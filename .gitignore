@@ -1,0 +1,13 @@
+# Nix
+result
+.direnv/
+
+# Node (docs)
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp

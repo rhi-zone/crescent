@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -e
+
+echo "Running tests..."
+luajit cli/test.lua
+
+echo "Pre-commit checks passed!"

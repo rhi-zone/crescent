@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LuaJIT
+        run: sudo apt-get install -y luajit
+      - name: Test
+        run: luajit cli/test.lua
