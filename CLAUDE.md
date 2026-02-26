@@ -14,8 +14,8 @@ Part of the [rhi ecosystem](https://rhi.zone).
 
 ```
 lib/          — standard library modules (http, websocket, dns, sqlite, fs, ...)
-type/         — typechecker (parses LuaJIT FFI cdefs)
-pkg/          — vendor-first package manager
+lib/type/     — typechecker (parses LuaJIT FFI cdefs)
+lib/pkg/      — vendor-first package manager
 cli/          — command-line tools built on lib/
 dep/          — vendored third-party code
 doc/          — documentation
