@@ -1,6 +1,8 @@
 -- crescent test runner
 -- discovers and runs *_test.lua files under lib/
 
+package.path = "./?/init.lua;" .. package.path
+
 local function find_test_files()
 	local files = {}
 	local handle = io.popen("find lib -name '*_test.lua' -type f | sort")

@@ -3,10 +3,12 @@
 ## stdlib
 - [ ] http: extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
 - [ ] http: extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
-- [ ] Extract and polish websocket from ~/git/lua
-- [ ] Extract and polish dns from ~/git/lua
-- [ ] Extract and polish sqlite from ~/git/lua
-- [ ] Extract and polish fs utilities from ~/git/lua
+- [ ] Review and polish all libraries pulled from ~/git/lua (bulk import done)
+- [ ] lib/utf8.lua: crescent has a 29-line version, ~/git/lua had a 142-line version — reconcile
+- [ ] lib/todo/: conflicts with dep/todo/ (stubs for jpeg, png, xcb, soloud + a sqlitex.lua, webp.lua) — decide what to keep
+- [ ] Audit vendored third-party libs (ljsocket, lunajson, sqlite, cparser, etc.) — ensure LICENSE files present
+- [ ] Review lib/cli/ scripts — many have implicit dep on lib/ layout, may need path fixups
+- [ ] Remove or integrate duplicate/overlapping libs (e.g., mock.lua vs mock/, lil.lua vs lil/)
 
 ## typechecker
 - [ ] Parse LuaJIT FFI cdef blocks

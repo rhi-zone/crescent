@@ -1,0 +1,3 @@
+-- https://www.rfc-editor.org/rfc/rfc5321
+-- imap4: https://www.rfc-editor.org/rfc/rfc3501
+-- pop3: https://www.ietf.org/rfc/rfc1939.txt
