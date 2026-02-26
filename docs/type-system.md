@@ -68,7 +68,7 @@ In TypeScript, `any` is contagious — it silently disables checking for everyth
 
 The philosophy: `any` is for FFI boundaries, legacy interop, and genuinely dynamic code (serialization, plugin systems). It should not appear in normal application code. If you find yourself writing `any` to make the checker happy, the checker has a bug.
 
-Future work: a strict mode that forbids implicit `any` entirely.
+Every implicit `any` emits a warning. There is no "loose mode" — strict is the only mode. A gradual adoption path may exist for external code, but crescent libraries are held to the full standard. We are not here to let the ecosystem slip into looseness for the sake of backwards compatibility.
 
 ### 4. Annotations are checked, not trusted
 
@@ -206,13 +206,142 @@ Tables are the universal compound type. A table type has:
 - **Completeness.** The checker will have gaps. Better to be correct on 90% of code than hand-wavy on 100%.
 - **Runtime overhead.** The checker is purely static. Zero runtime cost. The runtime schema validator (`lib/type/check.lua`) is a separate, complementary tool.
 
+## Decisions
+
+Resolved design choices.
+
+### Generics: `<T>` syntax, not `[T]`
+
+`[T]` for type parameters conflicts with `[T]` for array types. `[number]` is "array of number" — it can't also mean "generic parameterized by number." Use angle brackets for generics:
+
+```lua
+--:: Result<T, E> = { ok: T } | { err: E }
+Result<number, string>
+
+-- Array types remain bracket syntax:
+[number]      -- array of number
+number[]      -- also array of number (suffix form)
+```
+
+This is unambiguous. `<T>` is generics, `[T]` is arrays. No parsing conflict.
+
+### Type narrowing: full flow analysis
+
+The checker models how the code actually works, not just what the types say. Narrowing applies everywhere a branch constrains a type:
+
+```lua
+local x = get_value() --: string | number | nil
+
+if type(x) == "string" then
+  -- x: string
+  print(x:upper())
+elseif x ~= nil then
+  -- x: number
+  print(x + 1)
+else
+  -- x: nil
+end
+
+-- Truthiness narrows too:
+if x then
+  -- x: string | number (nil eliminated)
+end
+
+-- Pattern matching on tags:
+if t.kind == "literal" then
+  -- t.value exists, t is narrowed to the literal branch
+end
+```
+
+This is *more* power than TypeScript, not less. The goal is to model how the code works — if a branch eliminates a possibility, the checker knows. This extends to:
+
+- `type()` checks → narrow to matching primitive
+- `== nil` / `~= nil` → eliminate or narrow to nil
+- Truthiness (`if x then`) → eliminate nil and false
+- Tag/discriminant checks (`if x.kind == "foo"`) → narrow discriminated unions
+- `assert(x)` → narrow away nil/false in subsequent code
+- Negation: `if not x then return end` → `x` is truthy after the guard
+
+### Metatypes: UX-first, `__index` drives the model
+
+Metatables are Lua's extension mechanism. The type system must model them, and the UX question is: how does the user express "this table has metamethods"?
+
+The core insight: `__index` is the only metamethod that affects *type structure* (it adds fields). The arithmetic metamethods (`__add`, `__mul`, etc.) affect *operator resolution*. `__call` makes a table callable. These are separate concerns:
+
+```lua
+-- __index: modeled via setmetatable pattern recognition
+local Point = {}
+Point.__index = Point
+function Point.new(x, y)
+  return setmetatable({ x = x, y = y }, Point)
+end
+-- Point.new returns: { x: number, y: number } & Point (merged via __index)
+
+-- Arithmetic metamethods: declared via annotation
+--:: Vector = { x: number, y: number, __add: (Vector, Vector) -> Vector }
+
+-- __call: makes a table callable
+--:: Callable = { __call: (self, number) -> string }
+```
+
+Start with `__index` (most common, highest value), then `__call`, then arithmetic. The checker recognizes `setmetatable` calls and merges types accordingly. Metamethods declared in type annotations are checked against the implementation.
+
+### Module resolution: overrideable, manifest-aware
+
+Following `require()` across files is essential — a typechecker that can't cross module boundaries is useless. The resolution strategy:
+
+1. **Default**: follow `package.path` rules. `require("lib.foo")` → `lib/foo/init.lua` or `lib/foo.lua`.
+2. **Manifest override**: a `crescent.toml` or similar can declare module mappings, external type stubs, and path overrides. This is how you type third-party code you don't control.
+3. **Adjacent `.d.lua` files**: `lib/foo/init.d.lua` provides type declarations for `lib/foo/init.lua`. The checker loads these automatically. This is the escape hatch for code that's too dynamic to infer.
+4. **External type packages**: type definitions can be distributed as vendorable `.d.lua` files, just like the libraries themselves.
+
+```
+lib/foo/init.lua        -- implementation
+lib/foo/init.d.lua      -- type declarations (optional, supplements inference)
+```
+
+Circular requires: the checker detects cycles and assigns `any` to the cycle-breaking edge, with a warning. This is a real Lua pattern (two modules that require each other) and must not crash the checker.
+
+Missing modules: error, not silent `any`. If you `require` something that doesn't exist, that's a bug.
+
+### Error recovery: `any` with warnings
+
+When inference fails partway through a function, the checker assigns `any` to the failed expression and continues. Every implicit `any` emits a warning. This means:
+
+- One error doesn't cascade into 50 errors.
+- The user sees where inference gave up.
+- `any` warnings are a signal that code needs annotation or the checker needs improvement.
+
+### Output formats
+
+The checker supports multiple output formats:
+
+- **Human-readable** (default): file:line: severity: message, with source context.
+- **JSON**: structured output for editor integration and CI pipelines.
+- **SARIF**: for GitHub code scanning and other static analysis tooling.
+
+Machine-readable output is a first-class concern, not an afterthought. The checker is a tool that other tools consume.
+
+### No strict mode — strict is the only mode
+
+There is no `--strict` flag. The checker is always strict. Every implicit `any` is a warning. Every type error is an error.
+
+If you're adopting crescent for an existing codebase, the path is:
+1. Add annotations incrementally.
+2. Fix errors as they appear.
+3. Use `--[[as! T]]` for code that's genuinely too dynamic.
+
+There is no "turn off the checker for this file" escape. The closest equivalent is annotating with `any`, which is visible and grep-able. The ecosystem does not have a loose mode because loose modes become the default — TypeScript proved this with `any`, `noImplicitAny`, `strict`, `strictNullChecks`, and the dozen other flags that exist because the default was too loose and tightening it broke the world.
+
+We start tight. We stay tight.
+
 ## Open Questions
 
-These are unresolved and will be decided through implementation experience:
+Genuinely unresolved — will be decided through implementation experience:
 
-- **Generics syntax.** `[T]` for type parameters reads naturally (`Result[number, string]`) but conflicts with array type syntax. May need revisiting.
-- **Type narrowing in branches.** `if type(x) == "string" then ... end` should narrow `x` to `string` in the branch. How deep does this go? Just `type()` checks? `== nil`? Truthiness?
-- **Metatype support.** How precisely to model `__add`, `__index`, `__call` etc. Full metatable typing is complex — may start with `__index` only and expand.
-- **Module resolution.** Following `require()` across files means building a module graph. How to handle circular requires? Missing modules?
-- **Error recovery.** When inference fails partway through a function, how much of the rest should be checked? Currently: assign `any` and continue. May want better.
-- **Strict mode.** A mode where implicit `any` is forbidden — every binding must be inferable or annotated. Useful for library code.
+- **Generics type parameter constraints.** `<T: number | string>` for bounded generics — what's the constraint syntax? How do constraints interact with structural typing?
+- **Tuple types vs. array types.** Is `{ number, string, boolean }` a tuple (fixed length, heterogeneous) or sugar for something else? How do tuples interact with `ipairs` and `#`?
+- **Overload resolution.** When a function has multiple signatures (`((number) -> string) | ((string) -> number)`), how are calls resolved? First match? Best match? Error on ambiguity?
+- **Variance annotations.** Should the user be able to declare a generic parameter as covariant or contravariant? Or is inference sufficient?
+- **String pattern types.** `string.match` and `string.gmatch` return types depend on capture groups in the pattern. Is this worth modeling?
+- **Coroutine typing.** `coroutine.wrap` returns a function whose return type depends on the coroutine's yields. How to model `yield`/`resume` types?
