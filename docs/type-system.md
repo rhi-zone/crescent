@@ -180,7 +180,7 @@ The typechecker is not a monolith. It's a small core — structural HM unificati
 
 Each module is a Lua file that plugs into the core. No plugin API — just good file boundaries. This is internal architecture, not user-facing configuration. All modules are always enabled. The benefit is development velocity and testability: each subsystem can be built, tested, and reasoned about independently.
 
-This is how rustc works (separate crates for borrowck, typeck, resolve) and how the checker should work too.
+This is how rustc works (separate crates for borrowck, typeck, resolve) and how the checker should work too. Don't over-engineer the module boundary upfront — split out when the seams become obvious through implementation.
 
 ### 9. Errors are precise, not noisy
 
@@ -456,12 +456,72 @@ Coroutine typing is fundamentally about effects — `yield` is an effect that su
 
 For now: `coroutine.wrap(f)` returns `(...) -> any`, and `coroutine.resume` returns `(boolean, any)`. This is the `any` boundary — correct but imprecise. Effect typing is future work.
 
+### Tuple subtyping: structural, no magic
+
+Tuples and arrays are distinct types. A tuple `{ number, string }` is *not* a subtype of `[number | string]`. If a function expects an array, it expects homogeneous, variable-length data. A tuple is heterogeneous, fixed-length data. They don't mix.
+
+Library authors who want to accept both should make their functions generic over indexable tables. The checker doesn't insert implicit coercions — if the types don't line up, annotate or restructure.
+
+Named tuple elements and rest params (like TypeScript's `[first: string, ...rest: number[]]`) are worth exploring for argument spreading, but not needed for v1. Noted for future design.
+
+### Recursive types: equi-recursive with lazy expansion
+
+Equi-recursive: a recursive type `mu X. T` *is* its unfolding. No explicit fold/unfold coercions. The checker compares recursive types coinductively — walk both sides in lockstep, track "currently comparing" pairs, and if you revisit a pair already in the set, they're equal.
+
+This is the right choice for structural HM:
+- Iso-recursive requires explicit fold/unfold, which is undecidable to infer in HM. Not an option.
+- Equi-recursive is what OCaml (`-rectypes`), TypeScript, and Flow use. Proven at scale.
+- Lazy expansion (expand on demand, memoize) avoids infinite expansion while keeping the equi-recursive semantics.
+
+Implementation: store recursive types as thunks. Physical equality on unification variable representatives short-circuits most comparisons before the seen-set is even consulted. Maintain a separate blame trail for error messages — don't rely on the cycle-breaking point for error context.
+
+```lua
+--:: List<T> = { head: T, tail: List<T>? }
+-- This Just Works. No special syntax for recursion.
+```
+
+### Type-level computation: declarative when possible
+
+TypeScript's mapped types, conditional types, and template literal types are powerful but create a Turing-complete type language that's impenetrable to read and impossible to give good error messages for. Zig's comptime is the extreme end — the type system *is* a programming language, and type errors become runtime debugging.
+
+Crescent should support type-level computation but keep it **declarative**:
+- Mapped types (transform all fields of a record) — yes, high value.
+- Conditional types (`T extends U ? A : B`) — cautiously, for pattern matching on types.
+- Arbitrary type-level functions — no. If you need Turing-complete type computation, the type system has failed.
+
+The guiding principle: a type expression should be *readable* to someone who hasn't written it. If understanding a type requires mentally evaluating a program, the type is too complex. Specific design deferred — needs its own exploration when the core is stable.
+
+### Performance: LuaJIT-first, Rust escape hatch
+
+The checker is written in LuaJIT because that's the ecosystem. But performance is a hard constraint: if the checker can't stay within ~2x of equivalent Rust performance on realistic codebases, rewrite the hot paths (or the whole thing) in Rust.
+
+LuaJIT's JIT gives us a real shot — tight loops over tables with predictable shapes are exactly what the trace compiler optimizes. But we measure, not hope. Benchmarks are part of the test infrastructure.
+
+### Manifest: `crescent.type.toml`
+
+The type checker's manifest is separate from the (future) package manager's manifest. It lives in `crescent.type.toml` at the project root:
+
+```toml
+# Module path overrides
+[paths]
+"lib.foo" = "vendor/foo/init.lua"
+
+# External type stubs
+[stubs]
+"lpeg" = "types/lpeg.d.lua"
+
+# Package.path additions (beyond defaults)
+[search]
+paths = ["vendor/?.lua", "vendor/?/init.lua"]
+```
+
+Exact format TBD — this is the shape, not the spec. The manifest is optional; the checker works without one by following `package.path`.
+
 ## Open Questions
 
-Genuinely unresolved — will be decided through implementation experience:
+Genuinely unresolved — needs dedicated design work:
 
-- **Exact tuple semantics.** How do tuples interact with `table.insert`, `table.remove`, and other stdlib functions that assume arrays? Is a tuple a subtype of a same-length array of the union of its element types?
-- **Recursive types.** `--:: List<T> = { head: T, tail: List<T> | nil }` — how does the checker handle recursive type aliases? Lazy expansion? Equi-recursive? Iso-recursive?
-- **Type-level computation.** Mapped types, conditional types, template literal types — TypeScript has these. Are any of them needed? Which ones earn their complexity?
-- **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document.
-- **`crescent.toml` format.** What goes in the manifest? Module path overrides, external type stubs, checker options? How does it interact with the package manager (when it exists)?
+- **Named tuple elements and rest params.** `{ first: string, ...rest: number[] }` for argument spreading. How does this interact with varargs and multi-return? Does it subsume the need for overloads in some cases?
+- **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
+- **Type-level computation specifics.** Which mapped/conditional type features earn their complexity? What's the syntax? How do error messages work when type computation fails?
+- **`newtype` conversion syntax.** `UserId(42)` to wrap, `number(id)` to unwrap? Or methods like `UserId.from(42)` and `id:unwrap()`? How does this interact with FFI cdata types that also use call-syntax construction?
