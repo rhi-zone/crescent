@@ -216,7 +216,7 @@ Not "type mismatch" with no context. Not 47 cascading errors from one root cause
 ```lua
 (number, string) -> boolean
 (x: number, y: number) -> number   -- named params (documentation only)
-(string, ...any) -> string          -- varargs
+(string, ...Array<any>) -> string   -- varargs (Array<T> = { [number]: T })
 (string) -> (number?, string?)      -- multi-return
 ```
 
@@ -226,10 +226,10 @@ Parameters are contravariant, returns are covariant. This is standard.
 
 Tables are the universal compound type. A table type has:
 - **Named fields**: `{ x: number, y: number }` — known keys with known types.
-- **Indexers**: `{ [string]: number }` — dynamic keys. `[number]` for arrays, `[string]` for dictionaries.
+- **Indexers**: `{ [string]: number }` — dynamic keys. `{ [number]: T }` for arrays, `{ [string]: T }` for dictionaries.
 - **Row variable**: open vs. closed. Open tables accept extra fields. Closed tables don't.
 
-`[T]` is sugar for `{ [number]: T }`. `T?` is sugar for `T | nil`.
+`T?` is sugar for `T | nil`.
 
 ### Tuples
 
@@ -263,20 +263,17 @@ Tuples model Lua's multiple-return and fixed-structure patterns. They're tables 
 
 Resolved design choices.
 
-### Generics: `<T>` syntax, not `[T]`
+### Generics: `<T>` syntax
 
-`[T]` for type parameters conflicts with `[T]` for array types. `[number]` is "array of number" — it can't also mean "generic parameterized by number." Use angle brackets for generics:
+Angle brackets for generic type parameters. Arrays use indexer syntax `{ [number]: T }`, not bracket sugar — no parsing conflict:
 
 ```lua
 --:: Result<T, E> = { ok: T } | { err: E }
 Result<number, string>
 
--- Array types remain bracket syntax:
-[number]      -- array of number
-number[]      -- also array of number (suffix form)
+-- Arrays are table types with number indexers:
+{ [number]: string }    -- array of string
 ```
-
-This is unambiguous. `<T>` is generics, `[T]` is arrays. No parsing conflict.
 
 ### Type narrowing: full flow analysis
 
@@ -458,11 +455,9 @@ For now: `coroutine.wrap(f)` returns `(...) -> any`, and `coroutine.resume` retu
 
 ### Tuple subtyping: structural, no magic
 
-Tuples and arrays are distinct types. A tuple `{ number, string }` is *not* a subtype of `[number | string]`. If a function expects an array, it expects homogeneous, variable-length data. A tuple is heterogeneous, fixed-length data. They don't mix.
+Tuples and arrays are distinct types. A tuple `{ number, string }` is *not* a subtype of `{ [number]: number | string }`. If a function expects an array, it expects homogeneous, variable-length data. A tuple is heterogeneous, fixed-length data. They don't mix.
 
 Library authors who want to accept both should make their functions generic over indexable tables. The checker doesn't insert implicit coercions — if the types don't line up, annotate or restructure.
-
-Named tuple elements and rest params (like TypeScript's `[first: string, ...rest: number[]]`) are worth exploring for argument spreading, but not needed for v1. Noted for future design.
 
 ### Recursive types: equi-recursive with lazy expansion
 
@@ -540,14 +535,20 @@ This makes `$Params` and `$Return` safe on union types — they never see a unio
 
 Function parameter names are **preserved for tooling but not structural**. Two function types with different parameter names but same positional types are the same type. The checker remembers names for error messages, hover types, and autocomplete — but they don't affect assignability.
 
-#### Shared type language for static and runtime checking
+#### Static types from runtime schemas
 
-The type language serves two independent systems:
+`--::` annotations are comments — they don't exist at runtime. Runtime validation needs actual runtime values that describe types. Rather than trying to share syntax between static and runtime systems, the approach is **runtime-first**: define schemas as runtime values, and the static checker infers types from them.
 
-- **Static typechecker**: compile-time analysis, zero runtime cost
-- **Runtime schema validator** (`lib/type/check.lua`): boundary validation for network data, file input, user input — like Zod or ArkType for Lua
+```lua
+local t = schema.object({
+  name = schema.string(),
+  age = schema.optional(schema.number()),
+})
+-- Runtime: t:check(data) validates at boundaries
+-- Static: checker infers t's validated type as { name: string, age?: number }
+```
 
-These are separate tools, not one generating the other. But they share the same type language so you don't write the same shape twice in two different syntaxes. A type declared via `--::` should be consumable by both the static checker and a runtime validator.
+This is the Zod/ArkType model: write the schema once as real code, get both runtime validation and static types. The "shared language" isn't shared syntax — it's the checker understanding the runtime schema library's type signatures deeply enough to compute the corresponding static type from schema constructor calls. Zod does this in TypeScript via `z.infer<typeof schema>`. Crescent's version would be the checker recognizing `schema.object({ ... })` patterns and computing the static type directly — no `$Infer` needed if the checker is smart enough.
 
 This is the primary consumer of type transformations. API boundaries need `Partial` (PATCH endpoints), `Pick` (projections), `Omit` (stripping internal fields before serialization). The transformations should be driven by what real validation and serialization code needs, not by what TypeScript happens to offer.
 
@@ -598,7 +599,7 @@ This is the same concept as overload resolution — pattern match on inputs, pro
 ```lua
 -- $Return is match on function structure
 --:: $Return<F> = match F {
---::   (...any) -> R => R,
+--::   (...Array<any>) -> R => R,
 --:: }
 
 -- $Keys is match on table structure
@@ -686,6 +687,47 @@ If crescent needs conditional type logic beyond what distribution + overloads pr
 - **Recursive type transforms.** Type transforms iterate over a finite key set. They do not recurse. This keeps type-level computation terminating and error messages comprehensible.
 - **General mapped type syntax.** The `{ [K in U]: T }` iteration form is deferred. The builtin transformations (`Partial`, `Pick`, `Omit`, etc.) cover most use cases. A general-purpose iteration syntax will be designed when concrete use cases demand it, informed by real usage patterns rather than TypeScript precedent.
 
+### Higher-kinded types: `$Call` + match + generic-type-as-bound
+
+HKTs — abstracting over type constructors — fall out of existing machinery. Every generic type is a type-level function (via match). `$Call` applies them. A generic type used as a bound constrains the kind:
+
+```lua
+--:: T1<T> = any              -- kind: * -> * (most permissive bound at arity 1)
+--:: T2<A, B> = any           -- kind: * -> * -> *
+
+--:: Lift<F: T1, A> = $Call<F, A>
+-- F must be a single-param type constructor
+
+--:: MakeOptional<T> = T?
+Lift<MakeOptional, number>    -- number? (MakeOptional is * -> *)
+
+-- Tighter bound: F must produce something with a value field
+--:: Wrapper<T> = { value: T }
+--:: LiftW<F: Wrapper, A> = $Call<F, A>
+```
+
+No new syntax. Arity is structural — the bound's parameter count IS the kind. `T1<T> = any` is the most permissive bound because `any` is the top type (everything is a subtype).
+
+**Type constructor variance** is non-trivial (contravariant inputs interact with constrained constructors), but the pragmatic resolution for v1: HKT bounds are **arity-matching + constraint propagation**, not full subtype checks between constructors. The bound's arity determines the kind, and at `$Call` sites the actual type constructor's own constraints are checked against the concrete arguments. This sidesteps constructor variance entirely and defers the real checking to where it matters.
+
+Not in v1, but no design changes needed to add it later — the machinery is already there.
+
+### `newtype` conversion: constructor pattern, not syntax
+
+`newtype` is purely static — no runtime wrapping/unwrapping. A `UserId` IS a `number` at runtime. The recommended pattern is a constructor function that contains the single force cast:
+
+```lua
+--:: newtype UserId = number
+
+--: (number) -> UserId
+local function UserId(n) return n --[[as! UserId]] end
+
+local id = UserId(42)    -- clean call site
+local n = id --[[as number]]  -- explicit unwrap when needed
+```
+
+The `as!` blast radius is contained to one line in the constructor. No special conversion syntax needed — it's a regular function.
+
 ### Performance: LuaJIT-first, Rust escape hatch
 
 The checker is written in LuaJIT because that's the ecosystem. But performance is a hard constraint: if the checker can't stay within ~2x of equivalent Rust performance on realistic codebases, rewrite the hot paths (or the whole thing) in Rust.
@@ -712,31 +754,121 @@ paths = ["vendor/?.lua", "vendor/?/init.lua"]
 
 Exact format TBD — this is the shape, not the spec. The manifest is optional; the checker works without one by following `package.path`.
 
+### Standard prelude
+
+The checker loads a prelude before checking user code — type aliases and stdlib signatures that are always in scope. The prelude is not magic; it's a `.d.lua` file (or set of files) written in the same annotation syntax as everything else. The checker just loads it first.
+
+**Common type aliases:**
+
+```lua
+--:: Array<T> = { [number]: T }
+--:: Dict<K, V> = { [K]: V }
+--:: Map<K, V> = { [K]: V }          -- alias if preferred
+--:: Set<T> = { [T]: boolean }
+--:: Optional<T> = T?                 -- explicit form of T | nil
+```
+
+**Type transforms (builtins, but defined as types):**
+
+```lua
+--:: Partial<T> = ...                 -- all fields optional
+--:: Required<T> = ...                -- all fields required
+--:: Readonly<T> = ...                -- all fields readonly
+--:: Mutable<T> = ...                 -- all fields mutable
+--:: Pick<T, K> = ...                 -- keep only fields in K
+--:: Omit<T, K> = ...                 -- remove fields in K
+--:: Extract<T, U> = ...              -- union members assignable to U
+--:: Exclude<T, U> = ...              -- union members not assignable to U
+```
+
+**Type queries:**
+
+```lua
+--:: $Keys<T> = ...                   -- string literal union of record keys
+--:: $Params<F> = ...                 -- parameter types as a tuple
+--:: $Return<F> = ...                 -- return type of a function
+--:: $Call<F, Args> = ...             -- apply type-level function
+```
+
+**Stdlib signatures are prelude files, not hardcoded.** The checker ships with prelude files for each target:
+
+```
+lib/type/static/prelude/
+  core.d.lua          -- common aliases (Array, Dict, etc.)
+  transforms.d.lua    -- Partial, Pick, Omit, etc.
+  lua51.d.lua         -- Lua 5.1 stdlib (string, table, math, io, os, ...)
+  lua54.d.lua         -- Lua 5.4 stdlib (integer semantics, utf8, ...)
+  luajit.d.lua        -- LuaJIT extensions (ffi, bit, jit, ...)
+```
+
+The manifest selects which preludes to load:
+
+```toml
+[prelude]
+target = "luajit"                     # loads core + transforms + lua51 + luajit
+extra = ["types/my_globals.d.lua"]    # project-specific globals
+```
+
+Multiple targets are composable — `target = ["lua51", "luajit"]` loads both. Projects can add arbitrary `.d.lua` files to the prelude for project-wide type declarations. The prelude is just "files loaded before everything else" — no special mechanism.
+
+This means:
+- Stdlib types are auditable and overrideable — they're files, not hardcoded tables.
+- Supporting a new Lua version is adding a `.d.lua` file, not modifying the checker.
+- Projects can declare global types without scattering `--::` across files.
+- The `$`-prefixed type queries may need compiler support (they inspect type structure in ways that annotations alone can't express), but they still appear in prelude files for documentation and discoverability.
+
 ## Open Questions
 
 Genuinely unresolved — needs dedicated design work:
 
-- **Tuples vs records syntax.** `{ string, number }` is a tuple, `{ x: string, y: number }` is a record — no overlap. But named tuple elements (`{ first: string, ...rest: number[] }`) conflict with record field syntax. Named positions probably only belong in function signatures (`(first: string, ...rest: number[]) -> T`), not in type expressions. How do rest params interact with varargs and multi-return? Does this subsume some overload cases?
-- **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
-- **`newtype` conversion syntax.** `UserId(42)` to wrap, `number(id)` to unwrap? Or methods like `UserId.from(42)` and `id:unwrap()`? How does this interact with FFI cdata types that also use call-syntax construction?
-- **Type transformation composition.** Modifier toggles, key filters, union filters, and value transforms are separate concepts. How do they compose? Conditional application ("make `a` and `b` optional, keep the rest required") is the hard case. Possible models: `with`-clauses for patching, piping, intersection of partial transforms. Needs real use cases from API boundary validation to drive the design.
-- **Higher-kinded types.** HKTs let you abstract over type constructors — "same wrapper, different contents." The mechanism is mostly present: match makes every generic type a type-level function, `$Call` applies them, so passing a generic type as a type argument works. The constraint language reuses existing syntax — a generic type as a bound constrains the kind:
+- ~~**Tuples vs records syntax.**~~ Resolved: three distinct constructs with no ambiguity:
 
+  Tuples, arrays, and records are all table types — one bracket syntax (`{}`):
   ```lua
-  --:: T1<T> = never           -- kind: * -> * (bottom type constructor)
-  --:: T2<A, B> = never        -- kind: * -> * -> *
-
-  --:: Lift<F: T1, A> = $Call<F, A>
-  -- F must be a single-param type constructor
-
-  --:: MakeOptional<T> = T?
-  Lift<MakeOptional, number>   -- number? (MakeOptional is * -> *)
-
-  -- Tighter bound: F must produce something with a value field
-  --:: Wrapper<T> = { value: T }
-  --:: LiftW<F: Wrapper, A> = $Call<F, A>
+  { number, string }                     -- tuple (fixed, heterogeneous)
+  { [number]: string }                   -- array (variable, homogeneous)
+  { x: number, y: number }              -- record (named fields)
+  { number, string, name: boolean }      -- hybrid (positional + named)
+  { number, string, [number]: boolean }  -- tuple prefix + array tail
   ```
 
-  No new syntax needed; arity is structural (the bound's parameter count IS the kind). But **type constructor variance is non-trivial**. For the bound to be "most permissive at arity 1," the output must be the top type (`any` — everything is a subtype) but the input side is contravariant: an unconstrained bound `T1<T> = any` is hard for constrained constructors like `Clamp<T: number>` to satisfy (narrower domain ≠ subtype, same as `(number) -> R` not being `<:` `(any) -> R`). Possible resolutions: (a) HKT bounds are arity-matching only, not subtype checks — constraints are deferred to `$Call` sites; (b) use a separate kind syntax; (c) accept the variance and let users write precise bounds. Needs design work. TypeScript lacks HKTs but supports them via F-bounded polymorphism encoding — works but terrible error messages and boilerplate. The practical question: structural typing handles most container abstractions ("anything with `.map`") without HKTs. The genuinely compelling case is abstracting over effect/wrapper types. Not in v1, but the machinery (`$Call` + match + generic-type-as-bound) may already be sufficient — needs validation against real use cases.
-- **Match recursion bounds.** Type-level match supports recursive arms (e.g. `ToString<[U]> => [ToString<U>]`). What's the recursion limit? How does the checker detect divergence? Haskell uses a fixed depth limit (default 201). Scala 3 similarly. A fixed limit is pragmatic but arbitrary.
+  Function types use `()` because that's Lua call syntax — parens are function syntax, not a separate type constructor. Parameter names live in function signatures only:
+  ```lua
+  (host: string, port: number) -> Connection
+  ```
+
+  `$Params<F>` returns a tuple with names as internal metadata. When spread back into a function signature, names are restored:
+  ```lua
+  --:: F = (host: string, port: number) -> Connection
+  --:: P = $Params<F>         -- { string, number } (names preserved internally)
+  (...P) -> void              -- (host: string, port: number) -> void
+  ```
+
+  **Spread (`...`) is one unified operation** — "splice this type's contents here." The type being spread determines semantics:
+  ```lua
+  -- Positional spread (tuples):
+  --:: P = { string, number }
+  { boolean, ...P, integer }          -- { boolean, string, number, integer }
+
+  -- Vararg spread (arrays):
+  (string, ...Array<any>) -> string   -- like Lua's (string, ...)
+
+  -- Field spread (records, last wins on conflicts):
+  --:: Base = { x: number, y: number }
+  { ...Base, y: string, z: boolean }  -- { x: number, y: string, z: boolean }
+
+  -- Param list spread:
+  (...$Params<F>, timeout: number) -> void
+  ```
+
+  Spread is distinct from intersection (`&`). Spread merges with override (last wins). Intersection constrains (conflicts are errors):
+  ```lua
+  { ...Base, y: string }              -- y becomes string (override)
+  Base & { y: string }                -- ERROR: number & string (conflict)
+  ```
+
+  Mirrors how `...` works in Lua value-level table constructors — positional entries go by position, named entries go by name.
+- **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
+- **Type transformation composition.** Modifier toggles, key filters, union filters, and value transforms are separate concepts. How do they compose? Conditional application ("make `a` and `b` optional, keep the rest required") is the hard case. Possible models: `with`-clauses for patching, piping, intersection of partial transforms. Needs real use cases from API boundary validation to drive the design.
+- ~~**Match recursion bounds.**~~ Resolved: no arbitrary depth limit. The primary mechanism is **cycle detection** — the checker tracks `(match-type, input-type)` pairs during expansion. If it revisits the same pair, it's a cycle. Structural recursion (input shrinks each step) terminates naturally. Growing or unchanged inputs are flagged as divergence. A configurable depth limit (default high, ~1000) exists as a safety net, not the primary mechanism. Prior art: Haskell's fixed 201 limit is arbitrary and frustrating; smart detection is better.
 - **User-defined type transforms.** Match gives users the mechanism to define their own `Partial`-like operations. The open question is whether this is enough — or whether modifier toggles (`Partial`, `Readonly`) need dedicated support because they operate on the field-modifier level, which match arms can't express (match dispatches on type structure, not on per-field metadata).
