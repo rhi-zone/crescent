@@ -485,51 +485,89 @@ Crescent rejects imperative type-level computation. Not because of Turing-comple
 
 Type-level operations fall into distinct categories. TypeScript unifies most of these under "mapped types" — one flexible syntax that can do everything. Crescent separates them because they're conceptually different and compose differently:
 
-**Type queries** — extract information from a type:
+**Intrinsics** — compiler-supported, `$` prefix, declared as `= intrinsic` in prelude. `$` means "compiler magic, not user-definable." If it has `$`, the compiler implements it. If it doesn't, you can read the definition:
+- `$EachField<T, F>` — apply F to each field of T (F receives a field descriptor)
+- `$EachUnion<T, F>` — apply F to each member of union T, re-union results
 - `$Keys<T>` — string literal union of a record's keys
-- `$Params<F>` — parameter types of a function as a tuple
-- `$Return<F>` — return type of a function
-- `T[K]` — indexed access, look up a field type by key
-- `$Call<F, Args...>` — apply a function type to arguments, get the return type
+- `T[K]` — indexed access, look up a field's type by key (syntax, not `$`-prefixed)
+- `F(Args...)` — call a function type, resolve overloads, return the return type (syntax, not `$`-prefixed)
 
-**Modifier toggles** — flip per-field flags:
-- `Partial<T>` — all fields optional
-- `Required<T>` — all fields required
-- `Readonly<T>` — all fields readonly
-- `Mutable<T>` — all fields mutable
+`$EachField` is the key primitive — it iterates over fields, passing each as a `{ key: K, value: V, optional: boolean, readonly: boolean }` descriptor to the user-defined transform F. The transform is a regular type-level function (match or simple generic). `$EachField` collects the transformed field descriptors back into a table type.
 
-**Key filters** — subset of fields:
-- `Pick<T, K>` — keep only fields in K
-- `Omit<T, K>` — remove fields in K
-
-**Union filters** — subset of union members:
-- `Extract<T, U>` — members of T assignable to U
-- `Exclude<T, U>` — members of T not assignable to U
-
-**Value transforms** — change every field's type:
-- The general case: "for each field of T, transform its type somehow"
-
-These are separate operations with separate semantics. The open design question is how they **compose** — especially conditional application (e.g. "make fields `a` and `b` optional, keep the rest required").
-
-#### `$Call` and distribution
-
-`$Call<F, Args...>` is the fundamental type application primitive. It resolves generics (instantiates type parameters) and overloads (picks the best-matching branch).
-
-**Generic type application distributes over unions before evaluating the body.** Each union member is processed independently, then the results are re-unioned:
+**Everything else is user-definable** in the prelude using match + intrinsics:
 
 ```lua
---:: Promisify<F> = (...$Params<F>) -> Promise<$Return<F>>
+-- Modifier toggles:
+--:: MakeOptional<F> = match F {
+--::   { key: K, value: V } => { key: K, value: V, optional: true },
+--:: }
+--:: Partial<T> = $EachField<T, MakeOptional>
+--:: Required<T> = $EachField<T, MakeRequired>
+--:: Readonly<T> = $EachField<T, MakeReadonly>
+--:: Mutable<T> = $EachField<T, MakeMutable>
+
+-- Value transforms:
+--:: UnwrapSchema<F> = match F {
+--::   { key: K, value: Schema<V> } => { key: K, value: V },
+--::   F => F,
+--:: }
+--:: Infer<T> = $EachField<T, UnwrapSchema>
+
+-- Key filters:
+--:: KeepKey<Allowed><F> = match F {
+--::   { key: K } => match K {
+--::     Allowed => F,       -- keep if key is in Allowed
+--::   },
+--:: }
+--:: Pick<T, K> = $EachField<T, KeepKey<K>>
+--:: Omit<T, K> = $EachField<T, DropKey<K>>
+
+-- Union filters:
+--:: Extract<T, U> = $EachUnion<T, KeepIfAssignable<U>>
+--:: Exclude<T, U> = $EachUnion<T, DropIfAssignable<U>>
+
+-- Function type queries (match destructures functions — no intrinsic needed):
+--:: Params<F> = match F { (...P) -> any => P }
+--:: Return<F> = match F { (...Array<any>) -> R => R }
+
+-- Convenience (sugar over $EachField):
+--:: EachValue<T, F> = $EachField<T, ApplyToValue<F>>
+--:: EachKey<T, F> = $EachField<T, ApplyToKey<F>>
+```
+
+**Composition is just function composition.** "Make fields `a` and `b` optional, keep the rest required" is:
+```lua
+--:: PatchUser = { ...Partial<Pick<User, "name" | "email">>, ...Omit<User, "name" | "email"> }
+```
+No special composition mechanism — spread (`...`) and the existing transforms.
+
+#### Function type calls and distribution
+
+`F(Args...)` calls a function type — resolves overloads (picks the best-matching branch) and returns the return type. This is syntax, not a `$`-prefixed intrinsic, because it mirrors Lua's call syntax:
+
+```lua
+--:: F = (number) -> string
+F(number)                    -- string
 
 --:: G = ((number) -> string) | ((string) -> number)
---:: H = Promisify<G>
--- Step 1: distribute G into branches
+G(number)                    -- string (picks matching overload)
+G(string)                    -- number
+```
+
+**`$EachUnion` makes transforms safe on union types.** When a transform needs to process each union member independently (preserving pairings), use `$EachUnion` explicitly:
+
+```lua
+--:: Promisify<F> = (...Params<F>) -> Promise<Return<F>>
+
+--:: G = ((number) -> string) | ((string) -> number)
+--:: H = $EachUnion<G, Promisify>
+-- Applies Promisify to each branch independently:
 --   Promisify<(number) -> string> | Promisify<(string) -> number>
--- Step 2: evaluate each branch (single function type, safe)
---   ((number) -> Promise<string>) | ((string) -> Promise<number>)
+--   = ((number) -> Promise<string>) | ((string) -> Promise<number>)
 -- Pairing preserved.
 ```
 
-This makes `$Params` and `$Return` safe on union types — they never see a union, distribution ensures they always receive a single concrete function type.
+Distribution is explicit via `$EachUnion`, not automatic. `Params` and `Return` are match-defined in the prelude — they destructure a single function type. For union function types, wrap with `$EachUnion` so each branch is processed independently.
 
 #### Parameter names
 
@@ -576,22 +614,23 @@ This is the same concept as overload resolution — pattern match on inputs, pro
 - **Best-match**: no ordering dependency. Ambiguous matches are errors.
 - **Structural destructuring**: patterns bind type variables from structure (`[U]` captures the element type, `(A) -> B` captures params and return).
 
-**`$Call` is application, not a separate concept.** `$Call<F, Args>` applies a type-level function to arguments. `F<Args>` is sugar for the same. Every generic type is a type-level function — simple generics have a direct substitution body, match generics dispatch on structure:
+**Application is just syntax.** Generic instantiation is `F<Args>`. Function type calls are `F(Args)`. Every generic type is a type-level function — simple generics have a direct substitution body, match generics dispatch on structure:
 
 ```lua
 -- Direct body (no dispatch)
 --:: Pair<A, B> = { first: A, second: B }
+Pair<number, string>    -- { first: number, second: string }
 
 -- Match body (structural dispatch)
 --:: Unwrap<T> = match T {
 --::   Promise<U> => U,
 --::   T => T,
 --:: }
+Unwrap<Promise<string>> -- string
 
--- Overloaded function type (implicit match on argument types)
+-- Function type call (overload resolution)
 --:: Format = ((number) -> string) | ((boolean) -> "true" | "false")
-
--- All three are type-level functions. $Call applies any of them.
+Format(number)          -- string
 ```
 
 **Builtins as match.** The `$`-prefixed type queries are instances of match, some builtin for performance and error quality:
@@ -678,7 +717,7 @@ TypeScript's `T extends U ? A : B` is imperative control flow at the type level.
 
 This matters in practice. When a function's return type is a conditional type, the checker can't infer the argument type from a usage site. Error messages degrade to "conditional type didn't match" with no structural explanation. Composition of conditional types produces nested `extends` chains that are Turing-complete in theory and unreadable in practice.
 
-**SFINAE** (C++ "Substitution Failure Is Not An Error") is closer to the right model: try each candidate, silently skip failures, pick the match. This is what crescent's overload resolution already does — best-match across union branches. Distribution ensures each branch gets a concrete type, and `$Call` resolves by trying substitution. The checker *can* reason backwards through this: if you know the return type, it constrains which overload branch was taken, which constrains the argument types.
+**SFINAE** (C++ "Substitution Failure Is Not An Error") is closer to the right model: try each candidate, silently skip failures, pick the match. This is what crescent's overload resolution already does — best-match across union branches. `$EachUnion` processes each branch independently, and `F(Args)` resolves by trying substitution. The checker *can* reason backwards through this: if you know the return type, it constrains which overload branch was taken, which constrains the argument types.
 
 If crescent needs conditional type logic beyond what distribution + overloads provide, the path is bounded pattern matching on type structure (Scala 3 match types, Haskell closed type families) — declarative dispatch that the checker can invert. Not an imperative if/else that turns the type system into a second runtime.
 
@@ -687,15 +726,15 @@ If crescent needs conditional type logic beyond what distribution + overloads pr
 - **Recursive type transforms.** Type transforms iterate over a finite key set. They do not recurse. This keeps type-level computation terminating and error messages comprehensible.
 - **General mapped type syntax.** The `{ [K in U]: T }` iteration form is deferred. The builtin transformations (`Partial`, `Pick`, `Omit`, etc.) cover most use cases. A general-purpose iteration syntax will be designed when concrete use cases demand it, informed by real usage patterns rather than TypeScript precedent.
 
-### Higher-kinded types: `$Call` + match + generic-type-as-bound
+### Higher-kinded types: match + generic-type-as-bound
 
-HKTs — abstracting over type constructors — fall out of existing machinery. Every generic type is a type-level function (via match). `$Call` applies them. A generic type used as a bound constrains the kind:
+HKTs — abstracting over type constructors — fall out of existing machinery. Every generic type is a type-level function (via match). `F<Args>` applies them. A generic type used as a bound constrains the kind:
 
 ```lua
 --:: T1<T> = any              -- kind: * -> * (most permissive bound at arity 1)
 --:: T2<A, B> = any           -- kind: * -> * -> *
 
---:: Lift<F: T1, A> = $Call<F, A>
+--:: Lift<F: T1, A> = F<A>
 -- F must be a single-param type constructor
 
 --:: MakeOptional<T> = T?
@@ -703,12 +742,12 @@ Lift<MakeOptional, number>    -- number? (MakeOptional is * -> *)
 
 -- Tighter bound: F must produce something with a value field
 --:: Wrapper<T> = { value: T }
---:: LiftW<F: Wrapper, A> = $Call<F, A>
+--:: LiftW<F: Wrapper, A> = F<A>
 ```
 
 No new syntax. Arity is structural — the bound's parameter count IS the kind. `T1<T> = any` is the most permissive bound because `any` is the top type (everything is a subtype).
 
-**Type constructor variance** is non-trivial (contravariant inputs interact with constrained constructors), but the pragmatic resolution for v1: HKT bounds are **arity-matching + constraint propagation**, not full subtype checks between constructors. The bound's arity determines the kind, and at `$Call` sites the actual type constructor's own constraints are checked against the concrete arguments. This sidesteps constructor variance entirely and defers the real checking to where it matters.
+**Type constructor variance** is non-trivial (contravariant inputs interact with constrained constructors), but the pragmatic resolution for v1: HKT bounds are **arity-matching + constraint propagation**, not full subtype checks between constructors. The bound's arity determines the kind, and at instantiation sites the actual type constructor's own constraints are checked against the concrete arguments. This sidesteps constructor variance entirely and defers the real checking to where it matters.
 
 Not in v1, but no design changes needed to add it later — the machinery is already there.
 
@@ -768,26 +807,28 @@ The checker loads a prelude before checking user code — type aliases and stdli
 --:: Optional<T> = T?                 -- explicit form of T | nil
 ```
 
-**Type transforms (builtins, but defined as types):**
+**Intrinsics** (`$` prefix = compiler magic, declared as `= intrinsic`):
 
 ```lua
---:: Partial<T> = ...                 -- all fields optional
---:: Required<T> = ...                -- all fields required
---:: Readonly<T> = ...                -- all fields readonly
---:: Mutable<T> = ...                 -- all fields mutable
---:: Pick<T, K> = ...                 -- keep only fields in K
---:: Omit<T, K> = ...                 -- remove fields in K
---:: Extract<T, U> = ...              -- union members assignable to U
---:: Exclude<T, U> = ...              -- union members not assignable to U
+--:: $EachField<T, F> = intrinsic     -- apply F to each field of T
+--:: $EachUnion<T, F> = intrinsic     -- apply F to each union member
+--:: $Keys<T> = intrinsic             -- string literal union of record keys
+-- T[K] (indexed access) and F(Args) (function type call) are intrinsic syntax
 ```
 
-**Type queries:**
+**Type transforms** (user-defined via match + intrinsics, no `$`):
 
 ```lua
---:: $Keys<T> = ...                   -- string literal union of record keys
---:: $Params<F> = ...                 -- parameter types as a tuple
---:: $Return<F> = ...                 -- return type of a function
---:: $Call<F, Args> = ...             -- apply type-level function
+--:: Partial<T> = $EachField<T, MakeOptional>
+--:: Required<T> = $EachField<T, MakeRequired>
+--:: Readonly<T> = $EachField<T, MakeReadonly>
+--:: Mutable<T> = $EachField<T, MakeMutable>
+--:: Pick<T, K> = $EachField<T, KeepKey<K>>
+--:: Omit<T, K> = $EachField<T, DropKey<K>>
+--:: Extract<T, U> = $EachUnion<T, KeepIfAssignable<U>>
+--:: Exclude<T, U> = $EachUnion<T, DropIfAssignable<U>>
+--:: Params<F> = match F { (...P) -> any => P }
+--:: Return<F> = match F { (...Array<any>) -> R => R }
 ```
 
 **Stdlib signatures are prelude files, not hardcoded.** The checker ships with prelude files for each target:
@@ -815,7 +856,7 @@ This means:
 - Stdlib types are auditable and overrideable — they're files, not hardcoded tables.
 - Supporting a new Lua version is adding a `.d.lua` file, not modifying the checker.
 - Projects can declare global types without scattering `--::` across files.
-- The `$`-prefixed type queries may need compiler support (they inspect type structure in ways that annotations alone can't express), but they still appear in prelude files for documentation and discoverability.
+- `$`-prefixed types are intrinsics — compiler-supported, declared as `= intrinsic` in prelude files. The `$` prefix is the rule: if it has `$`, the compiler implements it and users can't redefine it. If it doesn't have `$`, it's user-defined and you can read the source. Same pattern as TypeScript's `intrinsic` keyword, but with a visible naming convention.
 
 ## Open Questions
 
@@ -869,6 +910,6 @@ Genuinely unresolved — needs dedicated design work:
 
   Mirrors how `...` works in Lua value-level table constructors — positional entries go by position, named entries go by name.
 - **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
-- **Type transformation composition.** Modifier toggles, key filters, union filters, and value transforms are separate concepts. How do they compose? Conditional application ("make `a` and `b` optional, keep the rest required") is the hard case. Possible models: `with`-clauses for patching, piping, intersection of partial transforms. Needs real use cases from API boundary validation to drive the design.
+- ~~**Type transformation composition.**~~ Resolved: `$EachField<T, F>` and `$EachUnion<T, F>` are the two iteration intrinsics. The transform F is a regular type-level function (match or simple generic) that receives a field descriptor `{ key, value, optional, readonly }`. All transforms (`Partial`, `Pick`, `Omit`, etc.) are user-definable in the prelude. Composition is spread + existing transforms, no special mechanism.
 - ~~**Match recursion bounds.**~~ Resolved: no arbitrary depth limit. The primary mechanism is **cycle detection** — the checker tracks `(match-type, input-type)` pairs during expansion. If it revisits the same pair, it's a cycle. Structural recursion (input shrinks each step) terminates naturally. Growing or unchanged inputs are flagged as divergence. A configurable depth limit (default high, ~1000) exists as a safety net, not the primary mechanism. Prior art: Haskell's fixed 201 limit is arbitrary and frustrating; smart detection is better.
-- **User-defined type transforms.** Match gives users the mechanism to define their own `Partial`-like operations. The open question is whether this is enough — or whether modifier toggles (`Partial`, `Readonly`) need dedicated support because they operate on the field-modifier level, which match arms can't express (match dispatches on type structure, not on per-field metadata).
+- ~~**User-defined type transforms.**~~ Resolved: fields are types (descriptors with key, value, metadata). Match destructures them. `$EachField` iterates. Users define transforms as regular type-level functions — no privileged intrinsics for `Partial`, `Readonly`, etc.
