@@ -17,8 +17,11 @@ lib/          — all packages (http, websocket, dns, sqlite, fs, ljsocket, ...)
 lib/type/     — typechecker (parses LuaJIT FFI cdefs)
 lib/pkg/      — package manager
 lib/test/     — test runner
+lib/cli/      — CLI tools
 doc/          — documentation
 ```
+
+**Every package is a directory** under `lib/` with an `init.lua` entry point. This gives each package room for LICENSE, tests, type definitions, and docs alongside the code. LuaJIT doesn't include `?/init.lua` in the default `package.path` (that's a Lua 5.2+ default), so entry points must conditionally add `./?/init.lua` to `package.path` (check before adding — Lua 5.2+ already includes it, and multiple entry points may be composed).
 
 ## Development
 
@@ -42,6 +45,8 @@ cd docs && bun dev           # Local docs
 **Hackable.** The user should be able to read, understand, and modify any library. Prefer clarity over abstraction.
 
 **Fast.** Performance at all costs. LuaJIT is fast — don't waste it. Avoid allocations in hot paths, prefer tables over closures, measure before and after.
+
+**LuaJIT-first, not LuaJIT-only.** Target LuaJIT but don't gratuitously break Lua 5.2+ compatibility. Pure Lua code shouldn't depend on LuaJIT quirks. FFI and `bit.*` are inherently LuaJIT-only, but everything else should work on standard Lua if it doesn't sacrifice performance.
 
 **Composable.** Libraries depend on each other minimally. Pick what you need, ignore the rest.
 

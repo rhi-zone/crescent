@@ -20,13 +20,13 @@ local run = function ()
 		res.headers["Cross-Origin-Opener-Policy"] = "same-origin"
 		res.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
 		res.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
-		if req.path:find(".gz$") then
+		if req.path:find("%.gz$") then
 			res.headers["Content-Encoding"] = "gzip"
-			res.headers["Content-Length"] = ""
+			res.headers["Content-Length"] = nil
 			res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path:sub(1, -3))
-		elseif req.path:find(".br$") then
+		elseif req.path:find("%.br$") then
 			res.headers["Content-Encoding"] = "br"
-			res.headers["Content-Length"] = ""
+			res.headers["Content-Length"] = nil
 			res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path:sub(1, -3))
 		else res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path) end
 		--[[@diagnostic disable-next-line: param-type-mismatch]]
@@ -36,13 +36,13 @@ local run = function ()
 		res.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
 		res.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
 		res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path)
-		if req.path:find(".gz$") then
+		if req.path:find("%.gz$") then
 			res.headers["Content-Encoding"] = "gzip"
-			res.headers["Content-Length"] = ""
+			res.headers["Content-Length"] = nil
 			res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path:sub(1, -3))
-		elseif req.path:find(".br$") then
+		elseif req.path:find("%.br$") then
 			res.headers["Content-Encoding"] = "br"
-			res.headers["Content-Length"] = ""
+			res.headers["Content-Length"] = nil
 			res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path:sub(1, -3))
 		else res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(root .. req.path) end
 		--[[@diagnostic disable-next-line: param-type-mismatch]]

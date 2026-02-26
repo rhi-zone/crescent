@@ -13,7 +13,9 @@ mod.router = function (base)
 	--[[@type http_callback]]
 	return function (req, res)
 		-- TODO: urldecode? urldecode(req.path)
-		local file = io.open(path.resolve(base, req.path), "r")
+		local full_path = path.safe_resolve(base, req.path)
+		if not full_path then res.status = 404; return end
+		local file = io.open(full_path, "rb")
 		if file == nil then res.status = 404; return end
 		res.status = 200
 		res.body = file:read("*all")

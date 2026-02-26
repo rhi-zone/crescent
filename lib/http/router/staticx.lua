@@ -62,14 +62,15 @@ mod.router = function (base)
 	--[[@return nil]] --[[@param req http_request]] --[[@param res http_response]]
 	return function (req, res)
 		--[[TODO: urldecode? urldecode(req.path)]]
-		local full_path = path.resolve(base, urldecode(req.path))
-		local file = io.open(full_path, "r")
+		local full_path = path.safe_resolve(base, urldecode(req.path))
+		if not full_path then res.status = 404; return end
+		local file = io.open(full_path, "rb")
 		if file == nil then res.status = 404; return end
 		res.status = 200
 		res.body = file:read("*all")
 		file:close()
 		if res.body == nil then
-			file = io.open(full_path:gsub("/$", "") .. "/index.html")
+			file = io.open(full_path:gsub("/$", "") .. "/index.html", "rb")
 			if file then
 				res.body = file:read("*all")
 				file:close()

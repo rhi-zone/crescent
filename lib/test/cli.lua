@@ -1,7 +1,9 @@
 -- crescent test runner
 -- discovers and runs *_test.lua files under lib/
 
-package.path = "./?/init.lua;" .. package.path
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
 
 local function find_test_files()
 	local files = {}
