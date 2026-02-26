@@ -541,6 +541,93 @@ Type-level operations fall into distinct categories. TypeScript unifies most of 
 ```
 No special composition mechanism — spread (`...`) and the existing transforms.
 
+#### Motivating use cases
+
+**PATCH endpoint — some fields optional, rest required:**
+
+```lua
+--:: User = { id: string, name: string, email: string, role: string }
+
+-- PATCH only allows updating name and email:
+--:: PatchUser = { ...Partial<Pick<User, "name" | "email">>, ...Omit<User, "name" | "email"> }
+-- = { id: string, name?: string, email?: string, role: string }
+
+--: (string, PatchUser) -> User
+local function update_user(id, patch) ... end
+```
+
+**Runtime schema → static type (Zod-style):**
+
+```lua
+--:: UnwrapSchema<F> = match F {
+--::   { key: K, value: Schema<V> } => { key: K, value: V },
+--::   F => F,
+--:: }
+--:: Infer<T> = $EachField<T, UnwrapSchema>
+
+local user_schema = schema.object({
+  name = schema.string(),
+  age = schema.optional(schema.number()),
+})
+-- user_schema: Schema<{ name: string, age?: number }>
+-- Infer<typeof user_schema> = { name: string, age?: number }
+
+-- Validate at API boundary, get typed result:
+local user = user_schema:check(request.body)
+-- user: { name: string, age?: number }
+```
+
+**API response projection — strip internal fields before serialization:**
+
+```lua
+--:: InternalUser = { id: string, name: string, email: string, password_hash: string, role: string }
+
+--:: PublicUser = Omit<InternalUser, "password_hash">
+-- = { id: string, name: string, email: string, role: string }
+
+--: (InternalUser) -> PublicUser
+local function to_public(user)
+  return { id = user.id, name = user.name, email = user.email, role = user.role }
+end
+```
+
+**Readonly config — freeze after initialization:**
+
+```lua
+--:: Config = { host: string, port: number, debug: boolean }
+--:: FrozenConfig = Readonly<Config>
+
+--: (Config) -> FrozenConfig
+local function freeze_config(c) return c --[[as FrozenConfig]] end
+
+local cfg = freeze_config({ host = "localhost", port = 8080, debug = false })
+cfg.port = 9090  -- ERROR: cannot assign to readonly field
+```
+
+**Deep transform — recursive via match:**
+
+```lua
+--:: DeepReadonly<T> = match T {
+--::   { key: K, value: V } => { key: K, value: DeepReadonly<V>, readonly: true },
+--::   T => T,
+--:: }
+-- Applied via $EachField for table types, identity for primitives
+```
+
+**Middleware wrapper — transform function signatures:**
+
+```lua
+--:: AddContext<F> = match F {
+--::   (ctx: Context, ...P) -> R => (...P) -> R,
+--:: }
+-- Strips the first Context param, curried by middleware:
+
+--: (handler: (Context, Request) -> Response) -> (Request) -> Response
+local function with_context(handler)
+  return function(req) return handler(create_context(), req) end
+end
+```
+
 #### Function type calls and distribution
 
 `F(Args...)` calls a function type — resolves overloads (picks the best-matching branch) and returns the return type. This is syntax, not a `$`-prefixed intrinsic, because it mirrors Lua's call syntax:
