@@ -480,16 +480,61 @@ Implementation: store recursive types as thunks. Physical equality on unificatio
 -- This Just Works. No special syntax for recursion.
 ```
 
-### Type-level computation: declarative when possible
+### Type-level computation: declarative, not imperative
 
 TypeScript's mapped types, conditional types, and template literal types are powerful but create a Turing-complete type language that's impenetrable to read and impossible to give good error messages for. Zig's comptime is the extreme end — the type system *is* a programming language, and type errors become runtime debugging.
 
-Crescent should support type-level computation but keep it **declarative**:
-- Mapped types (transform all fields of a record) — yes, high value.
-- Conditional types (`T extends U ? A : B`) — cautiously, for pattern matching on types.
-- Arbitrary type-level functions — no. If you need Turing-complete type computation, the type system has failed.
+Crescent rejects this. A type expression should be *readable* to someone who hasn't written it. If understanding a type requires mentally evaluating a program, the type is too complex.
 
-The guiding principle: a type expression should be *readable* to someone who hasn't written it. If understanding a type requires mentally evaluating a program, the type is too complex. Specific design deferred — needs its own exploration when the core is stable.
+#### Primitives
+
+The type-level computation foundation is four orthogonal primitives:
+
+- **`$Call<F, Args...>`** — apply a function type to arguments, get the return type. This is the fundamental primitive. It resolves generics (instantiates type parameters from the provided args) and resolves overloads (picks the best-matching branch).
+- **`$Keys<T>`** — extract a string literal union of a record's keys. This feeds mapped types — it can't be derived from them.
+- **Indexed access `T[K]`** — look up a field type by key. `{ x: number, y: string }["x"]` = `number`.
+- **Mapped types `{ [K in U]: T }`** — iterate over a union of keys, produce fields. The declarative iteration primitive.
+
+Everything else is sugar over these four:
+
+```lua
+--:: $Values<T> = T[$Keys<T>]
+--:: $Pick<T, K> = { [P in K]: T[P] }
+--:: $Omit<T, K> = { [P in $Keys<T> \ K]: T[P] }
+--:: $ReadOnly<T> = { [P in $Keys<T>]: T[P] }  -- with readonly flag
+```
+
+#### `$Params` and `$Return`: safe via distribution
+
+`$Params<F>` and `$Return<F>` decompose a function type into its parameter tuple and return type. Naively, these are lossy on union types — splitting params and return discards the pairing between them.
+
+The solution: **generic type application distributes over unions before evaluating the body.** Each union member is processed independently, then the results are re-unioned:
+
+```lua
+--:: Promisify<F> = (...$Params<F>) -> Promise<$Return<F>>
+
+--:: G = ((number) -> string) | ((string) -> number)
+--:: H = Promisify<G>
+-- Step 1: distribute G into branches
+--   Promisify<(number) -> string> | Promisify<(string) -> number>
+-- Step 2: evaluate each branch (single function type, $Params/$Return are safe)
+--   ((number) -> Promise<string>) | ((string) -> Promise<number>)
+-- Pairing preserved.
+```
+
+`$Params` and `$Return` never see a union — distribution ensures they always receive a single concrete function type. This makes them safe without special-casing. `$Call` remains the right primitive when you have concrete arguments and want to resolve which branch applies.
+
+#### Parameter names
+
+Function parameter names are **preserved for tooling but not structural**. Two function types with different parameter names but same positional types are the same type. The checker remembers names for error messages, hover types, and autocomplete — but they don't affect assignability.
+
+This keeps the door open for future type-level manipulation of parameter names (extracting them via a `$ParamNames<F>` operator, spreading named tuples into argument positions) without making them load-bearing today.
+
+#### What we don't have
+
+- **Conditional types** (`T extends U ? A : B`). TypeScript's most abused feature. Turing-complete when combined with recursion. If crescent needs conditional type logic, it should be via pattern matching with clear, bounded semantics — not an imperative if/else in the type language. Deferred until a concrete use case forces the issue.
+- **Template literal types** (`\`hello ${T}\``). Clever but niche. String pattern types (for `string.match` etc.) are handled by the pattern module, not by a general string computation mechanism.
+- **Recursive mapped types.** Mapped types iterate over a finite key set. They do not recurse. This is intentional — it keeps type-level computation terminating and error messages comprehensible.
 
 ### Performance: LuaJIT-first, Rust escape hatch
 
@@ -523,5 +568,6 @@ Genuinely unresolved — needs dedicated design work:
 
 - **Tuples vs records syntax.** `{ string, number }` is a tuple, `{ x: string, y: number }` is a record — no overlap. But named tuple elements (`{ first: string, ...rest: number[] }`) conflict with record field syntax. Named positions probably only belong in function signatures (`(first: string, ...rest: number[]) -> T`), not in type expressions. How do rest params interact with varargs and multi-return? Does this subsume some overload cases?
 - **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
-- **Type-level computation specifics.** Which mapped/conditional type features earn their complexity? What's the syntax? How do error messages work when type computation fails?
+- **Conditional type alternative.** If crescent needs conditional type logic, what does bounded pattern matching on types look like? What concrete use cases force the issue?
 - **`newtype` conversion syntax.** `UserId(42)` to wrap, `number(id)` to unwrap? Or methods like `UserId.from(42)` and `id:unwrap()`? How does this interact with FFI cdata types that also use call-syntax construction?
+- **Mapped type syntax.** `{ [K in U]: T }` is the TypeScript form. Is there a more Lua-native syntax? How does `\` (set difference) work in key expressions for `$Omit`?
