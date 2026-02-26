@@ -13,20 +13,19 @@ Part of the [rhi ecosystem](https://rhi.zone).
 ## Architecture
 
 ```
-lib/          — standard library modules (http, websocket, dns, sqlite, fs, ...)
+lib/          — all packages (http, websocket, dns, sqlite, fs, ljsocket, ...)
 lib/type/     — typechecker (parses LuaJIT FFI cdefs)
-lib/pkg/      — vendor-first package manager
-cli/          — command-line tools built on lib/
-dep/          — vendored third-party code
+lib/pkg/      — package manager
+lib/test/     — test runner
 doc/          — documentation
 ```
 
 ## Development
 
 ```bash
-nix develop              # Enter dev shell
-luajit cli/test.lua      # Run tests
-cd docs && bun dev       # Local docs
+nix develop                  # Enter dev shell
+luajit lib/test/cli.lua      # Run tests
+cd docs && bun dev           # Local docs
 ```
 
 ## Core Rules
@@ -41,6 +40,8 @@ cd docs && bun dev       # Local docs
 **Pure Lua first.** Prefer pure Lua implementations for hackability. Use FFI only when pure Lua can't do it (syscalls, native libraries, performance-critical paths).
 
 **Hackable.** The user should be able to read, understand, and modify any library. Prefer clarity over abstraction.
+
+**Fast.** Performance at all costs. LuaJIT is fast — don't waste it. Avoid allocations in hot paths, prefer tables over closures, measure before and after.
 
 **Composable.** Libraries depend on each other minimally. Pick what you need, ignore the rest.
 

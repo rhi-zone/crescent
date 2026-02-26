@@ -1,7 +1,8 @@
 # TODO
 
 ## stdlib
-- [ ] Extract and polish http from ~/git/lua
+- [ ] http: extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
+- [ ] http: extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
 - [ ] Extract and polish websocket from ~/git/lua
 - [ ] Extract and polish dns from ~/git/lua
 - [ ] Extract and polish sqlite from ~/git/lua
@@ -12,6 +13,13 @@
 - [ ] Type inference for local bindings
 - [ ] Structural typing for tables
 - [ ] Typed holes / completions
+
+## infra
+- [ ] Bench infrastructure (pure Lua, handgrown)
+- [ ] Fuzz infrastructure (pure Lua, handgrown)
+- [ ] Code style conventions doc
+- [ ] `cr` binary entry point
+- [ ] Third-party libs under lib/ must preserve original LICENSE
 
 ## package manager
 - [ ] Vendor-first install (copy .lua files into project)

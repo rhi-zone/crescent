@@ -2,6 +2,6 @@
 set -e
 
 echo "Running tests..."
-luajit cli/test.lua
+luajit lib/test/cli.lua
 
 echo "Pre-commit checks passed!"
