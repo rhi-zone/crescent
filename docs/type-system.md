@@ -521,7 +521,7 @@ Exact format TBD — this is the shape, not the spec. The manifest is optional; 
 
 Genuinely unresolved — needs dedicated design work:
 
-- **Named tuple elements and rest params.** `{ first: string, ...rest: number[] }` for argument spreading. How does this interact with varargs and multi-return? Does it subsume the need for overloads in some cases?
+- **Tuples vs records syntax.** `{ string, number }` is a tuple, `{ x: string, y: number }` is a record — no overlap. But named tuple elements (`{ first: string, ...rest: number[] }`) conflict with record field syntax. Named positions probably only belong in function signatures (`(first: string, ...rest: number[]) -> T`), not in type expressions. How do rest params interact with varargs and multi-return? Does this subsume some overload cases?
 - **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
 - **Type-level computation specifics.** Which mapped/conditional type features earn their complexity? What's the syntax? How do error messages work when type computation fails?
 - **`newtype` conversion syntax.** `UserId(42)` to wrap, `number(id)` to unwrap? Or methods like `UserId.from(42)` and `id:unwrap()`? How does this interact with FFI cdata types that also use call-syntax construction?
