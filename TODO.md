@@ -17,7 +17,7 @@
 ## infra
 - [ ] Bench infrastructure (pure Lua, handgrown)
 - [ ] Fuzz infrastructure (pure Lua, handgrown)
-- [ ] Code style conventions doc
+- [ ] Formalize code style conventions — don't assume ~/git/lua conventions are correct, decide fresh
 - [ ] `cr` binary entry point
 - [ ] Third-party libs under lib/ must preserve original LICENSE
 
