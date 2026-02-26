@@ -16,7 +16,7 @@ end
 --[[@param urlencoded string]]
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
-	return (urlencoded:gsub("%%([0-9a-fA-F][0-9a-fA-F])", function (code) return urlencoded.char(tonumber(code, 16)) end))
+	return (urlencoded:gsub("%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(tonumber(code, 16)) end))
 end
 
 return mod

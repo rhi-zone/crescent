@@ -11,7 +11,7 @@ mod.check = function (schema, x)
 end
 
 --[[@return boolean]]
-mod.checkers.integer = function (_, x) return type(x) == "number" and x % 0 == 0 end
+mod.checkers.integer = function (_, x) return type(x) == "number" and x % 1 == 0 end
 --[[@return boolean]]
 mod.checkers.number = function (_, x) return type(x) == "number" end
 --[[@return boolean]]
@@ -22,11 +22,12 @@ mod.checkers.boolean = function (_, x) return type(x) == "boolean" end
 mod.checkers["nil"] = function (_, x) return type(x) == "nil" end
 --[[@return boolean]]
 mod.checkers.literal = function (s, x)
-	if type(s) ~= "table" or type(x) ~= "table" then return s == x end
-	if s == x then return true end
-	if #s ~= #x then return false end
-	for k, v in pairs(s) do if not mod.checkers.literal(v, x[k]) then return false end end
-	for k in pairs(x) do if s[k] == nil then return false end end
+	local v = s.value
+	if type(v) ~= "table" or type(x) ~= "table" then return v == x end
+	if v == x then return true end
+	if #v ~= #x then return false end
+	for k, val in pairs(v) do if x[k] ~= val then return false end end
+	for k in pairs(x) do if v[k] == nil then return false end end
 	return true
 end
 --[[@return boolean]]
@@ -49,7 +50,7 @@ end
 --[[@return boolean]]
 mod.checkers.struct_exact = function (s, x)
 	if type(x) ~= "table" then return false end
-	for k in pairs(x) do if not s.shape[x] then return false end end
+	for k in pairs(x) do if not s.shape[k] then return false end end
 	for k, s2 in pairs(s.shape) do
 		if not mod.check(s2, x[k]) then return false end
 	end
@@ -67,7 +68,7 @@ mod.checkers.dictionary = function (s, x)
 	if type(x) ~= "table" then return false end
 	local s_key = s.key
 	local s_value = s.value
-	for k, v in ipairs(x) do
+	for k, v in pairs(x) do
 		if not mod.check(s_key, k) or not mod.check(s_value, v) then return false end
 	end
 	return true
@@ -76,12 +77,12 @@ end
 mod.checkers.optional = function (s, x) return x == nil or mod.check(s.inner, x) end
 --[[@return boolean]]
 mod.checkers.any_of = function (s, x)
-	for i = 1, #s.types do if mod.check(s[i], x) == true then return true end end
+	for i = 1, #s.types do if mod.check(s.types[i], x) == true then return true end end
 	return false
 end
 --[[@return boolean]]
 mod.checkers.all_of = function (s, x)
-	for i = 1, #s.types do if mod.check(s[i], x) == false then return false end end
+	for i = 1, #s.types do if mod.check(s.types[i], x) == false then return false end end
 	return true
 end
 
