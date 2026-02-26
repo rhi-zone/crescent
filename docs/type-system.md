@@ -482,33 +482,45 @@ Implementation: store recursive types as thunks. Physical equality on unificatio
 
 ### Type-level computation: declarative, not imperative
 
-TypeScript's mapped types, conditional types, and template literal types are powerful but create a Turing-complete type language that's impenetrable to read and impossible to give good error messages for. Zig's comptime is the extreme end — the type system *is* a programming language, and type errors become runtime debugging.
+TypeScript's mapped types, conditional types, and template literal types are powerful but create an imperative type language that the checker can't reason about bidirectionally. Zig's comptime is the extreme end — the type system *is* a programming language, and type errors become runtime debugging.
 
-Crescent rejects this. A type expression should be *readable* to someone who hasn't written it. If understanding a type requires mentally evaluating a program, the type is too complex.
+Crescent rejects imperative type-level computation. Not because of Turing-completeness (that's a theoretical concern) — but because imperative type constructs are **opaque to the checker**. It can evaluate them forward but can't unify backwards through them. A type expression should be something the checker can reason about in both directions — and something a human can read without mentally executing a program.
 
-#### Primitives
+#### The design space
 
-The type-level computation foundation is four orthogonal primitives:
+Type-level operations fall into distinct categories. TypeScript unifies most of these under "mapped types" — one flexible syntax that can do everything. Crescent separates them because they're conceptually different and compose differently:
 
-- **`$Call<F, Args...>`** — apply a function type to arguments, get the return type. This is the fundamental primitive. It resolves generics (instantiates type parameters from the provided args) and resolves overloads (picks the best-matching branch).
-- **`$Keys<T>`** — extract a string literal union of a record's keys. This feeds mapped types — it can't be derived from them.
-- **Indexed access `T[K]`** — look up a field type by key. `{ x: number, y: string }["x"]` = `number`.
-- **Mapped types `{ [K in U]: T }`** — iterate over a union of keys, produce fields. The declarative iteration primitive.
+**Type queries** — extract information from a type:
+- `$Keys<T>` — string literal union of a record's keys
+- `$Params<F>` — parameter types of a function as a tuple
+- `$Return<F>` — return type of a function
+- `T[K]` — indexed access, look up a field type by key
+- `$Call<F, Args...>` — apply a function type to arguments, get the return type
 
-Everything else is sugar over these four:
+**Modifier toggles** — flip per-field flags:
+- `Partial<T>` — all fields optional
+- `Required<T>` — all fields required
+- `Readonly<T>` — all fields readonly
+- `Mutable<T>` — all fields mutable
 
-```lua
---:: $Values<T> = T[$Keys<T>]
---:: $Pick<T, K> = { [P in K]: T[P] }
---:: $Omit<T, K> = { [P in $Keys<T> \ K]: T[P] }
---:: $ReadOnly<T> = { [P in $Keys<T>]: T[P] }  -- with readonly flag
-```
+**Key filters** — subset of fields:
+- `Pick<T, K>` — keep only fields in K
+- `Omit<T, K>` — remove fields in K
 
-#### `$Params` and `$Return`: safe via distribution
+**Union filters** — subset of union members:
+- `Extract<T, U>` — members of T assignable to U
+- `Exclude<T, U>` — members of T not assignable to U
 
-`$Params<F>` and `$Return<F>` decompose a function type into its parameter tuple and return type. Naively, these are lossy on union types — splitting params and return discards the pairing between them.
+**Value transforms** — change every field's type:
+- The general case: "for each field of T, transform its type somehow"
 
-The solution: **generic type application distributes over unions before evaluating the body.** Each union member is processed independently, then the results are re-unioned:
+These are separate operations with separate semantics. The open design question is how they **compose** — especially conditional application (e.g. "make fields `a` and `b` optional, keep the rest required").
+
+#### `$Call` and distribution
+
+`$Call<F, Args...>` is the fundamental type application primitive. It resolves generics (instantiates type parameters) and overloads (picks the best-matching branch).
+
+**Generic type application distributes over unions before evaluating the body.** Each union member is processed independently, then the results are re-unioned:
 
 ```lua
 --:: Promisify<F> = (...$Params<F>) -> Promise<$Return<F>>
@@ -517,24 +529,162 @@ The solution: **generic type application distributes over unions before evaluati
 --:: H = Promisify<G>
 -- Step 1: distribute G into branches
 --   Promisify<(number) -> string> | Promisify<(string) -> number>
--- Step 2: evaluate each branch (single function type, $Params/$Return are safe)
+-- Step 2: evaluate each branch (single function type, safe)
 --   ((number) -> Promise<string>) | ((string) -> Promise<number>)
 -- Pairing preserved.
 ```
 
-`$Params` and `$Return` never see a union — distribution ensures they always receive a single concrete function type. This makes them safe without special-casing. `$Call` remains the right primitive when you have concrete arguments and want to resolve which branch applies.
+This makes `$Params` and `$Return` safe on union types — they never see a union, distribution ensures they always receive a single concrete function type.
 
 #### Parameter names
 
 Function parameter names are **preserved for tooling but not structural**. Two function types with different parameter names but same positional types are the same type. The checker remembers names for error messages, hover types, and autocomplete — but they don't affect assignability.
 
-This keeps the door open for future type-level manipulation of parameter names (extracting them via a `$ParamNames<F>` operator, spreading named tuples into argument positions) without making them load-bearing today.
+#### Shared type language for static and runtime checking
+
+The type language serves two independent systems:
+
+- **Static typechecker**: compile-time analysis, zero runtime cost
+- **Runtime schema validator** (`lib/type/check.lua`): boundary validation for network data, file input, user input — like Zod or ArkType for Lua
+
+These are separate tools, not one generating the other. But they share the same type language so you don't write the same shape twice in two different syntaxes. A type declared via `--::` should be consumable by both the static checker and a runtime validator.
+
+This is the primary consumer of type transformations. API boundaries need `Partial` (PATCH endpoints), `Pick` (projections), `Omit` (stripping internal fields before serialization). The transformations should be driven by what real validation and serialization code needs, not by what TypeScript happens to offer.
+
+#### Type-level match
+
+A generic type declaration is a type-level function. Match arms define how it dispatches on input types:
+
+```lua
+--:: ToString<T> = match T {
+--::   number => string,
+--::   boolean => "true" | "false",
+--::   [U] => [ToString<U>],
+--:: }
+
+ToString<number>   -- string
+ToString<boolean>  -- "true" | "false"
+ToString<[number]> -- [string]
+```
+
+This is the same concept as overload resolution — pattern match on inputs, produce an output. The difference is scope: overloads match on function argument types (value-level dispatch), match matches on type parameters (type-level dispatch). The checker machinery is the same: structural pattern matching, captured type variables, best-match selection.
+
+**Properties:**
+- **Invertible**: each arm is a pattern → result pair. The checker can work backwards.
+- **Exhaustiveness-checkable**: missing cases are errors.
+- **Best-match**: no ordering dependency. Ambiguous matches are errors.
+- **Structural destructuring**: patterns bind type variables from structure (`[U]` captures the element type, `(A) -> B` captures params and return).
+
+**`$Call` is application, not a separate concept.** `$Call<F, Args>` applies a type-level function to arguments. `F<Args>` is sugar for the same. Every generic type is a type-level function — simple generics have a direct substitution body, match generics dispatch on structure:
+
+```lua
+-- Direct body (no dispatch)
+--:: Pair<A, B> = { first: A, second: B }
+
+-- Match body (structural dispatch)
+--:: Unwrap<T> = match T {
+--::   Promise<U> => U,
+--::   T => T,
+--:: }
+
+-- Overloaded function type (implicit match on argument types)
+--:: Format = ((number) -> string) | ((boolean) -> "true" | "false")
+
+-- All three are type-level functions. $Call applies any of them.
+```
+
+**Builtins as match.** The `$`-prefixed type queries are instances of match, some builtin for performance and error quality:
+
+```lua
+-- $Return is match on function structure
+--:: $Return<F> = match F {
+--::   (...any) -> R => R,
+--:: }
+
+-- $Keys is match on table structure
+--:: $Keys<T> = match T {
+--::   { ...fields } => keyof fields,
+--:: }
+```
+
+They're not conceptually special — they're common patterns that deserve dedicated error messages and optimized paths. User-defined matches use the same mechanism.
+
+**Distribution still applies.** When a match receives a union, it distributes: each union member is matched independently, results are re-unioned. This keeps match arms simple — they never see unions.
+
+**Prior art.** The individual pieces are proven — what's new is the combination targeting a dynamically-typed language:
+
+- **Scala 3 match types** (2020): the closest direct analog. Structural pattern matching at the type level, with reduction semantics. Main pain point: interaction with Scala's subtyping and path-dependent types creates edge cases. Crescent's simpler type system (no path-dependence, no higher-kinded types, no implicits) has less surface area for those issues.
+- **Haskell closed type families** (GHC 7.8, 2014): type-level functions with pattern matching, proven at scale for 10+ years. First-match semantics (crescent uses best-match). Non-injective by default; injectivity annotations are opt-in. Demonstrates that type-level match is tractable in practice.
+- **C++ SFINAE / concepts** (SFINAE: C++98, concepts: C++20): "Substitution Failure Is Not An Error" — try each candidate, silently skip failures. The semantic model crescent's overload resolution uses. C++ arrived here accidentally through template metaprogramming; concepts cleaned up the syntax 22 years later.
+- **OCaml GADTs** (OCaml 4.00, 2012): pattern matching that refines types in branches. Value-level, but the same bidirectional inference — matching a GADT constructor tells the checker what the type parameter must be. The reasoning model crescent's match should support.
+- **TypeScript conditional types** (TS 2.8, 2018): the cautionary tale. `T extends U ? A : B` is expedient but imperative — opaque to inference, composes into unreadable nested chains, Turing-complete when recursive. Got there first for "type a dynamic language," and now it's load-bearing infrastructure that can't be changed. Crescent has the luxury of starting fresh.
+
+Nobody has combined structural types + match-as-primitive + distribution + SFINAE-style overloads + bidirectional inference into one coherent system for a dynamically-typed language. Each piece is well-understood; the bet is that the combination works.
+
+#### Constraint inference and deferred checking
+
+Three modes for generic constraints, chosen by how you write the generic:
+
+**Explicit constraint** — checked standalone against the body. Errors at definition site. Guarantees the body works for all valid inputs:
+
+```lua
+--:: <T: { name: string }> GetName = (T) -> string
+-- Body checked once against the constraint. Call sites only verify T satisfies it.
+```
+
+**No constraint** — inferred from the body. Same standalone guarantees, less boilerplate. Structural inference extracts what the body actually uses:
+
+```lua
+-- No constraint written:
+local function get_x(t) return t.x end
+-- Inferred: <T> ({ x: T, ... }) -> T
+-- The constraint IS the usage, extracted automatically.
+```
+
+**Match arms** — SFINAE-style deferred dispatch. Each arm is standalone-checked, but which arm applies is deferred to the call site. Failed arms are silently skipped:
+
+```lua
+--:: Stringify<T> = match T {
+--::   { name: string } => T["name"],
+--::   number => string,
+--:: }
+-- Each arm is checked independently. At the call site,
+-- the checker picks the matching arm. No match = error.
+```
+
+This covers the spectrum without flags or modes:
+- Want documentation + guarantees? Write explicit constraints.
+- Want less boilerplate? Omit constraints, let inference handle it.
+- Want "try and see" dispatch? Use match — each arm is tried, failures are skipped.
+- Want silent fallback at call sites? Overloaded function signatures — if one overload doesn't match, try the next.
+
+The match arms and overload branches are each standalone-checked, so you never get the C++ problem of inscrutable errors deep inside a template body at a distant call site. Errors are either at the definition (constraint violation) or at the call site (no matching arm/overload) — never inside the generic's internals.
+
+**Prior art: C++20 concepts.** Concepts are SFINAE made declarative — instead of relying on substitution failure as a side effect, you state what operations a type must support:
+
+```cpp
+template<typename T>
+concept Addable = requires(T a, T b) {
+    { a + b } -> std::convertible_to<T>;
+};
+```
+
+The `requires` clause is "try this expression, check it's valid." Crescent's structural inference does the same thing automatically — `function add(a, b) return a + b end` infers "a and b must support `+`" without a separate declaration. The explicit constraint form `<T: { ... }>` is the analog of a named concept, but structural rather than nominal. C++ needs concepts declared separately because templates aren't checked standalone without them; crescent infers constraints from the body because structural typing makes usage self-documenting. Named constraints (`--:: Addable = ...` used as `<T: Addable>`) are available for documentation and reuse, but they're type aliases, not a separate concept system.
+
+#### Why not conditional types?
+
+TypeScript's `T extends U ? A : B` is imperative control flow at the type level. The problem isn't power or Turing-completeness — it's that conditional types are **opaque to unification**. The checker can evaluate them forward (given T, compute A or B) but cannot work backwards (given the result type, constrain T). They're black boxes that block inference, narrowing, and bidirectional type refinement.
+
+This matters in practice. When a function's return type is a conditional type, the checker can't infer the argument type from a usage site. Error messages degrade to "conditional type didn't match" with no structural explanation. Composition of conditional types produces nested `extends` chains that are Turing-complete in theory and unreadable in practice.
+
+**SFINAE** (C++ "Substitution Failure Is Not An Error") is closer to the right model: try each candidate, silently skip failures, pick the match. This is what crescent's overload resolution already does — best-match across union branches. Distribution ensures each branch gets a concrete type, and `$Call` resolves by trying substitution. The checker *can* reason backwards through this: if you know the return type, it constrains which overload branch was taken, which constrains the argument types.
+
+If crescent needs conditional type logic beyond what distribution + overloads provide, the path is bounded pattern matching on type structure (Scala 3 match types, Haskell closed type families) — declarative dispatch that the checker can invert. Not an imperative if/else that turns the type system into a second runtime.
 
 #### What we don't have
-
-- **Conditional types** (`T extends U ? A : B`). TypeScript's most abused feature. Turing-complete when combined with recursion. If crescent needs conditional type logic, it should be via pattern matching with clear, bounded semantics — not an imperative if/else in the type language. Deferred until a concrete use case forces the issue.
 - **Template literal types** (`\`hello ${T}\``). Clever but niche. String pattern types (for `string.match` etc.) are handled by the pattern module, not by a general string computation mechanism.
-- **Recursive mapped types.** Mapped types iterate over a finite key set. They do not recurse. This is intentional — it keeps type-level computation terminating and error messages comprehensible.
+- **Recursive type transforms.** Type transforms iterate over a finite key set. They do not recurse. This keeps type-level computation terminating and error messages comprehensible.
+- **General mapped type syntax.** The `{ [K in U]: T }` iteration form is deferred. The builtin transformations (`Partial`, `Pick`, `Omit`, etc.) cover most use cases. A general-purpose iteration syntax will be designed when concrete use cases demand it, informed by real usage patterns rather than TypeScript precedent.
 
 ### Performance: LuaJIT-first, Rust escape hatch
 
@@ -568,6 +718,25 @@ Genuinely unresolved — needs dedicated design work:
 
 - **Tuples vs records syntax.** `{ string, number }` is a tuple, `{ x: string, y: number }` is a record — no overlap. But named tuple elements (`{ first: string, ...rest: number[] }`) conflict with record field syntax. Named positions probably only belong in function signatures (`(first: string, ...rest: number[]) -> T`), not in type expressions. How do rest params interact with varargs and multi-return? Does this subsume some overload cases?
 - **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document. Prior art: Koka, OCaml 5, Eff.
-- **Conditional type alternative.** If crescent needs conditional type logic, what does bounded pattern matching on types look like? What concrete use cases force the issue?
 - **`newtype` conversion syntax.** `UserId(42)` to wrap, `number(id)` to unwrap? Or methods like `UserId.from(42)` and `id:unwrap()`? How does this interact with FFI cdata types that also use call-syntax construction?
-- **Mapped type syntax.** `{ [K in U]: T }` is the TypeScript form. Is there a more Lua-native syntax? How does `\` (set difference) work in key expressions for `$Omit`?
+- **Type transformation composition.** Modifier toggles, key filters, union filters, and value transforms are separate concepts. How do they compose? Conditional application ("make `a` and `b` optional, keep the rest required") is the hard case. Possible models: `with`-clauses for patching, piping, intersection of partial transforms. Needs real use cases from API boundary validation to drive the design.
+- **Higher-kinded types.** HKTs let you abstract over type constructors — "same wrapper, different contents." The mechanism is mostly present: match makes every generic type a type-level function, `$Call` applies them, so passing a generic type as a type argument works. The constraint language reuses existing syntax — a generic type as a bound constrains the kind:
+
+  ```lua
+  --:: T1<T> = never           -- kind: * -> * (bottom type constructor)
+  --:: T2<A, B> = never        -- kind: * -> * -> *
+
+  --:: Lift<F: T1, A> = $Call<F, A>
+  -- F must be a single-param type constructor
+
+  --:: MakeOptional<T> = T?
+  Lift<MakeOptional, number>   -- number? (MakeOptional is * -> *)
+
+  -- Tighter bound: F must produce something with a value field
+  --:: Wrapper<T> = { value: T }
+  --:: LiftW<F: Wrapper, A> = $Call<F, A>
+  ```
+
+  No new syntax needed; arity is structural (the bound's parameter count IS the kind). But **type constructor variance is non-trivial**. For the bound to be "most permissive at arity 1," the output must be the top type (`any` — everything is a subtype) but the input side is contravariant: an unconstrained bound `T1<T> = any` is hard for constrained constructors like `Clamp<T: number>` to satisfy (narrower domain ≠ subtype, same as `(number) -> R` not being `<:` `(any) -> R`). Possible resolutions: (a) HKT bounds are arity-matching only, not subtype checks — constraints are deferred to `$Call` sites; (b) use a separate kind syntax; (c) accept the variance and let users write precise bounds. Needs design work. TypeScript lacks HKTs but supports them via F-bounded polymorphism encoding — works but terrible error messages and boilerplate. The practical question: structural typing handles most container abstractions ("anything with `.map`") without HKTs. The genuinely compelling case is abstracting over effect/wrapper types. Not in v1, but the machinery (`$Call` + match + generic-type-as-bound) may already be sufficient — needs validation against real use cases.
+- **Match recursion bounds.** Type-level match supports recursive arms (e.g. `ToString<[U]> => [ToString<U>]`). What's the recursion limit? How does the checker detect divergence? Haskell uses a fixed depth limit (default 201). Scala 3 similarly. A fixed limit is pragmatic but arbitrary.
+- **User-defined type transforms.** Match gives users the mechanism to define their own `Partial`-like operations. The open question is whether this is enough — or whether modifier toggles (`Partial`, `Readonly`) need dedicated support because they operate on the field-modifier level, which match arms can't express (match dispatches on type structure, not on per-field metadata).
