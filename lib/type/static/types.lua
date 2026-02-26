@@ -109,6 +109,34 @@ function M.optional(ty)
   return M.union({ ty, M.NIL() })
 end
 
+function M.tuple(elements)
+  return { tag = "tuple", elements = elements }
+end
+
+function M.field_descriptor(key, value, optional, readonly)
+  return { tag = "field_descriptor", key = key, value = value, optional = optional or false, readonly = readonly or false }
+end
+
+function M.spread(inner)
+  return { tag = "spread", inner = inner }
+end
+
+function M.nominal(name, identity, underlying)
+  return { tag = "nominal", name = name, identity = identity, underlying = underlying }
+end
+
+function M.match_type(param, arms)
+  return { tag = "match_type", param = param, arms = arms }
+end
+
+function M.intrinsic(name)
+  return { tag = "intrinsic", name = name }
+end
+
+function M.type_call(callee, args)
+  return { tag = "type_call", callee = callee, args = args }
+end
+
 -- Resolve union-find chain for type variables
 function M.resolve(ty)
   while ty.tag == "var" and ty.bound and ty.bound.tag == "var" do
@@ -205,12 +233,141 @@ function M.display(ty)
     return "...'" .. ty.id
   end
 
+  if tag == "named" then
+    if ty.args and #ty.args > 0 then
+      local parts = {}
+      for i = 1, #ty.args do
+        parts[#parts + 1] = M.display(ty.args[i])
+      end
+      return ty.name .. "<" .. table.concat(parts, ", ") .. ">"
+    end
+    return ty.name
+  end
+
+  if tag == "tuple" then
+    local parts = {}
+    for i = 1, #ty.elements do
+      parts[#parts + 1] = M.display(ty.elements[i])
+    end
+    return "{ " .. table.concat(parts, ", ") .. " }"
+  end
+
+  if tag == "spread" then
+    return "..." .. M.display(ty.inner)
+  end
+
+  if tag == "nominal" then
+    return ty.name
+  end
+
+  if tag == "match_type" then
+    return "match " .. M.display(ty.param) .. " { ... }"
+  end
+
+  if tag == "intrinsic" then
+    return "$" .. ty.name
+  end
+
+  if tag == "type_call" then
+    local parts = {}
+    for i = 1, #ty.args do
+      parts[#parts + 1] = M.display(ty.args[i])
+    end
+    return M.display(ty.callee) .. "(" .. table.concat(parts, ", ") .. ")"
+  end
+
+  if tag == "field_descriptor" then
+    local prefix = ty.readonly and "readonly " or ""
+    local opt = ty.optional and "?" or ""
+    return prefix .. M.display(ty.key) .. opt .. ": " .. M.display(ty.value)
+  end
+
   if tag == "cdata" then
     return "cdata"
   end
 
   return "?"
 end
+
+-- Subtract a type from a union: remove members that match `exclude`.
+-- Returns the remaining type.
+function M.subtract(ty, exclude)
+  ty = M.resolve(ty)
+  exclude = M.resolve(exclude)
+  if ty.tag == "union" then
+    local remaining = {}
+    for i = 1, #ty.types do
+      local member = M.resolve(ty.types[i])
+      if not M.types_equal(member, exclude) then
+        remaining[#remaining + 1] = member
+      end
+    end
+    if #remaining == 0 then return M.NEVER() end
+    if #remaining == 1 then return remaining[1] end
+    return M.union(remaining)
+  end
+  -- Single type: if it matches exclude, return never
+  if M.types_equal(ty, exclude) then return M.NEVER() end
+  return ty
+end
+
+-- Narrow a type to only members that match `target`.
+function M.narrow_to(ty, target)
+  ty = M.resolve(ty)
+  target = M.resolve(target)
+  if ty.tag == "union" then
+    local matching = {}
+    for i = 1, #ty.types do
+      local member = M.resolve(ty.types[i])
+      if M.types_equal(member, target) or M.is_subtype_tag(member, target) then
+        matching[#matching + 1] = member
+      end
+    end
+    if #matching == 0 then return target end
+    if #matching == 1 then return matching[1] end
+    return M.union(matching)
+  end
+  return target
+end
+
+-- Check if two types are structurally equal (shallow).
+function M.types_equal(a, b)
+  a = M.resolve(a)
+  b = M.resolve(b)
+  if a.tag ~= b.tag then return false end
+  if a.tag == "literal" then return a.kind == b.kind and a.value == b.value end
+  -- For primitives, same tag = equal
+  if a.tag == "nil" or a.tag == "boolean" or a.tag == "number"
+    or a.tag == "integer" or a.tag == "string"
+    or a.tag == "any" or a.tag == "never" then
+    return true
+  end
+  return a == b -- reference equality for complex types
+end
+
+-- Check if a member's tag is compatible with a target type (for narrowing).
+function M.is_subtype_tag(member, target)
+  if target.tag == "number" and (member.tag == "integer" or (member.tag == "literal" and member.kind == "number")) then
+    return true
+  end
+  if target.tag == "string" and (member.tag == "literal" and member.kind == "string") then
+    return true
+  end
+  if target.tag == "boolean" and (member.tag == "literal" and member.kind == "boolean") then
+    return true
+  end
+  return false
+end
+
+-- Map type() string results to type tags
+M.typeof_map = {
+  ["nil"] = "nil",
+  ["boolean"] = "boolean",
+  ["number"] = "number",
+  ["string"] = "string",
+  ["table"] = "table",
+  ["function"] = "function",
+}
 
 -- Reset counter (for testing)
 function M.reset_counter()

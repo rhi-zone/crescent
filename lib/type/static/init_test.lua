@@ -215,10 +215,34 @@ assert.eq(named.tag, "named", "ann named tag")
 assert.eq(named.name, "MyType", "ann named name")
 
 -- generic named type
-local gen = annotations.parse_type("Result[number, string]")
+local gen = annotations.parse_type("Result<number, string>")
 assert.eq(gen.tag, "named", "ann generic tag")
 assert.eq(gen.name, "Result", "ann generic name")
 assert.eq(#gen.args, 2, "ann generic args")
+assert.eq(gen.args[1].tag, "number", "ann generic arg1")
+assert.eq(gen.args[2].tag, "string", "ann generic arg2")
+
+-- nested generics
+local nested = annotations.parse_type("Result<Option<number>, string>")
+assert.eq(nested.tag, "named", "ann nested generic tag")
+assert.eq(nested.name, "Result", "ann nested generic name")
+assert.eq(#nested.args, 2, "ann nested generic args")
+assert.eq(nested.args[1].tag, "named", "ann nested inner tag")
+assert.eq(nested.args[1].name, "Option", "ann nested inner name")
+assert.eq(#nested.args[1].args, 1, "ann nested inner args")
+assert.eq(nested.args[1].args[1].tag, "number", "ann nested inner arg type")
+
+-- generic with array suffix
+local garr = annotations.parse_type("Option<string>[]")
+assert.eq(garr.tag, "table", "ann generic array suffix tag")
+assert.eq(garr.indexers[1].value.tag, "named", "ann generic array suffix elem")
+assert.eq(garr.indexers[1].value.name, "Option", "ann generic array elem name")
+
+-- single generic arg
+local sgen = annotations.parse_type("Array<string>")
+assert.eq(sgen.tag, "named", "ann single generic tag")
+assert.eq(sgen.name, "Array", "ann single generic name")
+assert.eq(#sgen.args, 1, "ann single generic args")
 
 -- multi-return function
 local mret = annotations.parse_type("(string) -> (number, string)")
@@ -267,6 +291,32 @@ assert.eq(map2[1].name, "Point", "ann decl name1")
 assert.ok(map2[2], "ann decl line2")
 assert.eq(map2[2].kind, "type_decl", "ann decl kind2")
 assert.eq(map2[2].name, "Color", "ann decl name2")
+
+-- generic type declaration
+local source3 = '--:: Pair<A, B> = { first: A, second: B }\n'
+local map3 = annotations.build_map(source3)
+assert.ok(map3[1], "ann generic decl exists")
+assert.eq(map3[1].kind, "type_decl", "ann generic decl kind")
+assert.eq(map3[1].name, "Pair", "ann generic decl name")
+assert.ok(map3[1].params, "ann generic decl has params")
+assert.eq(#map3[1].params, 2, "ann generic decl param count")
+assert.eq(map3[1].params[1].name, "A", "ann generic decl param1 name")
+assert.eq(map3[1].params[2].name, "B", "ann generic decl param2 name")
+
+-- generic type declaration with constraint
+local source4 = '--:: Numeric<T: number> = { value: T }\n'
+local map4 = annotations.build_map(source4)
+assert.ok(map4[1], "ann constrained decl exists")
+assert.eq(map4[1].name, "Numeric", "ann constrained decl name")
+assert.eq(#map4[1].params, 1, "ann constrained decl param count")
+assert.eq(map4[1].params[1].name, "T", "ann constrained decl param name")
+assert.ok(map4[1].params[1].constraint, "ann constrained decl has constraint")
+assert.eq(map4[1].params[1].constraint.tag, "number", "ann constrained decl constraint type")
+
+-- display named types
+assert.eq(T.display({ tag = "named", name = "MyType", args = {} }), "MyType", "display named")
+assert.eq(T.display({ tag = "named", name = "Result", args = { T.NUMBER(), T.STRING() } }),
+  "Result<number, string>", "display generic")
 
 ---------------------------------------------------------------------------
 -- Full checker integration
@@ -327,3 +377,293 @@ function M.add(a, b) return a + b end
 return M
 ]], "test.lua")
 assert.ok(ok10, "module pattern works")
+
+---------------------------------------------------------------------------
+-- Phase 2: Named type resolution
+---------------------------------------------------------------------------
+
+-- generic type alias resolves in annotation
+local ok_alias, errs_alias = checker.check([[
+--:: Pair<A, B> = { first: A, second: B }
+local p = { first = 1, second = "hello" } --: Pair<number, string>
+]], "test.lua")
+assert.ok(ok_alias, "generic type alias resolves: " .. (errs_alias or ""))
+
+-- generic alias mismatch detected
+local ok_alias2, errs_alias2 = checker.check([[
+--:: Pair<A, B> = { first: A, second: B }
+local p = { first = 1, second = 2 } --: Pair<number, string>
+]], "test.lua")
+assert.ok(not ok_alias2, "generic alias mismatch detected")
+
+-- simple (non-generic) alias resolves
+local ok_alias3, errs_alias3 = checker.check([[
+--:: Name = string
+local x = "hello" --: Name
+]], "test.lua")
+assert.ok(ok_alias3, "simple alias resolves: " .. (errs_alias3 or ""))
+
+-- forward references between type declarations
+local ok_fwd, errs_fwd = checker.check([[
+--:: Id = number
+--:: Named = { id: Id, name: string }
+local x = { id = 1, name = "test" } --: Named
+]], "test.lua")
+assert.ok(ok_fwd, "forward type references: " .. (errs_fwd or ""))
+
+-- new type constructors
+assert.eq(T.tuple({ T.NUMBER(), T.STRING() }).tag, "tuple", "tuple tag")
+assert.eq(#T.tuple({ T.NUMBER(), T.STRING() }).elements, 2, "tuple elements")
+assert.eq(T.spread(T.NUMBER()).tag, "spread", "spread tag")
+assert.eq(T.nominal("UserId", {}, T.NUMBER()).tag, "nominal", "nominal tag")
+assert.eq(T.intrinsic("EachField").tag, "intrinsic", "intrinsic tag")
+assert.eq(T.type_call(T.intrinsic("Keys"), { T.ANY() }).tag, "type_call", "type_call tag")
+
+-- display new types
+assert.eq(T.display(T.tuple({ T.NUMBER(), T.STRING() })), "{ number, string }", "display tuple")
+assert.eq(T.display(T.spread(T.NUMBER())), "...number", "display spread")
+assert.eq(T.display(T.nominal("UserId", {}, T.NUMBER())), "UserId", "display nominal")
+assert.eq(T.display(T.intrinsic("EachField")), "$EachField", "display intrinsic")
+
+---------------------------------------------------------------------------
+-- Phase 3: Tuples and Spread
+---------------------------------------------------------------------------
+
+-- parse tuple type
+local tup = annotations.parse_type("{ number, string }")
+assert.eq(tup.tag, "tuple", "ann tuple tag")
+assert.eq(#tup.elements, 2, "ann tuple elements")
+assert.eq(tup.elements[1].tag, "number", "ann tuple elem1")
+assert.eq(tup.elements[2].tag, "string", "ann tuple elem2")
+
+-- parse spread in tuple
+local spr = annotations.parse_type("{ ...Base, string }")
+assert.eq(spr.tag, "tuple", "ann spread tuple tag")
+assert.eq(spr.elements[1].tag, "spread", "ann spread elem tag")
+
+-- record type still works
+local rec2 = annotations.parse_type("{ x: number, y: string }")
+assert.eq(rec2.tag, "table", "ann record still works")
+assert.ok(rec2.fields.x, "ann record field x")
+assert.ok(rec2.fields.y, "ann record field y")
+
+-- optional field still works
+local optf = annotations.parse_type("{ name: string, age?: number }")
+assert.eq(optf.tag, "table", "ann optional field record")
+assert.eq(optf.fields.age.optional, true, "ann optional field flag")
+
+-- tuple unification
+assert.ok(unify.unify(T.tuple({ T.NUMBER(), T.STRING() }), T.tuple({ T.NUMBER(), T.STRING() })), "tuple unify same")
+local ok_tup_mismatch, _ = unify.unify(T.tuple({ T.NUMBER() }), T.tuple({ T.STRING() }))
+assert.ok(not ok_tup_mismatch, "tuple unify type mismatch")
+local ok_tup_len, _ = unify.unify(T.tuple({ T.NUMBER() }), T.tuple({ T.NUMBER(), T.STRING() }))
+assert.ok(not ok_tup_len, "tuple unify length mismatch")
+
+-- tuple not assignable to array
+local ok_tup_arr, _ = unify.unify(T.tuple({ T.NUMBER(), T.STRING() }), T.array(T.NUMBER()))
+assert.ok(not ok_tup_arr, "tuple not assignable to array")
+
+---------------------------------------------------------------------------
+-- Phase 4: Type narrowing
+---------------------------------------------------------------------------
+
+-- types_equal
+assert.ok(T.types_equal(T.NUMBER(), T.NUMBER()), "types_equal same")
+assert.ok(not T.types_equal(T.NUMBER(), T.STRING()), "types_equal diff")
+assert.ok(T.types_equal(T.NIL(), T.NIL()), "types_equal nil")
+
+-- subtract
+local sub1 = T.subtract(T.union({ T.STRING(), T.NUMBER() }), T.STRING())
+assert.eq(sub1.tag, "number", "subtract from union")
+local sub2 = T.subtract(T.STRING(), T.STRING())
+assert.eq(sub2.tag, "never", "subtract same type")
+local sub3 = T.subtract(T.STRING(), T.NUMBER())
+assert.eq(sub3.tag, "string", "subtract different type")
+
+-- narrow_to
+local nar1 = T.narrow_to(T.union({ T.STRING(), T.NUMBER() }), T.STRING())
+assert.eq(nar1.tag, "string", "narrow_to string")
+
+-- type() narrowing in if
+local ok_narrow1, errs_narrow1 = checker.check([[
+--: string | number
+local x = "hello"
+if type(x) == "string" then
+  local y = x .. " world"
+end
+]], "test.lua")
+assert.ok(ok_narrow1, "type() narrowing: " .. (errs_narrow1 or ""))
+
+-- nil check narrowing
+local ok_narrow2, errs_narrow2 = checker.check([[
+--: string?
+local x = "hello"
+if x ~= nil then
+  local y = x .. " world"
+end
+]], "test.lua")
+assert.ok(ok_narrow2, "nil check narrowing: " .. (errs_narrow2 or ""))
+
+-- truthiness narrowing
+local ok_narrow3, errs_narrow3 = checker.check([[
+--: string?
+local x = "hello"
+if x then
+  local y = x .. " world"
+end
+]], "test.lua")
+assert.ok(ok_narrow3, "truthiness narrowing: " .. (errs_narrow3 or ""))
+
+---------------------------------------------------------------------------
+-- Phase 5: Module resolution + Prelude
+---------------------------------------------------------------------------
+
+-- Prelude aliases available
+local ok_prelude1, errs_prelude1 = checker.check([[
+--:: MyList = Array<number>
+]], "test.lua")
+assert.ok(ok_prelude1, "prelude Array alias: " .. (errs_prelude1 or ""))
+
+-- Module resolver finds files
+local resolver = require("lib.type.static.resolve")
+local lua_path, decl_path = resolver.resolve("lib.path")
+assert.ok(lua_path, "resolver finds lib.path")
+assert.ok(lua_path:find("lib/path"), "resolver path correct")
+
+-- Resolver returns nil for missing modules
+local missing_path = resolver.resolve("lib.nonexistent.module")
+assert.eq(missing_path, nil, "resolver nil for missing")
+
+---------------------------------------------------------------------------
+-- Phase 6: Nominal types
+---------------------------------------------------------------------------
+
+-- newtype creates distinct type
+local ok_newtype1, errs_newtype1 = checker.check([[
+--:: newtype UserId = number
+local x = 42 --: UserId
+]], "test.lua")
+-- newtype UserId should NOT accept a plain number
+assert.ok(not ok_newtype1, "newtype rejects underlying type")
+
+-- newtype declaration parses
+local src_nt = '--:: newtype UserId = number\n'
+local map_nt = annotations.build_map(src_nt)
+assert.ok(map_nt[1], "newtype decl exists")
+assert.eq(map_nt[1].nominal, "newtype", "newtype nominal kind")
+assert.eq(map_nt[1].name, "UserId", "newtype name")
+
+-- opaque declaration parses
+local src_op = '--:: opaque Connection = { handle: number }\n'
+local map_op = annotations.build_map(src_op)
+assert.ok(map_op[1], "opaque decl exists")
+assert.eq(map_op[1].nominal, "opaque", "opaque nominal kind")
+assert.eq(map_op[1].name, "Connection", "opaque name")
+
+-- nominal unification: same identity passes
+local nom1 = T.nominal("X", 999, T.NUMBER())
+local nom2 = T.nominal("X", 999, T.NUMBER())
+assert.ok(unify.unify(nom1, nom2), "nominal same identity")
+
+-- nominal unification: different identity fails
+local nom3 = T.nominal("X", 998, T.NUMBER())
+local ok_nom, _ = unify.unify(nom1, nom3)
+assert.ok(not ok_nom, "nominal different identity")
+
+---------------------------------------------------------------------------
+-- Phase 7: Match types + Intrinsics
+---------------------------------------------------------------------------
+
+-- parse intrinsic
+local intr = annotations.parse_type("$Keys")
+assert.eq(intr.tag, "intrinsic", "ann intrinsic tag")
+assert.eq(intr.name, "Keys", "ann intrinsic name")
+
+-- parse intrinsic with type args
+local intr_call = annotations.parse_type("$Keys<{ x: number, y: string }>")
+assert.eq(intr_call.tag, "type_call", "ann intrinsic call tag")
+assert.eq(intr_call.callee.tag, "intrinsic", "ann intrinsic call callee")
+assert.eq(intr_call.callee.name, "Keys", "ann intrinsic call name")
+assert.eq(#intr_call.args, 1, "ann intrinsic call args")
+
+-- parse match type
+local mt = annotations.parse_type('match number { number => string, string => number }')
+assert.eq(mt.tag, "match_type", "ann match type tag")
+assert.eq(mt.param.tag, "number", "ann match param")
+assert.eq(#mt.arms, 2, "ann match arms count")
+assert.eq(mt.arms[1].result.tag, "string", "ann match arm1 result")
+
+-- match evaluation
+local matcher = require("lib.type.static.match")
+local match_result = matcher.evaluate(T.match_type(T.NUMBER(), {
+  { pattern = T.NUMBER(), result = T.STRING() },
+  { pattern = T.STRING(), result = T.NUMBER() },
+}))
+assert.eq(match_result.tag, "string", "match eval number -> string")
+
+local match_result2 = matcher.evaluate(T.match_type(T.BOOLEAN(), {
+  { pattern = T.NUMBER(), result = T.STRING() },
+  { pattern = T.STRING(), result = T.NUMBER() },
+}))
+assert.eq(match_result2.tag, "never", "match eval no match -> never")
+
+-- $Keys intrinsic evaluation
+local intrinsics = require("lib.type.static.intrinsics")
+local keys_result = intrinsics.evaluate("Keys", {
+  T.table({ x = { type = T.NUMBER(), optional = false }, y = { type = T.STRING(), optional = false } }, {})
+})
+assert.eq(keys_result.tag, "union", "Keys produces union")
+assert.eq(#keys_result.types, 2, "Keys union members")
+
+-- $Keys end-to-end in checker
+local ok_keys, errs_keys = checker.check([[
+--:: Point = { x: number, y: number }
+--:: PointKey = $Keys<Point>
+]], "test.lua")
+assert.ok(ok_keys, "Keys end-to-end: " .. (errs_keys or ""))
+
+-- = intrinsic declaration
+local src_intr = '--:: EachField<T, F> = intrinsic\n'
+local map_intr = annotations.build_map(src_intr)
+assert.ok(map_intr[1], "intrinsic decl exists")
+assert.ok(map_intr[1].is_intrinsic, "intrinsic decl flag")
+
+-- match type in checker context
+local ok_match, errs_match = checker.check([[
+--:: ToString<T> = match T { number => string, string => string, boolean => string }
+]], "test.lua")
+assert.ok(ok_match, "match type decl: " .. (errs_match or ""))
+
+---------------------------------------------------------------------------
+-- Phase 8: Overloads + setmetatable
+---------------------------------------------------------------------------
+
+-- try_unify (read-only scoring)
+local score1, ok_try1 = unify.try_unify(T.NUMBER(), T.NUMBER())
+assert.ok(ok_try1, "try_unify same type")
+assert.eq(score1, 0, "try_unify exact score")
+
+local score2, ok_try2 = unify.try_unify(T.INTEGER(), T.NUMBER())
+assert.ok(ok_try2, "try_unify subtype")
+assert.eq(score2, 1, "try_unify subtype score")
+
+local _, ok_try3 = unify.try_unify(T.STRING(), T.NUMBER())
+assert.ok(not ok_try3, "try_unify mismatch")
+
+-- setmetatable merges __index fields (field access)
+local ok_mt, errs_mt = checker.check([[
+local proto = { x = 42 }
+local obj = setmetatable({}, { __index = proto })
+local result = obj.x
+]], "test.lua")
+assert.ok(ok_mt, "setmetatable __index: " .. (errs_mt or ""))
+
+-- class pattern: setmetatable + __index (just checking it doesn't crash)
+local ok_class, errs_class = checker.check([[
+local M = {}
+M.__index = M
+function M.new()
+  return setmetatable({}, M)
+end
+]], "test.lua")
+assert.ok(ok_class, "class pattern: " .. (errs_class or ""))

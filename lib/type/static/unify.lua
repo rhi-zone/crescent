@@ -80,6 +80,11 @@ function M.unify(a, b)
   a = types.resolve(a)
   b = types.resolve(b)
 
+  -- Named types should be resolved before unification.
+  -- If we still see a named type here, treat it as any (unresolved alias).
+  if a.tag == "named" then return true end
+  if b.tag == "named" then return true end
+
   -- Same reference
   if a == b then return true end
 
@@ -95,6 +100,19 @@ function M.unify(a, b)
   end
   if b.tag == "var" then
     return bind_var(b, a)
+  end
+
+  -- Nominal types: identity-based comparison
+  if a.tag == "nominal" and b.tag == "nominal" then
+    if a.identity == b.identity then return true end
+    return false, "nominal type '" .. a.name .. "' is not '" .. b.name .. "'"
+  end
+  -- Nominal on one side only: not directly assignable
+  if a.tag == "nominal" and b.tag ~= "nominal" then
+    return false, "nominal type '" .. a.name .. "' is not assignable to '" .. types.display(b) .. "'"
+  end
+  if b.tag == "nominal" and a.tag ~= "nominal" then
+    return false, "'" .. types.display(a) .. "' is not assignable to nominal type '" .. b.name .. "'"
   end
 
   -- integer <: number
@@ -236,12 +254,117 @@ function M.unify(a, b)
     return true
   end
 
+  -- Tuple types
+  if a.tag == "tuple" and b.tag == "tuple" then
+    if #a.elements ~= #b.elements then
+      return false, "tuple length mismatch: " .. #a.elements .. " vs " .. #b.elements
+    end
+    for i = 1, #a.elements do
+      local ok, err = M.unify(a.elements[i], b.elements[i])
+      if not ok then
+        return false, "tuple element " .. i .. ": " .. (err or "type mismatch")
+      end
+    end
+    return true
+  end
+
+  -- Tuple is NOT assignable to array (different semantics)
+  if a.tag == "tuple" and b.tag == "table" then
+    return false, "tuple is not assignable to table/array"
+  end
+  if a.tag == "table" and b.tag == "tuple" then
+    return false, "table/array is not assignable to tuple"
+  end
+
   -- cdata: structural comparison not implemented, use any
   if a.tag == "cdata" or b.tag == "cdata" then
     return true
   end
 
   return false, "cannot assign '" .. types.display(a) .. "' to '" .. types.display(b) .. "'"
+end
+
+-- Read-only unification: checks assignability without mutating type variables.
+-- Returns (score, ok) where score is a specificity measure (lower = more specific match).
+-- Score 0 = exact match, score N = N type variables or widenings.
+function M.try_unify(a, b)
+  a = types.resolve(a)
+  b = types.resolve(b)
+
+  -- any is bilateral but not specific
+  if a.tag == "any" or b.tag == "any" then return 100, true end
+  if a.tag == "never" then return 50, true end
+
+  -- Skip var binding (read-only)
+  if a.tag == "var" or b.tag == "var" then return 50, true end
+
+  -- Named types: pass through
+  if a.tag == "named" or b.tag == "named" then return 50, true end
+
+  -- Same primitive
+  if a.tag == b.tag and (a.tag == "nil" or a.tag == "boolean" or a.tag == "number"
+    or a.tag == "integer" or a.tag == "string") then
+    return 0, true
+  end
+
+  -- integer <: number
+  if a.tag == "integer" and b.tag == "number" then return 1, true end
+
+  -- Literal match
+  if a.tag == "literal" then
+    if b.tag == "literal" and a.kind == b.kind and a.value == b.value then return 0, true end
+    if (a.kind == "string" and b.tag == "string")
+      or (a.kind == "number" and b.tag == "number")
+      or (a.kind == "boolean" and b.tag == "boolean") then
+      return 1, true
+    end
+  end
+
+  -- Union on RHS
+  if b.tag == "union" then
+    for i = 1, #b.types do
+      local score, ok = M.try_unify(a, b.types[i])
+      if ok then return score, true end
+    end
+    return 0, false
+  end
+
+  -- Function types
+  if a.tag == "function" and b.tag == "function" then
+    local total_score = 0
+    local max_params = math.max(#a.params, #b.params)
+    for i = 1, max_params do
+      local ap = a.params[i] or types.NIL()
+      local bp = b.params[i] or types.NIL()
+      local score, ok = M.try_unify(bp, ap)
+      if not ok then return 0, false end
+      total_score = total_score + score
+    end
+    return total_score, true
+  end
+
+  -- Table types
+  if a.tag == "table" and b.tag == "table" then
+    local total_score = 0
+    for name, bf in pairs(b.fields) do
+      local af = a.fields[name]
+      if not af and not bf.optional then return 0, false end
+      if af then
+        local score, ok = M.try_unify(af.type, bf.type)
+        if not ok then return 0, false end
+        total_score = total_score + score
+      end
+    end
+    return total_score, true
+  end
+
+  -- Nominal
+  if a.tag == "nominal" and b.tag == "nominal" then
+    if a.identity == b.identity then return 0, true end
+    return 0, false
+  end
+
+  return 0, false
 end
 
 -- Convenience: check assignability without binding vars (read-only check)

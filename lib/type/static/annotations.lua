@@ -114,7 +114,7 @@ end
 --         | "{" field_list "}"             (record/dict)
 --         | "[" type "]"                   (array)
 --         | "..." type                     (vararg -- only in param context)
---         | name ("[" type_list "]")?       (named/generic)
+--         | name ("<" type_list ">")?       (named/generic)
 function Parser:parse_primary()
   self:skip_ws()
   local ch = self.src:sub(self.pos, self.pos)
@@ -154,6 +154,26 @@ function Parser:parse_primary()
     return { tag = "vararg_marker", type = t }
   end
 
+  -- $Intrinsic
+  if ch == "$" then
+    self.pos = self.pos + 1
+    local iname, iend = self:peek_word()
+    if not iname then
+      error("expected intrinsic name after '$' at position " .. self.pos)
+    end
+    self.pos = iend + 1
+    -- Intrinsic may have type args: $Keys<T>
+    if self:match_char("<") then
+      local args = { self:parse_type() }
+      while self:match_char(",") do
+        args[#args + 1] = self:parse_type()
+      end
+      self:expect_char(">")
+      return types.type_call(types.intrinsic(iname), args)
+    end
+    return types.intrinsic(iname)
+  end
+
   -- Keywords and names
   local word, word_end = self:peek_word()
   if not word then
@@ -173,17 +193,93 @@ function Parser:parse_primary()
   if word == "true" then return types.literal("boolean", true) end
   if word == "false" then return types.literal("boolean", false) end
 
-  -- Named type, possibly generic: Name[T, U]
-  if self:match_char("[") then
+  -- match type: match T { pattern => result, ... }
+  if word == "match" then
+    return self:parse_match_type()
+  end
+
+  -- Named type, possibly generic: Name<T, U>
+  if self:match_char("<") then
     local args = { self:parse_type() }
     while self:match_char(",") do
       args[#args + 1] = self:parse_type()
     end
-    self:expect_char("]")
+    self:expect_char(">")
+    -- Check for type call: Name<T>(Args) — F(Args) syntax
+    if self:match_char("(") then
+      local call_args = {}
+      if not self:match_char(")") then
+        call_args[1] = self:parse_type()
+        while self:match_char(",") do
+          call_args[#call_args + 1] = self:parse_type()
+        end
+        self:expect_char(")")
+      end
+      return types.type_call({ tag = "named", name = word, args = args }, call_args)
+    end
     return { tag = "named", name = word, args = args }
   end
 
+  -- Type call without generics: F(Args) — disambiguate from function type by absence of ->
+  if self:peek() == "(" then
+    local save = self.pos
+    self:expect_char("(")
+    if self:match_char(")") then
+      -- F() — type call with no args
+      if not self:match_str("->") then
+        return types.type_call({ tag = "named", name = word, args = {} }, {})
+      end
+      -- F() -> R — that's a function type, backtrack
+      self.pos = save
+    else
+      -- Try parsing as type call: F(T, U)
+      local first = self:parse_type()
+      if self:match_char(",") then
+        local call_args = { first }
+        repeat
+          call_args[#call_args + 1] = self:parse_type()
+        until not self:match_char(",")
+        if self:match_char(")") then
+          if not self:match_str("->") then
+            return types.type_call({ tag = "named", name = word, args = {} }, call_args)
+          end
+          -- Has -> so it's a function, backtrack
+          self.pos = save
+        else
+          self.pos = save
+        end
+      elseif self:match_char(")") then
+        if not self:match_str("->") then
+          return types.type_call({ tag = "named", name = word, args = {} }, { first })
+        end
+        -- Has -> so it's a function, backtrack
+        self.pos = save
+      else
+        self.pos = save
+      end
+    end
+  end
+
   return { tag = "named", name = word, args = {} }
+end
+
+function Parser:parse_match_type()
+  local param = self:parse_type()
+  self:expect_char("{")
+  local arms = {}
+  if not self:match_char("}") then
+    repeat
+      local pattern = self:parse_type()
+      self:skip_ws()
+      if not self:match_str("=>") then
+        error("expected '=>' in match type arm at position " .. self.pos)
+      end
+      local result = self:parse_type()
+      arms[#arms + 1] = { pattern = pattern, result = result }
+    until not self:match_char(",")
+    self:expect_char("}")
+  end
+  return types.match_type(param, arms)
 end
 
 function Parser:parse_string_literal()
@@ -214,6 +310,8 @@ function Parser:parse_table_type()
   self:expect_char("{")
   local fields = {}
   local indexers = {}
+  local positional = {}
+  local has_named = false
 
   if self:match_char("}") then
     return types.table(fields, indexers)
@@ -221,30 +319,91 @@ function Parser:parse_table_type()
 
   repeat
     self:skip_ws()
+    -- Spread: ...Type
+    if self.src:sub(self.pos, self.pos + 2) == "..." then
+      self.pos = self.pos + 3
+      local inner = self:parse_type()
+      positional[#positional + 1] = types.spread(inner)
     -- Indexer: [type]: type
-    if self:peek() == "[" then
+    elseif self:peek() == "[" then
       self.pos = self.pos + 1
       local key = self:parse_type()
       self:expect_char("]")
       self:expect_char(":")
       local value = self:parse_type()
       indexers[#indexers + 1] = { key = key, value = value }
+      has_named = true
     else
-      -- Named field: name?: type
-      local name = self:peek_word()
-      if not name then
-        error("expected field name at position " .. self.pos)
+      -- Could be "name?: type" (field) or just a type (positional/tuple element).
+      -- Disambiguate: save position, try parsing as "word" then check for ":" or "?:".
+      local save = self.pos
+      local word, word_end = self:peek_word()
+      if word then
+        -- Check if this is a field: word followed by ":" or "?:"
+        local after = word_end + 1
+        local _, ws_end = self.src:find("^%s*", after)
+        if ws_end then after = ws_end + 1 end
+        local next_ch = self.src:sub(after, after)
+        if next_ch == ":" then
+          -- Named field: name: type
+          self.pos = after + 1
+          local ty = self:parse_type()
+          fields[word] = { type = ty, optional = false }
+          has_named = true
+        elseif next_ch == "?" then
+          -- Check for "?:"
+          local after2 = after + 1
+          local _, ws2 = self.src:find("^%s*", after2)
+          if ws2 then after2 = ws2 + 1 end
+          if self.src:sub(after2, after2) == ":" then
+            -- Optional field: name?: type
+            self.pos = after2 + 1
+            local ty = self:parse_type()
+            fields[word] = { type = ty, optional = true }
+            has_named = true
+          else
+            -- Just a type starting with a word
+            self.pos = save
+            positional[#positional + 1] = self:parse_type()
+          end
+        else
+          -- Positional type element
+          self.pos = save
+          positional[#positional + 1] = self:parse_type()
+        end
+      else
+        -- Non-word type (e.g. string literal, number, parenthesized)
+        positional[#positional + 1] = self:parse_type()
       end
-      local _, ne = self.src:find("^([%a_][%w_]*)", self.pos)
-      self.pos = ne + 1
-      local optional = self:match_char("?")
-      self:expect_char(":")
-      local ty = self:parse_type()
-      fields[name] = { type = ty, optional = optional or false }
     end
   until not self:match_char(",")
 
   self:expect_char("}")
+
+  -- If we have positional elements and no named fields/indexers, it's a tuple
+  if #positional > 0 and not has_named then
+    -- Check if any element is a spread — if so, we need to merge
+    local has_spread = false
+    for i = 1, #positional do
+      if positional[i].tag == "spread" then
+        has_spread = true
+        break
+      end
+    end
+    if has_spread then
+      -- Return a table with spread markers for later expansion
+      return types.tuple(positional)
+    end
+    return types.tuple(positional)
+  end
+
+  -- Mixed positional + named: positional entries become spread overlay
+  if #positional > 0 and has_named then
+    -- Spread syntax: { ...Base, name: type } means merge base fields with overrides
+    -- For now, just return the table with fields/indexers (spreads resolved later)
+    return types.table(fields, indexers)
+  end
+
   return types.table(fields, indexers)
 end
 
@@ -577,17 +736,67 @@ function M.build_map(source)
 
   -- Parse type declarations
   for ln, text in pairs(merged_decls) do
-    -- Parse: Name[T, U] = type
-    local name, params, rest = text:match("^%s*([%a_][%w_]*)%[(.-)%]%s*=%s*(.+)%s*$")
+    -- Check for nominal type keywords: newtype/opaque
+    local nominal_kind, nominal_rest = text:match("^%s*(newtype)%s+(.+)$")
+    if not nominal_kind then
+      nominal_kind, nominal_rest = text:match("^%s*(opaque)%s+(.+)$")
+    end
+
+    local decl_text = nominal_kind and nominal_rest or text
+
+    -- Parse: Name<T, U> = type
+    local name, params, rest = decl_text:match("^%s*([%a_][%w_]*)%s*<(.-)>%s*=%s*(.+)%s*$")
     if not name then
-      name, rest = text:match("^%s*([%a_][%w_]*)%s*=%s*(.+)%s*$")
+      name, rest = decl_text:match("^%s*([%a_][%w_]*)%s*=%s*(.+)%s*$")
     end
     if name and rest then
+      -- Check for "= intrinsic" declaration
+      if rest:match("^%s*intrinsic%s*$") then
+        local parsed_params
+        if params then
+          parsed_params = {}
+          for param in params:gmatch("[^,]+") do
+            param = param:match("^%s*(.-)%s*$")
+            parsed_params[#parsed_params + 1] = { name = param }
+          end
+        end
+        map[ln] = {
+          kind = "type_decl",
+          name = name,
+          type = types.intrinsic(name),
+          params = parsed_params,
+          is_intrinsic = true,
+          nominal = nominal_kind or nil,
+        }
+        goto next_decl
+      end
       local ok, ty = pcall(M.parse_type, rest)
       if ok then
-        map[ln] = { kind = "type_decl", name = name, type = ty, params = params }
+        -- Parse params string into structured list: { { name = "T", constraint = ty? }, ... }
+        local parsed_params
+        if params then
+          parsed_params = {}
+          for param in params:gmatch("[^,]+") do
+            param = param:match("^%s*(.-)%s*$") -- trim
+            local pname, constraint_str = param:match("^([%a_][%w_]*)%s*:%s*(.+)$")
+            if pname then
+              local cok, cty = pcall(M.parse_type, constraint_str)
+              parsed_params[#parsed_params + 1] = { name = pname, constraint = cok and cty or nil }
+            else
+              parsed_params[#parsed_params + 1] = { name = param }
+            end
+          end
+        end
+        map[ln] = {
+          kind = "type_decl",
+          name = name,
+          type = ty,
+          params = parsed_params,
+          nominal = nominal_kind or nil,
+        }
       end
     end
+    ::next_decl::
   end
 
   -- Second pass: resolve signatures and eol annotations

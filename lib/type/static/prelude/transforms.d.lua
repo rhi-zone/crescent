@@ -1,0 +1,14 @@
+-- Type transforms (utility types) for the crescent type system.
+-- Loaded automatically as part of the prelude.
+-- These are simplified type aliases; full transform evaluation
+-- requires match types and $EachField intrinsics.
+
+--:: Readonly<T> = T
+--:: Partial<T> = T
+--:: Required<T> = T
+--:: Pick<T, K> = T
+--:: Omit<T, K> = T
+--:: Extract<T, U> = T
+--:: Exclude<T, U> = T
+--:: Params<F> = any
+--:: Return<F> = any

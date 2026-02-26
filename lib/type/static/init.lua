@@ -33,7 +33,38 @@ local builtins = require("lib.type.static.builtins")
 local infer = require("lib.type.static.infer")
 local errors = require("lib.type.static.errors")
 
+local annotations = require("lib.type.static.annotations")
+
 local M = {}
+
+-- Load prelude type declarations into a scope.
+local function load_prelude(scope)
+  -- Find prelude directory relative to this file
+  local info = debug.getinfo(1, "S")
+  local this_dir = info.source:match("^@(.*/)")
+  if not this_dir then this_dir = "./" end
+  -- Normalize: remove ./ prefix if present
+  this_dir = this_dir:gsub("^%./", "")
+
+  local prelude_files = {
+    this_dir .. "prelude/core.d.lua",
+    this_dir .. "prelude/transforms.d.lua",
+  }
+
+  for _, path in ipairs(prelude_files) do
+    local f = io.open(path, "r")
+    if f then
+      local source = f:read("*a")
+      f:close()
+      local ann_map = annotations.build_map(source)
+      for _, ann in pairs(ann_map) do
+        if ann.kind == "type_decl" then
+          env.bind_type(scope, ann.name, { body = ann.type, params = ann.params })
+        end
+      end
+    end
+  end
+end
 
 -- Check a Lua source string. Returns error context.
 function M.check_string(source, filename)
@@ -51,6 +82,9 @@ function M.check_string(source, filename)
 
   -- Create scope with builtins
   local scope = builtins.create_env()
+
+  -- Load prelude type aliases
+  load_prelude(scope)
 
   -- Infer
   local ctx = infer.infer_chunk(chunk, err_ctx, source, filename, scope)

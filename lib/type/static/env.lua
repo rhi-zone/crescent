@@ -44,6 +44,122 @@ function M.lookup_type(scope, name)
   return nil
 end
 
+-- Substitute named type parameters with provided type arguments.
+-- mapping: { param_name -> type }
+-- Returns a new type with all matching named references replaced.
+function M.substitute(ty, mapping)
+  if not ty then return ty end
+  local tag = ty.tag
+
+  if tag == "named" then
+    -- If the name matches a type parameter, substitute it
+    if mapping[ty.name] and #ty.args == 0 then
+      return mapping[ty.name]
+    end
+    -- Otherwise substitute within args
+    if ty.args and #ty.args > 0 then
+      local new_args = {}
+      for i = 1, #ty.args do
+        new_args[i] = M.substitute(ty.args[i], mapping)
+      end
+      return { tag = "named", name = ty.name, args = new_args }
+    end
+    return ty
+  end
+
+  if tag == "function" then
+    local params = {}
+    for i = 1, #ty.params do
+      params[i] = M.substitute(ty.params[i], mapping)
+    end
+    local returns = {}
+    for i = 1, #ty.returns do
+      returns[i] = M.substitute(ty.returns[i], mapping)
+    end
+    local vararg = ty.vararg and M.substitute(ty.vararg, mapping)
+    return types.func(params, returns, vararg)
+  end
+
+  if tag == "table" then
+    local fields = {}
+    for name, f in pairs(ty.fields) do
+      fields[name] = { type = M.substitute(f.type, mapping), optional = f.optional }
+    end
+    local indexers = {}
+    for i = 1, #ty.indexers do
+      indexers[i] = {
+        key = M.substitute(ty.indexers[i].key, mapping),
+        value = M.substitute(ty.indexers[i].value, mapping),
+      }
+    end
+    return types.table(fields, indexers, ty.row)
+  end
+
+  if tag == "union" then
+    local ts = {}
+    for i = 1, #ty.types do
+      ts[i] = M.substitute(ty.types[i], mapping)
+    end
+    return types.union(ts)
+  end
+
+  if tag == "intersection" then
+    local ts = {}
+    for i = 1, #ty.types do
+      ts[i] = M.substitute(ty.types[i], mapping)
+    end
+    return types.intersection(ts)
+  end
+
+  if tag == "tuple" then
+    local elems = {}
+    for i = 1, #ty.elements do
+      elems[i] = M.substitute(ty.elements[i], mapping)
+    end
+    return types.tuple(elems)
+  end
+
+  if tag == "spread" then
+    return types.spread(M.substitute(ty.inner, mapping))
+  end
+
+  return ty
+end
+
+-- Resolve a named type reference by looking up its alias and substituting params.
+-- alias_entry: { body = type, params = { { name = "T", constraint? }, ... } | nil }
+-- args: list of type arguments provided at the usage site
+-- Returns the resolved type, or nil + error message.
+function M.resolve_named_type(scope, name, args)
+  local alias = M.lookup_type(scope, name)
+  if not alias then
+    return nil, "undefined type '" .. name .. "'"
+  end
+
+  -- Simple alias (no params)
+  if not alias.params or #alias.params == 0 then
+    if args and #args > 0 then
+      return nil, "type '" .. name .. "' does not take type arguments"
+    end
+    return alias.body
+  end
+
+  -- Generic alias — check arity
+  if not args or #args ~= #alias.params then
+    local expected = #alias.params
+    local got = args and #args or 0
+    return nil, "type '" .. name .. "' expects " .. expected .. " type argument(s), got " .. got
+  end
+
+  -- Build substitution mapping
+  local mapping = {}
+  for i = 1, #alias.params do
+    mapping[alias.params[i].name] = args[i]
+  end
+
+  return M.substitute(alias.body, mapping)
+end
+
 -- Generalize: promote free type variables above `level` to generic vars
 function M.generalize(ty, level)
   ty = types.resolve(ty)

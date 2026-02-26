@@ -26,8 +26,23 @@
 
 ## typechecker
 - [ ] Parse LuaJIT FFI cdef blocks
-- [ ] Type inference for local bindings
-- [ ] Structural typing for tables
+- [x] Type inference for local bindings
+- [x] Structural typing for tables
+- [x] Angle-bracket generics (`Name<T, U>`) with constraint support
+- [x] Named type resolution with two-pass forward references
+- [x] Tuple types (`{ number, string }`) and spread (`{ ...Base }`)
+- [x] Flow-sensitive type narrowing (type(), nil checks, truthiness, assert)
+- [x] Module resolver + prelude system (Array, Dict, Set, Optional)
+- [x] Nominal types (newtype, opaque)
+- [x] Match types (`match T { pattern => result }`)
+- [x] Intrinsics ($Keys, $EachField, $EachUnion)
+- [x] Overload resolution (best-match scoring)
+- [x] setmetatable __index merging, __call metamethod
+- [ ] Full require() return type tracking
+- [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
+- [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
+- [ ] Private field visibility enforcement
+- [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
 
 ## infra

@@ -21,12 +21,20 @@ end
 local function main()
   local checker = require("lib.type.static")
   local files = {}
+  local target = "luajit" -- default target
 
-  if #arg > 0 then
-    for i = 1, #arg do
+  local i = 1
+  while i <= #arg do
+    if arg[i] == "--target" and arg[i + 1] then
+      target = arg[i + 1]
+      i = i + 2
+    else
       files[#files + 1] = arg[i]
+      i = i + 1
     end
-  else
+  end
+
+  if #files == 0 then
     files = glob_lua_files("lib")
   end
 
