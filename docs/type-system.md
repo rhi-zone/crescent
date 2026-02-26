@@ -37,7 +37,7 @@ Widening happens at well-defined points:
 
 The user should be able to look at any binding and know its type without running the program.
 
-### 2. Tables are structural, not nominal
+### 2. Structural by default, nominal by choice
 
 Lua tables are the only compound data structure. Two tables with the same shape are the same type:
 
@@ -46,14 +46,32 @@ Lua tables are the only compound data structure. Two tables with the same shape 
 local p = { x = 1, y = 2 }  -- p is a Point, no declaration needed
 ```
 
-This is the natural fit for Lua. Nominal typing (requiring `Point.new()`) would fight the language. Structural typing works *with* it.
+This is the natural fit for Lua. Structural typing works *with* the language. But sometimes you need identity — two types with the same shape that are deliberately incompatible. Three mechanisms, each addressing a different need:
+
+```lua
+-- opaque: structure hidden outside the defining module
+--:: opaque Connection = { fd: number, state: string }
+-- inside this module: full field access
+-- outside: it's just "Connection", no field access
+
+-- newtype: distinct type wrapping another, explicit conversion required
+--:: newtype UserId = number
+--:: newtype PostId = number
+-- UserId and PostId are incompatible despite both being number
+
+-- private fields: individual fields hidden, rest of structure visible
+--:: Session = { id: string, private socket: cdata }
+-- outside: { id: string } — socket is invisible
+```
+
+**`opaque`** is OCaml's abstract type — the module controls what the outside world sees. **`newtype`** is Haskell's — zero-cost wrapper that creates type-level identity. **`private`** is field-granularity visibility. They're orthogonal and composable.
 
 Row polymorphism keeps tables open when they need to be:
 
 ```lua
 -- This function works on any table with an `x` field:
 local function get_x(t) return t.x end
--- Inferred: [T] ({ x: T, ... }) -> T
+-- Inferred: <T> ({ x: T, ... }) -> T
 ```
 
 The `...` (row variable) means "and maybe other fields." Without it, the table is closed — extra fields are an error. This distinction matters: APIs that accept input should be open. Data definitions should be closed.
@@ -146,7 +164,25 @@ local b = ffi.C.vec2_add(a, a)     -- b: cdata<vec2_t>
 
 Single source of truth. The C header *is* the type definition. This extends to `ffi.cast`, `ffi.sizeof`, and `ffi.typeof`.
 
-### 8. Errors are precise, not noisy
+### 8. The checker is modular
+
+The typechecker is not a monolith. It's a small core — structural HM unification, scope management, AST walking — with features implemented as separate modules that register into the core's dispatch tables:
+
+- **Core**: types, environments, unification, basic inference
+- **Annotations**: parse `--:` / `--::` syntax into types
+- **Narrowing**: flow-sensitive type refinement in branches
+- **Nominal**: `opaque`, `newtype`, `private` — identity and visibility
+- **FFI**: cparser bridge, `ffi.cdef` extraction, cdata types
+- **Builtins**: stdlib type signatures
+- **Patterns**: string pattern return type analysis
+- **Coroutines**: yield/resume typing
+- **Metatypes**: `__index`, `__call`, operator metamethods
+
+Each module is a Lua file that plugs into the core. No plugin API — just good file boundaries. This is internal architecture, not user-facing configuration. All modules are always enabled. The benefit is development velocity and testability: each subsystem can be built, tested, and reasoned about independently.
+
+This is how rustc works (separate crates for borrowck, typeck, resolve) and how the checker should work too.
+
+### 9. Errors are precise, not noisy
 
 A type error should tell you exactly what went wrong, where, and why:
 
@@ -195,9 +231,26 @@ Tables are the universal compound type. A table type has:
 
 `[T]` is sugar for `{ [number]: T }`. `T?` is sugar for `T | nil`.
 
+### Tuples
+
+`{ number, string, boolean }` is a tuple — fixed length, heterogeneous, ordered. Distinct from arrays:
+
+- `t[1]` is `number`, `t[2]` is `string`, `t[3]` is `boolean`.
+- `t[4]` is an error — out of bounds.
+- `#t` is `integer` (statically known to be 3).
+- A tuple is *not* assignable to an array. `{ number, string }` is not `[number | string]`.
+- `ipairs` over a tuple yields the union of element types at each position.
+
+Tuples model Lua's multiple-return and fixed-structure patterns. They're tables with known integer keys.
+
 ### `any` and `never`
 
-`any` is the top-and-bottom type for gradual typing. `never` is the true bottom — the type of `error()` and unreachable code.
+`any` is the top-and-bottom type for gradual typing. `never` is the true bottom — the type of expressions that never produce a value:
+
+- `error("msg")` returns `never` — the call never completes normally.
+- `assert(x)` narrows `x` by eliminating nil/false; if `x` is `nil`, the `assert` branch is `never`.
+- A function that always throws has return type `never`.
+- `never` is assignable to everything (vacuously). Nothing is assignable to `never`.
 
 ## Non-Goals
 
@@ -335,13 +388,80 @@ There is no "turn off the checker for this file" escape. The closest equivalent 
 
 We start tight. We stay tight.
 
+### Generic constraints: structural, inline
+
+Constraints on type parameters use the same structural types as everything else. No trait system, no interface declarations — a constraint is just a type:
+
+```lua
+--:: <T: number | string> Comparable = (T, T) -> boolean
+--:: <T: { name: string }> Named = (T) -> string
+```
+
+`<T: C>` means "T must be assignable to C." Since crescent is structural, this works naturally — `<T: { x: number }>` means "any table with at least an `x: number` field." No need for Rust-style trait bounds or Haskell-style typeclasses. The constraint *is* the structure.
+
+Multiple constraints compose with `&`: `<T: Readable & Closeable>` means T must satisfy both.
+
+Prior art: Haskell's `HasField` typeclass is the closest analog — structural field constraints resolved automatically. But crescent doesn't need the typeclass machinery because structural typing is the default, not an opt-in extension.
+
+### Overload resolution: best match
+
+When a function has multiple signatures (union of function types), calls are resolved by **best match** — the most specific signature whose parameters are all satisfied:
+
+```lua
+--: ((number) -> string) | ((string) -> number)
+local function convert(x) ... end
+
+convert(42)      -- resolves to (number) -> string
+convert("hello") -- resolves to (string) -> number
+convert(true)    -- ERROR: no matching overload
+```
+
+Best-match avoids order-sensitivity bugs. If multiple overloads match equally, it's an error — the user must narrow the argument types. This is more predictable than first-match and gives the user more control.
+
+### Variance: inferred, with invariance explicit
+
+Variance is inferred from usage, not declared. The checker determines whether a generic parameter is used covariantly, contravariantly, or invariantly based on its positions in the type:
+
+- Return position → covariant
+- Parameter position → contravariant
+- Both → invariant
+- Mutable field → invariant
+
+Explicit variance annotations are not needed for most code. If the inferred variance is wrong, the user sees it as a type error at the use site — which is the right place to catch it.
+
+**Invariant choice types** are a distinct concept: a value that is *one of* several types but you don't know which. This is what unions (`A | B`) express. The key property is that a `[A | B]` array can *contain* both A and B values, but you can't assume any particular element is A without narrowing. This is sound — unlike TypeScript's unsound covariant arrays.
+
+### Inline privacy annotations
+
+Private fields can be annotated inline at the binding site using `--: private`:
+
+```lua
+local Session = {
+  id = generate_id(),            --: string
+  socket = connect(host, port),  --: private cdata
+}
+```
+
+This is sugar — equivalent to declaring `--:: Session = { id: string, private socket: cdata }` separately. It's there for convenience when the type declaration would be redundant with the implementation. The `--::` form in a type declaration is the canonical form; `--: private T` on a field is the inline shorthand.
+
+### String pattern types
+
+`string.match`, `string.gmatch`, and `string.gsub` return types depend on capture groups in the pattern string. This is worth modeling — it's a common source of bugs (wrong number of captures, nil from non-matching optional groups).
+
+This is implemented as a checker module, not core functionality. The module analyzes string literal patterns passed to string functions and computes return types from capture groups. Non-literal patterns fall back to `string?` returns.
+
+### Coroutine typing: effects as future work
+
+Coroutine typing is fundamentally about effects — `yield` is an effect that suspends computation and produces a value. The full design (effect types, effect handlers) is a significant extension that deserves its own design document.
+
+For now: `coroutine.wrap(f)` returns `(...) -> any`, and `coroutine.resume` returns `(boolean, any)`. This is the `any` boundary — correct but imprecise. Effect typing is future work.
+
 ## Open Questions
 
 Genuinely unresolved — will be decided through implementation experience:
 
-- **Generics type parameter constraints.** `<T: number | string>` for bounded generics — what's the constraint syntax? How do constraints interact with structural typing?
-- **Tuple types vs. array types.** Is `{ number, string, boolean }` a tuple (fixed length, heterogeneous) or sugar for something else? How do tuples interact with `ipairs` and `#`?
-- **Overload resolution.** When a function has multiple signatures (`((number) -> string) | ((string) -> number)`), how are calls resolved? First match? Best match? Error on ambiguity?
-- **Variance annotations.** Should the user be able to declare a generic parameter as covariant or contravariant? Or is inference sufficient?
-- **String pattern types.** `string.match` and `string.gmatch` return types depend on capture groups in the pattern. Is this worth modeling?
-- **Coroutine typing.** `coroutine.wrap` returns a function whose return type depends on the coroutine's yields. How to model `yield`/`resume` types?
+- **Exact tuple semantics.** How do tuples interact with `table.insert`, `table.remove`, and other stdlib functions that assume arrays? Is a tuple a subtype of a same-length array of the union of its element types?
+- **Recursive types.** `--:: List<T> = { head: T, tail: List<T> | nil }` — how does the checker handle recursive type aliases? Lazy expansion? Equi-recursive? Iso-recursive?
+- **Type-level computation.** Mapped types, conditional types, template literal types — TypeScript has these. Are any of them needed? Which ones earn their complexity?
+- **Coroutine effects.** Full effect system design for yield/resume typing. Needs its own design document.
+- **`crescent.toml` format.** What goes in the manifest? Module path overrides, external type stubs, checker options? How does it interact with the package manager (when it exists)?
