@@ -25,7 +25,22 @@
 - [ ] Formalize C header ingestion pipeline (update_wlroots.sh pattern) as reusable tooling
 
 ## typechecker
-- [ ] Parse LuaJIT FFI cdef blocks
+
+### self-hosting blockers (run clean on own codebase)
+- [ ] Widen literal types on reassignment (`local k = 1; k = k + 1` should work)
+- [ ] Multi-return unpacking (`local a, b, c = f()` should assign all three)
+- [ ] Forward-declared locals (`local f; f = 42` — use typevar, not nil)
+- [ ] Integer literal inference (hex `0x36` should be integer, not number)
+- [ ] Arithmetic on integers returns integer, not number
+- [ ] String method resolution (`s:gsub(...)` resolves via string metatable)
+- [ ] `number` assignable to `integer` parameter (safe widening direction)
+
+### output formats
+- [ ] `--format json` structured output (file, line, col, severity, message)
+- [ ] `--format sarif` for GitHub Code Scanning / CI integration
+- [ ] Column numbers in error positions (currently line-only)
+
+### done
 - [x] Type inference for local bindings
 - [x] Structural typing for tables
 - [x] Angle-bracket generics (`Name<T, U>`) with constraint support
@@ -38,12 +53,18 @@
 - [x] Intrinsics ($Keys, $EachField, $EachUnion)
 - [x] Overload resolution (best-match scoring)
 - [x] setmetatable __index merging, __call metamethod
-- [ ] Full require() return type tracking
+
+### backlog
+- [ ] Parse LuaJIT FFI cdef blocks
+- [ ] Full require() return type tracking (infer module return type)
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
 - [ ] Private field visibility enforcement
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
+- [ ] Discriminated union narrowing (`if t.kind == "literal" then ...`)
+- [ ] `pcall`/`xpcall` return type narrowing
+- [ ] Generic function inference (infer type params from call site args)
 
 ## infra
 - [ ] Bench infrastructure (pure Lua, handgrown)

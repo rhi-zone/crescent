@@ -45,9 +45,10 @@ end
 
 function M.sort(ctx)
   table.sort(ctx.errors, function(a, b)
-    if a.file ~= b.file then return a.file < b.file end
-    if a.line ~= b.line then return a.line < b.line end
-    return a.severity < b.severity
+    if a.file ~= b.file then return (a.file or "") < (b.file or "") end
+    local al, bl = a.line or 0, b.line or 0
+    if al ~= bl then return al < bl end
+    return (a.severity or "") < (b.severity or "")
   end)
 end
 
