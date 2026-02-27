@@ -115,8 +115,9 @@ function M.unify(a, b)
     return false, "'" .. types.display(a) .. "' is not assignable to nominal type '" .. b.name .. "'"
   end
 
-  -- integer <: number
+  -- integer <: number and number <: integer (Lua doesn't distinguish at runtime)
   if a.tag == "integer" and b.tag == "number" then return true end
+  if a.tag == "number" and b.tag == "integer" then return true end
 
   -- Literal <: base type
   if a.tag == "literal" then
@@ -307,8 +308,9 @@ function M.try_unify(a, b)
     return 0, true
   end
 
-  -- integer <: number
+  -- integer <: number and number <: integer
   if a.tag == "integer" and b.tag == "number" then return 1, true end
+  if a.tag == "number" and b.tag == "integer" then return 1, true end
 
   -- Literal match
   if a.tag == "literal" then

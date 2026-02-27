@@ -137,6 +137,18 @@ function M.type_call(callee, args)
   return { tag = "type_call", callee = callee, args = args }
 end
 
+-- Widen a literal type to its base type.
+-- literal("number", 42) -> NUMBER(), literal("string", "x") -> STRING(), etc.
+function M.widen(ty)
+  ty = M.resolve(ty)
+  if ty.tag == "literal" then
+    if ty.kind == "number" then return M.NUMBER() end
+    if ty.kind == "string" then return M.STRING() end
+    if ty.kind == "boolean" then return M.BOOLEAN() end
+  end
+  return ty
+end
+
 -- Resolve union-find chain for type variables
 function M.resolve(ty)
   while ty.tag == "var" and ty.bound and ty.bound.tag == "var" do

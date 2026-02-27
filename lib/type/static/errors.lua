@@ -69,4 +69,46 @@ function M.format(ctx, source_lines)
   return table.concat(out, "\n")
 end
 
+-- Escape a string for JSON output (no dependency on a JSON library)
+local function json_escape(s)
+  s = s:gsub('\\', '\\\\')
+  s = s:gsub('"', '\\"')
+  s = s:gsub('\n', '\\n')
+  s = s:gsub('\r', '\\r')
+  s = s:gsub('\t', '\\t')
+  return s
+end
+
+function M.format_json(ctx)
+  M.sort(ctx)
+  local parts = {}
+  for i = 1, #ctx.errors do
+    local e = ctx.errors[i]
+    parts[#parts + 1] = '{"file":"' .. json_escape(e.file or "") ..
+      '","line":' .. (e.line or 0) ..
+      ',"severity":"' .. json_escape(e.severity or "error") ..
+      '","message":"' .. json_escape(e.message or "") .. '"}'
+  end
+  return "[" .. table.concat(parts, ",") .. "]"
+end
+
+function M.format_sarif(ctx)
+  M.sort(ctx)
+  local results = {}
+  for i = 1, #ctx.errors do
+    local e = ctx.errors[i]
+    local level = e.severity == "warning" and "warning" or "error"
+    results[#results + 1] = '{"ruleId":"' .. json_escape(e.severity or "error") ..
+      '","level":"' .. level ..
+      '","message":{"text":"' .. json_escape(e.message or "") ..
+      '"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"' ..
+      json_escape(e.file or "") ..
+      '"},"region":{"startLine":' .. (e.line or 0) .. '}}}]}'
+  end
+  return '{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",' ..
+    '"version":"2.1.0",' ..
+    '"runs":[{"tool":{"driver":{"name":"crescent-typecheck","version":"0.1.0"}},' ..
+    '"results":[' .. table.concat(results, ",") .. ']}]}'
+end
+
 return M

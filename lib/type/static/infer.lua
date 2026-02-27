@@ -65,9 +65,9 @@ ExprRule.Literal = function(ctx, node)
   if v == false then return T.literal("boolean", false) end
   if type(v) == "number" then
     if v % 1 == 0 then
-      return T.literal("number", v)
+      return T.INTEGER()
     end
-    return T.literal("number", v)
+    return T.NUMBER()
   end
   if type(v) == "string" then
     return T.literal("string", v)
@@ -114,6 +114,17 @@ ExprRule.BinaryExpression = function(ctx, node)
       and not (right_r.tag == "literal" and right_r.kind == "number")
       and right_r.tag ~= "var" then
       report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(right) .. "'")
+    end
+    -- Division and exponentiation always produce number
+    if op == "/" or op == "^" then
+      return T.NUMBER()
+    end
+    -- For +, -, *, %: if both operands are integer-compatible, result is integer
+    local function is_int_compat(r)
+      return r.tag == "integer" or (r.tag == "literal" and r.kind == "number" and r.value % 1 == 0)
+    end
+    if is_int_compat(left_r) and is_int_compat(right_r) then
+      return T.INTEGER()
     end
     return T.NUMBER()
   end
@@ -400,6 +411,30 @@ ExprRule.SendExpression = function(ctx, node)
     end
   end
 
+  -- String method resolution: s:method(...) looks up string.method
+  if recv_ty.tag == "string" or (recv_ty.tag == "literal" and recv_ty.kind == "string") then
+    local str_ty = env.lookup(ctx.scope, "string")
+    if str_ty then
+      str_ty = T.resolve(str_ty)
+      if str_ty.tag == "table" then
+        local f = str_ty.fields[method_name]
+        if f then
+          local ft = T.resolve(f.type)
+          if ft.tag == "function" then
+            -- Method call: first param is self (string), skip it
+            local method_params = {}
+            for i = 2, #ft.params do
+              method_params[#method_params + 1] = ft.params[i]
+            end
+            check_call_args(ctx, T.func(method_params, ft.returns, ft.vararg), arg_types, node.line)
+            if #ft.returns > 0 then return ft.returns[1] end
+            return T.NIL()
+          end
+        end
+      end
+    end
+  end
+
   return T.ANY()
 end
 
@@ -587,11 +622,66 @@ function infer_expr(ctx, node)
   return T.ANY()
 end
 
--- Infer multiple expressions, returning a list of types
+-- Get the full return type list from a call/send node's resolved callee.
+-- This does NOT perform inference or argument checking — call infer_expr first.
+local function get_callee_returns(ctx, node)
+  if node.kind == "CallExpression" then
+    -- Skip require() — returns are handled specially
+    if node.callee.kind == "Identifier" and node.callee.name == "require" then
+      return nil
+    end
+    -- Re-resolve the callee type (cheap: just a lookup)
+    local callee_ty = infer_expr(ctx, node.callee)
+    callee_ty = T.resolve(callee_ty)
+    if callee_ty.tag == "function" and #callee_ty.returns > 1 then
+      return callee_ty.returns
+    end
+  elseif node.kind == "SendExpression" then
+    local recv_ty = infer_expr(ctx, node.receiver)
+    recv_ty = T.resolve(recv_ty)
+    local method_name = node.method.name
+    local ft
+    if recv_ty.tag == "table" then
+      local f = recv_ty.fields[method_name]
+      if f then ft = T.resolve(f.type) end
+    end
+    if not ft and (recv_ty.tag == "string" or (recv_ty.tag == "literal" and recv_ty.kind == "string")) then
+      local str_ty = env.lookup(ctx.scope, "string")
+      if str_ty then
+        str_ty = T.resolve(str_ty)
+        if str_ty.tag == "table" then
+          local f = str_ty.fields[method_name]
+          if f then ft = T.resolve(f.type) end
+        end
+      end
+    end
+    if ft and ft.tag == "function" and #ft.returns > 1 then
+      return ft.returns
+    end
+  end
+  return nil
+end
+
+-- Infer multiple expressions, returning a list of types.
+-- When the last expression is a call, expand its full return type list.
 local function infer_expr_list(ctx, exprs)
   local result = {}
   for i = 1, #exprs do
-    result[i] = infer_expr(ctx, exprs[i])
+    -- Always infer the expression (does full type checking)
+    local ty = infer_expr(ctx, exprs[i])
+    if i == #exprs and (exprs[i].kind == "CallExpression" or exprs[i].kind == "SendExpression") then
+      -- Last expression is a call: try to expand multi-return
+      local ret_types = get_callee_returns(ctx, exprs[i])
+      if ret_types then
+        for j = 1, #ret_types do
+          result[#result + 1] = ret_types[j]
+        end
+      else
+        result[#result + 1] = ty
+      end
+    else
+      result[i] = ty
+    end
   end
   return result
 end
@@ -635,7 +725,15 @@ StmtRule.LocalDeclaration = function(ctx, node)
       end
       env.bind(ctx.scope, name, ann_ty)
     else
-      local ty = rhs_types[i] or T.NIL()
+      local ty
+      if rhs_types[i] then
+        ty = T.widen(rhs_types[i])
+      elseif i > #node.expressions then
+        -- Forward-declared local with no RHS expression
+        ty = T.typevar(ctx.scope.level)
+      else
+        ty = T.NIL()
+      end
       env.bind(ctx.scope, name, ty)
     end
   end

@@ -22,11 +22,15 @@ local function main()
   local checker = require("lib.type.static")
   local files = {}
   local target = "luajit" -- default target
+  local format = "text"   -- text | json | sarif
 
   local i = 1
   while i <= #arg do
     if arg[i] == "--target" and arg[i + 1] then
       target = arg[i + 1]
+      i = i + 2
+    elseif arg[i] == "--format" and arg[i + 1] then
+      format = arg[i + 1]
       i = i + 2
     else
       files[#files + 1] = arg[i]
@@ -41,27 +45,36 @@ local function main()
   local total_errors = 0
   local total_warnings = 0
   local total_files = 0
+  -- For JSON/SARIF, collect all errors into a merged context
+  local merged_ctx = errors.new()
 
   for _, filename in ipairs(files) do
     local err_ctx = checker.check_file(filename)
     local n_errors = errors.count(err_ctx, "error")
     local n_warnings = errors.count(err_ctx, "warning")
 
-    if n_errors > 0 or n_warnings > 0 then
-      -- Read source lines for display
-      local source_lines = {}
-      local f = io.open(filename, "r")
-      if f then
-        local line_num = 0
-        for line in f:lines() do
-          line_num = line_num + 1
-          source_lines[line_num] = line
+    if format == "text" then
+      if n_errors > 0 or n_warnings > 0 then
+        -- Read source lines for display
+        local source_lines = {}
+        local f = io.open(filename, "r")
+        if f then
+          local line_num = 0
+          for line in f:lines() do
+            line_num = line_num + 1
+            source_lines[line_num] = line
+          end
+          f:close()
         end
-        f:close()
-      end
 
-      io.stderr:write(errors.format(err_ctx, source_lines))
-      io.stderr:write("\n")
+        io.stderr:write(errors.format(err_ctx, source_lines))
+        io.stderr:write("\n")
+      end
+    else
+      -- Merge errors for JSON/SARIF output
+      for j = 1, #err_ctx.errors do
+        merged_ctx.errors[#merged_ctx.errors + 1] = err_ctx.errors[j]
+      end
     end
 
     total_errors = total_errors + n_errors
@@ -69,7 +82,16 @@ local function main()
     total_files = total_files + 1
   end
 
-  -- Summary
+  -- Output structured formats to stdout
+  if format == "json" then
+    io.write(errors.format_json(merged_ctx))
+    io.write("\n")
+  elseif format == "sarif" then
+    io.write(errors.format_sarif(merged_ctx))
+    io.write("\n")
+  end
+
+  -- Summary (always to stderr)
   io.stderr:write(string.format("\nChecked %d file(s): %d error(s), %d warning(s)\n",
     total_files, total_errors, total_warnings))
 

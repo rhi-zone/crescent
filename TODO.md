@@ -27,17 +27,19 @@
 ## typechecker
 
 ### self-hosting blockers (run clean on own codebase)
-- [ ] Widen literal types on reassignment (`local k = 1; k = k + 1` should work)
-- [ ] Multi-return unpacking (`local a, b, c = f()` should assign all three)
-- [ ] Forward-declared locals (`local f; f = 42` — use typevar, not nil)
-- [ ] Integer literal inference (hex `0x36` should be integer, not number)
-- [ ] Arithmetic on integers returns integer, not number
-- [ ] String method resolution (`s:gsub(...)` resolves via string metatable)
-- [ ] `number` assignable to `integer` parameter (safe widening direction)
+- [x] Widen literal types on reassignment (`local k = 1; k = k + 1` should work)
+- [x] Multi-return unpacking (`local a, b, c = f()` should assign all three)
+- [x] Forward-declared locals (`local f; f = 42` — use typevar, not nil)
+- [x] Integer literal inference (hex `0x36` should be integer, not number)
+- [x] Arithmetic on integers returns integer, not number
+- [x] String method resolution (`s:gsub(...)` resolves via string metatable)
+- [x] `number` assignable to `integer` parameter (safe widening direction)
+- [ ] Union-typed concatenation operands (`x and "y" or "z"` produces union, concat rejects)
+- [ ] Reassignment of literal-typed bindings (`ret = "()"` then `ret = "..."`)
 
 ### output formats
-- [ ] `--format json` structured output (file, line, col, severity, message)
-- [ ] `--format sarif` for GitHub Code Scanning / CI integration
+- [x] `--format json` structured output (file, line, severity, message)
+- [x] `--format sarif` for GitHub Code Scanning / CI integration
 - [ ] Column numbers in error positions (currently line-only)
 
 ### done
