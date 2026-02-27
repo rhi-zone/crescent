@@ -39,7 +39,8 @@
 - [x] Forward references in `local M = {}` / `function M.foo()` pattern (prescan)
 - [x] Dict-style computed access `t[key]` checks string-keyed fields (literal and general)
 - [x] Empty table `{}` assignable to array-typed parameter (absorbs indexers in unify)
-- [ ] `x = x or default` pattern (`mapping = mapping or {}` fails on param typevar)
+- [x] `x = x or default` pattern — strip self-ref var from union in bind_var
+- [x] Cross-call-site typevar mutation — generalize params + FunctionDeclaration writes raw table
 
 ### output formats
 - [x] `--format json` structured output (file, line, severity, message)

@@ -67,6 +67,25 @@ end
 -- Bind a type variable to a type
 local function bind_var(v, ty)
   if occurs(v, ty) then
+    -- Special case: `x = x or default` produces union containing v itself.
+    -- Strip v out of the union and bind to the remainder.
+    if ty.tag == "union" then
+      local filtered = {}
+      for i = 1, #ty.types do
+        local t = types.resolve(ty.types[i])
+        if not (t.tag == "var" and t.id == v.id) then
+          filtered[#filtered + 1] = ty.types[i]
+        end
+      end
+      if #filtered < #ty.types then
+        local new_ty = #filtered == 1 and filtered[1] or types.union(filtered)
+        if not occurs(v, new_ty) then
+          adjust_levels(new_ty, v.level)
+          v.bound = new_ty
+          return true
+        end
+      end
+    end
     return false, "recursive type"
   end
   adjust_levels(ty, v.level)

@@ -337,11 +337,12 @@ ExprRule.CallExpression = function(ctx, node)
   if callee_ty.tag == "any" then return T.ANY() end
 
   if callee_ty.tag == "function" then
-    -- Check argument types
-    check_call_args(ctx, callee_ty, arg_types, node.line)
-    -- Return first return type
-    if #callee_ty.returns > 0 then
-      return callee_ty.returns[1]
+    -- Instantiate: freshen generic param typevars so each call site is
+    -- independent (prevents mutation of the function's canonical type).
+    local inst_fn = env.instantiate(callee_ty, ctx.scope.level)
+    check_call_args(ctx, inst_fn, arg_types, node.line)
+    if #inst_fn.returns > 0 then
+      return inst_fn.returns[1]
     end
     return T.NIL()
   end
@@ -559,6 +560,39 @@ end
 -- Helpers
 ---------------------------------------------------------------------------
 
+-- Generalize: mark unbound typevars at `level` as generic so they are
+-- freshened at each call site via env.instantiate.
+local function generalize_type(ty, level, seen)
+  ty = T.resolve(ty)
+  if not ty or (seen and seen[ty]) then return end
+  seen = seen or {}
+  seen[ty] = true
+  if ty.tag == "var" then
+    if ty.level == level and not ty.bound then
+      ty.generic = true
+    end
+    return
+  end
+  if ty.tag == "function" then
+    for i = 1, #ty.params do generalize_type(ty.params[i], level, seen) end
+    for i = 1, #ty.returns do generalize_type(ty.returns[i], level, seen) end
+    if ty.vararg then generalize_type(ty.vararg, level, seen) end
+    return
+  end
+  if ty.tag == "table" then
+    for _, f in pairs(ty.fields) do generalize_type(f.type, level, seen) end
+    for i = 1, #ty.indexers do
+      generalize_type(ty.indexers[i].key, level, seen)
+      generalize_type(ty.indexers[i].value, level, seen)
+    end
+    return
+  end
+  if ty.tag == "union" or ty.tag == "intersection" then
+    for i = 1, #ty.types do generalize_type(ty.types[i], level, seen) end
+    return
+  end
+end
+
 function check_call_args(ctx, fn_ty, arg_types, line)
   for i = 1, #fn_ty.params do
     local expected = fn_ty.params[i]
@@ -671,7 +705,11 @@ function infer_function(ctx, params, body, has_vararg, line)
     vararg_ty = (ann_fn and ann_fn.vararg) or T.ANY()
   end
 
-  return T.func(param_types, return_types, vararg_ty)
+  local fn_type = T.func(param_types, return_types, vararg_ty)
+  -- Generalize: free vars at child scope level become generic so each call
+  -- site gets fresh instances (prevents cross-call-site typevar mutation).
+  generalize_type(fn_type, child_scope.level)
+  return fn_type
 end
 
 ---------------------------------------------------------------------------
@@ -905,8 +943,15 @@ StmtRule.AssignmentExpression = function(ctx, node)
       end
     elseif lhs.kind == "MemberExpression" then
       -- obj.field = val or obj[key] = val
-      local obj_ty = infer_expr(ctx, lhs.object)
-      obj_ty = T.resolve(obj_ty)
+      -- Bypass env.instantiate for write: look up raw table to mutate directly.
+      local obj_ty
+      if lhs.object.kind == "Identifier" then
+        obj_ty = env.lookup(ctx.scope, lhs.object.name)
+        obj_ty = T.resolve(obj_ty)
+      else
+        obj_ty = infer_expr(ctx, lhs.object)
+        obj_ty = T.resolve(obj_ty)
+      end
 
       if not lhs.computed and obj_ty.tag == "table" then
         local name = lhs.property.name
@@ -955,9 +1000,17 @@ StmtRule.FunctionDeclaration = function(ctx, node)
     env.bind(ctx.scope, id.name, fn_ty)
   elseif id.kind == "MemberExpression" and not id.computed then
     -- mod.func = ...
-    local obj_ty = infer_expr(ctx, id.object)
-    obj_ty = T.resolve(obj_ty)
-    if obj_ty.tag == "table" then
+    -- Bypass env.instantiate for write: look up the raw table to mutate it
+    -- directly (env.instantiate returns a fresh copy, so writes would be lost).
+    local obj_ty
+    if id.object.kind == "Identifier" then
+      obj_ty = env.lookup(ctx.scope, id.object.name)
+      obj_ty = T.resolve(obj_ty)
+    else
+      obj_ty = infer_expr(ctx, id.object)
+      obj_ty = T.resolve(obj_ty)
+    end
+    if obj_ty and obj_ty.tag == "table" then
       obj_ty.fields[id.property.name] = { type = fn_ty, optional = false }
     end
   end
