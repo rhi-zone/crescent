@@ -505,8 +505,26 @@ ExprRule.MemberExpression = function(ctx, node)
         local ok = unify.unify(key_ty, idx.key)
         if ok then return idx.value end
       end
+      -- Dict-style access: t[key] where t has named fields
+      local key_r = T.resolve(key_ty)
+      if key_r.tag == "literal" and key_r.kind == "string" then
+        -- Literal string key: look up the specific field
+        local f = obj_ty.fields[key_r.value]
+        if f then return f.type end
+      elseif key_r.tag == "string" or key_r.tag == "any" then
+        -- General string key: return union of all field value types
+        local field_types = {}
+        for _, f in pairs(obj_ty.fields) do
+          field_types[#field_types + 1] = f.type
+        end
+        if #field_types > 0 then
+          return T.union(field_types)
+        end
+      end
     end
-    if obj_ty.tag ~= "any" and obj_ty.tag ~= "var" then
+    if obj_ty.tag == "table" and not next(obj_ty.fields) and #obj_ty.indexers == 0 then
+      -- Empty table — treat as open container, no error
+    elseif obj_ty.tag ~= "any" and obj_ty.tag ~= "var" then
       report(ctx, node.line, "no matching indexer for key '" .. T.display(key_ty) .. "' on type '" .. T.display(obj_ty) .. "'")
     end
     return T.ANY()

@@ -245,10 +245,16 @@ function M.unify(a, b)
           break
         end
       end
-      if not matched and bi.key.tag ~= "string" then
-        -- Row var could absorb this
-        if not a.row then
-          return false, "missing indexer for " .. types.display(bi.key)
+      if not matched then
+        -- Empty table absorbs indexers (structural subtyping: {} is a valid empty array/dict)
+        if not next(a.fields) and #a.indexers == 0 then
+          a.indexers[#a.indexers + 1] = { key = bi.key, value = bi.value }
+          matched = true
+        elseif bi.key.tag ~= "string" then
+          -- Row var could absorb this
+          if not a.row then
+            return false, "missing indexer for " .. types.display(bi.key)
+          end
         end
       end
     end

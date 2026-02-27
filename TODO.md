@@ -37,8 +37,9 @@
 - [x] Union-typed operands (`x and "y" or "z"` produces union — concat/arithmetic now accept)
 - [x] Reassignment of literal-typed bindings (`ret = "()"` then `ret = "..."` — fixed by T.widen)
 - [x] Forward references in `local M = {}` / `function M.foo()` pattern (prescan)
-- [ ] Dict-style computed access `t[key]` should check string-keyed fields, not just indexers
-- [ ] Empty table `{}` not assignable to array-typed parameter (structural subtyping gap)
+- [x] Dict-style computed access `t[key]` checks string-keyed fields (literal and general)
+- [x] Empty table `{}` assignable to array-typed parameter (absorbs indexers in unify)
+- [ ] `x = x or default` pattern (`mapping = mapping or {}` fails on param typevar)
 
 ### output formats
 - [x] `--format json` structured output (file, line, severity, message)
