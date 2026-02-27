@@ -89,7 +89,7 @@ function M.check_string(source, filename)
   -- Infer
   local ctx = infer.infer_chunk(chunk, err_ctx, source, filename, scope)
 
-  return err_ctx
+  return err_ctx, ctx
 end
 
 -- Check a Lua file. Returns error context.
@@ -102,7 +102,8 @@ function M.check_file(filename)
   end
   local source = f:read("*a")
   f:close()
-  return M.check_string(source, filename)
+  local err_ctx, ctx = M.check_string(source, filename)
+  return err_ctx, ctx
 end
 
 -- Convenience: check and return formatted errors string

@@ -24,6 +24,7 @@ local function new_ctx(err_ctx, source, filename, ann_map, scope)
     scope = scope,
     return_types = {},    -- stack of return type collectors
     module_types = {},    -- cache: module path -> type
+    inferred_anns = {},   -- { line, text } entries for --annotate
   }
 end
 
@@ -72,6 +73,7 @@ ExprRule.Literal = function(ctx, node)
   if type(v) == "string" then
     return T.literal("string", v)
   end
+  report(ctx, node.line, "unknown literal type '" .. type(v) .. "'")
   return T.ANY()
 end
 
@@ -80,13 +82,15 @@ ExprRule.Identifier = function(ctx, node)
   if ty then
     return env.instantiate(ty, ctx.scope.level)
   end
-  -- Unknown identifier — gradual typing: return any
+  -- Unknown identifier
+  report(ctx, node.line, "unknown identifier '" .. node.name .. "'")
   return T.ANY()
 end
 
 ExprRule.Vararg = function(ctx, node)
   local ty = env.lookup(ctx.scope, "...")
   if ty then return ty end
+  report(ctx, node.line, "'...' used outside a vararg function")
   return T.ANY()
 end
 
@@ -137,6 +141,7 @@ ExprRule.BinaryExpression = function(ctx, node)
     return T.BOOLEAN()
   end
 
+  report(ctx, node.line, "unknown binary operator '" .. op .. "'")
   return T.ANY()
 end
 
@@ -150,6 +155,7 @@ ExprRule.LogicalExpression = function(ctx, node)
   if node.operator == "or" then
     return T.union({ left, right })
   end
+  report(ctx, node.line, "unknown logical operator '" .. node.operator .. "'")
   return T.ANY()
 end
 
@@ -164,6 +170,7 @@ ExprRule.UnaryExpression = function(ctx, node)
   if node.operator == "#" then
     return T.INTEGER()
   end
+  report(ctx, node.line, "unknown unary operator '" .. node.operator .. "'")
   return T.ANY()
 end
 
@@ -245,6 +252,7 @@ ExprRule.CallExpression = function(ctx, node)
       local mod_ty = resolve_require(ctx, mod_path)
       if mod_ty then return mod_ty end
     end
+    report(ctx, node.line, "cannot resolve require() with non-literal argument")
     return T.ANY()
   end
 
@@ -261,6 +269,7 @@ ExprRule.CallExpression = function(ctx, node)
       end
     end
     if #arg_types >= 1 then return arg_types[1] end
+    report(ctx, node.line, "assert() called with no arguments")
     return T.ANY()
   end
 
@@ -295,6 +304,7 @@ ExprRule.CallExpression = function(ctx, node)
       return arg_types[1]
     end
     if #arg_types >= 1 then return arg_types[1] end
+    report(ctx, node.line, "setmetatable() called with no arguments")
     return T.ANY()
   end
 
@@ -380,6 +390,7 @@ ExprRule.CallExpression = function(ctx, node)
     return ret_var
   end
 
+  report(ctx, node.line, "cannot call type '" .. T.display(callee_ty) .. "'")
   return T.ANY()
 end
 
@@ -435,6 +446,10 @@ ExprRule.SendExpression = function(ctx, node)
     end
   end
 
+  -- Report on concrete types (not any/var which legitimately fall through)
+  if recv_ty.tag ~= "any" and recv_ty.tag ~= "var" then
+    report(ctx, node.line, "no method '" .. method_name .. "' on type '" .. T.display(recv_ty) .. "'")
+  end
   return T.ANY()
 end
 
@@ -456,6 +471,7 @@ ExprRule.MemberExpression = function(ctx, node)
         report(ctx, node.line, "tuple index " .. idx .. " out of range (tuple has " .. #obj_ty.elements .. " elements)")
         return T.NEVER()
       end
+      report(ctx, node.line, "tuple indexed with non-literal key '" .. T.display(key_ty) .. "'")
       return T.ANY()
     end
     if obj_ty.tag == "table" then
@@ -465,6 +481,9 @@ ExprRule.MemberExpression = function(ctx, node)
         local ok = unify.unify(key_ty, idx.key)
         if ok then return idx.value end
       end
+    end
+    if obj_ty.tag ~= "any" and obj_ty.tag ~= "var" then
+      report(ctx, node.line, "no matching indexer for key '" .. T.display(key_ty) .. "' on type '" .. T.display(obj_ty) .. "'")
     end
     return T.ANY()
   else
@@ -489,6 +508,7 @@ ExprRule.MemberExpression = function(ctx, node)
       unify.unify(obj_ty, tbl)
       return field_var
     end
+    report(ctx, node.line, "no field '" .. name .. "' on type '" .. T.display(obj_ty) .. "'")
     return T.ANY()
   end
 end
@@ -542,13 +562,14 @@ function resolve_require(ctx, mod_path)
 
   -- Typecheck the module
   local checker = require("lib.type.static")
-  local err_ctx = checker.check_string(source, target)
+  local err_ctx, mod_ctx = checker.check_string(source, target)
 
   ctx.resolving[mod_path] = nil
 
-  -- For now, return any — full module return type tracking is Phase 5+
-  ctx.module_types[mod_path] = T.ANY()
-  return T.ANY()
+  -- Extract module return type from the checked module's context
+  local mod_ty = (mod_ctx and mod_ctx.module_return) or T.ANY()
+  ctx.module_types[mod_path] = mod_ty
+  return mod_ty
 end
 
 function infer_function(ctx, params, body, has_vararg, line)
@@ -619,6 +640,7 @@ function infer_expr(ctx, node)
   if not node then return T.NIL() end
   local rule = ExprRule[node.kind]
   if rule then return rule(ctx, node) end
+  report(ctx, node.line or 0, "unhandled expression kind '" .. tostring(node.kind) .. "'")
   return T.ANY()
 end
 
@@ -735,6 +757,10 @@ StmtRule.LocalDeclaration = function(ctx, node)
         ty = T.NIL()
       end
       env.bind(ctx.scope, name, ty)
+      -- Record inferred annotation (deferred: resolve typevars at end)
+      ctx.inferred_anns[#ctx.inferred_anns + 1] = {
+        line = line, kind = "type", name = name, type_fn = function() return env.lookup(ctx.scope, name) end,
+      }
     end
   end
 end
@@ -785,13 +811,24 @@ StmtRule.FunctionDeclaration = function(ctx, node)
   -- Check for preceding annotation
   local line = node.firstline or node.line
   local ann = ctx.ann_map[line]
-  if ann and ann.kind == "type_annotation" and ann.type then
+  local has_ann = ann and ann.kind == "type_annotation" and ann.type
+  if has_ann then
     local resolved = resolve_annotation_type(ctx, ann.type)
     if resolved and resolved.tag == "function" then
       fn_ty = resolved
     end
     -- Still infer the body for error checking but use annotated type
     -- (already done above via infer_function which checks ann_map)
+  end
+
+  -- Record inferred function annotation (params + return) when no explicit annotation
+  if not has_ann then
+    local resolved_fn = T.resolve(fn_ty)
+    if resolved_fn.tag == "function" then
+      ctx.inferred_anns[#ctx.inferred_anns + 1] = {
+        line = line, kind = "function", params = node.params, fn_type = resolved_fn,
+      }
+    end
   end
 
   local id = node.id
@@ -1172,15 +1209,32 @@ end
 ---------------------------------------------------------------------------
 
 function M.infer_chunk(ast_chunk, err_ctx, source, filename, scope, module_types)
+  -- Create a child scope so file-level bindings are separate from builtins
+  local file_scope = env.child(scope)
   local ann_map = annotations.build_map(source)
-  local ctx = new_ctx(err_ctx, source, filename, ann_map, scope)
+  local ctx = new_ctx(err_ctx, source, filename, ann_map, file_scope)
   ctx.module_types = module_types or {}
 
   -- Process type declarations first
   process_type_decls(ctx, ann_map)
 
-  -- Infer the chunk
+  -- Collect chunk-level returns for module return type
+  push_return_collector(ctx)
   infer_block(ctx, ast_chunk.body)
+  local collected = pop_return_collector(ctx)
+
+  -- Compute module return type from collected returns
+  if #collected > 0 then
+    -- Use first return's first type (module return value)
+    local first_ret = collected[1]
+    if first_ret and #first_ret > 0 then
+      ctx.module_return = first_ret[1]
+    else
+      ctx.module_return = T.NIL()
+    end
+  else
+    ctx.module_return = T.NIL()
+  end
 
   return ctx
 end

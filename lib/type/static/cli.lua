@@ -20,9 +20,12 @@ end
 
 local function main()
   local checker = require("lib.type.static")
+  local types = require("lib.type.static.types")
   local files = {}
   local target = "luajit" -- default target
   local format = "text"   -- text | json | sarif
+  local dump = false
+  local annotate = false
 
   local i = 1
   while i <= #arg do
@@ -32,6 +35,12 @@ local function main()
     elseif arg[i] == "--format" and arg[i + 1] then
       format = arg[i + 1]
       i = i + 2
+    elseif arg[i] == "--dump" then
+      dump = true
+      i = i + 1
+    elseif arg[i] == "--annotate" then
+      annotate = true
+      i = i + 1
     else
       files[#files + 1] = arg[i]
       i = i + 1
@@ -40,6 +49,117 @@ local function main()
 
   if #files == 0 then
     files = glob_lua_files("lib")
+  end
+
+  -- --dump mode: print inferred types for each file
+  if dump then
+    for _, filename in ipairs(files) do
+      local err_ctx, ctx = checker.check_file(filename)
+      if ctx and ctx.scope then
+        -- Walk the file's own scope bindings (not parent/builtins)
+        local names = {}
+        for name in pairs(ctx.scope.bindings) do
+          names[#names + 1] = name
+        end
+        table.sort(names)
+        for _, name in ipairs(names) do
+          io.write(name .. ": " .. types.display(ctx.scope.bindings[name]) .. "\n")
+        end
+      end
+      -- Show module return type
+      if ctx and ctx.module_return then
+        io.write("(return): " .. types.display(ctx.module_return) .. "\n")
+      end
+    end
+    return
+  end
+
+  -- --annotate mode: emit source with inferred type annotations
+  if annotate then
+    for _, filename in ipairs(files) do
+      local err_ctx, ctx = checker.check_file(filename)
+      if not ctx then
+        io.stderr:write(filename .. ": failed to check\n")
+      else
+        -- Read source lines
+        local source_lines = {}
+        local f = io.open(filename, "r")
+        if f then
+          for line in f:lines() do
+            source_lines[#source_lines + 1] = line
+          end
+          f:close()
+        end
+
+        -- Build insertion map: line -> list of annotation strings to insert before it
+        local insertions = {} -- line -> { text, ... }
+        for _, ann in ipairs(ctx.inferred_anns) do
+          local line = ann.line
+          if line and line > 0 then
+            if ann.kind == "type" then
+              local ty = ann.type_fn()
+              if ty then
+                local resolved = types.resolve(ty)
+                -- Skip trivial/obvious types
+                local trivial = resolved.tag == "any" or resolved.tag == "var"
+                  or resolved.tag == "nil"
+                  or (resolved.tag == "table" and not next(resolved.fields) and #resolved.indexers == 0)
+                if not trivial then
+                  if not insertions[line] then insertions[line] = {} end
+                  local ins = insertions[line]
+                  ins[#ins + 1] = "--: " .. types.display(ty)
+                end
+              end
+            elseif ann.kind == "function" then
+              local ft = ann.fn_type
+              -- Build function signature: --: (params) -> returns
+              local param_parts = {}
+              local all_trivial = true
+              for j = 1, #ft.params do
+                local p_ty = ft.params[j]
+                local resolved = types.resolve(p_ty)
+                if resolved.tag ~= "any" and resolved.tag ~= "var" then
+                  all_trivial = false
+                end
+                param_parts[j] = types.display(p_ty)
+              end
+              local ret_parts = {}
+              for j = 1, #ft.returns do
+                local r_ty = ft.returns[j]
+                local resolved = types.resolve(r_ty)
+                if resolved.tag ~= "any" and resolved.tag ~= "var" then
+                  all_trivial = false
+                end
+                ret_parts[j] = types.display(r_ty)
+              end
+              -- Skip if everything is any/var (no useful info)
+              if not all_trivial then
+                if not insertions[line] then insertions[line] = {} end
+                local ins = insertions[line]
+                local sig = "(" .. table.concat(param_parts, ", ") .. ")"
+                if #ret_parts > 0 then
+                  sig = sig .. " -> " .. table.concat(ret_parts, ", ")
+                end
+                ins[#ins + 1] = "--: " .. sig
+              end
+            end
+          end
+        end
+
+        -- Emit source with insertions
+        for line_num, line_text in ipairs(source_lines) do
+          if insertions[line_num] then
+            -- Match indentation of the source line
+            local indent = line_text:match("^(%s*)")
+            for _, ann_text in ipairs(insertions[line_num]) do
+              io.write(indent .. ann_text .. "\n")
+            end
+          end
+          io.write(line_text .. "\n")
+        end
+      end
+    end
+    return
   end
 
   local total_errors = 0
