@@ -108,17 +108,26 @@ ExprRule.BinaryExpression = function(ctx, node)
   if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "^" then
     local left_r = T.resolve(left)
     local right_r = T.resolve(right)
-    -- Check operands are numeric
-    if left_r.tag ~= "any" and left_r.tag ~= "number" and left_r.tag ~= "integer"
-      and not (left_r.tag == "literal" and left_r.kind == "number")
-      and left_r.tag ~= "var" then
-      report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(left) .. "'")
+    -- Check operands are numeric (unions allowed if all members are numeric/nil)
+    local function is_numeric(r)
+      return r.tag == "any" or r.tag == "number" or r.tag == "integer"
+        or (r.tag == "literal" and r.kind == "number")
+        or r.tag == "var" or r.tag == "nil"
     end
-    if right_r.tag ~= "any" and right_r.tag ~= "number" and right_r.tag ~= "integer"
-      and not (right_r.tag == "literal" and right_r.kind == "number")
-      and right_r.tag ~= "var" then
-      report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(right) .. "'")
+    local function check_numeric(r, display_ty)
+      if r.tag == "union" then
+        for i = 1, #r.types do
+          if not is_numeric(T.resolve(r.types[i])) then
+            report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(display_ty) .. "'")
+            return
+          end
+        end
+      elseif not is_numeric(r) then
+        report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(display_ty) .. "'")
+      end
     end
+    check_numeric(left_r, left)
+    check_numeric(right_r, right)
     -- Division and exponentiation always produce number
     if op == "/" or op == "^" then
       return T.NUMBER()
@@ -174,13 +183,28 @@ ExprRule.UnaryExpression = function(ctx, node)
   return T.ANY()
 end
 
+local function is_concat_compatible(r)
+  return r.tag == "any" or r.tag == "string" or r.tag == "number" or r.tag == "integer"
+    or (r.tag == "literal" and (r.kind == "string" or r.kind == "number"))
+    or r.tag == "var" or r.tag == "nil"
+end
+
 ExprRule.ConcatenateExpression = function(ctx, node)
   for _, term in ipairs(node.terms) do
     local ty = infer_expr(ctx, term)
     local r = T.resolve(ty)
-    if r.tag ~= "any" and r.tag ~= "string" and r.tag ~= "number" and r.tag ~= "integer"
-      and not (r.tag == "literal" and (r.kind == "string" or r.kind == "number"))
-      and r.tag ~= "var" then
+    local ok = true
+    if r.tag == "union" then
+      for i = 1, #r.types do
+        if not is_concat_compatible(T.resolve(r.types[i])) then
+          ok = false
+          break
+        end
+      end
+    else
+      ok = is_concat_compatible(r)
+    end
+    if not ok then
       report(ctx, node.line, "cannot concatenate '" .. T.display(ty) .. "'")
     end
   end

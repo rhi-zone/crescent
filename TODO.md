@@ -34,8 +34,8 @@
 - [x] Arithmetic on integers returns integer, not number
 - [x] String method resolution (`s:gsub(...)` resolves via string metatable)
 - [x] `number` assignable to `integer` parameter (safe widening direction)
-- [ ] Union-typed concatenation operands (`x and "y" or "z"` produces union, concat rejects)
-- [ ] Reassignment of literal-typed bindings (`ret = "()"` then `ret = "..."`)
+- [x] Union-typed operands (`x and "y" or "z"` produces union — concat/arithmetic now accept)
+- [x] Reassignment of literal-typed bindings (`ret = "()"` then `ret = "..."` — fixed by T.widen)
 
 ### output formats
 - [x] `--format json` structured output (file, line, severity, message)
@@ -43,6 +43,10 @@
 - [ ] Column numbers in error positions (currently line-only)
 
 ### done
+- [x] Full require() return type tracking (infer module return type)
+- [x] Implicit any error reporting (every ANY fallback site)
+- [x] `--dump` CLI mode (print inferred bindings)
+- [x] `--annotate` CLI mode (emit source with --: annotations)
 - [x] Type inference for local bindings
 - [x] Structural typing for tables
 - [x] Angle-bracket generics (`Name<T, U>`) with constraint support
@@ -57,16 +61,15 @@
 - [x] setmetatable __index merging, __call metamethod
 
 ### backlog
+- [ ] Discriminated union narrowing (`if t.kind == "literal" then ...`)
+- [ ] Generic function inference (infer type params from call site args)
 - [ ] Parse LuaJIT FFI cdef blocks
-- [ ] Full require() return type tracking (infer module return type)
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
+- [ ] `pcall`/`xpcall` return type narrowing
 - [ ] Private field visibility enforcement
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
-- [ ] Discriminated union narrowing (`if t.kind == "literal" then ...`)
-- [ ] `pcall`/`xpcall` return type narrowing
-- [ ] Generic function inference (infer type params from call site args)
 
 ## infra
 - [ ] Bench infrastructure (pure Lua, handgrown)
