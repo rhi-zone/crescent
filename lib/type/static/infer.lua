@@ -743,11 +743,67 @@ function infer_stmt(ctx, node)
   end
 end
 
+-- Pre-scan a block for `function T.field(...)` and `T.field = ...` patterns.
+-- Collects field names per local table so they can be pre-populated as typevar
+-- placeholders when the local declaration creates the table.
+local function prescan_member_fields(ctx, stmts)
+  -- Identify which locals are tables (local M = {})
+  local table_locals = {} -- name -> true
+  for i = 1, #stmts do
+    local node = stmts[i]
+    if node.kind == "LocalDeclaration" then
+      for j = 1, #node.names do
+        local expr = node.expressions[j]
+        if expr and expr.kind == "Table" then
+          table_locals[node.names[j].name] = true
+        end
+      end
+    end
+  end
+
+  -- Collect field names assigned to those tables
+  local pending = {} -- name -> { field_name -> true }
+  for i = 1, #stmts do
+    local node = stmts[i]
+    local obj_name, field_name
+
+    if node.kind == "FunctionDeclaration" then
+      local id = node.id
+      if id.kind == "MemberExpression" and not id.computed
+        and id.object.kind == "Identifier" then
+        obj_name = id.object.name
+        field_name = id.property.name
+      end
+    elseif node.kind == "AssignmentExpression" then
+      for j = 1, #node.left do
+        local lhs = node.left[j]
+        if lhs.kind == "MemberExpression" and not lhs.computed
+          and lhs.object.kind == "Identifier" then
+          obj_name = lhs.object.name
+          field_name = lhs.property.name
+        end
+      end
+    end
+
+    if obj_name and field_name and table_locals[obj_name]
+      and field_name:sub(1, 2) ~= "__" then
+      if not pending[obj_name] then pending[obj_name] = {} end
+      pending[obj_name][field_name] = true
+    end
+  end
+
+  return pending
+end
+
 function infer_block(ctx, stmts)
   if not stmts then return end
+  local pending = prescan_member_fields(ctx, stmts)
+  local saved_pending = ctx.pending_fields
+  ctx.pending_fields = pending
   for i = 1, #stmts do
     infer_stmt(ctx, stmts[i])
   end
+  ctx.pending_fields = saved_pending
 end
 
 StmtRule.LocalDeclaration = function(ctx, node)
@@ -781,6 +837,16 @@ StmtRule.LocalDeclaration = function(ctx, node)
         ty = T.NIL()
       end
       env.bind(ctx.scope, name, ty)
+      -- Pre-populate pending member fields from prescan
+      local resolved_ty = T.resolve(ty)
+      if resolved_ty.tag == "table" and ctx.pending_fields and ctx.pending_fields[name] then
+        for field_name in pairs(ctx.pending_fields[name]) do
+          if not resolved_ty.fields[field_name] then
+            resolved_ty.fields[field_name] = { type = T.typevar(ctx.scope.level), optional = false }
+          end
+        end
+        ctx.pending_fields[name] = nil
+      end
       -- Record inferred annotation (deferred: resolve typevars at end)
       ctx.inferred_anns[#ctx.inferred_anns + 1] = {
         line = line, kind = "type", name = name, type_fn = function() return env.lookup(ctx.scope, name) end,
@@ -801,8 +867,19 @@ StmtRule.AssignmentExpression = function(ctx, node)
       if existing then
         local ok, err = unify.unify(rhs_ty, existing)
         if not ok then
-          report(ctx, node.line, "type mismatch: cannot assign '" .. T.display(rhs_ty)
-            .. "' to '" .. T.display(existing) .. "'")
+          -- Try widening: if existing is a literal, widen to base type and retry
+          local resolved = T.resolve(existing)
+          local widened = T.widen(resolved)
+          if widened ~= resolved then
+            ok = unify.unify(rhs_ty, widened)
+            if ok then
+              env.bind(ctx.scope, lhs.name, widened)
+            end
+          end
+          if not ok then
+            report(ctx, node.line, "type mismatch: cannot assign '" .. T.display(rhs_ty)
+              .. "' to '" .. T.display(existing) .. "'")
+          end
         end
       else
         -- Global assignment
