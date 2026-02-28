@@ -667,3 +667,58 @@ function M.new()
 end
 ]], "test.lua")
 assert.ok(ok_class, "class pattern: " .. (errs_class or ""))
+
+---------------------------------------------------------------------------
+-- Discriminated union narrowing
+---------------------------------------------------------------------------
+
+-- Basic field narrowing: x.tag == "a" narrows union in then-branch
+local ok_du1, errs_du1 = checker.check([[
+local function process(node)
+  if node.tag == "number" then
+    local n = node.value + 1
+  end
+end
+]], "test.lua")
+assert.ok(ok_du1, "field narrowing no crash: " .. (errs_du1 or ""))
+
+-- Field narrowing eliminates a union member in then-branch
+local ok_du2, errs_du2 = checker.check([[
+--:: NumNode = { tag: "number", value: number }
+--:: StrNode = { tag: "string", value: string }
+--:: Node = NumNode | StrNode
+local function process(node) --: (Node) -> number
+  if node.tag == "number" then
+    return node.value + 1
+  end
+  return 0
+end
+]], "test.lua")
+assert.ok(ok_du2, "discriminated union narrows in branch: " .. (errs_du2 or ""))
+
+-- Field narrowing in else-branch removes matched member
+local ok_du3, errs_du3 = checker.check([[
+--:: ANode = { tag: "a", x: number }
+--:: BNode = { tag: "b", y: string }
+--:: ABNode = ANode | BNode
+local function process(node) --: (ABNode) -> string
+  if node.tag == "a" then
+    return tostring(node.x)
+  else
+    return node.y
+  end
+end
+]], "test.lua")
+assert.ok(ok_du3, "discriminated union else-branch: " .. (errs_du3 or ""))
+
+-- narrow_by_field unit test on union type
+local T = types
+local nu = T.table({ tag = { type = T.literal("string", "number"), optional = false }, value = { type = T.NUMBER(), optional = false } }, {})
+local su = T.table({ tag = { type = T.literal("string", "string"), optional = false }, value = { type = T.STRING(), optional = false } }, {})
+local union_ty = T.union({ nu, su })
+
+local narrowed_pos = T.narrow_by_field(union_ty, "tag", "number", true)
+assert.eq(narrowed_pos.tag, "table", "narrow_by_field positive keeps matching member")
+
+local narrowed_neg = T.narrow_by_field(union_ty, "tag", "number", false)
+assert.eq(narrowed_neg.tag, "table", "narrow_by_field negative keeps non-matching member")

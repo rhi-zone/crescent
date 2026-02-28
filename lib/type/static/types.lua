@@ -323,6 +323,46 @@ function M.subtract(ty, exclude)
   return ty
 end
 
+-- Narrow a union by a field discriminant: `x.field == lit_value`.
+-- positive=true: keep members where field COULD be lit_value.
+-- positive=false: remove members where field is DEFINITELY lit_value.
+function M.narrow_by_field(ty, field, lit_value, positive)
+  ty = M.resolve(ty)
+  if ty.tag ~= "union" then
+    -- Not a union: can't split. Return ty for positive (it might match),
+    -- or NEVER for negative only if we know it's definitely a match.
+    return ty
+  end
+  local result = {}
+  for i = 1, #ty.types do
+    local m = M.resolve(ty.types[i])
+    local definite_match = false   -- field is definitely == lit_value
+    local possible_match = true    -- field could be == lit_value
+    if m.tag == "table" then
+      local f = m.fields[field]
+      if f then
+        local fty = M.resolve(f.type)
+        if fty.tag == "literal" and fty.kind == "string" then
+          definite_match = (fty.value == lit_value)
+          possible_match = definite_match
+        end
+      end
+    elseif m.tag ~= "any" and m.tag ~= "var" then
+      -- Non-table, non-any types don't have fields; they can't match.
+      definite_match = false
+      possible_match = false
+    end
+    if positive then
+      if possible_match then result[#result + 1] = m end
+    else
+      if not definite_match then result[#result + 1] = m end
+    end
+  end
+  if #result == 0 then return M.NEVER() end
+  if #result == 1 then return result[1] end
+  return M.union(result)
+end
+
 -- Narrow a type to only members that match `target`.
 function M.narrow_to(ty, target)
   ty = M.resolve(ty)

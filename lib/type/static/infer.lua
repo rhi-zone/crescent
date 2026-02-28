@@ -551,6 +551,30 @@ ExprRule.MemberExpression = function(ctx, node)
       unify.unify(obj_ty, tbl)
       return field_var
     end
+    -- Union: return the union of field types from each member that has it.
+    if obj_ty.tag == "union" then
+      local field_types = {}
+      local any_missing = false
+      for i = 1, #obj_ty.types do
+        local m = T.resolve(obj_ty.types[i])
+        if m.tag == "table" then
+          local f = m.fields[name]
+          if f then
+            field_types[#field_types + 1] = f.type
+          else
+            any_missing = true
+          end
+        elseif m.tag == "any" then
+          return T.ANY()
+        else
+          any_missing = true
+        end
+      end
+      if #field_types > 0 then
+        if any_missing then field_types[#field_types + 1] = T.NIL() end
+        return T.union(field_types)
+      end
+    end
     report(ctx, node.line, "no field '" .. name .. "' on type '" .. T.display(obj_ty) .. "'")
     return T.ANY()
   end
@@ -1064,6 +1088,24 @@ local function extract_narrowing(ctx, test)
       local var_name = test.right.name
       return { name = var_name, is_nil_check = true, then_removes_nil = (test.operator == "~=") }
     end
+
+    -- Discriminated union: x.field == "value"
+    local mem, lit_node
+    if test.left.kind == "MemberExpression" and not test.left.computed
+      and test.left.object.kind == "Identifier" and test.right.kind == "Literal" then
+      mem, lit_node = test.left, test.right
+    elseif test.right.kind == "MemberExpression" and not test.right.computed
+      and test.right.object.kind == "Identifier" and test.left.kind == "Literal" then
+      mem, lit_node = test.right, test.left
+    end
+    if mem and lit_node and type(lit_node.value) == "string" then
+      return {
+        name = mem.object.name,
+        field = mem.property.name,
+        field_value = lit_node.value,
+        positive = (test.operator == "=="),
+      }
+    end
   end
 
   -- Simple truthiness: if x then (narrows out nil and false)
@@ -1115,6 +1157,11 @@ local function apply_narrowing(ctx, child_scope, narrowing, positive)
       -- Negative match: subtract target
       env.bind(child_scope, narrowing.name, T.subtract(var_ty, narrowing.target))
     end
+  elseif narrowing.field then
+    -- Discriminated union: x.field == "value"
+    local is_positive = (narrowing.positive == positive)
+    local narrowed = T.narrow_by_field(var_ty, narrowing.field, narrowing.field_value, is_positive)
+    env.bind(child_scope, narrowing.name, narrowed)
   end
 end
 
