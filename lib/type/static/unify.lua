@@ -78,7 +78,8 @@ local function bind_var(v, ty)
         end
       end
       if #filtered < #ty.types then
-        local new_ty = #filtered == 1 and filtered[1] or types.union(filtered)
+        local new_ty
+        if #filtered == 1 then new_ty = filtered[1] else new_ty = types.union(filtered) end
         if not occurs(v, new_ty) then
           adjust_levels(new_ty, v.level)
           v.bound = new_ty

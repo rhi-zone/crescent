@@ -408,11 +408,9 @@ ExprRule.CallExpression = function(ctx, node)
   end
 
   if callee_ty.tag == "var" then
-    -- Constrain the var to be a function
-    local ret_var = T.typevar(ctx.scope.level)
-    local fn_ty = T.func(arg_types, { ret_var })
-    unify.unify(callee_ty, fn_ty)
-    return ret_var
+    -- Unbound var — likely a recursive or forward-declared call.
+    -- Don't bind the var to a partial function type (would pollute recursive call sites).
+    return T.ANY()
   end
 
   report(ctx, node.line, "cannot call type '" .. T.display(callee_ty) .. "'")
@@ -971,13 +969,13 @@ StmtRule.AssignmentExpression = function(ctx, node)
       local obj_ty
       if lhs.object.kind == "Identifier" then
         obj_ty = env.lookup(ctx.scope, lhs.object.name)
-        obj_ty = T.resolve(obj_ty)
+        if obj_ty then obj_ty = T.resolve(obj_ty) end
       else
         obj_ty = infer_expr(ctx, lhs.object)
         obj_ty = T.resolve(obj_ty)
       end
 
-      if not lhs.computed and obj_ty.tag == "table" then
+      if obj_ty and not lhs.computed and obj_ty.tag == "table" then
         local name = lhs.property.name
         -- Add or update field on the table
         if not obj_ty.fields[name] then
@@ -994,6 +992,12 @@ StmtRule.AssignmentExpression = function(ctx, node)
 end
 
 StmtRule.FunctionDeclaration = function(ctx, node)
+  -- Pre-bind the name as a typevar so recursive calls resolve correctly.
+  -- `local function f() ... f() ... end` needs `f` in scope during body inference.
+  local id = node.id
+  if id.kind == "Identifier" then
+    env.bind(ctx.scope, id.name, T.typevar(ctx.scope.level))
+  end
   local fn_ty = infer_function(ctx, node.params, node.body, node.vararg, node.firstline or node.line)
 
   -- Check for preceding annotation

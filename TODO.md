@@ -41,6 +41,11 @@
 - [x] Empty table `{}` assignable to array-typed parameter (absorbs indexers in unify)
 - [x] `x = x or default` pattern — strip self-ref var from union in bind_var
 - [x] Cross-call-site typevar mutation — generalize params + FunctionDeclaration writes raw table
+- [x] Recursive `local function f()` — pre-bind name as typevar before body inference
+- [x] Discriminated union narrowing (`if t.kind == "literal" then ...`)
+
+### unify.lua blockers (4 false positives remaining)
+- [ ] Structural narrowing after `if ty.tag == "var" then` (adjust_levels/bind_var expect level/id fields on resolved vars)
 
 ### output formats
 - [x] `--format json` structured output (file, line, severity, message)
@@ -66,7 +71,6 @@
 - [x] setmetatable __index merging, __call metamethod
 
 ### backlog
-- [ ] Discriminated union narrowing (`if t.kind == "literal" then ...`)
 - [ ] Generic function inference (infer type params from call site args)
 - [ ] Parse LuaJIT FFI cdef blocks
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
