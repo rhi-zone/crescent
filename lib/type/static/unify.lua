@@ -176,11 +176,21 @@ function M.unify(a, b)
 
   -- Union on RHS: LHS must be assignable to at least one member
   if b.tag == "union" then
+    local best_detail, best_path_len = nil, -1
     for i = 1, #b.types do
-      local ok = M.unify(types.resolve(a), b.types[i])
+      local ok, _, detail = M.unify(types.resolve(a), b.types[i])
       if ok then return true end
+      -- Keep the most specific failure (deepest path) to surface as context
+      if detail and detail.kind == "mismatch" then
+        local depth = detail.path and #detail.path or 0
+        if depth > best_path_len then
+          best_detail = detail
+          best_path_len = depth
+        end
+      end
     end
-    return false, "'" .. types.display(a) .. "' is not assignable to '" .. types.display(b) .. "'"
+    return false, "'" .. types.display(a) .. "' is not assignable to '" .. types.display(b) .. "'",
+      best_detail
   end
 
   -- Intersection on RHS: LHS must be assignable to all members

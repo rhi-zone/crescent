@@ -338,6 +338,16 @@ function M.display_annotated(ty, path, got_ty, colors)
            " (got " .. M.display(M.resolve(got_ty)) .. ")" .. reset
   end
 
+  if ty.tag == "union" then
+    -- Recurse into each member: the one that contains the field gets annotated,
+    -- others (e.g. nil) display plainly. Handles optional fields (T | nil).
+    local parts = {}
+    for i = 1, #ty.types do
+      parts[#parts + 1] = M.display_annotated(M.resolve(ty.types[i]), path, got_ty, colors)
+    end
+    return table.concat(parts, " | ")
+  end
+
   if ty.tag == "table" then
     local target = path[1]
     local rest   = {}
@@ -365,7 +375,7 @@ function M.display_annotated(ty, path, got_ty, colors)
     return "{ " .. table.concat(parts, ", ") .. " }"
   end
 
-  -- Can't follow path through a non-table — fall back to plain display
+  -- Can't follow path through this type (literal, primitive, etc.) — plain display
   return M.display(ty)
 end
 
