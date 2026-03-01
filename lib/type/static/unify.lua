@@ -26,6 +26,9 @@ local function occurs(v, ty)
     for i = 1, #ty.indexers do
       if occurs(v, ty.indexers[i].key) or occurs(v, ty.indexers[i].value) then return true end
     end
+    for _, f in pairs(ty.meta or {}) do
+      if occurs(v, f.type) then return true end
+    end
     return false
   end
   if ty.tag == "union" or ty.tag == "intersection" then
@@ -56,6 +59,7 @@ local function adjust_levels(ty, max_level)
       adjust_levels(ty.indexers[i].key, max_level)
       adjust_levels(ty.indexers[i].value, max_level)
     end
+    for _, f in pairs(ty.meta or {}) do adjust_levels(f.type, max_level) end
     return
   end
   if ty.tag == "union" or ty.tag == "intersection" then
@@ -276,6 +280,18 @@ function M.unify(a, b)
             return false, "missing indexer for " .. types.display(bi.key)
           end
         end
+      end
+    end
+    -- Check meta fields: every required meta field in b must exist in a
+    for name, bmf in pairs(b.meta or {}) do
+      local amf = (a.meta or {})[name]
+      if not amf then
+        if not bmf.optional then
+          return false, "missing metatable slot '#" .. name .. "'"
+        end
+      else
+        local ok, err = M.unify(amf.type, bmf.type)
+        if not ok then return false, "#" .. name .. ": " .. (err or "type mismatch") end
       end
     end
     return true

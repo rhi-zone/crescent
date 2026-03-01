@@ -92,7 +92,11 @@ function M.substitute(ty, mapping)
         value = M.substitute(ty.indexers[i].value, mapping),
       }
     end
-    return types.table(fields, indexers, ty.row)
+    local meta = {}
+    for name, f in pairs(ty.meta or {}) do
+      meta[name] = { type = M.substitute(f.type, mapping), optional = f.optional }
+    end
+    return types.table(fields, indexers, ty.row, meta)
   end
 
   if tag == "union" then
@@ -191,6 +195,9 @@ function M.generalize(ty, level)
       M.generalize(ty.indexers[i].key, level)
       M.generalize(ty.indexers[i].value, level)
     end
+    for _, f in pairs(ty.meta or {}) do
+      M.generalize(f.type, level)
+    end
     return ty
   end
 
@@ -245,7 +252,11 @@ function M.instantiate(ty, level, mapping)
         value = M.instantiate(ty.indexers[i].value, level, mapping),
       }
     end
-    return types.table(fields, indexers, ty.row)
+    local meta = {}
+    for name, f in pairs(ty.meta or {}) do
+      meta[name] = { type = M.instantiate(f.type, level, mapping), optional = f.optional }
+    end
+    return types.table(fields, indexers, ty.row, meta)
   end
 
   if tag == "union" then

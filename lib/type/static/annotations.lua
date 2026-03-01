@@ -310,11 +310,12 @@ function Parser:parse_table_type()
   self:expect_char("{")
   local fields = {}
   local indexers = {}
+  local meta = {}
   local positional = {}
   local has_named = false
 
   if self:match_char("}") then
-    return types.table(fields, indexers)
+    return types.table(fields, indexers, nil, meta)
   end
 
   repeat
@@ -332,6 +333,18 @@ function Parser:parse_table_type()
       self:expect_char(":")
       local value = self:parse_type()
       indexers[#indexers + 1] = { key = key, value = value }
+      has_named = true
+    -- Meta field: #name: type
+    elseif self:peek() == "#" then
+      self.pos = self.pos + 1
+      local mname, mend = self:peek_word()
+      if not mname then
+        error("expected metamethod name after '#' at position " .. self.pos)
+      end
+      self.pos = mend + 1
+      self:expect_char(":")
+      local mty = self:parse_type()
+      meta[mname] = { type = mty, optional = false }
       has_named = true
     else
       -- Could be "name?: type" (field) or just a type (positional/tuple element).
@@ -401,10 +414,10 @@ function Parser:parse_table_type()
   if #positional > 0 and has_named then
     -- Spread syntax: { ...Base, name: type } means merge base fields with overrides
     -- For now, just return the table with fields/indexers (spreads resolved later)
-    return types.table(fields, indexers)
+    return types.table(fields, indexers, nil, meta)
   end
 
-  return types.table(fields, indexers)
+  return types.table(fields, indexers, nil, meta)
 end
 
 -- Parse "(..." which could be a function type or grouping

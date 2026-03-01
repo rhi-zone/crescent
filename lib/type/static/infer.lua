@@ -316,13 +316,13 @@ ExprRule.CallExpression = function(ctx, node)
             end
           end
         end
-        -- Look for __call metamethod
-        local call_field = mt_ty.fields["__call"]
-        if call_field then
-          local call_ty = T.resolve(call_field.type)
-          if call_ty.tag == "function" then
-            t_ty._call = call_ty
-          end
+        -- Populate meta slots from metamethods
+        t_ty.meta = t_ty.meta or {}
+        local META_OPS = {"__call","__add","__sub","__mul","__div","__mod","__pow",
+                          "__concat","__unm","__len","__eq","__lt","__le"}
+        for _, op in ipairs(META_OPS) do
+          local f = mt_ty.fields[op]
+          if f then t_ty.meta[op] = { type = f.type, optional = false } end
         end
       end
       return arg_types[1]
@@ -393,8 +393,8 @@ ExprRule.CallExpression = function(ctx, node)
   end
 
   -- Table with __call metamethod
-  if callee_ty.tag == "table" and callee_ty._call then
-    local call_fn = T.resolve(callee_ty._call)
+  if callee_ty.tag == "table" and callee_ty.meta and callee_ty.meta["__call"] then
+    local call_fn = T.resolve(callee_ty.meta["__call"].type)
     if call_fn.tag == "function" then
       -- __call first param is self, skip it
       local method_params = {}
@@ -635,6 +635,7 @@ local function generalize_type(ty, level, seen)
       generalize_type(ty.indexers[i].key, level, seen)
       generalize_type(ty.indexers[i].value, level, seen)
     end
+    for _, f in pairs(ty.meta or {}) do generalize_type(f.type, level, seen) end
     return
   end
   if ty.tag == "union" or ty.tag == "intersection" then

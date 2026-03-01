@@ -777,3 +777,63 @@ end
 local r = fact(5)
 ]], "test.lua")
 assert.ok(ok_rec, "recursive function not broken: " .. (errs_rec or ""))
+
+---------------------------------------------------------------------------
+-- Phase 10: Meta fields (#field syntax)
+---------------------------------------------------------------------------
+
+-- M.table() with meta param
+local mt1 = T.table({}, {}, nil, { ["__add"] = { type = T.func({T.NUMBER(), T.NUMBER()}, {T.NUMBER()}), optional = false } })
+assert.ok(mt1.meta, "table with meta exists")
+assert.ok(mt1.meta["__add"], "table meta __add exists")
+assert.eq(mt1.meta["__add"].type.tag, "function", "table meta __add is function")
+
+-- parse meta field in table type annotation
+local mft = annotations.parse_type("{ x: number, #__add: (any, any) -> any }")
+assert.eq(mft.tag, "table", "meta field parse: table tag")
+assert.ok(mft.fields.x, "meta field parse: regular field x present")
+assert.ok(mft.meta, "meta field parse: meta dict present")
+assert.ok(mft.meta["__add"], "meta field parse: __add in meta")
+assert.eq(mft.meta["__add"].type.tag, "function", "meta field parse: __add type is function")
+assert.eq(mft.meta["__add"].optional, false, "meta field parse: __add not optional")
+
+-- display renders meta fields with # prefix
+local mft_disp = T.display(mft)
+assert.ok(mft_disp:find("#__add"), "display: meta field has # prefix")
+assert.ok(mft_disp:find("x:"), "display: regular field still present")
+
+-- table with no meta fields still displays without # entries
+local plain_disp = T.display(T.table({ x = { type = T.NUMBER(), optional = false } }, {}))
+assert.ok(not plain_disp:find("#"), "display: plain table has no # prefix")
+
+-- unification: required meta field missing → error
+local ua = T.table({}, {}, nil, {})
+local ub = T.table({}, {}, nil, { ["__call"] = { type = T.func({}, {}), optional = false } })
+local ok_umeta, err_umeta = unify.unify(ua, ub)
+assert.ok(not ok_umeta, "unify: missing required meta field fails")
+assert.ok(err_umeta and err_umeta:find("__call"), "unify: error names the missing slot")
+
+-- unification: optional meta field missing → ok
+local uc = T.table({}, {}, nil, { ["__add"] = { type = T.func({T.NUMBER()}, {T.NUMBER()}), optional = true } })
+assert.ok(unify.unify(ua, uc), "unify: missing optional meta field passes")
+
+-- unification: meta field present and matching → ok
+local ud = T.table({}, {}, nil, { ["__call"] = { type = T.func({}, {}), optional = false } })
+assert.ok(unify.unify(ud, ub), "unify: matching meta field passes")
+
+-- setmetatable handler populates meta for __add, __call etc.
+local ok_smt2, errs_smt2 = checker.check([[
+local mt = { __add = function(a, b) return a end, __mul = function(a, b) return a end }
+local obj = setmetatable({}, mt)
+]], "test.lua")
+assert.ok(ok_smt2, "setmetatable meta ops: " .. (errs_smt2 or ""))
+
+-- class pattern still works (regression: __call via meta["__call"])
+local ok_class2, errs_class2 = checker.check([[
+local M = {}
+M.__index = M
+function M.new()
+  return setmetatable({}, M)
+end
+]], "test.lua")
+assert.ok(ok_class2, "class pattern regression: " .. (errs_class2 or ""))

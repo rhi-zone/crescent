@@ -44,8 +44,8 @@ function M.func(params, returns, vararg)
   return { tag = "function", params = params, returns = returns, vararg = vararg }
 end
 
-function M.table(fields, indexers, row)
-  return { tag = "table", fields = fields or {}, indexers = indexers or {}, row = row }
+function M.table(fields, indexers, row, meta)
+  return { tag = "table", fields = fields or {}, indexers = indexers or {}, row = row, meta = meta or {} }
 end
 
 function M.union(types)
@@ -220,6 +220,14 @@ function M.display(ty)
     for i = 1, #ty.indexers do
       local idx = ty.indexers[i]
       parts[#parts + 1] = "[" .. M.display(idx.key) .. "]: " .. M.display(idx.value)
+    end
+    local meta_names = {}
+    for name in pairs(ty.meta or {}) do meta_names[#meta_names + 1] = name end
+    table.sort(meta_names)
+    for _, name in ipairs(meta_names) do
+      local f = ty.meta[name]
+      local opt = f.optional and "?" or ""
+      parts[#parts + 1] = "#" .. name .. opt .. ": " .. M.display(f.type)
     end
     return "{ " .. table.concat(parts, ", ") .. " }"
   end
