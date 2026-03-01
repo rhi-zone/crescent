@@ -93,6 +93,10 @@ Types:
 
 Scope is the library or component name (e.g., `feat(http): add chunked transfer encoding`).
 
+## Typechecker Design Principles
+
+**Prefer principled solutions over special cases.** When a check needs to accept a new category of type, ask whether the type system can be extended cleanly (e.g. declare the primitive's metamethods, extend unify) rather than tagging the predicate. Ad-hoc flags in `is_numeric`, `is_concat_compatible`, etc. erode correctness over time.
+
 ## Negative Constraints
 
 Do not:

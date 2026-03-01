@@ -160,24 +160,38 @@ ExprRule.BinaryExpression = function(ctx, node)
     -- Metamethod dispatch: __add, __sub, etc. on either operand
     local mm = meta_op_ret(left, ARITH_META[op]) or meta_op_ret(right, ARITH_META[op])
     if mm then return mm end
-    -- Unbound vars: constrain to "has #__add" (or whichever op) using fresh typevars.
-    -- This avoids implicit-any warnings while accepting custom types with metamethods.
-    -- Primitives satisfying this constraint are handled in unify.unify.
+    -- Constrain unbound vars to "has #__add" (etc.) using fresh typevars, so they are
+    -- no longer unbound after inference (suppresses implicit-any warnings).
+    -- If an operand is already a meta-only constraint table (from a previous arithmetic
+    -- use of the same var), extend it with this op rather than creating a new binding.
+    -- After extending, re-check metamethods: if found, the operand is arithmetic-capable.
     local meta_name = ARITH_META[op]
-    if left_r.tag == "var" then
-      unify.unify(left_r, meta_constraint(ctx.scope.level, meta_name, 2))
+    local function constrain_operand(r)
+      if r.tag == "var" then
+        unify.unify(r, meta_constraint(ctx.scope.level, meta_name, 2))
+      elseif r.tag == "table" and next(r.fields) == nil and #r.indexers == 0
+        and r.meta and next(r.meta) then
+        -- Already a meta constraint table (has at least one meta slot from a previous
+        -- arith/concat use). Extend with the new op rather than creating a new binding.
+        if not r.meta[meta_name] then
+          local fn_ty = T.func(
+            { T.typevar(ctx.scope.level), T.typevar(ctx.scope.level) },
+            { T.typevar(ctx.scope.level) })
+          r.meta[meta_name] = { type = fn_ty, optional = false }
+        end
+      end
     end
-    if right_r.tag == "var" then
-      unify.unify(right_r, meta_constraint(ctx.scope.level, meta_name, 2))
-    end
-    -- Check operands are numeric (unions allowed if all members are numeric/nil)
-    -- Meta-only tables are arithmetic constraint types (e.g. { #__sub: ... } bound from a
-    -- previous arith use of the same var) and are accepted as numeric-capable.
+    constrain_operand(left_r)
+    constrain_operand(right_r)
+    left_r = T.resolve(left)
+    right_r = T.resolve(right)
+    mm = meta_op_ret(left, ARITH_META[op]) or meta_op_ret(right, ARITH_META[op])
+    if mm then return T.NUMBER() end
+    -- Check remaining operands are numeric primitives
     local function is_numeric(r)
       return r.tag == "any" or r.tag == "number" or r.tag == "integer"
         or (r.tag == "literal" and r.kind == "number")
         or r.tag == "var" or r.tag == "nil"
-        or (r.tag == "table" and next(r.fields) == nil and #r.indexers == 0)
     end
     local function check_numeric(r, display_ty)
       if r.tag == "union" then
@@ -270,8 +284,22 @@ ExprRule.ConcatenateExpression = function(ctx, node)
     if mm then
       if not concat_mm then concat_mm = mm end
     else
+      -- Constrain vars; extend existing meta-only constraint tables.
       if r.tag == "var" then
         unify.unify(r, meta_constraint(ctx.scope.level, "__concat", 2))
+        r = T.resolve(ty)
+        local mm2 = meta_op_ret(ty, "__concat")
+        if mm2 then if not concat_mm then concat_mm = mm2 end goto continue end
+      elseif r.tag == "table" and next(r.fields) == nil and #r.indexers == 0
+        and r.meta and next(r.meta) then
+        if not r.meta.__concat then
+          local fn_ty = T.func(
+            { T.typevar(ctx.scope.level), T.typevar(ctx.scope.level) },
+            { T.typevar(ctx.scope.level) })
+          r.meta.__concat = { type = fn_ty, optional = false }
+        end
+        local mm2 = meta_op_ret(ty, "__concat")
+        if mm2 then if not concat_mm then concat_mm = mm2 end goto continue end
       end
       local ok = true
       if r.tag == "union" then
@@ -288,6 +316,7 @@ ExprRule.ConcatenateExpression = function(ctx, node)
         report(ctx, node.line, node.col, "cannot concatenate '" .. T.display(ty) .. "'")
       end
     end
+    ::continue::
   end
   if concat_mm then return concat_mm end
   return T.STRING()
