@@ -1284,24 +1284,21 @@ StmtRule.AssignmentExpression = function(ctx, node)
             env.bind(owner or ctx.scope, lhs.name, new_ty)
             ok = true
           end
-          -- Try narrowing-escape: `x = nil` where x was narrowed from a wider type.
-          -- If assigning nil fails against the narrowed type, check if nil is valid
-          -- against the pre-narrowing type in an outer scope.
+          -- Try narrowing-escape: x was narrowed from a wider type in an outer scope.
+          -- If assignment fails against the narrowed type, check if the value is valid
+          -- against the pre-narrowing type. E.g. `local x: A|B; if type(x)=="A" then x = b end`.
           if not ok then
-            local rhs_resolved = T.resolve(rhs_ty)
-            if rhs_resolved.tag == "nil" then
-              local outer = ctx.scope.parent
-              while outer do
-                if outer.bindings[lhs.name] ~= nil then
-                  local outer_ok = unify.unify(rhs_ty, T.resolve(outer.bindings[lhs.name]))
-                  if outer_ok then
-                    env.bind(ctx.scope, lhs.name, rhs_ty)
-                    ok = true
-                  end
-                  break
+            local outer = ctx.scope.parent
+            while outer do
+              if outer.bindings[lhs.name] ~= nil then
+                local outer_ok = unify.unify(rhs_ty, T.resolve(outer.bindings[lhs.name]))
+                if outer_ok then
+                  env.bind(ctx.scope, lhs.name, rhs_ty)
+                  ok = true
                 end
-                outer = outer.parent
+                break
               end
+              outer = outer.parent
             end
           end
           if not ok then
