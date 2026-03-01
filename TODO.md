@@ -84,7 +84,8 @@ Demote to "important, persistent" once root cause is profiled and a plan is in p
 
 - [x] Infinite recursion in resolve_require: per-ctx circular detection missed cross-check cycles (A→B→A). Fixed with `_globally_resolving` module-level table. infer.lua now checks in ~1.3s (was infinite loop).
 - [ ] **Profile first**: run under `jit.p` / time individual phases (parse, infer, unify) to find the real bottleneck before optimising. Hypothesis: re-checking required modules on every `check_string` call dominates.
-- [ ] Module-level type cache: currently each `check_string` call re-typechecks all required modules from scratch. Add a global cache keyed by (file path, mtime) so unchanged deps are not re-checked. Likely the single biggest win.
+- [ ] Module-level type cache: currently each `check_string` call re-typechecks all required modules from scratch. Add a global cache keyed by (file path, mtime) so unchanged deps skip both parse AND infer. Likely the single biggest win — the cache must store the inferred return type, not just avoid inference (skipping parse matters too since ljltk runs every call).
+- [ ] Parsing speed: ljltk is not tuned for throughput. Even for the target file (always parsed fresh, even with caching), this may be significant. Profile parse phase separately; consider a faster lexer or AST node pooling.
 - [ ] Unification hot path: `T.resolve` does pointer chasing on every call; consider path compression in the union-find structure.
 - [ ] Avoid repeated `pairs()` / `ipairs()` over fields/indexers in hot unify paths — measure first.
 
