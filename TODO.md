@@ -79,7 +79,7 @@
 - [ ] `pcall`/`xpcall` return type narrowing
 - [ ] For-in iterator return type tracking — `for k, v in pairs(t)` always gives `any` for k/v; need iterator protocol inference (ipairs/pairs over typed tables, custom iterators)
 - [x] Metatable slot syntax: `#field` in type annotations — done (see above)
-- [ ] Structural operator dispatch — once `#field` syntax exists, BinaryExpression checks `#__add` on operand types (not `__add`), constrains var operands structurally, returns metamethod's result type. Unlocks linalg / custom numeric types.
+- [x] Structural operator dispatch — BinaryExpression/UnaryExpression/ConcatenateExpression check `meta["__add"]` etc. on operand types via `meta_op_ret`; metamethod return type used instead of primitive check. Unlocks linalg / custom numeric types.
 - [ ] Structural constraint propagation for send — `x:method(args)` on a var should constrain x to `{ method: (self, args...) -> T, ...row }` (mirrors field access on var).
 - [ ] Implicit-any warnings on unannotated params — after full function inference, warn if a param typevar is still completely unbound. Depends on structural constraint propagation above being complete first; otherwise too noisy.
 - [ ] Private field visibility enforcement

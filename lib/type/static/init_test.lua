@@ -837,3 +837,61 @@ function M.new()
 end
 ]], "test.lua")
 assert.ok(ok_class2, "class pattern regression: " .. (errs_class2 or ""))
+
+-- Phase 9: Structural operator dispatch via meta slots
+
+-- __add metamethod dispatch: custom type + custom type → metamethod return type
+local ok_add, errs_add = checker.check([[
+local mt = { __add = function(a, b) return 1 end }
+local v = setmetatable({}, mt)
+local result = v + v
+]], "test.lua")
+assert.ok(ok_add, "meta __add dispatch: " .. (errs_add or ""))
+
+-- __add on unknown operand types (no meta) still errors for non-numeric
+local ok_bad, errs_bad = checker.check([[
+local s = "hello"
+local n = s + 1
+]], "test.lua")
+assert.ok(not ok_bad, "arithmetic on string still errors without meta")
+assert.ok(errs_bad and errs_bad:find("arithmetic"), "arithmetic error still reported")
+
+-- __mul metamethod dispatch
+local ok_mul, errs_mul = checker.check([[
+local mt = { __mul = function(a, b) return {} end }
+local v = setmetatable({}, mt)
+local r = v * 2
+]], "test.lua")
+assert.ok(ok_mul, "meta __mul dispatch: " .. (errs_mul or ""))
+
+-- __unm (unary minus) metamethod dispatch
+local ok_unm, errs_unm = checker.check([[
+local mt = { __unm = function(a) return a end }
+local v = setmetatable({}, mt)
+local neg = -v
+]], "test.lua")
+assert.ok(ok_unm, "meta __unm dispatch: " .. (errs_unm or ""))
+
+-- __len (# operator) metamethod dispatch
+local ok_len, errs_len = checker.check([[
+local mt = { __len = function(a) return 42 end }
+local v = setmetatable({}, mt)
+local n = #v
+]], "test.lua")
+assert.ok(ok_len, "meta __len dispatch: " .. (errs_len or ""))
+
+-- __lt (< operator) metamethod dispatch
+local ok_lt, errs_lt = checker.check([[
+local mt = { __lt = function(a, b) return true end }
+local v = setmetatable({}, mt)
+local cmp = v < v
+]], "test.lua")
+assert.ok(ok_lt, "meta __lt dispatch: " .. (errs_lt or ""))
+
+-- __concat metamethod dispatch
+local ok_cc, errs_cc = checker.check([[
+local mt = { __concat = function(a, b) return a end }
+local v = setmetatable({}, mt)
+local joined = v .. v
+]], "test.lua")
+assert.ok(ok_cc, "meta __concat dispatch: " .. (errs_cc or ""))

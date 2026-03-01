@@ -99,6 +99,29 @@ ExprRule.ExpressionValue = function(ctx, node)
   return infer_expr(ctx, node.value)
 end
 
+-- Get the return type produced by metamethod op_name on ty.
+-- Returns the first return type if found, T.ANY() if metamethod exists but returns nothing,
+-- or nil if the type has no such metamethod.
+local function meta_op_ret(ty, op_name)
+  local r = T.resolve(ty)
+  if r.tag == "table" and r.meta and r.meta[op_name] then
+    local fn = T.resolve(r.meta[op_name].type)
+    if fn.tag == "function" and #fn.returns > 0 then
+      return fn.returns[1]
+    end
+    return T.ANY()
+  end
+  return nil
+end
+
+local ARITH_META = {
+  ["+"] = "__add", ["-"] = "__sub", ["*"] = "__mul",
+  ["/"] = "__div", ["%"] = "__mod", ["^"] = "__pow",
+}
+local CMP_META = {
+  ["<"] = "__lt", [">"] = "__lt", ["<="] = "__le", [">="] = "__le",
+}
+
 ExprRule.BinaryExpression = function(ctx, node)
   local left = infer_expr(ctx, node.left)
   local right = infer_expr(ctx, node.right)
@@ -108,6 +131,9 @@ ExprRule.BinaryExpression = function(ctx, node)
   if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "^" then
     local left_r = T.resolve(left)
     local right_r = T.resolve(right)
+    -- Metamethod dispatch: __add, __sub, etc. on either operand
+    local mm = meta_op_ret(left, ARITH_META[op]) or meta_op_ret(right, ARITH_META[op])
+    if mm then return mm end
     -- Check operands are numeric (unions allowed if all members are numeric/nil)
     local function is_numeric(r)
       return r.tag == "any" or r.tag == "number" or r.tag == "integer"
@@ -147,6 +173,9 @@ ExprRule.BinaryExpression = function(ctx, node)
     return T.BOOLEAN()
   end
   if op == "<" or op == ">" or op == "<=" or op == ">=" then
+    -- Metamethod dispatch: __lt, __le on either operand
+    local mm = meta_op_ret(left, CMP_META[op]) or meta_op_ret(right, CMP_META[op])
+    if mm then return mm end
     return T.BOOLEAN()
   end
 
@@ -174,9 +203,13 @@ ExprRule.UnaryExpression = function(ctx, node)
     return T.BOOLEAN()
   end
   if node.operator == "-" then
+    local mm = meta_op_ret(arg, "__unm")
+    if mm then return mm end
     return T.NUMBER()
   end
   if node.operator == "#" then
+    local mm = meta_op_ret(arg, "__len")
+    if mm then return mm end
     return T.INTEGER()
   end
   report(ctx, node.line, "unknown unary operator '" .. node.operator .. "'")
@@ -190,24 +223,31 @@ local function is_concat_compatible(r)
 end
 
 ExprRule.ConcatenateExpression = function(ctx, node)
+  local concat_mm
   for _, term in ipairs(node.terms) do
     local ty = infer_expr(ctx, term)
     local r = T.resolve(ty)
-    local ok = true
-    if r.tag == "union" then
-      for i = 1, #r.types do
-        if not is_concat_compatible(T.resolve(r.types[i])) then
-          ok = false
-          break
-        end
-      end
+    local mm = meta_op_ret(ty, "__concat")
+    if mm then
+      if not concat_mm then concat_mm = mm end
     else
-      ok = is_concat_compatible(r)
-    end
-    if not ok then
-      report(ctx, node.line, "cannot concatenate '" .. T.display(ty) .. "'")
+      local ok = true
+      if r.tag == "union" then
+        for i = 1, #r.types do
+          if not is_concat_compatible(T.resolve(r.types[i])) then
+            ok = false
+            break
+          end
+        end
+      else
+        ok = is_concat_compatible(r)
+      end
+      if not ok then
+        report(ctx, node.line, "cannot concatenate '" .. T.display(ty) .. "'")
+      end
     end
   end
+  if concat_mm then return concat_mm end
   return T.STRING()
 end
 
