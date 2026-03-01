@@ -71,6 +71,13 @@
 - [x] setmetatable __index merging, __call metamethod
 - [x] `#field` metatable slot syntax — separate `meta` dict on table types; `#__add: fn` in annotations; setmetatable populates META_OPS into meta; unification checks meta fields
 
+### known false positives
+- [ ] **Assignment narrowing**: assigning `nil` to a variable inside `if x then` is flagged — typechecker checks against narrowed type, not declared type. E.g. `if block_ann_kind ~= "" then ... block_ann_kind = "" end` fails; workaround: reset outside the narrowed block.
+- [ ] **Nil method call not caught**: `local x; x:match("pattern")` — method call on nil variable produces no error (documented in `testdata/errors/nil_method.expected` as empty snapshot).
+
+### annotation syntax gaps
+- [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.
+
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
 - [ ] Parse LuaJIT FFI cdef blocks

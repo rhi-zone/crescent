@@ -79,9 +79,7 @@ end
 
 ExprRule.Identifier = function(ctx, node)
   local ty = env.lookup(ctx.scope, node.name)
-  if ty then
-    return env.instantiate(ty, ctx.scope.level)
-  end
+  if ty then return ty end
   -- Unknown identifier
   report(ctx, node.line, "unknown identifier '" .. node.name .. "'")
   return T.ANY()
@@ -492,7 +490,13 @@ ExprRule.SendExpression = function(ctx, node)
         if #ft.returns > 0 then return ft.returns[1] end
         return T.NIL()
       end
+      -- Field found but not yet a function (e.g. a sentinel typevar for a forward-declared
+      -- OOP method). Treat as unknown-return rather than reporting a spurious error.
+      if ft.tag == "var" or ft.tag == "any" then return T.ANY() end
     end
+    -- Open table (row variable present): may have additional methods via metatable
+    -- inheritance. Don't report an error — mirrors MemberExpression behaviour.
+    if recv_ty.row then return T.ANY() end
   end
 
   -- String method resolution: s:method(...) looks up string.method
@@ -516,6 +520,57 @@ ExprRule.SendExpression = function(ctx, node)
           end
         end
       end
+    end
+  end
+
+  -- Union receiver: try the method on each non-nil member.
+  -- Handles patterns like `(string | nil):method()` protected by truthiness guards.
+  if recv_ty.tag == "union" then
+    local ret_types = {}
+    local found = false
+    for i = 1, #recv_ty.types do
+      local member = T.resolve(recv_ty.types[i])
+      if member.tag == "nil" then
+        -- nil member: skip (caller responsible for nil guard)
+      else
+        -- Recurse with member as receiver (won't re-enter union branch since member is resolved)
+        local saved_scope = ctx.scope
+        local dummy_ctx = ctx  -- reuse ctx but intercept errors
+        -- Silently attempt method lookup on member type
+        if member.tag == "table" then
+          local f = member.fields[method_name]
+          if f then
+            local ft = T.resolve(f.type)
+            if ft.tag == "function" then
+              found = true
+              if #ft.returns > 0 then ret_types[#ret_types + 1] = ft.returns[1] end
+            elseif ft.tag == "var" or ft.tag == "any" then
+              found = true
+            end
+          elseif member.row then
+            found = true
+          end
+        elseif member.tag == "string" or (member.tag == "literal" and member.kind == "string") then
+          local str_ty = env.lookup(ctx.scope, "string")
+          if str_ty then
+            str_ty = T.resolve(str_ty)
+            if str_ty.tag == "table" and str_ty.fields[method_name] then
+              local ft = T.resolve(str_ty.fields[method_name].type)
+              if ft.tag == "function" then
+                found = true
+                if #ft.returns > 0 then ret_types[#ret_types + 1] = ft.returns[1] end
+              end
+            end
+          end
+        elseif member.tag == "any" or member.tag == "var" then
+          found = true
+        end
+      end
+    end
+    if found then
+      if #ret_types == 0 then return T.NIL() end
+      if #ret_types == 1 then return ret_types[1] end
+      return T.union(ret_types)
     end
   end
 
@@ -691,8 +746,19 @@ function check_call_args(ctx, fn_ty, arg_types, line)
     if actual then
       local ok, err = unify.unify(actual, expected)
       if not ok then
-        report(ctx, line, "argument " .. i .. ": cannot pass '" .. T.display(actual)
-          .. "' where '" .. T.display(expected) .. "' expected")
+        local exp_r = T.resolve(expected)
+        local msg
+        -- For structural (table-to-table) mismatches, lead with the specific
+        -- diff (e.g. "missing field 'role'") and append both types as context.
+        if err and actual.tag == "table" and exp_r.tag == "table" then
+          msg = "argument " .. i .. ": " .. err
+            .. "\n    passed:   " .. T.display(actual)
+            .. "\n    expected: " .. T.display(exp_r)
+        else
+          msg = "argument " .. i .. ": cannot pass '" .. T.display(actual)
+            .. "' where '" .. T.display(expected) .. "' expected"
+        end
+        report(ctx, line, msg)
       end
     end
     -- Missing args are nil — only error if param is not optional
@@ -845,6 +911,26 @@ local function get_callee_returns(ctx, node)
         if str_ty.tag == "table" then
           local f = str_ty.fields[method_name]
           if f then ft = T.resolve(f.type) end
+        end
+      end
+    end
+    -- Union receiver (e.g. string | nil): look for method in string members
+    if not ft and recv_ty.tag == "union" then
+      local str_ty = env.lookup(ctx.scope, "string")
+      if str_ty then
+        str_ty = T.resolve(str_ty)
+        for i = 1, #recv_ty.types do
+          local m = T.resolve(recv_ty.types[i])
+          if m.tag == "string" or (m.tag == "literal" and m.kind == "string") then
+            if str_ty.tag == "table" then
+              local f = str_ty.fields[method_name]
+              if f then ft = T.resolve(f.type) end
+            end
+            break
+          elseif m.tag == "table" then
+            local f = m.fields[method_name]
+            if f then ft = T.resolve(f.type) break end
+          end
         end
       end
     end
@@ -1010,9 +1096,19 @@ end
 StmtRule.AssignmentExpression = function(ctx, node)
   local rhs_types = infer_expr_list(ctx, node.right)
 
+  -- When the only RHS expression is a call/send that returned `any`, positions beyond
+  -- the first are also `any` (not `nil`): we can't know the callee's return count.
+  local overflow_ty = T.NIL()
+  if #node.right == 1 and #rhs_types >= 1 and T.resolve(rhs_types[#rhs_types]).tag == "any" then
+    local last_expr = node.right[1]
+    if last_expr.kind == "CallExpression" or last_expr.kind == "SendExpression" then
+      overflow_ty = T.ANY()
+    end
+  end
+
   for i = 1, #node.left do
     local lhs = node.left[i]
-    local rhs_ty = rhs_types[i] or T.NIL()
+    local rhs_ty = rhs_types[i] or overflow_ty
 
     if lhs.kind == "Identifier" then
       local existing = env.lookup(ctx.scope, lhs.name)
@@ -1026,6 +1122,38 @@ StmtRule.AssignmentExpression = function(ctx, node)
             ok = unify.unify(rhs_ty, widened)
             if ok then
               env.bind(ctx.scope, lhs.name, widened)
+            end
+          end
+          -- Try nil-widening: `local x = nil; x = val` — widen to val | nil.
+          -- Update the scope that OWNS the binding so the wider type propagates
+          -- to all enclosing blocks (not just the current narrowed child scope).
+          if not ok and resolved.tag == "nil" then
+            local new_ty = T.union({T.widen(rhs_ty), T.NIL()})
+            local owner = ctx.scope
+            while owner and owner.bindings[lhs.name] == nil do
+              owner = owner.parent
+            end
+            env.bind(owner or ctx.scope, lhs.name, new_ty)
+            ok = true
+          end
+          -- Try narrowing-escape: `x = nil` where x was narrowed from a wider type.
+          -- If assigning nil fails against the narrowed type, check if nil is valid
+          -- against the pre-narrowing type in an outer scope.
+          if not ok then
+            local rhs_resolved = T.resolve(rhs_ty)
+            if rhs_resolved.tag == "nil" then
+              local outer = ctx.scope.parent
+              while outer do
+                if outer.bindings[lhs.name] ~= nil then
+                  local outer_ok = unify.unify(rhs_ty, T.resolve(outer.bindings[lhs.name]))
+                  if outer_ok then
+                    env.bind(ctx.scope, lhs.name, rhs_ty)
+                    ok = true
+                  end
+                  break
+                end
+                outer = outer.parent
+              end
             end
           end
           if not ok then
@@ -1221,6 +1349,40 @@ local function extract_narrowing(ctx, test)
   return nil
 end
 
+-- Recursively collect narrowings from an `a and b and c` chain.
+-- For compound `and` chains, only collects is_truthy narrowings (identifier conditions).
+-- Field-discriminant narrowings (a.field == "x") are NOT collected from compound
+-- `and` chains because they create fresh disconnected tables that break constraint
+-- inference for unannotated parameters.  They ARE still collected for single conditions
+-- (handled by calling extract_narrowing directly for non-and expressions).
+local function extract_all_narrowings(ctx, test)
+  if not test then return {} end
+  if test.kind == "LogicalExpression" and test.operator == "and" then
+    -- Compound and: only collect is_truthy narrowings from each sub-expression
+    local function collect_truthy(t)
+      if not t then return {} end
+      if t.kind == "LogicalExpression" and t.operator == "and" then
+        local left = collect_truthy(t.left)
+        local right = collect_truthy(t.right)
+        for i = 1, #right do left[#left + 1] = right[i] end
+        return left
+      end
+      if t.kind == "Identifier" then
+        return { { name = t.name, is_truthy = true } }
+      end
+      if t.kind == "UnaryExpression" and t.operator == "not" and t.argument.kind == "Identifier" then
+        return { { name = t.argument.name, is_truthy = true, negated = true } }
+      end
+      return {}
+    end
+    return collect_truthy(test)
+  end
+  -- Non-and: use full single-narrowing (field discriminants, nil checks, etc.)
+  local n = extract_narrowing(ctx, test)
+  if n then return { n } end
+  return {}
+end
+
 -- Apply narrowing to a child scope.
 local function apply_narrowing(ctx, child_scope, narrowing, positive)
   if not narrowing then return end
@@ -1290,11 +1452,13 @@ StmtRule.IfStatement = function(ctx, node)
 
   for i = 1, #node.tests do
     infer_expr(ctx, node.tests[i])
-    local narrowing = extract_narrowing(ctx, node.tests[i])
-    all_narrowings[i] = narrowing
+    local narrowings = extract_all_narrowings(ctx, node.tests[i])
+    all_narrowings[i] = narrowings
 
     local child = env.child(ctx.scope)
-    apply_narrowing(ctx, child, narrowing, true)
+    for j = 1, #narrowings do
+      apply_narrowing(ctx, child, narrowings[j], true)
+    end
     local saved = ctx.scope
     ctx.scope = child
     infer_block(ctx, node.cons[i])
@@ -1305,7 +1469,9 @@ StmtRule.IfStatement = function(ctx, node)
     local child = env.child(ctx.scope)
     -- Apply all negative narrowings for the else branch
     for i = 1, #all_narrowings do
-      apply_narrowing(ctx, child, all_narrowings[i], false)
+      for j = 1, #all_narrowings[i] do
+        apply_narrowing(ctx, child, all_narrowings[i][j], false)
+      end
     end
     local saved = ctx.scope
     ctx.scope = child
