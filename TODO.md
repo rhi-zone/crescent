@@ -96,9 +96,9 @@ Key design decisions:
 
 - [x] Infinite recursion in resolve_require: fixed with `_globally_resolving` module-level table.
 
-Lexer optimization path (see `docs/perf/log.md` for profiling data):
-- [ ] Kill `_buf` mechanism — scan identifiers/numbers/strings with pointer arithmetic, `ffi.string(src+start, len)` at end. Eliminates per-byte method calls, `string.char` + `table.concat` per token.
-- [ ] Source-referencing intern pool — FFI hash table keyed by `(buf_id, offset, len)` into source buffer, `memcmp` verification. Zero Lua string allocation in lex path. Requires source buffers alive while intern entries are referenced (aligns with mmap'd source for LSP). `pool:debug_str(id)` for diagnostics.
+Lexer optimization (see `docs/perf/log.md` for measurements):
+- [x] Kill `_buf` mechanism — pointer arithmetic + `ffi.string` at end (1.4x speedup)
+- [x] Source-referencing intern pool — FNV-1a hash + memcmp, zero Lua strings in lex path (5.3x total vs baseline)
 
 ### backlog
 - [x] Generic function inference (infer type params from call site args)

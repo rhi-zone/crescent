@@ -7,8 +7,6 @@ local ffi = require("ffi")
 local band = bit.band
 local char = string.char
 local format = string.format
-local sub = string.sub
-local tonumber = tonumber
 
 local defs = require("lib.type.static.v2.defs")
 local intern_mod = require("lib.type.static.v2.intern")
@@ -66,15 +64,15 @@ local EOF = 256  -- sentinel: no valid byte
 
 local uint8_ptr = ffi.typeof("const uint8_t*")
 
--- Escape table: byte -> replacement char (or nil)
+-- Escape table: byte -> replacement byte (or nil)
 local escapes = {
-    [97]  = "\a",  -- a
-    [98]  = "\b",  -- b
-    [102] = "\f",  -- f
-    [B_n] = "\n",  -- n
-    [B_r] = "\r",  -- r
-    [B_t] = "\t",  -- t
-    [B_v] = "\v",  -- v
+    [97]  = 7,    -- a -> \a
+    [98]  = 8,    -- b -> \b
+    [102] = 12,   -- f -> \f
+    [B_n] = 10,   -- n -> \n
+    [B_r] = 13,   -- r -> \r
+    [B_t] = 9,    -- t -> \t
+    [B_v] = 11,   -- v -> \v
 }
 
 -- Character classification (inline for hot path)
@@ -119,6 +117,7 @@ function M.new(source, filename, pool)
     pool = pool or intern_mod.new()
     local src = ffi.cast(uint8_ptr, source)
     local len = #source
+    local buf_id = intern_mod.register_buf(pool, src, source)
     local ls = setmetatable({
         src    = src,
         srclen = len,
@@ -129,6 +128,7 @@ function M.new(source, filename, pool)
         tk     = defs.TK_EOF,
         val    = 0,          -- token value (name_id or numval_id)
         pool   = pool,
+        _buf_id = buf_id,
         filename = filename or "?",
         -- lookahead storage
         _la_tk  = defs.TK_EOF,
@@ -141,7 +141,7 @@ function M.new(source, filename, pool)
         numval_next = 0,
         -- annotations captured during lex
         annotations = {},
-        -- save buffer for building strings/numbers
+        -- save buffer for building escape-sequence strings
         _buf = {},
         _bufn = 0,
     }, Lexer)
@@ -201,7 +201,7 @@ function Lexer:_incline()
 end
 
 ---------------------------------------------------------------------------
--- Save buffer (for building identifier/string/number text)
+-- Save buffer (only for escape-sequence strings)
 ---------------------------------------------------------------------------
 
 function Lexer:_buf_reset()
@@ -214,17 +214,10 @@ function Lexer:_buf_save(b)
     self._bufn = n
 end
 
-function Lexer:_buf_save_and_next()
-    self:_buf_save(self.b)
-    self:_nextbyte()
-end
-
-function Lexer:_buf_tostring(skip_start, skip_end)
-    skip_start = skip_start or 0
-    skip_end = skip_end or 0
+function Lexer:_buf_tostring()
     local t = {}
-    for i = 1 + skip_start, self._bufn - skip_end do
-        t[#t + 1] = char(self._buf[i])
+    for i = 1, self._bufn do
+        t[i] = char(self._buf[i])
     end
     return table.concat(t)
 end
@@ -245,44 +238,98 @@ end
 -- Long string / long comment
 ---------------------------------------------------------------------------
 
+-- Count separator level: self.b must be '[' or ']'.
+-- Returns count of '=' between matching brackets, or negative if no match.
+-- Advances past the bracket + equals + (matching bracket stays in self.b).
 function Lexer:_skip_sep()
     local count = 0
     local s = self.b
     assert(s == B_LBRK or s == B_RBRK)
-    self:_buf_save_and_next()
+    self:_nextbyte()
     while self.b == B_EQ do
-        self:_buf_save_and_next()
+        self:_nextbyte()
         count = count + 1
     end
     return self.b == s and count or (-count - 1)
 end
 
-function Lexer:_read_long_string(sep, ret_value)
-    self:_buf_save_and_next()  -- skip 2nd '['
+function Lexer:_read_long_string(sep)
+    -- self.b is on the 2nd '['. Advance past it.
+    self:_nextbyte()
     if is_newline(self.b) then self:_incline() end
+    -- Record content start
+    local start = self.pos - 1
+    if self.b == EOF then start = self.pos end
+    -- Scan for closing bracket
+    -- Long strings can contain newlines, so we need to track lines.
+    -- Content between open and close brackets (minus the brackets/separators).
+    local parts = nil  -- only allocate if we hit newlines (CR normalization)
+    local plain = true -- true if we can use a single ffi.string slice
     while true do
         if self.b == EOF then
-            self:error(ret_value and "unfinished long string" or "unfinished long comment")
+            self:error("unfinished long string")
         elseif self.b == B_RBRK then
-            local old_bufn = self._bufn
-            if self:_skip_sep() == sep then
-                self:_buf_save_and_next()
-                break
-            else
-                -- _skip_sep dirtied buffer but didn't match; keep contents
+            local content_end = self.pos - 1  -- position before ']'
+            local count = 0
+            self:_nextbyte()
+            while self.b == B_EQ do self:_nextbyte(); count = count + 1 end
+            if self.b == B_RBRK and count == sep then
+                self:_nextbyte()
+                if plain then
+                    return ffi.string(self.src + start, content_end - start)
+                else
+                    -- flush remaining plain segment
+                    if content_end > start then
+                        parts[#parts + 1] = ffi.string(self.src + start, content_end - start)
+                    end
+                    return table.concat(parts)
+                end
             end
+            -- Not a match — the bytes we consumed are part of content, continue
         elseif is_newline(self.b) then
-            self:_buf_save(B_NL)
-            self:_incline()
-            if not ret_value then self:_buf_reset() end
-        elseif ret_value then
-            self:_buf_save_and_next()
+            -- Normalize CR/CRLF/LFCR to LF
+            if plain then
+                if self.b == B_CR then
+                    -- Need to normalize, switch to parts mode
+                    plain = false
+                    parts = {}
+                    if self.pos - 1 > start then
+                        parts[#parts + 1] = ffi.string(self.src + start, self.pos - 1 - start)
+                    end
+                    parts[#parts + 1] = "\n"
+                    self:_incline()
+                    start = self.pos - 1
+                    if self.b == EOF then start = self.pos end
+                else
+                    -- LF: check if next is CR (LFCR), need normalization
+                    local next_pos = self.pos  -- pos after the LF byte
+                    if next_pos < self.srclen and self.src[next_pos] == B_CR then
+                        plain = false
+                        parts = {}
+                        if self.pos - 1 > start then
+                            parts[#parts + 1] = ffi.string(self.src + start, self.pos - 1 - start)
+                        end
+                        parts[#parts + 1] = "\n"
+                        self:_incline()
+                        start = self.pos - 1
+                        if self.b == EOF then start = self.pos end
+                    else
+                        self:_incline()
+                    end
+                end
+            else
+                -- Already in parts mode
+                if self.pos - 1 > start then
+                    parts[#parts + 1] = ffi.string(self.src + start, self.pos - 1 - start)
+                end
+                parts[#parts + 1] = "\n"
+                self:_incline()
+                start = self.pos - 1
+                if self.b == EOF then start = self.pos end
+            end
         else
             self:_nextbyte()
         end
-    end
-    if ret_value then
-        return self:_buf_tostring(2 + sep, 2 + sep)
     end
 end
 
@@ -317,7 +364,7 @@ function Lexer:_read_escape()
     local c = self:_nextbyte()  -- skip '\\'
     local esc = escapes[c]
     if esc then
-        self:_buf_save(string.byte(esc))
+        self:_buf_save(esc)
         self:_nextbyte()
     elseif c == B_x then  -- \xNN
         local h1 = hex_val(self:_nextbyte())
@@ -326,7 +373,7 @@ function Lexer:_read_escape()
         if h2 < 0 then self:error("invalid escape sequence") end
         self:_buf_save(h1 * 16 + h2)
         self:_nextbyte()
-    elseif c == B_z then  -- \z skip whitespace
+    elseif c == 122 then  -- \z skip whitespace (B_z = 122)
         self:_nextbyte()
         while true do
             if is_newline(self.b) then self:_incline()
@@ -359,16 +406,53 @@ function Lexer:_read_escape()
     end
 end
 
+-- Returns intern ID directly.
 function Lexer:_read_string(delim)
-    self:_nextbyte()  -- skip opening delimiter
-    while self.b ~= delim do
-        if self.b == EOF then self:error("unfinished string")
-        elseif is_newline(self.b) then self:error("unfinished string")
-        elseif self.b == B_BSLSH then self:_read_escape()
-        else self:_buf_save_and_next() end
+    -- self.b is on the opening delimiter. Skip it.
+    self:_nextbyte()
+    -- Fast path: scan forward looking for delimiter or backslash.
+    -- If no backslash, use intern_raw (zero Lua string allocation).
+    local start = self.pos - 1  -- pos of first content byte (already in self.b)
+    if self.b == EOF then start = self.pos end
+    while true do
+        local b = self.b
+        if b == delim then
+            -- End of string, no escapes encountered
+            local len = self.pos - 1 - start
+            local id = intern_mod.intern_raw(
+                self.pool, self.src + start, len, self._buf_id, start)
+            self:_nextbyte()  -- skip closing delimiter
+            return id
+        elseif b == EOF or is_newline(b) then
+            self:error("unfinished string")
+        elseif b == B_BSLSH then
+            -- Escape found: flush prefix into _buf, then process escapes
+            self:_buf_reset()
+            -- Copy bytes [start, pos-1) into _buf
+            local prefix_end = self.pos - 1
+            for i = start, prefix_end - 1 do
+                self:_buf_save(self.src[i])
+            end
+            -- Process this escape
+            self:_read_escape()
+            -- Continue with _buf for rest of string
+            while self.b ~= delim do
+                if self.b == EOF or is_newline(self.b) then
+                    self:error("unfinished string")
+                elseif self.b == B_BSLSH then
+                    self:_read_escape()
+                else
+                    self:_buf_save(self.b)
+                    self:_nextbyte()
+                end
+            end
+            self:_nextbyte()  -- skip closing delimiter
+            local str = self:_buf_tostring()
+            return intern_mod.intern(self.pool, str)
+        else
+            self:_nextbyte()
+        end
     end
-    self:_nextbyte()  -- skip closing delimiter
-    return self:_buf_tostring()
 end
 
 ---------------------------------------------------------------------------
@@ -376,19 +460,37 @@ end
 ---------------------------------------------------------------------------
 
 function Lexer:_read_number()
-    local xp = B_e  -- exponent marker: 'e' for decimal, 'p' for hex
+    -- Scan the number token using pointer arithmetic.
+    -- Numbers: digits, hex digits, '.', 'e'/'E'/'p'/'P' optionally followed by +/-.
+    -- We need to track the previous byte for the exponent +/- lookaback.
+    local start = self.pos - 1  -- pos of first byte (already in self.b)
+    local xp = B_e  -- exponent marker
     if self.b == B_0 then
-        self:_buf_save_and_next()
+        self:_nextbyte()
         if self.b == B_x or self.b == B_X then
             xp = B_p
         end
     end
-    while is_ident(self.b) or self.b == B_DOT
-        or ((self.b == B_MINUS or self.b == B_PLUS) and lower(self._buf[self._bufn] or 0) == xp) do
-        self:_buf_save(lower(self.b))
-        self:_nextbyte()
+    while true do
+        local b = self.b
+        if is_ident(b) or b == B_DOT then
+            self:_nextbyte()
+        elseif (b == B_MINUS or b == B_PLUS) then
+            -- Check previous byte for exponent marker
+            local prev = self.src[self.pos - 2]
+            if lower(prev) == xp then
+                self:_nextbyte()
+            else
+                break
+            end
+        else
+            break
+        end
     end
-    local str = self:_buf_tostring()
+    local str = ffi.string(self.src + start, self.pos - 1 - start)
+    if self.b == EOF then
+        str = ffi.string(self.src + start, self.srclen - start)
+    end
     local x = tonumber(str)
     if not x then self:error("malformed number") end
     return x
@@ -452,10 +554,6 @@ function Lexer:_capture_block_annotation(sep, ann_line, ann_col)
             self:error("unfinished long comment")
         elseif self.b == B_RBRK then
             -- Check for matching close
-            local save_pos = self.pos
-            local save_b = self.b
-            local save_col = self.col
-            -- Manual sep check without dirtying main buffer
             local count = 0
             self:_nextbyte()
             while self.b == B_EQ do self:_nextbyte(); count = count + 1 end
@@ -490,7 +588,6 @@ end
 ---------------------------------------------------------------------------
 
 function Lexer:_lex()
-    self:_buf_reset()
     while true do
         self._tk_line = self.line
         self._tk_col = self.col
@@ -505,16 +602,30 @@ function Lexer:_lex()
                 self.numval_next = id + 1
                 return defs.TK_NUMBER, id
             end
-            -- Identifier / keyword
-            repeat
-                self:_buf_save_and_next()
-            until not is_ident(self.b)
-            local s = self:_buf_tostring()
-            local kw_id = self.pool.map[s]
-            if kw_id ~= nil and kw_id < defs.NUM_KEYWORDS then
-                return kw_id, 0  -- keyword token = its intern ID
+            -- Identifier / keyword: scan forward with pointer arithmetic
+            local start = self.pos - 1  -- pos of first byte (already in self.b)
+            local src = self.src
+            local p = self.pos
+            local srclen = self.srclen
+            while p < srclen and is_ident(src[p]) do
+                p = p + 1
             end
-            local name_id = intern_mod.intern(self.pool, s)
+            -- Advance col for scanned bytes, then load next byte
+            self.col = self.col + (p - self.pos)
+            self.pos = p
+            -- Load next byte (like _nextbyte but we already set pos)
+            if self.pos < srclen then
+                self.b = src[self.pos]
+                self.pos = self.pos + 1
+                self.col = self.col + 1
+            else
+                self.b = EOF
+            end
+            local name_id = intern_mod.intern_raw(
+                self.pool, src + start, p - start, self._buf_id, start)
+            if name_id < defs.NUM_KEYWORDS then
+                return name_id, 0  -- keyword token = its intern ID
+            end
             return defs.TK_NAME, name_id
         end
 
@@ -534,9 +645,7 @@ function Lexer:_lex()
             self:_nextbyte()  -- skip second '-'
             if self.b == B_LBRK then
                 -- Possible long comment
-                self:_buf_reset()
                 local sep = self:_skip_sep()
-                self:_buf_reset()
                 if sep >= 0 then
                     -- Long comment: --[=*[ ... ]=*]
                     -- _skip_sep left self.b on the 2nd '['. Advance past it.
@@ -568,10 +677,9 @@ function Lexer:_lex()
 
         -- Long string
         elseif b == B_LBRK then
-            self:_buf_reset()
             local sep = self:_skip_sep()
             if sep >= 0 then
-                local str = self:_read_long_string(sep, true)
+                local str = self:_read_long_string(sep)
                 local id = intern_mod.intern(self.pool, str)
                 return defs.TK_STRING, id
             elseif sep == -1 then
@@ -602,7 +710,6 @@ function Lexer:_lex()
         elseif b == B_TILDE then
             self:_nextbyte()
             if self.b == B_EQ then self:_nextbyte(); return defs.TK_NE, 0 end
-            -- '~' alone is not a valid Lua token, but return it for error recovery
             self:error("unexpected character '~'")
 
         -- Colon / label
@@ -613,9 +720,7 @@ function Lexer:_lex()
 
         -- String literals
         elseif b == B_DQUOT or b == B_SQUOT then
-            self:_buf_reset()
-            local str = self:_read_string(b)
-            local id = intern_mod.intern(self.pool, str)
+            local id = self:_read_string(b)
             return defs.TK_STRING, id
 
         -- Dot / concat / dots / number starting with '.'
@@ -626,8 +731,12 @@ function Lexer:_lex()
                 if self.b == B_DOT then self:_nextbyte(); return defs.TK_DOTS, 0 end
                 return defs.TK_CONCAT, 0
             elseif is_digit(self.b) then
-                self:_buf_reset()
-                self:_buf_save(B_DOT)
+                -- Number starting with '.': rewind so _read_number sees the dot
+                -- After _nextbyte: pos is past the digit, digit is at pos-1,
+                -- dot is at pos-2. Rewind to make dot the "current byte".
+                self.pos = self.pos - 1
+                self.col = self.col - 1
+                self.b = B_DOT
                 local num = self:_read_number()
                 local id = self.numval_next
                 self.numvals[id] = num
