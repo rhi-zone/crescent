@@ -69,6 +69,7 @@
 - [x] Intrinsics ($Keys, $EachField, $EachUnion)
 - [x] Overload resolution (best-match scoring)
 - [x] setmetatable __index merging, __call metamethod
+- [x] `#field` metatable slot syntax — separate `meta` dict on table types; `#__add: fn` in annotations; setmetatable populates META_OPS into meta; unification checks meta fields
 
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
@@ -77,7 +78,7 @@
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
 - [ ] `pcall`/`xpcall` return type narrowing
 - [ ] For-in iterator return type tracking — `for k, v in pairs(t)` always gives `any` for k/v; need iterator protocol inference (ipairs/pairs over typed tables, custom iterators)
-- [ ] Metatable slot syntax: `#field` in type annotations means "this field lives in the metatable". E.g. `{ x: number, #__add: (Self, Self) -> Self, #__index: Self }`. Disambiguates metamethods from regular fields named `__add` etc. Extends naturally to all metamethods (__sub, __mul, __index, __newindex, __call, __len, __concat, ...). Type repr needs a `meta` table alongside `fields`. Unification checks meta fields separately.
+- [x] Metatable slot syntax: `#field` in type annotations — done (see above)
 - [ ] Structural operator dispatch — once `#field` syntax exists, BinaryExpression checks `#__add` on operand types (not `__add`), constrains var operands structurally, returns metamethod's result type. Unlocks linalg / custom numeric types.
 - [ ] Structural constraint propagation for send — `x:method(args)` on a var should constrain x to `{ method: (self, args...) -> T, ...row }` (mirrors field access on var).
 - [ ] Implicit-any warnings on unannotated params — after full function inference, warn if a param typevar is still completely unbound. Depends on structural constraint propagation above being complete first; otherwise too noisy.
