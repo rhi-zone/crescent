@@ -151,11 +151,16 @@ ExprRule.BinaryExpression = function(ctx, node)
     -- Metamethod dispatch: __add, __sub, etc. on either operand
     local mm = meta_op_ret(left, ARITH_META[op]) or meta_op_ret(right, ARITH_META[op])
     if mm then return mm end
+    -- Unbound vars: constrain to number (arithmetic requires numeric operands)
+    if left_r.tag == "var" then unify.unify(left_r, T.NUMBER()) end
+    if right_r.tag == "var" then unify.unify(right_r, T.NUMBER()) end
+    left_r = T.resolve(left)
+    right_r = T.resolve(right)
     -- Check operands are numeric (unions allowed if all members are numeric/nil)
     local function is_numeric(r)
       return r.tag == "any" or r.tag == "number" or r.tag == "integer"
         or (r.tag == "literal" and r.kind == "number")
-        or r.tag == "var" or r.tag == "nil"
+        or r.tag == "nil"
     end
     local function check_numeric(r, display_ty)
       if r.tag == "union" then
@@ -236,7 +241,7 @@ end
 local function is_concat_compatible(r)
   return r.tag == "any" or r.tag == "string" or r.tag == "number" or r.tag == "integer"
     or (r.tag == "literal" and (r.kind == "string" or r.kind == "number"))
-    or r.tag == "var" or r.tag == "nil"
+    or r.tag == "nil"
 end
 
 ExprRule.ConcatenateExpression = function(ctx, node)
@@ -248,6 +253,11 @@ ExprRule.ConcatenateExpression = function(ctx, node)
     if mm then
       if not concat_mm then concat_mm = mm end
     else
+      -- Unbound vars: constrain to string (concat requires string-or-number operands)
+      if r.tag == "var" then
+        unify.unify(r, T.STRING())
+        r = T.resolve(ty)
+      end
       local ok = true
       if r.tag == "union" then
         for i = 1, #r.types do
