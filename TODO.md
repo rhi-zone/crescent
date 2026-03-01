@@ -96,6 +96,10 @@ Key design decisions:
 
 - [x] Infinite recursion in resolve_require: fixed with `_globally_resolving` module-level table.
 
+Lexer optimization path (see `docs/perf/log.md` for profiling data):
+- [ ] Kill `_buf` mechanism — scan identifiers/numbers/strings with pointer arithmetic, `ffi.string(src+start, len)` at end. Eliminates per-byte method calls, `string.char` + `table.concat` per token.
+- [ ] Source-referencing intern pool — FFI hash table keyed by `(buf_id, offset, len)` into source buffer, `memcmp` verification. Zero Lua string allocation in lex path. Requires source buffers alive while intern entries are referenced (aligns with mmap'd source for LSP). `pool:debug_str(id)` for diagnostics.
+
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
@@ -118,7 +122,7 @@ Key design decisions:
 
 ## performance
 
-- [ ] Bench infrastructure (pure Lua, handgrown) — micro + macro; latency histograms; compare before/after on HTTP request path
+- [ ] Bench infrastructure (pure Lua, handgrown) — micro + macro; latency histograms; compare before/after on HTTP request path. v2 parser bench: `docs/perf/v2_parse.lua`; perf log: `docs/perf/log.md`
 - [ ] Write buffering — HTTP response assembly currently does many small `sock:send()` calls; gather into an iovec or corked buffer before flushing (TCP_CORK / TCP_NOPUSH via setsockopt FFI)
 - [ ] Zero-copy static file serving — `sendfile(2)` FFI wrapper for staticx; avoids read-into-Lua-string + write round-trip; meaningful for large files
 - [ ] `writev` / scatter-gather — single syscall for header + body chunks; pairs with write buffering above; FFI wrapper + iovec builder helper
