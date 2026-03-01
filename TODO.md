@@ -81,7 +81,7 @@
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
-- [ ] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Valid Lua (block comment between callee and arglist); consistent with `--[[: T ]]` family; col-based extraction associates it with the call. `_` leaves that param to inference, explicit args pre-bind vars before unification. TS lacks partial inference entirely.
+- [ ] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Valid Lua (block comment anywhere between callee and arglist, not necessarily same line); consistent with `--[[: T ]]` family. Association: annotation on any line in `(callee_end_line, open_paren_line]` — requires AST to track the call's opening paren line separately from the callee. `_` leaves that param to inference, explicit args pre-bind vars before unification. TS lacks partial inference entirely.
 - [ ] Parse LuaJIT FFI cdef blocks
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
