@@ -54,14 +54,16 @@ local expr_list, expr_table
 local parse_body, parse_block, parse_args
 
 local var_lookup = function (ast, ls)
+	local line, col = ls.linenumber, ls.tokencolumn
 	local name = lex_str(ls)
-	return ast:identifier(name)
+	return ast:identifier(name, line, col)
 end
 
 local expr_field = function (ast, ls, v)
 	ls:next() -- Skip dot or colon
+	local line, col = ls.linenumber, ls.tokencolumn
 	local key = lex_str(ls)
-	return ast:expr_property(v, key)
+	return ast:expr_property(v, key, line, col)
 end
 
 local expr_bracket = function (ast, ls)
@@ -96,20 +98,21 @@ end
 expr_simple = function (ast, ls)
 	local tk = ls.token
 	local val = ls.tokenval
+	local line, col = ls.linenumber, ls.tokencolumn
 	local e
-	if tk == "TK_number" then e = ast:literal(val)
-	elseif tk == "TK_string" then e = ast:literal(val)
-	elseif tk == "TK_nil" then e = ast:literal(nil)
-	elseif tk == "TK_true" then e = ast:literal(true)
-	elseif tk == "TK_false" then e = ast:literal(false)
+	if tk == "TK_number" then e = ast:literal(val, line, col)
+	elseif tk == "TK_string" then e = ast:literal(val, line, col)
+	elseif tk == "TK_nil" then e = ast:literal(nil, line, col)
+	elseif tk == "TK_true" then e = ast:literal(true, line, col)
+	elseif tk == "TK_false" then e = ast:literal(false, line, col)
 	elseif tk == "TK_dots" then
 		if not ls.fs.varargs then err_syntax(ls, "cannot use \"...\" outside a vararg function") end
 		e = ast:expr_vararg()
 	elseif tk == "{" then return expr_table(ast, ls)
 	elseif tk == "TK_function" then
 		ls:next()
-		local args, body, proto = parse_body(ast, ls, ls.linenumber, false)
-		return ast:expr_function(args, body, proto)
+		local args, body, proto = parse_body(ast, ls, line, false)
+		return ast:expr_function(args, body, proto, col)
 	else return expr_primary(ast, ls) end
 	ls:next()
 	return e
@@ -127,10 +130,10 @@ end
 expr_unop = function (ast, ls)
 	local tk = ls.token
 	if tk == "TK_not" or tk == "-" or tk == "#" then
-		local line = ls.linenumber
+		local line, col = ls.linenumber, ls.tokencolumn
 		ls:next()
 		local v = expr_binop(ast, ls, operator.unary_priority)
-		return ast:expr_unop(ls.token2str(tk), v, line)
+		return ast:expr_unop(ls.token2str(tk), v, line, col)
 	else
 		return expr_simple(ast, ls)
 	end
@@ -141,10 +144,10 @@ expr_binop = function (ast, ls, limit)
 	local v = expr_unop(ast, ls)
 	local op = ls.token2str(ls.token)
 	while operator.is_binop(op) and operator.left_priority(op) > limit do
-		local line = ls.linenumber
+		local line, col = ls.linenumber, ls.tokencolumn
 		ls:next()
 		local v2, nextop = expr_binop(ast, ls, operator.right_priority(op))
-		v = ast:expr_binop(op, v, v2, line)
+		v = ast:expr_binop(op, v, v2, line, col)
 		op = nextop
 	end
 	return v, op
@@ -157,7 +160,7 @@ expr_primary = function (ast, ls)
 	local v, vk
 	--[[Parse prefix expression]]
 	if ls.token == "(" then
-		local line = ls.linenumber
+		local line, col = ls.linenumber, ls.tokencolumn
 		ls:next()
 		vk, v = "expr", ast:expr_brackets(expr(ast, ls))
 		lex_match(ls, ")", "(", line)
@@ -165,20 +168,20 @@ expr_primary = function (ast, ls)
 		vk, v = "var", var_lookup(ast, ls)
 	else err_syntax(ls, "unexpected symbol") end
 	while true do --[[Parse multiple expression suffixes]]
-		local line = ls.linenumber
+		local line, col = ls.linenumber, ls.tokencolumn
 		if ls.token == "." then
 			vk, v = "indexed", expr_field(ast, ls, v)
 		elseif ls.token == "[" then
 			local key = expr_bracket(ast, ls)
-			vk, v = "indexed", ast:expr_index(v, key)
+			vk, v = "indexed", ast:expr_index(v, key, line, col)
 		elseif ls.token == ":" then
 			ls:next()
 			local key = lex_str(ls)
 			local args = parse_args(ast, ls)
-			vk, v = "call", ast:expr_method_call(v, key, args, line)
+			vk, v = "call", ast:expr_method_call(v, key, args, line, col)
 		elseif ls.token == "(" or ls.token == "TK_string" or ls.token == "{" then
 			local args = parse_args(ast, ls)
-			vk, v = "call", ast:expr_function_call(v, args, line)
+			vk, v = "call", ast:expr_function_call(v, args, line, col)
 		else break end
 	end
 	return v, vk
@@ -269,7 +272,7 @@ end
 
 local parse_assignment
 parse_assignment = function (ast, ls, vlist, var, vk)
-	local line = ls.linenumber
+	local line, col = ls.linenumber, ls.tokencolumn
 	checkcond(ls, vk == "var" or vk == "indexed", "syntax error")
 	vlist[#vlist+1] = var
 	if lex_opt(ls, ",") then
@@ -278,7 +281,7 @@ parse_assignment = function (ast, ls, vlist, var, vk)
 	else --[[Parse RHS]]
 		lex_check(ls, "=")
 		local exps = expr_list(ast, ls)
-		return ast:assignment_expr(vlist, exps, line)
+		return ast:assignment_expr(vlist, exps, line, col)
 	end
 end
 
@@ -293,11 +296,11 @@ local parse_call_assign = function (ast, ls)
 end
 
 local parse_local = function (ast, ls, _)
-	local line = ls.linenumber
+	local line, col = ls.linenumber, ls.tokencolumn
 	if lex_opt(ls, "TK_function") then -- Local function declaration
 		local name = lex_str(ls)
 		local args, body, proto = parse_body(ast, ls, line, false)
-		return ast:local_function_decl(name, args, body, proto)
+		return ast:local_function_decl(name, args, body, proto, col)
 	else -- Local variable declaration
 		local vl = {}
 		repeat -- Collect LHS
@@ -309,11 +312,11 @@ local parse_local = function (ast, ls, _)
 		else
 			exps = {}
 		end
-		return ast:local_decl(vl, exps, line)
+		return ast:local_decl(vl, exps, line, col)
 	end
 end
 
-local parse_func = function (ast, ls, line)
+local parse_func = function (ast, ls, line, col)
 	local needself = false
 	ls:next() -- Skip "function"
 	-- Parse function name
@@ -326,7 +329,7 @@ local parse_func = function (ast, ls, line)
 		v = expr_field(ast, ls, v)
 	end
 	local args, body, proto = parse_body(ast, ls, line, needself)
-	return ast:function_decl(v, args, body, proto)
+	return ast:function_decl(v, args, body, proto, col)
 end
 
 local parse_while = function (ast, ls, line)
@@ -393,7 +396,7 @@ end
 -- whether it must be the last one in a chunk
 local parse_stmt
 parse_stmt = function (ast, ls)
-	local line = ls.linenumber
+	local line, col = ls.linenumber, ls.tokencolumn
 	local stmt
 	if ls.token == "TK_if" then
 		stmt = parse_if(ast, ls, line)
@@ -410,7 +413,7 @@ parse_stmt = function (ast, ls)
 	elseif ls.token == "TK_repeat" then
 		stmt = parse_repeat(ast, ls, line)
 	elseif ls.token == "TK_function" then
-		stmt = parse_func(ast, ls, line)
+		stmt = parse_func(ast, ls, line, col)
 	elseif ls.token == "TK_local" then
 		ls:next()
 		stmt = parse_local(ast, ls, line)

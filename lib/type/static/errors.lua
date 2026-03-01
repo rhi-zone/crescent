@@ -21,21 +21,22 @@ function M.new()
   return { errors = {} }
 end
 
-function M.add(ctx, severity, file, line, message)
+function M.add(ctx, severity, file, line, col, message)
   ctx.errors[#ctx.errors + 1] = {
     severity = severity,
     file = file,
     line = line,
+    col = col,
     message = message,
   }
 end
 
-function M.error(ctx, file, line, message)
-  M.add(ctx, "error", file, line, message)
+function M.error(ctx, file, line, col, message)
+  M.add(ctx, "error", file, line, col, message)
 end
 
-function M.warning(ctx, file, line, message)
-  M.add(ctx, "warning", file, line, message)
+function M.warning(ctx, file, line, col, message)
+  M.add(ctx, "warning", file, line, col, message)
 end
 
 function M.has_errors(ctx)
@@ -62,6 +63,8 @@ function M.sort(ctx)
     if a.file ~= b.file then return (a.file or "") < (b.file or "") end
     local al, bl = a.line or 0, b.line or 0
     if al ~= bl then return al < bl end
+    local ac, bc = a.col or 0, b.col or 0
+    if ac ~= bc then return ac < bc end
     return (a.severity or "") < (b.severity or "")
   end)
 end
@@ -71,13 +74,18 @@ function M.format(ctx, source_lines)
   local out = {}
   for i = 1, #ctx.errors do
     local e = ctx.errors[i]
-    local prefix = e.file .. ":" .. (e.line or 0) .. ": " .. e.severity .. ": "
+    local loc = (e.line or 0) .. (e.col and e.col > 0 and (":" .. e.col) or "")
+    local prefix = e.file .. ":" .. loc .. ": " .. e.severity .. ": "
     out[#out + 1] = prefix .. e.message
-    -- Show source line if available
+    -- Show source line and caret if available
     if source_lines and e.line and source_lines[e.line] then
       local src_line = source_lines[e.line]
       local line_str = string.format("  %d | %s", e.line, src_line)
       out[#out + 1] = line_str
+      if e.col and e.col > 0 then
+        local pad = string.rep(" ", e.col + 4 + #tostring(e.line))
+        out[#out + 1] = pad .. "^"
+      end
     end
   end
   return table.concat(out, "\n")
@@ -100,6 +108,7 @@ function M.format_json(ctx)
     local e = ctx.errors[i]
     parts[#parts + 1] = '{"file":"' .. json_escape(e.file or "") ..
       '","line":' .. (e.line or 0) ..
+      ',"col":' .. (e.col or 0) ..
       ',"severity":"' .. json_escape(e.severity or "error") ..
       '","message":"' .. json_escape(e.message or "") .. '"}'
   end
@@ -117,7 +126,8 @@ function M.format_sarif(ctx)
       '","message":{"text":"' .. json_escape(e.message or "") ..
       '"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"' ..
       json_escape(e.file or "") ..
-      '"},"region":{"startLine":' .. (e.line or 0) .. '}}}]}'
+      '"},"region":{"startLine":' .. (e.line or 0) ..
+      ',"startColumn":' .. (e.col or 0) .. '}}}]}'
   end
   return '{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",' ..
     '"version":"2.1.0",' ..

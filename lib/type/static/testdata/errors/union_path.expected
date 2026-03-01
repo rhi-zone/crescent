@@ -1,3 +1,4 @@
-test.lua:10: error: argument 1: .address.zip — got "90210", expected number
+test.lua:10:12: error: argument 1: .address.zip — got "90210", expected number
   { address: { street: string, zip: ✗number (got "90210") } | nil, name: string }
   10 | format_user({ name = "alice", address = { street = "Main St", zip = "90210" } })
+                  ^

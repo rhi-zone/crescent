@@ -46,9 +46,9 @@ local function add_return(ctx, ret_types)
   end
 end
 
-local function report(ctx, line, msg)
+local function report(ctx, line, col, msg)
   local errors = require("lib.type.static.errors")
-  errors.error(ctx.err, ctx.filename, line, msg)
+  errors.error(ctx.err, ctx.filename, line, col or 0, msg)
 end
 
 ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ ExprRule.Literal = function(ctx, node)
   if type(v) == "string" then
     return T.literal("string", v)
   end
-  report(ctx, node.line, "unknown literal type '" .. type(v) .. "'")
+  report(ctx, node.line, node.col, "unknown literal type '" .. type(v) .. "'")
   return T.ANY()
 end
 
@@ -82,14 +82,14 @@ ExprRule.Identifier = function(ctx, node)
   local ty = env.lookup(ctx.scope, node.name)
   if ty then return ty end
   -- Unknown identifier
-  report(ctx, node.line, "unknown identifier '" .. node.name .. "'")
+  report(ctx, node.line, node.col, "unknown identifier '" .. node.name .. "'")
   return T.ANY()
 end
 
 ExprRule.Vararg = function(ctx, node)
   local ty = env.lookup(ctx.scope, "...")
   if ty then return ty end
-  report(ctx, node.line, "'...' used outside a vararg function")
+  report(ctx, node.line, node.col, "'...' used outside a vararg function")
   return T.ANY()
 end
 
@@ -143,12 +143,12 @@ ExprRule.BinaryExpression = function(ctx, node)
       if r.tag == "union" then
         for i = 1, #r.types do
           if not is_numeric(T.resolve(r.types[i])) then
-            report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(display_ty) .. "'")
+            report(ctx, node.line, node.col, "cannot perform arithmetic on '" .. T.display(display_ty) .. "'")
             return
           end
         end
       elseif not is_numeric(r) then
-        report(ctx, node.line, "cannot perform arithmetic on '" .. T.display(display_ty) .. "'")
+        report(ctx, node.line, node.col, "cannot perform arithmetic on '" .. T.display(display_ty) .. "'")
       end
     end
     check_numeric(left_r, left)
@@ -178,7 +178,7 @@ ExprRule.BinaryExpression = function(ctx, node)
     return T.BOOLEAN()
   end
 
-  report(ctx, node.line, "unknown binary operator '" .. op .. "'")
+  report(ctx, node.line, node.col, "unknown binary operator '" .. op .. "'")
   return T.ANY()
 end
 
@@ -192,7 +192,7 @@ ExprRule.LogicalExpression = function(ctx, node)
   if node.operator == "or" then
     return T.union({ left, right })
   end
-  report(ctx, node.line, "unknown logical operator '" .. node.operator .. "'")
+  report(ctx, node.line, node.col, "unknown logical operator '" .. node.operator .. "'")
   return T.ANY()
 end
 
@@ -211,7 +211,7 @@ ExprRule.UnaryExpression = function(ctx, node)
     if mm then return mm end
     return T.INTEGER()
   end
-  report(ctx, node.line, "unknown unary operator '" .. node.operator .. "'")
+  report(ctx, node.line, node.col, "unknown unary operator '" .. node.operator .. "'")
   return T.ANY()
 end
 
@@ -242,7 +242,7 @@ ExprRule.ConcatenateExpression = function(ctx, node)
         ok = is_concat_compatible(r)
       end
       if not ok then
-        report(ctx, node.line, "cannot concatenate '" .. T.display(ty) .. "'")
+        report(ctx, node.line, node.col, "cannot concatenate '" .. T.display(ty) .. "'")
       end
     end
   end
@@ -315,7 +315,7 @@ ExprRule.CallExpression = function(ctx, node)
       local mod_ty = resolve_require(ctx, mod_path)
       if mod_ty then return mod_ty end
     end
-    report(ctx, node.line, "cannot resolve require() with non-literal argument")
+    report(ctx, node.line, node.col, "cannot resolve require() with non-literal argument")
     return T.ANY()
   end
 
@@ -332,7 +332,7 @@ ExprRule.CallExpression = function(ctx, node)
       end
     end
     if #arg_types >= 1 then return arg_types[1] end
-    report(ctx, node.line, "assert() called with no arguments")
+    report(ctx, node.line, node.col, "assert() called with no arguments")
     return T.ANY()
   end
 
@@ -367,7 +367,7 @@ ExprRule.CallExpression = function(ctx, node)
       return arg_types[1]
     end
     if #arg_types >= 1 then return arg_types[1] end
-    report(ctx, node.line, "setmetatable() called with no arguments")
+    report(ctx, node.line, node.col, "setmetatable() called with no arguments")
     return T.ANY()
   end
 
@@ -397,7 +397,7 @@ ExprRule.CallExpression = function(ctx, node)
         end
       end
     end
-    check_call_args(ctx, inst_fn, arg_types, node.line)
+    check_call_args(ctx, inst_fn, arg_types, node.line, node.col)
     if #inst_fn.returns > 0 then
       return inst_fn.returns[1]
     end
@@ -439,13 +439,13 @@ ExprRule.CallExpression = function(ctx, node)
     end
     if best_fn then
       if ambiguous then
-        report(ctx, node.line, "ambiguous overload resolution")
+        report(ctx, node.line, node.col, "ambiguous overload resolution")
       end
-      check_call_args(ctx, best_fn, arg_types, node.line)
+      check_call_args(ctx, best_fn, arg_types, node.line, node.col)
       if #best_fn.returns > 0 then return best_fn.returns[1] end
       return T.NIL()
     end
-    report(ctx, node.line, "no matching overload")
+    report(ctx, node.line, node.col, "no matching overload")
     return T.ANY()
   end
 
@@ -458,7 +458,7 @@ ExprRule.CallExpression = function(ctx, node)
       for i = 2, #call_fn.params do
         method_params[#method_params + 1] = call_fn.params[i]
       end
-      check_call_args(ctx, T.func(method_params, call_fn.returns, call_fn.vararg), arg_types, node.line)
+      check_call_args(ctx, T.func(method_params, call_fn.returns, call_fn.vararg), arg_types, node.line, node.col)
       if #call_fn.returns > 0 then return call_fn.returns[1] end
       return T.NIL()
     end
@@ -480,7 +480,7 @@ ExprRule.CallExpression = function(ctx, node)
     return ret_var
   end
 
-  report(ctx, node.line, "cannot call type '" .. T.display(callee_ty) .. "'")
+  report(ctx, node.line, node.col, "cannot call type '" .. T.display(callee_ty) .. "'")
   return T.ANY()
 end
 
@@ -505,7 +505,7 @@ ExprRule.SendExpression = function(ctx, node)
         for i = 2, #ft.params do
           method_params[#method_params + 1] = ft.params[i]
         end
-        check_call_args(ctx, T.func(method_params, ft.returns, ft.vararg), arg_types, node.line)
+        check_call_args(ctx, T.func(method_params, ft.returns, ft.vararg), arg_types, node.line, node.col)
         if #ft.returns > 0 then return ft.returns[1] end
         return T.NIL()
       end
@@ -533,7 +533,7 @@ ExprRule.SendExpression = function(ctx, node)
             for i = 2, #ft.params do
               method_params[#method_params + 1] = ft.params[i]
             end
-            check_call_args(ctx, T.func(method_params, ft.returns, ft.vararg), arg_types, node.line)
+            check_call_args(ctx, T.func(method_params, ft.returns, ft.vararg), arg_types, node.line, node.col)
             if #ft.returns > 0 then return ft.returns[1] end
             return T.NIL()
           end
@@ -595,7 +595,7 @@ ExprRule.SendExpression = function(ctx, node)
 
   -- Report on concrete types (not any/var which legitimately fall through)
   if recv_ty.tag ~= "any" and recv_ty.tag ~= "var" then
-    report(ctx, node.line, "no method '" .. method_name .. "' on type '" .. T.display(recv_ty) .. "'")
+    report(ctx, node.line, node.col, "no method '" .. method_name .. "' on type '" .. T.display(recv_ty) .. "'")
   end
   return T.ANY()
 end
@@ -618,10 +618,10 @@ ExprRule.MemberExpression = function(ctx, node)
         if idx >= 1 and idx <= #obj_ty.elements then
           return obj_ty.elements[idx]
         end
-        report(ctx, node.line, "tuple index " .. idx .. " out of range (tuple has " .. #obj_ty.elements .. " elements)")
+        report(ctx, node.line, node.col, "tuple index " .. idx .. " out of range (tuple has " .. #obj_ty.elements .. " elements)")
         return T.NEVER()
       end
-      report(ctx, node.line, "tuple indexed with non-literal key '" .. T.display(key_ty) .. "'")
+      report(ctx, node.line, node.col, "tuple indexed with non-literal key '" .. T.display(key_ty) .. "'")
       return T.ANY()
     end
     if obj_ty.tag == "table" then
@@ -666,7 +666,7 @@ ExprRule.MemberExpression = function(ctx, node)
     if obj_ty.tag == "table" and not next(obj_ty.fields) and #obj_ty.indexers == 0 then
       -- Empty table — treat as open container, no error
     elseif obj_ty.tag ~= "any" then
-      report(ctx, node.line, "no matching indexer for key '" .. T.display(key_ty) .. "' on type '" .. T.display(obj_ty) .. "'")
+      report(ctx, node.line, node.col, "no matching indexer for key '" .. T.display(key_ty) .. "' on type '" .. T.display(obj_ty) .. "'")
     end
     return T.ANY()
   else
@@ -715,7 +715,7 @@ ExprRule.MemberExpression = function(ctx, node)
         return T.union(field_types)
       end
     end
-    report(ctx, node.line, "no field '" .. name .. "' on type '" .. T.display(obj_ty) .. "'")
+    report(ctx, node.line, node.col, "no field '" .. name .. "' on type '" .. T.display(obj_ty) .. "'")
     return T.ANY()
   end
 end
@@ -758,7 +758,7 @@ local function generalize_type(ty, level, seen)
   end
 end
 
-function check_call_args(ctx, fn_ty, arg_types, line)
+function check_call_args(ctx, fn_ty, arg_types, line, col)
   local colors = errors_mod.get_colors()
   for i = 1, #fn_ty.params do
     local expected = fn_ty.params[i]
@@ -795,7 +795,7 @@ function check_call_args(ctx, fn_ty, arg_types, line)
           msg = "argument " .. i .. ": cannot pass '" .. T.display(actual)
             .. "' where '" .. T.display(expected) .. "' expected"
         end
-        report(ctx, line, msg)
+        report(ctx, line, col, msg)
       end
     end
     -- Missing args are nil — only error if param is not optional
@@ -809,7 +809,7 @@ function resolve_require(ctx, mod_path)
 
   -- Prevent circular requires
   if ctx.resolving and ctx.resolving[mod_path] then
-    report(ctx, 0, "warning: circular require '" .. mod_path .. "'")
+    report(ctx, 0, 0, "warning: circular require '" .. mod_path .. "'")
     ctx.module_types[mod_path] = T.ANY()
     return T.ANY()
   end
@@ -914,7 +914,7 @@ function infer_expr(ctx, node)
   if not node then return T.NIL() end
   local rule = ExprRule[node.kind]
   if rule then return rule(ctx, node) end
-  report(ctx, node.line or 0, "unhandled expression kind '" .. tostring(node.kind) .. "'")
+  report(ctx, node.line or 0, node.col or 0, "unhandled expression kind '" .. tostring(node.kind) .. "'")
   return T.ANY()
 end
 
@@ -1081,7 +1081,7 @@ StmtRule.LocalDeclaration = function(ctx, node)
 
   for i = 1, #node.names do
     local name = node.names[i].name
-    local line = node.line
+    local line, col = node.line, node.col
 
     -- Check for annotation
     local ann = ctx.ann_map[line]
@@ -1091,7 +1091,7 @@ StmtRule.LocalDeclaration = function(ctx, node)
       if rhs_types[i] then
         local ok, err = unify.unify(rhs_types[i], ann_ty)
         if not ok then
-          report(ctx, line, "type mismatch: '" .. T.display(rhs_types[i])
+          report(ctx, line, col, "type mismatch: '" .. T.display(rhs_types[i])
             .. "' is not assignable to '" .. T.display(ann_ty) .. "'")
         end
       end
@@ -1194,7 +1194,7 @@ StmtRule.AssignmentExpression = function(ctx, node)
             end
           end
           if not ok then
-            report(ctx, node.line, "type mismatch: cannot assign '" .. T.display(rhs_ty)
+            report(ctx, node.line, node.col, "type mismatch: cannot assign '" .. T.display(rhs_ty)
               .. "' to '" .. T.display(existing) .. "'")
           end
         end
@@ -1222,7 +1222,7 @@ StmtRule.AssignmentExpression = function(ctx, node)
         else
           local ok, err = unify.unify(rhs_ty, obj_ty.fields[name].type)
           if not ok then
-            report(ctx, node.line, "field '" .. name .. "': " .. (err or "type mismatch"))
+            report(ctx, node.line, node.col, "field '" .. name .. "': " .. (err or "type mismatch"))
           end
         end
       elseif obj_ty and lhs.computed and obj_ty.tag == "table" then

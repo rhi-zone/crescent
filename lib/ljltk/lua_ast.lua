@@ -5,24 +5,24 @@ local build = function (kind, node)
 	return node
 end
 
-local ident = function (name, line)
-	return build("Identifier", { name = name, line = line })
+local ident = function (name, line, col)
+	return build("Identifier", { name = name, line = line, col = col })
 end
 
-local literal = function (value, line)
-	return build("Literal", { value = value, line = line })
+local literal = function (value, line, col)
+	return build("Literal", { value = value, line = line, col = col })
 end
 
-local field = function (obj, name, line)
-	return build("MemberExpression", { object = obj, property = ident(name), computed = false, line = line })
+local field = function (obj, name, line, col)
+	return build("MemberExpression", { object = obj, property = ident(name, line, col), computed = false, line = line, col = col })
 end
 
-local logical_binop = function (op, left, right, line)
-	return build("LogicalExpression", { operator = op, left = left, right = right, line = line })
+local logical_binop = function (op, left, right, line, col)
+	return build("LogicalExpression", { operator = op, left = left, right = right, line = line, col = col })
 end
 
-local binop = function (op, left, right, line)
-	return build("BinaryExpression", { operator = op, left = left, right = right, line = line })
+local binop = function (op, left, right, line, col)
+	return build("BinaryExpression", { operator = op, left = left, right = right, line = line, col = col })
 end
 
 local empty_table = function (line)
@@ -36,7 +36,7 @@ end
 
 local AST = { }
 
-local func_decl = function (id, body, params, vararg, locald, firstline, lastline)
+local func_decl = function (id, body, params, vararg, locald, firstline, lastline, col)
 	return build("FunctionDeclaration", {
 		id         = id,
 		body       = body,
@@ -46,24 +46,25 @@ local func_decl = function (id, body, params, vararg, locald, firstline, lastlin
 		firstline  = firstline,
 		lastline   = lastline,
 		line       = firstline,
+		col        = col,
 	})
 end
 
-local func_expr = function (body, params, vararg, firstline, lastline)
-	return build("FunctionExpression", { body = body, params = params, vararg = vararg, firstline = firstline, lastline = lastline })
+local func_expr = function (body, params, vararg, firstline, lastline, col)
+	return build("FunctionExpression", { body = body, params = params, vararg = vararg, firstline = firstline, lastline = lastline, col = col })
 end
 
-AST.expr_function = function (ast, args, body, proto)
-	return func_expr(body, args, proto.varargs, proto.firstline, proto.lastline)
+AST.expr_function = function (ast, args, body, proto, col)
+	return func_expr(body, args, proto.varargs, proto.firstline, proto.lastline, col)
 end
 
-AST.local_function_decl = function (ast, name, args, body, proto)
+AST.local_function_decl = function (ast, name, args, body, proto, col)
 	local id = ast:var_declare(name)
-	return func_decl(id, body, args, proto.varargs, true, proto.firstline, proto.lastline)
+	return func_decl(id, body, args, proto.varargs, true, proto.firstline, proto.lastline, col)
 end
 
-AST.function_decl = function (ast, path, args, body, proto)
-	return func_decl(path, body, args, proto.varargs, false, proto.firstline, proto.lastline)
+AST.function_decl = function (ast, path, args, body, proto, col)
+	return func_decl(path, body, args, proto.varargs, false, proto.firstline, proto.lastline, col)
 end
 
 AST.func_parameters_decl = function (ast, args, vararg)
@@ -81,29 +82,29 @@ AST.chunk = function (ast, body, chunkname, firstline, lastline)
 	return build("Chunk", { body = body, chunkname = chunkname, firstline = firstline, lastline = lastline })
 end
 
-AST.local_decl = function (ast, vlist, exps, line)
+AST.local_decl = function (ast, vlist, exps, line, col)
 	local ids = {}
 	for k = 1, #vlist do
 		ids[k] = ast:var_declare(vlist[k])
 	end
-	return build("LocalDeclaration", { names = ids, expressions = exps, line = line })
+	return build("LocalDeclaration", { names = ids, expressions = exps, line = line, col = col })
 end
 
-AST.assignment_expr = function (ast, vars, exps, line)
-	return build("AssignmentExpression", { left = vars, right = exps, line = line })
+AST.assignment_expr = function (ast, vars, exps, line, col)
+	return build("AssignmentExpression", { left = vars, right = exps, line = line, col = col })
 end
 
-AST.expr_index = function (ast, v, index, line)
-	return build("MemberExpression", { object = v, property = index, computed = true, line = line })
+AST.expr_index = function (ast, v, index, line, col)
+	return build("MemberExpression", { object = v, property = index, computed = true, line = line, col = col })
 end
 
-AST.expr_property = function (ast, v, prop, line)
-	local index = ident(prop, line)
-	return build("MemberExpression", { object = v, property = index, computed = false, line = line })
+AST.expr_property = function (ast, v, prop, line, col)
+	local index = ident(prop, line, col)
+	return build("MemberExpression", { object = v, property = index, computed = false, line = line, col = col })
 end
 
-AST.literal = function (ast, val)
-	return build("Literal", { value = val })
+AST.literal = function (ast, val, line, col)
+	return build("Literal", { value = val, line = line, col = col })
 end
 
 AST.expr_vararg = function (ast)
@@ -128,8 +129,8 @@ AST.expr_table = function (ast, keyvals, line)
 	return build("Table", { keyvals = keyvals, line = line })
 end
 
-AST.expr_unop = function (ast, op, v, line)
-	return build("UnaryExpression", { operator = op, argument = v, line = line })
+AST.expr_unop = function (ast, op, v, line, col)
+	return build("UnaryExpression", { operator = op, argument = v, line = line, col = col })
 end
 
 local concat_append = function (ts, node)
@@ -141,8 +142,8 @@ local concat_append = function (ts, node)
 	end
 end
 
-AST.expr_binop = function (ast, op, expa, expb, line)
-	local binop_body = (op ~= ".." and { operator = op, left = expa, right = expb, line = line })
+AST.expr_binop = function (ast, op, expa, expb, line, col)
+	local binop_body = (op ~= ".." and { operator = op, left = expa, right = expb, line = line, col = col })
 	if binop_body then
 		if op == "and" or op == "or" then
 			return build("LogicalExpression", binop_body)
@@ -153,21 +154,21 @@ AST.expr_binop = function (ast, op, expa, expb, line)
 		local terms = { }
 		concat_append(terms, expa)
 		concat_append(terms, expb)
-		return build("ConcatenateExpression", { terms = terms, line = expa.line })
+		return build("ConcatenateExpression", { terms = terms, line = expa.line, col = expa.col })
 	end
 end
 
-AST.identifier = function (ast, name)
-	return ident(name)
+AST.identifier = function (ast, name, line, col)
+	return ident(name, line, col)
 end
 
-AST.expr_method_call = function (ast, v, key, args, line)
-	local m = ident(key)
-	return build("SendExpression", { receiver = v, method = m, arguments = args, line = line })
+AST.expr_method_call = function (ast, v, key, args, line, col)
+	local m = ident(key, line, col)
+	return build("SendExpression", { receiver = v, method = m, arguments = args, line = line, col = col })
 end
 
-AST.expr_function_call = function (ast, v, args, line)
-	return build("CallExpression", { callee = v, arguments = args, line = line })
+AST.expr_function_call = function (ast, v, args, line, col)
+	return build("CallExpression", { callee = v, arguments = args, line = line, col = col })
 end
 
 AST.return_stmt = function (ast, exps, line)

@@ -106,6 +106,7 @@ end
 local nextchar = function (ls)
 	local c = ls.n > 0 and pop(ls) or fillbuf(ls)
 	ls.current = c
+	ls.column = ls.column + 1
 	return c
 end
 
@@ -137,6 +138,7 @@ local inclinenumber = function (ls)
 	--[[skip `\n\r` or `\r\n`]]
 	if curr_is_newline(ls) and ls.current ~= old then savespace_and_next(ls) end
 	ls.linenumber = ls.linenumber + 1
+	ls.column = 1
 end
 
 local skip_sep = function (ls)
@@ -314,6 +316,7 @@ end
 local llex = function (ls)
 	resetbuf(ls)
 	while true do
+		ls.tokencolumn = ls.column
 		local current = ls.current
 		if char_isident(current) then
 			--[[numeric literal]]
@@ -392,6 +395,7 @@ Lexer.next = function (ls)
 		ls.space = get_space_string(ls)
 	else
 		ls.token, ls.tokenval = ls.tklookahead, ls.tklookaheadval
+		ls.tokencolumn = ls.tokencolumnahead
 		ls.space = ls.spaceahead
 		ls.tklookahead = "TK_eof"
 	end
@@ -399,7 +403,10 @@ end
 
 Lexer.lookahead = function (ls)
 	assert(ls.tklookahead == "TK_eof")
+	local saved_col = ls.tokencolumn
 	ls.tklookahead, ls.tklookaheadval = llex(ls)
+	ls.tokencolumnahead = ls.tokencolumn
+	ls.tokencolumn = saved_col
 	ls.spaceahead = get_space_string(ls)
 	return ls.tklookahead
 end
@@ -413,6 +420,8 @@ local lex_setup = function (read_func, chunkname)
 		tklookahead = "TK_eof", --[[No look-ahead token.]]
 		linenumber = 1,
 		lastline = 1,
+		column = 0,
+		tokencolumn = 1,
 		read_func = read_func,
 		chunkname = chunkname,
 		space_buf = ""
@@ -423,6 +432,7 @@ local lex_setup = function (read_func, chunkname)
 		ls.n = ls.n - 2
 		ls.p = ls.p + 2
 		nextchar(ls)
+		ls.column = 1 --[[BOM bytes don't count as columns]]
 	end
 	if ls.current == "#" then
 		repeat
