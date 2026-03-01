@@ -79,8 +79,14 @@
 - [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.
 
 ### performance
+**CRITICAL: 1.5s for 6 files is unacceptable for a typechecker used in a dev loop.**
+Demote to "important, persistent" once root cause is profiled and a plan is in place.
+
 - [x] Infinite recursion in resolve_require: per-ctx circular detection missed cross-check cycles (A→B→A). Fixed with `_globally_resolving` module-level table. infer.lua now checks in ~1.3s (was infinite loop).
-- [ ] Module-level type cache: currently each `check_string` call re-typechecks all required modules. Add a global cache keyed by file path + mtime to avoid re-checking unchanged modules.
+- [ ] **Profile first**: run under `jit.p` / time individual phases (parse, infer, unify) to find the real bottleneck before optimising. Hypothesis: re-checking required modules on every `check_string` call dominates.
+- [ ] Module-level type cache: currently each `check_string` call re-typechecks all required modules from scratch. Add a global cache keyed by (file path, mtime) so unchanged deps are not re-checked. Likely the single biggest win.
+- [ ] Unification hot path: `T.resolve` does pointer chasing on every call; consider path compression in the union-find structure.
+- [ ] Avoid repeated `pairs()` / `ipairs()` over fields/indexers in hot unify paths — measure first.
 
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
