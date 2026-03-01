@@ -623,6 +623,11 @@ function M.extract(source)
   local line_num = 0
   local in_long_string = false
   local long_string_close = nil
+  -- Block annotation accumulator (for --[[:: and --[[ : multi-line forms).
+  -- Use "" as the inactive sentinel to avoid nil-narrowing false positives.
+  local block_ann_kind = ""  -- "" = inactive, "decl" | "signature" = accumulating
+  local block_ann_start = 0
+  local block_ann_lines = {}
 
   for line in (source .. "\n"):gmatch("([^\n]*)\n") do
     line_num = line_num + 1
@@ -633,6 +638,34 @@ function M.extract(source)
         in_long_string = false
         long_string_close = nil
       end
+      goto continue
+    end
+
+    -- Accumulate lines inside a multi-line block annotation.
+    -- Keep the nil resets OUTSIDE the narrowed `block_ann_kind ~= ""` block to
+    -- avoid a false positive from narrowing + nil-assignment.
+    local block_closed = false
+    if block_ann_kind ~= "" then
+      local close = line:find("]]", 1, true)
+      if close then
+        local piece = line:sub(1, close - 1):match("^%s*(.-)%s*$")
+        if #piece > 0 then block_ann_lines[#block_ann_lines + 1] = piece end
+        annotations[block_ann_start] = {
+          kind = block_ann_kind,
+          text = table.concat(block_ann_lines, " "),
+        }
+        block_closed = true
+      else
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if #trimmed > 0 then block_ann_lines[#block_ann_lines + 1] = trimmed end
+      end
+      if not block_closed then goto continue end
+    end
+    -- Reset outside the narrowed block (avoids assign-nil-to-narrowed false positive).
+    if block_closed then
+      block_ann_kind = ""
+      block_ann_start = 0
+      block_ann_lines = {}
       goto continue
     end
 
@@ -652,6 +685,45 @@ function M.extract(source)
         long_string_close = close_pat
         -- Still process annotations before the long string
       end
+    end
+
+    -- Block form --[[:: ... ]] (equivalent to --:: but allows multi-line).
+    -- Must check before --[[ : to avoid ambiguity.
+    local blk_decl = line:match("^%s*%-%-%[%[::(.*)$")
+    if blk_decl then
+      local close = blk_decl:find("]]", 1, true)
+      if close then
+        local text = blk_decl:sub(1, close - 1):match("^%s*(.-)%s*$")
+        if #text > 0 then
+          annotations[line_num] = { kind = "decl", text = text }
+        end
+      else
+        block_ann_kind = "decl"
+        block_ann_start = line_num
+        local trimmed = blk_decl:match("^%s*(.-)%s*$")
+        block_ann_lines = {}
+        if #trimmed > 0 then block_ann_lines[1] = trimmed end
+      end
+      goto continue
+    end
+
+    -- Block form --[[ : ... ]] (equivalent to --: but allows multi-line).
+    local blk_sig = line:match("^%s*%-%-%[%[:(.*)$")
+    if blk_sig then
+      local close = blk_sig:find("]]", 1, true)
+      if close then
+        local text = blk_sig:sub(1, close - 1):match("^%s*(.-)%s*$")
+        if #text > 0 then
+          annotations[line_num] = { kind = "signature", text = text }
+        end
+      else
+        block_ann_kind = "signature"
+        block_ann_start = line_num
+        local trimmed = blk_sig:match("^%s*(.-)%s*$")
+        block_ann_lines = {}
+        if #trimmed > 0 then block_ann_lines[1] = trimmed end
+      end
+      goto continue
     end
 
     -- --:: type declaration: entire line is a comment starting with --::
@@ -819,8 +891,28 @@ function M.build_map(source)
     local ann = raw[ln]
     if ann then
       if ann.kind == "signature" then
-        pending_sig = ann.text
-        pending_sig_line = ln
+        local text = ann.text:match("^%s*(.-)%s*$")
+        -- declare directive: --: declare name: type
+        local decl_name, decl_rest = text:match("^declare%s+([%a_][%w_]*)%s*:%s*(.+)$")
+        if decl_name then
+          local ok, ty = pcall(M.parse_type, decl_rest)
+          if ok then map[ln] = { kind = "value_decl", name = decl_name, type = ty } end
+        else
+          -- extend directive: --: extend name: { ... }
+          local ext_name, ext_rest = text:match("^extend%s+([%a_][%w_]*)%s*:%s*(.+)$")
+          if not ext_name then
+            -- extend without colon: extend name { ... }
+            ext_name, ext_rest = text:match("^extend%s+([%a_][%w_]*)%s*(%b{}.*)$")
+          end
+          if ext_name then
+            local ok, ty = pcall(M.parse_type, ext_rest)
+            if ok then map[ln] = { kind = "extend_decl", name = ext_name, type = ty } end
+          else
+            -- Regular signature: attach to next code line
+            pending_sig = text
+            pending_sig_line = ln
+          end
+        end
       elseif ann.kind == "eol_type" then
         local ok, ty = pcall(M.parse_type, ann.text)
         if ok then
