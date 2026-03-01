@@ -71,7 +71,7 @@
 - [x] setmetatable __index merging, __call metamethod
 
 ### backlog
-- [ ] Generic function inference (infer type params from call site args)
+- [x] Generic function inference (infer type params from call site args)
 - [ ] Parse LuaJIT FFI cdef blocks
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua

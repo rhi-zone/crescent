@@ -49,13 +49,16 @@ function M.table(fields, indexers, row)
 end
 
 function M.union(types)
-  -- Flatten nested unions and deduplicate
+  -- Flatten nested unions; eliminate `never` (bottom) and short-circuit on `any` (top).
   local flat = {}
   for i = 1, #types do
     local t = types[i]
+    if t.tag == "any" then return M.ANY() end  -- any dominates union
     if t.tag == "union" then
       for j = 1, #t.types do
-        flat[#flat + 1] = t.types[j]
+        local m = t.types[j]
+        if m.tag == "any" then return M.ANY() end
+        flat[#flat + 1] = m
       end
     elseif t.tag ~= "never" then
       flat[#flat + 1] = t

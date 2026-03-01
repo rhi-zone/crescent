@@ -722,3 +722,58 @@ assert.eq(narrowed_pos.tag, "table", "narrow_by_field positive keeps matching me
 
 local narrowed_neg = T.narrow_by_field(union_ty, "tag", "number", false)
 assert.eq(narrowed_neg.tag, "table", "narrow_by_field negative keeps non-matching member")
+
+---------------------------------------------------------------------------
+-- Phase 9: Generic function inference
+---------------------------------------------------------------------------
+
+-- any dominates union: any | X = any
+assert.eq(T.union({ T.ANY(), T.NIL() }).tag, "any", "union any | nil = any")
+assert.eq(T.union({ T.NIL(), T.ANY() }).tag, "any", "union nil | any = any")
+assert.eq(T.union({ T.STRING(), T.ANY(), T.NUMBER() }).tag, "any", "union with any short-circuits")
+-- non-any unions still work
+assert.eq(T.union({ T.NIL(), T.STRING() }).tag, "union", "nil | string stays union")
+
+-- apply: higher-order function return type flows from callback
+local ok_apply, errs_apply = checker.check([[
+local function apply(fn, x)
+  return fn(x)
+end
+local y = apply(function(n) return n + 1 end, 10)
+local z = apply(function(s) return s .. "!" end, "hello")
+]], "test.lua")
+assert.ok(ok_apply, "higher-order apply: " .. (errs_apply or ""))
+
+-- identity: return type matches param type at call sites
+local ok_id, errs_id = checker.check([[
+local function identity(x)
+  return x
+end
+local a = identity(42)
+local b = identity("hi")
+]], "test.lua")
+assert.ok(ok_id, "identity inference: " .. (errs_id or ""))
+
+-- transform (map-like): element and result types flow through callback
+local ok_map, errs_map = checker.check([[
+local function transform(list, fn)
+  local result = {}
+  for i = 1, #list do
+    result[i] = fn(list[i])
+  end
+  return result
+end
+local nums = transform({1, 2, 3}, function(x) return x * 2 end)
+local strs = transform({"a", "b"}, function(s) return s .. s end)
+]], "test.lua")
+assert.ok(ok_map, "map-like transform: " .. (errs_map or ""))
+
+-- recursive functions are not broken by the fix
+local ok_rec, errs_rec = checker.check([[
+local function fact(n)
+  if n <= 1 then return 1 end
+  return n * fact(n - 1)
+end
+local r = fact(5)
+]], "test.lua")
+assert.ok(ok_rec, "recursive function not broken: " .. (errs_rec or ""))

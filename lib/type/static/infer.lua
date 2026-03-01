@@ -408,9 +408,19 @@ ExprRule.CallExpression = function(ctx, node)
   end
 
   if callee_ty.tag == "var" then
-    -- Unbound var — likely a recursive or forward-declared call.
-    -- Don't bind the var to a partial function type (would pollute recursive call sites).
-    return T.ANY()
+    if callee_ty.recursive then
+      -- Recursive sentinel pre-bound for `local function f()` bodies.
+      -- Binding it here would cause subsequent recursive calls (once the var
+      -- resolves to a function) to run check_call_args and bind the param vars
+      -- to concrete types, destroying generality.
+      return T.ANY()
+    end
+    -- Infer return type by constraining the callee to be a callable.
+    -- Binds the callee var to func(arg_types -> ret_var) so the return type
+    -- is linked to the callee's type at call sites (enables higher-order inference).
+    local ret_var = T.typevar(ctx.scope.level)
+    unify.unify(callee_ty, T.func(arg_types, {ret_var}))
+    return ret_var
   end
 
   report(ctx, node.line, "cannot call type '" .. T.display(callee_ty) .. "'")
@@ -524,9 +534,24 @@ ExprRule.MemberExpression = function(ctx, node)
         end
       end
     end
+    if obj_ty.tag == "var" then
+      -- Constrain the var to have an indexer for this key type.
+      -- Mirrors non-computed field access: obj.name on a var creates a row-constrained table.
+      local elem_var = T.typevar(ctx.scope.level)
+      local key_r = T.resolve(key_ty)
+      local tbl
+      if key_r.tag == "literal" and key_r.kind == "string" then
+        -- Literal string key — treat as named field (consistent with obj.name on var)
+        tbl = T.table({ [key_r.value] = { type = elem_var, optional = false } }, {}, T.rowvar(ctx.scope.level))
+      else
+        tbl = T.table({}, {{ key = key_r, value = elem_var }})
+      end
+      unify.unify(obj_ty, tbl)
+      return elem_var
+    end
     if obj_ty.tag == "table" and not next(obj_ty.fields) and #obj_ty.indexers == 0 then
       -- Empty table — treat as open container, no error
-    elseif obj_ty.tag ~= "any" and obj_ty.tag ~= "var" then
+    elseif obj_ty.tag ~= "any" then
       report(ctx, node.line, "no matching indexer for key '" .. T.display(key_ty) .. "' on type '" .. T.display(obj_ty) .. "'")
     end
     return T.ANY()
@@ -923,7 +948,12 @@ StmtRule.LocalDeclaration = function(ctx, node)
       if resolved_ty.tag == "table" and ctx.pending_fields and ctx.pending_fields[name] then
         for field_name in pairs(ctx.pending_fields[name]) do
           if not resolved_ty.fields[field_name] then
-            resolved_ty.fields[field_name] = { type = T.typevar(ctx.scope.level), optional = false }
+            -- Mark as recursive sentinel: these are forward-reference placeholders for
+            -- `function M.foo()` declarations. They must not be constrained via var-callee
+            -- binding when called during other method bodies (same issue as local function).
+            local placeholder = T.typevar(ctx.scope.level)
+            placeholder.recursive = true
+            resolved_ty.fields[field_name] = { type = placeholder, optional = false }
           end
         end
         ctx.pending_fields[name] = nil
@@ -989,6 +1019,24 @@ StmtRule.AssignmentExpression = function(ctx, node)
             report(ctx, node.line, "field '" .. name .. "': " .. (err or "type mismatch"))
           end
         end
+      elseif obj_ty and lhs.computed and obj_ty.tag == "table" then
+        -- obj[key] = val: add or widen an indexer for this key type.
+        local key_ty = infer_expr(ctx, lhs.property)
+        local key_r = T.resolve(key_ty)
+        local found = false
+        for i = 1, #obj_ty.indexers do
+          local idxr = obj_ty.indexers[i]
+          local _, key_ok = unify.try_unify(idxr.key, key_r)
+          if key_ok then
+            -- Widen existing indexer value type to accept new rhs
+            unify.unify(rhs_ty, idxr.value)
+            found = true
+            break
+          end
+        end
+        if not found then
+          obj_ty.indexers[#obj_ty.indexers + 1] = { key = key_r, value = rhs_ty }
+        end
       end
     end
   end
@@ -999,7 +1047,11 @@ StmtRule.FunctionDeclaration = function(ctx, node)
   -- `local function f() ... f() ... end` needs `f` in scope during body inference.
   local id = node.id
   if id.kind == "Identifier" then
-    env.bind(ctx.scope, id.name, T.typevar(ctx.scope.level))
+    -- Mark as recursive sentinel: prevents var-callee binding from prematurely
+    -- constraining the param vars on subsequent recursive calls inside the body.
+    local sentinel = T.typevar(ctx.scope.level)
+    sentinel.recursive = true
+    env.bind(ctx.scope, id.name, sentinel)
   end
   local fn_ty = infer_function(ctx, node.params, node.body, node.vararg, node.firstline or node.line)
 
