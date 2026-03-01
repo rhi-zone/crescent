@@ -211,8 +211,10 @@ function M.generalize(ty, level)
   return ty
 end
 
--- Instantiate: replace generic vars with fresh vars at current level
-function M.instantiate(ty, level, mapping)
+-- Instantiate: replace generic vars with fresh vars at current level.
+-- mapping: var_id -> fresh_var (shared across recursion for consistent substitution)
+-- seen: table_identity -> copied_table (cycle detection for circular table types like M.__index = M)
+function M.instantiate(ty, level, mapping, seen)
   ty = types.resolve(ty)
   mapping = mapping or {}
   local tag = ty.tag
@@ -230,39 +232,52 @@ function M.instantiate(ty, level, mapping)
   if tag == "function" then
     local params = {}
     for i = 1, #ty.params do
-      params[i] = M.instantiate(ty.params[i], level, mapping)
+      params[i] = M.instantiate(ty.params[i], level, mapping, seen)
     end
     local returns = {}
     for i = 1, #ty.returns do
-      returns[i] = M.instantiate(ty.returns[i], level, mapping)
+      returns[i] = M.instantiate(ty.returns[i], level, mapping, seen)
     end
-    local vararg = ty.vararg and M.instantiate(ty.vararg, level, mapping)
-    return types.func(params, returns, vararg)
+    local vararg = ty.vararg and M.instantiate(ty.vararg, level, mapping, seen)
+    local fn = types.func(params, returns, vararg)
+    -- Preserve type_params list (from forall annotations) so call sites can
+    -- bind explicit type args via --[[:<T, _>]] syntax.
+    if ty.type_params then
+      local tp = {}
+      for i = 1, #ty.type_params do
+        tp[i] = M.instantiate(ty.type_params[i], level, mapping, seen)
+      end
+      fn.type_params = tp
+    end
+    return fn
   end
 
   if tag == "table" then
-    local fields = {}
+    -- Cycle detection: pre-register the result before recursing into fields.
+    -- Handles circular types like M.__index = M.
+    seen = seen or {}
+    if seen[ty] then return seen[ty] end
+    local result = types.table({}, {}, ty.row, {})
+    seen[ty] = result
     for name, f in pairs(ty.fields) do
-      fields[name] = { type = M.instantiate(f.type, level, mapping), optional = f.optional }
+      result.fields[name] = { type = M.instantiate(f.type, level, mapping, seen), optional = f.optional }
     end
-    local indexers = {}
     for i = 1, #ty.indexers do
-      indexers[i] = {
-        key = M.instantiate(ty.indexers[i].key, level, mapping),
-        value = M.instantiate(ty.indexers[i].value, level, mapping),
+      result.indexers[i] = {
+        key = M.instantiate(ty.indexers[i].key, level, mapping, seen),
+        value = M.instantiate(ty.indexers[i].value, level, mapping, seen),
       }
     end
-    local meta = {}
     for name, f in pairs(ty.meta or {}) do
-      meta[name] = { type = M.instantiate(f.type, level, mapping), optional = f.optional }
+      result.meta[name] = { type = M.instantiate(f.type, level, mapping, seen), optional = f.optional }
     end
-    return types.table(fields, indexers, ty.row, meta)
+    return result
   end
 
   if tag == "union" then
     local ts = {}
     for i = 1, #ty.types do
-      ts[i] = M.instantiate(ty.types[i], level, mapping)
+      ts[i] = M.instantiate(ty.types[i], level, mapping, seen)
     end
     return types.union(ts)
   end
@@ -270,7 +285,7 @@ function M.instantiate(ty, level, mapping)
   if tag == "intersection" then
     local ts = {}
     for i = 1, #ty.types do
-      ts[i] = M.instantiate(ty.types[i], level, mapping)
+      ts[i] = M.instantiate(ty.types[i], level, mapping, seen)
     end
     return types.intersection(ts)
   end

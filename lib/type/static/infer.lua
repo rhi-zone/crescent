@@ -379,6 +379,24 @@ ExprRule.CallExpression = function(ctx, node)
     -- Instantiate: freshen generic param typevars so each call site is
     -- independent (prevents mutation of the function's canonical type).
     local inst_fn = env.instantiate(callee_ty, ctx.scope.level)
+    -- Check for explicit type args: --[[:<T, U, _>]] on any line between
+    -- the callee and the opening paren (inclusive on both ends).
+    if inst_fn.type_params and #inst_fn.type_params > 0 then
+      local callee_line = (node.callee and node.callee.line) or node.line
+      for ln = callee_line, node.line do
+        local tann = ctx.ann_map[ln]
+        if tann and tann.kind == "type_args" then
+          for i, ta in ipairs(tann.types) do
+            local tv = inst_fn.type_params[i]
+            if tv and not (ta.tag == "named" and ta.name == "_") then
+              local resolved_ta = resolve_annotation_type(ctx, ta)
+              unify.unify(tv, resolved_ta)
+            end
+          end
+          break
+        end
+      end
+    end
     check_call_args(ctx, inst_fn, arg_types, node.line)
     if #inst_fn.returns > 0 then
       return inst_fn.returns[1]
@@ -1666,13 +1684,20 @@ resolve_annotation_type = function(ctx, ty, seen)
     -- Create fresh generic typevars for each type parameter, then substitute
     -- them into the body so the resulting function type is polymorphic.
     local mapping = {}
+    local type_params = {}
     for i = 1, #ty.type_params do
       local tv = T.typevar(0)
       tv.generic = true
       mapping[ty.type_params[i].name] = tv
+      type_params[i] = tv
     end
     local body = env.substitute(ty.body, mapping)
-    return resolve_annotation_type(ctx, body, seen)
+    local resolved = resolve_annotation_type(ctx, body, seen)
+    -- Attach type_params so call sites can bind explicit args via --[[:<T, _>]].
+    if resolved and resolved.tag == "function" then
+      resolved.type_params = type_params
+    end
+    return resolved
   end
 
   if tag == "match_type" then

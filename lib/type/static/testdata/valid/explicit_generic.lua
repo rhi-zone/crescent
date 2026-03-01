@@ -30,3 +30,17 @@ local v = unwrap({ value = "world" })
 local function first(arr)
   return arr[1]
 end
+
+-- Call-site explicit type args: --[[:<T, _>]] pre-binds type params before inference.
+-- The annotation appears between the callee token and the opening (.
+-- In Lua 5.1 / LuaJIT, ( cannot be on a new line from the callee (ambiguous call
+-- syntax), so the annotation must share the callee's line.
+
+--: <A, B>(A) -> B | nil
+local function cast_or_nil(x)
+  return nil
+end
+
+-- Explicit first arg, second inferred
+local r1 = cast_or_nil --[[:<string, _>]] ("hello")
+local r2 = cast_or_nil --[[:<integer, _>]] (42)

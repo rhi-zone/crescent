@@ -600,6 +600,16 @@ function M.parse_type(src)
   return ty
 end
 
+-- Parse a comma-separated list of types (handles nested generics like Dict<string, number>).
+function M.parse_type_list(src)
+  local parser = Parser.new(src)
+  local list = { parser:parse_type() }
+  while parser:match_char(",") do
+    list[#list + 1] = parser:parse_type()
+  end
+  return list
+end
+
 ---------------------------------------------------------------------------
 -- Extract annotations from source text
 ---------------------------------------------------------------------------
@@ -776,10 +786,17 @@ function M.extract(source)
       end
     end
 
-    -- Inline block comment annotations: --[[: T]] / --[[as T]] / --[[as! T]]
-    -- These use block comments so they must start with --[[ which find_comment_start catches
+    -- Inline block comment annotations: --[[:<T>]] / --[[: T]] / --[[as T]] / --[[as! T]]
+    -- --[[:<>]] must be checked before --[[: to avoid ambiguous prefix match.
     if comment_pos then
       local rest = line:sub(comment_pos)
+      -- Type application: --[[:<T, U, _>]] (explicit type args at call site)
+      -- Use greedy (.+) so nested generics like Dict<string, number> work.
+      local targs_text = rest:match("^%-%-%%[%%[:<(.+)>%]%]")
+      if targs_text then
+        annotations[line_num] = { kind = "type_args", text = targs_text }
+        goto continue
+      end
       local ty_text = rest:match("^%-%-%%[%%[:%s*(.-)%]%]")
       if ty_text then
         annotations[line_num] = { kind = "inline", text = ty_text, col = comment_pos }
@@ -952,6 +969,13 @@ function M.build_map(source)
         local ok, ty = pcall(M.parse_type, ann.text)
         if ok then
           map[ln] = { kind = "force_cast", type = ty, col = ann.col }
+        end
+      elseif ann.kind == "type_args" then
+        -- Call-site explicit type args: --[[:<T, U, _>]]
+        -- _ is a wildcard meaning "infer this param". Other names are resolved at call site.
+        local ok, type_list = pcall(M.parse_type_list, ann.text)
+        if ok then
+          map[ln] = { kind = "type_args", types = type_list }
         end
       end
     else
