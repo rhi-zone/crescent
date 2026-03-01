@@ -13,6 +13,12 @@ local checker = require("lib.type.static")
 
 local update_mode = os.getenv("FIXTURE_UPDATE") == "1"
 
+-- Strip ANSI escape sequences so snapshots are plain text regardless of
+-- whether colors are enabled in the current terminal.
+local function strip_ansi(s)
+  return (s:gsub("\27%[[%d;]*m", ""))
+end
+
 local function read_file(path)
   local f = io.open(path, "r")
   if not f then return nil end
@@ -60,7 +66,7 @@ for _, path in ipairs(error_fixtures) do
       assert.ok(src ~= nil, "cannot read: " .. path)
 
       local ok, errs = checker.check(src, "test.lua")
-      local actual = (errs or "") .. (ok and "" or "")
+      local actual = strip_ansi(errs or "")
       -- Normalise: ensure trailing newline is consistent
       if actual ~= "" and actual:sub(-1) ~= "\n" then actual = actual .. "\n" end
 

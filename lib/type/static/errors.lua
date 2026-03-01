@@ -3,6 +3,20 @@
 
 local M = {}
 
+-- ANSI color support. Disabled when NO_COLOR is set or TERM=dumb.
+-- Returns a table of escape strings (empty strings when color is off).
+function M.get_colors()
+  if os.getenv("NO_COLOR") or os.getenv("TERM") == "dumb" then
+    return { err = "", path = "", dim = "", reset = "" }
+  end
+  return {
+    err   = "\27[31m",   -- red   — mismatch annotation
+    path  = "\27[33m",   -- yellow — .field.path line
+    dim   = "\27[2m",    -- dim    — secondary context
+    reset = "\27[0m",
+  }
+end
+
 function M.new()
   return { errors = {} }
 end

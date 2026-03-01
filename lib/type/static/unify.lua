@@ -242,14 +242,26 @@ function M.unify(a, b)
               if ok then found = true; break end
             end
           end
+          -- Open table (row variable): additional fields may come from the row extension
+          if not found and a.row then found = true end
           if not found then
-            return false, "missing field '" .. name .. "'"
+            return false, "missing field '" .. name .. "'",
+              { kind = "missing_field", field = name }
           end
         end
       else
-        local ok, err = M.unify(af.type, bf.type)
+        local ok, err, detail = M.unify(af.type, bf.type)
         if not ok then
-          return false, "field '" .. name .. "': " .. (err or "type mismatch")
+          -- Prepend this field name to the error path
+          local d = detail or { kind = "mismatch", path = {},
+                                got = af.type, expected = bf.type }
+          if d.kind == "mismatch" then
+            local new_path = { name }
+            for i = 1, #d.path do new_path[#new_path + 1] = d.path[i] end
+            d = { kind = "mismatch", path = new_path,
+                  got = d.got, expected = d.expected }
+          end
+          return false, "field '" .. name .. "': " .. (err or "type mismatch"), d
         end
       end
     end
@@ -324,7 +336,8 @@ function M.unify(a, b)
     return true
   end
 
-  return false, "cannot assign '" .. types.display(a) .. "' to '" .. types.display(b) .. "'"
+  return false, "cannot assign '" .. types.display(a) .. "' to '" .. types.display(b) .. "'",
+    { kind = "mismatch", path = {}, got = a, expected = b }
 end
 
 -- Read-only unification: checks assignability without mutating type variables.

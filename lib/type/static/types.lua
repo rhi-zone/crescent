@@ -163,8 +163,9 @@ function M.resolve(ty)
   return ty
 end
 
--- Display a type as a string (for error messages)
-function M.display(ty)
+-- Display a type as a string (for error messages).
+-- seen: optional set of table types already being displayed (cycle detection).
+function M.display(ty, seen)
   ty = M.resolve(ty)
   local tag = ty.tag
 
@@ -184,20 +185,20 @@ function M.display(ty)
   if tag == "function" then
     local parts = {}
     for i = 1, #ty.params do
-      parts[#parts + 1] = M.display(ty.params[i])
+      parts[#parts + 1] = M.display(ty.params[i], seen)
     end
     if ty.vararg then
-      parts[#parts + 1] = "..." .. M.display(ty.vararg)
+      parts[#parts + 1] = "..." .. M.display(ty.vararg, seen)
     end
     local ret
     if #ty.returns == 0 then
       ret = "()"
     elseif #ty.returns == 1 then
-      ret = M.display(ty.returns[1])
+      ret = M.display(ty.returns[1], seen)
     else
       local rs = {}
       for i = 1, #ty.returns do
-        rs[#rs + 1] = M.display(ty.returns[i])
+        rs[#rs + 1] = M.display(ty.returns[i], seen)
       end
       ret = "(" .. table.concat(rs, ", ") .. ")"
     end
@@ -205,6 +206,10 @@ function M.display(ty)
   end
 
   if tag == "table" then
+    -- Cycle detection: circular table types (e.g. M.__index = M) display as "{...}"
+    seen = seen or {}
+    if seen[ty] then return "{...}" end
+    seen[ty] = true
     local parts = {}
     -- Sort field names for stable output
     local names = {}
@@ -215,11 +220,11 @@ function M.display(ty)
     for _, name in ipairs(names) do
       local f = ty.fields[name]
       local opt = f.optional and "?" or ""
-      parts[#parts + 1] = name .. opt .. ": " .. M.display(f.type)
+      parts[#parts + 1] = name .. opt .. ": " .. M.display(f.type, seen)
     end
     for i = 1, #ty.indexers do
       local idx = ty.indexers[i]
-      parts[#parts + 1] = "[" .. M.display(idx.key) .. "]: " .. M.display(idx.value)
+      parts[#parts + 1] = "[" .. M.display(idx.key, seen) .. "]: " .. M.display(idx.value, seen)
     end
     local meta_names = {}
     for name in pairs(ty.meta or {}) do meta_names[#meta_names + 1] = name end
@@ -227,15 +232,16 @@ function M.display(ty)
     for _, name in ipairs(meta_names) do
       local f = ty.meta[name]
       local opt = f.optional and "?" or ""
-      parts[#parts + 1] = "#" .. name .. opt .. ": " .. M.display(f.type)
+      parts[#parts + 1] = "#" .. name .. opt .. ": " .. M.display(f.type, seen)
     end
+    seen[ty] = nil
     return "{ " .. table.concat(parts, ", ") .. " }"
   end
 
   if tag == "union" then
     local parts = {}
     for i = 1, #ty.types do
-      parts[#parts + 1] = M.display(ty.types[i])
+      parts[#parts + 1] = M.display(ty.types[i], seen)
     end
     return table.concat(parts, " | ")
   end
@@ -243,7 +249,7 @@ function M.display(ty)
   if tag == "intersection" then
     local parts = {}
     for i = 1, #ty.types do
-      parts[#parts + 1] = M.display(ty.types[i])
+      parts[#parts + 1] = M.display(ty.types[i], seen)
     end
     return table.concat(parts, " & ")
   end
@@ -260,7 +266,7 @@ function M.display(ty)
     if ty.args and #ty.args > 0 then
       local parts = {}
       for i = 1, #ty.args do
-        parts[#parts + 1] = M.display(ty.args[i])
+        parts[#parts + 1] = M.display(ty.args[i], seen)
       end
       return ty.name .. "<" .. table.concat(parts, ", ") .. ">"
     end
@@ -270,13 +276,13 @@ function M.display(ty)
   if tag == "tuple" then
     local parts = {}
     for i = 1, #ty.elements do
-      parts[#parts + 1] = M.display(ty.elements[i])
+      parts[#parts + 1] = M.display(ty.elements[i], seen)
     end
     return "{ " .. table.concat(parts, ", ") .. " }"
   end
 
   if tag == "spread" then
-    return "..." .. M.display(ty.inner)
+    return "..." .. M.display(ty.inner, seen)
   end
 
   if tag == "nominal" then
@@ -284,7 +290,7 @@ function M.display(ty)
   end
 
   if tag == "match_type" then
-    return "match " .. M.display(ty.param) .. " { ... }"
+    return "match " .. M.display(ty.param, seen) .. " { ... }"
   end
 
   if tag == "intrinsic" then
@@ -294,15 +300,15 @@ function M.display(ty)
   if tag == "type_call" then
     local parts = {}
     for i = 1, #ty.args do
-      parts[#parts + 1] = M.display(ty.args[i])
+      parts[#parts + 1] = M.display(ty.args[i], seen)
     end
-    return M.display(ty.callee) .. "(" .. table.concat(parts, ", ") .. ")"
+    return M.display(ty.callee, seen) .. "(" .. table.concat(parts, ", ") .. ")"
   end
 
   if tag == "field_descriptor" then
     local prefix = ty.readonly and "readonly " or ""
     local opt = ty.optional and "?" or ""
-    return prefix .. M.display(ty.key) .. opt .. ": " .. M.display(ty.value)
+    return prefix .. M.display(ty.key, seen) .. opt .. ": " .. M.display(ty.value, seen)
   end
 
   if tag == "cdata" then
@@ -310,6 +316,57 @@ function M.display(ty)
   end
 
   return "?"
+end
+
+-- Render `ty` (the expected type) with the field at `path` annotated as a
+-- mismatch: ✗expected_type (got actual_type).
+--
+-- path    — list of field names leading to the mismatch, e.g. {"address","zip"}
+-- got_ty  — the actual (wrong) type found at the end of the path
+-- colors  — table {err, reset, ...} from errors.get_colors(); plain strings ok
+--
+-- Only table fields are walked; any other node type falls back to M.display.
+function M.display_annotated(ty, path, got_ty, colors)
+  ty = M.resolve(ty)
+  local c = colors or {}
+  local err_open  = c.err   or ""
+  local reset     = c.reset or ""
+
+  if #path == 0 then
+    -- Mismatch site: ✗expected_type (got actual_type)
+    return err_open .. "\xE2\x9C\x97" .. M.display(ty) ..
+           " (got " .. M.display(M.resolve(got_ty)) .. ")" .. reset
+  end
+
+  if ty.tag == "table" then
+    local target = path[1]
+    local rest   = {}
+    for i = 2, #path do rest[#rest + 1] = path[i] end
+
+    local names = {}
+    for name in pairs(ty.fields) do names[#names + 1] = name end
+    table.sort(names)
+
+    local parts = {}
+    for _, name in ipairs(names) do
+      local f   = ty.fields[name]
+      local opt = f.optional and "?" or ""
+      if name == target then
+        parts[#parts + 1] = name .. opt .. ": " ..
+          M.display_annotated(f.type, rest, got_ty, colors)
+      else
+        parts[#parts + 1] = name .. opt .. ": " .. M.display(f.type)
+      end
+    end
+    for i = 1, #ty.indexers do
+      local idx = ty.indexers[i]
+      parts[#parts + 1] = "[" .. M.display(idx.key) .. "]: " .. M.display(idx.value)
+    end
+    return "{ " .. table.concat(parts, ", ") .. " }"
+  end
+
+  -- Can't follow path through a non-table — fall back to plain display
+  return M.display(ty)
 end
 
 -- Subtract a type from a union: remove members that match `exclude`.

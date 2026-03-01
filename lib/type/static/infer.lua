@@ -6,6 +6,7 @@ local types = require("lib.type.static.types")
 local env = require("lib.type.static.env")
 local unify = require("lib.type.static.unify")
 local annotations = require("lib.type.static.annotations")
+local errors_mod = require("lib.type.static.errors")
 
 local T = types
 
@@ -740,20 +741,38 @@ local function generalize_type(ty, level, seen)
 end
 
 function check_call_args(ctx, fn_ty, arg_types, line)
+  local colors = errors_mod.get_colors()
   for i = 1, #fn_ty.params do
     local expected = fn_ty.params[i]
     local actual = arg_types[i]
     if actual then
-      local ok, err = unify.unify(actual, expected)
+      local ok, err, detail = unify.unify(actual, expected)
       if not ok then
         local exp_r = T.resolve(expected)
         local msg
-        -- For structural (table-to-table) mismatches, lead with the specific
-        -- diff (e.g. "missing field 'role'") and append both types as context.
-        if err and actual.tag == "table" and exp_r.tag == "table" then
-          msg = "argument " .. i .. ": " .. err
-            .. "\n    passed:   " .. T.display(actual)
-            .. "\n    expected: " .. T.display(exp_r)
+        if detail and actual.tag == "table" and exp_r.tag == "table" then
+          if detail.kind == "mismatch" and #detail.path > 0 then
+            -- Deep structural mismatch: path line + annotated expected type
+            local path_str = "." .. table.concat(detail.path, ".")
+            local got_r    = T.resolve(detail.got)
+            local exp_leaf = T.resolve(detail.expected)
+            msg = "argument " .. i .. ": "
+              .. colors.path .. path_str .. colors.reset
+              .. " — got " .. colors.err .. T.display(got_r) .. colors.reset
+              .. ", expected " .. T.display(exp_leaf)
+              .. "\n  " .. T.display_annotated(exp_r, detail.path, got_r, colors)
+          elseif detail.kind == "missing_field" then
+            -- Missing field: delta first, then passed/expected for context
+            msg = "argument " .. i .. ": missing field '"
+              .. colors.err .. detail.field .. colors.reset .. "'"
+              .. "\n    passed:   " .. T.display(actual)
+              .. "\n    expected: " .. T.display(exp_r)
+          else
+            -- Top-level table mismatch
+            msg = "argument " .. i .. ": " .. (err or "type mismatch")
+              .. "\n    passed:   " .. T.display(actual)
+              .. "\n    expected: " .. T.display(exp_r)
+          end
         else
           msg = "argument " .. i .. ": cannot pass '" .. T.display(actual)
             .. "' where '" .. T.display(expected) .. "' expected"
