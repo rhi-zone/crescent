@@ -168,6 +168,7 @@ M.OP_LEN                = 17
 M.LIT_STRING            = 0
 M.LIT_NUMBER            = 1
 M.LIT_BOOLEAN           = 2
+M.LIT_NIL               = 3
 
 -- Flag bits (nodes)
 M.FLAG_VARARG           = 1

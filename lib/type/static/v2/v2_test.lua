@@ -1,5 +1,5 @@
 -- lib/type/static/v2/v2_test.lua
--- Tests for the v2 typechecker foundation: defs, intern, arena, lex.
+-- Tests for the v2 typechecker foundation: defs, intern, arena, lex, parse, ann.
 
 local ffi = require("ffi")
 local assert = require("lib.test.assert")
@@ -7,6 +7,8 @@ local defs = require("lib.type.static.v2.defs")
 local intern = require("lib.type.static.v2.intern")
 local arena = require("lib.type.static.v2.arena")
 local lex = require("lib.type.static.v2.lex")
+local parse = require("lib.type.static.v2.parse")
+local ann = require("lib.type.static.v2.ann")
 
 ---------------------------------------------------------------------------
 -- defs.lua
@@ -507,5 +509,694 @@ assert.describe("lex: real Lua code", function()
         L:next(); assert.eq(L.tk, defs.TK_COMMA)
         L:next(); assert.eq(L.tk, defs.TK_NUMBER)     -- 3
         L:next(); assert.eq(L.tk, defs.TK_RBRACE)
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- parse.lua
+---------------------------------------------------------------------------
+
+-- Helper: parse source, return result table
+local function p(src)
+    return parse.parse(src, "test")
+end
+
+-- Helper: get the single statement from a chunk
+local function first_stmt(r)
+    local root = r.nodes:get(r.root)
+    local id = r.lists:get(root.data[0])
+    return r.nodes:get(id), id
+end
+
+assert.describe("parse: literals", function()
+    assert.it("parses number literal", function()
+        local r = p("return 42")
+        local ret = first_stmt(r)
+        assert.eq(ret.kind, defs.NODE_RETURN_STMT)
+        local expr_id = r.lists:get(ret.data[0])
+        local expr = r.nodes:get(expr_id)
+        assert.eq(expr.kind, defs.NODE_LITERAL)
+        assert.eq(expr.data[0], defs.LIT_NUMBER)
+    end)
+    assert.it("parses string literal", function()
+        local r = p('return "hello"')
+        local ret = first_stmt(r)
+        local expr = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(expr.kind, defs.NODE_LITERAL)
+        assert.eq(expr.data[0], defs.LIT_STRING)
+        assert.eq(intern.get(r.pool, expr.data[1]), "hello")
+    end)
+    assert.it("parses nil", function()
+        local r = p("return nil")
+        local ret = first_stmt(r)
+        local expr = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(expr.data[0], defs.LIT_NIL)
+    end)
+    assert.it("parses true and false", function()
+        local r = p("return true, false")
+        local ret = first_stmt(r)
+        assert.eq(ret.data[1], 2)
+        local t = r.nodes:get(r.lists:get(ret.data[0]))
+        local f = r.nodes:get(r.lists:get(ret.data[0] + 1))
+        assert.eq(t.data[0], defs.LIT_BOOLEAN)
+        assert.eq(t.data[1], 1)
+        assert.eq(f.data[0], defs.LIT_BOOLEAN)
+        assert.eq(f.data[1], 0)
+    end)
+    assert.it("parses vararg", function()
+        local r = p("return ...")
+        local ret = first_stmt(r)
+        local expr = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(expr.kind, defs.NODE_VARARG_EXPR)
+    end)
+end)
+
+assert.describe("parse: expressions", function()
+    assert.it("parses identifier", function()
+        local r = p("return x")
+        local ret = first_stmt(r)
+        local expr = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(expr.kind, defs.NODE_IDENTIFIER)
+        assert.eq(intern.get(r.pool, expr.data[0]), "x")
+    end)
+    assert.it("binary precedence: + vs *", function()
+        local r = p("return 1 + 2 * 3")
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.kind, defs.NODE_BINARY_EXPR)
+        assert.eq(top.data[0], defs.OP_ADD)
+        local rhs = r.nodes:get(top.data[2])
+        assert.eq(rhs.data[0], defs.OP_MUL)
+    end)
+    assert.it("right-associative power", function()
+        local r = p("return 2 ^ 3 ^ 4")
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.data[0], defs.OP_POW)
+        -- right child should also be POW
+        local rhs = r.nodes:get(top.data[2])
+        assert.eq(rhs.data[0], defs.OP_POW)
+    end)
+    assert.it("right-associative concat", function()
+        local r = p('return a .. b .. c')
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.data[0], defs.OP_CONCAT)
+        local rhs = r.nodes:get(top.data[2])
+        assert.eq(rhs.data[0], defs.OP_CONCAT)
+    end)
+    assert.it("unary minus and power", function()
+        -- -a^2 should be -(a^2)
+        local r = p("return -a^2")
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.kind, defs.NODE_UNARY_EXPR)
+        assert.eq(top.data[0], defs.OP_UNM)
+        local inner = r.nodes:get(top.data[1])
+        assert.eq(inner.kind, defs.NODE_BINARY_EXPR)
+        assert.eq(inner.data[0], defs.OP_POW)
+    end)
+    assert.it("not a and b", function()
+        local r = p("return not a and b")
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.kind, defs.NODE_BINARY_EXPR)
+        assert.eq(top.data[0], defs.OP_AND)
+        local lhs = r.nodes:get(top.data[1])
+        assert.eq(lhs.kind, defs.NODE_UNARY_EXPR)
+        assert.eq(lhs.data[0], defs.OP_NOT)
+    end)
+    assert.it("length operator", function()
+        local r = p("return #t")
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.kind, defs.NODE_UNARY_EXPR)
+        assert.eq(top.data[0], defs.OP_LEN)
+    end)
+end)
+
+assert.describe("parse: suffixed expressions", function()
+    assert.it("field access", function()
+        local r = p("return a.b")
+        local ret = first_stmt(r)
+        local expr = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(expr.kind, defs.NODE_FIELD_EXPR)
+        local obj = r.nodes:get(expr.data[0])
+        assert.eq(obj.kind, defs.NODE_IDENTIFIER)
+        assert.eq(intern.get(r.pool, expr.data[1]), "b")
+    end)
+    assert.it("index access", function()
+        local r = p("return a[1]")
+        local ret = first_stmt(r)
+        local expr = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(expr.kind, defs.NODE_INDEX_EXPR)
+    end)
+    assert.it("function call", function()
+        local r = p("return f(x, y)")
+        local ret = first_stmt(r)
+        local call = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(call.kind, defs.NODE_CALL_EXPR)
+        assert.eq(call.data[2], 2)  -- 2 args
+    end)
+    assert.it("method call", function()
+        local r = p("return a:b(x)")
+        local ret = first_stmt(r)
+        local call = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(call.kind, defs.NODE_METHOD_CALL)
+        assert.eq(intern.get(r.pool, call.data[1]), "b")
+        assert.eq(call.data[3], 1)  -- 1 arg
+    end)
+    assert.it("string call", function()
+        local r = p('f "hello"')
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_EXPR_STMT)
+        local call = r.nodes:get(stmt.data[0])
+        assert.eq(call.kind, defs.NODE_CALL_EXPR)
+        assert.eq(call.data[2], 1)
+    end)
+    assert.it("table call", function()
+        local r = p("f {1, 2}")
+        local stmt = first_stmt(r)
+        local call = r.nodes:get(stmt.data[0])
+        assert.eq(call.kind, defs.NODE_CALL_EXPR)
+        assert.eq(call.data[2], 1)
+    end)
+    assert.it("chained access", function()
+        local r = p("return a.b.c[d]:e(f)")
+        local ret = first_stmt(r)
+        local top = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(top.kind, defs.NODE_METHOD_CALL)
+    end)
+end)
+
+assert.describe("parse: table constructors", function()
+    assert.it("empty table", function()
+        local r = p("return {}")
+        local ret = first_stmt(r)
+        local tbl = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(tbl.kind, defs.NODE_TABLE_EXPR)
+        assert.eq(tbl.data[1], 0)
+    end)
+    assert.it("positional fields", function()
+        local r = p("return {1, 2, 3}")
+        local ret = first_stmt(r)
+        local tbl = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(tbl.data[1], 3)
+        local f0 = r.nodes:get(r.lists:get(tbl.data[0]))
+        assert.eq(f0.kind, defs.NODE_TABLE_FIELD)
+        assert.eq(f0.data[0], -1)  -- positional
+    end)
+    assert.it("named fields", function()
+        local r = p("return {x = 1, y = 2}")
+        local ret = first_stmt(r)
+        local tbl = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(tbl.data[1], 2)
+        local f0 = r.nodes:get(r.lists:get(tbl.data[0]))
+        assert.eq(f0.kind, defs.NODE_TABLE_FIELD)
+        assert.ok(f0.data[0] ~= -1)  -- has key
+    end)
+    assert.it("computed fields", function()
+        local r = p("return {[1] = 'a'}")
+        local ret = first_stmt(r)
+        local tbl = r.nodes:get(r.lists:get(ret.data[0]))
+        local f0 = r.nodes:get(r.lists:get(tbl.data[0]))
+        assert.eq(bit.band(f0.flags, defs.FLAG_COMPUTED), defs.FLAG_COMPUTED)
+    end)
+    assert.it("mixed fields", function()
+        local r = p("return {1, x = 2, [3] = 4}")
+        local ret = first_stmt(r)
+        local tbl = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(tbl.data[1], 3)
+    end)
+end)
+
+assert.describe("parse: function expressions", function()
+    assert.it("simple function", function()
+        local r = p("return function(a, b) return a + b end")
+        local ret = first_stmt(r)
+        local func = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(func.kind, defs.NODE_FUNC_EXPR)
+        assert.eq(func.data[1], 2)  -- 2 params
+        assert.eq(func.data[3], 1)  -- 1 body stmt
+    end)
+    assert.it("vararg function", function()
+        local r = p("return function(...) end")
+        local ret = first_stmt(r)
+        local func = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(func.kind, defs.NODE_FUNC_EXPR)
+        assert.eq(bit.band(func.flags, defs.FLAG_VARARG), defs.FLAG_VARARG)
+    end)
+    assert.it("params then vararg", function()
+        local r = p("return function(a, b, ...) end")
+        local ret = first_stmt(r)
+        local func = r.nodes:get(r.lists:get(ret.data[0]))
+        assert.eq(func.data[1], 2)  -- 2 named params
+        assert.eq(bit.band(func.flags, defs.FLAG_VARARG), defs.FLAG_VARARG)
+    end)
+end)
+
+assert.describe("parse: statements", function()
+    assert.it("local declaration", function()
+        local r = p("local x = 1")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_LOCAL_STMT)
+        assert.eq(stmt.data[1], 1)  -- 1 name
+        assert.eq(stmt.data[3], 1)  -- 1 expr
+    end)
+    assert.it("local multi-decl", function()
+        local r = p("local a, b, c = 1, 2")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.data[1], 3)  -- 3 names
+        assert.eq(stmt.data[3], 2)  -- 2 exprs
+    end)
+    assert.it("local without init", function()
+        local r = p("local x")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.data[1], 1)
+        assert.eq(stmt.data[3], 0)
+    end)
+    assert.it("assignment", function()
+        local r = p("x = 1")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_ASSIGN_STMT)
+        assert.eq(stmt.data[1], 1)  -- 1 target
+        assert.eq(stmt.data[3], 1)  -- 1 expr
+    end)
+    assert.it("multi-assignment", function()
+        local r = p("a, b = 1, 2")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.data[1], 2)
+        assert.eq(stmt.data[3], 2)
+    end)
+    assert.it("expression statement (call)", function()
+        local r = p("print(x)")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_EXPR_STMT)
+        local call = r.nodes:get(stmt.data[0])
+        assert.eq(call.kind, defs.NODE_CALL_EXPR)
+    end)
+    assert.it("return empty", function()
+        local r = p("return")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_RETURN_STMT)
+        assert.eq(stmt.data[1], 0)
+    end)
+    assert.it("return with values", function()
+        local r = p("return 1, 2, 3")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.data[1], 3)
+    end)
+    assert.it("break", function()
+        local r = p("while true do break end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_WHILE_STMT)
+        local body_id = r.lists:get(stmt.data[1])
+        local brk = r.nodes:get(body_id)
+        assert.eq(brk.kind, defs.NODE_BREAK_STMT)
+    end)
+    assert.it("goto and label", function()
+        local r = p("goto done; ::done::")
+        local root = r.nodes:get(r.root)
+        assert.eq(root.data[1], 2)  -- 2 statements
+        local goto_stmt = r.nodes:get(r.lists:get(root.data[0]))
+        assert.eq(goto_stmt.kind, defs.NODE_GOTO_STMT)
+        local label_stmt = r.nodes:get(r.lists:get(root.data[0] + 1))
+        assert.eq(label_stmt.kind, defs.NODE_LABEL_STMT)
+        -- Both should reference the same label name
+        assert.eq(goto_stmt.data[0], label_stmt.data[0])
+    end)
+end)
+
+assert.describe("parse: control flow", function()
+    assert.it("if/then/end", function()
+        local r = p("if x then return 1 end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_IF_STMT)
+        assert.eq(stmt.data[1], 1)  -- 1 clause
+    end)
+    assert.it("if/elseif/else", function()
+        local r = p("if a then x() elseif b then y() else z() end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_IF_STMT)
+        assert.eq(stmt.data[1], 3)  -- 3 clauses
+        -- else clause has test = -1
+        local else_id = r.lists:get(stmt.data[0] + 2)
+        local else_c = r.nodes:get(else_id)
+        assert.eq(else_c.kind, defs.NODE_IF_CLAUSE)
+        assert.eq(else_c.data[0], -1)
+    end)
+    assert.it("while loop", function()
+        local r = p("while x > 0 do x = x - 1 end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_WHILE_STMT)
+        -- test is a binary expr
+        local test = r.nodes:get(stmt.data[0])
+        assert.eq(test.kind, defs.NODE_BINARY_EXPR)
+    end)
+    assert.it("repeat/until", function()
+        local r = p("repeat x = x + 1 until x > 10")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_REPEAT_STMT)
+    end)
+    assert.it("do block", function()
+        local r = p("do local x = 1 end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_DO_STMT)
+        assert.eq(stmt.data[1], 1)  -- 1 body stmt
+    end)
+    assert.it("numeric for", function()
+        local r = p("for i = 1, 10, 2 do print(i) end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_FOR_NUM)
+        assert.eq(stmt.data[5], 1)  -- 1 body stmt
+        -- step is a node (not -1)
+        assert.ok(stmt.data[3] >= 0, "step should be a node id")
+    end)
+    assert.it("numeric for without step", function()
+        local r = p("for i = 1, 10 do end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_FOR_NUM)
+        assert.eq(stmt.data[3], -1)  -- no step
+    end)
+    assert.it("generic for", function()
+        local r = p("for k, v in pairs(t) do print(k, v) end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_FOR_IN)
+        assert.eq(stmt.data[1], 2)  -- 2 names
+        assert.eq(stmt.data[3], 1)  -- 1 expr (pairs(t))
+        assert.eq(stmt.data[5], 1)  -- 1 body stmt
+    end)
+end)
+
+assert.describe("parse: function declarations", function()
+    assert.it("global function", function()
+        local r = p("function foo(a) return a end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_FUNC_DECL)
+        local name = r.nodes:get(stmt.data[0])
+        assert.eq(name.kind, defs.NODE_IDENTIFIER)
+        assert.eq(intern.get(r.pool, name.data[0]), "foo")
+        assert.eq(stmt.data[2], 1)  -- 1 param
+    end)
+    assert.it("local function", function()
+        local r = p("local function bar(x) end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.kind, defs.NODE_FUNC_DECL)
+        assert.eq(bit.band(stmt.flags, defs.FLAG_LOCAL), defs.FLAG_LOCAL)
+    end)
+    assert.it("dotted function name", function()
+        local r = p("function M.foo.bar(x) end")
+        local stmt = first_stmt(r)
+        local name = r.nodes:get(stmt.data[0])
+        assert.eq(name.kind, defs.NODE_FIELD_EXPR)
+        assert.eq(intern.get(r.pool, name.data[1]), "bar")
+        local inner = r.nodes:get(name.data[0])
+        assert.eq(inner.kind, defs.NODE_FIELD_EXPR)
+    end)
+    assert.it("method declaration adds self", function()
+        local r = p("function M:method(a) end")
+        local stmt = first_stmt(r)
+        assert.eq(stmt.data[2], 2)  -- 2 params: self, a
+        local p0 = r.lists:get(stmt.data[1])
+        assert.eq(intern.get(r.pool, p0), "self")
+        local p1 = r.lists:get(stmt.data[1] + 1)
+        assert.eq(intern.get(r.pool, p1), "a")
+    end)
+    assert.it("vararg function declaration", function()
+        local r = p("function f(...) end")
+        local stmt = first_stmt(r)
+        assert.eq(bit.band(stmt.flags, defs.FLAG_VARARG), defs.FLAG_VARARG)
+    end)
+end)
+
+assert.describe("parse: real code", function()
+    assert.it("parses a complete module pattern", function()
+        local src = [[
+local M = {}
+
+function M.new(x, y)
+    return { x = x, y = y }
+end
+
+function M:length()
+    return (self.x^2 + self.y^2)^0.5
+end
+
+return M
+]]
+        local r = p(src)
+        local root = r.nodes:get(r.root)
+        assert.eq(root.kind, defs.NODE_CHUNK)
+        assert.eq(root.data[1], 4)  -- local, function, function, return
+    end)
+    assert.it("parses nested control flow", function()
+        local src = [[
+if a then
+    for i = 1, 10 do
+        if i > 5 then
+            break
+        end
+    end
+elseif b then
+    repeat
+        x = x + 1
+    until x > 100
+else
+    do
+        local y = 42
+    end
+end
+]]
+        local r = p(src)
+        local root = r.nodes:get(r.root)
+        assert.eq(root.data[1], 1)  -- 1 top-level if stmt
+    end)
+    assert.it("parses its own source files", function()
+        local files = {
+            "lib/type/static/v2/intern.lua",
+            "lib/type/static/v2/arena.lua",
+            "lib/type/static/v2/defs.lua",
+            "lib/type/static/v2/lex.lua",
+            "lib/type/static/v2/parse.lua",
+        }
+        for _, path in ipairs(files) do
+            local f = io.open(path, "r")
+            if f then
+                local src = f:read("*a")
+                f:close()
+                local ok, err = pcall(parse.parse, src, path)
+                assert.ok(ok, path .. ": " .. tostring(err))
+            end
+        end
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- ann.lua
+---------------------------------------------------------------------------
+
+assert.describe("ann: primitive types", function()
+    assert.it("parses number", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "number" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_NUMBER)
+    end)
+    assert.it("parses string", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "string" } }, nil, "test")
+        assert.eq(r.types:get(r.results[1].type_id).tag, defs.TAG_STRING)
+    end)
+    assert.it("parses nil", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "nil" } }, nil, "test")
+        assert.eq(r.types:get(r.results[1].type_id).tag, defs.TAG_NIL)
+    end)
+    assert.it("parses boolean", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "boolean" } }, nil, "test")
+        assert.eq(r.types:get(r.results[1].type_id).tag, defs.TAG_BOOLEAN)
+    end)
+    assert.it("parses any", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "any" } }, nil, "test")
+        assert.eq(r.types:get(r.results[1].type_id).tag, defs.TAG_ANY)
+    end)
+    assert.it("parses integer", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "integer" } }, nil, "test")
+        assert.eq(r.types:get(r.results[1].type_id).tag, defs.TAG_INTEGER)
+    end)
+end)
+
+assert.describe("ann: composite types", function()
+    assert.it("parses union", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "string | number" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_UNION)
+        assert.eq(t.data[1], 2)  -- 2 members
+    end)
+    assert.it("parses nullable", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "string?" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_UNION)
+        assert.eq(t.data[1], 2)  -- string | nil
+    end)
+    assert.it("parses array", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "number[]" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        -- Should have indexer [number]: number
+        assert.eq(t.data[3], 2)  -- indexer list len (key_type, val_type)
+    end)
+    assert.it("parses function type", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "(number, string) -> boolean" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_FUNCTION)
+        assert.eq(t.data[1], 2)  -- 2 params
+        assert.eq(t.data[3], 1)  -- 1 return
+    end)
+    assert.it("parses function with multi-return", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "(string) -> (number, string)" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_FUNCTION)
+        assert.eq(t.data[1], 1)  -- 1 param
+        assert.eq(t.data[3], 2)  -- 2 returns
+    end)
+    assert.it("parses table type", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ x: number, y?: string }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        assert.eq(t.data[1], 2)  -- 2 fields
+        -- Second field should be optional
+        local f1_idx = r.lists:get(t.data[0] + 1)
+        local f1 = r.fields:get(f1_idx)
+        assert.eq(f1.optional, 1)
+    end)
+    assert.it("parses table with indexer", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ [string]: number }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        assert.eq(t.data[3], 2)  -- indexer list: (key_type, val_type)
+    end)
+    assert.it("parses named type", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "Foo" } }, pool, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_NAMED)
+        assert.eq(intern.get(pool, t.data[0]), "Foo")
+    end)
+    assert.it("parses generic instantiation", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "Array<number>" } }, pool, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_NAMED)
+        assert.eq(intern.get(pool, t.data[0]), "Array")
+        assert.eq(t.data[2], 1)  -- 1 type arg
+    end)
+    assert.it("parses forall", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "<T>(T) -> T" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_FORALL)
+        assert.eq(t.data[1], 1)  -- 1 type param
+        -- body should be a function
+        local body = r.types:get(t.data[2])
+        assert.eq(body.tag, defs.TAG_FUNCTION)
+    end)
+    assert.it("parses string literal type", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = '"hello"' } }, pool, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_LITERAL)
+        assert.eq(t.data[0], defs.LIT_STRING)
+        assert.eq(intern.get(pool, t.data[1]), "hello")
+    end)
+    assert.it("parses intrinsic", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "$Keys<Point>" } }, pool, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TYPE_CALL)
+        local callee = r.types:get(t.data[0])
+        assert.eq(callee.tag, defs.TAG_INTRINSIC)
+    end)
+end)
+
+assert.describe("ann: declarations", function()
+    assert.it("parses simple type alias", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_DECL, content = "Name = string" } }, pool, "test")
+        local res = r.results[1]
+        assert.eq(res.kind, defs.ANN_DECL)
+        assert.eq(intern.get(pool, res.name_id), "Name")
+        assert.eq(r.types:get(res.type_id).tag, defs.TAG_STRING)
+    end)
+    assert.it("parses generic type alias", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_DECL, content = "Pair<A, B> = { first: A, second: B }" } }, pool, "test")
+        local res = r.results[1]
+        assert.eq(intern.get(pool, res.name_id), "Pair")
+        assert.eq(res.type_params_len, 2)
+        assert.eq(r.types:get(res.type_id).tag, defs.TAG_TABLE)
+    end)
+    assert.it("parses newtype", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_DECL, content = "newtype UserId = number" } }, pool, "test")
+        local res = r.results[1]
+        assert.ok(res.newtype)
+        assert.eq(intern.get(pool, res.name_id), "UserId")
+        assert.eq(r.types:get(res.type_id).tag, defs.TAG_NOMINAL)
+    end)
+end)
+
+assert.describe("ann: match types", function()
+    assert.it("parses match type", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE,
+                content = "match T { number => string, boolean => string }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_MATCH_TYPE)
+        assert.eq(t.data[2], 4)  -- 4 items in arms list (2 pairs)
+    end)
+end)
+
+assert.describe("ann: integration with parser", function()
+    assert.it("round-trip: parse source with annotations, then parse annotations", function()
+        local src = [[
+--: number
+local x = 1
+--:: Pair<A, B> = { first: A, second: B }
+--: string | number
+local y
+]]
+        local r = parse.parse(src, "test")
+        local ann_result = ann.parse_annotations(r.lexer.annotations, r.pool, "test")
+        -- Line 1: type annotation = number
+        assert.ok(ann_result.results[1])
+        assert.eq(ann_result.results[1].kind, defs.ANN_TYPE)
+        assert.eq(r.types or true, true)  -- just checking it doesn't crash
+        local t1 = ann_result.types:get(ann_result.results[1].type_id)
+        assert.eq(t1.tag, defs.TAG_NUMBER)
+        -- Line 3: declaration
+        assert.ok(ann_result.results[3])
+        assert.eq(ann_result.results[3].kind, defs.ANN_DECL)
+        -- Line 4: union
+        assert.ok(ann_result.results[4])
+        local t4 = ann_result.types:get(ann_result.results[4].type_id)
+        assert.eq(t4.tag, defs.TAG_UNION)
     end)
 end)

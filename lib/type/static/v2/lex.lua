@@ -660,8 +660,8 @@ function Lexer:next()
     if self._la_valid then
         self.tk   = self._la_tk
         self.val  = self._la_val
-        self.line = self._la_line
-        self.col  = self._la_col
+        self._tk_line_out = self._la_line
+        self._tk_col_out  = self._la_col
         self._la_valid = false
         return self.tk
     end
