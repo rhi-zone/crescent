@@ -5,6 +5,14 @@ local types = require("lib.type.static.types")
 
 local M = {}
 
+-- Meta ops supported natively by primitive types (no explicit __meta declaration needed).
+local NUMERIC_META = {
+  __add=true, __sub=true, __mul=true, __div=true,
+  __mod=true, __pow=true, __unm=true,
+  __lt=true, __le=true, __concat=true,
+}
+local STRING_META = { __concat=true, __len=true, __lt=true, __le=true }
+
 -- Occurs check: does var `v` appear in type `ty`?
 local function occurs(v, ty)
   ty = types.resolve(ty)
@@ -235,6 +243,28 @@ function M.unify(a, b)
       end
     end
     return true
+  end
+
+  -- Primitive types satisfy meta-only table constraints for their built-in ops.
+  -- e.g. number satisfies { #__add: ... } because numbers implement arithmetic natively.
+  -- This is needed at call sites when a param was constrained via a meta_constraint.
+  if b.tag == "table" and next(b.fields) == nil and #b.indexers == 0 then
+    local ops
+    if a.tag == "number" or a.tag == "integer"
+      or (a.tag == "literal" and a.kind == "number") then
+      ops = NUMERIC_META
+    elseif a.tag == "string"
+      or (a.tag == "literal" and a.kind == "string") then
+      ops = STRING_META
+    end
+    if ops then
+      for mname in pairs(b.meta or {}) do
+        if not ops[mname] then
+          return false, types.display(a) .. " does not support #" .. mname
+        end
+      end
+      return true
+    end
   end
 
   -- Table types: structural subtyping

@@ -116,6 +116,15 @@ ExprRule.ExpressionValue = function(ctx, node)
   return infer_expr(ctx, node.value)
 end
 
+-- Build a meta-only table constraint: { #meta_name: (p1..pN) -> ret, ...row }.
+-- Uses fresh typevars so there is no recursive-type issue when binding a var operand.
+local function meta_constraint(level, meta_name, arity)
+  local params = {}
+  for i = 1, arity do params[i] = T.typevar(level) end
+  local fn_ty = T.func(params, { T.typevar(level) })
+  return T.table({}, {}, T.rowvar(level), { [meta_name] = { type = fn_ty, optional = false } })
+end
+
 -- Get the return type produced by metamethod op_name on ty.
 -- Returns the first return type if found, T.ANY() if metamethod exists but returns nothing,
 -- or nil if the type has no such metamethod.
@@ -151,13 +160,24 @@ ExprRule.BinaryExpression = function(ctx, node)
     -- Metamethod dispatch: __add, __sub, etc. on either operand
     local mm = meta_op_ret(left, ARITH_META[op]) or meta_op_ret(right, ARITH_META[op])
     if mm then return mm end
+    -- Unbound vars: constrain to "has #__add" (or whichever op) using fresh typevars.
+    -- This avoids implicit-any warnings while accepting custom types with metamethods.
+    -- Primitives satisfying this constraint are handled in unify.unify.
+    local meta_name = ARITH_META[op]
+    if left_r.tag == "var" then
+      unify.unify(left_r, meta_constraint(ctx.scope.level, meta_name, 2))
+    end
+    if right_r.tag == "var" then
+      unify.unify(right_r, meta_constraint(ctx.scope.level, meta_name, 2))
+    end
     -- Check operands are numeric (unions allowed if all members are numeric/nil)
-    -- var is accepted without constraining: arithmetic is valid on any type with __add,
-    -- so we can't safely bind a var to number here.
+    -- Meta-only tables are arithmetic constraint types (e.g. { #__sub: ... } bound from a
+    -- previous arith use of the same var) and are accepted as numeric-capable.
     local function is_numeric(r)
       return r.tag == "any" or r.tag == "number" or r.tag == "integer"
         or (r.tag == "literal" and r.kind == "number")
         or r.tag == "var" or r.tag == "nil"
+        or (r.tag == "table" and next(r.fields) == nil and #r.indexers == 0)
     end
     local function check_numeric(r, display_ty)
       if r.tag == "union" then
@@ -250,6 +270,9 @@ ExprRule.ConcatenateExpression = function(ctx, node)
     if mm then
       if not concat_mm then concat_mm = mm end
     else
+      if r.tag == "var" then
+        unify.unify(r, meta_constraint(ctx.scope.level, "__concat", 2))
+      end
       local ok = true
       if r.tag == "union" then
         for i = 1, #r.types do
