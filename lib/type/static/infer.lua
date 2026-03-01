@@ -26,6 +26,7 @@ local function new_ctx(err_ctx, source, filename, ann_map, scope)
     return_types = {},    -- stack of return type collectors
     module_types = {},    -- cache: module path -> type
     inferred_anns = {},   -- { line, text } entries for --annotate
+    nil_vars = {},        -- set of definitely-nil local variable names at current point
   }
 end
 
@@ -49,6 +50,18 @@ end
 local function report(ctx, line, col, msg)
   local errors = require("lib.type.static.errors")
   errors.error(ctx.err, ctx.filename, line, col or 0, msg)
+end
+
+---------------------------------------------------------------------------
+-- nil_vars helpers
+---------------------------------------------------------------------------
+
+local function copy_set(t)
+  local r = {} for k, v in pairs(t) do r[k] = v end return r
+end
+
+local function intersect_sets(a, b)
+  local r = {} for k in pairs(a) do if b[k] then r[k] = true end end return r
 end
 
 ---------------------------------------------------------------------------
@@ -494,6 +507,13 @@ ExprRule.SendExpression = function(ctx, node)
   recv_ty = T.resolve(recv_ty)
   local method_name = node.method.name
 
+  -- Nil variable check: catches `local x; x:method()` without disturbing typevar machinery
+  if node.receiver.kind == "Identifier" and ctx.nil_vars[node.receiver.name] then
+    report(ctx, node.line, node.col,
+      "method call '" .. method_name .. "' on nil variable '" .. node.receiver.name .. "'")
+    return T.ANY()
+  end
+
   -- Look up method on receiver
   if recv_ty.tag == "table" then
     local f = recv_ty.fields[method_name]
@@ -879,9 +899,12 @@ function infer_function(ctx, params, body, has_vararg, line)
 
   push_return_collector(ctx)
   local saved_scope = ctx.scope
+  local saved_nil_vars = ctx.nil_vars
+  ctx.nil_vars = {}
   ctx.scope = child_scope
   infer_block(ctx, body)
   ctx.scope = saved_scope
+  ctx.nil_vars = saved_nil_vars
 
   local collected = pop_return_collector(ctx)
   local return_types
@@ -1103,8 +1126,10 @@ StmtRule.LocalDeclaration = function(ctx, node)
       elseif i > #node.expressions then
         -- Forward-declared local with no RHS expression
         ty = T.typevar(ctx.scope.level)
+        ctx.nil_vars[name] = true   -- definitely nil until first assignment
       else
         ty = T.NIL()
+        ctx.nil_vars[name] = true   -- explicit nil initialiser
       end
       env.bind(ctx.scope, name, ty)
       -- Pre-populate pending member fields from prescan
@@ -1148,6 +1173,7 @@ StmtRule.AssignmentExpression = function(ctx, node)
     local rhs_ty = rhs_types[i] or overflow_ty
 
     if lhs.kind == "Identifier" then
+      ctx.nil_vars[lhs.name] = nil   -- assigned: no longer definitely nil
       local existing = env.lookup(ctx.scope, lhs.name)
       if existing then
         local ok, err = unify.unify(rhs_ty, existing)
@@ -1435,6 +1461,7 @@ local function apply_narrowing(ctx, child_scope, narrowing, positive)
       local narrowed = T.subtract(var_ty, T.NIL())
       narrowed = T.subtract(narrowed, T.literal("boolean", false))
       env.bind(child_scope, narrowing.name, narrowed)
+      ctx.nil_vars[narrowing.name] = nil   -- proven non-nil in this branch
     else
       -- Falsy branch: type is nil | false
       -- (we don't narrow to nil|false since it's not very useful)
@@ -1444,6 +1471,7 @@ local function apply_narrowing(ctx, child_scope, narrowing, positive)
     if removes_nil then
       -- x is not nil: subtract nil
       env.bind(child_scope, narrowing.name, T.subtract(var_ty, T.NIL()))
+      ctx.nil_vars[narrowing.name] = nil   -- proven non-nil in this branch
     else
       -- x is nil: narrow to nil
       env.bind(child_scope, narrowing.name, T.NIL())
@@ -1486,6 +1514,8 @@ end
 StmtRule.IfStatement = function(ctx, node)
   -- Track narrowings for the else branch (accumulated negatives)
   local all_narrowings = {}
+  local pre_nil = copy_set(ctx.nil_vars)
+  local branch_nils = {}
 
   for i = 1, #node.tests do
     infer_expr(ctx, node.tests[i])
@@ -1493,6 +1523,7 @@ StmtRule.IfStatement = function(ctx, node)
     all_narrowings[i] = narrowings
 
     local child = env.child(ctx.scope)
+    ctx.nil_vars = copy_set(pre_nil)   -- fork nil_vars for this branch
     for j = 1, #narrowings do
       apply_narrowing(ctx, child, narrowings[j], true)
     end
@@ -1500,10 +1531,12 @@ StmtRule.IfStatement = function(ctx, node)
     ctx.scope = child
     infer_block(ctx, node.cons[i])
     ctx.scope = saved
+    branch_nils[#branch_nils + 1] = ctx.nil_vars
   end
 
   if node.alternate then
     local child = env.child(ctx.scope)
+    ctx.nil_vars = copy_set(pre_nil)   -- fork nil_vars for else branch
     -- Apply all negative narrowings for the else branch
     for i = 1, #all_narrowings do
       for j = 1, #all_narrowings[i] do
@@ -1514,7 +1547,18 @@ StmtRule.IfStatement = function(ctx, node)
     ctx.scope = child
     infer_block(ctx, node.alternate)
     ctx.scope = saved
+    branch_nils[#branch_nils + 1] = ctx.nil_vars
+  else
+    -- No else: the "not-taken" path preserves pre_nil
+    branch_nils[#branch_nils + 1] = pre_nil
   end
+
+  -- A var is definitely nil after the if only if nil in ALL paths
+  local merged = branch_nils[1]
+  for i = 2, #branch_nils do
+    merged = intersect_sets(merged, branch_nils[i])
+  end
+  ctx.nil_vars = merged
 end
 
 StmtRule.WhileStatement = function(ctx, node)

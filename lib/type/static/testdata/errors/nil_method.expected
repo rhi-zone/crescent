@@ -1,0 +1,3 @@
+test.lua:3:17: error: method call 'match' on nil variable 'x'
+  3 | local result = x:match("pattern")
+                      ^
