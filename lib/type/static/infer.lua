@@ -514,6 +514,23 @@ ExprRule.SendExpression = function(ctx, node)
     return T.ANY()
   end
 
+  -- Unbound typevar receiver: constrain it to have this method.
+  -- Mirrors MemberExpression on var: creates { method: fn, ...row } and unifies.
+  -- Self is the first param (the receiver itself); remaining params are the call args.
+  if recv_ty.tag == "var" then
+    local ret_var = T.typevar(ctx.scope.level)
+    local method_params = { recv_ty }
+    for i = 1, #arg_types do method_params[i + 1] = arg_types[i] end
+    local method_ty = T.func(method_params, { ret_var })
+    local tbl = T.table(
+      { [method_name] = { type = method_ty, optional = false } },
+      {},
+      T.rowvar(ctx.scope.level)
+    )
+    unify.unify(recv_ty, tbl)
+    return ret_var
+  end
+
   -- Look up method on receiver
   if recv_ty.tag == "table" then
     local f = recv_ty.fields[method_name]
