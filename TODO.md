@@ -79,6 +79,7 @@
 - [ ] Private field visibility enforcement
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
+- [ ] Variadic `pipe`/`compose` typing — fixed-arity overloads work but variadic needs design; blocked on generic inference + possibly variadic generics or dependent types. Low priority, pending design.
 
 ## infra
 - [ ] Bench infrastructure (pure Lua, handgrown)
