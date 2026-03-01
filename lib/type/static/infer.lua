@@ -480,6 +480,9 @@ ExprRule.MemberExpression = function(ctx, node)
   local obj_ty = infer_expr(ctx, node.object)
   obj_ty = T.resolve(obj_ty)
 
+  -- NEVER is bottom: field access on unreachable value is also unreachable.
+  if obj_ty.tag == "never" then return T.NEVER() end
+
   if node.computed then
     -- obj[expr]
     local key_ty = infer_expr(ctx, node.property)
@@ -1164,7 +1167,26 @@ local function apply_narrowing(ctx, child_scope, narrowing, positive)
   elseif narrowing.field then
     -- Discriminated union: x.field == "value"
     local is_positive = (narrowing.positive == positive)
-    local narrowed = T.narrow_by_field(var_ty, narrowing.field, narrowing.field_value, is_positive)
+    local var_ty_r = T.resolve(var_ty)
+    local narrowed
+    if var_ty_r.tag == "union" then
+      -- Union: narrow_by_field picks matching members (returns a different object).
+      narrowed = T.narrow_by_field(var_ty_r, narrowing.field, narrowing.field_value, is_positive)
+    else
+      -- Non-union: narrow_by_field returns the same object or NEVER.
+      narrowed = T.narrow_by_field(var_ty_r, narrowing.field, narrowing.field_value, is_positive)
+      if narrowed.tag ~= "never" and is_positive then
+        -- Create a fresh disconnected table for the branch scope.  If we kept the same
+        -- object, field mutations inside the branch (e.g. ty.level = x) would propagate
+        -- back through the typevar alias chain to the original parameter type, producing
+        -- spurious "missing field" errors at call sites.
+        narrowed = T.table(
+          { [narrowing.field] = { type = T.literal("string", narrowing.field_value), optional = false } },
+          {},
+          T.rowvar(ctx.scope.level)
+        )
+      end
+    end
     env.bind(child_scope, narrowing.name, narrowed)
   end
 end

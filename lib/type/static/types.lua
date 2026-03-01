@@ -329,8 +329,19 @@ end
 function M.narrow_by_field(ty, field, lit_value, positive)
   ty = M.resolve(ty)
   if ty.tag ~= "union" then
-    -- Not a union: can't split. Return ty for positive (it might match),
-    -- or NEVER for negative only if we know it's definitely a match.
+    -- Single (non-union) type: check if the field has a definite non-matching literal.
+    -- If so, the branch is impossible → narrow to NEVER (dead code).
+    if ty.tag == "table" then
+      local f = ty.fields[field]
+      if f then
+        local fty = M.resolve(f.type)
+        if fty.tag == "literal" and fty.kind == "string" then
+          local definite_match = (fty.value == lit_value)
+          if positive and not definite_match then return M.NEVER() end
+          if not positive and definite_match then return M.NEVER() end
+        end
+      end
+    end
     return ty
   end
   local result = {}
