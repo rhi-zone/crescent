@@ -50,7 +50,7 @@
 ### output formats
 - [x] `--format json` structured output (file, line, severity, message)
 - [x] `--format sarif` for GitHub Code Scanning / CI integration
-- [ ] Column numbers in error positions (currently line-only)
+- [x] Column numbers in error positions
 
 ### done
 - [x] Full require() return type tracking (infer module return type)
@@ -90,7 +90,8 @@
 - [x] Metatable slot syntax: `#field` in type annotations — done (see above)
 - [x] Structural operator dispatch — BinaryExpression/UnaryExpression/ConcatenateExpression check `meta["__add"]` etc. on operand types via `meta_op_ret`; metamethod return type used instead of primitive check. Unlocks linalg / custom numeric types.
 - [x] Structural constraint propagation for send — `x:method(args)` on a var should constrain x to `{ method: (self, args...) -> T, ...row }` (mirrors field access on var).
-- [ ] Implicit-any warnings on unannotated params — after full function inference, warn if a param typevar is still completely unbound. Structural constraint propagation now complete; can proceed.
+- [x] Implicit-any warnings on unannotated params — warn if param typevar still completely unbound after body inference; skip `self` and `_`.
+- [ ] Arithmetic/concat constraint propagation — `a + b` on vars should constrain to "numeric OR has `#__add`"; cannot naively bind to `number` (rejects custom types). Needs a typeclass-style "Numeric" constraint or union of `number | { #__add: ... }`. Same for concat and `#__concat`.
 - [ ] Private field visibility enforcement
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
