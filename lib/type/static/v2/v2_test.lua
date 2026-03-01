@@ -1,0 +1,511 @@
+-- lib/type/static/v2/v2_test.lua
+-- Tests for the v2 typechecker foundation: defs, intern, arena, lex.
+
+local ffi = require("ffi")
+local assert = require("lib.test.assert")
+local defs = require("lib.type.static.v2.defs")
+local intern = require("lib.type.static.v2.intern")
+local arena = require("lib.type.static.v2.arena")
+local lex = require("lib.type.static.v2.lex")
+
+---------------------------------------------------------------------------
+-- defs.lua
+---------------------------------------------------------------------------
+
+assert.describe("defs: FFI struct sizes", function()
+    assert.it("ASTNode is 32 bytes", function()
+        assert.eq(ffi.sizeof("ASTNode"), 32)
+    end)
+    assert.it("TypeSlot is 32 bytes", function()
+        assert.eq(ffi.sizeof("TypeSlot"), 32)
+    end)
+    assert.it("FieldEntry is 12 bytes", function()
+        assert.eq(ffi.sizeof("FieldEntry"), 12)
+    end)
+end)
+
+assert.describe("defs: constants", function()
+    assert.it("keywords list length matches NUM_KEYWORDS", function()
+        assert.eq(#defs.keywords, defs.NUM_KEYWORDS)
+    end)
+    assert.it("token_name covers all tokens up to TK_EOF", function()
+        for i = 0, defs.TK_EOF do
+            assert.ok(defs.token_name[i], "missing token_name for " .. i)
+        end
+    end)
+    assert.it("binop_priority has entries", function()
+        assert.ok(defs.binop_priority[defs.OP_ADD])
+        assert.ok(defs.binop_priority[defs.OP_OR])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- intern.lua
+---------------------------------------------------------------------------
+
+assert.describe("intern: basics", function()
+    assert.it("round-trip string -> id -> string", function()
+        local pool = intern.new()
+        local id = intern.intern(pool, "hello")
+        assert.eq(intern.get(pool, id), "hello")
+    end)
+    assert.it("idempotent: same string returns same id", function()
+        local pool = intern.new()
+        local id1 = intern.intern(pool, "world")
+        local id2 = intern.intern(pool, "world")
+        assert.eq(id1, id2)
+    end)
+    assert.it("different strings get different ids", function()
+        local pool = intern.new()
+        local id1 = intern.intern(pool, "foo")
+        local id2 = intern.intern(pool, "bar")
+        assert.ok(id1 ~= id2, "expected different ids")
+    end)
+    assert.it("sequential IDs starting from 0", function()
+        local pool = intern.new()
+        -- Keywords are pre-interned at 0..NUM_KEYWORDS-1
+        -- Next ID should be NUM_KEYWORDS
+        local id = intern.intern(pool, "custom_name")
+        assert.eq(id, defs.NUM_KEYWORDS)
+        local id2 = intern.intern(pool, "another_name")
+        assert.eq(id2, defs.NUM_KEYWORDS + 1)
+    end)
+end)
+
+assert.describe("intern: keywords pre-interned", function()
+    assert.it("keyword lookup returns known IDs", function()
+        local pool = intern.new()
+        for i = 1, #defs.keywords do
+            local kw = defs.keywords[i]
+            local id = pool.map[kw]
+            assert.ok(id ~= nil, "keyword not found: " .. kw)
+            assert.eq(id, i - 1, "keyword ID mismatch for " .. kw)
+            assert.ok(id < defs.NUM_KEYWORDS)
+        end
+    end)
+    assert.it("'and' is ID 0, 'while' is ID 21", function()
+        local pool = intern.new()
+        assert.eq(pool.map["and"], 0)
+        assert.eq(pool.map["while"], 21)
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- arena.lua
+---------------------------------------------------------------------------
+
+assert.describe("arena: node arena", function()
+    assert.it("alloc and read back", function()
+        local a = arena.new_node_arena(4)
+        local i = a:alloc()
+        assert.eq(i, 0)
+        local node = a:get(i)
+        node.kind = defs.NODE_LITERAL
+        node.line = 42
+        node.col = 7
+        assert.eq(a:get(0).kind, defs.NODE_LITERAL)
+        assert.eq(a:get(0).line, 42)
+        assert.eq(a:get(0).col, 7)
+    end)
+    assert.it("reset and reuse", function()
+        local a = arena.new_node_arena(4)
+        a:alloc()
+        a:alloc()
+        assert.eq(a.len, 2)
+        a:reset()
+        assert.eq(a.len, 0)
+        local i = a:alloc()
+        assert.eq(i, 0)
+    end)
+    assert.it("grow beyond initial capacity", function()
+        local a = arena.new_node_arena(2)
+        for j = 0, 9 do
+            local i = a:alloc()
+            a:get(i).kind = j
+        end
+        assert.eq(a.len, 10)
+        for j = 0, 9 do
+            assert.eq(a:get(j).kind, j)
+        end
+    end)
+end)
+
+assert.describe("arena: type arena", function()
+    assert.it("alloc and read back", function()
+        local a = arena.new_type_arena(4)
+        local i = a:alloc()
+        a:get(i).tag = defs.TAG_NUMBER
+        assert.eq(a:get(0).tag, defs.TAG_NUMBER)
+    end)
+end)
+
+assert.describe("arena: field arena", function()
+    assert.it("alloc and read back", function()
+        local a = arena.new_field_arena(4)
+        local i = a:alloc()
+        local f = a:get(i)
+        f.name_id = 42
+        f.type_id = 7
+        f.optional = 1
+        assert.eq(a:get(0).name_id, 42)
+        assert.eq(a:get(0).type_id, 7)
+        assert.eq(a:get(0).optional, 1)
+    end)
+end)
+
+assert.describe("arena: list pool", function()
+    assert.it("mark/push/since", function()
+        local lp = arena.new_list_pool(8)
+        local m = lp:mark()
+        lp:push(10)
+        lp:push(20)
+        lp:push(30)
+        local start, len = lp:since(m)
+        assert.eq(start, 0)
+        assert.eq(len, 3)
+        assert.eq(lp:get(start), 10)
+        assert.eq(lp:get(start + 1), 20)
+        assert.eq(lp:get(start + 2), 30)
+    end)
+    assert.it("nested lists", function()
+        local lp = arena.new_list_pool(8)
+        local m1 = lp:mark()
+        lp:push(1)
+        lp:push(2)
+        local s1, l1 = lp:since(m1)
+        local m2 = lp:mark()
+        lp:push(10)
+        lp:push(20)
+        lp:push(30)
+        local s2, l2 = lp:since(m2)
+        assert.eq(l1, 2)
+        assert.eq(l2, 3)
+        assert.eq(lp:get(s1), 1)
+        assert.eq(lp:get(s2), 10)
+    end)
+    assert.it("grow beyond initial capacity", function()
+        local lp = arena.new_list_pool(2)
+        for i = 0, 99 do lp:push(i) end
+        assert.eq(lp.len, 100)
+        for i = 0, 99 do
+            assert.eq(lp:get(i), i)
+        end
+    end)
+    assert.it("reset", function()
+        local lp = arena.new_list_pool(8)
+        lp:push(1)
+        lp:push(2)
+        lp:reset()
+        assert.eq(lp.len, 0)
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- lex.lua
+---------------------------------------------------------------------------
+
+assert.describe("lex: simple tokens", function()
+    assert.it("empty source yields EOF", function()
+        local L = lex.new("", "test")
+        assert.eq(L.tk, defs.TK_EOF)
+    end)
+    assert.it("single keyword", function()
+        local L = lex.new("local", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+    end)
+    assert.it("multiple keywords", function()
+        local L = lex.new("local function end", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        L:next()
+        assert.eq(L.tk, defs.TK_FUNCTION)
+        L:next()
+        assert.eq(L.tk, defs.TK_END)
+        L:next()
+        assert.eq(L.tk, defs.TK_EOF)
+    end)
+    assert.it("identifier", function()
+        local L = lex.new("foo", "test")
+        assert.eq(L.tk, defs.TK_NAME)
+        assert.eq(intern.get(L.pool, L.val), "foo")
+    end)
+    assert.it("operators", function()
+        local L = lex.new("+ - * / % ^ # == ~= <= >= < > = ( ) [ ] { } ; : , .", "test")
+        local expected = {
+            defs.TK_PLUS, defs.TK_MINUS, defs.TK_STAR, defs.TK_SLASH,
+            defs.TK_PERCENT, defs.TK_CARET, defs.TK_HASH,
+            defs.TK_EQ, defs.TK_NE, defs.TK_LE, defs.TK_GE,
+            defs.TK_LT, defs.TK_GT, defs.TK_ASSIGN,
+            defs.TK_LPAREN, defs.TK_RPAREN,
+            defs.TK_LBRACKET, defs.TK_RBRACKET,
+            defs.TK_LBRACE, defs.TK_RBRACE,
+            defs.TK_SEMICOLON, defs.TK_COLON, defs.TK_COMMA, defs.TK_DOT,
+            defs.TK_EOF,
+        }
+        for i, exp in ipairs(expected) do
+            assert.eq(L.tk, exp, "token " .. i .. ": expected " .. exp .. " got " .. L.tk)
+            if exp ~= defs.TK_EOF then L:next() end
+        end
+    end)
+    assert.it("concat and dots", function()
+        local L = lex.new(".. ...", "test")
+        assert.eq(L.tk, defs.TK_CONCAT)
+        L:next()
+        assert.eq(L.tk, defs.TK_DOTS)
+    end)
+    assert.it("label", function()
+        local L = lex.new("::foo::", "test")
+        assert.eq(L.tk, defs.TK_LABEL)
+        L:next()
+        assert.eq(L.tk, defs.TK_NAME)
+        L:next()
+        assert.eq(L.tk, defs.TK_LABEL)
+    end)
+end)
+
+assert.describe("lex: numbers", function()
+    assert.it("integer", function()
+        local L = lex.new("42", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+        assert.eq(L.numvals[L.val], 42)
+    end)
+    assert.it("float", function()
+        local L = lex.new("3.14", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+        assert.ok(math.abs(L.numvals[L.val] - 3.14) < 1e-10)
+    end)
+    assert.it("hex", function()
+        local L = lex.new("0xFF", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+        assert.eq(L.numvals[L.val], 255)
+    end)
+    assert.it("scientific notation", function()
+        local L = lex.new("1e10", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+        assert.eq(L.numvals[L.val], 1e10)
+    end)
+    assert.it("number starting with dot", function()
+        local L = lex.new(".5", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+        assert.eq(L.numvals[L.val], 0.5)
+    end)
+end)
+
+assert.describe("lex: strings", function()
+    assert.it("double-quoted string", function()
+        local L = lex.new('"hello"', "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "hello")
+    end)
+    assert.it("single-quoted string", function()
+        local L = lex.new("'world'", "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "world")
+    end)
+    assert.it("string with escapes", function()
+        local L = lex.new('"hello\\nworld"', "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "hello\nworld")
+    end)
+    assert.it("string with hex escape", function()
+        local L = lex.new('"\\x41"', "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "A")
+    end)
+    assert.it("string with decimal escape", function()
+        local L = lex.new('"\\65"', "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "A")
+    end)
+    assert.it("long string", function()
+        local L = lex.new("[[hello world]]", "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "hello world")
+    end)
+    assert.it("long string with equals", function()
+        local L = lex.new("[=[hello]=]", "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "hello")
+    end)
+    assert.it("empty string", function()
+        local L = lex.new('""', "test")
+        assert.eq(L.tk, defs.TK_STRING)
+        assert.eq(intern.get(L.pool, L.val), "")
+    end)
+    assert.it("unterminated string errors", function()
+        assert.throws(function()
+            lex.new('"hello', "test")
+        end)
+    end)
+end)
+
+assert.describe("lex: comments", function()
+    assert.it("line comment is skipped", function()
+        local L = lex.new("-- a comment\n42", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+    end)
+    assert.it("block comment is skipped", function()
+        local L = lex.new("--[[ block comment ]] 42", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+    end)
+    assert.it("long block comment is skipped", function()
+        local L = lex.new("--[=[ block\ncomment ]=] 42", "test")
+        assert.eq(L.tk, defs.TK_NUMBER)
+    end)
+end)
+
+assert.describe("lex: annotations", function()
+    assert.it("captures --: type annotation", function()
+        local L = lex.new("--: number\nlocal x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        local ann = L.annotations[1]
+        assert.ok(ann, "annotation on line 1")
+        assert.eq(ann.kind, defs.ANN_TYPE)
+        assert.eq(ann.content, "number")
+    end)
+    assert.it("captures --:: declaration annotation", function()
+        local L = lex.new("--:: Foo = { x: number }\nlocal x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        local ann = L.annotations[1]
+        assert.ok(ann, "annotation on line 1")
+        assert.eq(ann.kind, defs.ANN_DECL)
+        assert.eq(ann.content, "Foo = { x: number }")
+    end)
+    assert.it("captures block annotation --[[: type ]]", function()
+        local L = lex.new("--[[:number]] local x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        local ann = L.annotations[1]
+        assert.ok(ann, "annotation on line 1")
+        assert.eq(ann.kind, defs.ANN_TYPE)
+        assert.eq(ann.content, "number")
+    end)
+    assert.it("captures block declaration --[[:: Name = T ]]", function()
+        local L = lex.new("--[[::Foo = number]] local x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        local ann = L.annotations[1]
+        assert.ok(ann, "annotation on line 1")
+        assert.eq(ann.kind, defs.ANN_DECL)
+        assert.eq(ann.content, "Foo = number")
+    end)
+    assert.it("captures --:<T> type args annotation", function()
+        local L = lex.new("--:<T, U>\nlocal x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        local ann = L.annotations[1]
+        assert.ok(ann, "annotation on line 1")
+        assert.eq(ann.kind, defs.ANN_TYPE_ARGS)
+        assert.eq(ann.content, "<T, U>")
+    end)
+end)
+
+assert.describe("lex: line and column tracking", function()
+    assert.it("tracks line numbers across newlines", function()
+        local L = lex.new("a\nb\nc", "test")
+        assert.eq(L.tk, defs.TK_NAME)
+        -- After first next(), we consumed 'a' and are on line 1
+        -- Exact line tracking depends on when _lex records _tk_line
+        L:next()
+        assert.eq(L.tk, defs.TK_NAME)
+        L:next()
+        assert.eq(L.tk, defs.TK_NAME)
+        L:next()
+        assert.eq(L.tk, defs.TK_EOF)
+    end)
+end)
+
+assert.describe("lex: lookahead", function()
+    assert.it("lookahead returns next token without consuming", function()
+        local L = lex.new("local x", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+        local la = L:lookahead()
+        assert.eq(la, defs.TK_NAME)
+        -- Current token unchanged
+        assert.eq(L.tk, defs.TK_LOCAL)
+        -- Now consume
+        L:next()
+        assert.eq(L.tk, defs.TK_NAME)
+    end)
+end)
+
+assert.describe("lex: expect and opt", function()
+    assert.it("expect succeeds on correct token", function()
+        local L = lex.new("local x", "test")
+        L:expect(defs.TK_LOCAL)
+        assert.eq(L.tk, defs.TK_NAME)
+    end)
+    assert.it("expect errors on wrong token", function()
+        assert.throws(function()
+            local L = lex.new("local x", "test")
+            L:expect(defs.TK_IF)
+        end)
+    end)
+    assert.it("opt returns true and advances on match", function()
+        local L = lex.new("local x", "test")
+        assert.ok(L:opt(defs.TK_LOCAL))
+        assert.eq(L.tk, defs.TK_NAME)
+    end)
+    assert.it("opt returns false and does not advance on mismatch", function()
+        local L = lex.new("local x", "test")
+        assert.eq(L:opt(defs.TK_IF), false)
+        assert.eq(L.tk, defs.TK_LOCAL)
+    end)
+end)
+
+assert.describe("lex: edge cases", function()
+    assert.it("shebang is skipped", function()
+        local L = lex.new("#!/usr/bin/env luajit\nlocal x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+    end)
+    assert.it("BOM is skipped", function()
+        local L = lex.new("\xEF\xBB\xBFlocal x = 1", "test")
+        assert.eq(L.tk, defs.TK_LOCAL)
+    end)
+    assert.it("all keywords tokenize correctly", function()
+        local pool = intern.new()
+        for i, kw in ipairs(defs.keywords) do
+            local L = lex.new(kw, "test", pool)
+            assert.eq(L.tk, i - 1, "keyword '" .. kw .. "' should be token " .. (i - 1))
+        end
+    end)
+end)
+
+assert.describe("lex: real Lua code", function()
+    assert.it("tokenizes a simple function", function()
+        local src = "local function add(a, b) return a + b end"
+        local L = lex.new(src, "test")
+        local tokens = {}
+        while L.tk ~= defs.TK_EOF do
+            tokens[#tokens + 1] = L.tk
+            L:next()
+        end
+        assert.eq(tokens[1], defs.TK_LOCAL)
+        assert.eq(tokens[2], defs.TK_FUNCTION)
+        assert.eq(tokens[3], defs.TK_NAME)     -- add
+        assert.eq(tokens[4], defs.TK_LPAREN)
+        assert.eq(tokens[5], defs.TK_NAME)     -- a
+        assert.eq(tokens[6], defs.TK_COMMA)
+        assert.eq(tokens[7], defs.TK_NAME)     -- b
+        assert.eq(tokens[8], defs.TK_RPAREN)
+        assert.eq(tokens[9], defs.TK_RETURN)
+        assert.eq(tokens[10], defs.TK_NAME)    -- a
+        assert.eq(tokens[11], defs.TK_PLUS)
+        assert.eq(tokens[12], defs.TK_NAME)    -- b
+        assert.eq(tokens[13], defs.TK_END)
+        assert.eq(#tokens, 13)
+    end)
+    assert.it("tokenizes table constructor", function()
+        local src = '{ x = 1, ["y"] = true, 3 }'
+        local L = lex.new(src, "test")
+        assert.eq(L.tk, defs.TK_LBRACE)
+        L:next(); assert.eq(L.tk, defs.TK_NAME)      -- x
+        L:next(); assert.eq(L.tk, defs.TK_ASSIGN)     -- =
+        L:next(); assert.eq(L.tk, defs.TK_NUMBER)     -- 1
+        L:next(); assert.eq(L.tk, defs.TK_COMMA)
+        L:next(); assert.eq(L.tk, defs.TK_LBRACKET)
+        L:next(); assert.eq(L.tk, defs.TK_STRING)     -- "y"
+        L:next(); assert.eq(L.tk, defs.TK_RBRACKET)
+        L:next(); assert.eq(L.tk, defs.TK_ASSIGN)
+        L:next(); assert.eq(L.tk, defs.TK_TRUE)
+        L:next(); assert.eq(L.tk, defs.TK_COMMA)
+        L:next(); assert.eq(L.tk, defs.TK_NUMBER)     -- 3
+        L:next(); assert.eq(L.tk, defs.TK_RBRACE)
+    end)
+end)
