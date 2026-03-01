@@ -78,16 +78,23 @@
 ### annotation syntax gaps
 - [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.
 
-### performance
-**CRITICAL: 1.5s for 6 files is unacceptable for a typechecker used in a dev loop.**
-Demote to "important, persistent" once root cause is profiled and a plan is in place.
+### performance (v2 redesign)
+**Full redesign in progress. See `docs/typechecker-v2.md` for architecture.**
 
-- [x] Infinite recursion in resolve_require: per-ctx circular detection missed cross-check cycles (A→B→A). Fixed with `_globally_resolving` module-level table. infer.lua now checks in ~1.3s (was infinite loop).
-- [ ] **Profile first**: run under `jit.p` / time individual phases (parse, infer, unify) to find the real bottleneck before optimising. Hypothesis: re-checking required modules on every `check_string` call dominates.
-- [ ] Module-level type cache: currently each `check_string` call re-typechecks all required modules from scratch. Add a global cache keyed by (file path, mtime) so unchanged deps skip both parse AND infer. Likely the single biggest win — the cache must store the inferred return type, not just avoid inference (skipping parse matters too since ljltk runs every call).
-- [ ] Parsing allocation pressure: ljltk is not tuned for throughput — every AST node is a fresh table, tokens are likely heap-allocated strings, no pooling or arena. This is a fundamental cost even for single-file checks; a rewrite or wrapper that uses pre-allocated node pools / interned strings could be significant. Profile allocation rate (e.g. `jit.p=a`) before deciding on approach.
-- [ ] Unification hot path: `T.resolve` does pointer chasing on every call; consider path compression in the union-find structure.
-- [ ] Avoid repeated `pairs()` / `ipairs()` over fields/indexers in hot unify paths — measure first.
+v1 is a proof-of-concept for the type system semantics. v2 is the production
+implementation targeting tsgo-competitive cold-start performance and sub-100ms
+incremental checking at 1M+ LOC scale.
+
+Key design decisions:
+- Flat-array AST (32-byte FFI nodes, arena-allocated, zero GC)
+- Integer type tags + union-find (no string dispatch, O(α) resolution)
+- Custom parser → flat AST directly (no intermediate tables)
+- mmap-able .cri interface files (zero-copy, content-addressed)
+- Merkle DAG incremental cache (interface-hash propagation)
+- Fork-based parallelism via libc FFI (wave-front scheduling)
+- LSP daemon with tiered memory (hot/warm/cold)
+
+- [x] Infinite recursion in resolve_require: fixed with `_globally_resolving` module-level table.
 
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
