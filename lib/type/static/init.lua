@@ -109,7 +109,9 @@ end
 -- Convenience: check and return formatted errors string
 function M.check(source, filename)
   local err_ctx = M.check_string(source, filename)
-  if errors.has_errors(err_ctx) then
+  local has_err = errors.has_errors(err_ctx)
+  local has_diag = has_err or errors.count(err_ctx) > 0
+  if has_diag then
     -- Build source lines map
     local source_lines = {}
     local line_num = 0
@@ -117,7 +119,7 @@ function M.check(source, filename)
       line_num = line_num + 1
       source_lines[line_num] = line
     end
-    return false, errors.format(err_ctx, source_lines)
+    return not has_err, errors.format(err_ctx, source_lines)
   end
   return true, nil
 end

@@ -52,6 +52,11 @@ local function report(ctx, line, col, msg)
   errors.error(ctx.err, ctx.filename, line, col or 0, msg)
 end
 
+local function warn(ctx, line, col, msg)
+  local errors = require("lib.type.static.errors")
+  errors.warning(ctx.err, ctx.filename, line, col or 0, msg)
+end
+
 ---------------------------------------------------------------------------
 -- nil_vars helpers
 ---------------------------------------------------------------------------
@@ -893,6 +898,7 @@ function infer_function(ctx, params, body, has_vararg, line)
     end
   end
 
+  local unannotated_params = {}
   for i = 1, #params do
     local p = params[i]
     if p.kind == "Vararg" then
@@ -904,6 +910,7 @@ function infer_function(ctx, params, body, has_vararg, line)
         p_ty = ann_fn.params[i]
       else
         p_ty = T.typevar(child_scope.level)
+        unannotated_params[#unannotated_params + 1] = { p.name, p_ty }
       end
       param_types[#param_types + 1] = p_ty
       env.bind(child_scope, p.name, p_ty)
@@ -922,6 +929,13 @@ function infer_function(ctx, params, body, has_vararg, line)
   infer_block(ctx, body)
   ctx.scope = saved_scope
   ctx.nil_vars = saved_nil_vars
+
+  for i = 1, #unannotated_params do
+    local pname, pty = unannotated_params[i][1], unannotated_params[i][2]
+    if pname ~= "self" and pname ~= "_" and T.resolve(pty).tag == "var" then
+      warn(ctx, line, 0, "unannotated parameter '" .. pname .. "' has implicit any type")
+    end
+  end
 
   local collected = pop_return_collector(ctx)
   local return_types

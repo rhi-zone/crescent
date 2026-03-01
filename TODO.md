@@ -73,7 +73,7 @@
 
 ### known false positives
 - [ ] **Assignment narrowing**: assigning `nil` to a variable inside `if x then` is flagged — typechecker checks against narrowed type, not declared type. E.g. `if block_ann_kind ~= "" then ... block_ann_kind = "" end` fails; workaround: reset outside the narrowed block.
-- [ ] **Nil method call not caught**: `local x; x:match("pattern")` — method call on nil variable produces no error (documented in `testdata/errors/nil_method.expected` as empty snapshot).
+- [x] **Nil method call not caught**: `local x; x:match("pattern")` — fixed by nil_vars side-channel; `testdata/errors/nil_method.expected` now captures the error.
 
 ### annotation syntax gaps
 - [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.
@@ -89,8 +89,8 @@
 - [ ] For-in iterator return type tracking — `for k, v in pairs(t)` always gives `any` for k/v; need iterator protocol inference (ipairs/pairs over typed tables, custom iterators)
 - [x] Metatable slot syntax: `#field` in type annotations — done (see above)
 - [x] Structural operator dispatch — BinaryExpression/UnaryExpression/ConcatenateExpression check `meta["__add"]` etc. on operand types via `meta_op_ret`; metamethod return type used instead of primitive check. Unlocks linalg / custom numeric types.
-- [ ] Structural constraint propagation for send — `x:method(args)` on a var should constrain x to `{ method: (self, args...) -> T, ...row }` (mirrors field access on var).
-- [ ] Implicit-any warnings on unannotated params — after full function inference, warn if a param typevar is still completely unbound. Depends on structural constraint propagation above being complete first; otherwise too noisy.
+- [x] Structural constraint propagation for send — `x:method(args)` on a var should constrain x to `{ method: (self, args...) -> T, ...row }` (mirrors field access on var).
+- [ ] Implicit-any warnings on unannotated params — after full function inference, warn if a param typevar is still completely unbound. Structural constraint propagation now complete; can proceed.
 - [ ] Private field visibility enforcement
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
