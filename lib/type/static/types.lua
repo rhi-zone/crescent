@@ -345,7 +345,7 @@ end
 -- Only table fields are walked; any other node type falls back to M.display.
 function M.display_annotated(ty, path, got_ty, colors)
   ty = M.resolve(ty)
-  local c = colors or {}
+  local c = colors or {} --: { err?: string, reset?: string }
   local err_open  = c.err   or ""
   local reset     = c.reset or ""
 

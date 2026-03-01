@@ -190,7 +190,8 @@ function M.unify(a, b)
       if ok then return true end
       -- Keep the most specific failure (deepest path) to surface as context
       if detail and detail.kind == "mismatch" then
-        local depth = detail.path and #detail.path or 0
+        local depth = 0
+        if detail.path then depth = #detail.path end
         if depth > best_path_len then
           best_detail = detail
           best_path_len = depth
@@ -249,7 +250,7 @@ function M.unify(a, b)
   -- e.g. number satisfies { #__add: ... } because numbers implement arithmetic natively.
   -- This is needed at call sites when a param was constrained via a meta_constraint.
   if b.tag == "table" and next(b.fields) == nil and #b.indexers == 0 then
-    local ops
+    local ops --: { [string]: boolean }?
     if a.tag == "number" or a.tag == "integer"
       or (a.tag == "literal" and a.kind == "number") then
       ops = NUMERIC_META
@@ -297,7 +298,10 @@ function M.unify(a, b)
                                 got = af.type, expected = bf.type }
           if d.kind == "mismatch" then
             local new_path = { name }
-            for i = 1, #d.path do new_path[#new_path + 1] = d.path[i] end
+            local old_path = d.path --: [string]?
+            if old_path then
+              for i = 1, #old_path do new_path[#new_path + 1] = old_path[i] end
+            end
             d = { kind = "mismatch", path = new_path,
                   got = d.got, expected = d.expected }
           end
