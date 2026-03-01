@@ -33,7 +33,7 @@ cd docs && bun dev           # Local docs
 
 ## Core Rules
 
-- **Note things down immediately:** problems, tech debt, or issues spotted MUST be added to TODO.md backlog
+- **Note things down immediately:** problems, tech debt, or issues spotted MUST be added to TODO.md backlog. "Out of scope for now" is not a reason to skip this — if something was deferred, it goes in TODO.md right then.
 - **Do the work properly.** Don't leave workarounds or hacks undocumented.
 
 ## Design Principles

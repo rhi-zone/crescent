@@ -78,6 +78,10 @@
 ### annotation syntax gaps
 - [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.
 
+### performance
+- [x] Infinite recursion in resolve_require: per-ctx circular detection missed cross-check cycles (A→B→A). Fixed with `_globally_resolving` module-level table. infer.lua now checks in ~1.3s (was infinite loop).
+- [ ] Module-level type cache: currently each `check_string` call re-typechecks all required modules. Add a global cache keyed by file path + mtime to avoid re-checking unchanged modules.
+
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
@@ -92,6 +96,7 @@
 - [x] Structural constraint propagation for send — `x:method(args)` on a var should constrain x to `{ method: (self, args...) -> T, ...row }` (mirrors field access on var).
 - [x] Implicit-any warnings on unannotated params — warn if param typevar still completely unbound after body inference; skip `self` and `_`.
 - [x] Arithmetic/concat constraint propagation — `a + b` on vars should constrain to "numeric OR has `#__add`"; cannot naively bind to `number` (rejects custom types). Needs a typeclass-style "Numeric" constraint or union of `number | { #__add: ... }`. Same for concat and `#__concat`.
+- [ ] Branch-join / post-if type merging — after `if/else`, merge the types from each branch (currently outer scope is used unchanged). E.g. `x: A|B; if type(x)=="A" then x=b_val end` leaves x as `A|B` after the block rather than `B|A`. Requires tracking per-branch mutations and joining at merge point.
 - [ ] Private field visibility enforcement
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions

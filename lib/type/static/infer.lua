@@ -12,6 +12,12 @@ local T = types
 
 local M = {}
 
+-- Global (module-level) set of modules currently being resolved via resolve_require.
+-- Persists across nested check_string calls to prevent infinite recursion when
+-- module A requires module B which requires module A (e.g. infer.lua → init.lua → infer.lua).
+-- Per-ctx `resolving` only covers cycles within a single check; this covers cross-check cycles.
+local _globally_resolving = {}
+
 ---------------------------------------------------------------------------
 -- Inference context
 ---------------------------------------------------------------------------
@@ -903,9 +909,8 @@ function resolve_require(ctx, mod_path)
     return ctx.module_types[mod_path]
   end
 
-  -- Prevent circular requires
-  if ctx.resolving and ctx.resolving[mod_path] then
-    report(ctx, 0, 0, "warning: circular require '" .. mod_path .. "'")
+  -- Prevent circular requires: per-ctx (same check_string call) and global (nested calls).
+  if (ctx.resolving and ctx.resolving[mod_path]) or _globally_resolving[mod_path] then
     ctx.module_types[mod_path] = T.ANY()
     return T.ANY()
   end
@@ -922,15 +927,17 @@ function resolve_require(ctx, mod_path)
   local source = f:read("*a")
   f:close()
 
-  -- Mark as resolving (circular detection)
+  -- Mark as resolving (circular detection, both per-ctx and global)
   if not ctx.resolving then ctx.resolving = {} end
   ctx.resolving[mod_path] = true
+  _globally_resolving[mod_path] = true
 
   -- Typecheck the module
   local checker = require("lib.type.static")
   local err_ctx, mod_ctx = checker.check_string(source, target)
 
   ctx.resolving[mod_path] = nil
+  _globally_resolving[mod_path] = nil
 
   -- Extract module return type from the checked module's context
   local mod_ty = (mod_ctx and mod_ctx.module_return) or T.ANY()
