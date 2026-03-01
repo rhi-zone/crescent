@@ -111,8 +111,7 @@ end
 --         | literal_string | literal_number
 --         | "(" ... ")" "->" return_type   (function type)
 --         | "(" type ")"                   (grouping)
---         | "{" field_list "}"             (record/dict)
---         | "[" type "]"                   (array)
+--         | "{" field_list "}"             (record/dict — use { [number]: T } for arrays)
 --         | "..." type                     (vararg -- only in param context)
 --         | name ("<" type_list ">")?       (named/generic)
 function Parser:parse_primary()
@@ -127,14 +126,6 @@ function Parser:parse_primary()
   -- Number literal
   if ch:match("[%d]") or (ch == "-" and self.src:sub(self.pos + 1, self.pos + 1):match("[%d]")) then
     return self:parse_number_literal()
-  end
-
-  -- Array type [T]
-  if ch == "[" then
-    self.pos = self.pos + 1
-    local elem = self:parse_type()
-    self:expect_char("]")
-    return types.array(elem)
   end
 
   -- Record/dict type { ... }

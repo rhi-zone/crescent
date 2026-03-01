@@ -184,8 +184,8 @@ assert.ok(rec.fields.name, "ann record field name")
 assert.eq(rec.fields.name.type.tag, "string", "ann record field type")
 assert.eq(rec.fields.age.optional, true, "ann record optional field")
 
--- array type
-local arr = annotations.parse_type("[number]")
+-- array type (explicit form: { [number]: T })
+local arr = annotations.parse_type("{ [number]: number }")
 assert.eq(arr.tag, "table", "ann array tag")
 assert.eq(#arr.indexers, 1, "ann array indexer")
 assert.eq(arr.indexers[1].value.tag, "number", "ann array elem type")

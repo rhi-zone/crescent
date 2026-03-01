@@ -298,7 +298,7 @@ function M.unify(a, b)
                                 got = af.type, expected = bf.type }
           if d.kind == "mismatch" then
             local new_path = { name }
-            local old_path = d.path --: [string]?
+            local old_path = d.path --: { [number]: string }?
             if old_path then
               for i = 1, #old_path do new_path[#new_path + 1] = old_path[i] end
             end
