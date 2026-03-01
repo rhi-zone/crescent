@@ -1662,6 +1662,19 @@ resolve_annotation_type = function(ctx, ty, seen)
     return T.type_call(callee, resolved_args)
   end
 
+  if tag == "forall" then
+    -- Create fresh generic typevars for each type parameter, then substitute
+    -- them into the body so the resulting function type is polymorphic.
+    local mapping = {}
+    for i = 1, #ty.type_params do
+      local tv = T.typevar(0)
+      tv.generic = true
+      mapping[ty.type_params[i].name] = tv
+    end
+    local body = env.substitute(ty.body, mapping)
+    return resolve_annotation_type(ctx, body, seen)
+  end
+
   if tag == "match_type" then
     local param = resolve_annotation_type(ctx, ty.param, seen)
     local arms = {}

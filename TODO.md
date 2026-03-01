@@ -80,6 +80,8 @@
 
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
+- [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
+- [ ] Partially inferred / partially specified generics — e.g. `f<_, string>(x)` where some type args are explicit and some are inferred. TS lacks this; would enable call-site specialisation without losing inference for unconstrained params.
 - [ ] Parse LuaJIT FFI cdef blocks
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
@@ -100,6 +102,14 @@
 - [ ] Formalize code style conventions — don't assume ~/git/lua conventions are correct, decide fresh
 - [ ] `cr` binary entry point
 - [ ] Third-party libs under lib/ must preserve original LICENSE
+
+## LSP
+- [ ] LSP server (JSON-RPC over stdio) — wire protocol is ~100 lines; hard part is the incremental model
+- [ ] Position → type query — retain `(line, col) → type` table during inference for hover
+- [ ] Incremental re-check — cheap scope invalidation so full reparse isn't needed on every keystroke
+- [ ] Module-level type cache — avoid re-typechecking stdlib/imports on every edit
+- [ ] Completion — field enumeration on partial expressions; needs partial-parse recovery
+- [ ] Go-to-def — binding provenance map (name → declaration site)
 
 ## package manager
 - [ ] Vendor-first install (copy .lua files into project)

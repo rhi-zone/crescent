@@ -140,6 +140,10 @@ function M.type_call(callee, args)
   return { tag = "type_call", callee = callee, args = args }
 end
 
+function M.forall(type_params, body)
+  return { tag = "forall", type_params = type_params, body = body }
+end
+
 -- Widen a literal type to its base type.
 -- literal("number", 42) -> NUMBER(), literal("string", "x") -> STRING(), etc.
 function M.widen(ty)
@@ -313,6 +317,19 @@ function M.display(ty, seen)
 
   if tag == "cdata" then
     return "cdata"
+  end
+
+  if tag == "forall" then
+    local parts = {}
+    for i = 1, #ty.type_params do
+      local p = ty.type_params[i]
+      if p.constraint then
+        parts[#parts + 1] = p.name .. ": " .. M.display(p.constraint, seen)
+      else
+        parts[#parts + 1] = p.name
+      end
+    end
+    return "<" .. table.concat(parts, ", ") .. ">" .. M.display(ty.body, seen)
   end
 
   return "?"

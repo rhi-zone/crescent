@@ -154,6 +154,11 @@ function Parser:parse_primary()
     return { tag = "vararg_marker", type = t }
   end
 
+  -- Forall generic function: <T, U>(params) -> ret
+  if ch == "<" then
+    return self:parse_forall()
+  end
+
   -- $Intrinsic
   if ch == "$" then
     self.pos = self.pos + 1
@@ -261,6 +266,26 @@ function Parser:parse_primary()
   end
 
   return { tag = "named", name = word, args = {} }
+end
+
+function Parser:parse_forall()
+  self:expect_char("<")
+  local type_params = {}
+  repeat
+    local name, ne = self:peek_word()
+    if not name then
+      error("expected type parameter name in forall at position " .. self.pos)
+    end
+    self.pos = ne + 1
+    local constraint = nil
+    if self:match_char(":") then
+      constraint = self:parse_type()
+    end
+    type_params[#type_params + 1] = { name = name, constraint = constraint }
+  until not self:match_char(",")
+  self:expect_char(">")
+  local body = self:parse_type()
+  return { tag = "forall", type_params = type_params, body = body }
 end
 
 function Parser:parse_match_type()
