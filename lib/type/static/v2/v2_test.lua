@@ -2463,6 +2463,55 @@ assert.describe("checker: arithmetic/unary operator type checking via prim_meta"
     end)
 end)
 
+assert.describe("checker: recursive function return type inference", function()
+    assert.it("tail-recursive boolean: base cases bind return var before recursive call", function()
+        -- all_positive returns bool; the recursive call result resolves to bool, not widened
+        no_errors([[
+local function all_positive(t, i)
+    if i > #t then return true end
+    if t[i] <= 0 then return false end
+    return all_positive(t, i + 1)
+end
+--: boolean
+local x = all_positive({}, 1)
+]])
+    end)
+    assert.it("annotated recursive function: parameter annotation enables integer inference", function()
+        -- fib(n-1) resolves to integer once the param type is declared
+        no_errors([[
+--: (integer) -> integer
+local function fib(n)
+    if n <= 1 then return n end
+    return fib(n - 1) + fib(n - 2)
+end
+--: integer
+local x = fib(10)
+]])
+    end)
+    assert.it("module-level recursive function: return type inferred from base case", function()
+        -- M.sum returns 0 (integer) as base case; recursive call resolves to integer
+        no_errors([[
+local M = {}
+function M.sum(n)
+    if n <= 0 then return 0 end
+    return n + M.sum(n - 1)
+end
+]])
+    end)
+    assert.it("mutual recursion: basic case does not crash", function()
+        no_errors([[
+local function is_even(n)
+    if n == 0 then return true end
+    return is_odd(n - 1)
+end
+function is_odd(n)
+    if n == 0 then return false end
+    return is_even(n - 1)
+end
+]])
+    end)
+end)
+
 assert.describe("checker: comparison operator type checking via prim_meta", function()
     assert.it("nil < number is an error", function()
         has_error("local x = nil < 1", "compare")

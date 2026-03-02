@@ -105,19 +105,36 @@ local function report(ctx, line, col, msg)
     errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
-local function push_return_collector(ctx)
+-- stub_ret_vars: optional array of TAG_VAR type IDs from the prescan stub.
+-- When provided, add_return eagerly binds them so recursive calls within
+-- this function body see the correct return type immediately via find().
+local function push_return_collector(ctx, stub_ret_vars)
     ctx.return_types[#ctx.return_types + 1] = {}
+    ctx.return_stub_vars[#ctx.return_stub_vars + 1] = stub_ret_vars or false
 end
 
 local function pop_return_collector(ctx)
     local c = ctx.return_types[#ctx.return_types]
     ctx.return_types[#ctx.return_types] = nil
+    ctx.return_stub_vars[#ctx.return_stub_vars] = nil
     return c
 end
 
 local function add_return(ctx, type_ids)
     local c = ctx.return_types[#ctx.return_types]
-    if c then c[#c + 1] = type_ids end
+    if not c then return end
+    c[#c + 1] = type_ids
+    -- Eagerly bind the prescan stub's return vars so recursive calls within
+    -- this function body get the correct return type via find().
+    local stub_vars = ctx.return_stub_vars[#ctx.return_stub_vars]
+    if stub_vars then
+        for j, rv in ipairs(stub_vars) do
+            rv = types_mod.find(ctx, rv)
+            if ctx.types:get(rv).tag == TAG_VAR then
+                unify_mod.unify(ctx, type_ids[j] or ctx.T_NIL, rv)
+            end
+        end
+    end
 end
 
 ---------------------------------------------------------------------------
@@ -1016,7 +1033,7 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
     return types_mod.make_table(ctx, field_ids, indexers, -1, {})
 end
 
-infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
+infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, stub_ret_vars)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {}
 
@@ -1065,7 +1082,9 @@ infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local saved = ctx.scope
     ctx.scope = fn_scope
     prescan_block(ctx, bs, bl)
-    push_return_collector(ctx)
+    -- Pass stub_ret_vars only for unannotated functions; annotated functions
+    -- use the declared return type as the source of truth.
+    push_return_collector(ctx, not has_ann_fn and stub_ret_vars or nil)
     infer_block(ctx, bs, bl)
     local rc = pop_return_collector(ctx)
     ctx.scope = saved
@@ -1191,19 +1210,31 @@ local function table_add_field(ctx, obj_tid, field_id, field_type_id)
     for k = 0, 6 do ot.data[k] = new_t.data[k] end
 end
 
+-- Build a prescan stub for a forward-declared function.
+-- Uses T_ANY for all params (recursive call arg-checking always passes)
+-- and a fresh TAG_VAR for the return (shared across all recursive calls;
+-- eagerly bound when the first return statement fires).
+local function make_prescan_stub(ctx, pl)
+    local param_anys = {}
+    for i = 1, pl do param_anys[i] = ctx.T_ANY end
+    local ret_var = types_mod.make_var(ctx, ctx.scope.level)
+    return types_mod.make_func(ctx, param_anys, {ret_var}, -1)
+end
+
 prescan_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         local sid = ctx.ast_lists:get(i)
         local sn  = ctx.nodes:get(sid)
         if sn.kind == NODE_FUNC_DECL then
             local nn = ctx.nodes:get(sn.data[0])
+            local pl = sn.data[2]  -- param list length
             if nn.kind == NODE_IDENTIFIER then
                 local name_id = nn.data[0]
                 if not env_mod.lookup(ctx.scope, name_id) then
-                    env_mod.bind(ctx.scope, name_id, types_mod.make_var(ctx, ctx.scope.level))
+                    env_mod.bind(ctx.scope, name_id, make_prescan_stub(ctx, pl))
                 end
             elseif nn.kind == NODE_FIELD_EXPR then
-                -- function M.foo(): pre-add foo as a var field on M's table type.
+                -- function M.foo(): pre-add foo as a stub field on M's table type.
                 local obj_n = ctx.nodes:get(nn.data[0])
                 if obj_n.kind == NODE_IDENTIFIER then
                     local obj_name_id = obj_n.data[0]
@@ -1215,7 +1246,7 @@ prescan_block = function(ctx, bs, bl)
                             local field_id = nn.data[1]
                             if not types_mod.table_field(ctx, obj_tid, field_id) then
                                 table_add_field(ctx, obj_tid, field_id,
-                                    types_mod.make_var(ctx, ctx.scope.level))
+                                    make_prescan_stub(ctx, pl))
                             end
                         end
                     end
@@ -1430,9 +1461,42 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
         if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
     end
 
-    local fn_tid = infer_function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
-
+    -- Extract the prescan stub's return vars so infer_function can eagerly
+    -- bind them when return statements fire, making recursive calls
+    -- resolve to the correct return type via find().
+    -- Only for unannotated functions; annotated ones use the declared type.
+    local stub_ret_vars = nil
     local nn = ctx.nodes:get(name_nid)
+    if not ann_fn_tid then
+        local stub_tid
+        if nn.kind == NODE_IDENTIFIER then
+            local sid = env_mod.lookup(ctx.scope, nn.data[0])
+            if sid then stub_tid = types_mod.find(ctx, sid) end
+        elseif nn.kind == NODE_FIELD_EXPR then
+            local obj_n = ctx.nodes:get(nn.data[0])
+            if obj_n.kind == NODE_IDENTIFIER then
+                local obj_tid = env_mod.lookup(ctx.scope, obj_n.data[0])
+                if obj_tid then
+                    obj_tid = types_mod.find(ctx, obj_tid)
+                    local fe = types_mod.table_field(ctx, obj_tid, nn.data[1])
+                    if fe then stub_tid = types_mod.find(ctx, fe.type_id) end
+                end
+            end
+        end
+        if stub_tid then
+            local st = ctx.types:get(stub_tid)
+            if st.tag == TAG_FUNCTION and st.data[3] > 0 then
+                stub_ret_vars = {}
+                for i = st.data[2], st.data[2] + st.data[3] - 1 do
+                    stub_ret_vars[#stub_ret_vars + 1] = ctx.lists:get(i)
+                end
+            end
+        end
+    end
+
+    local fn_tid = infer_function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, stub_ret_vars)
+
+    nn = ctx.nodes:get(name_nid)
     if nn.kind == NODE_IDENTIFIER then
         local name_id = nn.data[0]
         local existing = env_mod.lookup(ctx.scope, name_id)
@@ -1766,7 +1830,8 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx.err       = err_ctx or errors_mod.new_ctx()
     ctx.filename  = filename or "?"
     ctx.scope     = scope or env_mod.new(0)
-    ctx.return_types = {}
+    ctx.return_types    = {}
+    ctx.return_stub_vars = {}  -- stack parallel to return_types; see push_return_collector
     ctx.module_types = {}
     ctx._last_multi_return = nil
     ctx._last_pcall_success_types = nil
