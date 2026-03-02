@@ -187,7 +187,9 @@ tables are large, long-lived, or in a JIT-hostile path. The real allocation
 pressure is in the arenas and list pools (already FFI). If list collection
 ever matters, restructure the grammar (e.g. sibling-linked AST nodes) instead.
 
-Raw output (infer.lua, N=500, from session `eacb799e`, code not committed):
+**Experiment commit:** `7fcde15` (branch `experiment/scratch-stack`)
+
+Raw output (infer.lua, N=500, from session `eacb799e`):
 ```
 === SCRATCH STACK ===
 round 1:  75115 µs/parse  3696.7 KB/parse
