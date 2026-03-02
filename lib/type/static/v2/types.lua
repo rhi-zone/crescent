@@ -163,6 +163,10 @@ function M.new_ctx(pool)
         -- prim_index: TAG_* → TID of the __index table for that primitive.
         -- Populated by prelude.populate. Used by NODE_METHOD_CALL dispatch.
         prim_index = {},
+        -- prim_meta: TAG_* → TID of the operator metamethods table for that primitive.
+        -- Populated by prelude.populate. Used by meta_op_ret and unify.
+        -- Keys: TAG_NUMBER, TAG_INTEGER, TAG_STRING (and their literal subtypes, normalized by callers).
+        prim_meta = {},
     }
     return ctx
 end

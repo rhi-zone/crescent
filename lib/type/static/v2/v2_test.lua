@@ -2314,3 +2314,54 @@ local t = n:upper()
 ]], "no method 'upper'")
     end)
 end)
+
+assert.describe("checker: prim_meta operator metamethods", function()
+    -- unary: meta_op_ret now resolves via prim_meta for primitives
+    assert.it("unary minus on integer variable is valid", function()
+        no_errors([[
+local x = 1
+--: integer
+local y = -x
+]])
+    end)
+    assert.it("unary minus on number variable is valid", function()
+        no_errors([[
+local x = 1.5
+--: number
+local y = -x
+]])
+    end)
+    assert.it("string + number is still an error (prim_meta guard preserved)", function()
+        has_error([[local x = "a" + 1]], "arithmetic")
+    end)
+    assert.it("number + string is still an error (prim_meta guard preserved)", function()
+        has_error([[local x = 1 + "a"]], "arithmetic")
+    end)
+    assert.it("integer + integer is valid", function()
+        no_errors([[
+local x = 1
+--: integer
+local y = 2
+--: integer
+local z = x + y
+]])
+    end)
+    assert.it("integer + number is valid (upcast)", function()
+        no_errors([[
+local x = 1
+--: integer
+local y = 1.5
+--: number
+local z = x + y
+]])
+    end)
+    assert.it("table with custom __add metamethod still dispatched via meta_op_ret", function()
+        no_errors([[
+--:: Vec = { x: number, #__add: (Vec, Vec) -> Vec }
+local function vec_add(a, b)
+    --: Vec, Vec -> Vec
+    return a + b
+end
+]])
+    end)
+end)

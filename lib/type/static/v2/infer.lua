@@ -76,6 +76,7 @@ local ANN_DECL      = defs.ANN_DECL
 
 local TAG_ANY      = defs.TAG_ANY
 local TAG_NIL      = defs.TAG_NIL
+local TAG_NUMBER   = defs.TAG_NUMBER
 local TAG_INTEGER  = defs.TAG_INTEGER
 local TAG_STRING   = defs.TAG_STRING
 local TAG_LITERAL  = defs.TAG_LITERAL
@@ -397,13 +398,44 @@ local function infer_expr_list(ctx, es, el)
     return result
 end
 
+-- Normalize a primitive or literal type tag to its base primitive tag for prim_meta lookup.
+-- Returns the resolved base tag, or nil if not a relevant primitive.
+local function prim_tag(ctx, tid)
+    local t = ctx.types:get(types_mod.find(ctx, tid))
+    local tag = t.tag
+    if tag == TAG_LITERAL then
+        local kind = t.data[0]
+        if kind == LIT_NUMBER  then return TAG_NUMBER  end
+        if kind == LIT_STRING  then return TAG_STRING  end
+        return nil  -- boolean/nil literals have no prim_meta
+    end
+    if tag == TAG_NUMBER or tag == TAG_INTEGER or tag == TAG_STRING then return tag end
+    return nil
+end
+
 -- Get return type of metamethod on type, or nil.
+-- For TAG_TABLE: looks up the meta field directly.
+-- For primitives: looks up ctx.prim_meta[base_tag] (number, integer, string).
+-- NOTE: Do NOT call this for binary arithmetic/concat/cmp operands when both sides
+-- may be primitives — the hardcoded dispatch in those paths handles mixed-type
+-- arithmetic correctly and validates concat operands. Call with tag==TAG_TABLE guard
+-- or use the prim_tag() helper inline instead.
 local function meta_op_ret(ctx, tid, mm_name)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
-    if t.tag ~= TAG_TABLE then return nil end
+    local meta_tid
+    if t.tag == TAG_TABLE then
+        meta_tid = tid
+    else
+        local pt = prim_tag(ctx, tid)
+        if not pt then return nil end
+        local pmt = ctx.prim_meta[pt]
+        if not pmt then return nil end
+        meta_tid = types_mod.find(ctx, pmt)
+        if ctx.types:get(meta_tid).tag ~= TAG_TABLE then return nil end
+    end
     local mm_id = intern_mod.intern(ctx.pool, mm_name)
-    local fe = types_mod.table_meta_field(ctx, tid, mm_id)
+    local fe = types_mod.table_meta_field(ctx, meta_tid, mm_id)
     if not fe then return nil end
     local fn_tid = types_mod.find(ctx, fe.type_id)
     local ft = ctx.types:get(fn_tid)
@@ -514,7 +546,16 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if ARITH_META[op] then
         local mm_name = ARITH_META[op]
-        local mm = meta_op_ret(ctx, left_r, mm_name) or meta_op_ret(ctx, right_r, mm_name)
+        -- Only dispatch via table metamethods for non-primitive operands.
+        -- Primitive arithmetic is handled by the hardcoded path below, which correctly
+        -- handles mixed integer+number types and validates non-numeric operands.
+        local mm
+        if ctx.types:get(left_r).tag == TAG_TABLE then
+            mm = meta_op_ret(ctx, left_r, mm_name)
+        end
+        if not mm and ctx.types:get(right_r).tag == TAG_TABLE then
+            mm = meta_op_ret(ctx, right_r, mm_name)
+        end
         if mm then return mm end
         local function check_num(r_id)
             local lt = ctx.types:get(r_id)
@@ -538,13 +579,27 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if op == OP_EQ or op == OP_NE then return ctx.T_BOOLEAN end
     if CMP_META[op] then
-        local mm = meta_op_ret(ctx, left_r, CMP_META[op]) or meta_op_ret(ctx, right_r, CMP_META[op])
+        -- Only dispatch via table metamethods; primitive comparison always returns boolean.
+        local mm
+        if ctx.types:get(left_r).tag == TAG_TABLE then
+            mm = meta_op_ret(ctx, left_r, CMP_META[op])
+        end
+        if not mm and ctx.types:get(right_r).tag == TAG_TABLE then
+            mm = meta_op_ret(ctx, right_r, CMP_META[op])
+        end
         if mm then return mm end
         return ctx.T_BOOLEAN
     end
 
     if op == OP_CONCAT then
-        local mm = meta_op_ret(ctx, left_r, "__concat") or meta_op_ret(ctx, right_r, "__concat")
+        -- Only dispatch via table metamethods; primitive concat validity is checked below.
+        local mm
+        if ctx.types:get(left_r).tag == TAG_TABLE then
+            mm = meta_op_ret(ctx, left_r, "__concat")
+        end
+        if not mm and ctx.types:get(right_r).tag == TAG_TABLE then
+            mm = meta_op_ret(ctx, right_r, "__concat")
+        end
         if mm then return mm end
         local function is_concat_scalar(tag, data0)
             return tag == TAG_ANY or tag == defs.TAG_STRING or tag == defs.TAG_NUMBER

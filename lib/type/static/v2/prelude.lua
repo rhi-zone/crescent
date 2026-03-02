@@ -85,11 +85,16 @@ local function load_decls(ctx, path)
         return env_mod.lookup(ctx.scope, nid)
     end
 
-    ctx.number_meta_tid     = get_alias("number_meta")     or ctx.number_meta_tid
-    ctx.integer_meta_tid    = get_alias("integer_meta")    or ctx.integer_meta_tid
-    ctx.string_meta_ops_tid = get_alias("string_meta_ops") or ctx.string_meta_ops_tid
-    ctx.string_meta_tid     = get_var("string")            or ctx.string_meta_tid
-    -- Register string's __index table in prim_index for generic method dispatch.
+    ctx.string_meta_tid = get_var("string") or ctx.string_meta_tid
+
+    -- Populate prim_meta: TAG_* → operator metamethods table TID.
+    -- Also populate prim_index: TAG_* → __index table TID (method dispatch).
+    local num_meta  = get_alias("number_meta")
+    local int_meta  = get_alias("integer_meta")
+    local str_ops   = get_alias("string_meta_ops")
+    if num_meta  then ctx.prim_meta[defs_mod.TAG_NUMBER]  = num_meta  end
+    if int_meta  then ctx.prim_meta[defs_mod.TAG_INTEGER] = int_meta  end
+    if str_ops   then ctx.prim_meta[defs_mod.TAG_STRING]  = str_ops   end
     if ctx.string_meta_tid then
         ctx.prim_index[defs_mod.TAG_STRING] = ctx.string_meta_tid
     end

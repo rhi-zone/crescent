@@ -349,19 +349,18 @@ function M.unify(ctx, a, b)
     end
 
     -- Primitives satisfy meta-only table constraints (e.g. number satisfies { #__add: fn }).
-    -- Look up the primitive's declared meta type from the prelude (ctx.number_meta_tid etc.)
-    -- and verify each required meta slot exists there.
+    -- Look up the primitive's declared meta type from ctx.prim_meta (keyed by base TAG_*).
     if tb.tag == TAG_TABLE and tb.data[1] == 0 and tb.data[3] == 0 and tb.data[6] > 0 then
-        local prim_meta_tid
-        if ta.tag == TAG_NUMBER
-          or (ta.tag == TAG_LITERAL and ta.data[0] == LIT_NUMBER) then
-            prim_meta_tid = ctx.number_meta_tid
-        elseif ta.tag == TAG_INTEGER then
-            prim_meta_tid = ctx.integer_meta_tid
-        elseif ta.tag == TAG_STRING
-          or (ta.tag == TAG_LITERAL and ta.data[0] == LIT_STRING) then
-            prim_meta_tid = ctx.string_meta_ops_tid
+        local ptag = ta.tag
+        if ptag == TAG_LITERAL then
+            if ta.data[0] == LIT_NUMBER  then ptag = TAG_NUMBER
+            elseif ta.data[0] == LIT_STRING then ptag = TAG_STRING
+            else ptag = nil
+            end
+        elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
+            ptag = nil
         end
+        local prim_meta_tid = ptag and ctx.prim_meta[ptag]
         if prim_meta_tid then
             for i = tb.data[5], tb.data[5] + tb.data[6] - 1 do
                 local fe  = ctx.fields:get(ctx.lists:get(i))

@@ -75,6 +75,9 @@
 - [x] **Assignment narrowing**: assigning `nil` to a variable inside `if x then` is flagged — typechecker checks against narrowed type, not declared type. Fixed: narrowing-escape generalized from nil-only to any value; checks outer scope binding for the pre-narrowing type.
 - [x] **Nil method call not caught**: `local x; x:match("pattern")` — fixed by nil_vars side-channel; `testdata/errors/nil_method.expected` now captures the error.
 
+### known false negatives (v2)
+- [ ] **nil concat not caught**: `nil .. "a"` silently passes — TAG_NIL is in `is_concat_scalar` in infer.lua. In Lua, nil is not a valid concat operand. Fix: remove TAG_NIL from is_concat_scalar (check if anything depends on nil being concat-ok first).
+
 ### annotation syntax gaps
 - [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.
 
@@ -162,10 +165,13 @@ Cat J — **FIXED 2026-03-02** (commit 0a91819):
 - All 9 previously-clean v2 source files now self-check at 0 errors.
 
 Cat G — string meta architecture: **FIXED 2026-03-02**
-- `ctx.prim_index` (TAG_* → TID) added to types.lua context; populated by prelude after loading stdlib.d.lua.
-- infer.lua NODE_METHOD_CALL: replaced `recv_r == ctx.T_STRING` special case with generic `ctx.prim_index[tag]` lookup.
-- Literal strings normalized to TAG_STRING before lookup, so `("hello"):upper()` works correctly.
-- Extensible: any primitive with a registered `__index` meta table works without modifying infer.lua.
+- `ctx.prim_index` (TAG_* → __index TID) for method dispatch; `ctx.prim_meta` (TAG_* → op-metamethods TID) for operator dispatch.
+- Both populated by prelude.populate() from stdlib.d.lua aliases (number_meta, integer_meta, string_meta_ops, string var).
+- infer.lua NODE_METHOD_CALL: generic prim_index[tag] lookup; literal strings normalized to TAG_STRING.
+- infer.lua meta_op_ret: extended to check prim_meta for primitives — unary `-integer` now returns integer (not number).
+- infer.lua binary dispatch (ARITH/CMP/CONCAT): TAG_TABLE guard prevents prim_meta from short-circuiting error checks and mixed-type arithmetic.
+- unify.lua: replaced if/elseif tag switch with prim_meta[ptag] lookup (TAG_LITERAL normalized inline).
+- Known gap: `nil .. "a"` not flagged — TAG_NIL is in is_concat_scalar (pre-existing, separate fix needed).
 
 Cat H (new) — Optional function parameter typed as required: **FIXED 2026-03-02**
 - Fixed in infer_function: scan first 10 body statements for `param = param or default`.
