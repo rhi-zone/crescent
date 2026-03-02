@@ -2718,6 +2718,46 @@ assert.describe("cri: round-trip", function()
     end)
 end)
 
+assert.describe("field assignment M.foo = val", function()
+    assert.it("new field can be read back without error", function()
+        local err = infer_mod.check_string([[
+            local M = {}
+            M.x = 42
+            local v = M.x
+        ]], "t.lua")
+        assert.eq(#err.errors, 0)
+    end)
+
+    assert.it("assigned string field enables string method call", function()
+        local err = infer_mod.check_string([[
+            local M = {}
+            M.name = "hello"
+            local upper = M.name:upper()
+        ]], "t.lua")
+        assert.eq(#err.errors, 0)
+    end)
+
+    assert.it("multiple field assignments build table type", function()
+        local err = infer_mod.check_string([[
+            local M = {}
+            M.name = "hello"
+            M.value = 99
+            local s = M.name .. " world"
+            local n = M.value + 1
+        ]], "t.lua")
+        assert.eq(#err.errors, 0)
+    end)
+
+    assert.it("function M.foo still works after field assignment fix", function()
+        local err = infer_mod.check_string([[
+            local M = {}
+            function M.greet() return "hi" end
+            local s = M.greet()
+        ]], "t.lua")
+        assert.eq(#err.errors, 0)
+    end)
+end)
+
 assert.describe("cri: require() type resolution", function()
     assert.it("cri_loader wires require() return type", function()
         -- Build a 'module' and serialize its export type

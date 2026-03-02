@@ -1455,7 +1455,22 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 env_mod.bind(s, name_id, rhs_tid)
             end
         elseif tn.kind == NODE_FIELD_EXPR then
-            infer_expr(ctx, tn.data[0])
+            local obj_nid = tn.data[0]
+            local field_id = tn.data[1]
+            local obj_tid = types_mod.find(ctx, infer_expr(ctx, obj_nid))
+            local ot = ctx.types:get(obj_tid)
+            if ot.tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx, obj_tid, field_id)
+                if not fe then
+                    table_add_field(ctx, obj_tid, field_id, rhs_tid)
+                end
+                -- Re-assignment to an existing field: no type check here.
+                -- The field type was inferred from the first assignment; we do
+                -- not check subsequent ones since index-assignment tracking is
+                -- not yet implemented (returns[n] = v keeps returns typed as {}).
+                -- Catching wrong-type re-assignment (e.g. `M.fn = "string"` after
+                -- `function M.fn()`) is tracked in TODO.md for a future pass.
+            end
         elseif tn.kind == NODE_INDEX_EXPR then
             infer_expr(ctx, tn.data[0])
             infer_expr(ctx, tn.data[1])

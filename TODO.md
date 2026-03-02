@@ -238,7 +238,8 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
 - [x] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Annotation on any line `[callee.line, node.line]` (node.line = `(` line). Lua 5.1/LuaJIT constraint: `(` cannot be on a new line from the callee (ambiguous call syntax), so annotation must share the callee's line in practice. Lua 5.2+ compat removes this restriction.
 - [ ] Parse LuaJIT FFI cdef blocks
-- [ ] Field assignment `M.foo = val` doesn't add field to M's table type (only `function M.foo()` does via prescan). Fix: handle NODE_FIELD_EXPR on LHS of NODE_ASSIGN_STMT by calling table_add_field.
+- [x] Field assignment `M.foo = val` now adds the field to M's table type via NODE_FIELD_EXPR handling in NODE_ASSIGN_STMT. Structural-inference guard: skip when existing field type is TAG_VAR (prevents Cat J regression where `s.pos = s.pos + 1` binds the structural typevar).
+- [ ] Field re-assignment type-check (`M.count = "string"` after `function M.count()`) deferred: index-assignment tracking needed first (currently `returns[n] = v` doesn't update the type of `returns`, so inferred table field types are inconsistent across branches — causes self-check false positives).
 - [x] v2 stdlib.d.lua: stdlib.d.lua created (2026-03-02); prelude.lua replaced with load_decls().
   `--:: declare name = type` for variable bindings; `--[[:: name = { ... }]]` for type aliases.
   Primitive meta types (number_meta, integer_meta, string_meta_ops) declared in stdlib.d.lua;
