@@ -112,6 +112,8 @@ function M.populate(ctx)
     ---------------------------------------------------------------------------
     -- string table
     ---------------------------------------------------------------------------
+    -- Store string table type on ctx so method call inference can find it
+    -- without doing a name lookup (see ExprRule[NODE_METHOD_CALL] in infer.lua).
     local str_t = make_ns(ctx, {
         {"format",  types_mod.make_func(ctx, {T_STRING}, {T_STRING}, T_ANY)},
         {"len",     types_mod.make_func(ctx, {T_STRING}, {T_INTEGER})},
@@ -129,6 +131,7 @@ function M.populate(ctx)
         {"dump",    types_mod.make_func(ctx, {T_ANY, T_ANY}, {T_STRING})},
     })
     bind(ctx, "string", str_t)
+    ctx.string_meta_tid = str_t  -- used by ExprRule[NODE_METHOD_CALL] for s:method()
 
     ---------------------------------------------------------------------------
     -- table table

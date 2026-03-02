@@ -780,8 +780,8 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
         end
     elseif recv_r == ctx.T_STRING then
         -- String method call: Lua strings inherit the string table via __index.
-        local str_name_id = intern_mod.intern(ctx.pool, "string")
-        local str_tbl_tid = env_mod.lookup(ctx.scope, str_name_id)
+        -- ctx.string_meta_tid is set by prelude.populate; fall back to any if absent.
+        local str_tbl_tid = ctx.string_meta_tid
         if str_tbl_tid then
             str_tbl_tid = types_mod.find(ctx, str_tbl_tid)
             local st = ctx.types:get(str_tbl_tid)
