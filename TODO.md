@@ -274,8 +274,46 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [ ] Header serialisation fast path — avoid `table.concat` + string interning on every response; pre-serialise static headers once, memcpy into buffer
 - [ ] Profile-guided allocation reduction — run under `jit.p` / `jit.dump` to find top allocation sites before committing to specific optimisations
 
+## testing
+
+### property testing (`lib/test/prop.lua`)
+- [ ] QuickCheck-style property runner: `prop.check(desc, gen, fn)` / `assert.property(desc, gen, fn)`
+- [ ] Core generators: `gen.int(min, max)`, `gen.uint`, `gen.float`, `gen.bool`, `gen.byte`, `gen.string`, `gen.list(elem_gen)`, `gen.table(k_gen, v_gen)`, `gen.one_of(...)`, `gen.frequency({weight, gen}...)`, `gen.sized(fn)`, `gen.map(g, fn)`, `gen.filter(g, pred)`, `gen.constant(v)`, `gen.nil_or(g)`
+- [ ] Shrinking: binary search on int ranges, element removal for lists/strings, field removal for tables — find minimal counterexample automatically
+- [ ] N configurable trials (default 100); on failure: print original + shrunk + seed for reproducibility
+- [ ] Integration with test runner: failures show in the same format as `it()` blocks; property names in output
+- [ ] Seed override via env var or CLI flag for deterministic replay
+
+### fuzz testing (`lib/test/fuzz.lua`)
+- [ ] Corpus-based mutation fuzzer: byte-flip, insert, delete, splice on seed inputs
+- [ ] Coverage-guided mode: track which branches fire (debug.sethook + branch bitmap); prefer mutations that hit new branches
+- [ ] Crash/error detection: wrap target in pcall; distinguish expected errors from panics
+- [ ] Corpus persistence: save interesting inputs to disk; resume across runs
+- [ ] AFL-style queue: score inputs by new coverage; cycle through queue mutating each
+- [ ] Integration with property testing: `prop.fuzz(gen, fn)` — use mutations instead of random generation when a corpus exists
+- [ ] Note: pure coverage-guided fuzzing in Lua will be slow (debug.sethook overhead); offer a "fast dumb" mode (pure random) and a "slow guided" mode
+
+### coverage
+
+Current: `luajit lib/test/cli.lua --coverage` does line coverage via `debug.sethook`. Gaps:
+
+- [ ] **Statement coverage**: count each statement executed (finer than line — multiple stmts per line)
+- [ ] **Branch coverage**: track both arms of every `if`/`elseif`/`else`, `and`/`or` short-circuit, `repeat`/`while`/`for` loop entry vs skip — report uncovered branches explicitly
+- [ ] **MC/DC (Modified Condition/Decision Coverage)**: each boolean sub-condition independently affects the overall decision; required for aviation/automotive safety standards; needs AST instrumentation or symbolic execution
+- [ ] **Path coverage**: enumerate feasible execution paths through a function; exponential in theory, approximate with DFS + budget
+- [ ] **Coverage-gated CI**: fail if coverage drops below threshold; report per-file and per-function coverage delta
+
+Branch coverage implementation sketch: instrument the AST (add synthetic nodes around branch points) or use `debug.sethook("l", ...)` + a per-function line→branch-id table derived from the parser. The v2 parser already produces a full AST, so AST instrumentation is the natural path.
+
+### fixture / snapshot testing (`lib/test/fixture.lua`)
+- [ ] Generalize the pattern from `lib/type/static/fixtures_test.lua` into a reusable lib
+- [ ] `fixture.run_dir(dir, runner, opts)`: discover `*.input` / `*.expected` pairs; run `runner(input)` → actual; diff vs expected; report failures with unified diff
+- [ ] `--update` / `UPDATE_SNAPSHOTS=1` mode: overwrite `.expected` files with actual output (snapshot update workflow)
+- [ ] Pluggable normalizers: strip trailing whitespace, normalize line endings, sort lines, redact timestamps/paths
+- [ ] Support binary fixtures (e.g. .cri files) with hex-dump diff on mismatch
+- [ ] Named fixture groups: `fixture.group("parser", ...)` so runner output is scoped
+
 ## infra
-- [ ] Fuzz infrastructure (pure Lua, handgrown)
 - [ ] Formalize code style conventions — don't assume ~/git/lua conventions are correct, decide fresh
 - [ ] `cr` binary entry point
 - [ ] Third-party libs under lib/ must preserve original LICENSE
