@@ -123,9 +123,9 @@ Cat B — Multi-return assignment loses values: **FIXED 2026-03-02**
   when last RHS is a call, missing return slots → T_ANY instead of T_NIL
 - Remaining: fully generic multi-return arity tracking (future)
 
-Cat C — Literal table vs indexed type mismatch:
-- `{ T_NUMBER, elem_tid }` inferred as `{1: T, 2: U}`, but param expects `{[number]: T}`
-- Fix: unify positional table with indexed type (sequential int keys → numeric indexer)
+Cat C — Literal table vs indexed type mismatch: **FIXED 2026-03-02**
+- Fixed in unify.lua: when b has a numeric indexer and a has no matching indexer, check
+  a's sequential integer-named fields ("1", "2", ...) and unify each value with the indexer value type.
 
 Cat D — Boolean literal widen on reassignment: **FIXED 2026-03-02**
 - Fixed in StmtRule[NODE_LOCAL_STMT]: boolean literal binds widen to `boolean`
@@ -140,24 +140,24 @@ Cat E — Nil-narrowing after early return: **PARTIALLY FIXED 2026-03-02**
 - Remaining Cat E variant: compound `or` conditions like `if not x.field or ... then return end`
   cannot be narrowed — requires reasoning about sub-expressions of `or`
 
-Cat F — `intern_mod.get()` returns `string|nil`, `or "?"` not narrowed to `string`:
-- `intern_mod.get(pool, id) or "?"` — checker sees result as `string|nil|string` not `string`
-- Fix: `A or B` where B is a non-nil literal should narrow result type to non-nil
+Cat F — `intern_mod.get()` returns `string|nil`, `or "?"` not narrowed to `string`: **FIXED 2026-03-02**
+- Fixed in ExprRule[NODE_BINARY_EXPR] OP_OR: strip nil from left side before union with right.
+- Also fixed `is_concat_ok` to handle unions (all members must be concat-compatible).
+- `string|nil or "?"` now produces `string|"?"` (concat-safe union), not `string|nil|"?"`.
 
 Cat G — string meta architecture (minor):
 - `s:method()` special-cased via `recv_r == ctx.T_STRING` in ExprRule[NODE_METHOD_CALL]
 - More principled: store `ctx.string_meta_tid` in prelude, use generically
 - Blocked on: primitive types having declared metatables (a .cri/stdlib concern)
 
-Cat H (new) — Optional function parameter typed as required:
-- `resolve_annotation_type(ctx, ann_tid, seen)` with `seen = seen or {}` inside
-- Caller `resolve_annotation_type(ctx, id)` (2 args) errors "argument 3: missing required argument"
-- Fix: detect `param = param or default` pattern and mark param as optional in type
+Cat H (new) — Optional function parameter typed as required: **FIXED 2026-03-02**
+- Fixed in infer_function: scan first 10 body statements for `param = param or default`.
+- After body inference, widen matched params to union(bound_type, T_NIL).
+- `resolve_annotation_type(ctx, id)` (2 args) now accepted where 3rd param has default.
 
-Cat I (new) — Explicit `local x = nil` still binds T_NIL:
-- Same symptom as Cat A but for explicit nil initializer
-- `local arg_ids = nil; arg_ids = {}` errors "cannot assign '{}' to 'arg_ids'"
-- Fix: treat explicit nil init the same as no-init (make_var or T_ANY)
+Cat I (new) — Explicit `local x = nil` still binds T_NIL: **FIXED 2026-03-02**
+- Fixed in NODE_LOCAL_STMT: when rhs resolves to TAG_NIL, bind fresh typevar (same as Cat A).
+- `local arg_ids = nil; arg_ids = {}` now works correctly.
 
 **Phase 4 proper:**
 - [ ] .cri interface files (zero-copy module loading, content-addressed)
@@ -170,10 +170,10 @@ Cat I (new) — Explicit `local x = nil` still binds T_NIL:
 - [x] Cat B: multi-return in assignments (right-hand side)
 - [x] Cat D: boolean literal widen on reassignment
 - [x] Cat E: guard/early-return nil narrowing (partial fix; compound conditions remain)
-- [ ] Cat C: positional table vs indexed type (types.lua, infer.lua)
-- [ ] Cat F: `A or B` result narrowing
-- [ ] Cat H: optional function parameters (seen arg pattern)
-- [ ] Cat I: explicit `local x = nil` treated as forward declaration
+- [x] Cat C: positional table vs indexed type — FIXED 2026-03-02
+- [x] Cat F: `A or B` result narrowing — FIXED 2026-03-02
+- [x] Cat H: optional function parameters (seen arg pattern) — FIXED 2026-03-02
+- [x] Cat I: explicit `local x = nil` treated as forward declaration — FIXED 2026-03-02
 
 - [x] Infinite recursion in resolve_require: fixed with `_globally_resolving` module-level table.
 
