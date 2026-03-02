@@ -61,6 +61,26 @@ function M.lookup(scope, name_id)
     return nil
 end
 
+-- Look up the declared type of a name, skipping narrowing-derived bindings.
+-- Narrowing scopes (created by apply_narrowed) record which names are narrowed
+-- in the `narrowed_names` table. This function skips those entries to find
+-- the type as declared/assigned before narrowing.
+-- Returns type_id or nil.
+function M.lookup_declared(scope, name_id)
+    local s = scope
+    while s do
+        local ty = s.bindings[name_id]
+        if ty ~= nil then
+            -- If this binding is narrowing-derived, skip it
+            if not (s.narrowed_names and s.narrowed_names[name_id]) then
+                return ty
+            end
+        end
+        s = s.parent
+    end
+    return nil
+end
+
 -- Look up a type alias up the scope chain.
 -- Returns alias entry or nil.
 function M.lookup_type(scope, name_id)

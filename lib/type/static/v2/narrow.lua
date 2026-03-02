@@ -365,9 +365,13 @@ end
 function M.apply_narrowed(ctx, narrowed)
     local env_mod = require("lib.type.static.v2.env")
     local new_scope = env_mod.child(ctx.scope)
+    -- Track which bindings are narrowing-derived so that lookup_declared can skip them.
+    local nn = {}
     for name_id, type_id in pairs(narrowed) do
         env_mod.bind(new_scope, name_id, type_id)
+        nn[name_id] = true
     end
+    new_scope.narrowed_names = nn
     return new_scope
 end
 

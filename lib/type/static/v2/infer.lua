@@ -1175,21 +1175,44 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             local name_id = tn.data[0]
             local existing = env_mod.lookup(ctx.scope, name_id)
             if existing then
-                -- Cat D: widen the existing binding before checking so that
-                -- `local x = false; x = boolExpr` doesn't error (false → boolean).
-                local check_against = types_mod.widen(ctx, existing)
+                -- Use the declared type (skipping narrowing-derived bindings) for the
+                -- compatibility check, so that assigning inside a narrowing branch (e.g.
+                -- `if x == nil then x = "default" end`) checks against the declared
+                -- string|nil rather than the narrowed nil.
+                local declared = env_mod.lookup_declared(ctx.scope, name_id)
+                -- Cat D: widen literals so `local x = false; x = boolExpr` is fine.
+                local check_against = types_mod.widen(ctx, declared or existing)
+                local ca_resolved   = types_mod.find(ctx, check_against)
+                local ca_tag        = ctx.types:get(ca_resolved).tag
                 -- Skip check when existing resolved to never: this happens in narrowed
                 -- branches (e.g. inside `if not x then`) where the type was eliminated.
                 -- Assignment in such branches is always permissive — the code is
                 -- logically unreachable under the narrowed assumptions.
-                if types_mod.find(ctx, check_against) ~= ctx.T_NEVER then
-                    local ok, err = unify_mod.unify(ctx, rhs_tid, check_against)
+                -- Also skip when check_against is an unbound typevar: unifying against a
+                -- free typevar would bind it globally across branches (invalidating the
+                -- second branch's check). Instead, rebind branch-locally and let the
+                -- branch-join later resolve the final type as a union.
+                local skip_check = (ca_resolved == ctx.T_NEVER) or (ca_tag == TAG_VAR)
+                local ok = true
+                if not skip_check then
+                    local err
+                    ok, err = unify_mod.unify(ctx, rhs_tid, check_against)
                     if not ok then
                         local nm = intern_mod.get(ctx.pool, name_id) or "?"
                         report(ctx, tn.line, tn.col,
                             "cannot assign '" .. types_mod.display(ctx, rhs_tid)
                             .. "' to '" .. nm .. "'" .. (err and (": " .. err) or ""))
                     end
+                end
+                if ok then
+                    -- Rebind in the current scope so branch-local type changes are
+                    -- visible to subsequent code in this branch AND diffable by
+                    -- branch-join after the if-statement.
+                    -- Clear any stale narrowed_names flag for this binding.
+                    if ctx.scope.narrowed_names then
+                        ctx.scope.narrowed_names[name_id] = nil
+                    end
+                    env_mod.bind(ctx.scope, name_id, rhs_tid)
                 end
             else
                 local s = ctx.scope
@@ -1282,39 +1305,134 @@ StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
     ctx.scope = saved
 end
 
+-- Collect the effective type of each parent-scope variable at the end of a branch.
+-- Walks the branch_scope chain up to (not including) base_scope and returns
+-- { [name_id] -> type_id } for names that already existed in base_scope.
+-- This captures narrowings AND assignment rebindings from within the branch.
+local function branch_scope_diff(ctx, branch_scope, base_scope)
+    local result = {}
+    local s = branch_scope
+    while s and s ~= base_scope do
+        for name_id, type_id in pairs(s.bindings) do
+            if result[name_id] == nil then
+                -- Only include names that existed before the branch (not new locals).
+                if env_mod.lookup(base_scope, name_id) ~= nil then
+                    result[name_id] = type_id
+                end
+            end
+        end
+        s = s.parent
+    end
+    return result
+end
+
 StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local narrow_mod = require("lib.type.static.v2.narrow")
-    -- Cat E: accumulate negated narrowings from guard clauses that unconditionally exit.
-    -- After `if not x then return end`, the continuation knows x is non-nil.
-    local guard_narrowings = {}
+    local saved = ctx.scope  -- stable reference; same for all clauses
+
+    -- Per-clause state collected during the loop.
+    local guard_narrowings = {}  -- Cat E: negated narrowings from exiting clauses
+    local branch_ends    = {}    -- [i] -> { name_id -> type_id } for non-exiting clauses
+    local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
+    local has_else       = false
+
     for i = n.data[0], n.data[0] + n.data[1] - 1 do
-        local cn = ctx.nodes:get(ctx.ast_lists:get(i))
+        local cn      = ctx.nodes:get(ctx.ast_lists:get(i))
         local test_nid = cn.data[0]
-        local saved = ctx.scope
-        if test_nid >= 0 then
+
+        if test_nid < 0 then
+            has_else = true
+        else
             infer_expr(ctx, test_nid)
             local narrowed = narrow_mod.narrow_scope(ctx, test_nid, true)
             ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
         end
+
         infer_block(ctx, cn.data[1], cn.data[2])
+        local end_scope = ctx.scope  -- end-of-branch state before restore
         ctx.scope = saved
-        -- If this is a conditional clause whose body exits unconditionally (return/break),
-        -- apply the negated narrowing to the continuation scope.
-        if test_nid >= 0 and cn.data[2] > 0 then
+
+        -- Determine whether this clause exits unconditionally.
+        local exits = false
+        if cn.data[2] > 0 then
             local last_nid = ctx.ast_lists:get(cn.data[1] + cn.data[2] - 1)
-            local last_n = ctx.nodes:get(last_nid)
-            if last_n.kind == NODE_RETURN_STMT or last_n.kind == NODE_BREAK_STMT then
+            local last_n   = ctx.nodes:get(last_nid)
+            exits = (last_n.kind == NODE_RETURN_STMT or last_n.kind == NODE_BREAK_STMT)
+        end
+
+        if test_nid >= 0 and exits then
+            -- Cat E guard: negated narrowing narrows the continuation scope.
+            local neg = narrow_mod.narrow_scope(ctx, test_nid, false)
+            for name_id, type_id in pairs(neg) do
+                guard_narrowings[name_id] = type_id
+            end
+        end
+
+        if not exits then
+            -- Collect end-of-branch effective types for branch-join.
+            branch_ends[#branch_ends + 1] = branch_scope_diff(ctx, end_scope, saved)
+            -- Accumulate negated narrowings for the implicit pass-through path.
+            -- (Only conditional clauses contribute; the else clause sets has_else.)
+            if test_nid >= 0 then
                 local neg = narrow_mod.narrow_scope(ctx, test_nid, false)
                 for name_id, type_id in pairs(neg) do
-                    guard_narrowings[name_id] = type_id
+                    pass_through_neg[name_id] = type_id
                 end
             end
         end
     end
-    -- Apply accumulated guard narrowings to the continuation scope.
+
+    -- Step 1: Apply Cat E guard narrowings to the continuation scope.
     if next(guard_narrowings) then
         ctx.scope = narrow_mod.apply_narrowed(ctx, guard_narrowings)
+    end
+
+    -- Step 2: Branch join — union per-branch end-types and bind in the continuation.
+    -- Collect all names that changed in at least one non-exiting branch.
+    local changed = {}
+    for _, et in ipairs(branch_ends) do
+        for name_id in pairs(et) do changed[name_id] = true end
+    end
+
+    if next(changed) then
+        local join = {}
+        for name_id in pairs(changed) do
+            -- post_guard is the type this variable has in the continuation after guards.
+            local post_guard = env_mod.lookup(ctx.scope, name_id)
+            local members = {}
+            local seen    = {}
+            local function add_member(t)
+                t = types_mod.find(ctx, t)
+                if t ~= nil and not seen[t] then
+                    seen[t] = true
+                    members[#members + 1] = t
+                end
+            end
+
+            -- Collect types from each non-exiting branch.
+            for _, et in ipairs(branch_ends) do
+                add_member(et[name_id] or post_guard)
+            end
+
+            -- If there is no else clause, the "no branch taken" path also contributes.
+            -- Its type is the negated narrowing of the clause condition applied to
+            -- post_guard (e.g. after `if x == nil` the pass-through has x non-nil).
+            if not has_else then
+                local pt = pass_through_neg[name_id] or post_guard
+                add_member(pt)
+            end
+
+            if #members == 1 then
+                join[name_id] = members[1]
+            elseif #members > 1 then
+                join[name_id] = types_mod.make_union(ctx, members)
+            end
+        end
+
+        if next(join) then
+            ctx.scope = narrow_mod.apply_narrowed(ctx, join)
+        end
     end
 end
 

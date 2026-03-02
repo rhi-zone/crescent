@@ -2100,3 +2100,68 @@ end
 ]])
     end)
 end)
+
+assert.describe("checker: branch-join / post-if type merging", function()
+    assert.it("nil-default: if x == nil then x = default end → x non-nil after", function()
+        -- After the if, x was either non-nil (unchanged) or reassigned to "default".
+        -- Both paths end with x = string, so x:upper() is safe.
+        no_errors([[
+--: string?
+local x = "hello"
+if x == nil then
+    x = "default"
+end
+local y = x .. "!"
+]])
+    end)
+    assert.it("if/else exhaustive: variable gets union of both branch types", function()
+        -- x is assigned in both branches; after the if, x is string|integer.
+        no_errors([[
+local function get_val(flag)
+    local x
+    if flag then
+        x = "hello"
+    else
+        x = 42
+    end
+    return x
+end
+]])
+    end)
+    assert.it("if-only (no else): variable gets union of branch type and original", function()
+        -- x starts as integer; branch assigns "world" to it.
+        -- After the if: x = string|integer.
+        no_errors([[
+--: string?
+local x = nil
+if true then
+    x = "set"
+end
+]])
+    end)
+    assert.it("assignment in narrowing branch uses declared type for check", function()
+        -- Inside `if x == nil`, x is narrowed to nil.
+        -- Assigning string to x should check against declared string|nil, not narrowed nil.
+        no_errors([[
+--: string?
+local x = "original"
+if x == nil then
+    x = "replacement"
+end
+]])
+    end)
+    assert.it("if/else both-exit: no join (both branches return)", function()
+        no_errors([[
+local function f(cond)
+    local x = 0
+    if cond then
+        x = 1
+        return x
+    else
+        x = 2
+        return x
+    end
+end
+]])
+    end)
+end)
