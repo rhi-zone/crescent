@@ -778,6 +778,23 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
             local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
             report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
         end
+    elseif recv_r == ctx.T_STRING then
+        -- String method call: Lua strings inherit the string table via __index.
+        local str_name_id = intern_mod.intern(ctx.pool, "string")
+        local str_tbl_tid = env_mod.lookup(ctx.scope, str_name_id)
+        if str_tbl_tid then
+            str_tbl_tid = types_mod.find(ctx, str_tbl_tid)
+            local st = ctx.types:get(str_tbl_tid)
+            if st.tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx, str_tbl_tid, method_name_id)
+                if fe then
+                    method_tid = types_mod.find(ctx, fe.type_id)
+                else
+                    local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
+                    report(ctx, n.line, n.col, "no method '" .. mname .. "' on type 'string'")
+                end
+            end
+        end
     elseif recv_t.tag ~= TAG_ANY and recv_t.tag ~= TAG_VAR then
         local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
         report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
@@ -926,6 +943,40 @@ infer_block = function(ctx, bs, bl)
     end
 end
 
+-- Add a field to a table type in-place (used by prescan and open-table extension).
+-- WARNING: reads all ot.data before calling make_table, then re-fetches the pointer
+-- after, because arena:grow() may reallocate ctx.types.items, invalidating old ptrs.
+local function table_add_field(ctx, obj_tid, field_id, field_type_id)
+    -- Snapshot all data before any allocation that may trigger arena grow.
+    local ot = ctx.types:get(obj_tid)
+    local fs, fl = ot.data[0], ot.data[1]
+    local is2, il2 = ot.data[2], ot.data[3]
+    local rv = ot.data[4]
+    local ms, ml = ot.data[5], ot.data[6]
+
+    local existing_fields = {}
+    for i = fs, fs + fl - 1 do
+        existing_fields[#existing_fields + 1] = ctx.lists:get(i)
+    end
+    existing_fields[#existing_fields + 1] = types_mod.make_field(ctx, field_id, field_type_id, false)
+    local existing_indexers = {}
+    local ix = is2
+    while ix < is2 + il2 - 1 do
+        existing_indexers[#existing_indexers + 1] = ctx.lists:get(ix)
+        existing_indexers[#existing_indexers + 1] = ctx.lists:get(ix + 1)
+        ix = ix + 2
+    end
+    local existing_meta = {}
+    for j = ms, ms + ml - 1 do
+        existing_meta[#existing_meta + 1] = ctx.lists:get(j)
+    end
+    local new_tbl = types_mod.make_table(ctx, existing_fields, existing_indexers, rv, existing_meta)
+    -- Re-fetch ot: make_table may have triggered ctx.types arena grow, invalidating old ptr.
+    ot = ctx.types:get(obj_tid)
+    local new_t = ctx.types:get(new_tbl)
+    for k = 0, 6 do ot.data[k] = new_t.data[k] end
+end
+
 local function prescan_block(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         local sid = ctx.ast_lists:get(i)
@@ -936,6 +987,24 @@ local function prescan_block(ctx, bs, bl)
                 local name_id = nn.data[0]
                 if not env_mod.lookup(ctx.scope, name_id) then
                     env_mod.bind(ctx.scope, name_id, types_mod.make_var(ctx, ctx.scope.level))
+                end
+            elseif nn.kind == NODE_FIELD_EXPR then
+                -- function M.foo(): pre-add foo as a var field on M's table type.
+                local obj_n = ctx.nodes:get(nn.data[0])
+                if obj_n.kind == NODE_IDENTIFIER then
+                    local obj_name_id = obj_n.data[0]
+                    local obj_tid = env_mod.lookup(ctx.scope, obj_name_id)
+                    if obj_tid then
+                        obj_tid = types_mod.find(ctx, obj_tid)
+                        local ot = ctx.types:get(obj_tid)
+                        if ot.tag == TAG_TABLE then
+                            local field_id = nn.data[1]
+                            if not types_mod.table_field(ctx, obj_tid, field_id) then
+                                table_add_field(ctx, obj_tid, field_id,
+                                    types_mod.make_var(ctx, ctx.scope.level))
+                            end
+                        end
+                    end
                 end
             end
         elseif sn.kind == NODE_LOCAL_STMT then
@@ -983,6 +1052,11 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             ann_tid = resolve_annotation_type(ctx, ann.type_id)
         end
 
+        -- Check for a prescan binding in the CURRENT scope (forward-declared module table).
+        -- When `local M = {}` is prescanned, M is bound as a table with all method fields
+        -- pre-populated. The inferred RHS (`{}`) must not overwrite that richer type.
+        local prescanned = ctx.scope.bindings[name_id]
+
         if ann_tid then
             if rhs_tid then
                 local ok, err = unify_mod.unify(ctx, rhs_tid, ann_tid)
@@ -994,6 +1068,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 end
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
+        elseif prescanned then
+            -- Prescan bound this name: unify with RHS but keep the richer prescanned type.
+            if rhs_tid then unify_mod.unify(ctx, rhs_tid, prescanned) end
         else
             env_mod.bind(ctx.scope, name_id, rhs_tid or ctx.T_NIL)
         end
@@ -1071,8 +1148,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
                 unify_mod.unify(ctx, fn_tid, fe.type_id)
                 fe.type_id = fn_tid
             else
-                -- Add field: rebuild table with new field
-                -- TODO: proper open table extension
+                table_add_field(ctx, obj_tid, field_id, fn_tid)
             end
         end
     end
@@ -1147,17 +1223,21 @@ StmtRule[NODE_FOR_IN] = function(ctx, nid)
     local saved = ctx.scope
     ctx.scope = env_mod.child(ctx.scope)
     local ns, nl = n.data[0], n.data[1]
-    for i = 0, nl - 1 do
-        local name_id = ctx.ast_lists:get(ns + i)
-        local ty = ctx.T_ANY
-        if i == 0 and #iter_types > 0 then
-            local ft = types_mod.find(ctx, iter_types[1])
-            local ftt = ctx.types:get(ft)
-            if ftt.tag == TAG_FUNCTION and ftt.data[3] > 0 then
-                ty = types_mod.find(ctx, ctx.lists:get(ftt.data[2]))
+    -- Extract loop-variable types from iterator function's return types.
+    -- iter_types[1] is the iterator function; its returns are the loop vars.
+    local iter_func_returns = {}
+    if #iter_types > 0 then
+        local ft = types_mod.find(ctx, iter_types[1])
+        local ftt = ctx.types:get(ft)
+        if ftt.tag == TAG_FUNCTION then
+            for j = ftt.data[2], ftt.data[2] + ftt.data[3] - 1 do
+                iter_func_returns[#iter_func_returns + 1] = types_mod.find(ctx, ctx.lists:get(j))
             end
         end
-        env_mod.bind(ctx.scope, name_id, ty)
+    end
+    for i = 0, nl - 1 do
+        local name_id = ctx.ast_lists:get(ns + i)
+        env_mod.bind(ctx.scope, name_id, iter_func_returns[i + 1] or ctx.T_ANY)
     end
     infer_block(ctx, n.data[4], n.data[5])
     ctx.scope = saved
@@ -1253,6 +1333,11 @@ function M.check_string(source, filename, parent_scope, pool)
     local err_ctx = errors_mod.new_ctx()
     local scope   = parent_scope or env_mod.new(0)
     local ctx     = M.new_ctx(pr, ann_result, pool, err_ctx, filename, scope)
+
+    -- Populate stdlib prelude when no parent scope is provided.
+    if not parent_scope then
+        require("lib.type.static.v2.prelude").populate(ctx)
+    end
 
     -- Register type declarations first, then prescan, then infer
     process_type_decls(ctx)
