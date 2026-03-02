@@ -189,12 +189,11 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [ ] Parse LuaJIT FFI cdef blocks
 - [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
 - [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
-- [ ] v2 stdlib.d.lua: declare primitive metamethods in a .d.lua file instead of imperative
-  prelude.lua code. `ctx.number_meta_tid`, `ctx.integer_meta_tid`, `ctx.string_meta_ops_tid`
-  are currently set up in prelude.populate() as Lua. They belong in a stdlib declaration.
-  Requires annotation syntax for declaring meta slots on primitives
-  (e.g. `declare number: { #__add: (number, number) -> number, ... }`).
-  The current prelude.lua is a placeholder until that infrastructure exists.
+- [ ] v2 stdlib.d.lua: declare primitive metamethods in .d.lua instead of imperative prelude.lua.
+  `--:: number = { #__add: (number, number) -> number, ... }` already works as an ANN_DECL
+  (prim_tags fires only in type expressions, not on the LHS of --:: declarations). Once the
+  prelude loads .d.lua, it can do `ctx.number_meta_tid = lookup_type("number").body` etc.
+  The current prelude.populate() hardcoding is a placeholder until .d.lua loading exists.
 - [ ] `pcall`/`xpcall` return type narrowing
 - [ ] For-in iterator return type tracking — `for k, v in pairs(t)` always gives `any` for k/v; need iterator protocol inference (ipairs/pairs over typed tables, custom iterators)
 - [x] Metatable slot syntax: `#field` in type annotations — done (see above)
