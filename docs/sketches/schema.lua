@@ -101,8 +101,14 @@ end
 --:: InferFields<F> = $EachField<F, InferField>
 
 -- Map an array of schema members → union of inferred types.
--- (This is the part that needs $EachUnion or similar iteration over array elements.)
---:: InferUnionMembers<M> = $EachUnion<M, Infer>  -- TODO: M is an array, not a union
+-- M[number] is indexed access: given M: { [number]: Schema }, it extracts the
+-- element type (union of all element types for a tuple). Then Infer distributes
+-- over the union — each member matches a different arm of the match type.
+--
+-- Indexed access is itself derivable from match types:
+--   T[K] = match T { { [K]: V } => V }
+-- So it's sugar, not a new primitive.
+--:: InferUnionMembers<M> = Infer<M[number]>
 
 ------------------------------------------------------------------------
 -- Part 3: Usage — how it feels

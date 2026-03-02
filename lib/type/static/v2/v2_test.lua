@@ -2211,3 +2211,69 @@ end
         no_errors("for i, v in ipairs({}) do end")
     end)
 end)
+
+assert.describe("checker: pcall/xpcall return type narrowing", function()
+    assert.it("pcall success branch: result narrowed to wrapped fn return type", function()
+        no_errors([[
+local function parse(s)
+    --: string -> number
+    return tonumber(s) or 0
+end
+local ok, n = pcall(parse, "42")
+if ok then
+    local x = n + 1
+end
+]])
+    end)
+    assert.it("pcall guard: if not ok then return end narrows result in continuation", function()
+        no_errors([[
+local function parse(s)
+    --: string -> number
+    return tonumber(s) or 0
+end
+local ok, n = pcall(parse, "42")
+if not ok then return end
+local x = n + 1
+]])
+    end)
+    assert.it("pcall result without narrowing is nil-unioned (no false positives on use)", function()
+        no_errors([[
+local function get()
+    --: -> string
+    return "hello"
+end
+local ok, s = pcall(get)
+]])
+    end)
+    assert.it("xpcall success branch: result narrowed to wrapped fn return type", function()
+        no_errors([[
+local function parse(s)
+    --: string -> number
+    return tonumber(s) or 0
+end
+local ok, n = xpcall(parse, tostring, "42")
+if ok then
+    local x = n + 1
+end
+]])
+    end)
+    assert.it("pcall with no result vars still works (no false positive)", function()
+        no_errors([[
+local function side_effect() end
+local ok = pcall(side_effect)
+if ok then end
+]])
+    end)
+    assert.it("pcall result type error: using string result as number without narrowing", function()
+        has_error([[
+local function get_str()
+    --: -> string
+    return "hello"
+end
+local ok, s = pcall(get_str)
+if ok then
+    local x = s + 1
+end
+]], "cannot")
+    end)
+end)

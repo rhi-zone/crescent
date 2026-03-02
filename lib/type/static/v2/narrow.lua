@@ -20,6 +20,7 @@ local OP_OR  = defs.OP_OR
 
 local TAG_ANY   = defs.TAG_ANY
 local TAG_NIL   = defs.TAG_NIL
+local TAG_NEVER = defs.TAG_NEVER
 local TAG_VAR   = defs.TAG_VAR
 local TAG_TABLE = defs.TAG_TABLE
 local TAG_UNION = defs.TAG_UNION
@@ -314,6 +315,25 @@ local function info_name_id(info)
     return nil
 end
 
+-- If name_id is a pcall status variable, add success-type narrowings for the result vars.
+-- Called after the ok variable has been narrowed; ok_narrowed is its new type_id.
+-- If ok_narrowed is not NEVER (truthy), pcall succeeded → narrow result vars to success types.
+local function propagate_pcall_narrowing(ctx, name_id, ok_narrowed, narrowed)
+    local pcall_entry = ctx._pcall_info and ctx._pcall_info[name_id]
+    if not pcall_entry then return end
+    local env_mod = require("lib.type.static.v2.env")
+    -- Truthy: ok is not narrowed to NEVER (impossible) or NIL → pcall succeeded.
+    local ok_r = types_mod.find(ctx, ok_narrowed)
+    local ok_tag = ctx.types:get(ok_r).tag
+    if ok_tag == TAG_NEVER or ok_tag == TAG_NIL then return end
+    for i, res_name_id in ipairs(pcall_entry.result_name_ids) do
+        if env_mod.lookup(ctx.scope, res_name_id) then
+            local st = pcall_entry.success_types[i]
+            if st then narrowed[res_name_id] = st end
+        end
+    end
+end
+
 -- Apply a single narrowing info to the 'narrowed' map.
 local function record_narrowing(ctx, info, narrowed, is_truthy)
     local name_id = info_name_id(info)
@@ -322,6 +342,8 @@ local function record_narrowing(ctx, info, narrowed, is_truthy)
     local current_ty = env_mod.lookup(ctx.scope, name_id)
     if not current_ty then return end
     narrowed[name_id] = apply_narrowing(ctx, info, current_ty, is_truthy)
+    -- Propagate pcall result narrowings when the ok status variable is narrowed.
+    propagate_pcall_narrowing(ctx, name_id, narrowed[name_id], narrowed)
 end
 
 -- Narrow a scope based on a test expression.

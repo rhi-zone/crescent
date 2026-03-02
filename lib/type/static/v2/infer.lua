@@ -766,8 +766,43 @@ end
 
 ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
-    local callee_tid = infer_expr(ctx, n.data[0])
+    local callee_nid = n.data[0]
+    local callee_tid = infer_expr(ctx, callee_nid)
     local arg_tids = infer_expr_list(ctx, n.data[1], n.data[2])
+
+    -- Detect pcall(fn, ...) / xpcall(fn, handler, ...) for enriched return types.
+    -- Extract the wrapped function's return types so that `local ok, val = pcall(fn)`
+    -- gives val: ret_type|nil rather than any, enabling downstream narrowing.
+    ctx._last_pcall_success_types = nil
+    local callee_n = ctx.nodes:get(callee_nid)
+    if callee_n.kind == NODE_IDENTIFIER and n.data[2] >= 1 then
+        local fname = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
+        if fname == "pcall" or fname == "xpcall" then
+            local wrapped_fn_tid = types_mod.find(ctx, arg_tids[1])
+            local wft = ctx.types:get(wrapped_fn_tid)
+            if wft.tag == TAG_FUNCTION then
+                local inst = env_mod.instantiate(ctx, wrapped_fn_tid, ctx.scope.level)
+                local ift = ctx.types:get(inst)
+                local success_types = {}
+                for i = ift.data[2], ift.data[2] + ift.data[3] - 1 do
+                    success_types[#success_types + 1] = types_mod.find(ctx, ctx.lists:get(i))
+                end
+                ctx._last_pcall_success_types = success_types
+                -- Multi-return: boolean + each success type union'd with nil
+                local returns = { ctx.T_BOOLEAN }
+                for _, st in ipairs(success_types) do
+                    returns[#returns + 1] = types_mod.make_union(ctx, {st, ctx.T_NIL})
+                end
+                if #returns == 1 then
+                    -- Wrapped fn returns nothing: pcall still returns boolean
+                    returns[2] = ctx.T_ANY
+                end
+                ctx._last_multi_return = returns
+                return ctx.T_BOOLEAN
+            end
+        end
+    end
+
     return call_returns(ctx, callee_tid, arg_tids, n.line, n.col)
 end
 
@@ -1150,6 +1185,23 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             end
             env_mod.bind(ctx.scope, name_id, bind_tid)
         end
+    end
+
+    -- Track pcall/xpcall bindings for result-variable narrowing.
+    -- When `local ok, v1, v2, ... = pcall(fn, ...)`, record the ok→{v1,v2,...} mapping
+    -- so that `if ok then` can narrow v1, v2, ... to fn's actual return types.
+    local success_types = ctx._last_pcall_success_types
+    ctx._last_pcall_success_types = nil
+    if success_types and el == 1 and nl >= 2 then
+        local ok_name_id = ctx.ast_lists:get(ns + 0)
+        local result_name_ids = {}
+        for i = 1, nl - 1 do
+            result_name_ids[i] = ctx.ast_lists:get(ns + i)
+        end
+        ctx._pcall_info[ok_name_id] = {
+            result_name_ids = result_name_ids,
+            success_types   = success_types,
+        }
     end
 end
 
@@ -1581,6 +1633,8 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx.return_types = {}
     ctx.module_types = {}
     ctx._last_multi_return = nil
+    ctx._last_pcall_success_types = nil
+    ctx._pcall_info = {}
     ctx.nominal_id = 0
     return ctx
 end
