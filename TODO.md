@@ -101,6 +101,7 @@ Files: types.lua, env.lua, unify.lua, errors.lua, match.lua, narrow.lua, infer.l
 Tests: 721 assertions in v2_test.lua (1123 total across all suites).
 
 Known gaps / Phase 4 deferred work:
+- [ ] **Put the checker through its paces** — run v2 checker against real Lua codebases (this repo's lib/, v1 typechecker source, etc.) and catalogue what breaks. The unit tests are narrow; real code will surface missing cases (globals, metatables, require(), coroutines, etc.). Do this before committing to Phase 4 priorities.
 - [ ] `function M.foo()` field assignment: open-table extension (TODO in infer.lua:1075) — currently no-ops for new fields
 - [ ] `for k, v in pairs(t)` iterator type inference — currently yields any
 - [ ] Prelude: Lua 5.1 stdlib (print, pairs, ipairs, type, etc.) — currently unknown identifiers
