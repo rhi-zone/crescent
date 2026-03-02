@@ -2165,3 +2165,49 @@ end
 ]])
     end)
 end)
+
+assert.describe("checker: for-in iterator return types", function()
+    assert.it("ipairs over { [number]: string } gives string values", function()
+        -- v should be typed as string, so v + 1 is a type error
+        has_error([[
+--: { [number]: string }
+local arr = {}
+for i, v in ipairs(arr) do
+    local x = v + 1
+end
+]], "cannot")
+    end)
+    assert.it("ipairs over { [number]: number } gives number values (no error on v+1)", function()
+        no_errors([[
+--: { [number]: number }
+local arr = {}
+for i, v in ipairs(arr) do
+    local x = v + 1
+end
+]])
+    end)
+    assert.it("pairs over { [string]: number } gives number values (no error on v+1)", function()
+        no_errors([[
+--: { [string]: number }
+local counts = {}
+for k, v in pairs(counts) do
+    local x = v + 1
+end
+]])
+    end)
+    assert.it("pairs over { [string]: string } gives string values, v+1 is a type error", function()
+        has_error([[
+--: { [string]: string }
+local m = {}
+for k, v in pairs(m) do
+    local x = v + 1
+end
+]], "cannot")
+    end)
+    assert.it("pairs over untyped table still works (no false positive)", function()
+        no_errors("for k, v in pairs({}) do end")
+    end)
+    assert.it("ipairs over untyped table still works (no false positive)", function()
+        no_errors("for i, v in ipairs({}) do end")
+    end)
+end)

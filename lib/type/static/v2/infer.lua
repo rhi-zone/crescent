@@ -1450,6 +1450,46 @@ end
 
 StmtRule[NODE_FOR_IN] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
+    -- Pre-inspect: detect pairs(t)/ipairs(t) with a single argument to extract
+    -- element types from the actual table, giving typed loop variables.
+    local typed_iter_returns = nil
+    if n.data[3] == 1 then
+        local call_nid = ctx.ast_lists:get(n.data[2])
+        local call_n = ctx.nodes:get(call_nid)
+        if call_n.kind == NODE_CALL_EXPR and call_n.data[2] == 1 then
+            local callee_n = ctx.nodes:get(call_n.data[0])
+            if callee_n.kind == NODE_IDENTIFIER then
+                local fn_name = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
+                if fn_name == "pairs" or fn_name == "ipairs" then
+                    local arg_nid = ctx.ast_lists:get(call_n.data[1])
+                    local arg_tid = types_mod.find(ctx, infer_expr(ctx, arg_nid))
+                    local at = ctx.types:get(arg_tid)
+                    if at.tag == TAG_TABLE and at.data[3] >= 2 then
+                        local is = at.data[2]
+                        if fn_name == "ipairs" then
+                            -- Find numeric indexer → (integer, V)
+                            local j = is
+                            while j < is + at.data[3] - 1 do
+                                local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
+                                if kt.tag == defs.TAG_NUMBER or kt.tag == TAG_INTEGER then
+                                    typed_iter_returns = {
+                                        ctx.T_INTEGER,
+                                        types_mod.find(ctx, ctx.lists:get(j + 1))
+                                    }
+                                    break
+                                end
+                                j = j + 2
+                            end
+                        else  -- pairs: use first indexer → (K, V)
+                            local k = types_mod.find(ctx, ctx.lists:get(is))
+                            local v = types_mod.find(ctx, ctx.lists:get(is + 1))
+                            typed_iter_returns = { k, v }
+                        end
+                    end
+                end
+            end
+        end
+    end
     local iter_types = infer_expr_list(ctx, n.data[2], n.data[3])
     local saved = ctx.scope
     ctx.scope = env_mod.child(ctx.scope)
@@ -1468,7 +1508,11 @@ StmtRule[NODE_FOR_IN] = function(ctx, nid)
     end
     for i = 0, nl - 1 do
         local name_id = ctx.ast_lists:get(ns + i)
-        env_mod.bind(ctx.scope, name_id, iter_func_returns[i + 1] or ctx.T_ANY)
+        -- typed_iter_returns (from pairs/ipairs table inspection) takes priority
+        local t = (typed_iter_returns and typed_iter_returns[i + 1])
+               or iter_func_returns[i + 1]
+               or ctx.T_ANY
+        env_mod.bind(ctx.scope, name_id, t)
     end
     infer_block(ctx, n.data[4], n.data[5])
     ctx.scope = saved
