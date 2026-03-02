@@ -187,6 +187,19 @@ tables are large, long-lived, or in a JIT-hostile path. The real allocation
 pressure is in the arenas and list pools (already FFI). If list collection
 ever matters, restructure the grammar (e.g. sibling-linked AST nodes) instead.
 
+Raw output (infer.lua, N=500, from session `eacb799e`, code not committed):
+```
+=== SCRATCH STACK ===
+round 1:  75115 µs/parse  3696.7 KB/parse
+round 2:  75399 µs/parse  3666.5 KB/parse
+round 3:  42611 µs/parse  3712.6 KB/parse
+
+=== LUA TABLES ===
+round 1:  38983 µs/parse  3653.9 KB/parse
+round 2:  37022 µs/parse  3635.0 KB/parse
+round 3:  37205 µs/parse  3632.9 KB/parse
+```
+
 ---
 
 ## 2026-03-02: v2 parser baseline (Phase 2)
