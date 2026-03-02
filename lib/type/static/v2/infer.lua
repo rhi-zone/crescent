@@ -1042,6 +1042,14 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
 
     local rhs_types = el > 0 and infer_expr_list(ctx, es, el) or {}
 
+    -- Cat B: if the last RHS is a call, missing entries may be extra returns → use T_ANY.
+    local last_rhs_is_call = false
+    if el > 0 then
+        local last_rhs_nid = ctx.ast_lists:get(es + el - 1)
+        local last_rhs_n = ctx.nodes:get(last_rhs_nid)
+        last_rhs_is_call = (last_rhs_n.kind == NODE_CALL_EXPR or last_rhs_n.kind == NODE_METHOD_CALL)
+    end
+
     for i = 0, nl - 1 do
         local name_id = ctx.ast_lists:get(ns + i)
         local rhs_tid = rhs_types[i + 1]
@@ -1072,30 +1080,68 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             -- Prescan bound this name: unify with RHS but keep the richer prescanned type.
             if rhs_tid then unify_mod.unify(ctx, rhs_tid, prescanned) end
         else
-            env_mod.bind(ctx.scope, name_id, rhs_tid or ctx.T_NIL)
+            local bind_tid
+            if rhs_tid then
+                -- Cat D: widen boolean literals so `local x = false` gives x: boolean,
+                -- allowing reassignment to any boolean expression.
+                local rt = ctx.types:get(types_mod.find(ctx, rhs_tid))
+                if rt.tag == TAG_LITERAL and rt.data[0] == LIT_BOOLEAN then
+                    bind_tid = ctx.T_BOOLEAN
+                else
+                    bind_tid = rhs_tid
+                end
+            elseif el == 0 then
+                -- Cat A: no RHS at all — forward declaration; use a fresh type var
+                -- so later assignment (e.g. `local f; f = function()...end`) succeeds.
+                bind_tid = types_mod.make_var(ctx, ctx.scope.level)
+            elseif last_rhs_is_call then
+                -- Cat B: last RHS was a call with unknown arity; treat missing returns as any.
+                bind_tid = ctx.T_ANY
+            else
+                bind_tid = ctx.T_NIL
+            end
+            env_mod.bind(ctx.scope, name_id, bind_tid)
         end
     end
 end
 
 StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
-    local rhs_types = infer_expr_list(ctx, n.data[2], n.data[3])
+    local rhs_count = n.data[3]
+    local rhs_types = infer_expr_list(ctx, n.data[2], rhs_count)
+
+    -- Cat B: if the last RHS is a call, missing return slots → T_ANY not T_NIL.
+    local last_rhs_is_call = false
+    if rhs_count > 0 then
+        local last_rhs_nid = ctx.ast_lists:get(n.data[2] + rhs_count - 1)
+        local last_rhs_n = ctx.nodes:get(last_rhs_nid)
+        last_rhs_is_call = (last_rhs_n.kind == NODE_CALL_EXPR or last_rhs_n.kind == NODE_METHOD_CALL)
+    end
 
     for i = 0, n.data[1] - 1 do
         local target_nid = ctx.ast_lists:get(n.data[0] + i)
-        local rhs_tid = rhs_types[i + 1] or ctx.T_NIL
+        local rhs_tid = rhs_types[i + 1] or (last_rhs_is_call and ctx.T_ANY or ctx.T_NIL)
         local tn = ctx.nodes:get(target_nid)
 
         if tn.kind == NODE_IDENTIFIER then
             local name_id = tn.data[0]
             local existing = env_mod.lookup(ctx.scope, name_id)
             if existing then
-                local ok, err = unify_mod.unify(ctx, rhs_tid, existing)
-                if not ok then
-                    local nm = intern_mod.get(ctx.pool, name_id) or "?"
-                    report(ctx, tn.line, tn.col,
-                        "cannot assign '" .. types_mod.display(ctx, rhs_tid)
-                        .. "' to '" .. nm .. "'" .. (err and (": " .. err) or ""))
+                -- Cat D: widen the existing binding before checking so that
+                -- `local x = false; x = boolExpr` doesn't error (false → boolean).
+                local check_against = types_mod.widen(ctx, existing)
+                -- Skip check when existing resolved to never: this happens in narrowed
+                -- branches (e.g. inside `if not x then`) where the type was eliminated.
+                -- Assignment in such branches is always permissive — the code is
+                -- logically unreachable under the narrowed assumptions.
+                if types_mod.find(ctx, check_against) ~= ctx.T_NEVER then
+                    local ok, err = unify_mod.unify(ctx, rhs_tid, check_against)
+                    if not ok then
+                        local nm = intern_mod.get(ctx.pool, name_id) or "?"
+                        report(ctx, tn.line, tn.col,
+                            "cannot assign '" .. types_mod.display(ctx, rhs_tid)
+                            .. "' to '" .. nm .. "'" .. (err and (": " .. err) or ""))
+                    end
                 end
             else
                 local s = ctx.scope
@@ -1191,6 +1237,9 @@ end
 StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local narrow_mod = require("lib.type.static.v2.narrow")
+    -- Cat E: accumulate negated narrowings from guard clauses that unconditionally exit.
+    -- After `if not x then return end`, the continuation knows x is non-nil.
+    local guard_narrowings = {}
     for i = n.data[0], n.data[0] + n.data[1] - 1 do
         local cn = ctx.nodes:get(ctx.ast_lists:get(i))
         local test_nid = cn.data[0]
@@ -1202,6 +1251,22 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
         end
         infer_block(ctx, cn.data[1], cn.data[2])
         ctx.scope = saved
+        -- If this is a conditional clause whose body exits unconditionally (return/break),
+        -- apply the negated narrowing to the continuation scope.
+        if test_nid >= 0 and cn.data[2] > 0 then
+            local last_nid = ctx.ast_lists:get(cn.data[1] + cn.data[2] - 1)
+            local last_n = ctx.nodes:get(last_nid)
+            if last_n.kind == NODE_RETURN_STMT or last_n.kind == NODE_BREAK_STMT then
+                local neg = narrow_mod.narrow_scope(ctx, test_nid, false)
+                for name_id, type_id in pairs(neg) do
+                    guard_narrowings[name_id] = type_id
+                end
+            end
+        end
+    end
+    -- Apply accumulated guard narrowings to the continuation scope.
+    if next(guard_narrowings) then
+        ctx.scope = narrow_mod.apply_narrowed(ctx, guard_narrowings)
     end
 end
 

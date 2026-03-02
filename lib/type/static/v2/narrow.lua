@@ -18,6 +18,7 @@ local OP_NOT = defs.OP_NOT
 
 local TAG_ANY  = defs.TAG_ANY
 local TAG_NIL  = defs.TAG_NIL
+local TAG_VAR  = defs.TAG_VAR
 local TAG_UNION = defs.TAG_UNION
 local TAG_LITERAL = defs.TAG_LITERAL
 local TAG_STRING  = defs.TAG_STRING
@@ -39,6 +40,12 @@ local M = {}
 local function extract_narrowing(ctx, nid)
     local n = ctx.nodes:get(nid)
     if not n then return nil end
+
+    -- Bare identifier: `if x then` / `if not x then`.
+    -- Treat truthiness as a nil-check (positive=true means "x is not nil").
+    if n.kind == NODE_IDENTIFIER then
+        return { kind = "nil_check", name_id = n.data[0], positive = true }
+    end
 
     if n.kind == NODE_UNARY_EXPR and n.data[0] == OP_NOT then
         local inner = extract_narrowing(ctx, n.data[1])
@@ -137,8 +144,10 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         if should_remove_nil then
             return types_mod.subtract(ctx, t, ctx.T_NIL)
         else
-            -- Keep only nil members
+            -- Keep only nil members.
+            -- For unresolved type variables or any, we can't know — leave unchanged.
             local tt = ctx.types:get(t)
+            if tt.tag == TAG_VAR or tt.tag == TAG_ANY then return ty_id end
             if tt.tag == TAG_UNION then
                 local nil_members = {}
                 for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do

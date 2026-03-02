@@ -113,27 +113,32 @@ Known gaps / Phase 4 deferred work:
 
 **Known false positives in v2 (catalogued 2026-03-02 against v2 source):**
 
-Cat A — Forward-declared nil locals (large impact on infer.lua):
-- `local f; f = function()` — f typed as nil at declaration, then reassigned
-- Affects all forward declarations (`infer_expr`, `infer_stmt`, etc.)
-- Fix: forward-declared locals with no initializer should be T_ANY, not T_NIL
+Cat A — Forward-declared nil locals (large impact on infer.lua): **FIXED 2026-03-02**
+- `local f; f = function()` — now binds a fresh type var instead of T_NIL when no RHS
+- Fixed in StmtRule[NODE_LOCAL_STMT]: el==0 → make_var; last_rhs_is_call → T_ANY
+- Remaining: `local x = nil` (explicit nil literal) still binds T_NIL — Cat A variant
 
-Cat B — Multi-return assignment loses values:
-- `local fs, fl = 0, 0; fs, fl = ctx.lists:since(m)` — fl gets nil from second call
-- The checker only unpacks the first return of a call; remaining vars get nil
-- Fix: infer_expr_list properly needed for multi-return RHS in assignments too
+Cat B — Multi-return assignment loses values: **FIXED 2026-03-02**
+- Fixed in StmtRule[NODE_LOCAL_STMT] and StmtRule[NODE_ASSIGN_STMT]:
+  when last RHS is a call, missing return slots → T_ANY instead of T_NIL
+- Remaining: fully generic multi-return arity tracking (future)
 
 Cat C — Literal table vs indexed type mismatch:
 - `{ T_NUMBER, elem_tid }` inferred as `{1: T, 2: U}`, but param expects `{[number]: T}`
 - Fix: unify positional table with indexed type (sequential int keys → numeric indexer)
 
-Cat D — Boolean literal widen on reassignment:
-- `local x = false; x = (...)` — checker infers x as literal `false`, rejects `boolean`
-- Fix: literal-typed locals should widen on reassignment (like string/number already do)
+Cat D — Boolean literal widen on reassignment: **FIXED 2026-03-02**
+- Fixed in StmtRule[NODE_LOCAL_STMT]: boolean literal binds widen to `boolean`
+- Fixed in StmtRule[NODE_ASSIGN_STMT]: existing binding widened before unify
 
-Cat E — Nil-narrowing after early return not tracked (env.lua):
-- `local alias = lookup(); if not alias then return end; alias.params` — alias still `T | nil`
-- Fix: control flow narrowing for guard patterns (early return/error eliminates nil branch)
+Cat E — Nil-narrowing after early return: **PARTIALLY FIXED 2026-03-02**
+- narrow.lua: bare identifier treated as nil-check; guard clauses apply negated narrowing
+- narrow.lua: TAG_VAR not narrowed to T_NEVER (prevent "never" in branched code)
+- StmtRule[NODE_IF_STMT]: after unconditional-exit clause, apply negated narrow to continuation
+- ASSIGN_STMT: skip unify when existing resolves to T_NEVER (narrowed-out branches)
+- env.lua went from 9 errors → 1 error (remaining: compound-condition guard on field access)
+- Remaining Cat E variant: compound `or` conditions like `if not x.field or ... then return end`
+  cannot be narrowed — requires reasoning about sub-expressions of `or`
 
 Cat F — `intern_mod.get()` returns `string|nil`, `or "?"` not narrowed to `string`:
 - `intern_mod.get(pool, id) or "?"` — checker sees result as `string|nil|string` not `string`
@@ -144,6 +149,16 @@ Cat G — string meta architecture (minor):
 - More principled: store `ctx.string_meta_tid` in prelude, use generically
 - Blocked on: primitive types having declared metatables (a .cri/stdlib concern)
 
+Cat H (new) — Optional function parameter typed as required:
+- `resolve_annotation_type(ctx, ann_tid, seen)` with `seen = seen or {}` inside
+- Caller `resolve_annotation_type(ctx, id)` (2 args) errors "argument 3: missing required argument"
+- Fix: detect `param = param or default` pattern and mark param as optional in type
+
+Cat I (new) — Explicit `local x = nil` still binds T_NIL:
+- Same symptom as Cat A but for explicit nil initializer
+- `local arg_ids = nil; arg_ids = {}` errors "cannot assign '{}' to 'arg_ids'"
+- Fix: treat explicit nil init the same as no-init (make_var or T_ANY)
+
 **Phase 4 proper:**
 - [ ] .cri interface files (zero-copy module loading, content-addressed)
 - [ ] Module caching beyond single-session simple table
@@ -151,10 +166,14 @@ Cat G — string meta architecture (minor):
 - [ ] LSP daemon integration (Phase 6)
 
 **Next high-value false-positive fixes (from catalogue above):**
-- [ ] Cat A: forward-declared nil locals → T_ANY (unblocks most of infer.lua false positives)
-- [ ] Cat B: multi-return in assignments (right-hand side)
-- [ ] Cat D: boolean literal widen on reassignment
-- [ ] Cat E: guard/early-return nil narrowing
+- [x] Cat A: forward-declared nil locals → make_var (unblocks most of infer.lua false positives)
+- [x] Cat B: multi-return in assignments (right-hand side)
+- [x] Cat D: boolean literal widen on reassignment
+- [x] Cat E: guard/early-return nil narrowing (partial fix; compound conditions remain)
+- [ ] Cat C: positional table vs indexed type (types.lua, infer.lua)
+- [ ] Cat F: `A or B` result narrowing
+- [ ] Cat H: optional function parameters (seen arg pattern)
+- [ ] Cat I: explicit `local x = nil` treated as forward declaration
 
 - [x] Infinite recursion in resolve_require: fixed with `_globally_resolving` module-level table.
 
