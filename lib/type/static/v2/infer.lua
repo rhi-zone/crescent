@@ -454,11 +454,31 @@ local CMP_META = {
     [OP_LT] = "__lt", [OP_GT] = "__lt", [OP_LE] = "__le", [OP_GE] = "__le",
 }
 
+-- Check whether a type (including unions) has a specific metamethod.
+-- Uses meta_op_ret for the leaf check (handles TAG_TABLE fields and prim_meta).
+-- TAG_ANY / TAG_VAR / TAG_ROWVAR are assumed to have any metamethod (unconstrained).
+-- allow_table: if true, TAG_TABLE always passes (for OP_LEN — built-in # on tables).
+local has_metamethod
+has_metamethod = function(ctx, tid, mm_name, allow_table)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag == TAG_ANY or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
+    if allow_table and t.tag == TAG_TABLE then return true end
+    if t.tag == TAG_UNION then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if not has_metamethod(ctx, ctx.lists:get(i), mm_name, allow_table) then
+                return false
+            end
+        end
+        return true
+    end
+    return meta_op_ret(ctx, tid, mm_name) ~= nil
+end
+
+-- A type is numeric iff it has arithmetic metamethods (__add as proxy).
+-- number/integer pass via prim_meta; nil, boolean, string correctly fail.
 local function is_numeric(ctx, tid)
-    local t = ctx.types:get(types_mod.find(ctx, tid))
-    return t.tag == TAG_ANY or t.tag == defs.TAG_NUMBER or t.tag == TAG_INTEGER
-        or (t.tag == TAG_LITERAL and t.data[0] == LIT_NUMBER)
-        or t.tag == TAG_VAR or t.tag == defs.TAG_NIL
+    return has_metamethod(ctx, tid, "__add", false)
 end
 
 local function is_int_compat(ctx, tid)
@@ -511,11 +531,18 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     if op == OP_UNM then
         local mm = meta_op_ret(ctx, arg_tid, "__unm")
         if mm then return mm end
+        if not has_metamethod(ctx, arg_tid, "__unm", false) then
+            report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display(ctx, arg_tid) .. "'")
+        end
         return ctx.T_NUMBER
     end
     if op == OP_LEN then
         local mm = meta_op_ret(ctx, arg_tid, "__len")
         if mm then return mm end
+        -- Tables always support # (built-in length); everything else needs __len.
+        if not has_metamethod(ctx, arg_tid, "__len", true) then
+            report(ctx, n.line, n.col, "cannot get length of '" .. types_mod.display(ctx, arg_tid) .. "'")
+        end
         return ctx.T_INTEGER
     end
     return ctx.T_ANY
