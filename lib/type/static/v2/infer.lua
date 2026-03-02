@@ -657,8 +657,8 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             if ft.tag == TAG_FUNCTION and ft.data[1] >= 2 then
                 local p0 = ctx.lists:get(ft.data[0])
                 local p1 = ctx.lists:get(ft.data[0] + 1)
-                local _, ok0 = unify_mod.try_unify(ctx, left_r,  p0)
-                local _, ok1 = unify_mod.try_unify(ctx, right_r, p1)
+                local ok0 = unify_mod.try_unify(ctx, left_r,  p0)
+                local ok1 = unify_mod.try_unify(ctx, right_r, p1)
                 if not ok0 or not ok1 then
                     report(ctx, n.line, n.col,
                         "cannot compare '" .. types_mod.display(ctx, left_r)
@@ -796,8 +796,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         local i = is
         while i < is + il - 1 do
             local kt = ctx.lists:get(i)
-            local _, ok = unify_mod.try_unify(ctx, key_r, kt)
-            if ok then return types_mod.find(ctx, ctx.lists:get(i + 1)) end
+            if unify_mod.try_unify(ctx, key_r, kt) then return types_mod.find(ctx, ctx.lists:get(i + 1)) end
             i = i + 2
         end
         local kt_t = ctx.types:get(key_r)

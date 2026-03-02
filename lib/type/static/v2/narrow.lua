@@ -277,8 +277,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
                 for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
                     local unify_mod = require("lib.type.static.v2.unify")
-                    local _, ok = unify_mod.try_unify(ctx, mid, target_id)
-                    if ok then matching[#matching + 1] = mid end
+                    if unify_mod.try_unify(ctx, mid, target_id) then matching[#matching + 1] = mid end
                 end
                 if #matching == 0 then return target_id end
                 if #matching == 1 then return matching[1] end

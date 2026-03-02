@@ -529,7 +529,7 @@ function M.unify(ctx, a, b)
 end
 
 -- Read-only unification: checks assignability without mutating type variables.
--- Returns (score, ok).
+-- Returns ok (boolean). Does not bind type variables.
 function M.try_unify(ctx, a, b)
     a = find(ctx, a)
     b = find(ctx, b)
@@ -537,82 +537,70 @@ function M.try_unify(ctx, a, b)
     local ta = ctx.types:get(a)
     local tb = ctx.types:get(b)
 
-    if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return 100, true end
-    if ta.tag == TAG_NEVER then return 50, true end
-    if ta.tag == TAG_VAR or tb.tag == TAG_VAR then return 50, true end
-    if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return 50, true end
+    if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
+    if ta.tag == TAG_NEVER then return true end
+    if ta.tag == TAG_VAR or tb.tag == TAG_VAR then return true end
+    if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return true end
 
     -- Union LHS: all members must be assignable to b.
     if ta.tag == TAG_UNION then
-        --: number
-        local total = 0
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
-            local score, ok = M.try_unify(ctx, ctx.lists:get(i), b)
-            if not ok then return 0, false end
-            total = total + score
+            if not M.try_unify(ctx, ctx.lists:get(i), b) then return false end
         end
-        return total, true
+        return true
     end
 
-    if ta.tag == tb.tag and is_primitive_tag(ta.tag) then return 0, true end
+    if ta.tag == tb.tag and is_primitive_tag(ta.tag) then return true end
 
-    if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return 1, true end
+    if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return true end
 
     if ta.tag == TAG_LITERAL then
         if tb.tag == TAG_LITERAL and ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then
-            return 0, true
+            return true
         end
         local kind = ta.data[0]
-        if kind == LIT_STRING  and tb.tag == TAG_STRING  then return 1, true end
-        if kind == LIT_NUMBER  and tb.tag == TAG_NUMBER  then return 1, true end
-        if kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN then return 1, true end
+        if kind == LIT_STRING  and tb.tag == TAG_STRING  then return true end
+        if kind == LIT_NUMBER  and tb.tag == TAG_NUMBER  then return true end
+        if kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN then return true end
     end
 
     if tb.tag == TAG_UNION then
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            local score, ok = M.try_unify(ctx, a, ctx.lists:get(i))
-            if ok then return score, true end
+            if M.try_unify(ctx, a, ctx.lists:get(i)) then return true end
         end
-        return 0, false
+        return false
     end
 
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
-        --: number
-        local total = 0
         local apl, bpl = ta.data[1], tb.data[1]
         local max_p = apl > bpl and apl or bpl
         for i = 0, max_p - 1 do
             local ap = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i)) or ctx.T_NIL
             local bp = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i)) or ctx.T_NIL
-            local score, ok = M.try_unify(ctx, bp, ap)
-            if not ok then return 0, false end
-            total = total + score
+            if not M.try_unify(ctx, bp, ap) then return false end
         end
-        return total, true
+        return true
     end
 
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
-        --: number
-        local total = 0
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
             local bfe = ctx.fields:get(ctx.lists:get(i))
             local afe = types_mod.table_field(ctx, a, bfe.name_id)
-            if not afe and bfe.optional == 0 then return 0, false end
+            if not afe and bfe.optional == 0 then return false end
             if afe then
-                local score, ok = M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id))
-                if not ok then return 0, false end
-                total = total + score
+                if not M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id)) then
+                    return false
+                end
             end
         end
-        return total, true
+        return true
     end
 
     if ta.tag == TAG_NOMINAL and tb.tag == TAG_NOMINAL then
-        if ta.data[1] == tb.data[1] then return 0, true end
-        return 0, false
+        return ta.data[1] == tb.data[1]
     end
 
-    return 0, false
+    return false
 end
 
 -- Expose the private is_primitive_tag for use in infer.lua
