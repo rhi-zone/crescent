@@ -99,6 +99,7 @@ Key design decisions:
 Lexer optimization (see `docs/perf/log.md` for measurements):
 - [x] Kill `_buf` mechanism — pointer arithmetic + `ffi.string` at end (1.4x speedup)
 - [x] Source-referencing intern pool — FNV-1a hash + memcmp, zero Lua strings in lex path (5.3x total vs baseline)
+- [ ] (stretch) Full FFI struct hash table for intern entries — current impl uses Lua tables per entry with FNV-1a + memcmp; a flat FFI array could reduce GC pressure further but 5.3x is good enough to move on
 
 ### backlog
 - [x] Generic function inference (infer type params from call site args)
