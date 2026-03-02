@@ -97,7 +97,8 @@ Scope is the library or component name (e.g., `feat(http): add chunked transfer 
 
 When doing performance optimization:
 - **Benchmark before and after.** Use `docs/perf/v2_parse.lua` for parser/lexer throughput.
-- **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Most recent entries first.
+- **Commit experiments before discarding.** Even rejected optimizations need a commit hash so results are reproducible. Use a branch or revert if needed — never throw away measured code.
+- **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Include raw benchmark output. Most recent entries first.
 - **Include**: file sizes, times, throughput (MB/s), allocation (KB/parse), and speedup ratios.
 
 ## Typechecker Design Principles
