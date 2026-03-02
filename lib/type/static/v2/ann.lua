@@ -16,6 +16,8 @@ local M = {}
 -- Byte constants
 local B_SPACE = 32
 local B_TAB   = 9
+local B_NL    = 10
+local B_CR    = 13
 local B_a = 97; local B_z = 122
 local B_A = 65; local B_Z = 90
 local B_0 = 48; local B_9 = 57
@@ -69,7 +71,7 @@ end
 local function skip_ws(s)
     while s.pos <= s.len do
         local b = byte(s.src, s.pos)
-        if b == B_SPACE or b == B_TAB then
+        if b == B_SPACE or b == B_TAB or b == B_NL or b == B_CR then
             s.pos = s.pos + 1
         else
             break
@@ -263,6 +265,7 @@ function M.parse_annotations(annotations, pool, filename)
                     local rs, rl = flush_type_list({ ret })
                     ft.data[2] = rs
                     ft.data[3] = rl
+                    ft.data[4] = -1
                     return fn
                 end
                 -- Empty tuple
@@ -292,6 +295,15 @@ function M.parse_annotations(annotations, pool, filename)
                 else
                     returns[1] = parse_type(s)
                 end
+                -- Extract trailing spread as vararg
+                local vararg_ann_id = -1
+                if #items > 0 then
+                    local last_t = types:get(items[#items])
+                    if last_t.tag == defs.TAG_SPREAD then
+                        vararg_ann_id = last_t.data[0]
+                        items[#items] = nil
+                    end
+                end
                 local ps, pl = flush_type_list(items)
                 local rs, rl = flush_type_list(returns)
                 local fn = alloc_type(defs.TAG_FUNCTION)
@@ -300,6 +312,7 @@ function M.parse_annotations(annotations, pool, filename)
                 ft.data[1] = pl
                 ft.data[2] = rs
                 ft.data[3] = rl
+                ft.data[4] = vararg_ann_id
                 return fn
             end
             -- Single item in parens → just the type
@@ -415,7 +428,7 @@ function M.parse_annotations(annotations, pool, filename)
             tt.data[1] = fl
             tt.data[2] = is
             tt.data[3] = il
-            tt.data[4] = 0   -- row_id
+            tt.data[4] = -1  -- row_id (no annotation syntax for row vars yet)
             tt.data[5] = ms
             tt.data[6] = ml
             return tbl
@@ -627,9 +640,17 @@ function M.parse_annotations(annotations, pool, filename)
                 return { kind = defs.ANN_TYPE, type_id = type_id }
             elseif ann.kind == defs.ANN_DECL then
                 -- Parse "Name = type" or "Name<T, U> = type" or "newtype Name = type"
-                -- Check for newtype
+                -- Check for newtype or declare
                 local save = s.pos
                 local word = scan_word(s)
+                if word == "declare" then
+                    local vname = scan_word(s)
+                    if not vname then scan_error(s, "expected name after 'declare'") end
+                    local vname_id = intern_mod.intern(pool, vname)
+                    expect_char(s, "=")
+                    local type_id = parse_type(s)
+                    return { kind = defs.ANN_DECL, type_id = type_id, name_id = vname_id, decl_var = true }
+                end
                 if word == "newtype" then
                     local name = scan_word(s)
                     if not name then scan_error(s, "expected name after 'newtype'") end

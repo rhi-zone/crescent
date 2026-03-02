@@ -129,7 +129,7 @@ end
 -- info: narrowing info from extract_narrowing
 -- ty_id: the current type of the variable
 -- in_truthy: true if we're in the truthy branch, false for falsy branch
---: (any, { kind: string }, any, boolean) -> any
+--: (any, { kind: string, [string]: any }, any, boolean) -> any
 local function apply_narrowing(ctx, info, ty_id, in_truthy)
     local t = types_mod.find(ctx, ty_id)
 

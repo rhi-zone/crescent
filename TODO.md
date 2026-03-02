@@ -145,6 +145,15 @@ Cat F — `intern_mod.get()` returns `string|nil`, `or "?"` not narrowed to `str
 - Also fixed `is_concat_ok` to handle unions (all members must be concat-compatible).
 - `string|nil or "?"` now produces `string|"?"` (concat-safe union), not `string|nil|"?"`.
 
+Cat J (new) — ann.lua self-check: meta-constraint propagation through arithmetic on typevar scanner fields.
+- 11 pre-existing false positives in ann.lua (confirmed via git stash — existed before this session).
+- Root cause: `s.pos + 1` where `s` is a typevar (scanner param) causes `constrain()` to bind it
+  to `{ #__add: (v1, v2) -> v3 }`. This table type flows to functions receiving the scanner,
+  causing false positives in string.sub/string.byte call sites (expected string, got meta-table).
+- Fix requires: meta-constraint types for typevars rather than binding to a literal meta-table.
+  Or: a principled "Numeric" or "Indexable" constraint rather than ad-hoc meta binding.
+- Not a practical issue — ann.lua is not user-facing; but should be fixed before LSP work.
+
 Cat G — string meta architecture (minor):
 - `s:method()` special-cased via `recv_r == ctx.T_STRING` in ExprRule[NODE_METHOD_CALL]
 - More principled: store `ctx.string_meta_tid` in prelude, use generically
@@ -187,13 +196,14 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
 - [x] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Annotation on any line `[callee.line, node.line]` (node.line = `(` line). Lua 5.1/LuaJIT constraint: `(` cannot be on a new line from the callee (ambiguous call syntax), so annotation must share the callee's line in practice. Lua 5.2+ compat removes this restriction.
 - [ ] Parse LuaJIT FFI cdef blocks
-- [ ] Prelude: migrate Lua 5.1 stdlib from builtins.lua to .d.lua
-- [ ] Prelude: LuaJIT-specific (ffi, bit, jit) .d.lua
-- [ ] v2 stdlib.d.lua: declare primitive metamethods in .d.lua instead of imperative prelude.lua.
-  `--:: number = { #__add: (number, number) -> number, ... }` already works as an ANN_DECL
-  (prim_tags fires only in type expressions, not on the LHS of --:: declarations). Once the
-  prelude loads .d.lua, it can do `ctx.number_meta_tid = lookup_type("number").body` etc.
-  The current prelude.populate() hardcoding is a placeholder until .d.lua loading exists.
+- [x] v2 stdlib.d.lua: stdlib.d.lua created (2026-03-02); prelude.lua replaced with load_decls().
+  `--:: declare name = type` for variable bindings; `--[[:: name = { ... }]]` for type aliases.
+  Primitive meta types (number_meta, integer_meta, string_meta_ops) declared in stdlib.d.lua;
+  derived into ctx fields after load_decls runs.
+- [x] ann.lua: `declare` keyword added to ANN_DECL parser for variable bindings (vs type aliases).
+- [x] ann.lua: function data[4] (vararg) fixed — trailing `...T` SPREAD now extracted correctly.
+- [x] ann.lua: table data[4] (row_var) fixed — closed by default (-1), was accidentally open (0).
+- [x] ann.lua: skip_ws fixed to handle newlines (B_NL, B_CR) for multi-line block annotations.
 - [ ] `pcall`/`xpcall` return type narrowing
 - [ ] For-in iterator return type tracking — `for k, v in pairs(t)` always gives `any` for k/v; need iterator protocol inference (ipairs/pairs over typed tables, custom iterators)
 - [x] Metatable slot syntax: `#field` in type annotations — done (see above)
