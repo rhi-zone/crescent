@@ -94,6 +94,21 @@ Key design decisions:
 - Fork-based parallelism via libc FFI (wave-front scheduling)
 - LSP daemon with tiered memory (hot/warm/cold)
 
+**v2 checker Phase 3 — implemented (2026-03-02).**
+Types: flat TypeSlot arenas + union-find. Env: let-polymorphism (generalize/instantiate).
+Unify: structural, bidirectional, row polymorphism. Infer: full AST walk, annotations, narrowing.
+Files: types.lua, env.lua, unify.lua, errors.lua, match.lua, narrow.lua, infer.lua, check.lua.
+Tests: 721 assertions in v2_test.lua (1123 total across all suites).
+
+Known gaps / Phase 4 deferred work:
+- [ ] `function M.foo()` field assignment: open-table extension (TODO in infer.lua:1075) — currently no-ops for new fields
+- [ ] `for k, v in pairs(t)` iterator type inference — currently yields any
+- [ ] Prelude: Lua 5.1 stdlib (print, pairs, ipairs, type, etc.) — currently unknown identifiers
+- [ ] Module caching beyond single-session simple table
+- [ ] .cri interface files (Phase 4)
+- [ ] Fork-based parallelism (Phase 5)
+- [ ] LSP daemon integration (Phase 6)
+
 - [x] Infinite recursion in resolve_require: fixed with `_globally_resolving` module-level table.
 
 Lexer optimization (see `docs/perf/log.md` for measurements):

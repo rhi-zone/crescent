@@ -1,0 +1,1273 @@
+-- lib/type/static/v2/infer.lua
+-- AST walker for the v2 typechecker.
+--
+-- Two list pools:
+--   ctx.lists     = type list pool  (write: type construction via types_mod)
+--   ctx.ast_lists = AST list pool   (read: node IDs, param IDs, stmt IDs from parser)
+--
+-- All AST traversal uses ctx.ast_lists:get(i).
+-- All type construction uses ctx.lists (via types_mod helpers).
+
+local defs     = require("lib.type.static.v2.defs")
+local types_mod = require("lib.type.static.v2.types")
+local env_mod   = require("lib.type.static.v2.env")
+local unify_mod = require("lib.type.static.v2.unify")
+local errors_mod = require("lib.type.static.v2.errors")
+local intern_mod = require("lib.type.static.v2.intern")
+local ann_mod    = require("lib.type.static.v2.ann")
+
+local NODE_LITERAL     = defs.NODE_LITERAL
+local NODE_IDENTIFIER  = defs.NODE_IDENTIFIER
+local NODE_UNARY_EXPR  = defs.NODE_UNARY_EXPR
+local NODE_BINARY_EXPR = defs.NODE_BINARY_EXPR
+local NODE_INDEX_EXPR  = defs.NODE_INDEX_EXPR
+local NODE_FIELD_EXPR  = defs.NODE_FIELD_EXPR
+local NODE_METHOD_CALL = defs.NODE_METHOD_CALL
+local NODE_CALL_EXPR   = defs.NODE_CALL_EXPR
+local NODE_FUNC_EXPR   = defs.NODE_FUNC_EXPR
+local NODE_TABLE_EXPR  = defs.NODE_TABLE_EXPR
+local NODE_TABLE_FIELD = defs.NODE_TABLE_FIELD
+local NODE_VARARG_EXPR = defs.NODE_VARARG_EXPR
+local NODE_ASSIGN_STMT = defs.NODE_ASSIGN_STMT
+local NODE_LOCAL_STMT  = defs.NODE_LOCAL_STMT
+local NODE_DO_STMT     = defs.NODE_DO_STMT
+local NODE_WHILE_STMT  = defs.NODE_WHILE_STMT
+local NODE_REPEAT_STMT = defs.NODE_REPEAT_STMT
+local NODE_IF_STMT     = defs.NODE_IF_STMT
+local NODE_IF_CLAUSE   = defs.NODE_IF_CLAUSE
+local NODE_FOR_NUM     = defs.NODE_FOR_NUM
+local NODE_FOR_IN      = defs.NODE_FOR_IN
+local NODE_RETURN_STMT = defs.NODE_RETURN_STMT
+local NODE_BREAK_STMT  = defs.NODE_BREAK_STMT
+local NODE_EXPR_STMT   = defs.NODE_EXPR_STMT
+local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL
+local NODE_CHUNK       = defs.NODE_CHUNK
+
+local LIT_STRING  = defs.LIT_STRING
+local LIT_NUMBER  = defs.LIT_NUMBER
+local LIT_BOOLEAN = defs.LIT_BOOLEAN
+local LIT_NIL     = defs.LIT_NIL
+
+local OP_ADD    = defs.OP_ADD
+local OP_SUB    = defs.OP_SUB
+local OP_MUL    = defs.OP_MUL
+local OP_DIV    = defs.OP_DIV
+local OP_MOD    = defs.OP_MOD
+local OP_POW    = defs.OP_POW
+local OP_CONCAT = defs.OP_CONCAT
+local OP_EQ     = defs.OP_EQ
+local OP_NE     = defs.OP_NE
+local OP_LT     = defs.OP_LT
+local OP_LE     = defs.OP_LE
+local OP_GT     = defs.OP_GT
+local OP_GE     = defs.OP_GE
+local OP_AND    = defs.OP_AND
+local OP_OR     = defs.OP_OR
+local OP_UNM    = defs.OP_UNM
+local OP_NOT    = defs.OP_NOT
+local OP_LEN    = defs.OP_LEN
+
+local FLAG_LOCAL    = defs.FLAG_LOCAL
+local FLAG_VARARG   = defs.FLAG_VARARG
+local FLAG_COMPUTED = defs.FLAG_COMPUTED
+
+local ANN_TYPE      = defs.ANN_TYPE
+local ANN_DECL      = defs.ANN_DECL
+
+local TAG_ANY      = defs.TAG_ANY
+local TAG_NIL      = defs.TAG_NIL
+local TAG_INTEGER  = defs.TAG_INTEGER
+local TAG_LITERAL  = defs.TAG_LITERAL
+local TAG_FUNCTION = defs.TAG_FUNCTION
+local TAG_TABLE    = defs.TAG_TABLE
+local TAG_UNION    = defs.TAG_UNION
+local TAG_VAR      = defs.TAG_VAR
+local TAG_ROWVAR   = defs.TAG_ROWVAR
+local TAG_NAMED    = defs.TAG_NAMED
+local TAG_NOMINAL  = defs.TAG_NOMINAL
+local TAG_MATCH_TYPE = defs.TAG_MATCH_TYPE
+local TAG_FORALL   = defs.TAG_FORALL
+local TAG_INTRINSIC = defs.TAG_INTRINSIC
+local TAG_TYPE_CALL = defs.TAG_TYPE_CALL
+local TAG_TUPLE    = defs.TAG_TUPLE
+local TAG_SPREAD   = defs.TAG_SPREAD
+local TAG_NEVER    = defs.TAG_NEVER
+
+local M = {}
+
+---------------------------------------------------------------------------
+-- Context helpers
+---------------------------------------------------------------------------
+
+local function report(ctx, line, col, msg)
+    errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
+end
+
+local function push_return_collector(ctx)
+    ctx.return_types[#ctx.return_types + 1] = {}
+end
+
+local function pop_return_collector(ctx)
+    local c = ctx.return_types[#ctx.return_types]
+    ctx.return_types[#ctx.return_types] = nil
+    return c
+end
+
+local function add_return(ctx, type_ids)
+    local c = ctx.return_types[#ctx.return_types]
+    if c then c[#c + 1] = type_ids end
+end
+
+---------------------------------------------------------------------------
+-- Annotation helpers
+---------------------------------------------------------------------------
+
+local function get_ann(ctx, line)
+    if not ctx.ann then return nil end
+    return ctx.ann.results[line] or ctx.ann.results[line - 1]
+end
+
+-- Forward declarations
+local infer_expr, infer_stmt, infer_block, infer_function, resolve_annotation_type
+
+-- Translate annotation type_id (from ann_ctx.types) into a checker type_id.
+-- Uses ctx.ann.types/fields/lists for reading, ctx.types/fields/lists for writing.
+resolve_annotation_type = function(ctx, ann_tid, seen)
+    if not ctx.ann then return ctx.T_ANY end
+    seen = seen or {}
+    if seen[ann_tid] then return ctx.T_ANY end
+
+    -- Read from annotation arena
+    local at = ctx.ann.types:get(ann_tid)
+    if not at then return ctx.T_ANY end
+    local tag = at.tag
+
+    -- Primitives → singletons
+    if tag == defs.TAG_NIL      then return ctx.T_NIL end
+    if tag == defs.TAG_BOOLEAN  then return ctx.T_BOOLEAN end
+    if tag == defs.TAG_NUMBER   then return ctx.T_NUMBER end
+    if tag == defs.TAG_STRING   then return ctx.T_STRING end
+    if tag == defs.TAG_ANY      then return ctx.T_ANY end
+    if tag == defs.TAG_NEVER    then return ctx.T_NEVER end
+    if tag == defs.TAG_INTEGER  then return ctx.T_INTEGER end
+    if tag == defs.TAG_CDATA    then
+        local id = types_mod.alloc_type(ctx, defs.TAG_CDATA)
+        return id
+    end
+
+    if tag == TAG_LITERAL then
+        return types_mod.make_literal(ctx, at.data[0], at.data[1])
+    end
+
+    if tag == TAG_NAMED then
+        local name_id = at.data[0]
+        local args_len = at.data[2]
+        local arg_ids = nil
+        if args_len > 0 then
+            seen[ann_tid] = true
+            arg_ids = {}
+            for i = at.data[1], at.data[1] + args_len - 1 do
+                arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            end
+            seen[ann_tid] = nil
+        end
+        local resolved = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
+        if resolved then
+            -- resolved is already a checker type_id
+            return resolved
+        end
+        -- Unknown named type — keep as named ref
+        local id = types_mod.alloc_type(ctx, TAG_NAMED)
+        ctx.types:get(id).data[0] = name_id
+        return id
+    end
+
+    if tag == TAG_FUNCTION then
+        seen[ann_tid] = true
+        local params = {}
+        for i = at.data[0], at.data[0] + at.data[1] - 1 do
+            params[#params + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        local returns = {}
+        for i = at.data[2], at.data[2] + at.data[3] - 1 do
+            returns[#returns + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        local vararg_id = -1
+        if at.data[4] >= 0 then
+            vararg_id = resolve_annotation_type(ctx, at.data[4], seen)
+        end
+        seen[ann_tid] = nil
+        return types_mod.make_func(ctx, params, returns, vararg_id)
+    end
+
+    if tag == TAG_TABLE then
+        seen[ann_tid] = true
+        local field_ids = {}
+        for i = at.data[0], at.data[0] + at.data[1] - 1 do
+            local fid = ctx.ann.lists:get(i)
+            local fe  = ctx.ann.fields:get(fid)
+            local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
+            field_ids[#field_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.optional == 1)
+        end
+        local indexers = {}
+        local is, il = at.data[2], at.data[3]
+        local i = is
+        while i < is + il - 1 do
+            indexers[#indexers + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            indexers[#indexers + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
+            i = i + 2
+        end
+        local row_var = -1
+        if at.data[4] >= 0 then
+            row_var = resolve_annotation_type(ctx, at.data[4], seen)
+        end
+        local meta_ids = {}
+        for j = at.data[5], at.data[5] + at.data[6] - 1 do
+            local fid = ctx.ann.lists:get(j)
+            local fe  = ctx.ann.fields:get(fid)
+            local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
+            meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.optional == 1)
+        end
+        seen[ann_tid] = nil
+        return types_mod.make_table(ctx, field_ids, indexers, row_var, meta_ids)
+    end
+
+    if tag == TAG_UNION then
+        seen[ann_tid] = true
+        local members = {}
+        for i = at.data[0], at.data[0] + at.data[1] - 1 do
+            members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        seen[ann_tid] = nil
+        return types_mod.make_union(ctx, members)
+    end
+
+    if tag == defs.TAG_INTERSECTION then
+        seen[ann_tid] = true
+        local members = {}
+        for i = at.data[0], at.data[0] + at.data[1] - 1 do
+            members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        seen[ann_tid] = nil
+        return types_mod.make_intersection(ctx, members)
+    end
+
+    if tag == TAG_TUPLE then
+        seen[ann_tid] = true
+        local elems = {}
+        for i = at.data[0], at.data[0] + at.data[1] - 1 do
+            elems[#elems + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        seen[ann_tid] = nil
+        return types_mod.make_tuple(ctx, elems)
+    end
+
+    if tag == TAG_FORALL then
+        seen[ann_tid] = true
+        local param_scope = env_mod.child(ctx.scope)
+        for i = at.data[0], at.data[0] + at.data[1] - 1 do
+            local param_name_id = ctx.ann.lists:get(i)
+            local tv = types_mod.make_var(ctx, ctx.scope.level + 1)
+            ctx.types:get(tv).flags = defs.FLAG_GENERIC
+            env_mod.bind_type(param_scope, param_name_id, { body = tv })
+        end
+        local saved_scope = ctx.scope
+        ctx.scope = param_scope
+        local body = resolve_annotation_type(ctx, at.data[2], seen)
+        ctx.scope = saved_scope
+        seen[ann_tid] = nil
+        return body
+    end
+
+    if tag == TAG_MATCH_TYPE then
+        seen[ann_tid] = true
+        local param = resolve_annotation_type(ctx, at.data[0], seen)
+        local arms = {}
+        local as, al = at.data[1], at.data[2]
+        local i = as
+        while i < as + al - 1 do
+            arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+            arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
+            i = i + 2
+        end
+        local m = ctx.lists:mark()
+        for _, aid in ipairs(arms) do ctx.lists:push(aid) end
+        local ms, ml = ctx.lists:since(m)
+        local id = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
+        local mtt = ctx.types:get(id)
+        mtt.data[0] = param
+        mtt.data[1] = ms
+        mtt.data[2] = ml
+        seen[ann_tid] = nil
+        local match_mod = require("lib.type.static.v2.match")
+        return match_mod.evaluate(ctx, id)
+    end
+
+    if tag == TAG_NOMINAL then
+        seen[ann_tid] = true
+        local underlying = resolve_annotation_type(ctx, at.data[2], seen)
+        seen[ann_tid] = nil
+        return types_mod.make_nominal(ctx, at.data[0], at.data[1], underlying)
+    end
+
+    if tag == TAG_SPREAD then
+        seen[ann_tid] = true
+        local inner = resolve_annotation_type(ctx, at.data[0], seen)
+        seen[ann_tid] = nil
+        local id = types_mod.alloc_type(ctx, TAG_SPREAD)
+        ctx.types:get(id).data[0] = inner
+        return id
+    end
+
+    if tag == TAG_INTRINSIC then
+        local id = types_mod.alloc_type(ctx, TAG_INTRINSIC)
+        ctx.types:get(id).data[0] = at.data[0]
+        return id
+    end
+
+    if tag == TAG_TYPE_CALL then
+        seen[ann_tid] = true
+        local callee = resolve_annotation_type(ctx, at.data[0], seen)
+        local arg_ids = {}
+        for i = at.data[1], at.data[1] + at.data[2] - 1 do
+            arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        seen[ann_tid] = nil
+        local ct = ctx.types:get(callee)
+        if ct.tag == TAG_NAMED then
+            local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ct.data[0], arg_ids)
+            if resolved then return resolved end
+        end
+        local m = ctx.lists:mark()
+        for _, aid in ipairs(arg_ids) do ctx.lists:push(aid) end
+        local as, al = ctx.lists:since(m)
+        local id = types_mod.alloc_type(ctx, TAG_TYPE_CALL)
+        local tct = ctx.types:get(id)
+        tct.data[0] = callee
+        tct.data[1] = as
+        tct.data[2] = al
+        return id
+    end
+
+    return ctx.T_ANY
+end
+
+---------------------------------------------------------------------------
+-- Expression inference
+---------------------------------------------------------------------------
+
+local ExprRule = {}
+local StmtRule = {}
+
+infer_expr = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local rule = ExprRule[n.kind]
+    if rule then return rule(ctx, nid) end
+    report(ctx, n.line, n.col, "unhandled expr kind " .. n.kind)
+    return ctx.T_ANY
+end
+
+-- Infer expression for multi-return contexts (calls).
+local function infer_expr_multi(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    if n.kind == NODE_CALL_EXPR or n.kind == NODE_METHOD_CALL then
+        local rule = ExprRule[n.kind]
+        if rule then
+            local primary = rule(ctx, nid)
+            local mr = ctx._last_multi_return
+            ctx._last_multi_return = nil
+            if mr then return mr end
+            return { primary }
+        end
+    end
+    return { infer_expr(ctx, nid) }
+end
+
+-- Infer expression list; last expr may multi-return.
+local function infer_expr_list(ctx, es, el)
+    if el == 0 then return {} end
+    local result = {}
+    for i = es, es + el - 2 do
+        result[#result + 1] = infer_expr(ctx, ctx.ast_lists:get(i))
+    end
+    local last_nid = ctx.ast_lists:get(es + el - 1)
+    local multi = infer_expr_multi(ctx, last_nid)
+    for _, tid in ipairs(multi) do result[#result + 1] = tid end
+    return result
+end
+
+-- Get return type of metamethod on type, or nil.
+local function meta_op_ret(ctx, tid, mm_name)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag ~= TAG_TABLE then return nil end
+    local mm_id = intern_mod.intern(ctx.pool, mm_name)
+    local fe = types_mod.table_meta_field(ctx, tid, mm_id)
+    if not fe then return nil end
+    local fn_tid = types_mod.find(ctx, fe.type_id)
+    local ft = ctx.types:get(fn_tid)
+    if ft.tag == TAG_FUNCTION and ft.data[3] > 0 then
+        return types_mod.find(ctx, ctx.lists:get(ft.data[2]))
+    end
+    return ctx.T_ANY
+end
+
+-- Build a meta-only table constraint for an operator.
+local function meta_constraint(ctx, mm_name, arity)
+    local level = ctx.scope.level
+    local params = {}
+    for i = 1, arity do params[i] = types_mod.make_var(ctx, level) end
+    local fn_ty = types_mod.make_func(ctx, params, { types_mod.make_var(ctx, level) }, -1)
+    local mm_id = intern_mod.intern(ctx.pool, mm_name)
+    local meta_fid = types_mod.make_field(ctx, mm_id, fn_ty, false)
+    return types_mod.make_table(ctx, {}, {}, -1, { meta_fid })
+end
+
+local ARITH_META = {
+    [OP_ADD] = "__add", [OP_SUB] = "__sub", [OP_MUL] = "__mul",
+    [OP_DIV] = "__div", [OP_MOD] = "__mod", [OP_POW] = "__pow",
+}
+local CMP_META = {
+    [OP_LT] = "__lt", [OP_GT] = "__lt", [OP_LE] = "__le", [OP_GE] = "__le",
+}
+
+local function is_numeric(ctx, tid)
+    local t = ctx.types:get(types_mod.find(ctx, tid))
+    return t.tag == TAG_ANY or t.tag == defs.TAG_NUMBER or t.tag == TAG_INTEGER
+        or (t.tag == TAG_LITERAL and t.data[0] == LIT_NUMBER)
+        or t.tag == TAG_VAR or t.tag == defs.TAG_NIL
+end
+
+local function is_int_compat(ctx, tid)
+    local t = ctx.types:get(types_mod.find(ctx, tid))
+    return t.tag == TAG_INTEGER
+        or (t.tag == TAG_LITERAL and t.data[0] == LIT_NUMBER)
+end
+
+ExprRule[NODE_LITERAL] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local kind = n.data[0]
+    if kind == LIT_NIL     then return ctx.T_NIL end
+    if kind == LIT_BOOLEAN then return types_mod.make_literal(ctx, LIT_BOOLEAN, n.data[1]) end
+    if kind == LIT_STRING  then return types_mod.make_literal(ctx, LIT_STRING, n.data[1]) end
+    if kind == LIT_NUMBER  then
+        local num_str = intern_mod.get(ctx.pool, n.data[1])
+        if num_str then
+            local num = tonumber(num_str)
+            if num and num % 1 == 0 then return ctx.T_INTEGER end
+        end
+        return ctx.T_NUMBER
+    end
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local name_id = n.data[0]
+    local ty = env_mod.lookup(ctx.scope, name_id)
+    if ty then return ty end
+    local name = intern_mod.get(ctx.pool, name_id) or "?"
+    report(ctx, n.line, n.col, "unknown identifier '" .. name .. "'")
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_VARARG_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local vararg_id = intern_mod.intern(ctx.pool, "...")
+    local ty = env_mod.lookup(ctx.scope, vararg_id)
+    if ty then return ty end
+    report(ctx, n.line, n.col, "'...' used outside a vararg function")
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local op = n.data[0]
+    local arg_tid = infer_expr(ctx, n.data[1])
+    if op == OP_NOT then return ctx.T_BOOLEAN end
+    if op == OP_UNM then
+        local mm = meta_op_ret(ctx, arg_tid, "__unm")
+        if mm then return mm end
+        return ctx.T_NUMBER
+    end
+    if op == OP_LEN then
+        local mm = meta_op_ret(ctx, arg_tid, "__len")
+        if mm then return mm end
+        return ctx.T_INTEGER
+    end
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local op = n.data[0]
+    local left_tid  = infer_expr(ctx, n.data[1])
+    local right_tid = infer_expr(ctx, n.data[2])
+    local left_r  = types_mod.find(ctx, left_tid)
+    local right_r = types_mod.find(ctx, right_tid)
+
+    if ARITH_META[op] then
+        local mm_name = ARITH_META[op]
+        local mm = meta_op_ret(ctx, left_r, mm_name) or meta_op_ret(ctx, right_r, mm_name)
+        if mm then return mm end
+        local function constrain(r_id)
+            local rt = ctx.types:get(r_id)
+            if rt.tag == TAG_VAR then
+                unify_mod.unify(ctx, r_id, meta_constraint(ctx, mm_name, 2))
+            end
+        end
+        constrain(left_r)
+        constrain(right_r)
+        left_r  = types_mod.find(ctx, left_tid)
+        right_r = types_mod.find(ctx, right_tid)
+        mm = meta_op_ret(ctx, left_r, mm_name) or meta_op_ret(ctx, right_r, mm_name)
+        if mm then return ctx.T_NUMBER end
+        local function check_num(r_id)
+            local lt = ctx.types:get(r_id)
+            if lt.tag == TAG_UNION then
+                for i = lt.data[0], lt.data[0] + lt.data[1] - 1 do
+                    if not is_numeric(ctx, ctx.lists:get(i)) then
+                        report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display(ctx, r_id) .. "'")
+                        return
+                    end
+                end
+            elseif not is_numeric(ctx, r_id) then
+                report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display(ctx, r_id) .. "'")
+            end
+        end
+        check_num(left_r)
+        check_num(right_r)
+        if op == OP_DIV or op == OP_POW then return ctx.T_NUMBER end
+        if is_int_compat(ctx, left_r) and is_int_compat(ctx, right_r) then return ctx.T_INTEGER end
+        return ctx.T_NUMBER
+    end
+
+    if op == OP_EQ or op == OP_NE then return ctx.T_BOOLEAN end
+    if CMP_META[op] then
+        local mm = meta_op_ret(ctx, left_r, CMP_META[op]) or meta_op_ret(ctx, right_r, CMP_META[op])
+        if mm then return mm end
+        return ctx.T_BOOLEAN
+    end
+
+    if op == OP_CONCAT then
+        local mm = meta_op_ret(ctx, left_r, "__concat") or meta_op_ret(ctx, right_r, "__concat")
+        if mm then return mm end
+        local function is_concat_ok(r_id)
+            local t = ctx.types:get(r_id)
+            return t.tag == TAG_ANY or t.tag == defs.TAG_STRING or t.tag == defs.TAG_NUMBER
+                or t.tag == TAG_INTEGER or t.tag == TAG_VAR or t.tag == defs.TAG_NIL
+                or (t.tag == TAG_LITERAL and (t.data[0] == LIT_STRING or t.data[0] == LIT_NUMBER))
+        end
+        if not is_concat_ok(left_r) then
+            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display(ctx, left_r) .. "'")
+        end
+        if not is_concat_ok(right_r) then
+            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display(ctx, right_r) .. "'")
+        end
+        return ctx.T_STRING
+    end
+
+    if op == OP_AND then return types_mod.make_union(ctx, { ctx.T_NIL, right_r }) end
+    if op == OP_OR  then return types_mod.make_union(ctx, { left_r, right_r }) end
+
+    report(ctx, n.line, n.col, "unknown binary operator " .. op)
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local obj_tid = types_mod.find(ctx, infer_expr(ctx, n.data[0]))
+    local fname_id = n.data[1]
+    local obj_t = ctx.types:get(obj_tid)
+
+    if obj_t.tag == TAG_NEVER then return ctx.T_NEVER end
+    if obj_t.tag == TAG_ANY   then return ctx.T_ANY end
+
+    if obj_t.tag == TAG_TABLE then
+        local fe = types_mod.table_field(ctx, obj_tid, fname_id)
+        if fe then return types_mod.find(ctx, fe.type_id) end
+        local is, il = obj_t.data[2], obj_t.data[3]
+        local i = is
+        while i < is + il - 1 do
+            local kt = types_mod.find(ctx, ctx.lists:get(i))
+            if ctx.types:get(kt).tag == defs.TAG_STRING then
+                return types_mod.find(ctx, ctx.lists:get(i + 1))
+            end
+            i = i + 2
+        end
+        if obj_t.data[4] >= 0 then return ctx.T_ANY end
+        local fname = intern_mod.get(ctx.pool, fname_id) or "?"
+        report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display(ctx, obj_tid) .. "'")
+        return ctx.T_ANY
+    end
+
+    if obj_t.tag == TAG_VAR then
+        local field_var = types_mod.make_var(ctx, ctx.scope.level)
+        local row_var   = types_mod.make_rowvar(ctx, ctx.scope.level)
+        local fid = types_mod.make_field(ctx, fname_id, field_var, false)
+        local tbl_ty = types_mod.make_table(ctx, { fid }, {}, row_var, {})
+        unify_mod.unify(ctx, obj_tid, tbl_ty)
+        return field_var
+    end
+
+    if obj_t.tag == TAG_UNION then
+        local field_types = {}
+        local any_missing = false
+        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local mid = types_mod.find(ctx, ctx.lists:get(i))
+            local mt = ctx.types:get(mid)
+            if mt.tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx, mid, fname_id)
+                if fe then
+                    field_types[#field_types + 1] = types_mod.find(ctx, fe.type_id)
+                else
+                    any_missing = true
+                end
+            elseif mt.tag == TAG_ANY then
+                return ctx.T_ANY
+            else
+                any_missing = true
+            end
+        end
+        if #field_types > 0 then
+            if any_missing then field_types[#field_types + 1] = ctx.T_NIL end
+            return types_mod.make_union(ctx, field_types)
+        end
+    end
+
+    local fname = intern_mod.get(ctx.pool, fname_id) or "?"
+    report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display(ctx, obj_tid) .. "'")
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local obj_tid = types_mod.find(ctx, infer_expr(ctx, n.data[0]))
+    local key_tid = infer_expr(ctx, n.data[1])
+    local key_r   = types_mod.find(ctx, key_tid)
+    local obj_t   = ctx.types:get(obj_tid)
+
+    if obj_t.tag == TAG_ANY then return ctx.T_ANY end
+
+    if obj_t.tag == TAG_TABLE then
+        local is, il = obj_t.data[2], obj_t.data[3]
+        local i = is
+        while i < is + il - 1 do
+            local kt = ctx.lists:get(i)
+            local _, ok = unify_mod.try_unify(ctx, key_r, kt)
+            if ok then return types_mod.find(ctx, ctx.lists:get(i + 1)) end
+            i = i + 2
+        end
+        local kt_t = ctx.types:get(key_r)
+        if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
+            local fe = types_mod.table_field(ctx, obj_tid, kt_t.data[1])
+            if fe then return types_mod.find(ctx, fe.type_id) end
+        end
+        if obj_t.data[4] >= 0 then return ctx.T_ANY end
+    end
+
+    if obj_t.tag == TAG_VAR then
+        local elem_var = types_mod.make_var(ctx, ctx.scope.level)
+        local tbl = types_mod.make_table(ctx, {}, { key_r, elem_var }, -1, {})
+        unify_mod.unify(ctx, obj_tid, tbl)
+        return elem_var
+    end
+
+    return ctx.T_ANY
+end
+
+local function check_call_args(ctx, fn_tid, arg_tids, line, col)
+    local ft = ctx.types:get(fn_tid)
+    if ft.tag ~= TAG_FUNCTION then return end
+    local pl = ft.data[1]
+    for i = 0, pl - 1 do
+        local exp_tid = types_mod.find(ctx, ctx.lists:get(ft.data[0] + i))
+        local act_tid = arg_tids[i + 1]
+        if act_tid then
+            local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
+            if not ok then
+                report(ctx, line, col,
+                    "argument " .. (i + 1) .. ": cannot pass '" .. types_mod.display(ctx, act_tid)
+                    .. "' where '" .. types_mod.display(ctx, exp_tid) .. "' expected"
+                    .. (err and (": " .. err) or ""))
+            end
+        else
+            local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
+            if not ok then
+                report(ctx, line, col, "argument " .. (i + 1) .. ": missing required argument")
+            end
+        end
+    end
+end
+
+local function call_returns(ctx, fn_tid, arg_tids, line, col)
+    fn_tid = types_mod.find(ctx, fn_tid)
+    local ft = ctx.types:get(fn_tid)
+
+    if ft.tag == TAG_ANY then
+        ctx._last_multi_return = { ctx.T_ANY }
+        return ctx.T_ANY
+    end
+
+    if ft.tag == TAG_FUNCTION then
+        local inst_fn = env_mod.instantiate(ctx, fn_tid, ctx.scope.level)
+        check_call_args(ctx, inst_fn, arg_tids, line, col)
+        local ift = ctx.types:get(inst_fn)
+        local rl = ift.data[3]
+        if rl == 0 then
+            ctx._last_multi_return = { ctx.T_NIL }
+            return ctx.T_NIL
+        end
+        local returns = {}
+        for i = ift.data[2], ift.data[2] + rl - 1 do
+            returns[#returns + 1] = types_mod.find(ctx, ctx.lists:get(i))
+        end
+        ctx._last_multi_return = returns
+        return returns[1]
+    end
+
+    if ft.tag == TAG_UNION then
+        for i = ft.data[0], ft.data[0] + ft.data[1] - 1 do
+            local mid = types_mod.find(ctx, ctx.lists:get(i))
+            if ctx.types:get(mid).tag == TAG_FUNCTION then
+                local rl = ctx.types:get(mid).data[3]
+                if rl > 0 then
+                    local r = types_mod.find(ctx, ctx.lists:get(ctx.types:get(mid).data[2]))
+                    ctx._last_multi_return = { r }
+                    return r
+                end
+                ctx._last_multi_return = { ctx.T_NIL }
+                return ctx.T_NIL
+            end
+        end
+    end
+
+    if ft.tag == TAG_VAR then
+        local ret_var = types_mod.make_var(ctx, ctx.scope.level)
+        ctx._last_multi_return = { ret_var }
+        return ret_var
+    end
+
+    if ft.tag ~= TAG_NEVER then
+        report(ctx, line, col, "cannot call type '" .. types_mod.display(ctx, fn_tid) .. "'")
+    end
+    ctx._last_multi_return = { ctx.T_ANY }
+    return ctx.T_ANY
+end
+
+ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local callee_tid = infer_expr(ctx, n.data[0])
+    local arg_tids = infer_expr_list(ctx, n.data[1], n.data[2])
+    return call_returns(ctx, callee_tid, arg_tids, n.line, n.col)
+end
+
+ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local recv_tid = infer_expr(ctx, n.data[0])
+    local recv_r   = types_mod.find(ctx, recv_tid)
+    local method_name_id = n.data[1]
+
+    local method_tid = ctx.T_ANY
+    local recv_t = ctx.types:get(recv_r)
+    if recv_t.tag == TAG_TABLE then
+        local fe = types_mod.table_field(ctx, recv_r, method_name_id)
+        if fe then
+            method_tid = types_mod.find(ctx, fe.type_id)
+        else
+            local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
+            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
+        end
+    elseif recv_t.tag ~= TAG_ANY and recv_t.tag ~= TAG_VAR then
+        local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
+        report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
+    end
+
+    local extra = infer_expr_list(ctx, n.data[2], n.data[3])
+    local arg_tids = { recv_tid }
+    for _, a in ipairs(extra) do arg_tids[#arg_tids + 1] = a end
+    return call_returns(ctx, method_tid, arg_tids, n.line, n.col)
+end
+
+ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local field_ids = {}
+    local indexers  = {}
+    local pos_idx   = 1
+    for i = n.data[0], n.data[0] + n.data[1] - 1 do
+        local fld_nid = ctx.ast_lists:get(i)
+        local fn = ctx.nodes:get(fld_nid)
+        local val_tid = infer_expr(ctx, fn.data[1])
+        local key_nid = fn.data[0]
+
+        if key_nid == -1 then
+            -- Positional
+            local pos_key = intern_mod.intern(ctx.pool, tostring(pos_idx))
+            field_ids[#field_ids + 1] = types_mod.make_field(ctx, pos_key, val_tid, false)
+            pos_idx = pos_idx + 1
+        elseif (fn.flags % (FLAG_COMPUTED * 2)) >= FLAG_COMPUTED then
+            -- [expr] = val
+            local key_tid = infer_expr(ctx, key_nid)
+            indexers[#indexers + 1] = key_tid
+            indexers[#indexers + 1] = val_tid
+        else
+            -- name = val (key_nid is a literal string node)
+            local kn = ctx.nodes:get(key_nid)
+            local name_id = kn.data[1]
+            field_ids[#field_ids + 1] = types_mod.make_field(ctx, name_id, val_tid, false)
+        end
+    end
+    return types_mod.make_table(ctx, field_ids, indexers, -1, {})
+end
+
+infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
+    local fn_scope = env_mod.child(ctx.scope)
+    local param_tids = {}
+
+    local has_ann_fn = ann_fn_tid ~= nil
+    if has_ann_fn then
+        local aft = ctx.types:get(ann_fn_tid)
+        if aft and aft.tag == TAG_FUNCTION then
+            for i = 0, pl - 1 do
+                local name_id = ctx.ast_lists:get(ps + i)
+                local pt_id
+                if i < aft.data[1] then
+                    pt_id = types_mod.find(ctx, ctx.lists:get(aft.data[0] + i))
+                else
+                    pt_id = types_mod.make_var(ctx, fn_scope.level)
+                end
+                env_mod.bind(fn_scope, name_id, pt_id)
+                param_tids[#param_tids + 1] = pt_id
+            end
+            if has_vararg then
+                local dots_id = intern_mod.intern(ctx.pool, "...")
+                local vt = aft.data[4] >= 0 and aft.data[4] or ctx.T_ANY
+                env_mod.bind(fn_scope, dots_id, vt)
+            end
+        else
+            has_ann_fn = false
+        end
+    end
+
+    if not has_ann_fn then
+        for i = 0, pl - 1 do
+            local name_id = ctx.ast_lists:get(ps + i)
+            local pt_id = types_mod.make_var(ctx, fn_scope.level)
+            env_mod.bind(fn_scope, name_id, pt_id)
+            param_tids[#param_tids + 1] = pt_id
+        end
+        if has_vararg then
+            local dots_id = intern_mod.intern(ctx.pool, "...")
+            env_mod.bind(fn_scope, dots_id, ctx.T_ANY)
+        end
+    end
+
+    local saved = ctx.scope
+    ctx.scope = fn_scope
+    push_return_collector(ctx)
+    infer_block(ctx, bs, bl)
+    local rc = pop_return_collector(ctx)
+    ctx.scope = saved
+
+    local returns
+    if has_ann_fn then
+        local aft = ctx.types:get(ann_fn_tid)
+        if aft and aft.tag == TAG_FUNCTION then
+            returns = {}
+            for i = aft.data[2], aft.data[2] + aft.data[3] - 1 do
+                returns[#returns + 1] = types_mod.find(ctx, ctx.lists:get(i))
+            end
+        end
+    end
+
+    if not returns then
+        if #rc == 0 then
+            returns = {}
+        elseif #rc == 1 then
+            returns = rc[1]
+        else
+            local max_rets = 0
+            for _, rtl in ipairs(rc) do if #rtl > max_rets then max_rets = #rtl end end
+            returns = {}
+            for i = 1, max_rets do
+                local cands = {}
+                for _, rtl in ipairs(rc) do cands[#cands + 1] = rtl[i] or ctx.T_NIL end
+                returns[i] = types_mod.make_union(ctx, cands)
+            end
+        end
+    end
+
+    local vararg_id = has_vararg and ctx.T_ANY or -1
+    local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id)
+    env_mod.generalize(ctx, fn_tid, saved.level)
+    return fn_tid
+end
+
+ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
+    local ann = get_ann(ctx, n.line)
+    local ann_fn_tid = nil
+    if ann and ann.kind == ANN_TYPE then
+        local resolved = resolve_annotation_type(ctx, ann.type_id)
+        local rt = ctx.types:get(types_mod.find(ctx, resolved))
+        if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
+    end
+    return infer_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid)
+end
+
+---------------------------------------------------------------------------
+-- Block / statement inference
+---------------------------------------------------------------------------
+
+infer_block = function(ctx, bs, bl)
+    for i = bs, bs + bl - 1 do
+        infer_stmt(ctx, ctx.ast_lists:get(i))
+    end
+end
+
+local function prescan_block(ctx, bs, bl)
+    for i = bs, bs + bl - 1 do
+        local sid = ctx.ast_lists:get(i)
+        local sn  = ctx.nodes:get(sid)
+        if sn.kind == NODE_FUNC_DECL then
+            local nn = ctx.nodes:get(sn.data[0])
+            if nn.kind == NODE_IDENTIFIER then
+                local name_id = nn.data[0]
+                if not env_mod.lookup(ctx.scope, name_id) then
+                    env_mod.bind(ctx.scope, name_id, types_mod.make_var(ctx, ctx.scope.level))
+                end
+            end
+        elseif sn.kind == NODE_LOCAL_STMT then
+            -- `local M = {}` prescan
+            if sn.data[1] == 1 and sn.data[3] == 1 then
+                local val_nid = ctx.ast_lists:get(sn.data[2])
+                local vn = ctx.nodes:get(val_nid)
+                if vn.kind == NODE_TABLE_EXPR and vn.data[1] == 0 then
+                    local name_id = ctx.ast_lists:get(sn.data[0])
+                    if not env_mod.lookup(ctx.scope, name_id) then
+                        local rv = types_mod.make_rowvar(ctx, ctx.scope.level)
+                        env_mod.bind(ctx.scope, name_id, types_mod.make_table(ctx, {}, {}, rv, {}))
+                    end
+                end
+            end
+        end
+    end
+end
+
+infer_stmt = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local rule = StmtRule[n.kind]
+    if rule then rule(ctx, nid) end
+end
+
+StmtRule[NODE_EXPR_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    infer_expr(ctx, n.data[0])
+end
+
+StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local ns, nl = n.data[0], n.data[1]
+    local es, el = n.data[2], n.data[3]
+
+    local rhs_types = el > 0 and infer_expr_list(ctx, es, el) or {}
+
+    for i = 0, nl - 1 do
+        local name_id = ctx.ast_lists:get(ns + i)
+        local rhs_tid = rhs_types[i + 1]
+
+        local ann = get_ann(ctx, n.line)
+        local ann_tid = nil
+        if ann and ann.kind == ANN_TYPE then
+            ann_tid = resolve_annotation_type(ctx, ann.type_id)
+        end
+
+        if ann_tid then
+            if rhs_tid then
+                local ok, err = unify_mod.unify(ctx, rhs_tid, ann_tid)
+                if not ok then
+                    report(ctx, n.line, n.col,
+                        "type mismatch: '" .. types_mod.display(ctx, rhs_tid)
+                        .. "' is not assignable to '" .. types_mod.display(ctx, ann_tid) .. "'"
+                        .. (err and (": " .. err) or ""))
+                end
+            end
+            env_mod.bind(ctx.scope, name_id, ann_tid)
+        else
+            env_mod.bind(ctx.scope, name_id, rhs_tid or ctx.T_NIL)
+        end
+    end
+end
+
+StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local rhs_types = infer_expr_list(ctx, n.data[2], n.data[3])
+
+    for i = 0, n.data[1] - 1 do
+        local target_nid = ctx.ast_lists:get(n.data[0] + i)
+        local rhs_tid = rhs_types[i + 1] or ctx.T_NIL
+        local tn = ctx.nodes:get(target_nid)
+
+        if tn.kind == NODE_IDENTIFIER then
+            local name_id = tn.data[0]
+            local existing = env_mod.lookup(ctx.scope, name_id)
+            if existing then
+                local ok, err = unify_mod.unify(ctx, rhs_tid, existing)
+                if not ok then
+                    local nm = intern_mod.get(ctx.pool, name_id) or "?"
+                    report(ctx, tn.line, tn.col,
+                        "cannot assign '" .. types_mod.display(ctx, rhs_tid)
+                        .. "' to '" .. nm .. "'" .. (err and (": " .. err) or ""))
+                end
+            else
+                local s = ctx.scope
+                while s.parent do s = s.parent end
+                env_mod.bind(s, name_id, rhs_tid)
+            end
+        elseif tn.kind == NODE_FIELD_EXPR then
+            infer_expr(ctx, tn.data[0])
+        elseif tn.kind == NODE_INDEX_EXPR then
+            infer_expr(ctx, tn.data[0])
+            infer_expr(ctx, tn.data[1])
+        end
+    end
+end
+
+StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local name_nid   = n.data[0]
+    local ps, pl     = n.data[1], n.data[2]
+    local bs, bl     = n.data[3], n.data[4]
+    local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
+
+    local ann = get_ann(ctx, n.line)
+    local ann_fn_tid = nil
+    if ann and ann.kind == ANN_TYPE then
+        local resolved = resolve_annotation_type(ctx, ann.type_id)
+        local rt = ctx.types:get(types_mod.find(ctx, resolved))
+        if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
+    end
+
+    local fn_tid = infer_function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
+
+    local nn = ctx.nodes:get(name_nid)
+    if nn.kind == NODE_IDENTIFIER then
+        local name_id = nn.data[0]
+        local existing = env_mod.lookup(ctx.scope, name_id)
+        if existing then
+            unify_mod.unify(ctx, fn_tid, existing)
+        end
+        env_mod.bind(ctx.scope, name_id, fn_tid)
+    elseif nn.kind == NODE_FIELD_EXPR then
+        -- function M.foo(...): assign to field
+        local obj_nid = nn.data[0]
+        local field_id = nn.data[1]
+        local obj_tid = types_mod.find(ctx, infer_expr(ctx, obj_nid))
+        local ot = ctx.types:get(obj_tid)
+        if ot.tag == TAG_TABLE then
+            local fe = types_mod.table_field(ctx, obj_tid, field_id)
+            if fe then
+                unify_mod.unify(ctx, fn_tid, fe.type_id)
+                fe.type_id = fn_tid
+            else
+                -- Add field: rebuild table with new field
+                -- TODO: proper open table extension
+            end
+        end
+    end
+end
+
+StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local ret_types = infer_expr_list(ctx, n.data[0], n.data[1])
+    add_return(ctx, ret_types)
+end
+
+StmtRule[NODE_DO_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local saved = ctx.scope
+    ctx.scope = env_mod.child(ctx.scope)
+    infer_block(ctx, n.data[0], n.data[1])
+    ctx.scope = saved
+end
+
+StmtRule[NODE_WHILE_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    infer_expr(ctx, n.data[0])
+    local narrow_mod = require("lib.type.static.v2.narrow")
+    local narrowed = narrow_mod.narrow_scope(ctx, n.data[0], true)
+    local saved = ctx.scope
+    ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
+    infer_block(ctx, n.data[1], n.data[2])
+    ctx.scope = saved
+end
+
+StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local saved = ctx.scope
+    ctx.scope = env_mod.child(ctx.scope)
+    infer_block(ctx, n.data[1], n.data[2])
+    infer_expr(ctx, n.data[0])
+    ctx.scope = saved
+end
+
+StmtRule[NODE_IF_STMT] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local narrow_mod = require("lib.type.static.v2.narrow")
+    for i = n.data[0], n.data[0] + n.data[1] - 1 do
+        local cn = ctx.nodes:get(ctx.ast_lists:get(i))
+        local test_nid = cn.data[0]
+        local saved = ctx.scope
+        if test_nid >= 0 then
+            infer_expr(ctx, test_nid)
+            local narrowed = narrow_mod.narrow_scope(ctx, test_nid, true)
+            ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
+        end
+        infer_block(ctx, cn.data[1], cn.data[2])
+        ctx.scope = saved
+    end
+end
+
+StmtRule[NODE_FOR_NUM] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    infer_expr(ctx, n.data[1])
+    infer_expr(ctx, n.data[2])
+    if n.data[3] >= 0 then infer_expr(ctx, n.data[3]) end
+    local saved = ctx.scope
+    ctx.scope = env_mod.child(ctx.scope)
+    env_mod.bind(ctx.scope, n.data[0], ctx.T_INTEGER)
+    infer_block(ctx, n.data[4], n.data[5])
+    ctx.scope = saved
+end
+
+StmtRule[NODE_FOR_IN] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local iter_types = infer_expr_list(ctx, n.data[2], n.data[3])
+    local saved = ctx.scope
+    ctx.scope = env_mod.child(ctx.scope)
+    local ns, nl = n.data[0], n.data[1]
+    for i = 0, nl - 1 do
+        local name_id = ctx.ast_lists:get(ns + i)
+        local ty = ctx.T_ANY
+        if i == 0 and #iter_types > 0 then
+            local ft = types_mod.find(ctx, iter_types[1])
+            local ftt = ctx.types:get(ft)
+            if ftt.tag == TAG_FUNCTION and ftt.data[3] > 0 then
+                ty = types_mod.find(ctx, ctx.lists:get(ftt.data[2]))
+            end
+        end
+        env_mod.bind(ctx.scope, name_id, ty)
+    end
+    infer_block(ctx, n.data[4], n.data[5])
+    ctx.scope = saved
+end
+
+StmtRule[NODE_BREAK_STMT] = function() end
+
+---------------------------------------------------------------------------
+-- Type declaration processing
+---------------------------------------------------------------------------
+
+local function process_type_decls(ctx)
+    if not ctx.ann then return end
+    local decls = {}
+    for _, result in pairs(ctx.ann.results) do
+        if result.kind == ANN_DECL then
+            decls[#decls + 1] = result
+        end
+    end
+    -- Pass 1: register names
+    for _, r in ipairs(decls) do
+        local params = nil
+        if r.type_params_len and r.type_params_len > 0 then
+            params = {}
+            for i = r.type_params_start, r.type_params_start + r.type_params_len - 1 do
+                params[#params + 1] = ctx.ann.lists:get(i)
+            end
+        end
+        env_mod.bind_type(ctx.scope, r.name_id, {
+            body   = nil,
+            params = params,
+            nominal = r.newtype or false,
+        })
+    end
+    -- Pass 2: resolve bodies
+    for _, r in ipairs(decls) do
+        local alias = env_mod.lookup_type(ctx.scope, r.name_id)
+        if alias then
+            if r.newtype then
+                local underlying = resolve_annotation_type(ctx, r.type_id)
+                ctx.nominal_id = ctx.nominal_id + 1
+                alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
+            else
+                alias.body = resolve_annotation_type(ctx, r.type_id)
+            end
+        end
+    end
+end
+
+---------------------------------------------------------------------------
+-- Entry point
+---------------------------------------------------------------------------
+
+-- Create a fully initialized checker context.
+function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
+    -- types_mod.new_ctx creates the type arena + field arena + type list pool
+    local ctx = types_mod.new_ctx(pool)
+    -- ctx.lists is the TYPE list pool — don't touch it
+    ctx.ast_lists = parse_result.lists  -- AST list pool (read only)
+    ctx.nodes     = parse_result.nodes
+    ctx.pool      = pool
+    ctx.ann       = ann_result
+    ctx.err       = err_ctx or errors_mod.new_ctx()
+    ctx.filename  = filename or "?"
+    ctx.scope     = scope or env_mod.new(0)
+    ctx.return_types = {}
+    ctx.module_types = {}
+    ctx._last_multi_return = nil
+    ctx.nominal_id = 0
+    return ctx
+end
+
+-- Check a Lua source string. Returns error context.
+function M.check_string(source, filename, parent_scope, pool)
+    local parse_mod  = require("lib.type.static.v2.parse")
+    local intern_new = require("lib.type.static.v2.intern").new
+    pool = pool or intern_new()
+
+    local ok_parse, pr = pcall(parse_mod.parse, source, filename, pool)
+    if not ok_parse then
+        local err_ctx = errors_mod.new_ctx()
+        errors_mod.error(err_ctx, filename or "?", 0, 0, tostring(pr))
+        return err_ctx
+    end
+
+    local ann_result = nil
+    local lex_annotations = pr.lexer and pr.lexer.annotations
+    if lex_annotations and next(lex_annotations) then
+        local ok_ann, ar = pcall(ann_mod.parse_annotations, lex_annotations, pool, filename)
+        if ok_ann then ann_result = ar end
+    end
+
+    local err_ctx = errors_mod.new_ctx()
+    local scope   = parent_scope or env_mod.new(0)
+    local ctx     = M.new_ctx(pr, ann_result, pool, err_ctx, filename, scope)
+
+    -- Register type declarations first, then prescan, then infer
+    process_type_decls(ctx)
+
+    local chunk = pr.root and ctx.nodes:get(pr.root)
+    if chunk then
+        local bs, bl = chunk.data[0], chunk.data[1]
+        prescan_block(ctx, bs, bl)
+        infer_block(ctx, bs, bl)
+    end
+
+    return err_ctx
+end
+
+-- Expose resolve_annotation_type for external use (e.g. check.lua)
+M.resolve_annotation_type = resolve_annotation_type
+
+return M
