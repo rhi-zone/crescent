@@ -304,6 +304,7 @@ end
 -- member_ids: Lua array of type_ids
 function M.make_union(ctx, member_ids)
     local flat = {}
+    local seen = {}
     for i = 1, #member_ids do
         local rtid = M.find(ctx, member_ids[i])
         local t = ctx.types:get(rtid)
@@ -311,10 +312,11 @@ function M.make_union(ctx, member_ids)
         if t.tag == TAG_UNION then
             local s, l = t.data[0], t.data[1]
             for j = s, s + l - 1 do
-                flat[#flat + 1] = ctx.lists:get(j)
+                local mid = ctx.lists:get(j)
+                if not seen[mid] then seen[mid] = true; flat[#flat + 1] = mid end
             end
         elseif t.tag ~= TAG_NEVER then
-            flat[#flat + 1] = rtid
+            if not seen[rtid] then seen[rtid] = true; flat[#flat + 1] = rtid end
         end
     end
     if #flat == 0 then return ctx.T_NEVER end

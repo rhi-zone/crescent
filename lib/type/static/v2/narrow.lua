@@ -12,9 +12,10 @@ local NODE_CALL_EXPR   = defs.NODE_CALL_EXPR
 local NODE_IDENTIFIER  = defs.NODE_IDENTIFIER
 local NODE_FIELD_EXPR  = defs.NODE_FIELD_EXPR
 
-local OP_EQ = defs.OP_EQ
-local OP_NE = defs.OP_NE
+local OP_EQ  = defs.OP_EQ
+local OP_NE  = defs.OP_NE
 local OP_NOT = defs.OP_NOT
+local OP_AND = defs.OP_AND
 
 local TAG_ANY  = defs.TAG_ANY
 local TAG_NIL  = defs.TAG_NIL
@@ -206,37 +207,55 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
     return ty_id
 end
 
+-- Extract the name_id targeted by a narrowing info struct.
+local function info_name_id(info)
+    if info.kind == "nil_check" or info.kind == "type_check" then
+        return info.name_id
+    elseif info.kind == "field_disc" then
+        return info.name_id
+    elseif info.kind == "negation" then
+        local inner = info.inner
+        if inner.kind == "nil_check" or inner.kind == "type_check" then
+            return inner.name_id
+        elseif inner.kind == "field_disc" then
+            return inner.name_id
+        end
+    end
+    return nil
+end
+
+-- Apply a single narrowing info to the 'narrowed' map.
+local function record_narrowing(ctx, info, narrowed, is_truthy)
+    local name_id = info_name_id(info)
+    if not name_id then return end
+    local env_mod = require("lib.type.static.v2.env")
+    local current_ty = env_mod.lookup(ctx.scope, name_id)
+    if not current_ty then return end
+    narrowed[name_id] = apply_narrowing(ctx, info, current_ty, is_truthy)
+end
+
 -- Narrow a scope based on a test expression.
 -- Returns a table { [name_id] -> type_id } of narrowed types.
 -- is_truthy: true for truthy branch, false for falsy branch.
 function M.narrow_scope(ctx, test_nid, is_truthy)
     local narrowed = {}
-    local info = extract_narrowing(ctx, test_nid)
-    if not info then return narrowed end
+    local n = ctx.nodes:get(test_nid)
 
-    local name_id
-    if info.kind == "nil_check" or info.kind == "type_check" then
-        name_id = info.name_id
-    elseif info.kind == "field_disc" then
-        name_id = info.name_id
-    elseif info.kind == "negation" then
-        -- Let apply_narrowing handle the inversion
-        local inner = info.inner
-        if inner.kind == "nil_check" or inner.kind == "type_check" then
-            name_id = inner.name_id
-        elseif inner.kind == "field_disc" then
-            name_id = inner.name_id
+    -- `a and b`: in truthy branch, both a and b are true — apply both narrowings.
+    -- In falsy branch, De Morgan complexity: skip (conservative).
+    if n and n.kind == NODE_BINARY_EXPR and n.data[0] == OP_AND then
+        if is_truthy then
+            local left_info  = extract_narrowing(ctx, n.data[1])
+            local right_info = extract_narrowing(ctx, n.data[2])
+            if left_info  then record_narrowing(ctx, left_info,  narrowed, true) end
+            if right_info then record_narrowing(ctx, right_info, narrowed, true) end
         end
+        return narrowed
     end
 
-    if not name_id then return narrowed end
-
-    local env_mod = require("lib.type.static.v2.env")
-    local current_ty = env_mod.lookup(ctx.scope, name_id)
-    if not current_ty then return narrowed end
-
-    local narrowed_ty = apply_narrowing(ctx, info, current_ty, is_truthy)
-    narrowed[name_id] = narrowed_ty
+    local info = extract_narrowing(ctx, test_nid)
+    if not info then return narrowed end
+    record_narrowing(ctx, info, narrowed, is_truthy)
     return narrowed
 end
 

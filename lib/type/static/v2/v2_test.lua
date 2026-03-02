@@ -1992,3 +1992,66 @@ assert.describe("errors: formatting", function()
         assert.ok(not errors_mod.has_errors(ec))
     end)
 end)
+
+assert.describe("checker: arithmetic on unannotated params (Cat J regression)", function()
+    assert.it("arithmetic on unannotated param doesn't pollute type downstream", function()
+        -- s.pos + 1 should not bind pos to a meta-constraint table;
+        -- pos must remain a free typevar so string.sub(s.src, s.pos, s.pos-1) works.
+        no_errors([[
+local function scan(s)
+    s.pos = s.pos + 1
+    return string.sub(s.src, s.pos, s.pos - 1)
+end
+]])
+    end)
+    assert.it("arithmetic on multiple ops on same unannotated field doesn't error", function()
+        no_errors([[
+local function walk(s)
+    s.pos = s.pos + 1
+    s.pos = s.pos - 1
+    s.pos = s.pos * 2
+end
+]])
+    end)
+    assert.it("arithmetic on known non-numeric still errors", function()
+        has_error([[
+local x = "hello"
+local y = x + 1
+]], "cannot perform arithmetic")
+    end)
+end)
+
+assert.describe("checker: nested recursive local function (Cat J regression)", function()
+    assert.it("local function calling itself recursively doesn't error", function()
+        no_errors([[
+local function outer()
+    local function inner(n)
+        if n <= 0 then return 0 end
+        return inner(n - 1)
+    end
+    return inner(5)
+end
+]])
+    end)
+end)
+
+assert.describe("checker: and short-circuit narrowing", function()
+    assert.it("x and x.field doesn't error when x can be nil", function()
+        no_errors([[
+local function foo(x)
+    if x and x.kind == 1 then
+        local k = x.kind
+    end
+end
+]])
+    end)
+    assert.it("and narrows nil-check before evaluating right side", function()
+        no_errors([[
+local function bar(x)
+    if x and x.name then
+        local n = x.name
+    end
+end
+]])
+    end)
+end)

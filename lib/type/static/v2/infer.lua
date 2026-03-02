@@ -128,7 +128,7 @@ local function get_ann(ctx, line)
 end
 
 -- Forward declarations
-local infer_expr, infer_stmt, infer_block, infer_function, resolve_annotation_type
+local infer_expr, infer_stmt, infer_block, infer_function, resolve_annotation_type, prescan_block
 
 -- Translate annotation type_id (from ann_ctx.types) into a checker type_id.
 -- Uses ctx.ann.types/fields/lists for reading, ctx.types/fields/lists for writing.
@@ -412,16 +412,6 @@ local function meta_op_ret(ctx, tid, mm_name)
     return ctx.T_ANY
 end
 
--- Build a meta-only table constraint for an operator.
-local function meta_constraint(ctx, mm_name, arity)
-    local level = ctx.scope.level
-    local params = {}
-    for i = 1, arity do params[i] = types_mod.make_var(ctx, level) end
-    local fn_ty = types_mod.make_func(ctx, params, { types_mod.make_var(ctx, level) }, -1)
-    local mm_id = intern_mod.intern(ctx.pool, mm_name)
-    local meta_fid = types_mod.make_field(ctx, mm_id, fn_ty, false)
-    return types_mod.make_table(ctx, {}, {}, -1, { meta_fid })
-end
 
 local ARITH_META = {
     [OP_ADD] = "__add", [OP_SUB] = "__sub", [OP_MUL] = "__mul",
@@ -501,6 +491,21 @@ end
 ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local op = n.data[0]
+
+    -- OP_AND: short-circuit — when evaluating right, left was truthy.
+    -- Narrow scope from left before inferring right to avoid false positives
+    -- on patterns like `ann and ann.field`.
+    if op == defs.OP_AND then
+        infer_expr(ctx, n.data[1])
+        local narrow_mod = require("lib.type.static.v2.narrow")
+        local narrowed = narrow_mod.narrow_scope(ctx, n.data[1], true)
+        local saved = ctx.scope
+        if next(narrowed) then ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed) end
+        local right_r = types_mod.find(ctx, infer_expr(ctx, n.data[2]))
+        ctx.scope = saved
+        return types_mod.make_union(ctx, { ctx.T_NIL, right_r })
+    end
+
     local left_tid  = infer_expr(ctx, n.data[1])
     local right_tid = infer_expr(ctx, n.data[2])
     local left_r  = types_mod.find(ctx, left_tid)
@@ -510,18 +515,6 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         local mm_name = ARITH_META[op]
         local mm = meta_op_ret(ctx, left_r, mm_name) or meta_op_ret(ctx, right_r, mm_name)
         if mm then return mm end
-        local function constrain(r_id)
-            local rt = ctx.types:get(r_id)
-            if rt.tag == TAG_VAR then
-                unify_mod.unify(ctx, r_id, meta_constraint(ctx, mm_name, 2))
-            end
-        end
-        constrain(left_r)
-        constrain(right_r)
-        left_r  = types_mod.find(ctx, left_tid)
-        right_r = types_mod.find(ctx, right_tid)
-        mm = meta_op_ret(ctx, left_r, mm_name) or meta_op_ret(ctx, right_r, mm_name)
-        if mm then return ctx.T_NUMBER end
         local function check_num(r_id)
             local lt = ctx.types:get(r_id)
             if lt.tag == TAG_UNION then
@@ -579,7 +572,6 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         return ctx.T_STRING
     end
 
-    if op == OP_AND then return types_mod.make_union(ctx, { ctx.T_NIL, right_r }) end
     if op == OP_OR then
         -- Cat F: `A or B` — when right is used, left was nil/false.
         -- Strip nil from left to avoid spurious nil in the result union.
@@ -902,6 +894,7 @@ infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
 
     local saved = ctx.scope
     ctx.scope = fn_scope
+    prescan_block(ctx, bs, bl)
     push_return_collector(ctx)
     infer_block(ctx, bs, bl)
     local rc = pop_return_collector(ctx)
@@ -1028,7 +1021,7 @@ local function table_add_field(ctx, obj_tid, field_id, field_type_id)
     for k = 0, 6 do ot.data[k] = new_t.data[k] end
 end
 
-local function prescan_block(ctx, bs, bl)
+prescan_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         local sid = ctx.ast_lists:get(i)
         local sn  = ctx.nodes:get(sid)
