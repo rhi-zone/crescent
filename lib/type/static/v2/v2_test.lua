@@ -14,7 +14,34 @@ local env_mod   = require("lib.type.static.v2.env")
 local unify_mod = require("lib.type.static.v2.unify")
 local errors_mod = require("lib.type.static.v2.errors")
 local match_mod = require("lib.type.static.v2.match")
-local infer_mod = require("lib.type.static.v2.infer")
+local infer_mod    = require("lib.type.static.v2.infer")
+local sha256_mod   = require("lib.type.static.v2.sha256")
+local cri_write    = require("lib.type.static.v2.cri_write")
+local cri_read     = require("lib.type.static.v2.cri_read")
+
+---------------------------------------------------------------------------
+-- sha256.lua
+---------------------------------------------------------------------------
+
+assert.describe("sha256: NIST test vectors", function()
+    assert.it("empty string", function()
+        assert.eq(sha256_mod.hash(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    end)
+    assert.it("abc", function()
+        assert.eq(sha256_mod.hash("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    end)
+    assert.it("two-block message (448 chars)", function()
+        assert.eq(sha256_mod.hash("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+                  "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+    end)
+    assert.it("message digest", function()
+        assert.eq(sha256_mod.hash("message digest"), "f7846f55cf23e14eebeab5b4e1550cad5b509e3348fbc4efa3a1413d393cb650")
+    end)
+    assert.it("a-z", function()
+        assert.eq(sha256_mod.hash("abcdefghijklmnopqrstuvwxyz"),
+                  "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73")
+    end)
+end)
 
 ---------------------------------------------------------------------------
 -- defs.lua
@@ -2594,5 +2621,130 @@ assert.describe("checker: open table / row variable", function()
             local t
             local x = t.unknown_field
         ]], "")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- cri_write / cri_read: .cri round-trip
+---------------------------------------------------------------------------
+
+assert.describe("cri: round-trip", function()
+    local function make_ctx(src)
+        local _, ctx = infer_mod.check_string(src, "test.lua")
+        return ctx
+    end
+
+    assert.it("magic and version are correct", function()
+        local ctx = make_ctx("")
+        local bytes = cri_write.serialize(ctx, {})
+        assert.eq(bytes:sub(1, 4), "CRIF")
+        -- version = 1 in big-endian u32
+        assert.eq(bytes:byte(5), 0)
+        assert.eq(bytes:byte(6), 0)
+        assert.eq(bytes:byte(7), 0)
+        assert.eq(bytes:byte(8), 1)
+    end)
+
+    assert.it("SHA-256 hash is valid", function()
+        local ctx = make_ctx("")
+        local bytes = cri_write.serialize(ctx, {})
+        -- Zero out hash field, recompute, compare
+        local zeroed = bytes:sub(1, 12) .. string.rep("\0", 32) .. bytes:sub(45)
+        local expected = sha256_mod.hash(zeroed)
+        local stored = {}
+        for i = 13, 44 do stored[#stored + 1] = string.format("%02x", bytes:byte(i)) end
+        assert.eq(table.concat(stored), expected)
+    end)
+
+    assert.it("empty export serializes and loads back", function()
+        local ctx = make_ctx("")
+        local bytes = cri_write.serialize(ctx, {})
+        local ctx2 = make_ctx("")
+        local ok, exports = cri_read.load(bytes, ctx2)
+        assert.ok(ok)
+        assert.eq(next(exports), nil)  -- no exports
+    end)
+
+    assert.it("primitive type round-trips", function()
+        local ctx = make_ctx("")
+        local bytes = cri_write.serialize(ctx, { x = ctx.T_INTEGER, y = ctx.T_STRING })
+        local ctx2 = make_ctx("")
+        local ok, exports = cri_read.load(bytes, ctx2)
+        assert.ok(ok)
+        assert.eq(ctx2.types:get(exports.x).tag, defs.TAG_INTEGER)
+        assert.eq(ctx2.types:get(exports.y).tag, defs.TAG_STRING)
+    end)
+
+    assert.it("table type with fields round-trips", function()
+        local src = [[
+            local M = {}
+            function M.add(a, b) return a + b end
+            function M.greet(name) return "hi " .. name end
+            return M
+        ]]
+        local ctx = make_ctx(src)
+        local rets = ctx.module_return_tids
+        local m_tid = rets and rets[1] and types_mod.find(ctx, rets[1][1])
+        assert.ok(m_tid ~= nil)
+
+        local bytes = cri_write.serialize(ctx, { M = m_tid })
+        local ctx2 = make_ctx("")
+        local ok, exports = cri_read.load(bytes, ctx2)
+        assert.ok(ok)
+
+        local m2_tid = exports.M
+        assert.ok(m2_tid ~= nil and m2_tid >= 0)
+        local m2_slot = ctx2.types:get(m2_tid)
+        assert.eq(m2_slot.tag, defs.TAG_TABLE)
+        assert.eq(m2_slot.data[1], 2)  -- 2 fields: add, greet
+    end)
+
+    assert.it("deterministic: same input produces same bytes", function()
+        local ctx = make_ctx("local x = 1")
+        local exports = { x = ctx.T_INTEGER }
+        local b1 = cri_write.serialize(ctx, exports)
+        local b2 = cri_write.serialize(ctx, exports)
+        assert.eq(b1, b2)
+    end)
+
+    assert.it("corrupted .cri fails to load", function()
+        local ctx = make_ctx("")
+        local bytes = cri_write.serialize(ctx, {})
+        -- Corrupt a byte in the middle
+        local bad = bytes:sub(1, 100) .. "\xff" .. bytes:sub(102)
+        local ctx2 = make_ctx("")
+        local ok, err = cri_read.load(bad, ctx2)
+        assert.ok(not ok)
+    end)
+end)
+
+assert.describe("cri: require() type resolution", function()
+    assert.it("cri_loader wires require() return type", function()
+        -- Build a 'module' and serialize its export type
+        local mod_src = [[
+            local M = {}
+            function M.foo() return 42 end
+            return M
+        ]]
+        local _, mod_ctx = infer_mod.check_string(mod_src, "mymod.lua")
+        local rets = mod_ctx.module_return_tids
+        local m_tid = rets and rets[1] and types_mod.find(mod_ctx, rets[1][1])
+        local cri_bytes = cri_write.serialize(mod_ctx, { M = m_tid })
+
+        -- In the 'requiring' file, install a cri_loader that returns the type
+        local function cri_loader(ctx, mod_name)
+            if mod_name ~= "mymod" then return nil end
+            local ok, exports = cri_read.load(cri_bytes, ctx)
+            if ok then return exports.M end
+            return nil
+        end
+
+        -- Check a file that requires the module
+        local use_src = [[
+            local M = require("mymod")
+            local x = M.foo()
+        ]]
+        local err, use_ctx = infer_mod.check_string(use_src, "use.lua", nil, nil, cri_loader)
+        assert.eq(#err.errors, 0)
     end)
 end)

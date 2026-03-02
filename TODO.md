@@ -203,8 +203,7 @@ Recursive function return type inference: **FIXED 2026-03-03** (commit 192b878)
 - Limitation: unannotated params are TAG_VAR; arithmetic falls to T_NUMBER. Annotated params work.
 
 **Phase 4 proper:**
-- [ ] .cri interface files (zero-copy module loading, content-addressed)
-- [ ] Module caching beyond single-session simple table
+- [x] .cri interface files (zero-copy module loading, content-addressed) — 2026-03-03: sha256.lua, cri_write.lua, cri_read.lua, cache.lua, check.lua integration
 - [ ] Fork-based parallelism (Phase 5)
 - [ ] LSP daemon integration (Phase 6)
 
@@ -226,10 +225,20 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [ ] (stretch) Full FFI struct hash table for intern entries — current impl uses Lua tables per entry with FNV-1a + memcmp; a flat FFI array could reduce GC pressure further but 5.3x is good enough to move on
 
 ### backlog
+- [ ] **Error message quality audit** — bar is Rust-level helpfulness. Specific gaps identified:
+  - "missing required argument" should include parameter name and expected type (e.g. `argument 1 'opts': expected {…}, got nil`)
+  - "cannot pass X where Y expected" truncates long type strings — need smart truncation with `…` or abbrev for nested types
+  - Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff)
+  - General: add suggestions/recommendations where possible ("did you mean …?", "add annotation to …")
+- [ ] High-perf SHA-256 for .cri content addressing: current pure-Lua impl is correct but slow
+  (~10 MB/s). For 1M LOC scale, SHA-256 should be done via FFI (libssl EVP_DigestInit or
+  kernel crypto via syscall). Profile first — .cri files are small (kB range) so this may
+  not matter until we're hashing source files at scale.
 - [x] Generic function inference (infer type params from call site args)
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
 - [x] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Annotation on any line `[callee.line, node.line]` (node.line = `(` line). Lua 5.1/LuaJIT constraint: `(` cannot be on a new line from the callee (ambiguous call syntax), so annotation must share the callee's line in practice. Lua 5.2+ compat removes this restriction.
 - [ ] Parse LuaJIT FFI cdef blocks
+- [ ] Field assignment `M.foo = val` doesn't add field to M's table type (only `function M.foo()` does via prescan). Fix: handle NODE_FIELD_EXPR on LHS of NODE_ASSIGN_STMT by calling table_add_field.
 - [x] v2 stdlib.d.lua: stdlib.d.lua created (2026-03-02); prelude.lua replaced with load_decls().
   `--:: declare name = type` for variable bindings; `--[[:: name = { ... }]]` for type aliases.
   Primitive meta types (number_meta, integer_meta, string_meta_ops) declared in stdlib.d.lua;

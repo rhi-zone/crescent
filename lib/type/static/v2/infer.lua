@@ -953,6 +953,19 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 ctx._last_multi_return = returns
                 return ctx.T_BOOLEAN
             end
+        elseif fname == "require" and ctx.cri_loader and n.data[2] >= 1 then
+            -- If a cri_loader is registered, use it to resolve the module's export type.
+            -- The first arg must be a string literal for static resolution.
+            local arg0_nid_or_mod = n.data[1]  -- start index into ast_lists
+            local arg0_nid = ctx.ast_lists:get(arg0_nid_or_mod)
+            local arg0_n = ctx.nodes:get(arg0_nid)
+            if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
+                local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
+                local exports = ctx.cri_loader(ctx, mod_name)
+                if exports then
+                    return exports
+                end
+            end
         end
     end
 
@@ -1837,6 +1850,8 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx.return_types    = {}
     ctx.return_stub_vars = {}  -- stack parallel to return_types; see push_return_collector
     ctx.module_types = {}
+    ctx.module_return_tids = nil  -- set after check_string wraps infer_block
+    ctx.cri_loader = nil          -- optional: function(ctx, module_name) -> exports_table | nil
     ctx._last_multi_return = nil
     ctx._last_pcall_success_types = nil
     ctx._pcall_info = {}
@@ -1844,8 +1859,10 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     return ctx
 end
 
--- Check a Lua source string. Returns error context.
-function M.check_string(source, filename, parent_scope, pool)
+-- Check a Lua source string. Returns err_ctx, ctx.
+-- Optional cri_loader: function(ctx, module_name) -> type_id | nil
+-- Installed on ctx before inference so require() calls resolve at check time.
+function M.check_string(source, filename, parent_scope, pool, cri_loader)
     local parse_mod  = require("lib.type.static.v2.parse")
     local intern_new = require("lib.type.static.v2.intern").new
     pool = pool or intern_new()
@@ -1868,6 +1885,9 @@ function M.check_string(source, filename, parent_scope, pool)
     local scope   = parent_scope or env_mod.new(0)
     local ctx     = M.new_ctx(pr, ann_result, pool, err_ctx, filename, scope)
 
+    -- Install cri_loader before inference so require() calls resolve at check time.
+    if cri_loader then ctx.cri_loader = cri_loader end
+
     -- Populate stdlib prelude when no parent scope is provided.
     if not parent_scope then
         require("lib.type.static.v2.prelude").populate(ctx)
@@ -1880,10 +1900,12 @@ function M.check_string(source, filename, parent_scope, pool)
     if chunk then
         local bs, bl = chunk.data[0], chunk.data[1]
         prescan_block(ctx, bs, bl)
+        push_return_collector(ctx, nil)
         infer_block(ctx, bs, bl)
+        ctx.module_return_tids = pop_return_collector(ctx)
     end
 
-    return err_ctx
+    return err_ctx, ctx
 end
 
 -- Expose resolve_annotation_type for external use (e.g. check.lua)
