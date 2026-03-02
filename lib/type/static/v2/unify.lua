@@ -543,6 +543,17 @@ function M.try_unify(ctx, a, b)
     if ta.tag == TAG_VAR or tb.tag == TAG_VAR then return 50, true end
     if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return 50, true end
 
+    -- Union LHS: all members must be assignable to b.
+    if ta.tag == TAG_UNION then
+        local total = 0
+        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+            local score, ok = M.try_unify(ctx, ctx.lists:get(i), b)
+            if not ok then return 0, false end
+            total = total + score
+        end
+        return total, true
+    end
+
     if ta.tag == tb.tag and is_primitive_tag(ta.tag) then return 0, true end
 
     if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return 1, true end

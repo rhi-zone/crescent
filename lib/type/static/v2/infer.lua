@@ -446,6 +446,28 @@ local function meta_op_ret(ctx, tid, mm_name)
 end
 
 
+-- Like meta_op_ret but returns the full metamethod function TID (not just return type).
+-- Used to extract parameter types for cross-type operand validation.
+local function meta_fn_tid(ctx, tid, mm_name)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+    local meta_tid
+    if t.tag == TAG_TABLE then
+        meta_tid = tid
+    else
+        local pt = prim_tag(ctx, tid)
+        if not pt then return nil end
+        local pmt = ctx.prim_meta[pt]
+        if not pmt then return nil end
+        meta_tid = types_mod.find(ctx, pmt)
+        if ctx.types:get(meta_tid).tag ~= TAG_TABLE then return nil end
+    end
+    local mm_id = intern_mod.intern(ctx.pool, mm_name)
+    local fe = types_mod.table_meta_field(ctx, meta_tid, mm_id)
+    if not fe then return nil end
+    return types_mod.find(ctx, fe.type_id)
+end
+
 local ARITH_META = {
     [OP_ADD] = "__add", [OP_SUB] = "__sub", [OP_MUL] = "__mul",
     [OP_DIV] = "__div", [OP_MOD] = "__mod", [OP_POW] = "__pow",
@@ -606,22 +628,43 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if op == OP_EQ or op == OP_NE then return ctx.T_BOOLEAN end
     if CMP_META[op] then
-        -- Custom __lt/__le on a table operand overrides.
+        local mm_name = CMP_META[op]
+        -- Custom __lt/__le on a table operand overrides return type.
         local mm
         if ctx.types:get(left_r).tag == TAG_TABLE then
-            mm = meta_op_ret(ctx, left_r, CMP_META[op])
+            mm = meta_op_ret(ctx, left_r, mm_name)
         end
         if not mm and ctx.types:get(right_r).tag == TAG_TABLE then
-            mm = meta_op_ret(ctx, right_r, CMP_META[op])
+            mm = meta_op_ret(ctx, right_r, mm_name)
         end
         if mm then return mm end
-        -- Validate both operands support ordering (nil and boolean do not).
-        local mm_name = CMP_META[op]
+        -- Validate each operand supports ordering (nil and boolean do not).
         if not has_metamethod(ctx, left_r, mm_name, false) then
             report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display(ctx, left_r) .. "'")
+            return ctx.T_BOOLEAN
         end
         if not has_metamethod(ctx, right_r, mm_name, false) then
             report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display(ctx, right_r) .. "'")
+            return ctx.T_BOOLEAN
+        end
+        -- Cross-type check via Lua metamethod calling rules.
+        -- Lua picks __lt/__le from left operand first, then right.
+        -- The function's parameter types define valid operand types.
+        local fn = meta_fn_tid(ctx, left_r, mm_name)
+               or  meta_fn_tid(ctx, right_r, mm_name)
+        if fn then
+            local ft = ctx.types:get(fn)
+            if ft.tag == TAG_FUNCTION and ft.data[1] >= 2 then
+                local p0 = ctx.lists:get(ft.data[0])
+                local p1 = ctx.lists:get(ft.data[0] + 1)
+                local _, ok0 = unify_mod.try_unify(ctx, left_r,  p0)
+                local _, ok1 = unify_mod.try_unify(ctx, right_r, p1)
+                if not ok0 or not ok1 then
+                    report(ctx, n.line, n.col,
+                        "cannot compare '" .. types_mod.display(ctx, left_r)
+                        .. "' with '" .. types_mod.display(ctx, right_r) .. "'")
+                end
+            end
         end
         return ctx.T_BOOLEAN
     end
