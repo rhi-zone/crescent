@@ -161,10 +161,11 @@ Cat J — **FIXED 2026-03-02** (commit 0a91819):
   unannotated `add(x,y) = x+y` won't error). Annotated code is unaffected.
 - All 9 previously-clean v2 source files now self-check at 0 errors.
 
-Cat G — string meta architecture (minor):
-- `s:method()` special-cased via `recv_r == ctx.T_STRING` in ExprRule[NODE_METHOD_CALL]
-- More principled: store `ctx.string_meta_tid` in prelude, use generically
-- Blocked on: primitive types having declared metatables (a .cri/stdlib concern)
+Cat G — string meta architecture: **FIXED 2026-03-02**
+- `ctx.prim_index` (TAG_* → TID) added to types.lua context; populated by prelude after loading stdlib.d.lua.
+- infer.lua NODE_METHOD_CALL: replaced `recv_r == ctx.T_STRING` special case with generic `ctx.prim_index[tag]` lookup.
+- Literal strings normalized to TAG_STRING before lookup, so `("hello"):upper()` works correctly.
+- Extensible: any primitive with a registered `__index` meta table works without modifying infer.lua.
 
 Cat H (new) — Optional function parameter typed as required: **FIXED 2026-03-02**
 - Fixed in infer_function: scan first 10 body statements for `param = param or default`.

@@ -77,6 +77,7 @@ local ANN_DECL      = defs.ANN_DECL
 local TAG_ANY      = defs.TAG_ANY
 local TAG_NIL      = defs.TAG_NIL
 local TAG_INTEGER  = defs.TAG_INTEGER
+local TAG_STRING   = defs.TAG_STRING
 local TAG_LITERAL  = defs.TAG_LITERAL
 local TAG_FUNCTION = defs.TAG_FUNCTION
 local TAG_TABLE    = defs.TAG_TABLE
@@ -822,26 +823,29 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
             local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
             report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
         end
-    elseif recv_r == ctx.T_STRING then
-        -- String method call: Lua strings inherit the string table via __index.
-        -- ctx.string_meta_tid is set by prelude.populate; fall back to any if absent.
-        local str_tbl_tid = ctx.string_meta_tid
-        if str_tbl_tid then
-            str_tbl_tid = types_mod.find(ctx, str_tbl_tid)
-            local st = ctx.types:get(str_tbl_tid)
-            if st.tag == TAG_TABLE then
-                local fe = types_mod.table_field(ctx, str_tbl_tid, method_name_id)
+    else
+        -- For primitive types, look up a registered __index table in ctx.prim_index.
+        -- Literal types are mapped to their base primitive tag first.
+        local tag = recv_t.tag
+        if tag == TAG_LITERAL and recv_t.data[0] == LIT_STRING then
+            tag = TAG_STRING
+        end
+        local prim_tid = ctx.prim_index[tag]
+        if prim_tid then
+            prim_tid = types_mod.find(ctx, prim_tid)
+            if ctx.types:get(prim_tid).tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx, prim_tid, method_name_id)
                 if fe then
                     method_tid = types_mod.find(ctx, fe.type_id)
                 else
                     local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-                    report(ctx, n.line, n.col, "no method '" .. mname .. "' on type 'string'")
+                    report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
                 end
             end
+        elseif recv_t.tag ~= TAG_ANY and recv_t.tag ~= TAG_VAR then
+            local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
+            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
         end
-    elseif recv_t.tag ~= TAG_ANY and recv_t.tag ~= TAG_VAR then
-        local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-        report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
     end
 
     local extra = infer_expr_list(ctx, n.data[2], n.data[3])

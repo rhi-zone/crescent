@@ -89,6 +89,10 @@ local function load_decls(ctx, path)
     ctx.integer_meta_tid    = get_alias("integer_meta")    or ctx.integer_meta_tid
     ctx.string_meta_ops_tid = get_alias("string_meta_ops") or ctx.string_meta_ops_tid
     ctx.string_meta_tid     = get_var("string")            or ctx.string_meta_tid
+    -- Register string's __index table in prim_index for generic method dispatch.
+    if ctx.string_meta_tid then
+        ctx.prim_index[defs_mod.TAG_STRING] = ctx.string_meta_tid
+    end
 end
 
 -- Populate ctx.scope with Lua 5.1 / LuaJIT stdlib bindings.

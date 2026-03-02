@@ -2277,3 +2277,40 @@ end
 ]], "cannot")
     end)
 end)
+
+assert.describe("checker: string method dispatch via prim_index", function()
+    assert.it("method call on string variable is valid", function()
+        no_errors([[
+local s = "hello"
+--: string
+local t = s:upper()
+]])
+    end)
+    assert.it("method call on string literal is valid", function()
+        -- ("hello"):upper() — receiver is a literal string, not canonical T_STRING.
+        no_errors([[
+local t = ("hello"):upper()
+]])
+    end)
+    assert.it("chained string methods are valid", function()
+        no_errors([[
+local s = "Hello World"
+--: string
+local t = s:lower():upper()
+]])
+    end)
+    assert.it("unknown string method is an error", function()
+        has_error([[
+local s = "hello"
+--: string
+local t = s:nosuchmethod()
+]], "no method 'nosuchmethod'")
+    end)
+    assert.it("method call on non-string primitive is an error", function()
+        has_error([[
+local n = 42
+--: number
+local t = n:upper()
+]], "no method 'upper'")
+    end)
+end)

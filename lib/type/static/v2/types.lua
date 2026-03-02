@@ -160,6 +160,9 @@ function M.new_ctx(pool)
         T_ANY     = M.T_ANY,
         T_NEVER   = M.T_NEVER,
         T_INTEGER = M.T_INTEGER,
+        -- prim_index: TAG_* → TID of the __index table for that primitive.
+        -- Populated by prelude.populate. Used by NODE_METHOD_CALL dispatch.
+        prim_index = {},
     }
     return ctx
 end
