@@ -606,7 +606,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if op == OP_EQ or op == OP_NE then return ctx.T_BOOLEAN end
     if CMP_META[op] then
-        -- Only dispatch via table metamethods; primitive comparison always returns boolean.
+        -- Custom __lt/__le on a table operand overrides.
         local mm
         if ctx.types:get(left_r).tag == TAG_TABLE then
             mm = meta_op_ret(ctx, left_r, CMP_META[op])
@@ -615,6 +615,14 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             mm = meta_op_ret(ctx, right_r, CMP_META[op])
         end
         if mm then return mm end
+        -- Validate both operands support ordering (nil and boolean do not).
+        local mm_name = CMP_META[op]
+        if not has_metamethod(ctx, left_r, mm_name, false) then
+            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display(ctx, left_r) .. "'")
+        end
+        if not has_metamethod(ctx, right_r, mm_name, false) then
+            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display(ctx, right_r) .. "'")
+        end
         return ctx.T_BOOLEAN
     end
 
