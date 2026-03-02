@@ -13,6 +13,9 @@ local M = {}
 -- Simple, no invalidation — for batch checking within one session.
 local _cache = {}
 
+-- Shared intern pool for check_files — lazy-initialised, reused across files.
+local pool
+
 -- Clear the module cache.
 function M.clear_cache()
     _cache = {}

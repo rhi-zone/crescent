@@ -358,7 +358,7 @@ function M.unify(ctx, a, b)
     -- Primitives satisfy meta-only table constraints (e.g. number satisfies { #__add: ... })
     if tb.tag == TAG_TABLE and tb.data[1] == 0 and tb.data[3] == 0 then
         -- b is a table with no fields and no indexers (meta-only constraint)
-        local ops
+        local ops --: { [string]: boolean }
         if ta.tag == TAG_NUMBER or ta.tag == TAG_INTEGER
           or (ta.tag == TAG_LITERAL and ta.data[0] == LIT_NUMBER) then
             ops = NUMERIC_META
