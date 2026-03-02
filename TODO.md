@@ -173,6 +173,19 @@ Cat G — string meta architecture: **FIXED 2026-03-02**
 - unify.lua: replaced if/elseif tag switch with prim_meta[ptag] lookup (TAG_LITERAL normalized inline).
 - Known gap: `nil .. "a"` not flagged — TAG_NIL is in is_concat_scalar (pre-existing, separate fix needed).
 
+Integer literal typing: **FIXED 2026-03-03** (commit bb0c2e8 era)
+- `NODE_LITERAL` handler was using numval index as a pool intern ID (IDs 0-21 are keywords).
+- Fix: store `pr.lexer.numvals` in `ctx.numvals`; check `num % 1 == 0` for integer classification.
+- integer <: number is now unidirectional (integer assignable to number, NOT vice versa).
+
+Cross-type comparison: **FIXED 2026-03-03** (commit bb0c2e8)
+- `"a" < 1` and `1 < "a"` silently passed because each operand individually had __lt in prim_meta.
+- Fix: meta_fn_tid helper returns the full metamethod function TID. In CMP_META dispatch, after
+  has_metamethod passes for both operands, look up the __lt/__le function (left first, then right
+  per Lua calling rules) and validate both operands against its declared parameter types via try_unify.
+- Bonus fix: try_unify union-LHS case: all members must be assignable to b (previously fell through
+  to false, causing false positives for `integer | number > number` patterns in unify.lua self-check).
+
 Cat H (new) — Optional function parameter typed as required: **FIXED 2026-03-02**
 - Fixed in infer_function: scan first 10 body statements for `param = param or default`.
 - After body inference, widen matched params to union(bound_type, T_NIL).
@@ -181,6 +194,13 @@ Cat H (new) — Optional function parameter typed as required: **FIXED 2026-03-0
 Cat I (new) — Explicit `local x = nil` still binds T_NIL: **FIXED 2026-03-02**
 - Fixed in NODE_LOCAL_STMT: when rhs resolves to TAG_NIL, bind fresh typevar (same as Cat A).
 - `local arg_ids = nil; arg_ids = {}` now works correctly.
+
+Recursive function return type inference: **FIXED 2026-03-03** (commit 192b878)
+- Prescan now creates `(T_ANY,...) → β` stubs (not bare TAG_VAR). β is shared across all recursive
+  call sites (not FLAG_GENERIC → instantiate passes it through unchanged). add_return eagerly binds
+  β on first return statement; all later recursive calls resolve via find(). ctx.return_stub_vars
+  stack threads stub return vars into nested function scopes. Annotated functions skip eager binding.
+- Limitation: unannotated params are TAG_VAR; arithmetic falls to T_NUMBER. Annotated params work.
 
 **Phase 4 proper:**
 - [ ] .cri interface files (zero-copy module loading, content-addressed)
