@@ -945,6 +945,179 @@ This means:
 - Projects can declare global types without scattering `--::` across files.
 - `$`-prefixed types are intrinsics — compiler-supported, declared as `= intrinsic` in prelude files. The `$` prefix is the rule: if it has `$`, the compiler implements it and users can't redefine it. If it doesn't have `$`, it's user-defined and you can read the source. Same pattern as TypeScript's `intrinsic` keyword, but with a visible naming convention.
 
+## v2 Checker Architecture
+
+Design insights for the v2 checker implementation. The v2 front-end (lexer,
+parser, annotation parser) is complete. These notes inform the back-end:
+constraint generation, solving, and error reporting.
+
+### It's a constraint solver, not a type checker
+
+The traditional framing — "infer types, then check them" — is misleading.
+Types ARE constraints. `number` is a constraint ("must be a number").
+`{ x: number }` is a constraint ("must have field x satisfying the number
+constraint"). `$EachField<T, P>` is a constraint ("every field must satisfy
+P"). There is no ontological difference between "a type" and "a predicate on
+types." They're all constraint expressions of varying complexity.
+
+The checker is a constraint solver:
+1. Walk the AST, generate constraints
+2. Propagate constraints (unification, pattern matching, quantifier expansion
+   — all the same engine)
+3. Unsatisfied constraints are errors
+
+No separate "type evaluation" mode. No special path for match types. One
+engine, one loop.
+
+### Unification (equality) is the base, subtyping is a relaxation
+
+TypeScript's fundamental operation is `T extends U` — subtyping, one direction.
+This makes exact equality nearly inexpressible (see: the `IsEqual` hacks, the
+`oneof` requests, the validator pattern). People build Rube Goldberg machines
+to recover what unification gives for free: `T = U`.
+
+Our system is built on unification. Equality is the primitive. Subtyping is a
+relaxation we add on top (structural compatibility for tables, union
+membership). The programmer can reach both.
+
+### Two constraint operators
+
+Instead of debating "exact vs structural by default," give users both:
+
+- `T: U` — T satisfies U (subtyping, structural compatibility)
+- `T = U` — T equals U (unification, exact match)
+
+`<T: X>` is sugar for `<T where T: X>`. The `where` clause is where the
+constraint language lives:
+
+```
+-- Subtyping (default for most parameters):
+<T: Serializable>(data: T) -> string
+
+-- Equality (when you need exact match):
+<T where T = boolean | null>(done: T) -> void
+
+-- Relationships between parameters:
+<T, U where T: U>(sub: T, sup: U) -> void
+
+-- Compound constraints:
+<T where T: Readable, T: Closeable>(resource: T) -> void
+```
+
+This dissolves several TypeScript pain points:
+- **`$Exact`**: not needed. Use `=` constraint instead of `:` constraint.
+- **Validator pattern**: not needed. Write the constraint directly.
+- **`oneof`**: not needed. `foreach` over union members with `=` constraints.
+
+### Bidirectional flow
+
+TypeScript's inference is fundamentally bottom-up: infer the argument's type,
+then check it against the expected type. Information flows one way. The
+`unknown extends T` validator pattern is a hack to force information downward.
+
+Our system uses bidirectional unification. Constraints flow in whatever
+direction has information. When a function expects `T where T = A | B | C`,
+the expected type flows DOWN into the argument — the checker asks "which of
+A, B, C does this match?" rather than inferring the argument independently and
+checking afterward.
+
+This means:
+- The validator pattern is free — expected types naturally constrain arguments.
+- Partial inference works — known type params constrain unknown ones.
+- Match types participate in inference — they're constraints, not evaluation
+  steps.
+
+### Match types are the intentionally Turing-complete core
+
+TypeScript is Turing-complete by accident (conditional + mapped + recursive
+types interacting). We do it on purpose with a minimal core:
+
+- **Pattern matching** on type structure (match types)
+- **Recursion** (recursive type aliases)
+- **Binding** (type variables captured during pattern matching)
+
+One mechanism, not ten. Everything TypeScript does with conditional types,
+mapped types, template literal types — those are patterns expressible in
+match/recurse/bind.
+
+The key property of match over conditional types: **match types are
+bidirectional.** Pattern matching works through unification, which propagates
+constraints both ways. Conditional types are imperative (evaluate forward,
+opaque backwards). This is why we have match types and not conditional types —
+not because match is "more general," but because it participates in the
+constraint solver naturally instead of requiring a separate evaluation engine.
+
+### `foreach` as overload generation
+
+The TypeScript community's `oneof A | B | C` concept — "the value must be
+exactly one of these, not a subtype" — is expressible as overload generation:
+
+```
+--[=[:<foreach T where T = A | B | C>(arg: T) -> [T]]=]
+```
+
+Expands to three overloads:
+```
+(arg: A) -> [A]
+(arg: B) -> [B]
+(arg: C) -> [C]
+```
+
+Each overload uses equality constraints (via `=`), so subtypes are rejected.
+`foreach` iterates explicitly — no surprise distribution like TypeScript's
+naked type parameter behavior. If `A` is itself a union `X | Y`, T binds to
+`X | Y` as written — no flattening.
+
+This is sugar over overloads, not a new primitive. The core doesn't grow.
+
+### Open tables by default
+
+Lua is duck-typed. Tables are bags of fields. The `M = {}; M.foo = ...`
+pattern means tables are built incrementally — inherently open. Closed-by-default
+would fight the language.
+
+Existing design (from above): `...` row variable means open, absence means
+closed. APIs that accept input should be open. Data definitions can be closed.
+
+Exactness at usage sites is handled by `=` constraints in `where` clauses,
+not by `$Exact<T>` type modifiers. `$Exact` conflates definition with usage —
+the same type should be open in some contexts and exact in others.
+
+### Existential quantification
+
+TypeScript only has universal quantification (`<T>` = "for all T"). It has no
+way to say "there exists some type T such that this holds." The validator
+pattern partly hacks around this — it captures T to manipulate it
+imperatively, which is reaching for existential binding.
+
+Our `opaque` types are module-level existentials: the implementing module knows
+the concrete type, consumers see an abstract type. The open question is whether
+to generalize existentials below module level — e.g., type-erased callbacks,
+heterogeneous containers.
+
+### What this means for the v2 checker implementation
+
+The v2 checker is a constraint solver operating on flat TypeSlot arenas:
+
+1. **Constraint generation**: walk ASTNode arena, emit constraints into a
+   constraint pool (equality constraints from unification, subtyping
+   constraints from assignments, pattern constraints from match types)
+2. **Constraint solving**: propagate until fixpoint. Union-find for equality.
+   Structural matching for subtyping. Pattern matching for match types.
+   Intrinsic expansion for quantified constraints ($EachField, $EachUnion).
+3. **Error reporting**: unsatisfied constraints become diagnostics.
+
+The solver doesn't distinguish "type evaluation" from "type checking" — it's
+all constraint propagation. Match types, generics, structural typing — all
+just constraints fed to the same engine.
+
+**Open design questions for implementation:**
+- Constraint representation in the flat-slot model (new arena? inline in TypeSlots?)
+- Solving order / worklist algorithm
+- How `where` clauses lower to constraints
+- Interaction between equality and subtyping constraints on the same variable
+- Error blame tracking through constraint propagation
+
 ## Open Questions
 
 Genuinely unresolved — needs dedicated design work:
