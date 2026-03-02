@@ -136,7 +136,8 @@ Cat E — Nil-narrowing after early return: **PARTIALLY FIXED 2026-03-02**
 - narrow.lua: TAG_VAR not narrowed to T_NEVER (prevent "never" in branched code)
 - StmtRule[NODE_IF_STMT]: after unconditional-exit clause, apply negated narrow to continuation
 - ASSIGN_STMT: skip unify when existing resolves to T_NEVER (narrowed-out branches)
-- env.lua went from 9 errors → 1 error (remaining: compound-condition guard on field access)
+- OP_AND short-circuit narrowing: `a and a.field` narrows `a` before evaluating `a.field`.
+  narrow_scope handles OP_AND in truthy branch; infer.lua OP_AND early-returns with narrowing.
 - Remaining Cat E variant: compound `or` conditions like `if not x.field or ... then return end`
   cannot be narrowed — requires reasoning about sub-expressions of `or`
 
@@ -145,14 +146,17 @@ Cat F — `intern_mod.get()` returns `string|nil`, `or "?"` not narrowed to `str
 - Also fixed `is_concat_ok` to handle unions (all members must be concat-compatible).
 - `string|nil or "?"` now produces `string|"?"` (concat-safe union), not `string|nil|"?"`.
 
-Cat J (new) — ann.lua self-check: meta-constraint propagation through arithmetic on typevar scanner fields.
-- 11 pre-existing false positives in ann.lua (confirmed via git stash — existed before this session).
-- Root cause: `s.pos + 1` where `s` is a typevar (scanner param) causes `constrain()` to bind it
-  to `{ #__add: (v1, v2) -> v3 }`. This table type flows to functions receiving the scanner,
-  causing false positives in string.sub/string.byte call sites (expected string, got meta-table).
-- Fix requires: meta-constraint types for typevars rather than binding to a literal meta-table.
-  Or: a principled "Numeric" or "Indexable" constraint rather than ad-hoc meta binding.
-- Not a practical issue — ann.lua is not user-facing; but should be fixed before LSP work.
+Cat J — **FIXED 2026-03-02** (commit 0a91819):
+- Removed `constrain()` / `meta_constraint()` — free typevars in arithmetic stay free.
+- Added `prescan_block` call inside `infer_function` (forward-decl'd) to pre-bind nested
+  `local function f()` before body inference (fixes self-recursive nested locals).
+- Added `and`-short-circuit narrowing in ExprRule[OP_AND] (infer.lua) and narrow_scope
+  (narrow.lua) — `ann and ann.field` no longer fails before entering the truthy branch.
+- Added `seen` dedup table in `make_union` (types.lua) — prevents `'v | 'v` unions that
+  broke field access after stripping nil from `nil | 'v | 'v`.
+- Trade-off: arithmetic on unannotated params is no longer constrained (e.g. `add({}, {})` with
+  unannotated `add(x,y) = x+y` won't error). Annotated code is unaffected.
+- All 9 previously-clean v2 source files now self-check at 0 errors.
 
 Cat G — string meta architecture (minor):
 - `s:method()` special-cased via `recv_r == ctx.T_STRING` in ExprRule[NODE_METHOD_CALL]
