@@ -331,6 +331,7 @@ function M.parse_annotations(annotations, pool, filename)
             local flds = {}
             local indexers = {}
             local metas = {}
+            local row_var_ann_id = -1  -- set if bare ... seen (open table)
             if peek(s) ~= byte("}") then
                 while true do
                     local fb = peek(s)
@@ -385,18 +386,25 @@ function M.parse_annotations(annotations, pool, filename)
                         end
                     elseif fb == byte(".") and s.pos + 2 <= s.len
                         and sub(s.src, s.pos, s.pos + 2) == "..." then
-                        -- Spread: ...T
                         s.pos = s.pos + 3
-                        local inner = parse_type(s)
-                        local sp = alloc_type(defs.TAG_SPREAD)
-                        types:get(sp).data[0] = inner
-                        -- Spread in table context — store as special field
-                        local fi = fields:alloc()
-                        local fe = fields:get(fi)
-                        fe.name_id = -1  -- spread marker
-                        fe.type_id = sp
-                        fe.optional = 0
-                        flds[#flds + 1] = fi
+                        -- Bare ...: open-table row variable marker.
+                        -- ...T: spread base type (extends another table's fields).
+                        local nb = peek(s)
+                        if nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
+                            row_var_ann_id = alloc_type(defs.TAG_ROWVAR)
+                            break
+                        else
+                            local inner = parse_type(s)
+                            local sp = alloc_type(defs.TAG_SPREAD)
+                            types:get(sp).data[0] = inner
+                            -- Spread in table context — store as special field
+                            local fi = fields:alloc()
+                            local fe = fields:get(fi)
+                            fe.name_id = -1  -- spread marker
+                            fe.type_id = sp
+                            fe.optional = 0
+                            flds[#flds + 1] = fi
+                        end
                     else
                         break
                     end
@@ -428,7 +436,7 @@ function M.parse_annotations(annotations, pool, filename)
             tt.data[1] = fl
             tt.data[2] = is
             tt.data[3] = il
-            tt.data[4] = -1  -- row_id (no annotation syntax for row vars yet)
+            tt.data[4] = row_var_ann_id
             tt.data[5] = ms
             tt.data[6] = ml
             return tbl

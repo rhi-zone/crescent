@@ -1092,6 +1092,34 @@ assert.describe("ann: composite types", function()
         assert.eq(t.tag, defs.TAG_TABLE)
         assert.eq(t.data[3], 2)  -- indexer list: (key_type, val_type)
     end)
+    assert.it("parses open table { ... }", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ ... }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        assert.eq(t.data[1], 0)  -- no named fields
+        -- data[4] holds the row var annotation id
+        assert.ok(t.data[4] >= 0)
+        local rv = r.types:get(t.data[4])
+        assert.eq(rv.tag, defs.TAG_ROWVAR)
+    end)
+    assert.it("parses open table with fields { x: number, ... }", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ x: number, ... }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        assert.eq(t.data[1], 1)  -- 1 named field
+        assert.ok(t.data[4] >= 0)
+        local rv = r.types:get(t.data[4])
+        assert.eq(rv.tag, defs.TAG_ROWVAR)
+    end)
+    assert.it("closed table has no row var", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ x: number }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        assert.eq(t.data[4], -1)  -- closed: no row var
+    end)
     assert.it("parses named type", function()
         local pool = intern.new()
         local r = ann.parse_annotations(
@@ -2542,5 +2570,29 @@ assert.describe("checker: comparison operator type checking via prim_meta", func
     end)
     assert.it("integer <= number is valid (bidirectional compat)", function()
         no_errors("local x = 1 <= 2.0")
+    end)
+end)
+
+assert.describe("checker: open table / row variable", function()
+    assert.it("_G field access produces no error", function()
+        no_errors("local x = _G.print")
+    end)
+    assert.it("_G string subscript produces no error", function()
+        no_errors('local x = _G["anything"]')
+    end)
+    assert.it("annotated open table accepts any field access", function()
+        no_errors([[
+            --: { name: string, ... }
+            local t
+            local s = t.name
+            local x = t.anything_else
+        ]])
+    end)
+    assert.it("closed table rejects unknown field", function()
+        has_error([[
+            --: { name: string }
+            local t
+            local x = t.unknown_field
+        ]], "")
     end)
 end)

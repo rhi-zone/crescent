@@ -178,6 +178,10 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         return types_mod.make_literal(ctx, at.data[0], at.data[1])
     end
 
+    if tag == TAG_ROWVAR then
+        return types_mod.make_rowvar(ctx, ctx.scope.level)
+    end
+
     if tag == TAG_NAMED then
         local name_id = at.data[0]
         local args_len = at.data[2]

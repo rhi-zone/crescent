@@ -38,6 +38,7 @@
 --:: declare rawprint = (any) -> ()
 --:: declare _VERSION = string
 --:: declare ffi = any
+--:: declare _G = { [string]: any, ... }
 --:: declare bit = any
 --:: declare jit = any
 

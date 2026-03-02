@@ -4,7 +4,6 @@
 -- to ctx.scope. Types are allocated into ctx's own arena so IDs are valid.
 
 local intern_mod = require("lib.type.static.v2.intern")
-local types_mod  = require("lib.type.static.v2.types")
 local env_mod    = require("lib.type.static.v2.env")
 local defs_mod   = require("lib.type.static.v2.defs")
 
@@ -106,11 +105,6 @@ function M.populate(ctx)
     local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     load_decls(ctx, dir .. "stdlib.d.lua")
-
-    -- _G: open table — requires a row variable, not expressible in annotation syntax.
-    local rv = types_mod.make_rowvar(ctx, 0)
-    local g_name_id = intern_mod.intern(ctx.pool, "_G")
-    env_mod.bind(ctx.scope, g_name_id, types_mod.make_table(ctx, {}, {}, rv, {}))
 end
 
 return M
