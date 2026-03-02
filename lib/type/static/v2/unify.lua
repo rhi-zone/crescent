@@ -452,9 +452,30 @@ function M.unify(ctx, a, b)
                     -- Empty table absorbs indexers
                     -- Can't add to immutable arena; treat as ok for empty tables
                     matched = true
-                elseif ctx.types:get(bk).tag ~= TAG_STRING then
-                    if ta.data[4] < 0 then  -- no row var
-                        return false, "missing indexer for " .. types_mod.display(ctx, bk)
+                else
+                    -- Cat C: positional table `{T, U}` vs `{[number]: T}`.
+                    -- When b expects a numeric indexer and a has sequential integer-named
+                    -- fields ("1", "2", ...), unify each positional value with the indexer
+                    -- value type instead of reporting "missing indexer".
+                    local bkt = ctx.types:get(bk)
+                    if bkt.tag == TAG_NUMBER or bkt.tag == TAG_INTEGER then
+                        for fi = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                            local afe = ctx.fields:get(ctx.lists:get(fi))
+                            local fname = intern_mod.get(ctx.pool, afe.name_id)
+                            if fname and fname:match("^%d+$") then
+                                local av = find(ctx, afe.type_id)
+                                local ok, err = M.unify(ctx, av, bv)
+                                if not ok then
+                                    return false, "positional element " .. fname .. ": " .. (err or "type mismatch")
+                                end
+                                matched = true
+                            end
+                        end
+                    end
+                    if not matched and bkt.tag ~= TAG_STRING then
+                        if ta.data[4] < 0 then  -- no row var
+                            return false, "missing indexer for " .. types_mod.display(ctx, bk)
+                        end
                     end
                 end
             end

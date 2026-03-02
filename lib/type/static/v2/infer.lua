@@ -552,11 +552,23 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     if op == OP_CONCAT then
         local mm = meta_op_ret(ctx, left_r, "__concat") or meta_op_ret(ctx, right_r, "__concat")
         if mm then return mm end
+        local function is_concat_scalar(tag, data0)
+            return tag == TAG_ANY or tag == defs.TAG_STRING or tag == defs.TAG_NUMBER
+                or tag == TAG_INTEGER or tag == TAG_VAR or tag == defs.TAG_NIL
+                or (tag == TAG_LITERAL and (data0 == LIT_STRING or data0 == LIT_NUMBER))
+        end
         local function is_concat_ok(r_id)
-            local t = ctx.types:get(r_id)
-            return t.tag == TAG_ANY or t.tag == defs.TAG_STRING or t.tag == defs.TAG_NUMBER
-                or t.tag == TAG_INTEGER or t.tag == TAG_VAR or t.tag == defs.TAG_NIL
-                or (t.tag == TAG_LITERAL and (t.data[0] == LIT_STRING or t.data[0] == LIT_NUMBER))
+            local t = ctx.types:get(types_mod.find(ctx, r_id))
+            if is_concat_scalar(t.tag, t.data[0]) then return true end
+            -- Union: all members must be concat-compatible (make_union flattens, so no nesting).
+            if t.tag == defs.TAG_UNION then
+                for j = t.data[0], t.data[0] + t.data[1] - 1 do
+                    local mt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
+                    if not is_concat_scalar(mt.tag, mt.data[0]) then return false end
+                end
+                return true
+            end
+            return false
         end
         if not is_concat_ok(left_r) then
             report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display(ctx, left_r) .. "'")
@@ -568,7 +580,12 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     end
 
     if op == OP_AND then return types_mod.make_union(ctx, { ctx.T_NIL, right_r }) end
-    if op == OP_OR  then return types_mod.make_union(ctx, { left_r, right_r }) end
+    if op == OP_OR then
+        -- Cat F: `A or B` — when right is used, left was nil/false.
+        -- Strip nil from left to avoid spurious nil in the result union.
+        local non_nil_left = types_mod.subtract(ctx, left_r, ctx.T_NIL)
+        return types_mod.make_union(ctx, { non_nil_left, right_r })
+    end
 
     report(ctx, n.line, n.col, "unknown binary operator " .. op)
     return ctx.T_ANY
@@ -866,12 +883,16 @@ infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
         end
     end
 
+    -- Cat H: scan body start for `param = param or default` to detect optional params.
+    -- Build name_id → param index (1-based) mapping for the scan.
+    local param_name_to_idx = {}
     if not has_ann_fn then
         for i = 0, pl - 1 do
             local name_id = ctx.ast_lists:get(ps + i)
             local pt_id = types_mod.make_var(ctx, fn_scope.level)
             env_mod.bind(fn_scope, name_id, pt_id)
             param_tids[#param_tids + 1] = pt_id
+            param_name_to_idx[name_id] = i + 1
         end
         if has_vararg then
             local dots_id = intern_mod.intern(ctx.pool, "...")
@@ -885,6 +906,36 @@ infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     infer_block(ctx, bs, bl)
     local rc = pop_return_collector(ctx)
     ctx.scope = saved
+
+    -- Cat H: after body inference, widen params with `param = param or default` to
+    -- include nil, so callers can omit trailing optional arguments.
+    -- Scan the first few body statements (the pattern may follow guard returns).
+    if not has_ann_fn then
+        local scan_limit = bl < 10 and bl or 10
+        for i = bs, bs + scan_limit - 1 do
+            local sid = ctx.ast_lists:get(i)
+            local sn  = ctx.nodes:get(sid)
+            if sn.kind ~= NODE_ASSIGN_STMT or sn.data[1] ~= 1 or sn.data[3] ~= 1 then
+                -- Skip non-matching statements; stop at end-of-range.
+            else
+                local lhs_n = ctx.nodes:get(ctx.ast_lists:get(sn.data[0]))
+                if lhs_n.kind == NODE_IDENTIFIER then
+                    local nm_id = lhs_n.data[0]
+                    local pidx  = param_name_to_idx[nm_id]
+                    if pidx then
+                        local rhs_n = ctx.nodes:get(ctx.ast_lists:get(sn.data[2]))
+                        if rhs_n.kind == NODE_BINARY_EXPR and rhs_n.data[0] == OP_OR then
+                            local or_left_n = ctx.nodes:get(rhs_n.data[1])
+                            if or_left_n.kind == NODE_IDENTIFIER and or_left_n.data[0] == nm_id then
+                                -- Pattern matched: widen this param to union(bound_type, T_NIL).
+                                param_tids[pidx] = types_mod.make_union(ctx, { param_tids[pidx], ctx.T_NIL })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
 
     local returns
     if has_ann_fn then
@@ -1084,9 +1135,13 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             if rhs_tid then
                 -- Cat D: widen boolean literals so `local x = false` gives x: boolean,
                 -- allowing reassignment to any boolean expression.
+                -- Cat I: explicit nil init (`local x = nil`) treated as forward declaration.
                 local rt = ctx.types:get(types_mod.find(ctx, rhs_tid))
                 if rt.tag == TAG_LITERAL and rt.data[0] == LIT_BOOLEAN then
                     bind_tid = ctx.T_BOOLEAN
+                elseif rt.tag == defs.TAG_NIL then
+                    -- Same as no-RHS: fresh typevar so later assignment succeeds.
+                    bind_tid = types_mod.make_var(ctx, ctx.scope.level)
                 else
                     bind_tid = rhs_tid
                 end
