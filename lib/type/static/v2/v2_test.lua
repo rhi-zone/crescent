@@ -2365,3 +2365,37 @@ end
 ]])
     end)
 end)
+
+assert.describe("checker: concat type checking via prim_meta", function()
+    assert.it("nil .. string is an error", function()
+        has_error("local y = nil .. 'a'", "concatenate")
+    end)
+    assert.it("string .. nil is an error", function()
+        has_error("local y = 'a' .. nil", "concatenate")
+    end)
+    assert.it("boolean concat is an error", function()
+        has_error("local y = true .. 'a'", "concatenate")
+    end)
+    assert.it("string? (string|nil) concat is an error", function()
+        -- eol annotation makes s typed as string|nil; nil member fails concat check
+        has_error("local s = 'a' --: string?\nlocal x = s .. '!'", "concatenate")
+    end)
+    assert.it("string .. string is valid", function()
+        no_errors("local x = 'a' .. 'b'")
+    end)
+    assert.it("number .. string is valid", function()
+        no_errors("local x = 1 .. 'b'")
+    end)
+    assert.it("table without __concat is an error", function()
+        has_error("local x = {} .. 'a'", "concatenate")
+    end)
+    assert.it("table with __concat is valid", function()
+        no_errors([[
+--:: S = { v: string, #__concat: (S, S) -> S }
+local function cat(a, b)
+    --: S, S -> S
+    return a .. b
+end
+]])
+    end)
+end)

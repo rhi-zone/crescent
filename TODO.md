@@ -76,7 +76,7 @@
 - [x] **Nil method call not caught**: `local x; x:match("pattern")` — fixed by nil_vars side-channel; `testdata/errors/nil_method.expected` now captures the error.
 
 ### known false negatives (v2)
-- [ ] **nil concat not caught**: `nil .. "a"` silently passes — TAG_NIL is in `is_concat_scalar` in infer.lua. In Lua, nil is not a valid concat operand. Fix: remove TAG_NIL from is_concat_scalar (check if anything depends on nil being concat-ok first).
+- [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
 
 ### annotation syntax gaps
 - [ ] **Open table syntax in .d.lua**: `_G` and `ffi.C` require Lua code in `create_env()` because annotation syntax has no rowvar expression. Need `{ ... }` spread or `open {}` syntax.

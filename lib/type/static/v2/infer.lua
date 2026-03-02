@@ -592,7 +592,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     end
 
     if op == OP_CONCAT then
-        -- Only dispatch via table metamethods; primitive concat validity is checked below.
+        -- Custom __concat on a table operand overrides the return type.
         local mm
         if ctx.types:get(left_r).tag == TAG_TABLE then
             mm = meta_op_ret(ctx, left_r, "__concat")
@@ -601,23 +601,22 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             mm = meta_op_ret(ctx, right_r, "__concat")
         end
         if mm then return mm end
-        local function is_concat_scalar(tag, data0)
-            return tag == TAG_ANY or tag == defs.TAG_STRING or tag == defs.TAG_NUMBER
-                or tag == TAG_INTEGER or tag == TAG_VAR or tag == defs.TAG_NIL
-                or (tag == TAG_LITERAL and (data0 == LIT_STRING or data0 == LIT_NUMBER))
-        end
-        local function is_concat_ok(r_id)
-            local t = ctx.types:get(types_mod.find(ctx, r_id))
-            if is_concat_scalar(t.tag, t.data[0]) then return true end
-            -- Union: all members must be concat-compatible (make_union flattens, so no nesting).
-            if t.tag == defs.TAG_UNION then
+        -- A type is concat-compatible iff it has a __concat metamethod.
+        -- meta_op_ret checks both table meta fields and ctx.prim_meta for primitives.
+        -- TAG_ANY / TAG_VAR / TAG_ROWVAR are assumed compatible (unconstrained).
+        -- nil and boolean have no __concat in prim_meta, so they correctly fail.
+        local is_concat_ok
+        is_concat_ok = function(r_id)
+            r_id = types_mod.find(ctx, r_id)
+            local t = ctx.types:get(r_id)
+            if t.tag == TAG_ANY or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
+            if t.tag == TAG_UNION then
                 for j = t.data[0], t.data[0] + t.data[1] - 1 do
-                    local mt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
-                    if not is_concat_scalar(mt.tag, mt.data[0]) then return false end
+                    if not is_concat_ok(ctx.lists:get(j)) then return false end
                 end
                 return true
             end
-            return false
+            return meta_op_ret(ctx, r_id, "__concat") ~= nil
         end
         if not is_concat_ok(left_r) then
             report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display(ctx, left_r) .. "'")
