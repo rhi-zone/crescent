@@ -1553,11 +1553,15 @@ assert.describe("unify: primitives", function()
         local ok = unify_mod.unify(ctx, ctx.T_INTEGER, ctx.T_NUMBER)
         assert.ok(ok)
     end)
-    assert.it("number unifies with integer (LuaJIT: no runtime distinction)", function()
+    assert.it("integer is assignable to number (integer <: number)", function()
         local ctx = make_unify_ctx()
-        -- In LuaJIT, integers and numbers are bidirectionally compatible
-        local ok = unify_mod.unify(ctx, ctx.T_NUMBER, ctx.T_INTEGER)
+        local ok = unify_mod.unify(ctx, ctx.T_INTEGER, ctx.T_NUMBER)
         assert.ok(ok)
+    end)
+    assert.it("number is NOT assignable to integer (no implicit narrowing)", function()
+        local ctx = make_unify_ctx()
+        local ok = unify_mod.unify(ctx, ctx.T_NUMBER, ctx.T_INTEGER)
+        assert.ok(not ok)
     end)
 end)
 
@@ -2348,10 +2352,10 @@ local z = x + y
     end)
     assert.it("integer + number is valid (upcast)", function()
         no_errors([[
-local x = 1
 --: integer
-local y = 1.5
+local x = 1
 --: number
+local y = 1.5
 local z = x + y
 ]])
     end)

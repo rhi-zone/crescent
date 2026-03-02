@@ -236,9 +236,8 @@ function M.unify(ctx, a, b)
         return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to nominal type '" .. nb .. "'"
     end
 
-    -- integer <: number and number <: integer (Lua doesn't distinguish)
+    -- integer <: number (every integer is a number; not the reverse)
     if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return true end
-    if ta.tag == TAG_NUMBER  and tb.tag == TAG_INTEGER then return true end
 
     -- Literal <: base type
     if ta.tag == TAG_LITERAL then
@@ -248,7 +247,7 @@ function M.unify(ctx, a, b)
         end
         local kind = ta.data[0]
         if (kind == LIT_STRING  and tb.tag == TAG_STRING)  then return true end
-        if (kind == LIT_NUMBER  and (tb.tag == TAG_NUMBER or tb.tag == TAG_INTEGER)) then return true end
+        if (kind == LIT_NUMBER  and tb.tag == TAG_NUMBER)  then return true end
         if (kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN) then return true end
     end
 
@@ -545,6 +544,7 @@ function M.try_unify(ctx, a, b)
 
     -- Union LHS: all members must be assignable to b.
     if ta.tag == TAG_UNION then
+        --: number
         local total = 0
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
             local score, ok = M.try_unify(ctx, ctx.lists:get(i), b)
@@ -557,7 +557,6 @@ function M.try_unify(ctx, a, b)
     if ta.tag == tb.tag and is_primitive_tag(ta.tag) then return 0, true end
 
     if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return 1, true end
-    if ta.tag == TAG_NUMBER  and tb.tag == TAG_INTEGER then return 1, true end
 
     if ta.tag == TAG_LITERAL then
         if tb.tag == TAG_LITERAL and ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then
@@ -578,6 +577,7 @@ function M.try_unify(ctx, a, b)
     end
 
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
+        --: number
         local total = 0
         local apl, bpl = ta.data[1], tb.data[1]
         local max_p = apl > bpl and apl or bpl
@@ -592,6 +592,7 @@ function M.try_unify(ctx, a, b)
     end
 
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
+        --: number
         local total = 0
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
             local bfe = ctx.fields:get(ctx.lists:get(i))

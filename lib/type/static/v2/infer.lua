@@ -516,10 +516,10 @@ ExprRule[NODE_LITERAL] = function(ctx, nid)
     if kind == LIT_BOOLEAN then return types_mod.make_literal(ctx, LIT_BOOLEAN, n.data[1]) end
     if kind == LIT_STRING  then return types_mod.make_literal(ctx, LIT_STRING, n.data[1]) end
     if kind == LIT_NUMBER  then
-        local num_str = intern_mod.get(ctx.pool, n.data[1])
-        if num_str then
-            local num = tonumber(num_str)
-            if num and num % 1 == 0 then return ctx.T_INTEGER end
+        -- n.data[1] is the numval index into pr.lexer.numvals (Lua numbers, not pool IDs)
+        local num = ctx.numvals[n.data[1]]
+        if num and num % 1 == 0 and num >= -2^53 and num <= 2^53 then
+            return ctx.T_INTEGER
         end
         return ctx.T_NUMBER
     end
@@ -1761,6 +1761,7 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     -- ctx.lists is the TYPE list pool — don't touch it
     ctx.ast_lists = parse_result.lists  -- AST list pool (read only)
     ctx.nodes     = parse_result.nodes
+    ctx.numvals   = parse_result.lexer and parse_result.lexer.numvals or {}
     ctx.pool      = pool
     ctx.ann       = ann_result
     ctx.err       = err_ctx or errors_mod.new_ctx()

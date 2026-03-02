@@ -216,8 +216,8 @@ integer_meta = {
     #__mod:    (integer, integer) -> integer,
     #__pow:    (integer, number) -> number,
     #__unm:    (integer) -> integer,
-    #__lt:     (integer, integer) -> boolean,
-    #__le:     (integer, integer) -> boolean,
+    #__lt:     (number, number) -> boolean,
+    #__le:     (number, number) -> boolean,
     #__concat: (any, any) -> string
 }
 ]]
