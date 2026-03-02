@@ -134,6 +134,57 @@ function M.populate(ctx)
     ctx.string_meta_tid = str_t  -- used by ExprRule[NODE_METHOD_CALL] for s:method()
 
     ---------------------------------------------------------------------------
+    -- Primitive meta types
+    -- Tables with META SLOTS declaring which metamethods each primitive supports,
+    -- with proper function signatures. Used by unify.lua for structural constraints
+    -- like `{ #__add: fn }`. Stored on ctx so unify can reach them without
+    -- hardcoded lookup tables.
+    ---------------------------------------------------------------------------
+    local function make_prim_meta(ctx, meta_defs)
+        local meta_fids = {}
+        for _, def in ipairs(meta_defs) do
+            local name_id = intern_mod.intern(ctx.pool, def[1])
+            meta_fids[#meta_fids + 1] = types_mod.make_field(ctx, name_id, def[2], false)
+        end
+        return types_mod.make_table(ctx, {}, {}, -1, meta_fids)
+    end
+
+    -- number: all arithmetic ops return number; concat coerces to string.
+    local Tnn_n = types_mod.make_func(ctx, {T_NUMBER, T_NUMBER}, {T_NUMBER})
+    local Tn_n  = types_mod.make_func(ctx, {T_NUMBER},           {T_NUMBER})
+    local Tnn_b = types_mod.make_func(ctx, {T_NUMBER, T_NUMBER}, {T_BOOLEAN})
+    ctx.number_meta_tid = make_prim_meta(ctx, {
+        {"__add",    Tnn_n}, {"__sub",  Tnn_n}, {"__mul",  Tnn_n},
+        {"__div",    Tnn_n}, {"__mod",  Tnn_n}, {"__pow",  Tnn_n},
+        {"__unm",    Tn_n},
+        {"__lt",     Tnn_b}, {"__le",   Tnn_b},
+        {"__concat", types_mod.make_func(ctx, {T_ANY, T_ANY}, {T_STRING})},
+    })
+
+    -- integer: most ops return integer; __div and __pow return number (float result).
+    local Tii_i = types_mod.make_func(ctx, {T_INTEGER, T_INTEGER}, {T_INTEGER})
+    local Ti_i  = types_mod.make_func(ctx, {T_INTEGER},            {T_INTEGER})
+    local Tii_b = types_mod.make_func(ctx, {T_INTEGER, T_INTEGER}, {T_BOOLEAN})
+    ctx.integer_meta_tid = make_prim_meta(ctx, {
+        {"__add",    Tii_i}, {"__sub",  Tii_i}, {"__mul",  Tii_i},
+        {"__div",    types_mod.make_func(ctx, {T_INTEGER, T_INTEGER}, {T_NUMBER})},
+        {"__mod",    Tii_i},
+        {"__pow",    types_mod.make_func(ctx, {T_INTEGER, T_NUMBER},  {T_NUMBER})},
+        {"__unm",    Ti_i},
+        {"__lt",     Tii_b}, {"__le",   Tii_b},
+        {"__concat", types_mod.make_func(ctx, {T_ANY, T_ANY}, {T_STRING})},
+    })
+
+    -- string: concat + comparison + len.
+    local Tss_s = types_mod.make_func(ctx, {T_STRING, T_ANY},    {T_STRING})
+    local Tss_b = types_mod.make_func(ctx, {T_STRING, T_STRING}, {T_BOOLEAN})
+    ctx.string_meta_ops_tid = make_prim_meta(ctx, {
+        {"__concat", Tss_s},
+        {"__len",    types_mod.make_func(ctx, {T_STRING}, {T_INTEGER})},
+        {"__lt",     Tss_b}, {"__le",   Tss_b},
+    })
+
+    ---------------------------------------------------------------------------
     -- table table
     ---------------------------------------------------------------------------
     local tbl_t = make_ns(ctx, {

@@ -32,13 +32,6 @@ local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 
 -- Meta ops supported natively by primitive types
-local NUMERIC_META = {
-    __add=true, __sub=true, __mul=true, __div=true,
-    __mod=true, __pow=true, __unm=true,
-    __lt=true, __le=true, __concat=true,
-}
-local STRING_META = { __concat=true, __len=true, __lt=true, __le=true }
-
 local M = {}
 local find = types_mod.find
 
@@ -355,22 +348,26 @@ function M.unify(ctx, a, b)
         return true
     end
 
-    -- Primitives satisfy meta-only table constraints (e.g. number satisfies { #__add: ... })
-    if tb.tag == TAG_TABLE and tb.data[1] == 0 and tb.data[3] == 0 then
-        -- b is a table with no fields and no indexers (meta-only constraint)
-        local ops --: { [string]: boolean }
-        if ta.tag == TAG_NUMBER or ta.tag == TAG_INTEGER
+    -- Primitives satisfy meta-only table constraints (e.g. number satisfies { #__add: fn }).
+    -- Look up the primitive's declared meta type from the prelude (ctx.number_meta_tid etc.)
+    -- and verify each required meta slot exists there.
+    if tb.tag == TAG_TABLE and tb.data[1] == 0 and tb.data[3] == 0 and tb.data[6] > 0 then
+        local prim_meta_tid
+        if ta.tag == TAG_NUMBER
           or (ta.tag == TAG_LITERAL and ta.data[0] == LIT_NUMBER) then
-            ops = NUMERIC_META
+            prim_meta_tid = ctx.number_meta_tid
+        elseif ta.tag == TAG_INTEGER then
+            prim_meta_tid = ctx.integer_meta_tid
         elseif ta.tag == TAG_STRING
           or (ta.tag == TAG_LITERAL and ta.data[0] == LIT_STRING) then
-            ops = STRING_META
+            prim_meta_tid = ctx.string_meta_ops_tid
         end
-        if ops then
+        if prim_meta_tid then
             for i = tb.data[5], tb.data[5] + tb.data[6] - 1 do
-                local fe = ctx.fields:get(ctx.lists:get(i))
-                local mname = intern_mod.get(ctx.pool, fe.name_id)
-                if mname and not ops[mname] then
+                local fe  = ctx.fields:get(ctx.lists:get(i))
+                local amf = types_mod.table_meta_field(ctx, prim_meta_tid, fe.name_id)
+                if not amf then
+                    local mname = intern_mod.get(ctx.pool, fe.name_id) or "?"
                     return false, types_mod.display(ctx, a) .. " does not support #" .. mname
                 end
             end
