@@ -93,6 +93,13 @@ Types:
 
 Scope is the library or component name (e.g., `feat(http): add chunked transfer encoding`).
 
+## Performance Work
+
+When doing performance optimization:
+- **Benchmark before and after.** Use `docs/perf/v2_parse.lua` for parser/lexer throughput.
+- **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Most recent entries first.
+- **Include**: file sizes, times, throughput (MB/s), allocation (KB/parse), and speedup ratios.
+
 ## Typechecker Design Principles
 
 **Prefer principled solutions over special cases.** When a check needs to accept a new category of type, ask whether the type system can be extended cleanly (e.g. declare the primitive's metamethods, extend unify) rather than tagging the predicate. Ad-hoc flags in `is_numeric`, `is_concat_compatible`, etc. erode correctness over time.

@@ -9,6 +9,7 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 ## 2026-03-02: lexer optimization — kill _buf + source-referencing intern
 
 **Baseline commit:** `7b58fdc` (Phase 2 parser)
+**Optimization commit:** `8941262`
 
 Two-step optimization of the lexer hot path:
 
