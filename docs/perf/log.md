@@ -60,6 +60,24 @@ The step 2 speedup was much larger than expected. The `ffi.string` call was
 not just allocation overhead — it also forces a Lua string hash computation
 and GC tracking per token. The FNV-1a + memcmp path skips all of that.
 
+### Raw benchmark output
+
+`luajit docs/perf/v2_parse.lua 500`, best of 3 rounds.
+
+Baseline (`7b58fdc`):
+```
+lib/type/static/v2/lex.lua                 21.4 KB     9977 µs  1126.3 KB/parse    2.1 MB/s
+lib/type/static/v2/parse.lua               25.5 KB     7035 µs  1012.3 KB/parse    3.5 MB/s
+lib/type/static/infer.lua                  68.3 KB    37299 µs  3710.4 KB/parse    1.8 MB/s
+```
+
+After optimization (`8941262`):
+```
+lib/type/static/v2/lex.lua                 26.3 KB     1628 µs   559.2 KB/parse   15.8 MB/s
+lib/type/static/v2/parse.lua               25.5 KB     2006 µs   637.0 KB/parse   12.4 MB/s
+lib/type/static/infer.lua                  68.3 KB     6900 µs  1643.6 KB/parse    9.7 MB/s
+```
+
 ---
 
 ## 2026-03-02: lexer profiling and optimization path
