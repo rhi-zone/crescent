@@ -2055,3 +2055,48 @@ end
 ]])
     end)
 end)
+
+assert.describe("checker: or-guard narrowing (Cat E compound or)", function()
+    assert.it("if not x or not y then return end — x and y non-nil after guard", function()
+        no_errors([[
+--:: T = { val: string }
+local function foo(x, y)
+    --: T?
+    x = x
+    --: T?
+    y = y
+    if not x or not y then return end
+    local a = x.val
+    local b = y.val
+end
+]])
+    end)
+    assert.it("if not x.field or not y then return end — field non-nil and y non-nil after guard", function()
+        no_errors([[
+--:: Row = { field: string | nil }
+local function bar(row, flag)
+    --: Row
+    row = row
+    --: string?
+    flag = flag
+    if not row.field or not flag then return end
+    local f = row.field
+    local g = flag
+end
+]])
+    end)
+    assert.it("if x == nil or y == nil then return end — x and y non-nil after guard", function()
+        no_errors([[
+--:: T = { val: number }
+local function baz(x, y)
+    --: T?
+    x = x
+    --: T?
+    y = y
+    if x == nil or y == nil then return end
+    local a = x.val
+    local b = y.val
+end
+]])
+    end)
+end)

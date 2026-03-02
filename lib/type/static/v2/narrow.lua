@@ -16,10 +16,12 @@ local OP_EQ  = defs.OP_EQ
 local OP_NE  = defs.OP_NE
 local OP_NOT = defs.OP_NOT
 local OP_AND = defs.OP_AND
+local OP_OR  = defs.OP_OR
 
-local TAG_ANY  = defs.TAG_ANY
-local TAG_NIL  = defs.TAG_NIL
-local TAG_VAR  = defs.TAG_VAR
+local TAG_ANY   = defs.TAG_ANY
+local TAG_NIL   = defs.TAG_NIL
+local TAG_VAR   = defs.TAG_VAR
+local TAG_TABLE = defs.TAG_TABLE
 local TAG_UNION = defs.TAG_UNION
 local TAG_LITERAL = defs.TAG_LITERAL
 local TAG_STRING  = defs.TAG_STRING
@@ -38,6 +40,8 @@ local M = {}
 --   { kind = "type_check", name_id = int, type_str = string }
 --     — `type(x) == "string"` etc.
 --   { kind = "negation", inner = narrowing_info }
+--   { kind = "field_presence", obj_name_id = int, field_name_id = int, positive = bool }
+--     — `x.field` is truthy (positive=true means: x.field is non-nil in the truthy branch)
 local function extract_narrowing(ctx, nid)
     local n = ctx.nodes:get(nid)
     if not n then return nil end
@@ -46,6 +50,15 @@ local function extract_narrowing(ctx, nid)
     -- Treat truthiness as a nil-check (positive=true means "x is not nil").
     if n.kind == NODE_IDENTIFIER then
         return { kind = "nil_check", name_id = n.data[0], positive = true }
+    end
+
+    -- Field access: `if x.field then` / `if not x.field then`.
+    -- Treat as a presence check on x's field (positive=true means field is non-nil).
+    if n.kind == NODE_FIELD_EXPR then
+        local obj = ctx.nodes:get(n.data[0])
+        if obj and obj.kind == NODE_IDENTIFIER then
+            return { kind = "field_presence", obj_name_id = obj.data[0], field_name_id = n.data[1], positive = true }
+        end
     end
 
     if n.kind == NODE_UNARY_EXPR and n.data[0] == OP_NOT then
@@ -126,6 +139,69 @@ local function extract_narrowing(ctx, nid)
     return nil
 end
 
+-- Narrow a table type so a specific field has nil subtracted from its type.
+-- Used for field-presence narrowing: after `if not x.field then return end`,
+-- x.field is guaranteed non-nil in the continuation.
+local function narrow_field_non_nil(ctx, tid, field_name_id)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+
+    if t.tag == TAG_TABLE then
+        -- Collect field data before any allocs (FFI pointers invalidated on arena grow)
+        local fs, fl = t.data[0], t.data[1]
+        local is, il = t.data[2], t.data[3]
+        local rv     = t.data[4]
+        local ms, ml = t.data[5], t.data[6]
+        local field_data = {}
+        for i = fs, fs + fl - 1 do
+            local fid = ctx.lists:get(i)
+            local fe = ctx.fields:get(fid)
+            field_data[#field_data + 1] = { fid = fid, name_id = fe.name_id, type_id = fe.type_id, optional = fe.optional }
+        end
+
+        -- Build new field list, replacing target field with non-nil version.
+        local new_field_ids = {}
+        local changed = false
+        for _, fd in ipairs(field_data) do
+            if fd.name_id == field_name_id then
+                local non_nil = types_mod.subtract(ctx, fd.type_id, ctx.T_NIL)
+                if non_nil ~= fd.type_id then
+                    local new_fid = types_mod.make_field(ctx, fd.name_id, non_nil, fd.optional == 1)
+                    new_field_ids[#new_field_ids + 1] = new_fid
+                    changed = true
+                else
+                    new_field_ids[#new_field_ids + 1] = fd.fid
+                end
+            else
+                new_field_ids[#new_field_ids + 1] = fd.fid
+            end
+        end
+
+        if not changed then return tid end
+
+        local indexer_pairs = {}
+        for i = is, is + il - 1 do indexer_pairs[#indexer_pairs + 1] = ctx.lists:get(i) end
+        local meta_field_ids = {}
+        for i = ms, ms + ml - 1 do meta_field_ids[#meta_field_ids + 1] = ctx.lists:get(i) end
+        return types_mod.make_table(ctx, new_field_ids, indexer_pairs, rv, meta_field_ids)
+
+    elseif t.tag == TAG_UNION then
+        -- Collect member IDs before recursing (allocation may reallocate list pool)
+        local s, l = t.data[0], t.data[1]
+        local member_ids = {}
+        for i = s, s + l - 1 do
+            member_ids[#member_ids + 1] = types_mod.find(ctx, ctx.lists:get(i))
+        end
+        local members = {}
+        for _, mid in ipairs(member_ids) do
+            members[#members + 1] = narrow_field_non_nil(ctx, mid, field_name_id)
+        end
+        return types_mod.make_union(ctx, members)
+    end
+
+    return tid
+end
+
 -- Apply narrowing info to create a narrowed type_id.
 -- info: narrowing info from extract_narrowing
 -- ty_id: the current type of the variable
@@ -179,6 +255,16 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         end
     end
 
+    if info.kind == "field_presence" then
+        -- positive=true: field is truthy (non-nil) when in_truthy matches.
+        local field_is_nonnull = (info.positive == in_truthy)
+        if field_is_nonnull then
+            return narrow_field_non_nil(ctx, ty_id, info.field_name_id)
+        end
+        -- Conservative: don't narrow to nil in the falsy direction.
+        return ty_id
+    end
+
     if info.kind == "type_check" then
         -- Build the target type
         local target_id = types_mod.typeof_to_id(ctx, info.type_str)
@@ -213,12 +299,16 @@ local function info_name_id(info)
         return info.name_id
     elseif info.kind == "field_disc" then
         return info.name_id
+    elseif info.kind == "field_presence" then
+        return info.obj_name_id
     elseif info.kind == "negation" then
         local inner = info.inner
         if inner.kind == "nil_check" or inner.kind == "type_check" then
             return inner.name_id
         elseif inner.kind == "field_disc" then
             return inner.name_id
+        elseif inner.kind == "field_presence" then
+            return inner.obj_name_id
         end
     end
     return nil
@@ -249,6 +339,18 @@ function M.narrow_scope(ctx, test_nid, is_truthy)
             local right_info = extract_narrowing(ctx, n.data[2])
             if left_info  then record_narrowing(ctx, left_info,  narrowed, true) end
             if right_info then record_narrowing(ctx, right_info, narrowed, true) end
+        end
+        return narrowed
+    end
+
+    -- `a or b`: in falsy branch, not (A or B) ≡ not A and not B — apply both negated narrowings.
+    -- In truthy branch, either arm may be true: skip (conservative).
+    if n and n.kind == NODE_BINARY_EXPR and n.data[0] == OP_OR then
+        if not is_truthy then
+            local left_info  = extract_narrowing(ctx, n.data[1])
+            local right_info = extract_narrowing(ctx, n.data[2])
+            if left_info  then record_narrowing(ctx, left_info,  narrowed, false) end
+            if right_info then record_narrowing(ctx, right_info, narrowed, false) end
         end
         return narrowed
     end

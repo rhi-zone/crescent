@@ -131,15 +131,18 @@ Cat D — Boolean literal widen on reassignment: **FIXED 2026-03-02**
 - Fixed in StmtRule[NODE_LOCAL_STMT]: boolean literal binds widen to `boolean`
 - Fixed in StmtRule[NODE_ASSIGN_STMT]: existing binding widened before unify
 
-Cat E — Nil-narrowing after early return: **PARTIALLY FIXED 2026-03-02**
+Cat E — Nil-narrowing after early return: **FIXED 2026-03-02**
 - narrow.lua: bare identifier treated as nil-check; guard clauses apply negated narrowing
 - narrow.lua: TAG_VAR not narrowed to T_NEVER (prevent "never" in branched code)
 - StmtRule[NODE_IF_STMT]: after unconditional-exit clause, apply negated narrow to continuation
 - ASSIGN_STMT: skip unify when existing resolves to T_NEVER (narrowed-out branches)
 - OP_AND short-circuit narrowing: `a and a.field` narrows `a` before evaluating `a.field`.
   narrow_scope handles OP_AND in truthy branch; infer.lua OP_AND early-returns with narrowing.
-- Remaining Cat E variant: compound `or` conditions like `if not x.field or ... then return end`
-  cannot be narrowed — requires reasoning about sub-expressions of `or`
+- OP_OR guard narrowing (2026-03-02): `if not x or not y then return end` — falsy branch of
+  `A or B` applies De Morgan: narrow_scope handles OP_OR with is_truthy=false, extracting
+  narrowings from both arms. Also added NODE_FIELD_EXPR support in extract_narrowing:
+  `x.field` is a "field_presence" check; after `if not x.field then return end`, x.field
+  is narrowed to non-nil in the continuation via narrow_field_non_nil (rebuilds table type).
 
 Cat F — `intern_mod.get()` returns `string|nil`, `or "?"` not narrowed to `string`: **FIXED 2026-03-02**
 - Fixed in ExprRule[NODE_BINARY_EXPR] OP_OR: strip nil from left side before union with right.
@@ -182,7 +185,7 @@ Cat I (new) — Explicit `local x = nil` still binds T_NIL: **FIXED 2026-03-02**
 - [x] Cat A: forward-declared nil locals → make_var (unblocks most of infer.lua false positives)
 - [x] Cat B: multi-return in assignments (right-hand side)
 - [x] Cat D: boolean literal widen on reassignment
-- [x] Cat E: guard/early-return nil narrowing (partial fix; compound conditions remain)
+- [x] Cat E: guard/early-return nil narrowing (full fix: includes OP_OR De Morgan + field_presence)
 - [x] Cat C: positional table vs indexed type — FIXED 2026-03-02
 - [x] Cat F: `A or B` result narrowing — FIXED 2026-03-02
 - [x] Cat H: optional function parameters (seen arg pattern) — FIXED 2026-03-02
