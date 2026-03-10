@@ -306,12 +306,12 @@ Blocking items for cutover:
 ## testing
 
 ### property testing (`lib/test/prop.lua`)
-- [ ] QuickCheck-style property runner: `prop.check(desc, gen, fn)` / `assert.property(desc, gen, fn)`
-- [ ] Core generators: `gen.int(min, max)`, `gen.uint`, `gen.float`, `gen.bool`, `gen.byte`, `gen.string`, `gen.list(elem_gen)`, `gen.table(k_gen, v_gen)`, `gen.one_of(...)`, `gen.frequency({weight, gen}...)`, `gen.sized(fn)`, `gen.map(g, fn)`, `gen.filter(g, pred)`, `gen.constant(v)`, `gen.nil_or(g)`
-- [ ] Shrinking: binary search on int ranges, element removal for lists/strings, field removal for tables — find minimal counterexample automatically
-- [ ] N configurable trials (default 100); on failure: print original + shrunk + seed for reproducibility
-- [ ] Integration with test runner: failures show in the same format as `it()` blocks; property names in output
-- [ ] Seed override via env var or CLI flag for deterministic replay
+- [x] QuickCheck-style property runner: `prop.check(desc, gen, fn)` / `prop.it(desc, gen, fn)` — 2026-03-11 (commit a5c2799)
+- [x] Core generators: `gen.int(min, max)`, `gen.uint`, `gen.float`, `gen.bool`, `gen.byte`, `gen.string`, `gen.list(elem_gen)`, `gen.table(k_gen, v_gen)`, `gen.one_of(...)`, `gen.frequency({weight, gen}...)`, `gen.sized(fn)`, `gen.map(g, fn)`, `gen.filter(g, pred)`, `gen.constant(v)`, `gen.nil_or(g)`, `gen.tuple(gens)`
+- [x] Shrinking: binary search on int ranges, element removal for lists/strings, field removal for tables
+- [x] N configurable trials (default 100); on failure: print original + shrunk + seed for reproducibility
+- [x] Integration with test runner: failures show in the same format as `it()` blocks; property names in output
+- [x] Seed override via PROP_SEED env var for deterministic replay
 
 ### fuzz testing (`lib/test/fuzz.lua`)
 - [ ] Corpus-based mutation fuzzer: byte-flip, insert, delete, splice on seed inputs
@@ -335,12 +335,13 @@ Current: `luajit lib/test/cli.lua --coverage` does line coverage via `debug.seth
 Branch coverage implementation sketch: instrument the AST (add synthetic nodes around branch points) or use `debug.sethook("l", ...)` + a per-function line→branch-id table derived from the parser. The v2 parser already produces a full AST, so AST instrumentation is the natural path.
 
 ### fixture / snapshot testing (`lib/test/fixture.lua`)
-- [ ] Generalize the pattern from `lib/type/static/fixtures_test.lua` into a reusable lib
-- [ ] `fixture.run_dir(dir, runner, opts)`: discover `*.input` / `*.expected` pairs; run `runner(input)` → actual; diff vs expected; report failures with unified diff
-- [ ] `--update` / `UPDATE_SNAPSHOTS=1` mode: overwrite `.expected` files with actual output (snapshot update workflow)
-- [ ] Pluggable normalizers: strip trailing whitespace, normalize line endings, sort lines, redact timestamps/paths
-- [ ] Support binary fixtures (e.g. .cri files) with hex-dump diff on mismatch
-- [ ] Named fixture groups: `fixture.group("parser", ...)` so runner output is scoped
+- [x] `fixture.run_dir(dir, runner, opts)`: discover `*.input` / `*.expected` pairs; run `runner(input)` → actual; diff vs expected; report failures with unified diff — 2026-03-11 (commit f5e9c7a)
+- [x] `UPDATE_SNAPSHOTS=1` / `opts.update` mode: overwrite `.expected` files with actual output (snapshot update workflow)
+- [x] Pluggable normalizers: `fixture.normalize.{strip_ws, crlf, sort_lines, compose}`
+- [x] Binary fixture support: hex-dump diff on mismatch when content has non-printable bytes
+- [x] Named fixture groups: `fixture.group(name, dir, runner)` wraps `run_dir` in describe
+- [x] `fixture.check(in, exp, runner, opts)` — low-level single-fixture check without it() registration
+- [x] `fixture.diff(expected, actual)` — LCS unified diff (pure Lua, O(n*m), capped at 600 lines)
 
 ## infra
 - [ ] Formalize code style conventions — don't assume ~/git/lua conventions are correct, decide fresh
