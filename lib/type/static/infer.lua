@@ -885,6 +885,63 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col)
     end
 end
 
+-- Non-mutating argument check against a single function type.
+-- Returns ok (boolean) and a list of error strings (may be empty if ok).
+-- Uses try_unify so no type variables are bound.
+local function try_call_args(ctx, fn_tid, arg_tids)
+    local ft = ctx.types:get(fn_tid)
+    if ft.tag ~= TAG_FUNCTION then return false, {"not a function"} end
+    local pl = ft.data[1]
+    local has_names = ft.data[6] > 0
+    local errs = {}
+    local ok = true
+    for i = 0, pl - 1 do
+        local exp_tid = types_mod.find(ctx, ctx.lists:get(ft.data[0] + i))
+        local act_tid = arg_tids[i + 1]
+        local arg_label
+        if has_names then
+            local name_id = ctx.lists:get(ft.data[5] + i)
+            local name_str = intern_mod.get(ctx.pool, name_id)
+            if name_str then
+                arg_label = "argument " .. (i + 1) .. " '" .. name_str .. "'"
+            end
+        end
+        arg_label = arg_label or ("argument " .. (i + 1))
+        if act_tid then
+            if not unify_mod.try_unify(ctx, act_tid, exp_tid) then
+                ok = false
+                errs[#errs + 1] = arg_label .. ": cannot pass '"
+                    .. types_mod.display_short(ctx, act_tid)
+                    .. "' where '" .. types_mod.display_short(ctx, exp_tid) .. "' expected"
+            end
+        else
+            if not unify_mod.try_unify(ctx, ctx.T_NIL, exp_tid) then
+                ok = false
+                errs[#errs + 1] = arg_label .. ": missing required argument"
+                    .. " (expected '" .. types_mod.display(ctx, exp_tid) .. "', got nil)"
+            end
+        end
+    end
+    return ok, errs
+end
+
+local function call_fn_returns(ctx, fn_tid, arg_tids, line, col)
+    local inst_fn = env_mod.instantiate(ctx, fn_tid, ctx.scope.level)
+    check_call_args(ctx, inst_fn, arg_tids, line, col)
+    local ift = ctx.types:get(inst_fn)
+    local rl = ift.data[3]
+    if rl == 0 then
+        ctx._last_multi_return = { ctx.T_NIL }
+        return ctx.T_NIL
+    end
+    local returns = {}
+    for i = ift.data[2], ift.data[2] + rl - 1 do
+        returns[#returns + 1] = types_mod.find(ctx, ctx.lists:get(i))
+    end
+    ctx._last_multi_return = returns
+    return returns[1]
+end
+
 local function call_returns(ctx, fn_tid, arg_tids, line, col)
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
@@ -895,35 +952,46 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
     end
 
     if ft.tag == TAG_FUNCTION then
-        local inst_fn = env_mod.instantiate(ctx, fn_tid, ctx.scope.level)
-        check_call_args(ctx, inst_fn, arg_tids, line, col)
-        local ift = ctx.types:get(inst_fn)
-        local rl = ift.data[3]
-        if rl == 0 then
-            ctx._last_multi_return = { ctx.T_NIL }
-            return ctx.T_NIL
-        end
-        local returns = {}
-        for i = ift.data[2], ift.data[2] + rl - 1 do
-            returns[#returns + 1] = types_mod.find(ctx, ctx.lists:get(i))
-        end
-        ctx._last_multi_return = returns
-        return returns[1]
+        return call_fn_returns(ctx, fn_tid, arg_tids, line, col)
     end
 
     if ft.tag == TAG_UNION then
+        -- Collect all function-typed members.
+        local candidates = {}
         for i = ft.data[0], ft.data[0] + ft.data[1] - 1 do
             local mid = types_mod.find(ctx, ctx.lists:get(i))
             if ctx.types:get(mid).tag == TAG_FUNCTION then
-                local rl = ctx.types:get(mid).data[3]
-                if rl > 0 then
-                    local r = types_mod.find(ctx, ctx.lists:get(ctx.types:get(mid).data[2]))
-                    ctx._last_multi_return = { r }
-                    return r
-                end
-                ctx._last_multi_return = { ctx.T_NIL }
-                return ctx.T_NIL
+                candidates[#candidates + 1] = mid
             end
+        end
+        if #candidates > 0 then
+            -- Try each candidate with non-mutating checks; pick first match.
+            local match_tid = nil
+            local failures = {}
+            for _, cand_tid in ipairs(candidates) do
+                local inst = env_mod.instantiate(ctx, cand_tid, ctx.scope.level)
+                local ok, errs = try_call_args(ctx, inst, arg_tids)
+                if ok and not match_tid then
+                    match_tid = cand_tid
+                elseif not ok then
+                    failures[#failures + 1] = { tid = cand_tid, errs = errs }
+                end
+            end
+            if match_tid then
+                return call_fn_returns(ctx, match_tid, arg_tids, line, col)
+            end
+            -- All candidates failed — report detailed mismatch.
+            local parts = { "no matching overload for call" }
+            for idx, fail in ipairs(failures) do
+                local label = #failures == 1 and "  candidate:" or ("  candidate " .. idx .. ":")
+                parts[#parts + 1] = label .. " " .. types_mod.display_short(ctx, fail.tid)
+                for _, e in ipairs(fail.errs) do
+                    parts[#parts + 1] = "    " .. e
+                end
+            end
+            report(ctx, line, col, table.concat(parts, "\n"))
+            ctx._last_multi_return = { ctx.T_ANY }
+            return ctx.T_ANY
         end
     end
 
@@ -1881,20 +1949,22 @@ local function process_type_decls(ctx)
             decl_lines[result] = line
         end
     end
-    -- Pass 1: register names
+    -- Pass 1: register type alias names (skip variable declarations)
     for _, r in ipairs(decls) do
-        local params = nil
-        if r.type_params_len and r.type_params_len > 0 then
-            params = {}
-            for i = r.type_params_start, r.type_params_start + r.type_params_len - 1 do
-                params[#params + 1] = ctx.ann.lists:get(i)
+        if not r.decl_var then
+            local params = nil
+            if r.type_params_len and r.type_params_len > 0 then
+                params = {}
+                for i = r.type_params_start, r.type_params_start + r.type_params_len - 1 do
+                    params[#params + 1] = ctx.ann.lists:get(i)
+                end
             end
+            env_mod.bind_type(ctx.scope, r.name_id, {
+                body   = nil,
+                params = params,
+                nominal = r.newtype or false,
+            })
         end
-        env_mod.bind_type(ctx.scope, r.name_id, {
-            body   = nil,
-            params = params,
-            nominal = r.newtype or false,
-        })
     end
     -- Pass 2: resolve bodies and warn on unnamed function params
     for _, r in ipairs(decls) do
@@ -1903,14 +1973,19 @@ local function process_type_decls(ctx)
                 "declared function type has unnamed parameters"
                 .. " — add 'name: type' to show names in error messages")
         end
-        local alias = env_mod.lookup_type(ctx.scope, r.name_id)
-        if alias then
-            if r.newtype then
-                local underlying = resolve_annotation_type(ctx, r.type_id)
-                ctx.nominal_id = ctx.nominal_id + 1
-                alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
-            else
-                alias.body = resolve_annotation_type(ctx, r.type_id)
+        if r.decl_var then
+            -- Variable binding: bind the resolved type as a value in scope.
+            env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
+        else
+            local alias = env_mod.lookup_type(ctx.scope, r.name_id)
+            if alias then
+                if r.newtype then
+                    local underlying = resolve_annotation_type(ctx, r.type_id)
+                    ctx.nominal_id = ctx.nominal_id + 1
+                    alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
+                else
+                    alias.body = resolve_annotation_type(ctx, r.type_id)
+                end
             end
         end
     end

@@ -2850,3 +2850,58 @@ assert.describe("cri: require() type resolution", function()
         assert.eq(#err.errors, 0)
     end)
 end)
+
+-- Helper: overloaded function type via aliases (union of two function aliases)
+-- (integer) -> string | (string) -> integer needs alias indirection because
+-- `->` return type consumes the `|`, so direct union-of-functions syntax requires aliases.
+local OVERLOAD_HEADER = [[
+--:: F1 = (integer) -> string
+--:: F2 = (string) -> integer
+--:: Fn = F1 | F2
+--:: declare fn = Fn
+]]
+
+assert.describe("checker: overload resolution and mismatch messages", function()
+    assert.it("overloaded function: first overload matched by argument type", function()
+        no_errors(OVERLOAD_HEADER .. "local x = fn(1)")
+    end)
+
+    assert.it("overloaded function: second overload matched by argument type", function()
+        no_errors(OVERLOAD_HEADER .. [[local y = fn("hello")]])
+    end)
+
+    assert.it("overloaded function: both overloads valid in same block", function()
+        no_errors(OVERLOAD_HEADER .. [[
+local x = fn(1)
+local y = fn("hello")
+]])
+    end)
+
+    assert.it("overloaded function: no matching overload reports error", function()
+        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "no matching overload")
+    end)
+
+    assert.it("overloaded function mismatch lists both candidates", function()
+        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "candidate 1")
+        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "candidate 2")
+    end)
+
+    assert.it("overloaded function mismatch shows argument failure reason", function()
+        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "cannot pass 'boolean'")
+    end)
+
+    assert.it("single-candidate mismatch still shows argument error", function()
+        has_error([[
+--:: Fn = (integer) -> string
+--:: declare fn = Fn
+local x = fn("oops")
+]], "argument 1")
+    end)
+
+    assert.it("declare var binding: --:: declare x = type binds x as a value", function()
+        no_errors([[
+--:: declare n = integer
+local y = n + 1
+]])
+    end)
+end)
