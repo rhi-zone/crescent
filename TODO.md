@@ -224,8 +224,31 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [x] Source-referencing intern pool — FNV-1a hash + memcmp, zero Lua strings in lex path (5.3x total vs baseline)
 - [ ] (stretch) Full FFI struct hash table for intern entries — current impl uses Lua tables per entry with FNV-1a + memcmp; a flat FFI array could reduce GC pressure further but 5.3x is good enough to move on
 
+### v1 → v2 cutover status (2026-03-10)
+
+v2 is architecturally superior but v1 CLI has QoL features v2 still needs before cutover:
+
+| Feature | v1 | v2 |
+|---|---|---|
+| Source line + caret in errors | ✓ | ✓ (2026-03-10) |
+| `--format sarif` | ✓ | ✓ (2026-03-10) |
+| `--dump` mode (print inferred bindings) | ✓ | ✗ |
+| `--annotate` mode (emit source + annotations) | ✓ | ✗ |
+| Auto-glob `lib/*.lua` when no args | ✓ | ✗ |
+| `.cri` cross-file require() types | ✗ | ✓ |
+| Correct integer <: number | ✗ | ✓ |
+| pcall/xpcall narrowing | ✗ | ✓ |
+| Branch-join merging | ✗ | ✓ |
+| Recursive fn return inference | ✗ | ✓ |
+
+Blocking items for cutover:
+- [ ] `--dump` mode in v2 CLI
+- [ ] `--annotate` mode in v2 CLI
+- [ ] Auto-glob fallback in v2 CLI
+
 ### backlog
 - [ ] **Error message quality audit** — bar is Rust-level helpfulness. Specific gaps identified:
+  - Source line + caret: **DONE** (2026-03-10)
   - "missing required argument" should include parameter name and expected type (e.g. `argument 1 'opts': expected {…}, got nil`)
   - "cannot pass X where Y expected" truncates long type strings — need smart truncation with `…` or abbrev for nested types
   - Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff)

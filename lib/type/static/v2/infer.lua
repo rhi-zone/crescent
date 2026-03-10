@@ -1897,6 +1897,7 @@ function M.check_string(source, filename, parent_scope, pool, cri_loader)
     end
 
     local err_ctx = errors_mod.new_ctx()
+    errors_mod.set_source(err_ctx, filename or "?", source)
     local scope   = parent_scope or env_mod.new(0)
     local ctx     = M.new_ctx(pr, ann_result, pool, err_ctx, filename, scope)
 

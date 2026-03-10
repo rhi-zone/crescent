@@ -1,6 +1,6 @@
 -- lib/type/static/v2/cli.lua
 -- CLI entry point for the v2 typechecker.
--- Usage: luajit lib/type/static/v2/cli.lua [--format plain|ansi|json] <file> [<file> ...]
+-- Usage: luajit lib/type/static/v2/cli.lua [--format plain|ansi|json|sarif] <file> [<file> ...]
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -10,7 +10,7 @@ local function main()
     local check_mod  = require("lib.type.static.v2.check")
     local errors_mod = require("lib.type.static.v2.errors")
 
-    local format = "ansi"  -- ansi | plain | json
+    local format = "ansi"  -- ansi | plain | json | sarif
     local files  = {}
 
     local i = 1
@@ -25,13 +25,13 @@ local function main()
     end
 
     if #files == 0 then
-        io.stderr:write("usage: luajit lib/type/static/v2/cli.lua [--format plain|ansi|json] <file> ...\n")
+        io.stderr:write("usage: luajit lib/type/static/v2/cli.lua [--format plain|ansi|json|sarif] <file> ...\n")
         os.exit(1)
     end
 
     local total_errors   = 0
     local total_warnings = 0
-    local json_parts     = {}
+    local structured_parts = {}
 
     for _, filename in ipairs(files) do
         local err_ctx = check_mod.check_file(filename)
@@ -41,7 +41,9 @@ local function main()
         total_warnings = total_warnings + nw
 
         if format == "json" then
-            json_parts[#json_parts + 1] = errors_mod.format_json(err_ctx)
+            structured_parts[#structured_parts + 1] = errors_mod.format_json(err_ctx)
+        elseif format == "sarif" then
+            structured_parts[#structured_parts + 1] = err_ctx
         elseif ne > 0 or nw > 0 then
             if format == "plain" then
                 io.stderr:write(errors_mod.format_plain(err_ctx))
@@ -56,8 +58,7 @@ local function main()
         -- Merge all JSON arrays into one
         io.write("[")
         local first = true
-        for _, part in ipairs(json_parts) do
-            -- Strip outer brackets and concat
+        for _, part in ipairs(structured_parts) do
             local inner = part:match("^%[(.*)%]$") or ""
             if inner ~= "" then
                 if not first then io.write(",") end
@@ -66,6 +67,15 @@ local function main()
             end
         end
         io.write("]\n")
+    elseif format == "sarif" then
+        -- Merge all err_ctx into a combined context and emit one SARIF document
+        local combined = errors_mod.new_ctx()
+        for _, ec in ipairs(structured_parts) do
+            for _, e in ipairs(ec.errors)   do combined.errors[#combined.errors+1]     = e end
+            for _, w in ipairs(ec.warnings) do combined.warnings[#combined.warnings+1] = w end
+        end
+        io.write(errors_mod.format_sarif(combined))
+        io.write("\n")
     end
 
     io.stderr:write(string.format("\nChecked %d file(s): %d error(s), %d warning(s)\n",
