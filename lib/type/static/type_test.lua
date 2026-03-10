@@ -1826,6 +1826,25 @@ local function has_error(src, pattern)
     end
 end
 
+local function has_warning(src, pattern)
+    local ec = check(src)
+    local msg = errors_mod.format_plain(ec)
+    if not msg:find("warning:") then
+        error("expected warning matching '" .. pattern .. "' but got none", 2)
+    end
+    if pattern and not msg:find(pattern) then
+        error("expected warning matching '" .. pattern .. "' but got:\n" .. msg, 2)
+    end
+end
+
+local function no_warnings(src)
+    local ec = check(src)
+    local msg = errors_mod.format_plain(ec)
+    if msg:find("warning:") then
+        error("expected no warnings but got:\n" .. msg, 2)
+    end
+end
+
 assert.describe("checker: literals", function()
     assert.it("number literal has no errors", function()
         no_errors("local x = 1")
@@ -1977,6 +1996,29 @@ local x = "hello"
 --:: Point = { x: number, y: number }
 --: Point
 local p = { x = 1.0, y = 2.0 }
+]])
+    end)
+    assert.it("unnamed function params in decl warn", function()
+        has_warning([[
+--:: declare fn = (integer, string) -> boolean
+]], "unnamed parameters")
+    end)
+    assert.it("named function params in decl no warning", function()
+        no_warnings([[
+--:: declare fn = (x: integer, y: string) -> boolean
+]])
+    end)
+    assert.it("zero-param function decl no warning", function()
+        no_warnings([[
+--:: declare fn = () -> boolean
+]])
+    end)
+    assert.it("inline --: annotation does not warn on unnamed (names from AST)", function()
+        no_warnings([[
+--: (integer, string) -> boolean
+local function f(x, y)
+    return x > 0
+end
 ]])
     end)
 end)

@@ -105,6 +105,10 @@ local function report(ctx, line, col, msg)
     errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
+local function warn(ctx, line, col, msg)
+    errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+end
+
 -- stub_ret_vars: optional array of TAG_VAR type IDs from the prescan stub.
 -- When provided, add_return eagerly binds them so recursive calls within
 -- this function body see the correct return type immediately via find().
@@ -1852,12 +1856,29 @@ StmtRule[NODE_BREAK_STMT] = function() end
 -- Type declaration processing
 ---------------------------------------------------------------------------
 
+-- Returns true if the annotation TypeSlot at ann_tid is NOT a function with
+-- unnamed params (i.e., no warning needed). Returns false = should warn.
+local function ann_fn_params_named(ctx, ann_tid)
+    local at = ctx.ann.types:get(ann_tid)
+    local fn_at
+    if at.tag == TAG_FUNCTION then
+        fn_at = at
+    elseif at.tag == TAG_FORALL then
+        local body = ctx.ann.types:get(at.data[2])
+        if body.tag == TAG_FUNCTION then fn_at = body end
+    end
+    if not fn_at then return true end  -- not a function type, no warning needed
+    return fn_at.data[1] == 0 or fn_at.data[6] > 0  -- no params, or has names
+end
+
 local function process_type_decls(ctx)
     if not ctx.ann then return end
     local decls = {}
-    for _, result in pairs(ctx.ann.results) do
+    local decl_lines = {}
+    for line, result in pairs(ctx.ann.results) do
         if result.kind == ANN_DECL then
             decls[#decls + 1] = result
+            decl_lines[result] = line
         end
     end
     -- Pass 1: register names
@@ -1875,8 +1896,13 @@ local function process_type_decls(ctx)
             nominal = r.newtype or false,
         })
     end
-    -- Pass 2: resolve bodies
+    -- Pass 2: resolve bodies and warn on unnamed function params
     for _, r in ipairs(decls) do
+        if not ann_fn_params_named(ctx, r.type_id) then
+            warn(ctx, decl_lines[r], 1,
+                "declared function type has unnamed parameters"
+                .. " — add 'name: type' to show names in error messages")
+        end
         local alias = env_mod.lookup_type(ctx.scope, r.name_id)
         if alias then
             if r.newtype then
