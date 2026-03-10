@@ -272,9 +272,32 @@ function M.parse_annotations(annotations, pool, filename)
                 local id = alloc_type(defs.TAG_TUPLE)
                 return id
             end
-            local items = { parse_type(s) }
+            -- Parse items: support named params (x: T) alongside bare types (T)
+            local items = {}
+            local item_names = {}
+            local has_param_names = false
+            local function parse_one_param()
+                local save_pos = s.pos
+                local word = scan_word(s)
+                if word then
+                    local nb = peek(s)
+                    if nb == byte(":") then
+                        -- named param: word: type
+                        advance(s)  -- skip ':'
+                        local ty = parse_type(s)
+                        item_names[#item_names + 1] = intern_mod.intern(pool, word)
+                        has_param_names = true
+                        return ty
+                    else
+                        s.pos = save_pos  -- not named, rewind and parse as bare type
+                    end
+                end
+                item_names[#item_names + 1] = 0
+                return parse_type(s)
+            end
+            items[1] = parse_one_param()
             while opt_char(s, ",") do
-                items[#items + 1] = parse_type(s)
+                items[#items + 1] = parse_one_param()
             end
             expect_char(s, ")")
             -- Check for -> (function type)
@@ -302,6 +325,7 @@ function M.parse_annotations(annotations, pool, filename)
                     if last_t.tag == defs.TAG_SPREAD then
                         vararg_ann_id = last_t.data[0]
                         items[#items] = nil
+                        item_names[#item_names] = nil
                     end
                 end
                 local ps, pl = flush_type_list(items)
@@ -313,6 +337,11 @@ function M.parse_annotations(annotations, pool, filename)
                 ft.data[2] = rs
                 ft.data[3] = rl
                 ft.data[4] = vararg_ann_id
+                if has_param_names then
+                    local pns, pnl = flush_type_list(item_names)
+                    ft.data[5] = pns
+                    ft.data[6] = pnl
+                end
                 return fn
             end
             -- Single item in parens → just the type

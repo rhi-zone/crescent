@@ -1101,6 +1101,26 @@ assert.describe("ann: composite types", function()
         assert.eq(t.data[1], 1)  -- 1 param
         assert.eq(t.data[3], 2)  -- 2 returns
     end)
+    assert.it("parses function with named params", function()
+        local pool = intern.new()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "(x: integer, y: string) -> boolean" } }, pool, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_FUNCTION)
+        assert.eq(t.data[1], 2)  -- 2 params
+        assert.eq(t.data[3], 1)  -- 1 return
+        assert.ok(t.data[6] > 0, "named param list should be present")
+        assert.eq(t.data[6], 2)  -- 2 names
+        assert.eq(intern.get(pool, r.lists:get(t.data[5])),     "x")
+        assert.eq(intern.get(pool, r.lists:get(t.data[5] + 1)), "y")
+    end)
+    assert.it("unnamed params leave name list absent", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "(integer, string) -> boolean" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_FUNCTION)
+        assert.eq(t.data[6], 0)  -- no name list
+    end)
     assert.it("parses table type", function()
         local r = ann.parse_annotations(
             { [1] = { kind = defs.ANN_TYPE, content = "{ x: number, y?: string }" } }, nil, "test")

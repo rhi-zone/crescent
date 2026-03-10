@@ -9,50 +9,50 @@
 ---------------------------------------------------------------------------
 
 --:: declare print = (...any) -> ()
---:: declare tostring = (any) -> string
---:: declare tonumber = (any, any?) -> number?
---:: declare type = (any) -> string
---:: declare error = (any, any?) -> never
---:: declare assert = (any, ...any) -> any
---:: declare pcall = (any, ...any) -> (boolean, any)
---:: declare xpcall = (any, any, ...any) -> (boolean, any)
---:: declare require = (string) -> any
---:: declare select = (any, ...any) -> any
---:: declare rawget = (any, any) -> any
---:: declare rawset = (any, any, any) -> any
---:: declare rawequal = (any, any) -> boolean
---:: declare rawlen = (any) -> integer
---:: declare unpack = (any, any?, any?) -> any
---:: declare pairs = (any) -> ((any, any) -> (any, any), any, any)
---:: declare ipairs = (any) -> ((any, integer) -> (integer, any), any, integer)
---:: declare next = (any, any?) -> (any, any)
---:: declare setmetatable = (any, any?) -> any
---:: declare getmetatable = (any) -> any
---:: declare collectgarbage = (any?, any?) -> any
+--:: declare tostring = (val: any) -> string
+--:: declare tonumber = (val: any, base: any?) -> number?
+--:: declare type = (val: any) -> string
+--:: declare error = (msg: any, level: any?) -> never
+--:: declare assert = (val: any, ...any) -> any
+--:: declare pcall = (fn: any, ...any) -> (boolean, any)
+--:: declare xpcall = (fn: any, msgh: any, ...any) -> (boolean, any)
+--:: declare require = (modname: string) -> any
+--:: declare select = (index: any, ...any) -> any
+--:: declare rawget = (t: any, k: any) -> any
+--:: declare rawset = (t: any, k: any, v: any) -> any
+--:: declare rawequal = (a: any, b: any) -> boolean
+--:: declare rawlen = (t: any) -> integer
+--:: declare unpack = (t: any, i: any?, j: any?) -> any
+--:: declare pairs = (t: any) -> ((any, any) -> (any, any), any, any)
+--:: declare ipairs = (t: any) -> ((any, integer) -> (integer, any), any, integer)
+--:: declare next = (t: any, k: any?) -> (any, any)
+--:: declare setmetatable = (t: any, mt: any?) -> any
+--:: declare getmetatable = (t: any) -> any
+--:: declare collectgarbage = (opt: any?, arg: any?) -> any
 --:: declare gcinfo = () -> integer
---:: declare dofile = (any?) -> any
---:: declare loadfile = (any?) -> (any, any?)
---:: declare loadstring = (string, any?) -> (any, any?)
---:: declare load = (any, any?, any?, any?) -> (any, any?)
---:: declare newproxy = (any?) -> any
---:: declare rawprint = (any) -> ()
+--:: declare dofile = (filename: any?) -> any
+--:: declare loadfile = (filename: any?) -> (any, any?)
+--:: declare loadstring = (s: string, chunkname: any?) -> (any, any?)
+--:: declare load = (chunk: any, chunkname: any?, mode: any?, env: any?) -> (any, any?)
+--:: declare newproxy = (mt: any?) -> any
+--:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
 --:: declare ffi = any
 --:: declare _G = { [string]: any, ... }
 --[[::
 declare bit = {
-    tobit:   (number) -> integer,
-    tohex:   (integer, integer?) -> string,
-    bnot:    (integer) -> integer,
-    band:    (integer, ...integer) -> integer,
-    bor:     (integer, ...integer) -> integer,
-    bxor:    (integer, ...integer) -> integer,
-    lshift:  (integer, integer) -> integer,
-    rshift:  (integer, integer) -> integer,
-    arshift: (integer, integer) -> integer,
-    bswap:   (integer) -> integer,
-    rol:     (integer, integer) -> integer,
-    ror:     (integer, integer) -> integer
+    tobit:   (x: number) -> integer,
+    tohex:   (x: integer, n: integer?) -> string,
+    bnot:    (x: integer) -> integer,
+    band:    (x: integer, ...integer) -> integer,
+    bor:     (x: integer, ...integer) -> integer,
+    bxor:    (x: integer, ...integer) -> integer,
+    lshift:  (x: integer, n: integer) -> integer,
+    rshift:  (x: integer, n: integer) -> integer,
+    arshift: (x: integer, n: integer) -> integer,
+    bswap:   (x: integer) -> integer,
+    rol:     (x: integer, n: integer) -> integer,
+    ror:     (x: integer, n: integer) -> integer
 }
 ]]
 --:: declare jit = any
@@ -63,20 +63,20 @@ declare bit = {
 
 --[[::
 declare string = {
-    format:  (string, ...any) -> string,
-    len:     (string) -> integer,
-    sub:     (string, integer, any?) -> string,
-    find:    (string, string, any?, any?) -> (any, any),
-    match:   (string, string, any?) -> any,
-    gmatch:  (string, string) -> any,
-    gsub:    (string, string, any, any?) -> (string, integer),
-    rep:     (string, integer, any?) -> string,
-    byte:    (string, any?, any?) -> integer,
+    format:  (fmt: string, ...any) -> string,
+    len:     (s: string) -> integer,
+    sub:     (s: string, i: integer, j: any?) -> string,
+    find:    (s: string, pattern: string, init: any?, plain: any?) -> (any, any),
+    match:   (s: string, pattern: string, init: any?) -> any,
+    gmatch:  (s: string, pattern: string) -> any,
+    gsub:    (s: string, pattern: string, repl: any, n: any?) -> (string, integer),
+    rep:     (s: string, n: integer, sep: any?) -> string,
+    byte:    (s: string, i: any?, j: any?) -> integer,
     char:    (...integer) -> string,
-    upper:   (string) -> string,
-    lower:   (string) -> string,
-    reverse: (string) -> string,
-    dump:    (any, any?) -> string
+    upper:   (s: string) -> string,
+    lower:   (s: string) -> string,
+    reverse: (s: string) -> string,
+    dump:    (fn: any, strip: any?) -> string
 }
 ]]
 
@@ -86,13 +86,13 @@ declare string = {
 
 --[[::
 declare table = {
-    insert:  (any, any) -> (),
-    remove:  (any, any?) -> any,
-    concat:  (any, any?, any?, any?) -> string,
-    sort:    (any, any?) -> (),
-    unpack:  (any, any?, any?) -> any,
-    move:    (any, integer, integer, integer, any?) -> any,
-    maxn:    (any) -> integer
+    insert:  (t: any, v: any) -> (),
+    remove:  (t: any, pos: any?) -> any,
+    concat:  (t: any, sep: any?, i: any?, j: any?) -> string,
+    sort:    (t: any, comp: any?) -> (),
+    unpack:  (t: any, i: any?, j: any?) -> any,
+    move:    (a1: any, f: integer, e: integer, t: integer, a2: any?) -> any,
+    maxn:    (t: any) -> integer
 }
 ]]
 
@@ -102,29 +102,29 @@ declare table = {
 
 --[[::
 declare math = {
-    floor:      (number) -> integer,
-    ceil:       (number) -> integer,
-    abs:        (number) -> number,
-    sqrt:       (number) -> number,
-    max:        (number, ...number) -> number,
-    min:        (number, ...number) -> number,
-    random:     (any?, any?) -> number,
-    randomseed: (number) -> (),
-    sin:        (number) -> number,
-    cos:        (number) -> number,
-    tan:        (number) -> number,
-    asin:       (number) -> number,
-    acos:       (number) -> number,
-    atan:       (number) -> number,
-    atan2:      (number, number) -> number,
-    exp:        (number) -> number,
-    log:        (number, any?) -> number,
-    log10:      (number) -> number,
-    pow:        (number, number) -> number,
-    fmod:       (number, number) -> number,
-    modf:       (number) -> (number, number),
-    frexp:      (number) -> (number, integer),
-    ldexp:      (number, integer) -> number,
+    floor:      (x: number) -> integer,
+    ceil:       (x: number) -> integer,
+    abs:        (x: number) -> number,
+    sqrt:       (x: number) -> number,
+    max:        (x: number, ...number) -> number,
+    min:        (x: number, ...number) -> number,
+    random:     (m: any?, n: any?) -> number,
+    randomseed: (x: number) -> (),
+    sin:        (x: number) -> number,
+    cos:        (x: number) -> number,
+    tan:        (x: number) -> number,
+    asin:       (x: number) -> number,
+    acos:       (x: number) -> number,
+    atan:       (x: number) -> number,
+    atan2:      (y: number, x: number) -> number,
+    exp:        (x: number) -> number,
+    log:        (x: number, base: any?) -> number,
+    log10:      (x: number) -> number,
+    pow:        (x: number, y: number) -> number,
+    fmod:       (x: number, y: number) -> number,
+    modf:       (x: number) -> (number, number),
+    frexp:      (x: number) -> (number, integer),
+    ldexp:      (m: number, e: integer) -> number,
     huge:       number,
     pi:         number,
     max_integer: integer,
@@ -138,12 +138,12 @@ declare math = {
 
 --[[::
 declare io = {
-    open:    (string, any?) -> (any, any?),
-    close:   (any?) -> any,
+    open:    (path: string, mode: any?) -> (any, any?),
+    close:   (file: any?) -> any,
     write:   (...any) -> any,
     read:    (...any) -> any,
-    lines:   (any?, ...any) -> any,
-    popen:   (string, any?) -> (any, any?),
+    lines:   (filename: any?, ...any) -> any,
+    popen:   (cmd: string, mode: any?) -> (any, any?),
     tmpfile: () -> any,
     stdin:   any,
     stdout:  any,
@@ -157,16 +157,16 @@ declare io = {
 
 --[[::
 declare os = {
-    time:     (any?) -> integer,
+    time:     (t: any?) -> integer,
     clock:    () -> number,
-    date:     (any?, any?) -> any,
-    exit:     (any?, any?) -> (),
-    getenv:   (string) -> string?,
-    difftime: (number, number) -> number,
-    rename:   (string, string) -> (boolean, any?),
-    remove:   (string) -> (boolean, any?),
+    date:     (format: any?, time: any?) -> any,
+    exit:     (code: any?, close: any?) -> (),
+    getenv:   (name: string) -> string?,
+    difftime: (t2: number, t1: number) -> number,
+    rename:   (oldname: string, newname: string) -> (boolean, any?),
+    remove:   (path: string) -> (boolean, any?),
     tmpname:  () -> string,
-    execute:  (any?) -> (any, any?, integer?)
+    execute:  (cmd: any?) -> (any, any?, integer?)
 }
 ]]
 
@@ -176,11 +176,11 @@ declare os = {
 
 --[[::
 declare coroutine = {
-    create:     (any) -> any,
-    resume:     (any, ...any) -> (boolean, any),
+    create:     (fn: any) -> any,
+    resume:     (co: any, ...any) -> (boolean, any),
     yield:      (...any) -> any,
-    wrap:       (any) -> any,
-    status:     (any) -> string,
+    wrap:       (fn: any) -> any,
+    status:     (co: any) -> string,
     running:    () -> (any, boolean),
     isyieldable: () -> boolean
 }
@@ -192,13 +192,13 @@ declare coroutine = {
 
 --[[::
 declare debug = {
-    getinfo:      (any, any?) -> any,
-    traceback:    (any?, any?, any?) -> string,
-    sethook:      (any, any, any?) -> (),
-    getlocal:     (any, integer) -> (string, any),
-    setlocal:     (any, integer, any) -> string,
-    getmetatable: (any) -> any,
-    setmetatable: (any, any?) -> any
+    getinfo:      (thread_or_f: any, what: any?) -> any,
+    traceback:    (thread_or_msg: any?, msg: any?, level: any?) -> string,
+    sethook:      (thread_or_fn: any, mask: any, count: any?) -> (),
+    getlocal:     (level: any, local_: integer) -> (string, any),
+    setlocal:     (level: any, local_: integer, value: any) -> string,
+    getmetatable: (t: any) -> any,
+    setmetatable: (t: any, mt: any?) -> any
 }
 ]]
 
@@ -210,39 +210,39 @@ declare debug = {
 
 --[[::
 number_meta = {
-    #__add:    (number, number) -> number,
-    #__sub:    (number, number) -> number,
-    #__mul:    (number, number) -> number,
-    #__div:    (number, number) -> number,
-    #__mod:    (number, number) -> number,
-    #__pow:    (number, number) -> number,
-    #__unm:    (number) -> number,
-    #__lt:     (number, number) -> boolean,
-    #__le:     (number, number) -> boolean,
-    #__concat: (any, any) -> string
+    #__add:    (a: number, b: number) -> number,
+    #__sub:    (a: number, b: number) -> number,
+    #__mul:    (a: number, b: number) -> number,
+    #__div:    (a: number, b: number) -> number,
+    #__mod:    (a: number, b: number) -> number,
+    #__pow:    (a: number, b: number) -> number,
+    #__unm:    (a: number) -> number,
+    #__lt:     (a: number, b: number) -> boolean,
+    #__le:     (a: number, b: number) -> boolean,
+    #__concat: (a: any, b: any) -> string
 }
 ]]
 
 --[[::
 integer_meta = {
-    #__add:    (integer, integer) -> integer,
-    #__sub:    (integer, integer) -> integer,
-    #__mul:    (integer, integer) -> integer,
-    #__div:    (integer, integer) -> number,
-    #__mod:    (integer, integer) -> integer,
-    #__pow:    (integer, number) -> number,
-    #__unm:    (integer) -> integer,
-    #__lt:     (number, number) -> boolean,
-    #__le:     (number, number) -> boolean,
-    #__concat: (any, any) -> string
+    #__add:    (a: integer, b: integer) -> integer,
+    #__sub:    (a: integer, b: integer) -> integer,
+    #__mul:    (a: integer, b: integer) -> integer,
+    #__div:    (a: integer, b: integer) -> number,
+    #__mod:    (a: integer, b: integer) -> integer,
+    #__pow:    (a: integer, b: number) -> number,
+    #__unm:    (a: integer) -> integer,
+    #__lt:     (a: number, b: number) -> boolean,
+    #__le:     (a: number, b: number) -> boolean,
+    #__concat: (a: any, b: any) -> string
 }
 ]]
 
 --[[::
 string_meta_ops = {
-    #__concat: (string, any) -> string,
-    #__len:    (string) -> integer,
-    #__lt:     (string, string) -> boolean,
-    #__le:     (string, string) -> boolean
+    #__concat: (a: string, b: any) -> string,
+    #__len:    (s: string) -> integer,
+    #__lt:     (a: string, b: string) -> boolean,
+    #__le:     (a: string, b: string) -> boolean
 }
 ]]

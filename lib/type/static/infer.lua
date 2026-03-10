@@ -219,8 +219,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if at.data[4] >= 0 then
             vararg_id = resolve_annotation_type(ctx, at.data[4], seen)
         end
+        local param_name_ids = nil
+        if at.data[6] > 0 then
+            param_name_ids = {}
+            for i = at.data[5], at.data[5] + at.data[6] - 1 do
+                param_name_ids[#param_name_ids + 1] = ctx.ann.lists:get(i)
+            end
+        end
         seen[ann_tid] = nil
-        return types_mod.make_func(ctx, params, returns, vararg_id)
+        return types_mod.make_func(ctx, params, returns, vararg_id, param_name_ids)
     end
 
     if tag == TAG_TABLE then
