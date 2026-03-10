@@ -2851,53 +2851,64 @@ assert.describe("cri: require() type resolution", function()
     end)
 end)
 
--- Helper: overloaded function type via aliases (union of two function aliases)
--- (integer) -> string | (string) -> integer needs alias indirection because
--- `->` return type consumes the `|`, so direct union-of-functions syntax requires aliases.
+-- Overload (intersection): ((A)->R1) & ((B)->R2) — first matching member wins.
 local OVERLOAD_HEADER = [[
---:: F1 = (integer) -> string
---:: F2 = (string) -> integer
---:: Fn = F1 | F2
---:: declare fn = Fn
+--:: declare fn = ((integer) -> string) & ((string) -> integer)
 ]]
 
-assert.describe("checker: overload resolution and mismatch messages", function()
-    assert.it("overloaded function: first overload matched by argument type", function()
+assert.describe("checker: intersection overload dispatch", function()
+    assert.it("first overload matched by argument type", function()
         no_errors(OVERLOAD_HEADER .. "local x = fn(1)")
     end)
 
-    assert.it("overloaded function: second overload matched by argument type", function()
+    assert.it("second overload matched by argument type", function()
         no_errors(OVERLOAD_HEADER .. [[local y = fn("hello")]])
     end)
 
-    assert.it("overloaded function: both overloads valid in same block", function()
+    assert.it("both overloads valid in same block", function()
         no_errors(OVERLOAD_HEADER .. [[
 local x = fn(1)
 local y = fn("hello")
 ]])
     end)
 
-    assert.it("overloaded function: no matching overload reports error", function()
+    assert.it("no matching overload reports error", function()
         has_error(OVERLOAD_HEADER .. "local x = fn(true)", "no matching overload")
     end)
 
-    assert.it("overloaded function mismatch lists both candidates", function()
+    assert.it("mismatch lists both candidates", function()
         has_error(OVERLOAD_HEADER .. "local x = fn(true)", "candidate 1")
         has_error(OVERLOAD_HEADER .. "local x = fn(true)", "candidate 2")
     end)
 
-    assert.it("overloaded function mismatch shows argument failure reason", function()
+    assert.it("mismatch shows argument failure reason", function()
         has_error(OVERLOAD_HEADER .. "local x = fn(true)", "cannot pass 'boolean'")
     end)
+end)
 
-    assert.it("single-candidate mismatch still shows argument error", function()
-        has_error([[
---:: Fn = (integer) -> string
---:: declare fn = Fn
-local x = fn("oops")
-]], "argument 1")
+assert.describe("checker: union function call requires all members to accept", function()
+    -- Union of functions: arg must be valid for ALL members (sound union semantics).
+    assert.it("arg valid for all members: no error", function()
+        -- both members accept 'any' arg
+        no_errors([[
+--:: declare fn = ((any) -> string) & ((any) -> integer)
+local x = fn(1)
+local y = fn("hello")
+]])
     end)
 
+    assert.it("arg rejected by a union member: error reports which member failed", function()
+        has_error([[
+--:: F1 = (integer) -> string
+--:: F2 = (string) -> integer
+--:: Fn = F1 | F2
+--:: declare fn = Fn
+local x = fn(1)
+]], "union members")
+    end)
+end)
+
+assert.describe("checker: misc annotation", function()
     assert.it("declare var binding: --:: declare x = type binds x as a value", function()
         no_errors([[
 --:: declare n = integer
@@ -2912,10 +2923,10 @@ local x = fn(1)
 ]], "function type in union return position")
     end)
 
-    assert.it("parenthesized function union does not warn", function()
-        no_errors([[
+    assert.it("parenthesized function union warns on call (arg must satisfy all members)", function()
+        has_error([[
 --:: declare fn = ((integer) -> string) | ((string) -> integer)
 local x = fn(1)
-]])
+]], "union members")
     end)
 end)

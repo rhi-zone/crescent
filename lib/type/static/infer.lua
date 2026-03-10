@@ -956,7 +956,50 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
     end
 
     if ft.tag == TAG_UNION then
-        -- Collect all function-typed members.
+        -- Union of functions: ALL members must accept the argument (sound union semantics).
+        -- Check each member; accumulate failures. Return union of all return types.
+        local fn_members = {}
+        for i = ft.data[0], ft.data[0] + ft.data[1] - 1 do
+            local mid = types_mod.find(ctx, ctx.lists:get(i))
+            if ctx.types:get(mid).tag == TAG_FUNCTION then
+                fn_members[#fn_members + 1] = mid
+            end
+        end
+        if #fn_members > 0 then
+            local failures = {}
+            for _, mem_tid in ipairs(fn_members) do
+                local inst = env_mod.instantiate(ctx, mem_tid, ctx.scope.level)
+                local ok, errs = try_call_args(ctx, inst, arg_tids)
+                if not ok then
+                    failures[#failures + 1] = { tid = mem_tid, errs = errs }
+                end
+            end
+            if #failures > 0 then
+                local parts = { "argument does not satisfy all union members:" }
+                for idx, fail in ipairs(failures) do
+                    local label = #failures == 1 and "  member:" or ("  member " .. idx .. ":")
+                    parts[#parts + 1] = label .. " " .. types_mod.display_short(ctx, fail.tid)
+                    for _, e in ipairs(fail.errs) do
+                        parts[#parts + 1] = "    " .. e
+                    end
+                end
+                report(ctx, line, col, table.concat(parts, "\n"))
+                ctx._last_multi_return = { ctx.T_ANY }
+                return ctx.T_ANY
+            end
+            -- All members accept — return union of their return types.
+            local ret_tids = {}
+            for _, mem_tid in ipairs(fn_members) do
+                ret_tids[#ret_tids + 1] = call_fn_returns(ctx, mem_tid, arg_tids, line, col)
+            end
+            local ret = #ret_tids == 1 and ret_tids[1] or types_mod.make_union(ctx, ret_tids)
+            ctx._last_multi_return = { ret }
+            return ret
+        end
+    end
+
+    if ft.tag == defs.TAG_INTERSECTION then
+        -- Intersection of functions: overload dispatch — first member that accepts the arg wins.
         local candidates = {}
         for i = ft.data[0], ft.data[0] + ft.data[1] - 1 do
             local mid = types_mod.find(ctx, ctx.lists:get(i))
@@ -965,22 +1008,16 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
             end
         end
         if #candidates > 0 then
-            -- Try each candidate with non-mutating checks; pick first match.
-            local match_tid = nil
             local failures = {}
             for _, cand_tid in ipairs(candidates) do
                 local inst = env_mod.instantiate(ctx, cand_tid, ctx.scope.level)
                 local ok, errs = try_call_args(ctx, inst, arg_tids)
-                if ok and not match_tid then
-                    match_tid = cand_tid
-                elseif not ok then
-                    failures[#failures + 1] = { tid = cand_tid, errs = errs }
+                if ok then
+                    return call_fn_returns(ctx, cand_tid, arg_tids, line, col)
                 end
+                failures[#failures + 1] = { tid = cand_tid, errs = errs }
             end
-            if match_tid then
-                return call_fn_returns(ctx, match_tid, arg_tids, line, col)
-            end
-            -- All candidates failed — report detailed mismatch.
+            -- No candidate matched — report with per-candidate detail.
             local parts = { "no matching overload for call" }
             for idx, fail in ipairs(failures) do
                 local label = #failures == 1 and "  candidate:" or ("  candidate " .. idx .. ":")
