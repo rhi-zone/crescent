@@ -856,7 +856,9 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col)
         else
             local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
             if not ok then
-                report(ctx, line, col, "argument " .. (i + 1) .. ": missing required argument")
+                report(ctx, line, col,
+                    "argument " .. (i + 1) .. ": missing required argument"
+                    .. " (expected '" .. types_mod.display(ctx, exp_tid) .. "', got nil)")
             end
         end
     end
