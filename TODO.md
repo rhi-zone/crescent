@@ -254,7 +254,7 @@ Blocking items for cutover:
   - "missing required argument" now includes parameter name: **DONE** (2026-03-10) — `argument 1 'opts': missing required argument...`; param name IDs stored in TypeSlot data[5]/data[6], threaded through instantiate/substitute
   - Named params in annotations: **DONE** (2026-03-10) — `(x: integer, y: string) -> boolean` syntax in ann.lua; stdlib.d.lua updated to use named params throughout; resolve_annotation_type passes names to make_func via data[5]/data[6]
   - Warn on annotation-only functions missing param names: **DONE** (2026-03-10) — `process_type_decls` in infer.lua emits a warning for `--:: declare fn = (T1, T2) -> ret` where the function type has params but no names; inline `--:` annotations on real functions don't warn (names come from AST)
-  - Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff)
+  - [x] Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff) — **DONE** (2026-03-11): try_call_args (non-mutating) tries each candidate; first match wins; if none match, reports "no matching overload" with per-candidate argument errors
   - General: add suggestions/recommendations where possible ("did you mean …?", "add annotation to …")
 - [ ] High-perf SHA-256 for .cri content addressing: current pure-Lua impl is correct but slow
   (~10 MB/s). For 1M LOC scale, SHA-256 should be done via FFI (libssl EVP_DigestInit or
