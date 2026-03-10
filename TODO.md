@@ -251,7 +251,7 @@ Blocking items for cutover:
   - Source line + caret: **DONE** (2026-03-10) — errors.lua set_source/format_plain/format_ansi
   - "missing required argument" now shows expected type: **DONE** (2026-03-10) — `argument 1: missing required argument (expected 'string', got nil)`
   - Long type truncation: **DONE** (2026-03-10) — display_short() at 120 chars with …
-  - "missing required argument" should also include parameter name (e.g. `argument 1 'opts': ...`) — requires storing param name IDs in the function TypeSlot (currently only types stored)
+  - "missing required argument" now includes parameter name: **DONE** (2026-03-10) — `argument 1 'opts': missing required argument...`; param name IDs stored in TypeSlot data[5]/data[6], threaded through instantiate/substitute
   - Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff)
   - General: add suggestions/recommendations where possible ("did you mean …?", "add annotation to …")
 - [ ] High-perf SHA-256 for .cri content addressing: current pure-Lua impl is correct but slow
