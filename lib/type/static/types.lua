@@ -239,7 +239,8 @@ end
 -- Make a function type.
 -- params, returns: Lua arrays of type_ids
 -- vararg_id: type_id or -1 for no vararg
-function M.make_func(ctx, params, returns, vararg_id)
+-- param_name_ids: optional Lua array of intern IDs (one per param); stored in data[5]/data[6]
+function M.make_func(ctx, params, returns, vararg_id, param_name_ids)
     local m = ctx.lists:mark()
     for i = 1, #params do ctx.lists:push(params[i]) end
     local ps, pl = ctx.lists:since(m)
@@ -253,6 +254,13 @@ function M.make_func(ctx, params, returns, vararg_id)
     t.data[2] = rs
     t.data[3] = rl
     t.data[4] = vararg_id ~= nil and vararg_id or -1
+    if param_name_ids and #param_name_ids > 0 then
+        m = ctx.lists:mark()
+        for i = 1, #param_name_ids do ctx.lists:push(param_name_ids[i]) end
+        local pns, pnl = ctx.lists:since(m)
+        t.data[5] = pns
+        t.data[6] = pnl
+    end
     return id
 end
 

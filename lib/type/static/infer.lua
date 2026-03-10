@@ -842,14 +842,24 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col)
     local ft = ctx.types:get(fn_tid)
     if ft.tag ~= TAG_FUNCTION then return end
     local pl = ft.data[1]
+    local has_names = ft.data[6] > 0
     for i = 0, pl - 1 do
         local exp_tid = types_mod.find(ctx, ctx.lists:get(ft.data[0] + i))
         local act_tid = arg_tids[i + 1]
+        local arg_label
+        if has_names then
+            local name_id = ctx.lists:get(ft.data[5] + i)
+            local name_str = intern_mod.get(ctx.pool, name_id)
+            if name_str then
+                arg_label = "argument " .. (i + 1) .. " '" .. name_str .. "'"
+            end
+        end
+        arg_label = arg_label or ("argument " .. (i + 1))
         if act_tid then
             local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
             if not ok then
                 report(ctx, line, col,
-                    "argument " .. (i + 1) .. ": cannot pass '" .. types_mod.display_short(ctx, act_tid)
+                    arg_label .. ": cannot pass '" .. types_mod.display_short(ctx, act_tid)
                     .. "' where '" .. types_mod.display_short(ctx, exp_tid) .. "' expected"
                     .. (err and (": " .. err) or ""))
             end
@@ -857,7 +867,7 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col)
             local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
             if not ok then
                 report(ctx, line, col,
-                    "argument " .. (i + 1) .. ": missing required argument"
+                    arg_label .. ": missing required argument"
                     .. " (expected '" .. types_mod.display(ctx, exp_tid) .. "', got nil)")
             end
         end
@@ -1167,7 +1177,9 @@ infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, stub_ret_
     end
 
     local vararg_id = has_vararg and ctx.T_ANY or -1
-    local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id)
+    local param_name_ids = {}
+    for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
+    local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
     env_mod.generalize(ctx, fn_tid, saved.level)
     return fn_tid
 end
