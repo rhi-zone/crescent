@@ -24,10 +24,12 @@ local function main()
     local errors_mod = require("lib.type.static.v2.errors")
     local intern_mod = require("lib.type.static.v2.intern")
     local types_mod  = require("lib.type.static.v2.types")
+    local defs       = require("lib.type.static.v2.defs")
 
-    local format = "ansi"  -- ansi | plain | json | sarif
-    local dump   = false
-    local files  = {}
+    local format   = "ansi"  -- ansi | plain | json | sarif
+    local dump     = false
+    local annotate = false
+    local files    = {}
 
     local i = 1
     while i <= #arg do
@@ -36,6 +38,9 @@ local function main()
             i = i + 2
         elseif arg[i] == "--dump" then
             dump = true
+            i = i + 1
+        elseif arg[i] == "--annotate" then
+            annotate = true
             i = i + 1
         else
             files[#files + 1] = arg[i]
@@ -47,9 +52,58 @@ local function main()
     if #files == 0 then
         files = glob_lua_files("lib")
         if #files == 0 then
-            io.stderr:write("usage: luajit lib/type/static/v2/cli.lua [--format plain|ansi|json|sarif] [--dump] <file> ...\n")
+            io.stderr:write("usage: luajit lib/type/static/v2/cli.lua [--format plain|ansi|json|sarif] [--dump] [--annotate] <file> ...\n")
             os.exit(1)
         end
+    end
+
+    -- --annotate mode: emit source with inferred type annotations inserted.
+    if annotate then
+        for _, filename in ipairs(files) do
+            local _, ctx = check_mod.check_file(filename)
+            if not ctx then
+                io.stderr:write(filename .. ": failed to check\n")
+            else
+                -- Read source lines.
+                local src_lines = {}
+                local f = io.open(filename, "r")
+                if f then
+                    for line in f:lines() do src_lines[#src_lines + 1] = line end
+                    f:close()
+                end
+
+                -- Build line → list of annotation strings to insert before that line.
+                local insertions = {}
+                for _, ann in ipairs(ctx.inferred_anns) do
+                    local line = ann.line
+                    if line and line > 0 then
+                        local resolved = types_mod.find(ctx, ann.type_id)
+                        local rt = ctx.types:get(resolved)
+                        -- Skip trivial: vars, any, nil, functions with all-any sigs.
+                        if rt.tag ~= defs.TAG_VAR and rt.tag ~= defs.TAG_ANY
+                                and rt.tag ~= defs.TAG_NIL then
+                            local name = intern_mod.get(ctx.pool, ann.name_id) or "?"
+                            local type_str = types_mod.display(ctx, resolved)
+                            local ann_text = "--: " .. name .. ": " .. type_str
+                            if not insertions[line] then insertions[line] = {} end
+                            insertions[line][#insertions[line] + 1] = ann_text
+                        end
+                    end
+                end
+
+                -- Emit source with annotations inserted before each annotated line.
+                for ln, src_line in ipairs(src_lines) do
+                    if insertions[ln] then
+                        local indent = src_line:match("^(%s*)") or ""
+                        for _, ann_text in ipairs(insertions[ln]) do
+                            io.write(indent .. ann_text .. "\n")
+                        end
+                    end
+                    io.write(src_line .. "\n")
+                end
+            end
+        end
+        return
     end
 
     -- --dump mode: print inferred top-level bindings for each file.

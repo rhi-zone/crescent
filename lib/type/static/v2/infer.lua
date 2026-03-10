@@ -1367,6 +1367,15 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 bind_tid = ctx.T_NIL
             end
             env_mod.bind(ctx.scope, name_id, bind_tid)
+            -- Record for --annotate mode (skip trivial types).
+            local resolved_tag = ctx.types:get(types_mod.find(ctx, bind_tid)).tag
+            if resolved_tag ~= defs.TAG_VAR and resolved_tag ~= defs.TAG_ANY
+                    and resolved_tag ~= defs.TAG_NIL then
+                ctx.inferred_anns[#ctx.inferred_anns + 1] = {
+                    line = n.line, kind = "type",
+                    name_id = name_id, type_id = bind_tid,
+                }
+            end
         end
     end
 
@@ -1527,6 +1536,21 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     end
 
     local fn_tid = infer_function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, stub_ret_vars)
+
+    -- Record for --annotate mode.
+    nn = ctx.nodes:get(name_nid)
+    local ann_name_id = nil
+    if nn.kind == NODE_IDENTIFIER then
+        ann_name_id = nn.data[0]
+    elseif nn.kind == NODE_FIELD_EXPR then
+        ann_name_id = nn.data[1]
+    end
+    if ann_name_id then
+        ctx.inferred_anns[#ctx.inferred_anns + 1] = {
+            line = n.line, kind = "function",
+            name_id = ann_name_id, type_id = fn_tid,
+        }
+    end
 
     nn = ctx.nodes:get(name_nid)
     if nn.kind == NODE_IDENTIFIER then
@@ -1871,6 +1895,7 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx._last_pcall_success_types = nil
     ctx._pcall_info = {}
     ctx.nominal_id = 0
+    ctx.inferred_anns = {}  -- list of {line, kind, name_id, type_id} for --annotate mode
     return ctx
 end
 
