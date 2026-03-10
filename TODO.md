@@ -248,9 +248,10 @@ Blocking items for cutover:
 
 ### backlog
 - [ ] **Error message quality audit** — bar is Rust-level helpfulness. Specific gaps identified:
-  - Source line + caret: **DONE** (2026-03-10)
-  - "missing required argument" should include parameter name and expected type (e.g. `argument 1 'opts': expected {…}, got nil`)
-  - "cannot pass X where Y expected" truncates long type strings — need smart truncation with `…` or abbrev for nested types
+  - Source line + caret: **DONE** (2026-03-10) — errors.lua set_source/format_plain/format_ansi
+  - "missing required argument" now shows expected type: **DONE** (2026-03-10) — `argument 1: missing required argument (expected 'string', got nil)`
+  - Long type truncation: **DONE** (2026-03-10) — display_short() at 120 chars with …
+  - "missing required argument" should also include parameter name (e.g. `argument 1 'opts': ...`) — requires storing param name IDs in the function TypeSlot (currently only types stored)
   - Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff)
   - General: add suggestions/recommendations where possible ("did you mean …?", "add annotation to …")
 - [ ] High-perf SHA-256 for .cri content addressing: current pure-Lua impl is correct but slow
