@@ -1,11 +1,11 @@
--- lib/type/static/v2/ann.lua
--- Annotation parser for the v2 typechecker.
+-- lib/type/static/ann.lua
+-- Annotation parser for the typechecker.
 -- Parses --: / --:: / --[[: type annotation content strings into flat
 -- TypeSlot entries in a type arena. Returns type IDs (int32).
 
-local defs = require("lib.type.static.v2.defs")
-local arena_mod = require("lib.type.static.v2.arena")
-local intern_mod = require("lib.type.static.v2.intern")
+local defs = require("lib.type.static.defs")
+local arena_mod = require("lib.type.static.arena")
+local intern_mod = require("lib.type.static.intern")
 
 local format = string.format
 local byte = string.byte

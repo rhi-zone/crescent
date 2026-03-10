@@ -1,2 +1,0 @@
-test.lua:1: warning: unannotated parameter 'x' has implicit any type
-  1 | local function wrap(x)

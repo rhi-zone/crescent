@@ -1,10 +1,10 @@
--- lib/type/static/v2/narrow.lua
--- Control flow narrowing for the v2 typechecker.
+-- lib/type/static/narrow.lua
+-- Control flow narrowing for the typechecker.
 -- Extracts type narrowing information from if/while/repeat test expressions.
 
-local defs = require("lib.type.static.v2.defs")
-local types_mod = require("lib.type.static.v2.types")
-local intern_mod = require("lib.type.static.v2.intern")
+local defs = require("lib.type.static.defs")
+local types_mod = require("lib.type.static.types")
+local intern_mod = require("lib.type.static.intern")
 
 local NODE_BINARY_EXPR = defs.NODE_BINARY_EXPR
 local NODE_UNARY_EXPR  = defs.NODE_UNARY_EXPR
@@ -276,7 +276,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
                 local matching = {}
                 for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
-                    local unify_mod = require("lib.type.static.v2.unify")
+                    local unify_mod = require("lib.type.static.unify")
                     if unify_mod.try_unify(ctx, mid, target_id) then matching[#matching + 1] = mid end
                 end
                 if #matching == 0 then return target_id end
@@ -320,7 +320,7 @@ end
 local function propagate_pcall_narrowing(ctx, name_id, ok_narrowed, narrowed)
     local pcall_entry = ctx._pcall_info and ctx._pcall_info[name_id]
     if not pcall_entry then return end
-    local env_mod = require("lib.type.static.v2.env")
+    local env_mod = require("lib.type.static.env")
     -- Truthy: ok is not narrowed to NEVER (impossible) or NIL → pcall succeeded.
     local ok_r = types_mod.find(ctx, ok_narrowed)
     local ok_tag = ctx.types:get(ok_r).tag
@@ -337,7 +337,7 @@ end
 local function record_narrowing(ctx, info, narrowed, is_truthy)
     local name_id = info_name_id(info)
     if not name_id then return end
-    local env_mod = require("lib.type.static.v2.env")
+    local env_mod = require("lib.type.static.env")
     local current_ty = env_mod.lookup(ctx.scope, name_id)
     if not current_ty then return end
     narrowed[name_id] = apply_narrowing(ctx, info, current_ty, is_truthy)
@@ -384,7 +384,7 @@ end
 
 -- Apply narrowed types to a scope (for if-branch entry).
 function M.apply_narrowed(ctx, narrowed)
-    local env_mod = require("lib.type.static.v2.env")
+    local env_mod = require("lib.type.static.env")
     local new_scope = env_mod.child(ctx.scope)
     -- Track which bindings are narrowing-derived so that lookup_declared can skip them.
     local nn = {}

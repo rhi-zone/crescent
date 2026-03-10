@@ -1,4 +1,4 @@
--- lib/type/static/v2/cache.lua
+-- lib/type/static/cache.lua
 -- Content-addressed .cri interface cache.
 --
 -- Cache layout:
@@ -10,13 +10,13 @@
 -- for simplicity and written as a plain Lua table literal.
 --
 -- API:
---   local cache = require("lib.type.static.v2.cache")
+--   local cache = require("lib.type.static.cache")
 --   cache.set_dir(path)         -- set cache directory (default: ".crescentcache")
 --   cache.lookup(src_hash)      -- returns cri_bytes or nil
 --   cache.store(src_hash, cri_bytes) -- stores .cri and updates manifest
 --   cache.invalidate(src_hash)  -- removes manifest entry (does not delete .cri)
 
-local sha256 = require("lib.type.static.v2.sha256")
+local sha256 = require("lib.type.static.sha256")
 
 local M = {}
 

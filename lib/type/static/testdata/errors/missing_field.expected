@@ -1,5 +1,0 @@
-test.lua:7:6: error: argument 1: missing field 'role'
-    passed:   { name: "alice" }
-    expected: { name: string, role: string }
-  7 | greet({ name = "alice" })
-           ^

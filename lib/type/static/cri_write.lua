@@ -1,8 +1,8 @@
--- lib/type/static/v2/cri_write.lua
+-- lib/type/static/cri_write.lua
 -- Serialize a set of named type exports from a checked ctx into a .cri binary blob.
 --
 -- Usage:
---   local cri_write = require("lib.type.static.v2.cri_write")
+--   local cri_write = require("lib.type.static.cri_write")
 --   local bytes = cri_write.serialize(ctx, exports)
 --   -- exports: { [name_string] = type_id, ... }
 --
@@ -29,9 +29,9 @@
 
 local ffi    = require("ffi")
 local bit    = require("bit")
-local sha256 = require("lib.type.static.v2.sha256")
-local defs   = require("lib.type.static.v2.defs")
-local intern_mod = require("lib.type.static.v2.intern")
+local sha256 = require("lib.type.static.sha256")
+local defs   = require("lib.type.static.defs")
+local intern_mod = require("lib.type.static.intern")
 
 local band, rshift, tobit = bit.band, bit.rshift, bit.tobit
 

@@ -1,3 +1,0 @@
-test.lua:3:2: error: no method 'bar' on type '{ foo: integer }'
-  3 | t:bar()
-       ^

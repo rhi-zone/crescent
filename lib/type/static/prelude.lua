@@ -1,16 +1,16 @@
--- lib/type/static/v2/prelude.lua
--- Lua 5.1 / LuaJIT stdlib type bindings for the v2 typechecker.
+-- lib/type/static/prelude.lua
+-- Lua 5.1 / LuaJIT stdlib type bindings for the typechecker.
 -- Call M.populate(ctx) after creating a checker context to add stdlib types
 -- to ctx.scope. Types are allocated into ctx's own arena so IDs are valid.
 
-local intern_mod = require("lib.type.static.v2.intern")
-local env_mod    = require("lib.type.static.v2.env")
-local defs_mod   = require("lib.type.static.v2.defs")
+local intern_mod = require("lib.type.static.intern")
+local env_mod    = require("lib.type.static.env")
+local defs_mod   = require("lib.type.static.defs")
 
 local M = {}
 
 -- Parse a .d.lua declaration file and populate ctx.scope.
--- Uses the v2 parse + annotation pipeline.
+-- Uses the + annotation pipeline.
 -- Variable declarations (--:: declare name = type) are bound in ctx.scope.
 -- Type aliases (--:: Name = type) are registered in ctx.scope.type_bindings.
 -- After loading, primitive meta type ctx fields are derived from aliases.
@@ -20,9 +20,9 @@ local function load_decls(ctx, path)
     local source = f:read("*a")
     f:close()
 
-    local parse_mod  = require("lib.type.static.v2.parse")
-    local ann_mod    = require("lib.type.static.v2.ann")
-    local infer_mod  = require("lib.type.static.v2.infer")
+    local parse_mod  = require("lib.type.static.parse")
+    local ann_mod    = require("lib.type.static.ann")
+    local infer_mod  = require("lib.type.static.infer")
 
     local ok_p, pr = pcall(parse_mod.parse, source, path, ctx.pool)
     if not ok_p then return end

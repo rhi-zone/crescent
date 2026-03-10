@@ -1,5 +1,5 @@
--- lib/type/static/v2/defs.lua
--- FFI struct definitions and integer constants for the v2 typechecker.
+-- lib/type/static/defs.lua
+-- FFI struct definitions and integer constants for the typechecker.
 
 local ffi = require("ffi")
 

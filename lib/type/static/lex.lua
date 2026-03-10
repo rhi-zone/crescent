@@ -1,5 +1,5 @@
--- lib/type/static/v2/lex.lua
--- Lexer for the v2 typechecker.
+-- lib/type/static/lex.lua
+-- Lexer for the typechecker.
 -- Produces integer token types, interns identifiers/strings on the spot,
 -- captures annotation comments during lex.
 
@@ -8,8 +8,8 @@ local band = bit.band
 local char = string.char
 local format = string.format
 
-local defs = require("lib.type.static.v2.defs")
-local intern_mod = require("lib.type.static.v2.intern")
+local defs = require("lib.type.static.defs")
+local intern_mod = require("lib.type.static.intern")
 
 local M = {}
 

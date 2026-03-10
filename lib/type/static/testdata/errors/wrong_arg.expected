@@ -1,3 +1,0 @@
-test.lua:2:20: error: argument 1: cannot pass '"hello"' where 'number' expected
-  2 | local x = math.sqrt("hello")
-                         ^

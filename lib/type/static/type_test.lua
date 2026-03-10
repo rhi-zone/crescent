@@ -1,23 +1,23 @@
--- lib/type/static/v2/v2_test.lua
--- Tests for the v2 typechecker: defs, intern, arena, lex, parse, ann, checker.
+-- lib/type/static/type_test.lua
+-- Tests for the typechecker: defs, intern, arena, lex, parse, ann, checker.
 
 local ffi = require("ffi")
 local assert = require("lib.test.assert")
-local defs = require("lib.type.static.v2.defs")
-local intern = require("lib.type.static.v2.intern")
-local arena = require("lib.type.static.v2.arena")
-local lex = require("lib.type.static.v2.lex")
-local parse = require("lib.type.static.v2.parse")
-local ann = require("lib.type.static.v2.ann")
-local types_mod = require("lib.type.static.v2.types")
-local env_mod   = require("lib.type.static.v2.env")
-local unify_mod = require("lib.type.static.v2.unify")
-local errors_mod = require("lib.type.static.v2.errors")
-local match_mod = require("lib.type.static.v2.match")
-local infer_mod    = require("lib.type.static.v2.infer")
-local sha256_mod   = require("lib.type.static.v2.sha256")
-local cri_write    = require("lib.type.static.v2.cri_write")
-local cri_read     = require("lib.type.static.v2.cri_read")
+local defs = require("lib.type.static.defs")
+local intern = require("lib.type.static.intern")
+local arena = require("lib.type.static.arena")
+local lex = require("lib.type.static.lex")
+local parse = require("lib.type.static.parse")
+local ann = require("lib.type.static.ann")
+local types_mod = require("lib.type.static.types")
+local env_mod   = require("lib.type.static.env")
+local unify_mod = require("lib.type.static.unify")
+local errors_mod = require("lib.type.static.errors")
+local match_mod = require("lib.type.static.match")
+local infer_mod    = require("lib.type.static.infer")
+local sha256_mod   = require("lib.type.static.sha256")
+local cri_write    = require("lib.type.static.cri_write")
+local cri_read     = require("lib.type.static.cri_read")
 
 ---------------------------------------------------------------------------
 -- sha256.lua
@@ -1006,10 +1006,10 @@ end
     end)
     assert.it("parses its own source files", function()
         local files = {
-            "lib/type/static/v2/intern.lua",
-            "lib/type/static/v2/arena.lua",
-            "lib/type/static/v2/defs.lua",
-            "lib/type/static/v2/lex.lua",
+            "lib/type/static/intern.lua",
+            "lib/type/static/arena.lua",
+            "lib/type/static/defs.lua",
+            "lib/type/static/lex.lua",
             "lib/type/static/v2/parse.lua",
         }
         for _, path in ipairs(files) do

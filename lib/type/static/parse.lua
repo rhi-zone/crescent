@@ -1,4 +1,4 @@
--- lib/type/static/v2/parse.lua
+-- lib/type/static/parse.lua
 -- Recursive descent parser for Lua 5.1/LuaJIT.
 -- Emits flat ASTNode entries directly into an arena — no intermediate tables.
 --
@@ -9,10 +9,10 @@
 
 local ffi = require("ffi")
 local bit = require("bit")
-local defs = require("lib.type.static.v2.defs")
-local lex_mod = require("lib.type.static.v2.lex")
-local arena_mod = require("lib.type.static.v2.arena")
-local intern_mod = require("lib.type.static.v2.intern")
+local defs = require("lib.type.static.defs")
+local lex_mod = require("lib.type.static.lex")
+local arena_mod = require("lib.type.static.arena")
+local intern_mod = require("lib.type.static.intern")
 
 local rshift = bit.rshift
 local band = bit.band

@@ -1,8 +1,8 @@
--- lib/type/static/v2/cri_read.lua
+-- lib/type/static/cri_read.lua
 -- Parse a .cri binary blob and inject the exported types into a ctx.
 --
 -- Usage:
---   local cri_read = require("lib.type.static.v2.cri_read")
+--   local cri_read = require("lib.type.static.cri_read")
 --   local ok, exports = cri_read.load(bytes, ctx)
 --   -- exports: { [name_string] = type_id }  (IDs in ctx's arena)
 --
@@ -21,9 +21,9 @@
 
 local ffi    = require("ffi")
 local bit    = require("bit")
-local sha256 = require("lib.type.static.v2.sha256")
-local defs   = require("lib.type.static.v2.defs")
-local intern_mod = require("lib.type.static.v2.intern")
+local sha256 = require("lib.type.static.sha256")
+local defs   = require("lib.type.static.defs")
+local intern_mod = require("lib.type.static.intern")
 
 local lshift, rshift, tobit = bit.lshift, bit.rshift, bit.tobit
 local band = bit.band

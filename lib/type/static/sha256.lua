@@ -1,4 +1,4 @@
--- lib/type/static/v2/sha256.lua
+-- lib/type/static/sha256.lua
 -- Pure LuaJIT SHA-256 implementation (FIPS 180-4).
 -- Uses bit.* for 32-bit arithmetic; no external dependencies.
 -- Input: Lua string. Output: 64-character lowercase hex string.

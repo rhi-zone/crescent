@@ -1,4 +1,4 @@
--- lib/type/static/v2/arena.lua
+-- lib/type/static/arena.lua
 -- Arena allocators for flat FFI arrays with bump allocation and reset.
 -- Also includes the list pool for variable-length int32 sequences.
 

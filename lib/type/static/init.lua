@@ -1,127 +1,38 @@
 -- lib/type/static/init.lua
--- Public API for the static typechecker.
+-- typechecker: FFI-backed flat data structures, lexer, parser, annotations, checker.
 
 if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
--- ljltk internally requires "dep.ljltk.*" — map "dep." to "lib."
-if not package.preload["dep.ljltk.id_generator"] then
-  local dep_loader = function(mod)
-    local path = mod:gsub("^dep%.", "lib."):gsub("%.", "/") .. ".lua"
-    local f = io.open(path, "r")
-    if not f then return nil, "cannot find " .. path end
-    local src = f:read("*a")
-    f:close()
-    local chunk, err = loadstring(src, "@./" .. path)
-    if not chunk then return nil, err end
-    return chunk
-  end
-  table.insert(package.loaders or package.searchers, 2, function(mod)
-    if mod:match("^dep%.") then return dep_loader(mod) end
-    return nil
-  end)
-end
-
-local reader = require("lib.ljltk.reader")
-local lua_ast = require("lib.ljltk.lua_ast")
-local parse = require("lib.ljltk.parser")
-local lexer = require("lib.ljltk.lexer")
-local types = require("lib.type.static.types")
-local env = require("lib.type.static.env")
-local builtins = require("lib.type.static.builtins")
-local infer = require("lib.type.static.infer")
+local defs   = require("lib.type.static.defs")
+local intern = require("lib.type.static.intern")
+local arena  = require("lib.type.static.arena")
+local lex    = require("lib.type.static.lex")
+local parse  = require("lib.type.static.parse")
+local ann    = require("lib.type.static.ann")
+local types  = require("lib.type.static.types")
+local env    = require("lib.type.static.env")
+local unify  = require("lib.type.static.unify")
 local errors = require("lib.type.static.errors")
+local match  = require("lib.type.static.match")
+local narrow = require("lib.type.static.narrow")
+local infer  = require("lib.type.static.infer")
+local check  = require("lib.type.static.check")
 
-local annotations = require("lib.type.static.annotations")
-
-local M = {}
-
--- Load prelude type declarations into a scope.
-local function load_prelude(scope)
-  -- Find prelude directory relative to this file
-  local info = debug.getinfo(1, "S")
-  local this_dir = info.source:match("^@(.*/)")
-  if not this_dir then this_dir = "./" end
-  -- Normalize: remove ./ prefix if present
-  this_dir = this_dir:gsub("^%./", "")
-
-  local prelude_files = {
-    this_dir .. "prelude/core.d.lua",
-    this_dir .. "prelude/transforms.d.lua",
-  }
-
-  for _, path in ipairs(prelude_files) do
-    local f = io.open(path, "r")
-    if f then
-      local source = f:read("*a")
-      f:close()
-      local ann_map = annotations.build_map(source)
-      for _, ann in pairs(ann_map) do
-        if ann.kind == "type_decl" then
-          env.bind_type(scope, ann.name, { body = ann.type, params = ann.params })
-        end
-      end
-    end
-  end
-end
-
--- Check a Lua source string. Returns error context.
-function M.check_string(source, filename)
-  filename = filename or "<string>"
-  local err_ctx = errors.new()
-
-  -- Parse
-  local ast = lua_ast.New()
-  local ls = lexer(reader.string(source), filename)
-  local ok, chunk = pcall(parse, ast, ls)
-  if not ok then
-    errors.error(err_ctx, filename, 0, "parse error: " .. tostring(chunk))
-    return err_ctx
-  end
-
-  -- Create scope with builtins
-  local scope = builtins.create_env()
-
-  -- Load prelude type aliases
-  load_prelude(scope)
-
-  -- Infer
-  local ctx = infer.infer_chunk(chunk, err_ctx, source, filename, scope)
-
-  return err_ctx, ctx
-end
-
--- Check a Lua file. Returns error context.
-function M.check_file(filename)
-  local f = io.open(filename, "r")
-  if not f then
-    local err_ctx = errors.new()
-    errors.error(err_ctx, filename, 0, "cannot open file")
-    return err_ctx
-  end
-  local source = f:read("*a")
-  f:close()
-  local err_ctx, ctx = M.check_string(source, filename)
-  return err_ctx, ctx
-end
-
--- Convenience: check and return formatted errors string
-function M.check(source, filename)
-  local err_ctx = M.check_string(source, filename)
-  local has_err = errors.has_errors(err_ctx)
-  local has_diag = has_err or errors.count(err_ctx) > 0
-  if has_diag then
-    -- Build source lines map
-    local source_lines = {}
-    local line_num = 0
-    for line in (source .. "\n"):gmatch("([^\n]*)\n") do
-      line_num = line_num + 1
-      source_lines[line_num] = line
-    end
-    return not has_err, errors.format(err_ctx, source_lines)
-  end
-  return true, nil
-end
-
-return M
+return {
+    defs   = defs,
+    intern = intern,
+    arena  = arena,
+    lex    = lex,
+    parse  = parse,
+    ann    = ann,
+    types  = types,
+    env    = env,
+    unify  = unify,
+    errors = errors,
+    match  = match,
+    narrow = narrow,
+    infer  = infer,
+    check  = check,
+}

@@ -1,15 +1,15 @@
--- lib/type/static/v2/check.lua
--- Entry point for the v2 typechecker.
+-- lib/type/static/check.lua
+-- Entry point for the typechecker.
 -- Orchestrates parse → annotations → prescan → infer → .cri cache.
 
-local infer_mod  = require("lib.type.static.v2.infer")
-local errors_mod = require("lib.type.static.v2.errors")
-local intern_mod = require("lib.type.static.v2.intern")
-local env_mod    = require("lib.type.static.v2.env")
-local types_mod  = require("lib.type.static.v2.types")
-local cache_mod  = require("lib.type.static.v2.cache")
-local cri_write  = require("lib.type.static.v2.cri_write")
-local cri_read   = require("lib.type.static.v2.cri_read")
+local infer_mod  = require("lib.type.static.infer")
+local errors_mod = require("lib.type.static.errors")
+local intern_mod = require("lib.type.static.intern")
+local env_mod    = require("lib.type.static.env")
+local types_mod  = require("lib.type.static.types")
+local cache_mod  = require("lib.type.static.cache")
+local cri_write  = require("lib.type.static.cri_write")
+local cri_read   = require("lib.type.static.cri_read")
 
 local M = {}
 

@@ -1,4 +1,4 @@
--- lib/type/static/v2/intern.lua
+-- lib/type/static/intern.lua
 -- String interning with FFI-aware hash table.
 -- Hot path (intern_raw) does zero Lua string allocation — hashes raw
 -- source bytes, probes open-addressing table, memcmp to confirm.
@@ -10,7 +10,7 @@ local bxor = bit.bxor
 local lshift = bit.lshift
 local tobit = bit.tobit
 
-local defs = require("lib.type.static.v2.defs")
+local defs = require("lib.type.static.defs")
 
 pcall(ffi.cdef, "int memcmp(const void *s1, const void *s2, size_t n);")
 
