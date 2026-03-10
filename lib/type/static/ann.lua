@@ -196,6 +196,20 @@ function M.parse_annotations(annotations, pool, filename)
     -- Forward declaration
     local parse_type
 
+    -- Accumulated parse warnings (populated during parsing, returned with the result).
+    local warnings = {}
+
+    -- Check if an annotation type ID is a union containing at least one function type.
+    -- Used to warn on `(A) -> B | (C) -> D` which parses as `(A) -> (B | (C) -> D)`.
+    local function union_contains_fn(tid)
+        local t = types:get(tid)
+        if t.tag ~= defs.TAG_UNION then return false end
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if types:get(type_lists:get(i)).tag == defs.TAG_FUNCTION then return true end
+        end
+        return false
+    end
+
     -- Parse primary (non-union, non-intersection) type
     local function parse_primary(s)
         local b = peek(s)
@@ -259,6 +273,12 @@ function M.parse_annotations(annotations, pool, filename)
                 if s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "->" then
                     s.pos = s.pos + 2
                     local ret = parse_type(s)
+                    if union_contains_fn(ret) then
+                        warnings[#warnings + 1] = { line = s.line, col = 1,
+                            msg = "function type in union return position"
+                                .. " — wrap each function type in parens:"
+                                .. " `(() -> A) | (() -> B)`" }
+                    end
                     local fn = alloc_type(defs.TAG_FUNCTION)
                     local ft = types:get(fn)
                     -- no params, no returns list — single return
@@ -317,6 +337,12 @@ function M.parse_annotations(annotations, pool, filename)
                     expect_char(s, ")")
                 else
                     returns[1] = parse_type(s)
+                    if union_contains_fn(returns[1]) then
+                        warnings[#warnings + 1] = { line = s.line, col = 1,
+                            msg = "function type in union return position"
+                                .. " — wrap each function type in parens:"
+                                .. " `((A) -> B) | ((A) -> C)`" }
+                    end
                 end
                 -- Extract trailing spread as vararg
                 local vararg_ann_id = -1
@@ -771,6 +797,7 @@ function M.parse_annotations(annotations, pool, filename)
         fields = fields,
         lists = type_lists,
         results = results,
+        warnings = warnings,
         pool = pool,
     }
 end

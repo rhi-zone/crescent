@@ -1941,6 +1941,12 @@ end
 
 local function process_type_decls(ctx)
     if not ctx.ann then return end
+    -- Emit annotation parse warnings (e.g. ambiguous function-union return types).
+    if ctx.ann.warnings then
+        for _, w in ipairs(ctx.ann.warnings) do
+            warn(ctx, w.line, w.col, w.msg)
+        end
+    end
     local decls = {}
     local decl_lines = {}
     for line, result in pairs(ctx.ann.results) do

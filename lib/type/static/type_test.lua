@@ -2904,4 +2904,18 @@ local x = fn("oops")
 local y = n + 1
 ]])
     end)
+
+    assert.it("ambiguous function-union return type warns to add parens", function()
+        has_warning([[
+--:: declare fn = (integer) -> string | (string) -> integer
+local x = fn(1)
+]], "function type in union return position")
+    end)
+
+    assert.it("parenthesized function union does not warn", function()
+        no_errors([[
+--:: declare fn = ((integer) -> string) | ((string) -> integer)
+local x = fn(1)
+]])
+    end)
 end)
