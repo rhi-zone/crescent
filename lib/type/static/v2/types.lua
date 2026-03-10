@@ -706,6 +706,16 @@ function M.display(ctx, tid, seen)
     return "?"
 end
 
+-- Display a type, truncating to max_len characters with "…" appended.
+-- Keeps error messages readable for complex / deeply-nested types.
+local TRUNC_LEN = 120
+function M.display_short(ctx, tid, max_len)
+    max_len = max_len or TRUNC_LEN
+    local s = M.display(ctx, tid)
+    if #s <= max_len then return s end
+    return s:sub(1, max_len - 1) .. "\xe2\x80\xa6"  -- UTF-8 ellipsis (…)
+end
+
 -- Map from Lua type() string to type_id singleton
 function M.typeof_to_id(ctx, s)
     if s == "nil"      then return ctx.T_NIL end

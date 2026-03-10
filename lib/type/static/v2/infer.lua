@@ -575,7 +575,7 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
         local mm = meta_op_ret(ctx, arg_tid, "__unm")
         if mm then return mm end
         if not has_metamethod(ctx, arg_tid, "__unm", false) then
-            report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display(ctx, arg_tid) .. "'")
+            report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display_short(ctx, arg_tid) .. "'")
         end
         return ctx.T_NUMBER
     end
@@ -584,7 +584,7 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
         if mm then return mm end
         -- Tables always support # (built-in length); everything else needs __len.
         if not has_metamethod(ctx, arg_tid, "__len", true) then
-            report(ctx, n.line, n.col, "cannot get length of '" .. types_mod.display(ctx, arg_tid) .. "'")
+            report(ctx, n.line, n.col, "cannot get length of '" .. types_mod.display_short(ctx, arg_tid) .. "'")
         end
         return ctx.T_INTEGER
     end
@@ -632,12 +632,12 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             if lt.tag == TAG_UNION then
                 for i = lt.data[0], lt.data[0] + lt.data[1] - 1 do
                     if not is_numeric(ctx, ctx.lists:get(i)) then
-                        report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display(ctx, r_id) .. "'")
+                        report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display_short(ctx, r_id) .. "'")
                         return
                     end
                 end
             elseif not is_numeric(ctx, r_id) then
-                report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display(ctx, r_id) .. "'")
+                report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display_short(ctx, r_id) .. "'")
             end
         end
         check_num(left_r)
@@ -661,11 +661,11 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         if mm then return mm end
         -- Validate each operand supports ordering (nil and boolean do not).
         if not has_metamethod(ctx, left_r, mm_name, false) then
-            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display(ctx, left_r) .. "'")
+            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display_short(ctx, left_r) .. "'")
             return ctx.T_BOOLEAN
         end
         if not has_metamethod(ctx, right_r, mm_name, false) then
-            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display(ctx, right_r) .. "'")
+            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display_short(ctx, right_r) .. "'")
             return ctx.T_BOOLEAN
         end
         -- Cross-type check via Lua metamethod calling rules.
@@ -682,8 +682,8 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
                 local ok1 = unify_mod.try_unify(ctx, right_r, p1)
                 if not ok0 or not ok1 then
                     report(ctx, n.line, n.col,
-                        "cannot compare '" .. types_mod.display(ctx, left_r)
-                        .. "' with '" .. types_mod.display(ctx, right_r) .. "'")
+                        "cannot compare '" .. types_mod.display_short(ctx, left_r)
+                        .. "' with '" .. types_mod.display_short(ctx, right_r) .. "'")
                 end
             end
         end
@@ -718,10 +718,10 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             return meta_op_ret(ctx, r_id, "__concat") ~= nil
         end
         if not is_concat_ok(left_r) then
-            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display(ctx, left_r) .. "'")
+            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display_short(ctx, left_r) .. "'")
         end
         if not is_concat_ok(right_r) then
-            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display(ctx, right_r) .. "'")
+            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display_short(ctx, right_r) .. "'")
         end
         return ctx.T_STRING
     end
@@ -760,7 +760,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         end
         if obj_t.data[4] >= 0 then return ctx.T_ANY end
         local fname = intern_mod.get(ctx.pool, fname_id) or "?"
-        report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display(ctx, obj_tid) .. "'")
+        report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'")
         return ctx.T_ANY
     end
 
@@ -799,7 +799,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     end
 
     local fname = intern_mod.get(ctx.pool, fname_id) or "?"
-    report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display(ctx, obj_tid) .. "'")
+    report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'")
     return ctx.T_ANY
 end
 
@@ -849,8 +849,8 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col)
             local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
             if not ok then
                 report(ctx, line, col,
-                    "argument " .. (i + 1) .. ": cannot pass '" .. types_mod.display(ctx, act_tid)
-                    .. "' where '" .. types_mod.display(ctx, exp_tid) .. "' expected"
+                    "argument " .. (i + 1) .. ": cannot pass '" .. types_mod.display_short(ctx, act_tid)
+                    .. "' where '" .. types_mod.display_short(ctx, exp_tid) .. "' expected"
                     .. (err and (": " .. err) or ""))
             end
         else
@@ -913,7 +913,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
     end
 
     if ft.tag ~= TAG_NEVER then
-        report(ctx, line, col, "cannot call type '" .. types_mod.display(ctx, fn_tid) .. "'")
+        report(ctx, line, col, "cannot call type '" .. types_mod.display_short(ctx, fn_tid) .. "'")
     end
     ctx._last_multi_return = { ctx.T_ANY }
     return ctx.T_ANY
@@ -988,7 +988,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
             method_tid = types_mod.find(ctx, fe.type_id)
         else
             local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
+            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display_short(ctx, recv_r) .. "'")
         end
     else
         -- For primitive types, look up a registered __index table in ctx.prim_index.
@@ -1006,12 +1006,12 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
                     method_tid = types_mod.find(ctx, fe.type_id)
                 else
                     local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-                    report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
+                    report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display_short(ctx, recv_r) .. "'")
                 end
             end
         elseif recv_t.tag ~= TAG_ANY and recv_t.tag ~= TAG_VAR then
             local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display(ctx, recv_r) .. "'")
+            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display_short(ctx, recv_r) .. "'")
         end
     end
 
@@ -1334,8 +1334,8 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 local ok, err = unify_mod.unify(ctx, rhs_tid, ann_tid)
                 if not ok then
                     report(ctx, n.line, n.col,
-                        "type mismatch: '" .. types_mod.display(ctx, rhs_tid)
-                        .. "' is not assignable to '" .. types_mod.display(ctx, ann_tid) .. "'"
+                        "type mismatch: '" .. types_mod.display_short(ctx, rhs_tid)
+                        .. "' is not assignable to '" .. types_mod.display_short(ctx, ann_tid) .. "'"
                         .. (err and (": " .. err) or ""))
                 end
             end
@@ -1446,7 +1446,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     if not ok then
                         local nm = intern_mod.get(ctx.pool, name_id) or "?"
                         report(ctx, tn.line, tn.col,
-                            "cannot assign '" .. types_mod.display(ctx, rhs_tid)
+                            "cannot assign '" .. types_mod.display_short(ctx, rhs_tid)
                             .. "' to '" .. nm .. "'" .. (err and (": " .. err) or ""))
                     end
                 end
