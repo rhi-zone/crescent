@@ -39,7 +39,22 @@
 --:: declare _VERSION = string
 --:: declare ffi = any
 --:: declare _G = { [string]: any, ... }
---:: declare bit = any
+--[[::
+declare bit = {
+    tobit:   (number) -> integer,
+    tohex:   (integer, integer?) -> string,
+    bnot:    (integer) -> integer,
+    band:    (integer, ...integer) -> integer,
+    bor:     (integer, ...integer) -> integer,
+    bxor:    (integer, ...integer) -> integer,
+    lshift:  (integer, integer) -> integer,
+    rshift:  (integer, integer) -> integer,
+    arshift: (integer, integer) -> integer,
+    bswap:   (integer) -> integer,
+    rol:     (integer, integer) -> integer,
+    ror:     (integer, integer) -> integer
+}
+]]
 --:: declare jit = any
 
 ---------------------------------------------------------------------------
