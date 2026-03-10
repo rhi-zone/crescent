@@ -233,7 +233,7 @@ v2 is architecturally superior but v1 CLI has QoL features v2 still needs before
 | Source line + caret in errors | ✓ | ✓ (2026-03-10) |
 | `--format sarif` | ✓ | ✓ (2026-03-10) |
 | `--dump` mode (print inferred bindings) | ✓ | ✓ (2026-03-10) |
-| `--annotate` mode (emit source + annotations) | ✓ | ✗ |
+| `--annotate` mode (emit source + annotations) | ✓ | ✓ (2026-03-10) |
 | Auto-glob `lib/*.lua` when no args | ✓ | ✓ (2026-03-10) |
 | `.cri` cross-file require() types | ✗ | ✓ |
 | Correct integer <: number | ✗ | ✓ |
@@ -244,7 +244,7 @@ v2 is architecturally superior but v1 CLI has QoL features v2 still needs before
 Blocking items for cutover:
 - [x] `--dump` mode in v2 CLI — 2026-03-10
 - [x] Auto-glob fallback in v2 CLI — 2026-03-10
-- [ ] `--annotate` mode in v2 CLI
+- [x] `--annotate` mode in v2 CLI — 2026-03-10
 
 ### backlog
 - [ ] **Error message quality audit** — bar is Rust-level helpfulness. Specific gaps identified:

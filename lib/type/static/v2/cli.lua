@@ -82,9 +82,8 @@ local function main()
                         -- Skip trivial: vars, any, nil, functions with all-any sigs.
                         if rt.tag ~= defs.TAG_VAR and rt.tag ~= defs.TAG_ANY
                                 and rt.tag ~= defs.TAG_NIL then
-                            local name = intern_mod.get(ctx.pool, ann.name_id) or "?"
                             local type_str = types_mod.display(ctx, resolved)
-                            local ann_text = "--: " .. name .. ": " .. type_str
+                            local ann_text = "--: " .. type_str
                             if not insertions[line] then insertions[line] = {} end
                             insertions[line][#insertions[line] + 1] = ann_text
                         end
