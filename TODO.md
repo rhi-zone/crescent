@@ -247,7 +247,7 @@ Blocking items for cutover:
 - [x] `--annotate` mode in v2 CLI — 2026-03-10
 
 ### backlog
-- [ ] **[HIGH] Soundness audit** — systematic review of known unsoundness in the type system once semantics are more complete. Known gaps to audit: (1) union-of-functions call: arg that matches only *some* union members at try_unify level (due to TAG_VAR permissiveness) may slip through; (2) intersection LHS in unify: "any one member satisfies RHS" is wrong for structural types — `{x} & {y} <: {x,y}` should hold but doesn't; (3) try_unify doesn't handle TAG_INTERSECTION; (4) covariant/contravariant positions in generics not enforced; (5) recursive types. Goal: enumerate all unsound rules and decide fix vs documented trade-off.
+- [ ] **Soundness audit** — do this AFTER the type system is feature-complete; auditing before then risks fixing things that get re-broken by later features. Known gaps to audit: (1) union-of-functions call: arg that matches only *some* union members at try_unify level (due to TAG_VAR permissiveness) may slip through; (2) intersection LHS in unify: "any one member satisfies RHS" is wrong for structural types — `{x} & {y} <: {x,y}` should hold but doesn't; (3) try_unify doesn't handle TAG_INTERSECTION; (4) covariant/contravariant positions in generics not enforced; (5) recursive types. Goal: enumerate all unsound rules and decide fix vs documented trade-off.
 - [ ] **Error message quality audit** — bar is Rust-level helpfulness. Specific gaps identified:
   - Source line + caret: **DONE** (2026-03-10) — errors.lua set_source/format_plain/format_ansi
   - "missing required argument" now shows expected type: **DONE** (2026-03-10) — `argument 1: missing required argument (expected 'string', got nil)`
