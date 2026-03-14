@@ -101,10 +101,11 @@ end
 
 -- Populate ctx.scope with Lua 5.1 / LuaJIT stdlib bindings.
 function M.populate(ctx)
-    -- Load all stdlib declarations from the companion .d.lua file.
+    -- Load all stdlib declarations from the companion .d.lua files.
     local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     load_decls(ctx, dir .. "stdlib.d.lua")
+    load_decls(ctx, dir .. "ctx.d.lua")
 end
 
 return M
