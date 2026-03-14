@@ -248,10 +248,11 @@ assert.describe("cdef: Ptr<T> — struct pointer returns intersection", function
         local m1_tid = types_mod.find(ctx, ctx.lists:get(ret_t.data[0] + 1))
         local m1 = ctx.types:get(m1_tid)
         assert.eq(m1.tag, defs.TAG_TABLE, "second member should be an integer-indexed table")
-        -- Deref table should have an integer indexer
+        -- Deref table should have a literal-0 indexer (only ptr[0] valid, not ptr[1])
         assert.ok(m1.data[3] > 0, "deref table should have at least one indexer pair")
         local idx_key_tid = types_mod.find(ctx, ctx.lists:get(m1.data[2]))
-        assert.eq(idx_key_tid, ctx.T_INTEGER, "deref indexer key should be integer")
+        local idx_key_t = ctx.types:get(idx_key_tid)
+        assert.eq(idx_key_t.tag, defs.TAG_LITERAL, "deref indexer key should be literal 0")
     end)
 end)
 

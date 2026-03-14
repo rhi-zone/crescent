@@ -28,8 +28,11 @@ local function register_ptr(ctx)
     t_ref_slot.data[1] = 0  -- args_start
     t_ref_slot.data[2] = 0  -- args_len
 
-    -- { [integer]: T }  (indexer: integer → T_ref) for [0] dereference
-    local deref_tbl = types_mod.make_table(ctx, {}, {ctx.T_INTEGER, T_ref}, -1, {})
+    -- { [0]: T }  (indexer: literal 0 → T_ref) for scalar pointer dereference
+    -- Use TAG_LITERAL LIT_NUMBER so ptr[1] is rejected (only ptr[0] is valid)
+    local zero_id  = intern_mod.intern(ctx.pool, "0")
+    local zero_tid = types_mod.make_literal(ctx, defs.LIT_NUMBER, zero_id)
+    local deref_tbl = types_mod.make_table(ctx, {}, {zero_tid, T_ref}, -1, {})
 
     -- Ptr<T> = T & { [integer]: T }
     -- Member 1: T itself (struct fields accessible directly via intersection)

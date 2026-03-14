@@ -21,11 +21,13 @@ local TAG_TABLE        = defs.TAG_TABLE
 -- Helpers: build concrete Ptr and Arr types for a known element TID
 ---------------------------------------------------------------------------
 
--- make_ptr(ctx, inner_tid): build Ptr<inner_tid> = inner_tid & { [integer]: inner_tid }
+-- make_ptr(ctx, inner_tid): build Ptr<inner_tid> = inner_tid & { [0]: inner_tid }
 -- Models a struct pointer: struct fields accessible directly (intersection with inner),
--- plus explicit [0] dereference via the integer indexer.
+-- plus explicit [0] dereference via the literal-0 indexer (ptr[1] is rejected).
 local function make_ptr(ctx, inner_tid)
-    local deref_tbl = types_mod.make_table(ctx, {}, {ctx.T_INTEGER, inner_tid}, -1, {})
+    local zero_id  = intern_mod.intern(ctx.pool, "0")
+    local zero_tid = types_mod.make_literal(ctx, defs.LIT_NUMBER, zero_id)
+    local deref_tbl = types_mod.make_table(ctx, {}, {zero_tid, inner_tid}, -1, {})
     -- Re-fetch inner_tid after make_table (arena:grow() may have invalidated pointers,
     -- but inner_tid is still a valid integer ID so it stays correct).
     return types_mod.make_intersection(ctx, {inner_tid, deref_tbl})
