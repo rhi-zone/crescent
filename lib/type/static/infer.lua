@@ -2139,7 +2139,12 @@ local function process_type_decls(ctx)
             local alias = env_mod.lookup_type(ctx.scope, r.name_id)
             if alias then
                 if r.newtype then
-                    local underlying = resolve_annotation_type(ctx, r.type_id)
+                    -- r.type_id in the ann arena is already a TAG_NOMINAL; its data[2]
+                    -- holds the underlying ann type_id. Resolve that directly to avoid
+                    -- double-wrapping (resolve_annotation_type would create a NOMINAL
+                    -- then make_nominal would wrap it again).
+                    local ann_nom = ctx.ann.types:get(r.type_id)
+                    local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
                     ctx.nominal_id = ctx.nominal_id + 1
                     alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
                 else

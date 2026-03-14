@@ -3039,3 +3039,84 @@ local x = fn(1)
 ]], "union members")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- TAG_NOMINAL unwrap: field access, index access, call
+---------------------------------------------------------------------------
+
+assert.describe("checker: TAG_NOMINAL unwrap", function()
+    assert.it("nominal wrapping table: field access works", function()
+        no_errors([[
+--:: newtype MyTable = { x: integer, y: string }
+--:: declare t = MyTable
+local a = t.x
+local b = a + 1
+]])
+    end)
+
+    assert.it("nominal wrapping table: index access works", function()
+        no_errors([[
+--:: newtype MyMap = { [string]: integer }
+--:: declare m = MyMap
+local v = m["key"]
+]])
+    end)
+
+    assert.it("nominal wrapping function: call works", function()
+        no_errors([[
+--:: newtype MyFn = (integer) -> string
+--:: declare f = MyFn
+local r = f(42)
+local s = r .. "!"
+]])
+    end)
+
+    assert.it("nominal wrapping function: wrong arg type errors", function()
+        has_error([[
+--:: newtype MyFn = (integer) -> string
+--:: declare f = MyFn
+local r = f("oops")
+]], "cannot pass")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- TAG_NEVER in NODE_INDEX_EXPR
+---------------------------------------------------------------------------
+
+assert.describe("checker: TAG_NEVER index", function()
+    assert.it("indexing never-typed value returns never (no error)", function()
+        -- x[1] where x: never should propagate never, not T_ANY.
+        no_errors([[
+--:: declare x = never
+local y = x[1]
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- TAG_CDATA in try_unify
+---------------------------------------------------------------------------
+
+assert.describe("checker: TAG_CDATA in try_unify", function()
+    assert.it("cdata is assignable to any type via try_unify (low-level)", function()
+        local ctx = make_unify_ctx()
+        local cdata_tid = types_mod.alloc_type(ctx, defs.TAG_CDATA)
+        assert.ok(unify_mod.try_unify(ctx, cdata_tid, ctx.T_STRING))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_NUMBER, cdata_tid))
+    end)
+
+    assert.it("overload dispatch accepts cdata argument", function()
+        no_errors([[
+--:: declare fn = ((cdata) -> string) & ((string) -> integer)
+local r = fn("hello")
+]])
+    end)
+
+    assert.it("overloaded function with cdata parameter: cdata arg satisfies cdata param", function()
+        local ctx = make_unify_ctx()
+        local cdata_tid = types_mod.alloc_type(ctx, defs.TAG_CDATA)
+        assert.ok(unify_mod.try_unify(ctx, cdata_tid, cdata_tid))
+        assert.ok(unify_mod.try_unify(ctx, cdata_tid, ctx.T_STRING))
+    end)
+end)
