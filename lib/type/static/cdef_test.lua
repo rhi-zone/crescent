@@ -201,3 +201,91 @@ assert.describe("cdef: enum values", function()
         assert.eq(green_tid, ctx.T_INTEGER)
     end)
 end)
+
+assert.describe("cdef: Ptr<T> — struct pointer returns intersection", function()
+    -- typedef struct Vec2 { float x; float y; } Vec2;
+    -- Vec2 *get_vec(void);
+    -- Return type should be TAG_INTERSECTION of (struct table) & ({ [integer]: struct })
+    assert.it("function returning T* where T is a named struct yields TAG_INTERSECTION", function()
+        local ctx = new_ctx()
+        cdef_mod.process(ctx, [[
+            typedef struct { float x; float y; } Vec2;
+            Vec2 *get_vec(void);
+        ]])
+        local fn_tid = ffi_c_field(ctx, "get_vec")
+        assert.ok(fn_tid, "get_vec should be in ffi.C")
+        local fn_t = ctx.types:get(fn_tid)
+        assert.eq(fn_t.tag, defs.TAG_FUNCTION)
+        -- Return type is the intersection
+        assert.eq(fn_t.data[3], 1)
+        local ret_tid = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
+        local ret_t = ctx.types:get(ret_tid)
+        assert.eq(ret_t.tag, defs.TAG_INTERSECTION,
+            "Ptr<T> should be an intersection type (got tag " .. tostring(ret_t.tag) .. ")")
+    end)
+
+    assert.it("Ptr<T> intersection has 2 members: the struct table and an integer-indexed table", function()
+        local ctx = new_ctx()
+        cdef_mod.process(ctx, [[
+            typedef struct { int x; int y; } Point;
+            Point *get_point(void);
+        ]])
+        local fn_tid = ffi_c_field(ctx, "get_point")
+        local fn_t = ctx.types:get(fn_tid)
+        local ret_tid = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
+        local ret_t = ctx.types:get(ret_tid)
+        -- Intersection should have exactly 2 members
+        assert.eq(ret_t.data[1], 2, "intersection should have 2 members")
+        -- Member 0: the struct (TAG_TABLE with named fields)
+        local m0_tid = types_mod.find(ctx, ctx.lists:get(ret_t.data[0]))
+        local m0 = ctx.types:get(m0_tid)
+        assert.eq(m0.tag, defs.TAG_TABLE, "first member should be the struct table")
+        -- Verify struct has x field
+        local x_id = intern.intern(ctx.pool, "x")
+        local fe_x = types_mod.table_field(ctx, m0_tid, x_id)
+        assert.ok(fe_x, "struct member should have x field")
+        -- Member 1: { [integer]: struct } (deref table)
+        local m1_tid = types_mod.find(ctx, ctx.lists:get(ret_t.data[0] + 1))
+        local m1 = ctx.types:get(m1_tid)
+        assert.eq(m1.tag, defs.TAG_TABLE, "second member should be an integer-indexed table")
+        -- Deref table should have an integer indexer
+        assert.ok(m1.data[3] > 0, "deref table should have at least one indexer pair")
+        local idx_key_tid = types_mod.find(ctx, ctx.lists:get(m1.data[2]))
+        assert.eq(idx_key_tid, ctx.T_INTEGER, "deref indexer key should be integer")
+    end)
+end)
+
+assert.describe("cdef: Arr<T> — array parameter yields integer-indexed table", function()
+    -- void process(int buf[], int n)  — buf is int[] → Arr<int>
+    assert.it("T[] parameter type has TAG_TABLE with integer indexer", function()
+        local ctx = new_ctx()
+        cdef_mod.process(ctx, "void process(int buf[], int n);")
+        local fn_tid = ffi_c_field(ctx, "process")
+        assert.ok(fn_tid, "process should be in ffi.C")
+        local fn_t = ctx.types:get(fn_tid)
+        assert.eq(fn_t.tag, defs.TAG_FUNCTION)
+        -- First param: buf — should be Arr<int> = { [integer]: integer }
+        assert.ok(fn_t.data[1] >= 1, "process should have at least one param")
+        local p0_tid = types_mod.find(ctx, ctx.lists:get(fn_t.data[0]))
+        local p0 = ctx.types:get(p0_tid)
+        assert.eq(p0.tag, defs.TAG_TABLE,
+            "Arr<T> should be a table type (got tag " .. tostring(p0.tag) .. ")")
+        -- Should have an integer indexer
+        assert.ok(p0.data[3] > 0, "Arr<T> table should have at least one indexer pair")
+        local idx_key_tid = types_mod.find(ctx, ctx.lists:get(p0.data[2]))
+        assert.eq(idx_key_tid, ctx.T_INTEGER, "Arr<T> indexer key should be integer")
+        local idx_val_tid = types_mod.find(ctx, ctx.lists:get(p0.data[2] + 1))
+        assert.eq(idx_val_tid, ctx.T_INTEGER, "Arr<int> indexer value should be integer")
+    end)
+
+    assert.it("Arr<T> has no named fields (pure indexer table)", function()
+        local ctx = new_ctx()
+        cdef_mod.process(ctx, "void process(int buf[], int n);")
+        local fn_tid = ffi_c_field(ctx, "process")
+        local fn_t = ctx.types:get(fn_tid)
+        local p0_tid = types_mod.find(ctx, ctx.lists:get(fn_t.data[0]))
+        local p0 = ctx.types:get(p0_tid)
+        -- fields_len should be 0 (no named fields)
+        assert.eq(p0.data[1], 0, "Arr<T> should have no named fields")
+    end)
+end)

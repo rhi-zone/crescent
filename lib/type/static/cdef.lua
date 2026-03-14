@@ -18,6 +18,26 @@ local TAG_ANY          = defs.TAG_ANY
 local TAG_TABLE        = defs.TAG_TABLE
 
 ---------------------------------------------------------------------------
+-- Helpers: build concrete Ptr and Arr types for a known element TID
+---------------------------------------------------------------------------
+
+-- make_ptr(ctx, inner_tid): build Ptr<inner_tid> = inner_tid & { [integer]: inner_tid }
+-- Models a struct pointer: struct fields accessible directly (intersection with inner),
+-- plus explicit [0] dereference via the integer indexer.
+local function make_ptr(ctx, inner_tid)
+    local deref_tbl = types_mod.make_table(ctx, {}, {ctx.T_INTEGER, inner_tid}, -1, {})
+    -- Re-fetch inner_tid after make_table (arena:grow() may have invalidated pointers,
+    -- but inner_tid is still a valid integer ID so it stays correct).
+    return types_mod.make_intersection(ctx, {inner_tid, deref_tbl})
+end
+
+-- make_arr(ctx, elem_tid): build Arr<elem_tid> = { [integer]: elem_tid }
+-- Models an array pointer: any integer index yields elem_tid.
+local function make_arr(ctx, elem_tid)
+    return types_mod.make_table(ctx, {}, {ctx.T_INTEGER, elem_tid}, -1, {})
+end
+
+---------------------------------------------------------------------------
 -- c_type_to_tid: map a C type descriptor to a TypeSlot ID in ctx
 ---------------------------------------------------------------------------
 
@@ -43,12 +63,21 @@ local function c_type_to_tid(ctx, ctype)
             end
             if tok == "struct" then
                 if to.fields and #to.fields > 0 then
-                    -- Build the struct table type.
+                    -- Build the struct table type, then wrap as Ptr<T>.
                     local inner = c_type_to_tid(ctx, to)
-                    -- Ptr<T> = T & { [integer]: T } for [0] dereference.
-                    local deref_tbl = types_mod.make_table(ctx, {}, {ctx.T_INTEGER, inner}, -1, {})
-                    return types_mod.make_intersection(ctx, {inner, deref_tbl})
+                    return make_ptr(ctx, inner)
                 end
+            end
+            if tok == "name" then
+                -- Typedef reference: resolve to check if it's a struct table.
+                local inner = c_type_to_tid(ctx, to)
+                local resolved = types_mod.find(ctx, inner)
+                local t = ctx.types:get(resolved)
+                if t.tag == TAG_TABLE then
+                    return make_ptr(ctx, resolved)
+                end
+                -- Not a struct — opaque pointer.
+                return types_mod.alloc_type(ctx, defs.TAG_CDATA)
             end
         end
         -- Opaque pointer.
@@ -56,8 +85,9 @@ local function c_type_to_tid(ctx, ctype)
     end
 
     if k == "arr" then
-        -- Arrays treated as opaque for now.
-        return types_mod.alloc_type(ctx, defs.TAG_CDATA)
+        -- Arr<T> = { [integer]: T } — array pointer with integer indexer.
+        local elem_tid = c_type_to_tid(ctx, ctype.of)
+        return make_arr(ctx, elem_tid)
     end
 
     if k == "union" then
