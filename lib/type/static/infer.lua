@@ -756,7 +756,22 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local obj_t = ctx.types:get(obj_tid)
 
     if obj_t.tag == TAG_NEVER then return ctx.T_NEVER end
-    if obj_t.tag == TAG_ANY   then return ctx.T_ANY end
+    if obj_t.tag == TAG_ANY   then
+        -- ffi.C → return the per-ctx FFI namespace type when hooks are active.
+        if ctx.T_FFI_C then
+            local obj_n = ctx.nodes:get(n.data[0])
+            if obj_n and obj_n.kind == NODE_IDENTIFIER then
+                local obj_name = intern_mod.get(ctx.pool, obj_n.data[0]) or ""
+                if obj_name == "ffi" then
+                    local field_name = intern_mod.get(ctx.pool, fname_id) or ""
+                    if field_name == "C" then
+                        return ctx.T_FFI_C
+                    end
+                end
+            end
+        end
+        return ctx.T_ANY
+    end
 
     -- Nominal types: unwrap to underlying type for field access.
     if obj_t.tag == TAG_NOMINAL then
@@ -1209,6 +1224,24 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 if exports then
                     return exports
                 end
+            end
+        end
+    elseif callee_n.kind == NODE_FIELD_EXPR and ctx.ffi_hooks then
+        -- Detect ffi.cdef(str) calls: extract C declaration string and process it.
+        local obj_n = ctx.nodes:get(callee_n.data[0])
+        if obj_n.kind == NODE_IDENTIFIER then
+            local obj_name  = intern_mod.get(ctx.pool, obj_n.data[0]) or ""
+            local field_name = intern_mod.get(ctx.pool, callee_n.data[1]) or ""
+            if obj_name == "ffi" and field_name == "cdef" and n.data[2] >= 1 then
+                local arg0_nid = ctx.ast_lists:get(n.data[1])
+                local arg0_n   = ctx.nodes:get(arg0_nid)
+                if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
+                    local c_str = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
+                    if ctx.ffi_hooks.process then
+                        ctx.ffi_hooks.process(ctx, c_str)
+                    end
+                end
+                return ctx.T_NIL
             end
         end
     end
@@ -2177,6 +2210,7 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx.module_types = {}
     ctx.module_return_tids = nil  -- set after check_string wraps infer_block
     ctx.cri_loader = nil          -- optional: function(ctx, module_name) -> exports_table | nil
+    ctx.ffi_hooks  = nil          -- optional: { init=fn, process=fn } installed by prelude_luajit
     ctx._last_multi_return = nil
     ctx._last_pcall_success_types = nil
     ctx._pcall_info = {}
@@ -2220,6 +2254,11 @@ function M.check_string(source, filename, parent_scope, pool, cri_loader)
         require("lib.type.static.prelude").populate(ctx)
     end
 
+    -- Run FFI hooks init if installed (e.g. by prelude_luajit).
+    if ctx.ffi_hooks and ctx.ffi_hooks.init then
+        ctx.ffi_hooks.init(ctx)
+    end
+
     -- Register type declarations first, then prescan, then infer
     process_type_decls(ctx)
 
@@ -2237,5 +2276,8 @@ end
 
 -- Expose resolve_annotation_type for external use (e.g. check.lua)
 M.resolve_annotation_type = resolve_annotation_type
+
+-- Expose table_add_field for external modules (e.g. cdef.lua)
+M.table_add_field = table_add_field
 
 return M
