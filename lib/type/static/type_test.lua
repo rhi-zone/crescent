@@ -2908,6 +2908,115 @@ local x = fn(1)
     end)
 end)
 
+---------------------------------------------------------------------------
+-- TAG_INTERSECTION completeness: field access, index access, try_unify
+---------------------------------------------------------------------------
+
+assert.describe("checker: intersection field access", function()
+    assert.it("field from first member resolves correctly", function()
+        no_errors([[
+--:: T1 = { x: integer }
+--:: T2 = { y: string }
+--:: declare obj = T1 & T2
+local a = obj.x
+local b = a + 1
+]])
+    end)
+
+    assert.it("field from second member resolves correctly", function()
+        no_errors([[
+--:: T1 = { x: integer }
+--:: T2 = { y: string }
+--:: declare obj = T1 & T2
+local a = obj.y
+local b = a .. "!"
+]])
+    end)
+
+    assert.it("field present in all members: no error", function()
+        no_errors([[
+--:: T1 = { x: integer }
+--:: T2 = { x: integer }
+--:: declare obj = T1 & T2
+local a = obj.x
+]])
+    end)
+
+    assert.it("missing field on intersection reports error", function()
+        has_error([[
+--:: T1 = { x: integer }
+--:: T2 = { y: string }
+--:: declare obj = T1 & T2
+local a = obj.z
+]], "no field")
+    end)
+end)
+
+assert.describe("checker: intersection index access", function()
+    assert.it("numeric indexer from intersection member resolves", function()
+        no_errors([[
+--:: T1 = { [number]: integer }
+--:: T2 = { name: string }
+--:: declare obj = T1 & T2
+local a = obj[1]
+local b = a + 1
+]])
+    end)
+end)
+
+assert.describe("unify: try_unify TAG_INTERSECTION", function()
+    assert.it("intersection satisfies any of its members (LHS)", function()
+        local ctx = make_unify_ctx()
+        local pool = intern.new()
+        ctx = types_mod.new_ctx(pool)
+        ctx.scope = env_mod.new(0)
+        -- Build { x: integer } & { y: string }
+        local x_id = intern.intern(pool, "x")
+        local y_id = intern.intern(pool, "y")
+        local fx = types_mod.make_field(ctx, x_id, ctx.T_INTEGER, false)
+        local fy = types_mod.make_field(ctx, y_id, ctx.T_STRING, false)
+        local t1 = types_mod.make_table(ctx, { fx }, {}, -1, {})
+        local t2 = types_mod.make_table(ctx, { fy }, {}, -1, {})
+        local inter = types_mod.make_intersection(ctx, { t1, t2 })
+        -- intersection satisfies t1 (any member)
+        assert.ok(unify_mod.try_unify(ctx, inter, t1))
+        -- intersection satisfies t2 (any member)
+        assert.ok(unify_mod.try_unify(ctx, inter, t2))
+    end)
+
+    assert.it("a type satisfying all members is assignable to an intersection (RHS)", function()
+        local pool = intern.new()
+        local ctx = types_mod.new_ctx(pool)
+        ctx.scope = env_mod.new(0)
+        -- Build a table with both x and y fields
+        local x_id = intern.intern(pool, "x")
+        local y_id = intern.intern(pool, "y")
+        local fx = types_mod.make_field(ctx, x_id, ctx.T_INTEGER, false)
+        local fy = types_mod.make_field(ctx, y_id, ctx.T_STRING, false)
+        local t1 = types_mod.make_table(ctx, { fx }, {}, -1, {})
+        local t2 = types_mod.make_table(ctx, { fy }, {}, -1, {})
+        local t_both = types_mod.make_table(ctx, { fx, fy }, {}, -1, {})
+        local inter = types_mod.make_intersection(ctx, { t1, t2 })
+        -- t_both satisfies all members of the intersection
+        assert.ok(unify_mod.try_unify(ctx, t_both, inter))
+    end)
+
+    assert.it("a type failing any member is not assignable to an intersection (RHS)", function()
+        local pool = intern.new()
+        local ctx = types_mod.new_ctx(pool)
+        ctx.scope = env_mod.new(0)
+        local x_id = intern.intern(pool, "x")
+        local y_id = intern.intern(pool, "y")
+        local fx = types_mod.make_field(ctx, x_id, ctx.T_INTEGER, false)
+        local fy = types_mod.make_field(ctx, y_id, ctx.T_STRING, false)
+        local t1 = types_mod.make_table(ctx, { fx }, {}, -1, {})
+        local t2 = types_mod.make_table(ctx, { fy }, {}, -1, {})
+        local inter = types_mod.make_intersection(ctx, { t1, t2 })
+        -- t1 alone doesn't satisfy t2's constraint in the intersection
+        assert.ok(not unify_mod.try_unify(ctx, t1, inter))
+    end)
+end)
+
 assert.describe("checker: misc annotation", function()
     assert.it("declare var binding: --:: declare x = type binds x as a value", function()
         no_errors([[

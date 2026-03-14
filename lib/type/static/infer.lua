@@ -82,7 +82,8 @@ local TAG_STRING   = defs.TAG_STRING
 local TAG_LITERAL  = defs.TAG_LITERAL
 local TAG_FUNCTION = defs.TAG_FUNCTION
 local TAG_TABLE    = defs.TAG_TABLE
-local TAG_UNION    = defs.TAG_UNION
+local TAG_UNION        = defs.TAG_UNION
+local TAG_INTERSECTION = defs.TAG_INTERSECTION
 local TAG_VAR      = defs.TAG_VAR
 local TAG_ROWVAR   = defs.TAG_ROWVAR
 local TAG_NAMED    = defs.TAG_NAMED
@@ -757,6 +758,12 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     if obj_t.tag == TAG_NEVER then return ctx.T_NEVER end
     if obj_t.tag == TAG_ANY   then return ctx.T_ANY end
 
+    -- Nominal types: unwrap to underlying type for field access.
+    if obj_t.tag == TAG_NOMINAL then
+        obj_tid = types_mod.find(ctx, obj_t.data[2])
+        obj_t   = ctx.types:get(obj_tid)
+    end
+
     if obj_t.tag == TAG_TABLE then
         local fe = types_mod.table_field(ctx, obj_tid, fname_id)
         if fe then return types_mod.find(ctx, fe.type_id) end
@@ -809,6 +816,53 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         end
     end
 
+    -- Intersection: field must be present in at least one member; collect from all members.
+    -- If all members have the field, return union of their types.
+    -- If some members lack the field, include T_NIL to reflect that.
+    if obj_t.tag == TAG_INTERSECTION then
+        local field_types = {}
+        local any_missing = false
+        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local mid = types_mod.find(ctx, ctx.lists:get(i))
+            local mt = ctx.types:get(mid)
+            if mt.tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx, mid, fname_id)
+                if fe then
+                    field_types[#field_types + 1] = types_mod.find(ctx, fe.type_id)
+                else
+                    -- Check string indexer on this member
+                    local found_indexer = false
+                    local mis, mil = mt.data[2], mt.data[3]
+                    local j = mis
+                    while j < mis + mil - 1 do
+                        local kt = types_mod.find(ctx, ctx.lists:get(j))
+                        if ctx.types:get(kt).tag == TAG_STRING then
+                            field_types[#field_types + 1] = types_mod.find(ctx, ctx.lists:get(j + 1))
+                            found_indexer = true
+                            break
+                        end
+                        j = j + 2
+                    end
+                    if not found_indexer then
+                        if mt.data[4] >= 0 then
+                            field_types[#field_types + 1] = ctx.T_ANY
+                        else
+                            any_missing = true
+                        end
+                    end
+                end
+            elseif mt.tag == TAG_ANY then
+                return ctx.T_ANY
+            else
+                any_missing = true
+            end
+        end
+        if #field_types > 0 then
+            if any_missing then field_types[#field_types + 1] = ctx.T_NIL end
+            return types_mod.make_union(ctx, field_types)
+        end
+    end
+
     local fname = intern_mod.get(ctx.pool, fname_id) or "?"
     report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'")
     return ctx.T_ANY
@@ -821,7 +875,14 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local key_r   = types_mod.find(ctx, key_tid)
     local obj_t   = ctx.types:get(obj_tid)
 
-    if obj_t.tag == TAG_ANY then return ctx.T_ANY end
+    if obj_t.tag == TAG_NEVER then return ctx.T_NEVER end
+    if obj_t.tag == TAG_ANY   then return ctx.T_ANY end
+
+    -- Nominal types: unwrap to underlying type for index access.
+    if obj_t.tag == TAG_NOMINAL then
+        obj_tid = types_mod.find(ctx, obj_t.data[2])
+        obj_t   = ctx.types:get(obj_tid)
+    end
 
     if obj_t.tag == TAG_TABLE then
         local is, il = obj_t.data[2], obj_t.data[3]
@@ -844,6 +905,55 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         local tbl = types_mod.make_table(ctx, {}, { key_r, elem_var }, -1, {})
         unify_mod.unify(ctx, obj_tid, tbl)
         return elem_var
+    end
+
+    -- Intersection: try index on each member, union the results.
+    if obj_t.tag == TAG_INTERSECTION then
+        local val_types = {}
+        local any_missing = false
+        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local mid = types_mod.find(ctx, ctx.lists:get(i))
+            local mt = ctx.types:get(mid)
+            if mt.tag == TAG_TABLE then
+                local mis, mil = mt.data[2], mt.data[3]
+                local j = mis
+                local found = false
+                while j < mis + mil - 1 do
+                    local kt = ctx.lists:get(j)
+                    if unify_mod.try_unify(ctx, key_r, kt) then
+                        val_types[#val_types + 1] = types_mod.find(ctx, ctx.lists:get(j + 1))
+                        found = true
+                        break
+                    end
+                    j = j + 2
+                end
+                if not found then
+                    local kt_t = ctx.types:get(key_r)
+                    if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
+                        local fe = types_mod.table_field(ctx, mid, kt_t.data[1])
+                        if fe then
+                            val_types[#val_types + 1] = types_mod.find(ctx, fe.type_id)
+                            found = true
+                        end
+                    end
+                end
+                if not found then
+                    if mt.data[4] >= 0 then
+                        val_types[#val_types + 1] = ctx.T_ANY
+                    else
+                        any_missing = true
+                    end
+                end
+            elseif mt.tag == TAG_ANY then
+                return ctx.T_ANY
+            else
+                any_missing = true
+            end
+        end
+        if #val_types > 0 then
+            if any_missing then val_types[#val_types + 1] = ctx.T_NIL end
+            return types_mod.make_union(ctx, val_types)
+        end
     end
 
     return ctx.T_ANY
@@ -945,6 +1055,12 @@ end
 local function call_returns(ctx, fn_tid, arg_tids, line, col)
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
+
+    -- Nominal types: unwrap to underlying type for call dispatch.
+    if ft.tag == TAG_NOMINAL then
+        fn_tid = types_mod.find(ctx, ft.data[2])
+        ft     = ctx.types:get(fn_tid)
+    end
 
     if ft.tag == TAG_ANY then
         ctx._last_multi_return = { ctx.T_ANY }

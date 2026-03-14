@@ -571,6 +571,22 @@ function M.try_unify(ctx, a, b)
         return false
     end
 
+    -- Intersection on RHS: a must satisfy ALL members (a must be assignable to each constraint).
+    if tb.tag == TAG_INTERSECTION then
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            if not M.try_unify(ctx, a, ctx.lists:get(i)) then return false end
+        end
+        return true
+    end
+
+    -- Intersection on LHS: satisfies b if ANY member satisfies b (intersection <: each member).
+    if ta.tag == TAG_INTERSECTION then
+        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+            if M.try_unify(ctx, ctx.lists:get(i), b) then return true end
+        end
+        return false
+    end
+
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
         local apl, bpl = ta.data[1], tb.data[1]
         local max_p = apl > bpl and apl or bpl
@@ -599,6 +615,8 @@ function M.try_unify(ctx, a, b)
     if ta.tag == TAG_NOMINAL and tb.tag == TAG_NOMINAL then
         return ta.data[1] == tb.data[1]
     end
+
+    if ta.tag == TAG_CDATA or tb.tag == TAG_CDATA then return true end
 
     return false
 end
