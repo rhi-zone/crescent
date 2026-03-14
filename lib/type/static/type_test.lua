@@ -3200,3 +3200,93 @@ f(v)
         assert.ok(errs and #errs.errors > 0, "unknown is not assignable to string")
     end)
 end)
+
+assert.describe("checker: object narrowing via field access", function()
+    assert.it("if t.x then: t narrowed so t.x is non-nil inside branch", function()
+        -- t.x is string|nil; after `if t.x then`, t.x should be string
+        no_errors([[
+--: (string) -> nil
+local function use_str(s) end
+
+local function test(t)
+    --: { x: string | nil }
+    t = t
+    if t.x then
+        use_str(t.x)
+    end
+end
+]])
+    end)
+    assert.it("if t.x then: narrowed t passes to fn requiring non-nil field", function()
+        -- t is {x: string|nil}; after guard, t should unify with {x: string}
+        no_errors([[
+--: ({ x: string }) -> nil
+local function aaa(foo) end
+
+local function test(t)
+    --: { x: string | nil }
+    t = t
+    if t.x then
+        aaa(t)
+    end
+end
+]])
+    end)
+    assert.it("without guard: passing {x: string|nil} to fn({x: string}) fails", function()
+        -- Verify the guard is actually needed (regression: no false negative)
+        has_error([[
+--: ({ x: string }) -> nil
+local function aaa(foo) end
+
+local function test(t)
+    --: { x: string | nil }
+    t = t
+    aaa(t)
+end
+]], "cannot pass")
+    end)
+    assert.it("early-return guard: if not t.x then return end narrows continuation", function()
+        -- After the guard, t.x is guaranteed non-nil in the continuation
+        no_errors([[
+--: ({ x: string }) -> nil
+local function aaa(t) end
+
+local function test(t)
+    --: { x: string | nil }
+    t = t
+    if not t.x then return end
+    aaa(t)
+end
+]])
+    end)
+    assert.it("union type: {x:string}|{y:number} narrowed by field guard", function()
+        -- After `if t.x then`, the union member without x is excluded
+        no_errors([[
+--: ({ x: string }) -> nil
+local function aaa(foo) end
+
+local function test(t)
+    --: { x: string } | { y: number }
+    t = t
+    if t.x then
+        aaa(t)
+    end
+end
+]])
+    end)
+    assert.it("string? field: t.x is string (not string|nil) inside if branch", function()
+        -- string? means string|nil; after field guard, should be string
+        no_errors([[
+--: (string) -> nil
+local function use_str(s) end
+
+local function test(t)
+    --: { x: string? }
+    t = t
+    if t.x then
+        use_str(t.x)
+    end
+end
+]])
+    end)
+end)
