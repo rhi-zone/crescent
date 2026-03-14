@@ -132,6 +132,10 @@ When doing performance optimization:
 
 **Prefer principled solutions over special cases.** When a check needs to accept a new category of type, ask whether the type system can be extended cleanly (e.g. declare the primitive's metamethods, extend unify) rather than tagging the predicate. Ad-hoc flags in `is_numeric`, `is_concat_compatible`, etc. erode correctness over time.
 
+**Every type tag requires a complete behavioral spec.** For every type construct (new or existing), enumerate ALL operations it must support: field access, indexing, call, unification (both directions, covariant/contravariant), try_unify, narrowing, display, serialization (cri round-trip), instantiate/generalize, resolve_annotation_type. Write tests for each. A type tag is not done until all operations are specified and tested. Gaps discovered only when a feature needs them ("we only noticed when we needed it") mean the tag was never complete — that's a process failure, not normal iteration. The bar is a tag × operation matrix where every cell is either implemented+tested or explicitly documented as out-of-scope.
+
+**New type features: derive from full unification first.** When designing how a new type construct should work, ask: "what does full unification give us?" before reaching for special cases. The answer is almost always: one persistent type that accumulates information over time, not per-access reconstruction or per-call rebuilding. Examples: `ffi.C` is one open table that grows as `ffi.cdef` runs — not rebuilt on each access. Module types accumulate fields during prescan — not recomputed per reference. If the unification answer feels surprising, that signals a gap in design understanding, not a need for a special case.
+
 ## Negative Constraints
 
 Do not:
