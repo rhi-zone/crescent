@@ -16,6 +16,7 @@ local TAG_STRING       = defs.TAG_STRING
 local TAG_ANY          = defs.TAG_ANY
 local TAG_NEVER        = defs.TAG_NEVER
 local TAG_INTEGER      = defs.TAG_INTEGER
+local TAG_UNKNOWN      = defs.TAG_UNKNOWN
 local TAG_LITERAL      = defs.TAG_LITERAL
 local TAG_FUNCTION     = defs.TAG_FUNCTION
 local TAG_TABLE        = defs.TAG_TABLE
@@ -114,6 +115,7 @@ M.T_STRING  = 3
 M.T_ANY     = 4
 M.T_NEVER   = 5
 M.T_INTEGER = 6
+M.T_UNKNOWN = 7
 
 local function alloc_zero(types, tag)
     local i = types:alloc()
@@ -141,6 +143,7 @@ function M.new_ctx(pool)
     alloc_zero(types, TAG_ANY)      -- 4
     alloc_zero(types, TAG_NEVER)    -- 5
     alloc_zero(types, TAG_INTEGER)  -- 6
+    alloc_zero(types, TAG_UNKNOWN)  -- 7
     -- data[2] for singletons: -1 means "no parent" (they are concrete types, not vars)
     -- but we never call find() expecting to follow them, so it's fine to leave as 0
 
@@ -160,6 +163,7 @@ function M.new_ctx(pool)
         T_ANY     = M.T_ANY,
         T_NEVER   = M.T_NEVER,
         T_INTEGER = M.T_INTEGER,
+        T_UNKNOWN = M.T_UNKNOWN,
         -- prim_index: TAG_* → TID of the __index table for that primitive.
         -- Populated by prelude.populate. Used by NODE_METHOD_CALL dispatch.
         prim_index = {},
@@ -323,7 +327,8 @@ function M.make_union(ctx, member_ids)
     for i = 1, #member_ids do
         local rtid = M.find(ctx, member_ids[i])
         local t = ctx.types:get(rtid)
-        if t.tag == TAG_ANY then return ctx.T_ANY end
+        if t.tag == TAG_ANY     then return ctx.T_ANY end
+        if t.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
         if t.tag == TAG_UNION then
             local s, l = t.data[0], t.data[1]
             for j = s, s + l - 1 do
@@ -547,6 +552,7 @@ function M.display(ctx, tid, seen)
     if tag == TAG_STRING   then return "string" end
     if tag == TAG_ANY      then return "any" end
     if tag == TAG_NEVER    then return "never" end
+    if tag == TAG_UNKNOWN  then return "unknown" end
     if tag == TAG_INTEGER  then return "integer" end
     if tag == TAG_CDATA    then return "cdata" end
 

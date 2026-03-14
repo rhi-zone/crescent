@@ -75,6 +75,7 @@ local ANN_TYPE      = defs.ANN_TYPE
 local ANN_DECL      = defs.ANN_DECL
 
 local TAG_ANY      = defs.TAG_ANY
+local TAG_UNKNOWN  = defs.TAG_UNKNOWN
 local TAG_NIL      = defs.TAG_NIL
 local TAG_NUMBER   = defs.TAG_NUMBER
 local TAG_INTEGER  = defs.TAG_INTEGER
@@ -174,6 +175,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == defs.TAG_ANY      then return ctx.T_ANY end
     if tag == defs.TAG_NEVER    then return ctx.T_NEVER end
     if tag == defs.TAG_INTEGER  then return ctx.T_INTEGER end
+    if tag == defs.TAG_UNKNOWN  then return ctx.T_UNKNOWN end
     if tag == defs.TAG_CDATA    then
         local id = types_mod.alloc_type(ctx, defs.TAG_CDATA)
         return id
@@ -517,7 +519,7 @@ local has_metamethod
 has_metamethod = function(ctx, tid, mm_name, allow_table)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
-    if t.tag == TAG_ANY or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
+    if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
     if allow_table and t.tag == TAG_TABLE then return true end
     if t.tag == TAG_UNION then
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
@@ -755,7 +757,8 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local fname_id = n.data[1]
     local obj_t = ctx.types:get(obj_tid)
 
-    if obj_t.tag == TAG_NEVER then return ctx.T_NEVER end
+    if obj_t.tag == TAG_NEVER   then return ctx.T_NEVER end
+    if obj_t.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
     if obj_t.tag == TAG_ANY   then
         -- ffi.C → return the per-ctx FFI namespace type when hooks are active.
         if ctx.T_FFI_C then
@@ -791,7 +794,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
             end
             i = i + 2
         end
-        if obj_t.data[4] >= 0 then return ctx.T_ANY end
+        if obj_t.data[4] >= 0 then return ctx.T_UNKNOWN end
         local fname = intern_mod.get(ctx.pool, fname_id) or "?"
         report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'")
         return ctx.T_ANY
@@ -808,7 +811,8 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
 
     if obj_t.tag == TAG_UNION then
         local field_types = {}
-        local any_missing = false
+        local closed_miss = false  -- some closed member lacks field → T_NIL in result
+        local open_miss   = false  -- some open member may or may not have field → T_UNKNOWN
         for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
             local mid = types_mod.find(ctx, ctx.lists:get(i))
             local mt = ctx.types:get(mid)
@@ -816,27 +820,32 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
                 local fe = types_mod.table_field(ctx, mid, fname_id)
                 if fe then
                     field_types[#field_types + 1] = types_mod.find(ctx, fe.type_id)
+                elseif mt.data[4] >= 0 then
+                    open_miss = true  -- open table: field may exist (contributes unknown)
                 else
-                    any_missing = true
+                    closed_miss = true  -- closed table, field absent (contributes nil)
                 end
             elseif mt.tag == TAG_ANY then
                 return ctx.T_ANY
+            elseif mt.tag == TAG_UNKNOWN then
+                open_miss = true
             else
-                any_missing = true
+                closed_miss = true
             end
         end
-        if #field_types > 0 then
-            if any_missing then field_types[#field_types + 1] = ctx.T_NIL end
+        if #field_types > 0 or open_miss or closed_miss then
+            if open_miss   then field_types[#field_types + 1] = ctx.T_UNKNOWN end
+            if closed_miss then field_types[#field_types + 1] = ctx.T_NIL end
             return types_mod.make_union(ctx, field_types)
         end
     end
 
-    -- Intersection: field must be present in at least one member; collect from all members.
-    -- If all members have the field, return union of their types.
-    -- If some members lack the field, include T_NIL to reflect that.
+    -- Intersection: field must be present in at least one member.
+    -- If ANY member provides the field, the intersection definitely has it (no nil added).
+    -- Open members that don't explicitly have it contribute T_UNKNOWN.
     if obj_t.tag == TAG_INTERSECTION then
         local field_types = {}
-        local any_missing = false
+        local has_open_miss = false
         for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
             local mid = types_mod.find(ctx, ctx.lists:get(i))
             local mt = ctx.types:get(mid)
@@ -860,22 +869,22 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
                     end
                     if not found_indexer then
                         if mt.data[4] >= 0 then
-                            field_types[#field_types + 1] = ctx.T_ANY
-                        else
-                            any_missing = true
+                            has_open_miss = true  -- open member: field may exist
                         end
+                        -- closed miss: member doesn't have field, but intersection may still
                     end
                 end
             elseif mt.tag == TAG_ANY then
                 return ctx.T_ANY
-            else
-                any_missing = true
+            elseif mt.tag == TAG_UNKNOWN then
+                has_open_miss = true
             end
         end
         if #field_types > 0 then
-            if any_missing then field_types[#field_types + 1] = ctx.T_NIL end
+            if has_open_miss then field_types[#field_types + 1] = ctx.T_UNKNOWN end
             return types_mod.make_union(ctx, field_types)
         end
+        if has_open_miss then return ctx.T_UNKNOWN end
     end
 
     local fname = intern_mod.get(ctx.pool, fname_id) or "?"
@@ -890,8 +899,9 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local key_r   = types_mod.find(ctx, key_tid)
     local obj_t   = ctx.types:get(obj_tid)
 
-    if obj_t.tag == TAG_NEVER then return ctx.T_NEVER end
-    if obj_t.tag == TAG_ANY   then return ctx.T_ANY end
+    if obj_t.tag == TAG_NEVER   then return ctx.T_NEVER end
+    if obj_t.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
+    if obj_t.tag == TAG_ANY     then return ctx.T_ANY end
 
     -- Nominal types: unwrap to underlying type for index access.
     if obj_t.tag == TAG_NOMINAL then
@@ -912,7 +922,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
             local fe = types_mod.table_field(ctx, obj_tid, kt_t.data[1])
             if fe then return types_mod.find(ctx, fe.type_id) end
         end
-        if obj_t.data[4] >= 0 then return ctx.T_ANY end
+        if obj_t.data[4] >= 0 then return ctx.T_UNKNOWN end
     end
 
     if obj_t.tag == TAG_VAR then
@@ -922,13 +932,14 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         return elem_var
     end
 
-    -- Helper: index a single type. Returns tid on match, T_ANY for open/unknown,
+    -- Helper: index a single type. Returns tid on match, T_UNKNOWN for open-table miss,
     -- T_NIL for closed-table miss, nil for non-indexable types.
     local function index_one(tid)
         tid = types_mod.find(ctx, tid)
         local t = ctx.types:get(tid)
-        if t.tag == TAG_ANY   then return ctx.T_ANY end
-        if t.tag == TAG_NEVER then return ctx.T_NEVER end
+        if t.tag == TAG_ANY     then return ctx.T_ANY end
+        if t.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
+        if t.tag == TAG_NEVER   then return ctx.T_NEVER end
         if t.tag == TAG_NOMINAL then
             return index_one(t.data[2])
         end
@@ -947,7 +958,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
                 local fe = types_mod.table_field(ctx, tid, kt_t.data[1])
                 if fe then return types_mod.find(ctx, fe.type_id) end
             end
-            if t.data[4] >= 0 then return ctx.T_ANY end  -- open table
+            if t.data[4] >= 0 then return ctx.T_UNKNOWN end  -- open table: field may exist
             return ctx.T_NIL  -- closed table, key absent
         end
         return nil  -- not indexable
@@ -967,25 +978,30 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     end
 
     -- Intersection: index each member; collect results from members that have the key.
+    -- If ANY member provides the key, the intersection definitely has it (no nil added).
+    -- Open members that don't explicitly have the key contribute T_UNKNOWN.
     if obj_t.tag == TAG_INTERSECTION then
         local val_types = {}
-        local any_missing = false
+        local has_open_miss = false
         for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
             local r = index_one(ctx.lists:get(i))
             if r == ctx.T_ANY then return ctx.T_ANY end
-            if r == nil or r == ctx.T_NIL then
-                any_missing = true
-            else
+            if r == ctx.T_UNKNOWN then
+                has_open_miss = true  -- open member may or may not have the key
+            elseif r ~= nil and r ~= ctx.T_NIL then
                 val_types[#val_types + 1] = r
             end
+            -- r == nil (non-indexable) or T_NIL (closed miss): member doesn't have the key
         end
         if #val_types > 0 then
-            if any_missing then val_types[#val_types + 1] = ctx.T_NIL end
+            -- Known members provide a definite type; open members add uncertainty
+            if has_open_miss then val_types[#val_types + 1] = ctx.T_UNKNOWN end
             return types_mod.make_union(ctx, val_types)
         end
+        if has_open_miss then return ctx.T_UNKNOWN end
     end
 
-    return ctx.T_ANY
+    return ctx.T_UNKNOWN
 end
 
 local function check_call_args(ctx, fn_tid, arg_tids, line, col)
@@ -1094,6 +1110,11 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
     if ft.tag == TAG_ANY then
         ctx._last_multi_return = { ctx.T_ANY }
         return ctx.T_ANY
+    end
+
+    if ft.tag == TAG_UNKNOWN then
+        ctx._last_multi_return = { ctx.T_UNKNOWN }
+        return ctx.T_UNKNOWN
     end
 
     if ft.tag == TAG_FUNCTION then

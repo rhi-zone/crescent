@@ -48,6 +48,7 @@ local prim_tags = {
     ["integer"] = defs.TAG_INTEGER,
     ["any"]     = defs.TAG_ANY,
     ["never"]   = defs.TAG_NEVER,
+    ["unknown"] = defs.TAG_UNKNOWN,
     ["cdata"]   = defs.TAG_CDATA,
 }
 

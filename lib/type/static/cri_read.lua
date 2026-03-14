@@ -171,6 +171,7 @@ function M.load(bytes, ctx)
         [defs.TAG_ANY]     = ctx.T_ANY,
         [defs.TAG_NEVER]   = ctx.T_NEVER,
         [defs.TAG_INTEGER] = ctx.T_INTEGER,
+        [defs.TAG_UNKNOWN] = ctx.T_UNKNOWN,
     }
     for i = 0, type_count - 1 do
         local s = singleton[raw_types[i][1]]

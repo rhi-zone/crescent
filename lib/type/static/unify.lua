@@ -13,6 +13,7 @@ local TAG_STRING       = defs.TAG_STRING
 local TAG_ANY          = defs.TAG_ANY
 local TAG_NEVER        = defs.TAG_NEVER
 local TAG_INTEGER      = defs.TAG_INTEGER
+local TAG_UNKNOWN      = defs.TAG_UNKNOWN
 local TAG_LITERAL      = defs.TAG_LITERAL
 local TAG_FUNCTION     = defs.TAG_FUNCTION
 local TAG_TABLE        = defs.TAG_TABLE
@@ -208,6 +209,13 @@ function M.unify(ctx, a, b)
 
     -- any is bilateral
     if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
+
+    -- unknown: top type — everything is assignable to unknown (T <: unknown),
+    -- but unknown is not assignable to a specific type (unknown <: T fails, must narrow).
+    if tb.tag == TAG_UNKNOWN then return true end
+    if ta.tag == TAG_UNKNOWN then
+        return false, "value of type 'unknown' must be narrowed before use (got unknown, expected '" .. types_mod.display(ctx, b) .. "')"
+    end
 
     -- never is bottom
     if ta.tag == TAG_NEVER then return true end
@@ -559,6 +567,8 @@ function M.try_unify(ctx, a, b)
     local tb = ctx.types:get(b)
 
     if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
+    if tb.tag == TAG_UNKNOWN then return true end
+    if ta.tag == TAG_UNKNOWN then return false end
     if ta.tag == TAG_NEVER then return true end
     if ta.tag == TAG_VAR or tb.tag == TAG_VAR then return true end
     if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return true end

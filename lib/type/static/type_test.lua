@@ -1301,6 +1301,7 @@ assert.describe("types: singletons", function()
         assert.eq(ctx.T_ANY,     4)
         assert.eq(ctx.T_NEVER,   5)
         assert.eq(ctx.T_INTEGER, 6)
+        assert.eq(ctx.T_UNKNOWN, 7)
     end)
     assert.it("singleton tags are correct", function()
         local ctx = new_ctx()
@@ -1311,6 +1312,7 @@ assert.describe("types: singletons", function()
         assert.eq(ctx.types:get(ctx.T_ANY).tag,     defs.TAG_ANY)
         assert.eq(ctx.types:get(ctx.T_NEVER).tag,   defs.TAG_NEVER)
         assert.eq(ctx.types:get(ctx.T_INTEGER).tag, defs.TAG_INTEGER)
+        assert.eq(ctx.types:get(ctx.T_UNKNOWN).tag, defs.TAG_UNKNOWN)
     end)
     assert.it("find on singleton returns self", function()
         local ctx = new_ctx()
@@ -1455,6 +1457,7 @@ assert.describe("types: display", function()
         assert.eq(types_mod.display(ctx, ctx.T_ANY),    "any")
         assert.eq(types_mod.display(ctx, ctx.T_NEVER),  "never")
         assert.eq(types_mod.display(ctx, ctx.T_INTEGER),"integer")
+        assert.eq(types_mod.display(ctx, ctx.T_UNKNOWN),"unknown")
     end)
     assert.it("display typevar", function()
         local ctx = new_ctx()
@@ -2882,7 +2885,7 @@ local y = fn("hello")
     end)
 
     assert.it("mismatch shows argument failure reason", function()
-        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "cannot pass 'boolean'")
+        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "cannot pass 'true'")
     end)
 end)
 
@@ -3118,5 +3121,82 @@ local r = fn("hello")
         local cdata_tid = types_mod.alloc_type(ctx, defs.TAG_CDATA)
         assert.ok(unify_mod.try_unify(ctx, cdata_tid, cdata_tid))
         assert.ok(unify_mod.try_unify(ctx, cdata_tid, ctx.T_STRING))
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- TAG_UNKNOWN: top type, must narrow before use
+---------------------------------------------------------------------------
+
+assert.describe("unify: TAG_UNKNOWN", function()
+    assert.it("everything is assignable to unknown (T <: unknown)", function()
+        local ctx = make_unify_ctx()
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_STRING,  ctx.T_UNKNOWN))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_INTEGER, ctx.T_UNKNOWN))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_NIL,     ctx.T_UNKNOWN))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_NEVER,   ctx.T_UNKNOWN))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_ANY,     ctx.T_UNKNOWN))
+    end)
+    assert.it("unknown is not assignable to a specific type (must narrow)", function()
+        local ctx = make_unify_ctx()
+        assert.ok(not unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_STRING))
+        assert.ok(not unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_INTEGER))
+        assert.ok(not unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_NIL))
+    end)
+    assert.it("unknown is assignable to any (escape hatch)", function()
+        local ctx = make_unify_ctx()
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_ANY))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_UNKNOWN))
+    end)
+    assert.it("unify: unknown as RHS succeeds", function()
+        local ctx = make_unify_ctx()
+        local ok = unify_mod.unify(ctx, ctx.T_STRING, ctx.T_UNKNOWN)
+        assert.ok(ok)
+    end)
+    assert.it("unify: unknown as LHS fails with message", function()
+        local ctx = make_unify_ctx()
+        local ok, err = unify_mod.unify(ctx, ctx.T_UNKNOWN, ctx.T_STRING)
+        assert.ok(not ok)
+        assert.ok(err and err:find("unknown"), "error should mention unknown: " .. tostring(err))
+    end)
+    assert.it("make_union absorbs unknown like any", function()
+        local ctx = make_unify_ctx()
+        local u = types_mod.make_union(ctx, {ctx.T_STRING, ctx.T_UNKNOWN})
+        assert.eq(u, ctx.T_UNKNOWN)
+    end)
+end)
+
+assert.describe("checker: TAG_UNKNOWN in field/index access", function()
+    assert.it("passing unknown to typed param is an error", function()
+        local errs = infer_mod.check_string([[
+--: (string) -> nil
+local function f(x) end
+--: { ... }
+local t = {}
+local v = t.x
+f(v)
+]], "test")
+        assert.ok(errs and #errs.errors > 0, "should error: unknown passed to string param")
+    end)
+    assert.it("passing unknown to any param is ok", function()
+        local errs = infer_mod.check_string([[
+--: (any) -> nil
+local function f(x) end
+--: { ... }
+local t = {}
+local v = t.x
+f(v)
+]], "test")
+        assert.eq(errs and #errs.errors or 0, 0, "unknown is assignable to any")
+    end)
+    assert.it("explicit unknown annotation blocks use without narrowing", function()
+        local errs = infer_mod.check_string([[
+--: (string) -> nil
+local function f(x) end
+--: unknown
+local v
+f(v)
+]], "test")
+        assert.ok(errs and #errs.errors > 0, "unknown is not assignable to string")
     end)
 end)
