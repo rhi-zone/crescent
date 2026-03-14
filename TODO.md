@@ -265,8 +265,8 @@ Blocking items for cutover:
 - [x] Generic function inference (infer type params from call site args)
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
 - [x] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Annotation on any line `[callee.line, node.line]` (node.line = `(` line). Lua 5.1/LuaJIT constraint: `(` cannot be on a new line from the callee (ambiguous call syntax), so annotation must share the callee's line in practice. Lua 5.2+ compat removes this restriction.
-- [ ] Parse LuaJIT FFI cdef blocks
-- [ ] **stdlib.d.lua: type `bit.*` library** — `bit.lshift`, `bit.rshift`, `bit.arshift`, `bit.band`, `bit.bor`, `bit.bxor`, `bit.bnot`, `bit.bswap`, `bit.tobit`, `bit.tohex` all return `integer`; currently untyped so code using them infers as `any`
+- [x] Parse LuaJIT FFI cdef blocks
+- [x] **stdlib.d.lua: type `bit.*` library** — all bit.* fns typed, return integer
 - [ ] **stdlib.d.lua: multi-target support** — stdlib types differ by runtime/version (LuaJIT vs Lua 5.1/5.2/5.3/5.4); currently stdlib.d.lua targets LuaJIT but isn't labelled as such; design needed: separate .d.lua files per target, or conditional sections, or CLI `--target` flag that selects which prelude to load
 - [x] Field assignment `M.foo = val` now adds the field to M's table type via NODE_FIELD_EXPR handling in NODE_ASSIGN_STMT. Structural-inference guard: skip when existing field type is TAG_VAR (prevents Cat J regression where `s.pos = s.pos + 1` binds the structural typevar).
 - [ ] Field re-assignment type-check (`M.count = "string"` after `function M.count()`) deferred: index-assignment tracking needed first (currently `returns[n] = v` doesn't update the type of `returns`, so inferred table field types are inconsistent across branches — causes self-check false positives).

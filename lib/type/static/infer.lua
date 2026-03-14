@@ -922,47 +922,61 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         return elem_var
     end
 
-    -- Intersection: try index on each member, union the results.
+    -- Helper: index a single type. Returns tid on match, T_ANY for open/unknown,
+    -- T_NIL for closed-table miss, nil for non-indexable types.
+    local function index_one(tid)
+        tid = types_mod.find(ctx, tid)
+        local t = ctx.types:get(tid)
+        if t.tag == TAG_ANY   then return ctx.T_ANY end
+        if t.tag == TAG_NEVER then return ctx.T_NEVER end
+        if t.tag == TAG_NOMINAL then
+            return index_one(t.data[2])
+        end
+        if t.tag == TAG_TABLE then
+            local is, il = t.data[2], t.data[3]
+            local i = is
+            while i < is + il - 1 do
+                local kt = ctx.lists:get(i)
+                if unify_mod.try_unify(ctx, key_r, kt) then
+                    return types_mod.find(ctx, ctx.lists:get(i + 1))
+                end
+                i = i + 2
+            end
+            local kt_t = ctx.types:get(key_r)
+            if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
+                local fe = types_mod.table_field(ctx, tid, kt_t.data[1])
+                if fe then return types_mod.find(ctx, fe.type_id) end
+            end
+            if t.data[4] >= 0 then return ctx.T_ANY end  -- open table
+            return ctx.T_NIL  -- closed table, key absent
+        end
+        return nil  -- not indexable
+    end
+
+    -- Union: (A | B)[k] = A[k] | B[k]
+    if obj_t.tag == TAG_UNION then
+        local val_types = {}
+        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local r = index_one(ctx.lists:get(i))
+            if r == ctx.T_ANY then return ctx.T_ANY end
+            val_types[#val_types + 1] = r or ctx.T_NIL
+        end
+        if #val_types > 0 then
+            return types_mod.make_union(ctx, val_types)
+        end
+    end
+
+    -- Intersection: index each member; collect results from members that have the key.
     if obj_t.tag == TAG_INTERSECTION then
         local val_types = {}
         local any_missing = false
         for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
-            local mid = types_mod.find(ctx, ctx.lists:get(i))
-            local mt = ctx.types:get(mid)
-            if mt.tag == TAG_TABLE then
-                local mis, mil = mt.data[2], mt.data[3]
-                local j = mis
-                local found = false
-                while j < mis + mil - 1 do
-                    local kt = ctx.lists:get(j)
-                    if unify_mod.try_unify(ctx, key_r, kt) then
-                        val_types[#val_types + 1] = types_mod.find(ctx, ctx.lists:get(j + 1))
-                        found = true
-                        break
-                    end
-                    j = j + 2
-                end
-                if not found then
-                    local kt_t = ctx.types:get(key_r)
-                    if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
-                        local fe = types_mod.table_field(ctx, mid, kt_t.data[1])
-                        if fe then
-                            val_types[#val_types + 1] = types_mod.find(ctx, fe.type_id)
-                            found = true
-                        end
-                    end
-                end
-                if not found then
-                    if mt.data[4] >= 0 then
-                        val_types[#val_types + 1] = ctx.T_ANY
-                    else
-                        any_missing = true
-                    end
-                end
-            elseif mt.tag == TAG_ANY then
-                return ctx.T_ANY
-            else
+            local r = index_one(ctx.lists:get(i))
+            if r == ctx.T_ANY then return ctx.T_ANY end
+            if r == nil or r == ctx.T_NIL then
                 any_missing = true
+            else
+                val_types[#val_types + 1] = r
             end
         end
         if #val_types > 0 then

@@ -300,6 +300,27 @@ function M.unify(ctx, a, b)
             local ok = M.unify(ctx, ctx.lists:get(i), b)
             if ok then return true end
         end
+        -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
+        -- For each required field in b, at least one intersection member must cover it.
+        if tb.tag == TAG_TABLE then
+            local all_covered = true
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                local bfe = ctx.fields:get(ctx.lists:get(i))
+                if bfe.optional == 0 then
+                    local found = false
+                    for j = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                        local mid = find(ctx, ctx.lists:get(j))
+                        local mfe = types_mod.table_field(ctx, mid, bfe.name_id)
+                        if mfe then
+                            local ok2 = M.unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id))
+                            if ok2 then found = true; break end
+                        end
+                    end
+                    if not found then all_covered = false; break end
+                end
+            end
+            if all_covered then return true end
+        end
         return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'"
     end
 
@@ -583,6 +604,27 @@ function M.try_unify(ctx, a, b)
     if ta.tag == TAG_INTERSECTION then
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
             if M.try_unify(ctx, ctx.lists:get(i), b) then return true end
+        end
+        -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
+        if tb.tag == TAG_TABLE then
+            local all_covered = true
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                local bfe = ctx.fields:get(ctx.lists:get(i))
+                if bfe.optional == 0 then
+                    local found = false
+                    for j = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                        local mid = find(ctx, ctx.lists:get(j))
+                        local mfe = types_mod.table_field(ctx, mid, bfe.name_id)
+                        if mfe then
+                            if M.try_unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id)) then
+                                found = true; break
+                            end
+                        end
+                    end
+                    if not found then all_covered = false; break end
+                end
+            end
+            if all_covered then return true end
         end
         return false
     end
