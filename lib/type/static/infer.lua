@@ -1168,14 +1168,48 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col, fn_name)
         if act_tid then
             local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
             if not ok then
-                report(ctx, line, col, E.CALL_ARG_MISMATCH, {
-                    param_name = param_name,
-                    idx        = i + 1,
-                    act        = types_mod.display_short(ctx, act_tid),
-                    fn         = fn_label,
-                    exp        = types_mod.display_short(ctx, exp_tid),
-                    detail     = err,
-                })
+                -- When actual is a union, partition into passing/failing members.
+                -- If some pass, show "fn expects exp, but arg might also be <failing>".
+                -- If all fail, fall back to the standard message.
+                local union_msg = nil
+                local act_t = ctx.types:get(types_mod.find(ctx, act_tid))
+                if act_t.tag == TAG_UNION then
+                    local failing = {}
+                    for mi = act_t.data[0], act_t.data[0] + act_t.data[1] - 1 do
+                        local mid = types_mod.find(ctx, ctx.lists:get(mi))
+                        if not unify_mod.try_unify(ctx, mid, exp_tid) then
+                            failing[#failing + 1] = mid
+                        end
+                    end
+                    local total = act_t.data[1]
+                    if #failing > 0 and #failing < total then
+                        -- Some members pass — build "might also be" message.
+                        local fail_tid
+                        if #failing == 1 then
+                            fail_tid = failing[1]
+                        else
+                            fail_tid = types_mod.make_union(ctx, failing)
+                        end
+                        local arg_label = param_name
+                            and ("`" .. param_name .. "`")
+                            or  ("argument " .. (i + 1))
+                        union_msg = fn_label .. " expects `" .. types_mod.display_short(ctx, exp_tid)
+                            .. "`, but " .. arg_label .. " might also be `"
+                            .. types_mod.display_short(ctx, fail_tid) .. "`"
+                    end
+                end
+                if union_msg then
+                    errors_mod.error(ctx.err, ctx.filename, line, col, union_msg)
+                else
+                    report(ctx, line, col, E.CALL_ARG_MISMATCH, {
+                        param_name = param_name,
+                        idx        = i + 1,
+                        act        = types_mod.display_short(ctx, act_tid),
+                        fn         = fn_label,
+                        exp        = types_mod.display_short(ctx, exp_tid),
+                        detail     = err,
+                    })
+                end
             end
         else
             local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)

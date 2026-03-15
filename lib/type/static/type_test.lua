@@ -3925,3 +3925,34 @@ assert.describe("make_intersection dedup", function()
         assert.eq(t.data[1], 2)
     end)
 end)
+
+assert.describe("checker: union-vs-concrete mismatch message", function()
+    assert.it("union-vs-concrete: shows only failing members", function()
+        -- Annotate f with a function type so its parameter is typed.
+        -- g has a union parameter; passing it to f should yield the new message.
+        local ec = check([[
+--: (number) -> number
+local function f(x) return x + 1 end
+--: (number | nil) -> nil
+local function g(v) f(v) end
+]])
+        local errs = ec.errors
+        assert.eq(#errs, 1)
+        assert.ok(errs[1].msg:find("might also be"), errs[1].msg)
+        assert.ok(errs[1].msg:find("nil"), errs[1].msg)
+        assert.ok(not errs[1].msg:find("number | nil"), errs[1].msg)
+    end)
+
+    assert.it("union-vs-concrete: all fail uses standard message", function()
+        local ec = check([[
+--: (number) -> number
+local function f(x) return x + 1 end
+--: (string | nil) -> nil
+local function g(v) f(v) end
+]])
+        local errs = ec.errors
+        assert.eq(#errs, 1)
+        -- standard message should not contain "might also be"
+        assert.ok(not errs[1].msg:find("might also be"), errs[1].msg)
+    end)
+end)
