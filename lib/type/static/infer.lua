@@ -1391,17 +1391,22 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 ctx._last_multi_return = returns
                 return ctx.T_BOOLEAN
             end
-        elseif fname == "require" and ctx.cri_loader and n.data[2] >= 1 then
-            -- If a cri_loader is registered, use it to resolve the module's export type.
+        elseif fname == "require" and n.data[2] >= 1 then
+            -- Track require() calls for go-to-def navigation.
             -- The first arg must be a string literal for static resolution.
             local arg0_nid_or_mod = n.data[1]  -- start index into ast_lists
             local arg0_nid = ctx.ast_lists:get(arg0_nid_or_mod)
             local arg0_n = ctx.nodes:get(arg0_nid)
             if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
                 local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
-                local exports = ctx.cri_loader(ctx, mod_name)
-                if exports then
-                    return exports
+                -- Record for LOCAL_STMT to pick up after RHS inference.
+                ctx._last_require_mod = mod_name
+                -- If a cri_loader is registered, use it to resolve the module's export type.
+                if ctx.cri_loader then
+                    local exports = ctx.cri_loader(ctx, mod_name)
+                    if exports then
+                        return exports
+                    end
                 end
             end
         end
@@ -1849,7 +1854,11 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local ns, nl = n.data[0], n.data[1]
     local es, el = n.data[2], n.data[3]
 
+    ctx._last_require_mod = nil  -- cleared before RHS inference; CALL_EXPR sets it if require()
     local rhs_types = el > 0 and infer_expr_list(ctx, es, el) or {}
+    -- Capture require() module name before any nested LOCAL_STMT clears it.
+    local stmt_require_mod = ctx._last_require_mod
+    ctx._last_require_mod = nil
 
     -- Cat B: if the last RHS is a call, missing entries may be extra returns → use T_ANY.
     local last_rhs_is_call = false
@@ -1889,6 +1898,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
+            if stmt_require_mod and i == 0 and el == 1 then
+                ctx.require_sources[name_id] = stmt_require_mod
+            end
         elseif prescanned then
             -- Prescan bound this name: unify with RHS but keep the richer prescanned type.
             if rhs_tid then unify_mod.unify(ctx, rhs_tid, prescanned) end
@@ -1920,6 +1932,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             env_mod.bind(ctx.scope, name_id, bind_tid)
             -- Record definition site (line is statement line; col is approximate).
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
+            if stmt_require_mod and i == 0 and el == 1 then
+                ctx.require_sources[name_id] = stmt_require_mod
+            end
             -- After binding a table literal with no annotation, try to promote it to an enum.
             -- Only for single-name single-rhs table literal bindings (e.g. `local Status = {...}`).
             if nl == 1 and el == 1 then
@@ -2601,6 +2616,7 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx.type_at  = {}       -- flat array {line,col,tid,...} for position→type hover queries
     ctx.name_at  = {}       -- flat array {line,col,name_id,...} for identifier use positions
     ctx.def_sites = {}      -- name_id → {line, col} for definition sites (go-to-def)
+    ctx.require_sources = {} -- name_id → module_name string for `local x = require("mod")` bindings
     return ctx
 end
 

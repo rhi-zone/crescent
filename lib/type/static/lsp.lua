@@ -286,6 +286,29 @@ local function field_completions(ctx, text, lsp_line, lsp_char, trigger)
 end
 
 -- ---------------------------------------------------------------------------
+-- Cross-file navigation helpers
+-- ---------------------------------------------------------------------------
+
+-- Resolve a Lua module name to a file:// URI.
+-- Tries <root>/<mod/path>.lua then <root>/<mod/path>/init.lua.
+-- Returns a URI string or nil if no file is found.
+local function resolve_module_uri(root, mod_name)
+    local rel = mod_name:gsub("%.", "/")
+    local candidates = { rel .. ".lua", rel .. "/init.lua" }
+    for _, p in ipairs(candidates) do
+        local abs = root .. "/" .. p
+        local f = io.open(abs, "r")
+        if f then
+            f:close()
+            -- Percent-encode spaces; other chars left as-is for simplicity.
+            local encoded = abs:gsub(" ", "%%20")
+            return "file://" .. encoded
+        end
+    end
+    return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Message handlers
 -- ---------------------------------------------------------------------------
 
@@ -293,6 +316,15 @@ local HANDLERS = {}
 
 HANDLERS["initialize"] = function(state, msg)
     state.initialized = true
+    -- Capture workspace root for cross-file navigation.
+    local p = msg.params or {}
+    if p.rootUri then
+        state.root_path = uri_to_path(p.rootUri)
+    elseif p.rootPath then
+        state.root_path = p.rootPath
+    else
+        state.root_path = "."
+    end
     send(ok_resp(msg.id, {
         capabilities = {
             textDocumentSync = {
@@ -474,6 +506,22 @@ HANDLERS["textDocument/definition"] = function(state, msg)
     if not name_id then
         send(ok_resp(msg.id, NULL))
         return
+    end
+    -- Cross-file: if this name was bound from a require(), navigate to the module file.
+    if ctx.require_sources and ctx.require_sources[name_id] then
+        local mod_name = ctx.require_sources[name_id]
+        local root = state.root_path or "."
+        local mod_uri = resolve_module_uri(root, mod_name)
+        if mod_uri then
+            send(ok_resp(msg.id, {
+                uri   = mod_uri,
+                range = {
+                    start   = { line = 0, character = 0 },
+                    ["end"] = { line = 0, character = 1 },
+                },
+            }))
+            return
+        end
     end
     local def = ctx.def_sites[name_id]
     if not def then
