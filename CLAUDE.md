@@ -136,6 +136,8 @@ When doing performance optimization:
 
 **New type features: derive from full unification first.** When designing how a new type construct should work, ask: "what does full unification give us?" before reaching for special cases. The answer is almost always: one persistent type that accumulates information over time, not per-access reconstruction or per-call rebuilding. Examples: `ffi.C` is one open table that grows as `ffi.cdef` runs — not rebuilt on each access. Module types accumulate fields during prescan — not recomputed per reference. If the unification answer feels surprising, that signals a gap in design understanding, not a need for a special case.
 
+**Source locations do not belong in the type system.** Types are semantic entities; source positions are syntactic. Do not store line/col in type arena entries (FieldEntry, TypeSlot, etc.) to support error messages — errors are exceptional, so paying a per-entry cost for rare diagnostics is the wrong trade-off. Instead, reparse the source on the error path: for same-file definitions, walk the already-parsed AST; for cross-module definitions, reparse the source file from disk. This keeps the type arena compact and clean, and works uniformly for all cases without bloating the CRI format.
+
 ## Negative Constraints
 
 Do not:

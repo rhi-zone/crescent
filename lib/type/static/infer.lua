@@ -100,80 +100,6 @@ local TAG_NEVER    = defs.TAG_NEVER
 local M = {}
 
 ---------------------------------------------------------------------------
--- Levenshtein distance helper (for "did you mean?" suggestions)
----------------------------------------------------------------------------
-
--- Compute edit distance between two strings. Returns a number.
--- Uses a two-row DP to keep memory O(min(m,n)).
---: (string, string) -> integer
-local function levenshtein(a, b)
-    --: string
-    a = a
-    --: string
-    b = b
-    local m, n = #a, #b
-    if m == 0 then return n end
-    if n == 0 then return m end
-    -- Ensure a is the shorter string for space efficiency
-    if m > n then a, b, m, n = b, a, n, m end
-    --: any
-    local prev = {}
-    --: any
-    local curr = {}
-    for j = 0, n do prev[j] = j end
-    for i = 1, m do
-        curr[0] = i
-        for j = 1, n do
-            if a:sub(i,i) == b:sub(j,j) then
-                curr[j] = prev[j-1]
-            else
-                --: number
-                local pj1 = prev[j-1]
-                --: number
-                local pj  = prev[j]
-                --: number
-                local cj1 = curr[j-1]
-                local d = pj1
-                if pj < d then d = pj end
-                if cj1 < d then d = cj1 end
-                curr[j] = d + 1
-            end
-        end
-        prev, curr = curr, prev
-    end
-    --: number
-    local result = prev[n]
-    return result
-end
-
--- Find closest field name in a closed table type. Returns suggestion string or nil.
--- obj_t: TypeSlot for TAG_TABLE; fname: string to match against.
---: (Ctx, any, string) -> string?
-local function field_suggestion(ctx, obj_t, fname)
-    --: any
-    local fields = ctx.fields
-    local threshold = math.max(2, math.floor(#fname / 3))
-    local best_dist = threshold + 1
-    local best_name = nil
-    for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
-        local fid  = ctx.lists:get(i)
-        --: any
-        local fe   = fields:get(fid)
-        local name = intern_mod.get(ctx.pool, fe.name_id)
-        if name then
-            local d = levenshtein(fname, name)
-            --: number
-            d = d
-            if d < best_dist then
-                best_dist = d
-                best_name = name
-            end
-        end
-    end
-    return best_name
-end
-
----------------------------------------------------------------------------
 -- Context helpers
 ---------------------------------------------------------------------------
 
@@ -935,10 +861,28 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         end
         if obj_t.data[4] >= 0 then return ctx.T_UNKNOWN end
         local fname = intern_mod.get(ctx.pool, fname_id) or "?"
-        local suggestion = field_suggestion(ctx, obj_t, fname)
-        local msg = "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'"
-        if suggestion then msg = msg .. "\n  = help: did you mean '" .. suggestion .. "'?" end
-        report(ctx, n.line, n.col, msg)
+        local obj_n2 = ctx.nodes:get(n.data[0])
+        local obj_name2 = (obj_n2 and obj_n2.kind == NODE_IDENTIFIER)
+            and intern_mod.get(ctx.pool, obj_n2.data[0]) or nil
+        local primary_msg = obj_name2
+            and ("`" .. obj_name2 .. "." .. fname .. "` doesn't exist")
+            or  ("`" .. fname .. "` doesn't exist")
+        local entry = report(ctx, n.line, n.col, primary_msg)
+        -- Build field listing for the follow-up note.
+        local field_names = {}
+        local fields2 = ctx.fields
+        for fi = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local fid2 = ctx.lists:get(fi)
+            --: any
+            local fe2 = fields2:get(fid2)
+            local fn2 = intern_mod.get(ctx.pool, fe2.name_id)
+            if fn2 then field_names[#field_names + 1] = "`" .. fn2 .. "`" end
+        end
+        if #field_names > 0 then
+            local obj_label = obj_name2 or "table"
+            errors_mod.add_note(entry, nil, 0, 0,
+                obj_label .. " has: " .. table.concat(field_names, ", "))
+        end
         return ctx.T_ANY
     end
 
@@ -1030,7 +974,13 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     end
 
     local fname = intern_mod.get(ctx.pool, fname_id) or "?"
-    report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'")
+    local obj_nf = ctx.nodes:get(n.data[0])
+    local obj_namef = (obj_nf and obj_nf.kind == NODE_IDENTIFIER)
+        and intern_mod.get(ctx.pool, obj_nf.data[0]) or nil
+    local primary_msgf = obj_namef
+        and ("`" .. obj_namef .. "." .. fname .. "` doesn't exist")
+        or  ("`" .. fname .. "` doesn't exist")
+    report(ctx, n.line, n.col, primary_msgf)
     return ctx.T_ANY
 end
 
@@ -1147,40 +1097,39 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     return ctx.T_UNKNOWN
 end
 
---: (Ctx, any, any, any, any) -> ()
-local function check_call_args(ctx, fn_tid, arg_tids, line, col)
+--: (Ctx, any, any, any, any, any) -> ()
+local function check_call_args(ctx, fn_tid, arg_tids, line, col, fn_name)
     local ft = ctx.types:get(fn_tid)
     if ft.tag ~= TAG_FUNCTION then return end
     local pl = ft.data[1]
     local has_names = ft.data[6] > 0
+    local fn_label = fn_name and ("`" .. fn_name .. "`") or "this function"
     for i = 0, pl - 1 do
         local exp_tid = types_mod.find(ctx, ctx.lists:get(ft.data[0] + i))
         local act_tid = arg_tids[i + 1]
-        local arg_label
+        local param_name = nil
         if has_names then
             local name_id = ctx.lists:get(ft.data[5] + i)
-            local name_str = intern_mod.get(ctx.pool, name_id)
-            if name_str then
-                arg_label = "argument " .. (i + 1) .. " '" .. name_str .. "'"
-            end
+            param_name = intern_mod.get(ctx.pool, name_id)
         end
-        arg_label = arg_label or ("argument " .. (i + 1))
         if act_tid then
             local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
             if not ok then
-                local act_t = ctx.types:get(types_mod.find(ctx, act_tid))
-                local hint = ""
-                if act_t.tag == TAG_UNKNOWN or act_t.tag == TAG_VAR then
-                    hint = "\n  = help: add a type annotation: --: " .. types_mod.display_short(ctx, exp_tid)
+                local msg
+                if param_name then
+                    msg = "`" .. param_name .. "` is `" .. types_mod.display_short(ctx, act_tid)
+                        .. "`, but " .. fn_label .. " expects `" .. types_mod.display_short(ctx, exp_tid) .. "`"
+                else
+                    msg = "argument " .. (i + 1) .. " is `" .. types_mod.display_short(ctx, act_tid)
+                        .. "`, but " .. fn_label .. " expects `" .. types_mod.display_short(ctx, exp_tid) .. "`"
                 end
-                report(ctx, line, col,
-                    arg_label .. ": cannot pass '" .. types_mod.display_short(ctx, act_tid)
-                    .. "' where '" .. types_mod.display_short(ctx, exp_tid) .. "' expected"
-                    .. (err and (": " .. err) or "") .. hint)
+                if err then msg = msg .. ": " .. err end
+                report(ctx, line, col, msg)
             end
         else
             local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
             if not ok then
+                local arg_label = param_name and ("`" .. param_name .. "`") or ("argument " .. (i + 1))
                 report(ctx, line, col,
                     arg_label .. ": missing required argument"
                     .. " (expected '" .. types_mod.display(ctx, exp_tid) .. "', got nil)")
@@ -1230,10 +1179,10 @@ local function try_call_args(ctx, fn_tid, arg_tids)
     return ok, errs
 end
 
---: (Ctx, any, any, any, any) -> any
-local function call_fn_returns(ctx, fn_tid, arg_tids, line, col)
+--: (Ctx, any, any, any, any, any) -> any
+local function call_fn_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     local inst_fn = env_mod.instantiate(ctx, fn_tid, ctx.scope.level)
-    check_call_args(ctx, inst_fn, arg_tids, line, col)
+    check_call_args(ctx, inst_fn, arg_tids, line, col, fn_name)
     local ift = ctx.types:get(inst_fn)
     local rl = ift.data[3]
     if rl == 0 then
@@ -1248,8 +1197,8 @@ local function call_fn_returns(ctx, fn_tid, arg_tids, line, col)
     return returns[1]
 end
 
---: (Ctx, any, any, any, any) -> any
-local function call_returns(ctx, fn_tid, arg_tids, line, col)
+--: (Ctx, any, any, any, any, any) -> any
+local function call_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
 
@@ -1270,7 +1219,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
     end
 
     if ft.tag == TAG_FUNCTION then
-        return call_fn_returns(ctx, fn_tid, arg_tids, line, col)
+        return call_fn_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     end
 
     if ft.tag == TAG_UNION then
@@ -1308,7 +1257,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
             -- All members accept — return union of their return types.
             local ret_tids = {}
             for _, mem_tid in ipairs(fn_members) do
-                ret_tids[#ret_tids + 1] = call_fn_returns(ctx, mem_tid, arg_tids, line, col)
+                ret_tids[#ret_tids + 1] = call_fn_returns(ctx, mem_tid, arg_tids, line, col, fn_name)
             end
             local ret = #ret_tids == 1 and ret_tids[1] or types_mod.make_union(ctx, ret_tids)
             ctx._last_multi_return = { ret }
@@ -1331,7 +1280,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col)
                 local inst = env_mod.instantiate(ctx, cand_tid, ctx.scope.level)
                 local ok, errs = try_call_args(ctx, inst, arg_tids)
                 if ok then
-                    return call_fn_returns(ctx, cand_tid, arg_tids, line, col)
+                    return call_fn_returns(ctx, cand_tid, arg_tids, line, col, fn_name)
                 end
                 failures[#failures + 1] = { tid = cand_tid, errs = errs }
             end
@@ -1434,7 +1383,14 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         end
     end
 
-    return call_returns(ctx, callee_tid, arg_tids, n.line, n.col)
+    -- Extract callee name for error messages.
+    local callee_name = nil
+    if callee_n.kind == NODE_IDENTIFIER then
+        callee_name = intern_mod.get(ctx.pool, callee_n.data[0])
+    elseif callee_n.kind == NODE_FIELD_EXPR then
+        callee_name = intern_mod.get(ctx.pool, callee_n.data[1])
+    end
+    return call_returns(ctx, callee_tid, arg_tids, n.line, n.col, callee_name)
 end
 
 --: (Ctx, any) -> any
@@ -1479,10 +1435,11 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
         end
     end
 
+    local method_name_str = intern_mod.get(ctx.pool, method_name_id)
     local extra = infer_expr_list(ctx, n.data[2], n.data[3])
     local arg_tids = { recv_tid }
     for _, a in ipairs(extra) do arg_tids[#arg_tids + 1] = a end
-    return call_returns(ctx, method_tid, arg_tids, n.line, n.col)
+    return call_returns(ctx, method_tid, arg_tids, n.line, n.col, method_name_str)
 end
 
 --: (Ctx, any) -> any
@@ -1961,18 +1918,17 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         if not unify_mod.try_unify(ctx, rhs_tid, existing_tid) then
                             local field_name = intern_mod.get(ctx.pool, field_id) or "?"
                             local entry = report(ctx, tn.line, tn.col,
-                                "cannot assign type '"
-                                .. types_mod.display_short(ctx, rhs_tid)
-                                .. "' to field '" .. field_name
-                                .. "' of type '"
-                                .. types_mod.display_short(ctx, existing_tid) .. "'")
+                                "`" .. field_name .. "` is `"
+                                .. types_mod.display_short(ctx, existing_tid)
+                                .. "`, but this location expects `"
+                                .. types_mod.display_short(ctx, rhs_tid) .. "`")
                             -- Secondary span: find where the field was first defined.
                             local obj_n = ctx.nodes:get(obj_nid)
                             if obj_n.kind == NODE_IDENTIFIER then
                                 local def = find_field_definition(ctx, obj_n.data[0], field_id)
                                 if def then
                                     errors_mod.add_note(entry, ctx.filename, def.line, def.col,
-                                        "field '" .. field_name .. "' first defined here")
+                                        "set to `" .. types_mod.display_short(ctx, existing_tid) .. "` here")
                                 end
                             end
                         end

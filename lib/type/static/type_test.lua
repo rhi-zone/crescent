@@ -2829,7 +2829,7 @@ assert.describe("checker: field re-assignment type check", function()
 local M = {}
 function M.count() return 1 end
 M.count = "string"
-]], "cannot assign")
+]], "but this location expects")
     end)
 
     assert.it("M.count = compatible_fn after function M.count() → no error", function()
@@ -2846,7 +2846,7 @@ M.count = replacement
 local M = {}
 M.name = "hello"
 M.name = 42
-]], "cannot assign")
+]], "but this location expects")
     end)
 
     assert.it("t.x = 2 after t.x = 1 (integer to integer) → no error", function()
@@ -2868,7 +2868,7 @@ M.name = 42
         assert.ok(errors_mod.has_errors(ec))
         local e = ec.errors[1]
         assert.ok(e.notes and #e.notes > 0, "expected at least one note")
-        assert.ok(e.notes[1].msg:find("first defined"), "note should say 'first defined'")
+        assert.ok(e.notes[1].msg:find("set to"), "note should say 'set to', got: " .. tostring(e.notes[1].msg))
         -- The first definition is on line 2 (M.name = "hello")
         assert.eq(e.notes[1].line, 2)
     end)
@@ -2894,7 +2894,7 @@ M.x = "bad"
 ]])
         local msg = errors_mod.format_plain(ec)
         assert.ok(msg:find("note:"), "format_plain should include note: line, got: " .. msg)
-        assert.ok(msg:find("first defined"), "note should mention first defined, got: " .. msg)
+        assert.ok(msg:find("set to"), "note should mention 'set to', got: " .. msg)
     end)
 end)
 
@@ -3026,7 +3026,7 @@ local a = obj.x
 --:: T2 = { y: string }
 --:: declare obj = T1 & T2
 local a = obj.z
-]], "no field")
+]], "doesn't exist")
     end)
 end)
 
@@ -3154,7 +3154,7 @@ local s = r .. "!"
 --:: newtype MyFn = (integer) -> string
 --:: declare f = MyFn
 local r = f("oops")
-]], "cannot pass")
+]], "expects")
     end)
 end)
 
@@ -3318,7 +3318,7 @@ local function test(t)
     t = t
     aaa(t)
 end
-]], "cannot pass")
+]], "expects")
     end)
     assert.it("early-return guard: if not t.x then return end narrows continuation", function()
         -- After the guard, t.x is guaranteed non-nil in the continuation
@@ -3367,41 +3367,56 @@ end
 end)
 
 ---------------------------------------------------------------------------
--- Error suggestions: "did you mean?" and "consider annotating"
+-- Error messages: field-not-found and argument mismatch
 ---------------------------------------------------------------------------
 
-assert.describe("error suggestions", function()
-    assert.it("field typo: suggests closest field name (distance 1)", function()
+assert.describe("error messages", function()
+    assert.it("field not found: message says doesn't exist", function()
         has_error([[
 local foo = {} --: { bar: string, count: number }
 local x = foo.baz
-]], "did you mean 'bar'")
+]], "doesn't exist")
     end)
 
-    assert.it("field typo: suggests closest field name (count_items vs count_item)", function()
+    assert.it("field not found: message includes object and field name", function()
         has_error([[
-local foo = {} --: { count_items: number }
-local x = foo.count_item
-]], "did you mean 'count_items'")
+local foo = {} --: { bar: string, count: number }
+local x = foo.baz
+]], "foo.baz")
     end)
 
-    assert.it("field typo: no suggestion when no close match", function()
+    assert.it("field not found: note lists available fields", function()
+        local ec = check([[
+local foo = {} --: { bar: string, count: number }
+local x = foo.baz
+]])
+        assert.ok(errors_mod.has_errors(ec))
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(msg:find("`bar`"), "note should list field 'bar', got: " .. msg)
+        assert.ok(msg:find("`count`"), "note should list field 'count', got: " .. msg)
+        assert.ok(not msg:find("did you mean"), "should not say 'did you mean', got: " .. msg)
+    end)
+
+    assert.it("field not found: no 'did you mean' suggestion", function()
         local ec = check([[
 local foo = {} --: { alpha: string, beta: number }
 local x = foo.xyz
 ]])
         assert.ok(errors_mod.has_errors(ec))
         local msg = errors_mod.format_plain(ec)
-        assert.ok(not msg:find("did you mean"), "should not suggest for distant match, got: " .. msg)
+        assert.ok(not msg:find("did you mean"), "should not suggest 'did you mean', got: " .. msg)
     end)
 
-    assert.it("unknown arg: passing unknown (open table field) to typed fn suggests annotation", function()
-        -- Open table field access returns unknown; passing to typed fn should suggest annotation
-        has_error([[
+    assert.it("unknown arg: passing unknown to typed fn reports type mismatch", function()
+        -- Open table field access returns unknown; passing to typed fn should report error
+        local ec = check([[
 --: (string) -> nil
 local function takes_str(s) end
 local t = {}
 takes_str(t.foo)
-]], "consider")
+]])
+        assert.ok(errors_mod.has_errors(ec))
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(not msg:find("consider"), "should not say 'consider annotating', got: " .. msg)
     end)
 end)
