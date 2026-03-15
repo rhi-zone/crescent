@@ -2639,32 +2639,57 @@ function M.check_string(source, filename, parent_scope, pool, cri_loader)
     local intern_new = require("lib.type.static.intern").new
     pool = pool or intern_new()
 
-    local ok_parse, pr = pcall(parse_mod.parse, source, filename, pool)
-    if not ok_parse then
-        local err_ctx = errors_mod.new_ctx()
-        errors_mod.error(err_ctx, filename or "?", 0, 0, tostring(pr))
-        return err_ctx
-    end
+    -- Build the type arena and scope BEFORE parsing the user source so that
+    -- prelude.populate() runs while the pool contains only keywords (IDs 0-21).
+    -- This makes prelude's parse-result cache valid across all fresh pools.
+    local scope = parent_scope or env_mod.new(0)
+    local ctx = types_mod.new_ctx(pool)
+    ctx.scope          = scope
+    ctx.ann            = nil
+    ctx.err            = errors_mod.new_ctx()
+    ctx.filename       = filename or "?"
+    ctx.return_types   = {}
+    ctx.return_stub_vars = {}
+    ctx.module_types   = {}
+    ctx.module_return_tids = nil
+    ctx.cri_loader     = nil
+    ctx.ffi_hooks      = nil
+    ctx._last_multi_return = nil
+    ctx._last_pcall_success_types = nil
+    ctx._pcall_info    = {}
+    ctx.inferred_anns  = {}
+    ctx.type_at        = {}
+    ctx.name_at        = {}
+    ctx.field_at       = {}
+    ctx.def_sites      = {}
+    ctx.require_sources = {}
 
-    local ann_result = nil
-    local lex_annotations = pr.lexer and pr.lexer.annotations
-    if lex_annotations and next(lex_annotations) then
-        local ok_ann, ar = pcall(ann_mod.parse_annotations, lex_annotations, pool, filename)
-        if ok_ann then ann_result = ar end
-    end
-
-    local err_ctx = errors_mod.new_ctx()
-    errors_mod.set_source(err_ctx, filename or "?", source)
-    local scope   = parent_scope or env_mod.new(0)
-    local ctx     = M.new_ctx(pr, ann_result, pool, err_ctx, filename, scope)
-
-    -- Install cri_loader before inference so require() calls resolve at check time.
-    if cri_loader then ctx.cri_loader = cri_loader end
-
-    -- Populate stdlib prelude when no parent scope is provided.
+    -- Populate stdlib prelude before user source is parsed.
+    -- prelude.populate() caches its parse results; this ordering ensures cache hits.
     if not parent_scope then
         require("lib.type.static.prelude").populate(ctx)
     end
+
+    -- Now parse the user source (pool may grow with user identifiers after this).
+    local ok_parse, pr = pcall(parse_mod.parse, source, filename, pool)
+    if not ok_parse then
+        errors_mod.error(ctx.err, filename or "?", 0, 0, tostring(pr))
+        return ctx.err
+    end
+
+    ctx.ast_lists = pr.lists
+    ctx.nodes     = pr.nodes
+
+    errors_mod.set_source(ctx.err, filename or "?", source)
+
+    local lex_annotations = pr.lexer and pr.lexer.annotations
+    if lex_annotations and next(lex_annotations) then
+        local ok_ann, ar = pcall(ann_mod.parse_annotations, lex_annotations, pool, filename)
+        if ok_ann then ctx.ann = ar end
+    end
+
+    -- Install cri_loader before inference so require() calls resolve at check time.
+    if cri_loader then ctx.cri_loader = cri_loader end
 
     -- Run FFI hooks init if installed (e.g. by prelude_luajit).
     if ctx.ffi_hooks and ctx.ffi_hooks.init then
@@ -2683,7 +2708,7 @@ function M.check_string(source, filename, parent_scope, pool, cri_loader)
         ctx.module_return_tids = pop_return_collector(ctx)
     end
 
-    return err_ctx, ctx
+    return ctx.err, ctx
 end
 
 -- Expose resolve_annotation_type for external use (e.g. check.lua)

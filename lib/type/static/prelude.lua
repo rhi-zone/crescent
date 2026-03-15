@@ -9,20 +9,46 @@ local defs_mod   = require("lib.type.static.defs")
 
 local M = {}
 
+-- Module-level source cache: path → source string.
+--
+-- Caches the raw file contents so that subsequent populate() calls skip
+-- file I/O.  parse_mod.parse and ann_mod.parse_annotations are still called
+-- on every populate() so that intern IDs are always assigned into the current
+-- pool — intern is idempotent, so calling it multiple times with the same
+-- strings on the same pool is free.
+--
+-- INVARIANT: infer.check_string calls populate() BEFORE parsing the user
+-- source, so the pool contains only pre-seeded keywords (IDs 0–21) at the
+-- start of the first populate() call on a fresh pool.  Because intern is
+-- idempotent, re-parsing the stdlib files on a reused pool simply confirms
+-- the same IDs that were already assigned.
+--
+-- Call M.clear_cache() if the stdlib .d.lua files change at runtime.
+local _source_cache = {}   -- path → source string
+
+function M.clear_cache()
+    _source_cache = {}
+end
+
 -- Parse a .d.lua declaration file and populate ctx.scope.
 -- Uses the + annotation pipeline.
 -- Variable declarations (--:: declare name = type) are bound in ctx.scope.
 -- Type aliases (--:: Name = type) are registered in ctx.scope.type_bindings.
 -- After loading, primitive meta type ctx fields are derived from aliases.
 local function load_decls(ctx, path)
-    local f = io.open(path, "r")
-    if not f then return end
-    local source = f:read("*a")
-    f:close()
-
     local parse_mod  = require("lib.type.static.parse")
     local ann_mod    = require("lib.type.static.ann")
     local infer_mod  = require("lib.type.static.infer")
+
+    -- Cache the source string to skip file I/O on subsequent calls.
+    local source = _source_cache[path]
+    if not source then
+        local f = io.open(path, "r")
+        if not f then return end
+        source = f:read("*a")
+        f:close()
+        _source_cache[path] = source
+    end
 
     local ok_p, pr = pcall(parse_mod.parse, source, path, ctx.pool)
     if not ok_p then return end
