@@ -41,6 +41,7 @@ end
 local function parse_args(argv)
 	local coverage = false
 	local jobs_arg = nil  -- nil = auto-detect
+	local files = {}
 
 	for i = 1, #argv do
 		local v = argv[i]
@@ -48,10 +49,12 @@ local function parse_args(argv)
 			coverage = true
 		elseif v:match("^%-%-jobs=(%d+)$") then
 			jobs_arg = tonumber(v:match("^%-%-jobs=(%d+)$"))
+		elseif not v:match("^%-") then
+			files[#files + 1] = v
 		end
 	end
 
-	return coverage, jobs_arg
+	return coverage, jobs_arg, files
 end
 
 -- ── file discovery ────────────────────────────────────────────────────────────
@@ -400,9 +403,9 @@ end
 
 --- Run the test suite. argv is a 1-indexed list of arguments.
 function M.main(argv)
-	local coverage, jobs_arg = parse_args(argv)
+	local coverage, jobs_arg, explicit_files = parse_args(argv)
 
-	local files = find_test_files()
+	local files = #explicit_files > 0 and explicit_files or find_test_files()
 	if #files == 0 then
 		print("no test files found")
 		os.exit(0)
