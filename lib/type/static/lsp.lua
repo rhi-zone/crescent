@@ -181,8 +181,8 @@ local function run_check(state, uri, text)
     local path = uri_to_path(uri)
     state.text_cache[uri] = text
 
-    -- Clear per-session cache so this file is re-checked fresh.
-    check.clear_cache()
+    -- Invalidate only this file's session entry; dependencies on disk remain cached.
+    check.invalidate_file(path)
 
     local err_ctx, ctx = check.check_string_with_deps(text, path)
 

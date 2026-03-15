@@ -30,6 +30,15 @@ function M.clear_cache()
     _pool     = nil
 end
 
+-- Invalidate the session cache entry for a single file.
+-- Useful in the LSP: when a file is edited, only its entry needs eviction;
+-- deps on disk are still valid and can be reused.
+function M.invalidate_file(filename)
+    if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
+    _session[filename]  = nil
+    _checking[filename] = nil
+end
+
 -- Enable or disable the disk .cri cache.
 -- Pass a directory path to enable (default disabled).
 -- Setting nil or false disables.
