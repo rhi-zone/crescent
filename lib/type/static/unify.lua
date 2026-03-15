@@ -598,8 +598,13 @@ function M.try_unify(ctx, a, b)
     if tb.tag == TAG_UNKNOWN then return true end
     if ta.tag == TAG_UNKNOWN then return false end
     if ta.tag == TAG_NEVER then return true end
-    if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR or
-       tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then return true end
+    -- TAG_VAR/TAG_ROWVAR on RHS (expected type is a free var): accept any actual — this covers
+    -- generic-param instantiation, where exp_tid is a freshly-created unbound var.
+    -- TAG_ROWVAR on LHS (actual is a row extension): accept for structural/open-table matching.
+    -- TAG_VAR on LHS (actual is a free unbound var): return false — we cannot confirm that an
+    -- unknown type is compatible with the expected type (soundness-audit.md Gap 1).
+    if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then return true end
+    if ta.tag == TAG_ROWVAR then return true end
     if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return true end
 
     -- Union LHS: all members must be assignable to b.

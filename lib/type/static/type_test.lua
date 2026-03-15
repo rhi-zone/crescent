@@ -2985,6 +2985,38 @@ local y = fn("hello")
 local x = fn(1)
 ]], "union members")
     end)
+
+    -- Soundness: free TAG_VAR should not silently satisfy union dispatch (Gap 1 in soundness-audit.md)
+    assert.it("unbound forward-decl variable fails union dispatch", function()
+        has_error([[
+--:: F1 = (integer) -> nil
+--:: F2 = (string) -> nil
+--:: Fn = F1 | F2
+--:: declare fn = Fn
+local y
+fn(y)
+]], "union members")
+    end)
+end)
+
+assert.describe("checker: soundness: free TAG_VAR in try_unify", function()
+    -- Gap 1 from soundness-audit.md: unbound TAG_VAR was silently accepted by try_unify
+    -- (ta.tag == TAG_VAR → true), letting free vars slip through intersection dispatch.
+    assert.it("unbound variable does not match intersection overload", function()
+        has_error([[
+--:: declare fn = ((x: integer) -> nil) & ((x: string) -> nil)
+local y
+fn(y)
+]], "no matching overload")
+    end)
+
+    assert.it("annotated variable matches correct overload", function()
+        no_errors([[
+--:: declare fn = ((x: integer) -> nil) & ((x: string) -> nil)
+local y = 1
+fn(y)
+]])
+    end)
 end)
 
 ---------------------------------------------------------------------------

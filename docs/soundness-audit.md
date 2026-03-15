@@ -12,10 +12,23 @@ valid code.
 
 ---
 
-## Gap 1 — TAG_VAR permissiveness in `try_unify`
+## Gap 1 — TAG_VAR permissiveness in `try_unify` — FIXED 2026-03-15
 
-**File:** `unify.lua:601-602`
-**Severity:** Critical (false negative)
+**File:** `unify.lua:601-602` (fixed: ta.tag == TAG_VAR now falls through to false)
+**Severity:** Critical (false negative) — **FIXED**
+
+**Fix (session 21):** Changed `try_unify` so that `ta.tag == TAG_VAR` (actual type is a free
+unbound variable) no longer returns `true`. Only `tb.tag == TAG_VAR` (expected type is a free
+var — needed for generic param instantiation) keeps `return true`. `ta.tag == TAG_ROWVAR` also
+kept as `true` for open-table structural matching.
+
+Result: unbound forward-declared variables no longer silently satisfy union/intersection dispatch.
+Tests added: "unbound forward-decl variable fails union dispatch" and "unbound variable does not
+match intersection overload" in type_test.lua.
+
+---
+
+**Original description (kept for reference):**
 
 ```lua
 if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR or
@@ -213,7 +226,7 @@ replaced by full structural checking once resolution completes.
 
 | # | Gap | Severity | Impact on user code |
 |---|-----|----------|---------------------|
-| 1 | TAG_VAR in try_unify | Critical | Union/intersection function dispatch silently passes wrong types |
+| 1 | TAG_VAR in try_unify | ~~Critical~~ **FIXED** | Union/intersection function dispatch silently passes wrong types |
 | 2 | Unannotated params | High | By design; mitigated by implicit-any warnings |
 | 3 | Generic variance | High | Type params in generic containers not variance-checked |
 | 4 | Recursive types | Medium | Self-referential types may cause display loops |
