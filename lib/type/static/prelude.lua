@@ -60,11 +60,22 @@ local function load_decls(ctx, path)
     end
 
     -- Pass 2: resolve all type bodies and bind.
+    local types_mod = require("lib.type.static.types")
     for _, r in ipairs(decls) do
-        local resolved = resolve(ctx, r.type_id)
         if r.decl_var then
-            env_mod.bind(ctx.scope, r.name_id, resolved)
+            env_mod.bind(ctx.scope, r.name_id, resolve(ctx, r.type_id))
+        elseif r.newtype then
+            -- Newtype: resolve underlying type, assign a unique nominal identity.
+            -- ann.lua stores data[1]=0 for all newtypes; without a unique identity
+            -- all newtypes would unify with each other (identity-based equality).
+            local ann_nom = ctx.ann.types:get(r.type_id)
+            local underlying = resolve(ctx, ann_nom.data[2])
+            ctx.nominal_id = ctx.nominal_id + 1
+            local nom = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
+            local alias = env_mod.lookup_type(ctx.scope, r.name_id)
+            if alias then alias.body = nom end
         else
+            local resolved = resolve(ctx, r.type_id)
             local alias = env_mod.lookup_type(ctx.scope, r.name_id)
             if alias then alias.body = resolved end
         end

@@ -9,6 +9,11 @@
 -- objects (TypeSlot*, FieldEntry*, int32_t*) whose methods cannot be described
 -- in the annotation language without full FFI ctype support.
 
+--:: newtype TypeId = integer
+--:: newtype InternId = integer
+--:: newtype NodeId = integer
+--:: newtype ListIdx = integer
+
 --[[::
 Ctx = {
   types:        any,
