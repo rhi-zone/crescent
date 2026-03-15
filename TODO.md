@@ -51,7 +51,7 @@
 - [x] `--format json` structured output (file, line, severity, message)
 - [x] `--format sarif` for GitHub Code Scanning / CI integration
 - [x] Column numbers in error positions
-- [ ] SARIF column off-by-one: typechecker cols are 1-indexed; `errors.format_sarif` uses `e.col+1` → outputs col+1 (2-indexed). Should use `e.col` for 1-indexed SARIF. Discovered 2026-03-15.
+- [x] SARIF column off-by-one: typechecker cols are 1-indexed; `errors.format_sarif` uses `e.col+1` → outputs col+1 (2-indexed). Should use `e.col` for 1-indexed SARIF. Fixed 2026-03-15.
 
 ### done
 - [x] Full require() return type tracking (infer module return type)
@@ -368,7 +368,7 @@ Branch coverage implementation sketch: instrument the AST (add synthetic nodes a
 - [ ] Incremental re-check — cheap scope invalidation so full reparse isn't needed on every keystroke
 - [ ] Module-level type cache — avoid re-typechecking stdlib/imports on every edit; currently `check.clear_cache()` on every file change is correct but slow for large projects
 - [x] Completion — scope-level name enumeration (module + stdlib + locals visible at module level); cursor-local scope completions need position-tracking infrastructure not yet built. (2026-03-15)
-- [ ] Completion: field completions after `foo.` — need to parse the prefix expression, find its type, enumerate fields
+- [x] Completion: field completions after `foo.` — extract identifier before trigger, resolve in scope, enumerate table fields. (2026-03-15)
 - [x] Go-to-def — `ctx.def_sites` (name_id → {line,col}) + `ctx.name_at` for identifier use positions; textDocument/definition handler in lsp.lua. (2026-03-15, within-file only; cross-file requires cri_loader integration)
 
 ## package manager
