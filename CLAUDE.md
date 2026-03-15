@@ -64,6 +64,8 @@ cd docs && bun dev           # Local docs
 
 **Fast.** Performance at all costs. LuaJIT is fast — don't waste it. Avoid allocations in hot paths, prefer tables over closures, measure before and after.
 
+**Tooling performance bar: bun.** The test runner, package manager, typechecker, and any other CLI tooling must be competitive with bun in wall-clock time. Bun is written in Zig and sets the current bar for JS/TS ecosystem tooling speed. If a LuaJIT implementation of the same program is not within striking distance of bun on the same workload, that is a signal to reconsider the design — not to accept the gap. Benchmark both before shipping. This applies especially to: test runner startup + execution, package install, typechecker cold-start and incremental check.
+
 **LuaJIT-first, not LuaJIT-only.** Target LuaJIT but don't gratuitously break Lua 5.2+ compatibility. Pure Lua code shouldn't depend on LuaJIT quirks. FFI and `bit.*` are inherently LuaJIT-only, but everything else should work on standard Lua if it doesn't sacrifice performance.
 
 **Composable.** Libraries depend on each other minimally. Pick what you need, ignore the rest.
