@@ -2858,6 +2858,46 @@ t.x = 2
     end)
 end)
 
+assert.describe("checker: secondary spans (notes) for field errors", function()
+    assert.it("M.name = 42 after M.name = 'hello' → note points to first definition", function()
+        local ec = check([[
+local M = {}
+M.name = "hello"
+M.name = 42
+]])
+        assert.ok(errors_mod.has_errors(ec))
+        local e = ec.errors[1]
+        assert.ok(e.notes and #e.notes > 0, "expected at least one note")
+        assert.ok(e.notes[1].msg:find("first defined"), "note should say 'first defined'")
+        -- The first definition is on line 2 (M.name = "hello")
+        assert.eq(e.notes[1].line, 2)
+    end)
+
+    assert.it("function M.count() then M.count = 'bad' → note points to function decl", function()
+        local ec = check([[
+local M = {}
+function M.count() return 1 end
+M.count = "string"
+]])
+        assert.ok(errors_mod.has_errors(ec))
+        local e = ec.errors[1]
+        assert.ok(e.notes and #e.notes > 0, "expected at least one note")
+        -- The first definition is on line 2 (function M.count())
+        assert.eq(e.notes[1].line, 2)
+    end)
+
+    assert.it("format_plain includes 'note:' in output", function()
+        local ec = check([[
+local M = {}
+M.x = 1
+M.x = "bad"
+]])
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(msg:find("note:"), "format_plain should include note: line, got: " .. msg)
+        assert.ok(msg:find("first defined"), "note should mention first defined, got: " .. msg)
+    end)
+end)
+
 assert.describe("cri: require() type resolution", function()
     assert.it("cri_loader wires require() return type", function()
         -- Build a 'module' and serialize its export type

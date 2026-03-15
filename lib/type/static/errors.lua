@@ -29,10 +29,25 @@ function M.set_source(err_ctx, filename, source)
     err_ctx.source_lines[filename] = lines
 end
 
--- Add an error.
+-- Add an error. Returns the error entry so callers can attach notes.
 function M.error(err_ctx, filename, line, col, msg)
-    err_ctx.errors[#err_ctx.errors + 1] = {
+    local e = {
         kind     = "error",
+        filename = filename,
+        line     = line,
+        col      = col,
+        msg      = msg,
+        notes    = {},
+    }
+    err_ctx.errors[#err_ctx.errors + 1] = e
+    return e
+end
+
+-- Attach a secondary note to an error entry returned by M.error.
+-- note: { filename, line, col, msg }
+function M.add_note(entry, filename, line, col, msg)
+    if not entry then return end
+    entry.notes[#entry.notes + 1] = {
         filename = filename,
         line     = line,
         col      = col,
@@ -40,15 +55,18 @@ function M.error(err_ctx, filename, line, col, msg)
     }
 end
 
--- Add a warning.
+-- Add a warning. Returns the warning entry.
 function M.warning(err_ctx, filename, line, col, msg)
-    err_ctx.warnings[#err_ctx.warnings + 1] = {
+    local w = {
         kind     = "warning",
         filename = filename,
         line     = line,
         col      = col,
         msg      = msg,
+        notes    = {},
     }
+    err_ctx.warnings[#err_ctx.warnings + 1] = w
+    return w
 end
 
 -- Check if there are any errors.
@@ -70,6 +88,15 @@ local function append_context(out, source_lines, filename, line_num, col)
     end
 end
 
+-- Append notes to an output lines table (plain text).
+local function append_notes_plain(out, notes, source_lines)
+    if not notes then return end
+    for _, note in ipairs(notes) do
+        out[#out + 1] = string.format("  note: %s", note.msg)
+        append_context(out, source_lines, note.filename, note.line, note.col)
+    end
+end
+
 -- Format errors as plain text.
 function M.format_plain(err_ctx)
     local lines = {}
@@ -77,6 +104,7 @@ function M.format_plain(err_ctx)
         lines[#lines + 1] = string.format("%s:%d:%d: error: %s",
             e.filename, e.line, e.col, e.msg)
         append_context(lines, err_ctx.source_lines, e.filename, e.line, e.col)
+        append_notes_plain(lines, e.notes, err_ctx.source_lines)
     end
     for _, w in ipairs(err_ctx.warnings) do
         lines[#lines + 1] = string.format("%s:%d:%d: warning: %s",
@@ -109,6 +137,15 @@ local function append_context_ansi(out, source_lines, filename, line_num, col, c
     end
 end
 
+-- Append notes to an output lines table (ANSI).
+local function append_notes_ansi(out, notes, source_lines)
+    if not notes then return end
+    for _, note in ipairs(notes) do
+        out[#out + 1] = string.format("  %snote:%s %s", ANSI.bold, ANSI.reset, note.msg)
+        append_context_ansi(out, source_lines, note.filename, note.line, note.col, ANSI.dim)
+    end
+end
+
 -- Format errors with ANSI colors.
 function M.format_ansi(err_ctx)
     local lines = {}
@@ -117,6 +154,7 @@ function M.format_ansi(err_ctx)
             ANSI.bold, e.filename, e.line, e.col, ANSI.reset,
             ANSI.red, ANSI.reset, e.msg)
         append_context_ansi(lines, err_ctx.source_lines, e.filename, e.line, e.col, ANSI.red)
+        append_notes_ansi(lines, e.notes, err_ctx.source_lines)
     end
     for _, w in ipairs(err_ctx.warnings) do
         lines[#lines + 1] = string.format("%s%s:%d:%d:%s %swarning:%s %s",
@@ -127,18 +165,32 @@ function M.format_ansi(err_ctx)
     return table.concat(lines, "\n")
 end
 
+-- Serialize a notes array to JSON fragment.
+local function notes_to_json(notes)
+    if not notes or #notes == 0 then return "[]" end
+    local parts = {}
+    for _, note in ipairs(notes) do
+        parts[#parts + 1] = string.format(
+            '{"file":%s,"line":%d,"col":%d,"message":%s}',
+            M._json_str(note.filename), note.line, note.col, M._json_str(note.msg))
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+end
+
 -- Format errors as JSON array.
 function M.format_json(err_ctx)
     local items = {}
     for _, e in ipairs(err_ctx.errors) do
         items[#items + 1] = string.format(
-            '{"kind":"error","file":%s,"line":%d,"col":%d,"message":%s}',
-            M._json_str(e.filename), e.line, e.col, M._json_str(e.msg))
+            '{"kind":"error","file":%s,"line":%d,"col":%d,"message":%s,"notes":%s}',
+            M._json_str(e.filename), e.line, e.col, M._json_str(e.msg),
+            notes_to_json(e.notes))
     end
     for _, w in ipairs(err_ctx.warnings) do
         items[#items + 1] = string.format(
-            '{"kind":"warning","file":%s,"line":%d,"col":%d,"message":%s}',
-            M._json_str(w.filename), w.line, w.col, M._json_str(w.msg))
+            '{"kind":"warning","file":%s,"line":%d,"col":%d,"message":%s,"notes":%s}',
+            M._json_str(w.filename), w.line, w.col, M._json_str(w.msg),
+            notes_to_json(w.notes))
     end
     return "[" .. table.concat(items, ",") .. "]"
 end

@@ -177,14 +177,57 @@ end
 -- Context helpers
 ---------------------------------------------------------------------------
 
---: (Ctx, any, any, any) -> ()
+-- Returns the error entry so callers can attach notes.
+--: (Ctx, any, any, any) -> any
 local function report(ctx, line, col, msg)
-    errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
+    return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
 --: (Ctx, any, any, any) -> ()
 local function warn(ctx, line, col, msg)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+end
+
+-- Walk ctx.nodes to find where field `field_name_id` on object `obj_name_id`
+-- was first defined.  Checks:
+--   NODE_ASSIGN_STMT where LHS[i] is NODE_FIELD_EXPR{ obj, field }
+--   NODE_FUNC_DECL   where name  is NODE_FIELD_EXPR{ obj, field }
+-- Returns {line, col} of the first matching node, or nil.
+-- This is an O(n) scan — only called on the error path.
+--: (Ctx, any, any) -> any
+local function find_field_definition(ctx, obj_name_id, field_name_id)
+    local n_nodes = ctx.nodes.len
+    for i = 0, n_nodes - 1 do
+        local nd = ctx.nodes:get(i)
+        if nd.kind == NODE_ASSIGN_STMT then
+            -- LHS list: (data[0]=start, data[1]=count)
+            local ls, lc = nd.data[0], nd.data[1]
+            for j = ls, ls + lc - 1 do
+                local lhs_nid = ctx.ast_lists:get(j)
+                local lhs_n = ctx.nodes:get(lhs_nid)
+                if lhs_n.kind == NODE_FIELD_EXPR then
+                    local obj_n = ctx.nodes:get(lhs_n.data[0])
+                    if obj_n.kind == NODE_IDENTIFIER
+                        and obj_n.data[0] == obj_name_id
+                        and lhs_n.data[1] == field_name_id then
+                        return { line = lhs_n.line, col = lhs_n.col }
+                    end
+                end
+            end
+        elseif nd.kind == NODE_FUNC_DECL then
+            -- name node is data[0]
+            local name_n = ctx.nodes:get(nd.data[0])
+            if name_n.kind == NODE_FIELD_EXPR then
+                local obj_n = ctx.nodes:get(name_n.data[0])
+                if obj_n.kind == NODE_IDENTIFIER
+                    and obj_n.data[0] == obj_name_id
+                    and name_n.data[1] == field_name_id then
+                    return { line = name_n.line, col = name_n.col }
+                end
+            end
+        end
+    end
+    return nil
 end
 
 -- stub_ret_vars: optional array of TAG_VAR type IDs from the prescan stub.
@@ -1917,12 +1960,21 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     if existing_tag ~= TAG_VAR then
                         if not unify_mod.try_unify(ctx, rhs_tid, existing_tid) then
                             local field_name = intern_mod.get(ctx.pool, field_id) or "?"
-                            report(ctx, tn.line, tn.col,
+                            local entry = report(ctx, tn.line, tn.col,
                                 "cannot assign type '"
                                 .. types_mod.display_short(ctx, rhs_tid)
                                 .. "' to field '" .. field_name
                                 .. "' of type '"
                                 .. types_mod.display_short(ctx, existing_tid) .. "'")
+                            -- Secondary span: find where the field was first defined.
+                            local obj_n = ctx.nodes:get(obj_nid)
+                            if obj_n.kind == NODE_IDENTIFIER then
+                                local def = find_field_definition(ctx, obj_n.data[0], field_id)
+                                if def then
+                                    errors_mod.add_note(entry, ctx.filename, def.line, def.col,
+                                        "field '" .. field_name .. "' first defined here")
+                                end
+                            end
                         end
                     end
                 end
