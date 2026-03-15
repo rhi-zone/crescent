@@ -134,7 +134,40 @@ again. The checksum in the lockfile is the integrity guarantee, not the
 registry. Any server that speaks the protocol can serve packages; the
 default registry is a convenience, not a trust anchor.
 
-Override with `--registry=URL` or per-project config (future).
+## Multiple registries
+
+Crescent supports multiple registries with explicit priority ordering
+(first registry that satisfies the version constraint wins — not
+highest-version-wins, which would be unpredictable across registries).
+
+**Configuration sources** (merged in priority order, highest first):
+
+1. `~/.crescent/config.lua` — user-level; private/corp registries and auth
+   tokens live here, never committed to VCS:
+   ```lua
+   return {
+     registries = { "https://corp.internal/lua-pkgs" },
+     auth = {
+       ["corp.internal"] = { token = "..." },
+     },
+   }
+   ```
+
+2. `pkg.lua` — project-level, committed, reproducible:
+   ```lua
+   registries = {
+     "https://pkg.crescent.run",
+     "https://my.mirror",
+   }
+   ```
+
+Effective registry list = `user_config.registries + pkg.lua.registries`.
+Registries are queried in order; the first one with a version satisfying
+the constraint is used. The winning registry's URL is stored in
+`crescent.lock`, so reinstalls are deterministic regardless of registry
+availability.
+
+`--registry=URL` on the CLI prepends a registry for that invocation only.
 
 ```
 GET /index.json                         → {name: {versions: [...], latest: "x.y.z"}}
@@ -214,9 +247,8 @@ the bottleneck shifts to network latency, at which point we're on equal footing.
   exact-only? Full semver is more useful but requires a semver parser.
   Proposal: full semver (write a small pure-Lua semver parser).
 
-- **Multiple registries**: support `--registry` flag or per-scope config?
-  Not needed for v1 but the lockfile URL already encodes the source so
-  switching registries doesn't invalidate existing lockfiles.
+- **Multiple registries**: designed — see "Multiple registries" section above.
+  v1 implements single registry only; multi-registry resolution is v2.
 
 - **FFI packages**: packages with `.so`/`.dylib` prebuilt binaries need
   platform filtering (cpu + os in pkg.lua). Design slot exists; skip for v1.
