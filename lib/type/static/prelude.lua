@@ -9,29 +9,41 @@ local defs_mod   = require("lib.type.static.defs")
 
 local M = {}
 
--- Module-level source cache: path → source string.
---
--- Caches the raw file contents so that subsequent populate() calls skip
--- file I/O.  parse_mod.parse and ann_mod.parse_annotations are still called
--- on every populate() so that intern IDs are always assigned into the current
--- pool — intern is idempotent, so calling it multiple times with the same
--- strings on the same pool is free.
+-- Module-level parse cache: path → { ar, strings }
 --
 -- INVARIANT: infer.check_string calls populate() BEFORE parsing the user
--- source, so the pool contains only pre-seeded keywords (IDs 0–21) at the
--- start of the first populate() call on a fresh pool.  Because intern is
--- idempotent, re-parsing the stdlib files on a reused pool simply confirms
--- the same IDs that were already assigned.
+-- source.  Therefore, at populate time the pool contains only pre-seeded
+-- keywords (IDs 0–21) for any fresh pool.  Because keyword seeding is
+-- deterministic, every fresh pool assigns the same integer IDs to the same
+-- stdlib strings encountered in the same file-parse order.
 --
--- Call M.clear_cache() if the stdlib .d.lua files change at runtime.
-local _source_cache = {}   -- path → source string
+-- The cache stores:
+--   ar      – the annotation-arena result from the FIRST parse (pool-specific
+--             IDs, but identical for all fresh pools due to the invariant above)
+--   strings – ordered list of {id, str} pairs for each new intern ID added
+--             during the stdlib parse; used to populate subsequent fresh pools
+--             so that later user-source parsing finds stdlib names at the
+--             expected IDs.
+--
+-- On a cache hit the file I/O, parse_mod.parse, and ann_mod.parse_annotations
+-- calls are all skipped.  Instead the cached strings are re-interned into the
+-- current pool (free if already present; idempotent) and the cached ar is
+-- reused directly.
+--
+-- Invariant violation (e.g. passing a pre-used pool): handled conservatively —
+-- if the pool's next_id differs from the expected first stdlib ID (22) at
+-- populate time, the cache is bypassed and a full re-parse is done.
+--
+-- Call M.clear_cache() to force re-parsing (e.g. if stdlib .d.lua files
+-- change at runtime, which should not happen in normal usage).
+local _cache = {}   -- path → { ar, strings, first_id }
 
 function M.clear_cache()
-    _source_cache = {}
+    _cache = {}
 end
 
 -- Parse a .d.lua declaration file and populate ctx.scope.
--- Uses the + annotation pipeline.
+-- Uses the annotation pipeline.
 -- Variable declarations (--:: declare name = type) are bound in ctx.scope.
 -- Type aliases (--:: Name = type) are registered in ctx.scope.type_bindings.
 -- After loading, primitive meta type ctx fields are derived from aliases.
@@ -40,21 +52,42 @@ local function load_decls(ctx, path)
     local ann_mod    = require("lib.type.static.ann")
     local infer_mod  = require("lib.type.static.infer")
 
-    -- Cache the source string to skip file I/O on subsequent calls.
-    local source = _source_cache[path]
-    if not source then
+    local cached = _cache[path]
+    local ar
+
+    if cached and ctx.pool.next_id == cached.first_id then
+        -- Cache hit: pool is in the expected state (same number of pre-existing
+        -- IDs as when the cache was built).  Re-intern the stdlib strings to
+        -- ensure they are registered in this pool at the same IDs, then reuse ar.
+        for _, entry in ipairs(cached.strings) do
+            intern_mod.intern(ctx.pool, entry[2])
+        end
+        ar = cached.ar
+    else
+        -- Cache miss: full parse + annotate.
         local f = io.open(path, "r")
         if not f then return end
-        source = f:read("*a")
+        local source = f:read("*a")
         f:close()
-        _source_cache[path] = source
+
+        local first_id = ctx.pool.next_id
+
+        local ok_p, pr = pcall(parse_mod.parse, source, path, ctx.pool)
+        if not ok_p then return end
+
+        local ok_a, ar_ = pcall(ann_mod.parse_annotations, pr.lexer.annotations, ctx.pool, path)
+        if not ok_a then return end
+        ar = ar_
+
+        -- Collect all strings that were freshly interned during this parse so
+        -- that we can re-register them in subsequent pools on a cache hit.
+        local strings = {}
+        for id = first_id, ctx.pool.next_id - 1 do
+            strings[#strings + 1] = { id, intern_mod.get(ctx.pool, id) }
+        end
+
+        _cache[path] = { ar = ar, strings = strings, first_id = first_id }
     end
-
-    local ok_p, pr = pcall(parse_mod.parse, source, path, ctx.pool)
-    if not ok_p then return end
-
-    local ok_a, ar = pcall(ann_mod.parse_annotations, pr.lexer.annotations, ctx.pool, path)
-    if not ok_a then return end
 
     -- Temporarily attach annotation arenas so resolve_annotation_type can read them.
     local saved_ann = ctx.ann
