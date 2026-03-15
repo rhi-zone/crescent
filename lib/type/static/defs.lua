@@ -84,6 +84,12 @@ M.TAG_FORALL            = 20
 M.TAG_SPREAD            = 21
 M.TAG_NAMED             = 22
 M.TAG_CDATA             = 23
+M.TAG_ENUM_MEMBER       = 24  -- named enum member: EnumName.MemberName
+-- TypeSlot layout for TAG_ENUM_MEMBER:
+--   data[0] = enum_name_id   (intern ID of the enum table variable name)
+--   data[1] = member_name_id (intern ID of the member field name)
+--   data[2] = lit_kind       (LIT_INTEGER or LIT_STRING)
+--   data[3] = value          (LIT_INTEGER: int32 value; LIT_STRING: intern ID)
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0

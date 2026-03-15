@@ -33,6 +33,7 @@ local TAG_FORALL       = defs.TAG_FORALL
 local TAG_SPREAD       = defs.TAG_SPREAD
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_CDATA        = defs.TAG_CDATA
+local TAG_ENUM_MEMBER  = defs.TAG_ENUM_MEMBER
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -107,6 +108,12 @@ local M = {}
 --   data[0] = callee_id
 --   data[1] = args_start
 --   data[2] = args_len
+--
+-- TAG_ENUM_MEMBER:
+--   data[0] = enum_name_id   (intern ID of the enum variable name)
+--   data[1] = member_name_id (intern ID of the member field name)
+--   data[2] = lit_kind       (LIT_INTEGER or LIT_STRING)
+--   data[3] = value          (LIT_INTEGER: int32 value; LIT_STRING: intern ID)
 
 -- Singleton IDs (pre-allocated at fixed positions)
 M.T_NIL     = 0
@@ -238,6 +245,21 @@ function M.make_literal(ctx, kind, val)
     local t = ctx.types:get(id)
     t.data[0] = kind
     t.data[1] = val or 0
+    return id
+end
+
+-- Make an enum member type.
+-- enum_name_id:   intern ID of the enum table's variable name (e.g. "Status")
+-- member_name_id: intern ID of the field name (e.g. "OK")
+-- lit_kind:       LIT_INTEGER or LIT_STRING
+-- value:          int32 integer value (LIT_INTEGER) or intern ID of string (LIT_STRING)
+function M.make_enum_member(ctx, enum_name_id, member_name_id, lit_kind, value)
+    local id = alloc_zero(ctx.types, TAG_ENUM_MEMBER)
+    local t = ctx.types:get(id)
+    t.data[0] = enum_name_id
+    t.data[1] = member_name_id
+    t.data[2] = lit_kind
+    t.data[3] = value
     return id
 end
 
@@ -415,13 +437,18 @@ end
 function M.widen(ctx, tid)
     tid = M.find(ctx, tid)
     local t = ctx.types:get(tid)
-    if t.tag ~= TAG_LITERAL then return tid end
-    local kind = t.data[0]
-    if kind == LIT_STRING  then return ctx.T_STRING end
-    if kind == LIT_NUMBER  then return ctx.T_NUMBER end
-    if kind == LIT_BOOLEAN then return ctx.T_BOOLEAN end
-    if kind == LIT_NIL     then return ctx.T_NIL end
-    if kind == LIT_INTEGER then return ctx.T_INTEGER end
+    if t.tag == TAG_LITERAL then
+        local kind = t.data[0]
+        if kind == LIT_STRING  then return ctx.T_STRING end
+        if kind == LIT_NUMBER  then return ctx.T_NUMBER end
+        if kind == LIT_BOOLEAN then return ctx.T_BOOLEAN end
+        if kind == LIT_NIL     then return ctx.T_NIL end
+        if kind == LIT_INTEGER then return ctx.T_INTEGER end
+    end
+    if t.tag == TAG_ENUM_MEMBER then
+        if t.data[2] == LIT_INTEGER then return ctx.T_INTEGER end
+        if t.data[2] == LIT_STRING  then return ctx.T_STRING end
+    end
     return tid
 end
 
@@ -440,6 +467,10 @@ function M.types_equal(ctx, a, b)
         return true  -- same tag = equal for primitives
     end
     if tag == TAG_LITERAL then
+        return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+    end
+    if tag == TAG_ENUM_MEMBER then
+        -- same enum + same member = equal
         return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
     end
     if tag == TAG_NOMINAL then
@@ -559,6 +590,11 @@ function M.display(ctx, tid, seen)
     if tag == TAG_UNKNOWN  then return "unknown" end
     if tag == TAG_INTEGER  then return "integer" end
     if tag == TAG_CDATA    then return "cdata" end
+    if tag == TAG_ENUM_MEMBER then
+        local en = intern_mod.get(ctx.pool, t.data[0]) or "?"
+        local mn = intern_mod.get(ctx.pool, t.data[1]) or "?"
+        return en .. "." .. mn
+    end
 
     if tag == TAG_VAR then
         if t.flags ~= 0 and (t.flags % 2) == 1 then  -- FLAG_GENERIC

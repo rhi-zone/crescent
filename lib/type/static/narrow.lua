@@ -24,7 +24,8 @@ local TAG_NEVER = defs.TAG_NEVER
 local TAG_VAR   = defs.TAG_VAR
 local TAG_TABLE = defs.TAG_TABLE
 local TAG_UNION = defs.TAG_UNION
-local TAG_LITERAL = defs.TAG_LITERAL
+local TAG_LITERAL     = defs.TAG_LITERAL
+local TAG_ENUM_MEMBER = defs.TAG_ENUM_MEMBER
 local TAG_STRING  = defs.TAG_STRING
 local LIT_NIL     = defs.LIT_NIL
 local LIT_STRING  = defs.LIT_STRING
@@ -45,6 +46,8 @@ local M = {}
 --   { kind = "negation", inner = narrowing_info }
 --   { kind = "field_presence", obj_name_id = int, field_name_id = int, positive = bool }
 --     — `x.field` is truthy (positive=true means: x.field is non-nil in the truthy branch)
+--   { kind = "enum_eq", name_id = int, member_tid = int, positive = bool }
+--     — `x == Enum.Member`: narrows x to the enum member type (preserves EnumName.Member display)
 local function extract_narrowing(ctx, nid)
     local n = ctx.nodes:get(nid)
     if not n then return nil end
@@ -118,6 +121,28 @@ local function extract_narrowing(ctx, nid)
         -- symmetric: "literal" == x
         if rhs and rhs.kind == NODE_IDENTIFIER and lhs and lhs.kind == defs.NODE_LITERAL then
             local r = make_lit_eq(rhs, lhs, op == OP_EQ)
+            if r then return r end
+        end
+
+        -- x == Enum.Member (e.g. x == Status.OK): enum member narrowing
+        local function try_enum_eq(ident_node, field_node, positive)
+            if ident_node.kind ~= NODE_IDENTIFIER then return nil end
+            if field_node.kind ~= NODE_FIELD_EXPR then return nil end
+            local obj_n = ctx.nodes:get(field_node.data[0])
+            if not obj_n or obj_n.kind ~= NODE_IDENTIFIER then return nil end
+            -- Look up the enum member type from scope
+            local obj_tid = types_mod.find(ctx, (require("lib.type.static.env").lookup(ctx.scope, obj_n.data[0])) or -1)
+            if obj_tid < 0 then return nil end
+            local fe = types_mod.table_field(ctx, obj_tid, field_node.data[1])
+            if not fe then return nil end
+            local mem_tid = types_mod.find(ctx, fe.type_id)
+            if ctx.types:get(mem_tid).tag ~= TAG_ENUM_MEMBER then return nil end
+            return { kind = "enum_eq", name_id = ident_node.data[0],
+                     member_tid = mem_tid, positive = positive }
+        end
+        if lhs and rhs then
+            local r = try_enum_eq(lhs, rhs, op == OP_EQ)
+                   or try_enum_eq(rhs, lhs, op == OP_EQ)
             if r then return r end
         end
 
@@ -318,6 +343,33 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         end
     end
 
+    if info.kind == "enum_eq" then
+        local unify_mod = require("lib.type.static.unify")
+        if in_truthy == info.positive then
+            -- Truthy: narrow to this specific enum member.
+            local tr = types_mod.find(ctx, ty_id)
+            local tt = ctx.types:get(tr)
+            if tt.tag == TAG_UNION then
+                local has_match = false
+                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                    local mid = types_mod.find(ctx, ctx.lists:get(i))
+                    if unify_mod.try_unify(ctx, info.member_tid, mid) then
+                        has_match = true; break
+                    end
+                end
+                if not has_match then return ctx.T_NEVER end
+            else
+                if not unify_mod.try_unify(ctx, info.member_tid, tr) then
+                    return ctx.T_NEVER
+                end
+            end
+            return info.member_tid
+        else
+            -- Falsy: subtract the enum member from the type.
+            return types_mod.subtract(ctx, ty_id, info.member_tid)
+        end
+    end
+
     if info.kind == "field_presence" then
         -- positive=true: field is truthy (non-nil) when in_truthy matches.
         local field_is_nonnull = (info.positive == in_truthy)
@@ -363,9 +415,12 @@ local function info_name_id(info)
         return info.name_id
     elseif info.kind == "field_presence" then
         return info.obj_name_id
+    elseif info.kind == "enum_eq" then
+        return info.name_id
     elseif info.kind == "negation" then
         local inner = info.inner
-        if inner.kind == "nil_check" or inner.kind == "type_check" or inner.kind == "lit_eq" then
+        if inner.kind == "nil_check" or inner.kind == "type_check" or inner.kind == "lit_eq"
+            or inner.kind == "enum_eq" then
             return inner.name_id
         elseif inner.kind == "field_disc" then
             return inner.name_id

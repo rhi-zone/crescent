@@ -27,6 +27,7 @@ local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_CDATA        = defs.TAG_CDATA
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_SPREAD       = defs.TAG_SPREAD
+local TAG_ENUM_MEMBER  = defs.TAG_ENUM_MEMBER
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -247,6 +248,26 @@ function M.unify(ctx, a, b)
 
     -- integer <: number (every integer is a number; not the reverse)
     if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return true end
+
+    -- Enum member identity and subtyping
+    if ta.tag == TAG_ENUM_MEMBER then
+        -- same enum + same member = equal
+        if tb.tag == TAG_ENUM_MEMBER then
+            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then return true end
+            return false, types_mod.display(ctx, a) .. " is not " .. types_mod.display(ctx, b)
+        end
+        -- enum member <: its base primitive type
+        local kind = ta.data[2]
+        if kind == LIT_INTEGER then
+            if tb.tag == TAG_INTEGER then return true end
+            if tb.tag == TAG_NUMBER  then return true end
+        end
+        if kind == LIT_STRING and tb.tag == TAG_STRING then return true end
+        -- enum member <: matching literal (same kind and value)
+        if tb.tag == TAG_LITERAL and tb.data[0] == kind and tb.data[1] == ta.data[3] then
+            return true
+        end
+    end
 
     -- Literal <: base type
     if ta.tag == TAG_LITERAL then
@@ -591,6 +612,22 @@ function M.try_unify(ctx, a, b)
     if ta.tag == tb.tag and is_primitive_tag(ta.tag) then return true end
 
     if ta.tag == TAG_INTEGER and tb.tag == TAG_NUMBER then return true end
+
+    if ta.tag == TAG_ENUM_MEMBER then
+        if tb.tag == TAG_ENUM_MEMBER then
+            return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+        end
+        local kind = ta.data[2]
+        if kind == LIT_INTEGER then
+            if tb.tag == TAG_INTEGER then return true end
+            if tb.tag == TAG_NUMBER  then return true end
+        end
+        if kind == LIT_STRING and tb.tag == TAG_STRING then return true end
+        if tb.tag == TAG_LITERAL and tb.data[0] == kind and tb.data[1] == ta.data[3] then
+            return true
+        end
+        return false
+    end
 
     if ta.tag == TAG_LITERAL then
         if tb.tag == TAG_LITERAL and ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then
