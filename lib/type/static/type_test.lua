@@ -3523,3 +3523,68 @@ local x = t[5]
 ]])
     end)
 end)
+
+assert.describe("checker: index assignment t[k] = v", function()
+    assert.it("string literal key: new field added and usable", function()
+        no_errors([[
+local t = {}
+t["name"] = "hello"
+local s = t["name"] .. "!"
+]])
+    end)
+
+    assert.it("string literal key: type mismatch on re-assignment → error", function()
+        has_error([[
+local t = {}
+t["x"] = 1
+t["x"] = "bad"
+]], "but this location expects")
+    end)
+
+    assert.it("string literal key: compatible re-assignment → no error", function()
+        no_errors([[
+local t = {}
+t["x"] = 1
+t["x"] = 2
+]])
+    end)
+
+    assert.it("non-literal key against matching indexer: compatible → no error", function()
+        no_errors([[
+--:: declare arr = { [number]: integer }
+local i = 1
+arr[i] = 42
+]])
+    end)
+
+    assert.it("non-literal key against matching indexer: incompatible → error", function()
+        has_error([[
+--:: declare arr = { [number]: integer }
+local i = 1
+arr[i] = "bad"
+]], "doesn't match indexer type")
+    end)
+
+    assert.it("append pattern: t[#t+1] = v on empty table → no error", function()
+        -- returns[#returns+1] = v is a common pattern; empty tables have no indexer
+        -- so no check fires (conservative) — important for typechecker self-check
+        no_errors([[
+local returns = {}
+returns[#returns + 1] = 42
+]])
+    end)
+
+    assert.it("TAG_VAR table: index assignment constrains the variable", function()
+        -- When a table variable has no known type yet, assigning t[k]=v should
+        -- constrain it so subsequent reads work.
+        no_errors([[
+local function build(n)
+    --: { [number]: integer }
+    local t
+    t = {}
+    t[n] = 1
+    return t
+end
+]])
+    end)
+end)

@@ -1943,8 +1943,59 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 end
             end
         elseif tn.kind == NODE_INDEX_EXPR then
-            infer_expr(ctx, tn.data[0])
-            infer_expr(ctx, tn.data[1])
+            local obj_nid2 = tn.data[0]
+            local key_nid2 = tn.data[1]
+            local obj_tid2 = types_mod.find(ctx, infer_expr(ctx, obj_nid2))
+            local key_tid2 = types_mod.find(ctx, infer_expr(ctx, key_nid2))
+            local obj_t2   = ctx.types:get(obj_tid2)
+            if obj_t2.tag == TAG_TABLE then
+                local kt_t2 = ctx.types:get(key_tid2)
+                if kt_t2.tag == TAG_LITERAL and kt_t2.data[0] == LIT_STRING then
+                    -- String literal key: equivalent to named field assignment.
+                    local field_id2 = kt_t2.data[1]
+                    local fe2 = types_mod.table_field(ctx, obj_tid2, field_id2)
+                    if not fe2 then
+                        table_add_field(ctx, obj_tid2, field_id2, rhs_tid)
+                    else
+                        local existing_tid2 = types_mod.find(ctx, fe2.type_id)
+                        if ctx.types:get(existing_tid2).tag ~= TAG_VAR then
+                            if not unify_mod.try_unify(ctx, rhs_tid, existing_tid2) then
+                                local key_name2 = intern_mod.get(ctx.pool, field_id2) or "?"
+                                report(ctx, tn.line, tn.col,
+                                    "`" .. key_name2 .. "` is `"
+                                    .. types_mod.display_short(ctx, existing_tid2)
+                                    .. "`, but this location expects `"
+                                    .. types_mod.display_short(ctx, rhs_tid) .. "`")
+                            end
+                        end
+                    end
+                else
+                    -- Non-literal key: check against any matching indexer.
+                    local is2, il2 = obj_t2.data[2], obj_t2.data[3]
+                    local ix2 = is2
+                    while ix2 < is2 + il2 - 1 do
+                        local ikt2 = ctx.lists:get(ix2)
+                        if unify_mod.try_unify(ctx, key_tid2, ikt2) then
+                            local ival_tid = types_mod.find(ctx, ctx.lists:get(ix2 + 1))
+                            if ctx.types:get(ival_tid).tag ~= TAG_VAR then
+                                if not unify_mod.try_unify(ctx, rhs_tid, ival_tid) then
+                                    report(ctx, tn.line, tn.col,
+                                        "index assignment: `"
+                                        .. types_mod.display_short(ctx, rhs_tid)
+                                        .. "` doesn't match indexer type `"
+                                        .. types_mod.display_short(ctx, ival_tid) .. "`")
+                                end
+                            end
+                            break
+                        end
+                        ix2 = ix2 + 2
+                    end
+                end
+            elseif obj_t2.tag == TAG_VAR then
+                -- Constrain the unknown table variable to have this indexer.
+                local tbl2 = types_mod.make_table(ctx, {}, { key_tid2, rhs_tid }, -1, {})
+                unify_mod.unify(ctx, obj_tid2, tbl2)
+            end
         end
     end
 end
