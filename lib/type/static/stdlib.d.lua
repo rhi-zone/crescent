@@ -39,6 +39,8 @@
 --:: declare _VERSION = string
 --:: declare ffi = any
 --:: declare _G = { [string]: any, ... }
+--:: declare package = { path: string, cpath: string, loaded: { [string]: any, ... }, preload: { [string]: any, ... }, ... }
+--:: declare arg = { [integer]: string, ... }
 --[[::
 declare bit = {
     tobit:   (x: number) -> integer,
