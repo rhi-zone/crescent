@@ -72,6 +72,21 @@ function manifest.validate(tbl)
 		end
 	end
 
+	-- scripts: optional, table of {string = string}
+	if tbl.scripts ~= nil then
+		if type(tbl.scripts) ~= "table" then
+			return nil, "manifest field 'scripts' must be a table"
+		end
+		for k, v in pairs(tbl.scripts) do
+			if type(k) ~= "string" then
+				return nil, "manifest field 'scripts' keys must be strings"
+			end
+			if type(v) ~= "string" then
+				return nil, "manifest field 'scripts' values must be strings (shell commands)"
+			end
+		end
+	end
+
 	return true
 end
 
@@ -151,6 +166,28 @@ function manifest.write(path, tbl)
 			lines[#lines + 1] = "    " .. lua_string(url) .. ","
 		end
 		lines[#lines + 1] = "  },"
+	end
+
+	-- scripts block (only written when non-empty)
+	if tbl.scripts ~= nil then
+		local script_keys = {}
+		for k in pairs(tbl.scripts) do
+			script_keys[#script_keys + 1] = k
+		end
+		if #script_keys > 0 then
+			table.sort(script_keys)
+			lines[#lines + 1] = "  scripts = {"
+			for _, k in ipairs(script_keys) do
+				local key_str
+				if k:match("^[a-zA-Z_][a-zA-Z0-9_]*$") then
+					key_str = k
+				else
+					key_str = "[" .. lua_string(k) .. "]"
+				end
+				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(tbl.scripts[k]) .. ","
+			end
+			lines[#lines + 1] = "  },"
+		end
 	end
 
 	lines[#lines + 1] = "}"

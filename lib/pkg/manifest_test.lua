@@ -120,6 +120,32 @@ T.describe("manifest.validate", function()
 		T.ok(err:find("deps"))
 	end)
 
+	T.it("accepts a manifest with a scripts table", function()
+		local ok, err = manifest.validate({
+			name    = "mylib",
+			version = "1.0.0",
+			scripts = { build = "luajit build.lua", test = "luajit lib/test/cli.lua" },
+		})
+		T.ok(ok, err)
+	end)
+
+	T.it("accepts a manifest with an empty scripts table", function()
+		local ok, err = manifest.validate({ name = "pkg", version = "0.0.1", scripts = {} })
+		T.ok(ok, err)
+	end)
+
+	T.it("rejects non-table scripts", function()
+		local ok, err = manifest.validate({ name = "mylib", version = "1.0.0", scripts = "bad" })
+		T.fail(ok)
+		T.ok(err:find("scripts"))
+	end)
+
+	T.it("rejects scripts with non-string values", function()
+		local ok, err = manifest.validate({ name = "mylib", version = "1.0.0", scripts = { build = 42 } })
+		T.fail(ok)
+		T.ok(err:find("scripts"))
+	end)
+
 end)
 
 -- ── load ──────────────────────────────────────────────────────────────────────
@@ -264,6 +290,60 @@ T.describe("manifest.write", function()
 		local pos_zzz = content:find("zzz")
 		T.ok(pos_aaa < pos_mmm)
 		T.ok(pos_mmm < pos_zzz)
+	end)
+
+	T.it("emits scripts block when scripts are non-empty", function()
+		local tmp = os.tmpname() .. ".lua"
+		local ok, err = manifest.write(tmp, {
+			name    = "withscripts",
+			version = "1.0.0",
+			scripts = { build = "luajit build.lua", test = "luajit lib/test/cli.lua" },
+		})
+		T.ok(ok, err)
+		local fh = io.open(tmp, "r")
+		local content = fh:read("*a")
+		fh:close()
+		os.remove(tmp)
+		T.ok(content:find("scripts"))
+		T.ok(content:find("build"))
+		T.ok(content:find("test"))
+	end)
+
+	T.it("omits scripts block when scripts is nil", function()
+		local tmp = os.tmpname() .. ".lua"
+		manifest.write(tmp, { name = "noscripts", version = "1.0.0" })
+		local fh = io.open(tmp, "r")
+		local content = fh:read("*a")
+		fh:close()
+		os.remove(tmp)
+		-- "scripts =" is the block header; the name "noscripts" must not match
+		T.fail(content:find("scripts%s*="))
+	end)
+
+	T.it("omits scripts block when scripts is empty table", function()
+		local tmp = os.tmpname() .. ".lua"
+		manifest.write(tmp, { name = "emptyscripts", version = "1.0.0", scripts = {} })
+		local fh = io.open(tmp, "r")
+		local content = fh:read("*a")
+		fh:close()
+		os.remove(tmp)
+		T.fail(content:find("scripts%s*="))
+	end)
+
+	T.it("scripts round-trips through write+load", function()
+		local tmp = os.tmpname() .. ".lua"
+		local src = {
+			name    = "scriptsrt",
+			version = "1.0.0",
+			scripts = { build = "luajit build.lua", deploy = "sh deploy.sh" },
+		}
+		local ok, err = manifest.write(tmp, src)
+		T.ok(ok, err)
+		local loaded, load_err = manifest.load(tmp)
+		os.remove(tmp)
+		T.ok(loaded, load_err)
+		T.eq(loaded.scripts.build, src.scripts.build)
+		T.eq(loaded.scripts.deploy, src.scripts.deploy)
 	end)
 
 end)
