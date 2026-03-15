@@ -404,13 +404,15 @@ Branch coverage implementation sketch: instrument the AST (add synthetic nodes a
 
 ## package manager
 See `docs/pkg-design.md` for full design.
-- [ ] `pkg.lua` manifest format + parser
-- [ ] `crescent.lock` lockfile format + parser (hand-written TOML-like)
-- [ ] Registry HTTP protocol (`pkg.rhi.zone` — simple GET index + tarballs)
-- [ ] Global cache (`~/.crescent/cache/<name>@<version>/`)
-- [ ] Install algorithm: resolve → fetch (parallel, fork) → link (hardlinks) → write lockfile
-- [ ] Lockfile fast path: dep/ name+version check → skip network entirely
-- [ ] `--frozen-lockfile` for CI
-- [ ] CLI: `cr add / install / remove / update / publish / info`
-- [ ] Semver parser (pure Lua, small)
-- [ ] Fork-based parallel fetch with `--jobs=N` (default: CPU count)
+- [x] `pkg.lua` manifest format + parser — `lib/pkg/manifest.lua` (2026-03-16)
+- [x] `crescent.lock` lockfile format + parser (hand-written TOML-like) — `lib/pkg/lock.lua` (2026-03-16)
+- [x] Registry HTTP protocol (`pkg.rhi.zone` — simple GET index + tarballs) — curl-based v1 in `lib/pkg/install.lua` (2026-03-16)
+- [x] Global cache (`~/.crescent/cache/<name>@<version>/`) — `lib/pkg/install.lua` (2026-03-16)
+- [x] Install algorithm: resolve → fetch → link (hardlinks) → write lockfile — `lib/pkg/install.lua` (2026-03-16)
+- [x] Lockfile fast path: dep/ name+version check → skip network entirely — `dep_ok` check in `lib/pkg/install.lua` (2026-03-16)
+- [x] `--frozen-lockfile` for CI — `opts.frozen` in `lib/pkg/install.lua` (2026-03-16)
+- [x] CLI: `cr add / install / remove / update / info` — `lib/pkg/cli.lua` (2026-03-16); `publish` not yet done
+- [x] Semver parser (pure Lua, small) — `lib/pkg/semver.lua` (2026-03-16)
+- [x] Multi-registry support with priority ordering and per-registry auth — `lib/pkg/config.lua` (2026-03-16)
+- [ ] Fork-based parallel fetch with `--jobs=N` (default: CPU count) — v1 fetch is sequential
+- [ ] `cr publish` — not yet implemented
