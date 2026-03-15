@@ -173,6 +173,27 @@ resource limits).
 
 ---
 
+## File I/O strategy
+
+Hardlinks are table stakes — pnpm does this too and is still slower than bun.
+The real wins:
+
+- **`io_uring` on Linux** (via FFI): submit a batch of file operations in a
+  single syscall; kernel pipelines them. Extracting many small `.lua` files
+  from a tarball is exactly the workload where this matters — traditional
+  `open`/`write`/`close` per file means hundreds of kernel crossings;
+  `io_uring` collapses them. Use `liburing` or raw `io_uring_setup` syscalls.
+- **`clonefile()` on macOS** (via FFI): CoW copy at the filesystem level;
+  instantaneous regardless of file size. Same syscall bun uses.
+- **Fallback**: `sendfile(2)` or plain `read`/`write` via FFI (not `io.open`
+  — avoid Lua string allocation on the copy path).
+
+LuaJIT calls the same kernel interfaces as bun (Zig). The overhead is Lua
+control-flow wrapping the submission loop, not the I/O itself. With `io_uring`
+the bottleneck shifts to network latency, at which point we're on equal footing.
+
+---
+
 ## Open questions (design TBD before implementation)
 
 - **Package name scoping**: flat names (`sha1`) vs namespaced (`rhi/sha1`)?
