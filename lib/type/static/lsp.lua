@@ -208,6 +208,84 @@ local function run_check(state, uri, text)
 end
 
 -- ---------------------------------------------------------------------------
+-- Field completion helpers
+-- ---------------------------------------------------------------------------
+
+-- Return the text of line lsp_line (0-indexed) from a full document string.
+local function get_line(text, lsp_line)
+    local n = 0
+    local pos = 1
+    while pos <= #text do
+        local nl = text:find("\n", pos, true)
+        if n == lsp_line then
+            return text:sub(pos, nl and nl - 1 or #text)
+        end
+        if nl then pos = nl + 1 else break end
+        n = n + 1
+    end
+    return nil
+end
+
+-- Build completion items for all regular fields of a table type.
+-- Returns an array (possibly empty) or nil if tid is not a table.
+local function table_field_items(ctx, tid)
+    local TAG_FUNCTION = defs.TAG_FUNCTION
+    local TAG_TABLE    = defs.TAG_TABLE
+    local resolved = types.find(ctx, tid)
+    local t = ctx.types:get(resolved)
+    if t.tag ~= TAG_TABLE then return nil end
+    local items = {}
+    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fid  = ctx.lists:get(i)
+        local fe   = ctx.fields:get(fid)
+        local name = intern.get(ctx.pool, fe.name_id)
+        if name and name:sub(1, 2) ~= "__" then
+            local fres = types.find(ctx, fe.type_id)
+            local ft   = ctx.types:get(fres)
+            local kind = 6
+            if ft.tag == TAG_FUNCTION then kind = 3 end
+            items[#items + 1] = {
+                label  = name,
+                kind   = kind,
+                detail = types.display_short(ctx, fres),
+            }
+        end
+    end
+    return items
+end
+
+-- Given a trigger character ("." or ":") and cursor position, try to
+-- extract the identifier before the trigger and look up its fields.
+-- Returns an items array on success, nil on failure.
+local function field_completions(ctx, text, lsp_line, lsp_char, trigger)
+    local line = get_line(text, lsp_line)
+    if not line then return nil end
+    -- Extract text up to and including the trigger position.
+    -- lsp_char is 0-indexed; Lua sub is 1-indexed.
+    local prefix = line:sub(1, lsp_char)
+    -- Strip trailing trigger character if present.
+    if prefix:sub(-1) == trigger then prefix = prefix:sub(1, -2) end
+    -- Match trailing simple identifier.
+    local name_str = prefix:match("([%a_][%w_]*)$")
+    if not name_str then return nil end
+    -- Look up name in intern pool (read-only via pool.map).
+    local name_id = ctx.pool.map[name_str]
+    if not name_id then return nil end
+    -- Search scope chain for type binding.
+    local scope = ctx.scope
+    local type_id
+    while scope do
+        if scope.bindings[name_id] then
+            type_id = scope.bindings[name_id]
+            break
+        end
+        scope = scope.parent
+    end
+    if not type_id then return nil end
+    return table_field_items(ctx, type_id)
+end
+
+-- ---------------------------------------------------------------------------
 -- Message handlers
 -- ---------------------------------------------------------------------------
 
@@ -330,7 +408,22 @@ HANDLERS["textDocument/completion"] = function(state, msg)
         send(ok_resp(msg.id, EMPTY_ARRAY))
         return
     end
-    -- Enumerate all names visible in the module-level scope chain.
+
+    -- Field completion: triggered by "." or ":" — enumerate the object's fields.
+    local trigger = p.context and p.context.triggerCharacter
+    local pos     = p.position
+    if pos and (trigger == "." or trigger == ":") then
+        local text = state.open_files[uri]
+        if text then
+            local items = field_completions(ctx, text, pos.line, pos.character, trigger)
+            if items then
+                send(ok_resp(msg.id, #items > 0 and items or EMPTY_ARRAY))
+                return
+            end
+        end
+    end
+
+    -- Fallback: enumerate all names visible in the module-level scope chain.
     -- This is a best-effort approximation; cursor-local scopes are not tracked.
     local TAG_FUNCTION = defs.TAG_FUNCTION
     local TAG_TABLE    = defs.TAG_TABLE

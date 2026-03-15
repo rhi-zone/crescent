@@ -314,12 +314,12 @@ function M.format_sarif(err_ctx)
     for _, e in ipairs(err_ctx.errors) do
         results[#results + 1] = string.format(
             '{"ruleId":"checker","level":"error","message":{"text":%s},"locations":[{"physicalLocation":{"artifactLocation":{"uri":%s},"region":{"startLine":%d,"startColumn":%d}}}]}',
-            M._json_str(e.msg), M._json_str(e.filename), e.line, e.col + 1)
+            M._json_str(e.msg), M._json_str(e.filename), e.line, e.col)
     end
     for _, w in ipairs(err_ctx.warnings) do
         results[#results + 1] = string.format(
             '{"ruleId":"checker","level":"warning","message":{"text":%s},"locations":[{"physicalLocation":{"artifactLocation":{"uri":%s},"region":{"startLine":%d,"startColumn":%d}}}]}',
-            M._json_str(w.msg), M._json_str(w.filename), w.line, w.col + 1)
+            M._json_str(w.msg), M._json_str(w.filename), w.line, w.col)
     end
     return string.format(
         '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"crescent","version":"0.2.0"}},"results":[%s]}]}',
