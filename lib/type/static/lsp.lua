@@ -271,6 +271,110 @@ local function table_field_items(ctx, tid)
     return #items > 0 and items or nil
 end
 
+-- ---------------------------------------------------------------------------
+-- Signature help helpers
+-- ---------------------------------------------------------------------------
+
+-- Build a SignatureInformation from a TAG_FUNCTION type.
+-- Returns {label, parameters=[{label},...]} or nil.
+local function fn_signature(ctx, fn_tid)
+    local TAG_FUNCTION = defs.TAG_FUNCTION
+    local resolved = types.find(ctx, fn_tid)
+    local t = ctx.types:get(resolved)
+    if t.tag ~= TAG_FUNCTION then return nil end
+
+    local param_labels = {}
+    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local ptid = types.find(ctx, ctx.lists:get(i))
+        local label = types.display_short(ctx, ptid)
+        -- If the slot has a name (data[5]/data[6] in the list), prefer it.
+        -- Param names are stored in the TypeSlot's data fields; display_short
+        -- already shows the type, which is sufficient.
+        param_labels[#param_labels + 1] = { label = label }
+    end
+
+    local full_label = types.display_short(ctx, resolved)
+    return { label = full_label, parameters = param_labels }
+end
+
+-- Resolve the function type at a call site by scanning the line prefix
+-- for a function name before the opening paren or last comma.
+-- Returns a SignatureInformation table or nil.
+local function signature_at(ctx, text, lsp_line, lsp_char)
+    local line = get_line(text, lsp_line)
+    if not line then return nil end
+
+    -- Extract prefix up to the cursor.
+    local prefix = line:sub(1, lsp_char)
+
+    -- Count open parens to find active arg index and the call start.
+    -- Strategy: find the innermost unclosed '('.
+    local depth = 0
+    local call_start = nil
+    for i = #prefix, 1, -1 do
+        local ch = prefix:sub(i, i)
+        if ch == ")" then
+            depth = depth + 1
+        elseif ch == "(" then
+            if depth == 0 then
+                call_start = i
+                break
+            end
+            depth = depth - 1
+        end
+    end
+    if not call_start then return nil end
+
+    -- Extract the callee expression: text before '('.
+    local callee_str = prefix:sub(1, call_start - 1):match("([%a_][%w_%.%:]*)%s*$")
+    if not callee_str then return nil end
+
+    -- For method calls (x:method), strip the colon part and look up on the object.
+    -- For field calls (x.method), strip the dot part.
+    -- For simple calls (foo), look up directly.
+    local obj_str, fn_str = callee_str:match("^(.+)[%.%:]([%a_][%w_]*)$")
+
+    local function lookup_in_scope(name_str)
+        local name_id = ctx.pool.map[name_str]
+        if not name_id then return nil end
+        local scope = ctx.scope
+        while scope do
+            if scope.bindings[name_id] then
+                return scope.bindings[name_id]
+            end
+            scope = scope.parent
+        end
+        return nil
+    end
+
+    local fn_tid
+    if obj_str and fn_str then
+        -- x.method or x:method — look up x then get the field.
+        local obj_name = obj_str:match("[%a_][%w_]*$") -- last simple name in chain
+        local obj_tid = lookup_in_scope(obj_name)
+        if not obj_tid then return nil end
+        local obj_res = types.find(ctx, obj_tid)
+        local ot = ctx.types:get(obj_res)
+        if ot.tag == defs.TAG_TABLE then
+            local fn_name_id = ctx.pool.map[fn_str]
+            if not fn_name_id then return nil end
+            for i = ot.data[0], ot.data[0] + ot.data[1] - 1 do
+                local fe = ctx.fields:get(ctx.lists:get(i))
+                if fe.name_id == fn_name_id then
+                    fn_tid = types.find(ctx, fe.type_id)
+                    break
+                end
+            end
+        end
+    else
+        -- Simple identifier.
+        fn_tid = lookup_in_scope(callee_str)
+    end
+
+    if not fn_tid then return nil end
+    return fn_signature(ctx, fn_tid)
+end
+
 -- Given a trigger character ("." or ":") and cursor position, try to
 -- extract the identifier before the trigger and look up its fields.
 -- Returns an items array on success, nil on failure.
@@ -351,7 +455,8 @@ HANDLERS["initialize"] = function(state, msg)
             },
             hoverProvider      = true,
             definitionProvider = true,
-            completionProvider = { triggerCharacters = { ".", ":" } },
+            completionProvider  = { triggerCharacters = { ".", ":" } },
+            signatureHelpProvider = { triggerCharacters = { "(", "," } },
         },
         serverInfo = { name = "crescent", version = "0.2.0" },
     }))
@@ -503,6 +608,37 @@ HANDLERS["textDocument/completion"] = function(state, msg)
         scope = scope.parent
     end
     send(ok_resp(msg.id, items))
+end
+
+HANDLERS["textDocument/signatureHelp"] = function(state, msg)
+    local p = msg.params
+    if not p or not p.textDocument or not p.position then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local uri = p.textDocument.uri
+    local ln  = p.position.line
+    local col = p.position.character
+    local ctx = state.ctx_cache[uri]
+    if not ctx then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local text = state.open_files[uri]
+    if not text then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local sig = signature_at(ctx, text, ln, col)
+    if not sig then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    send(ok_resp(msg.id, {
+        signatures    = { sig },
+        activeSignature = 0,
+        activeParameter = 0,
+    }))
 end
 
 HANDLERS["textDocument/definition"] = function(state, msg)
