@@ -1971,6 +1971,10 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     end
                 else
                     -- Non-literal key: check against any matching indexer.
+                    -- If no matching indexer exists we cannot safely infer one: an
+                    -- unannotated table might be a heterogeneous dispatch table (e.g.
+                    -- StmtRule[NODE_X] = fn) where successive values have different
+                    -- types.  Annotate the table to get strict checking.
                     local is2, il2 = obj_t2.data[2], obj_t2.data[3]
                     local ix2 = is2
                     while ix2 < is2 + il2 - 1 do

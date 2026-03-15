@@ -3565,13 +3565,20 @@ arr[i] = "bad"
 ]], "doesn't match indexer type")
     end)
 
-    assert.it("append pattern: t[#t+1] = v on empty table → no error", function()
-        -- returns[#returns+1] = v is a common pattern; empty tables have no indexer
-        -- so no check fires (conservative) — important for typechecker self-check
+    assert.it("append pattern: t[#t+1] = v on unannotated table → no error", function()
+        -- Unannotated tables may be heterogeneous dispatch tables, so we don't
+        -- infer an indexer from assignments — no check fires, no false positives.
         no_errors([[
 local returns = {}
 returns[#returns + 1] = 42
 ]])
+    end)
+
+    assert.it("append pattern on annotated array: checks element type", function()
+        has_error([[
+--:: declare returns = { [number]: integer }
+returns[#returns + 1] = "bad"
+]], "doesn't match indexer type")
     end)
 
     assert.it("TAG_VAR table: index assignment constrains the variable", function()
