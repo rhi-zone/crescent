@@ -217,6 +217,67 @@ T.describe("install.resolve", function()
 
 end)
 
+-- ── install.resolve (multi-registry) ─────────────────────────────────────────
+
+local MOCK_INDEX_2 = {
+	only_in_2 = {
+		versions = { "1.0.0" },
+		latest   = "1.0.0",
+	},
+	sha1 = {
+		versions = { "0.9.0", "1.0.0" },
+		latest   = "1.0.0",
+	},
+}
+
+T.describe("install.resolve multi-registry", function()
+
+	T.it("finds package in second registry when absent from first", function()
+		local deps = { only_in_2 = "^1.0.0" }
+		local indices = {
+			{ index = MOCK_INDEX, url = "https://reg1.example.com" },
+			{ index = MOCK_INDEX_2, url = "https://reg2.example.com" },
+		}
+		local r, err = install.resolve(deps, {}, nil, { registry_indices = indices })
+		T.ok(r, tostring(err))
+		T.eq(r.only_in_2.version, "1.0.0")
+		T.eq(r.only_in_2._winning_registry, "https://reg2.example.com")
+	end)
+
+	T.it("uses higher-priority registry when package is in both", function()
+		-- sha1 2.0.0 is in MOCK_INDEX (reg1) but not MOCK_INDEX_2 (reg2 only has up to 1.0.0)
+		local deps = { sha1 = "^2.0.0" }
+		local indices = {
+			{ index = MOCK_INDEX, url = "https://reg1.example.com" },
+			{ index = MOCK_INDEX_2, url = "https://reg2.example.com" },
+		}
+		local r, err = install.resolve(deps, {}, nil, { registry_indices = indices })
+		T.ok(r, tostring(err))
+		T.eq(r.sha1.version, "2.0.0")
+		T.eq(r.sha1._winning_registry, "https://reg1.example.com")
+	end)
+
+	T.it("errors when no registry satisfies constraint", function()
+		local deps = { sha1 = ">=99.0.0" }
+		local indices = {
+			{ index = MOCK_INDEX, url = "https://reg1.example.com" },
+			{ index = MOCK_INDEX_2, url = "https://reg2.example.com" },
+		}
+		local r, err = install.resolve(deps, {}, nil, { registry_indices = indices })
+		T.eq(r, nil)
+		T.ok(err ~= nil)
+		T.ok(err:find("sha1") ~= nil)
+	end)
+
+	T.it("backwards compat: positional registry_index still works", function()
+		local deps = { sha1 = "^1.0.0" }
+		local r, err = install.resolve(deps, {}, MOCK_INDEX)
+		T.ok(r, tostring(err))
+		T.eq(r.sha1.version, "1.1.0")
+	end)
+
+end)
+
 -- ── install._parse_index ──────────────────────────────────────────────────────
 
 T.describe("install._parse_index (JSON parser)", function()

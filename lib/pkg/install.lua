@@ -19,6 +19,7 @@ local ffi = require("ffi")
 local semver  = require("lib.pkg.semver")
 local manifest = require("lib.pkg.manifest")
 local lock     = require("lib.pkg.lock")
+local config   = require("lib.pkg.config")
 
 ffi.cdef[[
 	int link(const char *oldpath, const char *newpath);
@@ -334,15 +335,49 @@ end
 
 -- ── Resolution ────────────────────────────────────────────────────────────────
 
---- Resolve versions for a deps table against a lockfile and a registry index.
+--- Resolve versions for a deps table against a lockfile and registry indices.
 -- deps:           { [name] = constraint_str, ... }
 -- locked:         lock entries table from lock.load(), or {}
--- registry_index: parsed /index.json table, or nil (for frozen/offline mode)
--- opts:           { frozen=bool }
+-- registry_index: parsed /index.json table, or nil (backwards-compat single registry)
+-- opts:           { frozen=bool, registry_indices={{index=tbl, url=str},...} }
+--
+-- opts.registry_indices overrides registry_index when present.
+-- Each entry is tried in order; the first that satisfies the constraint wins.
 --
 -- Returns: { [name] = { version=str, url=str, checksum=str } } or nil, err
 function M.resolve(deps, locked, registry_index, opts)
 	opts = opts or {}
+
+	-- Build ordered list of {index, url} pairs from opts or fallback to single registry_index.
+	-- opts.registry_indices = { {index=tbl, url=str}, ... }
+	local indices = opts.registry_indices
+	if not indices then
+		if registry_index then
+			indices = { { index = registry_index, url = nil } }
+		else
+			indices = {}
+		end
+	end
+
+	-- Helper: pick the best satisfying version from a single registry index entry.
+	-- Returns best_version_str, or nil if not found.
+	local function best_from_index(idx_entry, name, constraint)
+		local pkg_info = idx_entry.index[name]
+		if not pkg_info then return nil end
+		local best = nil
+		local best_parsed = nil
+		for _, ver_str in ipairs(pkg_info.versions or {}) do
+			local ver, _ = semver.parse(ver_str)
+			if ver and semver.satisfies(ver, constraint) then
+				if best_parsed == nil or semver.cmp(ver, best_parsed) > 0 then
+					best = ver_str
+					best_parsed = ver
+				end
+			end
+		end
+		return best
+	end
+
 	local resolved = {}
 
 	for name, constraint in pairs(deps) do
@@ -360,7 +395,7 @@ function M.resolve(deps, locked, registry_index, opts)
 						locked_entry.version, name, constraint)
 				end
 				-- Need to re-resolve against registry
-				if not registry_index then
+				if #indices == 0 then
 					return nil, ("package %q: locked version %s does not satisfy %q and no registry index available"):format(
 						name, locked_entry.version, constraint)
 				end
@@ -379,39 +414,48 @@ function M.resolve(deps, locked, registry_index, opts)
 			if opts.frozen then
 				return nil, ("frozen: package %q not in lockfile"):format(name)
 			end
-			if not registry_index then
+			if #indices == 0 then
 				return nil, ("package %q: not in lockfile and no registry index available"):format(name)
 			end
-			local pkg_info = registry_index[name]
-			if not pkg_info then
-				return nil, ("package %q not found in registry"):format(name)
-			end
 
-			-- Pick the highest version satisfying the constraint
+			-- Scan registries in priority order; first satisfying registry wins.
 			local best = nil
-			local best_parsed = nil
-			for _, ver_str in ipairs(pkg_info.versions or {}) do
-				local ver, _ = semver.parse(ver_str)
-				if ver and semver.satisfies(ver, constraint) then
-					if best_parsed == nil or semver.cmp(ver, best_parsed) > 0 then
-						best = ver_str
-						best_parsed = ver
-					end
+			local winning_registry_url = nil
+			for _, idx_entry in ipairs(indices) do
+				local ver = best_from_index(idx_entry, name, constraint)
+				if ver then
+					best = ver
+					winning_registry_url = idx_entry.url
+					break
 				end
 			end
 
 			if not best then
+				-- Collect all available versions across all registries for the error message.
+				local all_versions = {}
+				for _, idx_entry in ipairs(indices) do
+					local pkg_info = idx_entry.index[name]
+					if pkg_info then
+						for _, v in ipairs(pkg_info.versions or {}) do
+							all_versions[#all_versions + 1] = v
+						end
+					end
+				end
+				if #all_versions == 0 then
+					return nil, ("package %q not found in any registry"):format(name)
+				end
 				return nil, ("no version of %q satisfies constraint %q (available: %s)"):format(
-					name, constraint, table.concat(pkg_info.versions or {}, ", "))
+					name, constraint, table.concat(all_versions, ", "))
 			end
 
 			-- Build URL and checksum URL (these will be fetched for real during install)
 			-- We don't have the checksum yet at resolve time; it will be filled in during fetch.
 			resolved[name] = {
-				version  = best,
-				url      = nil,  -- populated by caller after fetch
-				checksum = nil,  -- populated after download
-				_needs_fetch = true,
+				version          = best,
+				url              = nil,   -- populated by caller after fetch
+				checksum         = nil,   -- populated after download
+				_needs_fetch     = true,
+				_winning_registry = winning_registry_url,
 			}
 		end
 	end
@@ -533,17 +577,33 @@ end
 
 -- ── Main install entry point ──────────────────────────────────────────────────
 
+-- Deduplicate a list of registry URLs, preserving order (first occurrence wins).
+local function dedup_registries(list)
+	local seen = {}
+	local out = {}
+	for _, url in ipairs(list) do
+		if not seen[url] then
+			seen[url] = true
+			out[#out + 1] = url
+		end
+	end
+	return out
+end
+
 --- Install all deps listed in pkg.lua in the given project directory.
 -- opts:
---   frozen   = false   error if pkg.lua diverges from lockfile
---   registry = "https://pkg.crescent.run"
---   jobs     = 1       (v1: sequential only — parallel is a later phase)
---   verbose  = false
+--   frozen     = false   error if pkg.lua diverges from lockfile
+--   registry   = "https://pkg.crescent.run"  (single registry, backwards-compat)
+--   registries = { url, ... }                (list; merged with user config + pkg registries)
+--   jobs       = 1       (v1: sequential only — parallel is a later phase)
+--   verbose    = false
+--
+-- Effective registry list (highest priority first):
+--   opts.registry (if set) → opts.registries → user ~/.crescent/config.lua → pkg.lua.registries → default
 --
 -- Returns: { ok=bool, errors={string,...}, installed={string,...}, skipped={string,...} }
 function M.run(project_dir, opts)
 	opts = opts or {}
-	local registry = opts.registry or "https://pkg.crescent.run"
 	local result = { ok = true, errors = {}, installed = {}, skipped = {} }
 
 	local function fail(msg)
@@ -564,6 +624,32 @@ function M.run(project_dir, opts)
 		log(opts, "no dependencies declared in pkg.lua")
 		return result
 	end
+
+	-- Build effective registry list.
+	-- Priority: cli_registry > opts.registries > user_config.registries > pkg.registries > default
+	local user_cfg = config.load()
+	local DEFAULT_REGISTRY = "https://pkg.crescent.run"
+
+	local raw_registries = {}
+	if opts.registry then
+		raw_registries[#raw_registries + 1] = opts.registry
+	end
+	if opts.registries then
+		for _, url in ipairs(opts.registries) do
+			raw_registries[#raw_registries + 1] = url
+		end
+	end
+	for _, url in ipairs(user_cfg.registries or {}) do
+		raw_registries[#raw_registries + 1] = url
+	end
+	for _, url in ipairs(m.registries or {}) do
+		raw_registries[#raw_registries + 1] = url
+	end
+	raw_registries[#raw_registries + 1] = DEFAULT_REGISTRY
+
+	local registries = dedup_registries(raw_registries)
+	-- Use the first registry as the primary one for fetch_package (single-registry fetch).
+	local primary_registry = registries[1]
 
 	-- 2. Load crescent.lock if present
 	local lock_path = project_dir .. "/crescent.lock"
@@ -594,7 +680,8 @@ function M.run(project_dir, opts)
 		return result
 	end
 
-	-- 4. Fetch registry index for any packages that aren't in the lockfile
+	-- 4. Fetch registry indices for any packages that aren't in the lockfile.
+	-- Cache index fetches so each registry URL is only fetched once.
 	local needs_registry = false
 	for name, constraint in pairs(deps) do
 		local entry = locked[name]
@@ -612,24 +699,32 @@ function M.run(project_dir, opts)
 		end
 	end
 
-	local registry_index = nil
+	-- registry_indices: ordered list of {index=tbl, url=str} for resolve()
+	local registry_indices = nil
 	if needs_registry then
-		log(opts, "fetching registry index from %s", registry)
-		local idx_str, idx_err = http_get(registry .. "/index.json")
-		if not idx_str then
-			fail("failed to fetch registry index: " .. tostring(idx_err))
-			return result
+		registry_indices = {}
+		for _, reg_url in ipairs(registries) do
+			log(opts, "fetching registry index from %s", reg_url)
+			local idx_str, idx_err = http_get(reg_url .. "/index.json")
+			if not idx_str then
+				fail("failed to fetch registry index from " .. reg_url .. ": " .. tostring(idx_err))
+				return result
+			end
+			local idx, parse_err = parse_index(idx_str)
+			if not idx then
+				fail("failed to parse registry index from " .. reg_url .. ": " .. tostring(parse_err))
+				return result
+			end
+			registry_indices[#registry_indices + 1] = { index = idx, url = reg_url }
 		end
-		local idx, parse_err = parse_index(idx_str)
-		if not idx then
-			fail("failed to parse registry index: " .. tostring(parse_err))
-			return result
-		end
-		registry_index = idx
 	end
 
 	-- 5. Resolve
-	local resolved, res_err = M.resolve(deps, locked, registry_index, opts)
+	local resolve_opts = {
+		frozen           = opts.frozen,
+		registry_indices = registry_indices,
+	}
+	local resolved, res_err = M.resolve(deps, locked, nil, resolve_opts)
 	if not resolved then
 		fail("resolution failed: " .. tostring(res_err))
 		return result
@@ -680,7 +775,8 @@ function M.run(project_dir, opts)
 			end
 		else
 			-- Fetch from registry / cache
-			local fetch_info, fetch_err = fetch_package(name, version, registry, opts)
+			local fetch_registry = info._winning_registry or primary_registry
+			local fetch_info, fetch_err = fetch_package(name, version, fetch_registry, opts)
 			if not fetch_info then
 				fail(("failed to fetch %s@%s: %s"):format(name, version, tostring(fetch_err)))
 			else

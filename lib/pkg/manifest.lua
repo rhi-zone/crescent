@@ -60,6 +60,18 @@ function manifest.validate(tbl)
 		end
 	end
 
+	-- registries: optional, list of URL strings
+	if tbl.registries ~= nil then
+		if type(tbl.registries) ~= "table" then
+			return nil, "manifest field 'registries' must be a table (list of URL strings)"
+		end
+		for i, v in ipairs(tbl.registries) do
+			if type(v) ~= "string" then
+				return nil, ("manifest field 'registries'[%d] must be a string"):format(i)
+			end
+		end
+	end
+
 	return true
 end
 
@@ -131,6 +143,16 @@ function manifest.write(path, tbl)
 	end
 
 	lines[#lines + 1] = "  },"
+
+	-- registries block (only written when non-empty)
+	if tbl.registries ~= nil and #tbl.registries > 0 then
+		lines[#lines + 1] = "  registries = {"
+		for _, url in ipairs(tbl.registries) do
+			lines[#lines + 1] = "    " .. lua_string(url) .. ","
+		end
+		lines[#lines + 1] = "  },"
+	end
+
 	lines[#lines + 1] = "}"
 	lines[#lines + 1] = ""  -- trailing newline
 
