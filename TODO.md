@@ -9,14 +9,13 @@
   module cache, LuaJIT JIT warm-up tuning. Target: same program runs comparably fast
   in bun and luajit; if not, the design needs revisiting.
 
-- [ ] **Package manager** (`lib/pkg/`) — needs design discussion before implementation.
-  Core principle: vendor-first (copy .lua files into your project, you own them).
-  Open questions: registry format, lockfile, version resolution, dependency graph,
-  how to handle FFI-only packages (no build step allowed). Design before coding.
-  Performance bar: bun — workload is I/O-bound (network, file copy, lockfile) so
-  LuaJIT via FFI syscalls should be competitive; if not, revisit the design.
-  Parallelism: fork-based by default (same model as typechecker Phase 5), configurable
-  (e.g. `--jobs=1` for sequential). No async I/O in LuaJIT core; fork is the right lever.
+- [ ] **Package manager** (`lib/pkg/`) — design in `docs/pkg-design.md`.
+  Key decisions: vendor-first; `dep/` namespace (matches existing `dep.sha1` refs);
+  `pkg.lua` manifest; `crescent.lock` text lockfile; global cache with hardlinks;
+  fork-based parallel fetch (default `--jobs=N`), configurable.
+  Open questions before starting: flat vs namespaced package names, semver parser,
+  lockfile text format (TOML-like vs JSON). See design doc for full detail.
+  Performance bar: bun — I/O-bound, LuaJIT + FFI syscalls should be competitive.
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: private field visibility enforcement, module-level LSP cache,
@@ -404,5 +403,14 @@ Branch coverage implementation sketch: instrument the AST (add synthetic nodes a
 - [x] Cross-file go-to-def for fields — `x.bar` where x is a required module: navigate to where `bar` is defined in the module. Implemented via ctx.field_at flat array (stride 4: line/col/field_id/obj_id) populated in ExprRule[NODE_FIELD_EXPR]; find_field_in_ctx() scans AST; cross-file interns field name in module pool then scans module AST. (2026-03-15, commit 38f9a07)
 
 ## package manager
-- [ ] Vendor-first install (copy .lua files into project)
-- [ ] Registry / index format
+See `docs/pkg-design.md` for full design.
+- [ ] `pkg.lua` manifest format + parser
+- [ ] `crescent.lock` lockfile format + parser (hand-written TOML-like)
+- [ ] Registry HTTP protocol (`pkg.rhi.zone` — simple GET index + tarballs)
+- [ ] Global cache (`~/.crescent/cache/<name>@<version>/`)
+- [ ] Install algorithm: resolve → fetch (parallel, fork) → link (hardlinks) → write lockfile
+- [ ] Lockfile fast path: dep/ name+version check → skip network entirely
+- [ ] `--frozen-lockfile` for CI
+- [ ] CLI: `cr add / install / remove / update / publish / info`
+- [ ] Semver parser (pure Lua, small)
+- [ ] Fork-based parallel fetch with `--jobs=N` (default: CPU count)
