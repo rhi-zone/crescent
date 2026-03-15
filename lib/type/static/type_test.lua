@@ -3849,6 +3849,61 @@ end)
 -- make_intersection: deduplication
 ---------------------------------------------------------------------------
 
+---------------------------------------------------------------------------
+-- field_at tracking (LSP go-to-def for fields)
+---------------------------------------------------------------------------
+
+assert.describe("field_at tracking", function()
+    assert.it("populates field_at for field access expressions", function()
+        local _, c = infer_mod.check_string("local M = {}\nM.foo = 1\nlocal x = M.foo", "test.lua")
+        assert.ok(c.field_at ~= nil, "field_at must exist")
+        -- line 3: `local x = M.foo` — M.foo triggers ExprRule[NODE_FIELD_EXPR]
+        local found = false
+        local fa = c.field_at
+        local i = 1
+        while i <= #fa do
+            if fa[i] == 3 then found = true end
+            i = i + 4
+        end
+        assert.ok(found, "field_at must have an entry on line 3 for M.foo")
+    end)
+
+    assert.it("records obj_name_id and field_name_id", function()
+        local _, c = infer_mod.check_string("local M = {}\nM.bar = 42\nlocal y = M.bar", "test.lua")
+        local fa = c.field_at
+        local found_bar = false
+        local i = 1
+        while i <= #fa do
+            if fa[i] == 3 then
+                -- fa[i+2] = field_name_id for "bar"; fa[i+3] = obj_name_id for "M"
+                local field_str = intern.get(c.pool, fa[i+2])
+                local obj_str   = intern.get(c.pool, fa[i+3])
+                if field_str == "bar" and obj_str == "M" then
+                    found_bar = true
+                end
+            end
+            i = i + 4
+        end
+        assert.ok(found_bar, "field_at must record field='bar', obj='M' on line 3")
+    end)
+
+    assert.it("does not record field_at for non-identifier obj (e.g. call().field)", function()
+        local _, c = infer_mod.check_string("local function f() return {} end\nlocal x = f().foo", "test.lua")
+        -- f() is not a simple identifier, so field_at should have no entry for this
+        -- (the obj would not be NODE_IDENTIFIER)
+        local has_line2 = false
+        local fa = c.field_at
+        local i = 1
+        while i <= #fa do
+            if fa[i] == 2 then has_line2 = true end
+            i = i + 4
+        end
+        assert.ok(not has_line2, "field_at must not record non-identifier obj")
+    end)
+end)
+
+---------------------------------------------------------------------------
+
 assert.describe("make_intersection dedup", function()
     assert.it("duplicate members are deduplicated", function()
         local ctx = infer_mod.check_string("", "test.lua")

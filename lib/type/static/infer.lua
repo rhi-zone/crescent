@@ -860,6 +860,16 @@ end
 --: (Ctx, integer) -> integer
 ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
+    -- Record field access position for go-to-def (when obj is a simple identifier).
+    local obj_n0 = ctx.nodes:get(n.data[0])
+    if obj_n0.kind == NODE_IDENTIFIER then
+        local fa = ctx.field_at
+        local fi = #fa
+        fa[fi+1] = n.line
+        fa[fi+2] = n.col
+        fa[fi+3] = n.data[1]         -- field_name_id
+        fa[fi+4] = obj_n0.data[0]    -- obj_name_id
+    end
     local obj_tid = types_mod.find(ctx, infer_expr(ctx, n.data[0]))
     local fname_id = n.data[1]
     local obj_t = ctx.types:get(obj_tid)
@@ -2615,6 +2625,7 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx.inferred_anns = {}  -- list of {line, kind, name_id, type_id} for --annotate mode
     ctx.type_at  = {}       -- flat array {line,col,tid,...} for position→type hover queries
     ctx.name_at  = {}       -- flat array {line,col,name_id,...} for identifier use positions
+    ctx.field_at = {}       -- flat array {line,col,field_id,obj_name_id,...} for field access positions
     ctx.def_sites = {}      -- name_id → {line, col} for definition sites (go-to-def)
     ctx.require_sources = {} -- name_id → module_name string for `local x = require("mod")` bindings
     return ctx

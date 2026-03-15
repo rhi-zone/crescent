@@ -112,6 +112,7 @@ end
 -- Hover helpers
 -- ---------------------------------------------------------------------------
 -- name_at is a flat array: {line1, col1, name_id1, ...}; same coord system as type_at.
+-- Returns name_id, matched_col (both nil if no match).
 local function name_at_lookup(ctx, hover_line, hover_col)
     local na = ctx.name_at
     if not na then return nil end
@@ -132,7 +133,70 @@ local function name_at_lookup(ctx, hover_line, hover_col)
         end
         i = i + 3
     end
-    return best_name_id
+    return best_name_id, best_col
+end
+
+-- field_at is a flat array: {line, col, field_name_id, obj_name_id, ...} stride=4.
+-- Returns field_id, obj_name_id, matched_col (all nil if no match).
+local function field_at_lookup(ctx, hover_line, hover_col)
+    local fa = ctx.field_at
+    if not fa then return nil end
+    local tc_line = hover_line + 1
+    local tc_col  = hover_col + 1
+    local best_fid, best_oid, best_col
+    local i = 1
+    local n = #fa
+    while i <= n do
+        local eline = fa[i]
+        local ecol  = fa[i + 1]
+        local efid  = fa[i + 2]
+        local eoid  = fa[i + 3]
+        if eline == tc_line and ecol <= tc_col then
+            if best_col == nil or ecol >= best_col then
+                best_col = ecol
+                best_fid = efid
+                best_oid = eoid
+            end
+        end
+        i = i + 4
+    end
+    return best_fid, best_oid, best_col
+end
+
+-- Scan ctx_scan.nodes for the definition of a field with intern id `field_id`.
+-- obj_name_id_opt: if non-nil, only match that object variable; nil matches any.
+-- Returns {line, col} (1-indexed typechecker coords) or nil.
+local function find_field_in_ctx(ctx_scan, obj_name_id_opt, field_id)
+    local NODE_ASSIGN_STMT = defs.NODE_ASSIGN_STMT
+    local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL
+    local NODE_FIELD_EXPR  = defs.NODE_FIELD_EXPR
+    local NODE_IDENTIFIER  = defs.NODE_IDENTIFIER
+    for i = 0, ctx_scan.nodes.len - 1 do
+        local nd = ctx_scan.nodes:get(i)
+        if nd.kind == NODE_ASSIGN_STMT then
+            local ls, lc = nd.data[0], nd.data[1]
+            for j = ls, ls + lc - 1 do
+                local lhs_n = ctx_scan.nodes:get(ctx_scan.ast_lists:get(j))
+                if lhs_n.kind == NODE_FIELD_EXPR and lhs_n.data[1] == field_id then
+                    local obj_n = ctx_scan.nodes:get(lhs_n.data[0])
+                    if obj_n.kind == NODE_IDENTIFIER
+                        and (obj_name_id_opt == nil or obj_n.data[0] == obj_name_id_opt) then
+                        return { line = lhs_n.line, col = lhs_n.col }
+                    end
+                end
+            end
+        elseif nd.kind == NODE_FUNC_DECL then
+            local name_n = ctx_scan.nodes:get(nd.data[0])
+            if name_n.kind == NODE_FIELD_EXPR and name_n.data[1] == field_id then
+                local obj_n = ctx_scan.nodes:get(name_n.data[0])
+                if obj_n.kind == NODE_IDENTIFIER
+                    and (obj_name_id_opt == nil or obj_n.data[0] == obj_name_id_opt) then
+                    return { line = name_n.line, col = name_n.col }
+                end
+            end
+        end
+    end
+    return nil
 end
 
 -- type_at is a flat array: {line1, col1, tid1, line2, col2, tid2, ...}
@@ -669,7 +733,77 @@ HANDLERS["textDocument/definition"] = function(state, msg)
         send(ok_resp(msg.id, NULL))
         return
     end
-    local name_id = name_at_lookup(ctx, ln, col)
+
+    local name_id, name_col   = name_at_lookup(ctx, ln, col)
+    local field_id, obj_id, field_col = field_at_lookup(ctx, ln, col)
+
+    -- Prefer field go-to-def when the field_at match has a higher (or equal) col than name_at.
+    -- This handles `x.bar`: cursor on `bar` → field wins; cursor on `x` → name wins.
+    if field_id and (not name_col or field_col >= name_col) then
+        local field_str = intern.get(ctx.pool, field_id)
+        local field_len = field_str and #field_str or 1
+
+        -- Cross-file: obj is a required module — navigate into that module.
+        if ctx.require_sources and ctx.require_sources[obj_id] then
+            local mod_name = ctx.require_sources[obj_id]
+            local root = state.root_path or "."
+            local rel  = mod_name:gsub("%.", "/")
+            for _, rel_path in ipairs({ rel .. ".lua", rel .. "/init.lua" }) do
+                local abs_path = root .. "/" .. rel_path
+                local f = io.open(abs_path, "r")
+                if f then
+                    f:close()
+                    local _ec, mod_ctx = check.check_file(abs_path)
+                    if mod_ctx then
+                        local mod_fid = intern.intern(mod_ctx.pool, field_str)
+                        local def = find_field_in_ctx(mod_ctx, nil, mod_fid)
+                        if def then
+                            local dl = math.max(0, def.line - 1)
+                            local dc = math.max(0, def.col - 1)
+                            local encoded = abs_path:gsub(" ", "%%20")
+                            send(ok_resp(msg.id, {
+                                uri   = "file://" .. encoded,
+                                range = {
+                                    start   = { line = dl, character = dc },
+                                    ["end"] = { line = dl, character = dc + field_len },
+                                },
+                            }))
+                            return
+                        end
+                    end
+                    -- Module found but field not located — navigate to top of file.
+                    local encoded = abs_path:gsub(" ", "%%20")
+                    send(ok_resp(msg.id, {
+                        uri   = "file://" .. encoded,
+                        range = { start = { line = 0, character = 0 },
+                                  ["end"] = { line = 0, character = 1 } },
+                    }))
+                    return
+                end
+            end
+            send(ok_resp(msg.id, NULL))
+            return
+        end
+
+        -- Same-file: scan AST for where obj.field was first defined.
+        local def = find_field_in_ctx(ctx, obj_id, field_id)
+        if def then
+            local dl = math.max(0, def.line - 1)
+            local dc = math.max(0, def.col - 1)
+            send(ok_resp(msg.id, {
+                uri   = uri,
+                range = {
+                    start   = { line = dl, character = dc },
+                    ["end"] = { line = dl, character = dc + field_len },
+                },
+            }))
+            return
+        end
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+
+    -- Name go-to-def path (variables, require() bindings).
     if not name_id then
         send(ok_resp(msg.id, NULL))
         return
