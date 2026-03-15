@@ -14,9 +14,9 @@
   Open questions: registry format, lockfile, version resolution, dependency graph,
   how to handle FFI-only packages (no build step allowed). Design before coding.
 
-- [ ] **Typechecker** — ongoing; chip away at backlog in TODO.md typechecker section.
-  Near-term: private field visibility enforcement, module-level LSP cache,
-  soundness gap 3 (generic variance). No big-bang sessions — incremental commits.
+- [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
+  Near-term candidates: private field visibility enforcement, module-level LSP cache,
+  soundness gap 3 (generic variance). See typechecker section below for full list.
 
 ## security (fix soon)
 - [x] http/router: path traversal via symlinks — `path.safe_resolve()` with FFI `realpath()`
