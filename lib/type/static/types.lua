@@ -383,16 +383,18 @@ end
 -- Make an intersection type.
 function M.make_intersection(ctx, member_ids)
     local flat = {}
+    local seen = {}
     for i = 1, #member_ids do
         local rtid = M.find(ctx, member_ids[i])
         local t = ctx.types:get(rtid)
         if t.tag == TAG_INTERSECTION then
             local s, l = t.data[0], t.data[1]
             for j = s, s + l - 1 do
-                flat[#flat + 1] = ctx.lists:get(j)
+                local mid = ctx.lists:get(j)
+                if not seen[mid] then seen[mid] = true; flat[#flat + 1] = mid end
             end
         elseif t.tag ~= TAG_ANY then
-            flat[#flat + 1] = rtid
+            if not seen[rtid] then seen[rtid] = true; flat[#flat + 1] = rtid end
         end
     end
     if #flat == 0 then return ctx.T_ANY end
