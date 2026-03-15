@@ -331,13 +331,15 @@ Blocking items for cutover:
 - [x] Seed override via PROP_SEED env var for deterministic replay
 
 ### fuzz testing (`lib/test/fuzz.lua`)
-- [ ] Corpus-based mutation fuzzer: byte-flip, insert, delete, splice on seed inputs
-- [ ] Coverage-guided mode: track which branches fire (debug.sethook + branch bitmap); prefer mutations that hit new branches
-- [ ] Crash/error detection: wrap target in pcall; distinguish expected errors from panics
-- [ ] Corpus persistence: save interesting inputs to disk; resume across runs
-- [ ] AFL-style queue: score inputs by new coverage; cycle through queue mutating each
+- [x] Corpus-based mutation fuzzer: byte-flip, insert, delete, splice on seed inputs (2026-03-15)
+- [x] Coverage-guided mode: track which branches fire (debug.sethook + branch bitmap); prefer mutations that hit new branches (2026-03-15)
+- [x] Crash/error detection: wrap target in pcall; distinguish expected errors from panics (2026-03-15)
+- [x] Corpus persistence: save interesting inputs to disk; resume across runs (2026-03-15)
+- [x] AFL-style queue: round-robin queue; guided mode prioritises inputs that hit new branches (2026-03-15)
+- [x] Integration with test runner: `fuzz.it(desc, fn, opts)` — failures appear in standard test output (2026-03-15)
+- [x] Two modes: "fast" (pure random, no sethook overhead) and "guided" (coverage-guided) (2026-03-15)
 - [ ] Integration with property testing: `prop.fuzz(gen, fn)` — use mutations instead of random generation when a corpus exists
-- [ ] Note: pure coverage-guided fuzzing in Lua will be slow (debug.sethook overhead); offer a "fast dumb" mode (pure random) and a "slow guided" mode
+- [ ] Shrinking: mutate + binary-search toward a minimal crashing input (currently reports first crash, not shrunk)
 
 ### coverage
 
