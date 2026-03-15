@@ -285,6 +285,31 @@ M.char_to_token[string.byte("}")] = M.TK_RBRACE
 M.char_to_token[string.byte(";")] = M.TK_SEMICOLON
 M.char_to_token[string.byte(",")] = M.TK_COMMA
 
+-- Diagnostic error codes
+M.E = {}
+M.E.FIELD_NOT_FOUND         = 1   -- `obj.field` doesn't exist
+M.E.CALL_ARG_MISMATCH       = 2   -- named or positional argument type mismatch
+M.E.CALL_ARG_MISSING        = 3   -- required argument not supplied
+M.E.ARITH_TYPE              = 4   -- cannot perform arithmetic on T
+M.E.LENGTH_TYPE             = 5   -- cannot get length of T
+M.E.COMPARE_TYPE            = 6   -- cannot compare T (no ordering metamethod)
+M.E.COMPARE_CROSS           = 7   -- cannot compare T with U (cross-type mismatch)
+M.E.CONCAT_TYPE             = 8   -- cannot concatenate T
+M.E.UNHANDLED_EXPR          = 9   -- internal: unhandled expression kind
+M.E.UNKNOWN_IDENTIFIER      = 10  -- undefined identifier
+M.E.VARARG_OUTSIDE_FN       = 11  -- '...' used outside vararg function
+M.E.BINARY_OP_UNKNOWN       = 12  -- internal: unknown binary operator
+M.E.TYPE_MISMATCH           = 13  -- declared type vs initializer mismatch (local with annotation)
+M.E.ASSIGN_MISMATCH         = 14  -- variable assignment type mismatch
+M.E.FIELD_REASSIGN          = 15  -- field re-assigned with incompatible type
+M.E.INDEX_ASSIGN_MISMATCH   = 16  -- index assignment doesn't match indexer type
+M.E.NO_MATCHING_OVERLOAD    = 17  -- no overload accepts the given arguments
+M.E.UNION_CALL_MISMATCH     = 18  -- argument doesn't satisfy all union members
+M.E.CANNOT_CALL             = 19  -- cannot call a non-function type
+M.E.METHOD_NOT_FOUND        = 20  -- no method on type
+M.E.UNNAMED_PARAMS          = 21  -- declared function type has unnamed parameters (warning)
+M.E.EXPLICIT_ANY            = 22  -- explicit `any` in annotation (warning)
+
 -- Keyword strings (ordered by token ID, for intern pre-population)
 M.keywords = {
     "and", "break", "do", "else", "elseif", "end", "false", "for",

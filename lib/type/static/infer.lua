@@ -99,6 +99,8 @@ local TAG_TUPLE    = defs.TAG_TUPLE
 local TAG_SPREAD   = defs.TAG_SPREAD
 local TAG_NEVER    = defs.TAG_NEVER
 
+local E = defs.E
+
 local M = {}
 
 ---------------------------------------------------------------------------
@@ -106,13 +108,21 @@ local M = {}
 ---------------------------------------------------------------------------
 
 -- Returns the error entry so callers can attach notes.
---: (Ctx, unknown, unknown, unknown) -> unknown
-local function report(ctx, line, col, msg)
+--: (Ctx, unknown, unknown, integer, unknown) -> unknown
+local function report(ctx, line, col, code, args)
+    local msg = errors_mod.format_diag(code, args)
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
---: (Ctx, unknown, unknown, unknown) -> ()
-local function warn(ctx, line, col, msg)
+--: (Ctx, unknown, unknown, integer, unknown) -> ()
+local function warn(ctx, line, col, code, args)
+    local msg = errors_mod.format_diag(code, args)
+    errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+end
+
+-- Pass-through for pre-formatted warning strings coming from external sources (e.g. ann.lua).
+--: (Ctx, unknown, unknown, string) -> ()
+local function warn_raw(ctx, line, col, msg)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
@@ -225,8 +235,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == defs.TAG_STRING   then return ctx.T_STRING end
     if tag == defs.TAG_ANY      then
         if ctx._ann_warn_line then
-            warn(ctx, ctx._ann_warn_line, 0,
-                "explicit `any` in annotation — use `unknown` for an unconstrained value, or a specific type")
+            warn(ctx, ctx._ann_warn_line, 0, E.EXPLICIT_ANY, {})
             ctx._ann_warn_line = nil  -- warn once per annotation
         end
         return ctx.T_ANY
@@ -459,7 +468,7 @@ infer_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = ExprRule[n.kind]
     if rule then return rule(ctx, nid) end
-    report(ctx, n.line, n.col, "unhandled expr kind " .. n.kind)
+    report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
     return ctx.T_ANY
 end
 
@@ -638,7 +647,7 @@ ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
     local ty = env_mod.lookup(ctx.scope, name_id)
     if ty then return ty end
     local name = intern_mod.get(ctx.pool, name_id) or "?"
-    report(ctx, n.line, n.col, "unknown identifier '" .. name .. "'")
+    report(ctx, n.line, n.col, E.UNKNOWN_IDENTIFIER, { name = name })
     return ctx.T_ANY
 end
 
@@ -648,7 +657,7 @@ ExprRule[NODE_VARARG_EXPR] = function(ctx, nid)
     local vararg_id = intern_mod.intern(ctx.pool, "...")
     local ty = env_mod.lookup(ctx.scope, vararg_id)
     if ty then return ty end
-    report(ctx, n.line, n.col, "'...' used outside a vararg function")
+    report(ctx, n.line, n.col, E.VARARG_OUTSIDE_FN, {})
     return ctx.T_ANY
 end
 
@@ -662,7 +671,7 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
         local mm = meta_op_ret(ctx, arg_tid, "__unm")
         if mm then return mm end
         if not has_metamethod(ctx, arg_tid, "__unm", false) then
-            report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display_short(ctx, arg_tid) .. "'")
+            report(ctx, n.line, n.col, E.ARITH_TYPE, { t = types_mod.display_short(ctx, arg_tid) })
         end
         return ctx.T_NUMBER
     end
@@ -671,7 +680,7 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
         if mm then return mm end
         -- Tables always support # (built-in length); everything else needs __len.
         if not has_metamethod(ctx, arg_tid, "__len", true) then
-            report(ctx, n.line, n.col, "cannot get length of '" .. types_mod.display_short(ctx, arg_tid) .. "'")
+            report(ctx, n.line, n.col, E.LENGTH_TYPE, { t = types_mod.display_short(ctx, arg_tid) })
         end
         return ctx.T_INTEGER
     end
@@ -720,12 +729,12 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             if lt.tag == TAG_UNION then
                 for i = lt.data[0], lt.data[0] + lt.data[1] - 1 do
                     if not is_numeric(ctx, ctx.lists:get(i)) then
-                        report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display_short(ctx, r_id) .. "'")
+                        report(ctx, n.line, n.col, E.ARITH_TYPE, { t = types_mod.display_short(ctx, r_id) })
                         return
                     end
                 end
             elseif not is_numeric(ctx, r_id) then
-                report(ctx, n.line, n.col, "cannot perform arithmetic on '" .. types_mod.display_short(ctx, r_id) .. "'")
+                report(ctx, n.line, n.col, E.ARITH_TYPE, { t = types_mod.display_short(ctx, r_id) })
             end
         end
         check_num(left_r)
@@ -749,11 +758,11 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         if mm then return mm end
         -- Validate each operand supports ordering (nil and boolean do not).
         if not has_metamethod(ctx, left_r, mm_name, false) then
-            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display_short(ctx, left_r) .. "'")
+            report(ctx, n.line, n.col, E.COMPARE_TYPE, { t = types_mod.display_short(ctx, left_r) })
             return ctx.T_BOOLEAN
         end
         if not has_metamethod(ctx, right_r, mm_name, false) then
-            report(ctx, n.line, n.col, "cannot compare '" .. types_mod.display_short(ctx, right_r) .. "'")
+            report(ctx, n.line, n.col, E.COMPARE_TYPE, { t = types_mod.display_short(ctx, right_r) })
             return ctx.T_BOOLEAN
         end
         -- Cross-type check via Lua metamethod calling rules.
@@ -769,9 +778,10 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
                 local ok0 = unify_mod.try_unify(ctx, left_r,  p0)
                 local ok1 = unify_mod.try_unify(ctx, right_r, p1)
                 if not ok0 or not ok1 then
-                    report(ctx, n.line, n.col,
-                        "cannot compare '" .. types_mod.display_short(ctx, left_r)
-                        .. "' with '" .. types_mod.display_short(ctx, right_r) .. "'")
+                    report(ctx, n.line, n.col, E.COMPARE_CROSS, {
+                        left  = types_mod.display_short(ctx, left_r),
+                        right = types_mod.display_short(ctx, right_r),
+                    })
                 end
             end
         end
@@ -806,10 +816,10 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
             return meta_op_ret(ctx, r_id, "__concat") ~= nil
         end
         if not is_concat_ok(left_r) then
-            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display_short(ctx, left_r) .. "'")
+            report(ctx, n.line, n.col, E.CONCAT_TYPE, { t = types_mod.display_short(ctx, left_r) })
         end
         if not is_concat_ok(right_r) then
-            report(ctx, n.line, n.col, "cannot concatenate '" .. types_mod.display_short(ctx, right_r) .. "'")
+            report(ctx, n.line, n.col, E.CONCAT_TYPE, { t = types_mod.display_short(ctx, right_r) })
         end
         return ctx.T_STRING
     end
@@ -821,7 +831,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         return types_mod.make_union(ctx, { non_nil_left, right_r })
     end
 
-    report(ctx, n.line, n.col, "unknown binary operator " .. op)
+    report(ctx, n.line, n.col, E.BINARY_OP_UNKNOWN, { op = op })
     return ctx.T_ANY
 end
 
@@ -874,10 +884,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         local obj_n2 = ctx.nodes:get(n.data[0])
         local obj_name2 = (obj_n2 and obj_n2.kind == NODE_IDENTIFIER)
             and intern_mod.get(ctx.pool, obj_n2.data[0]) or nil
-        local primary_msg = obj_name2
-            and ("`" .. obj_name2 .. "." .. fname .. "` doesn't exist")
-            or  ("`" .. fname .. "` doesn't exist")
-        report(ctx, n.line, n.col, primary_msg)
+        report(ctx, n.line, n.col, E.FIELD_NOT_FOUND, { obj = obj_name2, name = fname })
         return ctx.T_ANY
     end
 
@@ -972,10 +979,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local obj_nf = ctx.nodes:get(n.data[0])
     local obj_namef = (obj_nf and obj_nf.kind == NODE_IDENTIFIER)
         and intern_mod.get(ctx.pool, obj_nf.data[0]) or nil
-    local primary_msgf = obj_namef
-        and ("`" .. obj_namef .. "." .. fname .. "` doesn't exist")
-        or  ("`" .. fname .. "` doesn't exist")
-    report(ctx, n.line, n.col, primary_msgf)
+    report(ctx, n.line, n.col, E.FIELD_NOT_FOUND, { obj = obj_namef, name = fname })
     return ctx.T_ANY
 end
 
@@ -1132,24 +1136,23 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col, fn_name)
         if act_tid then
             local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
             if not ok then
-                local msg
-                if param_name then
-                    msg = "`" .. param_name .. "` is `" .. types_mod.display_short(ctx, act_tid)
-                        .. "`, but " .. fn_label .. " expects `" .. types_mod.display_short(ctx, exp_tid) .. "`"
-                else
-                    msg = "argument " .. (i + 1) .. " is `" .. types_mod.display_short(ctx, act_tid)
-                        .. "`, but " .. fn_label .. " expects `" .. types_mod.display_short(ctx, exp_tid) .. "`"
-                end
-                if err then msg = msg .. ": " .. err end
-                report(ctx, line, col, msg)
+                report(ctx, line, col, E.CALL_ARG_MISMATCH, {
+                    param_name = param_name,
+                    idx        = i + 1,
+                    act        = types_mod.display_short(ctx, act_tid),
+                    fn         = fn_label,
+                    exp        = types_mod.display_short(ctx, exp_tid),
+                    detail     = err,
+                })
             end
         else
             local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
             if not ok then
-                local arg_label = param_name and ("`" .. param_name .. "`") or ("argument " .. (i + 1))
-                report(ctx, line, col,
-                    arg_label .. ": missing required argument"
-                    .. " (expected '" .. types_mod.display(ctx, exp_tid) .. "', got nil)")
+                report(ctx, line, col, E.CALL_ARG_MISSING, {
+                    param_name = param_name,
+                    idx        = i + 1,
+                    exp        = types_mod.display(ctx, exp_tid),
+                })
             end
         end
     end
@@ -1267,7 +1270,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
                         parts[#parts + 1] = "    " .. e
                     end
                 end
-                report(ctx, line, col, table.concat(parts, "\n"))
+                report(ctx, line, col, E.UNION_CALL_MISMATCH, { msg = table.concat(parts, "\n") })
                 ctx._last_multi_return = { ctx.T_ANY }
                 return ctx.T_ANY
             end
@@ -1310,7 +1313,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
                     parts[#parts + 1] = "    " .. e
                 end
             end
-            report(ctx, line, col, table.concat(parts, "\n"))
+            report(ctx, line, col, E.NO_MATCHING_OVERLOAD, { msg = table.concat(parts, "\n") })
             ctx._last_multi_return = { ctx.T_ANY }
             return ctx.T_ANY
         end
@@ -1323,7 +1326,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     end
 
     if ft.tag ~= TAG_NEVER then
-        report(ctx, line, col, "cannot call type '" .. types_mod.display_short(ctx, fn_tid) .. "'")
+        report(ctx, line, col, E.CANNOT_CALL, { t = types_mod.display_short(ctx, fn_tid) })
     end
     ctx._last_multi_return = { ctx.T_ANY }
     return ctx.T_ANY
@@ -1425,7 +1428,8 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
             method_tid = types_mod.find(ctx, fe.type_id)
         else
             local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display_short(ctx, recv_r) .. "'")
+            report(ctx, n.line, n.col, E.METHOD_NOT_FOUND,
+                { method = mname, t = types_mod.display_short(ctx, recv_r) })
         end
     else
         -- For primitive types, look up a registered __index table in ctx.prim_index.
@@ -1443,12 +1447,14 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
                     method_tid = types_mod.find(ctx, fe.type_id)
                 else
                     local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-                    report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display_short(ctx, recv_r) .. "'")
+                    report(ctx, n.line, n.col, E.METHOD_NOT_FOUND,
+                        { method = mname, t = types_mod.display_short(ctx, recv_r) })
                 end
             end
         elseif recv_t.tag ~= TAG_ANY and recv_t.tag ~= TAG_VAR then
             local mname = intern_mod.get(ctx.pool, method_name_id) or "?"
-            report(ctx, n.line, n.col, "no method '" .. mname .. "' on type '" .. types_mod.display_short(ctx, recv_r) .. "'")
+            report(ctx, n.line, n.col, E.METHOD_NOT_FOUND,
+                { method = mname, t = types_mod.display_short(ctx, recv_r) })
         end
     end
 
@@ -1852,10 +1858,11 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             if rhs_tid then
                 local ok, err = unify_mod.unify(ctx, rhs_tid, ann_tid)
                 if not ok then
-                    report(ctx, n.line, n.col,
-                        "type mismatch: '" .. types_mod.display_short(ctx, rhs_tid)
-                        .. "' is not assignable to '" .. types_mod.display_short(ctx, ann_tid) .. "'"
-                        .. (err and (": " .. err) or ""))
+                    report(ctx, n.line, n.col, E.TYPE_MISMATCH, {
+                        got    = types_mod.display_short(ctx, rhs_tid),
+                        exp    = types_mod.display_short(ctx, ann_tid),
+                        detail = err,
+                    })
                 end
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
@@ -1973,9 +1980,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     ok, err = unify_mod.unify(ctx, rhs_tid, check_against)
                     if not ok then
                         local nm = intern_mod.get(ctx.pool, name_id) or "?"
-                        report(ctx, tn.line, tn.col,
-                            "cannot assign '" .. types_mod.display_short(ctx, rhs_tid)
-                            .. "' to '" .. nm .. "'" .. (err and (": " .. err) or ""))
+                        report(ctx, tn.line, tn.col, E.ASSIGN_MISMATCH, {
+                            got    = types_mod.display_short(ctx, rhs_tid),
+                            name   = nm,
+                            detail = err,
+                        })
                     end
                 end
                 if ok then
@@ -2011,11 +2020,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     if existing_tag ~= TAG_VAR then
                         if not unify_mod.try_unify(ctx, rhs_tid, existing_tid) then
                             local field_name = intern_mod.get(ctx.pool, field_id) or "?"
-                            local entry = report(ctx, tn.line, tn.col,
-                                "`" .. field_name .. "` is `"
-                                .. types_mod.display_short(ctx, existing_tid)
-                                .. "`, but this location expects `"
-                                .. types_mod.display_short(ctx, rhs_tid) .. "`")
+                            local entry = report(ctx, tn.line, tn.col, E.FIELD_REASSIGN, {
+                                name     = field_name,
+                                existing = types_mod.display_short(ctx, existing_tid),
+                                got      = types_mod.display_short(ctx, rhs_tid),
+                            })
                             -- Secondary span: find where the field was first defined.
                             local obj_n = ctx.nodes:get(obj_nid)
                             if obj_n.kind == NODE_IDENTIFIER then
@@ -2048,11 +2057,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         if ctx.types:get(existing_tid2).tag ~= TAG_VAR then
                             if not unify_mod.try_unify(ctx, rhs_tid, existing_tid2) then
                                 local key_name2 = intern_mod.get(ctx.pool, field_id2) or "?"
-                                report(ctx, tn.line, tn.col,
-                                    "`" .. key_name2 .. "` is `"
-                                    .. types_mod.display_short(ctx, existing_tid2)
-                                    .. "`, but this location expects `"
-                                    .. types_mod.display_short(ctx, rhs_tid) .. "`")
+                                report(ctx, tn.line, tn.col, E.FIELD_REASSIGN, {
+                                    name     = key_name2,
+                                    existing = types_mod.display_short(ctx, existing_tid2),
+                                    got      = types_mod.display_short(ctx, rhs_tid),
+                                })
                             end
                         end
                     end
@@ -2078,11 +2087,10 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                                 local ival_tag = ctx.types:get(ival_tid).tag
                                 if ival_tag ~= TAG_VAR
                                     and not unify_mod.try_unify(ctx, rhs_tid, ival_tid) then
-                                    report(ctx, tn.line, tn.col,
-                                        "cannot assign `"
-                                        .. types_mod.display_short(ctx, rhs_tid)
-                                        .. "` — doesn't match indexer type `"
-                                        .. types_mod.display_short(ctx, ival_tid) .. "`")
+                                    report(ctx, tn.line, tn.col, E.INDEX_ASSIGN_MISMATCH, {
+                                        got     = types_mod.display_short(ctx, rhs_tid),
+                                        indexer = types_mod.display_short(ctx, ival_tid),
+                                    })
                                 end
                             end
                             break
@@ -2480,7 +2488,7 @@ local function process_type_decls(ctx)
     -- Emit annotation parse warnings (e.g. ambiguous function-union return types).
     if ctx.ann.warnings then
         for _, w in ipairs(ctx.ann.warnings) do
-            warn(ctx, w.line, w.col, w.msg)
+            warn_raw(ctx, w.line, w.col, w.msg)
         end
     end
     local decls = {}
@@ -2511,9 +2519,7 @@ local function process_type_decls(ctx)
     -- Pass 2: resolve bodies and warn on unnamed function params
     for _, r in ipairs(decls) do
         if not ann_fn_params_named(ctx, r.type_id) then
-            warn(ctx, decl_lines[r], 1,
-                "declared function type has unnamed parameters"
-                .. " — add 'name: type' to show names in error messages")
+            warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
         end
         if r.decl_var then
             -- Variable binding: bind the resolved type as a value in scope.

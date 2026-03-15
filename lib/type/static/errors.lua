@@ -195,6 +195,108 @@ function M.format_json(err_ctx)
     return "[" .. table.concat(items, ",") .. "]"
 end
 
+-- Template table: maps error code → function(args) → string.
+-- Populated lazily so defs can be required without a circular dependency.
+local _templates  -- forward declaration; built on first call to format_diag
+
+local function build_templates()
+    local defs = require("lib.type.static.defs")
+    local E = defs.E
+    _templates = {
+        [E.FIELD_NOT_FOUND]       = function(a)
+            if a.obj then
+                return "`" .. a.obj .. "." .. a.name .. "` doesn't exist"
+            end
+            return "`" .. a.name .. "` doesn't exist"
+        end,
+        [E.CALL_ARG_MISMATCH]     = function(a)
+            local label = a.param_name
+                and ("`" .. a.param_name .. "` is `" .. a.act .. "`, but " .. a.fn .. " expects `" .. a.exp .. "`")
+                or  ("argument " .. a.idx .. " is `" .. a.act .. "`, but " .. a.fn .. " expects `" .. a.exp .. "`")
+            if a.detail then label = label .. ": " .. a.detail end
+            return label
+        end,
+        [E.CALL_ARG_MISSING]      = function(a)
+            local label = a.param_name and ("`" .. a.param_name .. "`") or ("argument " .. a.idx)
+            return label .. ": missing required argument (expected '" .. a.exp .. "', got nil)"
+        end,
+        [E.ARITH_TYPE]            = function(a)
+            return "cannot perform arithmetic on '" .. a.t .. "'"
+        end,
+        [E.LENGTH_TYPE]           = function(a)
+            return "cannot get length of '" .. a.t .. "'"
+        end,
+        [E.COMPARE_TYPE]          = function(a)
+            return "cannot compare '" .. a.t .. "'"
+        end,
+        [E.COMPARE_CROSS]         = function(a)
+            return "cannot compare '" .. a.left .. "' with '" .. a.right .. "'"
+        end,
+        [E.CONCAT_TYPE]           = function(a)
+            return "cannot concatenate '" .. a.t .. "'"
+        end,
+        [E.UNHANDLED_EXPR]        = function(a)
+            return "unhandled expr kind " .. a.kind
+        end,
+        [E.UNKNOWN_IDENTIFIER]    = function(a)
+            return "unknown identifier '" .. a.name .. "'"
+        end,
+        [E.VARARG_OUTSIDE_FN]     = function(_a)
+            return "'...' used outside a vararg function"
+        end,
+        [E.BINARY_OP_UNKNOWN]     = function(a)
+            return "unknown binary operator " .. a.op
+        end,
+        [E.TYPE_MISMATCH]         = function(a)
+            local msg = "type mismatch: '" .. a.got .. "' is not assignable to '" .. a.exp .. "'"
+            if a.detail then msg = msg .. ": " .. a.detail end
+            return msg
+        end,
+        [E.ASSIGN_MISMATCH]       = function(a)
+            local msg = "cannot assign '" .. a.got .. "' to '" .. a.name .. "'"
+            if a.detail then msg = msg .. ": " .. a.detail end
+            return msg
+        end,
+        [E.FIELD_REASSIGN]        = function(a)
+            return "`" .. a.name .. "` is `" .. a.existing
+                .. "`, but this location expects `" .. a.got .. "`"
+        end,
+        [E.INDEX_ASSIGN_MISMATCH] = function(a)
+            return "cannot assign `" .. a.got
+                .. "` \xe2\x80\x94 doesn't match indexer type `" .. a.indexer .. "`"
+        end,
+        [E.NO_MATCHING_OVERLOAD]  = function(a)
+            return a.msg  -- pre-formatted multi-line string
+        end,
+        [E.UNION_CALL_MISMATCH]   = function(a)
+            return a.msg  -- pre-formatted multi-line string
+        end,
+        [E.CANNOT_CALL]           = function(a)
+            return "cannot call type '" .. a.t .. "'"
+        end,
+        [E.METHOD_NOT_FOUND]      = function(a)
+            return "no method '" .. a.method .. "' on type '" .. a.t .. "'"
+        end,
+        [E.UNNAMED_PARAMS]        = function(_a)
+            return "declared function type has unnamed parameters"
+                .. " \xe2\x80\x94 add 'name: type' to show names in error messages"
+        end,
+        [E.EXPLICIT_ANY]          = function(_a)
+            return "explicit `any` in annotation \xe2\x80\x94"
+                .. " use `unknown` for an unconstrained value, or a specific type"
+        end,
+    }
+end
+
+-- Convert an integer error code + args table to a human-readable string.
+-- Returns "error <code>" when the code is unknown (should not happen in practice).
+function M.format_diag(code, args)
+    if not _templates then build_templates() end
+    local fn = _templates[code]
+    if fn then return fn(args) end
+    return "error " .. tostring(code)
+end
+
 -- Minimal JSON string escaping.
 function M._json_str(s)
     s = tostring(s or "")
