@@ -13,6 +13,7 @@ end
 local json   = require("lib.lunajson")
 local check  = require("lib.type.static.check")
 local types  = require("lib.type.static.types")
+local intern = require("lib.type.static.intern")
 
 -- ---------------------------------------------------------------------------
 -- JSON null sentinel
@@ -109,6 +110,30 @@ end
 -- ---------------------------------------------------------------------------
 -- Hover helpers
 -- ---------------------------------------------------------------------------
+-- name_at is a flat array: {line1, col1, name_id1, ...}; same coord system as type_at.
+local function name_at_lookup(ctx, hover_line, hover_col)
+    local na = ctx.name_at
+    if not na then return nil end
+    local tc_line = hover_line + 1
+    local tc_col  = hover_col + 1
+    local best_name_id, best_col
+    local i = 1
+    local n = #na
+    while i <= n do
+        local eline = na[i]
+        local ecol  = na[i + 1]
+        local eid   = na[i + 2]
+        if eline == tc_line and ecol <= tc_col then
+            if best_col == nil or ecol >= best_col then
+                best_col = ecol
+                best_name_id = eid
+            end
+        end
+        i = i + 3
+    end
+    return best_name_id
+end
+
 -- type_at is a flat array: {line1, col1, tid1, line2, col2, tid2, ...}
 -- typechecker line is 1-indexed; col is 0-indexed.
 -- LSP position: both 0-indexed.
@@ -196,7 +221,8 @@ HANDLERS["initialize"] = function(state, msg)
                 change    = 1,    -- Full document sync
                 save      = true,
             },
-            hoverProvider = true,
+            hoverProvider      = true,
+            definitionProvider = true,
         },
         serverInfo = { name = "crescent", version = "0.2.0" },
     }))
@@ -287,6 +313,42 @@ HANDLERS["textDocument/hover"] = function(state, msg)
     local type_str = types.display(ctx, resolved)
     send(ok_resp(msg.id, {
         contents = { kind = "markdown", value = "```\n" .. type_str .. "\n```" },
+    }))
+end
+
+HANDLERS["textDocument/definition"] = function(state, msg)
+    local p = msg.params
+    if not p or not p.textDocument or not p.position then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local uri = p.textDocument.uri
+    local ln  = p.position.line
+    local col = p.position.character
+    local ctx = state.ctx_cache[uri]
+    if not ctx then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local name_id = name_at_lookup(ctx, ln, col)
+    if not name_id then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local def = ctx.def_sites[name_id]
+    if not def then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    -- Convert typechecker 1-indexed line/col to LSP 0-indexed.
+    local def_ln  = math.max(0, def.line - 1)
+    local def_col = math.max(0, def.col - 1)
+    send(ok_resp(msg.id, {
+        uri   = uri,
+        range = {
+            start   = { line = def_ln, character = def_col },
+            ["end"] = { line = def_ln, character = def_col + 1 },
+        },
     }))
 end
 

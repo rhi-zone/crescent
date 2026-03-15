@@ -660,6 +660,12 @@ end
 ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local name_id = n.data[0]
+    -- Record identifier use position for go-to-def.
+    local na = ctx.name_at
+    local ni = #na
+    na[ni + 1] = n.line
+    na[ni + 2] = n.col
+    na[ni + 3] = name_id
     local ty = env_mod.lookup(ctx.scope, name_id)
     if ty then return ty end
     local name = intern_mod.get(ctx.pool, name_id) or "?"
@@ -1882,6 +1888,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 end
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
+            ctx.def_sites[name_id] = { line = n.line, col = n.col }
         elseif prescanned then
             -- Prescan bound this name: unify with RHS but keep the richer prescanned type.
             if rhs_tid then unify_mod.unify(ctx, rhs_tid, prescanned) end
@@ -1911,6 +1918,8 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 bind_tid = ctx.T_NIL
             end
             env_mod.bind(ctx.scope, name_id, bind_tid)
+            -- Record definition site (line is statement line; col is approximate).
+            ctx.def_sites[name_id] = { line = n.line, col = n.col }
             -- After binding a table literal with no annotation, try to promote it to an enum.
             -- Only for single-name single-rhs table literal bindings (e.g. `local Status = {...}`).
             if nl == 1 and el == 1 then
@@ -2202,6 +2211,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
             unify_mod.unify(ctx, fn_tid, existing)
         end
         env_mod.bind(ctx.scope, name_id, fn_tid)
+        ctx.def_sites[name_id] = { line = nn.line, col = nn.col }
     elseif nn.kind == NODE_FIELD_EXPR then
         -- function M.foo(...): assign to field
         local obj_nid = nn.data[0]
@@ -2588,7 +2598,9 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx._pcall_info = {}
     ctx.nominal_id = 0
     ctx.inferred_anns = {}  -- list of {line, kind, name_id, type_id} for --annotate mode
-    ctx.type_at = {}        -- flat array {line,col,tid,...} for position→type hover queries
+    ctx.type_at  = {}       -- flat array {line,col,tid,...} for position→type hover queries
+    ctx.name_at  = {}       -- flat array {line,col,name_id,...} for identifier use positions
+    ctx.def_sites = {}      -- name_id → {line, col} for definition sites (go-to-def)
     return ctx
 end
 
