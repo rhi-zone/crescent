@@ -2823,6 +2823,41 @@ assert.describe("field assignment M.foo = val", function()
     end)
 end)
 
+assert.describe("checker: field re-assignment type check", function()
+    assert.it("M.count = 'string' after function M.count() → error", function()
+        has_error([[
+local M = {}
+function M.count() return 1 end
+M.count = "string"
+]], "cannot assign")
+    end)
+
+    assert.it("M.count = compatible_fn after function M.count() → no error", function()
+        no_errors([[
+local M = {}
+function M.count() return 1 end
+local function replacement() return 2 end
+M.count = replacement
+]])
+    end)
+
+    assert.it("M.name = 42 after M.name = 'hello' → error", function()
+        has_error([[
+local M = {}
+M.name = "hello"
+M.name = 42
+]], "cannot assign")
+    end)
+
+    assert.it("t.x = 2 after t.x = 1 (integer to integer) → no error", function()
+        no_errors([[
+local t = {}
+t.x = 1
+t.x = 2
+]])
+    end)
+end)
+
 assert.describe("cri: require() type resolution", function()
     assert.it("cri_loader wires require() return type", function()
         -- Build a 'module' and serialize its export type

@@ -100,6 +100,59 @@ local TAG_NEVER    = defs.TAG_NEVER
 local M = {}
 
 ---------------------------------------------------------------------------
+-- Levenshtein distance helper (for "did you mean?" suggestions)
+---------------------------------------------------------------------------
+
+-- Compute edit distance between two strings. Returns a number.
+-- Uses a two-row DP to keep memory O(min(m,n)).
+local function levenshtein(a, b)
+    local m, n = #a, #b
+    if m == 0 then return n end
+    if n == 0 then return m end
+    -- Ensure a is the shorter string for space efficiency
+    if m > n then a, b, m, n = b, a, n, m end
+    local prev = {}
+    local curr = {}
+    for j = 0, n do prev[j] = j end
+    for i = 1, m do
+        curr[0] = i
+        for j = 1, n do
+            if a:sub(i,i) == b:sub(j,j) then
+                curr[j] = prev[j-1]
+            else
+                local d = prev[j-1]
+                if prev[j] < d then d = prev[j] end
+                if curr[j-1] < d then d = curr[j-1] end
+                curr[j] = d + 1
+            end
+        end
+        prev, curr = curr, prev
+    end
+    return prev[n]
+end
+
+-- Find closest field name in a closed table type. Returns suggestion string or nil.
+-- obj_t: TypeSlot for TAG_TABLE; fname: string to match against.
+local function field_suggestion(ctx, obj_t, fname)
+    local threshold = math.max(2, math.floor(#fname / 3))
+    local best_dist = threshold + 1
+    local best_name = nil
+    for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+        local fid  = ctx.lists:get(i)
+        local fe   = ctx.fields:get(fid)
+        local name = intern_mod.get(ctx.pool, fe.name_id)
+        if name then
+            local d = levenshtein(fname, name)
+            if d < best_dist then
+                best_dist = d
+                best_name = name
+            end
+        end
+    end
+    return best_name
+end
+
+---------------------------------------------------------------------------
 -- Context helpers
 ---------------------------------------------------------------------------
 
@@ -818,7 +871,10 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         end
         if obj_t.data[4] >= 0 then return ctx.T_UNKNOWN end
         local fname = intern_mod.get(ctx.pool, fname_id) or "?"
-        report(ctx, n.line, n.col, "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'")
+        local suggestion = field_suggestion(ctx, obj_t, fname)
+        local msg = "no field '" .. fname .. "' on type '" .. types_mod.display_short(ctx, obj_tid) .. "'"
+        if suggestion then msg = msg .. "\n  = help: did you mean '" .. suggestion .. "'?" end
+        report(ctx, n.line, n.col, msg)
         return ctx.T_ANY
     end
 
@@ -1826,13 +1882,24 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 local fe = types_mod.table_field(ctx, obj_tid, field_id)
                 if not fe then
                     table_add_field(ctx, obj_tid, field_id, rhs_tid)
+                else
+                    -- Re-assignment to an existing field: check type compatibility.
+                    -- Guard: skip if existing type is an unbound typevar — unifying
+                    -- against a free typevar would bind it globally across branches.
+                    local existing_tid = types_mod.find(ctx, fe.type_id)
+                    local existing_tag = ctx.types:get(existing_tid).tag
+                    if existing_tag ~= TAG_VAR then
+                        if not unify_mod.try_unify(ctx, rhs_tid, existing_tid) then
+                            local field_name = intern_mod.get(ctx.pool, field_id) or "?"
+                            report(ctx, tn.line, tn.col,
+                                "cannot assign type '"
+                                .. types_mod.display_short(ctx, rhs_tid)
+                                .. "' to field '" .. field_name
+                                .. "' of type '"
+                                .. types_mod.display_short(ctx, existing_tid) .. "'")
+                        end
+                    end
                 end
-                -- Re-assignment to an existing field: no type check here.
-                -- The field type was inferred from the first assignment; we do
-                -- not check subsequent ones since index-assignment tracking is
-                -- not yet implemented (returns[n] = v keeps returns typed as {}).
-                -- Catching wrong-type re-assignment (e.g. `M.fn = "string"` after
-                -- `function M.fn()`) is tracked in TODO.md for a future pass.
             end
         elseif tn.kind == NODE_INDEX_EXPR then
             infer_expr(ctx, tn.data[0])
