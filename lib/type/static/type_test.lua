@@ -3773,3 +3773,68 @@ local x = 3.14
         assert.ok(not unify_mod.try_unify(ctx, a, b), "different floats should not unify")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- require_sources: cross-file go-to-def tracking
+---------------------------------------------------------------------------
+
+assert.describe("require_sources", function()
+    assert.it("local x = require() populates require_sources", function()
+        local _, ctx = infer_mod.check_string([[
+local json = require("lib.lunajson")
+]], "test.lua")
+        assert.ok(ctx, "ctx should be non-nil")
+        assert.ok(ctx.require_sources, "require_sources should exist")
+        local found_mod
+        for _, mod in pairs(ctx.require_sources) do
+            found_mod = mod
+        end
+        assert.eq(found_mod, "lib.lunajson")
+    end)
+
+    assert.it("require_sources not polluted by non-require calls", function()
+        local _, ctx = infer_mod.check_string([[
+local x = tostring(42)
+]], "test.lua")
+        local count = 0
+        for _ in pairs(ctx.require_sources) do count = count + 1 end
+        assert.eq(count, 0)
+    end)
+
+    assert.it("multiple requires tracked separately", function()
+        local _, ctx = infer_mod.check_string([[
+local a = require("lib.a")
+local b = require("lib.b")
+]], "test.lua")
+        local mods = {}
+        for _, mod in pairs(ctx.require_sources) do mods[mod] = true end
+        assert.ok(mods["lib.a"], "lib.a should be tracked")
+        assert.ok(mods["lib.b"], "lib.b should be tracked")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- make_intersection: deduplication
+---------------------------------------------------------------------------
+
+assert.describe("make_intersection dedup", function()
+    assert.it("duplicate members are deduplicated", function()
+        local ctx = infer_mod.check_string("", "test.lua")
+        -- We need a fresh ctx; use check_string and get the second return
+        local _, c = infer_mod.check_string("", "test.lua")
+        local t1 = c.T_NUMBER
+        local t2 = c.T_STRING
+        -- Intersection of same type twice should give one member
+        local isect = types_mod.make_intersection(c, {t1, t1})
+        -- Should return t1 directly (single member collapses)
+        assert.eq(types_mod.find(c, isect), types_mod.find(c, t1))
+    end)
+
+    assert.it("distinct members are preserved", function()
+        local _, c = infer_mod.check_string("", "test.lua")
+        local isect = types_mod.make_intersection(c, {c.T_NUMBER, c.T_STRING})
+        local t = c.types:get(isect)
+        assert.eq(t.tag, defs.TAG_INTERSECTION)
+        assert.eq(t.data[1], 2)
+    end)
+end)

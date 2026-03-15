@@ -112,26 +112,18 @@ priority for LuaJIT target where generics are already advisory.
 
 ---
 
-## Gap 4 — Recursive types have no occurs check
+## Gap 4 — Recursive types: well-handled, mostly not a gap
 
-**Severity:** Medium (correctness for recursive type construction)
+**File:** `unify.lua:43–100` (`occurs`), `unify.lua:146–190` (`bind_var`), `types.lua:660–699`
+**Severity:** Very low
 
-`unify` / `try_unify` perform union-find path compression but do not do an
-occurs check (verifying that `TAG_VAR 'a` does not appear within the type
-being bound to it). This means:
+`bind_var` has an `occurs()` check. `display()` has a `seen` cycle guard for
+tables (lines 660–699: `if seen[tid] then return "{...}" end`).
 
-```lua
--- Constructing a self-referential type directly could loop:
--- 'a ~ { next: 'a }
--- unify('a, { next: 'a }) → succeeds, no cycle detection
-```
-
-In practice, the arena is mutated in-place, so the resulting type is a cycle
-in the union-find structure. Display and recursive traversal must guard against
-cycles (currently they may not — not fully audited).
-
-**Known:** Documented in TODO.md. Fix requires an occurs-check during `bind_var`
-or a cycle-breaking sentinel.
+**Remaining edge case:** Mutual recursion via non-table types (e.g., two function
+types pointing to each other) is not covered by the table `seen` guard. In practice,
+mutual recursive function types are extremely rare in the Lua patterns this
+checker handles; this is not a priority.
 
 ---
 
