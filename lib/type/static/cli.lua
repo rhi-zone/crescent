@@ -7,6 +7,8 @@ if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
+local M = {}
+
 local function glob_lua_files(dir)
     local files = {}
     local p = io.popen('find "' .. dir .. '" -name "*.lua" -not -name "*_test.lua" -not -path "*/dep/*" 2>/dev/null')
@@ -19,7 +21,8 @@ local function glob_lua_files(dir)
     return files
 end
 
-local function main()
+--- Main entry point. argv is a 1-indexed list of arguments.
+function M.main(argv)
     local check_mod  = require("lib.type.static.check")
     local errors_mod = require("lib.type.static.errors")
     local intern_mod = require("lib.type.static.intern")
@@ -32,18 +35,18 @@ local function main()
     local files    = {}
 
     local i = 1
-    while i <= #arg do
-        if arg[i] == "--format" and arg[i + 1] then
-            format = arg[i + 1]
+    while i <= #argv do
+        if argv[i] == "--format" and argv[i + 1] then
+            format = argv[i + 1]
             i = i + 2
-        elseif arg[i] == "--dump" then
+        elseif argv[i] == "--dump" then
             dump = true
             i = i + 1
-        elseif arg[i] == "--annotate" then
+        elseif argv[i] == "--annotate" then
             annotate = true
             i = i + 1
         else
-            files[#files + 1] = arg[i]
+            files[#files + 1] = argv[i]
             i = i + 1
         end
     end
@@ -187,4 +190,10 @@ local function main()
     os.exit(total_errors > 0 and 1 or 0)
 end
 
-main()
+-- ── standalone entry point ────────────────────────────────────────────────────
+
+if arg and arg[0] and arg[0]:match("static/cli%.lua$") then
+    M.main(arg)
+end
+
+return M

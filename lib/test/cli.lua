@@ -5,38 +5,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
--- ── argument parsing ──────────────────────────────────────────────────────────
-
-local coverage = false
-local jobs_arg = nil  -- nil = auto-detect
-
-for i = 1, #arg do
-	local v = arg[i]
-	if v == "--coverage" or v == "-c" then
-		coverage = true
-	elseif v:match("^%-%-jobs=(%d+)$") then
-		jobs_arg = tonumber(v:match("^%-%-jobs=(%d+)$"))
-	end
-end
-
--- ── file discovery ────────────────────────────────────────────────────────────
-
-local function find_test_files()
-	local files = {}
-	local handle = io.popen("find lib -name '*_test.lua' -type f | sort")
-	if not handle then return files end
-	for line in handle:lines() do
-		files[#files + 1] = line
-	end
-	handle:close()
-	return files
-end
-
-local files = find_test_files()
-if #files == 0 then
-	print("no test files found")
-	os.exit(0)
-end
+local M = {}
 
 -- ── FFI for fork/pipe/waitpid ─────────────────────────────────────────────────
 
@@ -65,22 +34,42 @@ local function get_cpu_count()
 	return tonumber(n)
 end
 
--- ── determine job count ───────────────────────────────────────────────────────
+-- ── argument parsing ──────────────────────────────────────────────────────────
 
-local njobs
-if coverage then
-	njobs = 1  -- debug.sethook is per-process; must be sequential
-elseif jobs_arg then
-	njobs = jobs_arg
-elseif fork_available then
-	njobs = math.min(get_cpu_count(), #files)
-else
-	njobs = 1
+--- Parse args table into { coverage, jobs }.
+-- Accepts either the global arg table or a 1-indexed list passed from M.main.
+local function parse_args(argv)
+	local coverage = false
+	local jobs_arg = nil  -- nil = auto-detect
+
+	for i = 1, #argv do
+		local v = argv[i]
+		if v == "--coverage" or v == "-c" then
+			coverage = true
+		elseif v:match("^%-%-jobs=(%d+)$") then
+			jobs_arg = tonumber(v:match("^%-%-jobs=(%d+)$"))
+		end
+	end
+
+	return coverage, jobs_arg
+end
+
+-- ── file discovery ────────────────────────────────────────────────────────────
+
+local function find_test_files()
+	local files = {}
+	local handle = io.popen("find lib -name '*_test.lua' -type f | sort")
+	if not handle then return files end
+	for line in handle:lines() do
+		files[#files + 1] = line
+	end
+	handle:close()
+	return files
 end
 
 -- ── sequential runner (used for coverage and --jobs=1) ───────────────────────
 
-local function run_sequential(file_list)
+local function run_sequential(file_list, coverage)
 	local cov
 	if coverage then
 		cov = require("lib.test.coverage")
@@ -407,10 +396,40 @@ local function run_parallel(file_list, n)
 	if total_fail_files > 0 then os.exit(1) end
 end
 
--- ── dispatch ──────────────────────────────────────────────────────────────────
+-- ── main export ───────────────────────────────────────────────────────────────
 
-if njobs <= 1 or not fork_available then
-	run_sequential(files)
-else
-	run_parallel(files, njobs)
+--- Run the test suite. argv is a 1-indexed list of arguments.
+function M.main(argv)
+	local coverage, jobs_arg = parse_args(argv)
+
+	local files = find_test_files()
+	if #files == 0 then
+		print("no test files found")
+		os.exit(0)
+	end
+
+	local njobs
+	if coverage then
+		njobs = 1  -- debug.sethook is per-process; must be sequential
+	elseif jobs_arg then
+		njobs = jobs_arg
+	elseif fork_available then
+		njobs = math.min(get_cpu_count(), #files)
+	else
+		njobs = 1
+	end
+
+	if njobs <= 1 or not fork_available then
+		run_sequential(files, coverage)
+	else
+		run_parallel(files, njobs)
+	end
 end
+
+-- ── standalone entry point ────────────────────────────────────────────────────
+
+if arg and arg[0] and arg[0]:match("test/cli%.lua$") then
+	M.main(arg)
+end
+
+return M
