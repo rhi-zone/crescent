@@ -51,6 +51,7 @@
 - [x] `--format json` structured output (file, line, severity, message)
 - [x] `--format sarif` for GitHub Code Scanning / CI integration
 - [x] Column numbers in error positions
+- [ ] SARIF column off-by-one: typechecker cols are 1-indexed; `errors.format_sarif` uses `e.col+1` → outputs col+1 (2-indexed). Should use `e.col` for 1-indexed SARIF. Discovered 2026-03-15.
 
 ### done
 - [x] Full require() return type tracking (infer module return type)
