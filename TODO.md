@@ -1,5 +1,23 @@
 # TODO
 
+## priorities (medium horizon)
+
+- [ ] **Test runner performance** — benchmark against bun; must be at parity or better.
+  Current runner shells out to `find` + `sort`, then `dofile`s each file sequentially.
+  Profile first: startup cost, require() overhead, per-file execution. Candidates:
+  native file discovery (FFI readdir), parallel execution (fork + collect), preloaded
+  module cache, LuaJIT JIT warm-up tuning. Target: same program runs comparably fast
+  in bun and luajit; if not, the design needs revisiting.
+
+- [ ] **Package manager** (`lib/pkg/`) — needs design discussion before implementation.
+  Core principle: vendor-first (copy .lua files into your project, you own them).
+  Open questions: registry format, lockfile, version resolution, dependency graph,
+  how to handle FFI-only packages (no build step allowed). Design before coding.
+
+- [ ] **Typechecker** — ongoing; chip away at backlog in TODO.md typechecker section.
+  Near-term: private field visibility enforcement, module-level LSP cache,
+  soundness gap 3 (generic variance). No big-bang sessions — incremental commits.
+
 ## security (fix soon)
 - [x] http/router: path traversal via symlinks — `path.safe_resolve()` with FFI `realpath()`
 - [x] http/server: reads one packet, not until headers complete — loop until `\r\n\r\n`, then read body by Content-Length
