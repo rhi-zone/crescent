@@ -189,16 +189,68 @@ be stored in a separate index.
 
 ## CLI
 
+`cr` is the unified crescent CLI — not just a package manager. It covers
+tests, typechecking, running scripts, and package management from a single
+entry point.
+
+```
+bin/cr              shebang launcher (sets package.path, calls lib/cr)
+lib/cr/init.lua     dispatcher: global flags, command routing, lazy-load
+```
+
+Each subcommand is lazy-loaded so `cr test` pays no cost for the
+typechecker, and vice versa.
+
+### Command dispatch order
+
+When `cr <arg>` is invoked:
+1. `<arg>.lua` exists as a file → run it directly
+2. `<arg>` matches a key in `pkg.lua`'s `scripts` table → run that script
+3. `<arg>` is a built-in command → dispatch
+
+This mirrors bun's `bun <file>` / `bun <script>` / `bun <command>` UX.
+
+### Built-in commands
+
 ```bash
-cr add sha1              # add to pkg.lua deps, install, update lockfile
-cr add sha1@1.0.0        # pin exact version
+# Package management
 cr install               # install all deps from pkg.lua / lockfile
 cr install --frozen      # CI mode: error on lockfile divergence
+cr add sha1              # add to pkg.lua deps, install, update lockfile
+cr add sha1@1.0.0        # pin exact version
 cr remove sha1           # remove from pkg.lua, update lockfile, delete dep/sha1/
 cr update sha1           # re-resolve to latest matching version, update lockfile
 cr update                # re-resolve all
 cr publish               # publish to registry (TBD)
 cr info sha1             # show package info from registry
+
+# Tooling
+cr test [files...]       # run test suite (lib/test/cli.lua)
+cr check [files...]      # typecheck (lib/type/static/cli.lua)
+cr run <file>            # run a Lua file with lib/ on package.path
+```
+
+### Scripts (pkg.lua)
+
+```lua
+return {
+  name = "myapp",
+  scripts = {
+    build = "luajit build.lua",
+    serve = "luajit lib/http/server.lua",
+  },
+}
+```
+
+`cr build` / `cr serve` run the corresponding script via shell.
+
+### Global flags
+
+```
+--verbose / -v       verbose output
+--jobs=N             parallelism (test runner + package fetch)
+--registry=URL       prepend a registry for this invocation
+--no-color           disable ANSI output
 ```
 
 ---
