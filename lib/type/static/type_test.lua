@@ -1463,7 +1463,7 @@ assert.describe("types: display", function()
         local ctx = new_ctx()
         local v = types_mod.make_var(ctx, 0)
         local s = types_mod.display(ctx, v)
-        assert.ok(s:find("'", 1, true))  -- e.g. 'a
+        assert.ok(s == "_")  -- free (unbound) typevar displays as anonymous '_'
     end)
     assert.it("display function", function()
         local ctx = new_ctx()

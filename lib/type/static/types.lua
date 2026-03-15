@@ -609,13 +609,12 @@ function M.display(ctx, tid, seen)
     end
 
     if tag == TAG_VAR then
-        if t.flags ~= 0 and (t.flags % 2) == 1 then  -- FLAG_GENERIC
-            return "'" .. tostring(t.data[0])
-        end
-        return "'" .. tostring(t.data[0])
+        -- After find(), still a TAG_VAR means unbound free variable.
+        -- Display as anonymous type parameter '_', never as raw numeric ID.
+        return "_"
     end
     if tag == TAG_ROWVAR then
-        return "...'" .. tostring(t.data[0])
+        return "..._"
     end
 
     if tag == TAG_LITERAL then

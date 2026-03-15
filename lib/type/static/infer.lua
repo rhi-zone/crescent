@@ -790,20 +790,27 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         -- Cross-type check via Lua metamethod calling rules.
         -- Lua picks __lt/__le from left operand first, then right.
         -- The function's parameter types define valid operand types.
-        local fn = meta_fn_tid(ctx, left_r, mm_name)
-               or  meta_fn_tid(ctx, right_r, mm_name)
-        if fn then
-            local ft = ctx.types:get(fn)
-            if ft.tag == TAG_FUNCTION and ft.data[1] >= 2 then
-                local p0 = ctx.lists:get(ft.data[0])
-                local p1 = ctx.lists:get(ft.data[0] + 1)
-                local ok0 = unify_mod.try_unify(ctx, left_r,  p0)
-                local ok1 = unify_mod.try_unify(ctx, right_r, p1)
-                if not ok0 or not ok1 then
-                    report(ctx, n.line, n.col, E.COMPARE_CROSS, {
-                        left  = types_mod.display_short(ctx, left_r),
-                        right = types_mod.display_short(ctx, right_r),
-                    })
+        -- Skip if either operand is a free typevar/any/unknown — type unknown, no error.
+        local left_tag  = ctx.types:get(left_r).tag
+        local right_tag = ctx.types:get(right_r).tag
+        local either_free = left_tag  == TAG_VAR or left_tag  == TAG_ROWVAR
+                         or right_tag == TAG_VAR or right_tag == TAG_ROWVAR
+        if not either_free then
+            local fn = meta_fn_tid(ctx, left_r, mm_name)
+                   or  meta_fn_tid(ctx, right_r, mm_name)
+            if fn then
+                local ft = ctx.types:get(fn)
+                if ft.tag == TAG_FUNCTION and ft.data[1] >= 2 then
+                    local p0 = ctx.lists:get(ft.data[0])
+                    local p1 = ctx.lists:get(ft.data[0] + 1)
+                    local ok0 = unify_mod.try_unify(ctx, left_r,  p0)
+                    local ok1 = unify_mod.try_unify(ctx, right_r, p1)
+                    if not ok0 or not ok1 then
+                        report(ctx, n.line, n.col, E.COMPARE_CROSS, {
+                            left  = types_mod.display_short(ctx, left_r),
+                            right = types_mod.display_short(ctx, right_r),
+                        })
+                    end
                 end
             end
         end
@@ -1051,11 +1058,15 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
 
     if obj_t.tag == TAG_TUPLE then
         local kt_t = ctx.types:get(key_r)
-        if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
+        local idx_int = nil
+        if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_INTEGER then
+            idx_int = kt_t.data[1]
+        elseif kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
             local num = i32x2_to_double(kt_t.data[1], kt_t.data[2])
-            if num % 1 == 0 and num >= 1 and num <= obj_t.data[1] then
-                return types_mod.find(ctx, ctx.lists:get(obj_t.data[0] + math.floor(num) - 1))
-            end
+            if num % 1 == 0 then idx_int = math.floor(num) end
+        end
+        if idx_int and idx_int >= 1 and idx_int <= obj_t.data[1] then
+            return types_mod.find(ctx, ctx.lists:get(obj_t.data[0] + idx_int - 1))
         end
         return ctx.T_UNKNOWN
     end
@@ -1099,11 +1110,15 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         if t.tag == TAG_TUPLE then
             -- Numeric literal key: return the element at that 1-based index.
             local kt_t = ctx.types:get(key_r)
-            if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
+            local idx_int2 = nil
+            if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_INTEGER then
+                idx_int2 = kt_t.data[1]
+            elseif kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
                 local num = i32x2_to_double(kt_t.data[1], kt_t.data[2])
-                if num % 1 == 0 and num >= 1 and num <= t.data[1] then
-                    return types_mod.find(ctx, ctx.lists:get(t.data[0] + math.floor(num) - 1))
-                end
+                if num % 1 == 0 then idx_int2 = math.floor(num) end
+            end
+            if idx_int2 and idx_int2 >= 1 and idx_int2 <= t.data[1] then
+                return types_mod.find(ctx, ctx.lists:get(t.data[0] + idx_int2 - 1))
             end
             return ctx.T_UNKNOWN  -- out-of-bounds or non-literal key
         end
@@ -1930,7 +1945,26 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
         local prescanned = ctx.scope.bindings[name_id]
 
         if ann_tid then
-            if rhs_tid then
+            -- Tuple annotation on a single name with multiple RHS values:
+            -- check each tuple element against the corresponding RHS value.
+            local ann_t = ctx.types:get(types_mod.find(ctx, ann_tid))
+            if ann_t.tag == TAG_TUPLE and nl == 1 and i == 0 then
+                local tlen = ann_t.data[1]
+                for j = 0, tlen - 1 do
+                    local elem_tid = types_mod.find(ctx, ctx.lists:get(ann_t.data[0] + j))
+                    local rhs_j = rhs_types[j + 1]
+                    if rhs_j then
+                        local ok, err = unify_mod.unify(ctx, rhs_j, elem_tid)
+                        if not ok then
+                            report(ctx, n.line, n.col, E.TYPE_MISMATCH, {
+                                got    = types_mod.display_short(ctx, rhs_j),
+                                exp    = types_mod.display_short(ctx, elem_tid),
+                                detail = err,
+                            })
+                        end
+                    end
+                end
+            elseif rhs_tid then
                 local ok, err = unify_mod.unify(ctx, rhs_tid, ann_tid)
                 if not ok then
                     report(ctx, n.line, n.col, E.TYPE_MISMATCH, {
@@ -2102,7 +2136,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     local existing_tid = types_mod.find(ctx, fe.type_id)
                     local existing_tag = ctx.types:get(existing_tid).tag
                     if existing_tag ~= TAG_VAR then
-                        if not unify_mod.try_unify(ctx, rhs_tid, existing_tid) then
+                        -- Check assignability: rhs must be assignable to existing type.
+                        -- Also accept if both widen to the same base type (e.g. two int literals).
+                        local compat = unify_mod.try_unify(ctx, rhs_tid, existing_tid)
+                            or unify_mod.try_unify(ctx, rhs_tid, types_mod.widen(ctx, existing_tid))
+                        if not compat then
                             local field_name = intern_mod.get(ctx.pool, field_id) or "?"
                             local entry = report(ctx, tn.line, tn.col, E.FIELD_REASSIGN, {
                                 name     = field_name,
@@ -2139,7 +2177,9 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     else
                         local existing_tid2 = types_mod.find(ctx, fe2.type_id)
                         if ctx.types:get(existing_tid2).tag ~= TAG_VAR then
-                            if not unify_mod.try_unify(ctx, rhs_tid, existing_tid2) then
+                            local compat2 = unify_mod.try_unify(ctx, rhs_tid, existing_tid2)
+                                or unify_mod.try_unify(ctx, rhs_tid, types_mod.widen(ctx, existing_tid2))
+                            if not compat2 then
                                 local key_name2 = intern_mod.get(ctx.pool, field_id2) or "?"
                                 report(ctx, tn.line, tn.col, E.FIELD_REASSIGN, {
                                     name     = key_name2,
