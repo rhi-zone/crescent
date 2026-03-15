@@ -272,7 +272,8 @@ function M.unify(ctx, a, b)
     -- Literal <: base type
     if ta.tag == TAG_LITERAL then
         if tb.tag == TAG_LITERAL then
-            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then return true end
+            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+              and (ta.data[0] ~= LIT_NUMBER or ta.data[2] == tb.data[2]) then return true end
             return false, "'" .. types_mod.display(ctx, a) .. "' is not '" .. types_mod.display(ctx, b) .. "'"
         end
         local kind = ta.data[0]
@@ -630,7 +631,8 @@ function M.try_unify(ctx, a, b)
     end
 
     if ta.tag == TAG_LITERAL then
-        if tb.tag == TAG_LITERAL and ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then
+        if tb.tag == TAG_LITERAL and ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+          and (ta.data[0] ~= LIT_NUMBER or ta.data[2] == tb.data[2]) then
             return true
         end
         local kind = ta.data[0]

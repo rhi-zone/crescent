@@ -31,6 +31,8 @@ local LIT_NIL     = defs.LIT_NIL
 local LIT_STRING  = defs.LIT_STRING
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_INTEGER = defs.LIT_INTEGER
+local LIT_NUMBER  = defs.LIT_NUMBER
+local i32x2_to_double = defs.i32x2_to_double
 
 local M = {}
 
@@ -105,12 +107,17 @@ local function extract_narrowing(ctx, nid)
                 return { kind = "lit_eq", name_id = ident_node.data[0],
                          lit_kind = rlit_kind, lit_id = lit_node.data[1], positive = positive }
             end
-            if rlit_kind == defs.LIT_NUMBER then
-                -- Convert AST numval index to actual integer value for cross-file comparability.
-                local num = ctx.numvals and ctx.numvals[lit_node.data[1]]
-                if num and num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
+            if rlit_kind == LIT_NUMBER then
+                -- LIT_NUMBER stores the double inline as data[1]+data[2] (i32x2).
+                local num = i32x2_to_double(lit_node.data[1], lit_node.data[2])
+                if num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
+                    -- Integer-valued float: promote to LIT_INTEGER for cross-type comparison.
                     return { kind = "lit_eq", name_id = ident_node.data[0],
                              lit_kind = LIT_INTEGER, lit_id = math.floor(num), positive = positive }
+                else
+                    -- Non-integer float: narrow as LIT_NUMBER literal.
+                    return { kind = "lit_eq", name_id = ident_node.data[0],
+                             lit_kind = LIT_NUMBER, lit_id = num, positive = positive }
                 end
             end
         end

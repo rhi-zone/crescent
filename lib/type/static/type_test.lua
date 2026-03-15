@@ -3719,3 +3719,57 @@ assert.describe("types: LIT_NUMBER inline storage", function()
         assert.ok(math.abs(v - 3.14) < 1e-10, "expected 3.14, got " .. tostring(v))
     end)
 end)
+
+---------------------------------------------------------------------------
+-- x == 3.14 float narrowing
+---------------------------------------------------------------------------
+
+assert.describe("checker: float literal narrowing", function()
+    assert.it("x == 3.14 narrows number to specific float", function()
+        no_errors([[
+--: number
+local x = 1.0
+if x == 3.14 then
+    --: 3.14
+    local y = x
+end
+]])
+    end)
+    assert.it("x ~= 3.14 does not error in truthy branch", function()
+        no_errors([[
+--: number
+local x = 1.0
+if x ~= 3.14 then
+    local y = x
+end
+]])
+    end)
+    assert.it("two LIT_NUMBER literals with same value unify", function()
+        no_errors([[
+--: 3.14
+local x = 3.14
+--: 3.14
+local y = x
+]])
+    end)
+    assert.it("two LIT_NUMBER literals with different values do not unify", function()
+        has_error([[
+--: 2.71
+local x = 3.14
+]], "")
+    end)
+    assert.it("LIT_NUMBER same-value unify", function()
+        local ctx = new_ctx()
+        local a = types_mod.make_literal(ctx, defs.LIT_NUMBER, 3.14)
+        local b = types_mod.make_literal(ctx, defs.LIT_NUMBER, 3.14)
+        local unify_mod = require("lib.type.static.unify")
+        assert.ok(unify_mod.try_unify(ctx, a, b), "same float should unify")
+    end)
+    assert.it("LIT_NUMBER different-value try_unify fails", function()
+        local ctx = new_ctx()
+        local a = types_mod.make_literal(ctx, defs.LIT_NUMBER, 3.14)
+        local b = types_mod.make_literal(ctx, defs.LIT_NUMBER, 2.71)
+        local unify_mod = require("lib.type.static.unify")
+        assert.ok(not unify_mod.try_unify(ctx, a, b), "different floats should not unify")
+    end)
+end)
