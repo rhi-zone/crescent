@@ -12,7 +12,7 @@ T.describe("cli.parse_args", function()
 		T.eq(#r.args, 0)
 		T.eq(r.verbose, false)
 		T.eq(r.frozen, false)
-		T.eq(r.registry, "https://pkg.rhi.zone")
+		T.eq(r.registry, "https://pkg.crescent.run")
 		T.eq(r.jobs, 1)
 	end)
 

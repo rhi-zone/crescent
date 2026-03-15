@@ -15,7 +15,7 @@ end
 --
 -- Global flags:
 --   --verbose                   enable verbose output
---   --registry=URL              override default registry (https://pkg.rhi.zone)
+--   --registry=URL              override default registry (https://pkg.crescent.run)
 --   --jobs=N                    parallelism (default: 1)
 
 local manifest = require("lib.pkg.manifest")
@@ -26,7 +26,7 @@ local M = {}
 
 -- ── constants ────────────────────────────────────────────────────────────────
 
-local DEFAULT_REGISTRY = "https://pkg.rhi.zone"
+local DEFAULT_REGISTRY = "https://pkg.crescent.run"
 
 -- ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -423,7 +423,7 @@ commands:
 
 global options:
   --verbose                 enable verbose logging
-  --registry=URL            registry base URL (default: https://pkg.rhi.zone)
+  --registry=URL            registry base URL (default: https://pkg.crescent.run)
   --jobs=N                  parallel jobs (default: 1)
 ]]
 

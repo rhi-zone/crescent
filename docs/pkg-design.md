@@ -66,12 +66,12 @@ lockfile entry.
 
 [sha1]
 version  = "1.0.0"
-url      = "https://pkg.rhi.zone/sha1/1.0.0.tar.gz"
+url      = "https://pkg.crescent.run/sha1/1.0.0.tar.gz"
 checksum = "sha256:a3f1..."
 
 [lunajson]
 version  = "1.3.0"
-url      = "https://pkg.rhi.zone/lunajson/1.3.0.tar.gz"
+url      = "https://pkg.crescent.run/lunajson/1.3.0.tar.gz"
 checksum = "sha256:b7c2..."
 ```
 
@@ -125,7 +125,16 @@ from lockfile. For CI reproducibility.
 
 ## Registry protocol
 
-Simple HTTP, content-addressed. Registry at `pkg.rhi.zone` (TBD).
+Simple HTTP, content-addressed. Default registry at `pkg.crescent.run`.
+
+**Decentralized by design.** The registry is only needed for initial
+discovery and version resolution. Once a package is in `crescent.lock`,
+the full source URL is stored there — installs never touch the registry
+again. The checksum in the lockfile is the integrity guarantee, not the
+registry. Any server that speaks the protocol can serve packages; the
+default registry is a convenience, not a trust anchor.
+
+Override with `--registry=URL` or per-project config (future).
 
 ```
 GET /index.json                         → {name: {versions: [...], latest: "x.y.z"}}

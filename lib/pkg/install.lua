@@ -536,14 +536,14 @@ end
 --- Install all deps listed in pkg.lua in the given project directory.
 -- opts:
 --   frozen   = false   error if pkg.lua diverges from lockfile
---   registry = "https://pkg.rhi.zone"
+--   registry = "https://pkg.crescent.run"
 --   jobs     = 1       (v1: sequential only — parallel is a later phase)
 --   verbose  = false
 --
 -- Returns: { ok=bool, errors={string,...}, installed={string,...}, skipped={string,...} }
 function M.run(project_dir, opts)
 	opts = opts or {}
-	local registry = opts.registry or "https://pkg.rhi.zone"
+	local registry = opts.registry or "https://pkg.crescent.run"
 	local result = { ok = true, errors = {}, installed = {}, skipped = {} }
 
 	local function fail(msg)
