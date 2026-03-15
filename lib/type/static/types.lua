@@ -38,6 +38,7 @@ local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_NIL     = defs.LIT_NIL
+local LIT_INTEGER = defs.LIT_INTEGER
 
 local FLAG_GENERIC = defs.FLAG_GENERIC
 
@@ -420,6 +421,7 @@ function M.widen(ctx, tid)
     if kind == LIT_NUMBER  then return ctx.T_NUMBER end
     if kind == LIT_BOOLEAN then return ctx.T_BOOLEAN end
     if kind == LIT_NIL     then return ctx.T_NIL end
+    if kind == LIT_INTEGER then return ctx.T_INTEGER end
     return tid
 end
 
@@ -579,6 +581,7 @@ function M.display(ctx, tid, seen)
         if kind == LIT_NUMBER  then
             return intern_mod.get(ctx.pool, t.data[1]) or "number"
         end
+        if kind == LIT_INTEGER then return tostring(t.data[1]) end
     end
 
     if tag == TAG_FUNCTION then

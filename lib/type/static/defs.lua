@@ -167,9 +167,10 @@ M.OP_LEN                = 17
 
 -- Literal kinds
 M.LIT_STRING            = 0
-M.LIT_NUMBER            = 1
+M.LIT_NUMBER            = 1   -- float literal; data[1] = numval index (per-file)
 M.LIT_BOOLEAN           = 2
 M.LIT_NIL               = 3
+M.LIT_INTEGER           = 4   -- integer literal; data[1] = value directly (int32_t, globally comparable)
 
 -- Flag bits (nodes)
 M.FLAG_VARARG           = 1

@@ -46,6 +46,7 @@ local NODE_CHUNK       = defs.NODE_CHUNK
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
+local LIT_INTEGER = defs.LIT_INTEGER
 local LIT_NIL     = defs.LIT_NIL
 
 local OP_ADD    = defs.OP_ADD
@@ -494,8 +495,9 @@ local function prim_tag(ctx, tid)
     local tag = t.tag
     if tag == TAG_LITERAL then
         local kind = t.data[0]
-        if kind == LIT_NUMBER  then return TAG_NUMBER  end
-        if kind == LIT_STRING  then return TAG_STRING  end
+        if kind == LIT_NUMBER   then return TAG_NUMBER  end
+        if kind == LIT_INTEGER  then return TAG_INTEGER end
+        if kind == LIT_STRING   then return TAG_STRING  end
         return nil  -- boolean/nil literals have no prim_meta
     end
     if tag == TAG_NUMBER or tag == TAG_INTEGER or tag == TAG_STRING then return tag end
@@ -600,7 +602,7 @@ end
 local function is_int_compat(ctx, tid)
     local t = ctx.types:get(types_mod.find(ctx, tid))
     return t.tag == TAG_INTEGER
-        or (t.tag == TAG_LITERAL and t.data[0] == LIT_NUMBER)
+        or (t.tag == TAG_LITERAL and t.data[0] == LIT_INTEGER)
 end
 
 --: (Ctx, any) -> any
@@ -613,8 +615,9 @@ ExprRule[NODE_LITERAL] = function(ctx, nid)
     if kind == LIT_NUMBER  then
         -- n.data[1] is the numval index into pr.lexer.numvals (Lua numbers, not pool IDs)
         local num = ctx.numvals[n.data[1]]
-        if num and num % 1 == 0 and num >= -2^53 and num <= 2^53 then
-            return ctx.T_INTEGER
+        if num and num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
+            -- Integer literal: store value directly in data[1] so it's globally comparable.
+            return types_mod.make_literal(ctx, LIT_INTEGER, math.floor(num))
         end
         return ctx.T_NUMBER
     end
@@ -2004,11 +2007,10 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         end
                     end
                 else
-                    -- Non-literal key: find matching indexer.
-                    -- If found and compatible: nothing to do.
-                    -- If found and incompatible: widen the indexer value (never error —
-                    --   t[k]=v is semantically "this table now also holds this type").
-                    -- If not found: add a new indexer (first assignment teaches the type).
+                    -- Non-string-literal key: find matching indexer.
+                    -- If found and type matches: nothing to do.
+                    -- If found and type mismatches: error.
+                    -- If not found: add new indexer (first assignment teaches the type).
                     local is2, il2 = obj_t2.data[2], obj_t2.data[3]
                     local ix2 = is2
                     local found2 = false
@@ -2016,12 +2018,22 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         local ikt2 = ctx.lists:get(ix2)
                         if unify_mod.try_unify(ctx, key_tid2, ikt2) then
                             found2 = true
-                            local ival_tid = types_mod.find(ctx, ctx.lists:get(ix2 + 1))
-                            local ival_tag = ctx.types:get(ival_tid).tag
-                            if ival_tag ~= TAG_VAR
-                                and not unify_mod.try_unify(ctx, rhs_tid, ival_tid) then
-                                -- Incompatible: widen the indexer value to the union.
-                                table_widen_indexer(ctx, obj_tid2, key_tid2, rhs_tid)
+                            -- Skip value check when the indexer key is T_ANY/T_UNKNOWN:
+                            -- that means all key info was lost (e.g. `require()` → any →
+                            -- field access → any), so we can't meaningfully enforce the
+                            -- value type either.
+                            local ikt2_tag = ctx.types:get(types_mod.find(ctx, ikt2)).tag
+                            if ikt2_tag ~= TAG_ANY and ikt2_tag ~= TAG_UNKNOWN then
+                                local ival_tid = types_mod.find(ctx, ctx.lists:get(ix2 + 1))
+                                local ival_tag = ctx.types:get(ival_tid).tag
+                                if ival_tag ~= TAG_VAR
+                                    and not unify_mod.try_unify(ctx, rhs_tid, ival_tid) then
+                                    report(ctx, tn.line, tn.col,
+                                        "cannot assign `"
+                                        .. types_mod.display_short(ctx, rhs_tid)
+                                        .. "` — doesn't match indexer type `"
+                                        .. types_mod.display_short(ctx, ival_tid) .. "`")
+                                end
                             end
                             break
                         end

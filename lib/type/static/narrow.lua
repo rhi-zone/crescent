@@ -29,6 +29,7 @@ local TAG_STRING  = defs.TAG_STRING
 local LIT_NIL     = defs.LIT_NIL
 local LIT_STRING  = defs.LIT_STRING
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
+local LIT_INTEGER = defs.LIT_INTEGER
 
 local M = {}
 
@@ -93,36 +94,31 @@ local function extract_narrowing(ctx, nid)
             end
         end
 
-        -- x == "literal" or x == true/false (direct identifier equality with a literal)
-        -- x == nil is handled above as nil_check; LIT_NUMBER skipped (numval indices are per-file)
-        if lhs and lhs.kind == NODE_IDENTIFIER then
-            if rhs and rhs.kind == defs.NODE_LITERAL then
-                local rlit_kind = rhs.data[0]
-                if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
-                    return {
-                        kind     = "lit_eq",
-                        name_id  = lhs.data[0],
-                        lit_kind = rlit_kind,
-                        lit_id   = rhs.data[1],
-                        positive = (op == OP_EQ),
-                    }
+        -- x == "literal", x == true/false, x == 42 (direct identifier equality with a literal)
+        -- x == nil is handled above as nil_check
+        local function make_lit_eq(ident_node, lit_node, positive)
+            local rlit_kind = lit_node.data[0]
+            if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
+                return { kind = "lit_eq", name_id = ident_node.data[0],
+                         lit_kind = rlit_kind, lit_id = lit_node.data[1], positive = positive }
+            end
+            if rlit_kind == defs.LIT_NUMBER then
+                -- Convert AST numval index to actual integer value for cross-file comparability.
+                local num = ctx.numvals and ctx.numvals[lit_node.data[1]]
+                if num and num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
+                    return { kind = "lit_eq", name_id = ident_node.data[0],
+                             lit_kind = LIT_INTEGER, lit_id = math.floor(num), positive = positive }
                 end
             end
         end
+        if lhs and lhs.kind == NODE_IDENTIFIER and rhs and rhs.kind == defs.NODE_LITERAL then
+            local r = make_lit_eq(lhs, rhs, op == OP_EQ)
+            if r then return r end
+        end
         -- symmetric: "literal" == x
-        if rhs and rhs.kind == NODE_IDENTIFIER then
-            if lhs and lhs.kind == defs.NODE_LITERAL then
-                local rlit_kind = lhs.data[0]
-                if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
-                    return {
-                        kind     = "lit_eq",
-                        name_id  = rhs.data[0],
-                        lit_kind = rlit_kind,
-                        lit_id   = lhs.data[1],
-                        positive = (op == OP_EQ),
-                    }
-                end
-            end
+        if rhs and rhs.kind == NODE_IDENTIFIER and lhs and lhs.kind == defs.NODE_LITERAL then
+            local r = make_lit_eq(rhs, lhs, op == OP_EQ)
+            if r then return r end
         end
 
         -- x.field == "literal" or x.field == true/false

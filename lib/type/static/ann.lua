@@ -232,8 +232,13 @@ function M.parse_annotations(annotations, pool, filename)
             local num = scan_number(s)
             local id = alloc_type(defs.TAG_LITERAL)
             local t = types:get(id)
-            t.data[0] = defs.LIT_NUMBER
-            t.data[1] = intern_mod.intern(pool, tostring(num))
+            if num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
+                t.data[0] = defs.LIT_INTEGER
+                t.data[1] = math.floor(num)
+            else
+                t.data[0] = defs.LIT_NUMBER
+                t.data[1] = intern_mod.intern(pool, tostring(num))
+            end
             return id
         end
 

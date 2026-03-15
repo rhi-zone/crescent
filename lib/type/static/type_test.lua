@@ -3549,6 +3549,22 @@ t["x"] = 2
 ]])
     end)
 
+    assert.it("integer literal key: annotated slot mismatch → error", function()
+        has_error([[
+--: { [1]: string }
+local arr = {}
+arr[1] = 42
+]], "doesn't match indexer type `string`")
+    end)
+
+    assert.it("integer literal key: compatible assignment → no error", function()
+        no_errors([[
+--: { [1]: string }
+local arr = {}
+arr[1] = "hello"
+]])
+    end)
+
     assert.it("non-literal key against matching indexer: compatible → no error", function()
         no_errors([[
 --:: declare arr = { [number]: integer }
@@ -3562,7 +3578,7 @@ arr[i] = 42
 --:: declare arr = { [number]: integer }
 local i = 1
 arr[i] = "bad"
-]], "doesn't match indexer type")
+]], "doesn't match indexer type `integer`")
     end)
 
     assert.it("append pattern: t[#t+1] = v on unannotated table → no error", function()
@@ -3578,7 +3594,7 @@ returns[#returns + 1] = 42
         has_error([[
 --:: declare returns = { [number]: integer }
 returns[#returns + 1] = "bad"
-]], "doesn't match indexer type")
+]], "doesn't match indexer type `integer`")
     end)
 
     assert.it("TAG_VAR table: index assignment constrains the variable", function()

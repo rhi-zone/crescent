@@ -31,6 +31,7 @@ local TAG_SPREAD       = defs.TAG_SPREAD
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
+local LIT_INTEGER = defs.LIT_INTEGER
 
 -- Meta ops supported natively by primitive types
 local M = {}
@@ -257,6 +258,10 @@ function M.unify(ctx, a, b)
         if (kind == LIT_STRING  and tb.tag == TAG_STRING)  then return true end
         if (kind == LIT_NUMBER  and tb.tag == TAG_NUMBER)  then return true end
         if (kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN) then return true end
+        if  kind == LIT_INTEGER then
+            if tb.tag == TAG_INTEGER then return true end
+            if tb.tag == TAG_NUMBER  then return true end  -- integer <: number
+        end
     end
 
     -- Same primitive tags
@@ -381,8 +386,9 @@ function M.unify(ctx, a, b)
     if tb.tag == TAG_TABLE and tb.data[1] == 0 and tb.data[3] == 0 and tb.data[6] > 0 then
         local ptag = ta.tag
         if ptag == TAG_LITERAL then
-            if ta.data[0] == LIT_NUMBER  then ptag = TAG_NUMBER
-            elseif ta.data[0] == LIT_STRING then ptag = TAG_STRING
+            if ta.data[0] == LIT_NUMBER   then ptag = TAG_NUMBER
+            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif ta.data[0] == LIT_STRING  then ptag = TAG_STRING
             else ptag = nil
             end
         elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
@@ -594,6 +600,10 @@ function M.try_unify(ctx, a, b)
         if kind == LIT_STRING  and tb.tag == TAG_STRING  then return true end
         if kind == LIT_NUMBER  and tb.tag == TAG_NUMBER  then return true end
         if kind == LIT_BOOLEAN and tb.tag == TAG_BOOLEAN then return true end
+        if kind == LIT_INTEGER then
+            if tb.tag == TAG_INTEGER then return true end
+            if tb.tag == TAG_NUMBER  then return true end
+        end
     end
 
     if tb.tag == TAG_UNION then
