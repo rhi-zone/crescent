@@ -367,7 +367,7 @@ Branch coverage implementation sketch: instrument the AST (add synthetic nodes a
 - [ ] Incremental re-check — cheap scope invalidation so full reparse isn't needed on every keystroke
 - [ ] Module-level type cache — avoid re-typechecking stdlib/imports on every edit; currently `check.clear_cache()` on every file change is correct but slow for large projects
 - [ ] Completion — field enumeration on partial expressions; needs partial-parse recovery
-- [ ] Go-to-def — binding provenance map (name → declaration site)
+- [x] Go-to-def — `ctx.def_sites` (name_id → {line,col}) + `ctx.name_at` for identifier use positions; textDocument/definition handler in lsp.lua. (2026-03-15, within-file only; cross-file requires cri_loader integration)
 
 ## package manager
 - [ ] Vendor-first install (copy .lua files into project)
