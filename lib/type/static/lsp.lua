@@ -458,7 +458,7 @@ HANDLERS["initialize"] = function(state, msg)
             completionProvider  = { triggerCharacters = { ".", ":" } },
             signatureHelpProvider = { triggerCharacters = { "(", "," } },
         },
-        serverInfo = { name = "crescent", version = "0.2.0" },
+        serverInfo = { name = "crescent", version = "0.3.0" },
     }))
 end
 
