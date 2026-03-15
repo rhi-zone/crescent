@@ -524,6 +524,10 @@ HANDLERS["initialize"] = function(state, msg)
     else
         state.root_path = "."
     end
+    -- Wire disk cache for cross-session .cri persistence.
+    local cache_dir = (os.getenv("HOME") or ".") .. "/.crescent/type-cache"
+    os.execute("mkdir -p " .. cache_dir)
+    check.set_cache_dir(cache_dir)
     send(ok_resp(msg.id, {
         capabilities = {
             textDocumentSync = {
