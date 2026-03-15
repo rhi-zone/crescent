@@ -472,9 +472,21 @@ local StmtRule = {}
 infer_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = ExprRule[n.kind]
-    if rule then return rule(ctx, nid) end
-    report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
-    return ctx.T_ANY
+    local result
+    if rule then result = rule(ctx, nid)
+    else
+        report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
+        result = ctx.T_ANY
+    end
+    -- Record position → type for hover queries (opt-in: ctx.type_at must be pre-set to {}).
+    local ta = ctx.type_at
+    if ta then
+        local i = #ta
+        ta[i + 1] = n.line
+        ta[i + 2] = n.col
+        ta[i + 3] = result
+    end
+    return result
 end
 
 -- Infer expression for multi-return contexts (calls).
@@ -2576,6 +2588,7 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     ctx._pcall_info = {}
     ctx.nominal_id = 0
     ctx.inferred_anns = {}  -- list of {line, kind, name_id, type_id} for --annotate mode
+    ctx.type_at = {}        -- flat array {line,col,tid,...} for position→type hover queries
     return ctx
 end
 

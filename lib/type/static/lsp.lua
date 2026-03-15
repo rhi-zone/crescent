@@ -12,12 +12,17 @@ end
 
 local json   = require("lib.lunajson")
 local check  = require("lib.type.static.check")
+local types  = require("lib.type.static.types")
 
 -- ---------------------------------------------------------------------------
 -- JSON null sentinel
 -- ---------------------------------------------------------------------------
 -- lunajson.encode(v, nullv): any value == nullv is written as JSON null.
 local NULL = {}  -- unique sentinel for JSON null
+
+-- lunajson encodes empty tables as "{}" (object). To force "[]" (array),
+-- set t[0] = 0 (explicit array-length marker recognized by lunajson).
+local EMPTY_ARRAY = {[0] = 0}
 
 -- ---------------------------------------------------------------------------
 -- Wire protocol
@@ -88,7 +93,8 @@ end
 
 local function to_lsp_diag(entry)
     local ln  = math.max(0, (entry.line or 1) - 1)
-    local col = math.max(0, entry.col or 0)
+    -- Typechecker col is 1-indexed; LSP character is 0-indexed.
+    local col = math.max(0, (entry.col or 1) - 1)
     return {
         range = {
             start   = { line = ln, character = col },
@@ -99,6 +105,43 @@ local function to_lsp_diag(entry)
         message  = entry.msg,
     }
 end
+
+-- ---------------------------------------------------------------------------
+-- Hover helpers
+-- ---------------------------------------------------------------------------
+-- type_at is a flat array: {line1, col1, tid1, line2, col2, tid2, ...}
+-- typechecker line is 1-indexed; col is 0-indexed.
+-- LSP position: both 0-indexed.
+local function type_at_lookup(ctx, hover_line, hover_col)
+    local ta = ctx.type_at
+    if not ta then return nil end
+    -- Convert LSP position to typechecker coords.
+    -- LSP: 0-indexed line, 0-indexed char.
+    -- Typechecker: 1-indexed line, 1-indexed col.
+    local tc_line = hover_line + 1
+    local tc_col  = hover_col + 1
+    -- Find the entry on the correct line whose col is closest to (≤) hover col.
+    local best_tid, best_col
+    local i = 1
+    local n = #ta
+    while i <= n do
+        local eline = ta[i]
+        local ecol  = ta[i + 1]
+        local etid  = ta[i + 2]
+        if eline == tc_line and ecol <= tc_col then
+            if best_col == nil or ecol >= best_col then
+                best_col = ecol
+                best_tid = etid
+            end
+        end
+        i = i + 3
+    end
+    return best_tid
+end
+
+-- ---------------------------------------------------------------------------
+-- Check + publish
+-- ---------------------------------------------------------------------------
 
 local function run_check(state, uri, text)
     -- Skip if text is unchanged and diagnostics are cached.
@@ -115,7 +158,10 @@ local function run_check(state, uri, text)
     -- Clear per-session cache so this file is re-checked fresh.
     check.clear_cache()
 
-    local err_ctx = check.check_string(text, path)
+    local err_ctx, ctx = check.check_string(text, path)
+
+    -- Store ctx for hover queries (ctx.type_at is always populated by infer_expr).
+    state.ctx_cache[uri] = ctx
 
     local diags = {}
     for _, e in ipairs(err_ctx.errors) do
@@ -129,9 +175,9 @@ local function run_check(state, uri, text)
         end
     end
 
-    state.diag_cache[uri] = diags
+    state.diag_cache[uri] = #diags > 0 and diags or EMPTY_ARRAY
     notify("textDocument/publishDiagnostics", {
-        uri = uri, diagnostics = diags,
+        uri = uri, diagnostics = state.diag_cache[uri],
     })
 end
 
@@ -150,6 +196,7 @@ HANDLERS["initialize"] = function(state, msg)
                 change    = 1,    -- Full document sync
                 save      = true,
             },
+            hoverProvider = true,
         },
         serverInfo = { name = "crescent", version = "0.2.0" },
     }))
@@ -212,8 +259,35 @@ HANDLERS["textDocument/didClose"] = function(state, msg)
     state.open_files[uri] = nil
     state.text_cache[uri] = nil
     state.diag_cache[uri] = nil
+    state.ctx_cache[uri]  = nil
     -- Clear diagnostics for the closed file.
-    notify("textDocument/publishDiagnostics", { uri = uri, diagnostics = {} })
+    notify("textDocument/publishDiagnostics", { uri = uri, diagnostics = EMPTY_ARRAY })
+end
+
+HANDLERS["textDocument/hover"] = function(state, msg)
+    local p = msg.params
+    if not p or not p.textDocument or not p.position then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local uri  = p.textDocument.uri
+    local ln   = p.position.line      -- 0-indexed
+    local col  = p.position.character -- 0-indexed
+    local ctx  = state.ctx_cache[uri]
+    if not ctx then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local tid = type_at_lookup(ctx, ln, col)
+    if not tid then
+        send(ok_resp(msg.id, NULL))
+        return
+    end
+    local resolved = types.find(ctx, tid)
+    local type_str = types.display(ctx, resolved)
+    send(ok_resp(msg.id, {
+        contents = { kind = "markdown", value = "```\n" .. type_str .. "\n```" },
+    }))
 end
 
 HANDLERS["$/cancelRequest"]     = function(_s, _m) end
@@ -231,6 +305,7 @@ local function main()
         open_files  = {},   -- uri → text
         text_cache  = {},   -- uri → last-checked text
         diag_cache  = {},   -- uri → last diags array
+        ctx_cache   = {},   -- uri → infer ctx (for hover type_at lookup)
     }
 
     while true do
