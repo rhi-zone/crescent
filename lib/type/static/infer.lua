@@ -867,22 +867,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
         local primary_msg = obj_name2
             and ("`" .. obj_name2 .. "." .. fname .. "` doesn't exist")
             or  ("`" .. fname .. "` doesn't exist")
-        local entry = report(ctx, n.line, n.col, primary_msg)
-        -- Build field listing for the follow-up note.
-        local field_names = {}
-        local fields2 = ctx.fields
-        for fi = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
-            local fid2 = ctx.lists:get(fi)
-            --: any
-            local fe2 = fields2:get(fid2)
-            local fn2 = intern_mod.get(ctx.pool, fe2.name_id)
-            if fn2 then field_names[#field_names + 1] = "`" .. fn2 .. "`" end
-        end
-        if #field_names > 0 then
-            local obj_label = obj_name2 or "table"
-            errors_mod.add_note(entry, nil, 0, 0,
-                obj_label .. " has: " .. table.concat(field_names, ", "))
-        end
+        report(ctx, n.line, n.col, primary_msg)
         return ctx.T_ANY
     end
 
