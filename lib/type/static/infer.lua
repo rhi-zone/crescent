@@ -1633,35 +1633,69 @@ end
 -- WARNING: reads all ot.data before calling make_table, then re-fetches the pointer
 -- after, because arena:grow() may reallocate ctx.types.items, invalidating old ptrs.
 --: (Ctx, any, any, any) -> ()
-local function table_add_field(ctx, obj_tid, field_id, field_type_id)
-    -- Snapshot all data before any allocation that may trigger arena grow.
+-- Snapshot helper: collect a table's existing fields, indexers, meta into Lua arrays.
+-- Returns fields[], indexers[], rv, meta[].  Safe to call before any arena alloc.
+--: (Ctx, any) -> ({ [number]: any }, { [number]: any }, any, { [number]: any })
+local function snapshot_table(ctx, obj_tid)
     local ot = ctx.types:get(obj_tid)
     local fs, fl = ot.data[0], ot.data[1]
     local is2, il2 = ot.data[2], ot.data[3]
     local rv = ot.data[4]
     local ms, ml = ot.data[5], ot.data[6]
-
-    local existing_fields = {}
-    for i = fs, fs + fl - 1 do
-        existing_fields[#existing_fields + 1] = ctx.lists:get(i)
-    end
-    existing_fields[#existing_fields + 1] = types_mod.make_field(ctx, field_id, field_type_id, false)
-    local existing_indexers = {}
+    local fields = {}
+    for i = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(i) end
+    local indexers = {}
     local ix = is2
     while ix < is2 + il2 - 1 do
-        existing_indexers[#existing_indexers + 1] = ctx.lists:get(ix)
-        existing_indexers[#existing_indexers + 1] = ctx.lists:get(ix + 1)
+        indexers[#indexers + 1] = ctx.lists:get(ix)
+        indexers[#indexers + 1] = ctx.lists:get(ix + 1)
         ix = ix + 2
     end
-    local existing_meta = {}
-    for j = ms, ms + ml - 1 do
-        existing_meta[#existing_meta + 1] = ctx.lists:get(j)
-    end
-    local new_tbl = types_mod.make_table(ctx, existing_fields, existing_indexers, rv, existing_meta)
-    -- Re-fetch ot: make_table may have triggered ctx.types arena grow, invalidating old ptr.
-    ot = ctx.types:get(obj_tid)
+    local meta = {}
+    for j = ms, ms + ml - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+    return fields, indexers, rv, meta
+end
+
+-- Patch obj_tid's TypeSlot in-place with a new table built from the given parts.
+--: (Ctx, any, any, any, any, any) -> ()
+local function patch_table(ctx, obj_tid, fields, indexers, rv, meta)
+    local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
+    local ot = ctx.types:get(obj_tid)   -- re-fetch: make_table may have grown arena
     local new_t = ctx.types:get(new_tbl)
     for k = 0, 6 do ot.data[k] = new_t.data[k] end
+end
+
+-- Add an indexer pair [key_tid]: val_tid to a table type in-place.
+--: (Ctx, any, any, any) -> ()
+local function table_add_indexer(ctx, obj_tid, key_tid, val_tid)
+    local fields, indexers, rv, meta = snapshot_table(ctx, obj_tid)
+    indexers[#indexers + 1] = key_tid
+    indexers[#indexers + 1] = val_tid
+    patch_table(ctx, obj_tid, fields, indexers, rv, meta)
+end
+
+-- Widen the value type of the first matching indexer in-place.
+-- Finds the indexer whose key type matches match_key via try_unify and replaces
+-- its value with make_union(existing_val, new_val).
+--: (Ctx, any, any, any) -> ()
+local function table_widen_indexer(ctx, obj_tid, match_key_tid, new_val_tid)
+    local fields, indexers, rv, meta = snapshot_table(ctx, obj_tid)
+    local widened = false
+    local i = 1
+    while i < #indexers do
+        if (not widened) and unify_mod.try_unify(ctx, match_key_tid, indexers[i]) then
+            indexers[i + 1] = types_mod.make_union(ctx, { indexers[i + 1], new_val_tid })
+            widened = true
+        end
+        i = i + 2
+    end
+    if widened then patch_table(ctx, obj_tid, fields, indexers, rv, meta) end
+end
+
+local function table_add_field(ctx, obj_tid, field_id, field_type_id)
+    local fields, indexers, rv, meta = snapshot_table(ctx, obj_tid)
+    fields[#fields + 1] = types_mod.make_field(ctx, field_id, field_type_id, false)
+    patch_table(ctx, obj_tid, fields, indexers, rv, meta)
 end
 
 -- Build a prescan stub for a forward-declared function.
@@ -1970,29 +2004,31 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         end
                     end
                 else
-                    -- Non-literal key: check against any matching indexer.
-                    -- If no matching indexer exists we cannot safely infer one: an
-                    -- unannotated table might be a heterogeneous dispatch table (e.g.
-                    -- StmtRule[NODE_X] = fn) where successive values have different
-                    -- types.  Annotate the table to get strict checking.
+                    -- Non-literal key: find matching indexer.
+                    -- If found and compatible: nothing to do.
+                    -- If found and incompatible: widen the indexer value (never error —
+                    --   t[k]=v is semantically "this table now also holds this type").
+                    -- If not found: add a new indexer (first assignment teaches the type).
                     local is2, il2 = obj_t2.data[2], obj_t2.data[3]
                     local ix2 = is2
+                    local found2 = false
                     while ix2 < is2 + il2 - 1 do
                         local ikt2 = ctx.lists:get(ix2)
                         if unify_mod.try_unify(ctx, key_tid2, ikt2) then
+                            found2 = true
                             local ival_tid = types_mod.find(ctx, ctx.lists:get(ix2 + 1))
-                            if ctx.types:get(ival_tid).tag ~= TAG_VAR then
-                                if not unify_mod.try_unify(ctx, rhs_tid, ival_tid) then
-                                    report(ctx, tn.line, tn.col,
-                                        "index assignment: `"
-                                        .. types_mod.display_short(ctx, rhs_tid)
-                                        .. "` doesn't match indexer type `"
-                                        .. types_mod.display_short(ctx, ival_tid) .. "`")
-                                end
+                            local ival_tag = ctx.types:get(ival_tid).tag
+                            if ival_tag ~= TAG_VAR
+                                and not unify_mod.try_unify(ctx, rhs_tid, ival_tid) then
+                                -- Incompatible: widen the indexer value to the union.
+                                table_widen_indexer(ctx, obj_tid2, key_tid2, rhs_tid)
                             end
                             break
                         end
                         ix2 = ix2 + 2
+                    end
+                    if not found2 then
+                        table_add_indexer(ctx, obj_tid2, key_tid2, rhs_tid)
                     end
                 end
             elseif obj_t2.tag == TAG_VAR then
