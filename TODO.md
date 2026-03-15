@@ -363,7 +363,7 @@ Branch coverage implementation sketch: instrument the AST (add synthetic nodes a
 
 ## LSP
 - [x] LSP server (JSON-RPC over stdio) — `lib/type/static/lsp.lua`; stdio framing, initialize/shutdown/exit, textDocument/didOpen+didChange+didSave+didClose → publishDiagnostics. Full text sync. (2026-03-15)
-- [ ] Position → type query — retain `(line, col) → type` table during inference for hover
+- [x] Position → type query — `ctx.type_at` flat array {line,col,tid,...} populated by `infer_expr`; `type_at_lookup` in lsp.lua finds best match; `textDocument/hover` returns markdown type string. (2026-03-15)
 - [ ] Incremental re-check — cheap scope invalidation so full reparse isn't needed on every keystroke
 - [ ] Module-level type cache — avoid re-typechecking stdlib/imports on every edit; currently `check.clear_cache()` on every file change is correct but slow for large projects
 - [ ] Completion — field enumeration on partial expressions; needs partial-parse recovery
