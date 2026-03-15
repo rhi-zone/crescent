@@ -227,31 +227,48 @@ local function get_line(text, lsp_line)
 end
 
 -- Build completion items for all regular fields of a table type.
--- Returns an array (possibly empty) or nil if tid is not a table.
+-- Handles TAG_TABLE directly; for TAG_UNION, merges fields from all members.
+-- Returns an array (possibly empty) or nil if tid has no table fields.
 local function table_field_items(ctx, tid)
-    local TAG_FUNCTION = defs.TAG_FUNCTION
-    local TAG_TABLE    = defs.TAG_TABLE
-    local resolved = types.find(ctx, tid)
-    local t = ctx.types:get(resolved)
-    if t.tag ~= TAG_TABLE then return nil end
-    local items = {}
-    for i = t.data[0], t.data[0] + t.data[1] - 1 do
-        local fid  = ctx.lists:get(i)
-        local fe   = ctx.fields:get(fid)
-        local name = intern.get(ctx.pool, fe.name_id)
-        if name and name:sub(1, 2) ~= "__" then
-            local fres = types.find(ctx, fe.type_id)
-            local ft   = ctx.types:get(fres)
-            local kind = 6
-            if ft.tag == TAG_FUNCTION then kind = 3 end
-            items[#items + 1] = {
-                label  = name,
-                kind   = kind,
-                detail = types.display_short(ctx, fres),
-            }
+    local TAG_FUNCTION    = defs.TAG_FUNCTION
+    local TAG_TABLE       = defs.TAG_TABLE
+    local TAG_UNION       = defs.TAG_UNION
+    local TAG_INTERSECTION = defs.TAG_INTERSECTION
+
+    local function collect_fields(resolved, out, seen_names)
+        local t = ctx.types:get(resolved)
+        if t.tag == TAG_TABLE then
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                local fid  = ctx.lists:get(i)
+                local fe   = ctx.fields:get(fid)
+                local name = intern.get(ctx.pool, fe.name_id)
+                if name and name:sub(1, 2) ~= "__" and not seen_names[name] then
+                    seen_names[name] = true
+                    local fres = types.find(ctx, fe.type_id)
+                    local ft   = ctx.types:get(fres)
+                    local kind = ft.tag == TAG_FUNCTION and 3 or 6
+                    out[#out + 1] = {
+                        label  = name,
+                        kind   = kind,
+                        detail = types.display_short(ctx, fres),
+                    }
+                end
+            end
+        elseif t.tag == TAG_UNION or t.tag == TAG_INTERSECTION then
+            for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                collect_fields(types.find(ctx, ctx.lists:get(i)), out, seen_names)
+            end
         end
     end
-    return items
+
+    local resolved = types.find(ctx, tid)
+    local t = ctx.types:get(resolved)
+    if t.tag ~= TAG_TABLE and t.tag ~= TAG_UNION and t.tag ~= TAG_INTERSECTION then
+        return nil
+    end
+    local items = {}
+    collect_fields(resolved, items, {})
+    return #items > 0 and items or nil
 end
 
 -- Given a trigger character ("." or ":") and cursor position, try to
