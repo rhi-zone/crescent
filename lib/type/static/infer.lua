@@ -88,8 +88,9 @@ local TAG_UNION        = defs.TAG_UNION
 local TAG_INTERSECTION = defs.TAG_INTERSECTION
 local TAG_VAR      = defs.TAG_VAR
 local TAG_ROWVAR   = defs.TAG_ROWVAR
-local TAG_NAMED    = defs.TAG_NAMED
-local TAG_NOMINAL  = defs.TAG_NOMINAL
+local TAG_NAMED       = defs.TAG_NAMED
+local TAG_NOMINAL     = defs.TAG_NOMINAL
+local TAG_ENUM_MEMBER = defs.TAG_ENUM_MEMBER
 local TAG_MATCH_TYPE = defs.TAG_MATCH_TYPE
 local TAG_FORALL   = defs.TAG_FORALL
 local TAG_INTRINSIC = defs.TAG_INTRINSIC
@@ -1708,6 +1709,38 @@ local function table_add_field(ctx, obj_tid, field_id, field_type_id)
     patch_table(ctx, obj_tid, fields, indexers, rv, meta)
 end
 
+-- If all fields of a table literal are same-kind literals (all LIT_INTEGER or all LIT_STRING),
+-- rewrite each field's type_id to a TAG_ENUM_MEMBER so `Status.OK` displays as `Status.OK`
+-- rather than `1`.  enum_name_id is the intern ID of the variable name (e.g. "Status").
+-- No-op when fields are mixed kinds, empty, or contain non-literals.
+--: (Ctx, unknown, unknown) -> ()
+local function try_promote_enum(ctx, tbl_tid, enum_name_id)
+    local ot = ctx.types:get(types_mod.find(ctx, tbl_tid))
+    if ot.tag ~= TAG_TABLE then return end
+    local fs, fl = ot.data[0], ot.data[1]
+    if fl == 0 then return end
+    local lit_kind = nil
+    local entries = {}  -- {feid, member_name_id, lit_kind, value}
+    for i = fs, fs + fl - 1 do
+        local fe = ctx.fields:get(ctx.lists:get(i))
+        local vt = ctx.types:get(types_mod.find(ctx, fe.type_id))
+        if vt.tag ~= TAG_LITERAL then return end
+        local k = vt.data[0]
+        if k ~= LIT_INTEGER and k ~= LIT_STRING then return end  -- booleans/nil: skip
+        if lit_kind == nil then lit_kind = k
+        elseif lit_kind ~= k then return end  -- mixed kinds: not an enum
+        entries[#entries + 1] = { feid = ctx.lists:get(i), member_name_id = fe.name_id,
+                                  lit_kind = k, value = vt.data[1] }
+    end
+    for _, info in ipairs(entries) do
+        local mem_tid = types_mod.make_enum_member(ctx, enum_name_id,
+            info.member_name_id, info.lit_kind, info.value)
+        -- Re-fetch FieldEntry after make_enum_member (arena may have grown)
+        local fe = ctx.fields:get(info.feid)
+        fe.type_id = mem_tid
+    end
+end
+
 -- Build a prescan stub for a forward-declared function.
 -- Uses T_ANY for all params (recursive call arg-checking always passes)
 -- and a fresh TAG_VAR for the return (shared across all recursive calls;
@@ -1855,6 +1888,14 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 bind_tid = ctx.T_NIL
             end
             env_mod.bind(ctx.scope, name_id, bind_tid)
+            -- After binding a table literal with no annotation, try to promote it to an enum.
+            -- Only for single-name single-rhs table literal bindings (e.g. `local Status = {...}`).
+            if nl == 1 and el == 1 then
+                local rhs_nid = ctx.ast_lists:get(es)
+                if ctx.nodes:get(rhs_nid).kind == NODE_TABLE_EXPR then
+                    try_promote_enum(ctx, types_mod.find(ctx, bind_tid), name_id)
+                end
+            end
             -- Record for --annotate mode (skip trivial types).
             local resolved_tag = ctx.types:get(types_mod.find(ctx, bind_tid)).tag
             if resolved_tag ~= defs.TAG_VAR and resolved_tag ~= defs.TAG_ANY
