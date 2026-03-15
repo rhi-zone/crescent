@@ -317,4 +317,18 @@ M.keywords = {
     "repeat", "return", "then", "true", "until", "while",
 }
 
+-- Double ↔ int32×2 reinterpret helpers.
+-- LIT_NUMBER stores float values inline in data[1]+data[2] as two int32s,
+-- enabling globally comparable float literals across files.
+local _f64buf = ffi.new("union { double d; int32_t i[2]; }")
+function M.double_to_i32x2(v)
+    _f64buf.d = v
+    return _f64buf.i[0], _f64buf.i[1]
+end
+function M.i32x2_to_double(lo, hi)
+    _f64buf.i[0] = lo
+    _f64buf.i[1] = hi
+    return _f64buf.d
+end
+
 return M

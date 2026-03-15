@@ -48,6 +48,7 @@ local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_INTEGER = defs.LIT_INTEGER
 local LIT_NIL     = defs.LIT_NIL
+local i32x2_to_double = defs.i32x2_to_double
 
 local OP_ADD    = defs.OP_ADD
 local OP_SUB    = defs.OP_SUB
@@ -249,6 +250,10 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     end
 
     if tag == TAG_LITERAL then
+        if at.data[0] == LIT_NUMBER then
+            -- data[1]+data[2] store the double as two int32s
+            return types_mod.make_literal(ctx, LIT_NUMBER, i32x2_to_double(at.data[1], at.data[2]))
+        end
         return types_mod.make_literal(ctx, at.data[0], at.data[1])
     end
 
@@ -629,13 +634,12 @@ ExprRule[NODE_LITERAL] = function(ctx, nid)
     if kind == LIT_BOOLEAN then return types_mod.make_literal(ctx, LIT_BOOLEAN, n.data[1]) end
     if kind == LIT_STRING  then return types_mod.make_literal(ctx, LIT_STRING, n.data[1]) end
     if kind == LIT_NUMBER  then
-        -- n.data[1] is the numval index into pr.lexer.numvals (Lua numbers, not pool IDs)
-        local num = ctx.numvals[n.data[1]]
-        if num and num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
-            -- Integer literal: store value directly in data[1] so it's globally comparable.
+        -- data[1]+data[2] store the double value as two int32s (inline, globally comparable)
+        local num = i32x2_to_double(n.data[1], n.data[2])
+        if num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
             return types_mod.make_literal(ctx, LIT_INTEGER, math.floor(num))
         end
-        return ctx.T_NUMBER
+        return types_mod.make_literal(ctx, LIT_NUMBER, num)
     end
     return ctx.T_ANY
 end
@@ -1020,8 +1024,8 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     if obj_t.tag == TAG_TUPLE then
         local kt_t = ctx.types:get(key_r)
         if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
-            local num = ctx.numvals and ctx.numvals[kt_t.data[1]]
-            if num and num % 1 == 0 and num >= 1 and num <= obj_t.data[1] then
+            local num = i32x2_to_double(kt_t.data[1], kt_t.data[2])
+            if num % 1 == 0 and num >= 1 and num <= obj_t.data[1] then
                 return types_mod.find(ctx, ctx.lists:get(obj_t.data[0] + math.floor(num) - 1))
             end
         end
@@ -1068,8 +1072,8 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
             -- Numeric literal key: return the element at that 1-based index.
             local kt_t = ctx.types:get(key_r)
             if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
-                local num = ctx.numvals and ctx.numvals[kt_t.data[1]]
-                if num and num % 1 == 0 and num >= 1 and num <= t.data[1] then
+                local num = i32x2_to_double(kt_t.data[1], kt_t.data[2])
+                if num % 1 == 0 and num >= 1 and num <= t.data[1] then
                     return types_mod.find(ctx, ctx.lists:get(t.data[0] + math.floor(num) - 1))
                 end
             end
@@ -2556,7 +2560,6 @@ function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     -- ctx.lists is the TYPE list pool — don't touch it
     ctx.ast_lists = parse_result.lists  -- AST list pool (read only)
     ctx.nodes     = parse_result.nodes
-    ctx.numvals   = parse_result.lexer and parse_result.lexer.numvals or {}
     ctx.pool      = pool
     ctx.ann       = ann_result
     ctx.err       = err_ctx or errors_mod.new_ctx()

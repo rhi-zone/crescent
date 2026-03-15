@@ -11,7 +11,7 @@
 --
 -- TypeSlot data layouts (from types.lua):
 --   TAG_VAR/ROWVAR:     data[0]=var_id, data[1]=level, data[2]=parent_tid(-1=unbound)
---   TAG_LITERAL:        data[0]=lit_kind, data[1]=value (intern_id or 0/1)
+--   TAG_LITERAL:        data[0]=lit_kind, data[1]=value; for LIT_NUMBER: data[1..2]=lo/hi int32 of double
 --   TAG_FUNCTION:       data[0..1]=params(list), data[2..3]=returns(list), data[4]=vararg_tid
 --   TAG_TABLE:          data[0..1]=fields(field_ids in list), data[2..3]=indexers(tid pairs in list),
 --                       data[4]=row_var_tid, data[5..6]=meta(field_ids in list)
@@ -52,6 +52,7 @@ local TAG_ROWVAR      = defs.TAG_ROWVAR
 local TAG_INTRINSIC   = defs.TAG_INTRINSIC
 
 local LIT_STRING      = defs.LIT_STRING
+local LIT_NUMBER      = defs.LIT_NUMBER
 
 local M = {}
 
@@ -456,11 +457,14 @@ function M.serialize(ctx, exports)
 
         if tag == TAG_LITERAL then
             d[1] = slot.data[0]  -- lit_kind (unchanged)
-            -- data[1] = value; remap string ID if LIT_STRING
+            -- data[1] = value; remap string ID if LIT_STRING; for LIT_NUMBER store lo+hi
             if slot.data[0] == LIT_STRING then
                 d[2] = remap_sid(seen_strings, slot.data[1])
+            elseif slot.data[0] == LIT_NUMBER then
+                d[2] = slot.data[1]  -- lo int32 of double
+                d[3] = slot.data[2]  -- hi int32 of double
             else
-                d[2] = slot.data[1]  -- boolean 0/1 or numeric value as-is
+                d[2] = slot.data[1]  -- boolean 0/1
             end
 
         elseif tag == TAG_FUNCTION then

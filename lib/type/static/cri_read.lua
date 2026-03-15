@@ -45,6 +45,7 @@ local TAG_ROWVAR      = defs.TAG_ROWVAR
 local TAG_INTRINSIC   = defs.TAG_INTRINSIC
 
 local LIT_STRING      = defs.LIT_STRING
+local LIT_NUMBER      = defs.LIT_NUMBER
 
 local M = {}
 
@@ -241,7 +242,14 @@ function M.load(bytes, ctx)
 
             if tag == TAG_LITERAL then
                 slot.data[0] = d[1]  -- lit_kind unchanged
-                slot.data[1] = (d[1] == LIT_STRING) and rs(d[2]) or d[2]
+                if d[1] == LIT_STRING then
+                    slot.data[1] = rs(d[2])
+                elseif d[1] == LIT_NUMBER then
+                    slot.data[1] = d[2]  -- lo int32 of double
+                    slot.data[2] = d[3]  -- hi int32 of double
+                else
+                    slot.data[1] = d[2]  -- boolean 0/1
+                end
 
             elseif tag == TAG_FUNCTION then
                 -- d[1..2]=params list, d[3..4]=returns list, d[5]=vararg_tid

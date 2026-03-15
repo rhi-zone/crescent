@@ -136,9 +136,6 @@ function M.new(source, filename, pool)
         _la_line = 0,
         _la_col  = 0,
         _la_valid = false,
-        -- number values side array
-        numvals = {},
-        numval_next = 0,
         -- annotations captured during lex
         annotations = {},
         -- save buffer for building escape-sequence strings
@@ -597,10 +594,7 @@ function Lexer:_lex()
         if is_ident(b) then
             if is_digit(b) then
                 local num = self:_read_number()
-                local id = self.numval_next
-                self.numvals[id] = num
-                self.numval_next = id + 1
-                return defs.TK_NUMBER, id
+                return defs.TK_NUMBER, num
             end
             -- Identifier / keyword: scan forward with pointer arithmetic
             local start = self.pos - 1  -- pos of first byte (already in self.b)
@@ -738,10 +732,7 @@ function Lexer:_lex()
                 self.col = self.col - 1
                 self.b = B_DOT
                 local num = self:_read_number()
-                local id = self.numval_next
-                self.numvals[id] = num
-                self.numval_next = id + 1
-                return defs.TK_NUMBER, id
+                return defs.TK_NUMBER, num
             end
             return defs.TK_DOT, 0
 

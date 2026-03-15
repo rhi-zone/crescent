@@ -6,6 +6,7 @@
 local defs = require("lib.type.static.defs")
 local arena_mod = require("lib.type.static.arena")
 local intern_mod = require("lib.type.static.intern")
+local double_to_i32x2 = defs.double_to_i32x2
 
 local format = string.format
 local byte = string.byte
@@ -237,7 +238,7 @@ function M.parse_annotations(annotations, pool, filename)
                 t.data[1] = math.floor(num)
             else
                 t.data[0] = defs.LIT_NUMBER
-                t.data[1] = intern_mod.intern(pool, tostring(num))
+                t.data[1], t.data[2] = double_to_i32x2(num)
             end
             return id
         end

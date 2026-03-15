@@ -18,6 +18,7 @@ local rshift = bit.rshift
 local band = bit.band
 local bor = bit.bor
 local format = string.format
+local double_to_i32x2 = defs.double_to_i32x2
 
 local M = {}
 
@@ -282,8 +283,9 @@ function M.parse(source, filename, pool)
         local tk = L.tk
         if tk == defs.TK_NUMBER then
             local n = mknode(defs.NODE_LITERAL, line, col)
-            nodes:get(n).data[0] = defs.LIT_NUMBER
-            nodes:get(n).data[1] = L.val
+            local nn = nodes:get(n)
+            nn.data[0] = defs.LIT_NUMBER
+            nn.data[1], nn.data[2] = double_to_i32x2(L.val)
             L:next()
             return n
         elseif tk == defs.TK_STRING then

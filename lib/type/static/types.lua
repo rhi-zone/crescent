@@ -40,6 +40,8 @@ local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_NIL     = defs.LIT_NIL
 local LIT_INTEGER = defs.LIT_INTEGER
+local double_to_i32x2 = defs.double_to_i32x2
+local i32x2_to_double = defs.i32x2_to_double
 
 local FLAG_GENERIC = defs.FLAG_GENERIC
 
@@ -55,8 +57,8 @@ local M = {}
 --
 -- TAG_LITERAL:
 --   data[0] = LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
---   data[1] = for string/number: intern_id of value string
---             for boolean: 1=true, 0=false
+--   data[1] = for string: intern_id; for boolean: 1=true, 0=false
+--             for number: lo int32 of double (data[2] = hi int32)
 --
 -- TAG_FUNCTION:
 --   data[0] = params_start (list pool)
@@ -239,12 +241,16 @@ end
 
 -- Make a literal type.
 -- kind: LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
--- val: intern_id (for string/number) or 1/0 (for boolean)
+-- val: intern_id (for string) or 1/0 (for boolean) or double (for number)
 function M.make_literal(ctx, kind, val)
     local id = alloc_zero(ctx.types, TAG_LITERAL)
     local t = ctx.types:get(id)
     t.data[0] = kind
-    t.data[1] = val or 0
+    if kind == LIT_NUMBER then
+        t.data[1], t.data[2] = double_to_i32x2(val or 0)
+    else
+        t.data[1] = val or 0
+    end
     return id
 end
 
@@ -467,7 +473,11 @@ function M.types_equal(ctx, a, b)
         return true  -- same tag = equal for primitives
     end
     if tag == TAG_LITERAL then
-        return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+        if ta.data[0] ~= tb.data[0] then return false end
+        if ta.data[0] == LIT_NUMBER then
+            return ta.data[1] == tb.data[1] and ta.data[2] == tb.data[2]
+        end
+        return ta.data[1] == tb.data[1]
     end
     if tag == TAG_ENUM_MEMBER then
         -- same enum + same member = equal
@@ -615,7 +625,7 @@ function M.display(ctx, tid, seen)
             return s and ('"' .. s .. '"') or '"?"'
         end
         if kind == LIT_NUMBER  then
-            return intern_mod.get(ctx.pool, t.data[1]) or "number"
+            return tostring(i32x2_to_double(t.data[1], t.data[2]))
         end
         if kind == LIT_INTEGER then return tostring(t.data[1]) end
     end
