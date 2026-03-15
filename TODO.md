@@ -366,7 +366,8 @@ Branch coverage implementation sketch: instrument the AST (add synthetic nodes a
 - [x] Position → type query — `ctx.type_at` flat array {line,col,tid,...} populated by `infer_expr`; `type_at_lookup` in lsp.lua finds best match; `textDocument/hover` returns markdown type string. (2026-03-15)
 - [ ] Incremental re-check — cheap scope invalidation so full reparse isn't needed on every keystroke
 - [ ] Module-level type cache — avoid re-typechecking stdlib/imports on every edit; currently `check.clear_cache()` on every file change is correct but slow for large projects
-- [ ] Completion — field enumeration on partial expressions; needs partial-parse recovery
+- [x] Completion — scope-level name enumeration (module + stdlib + locals visible at module level); cursor-local scope completions need position-tracking infrastructure not yet built. (2026-03-15)
+- [ ] Completion: field completions after `foo.` — need to parse the prefix expression, find its type, enumerate fields
 - [x] Go-to-def — `ctx.def_sites` (name_id → {line,col}) + `ctx.name_at` for identifier use positions; textDocument/definition handler in lsp.lua. (2026-03-15, within-file only; cross-file requires cri_loader integration)
 
 ## package manager
