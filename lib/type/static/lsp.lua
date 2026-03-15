@@ -14,6 +14,7 @@ local json   = require("lib.lunajson")
 local check  = require("lib.type.static.check")
 local types  = require("lib.type.static.types")
 local intern = require("lib.type.static.intern")
+local defs   = require("lib.type.static.defs")
 
 -- ---------------------------------------------------------------------------
 -- JSON null sentinel
@@ -223,6 +224,7 @@ HANDLERS["initialize"] = function(state, msg)
             },
             hoverProvider      = true,
             definitionProvider = true,
+            completionProvider = { triggerCharacters = { ".", ":" } },
         },
         serverInfo = { name = "crescent", version = "0.2.0" },
     }))
@@ -314,6 +316,51 @@ HANDLERS["textDocument/hover"] = function(state, msg)
     send(ok_resp(msg.id, {
         contents = { kind = "markdown", value = "```\n" .. type_str .. "\n```" },
     }))
+end
+
+HANDLERS["textDocument/completion"] = function(state, msg)
+    local p = msg.params
+    if not p or not p.textDocument then
+        send(ok_resp(msg.id, EMPTY_ARRAY))
+        return
+    end
+    local uri = p.textDocument.uri
+    local ctx = state.ctx_cache[uri]
+    if not ctx then
+        send(ok_resp(msg.id, EMPTY_ARRAY))
+        return
+    end
+    -- Enumerate all names visible in the module-level scope chain.
+    -- This is a best-effort approximation; cursor-local scopes are not tracked.
+    local TAG_FUNCTION = defs.TAG_FUNCTION
+    local TAG_TABLE    = defs.TAG_TABLE
+    local items = {}
+    local seen = {}
+    local scope = ctx.scope
+    while scope do
+        for name_id, type_id in pairs(scope.bindings) do
+            if not seen[name_id] then
+                seen[name_id] = true
+                local name = intern.get(ctx.pool, name_id)
+                if name and name:sub(1, 2) ~= "__" then  -- skip metamethod names
+                    local resolved = types.find(ctx, type_id)
+                    local rt = ctx.types:get(resolved)
+                    -- LSP CompletionItemKind: 3=Function, 6=Variable, 7=Class(table), 9=Module
+                    local kind = 6
+                    if rt.tag == TAG_FUNCTION then kind = 3
+                    elseif rt.tag == TAG_TABLE then kind = 7
+                    end
+                    items[#items + 1] = {
+                        label  = name,
+                        kind   = kind,
+                        detail = types.display_short(ctx, resolved),
+                    }
+                end
+            end
+        end
+        scope = scope.parent
+    end
+    send(ok_resp(msg.id, items))
 end
 
 HANDLERS["textDocument/definition"] = function(state, msg)
