@@ -184,7 +184,7 @@ local function run_check(state, uri, text)
     -- Clear per-session cache so this file is re-checked fresh.
     check.clear_cache()
 
-    local err_ctx, ctx = check.check_string(text, path)
+    local err_ctx, ctx = check.check_string_with_deps(text, path)
 
     -- Store ctx for hover queries (ctx.type_at is always populated by infer_expr).
     state.ctx_cache[uri] = ctx

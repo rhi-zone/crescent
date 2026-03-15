@@ -201,6 +201,42 @@ function M.check_file(filename, parent_scope, explicit_pool)
 end
 
 -- ---------------------------------------------------------------------------
+-- check_string_with_deps
+-- ---------------------------------------------------------------------------
+-- Check a source string (e.g. an unsaved editor buffer) with one level of
+-- require() dependency resolution: dependencies are read from disk via
+-- check_file so their export types are available to the caller.
+-- Unlike check_file's internal cri_loader, this does not require _disk_cache_dir.
+-- Use this in the LSP to check buffers that may differ from the on-disk file.
+function M.check_string_with_deps(source, filename, parent_scope)
+    if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
+    _pool = _pool or intern_mod.new()
+
+    -- Guard against cycles within our own cri_loader calls.
+    local checking_deps = {}
+
+    local function try_dep(ctx, dep_path)
+        if checking_deps[dep_path] or _checking[dep_path] then return nil end
+        checking_deps[dep_path] = true
+        M.check_file(dep_path, parent_scope, _pool)
+        checking_deps[dep_path] = nil
+        if _session[dep_path] and _session[dep_path].cri_bytes then
+            local ok, exports = cri_read.load(_session[dep_path].cri_bytes, ctx)
+            if ok and exports["__ret"] then return exports["__ret"] end
+        end
+        return nil
+    end
+
+    local function cri_loader(ctx, mod_name)
+        -- Try <mod/path>.lua first, then <mod/path>/init.lua.
+        local rel = mod_name:gsub("%.", "/")
+        return try_dep(ctx, rel .. ".lua") or try_dep(ctx, rel .. "/init.lua")
+    end
+
+    return infer_mod.check_string(source, filename, parent_scope, _pool, cri_loader)
+end
+
+-- ---------------------------------------------------------------------------
 -- check_files
 -- ---------------------------------------------------------------------------
 -- Check multiple files and return a combined error context.
