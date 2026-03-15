@@ -105,12 +105,12 @@ local M = {}
 ---------------------------------------------------------------------------
 
 -- Returns the error entry so callers can attach notes.
---: (Ctx, any, any, any) -> any
+--: (Ctx, unknown, unknown, unknown) -> unknown
 local function report(ctx, line, col, msg)
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
---: (Ctx, any, any, any) -> ()
+--: (Ctx, unknown, unknown, unknown) -> ()
 local function warn(ctx, line, col, msg)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
@@ -121,7 +121,7 @@ end
 --   NODE_FUNC_DECL   where name  is NODE_FIELD_EXPR{ obj, field }
 -- Returns {line, col} of the first matching node, or nil.
 -- This is an O(n) scan — only called on the error path.
---: (Ctx, any, any) -> any
+--: (Ctx, unknown, unknown) -> unknown
 local function find_field_definition(ctx, obj_name_id, field_name_id)
     local n_nodes = ctx.nodes.len
     for i = 0, n_nodes - 1 do
@@ -160,13 +160,13 @@ end
 -- stub_ret_vars: optional array of TAG_VAR type IDs from the prescan stub.
 -- When provided, add_return eagerly binds them so recursive calls within
 -- this function body see the correct return type immediately via find().
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 local function push_return_collector(ctx, stub_ret_vars)
     ctx.return_types[#ctx.return_types + 1] = {}
     ctx.return_stub_vars[#ctx.return_stub_vars + 1] = stub_ret_vars or false
 end
 
---: (Ctx) -> any
+--: (Ctx) -> unknown
 local function pop_return_collector(ctx)
     local c = ctx.return_types[#ctx.return_types]
     ctx.return_types[#ctx.return_types] = nil
@@ -174,7 +174,7 @@ local function pop_return_collector(ctx)
     return c
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 local function add_return(ctx, type_ids)
     local c = ctx.return_types[#ctx.return_types]
     if not c then return end
@@ -196,7 +196,6 @@ end
 -- Annotation helpers
 ---------------------------------------------------------------------------
 
---: (Ctx, any) -> any
 local function get_ann(ctx, line)
     if not ctx.ann then return nil end
     return ctx.ann.results[line] or ctx.ann.results[line - 1]
@@ -207,7 +206,7 @@ local infer_expr, infer_stmt, infer_block, infer_function, resolve_annotation_ty
 
 -- Translate annotation type_id (from ann_ctx.types) into a checker type_id.
 -- Uses ctx.ann.types/fields/lists for reading, ctx.types/fields/lists for writing.
---: (Ctx, any, any) -> any
+--: (Ctx, unknown, unknown) -> integer
 resolve_annotation_type = function(ctx, ann_tid, seen)
     if not ctx.ann then return ctx.T_ANY end
     seen = seen or {}
@@ -223,7 +222,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == defs.TAG_BOOLEAN  then return ctx.T_BOOLEAN end
     if tag == defs.TAG_NUMBER   then return ctx.T_NUMBER end
     if tag == defs.TAG_STRING   then return ctx.T_STRING end
-    if tag == defs.TAG_ANY      then return ctx.T_ANY end
+    if tag == defs.TAG_ANY      then
+        if ctx._ann_warn_line then
+            warn(ctx, ctx._ann_warn_line, 0,
+                "explicit `any` in annotation — use `unknown` for an unconstrained value, or a specific type")
+            ctx._ann_warn_line = nil  -- warn once per annotation
+        end
+        return ctx.T_ANY
+    end
     if tag == defs.TAG_NEVER    then return ctx.T_NEVER end
     if tag == defs.TAG_INTEGER  then return ctx.T_INTEGER end
     if tag == defs.TAG_UNKNOWN  then return ctx.T_UNKNOWN end
@@ -447,7 +453,7 @@ end
 local ExprRule = {}
 local StmtRule = {}
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 infer_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = ExprRule[n.kind]
@@ -457,7 +463,7 @@ infer_expr = function(ctx, nid)
 end
 
 -- Infer expression for multi-return contexts (calls).
---: (Ctx, any) -> any
+--: (Ctx, integer) -> unknown
 local function infer_expr_multi(ctx, nid)
     local n = ctx.nodes:get(nid)
     if n.kind == NODE_CALL_EXPR or n.kind == NODE_METHOD_CALL then
@@ -474,7 +480,7 @@ local function infer_expr_multi(ctx, nid)
 end
 
 -- Infer expression list; last expr may multi-return.
---: (Ctx, any, any) -> any
+--: (Ctx, integer, integer) -> { [integer]: integer }
 local function infer_expr_list(ctx, es, el)
     if el == 0 then return {} end
     local result = {}
@@ -489,7 +495,7 @@ end
 
 -- Normalize a primitive or literal type tag to its base primitive tag for prim_meta lookup.
 -- Returns the resolved base tag, or nil if not a relevant primitive.
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer?
 local function prim_tag(ctx, tid)
     local t = ctx.types:get(types_mod.find(ctx, tid))
     local tag = t.tag
@@ -511,7 +517,7 @@ end
 -- may be primitives — the hardcoded dispatch in those paths handles mixed-type
 -- arithmetic correctly and validates concat operands. Call with tag==TAG_TABLE guard
 -- or use the prim_tag() helper inline instead.
---: (Ctx, any, any) -> any
+--: (Ctx, integer, string) -> integer?
 local function meta_op_ret(ctx, tid, mm_name)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -540,7 +546,7 @@ end
 
 -- Like meta_op_ret but returns the full metamethod function TID (not just return type).
 -- Used to extract parameter types for cross-type operand validation.
---: (Ctx, any, any) -> any
+--: (Ctx, integer, string) -> integer?
 local function meta_fn_tid(ctx, tid, mm_name)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -574,7 +580,7 @@ local CMP_META = {
 -- TAG_ANY / TAG_VAR / TAG_ROWVAR are assumed to have any metamethod (unconstrained).
 -- allow_table: if true, TAG_TABLE always passes (for OP_LEN — built-in # on tables).
 local has_metamethod
---: (Ctx, any, any, any) -> any
+--: (Ctx, integer, string, boolean) -> boolean
 has_metamethod = function(ctx, tid, mm_name, allow_table)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -593,19 +599,19 @@ end
 
 -- A type is numeric iff it has arithmetic metamethods (__add as proxy).
 -- number/integer pass via prim_meta; nil, boolean, string correctly fail.
---: (Ctx, any) -> any
+--: (Ctx, integer) -> boolean
 local function is_numeric(ctx, tid)
     return has_metamethod(ctx, tid, "__add", false)
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> boolean
 local function is_int_compat(ctx, tid)
     local t = ctx.types:get(types_mod.find(ctx, tid))
     return t.tag == TAG_INTEGER
         or (t.tag == TAG_LITERAL and t.data[0] == LIT_INTEGER)
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_LITERAL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local kind = n.data[0]
@@ -624,7 +630,7 @@ ExprRule[NODE_LITERAL] = function(ctx, nid)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local name_id = n.data[0]
@@ -635,7 +641,7 @@ ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_VARARG_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local vararg_id = intern_mod.intern(ctx.pool, "...")
@@ -645,7 +651,7 @@ ExprRule[NODE_VARARG_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local op = n.data[0]
@@ -671,7 +677,7 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local op = n.data[0]
@@ -818,7 +824,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local obj_tid = types_mod.find(ctx, infer_expr(ctx, n.data[0]))
@@ -972,7 +978,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local obj_tid = types_mod.find(ctx, infer_expr(ctx, n.data[0]))
@@ -1107,7 +1113,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     return ctx.T_UNKNOWN
 end
 
---: (Ctx, any, any, any, any, any) -> ()
+--: (Ctx, integer, unknown, integer, integer, string?) -> ()
 local function check_call_args(ctx, fn_tid, arg_tids, line, col, fn_name)
     local ft = ctx.types:get(fn_tid)
     if ft.tag ~= TAG_FUNCTION then return end
@@ -1151,7 +1157,7 @@ end
 -- Non-mutating argument check against a single function type.
 -- Returns ok (boolean) and a list of error strings (may be empty if ok).
 -- Uses try_unify so no type variables are bound.
---: (Ctx, any, any) -> any
+--: (Ctx, integer, unknown) -> unknown
 local function try_call_args(ctx, fn_tid, arg_tids)
     local ft = ctx.types:get(fn_tid)
     if ft.tag ~= TAG_FUNCTION then return false, {"not a function"} end
@@ -1189,7 +1195,7 @@ local function try_call_args(ctx, fn_tid, arg_tids)
     return ok, errs
 end
 
---: (Ctx, any, any, any, any, any) -> any
+--: (Ctx, integer, unknown, integer, integer, string?) -> integer
 local function call_fn_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     local inst_fn = env_mod.instantiate(ctx, fn_tid, ctx.scope.level)
     check_call_args(ctx, inst_fn, arg_tids, line, col, fn_name)
@@ -1207,7 +1213,7 @@ local function call_fn_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     return returns[1]
 end
 
---: (Ctx, any, any, any, any, any) -> any
+--: (Ctx, integer, unknown, integer, integer, string?) -> integer
 local function call_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     fn_tid = types_mod.find(ctx, fn_tid)
     local ft = ctx.types:get(fn_tid)
@@ -1322,7 +1328,7 @@ local function call_returns(ctx, fn_tid, arg_tids, line, col, fn_name)
     return ctx.T_ANY
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local callee_nid = n.data[0]
@@ -1403,7 +1409,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     return call_returns(ctx, callee_tid, arg_tids, n.line, n.col, callee_name)
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local recv_tid = infer_expr(ctx, n.data[0])
@@ -1452,7 +1458,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     return call_returns(ctx, method_tid, arg_tids, n.line, n.col, method_name_str)
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local field_ids = {}
@@ -1484,7 +1490,7 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
     return types_mod.make_table(ctx, field_ids, indexers, -1, {})
 end
 
---: (Ctx, any, any, any, any, any, any, any) -> any
+--: (Ctx, integer, integer, integer, integer, boolean, unknown, unknown) -> integer
 infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, stub_ret_vars)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {}
@@ -1607,14 +1613,16 @@ infer_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid, stub_ret_
     return fn_tid
 end
 
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
     local ann = get_ann(ctx, n.line)
     local ann_fn_tid = nil
     if ann and ann.kind == ANN_TYPE then
+        ctx._ann_warn_line = n.line
         local resolved = resolve_annotation_type(ctx, ann.type_id)
+        ctx._ann_warn_line = nil
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
         if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
     end
@@ -1625,7 +1633,7 @@ end
 -- Block / statement inference
 ---------------------------------------------------------------------------
 
---: (Ctx, any, any) -> ()
+--: (Ctx, unknown, unknown) -> ()
 infer_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         infer_stmt(ctx, ctx.ast_lists:get(i))
@@ -1635,10 +1643,9 @@ end
 -- Add a field to a table type in-place (used by prescan and open-table extension).
 -- WARNING: reads all ot.data before calling make_table, then re-fetches the pointer
 -- after, because arena:grow() may reallocate ctx.types.items, invalidating old ptrs.
---: (Ctx, any, any, any) -> ()
 -- Snapshot helper: collect a table's existing fields, indexers, meta into Lua arrays.
 -- Returns fields[], indexers[], rv, meta[].  Safe to call before any arena alloc.
---: (Ctx, any) -> ({ [number]: any }, { [number]: any }, any, { [number]: any })
+--: (Ctx, unknown) -> ({ [number]: unknown }, { [number]: unknown }, unknown, { [number]: unknown })
 local function snapshot_table(ctx, obj_tid)
     local ot = ctx.types:get(obj_tid)
     local fs, fl = ot.data[0], ot.data[1]
@@ -1660,7 +1667,7 @@ local function snapshot_table(ctx, obj_tid)
 end
 
 -- Patch obj_tid's TypeSlot in-place with a new table built from the given parts.
---: (Ctx, any, any, any, any, any) -> ()
+--: (Ctx, unknown, unknown, unknown, unknown, unknown) -> ()
 local function patch_table(ctx, obj_tid, fields, indexers, rv, meta)
     local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
     local ot = ctx.types:get(obj_tid)   -- re-fetch: make_table may have grown arena
@@ -1669,7 +1676,7 @@ local function patch_table(ctx, obj_tid, fields, indexers, rv, meta)
 end
 
 -- Add an indexer pair [key_tid]: val_tid to a table type in-place.
---: (Ctx, any, any, any) -> ()
+--: (Ctx, unknown, unknown, unknown) -> ()
 local function table_add_indexer(ctx, obj_tid, key_tid, val_tid)
     local fields, indexers, rv, meta = snapshot_table(ctx, obj_tid)
     indexers[#indexers + 1] = key_tid
@@ -1680,7 +1687,7 @@ end
 -- Widen the value type of the first matching indexer in-place.
 -- Finds the indexer whose key type matches match_key via try_unify and replaces
 -- its value with make_union(existing_val, new_val).
---: (Ctx, any, any, any) -> ()
+--: (Ctx, unknown, unknown, unknown) -> ()
 local function table_widen_indexer(ctx, obj_tid, match_key_tid, new_val_tid)
     local fields, indexers, rv, meta = snapshot_table(ctx, obj_tid)
     local widened = false
@@ -1705,7 +1712,7 @@ end
 -- Uses T_ANY for all params (recursive call arg-checking always passes)
 -- and a fresh TAG_VAR for the return (shared across all recursive calls;
 -- eagerly bound when the first return statement fires).
---: (Ctx, any) -> any
+--: (Ctx, integer) -> integer
 local function make_prescan_stub(ctx, pl)
     local param_anys = {}
     for i = 1, pl do param_anys[i] = ctx.T_ANY end
@@ -1713,7 +1720,7 @@ local function make_prescan_stub(ctx, pl)
     return types_mod.make_func(ctx, param_anys, {ret_var}, -1)
 end
 
---: (Ctx, any, any) -> ()
+--: (Ctx, unknown, unknown) -> ()
 prescan_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         local sid = ctx.ast_lists:get(i)
@@ -1762,20 +1769,20 @@ prescan_block = function(ctx, bs, bl)
     end
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 infer_stmt = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = StmtRule[n.kind]
     if rule then rule(ctx, nid) end
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_EXPR_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     infer_expr(ctx, n.data[0])
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local ns, nl = n.data[0], n.data[1]
@@ -1798,7 +1805,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
         local ann = get_ann(ctx, n.line)
         local ann_tid = nil
         if ann and ann.kind == ANN_TYPE then
+            ctx._ann_warn_line = n.line
             ann_tid = resolve_annotation_type(ctx, ann.type_id)
+            ctx._ann_warn_line = nil
         end
 
         -- Check for a prescan binding in the CURRENT scope (forward-declared module table).
@@ -1876,7 +1885,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     end
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rhs_count = n.data[3]
@@ -2052,7 +2061,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     end
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local name_nid   = n.data[0]
@@ -2063,7 +2072,9 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     local ann = get_ann(ctx, n.line)
     local ann_fn_tid = nil
     if ann and ann.kind == ANN_TYPE then
+        ctx._ann_warn_line = n.line
         local resolved = resolve_annotation_type(ctx, ann.type_id)
+        ctx._ann_warn_line = nil
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
         if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
     end
@@ -2144,14 +2155,14 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     end
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local ret_types = infer_expr_list(ctx, n.data[0], n.data[1])
     add_return(ctx, ret_types)
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_DO_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local saved = ctx.scope
@@ -2160,7 +2171,7 @@ StmtRule[NODE_DO_STMT] = function(ctx, nid)
     ctx.scope = saved
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_WHILE_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     infer_expr(ctx, n.data[0])
@@ -2172,7 +2183,7 @@ StmtRule[NODE_WHILE_STMT] = function(ctx, nid)
     ctx.scope = saved
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local saved = ctx.scope
@@ -2186,7 +2197,7 @@ end
 -- Walks the branch_scope chain up to (not including) base_scope and returns
 -- { [name_id] -> type_id } for names that already existed in base_scope.
 -- This captures narrowings AND assignment rebindings from within the branch.
---: (Ctx, any, any) -> any
+--: (Ctx, unknown, unknown) -> { [integer]: integer }
 local function branch_scope_diff(ctx, branch_scope, base_scope)
     local result = {}
     local s = branch_scope
@@ -2204,7 +2215,7 @@ local function branch_scope_diff(ctx, branch_scope, base_scope)
     return result
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local narrow_mod = require("lib.type.static.narrow")
@@ -2213,6 +2224,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     -- Per-clause state collected during the loop.
     local guard_narrowings = {}  -- Cat E: negated narrowings from exiting clauses
     local branch_ends    = {}    -- [i] -> { name_id -> type_id } for non-exiting clauses
+    --: { [integer]: integer }
     local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
     local has_else       = false
 
@@ -2298,7 +2310,6 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
             -- Its type is the negated narrowing of the clause condition applied to
             -- post_guard (e.g. after `if x == nil` the pass-through has x non-nil).
             if not has_else then
-                --: any
                 local pt = pass_through_neg[name_id] or post_guard
                 add_member(pt)
             end
@@ -2316,7 +2327,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     end
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_FOR_NUM] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     infer_expr(ctx, n.data[1])
@@ -2329,7 +2340,7 @@ StmtRule[NODE_FOR_NUM] = function(ctx, nid)
     ctx.scope = saved
 end
 
---: (Ctx, any) -> ()
+--: (Ctx, unknown) -> ()
 StmtRule[NODE_FOR_IN] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     -- Pre-inspect: detect pairs(t)/ipairs(t) with a single argument to extract
@@ -2408,7 +2419,7 @@ StmtRule[NODE_BREAK_STMT] = function() end
 
 -- Returns true if the annotation TypeSlot at ann_tid is NOT a function with
 -- unnamed params (i.e., no warning needed). Returns false = should warn.
---: (Ctx, any) -> any
+--: (Ctx, integer) -> boolean
 local function ann_fn_params_named(ctx, ann_tid)
     local at = ctx.ann.types:get(ann_tid)
     local fn_at
@@ -2491,6 +2502,7 @@ end
 ---------------------------------------------------------------------------
 
 -- Create a fully initialized checker context.
+--: (unknown, unknown, unknown, unknown, unknown, unknown) -> Ctx
 function M.new_ctx(parse_result, ann_result, pool, err_ctx, filename, scope)
     -- types_mod.new_ctx creates the type arena + field arena + type list pool
     local ctx = types_mod.new_ctx(pool)

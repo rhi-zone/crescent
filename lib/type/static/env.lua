@@ -51,6 +51,7 @@ end
 
 -- Look up a name (intern ID) up the scope chain.
 -- Returns type_id or nil.
+--: (unknown, integer) -> integer?
 function M.lookup(scope, name_id)
     local s = scope
     while s do
