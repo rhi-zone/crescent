@@ -325,6 +325,20 @@ local function signature_at(ctx, text, lsp_line, lsp_char)
     end
     if not call_start then return nil end
 
+    -- Count top-level commas between call_start+1 and cursor to find active param index.
+    local active_param = 0
+    local inner_depth = 0
+    for i = call_start + 1, #prefix do
+        local ch = prefix:sub(i, i)
+        if ch == "(" or ch == "[" or ch == "{" then
+            inner_depth = inner_depth + 1
+        elseif ch == ")" or ch == "]" or ch == "}" then
+            inner_depth = inner_depth - 1
+        elseif ch == "," and inner_depth == 0 then
+            active_param = active_param + 1
+        end
+    end
+
     -- Extract the callee expression: text before '('.
     local callee_str = prefix:sub(1, call_start - 1):match("([%a_][%w_%.%:]*)%s*$")
     if not callee_str then return nil end
@@ -372,7 +386,7 @@ local function signature_at(ctx, text, lsp_line, lsp_char)
     end
 
     if not fn_tid then return nil end
-    return fn_signature(ctx, fn_tid)
+    return fn_signature(ctx, fn_tid), active_param
 end
 
 -- Given a trigger character ("." or ":") and cursor position, try to
@@ -629,15 +643,15 @@ HANDLERS["textDocument/signatureHelp"] = function(state, msg)
         send(ok_resp(msg.id, NULL))
         return
     end
-    local sig = signature_at(ctx, text, ln, col)
+    local sig, active_param = signature_at(ctx, text, ln, col)
     if not sig then
         send(ok_resp(msg.id, NULL))
         return
     end
     send(ok_resp(msg.id, {
-        signatures    = { sig },
+        signatures      = { sig },
         activeSignature = 0,
-        activeParameter = 0,
+        activeParameter = active_param or 0,
     }))
 end
 
