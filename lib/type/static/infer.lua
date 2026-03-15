@@ -105,13 +105,20 @@ local M = {}
 
 -- Compute edit distance between two strings. Returns a number.
 -- Uses a two-row DP to keep memory O(min(m,n)).
+--: (string, string) -> integer
 local function levenshtein(a, b)
+    --: string
+    a = a
+    --: string
+    b = b
     local m, n = #a, #b
     if m == 0 then return n end
     if n == 0 then return m end
     -- Ensure a is the shorter string for space efficiency
     if m > n then a, b, m, n = b, a, n, m end
+    --: any
     local prev = {}
+    --: any
     local curr = {}
     for j = 0, n do prev[j] = j end
     for i = 1, m do
@@ -120,29 +127,43 @@ local function levenshtein(a, b)
             if a:sub(i,i) == b:sub(j,j) then
                 curr[j] = prev[j-1]
             else
-                local d = prev[j-1]
-                if prev[j] < d then d = prev[j] end
-                if curr[j-1] < d then d = curr[j-1] end
+                --: number
+                local pj1 = prev[j-1]
+                --: number
+                local pj  = prev[j]
+                --: number
+                local cj1 = curr[j-1]
+                local d = pj1
+                if pj < d then d = pj end
+                if cj1 < d then d = cj1 end
                 curr[j] = d + 1
             end
         end
         prev, curr = curr, prev
     end
-    return prev[n]
+    --: number
+    local result = prev[n]
+    return result
 end
 
 -- Find closest field name in a closed table type. Returns suggestion string or nil.
 -- obj_t: TypeSlot for TAG_TABLE; fname: string to match against.
+--: (Ctx, any, string) -> string?
 local function field_suggestion(ctx, obj_t, fname)
+    --: any
+    local fields = ctx.fields
     local threshold = math.max(2, math.floor(#fname / 3))
     local best_dist = threshold + 1
     local best_name = nil
     for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
         local fid  = ctx.lists:get(i)
-        local fe   = ctx.fields:get(fid)
+        --: any
+        local fe   = fields:get(fid)
         local name = intern_mod.get(ctx.pool, fe.name_id)
         if name then
             local d = levenshtein(fname, name)
+            --: number
+            d = d
             if d < best_dist then
                 best_dist = d
                 best_name = name
@@ -1104,10 +1125,15 @@ local function check_call_args(ctx, fn_tid, arg_tids, line, col)
         if act_tid then
             local ok, err = unify_mod.unify(ctx, act_tid, exp_tid)
             if not ok then
+                local act_t = ctx.types:get(types_mod.find(ctx, act_tid))
+                local hint = ""
+                if act_t.tag == TAG_UNKNOWN or act_t.tag == TAG_VAR then
+                    hint = "\n  = help: add a type annotation: --: " .. types_mod.display_short(ctx, exp_tid)
+                end
                 report(ctx, line, col,
                     arg_label .. ": cannot pass '" .. types_mod.display_short(ctx, act_tid)
                     .. "' where '" .. types_mod.display_short(ctx, exp_tid) .. "' expected"
-                    .. (err and (": " .. err) or ""))
+                    .. (err and (": " .. err) or "") .. hint)
             end
         else
             local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)

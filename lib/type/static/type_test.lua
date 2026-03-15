@@ -3325,3 +3325,43 @@ end
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- Error suggestions: "did you mean?" and "consider annotating"
+---------------------------------------------------------------------------
+
+assert.describe("error suggestions", function()
+    assert.it("field typo: suggests closest field name (distance 1)", function()
+        has_error([[
+local foo = {} --: { bar: string, count: number }
+local x = foo.baz
+]], "did you mean 'bar'")
+    end)
+
+    assert.it("field typo: suggests closest field name (count_items vs count_item)", function()
+        has_error([[
+local foo = {} --: { count_items: number }
+local x = foo.count_item
+]], "did you mean 'count_items'")
+    end)
+
+    assert.it("field typo: no suggestion when no close match", function()
+        local ec = check([[
+local foo = {} --: { alpha: string, beta: number }
+local x = foo.xyz
+]])
+        assert.ok(errors_mod.has_errors(ec))
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(not msg:find("did you mean"), "should not suggest for distant match, got: " .. msg)
+    end)
+
+    assert.it("unknown arg: passing unknown (open table field) to typed fn suggests annotation", function()
+        -- Open table field access returns unknown; passing to typed fn should suggest annotation
+        has_error([[
+--: (string) -> nil
+local function takes_str(s) end
+local t = {}
+takes_str(t.foo)
+]], "consider")
+    end)
+end)
