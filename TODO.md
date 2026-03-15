@@ -15,6 +15,8 @@
   how to handle FFI-only packages (no build step allowed). Design before coding.
   Performance bar: bun — workload is I/O-bound (network, file copy, lockfile) so
   LuaJIT via FFI syscalls should be competitive; if not, revisit the design.
+  Parallelism: fork-based by default (same model as typechecker Phase 5), configurable
+  (e.g. `--jobs=1` for sequential). No async I/O in LuaJIT core; fork is the right lever.
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: private field visibility enforcement, module-level LSP cache,
