@@ -13,6 +13,8 @@
   Core principle: vendor-first (copy .lua files into your project, you own them).
   Open questions: registry format, lockfile, version resolution, dependency graph,
   how to handle FFI-only packages (no build step allowed). Design before coding.
+  Performance bar: bun — workload is I/O-bound (network, file copy, lockfile) so
+  LuaJIT via FFI syscalls should be competitive; if not, revisit the design.
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: private field visibility enforcement, module-level LSP cache,
