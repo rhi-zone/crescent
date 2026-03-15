@@ -220,11 +220,11 @@ function M.unify(ctx, a, b)
     -- never is bottom
     if ta.tag == TAG_NEVER then return true end
 
-    -- Type variable binding
-    if ta.tag == TAG_VAR then
+    -- Type variable binding (TAG_ROWVAR is treated the same as TAG_VAR for binding)
+    if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR then
         return bind_var(ctx, a, b)
     end
-    if tb.tag == TAG_VAR then
+    if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then
         return bind_var(ctx, b, a)
     end
 
@@ -570,7 +570,8 @@ function M.try_unify(ctx, a, b)
     if tb.tag == TAG_UNKNOWN then return true end
     if ta.tag == TAG_UNKNOWN then return false end
     if ta.tag == TAG_NEVER then return true end
-    if ta.tag == TAG_VAR or tb.tag == TAG_VAR then return true end
+    if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR or
+       tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then return true end
     if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return true end
 
     -- Union LHS: all members must be assignable to b.

@@ -3408,3 +3408,118 @@ takes_str(t.foo)
         assert.ok(not msg:find("consider"), "should not say 'consider annotating', got: " .. msg)
     end)
 end)
+
+assert.describe("checker: literal equality narrowing (x == 'val')", function()
+    assert.it("string literal: narrows union in truthy branch", function()
+        no_errors([[
+--: "ok" | "error"
+local status = "ok"
+--: (string) -> nil
+local function takes_str(s) end
+if status == "ok" then
+    takes_str(status)
+end
+]])
+    end)
+    assert.it("string literal: removes member in falsy branch", function()
+        no_errors([[
+--: "ok" | "error"
+local status = "ok"
+--: ("error") -> nil
+local function takes_err(s) end
+if status ~= "ok" then
+    takes_err(status)
+end
+]])
+    end)
+    assert.it("string literal: symmetric (literal on left)", function()
+        no_errors([[
+--: "ok" | "error"
+local status = "ok"
+--: (string) -> nil
+local function takes_str(s) end
+if "ok" == status then
+    takes_str(status)
+end
+]])
+    end)
+    assert.it("string literal: narrows bare string type to specific literal", function()
+        no_errors([[
+--: string
+local s = "hello"
+--: ("hello") -> nil
+local function takes_hello(x) end
+if s == "hello" then
+    takes_hello(s)
+end
+]])
+    end)
+    assert.it("boolean literal: narrows boolean union", function()
+        no_errors([[
+--: boolean
+local flag = true
+if flag == true then
+    local x = flag -- x: true (literal)
+end
+]])
+    end)
+end)
+
+assert.describe("checker: boolean field discriminant narrowing", function()
+    assert.it("field == true narrows union by boolean field", function()
+        no_errors([[
+--:: WithMethod = { is_method: true, name: string }
+--:: NoMethod = { is_method: false, name: string }
+--:: Node = WithMethod | NoMethod
+--: Node
+local n = { is_method = true, name = "foo" }
+--: (WithMethod) -> nil
+local function handle_method(x) end
+if n.is_method == true then
+    handle_method(n)
+end
+]])
+    end)
+end)
+
+assert.describe("checker: TAG_ROWVAR in unify/try_unify", function()
+    assert.it("open table pattern: field access on var creates rowvar constraint", function()
+        -- This exercises the TAG_ROWVAR binding path in unify
+        no_errors([[
+local function get_name(t)
+    return t.name
+end
+local x = { name = "hello", extra = 1 }
+local n = get_name(x)
+]])
+    end)
+end)
+
+assert.describe("checker: tuple indexing", function()
+    assert.it("tuple[1] returns first element type", function()
+        no_errors([[
+--: (string, number)
+local t = "hello", 42
+--: (string) -> nil
+local function takes_str(s) end
+takes_str(t[1])
+]])
+    end)
+    assert.it("tuple[2] returns second element type", function()
+        no_errors([[
+--: (string, number)
+local t = "hello", 42
+--: (number) -> nil
+local function takes_num(n) end
+takes_num(t[2])
+]])
+    end)
+    assert.it("tuple index out of bounds returns unknown", function()
+        -- t[5] on a 2-element tuple: T_UNKNOWN
+        no_errors([[
+--: (string, number)
+local t = "hello", 42
+local x = t[5]
+]])
+    end)
+end)

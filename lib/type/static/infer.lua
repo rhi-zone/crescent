@@ -1003,6 +1003,17 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         if obj_t.data[4] >= 0 then return ctx.T_UNKNOWN end
     end
 
+    if obj_t.tag == TAG_TUPLE then
+        local kt_t = ctx.types:get(key_r)
+        if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
+            local num = ctx.numvals and ctx.numvals[kt_t.data[1]]
+            if num and num % 1 == 0 and num >= 1 and num <= obj_t.data[1] then
+                return types_mod.find(ctx, ctx.lists:get(obj_t.data[0] + math.floor(num) - 1))
+            end
+        end
+        return ctx.T_UNKNOWN
+    end
+
     if obj_t.tag == TAG_VAR then
         local elem_var = types_mod.make_var(ctx, ctx.scope.level)
         local tbl = types_mod.make_table(ctx, {}, { key_r, elem_var }, -1, {})
@@ -1038,6 +1049,17 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
             end
             if t.data[4] >= 0 then return ctx.T_UNKNOWN end  -- open table: field may exist
             return ctx.T_NIL  -- closed table, key absent
+        end
+        if t.tag == TAG_TUPLE then
+            -- Numeric literal key: return the element at that 1-based index.
+            local kt_t = ctx.types:get(key_r)
+            if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_NUMBER then
+                local num = ctx.numvals and ctx.numvals[kt_t.data[1]]
+                if num and num % 1 == 0 and num >= 1 and num <= t.data[1] then
+                    return types_mod.find(ctx, ctx.lists:get(t.data[0] + math.floor(num) - 1))
+                end
+            end
+            return ctx.T_UNKNOWN  -- out-of-bounds or non-literal key
         end
         return nil  -- not indexable
     end

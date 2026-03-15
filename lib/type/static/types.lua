@@ -490,7 +490,9 @@ function M.subtract(ctx, tid, exclude_tid)
 end
 
 -- Narrow a union by field discriminant. positive=true: keep members where field COULD be lit_intern_id.
-function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive)
+-- lit_kind defaults to LIT_STRING for backwards compat.
+function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit_kind)
+    lit_kind = lit_kind or LIT_STRING
     tid = M.find(ctx, tid)
     local t = ctx.types:get(tid)
     if t.tag ~= TAG_UNION then
@@ -500,7 +502,7 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive)
             if fe then
                 local frt = M.find(ctx, fe.type_id)
                 local ft = ctx.types:get(frt)
-                if ft.tag == TAG_LITERAL and ft.data[0] == LIT_STRING then
+                if ft.tag == TAG_LITERAL and ft.data[0] == lit_kind then
                     local definite = (ft.data[1] == lit_intern_id)
                     if positive and not definite then return ctx.T_NEVER end
                     if not positive and definite then return ctx.T_NEVER end
@@ -520,7 +522,7 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive)
             if fe then
                 local frt = M.find(ctx, fe.type_id)
                 local ft = ctx.types:get(frt)
-                if ft.tag == TAG_LITERAL and ft.data[0] == LIT_STRING then
+                if ft.tag == TAG_LITERAL and ft.data[0] == lit_kind then
                     definite_match = (ft.data[1] == lit_intern_id)
                     possible_match = definite_match
                 end

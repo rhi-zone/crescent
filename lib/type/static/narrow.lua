@@ -28,6 +28,7 @@ local TAG_LITERAL = defs.TAG_LITERAL
 local TAG_STRING  = defs.TAG_STRING
 local LIT_NIL     = defs.LIT_NIL
 local LIT_STRING  = defs.LIT_STRING
+local LIT_BOOLEAN = defs.LIT_BOOLEAN
 
 local M = {}
 
@@ -92,19 +93,55 @@ local function extract_narrowing(ctx, nid)
             end
         end
 
-        -- x.field == "literal"
+        -- x == "literal" or x == true/false (direct identifier equality with a literal)
+        -- x == nil is handled above as nil_check; LIT_NUMBER skipped (numval indices are per-file)
+        if lhs and lhs.kind == NODE_IDENTIFIER then
+            if rhs and rhs.kind == defs.NODE_LITERAL then
+                local rlit_kind = rhs.data[0]
+                if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
+                    return {
+                        kind     = "lit_eq",
+                        name_id  = lhs.data[0],
+                        lit_kind = rlit_kind,
+                        lit_id   = rhs.data[1],
+                        positive = (op == OP_EQ),
+                    }
+                end
+            end
+        end
+        -- symmetric: "literal" == x
+        if rhs and rhs.kind == NODE_IDENTIFIER then
+            if lhs and lhs.kind == defs.NODE_LITERAL then
+                local rlit_kind = lhs.data[0]
+                if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
+                    return {
+                        kind     = "lit_eq",
+                        name_id  = rhs.data[0],
+                        lit_kind = rlit_kind,
+                        lit_id   = lhs.data[1],
+                        positive = (op == OP_EQ),
+                    }
+                end
+            end
+        end
+
+        -- x.field == "literal" or x.field == true/false
         if lhs and lhs.kind == NODE_FIELD_EXPR then
             local obj = ctx.nodes:get(lhs.data[0])
             if obj and obj.kind == NODE_IDENTIFIER then
-                if rhs and rhs.kind == defs.NODE_LITERAL and rhs.data[0] == LIT_STRING then
-                    local positive = (op == OP_EQ)
-                    return {
-                        kind = "field_disc",
-                        name_id = obj.data[0],
-                        field_name_id = lhs.data[1],
-                        lit_intern_id = rhs.data[1],
-                        positive = positive,
-                    }
+                if rhs and rhs.kind == defs.NODE_LITERAL then
+                    local rlit_kind = rhs.data[0]
+                    if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
+                        local positive = (op == OP_EQ)
+                        return {
+                            kind          = "field_disc",
+                            name_id       = obj.data[0],
+                            field_name_id = lhs.data[1],
+                            lit_kind      = rlit_kind,
+                            lit_intern_id = rhs.data[1],
+                            positive      = positive,
+                        }
+                    end
                 end
             end
         end
@@ -249,10 +286,39 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
     if info.kind == "field_disc" then
         if in_truthy == info.positive then
             -- keep members where field matches
-            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, true)
+            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, true, info.lit_kind)
         else
             -- remove members where field matches
-            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, false)
+            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, false, info.lit_kind)
+        end
+    end
+
+    if info.kind == "lit_eq" then
+        local lit_tid = types_mod.make_literal(ctx, info.lit_kind, info.lit_id)
+        local unify_mod = require("lib.type.static.unify")
+        if in_truthy == info.positive then
+            -- Truthy branch: narrow to this specific literal.
+            -- From a union, keep only members that subsume the literal; then return the literal itself.
+            -- From a non-union type, narrow to the literal if the type subsumes it.
+            local tr = types_mod.find(ctx, ty_id)
+            local tt = ctx.types:get(tr)
+            if tt.tag == TAG_UNION then
+                local has_match = false
+                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                    local mid = types_mod.find(ctx, ctx.lists:get(i))
+                    if unify_mod.try_unify(ctx, lit_tid, mid) then
+                        has_match = true; break
+                    end
+                end
+                if not has_match then return ctx.T_NEVER end
+                return lit_tid
+            else
+                if unify_mod.try_unify(ctx, lit_tid, tr) then return lit_tid end
+                return ctx.T_NEVER
+            end
+        else
+            -- Falsy branch: subtract the literal from the type.
+            return types_mod.subtract(ctx, ty_id, lit_tid)
         end
     end
 
@@ -295,7 +361,7 @@ end
 
 -- Extract the name_id targeted by a narrowing info struct.
 local function info_name_id(info)
-    if info.kind == "nil_check" or info.kind == "type_check" then
+    if info.kind == "nil_check" or info.kind == "type_check" or info.kind == "lit_eq" then
         return info.name_id
     elseif info.kind == "field_disc" then
         return info.name_id
@@ -303,7 +369,7 @@ local function info_name_id(info)
         return info.obj_name_id
     elseif info.kind == "negation" then
         local inner = info.inner
-        if inner.kind == "nil_check" or inner.kind == "type_check" then
+        if inner.kind == "nil_check" or inner.kind == "type_check" or inner.kind == "lit_eq" then
             return inner.name_id
         elseif inner.kind == "field_disc" then
             return inner.name_id
