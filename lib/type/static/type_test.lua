@@ -4096,4 +4096,22 @@ local n = s:len()
 local n = ("hello"):upper()
 ]])
     end)
+
+    assert.it("nil narrowing: x ~= nil allows string method call", function()
+        v3_no_errors([[
+local x --: string | nil
+if x ~= nil then
+    local n = x:len()
+end
+]])
+    end)
+
+    assert.it("type() narrowing: type(x) == \"string\" allows string method call", function()
+        v3_no_errors([[
+local x --: string | integer
+if type(x) == "string" then
+    local n = x:len()
+end
+]])
+    end)
 end)

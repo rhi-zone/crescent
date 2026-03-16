@@ -921,8 +921,10 @@ end
 StmtRule[NODE_WHILE_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     gen_expr(ctx, n.data[0])
+    local narrow_mod = require("lib.type.static.narrow")
+    local narrowed = narrow_mod.narrow_scope(ctx, n.data[0], true)
     local saved = ctx.scope
-    ctx.scope = env_mod.child(ctx.scope)
+    ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
     gen_block(ctx, n.data[1], n.data[2])
     ctx.scope = saved
 end
@@ -938,12 +940,18 @@ end
 
 StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
+    local narrow_mod = require("lib.type.static.narrow")
     local saved = ctx.scope
     for i = n.data[0], n.data[0] + n.data[1] - 1 do
         local cn = ctx.nodes:get(ctx.ast_lists:get(i))
         local test_nid = cn.data[0]
-        ctx.scope = env_mod.child(saved)
-        if test_nid >= 0 then gen_expr(ctx, test_nid) end
+        if test_nid >= 0 then
+            gen_expr(ctx, test_nid)
+            local narrowed = narrow_mod.narrow_scope(ctx, test_nid, true)
+            ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
+        else
+            ctx.scope = env_mod.child(saved)
+        end
         gen_block(ctx, cn.data[1], cn.data[2])
         ctx.scope = saved
     end
