@@ -117,6 +117,66 @@ T.describe("command routing", function()
 	end
 end)
 
+-- ── run: script_dir extraction ───────────────────────────────────────────────
+
+T.describe("run: script_dir", function()
+	-- Mirror the logic in lib/cr/run.lua script_dir().
+	local function script_dir(path)
+		return path:match("^(.*[/\\])") or "."
+	end
+
+	T.it("extracts dir from absolute path", function()
+		T.eq(script_dir("/home/user/project/foo.lua"), "/home/user/project/")
+	end)
+
+	T.it("extracts dir from relative path with directory", function()
+		T.eq(script_dir("scripts/run.lua"), "scripts/")
+	end)
+
+	T.it("returns '.' for bare filename", function()
+		T.eq(script_dir("foo.lua"), ".")
+	end)
+
+	T.it("handles nested path", function()
+		T.eq(script_dir("a/b/c/d.lua"), "a/b/c/")
+	end)
+
+	T.it("handles Windows-style backslash separator", function()
+		T.eq(script_dir("a\\b\\c.lua"), "a\\b\\")
+	end)
+end)
+
+-- ── run: arg-building logic ───────────────────────────────────────────────────
+
+T.describe("run: arg building", function()
+	-- Mirror the arg-building in M.main: argv[1]=file, argv[2..n]=script args.
+	local function build_arg(argv)
+		local a = { [0] = argv[1] }
+		for i = 2, #argv do
+			a[i - 1] = argv[i]
+		end
+		return a
+	end
+
+	T.it("arg[0] is the script path", function()
+		local a = build_arg({ "foo.lua" })
+		T.eq(a[0], "foo.lua")
+	end)
+
+	T.it("no extra args → arg length is 0", function()
+		local a = build_arg({ "foo.lua" })
+		T.eq(#a, 0)
+	end)
+
+	T.it("extra args land at arg[1], arg[2], ...", function()
+		local a = build_arg({ "foo.lua", "hello", "world" })
+		T.eq(a[0], "foo.lua")
+		T.eq(a[1], "hello")
+		T.eq(a[2], "world")
+		T.eq(#a, 2)
+	end)
+end)
+
 -- ── scripts lookup (mock) ─────────────────────────────────────────────────────
 
 T.describe("scripts lookup logic", function()
