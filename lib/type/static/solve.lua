@@ -53,6 +53,16 @@ local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
 end
 
+-- Bind a free type var to a target type directly (bypasses unify's bilateral-any short-circuit).
+-- Use this when we want to resolve a result VAR to a concrete type (T_ANY, T_UNKNOWN, etc.).
+local function bind_to(ctx, tid, target)
+    local root = find(ctx, tid)
+    local t = ctx.types:get(root)
+    if t.tag == TAG_VAR or t.tag == TAG_ROWVAR then
+        t.data[2] = target
+    end
+end
+
 -- Resolve arithmetic result type from primitive operands.
 -- Returns result_tid or nil if operands are not numeric.
 local ARITH_OPS_SET = {
@@ -163,12 +173,12 @@ local function solve_has_field(ctx, c)
 
     if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
         -- Resolve result to T_ANY/T_UNKNOWN silently
-        unify_mod.unify(ctx, res_tid, obj_t.tag == TAG_ANY and ctx.T_ANY or ctx.T_UNKNOWN)
+        bind_to(ctx, res_tid, obj_t.tag == TAG_ANY and ctx.T_ANY or ctx.T_UNKNOWN)
         return true
     end
 
     if obj_t.tag == TAG_NEVER then
-        unify_mod.unify(ctx, res_tid, ctx.T_NEVER)
+        bind_to(ctx, res_tid, ctx.T_NEVER)
         return true
     end
 
@@ -197,12 +207,12 @@ local function solve_has_field(ctx, c)
         end
         -- Open table: field may exist
         if obj_t.data[4] >= 0 then
-            unify_mod.unify(ctx, res_tid, ctx.T_UNKNOWN)
+            bind_to(ctx, res_tid, ctx.T_UNKNOWN)
             return true
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
         add_error(ctx, line, col, "field '" .. fname .. "' not found")
-        unify_mod.unify(ctx, res_tid, ctx.T_ANY)
+        bind_to(ctx, res_tid, ctx.T_ANY)
         return false
     end
 
@@ -234,9 +244,10 @@ local function solve_has_field(ctx, c)
                     closed_miss = true
                 end
             elseif mt.tag == TAG_ANY then
-                unify_mod.unify(ctx, res_tid, ctx.T_ANY)
+                bind_to(ctx, res_tid, ctx.T_ANY)
                 return true
-            elseif mt.tag == TAG_UNKNOWN then
+            elseif mt.tag == TAG_UNKNOWN or mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
+                -- Unknown/unresolved types are open — field may exist
                 open_miss = true
             else
                 closed_miss = true
@@ -246,17 +257,17 @@ local function solve_has_field(ctx, c)
             if open_miss   then field_types[#field_types + 1] = ctx.T_UNKNOWN end
             if closed_miss then field_types[#field_types + 1] = ctx.T_NIL end
             local result = types_mod.make_union(ctx, field_types)
-            unify_mod.unify(ctx, res_tid, result)
+            bind_to(ctx, res_tid, result)
             return true
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
         add_error(ctx, line, col, "field '" .. fname .. "' not found in union")
-        unify_mod.unify(ctx, res_tid, ctx.T_ANY)
+        bind_to(ctx, res_tid, ctx.T_ANY)
         return false
     end
 
     -- For any other type, resolve result to T_ANY
-    unify_mod.unify(ctx, res_tid, ctx.T_ANY)
+    bind_to(ctx, res_tid, ctx.T_ANY)
     return true
 end
 
@@ -268,12 +279,12 @@ local function solve_callable(ctx, c)
     local callee_t   = ctx.types:get(callee_tid)
 
     if callee_t.tag == TAG_ANY or callee_t.tag == TAG_UNKNOWN then
-        unify_mod.unify(ctx, ret_tid, ctx.T_ANY)
+        bind_to(ctx, ret_tid, ctx.T_ANY)
         return true
     end
 
     if callee_t.tag == TAG_NEVER then
-        unify_mod.unify(ctx, ret_tid, ctx.T_NEVER)
+        bind_to(ctx, ret_tid, ctx.T_NEVER)
         return true
     end
 
@@ -284,7 +295,7 @@ local function solve_callable(ctx, c)
 
     if callee_t.tag == TAG_VAR or callee_t.tag == TAG_ROWVAR then
         -- Unknown callee: resolve ret to T_ANY
-        unify_mod.unify(ctx, ret_tid, ctx.T_ANY)
+        bind_to(ctx, ret_tid, ctx.T_ANY)
         return true
     end
 
@@ -362,7 +373,7 @@ local function solve_callable(ctx, c)
     -- Non-function: error
     add_error(ctx, line, col,
         "cannot call value of type '" .. types_mod.display_short(ctx, callee_tid) .. "'")
-    unify_mod.unify(ctx, ret_tid, ctx.T_ANY)
+    bind_to(ctx, ret_tid, ctx.T_ANY)
     return false
 end
 
@@ -439,22 +450,44 @@ local function solve_arith(ctx, c)
 end
 
 local function solve_return(ctx, c)
-    local val_tid      = find(ctx, c[2])
-    local expected_tid = find(ctx, c[3])
-    local line, col    = c[4], c[5]
-    -- Same semantics as C_SUB
-    local widened = widen_for_sub(ctx, val_tid)
-    local ok, err = unify_mod.unify(ctx, widened, expected_tid)
-    if not ok then
-        -- Bind rather than error: the return collector gathers types.
-        -- If expected_tid is still a free var we want to bind it, not error.
-        -- unify already attempted binding; if it failed, report.
-        add_error(ctx, line, col,
-            "return type mismatch: cannot return '"
-            .. types_mod.display_short(ctx, val_tid)
-            .. "': " .. (err or "type mismatch"))
+    local val_tid   = find(ctx, c[2])
+    local line, col = c[4], c[5]
+    local widened   = widen_for_sub(ctx, val_tid)
+
+    -- c[3] is the ret_var created by gen_function for this function body.
+    -- If it's still a free VAR, bind directly (first return path).
+    -- If it's already bound (subsequent return path), widen to union.
+    -- This mirrors v2 infer_function's return-type accumulation.
+    local ret_var_id = c[3]
+    local ret_var_t  = ctx.types:get(ret_var_id)
+
+    if ret_var_t.tag ~= TAG_VAR then
+        -- Annotated return type: check assignability
+        local expected_tid = find(ctx, ret_var_id)
+        local ok, err = unify_mod.unify(ctx, widened, expected_tid)
+        if not ok then
+            add_error(ctx, line, col,
+                "return type mismatch: cannot return '"
+                .. types_mod.display_short(ctx, val_tid)
+                .. "': " .. (err or "type mismatch"))
+        end
+        return ok
     end
-    return ok
+
+    local current = find(ctx, ret_var_id)
+    local ct = ctx.types:get(current)
+
+    if ct.tag == TAG_VAR then
+        -- First return path: bind the ret_var directly
+        ct.data[2] = widened
+    else
+        -- Subsequent return path: widen the return type to include this value
+        local new_union = types_mod.make_union(ctx, { current, widened })
+        -- Update ret_var's binding to the new wider union
+        -- ret_var_t.data[2] currently points to 'current'; redirect to new_union
+        ret_var_t.data[2] = new_union
+    end
+    return true
 end
 
 -- ---------------------------------------------------------------------------

@@ -638,8 +638,10 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local saved = ctx.scope
     ctx.scope = fn_scope
 
-    -- Fresh return variable for this function
-    local ret_var = types_mod.make_var(ctx, fn_scope.level)
+    -- Fresh return variable for this function.
+    -- Use saved.level so generalize does NOT mark it generic; the solve pass will
+    -- bind it to the actual union of return types from the body.
+    local ret_var = types_mod.make_var(ctx, saved.level)
     ctx.return_vars[#ctx.return_vars + 1] = ret_var
 
     gen_prescan_block(ctx, bs, bl)
@@ -812,9 +814,10 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 ctx.require_sources[name_id] = stmt_require_mod
             end
         elseif prescanned then
-            if rhs_tid then
-                emit(ctx, { C_UNIFY, rhs_tid, prescanned, n.line, n.col })
-            end
+            -- Prescan already bound this name to a rich type (e.g. M with all method fields).
+            -- The inferred RHS (e.g. `{}`) is a closed empty table — unifying would fail.
+            -- Keep the prescan binding as-is, mirroring v2 infer.lua's behavior.
+            -- (v2 calls unify but ignores the result; the prescan type wins.)
         else
             local bind_tid
             if rhs_tid then
@@ -1033,6 +1036,11 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
                 local ot2 = ctx.types:get(obj_tid)
                 local new_t = ctx.types:get(new_tbl)
                 for k = 0, 6 do ot2.data[k] = new_t.data[k] end
+            else
+                -- Prescan stub exists: update the field to point to the inferred
+                -- function type (mirrors v2 infer.lua: fe.type_id = fn_tid).
+                -- This ensures callers see the solved return type, not the stub var.
+                fe.type_id = fn_tid
             end
         end
     end
