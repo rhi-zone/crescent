@@ -2,6 +2,26 @@
 
 ## priorities (medium horizon)
 
+- [ ] **Registry + docs site** (`pkg.crescent.run`) — see `docs/registry-design.md` for full vision.
+  Key pieces: static JSON index (GitHub Pages), install fetches from GitHub releases directly,
+  no server required. Docs site renders auto-generated type signatures from typechecker output.
+  Uniquely: **Hoogle-style type search** — parse a query type annotation, unify against every
+  exported binding in the index using the existing unify.lua engine. The hard part (type inference)
+  is already done. Three sub-projects:
+  - [ ] Stabilise `--dump` output as machine-readable JSON (exported bindings + type sigs)
+  - [ ] Docgen tool (`lib/doc/`) — extract `---` doc comments + inferred types → JSON/HTML.
+    Performance bar: rustdoc-competitive cold-start. Driven by the typechecker, so incremental
+    caching via CRI applies. Output formats: JSON (for registry index), HTML (for docs site),
+    Markdown (for GitHub rendering).
+  - [ ] Type search index — at publish time, serialize all exported function types to index;
+    search = unify(query_type, candidate) over all entries. Backend can be the typechecker
+    itself running as a query engine (no new unification logic needed).
+  - [ ] Static docs site (bun) — renders docgen JSON; search calls type-search endpoint or
+    runs unification client-side via WASM build of the typechecker.
+  - [ ] GitHub Action — on release tag: run typechecker + docgen, publish JSON to index.
+  - [ ] `cr add <name>` — resolve short name via index.json, fetch GitHub release tarball,
+    extract to `dep/<name>/`, resolve transitive deps.
+
 - [ ] **Test runner performance** — benchmark against bun; must be at parity or better.
   Current runner shells out to `find` + `sort`, then `dofile`s each file sequentially.
   Profile first: startup cost, require() overhead, per-file execution. Candidates:
@@ -474,3 +494,14 @@ See `docs/pkg-design.md` for full design.
 - [x] Multi-registry support with priority ordering and per-registry auth — `lib/pkg/config.lua` (2026-03-16)
 - [ ] Fork-based parallel fetch with `--jobs=N` (default: CPU count) — v1 fetch is sequential
 - [ ] `cr publish` — not yet implemented
+
+## stretch goals (low priority, high reward)
+
+- [ ] **Backend framework** (`lib/web/`) — high-quality, typed, idiomatic Lua web framework.
+  HTTP server + router (lib/http already exists) + middleware pipeline + request/response types +
+  SQLite ORM layer + templating. API inspired by Lapis/Sinatra but first-class crescent types
+  throughout. Goal: write a web app in Lua that a Rails/Express developer finds familiar.
+
+- [ ] **Frontend framework** (`lib/ui/`) — Lua-to-JS via lib/js transpiler (already exists).
+  Component model, reactivity, DOM bindings. Stretch: WASM build of LuaJIT for true client-side
+  Lua. Very early/experimental — depends on lib/js maturity first.
