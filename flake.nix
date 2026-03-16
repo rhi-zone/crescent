@@ -20,6 +20,9 @@
             bun
           ];
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
+          shellHook = ''
+            export PATH="$PWD/bin:$PATH"
+          '';
         };
       }
     );
