@@ -36,22 +36,42 @@
 ## stdlib
 
 ### package audit
-Systematic pass over all packages under `lib/`. Lenses:
-- **Performance** — hot paths allocating unnecessarily, missing caching, avoidable copies
-- **Consistency** — naming conventions, error return style (`nil, err` vs throw), module shape
-- **API quality** — awkward call sites, missing convenience wrappers, over-exposed internals
-- **Correctness** — edge cases, untested paths, silent failures
-- **Vendorability** — does each package stand alone? correct `package.path` guard? LICENSE?
+103 packages surveyed. Findings below by package.
 
-Suggested order: start with the most-used packages (http, fs, test, cli) then work outward.
-Output: concrete TODO items filed here per package as issues are found, plus fixes where obvious.
+**Verdict summary:** type/static, test, sqlite, ljsocket, lunajson, cbor, base64, sha1, urlencode, fs/dir_list, cparser, git → `clean`. http, pkg, websocket, cli → `needs-work`.
 
-- [ ] http: extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
-- [ ] http: extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
+#### http
+- [ ] No `init.lua` — re-export `format`, `client`, `status` from a top-level init
+- [ ] `http/client`: replace `assert(socket.create(...))` with `return nil, err` — fails with unhelpful message on socket error
+- [ ] `http/format`: silently drops unparseable headers — log or return error
+- [ ] extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
+- [ ] extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
+
+#### websocket
+- [ ] 15 TODOs in 274 lines — either complete or mark as experimental in README
+- [ ] No tests — frame masking/unmasking and upgrade logic need coverage
+- [ ] Add `package.path` guard
+
+#### sqlite
+- [ ] No tests — add coverage for query, parameter binding, iteration, error paths
+- [ ] blob support missing (TODO in source)
+- [ ] macOS: dlopen path for libsqlite3 not set (Linux-only currently)
+
+#### pkg
+- [ ] `install.lua`: resolver and downloader are stubs — complete the install algorithm
+- [ ] `config.lua`: stub — implement `~/.crescent/config.lua` loading
+
+#### cli (lib/cli/)
+- [ ] Scripts mix `main()` logic with library code — not composable
+- [ ] Many scripts have implicit dep on lib/ layout; add path fixups or document
+- [ ] Review lib/cli/ scripts for which are worth keeping vs deleting
+
+#### cross-cutting
+- [ ] Standardise error return style: prefer `nil, err` for recoverable errors; `error()` only for invariant violations. Affected: http/client (uses assert), cbor/lunajson (uses error() for encode failures — acceptable but document the choice)
+- [ ] LICENSE files: most vendored packages have headers but no LICENSE file — add or verify (ljsocket, lunajson, cbor, sha1, base64, cparser, git)
+- [ ] `package.path` guard missing from websocket and http submodules — add where standalone use is expected
 - [ ] Review and polish all libraries pulled from ~/git/lua (bulk import done)
 - [ ] lib/todo/: conflicts with dep/todo/ (stubs for jpeg, png, xcb, soloud + a sqlitex.lua, webp.lua) — decide what to keep
-- [ ] Audit vendored third-party libs (ljsocket, lunajson, sqlite, cparser, etc.) — ensure LICENSE files present
-- [ ] Review lib/cli/ scripts — many have implicit dep on lib/ layout, may need path fixups
 - [ ] Remove or integrate duplicate/overlapping libs (e.g., mock.lua vs mock/, lil.lua vs lil/)
 - [ ] replx: add provenance tracking for lazy-loaded globals (symbol → source module)
 - [ ] FFI bindings: add ABI sanity checks (sizeof/offsetof assertions for wlroots version skew)
