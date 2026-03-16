@@ -181,7 +181,7 @@ local function extract_narrowing(ctx, nid)
                 local callee_name = intern_mod.get(ctx.pool, callee.data[0])
                 if callee_name == "type" and lhs.data[2] == 1 then
                     -- One argument: type(x)
-                    local arg_nid = ctx.lists:get(lhs.data[1])
+                    local arg_nid = ctx.ast_lists:get(lhs.data[1])
                     local arg = ctx.nodes:get(arg_nid)
                     if arg and arg.kind == NODE_IDENTIFIER then
                         if rhs and rhs.kind == defs.NODE_LITERAL and rhs.data[0] == LIT_STRING then
