@@ -252,12 +252,12 @@ Design: `docs/typechecker-v3.md`. Implementation: `lib/type/static/constrain.lua
 Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs alongside v2.
 
 **Phase 1 blockers (reach parity with v2):**
-- [ ] String method dispatch (`s:gsub(...)` via prim_meta)
-- [ ] prim_index / metamethod lookup for primitives
-- [ ] Narrowing (type(), nil checks, `if x.tag == "foo"` — reads from `find()` after solve)
-- [ ] pcall / xpcall return type inference
-- [ ] Iterator inference (`for k, v in pairs(t)`)
-- [ ] `or`-expression union inference (`x or default` → `T | U`)
+- [x] String method dispatch (`s:gsub(...)` via prim_meta) — prim_index lookup in solve_has_field
+- [x] prim_index / metamethod lookup for primitives — same
+- [x] Narrowing (type(), nil checks, `if x.tag == "foo"`) — narrow_scope/apply_narrowed in constrain.lua
+- [x] pcall / xpcall — already correct via stdlib.d.lua `any` param declarations
+- [x] Iterator inference (`for k, v in pairs(t)`) — already implemented in constrain.lua
+- [x] `or`-expression union inference (`x or default` → `T | U`) — already implemented in constrain.lua
 - [ ] Correlated multi-return narrowing (backlog: `if pat ~= nil then` narrows `maj`/`min` too)
 
 **Phase 2 — cutover:**
