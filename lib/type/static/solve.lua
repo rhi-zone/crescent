@@ -472,24 +472,44 @@ function M.solve(ctx, constraints)
         [C_RETURN]    = solve_return,
     }
 
-    -- Iterate to fixpoint (max 3 passes for recursive types)
+    -- Iterate to fixpoint (max 3 passes for recursive types).
+    -- Suppress error emission on all but the final pass to avoid duplicates.
+    local real_err = ctx.err
+    local silent_err = { errors = {}, warnings = {} }
+
     for pass = 1, 3 do
         local changed = false
+        -- Use silent error context on non-final passes
+        ctx.err = (pass < 3) and silent_err or real_err
+        silent_err.errors = {}
+        silent_err.warnings = {}
+
         for _, c in ipairs(constraints) do
             local kind = c[1]
             local handler = handlers[kind]
             if handler then
-                -- Track var state before
-                local t_before = ctx.types:get(find(ctx, c[2]))
+                -- Track var state before (c[2] is a tid for all kinds except C_ARITH)
+                local probe = kind ~= constrain.C_ARITH and c[2] or c[3]
+                local t_before = ctx.types:get(find(ctx, probe))
                 local tag_before = t_before.tag
                 handler(ctx, c)
-                -- If a var became concrete, mark changed for another pass
-                local t_after = ctx.types:get(find(ctx, c[2]))
+                local t_after = ctx.types:get(find(ctx, probe))
                 if t_after.tag ~= tag_before then changed = true end
             end
         end
-        if not changed then break end
+        if not changed then
+            -- Converged before pass 3 — re-run once more with real_err to emit errors
+            if pass < 3 then
+                ctx.err = real_err
+                for _, c in ipairs(constraints) do
+                    local handler = handlers[c[1]]
+                    if handler then handler(ctx, c) end
+                end
+            end
+            break
+        end
     end
+    ctx.err = real_err
 end
 
 return M
