@@ -525,7 +525,18 @@ HANDLERS["initialize"] = function(state, msg)
         state.root_path = "."
     end
     -- Wire disk cache for cross-session .cri persistence.
-    local cache_dir = (os.getenv("HOME") or ".") .. "/.crescent/type-cache"
+    local cache_dir
+    local opts = p.initializationOptions
+    if opts and opts.cachePath then
+        cache_dir = opts.cachePath
+    else
+        local xdg = os.getenv("XDG_CACHE_HOME")
+        if xdg and xdg ~= "" then
+            cache_dir = xdg .. "/crescent/cri/"
+        else
+            cache_dir = (os.getenv("HOME") or ".") .. "/.cache/crescent/cri/"
+        end
+    end
     os.execute("mkdir -p " .. cache_dir)
     check.set_cache_dir(cache_dir)
     send(ok_resp(msg.id, {
