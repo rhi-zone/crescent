@@ -1726,7 +1726,7 @@ end
 -- Block / statement inference
 ---------------------------------------------------------------------------
 
---: (Ctx, unknown, unknown) -> ()
+--: (Ctx, integer, integer) -> ()
 infer_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         infer_stmt(ctx, ctx.ast_lists:get(i))
@@ -1845,7 +1845,7 @@ local function make_prescan_stub(ctx, pl)
     return types_mod.make_func(ctx, param_anys, {ret_var}, -1)
 end
 
---: (Ctx, unknown, unknown) -> ()
+--: (Ctx, integer, integer) -> ()
 prescan_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         local sid = ctx.ast_lists:get(i)
