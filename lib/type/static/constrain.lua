@@ -85,7 +85,8 @@ local TAG_NAMED    = defs.TAG_NAMED
 local TAG_NOMINAL  = defs.TAG_NOMINAL
 local TAG_FORALL   = defs.TAG_FORALL
 local TAG_TUPLE    = defs.TAG_TUPLE
-local TAG_NEVER    = defs.TAG_NEVER
+local TAG_NEVER       = defs.TAG_NEVER
+local TAG_ENUM_MEMBER = defs.TAG_ENUM_MEMBER
 
 local E = defs.E
 
@@ -797,6 +798,37 @@ gen_block = function(ctx, bs, bl)
     end
 end
 
+-- If all fields of a table literal are same-kind literals (all LIT_INTEGER or all LIT_STRING),
+-- rewrite each field's type_id to a TAG_ENUM_MEMBER so `Status.OK` displays as `Status.OK`.
+-- enum_name_id is the intern ID of the variable name (e.g. "Status").
+-- No-op when fields are mixed kinds, empty, or contain non-literals.
+local function try_promote_enum(ctx, tbl_tid, enum_name_id)
+    local ot = ctx.types:get(types_mod.find(ctx, tbl_tid))
+    if ot.tag ~= TAG_TABLE then return end
+    local fs, fl = ot.data[0], ot.data[1]
+    if fl == 0 then return end
+    local lit_kind = nil
+    local entries = {}  -- {feid, member_name_id, lit_kind, value}
+    for i = fs, fs + fl - 1 do
+        local fe = ctx.fields:get(ctx.lists:get(i))
+        local vt = ctx.types:get(types_mod.find(ctx, fe.type_id))
+        if vt.tag ~= TAG_LITERAL then return end
+        local k = vt.data[0]
+        if k ~= LIT_INTEGER and k ~= LIT_STRING then return end  -- booleans/nil: skip
+        if lit_kind == nil then lit_kind = k
+        elseif lit_kind ~= k then return end  -- mixed kinds: not an enum
+        entries[#entries + 1] = { feid = ctx.lists:get(i), member_name_id = fe.name_id,
+                                  lit_kind = k, value = vt.data[1] }
+    end
+    for _, info in ipairs(entries) do
+        local mem_tid = types_mod.make_enum_member(ctx, enum_name_id,
+            info.member_name_id, info.lit_kind, info.value)
+        -- Re-fetch FieldEntry after make_enum_member (arena may have grown)
+        local fe = ctx.fields:get(info.feid)
+        fe.type_id = mem_tid
+    end
+end
+
 local StmtRule = {}
 
 gen_stmt = function(ctx, nid)
@@ -888,6 +920,14 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
             if stmt_require_mod and i == 0 and el == 1 then
                 ctx.require_sources[name_id] = stmt_require_mod
+            end
+            -- After binding a single-name table literal with no annotation, try to promote
+            -- it to an enum (e.g. `local Status = { OK = 1, ERR = 2 }`).
+            if nl == 1 and el == 1 and bind_tid then
+                local rhs_nid = ctx.ast_lists:get(es)
+                if ctx.nodes:get(rhs_nid).kind == NODE_TABLE_EXPR then
+                    try_promote_enum(ctx, types_mod.find(ctx, bind_tid), name_id)
+                end
             end
         end
     end
