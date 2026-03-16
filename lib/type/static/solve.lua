@@ -10,20 +10,21 @@ local intern_mod = require("lib.type.static.intern")
 local env_mod    = require("lib.type.static.env")
 local constrain  = require("lib.type.static.constrain")
 
-local TAG_ANY      = defs.TAG_ANY
-local TAG_UNKNOWN  = defs.TAG_UNKNOWN
-local TAG_NIL      = defs.TAG_NIL
-local TAG_NUMBER   = defs.TAG_NUMBER
-local TAG_INTEGER  = defs.TAG_INTEGER
-local TAG_STRING   = defs.TAG_STRING
-local TAG_LITERAL  = defs.TAG_LITERAL
-local TAG_FUNCTION = defs.TAG_FUNCTION
-local TAG_TABLE    = defs.TAG_TABLE
-local TAG_UNION    = defs.TAG_UNION
-local TAG_VAR      = defs.TAG_VAR
-local TAG_ROWVAR   = defs.TAG_ROWVAR
-local TAG_NEVER    = defs.TAG_NEVER
-local TAG_NOMINAL  = defs.TAG_NOMINAL
+local TAG_ANY          = defs.TAG_ANY
+local TAG_UNKNOWN      = defs.TAG_UNKNOWN
+local TAG_NIL          = defs.TAG_NIL
+local TAG_NUMBER       = defs.TAG_NUMBER
+local TAG_INTEGER      = defs.TAG_INTEGER
+local TAG_STRING       = defs.TAG_STRING
+local TAG_LITERAL      = defs.TAG_LITERAL
+local TAG_FUNCTION     = defs.TAG_FUNCTION
+local TAG_TABLE        = defs.TAG_TABLE
+local TAG_UNION        = defs.TAG_UNION
+local TAG_INTERSECTION = defs.TAG_INTERSECTION
+local TAG_VAR          = defs.TAG_VAR
+local TAG_ROWVAR       = defs.TAG_ROWVAR
+local TAG_NEVER        = defs.TAG_NEVER
+local TAG_NOMINAL      = defs.TAG_NOMINAL
 
 local LIT_INTEGER = defs.LIT_INTEGER
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -35,6 +36,7 @@ local C_HAS_FIELD = constrain.C_HAS_FIELD
 local C_CALLABLE  = constrain.C_CALLABLE
 local C_ARITH     = constrain.C_ARITH
 local C_RETURN    = constrain.C_RETURN
+local C_COMPARE   = constrain.C_COMPARE
 
 local find = types_mod.find
 
@@ -130,6 +132,19 @@ local function solve_sub(ctx, c)
     local expected = find(ctx, c[3])
     local line, col = c[4], c[5]
 
+    -- Fast path: check direct assignability without widening.
+    -- Allows literal types to satisfy union/literal expectations, e.g. "ok" → "ok"|"error",
+    -- or 3.14 → 3.14 (float literal narrowing round-trip).
+    -- Skip if expected is a free type var (needs unify to bind it, not just a check).
+    do
+        local et = ctx.types:get(expected)
+        if et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR then
+            if unify_mod.try_unify(ctx, actual, expected) then
+                return true
+            end
+        end
+    end
+
     -- Widen actual literals before constraining
     local widened = widen_for_sub(ctx, actual)
 
@@ -214,9 +229,11 @@ local function solve_has_field(ctx, c)
                     end
                 end
             end
-            -- Primitive with no matching field in prim_index — unknown result
+            -- Primitive with no matching method: error
+            local fname = intern_mod.get(ctx.pool, name_id) or "?"
+            add_error(ctx, line, col, "no method '" .. fname .. "' on this type")
             bind_to(ctx, res_tid, ctx.T_ANY)
-            return true
+            return false
         end
     end
 
@@ -243,7 +260,7 @@ local function solve_has_field(ctx, c)
             return true
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
-        add_error(ctx, line, col, "field '" .. fname .. "' not found")
+        add_error(ctx, line, col, "field '" .. fname .. "' doesn't exist")
         bind_to(ctx, res_tid, ctx.T_ANY)
         return false
     end
@@ -293,9 +310,48 @@ local function solve_has_field(ctx, c)
             return true
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
-        add_error(ctx, line, col, "field '" .. fname .. "' not found in union")
+        add_error(ctx, line, col, "field '" .. fname .. "' doesn't exist in union")
         bind_to(ctx, res_tid, ctx.T_ANY)
         return false
+    end
+
+    if obj_t.tag == TAG_INTERSECTION then
+        -- Field must exist in ALL closed members; if any open member, result may exist.
+        local field_types = {}
+        local any_open = false
+        local all_miss = true
+        for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt  = ctx.types:get(mid)
+            if mt.tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx, mid, name_id)
+                if fe then
+                    field_types[#field_types + 1] = find(ctx, fe.type_id)
+                    all_miss = false
+                elseif mt.data[4] >= 0 then
+                    any_open = true
+                    all_miss = false
+                end
+            elseif mt.tag == TAG_ANY then
+                bind_to(ctx, res_tid, ctx.T_ANY)
+                return true
+            elseif mt.tag == TAG_UNKNOWN or mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
+                any_open = true
+                all_miss = false
+            end
+        end
+        if all_miss and not any_open then
+            local fname = intern_mod.get(ctx.pool, name_id) or "?"
+            add_error(ctx, line, col, "field '" .. fname .. "' doesn't exist")
+            bind_to(ctx, res_tid, ctx.T_ANY)
+            return false
+        end
+        if any_open then field_types[#field_types + 1] = ctx.T_UNKNOWN end
+        local result = #field_types == 0 and ctx.T_UNKNOWN
+            or #field_types == 1 and field_types[1]
+            or types_mod.make_union(ctx, field_types)
+        bind_to(ctx, res_tid, result)
+        return true
     end
 
     -- For any other type, resolve result to T_ANY
@@ -332,6 +388,11 @@ local function solve_callable(ctx, c)
     end
 
     if callee_t.tag == TAG_FUNCTION then
+        -- Instantiate generic function (let-polymorphism).
+        -- This is needed for method calls where the callee was a free var at gen time:
+        -- FLAG_GENERIC params (including 'self') get fresh vars so occurs check doesn't fail.
+        callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
+        callee_t   = ctx.types:get(callee_tid)
         -- Unify arguments with parameters
         local pl = callee_t.data[1]
         local has_names = callee_t.data[6] > 0
@@ -339,6 +400,13 @@ local function solve_callable(ctx, c)
             local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
             local act_tid = arg_tids[i + 1]
             if act_tid then
+                -- Fast path: try direct assignability (preserves literal-to-literal/union).
+                local act_r = find(ctx, act_tid)
+                local et = ctx.types:get(exp_tid)
+                if et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
+                  and unify_mod.try_unify(ctx, act_r, exp_tid) then
+                    -- ok
+                else
                 local widened = widen_for_sub(ctx, act_tid)
                 local ok, err = unify_mod.unify(ctx, widened, exp_tid)
                 if not ok then
@@ -381,6 +449,7 @@ local function solve_callable(ctx, c)
                             .. (err and (": " .. err) or ""))
                     end
                 end
+                end  -- close fast-path else
             else
                 -- Missing argument
                 local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
@@ -399,6 +468,115 @@ local function solve_callable(ctx, c)
             local first_ret = find(ctx, ctx.lists:get(callee_t.data[2]))
             unify_mod.unify(ctx, ret_tid, first_ret)
         end
+        return true
+    end
+
+    -- Intersection: overload dispatch — first matching overload wins.
+    if callee_t.tag == TAG_INTERSECTION then
+        local members = {}
+        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt  = ctx.types:get(mid)
+            if mt.tag == TAG_FUNCTION then
+                members[#members + 1] = { tid = mid, t = mt }
+            end
+        end
+        if #members == 0 then
+            add_error(ctx, line, col,
+                "cannot call value of type '" .. types_mod.display_short(ctx, callee_tid) .. "'")
+            bind_to(ctx, ret_tid, ctx.T_ANY)
+            return false
+        end
+        -- Try each overload; first whose params all accept returns immediately.
+        for _, m in ipairs(members) do
+            local ft = m.t
+            local ok = true
+            for j = 0, ft.data[1] - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+                local act_tid = arg_tids[j + 1]
+                if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
+                    ok = false; break
+                end
+            end
+            if ok then
+                local rl = ft.data[3]
+                if rl == 0 then
+                    bind_to(ctx, ret_tid, ctx.T_NIL)
+                else
+                    bind_to(ctx, ret_tid, find(ctx, ctx.lists:get(ft.data[2])))
+                end
+                return true
+            end
+        end
+        -- No overload matched: report with candidates
+        local cands = {}
+        for ci, m in ipairs(members) do
+            local ft = m.t
+            local reasons = {}
+            for j = 0, ft.data[1] - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+                local act_tid = arg_tids[j + 1]
+                if act_tid then
+                    local a = find(ctx, act_tid)
+                    if not unify_mod.try_unify(ctx, a, exp_tid) then
+                        reasons[#reasons + 1] = "cannot pass '"
+                            .. types_mod.display_short(ctx, a)
+                            .. "' where '"
+                            .. types_mod.display_short(ctx, exp_tid) .. "' expected"
+                    end
+                end
+            end
+            cands[#cands + 1] = "candidate " .. ci .. ": "
+                .. types_mod.display_short(ctx, m.tid)
+                .. (#reasons > 0 and (" — " .. reasons[1]) or "")
+        end
+        add_error(ctx, line, col,
+            "no matching overload for '"
+            .. types_mod.display_short(ctx, callee_tid) .. "':\n  "
+            .. table.concat(cands, "\n  "))
+        bind_to(ctx, ret_tid, ctx.T_ANY)
+        return false
+    end
+
+    -- Union: ALL members must accept the argument (sound — we don't know which branch is live).
+    if callee_t.tag == TAG_UNION then
+        local ret_types = {}
+        local fail_msgs = {}
+        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt  = ctx.types:get(mid)
+            if mt.tag ~= TAG_FUNCTION then
+                fail_msgs[#fail_msgs + 1] = "union member '"
+                    .. types_mod.display_short(ctx, mid) .. "' is not callable"
+            else
+                local member_ok = true
+                for j = 0, mt.data[1] - 1 do
+                    local exp_tid = find(ctx, ctx.lists:get(mt.data[0] + j))
+                    local act_tid = arg_tids[j + 1]
+                    if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
+                        member_ok = false
+                        fail_msgs[#fail_msgs + 1] = "argument rejected by union members: '"
+                            .. types_mod.display_short(ctx, mid)
+                            .. "' does not accept argument " .. (j + 1)
+                        break
+                    end
+                end
+                if member_ok then
+                    local rl = mt.data[3]
+                    ret_types[#ret_types + 1] = rl > 0
+                        and find(ctx, ctx.lists:get(mt.data[2]))
+                        or  ctx.T_NIL
+                end
+            end
+        end
+        if #fail_msgs > 0 then
+            add_error(ctx, line, col, fail_msgs[1])
+            bind_to(ctx, ret_tid, ctx.T_ANY)
+            return false
+        end
+        local ret = #ret_types == 1 and ret_types[1]
+            or types_mod.make_union(ctx, ret_types)
+        bind_to(ctx, ret_tid, ret)
         return true
     end
 
@@ -427,6 +605,61 @@ local function solve_arith(ctx, c)
     if rhs_t.tag == TAG_TABLE then
         local mm = table_meta_op_ret(ctx, rhs_tid, op_name)
         if mm then unify_mod.unify(ctx, res_tid, mm); return true end
+    end
+
+    -- Concat: both operands must be string or number
+    if op_name == "__concat" then
+        local function is_concat_compat(ctx, tid)
+            tid = find(ctx, tid)
+            local t = ctx.types:get(tid)
+            if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
+            if t.tag == TAG_STRING or t.tag == TAG_NUMBER or t.tag == TAG_INTEGER then return true end
+            if t.tag == TAG_LITERAL then
+                local k = t.data[0]
+                return k == LIT_STRING or k == LIT_NUMBER or k == LIT_INTEGER
+            end
+            if t.tag == TAG_UNION then
+                for i = t.data[0], t.data[0] + t.data[1] - 1 do
+                    if not is_concat_compat(ctx, ctx.lists:get(i)) then return false end
+                end
+                return true
+            end
+            return false
+        end
+        if not is_concat_compat(ctx, lhs_tid) then
+            add_error(ctx, line, col,
+                "cannot concatenate type '" .. types_mod.display_short(ctx, lhs_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_STRING)
+            return false
+        end
+        if not is_concat_compat(ctx, rhs_tid) then
+            add_error(ctx, line, col,
+                "cannot concatenate type '" .. types_mod.display_short(ctx, rhs_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_STRING)
+            return false
+        end
+        unify_mod.unify(ctx, res_tid, ctx.T_STRING)
+        return true
+    end
+
+    -- Length: operand must be string or table
+    if op_name == "__len" then
+        local function is_len_compat(ctx, tid)
+            tid = find(ctx, tid)
+            local t = ctx.types:get(tid)
+            if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
+            if t.tag == TAG_STRING or t.tag == TAG_TABLE then return true end
+            if t.tag == TAG_LITERAL then return t.data[0] == LIT_STRING end
+            return false
+        end
+        if not is_len_compat(ctx, lhs_tid) then
+            add_error(ctx, line, col,
+                "cannot take length of type '" .. types_mod.display_short(ctx, lhs_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
+            return false
+        end
+        unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
+        return true
     end
 
     -- Unary negation: same numeric result
@@ -477,6 +710,48 @@ local function solve_arith(ctx, c)
         unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
     else
         unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
+    end
+    return true
+end
+
+local function solve_compare(ctx, c)
+    local lhs_tid = find(ctx, c[2])
+    local rhs_tid = find(ctx, c[3])
+    local line, col = c[4], c[5]
+
+    local function is_orderable(ctx, tid)
+        tid = find(ctx, tid)
+        local t = ctx.types:get(tid)
+        if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
+        if t.tag == TAG_NUMBER or t.tag == TAG_INTEGER then return "number" end
+        if t.tag == TAG_STRING then return "string" end
+        if t.tag == TAG_LITERAL then
+            local k = t.data[0]
+            if k == LIT_NUMBER or k == LIT_INTEGER then return "number" end
+            if k == LIT_STRING then return "string" end
+        end
+        return false
+    end
+
+    local lk = is_orderable(ctx, lhs_tid)
+    local rk = is_orderable(ctx, rhs_tid)
+
+    if lk == false then
+        add_error(ctx, line, col,
+            "cannot compare '" .. types_mod.display_short(ctx, lhs_tid) .. "' with '<'")
+        return false
+    end
+    if rk == false then
+        add_error(ctx, line, col,
+            "cannot compare '" .. types_mod.display_short(ctx, rhs_tid) .. "' with '<'")
+        return false
+    end
+    -- Cross-type comparison (string vs number): error
+    if lk and rk and lk ~= rk and lk ~= true and rk ~= true then
+        add_error(ctx, line, col,
+            "cannot compare '" .. types_mod.display_short(ctx, lhs_tid)
+            .. "' with '" .. types_mod.display_short(ctx, rhs_tid) .. "'")
+        return false
     end
     return true
 end
@@ -541,6 +816,7 @@ function M.solve(ctx, constraints)
         [C_CALLABLE]  = solve_callable,
         [C_ARITH]     = solve_arith,
         [C_RETURN]    = solve_return,
+        [C_COMPARE]   = solve_compare,
     }
 
     -- Iterate to fixpoint (max 3 passes for recursive types).

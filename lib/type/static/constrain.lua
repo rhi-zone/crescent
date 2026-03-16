@@ -99,6 +99,7 @@ local C_HAS_FIELD = 3   -- {C_HAS_FIELD, obj_tid, name_id, result_tid, line, col
 local C_CALLABLE  = 4   -- {C_CALLABLE,  callee_tid, arg_tids_list, ret_tid, line, col}
 local C_ARITH     = 5   -- {C_ARITH,     op_str, lhs_tid, rhs_tid, result_tid, line, col}
 local C_RETURN    = 6   -- {C_RETURN,    val_tid, expected_tid, line, col}
+local C_COMPARE   = 7   -- {C_COMPARE,   lhs_tid, rhs_tid, line, col}
 
 local M = {}
 
@@ -108,6 +109,7 @@ M.C_HAS_FIELD = C_HAS_FIELD
 M.C_CALLABLE  = C_CALLABLE
 M.C_ARITH     = C_ARITH
 M.C_RETURN    = C_RETURN
+M.C_COMPARE   = C_COMPARE
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -474,7 +476,9 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
         return res
     end
     if op == OP_LEN then
-        return ctx.T_INTEGER
+        local res = fresh_var(ctx)
+        emit(ctx, { C_ARITH, "__len", arg_tid, arg_tid, res, n.line, n.col })
+        return res
     end
     return ctx.T_ANY
 end
@@ -506,11 +510,14 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     if op == OP_EQ or op == OP_NE then return ctx.T_BOOLEAN end
 
     if op == OP_LT or op == OP_GT or op == OP_LE or op == OP_GE then
+        emit(ctx, { C_COMPARE, left_tid, right_tid, n.line, n.col })
         return ctx.T_BOOLEAN
     end
 
     if op == OP_CONCAT then
-        return ctx.T_STRING
+        local res = fresh_var(ctx)
+        emit(ctx, { C_ARITH, "__concat", left_tid, right_tid, res, n.line, n.col })
+        return res
     end
 
     if op == OP_OR then
@@ -524,10 +531,20 @@ end
 
 ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
-    local obj_tid = gen_expr(ctx, n.data[0])
+    local obj_nid = n.data[0]
+    local obj_tid = gen_expr(ctx, obj_nid)
     local fname_id = n.data[1]
     local res = fresh_var(ctx)
     emit(ctx, { C_HAS_FIELD, obj_tid, fname_id, res, n.line, n.col })
+    -- Track field access for LSP go-to-def (only for simple identifier objects)
+    local obj_n = ctx.nodes:get(obj_nid)
+    if obj_n.kind == NODE_IDENTIFIER then
+        local fa = ctx.field_at
+        fa[#fa+1] = n.line
+        fa[#fa+1] = n.col
+        fa[#fa+1] = fname_id
+        fa[#fa+1] = obj_n.data[0]  -- name_id of the object
+    end
     return res
 end
 
@@ -825,7 +842,18 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
         local prescanned = ctx.scope.bindings[name_id]
 
         if ann_tid then
-            if rhs_tid then
+            -- For tuple annotations, check each element against corresponding RHS expr.
+            local at_resolved = types_mod.find(ctx, ann_tid)
+            local at_t = ctx.types:get(at_resolved)
+            if at_t.tag == TAG_TUPLE then
+                for ti = 0, at_t.data[1] - 1 do
+                    local elem_tid = types_mod.find(ctx, ctx.lists:get(at_t.data[0] + ti))
+                    local rhs_elem = rhs_types[ti + 1]
+                    if rhs_elem then
+                        emit(ctx, { C_SUB, rhs_elem, elem_tid, n.line, n.col })
+                    end
+                end
+            elseif rhs_tid then
                 emit(ctx, { C_SUB, rhs_tid, ann_tid, n.line, n.col })
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
@@ -906,8 +934,15 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             local ot = ctx.types:get(obj_tid)
             if ot.tag == TAG_TABLE then
                 local fe = types_mod.table_field(ctx, obj_tid, field_id)
-                if not fe then
-                    -- Add field (same as infer.lua table_add_field)
+                if fe then
+                    -- Re-assignment: check type compatibility (widen to base type first)
+                    local expected = types_mod.widen(ctx, fe.type_id)
+                    local et = ctx.types:get(types_mod.find(ctx, expected))
+                    if et.tag ~= TAG_VAR then
+                        emit(ctx, { C_SUB, rhs_tid, expected, tn.line, tn.col })
+                    end
+                else
+                    -- Add field
                     local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
                     local fs, fl = ot.data[0], ot.data[1]
                     for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
@@ -924,6 +959,58 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     local ot2 = ctx.types:get(obj_tid)
                     local new_t = ctx.types:get(new_tbl)
                     for k = 0, 6 do ot2.data[k] = new_t.data[k] end
+                end
+            end
+        elseif tn.kind == NODE_INDEX_EXPR then
+            local obj_nid = tn.data[0]
+            local key_nid = tn.data[1]
+            local obj_tid = types_mod.find(ctx, gen_expr(ctx, obj_nid))
+            local key_tid = gen_expr(ctx, key_nid)
+            local ot = ctx.types:get(obj_tid)
+            if ot.tag == TAG_TABLE then
+                local key_r = types_mod.find(ctx, key_tid)
+                local kt_t = ctx.types:get(key_r)
+                -- String literal key: treat as named field (same as t.field syntax)
+                if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
+                    local field_id = kt_t.data[1]
+                    local fe = types_mod.table_field(ctx, obj_tid, field_id)
+                    if fe then
+                        -- Re-assignment: check type compatibility (widen to base type first)
+                        local expected = types_mod.widen(ctx, fe.type_id)
+                        local et = ctx.types:get(types_mod.find(ctx, expected))
+                        if et.tag ~= TAG_VAR then
+                            emit(ctx, { C_SUB, rhs_tid, expected, tn.line, tn.col })
+                        end
+                    else
+                        -- New field: add it
+                        local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
+                        local fs2, fl2 = ot.data[0], ot.data[1]
+                        for j = fs2, fs2 + fl2 - 1 do fields[#fields+1] = ctx.lists:get(j) end
+                        local is3, il3 = ot.data[2], ot.data[3]
+                        local ix2 = is3
+                        while ix2 < is3 + il3 - 1 do
+                            indexers[#indexers+1] = ctx.lists:get(ix2)
+                            indexers[#indexers+1] = ctx.lists:get(ix2+1)
+                            ix2 = ix2 + 2
+                        end
+                        for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta+1] = ctx.lists:get(j) end
+                        fields[#fields+1] = types_mod.make_field(ctx, field_id, rhs_tid, false)
+                        local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
+                        local ot2 = ctx.types:get(obj_tid)
+                        local new_t = ctx.types:get(new_tbl)
+                        for k = 0, 6 do ot2.data[k] = new_t.data[k] end
+                    end
+                else
+                    -- Non-literal key: check rhs against indexer value type if known
+                    local is2, il2 = ot.data[2], ot.data[3]
+                    if il2 > 0 then
+                        -- Check first indexer pair's value type
+                        local idx_val = types_mod.find(ctx, ctx.lists:get(is2 + 1))
+                        local ivt = ctx.types:get(idx_val)
+                        if ivt.tag ~= TAG_VAR then
+                            emit(ctx, { C_SUB, rhs_tid, idx_val, tn.line, tn.col })
+                        end
+                    end
                 end
             end
         end
@@ -953,8 +1040,8 @@ StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local saved = ctx.scope
     ctx.scope = env_mod.child(ctx.scope)
-    gen_block(ctx, n.data[0], n.data[1])
-    gen_expr(ctx, n.data[2])
+    gen_block(ctx, n.data[1], n.data[2])  -- data[1]=bs, data[2]=bl
+    gen_expr(ctx, n.data[0])              -- data[0]=test condition
     ctx.scope = saved
 end
 
@@ -991,13 +1078,73 @@ end
 
 StmtRule[NODE_FOR_IN] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
+
+    -- Pre-inspect: detect pairs(t)/ipairs(t) to extract typed loop vars from the table.
+    local typed_iter_returns = nil
+    if n.data[3] == 1 then
+        local call_nid = ctx.ast_lists:get(n.data[2])
+        local call_n = ctx.nodes:get(call_nid)
+        if call_n.kind == NODE_CALL_EXPR and call_n.data[2] == 1 then
+            local callee_n = ctx.nodes:get(call_n.data[0])
+            if callee_n.kind == NODE_IDENTIFIER then
+                local fn_name = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
+                if fn_name == "pairs" or fn_name == "ipairs" then
+                    local arg_nid = ctx.ast_lists:get(call_n.data[1])
+                    local arg_n = ctx.nodes:get(arg_nid)
+                    -- Only inspect identifiers to avoid double constraint emission.
+                    local arg_tid = nil
+                    if arg_n.kind == NODE_IDENTIFIER then
+                        arg_tid = env_mod.lookup(ctx.scope, arg_n.data[0])
+                        if arg_tid then arg_tid = types_mod.find(ctx, arg_tid) end
+                    end
+                    local at = arg_tid and ctx.types:get(arg_tid)
+                    if at and at.tag == TAG_TABLE and at.data[3] >= 2 then
+                        local is = at.data[2]
+                        if fn_name == "ipairs" then
+                            local j = is
+                            while j < is + at.data[3] - 1 do
+                                local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
+                                if kt.tag == TAG_NUMBER or kt.tag == TAG_INTEGER then
+                                    typed_iter_returns = {
+                                        ctx.T_INTEGER,
+                                        types_mod.find(ctx, ctx.lists:get(j + 1))
+                                    }
+                                    break
+                                end
+                                j = j + 2
+                            end
+                        else  -- pairs: use first indexer → (K, V)
+                            local k = types_mod.find(ctx, ctx.lists:get(is))
+                            local v = types_mod.find(ctx, ctx.lists:get(is + 1))
+                            typed_iter_returns = { k, v }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     local iter_types = gen_expr_list(ctx, n.data[2], n.data[3])
     local saved = ctx.scope
     ctx.scope = env_mod.child(ctx.scope)
     local ns, nl = n.data[0], n.data[1]
+    -- Extract loop-var types from iterator function's return types.
+    local iter_func_returns = {}
+    if #iter_types > 0 then
+        local ft = types_mod.find(ctx, iter_types[1])
+        local ftt = ctx.types:get(ft)
+        if ftt.tag == TAG_FUNCTION then
+            for j = ftt.data[2], ftt.data[2] + ftt.data[3] - 1 do
+                iter_func_returns[#iter_func_returns + 1] = types_mod.find(ctx, ctx.lists:get(j))
+            end
+        end
+    end
     for i = 0, nl - 1 do
         local name_id = ctx.ast_lists:get(ns + i)
-        env_mod.bind(ctx.scope, name_id, ctx.T_ANY)
+        local t = (typed_iter_returns and typed_iter_returns[i + 1])
+               or iter_func_returns[i + 1]
+               or ctx.T_ANY
+        env_mod.bind(ctx.scope, name_id, t)
     end
     gen_block(ctx, n.data[4], n.data[5])
     ctx.scope = saved
@@ -1181,6 +1328,20 @@ local function process_type_decls(ctx)
         end
     end
     for _, r in ipairs(decls) do
+        -- Warn on function type declarations with unnamed parameters.
+        do
+            local at = ctx.ann.types:get(r.type_id)
+            local fn_at
+            if at.tag == defs.TAG_FUNCTION then
+                fn_at = at
+            elseif at.tag == defs.TAG_FORALL then
+                local body = ctx.ann.types:get(at.data[2])
+                if body.tag == defs.TAG_FUNCTION then fn_at = body end
+            end
+            if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
+                warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
+            end
+        end
         if r.decl_var then
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
         else
