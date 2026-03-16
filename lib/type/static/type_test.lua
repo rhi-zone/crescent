@@ -4063,4 +4063,24 @@ local function f(n) return n end
 f("hello")
 ]], nil)
     end)
+
+    assert.it("or-expression: nil or string produces no errors", function()
+        v3_no_errors([[
+local x = nil
+local y = x or "default"
+]])
+    end)
+
+    assert.it("for-in ipairs: numeric loop over table produces no errors", function()
+        v3_no_errors([[
+local t = {1, 2, 3}
+for i, v in ipairs(t) do end
+]])
+    end)
+
+    assert.it("and-or ternary idiom: true and 1 or string produces no errors", function()
+        v3_no_errors([[
+local a = true and 1 or "x"
+]])
+    end)
 end)
