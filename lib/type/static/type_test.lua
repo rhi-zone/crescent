@@ -4114,4 +4114,24 @@ if type(x) == "string" then
 end
 ]])
     end)
+
+    assert.it("pcall: calling pcall with a lambda produces no errors", function()
+        v3_no_errors([[
+local ok, val = pcall(function() return 42 end)
+]])
+    end)
+
+    assert.it("pcall: calling pcall with a typed function and args produces no errors", function()
+        v3_no_errors([[
+--: (integer) -> integer
+local function double(n) return n * 2 end
+local ok, val = pcall(double, 5)
+]])
+    end)
+
+    assert.it("xpcall: calling xpcall with handler produces no errors", function()
+        v3_no_errors([[
+local ok, val = xpcall(function() return 42 end, tostring)
+]])
+    end)
 end)
