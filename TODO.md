@@ -246,6 +246,32 @@ Lexer optimization (see `docs/perf/log.md` for measurements):
 - [x] Source-referencing intern pool — FNV-1a hash + memcmp, zero Lua strings in lex path (5.3x total vs baseline)
 - [ ] (stretch) Full FFI struct hash table for intern entries — current impl uses Lua tables per entry with FNV-1a + memcmp; a flat FFI array could reduce GC pressure further but 5.3x is good enough to move on
 
+### v2 → v3 migration (constraint-based inference)
+
+Design: `docs/typechecker-v3.md`. Implementation: `lib/type/static/constrain.lua` + `solve.lua`.
+Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs alongside v2.
+
+**Phase 1 blockers (reach parity with v2):**
+- [ ] String method dispatch (`s:gsub(...)` via prim_meta)
+- [ ] prim_index / metamethod lookup for primitives
+- [ ] Narrowing (type(), nil checks, `if x.tag == "foo"` — reads from `find()` after solve)
+- [ ] pcall / xpcall return type inference
+- [ ] Iterator inference (`for k, v in pairs(t)`)
+- [ ] `or`-expression union inference (`x or default` → `T | U`)
+- [ ] Correlated multi-return narrowing (backlog: `if pat ~= nil then` narrows `maj`/`min` too)
+
+**Phase 2 — cutover:**
+- [ ] Replace `check.check_string` with v3 pipeline
+- [ ] All existing tests must pass (run both; diff before deleting v2)
+- [ ] Delete `infer.lua` (or keep 1 commit as reference)
+
+**Phase 3 — annotation pass (after Phase 2 cutover):**
+- [ ] Strip all `--:` annotations from own codebase, run v3, record error set
+- [ ] Re-annotate only where errors appear (load-bearing annotations)
+- [ ] Mark inference-gap annotations with `-- TODO: v3 gap` comment so they're removable in bulk when the gap closes
+- [ ] Keep annotations on public API functions regardless (they're contracts, not just inference hints)
+- [ ] Goal: minimal annotation set where every annotation either fixes an error or documents a public contract
+
 ### v1 → v2 cutover status (2026-03-10)
 
 v2 is architecturally superior but v1 CLI has QoL features v2 still needs before cutover:
