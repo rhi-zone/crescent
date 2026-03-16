@@ -728,7 +728,7 @@ function M.try_unify(ctx, a, b)
     return false
 end
 
--- Expose the private is_primitive_tag for use in infer.lua
+-- Expose the private is_primitive_tag for external use.
 function M.is_primitive_tag(tag)
     return tag == TAG_NIL or tag == TAG_BOOLEAN or tag == TAG_NUMBER
         or tag == TAG_INTEGER or tag == TAG_STRING

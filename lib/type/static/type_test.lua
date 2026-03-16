@@ -14,7 +14,6 @@ local env_mod   = require("lib.type.static.env")
 local unify_mod = require("lib.type.static.unify")
 local errors_mod = require("lib.type.static.errors")
 local match_mod = require("lib.type.static.match")
-local infer_mod    = require("lib.type.static.infer")
 local check_mod    = require("lib.type.static.check")
 local sha256_mod   = require("lib.type.static.sha256")
 local cri_write    = require("lib.type.static.cri_write")
@@ -1805,7 +1804,7 @@ end)
 ---------------------------------------------------------------------------
 
 local function check(src)
-    return infer_mod.check_string(src, "test")
+    return check_mod.check_string(src, "test")
 end
 
 local function no_errors(src)
@@ -2697,7 +2696,7 @@ end)
 
 assert.describe("cri: round-trip", function()
     local function make_ctx(src)
-        local _, ctx = infer_mod.check_string(src, "test.lua")
+        local _, ctx = check_mod.check_string(src, "test.lua")
         return ctx
     end
 
@@ -2787,7 +2786,7 @@ end)
 
 assert.describe("field assignment M.foo = val", function()
     assert.it("new field can be read back without error", function()
-        local err = infer_mod.check_string([[
+        local err = check_mod.check_string([[
             local M = {}
             M.x = 42
             local v = M.x
@@ -2796,7 +2795,7 @@ assert.describe("field assignment M.foo = val", function()
     end)
 
     assert.it("assigned string field enables string method call", function()
-        local err = infer_mod.check_string([[
+        local err = check_mod.check_string([[
             local M = {}
             M.name = "hello"
             local upper = M.name:upper()
@@ -2805,7 +2804,7 @@ assert.describe("field assignment M.foo = val", function()
     end)
 
     assert.it("multiple field assignments build table type", function()
-        local err = infer_mod.check_string([[
+        local err = check_mod.check_string([[
             local M = {}
             M.name = "hello"
             M.value = 99
@@ -2816,7 +2815,7 @@ assert.describe("field assignment M.foo = val", function()
     end)
 
     assert.it("function M.foo still works after field assignment fix", function()
-        local err = infer_mod.check_string([[
+        local err = check_mod.check_string([[
             local M = {}
             function M.greet() return "hi" end
             local s = M.greet()
@@ -2900,7 +2899,7 @@ assert.describe("cri: require() type resolution", function()
             function M.foo() return 42 end
             return M
         ]]
-        local _, mod_ctx = infer_mod.check_string(mod_src, "mymod.lua")
+        local _, mod_ctx = check_mod.check_string(mod_src, "mymod.lua")
         local rets = mod_ctx.module_return_tids
         local m_tid = rets and rets[1] and types_mod.find(mod_ctx, rets[1][1])
         local cri_bytes = cri_write.serialize(mod_ctx, { M = m_tid })
@@ -2918,7 +2917,7 @@ assert.describe("cri: require() type resolution", function()
             local M = require("mymod")
             local x = M.foo()
         ]]
-        local err, use_ctx = infer_mod.check_string(use_src, "use.lua", nil, nil, cri_loader)
+        local err, use_ctx = check_mod.check_string(use_src, "use.lua", nil, nil, cri_loader)
         assert.eq(#err.errors, 0)
     end)
 end)
@@ -3269,7 +3268,7 @@ end)
 
 assert.describe("checker: TAG_UNKNOWN in field/index access", function()
     assert.it("passing unknown to typed param is an error", function()
-        local errs = infer_mod.check_string([[
+        local errs = check_mod.check_string([[
 --: (string) -> nil
 local function f(x) end
 --: { ... }
@@ -3280,7 +3279,7 @@ f(v)
         assert.ok(errs and #errs.errors > 0, "should error: unknown passed to string param")
     end)
     assert.it("passing unknown to any param is ok", function()
-        local errs = infer_mod.check_string([[
+        local errs = check_mod.check_string([[
 --: (any) -> nil
 local function f(x) end
 --: { ... }
@@ -3291,7 +3290,7 @@ f(v)
         assert.eq(errs and #errs.errors or 0, 0, "unknown is assignable to any")
     end)
     assert.it("explicit unknown annotation blocks use without narrowing", function()
-        local errs = infer_mod.check_string([[
+        local errs = check_mod.check_string([[
 --: (string) -> nil
 local function f(x) end
 --: unknown
@@ -3638,7 +3637,7 @@ end)
 
 assert.describe("checker: enum inference", function()
     assert.it("integer enum members display as EnumName.Member", function()
-        local ec, ctx = infer_mod.check_string(
+        local ec, ctx = check_mod.check_string(
             "local Status = { OK = 1, ERR = 2 }", "test")
         assert.ok(not errors_mod.has_errors(ec), "no errors")
         local intern = require("lib.type.static.intern")
@@ -3654,7 +3653,7 @@ assert.describe("checker: enum inference", function()
         assert.eq(types_mod_l.display(ctx, fe.type_id), "Status.OK")
     end)
     assert.it("string enum members display as EnumName.Member", function()
-        local ec, ctx = infer_mod.check_string(
+        local ec, ctx = check_mod.check_string(
             "local Color = { RED = 'red', GREEN = 'green' }", "test")
         assert.ok(not errors_mod.has_errors(ec), "no errors")
         local intern = require("lib.type.static.intern")
@@ -3668,7 +3667,7 @@ assert.describe("checker: enum inference", function()
         assert.eq(types_mod_l.display(ctx, fe.type_id), "Color.RED")
     end)
     assert.it("mixed-kind table not promoted to enum", function()
-        local ec, ctx = infer_mod.check_string(
+        local ec, ctx = check_mod.check_string(
             "local Mixed = { A = 1, B = 'two' }", "test")
         assert.ok(not errors_mod.has_errors(ec), "no errors")
         local intern = require("lib.type.static.intern")
@@ -3805,7 +3804,7 @@ end)
 
 assert.describe("require_sources", function()
     assert.it("local x = require() populates require_sources", function()
-        local _, ctx = infer_mod.check_string([[
+        local _, ctx = check_mod.check_string([[
 local json = require("lib.lunajson")
 ]], "test.lua")
         assert.ok(ctx, "ctx should be non-nil")
@@ -3818,7 +3817,7 @@ local json = require("lib.lunajson")
     end)
 
     assert.it("require_sources not polluted by non-require calls", function()
-        local _, ctx = infer_mod.check_string([[
+        local _, ctx = check_mod.check_string([[
 local x = tostring(42)
 ]], "test.lua")
         local count = 0
@@ -3827,7 +3826,7 @@ local x = tostring(42)
     end)
 
     assert.it("multiple requires tracked separately", function()
-        local _, ctx = infer_mod.check_string([[
+        local _, ctx = check_mod.check_string([[
 local a = require("lib.a")
 local b = require("lib.b")
 ]], "test.lua")
@@ -3848,7 +3847,7 @@ end)
 
 assert.describe("field_at tracking", function()
     assert.it("populates field_at for field access expressions", function()
-        local _, c = infer_mod.check_string("local M = {}\nM.foo = 1\nlocal x = M.foo", "test.lua")
+        local _, c = check_mod.check_string("local M = {}\nM.foo = 1\nlocal x = M.foo", "test.lua")
         assert.ok(c.field_at ~= nil, "field_at must exist")
         -- line 3: `local x = M.foo` — M.foo triggers ExprRule[NODE_FIELD_EXPR]
         local found = false
@@ -3862,7 +3861,7 @@ assert.describe("field_at tracking", function()
     end)
 
     assert.it("records obj_name_id and field_name_id", function()
-        local _, c = infer_mod.check_string("local M = {}\nM.bar = 42\nlocal y = M.bar", "test.lua")
+        local _, c = check_mod.check_string("local M = {}\nM.bar = 42\nlocal y = M.bar", "test.lua")
         local fa = c.field_at
         local found_bar = false
         local i = 1
@@ -3881,7 +3880,7 @@ assert.describe("field_at tracking", function()
     end)
 
     assert.it("does not record field_at for non-identifier obj (e.g. call().field)", function()
-        local _, c = infer_mod.check_string("local function f() return {} end\nlocal x = f().foo", "test.lua")
+        local _, c = check_mod.check_string("local function f() return {} end\nlocal x = f().foo", "test.lua")
         -- f() is not a simple identifier, so field_at should have no entry for this
         -- (the obj would not be NODE_IDENTIFIER)
         local has_line2 = false
@@ -3899,9 +3898,9 @@ end)
 
 assert.describe("make_intersection dedup", function()
     assert.it("duplicate members are deduplicated", function()
-        local ctx = infer_mod.check_string("", "test.lua")
+        local ctx = check_mod.check_string("", "test.lua")
         -- We need a fresh ctx; use check_string and get the second return
-        local _, c = infer_mod.check_string("", "test.lua")
+        local _, c = check_mod.check_string("", "test.lua")
         local t1 = c.T_NUMBER
         local t2 = c.T_STRING
         -- Intersection of same type twice should give one member
@@ -3911,7 +3910,7 @@ assert.describe("make_intersection dedup", function()
     end)
 
     assert.it("distinct members are preserved", function()
-        local _, c = infer_mod.check_string("", "test.lua")
+        local _, c = check_mod.check_string("", "test.lua")
         local isect = types_mod.make_intersection(c, {c.T_NUMBER, c.T_STRING})
         local t = c.types:get(isect)
         assert.eq(t.tag, defs.TAG_INTERSECTION)
@@ -3954,10 +3953,8 @@ end)
 -- v3 constraint-based inference
 ---------------------------------------------------------------------------
 
-local check_mod = require("lib.type.static.check")
-
 local function v3(src)
-    return infer_mod.check_string_v3(src, "test.lua")
+    return check_mod.check_string_v3(src, "test.lua")
 end
 
 local function v3_no_errors(src)
