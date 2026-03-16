@@ -4083,4 +4083,17 @@ for i, v in ipairs(t) do end
 local a = true and 1 or "x"
 ]])
     end)
+
+    assert.it("string method: s:len() does not error", function()
+        v3_no_errors([[
+local s = "hello"
+local n = s:len()
+]])
+    end)
+
+    assert.it("string method: (\"hello\"):upper() does not error", function()
+        v3_no_errors([[
+local n = ("hello"):upper()
+]])
+    end)
 end)

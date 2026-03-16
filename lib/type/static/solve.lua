@@ -188,6 +188,38 @@ local function solve_has_field(ctx, c)
         obj_t   = ctx.types:get(obj_tid)
     end
 
+    -- Primitive field lookup via prim_index (string/number/integer methods).
+    -- Normalize TAG_LITERAL to its base primitive tag first.
+    do
+        local base_tag = obj_t.tag
+        if base_tag == TAG_LITERAL then
+            local kind = obj_t.data[0]
+            if     kind == LIT_STRING  then base_tag = TAG_STRING
+            elseif kind == LIT_NUMBER  then base_tag = TAG_NUMBER
+            elseif kind == LIT_INTEGER then base_tag = TAG_INTEGER
+            else                            base_tag = nil
+            end
+        elseif base_tag ~= TAG_STRING and base_tag ~= TAG_NUMBER and base_tag ~= TAG_INTEGER then
+            base_tag = nil
+        end
+        if base_tag then
+            local idx_tid = ctx.prim_index and ctx.prim_index[base_tag]
+            if idx_tid then
+                idx_tid = find(ctx, idx_tid)
+                if ctx.types:get(idx_tid).tag == TAG_TABLE then
+                    local fe = types_mod.table_field(ctx, idx_tid, name_id)
+                    if fe then
+                        unify_mod.unify(ctx, res_tid, find(ctx, fe.type_id))
+                        return true
+                    end
+                end
+            end
+            -- Primitive with no matching field in prim_index — unknown result
+            bind_to(ctx, res_tid, ctx.T_ANY)
+            return true
+        end
+    end
+
     if obj_t.tag == TAG_TABLE then
         local fe = types_mod.table_field(ctx, obj_tid, name_id)
         if fe then
