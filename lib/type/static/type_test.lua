@@ -4134,4 +4134,26 @@ local ok, val = pcall(double, 5)
 local ok, val = xpcall(function() return 42 end, tostring)
 ]])
     end)
+
+    assert.it("ffi.cdef: typedef struct is referenceable as annotation type", function()
+        v3_no_errors([=[
+local ffi = require("ffi")
+ffi.cdef([[
+  typedef struct { int x; int y; } Point;
+]])
+--: (Point) -> integer
+local function get_x(p) return p.x end
+]=])
+    end)
+
+    assert.it("ffi.cdef: struct fields accessible via annotation", function()
+        v3_no_errors([=[
+local ffi = require("ffi")
+ffi.cdef([[
+  typedef struct { int line; int col; } Span;
+]])
+--: (Span) -> integer
+local function get_line(s) return s.line end
+]=])
+    end)
 end)

@@ -720,6 +720,26 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
         end
     end
 
+    -- ffi.cdef() passthrough: register C type declarations into annotation namespace.
+    if callee_n.kind == NODE_FIELD_EXPR and ctx.ffi_hooks and n.data[2] >= 1 then
+        local obj_n = ctx.nodes:get(callee_n.data[0])
+        if obj_n.kind == NODE_IDENTIFIER then
+            local obj_name   = intern_mod.get(ctx.pool, obj_n.data[0]) or ""
+            local field_name = intern_mod.get(ctx.pool, callee_n.data[1]) or ""
+            if obj_name == "ffi" and field_name == "cdef" then
+                local arg0_nid = ctx.ast_lists:get(n.data[1])
+                local arg0_n   = ctx.nodes:get(arg0_nid)
+                if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
+                    local c_str = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
+                    if ctx.ffi_hooks.process then
+                        ctx.ffi_hooks.process(ctx, c_str)
+                    end
+                end
+                return ctx.T_NIL
+            end
+        end
+    end
+
     -- Instantiate callee at this call site (let-polymorphism)
     local inst_callee = env_mod.instantiate(ctx, callee_tid, ctx.scope.level)
 
@@ -1218,6 +1238,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
 
     if not parent_scope then
         require("lib.type.static.prelude").populate(ctx)
+        require("lib.type.static.prelude_luajit").populate(ctx)
     end
 
     local ok_parse, pr = pcall(parse_mod.parse, source, filename, pool)
