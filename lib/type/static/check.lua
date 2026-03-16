@@ -2,16 +2,27 @@
 -- Entry point for the typechecker.
 -- Orchestrates parse → annotations → prescan → infer → .cri cache.
 
-local infer_mod  = require("lib.type.static.infer")
-local errors_mod = require("lib.type.static.errors")
-local intern_mod = require("lib.type.static.intern")
-local env_mod    = require("lib.type.static.env")
-local types_mod  = require("lib.type.static.types")
-local cache_mod  = require("lib.type.static.cache")
-local cri_write  = require("lib.type.static.cri_write")
-local cri_read   = require("lib.type.static.cri_read")
+local infer_mod      = require("lib.type.static.infer")
+local constrain_mod  = require("lib.type.static.constrain")
+local solve_mod      = require("lib.type.static.solve")
+local errors_mod     = require("lib.type.static.errors")
+local intern_mod     = require("lib.type.static.intern")
+local env_mod        = require("lib.type.static.env")
+local types_mod      = require("lib.type.static.types")
+local cache_mod      = require("lib.type.static.cache")
+local cri_write      = require("lib.type.static.cri_write")
+local cri_read       = require("lib.type.static.cri_read")
 
 local M = {}
+
+-- ---------------------------------------------------------------------------
+-- v3 inference core (constraint generation + solving)
+-- ---------------------------------------------------------------------------
+local function run_v3(source, filename, parent_scope, pool, cri_loader)
+    local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader)
+    solve_mod.solve(ctx, constraints)
+    return ctx.err, ctx
+end
 
 -- Session cache: absolute_filename → { err_ctx, ctx, export_tid }
 -- Simple per-session, no invalidation. Cleared by M.clear_cache().
@@ -80,7 +91,7 @@ end
 -- Optional cri_loader: function(ctx, mod_name) -> type_id | nil
 -- Installed on ctx before inference so require() calls resolve.
 function M.check_string(source, filename, parent_scope, pool, cri_loader)
-    return infer_mod.check_string(source, filename, parent_scope, pool, cri_loader)
+    return run_v3(source, filename, parent_scope, pool, cri_loader)
 end
 
 -- ---------------------------------------------------------------------------
@@ -157,7 +168,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
         local cached_bytes = cache_mod.lookup(src_hash)
         if cached_bytes then
             err_ctx = errors_mod.new_ctx()
-            err_ctx, ctx = infer_mod.check_string("", filename, parent_scope, _pool, cri_loader)
+            err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader)
             local ok, exports = cri_read.load(cached_bytes, ctx)
             if ok and exports["__ret"] then
                 local export_tid = exports["__ret"]
@@ -184,7 +195,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
     local source = f:read("*a")
     f:close()
 
-    err_ctx, ctx = infer_mod.check_string(source, filename, parent_scope, _pool, cri_loader)
+    err_ctx, ctx = run_v3(source, filename, parent_scope, _pool, cri_loader)
 
     local export_tid = ctx and extract_export_tid(ctx) or nil
 
@@ -242,22 +253,15 @@ function M.check_string_with_deps(source, filename, parent_scope)
         return try_dep(ctx, rel .. ".lua") or try_dep(ctx, rel .. "/init.lua")
     end
 
-    return infer_mod.check_string(source, filename, parent_scope, _pool, cri_loader)
+    return run_v3(source, filename, parent_scope, _pool, cri_loader)
 end
 
 -- ---------------------------------------------------------------------------
 -- check_string_v3
 -- ---------------------------------------------------------------------------
--- v3 constraint-based inference. Runs constrain.lua (generation) + solve.lua.
--- Returns same {err_ctx, ctx} shape as check_string.
-function M.check_string_v3(source, filename, parent_scope, pool, cri_loader)
-    local constrain_mod = require("lib.type.static.constrain")
-    local solve_mod     = require("lib.type.static.solve")
-
-    local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader)
-    solve_mod.solve(ctx, constraints)
-    return ctx.err, ctx
-end
+-- Alias for check_string (now that v3 is the default pipeline).
+-- Kept for compatibility with callers that explicitly request v3.
+M.check_string_v3 = M.check_string
 
 -- ---------------------------------------------------------------------------
 -- check_files
