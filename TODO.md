@@ -34,6 +34,18 @@
 - [ ] http/router/staticx: reads entire files into memory — needs size cap or streaming for large files
 
 ## stdlib
+
+### package audit
+Systematic pass over all packages under `lib/`. Lenses:
+- **Performance** — hot paths allocating unnecessarily, missing caching, avoidable copies
+- **Consistency** — naming conventions, error return style (`nil, err` vs throw), module shape
+- **API quality** — awkward call sites, missing convenience wrappers, over-exposed internals
+- **Correctness** — edge cases, untested paths, silent failures
+- **Vendorability** — does each package stand alone? correct `package.path` guard? LICENSE?
+
+Suggested order: start with the most-used packages (http, fs, test, cli) then work outward.
+Output: concrete TODO items filed here per package as issues are found, plus fixes where obvious.
+
 - [ ] http: extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
 - [ ] http: extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
 - [ ] Review and polish all libraries pulled from ~/git/lua (bulk import done)
@@ -263,7 +275,7 @@ Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs
 **Phase 2 — cutover:**
 - [x] Replace `check.check_string` with v3 pipeline — done; check.lua fully on v3 (commit 848ea56)
 - [x] All existing tests must pass — 838/838 pass against v3 (2026-03-16)
-- [ ] Delete `infer.lua` (currently kept as reference; type_test.lua still requires it for v2 comparison tests)
+- [x] Delete `infer.lua` — done (commit 2e33c62); type_test.lua migrated to check_mod
 
 **Phase 3 — annotation pass (after Phase 2 cutover):**
 - [ ] Strip all `--:` annotations from own codebase, run v3, record error set
