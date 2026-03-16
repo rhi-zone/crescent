@@ -793,4 +793,41 @@ function M.typeof_to_id(ctx, s)
     return ctx.T_ANY
 end
 
+-- ---------------------------------------------------------------------------
+-- Table mutation helpers (used by constrain, cdef)
+-- ---------------------------------------------------------------------------
+
+function M.snapshot_table(ctx, obj_tid)
+    local ot = ctx.types:get(obj_tid)
+    local fs, fl = ot.data[0], ot.data[1]
+    local is2, il2 = ot.data[2], ot.data[3]
+    local rv = ot.data[4]
+    local ms, ml = ot.data[5], ot.data[6]
+    local fields = {}
+    for i = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(i) end
+    local indexers = {}
+    local ix = is2
+    while ix < is2 + il2 - 1 do
+        indexers[#indexers + 1] = ctx.lists:get(ix)
+        indexers[#indexers + 1] = ctx.lists:get(ix + 1)
+        ix = ix + 2
+    end
+    local meta = {}
+    for j = ms, ms + ml - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+    return fields, indexers, rv, meta
+end
+
+function M.patch_table(ctx, obj_tid, fields, indexers, rv, meta)
+    local new_tbl = M.make_table(ctx, fields, indexers, rv, meta)
+    local ot = ctx.types:get(obj_tid)
+    local new_t = ctx.types:get(new_tbl)
+    for k = 0, 6 do ot.data[k] = new_t.data[k] end
+end
+
+function M.table_add_field(ctx, obj_tid, field_id, field_type_id)
+    local fields, indexers, rv, meta = M.snapshot_table(ctx, obj_tid)
+    fields[#fields + 1] = M.make_field(ctx, field_id, field_type_id, false)
+    M.patch_table(ctx, obj_tid, fields, indexers, rv, meta)
+end
+
 return M

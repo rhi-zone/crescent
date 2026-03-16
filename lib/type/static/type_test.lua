@@ -15,6 +15,7 @@ local unify_mod = require("lib.type.static.unify")
 local errors_mod = require("lib.type.static.errors")
 local match_mod = require("lib.type.static.match")
 local infer_mod    = require("lib.type.static.infer")
+local check_mod    = require("lib.type.static.check")
 local sha256_mod   = require("lib.type.static.sha256")
 local cri_write    = require("lib.type.static.cri_write")
 local cri_read     = require("lib.type.static.cri_read")
@@ -3964,7 +3965,7 @@ end)
 local check_mod = require("lib.type.static.check")
 
 local function v3(src)
-    return check_mod.check_string_v3(src, "test.lua")
+    return infer_mod.check_string_v3(src, "test.lua")
 end
 
 local function v3_no_errors(src)

@@ -163,7 +163,6 @@ end
 function M.process(ctx, c_string)
     if not ctx.T_FFI_C then return end
 
-    local infer_mod = require("lib.type.static.infer")
     local ok, decls = pcall(cdecl_parse.parse, c_string, ctx.pool)
     if not ok then return end
 
@@ -173,7 +172,7 @@ function M.process(ctx, c_string)
 
         if d.decl == "func" or d.decl == "var" then
             local tid = c_type_to_tid(ctx, d.type)
-            infer_mod.table_add_field(ctx, ctx.T_FFI_C, name_id, tid)
+            types_mod.table_add_field(ctx, ctx.T_FFI_C, name_id, tid)
 
         elseif d.decl == "typedef" then
             local tid = c_type_to_tid(ctx, d.type)
@@ -191,7 +190,7 @@ function M.process(ctx, c_string)
 
         elseif d.decl == "enum_val" then
             -- Enum constants are integers accessible via ffi.C.
-            infer_mod.table_add_field(ctx, ctx.T_FFI_C, name_id, ctx.T_INTEGER)
+            types_mod.table_add_field(ctx, ctx.T_FFI_C, name_id, ctx.T_INTEGER)
         end
 
         ::continue::

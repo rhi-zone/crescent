@@ -50,7 +50,7 @@ end
 local function load_decls(ctx, path)
     local parse_mod  = require("lib.type.static.parse")
     local ann_mod    = require("lib.type.static.ann")
-    local infer_mod  = require("lib.type.static.infer")
+    local constrain_mod = require("lib.type.static.constrain")
 
     local cached = _cache[path]
     local ar
@@ -93,7 +93,7 @@ local function load_decls(ctx, path)
     local saved_ann = ctx.ann
     ctx.ann = ar
 
-    local resolve = infer_mod.resolve_annotation_type
+    local resolve = constrain_mod.resolve_annotation_type
 
     -- Collect all ANN_DECL results.
     local decls = {}

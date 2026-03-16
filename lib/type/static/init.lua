@@ -17,7 +17,6 @@ local unify  = require("lib.type.static.unify")
 local errors = require("lib.type.static.errors")
 local match  = require("lib.type.static.match")
 local narrow = require("lib.type.static.narrow")
-local infer  = require("lib.type.static.infer")
 local check  = require("lib.type.static.check")
 
 return {
@@ -33,6 +32,5 @@ return {
     errors = errors,
     match  = match,
     narrow = narrow,
-    infer  = infer,
     check  = check,
 }

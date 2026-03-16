@@ -1281,4 +1281,6 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     return ctx, ctx.constraints
 end
 
+M.resolve_annotation_type = resolve_annotation_type
+
 return M

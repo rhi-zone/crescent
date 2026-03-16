@@ -2,7 +2,6 @@
 -- Entry point for the typechecker.
 -- Orchestrates parse → annotations → prescan → infer → .cri cache.
 
-local infer_mod      = require("lib.type.static.infer")
 local constrain_mod  = require("lib.type.static.constrain")
 local solve_mod      = require("lib.type.static.solve")
 local errors_mod     = require("lib.type.static.errors")
