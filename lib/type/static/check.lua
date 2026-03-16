@@ -246,6 +246,20 @@ function M.check_string_with_deps(source, filename, parent_scope)
 end
 
 -- ---------------------------------------------------------------------------
+-- check_string_v3
+-- ---------------------------------------------------------------------------
+-- v3 constraint-based inference. Runs constrain.lua (generation) + solve.lua.
+-- Returns same {err_ctx, ctx} shape as check_string.
+function M.check_string_v3(source, filename, parent_scope, pool, cri_loader)
+    local constrain_mod = require("lib.type.static.constrain")
+    local solve_mod     = require("lib.type.static.solve")
+
+    local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader)
+    solve_mod.solve(ctx, constraints)
+    return ctx.err, ctx
+end
+
+-- ---------------------------------------------------------------------------
 -- check_files
 -- ---------------------------------------------------------------------------
 -- Check multiple files and return a combined error context.

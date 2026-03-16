@@ -3956,3 +3956,111 @@ local function g(v) f(v) end
         assert.ok(not errs[1].msg:find("might also be"), errs[1].msg)
     end)
 end)
+
+---------------------------------------------------------------------------
+-- v3 constraint-based inference
+---------------------------------------------------------------------------
+
+local check_mod = require("lib.type.static.check")
+
+local function v3(src)
+    return check_mod.check_string_v3(src, "test.lua")
+end
+
+local function v3_no_errors(src)
+    local ec = v3(src)
+    if errors_mod.has_errors(ec) then
+        local msg = errors_mod.format_plain(ec)
+        error("v3: expected no errors but got:\n" .. msg, 2)
+    end
+end
+
+local function v3_has_error(src, pattern)
+    local ec = v3(src)
+    if not errors_mod.has_errors(ec) then
+        error("v3: expected error matching '" .. tostring(pattern) .. "' but got none", 2)
+    end
+    if pattern then
+        local msg = errors_mod.format_plain(ec)
+        if not msg:find(pattern) then
+            error("v3: expected error matching '" .. pattern .. "' but got:\n" .. msg, 2)
+        end
+    end
+end
+
+assert.describe("v3 inference", function()
+    assert.it("literal pinning: unannotated function called with different literal types", function()
+        -- v2 bug: first call pins min→0, second call fails because number ≠ 0.
+        -- v3 with let-polymorphism: each call instantiates fresh vars → no error.
+        v3_no_errors([[
+local function v(maj, min, pat)
+    return { major = maj, minor = min, patch = pat }
+end
+local a = v(1, 0, 0)
+local b = v(2, 1, 0)
+]])
+    end)
+
+    assert.it("arithmetic constraint propagates to field slot", function()
+        -- `t.x + 1` should not error; t.x is resolved as a numeric type
+        v3_no_errors([[
+local function f(t)
+    return t.x + 1
+end
+]])
+    end)
+
+    assert.it("let-polymorphism: identity function used at multiple types", function()
+        v3_no_errors([[
+local function id(x) return x end
+local a = id(1)
+local b = id("hello")
+]])
+    end)
+
+    assert.it("union might-also-be: number|nil passed where number expected", function()
+        v3_has_error([[
+--: (number) -> number
+local function f(x) return x + 1 end
+--: (number | nil) -> nil
+local function g(v) f(v) end
+]], "might also be")
+    end)
+
+    assert.it("basic inference parity: local assignment", function()
+        v3_no_errors([[
+local x = 42
+local y = x + 1
+]])
+    end)
+
+    assert.it("basic inference parity: function call and return", function()
+        v3_no_errors([[
+--: (integer) -> integer
+local function double(n) return n * 2 end
+local result = double(5)
+]])
+    end)
+
+    assert.it("basic inference parity: table field assignment", function()
+        v3_no_errors([[
+local t = {}
+t.x = 10
+t.y = 20
+]])
+    end)
+
+    assert.it("unknown identifier reports error", function()
+        v3_has_error([[
+local x = undefined_name
+]], "undefined_name")
+    end)
+
+    assert.it("annotated function: type mismatch reports error", function()
+        v3_has_error([[
+--: (integer) -> integer
+local function f(n) return n end
+f("hello")
+]], nil)
+    end)
+end)
