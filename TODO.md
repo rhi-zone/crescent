@@ -261,9 +261,9 @@ Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs
 - [ ] Correlated multi-return narrowing (backlog: `if pat ~= nil then` narrows `maj`/`min` too)
 
 **Phase 2 — cutover:**
-- [ ] Replace `check.check_string` with v3 pipeline
-- [ ] All existing tests must pass (run both; diff before deleting v2)
-- [ ] Delete `infer.lua` (or keep 1 commit as reference)
+- [x] Replace `check.check_string` with v3 pipeline — done; check.lua fully on v3 (commit 848ea56)
+- [x] All existing tests must pass — 838/838 pass against v3 (2026-03-16)
+- [ ] Delete `infer.lua` (currently kept as reference; type_test.lua still requires it for v2 comparison tests)
 
 **Phase 3 — annotation pass (after Phase 2 cutover):**
 - [ ] Strip all `--:` annotations from own codebase, run v3, record error set
