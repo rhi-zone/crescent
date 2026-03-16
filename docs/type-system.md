@@ -1173,3 +1173,40 @@ Genuinely unresolved — needs dedicated design work:
 - ~~**Type transformation composition.**~~ Resolved: `$EachField<T, F>` and `$EachUnion<T, F>` are the two iteration intrinsics. The transform F is a regular type-level function (match or simple generic) that receives a field descriptor `{ key, value, optional, readonly }`. All transforms (`Partial`, `Pick`, `Omit`, etc.) are user-definable in the prelude. Composition is spread + existing transforms, no special mechanism.
 - ~~**Match recursion bounds.**~~ Resolved: no arbitrary depth limit. The primary mechanism is **cycle detection** — the checker tracks `(match-type, input-type)` pairs during expansion. If it revisits the same pair, it's a cycle. Structural recursion (input shrinks each step) terminates naturally. Growing or unchanged inputs are flagged as divergence. A configurable depth limit (default high, ~1000) exists as a safety net, not the primary mechanism. Prior art: Haskell's fixed 201 limit is arbitrary and frustrating; smart detection is better.
 - ~~**User-defined type transforms.**~~ Resolved: fields are types (descriptors with key, value, metadata). Match destructures them. `$EachField` iterates. Users define transforms as regular type-level functions — no privileged intrinsics for `Partial`, `Readonly`, etc.
+
+---
+
+## Feature Design Decisions
+
+Concrete decisions made during implementation. Each entry records the decision, the rejected alternatives, and the reasoning — so we don't relitigate.
+
+### Field modifiers: optional, readonly, private
+
+**Storage:** FieldEntry gains a flags word — stride changes from 2 to 3: `(name_id, type_id, flags)`. Done once; all modifiers share the same change.
+
+```
+FLAG_OPTIONAL  = 0x01  -- field may be absent; access returns T|nil
+FLAG_READONLY  = 0x02  -- assignment to this field is a type error
+FLAG_PRIVATE   = 0x04  -- inaccessible outside the defining file
+```
+
+**Syntax:**
+- Optional: `field?: T` — unambiguous, consistent with TypeScript/Flow.
+- Readonly: `readonly field: T` — field-level prefix keyword.
+- Private: `_` prefix convention marks a field private by default. Overridable with explicit `public _field: T` annotation. Zero boilerplate for the common case.
+
+**No table-level `readonly` keyword.** `readonly { x: T }` looks like it should be a primitive, but it isn't — it's just all fields marked readonly. The general form `Readonly<T>` (make all fields of T readonly) requires mapped types and is user-definable in the prelude once mapped types exist. Baking it into the language as a special case would be redundant.
+
+**Readonly access semantics:** reading a readonly field returns `T` normally. Writing to it is a type error at the call site.
+
+**Optional access semantics:** reading an optional field returns `T | nil`. The caller must narrow before treating it as `T`. Writing an optional field with a value of type `T` is fine; writing `nil` clears it (also fine).
+
+**Private visibility:** enforced at file granularity. A field named `_foo` (or annotated `private`) on a table type is accessible within the file that defines the type, but produces a type error if accessed from another file. Module boundary = file boundary.
+
+### `Readonly<T>` is a library type, not a keyword
+
+`Readonly<T>` maps over all fields of T and sets FLAG_READONLY. It's expressible as a mapped type:
+```lua
+--:: Readonly = <T: table> $EachField<T, fn(f) -> { ...f, readonly: true }>
+```
+No special compiler support required. Same applies to `Partial<T>`, `Required<T>`, `Pick<T, K>`, `Omit<T, K>` — all are prelude-defined mapped type applications, not language keywords.
