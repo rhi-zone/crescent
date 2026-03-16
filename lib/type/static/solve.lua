@@ -474,18 +474,24 @@ local function solve_return(ctx, c)
         return ok
     end
 
-    local current = find(ctx, ret_var_id)
-    local ct = ctx.types:get(current)
-
-    if ct.tag == TAG_VAR then
-        -- First return path: bind the ret_var directly
-        ct.data[2] = widened
+    -- Operate on ret_var_id.data[2] directly — never on find(ret_var_id).
+    -- Following the chain can reach a different unbound var (e.g. prescan_ret_var
+    -- after C_UNIFY extended the chain). Binding that var to `widened` where
+    -- widened == find(ret_var_id) creates a self-loop and hangs find().
+    if ret_var_t.data[2] == -1 then
+        -- First return path: bind ret_var_id directly.
+        ret_var_t.data[2] = widened
     else
-        -- Subsequent return path: widen the return type to include this value
-        local new_union = types_mod.make_union(ctx, { current, widened })
-        -- Update ret_var's binding to the new wider union
-        -- ret_var_t.data[2] currently points to 'current'; redirect to new_union
-        ret_var_t.data[2] = new_union
+        -- Subsequent return path (multiple `return` stmts, or fixpoint re-pass).
+        -- Use ret_var_t.data[2] to find the current concrete binding without
+        -- following the full chain past what this constraint owns.
+        local prev_root = find(ctx, ret_var_t.data[2])
+        if prev_root ~= widened then
+            -- Widen: new union of what we had and the new return value.
+            local new_union = types_mod.make_union(ctx, { prev_root, widened })
+            ret_var_t.data[2] = new_union
+        end
+        -- If prev_root == widened: idempotent, no change needed.
     end
     return true
 end
