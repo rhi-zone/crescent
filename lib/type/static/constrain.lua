@@ -209,15 +209,32 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             end
             seen[ann_tid] = nil
         end
+        -- Literal boolean types: `true` / `false` are valid type-level names.
+        local intern_local = require("lib.type.static.intern")
+        local name_str = intern_local.get(ctx.pool, name_id) or ""
+        if name_str == "true"  then return types_mod.make_literal(ctx, LIT_BOOLEAN, 1) end
+        if name_str == "false" then return types_mod.make_literal(ctx, LIT_BOOLEAN, 0) end
+
+        -- Check if the alias exists at all; only emit an error for truly undefined names.
+        local alias = env_mod.lookup_type(ctx.scope, name_id)
+        if not alias then
+            local err_line = ctx._ann_warn_line or 0
+            errors_mod.error(ctx.err, ctx.filename, err_line, 0, "undefined type '" .. name_str .. "'")
+            return ctx.T_ANY
+        end
+
         local resolved, resolve_err = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
         if resolved then return resolved end
-        -- Named type could not be resolved: emit an error and fall back to T_ANY.
-        local name_str = require("lib.type.static.intern").get(ctx.pool, name_id) or "?"
-        local msg = resolve_err or ("undefined type '" .. name_str .. "'")
-        -- Find any source line associated with this annotation use.
-        local err_line = ctx._ann_warn_line or 0
-        errors_mod.error(ctx.err, ctx.filename, err_line, 0, msg)
-        return ctx.T_ANY
+        -- Arity mismatch or similar resolution error: report it.
+        if resolve_err then
+            errors_mod.error(ctx.err, ctx.filename, ctx._ann_warn_line or 0, 0, resolve_err)
+            return ctx.T_ANY
+        end
+        -- alias.body == nil: self-referential or forward-ref during construction.
+        -- Fall back to an opaque TAG_NAMED placeholder (will be substituted on use).
+        local id = types_mod.alloc_type(ctx, TAG_NAMED)
+        ctx.types:get(id).data[0] = name_id
+        return id
     end
 
     if tag == TAG_FUNCTION then
@@ -403,7 +420,24 @@ end
 
 local function get_ann(ctx, line)
     if not ctx.ann then return nil end
-    return ctx.ann.results[line] or ctx.ann.results[line - 1]
+    local consumed = ctx._ann_consumed
+    local r = ctx.ann.results[line]
+    if r and not (consumed and consumed[line]) then return r end
+    local r1 = ctx.ann.results[line - 1]
+    if r1 and not (consumed and consumed[line - 1]) then return r1 end
+    return nil
+end
+
+local function consume_ann(ctx, line)
+    local r  = ctx.ann and ctx.ann.results[line]
+    local r1 = ctx.ann and ctx.ann.results[line - 1]
+    -- Only consume ANN_TYPE entries (not ANN_DECL, which are type-alias declarations).
+    if (r  and r.kind  == ANN_TYPE) or
+       (r1 and r1.kind == ANN_TYPE) then
+        ctx._ann_consumed = ctx._ann_consumed or {}
+        if r  and r.kind  == ANN_TYPE then ctx._ann_consumed[line]     = true end
+        if r1 and r1.kind == ANN_TYPE then ctx._ann_consumed[line - 1] = true end
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -953,6 +987,9 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             end
         end
     end
+    -- Consume the annotation for this line so it doesn't spill to the next statement
+    -- via the line-1 fallback in get_ann (e.g. `local t --: T \n local v = t.x`).
+    consume_ann(ctx, n.line)
 end
 
 StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)

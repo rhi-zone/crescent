@@ -66,6 +66,7 @@ mod.it = function(name, fn)
 	local full = (#_describe > 0 and table.concat(_describe, " > ") .. " > " or "") .. name
 	local pre_pass, pre_fail = _pass, _fail
 	local ok, err = pcall(fn)
+	if not ok then _fail = _fail + 1 end
 	local n_pass = _pass - pre_pass
 	local n_fail = _fail - pre_fail
 	_tests[#_tests + 1] = {

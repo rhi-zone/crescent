@@ -3206,7 +3206,7 @@ local x = obj._id + 1
     assert.it("public field with _ prefix annotation can override (still same-file ok)", function()
         -- Even with FLAG_PRIVATE set, same-file access is always allowed.
         no_errors([[
-local session = { _socket = nil, id = "abc" }
+local session = { _socket = "", id = "abc" }
 session._socket = "connected"
 local s = session._socket
 ]])

@@ -404,7 +404,18 @@ Blocking items for cutover:
 - [x] Branch-join / post-if type merging — FIXED 2026-03-02 (commit 19a6b19). Nil-default pattern,
   exhaustive if/else assignment, if-only assignment all handled. lookup_declared skips narrowing
   scopes; ASSIGN_STMT rebinds branch-locally; NODE_IF_STMT diffs branch scope and unions results.
-- [ ] Private field visibility enforcement
+  **KNOWN GAP (v3)**: nil-default pattern (`if x == nil then x = default end`) — v3 constraint
+  solver doesn't yet narrow `string | nil` to `string` after the if block. Test in type_test.lua
+  at "nil-default" marks expected behavior; failing silently before 2026-03-17 silent-crash fix.
+- [x] Private field visibility enforcement — DONE 2026-03-17 (session 25). `_`-prefix fields
+  get FLAG_PRIVATE. Cross-file access rejected in solve_has_field. ctx.type_origins maps type IDs
+  to source filenames via CRI load tagging.
+- [ ] pcall v3 narrowing — pcall-annotated `local ok, s = pcall(fn)` followed by `if ok then s+1`
+  should error: s is string inside the ok branch and `+` is invalid. Currently no error (v3 path).
+  Test at type_test.lua "pcall result type error" fails after 2026-03-17 silent-crash fix.
+- [ ] unnamed-params warn in --:: declare — `--:: declare fn = (T1, T2) -> R` should warn when
+  param types are unnamed. Feature exists in v2 path but not v3 process_type_decls. Test fails
+  after 2026-03-17 silent-crash fix.
 - [ ] $EachField / $EachUnion full transform evaluation
 - [ ] Typed holes / completions
 - [ ] Variadic `pipe`/`compose` typing — fixed-arity overloads work but variadic needs design; blocked on generic inference + possibly variadic generics or dependent types. Low priority, pending design.
