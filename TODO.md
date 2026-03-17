@@ -404,12 +404,9 @@ Blocking items for cutover:
 - [x] Branch-join / post-if type merging — FIXED 2026-03-02 (commit 19a6b19). Nil-default pattern,
   exhaustive if/else assignment, if-only assignment all handled. lookup_declared skips narrowing
   scopes; ASSIGN_STMT rebinds branch-locally; NODE_IF_STMT diffs branch scope and unions results.
-  **KNOWN GAP (v3)**: post-if branch-join narrowing — v3 constraint solver doesn't merge branch
-  types back into the outer scope after an if block. Examples: nil-default (`if x == nil then
-  x = "d" end` → x should be `string`), exhaustive if/else assignment, one-sided assignment.
-  v2 fixed this (commit 19a6b19) but the fix was not ported to the v3 path. Tests in type_test.lua
-  under "branch-join / post-if type merging" mark expected behavior; were failing silently before
-  the 2026-03-17 it()-crash fix.
+  **DONE (v3, 2026-03-17, session 25)**: post-if branch-join narrowing ported to v3.
+  `branch_scope_diff` + Cat E guard + union of per-branch end types. All branch-join
+  tests passing. See commit `feat(type): v3 branch-join`.
 - [x] Private field visibility enforcement — DONE 2026-03-17 (session 25). `_`-prefix fields
   get FLAG_PRIVATE. Cross-file access rejected in solve_has_field. ctx.type_origins maps type IDs
   to source filenames via CRI load tagging.

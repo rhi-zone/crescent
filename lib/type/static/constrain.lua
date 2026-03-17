@@ -1150,22 +1150,125 @@ StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
     ctx.scope = saved
 end
 
+-- Collect end-of-branch types for variables that already existed in base_scope.
+local function branch_scope_diff(ctx, branch_scope, base_scope)
+    local result = {}
+    local s = branch_scope
+    while s and s ~= base_scope do
+        for name_id, type_id in pairs(s.bindings) do
+            if result[name_id] == nil and env_mod.lookup(base_scope, name_id) ~= nil then
+                result[name_id] = type_id
+            end
+        end
+        s = s.parent
+    end
+    return result
+end
+
 StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local narrow_mod = require("lib.type.static.narrow")
     local saved = ctx.scope
+
+    local guard_narrowings = {}  -- Cat E: negated narrowings from exiting clauses
+    local branch_ends      = {}  -- { name_id -> type_id } per non-exiting clause
+    local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
+    local has_else         = false
+
     for i = n.data[0], n.data[0] + n.data[1] - 1 do
-        local cn = ctx.nodes:get(ctx.ast_lists:get(i))
-        local test_nid = cn.data[0]
+        local cn          = ctx.nodes:get(ctx.ast_lists:get(i))
+        local test_nid    = cn.data[0]
+        local block_start = cn.data[1]
+        local block_len   = cn.data[2]
+
         if test_nid >= 0 then
             gen_expr(ctx, test_nid)
             local narrowed = narrow_mod.narrow_scope(ctx, test_nid, true)
             ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
         else
+            has_else = true
             ctx.scope = env_mod.child(saved)
         end
-        gen_block(ctx, cn.data[1], cn.data[2])
+
+        gen_block(ctx, block_start, block_len)
+        local end_scope = ctx.scope
+
+        -- Detect unconditional exit (return/break as last statement).
+        local exits = false
+        if block_len > 0 then
+            local last_n = ctx.nodes:get(ctx.ast_lists:get(block_start + block_len - 1))
+            exits = (last_n.kind == NODE_RETURN_STMT or last_n.kind == NODE_BREAK_STMT)
+        end
+
+        if not exits then
+            branch_ends[#branch_ends + 1] = branch_scope_diff(ctx, end_scope, saved)
+        end
+
+        -- Restore scope to saved BEFORE computing negated narrowing so that the
+        -- lookup of variable types uses the pre-branch types (not truthy-narrowed ones).
+        -- (e.g. `if n == 0 then return end` — negated narrowing of n should be
+        -- based on n's type before the branch, not LIT_INTEGER(0) from inside it.)
         ctx.scope = saved
+
+        if test_nid >= 0 then
+            local neg = narrow_mod.narrow_scope(ctx, test_nid, false)
+            if exits then
+                -- Cat E: negate to narrow the continuation scope.
+                for name_id, type_id in pairs(neg) do
+                    guard_narrowings[name_id] = type_id
+                end
+            else
+                -- Accumulate for pass-through path.
+                for name_id, type_id in pairs(neg) do
+                    if pass_through_neg[name_id] == nil then
+                        pass_through_neg[name_id] = type_id
+                    end
+                end
+            end
+        end
+    end
+
+    -- Step 1: Apply Cat E guard narrowings to the continuation scope.
+    if next(guard_narrowings) then
+        ctx.scope = narrow_mod.apply_narrowed(ctx, guard_narrowings)
+    end
+
+    -- Step 2: Branch-join — union per-branch end-types and bind in continuation.
+    local changed = {}
+    for _, et in ipairs(branch_ends) do
+        for name_id in pairs(et) do changed[name_id] = true end
+    end
+
+    if next(changed) then
+        local join = {}
+        for name_id in pairs(changed) do
+            local post_guard = env_mod.lookup(ctx.scope, name_id)
+            local members, seen_m = {}, {}
+            local function add_member(t)
+                t = types_mod.find(ctx, t)
+                if t and not seen_m[t] then seen_m[t] = true; members[#members + 1] = t end
+            end
+            for _, et in ipairs(branch_ends) do
+                add_member(et[name_id] or post_guard)
+            end
+            if not has_else then
+                add_member(pass_through_neg[name_id] or post_guard)
+            end
+            if #members == 1 then
+                join[name_id] = members[1]
+            elseif #members > 1 then
+                join[name_id] = types_mod.make_union(ctx, members)
+            end
+        end
+        if next(join) then
+            -- Use a plain child scope (no narrowed_names) so joined types become
+            -- the new declared type for subsequent lookup_declared calls.
+            local join_scope = env_mod.child(ctx.scope)
+            for name_id, type_id in pairs(join) do
+                env_mod.bind(join_scope, name_id, type_id)
+            end
+            ctx.scope = join_scope
+        end
     end
 end
 
