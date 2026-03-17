@@ -1592,6 +1592,18 @@ local function process_type_decls(ctx)
     -- Pass 2b: bind declared variables (decl_var), which may reference aliases set above.
     for _, r in ipairs(decls) do
         if r.decl_var then
+            -- Warn on function type declarations with unnamed parameters.
+            local at = ctx.ann.types:get(r.type_id)
+            local fn_at
+            if at.tag == defs.TAG_FUNCTION then
+                fn_at = at
+            elseif at.tag == defs.TAG_FORALL then
+                local body = ctx.ann.types:get(at.data[2])
+                if body.tag == defs.TAG_FUNCTION then fn_at = body end
+            end
+            if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
+                warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
+            end
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
         end
     end
