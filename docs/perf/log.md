@@ -6,6 +6,44 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-17: SHA-256 tiered implementation
+
+**Commit:** `bb16c30`
+
+Three-tier SHA-256 (`lib/sha256/init.lua`). Tiers selected at load time.
+Benchmark: `luajit lib/sha256/bench.lua` — 1 MB input, 10 reps, 1 warm-up call.
+
+| tier | total (ms) | per-op (ms) | throughput |
+|------|-----------|-------------|------------|
+| ffi  | 138.7     | 13.87       | 72.1 MB/s  |
+| lua  | 245.1     | 24.51       | 40.8 MB/s  |
+
+**system tier** (OpenSSL `SHA256()`) not available on this machine (no `libssl.so`
+in `LD_LIBRARY_PATH`); would be ~1 GB/s via SHA-NI when available.
+
+**FFI tier** (LuaJIT FFI scalar, `uint32_t[64]` work arrays, `bit.ror/bxor`):
+72 MB/s. JIT-compiled loop over 64 compression rounds.
+
+**Lua tier** (pure Lua, streaming 64-byte blocks via `string.byte`): 41 MB/s.
+Much faster than the ~10 MB/s spec estimate because LuaJIT JIT-compiles the
+inner loop — the bit operations via `bit.*` trace cleanly. Streaming avoids
+building a full byte-table for large inputs.
+
+### Raw benchmark output (best of 3 runs)
+
+```
+sha256 benchmark — 1 MB input, 10 reps
+
+tier          total (ms)  per-op (ms)    throughput
+------------------------------------------------------
+ffi                138.7       13.87       72.1 MB/s
+lua                245.1       24.51       40.8 MB/s
+
+Default tier: ffi
+```
+
+---
+
 ## 2026-03-02: lexer optimization — kill _buf + source-referencing intern
 
 **Baseline commit:** `7b58fdc` (Phase 2 parser)
