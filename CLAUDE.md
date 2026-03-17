@@ -54,6 +54,12 @@ cd docs && bun dev           # Local docs
 
 **Do the work properly.** Don't leave workarounds or hacks undocumented. When asked to analyze X, actually read X — don't synthesize from conversation.
 
+## Implementation Patterns
+
+**Tiered implementation.** When an operation has multiple correct implementations at different performance levels (e.g. FFI + system library > FFI scalar > pure Lua), implement all tiers and select the best available at load time via `pcall`. Never fail hard when a faster tier is unavailable — fall through to the next. Never silently use a slow tier without the faster ones being attempted first.
+
+**Fix the specific problem, don't abandon the approach.** When an objection applies to one aspect of a design, fix that aspect. Platform-specific library names → try each known name. Library missing → fall back to next tier. These are implementation details, not architectural blockers. Discarding a whole approach because of a fixable problem is a cop-out.
+
 ## Design Principles
 
 **Vendorable.** Every library is a set of `.lua` files you can copy into your project. No build step, no native bindings to manage. You own the code.
