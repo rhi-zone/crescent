@@ -1043,6 +1043,26 @@ This means:
 - Match types participate in inference — they're constraints, not evaluation
   steps.
 
+**Academic context.** The closest formal foundation is **MLsub** (Dolan &
+Mycroft, 2017): an extension of ML type inference that adds structural
+subtyping while preserving principal types. MLsub uses *polar types* — types
+annotated with their variance position (input vs output) — and *biunification*
+(bidirectional constraint propagation) to handle subtyping without sacrificing
+the completeness guarantees of Hindley-Milner inference. The key insight: by
+tracking polarity, the solver knows which direction information flows for each
+variable and can propagate in both directions simultaneously. Crescent's
+constraint solver follows the same intuition informally — the union-find +
+structural matching approach approximates biunification without a full
+polarity analysis. If we formalize generic variance (soundness gap 3), MLsub
+is the reference to consult.
+
+**Liquid types** (Rondon et al., 2008; Vazou et al.) attach predicate
+refinements to types (`{x: int | x > 0}`) verified by an SMT solver. Not
+planned — they require per-type SMT queries, don't compose with structural
+subtyping cleanly, and the solver dependency conflicts with the "pure LuaJIT,
+no external tools" constraint. Narrowing (nil-check, truthiness) gives us the
+practical benefits for the Lua idioms that matter.
+
 ### Match types are the intentionally Turing-complete core
 
 TypeScript is Turing-complete by accident (conditional + mapped + recursive
