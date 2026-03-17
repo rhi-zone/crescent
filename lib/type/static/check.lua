@@ -132,11 +132,26 @@ function M.check_file(filename, parent_scope, explicit_pool)
         -- Always do a cri round-trip to get a type ID in the current ctx's arena.
 
         -- Check session cache: if dep has cri_bytes, deserialise into current ctx.
+        local function load_and_tag(cri_bytes, source_file)
+            local before = ctx.types.len
+            local ok, exports = cri_read.load(cri_bytes, ctx)
+            if ok and exports["__ret"] then
+                -- Mark all type IDs created by this load as originating from source_file.
+                if ctx.type_origins then
+                    for i = before, ctx.types.len - 1 do
+                        ctx.type_origins[i] = source_file
+                    end
+                end
+                return exports["__ret"]
+            end
+            return nil
+        end
+
         if _session[dep_path] then
             local dep = _session[dep_path]
             if dep.cri_bytes then
-                local ok, exports = cri_read.load(dep.cri_bytes, ctx)
-                if ok and exports["__ret"] then return exports["__ret"] end
+                local ret = load_and_tag(dep.cri_bytes, dep_path)
+                if ret then return ret end
             end
             -- Dep was checked but has no serializable export (e.g. T_ANY): return nil.
             return nil
@@ -147,8 +162,8 @@ function M.check_file(filename, parent_scope, explicit_pool)
         if dep_ctx then
             -- Session entry was populated by check_file; retry via session cache.
             if _session[dep_path] and _session[dep_path].cri_bytes then
-                local ok, exports = cri_read.load(_session[dep_path].cri_bytes, ctx)
-                if ok and exports["__ret"] then return exports["__ret"] end
+                local ret = load_and_tag(_session[dep_path].cri_bytes, dep_path)
+                if ret then return ret end
             end
         end
 

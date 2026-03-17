@@ -3184,6 +3184,44 @@ local r = f("oops")
 end)
 
 ---------------------------------------------------------------------------
+-- Private field enforcement (FLAG_PRIVATE via _ prefix)
+---------------------------------------------------------------------------
+
+assert.describe("checker: private fields", function()
+    assert.it("_-prefixed field is accessible within the same file", function()
+        no_errors([[
+local M = {}
+M._cache = {}
+local x = M._cache
+]])
+    end)
+
+    assert.it("_-prefixed field in table literal is accessible same-file", function()
+        no_errors([[
+local obj = { _id = 42, name = "hello" }
+local x = obj._id + 1
+]])
+    end)
+
+    assert.it("public field with _ prefix annotation can override (still same-file ok)", function()
+        -- Even with FLAG_PRIVATE set, same-file access is always allowed.
+        no_errors([[
+local session = { _socket = nil, id = "abc" }
+session._socket = "connected"
+local s = session._socket
+]])
+    end)
+
+    assert.it("_-prefixed method is accessible within the same file", function()
+        no_errors([[
+local M = {}
+function M._init(x) return x + 1 end
+local r = M._init(42)
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
 -- Nominal (newtype) assignment enforcement
 ---------------------------------------------------------------------------
 

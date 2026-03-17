@@ -31,6 +31,7 @@ local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_STRING  = defs.LIT_STRING
 
 local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local FLAG_PRIVATE  = defs.FLAG_PRIVATE
 local band          = require("bit").band
 
 local C_UNIFY     = constrain.C_UNIFY
@@ -243,6 +244,17 @@ local function solve_has_field(ctx, c)
     if obj_t.tag == TAG_TABLE then
         local fe = types_mod.table_field(ctx, obj_tid, name_id)
         if fe then
+            -- Private field: only accessible from the file that defines this type.
+            if band(fe.flags, FLAG_PRIVATE) ~= 0 then
+                local origin = ctx.type_origins and ctx.type_origins[obj_tid]
+                if origin and origin ~= ctx.filename then
+                    local fname = intern_mod.get(ctx.pool, name_id) or "?"
+                    add_error(ctx, line, col,
+                        "field '" .. fname .. "' is private to '" .. origin .. "'")
+                    bind_to(ctx, res_tid, ctx.T_ANY)
+                    return false
+                end
+            end
             local ft = find(ctx, fe.type_id)
             if band(fe.flags, FLAG_OPTIONAL) ~= 0 then
                 -- Optional field: access returns T | nil

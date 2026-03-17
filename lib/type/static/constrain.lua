@@ -67,7 +67,22 @@ local FLAG_VARARG   = defs.FLAG_VARARG
 local FLAG_COMPUTED = defs.FLAG_COMPUTED
 local FLAG_READONLY = defs.FLAG_READONLY
 local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local FLAG_PRIVATE  = defs.FLAG_PRIVATE
 local band          = require("bit").band
+local bor           = require("bit").bor
+
+-- Compute field flags, auto-setting FLAG_PRIVATE for `_`-prefixed names.
+local function field_flags(ctx, name_id, base_flags)
+    base_flags = base_flags or 0
+    if type(base_flags) == "boolean" then
+        base_flags = base_flags and FLAG_OPTIONAL or 0
+    end
+    local name = require("lib.type.static.intern").get(ctx.pool, name_id) or ""
+    if name:sub(1, 1) == "_" then
+        base_flags = bor(base_flags, FLAG_PRIVATE)
+    end
+    return base_flags
+end
 
 local ANN_TYPE = defs.ANN_TYPE
 local ANN_DECL = defs.ANN_DECL
@@ -601,7 +616,7 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
 
         if key_nid == -1 then
             local pos_key = intern_mod.intern(ctx.pool, tostring(pos_idx))
-            field_ids[#field_ids + 1] = types_mod.make_field(ctx, pos_key, val_tid, false)
+            field_ids[#field_ids + 1] = types_mod.make_field(ctx, pos_key, val_tid, field_flags(ctx, pos_key))
             pos_idx = pos_idx + 1
         elseif (fn.flags % (FLAG_COMPUTED * 2)) >= FLAG_COMPUTED then
             local key_tid = gen_expr(ctx, key_nid)
@@ -610,7 +625,7 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
         else
             local kn = ctx.nodes:get(key_nid)
             local name_id = kn.data[1]
-            field_ids[#field_ids + 1] = types_mod.make_field(ctx, name_id, val_tid, false)
+            field_ids[#field_ids + 1] = types_mod.make_field(ctx, name_id, val_tid, field_flags(ctx, name_id))
         end
     end
     return types_mod.make_table(ctx, field_ids, indexers, -1, {})
@@ -1007,7 +1022,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         ix = ix + 2
                     end
                     for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
-                    fields[#fields + 1] = types_mod.make_field(ctx, field_id, rhs_tid, false)
+                    fields[#fields + 1] = types_mod.make_field(ctx, field_id, rhs_tid, field_flags(ctx, field_id))
                     local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                     local ot2 = ctx.types:get(obj_tid)
                     local new_t = ctx.types:get(new_tbl)
@@ -1047,7 +1062,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                             ix2 = ix2 + 2
                         end
                         for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta+1] = ctx.lists:get(j) end
-                        fields[#fields+1] = types_mod.make_field(ctx, field_id, rhs_tid, false)
+                        fields[#fields+1] = types_mod.make_field(ctx, field_id, rhs_tid, field_flags(ctx, field_id))
                         local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                         local ot2 = ctx.types:get(obj_tid)
                         local new_t = ctx.types:get(new_tbl)
@@ -1259,7 +1274,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
                     ix = ix + 2
                 end
                 for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
-                fields[#fields + 1] = types_mod.make_field(ctx, field_id, fn_tid, false)
+                fields[#fields + 1] = types_mod.make_field(ctx, field_id, fn_tid, field_flags(ctx, field_id))
                 local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                 local ot2 = ctx.types:get(obj_tid)
                 local new_t = ctx.types:get(new_tbl)
@@ -1319,7 +1334,7 @@ gen_prescan_block = function(ctx, bs, bl)
                                     ix = ix + 2
                                 end
                                 for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
-                                fields[#fields + 1] = types_mod.make_field(ctx, field_id, make_prescan_stub(ctx, pl), false)
+                                fields[#fields + 1] = types_mod.make_field(ctx, field_id, make_prescan_stub(ctx, pl), field_flags(ctx, field_id))
                                 local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                                 local ot2 = ctx.types:get(obj_tid)
                                 local new_t = ctx.types:get(new_tbl)
@@ -1477,6 +1492,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx.field_at           = {}
     ctx.def_sites          = {}
     ctx.require_sources    = {}
+    ctx.type_origins       = {}   -- [type_id] -> filename; populated for cross-file types
     ctx.constraints        = {}   -- v3: emitted constraints
     ctx.lit_cache          = {}   -- literal type interning: (kind<<32|val) → type_id
 
