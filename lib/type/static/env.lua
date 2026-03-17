@@ -15,6 +15,8 @@ local TAG_INTERSECTION = defs.TAG_INTERSECTION
 local TAG_TUPLE        = defs.TAG_TUPLE
 local TAG_SPREAD       = defs.TAG_SPREAD
 local FLAG_GENERIC     = defs.FLAG_GENERIC
+local FLAG_OPTIONAL    = defs.FLAG_OPTIONAL
+local band             = bit.band
 
 local M = {}
 
@@ -221,7 +223,7 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
             local new_type = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
-            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe.name_id, new_type, fe.optional == 1)
+            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
         end
 
         local new_indexers = {}
@@ -238,7 +240,7 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
             local new_type = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
-            new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, fe.optional == 1)
+            new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
         end
 
         local row_var = t.data[4]
@@ -359,7 +361,7 @@ local function substitute_inner(ctx, tid, mapping, seen)
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
             local new_type = substitute_inner(ctx, fe.type_id, mapping, seen)
-            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe.name_id, new_type, fe.optional == 1)
+            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
         end
         local new_indexers = {}
         local is, il = t.data[2], t.data[3]
@@ -374,7 +376,7 @@ local function substitute_inner(ctx, tid, mapping, seen)
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
             local new_type = substitute_inner(ctx, fe.type_id, mapping, seen)
-            new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, fe.optional == 1)
+            new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
         end
         seen[tid] = nil
         return types_mod.make_table(ctx, new_field_ids, new_indexers, t.data[4], new_meta)

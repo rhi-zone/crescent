@@ -6,6 +6,9 @@ local defs = require("lib.type.static.defs")
 local types_mod = require("lib.type.static.types")
 local intern_mod = require("lib.type.static.intern")
 
+local FLAG_OPTIONAL    = defs.FLAG_OPTIONAL
+local band             = bit.band
+
 local NODE_BINARY_EXPR = defs.NODE_BINARY_EXPR
 local NODE_UNARY_EXPR  = defs.NODE_UNARY_EXPR
 local NODE_CALL_EXPR   = defs.NODE_CALL_EXPR
@@ -222,7 +225,7 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
         for i = fs, fs + fl - 1 do
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
-            field_data[#field_data + 1] = { fid = fid, name_id = fe.name_id, type_id = fe.type_id, optional = fe.optional }
+            field_data[#field_data + 1] = { fid = fid, name_id = fe.name_id, type_id = fe.type_id, flags = fe.flags }
         end
 
         -- Build new field list, replacing target field with non-nil version.
@@ -232,7 +235,7 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
             if fd.name_id == field_name_id then
                 local non_nil = types_mod.subtract(ctx, fd.type_id, ctx.T_NIL)
                 if non_nil ~= fd.type_id then
-                    local new_fid = types_mod.make_field(ctx, fd.name_id, non_nil, fd.optional == 1)
+                    local new_fid = types_mod.make_field(ctx, fd.name_id, non_nil, band(fd.flags, defs.FLAG_OPTIONAL) ~= 0)
                     new_field_ids[#new_field_ids + 1] = new_fid
                     changed = true
                 else
