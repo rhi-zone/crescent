@@ -44,50 +44,56 @@ local find = types_mod.find
 
 -- Occurs check: does the var at `var_tid` (after find) appear in type `tid`?
 -- var_tid must be the root of a TAG_VAR or TAG_ROWVAR.
-local function occurs(ctx, var_tid, tid)
+-- seen: set of already-visited type IDs to break cycles (recursive/self-referential types).
+local function occurs(ctx, var_tid, tid, seen)
     tid = find(ctx, tid)
     if tid == var_tid then return true end
+    if seen and seen[tid] then return false end
+
     local t = ctx.types:get(tid)
     local tag = t.tag
 
     if tag == TAG_FUNCTION then
+        seen = seen or {}; seen[tid] = true
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if occurs(ctx, var_tid, ctx.lists:get(i)) then return true end
+            if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
         for i = t.data[2], t.data[2] + t.data[3] - 1 do
-            if occurs(ctx, var_tid, ctx.lists:get(i)) then return true end
+            if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
         if t.data[4] >= 0 then
-            if occurs(ctx, var_tid, t.data[4]) then return true end
+            if occurs(ctx, var_tid, t.data[4], seen) then return true end
         end
         return false
     end
 
     if tag == TAG_TABLE then
+        seen = seen or {}; seen[tid] = true
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
-            if occurs(ctx, var_tid, fe.type_id) then return true end
+            if occurs(ctx, var_tid, fe.type_id, seen) then return true end
         end
         local is, il = t.data[2], t.data[3]
         for i = is, is + il - 1 do
-            if occurs(ctx, var_tid, ctx.lists:get(i)) then return true end
+            if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
         for i = t.data[5], t.data[5] + t.data[6] - 1 do
             local fe = ctx.fields:get(ctx.lists:get(i))
-            if occurs(ctx, var_tid, fe.type_id) then return true end
+            if occurs(ctx, var_tid, fe.type_id, seen) then return true end
         end
         return false
     end
 
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
+        seen = seen or {}; seen[tid] = true
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if occurs(ctx, var_tid, ctx.lists:get(i)) then return true end
+            if occurs(ctx, var_tid, ctx.lists:get(i), seen) then return true end
         end
         return false
     end
 
     if tag == TAG_SPREAD then
-        return occurs(ctx, var_tid, t.data[0])
+        return occurs(ctx, var_tid, t.data[0], seen)
     end
 
     return false
