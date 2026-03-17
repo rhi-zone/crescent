@@ -164,7 +164,7 @@ local function collect(ctx, root_tids)
                 for i = ls, ls + ll - 1 do
                     local fid = ctx.lists:get(i)
                     local fe  = ctx.fields:get(fid)
-                    field_entries[#field_entries + 1] = {fe.name_id, fe.type_id, fe.optional ~= 0}
+                    field_entries[#field_entries + 1] = {fe.name_id, fe.type_id, fe.flags}
                     intern_str(fe.name_id)
                     walk_tid(fe.type_id)
                 end
@@ -343,14 +343,14 @@ local function build_list_pool(ctx, seen_types, list_ranges)
 end
 
 -- Build remapped field pool entries. After collect(), field_entries[i] has
--- {old_name_sid, old_type_tid, optional}. We remap here.
+-- {old_name_sid, old_type_tid, flags_byte}. We remap here.
 local function build_field_pool(ctx, seen_types, seen_strings, field_entries)
     local remapped = {}
     for _, fe in ipairs(field_entries) do
         remapped[#remapped + 1] = {
             remap_sid(seen_strings, fe[1]),
             remap_tid(seen_types, ctx, fe[2]),
-            fe[3],
+            fe[3],  -- flags byte (was optional bool, now full flags)
         }
     end
     return remapped
@@ -583,7 +583,7 @@ function M.serialize(ctx, exports)
     for _, fe in ipairs(flat_fields) do
         field_buf[#field_buf + 1] = i32be(fe[1])                -- name_id (i32)
         field_buf[#field_buf + 1] = i32be(fe[2])                -- type_id (i32)
-        field_buf[#field_buf + 1] = u8(fe[3] and 1 or 0)        -- optional (u8)
+        field_buf[#field_buf + 1] = u8(fe[3] or 0)              -- flags (u8): FLAG_OPTIONAL=0x01, FLAG_READONLY=0x02, FLAG_PRIVATE=0x04
         field_buf[#field_buf + 1] = "\0\0\0"                    -- padding (3 bytes)
         -- 4+4+1+3 = 12 bytes ✓
     end

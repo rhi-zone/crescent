@@ -43,7 +43,11 @@ local LIT_INTEGER = defs.LIT_INTEGER
 local double_to_i32x2 = defs.double_to_i32x2
 local i32x2_to_double = defs.i32x2_to_double
 
-local FLAG_GENERIC = defs.FLAG_GENERIC
+local FLAG_GENERIC   = defs.FLAG_GENERIC
+local FLAG_OPTIONAL  = defs.FLAG_OPTIONAL
+local FLAG_READONLY  = defs.FLAG_READONLY
+local FLAG_PRIVATE   = defs.FLAG_PRIVATE
+local band           = require("bit").band
 
 local M = {}
 
@@ -298,13 +302,29 @@ function M.make_func(ctx, params, returns, vararg_id, param_name_ids)
 end
 
 -- Make a FieldEntry and return its arena ID.
-function M.make_field(ctx, name_id, type_id, optional)
+-- flags: bitmask of FLAG_OPTIONAL, FLAG_READONLY, FLAG_PRIVATE.
+-- For backward compat, if flags is a boolean it is treated as FLAG_OPTIONAL.
+function M.make_field(ctx, name_id, type_id, flags)
     local fid = ctx.fields:alloc()
     local fe = ctx.fields:get(fid)
     fe.name_id = name_id
     fe.type_id = type_id
-    fe.optional = optional and 1 or 0
+    if type(flags) == "boolean" then
+        fe.flags = flags and FLAG_OPTIONAL or 0
+    else
+        fe.flags = flags or 0
+    end
     return fid
+end
+
+-- Return the flags byte of a FieldEntry.
+function M.field_flags(fe)
+    return fe.flags
+end
+
+-- Check if a FieldEntry has a given flag bit set.
+function M.field_has(fe, flag)
+    return band(fe.flags, flag) ~= 0
 end
 
 -- Make a table type.
@@ -670,8 +690,9 @@ function M.display(ctx, tid, seen)
         end
         table.sort(field_names, function(a, b) return a.name < b.name end)
         for _, nf in ipairs(field_names) do
-            local opt = nf.fe.optional == 1 and "?" or ""
-            parts[#parts + 1] = nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
+            local opt = band(nf.fe.flags, FLAG_OPTIONAL) ~= 0 and "?" or ""
+            local ro  = band(nf.fe.flags, FLAG_READONLY) ~= 0 and "readonly " or ""
+            parts[#parts + 1] = ro .. nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
         end
         -- indexers
         local is, il = t.data[2], t.data[3]
@@ -692,7 +713,7 @@ function M.display(ctx, tid, seen)
         end
         table.sort(meta_names, function(a, b) return a.name < b.name end)
         for _, nf in ipairs(meta_names) do
-            local opt = nf.fe.optional == 1 and "?" or ""
+            local opt = band(nf.fe.flags, FLAG_OPTIONAL) ~= 0 and "?" or ""
             parts[#parts + 1] = "#" .. nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
         end
         seen[tid] = nil
@@ -824,9 +845,9 @@ function M.patch_table(ctx, obj_tid, fields, indexers, rv, meta)
     for k = 0, 6 do ot.data[k] = new_t.data[k] end
 end
 
-function M.table_add_field(ctx, obj_tid, field_id, field_type_id)
+function M.table_add_field(ctx, obj_tid, field_id, field_type_id, flags)
     local fields, indexers, rv, meta = M.snapshot_table(ctx, obj_tid)
-    fields[#fields + 1] = M.make_field(ctx, field_id, field_type_id, false)
+    fields[#fields + 1] = M.make_field(ctx, field_id, field_type_id, flags or 0)
     M.patch_table(ctx, obj_tid, fields, indexers, rv, meta)
 end
 

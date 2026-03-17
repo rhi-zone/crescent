@@ -34,6 +34,10 @@ local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_INTEGER = defs.LIT_INTEGER
 
+local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local FLAG_READONLY = defs.FLAG_READONLY
+local band = require("bit").band
+
 -- Meta ops supported natively by primitive types
 local M = {}
 local find = types_mod.find
@@ -341,7 +345,7 @@ function M.unify(ctx, a, b)
             local all_covered = true
             for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
                 local bfe = ctx.fields:get(ctx.lists:get(i))
-                if bfe.optional == 0 then
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     local found = false
                     for j = ta.data[0], ta.data[0] + ta.data[1] - 1 do
                         local mid = find(ctx, ctx.lists:get(j))
@@ -439,7 +443,7 @@ function M.unify(ctx, a, b)
             local bft = find(ctx, bfe.type_id)
             local afe, afid = types_mod.table_field(ctx, a, bfe.name_id)
             if not afe then
-                if bfe.optional == 0 then
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     -- Check a's indexers with string key
                     local found = false
                     local ais, ail = ta.data[2], ta.data[3]
@@ -539,7 +543,7 @@ function M.unify(ctx, a, b)
             local bfe = ctx.fields:get(bfid)
             local amf = types_mod.table_meta_field(ctx, a, bfe.name_id)
             if not amf then
-                if bfe.optional == 0 then
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     local mname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                     return false, "missing metatable slot '#" .. mname .. "'"
                 end
@@ -675,7 +679,7 @@ function M.try_unify(ctx, a, b)
             local all_covered = true
             for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
                 local bfe = ctx.fields:get(ctx.lists:get(i))
-                if bfe.optional == 0 then
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 then
                     local found = false
                     for j = ta.data[0], ta.data[0] + ta.data[1] - 1 do
                         local mid = find(ctx, ctx.lists:get(j))
@@ -709,7 +713,7 @@ function M.try_unify(ctx, a, b)
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
             local bfe = ctx.fields:get(ctx.lists:get(i))
             local afe = types_mod.table_field(ctx, a, bfe.name_id)
-            if not afe and bfe.optional == 0 then return false end
+            if not afe and band(bfe.flags, FLAG_OPTIONAL) == 0 then return false end
             if afe then
                 if not M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id)) then
                     return false

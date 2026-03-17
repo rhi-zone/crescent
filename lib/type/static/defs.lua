@@ -22,7 +22,7 @@ typedef struct {
 typedef struct {
     int32_t  name_id;
     int32_t  type_id;
-    uint8_t  optional;
+    uint8_t  flags;
     uint8_t  padding[3];
 } FieldEntry;  /* 12 bytes */
 ]]
@@ -187,6 +187,11 @@ M.FLAG_COMPUTED         = 4
 M.FLAG_GENERIC          = 1
 M.FLAG_RECURSIVE        = 2
 
+-- Flag bits (field entries)
+M.FLAG_OPTIONAL         = 0x01  -- field may be absent; access returns T|nil
+M.FLAG_READONLY         = 0x02  -- assignment to this field is a type error
+M.FLAG_PRIVATE          = 0x04  -- inaccessible outside the defining file
+
 -- Annotation kinds
 M.ANN_TYPE              = 0
 M.ANN_DECL              = 1
@@ -309,6 +314,7 @@ M.E.CANNOT_CALL             = 19  -- cannot call a non-function type
 M.E.METHOD_NOT_FOUND        = 20  -- no method on type
 M.E.UNNAMED_PARAMS          = 21  -- declared function type has unnamed parameters (warning)
 M.E.EXPLICIT_ANY            = 22  -- explicit `any` in annotation (warning)
+M.E.FIELD_READONLY          = 23  -- assignment to a readonly field
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
 M.keywords = {

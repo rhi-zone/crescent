@@ -285,6 +285,9 @@ local function build_templates()
             return "explicit `any` in annotation \xe2\x80\x94"
                 .. " use `unknown` for an unconstrained value, or a specific type"
         end,
+        [E.FIELD_READONLY]        = function(a)
+            return "cannot assign to readonly field '" .. a.field .. "'"
+        end,
     }
 end
 

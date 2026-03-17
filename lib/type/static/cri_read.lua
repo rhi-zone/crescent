@@ -138,7 +138,7 @@ function M.load(bytes, ctx)
         field_data[i] = {
             r_i32be(bytes, base),      -- name_id
             r_i32be(bytes, base + 4),  -- type_id
-            r_u8(bytes, base + 8) ~= 0 -- optional
+            r_u8(bytes, base + 8)      -- flags byte (FLAG_OPTIONAL=0x01, FLAG_READONLY=0x02, FLAG_PRIVATE=0x04)
         }
     end
 
@@ -213,9 +213,9 @@ function M.load(bytes, ctx)
             if fe then
                 local fid   = ctx.fields:alloc()
                 local fslot = ctx.fields:get(fid)
-                fslot.name_id  = rs(fe[1])
-                fslot.type_id  = rt(fe[2])
-                fslot.optional = fe[3] and 1 or 0
+                fslot.name_id = rs(fe[1])
+                fslot.type_id = rt(fe[2])
+                fslot.flags   = fe[3] or 0
                 ctx.lists:push(fid)
             end
         end

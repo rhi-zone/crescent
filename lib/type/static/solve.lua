@@ -30,6 +30,9 @@ local LIT_INTEGER = defs.LIT_INTEGER
 local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_STRING  = defs.LIT_STRING
 
+local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local band          = require("bit").band
+
 local C_UNIFY     = constrain.C_UNIFY
 local C_SUB       = constrain.C_SUB
 local C_HAS_FIELD = constrain.C_HAS_FIELD
@@ -240,7 +243,12 @@ local function solve_has_field(ctx, c)
     if obj_t.tag == TAG_TABLE then
         local fe = types_mod.table_field(ctx, obj_tid, name_id)
         if fe then
-            unify_mod.unify(ctx, res_tid, find(ctx, fe.type_id))
+            local ft = find(ctx, fe.type_id)
+            if band(fe.flags, FLAG_OPTIONAL) ~= 0 then
+                -- Optional field: access returns T | nil
+                ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+            end
+            unify_mod.unify(ctx, res_tid, ft)
             return true
         end
         -- String indexer fallback

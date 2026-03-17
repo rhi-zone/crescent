@@ -7,6 +7,10 @@ local defs = require("lib.type.static.defs")
 local arena_mod = require("lib.type.static.arena")
 local intern_mod = require("lib.type.static.intern")
 local double_to_i32x2 = defs.double_to_i32x2
+local band = require("bit").band
+
+local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local FLAG_READONLY = defs.FLAG_READONLY
 
 local format = string.format
 local byte = string.byte
@@ -410,7 +414,7 @@ function M.parse_annotations(annotations, pool, filename)
                         local fe = fields:get(fi)
                         fe.name_id = intern_mod.intern(pool, name)
                         fe.type_id = ftype
-                        fe.optional = optional and 1 or 0
+                        fe.flags = optional and FLAG_OPTIONAL or 0
                         metas[#metas + 1] = fi
                     elseif fb == byte("[") then
                         -- Indexer: [K]: V
@@ -422,20 +426,37 @@ function M.parse_annotations(annotations, pool, filename)
                         indexers[#indexers + 1] = key_type
                         indexers[#indexers + 1] = val_type
                     elseif fb and is_ident_start(fb) then
-                        -- Field: name?: type
+                        -- Field: [readonly] name[?]: type
                         local save_pos = s.pos
-                        local name = scan_word(s)
+                        local word = scan_word(s)
+                        -- Check for 'readonly' modifier keyword
+                        local field_flags_val = 0
+                        local name
+                        if word == "readonly" then
+                            -- peek: must be followed by a field name
+                            local nb = peek(s)
+                            if nb and is_ident_start(nb) then
+                                field_flags_val = FLAG_READONLY
+                                name = scan_word(s)
+                            else
+                                -- 'readonly' used as a field name
+                                name = word
+                            end
+                        else
+                            name = word
+                        end
                         -- Check if followed by : or ?: (field) or something else
                         local next_b = peek(s)
                         if next_b == byte(":") or next_b == byte("?") then
                             local optional = opt_char(s, "?")
+                            if optional then field_flags_val = field_flags_val + FLAG_OPTIONAL end
                             expect_char(s, ":")
                             local ftype = parse_type(s)
                             local fi = fields:alloc()
                             local fe = fields:get(fi)
                             fe.name_id = intern_mod.intern(pool, name)
                             fe.type_id = ftype
-                            fe.optional = optional and 1 or 0
+                            fe.flags = field_flags_val
                             flds[#flds + 1] = fi
                         else
                             -- Not a field declaration, might be just a type (positional)
@@ -465,7 +486,7 @@ function M.parse_annotations(annotations, pool, filename)
                             local fe = fields:get(fi)
                             fe.name_id = -1  -- spread marker
                             fe.type_id = sp
-                            fe.optional = 0
+                            fe.flags = 0
                             flds[#flds + 1] = fi
                         end
                     else

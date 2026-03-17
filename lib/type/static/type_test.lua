@@ -181,10 +181,10 @@ assert.describe("arena: field arena", function()
         local f = a:get(i)
         f.name_id = 42
         f.type_id = 7
-        f.optional = 1
+        f.flags = 1
         assert.eq(a:get(0).name_id, 42)
         assert.eq(a:get(0).type_id, 7)
-        assert.eq(a:get(0).optional, 1)
+        assert.eq(a:get(0).flags, 1)
     end)
 end)
 
@@ -1127,10 +1127,10 @@ assert.describe("ann: composite types", function()
         local t = r.types:get(r.results[1].type_id)
         assert.eq(t.tag, defs.TAG_TABLE)
         assert.eq(t.data[1], 2)  -- 2 fields
-        -- Second field should be optional
+        -- Second field should be optional (FLAG_OPTIONAL = 0x01)
         local f1_idx = r.lists:get(t.data[0] + 1)
         local f1 = r.fields:get(f1_idx)
-        assert.eq(f1.optional, 1)
+        assert.eq(f1.flags, 1)  -- FLAG_OPTIONAL = 0x01
     end)
     assert.it("parses table with indexer", function()
         local r = ann.parse_annotations(
@@ -4145,5 +4145,104 @@ ffi.cdef([[
 --: (Span) -> integer
 local function get_line(s) return s.line end
 ]=])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Field modifiers: optional, readonly
+-- ---------------------------------------------------------------------------
+
+assert.describe("field modifiers: optional", function()
+    assert.it("annotation: optional field has FLAG_OPTIONAL set", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ name?: string }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        assert.eq(t.tag, defs.TAG_TABLE)
+        local fid = r.lists:get(t.data[0])
+        local fe = r.fields:get(fid)
+        assert.eq(fe.flags, defs.FLAG_OPTIONAL)
+    end)
+
+    assert.it("annotation: non-optional field has flags = 0", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ name: string }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        local fid = r.lists:get(t.data[0])
+        local fe = r.fields:get(fid)
+        assert.eq(fe.flags, 0)
+    end)
+
+    assert.it("annotation: readonly field has FLAG_READONLY set", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ readonly x: number }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        local fid = r.lists:get(t.data[0])
+        local fe = r.fields:get(fid)
+        assert.eq(fe.flags, defs.FLAG_READONLY)
+    end)
+
+    assert.it("annotation: readonly optional field has both flags", function()
+        local r = ann.parse_annotations(
+            { [1] = { kind = defs.ANN_TYPE, content = "{ readonly x?: number }" } }, nil, "test")
+        local t = r.types:get(r.results[1].type_id)
+        local fid = r.lists:get(t.data[0])
+        local fe = r.fields:get(fid)
+        assert.eq(fe.flags, defs.FLAG_READONLY + defs.FLAG_OPTIONAL)
+    end)
+
+    assert.it("optional field access returns T|nil: no error on nil branch", function()
+        v3_no_errors([[
+--:: Point = { x: number, y?: number }
+--: (Point) -> number
+local function get_y(p)
+    local y = p.y  -- y is number | nil
+    if y == nil then return 0 end
+    return y
+end
+]])
+    end)
+
+    assert.it("optional field: struct with missing optional field is valid", function()
+        v3_no_errors([[
+--:: Point = { x: number, y?: number }
+local p --: Point
+p = { x = 1 }
+]])
+    end)
+
+    assert.it("optional field: struct with both required and optional field is valid", function()
+        v3_no_errors([[
+--:: Point = { x: number, y?: number }
+local p --: Point
+p = { x = 1, y = 2 }
+]])
+    end)
+end)
+
+assert.describe("field modifiers: readonly", function()
+    assert.it("readonly field read is ok", function()
+        v3_no_errors([[
+--:: Config = { readonly version: string }
+--: (Config) -> string
+local function get_ver(c)
+    return c.version
+end
+]])
+    end)
+
+    assert.it("readonly field write is a type error", function()
+        v3_has_error([[
+--:: Config = { readonly version: string }
+local c --: Config
+c.version = "2.0"
+]], "readonly")
+    end)
+
+    assert.it("readonly field name 'readonly' still works as a plain field name", function()
+        v3_no_errors([[
+--:: T = { readonly: boolean }
+local t --: T
+local v = t.readonly
+]])
     end)
 end)

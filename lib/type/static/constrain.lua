@@ -65,6 +65,9 @@ local OP_LEN    = defs.OP_LEN
 local FLAG_LOCAL    = defs.FLAG_LOCAL
 local FLAG_VARARG   = defs.FLAG_VARARG
 local FLAG_COMPUTED = defs.FLAG_COMPUTED
+local FLAG_READONLY = defs.FLAG_READONLY
+local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local band          = require("bit").band
 
 local ANN_TYPE = defs.ANN_TYPE
 local ANN_DECL = defs.ANN_DECL
@@ -230,7 +233,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             local fid = ctx.ann.lists:get(i)
             local fe  = ctx.ann.fields:get(fid)
             local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
-            field_ids[#field_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.optional == 1)
+            field_ids[#field_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.flags)
         end
         local indexers = {}
         local is, il = at.data[2], at.data[3]
@@ -249,7 +252,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             local fid = ctx.ann.lists:get(j)
             local fe  = ctx.ann.fields:get(fid)
             local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
-            meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.optional == 1)
+            meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.flags)
         end
         seen[ann_tid] = nil
         return types_mod.make_table(ctx, field_ids, indexers, row_var, meta_ids)
@@ -975,6 +978,12 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             if ot.tag == TAG_TABLE then
                 local fe = types_mod.table_field(ctx, obj_tid, field_id)
                 if fe then
+                    -- Readonly check: assignment to a readonly field is a type error
+                    if band(fe.flags, FLAG_READONLY) ~= 0 then
+                        local fname = intern_mod.get(ctx.pool, field_id) or "?"
+                        report(ctx, tn.line, tn.col, E.FIELD_READONLY,
+                            { field = fname })
+                    end
                     -- Re-assignment: check type compatibility (widen to base type first)
                     local expected = types_mod.widen(ctx, fe.type_id)
                     local et = ctx.types:get(types_mod.find(ctx, expected))
