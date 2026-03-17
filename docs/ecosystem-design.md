@@ -135,6 +135,39 @@ registry, available via `cr add`, but not in `lib/`. Their interfaces may not be
 consistent with crescent's conventions; stdlib implementations are written from scratch
 to meet the bar.
 
+## Interface Design: Tradeoffs Are Real
+
+Every interface decision involves tradeoffs, and the stdlib must acknowledge them rather
+than picking one option and forcing it on all callers. The canonical example is parsing:
+
+- **Ergonomic** — returns materialized strings. Easy to use, allocates per-parse.
+- **Positional / zerocopy** — returns `(start, end)` integer pairs into the original
+  buffer. Zero allocation, but the caller must call `string.sub` explicitly.
+
+These are not tiers (same interface, different performance) — they are genuinely
+different interfaces with different consumers. Both belong in the stdlib. The pattern is
+multiple named implementations in the same namespace, each clear about what it does:
+`require("lib.http.parse")` vs `require("lib.http.parse.raw")`. The caller picks.
+
+This is not a mess — it is composability. Multiple implementations with coherent
+interfaces are a menu, not chaos. The mess comes from inconsistent conventions, not from
+having options. This is why interface design comes first: with solid interfaces, multiple
+implementations compose cleanly.
+
+### Tradeoffs are universal
+
+Parsing tradeoffs (ergonomic vs zerocopy, streaming vs buffered) are not specific to
+HTTP. They apply to every parser: JSON, CSV, binary protocols, everything. The interface
+design belongs in a general parsing abstraction (`lib/parse/`), not in each protocol
+library. HTTP is a consumer of the parsing interface, not the place where it is defined.
+
+### Deriving the bottom of the stack
+
+Bottom-of-stack interfaces are derived from real consumers, not guessed. Follow the
+dependency graph of concrete libraries downward until you find things with no
+dependencies — those are the primitives. Do not design primitives in isolation and hope
+they fit; design them by following what real libraries actually need.
+
 ## Access Control (deferred)
 
 Access control design is intentionally deferred. The wrong approach is to inherit

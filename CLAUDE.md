@@ -56,17 +56,26 @@ cd docs && bun dev           # Local docs
 
 ## Implementation Patterns
 
-**Tiered implementation.** When an operation has multiple correct implementations at different performance levels (e.g. FFI + system library > FFI scalar > pure Lua), implement all tiers and select the best available at load time via `pcall`. Never fail hard when a faster tier is unavailable — fall through to the next. Never silently use a slow tier without the faster ones being attempted first.
+**When one implementation can't satisfy all legitimate use cases, provide multiple and let the caller choose.** This takes two forms:
+
+- **Performance tiers** — same interface, different speed. E.g. FFI + system library > FFI scalar > pure Lua. Select the best available at load time via `pcall`. Never fail hard when a faster tier is unavailable — fall through to the next. Never silently use a slow tier without the faster ones being attempted first.
+- **Interface variants** — same data, different access patterns. E.g. ergonomic (returns strings) vs zerocopy (returns positions). Provide both with clear names; the caller picks. Do not resolve the tradeoff by imposing one choice on all callers — that makes the wrong choice someone else's permanent problem.
+
+In both cases: never wrap one implementation around another. Each is a real, independent implementation. Abstraction between tiers or variants destroys hackability.
 
 **Multiple implementations of the same spec require parity tests, parity fuzzing, and benchmarks.** This applies any time two implementations claim to satisfy the same spec — performance tiers, a reference impl and an optimized one, a pure-Lua and an FFI version, a stub and the real thing. Parity tests assert byte-for-byte identical output. Parity fuzzing generates random inputs and runs all implementations, catching edge cases unit tests miss. Benchmarks measure each implementation on representative inputs and results are committed to `docs/perf/log.md`. None of this is optional polish — the implementation is not done until all three exist.
 
 **Fix the specific problem, don't abandon the approach.** When an objection applies to one aspect of a design, fix that aspect. Platform-specific library names → try each known name. Library missing → fall back to next tier. These are implementation details, not architectural blockers. Discarding a whole approach because of a fixable problem is a cop-out.
 
+**Derive from values, not from precedent.** When designing interfaces or making architecture decisions, start from crescent's values (vendorable, pure, fast, hackable, composable). Don't reach for what Java/Go/Rust/TypeScript does — their designs embed assumptions that don't apply here. Other ecosystems are references, not templates.
+
+**Abstraction has a cost.** Wrappers, layers, and indirection reduce hackability and readability. Every abstraction needs justification beyond "it seems cleaner." A direct implementation that is longer is often better than an indirect one that is shorter.
+
 ## Design Principles
 
 **Vendorable.** Every library is a set of `.lua` files you can copy into your project. No build step, no native bindings to manage. You own the code.
 
-**Pure Lua first.** Prefer pure Lua implementations for hackability. Use FFI only when pure Lua can't do it (syscalls, native libraries, performance-critical paths).
+**Pure Lua first.** Pure Lua is the implementation — hackable, portable, readable. FFI scalar and system library are additional performance tiers alongside it, not replacements. Each tier serves different consumers: pure Lua works on PUC-Rio, is readable and modifiable by anyone, and is the baseline correctness reference; FFI scalar is LuaJIT-only but JIT-compiled with no external dependency; system library gives maximum throughput via hardware acceleration (SHA-NI, SIMD, etc.) but requires the library to be present. No tier is redundant — each has users the others can't serve. A pure Lua implementation must exist before any FFI tier is added.
 
 **Hackable.** The user should be able to read, understand, and modify any library. Prefer clarity over abstraction.
 
