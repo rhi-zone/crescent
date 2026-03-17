@@ -194,11 +194,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             end
             seen[ann_tid] = nil
         end
-        local resolved = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
+        local resolved, resolve_err = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
         if resolved then return resolved end
-        local id = types_mod.alloc_type(ctx, TAG_NAMED)
-        ctx.types:get(id).data[0] = name_id
-        return id
+        -- Named type could not be resolved: emit an error and fall back to T_ANY.
+        local name_str = require("lib.type.static.intern").get(ctx.pool, name_id) or "?"
+        local msg = resolve_err or ("undefined type '" .. name_str .. "'")
+        -- Find any source line associated with this annotation use.
+        local err_line = ctx._ann_warn_line or 0
+        errors_mod.error(ctx.err, ctx.filename, err_line, 0, msg)
+        return ctx.T_ANY
     end
 
     if tag == TAG_FUNCTION then
@@ -1360,6 +1364,10 @@ local function process_type_decls(ctx)
             decl_lines[result] = line
         end
     end
+    -- Sort by source line so forward references resolve in file order.
+    table.sort(decls, function(a, b) return (decl_lines[a] or 0) < (decl_lines[b] or 0) end)
+
+    -- Pass 1: register all type alias names (body=nil) so forward refs are visible.
     for _, r in ipairs(decls) do
         if not r.decl_var then
             local params = nil
@@ -1376,9 +1384,12 @@ local function process_type_decls(ctx)
             })
         end
     end
+
+    -- Pass 2a: resolve type alias bodies (non-decl_var) before variable declarations
+    -- reference them, so that `--:: declare x = SomeAlias` sees the fully-resolved body.
     for _, r in ipairs(decls) do
-        -- Warn on function type declarations with unnamed parameters.
-        do
+        if not r.decl_var then
+            -- Warn on function type declarations with unnamed parameters.
             local at = ctx.ann.types:get(r.type_id)
             local fn_at
             if at.tag == defs.TAG_FUNCTION then
@@ -1390,12 +1401,25 @@ local function process_type_decls(ctx)
             if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
                 warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
             end
-        end
-        if r.decl_var then
-            env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
-        else
+
             local alias = env_mod.lookup_type(ctx.scope, r.name_id)
             if alias then
+                -- For generic aliases, push a temporary scope where each type parameter
+                -- is bound to a TAG_NAMED placeholder. This lets resolve_annotation_type
+                -- produce the correct placeholder types (substitutable by env_mod.substitute)
+                -- instead of erroring on unresolved parameter names.
+                local old_scope = ctx.scope
+                if alias.params and #alias.params > 0 then
+                    local temp = env_mod.new(ctx.scope.level + 1)
+                    temp.parent = ctx.scope
+                    for _, param_name_id in ipairs(alias.params) do
+                        local ph = types_mod.alloc_type(ctx, defs.TAG_NAMED)
+                        ctx.types:get(ph).data[0] = param_name_id
+                        env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
+                    end
+                    ctx.scope = temp
+                end
+
                 if r.newtype then
                     local ann_nom = ctx.ann.types:get(r.type_id)
                     local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
@@ -1404,7 +1428,16 @@ local function process_type_decls(ctx)
                 else
                     alias.body = resolve_annotation_type(ctx, r.type_id)
                 end
+
+                ctx.scope = old_scope
             end
+        end
+    end
+
+    -- Pass 2b: bind declared variables (decl_var), which may reference aliases set above.
+    for _, r in ipairs(decls) do
+        if r.decl_var then
+            env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
         end
     end
 end

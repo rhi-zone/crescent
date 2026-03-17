@@ -3184,6 +3184,114 @@ local r = f("oops")
 end)
 
 ---------------------------------------------------------------------------
+-- Nominal (newtype) assignment enforcement
+---------------------------------------------------------------------------
+
+assert.describe("checker: newtype assignment enforcement", function()
+    assert.it("same newtype is assignable to itself", function()
+        no_errors([[
+--:: newtype UserId = integer
+--:: declare uid = UserId
+--: UserId
+local x = uid
+]])
+    end)
+
+    assert.it("different newtypes over same underlying type are not assignable", function()
+        has_error([[
+--:: newtype UserId = integer
+--:: newtype PostId = integer
+--:: declare uid = UserId
+--: PostId
+local y = uid
+]], "nominal type 'UserId' is not 'PostId'")
+    end)
+
+    assert.it("underlying type not assignable to newtype", function()
+        has_error([[
+--:: newtype UserId = integer
+--: UserId
+local y = 42
+]], "nominal")
+    end)
+
+    assert.it("newtype not assignable to underlying type", function()
+        has_error([[
+--:: newtype UserId = integer
+--:: declare uid = UserId
+--: integer
+local y = uid
+]], "nominal")
+    end)
+
+    assert.it("newtype function param rejects wrong newtype", function()
+        has_error([[
+--:: newtype UserId = integer
+--:: newtype PostId = integer
+--: (uid: UserId) -> string
+local function greet(uid) return "hi" end
+--:: declare pid = PostId
+greet(pid)
+]], "nominal")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- Generic type aliases
+---------------------------------------------------------------------------
+
+assert.describe("checker: generic type aliases", function()
+    assert.it("generic alias instantiated with correct arg passes", function()
+        no_errors([[
+--:: Box<T> = (T) -> T
+--:: declare identity = Box<integer>
+local r = identity(42)
+local s = r + 1
+]])
+    end)
+
+    assert.it("generic alias instantiated with wrong arg errors", function()
+        has_error([[
+--:: Box<T> = (T) -> T
+--:: declare identity = Box<integer>
+local r = identity("hello")
+]], "cannot pass")
+    end)
+
+    assert.it("two-param generic alias for function type", function()
+        no_errors([[
+--:: Transform<A, B> = (A) -> B
+--:: declare toStr = Transform<integer, string>
+local s = toStr(42)
+local r = s .. "!"
+]])
+    end)
+
+    assert.it("two-param generic alias wrong arg type errors", function()
+        has_error([[
+--:: Transform<A, B> = (A) -> B
+--:: declare toStr = Transform<integer, string>
+local s = toStr("oops")
+]], "cannot pass")
+    end)
+
+    assert.it("generic alias over table type", function()
+        no_errors([[
+--:: Pair<A, B> = { first: A, second: B }
+--:: declare p = Pair<integer, string>
+local x = p.first + 1
+local y = p.second .. "!"
+]])
+    end)
+
+    assert.it("undefined type name errors", function()
+        has_error([[
+--:: declare x = NonExistent
+]], "undefined type 'NonExistent'")
+    end)
+end)
+
+---------------------------------------------------------------------------
 -- TAG_NEVER in NODE_INDEX_EXPR
 ---------------------------------------------------------------------------
 
