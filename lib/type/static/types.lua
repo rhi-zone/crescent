@@ -247,6 +247,30 @@ end
 -- kind: LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
 -- val: intern_id (for string) or 1/0 (for boolean) or double (for number)
 function M.make_literal(ctx, kind, val)
+    -- Intern literals so the same value always maps to the same type_id.
+    -- This prevents union dedup from missing duplicate literal members.
+    local cache = ctx.lit_cache
+    if cache then
+        local key
+        if kind == LIT_NUMBER then
+            local hi, lo = double_to_i32x2(val or 0)
+            key = kind .. ":" .. hi .. ":" .. lo
+        else
+            key = kind .. ":" .. (val or 0)
+        end
+        local cached = cache[key]
+        if cached then return cached end
+        local id = alloc_zero(ctx.types, TAG_LITERAL)
+        local t = ctx.types:get(id)
+        t.data[0] = kind
+        if kind == LIT_NUMBER then
+            t.data[1], t.data[2] = double_to_i32x2(val or 0)
+        else
+            t.data[1] = val or 0
+        end
+        cache[key] = id
+        return id
+    end
     local id = alloc_zero(ctx.types, TAG_LITERAL)
     local t = ctx.types:get(id)
     t.data[0] = kind
@@ -381,8 +405,15 @@ function M.make_union(ctx, member_ids)
         if t.tag == TAG_UNION then
             local s, l = t.data[0], t.data[1]
             for j = s, s + l - 1 do
-                local mid = ctx.lists:get(j)
-                if not seen[mid] then seen[mid] = true; flat[#flat + 1] = mid end
+                -- find() here: union members may be VAR IDs written at gen time,
+                -- resolved only after solve. Without find(), dedup misses them.
+                local mid = M.find(ctx, ctx.lists:get(j))
+                local mt = ctx.types:get(mid)
+                if mt.tag == TAG_ANY     then return ctx.T_ANY end
+                if mt.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
+                if mt.tag ~= TAG_NEVER and not seen[mid] then
+                    seen[mid] = true; flat[#flat + 1] = mid
+                end
             end
         elseif t.tag ~= TAG_NEVER then
             if not seen[rtid] then seen[rtid] = true; flat[#flat + 1] = rtid end
@@ -410,7 +441,7 @@ function M.make_intersection(ctx, member_ids)
         if t.tag == TAG_INTERSECTION then
             local s, l = t.data[0], t.data[1]
             for j = s, s + l - 1 do
-                local mid = ctx.lists:get(j)
+                local mid = M.find(ctx, ctx.lists:get(j))
                 if not seen[mid] then seen[mid] = true; flat[#flat + 1] = mid end
             end
         elseif t.tag ~= TAG_ANY then
@@ -476,6 +507,13 @@ function M.widen(ctx, tid)
     if t.tag == TAG_ENUM_MEMBER then
         if t.data[2] == LIT_INTEGER then return ctx.T_INTEGER end
         if t.data[2] == LIT_STRING  then return ctx.T_STRING end
+    end
+    if t.tag == TAG_UNION then
+        local members = {}
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            members[#members + 1] = M.widen(ctx, ctx.lists:get(i))
+        end
+        return M.make_union(ctx, members)
     end
     return tid
 end

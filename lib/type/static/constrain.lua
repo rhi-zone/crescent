@@ -1445,6 +1445,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx.def_sites          = {}
     ctx.require_sources    = {}
     ctx.constraints        = {}   -- v3: emitted constraints
+    ctx.lit_cache          = {}   -- literal type interning: (kind<<32|val) → type_id
 
     if not parent_scope then
         require("lib.type.static.prelude").populate(ctx)
