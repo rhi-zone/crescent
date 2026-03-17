@@ -112,19 +112,20 @@ local E = defs.E
 -- Constraint kinds
 -- ---------------------------------------------------------------------------
 
-local C_UNIFY     = 1   -- {C_UNIFY,     t1, t2, line, col}
-local C_SUB       = 2   -- {C_SUB,       actual, expected, line, col}
-local C_HAS_FIELD = 3   -- {C_HAS_FIELD, obj_tid, name_id, result_tid, line, col}
-local C_CALLABLE  = 4   -- {C_CALLABLE,  callee_tid, arg_tids_list, ret_tid, line, col}
-local C_ARITH     = 5   -- {C_ARITH,     op_str, lhs_tid, rhs_tid, result_tid, line, col}
-local C_RETURN    = 6   -- {C_RETURN,    val_tid, expected_tid, line, col}
-local C_COMPARE   = 7   -- {C_COMPARE,   lhs_tid, rhs_tid, line, col}
+local C_UNIFY     = 1   -- {C_UNIFY,    t1, t2, line, col}
+local C_SUB       = 2   -- {C_SUB,      actual, expected, line, col}
+local C_CALLABLE  = 4   -- {C_CALLABLE, callee_tid, arg_tids_list, ret_tid, line, col}
+local C_ARITH     = 5   -- {C_ARITH,    op_str, lhs_tid, rhs_tid, result_tid, line, col}
+local C_RETURN    = 6   -- {C_RETURN,   val_tid, expected_tid, line, col}
+local C_COMPARE   = 7   -- {C_COMPARE,  lhs_tid, rhs_tid, line, col}
+local C_INDEX     = 8   -- {C_INDEX,    obj_tid, key_tid, result_tid, line, col}
+-- key_tid: TAG_LITERAL(LIT_STRING, name_id) for field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot
 
 local M = {}
 
 M.C_UNIFY     = C_UNIFY
 M.C_SUB       = C_SUB
-M.C_HAS_FIELD = C_HAS_FIELD
+M.C_INDEX     = C_INDEX
 M.C_CALLABLE  = C_CALLABLE
 M.C_ARITH     = C_ARITH
 M.C_RETURN    = C_RETURN
@@ -592,7 +593,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local obj_tid = gen_expr(ctx, obj_nid)
     local fname_id = n.data[1]
     local res = fresh_var(ctx)
-    emit(ctx, { C_HAS_FIELD, obj_tid, fname_id, res, n.line, n.col })
+    emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_STRING, fname_id), res, n.line, n.col })
     -- Track field access for LSP go-to-def (only for simple identifier objects)
     local obj_n = ctx.nodes:get(obj_nid)
     if obj_n.kind == NODE_IDENTIFIER then
@@ -620,7 +621,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local kt_t = ctx.types:get(key_r)
     if kt_t.tag == TAG_LITERAL and kt_t.data[0] == LIT_STRING then
         local res = fresh_var(ctx)
-        emit(ctx, { C_HAS_FIELD, obj_tid, kt_t.data[1], res, n.line, n.col })
+        emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_STRING, kt_t.data[1]), res, n.line, n.col })
         return res
     end
 
@@ -767,6 +768,39 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid)
 end
 
+-- Peek at the declared return type of a callee without going through constraint
+-- variables. Returns the concrete ret-slot type id, or nil if not resolvable.
+-- Used to detect union-of-tuples return types (e.g. string.find, io.open) so
+-- that LOCAL_STMT can correlate bindings at narrowing time.
+local function peek_callee_ret_union(ctx, callee_n)
+    local fn_tid = nil
+    if callee_n.kind == NODE_IDENTIFIER then
+        local tid = env_mod.lookup(ctx.scope, callee_n.data[0])
+        if tid then fn_tid = types_mod.find(ctx, tid) end
+    elseif callee_n.kind == NODE_FIELD_EXPR then
+        local obj_n = ctx.nodes:get(callee_n.data[0])
+        if obj_n.kind == NODE_IDENTIFIER then
+            local obj_tid = env_mod.lookup(ctx.scope, obj_n.data[0])
+            if obj_tid then
+                obj_tid = types_mod.find(ctx, obj_tid)
+                local fe = types_mod.table_field(ctx, obj_tid, callee_n.data[1])
+                if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
+            end
+        end
+    end
+    if not fn_tid then return nil end
+    local fn_t = ctx.types:get(fn_tid)
+    if fn_t.tag ~= TAG_FUNCTION or fn_t.data[3] ~= 1 then return nil end
+    local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
+    local ret_t = ctx.types:get(ret_slot)
+    if ret_t.tag ~= TAG_UNION then return nil end
+    for i = ret_t.data[0], ret_t.data[0] + ret_t.data[1] - 1 do
+        local arm = types_mod.find(ctx, ctx.lists:get(i))
+        if ctx.types:get(arm).tag ~= TAG_TUPLE then return nil end
+    end
+    return ret_slot
+end
+
 ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local callee_nid = n.data[0]
@@ -820,6 +854,41 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local ret = fresh_var(ctx)
     emit(ctx, { C_CALLABLE, inst_callee, arg_tids, ret, n.line, n.col })
     ctx._last_multi_return = { ret }
+
+    -- pcall/xpcall intrinsic: synthesise (true, fn_ret) | (false, string) union.
+    -- Stored in _last_multi_return_override for LOCAL_STMT to use as call_ret_tid.
+    if callee_n.kind == NODE_IDENTIFIER then
+        local fname = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
+        if (fname == "pcall" or fname == "xpcall") and #arg_tids >= 1 then
+            local fn_arg_tid = types_mod.find(ctx, arg_tids[1])
+            local fn_t = ctx.types:get(fn_arg_tid)
+            -- Collect fn return types (first slot only for simplicity)
+            local fn_rets = {}
+            if fn_t.tag == TAG_FUNCTION and fn_t.data[3] > 0 then
+                fn_rets[1] = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
+            elseif fn_t.tag == TAG_FUNCTION then
+                fn_rets[1] = ctx.T_NIL
+            else
+                fn_rets[1] = ctx.T_ANY
+            end
+            local true_lit  = types_mod.make_literal(ctx, LIT_BOOLEAN, 1)
+            local false_lit = types_mod.make_literal(ctx, LIT_BOOLEAN, 0)
+            local success_arm = types_mod.make_tuple(ctx, { true_lit, fn_rets[1] })
+            local failure_arm = types_mod.make_tuple(ctx, { false_lit, ctx.T_STRING })
+            ctx._last_multi_return_override = types_mod.make_union(ctx, { success_arm, failure_arm })
+        end
+    end
+
+    -- General union-of-tuples override: any callee declared to return a
+    -- union-of-tuples (e.g. string.find, io.open) gets the concrete union as
+    -- call_ret_tid so LOCAL_STMT can correlate bindings at narrowing time.
+    if not ctx._last_multi_return_override then
+        local ret_union = peek_callee_ret_union(ctx, callee_n)
+        if ret_union then
+            ctx._last_multi_return_override = ret_union
+        end
+    end
+
     return ret
 end
 
@@ -830,7 +899,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
 
     -- Get method field
     local method_var = fresh_var(ctx)
-    emit(ctx, { C_HAS_FIELD, recv_tid, method_name_id, method_var, n.line, n.col })
+    emit(ctx, { C_INDEX, recv_tid, types_mod.make_literal(ctx, LIT_STRING, method_name_id), method_var, n.line, n.col })
 
     local extra = gen_expr_list(ctx, n.data[2], n.data[3])
     local arg_tids = { recv_tid }
@@ -904,6 +973,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local es, el = n.data[2], n.data[3]
 
     ctx._last_require_mod = nil
+    ctx._last_multi_return_override = nil  -- clear before gen so stale values don't persist
     local rhs_types = el > 0 and gen_expr_list(ctx, es, el) or {}
     local stmt_require_mod = ctx._last_require_mod
     ctx._last_require_mod = nil
@@ -913,6 +983,18 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
         local last_rhs_nid = ctx.ast_lists:get(es + el - 1)
         local last_rhs_n = ctx.nodes:get(last_rhs_nid)
         last_rhs_is_call = (last_rhs_n.kind == NODE_CALL_EXPR or last_rhs_n.kind == NODE_METHOD_CALL)
+    end
+
+    -- For call-derived bindings, use C_INDEX to project individual slots.
+    -- call_ret_tid: the multi-return source (pcall intrinsic union, or last RHS ret var).
+    local call_ret_tid = nil
+    if last_rhs_is_call then
+        if ctx._last_multi_return_override then
+            call_ret_tid = ctx._last_multi_return_override
+            ctx._last_multi_return_override = nil
+        else
+            call_ret_tid = rhs_types[el]  -- the call's ret var
+        end
     end
 
     for i = 0, nl - 1 do
@@ -956,7 +1038,19 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             -- (v2 calls unify but ignores the result; the prescan type wins.)
         else
             local bind_tid
-            if rhs_tid then
+            -- call_slot: which slot of the call's return this binding maps to (-1 if not from call).
+            -- Bindings at index i >= (el-1) come from the last (call) expression.
+            local call_slot = (last_rhs_is_call and el > 0) and (i - (el - 1)) or -1
+            if call_slot >= 0 and call_ret_tid then
+                -- Project slot from the call's multi-return tuple/union via C_INDEX.
+                local slot_var = fresh_var(ctx)
+                emit(ctx, { C_INDEX, call_ret_tid,
+                    types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                    slot_var, n.line, n.col })
+                bind_tid = slot_var
+                if not ctx._multi_ret then ctx._multi_ret = {} end
+                ctx._multi_ret[name_id] = { source_tid = call_ret_tid, slot = call_slot }
+            elseif rhs_tid then
                 local rt = ctx.types:get(types_mod.find(ctx, rhs_tid))
                 if rt.tag == TAG_LITERAL and rt.data[0] == LIT_BOOLEAN then
                     bind_tid = ctx.T_BOOLEAN
@@ -967,8 +1061,6 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 end
             elseif el == 0 then
                 bind_tid = types_mod.make_var(ctx, ctx.scope.level)
-            elseif last_rhs_is_call then
-                bind_tid = ctx.T_ANY
             else
                 bind_tid = ctx.T_NIL
             end
@@ -1384,7 +1476,6 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
         if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
     end
-
     local fn_tid = gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid)
 
     if name_n.kind == NODE_IDENTIFIER then
@@ -1634,9 +1725,10 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx.module_return_tids = nil
     ctx.cri_loader         = nil
     ctx.ffi_hooks          = nil
-    ctx._last_multi_return = nil
-    ctx._last_require_mod  = nil
-    ctx._pcall_info        = {}
+    ctx._last_multi_return          = nil
+    ctx._last_multi_return_override = nil
+    ctx._last_require_mod           = nil
+    ctx._multi_ret                  = {}
     ctx.nominal_id         = 0
     ctx.inferred_anns      = {}
     ctx.type_at            = {}

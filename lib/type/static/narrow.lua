@@ -285,11 +285,15 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
 
     if info.kind == "nil_check" then
         -- positive=true: info says "x ~= nil" (not nil is truthy direction)
-        -- in truthy branch with ~=nil: remove nil
+        -- in truthy branch with ~=nil: remove nil (and literal false for boolean truthiness)
         -- in falsy branch with ~=nil: keep only nil
         local should_remove_nil = (info.positive == in_truthy)
         if should_remove_nil then
-            return types_mod.subtract(ctx, t, ctx.T_NIL)
+            local result = types_mod.subtract(ctx, t, ctx.T_NIL)
+            -- Also subtract literal false: `if x then` means x is not nil AND not false.
+            -- This only affects union(literal_true, literal_false) — TAG_BOOLEAN is unchanged.
+            local false_lit = types_mod.make_literal(ctx, LIT_BOOLEAN, 0)
+            return types_mod.subtract(ctx, result, false_lit)
         else
             -- Keep only nil members.
             -- For unresolved type variables or any, we can't know — leave unchanged.
@@ -441,21 +445,59 @@ local function info_name_id(info)
     return nil
 end
 
--- If name_id is a pcall status variable, add success-type narrowings for the result vars.
--- Called after the ok variable has been narrowed; ok_narrowed is its new type_id.
--- If ok_narrowed is not NEVER (truthy), pcall succeeded → narrow result vars to success types.
-local function propagate_pcall_narrowing(ctx, name_id, ok_narrowed, narrowed)
-    local pcall_entry = ctx._pcall_info and ctx._pcall_info[name_id]
-    if not pcall_entry then return end
-    local env_mod = require("lib.type.static.env")
-    -- Truthy: ok is not narrowed to NEVER (impossible) or NIL → pcall succeeded.
-    local ok_r = types_mod.find(ctx, ok_narrowed)
-    local ok_tag = ctx.types:get(ok_r).tag
-    if ok_tag == TAG_NEVER or ok_tag == TAG_NIL then return end
-    for i, res_name_id in ipairs(pcall_entry.result_name_ids) do
-        if env_mod.lookup(ctx.scope, res_name_id) then
-            local st = pcall_entry.success_types[i]
-            if st then narrowed[res_name_id] = st end
+-- Propagate correlated multi-return narrowing.
+-- When a binding from a multi-return call is narrowed, re-derive sibling bindings
+-- from the surviving arms of the source union-of-tuples.
+-- Return true if a concrete type is considered truthy (not nil, not literal false).
+-- Returns nil if uncertain (e.g. TAG_VAR — not yet solved).
+local function arm_slot_truthy(ctx, tid)
+    local t = ctx.types:get(types_mod.find(ctx, tid))
+    if t.tag == TAG_NIL   then return false end
+    if t.tag == TAG_NEVER then return false end
+    if t.tag == TAG_VAR   then return nil   end  -- unresolved — skip filtering
+    if t.tag == TAG_LITERAL and t.data[0] == defs.LIT_BOOLEAN and t.data[1] == 0 then
+        return false  -- literal false
+    end
+    return true
+end
+
+local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_truthy, narrowed)
+    local entry = ctx._multi_ret and ctx._multi_ret[name_id]
+    if not entry then return end
+    local env_mod   = require("lib.type.static.env")
+    -- Filter arms based on whether the arm's slot value matches the narrowing direction.
+    -- This is evaluated at constraint-gen time (types may not be solved), so we use
+    -- arm_slot_truthy (works on concrete literal slots from the intrinsic) rather than
+    -- try_unify against the (potentially unresolved) narrowed_tid.
+    local surviving = types_mod.filter_tuple_union_arms(ctx, entry.source_tid, entry.slot,
+        function(slot_tid)
+            local truthy = arm_slot_truthy(ctx, slot_tid)
+            if truthy == nil then return true end  -- uncertain: keep arm (conservative)
+            return truthy == is_truthy
+        end)
+    if not surviving or #surviving == 0 then return end
+    -- Re-derive ALL correlated bindings (including name_id itself) from surviving arms.
+    -- This overrides apply_narrowing's result for the primary binding when it cannot
+    -- narrow an unbound TAG_VAR (e.g. string.find: slot_var subtract nil = unchanged).
+    for other_id, other_entry in pairs(ctx._multi_ret) do
+        if other_entry.source_tid == entry.source_tid then
+            if env_mod.lookup(ctx.scope, other_id) then
+                local parts = {}
+                for _, arm in ipairs(surviving) do
+                    local arm_t = ctx.types:get(arm)
+                    if arm_t.data[1] > other_entry.slot then
+                        parts[#parts + 1] = types_mod.find(ctx,
+                            ctx.lists:get(arm_t.data[0] + other_entry.slot))
+                    else
+                        parts[#parts + 1] = ctx.T_NIL
+                    end
+                end
+                if #parts == 1 then
+                    narrowed[other_id] = parts[1]
+                elseif #parts > 1 then
+                    narrowed[other_id] = types_mod.make_union(ctx, parts)
+                end
+            end
         end
     end
 end
@@ -468,8 +510,15 @@ local function record_narrowing(ctx, info, narrowed, is_truthy)
     local current_ty = env_mod.lookup(ctx.scope, name_id)
     if not current_ty then return end
     narrowed[name_id] = apply_narrowing(ctx, info, current_ty, is_truthy)
-    -- Propagate pcall result narrowings when the ok status variable is narrowed.
-    propagate_pcall_narrowing(ctx, name_id, narrowed[name_id], narrowed)
+    -- Propagate correlated multi-return narrowings when any binding is narrowed.
+    -- Pass the narrowing direction (is_truthy_effective) so arm filtering works at gen time.
+    -- For negated infos, the effective direction is flipped.
+    local function effective_truthy(inf, it)
+        if inf.kind == "negation" then return effective_truthy(inf.inner, not it) end
+        return it
+    end
+    propagate_multi_ret_narrowing(ctx, name_id, narrowed[name_id],
+        effective_truthy(info, is_truthy), narrowed)
 end
 
 -- Narrow a scope based on a test expression.

@@ -469,6 +469,25 @@ function M.make_tuple(ctx, elem_ids)
     return id
 end
 
+-- Filter a union-of-tuples to arms where slot[slot_index] satisfies predicate_fn.
+-- Returns array of surviving arm type_ids, or nil if source is not TAG_UNION.
+function M.filter_tuple_union_arms(ctx, union_tid, slot_index, predicate_fn)
+    local u = ctx.types:get(M.find(ctx, union_tid))
+    if u.tag ~= TAG_UNION then return nil end
+    local surviving = {}
+    for i = u.data[0], u.data[0] + u.data[1] - 1 do
+        local arm = M.find(ctx, ctx.lists:get(i))
+        local arm_t = ctx.types:get(arm)
+        if arm_t.tag == TAG_TUPLE and arm_t.data[1] > slot_index then
+            local slot_tid = M.find(ctx, ctx.lists:get(arm_t.data[0] + slot_index))
+            if predicate_fn(slot_tid) then
+                surviving[#surviving + 1] = arm
+            end
+        end
+    end
+    return surviving
+end
+
 -- Make a nominal type.
 function M.make_nominal(ctx, name_id, identity, underlying_id)
     local id = alloc_zero(ctx.types, TAG_NOMINAL)

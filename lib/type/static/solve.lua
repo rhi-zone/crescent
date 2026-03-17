@@ -25,6 +25,7 @@ local TAG_VAR          = defs.TAG_VAR
 local TAG_ROWVAR       = defs.TAG_ROWVAR
 local TAG_NEVER        = defs.TAG_NEVER
 local TAG_NOMINAL      = defs.TAG_NOMINAL
+local TAG_TUPLE        = defs.TAG_TUPLE
 
 local LIT_INTEGER = defs.LIT_INTEGER
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -36,7 +37,7 @@ local band          = require("bit").band
 
 local C_UNIFY     = constrain.C_UNIFY
 local C_SUB       = constrain.C_SUB
-local C_HAS_FIELD = constrain.C_HAS_FIELD
+local C_INDEX     = constrain.C_INDEX
 local C_CALLABLE  = constrain.C_CALLABLE
 local C_ARITH     = constrain.C_ARITH
 local C_RETURN    = constrain.C_RETURN
@@ -183,11 +184,73 @@ local function solve_sub(ctx, c)
     return ok
 end
 
-local function solve_has_field(ctx, c)
-    local obj_tid  = find(ctx, c[2])
-    local name_id  = c[3]
+-- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
+-- key_tid: TAG_LITERAL(LIT_STRING, name_id) for named field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot.
+local function solve_index(ctx, c)
+    local obj_tid_raw = find(ctx, c[2])
+    local key_tid  = find(ctx, c[3])
     local res_tid  = c[4]
     local line, col = c[5], c[6]
+
+    local key_t = ctx.types:get(key_tid)
+    if key_t.tag ~= TAG_LITERAL then
+        bind_to(ctx, res_tid, ctx.T_ANY)
+        return true
+    end
+
+    if key_t.data[0] == LIT_INTEGER then
+        -- Tuple slot projection
+        local slot = key_t.data[1]
+        local obj_tid = find(ctx, obj_tid_raw)
+        local obj_t = ctx.types:get(obj_tid)
+        if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
+            return false  -- defer until obj is resolved
+        end
+        if obj_t.tag == TAG_TUPLE then
+            if slot < obj_t.data[1] then
+                unify_mod.unify(ctx, res_tid, find(ctx, ctx.lists:get(obj_t.data[0] + slot)))
+            else
+                bind_to(ctx, res_tid, ctx.T_NIL)
+            end
+            return true
+        end
+        if obj_t.tag == TAG_UNION then
+            local parts = {}
+            for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+                local arm = find(ctx, ctx.lists:get(i))
+                local arm_t = ctx.types:get(arm)
+                if arm_t.tag == TAG_TUPLE and slot < arm_t.data[1] then
+                    parts[#parts + 1] = find(ctx, ctx.lists:get(arm_t.data[0] + slot))
+                else
+                    parts[#parts + 1] = ctx.T_NIL
+                end
+            end
+            local result = #parts == 0 and ctx.T_NIL
+                or #parts == 1 and parts[1]
+                or types_mod.make_union(ctx, parts)
+            bind_to(ctx, res_tid, result)
+            return true
+        end
+        if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
+            bind_to(ctx, res_tid, ctx.T_ANY)
+            return true
+        end
+        if obj_t.tag == TAG_NEVER then
+            bind_to(ctx, res_tid, ctx.T_NEVER)
+            return true
+        end
+        -- Non-tuple: slot 0 = the value itself, others = nil
+        if slot == 0 then
+            unify_mod.unify(ctx, res_tid, obj_tid)
+        else
+            bind_to(ctx, res_tid, ctx.T_NIL)
+        end
+        return true
+    end
+
+    -- LIT_STRING key: named field access (was solve_has_field)
+    local name_id  = key_t.data[1]
+    local obj_tid  = find(ctx, obj_tid_raw)
     local obj_t = ctx.types:get(obj_tid)
 
     if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
@@ -484,9 +547,16 @@ local function solve_callable(ctx, c)
         local rl = callee_t.data[3]
         if rl == 0 then
             unify_mod.unify(ctx, ret_tid, ctx.T_NIL)
-        else
+        elseif rl == 1 then
             local first_ret = find(ctx, ctx.lists:get(callee_t.data[2]))
             unify_mod.unify(ctx, ret_tid, first_ret)
+        else
+            -- Multiple return values: assemble TAG_TUPLE so C_INDEX can project slots.
+            local slots = {}
+            for ri = 0, rl - 1 do
+                slots[ri + 1] = find(ctx, ctx.lists:get(callee_t.data[2] + ri))
+            end
+            unify_mod.unify(ctx, ret_tid, types_mod.make_tuple(ctx, slots))
         end
         return true
     end
@@ -832,7 +902,7 @@ function M.solve(ctx, constraints)
     local handlers = {
         [C_UNIFY]     = solve_unify,
         [C_SUB]       = solve_sub,
-        [C_HAS_FIELD] = solve_has_field,
+        [C_INDEX]     = solve_index,
         [C_CALLABLE]  = solve_callable,
         [C_ARITH]     = solve_arith,
         [C_RETURN]    = solve_return,

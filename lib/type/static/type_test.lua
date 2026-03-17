@@ -2340,8 +2340,8 @@ end)
 assert.describe("checker: pcall/xpcall return type narrowing", function()
     assert.it("pcall success branch: result narrowed to wrapped fn return type", function()
         no_errors([[
+--: (string) -> number
 local function parse(s)
-    --: string -> number
     return tonumber(s) or 0
 end
 local ok, n = pcall(parse, "42")
@@ -2352,8 +2352,8 @@ end
     end)
     assert.it("pcall guard: if not ok then return end narrows result in continuation", function()
         no_errors([[
+--: (string) -> number
 local function parse(s)
-    --: string -> number
     return tonumber(s) or 0
 end
 local ok, n = pcall(parse, "42")
@@ -2372,8 +2372,8 @@ local ok, s = pcall(get)
     end)
     assert.it("xpcall success branch: result narrowed to wrapped fn return type", function()
         no_errors([[
+--: (string) -> number
 local function parse(s)
-    --: string -> number
     return tonumber(s) or 0
 end
 local ok, n = xpcall(parse, tostring, "42")
@@ -2400,6 +2400,32 @@ if ok then
     local x = s + 1
 end
 ]], "cannot")
+    end)
+end)
+
+assert.describe("checker: correlated multi-return narrowing (io.open, string.find)", function()
+    assert.it("io.open nil-check: f non-nil implies err is nil (no false positive)", function()
+        no_errors([[
+local f, err = io.open("path.txt", "r")
+if f then
+    local x = f
+end
+]])
+    end)
+    assert.it("string.find match-check: s,e are integer when non-nil", function()
+        no_errors([[
+local s, e = string.find("hello world", "world")
+if s then
+    local len = e - s
+end
+]])
+    end)
+    assert.it("string.find guard: early return on nil narrows continuation", function()
+        no_errors([[
+local s, e = string.find("hello world", "world")
+if not s then return end
+local len = e - s
+]])
     end)
 end)
 

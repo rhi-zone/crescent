@@ -68,7 +68,7 @@ declare string = {
     format:  (fmt: string, ...any) -> string,
     len:     (s: string) -> integer,
     sub:     (s: string, i: integer, j: any?) -> string,
-    find:    (s: string, pattern: string, init: any?, plain: any?) -> (any, any),
+    find:    (s: string, pattern: string, init: any?, plain: any?) -> ((integer, integer) | (nil, nil)),
     match:   (s: string, pattern: string, init: any?) -> any,
     gmatch:  (s: string, pattern: string) -> any,
     gsub:    (s: string, pattern: string, repl: any, n: any?) -> (string, integer),
