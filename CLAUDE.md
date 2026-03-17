@@ -130,16 +130,6 @@ When doing performance optimization:
 - **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Include raw benchmark output. Most recent entries first.
 - **Include**: file sizes, times, throughput (MB/s), allocation (KB/parse), and speedup ratios.
 
-## Typechecker Design Principles
-
-**Prefer principled solutions over special cases.** When a check needs to accept a new category of type, ask whether the type system can be extended cleanly (e.g. declare the primitive's metamethods, extend unify) rather than tagging the predicate. Ad-hoc flags in `is_numeric`, `is_concat_compatible`, etc. erode correctness over time.
-
-**Every type tag requires a complete behavioral spec.** For every type construct (new or existing), enumerate ALL operations it must support: field access, indexing, call, unification (both directions, covariant/contravariant), try_unify, narrowing, display, serialization (cri round-trip), instantiate/generalize, resolve_annotation_type. Write tests for each. A type tag is not done until all operations are specified and tested. Gaps discovered only when a feature needs them ("we only noticed when we needed it") mean the tag was never complete — that's a process failure, not normal iteration. The bar is a tag × operation matrix where every cell is either implemented+tested or explicitly documented as out-of-scope.
-
-**New type features: derive from full unification first.** When designing how a new type construct should work, ask: "what does full unification give us?" before reaching for special cases. The answer is almost always: one persistent type that accumulates information over time, not per-access reconstruction or per-call rebuilding. Examples: `ffi.C` is one open table that grows as `ffi.cdef` runs — not rebuilt on each access. Module types accumulate fields during prescan — not recomputed per reference. If the unification answer feels surprising, that signals a gap in design understanding, not a need for a special case.
-
-**Source locations do not belong in the type system.** Types are semantic entities; source positions are syntactic. Do not store line/col in type arena entries (FieldEntry, TypeSlot, etc.) to support error messages — errors are exceptional, so paying a per-entry cost for rare diagnostics is the wrong trade-off. Instead, reparse the source on the error path: for same-file definitions, walk the already-parsed AST; for cross-module definitions, reparse the source file from disk. This keeps the type arena compact and clean, and works uniformly for all cases without bloating the CRI format.
-
 ## Negative Constraints
 
 Do not:

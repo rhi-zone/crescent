@@ -193,6 +193,22 @@ lib/foo/init.lua:42: error: cannot pass 'string' where 'number' expected
 
 Not "type mismatch" with no context. Not 47 cascading errors from one root cause. The checker should report the *first* meaningful error in a chain and suppress downstream noise.
 
+### 10. Prefer principled solutions over special cases
+
+When a check needs to accept a new category of type, ask whether the type system can be extended cleanly (e.g. declare the primitive's metamethods, extend unify) rather than tagging the predicate. Ad-hoc flags in `is_numeric`, `is_concat_compatible`, etc. erode correctness over time.
+
+### 11. Every type tag requires a complete behavioral spec
+
+For every type construct (new or existing), enumerate ALL operations it must support: field access, indexing, call, unification (both directions, covariant/contravariant), try_unify, narrowing, display, serialization (cri round-trip), instantiate/generalize, resolve_annotation_type. Write tests for each. A type tag is not done until all operations are specified and tested. The bar is a tag × operation matrix where every cell is either implemented+tested or explicitly documented as out-of-scope.
+
+### 12. New type features: derive from full unification first
+
+When designing how a new type construct should work, ask: "what does full unification give us?" before reaching for special cases. The answer is almost always: one persistent type that accumulates information over time, not per-access reconstruction or per-call rebuilding. If the unification answer feels surprising, that signals a gap in design understanding, not a need for a special case.
+
+### 13. Source locations do not belong in the type system
+
+Types are semantic entities; source positions are syntactic. Do not store line/col in type arena entries (FieldEntry, TypeSlot, etc.) — errors are exceptional, so paying a per-entry cost for rare diagnostics is the wrong trade-off. Reparse the source on the error path instead.
+
 ## Types
 
 ### Primitives
