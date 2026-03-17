@@ -318,6 +318,10 @@ Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs
 - [x] Delete `infer.lua` — done (commit 2e33c62); type_test.lua migrated to check_mod
 
 **Phase 3 — annotation pass (after Phase 2 cutover):**
+- [ ] Rewrite remaining sumneko-syntax `.d.lua` files in crescent annotation syntax
+  (`--:` / `--::`). Files: `lib/http/format.d.lua`, `lib/lsp/types.d.lua`,
+  `lib/imap/format.d.lua`, `lib/matrix/format.d.lua`. Until rewritten these have
+  no effect on crescent's typechecker (sumneko `--[[@class]]` syntax is not parsed).
 - [ ] Strip all `--:` annotations from own codebase, run v3, record error set
 - [ ] Re-annotate only where errors appear (load-bearing annotations)
 - [ ] Mark inference-gap annotations with `-- TODO: v3 gap` comment so they're removable in bulk when the gap closes
