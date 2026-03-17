@@ -392,11 +392,10 @@ function M.make_table(ctx, field_ids, indexer_pairs, row_var_id, meta_field_ids)
     return id
 end
 
--- Make a union type. Flattens nested unions, removes never, short-circuits on any.
--- member_ids: Lua array of type_ids
+local union_has  -- forward declaration; defined after struct_equal below
+
 function M.make_union(ctx, member_ids)
     local flat = {}
-    local seen = {}
     for i = 1, #member_ids do
         local rtid = M.find(ctx, member_ids[i])
         local t = ctx.types:get(rtid)
@@ -405,18 +404,16 @@ function M.make_union(ctx, member_ids)
         if t.tag == TAG_UNION then
             local s, l = t.data[0], t.data[1]
             for j = s, s + l - 1 do
-                -- find() here: union members may be VAR IDs written at gen time,
-                -- resolved only after solve. Without find(), dedup misses them.
                 local mid = M.find(ctx, ctx.lists:get(j))
                 local mt = ctx.types:get(mid)
                 if mt.tag == TAG_ANY     then return ctx.T_ANY end
                 if mt.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
-                if mt.tag ~= TAG_NEVER and not seen[mid] then
-                    seen[mid] = true; flat[#flat + 1] = mid
+                if mt.tag ~= TAG_NEVER and not union_has(ctx, flat, mid) then
+                    flat[#flat + 1] = mid
                 end
             end
         elseif t.tag ~= TAG_NEVER then
-            if not seen[rtid] then seen[rtid] = true; flat[#flat + 1] = rtid end
+            if not union_has(ctx, flat, rtid) then flat[#flat + 1] = rtid end
         end
     end
     if #flat == 0 then return ctx.T_NEVER end
@@ -518,8 +515,9 @@ function M.widen(ctx, tid)
     return tid
 end
 
--- Check structural equality of two types (shallow, no binding).
-function M.types_equal(ctx, a, b)
+-- Deep structural equality with cycle detection.
+-- seen: optional table mapping "a:b" string keys to prevent infinite recursion.
+local function struct_equal(ctx, a, b, seen)
     a = M.find(ctx, a)
     b = M.find(ctx, b)
     if a == b then return true end
@@ -527,10 +525,11 @@ function M.types_equal(ctx, a, b)
     local tb = ctx.types:get(b)
     if ta.tag ~= tb.tag then return false end
     local tag = ta.tag
+    -- Primitives: tag equality suffices.
     if tag == TAG_NIL or tag == TAG_BOOLEAN or tag == TAG_NUMBER
       or tag == TAG_INTEGER or tag == TAG_STRING
-      or tag == TAG_ANY or tag == TAG_NEVER then
-        return true  -- same tag = equal for primitives
+      or tag == TAG_ANY or tag == TAG_NEVER or tag == TAG_UNKNOWN then
+        return true
     end
     if tag == TAG_LITERAL then
         if ta.data[0] ~= tb.data[0] then return false end
@@ -540,13 +539,81 @@ function M.types_equal(ctx, a, b)
         return ta.data[1] == tb.data[1]
     end
     if tag == TAG_ENUM_MEMBER then
-        -- same enum + same member = equal
         return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
     end
     if tag == TAG_NOMINAL then
-        return ta.data[1] == tb.data[1]  -- identity-based
+        return ta.data[1] == tb.data[1]
     end
-    return false  -- reference inequality for complex types
+    -- Cycle detection for recursive types.
+    seen = seen or {}
+    local key = a .. ":" .. b
+    if seen[key] then return true end  -- assume equal under recursion
+    seen[key] = true
+    if tag == TAG_UNION or tag == TAG_INTERSECTION then
+        if ta.data[1] ~= tb.data[1] then seen[key] = nil; return false end
+        for i = 0, ta.data[1] - 1 do
+            local ma = M.find(ctx, ctx.lists:get(ta.data[0] + i))
+            local mb = M.find(ctx, ctx.lists:get(tb.data[0] + i))
+            if not struct_equal(ctx, ma, mb, seen) then seen[key] = nil; return false end
+        end
+        seen[key] = nil; return true
+    end
+    if tag == TAG_TABLE then
+        -- Compare field counts.
+        if ta.data[1] ~= tb.data[1] then seen[key] = nil; return false end
+        -- Compare fields pairwise (order-sensitive; both come from same annotation structure).
+        for i = 0, ta.data[1] - 1 do
+            local fa = ctx.fields:get(ctx.lists:get(ta.data[0] + i))
+            local fb = ctx.fields:get(ctx.lists:get(tb.data[0] + i))
+            if fa.name_id ~= fb.name_id then seen[key] = nil; return false end
+            if fa.flags   ~= fb.flags   then seen[key] = nil; return false end
+            if not struct_equal(ctx, fa.type_id, fb.type_id, seen) then
+                seen[key] = nil; return false
+            end
+        end
+        -- Compare indexer counts and types.
+        if ta.data[3] ~= tb.data[3] then seen[key] = nil; return false end
+        for i = 0, ta.data[3] - 1 do
+            local ka = M.find(ctx, ctx.lists:get(ta.data[2] + i))
+            local kb = M.find(ctx, ctx.lists:get(tb.data[2] + i))
+            if not struct_equal(ctx, ka, kb, seen) then seen[key] = nil; return false end
+        end
+        seen[key] = nil; return true
+    end
+    if tag == TAG_FUNCTION then
+        if ta.data[1] ~= tb.data[1] or ta.data[3] ~= tb.data[3] then
+            seen[key] = nil; return false
+        end
+        for i = 0, ta.data[1] - 1 do
+            if not struct_equal(ctx,
+                M.find(ctx, ctx.lists:get(ta.data[0] + i)),
+                M.find(ctx, ctx.lists:get(tb.data[0] + i)), seen) then
+                seen[key] = nil; return false
+            end
+        end
+        for i = 0, ta.data[3] - 1 do
+            if not struct_equal(ctx,
+                M.find(ctx, ctx.lists:get(ta.data[2] + i)),
+                M.find(ctx, ctx.lists:get(tb.data[2] + i)), seen) then
+                seen[key] = nil; return false
+            end
+        end
+        seen[key] = nil; return true
+    end
+    seen[key] = nil
+    return false
+end
+
+-- Check structural equality of two types (shallow for primitives, deep for composites).
+function M.types_equal(ctx, a, b)
+    return struct_equal(ctx, a, b, nil)
+end
+
+union_has = function(ctx, flat, tid)
+    for i = 1, #flat do
+        if struct_equal(ctx, flat[i], tid, nil) then return true end
+    end
+    return false
 end
 
 -- Look up a named field in a table type. Returns (FieldEntry*, field_arena_id) or nil.
