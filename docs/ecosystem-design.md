@@ -104,6 +104,37 @@ The ecosystem is comprehensive because the interfaces are stable and the convent
 clear, not because we wrote everything. The stdlib's job is to make the right patterns
 the natural patterns.
 
+## The Package Manager and Registry
+
+### Vendor-first
+
+Dependencies are committed to VCS. `cr install` populates `dep/` in user projects.
+No network required to build. You own your dependencies.
+
+### The registry as curation layer
+
+The registry maps short names to GitHub repos. It is maintained by the crescent project,
+not by package authors — a package does not need to know crescent exists to be listed.
+`cr add lunajson` resolves through the registry to the upstream GitHub repo. The registry
+is the curation layer; the source of truth is always the upstream repo.
+
+This makes the entire Lua/LuaJIT ecosystem accessible through `cr add`, regardless of
+whether authors have adopted crescent conventions. Quality and convention compliance are
+our concern for `lib/`; the registry lists anything worth listing.
+
+### The distribution has no external dependencies
+
+`lib/` is self-contained. Libraries in the stdlib do not depend on packages outside the
+repo. If a stdlib library needs JSON parsing, it has a crescent-native JSON
+implementation in `lib/`, not a vendored third-party package. Currently vendored
+packages (`dep/lunajson`, `dep/sha1`, etc.) are stopgaps predating the package manager
+— they will be replaced with native implementations or removed as the stdlib matures.
+
+Third-party packages that predate crescent (lunajson, sha1, etc.) belong in the
+registry, available via `cr add`, but not in `lib/`. Their interfaces may not be
+consistent with crescent's conventions; stdlib implementations are written from scratch
+to meet the bar.
+
 ## Access Control (deferred)
 
 Access control design is intentionally deferred. The wrong approach is to inherit
