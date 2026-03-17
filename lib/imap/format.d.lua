@@ -1,117 +1,59 @@
---[[@class imap_flag: string]]
---[[@class imap_capability: string]]
---[[@class imap_mailbox: string]]
---[[@class imap_message: string]]
---[[@class imap_message_id: string]]
+-- IMAP types (RFC 9051)
+-- imap_flag and imap_capability are string subtypes; crescent does not support
+-- nominal string subtypes, so they are aliased to string.
+--:: imap_flag = string
+--:: imap_capability = string
+--:: imap_mailbox = string
+--:: imap_message = string
+--:: imap_message_id = string
 
---[[@alias imap_command_type "capability"|"logout"|"noop"|"append"|"create"|"delete"|"enable"|"starttls"|"close"|"unselect"|"expunge"]]
+--:: imap_date_time = { day: string, month: string, year: string, hour: string, minute: string, second: string, zone: { sign: string, hour: string, minute: string } }
 
---[[@class imap_command]]
---[[@field tag string distinguishes between commands, not necessarily unique]]
---[[@field type string case insensitive]]
+-- imap_nil is a placeholder representing IMAP's NIL value
+--:: imap_nil = {}
 
---[[TODO: is this right?]]
---[[@class imap_authenticate_command: imap_command]]
---[[@field type "authenticate" case insensitive]]
+--:: imap_command = { tag: string, type: string }
 
---[[@class imap_capability_command: imap_command]]
---[[@field type "capability" case insensitive]]
+-- "CAPABILITY" / "LOGOUT" / "NOOP" — valid in any state
+--:: imap_capability_command = { tag: string, type: string }
+--:: imap_logout_command = { tag: string, type: string }
+--:: imap_noop_command = { tag: string, type: string }
 
---[[@class imap_logout_command: imap_command]]
---[[@field type "logout" case insensitive]]
+-- valid only in authenticated or selected state
+--:: imap_append_command = { tag: string, type: string, mailbox: string, flags: { [number]: string }, date_time?: imap_date_time, message: string }
+--:: imap_create_command = { tag: string, type: string, mailbox: string }
+--:: imap_delete_command = { tag: string, type: string, mailbox: string }
+--:: imap_enable_command = { tag: string, type: string, capabilities: { [number]: string } }
+--:: imap_examine_command = { tag: string, type: string }
+--:: imap_list_command = { tag: string, type: string }
+--:: imap_namespace_command = { tag: string, type: string }
+--:: imap_rename_command = { tag: string, type: string }
+--:: imap_select_command = { tag: string, type: string }
+--:: imap_status_command = { tag: string, type: string }
+--:: imap_subscribe_command = { tag: string, type: string }
+--:: imap_unsubscribe_command = { tag: string, type: string }
+--:: imap_idle_command = { tag: string, type: string }
 
---[[@class imap_noop_command: imap_command]]
---[[@field type "noop" case insensitive]]
+-- valid only in not authenticated state
+--:: imap_login_command = { tag: string, type: string }
+--:: imap_authenticate_command = { tag: string, type: string }
+--:: imap_starttls_command = { tag: string, type: string }
 
---[[@class imap_append_command: imap_command]]
---[[@field type "append" case insensitive]]
---[[@field mailbox imap_mailbox]]
---[[@field flags imap_flag[] ]]
---[[@field date_time imap_date_time?]]
---[[@field messsage imap_message]]
+-- valid only in selected state
+--:: imap_close_command = { tag: string, type: string }
+--:: imap_unselect_command = { tag: string, type: string }
+--:: imap_expunge_command = { tag: string, type: string }
+--:: imap_copy_command = { tag: string, type: string, message_ids: { [number]: string }, mailbox: string }
+--:: imap_move_command = { tag: string, type: string }
+--:: imap_fetch_command = { tag: string, type: string }
+--:: imap_store_command = { tag: string, type: string }
+--:: imap_search_command = { tag: string, type: string }
+--:: imap_uid_command = { tag: string, type: string }
 
---[[@class imap_create_command: imap_command]]
---[[@field type "create" case insensitive]]
---[[@field mailbox imap_mailbox]]
-
---[[@class imap_delete_command: imap_command]]
---[[@field type "delete" case insensitive]]
---[[@field mailbox imap_mailbox]]
-
---[[@class imap_enable_command: imap_command]]
---[[@field type "enable" case insensitive]]
-
---[[@class imap_examine_command: imap_command]]
---[[@field type "examine" case insensitive]]
-
---[[@class imap_list_command: imap_command]]
---[[@field type "list" case insensitive]]
-
---[[@class imap_namespace_command: imap_command]]
---[[@field type "namespace" case insensitive]]
-
---[[@class imap_rename_command: imap_command]]
---[[@field type "rename" case insensitive]]
-
---[[@class imap_select_command: imap_command]]
---[[@field type "select" case insensitive]]
-
---[[@class imap_status_command: imap_command]]
---[[@field type "status" case insensitive]]
-
---[[@class imap_subscribe_command: imap_command]]
---[[@field type "subscribe" case insensitive]]
-
---[[@class imap_unsubscribe_command: imap_command]]
---[[@field type "unsubscribe" case insensitive]]
-
---[[@class imap_idle_command: imap_command]]
---[[@field type "idle" case insensitive]]
-
---[[@class imap_login_command: imap_command]]
---[[@field type "login" case insensitive]]
-
---[[@class imap_authentiate_command: imap_command]]
---[[@field type "authentiate" case insensitive]]
-
---[[@class imap_starttls_command: imap_command]]
---[[@field type "starttls" case insensitive]]
-
---[[@class imap_close_command: imap_command]]
---[[@field type "close" case insensitive]]
-
---[[@class imap_unselect_command: imap_command]]
---[[@field type "unselect" case insensitive]]
-
---[[@class imap_expunge_command: imap_command]]
---[[@field type "expunge" case insensitive]]
-
---[[@class imap_copy_command: imap_command]]
---[[@field type "copy" case insensitive]]
---[[@field message_ids imap_message_id[] ]]
---[[@field mailbox imap_mailbox]]
-
---[[@class imap_move_command: imap_command]]
---[[@field type "move" case insensitive]]
-
---[[@class imap_fetch_command: imap_command]]
---[[@field type "fetch" case insensitive]]
-
---[[@class imap_store_command: imap_command]]
---[[@field type "store" case insensitive]]
-
---[[@class imap_search_command: imap_command]]
---[[@field type "search" case insensitive]]
-
---[[@class imap_uid_command: imap_command]]
---[[@field type "uid" case insensitive]]
-
---[["CAPABILITY" / "LOGOUT" / "NOOP"]]
---[[@alias imap_any_any_command imap_capability_command | imap_logout_command | imap_noop_command]]
---[[valid only in authenticated or selected state]]
---[[@alias imap_any_auth_command imap_append_command | imap_create_command | imap_delete_command | imap_enable_command | imap_examine_command | imap_list_command | imap_namespace_command | imap_rename_command | imap_select_command | imap_status_command | imap_subscribe_command | imap_unsubscribe_command | imap_idle_command]]
---[[valid only in not authenticated state]]
---[[@alias imap_any_nonauth_command imap_login_command | imap_authenticate_command | imap_starttls_command]]
---[[valid only in slected state]]
---[[@alias imap_any_select_command imap_close_command | imap_unselect_command | imap_expunge_command | imap_copy_command | imap_move_command | imap_fetch_command | imap_store_command | imap_search_command | imap_uid_command]]
---[[@alias imap_any_command imap_any_any_command | imap_any_auth_command | imap_any_nonauth_command | imap_any_select_command]]
+-- TODO: v3 gap — union aliases over named table types not yet supported;
+-- these would be:
+--   imap_any_any_command = imap_capability_command | imap_logout_command | imap_noop_command
+--   imap_any_auth_command = imap_append_command | imap_create_command | ...
+--   imap_any_nonauth_command = imap_login_command | imap_authenticate_command | imap_starttls_command
+--   imap_any_select_command = imap_close_command | imap_unselect_command | ...
+--   imap_any_command = imap_any_any_command | imap_any_auth_command | ...
