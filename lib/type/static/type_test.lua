@@ -4180,6 +4180,16 @@ local b = id("hello")
 ]])
     end)
 
+    assert.it("setmetatable: generic U binds to metatable type, no stack overflow on __index=self", function()
+        -- setmetatable = <T,U>(t:T, mt:{__index:U,...}) -> T & U
+        -- MyClass.__index = MyClass (cyclic) must not cause infinite occurs-check recursion.
+        v3_no_errors([[
+local MyClass = { foo = function() end }
+MyClass.__index = MyClass
+local obj = setmetatable({x = 1}, MyClass)
+]])
+    end)
+
     assert.it("union might-also-be: number|nil passed where number expected", function()
         v3_has_error([[
 --: (number) -> number

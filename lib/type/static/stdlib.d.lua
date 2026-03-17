@@ -26,7 +26,7 @@
 --:: declare pairs = (t: any) -> ((any, any) -> (any, any), any, any)
 --:: declare ipairs = (t: any) -> ((any, integer) -> (integer, any), any, integer)
 --:: declare next = (t: any, k: any?) -> (any, any)
---:: declare setmetatable = (t: any, mt: any?) -> any
+--:: declare setmetatable = <T, U>(t: T, mt: { __index: U, ... }) -> T & U
 --:: declare getmetatable = (t: any) -> any
 --:: declare collectgarbage = (opt: any?, arg: any?) -> any
 --:: declare gcinfo = () -> integer

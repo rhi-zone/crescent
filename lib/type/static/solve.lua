@@ -60,6 +60,43 @@ local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
 end
 
+-- Check if a type contains any unbound free TAG_VAR (depth-first, with cycle guard).
+-- Used to decide whether the fast path in solve_callable can safely skip unify().
+local function contains_free_var(ctx, tid, seen)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_VAR or tag == TAG_ROWVAR then return true end
+    if seen and seen[tid] then return false end
+    if tag == TAG_TABLE then
+        seen = seen or {}; seen[tid] = true
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fe = ctx.fields:get(ctx.lists:get(i))
+            if contains_free_var(ctx, fe.type_id, seen) then return true end
+        end
+        if t.data[4] >= 0 and contains_free_var(ctx, t.data[4], seen) then return true end
+        return false
+    end
+    if tag == TAG_FUNCTION then
+        seen = seen or {}; seen[tid] = true
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        return false
+    end
+    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
+        seen = seen or {}; seen[tid] = true
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        return false
+    end
+    return false
+end
+
 -- Bind a free type var to a target type directly (bypasses unify's bilateral-any short-circuit).
 -- Use this when we want to resolve a result VAR to a concrete type (T_ANY, T_UNKNOWN, etc.).
 local function bind_to(ctx, tid, target)
@@ -443,7 +480,8 @@ local function solve_index(ctx, c)
 end
 
 local function solve_callable(ctx, c)
-    local callee_tid = find(ctx, c[2])
+    local callee_raw = c[2]   -- raw stored id (may be TAG_VAR for method calls)
+    local callee_tid = find(ctx, callee_raw)
     local arg_tids   = c[3]
     local ret_tid    = c[4]
     local line, col  = c[5], c[6]
@@ -472,10 +510,15 @@ local function solve_callable(ctx, c)
 
     if callee_t.tag == TAG_FUNCTION then
         -- Instantiate generic function (let-polymorphism).
-        -- This is needed for method calls where the callee was a free var at gen time:
-        -- FLAG_GENERIC params (including 'self') get fresh vars so occurs check doesn't fail.
-        callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
-        callee_t   = ctx.types:get(callee_tid)
+        -- Only needed when callee was a free var at gen time (method calls): the actual method
+        -- may have FLAG_GENERIC params that need fresh vars per call site.
+        -- For regular calls, gen-time instantiate in constrain.lua already created fresh vars;
+        -- re-instantiating here would deep-copy already-bound types and cause recursive unification.
+        local raw_t = ctx.types:get(callee_raw)
+        if raw_t.tag == TAG_VAR or raw_t.tag == TAG_ROWVAR then
+            callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
+            callee_t   = ctx.types:get(callee_tid)
+        end
         -- Unify arguments with parameters
         local pl = callee_t.data[1]
         local has_names = callee_t.data[6] > 0
@@ -484,9 +527,11 @@ local function solve_callable(ctx, c)
             local act_tid = arg_tids[i + 1]
             if act_tid then
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
+                -- Skip when exp_tid contains free vars: try_unify is read-only and won't bind them.
                 local act_r = find(ctx, act_tid)
                 local et = ctx.types:get(exp_tid)
                 if et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
+                  and not contains_free_var(ctx, exp_tid)
                   and unify_mod.try_unify(ctx, act_r, exp_tid) then
                     -- ok
                 else
