@@ -21,6 +21,7 @@ end
 local manifest = require("lib.pkg.manifest")
 local lock     = require("lib.pkg.lock")
 local install  = require("lib.pkg.install")
+local publish  = require("lib.pkg.publish")
 
 local M = {}
 
@@ -76,6 +77,7 @@ function M.parse_args(argv)
 		args     = {},
 		verbose  = false,
 		frozen   = false,
+		dry_run  = false,
 		registry = DEFAULT_REGISTRY,
 		jobs     = 1,
 	}
@@ -94,6 +96,8 @@ function M.parse_args(argv)
 			result.verbose = true
 		elseif v == "--frozen" then
 			result.frozen = true
+		elseif v == "--dry-run" then
+			result.dry_run = true
 		elseif v:sub(1, 11) == "--registry=" then
 			result.registry = v:sub(12)
 		elseif v:sub(1, 7) == "--jobs=" then
@@ -353,6 +357,30 @@ local function cmd_update(project_dir, parsed)
 	return true
 end
 
+--- cr publish [--dry-run]
+local function cmd_publish(project_dir, parsed)
+	local opts = {
+		registry = parsed.registry,
+		dry_run  = parsed.dry_run,
+		verbose  = parsed.verbose,
+	}
+
+	local result = publish.run(project_dir, opts)
+
+	if not result.ok then
+		stderr("publish: %s", tostring(result.error))
+		return false
+	end
+
+	if opts.dry_run then
+		info("dry-run: %s@%s packed (%s)", result.name, result.version, result.checksum)
+	else
+		info("published %s@%s (%s)", result.name, result.version, result.checksum)
+	end
+
+	return true
+end
+
 --- cr info <name>
 local function cmd_info(project_dir, parsed)
 	local name = parsed.args[1]
@@ -409,6 +437,7 @@ local COMMANDS = {
 	remove  = cmd_remove,
 	update  = cmd_update,
 	info    = cmd_info,
+	publish = cmd_publish,
 }
 
 local USAGE = [[
@@ -420,11 +449,13 @@ commands:
   remove <name>             remove dep, delete dep/<name>/, update lockfile
   update [name]             re-resolve to latest matching version(s)
   info <name>               show package info from registry
+  publish [--dry-run]       publish package to registry
 
 global options:
   --verbose                 enable verbose logging
   --registry=URL            registry base URL (default: https://pkg.crescent.run)
   --jobs=N                  parallel jobs (default: 1)
+  --dry-run                 pack but do not upload (publish only)
 ]]
 
 --- Main entry point. argv is the arg table (1-indexed positional args).
