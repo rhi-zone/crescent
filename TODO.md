@@ -515,6 +515,7 @@ See `docs/pkg-design.md` for full design.
 - [x] Multi-registry support with priority ordering and per-registry auth — `lib/pkg/config.lua` (2026-03-16)
 - [ ] Fork-based parallel fetch with `--jobs=N` (default: CPU count) — v1 fetch is sequential
 - [ ] `cr publish` — not yet implemented
+- [ ] Package manifest `files` field — declare which files get installed (source only; tests, benchmarks, fixtures, docs stay in the repo). Installed footprint should be just the `.lua` files needed to run. Key to avoiding node_modules-scale bloat when vendoring.
 
 ## stretch goals (low priority, high reward)
 
