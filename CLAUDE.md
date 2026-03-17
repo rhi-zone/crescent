@@ -82,7 +82,7 @@ cd docs && bun dev           # Local docs
 ~/git/rhizone/normalize/target/debug/normalize view <dir>     # directory structure
 ```
 
-**On typechecker design questions, read `docs/type-system.md` first.** Design decisions are written there. Don't improvise from first principles.
+**On typechecker topics, read `docs/type-system.md` first.** Design decisions are written there. Don't improvise from first principles.
 
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
