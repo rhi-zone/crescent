@@ -1,6 +1,6 @@
 -- lib/fp/maybe/init.lua
 -- Maybe a = Nothing | Just a
--- Implements: Mappable, Applicable, Foldable, Semigroup (when inner is Semigroup), Monoid
+-- Implements: Mappable, Applicable, Chainable, Foldable, Semigroup (when inner is Semigroup), Monoid
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -8,6 +8,7 @@ end
 
 local Mappable   = require("lib.fp.mappable")
 local Applicable = require("lib.fp.applicable")
+local Chainable  = require("lib.fp.chainable")
 local Foldable   = require("lib.fp.foldable")
 local Semigroup  = require("lib.fp.semigroup")
 local Monoid     = require("lib.fp.monoid")
@@ -64,10 +65,18 @@ local nothing_foldable_impl = {
 	end,
 }
 
+local nothing_chainable_impl = {
+	-- bind(Nothing, f) = Nothing
+	bind = function(_ma, _f)
+		return Maybe.nothing
+	end,
+}
+
 local nothing_mt = {
 	__index = {
 		[Mappable]   = nothing_f_impl,
 		[Applicable] = nothing_ap_impl,
+		[Chainable]  = nothing_chainable_impl,
 		[Foldable]   = nothing_foldable_impl,
 		[Semigroup]  = nothing_sg_impl,
 		[Monoid]     = nothing_m_impl,
@@ -134,10 +143,18 @@ local just_foldable_impl = {
 	end,
 }
 
+local just_chainable_impl = {
+	-- bind(Just(a), f) = f(a)
+	bind = function(ma, f)
+		return f(ma.value)
+	end,
+}
+
 local just_mt = {
 	__index = {
 		[Mappable]   = just_f_impl,
 		[Applicable] = just_ap_impl,
+		[Chainable]  = just_chainable_impl,
 		[Foldable]   = just_foldable_impl,
 		[Semigroup]  = just_sg_impl,
 		[Monoid]     = just_m_impl,
