@@ -441,6 +441,36 @@ local function substitute_inner(ctx, tid, mapping, seen)
         return id
     end
 
+    -- TAG_MATCH_TYPE: deferred match evaluation.
+    -- When stored as an alias body with a TAG_NAMED param placeholder, substitution
+    -- replaces the placeholder with the concrete type and then evaluates the match.
+    if tag == defs.TAG_MATCH_TYPE then
+        -- Substitute into the param
+        local new_param = substitute_inner(ctx, t.data[0], mapping, seen)
+        -- Substitute into each arm (patterns and results may contain capture-var placeholders
+        -- that are not in `mapping` — those stay as TAG_NAMED and are handled by match_pattern)
+        local new_arms = {}
+        local as, al = t.data[1], t.data[2]
+        local i = as
+        while i < as + al - 1 do
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen)
+            i = i + 2
+        end
+        seen[tid] = nil
+        local mk = ctx.lists:mark()
+        for _, aid in ipairs(new_arms) do ctx.lists:push(aid) end
+        local ms, ml = ctx.lists:since(mk)
+        local new_mt = types_mod.alloc_type(ctx, defs.TAG_MATCH_TYPE)
+        local mtt = ctx.types:get(new_mt)
+        mtt.data[0] = new_param
+        mtt.data[1] = ms
+        mtt.data[2] = ml
+        -- Evaluate the match now that the param is (hopefully) concrete
+        local match_mod = require("lib.type.static.match")
+        return match_mod.evaluate(ctx, new_mt)
+    end
+
     -- TAG_TYPE_CALL: deferred HKT application F<A>.
     -- Substitute through callee and args so that when F is replaced by a concrete
     -- type constructor (e.g. Maybe), the application can be evaluated later.

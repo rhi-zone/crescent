@@ -4914,33 +4914,26 @@ assert.describe("adversarial: match type edge cases", function()
     -- Match types with table-pattern arms
     -- -----------------------------------------------------------------------
 
-    assert.it("GAP: match arm with table-pattern binding uses bare type var — undefined type 'A'", function()
-        -- `match T { { value: A } => A, T => T }` should bind A to the value
-        -- field type. Currently the checker doesn't resolve pattern-bound type
-        -- variables inside match arms, so A is treated as an undefined type.
-        -- The test currently produces an error (undefined type 'A'); when fixed
-        -- it should produce no error and resolve R to number.
-        v3_has_error([[
+    assert.it("PASS: match arm with table-pattern binding — pattern capture variable 'A'", function()
+        -- `match T { { value: A } => A, T => T }` binds A to the value field
+        -- type when T is a table with a `value` field.
+        v3_no_errors([[
 --:: Unwrap<T> = match T { { value: A } => A, T => T }
 --:: R = Unwrap<{ value: number }>
 local x --: R
 x = 42
-]], "undefined type")
+]])
     end)
 
-    assert.it("GAP: Unwrap<Unwrap<T>> double application — should resolve to inner type", function()
-        -- Unwrap<Unwrap<{ value: { value: string } }>> should give string.
-        -- Double application of a match type alias is valid syntax, but whether
-        -- the checker evaluates the outer call after the inner is resolved
-        -- depends on whether alias expansion re-enters match evaluation.
-        -- Currently the inner match also fails with undefined type 'A'.
-        v3_has_error([[
+    assert.it("PASS: Unwrap<Unwrap<T>> double application — resolves to inner type", function()
+        -- Inner = Unwrap<{ value: string }> = string; Outer = Unwrap<string> = string.
+        v3_no_errors([[
 --:: Unwrap<T> = match T { { value: A } => A, T => T }
 --:: Inner = Unwrap<{ value: string }>
 --:: Outer = Unwrap<Inner>
 local x --: Outer
 x = "hi"
-]], "undefined type")
+]])
     end)
 
     assert.it("GAP: recursive self-referencing match type crashes arena — cycle detection needed", function()
@@ -5058,15 +5051,30 @@ accept({ n = "wrong" })
 ]], "")
     end)
 
-    assert.it("GAP: $EachField where F descriptor match uses pattern vars — undefined type", function()
-        -- Matching the field descriptor `{ key: K, value: V }` inside the match
-        -- arm uses the same pattern-variable binding that breaks Unwrap above.
-        -- Currently produces 'undefined type K/V' errors.
-        v3_has_error([[
+    assert.it("PASS: $EachField where F descriptor match uses pattern vars — K, V captured correctly", function()
+        -- Pattern vars K, V in `{ key: K, value: V }` are now bound at match time.
+        v3_no_errors([[
 --:: MakeOpt<F> = match F { { key: K, value: V } => { key: K, value: V }, F => F }
 --:: R = $EachField<{ name: string }, MakeOpt>
 local v --: R
-]], "undefined type")
+]])
+    end)
+
+    assert.it("PASS: Unwrap<T> — pattern capture var in table pattern", function()
+        v3_no_errors([[
+--:: Unwrap<T> = match T { { value: A } => A, T => T }
+local x --: Unwrap<{ value: number }>
+x = 42
+]])
+    end)
+
+    assert.it("PASS: $EachField with descriptor pattern vars — MakeOptional transform", function()
+        v3_no_errors([[
+--:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ name: string, age: number }>
+x = { name = "hi" }
+]])
     end)
 end)
 

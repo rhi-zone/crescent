@@ -223,6 +223,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         -- Check if the alias exists at all; only emit an error for truly undefined names.
         local alias = env_mod.lookup_type(ctx.scope, name_id)
         if not alias then
+            -- Inside a match arm pattern/body, bare names that are not in scope
+            -- are pattern capture variables (e.g. `A` in `{ value: A } => A`).
+            -- Return a TAG_NAMED placeholder; match.evaluate will bind and substitute.
+            if ctx._in_match_arm then
+                local id = types_mod.alloc_type(ctx, TAG_NAMED)
+                ctx.types:get(id).data[0] = name_id
+                return id
+            end
             local err_line = ctx._ann_warn_line or 0
             errors_mod.error(ctx.err, ctx.filename, err_line, 0, "undefined type '" .. name_str .. "'")
             return ctx.T_ANY
@@ -405,12 +413,18 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local param = resolve_annotation_type(ctx, at.data[0], seen)
         local arms = {}
         local as, al = at.data[1], at.data[2]
+        -- Arm patterns and bodies may contain free names (e.g. `A` in `{ value: A } => A`).
+        -- These are pattern-capture variables, not errors. Set _in_match_arm so that
+        -- unresolved TAG_NAMED references are kept as placeholders instead of erroring.
+        local prev_in_match_arm = ctx._in_match_arm
+        ctx._in_match_arm = true
         local i = as
         while i < as + al - 1 do
             arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
             arms[#arms + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i + 1), seen)
             i = i + 2
         end
+        ctx._in_match_arm = prev_in_match_arm
         local mk = ctx.lists:mark()
         for _, aid in ipairs(arms) do ctx.lists:push(aid) end
         local ms, ml = ctx.lists:since(mk)
@@ -420,6 +434,14 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         mtt.data[1] = ms
         mtt.data[2] = ml
         seen[ann_tid] = nil
+        -- Evaluate immediately only when the param is already concrete.
+        -- When param is a TAG_NAMED placeholder (generic alias body resolution),
+        -- defer evaluation: env_mod.substitute will substitute param and call
+        -- match.evaluate with the concrete type at instantiation time.
+        local pt = ctx.types:get(types_mod.find(ctx, param))
+        if pt.tag == defs.TAG_NAMED then
+            return id  -- deferred; evaluated after substitution in env_mod.substitute
+        end
         local match_mod = require("lib.type.static.match")
         return match_mod.evaluate(ctx, id)
     end

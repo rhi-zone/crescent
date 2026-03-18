@@ -14,12 +14,29 @@ local TAG_INTEGER      = defs.TAG_INTEGER
 local TAG_LITERAL      = defs.TAG_LITERAL
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
+local TAG_TABLE        = defs.TAG_TABLE
+local TAG_FUNCTION     = defs.TAG_FUNCTION
+local TAG_UNION        = defs.TAG_UNION
+local TAG_INTERSECTION = defs.TAG_INTERSECTION
+local TAG_TUPLE        = defs.TAG_TUPLE
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 
 local M = {}
+
+-- Merge two bindings tables, returning merged or nil on conflict.
+local function merge_bindings(a, b)
+    if not b then return a end
+    local out = {}
+    for k, v in pairs(a) do out[k] = v end
+    for k, v in pairs(b) do
+        if out[k] ~= nil and out[k] ~= v then return nil end
+        out[k] = v
+    end
+    return out
+end
 
 -- Check if `ty_id` matches `pat_id`.
 -- Returns (ok, bindings_table_or_nil).
@@ -35,6 +52,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
     if pt.tag == TAG_ANY then return true, {} end
 
     -- Named pattern (type variable in match context): binds
+    -- A bare name with no args is a capture variable that matches anything.
     if pt.tag == TAG_NAMED and pt.data[2] == 0 then  -- no args
         return true, { [pt.data[0]] = ty_id }
     end
@@ -62,6 +80,76 @@ function M.match_pattern(ctx, ty_id, pat_id)
         if kind == LIT_STRING  and pt.tag == TAG_STRING  then return true, {} end
         if kind == LIT_NUMBER  and pt.tag == TAG_NUMBER  then return true, {} end
         if kind == LIT_BOOLEAN and pt.tag == TAG_BOOLEAN then return true, {} end
+    end
+
+    -- Table pattern: structural match with field-level capture variables.
+    -- { key: K, value: V } matched against an actual table collects bindings
+    -- for each field whose pattern type is a bare TAG_NAMED (capture var).
+    -- Every field in the pattern must be present in the input type.
+    if pt.tag == TAG_TABLE and tt.tag == TAG_TABLE then
+        local bindings = {}
+        -- Each field in the pattern must exist in the actual type and its
+        -- pattern sub-type must match the corresponding field type.
+        for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+            local pfid = ctx.lists:get(pi)
+            local pfe  = ctx.fields:get(pfid)
+            -- Find the matching field in the input type
+            local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
+            if not afe then return false, nil end
+            local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id)
+            if not ok then return false, nil end
+            bindings = merge_bindings(bindings, sub_bindings)
+            if bindings == nil then return false, nil end
+        end
+        return true, bindings
+    end
+
+    -- Function pattern: match param and return types, collecting capture bindings.
+    -- e.g. (...P) -> R or (A, B) -> C
+    if pt.tag == TAG_FUNCTION then
+        -- The input must also be a function
+        if tt.tag ~= TAG_FUNCTION then return false, nil end
+        local bindings = {}
+        -- Match params
+        local ppl = pt.data[1]  -- param count in pattern
+        local tpl = tt.data[1]  -- param count in input
+        -- If pattern has params, match them positionally
+        if ppl > 0 then
+            if tpl ~= ppl then return false, nil end
+            for i = 0, ppl - 1 do
+                local p_param = ctx.lists:get(pt.data[0] + i)
+                local t_param = ctx.lists:get(tt.data[0] + i)
+                local ok, sub = M.match_pattern(ctx, t_param, p_param)
+                if not ok then return false, nil end
+                bindings = merge_bindings(bindings, sub)
+                if bindings == nil then return false, nil end
+            end
+        end
+        -- Match vararg
+        local p_va = pt.data[4]
+        if p_va >= 0 then
+            local t_va = tt.data[4]
+            if t_va < 0 then return false, nil end
+            local ok, sub = M.match_pattern(ctx, t_va, p_va)
+            if not ok then return false, nil end
+            bindings = merge_bindings(bindings, sub)
+            if bindings == nil then return false, nil end
+        end
+        -- Match returns
+        local prl = pt.data[3]
+        local trl = tt.data[3]
+        if prl > 0 then
+            if trl ~= prl then return false, nil end
+            for i = 0, prl - 1 do
+                local p_ret = ctx.lists:get(pt.data[2] + i)
+                local t_ret = ctx.lists:get(tt.data[2] + i)
+                local ok, sub = M.match_pattern(ctx, t_ret, p_ret)
+                if not ok then return false, nil end
+                bindings = merge_bindings(bindings, sub)
+                if bindings == nil then return false, nil end
+            end
+        end
+        return true, bindings
     end
 
     return false, nil
