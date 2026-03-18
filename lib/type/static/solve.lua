@@ -66,6 +66,44 @@ local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
 end
 
+-- Deeply widen a type: widens top-level literals AND literal-typed table fields.
+-- Used when comparing inferred (non-annotated) types in bound checks, so that
+-- a table inferred as {x: 1} is treated as {x: number} for structural comparison.
+local function widen_deep(ctx, tid, seen)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+    local top = types_mod.widen(ctx, tid)
+    if top ~= tid then return top end  -- was a top-level literal; already widened
+    if t.tag == TAG_TABLE then
+        seen = seen or {}
+        if seen[tid] then return tid end
+        seen[tid] = true
+        local changed = false
+        local new_fields = {}
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe  = ctx.fields:get(fid)
+            local wt  = widen_deep(ctx, fe.type_id, seen)
+            if wt ~= types_mod.find(ctx, fe.type_id) then changed = true end
+            new_fields[#new_fields + 1] = types_mod.make_field(ctx, fe.name_id, wt,
+                require("bit").band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+        end
+        if not changed then seen[tid] = nil; return tid end
+        -- Rebuild indexers (unchanged)
+        local new_indexers = {}
+        local is, il = t.data[2], t.data[3]
+        local i = is
+        while i < is + il - 1 do
+            new_indexers[#new_indexers + 1] = ctx.lists:get(i)
+            new_indexers[#new_indexers + 1] = ctx.lists:get(i + 1)
+            i = i + 2
+        end
+        seen[tid] = nil
+        return types_mod.make_table(ctx, new_fields, new_indexers, t.data[4], {})
+    end
+    return tid
+end
+
 -- Check if a type contains any unbound free TAG_VAR (depth-first, with cycle guard).
 -- Used to decide whether the fast path in solve_callable can safely skip unify().
 local function contains_free_var(ctx, tid, seen)
@@ -229,9 +267,11 @@ end
 
 -- Solve a forall bound check: C_BOUND = { C_BOUND, fresh_tv_id, bound_type_id, line, col }
 -- Defers while fresh_tv is still a free TAG_VAR (not yet bound at call site).
--- Once bound, checks try_unify(widen(actual), bound) and emits an error if violated.
--- Skips enforcement when the bound is a TAG_NAMED, TAG_MATCH_TYPE, or TAG_TYPE_CALL —
--- these represent kind constraints or complex computed bounds not yet supported.
+-- Once bound:
+--   - For TAG_MATCH_TYPE bounds: evaluate the match with the actual type as subject.
+--     If the result is TAG_NEVER, the constraint is violated.
+--   - For other bounds: check try_unify(widen(actual), bound).
+-- Skips enforcement when the bound is TAG_NAMED (unapplied kind constraint).
 local function solve_bound(ctx, c)
     local tv_id    = c[2]
     local bound_id = c[3]
@@ -245,24 +285,59 @@ local function solve_bound(ctx, c)
         return false
     end
 
+    local resolved_bound = find(ctx, bound_id)
+    local bt = ctx.types:get(resolved_bound)
+
+    -- Defer if the bound TV itself is still free — e.g. "T: F" where F's fresh
+    -- TV has not yet been unified with a concrete type by the C_CALLABLE solver.
+    -- Once F is resolved, the next solver pass re-evaluates this constraint.
+    if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then
+        return false
+    end
+
     -- Skip unenforced bound forms:
     --   TAG_NAMED      — unapplied kind constraint (e.g. <F: T1> where T1<X> = ...)
-    --   TAG_MATCH_TYPE — deferred computed bound (not yet evaluable without concrete T)
-    --   TAG_TYPE_CALL  — unapplied HKT application
-    --   TAG_NEVER      — indeterminate bound (e.g. match type evaluation failed on free TV)
-    local bt = ctx.types:get(find(ctx, bound_id))
-    if bt.tag == TAG_NAMED or bt.tag == TAG_MATCH_TYPE or bt.tag == TAG_TYPE_CALL
-      or bt.tag == TAG_NEVER then
+    --   TAG_TYPE_CALL  — unapplied HKT application (not yet supported)
+    --   TAG_NEVER      — indeterminate bound (match type evaluation failed on free TV)
+    if bt.tag == TAG_NAMED or bt.tag == TAG_TYPE_CALL or bt.tag == TAG_NEVER then
         return true  -- not yet enforced
     end
 
-    -- TV is bound — check the bound.
-    local widened = widen_for_sub(ctx, actual)
-    if not unify_mod.try_unify(ctx, widened, bound_id) then
+    -- TAG_MATCH_TYPE bound: evaluate the match with the actual type as subject.
+    -- The bound is TAG_MATCH_TYPE(subject=orig_param_tv, arms=...) where orig_param_tv
+    -- is the same generic TV that was instantiated to produce fresh_tv (= tv_id here).
+    -- Since actual = find(ctx, tv_id) is the concrete type for that param,
+    -- evaluate the match by substituting actual in as the subject directly.
+    if bt.tag == TAG_MATCH_TYPE then
+        local match_mod = require("lib.type.static.match")
+        -- Build a temporary match-type node with the concrete actual type as subject.
+        local new_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
+        local mtt = ctx.types:get(new_mt)
+        mtt.data[0] = actual
+        mtt.data[1] = bt.data[1]
+        mtt.data[2] = bt.data[2]
+        local result = match_mod.evaluate(ctx, new_mt)
+        if find(ctx, result) == ctx.T_NEVER then
+            add_error(ctx, line, col,
+                "type argument '" .. types_mod.display_short(ctx, actual)
+                .. "' does not satisfy constraint '"
+                .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "'")
+            return false
+        end
+        return true
+    end
+
+    -- TV is bound — check the bound via structural assignability.
+    -- Widen both sides deeply: inferred bounds (e.g. "T: F" where F was inferred
+    -- from a literal argument like {x=1}) carry literal field types that should be
+    -- compared as their base types ({x: number}), not as exact literals.
+    local widened       = widen_deep(ctx, actual)
+    local widened_bound = widen_deep(ctx, resolved_bound)
+    if not unify_mod.try_unify(ctx, widened, widened_bound) then
         add_error(ctx, line, col,
             "type argument '" .. types_mod.display_short(ctx, actual)
             .. "' does not satisfy constraint '"
-            .. types_mod.display_short(ctx, bound_id) .. "'")
+            .. types_mod.display_short(ctx, resolved_bound) .. "'")
         return false
     end
     return true

@@ -1032,11 +1032,16 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local inst_callee = env_mod.instantiate(ctx, callee_tid, ctx.scope.level, inst_mapping)
 
     -- Emit deferred bound checks for each instantiated generic TV that has a bound.
+    -- Instantiate the bound with inst_mapping so that generic TVs inside it (e.g. the
+    -- subject of a TAG_MATCH_TYPE or a TV used as a <T: F> bound) are replaced by the
+    -- corresponding fresh TVs.  This lets solve_bound evaluate the bound once the fresh TV
+    -- is bound to a concrete type, without needing to retain the original inst_mapping.
     if next(ctx._forall_bounds) and next(inst_mapping) then
         for orig_tv, fresh_tv in pairs(inst_mapping) do
             local bound = ctx._forall_bounds[orig_tv]
             if bound then
-                emit(ctx, { C_BOUND, fresh_tv, bound, n.line, n.col })
+                local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, inst_mapping)
+                emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
             end
         end
     end
@@ -1099,11 +1104,13 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     local inst_method = env_mod.instantiate(ctx, method_var, ctx.scope.level, meth_mapping)
 
     -- Emit deferred bound checks for each instantiated generic TV that has a bound.
+    -- Instantiate the bound using meth_mapping so generic TVs inside it are replaced.
     if next(ctx._forall_bounds) and next(meth_mapping) then
         for orig_tv, fresh_tv in pairs(meth_mapping) do
             local bound = ctx._forall_bounds[orig_tv]
             if bound then
-                emit(ctx, { C_BOUND, fresh_tv, bound, n.line, n.col })
+                local inst_bound = env_mod.instantiate(ctx, bound, ctx.scope.level, meth_mapping)
+                emit(ctx, { C_BOUND, fresh_tv, inst_bound, n.line, n.col })
             end
         end
     end

@@ -5083,15 +5083,22 @@ x = true
 ]], "boolean")
     end)
 
-    assert.it("GAP: match type used as bound in <T: MatchType<...>> — constraint not enforced", function()
-        -- A match type alias used as the bound of a generic param should
-        -- constrain what T can be. Today constraints are dropped (see HKT gap).
+    assert.it("PASS: match type used as bound in <T: NumOnly<T>> — never result rejects constraint", function()
+        -- A match type alias used as the bound of a generic param constrains T.
+        -- NumOnly<T> returns number for number, never for anything else.
+        -- only_num("hello") passes string → NumOnly<string> = never → error.
         v3_no_errors([[
---:: IsNum<T> = match T { number => true, T => false }
---: <T: IsNum<T>>(x: T) -> T
+--:: NumOnly<T> = match T { number => number, T => never }
+--: <T: NumOnly<T>>(x: T) -> T
+local function only_num(x) return x end
+local r = only_num(42)
+]])
+        v3_has_error([[
+--:: NumOnly<T> = match T { number => number, T => never }
+--: <T: NumOnly<T>>(x: T) -> T
 local function only_num(x) return x end
 local r = only_num("should fail")
-]])
+]], "does not satisfy constraint")
     end)
 end)
 
@@ -5250,15 +5257,25 @@ local r = boxed(42)
 ]], "constraint")
     end)
 
-    assert.it("GAP: mutually constrained params <F, T: F> — T references F param (higher-order, not yet enforced)", function()
-        -- T: F means T must satisfy the type F. When F is itself a type variable
-        -- (not a concrete type), the bound is an unbound TAG_VAR, and try_unify
-        -- returns true for any actual (RHS free var). This remains a gap.
+    assert.it("ENFORCED: mutually constrained params <F, T: F> — T structural subtype of F passes", function()
+        -- T: F means T must be assignable to F. When F is {x:number} and T is
+        -- {x:number, y:number}, T is a structural subtype of F (T has all F's
+        -- fields plus more), so this should pass without error.
         v3_no_errors([[
 --: <F, T: F>(f: F, t: T) -> T
 local function check_sub(f, t) return t end
 local r = check_sub({ x = 1 }, { x = 2, y = 3 })
 ]])
+    end)
+
+    assert.it("ENFORCED: mutually constrained params <F, T: F> — T missing F field fails", function()
+        -- When F is {x:number} and T is {z:number} (no x field), T is NOT a
+        -- structural subtype of F — this should error with a constraint violation.
+        v3_has_error([[
+--: <F, T: F>(f: F, t: T) -> T
+local function check_sub(f, t) return t end
+local r = check_sub({ x = 1 }, { z = 2 })
+]], "constraint")
     end)
 
     assert.it("ENFORCED: <F: { map: any }> structural bound rejects table without .map", function()
@@ -5302,14 +5319,15 @@ local x --: Nested<Maybe, number>
 ]])
     end)
 
-    assert.it("GAP: F instantiated to a non-generic type — arity mismatch should error", function()
+    assert.it("ENFORCED: F instantiated to a non-generic type — arity mismatch errors", function()
         -- Apply<F, A> = F<A>. If F is bound to `number` (arity 0), then F<A>
-        -- is an arity mismatch. Currently no error; F<A> collapses to a bare var.
-        v3_no_errors([[
+        -- is number<string> — applying string to number which is not a generic type.
+        -- This should produce a type error.
+        v3_has_error([[
 --:: T1<T> = any
 --:: Apply<F, A> = F<A>
 local x --: Apply<number, string>
-]])
+]], "does not take type arguments")
     end)
 
     assert.it("PASS: <F: Mappable, A>(fa: F) -> A body — fa.value infers row constraint on F", function()

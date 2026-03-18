@@ -342,6 +342,29 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
         return id
     end
 
+    -- TAG_MATCH_TYPE: instantiate the subject (param) so that generic TVs inside
+    -- bound match types are replaced by their fresh TVs.  Arms are also instantiated
+    -- to propagate any generic TVs that appear in result types.
+    if tag == defs.TAG_MATCH_TYPE then
+        local new_param = instantiate_inner(ctx, t.data[0], level, mapping, seen)
+        local new_arms = {}
+        local as, al = t.data[1], t.data[2]
+        local i = as
+        while i < as + al - 1 do
+            new_arms[#new_arms + 1] = instantiate_inner(ctx, ctx.lists:get(i),     level, mapping, seen)
+            new_arms[#new_arms + 1] = instantiate_inner(ctx, ctx.lists:get(i + 1), level, mapping, seen)
+            i = i + 2
+        end
+        local mk = ctx.lists:mark()
+        for _, aid in ipairs(new_arms) do ctx.lists:push(aid) end
+        local ms, ml = ctx.lists:since(mk)
+        local id = types_mod.alloc_type(ctx, defs.TAG_MATCH_TYPE)
+        ctx.types:get(id).data[0] = new_param
+        ctx.types:get(id).data[1] = ms
+        ctx.types:get(id).data[2] = ml
+        return id
+    end
+
     return tid
 end
 
@@ -493,7 +516,16 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         mtt.data[0] = new_param
         mtt.data[1] = ms
         mtt.data[2] = ml
-        -- Evaluate the match now that the param is (hopefully) concrete.
+        -- Only evaluate the match if the subject is concrete (not a free variable).
+        -- If the subject is still a free TAG_VAR (e.g. a forall param TV during bound
+        -- registration), return the unevaluated TAG_MATCH_TYPE node so that it can
+        -- be evaluated later in solve_bound once the TV is bound to an actual type.
+        local resolved_param = types_mod.find(ctx, new_param)
+        local rpt = ctx.types:get(resolved_param)
+        if rpt.tag == TAG_VAR or rpt.tag == TAG_ROWVAR then
+            return new_mt
+        end
+        -- Param is concrete: evaluate the match now.
         -- Pass eval_seen to share the cycle-detection set with the caller.
         local match_mod = require("lib.type.static.match")
         return match_mod.evaluate(ctx, new_mt, eval_seen)
@@ -509,6 +541,24 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             new_args[#new_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
         end
         seen[tid] = nil
+        -- Arity check: if the callee is now a concrete non-generic type (not a
+        -- type variable, named alias, intrinsic, match, or nested type call) and
+        -- there are arguments, it cannot accept type args — emit an error.
+        if #new_args > 0 then
+            local callee_tid2 = types_mod.find(ctx, callee_id)
+            local ct2 = ctx.types:get(callee_tid2)
+            if ct2.tag ~= TAG_VAR and ct2.tag ~= TAG_ROWVAR
+                and ct2.tag ~= defs.TAG_NAMED
+                and ct2.tag ~= defs.TAG_INTRINSIC
+                and ct2.tag ~= defs.TAG_MATCH_TYPE
+                and ct2.tag ~= defs.TAG_TYPE_CALL then
+                local err_mod = require("lib.type.static.errors")
+                err_mod.error(ctx.err, ctx.filename, 0, 0,
+                    "type '" .. types_mod.display_short(ctx, callee_tid2)
+                    .. "' does not take type arguments")
+                return ctx.T_NEVER
+            end
+        end
         -- When callee is TAG_INTRINSIC and all substitution-target args are now
         -- resolved, evaluate the intrinsic immediately.
         -- A TAG_NAMED arg is a remaining placeholder only when its name_id is still
