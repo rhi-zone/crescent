@@ -443,12 +443,13 @@ Blocking items for cutover:
 - [ ] unnamed-params warn in --:: declare — `--:: declare fn = (T1, T2) -> R` should warn when
   param types are unnamed. Feature exists in v2 path but not v3 process_type_decls. Test fails
   after 2026-03-17 silent-crash fix.
-- [ ] $EachField / $EachUnion full transform evaluation
+- [ ] $EachField descriptor `optional` flag — `$EachField` transform produces `V | nil` fields, not FLAG_OPTIONAL fields. A proper `Partial<T>` (absent fields allowed) needs the descriptor to carry `optional: true`. Currently `{ key: K, value: V? }` makes fields nil-able but still structurally required in table literals.
+- [x] $EachField / $EachUnion full transform evaluation — descriptors, union distribution, any input all working (2026-03-19)
 - [ ] Typed holes / completions
-- [ ] **Match type pattern-bound variables** — `match T { { value: A } => A }` produces "undefined type 'A'"; pattern vars in match arms are not bound during arm evaluation. Same issue affects `$EachField` descriptor patterns `{ key: K, value: V }`. (adversarial tests, 2026-03-18)
-- [ ] **Recursive generic type crash** — `Tree<T>` with two recursive children crashes the arena with nil pointer arithmetic fault; cycle detection not implemented for multi-child recursive generics. Self-referential single-child types work. (adversarial tests, 2026-03-18)
-- [ ] **`never` type not enforced** — `never`-annotated bindings accept any assignment without error. (adversarial tests, 2026-03-18)
-- [ ] **`any` through `Box<any>`** — `Box<any>` pins the first assignment's concrete type rather than treating `any` as a wildcard; multi-assignment fails. (adversarial tests, 2026-03-18)
+- [x] **Match type pattern-bound variables** — fixed 2026-03-19 (commit 13e9603)
+- [x] **Recursive generic type crash** — fixed 2026-03-19 (commit d1bb4b9)
+- [x] **`never` type not enforced** — fixed 2026-03-19 (commit bf776ff)
+- [x] **`any` through `Box<any>`** — fixed 2026-03-19 (commit bf776ff + annotation authority fix)
 - [x] **Tag-exclusion in else branch** — fixed 2026-03-19: else branch now applies accumulated negated narrowings from all preceding if/elseif conditions (both Cat-E exiting and pass-through). See `fix(type): tag-exclusion narrowing in else branch`.
 - [ ] **Tag-exclusion in else with multiple exiting elseif arms** — `guard_narrowings` is last-write-wins; a three-arm union dispatched across two exiting elseif branches leaves the else branch seeing the full union instead of just the third arm. Fix: accumulate `guard_narrowings` by intersecting negations from each exiting arm instead of overwriting. (adversarial tests, 2026-03-19)
 - [ ] Variadic `pipe`/`compose` typing — fixed-arity overloads work but variadic needs design; blocked on generic inference + possibly variadic generics or dependent types. Low priority, pending design.
