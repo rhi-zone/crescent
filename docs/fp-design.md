@@ -138,9 +138,36 @@ Either[Mappable] = { map = function(f, fa) return Either.match(fa, {
 Constructor definitions are ordered arrays of `{name, arity}` pairs — order matters
 for `* -> *` instances (last constructor is the `Mappable` focus by convention).
 
-**Naming:** `maybe` and `either` remain as module names for conventional recognisability.
-The family relationship is encoded in `ADT.define`, not the module names — the same
-reason functions aren't called `Exp`.
+**Module naming:** `maybe` and `either` remain as module names for conventional
+recognisability. The family relationship is encoded in `ADT.define`, not the module names
+— the same reason functions aren't called `Exp`.
+
+**Constructor naming for positional (n-ary) sum types:**
+
+The stdlib `maybe`/`either` have semantic constructors (`some`/`none`, `left`/`right`).
+But `left`/`right` doesn't generalise — `Union3` has no natural spatial extension. Any
+general naming scheme must work for n-ary sums. The options considered:
+
+- **Pure integers** (`1`/`2`/`3` as tags) — honest and generalises, but integer keys in
+  match tables look alien: `{ [1]=..., [2]=... }`.
+- **Prefixed integers** (`v1`/`v2`, `c1`/`c2`) — short and generalises, but the prefix
+  is arbitrary with no grounding in anything.
+- **`.NET`-style** (`item1`/`item2`) — has prior art (ValueTuple) but that's widely
+  considered the ugly part of tuples before named tuples existed.
+- **Ordinals** (`first`/`second`/`third`) — readable but verbose, and `first`/`last`
+  are already taken as Semigroup instances.
+- **Academic** (`inj1`/`inj2`) — principled (injection into a coproduct) but forces
+  type-theory jargon on all users.
+- **No general Union type** — only named instances. A copout: the ecosystem needs a
+  convention for anonymous n-ary sums, and the stdlib sets it.
+- **Type variable names** (`a`/`b`/`c`) — `Either a b` already names its type
+  parameters `a` and `b`; the constructors hold values of those types. Reusing those
+  names is not inventing new ones. Generalises naturally: `Union3` has `a`/`b`/`c`.
+
+**Decision: `a`/`b`/`c`.** `Union2.a(x)`, `Union2.b(x)`, `Union3.a(x)`...`Union3.c(x)`.
+Match: `{ a=..., b=..., c=... }`. The names are already the conventional type variable
+names for these positions — they're not new vocabulary, just the existing vocabulary
+applied consistently.
 
 ## Implementation Order
 
