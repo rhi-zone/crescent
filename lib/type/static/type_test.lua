@@ -4428,3 +4428,338 @@ local v = t.readonly
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- HKT and typeclass constraint tests
+--
+-- Documents the current state of higher-kinded type and typeclass support.
+-- Each test is labelled with the outcome: PASS (works as intended),
+-- GAP (silently accepted but not enforced), or ERROR (errors with useful
+-- diagnostic).
+--
+-- lib/fp/ uses the pattern: value[Typeclass].method(...)
+-- i.e. instances are stored at value[TC_table] where TC_table is a module.
+-- For the typechecker to verify this correctly it needs:
+--   1. HKT constraints: <F: Mappable> meaning F :: * -> *
+--   2. Typeclass dispatch: fa[Mappable].map type inference
+--   3. Unapplied generics as HKTs: F<A> where F is a type var
+--   4. ADT match-type constructs: $EachField / partial type-level application
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- 1. Generic constraints: <T: Constraint> syntax
+-- ---------------------------------------------------------------------------
+
+assert.describe("HKT: generic constraint syntax <T: C>", function()
+    -- GAP: the parser accepts <T: C> but silently drops the constraint.
+    -- `scan_word` in the forall branch reads up to non-ident, then `opt_char(",")`
+    -- or `expect_char(">")` is called. A bare `T` before `:` is read as the
+    -- param name; the `: Constraint` is then left in the stream for `parse_type`
+    -- to parse as the body, producing nonsense without an error.
+    -- Expected future behaviour: <T: C> should parse C as a bound and enforce it.
+    assert.it("GAP: <T: Constraint> is parsed without error", function()
+        -- No error is a false negative: the constraint is silently dropped.
+        v3_no_errors([[
+--: <T: number>(x: T) -> T
+local function constrained(x) return x end
+]])
+    end)
+
+    assert.it("GAP: <T: number> constraint is NOT enforced at call site", function()
+        -- Passing a string to a constrained type var should fail,
+        -- but the checker accepts it because the constraint is dropped.
+        -- When constraints are implemented, this test should be changed to
+        -- v3_has_error(..., "constraint") or similar.
+        v3_no_errors([[
+--: <T: number>(x: T) -> T
+local function constrained(x) return x end
+local r = constrained("this should violate T: number")
+]])
+    end)
+
+    assert.it("GAP: <F: Mappable> constraint not enforced at call site", function()
+        -- Structural constraint on a named type: passing number where F: Mappable
+        -- expected should fail once constraints are propagated.
+        v3_no_errors([[
+--:: Mappable = { map: function }
+--: <F: Mappable, A, B>(f: A -> B, fa: F) -> F
+local function map_generic(f, fa) return fa end
+local result = map_generic(function(x) return x + 1 end, 42)
+]])
+    end)
+
+    assert.it("PASS: plain forall <A> without constraint accepts any type", function()
+        -- Unconstrained type vars work correctly via let-polymorphism.
+        v3_no_errors([[
+--: <A>(x: A) -> A
+local function id(x) return x end
+local a = id(42)
+local b = id("hello")
+]])
+    end)
+
+    assert.it("PASS: multi-param forall <A, B> works for pair construction", function()
+        v3_no_errors([[
+--: <A, B>(a: A, b: B) -> { first: A, second: B }
+local function pair(a, b) return { first = a, second = b } end
+local p = pair(1, "x")
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- 2. HKT application: F<A> where F is a type variable
+-- ---------------------------------------------------------------------------
+
+assert.describe("HKT: F<A> where F is a type variable", function()
+    -- GAP: F<A> in an annotation where F is a forall type param is parsed but
+    -- collapses: the TAG_TYPE_CALL(F, A) is reduced to a single type var because
+    -- F is TAG_VAR and resolve_named_type only handles TAG_NAMED. The F<A>
+    -- application silently degrades to a bare var, losing the HKT structure.
+    assert.it("GAP: F<A> in annotation where F is a forall var does not error", function()
+        -- This should ideally produce a proper HKT type, but currently F<A>
+        -- collapses to an unstructured type var. The annotation is accepted.
+        v3_no_errors([[
+--: <F, A, B>((A -> B) -> F<A> -> F<B>) -> boolean
+local function hkt_signature_ok(map_fn) return true end
+]])
+    end)
+
+    assert.it("ERROR: F<A> where F is a plain (non-generic) named type is rejected", function()
+        -- T1 is defined with one type param, so T1 (unapplied) used directly as a
+        -- value type errors with "does not take type arguments" when given args.
+        -- But T1 used as a type param (not a bound) collapses silently.
+        -- This specific case: T1 as a value annotation without args, then
+        -- applied with args elsewhere, produces the arity error.
+        v3_has_error([[
+--:: T1<T> = any
+local x --: T1
+]], "expects 1 argument")
+    end)
+
+    assert.it("GAP: <F, A>(fa: F<A>) -> A body checking not possible", function()
+        -- The body cannot safely access fa.value because F<A> has no structure.
+        -- The checker should prevent accessing fields on an HKT var, but currently
+        -- it does not track the TAG_TYPE_CALL structure — F<A> becomes a bare var
+        -- and field access is silently T_UNKNOWN (open table miss).
+        v3_no_errors([[
+--: <F, A>(fa: F) -> A
+local function extract(fa)
+    return fa.value
+end
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- 3. Typeclass table-key dispatch: fa[Mappable].map
+-- ---------------------------------------------------------------------------
+
+assert.describe("HKT: typeclass table-key dispatch fa[TC].method", function()
+    -- The fp library pattern: each value carries its typeclass instance at
+    -- value[TC_table] where TC_table is the typeclass module. This is a
+    -- non-string, non-integer index. The typechecker has to model this as
+    -- a table-valued key lookup.
+    assert.it("PASS: table[table_key] compiles without error when key is a module", function()
+        -- The typechecker treats `fa[Mappable]` as an open-table miss when fa
+        -- is untyped, producing T_UNKNOWN, which is then silently used.
+        v3_no_errors([[
+local Mappable = {}
+local function my_map(f, fa)
+    return fa[Mappable].map(f, fa)
+end
+]])
+    end)
+
+    assert.it("GAP: fa[TC_module] on untyped fa returns T_UNKNOWN (not TC instance type)", function()
+        -- The typechecker cannot statically determine the type stored at a
+        -- non-string table key. It returns T_UNKNOWN for open-table misses.
+        -- To properly type this, the checker would need to model table keys
+        -- by identity (value equality, not just string/integer indexing).
+        -- As a result, inst.map is also T_UNKNOWN: no field-access checking.
+        v3_no_errors([[
+local Mappable = { map = function(f, fa) return fa end }
+local function use_tc(fa)
+    local inst = fa[Mappable]
+    local map_fn = inst.map   -- T_UNKNOWN.map: no checking possible
+    return map_fn
+end
+]])
+    end)
+
+    assert.it("GAP: calling fa[TC].map(f, fa) produces no type error on bad f", function()
+        -- Because fa[TC] is T_UNKNOWN and inst.map is also unknown (or any),
+        -- passing the wrong type for f produces no error. This is the core
+        -- typeclass dispatch gap: the dispatch protocol is invisible to the checker.
+        v3_no_errors([[
+local Mappable = {}
+local function broken_map(fa)
+    return fa[Mappable].map(42, fa)  -- 42 is not a function, but no error
+end
+]])
+    end)
+
+    assert.it("PASS: annotated typeclass-style function typechecks its own body", function()
+        -- Even though dispatch is opaque, a function with explicit annotations
+        -- can be checked standalone. The body is verified against the signature.
+        v3_no_errors([[
+--: (number -> string, { value: number }) -> { value: string }
+local function map_box(f, fa)
+    return { value = f(fa.value) }
+end
+]])
+    end)
+
+    assert.it("PASS: calling annotated map_box with wrong struct field errors", function()
+        -- Passing a struct without the required 'value' field is caught.
+        -- Use explicit (number) -> string syntax — the `number -> string` shorthand
+        -- triggers a different parse path that does not check call args as strictly.
+        v3_has_error([[
+--: ((number) -> string, { value: number }) -> { value: string }
+local function map_box(f, fa)
+    return { value = f(fa.value) }
+end
+map_box(tostring, { other = 1 })
+]], "missing field")
+    end)
+
+    assert.it("GAP: shorthand function type `number -> string` in annotation weakens call checking", function()
+        -- When the annotation uses `number -> string` (no parens) the first arg is
+        -- treated as a generic `->` function and the second arg check may be skipped.
+        -- Using explicit `(number) -> string` syntax restores correct checking.
+        v3_no_errors([[
+--: (number -> string, { value: number }) -> { value: string }
+local function map_box(f, fa)
+    return { value = f(fa.value) }
+end
+map_box(tostring, { other = 1 })
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- 4. ADT match types: $EachField and partial type-level application
+-- ---------------------------------------------------------------------------
+
+assert.describe("HKT: ADT match types and $EachField", function()
+    -- The type-system.md design describes $EachField<T, P> as a constraint
+    -- iterating over all fields of T. This is not yet implemented.
+    -- The `$` intrinsic prefix is parsed but only known intrinsics (e.g.
+    -- the pcall intrinsic) are expanded. Unknown intrinsic names produce
+    -- a TAG_INTRINSIC node that is not evaluated.
+    assert.it("ERROR: unknown $ intrinsic name is not resolved as a type alias", function()
+        -- $EachField does not exist yet; the type alias references it as a
+        -- named call but the named type 'EachField' is undefined, producing
+        -- an error when the alias body references it through TAG_TYPE_CALL.
+        -- The exact error message depends on how the intrinsic is expanded,
+        -- but the annotation referencing it at a local binding triggers a check.
+        -- We accept any error here — the important thing is it doesn't silently
+        -- produce the correct Partial<T> semantics.
+        v3_has_error([[
+local x --: $EachField<{ name: string }, any>
+x = "hello"
+]], "")
+    end)
+
+    assert.it("GAP: Partial<T> is not a builtin — must be declared manually", function()
+        -- TypeScript's Partial<T> is not available; must be expressed via match types.
+        -- Attempting to use it without declaration gives 'undefined type'.
+        v3_has_error([[
+local x --: Partial<{ name: string, age: number }>
+]], "undefined type")
+    end)
+
+    assert.it("PASS: match type for nullable result compiles and typechecks", function()
+        -- A match type that branches on the type argument and returns a nullable
+        -- variant. Uses a function return to avoid the sequential-assignment pinning
+        -- issue (after x=42 the type narrows to 42, blocking x=nil).
+        v3_no_errors([[
+--:: MaybeNum<T> = match T { number => number | nil, string => string | nil }
+--: (boolean) -> MaybeNum<number>
+local function maybe_num(b)
+    if b then return 42 end
+    return nil
+end
+]])
+    end)
+
+    assert.it("GAP: ADT.define pattern cannot be typed end-to-end without HKT", function()
+        -- The fp-design.md ADT.define pattern requires passing a type constructor
+        -- (e.g. Either) as a value to attach typeclass instances. The typechecker
+        -- sees the module table as { Left: function, Right: function } but cannot
+        -- express that it is also a type-level function F :: * -> * -> *.
+        -- We document this by showing the structural typing works for the value
+        -- side but the type-level parameterisation is opaque.
+        v3_no_errors([[
+local Either = {}
+Either.left  = function(e) return { tag = "left",  value = e } end
+Either.right = function(a) return { tag = "right", value = a } end
+local l = Either.left(42)
+local r = Either.right("hello")
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- 5. HKT kinds via named aliases (the design-doc approach)
+-- ---------------------------------------------------------------------------
+
+assert.describe("HKT: named kind aliases as bounds (design-doc approach)", function()
+    -- docs/type-system.md §HKT: HKT bounds are expressed as named generic aliases.
+    -- T1<T> = any is the most permissive * -> * bound.
+    -- A bound F: T1 means F must be a single-param type constructor.
+    -- This is not enforced today but the syntax is parsed without error.
+    assert.it("PASS: T1<T> = any declares a kind-* -> * alias", function()
+        v3_no_errors([[
+--:: T1<T> = any
+local x --: T1<number>
+]])
+    end)
+
+    assert.it("ERROR: T1 used without type arg errors (arity mismatch)", function()
+        v3_has_error([[
+--:: T1<T> = any
+local x --: T1
+]], "expects 1 argument")
+    end)
+
+    assert.it("GAP: <F: T1> constraint is parsed but F: T1 arity is not checked", function()
+        -- The annotation <F: T1, A> should constrain F to be a * -> * constructor.
+        -- Currently the constraint is dropped; any value can be passed for F.
+        v3_no_errors([[
+--:: T1<T> = any
+--: <F: T1, A>(fa: F) -> F
+local function id_hkt(fa) return fa end
+local result = id_hkt(42)
+]])
+    end)
+
+    assert.it("GAP: applying F<A> in body when F: T1 is the bound does not error", function()
+        -- If <F: T1> were enforced, F<A> in the body should be valid (F has arity 1).
+        -- Currently F<A> with F as a var is handled: TAG_TYPE_CALL is created but
+        -- the resolve step returns a TAG_TYPE_CALL node (F is not TAG_NAMED),
+        -- so the result is an unevaluated type call — effectively T_UNKNOWN.
+        v3_no_errors([[
+--:: T1<T> = any
+--: <F: T1, A, B>((A -> B) -> F<A> -> F<B>) -> boolean
+local function map_sig(map_fn) return true end
+]])
+    end)
+
+    assert.it("PASS: Wrapper<T> = { value: T } is a tighter kind bound than T1", function()
+        -- A structural bound constrains not just arity but the shape of the result.
+        v3_no_errors([[
+--:: Wrapper<T> = { value: T }
+local x --: Wrapper<number>
+x = { value = 42 }
+]])
+    end)
+
+    assert.it("ERROR: Wrapper<T> bound violated — missing value field", function()
+        v3_has_error([[
+--:: Wrapper<T> = { value: T }
+local x --: Wrapper<number>
+x = { other = 42 }
+]], "missing field")
+    end)
+end)
