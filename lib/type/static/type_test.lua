@@ -4759,12 +4759,23 @@ x = "hello"
 ]], "")
     end)
 
-    assert.it("GAP: Partial<T> is not a builtin — must be declared manually", function()
-        -- TypeScript's Partial<T> is not available; must be expressed via match types.
-        -- Attempting to use it without declaration gives 'undefined type'.
+    assert.it("PASS: Partial<T> undeclared gives undefined type (no builtin)", function()
         v3_has_error([[
 local x --: Partial<{ name: string, age: number }>
 ]], "undefined type")
+    end)
+
+    assert.it("PASS: Partial<T> declared via $EachField — fields become nil-able", function()
+        -- $EachField produces { name: string|nil, age: number|nil }.
+        -- Fields are nil-able but still structurally required in table literals.
+        -- True optional (absent) fields require FLAG_OPTIONAL, a separate mechanism.
+        v3_no_errors([[
+--:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V? } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ name: string, age: number }>
+x = { name = "bob", age = 30 }
+x = { name = nil, age = nil }
+]])
     end)
 
     assert.it("PASS: match type for nullable result compiles and typechecks", function()
@@ -4781,13 +4792,10 @@ end
 ]])
     end)
 
-    assert.it("GAP: ADT.define pattern cannot be typed end-to-end without HKT", function()
-        -- The fp-design.md ADT.define pattern requires passing a type constructor
-        -- (e.g. Either) as a value to attach typeclass instances. The typechecker
-        -- sees the module table as { Left: function, Right: function } but cannot
-        -- express that it is also a type-level function F :: * -> * -> *.
-        -- We document this by showing the structural typing works for the value
-        -- side but the type-level parameterisation is opaque.
+    assert.it("PASS: ADT.define structural value-side typing works", function()
+        -- The structural (value) side typechecks fine. Type-level parameterisation
+        -- (passing Either as a type constructor F :: * -> * -> *) requires HKT
+        -- kinds not yet enforced, but usage is accepted.
         v3_no_errors([[
 local Either = {}
 Either.left  = function(e) return { tag = "left",  value = e } end
