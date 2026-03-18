@@ -4133,21 +4133,26 @@ local function v3_no_errors(src)
     local ec = v3(src)
     if errors_mod.has_errors(ec) then
         local msg = errors_mod.format_plain(ec)
-        error("v3: expected no errors but got:\n" .. msg, 2)
+        assert.fail("v3: expected no errors but got:\n" .. msg)
+    else
+        assert.ok(true)
     end
 end
 
 local function v3_has_error(src, pattern)
     local ec = v3(src)
     if not errors_mod.has_errors(ec) then
-        error("v3: expected error matching '" .. tostring(pattern) .. "' but got none", 2)
+        assert.fail("v3: expected error matching '" .. tostring(pattern) .. "' but got none")
+        return
     end
     if pattern then
         local msg = errors_mod.format_plain(ec)
         if not msg:find(pattern) then
-            error("v3: expected error matching '" .. pattern .. "' but got:\n" .. msg, 2)
+            assert.fail("v3: expected error matching '" .. pattern .. "' but got:\n" .. msg)
+            return
         end
     end
+    assert.ok(true)
 end
 
 assert.describe("v3 inference", function()
