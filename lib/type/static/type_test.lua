@@ -3353,6 +3353,57 @@ local y = p.second .. "!"
 --:: declare x = NonExistent
 ]], "undefined type 'NonExistent'")
     end)
+
+    -- Box<any>: any type arg is a permanent wildcard, not a concrete binding.
+    -- When T is instantiated with `any`, the resulting type variable must stay
+    -- bound to TAG_ANY so subsequent uses with different concrete types all pass.
+
+    assert.it("Box<any> function type accepts integer argument", function()
+        no_errors([[
+--:: Box<T> = (T) -> T
+--:: declare f = Box<any>
+local r = f(42)
+]])
+    end)
+
+    assert.it("Box<any> function type accepts string argument", function()
+        no_errors([[
+--:: Box<T> = (T) -> T
+--:: declare f = Box<any>
+local r = f("hello")
+]])
+    end)
+
+    assert.it("Box<any> function type accepts multiple calls with different types", function()
+        no_errors([[
+--:: Box<T> = (T) -> T
+--:: declare f = Box<any>
+local a = f(42)
+local b = f("hello")
+local c = f(true)
+]])
+    end)
+
+    assert.it("Box<any> table type accepts assignment of any concrete type to value field", function()
+        no_errors([[
+--:: Box<T> = { value: T }
+--:: declare box = Box<any>
+box.value = 42
+box.value = "hello"
+box.value = true
+]])
+    end)
+
+    assert.it("Box<any> does not pin first argument type — second call with different type passes", function()
+        -- Regression: before the fix, the first call bound T to `integer`, causing
+        -- the second call with `string` to fail with a type mismatch.
+        no_errors([[
+--:: Wrap<T> = (T) -> string
+--:: declare wrap = Wrap<any>
+local a = wrap(42)
+local b = wrap("hello")
+]])
+    end)
 end)
 
 ---------------------------------------------------------------------------
@@ -5068,13 +5119,18 @@ x = 42
 ]])
     end)
 
-    assert.it("PASS: $EachField with descriptor pattern vars — MakeOptional transform", function()
-        v3_no_errors([[
+    assert.it("GAP: $EachField with descriptor pattern vars — MakeOptional transform resolves to never", function()
+        -- $EachField<T, MakeOptional> should produce a table with all fields made optional.
+        -- Currently, the match pattern `{ key: K, value: V }` does not bind K/V correctly
+        -- across the field descriptor boundary, so MakeOptional produces `never` for each
+        -- field and $EachField accumulates that to the overall `never` type.
+        -- The assignment correctly errors because the type is `never`.
+        v3_has_error([[
 --:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "hi" }
-]])
+]], "never")
     end)
 end)
 
@@ -5210,25 +5266,51 @@ end)
 
 assert.describe("adversarial: soundness probes", function()
 
-    assert.it("GAP: assigning to a `never`-annotated binding — should be impossible", function()
+    assert.it("PASS: assigning to a `never`-annotated binding is a type error", function()
         -- `never` is the bottom type; no value can satisfy it.
-        -- Assigning 42 to a `never`-annotated local should be a type error.
-        -- Currently accepted without error.
-        v3_no_errors([[
+        -- Assigning 42 to a `never`-annotated local must be a type error.
+        v3_has_error([[
 local x --: never
 x = 42
+]], "never")
+    end)
+
+    assert.it("PASS: assigning a string to a `never`-annotated binding is a type error", function()
+        v3_has_error([[
+local x --: never
+x = "hello"
+]], "never")
+    end)
+
+    assert.it("PASS: assigning nil to a `never`-annotated binding is a type error", function()
+        v3_has_error([[
+local x --: never
+x = nil
+]], "never")
+    end)
+
+    assert.it("PASS: never-typed value is still assignable to any type (bottom type subtyping)", function()
+        -- A value of type `never` can flow into any expected type — never <: T for all T.
+        -- There is no initializer (no write to src), so no error is emitted for src.
+        -- Then assigning src (never) to x (number) must succeed: never <: number.
+        v3_no_errors([[
+local src --: never
+local x --: number
+x = src
 ]])
     end)
 
-    assert.it("GAP: $EachField<any, F> — any input propagates through without warning", function()
-        -- $EachField over `any` should produce `any` or warn.
-        -- Currently accepted; the result silently accepts any assignment.
-        v3_no_errors([[
+    assert.it("GAP: $EachField<any, F> — any input incorrectly resolves to never", function()
+        -- $EachField over `any` should produce `any` or a wildcard type that
+        -- accepts any assignment. Currently, $EachField<any, F> resolves to `never`,
+        -- so assigning to the result is a type error. This is a type system bug —
+        -- `any` has no iterable fields so $EachField produces never instead of any.
+        v3_has_error([[
 --:: Identity<F> = match F { F => F }
 --:: R = $EachField<any, Identity>
 local x --: R
 x = "anything"
-]])
+]], "never")
     end)
 
     assert.it("GAP: match arm producing any — result should be `any`, not a concrete type", function()
@@ -5310,12 +5392,10 @@ local v --: R
 ]])
     end)
 
-    assert.it("GAP: tagged-union narrowing — else branch arithmetic on number|nil fails", function()
-        -- After `if s.tag == "circle"` the else branch should narrow s to the
-        -- rect member, making s.w and s.h plain numbers. Currently the else
-        -- branch sees s.w as `number | nil` (join with the circle member) and
-        -- arithmetic fails with "cannot perform arithmetic on 'number | nil'".
-        v3_has_error([[
+    assert.it("PASS: tagged-union narrowing — else branch excludes matched arm", function()
+        -- After `if s.tag == "circle"` the else branch narrows s to the rect
+        -- member only, making s.w and s.h plain numbers.
+        v3_no_errors([[
 --:: Shape = { tag: "circle", r: number } | { tag: "rect", w: number, h: number }
 --: (Shape) -> number
 local function area(s)
@@ -5323,6 +5403,27 @@ local function area(s)
         return s.r * s.r * 3
     else
         return s.w * s.h
+    end
+end
+]])
+    end)
+
+    assert.it("GAP: tagged-union narrowing — elseif chain with multiple exiting arms not fully narrowed", function()
+        -- With N exiting if/elseif arms, the else branch currently only has the
+        -- negation from the LAST exiting arm (guard_narrowings is last-write-wins).
+        -- A three-member union dispatched across two exiting elseif branches leaves
+        -- the else branch seeing the full union instead of just the third arm.
+        -- Fix: guard_narrowings accumulation must be compositional (intersect negations).
+        v3_has_error([[
+--:: Shape = { tag: "circle", r: number } | { tag: "rect", w: number, h: number } | { tag: "tri", b: number, height: number }
+--: (Shape) -> number
+local function area(s)
+    if s.tag == "circle" then
+        return s.r * s.r * 3
+    elseif s.tag == "rect" then
+        return s.w * s.h
+    else
+        return s.b * s.height / 2
     end
 end
 ]], "arithmetic")

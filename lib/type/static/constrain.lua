@@ -1178,7 +1178,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 local check_against = types_mod.widen(ctx, declared or existing)
                 local ca_resolved = types_mod.find(ctx, check_against)
                 local ca_tag = ctx.types:get(ca_resolved).tag
-                if ca_tag ~= TAG_VAR and ca_resolved ~= ctx.T_NEVER then
+                if ca_tag ~= TAG_VAR then
                     emit(ctx, { C_SUB, rhs_tid, check_against, tn.line, tn.col })
                 end
                 env_mod.bind(ctx.scope, name_id, rhs_tid)
@@ -1348,7 +1348,23 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
             ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
         else
             has_else = true
-            ctx.scope = env_mod.child(saved)
+            -- Apply all accumulated negated narrowings from preceding if/elseif
+            -- conditions: the else branch is reachable only when all prior
+            -- conditions were false (both exiting Cat-E and non-exiting ones).
+            local else_neg = {}
+            for name_id, type_id in pairs(guard_narrowings) do
+                else_neg[name_id] = type_id
+            end
+            for name_id, type_id in pairs(pass_through_neg) do
+                if else_neg[name_id] == nil then
+                    else_neg[name_id] = type_id
+                end
+            end
+            if next(else_neg) then
+                ctx.scope = narrow_mod.apply_narrowed(ctx, else_neg)
+            else
+                ctx.scope = env_mod.child(saved)
+            end
         end
 
         gen_block(ctx, block_start, block_len)

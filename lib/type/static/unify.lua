@@ -219,8 +219,19 @@ function M.unify(ctx, a, b)
     local ta = ctx.types:get(a)
     local tb = ctx.types:get(b)
 
-    -- any is bilateral
-    if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
+    -- any is bilateral.
+    -- When one side is TAG_ANY and the other is a free type variable (TAG_VAR/TAG_ROWVAR),
+    -- bind the var to TAG_ANY so all future unifications with that var also see TAG_ANY.
+    -- Without this, the var stays unbound and the next concrete assignment binds it to a
+    -- specific type, causing later assignments of different types to fail (Box<any> bug).
+    if ta.tag == TAG_ANY then
+        if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then bind_var(ctx, b, a) end
+        return true
+    end
+    if tb.tag == TAG_ANY then
+        if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR then bind_var(ctx, a, b) end
+        return true
+    end
 
     -- unknown: top type — everything is assignable to unknown (T <: unknown),
     -- but unknown is not assignable to a specific type (unknown <: T fails, must narrow).
