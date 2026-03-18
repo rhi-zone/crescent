@@ -20,6 +20,13 @@ do
 	if ok then Chainable = mod end
 end
 
+-- Guard Traversable — may not exist in all deployment configurations.
+local Traversable
+do
+	local ok, mod = pcall(require, "lib.fp.traversable")
+	if ok then Traversable = mod end
+end
+
 local Either = {}
 
 -- ── Left ──────────────────────────────────────────────────────────────────────
@@ -73,6 +80,16 @@ local function make_left_chainable_impl()
 	}
 end
 
+-- Traversable instance for Left:
+-- traverse(f, Left(e), ctor) = pure(ctor, Either.left(e))
+local function make_left_traversable_impl()
+	return {
+		traverse = function(_f, ta, ctor)
+			return Applicable.pure(ctor, Either.left(ta.value))
+		end,
+	}
+end
+
 local function make_left_mt()
 	local index = {
 		[Mappable]   = left_f_impl,
@@ -82,6 +99,9 @@ local function make_left_mt()
 	}
 	if Chainable then
 		index[Chainable] = make_left_chainable_impl()
+	end
+	if Traversable then
+		index[Traversable] = make_left_traversable_impl()
 	end
 	return {
 		__index = index,
@@ -156,6 +176,16 @@ local function make_right_chainable_impl()
 	}
 end
 
+-- Traversable instance for Right:
+-- traverse(f, Right(a), ctor) = map(Either.right, f(a))
+local function make_right_traversable_impl()
+	return {
+		traverse = function(f, ta, _ctor)
+			return Mappable.map(Either.right, f(ta.value))
+		end,
+	}
+end
+
 local function make_right_mt()
 	local index = {
 		[Mappable]   = right_f_impl,
@@ -165,6 +195,9 @@ local function make_right_mt()
 	}
 	if Chainable then
 		index[Chainable] = make_right_chainable_impl()
+	end
+	if Traversable then
+		index[Traversable] = make_right_traversable_impl()
 	end
 	return {
 		__index = index,

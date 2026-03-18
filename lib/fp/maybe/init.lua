@@ -1,6 +1,7 @@
 -- lib/fp/maybe/init.lua
 -- Maybe a = Nothing | Just a
--- Implements: Mappable, Applicable, Chainable, Foldable, Semigroup (when inner is Semigroup), Monoid
+-- Implements: Mappable, Applicable, Chainable, Foldable, Traversable,
+--             Semigroup (when inner is Semigroup), Monoid
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -12,6 +13,13 @@ local Chainable  = require("lib.fp.chainable")
 local Foldable   = require("lib.fp.foldable")
 local Semigroup  = require("lib.fp.semigroup")
 local Monoid     = require("lib.fp.monoid")
+
+-- Guard Traversable — may not exist in all deployment configurations.
+local Traversable
+do
+	local ok, mod = pcall(require, "lib.fp.traversable")
+	if ok then Traversable = mod end
+end
 
 local Maybe = {}
 
@@ -72,19 +80,37 @@ local nothing_chainable_impl = {
 	end,
 }
 
-local nothing_mt = {
-	__index = {
+-- Traversable instance for Nothing:
+-- traverse(f, Nothing, ctor) = pure(ctor, Maybe.nothing)
+local function make_nothing_traversable_impl()
+	return {
+		traverse = function(_f, _ta, ctor)
+			return Applicable.pure(ctor, Maybe.nothing)
+		end,
+	}
+end
+
+local function make_nothing_mt()
+	local index = {
 		[Mappable]   = nothing_f_impl,
 		[Applicable] = nothing_ap_impl,
 		[Chainable]  = nothing_chainable_impl,
 		[Foldable]   = nothing_foldable_impl,
 		[Semigroup]  = nothing_sg_impl,
 		[Monoid]     = nothing_m_impl,
-	},
-	__tostring = function(_self)
-		return "Nothing"
-	end,
-}
+	}
+	if Traversable then
+		index[Traversable] = make_nothing_traversable_impl()
+	end
+	return {
+		__index = index,
+		__tostring = function(_self)
+			return "Nothing"
+		end,
+	}
+end
+
+local nothing_mt = make_nothing_mt()
 
 Maybe.nothing = setmetatable({}, nothing_mt)
 
@@ -150,19 +176,37 @@ local just_chainable_impl = {
 	end,
 }
 
-local just_mt = {
-	__index = {
+-- Traversable instance for Just:
+-- traverse(f, Just(a), ctor) = map(Maybe.just, f(a))
+local function make_just_traversable_impl()
+	return {
+		traverse = function(f, ta, _ctor)
+			return Mappable.map(Maybe.just, f(ta.value))
+		end,
+	}
+end
+
+local function make_just_mt()
+	local index = {
 		[Mappable]   = just_f_impl,
 		[Applicable] = just_ap_impl,
 		[Chainable]  = just_chainable_impl,
 		[Foldable]   = just_foldable_impl,
 		[Semigroup]  = just_sg_impl,
 		[Monoid]     = just_m_impl,
-	},
-	__tostring = function(self)
-		return "Just(" .. tostring(self.value) .. ")"
-	end,
-}
+	}
+	if Traversable then
+		index[Traversable] = make_just_traversable_impl()
+	end
+	return {
+		__index = index,
+		__tostring = function(self)
+			return "Just(" .. tostring(self.value) .. ")"
+		end,
+	}
+end
+
+local just_mt = make_just_mt()
 
 function Maybe.just(a)
 	return setmetatable({ value = a }, just_mt)
