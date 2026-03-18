@@ -5882,3 +5882,109 @@ g = f
 ]])
     end)
 end)
+
+assert.describe("adversarial: newtype comprehensive", function()
+    -- Union containing a newtype: narrowing recovers the nominal type
+    assert.it("newtype in union: nil-check narrows to newtype", function()
+        no_errors([[
+--:: newtype UserId = integer
+--:: declare uid = UserId
+--: UserId | nil
+local x = uid
+if x then
+    --: UserId
+    local y = x
+end
+]])
+    end)
+
+    -- Newtype in table field: raw underlying type is rejected
+    assert.it("newtype table field rejects raw underlying type", function()
+        has_error([[
+--:: newtype UserId = integer
+--:: Record = { uid: UserId }
+--: Record
+local r = { uid = 42 }
+]], "nominal")
+    end)
+
+    -- Newtype function return preserves nominal identity
+    assert.it("newtype return value preserves nominal identity", function()
+        no_errors([=[
+--:: newtype UserId = integer
+--:: declare make_uid = () -> UserId
+--: UserId
+local uid = make_uid()
+]=])
+    end)
+
+    -- Newtype with any: any is bilateral, bypasses nominal check
+    assert.it("any bypasses newtype in assignment (bilateral escape hatch)", function()
+        no_errors([=[
+--:: newtype UserId = integer
+--:: declare any_val = any
+--: UserId
+local uid = any_val
+]=])
+    end)
+
+    -- Generic over newtype: Box<UserId> and Box<PostId> are incompatible
+    assert.it("generic over newtype: Box<UserId> != Box<PostId>", function()
+        has_error([=[
+--:: newtype UserId = integer
+--:: newtype PostId = integer
+--:: Box<T> = { value: T }
+--:: declare ub = Box<UserId>
+--: Box<PostId>
+local pb = ub
+]=], "nominal")
+    end)
+
+    -- V3 checker: newtype basic enforcement
+    assert.it("v3: same newtype is assignable to itself", function()
+        v3_no_errors([[
+--:: newtype UserId = integer
+--: (UserId) -> UserId
+local function f(x) return x end
+]])
+    end)
+
+    assert.it("v3: different newtypes over same underlying type are incompatible", function()
+        v3_has_error([=[
+--:: newtype UserId = integer
+--:: newtype PostId = integer
+--:: declare pid = PostId
+--: (UserId) -> nil
+local function use_uid(x) end
+use_uid(pid)
+]=], nil)
+    end)
+
+    assert.it("v3: underlying type not assignable to newtype", function()
+        v3_has_error([[
+--:: newtype UserId = integer
+--: UserId
+local x = 42
+]], nil)
+    end)
+
+    assert.it("v3: newtype not assignable to underlying type", function()
+        v3_has_error([=[
+--:: newtype UserId = integer
+--:: declare uid = UserId
+--: integer
+local x = uid
+]=], nil)
+    end)
+
+    -- Nested newtype: newtype wrapping a newtype
+    assert.it("nested newtype: A wraps B — A and B are incompatible", function()
+        has_error([[
+--:: newtype Inner = integer
+--:: newtype Outer = Inner
+--:: declare i = Inner
+--: Outer
+local x = i
+]], "nominal")
+    end)
+end)
