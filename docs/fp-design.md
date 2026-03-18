@@ -28,17 +28,58 @@ Primitives (numbers, functions, strings) cannot have metatables, so they require
 wrappers (`Sum(42)`, `Fn(f)`). Wrappers use `__call` where applicable so they're
 transparent at call sites.
 
-## Module Structure
+## Typeclass Structure
 
-### Typeclasses
+### The FAM hierarchy as function application in context
+
+All typeclasses in the FAM family are variations on `apply :: (a -> b) -> a -> b`.
+Three positions in that signature can independently be "in context f":
+
+| Typeclass    | arg `a` ∈ f | fn `(a→b)` ∈ f | fn produces `f b` | signature |
+|--------------|:-----------:|:--------------:|:-----------------:|-----------|
+| Mappable     | ✓           | ☐              | ☐                 | `(a -> b) -> f a -> f b` |
+| Applicable   | ✓           | ✓              | ☐                 | `f (a -> b) -> f a -> f b` |
+| Chainable    | ✓           | ☐              | ✓                 | `(a -> f b) -> f a -> f b` |
+| (unnamed)    | ✓           | ✓              | ✓                 | `f (a -> f b) -> f a -> f b` |
+
+The unnamed row is a gap — may be derivable from the others or a distinct typeclass.
+
+### Duals
+
+Reversing arrows gives the dual of each typeclass:
+
+| Typeclass    | Dual          | Key operations |
+|--------------|---------------|----------------|
+| Mappable     | Contravariant | `contramap :: (b -> a) -> f a -> f b` |
+| Chainable    | Comonad       | `extract :: w a -> a`, `extend :: (w a -> b) -> w a -> w b` |
+| Applicable   | ?             | Divisible in the contravariant setting; unclear covariant dual |
+| (unnamed)    | ?             | Unknown |
+
+Foldable/Traversable have duals too:
+
+| Typeclass    | Dual          | Key operations |
+|--------------|---------------|----------------|
+| Foldable     | Unfoldable    | `unfoldr :: (b -> Maybe (a, b)) -> b -> [a]` |
+| Traversable  | Distributive  | `distribute :: Functor f => f (g a) -> g (f a)` |
+
+### Module list
 
 - `lib/fp/semigroup` — `append :: a -> a -> a`
 - `lib/fp/monoid` — `empty :: () -> a` (extends Semigroup)
 - `lib/fp/mappable` — `map :: (a -> b) -> f a -> f b`
 - `lib/fp/applicable` — `ap :: f (a -> b) -> f a -> f b`, `pure :: a -> f a` (extends Mappable; merges Apply + Applicative)
-- `lib/fp/chainable` — `bind :: m a -> (a -> m b) -> m b` (extends Applicable; not yet implemented)
+- `lib/fp/chainable` — `bind :: m a -> (a -> m b) -> m b` (extends Applicable)
 - `lib/fp/foldable` — `fold :: Monoid m => t m -> m`, `foldMap`, `foldr`
 - `lib/fp/traversable` — `traverse :: Applicable f => (a -> f b) -> t a -> f (t b)` (extends Foldable)
+
+Not yet implemented (derived from matrix + duals):
+- `lib/fp/contravariant` — `contramap`
+- `lib/fp/comonad` — `extract`, `extend`
+- `lib/fp/unfoldable` — `unfoldr`
+- `lib/fp/distributive` — `distribute`
+- `lib/fp/alt` — `alt :: f a -> f a -> f a` (fallback/choice; Maybe and Either need this)
+- `lib/fp/bifunctor` — `bimap :: (a -> c) -> (b -> d) -> f a b -> f c d` (Either needs this)
+- `lib/fp/profunctor` — `dimap :: (a -> b) -> (c -> d) -> f b c -> f a d` (Fn needs this)
 
 ### Optics
 
@@ -74,27 +115,32 @@ to be confused with `Maybe First`/`Maybe Last` which are `First (Maybe a)` treat
 - `lib/fp/fn` — `Fn(f)`. Wraps functions; `__call` makes usage transparent.
   Implements: Mappable (composition), Applicable (S combinator), Chainable (reader/function monad).
 
-### Open question: naming Maybe and Either
+### ADT: the general case
 
-The typeclass names follow a principled `-able` convention (named after the operation).
-`Maybe` and `Either` are conventional Haskell names — not wrong, but not principled.
+`Maybe` and `Either` are both instances of the general algebraic data type (ADT) pattern —
+sums of products. `Maybe a` = `1 + a` (one 0-arity constructor, one 1-arity constructor).
+`Either a b` = `a + b` (two 1-arity constructors). Both are part of the same infinite
+family of n-constructor ADTs.
 
-From a type-theoretic perspective:
-- `Maybe a` is `1 + a` — a sum type with one unit variant and one `a` variant
-- `Either a b` is `a + b` — a coproduct of two arbitrary types
-- Both are degenerate cases of n-ary sum types: `Either` is `Sum2`, `Maybe` is `Sum2`
-  where one variant is fixed to `Unit`
+A general `lib/fp/adt` module should provide `ADT.define` to generate constructors and
+`match` for any ADT, eliminating the boilerplate currently duplicated in `maybe`/`either`.
+`maybe` and `either` then become thin wrappers that call `ADT.define` and attach typeclass
+instances.
 
-`Either` is part of an infinite family — `a + b`, `a + b + c`, etc. — and naming it
-`Either` obscures that relationship. The algebraic names would be more principled but
-no clear convention exists yet.
+```lua
+local Either = ADT.define({"Left", 1}, {"Right", 1})
+Either[Mappable] = { map = function(f, fa) return Either.match(fa, {
+    left  = function(e) return fa end,
+    right = function(a) return Either.right(f(a)) end,
+}) end }
+```
 
-The reason these exist as named types at all (rather than bare `a | nil` unions) is that
-constructors (`Just`, `Nothing`, `Left`, `Right`) are needed as dispatch surfaces for
-typeclass instances — metatables attach to the constructor values, not to the union type.
+Constructor definitions are ordered arrays of `{name, arity}` pairs — order matters
+for `* -> *` instances (last constructor is the `Mappable` focus by convention).
 
-**Decision deferred.** Using `maybe`/`either` as module names for now. Rename when a
-principled naming convention is established.
+**Naming:** `maybe` and `either` remain as module names for conventional recognisability.
+The family relationship is encoded in `ADT.define`, not the module names — the same
+reason functions aren't called `Exp`.
 
 ## Implementation Order
 
