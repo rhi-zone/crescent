@@ -502,8 +502,27 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             if resolved then return resolved end
         end
         if ct.tag == defs.TAG_INTRINSIC then
-            local intrinsic_mod = require("lib.type.static.intrinsic")
-            return intrinsic_mod.expand(ctx, ct.data[0], arg_ids)
+            -- Defer when any arg is a placeholder TAG_NAMED (an unresolved type
+            -- param from the enclosing generic alias body, e.g. T in
+            -- $EachField<T, F>).  A placeholder is identified by its alias
+            -- in scope having body == the TAG_NAMED node itself (set by
+            -- process_type_decls for generic alias params).
+            local has_unresolved = false
+            for _, aid in ipairs(arg_ids) do
+                local at2 = ctx.types:get(types_mod.find(ctx, aid))
+                if at2.tag == defs.TAG_NAMED then
+                    local alias2 = env_mod.lookup_type(ctx.scope, at2.data[0])
+                    if alias2 and alias2.body == types_mod.find(ctx, aid) then
+                        has_unresolved = true
+                        break
+                    end
+                end
+            end
+            if not has_unresolved then
+                local intrinsic_mod = require("lib.type.static.intrinsic")
+                return intrinsic_mod.expand(ctx, ct.data[0], arg_ids)
+            end
+            -- Fall through to store a deferred TAG_TYPE_CALL.
         end
         local mk = ctx.lists:mark()
         for _, aid in ipairs(arg_ids) do ctx.lists:push(aid) end
