@@ -224,6 +224,17 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             return ctx.T_ANY
         end
 
+        -- If no type args were provided and the alias is generic (has params),
+        -- allow unapplied constructor only when explicitly requested by the caller
+        -- (e.g. when resolving args for a TAG_INTRINSIC type-call like $EachUnion).
+        -- In all other contexts (value types, alias bodies) emit the arity error.
+        if not arg_ids and alias.params and #alias.params > 0
+          and ctx._allow_unapplied_constructors then
+            local id = types_mod.alloc_type(ctx, TAG_NAMED)
+            ctx.types:get(id).data[0] = name_id
+            return id
+        end
+
         local resolved, resolve_err = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
         if resolved then return resolved end
         -- Arity mismatch or similar resolution error: report it.
@@ -391,15 +402,26 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == defs.TAG_TYPE_CALL then
         seen[ann_tid] = true
         local callee = resolve_annotation_type(ctx, at.data[0], seen)
+        local ct = ctx.types:get(callee)
+        -- When the callee is a TAG_INTRINSIC, allow unapplied generic aliases
+        -- as type constructor arguments (e.g. $EachUnion<T, ToString>).
+        local prev_allow = ctx._allow_unapplied_constructors
+        if ct.tag == defs.TAG_INTRINSIC then
+            ctx._allow_unapplied_constructors = true
+        end
         local arg_ids = {}
         for i = at.data[1], at.data[1] + at.data[2] - 1 do
             arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
         end
+        ctx._allow_unapplied_constructors = prev_allow
         seen[ann_tid] = nil
-        local ct = ctx.types:get(callee)
         if ct.tag == TAG_NAMED then
             local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ct.data[0], arg_ids)
             if resolved then return resolved end
+        end
+        if ct.tag == defs.TAG_INTRINSIC then
+            local intrinsic_mod = require("lib.type.static.intrinsic")
+            return intrinsic_mod.expand(ctx, ct.data[0], arg_ids)
         end
         local mk = ctx.lists:mark()
         for _, aid in ipairs(arg_ids) do ctx.lists:push(aid) end
@@ -1623,10 +1645,20 @@ local function process_type_decls(ctx)
                     params[#params + 1] = ctx.ann.lists:get(i)
                 end
             end
+            -- Extract raw (annotation-arena) bound type IDs, if any.
+            -- -1 entries are "no bound" sentinels. resolved_bounds is filled in Pass 2a.
+            local raw_bounds = nil
+            if r.type_bounds_len and r.type_bounds_len > 0 then
+                raw_bounds = {}
+                for i = r.type_bounds_start, r.type_bounds_start + r.type_bounds_len - 1 do
+                    raw_bounds[#raw_bounds + 1] = ctx.ann.lists:get(i)
+                end
+            end
             env_mod.bind_type(ctx.scope, r.name_id, {
-                body   = nil,
-                params = params,
-                nominal = r.newtype or false,
+                body        = nil,
+                params      = params,
+                nominal     = r.newtype or false,
+                raw_bounds  = raw_bounds,   -- annotation-arena IDs; resolved in Pass 2a
             })
         end
     end
@@ -1673,6 +1705,21 @@ local function process_type_decls(ctx)
                     alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
                 else
                     alias.body = resolve_annotation_type(ctx, r.type_id)
+                end
+
+                -- Resolve raw_bounds (annotation-arena IDs) into checker-context type IDs.
+                -- These are resolved in the same temporary param scope so that bound types
+                -- that reference other params (e.g. <T: { x: U }, U>) resolve correctly.
+                if alias.raw_bounds then
+                    alias.resolved_bounds = {}
+                    for _, raw_id in ipairs(alias.raw_bounds) do
+                        if raw_id == -1 then
+                            alias.resolved_bounds[#alias.resolved_bounds + 1] = nil
+                        else
+                            alias.resolved_bounds[#alias.resolved_bounds + 1] =
+                                resolve_annotation_type(ctx, raw_id)
+                        end
+                    end
                 end
 
                 ctx.scope = old_scope

@@ -526,16 +526,31 @@ function M.parse_annotations(annotations, pool, filename)
             return tbl
         end
 
-        -- Forall: <T, U> type
+        -- Forall: <T, U> type or <T: Bound, U> type
         if b == byte("<") then
             advance(s)  -- skip '<'
             local params = {}
+            local bounds = {}  -- parallel to params; nil means no bound
+            local has_bounds = false
             params[1] = scan_word(s)
             if not params[1] then scan_error(s, "expected type parameter") end
+            -- Check for optional bound: T: Bound
+            if opt_char(s, ":") then
+                bounds[1] = parse_type(s)
+                has_bounds = true
+            else
+                bounds[1] = nil
+            end
             while opt_char(s, ",") do
                 local p = scan_word(s)
                 if not p then scan_error(s, "expected type parameter") end
                 params[#params + 1] = p
+                if opt_char(s, ":") then
+                    bounds[#bounds + 1] = parse_type(s)
+                    has_bounds = true
+                else
+                    bounds[#bounds + 1] = nil
+                end
             end
             expect_char(s, ">")
             -- Intern type param names
@@ -544,12 +559,24 @@ function M.parse_annotations(annotations, pool, filename)
                 param_ids[i] = intern_mod.intern(pool, params[i])
             end
             local tps, tpl = flush_type_list(param_ids)
+            -- Store bounds in data[3]/data[4] if any bound was specified.
+            -- Bounds list parallel to params: -1 sentinel for "no bound", else type_id.
+            local bds, bdl = 0, 0
+            if has_bounds then
+                local bound_ids = {}
+                for i = 1, #bounds do
+                    bound_ids[i] = bounds[i] ~= nil and bounds[i] or -1
+                end
+                bds, bdl = flush_type_list(bound_ids)
+            end
             local body = parse_type(s)
             local forall = alloc_type(defs.TAG_FORALL)
             local ft = types:get(forall)
             ft.data[0] = tps
             ft.data[1] = tpl
             ft.data[2] = body
+            ft.data[3] = bds
+            ft.data[4] = bdl
             return forall
         end
 
@@ -756,19 +783,36 @@ function M.parse_annotations(annotations, pool, filename)
                     nt.data[2] = underlying
                     return { kind = defs.ANN_DECL, type_id = nom, name_id = name_id, newtype = true }
                 end
-                -- Regular: Name<T...> = type
+                -- Regular: Name<T...> = type  or  Name<T: Bound, ...> = type
                 local name = word
                 if not name then scan_error(s, "expected declaration name") end
                 local name_id = intern_mod.intern(pool, name)
                 local type_params
+                local type_bounds     -- parallel to type_params; nil entry = no bound
+                local has_type_bounds = false
                 if peek(s) == byte("<") then
                     advance(s)
                     type_params = {}
-                    type_params[1] = intern_mod.intern(pool, scan_word(s))
+                    type_bounds = {}
+                    local first_param = scan_word(s)
+                    if not first_param then scan_error(s, "expected type parameter") end
+                    type_params[1] = intern_mod.intern(pool, first_param)
+                    if opt_char(s, ":") then
+                        type_bounds[1] = parse_type(s)
+                        has_type_bounds = true
+                    else
+                        type_bounds[1] = nil
+                    end
                     while opt_char(s, ",") do
                         local p = scan_word(s)
                         if not p then scan_error(s, "expected type parameter") end
                         type_params[#type_params + 1] = intern_mod.intern(pool, p)
+                        if opt_char(s, ":") then
+                            type_bounds[#type_bounds + 1] = parse_type(s)
+                            has_type_bounds = true
+                        else
+                            type_bounds[#type_bounds + 1] = nil
+                        end
                     end
                     expect_char(s, ">")
                 end
@@ -778,12 +822,23 @@ function M.parse_annotations(annotations, pool, filename)
                 if type_params then
                     tps, tpl = flush_type_list(type_params)
                 end
+                -- Store bounds parallel to type_params: -1 sentinel for "no bound".
+                local bds, bdl = 0, 0
+                if has_type_bounds and type_bounds then
+                    local bound_ids = {}
+                    for i = 1, #type_bounds do
+                        bound_ids[i] = type_bounds[i] ~= nil and type_bounds[i] or -1
+                    end
+                    bds, bdl = flush_type_list(bound_ids)
+                end
                 return {
                     kind = defs.ANN_DECL,
                     type_id = type_id,
                     name_id = name_id,
                     type_params_start = tps,
                     type_params_len = tpl,
+                    type_bounds_start = bds,
+                    type_bounds_len = bdl,
                 }
             elseif ann.kind == defs.ANN_TYPE_ARGS then
                 -- Parse <T, U> — type arguments for call-site specialization

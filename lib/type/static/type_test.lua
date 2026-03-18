@@ -4510,6 +4510,29 @@ local function pair(a, b) return { first = a, second = b } end
 local p = pair(1, "x")
 ]])
     end)
+
+    -- Bound enforcement on named generic aliases (--:: decl with <T: Constraint>).
+
+    assert.it("ENFORCED: <T: { x: number }> rejects string (missing field x)", function()
+        v3_has_error([[
+--:: Wrap<T: { x: number }> = { wrapped: T }
+local x --: Wrap<string>
+]], "constraint")
+    end)
+
+    assert.it("ENFORCED: <T: { x: number }> accepts { x: number, y: string }", function()
+        v3_no_errors([[
+--:: Wrap<T: { x: number }> = { wrapped: T }
+local x --: Wrap<{ x: number, y: string }>
+]])
+    end)
+
+    assert.it("ENFORCED: <F: (number) -> number> rejects string", function()
+        v3_has_error([[
+--:: Box<F: (number) -> number> = F
+local x --: Box<string>
+]], "constraint")
+    end)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -4766,5 +4789,97 @@ x = { value = 42 }
 local x --: Wrapper<number>
 x = { other = 42 }
 ]], "missing field")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- 6. Intrinsic type-level operations: $Keys, $EachUnion, $EachField
+-- ---------------------------------------------------------------------------
+
+assert.describe("intrinsic: $Keys<T>", function()
+    assert.it("produces string literal union of field names", function()
+        v3_no_errors([[
+--:: T = { a: number, b: string }
+--:: K = $Keys<T>
+local x --: K
+x = "a"
+x = "b"
+]])
+    end)
+
+    assert.it("rejects values not in the key union", function()
+        -- Use function call context where literals are checked against the param type
+        -- without mutable-variable widening.
+        v3_has_error([[
+--:: T = { a: number, b: string }
+--:: K = $Keys<T>
+--: (K) -> nil
+local function accept_key(k) return nil end
+accept_key("c")
+]], "")
+    end)
+
+    assert.it("$Keys of empty table is never", function()
+        -- T_NEVER means the type cannot be satisfied — no value can be passed
+        v3_has_error([[
+--:: K = $Keys<{}>
+--: (K) -> nil
+local function accept_key(k) return nil end
+accept_key("anything")
+]], "")
+    end)
+
+    assert.it("$Keys of single-field table is a single string literal", function()
+        v3_no_errors([[
+--:: K = $Keys<{ only: number }>
+local x --: K
+x = "only"
+]])
+    end)
+end)
+
+assert.describe("intrinsic: $EachUnion<T, F>", function()
+    assert.it("applies match type to each union member and re-unions", function()
+        -- match number => string; match boolean => "true"|"false"
+        -- result = string | "true" | "false" which widens to string | "true" | "false"
+        -- x = "hello" satisfies string; x = "true" satisfies "true"
+        v3_no_errors([[
+--:: ToString<T> = match T { number => string, boolean => "true" | "false" }
+--:: R = $EachUnion<number | boolean, ToString>
+local x --: R
+x = "hello"
+x = "true"
+]])
+    end)
+
+    assert.it("passes single (non-union) type through F", function()
+        v3_no_errors([[
+--:: ToStr<T> = match T { number => string }
+--:: R = $EachUnion<number, ToStr>
+local x --: R
+x = "hi"
+]])
+    end)
+end)
+
+assert.describe("intrinsic: $EachField<T, F>", function()
+    assert.it("identity function preserves field structure", function()
+        -- Identity<F> = match F { F => F } returns the descriptor unchanged.
+        -- $EachField<{ a: number }, Identity> => { a: number }
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: R = $EachField<{ a: number }, Identity>
+local x --: R
+x = { a = 42 }
+]])
+    end)
+
+    assert.it("identity on multi-field table preserves all fields", function()
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: R = $EachField<{ x: number, y: string }, Identity>
+local v --: R
+v = { x = 1, y = "hi" }
+]])
     end)
 end)

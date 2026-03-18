@@ -458,6 +458,30 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
     for i = 1, #alias.params do
         mapping[alias.params[i]] = arg_ids[i]
     end
+
+    -- Check each argument against its resolved bound, if any.
+    if alias.resolved_bounds then
+        local intern_mod = require("lib.type.static.intern")
+        local unify_mod  = require("lib.type.static.unify")
+        for i = 1, #alias.params do
+            local bound = alias.resolved_bounds[i]
+            if bound ~= nil then
+                local arg = arg_ids[i]
+                -- Use try_unify to check structural assignability (read-only, no side effects).
+                -- Widen literal arg types first so `{ x: 1 }` satisfies `{ x: number }`.
+                local widened_arg = types_mod.widen(ctx, arg)
+                if not unify_mod.try_unify(ctx, widened_arg, bound) then
+                    local param_name = intern_mod.get(ctx.pool, alias.params[i]) or "?"
+                    local arg_str  = types_mod.display_short(ctx, arg)
+                    local bnd_str  = types_mod.display_short(ctx, bound)
+                    return nil, "type argument '" .. arg_str
+                        .. "' does not satisfy constraint '" .. bnd_str
+                        .. "' for parameter '" .. param_name .. "'"
+                end
+            end
+        end
+    end
+
     return M.substitute(ctx, alias.body, mapping)
 end
 
