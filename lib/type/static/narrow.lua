@@ -558,6 +558,18 @@ function M.narrow_scope(ctx, test_nid, is_truthy)
     return narrowed
 end
 
+-- Apply a single narrowing info against a given type_id, returning the narrowed type_id.
+-- Exposed for constrain.lua's guard_narrowings accumulation (elseif chains).
+function M.apply_narrowing_info(ctx, info, ty_id, is_truthy)
+    return apply_narrowing(ctx, info, ty_id, is_truthy)
+end
+
+-- Extract narrowing info from a test expression node, without looking up types.
+-- Exposed for constrain.lua to reuse per-arm narrowing info.
+function M.extract_narrowing_info(ctx, nid)
+    return extract_narrowing(ctx, nid)
+end
+
 -- Apply narrowed types to a scope (for if-branch entry).
 function M.apply_narrowed(ctx, narrowed)
     local env_mod = require("lib.type.static.env")

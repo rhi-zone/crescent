@@ -1391,8 +1391,26 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
             local neg = narrow_mod.narrow_scope(ctx, test_nid, false)
             if exits then
                 -- Cat E: negate to narrow the continuation scope.
+                -- Intersect with any previously-accumulated guard narrowings: apply this
+                -- arm's negation on top of the accumulated type so that each successive
+                -- exiting arm subtracts its matched variant from the running result.
+                -- Example: Circle|Rect|Tri → arm1 exits (circle) → Rect|Tri in guard;
+                --          arm2 exits (rect)  → apply neg(rect) to Rect|Tri → Tri.
+                local arm_info = narrow_mod.extract_narrowing_info(ctx, test_nid)
                 for name_id, type_id in pairs(neg) do
-                    guard_narrowings[name_id] = type_id
+                    if guard_narrowings[name_id] == nil then
+                        -- First exiting arm for this binding: use the negation as-is.
+                        guard_narrowings[name_id] = type_id
+                    else
+                        -- Subsequent exiting arm: apply the negation info against the
+                        -- already-accumulated guard type (intersection of exclusions).
+                        if arm_info then
+                            guard_narrowings[name_id] = narrow_mod.apply_narrowing_info(
+                                ctx, arm_info, guard_narrowings[name_id], false)
+                        else
+                            guard_narrowings[name_id] = type_id
+                        end
+                    end
                 end
             else
                 -- Accumulate for pass-through path.

@@ -5065,16 +5065,25 @@ v = { x = 1 }
 ]])
     end)
 
-    assert.it("GAP: $EachField on a union of tables — should distribute or error", function()
-        -- $EachField<TA | TB, F> should apply F to each member's fields and
-        -- produce a union of the resulting tables.
-        -- Currently accepted without error; distribution behaviour unverified.
+    assert.it("PASS: $EachField on a union of tables — distributes over each arm", function()
+        -- $EachField<A | B, Identity> distributes: applies Identity to each
+        -- arm's fields and unions the results: { a: number } | { b: string }.
+        -- Assigning either shape must succeed; assigning a wrong type must fail.
         v3_no_errors([[
 --:: Identity<F> = match F { F => F }
 --:: A = { a: number }
 --:: B = { b: string }
 --:: R = $EachField<A | B, Identity>
 local v --: R
+v = { a = 1 }
+]])
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: A = { a: number }
+--:: B = { b: string }
+--:: R = $EachField<A | B, Identity>
+local v --: R
+v = { b = "hi" }
 ]])
     end)
 
@@ -5300,28 +5309,33 @@ x = src
 ]])
     end)
 
-    assert.it("GAP: $EachField<any, F> — any input incorrectly resolves to never", function()
-        -- $EachField over `any` should produce `any` or a wildcard type that
-        -- accepts any assignment. Currently, $EachField<any, F> resolves to `never`,
-        -- so assigning to the result is a type error. This is a type system bug —
-        -- `any` has no iterable fields so $EachField produces never instead of any.
-        v3_has_error([[
+    assert.it("PASS: $EachField<any, F> — any input returns any", function()
+        -- $EachField over `any` returns `any` — since `any` has no iterable
+        -- fields, the safe widened result is `any`, not `never`.
+        -- Assigning any value to the result must succeed.
+        v3_no_errors([[
 --:: Identity<F> = match F { F => F }
 --:: R = $EachField<any, Identity>
 local x --: R
 x = "anything"
-]], "never")
+]])
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: R = $EachField<any, Identity>
+local x --: R
+x = 42
+]])
     end)
 
-    assert.it("GAP: match arm producing any — result should be `any`, not a concrete type", function()
-        -- Contam<number> resolves to `any`. Assigning a string to `any` is fine,
-        -- but the issue is whether the checker tracks the result as `any` or
-        -- silently assigns a concrete type. Currently accepted.
+    assert.it("PASS: match arm producing any — result is `any`, accepts any value", function()
+        -- Contam<number> resolves to `any` (the arm result for the `number` branch).
+        -- `any` is bilateral: both number and string assignments must pass.
         v3_no_errors([[
 --:: Contam<T> = match T { number => any, string => string }
 --:: R = Contam<number>
 local x --: R
 x = 9999
+x = "hello"
 ]])
     end)
 
@@ -5380,16 +5394,16 @@ v = { x = 1 }
 ]])
     end)
 
-    assert.it("GAP: intersection of conflicting field types — currently accepted without error", function()
+    assert.it("PASS: intersection of conflicting field types — field conflict is an error", function()
         -- { x: number } & { x: string } conflicts on field x.
-        -- The design doc says Spread overrides (last wins) but intersection
-        -- conflicts are errors. Currently no error is produced.
-        v3_no_errors([[
+        -- The checker must emit an error when a field appears in both members
+        -- with incompatible types (neither is assignable to the other).
+        v3_has_error([[
 --:: A = { x: number }
 --:: B = { x: string }
 --:: R = A & B
 local v --: R
-]])
+]], "x")
     end)
 
     assert.it("PASS: tagged-union narrowing — else branch excludes matched arm", function()
@@ -5408,13 +5422,12 @@ end
 ]])
     end)
 
-    assert.it("GAP: tagged-union narrowing — elseif chain with multiple exiting arms not fully narrowed", function()
-        -- With N exiting if/elseif arms, the else branch currently only has the
-        -- negation from the LAST exiting arm (guard_narrowings is last-write-wins).
-        -- A three-member union dispatched across two exiting elseif branches leaves
-        -- the else branch seeing the full union instead of just the third arm.
-        -- Fix: guard_narrowings accumulation must be compositional (intersect negations).
-        v3_has_error([[
+    assert.it("PASS: tagged-union narrowing — elseif chain with multiple exiting arms fully narrowed", function()
+        -- guard_narrowings accumulates compositionally: each successive exiting arm
+        -- applies its negation on top of the running intersection, so the else branch
+        -- sees only the third union member (Triangle) after Circle and Rectangle have
+        -- been excluded by their respective exiting arms.
+        v3_no_errors([[
 --:: Shape = { tag: "circle", r: number } | { tag: "rect", w: number, h: number } | { tag: "tri", b: number, height: number }
 --: (Shape) -> number
 local function area(s)
@@ -5426,7 +5439,23 @@ local function area(s)
         return s.b * s.height / 2
     end
 end
-]], "arithmetic")
+]])
+        -- Also verify a four-arm union with three exiting arms leaves the correct member.
+        v3_no_errors([[
+--:: S = { tag: "a", x: number } | { tag: "b", y: number } | { tag: "c", z: number } | { tag: "d", w: number }
+--: (S) -> number
+local function f(s)
+    if s.tag == "a" then
+        return s.x
+    elseif s.tag == "b" then
+        return s.y
+    elseif s.tag == "c" then
+        return s.z
+    else
+        return s.w
+    end
+end
+]])
     end)
 
     assert.it("GAP: union with three members — exhaustiveness not checked in if-chains", function()
