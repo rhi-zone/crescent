@@ -850,9 +850,13 @@ Lift<MakeOptional, number>    -- number? (MakeOptional is * -> *)
 
 No new syntax. Arity is structural — the bound's parameter count IS the kind. `T1<T> = any` is the most permissive bound because `any` is the top type (everything is a subtype).
 
-**Type constructor variance** is non-trivial (contravariant inputs interact with constrained constructors), but the pragmatic resolution for v1: HKT bounds are **arity-matching + constraint propagation**, not full subtype checks between constructors. The bound's arity determines the kind, and at instantiation sites the actual type constructor's own constraints are checked against the concrete arguments. This sidesteps constructor variance entirely and defers the real checking to where it matters.
+**`* -> *` arity is too coarse.** Knowing F takes one argument says nothing about what that argument or result looks like. The useful constraint is structural: what does F<A> look like? What operations does it support? Use structural bounds (`<F: Wrapper>`) or typeclass bounds (`<F: { [MappableTC]: { map: function } }>`) instead. `T1<T> = any` is the degenerate case — fine to write, but conveys almost no information.
 
-Not in v1, but no design changes needed to add it later — the machinery is already there.
+**Any `*` position can carry independent constraints.** In `<F: Functor, A: Semigroup>`, both F and A are separately constrained. In Haskell this would be `(Functor f, Semigroup a) =>`. In crescent, express each as a separate bound on its forall param.
+
+**Known limitation — type argument extraction.** When `<F, A>(fa: F<A>)` is called with `Maybe<number>`, the solver cannot currently extract `F = Maybe, A = number` from the expanded structural type. Once `Maybe<number>` is expanded to `{ tag: "just", value: integer } | { tag: "nothing" }`, the type-constructor/argument decomposition is lost. Fixing this requires either nominal type preservation (expanded generics remember their constructor) or bidirectional inference that propagates `F<A>` inward before expansion. Until then, constraints on `A` in `<F, A: Semigroup>(fa: F<A>)` are unenforceable at call sites — `A` is unbound.
+
+**Type constructor variance** is non-trivial (contravariant inputs interact with constrained constructors), but the pragmatic resolution for v1: HKT bounds are **arity-matching + constraint propagation**, not full subtype checks between constructors. The bound's arity determines the kind, and at instantiation sites the actual type constructor's own constraints are checked against the concrete arguments. This sidesteps constructor variance entirely and defers the real checking to where it matters.
 
 ### `newtype` conversion: constructor pattern, not syntax
 
