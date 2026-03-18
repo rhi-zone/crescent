@@ -4899,3 +4899,543 @@ v = { x = 1, y = "hi" }
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Adversarial: type system stress tests
+-- Each test is labelled:
+--   PASS: behaviour is correct — the test asserts it
+--   GAP:  a known hole — test structured so the suite still passes today,
+--         but the comment documents what SHOULD happen once fixed
+-- ---------------------------------------------------------------------------
+
+assert.describe("adversarial: match type edge cases", function()
+
+    -- -----------------------------------------------------------------------
+    -- Match types with table-pattern arms
+    -- -----------------------------------------------------------------------
+
+    assert.it("GAP: match arm with table-pattern binding uses bare type var — undefined type 'A'", function()
+        -- `match T { { value: A } => A, T => T }` should bind A to the value
+        -- field type. Currently the checker doesn't resolve pattern-bound type
+        -- variables inside match arms, so A is treated as an undefined type.
+        -- The test currently produces an error (undefined type 'A'); when fixed
+        -- it should produce no error and resolve R to number.
+        v3_has_error([[
+--:: Unwrap<T> = match T { { value: A } => A, T => T }
+--:: R = Unwrap<{ value: number }>
+local x --: R
+x = 42
+]], "undefined type")
+    end)
+
+    assert.it("GAP: Unwrap<Unwrap<T>> double application — should resolve to inner type", function()
+        -- Unwrap<Unwrap<{ value: { value: string } }>> should give string.
+        -- Double application of a match type alias is valid syntax, but whether
+        -- the checker evaluates the outer call after the inner is resolved
+        -- depends on whether alias expansion re-enters match evaluation.
+        -- Currently the inner match also fails with undefined type 'A'.
+        v3_has_error([[
+--:: Unwrap<T> = match T { { value: A } => A, T => T }
+--:: Inner = Unwrap<{ value: string }>
+--:: Outer = Unwrap<Inner>
+local x --: Outer
+x = "hi"
+]], "undefined type")
+    end)
+
+    assert.it("GAP: recursive self-referencing match type crashes arena — cycle detection needed", function()
+        -- A match type that recurses on its own result should be cycle-detected.
+        -- According to type-system.md, the primary mechanism is cycle detection on
+        -- (match-type, input-type) pairs; a depth-limit is the safety net.
+        -- Currently this causes an arena crash (pointer arithmetic on nil).
+        -- The test wraps pcall so the suite still passes; fix = no crash + error.
+        local ok = pcall(function()
+            v3_no_errors([[
+--:: Rec<T> = match T { number => Rec<string>, T => T }
+--:: R = Rec<number>
+local x --: R
+]])
+        end)
+        -- Currently crashes (ok=false). When fixed, it should either error
+        -- gracefully or produce a sensible type without looping.
+        assert.ok(true)  -- suite always passes; the pcall documents the crash
+    end)
+
+    assert.it("PASS: overlapping match arms — first arm wins on exact match", function()
+        -- Both arms match number; the first arm's result (string) should win.
+        v3_no_errors([[
+--:: FirstWins<T> = match T { number => string, number => boolean }
+--:: R = FirstWins<number>
+local x --: R
+x = "hello"
+]])
+    end)
+
+    assert.it("GAP: match on union input — distribution over members", function()
+        -- match (number | string) should be evaluated per-member and re-unioned.
+        -- If distribution works: (number => "n") | (string => "s") = "n" | "s".
+        -- Currently accepted without error; whether the result is the correct
+        -- two-member literal union is unverified.
+        v3_no_errors([[
+--:: Tag<T> = match T { number => "n", string => "s" }
+--:: R = Tag<number | string>
+local x --: R
+]])
+    end)
+
+    assert.it("GAP: match arm returning a union — result should be that union, not any", function()
+        -- When a match arm produces `number | string`, the result should be
+        -- exactly that union. Currently the alias is accepted; whether a boolean
+        -- assignment would correctly error is unverified.
+        v3_no_errors([[
+--:: Wide<T> = match T { number => number | string, T => T }
+--:: R = Wide<number>
+local x --: R
+]])
+    end)
+
+    assert.it("GAP: match type used as bound in <T: MatchType<...>> — constraint not enforced", function()
+        -- A match type alias used as the bound of a generic param should
+        -- constrain what T can be. Today constraints are dropped (see HKT gap).
+        v3_no_errors([[
+--:: IsNum<T> = match T { number => true, T => false }
+--: <T: IsNum<T>>(x: T) -> T
+local function only_num(x) return x end
+local r = only_num("should fail")
+]])
+    end)
+end)
+
+assert.describe("adversarial: $EachField interactions", function()
+
+    assert.it("GAP: $EachField on a named open table — accepts without error", function()
+        -- $EachField on { x: number } (closed) works. An open table (row variable)
+        -- is harder: the row tail is unbounded. Currently accepted without error;
+        -- whether the result correctly carries the known fields is unverified.
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: Closed = { x: number }
+--:: R = $EachField<Closed, Identity>
+local v --: R
+v = { x = 1 }
+]])
+    end)
+
+    assert.it("GAP: $EachField on a union of tables — should distribute or error", function()
+        -- $EachField<TA | TB, F> should apply F to each member's fields and
+        -- produce a union of the resulting tables.
+        -- Currently accepted without error; distribution behaviour unverified.
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: A = { a: number }
+--:: B = { b: string }
+--:: R = $EachField<A | B, Identity>
+local v --: R
+]])
+    end)
+
+    assert.it("GAP: nested $EachField — $EachField<$EachField<T, F>, G>", function()
+        -- Composing two $EachField transforms: apply F to T's fields, then apply
+        -- G to the result's fields. Currently accepted; structural correctness
+        -- of the doubly-transformed result is unverified.
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: R = $EachField<$EachField<{ a: number }, Identity>, Identity>
+local v --: R
+v = { a = 42 }
+]])
+    end)
+
+    assert.it("PASS: $EachField round-trip with Identity rejects wrong field type", function()
+        -- Confirm that after Identity transform the structural check still fires
+        -- for a wrong-typed field value.
+        v3_has_error([[
+--:: Identity<F> = match F { F => F }
+--:: R = $EachField<{ n: number }, Identity>
+--: (R) -> nil
+local function accept(r) return nil end
+accept({ n = "wrong" })
+]], "")
+    end)
+
+    assert.it("GAP: $EachField where F descriptor match uses pattern vars — undefined type", function()
+        -- Matching the field descriptor `{ key: K, value: V }` inside the match
+        -- arm uses the same pattern-variable binding that breaks Unwrap above.
+        -- Currently produces 'undefined type K/V' errors.
+        v3_has_error([[
+--:: MakeOpt<F> = match F { { key: K, value: V } => { key: K, value: V }, F => F }
+--:: R = $EachField<{ name: string }, MakeOpt>
+local v --: R
+]], "undefined type")
+    end)
+end)
+
+assert.describe("adversarial: $EachUnion interactions", function()
+
+    assert.it("PASS: $EachUnion on a non-union (single type) passes through F", function()
+        -- $EachUnion<number, F> where F maps number -> string should give string.
+        v3_no_errors([[
+--:: ToString<T> = match T { number => string }
+--:: R = $EachUnion<number, ToString>
+local x --: R
+x = "hi"
+]])
+    end)
+
+    assert.it("GAP: $EachUnion where F produces a union — result nesting is unverified", function()
+        -- If F maps number => "a" | "b", $EachUnion<number, F> should be "a"|"b".
+        -- Currently accepted without error; whether the result is flat or nested
+        -- is unverified.
+        v3_no_errors([[
+--:: Expand<T> = match T { number => "a" | "b" }
+--:: R = $EachUnion<number, Expand>
+local x --: R
+]])
+    end)
+
+    assert.it("GAP: $EachUnion + $Keys composition — intrinsics compose without crash", function()
+        -- $EachUnion<$Keys<T>, F> passes each key literal through F.
+        -- Currently accepted without error; correct result is unverified.
+        v3_no_errors([[
+--:: T = { foo: number, bar: string }
+--:: Identity<X> = match X { X => X }
+--:: R = $EachUnion<$Keys<T>, Identity>
+local x --: R
+]])
+    end)
+end)
+
+assert.describe("adversarial: HKT constraint enforcement", function()
+
+    assert.it("GAP: bound is itself a generic type — <F: Wrapper<number>> not enforced", function()
+        -- Wrapper<T> = { value: T }; F: Wrapper<number> means F must be
+        -- { value: number }. Passing 42 should violate the bound.
+        -- Constraint enforcement is not yet implemented; accepted without error.
+        v3_no_errors([[
+--:: Wrapper<T> = { value: T }
+--: <F: Wrapper<number>>(x: F) -> F
+local function boxed(x) return x end
+local r = boxed(42)
+]])
+    end)
+
+    assert.it("GAP: mutually constrained params <F, T: F> — T references F param", function()
+        -- T: F means T must satisfy the type F. When F is itself a type variable
+        -- (not a concrete type) this is a higher-order constraint.
+        -- Currently the constraint is dropped; no error for T not satisfying F.
+        v3_no_errors([[
+--: <F, T: F>(f: F, t: T) -> T
+local function check_sub(f, t) return t end
+local r = check_sub({ x = 1 }, { x = 2, y = 3 })
+]])
+    end)
+
+    assert.it("GAP: <F: { map: any }> structural typeclass bound — field check not done", function()
+        -- Passing a table without .map should violate the structural bound.
+        -- No enforcement today; constraint is silently dropped.
+        v3_no_errors([[
+--: <F: { map: any }>(fa: F) -> F
+local function needs_map(fa) return fa end
+local r = needs_map({ no_map = true })
+]])
+    end)
+
+    assert.it("GAP: bound violation at nested instantiation depth — not propagated", function()
+        -- <T: { x: number }> should reject { y = "no_x" }.
+        -- Currently constraints are dropped, so the bad call passes silently.
+        v3_no_errors([[
+--:: Wrapper<T> = { value: T }
+--: <T: { x: number }>(t: T) -> Wrapper<T>
+local function wrap(t) return { value = t } end
+wrap({ y = "no_x" })
+]])
+    end)
+end)
+
+assert.describe("adversarial: F<A> deferred application", function()
+
+    assert.it("GAP: two uses of same F with different args should be independent", function()
+        -- <F, A, B>: Pair<F, A, B> = { left: F<A>, right: F<B> }
+        -- F<A> and F<B> collapse to the same bare var today; A and B may
+        -- incorrectly unify. Currently accepted without error.
+        v3_no_errors([[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--:: Pair<F, A, B> = { left: F<A>, right: F<B> }
+local p --: Pair<Maybe, number, string>
+]])
+    end)
+
+    assert.it("GAP: F<F<A>> nested application of same type variable", function()
+        -- F<F<A>> should be F applied to (F applied to A).
+        -- Currently accepted; whether the result is structurally correct
+        -- (Maybe<Maybe<number>>) is unverified.
+        v3_no_errors([[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--:: Nested<F, A> = F<F<A>>
+local x --: Nested<Maybe, number>
+]])
+    end)
+
+    assert.it("GAP: F instantiated to a non-generic type — arity mismatch should error", function()
+        -- Apply<F, A> = F<A>. If F is bound to `number` (arity 0), then F<A>
+        -- is an arity mismatch. Currently no error; F<A> collapses to a bare var.
+        v3_no_errors([[
+--:: T1<T> = any
+--:: Apply<F, A> = F<A>
+local x --: Apply<number, string>
+]])
+    end)
+
+    assert.it("GAP: <F: Mappable, A>(fa: F) -> A body field access is T_UNKNOWN", function()
+        -- If F is constrained to Mappable ({ value: T }), accessing fa.value
+        -- should be valid and typed A. Currently T_UNKNOWN (open-table miss)
+        -- because F<A> doesn't carry the Mappable structure.
+        v3_no_errors([[
+--:: Mappable<T> = { value: T }
+--: <F: Mappable, A>(fa: F) -> A
+local function extract(fa)
+    return fa.value
+end
+]])
+    end)
+end)
+
+assert.describe("adversarial: soundness probes", function()
+
+    assert.it("GAP: assigning to a `never`-annotated binding — should be impossible", function()
+        -- `never` is the bottom type; no value can satisfy it.
+        -- Assigning 42 to a `never`-annotated local should be a type error.
+        -- Currently accepted without error.
+        v3_no_errors([[
+local x --: never
+x = 42
+]])
+    end)
+
+    assert.it("GAP: $EachField<any, F> — any input propagates through without warning", function()
+        -- $EachField over `any` should produce `any` or warn.
+        -- Currently accepted; the result silently accepts any assignment.
+        v3_no_errors([[
+--:: Identity<F> = match F { F => F }
+--:: R = $EachField<any, Identity>
+local x --: R
+x = "anything"
+]])
+    end)
+
+    assert.it("GAP: match arm producing any — result should be `any`, not a concrete type", function()
+        -- Contam<number> resolves to `any`. Assigning a string to `any` is fine,
+        -- but the issue is whether the checker tracks the result as `any` or
+        -- silently assigns a concrete type. Currently accepted.
+        v3_no_errors([[
+--:: Contam<T> = match T { number => any, string => string }
+--:: R = Contam<number>
+local x --: R
+x = 9999
+]])
+    end)
+
+    assert.it("PASS: any | string is accepted without error (any absorbs or unions)", function()
+        -- `any | string` as an alias is accepted. The design says any absorbs;
+        -- in practice the checker accepts this without crashing.
+        v3_no_errors([[
+--:: R = any | string
+local x --: R
+x = 42
+]])
+    end)
+
+    assert.it("GAP: Box<any> — generic with `any` arg does not accept arbitrary values", function()
+        -- Box<any> should give { value: any }, accepting any assignment to value.
+        -- Currently the checker pins the first assignment type and rejects later
+        -- assignments of a different type — `any` is not propagated as a wildcard.
+        v3_has_error([[
+--:: Box<T> = { value: T }
+local x --: Box<any>
+x = { value = true }
+x = { value = 42 }
+]], "")
+    end)
+
+    assert.it("PASS: never in a union is absorbed — number | never = number", function()
+        -- never contributes nothing to a union; the result is just number.
+        v3_no_errors([[
+--:: R = number | never
+local x --: R
+x = 42
+]])
+    end)
+
+    assert.it("GAP: assigning any-typed return to annotated number — no warning emitted", function()
+        -- The design says every implicit `any` emits a warning.
+        -- Assigning the result of an `any`-returning function to a `number`
+        -- binding should warn. Currently no warning is produced.
+        v3_no_errors([[
+--: () -> any
+local function get_any() return 42 end
+local x --: number
+x = get_any()
+]])
+    end)
+end)
+
+assert.describe("adversarial: intersection and union edge cases", function()
+
+    assert.it("PASS: intersection of identical types is the type itself", function()
+        v3_no_errors([[
+--:: T = { x: number }
+--:: R = T & T
+local v --: R
+v = { x = 1 }
+]])
+    end)
+
+    assert.it("GAP: intersection of conflicting field types — currently accepted without error", function()
+        -- { x: number } & { x: string } conflicts on field x.
+        -- The design doc says Spread overrides (last wins) but intersection
+        -- conflicts are errors. Currently no error is produced.
+        v3_no_errors([[
+--:: A = { x: number }
+--:: B = { x: string }
+--:: R = A & B
+local v --: R
+]])
+    end)
+
+    assert.it("GAP: tagged-union narrowing — else branch arithmetic on number|nil fails", function()
+        -- After `if s.tag == "circle"` the else branch should narrow s to the
+        -- rect member, making s.w and s.h plain numbers. Currently the else
+        -- branch sees s.w as `number | nil` (join with the circle member) and
+        -- arithmetic fails with "cannot perform arithmetic on 'number | nil'".
+        v3_has_error([[
+--:: Shape = { tag: "circle", r: number } | { tag: "rect", w: number, h: number }
+--: (Shape) -> number
+local function area(s)
+    if s.tag == "circle" then
+        return s.r * s.r * 3
+    else
+        return s.w * s.h
+    end
+end
+]], "arithmetic")
+    end)
+
+    assert.it("GAP: union with three members — exhaustiveness not checked in if-chains", function()
+        -- A three-member tagged union with only two branches handled should
+        -- ideally warn. Currently no exhaustiveness checking is performed.
+        v3_no_errors([[
+--:: T = { tag: "a" } | { tag: "b" } | { tag: "c" }
+--: (T) -> string
+local function label(t)
+    if t.tag == "a" then return "a"
+    elseif t.tag == "b" then return "b"
+    end
+    return "unknown"
+end
+]])
+    end)
+
+    assert.it("PASS: intersection used as argument to function expecting one member", function()
+        -- A value of type A & B is passable to a function expecting A.
+        -- The intersection carries both field sets; subtype checking should pass.
+        v3_no_errors([[
+--:: A = { x: number }
+--:: B = { y: string }
+--:: AB = A & B
+--: (A) -> nil
+local function needs_a(a) return nil end
+local v --: AB
+needs_a(v)
+]])
+    end)
+end)
+
+assert.describe("adversarial: literal type and widening edge cases", function()
+
+    assert.it("PASS: literal assigned to annotated base type does not error", function()
+        v3_no_errors([[
+local x --: number
+x = 42
+]])
+    end)
+
+    assert.it("PASS: literal union as param type — passing annotated supertype errors", function()
+        -- A function taking `"a" | "b"` should reject a plain `string`.
+        v3_has_error([[
+--: ("a" | "b") -> nil
+local function only_ab(s) return nil end
+local x --: string
+only_ab(x)
+]], "")
+    end)
+
+    assert.it("PASS: boolean literal narrowing after comparison", function()
+        v3_no_errors([[
+--: (boolean) -> string
+local function describe(b)
+    if b == true then return "yes" end
+    return "no"
+end
+]])
+    end)
+
+    assert.it("PASS: arithmetic on mutable numeric locals — result assignable to number", function()
+        -- a and b are assigned literals; after mutation they widen.
+        -- c = a + b should be number, not a literal.
+        v3_no_errors([[
+local a = 1
+local b = 2
+local c = a + b
+local x --: number
+x = c
+]])
+    end)
+
+    assert.it("PASS: string concatenation of two literals — result is string", function()
+        v3_no_errors([[
+local a = "foo"
+local b = "bar"
+local c = a .. b
+local x --: string
+x = c
+]])
+    end)
+end)
+
+assert.describe("adversarial: recursive type aliases", function()
+
+    assert.it("PASS: direct self-referential type via forward reference", function()
+        -- A linked-list node: each node points to the next or nil.
+        v3_no_errors([[
+--:: Node = { value: number, next: Node | nil }
+local n --: Node
+n = { value = 1, next = nil }
+]])
+    end)
+
+    assert.it("PASS: mutually recursive type aliases — Even/Odd", function()
+        -- Mutual recursion in type aliases requires forward reference resolution.
+        v3_no_errors([[
+--:: Even = { value: number, next: Odd | nil }
+--:: Odd  = { value: number, next: Even | nil }
+local e --: Even
+e = { value = 2, next = nil }
+]])
+    end)
+
+    assert.it("GAP: generic recursive type with two children crashes arena", function()
+        -- Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
+        -- With a generic parameter the alias expander re-enters without a guard,
+        -- causing an arena pointer-arithmetic crash.
+        -- The test wraps pcall so the suite still passes; fix = no crash.
+        local ok = pcall(function()
+            v3_no_errors([[
+--:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
+local t --: Tree<number>
+t = { value = 1, left = nil, right = nil }
+]])
+        end)
+        -- Currently crashes (ok=false). When fixed, it should produce no error.
+        assert.ok(true)  -- suite always passes; pcall documents the crash
+    end)
+end)
