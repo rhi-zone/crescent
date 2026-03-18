@@ -65,9 +65,23 @@
 - [ ] Many packages in `lib/` reference `dep.ljsocket`, `dep.lunajson`, `dep.epoll`, `dep.tls`, `dep.ljltk`, etc. — these resolve against `~/git/lua/dep/` in the parent monorepo, not against anything in crescent. Affected: `lib/http/client.lua`, `lib/http/serverx.lua`, `lib/https/`, `lib/codetree/`, `lib/dns/tcp_client.lua`, `lib/discord/`, `lib/lsp/`, `lib/markdown/`, and others. These packages are not self-contained and cannot be vendored. Each needs its dependencies either pulled into `lib/` properly or declared in a manifest and resolved via the package manager.
 
 ### package audit
-103 packages surveyed. Findings below by package.
+103+ packages surveyed. Most predate the ecosystem design and were written without crescent's conventions in mind. Many will need partial or full rewrites to meet the bar — not just cleanup. Treat the audit findings as a roadmap, not a checklist.
 
 **Verdict summary:** type/static, test, sqlite, ljsocket, lunajson, cbor, base64, sha1, urlencode, fs/dir_list, cparser, git → `clean`. http, pkg, websocket, cli → `needs-work`.
+
+**Wrong-home (belong in registry, not stdlib):**
+- [ ] `lib/glua/` — OpenGL bindings, application-specific
+- [ ] `lib/mock/` — large mock library (2.6 MB), not foundational
+- [ ] `lib/love/` — game framework bindings
+- [ ] `lib/tree_sitter/` — parse library bindings
+- [ ] `lib/ljltk/` — Lua parser/compiler (third-party origin)
+- [ ] `lib/cli/` — collection of executable scripts, not a stdlib package
+
+**Missing init.lua (35+ packages):** http, https, fs, socket, tcp, dns, imap, irc, test, and others — violates "every package is a directory with init.lua entry point". Many of these also need rewrites, so add init.lua as part of the rewrite, not as a standalone fix.
+
+**Missing spec traceability:** ~70+ packages lack RFC/spec citations. Add as part of rewrites, not retrofitted onto existing code that may be replaced anyway.
+
+**Missing conformance tests:** dns, irc, imap, websocket, http (partial) — no tests at all for protocol behavior. Add as part of rewrites.
 
 #### http
 - [ ] No `init.lua` — re-export `format`, `client`, `status` from a top-level init
