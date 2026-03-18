@@ -503,6 +503,12 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
         mapping[alias.params[i]] = arg_ids[i]
     end
 
+    -- Cycle guard: alias.body == nil means we are currently constructing this
+    -- generic alias body (self-referential during Pass 2a of process_type_decls).
+    -- Return nil,nil so the caller (resolve_annotation_type) can emit a TAG_NAMED
+    -- forward-reference placeholder instead of crashing on substitute(nil).
+    if alias.body == nil then return nil, nil end
+
     -- Check each argument against its resolved bound, if any.
     if alias.resolved_bounds then
         local intern_mod = require("lib.type.static.intern")

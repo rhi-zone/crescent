@@ -5423,19 +5423,25 @@ e = { value = 2, next = nil }
 ]])
     end)
 
-    assert.it("GAP: generic recursive type with two children crashes arena", function()
+    assert.it("PASS: generic recursive type with two children — no crash", function()
         -- Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
-        -- With a generic parameter the alias expander re-enters without a guard,
-        -- causing an arena pointer-arithmetic crash.
-        -- The test wraps pcall so the suite still passes; fix = no crash.
-        local ok = pcall(function()
-            v3_no_errors([[
+        -- The alias expander used to crash (nil body passed to substitute) when a
+        -- generic alias referenced itself more than once before its body was set.
+        -- Fix: resolve_named_type guards alias.body == nil and returns nil,nil so
+        -- the constrain.lua TAG_NAMED placeholder path fires instead.
+        v3_no_errors([[
 --:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
 local t --: Tree<number>
 t = { value = 1, left = nil, right = nil }
 ]])
-        end)
-        -- Currently crashes (ok=false). When fixed, it should produce no error.
-        assert.ok(true)  -- suite always passes; pcall documents the crash
+    end)
+
+    assert.it("PASS: generic recursive type — value field has correct type", function()
+        -- Tree<number>.value must be number; assigning a string should error.
+        v3_has_error([[
+--:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
+local t --: Tree<number>
+t = { value = "wrong", left = nil, right = nil }
+]], "cannot assign")
     end)
 end)
