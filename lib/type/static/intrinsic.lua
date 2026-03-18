@@ -17,6 +17,7 @@ local TAG_TABLE        = defs.TAG_TABLE
 local TAG_UNION        = defs.TAG_UNION
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_NAMED        = defs.TAG_NAMED
+local TAG_ANY          = defs.TAG_ANY
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
@@ -159,14 +160,8 @@ local function descriptor_field(ctx, tbl_tid, slot_name)
     return nil
 end
 
-local function expand_each_field(ctx, arg_ids)
-    if #arg_ids ~= 2 then
-        return ctx.T_NEVER
-    end
-    local tbl_tid = types_mod.find(ctx, arg_ids[1])
-    local fn_tid  = arg_ids[2]
+local function expand_each_field_table(ctx, tbl_tid, fn_tid)
     local tt = ctx.types:get(tbl_tid)
-
     if tt.tag ~= TAG_TABLE then
         return ctx.T_NEVER
     end
@@ -223,6 +218,34 @@ local function expand_each_field(ctx, arg_ids)
     end
 
     return types_mod.make_table(ctx, out_fields, {}, -1, {})
+end
+
+local function expand_each_field(ctx, arg_ids)
+    if #arg_ids ~= 2 then
+        return ctx.T_NEVER
+    end
+    local tbl_tid = types_mod.find(ctx, arg_ids[1])
+    local fn_tid  = arg_ids[2]
+    local tt = ctx.types:get(tbl_tid)
+
+    -- any input -> any output (no field iteration possible)
+    if tt.tag == TAG_ANY then
+        return ctx.T_ANY
+    end
+
+    -- union input -> distribute over each arm and union results
+    if tt.tag == TAG_UNION then
+        local arms = {}
+        for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+            local member_tid = types_mod.find(ctx, ctx.lists:get(i))
+            arms[#arms + 1] = expand_each_field_table(ctx, member_tid, fn_tid)
+        end
+        if #arms == 0 then return ctx.T_NEVER end
+        return types_mod.make_union(ctx, arms)
+    end
+
+    -- single table input
+    return expand_each_field_table(ctx, tbl_tid, fn_tid)
 end
 
 -- ---------------------------------------------------------------------------

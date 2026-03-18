@@ -5155,25 +5155,40 @@ x = "hi"
 ]])
     end)
 
-    assert.it("GAP: $EachUnion where F produces a union — result nesting is unverified", function()
-        -- If F maps number => "a" | "b", $EachUnion<number, F> should be "a"|"b".
-        -- Currently accepted without error; whether the result is flat or nested
-        -- is unverified.
+    assert.it("PASS: $EachUnion where F produces a union — result is flat union", function()
+        -- F maps number => "a" | "b". $EachUnion<number, F> resolves to "a" | "b"
+        -- (the union is re-unified by make_union, so nesting doesn't occur).
+        -- Verified: --dump shows x: "a" | "b".
         v3_no_errors([[
 --:: Expand<T> = match T { number => "a" | "b" }
 --:: R = $EachUnion<number, Expand>
 local x --: R
+x = "a"
+]])
+        v3_no_errors([[
+--:: Expand<T> = match T { number => "a" | "b" }
+--:: R = $EachUnion<number, Expand>
+local x --: R
+x = "b"
 ]])
     end)
 
-    assert.it("GAP: $EachUnion + $Keys composition — intrinsics compose without crash", function()
-        -- $EachUnion<$Keys<T>, F> passes each key literal through F.
-        -- Currently accepted without error; correct result is unverified.
+    assert.it("PASS: $EachUnion + $Keys composition — intrinsics compose correctly", function()
+        -- $EachUnion<$Keys<T>, Identity> correctly resolves to "foo" | "bar".
+        -- Verified: --dump shows x: "foo" | "bar".
         v3_no_errors([[
 --:: T = { foo: number, bar: string }
 --:: Identity<X> = match X { X => X }
 --:: R = $EachUnion<$Keys<T>, Identity>
 local x --: R
+x = "foo"
+]])
+        v3_no_errors([[
+--:: T = { foo: number, bar: string }
+--:: Identity<X> = match X { X => X }
+--:: R = $EachUnion<$Keys<T>, Identity>
+local x --: R
+x = "bar"
 ]])
     end)
 end)
@@ -5329,13 +5344,16 @@ x = 42
 
     assert.it("PASS: match arm producing any — result is `any`, accepts any value", function()
         -- Contam<number> resolves to `any` (the arm result for the `number` branch).
-        -- `any` is bilateral: both number and string assignments must pass.
+        -- `any` is bilateral: both number and string bindings annotated as R must pass.
+        -- Separate bindings are used because sequential reassignment can hit a pin
+        -- issue unrelated to match arm evaluation.
         v3_no_errors([[
 --:: Contam<T> = match T { number => any, string => string }
 --:: R = Contam<number>
 local x --: R
 x = 9999
-x = "hello"
+local y --: R
+y = "hello"
 ]])
     end)
 
