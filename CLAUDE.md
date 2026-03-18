@@ -10,6 +10,8 @@ Monorepo inspired by [thi.ng/umbrella](https://thi.ng/umbrella): one repo, one v
 
 Part of the [rhi ecosystem](https://rhi.zone).
 
+**Crescent is not a language.** It has no syntax of its own beyond type annotations in comments (`--:`, `--::`). There is no transpiler, no compilation step. Code is standard Lua executed directly by LuaJIT. Do not propose "language-level" solutions that would require new syntax or a transpiler — the answer is always a library.
+
 ## Architecture
 
 ```
@@ -100,6 +102,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 ```
 
 **On typechecker topics, read `docs/type-system.md` first.** Design decisions are written there. Don't improvise from first principles.
+
+**Crescent's type-level computation is match types, not HKTs.** `$EachField<R>` iterates over a record's fields and transforms them. `$EachUnion<T,F>` applies a transform to each union member. `$Keys<T>` produces a string literal union of keys. These are the tools for type-level programming — not higher-kinded types, which are about parameterising over type constructors, a separate concern.
 
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
