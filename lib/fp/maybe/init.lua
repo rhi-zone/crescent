@@ -1,17 +1,16 @@
 -- lib/fp/maybe/init.lua
 -- Maybe a = Nothing | Just a
--- Implements: Functor, Apply, Applicative, Foldable, Semigroup (when inner is Semigroup), Monoid
+-- Implements: Mappable, Applicable, Foldable, Semigroup (when inner is Semigroup), Monoid
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local Functor      = require("lib.fp.functor")
-local Apply        = require("lib.fp.apply")
-local Applicative  = require("lib.fp.applicative")
-local Foldable     = require("lib.fp.foldable")
-local Semigroup    = require("lib.fp.semigroup")
-local Monoid       = require("lib.fp.monoid")
+local Mappable   = require("lib.fp.mappable")
+local Applicable = require("lib.fp.applicable")
+local Foldable   = require("lib.fp.foldable")
+local Semigroup  = require("lib.fp.semigroup")
+local Monoid     = require("lib.fp.monoid")
 
 local Maybe = {}
 
@@ -44,9 +43,6 @@ local nothing_ap_impl = {
 	ap = function(_ff, _fa)
 		return Maybe.nothing
 	end,
-}
-
-local nothing_apl_impl = {
 	pure = function(a)
 		return Maybe.just(a)
 	end,
@@ -70,12 +66,11 @@ local nothing_foldable_impl = {
 
 local nothing_mt = {
 	__index = {
-		[Functor]     = nothing_f_impl,
-		[Apply]       = nothing_ap_impl,
-		[Applicative] = nothing_apl_impl,
-		[Foldable]    = nothing_foldable_impl,
-		[Semigroup]   = nothing_sg_impl,
-		[Monoid]      = nothing_m_impl,
+		[Mappable]   = nothing_f_impl,
+		[Applicable] = nothing_ap_impl,
+		[Foldable]   = nothing_foldable_impl,
+		[Semigroup]  = nothing_sg_impl,
+		[Monoid]     = nothing_m_impl,
 	},
 	__tostring = function(_self)
 		return "Nothing"
@@ -118,9 +113,6 @@ local just_ap_impl = {
 		end
 		return Maybe.just(ff.value(fa.value))
 	end,
-}
-
-local just_apl_impl = {
 	pure = function(a)
 		return Maybe.just(a)
 	end,
@@ -144,12 +136,11 @@ local just_foldable_impl = {
 
 local just_mt = {
 	__index = {
-		[Functor]     = just_f_impl,
-		[Apply]       = just_ap_impl,
-		[Applicative] = just_apl_impl,
-		[Foldable]    = just_foldable_impl,
-		[Semigroup]   = just_sg_impl,
-		[Monoid]      = just_m_impl,
+		[Mappable]   = just_f_impl,
+		[Applicable] = just_ap_impl,
+		[Foldable]   = just_foldable_impl,
+		[Semigroup]  = just_sg_impl,
+		[Monoid]     = just_m_impl,
 	},
 	__tostring = function(self)
 		return "Just(" .. tostring(self.value) .. ")"

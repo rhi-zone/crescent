@@ -1,5 +1,5 @@
 -- lib/fp/maybe/maybe_test.lua
--- Tests for Maybe: constructors, Functor, Semigroup, Monoid instances.
+-- Tests for Maybe: constructors, Mappable, Semigroup, Monoid instances.
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -7,7 +7,7 @@ end
 
 local T         = require("lib.test.assert")
 local arb       = require("lib.test.arb")
-local Functor   = require("lib.fp.functor")
+local Mappable  = require("lib.fp.mappable")
 local Semigroup = require("lib.fp.semigroup")
 local Monoid    = require("lib.fp.monoid")
 local Maybe     = require("lib.fp.maybe")
@@ -78,42 +78,42 @@ T.describe("Maybe tostring", function()
 	end)
 end)
 
--- ── Functor ───────────────────────────────────────────────────────────────────
+-- ── Mappable ──────────────────────────────────────────────────────────────────
 
-T.describe("Maybe Functor", function()
+T.describe("Maybe Mappable", function()
 	T.it("map over Just applies f", function()
-		local r = Functor.map(function(x) return x * 2 end, Maybe.just(5))
+		local r = Mappable.map(function(x) return x * 2 end, Maybe.just(5))
 		T.eq(r.value, 10)
 	end)
 
 	T.it("map over Nothing returns Nothing singleton", function()
-		local r = Functor.map(function(x) return x * 2 end, Maybe.nothing)
+		local r = Mappable.map(function(x) return x * 2 end, Maybe.nothing)
 		T.eq(r, Maybe.nothing)
 	end)
 
 	T.it("identity law: map(id, Just(x)) == Just(x)", function()
 		local m = Maybe.just(99)
-		T.eq(Functor.map(id, m).value, m.value)
+		T.eq(Mappable.map(id, m).value, m.value)
 	end)
 
 	T.it("identity law: map(id, Nothing) == Nothing", function()
-		T.eq(Functor.map(id, Maybe.nothing), Maybe.nothing)
+		T.eq(Mappable.map(id, Maybe.nothing), Maybe.nothing)
 	end)
 
 	T.it("composition law (Just)", function()
 		local f = function(x) return x + 1 end
 		local g = function(x) return x * 3 end
 		local m = Maybe.just(4)
-		local lhs = Functor.map(function(x) return f(g(x)) end, m)
-		local rhs = Functor.map(f, Functor.map(g, m))
+		local lhs = Mappable.map(function(x) return f(g(x)) end, m)
+		local rhs = Mappable.map(f, Mappable.map(g, m))
 		T.eq(lhs.value, rhs.value)
 	end)
 
 	T.it("composition law (Nothing)", function()
 		local f = function(x) return x + 1 end
 		local g = function(x) return x * 3 end
-		local lhs = Functor.map(function(x) return f(g(x)) end, Maybe.nothing)
-		local rhs = Functor.map(f, Functor.map(g, Maybe.nothing))
+		local lhs = Mappable.map(function(x) return f(g(x)) end, Maybe.nothing)
+		local rhs = Mappable.map(f, Mappable.map(g, Maybe.nothing))
 		T.eq(lhs, rhs)
 	end)
 end)
@@ -170,21 +170,21 @@ end)
 
 local int_arb = arb.int(-1000, 1000)
 
-T.describe("Maybe Functor property: identity law", function()
+T.describe("Maybe Mappable property: identity law", function()
 	arb.it("map(id, Just(x)).value == x", int_arb, function(n)
 		local fa = Maybe.just(n)
-		local r  = Functor.map(id, fa)
+		local r  = Mappable.map(id, fa)
 		return r.value == n
 	end)
 end)
 
-T.describe("Maybe Functor property: composition law", function()
+T.describe("Maybe Mappable property: composition law", function()
 	arb.it("map(f∘g, Just(x)) == map(f, map(g, Just(x)))", int_arb, function(n)
 		local fa = Maybe.just(n)
 		local f  = function(x) return x + 7 end
 		local g  = function(x) return x * 2 end
-		local lhs = Functor.map(function(x) return f(g(x)) end, fa)
-		local rhs = Functor.map(f, Functor.map(g, fa))
+		local lhs = Mappable.map(function(x) return f(g(x)) end, fa)
+		local rhs = Mappable.map(f, Mappable.map(g, fa))
 		return lhs.value == rhs.value
 	end)
 end)

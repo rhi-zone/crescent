@@ -98,11 +98,12 @@ have different table identities and would not be compatible — which is correct
 A value can implement multiple typeclasses without collision:
 
 ```lua
--- value[Monoid] = { append, empty }
--- value[Functor] = { map }
--- value[Foldable] = { fold }
+-- value[Monoid]     = { append, empty }
+-- value[Mappable]   = { map }
+-- value[Applicable] = { ap, pure }
+-- value[Foldable]   = { fold, foldMap, foldr }
 -- all at different keys, no pollution
 ```
 
-A function generic over `Functor` calls `value[Functor].map(...)`. A function generic
+A function generic over `Mappable` calls `value[Mappable].map(...)`. A function generic
 over `Monoid` calls `value[Monoid].append(...)`. They compose cleanly.

@@ -34,12 +34,11 @@ transparent at call sites.
 
 - `lib/fp/semigroup` — `append :: a -> a -> a`
 - `lib/fp/monoid` — `empty :: () -> a` (extends Semigroup)
-- `lib/fp/functor` — `map :: (a -> b) -> f a -> f b`
-- `lib/fp/apply` — `ap :: f (a -> b) -> f a -> f b` (extends Functor)
-- `lib/fp/applicative` — `pure :: a -> f a` (extends Apply)
-- `lib/fp/monad` — `bind :: m a -> (a -> m b) -> m b` (extends Applicative)
+- `lib/fp/mappable` — `map :: (a -> b) -> f a -> f b`
+- `lib/fp/applicable` — `ap :: f (a -> b) -> f a -> f b`, `pure :: a -> f a` (extends Mappable; merges Apply + Applicative)
+- `lib/fp/chainable` — `bind :: m a -> (a -> m b) -> m b` (extends Applicable; not yet implemented)
 - `lib/fp/foldable` — `fold :: Monoid m => t m -> m`, `foldMap`, `foldr`
-- `lib/fp/traversable` — `traverse :: Applicative f => (a -> f b) -> t a -> f (t b)` (extends Foldable)
+- `lib/fp/traversable` — `traverse :: Applicable f => (a -> f b) -> t a -> f (t b)` (extends Foldable)
 
 ### Optics
 
@@ -68,12 +67,12 @@ to be confused with `Maybe First`/`Maybe Last` which are `First (Maybe a)` treat
 `Nothing` as the identity.
 
 **Data types** (implement multiple typeclasses):
-- `lib/fp/maybe` — `Nothing`, `Just(a)`. Implements: Functor, Apply, Applicative,
-  Monad, Foldable, Traversable. Also: Semigroup/Monoid when `a` is Semigroup.
-- `lib/fp/either` — `Left(e)`, `Right(a)`. Implements: Functor, Apply, Applicative,
-  Monad, Foldable, Traversable (right-biased).
+- `lib/fp/maybe` — `Nothing`, `Just(a)`. Implements: Mappable, Applicable,
+  Chainable, Foldable, Traversable. Also: Semigroup/Monoid when `a` is Semigroup.
+- `lib/fp/either` — `Left(e)`, `Right(a)`. Implements: Mappable, Applicable,
+  Chainable, Foldable, Traversable (right-biased).
 - `lib/fp/fn` — `Fn(f)`. Wraps functions; `__call` makes usage transparent.
-  Implements: Functor (composition), Apply (S combinator), Monad (reader/function monad).
+  Implements: Mappable (composition), Applicable (S combinator), Chainable (reader/function monad).
 
 ## Implementation Order
 
@@ -83,12 +82,12 @@ at least one instance to test it against.
 1. `semigroup` + `first`, `last`, `sum`, `product`, `min`, `max`
 2. `monoid` — instances follow from semigroup + empty
 3. `maybe` skeleton (Just/Nothing constructors, no typeclass instances yet)
-4. `functor` + `maybe` Functor instance
+4. `mappable` + `maybe` Mappable instance
 5. `foldable` + `maybe`, list instances
-6. `apply` + `applicative` + `maybe` instances
-7. `monad` + `maybe` instance
+6. `applicable` + `maybe` instances (provides both `ap` and `pure`)
+7. `chainable` + `maybe` instance
 8. `either` — all typeclass instances
-9. `fn` — Functor/Apply/Monad instances
+9. `fn` — Mappable/Applicable/Chainable instances
 10. `traversable` + `maybe`, `either` instances
 11. Optics — `lens`, `prism`, `iso`, `traversal` (building on Traversable foundation)
 
