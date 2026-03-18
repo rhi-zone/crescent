@@ -30,13 +30,15 @@ local TAG_NAMED        = defs.TAG_NAMED
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
 
-local LIT_INTEGER = defs.LIT_INTEGER
-local LIT_NUMBER  = defs.LIT_NUMBER
-local LIT_STRING  = defs.LIT_STRING
+local LIT_INTEGER   = defs.LIT_INTEGER
+local LIT_NUMBER    = defs.LIT_NUMBER
+local LIT_STRING    = defs.LIT_STRING
+local LIT_OPAQUE_KEY = defs.LIT_OPAQUE_KEY
 
-local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
-local FLAG_PRIVATE  = defs.FLAG_PRIVATE
-local band          = require("bit").band
+local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
+local FLAG_PRIVATE    = defs.FLAG_PRIVATE
+local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
+local band            = require("bit").band
 
 local C_UNIFY     = constrain.C_UNIFY
 local C_SUB       = constrain.C_SUB
@@ -276,6 +278,46 @@ local function solve_index(ctx, c)
 
     local key_t = ctx.types:get(key_tid)
     if key_t.tag ~= TAG_LITERAL then
+        bind_to(ctx, res_tid, ctx.T_ANY)
+        return true
+    end
+
+    -- Opaque table-valued key: t[TC] — look for a FLAG_OPAQUE_KEY field by variable name.
+    if key_t.data[0] == LIT_OPAQUE_KEY then
+        local key_name_id = key_t.data[1]
+        local obj_tid = find(ctx, obj_tid_raw)
+        local obj_t   = ctx.types:get(obj_tid)
+
+        if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
+            bind_to(ctx, res_tid, obj_t.tag == TAG_ANY and ctx.T_ANY or ctx.T_UNKNOWN)
+            return true
+        end
+        if obj_t.tag == TAG_NEVER then
+            bind_to(ctx, res_tid, ctx.T_NEVER)
+            return true
+        end
+        if obj_t.tag == TAG_VAR or obj_t.tag == TAG_ROWVAR then
+            return false  -- defer
+        end
+        if obj_t.tag == TAG_TABLE then
+            local fe = types_mod.table_opaque_field(ctx, obj_tid, key_name_id)
+            if fe then
+                local ft = find(ctx, fe.type_id)
+                if band(fe.flags, FLAG_OPTIONAL) ~= 0 then
+                    ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+                end
+                unify_mod.unify(ctx, res_tid, ft)
+                return true
+            end
+            -- No matching opaque field: open table returns unknown, closed returns any (silently)
+            if obj_t.data[4] >= 0 then
+                bind_to(ctx, res_tid, ctx.T_UNKNOWN)
+            else
+                bind_to(ctx, res_tid, ctx.T_ANY)
+            end
+            return true
+        end
+        -- Not a table: return any silently
         bind_to(ctx, res_tid, ctx.T_ANY)
         return true
     end

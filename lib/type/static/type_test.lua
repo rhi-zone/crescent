@@ -4669,32 +4669,44 @@ end
 ]])
     end)
 
-    assert.it("GAP: fa[TC_module] on untyped fa returns T_UNKNOWN (not TC instance type)", function()
-        -- The typechecker cannot statically determine the type stored at a
-        -- non-string table key. It returns T_UNKNOWN for open-table misses.
-        -- To properly type this, the checker would need to model table keys
-        -- by identity (value equality, not just string/integer indexing).
-        -- As a result, inst.map is also T_UNKNOWN: no field-access checking.
+    assert.it("PASS: fa[TC_module] on annotated fa returns TC instance type", function()
+        -- With a { [Mappable]: Instance } annotation, t[Mappable] returns Instance.
+        -- The typechecker looks up the FLAG_OPAQUE_KEY field by variable name.
         v3_no_errors([[
-local Mappable = { map = function(f, fa) return fa end }
+local Mappable = {}
+--:: MappableNum = { map: ((number) -> number) -> number }
+--: (fa: { [Mappable]: MappableNum }) -> number
 local function use_tc(fa)
-    local inst = fa[Mappable]
-    local map_fn = inst.map   -- T_UNKNOWN.map: no checking possible
-    return map_fn
+    local inst = fa[Mappable]   -- inst: MappableNum
+    return inst.map(function(x) return x + 1 end)
 end
 ]])
     end)
 
-    assert.it("GAP: calling fa[TC].map(f, fa) produces no type error on bad f", function()
-        -- Because fa[TC] is T_UNKNOWN and inst.map is also unknown (or any),
-        -- passing the wrong type for f produces no error. This is the core
-        -- typeclass dispatch gap: the dispatch protocol is invisible to the checker.
-        v3_no_errors([[
+    assert.it("PASS: calling fa[TC].map(f, fa) with wrong f type errors when annotated", function()
+        -- With a proper annotation, passing the wrong type for f is caught.
+        -- The typeclass dispatch is visible to the checker via [TC]: Instance.
+        v3_has_error([[
 local Mappable = {}
+--:: MappableInst = { map: ((number) -> number) -> number -> number }
+--: (fa: { [Mappable]: MappableInst }) -> number
 local function broken_map(fa)
-    return fa[Mappable].map(42, fa)  -- 42 is not a function, but no error
+    return fa[Mappable].map("not a function", 42)
 end
-]])
+]], "cannot pass")
+    end)
+
+    assert.it("PASS: [TC]: { map: ... } annotation — wrong arg type to .map errors", function()
+        -- Positive test: declare { [Mappable]: { map: (number -> number) -> number -> number } },
+        -- call .map with a string -> string function, verify it errors.
+        v3_has_error([[
+local Mappable = {}
+--:: MapFn = (number) -> number
+--: (t: { [Mappable]: { map: (MapFn) -> number } }, f: (string) -> string) -> number
+local function run(t, f)
+    return t[Mappable].map(f)
+end
+]], "cannot pass")
     end)
 
     assert.it("PASS: annotated typeclass-style function typechecks its own body", function()

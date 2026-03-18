@@ -43,11 +43,12 @@ local LIT_INTEGER = defs.LIT_INTEGER
 local double_to_i32x2 = defs.double_to_i32x2
 local i32x2_to_double = defs.i32x2_to_double
 
-local FLAG_GENERIC   = defs.FLAG_GENERIC
-local FLAG_OPTIONAL  = defs.FLAG_OPTIONAL
-local FLAG_READONLY  = defs.FLAG_READONLY
-local FLAG_PRIVATE   = defs.FLAG_PRIVATE
-local band           = require("bit").band
+local FLAG_GENERIC    = defs.FLAG_GENERIC
+local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
+local FLAG_READONLY   = defs.FLAG_READONLY
+local FLAG_PRIVATE    = defs.FLAG_PRIVATE
+local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
+local band            = require("bit").band
 
 local M = {}
 
@@ -636,12 +637,30 @@ union_has = function(ctx, flat, tid)
 end
 
 -- Look up a named field in a table type. Returns (FieldEntry*, field_arena_id) or nil.
+-- Skips opaque-key fields (FLAG_OPAQUE_KEY): those are matched by opaque key lookup, not by name.
 function M.table_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)  -- caller must have called find()
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
         local fid = ctx.lists:get(i)
         local fe = ctx.fields:get(fid)
-        if fe.name_id == name_id then return fe, fid end
+        if fe.name_id == name_id and band(fe.flags, FLAG_OPAQUE_KEY) == 0 then
+            return fe, fid
+        end
+    end
+    return nil
+end
+
+-- Look up an opaque-key field (FLAG_OPAQUE_KEY) by the variable name that serves as the key.
+-- key_name_id: intern ID of the variable name used as the key (e.g. intern("Mappable")).
+-- Returns (FieldEntry*, field_arena_id) or nil.
+function M.table_opaque_field(ctx, tbl_tid, key_name_id)
+    local t = ctx.types:get(tbl_tid)
+    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local fid = ctx.lists:get(i)
+        local fe = ctx.fields:get(fid)
+        if band(fe.flags, FLAG_OPAQUE_KEY) ~= 0 and fe.name_id == key_name_id then
+            return fe, fid
+        end
     end
     return nil
 end
@@ -814,9 +833,14 @@ function M.display(ctx, tid, seen)
         end
         table.sort(field_names, function(a, b) return a.name < b.name end)
         for _, nf in ipairs(field_names) do
-            local opt = band(nf.fe.flags, FLAG_OPTIONAL) ~= 0 and "?" or ""
-            local ro  = band(nf.fe.flags, FLAG_READONLY) ~= 0 and "readonly " or ""
-            parts[#parts + 1] = ro .. nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
+            local opt = band(nf.fe.flags, FLAG_OPTIONAL)   ~= 0 and "?" or ""
+            local ro  = band(nf.fe.flags, FLAG_READONLY)   ~= 0 and "readonly " or ""
+            local ok  = band(nf.fe.flags, FLAG_OPAQUE_KEY) ~= 0
+            if ok then
+                parts[#parts + 1] = "[" .. nf.name .. "]: " .. M.display(ctx, nf.fe.type_id, seen)
+            else
+                parts[#parts + 1] = ro .. nf.name .. opt .. ": " .. M.display(ctx, nf.fe.type_id, seen)
+            end
         end
         -- indexers
         local is, il = t.data[2], t.data[3]

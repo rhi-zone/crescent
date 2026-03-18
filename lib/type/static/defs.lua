@@ -177,6 +177,7 @@ M.LIT_NUMBER            = 1   -- float literal; data[1] = numval index (per-file
 M.LIT_BOOLEAN           = 2
 M.LIT_NIL               = 3
 M.LIT_INTEGER           = 4   -- integer literal; data[1] = value directly (int32_t, globally comparable)
+M.LIT_OPAQUE_KEY        = 5   -- opaque table-valued key; data[1] = intern ID of the variable name
 
 -- Flag bits (nodes)
 M.FLAG_VARARG           = 1
@@ -191,6 +192,7 @@ M.FLAG_RECURSIVE        = 2
 M.FLAG_OPTIONAL         = 0x01  -- field may be absent; access returns T|nil
 M.FLAG_READONLY         = 0x02  -- assignment to this field is a type error
 M.FLAG_PRIVATE          = 0x04  -- inaccessible outside the defining file
+M.FLAG_OPAQUE_KEY       = 0x08  -- field keyed by an opaque table value (typeclass dispatch: t[TC])
 
 -- Annotation kinds
 M.ANN_TYPE              = 0

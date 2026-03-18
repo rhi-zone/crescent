@@ -36,11 +36,12 @@ local NODE_EXPR_STMT   = defs.NODE_EXPR_STMT
 local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL
 local NODE_CHUNK       = defs.NODE_CHUNK
 
-local LIT_STRING  = defs.LIT_STRING
-local LIT_NUMBER  = defs.LIT_NUMBER
-local LIT_BOOLEAN = defs.LIT_BOOLEAN
-local LIT_INTEGER = defs.LIT_INTEGER
-local LIT_NIL     = defs.LIT_NIL
+local LIT_STRING    = defs.LIT_STRING
+local LIT_NUMBER    = defs.LIT_NUMBER
+local LIT_BOOLEAN   = defs.LIT_BOOLEAN
+local LIT_INTEGER   = defs.LIT_INTEGER
+local LIT_NIL       = defs.LIT_NIL
+local LIT_OPAQUE_KEY = defs.LIT_OPAQUE_KEY
 local i32x2_to_double = defs.i32x2_to_double
 
 local OP_ADD    = defs.OP_ADD
@@ -62,14 +63,15 @@ local OP_UNM    = defs.OP_UNM
 local OP_NOT    = defs.OP_NOT
 local OP_LEN    = defs.OP_LEN
 
-local FLAG_LOCAL    = defs.FLAG_LOCAL
-local FLAG_VARARG   = defs.FLAG_VARARG
-local FLAG_COMPUTED = defs.FLAG_COMPUTED
-local FLAG_READONLY = defs.FLAG_READONLY
-local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
-local FLAG_PRIVATE  = defs.FLAG_PRIVATE
-local band          = require("bit").band
-local bor           = require("bit").bor
+local FLAG_LOCAL      = defs.FLAG_LOCAL
+local FLAG_VARARG     = defs.FLAG_VARARG
+local FLAG_COMPUTED   = defs.FLAG_COMPUTED
+local FLAG_READONLY   = defs.FLAG_READONLY
+local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
+local FLAG_PRIVATE    = defs.FLAG_PRIVATE
+local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
+local band            = require("bit").band
+local bor             = require("bit").bor
 
 -- Compute field flags, auto-setting FLAG_PRIVATE for `_`-prefixed names.
 local function field_flags(ctx, name_id, base_flags)
@@ -758,8 +760,35 @@ end
 
 ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
+    local key_nid = n.data[1]
+    local key_n   = ctx.nodes:get(key_nid)
+
+    -- Opaque key: `t[SomeVar]` where the key is a bare identifier resolving to a
+    -- table-typed value (typeclass dispatch pattern). Emit C_INDEX with LIT_OPAQUE_KEY
+    -- so solve_index can look up FLAG_OPAQUE_KEY fields by variable name.
+    if key_n.kind == NODE_IDENTIFIER then
+        local var_name_id = key_n.data[0]
+        local var_tid     = env_mod.lookup(ctx.scope, var_name_id)
+        if var_tid then
+            local vt = ctx.types:get(types_mod.find(ctx, var_tid))
+            if vt.tag == TAG_TABLE then
+                local obj_tid = types_mod.find(ctx, gen_expr(ctx, n.data[0]))
+                -- Consume the key expr so side-effects are still generated
+                gen_expr(ctx, key_nid)
+                local obj_t = ctx.types:get(obj_tid)
+                if obj_t.tag == TAG_NEVER   then return ctx.T_NEVER end
+                if obj_t.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
+                if obj_t.tag == TAG_ANY     then return ctx.T_ANY end
+                local res = fresh_var(ctx)
+                local opaque_key = types_mod.make_literal(ctx, LIT_OPAQUE_KEY, var_name_id)
+                emit(ctx, { C_INDEX, obj_tid, opaque_key, res, n.line, n.col })
+                return res
+            end
+        end
+    end
+
     local obj_tid = types_mod.find(ctx, gen_expr(ctx, n.data[0]))
-    local key_tid = gen_expr(ctx, n.data[1])
+    local key_tid = gen_expr(ctx, key_nid)
     local obj_t   = ctx.types:get(obj_tid)
 
     if obj_t.tag == TAG_NEVER   then return ctx.T_NEVER end

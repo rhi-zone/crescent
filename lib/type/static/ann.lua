@@ -9,8 +9,9 @@ local intern_mod = require("lib.type.static.intern")
 local double_to_i32x2 = defs.double_to_i32x2
 local band = require("bit").band
 
-local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
-local FLAG_READONLY = defs.FLAG_READONLY
+local FLAG_OPTIONAL  = defs.FLAG_OPTIONAL
+local FLAG_READONLY  = defs.FLAG_READONLY
+local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
 
 local format = string.format
 local byte = string.byte
@@ -418,13 +419,37 @@ function M.parse_annotations(annotations, pool, filename)
                         metas[#metas + 1] = fi
                     elseif fb == byte("[") then
                         -- Indexer: [K]: V
+                        -- Peek: if the bracket contains a single bare identifier that is not a
+                        -- primitive keyword, treat it as an opaque-key field (typeclass dispatch).
+                        -- This handles `{ [TC]: Instance }` where TC is a table-valued typeclass marker.
                         advance(s)
-                        local key_type = parse_type(s)
-                        expect_char(s, "]")
-                        expect_char(s, ":")
-                        local val_type = parse_type(s)
-                        indexers[#indexers + 1] = key_type
-                        indexers[#indexers + 1] = val_type
+                        local save_bracket = s.pos
+                        local bracket_word = scan_word(s)
+                        skip_ws(s)
+                        local is_opaque = bracket_word and not prim_tags[bracket_word]
+                            and s.pos <= s.len and byte(s.src, s.pos) == byte("]")
+                        if is_opaque then
+                            -- Opaque key field: name_id = intern(IDENT), FLAG_OPAQUE_KEY
+                            advance(s)  -- consume ']'
+                            expect_char(s, ":")
+                            local val_type = parse_type(s)
+                            local key_name_id = intern_mod.intern(pool, bracket_word)
+                            local fi = fields:alloc()
+                            local fe = fields:get(fi)
+                            fe.name_id = key_name_id
+                            fe.type_id = val_type
+                            fe.flags = FLAG_OPAQUE_KEY
+                            flds[#flds + 1] = fi
+                        else
+                            -- Regular indexer: rewind and parse key as a full type
+                            s.pos = save_bracket
+                            local key_type = parse_type(s)
+                            expect_char(s, "]")
+                            expect_char(s, ":")
+                            local val_type = parse_type(s)
+                            indexers[#indexers + 1] = key_type
+                            indexers[#indexers + 1] = val_type
+                        end
                     elseif fb and is_ident_start(fb) then
                         -- Field: [readonly] name[?]: type
                         local save_pos = s.pos
