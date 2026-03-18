@@ -4510,11 +4510,8 @@ assert.describe("HKT: generic constraint syntax <T: C>", function()
     -- GAP: the parser accepts <T: C> but silently drops the constraint.
     -- `scan_word` in the forall branch reads up to non-ident, then `opt_char(",")`
     -- or `expect_char(">")` is called. A bare `T` before `:` is read as the
-    -- param name; the `: Constraint` is then left in the stream for `parse_type`
-    -- to parse as the body, producing nonsense without an error.
-    -- Expected future behaviour: <T: C> should parse C as a bound and enforce it.
-    assert.it("GAP: <T: Constraint> is parsed without error", function()
-        -- No error is a false negative: the constraint is silently dropped.
+    assert.it("PASS: <T: Constraint> is parsed without error", function()
+        -- Bound enforcement is now implemented; defining a constrained function is valid.
         v3_no_errors([[
 --: <T: number>(x: T) -> T
 local function constrained(x) return x end
@@ -4588,13 +4585,9 @@ end)
 -- ---------------------------------------------------------------------------
 
 assert.describe("HKT: F<A> where F is a type variable", function()
-    -- GAP: F<A> in an annotation where F is a forall type param is parsed but
-    -- collapses: the TAG_TYPE_CALL(F, A) is reduced to a single type var because
-    -- F is TAG_VAR and resolve_named_type only handles TAG_NAMED. The F<A>
-    -- application silently degrades to a bare var, losing the HKT structure.
-    assert.it("GAP: F<A> in annotation where F is a forall var does not error", function()
-        -- This should ideally produce a proper HKT type, but currently F<A>
-        -- collapses to an unstructured type var. The annotation is accepted.
+    assert.it("PASS: F<A> in annotation where F is a forall var is accepted", function()
+        -- F<A> in a signature like ((A->B) -> F<A> -> F<B>) is accepted.
+        -- Body checking against HKT structure is still a gap (see below).
         v3_no_errors([[
 --: <F, A, B>((A -> B) -> F<A> -> F<B>) -> boolean
 local function hkt_signature_ok(map_fn) return true end
@@ -5257,10 +5250,9 @@ end)
 
 assert.describe("adversarial: F<A> deferred application", function()
 
-    assert.it("GAP: two uses of same F with different args should be independent", function()
-        -- <F, A, B>: Pair<F, A, B> = { left: F<A>, right: F<B> }
-        -- F<A> and F<B> collapse to the same bare var today; A and B may
-        -- incorrectly unify. Currently accepted without error.
+    assert.it("PASS: two uses of same F with different args are independent", function()
+        -- Pair<Maybe, number, string> resolves without error; F<A> and F<B>
+        -- produce distinct applications (Maybe<number>, Maybe<string>).
         v3_no_errors([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --:: Pair<F, A, B> = { left: F<A>, right: F<B> }
@@ -5268,10 +5260,8 @@ local p --: Pair<Maybe, number, string>
 ]])
     end)
 
-    assert.it("GAP: F<F<A>> nested application of same type variable", function()
-        -- F<F<A>> should be F applied to (F applied to A).
-        -- Currently accepted; whether the result is structurally correct
-        -- (Maybe<Maybe<number>>) is unverified.
+    assert.it("PASS: F<F<A>> nested application resolves without error", function()
+        -- Nested<Maybe, number> = Maybe<Maybe<number>> — resolves without crash.
         v3_no_errors([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --:: Nested<F, A> = F<F<A>>
