@@ -14,6 +14,13 @@ local Foldable   = require("lib.fp.foldable")
 local Semigroup  = require("lib.fp.semigroup")
 local Monoid     = require("lib.fp.monoid")
 
+-- Guard Alt — may not exist in all deployment configurations.
+local Alt
+do
+	local ok, mod = pcall(require, "lib.fp.alt")
+	if ok then Alt = mod end
+end
+
 -- Guard Traversable — may not exist in all deployment configurations.
 local Traversable
 do
@@ -90,6 +97,13 @@ local function make_nothing_traversable_impl()
 	}
 end
 
+-- Alt instance for Nothing: alt(Nothing, fb) = fb
+local nothing_alt_impl = {
+	alt = function(_fa, fb)
+		return fb
+	end,
+}
+
 local function make_nothing_mt()
 	local index = {
 		[Mappable]   = nothing_f_impl,
@@ -99,6 +113,9 @@ local function make_nothing_mt()
 		[Semigroup]  = nothing_sg_impl,
 		[Monoid]     = nothing_m_impl,
 	}
+	if Alt then
+		index[Alt] = nothing_alt_impl
+	end
 	if Traversable then
 		index[Traversable] = make_nothing_traversable_impl()
 	end
@@ -186,6 +203,13 @@ local function make_just_traversable_impl()
 	}
 end
 
+-- Alt instance for Just: alt(Just(a), _) = Just(a)
+local just_alt_impl = {
+	alt = function(fa, _fb)
+		return fa
+	end,
+}
+
 local function make_just_mt()
 	local index = {
 		[Mappable]   = just_f_impl,
@@ -195,6 +219,9 @@ local function make_just_mt()
 		[Semigroup]  = just_sg_impl,
 		[Monoid]     = just_m_impl,
 	}
+	if Alt then
+		index[Alt] = just_alt_impl
+	end
 	if Traversable then
 		index[Traversable] = make_just_traversable_impl()
 	end

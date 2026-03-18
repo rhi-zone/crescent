@@ -27,6 +27,20 @@ do
 	if ok then Traversable = mod end
 end
 
+-- Guard Alt — may not exist in all deployment configurations.
+local Alt
+do
+	local ok, mod = pcall(require, "lib.fp.alt")
+	if ok then Alt = mod end
+end
+
+-- Guard Bifunctor — may not exist in all deployment configurations.
+local Bifunctor
+do
+	local ok, mod = pcall(require, "lib.fp.bifunctor")
+	if ok then Bifunctor = mod end
+end
+
 local Either = {}
 
 -- ── Left ──────────────────────────────────────────────────────────────────────
@@ -80,6 +94,20 @@ local function make_left_chainable_impl()
 	}
 end
 
+-- Alt instance for Left: alt(Left(_), fb) = fb
+local left_alt_impl = {
+	alt = function(_fa, fb)
+		return fb
+	end,
+}
+
+-- Bifunctor instance for Left: bimap(f, g, Left(e)) = Left(f(e))
+local left_bifunctor_impl = {
+	bimap = function(f, _g, fab)
+		return Either.left(f(fab.value))
+	end,
+}
+
 -- Traversable instance for Left:
 -- traverse(f, Left(e), ctor) = pure(ctor, Either.left(e))
 local function make_left_traversable_impl()
@@ -99,6 +127,12 @@ local function make_left_mt()
 	}
 	if Chainable then
 		index[Chainable] = make_left_chainable_impl()
+	end
+	if Alt then
+		index[Alt] = left_alt_impl
+	end
+	if Bifunctor then
+		index[Bifunctor] = left_bifunctor_impl
 	end
 	if Traversable then
 		index[Traversable] = make_left_traversable_impl()
@@ -176,6 +210,20 @@ local function make_right_chainable_impl()
 	}
 end
 
+-- Alt instance for Right: alt(Right(a), _) = Right(a)
+local right_alt_impl = {
+	alt = function(fa, _fb)
+		return fa
+	end,
+}
+
+-- Bifunctor instance for Right: bimap(f, g, Right(a)) = Right(g(a))
+local right_bifunctor_impl = {
+	bimap = function(_f, g, fab)
+		return Either.right(g(fab.value))
+	end,
+}
+
 -- Traversable instance for Right:
 -- traverse(f, Right(a), ctor) = map(Either.right, f(a))
 local function make_right_traversable_impl()
@@ -195,6 +243,12 @@ local function make_right_mt()
 	}
 	if Chainable then
 		index[Chainable] = make_right_chainable_impl()
+	end
+	if Alt then
+		index[Alt] = right_alt_impl
+	end
+	if Bifunctor then
+		index[Bifunctor] = right_bifunctor_impl
 	end
 	if Traversable then
 		index[Traversable] = make_right_traversable_impl()

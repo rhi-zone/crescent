@@ -17,6 +17,13 @@ local Mappable   = require("lib.fp.mappable")
 local Applicable = require("lib.fp.applicable")
 local Chainable  = require("lib.fp.chainable")
 
+-- Guard Profunctor — may not exist in all deployment configurations.
+local Profunctor
+do
+	local ok, mod = pcall(require, "lib.fp.profunctor")
+	if ok then Profunctor = mod end
+end
+
 local Fn = {}
 
 -- ── Implementation tables ──────────────────────────────────────────────────────
@@ -56,14 +63,32 @@ local fn_chainable_impl = {
 	end,
 }
 
+-- Profunctor instance for Fn:
+-- dimap(f, g, Fn(h)) = Fn(function(...) return g(h(f(...))) end)
+-- Contramap input with f, map output with g.
+local fn_profunctor_impl = {
+	dimap = function(f, g, fbc)
+		local h = fbc._fn
+		return Fn.new(function(...)
+			return g(h(f(...)))
+		end)
+	end,
+}
+
 -- ── Metatable ──────────────────────────────────────────────────────────────────
 
+local fn_index = {
+	[Mappable]   = fn_mappable_impl,
+	[Applicable] = fn_applicable_impl,
+	[Chainable]  = fn_chainable_impl,
+}
+
+if Profunctor then
+	fn_index[Profunctor] = fn_profunctor_impl
+end
+
 local fn_mt = {
-	__index = {
-		[Mappable]   = fn_mappable_impl,
-		[Applicable] = fn_applicable_impl,
-		[Chainable]  = fn_chainable_impl,
-	},
+	__index = fn_index,
 	-- Transparent call: Fn(f)(x) == f(x)
 	__call = function(self, ...)
 		return self._fn(...)
