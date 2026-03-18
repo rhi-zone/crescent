@@ -205,9 +205,13 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if args_len > 0 then
             seen[ann_tid] = true
             arg_ids = {}
+            -- Allow unapplied type constructors as HKT arguments (e.g. Maybe in map<Maybe, A, B>).
+            local prev_allow = ctx._allow_unapplied_constructors
+            ctx._allow_unapplied_constructors = true
             for i = at.data[1], at.data[1] + args_len - 1 do
                 arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
             end
+            ctx._allow_unapplied_constructors = prev_allow
             seen[ann_tid] = nil
         end
         -- Literal boolean types: `true` / `false` are valid type-level names.
@@ -237,8 +241,29 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
         local resolved, resolve_err = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
         if resolved then return resolved end
-        -- Arity mismatch or similar resolution error: report it.
+        -- Arity mismatch or similar resolution error.
         if resolve_err then
+            -- HKT deferred application: F<A> where F is a type variable (forall param or
+            -- generic alias placeholder). Only applies when the alias has NO type params of
+            -- its own (the error is arity mismatch: "does not take type arguments") AND the
+            -- alias body is an abstract type (TAG_VAR = forall param; TAG_NAMED = placeholder).
+            -- Constraint violations (alias HAS params, arg fails bound check) are NOT deferred.
+            if arg_ids and #arg_ids > 0 and alias.body
+                and (not alias.params or #alias.params == 0) then
+                local body_id = types_mod.find(ctx, alias.body)
+                local bt = ctx.types:get(body_id)
+                if bt.tag == TAG_VAR or bt.tag == TAG_NAMED then
+                    -- Produce TAG_TYPE_CALL(body, args): resolved at instantiation time.
+                    local mk = ctx.lists:mark()
+                    for _, aid in ipairs(arg_ids) do ctx.lists:push(aid) end
+                    local as, al = ctx.lists:since(mk)
+                    local id = types_mod.alloc_type(ctx, defs.TAG_TYPE_CALL)
+                    ctx.types:get(id).data[0] = body_id
+                    ctx.types:get(id).data[1] = as
+                    ctx.types:get(id).data[2] = al
+                    return id
+                end
+            end
             errors_mod.error(ctx.err, ctx.filename, ctx._ann_warn_line or 0, 0, resolve_err)
             return ctx.T_ANY
         end

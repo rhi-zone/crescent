@@ -158,6 +158,14 @@ local function generalize_inner(ctx, tid, level, seen)
         generalize_inner(ctx, t.data[0], level, seen)
         return
     end
+
+    if tag == defs.TAG_TYPE_CALL then
+        generalize_inner(ctx, t.data[0], level, seen)
+        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+            generalize_inner(ctx, ctx.lists:get(i), level, seen)
+        end
+        return
+    end
 end
 
 -- Generalize: mark free vars above level as generic (for let-polymorphism).
@@ -296,6 +304,22 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
         return id
     end
 
+    if tag == defs.TAG_TYPE_CALL then
+        local callee = instantiate_inner(ctx, t.data[0], level, mapping, seen)
+        local new_args = {}
+        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+            new_args[#new_args + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
+        end
+        local mk = ctx.lists:mark()
+        for _, aid in ipairs(new_args) do ctx.lists:push(aid) end
+        local as, al = ctx.lists:since(mk)
+        local id = types_mod.alloc_type(ctx, defs.TAG_TYPE_CALL)
+        ctx.types:get(id).data[0] = callee
+        ctx.types:get(id).data[1] = as
+        ctx.types:get(id).data[2] = al
+        return id
+    end
+
     return tid
 end
 
@@ -414,6 +438,26 @@ local function substitute_inner(ctx, tid, mapping, seen)
         seen[tid] = nil
         local id = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
         ctx.types:get(id).data[0] = inner
+        return id
+    end
+
+    -- TAG_TYPE_CALL: deferred HKT application F<A>.
+    -- Substitute through callee and args so that when F is replaced by a concrete
+    -- type constructor (e.g. Maybe), the application can be evaluated later.
+    if tag == defs.TAG_TYPE_CALL then
+        local callee_id = substitute_inner(ctx, t.data[0], mapping, seen)
+        local new_args = {}
+        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+            new_args[#new_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+        end
+        seen[tid] = nil
+        local mk = ctx.lists:mark()
+        for _, aid in ipairs(new_args) do ctx.lists:push(aid) end
+        local as, al = ctx.lists:since(mk)
+        local id = types_mod.alloc_type(ctx, defs.TAG_TYPE_CALL)
+        ctx.types:get(id).data[0] = callee_id
+        ctx.types:get(id).data[1] = as
+        ctx.types:get(id).data[2] = al
         return id
     end
 

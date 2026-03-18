@@ -4651,17 +4651,17 @@ map_box(tostring, { other = 1 })
 ]], "missing field")
     end)
 
-    assert.it("GAP: shorthand function type `number -> string` in annotation weakens call checking", function()
-        -- When the annotation uses `number -> string` (no parens) the first arg is
-        -- treated as a generic `->` function and the second arg check may be skipped.
-        -- Using explicit `(number) -> string` syntax restores correct checking.
-        v3_no_errors([[
+    assert.it("PASS: shorthand function type `number -> string` in annotation correctly checks calls", function()
+        -- Top-level -> in type expressions now produces a proper function type:
+        -- `number -> string` is equivalent to `(number) -> string`.
+        -- So `(number -> string, ...)` is identical to `((number) -> string, ...)`.
+        v3_has_error([[
 --: (number -> string, { value: number }) -> { value: string }
 local function map_box(f, fa)
     return { value = f(fa.value) }
 end
 map_box(tostring, { other = 1 })
-]])
+]], "missing field")
     end)
 end)
 

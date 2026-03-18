@@ -731,18 +731,37 @@ function M.parse_annotations(annotations, pool, filename)
     end
 
     -- Parse union: A | B
+    -- Also handles top-level right-associative -> for curried function types.
+    -- This allows F<A> -> F<B> (bare, without surrounding parens) and
+    -- ((A -> B) -> F<A> -> F<B>) where the outer parens are transparent grouping.
     parse_type = function(s)
         local left = parse_intersection(s)
-        if not opt_char(s, "|") then return left end
-        local members = { left, parse_intersection(s) }
-        while opt_char(s, "|") do
-            members[#members + 1] = parse_intersection(s)
+        if opt_char(s, "|") then
+            local members = { left, parse_intersection(s) }
+            while opt_char(s, "|") do
+                members[#members + 1] = parse_intersection(s)
+            end
+            local ms, ml = flush_type_list(members)
+            local union = alloc_type(defs.TAG_UNION)
+            types:get(union).data[0] = ms
+            types:get(union).data[1] = ml
+            left = union
         end
-        local ms, ml = flush_type_list(members)
-        local union = alloc_type(defs.TAG_UNION)
-        types:get(union).data[0] = ms
-        types:get(union).data[1] = ml
-        return union
+        -- Top-level right-associative -> : T1 -> T2 means (T1) -> T2
+        skip_ws(s)
+        if s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "->" then
+            s.pos = s.pos + 2
+            local ret = parse_type(s)  -- right-recursive for right-associativity
+            local ps, pl = flush_type_list({ left })
+            local rs, rl = flush_type_list({ ret })
+            local fn = alloc_type(defs.TAG_FUNCTION)
+            local ft = types:get(fn)
+            ft.data[0] = ps; ft.data[1] = pl
+            ft.data[2] = rs; ft.data[3] = rl
+            ft.data[4] = -1
+            return fn
+        end
+        return left
     end
 
     -------------------------------------------------------------------
