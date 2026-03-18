@@ -222,9 +222,12 @@ local function solve_sub(ctx, c)
     -- Allows literal types to satisfy union/literal expectations, e.g. "ok" → "ok"|"error",
     -- or 3.14 → 3.14 (float literal narrowing round-trip).
     -- Skip if expected is a free type var (needs unify to bind it, not just a check).
+    -- Skip if expected is a closed table: the full unify path enforces the excess-field check
+    -- (width subtyping only holds when the target is open with a row variable).
     do
         local et = ctx.types:get(expected)
-        if et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR then
+        local is_closed_table = et.tag == TAG_TABLE and et.data[4] < 0
+        if not is_closed_table and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR then
             if unify_mod.try_unify(ctx, actual, expected) then
                 return true
             end
@@ -717,9 +720,12 @@ local function solve_callable(ctx, c)
             if act_tid then
                 -- Fast path: try direct assignability (preserves literal-to-literal/union).
                 -- Skip when exp_tid contains free vars: try_unify is read-only and won't bind them.
+                -- Skip for closed table params: the full unify path enforces the excess-field check.
                 local act_r = find(ctx, act_tid)
                 local et = ctx.types:get(exp_tid)
-                if et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
+                local param_is_closed_table = et.tag == TAG_TABLE and et.data[4] < 0
+                if not param_is_closed_table
+                  and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
                   and not contains_free_var(ctx, exp_tid)
                   and unify_mod.try_unify(ctx, act_r, exp_tid) then
                     -- ok

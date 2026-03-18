@@ -5773,19 +5773,19 @@ assert.describe("GAP: variance (unimplemented — all generics invariant)", func
     -- These document the current behavior. Once variance inference is implemented,
     -- the covariant read-only and contravariant callback cases should pass without error.
 
-    assert.it("GAP: covariant position — Box<Dog> should be usable as Box<Animal>", function()
-        -- With covariance (out T): Box<Dog> <: Box<Animal> when Dog <: Animal.
-        -- The current checker is invariant, so this is currently allowed only because
-        -- the structural types unify loosely (no nominal identity tracked).
-        -- This test documents the baseline — it must continue to pass after variance is added.
-        v3_no_errors([[
+    assert.it("GAP: covariant position — Box<Dog> correctly rejected without variance", function()
+        -- Without variance, Box<Dog> and Box<Animal> are invariant: Dog has excess field 'breed'
+        -- which fails the closed-table exact check in the function return type position.
+        -- Once covariant variance (out T) is implemented, ReadBox<Dog> <: ReadBox<Animal>
+        -- when Dog <: Animal — and this test should become v3_no_errors.
+        v3_has_error([[
 --:: Animal = { name: string }
 --:: Dog = { name: string, breed: string }
 --:: ReadBox<T> = { get: () -> T }
 local dog_box --: ReadBox<Dog>
 local _ --: ReadBox<Animal>
 _ = dog_box
-]])
+]], "excess field")
     end)
 
     assert.it("invariant mutable container — Box<Dog> correctly rejects Box<Animal>", function()
@@ -5801,5 +5801,84 @@ local dog_box --: MutBox<Dog>
 local animal_box --: MutBox<Animal>
 animal_box = dog_box
 ]], nil)
+    end)
+end)
+
+assert.describe("v3 closed vs open table subtyping", function()
+    assert.it("depth subtyping: { x: integer } satisfies { x: number }", function()
+        v3_no_errors([[
+local s --: { x: integer }
+local t --: { x: number }
+t = s
+]])
+    end)
+
+    assert.it("depth subtyping: literal subtype field satisfies annotated", function()
+        v3_no_errors([[
+local s --: { x: "hi" }
+local t --: { x: string }
+t = s
+]])
+    end)
+
+    assert.it("excess field error: closed target rejects wider source", function()
+        v3_has_error([[
+local t --: { x: number }
+t = { x = 1, y = 2 }
+]], "excess field")
+    end)
+
+    assert.it("excess field error: closed-typed var to closed target", function()
+        v3_has_error([[
+local s --: { x: number, y: string }
+local t --: { x: number }
+t = s
+]], "excess field")
+    end)
+
+    assert.it("open target accepts excess fields (width subtyping)", function()
+        v3_no_errors([[
+local t --: { x: number, ... }
+t = { x = 1, y = 2 }
+]])
+    end)
+
+    assert.it("open target accepts closed source with more fields", function()
+        v3_no_errors([[
+local s --: { x: number, y: string }
+local t --: { x: number, ... }
+t = s
+]])
+    end)
+
+    assert.it("closed param rejects excess-field argument", function()
+        v3_has_error([[
+--: (t: { x: number }) -> number
+local function f(t) return t.x end
+f({ x = 1, y = 2 })
+]], "excess field")
+    end)
+
+    assert.it("open param accepts excess-field argument", function()
+        v3_no_errors([[
+--: (t: { x: number, ... }) -> number
+local function f(t) return t.x end
+f({ x = 1, y = 2 })
+]])
+    end)
+
+    assert.it("generic bound: <T: { x: number }> still accepts wider types (at-least semantics)", function()
+        v3_no_errors([[
+--:: Wrap<T: { x: number }> = { val: T }
+local w --: Wrap<{ x: number, y: string }>
+]])
+    end)
+
+    assert.it("depth subtyping in function return: () -> integer satisfies () -> number", function()
+        v3_no_errors([[
+local f --: () -> integer
+local g --: () -> number
+g = f
+]])
     end)
 end)

@@ -34,8 +34,9 @@ local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_INTEGER = defs.LIT_INTEGER
 
-local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
-local FLAG_READONLY = defs.FLAG_READONLY
+local FLAG_OPTIONAL  = defs.FLAG_OPTIONAL
+local FLAG_READONLY  = defs.FLAG_READONLY
+local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
 local band = require("bit").band
 
 -- Meta ops supported natively by primitive types
@@ -572,6 +573,24 @@ function M.unify(ctx, a, b)
                 end
             end
         end
+
+        -- Excess-field check: if the target is closed (no row var) and the source
+        -- is also closed, every field in the source must exist in the target.
+        -- Width subtyping ({x,y} <: {x}) only holds when the target is open ({x,...}).
+        if tb.data[4] < 0 and ta.data[4] < 0 then
+            for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                local afid = ctx.lists:get(i)
+                local afe  = ctx.fields:get(afid)
+                if band(afe.flags, FLAG_OPAQUE_KEY) == 0 then
+                    local bfe_match = types_mod.table_field(ctx, b, afe.name_id)
+                    if not bfe_match then
+                        local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
+                        return false, "excess field '" .. fname .. "' not in target type"
+                    end
+                end
+            end
+        end
+
         return true
     end
 
