@@ -1,0 +1,218 @@
+-- lib/fp/either/init.lua
+-- Either e a = Left e | Right a
+-- Right-biased: all typeclass operations act on the Right value and
+-- short-circuit on Left.
+-- Implements: Mappable, Applicable, Chainable, Foldable, Semigroup
+
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
+
+local Mappable   = require("lib.fp.mappable")
+local Applicable = require("lib.fp.applicable")
+local Foldable   = require("lib.fp.foldable")
+local Semigroup  = require("lib.fp.semigroup")
+
+-- Guard Chainable — may not exist in all deployment configurations.
+local Chainable
+do
+	local ok, mod = pcall(require, "lib.fp.chainable")
+	if ok then Chainable = mod end
+end
+
+local Either = {}
+
+-- ── Left ──────────────────────────────────────────────────────────────────────
+
+local left_f_impl = {
+	map = function(_f, fa)
+		-- map over Left is identity — short-circuit
+		return fa
+	end,
+}
+
+local left_ap_impl = {
+	-- Left(e) <*> _ = Left(e)
+	ap = function(ff, _fa)
+		return ff
+	end,
+	pure = function(a)
+		return Either.right(a)
+	end,
+}
+
+local left_foldable_impl = {
+	-- Left has no Right value — behave like an empty container
+	foldr = function(_f, z, _ta)
+		return z
+	end,
+	foldMap = function(_f, _ta)
+		error("Foldable.foldMap: cannot foldMap over Left (no value to fold)", 2)
+	end,
+	fold = function(_ta)
+		error("Foldable.fold: cannot fold Left (no value to fold)", 2)
+	end,
+}
+
+-- Semigroup for Left(e):
+--   Left <> Right  = Right
+--   Left <> Left   = right Left (the second one)
+local left_sg_impl = {
+	append = function(_a, b)
+		-- Left is always dominated by the right operand
+		return b
+	end,
+}
+
+local function make_left_chainable_impl()
+	return {
+		-- bind(Left(e), f) = Left(e)
+		bind = function(ma, _f)
+			return ma
+		end,
+	}
+end
+
+local function make_left_mt()
+	local index = {
+		[Mappable]   = left_f_impl,
+		[Applicable] = left_ap_impl,
+		[Foldable]   = left_foldable_impl,
+		[Semigroup]  = left_sg_impl,
+	}
+	if Chainable then
+		index[Chainable] = make_left_chainable_impl()
+	end
+	return {
+		__index = index,
+		__tostring = function(self)
+			return "Left(" .. tostring(self.value) .. ")"
+		end,
+	}
+end
+
+local left_mt = make_left_mt()
+
+function Either.left(e)
+	return setmetatable({ value = e, _tag = "left" }, left_mt)
+end
+
+-- ── Right ─────────────────────────────────────────────────────────────────────
+
+local right_f_impl = {
+	map = function(f, fa)
+		return Either.right(f(fa.value))
+	end,
+}
+
+local right_ap_impl = {
+	-- Right(f) <*> Left(e)  = Left(e)
+	-- Right(f) <*> Right(a) = Right(f(a))
+	ap = function(ff, fa)
+		if fa._tag == "left" then
+			return fa
+		end
+		return Either.right(ff.value(fa.value))
+	end,
+	pure = function(a)
+		return Either.right(a)
+	end,
+}
+
+local right_foldable_impl = {
+	-- foldr(f, z, Right(a)) = f(a, z)
+	foldr = function(f, z, ta)
+		return f(ta.value, z)
+	end,
+	-- foldMap(f, Right(a)) = f(a)
+	foldMap = function(f, ta)
+		return f(ta.value)
+	end,
+	-- fold(Right(a)) = a
+	fold = function(ta)
+		return ta.value
+	end,
+}
+
+-- Semigroup for Right(a):
+--   Right <> Left  = Right (self wins)
+--   Right(a) <> Right(b) = Right(append(a, b))
+local right_sg_impl = {
+	append = function(a, b)
+		if b._tag == "left" then
+			return a
+		end
+		-- Both Right — combine inner values via their Semigroup instance
+		return Either.right(Semigroup.append(a.value, b.value))
+	end,
+}
+
+local function make_right_chainable_impl()
+	return {
+		-- bind(Right(a), f) = f(a)
+		bind = function(ma, f)
+			return f(ma.value)
+		end,
+	}
+end
+
+local function make_right_mt()
+	local index = {
+		[Mappable]   = right_f_impl,
+		[Applicable] = right_ap_impl,
+		[Foldable]   = right_foldable_impl,
+		[Semigroup]  = right_sg_impl,
+	}
+	if Chainable then
+		index[Chainable] = make_right_chainable_impl()
+	end
+	return {
+		__index = index,
+		__tostring = function(self)
+			return "Right(" .. tostring(self.value) .. ")"
+		end,
+	}
+end
+
+local right_mt = make_right_mt()
+
+function Either.right(a)
+	return setmetatable({ value = a, _tag = "right" }, right_mt)
+end
+
+-- ── Predicates ────────────────────────────────────────────────────────────────
+
+function Either.is_left(e)
+	return e._tag == "left"
+end
+
+function Either.is_right(e)
+	return e._tag == "right"
+end
+
+-- ── Eliminators ───────────────────────────────────────────────────────────────
+
+function Either.from_right(e)
+	if e._tag ~= "right" then
+		error("Either.from_right: Left", 2)
+	end
+	return e.value
+end
+
+function Either.from_left(e)
+	if e._tag ~= "left" then
+		error("Either.from_left: Right", 2)
+	end
+	return e.value
+end
+
+-- either(f, g, e) — eliminate: apply f for Left, g for Right
+function Either.either(f, g, e)
+	if e._tag == "left" then
+		return f(e.value)
+	else
+		return g(e.value)
+	end
+end
+
+return Either
