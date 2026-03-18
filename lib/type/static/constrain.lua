@@ -356,6 +356,41 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             members[#members + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
         end
         seen[ann_tid] = nil
+        -- Detect field conflicts: when two table members share a field name but
+        -- their types are mutually incompatible, the intersection is unsatisfiable.
+        local unify_mod = require("lib.type.static.unify")
+        for i = 1, #members do
+            local ai = types_mod.find(ctx, members[i])
+            local ta = ctx.types:get(ai)
+            if ta.tag == TAG_TABLE then
+                for j = i + 1, #members do
+                    local aj = types_mod.find(ctx, members[j])
+                    local tb = ctx.types:get(aj)
+                    if tb.tag == TAG_TABLE then
+                        for fi = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+                            local afe = ctx.fields:get(ctx.lists:get(fi))
+                            local bfe = types_mod.table_field(ctx, aj, afe.name_id)
+                            if bfe then
+                                local at_field = types_mod.find(ctx, afe.type_id)
+                                local bt_field = types_mod.find(ctx, bfe.type_id)
+                                if not unify_mod.try_unify(ctx, at_field, bt_field)
+                                  and not unify_mod.try_unify(ctx, bt_field, at_field) then
+                                    local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
+                                    local at_str = types_mod.display(ctx, at_field)
+                                    local bt_str = types_mod.display(ctx, bt_field)
+                                    local line = ctx._ann_warn_line or 0
+                                    errors_mod.error(ctx.err, ctx.filename, line, 0,
+                                        "intersection field conflict: field '" .. fname
+                                        .. "' has incompatible types '"
+                                        .. at_str .. "' and '" .. bt_str .. "'")
+                                    return ctx.T_NEVER
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
         return types_mod.make_intersection(ctx, members)
     end
 
