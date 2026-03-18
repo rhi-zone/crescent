@@ -5696,3 +5696,110 @@ t = { value = "wrong", left = nil, right = nil }
 ]], "cannot assign")
     end)
 end)
+
+assert.describe("v3 correlated multi-return narrowing", function()
+    assert.it("pcall success: ok=true arm narrows val to fn return type", function()
+        -- After `if ok then`, `val` should be the wrapped fn's return type (integer),
+        -- not the full union (integer|string). Arithmetic on integer must not error.
+        v3_no_errors([[
+--: (integer) -> integer
+local function double(n) return n * 2 end
+local ok, val = pcall(double, 5)
+if ok then
+    local x = val + 1
+end
+]])
+    end)
+
+    assert.it("pcall failure: not-ok arm narrows val to string (error message)", function()
+        v3_no_errors([[
+--: () -> integer
+local function work() return 42 end
+local ok, val = pcall(work)
+if not ok then
+    local s --: string
+    s = val
+end
+]])
+    end)
+
+    assert.it("pcall guard pattern: if not ok then return end narrows val in continuation", function()
+        v3_no_errors([[
+--: (integer) -> integer
+local function double(n) return n * 2 end
+local ok, val = pcall(double, 5)
+if not ok then return end
+local x = val + 1
+]])
+    end)
+
+    assert.it("pcall no result vars: no error", function()
+        v3_no_errors([[
+local ok = pcall(function() end)
+]])
+    end)
+
+    assert.it("xpcall: success branch narrows val to fn return type", function()
+        v3_no_errors([[
+--: (integer) -> integer
+local function double(n) return n * 2 end
+local ok, val = xpcall(double, tostring, 5)
+if ok then
+    local x = val + 1
+end
+]])
+    end)
+
+    assert.it("io.open success: if f then narrows f to non-nil file handle", function()
+        v3_no_errors([[
+local f, err = io.open("test.txt", "r")
+if f then
+    local line = f:read("*l")
+end
+]])
+    end)
+
+    assert.it("string.find match: if s then narrows s and e to integer", function()
+        v3_no_errors([[
+local s, e = string.find("hello world", "world")
+if s then
+    local len = e - s
+end
+]])
+    end)
+end)
+
+assert.describe("GAP: variance (unimplemented — all generics invariant)", function()
+    -- These document the current behavior. Once variance inference is implemented,
+    -- the covariant read-only and contravariant callback cases should pass without error.
+
+    assert.it("GAP: covariant position — Box<Dog> should be usable as Box<Animal>", function()
+        -- With covariance (out T): Box<Dog> <: Box<Animal> when Dog <: Animal.
+        -- The current checker is invariant, so this is currently allowed only because
+        -- the structural types unify loosely (no nominal identity tracked).
+        -- This test documents the baseline — it must continue to pass after variance is added.
+        v3_no_errors([[
+--:: Animal = { name: string }
+--:: Dog = { name: string, breed: string }
+--:: ReadBox<T> = { get: () -> T }
+local dog_box --: ReadBox<Dog>
+local _ --: ReadBox<Animal>
+_ = dog_box
+]])
+    end)
+
+    assert.it("invariant mutable container — Box<Dog> correctly rejects Box<Animal>", function()
+        -- A mutable container is invariant: set is contravariant (parameter position),
+        -- get is covariant (return position) — combined = invariant.
+        -- The checker catches this via structural field-type mismatch on 'set'.
+        -- This is correct behavior (not a gap) — structural subtyping handles it.
+        v3_has_error([[
+--:: Animal = { name: string }
+--:: Dog = { name: string, breed: string }
+--:: MutBox<T> = { get: () -> T, set: (T) -> nil }
+local dog_box --: MutBox<Dog>
+local animal_box --: MutBox<Animal>
+animal_box = dog_box
+]], nil)
+    end)
+end)

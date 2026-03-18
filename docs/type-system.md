@@ -431,16 +431,21 @@ convert(true)    -- ERROR: no matching overload
 
 Best-match avoids order-sensitivity bugs. If multiple overloads match equally, it's an error — the user must narrow the argument types. This is more predictable than first-match and gives the user more control.
 
-### Variance: inferred, with invariance explicit
+### Variance: unimplemented — inference planned, explicit override available
 
-Variance is inferred from usage, not declared. The checker determines whether a generic parameter is used covariantly, contravariantly, or invariantly based on its positions in the type:
+**Current state:** all generic types are invariant. `Box<Dog>` is not a subtype of `Box<Animal>` even if `Dog <: Animal`. This is sound but restrictive.
 
-- Return position → covariant
-- Parameter position → contravariant
-- Both → invariant
-- Mutable field → invariant
+**Planned approach:** infer variance from usage, with explicit annotation for documentation or enforcement:
 
-Explicit variance annotations are not needed for most code. If the inferred variance is wrong, the user sees it as a type error at the use site — which is the right place to catch it.
+- Return position only → infer covariant (`out T`)
+- Parameter position only → infer contravariant (`in T`)
+- Both positions, or mutable field → infer invariant (`inout T`, the default)
+
+Inference is the common case — it is what most generic types need without extra ceremony. Explicit `in T` / `out T` / `inout T` annotations are for:
+1. Documentation — making the contract visible at declaration sites
+2. Enforcement — if you annotate `out T` and accidentally write to it somewhere, the checker flags the inconsistency instead of silently widening to invariant
+
+Without variance, HKT subtype relationships between constructors (`F<A> <: G<A>`) cannot be checked — the system only checks that concrete instantiated types unify. This is a known gap tracked in TODO.md.
 
 **Invariant choice types** are a distinct concept: a value that is *one of* several types but you don't know which. This is what unions (`A | B`) express. The key property is that a `[A | B]` array can *contain* both A and B values, but you can't assume any particular element is A without narrowing. This is sound — unlike TypeScript's unsound covariant arrays.
 
@@ -856,7 +861,7 @@ No new syntax. Arity is structural — the bound's parameter count IS the kind. 
 
 **Known limitation — type argument extraction.** When `<F, A>(fa: F<A>)` is called with `Maybe<number>`, the solver cannot currently extract `F = Maybe, A = number` from the expanded structural type. Once `Maybe<number>` is expanded to `{ tag: "just", value: integer } | { tag: "nothing" }`, the type-constructor/argument decomposition is lost. Fixing this requires either nominal type preservation (expanded generics remember their constructor) or bidirectional inference that propagates `F<A>` inward before expansion. Until then, constraints on `A` in `<F, A: Semigroup>(fa: F<A>)` are unenforceable at call sites — `A` is unbound.
 
-**Type constructor variance is not yet implemented.** All generic types are currently invariant — `Box<Dog>` is not a subtype of `Box<Animal>` even if `Dog <: Animal`. This is sound but restrictive. Variance annotations (`+T` covariant, `-T` contravariant) are needed to express "read-only container is covariant in its element type" or "function is contravariant in its argument." Without variance, HKT subtype relationships between constructors (`F<A> <: G<A>`) can't be checked — the system only checks that the concrete instantiated types unify. This is a known gap, not a design decision.
+**Type constructor variance is not yet implemented.** See the "Variance" section above. All generic types are currently invariant — `Box<Dog>` is not a subtype of `Box<Animal>` even if `Dog <: Animal`. This is sound but restrictive. Without variance, HKT subtype relationships between constructors (`F<A> <: G<A>`) can't be checked. This is a known gap tracked in TODO.md.
 
 ### `newtype` conversion: constructor pattern, not syntax
 
