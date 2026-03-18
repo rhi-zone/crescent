@@ -1150,6 +1150,8 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 emit(ctx, { C_SUB, rhs_tid, ann_tid, n.line, n.col })
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
+            -- Record annotation so assignments keep this as the permanent type.
+            env_mod.bind_annotation(ctx.scope, name_id, ann_tid)
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
             if stmt_require_mod and i == 0 and el == 1 then
                 ctx.require_sources[name_id] = stmt_require_mod
@@ -1228,8 +1230,17 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             local name_id = tn.data[0]
             local existing = env_mod.lookup(ctx.scope, name_id)
             if existing then
-                local declared = env_mod.lookup_declared(ctx.scope, name_id)
-                local check_against = types_mod.widen(ctx, declared or existing)
+                -- If the variable has an explicit annotation, that type is authoritative:
+                -- always check rhs <: annotation_type regardless of any intermediate binding.
+                -- Still rebind for flow-sensitivity (branch-join narrowing via reassignment).
+                local ann_type = env_mod.lookup_annotation(ctx.scope, name_id)
+                local check_against
+                if ann_type then
+                    check_against = ann_type
+                else
+                    local declared = env_mod.lookup_declared(ctx.scope, name_id)
+                    check_against = types_mod.widen(ctx, declared or existing)
+                end
                 local ca_resolved = types_mod.find(ctx, check_against)
                 local ca_tag = ctx.types:get(ca_resolved).tag
                 if ca_tag ~= TAG_VAR then

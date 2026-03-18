@@ -5388,16 +5388,15 @@ x = 42
 ]])
     end)
 
-    assert.it("GAP: Box<any> — generic with `any` arg does not accept arbitrary values", function()
-        -- Box<any> should give { value: any }, accepting any assignment to value.
-        -- Currently the checker pins the first assignment type and rejects later
-        -- assignments of a different type — `any` is not propagated as a wildcard.
-        v3_has_error([[
+    assert.it("PASS: Box<any> — annotated variable type is authoritative, accepts arbitrary reassignments", function()
+        -- Box<any> expands to { value: any }. The annotation is the permanent type
+        -- for x; each assignment checks rhs <: Box<any> without rebinding x.
+        v3_no_errors([[
 --:: Box<T> = { value: T }
 local x --: Box<any>
 x = { value = true }
 x = { value = 42 }
-]], "")
+]])
     end)
 
     assert.it("PASS: never in a union is absorbed — number | never = number", function()

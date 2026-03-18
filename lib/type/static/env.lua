@@ -23,20 +23,22 @@ local M = {}
 -- Create a root scope at the given level.
 function M.new(level)
     return {
-        bindings      = {},  -- [name_id] -> type_id
-        type_bindings = {},  -- [name_id] -> { body=type_id, params={name_id,...} | nil, nominal=bool }
-        parent        = nil,
-        level         = level or 0,
+        bindings         = {},  -- [name_id] -> type_id
+        type_bindings    = {},  -- [name_id] -> { body=type_id, params={name_id,...} | nil, nominal=bool }
+        annotation_types = {},  -- [name_id] -> type_id (declared annotation, permanent type for variable)
+        parent           = nil,
+        level            = level or 0,
     }
 end
 
 -- Create a child scope inheriting from parent.
 function M.child(parent)
     return {
-        bindings      = {},
-        type_bindings = {},
-        parent        = parent,
-        level         = parent.level + 1,
+        bindings         = {},
+        type_bindings    = {},
+        annotation_types = {},
+        parent           = parent,
+        level            = parent.level + 1,
     }
 end
 
@@ -49,6 +51,26 @@ end
 -- alias: { body=type_id, params={name_id,...}|nil, nominal=bool }
 function M.bind_type(scope, name_id, alias)
     scope.type_bindings[name_id] = alias
+end
+
+-- Record the explicit annotation type for a variable (permanent declared type).
+-- Assignments to this variable check rhs <: annotation_type rather than rebinding.
+function M.bind_annotation(scope, name_id, type_id)
+    scope.annotation_types[name_id] = type_id
+end
+
+-- Look up the annotation type for a variable up the scope chain.
+-- Returns type_id or nil if the variable has no explicit annotation.
+function M.lookup_annotation(scope, name_id)
+    local s = scope
+    while s do
+        if s.annotation_types then
+            local ty = s.annotation_types[name_id]
+            if ty ~= nil then return ty end
+        end
+        s = s.parent
+    end
+    return nil
 end
 
 -- Look up a name (intern ID) up the scope chain.
