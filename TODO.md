@@ -449,7 +449,8 @@ Blocking items for cutover:
 - [ ] **Recursive generic type crash** — `Tree<T>` with two recursive children crashes the arena with nil pointer arithmetic fault; cycle detection not implemented for multi-child recursive generics. Self-referential single-child types work. (adversarial tests, 2026-03-18)
 - [ ] **`never` type not enforced** — `never`-annotated bindings accept any assignment without error. (adversarial tests, 2026-03-18)
 - [ ] **`any` through `Box<any>`** — `Box<any>` pins the first assignment's concrete type rather than treating `any` as a wildcard; multi-assignment fails. (adversarial tests, 2026-03-18)
-- [ ] **Tag-exclusion in else branch** — after `if t.tag == "circle" then ... end`, the else branch still has `t.s.w: number | nil` instead of narrowing to the non-circle shape. Branch join doesn't narrow the else side by tag exclusion. (adversarial tests, 2026-03-18)
+- [x] **Tag-exclusion in else branch** — fixed 2026-03-19: else branch now applies accumulated negated narrowings from all preceding if/elseif conditions (both Cat-E exiting and pass-through). See `fix(type): tag-exclusion narrowing in else branch`.
+- [ ] **Tag-exclusion in else with multiple exiting elseif arms** — `guard_narrowings` is last-write-wins; a three-arm union dispatched across two exiting elseif branches leaves the else branch seeing the full union instead of just the third arm. Fix: accumulate `guard_narrowings` by intersecting negations from each exiting arm instead of overwriting. (adversarial tests, 2026-03-19)
 - [ ] Variadic `pipe`/`compose` typing — fixed-arity overloads work but variadic needs design; blocked on generic inference + possibly variadic generics or dependent types. Low priority, pending design.
 
 ## performance
