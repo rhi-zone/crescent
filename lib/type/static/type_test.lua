@@ -4606,16 +4606,29 @@ local x --: T1
 ]], "expects 1 argument")
     end)
 
-    assert.it("GAP: <F, A>(fa: F<A>) -> A body checking not possible", function()
-        -- The body cannot safely access fa.value because F<A> has no structure.
-        -- The checker should prevent accessing fields on an HKT var, but currently
-        -- it does not track the TAG_TYPE_CALL structure — F<A> becomes a bare var
-        -- and field access is silently T_UNKNOWN (open table miss).
+    assert.it("PASS: <F, A>(fa: F) -> A body — fa.value infers structural row constraint", function()
+        -- When fa: F (a type variable), accessing fa.value unifies F with an open
+        -- table { value: _, ... } via TAG_ROWVAR. The result is the field var, not
+        -- T_UNKNOWN. No error is emitted for the field access or the return.
         v3_no_errors([[
 --: <F, A>(fa: F) -> A
 local function extract(fa)
     return fa.value
 end
+]])
+    end)
+
+    assert.it("PASS: extract(fa) = fa.value called with {value=42} returns integer", function()
+        -- At the call site, F is instantiated to { value: 42 } (inferred from arg),
+        -- the row constraint propagates, and the return type resolves to integer.
+        -- Assigning the result to an integer-typed variable must not error.
+        v3_no_errors([[
+local function extract(fa)
+    return fa.value
+end
+local r = extract({ value = 42 })
+local check_int --: integer
+check_int = r
 ]])
     end)
 
@@ -5279,10 +5292,10 @@ local x --: Apply<number, string>
 ]])
     end)
 
-    assert.it("GAP: <F: Mappable, A>(fa: F) -> A body field access is T_UNKNOWN", function()
-        -- If F is constrained to Mappable ({ value: T }), accessing fa.value
-        -- should be valid and typed A. Currently T_UNKNOWN (open-table miss)
-        -- because F<A> doesn't carry the Mappable structure.
+    assert.it("PASS: <F: Mappable, A>(fa: F) -> A body — fa.value infers row constraint on F", function()
+        -- F is constrained to Mappable ({ value: T }). When fa.value is accessed,
+        -- F (a TAG_VAR) is unified with an open table { value: _, ... } via TAG_ROWVAR.
+        -- The field access does not produce T_UNKNOWN and the return does not error.
         v3_no_errors([[
 --:: Mappable<T> = { value: T }
 --: <F: Mappable, A>(fa: F) -> A
