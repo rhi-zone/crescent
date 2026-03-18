@@ -26,6 +26,9 @@ local TAG_ROWVAR       = defs.TAG_ROWVAR
 local TAG_NEVER        = defs.TAG_NEVER
 local TAG_NOMINAL      = defs.TAG_NOMINAL
 local TAG_TUPLE        = defs.TAG_TUPLE
+local TAG_NAMED        = defs.TAG_NAMED
+local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
+local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
 
 local LIT_INTEGER = defs.LIT_INTEGER
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -42,6 +45,7 @@ local C_CALLABLE  = constrain.C_CALLABLE
 local C_ARITH     = constrain.C_ARITH
 local C_RETURN    = constrain.C_RETURN
 local C_COMPARE   = constrain.C_COMPARE
+local C_BOUND     = constrain.C_BOUND
 
 local find = types_mod.find
 
@@ -219,6 +223,47 @@ local function solve_sub(ctx, c)
             .. (err and (": " .. err) or ""))
     end
     return ok
+end
+
+-- Solve a forall bound check: C_BOUND = { C_BOUND, fresh_tv_id, bound_type_id, line, col }
+-- Defers while fresh_tv is still a free TAG_VAR (not yet bound at call site).
+-- Once bound, checks try_unify(widen(actual), bound) and emits an error if violated.
+-- Skips enforcement when the bound is a TAG_NAMED, TAG_MATCH_TYPE, or TAG_TYPE_CALL —
+-- these represent kind constraints or complex computed bounds not yet supported.
+local function solve_bound(ctx, c)
+    local tv_id    = c[2]
+    local bound_id = c[3]
+    local line, col = c[4], c[5]
+
+    local actual = find(ctx, tv_id)
+    local at = ctx.types:get(actual)
+
+    -- Defer: TV not yet bound to a concrete type at the call site.
+    if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then
+        return false
+    end
+
+    -- Skip unenforced bound forms:
+    --   TAG_NAMED      — unapplied kind constraint (e.g. <F: T1> where T1<X> = ...)
+    --   TAG_MATCH_TYPE — deferred computed bound (not yet evaluable without concrete T)
+    --   TAG_TYPE_CALL  — unapplied HKT application
+    --   TAG_NEVER      — indeterminate bound (e.g. match type evaluation failed on free TV)
+    local bt = ctx.types:get(find(ctx, bound_id))
+    if bt.tag == TAG_NAMED or bt.tag == TAG_MATCH_TYPE or bt.tag == TAG_TYPE_CALL
+      or bt.tag == TAG_NEVER then
+        return true  -- not yet enforced
+    end
+
+    -- TV is bound — check the bound.
+    local widened = widen_for_sub(ctx, actual)
+    if not unify_mod.try_unify(ctx, widened, bound_id) then
+        add_error(ctx, line, col,
+            "type argument '" .. types_mod.display_short(ctx, actual)
+            .. "' does not satisfy constraint '"
+            .. types_mod.display_short(ctx, bound_id) .. "'")
+        return false
+    end
+    return true
 end
 
 -- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
@@ -952,6 +997,7 @@ function M.solve(ctx, constraints)
         [C_ARITH]     = solve_arith,
         [C_RETURN]    = solve_return,
         [C_COMPARE]   = solve_compare,
+        [C_BOUND]     = solve_bound,
     }
 
     -- Iterate to fixpoint (max 3 passes for recursive types).

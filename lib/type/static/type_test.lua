@@ -4521,27 +4521,24 @@ local function constrained(x) return x end
 ]])
     end)
 
-    assert.it("GAP: <T: number> constraint is NOT enforced at call site", function()
-        -- Passing a string to a constrained type var should fail,
-        -- but the checker accepts it because the constraint is dropped.
-        -- When constraints are implemented, this test should be changed to
-        -- v3_has_error(..., "constraint") or similar.
-        v3_no_errors([[
+    assert.it("ENFORCED: <T: number> constraint rejects string at call site", function()
+        -- Passing a string to a constrained type var should fail.
+        v3_has_error([[
 --: <T: number>(x: T) -> T
 local function constrained(x) return x end
 local r = constrained("this should violate T: number")
-]])
+]], "constraint")
     end)
 
-    assert.it("GAP: <F: Mappable> constraint not enforced at call site", function()
+    assert.it("ENFORCED: <F: Mappable> structural constraint rejects plain number", function()
         -- Structural constraint on a named type: passing number where F: Mappable
-        -- expected should fail once constraints are propagated.
-        v3_no_errors([[
+        -- expected should fail.
+        v3_has_error([[
 --:: Mappable = { map: function }
 --: <F: Mappable, A, B>(f: A -> B, fa: F) -> F
 local function map_generic(f, fa) return fa end
 local result = map_generic(function(x) return x + 1 end, 42)
-]])
+]], "constraint")
     end)
 
     assert.it("PASS: plain forall <A> without constraint accepts any type", function()
@@ -5216,22 +5213,21 @@ end)
 
 assert.describe("adversarial: HKT constraint enforcement", function()
 
-    assert.it("GAP: bound is itself a generic type — <F: Wrapper<number>> not enforced", function()
+    assert.it("ENFORCED: <F: Wrapper<number>> rejects plain number (missing .value field)", function()
         -- Wrapper<T> = { value: T }; F: Wrapper<number> means F must be
         -- { value: number }. Passing 42 should violate the bound.
-        -- Constraint enforcement is not yet implemented; accepted without error.
-        v3_no_errors([[
+        v3_has_error([[
 --:: Wrapper<T> = { value: T }
 --: <F: Wrapper<number>>(x: F) -> F
 local function boxed(x) return x end
 local r = boxed(42)
-]])
+]], "constraint")
     end)
 
-    assert.it("GAP: mutually constrained params <F, T: F> — T references F param", function()
+    assert.it("GAP: mutually constrained params <F, T: F> — T references F param (higher-order, not yet enforced)", function()
         -- T: F means T must satisfy the type F. When F is itself a type variable
-        -- (not a concrete type) this is a higher-order constraint.
-        -- Currently the constraint is dropped; no error for T not satisfying F.
+        -- (not a concrete type), the bound is an unbound TAG_VAR, and try_unify
+        -- returns true for any actual (RHS free var). This remains a gap.
         v3_no_errors([[
 --: <F, T: F>(f: F, t: T) -> T
 local function check_sub(f, t) return t end
@@ -5239,25 +5235,23 @@ local r = check_sub({ x = 1 }, { x = 2, y = 3 })
 ]])
     end)
 
-    assert.it("GAP: <F: { map: any }> structural typeclass bound — field check not done", function()
+    assert.it("ENFORCED: <F: { map: any }> structural bound rejects table without .map", function()
         -- Passing a table without .map should violate the structural bound.
-        -- No enforcement today; constraint is silently dropped.
-        v3_no_errors([[
+        v3_has_error([[
 --: <F: { map: any }>(fa: F) -> F
 local function needs_map(fa) return fa end
 local r = needs_map({ no_map = true })
-]])
+]], "constraint")
     end)
 
-    assert.it("GAP: bound violation at nested instantiation depth — not propagated", function()
+    assert.it("ENFORCED: <T: { x: number }> rejects table without field x", function()
         -- <T: { x: number }> should reject { y = "no_x" }.
-        -- Currently constraints are dropped, so the bad call passes silently.
-        v3_no_errors([[
+        v3_has_error([[
 --:: Wrapper<T> = { value: T }
 --: <T: { x: number }>(t: T) -> Wrapper<T>
 local function wrap(t) return { value = t } end
 wrap({ y = "no_x" })
-]])
+]], "constraint")
     end)
 end)
 

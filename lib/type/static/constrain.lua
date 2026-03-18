@@ -120,6 +120,9 @@ local C_RETURN    = 6   -- {C_RETURN,   val_tid, expected_tid, line, col}
 local C_COMPARE   = 7   -- {C_COMPARE,  lhs_tid, rhs_tid, line, col}
 local C_INDEX     = 8   -- {C_INDEX,    obj_tid, key_tid, result_tid, line, col}
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot
+local C_BOUND     = 9   -- {C_BOUND,    fresh_tv_id, bound_type_id, line, col}
+-- Deferred forall bound check: defers while fresh_tv is still a free TAG_VAR,
+-- then checks try_unify(widen(fresh_tv), bound_type). Emitted at call sites.
 
 local M = {}
 
@@ -130,6 +133,7 @@ M.C_CALLABLE  = C_CALLABLE
 M.C_ARITH     = C_ARITH
 M.C_RETURN    = C_RETURN
 M.C_COMPARE   = C_COMPARE
+M.C_BOUND     = C_BOUND
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -407,11 +411,34 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == TAG_FORALL then
         seen[ann_tid] = true
         local param_scope = env_mod.child(ctx.scope)
+        local has_bounds = at.data[3] >= 0 and at.data[4] > 0
+        local param_tvs = {}  -- tv ids, parallel to params (used for bound storage)
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             local param_name_id = ctx.ann.lists:get(i)
             local tv = types_mod.make_var(ctx, ctx.scope.level + 1)
             ctx.types:get(tv).flags = defs.FLAG_GENERIC
             env_mod.bind_type(param_scope, param_name_id, { body = tv })
+            param_tvs[#param_tvs + 1] = tv
+        end
+        -- Resolve bounds (in param_scope so the bound can reference other type params)
+        -- and record them in ctx._forall_bounds keyed by generic tv_id.
+        -- Use _allow_unapplied_constructors so that unapplied kind-bounds like
+        -- <F: T1> (where T1<X> = ...) are accepted as TAG_NAMED rather than erroring.
+        -- solve_bound will skip TAG_NAMED bounds (kind constraints not yet enforced).
+        if has_bounds then
+            local saved_for_bounds = ctx.scope
+            ctx.scope = param_scope
+            local prev_allow = ctx._allow_unapplied_constructors
+            ctx._allow_unapplied_constructors = true
+            for idx = 1, #param_tvs do
+                local bound_ann_id = ctx.ann.lists:get(at.data[3] + idx - 1)
+                if bound_ann_id ~= -1 then
+                    local resolved_bound = resolve_annotation_type(ctx, bound_ann_id, seen)
+                    ctx._forall_bounds[param_tvs[idx]] = resolved_bound
+                end
+            end
+            ctx._allow_unapplied_constructors = prev_allow
+            ctx.scope = saved_for_bounds
         end
         local saved_scope = ctx.scope
         ctx.scope = param_scope
@@ -972,7 +999,18 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     end
 
     -- Instantiate callee at this call site (let-polymorphism)
-    local inst_callee = env_mod.instantiate(ctx, callee_tid, ctx.scope.level)
+    local inst_mapping = {}
+    local inst_callee = env_mod.instantiate(ctx, callee_tid, ctx.scope.level, inst_mapping)
+
+    -- Emit deferred bound checks for each instantiated generic TV that has a bound.
+    if next(ctx._forall_bounds) and next(inst_mapping) then
+        for orig_tv, fresh_tv in pairs(inst_mapping) do
+            local bound = ctx._forall_bounds[orig_tv]
+            if bound then
+                emit(ctx, { C_BOUND, fresh_tv, bound, n.line, n.col })
+            end
+        end
+    end
 
     local ret = fresh_var(ctx)
     emit(ctx, { C_CALLABLE, inst_callee, arg_tids, ret, n.line, n.col })
@@ -1028,7 +1066,18 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     local arg_tids = { recv_tid }
     for _, a in ipairs(extra) do arg_tids[#arg_tids + 1] = a end
 
-    local inst_method = env_mod.instantiate(ctx, method_var, ctx.scope.level)
+    local meth_mapping = {}
+    local inst_method = env_mod.instantiate(ctx, method_var, ctx.scope.level, meth_mapping)
+
+    -- Emit deferred bound checks for each instantiated generic TV that has a bound.
+    if next(ctx._forall_bounds) and next(meth_mapping) then
+        for orig_tv, fresh_tv in pairs(meth_mapping) do
+            local bound = ctx._forall_bounds[orig_tv]
+            if bound then
+                emit(ctx, { C_BOUND, fresh_tv, bound, n.line, n.col })
+            end
+        end
+    end
 
     local ret = fresh_var(ctx)
     emit(ctx, { C_CALLABLE, inst_method, arg_tids, ret, n.line, n.col })
@@ -1931,6 +1980,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx.require_sources    = {}
     ctx.type_origins       = {}   -- [type_id] -> filename; populated for cross-file types
     ctx.constraints        = {}   -- v3: emitted constraints
+    ctx._forall_bounds     = {}   -- [generic_tv_id] -> resolved_bound_type_id
     ctx.lit_cache          = {}   -- literal type interning: (kind<<32|val) → type_id
 
     if not parent_scope then

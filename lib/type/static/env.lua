@@ -346,8 +346,12 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
 end
 
 -- Instantiate: replace generic vars with fresh vars at current level.
-function M.instantiate(ctx, tid, level)
-    return instantiate_inner(ctx, tid, level, {}, {})
+-- Returns (result_tid, mapping) where mapping is { [orig_generic_tv_id] = fresh_tv_id }.
+-- If out_mapping is provided it is used (and populated) instead of a fresh table.
+function M.instantiate(ctx, tid, level, out_mapping)
+    local mapping = out_mapping or {}
+    local result = instantiate_inner(ctx, tid, level, mapping, {})
+    return result, mapping
 end
 
 -- Substitute: replace TAG_NAMED references matching mapping keys.
