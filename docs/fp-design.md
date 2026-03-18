@@ -74,6 +74,28 @@ to be confused with `Maybe First`/`Maybe Last` which are `First (Maybe a)` treat
 - `lib/fp/fn` — `Fn(f)`. Wraps functions; `__call` makes usage transparent.
   Implements: Mappable (composition), Applicable (S combinator), Chainable (reader/function monad).
 
+### Open question: naming Maybe and Either
+
+The typeclass names follow a principled `-able` convention (named after the operation).
+`Maybe` and `Either` are conventional Haskell names — not wrong, but not principled.
+
+From a type-theoretic perspective:
+- `Maybe a` is `1 + a` — a sum type with one unit variant and one `a` variant
+- `Either a b` is `a + b` — a coproduct of two arbitrary types
+- Both are degenerate cases of n-ary sum types: `Either` is `Sum2`, `Maybe` is `Sum2`
+  where one variant is fixed to `Unit`
+
+`Either` is part of an infinite family — `a + b`, `a + b + c`, etc. — and naming it
+`Either` obscures that relationship. The algebraic names would be more principled but
+no clear convention exists yet.
+
+The reason these exist as named types at all (rather than bare `a | nil` unions) is that
+constructors (`Just`, `Nothing`, `Left`, `Right`) are needed as dispatch surfaces for
+typeclass instances — metatables attach to the constructor values, not to the union type.
+
+**Decision deferred.** Using `maybe`/`either` as module names for now. Rename when a
+principled naming convention is established.
+
 ## Implementation Order
 
 Each typeclass is implemented together with its primary instances — no typeclass without
@@ -90,6 +112,45 @@ at least one instance to test it against.
 9. `fn` — Mappable/Applicable/Chainable instances
 10. `traversable` + `maybe`, `either` instances
 11. Optics — `lens`, `prism`, `iso`, `traversal` (building on Traversable foundation)
+
+## Pattern Matching
+
+Lua's idiomatic dispatch pattern is table lookup by tag:
+
+```lua
+local handlers = {
+    just    = function(v) return v.value + 1 end,
+    nothing = function(v) return 0 end,
+}
+handlers[value.tag](value)
+```
+
+`Sum.match` (or equivalent) formalizes this — a function that takes a value and a table
+of handlers keyed by constructor tag. The typechecker can narrow the type of `value`
+inside each handler via discriminated union narrowing on the tag field, which is already
+implemented.
+
+Pattern matching in crescent is not a language feature — it is this table dispatch
+pattern, integrated with the typechecker's existing narrowing.
+
+## Algebraic Structure
+
+The data types in `lib/fp/` are not arbitrary — they reflect the algebra of types:
+
+- `Unit` = `1` (one value)
+- `Bool` = `2` (two values)
+- `Maybe a` = `1 + a` (unit plus `a`)
+- `Either a b` = `a + b` (coproduct)
+- `Pair a b` = `a * b` (product)
+- `List a` = `1/(1-a)` (geometric series — lists of all lengths)
+
+Operations on types correspond to operations on their generating functions:
+- Differentiation gives one-hole contexts (zippers)
+- Integration gives cyclic structures (necklaces for lists)
+- The optics hierarchy (Lens, Prism, Traversal) falls out of this calculus directly
+
+This is not just aesthetic — the algebraic structure explains why the typeclass laws are
+what they are and why the hierarchy has exactly the shape it does.
 
 ## Type System Stress Tests
 
