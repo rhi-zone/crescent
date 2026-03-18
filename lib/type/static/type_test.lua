@@ -5461,16 +5461,27 @@ x = 42
 ]])
     end)
 
-    assert.it("GAP: assigning any-typed return to annotated number — no warning emitted", function()
-        -- The design says every implicit `any` emits a warning.
-        -- Assigning the result of an `any`-returning function to a `number`
-        -- binding should warn. Currently no warning is produced.
+    assert.it("PASS: assigning any-typed return to annotated number — no error (any is bilateral)", function()
+        -- `any` is a bilateral escape hatch: assigning any-typed return to number is allowed.
+        -- any <: number is permitted by design (any bypasses checking in both directions).
         v3_no_errors([[
 --: () -> any
 local function get_any() return 42 end
 local x --: number
 x = get_any()
 ]])
+    end)
+
+    assert.it("PASS: assigning unknown-typed return to annotated number — error (must narrow)", function()
+        -- `unknown` is the strict top type: anything can be assigned to unknown,
+        -- but unknown cannot be assigned to a concrete type without narrowing.
+        -- A function explicitly annotated -> unknown forces the caller to narrow the result.
+        v3_has_error([[
+--: () -> unknown
+local function get_unknown() return 42 end
+local x --: number
+x = get_unknown()
+]], "unknown")
     end)
 end)
 
