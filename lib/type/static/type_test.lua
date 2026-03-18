@@ -4577,6 +4577,22 @@ local function extract(fa)
 end
 ]])
     end)
+
+    assert.it("PASS: map<F, A, B> = ((A -> B) -> F<A> -> F<B>) with Maybe instantiation", function()
+        v3_no_errors([[
+--:: map<F, A, B> = ((A -> B) -> F<A> -> F<B>)
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+local x --: map<Maybe, number, string>
+]])
+    end)
+
+    assert.it("PASS: id<F, A> = (F<A> -> F<A>) HKT identity", function()
+        v3_no_errors([[
+--:: id<F, A> = (F<A> -> F<A>)
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+local x --: id<Maybe, number>
+]])
+    end)
 end)
 
 -- ---------------------------------------------------------------------------
