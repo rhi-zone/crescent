@@ -157,20 +157,50 @@ end
 
 -- Evaluate a match type.
 -- mt_id: type_id of a TAG_MATCH_TYPE slot
+-- seen:  { [mt_id] -> true } cycle-detection set (shared across recursive calls)
 -- Returns the result type_id of the first matching arm, or T_NEVER.
 function M.evaluate(ctx, mt_id, seen)
     seen = seen or {}
 
-    -- Cycle detection
+    -- Cycle detection: if we are already evaluating this exact match-type node,
+    -- return never to break the cycle rather than looping or crashing.
     if seen[mt_id] then return ctx.T_NEVER end
     seen[mt_id] = true
 
     local mt = ctx.types:get(mt_id)
-    if mt.tag ~= TAG_MATCH_TYPE then return ctx.T_NEVER end
+    if mt.tag ~= TAG_MATCH_TYPE then
+        seen[mt_id] = nil
+        return ctx.T_NEVER
+    end
 
     local param_id = types_mod.find(ctx, mt.data[0])
     local arms_start = mt.data[1]
     local arms_len   = mt.data[2]
+
+    -- Distribution over union inputs: match T { ... } where T is a union
+    -- evaluates each union member independently and re-unions the results.
+    -- This is required by the design: "Distribution still applies. When a match
+    -- receives a union, it distributes: each union member is matched independently,
+    -- results are re-unioned."
+    local param_t = ctx.types:get(param_id)
+    if param_t.tag == TAG_UNION then
+        local results = {}
+        for ui = param_t.data[0], param_t.data[0] + param_t.data[1] - 1 do
+            local member_id = types_mod.find(ctx, ctx.lists:get(ui))
+            -- Build a temporary match-type node with this member as the param.
+            -- Reuse the existing arms slice from the list pool (no new allocation).
+            local sub_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
+            local sub_mtt = ctx.types:get(sub_mt)
+            sub_mtt.data[0] = member_id
+            sub_mtt.data[1] = arms_start
+            sub_mtt.data[2] = arms_len
+            results[#results + 1] = M.evaluate(ctx, sub_mt, seen)
+        end
+        seen[mt_id] = nil
+        if #results == 0 then return ctx.T_NEVER end
+        if #results == 1 then return results[1] end
+        return types_mod.make_union(ctx, results)
+    end
 
     local i = arms_start
     while i < arms_start + arms_len - 1 do
@@ -178,10 +208,13 @@ function M.evaluate(ctx, mt_id, seen)
         local res_id = ctx.lists:get(i + 1)
         local ok, bindings = M.match_pattern(ctx, param_id, pat_id)
         if ok then
+            seen[mt_id] = nil
             if bindings and next(bindings) then
-                -- Substitute bindings into result
+                -- Substitute bindings into result, passing seen so that any
+                -- TAG_MATCH_TYPE nodes encountered during substitution share
+                -- this cycle-detection set.
                 local env_mod = require("lib.type.static.env")
-                return env_mod.substitute(ctx, res_id, bindings)
+                return env_mod.substitute(ctx, res_id, bindings, seen)
             end
             return res_id
         end

@@ -329,8 +329,9 @@ function M.instantiate(ctx, tid, level)
 end
 
 -- Substitute: replace TAG_NAMED references matching mapping keys.
--- mapping: { [name_id] -> type_id }
-local function substitute_inner(ctx, tid, mapping, seen)
+-- mapping:    { [name_id] -> type_id }
+-- eval_seen:  cycle-detection set shared with match.evaluate (optional)
+local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     tid = types_mod.find(ctx, tid)
     if seen[tid] then return tid end
     seen[tid] = true
@@ -446,15 +447,15 @@ local function substitute_inner(ctx, tid, mapping, seen)
     -- replaces the placeholder with the concrete type and then evaluates the match.
     if tag == defs.TAG_MATCH_TYPE then
         -- Substitute into the param
-        local new_param = substitute_inner(ctx, t.data[0], mapping, seen)
+        local new_param = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
         -- Substitute into each arm (patterns and results may contain capture-var placeholders
         -- that are not in `mapping` — those stay as TAG_NAMED and are handled by match_pattern)
         local new_arms = {}
         local as, al = t.data[1], t.data[2]
         local i = as
         while i < as + al - 1 do
-            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
-            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen, eval_seen)
             i = i + 2
         end
         seen[tid] = nil
@@ -466,9 +467,10 @@ local function substitute_inner(ctx, tid, mapping, seen)
         mtt.data[0] = new_param
         mtt.data[1] = ms
         mtt.data[2] = ml
-        -- Evaluate the match now that the param is (hopefully) concrete
+        -- Evaluate the match now that the param is (hopefully) concrete.
+        -- Pass eval_seen to share the cycle-detection set with the caller.
         local match_mod = require("lib.type.static.match")
-        return match_mod.evaluate(ctx, new_mt)
+        return match_mod.evaluate(ctx, new_mt, eval_seen)
     end
 
     -- TAG_TYPE_CALL: deferred HKT application F<A>.
@@ -481,6 +483,27 @@ local function substitute_inner(ctx, tid, mapping, seen)
             new_args[#new_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
         end
         seen[tid] = nil
+        -- When callee is TAG_INTRINSIC and all substitution-target args are now
+        -- resolved, evaluate the intrinsic immediately.
+        -- A TAG_NAMED arg is a remaining placeholder only when its name_id is still
+        -- present in the mapping (i.e. substitution didn't replace it).  A TAG_NAMED
+        -- that is NOT in the mapping is a reference to a concrete named alias (e.g.
+        -- MakeOptional) and is handled correctly by apply_type_fn inside the intrinsic.
+        local ct = ctx.types:get(callee_id)
+        if ct.tag == defs.TAG_INTRINSIC then
+            local has_unresolved = false
+            for _, aid in ipairs(new_args) do
+                local at2 = ctx.types:get(types_mod.find(ctx, aid))
+                if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                    has_unresolved = true
+                    break
+                end
+            end
+            if not has_unresolved then
+                local intrinsic_mod = require("lib.type.static.intrinsic")
+                return intrinsic_mod.expand(ctx, ct.data[0], new_args)
+            end
+        end
         local mk = ctx.lists:mark()
         for _, aid in ipairs(new_args) do ctx.lists:push(aid) end
         local as, al = ctx.lists:since(mk)
@@ -496,9 +519,10 @@ local function substitute_inner(ctx, tid, mapping, seen)
 end
 
 -- Substitute named type refs in a type.
--- mapping: { [name_id] -> type_id }
-function M.substitute(ctx, tid, mapping)
-    return substitute_inner(ctx, tid, mapping, {})
+-- mapping:    { [name_id] -> type_id }
+-- eval_seen:  optional cycle-detection set from an enclosing match.evaluate call
+function M.substitute(ctx, tid, mapping, eval_seen)
+    return substitute_inner(ctx, tid, mapping, {}, eval_seen)
 end
 
 -- Resolve a named type alias: look up in scope, apply type args.

@@ -4987,22 +4987,18 @@ x = "hi"
 ]])
     end)
 
-    assert.it("GAP: recursive self-referencing match type crashes arena — cycle detection needed", function()
-        -- A match type that recurses on its own result should be cycle-detected.
-        -- According to type-system.md, the primary mechanism is cycle detection on
-        -- (match-type, input-type) pairs; a depth-limit is the safety net.
-        -- Currently this causes an arena crash (pointer arithmetic on nil).
-        -- The test wraps pcall so the suite still passes; fix = no crash + error.
-        local ok = pcall(function()
-            v3_no_errors([[
---:: Rec<T> = match T { number => Rec<string>, T => T }
+    assert.it("PASS: recursive self-referencing match type — cycle detection terminates gracefully", function()
+        -- A match type that recurses on its own result must be cycle-detected.
+        -- The seen table is now shared across evaluate -> substitute -> evaluate
+        -- chains so that revisiting the same TAG_MATCH_TYPE node returns never
+        -- rather than looping or crashing.
+        -- Rec<number>: arm `number => Rec<number>` matches; evaluate Rec<number>
+        -- again → cycle detected → never; overall result = never (no crash).
+        v3_no_errors([[
+--:: Rec<T> = match T { number => Rec<number> }
 --:: R = Rec<number>
 local x --: R
 ]])
-        end)
-        -- Currently crashes (ok=false). When fixed, it should either error
-        -- gracefully or produce a sensible type without looping.
-        assert.ok(true)  -- suite always passes; the pcall documents the crash
     end)
 
     assert.it("PASS: overlapping match arms — first arm wins on exact match", function()
@@ -5015,27 +5011,53 @@ x = "hello"
 ]])
     end)
 
-    assert.it("GAP: match on union input — distribution over members", function()
-        -- match (number | string) should be evaluated per-member and re-unioned.
-        -- If distribution works: (number => "n") | (string => "s") = "n" | "s".
-        -- Currently accepted without error; whether the result is the correct
-        -- two-member literal union is unverified.
+    assert.it("PASS: match on union input — distribution over members", function()
+        -- When the match param is a union, evaluate distributes: each member is
+        -- matched independently and results are re-unioned.
+        -- Tag<number | string> = Tag<number> | Tag<string> = "n" | "s".
+        -- Both result literals must be assignable; a non-string value must fail.
         v3_no_errors([[
 --:: Tag<T> = match T { number => "n", string => "s" }
 --:: R = Tag<number | string>
 local x --: R
+x = "n"
+x = "s"
+]])
+        v3_has_error([[
+--:: Tag<T> = match T { number => "n", string => "s" }
+--:: R = Tag<number | string>
+local x --: R
+x = true
 ]])
     end)
 
-    assert.it("GAP: match arm returning a union — result should be that union, not any", function()
-        -- When a match arm produces `number | string`, the result should be
-        -- exactly that union. Currently the alias is accepted; whether a boolean
-        -- assignment would correctly error is unverified.
+    assert.it("PASS: match arm returning a union — result is that union", function()
+        -- When a match arm produces `number | string`, the result type is exactly
+        -- that union. A number value and a string value must each be assignable
+        -- independently; a boolean must not be.
+        -- Test number assignment (separate from string to avoid literal narrowing).
         v3_no_errors([[
 --:: Wide<T> = match T { number => number | string, T => T }
 --:: R = Wide<number>
 local x --: R
+local n --: number
+x = n
 ]])
+        -- Test string assignment independently.
+        v3_no_errors([[
+--:: Wide<T> = match T { number => number | string, T => T }
+--:: R = Wide<number>
+local x --: R
+local s --: string
+x = s
+]])
+        -- Boolean must not be assignable to number | string.
+        v3_has_error([[
+--:: Wide<T> = match T { number => number | string, T => T }
+--:: R = Wide<number>
+local x --: R
+x = true
+]], "boolean")
     end)
 
     assert.it("GAP: match type used as bound in <T: MatchType<...>> — constraint not enforced", function()
@@ -5052,10 +5074,9 @@ end)
 
 assert.describe("adversarial: $EachField interactions", function()
 
-    assert.it("GAP: $EachField on a named open table — accepts without error", function()
-        -- $EachField on { x: number } (closed) works. An open table (row variable)
-        -- is harder: the row tail is unbounded. Currently accepted without error;
-        -- whether the result correctly carries the known fields is unverified.
+    assert.it("PASS: $EachField on a closed table — Identity preserves fields", function()
+        -- $EachField<Closed, Identity> round-trips through the descriptor; the
+        -- result still has field x: number so assigning { x = 1 } is accepted.
         v3_no_errors([[
 --:: Identity<F> = match F { F => F }
 --:: Closed = { x: number }
@@ -5087,10 +5108,10 @@ v = { b = "hi" }
 ]])
     end)
 
-    assert.it("GAP: nested $EachField — $EachField<$EachField<T, F>, G>", function()
+    assert.it("PASS: nested $EachField — $EachField<$EachField<T, F>, G> composes correctly", function()
         -- Composing two $EachField transforms: apply F to T's fields, then apply
-        -- G to the result's fields. Currently accepted; structural correctness
-        -- of the doubly-transformed result is unverified.
+        -- G to the result's fields.  The result is structurally identical to T
+        -- when both F and G are Identity, so { a = 42 } is accepted.
         v3_no_errors([[
 --:: Identity<F> = match F { F => F }
 --:: R = $EachField<$EachField<{ a: number }, Identity>, Identity>
@@ -5128,18 +5149,18 @@ x = 42
 ]])
     end)
 
-    assert.it("GAP: $EachField with descriptor pattern vars — MakeOptional transform resolves to never", function()
-        -- $EachField<T, MakeOptional> should produce a table with all fields made optional.
-        -- Currently, the match pattern `{ key: K, value: V }` does not bind K/V correctly
-        -- across the field descriptor boundary, so MakeOptional produces `never` for each
-        -- field and $EachField accumulates that to the overall `never` type.
-        -- The assignment correctly errors because the type is `never`.
-        v3_has_error([[
+    assert.it("PASS: $EachField with descriptor pattern vars — MakeOptional makes all fields optional", function()
+        -- $EachField<T, MakeOptional> produces a table where every field is optional.
+        -- The deferred TAG_TYPE_CALL for $EachField<T, F> is now evaluated via
+        -- substitute_inner once T is replaced with the concrete table type.
+        -- { name = "hi" } satisfies Partial<{ name: string, age: number }> because
+        -- age is optional in the result.
+        v3_no_errors([[
 --:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "hi" }
-]], "never")
+]])
     end)
 end)
 
