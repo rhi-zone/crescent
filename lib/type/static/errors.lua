@@ -288,6 +288,9 @@ local function build_templates()
         [E.FIELD_READONLY]        = function(a)
             return "cannot assign to readonly field '" .. a.field .. "'"
         end,
+        [E.NON_EXHAUSTIVE]        = function(a)
+            return "non-exhaustive match on '" .. a.name .. "': unhandled " .. a.remaining
+        end,
     }
 end
 

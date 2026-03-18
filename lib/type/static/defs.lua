@@ -317,6 +317,7 @@ M.E.METHOD_NOT_FOUND        = 20  -- no method on type
 M.E.UNNAMED_PARAMS          = 21  -- declared function type has unnamed parameters (warning)
 M.E.EXPLICIT_ANY            = 22  -- explicit `any` in annotation (warning)
 M.E.FIELD_READONLY          = 23  -- assignment to a readonly field
+M.E.NON_EXHAUSTIVE          = 24  -- if-chain over union doesn't cover all members (warning)
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
 M.keywords = {

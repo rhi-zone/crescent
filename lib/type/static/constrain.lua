@@ -1485,6 +1485,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local branch_ends      = {}  -- { name_id -> type_id } per non-exiting clause
     local pass_through_neg = {}  -- negated narrowings for the implicit pass-through path
     local has_else         = false
+    local disc_names       = {}  -- name_ids narrowed via field_disc in an exiting arm
 
     for i = n.data[0], n.data[0] + n.data[1] - 1 do
         local cn          = ctx.nodes:get(ctx.ast_lists:get(i))
@@ -1547,6 +1548,10 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 -- Example: Circle|Rect|Tri → arm1 exits (circle) → Rect|Tri in guard;
                 --          arm2 exits (rect)  → apply neg(rect) to Rect|Tri → Tri.
                 local arm_info = narrow_mod.extract_narrowing_info(ctx, test_nid)
+                -- Track name_ids discriminated via field_disc for exhaustiveness checking.
+                if arm_info and arm_info.kind == "field_disc" then
+                    disc_names[arm_info.name_id] = true
+                end
                 for name_id, type_id in pairs(neg) do
                     if guard_narrowings[name_id] == nil then
                         -- First exiting arm for this binding: use the negation as-is.
@@ -1568,6 +1573,24 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                     if pass_through_neg[name_id] == nil then
                         pass_through_neg[name_id] = type_id
                     end
+                end
+            end
+        end
+    end
+
+    -- Exhaustiveness check: warn when a discriminated union if-chain has no else
+    -- and all branches exit (Cat E only) but the continuation type is not never.
+    -- Only fires for field_disc narrowing (tagged union dispatch), not nil-checks.
+    if not has_else and #branch_ends == 0 and next(disc_names) then
+        for name_id in pairs(disc_names) do
+            local cont_tid = guard_narrowings[name_id]
+            if cont_tid then
+                cont_tid = types_mod.find(ctx, cont_tid)
+                if cont_tid ~= ctx.T_NEVER then
+                    local var_name = intern_mod.get(ctx.pool, name_id) or "?"
+                    local remaining = types_mod.display(ctx, cont_tid)
+                    warn(ctx, n.line, n.col, E.NON_EXHAUSTIVE,
+                        { name = var_name, remaining = "case(s): " .. remaining })
                 end
             end
         end

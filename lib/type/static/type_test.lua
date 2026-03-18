@@ -4206,6 +4206,25 @@ local function v3_has_error(src, pattern)
     assert.ok(true)
 end
 
+local function v3_has_warning(src, pattern)
+    local ec = v3(src)
+    if errors_mod.has_errors(ec) then
+        local msg = errors_mod.format_plain(ec)
+        assert.fail("v3: expected warning but got error(s):\n" .. msg)
+        return
+    end
+    local msg = errors_mod.format_plain(ec)
+    if not msg:find("warning:") then
+        assert.fail("v3: expected warning matching '" .. tostring(pattern) .. "' but got none")
+        return
+    end
+    if pattern and not msg:find(pattern) then
+        assert.fail("v3: expected warning matching '" .. pattern .. "' but got:\n" .. msg)
+        return
+    end
+    assert.ok(true)
+end
+
 assert.describe("v3 inference", function()
     assert.it("literal pinning: unannotated function called with different literal types", function()
         -- v2 bug: first call pins min→0, second call fails because number ≠ 0.
@@ -5530,10 +5549,10 @@ end
 ]])
     end)
 
-    assert.it("GAP: union with three members — exhaustiveness not checked in if-chains", function()
-        -- A three-member tagged union with only two branches handled should
-        -- ideally warn. Currently no exhaustiveness checking is performed.
-        v3_no_errors([[
+    assert.it("PASS: union with three members — exhaustiveness warning for non-exhaustive if-chain", function()
+        -- A three-member tagged union with only two branches handled should warn.
+        -- Both branches exit (return), no else branch, "c" member remains unhandled.
+        v3_has_warning([[
 --:: T = { tag: "a" } | { tag: "b" } | { tag: "c" }
 --: (T) -> string
 local function label(t)
@@ -5541,6 +5560,17 @@ local function label(t)
     elseif t.tag == "b" then return "b"
     end
     return "unknown"
+end
+]], "non%-exhaustive")
+        -- Fully exhaustive chain (with else) should produce no warning.
+        v3_no_errors([[
+--:: T = { tag: "a" } | { tag: "b" } | { tag: "c" }
+--: (T) -> string
+local function label(t)
+    if t.tag == "a" then return "a"
+    elseif t.tag == "b" then return "b"
+    else return "c"
+    end
 end
 ]])
     end)
