@@ -101,7 +101,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 ~/git/rhizone/normalize/target/debug/normalize view <dir>     # directory structure
 ```
 
-**On typechecker topics, read `docs/type-system.md` first.** Design decisions are written there. Don't improvise from first principles.
+**On typechecker topics, read `docs/type-system.md` in full before doing anything.** Front-load the entire file into context. Design decisions are written there. Don't improvise from first principles.
 
 **Crescent's type-level computation is match types, not HKTs.** `$EachField<R>` iterates over a record's fields and transforms them. `$EachUnion<T,F>` applies a transform to each union member. `$Keys<T>` produces a string literal union of keys. These are the tools for type-level programming — not higher-kinded types, which are about parameterising over type constructors, a separate concern.
 
