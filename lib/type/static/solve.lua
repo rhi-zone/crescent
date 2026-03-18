@@ -296,11 +296,38 @@ local function solve_bound(ctx, c)
     end
 
     -- Skip unenforced bound forms:
-    --   TAG_NAMED      — unapplied kind constraint (e.g. <F: T1> where T1<X> = ...)
     --   TAG_TYPE_CALL  — unapplied HKT application (not yet supported)
     --   TAG_NEVER      — indeterminate bound (match type evaluation failed on free TV)
-    if bt.tag == TAG_NAMED or bt.tag == TAG_TYPE_CALL or bt.tag == TAG_NEVER then
+    if bt.tag == TAG_TYPE_CALL or bt.tag == TAG_NEVER then
         return true  -- not yet enforced
+    end
+
+    -- Kind arity enforcement: TAG_NAMED with no args is a kind constraint.
+    -- <F: T1> where T1<X>=any means F must be a * -> * type constructor (arity 1).
+    -- Check that the actual type has the same arity as the alias.
+    if bt.tag == TAG_NAMED and bt.data[2] == 0 then
+        local bound_alias = env_mod.lookup_type(ctx.scope, bt.data[0])
+        local bound_arity = (bound_alias and bound_alias.params) and #bound_alias.params or 0
+        if bound_arity > 0 then
+            -- Actual type must also be a TAG_NAMED alias with matching arity.
+            local actual_arity = 0
+            if at.tag == TAG_NAMED and at.data[2] == 0 then
+                local actual_alias = env_mod.lookup_type(ctx.scope, at.data[0])
+                actual_arity = (actual_alias and actual_alias.params) and #actual_alias.params or 0
+            end
+            -- Primitives and non-generic types have arity 0; they fail the kind check.
+            if actual_arity ~= bound_arity then
+                local bound_name = intern_mod.get(ctx.pool, bt.data[0]) or "?"
+                local kind_arrows = string.rep("* -> ", bound_arity) .. "*"
+                add_error(ctx, line, col,
+                    "type '" .. types_mod.display_short(ctx, actual)
+                    .. "' has kind *, expected kind " .. kind_arrows
+                    .. " (bound '" .. bound_name .. "' requires arity "
+                    .. bound_arity .. ")")
+                return false
+            end
+        end
+        return true
     end
 
     -- TAG_MATCH_TYPE bound: evaluate the match with the actual type as subject.

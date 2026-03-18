@@ -4841,22 +4841,21 @@ local x --: T1
 ]], "expects 1 argument")
     end)
 
-    assert.it("GAP: <F: T1> constraint is parsed but F: T1 arity is not checked", function()
-        -- The annotation <F: T1, A> should constrain F to be a * -> * constructor.
-        -- Currently the constraint is dropped; any value can be passed for F.
-        v3_no_errors([[
+    assert.it("PASS: <F: T1> kind arity is enforced — passing integer (arity 0) errors", function()
+        -- F: T1 constrains F to be a * -> * constructor (arity 1).
+        -- Passing 42 (type: integer, arity 0) must fail with a kind mismatch error.
+        v3_has_error([[
 --:: T1<T> = any
 --: <F: T1, A>(fa: F) -> F
 local function id_hkt(fa) return fa end
 local result = id_hkt(42)
-]])
+]], "has kind *")
     end)
 
-    assert.it("GAP: applying F<A> in body when F: T1 is the bound does not error", function()
-        -- If <F: T1> were enforced, F<A> in the body should be valid (F has arity 1).
-        -- Currently F<A> with F as a var is handled: TAG_TYPE_CALL is created but
-        -- the resolve step returns a TAG_TYPE_CALL node (F is not TAG_NAMED),
-        -- so the result is an unevaluated type call — effectively T_UNKNOWN.
+    assert.it("PASS: applying F<A> in body when F: T1 is the bound does not error", function()
+        -- F<A> in the body is a valid type application when F: T1 is the bound.
+        -- TAG_TYPE_CALL is created for F<A>; the result is an unevaluated type call.
+        -- No errors are expected — the annotation is well-formed.
         v3_no_errors([[
 --:: T1<T> = any
 --: <F: T1, A, B>((A -> B) -> F<A> -> F<B>) -> boolean
