@@ -188,7 +188,7 @@
 ### annotation syntax gaps
 - [x] **Open table syntax in .d.lua**: `{ ... }` bare spread in table annotation creates a row variable; `{ fields..., ... }` = open table. `_G` now declared in stdlib.d.lua. (2026-03-03, commit 6e197c5)
 - [x] **`typeof` annotation**: `typeof x` captures the inferred type of binding `x`. TAG_TYPEOF = 25; ann.lua recognises `typeof <ident>`; resolve_annotation_type does scope lookup. Top-level `--::` decls with typeof are deferred until after gen_block. (2026-03-19, 913110e)
-- [ ] **`typeof` in function return type** (`-> typeof x`): currently fails — return types are resolved before `gen_function` binds params in the inner scope. Fix: defer return-type `typeof` resolution until after params are bound. Failing test added.
+- [ ] **`typeof` in function signatures**: all cases currently fail — `resolve_annotation_type` resolves all param/return types before any param name is in scope. Fix: pre-bind all param names as `TAG_VAR` placeholders before resolving any annotation, enabling forward refs `(x: typeof y, y: T)`, backward refs `(x: T, y: typeof x)`, return refs `-> typeof x`, and mutual refs `(a: typeof b, b: typeof a)` (circular → both unify to same type var, resolved at call site). Three failing tests added.
 
 ### performance (v2 redesign)
 **Full redesign in progress. See `docs/typechecker-v2.md` for architecture.**

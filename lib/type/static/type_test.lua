@@ -6118,15 +6118,34 @@ local y = val
 ]])
     end)
 
-    -- TODO: typeof in function return type (-> typeof x) currently fails because
-    -- resolve_annotation_type resolves return types before gen_function binds
-    -- parameters in the inner scope. Fix: defer return-type typeof resolution
-    -- until after params are bound.
+    -- TODO: typeof in function signatures currently fails — resolve_annotation_type
+    -- resolves all param/return types before any param names are bound in scope.
+    -- Fix: pre-bind all param names as TAG_VAR placeholders, then resolve all
+    -- param type annotations (enabling forward refs), then resolve return types.
+    -- Cases that must work:
+    --   (x: T) -> typeof x          -- return same type as param
+    --   (x: T, y: typeof x)         -- later param same type as earlier
+    --   (x: typeof y, y: T)         -- earlier param same type as later (forward ref)
+    --   (a: typeof b, b: typeof a)  -- mutual: both unify to same type variable
     assert.it("typeof in function return type refers to param type", function()
         v3_no_errors([[
 --: (x: integer) -> typeof x
 local function identity(x) return x end
 local y = identity(42)
+]])
+    end)
+    assert.it("typeof in later param references earlier param", function()
+        v3_no_errors([[
+--: (x: integer, y: typeof x) -> ()
+local function same_type(x, y) end
+same_type(1, 2)
+]])
+    end)
+    assert.it("typeof in earlier param forward-references later param", function()
+        v3_no_errors([[
+--: (x: typeof y, y: integer) -> ()
+local function same_type(x, y) end
+same_type(1, 2)
 ]])
     end)
 end)
