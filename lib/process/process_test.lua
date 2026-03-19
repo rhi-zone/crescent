@@ -1,0 +1,72 @@
+local ffi = require("ffi")
+if ffi.os ~= "Linux" then return end
+
+local T = require("lib.test.assert")
+local process = require("lib.process")
+
+T.describe("process.exec", function()
+  T.it("captures stdout from echo", function()
+    local code, stdout, stderr = process.exec("echo", {"hello"})
+    T.eq(code, 0)
+    T.eq(stdout, "hello\n")
+    T.eq(stderr, "")
+  end)
+
+  T.it("feeds stdin to cat", function()
+    local code, stdout, stderr = process.exec("cat", {}, { stdin = "test input" })
+    T.eq(code, 0)
+    T.eq(stdout, "test input")
+    T.eq(stderr, "")
+  end)
+
+  T.it("returns non-zero exit code on failure", function()
+    local code, stdout, stderr = process.exec("ls", {"nonexistent_path_xyz"})
+    T.ok(code ~= 0, "exit code should be non-zero")
+    T.ok(#stderr > 0, "stderr should contain error message")
+  end)
+
+  T.it("captures stderr", function()
+    local code, stdout, stderr = process.exec("sh", {"-c", "echo err >&2"})
+    T.eq(code, 0)
+    T.eq(stdout, "")
+    T.eq(stderr, "err\n")
+  end)
+
+  T.it("returns 127 for nonexistent command", function()
+    local code, stdout, stderr = process.exec("nonexistent_command_xyz_12345")
+    T.eq(code, 127)
+  end)
+
+  T.it("supports cwd option", function()
+    local code, stdout, stderr = process.exec("pwd", {}, { cwd = "/tmp" })
+    T.eq(code, 0)
+    -- /tmp may be a symlink (e.g. to /private/tmp on macOS), just check it ends with tmp
+    T.ok(stdout:find("tmp"), "should contain tmp in path")
+  end)
+end)
+
+T.describe("process.spawn", function()
+  T.it("returns a handle with pid", function()
+    local h = process.spawn("sleep", {"10"})
+    T.ok(h, "spawn returned a handle")
+    T.ok(h.pid > 0, "pid is positive")
+    h:kill()
+    h:wait()
+  end)
+
+  T.it("wait returns correct exit code", function()
+    local h = process.spawn("sh", {"-c", "exit 42"})
+    T.ok(h, "spawn returned a handle")
+    local code = h:wait()
+    T.eq(code, 42)
+  end)
+
+  T.it("kill terminates process", function()
+    local h = process.spawn("sleep", {"60"})
+    T.ok(h, "spawn returned a handle")
+    h:kill()
+    local code = h:wait()
+    -- killed by SIGTERM (15) → 128 + 15 = 143
+    T.eq(code, 143)
+  end)
+end)
