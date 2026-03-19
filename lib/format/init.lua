@@ -4,4 +4,5 @@
 local M = {}
 M.json = require("lib.format.json")
 M.cbor = require("lib.format.cbor")
+M.toml = require("lib.format.toml")
 return M
