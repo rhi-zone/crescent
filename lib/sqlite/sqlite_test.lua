@@ -31,8 +31,6 @@ end
 -- ── helpers ──────────────────────────────────────────────────────────────────
 
 -- Open a fresh :memory: database or fail immediately.
--- NOTE: db:close() has a bug (passes sqlite3*[1] instead of sqlite3*[0] to
--- sqlite3_close_v2). Omit db:close() in all other tests until that is fixed.
 local function mem()
 	local db, err = sqlite.open(":memory:")
 	assert(db, "sqlite.open(:memory:) failed: " .. tostring(err))
@@ -62,17 +60,15 @@ T.describe("sqlite: open/close", function()
 	T.it("opens an in-memory database", function()
 		local db, err = sqlite.open(":memory:")
 		T.ok(db, err)
-		-- db:close() is intentionally omitted: known bug — see file header.
+		db:close()
 	end)
 
-	T.it("close() has a type bug (sqlite3*[1] vs sqlite3*)", function()
-		-- This test documents the known bug in db:close().
-		-- sqlite3_close_v2 expects sqlite3* but receives sqlite3*[1].
-		-- When the bug is fixed this test should be updated to assert success.
+	T.it("close() does not error (sqlite3*[1] bug fixed)", function()
+		-- Bug was: sqlite3_close_v2 received self.db (sqlite3*[1]) instead of
+		-- self.db[0] (sqlite3*). Fixed in init.lua line 125.
 		local db = mem()
 		local ok, err = pcall(function() db:close() end)
-		T.fail(ok) -- currently errors; expected to fail until bug is fixed
-		T.ok(err:find("sqlite3_close_v2") or err:find("cannot convert"), err)
+		T.ok(ok, err)
 	end)
 end)
 
