@@ -18,7 +18,7 @@
 
 --:: ASTNode = { kind: integer, flags: integer, col: integer, line: integer, data: { [integer]: integer, ... } }
 --:: TypeSlot = { tag: integer, flags: integer, reserved: integer, data: { [integer]: integer, ... } }
---:: FieldEntry = { name_id: integer, type_id: integer, optional: integer }
+--:: FieldEntry = { name_id: integer, type_id: integer, flags: integer }
 
 ---------------------------------------------------------------------------
 -- Arena types: wrap FFI flat-array arenas.

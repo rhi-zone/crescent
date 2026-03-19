@@ -198,6 +198,7 @@ end
 -- Union-find with path compression.
 -- For TAG_VAR / TAG_ROWVAR: follow data[2] chain until root.
 -- For all other tags: return tid directly.
+--: (Ctx, number) -> integer
 function M.find(ctx, tid)
     local types = ctx.types
     -- Find root
@@ -223,6 +224,7 @@ function M.find(ctx, tid)
 end
 
 -- Make a fresh type variable at the given level.
+--: (Ctx, integer?) -> integer
 function M.make_var(ctx, level)
     ctx.var_counter = ctx.var_counter + 1
     local id = alloc_zero(ctx.types, TAG_VAR)
@@ -234,6 +236,7 @@ function M.make_var(ctx, level)
 end
 
 -- Make a fresh row variable at the given level.
+--: (Ctx, integer?) -> integer
 function M.make_rowvar(ctx, level)
     ctx.var_counter = ctx.var_counter + 1
     local id = alloc_zero(ctx.types, TAG_ROWVAR)
@@ -247,6 +250,7 @@ end
 -- Make a literal type.
 -- kind: LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
 -- val: intern_id (for string) or 1/0 (for boolean) or double (for number)
+--: (Ctx, integer, integer?) -> integer
 function M.make_literal(ctx, kind, val)
     -- Intern literals so the same value always maps to the same type_id.
     -- This prevents union dedup from missing duplicate literal members.
@@ -302,6 +306,7 @@ end
 -- params, returns: Lua arrays of type_ids
 -- vararg_id: type_id or -1 for no vararg
 -- param_name_ids: optional Lua array of intern IDs (one per param); stored in data[5]/data[6]
+--: (Ctx, { [integer]: integer, ... }, { [integer]: integer, ... }, integer?, { [integer]: integer, ... }?) -> integer
 function M.make_func(ctx, params, returns, vararg_id, param_name_ids)
     local m = ctx.lists:mark()
     for i = 1, #params do ctx.lists:push(params[i]) end
@@ -316,12 +321,15 @@ function M.make_func(ctx, params, returns, vararg_id, param_name_ids)
     t.data[2] = rs
     t.data[3] = rl
     t.data[4] = vararg_id ~= nil and vararg_id or -1
-    if param_name_ids and #param_name_ids > 0 then
-        m = ctx.lists:mark()
-        for i = 1, #param_name_ids do ctx.lists:push(param_name_ids[i]) end
-        local pns, pnl = ctx.lists:since(m)
-        t.data[5] = pns
-        t.data[6] = pnl
+    if param_name_ids then
+        local pni = param_name_ids
+        if #pni > 0 then
+            m = ctx.lists:mark()
+            for i = 1, #pni do ctx.lists:push(pni[i]) end
+            local pns, pnl = ctx.lists:since(m)
+            t.data[5] = pns
+            t.data[6] = pnl
+        end
     end
     return id
 end
@@ -357,6 +365,7 @@ end
 -- indexer_pairs: flat Lua array of type_ids [key0, val0, key1, val1, ...]
 -- row_var_id: type_id or -1
 -- meta_field_ids: Lua array of field_arena IDs for __meta slots
+--: (Ctx, { [integer]: integer, ... }?, { [integer]: integer, ... }?, integer?, { [integer]: integer, ... }?) -> integer
 function M.make_table(ctx, field_ids, indexer_pairs, row_var_id, meta_field_ids)
     field_ids    = field_ids    or {}
     indexer_pairs = indexer_pairs or {}
@@ -465,6 +474,7 @@ local function remove_subsumed(ctx, flat, new_tag)
     end
 end
 
+--: (Ctx, { [integer]: integer, ... }) -> integer
 function M.make_union(ctx, member_ids)
     local flat = {}
     for i = 1, #member_ids do
@@ -534,6 +544,7 @@ function M.make_intersection(ctx, member_ids)
 end
 
 -- Make a tuple type.
+--: (Ctx, { [integer]: integer, ... }) -> integer
 function M.make_tuple(ctx, elem_ids)
     local m = ctx.lists:mark()
     for i = 1, #elem_ids do ctx.lists:push(elem_ids[i]) end
@@ -585,6 +596,7 @@ function M.make_array(ctx, elem_tid)
 end
 
 -- Widen literal type to base type.
+--: (Ctx, integer) -> integer
 function M.widen(ctx, tid)
     tid = M.find(ctx, tid)
     local t = ctx.types:get(tid)
