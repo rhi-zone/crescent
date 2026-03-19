@@ -75,20 +75,24 @@ function M.main(argv)
                     f:close()
                 end
 
-                -- Build line → list of annotation strings to insert before that line.
-                local insertions = {}
-                for _, ann in ipairs(ctx.inferred_anns) do
-                    local line = ann.line
-                    if line and line > 0 then
-                        local resolved = types_mod.find(ctx, ann.type_id)
+                -- Build line → annotation string to insert before that line.
+                -- type_at is a flat array {line, col, tid, ...} stride 3.
+                -- Emit at most one annotation per source line: pick the first
+                -- non-trivial type seen on that line (constraint-generation order).
+                local insertions = {}  -- line → ann_text string (one per line)
+                local ta = ctx.type_at
+                local i = 1
+                while i <= #ta do
+                    local line = ta[i]
+                    local tid  = ta[i + 2]
+                    i = i + 3
+                    if line and line > 0 and not insertions[line] then
+                        local resolved = types_mod.find(ctx, tid)
                         local rt = ctx.types:get(resolved)
-                        -- Skip trivial: vars, any, nil, functions with all-any sigs.
+                        -- Skip trivial: vars, any, nil.
                         if rt.tag ~= defs.TAG_VAR and rt.tag ~= defs.TAG_ANY
                                 and rt.tag ~= defs.TAG_NIL then
-                            local type_str = types_mod.display(ctx, resolved)
-                            local ann_text = "--: " .. type_str
-                            if not insertions[line] then insertions[line] = {} end
-                            insertions[line][#insertions[line] + 1] = ann_text
+                            insertions[line] = "--: " .. types_mod.display(ctx, resolved)
                         end
                     end
                 end
@@ -97,9 +101,7 @@ function M.main(argv)
                 for ln, src_line in ipairs(src_lines) do
                     if insertions[ln] then
                         local indent = src_line:match("^(%s*)") or ""
-                        for _, ann_text in ipairs(insertions[ln]) do
-                            io.write(indent .. ann_text .. "\n")
-                        end
+                        io.write(indent .. insertions[ln] .. "\n")
                     end
                     io.write(src_line .. "\n")
                 end

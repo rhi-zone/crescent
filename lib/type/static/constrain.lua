@@ -649,9 +649,21 @@ local ExprRule = {}
 gen_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = ExprRule[n.kind]
-    if rule then return rule(ctx, nid) end
-    report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
-    return ctx.T_ANY
+    local tid
+    if rule then
+        tid = rule(ctx, nid)
+    else
+        report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
+        tid = ctx.T_ANY
+    end
+    -- Record location → type for --annotate mode and LSP hover.
+    if n.line and n.line > 0 then
+        local ta = ctx.type_at
+        ta[#ta+1] = n.line
+        ta[#ta+1] = n.col
+        ta[#ta+1] = tid
+    end
+    return tid
 end
 
 local function gen_expr_multi(ctx, nid)
