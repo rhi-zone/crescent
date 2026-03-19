@@ -18,6 +18,8 @@
             luajit
             # JS tooling for docs
             bun
+            # Native libraries (lib/sqlite, etc.)
+            sqlite
           ];
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
           shellHook = ''
