@@ -1,3 +1,7 @@
+if not package.path:find("?/init.lua", 1, true) then
+  package.path = package.path .. ";./?/init.lua"
+end
+
 local mod = {}
 
 local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" }

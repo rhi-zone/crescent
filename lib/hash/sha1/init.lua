@@ -1,3 +1,7 @@
+if not package.path:find("?/init.lua", 1, true) then
+  package.path = package.path .. ";./?/init.lua"
+end
+
 -- https://github.com/mpeterv/sha1/tree/9b462c7610e1817373a7a358d4291da25226b3ce
 --[[
 Copyright (c) 2013 Enrique García Cota, Eike Decker, Jeffrey Friedl

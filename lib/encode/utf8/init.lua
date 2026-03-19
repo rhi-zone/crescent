@@ -1,3 +1,7 @@
+if not package.path:find("?/init.lua", 1, true) then
+  package.path = package.path .. ";./?/init.lua"
+end
+
 local bor = bit.bor; local band = bit.band; local lshift = bit.lshift; local rshift = bit.rshift
 local byte = string.byte; local char = string.char
 

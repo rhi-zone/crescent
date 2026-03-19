@@ -1,3 +1,7 @@
+if not package.path:find("?/init.lua", 1, true) then
+  package.path = package.path .. ";./?/init.lua"
+end
+
 local mod = {}
 
 --[[creates new object with all the keys of the inputs. handles array part as well]]

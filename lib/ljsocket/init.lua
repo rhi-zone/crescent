@@ -1,3 +1,7 @@
+if not package.path:find("?/init.lua", 1, true) then
+  package.path = package.path .. ";./?/init.lua"
+end
+
 --[[https://github.com/CapsAdmin/luajitsocket]]
 --[[
 MIT License
