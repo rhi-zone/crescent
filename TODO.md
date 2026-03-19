@@ -38,7 +38,7 @@
   Performance bar: bun — I/O-bound, LuaJIT + FFI syscalls should be competitive.
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
-  Near-term candidates: private field visibility enforcement, module-level LSP cache,
+  Near-term candidates: access control design (see below), module-level LSP cache,
   soundness gap 3 (generic variance). See typechecker section below for full list.
 
 ## security (fix soon)
@@ -174,6 +174,9 @@
 ### known false positives
 - [x] **Assignment narrowing**: assigning `nil` to a variable inside `if x then` is flagged — typechecker checks against narrowed type, not declared type. Fixed: narrowing-escape generalized from nil-only to any value; checks outer scope binding for the pre-narrowing type.
 - [x] **Nil method call not caught**: `local x; x:match("pattern")` — fixed by nil_vars side-channel; `testdata/errors/nil_method.expected` now captures the error.
+
+### access control (needs design before implementation)
+- [ ] **Design field access control model** — `FLAG_PRIVATE` exists on FieldEntry but is not enforced and was added without a design. The right model is NOT Java/C# `private` (class-boundary, both instances can read each other's private fields — wrong unit). Requirements: (1) separate read/write axes — a field can be read-only externally but writable internally; (2) granular exposure — "visible to module X but not Y" (cf. Rust `pub(in path)`, friend classes, capability tokens); (3) the visibility boundary should be the module (file), not the object. Design questions to answer before writing code: What is the annotation syntax? How are visibility levels represented in FieldEntry.flags (currently 1 byte, FLAG_OPTIONAL/READONLY/PRIVATE)? How does "expose to X" work — explicit allow-list, capability object, or structural (if your interface includes the field it's accessible)? What does the type of a partially-visible table look like to an external module? Write the design to `docs/access-control.md` before touching any implementation.
 
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
