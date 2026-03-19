@@ -84,8 +84,8 @@
 **Missing conformance tests:** dns, irc, imap, websocket, http (partial) — no tests at all for protocol behavior. Add as part of rewrites.
 
 #### http
-- [ ] No `init.lua` — re-export `format`, `client`, `status` from a top-level init
-- [ ] `http/client`: replace `assert(socket.create(...))` with `return nil, err` — fails with unhelpful message on socket error
+- [x] No `init.lua` — re-export `format`, `client`, `status` from a top-level init
+- [x] `http/client`: replace `assert(socket.create(...))` with `return nil, err` — fails with unhelpful message on socket error
 - [ ] `http/format`: silently drops unparseable headers — log or return error
 - [ ] extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
 - [ ] extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
