@@ -146,7 +146,7 @@ M.C_OR        = C_OR
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> unknown
+--: (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
 local function report(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)

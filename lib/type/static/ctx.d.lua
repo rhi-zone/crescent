@@ -57,7 +57,7 @@
 -- Diagnostic error codes (defs.E)
 ---------------------------------------------------------------------------
 
---:: DiagCodes = { FIELD_NOT_FOUND: integer, CALL_ARG_MISMATCH: integer, CALL_ARG_MISSING: integer, ARITH_TYPE: integer, LENGTH_TYPE: integer, COMPARE_TYPE: integer, COMPARE_CROSS: integer, CONCAT_TYPE: integer, UNHANDLED_EXPR: integer, UNKNOWN_IDENTIFIER: integer, VARARG_OUTSIDE_FN: integer, BINARY_OP_UNKNOWN: integer, TYPE_MISMATCH: integer, ASSIGN_MISMATCH: integer, FIELD_REASSIGN: integer, INDEX_ASSIGN_MISMATCH: integer, NO_MATCHING_OVERLOAD: integer, UNION_CALL_MISMATCH: integer, CANNOT_CALL: integer, METHOD_NOT_FOUND: integer, UNNAMED_PARAMS: integer, EXPLICIT_ANY: integer }
+--:: DiagCodes = { FIELD_NOT_FOUND: integer, CALL_ARG_MISMATCH: integer, CALL_ARG_MISSING: integer, ARITH_TYPE: integer, LENGTH_TYPE: integer, COMPARE_TYPE: integer, COMPARE_CROSS: integer, CONCAT_TYPE: integer, UNHANDLED_EXPR: integer, UNKNOWN_IDENTIFIER: integer, VARARG_OUTSIDE_FN: integer, BINARY_OP_UNKNOWN: integer, TYPE_MISMATCH: integer, ASSIGN_MISMATCH: integer, FIELD_REASSIGN: integer, INDEX_ASSIGN_MISMATCH: integer, NO_MATCHING_OVERLOAD: integer, UNION_CALL_MISMATCH: integer, CANNOT_CALL: integer, METHOD_NOT_FOUND: integer, UNNAMED_PARAMS: integer, EXPLICIT_ANY: integer, FIELD_READONLY: integer, NON_EXHAUSTIVE: integer }
 
 ---------------------------------------------------------------------------
 -- defs module type: all integer constants plus the E table.
@@ -108,19 +108,21 @@ DefsModule = {
 ---------------------------------------------------------------------------
 -- Local functions declared in constrain.lua that are referenced before
 -- their definition (prescan must see a typed stub, not an inferred var).
+-- `report` returns the DiagEntry allocated by errors_mod.error(); callers
+-- ignore the return value so -> () is the correct external signature.
 ---------------------------------------------------------------------------
 
---:: declare report = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> unknown
+--:: declare report = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
 --:: declare warn = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
 --:: declare warn_raw = (Ctx, integer?, integer?, string) -> ()
---:: declare find_field_definition = (Ctx, integer, integer) -> unknown
---:: declare pop_return_collector = (Ctx) -> unknown
---:: declare infer_expr_multi = (Ctx, integer) -> unknown
---:: declare try_call_args = (Ctx, integer, unknown) -> unknown
---:: declare snapshot_table = (Ctx, unknown) -> (unknown, unknown, unknown, unknown)
+-- snapshot_table: (ctx, TAG_TABLE type_id) -> (field_ids, indexer_pairs, row_var_id, meta_field_ids)
+--:: declare snapshot_table = (Ctx, integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
 
 ---------------------------------------------------------------------------
 -- Ctx: the central checker state object.
+-- inferred_anns: { [integer]: unknown } — was populated by deleted infer.lua;
+--   --annotate mode iterates it but it's always empty now. TODO: either
+--   repopulate via the constraint pass or remove --annotate support.
 ---------------------------------------------------------------------------
 
 --[[::
@@ -147,7 +149,7 @@ Ctx = {
   _ann_warn_line:  integer,
   _ann_consumed:   { [integer]: boolean, ... }?,
   inferred_anns:   { [integer]: unknown, ... },
-  constraints:     { [integer]: { [integer]: integer, ... }, ... },
+  constraints:     { [integer]: { [integer]: unknown, ... }, ... },
   var_counter:  integer,
   nominal_id:   integer,
   level:        integer,

@@ -25,7 +25,7 @@ end
 
 -- Session cache: absolute_filename → { err_ctx, ctx, export_tid, cri_bytes }
 -- Simple per-session, no invalidation. Cleared by M.clear_cache().
---:: SessionEntry = { err_ctx: unknown, ctx: unknown, export_tid: unknown, cri_bytes: string? }
+--:: SessionEntry = { err_ctx: ErrCtx, ctx: Ctx?, export_tid: integer?, cri_bytes: string? }
 --: { [string]: SessionEntry?, ... }
 local _session = {}
 
