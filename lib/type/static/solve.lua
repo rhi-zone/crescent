@@ -797,8 +797,9 @@ local function solve_callable(ctx, c)
                                 local name_id = ctx.lists:get(callee_t.data[5] + i)
                                 param_name = intern_mod.get(ctx.pool, name_id)
                             end
+                            local pn = param_name or ""
                             local arg_label = param_name
-                                and ("`" .. param_name .. "`")
+                                and ("`" .. pn .. "`")
                                 or  ("argument " .. (i + 1))
                             union_msg = "function expects `" .. types_mod.display_short(ctx, exp_tid)
                                 .. "`, but " .. arg_label .. " might also be `"
