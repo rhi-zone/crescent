@@ -146,16 +146,19 @@ M.C_OR        = C_OR
 -- Helpers
 -- ---------------------------------------------------------------------------
 
+--: (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> unknown
 local function report(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
+--: (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
 local function warn(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
+--: (Ctx, { [integer]: unknown, ... }) -> ()
 local function emit(ctx, constraint)
     ctx.constraints[#ctx.constraints + 1] = constraint
 end
@@ -170,6 +173,7 @@ end
 
 local resolve_annotation_type
 
+--: (Ctx, integer, { [integer]: boolean, ... }?) -> integer
 resolve_annotation_type = function(ctx, ann_tid, seen)
     if not ctx.ann then return ctx.T_ANY end
     seen = seen or {}
@@ -184,9 +188,9 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == defs.TAG_NUMBER   then return ctx.T_NUMBER end
     if tag == defs.TAG_STRING   then return ctx.T_STRING end
     if tag == defs.TAG_ANY      then
-        if ctx._ann_warn_line then
+        if ctx._ann_warn_line ~= 0 then
             warn(ctx, ctx._ann_warn_line, 0, E.EXPLICIT_ANY, {})
-            ctx._ann_warn_line = nil
+            ctx._ann_warn_line = 0
         end
         return ctx.T_ANY
     end
@@ -215,7 +219,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if not tid then
             local intern_local = require("lib.type.static.intern")
             local name_str = intern_local.get(ctx.pool, name_id) or "?"
-            local err_line = ctx._ann_warn_line or 0
+            local err_line = ctx._ann_warn_line
             errors_mod.error(ctx.err, ctx.filename, err_line, 0,
                 "typeof: unknown identifier '" .. name_str .. "'")
             return ctx.T_UNKNOWN
@@ -263,7 +267,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 ctx.types:get(id).data[0] = name_id
                 return id
             end
-            local err_line = ctx._ann_warn_line or 0
+            local err_line = ctx._ann_warn_line
             errors_mod.error(ctx.err, ctx.filename, err_line, 0, "undefined type '" .. name_str .. "'")
             return ctx.T_ANY
         end
@@ -288,14 +292,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             -- its own (the error is arity mismatch: "does not take type arguments") AND the
             -- alias body is an abstract type (TAG_VAR = forall param; TAG_NAMED = placeholder).
             -- Constraint violations (alias HAS params, arg fails bound check) are NOT deferred.
-            if arg_ids and #arg_ids > 0 and alias.body
+            local ai = arg_ids or {}
+            if #ai > 0 and alias.body
                 and (not alias.params or #alias.params == 0) then
                 local body_id = types_mod.find(ctx, alias.body)
                 local bt = ctx.types:get(body_id)
                 if bt.tag == TAG_VAR or bt.tag == TAG_NAMED then
                     -- Produce TAG_TYPE_CALL(body, args): resolved at instantiation time.
                     local mk = ctx.lists:mark()
-                    for _, aid in ipairs(arg_ids) do ctx.lists:push(aid) end
+                    for _, aid in ipairs(ai) do ctx.lists:push(aid) end
                     local as, al = ctx.lists:since(mk)
                     local id = types_mod.alloc_type(ctx, defs.TAG_TYPE_CALL)
                     ctx.types:get(id).data[0] = body_id
@@ -304,7 +309,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                     return id
                 end
             end
-            errors_mod.error(ctx.err, ctx.filename, ctx._ann_warn_line or 0, 0, resolve_err)
+            errors_mod.error(ctx.err, ctx.filename, ctx._ann_warn_line, 0, resolve_err)
             return ctx.T_ANY
         end
         -- alias.body == nil: self-referential or forward-ref during construction.
@@ -410,7 +415,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                                     local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
                                     local at_str = types_mod.display(ctx, at_field)
                                     local bt_str = types_mod.display(ctx, bt_field)
-                                    local line = ctx._ann_warn_line or 0
+                                    local line = ctx._ann_warn_line
                                     errors_mod.error(ctx.err, ctx.filename, line, 0,
                                         "intersection field conflict: field '" .. fname
                                         .. "' has incompatible types '"
@@ -637,8 +642,10 @@ local gen_expr, gen_stmt, gen_block, gen_function, gen_prescan_block
 -- Expression constraint generation
 -- ---------------------------------------------------------------------------
 
+--: { [integer]: (Ctx, integer) -> integer, ... }
 local ExprRule = {}
 
+--: (Ctx, integer) -> integer
 gen_expr = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = ExprRule[n.kind]
@@ -882,6 +889,7 @@ end
 
 -- Generate constraints for a function body.
 -- Returns the function type_id.
+--: (Ctx, integer, integer, integer, integer, boolean, integer?) -> integer
 gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {}
@@ -986,7 +994,7 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     if ann and ann.kind == ANN_TYPE then
         ctx._ann_warn_line = n.line
         local resolved = resolve_annotation_type(ctx, ann.type_id)
-        ctx._ann_warn_line = nil
+        ctx._ann_warn_line = 0
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
         if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
     end
@@ -1171,6 +1179,7 @@ end
 -- Block / statement generation
 -- ---------------------------------------------------------------------------
 
+--: (Ctx, integer, integer) -> ()
 gen_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         gen_stmt(ctx, ctx.ast_lists:get(i))
@@ -1208,8 +1217,10 @@ local function try_promote_enum(ctx, tbl_tid, enum_name_id)
     end
 end
 
+--: { [integer]: (Ctx, integer) -> (), ... }
 local StmtRule = {}
 
+--: (Ctx, integer) -> ()
 gen_stmt = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rule = StmtRule[n.kind]
@@ -1260,7 +1271,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
         if ann and ann.kind == ANN_TYPE then
             ctx._ann_warn_line = n.line
             ann_tid = resolve_annotation_type(ctx, ann.type_id)
-            ctx._ann_warn_line = nil
+            ctx._ann_warn_line = 0
         end
 
         local prescanned = ctx.scope.bindings[name_id]
@@ -1508,6 +1519,7 @@ StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
 end
 
 -- Collect end-of-branch types for variables that already existed in base_scope.
+--: (Ctx, Scope, Scope) -> { [integer]: integer, ... }
 local function branch_scope_diff(ctx, branch_scope, base_scope)
     local result = {}
     local s = branch_scope
@@ -1522,6 +1534,7 @@ local function branch_scope_diff(ctx, branch_scope, base_scope)
     return result
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_IF_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local narrow_mod = require("lib.type.static.narrow")
@@ -1782,7 +1795,7 @@ StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
     end
 end
 
-StmtRule[NODE_BREAK_STMT] = function() end
+StmtRule[NODE_BREAK_STMT] = function(_ctx, _nid) end
 
 StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
@@ -1794,7 +1807,7 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     if ann and ann.kind == ANN_TYPE then
         ctx._ann_warn_line = n.line
         local resolved = resolve_annotation_type(ctx, ann.type_id)
-        ctx._ann_warn_line = nil
+        ctx._ann_warn_line = 0
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
         if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
     end
@@ -1867,6 +1880,7 @@ local function make_prescan_stub(ctx, pl)
     return types_mod.make_func(ctx, param_vars, { ret_var }, -1)
 end
 
+--: (Ctx, integer, integer) -> ()
 gen_prescan_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         local sid = ctx.ast_lists:get(i)
@@ -2083,7 +2097,7 @@ local function process_typeof_decls(ctx, typeof_decls)
         if alias then
             ctx._ann_warn_line = entry.line
             alias.body = resolve_annotation_type(ctx, r.type_id)
-            ctx._ann_warn_line = nil
+            ctx._ann_warn_line = 0
         end
     end
 end
@@ -2180,8 +2194,9 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
         ctx.return_vars[1] = nil
         ctx.module_return_tids = { { module_ret_var } }
 
-        if typeof_decls and #typeof_decls > 0 then
-            process_typeof_decls(ctx, typeof_decls)
+        local td = typeof_decls or {}
+        if #td > 0 then
+            process_typeof_decls(ctx, td)
         end
     end
 

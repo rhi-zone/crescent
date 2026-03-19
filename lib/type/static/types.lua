@@ -186,6 +186,11 @@ function M.new_ctx(pool)
         -- Populated by prelude.populate. Used by meta_op_ret and unify.
         -- Keys: TAG_NUMBER, TAG_INTEGER, TAG_STRING (and their literal subtypes, normalized by callers).
         prim_meta = {},
+        -- _ann_warn_line: 0 = no active annotation warning; set to source line before
+        -- resolving a user annotation, reset to 0 after. Used by resolve_annotation_type
+        -- to emit E.EXPLICIT_ANY when `any` appears in a user-written annotation.
+        _ann_warn_line = 0,
+        _ann_consumed  = {},
     }
     return ctx
 end

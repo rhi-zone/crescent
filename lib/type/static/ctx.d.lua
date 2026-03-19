@@ -32,6 +32,9 @@
 -- List pool: flat int32_t array. :get(i) returns integer.
 --:: ListPool = { get: (ListPool, any) -> integer, len: integer, ... }
 
+-- Scope frame: linked list of binding tables.
+--:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: any, annotation_bindings: any, parent: Scope?, level: integer }
+
 ---------------------------------------------------------------------------
 -- Diagnostic error codes (defs.E)
 ---------------------------------------------------------------------------
@@ -51,6 +54,7 @@ DefsModule = {
   ANN_TYPE: integer, ANN_DECL: integer, ANN_TYPE_ARGS: integer,
   FLAG_VARARG: integer, FLAG_LOCAL: integer, FLAG_COMPUTED: integer,
   FLAG_GENERIC: integer, FLAG_RECURSIVE: integer,
+  FLAG_READONLY: integer, FLAG_OPTIONAL: integer, FLAG_PRIVATE: integer,
   TAG_NIL: integer, TAG_BOOLEAN: integer, TAG_NUMBER: integer,
   TAG_STRING: integer, TAG_ANY: integer, TAG_NEVER: integer,
   TAG_INTEGER: integer, TAG_UNKNOWN: integer, TAG_LITERAL: integer,
@@ -59,7 +63,7 @@ DefsModule = {
   TAG_TUPLE: integer, TAG_NOMINAL: integer, TAG_MATCH_TYPE: integer,
   TAG_INTRINSIC: integer, TAG_TYPE_CALL: integer, TAG_FORALL: integer,
   TAG_SPREAD: integer, TAG_NAMED: integer, TAG_CDATA: integer,
-  TAG_ENUM_MEMBER: integer,
+  TAG_ENUM_MEMBER: integer, TAG_TYPEOF: integer,
   NODE_LITERAL: integer, NODE_IDENTIFIER: integer, NODE_UNARY_EXPR: integer,
   NODE_BINARY_EXPR: integer, NODE_INDEX_EXPR: integer, NODE_FIELD_EXPR: integer,
   NODE_METHOD_CALL: integer, NODE_CALL_EXPR: integer, NODE_FUNC_EXPR: integer,
@@ -92,14 +96,14 @@ DefsModule = {
 --   unify(any, T_UNKNOWN) succeeds (TAG_ANY check fires first).
 ---------------------------------------------------------------------------
 
---:: declare report = (Ctx, any, any, integer, any) -> any
---:: declare warn = (Ctx, any, any, integer, any) -> ()
---:: declare warn_raw = (Ctx, any, any, string) -> ()
---:: declare find_field_definition = (Ctx, any, any) -> any
---:: declare pop_return_collector = (Ctx) -> any
---:: declare infer_expr_multi = (Ctx, integer) -> any
---:: declare try_call_args = (Ctx, integer, any) -> any
---:: declare snapshot_table = (Ctx, any) -> (any, any, any, any)
+--:: declare report = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> unknown
+--:: declare warn = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
+--:: declare warn_raw = (Ctx, integer?, integer?, string) -> ()
+--:: declare find_field_definition = (Ctx, integer, integer) -> unknown
+--:: declare pop_return_collector = (Ctx) -> unknown
+--:: declare infer_expr_multi = (Ctx, integer) -> unknown
+--:: declare try_call_args = (Ctx, integer, unknown) -> unknown
+--:: declare snapshot_table = (Ctx, unknown) -> (unknown, unknown, unknown, unknown)
 
 ---------------------------------------------------------------------------
 -- Ctx: the central checker state object.
@@ -115,7 +119,7 @@ Ctx = {
   pool:         any,
   ann:          any,
   err:          any,
-  scope:        any,
+  scope:        Scope,
   numvals:      any,
   prim_index:   any,
   prim_meta:    any,
@@ -128,7 +132,11 @@ Ctx = {
   _last_multi_return:        any,
   _last_pcall_success_types: any,
   _pcall_info:    any,
-  inferred_anns:  any,
+  inferred_anns:   any,
+  constraints:     any,
+  _multi_ret:      any,
+  _ann_warn_line:  integer,
+  _ann_consumed:   any,
   var_counter:    integer,
   nominal_id:     integer,
   level:          integer,

@@ -23,8 +23,10 @@ local function run_v3(source, filename, parent_scope, pool, cri_loader)
     return ctx.err, ctx
 end
 
--- Session cache: absolute_filename → { err_ctx, ctx, export_tid }
+-- Session cache: absolute_filename → { err_ctx, ctx, export_tid, cri_bytes }
 -- Simple per-session, no invalidation. Cleared by M.clear_cache().
+--:: SessionEntry = { err_ctx: unknown, ctx: unknown, export_tid: unknown, cri_bytes: string? }
+--: { [string]: SessionEntry?, ... }
 local _session = {}
 
 -- Currently-being-checked set: prevents re-entrant check_file calls.
@@ -171,8 +173,9 @@ function M.check_file(filename, parent_scope, explicit_pool)
 
         if _session[dep_path] then
             local dep = _session[dep_path]
-            if dep.cri_bytes then
-                local ret = load_and_tag(dep.cri_bytes, dep_path)
+            local cri = dep.cri_bytes
+            if cri then
+                local ret = load_and_tag(cri, dep_path)
                 if ret then return ret end
             end
             -- Dep was checked but has no serializable export (e.g. T_ANY): return nil.
@@ -183,9 +186,13 @@ function M.check_file(filename, parent_scope, explicit_pool)
         local _, dep_ctx = M.check_file(dep_path, parent_scope, _pool)
         if dep_ctx then
             -- Session entry was populated by check_file; retry via session cache.
-            if _session[dep_path] and _session[dep_path].cri_bytes then
-                local ret = load_and_tag(_session[dep_path].cri_bytes, dep_path)
-                if ret then return ret end
+            local dep2 = _session[dep_path]
+            if dep2 then
+                local cri2 = dep2.cri_bytes
+                if cri2 then
+                    local ret = load_and_tag(cri2, dep_path)
+                    if ret then return ret end
+                end
             end
         end
 
@@ -225,7 +232,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
         err_ctx = errors_mod.new_ctx()
         errors_mod.error(err_ctx, filename, 0, 0, "cannot open file: " .. (ioerr or filename))
         _checking[filename] = nil
-        _session[filename] = { err_ctx = err_ctx, ctx = nil, export_tid = nil }
+        _session[filename] = { err_ctx = err_ctx, ctx = nil, export_tid = nil, cri_bytes = nil }
         return err_ctx, nil
     end
     local source = f:read("*a")
