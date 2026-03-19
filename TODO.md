@@ -91,13 +91,16 @@
 - [ ] extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
 
 #### websocket
-- [ ] 15 TODOs in 274 lines — either complete or mark as experimental in README
-- [ ] No tests — frame masking/unmasking and upgrade logic need coverage
-- [ ] Add `package.path` guard
+- [x] 15 TODOs — resolved/categorised (perf/api/extensions/policy/refactor); aa5a4e0
+- [x] Tests — 118 assertions: frame encode/decode, masking, close/ping/pong, error cases
+- [x] `package.path` guard added
+- [ ] Error return convention: int → string (breaking API change, deferred)
+- [ ] Packet size limit enforcement (caller policy decision, deferred)
 
 #### sqlite
-- [ ] No tests — add coverage for query, parameter binding, iteration, error paths
-- [ ] blob support missing (TODO in source)
+- [x] No tests — add coverage for query, parameter binding, iteration, error paths (sqlite_test.lua, 72 assertions)
+- [ ] `db:close()` bug: passes `self.db` (`sqlite3 *[1]`) to `sqlite3_close_v2` which expects `sqlite3 *`; should be `self.db[0]`
+- [ ] blob support missing (TODO in source) — `sqlite3_bind_blob` declared in FFI cdef but unreachable from Lua API
 - [ ] macOS: dlopen path for libsqlite3 not set (Linux-only currently)
 
 #### pkg
