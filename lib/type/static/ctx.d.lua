@@ -1,6 +1,6 @@
 -- lib/type/static/ctx.d.lua
 -- Type declaration for the checker context (ctx) struct.
--- Loaded by prelude.populate() alongside stdlib.d.lua.
+-- Loaded by prelude.populate_checker() when self-checking typechecker source files.
 --
 -- ctx is the central state object threaded through every typechecker function.
 -- It holds all arenas, the intern pool, scope, and per-check bookkeeping.
@@ -23,17 +23,35 @@
 ---------------------------------------------------------------------------
 -- Arena types: wrap FFI flat-array arenas.
 -- :get(i) returns a pointer to the struct (mutably accessible).
+-- Index parameter is always integer (arena slot index).
 ---------------------------------------------------------------------------
 
---:: ASTNodeArena = { get: (ASTNodeArena, any) -> ASTNode, len: integer, ... }
---:: TypeSlotArena = { get: (TypeSlotArena, any) -> TypeSlot, len: integer, ... }
---:: FieldEntryArena = { get: (FieldEntryArena, any) -> FieldEntry, len: integer, ... }
+--:: ASTNodeArena   = { get: (ASTNodeArena,   integer) -> ASTNode,   len: integer, ... }
+--:: TypeSlotArena  = { get: (TypeSlotArena,  integer) -> TypeSlot,  len: integer, ... }
+--:: FieldEntryArena = { get: (FieldEntryArena, integer) -> FieldEntry, len: integer, ... }
 
 -- List pool: flat int32_t array. :get(i) returns integer.
---:: ListPool = { get: (ListPool, any) -> integer, len: integer, ... }
+--:: ListPool = { get: (ListPool, integer) -> integer, len: integer, mark: (ListPool) -> integer, push: (ListPool, integer) -> (), flush: (ListPool, integer) -> (integer, integer), ... }
+
+-- Intern pool: string interning table with hash map.
+-- next_id is the only field accessed directly in checker code.
+--:: InternPool = { next_id: integer, ... }
+
+-- Annotation arena result returned by ann.parse_annotations().
+-- Types/fields/lists use the same arena shapes as the main checker.
+--:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: string, ... }, pool: InternPool }
+
+-- Error context from errors.lua.
+--:: ErrCtx = { errors: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, warnings: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
+
+-- Type alias table stored in scope.type_bindings.
+--:: TypeAlias = { body: integer, params: { [integer]: integer, ... }?, ... }
 
 -- Scope frame: linked list of binding tables.
---:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: any, annotation_bindings: any, parent: Scope?, level: integer }
+--:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope?, level: integer }
+
+-- Entry in ctx._multi_ret: tracks which source tuple a binding came from.
+--:: MultiRetEntry = { source_tid: integer, slot: integer }
 
 ---------------------------------------------------------------------------
 -- Diagnostic error codes (defs.E)
@@ -45,7 +63,7 @@
 -- defs module type: all integer constants plus the E table.
 -- Declaring `defs` here pre-populates the scope so that
 --   local defs = require("lib.type.static.defs")
--- in infer.lua / constrain.lua uses this type (prescan wins over inferred any).
+-- in constrain.lua uses this type (prescan wins over inferred type).
 ---------------------------------------------------------------------------
 
 --[[::
@@ -88,12 +106,8 @@ DefsModule = {
 --:: declare defs = DefsModule
 
 ---------------------------------------------------------------------------
--- Local functions in infer.lua that have `-> unknown` return annotations.
--- Pre-declaring them here prevents the prescan from creating a generic
--- `(any, ...) -> TypeVar_` stub, which would conflict with the annotation's
--- `-> unknown` return type during constraint solving.
--- Using `-> any` instead of `-> unknown` is compatible because:
---   unify(any, T_UNKNOWN) succeeds (TAG_ANY check fires first).
+-- Local functions declared in constrain.lua that are referenced before
+-- their definition (prescan must see a typed stub, not an inferred var).
 ---------------------------------------------------------------------------
 
 --:: declare report = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> unknown
@@ -116,39 +130,36 @@ Ctx = {
   lists:        ListPool,
   ast_lists:    ListPool,
   nodes:        ASTNodeArena,
-  pool:         any,
-  ann:          any,
-  err:          any,
+  pool:         InternPool,
+  ann:          AnnResult?,
+  err:          ErrCtx,
   scope:        Scope,
-  numvals:      any,
-  prim_index:   any,
-  prim_meta:    any,
-  return_types:       any,
-  return_stub_vars:   any,
-  module_types:       any,
-  module_return_tids: any,
-  cri_loader:         any,
-  ffi_hooks:          any,
-  _last_multi_return:        any,
-  _last_pcall_success_types: any,
-  _pcall_info:    any,
-  inferred_anns:   any,
-  constraints:     any,
-  _multi_ret:      any,
+  numvals:      { [integer]: number, ... },
+  prim_index:   { [integer]: integer, ... },
+  prim_meta:    { [integer]: integer, ... },
+  module_types: { [string]: integer, ... },
+  module_return_tids: { [integer]: { [integer]: integer, ... }, ... }?,
+  cri_loader:   ((Ctx, string) -> integer)?,
+  ffi_hooks:    { process: ((Ctx, string) -> ())?, init: ((Ctx) -> ())?, ... }?,
+  _last_multi_return:          { [integer]: integer, ... }?,
+  _last_multi_return_override: integer?,
+  _multi_ret:      { [integer]: MultiRetEntry, ... },
   _ann_warn_line:  integer,
-  _ann_consumed:   any,
-  var_counter:    integer,
-  nominal_id:     integer,
-  level:          integer,
-  T_NIL:          integer,
-  T_BOOLEAN:      integer,
-  T_NUMBER:       integer,
-  T_STRING:       integer,
-  T_ANY:          integer,
-  T_NEVER:        integer,
-  T_INTEGER:      integer,
-  T_UNKNOWN:      integer,
-  filename:       string,
+  _ann_consumed:   { [integer]: boolean, ... }?,
+  inferred_anns:   { [integer]: unknown, ... },
+  constraints:     { [integer]: { [integer]: integer, ... }, ... },
+  var_counter:  integer,
+  nominal_id:   integer,
+  level:        integer,
+  T_NIL:        integer,
+  T_BOOLEAN:    integer,
+  T_NUMBER:     integer,
+  T_STRING:     integer,
+  T_ANY:        integer,
+  T_NEVER:      integer,
+  T_INTEGER:    integer,
+  T_UNKNOWN:    integer,
+  filename:     string,
   ...
 }
 ]]

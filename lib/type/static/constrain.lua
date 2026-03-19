@@ -892,10 +892,10 @@ end
 --: (Ctx, integer, integer, integer, integer, boolean, integer?) -> integer
 gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local fn_scope = env_mod.child(ctx.scope)
-    local param_tids = {}
+    local param_tids = {} --: { [integer]: integer, ... }
 
     local has_ann_fn = ann_fn_tid ~= nil
-    if has_ann_fn then
+    if ann_fn_tid then
         local aft = ctx.types:get(ann_fn_tid)
         if aft and aft.tag == TAG_FUNCTION then
             for i = 0, pl - 1 do
@@ -948,7 +948,7 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     ctx.scope = saved
 
     local returns
-    if has_ann_fn then
+    if ann_fn_tid then
         local aft = ctx.types:get(ann_fn_tid)
         if aft and aft.tag == TAG_FUNCTION then
             returns = {}
