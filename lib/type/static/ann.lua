@@ -605,9 +605,19 @@ function M.parse_annotations(annotations, pool, filename)
             return forall
         end
 
-        -- Word: could be primitive, keyword (match/newtype/function), or named type
+        -- Word: could be primitive, keyword (typeof/match/newtype/function), or named type
         if is_ident_start(b) then
             local word = scan_word(s)
+
+            -- typeof <ident>: capture the inferred type of a value binding
+            if word == "typeof" then
+                local ident = scan_word(s)
+                if not ident then scan_error(s, "expected identifier after 'typeof'") end
+                local name_id = intern_mod.intern(pool, ident)
+                local id = alloc_type(defs.TAG_TYPEOF)
+                types:get(id).data[0] = name_id
+                return id
+            end
 
             -- Check for primitive
             local prim = prim_tags[word]

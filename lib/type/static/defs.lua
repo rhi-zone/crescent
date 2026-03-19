@@ -90,6 +90,9 @@ M.TAG_ENUM_MEMBER       = 24  -- named enum member: EnumName.MemberName
 --   data[1] = member_name_id (intern ID of the member field name)
 --   data[2] = lit_kind       (LIT_INTEGER or LIT_STRING)
 --   data[3] = value          (LIT_INTEGER: int32 value; LIT_STRING: intern ID)
+M.TAG_TYPEOF            = 25  -- annotation-only: typeof <ident> — capture inferred type of a binding
+-- TypeSlot layout for TAG_TYPEOF (annotation arena only, never in the checker's type arena):
+--   data[0] = name_id  (intern ID of the identifier to look up)
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0

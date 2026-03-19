@@ -6052,3 +6052,114 @@ local x = i
 ]], "nominal")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- typeof annotation
+---------------------------------------------------------------------------
+
+assert.describe("typeof annotation", function()
+    assert.it("captures inferred table type", function()
+        -- Config is assigned the inferred type of config: { host: string, port: integer }
+        -- Using Config as an annotation should then pass type-checking.
+        v3_no_errors([[
+local config = { host = "localhost", port = 8080 }
+--:: Config = typeof config
+--: Config
+local c = config
+]])
+    end)
+
+    assert.it("typeof on annotated binding returns its declared type", function()
+        v3_no_errors([[
+--: string
+local name = "hello"
+--:: Name = typeof name
+--: Name
+local n = name
+]])
+    end)
+
+    assert.it("typeof on unknown identifier is an error", function()
+        v3_has_error([[
+--:: T = typeof no_such_binding
+local x = 1
+]], "typeof: unknown identifier")
+    end)
+
+    assert.it("typeof composes: alias of typeof works like the original type", function()
+        v3_no_errors([[
+local val = 42
+--:: MyInt = typeof val
+--: MyInt
+local y = val
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- prelude: ctx.d.lua scope isolation
+---------------------------------------------------------------------------
+
+assert.describe("prelude: ctx.d.lua scope isolation", function()
+    assert.it("checker-internal names (report, infer_expr_multi) absent from user scope", function()
+        -- These names are declared in ctx.d.lua, which is only loaded when
+        -- checking typechecker source files (lib/type/static/**). They must
+        -- not appear in the scope of an ordinary user file.
+        local _, ctx = check_mod.check_string("local x = 1", "user_file.lua")
+        local intern_mod2 = require("lib.type.static.intern")
+        local env_mod2 = require("lib.type.static.env")
+        local report_id = intern_mod2.intern(ctx.pool, "report")
+        local infer_id  = intern_mod2.intern(ctx.pool, "infer_expr_multi")
+        assert.ok(env_mod2.lookup(ctx.scope, report_id) == nil,
+            "report must not be in user scope")
+        assert.ok(env_mod2.lookup(ctx.scope, infer_id) == nil,
+            "infer_expr_multi must not be in user scope")
+    end)
+
+    assert.it("checker-internal names present when checking lib/type/static/ files", function()
+        -- When the filename matches lib/type/static/, populate_checker is used
+        -- and ctx.d.lua declarations appear in scope.
+        local _, ctx = check_mod.check_string("local x = 1", "lib/type/static/constrain.lua")
+        local intern_mod2 = require("lib.type.static.intern")
+        local env_mod2 = require("lib.type.static.env")
+        local report_id = intern_mod2.intern(ctx.pool, "report")
+        assert.ok(env_mod2.lookup(ctx.scope, report_id) ~= nil,
+            "report must be in scope for typechecker source files")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- prelude: _G intrinsic synthesized from scope
+---------------------------------------------------------------------------
+
+assert.describe("prelude: _G synthesized from global scope", function()
+    assert.it("_G.math.abs returns number, not any", function()
+        -- _G fields are typed: accessing a known stdlib module returns its type.
+        no_errors([[
+--: number
+local x = _G.math.abs(-1)
+]])
+    end)
+
+    assert.it("_G.unknown_key returns unknown, not any", function()
+        -- Unknown keys use T_UNKNOWN fallback. Assigning unknown to integer errors.
+        has_error([[
+--: integer
+local x = _G.no_such_key
+]], "unknown")
+    end)
+
+    assert.it("_G.string.format works with typed return", function()
+        no_errors([[
+--: string
+local s = _G.string.format("%d", 1)
+]])
+    end)
+
+    assert.it("_G contains _VERSION as string", function()
+        no_errors([[
+--: string
+local v = _G._VERSION
+]])
+    end)
+end)

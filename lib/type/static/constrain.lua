@@ -107,6 +107,7 @@ local TAG_FORALL   = defs.TAG_FORALL
 local TAG_TUPLE    = defs.TAG_TUPLE
 local TAG_NEVER       = defs.TAG_NEVER
 local TAG_ENUM_MEMBER = defs.TAG_ENUM_MEMBER
+local TAG_TYPEOF      = defs.TAG_TYPEOF
 
 local E = defs.E
 
@@ -206,6 +207,27 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == TAG_ROWVAR then
         return types_mod.make_rowvar(ctx, ctx.scope.level)
+    end
+
+    if tag == TAG_TYPEOF then
+        local name_id = at.data[0]
+        local tid = env_mod.lookup(ctx.scope, name_id)
+        if not tid then
+            local intern_local = require("lib.type.static.intern")
+            local name_str = intern_local.get(ctx.pool, name_id) or "?"
+            local err_line = ctx._ann_warn_line or 0
+            errors_mod.error(ctx.err, ctx.filename, err_line, 0,
+                "typeof: unknown identifier '" .. name_str .. "'")
+            return ctx.T_UNKNOWN
+        end
+        local resolved = types_mod.find(ctx, tid)
+        local rt = ctx.types:get(resolved)
+        if rt.tag == TAG_VAR then
+            -- Unbound type variable (unannotated param) — return T_UNKNOWN rather
+            -- than capturing an unstable free variable.
+            return ctx.T_UNKNOWN
+        end
+        return resolved
     end
 
     if tag == TAG_NAMED then
@@ -1902,7 +1924,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local function process_type_decls(ctx)
-    if not ctx.ann then return end
+    if not ctx.ann then return nil end
     if ctx.ann.warnings then
         for _, w in ipairs(ctx.ann.warnings) do
             errors_mod.warning(ctx.err, ctx.filename, w.line or 0, w.col or 0, w.msg)
@@ -1918,6 +1940,10 @@ local function process_type_decls(ctx)
     end
     -- Sort by source line so forward references resolve in file order.
     table.sort(decls, function(a, b) return (decl_lines[a] or 0) < (decl_lines[b] or 0) end)
+
+    -- Identify decls whose body is a bare TAG_TYPEOF — these must be deferred until after
+    -- gen_block, because typeof looks up value bindings that don't exist during prescan.
+    local typeof_decls = {}
 
     -- Pass 1: register all type alias names (body=nil) so forward refs are visible.
     for _, r in ipairs(decls) do
@@ -1949,64 +1975,71 @@ local function process_type_decls(ctx)
 
     -- Pass 2a: resolve type alias bodies (non-decl_var) before variable declarations
     -- reference them, so that `--:: declare x = SomeAlias` sees the fully-resolved body.
+    -- Decls whose body is a bare TAG_TYPEOF are deferred to after gen_block, because they
+    -- look up value bindings that don't exist during prescan.
     for _, r in ipairs(decls) do
         if not r.decl_var then
-            -- Warn on function type declarations with unnamed parameters.
+            -- Detect bare typeof body — defer until value bindings are in scope.
             local at = ctx.ann.types:get(r.type_id)
-            local fn_at
-            if at.tag == defs.TAG_FUNCTION then
-                fn_at = at
-            elseif at.tag == defs.TAG_FORALL then
-                local body = ctx.ann.types:get(at.data[2])
-                if body.tag == defs.TAG_FUNCTION then fn_at = body end
-            end
-            if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
-                warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
-            end
+            if at.tag == TAG_TYPEOF then
+                typeof_decls[#typeof_decls + 1] = { r = r, line = decl_lines[r] }
+            else
+                -- Warn on function type declarations with unnamed parameters.
+                local fn_at
+                if at.tag == defs.TAG_FUNCTION then
+                    fn_at = at
+                elseif at.tag == defs.TAG_FORALL then
+                    local body = ctx.ann.types:get(at.data[2])
+                    if body.tag == defs.TAG_FUNCTION then fn_at = body end
+                end
+                if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
+                    warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
+                end
 
-            local alias = env_mod.lookup_type(ctx.scope, r.name_id)
-            if alias then
-                -- For generic aliases, push a temporary scope where each type parameter
-                -- is bound to a TAG_NAMED placeholder. This lets resolve_annotation_type
-                -- produce the correct placeholder types (substitutable by env_mod.substitute)
-                -- instead of erroring on unresolved parameter names.
-                local old_scope = ctx.scope
-                if alias.params and #alias.params > 0 then
-                    local temp = env_mod.new(ctx.scope.level + 1)
-                    temp.parent = ctx.scope
-                    for _, param_name_id in ipairs(alias.params) do
-                        local ph = types_mod.alloc_type(ctx, defs.TAG_NAMED)
-                        ctx.types:get(ph).data[0] = param_name_id
-                        env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
+                local alias = env_mod.lookup_type(ctx.scope, r.name_id)
+                if alias then
+                    -- For generic aliases, push a temporary scope where each type parameter
+                    -- is bound to a TAG_NAMED placeholder. This lets resolve_annotation_type
+                    -- produce the correct placeholder types (substitutable by env_mod.substitute)
+                    -- instead of erroring on unresolved parameter names.
+                    local old_scope = ctx.scope
+                    if alias.params and #alias.params > 0 then
+                        local temp = env_mod.new(ctx.scope.level + 1)
+                        temp.parent = ctx.scope
+                        for _, param_name_id in ipairs(alias.params) do
+                            local ph = types_mod.alloc_type(ctx, defs.TAG_NAMED)
+                            ctx.types:get(ph).data[0] = param_name_id
+                            env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
+                        end
+                        ctx.scope = temp
                     end
-                    ctx.scope = temp
-                end
 
-                if r.newtype then
-                    local ann_nom = ctx.ann.types:get(r.type_id)
-                    local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
-                    ctx.nominal_id = ctx.nominal_id + 1
-                    alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
-                else
-                    alias.body = resolve_annotation_type(ctx, r.type_id)
-                end
+                    if r.newtype then
+                        local ann_nom = ctx.ann.types:get(r.type_id)
+                        local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
+                        ctx.nominal_id = ctx.nominal_id + 1
+                        alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
+                    else
+                        alias.body = resolve_annotation_type(ctx, r.type_id)
+                    end
 
-                -- Resolve raw_bounds (annotation-arena IDs) into checker-context type IDs.
-                -- These are resolved in the same temporary param scope so that bound types
-                -- that reference other params (e.g. <T: { x: U }, U>) resolve correctly.
-                if alias.raw_bounds then
-                    alias.resolved_bounds = {}
-                    for _, raw_id in ipairs(alias.raw_bounds) do
-                        if raw_id == -1 then
-                            alias.resolved_bounds[#alias.resolved_bounds + 1] = nil
-                        else
-                            alias.resolved_bounds[#alias.resolved_bounds + 1] =
-                                resolve_annotation_type(ctx, raw_id)
+                    -- Resolve raw_bounds (annotation-arena IDs) into checker-context type IDs.
+                    -- These are resolved in the same temporary param scope so that bound types
+                    -- that reference other params (e.g. <T: { x: U }, U>) resolve correctly.
+                    if alias.raw_bounds then
+                        alias.resolved_bounds = {}
+                        for _, raw_id in ipairs(alias.raw_bounds) do
+                            if raw_id == -1 then
+                                alias.resolved_bounds[#alias.resolved_bounds + 1] = nil
+                            else
+                                alias.resolved_bounds[#alias.resolved_bounds + 1] =
+                                    resolve_annotation_type(ctx, raw_id)
+                            end
                         end
                     end
-                end
 
-                ctx.scope = old_scope
+                    ctx.scope = old_scope
+                end
             end
         end
     end
@@ -2027,6 +2060,22 @@ local function process_type_decls(ctx)
                 warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
             end
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
+        end
+    end
+
+    return typeof_decls
+end
+
+-- Resolve deferred `--:: Name = typeof ident` declarations.
+-- Called after gen_block so that value bindings from local statements are in ctx.scope.
+local function process_typeof_decls(ctx, typeof_decls)
+    for _, entry in ipairs(typeof_decls) do
+        local r = entry.r
+        local alias = env_mod.lookup_type(ctx.scope, r.name_id)
+        if alias then
+            ctx._ann_warn_line = entry.line
+            alias.body = resolve_annotation_type(ctx, r.type_id)
+            ctx._ann_warn_line = nil
         end
     end
 end
@@ -2073,7 +2122,17 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx.lit_cache          = {}   -- literal type interning: (kind<<32|val) → type_id
 
     if not parent_scope then
-        require("lib.type.static.prelude").populate(ctx)
+        local prelude = require("lib.type.static.prelude")
+        -- Use populate_checker when self-checking typechecker source files so that
+        -- ctx.d.lua declarations (report, infer_expr_multi, etc.) are in scope.
+        -- For all other files, use populate (stdlib.d.lua only) to avoid leaking
+        -- typechecker-internal names into user file scope.
+        local fn = filename or ""
+        if fn:find("lib/type/static/", 1, true) or fn:find("lib\\type\\static\\", 1, true) then
+            prelude.populate_checker(ctx)
+        else
+            prelude.populate(ctx)
+        end
         require("lib.type.static.prelude_luajit").populate(ctx)
     end
 
@@ -2100,7 +2159,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
         ctx.ffi_hooks.init(ctx)
     end
 
-    process_type_decls(ctx)
+    local typeof_decls = process_type_decls(ctx)
 
     local chunk = pr.root and ctx.nodes:get(pr.root)
     if chunk then
@@ -2112,6 +2171,10 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
         gen_block(ctx, bs, bl)
         ctx.return_vars[1] = nil
         ctx.module_return_tids = { { module_ret_var } }
+
+        if typeof_decls and #typeof_decls > 0 then
+            process_typeof_decls(ctx, typeof_decls)
+        end
     end
 
     return ctx, ctx.constraints
