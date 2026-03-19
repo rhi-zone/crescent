@@ -122,7 +122,7 @@ end
 --[[@return sqlite? database, string? error]] --[[@param path string]]
 mod.open = function (path) return sqlite:open(path) end
 
-sqlite.close = function (self) sqlite_ffi.sqlite3_close_v2(self.db) end
+sqlite.close = function (self) sqlite_ffi.sqlite3_close_v2(self.db[0]) end
 
 --[[do we need binding for blobs?]]
 
