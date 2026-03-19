@@ -39,6 +39,8 @@ local i32x2_to_double = defs.i32x2_to_double
 
 local M = {}
 
+--:: NarrowInfo = { kind: string, inner: NarrowInfo?, name_id: integer?, obj_name_id: integer?, field_name_id: integer?, positive: boolean?, type_str: string?, member_tid: integer?, lit_intern_id: integer?, lit_kind: integer?, lit_id: integer? }
+
 -- Extract narrowing information from a test expression node.
 -- Returns a narrowing_info table or nil.
 -- Narrowing info types:
@@ -53,6 +55,7 @@ local M = {}
 --     — `x.field` is truthy (positive=true means: x.field is non-nil in the truthy branch)
 --   { kind = "enum_eq", name_id = int, member_tid = int, positive = bool }
 --     — `x == Enum.Member`: narrows x to the enum member type (preserves EnumName.Member display)
+--: (Ctx, integer) -> NarrowInfo?
 local function extract_narrowing(ctx, nid)
     local n = ctx.nodes:get(nid)
     if not n then return nil end
@@ -275,12 +278,13 @@ end
 -- info: narrowing info from extract_narrowing
 -- ty_id: the current type of the variable
 -- in_truthy: true if we're in the truthy branch, false for falsy branch
---: (any, { kind: string, [string]: any }, any, boolean) -> any
+--: (Ctx, NarrowInfo, integer, boolean) -> integer
 local function apply_narrowing(ctx, info, ty_id, in_truthy)
     local t = types_mod.find(ctx, ty_id)
 
     if info.kind == "negation" then
-        return apply_narrowing(ctx, info.inner, ty_id, not in_truthy)
+        local inner = info.inner or info  -- non-nil: negation always has inner
+        return apply_narrowing(ctx, inner, ty_id, not in_truthy)
     end
 
     if info.kind == "nil_check" then
@@ -388,7 +392,8 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         -- positive=true: field is truthy (non-nil) when in_truthy matches.
         local field_is_nonnull = (info.positive == in_truthy)
         if field_is_nonnull then
-            return narrow_field_non_nil(ctx, ty_id, info.field_name_id)
+            local fnid = info.field_name_id or 0  -- non-nil: field_presence always has field_name_id
+            return narrow_field_non_nil(ctx, ty_id, fnid)
         end
         -- Conservative: don't narrow to nil in the falsy direction.
         return ty_id
@@ -503,7 +508,9 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
 end
 
 -- Apply a single narrowing info to the 'narrowed' map.
+--: (Ctx, NarrowInfo?, { [integer]: integer, ... }, boolean) -> ()
 local function record_narrowing(ctx, info, narrowed, is_truthy)
+    if not info then return end
     local name_id = info_name_id(info)
     if not name_id then return end
     local env_mod = require("lib.type.static.env")
@@ -513,8 +520,12 @@ local function record_narrowing(ctx, info, narrowed, is_truthy)
     -- Propagate correlated multi-return narrowings when any binding is narrowed.
     -- Pass the narrowing direction (is_truthy_effective) so arm filtering works at gen time.
     -- For negated infos, the effective direction is flipped.
+    --: (NarrowInfo, boolean) -> boolean
     local function effective_truthy(inf, it)
-        if inf.kind == "negation" then return effective_truthy(inf.inner, not it) end
+        if inf.kind == "negation" then
+            local inner = inf.inner or inf  -- non-nil: negation always has inner
+            return effective_truthy(inner, not it)
+        end
         return it
     end
     propagate_multi_ret_narrowing(ctx, name_id, narrowed[name_id],
@@ -534,8 +545,8 @@ function M.narrow_scope(ctx, test_nid, is_truthy)
         if is_truthy then
             local left_info  = extract_narrowing(ctx, n.data[1])
             local right_info = extract_narrowing(ctx, n.data[2])
-            if left_info  then record_narrowing(ctx, left_info,  narrowed, true) end
-            if right_info then record_narrowing(ctx, right_info, narrowed, true) end
+            record_narrowing(ctx, left_info,  narrowed, true)
+            record_narrowing(ctx, right_info, narrowed, true)
         end
         return narrowed
     end
@@ -546,26 +557,27 @@ function M.narrow_scope(ctx, test_nid, is_truthy)
         if not is_truthy then
             local left_info  = extract_narrowing(ctx, n.data[1])
             local right_info = extract_narrowing(ctx, n.data[2])
-            if left_info  then record_narrowing(ctx, left_info,  narrowed, false) end
-            if right_info then record_narrowing(ctx, right_info, narrowed, false) end
+            record_narrowing(ctx, left_info,  narrowed, false)
+            record_narrowing(ctx, right_info, narrowed, false)
         end
         return narrowed
     end
 
     local info = extract_narrowing(ctx, test_nid)
-    if not info then return narrowed end
     record_narrowing(ctx, info, narrowed, is_truthy)
     return narrowed
 end
 
 -- Apply a single narrowing info against a given type_id, returning the narrowed type_id.
 -- Exposed for constrain.lua's guard_narrowings accumulation (elseif chains).
+--: (Ctx, NarrowInfo, integer, boolean) -> integer
 function M.apply_narrowing_info(ctx, info, ty_id, is_truthy)
     return apply_narrowing(ctx, info, ty_id, is_truthy)
 end
 
 -- Extract narrowing info from a test expression node, without looking up types.
 -- Exposed for constrain.lua to reuse per-arm narrowing info.
+--: (Ctx, integer) -> NarrowInfo?
 function M.extract_narrowing_info(ctx, nid)
     return extract_narrowing(ctx, nid)
 end
