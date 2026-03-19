@@ -10,7 +10,7 @@ if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
-local json   = require("lib.lunajson")
+local json   = require("lib.format.json")
 local check  = require("lib.type.static.check")
 local types  = require("lib.type.static.types")
 local intern = require("lib.type.static.intern")

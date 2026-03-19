@@ -7,7 +7,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local doc    = require("lib.doc")
-local json   = require("lib.lunajson")
+local json   = require("lib.format.json")
 
 local format = "json"
 local files  = {}

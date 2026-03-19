@@ -1,4 +1,4 @@
-local urlencode = require("lib.urlencode")
+local urlencode = require("lib.encode.urlencode")
 
 local function assert_eq(a, b, msg)
 	if a ~= b then error(msg .. ": expected " .. tostring(b) .. ", got " .. tostring(a), 2) end

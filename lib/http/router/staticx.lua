@@ -1,7 +1,7 @@
 local path = require("lib.path")
 local mimetype_by_name = require("lib.mimetype.by_name").mimetype
-local urldecode = require("lib.urlencode").urlencode_to_string
-local urlencode = require("lib.urlencode").string_to_urlencode
+local urldecode = require("lib.encode.urlencode").urlencode_to_string
+local urlencode = require("lib.encode.urlencode").string_to_urlencode
 local dir_list = require("lib.fs.dir_list").dir_list
 local mimetype_by_contents
 

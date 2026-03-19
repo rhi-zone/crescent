@@ -7,7 +7,7 @@ end
 
 local T   = require("lib.test.assert")
 local arb = require("lib.test.arb")
-local sha = require("lib.sha256")
+local sha = require("lib.hash.sha256")
 
 -- ── Known test vectors ────────────────────────────────────────────────────────
 -- Verified against system sha256sum(1).

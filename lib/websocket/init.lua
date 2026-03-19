@@ -4,7 +4,7 @@ end
 
 local sha1 = require("dep.sha1").binary
 local to_base64 = require("dep.base64").encode
-local utf8 = require("lib.utf8")
+local utf8 = require("lib.encode.utf8")
 
 local mod = {}
 

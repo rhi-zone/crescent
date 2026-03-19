@@ -1,4 +1,4 @@
-local base64 = require("lib.base64")
+local base64 = require("lib.encode.base64")
 local assert = require("lib.test.assert")
 
 -- RFC 4648 test vectors

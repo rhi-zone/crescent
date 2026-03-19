@@ -1,4 +1,4 @@
-local sha1 = require("lib.sha1")
+local sha1 = require("lib.hash.sha1")
 local assert = require("lib.test.assert")
 
 -- known test vectors (FIPS 180-1)

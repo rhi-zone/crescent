@@ -1,4 +1,4 @@
-local urlencode = require("lib.urlencode").string_to_urlencode
+local urlencode = require("lib.encode.urlencode").string_to_urlencode
 
 --[[FIXME:]]
 

@@ -1,4 +1,4 @@
-local urlencode_to_string = require("lib.urlencode").urlencode_to_string
+local urlencode_to_string = require("lib.encode.urlencode").urlencode_to_string
 local status_names = require("lib.http.status").status_names
 local nan = 0 / 0
 

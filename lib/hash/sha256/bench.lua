@@ -6,7 +6,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local sha = require("lib.sha256")
+local sha = require("lib.hash.sha256")
 
 local INPUT_SIZE = 1024 * 1024  -- 1 MB
 local REPS       = 10

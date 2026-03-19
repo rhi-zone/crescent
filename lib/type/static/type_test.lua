@@ -4087,7 +4087,7 @@ end)
 assert.describe("require_sources", function()
     assert.it("local x = require() populates require_sources", function()
         local _, ctx = check_mod.check_string([[
-local json = require("lib.lunajson")
+local json = require("lib.format.json")
 ]], "test.lua")
         assert.ok(ctx, "ctx should be non-nil")
         assert.ok(ctx.require_sources, "require_sources should exist")
@@ -4095,7 +4095,7 @@ local json = require("lib.lunajson")
         for _, mod in pairs(ctx.require_sources) do
             found_mod = mod
         end
-        assert.eq(found_mod, "lib.lunajson")
+        assert.eq(found_mod, "lib.format.json")
     end)
 
     assert.it("require_sources not polluted by non-require calls", function()
