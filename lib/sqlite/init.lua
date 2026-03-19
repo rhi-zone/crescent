@@ -90,9 +90,11 @@ if ffi.os == "Windows" then
 elseif ffi.os == "Linux" then
 	--[[TODO: bundle instead of relying on system installation]]
 	sqlite_ffi = ffi.load("sqlite3") --[[@type sqlite_ffi]]
+elseif ffi.os == "OSX" then
+	--[[macOS ships libsqlite3 as part of the OS]]
+	sqlite_ffi = ffi.load("libsqlite3.dylib") --[[@type sqlite_ffi]]
 else
-	--[[TODO: i think macos has it built in]]
-	error("os " .. ffi.os .. "not supported")
+	error("os " .. ffi.os .. " not supported")
 end
 
 --[[@param self sqlite]]
