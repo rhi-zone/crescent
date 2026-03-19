@@ -342,7 +342,7 @@ Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs
 - [x] pcall / xpcall — already correct via stdlib.d.lua `any` param declarations
 - [x] Iterator inference (`for k, v in pairs(t)`) — already implemented in constrain.lua
 - [x] `or`-expression union inference (`x or default` → `T | U`) — already implemented in constrain.lua
-- [ ] Correlated multi-return narrowing (backlog: `if pat ~= nil then` narrows `maj`/`min` too)
+- [x] Correlated multi-return narrowing — C_INDEX + filter_tuple_union_arms + pcall intrinsic; io.open/string.find union-of-tuples stdlib types (2026-03-19)
 
 **Phase 2 — cutover:**
 - [x] Replace `check.check_string` with v3 pipeline — done; check.lua fully on v3 (commit 848ea56)
