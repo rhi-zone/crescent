@@ -439,9 +439,15 @@ Blocking items for cutover:
 - [x] Private field visibility enforcement — DONE 2026-03-17 (session 25). `_`-prefix fields
   get FLAG_PRIVATE. Cross-file access rejected in solve_has_field. ctx.type_origins maps type IDs
   to source filenames via CRI load tagging.
-- [ ] pcall v3 narrowing — pcall-annotated `local ok, s = pcall(fn)` followed by `if ok then s+1`
-  should error: s is string inside the ok branch and `+` is invalid. Currently no error (v3 path).
-  Test at type_test.lua "pcall result type error" fails after 2026-03-17 silent-crash fix.
+- [x] pcall v3 narrowing — DONE (2026-03-19): C_INDEX multi-return + C_OR deferred or-expression
+  fix now correctly types `s` as the pcall'd fn's return type. `s + 1` in `if ok then` errors
+  with "cannot perform arithmetic on 'string'". Commits: 4976104 (C_OR), ca871ba (union subsumption).
+- [x] `(string|nil) or "fallback"` not narrowing — DONE (2026-03-19): C_OR = 10 deferred constraint.
+  OP_OR handler now emits `{C_OR, left, right, result}` instead of computing eagerly. solve_or
+  defers while left is TAG_VAR, then runs subtract(left, nil) | right. Commit: 4976104.
+- [x] `integer | 0` / `number | integer` union noise — DONE (2026-03-19): make_union now collapses
+  literals subsumed by their primitive (LIT_INTEGER → integer, LIT_INTEGER → number), and integer
+  into number. Fixes self-check false positives in arithmetic expression types. Commit: ca871ba.
 - [ ] unnamed-params warn in --:: declare — `--:: declare fn = (T1, T2) -> R` should warn when
   param types are unnamed. Feature exists in v2 path but not v3 process_type_decls. Test fails
   after 2026-03-17 silent-crash fix.
