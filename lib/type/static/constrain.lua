@@ -928,10 +928,21 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
     local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
 
-    -- Generalize: replace free vars in fn_tid with ForAll-bound vars.
-    -- This gives let-polymorphism for unannotated local functions.
-    if not has_ann_fn then
-        env_mod.generalize(ctx, fn_tid, saved.level)
+    -- Monomorphic inference: params stay as free TAG_VARs so that call-site C_CALLABLE
+    -- constraints bind them directly.  Body constraints (C_ARITH, C_COMPARE, etc.) defer
+    -- until params are concrete, then resolve with the actual call-site types.
+    -- This means add("hello", 2) correctly errors because the body has C_ARITH(string, int).
+    -- Functions with no call sites keep free params (effectively polymorphic/unknown).
+    -- Explicitly generic functions use ann_fn_tid with <T> annotations instead.
+    --
+    -- Exception: the implicit `self` param of methods is marked FLAG_GENERIC so each
+    -- call site gets a fresh instance.  Without this, binding p_self to the method's
+    -- owner table creates a recursive type cycle (occurs check fires).
+    if not has_ann_fn and pl > 0 then
+        local self_name_id = ctx.ast_lists:get(ps)
+        if intern_mod.get(ctx.pool, self_name_id) == "self" then
+            ctx.types:get(param_tids[1]).flags = defs.FLAG_GENERIC
+        end
     end
 
     return fn_tid
@@ -1763,7 +1774,18 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
         local name_id = name_n.data[0]
         local existing = env_mod.lookup(ctx.scope, name_id)
         if existing then
-            emit(ctx, { C_UNIFY, fn_tid, existing, n.line, n.col })
+            -- Mutate the prescan stub in-place: copy the real function's data fields so that
+            -- any C_CALLABLE constraints inside the body (recursive calls) that already hold
+            -- the stub type ID now resolve directly to the real function's param/return vars.
+            -- This avoids a C_UNIFY chain that aliases the stub's return var with the real
+            -- return var in a way that conflicts after solve_return widens the return type.
+            local stub_t = ctx.types:get(existing)
+            local real_t = ctx.types:get(fn_tid)
+            if stub_t.tag == TAG_FUNCTION and real_t.tag == TAG_FUNCTION then
+                for k = 0, 6 do stub_t.data[k] = real_t.data[k] end
+            else
+                emit(ctx, { C_UNIFY, fn_tid, existing, n.line, n.col })
+            end
         end
         env_mod.bind(ctx.scope, name_id, fn_tid)
         ctx.def_sites[name_id] = { line = n.line, col = n.col }
@@ -1806,10 +1828,13 @@ end
 -- ---------------------------------------------------------------------------
 
 local function make_prescan_stub(ctx, pl)
-    local param_anys = {}
-    for i = 1, pl do param_anys[i] = ctx.T_ANY end
+    -- Use fresh TAG_VARs for params so that C_UNIFY with the real function type
+    -- merges them (var→var) rather than binding real params to T_ANY.
+    -- Callsite argument types then flow through the merged vars into the function body.
+    local param_vars = {}
+    for i = 1, pl do param_vars[i] = types_mod.make_var(ctx, ctx.scope.level) end
     local ret_var = types_mod.make_var(ctx, ctx.scope.level)
-    return types_mod.make_func(ctx, param_anys, { ret_var }, -1)
+    return types_mod.make_func(ctx, param_vars, { ret_var }, -1)
 end
 
 gen_prescan_block = function(ctx, bs, bl)

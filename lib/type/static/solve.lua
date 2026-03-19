@@ -1042,6 +1042,11 @@ local function solve_arith(ctx, c)
         return true
     end
 
+    -- Defer if either operand is still a free type variable: callsite constraints haven't
+    -- bound the params yet. The solver's convergence re-run will retry with concrete types.
+    if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return end
+    if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return end
+
     -- Integer arithmetic when both operands are int-compatible
     if not is_numeric_tid(ctx, lhs_tid) then
         add_error(ctx, line, col,

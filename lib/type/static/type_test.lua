@@ -4283,11 +4283,39 @@ end
 ]])
     end)
 
-    assert.it("let-polymorphism: identity function used at multiple types", function()
+    assert.it("monomorphic inference: identity function used at same type twice is ok", function()
         v3_no_errors([[
 local function id(x) return x end
 local a = id(1)
+local b = id(2)
+]])
+    end)
+
+    assert.it("monomorphic inference: identity function called at two different types errors", function()
+        -- Without let-polymorphism, p_x is bound by the first call (integer),
+        -- so the second call with a different type is correctly rejected.
+        v3_has_error([[
+local function id(x) return x end
+local a = id(1)
 local b = id("hello")
+]], "cannot pass")
+    end)
+
+    assert.it("monomorphic inference: arithmetic on string param is caught", function()
+        -- Body constraint C_ARITH(p_a, p_b, ret) defers until call-site binds params.
+        -- add("hello", 2) binds p_a=string → C_ARITH(string, integer) → error.
+        v3_has_error([[
+local function add(a, b) return a + b end
+local x = add("hello", 2)
+]], "arithmetic")
+    end)
+
+    assert.it("monomorphic inference: arithmetic on integer params infers integer return", function()
+        v3_no_errors([[
+local function add(a, b) return a + b end
+local x = add(1, 2)
+--: integer
+local y = x
 ]])
     end)
 

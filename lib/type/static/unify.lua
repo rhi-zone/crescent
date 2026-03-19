@@ -236,7 +236,13 @@ function M.unify(ctx, a, b)
 
     -- unknown: top type — everything is assignable to unknown (T <: unknown),
     -- but unknown is not assignable to a specific type (unknown <: T fails, must narrow).
-    if tb.tag == TAG_UNKNOWN then return true end
+    -- When the target is unknown and the actual is a free type var, bind the var to unknown:
+    -- this prevents subsequent constraints (e.g. C_SUB from an annotated assignment) from
+    -- narrowing the var to a more specific type, which would silently lose the unknown signal.
+    if tb.tag == TAG_UNKNOWN then
+        if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR then bind_var(ctx, a, b) end
+        return true
+    end
     if ta.tag == TAG_UNKNOWN then
         return false, "value of type 'unknown' must be narrowed before use (got unknown, expected '" .. types_mod.display(ctx, b) .. "')"
     end
