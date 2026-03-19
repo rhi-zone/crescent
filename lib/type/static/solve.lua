@@ -159,31 +159,6 @@ local ARITH_OPS_SET = {
     __div = true, __mod = true, __pow = true, __unm = true,
 }
 
-local function is_numeric_tid(ctx, tid)
-    tid = find(ctx, tid)
-    local t = ctx.types:get(tid)
-    if t.tag == TAG_ANY or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
-    if t.tag == TAG_NUMBER  or t.tag == TAG_INTEGER  then return true end
-    if t.tag == TAG_LITERAL then
-        local k = t.data[0]
-        return k == LIT_INTEGER or k == LIT_NUMBER
-    end
-    if t.tag == TAG_UNION then
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            if not is_numeric_tid(ctx, ctx.lists:get(i)) then return false end
-        end
-        return true
-    end
-    return false
-end
-
-local function is_int_compat_tid(ctx, tid)
-    tid = find(ctx, tid)
-    local t = ctx.types:get(tid)
-    return t.tag == TAG_INTEGER
-        or (t.tag == TAG_LITERAL and t.data[0] == LIT_INTEGER)
-end
-
 -- Check metamethod on a TABLE type (not primitives — prim_meta lookup not needed here).
 local function table_meta_op_ret(ctx, tbl_tid, mm_name)
     local mm_id = intern_mod.intern(ctx.pool, mm_name)
@@ -195,6 +170,45 @@ local function table_meta_op_ret(ctx, tbl_tid, mm_name)
         return find(ctx, ctx.lists:get(ft.data[2]))
     end
     return ctx.T_ANY
+end
+
+-- Resolve the result type of an operator via metamethod dispatch.
+-- Checks table metamethods first, then prim_meta for primitive types.
+-- TAG_UNION: all arms must support the op; result is union of arm results.
+-- Returns result TID, ctx.T_ANY (any/unknown operand), or nil (not supported).
+local function meta_op_ret_impl(ctx, op_name, tid)
+    tid = find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN then return ctx.T_ANY end
+    if t.tag == TAG_TABLE then
+        local r = table_meta_op_ret(ctx, tid, op_name)
+        if r then return r end
+        -- Tables have implicit length support (#t returns integer without needing __len)
+        if op_name == "__len" then return ctx.T_INTEGER end
+        return nil
+    end
+    if t.tag == TAG_UNION then
+        local parts = {}
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i))
+            if r == nil then return nil end  -- any arm unsupported → whole union fails
+            parts[#parts + 1] = r
+        end
+        return #parts == 0 and nil or types_mod.make_union(ctx, parts)
+    end
+    -- Primitive: map tag (or literal kind) to prim_meta entry
+    local ptag = t.tag
+    if ptag == TAG_LITERAL then
+        local k = t.data[0]
+        if k == LIT_NUMBER  then ptag = TAG_NUMBER
+        elseif k == LIT_INTEGER then ptag = TAG_INTEGER
+        elseif k == LIT_STRING  then ptag = TAG_STRING
+        else return nil end
+    elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
+        return nil  -- nil, boolean, etc.: no prim_meta
+    end
+    local pm = ctx.prim_meta[ptag]
+    return pm and table_meta_op_ret(ctx, pm, op_name)
 end
 
 -- ---------------------------------------------------------------------------
@@ -946,127 +960,45 @@ local function solve_arith(ctx, c)
     local res_tid  = c[5]
     local line, col = c[6], c[7]
 
-    -- Check table metamethods first
+    -- Defer if either operand is not yet resolved (callsite hasn't bound params yet).
     local lhs_t = ctx.types:get(lhs_tid)
     local rhs_t = ctx.types:get(rhs_tid)
-
-    if lhs_t.tag == TAG_TABLE then
-        local mm = table_meta_op_ret(ctx, lhs_tid, op_name)
-        if mm then unify_mod.unify(ctx, res_tid, mm); return true end
-    end
-    if rhs_t.tag == TAG_TABLE then
-        local mm = table_meta_op_ret(ctx, rhs_tid, op_name)
-        if mm then unify_mod.unify(ctx, res_tid, mm); return true end
-    end
-
-    -- Concat: both operands must be string or number
-    if op_name == "__concat" then
-        local function is_concat_compat(ctx, tid)
-            tid = find(ctx, tid)
-            local t = ctx.types:get(tid)
-            if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
-            if t.tag == TAG_STRING or t.tag == TAG_NUMBER or t.tag == TAG_INTEGER then return true end
-            if t.tag == TAG_LITERAL then
-                local k = t.data[0]
-                return k == LIT_STRING or k == LIT_NUMBER or k == LIT_INTEGER
-            end
-            if t.tag == TAG_UNION then
-                for i = t.data[0], t.data[0] + t.data[1] - 1 do
-                    if not is_concat_compat(ctx, ctx.lists:get(i)) then return false end
-                end
-                return true
-            end
-            return false
-        end
-        if not is_concat_compat(ctx, lhs_tid) then
-            add_error(ctx, line, col,
-                "cannot concatenate type '" .. types_mod.display_short(ctx, lhs_tid) .. "'")
-            unify_mod.unify(ctx, res_tid, ctx.T_STRING)
-            return false
-        end
-        if not is_concat_compat(ctx, rhs_tid) then
-            add_error(ctx, line, col,
-                "cannot concatenate type '" .. types_mod.display_short(ctx, rhs_tid) .. "'")
-            unify_mod.unify(ctx, res_tid, ctx.T_STRING)
-            return false
-        end
-        unify_mod.unify(ctx, res_tid, ctx.T_STRING)
-        return true
-    end
-
-    -- Length: operand must be string or table
-    if op_name == "__len" then
-        local function is_len_compat(ctx, tid)
-            tid = find(ctx, tid)
-            local t = ctx.types:get(tid)
-            if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
-            if t.tag == TAG_STRING or t.tag == TAG_TABLE then return true end
-            if t.tag == TAG_LITERAL then return t.data[0] == LIT_STRING end
-            return false
-        end
-        if not is_len_compat(ctx, lhs_tid) then
-            add_error(ctx, line, col,
-                "cannot take length of type '" .. types_mod.display_short(ctx, lhs_tid) .. "'")
-            unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
-            return false
-        end
-        unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
-        return true
-    end
-
-    -- Unary negation: same numeric result
-    if op_name == "__unm" then
-        if not is_numeric_tid(ctx, lhs_tid) then
-            add_error(ctx, line, col,
-                "cannot negate value of type '" .. types_mod.display_short(ctx, lhs_tid) .. "'")
-            unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
-            return false
-        end
-        if is_int_compat_tid(ctx, lhs_tid) then
-            unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
-        else
-            unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
-        end
-        return true
-    end
-
-    -- Division/power always produces number
-    if op_name == "__div" or op_name == "__pow" then
-        if not is_numeric_tid(ctx, lhs_tid) or not is_numeric_tid(ctx, rhs_tid) then
-            local bad = not is_numeric_tid(ctx, lhs_tid) and lhs_tid or rhs_tid
-            add_error(ctx, line, col,
-                "cannot perform arithmetic on '"
-                .. types_mod.display_short(ctx, bad) .. "'")
-        end
-        unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
-        return true
-    end
-
-    -- Defer if either operand is still a free type variable: callsite constraints haven't
-    -- bound the params yet. The solver's convergence re-run will retry with concrete types.
     if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return end
     if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return end
 
-    -- Integer arithmetic when both operands are int-compatible
-    if not is_numeric_tid(ctx, lhs_tid) then
-        add_error(ctx, line, col,
-            "cannot perform arithmetic on '"
-            .. types_mod.display_short(ctx, lhs_tid) .. "'")
-        unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
-        return false
-    end
-    if not is_numeric_tid(ctx, rhs_tid) then
-        add_error(ctx, line, col,
-            "cannot perform arithmetic on '"
-            .. types_mod.display_short(ctx, rhs_tid) .. "'")
-        unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
+    -- Dispatch via metamethod lookup: prim_meta for primitives, table meta for tables.
+    -- Both operands must support the operation; result is the union of their declared
+    -- return types (integer|integer→integer, integer|number→number via make_union subsumption).
+    local lr = meta_op_ret_impl(ctx, op_name, lhs_tid)
+    local rr = meta_op_ret_impl(ctx, op_name, rhs_tid)
+
+    if lr == nil or rr == nil then
+        local bad_tid = (lr == nil) and lhs_tid or rhs_tid
+        if op_name == "__concat" then
+            add_error(ctx, line, col,
+                "cannot concatenate type '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_STRING)
+        elseif op_name == "__len" then
+            add_error(ctx, line, col,
+                "cannot take length of type '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
+        elseif op_name == "__unm" then
+            add_error(ctx, line, col,
+                "cannot negate value of type '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
+        else
+            add_error(ctx, line, col,
+                "cannot perform arithmetic on '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+            unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
+        end
         return false
     end
 
-    if is_int_compat_tid(ctx, lhs_tid) and is_int_compat_tid(ctx, rhs_tid) then
-        unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
+    -- Both sides support the op. Union results: T_ANY wins, else make_union for widening.
+    if lr == ctx.T_ANY or rr == ctx.T_ANY then
+        unify_mod.unify(ctx, res_tid, ctx.T_ANY)
     else
-        unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
+        unify_mod.unify(ctx, res_tid, types_mod.make_union(ctx, {lr, rr}))
     end
     return true
 end
@@ -1194,7 +1126,7 @@ function M.solve(ctx, constraints)
             local kind = c[1]
             local handler = handlers[kind]
             if handler then
-                -- Track var state before (c[2] is a tid for all kinds except C_ARITH)
+                -- Track var state before (C_ARITH has op_name at c[2]; lhs_tid is c[3])
                 local probe = kind ~= constrain.C_ARITH and c[2] or c[3]
                 local t_before = ctx.types:get(find(ctx, probe))
                 local tag_before = t_before.tag

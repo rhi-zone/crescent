@@ -103,6 +103,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **On typechecker topics, read `docs/type-system.md` in full before doing anything.** Front-load the entire file into context. Design decisions are written there. Don't improvise from first principles.
 
+**This rule has been violated before.** `C_ARITH` was implemented with `is_numeric_tid` / `is_int_compat_tid` predicates instead of the `prim_meta` metamethod dispatch prescribed by Principle 10. The fix required a full rewrite. The correct pattern: ask "does prim_meta / metamethod lookup handle this?" before adding any new predicate or special case to the solver. If yes — use prim_meta. If no — read the design doc again before proceeding.
+
 
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
