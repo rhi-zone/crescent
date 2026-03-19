@@ -177,12 +177,12 @@
 
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
-- [ ] **`_G` should be an intrinsic reflecting the global scope**: currently `{ [string]: any }` — `any` indexer is a universal type-bypass (`local x: integer = _G.foo` passes silently). Fix: `_G` is synthesized by the checker after prelude load — named fields for every declared global (so `_G.math` → `MathLib`), fallback indexer `[string]: unknown` (not `any`; requires explicit annotation to use). Declared as `$GlobalScope` intrinsic or built in `prelude.populate()` by walking the scope. No manual duplication.
-- [ ] **`ctx.d.lua` leaks internal bindings into user scope**: `prelude.populate()` loads `ctx.d.lua` alongside `stdlib.d.lua`, injecting `report`, `infer_expr_multi`, `find_field_definition`, etc. as visible globals in every checked file. `ctx.d.lua` should only be loaded when self-checking typechecker source files.
+- [x] **`_G` should be an intrinsic reflecting the global scope**: synthesized as `$GlobalScope` — closed TAG_TABLE (no fallback indexer), named fields per declared global, declared in stdlib.d.lua. TAG_INTRINSIC resolution in constrain.lua checks type aliases first so `$Name` works as a regular type reference when registered. (2026-03-19, 5a42a48)
+- [x] **`ctx.d.lua` leaks internal bindings into user scope**: `populate()` now only loads stdlib.d.lua; `populate_checker()` loads both. (2026-03-19, 9c9f788)
 
 ### annotation syntax gaps
 - [x] **Open table syntax in .d.lua**: `{ ... }` bare spread in table annotation creates a row variable; `{ fields..., ... }` = open table. `_G` now declared in stdlib.d.lua. (2026-03-03, commit 6e197c5)
-- [ ] **`typeof` annotation**: `typeof x` in type position captures the inferred type of binding `x`. Not decomposable by the user — there is no existing mechanism to extract an inferred type without writing it out. Earns its place for: naming complex inferred types without transcribing them, composing with intrinsics (`$Keys<typeof t>`), and extracting function return types (`Return<typeof fn>`). Implementation: new annotation AST node `ANN_TYPEOF`; parser recognises `typeof <ident>`; `resolve_annotation_type` looks up the ident in scope and returns its current type_id. Restrict to resolved (non-free-var) bindings to avoid capturing unbound params.
+- [x] **`typeof` annotation**: `typeof x` captures the inferred type of binding `x`. TAG_TYPEOF = 25; ann.lua recognises `typeof <ident>`; resolve_annotation_type does scope lookup. Top-level `--::` decls with typeof are deferred until after gen_block. (2026-03-19, 913110e)
 
 ### performance (v2 redesign)
 **Full redesign in progress. See `docs/typechecker-v2.md` for architecture.**
