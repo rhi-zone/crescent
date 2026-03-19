@@ -99,7 +99,7 @@
 
 #### sqlite
 - [x] No tests — add coverage for query, parameter binding, iteration, error paths (sqlite_test.lua, 72 assertions)
-- [ ] `db:close()` bug: passes `self.db` (`sqlite3 *[1]`) to `sqlite3_close_v2` which expects `sqlite3 *`; should be `self.db[0]`
+- [x] `db:close()` bug: passes `self.db` (`sqlite3 *[1]`) to `sqlite3_close_v2` which expects `sqlite3 *`; should be `self.db[0]` — fixed (4b9ae58)
 - [ ] blob support missing (TODO in source) — `sqlite3_bind_blob` declared in FFI cdef but unreachable from Lua API
 - [ ] macOS: dlopen path for libsqlite3 not set (Linux-only currently)
 
@@ -473,7 +473,7 @@ Blocking items for cutover:
 - [x] **`never` type not enforced** — fixed 2026-03-19 (commit bf776ff)
 - [x] **`any` through `Box<any>`** — fixed 2026-03-19 (commit bf776ff + annotation authority fix)
 - [x] **Tag-exclusion in else branch** — fixed 2026-03-19: else branch now applies accumulated negated narrowings from all preceding if/elseif conditions (both Cat-E exiting and pass-through). See `fix(type): tag-exclusion narrowing in else branch`.
-- [ ] **Tag-exclusion in else with multiple exiting elseif arms** — `guard_narrowings` is last-write-wins; a three-arm union dispatched across two exiting elseif branches leaves the else branch seeing the full union instead of just the third arm. Fix: accumulate `guard_narrowings` by intersecting negations from each exiting arm instead of overwriting. (adversarial tests, 2026-03-19)
+- [x] **Tag-exclusion in else with multiple exiting elseif arms** — fixed 2026-03-20: `filter_union` added to types.lua; `guard_narrowings` fallback (when `arm_info` is nil) now uses `filter_union(guard, neg)` instead of last-write-wins, correctly intersecting the accumulated guard with each new exiting arm's negation. See `fix(typechecker): accumulate else-branch negations across all exiting elseif arms`.
 - [ ] Variadic `pipe`/`compose` typing — fixed-arity overloads work but variadic needs design; blocked on generic inference + possibly variadic generics or dependent types. Low priority, pending design.
 
 ## performance

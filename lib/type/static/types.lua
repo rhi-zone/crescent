@@ -789,6 +789,33 @@ function M.subtract(ctx, tid, exclude_tid)
     return M.make_union(ctx, remaining)
 end
 
+--- Filter a union to members that also appear in ref_tid (set intersection for unions).
+--- For non-union tid: return tid if it equals ref_tid, else T_NEVER.
+--- Used when accumulating guard_narrowings with no arm_info (compound conditions).
+function M.filter_union(ctx, tid, ref_tid)
+    tid     = M.find(ctx, tid)
+    ref_tid = M.find(ctx, ref_tid)
+    local t = ctx.types:get(tid)
+    if t.tag ~= TAG_UNION then
+        -- Non-union: subtract to check membership; if unchanged, tid is not in ref_tid.
+        local after = M.find(ctx, M.subtract(ctx, ref_tid, tid))
+        if M.types_equal(ctx, after, ref_tid) then return ctx.T_NEVER end
+        return tid
+    end
+    local kept = {}
+    for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        local mid = M.find(ctx, ctx.lists:get(i))
+        -- mid is in ref_tid iff subtract(ref_tid, mid) != ref_tid
+        local after = M.find(ctx, M.subtract(ctx, ref_tid, mid))
+        if not M.types_equal(ctx, after, ref_tid) then
+            kept[#kept + 1] = mid
+        end
+    end
+    if #kept == 0 then return ctx.T_NEVER end
+    if #kept == 1 then return kept[1] end
+    return M.make_union(ctx, kept)
+end
+
 -- Narrow a union by field discriminant. positive=true: keep members where field COULD be lit_intern_id.
 -- lit_kind defaults to LIT_STRING for backwards compat.
 function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit_kind)

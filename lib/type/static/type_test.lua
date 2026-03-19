@@ -5647,6 +5647,31 @@ end
 ]])
     end)
 
+    assert.it("PASS: else-branch narrowing — two exiting elseif arms accumulate negations (no arm_info)", function()
+        -- When the second exiting arm has a compound condition (e.g. an OR), arm_info
+        -- is nil and guard_narrowings must still intersect rather than last-write-wins.
+        -- Arm1 exits for x == "a" → guard[x] = "b"|"c".
+        -- Arm2 exits for x == "a" or x == "b" (arm_info = nil) → should intersect
+        -- guard[x] with the negation of that arm, leaving x == "c" in the else.
+        -- Regression: before the fix the else branch saw "a"|"c" (last-write-wins on
+        -- the OR arm's neg), causing a spurious type error when passing x to only_c.
+        v3_no_errors([[
+--: ("c") -> string
+local function only_c(v) return v end
+
+--: ("a" | "b" | "c") -> string
+local function f(x)
+    if x == "a" then
+        return "a"
+    elseif x == "a" or x == "b" then
+        return "a or b"
+    else
+        return only_c(x)
+    end
+end
+]])
+    end)
+
     assert.it("PASS: union with three members — exhaustiveness warning for non-exhaustive if-chain", function()
         -- A three-member tagged union with only two branches handled should warn.
         -- Both branches exit (return), no else branch, "c" member remains unhandled.

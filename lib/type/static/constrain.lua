@@ -1687,7 +1687,11 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                             guard_narrowings[name_id] = narrow_mod.apply_narrowing_info(
                                 ctx, arm_info, guard_narrowings[name_id], false)
                         else
-                            guard_narrowings[name_id] = type_id
+                            -- No arm_info (compound condition, e.g. OR): intersect the
+                            -- accumulated guard with the negation from this arm.
+                            -- Keep only those guard members that also appear in neg[name_id].
+                            guard_narrowings[name_id] = types_mod.filter_union(
+                                ctx, guard_narrowings[name_id], type_id)
                         end
                     end
                 end
