@@ -169,13 +169,59 @@ local function load_decls(ctx, path)
     end
 end
 
+-- Synthesize _G as a TAG_TABLE whose named fields mirror the current global scope.
+-- This is called after stdlib.d.lua (and optionally ctx.d.lua) is loaded so that
+-- _G.math, _G.string, etc. return the actual typed module rather than `any`.
+-- Unknown keys use T_UNKNOWN (not T_ANY) so that _G.foo is an explicit escape hatch.
+local function synthesize_G(ctx)
+    local types_mod = require("lib.type.static.types")
+
+    -- Walk the top-level scope frame for all named bindings.
+    -- ctx.scope is the current scope; walk the chain to find the root frame
+    -- (level == 0) which holds the stdlib bindings we just loaded.
+    local root = ctx.scope
+    while root.parent do root = root.parent end
+
+    local field_ids = {}
+    for name_id, type_id in pairs(root.bindings) do
+        local fid = types_mod.make_field(ctx, name_id, types_mod.find(ctx, type_id), false)
+        field_ids[#field_ids + 1] = fid
+    end
+
+    -- [string]: T_UNKNOWN fallback indexer — unknown forces explicit annotation at call site.
+    local indexer_pairs = { ctx.T_STRING, ctx.T_UNKNOWN }
+
+    local g_tid = types_mod.make_table(ctx, field_ids, indexer_pairs, -1, {})
+
+    local g_name_id = intern_mod.intern(ctx.pool, "_G")
+    env_mod.bind(ctx.scope, g_name_id, g_tid)
+end
+
 -- Populate ctx.scope with Lua 5.1 / LuaJIT stdlib bindings.
+-- Only loads stdlib.d.lua — does NOT load ctx.d.lua.
+-- ctx.d.lua declares typechecker-internal functions and must not appear in
+-- user-file scope; use populate_checker() for self-checking typechecker sources.
 function M.populate(ctx)
-    -- Load all stdlib declarations from the companion .d.lua files.
     local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     load_decls(ctx, dir .. "stdlib.d.lua")
+    synthesize_G(ctx)
+end
+
+-- Populate ctx.scope with stdlib AND typechecker-internal declarations (ctx.d.lua).
+-- Use this only when checking typechecker source files themselves, so that
+-- internal functions like `report`, `infer_expr_multi`, etc. are in scope.
+-- Re-synthesizes _G after loading ctx.d.lua so that checker-internal names are
+-- also reachable via _G when self-checking.
+function M.populate_checker(ctx)
+    -- Load stdlib (synthesizes initial _G from stdlib bindings).
+    local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
+    local dir = src_path:match("^(.+/)[^/]+$") or "./"
+    load_decls(ctx, dir .. "stdlib.d.lua")
+    -- Load checker-internal declarations.
     load_decls(ctx, dir .. "ctx.d.lua")
+    -- Re-synthesize _G to include both stdlib and checker-internal bindings.
+    synthesize_G(ctx)
 end
 
 return M
