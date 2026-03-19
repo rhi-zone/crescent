@@ -2226,6 +2226,42 @@ end
     end)
 end)
 
+assert.describe("checker: or-expression nil stripping (C_OR deferred)", function()
+    assert.it("nil or 'default' → string", function()
+        -- Constant nil is always falsy; result is right side.
+        no_errors([[
+local x = nil or "default"
+local y = x .. "!"
+]])
+    end)
+    assert.it("(string | nil) or 'fallback' → string (nil stripped from left)", function()
+        -- Key case: left is a union resolved at solve time.
+        -- Result must be string, not nil|string|"fallback".
+        no_errors([[
+--: string | nil
+local s = "hello"
+local x = s or "fallback"
+local y = x .. "!"
+]])
+    end)
+    assert.it("or-expression with annotated nil var → concrete right side type", function()
+        no_errors([[
+--: string?
+local a = nil
+local b = a or "default"
+local c = b .. "!"
+]])
+    end)
+    assert.it("false | nil or 'x' → string (both falsy arms stripped)", function()
+        -- false is falsy, nil is falsy — only right side can be result
+        no_errors([[
+--: boolean | nil
+local flag = false
+local x = flag or "yes"
+]])
+    end)
+end)
+
 assert.describe("checker: branch-join / post-if type merging", function()
     assert.it("nil-default: if x == nil then x = default end → x non-nil after", function()
         -- After the if, x was either non-nil (unchanged) or reassigned to "default".

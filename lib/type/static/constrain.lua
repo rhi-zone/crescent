@@ -125,6 +125,9 @@ local C_INDEX     = 8   -- {C_INDEX,    obj_tid, key_tid, result_tid, line, col}
 local C_BOUND     = 9   -- {C_BOUND,    fresh_tv_id, bound_type_id, line, col}
 -- Deferred forall bound check: defers while fresh_tv is still a free TAG_VAR,
 -- then checks try_unify(widen(fresh_tv), bound_type). Emitted at call sites.
+local C_OR        = 10  -- {C_OR,       left_tid, right_tid, result_tid, line, col}
+-- Deferred `or` expression: defers while left_tid is a free TAG_VAR,
+-- then computes subtract(left, nil) | right and unifies with result_tid.
 
 local M = {}
 
@@ -136,6 +139,7 @@ M.C_ARITH     = C_ARITH
 M.C_RETURN    = C_RETURN
 M.C_COMPARE   = C_COMPARE
 M.C_BOUND     = C_BOUND
+M.C_OR        = C_OR
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -731,8 +735,9 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     end
 
     if op == OP_OR then
-        local non_nil_left = types_mod.subtract(ctx, types_mod.find(ctx, left_tid), ctx.T_NIL)
-        return types_mod.make_union(ctx, { non_nil_left, types_mod.find(ctx, right_tid) })
+        local res = fresh_var(ctx)
+        emit(ctx, { C_OR, left_tid, right_tid, res, n.line, n.col })
+        return res
     end
 
     report(ctx, n.line, n.col, E.BINARY_OP_UNKNOWN, { op = op })

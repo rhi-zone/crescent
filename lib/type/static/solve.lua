@@ -48,6 +48,7 @@ local C_ARITH     = constrain.C_ARITH
 local C_RETURN    = constrain.C_RETURN
 local C_COMPARE   = constrain.C_COMPARE
 local C_BOUND     = constrain.C_BOUND
+local C_OR        = constrain.C_OR
 
 local find = types_mod.find
 
@@ -266,6 +267,27 @@ local function solve_sub(ctx, c)
             .. (err and (": " .. err) or ""))
     end
     return ok
+end
+
+-- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
+-- Defers while left_tid is still a free TAG_VAR (not yet resolved).
+-- Once concrete: result = subtract(left, nil) | right.
+local function solve_or(ctx, c)
+    local left_tid   = c[2]
+    local right_tid  = c[3]
+    local result_tid = c[4]
+
+    local left = find(ctx, left_tid)
+    local lt = ctx.types:get(left)
+    if lt.tag == TAG_VAR or lt.tag == TAG_ROWVAR then
+        return false  -- defer
+    end
+
+    local non_nil_left = types_mod.subtract(ctx, left, ctx.T_NIL)
+    local right = find(ctx, right_tid)
+    local resolved = types_mod.make_union(ctx, { non_nil_left, right })
+    unify_mod.unify(ctx, result_tid, resolved)
+    return true
 end
 
 -- Solve a forall bound check: C_BOUND = { C_BOUND, fresh_tv_id, bound_type_id, line, col }
@@ -1148,6 +1170,7 @@ function M.solve(ctx, constraints)
         [C_RETURN]    = solve_return,
         [C_COMPARE]   = solve_compare,
         [C_BOUND]     = solve_bound,
+        [C_OR]        = solve_or,
     }
 
     -- Iterate to fixpoint (max 3 passes for recursive types).
