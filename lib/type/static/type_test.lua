@@ -429,6 +429,17 @@ assert.describe("lex: annotations", function()
         assert.eq(ann.kind, defs.ANN_TYPE_ARGS)
         assert.eq(ann.content, "<T, U>")
     end)
+    assert.it("strips -- comments inside --[[:: ]] blocks", function()
+        local src = "--[[::\nCtx = {\n  -- this comment should be stripped\n  field: integer,\n}\n]]"
+        local L = lex.new(src, "test")
+        local ann = L.annotations[1]
+        assert.ok(ann, "annotation present")
+        assert.eq(ann.kind, defs.ANN_DECL)
+        -- The comment line should be gone from content
+        assert.ok(not ann.content:find("this comment"), "comment stripped from content")
+        -- The field should still be present
+        assert.ok(ann.content:find("field"), "field retained in content")
+    end)
 end)
 
 assert.describe("lex: line and column tracking", function()
@@ -1986,6 +1997,18 @@ end
 end)
 
 assert.describe("checker: type declarations", function()
+    assert.it("--[[:: block with inline -- comment registers type alias", function()
+        no_errors([==[
+--[[::
+Ctx = {
+  -- this comment must not abort parsing
+  field: integer,
+}
+]]
+--: Ctx
+local c = { field = 42 }
+]==])
+    end)
     assert.it("simple type alias", function()
         no_errors([[
 --:: Name = string

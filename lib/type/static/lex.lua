@@ -570,6 +570,9 @@ function Lexer:_capture_block_annotation(sep, ann_line, ann_col)
         end
     end
     local content = table.concat(parts)
+    -- Strip inline -- comments (from -- to end of line) so that
+    -- --[[:: ... ]] blocks can contain documentation comments.
+    content = content:gsub("%-%-[^\n]*", "")
     -- Trim trailing whitespace
     content = content:match("^(.-)%s*$") or content
     self.annotations[ann_line] = {
