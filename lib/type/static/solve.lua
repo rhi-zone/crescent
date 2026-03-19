@@ -187,6 +187,14 @@ local function meta_op_ret_impl(ctx, op_name, tid)
         if op_name == "__len" then return ctx.T_INTEGER end
         return nil
     end
+    if t.tag == TAG_INTERSECTION then
+        -- Intersection: if any member supports the op, use its result
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local r = meta_op_ret_impl(ctx, op_name, ctx.lists:get(i))
+            if r then return r end
+        end
+        return nil
+    end
     if t.tag == TAG_UNION then
         local parts = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
