@@ -120,9 +120,6 @@ DefsModule = {
 
 ---------------------------------------------------------------------------
 -- Ctx: the central checker state object.
--- inferred_anns: { [integer]: unknown } — was populated by deleted infer.lua;
---   --annotate mode iterates it but it's always empty now. TODO: either
---   repopulate via the constraint pass or remove --annotate support.
 ---------------------------------------------------------------------------
 
 --[[::
@@ -148,7 +145,6 @@ Ctx = {
   _multi_ret:      { [integer]: MultiRetEntry, ... },
   _ann_warn_line:  integer,
   _ann_consumed:   { [integer]: boolean, ... }?,
-  inferred_anns:   { [integer]: unknown, ... },
   constraints:     { [integer]: { [integer]: unknown, ... }, ... },
   var_counter:  integer,
   nominal_id:   integer,

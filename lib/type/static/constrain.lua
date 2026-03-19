@@ -2144,7 +2144,6 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx._last_require_mod           = nil
     ctx._multi_ret                  = {}
     ctx.nominal_id         = 0
-    ctx.inferred_anns      = {}
     ctx.type_at            = {}
     ctx.name_at            = {}
     ctx.field_at           = {}
