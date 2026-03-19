@@ -56,9 +56,9 @@ To expose a subset of fields:
 
 External callers see only `start` and `stop`. Internal code works with the full `InternalHttpServer` type.
 
-`$Opaque<T>` fits the existing intrinsic system (`$GlobalScope`, `$Keys<T>`, etc.) and is usable anywhere in a type expression — function signatures, field types, not just module declarations.
+`$Opaque<T>` with no second argument produces a **nominal opaque newtype** — not an empty table type. The distinction matters: `{}` is structurally compatible with any other empty table, but `$Opaque<HttpServer>` is nominally distinct from `$Opaque<ConnectionPool>` even though both expose nothing. The identity comes from `T`. Callers can only thread the value through functions that accept it — they cannot inspect or construct it. This is how OCaml abstract types work.
 
-**Open question**: Whether `opaque T U` (two-token syntax without `$`) is worth introducing as a declaration-level alternative. Deferred.
+`$Opaque<T>` fits the existing intrinsic system (`$GlobalScope`, `$Keys<T>`, etc.) and is usable anywhere in a type expression — function signatures, field types, not just module declarations.
 
 ## Explicit opt-in for intentional private access
 
@@ -106,7 +106,7 @@ Code in `lib/http/router.lua` has no ambient authority over `lib/http/server.lua
 
 **1. `$Opaque<T, U>` vs `opaque T U` syntax**
 
-`$Opaque<T>` is consistent with the intrinsics system. `opaque T U` is a lighter two-token form. Either could work. Deferred until implementation.
+`$Opaque<T>` is consistent with the intrinsics system. `opaque T U` is a lighter two-token form. Either could work. Deferred until implementation. Note: `U` has no default (it is either absent — fully opaque newtype — or explicit).
 
 **2. `use_private` scope granularity**
 
