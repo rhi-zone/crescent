@@ -62,6 +62,9 @@ local prim_tags = {
 -- Scanner: minimal lexer for type expression strings
 ---------------------------------------------------------------------------
 
+--:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer }
+
+--: (string, string?, integer?) -> Scanner
 local function new_scanner(content, filename, line)
     return {
         src = content,
@@ -72,10 +75,12 @@ local function new_scanner(content, filename, line)
     }
 end
 
+--: (Scanner, string) -> never
 local function scan_error(s, msg)
     error(format("%s:%d: annotation: %s (at col %d)", s.filename, s.line, msg, s.pos), 0)
 end
 
+--: (Scanner) -> nil
 local function skip_ws(s)
     while s.pos <= s.len do
         local b = byte(s.src, s.pos)
@@ -87,21 +92,25 @@ local function skip_ws(s)
     end
 end
 
+--: (Scanner) -> integer?
 local function peek(s)
     skip_ws(s)
     if s.pos > s.len then return nil end
     return byte(s.src, s.pos)
 end
 
+--: (Scanner) -> integer?
 local function peek_raw(s)
     if s.pos > s.len then return nil end
     return byte(s.src, s.pos)
 end
 
+--: (Scanner) -> nil
 local function advance(s)
     s.pos = s.pos + 1
 end
 
+--: (Scanner, string) -> nil
 local function expect_char(s, ch)
     skip_ws(s)
     if s.pos > s.len or byte(s.src, s.pos) ~= byte(ch) then
@@ -110,6 +119,7 @@ local function expect_char(s, ch)
     s.pos = s.pos + 1
 end
 
+--: (Scanner, string) -> boolean
 local function opt_char(s, ch)
     skip_ws(s)
     if s.pos <= s.len and byte(s.src, s.pos) == byte(ch) then
@@ -119,6 +129,7 @@ local function opt_char(s, ch)
     return false
 end
 
+--: (Scanner) -> string?
 local function scan_word(s)
     skip_ws(s)
     local start = s.pos
@@ -132,6 +143,7 @@ local function scan_word(s)
     return sub(s.src, start, s.pos - 1)
 end
 
+--: (Scanner) -> string
 local function scan_string(s)
     skip_ws(s)
     local b = byte(s.src, s.pos)
@@ -153,6 +165,7 @@ local function scan_string(s)
     scan_error(s, "unterminated string")
 end
 
+--: (Scanner) -> number
 local function scan_number(s)
     skip_ws(s)
     local start = s.pos
@@ -168,6 +181,7 @@ local function scan_number(s)
     return tonumber(sub(s.src, start, s.pos - 1))
 end
 
+--: (Scanner) -> boolean
 local function at_end(s)
     skip_ws(s)
     return s.pos > s.len
@@ -195,6 +209,7 @@ function M.parse_annotations(annotations, pool, filename)
         return i
     end
 
+    --: ({ [integer]: integer, ... }) -> (integer, integer)
     local function flush_type_list(items)
         local m = type_lists:mark()
         for i = 1, #items do type_lists:push(items[i]) end
@@ -220,8 +235,9 @@ function M.parse_annotations(annotations, pool, filename)
 
     -- Parse primary (non-union, non-intersection) type
     local function parse_primary(s)
-        local b = peek(s)
-        if not b then scan_error(s, "unexpected end of type") end
+        local b0 = peek(s)
+        if not b0 then scan_error(s, "unexpected end of type") end
+        local b = b0 or 0  -- non-nil guaranteed by scan_error above
 
         -- String literal type: "foo"
         if b == B_DQUOT or b == B_SQUOT then
@@ -450,7 +466,7 @@ function M.parse_annotations(annotations, pool, filename)
                             indexers[#indexers + 1] = key_type
                             indexers[#indexers + 1] = val_type
                         end
-                    elseif fb and is_ident_start(fb) then
+                    elseif fb and is_ident_start(fb or 0) then
                         -- Field: [readonly] name[?]: type
                         local save_pos = s.pos
                         local word = scan_word(s)
@@ -460,7 +476,7 @@ function M.parse_annotations(annotations, pool, filename)
                         if word == "readonly" then
                             -- peek: must be followed by a field name
                             local nb = peek(s)
-                            if nb and is_ident_start(nb) then
+                            if nb and is_ident_start(nb or 0) then
                                 field_flags_val = FLAG_READONLY
                                 name = scan_word(s)
                             else
@@ -531,7 +547,8 @@ function M.parse_annotations(annotations, pool, filename)
             end
             local is, il = 0, 0
             if #indexers > 0 then
-                is, il = flush_type_list(indexers)
+                local _is, _il = flush_type_list(indexers)
+                is = _is; il = _il
             end
             local ms, ml = 0, 0
             if #metas > 0 then
@@ -592,7 +609,8 @@ function M.parse_annotations(annotations, pool, filename)
                 for i = 1, #bounds do
                     bound_ids[i] = bounds[i] ~= nil and bounds[i] or -1
                 end
-                bds, bdl = flush_type_list(bound_ids)
+                local _bds, _bdl = flush_type_list(bound_ids)
+                bds = _bds; bdl = _bdl
             end
             local body = parse_type(s)
             local forall = alloc_type(defs.TAG_FORALL)
@@ -874,16 +892,20 @@ function M.parse_annotations(annotations, pool, filename)
                 local type_id = parse_type(s)
                 local tps, tpl = 0, 0
                 if type_params then
-                    tps, tpl = flush_type_list(type_params)
+                    local _tps, _tpl = flush_type_list(type_params)
+                    tps = _tps; tpl = _tpl
                 end
                 -- Store bounds parallel to type_params: -1 sentinel for "no bound".
                 local bds, bdl = 0, 0
                 if has_type_bounds and type_bounds then
+                    local tb = type_bounds or {}
                     local bound_ids = {}
-                    for i = 1, #type_bounds do
-                        bound_ids[i] = type_bounds[i] ~= nil and type_bounds[i] or -1
+                    for i = 1, #tb do
+                        local bv = tb[i]
+                        bound_ids[i] = bv ~= nil and bv or -1
                     end
-                    bds, bdl = flush_type_list(bound_ids)
+                    local _bds, _bdl = flush_type_list(bound_ids)
+                    bds = _bds; bdl = _bdl
                 end
                 return {
                     kind = defs.ANN_DECL,
@@ -902,7 +924,7 @@ function M.parse_annotations(annotations, pool, filename)
                     local b = peek(s)
                     if b == byte("_") then
                         -- Wildcard: infer this param
-                        local word = scan_word(s)
+                        local word = scan_word(s) or ""
                         if word == "_" then
                             args[#args + 1] = -1  -- sentinel for "infer"
                         else
