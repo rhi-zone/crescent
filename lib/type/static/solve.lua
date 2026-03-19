@@ -1043,13 +1043,9 @@ local function solve_arith(ctx, c)
     end
 
     -- Defer if either operand is still a free type variable: callsite constraints haven't
-    -- bound the params yet.  On the final convergence pass (_final_pass), stop deferring:
-    -- no more callsites are coming, so body constraints should propagate to the params
-    -- (free params in zero-callsite functions get bound to the widest compatible type).
-    if not ctx._final_pass then
-        if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return end
-        if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return end
-    end
+    -- bound the params yet. The solver's convergence re-run will retry with concrete types.
+    if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return end
+    if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return end
 
     -- Integer arithmetic when both operands are int-compatible
     if not is_numeric_tid(ctx, lhs_tid) then
@@ -1208,17 +1204,13 @@ function M.solve(ctx, constraints)
             end
         end
         if not changed then
-            -- Converged — re-run once more with real_err to emit errors.
-            -- Mark ctx._final_pass so deferred constraints (e.g. C_ARITH on free vars)
-            -- know no more callsite binding will happen and can propagate from the body.
+            -- Converged before pass 3 — re-run once more with real_err to emit errors
             if pass < 3 then
                 ctx.err = real_err
-                ctx._final_pass = true
                 for _, c in ipairs(constraints) do
                     local handler = handlers[c[1]]
                     if handler then handler(ctx, c) end
                 end
-                ctx._final_pass = false
             end
             break
         end
