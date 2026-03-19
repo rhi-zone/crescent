@@ -177,7 +177,7 @@
 
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
-- [ ] **`_G` field access loses type info**: `_G` is typed as `{ [string]: any }`, so `_G.math.abs(1)` returns `any` instead of `number`. Fix: either special-case `_G.foo` in constrain.lua to look up `foo` in the global scope directly (like `require` intrinsic), or build `_G`'s named-field type from all declared globals at prelude load time.
+- [ ] **`_G` should be an intrinsic reflecting the global scope**: currently `{ [string]: any }` — `any` indexer is a universal type-bypass (`local x: integer = _G.foo` passes silently). Fix: `_G` is synthesized by the checker after prelude load — named fields for every declared global (so `_G.math` → `MathLib`), fallback indexer `[string]: unknown` (not `any`; requires explicit annotation to use). Declared as `$GlobalScope` intrinsic or built in `prelude.populate()` by walking the scope. No manual duplication.
 - [ ] **`ctx.d.lua` leaks internal bindings into user scope**: `prelude.populate()` loads `ctx.d.lua` alongside `stdlib.d.lua`, injecting `report`, `infer_expr_multi`, `find_field_definition`, etc. as visible globals in every checked file. `ctx.d.lua` should only be loaded when self-checking typechecker source files.
 
 ### annotation syntax gaps
