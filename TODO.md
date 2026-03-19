@@ -175,8 +175,10 @@
 - [x] **Assignment narrowing**: assigning `nil` to a variable inside `if x then` is flagged — typechecker checks against narrowed type, not declared type. Fixed: narrowing-escape generalized from nil-only to any value; checks outer scope binding for the pre-narrowing type.
 - [x] **Nil method call not caught**: `local x; x:match("pattern")` — fixed by nil_vars side-channel; `testdata/errors/nil_method.expected` now captures the error.
 
-### access control (needs design before implementation)
-- [ ] **Design field access control model** — `FLAG_PRIVATE` exists on FieldEntry but is not enforced and was added without a design. The right model is NOT Java/C# `private` (class-boundary, both instances can read each other's private fields — wrong unit). Requirements: (1) separate read/write axes — a field can be read-only externally but writable internally; (2) granular exposure — "visible to module X but not Y" (cf. Rust `pub(in path)`, friend classes, capability tokens); (3) the visibility boundary should be the module (file), not the object. Design questions to answer before writing code: What is the annotation syntax? How are visibility levels represented in FieldEntry.flags (currently 1 byte, FLAG_OPTIONAL/READONLY/PRIVATE)? How does "expose to X" work — explicit allow-list, capability object, or structural (if your interface includes the field it's accessible)? What does the type of a partially-visible table look like to an external module? Write the design to `docs/access-control.md` before touching any implementation.
+### access control (design complete, implementation pending)
+- [x] **Design field access control model** — written to `docs/access-control.md` (2026-03-19)
+- [ ] **Resolve open questions in access-control.md before implementation**: (1) annotation syntax for exported type vs internal type; (2) opt-in syntax at use site for intentional private access; (3) read/write independence in annotation syntax; (4) split FLAG_READONLY into FLAG_IMMUTABLE + FLAG_WRITE_PRIVATE in FieldEntry
+- [ ] **Remove FLAG_PRIVATE** — current `_`-prefix enforcement (session 25) is wrong model. Privacy = absence from exported type + explicit use-site opt-in. No definition-site whitelist.
 
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
