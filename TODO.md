@@ -101,8 +101,8 @@
 - [ ] macOS: dlopen path for libsqlite3 not set (Linux-only currently)
 
 #### pkg
-- [ ] `install.lua`: resolver and downloader are stubs — complete the install algorithm
-- [ ] `config.lua`: stub — implement `~/.crescent/config.lua` loading
+- [x] `install.lua`: resolver and downloader — implemented (resolve, fetch, link, run)
+- [x] `config.lua`: `~/.crescent/config.lua` loading with defaults
 
 #### cli (lib/cli/)
 - [ ] Scripts mix `main()` logic with library code — not composable
