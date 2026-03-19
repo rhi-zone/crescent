@@ -62,10 +62,10 @@ External callers see only `start` and `stop`. Internal code works with the full 
 
 - `$Opaque<HttpServer, { start: () -> () }>` ≠ `$Opaque<ConnectionPool, { start: () -> () }>` even with identical `U` — nominal identity still comes from `T`
 - `$Opaque<T, U>` is assignable to `$Opaque<T>` (drop exposed fields, go fully opaque) — identity preserved
-- `--:: use_private T` unseals the row variable, recovering the full `T`; the typechecker knows the sealed portion IS `T`
+- `--:: unseal T` unseals the row variable, recovering the full `T`; the typechecker knows the sealed portion IS `T`
 - The fields declared in `U` are checked against `T` — you cannot expose a field that does not exist in `T`
 
-This maps onto `TAG_ROWVAR` in the existing type system: the row is present but sealed; `use_private` unseals it.
+This maps onto `TAG_ROWVAR` in the existing type system: the row is present but sealed; `unseal` unseals it.
 
 `$Opaque<T>` fits the existing intrinsic system (`$GlobalScope`, `$Keys<T>`, etc.) and is usable anywhere in a type expression — function signatures, field types, not just module declarations.
 
@@ -89,7 +89,7 @@ The analogy is Rust's `#[allow(clippy::lint_name)]`: you don't declare who is al
 ### Syntax
 
 ```lua
---:: use_private InternalHttpServer
+--:: unseal InternalHttpServer
 do
     local s = require("lib.http.server")  -- full type accessible here
     ...
@@ -97,7 +97,7 @@ end
 -- scope ends, restriction restored
 ```
 
-`--:: use_private T` applies to the **next AST node** — a block, a declaration, a statement, or a single expression. Whatever the next syntactic unit is. No line counting. The region is delimited by code structure, not comment markers.
+`--:: unseal T` applies to the **next AST node** — a block, a declaration, a statement, or a single expression. Whatever the next syntactic unit is. No line counting. The region is delimited by code structure, not comment markers.
 
 When a tighter scope is needed than a function body, Lua's `do...end` is the explicit delimiter.
 
@@ -112,7 +112,7 @@ The explicitness is at the **use site**. The module author maintains no list.
 
 1. Field read on a type that does not include the field → error ("field not found")
 2. Field write on a type that marks the field `readonly` → error
-3. Accessing a field via `--:: use_private` → allowed; the opt-in is visible in source and greppable
+3. Accessing a field via `--:: unseal` → allowed; the opt-in is visible in source and greppable
 
 The type system is strict. The access policy falls out of type checking, not from a whitelist.
 
@@ -128,9 +128,9 @@ Code in `lib/http/router.lua` has no ambient authority over `lib/http/server.lua
 
 `$Opaque<T>` is consistent with the intrinsics system. `opaque T U` is a lighter two-token form. Either could work. Deferred until implementation. Note: `U` has no default (it is either absent — fully opaque newtype — or explicit).
 
-**2. `use_private` scope granularity**
+**2. `unseal` scope granularity**
 
-The annotation applies to the next AST node. Does this interact correctly with the prescan? The prescan needs to see `use_private` declarations to know which private types are in scope where. Implementation question, not a design question.
+The annotation applies to the next AST node. Does this interact correctly with the prescan? The prescan needs to see `unseal` declarations to know which private types are in scope where. Implementation question, not a design question.
 
 **3. `FLAG_READONLY` split in FieldEntry**
 

@@ -1234,7 +1234,7 @@ FLAG_OPTIONAL  = 0x01  -- field may be absent; access returns T|nil
 FLAG_READONLY  = 0x02  -- assignment to this field is a type error
 ```
 
-**Note:** `FLAG_PRIVATE` was added early but is superseded. See `docs/access-control.md` for the full access control design — the correct model is absence from the exported type + `$Opaque<T>` + `--:: use_private` opt-in, not a private flag.
+**Note:** `FLAG_PRIVATE` was added early but is superseded. See `docs/access-control.md` for the full access control design — the correct model is absence from the exported type + `$Opaque<T>` + `--:: unseal` opt-in, not a private flag.
 
 **Syntax:**
 - Optional: `field?: T` — unambiguous, consistent with TypeScript/Flow.
