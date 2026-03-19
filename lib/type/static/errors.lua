@@ -3,26 +3,33 @@
 
 local M = {}
 
+--:: DiagEntry = { kind: string, filename: string, line: integer, col: integer, msg: string, notes: { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... } }
+--:: ErrCtx = { errors: { [integer]: DiagEntry, ... }, warnings: { [integer]: DiagEntry, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
+
 -- Create a new error context.
 -- source_lines: filename -> array of source lines (populated by set_source).
+--: () -> ErrCtx
 function M.new_ctx()
     return { errors = {}, warnings = {}, source_lines = {} }
 end
 
 -- Store source text for a file so formatters can display context lines.
 -- Call this once after creating an err_ctx, before reporting errors.
+--: (ErrCtx, string, string?) -> ()
 function M.set_source(err_ctx, filename, source)
-    if not source or source == "" then return end
+    local src = source or ""
+    if src == "" then return end
     local lines = {}
     local i = 1
-    local len = #source
+    local len = #src
     while i <= len do
-        local nl = source:find("\n", i, true)
+        local nl = src:find("\n", i, true)
         if nl then
-            lines[#lines + 1] = source:sub(i, nl - 1)
-            i = nl + 1
+            local p = nl or 0  -- non-nil: guarded by if nl then
+            lines[#lines + 1] = src:sub(i, p - 1)
+            i = p + 1
         else
-            lines[#lines + 1] = source:sub(i)
+            lines[#lines + 1] = src:sub(i)
             break
         end
     end
@@ -30,6 +37,7 @@ function M.set_source(err_ctx, filename, source)
 end
 
 -- Add an error. Returns the error entry so callers can attach notes.
+--: (ErrCtx, string, integer, integer, string) -> DiagEntry
 function M.error(err_ctx, filename, line, col, msg)
     local e = {
         kind     = "error",
@@ -45,6 +53,7 @@ end
 
 -- Attach a secondary note to an error entry returned by M.error.
 -- note: { filename, line, col, msg }
+--: (DiagEntry?, string, integer, integer, string) -> ()
 function M.add_note(entry, filename, line, col, msg)
     if not entry then return end
     entry.notes[#entry.notes + 1] = {
@@ -56,6 +65,7 @@ function M.add_note(entry, filename, line, col, msg)
 end
 
 -- Add a warning. Returns the warning entry.
+--: (ErrCtx, string, integer, integer, string) -> DiagEntry
 function M.warning(err_ctx, filename, line, col, msg)
     local w = {
         kind     = "warning",
@@ -70,12 +80,14 @@ function M.warning(err_ctx, filename, line, col, msg)
 end
 
 -- Check if there are any errors.
+--: (ErrCtx) -> boolean
 function M.has_errors(err_ctx)
     return #err_ctx.errors > 0
 end
 
 -- Append source context (line + caret) to an output lines table.
 -- col is 0-indexed. line_num is 1-indexed.
+--: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... }?, string, integer, integer?) -> ()
 local function append_context(out, source_lines, filename, line_num, col)
     if not source_lines then return end
     local file_lines = source_lines[filename]
@@ -83,12 +95,14 @@ local function append_context(out, source_lines, filename, line_num, col)
     local src = file_lines[line_num]
     local prefix = string.format("  %d | ", line_num)
     out[#out + 1] = prefix .. src
-    if col and col >= 0 then
-        out[#out + 1] = string.rep(" ", #prefix + col) .. "^"
+    local c = col or -1
+    if c >= 0 then
+        out[#out + 1] = string.rep(" ", #prefix + c) .. "^"
     end
 end
 
 -- Append notes to an output lines table (plain text).
+--: ({ [integer]: string, ... }, { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... }?, { [string]: { [integer]: string, ... }, ... }?) -> ()
 local function append_notes_plain(out, notes, source_lines)
     if not notes then return end
     for _, note in ipairs(notes) do
@@ -98,6 +112,7 @@ local function append_notes_plain(out, notes, source_lines)
 end
 
 -- Format errors as plain text.
+--: (ErrCtx) -> string
 function M.format_plain(err_ctx)
     local lines = {}
     for _, e in ipairs(err_ctx.errors) do
@@ -115,6 +130,8 @@ function M.format_plain(err_ctx)
 end
 
 -- ANSI color codes
+--:: ANSICodes = { reset: string, red: string, yellow: string, bold: string, dim: string }
+--: ANSICodes
 local ANSI = {
     reset  = "\27[0m",
     red    = "\27[31m",
@@ -124,6 +141,7 @@ local ANSI = {
 }
 
 -- Append ANSI-colored source context to an output lines table.
+--: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... }?, string, integer, integer?, string?) -> ()
 local function append_context_ansi(out, source_lines, filename, line_num, col, caret_color)
     if not source_lines then return end
     local file_lines = source_lines[filename]
@@ -131,13 +149,15 @@ local function append_context_ansi(out, source_lines, filename, line_num, col, c
     local src = file_lines[line_num]
     local prefix = string.format("  %d | ", line_num)
     out[#out + 1] = ANSI.dim .. prefix .. src .. ANSI.reset
-    if col and col >= 0 then
-        out[#out + 1] = string.rep(" ", #prefix + col) ..
-            (caret_color or ANSI.red) .. "^" .. ANSI.reset
+    local c = col or -1
+    if c >= 0 then
+        local cc = caret_color or ANSI.red
+        out[#out + 1] = string.rep(" ", #prefix + c) .. cc .. "^" .. ANSI.reset
     end
 end
 
 -- Append notes to an output lines table (ANSI).
+--: ({ [integer]: string, ... }, { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... }?, { [string]: { [integer]: string, ... }, ... }?) -> ()
 local function append_notes_ansi(out, notes, source_lines)
     if not notes then return end
     for _, note in ipairs(notes) do
@@ -147,6 +167,7 @@ local function append_notes_ansi(out, notes, source_lines)
 end
 
 -- Format errors with ANSI colors.
+--: (ErrCtx) -> string
 function M.format_ansi(err_ctx)
     local lines = {}
     for _, e in ipairs(err_ctx.errors) do
@@ -178,6 +199,7 @@ local function notes_to_json(notes)
 end
 
 -- Format errors as JSON array.
+--: (ErrCtx) -> string
 function M.format_json(err_ctx)
     local items = {}
     for _, e in ipairs(err_ctx.errors) do
@@ -315,6 +337,7 @@ function M._json_str(s)
 end
 
 -- Format errors as SARIF 2.1.0 JSON.
+--: (ErrCtx) -> string
 function M.format_sarif(err_ctx)
     local results = {}
     for _, e in ipairs(err_ctx.errors) do
