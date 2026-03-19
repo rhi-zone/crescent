@@ -439,6 +439,11 @@ Blocking items for cutover:
 - [x] Private field visibility enforcement — DONE 2026-03-17 (session 25). `_`-prefix fields
   get FLAG_PRIVATE. Cross-file access rejected in solve_has_field. ctx.type_origins maps type IDs
   to source filenames via CRI load tagging.
+- [x] **Monomorphic callsite inference** — DONE (2026-03-19, commit 6cff48f): removed automatic
+  `generalize` for unannotated functions. Params stay as free TAG_VARs; call-site C_CALLABLE binds
+  them. Body constraints (C_ARITH etc.) defer until params are concrete. `add("hello", 2)` with
+  body `a+b` now correctly errors. `self` param in methods still gets FLAG_GENERIC (avoids recursive
+  type cycle). Prescan stub mutated in-place (not C_UNIFY). `unify(var, T_UNKNOWN)` now binds var.
 - [x] pcall v3 narrowing — DONE (2026-03-19): C_INDEX multi-return + C_OR deferred or-expression
   fix now correctly types `s` as the pcall'd fn's return type. `s + 1` in `if ok then` errors
   with "cannot perform arithmetic on 'string'". Commits: 4976104 (C_OR), ca871ba (union subsumption).
