@@ -6117,6 +6117,18 @@ local val = 42
 local y = val
 ]])
     end)
+
+    -- TODO: typeof in function return type (-> typeof x) currently fails because
+    -- resolve_annotation_type resolves return types before gen_function binds
+    -- parameters in the inner scope. Fix: defer return-type typeof resolution
+    -- until after params are bound.
+    assert.it("typeof in function return type refers to param type", function()
+        v3_no_errors([[
+--: (x: integer) -> typeof x
+local function identity(x) return x end
+local y = identity(42)
+]])
+    end)
 end)
 
 ---------------------------------------------------------------------------
