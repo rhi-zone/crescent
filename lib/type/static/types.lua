@@ -395,6 +395,76 @@ end
 
 local union_has  -- forward declaration; defined after struct_equal below
 
+-- Map from TAG_LITERAL kind to the primitive TAG that subsumes it.
+local lit_primitive = {
+    [LIT_INTEGER] = TAG_INTEGER,
+    [LIT_NUMBER]  = TAG_NUMBER,
+    [LIT_STRING]  = TAG_STRING,
+    [LIT_BOOLEAN] = TAG_BOOLEAN,
+}
+-- Map from primitive TAG to the LIT kind it subsumes.
+local primitive_lit_kind = {
+    [TAG_INTEGER] = LIT_INTEGER,
+    [TAG_NUMBER]  = LIT_NUMBER,
+    [TAG_STRING]  = LIT_STRING,
+    [TAG_BOOLEAN] = LIT_BOOLEAN,
+}
+
+-- Return true if tid is subsumed by prim_tag (literal-vs-primitive only).
+local function lit_subsumed_by_prim(ctx, tid, prim_tag)
+    local t = ctx.types:get(tid)
+    if t.tag ~= TAG_LITERAL then return false end
+    return lit_primitive[t.data[0]] == prim_tag
+end
+
+-- Return true if flat already contains a type that subsumes tid.
+-- Handles: TAG_LITERAL(k) subsumed by TAG_INTEGER/NUMBER/STRING/BOOLEAN,
+-- and TAG_INTEGER subsumed by TAG_NUMBER.
+local function flat_has_supertype(ctx, flat, tid)
+    local t = ctx.types:get(tid)
+    -- Literal subsumed by its primitive
+    if t.tag == TAG_LITERAL then
+        local prim = lit_primitive[t.data[0]]
+        if prim then
+            for i = 1, #flat do
+                local ft = ctx.types:get(flat[i])
+                if ft.tag == prim then return true end
+                -- integer literal also subsumed by number
+                if t.data[0] == LIT_INTEGER and ft.tag == TAG_NUMBER then return true end
+            end
+        end
+        return false
+    end
+    -- integer subsumed by number
+    if t.tag == TAG_INTEGER then
+        for i = 1, #flat do
+            if ctx.types:get(flat[i]).tag == TAG_NUMBER then return true end
+        end
+    end
+    return false
+end
+
+-- Remove from flat any types subsumed by the new primitive tag.
+-- Handles: literals when adding their primitive; TAG_INTEGER when adding TAG_NUMBER.
+local function remove_subsumed(ctx, flat, new_tag)
+    local lk = primitive_lit_kind[new_tag]
+    local i = 1
+    while i <= #flat do
+        local ft = ctx.types:get(flat[i])
+        local remove = false
+        -- Remove literals subsumed by this primitive
+        if ft.tag == TAG_LITERAL then
+            local fprim = lit_primitive[ft.data[0]]
+            if fprim == new_tag then remove = true end
+            -- integer literal subsumed by number
+            if new_tag == TAG_NUMBER and ft.data[0] == LIT_INTEGER then remove = true end
+        end
+        -- Remove integer when adding number
+        if new_tag == TAG_NUMBER and ft.tag == TAG_INTEGER then remove = true end
+        if remove then table.remove(flat, i) else i = i + 1 end
+    end
+end
+
 function M.make_union(ctx, member_ids)
     local flat = {}
     for i = 1, #member_ids do
@@ -409,12 +479,17 @@ function M.make_union(ctx, member_ids)
                 local mt = ctx.types:get(mid)
                 if mt.tag == TAG_ANY     then return ctx.T_ANY end
                 if mt.tag == TAG_UNKNOWN then return ctx.T_UNKNOWN end
-                if mt.tag ~= TAG_NEVER and not union_has(ctx, flat, mid) then
+                if mt.tag ~= TAG_NEVER and not union_has(ctx, flat, mid)
+                   and not flat_has_supertype(ctx, flat, mid) then
+                    remove_subsumed(ctx, flat, mt.tag)
                     flat[#flat + 1] = mid
                 end
             end
         elseif t.tag ~= TAG_NEVER then
-            if not union_has(ctx, flat, rtid) then flat[#flat + 1] = rtid end
+            if not union_has(ctx, flat, rtid) and not flat_has_supertype(ctx, flat, rtid) then
+                remove_subsumed(ctx, flat, t.tag)
+                flat[#flat + 1] = rtid
+            end
         end
     end
     if #flat == 0 then return ctx.T_NEVER end
