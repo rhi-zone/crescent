@@ -31,23 +31,23 @@ mod.DynamicLibrary = DynamicLibrary
 DynamicLibrary.__index = DynamicLibrary
 
 ---@param path string The path to the dynamic library
----@return DynamicLibrary
+---@return DynamicLibrary? library, string? error
 function DynamicLibrary.open(path)
   local handle = dl_ffi.dlopen(path, RTLD_LAZY)
   if handle == nil then
     local err = ffi.string(dl_ffi.dlerror())
-    error("Failed to open library: " .. err)
+    return nil, "dynamic_library.open: " .. err
   end
   return setmetatable({ handle = handle }, DynamicLibrary)
 end
 
 ---@param name string The name of the symbol to look up
----@return ptr_c<nil> symbol The pointer to the symbol, or `nil` if not found
+---@return ptr_c<nil>? symbol, string? error
 function DynamicLibrary:symbol(name)
   local sym = dl_ffi.dlsym(self.handle, name)
   if sym == nil then
     local err = ffi.string(dl_ffi.dlerror())
-    error("Failed to find symbol: " .. err)
+    return nil, "dynamic_library.symbol: " .. err
   end
   return sym
 end
