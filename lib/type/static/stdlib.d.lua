@@ -38,9 +38,7 @@
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
 --:: declare ffi = any
--- _G is synthesized programmatically in prelude.populate() after all stdlib
--- declarations are loaded, so it reflects actual typed bindings rather than
--- returning `any` for all fields. See prelude.lua M.populate().
+--:: declare _G = $GlobalScope
 --:: declare package = { path: string, cpath: string, loaded: { [string]: any, ... }, preload: { [string]: any, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
 --[[::

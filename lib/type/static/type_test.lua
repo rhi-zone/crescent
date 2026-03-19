@@ -2732,8 +2732,8 @@ assert.describe("checker: open table / row variable", function()
     assert.it("_G field access produces no error", function()
         no_errors("local x = _G.print")
     end)
-    assert.it("_G string subscript produces no error", function()
-        no_errors('local x = _G["anything"]')
+    assert.it("_G string subscript rejects unknown key (closed)", function()
+        has_error('local x = _G["anything"]', "doesn't exist")
     end)
     assert.it("annotated open table accepts any field access", function()
         no_errors([[
@@ -6141,12 +6141,13 @@ local x = _G.math.abs(-1)
 ]])
     end)
 
-    assert.it("_G.unknown_key returns unknown, not any", function()
-        -- Unknown keys use T_UNKNOWN fallback. Assigning unknown to integer errors.
+    assert.it("_G.unknown_key errors: field doesn't exist", function()
+        -- _G is closed — no fallback indexer. Undeclared keys are the same error
+        -- as accessing an undeclared global.
         has_error([[
 --: integer
 local x = _G.no_such_key
-]], "unknown")
+]], "doesn't exist")
     end)
 
     assert.it("_G.string.format works with typed return", function()

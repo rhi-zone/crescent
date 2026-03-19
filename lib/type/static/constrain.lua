@@ -493,8 +493,16 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     end
 
     if tag == defs.TAG_INTRINSIC then
+        -- If this intrinsic name is a registered type alias (e.g. $GlobalScope),
+        -- resolve it like TAG_NAMED. Otherwise keep it as an opaque intrinsic node
+        -- (for $Keys<T>, $EachUnion<T>, etc. that are expanded at call sites).
+        local name_id = at.data[0]
+        if env_mod.lookup_type(ctx.scope, name_id) then
+            local resolved, err = env_mod.resolve_named_type(ctx, ctx.scope, name_id, nil)
+            if resolved then return resolved end
+        end
         local id = types_mod.alloc_type(ctx, defs.TAG_INTRINSIC)
-        ctx.types:get(id).data[0] = at.data[0]
+        ctx.types:get(id).data[0] = name_id
         return id
     end
 
