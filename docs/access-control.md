@@ -58,6 +58,15 @@ External callers see only `start` and `stop`. Internal code works with the full 
 
 `$Opaque<T>` with no second argument produces a **nominal opaque newtype** — not an empty table type. The distinction matters: `{}` is structurally compatible with any other empty table, but `$Opaque<HttpServer>` is nominally distinct from `$Opaque<ConnectionPool>` even though both expose nothing. The identity comes from `T`. Callers can only thread the value through functions that accept it — they cannot inspect or construct it. This is how OCaml abstract types work.
 
+`U` in `$Opaque<T, U>` is not a standalone structural type — it is an **open view of `T`**. The external type is `U + sealed row variable` containing the hidden portion of `T`. This has several consequences:
+
+- `$Opaque<HttpServer, { start: () -> () }>` ≠ `$Opaque<ConnectionPool, { start: () -> () }>` even with identical `U` — nominal identity still comes from `T`
+- `$Opaque<T, U>` is assignable to `$Opaque<T>` (drop exposed fields, go fully opaque) — identity preserved
+- `--:: use_private T` unseals the row variable, recovering the full `T`; the typechecker knows the sealed portion IS `T`
+- The fields declared in `U` are checked against `T` — you cannot expose a field that does not exist in `T`
+
+This maps onto `TAG_ROWVAR` in the existing type system: the row is present but sealed; `use_private` unseals it.
+
 `$Opaque<T>` fits the existing intrinsic system (`$GlobalScope`, `$Keys<T>`, etc.) and is usable anywhere in a type expression — function signatures, field types, not just module declarations.
 
 ## Explicit opt-in for intentional private access
