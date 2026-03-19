@@ -182,6 +182,7 @@
 
 ### annotation syntax gaps
 - [x] **Open table syntax in .d.lua**: `{ ... }` bare spread in table annotation creates a row variable; `{ fields..., ... }` = open table. `_G` now declared in stdlib.d.lua. (2026-03-03, commit 6e197c5)
+- [ ] **`typeof` annotation**: `typeof x` in type position captures the inferred type of binding `x`. Not decomposable by the user — there is no existing mechanism to extract an inferred type without writing it out. Earns its place for: naming complex inferred types without transcribing them, composing with intrinsics (`$Keys<typeof t>`), and extracting function return types (`Return<typeof fn>`). Implementation: new annotation AST node `ANN_TYPEOF`; parser recognises `typeof <ident>`; `resolve_annotation_type` looks up the ident in scope and returns its current type_id. Restrict to resolved (non-free-var) bindings to avoid capturing unbound params.
 
 ### performance (v2 redesign)
 **Full redesign in progress. See `docs/typechecker-v2.md` for architecture.**
