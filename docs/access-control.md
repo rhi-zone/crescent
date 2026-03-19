@@ -69,6 +69,17 @@ This maps onto `TAG_ROWVAR` in the existing type system: the row is present but 
 
 `$Opaque<T>` fits the existing intrinsic system (`$GlobalScope`, `$Keys<T>`, etc.) and is usable anywhere in a type expression — function signatures, field types, not just module declarations.
 
+Each occurrence of `$Opaque<T>` creates a fresh nominal type anchored to its declaration site. Two textually identical `$Opaque<T>` at different source locations are different types. When the same opaque type is needed in multiple positions, three trivial options exist:
+
+```lua
+--:: type HttpHandle = $Opaque<HttpServer>       -- named alias
+--:: (x: HttpHandle) -> HttpHandle
+
+--:: <H: $Opaque<HttpServer>> (x: H) -> H        -- type variable
+
+--:: (x: $Opaque<HttpServer>) -> typeof x        -- typeof
+```
+
 ## Explicit opt-in for intentional private access
 
 Sometimes code genuinely needs access to internals — test suites, sibling modules, debuggers. The model is **use-site explicitness**, not definition-site whitelisting.
