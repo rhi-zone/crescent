@@ -17,14 +17,14 @@ These are type modifiers, not access control keywords. Both are enforced by the 
 
 `FLAG_READONLY` as currently implemented conflates "read is public" with "write is private." This must be split into independent flags.
 
-## Immutable vs write-private
+## `const` vs `readonly` — placement, not separate keywords
 
-Both are type modifiers; they differ in scope:
+Both mean "not writable in this type," but they differ by *where* `readonly` appears:
 
-- **Immutable** — field is non-writable in *all* contexts, internal and external. A structural property of the field itself. Useful for constants, IDs, and values set at construction that must never change.
-- **Write-private** — field is writable in the internal type, non-writable in the exported type. Different callers hold different types of the same underlying table.
+- `readonly` in the **internal type** → non-writable for all holders, including internal code. Equivalent to what `const` would mean. Useful for IDs, values set at construction, true constants.
+- `readonly` in the **exported (`$Opaque`) type only** → non-writable externally, writable internally. The internal type omits the restriction.
 
-From the typechecker's perspective, both are "this field is not writable in this type." The distinction is which types include write access.
+No separate `const` keyword needed. The distinction is expressed by placement.
 
 ## Privacy as absence from the exported type
 
@@ -36,69 +36,82 @@ The common case needs no special mechanism. A "private" field is simply not pres
 -- accessing them from outside is "field not found" — existing machinery
 ```
 
-There is no `private` keyword for this case. The module author designs the exported type to omit implementation details. `FLAG_PRIVATE` is not needed for the common case.
+There is no `private` keyword for this case. The module author designs the exported type to omit implementation details. `FLAG_PRIVATE` is not needed.
+
+## `$Opaque<T>` — hiding internals with a named type
+
+For the case where external callers need a named type (to pass values around, store in tables, etc.) but should not see its structure, use the `$Opaque<T>` intrinsic:
+
+```lua
+--:: declare server = $Opaque<InternalHttpServer>
+```
+
+Callers know the type exists and can pass it to functions that accept it, but cannot access any fields.
+
+To expose a subset of fields:
+
+```lua
+--:: declare server = $Opaque<InternalHttpServer, { start: () -> (), stop: () -> () }>
+```
+
+External callers see only `start` and `stop`. Internal code works with the full `InternalHttpServer` type.
+
+`$Opaque<T>` fits the existing intrinsic system (`$GlobalScope`, `$Keys<T>`, etc.) and is usable anywhere in a type expression — function signatures, field types, not just module declarations.
+
+**Open question**: Whether `opaque T U` (two-token syntax without `$`) is worth introducing as a declaration-level alternative. Deferred.
 
 ## Explicit opt-in for intentional private access
 
-Sometimes code genuinely needs access to internals — test suites, sibling modules in a package, debuggers. The model here is **use-site explicitness**, not definition-site whitelisting.
+Sometimes code genuinely needs access to internals — test suites, sibling modules, debuggers. The model is **use-site explicitness**, not definition-site whitelisting.
 
-The analogy is Rust's `unsafe {}`: you don't declare who is allowed to write unsafe code. You require that anyone who does must be explicit about it. Accidental unsafe operations are compile errors; deliberate ones require acknowledgment.
+The analogy is Rust's `#[allow(clippy::lint_name)]`: you don't declare who is allowed to bypass the lint. You require anyone who does to be explicit at the point of use. The scope of the bypass follows the AST node the attribute is attached to.
 
-Applied to access control:
-- Accessing a field absent from the exported type without acknowledgment → type error
-- Accessing it *with* explicit acknowledgment → allowed, typechecked normally
+### Syntax
+
+```lua
+--:: use_private InternalHttpServer
+do
+    local s = require("lib.http.server")  -- full type accessible here
+    ...
+end
+-- scope ends, restriction restored
+```
+
+`--:: use_private T` applies to the **next AST node** — a block, a declaration, a statement, or a single expression. Whatever the next syntactic unit is. No line counting. The region is delimited by code structure, not comment markers.
+
+When a tighter scope is needed than a function body, Lua's `do...end` is the explicit delimiter.
 
 **What this is not:**
-- Not a `friend` declaration (C++ `friend` is explicit at the definition site — you list every consumer. This couples the module to its consumers and doesn't scale.)
-- Not a capability token (requires explicit passing and bootstrapping)
-- Not path-based rules (files are not fundamental units of access control)
+- Not a `friend` declaration — C++ `friend` lists every consumer at the definition site, coupling the module to its consumers. This has no such list.
+- Not a capability token — no explicit passing, no bootstrapping problem.
+- Not path-based — no `pub(in path)` rules. Files are not fundamental units of access control.
 
-The explicitness is at the **use site**. The module author does not need to maintain any list.
+The explicitness is at the **use site**. The module author maintains no list.
 
 ## What the typechecker enforces
 
 1. Field read on a type that does not include the field → error ("field not found")
-2. Field write on a type that marks the field non-writable → error
-3. Accessing a field via explicit opt-in → allowed; the opt-in is visible in the source and can be audited
+2. Field write on a type that marks the field `readonly` → error
+3. Accessing a field via `--:: use_private` → allowed; the opt-in is visible in source and greppable
 
-The type system is strict. The access policy is not enforced by a whitelist — it falls out of type checking.
+The type system is strict. The access policy falls out of type checking, not from a whitelist.
 
 ## Files are not fundamental
 
-The module boundary (where you choose to narrow the type you expose) is often a file because `require()` creates a natural handoff point. But this is a convention, not a constraint. Access control does not depend on file identity or directory structure.
+The module boundary is often a file because `require()` creates a natural handoff point. But access control does not depend on file identity or directory structure. There are no `pub(in path)` style rules.
 
-There are no `pub(in path)` style rules. Code in `lib/http/router.lua` has no ambient authority to access `lib/http/server.lua` internals — it receives whatever type `require()` returns, same as any other caller.
+Code in `lib/http/router.lua` has no ambient authority over `lib/http/server.lua` internals — it receives whatever type `require()` returns, same as any other caller.
 
 ## Open questions
 
-**1. Annotation syntax for the exported type**
+**1. `$Opaque<T, U>` vs `opaque T U` syntax**
 
-How does a module author declare the exported type when it differs from the inferred type? Options:
-- Explicit `--:: export MyModule = { ... }` declaration in the source or a `.d.lua` file
-- Per-field modifiers on the internal type declaration: `--:: { pub field: integer, ... }`
-- Inferred from what is included in the returned table (already partially works)
+`$Opaque<T>` is consistent with the intrinsics system. `opaque T U` is a lighter two-token form. Either could work. Deferred until implementation.
 
-The `.d.lua` companion file model already provides an explicit exported type — the question is whether additional syntax is needed for the internal/external split.
+**2. `use_private` scope granularity**
 
-**2. Opt-in syntax at the use site**
+The annotation applies to the next AST node. Does this interact correctly with the prescan? The prescan needs to see `use_private` declarations to know which private types are in scope where. Implementation question, not a design question.
 
-What does explicit acknowledgment of private access look like? The design requirement: it must be impossible to do accidentally; it must be visible in code review.
+**3. `FLAG_READONLY` split in FieldEntry**
 
-Candidates:
-- Block annotation: `--! private-access` scoping a region
-- Per-expression: some explicit type assertion or cast
-- A function: `internal(x).field` where `internal` strips access restrictions (and is itself typed as requiring acknowledgment)
-
-The scope question is related: does the opt-in cover one expression, a block, or a whole file?
-
-**3. Read/write independence in annotation syntax**
-
-If read and write are truly independent, the annotation syntax must express them independently. `readonly` in existing annotations conflates these. The replacement syntax needs to be unambiguous.
-
-**4. Immutable vs write-private in the type representation**
-
-Currently `FLAG_READONLY` covers both. With the split, FieldEntry needs at minimum:
-- `FLAG_IMMUTABLE` — non-writable everywhere
-- `FLAG_WRITE_PRIVATE` — non-writable in exported type, writable internally
-
-These may be the same bit with different semantics depending on context (internal vs exported type), or genuinely separate flags.
+Currently one bit. With independent read/write axes, needs at minimum two flags. The `const`-vs-`readonly` distinction collapses into internal-type vs exported-type placement, so no third flag is needed. Implementation: rename/split `FLAG_READONLY` when `$Opaque` is implemented.
