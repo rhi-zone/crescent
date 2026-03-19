@@ -1,4 +1,6 @@
--- TODO
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
 
 local sha1 = require("dep.sha1").binary
 local to_base64 = require("dep.base64").encode
@@ -18,7 +20,8 @@ mod.status_ids = {
 	status_missing = 1005,
 	--[[@deprecated Reserved value. Marked deprecated to ensure it is being used properly.]]
 	abnormal_closure = 1006,
-	-- TODO: what is this
+	-- RFC 6455 §7.4.1: received data within a message that was not consistent
+	-- with the type of the message (e.g., non-UTF-8 data in a text message).
 	data_not_consistent_with_message_type = 1007,
 	violates_policy = 1008,
 	message_too_big = 1009,
@@ -72,12 +75,15 @@ local is_valid_opcode = {
 
 --[[@alias websocket_message websocket_message_text|websocket_message_binary|websocket_message_close|websocket_message_ping|websocket_message_pong]]
 
--- FIXME: should it use string errors?
+-- TODO(api): error representation is integer codes; consider converting to string
+-- errors for a more ergonomic API. Deferred — requires a breaking API change.
+-- The second return value of decode() is currently overloaded (boolean ready OR
+-- error code). Fixing the return convention is also a breaking change. Deferred.
 
 --[[@enum websocket_error]]
--- **Not** guaranteed to stay the same across versions.  
+-- **Not** guaranteed to stay the same across versions.
 -- Highly recommended to use the enum members directly
-mod.error = { --[[TODO: convert to string]]
+mod.error = {
 	invalid_format = 1,
 	invalid_opcode = 2,
 	frame_is_not_masked = 3,
@@ -116,8 +122,6 @@ end
 
 --[[@type websocket_error]]
 
---[[FIXME: return strings? also return error as second arg, not third]]
-
 --[[Returns a partial websocket message if this is not the last frame in the message,]]
 --[[or a websocket message if this is the last frame in the message,]]
 --[[or an error code.]]
@@ -125,16 +129,18 @@ end
 local decode = function (packet, acc)
 	local h0 = packet:byte(1)
 	local fin = bit.band(h0, 0x80) ~= 0 --[[is final packet?]]
-	if bit.band(h0, 0x70) ~= 0 then return nil, mod.error.invalid_format end --[[TODO: fail the connection]]
+	-- Returning an error code here is sufficient; the caller (mod.websocket) is
+	-- responsible for closing the connection on error. Requires integration test.
+	if bit.band(h0, 0x70) ~= 0 then return nil, mod.error.invalid_format end
 	local opcode = bit.band(h0, 0x0f)
-	if not is_valid_opcode[opcode + 1] then return nil, mod.error.invalid_opcode end --[[TODO: fail the connection]]
+	if not is_valid_opcode[opcode + 1] then return nil, mod.error.invalid_opcode end
 	local h1 = packet:byte(2)
 	local payload_len = bit.band(h1, 0x7f)
 	local mask
 	local i = 3
 	if payload_len == 126 then
 		local b1, b2 = packet:byte(3, 4)
-		--[[FIXME: compare performance of bitwise vs normal operators]]
+		-- TODO(perf): measure bitwise vs arithmetic for payload_len assembly.
 		payload_len = bit.bor(bit.lshift(b1, 8), b2)
 		i = 5
 	elseif payload_len == 127 then
@@ -154,7 +160,9 @@ local decode = function (packet, acc)
 	if not fin and opcode >= 0x8 then return nil, mod.error.control_frame_is_fragmented end
 	if opcode == 0x1 then
 		if not fin and acc then return nil, mod.error.continuation_frame_has_incorrect_opcode end
-		--[[NOTE: almost certainly a perf issue]]
+		-- TODO(perf): utf8.is_valid on each frame is O(n) per frame; for
+		-- fragmented messages this validates every fragment. Consider validating
+		-- only the reassembled message, or streaming validation.
 		if not utf8.is_valid(payload) then return nil, mod.error.text_frame_not_valid_utf8 end
 		--[[@type websocket_message_text]]
 		acc = { type = "text", payload = payload }
@@ -166,7 +174,8 @@ local decode = function (packet, acc)
 		if not acc then return nil, mod.error.continuation_frame_as_first_frame end
 		acc.payload  = acc.payload .. payload
 	elseif opcode == 0x9 then
-		--[[TODO: reply with pong?]]
+		-- The ping message is surfaced to the caller via the read callback.
+		-- The caller is responsible for sending a pong in response if desired.
 		--[[@type websocket_message_ping]]
 		acc = { type = "ping", payload = payload }
 	elseif opcode == 0xA then
@@ -183,8 +192,9 @@ local decode = function (packet, acc)
 		acc = { type = "close", status = status, payload = payload:sub(3) }
 	end
 	return acc, fin, mask, mi, (payload_len + i - 1)
-	--[[should split payload into extension + application data]]
-	--[[(requires implementing extensions)]]
+	-- TODO(extensions): payload should be split into extension data and
+	-- application data once extension negotiation (e.g. permessage-deflate)
+	-- is implemented.
 end
 
 --[[@return string? buf]] --[[@param msg websocket_message]]
@@ -211,9 +221,15 @@ local encode = function (msg)
 	return s .. msg.payload
 end
 
--- TODO: consider limiting packet size
+-- Expose frame codec for testing and advanced use.
+mod._encode = encode
+mod._decode = decode
 
--- TODO: nested function. outer takes the handler, returns function(sock, req)
+-- TODO(policy): consider enforcing a maximum incoming frame/packet size to
+-- guard against memory exhaustion. Deferred — policy decision for the caller.
+
+-- TODO(refactor): refactor so the outer function takes the handler and returns
+-- function(sock, req), enabling use as middleware without a closure per call.
 --[[@return websocket_send? send, websocket_close? close]]
 --[[@param sock luajitsocket]]
 --[[@param req http_request]]
@@ -222,7 +238,9 @@ end
 --[[@param epoll epoll]]
 mod.websocket = function (sock, req, read, close, epoll)
 	if (req.headers["upgrade"] or {})[1] ~= "websocket" or (req.headers["connection"] or {})[1] ~= "Upgrade" then return nil end
-	--[[FIXME: return numeric error, let caller decide how to respond]]
+	-- TODO(api): return a numeric error code here instead of sending the HTTP
+	-- response inline, so the caller can decide how to respond. Deferred —
+	-- requires a breaking API change.
 	if (req.headers["sec-websocket-version"] or {})[1] ~= "13" then return err(sock, "Unsupported WebSocket version - only v13 supported") end
 	--[[chrome supports permessage-deflate and client_max_window_bits]]
 	--[[if req.headers["sec-websocket-extensions"] then return err(sock, "WebSocket extensions are not supported") end]]
@@ -230,13 +248,18 @@ mod.websocket = function (sock, req, read, close, epoll)
 	if key == nil then return err(sock, "Missing header: Sec-WebSocket-Key") end
 	if #key ~= 24 then return err(sock, "Invalid header length - should be 24: Sec-WebSocket-Key") end
 	if not key:find("^[A-Za-z0-9+/]+==$") then return err(sock, "Invalid header - not base64: Sec-WebSocket-Key") end
-	--[[TODO: check Sec-WebSocket-Protocol... and just reject them all?]]
+	-- Sec-WebSocket-Protocol: subprotocol negotiation is not implemented.
+	-- If a client requests a subprotocol, we ignore it and proceed without one.
+	-- RFC 6455 §4.1 allows the server to omit the Sec-WebSocket-Protocol
+	-- header if it does not support the requested subprotocol.
 	local msg, ready, mask, mi
 	local remaining_len = 0
 	local write, remove = epoll:modify(sock.fd, function ()
-		--[[FIXME: set size = 131072 for chrome, but only *after* handling has been fixed]]
+		-- TODO(perf): once multi-frame handling is confirmed correct, set
+		-- receive size to 131072 for better throughput with Chrome.
 		local packet = sock:receive()
-		--[[TODO: consider adding `i` parameter to `packet` to avoid `:sub`]]
+		-- TODO(perf): pass an offset index into packet instead of slicing with
+		-- :sub() to avoid allocation in the multi-frame loop.
 		if not packet then return end
 		while #packet > 0 do
 			if remaining_len > 0 then
