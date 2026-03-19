@@ -227,8 +227,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local resolved = types_mod.find(ctx, tid)
         local rt = ctx.types:get(resolved)
         if rt.tag == TAG_VAR then
-            -- Unbound type variable (unannotated param) — return T_UNKNOWN rather
-            -- than capturing an unstable free variable.
+            -- When resolving function signature annotations, param names are pre-bound
+            -- to fresh TAG_VAR placeholders so that `typeof <param>` can reference
+            -- them.  In that context we return the placeholder TAG_VAR directly —
+            -- it will be bound to the concrete annotation type by the caller.
+            -- Outside that context (unannotated param at a call site), return T_UNKNOWN
+            -- to avoid capturing an unstable free variable.
+            if ctx._resolving_func_ann_scope then
+                return resolved
+            end
             return ctx.T_UNKNOWN
         end
         return resolved
@@ -321,9 +328,58 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
 
     if tag == TAG_FUNCTION then
         seen[ann_tid] = true
+        -- Pre-collect param name IDs so we can bind them in a child scope before
+        -- resolving any param/return type annotations.  This makes `typeof x` work
+        -- in both param types and return types of the same signature.
+        local param_name_ids = nil
+        if at.data[6] > 0 then
+            param_name_ids = {}
+            for i = at.data[5], at.data[5] + at.data[6] - 1 do
+                param_name_ids[#param_name_ids + 1] = ctx.ann.lists:get(i)
+            end
+        end
+        -- Build a child scope that pre-binds each named param as a fresh TAG_VAR
+        -- placeholder.  Resolving param/return annotations with this scope active
+        -- lets `typeof <param>` resolve to the placeholder regardless of declaration
+        -- order.  After all param annotations are resolved we bind each placeholder
+        -- to its concrete annotation type so subsequent `typeof` lookups find the
+        -- bound type via union-find.
+        local ann_scope = nil
+        local ann_vars  = nil   -- parallel to param_name_ids: the fresh TAG_VAR ids
+        local saved_scope = ctx.scope
+        local saved_flag  = ctx._resolving_func_ann_scope
+        if param_name_ids then
+            ann_scope = env_mod.child(ctx.scope)
+            ann_vars  = {}
+            for _, nid in ipairs(param_name_ids) do
+                local tv = types_mod.make_var(ctx, ctx.scope.level + 1)
+                env_mod.bind(ann_scope, nid, tv)
+                ann_vars[#ann_vars + 1] = tv
+            end
+            ctx.scope = ann_scope
+            ctx._resolving_func_ann_scope = true
+        end
         local params = {}
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             params[#params + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        -- Bind each placeholder to its resolved param type so that `typeof <param>`
+        -- in return types (and later param types) resolves through union-find.
+        if ann_vars then
+            for pi, nid in ipairs(param_name_ids) do
+                local tv_id  = ann_vars[pi]
+                local ann_id = params[pi]
+                if ann_id and ann_id ~= tv_id then
+                    -- Only bind if the annotation is a concrete type (not another free
+                    -- TAG_VAR placeholder — that would be a mutual `typeof` cycle like
+                    -- `(a: typeof b, b: typeof a)`; leave both free and let the caller
+                    -- unify them at call sites).
+                    local ann_t = ctx.types:get(types_mod.find(ctx, ann_id))
+                    if ann_t.tag ~= TAG_VAR then
+                        ctx.types:get(tv_id).data[2] = ann_id
+                    end
+                end
+            end
         end
         local returns = {}
         for i = at.data[2], at.data[2] + at.data[3] - 1 do
@@ -333,12 +389,9 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if at.data[4] >= 0 then
             vararg_id = resolve_annotation_type(ctx, at.data[4], seen)
         end
-        local param_name_ids = nil
-        if at.data[6] > 0 then
-            param_name_ids = {}
-            for i = at.data[5], at.data[5] + at.data[6] - 1 do
-                param_name_ids[#param_name_ids + 1] = ctx.ann.lists:get(i)
-            end
+        if ann_scope then
+            ctx.scope = saved_scope
+            ctx._resolving_func_ann_scope = saved_flag
         end
         seen[ann_tid] = nil
         return types_mod.make_func(ctx, params, returns, vararg_id, param_name_ids)
