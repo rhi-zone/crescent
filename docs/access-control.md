@@ -80,9 +80,19 @@ Each occurrence of `$Opaque<T>` creates a fresh nominal type anchored to its dec
 --:: (x: $Opaque<HttpServer>) -> typeof x        -- typeof
 ```
 
+## Why not absolute enforcement
+
+Absolute enforcement — where accessing a sealed type from outside its defining module is a hard error with no escape — has one fatal flaw: **it's binary**. Inside the module gets full access; outside gets nothing.
+
+This destroys all the granularity the rest of this design provides. `$Opaque<T, U>` with partial exposure, read/write as independent axes, different callers seeing different views — all of that is about fine-grained control. Absolute enforcement collapses it to a single bit: are you in the right file, yes or no.
+
+It also reintroduces identity-based reasoning ("who is the caller?") into a design that's entirely type-based ("what type do you hold?"). A module that absolutely enforces opacity must check call-site file identity, not just types — contradicting the core model.
+
+Vendorability is an additional concern: path/identity-based enforcement breaks when code is copied to a new location.
+
 ## Explicit opt-in for intentional private access
 
-Sometimes code genuinely needs access to internals — test suites, sibling modules, debuggers. The model is **use-site explicitness**, not definition-site whitelisting.
+The model is **use-site explicitness**, not definition-site whitelisting. The motivation is maximum explicitness: intentional access to internals must be impossible to do accidentally and impossible to miss in code review. This is the same principle as Rust's `unsafe {}` — anyone can write it, but it screams "something deliberate is happening here."
 
 The analogy is Rust's `#[allow(clippy::lint_name)]`: you don't declare who is allowed to bypass the lint. You require anyone who does to be explicit at the point of use. The scope of the bypass follows the AST node the attribute is attached to.
 
