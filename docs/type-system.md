@@ -1232,21 +1232,21 @@ Concrete decisions made during implementation. Each entry records the decision, 
 ```
 FLAG_OPTIONAL  = 0x01  -- field may be absent; access returns T|nil
 FLAG_READONLY  = 0x02  -- assignment to this field is a type error
-FLAG_PRIVATE   = 0x04  -- inaccessible outside the defining file
 ```
+
+**Note:** `FLAG_PRIVATE` was added early but is superseded. See `docs/access-control.md` for the full access control design — the correct model is absence from the exported type + `$Opaque<T>` + `--:: use_private` opt-in, not a private flag.
 
 **Syntax:**
 - Optional: `field?: T` — unambiguous, consistent with TypeScript/Flow.
 - Readonly: `readonly field: T` — field-level prefix keyword.
-- Private: `_` prefix convention marks a field private by default. Overridable with explicit `public _field: T` annotation. Zero boilerplate for the common case.
+
+**`readonly` placement determines scope:** `readonly` in the internal type means immutable for all holders (what `const` would mean); `readonly` only in the `$Opaque` exported type means externally readonly but internally writable.
 
 **No table-level `readonly` keyword.** `readonly { x: T }` looks like it should be a primitive, but it isn't — it's just all fields marked readonly. The general form `Readonly<T>` (make all fields of T readonly) requires mapped types and is user-definable in the prelude once mapped types exist. Baking it into the language as a special case would be redundant.
 
 **Readonly access semantics:** reading a readonly field returns `T` normally. Writing to it is a type error at the call site.
 
 **Optional access semantics:** reading an optional field returns `T | nil`. The caller must narrow before treating it as `T`. Writing an optional field with a value of type `T` is fine; writing `nil` clears it (also fine).
-
-**Private visibility:** enforced at file granularity. A field named `_foo` (or annotated `private`) on a table type is accessible within the file that defines the type, but produces a type error if accessed from another file. Module boundary = file boundary.
 
 ### `Readonly<T>` is a library type, not a keyword
 
@@ -1255,3 +1255,34 @@ FLAG_PRIVATE   = 0x04  -- inaccessible outside the defining file
 --:: Readonly = <T: table> $EachField<T, fn(f) -> { ...f, readonly: true }>
 ```
 No special compiler support required. Same applies to `Partial<T>`, `Required<T>`, `Pick<T, K>`, `Omit<T, K>` — all are prelude-defined mapped type applications, not language keywords.
+
+### `typeof` in function signatures: mutual equality constraints
+
+`typeof x` in a function signature means "same type as parameter x." This works for backward refs, forward refs, return types, and mutual/circular refs:
+
+```lua
+--: (x: T, y: typeof x) -> typeof x          -- backward + return
+--: (x: typeof y, y: T) -> ()                 -- forward ref
+--: (a: typeof b, b: typeof a) -> ()          -- mutual/circular
+```
+
+The mutual case `(a: typeof b, b: typeof a)` resolves naturally: pre-bind all param names as `TAG_VAR` placeholders before resolving any annotation, then the union-find solver merges both into the same equivalence class — equivalent to `<T>(a: T, b: T)` without requiring explicit type variable syntax. TypeScript cannot express this; it requires explicit generics.
+
+**Implementation:** `resolve_annotation_type` for `TAG_FUNCTION` must pre-bind all param names as `TAG_VAR` placeholders before resolving any param type annotation, then resolve return types last. Currently unimplemented — failing tests exist.
+
+### Mutual bounded type parameter constraints
+
+Beyond equality (`typeof`), parameters can have mutually dependent *bounds*:
+
+```lua
+--:: <T, K: $Keys<T>>(obj: T, key: K) -> ...
+```
+
+K's bound depends on T. For fully mutual bounds (T's constraint also references K), the solver must find a fixed point by iterating until no bound changes — similar to how TypeScript handles `<T extends Record<K, unknown>, K extends keyof T>`, but without the index-signature widening problem that motivates that pattern in TypeScript (crescent's explicit open/closed table distinction means no implicit index signatures are ever added).
+
+**Three constraint capabilities, one solver:**
+1. Mutual equality (`typeof`) → union-find, already handles cycles
+2. Bounded params (`K: $Keys<T>`, one-directional) → requires `$Keys<T>` intrinsic + bounded quantification
+3. Mutual bounded constraints → fixed-point iteration in `solve.lua`
+
+All three build on the same constraint solver infrastructure.
