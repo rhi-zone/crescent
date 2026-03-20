@@ -70,6 +70,14 @@ parsing, can't corrupt the solver. Adding a rule is adding a pass — not a patc
 into the core. This is the same boundary rustc/clippy maintain: clippy is a
 separate crate that walks the same HIR, not a patch into the type solver.
 
+**Architectural analysis is also in scope.** Import graph queries — god modules,
+hub detection, cycle detection, layering violations — are rule passes over the
+reference graph the typechecker already builds for cross-file type resolution.
+The graph exists; querying it for architectural properties is just more passes.
+Lua is sufficient for the queries worth having (reachability, degree counting,
+cycle detection); datalog would add expressive power for deeply recursive
+relational queries but isn't worth pulling in speculatively.
+
 **What would actually be feature creep:**
 - Formatter — requires round-trip fidelity, whitespace-preserving AST, totally
   different output model
