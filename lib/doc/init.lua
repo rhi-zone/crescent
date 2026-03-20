@@ -11,7 +11,8 @@ local types_mod  = require("lib.type.static.types")
 local intern_mod = require("lib.type.static.intern")
 local defs       = require("lib.type.static.defs")
 
-local TAG_TABLE = defs.TAG_TABLE
+local TAG_TABLE    = defs.TAG_TABLE
+local TAG_FUNCTION = defs.TAG_FUNCTION
 
 local M = {}
 
@@ -114,6 +115,32 @@ local function find_binding_line(ctx, name_id)
 end
 
 -- ---------------------------------------------------------------------------
+-- Parameter name extraction for function types
+-- ---------------------------------------------------------------------------
+-- Given a function type_id, extract parameter names and types as an array of
+-- { name = "param_name", type = "param_type" }.
+local function extract_func_params(ctx, tid)
+    tid = types_mod.find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag ~= TAG_FUNCTION then return nil end
+    local params = {}
+    local param_count = t.data[1]
+    local has_names = t.data[6] and t.data[6] > 0
+    for i = 0, param_count - 1 do
+        local ptid = ctx.lists:get(t.data[0] + i)
+        local ptype = types_mod.display(ctx, ptid)
+        local pname = "_"
+        if has_names and i < t.data[6] then
+            local name_id = ctx.lists:get(t.data[5] + i)
+            local n = intern_mod.get(ctx.pool, name_id)
+            if n then pname = n end
+        end
+        params[#params + 1] = { name = pname, type = ptype }
+    end
+    return params
+end
+
+-- ---------------------------------------------------------------------------
 -- Core generation logic (shared between generate and generate_string)
 -- ---------------------------------------------------------------------------
 local function build_doc(source, filename, err_ctx, ctx)
@@ -146,21 +173,31 @@ local function build_doc(source, filename, err_ctx, ctx)
             -- Module returns a table — enumerate its fields as exports
             local fields = table_fields(ctx, export_tid)
             if fields then
-                -- Sort by name for stable output
-                table.sort(fields, function(a, b) return a.name < b.name end)
+                -- Filter out private fields (names starting with _)
+                local public = {}
                 for _, f in ipairs(fields) do
+                    if f.name:sub(1, 1) ~= "_" then
+                        public[#public + 1] = f
+                    end
+                end
+                -- Sort by name for stable output
+                table.sort(public, function(a, b) return a.name < b.name end)
+                for _, f in ipairs(public) do
                     local type_str = types_mod.display(ctx, f.type_id)
                     -- Try to find the line: first scan AST for M.name,
                     -- then fall back to def_sites
                     local line = find_field_line(ctx, f.name_id)
                               or find_binding_line(ctx, f.name_id)
                     local doc = line and doc_comments[line] or nil
-                    exports[#exports + 1] = {
+                    local entry = {
                         name = f.name,
                         type = type_str,
                         doc  = doc,
                         line = line,
                     }
+                    local fp = extract_func_params(ctx, f.type_id)
+                    if fp then entry.params = fp end
+                    exports[#exports + 1] = entry
                 end
             end
         else
@@ -245,6 +282,71 @@ M.generate_string = function(source, filename)
     check_mod.clear_cache()
     local err_ctx, ctx = check_mod.check_string(source, filename)
     return build_doc(source, filename, err_ctx, ctx)
+end
+
+--- Generate documentation for all .lua files in a package directory.
+--- Returns an array of doc tables.
+M.generate_package = function(dir)
+    -- Normalize trailing slash
+    if dir:sub(-1) ~= "/" then dir = dir .. "/" end
+    -- List .lua files
+    local h = io.popen('ls -1 "' .. dir .. '"')
+    if not h then return {} end
+    local entries = {}
+    for line in h:lines() do
+        if line:match("%.lua$") and not line:match("_test%.lua$") then
+            entries[#entries + 1] = line
+        end
+    end
+    h:close()
+    -- Sort: init.lua first, then alphabetical
+    table.sort(entries, function(a, b)
+        if a == "init.lua" then return true end
+        if b == "init.lua" then return false end
+        return a < b
+    end)
+    local results = {}
+    for _, name in ipairs(entries) do
+        local path = dir .. name
+        local result, err = M.generate(path)
+        if result then
+            results[#results + 1] = result
+        elseif err then
+            io.stderr:write("warning: " .. path .. ": " .. err .. "\n")
+        end
+    end
+    return results
+end
+
+--- Format a doc result (or array of results) as Markdown.
+M.format_markdown = function(results)
+    -- Accept single result or array
+    if results.file then results = { results } end
+    local out = {}
+    for _, result in ipairs(results) do
+        out[#out + 1] = "# " .. result.file
+        out[#out + 1] = ""
+        if #result.exports == 0 then
+            out[#out + 1] = "(no exports)"
+            out[#out + 1] = ""
+        else
+            for _, exp in ipairs(result.exports) do
+                out[#out + 1] = "## " .. exp.name
+                out[#out + 1] = ""
+                out[#out + 1] = "```"
+                out[#out + 1] = exp.type
+                out[#out + 1] = "```"
+                out[#out + 1] = ""
+                if exp.doc then
+                    out[#out + 1] = exp.doc
+                    out[#out + 1] = ""
+                end
+                out[#out + 1] = "---"
+                out[#out + 1] = ""
+            end
+        end
+    end
+    return table.concat(out, "\n")
 end
 
 return M

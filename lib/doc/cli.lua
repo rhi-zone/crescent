@@ -1,6 +1,6 @@
 -- lib/doc/cli.lua
 -- CLI entry point for the docgen tool.
--- Usage: luajit lib/doc/cli.lua [--format json|text] <file>...
+-- Usage: luajit lib/doc/cli.lua [--format json|text|markdown] [--package <dir>] <file>...
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -9,8 +9,9 @@ end
 local doc    = require("lib.doc")
 local json   = require("lib.format.json")
 
-local format = "json"
-local files  = {}
+local format  = "json"
+local files   = {}
+local pkg_dir = nil
 
 local i = 1
 while i <= #arg do
@@ -20,19 +21,31 @@ while i <= #arg do
         format = arg[i] or "json"
     elseif a:sub(1, 9) == "--format=" then
         format = a:sub(10)
+    elseif a == "--package" then
+        i = i + 1
+        pkg_dir = arg[i]
+    elseif a:sub(1, 10) == "--package=" then
+        pkg_dir = a:sub(11)
     else
         files[#files + 1] = a
     end
     i = i + 1
 end
 
-if #files == 0 then
-    io.stderr:write("usage: luajit lib/doc/cli.lua [--format json|text] <file>...\n")
+if #files == 0 and not pkg_dir then
+    io.stderr:write("usage: luajit lib/doc/cli.lua [--format json|text|markdown] [--package <dir>] <file>...\n")
     os.exit(1)
 end
 
 local results = {}
 local had_error = false
+
+if pkg_dir then
+    results = doc.generate_package(pkg_dir)
+    if #results == 0 then
+        io.stderr:write("warning: no results from package " .. pkg_dir .. "\n")
+    end
+end
 
 for _, filename in ipairs(files) do
     local result, err = doc.generate(filename)
@@ -44,7 +57,9 @@ for _, filename in ipairs(files) do
     end
 end
 
-if format == "text" then
+if format == "markdown" then
+    io.write(doc.format_markdown(results))
+elseif format == "text" then
     for _, result in ipairs(results) do
         io.write("# " .. result.file .. "\n\n")
         if #result.exports == 0 then
@@ -69,12 +84,6 @@ else
         output = results[1]
     else
         output = results
-    end
-    -- lunajson encodes nil fields as absent — strip nil values from export entries
-    for _, result in ipairs(results) do
-        for _, exp in ipairs(result.exports) do
-            -- Leave nil fields absent (lunajson skips nil table values)
-        end
     end
     local ok, encoded = pcall(json.encode, output)
     if ok then
