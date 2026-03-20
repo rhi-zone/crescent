@@ -128,13 +128,20 @@ doencode = function (v2)
 	return enc_dispatcher[type(v2)](v2)
 end
 
-mod.encode = function (v_, nullv_)
+local encode_raw = function (v_, nullv_)
 	v, enc_nullv = v_, nullv_ or mod.null
 	i, builder, visited = 1, {}, {}
 	doencode(v)
 	return concat(builder)
 end
-mod.value_to_json = mod.encode
+mod._encode_raw = encode_raw
+mod.value_to_json = encode_raw
+
+mod.encode = function (v_, nullv_)
+	local ok, result = pcall(encode_raw, v_, nullv_)
+	if ok then return result end
+	return nil, result
+end
 
 local json, pos, dec_nullv, arraylen, rec_depth
 
@@ -442,7 +449,7 @@ dec_dispatcher = setmetatable({ [0] =
 
 --[[@return unknown v2, integer? pos]]
 --[[@param json_ string]] --[[@param pos_ integer?]] --[[@param nullv_ unknown?]] --[[@param arraylen_ integer?]]
-mod.decode = function (json_, pos_, nullv_, arraylen_)
+local decode_raw = function (json_, pos_, nullv_, arraylen_)
 	json, pos, dec_nullv, arraylen = json_, pos_, nullv_ or mod.null, arraylen_
 	rec_depth = 0
 	pos = match(json, "^[ \n\r\t]*()", pos)
@@ -456,6 +463,13 @@ mod.decode = function (json_, pos_, nullv_, arraylen_)
 		return v2
 	end
 end
-mod.json_to_value = mod.decode
+mod._decode_raw = decode_raw
+mod.json_to_value = decode_raw
+
+mod.decode = function (json_, pos_, nullv_, arraylen_)
+	local ok, result, extra = pcall(decode_raw, json_, pos_, nullv_, arraylen_)
+	if ok then return result, extra end
+	return nil, result
+end
 
 return mod

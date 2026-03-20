@@ -118,7 +118,7 @@ mod.new = function (epoll, flags) return inotify:new(epoll, flags) end
 --[[@return inotify_wd_c wd, fun() remove]] --[[@param pathname string]] --[[@param mask inotify_event_mask]] --[[@param cb fun(event: inotify_event_c)]]
 inotify.add = function (self, pathname, mask, cb)
 	local wd = inotify_ffi.inotify_add_watch(self.fd, pathname, mask)
-	assert(wd >= 0, "inotify: inotify_add_watch failed")
+	if wd < 0 then return nil, "inotify: inotify_add_watch failed: " .. pathname end
 	self.callbacks[wd] = cb
 	return wd, function () inotify_ffi.inotify_rm_watch(self.fd, wd) end
 end

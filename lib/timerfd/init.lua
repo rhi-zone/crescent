@@ -77,17 +77,23 @@ else
 	mod.set_timeout = function (self, ms, cb)
 		local value = timespec(math.floor(ms / 1000), (ms % 1000) * 1000000)
 		local fd = timerfd_c.timerfd_create(--[[CLOCK_MONOTONIC]] 1, 0)
-		assert(fd >= 0, "timerfd_create failed")
-		assert(timerfd_c.timerfd_settime(fd, 0, itimerspec(timespec0, value), nil) == 0, "timerfd_settime failed")
-		local _, remove
-		_, remove = self:add(fd, function ()
+		if fd < 0 then return nil, "timerfd_create failed" end
+		if timerfd_c.timerfd_settime(fd, 0, itimerspec(timespec0, value), nil) ~= 0 then
+			timerfd_c.close(fd)
+			return nil, "timerfd_settime failed"
+		end
+		local _, remove, err
+		_, remove, err = self:add(fd, function ()
 			cb() -- needs wrapping to make sure arg count is 0
 			timerfd_c.read(fd, rdbuf, 8)
 			timerfd_c.close(fd)
 			--[[@diagnostic disable-next-line: need-check-nil]]
 			remove()
 		end)
-		assert(remove, "epoll:add failed")
+		if not remove then
+			timerfd_c.close(fd)
+			return nil, err or "epoll:add failed"
+		end
 		return function ()
 			timerfd_c.close(fd)
 			remove()
@@ -100,14 +106,20 @@ else
 	mod.set_interval = function (self, ms, cb)
 		local value = timespec(math.floor(ms / 1000), (ms % 1000) * 1000000)
 		local fd = timerfd_c.timerfd_create(--[[CLOCK_MONOTONIC]] 1, 0)
-		assert(fd >= 0, "timerfd_create failed")
-		assert(timerfd_c.timerfd_settime(fd, 0, itimerspec(value, value), nil) == 0, "timerfd_settime failed")
-		local _, remove
-		_, remove = self:add(fd, function ()
+		if fd < 0 then return nil, "timerfd_create failed" end
+		if timerfd_c.timerfd_settime(fd, 0, itimerspec(value, value), nil) ~= 0 then
+			timerfd_c.close(fd)
+			return nil, "timerfd_settime failed"
+		end
+		local _, remove, err
+		_, remove, err = self:add(fd, function ()
 			cb() -- needs wrapping to make sure arg count is 0
 			timerfd_c.read(fd, rdbuf, 8)
 		end)
-		assert(remove, "epoll:add failed")
+		if not remove then
+			timerfd_c.close(fd)
+			return nil, err or "epoll:add failed"
+		end
 		return function ()
 			timerfd_c.close(fd)
 			remove()

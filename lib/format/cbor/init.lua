@@ -77,8 +77,14 @@ local _ENV = nil
 local encoder = {}
 
 local encode = function (obj, opts) return encoder[type(obj)](obj, opts) end
-mod.encode = encode
+mod._encode_raw = encode
 mod.value_to_cbor = encode
+
+mod.encode = function (obj, opts)
+	local ok, result = pcall(encode, obj, opts)
+	if ok then return result end
+	return nil, result
+end
 
 --[[Major types 0, 1 and length encoding for others]]
 --[[@param num integer]]
@@ -481,7 +487,7 @@ mod.type_decoders = decoder
 --[[opts.more(n) -> want more data]]
 --[[opts.simple -> decode simple value]]
 --[[opts[int] -> tagged decoder]]
-mod.decode = function (s, opts)
+local decode_raw = function (s, opts)
 	local fh = {}
 	local pos = 1
 	--[[@type fun(_: integer?, _, _)]]
@@ -513,6 +519,13 @@ mod.decode = function (s, opts)
 
 	return read_object(fh, opts)
 end
-mod.cbor_to_value = mod.decode
+mod._decode_raw = decode_raw
+mod.cbor_to_value = decode_raw
+
+mod.decode = function (s, opts)
+	local ok, result = pcall(decode_raw, s, opts)
+	if ok then return result end
+	return nil, result
+end
 
 return mod

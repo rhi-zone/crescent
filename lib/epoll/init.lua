@@ -143,20 +143,26 @@ epoll.add = function (self, fd, read, close, weak)
 		write_c(fd, write_buf, #write_buf)
 		write_buf = ""
 		events[0].events = 1 --[[EPOLLIN]]
-		assert(epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, events) == 0, "epoll: write callback failed")
+		if epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
+			error("epoll: write callback failed")
+		end
 	end
 	self.close_cbs[fd] = close
 	local write = function (data) --[[@param data string]]
 		write_buf = write_buf .. data
 		events[0].events = 5 --[[EPOLLIN | EPOLLOUT]]
-		assert(epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, events) == 0, "epoll: write failed")
+		if epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
+			error("epoll: write failed")
+		end
 	end
 	local remove = function ()
 		remove_fd(self, fd)
 		--[[this may silently fail if the socket has been closed.]]
 		epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_DEL]] 2, fd, events)
 	end
-	assert(epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_ADD]] 1, fd, events) == 0, "epoll: add failed")
+	if epoll_ffi.epoll_ctl(self.fd, --[[EPOLL_CTL_ADD]] 1, fd, events) ~= 0 then
+		return nil, nil, "epoll: add failed"
+	end
 	self.rets[fd] = { write = write, remove = remove }
 	if weak then self.weak[fd] = true
 	else self.count = self.count + 1 end
