@@ -1,6 +1,6 @@
 -- lib/type/static/cli.lua
 -- CLI entry point for the typechecker.
--- Usage: luajit lib/type/static/cli.lua [--format plain|ansi|json|sarif] [--dump] [<file> ...]
+-- Usage: luajit lib/type/static/cli.lua [--format plain|ansi|json|sarif] [--dump] [--rules] [<file> ...]
 -- If no files given, globs lib/ for *.lua (excluding *_test.lua and dep/).
 
 if not package.path:find("./?/init.lua", 1, true) then
@@ -32,6 +32,7 @@ function M.main(argv)
     local format   = "ansi"  -- ansi | plain | json | sarif
     local dump     = false
     local annotate = false
+    local run_rules = false  -- --rules flag: run lint passes after check
     local files    = {}
 
     local i = 1
@@ -45,10 +46,20 @@ function M.main(argv)
         elseif argv[i] == "--annotate" then
             annotate = true
             i = i + 1
+        elseif argv[i] == "--rules" then
+            run_rules = true
+            i = i + 1
         else
             files[#files + 1] = argv[i]
             i = i + 1
         end
+    end
+
+    -- Load rule passes once when --rules is active.
+    local rules_mod
+    if run_rules then
+        rules_mod = require("lib.type.static.rules")
+        rules_mod.load_all()
     end
 
     -- Auto-discover lib/ when no files given (mirrors v1 behaviour).
@@ -142,7 +153,13 @@ function M.main(argv)
     local structured_parts = {}
 
     for _, filename in ipairs(files) do
-        local err_ctx = check_mod.check_file(filename)
+        local err_ctx, ctx = check_mod.check_file(filename)
+
+        -- Run lint rule passes when --rules is active and the check succeeded.
+        if run_rules and ctx then
+            rules_mod.run(ctx, err_ctx, filename, nil)
+        end
+
         local ne = #err_ctx.errors
         local nw = #err_ctx.warnings
         total_errors   = total_errors   + ne
