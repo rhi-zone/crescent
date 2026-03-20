@@ -7,7 +7,7 @@
 - [x] **`and` RHS not narrowed** — fixed 11cf377
 - [x] **Readonly not enforced through intersection** — fixed 0b40861
 - [x] **Literal table not assignable to indexer type** — fixed 0b40861
-- [ ] **Missing return detection** — annotated `-> string` function with only conditional return (one branch returns, other falls through) does not error. Requires control flow analysis (CFG). Dedicated session.
+- [x] **Missing return detection** — fixed; `is_definitely_returning` analysis in constrain.lua emits implicit nil C_RETURN for non-definitely-returning annotated functions.
 
 ## priorities (medium horizon)
 
@@ -57,18 +57,9 @@
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: access control design (see below), module-level LSP cache,
   soundness gap 3 (generic variance). See typechecker section below for full list.
-  - [ ] **Overload checking against body** — when a function has multiple `--:`
-    annotations (overloads), the checker should verify the body independently
-    against each declared signature during inference. Unlike TypeScript, which only
-    checks the implementation signature. This is a type system feature, not a lint
-    rule — belongs in the inference walk alongside function type checking.
-    Implementation: N inference passes over the same AST body, one per overload
-    signature, standard flow typing applies within each pass. Errors tagged with
-    which overload they came from.
-    Prerequisite: ann.lua currently keyes results by line (`results[line] = result`)
-    so multiple `--:` silently drop all but the last. Fix: accumulate into an array
-    when multiple `--:` appear consecutively before a declaration. Then constrain.lua
-    builds an intersection of function types and runs N body-check passes.
+  - [x] **Overload checking against body** — implemented: `collect_preceding_run` in
+    constrain.lua accumulates consecutive `--:` annotations into intersection types;
+    `check_body_against_intersection` runs N inference passes (one per overload member).
 
 - [ ] **Stdlib rewrites** — vendored packages currently in `lib/` violate the ownership
   rule (docs/stdlib-design.md). Each needs a fresh crescent-native rewrite before the
