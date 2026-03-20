@@ -98,9 +98,10 @@ local TAG_INTEGER  = defs.TAG_INTEGER
 local TAG_STRING   = defs.TAG_STRING
 local TAG_LITERAL  = defs.TAG_LITERAL
 local TAG_FUNCTION = defs.TAG_FUNCTION
-local TAG_TABLE    = defs.TAG_TABLE
-local TAG_UNION    = defs.TAG_UNION
-local TAG_VAR      = defs.TAG_VAR
+local TAG_TABLE        = defs.TAG_TABLE
+local TAG_UNION        = defs.TAG_UNION
+local TAG_INTERSECTION = defs.TAG_INTERSECTION
+local TAG_VAR          = defs.TAG_VAR
 local TAG_ROWVAR   = defs.TAG_ROWVAR
 local TAG_NAMED    = defs.TAG_NAMED
 local TAG_NOMINAL  = defs.TAG_NOMINAL
@@ -1705,6 +1706,23 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     local ot2 = ctx.types:get(obj_tid)
                     local new_t = ctx.types:get(new_tbl)
                     for k = 0, 6 do ot2.data[k] = new_t.data[k] end
+                end
+            elseif ot.tag == TAG_INTERSECTION then
+                -- Readonly check for fields accessed through an intersection type.
+                -- Search each member for the field; if any member declares it readonly,
+                -- the write is an error (readonly is preserved across intersection).
+                for j = ot.data[0], ot.data[0] + ot.data[1] - 1 do
+                    local mid = types_mod.find(ctx, ctx.lists:get(j))
+                    local mt = ctx.types:get(mid)
+                    if mt.tag == TAG_TABLE then
+                        local mfe = types_mod.table_field(ctx, mid, field_id)
+                        if mfe and band(mfe.flags, FLAG_READONLY) ~= 0 then
+                            local fname = intern_mod.get(ctx.pool, field_id) or "?"
+                            report(ctx, tn.line, tn.col, E.FIELD_READONLY,
+                                { field = fname })
+                            break
+                        end
+                    end
                 end
             end
         elseif tn.kind == NODE_INDEX_EXPR then

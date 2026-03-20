@@ -590,8 +590,38 @@ function M.unify(ctx, a, b)
                 if band(afe.flags, FLAG_OPAQUE_KEY) == 0 then
                     local bfe_match = types_mod.table_field(ctx, b, afe.name_id)
                     if not bfe_match then
+                        -- Before rejecting as excess, check if tb has an indexer that
+                        -- covers this field's key type. A numeric-named field ("1","2"...)
+                        -- is covered by a number/integer indexer; any named field is covered
+                        -- by a string indexer. Also verify the value type is assignable.
                         local fname = intern_mod.get(ctx.pool, afe.name_id) or "?"
-                        return false, "excess field '" .. fname .. "' not in target type"
+                        local covered = false
+                        local bis, bil = tb.data[2], tb.data[3]
+                        local j = bis
+                        while j < bis + bil - 1 do
+                            local bkt = ctx.types:get(find(ctx, ctx.lists:get(j)))
+                            local is_numeric_key = fname:match("^%d+$")
+                            local key_ok = false
+                            if is_numeric_key and (bkt.tag == TAG_NUMBER or bkt.tag == TAG_INTEGER) then
+                                key_ok = true
+                            elseif not is_numeric_key and bkt.tag == TAG_STRING then
+                                key_ok = true
+                            end
+                            if key_ok then
+                                local bv = find(ctx, ctx.lists:get(j + 1))
+                                local av = find(ctx, afe.type_id)
+                                local ok2, err2 = M.unify(ctx, av, bv)
+                                if ok2 then
+                                    covered = true; break
+                                else
+                                    return false, "field '" .. fname .. "': " .. (err2 or "type mismatch")
+                                end
+                            end
+                            j = j + 2
+                        end
+                        if not covered then
+                            return false, "excess field '" .. fname .. "' not in target type"
+                        end
                     end
                 end
             end

@@ -1509,23 +1509,32 @@ local x = strict_fn("oops")
 end)
 
 assert.describe("soundness: table with indexer type", function()
-    assert.it("number indexer (array) — BUG: literal table not assignable to indexer type", function()
-        -- BUG: The checker does not currently unify a literal table { "a", "b", "c" }
-        -- with an indexer type { [number]: string }. The literal is inferred as a
-        -- positional table, not an indexed table.
-        has_error([[
+    assert.it("number indexer (array) — literal table assignable to indexer type", function()
+        no_errors([[
 --: { [number]: string }
 local arr = { "a", "b", "c" }
-]], "cannot assign")
+]])
     end)
 
-    assert.it("string indexer (dictionary) — BUG: literal table not assignable to indexer type", function()
-        -- BUG: Same issue — { x = 1, y = 2 } is inferred as a named-field table,
-        -- not as { [string]: number }.
-        has_error([[
+    assert.it("string indexer (dictionary) — literal table assignable to indexer type", function()
+        no_errors([[
 --: { [string]: number }
 local dict = { x = 1, y = 2 }
-]], "cannot assign")
+]])
+    end)
+
+    assert.it("number indexer (array) — wrong value type fails", function()
+        has_error([[
+--: { [number]: string }
+local arr = { "a", 2 }
+]], "")
+    end)
+
+    assert.it("string indexer (dictionary) — wrong value type fails", function()
+        has_error([[
+--: { [string]: number }
+local dict = { x = 1, y = "oops" }
+]], "")
     end)
 end)
 
@@ -2205,16 +2214,14 @@ local y = t.name
 ]])
     end)
 
-    assert.it("writing to readonly field in intersection — BUG: not enforced", function()
-        -- BUG: The checker does not currently enforce readonly on fields accessed
-        -- through an intersection type. This is a soundness gap.
-        no_errors([[
+    assert.it("writing to readonly field in intersection is an error", function()
+        has_error([[
 --:: A = { readonly id: number }
 --:: B = { name: string }
 --: A & B
 local t = { id = 1, name = "test" }
 t.id = 2
-]])
+]], "readonly")
     end)
 end)
 
