@@ -663,25 +663,71 @@ end
 -- Annotation helpers
 -- ---------------------------------------------------------------------------
 
+-- Collect a run of consecutive preceding-line ANN_TYPE annotations ending at
+-- decl_line - 1 and walking backward. Returns a synthetic merged ANN_TYPE entry
+-- (intersection in the annotation arena) when there are multiple, the single entry
+-- as-is when there is exactly one, or nil when there are none.
+-- "Preceding-line" means lines strictly before the declaration line (not inline).
+local function collect_preceding_run(ctx, decl_line)
+    local results = ctx.ann.results
+    local consumed = ctx._ann_consumed
+    -- Scan backward from decl_line - 1 collecting consecutive ANN_TYPE entries.
+    local ann_lines = {}  -- lines found, nearest-to-decl first
+    local scan = decl_line - 1
+    while scan >= 1 do
+        local r = results[scan]
+        if r and r.kind == ANN_TYPE and not (consumed and consumed[scan]) then
+            ann_lines[#ann_lines + 1] = scan
+            scan = scan - 1
+        else
+            break
+        end
+    end
+    if #ann_lines == 0 then return nil end
+    if #ann_lines == 1 then
+        return results[ann_lines[1]]
+    end
+    -- Multiple consecutive preceding-line ANN_TYPE entries — merge into intersection.
+    -- Reverse ann_lines so we go top-to-bottom (natural declaration order).
+    local type_ids = {}
+    for i = #ann_lines, 1, -1 do
+        type_ids[#type_ids + 1] = results[ann_lines[i]].type_id
+    end
+    local inter_id = ctx.ann.make_intersection(type_ids)
+    return { kind = ANN_TYPE, type_id = inter_id }
+end
+
 local function get_ann(ctx, line)
     if not ctx.ann then return nil end
     local consumed = ctx._ann_consumed
+    -- Inline (end-of-line) annotation on the same line takes priority.
     local r = ctx.ann.results[line]
     if r and not (consumed and consumed[line]) then return r end
-    local r1 = ctx.ann.results[line - 1]
-    if r1 and not (consumed and consumed[line - 1]) then return r1 end
-    return nil
+    -- Preceding-line annotation(s): collect the run starting at line-1.
+    return collect_preceding_run(ctx, line)
 end
 
 local function consume_ann(ctx, line)
-    local r  = ctx.ann and ctx.ann.results[line]
-    local r1 = ctx.ann and ctx.ann.results[line - 1]
+    if not ctx.ann then return end
+    local r = ctx.ann.results[line]
     -- Only consume ANN_TYPE entries (not ANN_DECL, which are type-alias declarations).
-    if (r  and r.kind  == ANN_TYPE) or
-       (r1 and r1.kind == ANN_TYPE) then
+    if r and r.kind == ANN_TYPE then
         ctx._ann_consumed = ctx._ann_consumed or {}
-        if r  and r.kind  == ANN_TYPE then ctx._ann_consumed[line]     = true end
-        if r1 and r1.kind == ANN_TYPE then ctx._ann_consumed[line - 1] = true end
+        ctx._ann_consumed[line] = true
+        return
+    end
+    -- Consume any preceding-line run (walk backward from line-1).
+    local results = ctx.ann.results
+    local scan = line - 1
+    while scan >= 1 do
+        local r1 = results[scan]
+        if r1 and r1.kind == ANN_TYPE then
+            ctx._ann_consumed = ctx._ann_consumed or {}
+            ctx._ann_consumed[scan] = true
+            scan = scan - 1
+        else
+            break
+        end
     end
 end
 
@@ -1051,6 +1097,70 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     return fn_tid
 end
 
+-- Check a function body against each member of an intersection-of-functions type.
+-- For each TAG_FUNCTION member in intersection_tid, runs gen_function + solve in
+-- isolation, collecting errors. If any overload produces errors, re-emits them
+-- tagged with "overload N: <type> — <message>".
+-- Returns the intersection_tid so the caller can bind the variable to it.
+local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
+                                                intersection_tid, node_line, node_col)
+    local solve_mod = require("lib.type.static.solve")
+    local it = ctx.types:get(intersection_tid)
+    -- Collect TAG_FUNCTION members
+    local members = {}
+    for i = it.data[0], it.data[0] + it.data[1] - 1 do
+        local mid = types_mod.find(ctx, ctx.lists:get(i))
+        local mt = ctx.types:get(mid)
+        if mt.tag == TAG_FUNCTION then
+            members[#members + 1] = mid
+        end
+    end
+    -- If not all members are functions, fall back to no body check
+    if #members ~= it.data[1] then
+        return intersection_tid
+    end
+
+    local saved_err = ctx.err
+    for oi, member_tid in ipairs(members) do
+        -- Capture constraint list before this overload's gen_function
+        local cstart = #ctx.constraints
+
+        -- Use a fresh error context for this overload pass.
+        -- Share source_lines from the real err_ctx (read-only; no set_source needed).
+        local pass_err = errors_mod.new_ctx()
+        pass_err.source_lines = saved_err.source_lines
+        ctx.err = pass_err
+
+        gen_function(ctx, ps, pl, bs, bl, has_vararg, member_tid)
+
+        -- Extract only the constraints emitted by this gen_function call
+        local overload_constraints = {}
+        for ci = cstart + 1, #ctx.constraints do
+            overload_constraints[#overload_constraints + 1] = ctx.constraints[ci]
+        end
+        -- Truncate: these constraints belong to the overload check, not the main solve
+        for ci = #ctx.constraints, cstart + 1, -1 do
+            ctx.constraints[ci] = nil
+        end
+
+        -- Run solve on just the overload constraints (with pass_err active)
+        solve_mod.solve(ctx, overload_constraints)
+
+        ctx.err = saved_err
+
+        -- Re-emit any errors from this overload, tagged with which overload
+        if #pass_err.errors > 0 then
+            local type_str = types_mod.display(ctx, member_tid)
+            for _, e in ipairs(pass_err.errors) do
+                local tagged_msg = "overload " .. oi .. ": " .. type_str .. " — " .. e.msg
+                errors_mod.error(saved_err, ctx.filename, e.line, e.col, tagged_msg)
+            end
+        end
+    end
+
+    return intersection_tid
+end
+
 ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
@@ -1061,7 +1171,18 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
         local resolved = resolve_annotation_type(ctx, ann.type_id)
         ctx._ann_warn_line = 0
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
-        if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
+        if rt.tag == TAG_FUNCTION then
+            ann_fn_tid = resolved
+        elseif rt.tag == defs.TAG_INTERSECTION then
+            -- Intersection of functions: check body against each overload independently,
+            -- then return the intersection type itself as the expression result.
+            -- LOCAL_STMT will see rhs_tid = intersection_tid, ann_tid = intersection_tid,
+            -- emit a trivial C_SUB, and bind the variable to the intersection type.
+            local isect_tid = types_mod.find(ctx, resolved)
+            check_body_against_intersection(ctx, n.data[0], n.data[1], n.data[2], n.data[3],
+                has_vararg, isect_tid, n.line, n.col)
+            return isect_tid
+        end
     end
     return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid)
 end
@@ -1873,24 +1994,36 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
 
     local ann = get_ann(ctx, n.line)
     local ann_fn_tid = nil
+    local ann_isect_tid = nil  -- non-nil when annotation is an intersection of functions
     if ann and ann.kind == ANN_TYPE then
         ctx._ann_warn_line = n.line
         local resolved = resolve_annotation_type(ctx, ann.type_id)
         ctx._ann_warn_line = 0
         local rt = ctx.types:get(types_mod.find(ctx, resolved))
-        if rt.tag == TAG_FUNCTION then ann_fn_tid = resolved end
+        if rt.tag == TAG_FUNCTION then
+            ann_fn_tid = resolved
+        elseif rt.tag == defs.TAG_INTERSECTION then
+            -- Intersection of functions: check body against each overload independently.
+            -- The function name will be bound to the intersection type.
+            ann_isect_tid = types_mod.find(ctx, resolved)
+            check_body_against_intersection(ctx, n.data[1], n.data[2], n.data[3], n.data[4],
+                has_vararg, ann_isect_tid, n.line, n.col)
+        end
     end
-    local fn_tid = gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid)
+    local fn_tid = ann_isect_tid or
+        gen_function(ctx, n.data[1], n.data[2], n.data[3], n.data[4], has_vararg, ann_fn_tid)
 
     if name_n.kind == NODE_IDENTIFIER then
         local name_id = name_n.data[0]
         local existing = env_mod.lookup(ctx.scope, name_id)
-        if existing then
+        if existing and not ann_isect_tid then
             -- Mutate the prescan stub in-place: copy the real function's data fields so that
             -- any C_CALLABLE constraints inside the body (recursive calls) that already hold
             -- the stub type ID now resolve directly to the real function's param/return vars.
             -- This avoids a C_UNIFY chain that aliases the stub's return var with the real
             -- return var in a way that conflicts after solve_return widens the return type.
+            -- (Skipped when annotation is an intersection: the body was already checked
+            -- per-overload, so the prescan stub is just replaced by the intersection type.)
             local stub_t = ctx.types:get(existing)
             local real_t = ctx.types:get(fn_tid)
             if stub_t.tag == TAG_FUNCTION and real_t.tag == TAG_FUNCTION then

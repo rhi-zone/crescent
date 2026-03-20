@@ -6243,3 +6243,93 @@ local v = _G._VERSION
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Multiple --: annotations desugar to intersection type
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: multiple --: annotations → intersection type", function()
+    assert.it("single --: still works (no regression)", function()
+        no_errors([[
+--: (string) -> string
+local f
+]])
+    end)
+
+    assert.it("two consecutive --: before local produce intersection — no error on either overload", function()
+        no_errors([[
+--:: declare fn = ((string) -> string) & ((number) -> number)
+--: (string) -> string
+--: (number) -> number
+local f
+local a = fn("hello")
+local b = fn(42)
+]])
+    end)
+
+    assert.it("two consecutive --: before local produce intersection callable with first arg type", function()
+        no_errors([[
+--: (string) -> string
+--: (number) -> number
+local f
+-- f should accept string (first overload)
+--: string
+local x = f("hello")
+]])
+    end)
+
+    assert.it("two consecutive --: before local produce intersection callable with second arg type", function()
+        no_errors([[
+--: (string) -> string
+--: (number) -> number
+local f
+-- f should accept number (second overload)
+--: number
+local y = f(42)
+]])
+    end)
+
+    assert.it("wrong arg type fails against intersection of two function overloads", function()
+        has_error([[
+--: (string) -> string
+--: (number) -> number
+local f
+local z = f(true)
+]], "no matching overload")
+    end)
+
+    assert.it("three consecutive --: produce a three-member intersection", function()
+        no_errors([[
+--: (string) -> string
+--: (number) -> number
+--: (boolean) -> boolean
+local f
+--: string
+local a = f("hi")
+--: number
+local b = f(1)
+--: boolean
+local c = f(true)
+]])
+    end)
+
+    assert.it("non-consecutive --: are not merged", function()
+        -- Line gap between the two annotations: second one applies, first is ignored
+        no_errors([[
+--: (string) -> string
+
+--: (number) -> number
+local f
+]])
+        -- After the gap the only annotation is (number)->number.
+        -- Calling with a string should fail since the intersection was NOT formed.
+        has_error([[
+--: (string) -> string
+
+--: (number) -> number
+local f
+--: string
+local x = f("hello")
+]], "")
+    end)
+end)

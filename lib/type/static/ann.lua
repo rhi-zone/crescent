@@ -952,6 +952,16 @@ function M.parse_annotations(annotations, pool, filename)
         end
     end
 
+    -- make_intersection(type_ids): build an intersection node in the annotation arena
+    -- from a list of annotation-arena type IDs. Returns the new type ID.
+    local function make_intersection_ann(type_ids)
+        local ms, ml = flush_type_list(type_ids)
+        local inter = alloc_type(defs.TAG_INTERSECTION)
+        types:get(inter).data[0] = ms
+        types:get(inter).data[1] = ml
+        return inter
+    end
+
     return {
         types = types,
         fields = fields,
@@ -959,6 +969,7 @@ function M.parse_annotations(annotations, pool, filename)
         results = results,
         warnings = warnings,
         pool = pool,
+        make_intersection = make_intersection_ann,
     }
 end
 
