@@ -848,24 +848,11 @@ mod.poll = function(socket, flags, timeout)
 end
 
 local addrinfo_get_ip = function(self)
-	if self.addrinfo.ai_addr == nil then
-		return nil
-	end
-	local str = ffi.new("char[256]")
-	local addr = assert(socket.inet_ntop(AF.lookup[self.family], self.addrinfo.ai_addr.sa_data, str, ffi.sizeof(str)))
-	return ffi.string(addr)
+	return self.ip
 end
 
 local addrinfo_get_port = function(self)
-	if self.addrinfo.ai_addr == nil then
-		return nil
-	end
-	if self.family == "inet" then
-		return ffi.cast("struct sockaddr_in*", self.addrinfo.ai_addr).sin_port
-	elseif self.family == "inet6" then
-		return ffi.cast("struct sockaddr_in6*", self.addrinfo.ai_addr).sin6_port
-	end
-	return nil, "ljsocket.addrinfo_get_port: unknown family " .. tostring(self.family)
+	return self.port
 end
 
 local addrinfo_to_table = function(res, host, service)
@@ -879,7 +866,20 @@ local addrinfo_to_table = function(res, host, service)
 	info.socket_type = SOCK.reverse[res.ai_socktype]
 	info.protocol = IPPROTO.reverse[res.ai_protocol]
 	info.flags = flags_to_table(res.ai_flags, AI.lookup, bit.band)
-	info.addrinfo = res
+	-- Extract ip and port eagerly so the addrinfo pointer can be freed after
+	-- the linked-list walk without leaving dangling references.
+	if res.ai_addr ~= nil then
+		local str = ffi.new("char[256]")
+		local addr = socket.inet_ntop(AF.lookup[info.family], res.ai_addr.sa_data, str, ffi.sizeof(str))
+		if addr ~= nil then
+			info.ip = ffi.string(addr)
+		end
+		if info.family == "inet" then
+			info.port = ffi.cast("struct sockaddr_in*", res.ai_addr).sin_port
+		elseif info.family == "inet6" then
+			info.port = ffi.cast("struct sockaddr_in6*", res.ai_addr).sin6_port
+		end
+	end
 	info.get_ip = addrinfo_get_ip
 	info.get_port = addrinfo_get_port
 	return info
@@ -909,7 +909,7 @@ mod.get_address_info = function(data)
 		table.insert(tbl, addrinfo_to_table(res, data.host, data.service))
 		res = res.ai_next
 	end
-	--[[ffi.C.freeaddrinfo(out[0])]]
+	ffi.C.freeaddrinfo(out[0])
 	return tbl
 end
 
