@@ -1,6 +1,6 @@
 local ffi = require("ffi")
-local socket = require("dep.ljsocket")
-local tls = require("dep.tls")
+local socket = require("lib.ljsocket")
+local tls = require("lib.tls")
 local format = require("lib.http.format")
 
 local mod = {}

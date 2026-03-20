@@ -46,7 +46,7 @@ The first file found, if any, is loaded.
 
 -- some local definitions (used by the module term and/or by the editor
 
-local utf8 = require("dep.utf8")
+local utf8 = require("lib.encode.utf8")
 local ulen = utf8.len; local uoff = utf8.offset; local uchar = utf8.char; local ucodes = utf8.codes
 local format = string.format; local char = string.char; local rep = string.rep; local gmatch = string.gmatch
 local sub = string.sub

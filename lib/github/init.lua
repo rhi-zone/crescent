@@ -1,4 +1,4 @@
-local json_to_value = require("dep.lunajson").json_to_value
+local json_to_value = require("lib.format.json").json_to_value
 local http = require("lib.https.client")
 
 local mod = {}

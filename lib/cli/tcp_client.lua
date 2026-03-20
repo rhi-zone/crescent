@@ -3,7 +3,7 @@ local arg = arg --[[@type unknown[] ]]
 if pcall(debug.getlocal, 4, 1) then arg = { ... }
 else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.path end
 
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 local client = require("lib.tcp.client").client
 
 local color = os.getenv("color") == "1"

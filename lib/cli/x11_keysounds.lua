@@ -23,7 +23,7 @@ local read_all = function (path)
 	return ret
 end
 
-local config = assert(require("dep.lunajson").json_to_value(assert(read_all(sound_path .. "/config.json"))))
+local config = assert(require("lib.format.json").json_to_value(assert(read_all(sound_path .. "/config.json"))))
 package.loaded["dep.lunajson"] = nil
 
 local ffi = require("ffi")

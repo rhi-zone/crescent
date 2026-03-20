@@ -1,5 +1,5 @@
-local socket = require("dep.ljsocket")
-local epoll_ = require("dep.epoll")
+local socket = require("lib.ljsocket")
+local epoll_ = require("lib.epoll")
 
 local mod = {}
 

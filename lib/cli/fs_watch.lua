@@ -4,7 +4,7 @@ if pcall(debug.getlocal, 4, 1) then arg = { ... }
 else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.path end
 
 local ffi = require("ffi")
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 local inotify_mod = require("dep.inotify")
 local inotify = inotify_mod.new(epoll)
 local special_flags = {

@@ -4,7 +4,7 @@ if pcall(debug.getlocal, 4, 1) then arg = { ... }
 else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.path end
 
 local ffi = require("ffi")
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 local xlib = require("dep.xlib")
 local et = xlib.event_type
 local event_name = {}

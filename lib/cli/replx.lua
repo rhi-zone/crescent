@@ -7,7 +7,7 @@ else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.pat
 
 --[[consider adding inotify as an iterator, but it's async so idk how hard it will be]]
 
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 --[[@type fun(...: any)]]
 print = require("dep.pretty_print").pretty_print
 wrap = function (name, f)

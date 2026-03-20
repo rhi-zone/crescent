@@ -44,7 +44,7 @@ A buffer contains
 
 -- some local definitions (used by the module term and/or by the editor
 
-local utf8 = require("dep.utf8")
+local utf8 = require("lib.encode.utf8")
 local ulen = utf8.len
 local uchar = utf8.char
 local uoff = utf8.offset

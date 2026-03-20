@@ -1,4 +1,4 @@
-local socket = require("dep.ljsocket")
+local socket = require("lib.ljsocket")
 local format = require("lib.http.format")
 
 local mod = {}

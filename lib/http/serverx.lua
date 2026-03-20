@@ -6,7 +6,7 @@
 local socket = require("lib.socket.server")
 local ws = require("lib.websocket")
 local http = require("lib.http.format")
-local epoll_ = require("dep.epoll")
+local epoll_ = require("lib.epoll")
 
 local mod = {}
 

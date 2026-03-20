@@ -7,7 +7,7 @@ local whiskr_ = require("world.whiskr")
 
 local whiskr = assert(whiskr_.open(arg[1] or os.getenv("HOME") .. "/whiskr.db"))
 
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 
 local remove
 local done = false

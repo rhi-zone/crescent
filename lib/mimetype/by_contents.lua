@@ -495,7 +495,7 @@ mod.mimetype = function (buffer, pos)
 		local json_size = get_u32_le(pos + 12)
 		if #buffer >= pos + json_size + 16 then
 			local header = buffer:sub(pos + 16, pos + json_size + 15)
-			json_parse = json_parse or require("dep.lunajson").json_to_value
+			json_parse = json_parse or require("lib.format.json").json_to_value
 			local _, json = pcall(json_parse, header)
 			if json and json.files then return "asar", "application/x-asar" end
 		end

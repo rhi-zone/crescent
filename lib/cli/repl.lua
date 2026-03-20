@@ -5,7 +5,7 @@ else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.pat
 
 --[[@diagnostic disable: lowercase-global]]
 
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 --[[@type fun(...: any)]]
 print = require("dep.pretty_print").pretty_print
 

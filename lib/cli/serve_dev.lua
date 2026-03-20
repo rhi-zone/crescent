@@ -7,7 +7,7 @@ local package_whitelist = {} --[[@type table<string, boolean>]]
 --[[@diagnostic disable-next-line: lowercase-global]]
 register_ffi_module = function (name) package_whitelist[name] = true end
 --[[@diagnostic disable-next-line: lowercase-global]]
-epoll = require("dep.epoll").new()
+epoll = require("lib.epoll").new()
 DEV = true
 local rest = function (_, ...) return ... end
 local inotify_mod = require("dep.inotify")

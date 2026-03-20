@@ -1013,8 +1013,8 @@ mod.run = function(init_log)
 	if not mod.variables.ipc then
 		wl.wl_display_run(server[0].wl_display)
 	else
-		local epoll = require("dep.epoll").new()
-		value_to_json = require("dep.lunajson").value_to_json
+		local epoll = require("lib.epoll").new()
+		value_to_json = require("lib.format.json").value_to_json
 		epoll_running = true
 		local wl_fd = wl.wl_event_loop_get_fd(loop)
 		epoll:add(wl_fd, function()

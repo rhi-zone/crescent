@@ -1,5 +1,5 @@
 #!/usr/bin/env luajit
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 -- TODO: chatmud client needs json (lunajson)
 
 --- @type table<string, fun (write: fun (s: string))>

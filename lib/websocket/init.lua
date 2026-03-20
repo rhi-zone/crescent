@@ -2,8 +2,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local sha1 = require("dep.sha1").binary
-local to_base64 = require("dep.base64").encode
+local sha1 = require("lib.hash.sha1").binary
+local to_base64 = require("lib.encode.base64").encode
 local utf8 = require("lib.encode.utf8")
 
 local mod = {}

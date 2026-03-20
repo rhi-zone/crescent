@@ -2,8 +2,8 @@
 --[[@alias api_table_handler api_callback | table<string, api_callback|table<string, api_callback|table<string, api_callback|table<string, api_callback|api_table_handler>>>>]]
 local mod = {}
 
-local json_to_value = require("dep.lunajson").json_to_value
-local value_to_json = require("dep.lunajson").value_to_json
+local json_to_value = require("lib.format.json").json_to_value
+local value_to_json = require("lib.format.json").value_to_json
 
 --[[@param routes api_table_handler]]
 mod.router = function (routes)

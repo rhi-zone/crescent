@@ -11,7 +11,7 @@ local mod = {}
 --[[@param cb fun(msg: dns_message)]] --[[@param nameserver string]] --[[@param domain string]] --[[@param opcode? dns_opcode]] --[[@param type? dns_type]] --[[@param class? dns_class]] --[[@param epoll epoll?]]
 mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	local is_running = not epoll
-	epoll = epoll or require("dep.epoll").new()
+	epoll = epoll or require("lib.epoll").new()
 	--[[@diagnostic disable-next-line: cast-local-type]]
 	type = type or dns.type["*"]
 	class = class or dns.class.IN

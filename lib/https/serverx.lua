@@ -2,9 +2,9 @@
 -- IMPL
 local ffi = require("ffi")
 local socket = require("lib.socket.server")
-local tls = require("dep.tls")
+local tls = require("lib.tls")
 local http_server = require("lib.http.serverx")
-local epoll_ = require("dep.epoll")
+local epoll_ = require("lib.epoll")
 
 local mod = {}
 

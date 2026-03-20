@@ -3,8 +3,8 @@ local arg = arg --[[@type unknown[] ]]
 if pcall(debug.getlocal, 4, 1) then arg = { ... }
 else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.path end
 
-local epoll = require("dep.epoll").new()
-local json = require("dep.lunajson")
+local epoll = require("lib.epoll").new()
+local json = require("lib.format.json")
 
 --[[@type (fun(msg: websocket_message))?]]
 local send

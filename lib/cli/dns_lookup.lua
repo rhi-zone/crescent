@@ -6,7 +6,7 @@ else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.pat
 if #arg < 2 then print("usage: dns_lookup.lua <nameserver> <domain>"); os.exit(1) end
 local dns = require("lib.dns.format")
 local dns_pretty_print = require("lib.dns.pretty_print")
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 local pretty_print = require("dep.pretty_print").pretty_print
 require("lib.dns.tcp_client").client(function (msg)
 	for _, k in ipairs({ "questions", "answers", "nameservers", "additional" }) do

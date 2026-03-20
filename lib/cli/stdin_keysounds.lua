@@ -23,7 +23,7 @@ local read_all = function (path)
 	return ret
 end
 
-local config = assert( require("dep.lunajson").json_to_value(assert(read_all(sound_path .. "/config.json"))))
+local config = assert( require("lib.format.json").json_to_value(assert(read_all(sound_path .. "/config.json"))))
 package.loaded["dep.lunajson"] = nil
 
 local ffi = require("ffi")
@@ -66,7 +66,7 @@ local key_map = {
 	[104] = 57416, [109] = 57424, [102] = 57419, [107] = 57421, [111] = 57427,
 }
 
-local epoll = require("dep.epoll").new()
+local epoll = require("lib.epoll").new()
 
 --[[@diagnostic disable-next-line: param-type-mismatch]]
 epoll:add(0, function (data)
