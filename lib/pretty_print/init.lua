@@ -118,12 +118,15 @@ pretty_print_ = function(value, write, not_top_level, opts, seen)
 	pretty_printers[type(value)](value, write, seen)
 	if not not_top_level and not opts.no_trailing_newline then write("\n") end
 end
+--: (any, ((string) -> nil)?, boolean?, { no_trailing_newline: boolean?, no_print_nil: boolean? }?, { [any]: boolean }?) -> nil
 mod.pretty_print_ = pretty_print_
+--: (any) -> string
 mod.uneval = function(value)
 	local parts = {} --[[@type string[] ]]
 	local write = function(part) parts[parts + 1] = part end
 	pretty_print_(value, write, true)
 end
+--: (...any) -> nil
 mod.pretty_print = function(...)
 	local count = select("#", ...)
 	if count == 1 then

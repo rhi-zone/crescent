@@ -6,6 +6,7 @@ local mod = {}
 
 --[[https://github.com/ms-jpq/lua-async-await/blob/neo/README.md]]
 
+--: ((...any) -> any) -> (...any) -> ((any) -> nil) -> nil
 mod.futurify = function (fn)
 	return function (...)
 		local params = { ... }
@@ -19,6 +20,7 @@ mod.futurify = function (fn)
 	end
 end
 
+--: ((...any) -> any) -> (...any) -> () -> ((any) -> nil) -> nil
 mod.futurify_many = function (fn)
 	return function (...)
 		local params = { ... }
@@ -35,6 +37,7 @@ mod.futurify_many = function (fn)
 end
 
 --[[TODO: return yield() somehow?]]
+--: ((...any) -> any) -> (...any) -> ((any) -> nil) -> nil
 mod.async = function (fn)
 	return function (...)
 		local args = { ... }
@@ -55,8 +58,10 @@ mod.async = function (fn)
 	end
 end
 
+--: (((any) -> nil) -> nil) -> any
 mod.await = coroutine.yield
 
+--: (...((any) -> nil) -> nil) -> ...any
 mod.await_all = function(...)
 	local fns = { ... }
 	local vals = {}
@@ -74,6 +79,7 @@ mod.await_all = function(...)
 	end)
 end
 
+--: (any, any, any) -> (any, any) -> any, any, any
 mod.await_each = function (step, c, v)
 	return function (c2, v2)
 		local future = step(c2, v2)

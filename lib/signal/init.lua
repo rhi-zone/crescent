@@ -28,6 +28,7 @@ local SIG_UNBLOCK = 1
 local mod = {}
 
 -- Signal constants (Linux x86_64)
+--: number
 mod.SIGHUP  = 1
 mod.SIGINT  = 2
 mod.SIGQUIT = 3
@@ -49,8 +50,7 @@ mod.SIGTSTP = 20
 local callbacks = {} --[[@type table<integer, ffi.cdata*>]]
 
 --- Install a Lua function as a signal handler.
---[[@param signum integer]]
---[[@param fn fun(signum: integer)]]
+--: (number, (number) -> nil) -> boolean | nil, string?
 function mod.handle(signum, fn)
   -- Free previous callback for this signal if any
   local prev = callbacks[signum]
@@ -66,7 +66,7 @@ function mod.handle(signum, fn)
 end
 
 --- Ignore a signal.
---[[@param signum integer]]
+--: (number) -> boolean | nil, string?
 function mod.ignore(signum)
   local prev = callbacks[signum]
   local ret = ffi.C.signal(signum, SIG_IGN)
@@ -79,7 +79,7 @@ function mod.ignore(signum)
 end
 
 --- Reset a signal to its default handler.
---[[@param signum integer]]
+--: (number) -> boolean | nil, string?
 function mod.default(signum)
   local prev = callbacks[signum]
   local ret = ffi.C.signal(signum, SIG_DFL)
@@ -92,8 +92,7 @@ function mod.default(signum)
 end
 
 --- Send a signal to a process.
---[[@param pid integer]]
---[[@param signum integer]]
+--: (number, number) -> boolean | nil, string?
 function mod.kill(pid, signum)
   local ret = ffi.C.kill(pid, signum)
   if ret ~= 0 then return nil, "kill() failed" end
@@ -101,13 +100,13 @@ function mod.kill(pid, signum)
 end
 
 --- Get the current process ID.
---[[@return integer]]
+--: () -> number
 function mod.getpid()
   return ffi.C.getpid()
 end
 
 --- Block a signal.
---[[@param signum integer]]
+--: (number) -> boolean | nil, string?
 function mod.block(signum)
   local set = ffi.new("sigset_t")
   ffi.C.sigemptyset(set)
@@ -118,7 +117,7 @@ function mod.block(signum)
 end
 
 --- Unblock a signal.
---[[@param signum integer]]
+--: (number) -> boolean | nil, string?
 function mod.unblock(signum)
   local set = ffi.new("sigset_t")
   ffi.C.sigemptyset(set)

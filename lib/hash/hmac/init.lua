@@ -102,6 +102,7 @@ end
 -- key: HMAC key (any length)
 -- message: data to authenticate
 -- Returns: binary string (raw HMAC digest)
+--: ((string) -> string, number, string, string) -> string
 function M.compute(hash_fn, block_size, key, message)
 	-- Step 1: If key longer than block size, hash it.
 	if #key > block_size then
@@ -123,6 +124,7 @@ function M.compute(hash_fn, block_size, key, message)
 end
 
 --- HMAC-SHA256 returning raw binary.
+--: (string, string) -> string
 function M.sha256_binary(key, message)
 	local sha = get_sha256()
 	local function hash_bin(s)
@@ -132,17 +134,20 @@ function M.sha256_binary(key, message)
 end
 
 --- HMAC-SHA256 returning hex string.
+--: (string, string) -> string
 function M.sha256(key, message)
 	return binary_to_hex(M.sha256_binary(key, message))
 end
 
 --- HMAC-SHA1 returning raw binary.
+--: (string, string) -> string
 function M.sha1_binary(key, message)
 	local sha = get_sha1()
 	return M.compute(sha.binary, 64, key, message)
 end
 
 --- HMAC-SHA1 returning hex string.
+--: (string, string) -> string
 function M.sha1(key, message)
 	return binary_to_hex(M.sha1_binary(key, message))
 end
