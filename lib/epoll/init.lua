@@ -89,6 +89,7 @@ local epoll = {}
 epoll.__index = epoll
 mod.epoll = epoll
 
+--: (epoll) -> epoll
 epoll.new = function (self)
 	--[[@class epoll]]
 	local obj = {
@@ -102,6 +103,7 @@ epoll.new = function (self)
 }
 	return setmetatable(obj, self)
 end
+--: () -> epoll
 mod.new = function () return epoll:new() end
 
 --[[@param fd fd_c]] --[[@param read epoll_read]]
@@ -126,6 +128,7 @@ local remove_fd = function (self, fd)
 	end
 end
 
+--: (epoll, number, (string) -> nil, (() -> nil)?, boolean?) -> (((string) -> nil)?, (() -> nil)?, string?)
 --[[@return epoll_write? write, epoll_remove? remove, string? err]]
 --[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]] --[[@param weak boolean? if false, self.count is not incremented]]
 epoll.add = function (self, fd, read, close, weak)
@@ -161,6 +164,7 @@ epoll.add = function (self, fd, read, close, weak)
 end
 mod.add = epoll.add
 
+--: (epoll, number, (string) -> nil, (() -> nil)?) -> (((string) -> nil)?, (() -> nil)?, string?)
 --[[@return epoll_write? write, epoll_remove? remove, string? error]]
 --[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]]
 epoll.modify = function (self, fd, read, close)
@@ -173,6 +177,7 @@ epoll.modify = function (self, fd, read, close)
 	return rets.write, rets.remove
 end
 
+--: (epoll) -> nil
 epoll.wait = function (self)
 	local events = epoll_event() --[[@type epoll_event[] ]]
 	epoll_ffi.epoll_wait(self.fd, events, 1, -1)
@@ -201,6 +206,7 @@ epoll.wait = function (self)
 end
 mod.wait = epoll.wait
 
+--: (epoll) -> nil
 --[[loops forever]]
 epoll.loop = function (self) while self.count > 0 do self:wait() end end
 mod.loop = epoll.loop

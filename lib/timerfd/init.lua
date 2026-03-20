@@ -71,6 +71,7 @@ else
 
 	local timespec0 = timespec(0, 0)
 
+	--: (epoll, number, () -> nil) -> (() -> nil)
 	--[[@return fun() clear_timeout]]
 	--[[@param self epoll]] --[[@param ms integer]] 	--[[@param cb fun()]]
 	mod.set_timeout = function (self, ms, cb)
@@ -93,6 +94,7 @@ else
 		end
 	end
 
+	--: (epoll, number, () -> nil) -> (() -> nil)
 	--[[@return fun() clear_interval]]
 	--[[@param self epoll]] --[[@param ms integer]] --[[@param cb fun()]]
 	mod.set_interval = function (self, ms, cb)
