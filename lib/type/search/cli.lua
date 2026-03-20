@@ -61,7 +61,8 @@ if #matches == 0 then
 else
     print(string.format("Found %d match(es) for: %s\n", #matches, query_str))
     for _, m in ipairs(matches) do
-        local marker = m.exact and "=" or "~"
+        local markers = { [3] = "=", [2] = "<", [1] = ">" }
+        local marker = markers[m.score] or "?"
         print(string.format("  [%s] %s.%s", marker, m.file, m.name))
         print(string.format("      %s", m.type))
     end

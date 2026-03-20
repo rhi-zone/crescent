@@ -133,6 +133,58 @@ describe("search.query", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Arity pre-filtering
+-- ---------------------------------------------------------------------------
+describe("search.query arity filtering", function()
+    it("skips candidates with wrong arity", function()
+        local index = {
+            { name = "unary",  file = "g.lua", type = "(string) -> string" },
+            { name = "binary", file = "g.lua", type = "(string, string) -> string" },
+            { name = "nullary", file = "g.lua", type = "() -> string" },
+        }
+        local matches = search.query("(string) -> string", index)
+        -- binary and nullary should be filtered out by arity
+        for _, m in ipairs(matches) do
+            T.ok(m.name ~= "binary", "binary should be filtered by arity")
+            T.ok(m.name ~= "nullary", "nullary should be filtered by arity")
+        end
+    end)
+
+    it("does not filter non-function queries", function()
+        local index = {
+            { name = "x", file = "h.lua", type = "string" },
+            { name = "y", file = "h.lua", type = "number" },
+        }
+        local matches = search.query("string", index)
+        T.ok(#matches >= 1, "non-function query should still find matches")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Scoring
+-- ---------------------------------------------------------------------------
+describe("search.query scoring", function()
+    it("exact matches get score 3", function()
+        local index = {
+            { name = "f", file = "i.lua", type = "(string) -> string" },
+        }
+        local matches = search.query("(string) -> string", index)
+        T.ok(#matches >= 1, "should find match")
+        T.eq(matches[1].score, 3)
+    end)
+
+    it("limit option caps results", function()
+        local index = {
+            { name = "a", file = "j.lua", type = "(string) -> string" },
+            { name = "b", file = "j.lua", type = "(string) -> string" },
+            { name = "c", file = "j.lua", type = "(string) -> string" },
+        }
+        local matches = search.query("(string) -> string", index, { limit = 2 })
+        T.ok(#matches <= 2, "limit should cap results")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Integration test with real modules (if available)
 -- ---------------------------------------------------------------------------
 describe("search.build_index (real files)", function()
@@ -152,9 +204,8 @@ describe("search.build_index (real files)", function()
             "lib/encode/base64/init.lua",
         })
         -- base64 is unannotated, so the typechecker infers structural types
-        -- like ({ byte: _ }, _) -> string. Query with a compatible structural type.
-        -- Use any to match broadly.
-        local matches = search.query("(any) -> string", index)
+        -- like ({ byte: _ }, _) -> string. Query with a compatible 2-arg type.
+        local matches = search.query("(any, any) -> string", index)
         T.ok(#matches >= 1, "should find functions returning string in base64")
         local names = {}
         for _, m in ipairs(matches) do names[m.name] = true end

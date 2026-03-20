@@ -115,68 +115,132 @@ M.build_index_from_docs = function(doc_results)
 end
 
 -- ---------------------------------------------------------------------------
+-- Arity extraction (for pre-filtering)
+-- ---------------------------------------------------------------------------
+-- Extract param count from a type string like "(a, b, c) -> d".
+-- Returns nil if the type is not a function.
+local function extract_arity(type_str)
+    local params = type_str:match("^%((.-)%)%s*%->")
+    if not params then return nil end
+    if params:match("^%s*$") then return 0 end
+    local count = 1
+    -- Count commas not inside nested parens/braces/angles
+    local depth = 0
+    for i = 1, #params do
+        local c = params:byte(i)
+        if c == 40 or c == 123 or c == 60 then depth = depth + 1     -- ( { <
+        elseif c == 41 or c == 125 or c == 62 then depth = depth - 1  -- ) } >
+        elseif c == 44 and depth == 0 then count = count + 1          -- ,
+        end
+    end
+    return count
+end
+
+-- ---------------------------------------------------------------------------
+-- Scope lookup helper
+-- ---------------------------------------------------------------------------
+local function lookup_binding(ctx, name_id)
+    local s = ctx.scope
+    while s do
+        local tid = s.bindings[name_id]
+        if tid then return tid end
+        s = s.parent
+    end
+    return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Query
 -- ---------------------------------------------------------------------------
+local BATCH_SIZE = 50
 
 --- Query the index for exports matching a type signature.
 --- query_type_str: a type annotation string, e.g. "(string) -> string"
 --- index: array of { name, file, type } as returned by build_index.
---- Returns array of { name, file, type, exact } sorted by relevance.
-M.query = function(query_type_str, index)
-    local matches = {}
+--- opts: optional table { limit = N } (default: no limit)
+--- Returns array of { name, file, type, score } sorted by relevance.
+--- Score: 3 = exact (both directions), 2 = candidate assignable to query,
+---        1 = query assignable to candidate (supertype match).
+M.query = function(query_type_str, index, opts)
+    opts = opts or {}
+    local limit = opts.limit
+
+    -- Pre-filter by arity if query is a function type
+    local query_arity = extract_arity(query_type_str)
+    local candidates = {}
     for _, entry in ipairs(index) do
-        -- Create a mini source with the query type and candidate type
-        -- as annotated locals. Typecheck it, then try_unify.
-        local src = string.format(
-            "--: %s\nlocal _q\n--: %s\nlocal _c\n",
-            query_type_str, entry.type)
+        if query_arity then
+            local cand_arity = extract_arity(entry.type)
+            -- Skip non-functions or wrong arity
+            if cand_arity and cand_arity ~= query_arity then
+                goto skip
+            end
+        end
+        candidates[#candidates + 1] = entry
+        ::skip::
+    end
+
+    -- Process in batches to reduce check_string overhead
+    local matches = {}
+    for batch_start = 1, #candidates, BATCH_SIZE do
+        local batch_end = math.min(batch_start + BATCH_SIZE - 1, #candidates)
+        local batch_count = batch_end - batch_start + 1
+
+        -- Build a single source with query + all candidates in this batch
+        local lines = { "--: " .. query_type_str, "local _q" }
+        for i = 0, batch_count - 1 do
+            local entry = candidates[batch_start + i]
+            lines[#lines + 1] = "--: " .. entry.type
+            lines[#lines + 1] = "local _c" .. i
+        end
+        local src = table.concat(lines, "\n") .. "\n"
+
         check_mod.clear_cache()
-        local err_ctx, ctx = check_mod.check_string(src, "_search.lua")
+        local _, ctx = check_mod.check_string(src, "_search.lua")
         if ctx then
-            local q_name = intern_mod.intern(ctx.pool, "_q")
-            local c_name = intern_mod.intern(ctx.pool, "_c")
-            -- Walk scope chain to find bindings
-            local q_tid = ctx.scope and ctx.scope.bindings[q_name]
-            local c_tid = ctx.scope and ctx.scope.bindings[c_name]
-            -- Also check def_sites for variables that may have been bound
-            -- in a child scope (module-level locals end up in root scope)
-            if not q_tid and ctx.def_sites and ctx.def_sites[q_name] then
-                -- Try parent scopes
-                local s = ctx.scope
-                while s and not q_tid do
-                    q_tid = s.bindings[q_name]
-                    s = s.parent
-                end
-            end
-            if not c_tid and ctx.def_sites and ctx.def_sites[c_name] then
-                local s = ctx.scope
-                while s and not c_tid do
-                    c_tid = s.bindings[c_name]
-                    s = s.parent
-                end
-            end
-            if q_tid and c_tid then
+            local q_nid = intern_mod.intern(ctx.pool, "_q")
+            local q_tid = lookup_binding(ctx, q_nid)
+            if q_tid then
                 q_tid = types_mod.find(ctx, q_tid)
-                c_tid = types_mod.find(ctx, c_tid)
-                -- Check both directions for flexibility
-                local forward  = unify_mod.try_unify(ctx, c_tid, q_tid)
-                local backward = unify_mod.try_unify(ctx, q_tid, c_tid)
-                if forward or backward then
-                    matches[#matches + 1] = {
-                        name  = entry.name,
-                        file  = entry.file,
-                        type  = entry.type,
-                        exact = (forward and backward) and true or false,
-                    }
+                for i = 0, batch_count - 1 do
+                    local c_nid = intern_mod.intern(ctx.pool, "_c" .. i)
+                    local c_tid = lookup_binding(ctx, c_nid)
+                    if c_tid then
+                        c_tid = types_mod.find(ctx, c_tid)
+                        local forward  = unify_mod.try_unify(ctx, c_tid, q_tid)
+                        local backward = unify_mod.try_unify(ctx, q_tid, c_tid)
+                        if forward or backward then
+                            local score = (forward and backward) and 3
+                                       or forward and 2
+                                       or 1
+                            local entry = candidates[batch_start + i]
+                            matches[#matches + 1] = {
+                                name  = entry.name,
+                                file  = entry.file,
+                                type  = entry.type,
+                                score = score,
+                                exact = score == 3,
+                            }
+                        end
+                    end
                 end
             end
         end
     end
-    -- Sort: exact matches first, then by name
+
+    -- Sort: highest score first, then by name
     table.sort(matches, function(a, b)
-        if a.exact ~= b.exact then return a.exact end
+        if a.score ~= b.score then return a.score > b.score end
         return a.name < b.name
     end)
+
+    -- Apply limit
+    if limit and #matches > limit then
+        local trimmed = {}
+        for i = 1, limit do trimmed[i] = matches[i] end
+        matches = trimmed
+    end
+
     return matches
 end
 
