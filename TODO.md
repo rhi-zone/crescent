@@ -48,6 +48,11 @@
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: access control design (see below), module-level LSP cache,
   soundness gap 3 (generic variance). See typechecker section below for full list.
+  - [ ] **Overload checking against body** — when a function has multiple `--:`
+    annotations (overloads), the checker should verify the body independently
+    against each declared signature during inference. Unlike TypeScript, which only
+    checks the implementation signature. This is a type system feature, not a lint
+    rule — belongs in the inference walk alongside function type checking.
 
 - [ ] **Stdlib rewrites** — vendored packages currently in `lib/` violate the ownership
   rule (docs/stdlib-design.md). Each needs a fresh crescent-native rewrite before the

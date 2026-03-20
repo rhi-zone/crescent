@@ -907,11 +907,13 @@ CLI: `--rules` flag (default: on for lib/ files, off otherwise).
 
 ### Phase 3 — Type-aware passes
 
-- `any_escape` — `any` appearing in a `--:` annotation
+- `any_escape` — already a core diagnostic (E.EXPLICIT_ANY), not a separate pass
 - `predicate_return` — `is_*/has_*` name but inferred return type is not boolean
-- `overloads` — multiple `--:` annotations on one declaration; verify each
-  overload signature independently against the function body (unlike TypeScript,
-  which only checks the implementation signature)
+
+Note: overload checking is **not** a lint pass — it belongs in the type checker
+core. When a function has multiple `--:` annotations, the checker should verify
+the body independently against each declared signature during inference, not as a
+post-pass. This is a type system feature tracked separately in TODO.md.
 
 ### Phase 4 — Dead code (needs reference graph)
 
