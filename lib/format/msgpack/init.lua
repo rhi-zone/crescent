@@ -289,6 +289,7 @@ encode = function(v)
   end
 end
 
+--: (nil | boolean | number | string | table) -> string
 M.encode = encode
 
 ----------------------------------------------------------------
@@ -605,6 +606,7 @@ decode = function(s, pos)
   return nil, "msgpack: unknown format byte 0x" .. string.format("%02x", b)
 end
 
+--: (string, number?) -> any, number | string
 M.decode = decode
 
 return M

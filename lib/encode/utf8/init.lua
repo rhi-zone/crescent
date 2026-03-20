@@ -7,8 +7,10 @@ local byte = string.byte; local char = string.char
 
 local mod = {}
 
+--: string
 mod.charpattern = "[\0-\x7F\xC2-\xF4][\x80-\xBF]*"
 
+--: (...number) -> string
 --[[@param ... integer]] --[[@return string encoded]]
 mod.char = function (...)
 	local parts = {}
@@ -30,6 +32,7 @@ local high_nibble_to_length = {
 local length_to_signifier = { 0, 0xc0, 0xe0, 0xf0 }
 local length_to_mask = { 0, 0x1f, 0xf, 0x7 }
 
+--: (string) -> boolean
 --[[@return boolean]]
 --[[@param bytes string]]
 mod.is_valid = function (bytes)
@@ -56,6 +59,7 @@ mod.is_valid = function (bytes)
 	return remain == 0
 end
 
+--: (string, number?, number?) -> number | nil, number?
 --[[@param s string]] --[[@param i? integer]] --[[@param j? integer]]
 mod.len = function (s, i, j)
 	i = i or 1
@@ -84,6 +88,7 @@ mod.len = function (s, i, j)
 	return len
 end
 
+--: (string, number?, number?) -> ...number
 --[[@param s string]] --[[@param i? integer]] --[[@param j? integer]]
 mod.codepoint = function (s, i, j)
 	i = i or 1
@@ -129,6 +134,7 @@ local codes_iter = function (s, p)
 	return p, c
 end
 
+--: (string) -> (fun(s: string, p: number?): number?, number?), string
 --[[returns an iterator that returns `p` (the start index of the current character)]]
 --[[and `c` (the codepoint of the current character)]]
 --[[@param s string]]
@@ -136,6 +142,7 @@ mod.codes = function (s)
 	return codes_iter, s
 end
 
+--: (string, number, number?) -> number
 --[[finds the index of the start of the character `n` characters away from .  ]]
 --[[`n` may be negative.  ]]
 --[[`i` is 1 if `n>0`; `#s+1` if `n<0`.  ]]

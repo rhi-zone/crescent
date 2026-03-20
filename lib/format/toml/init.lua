@@ -956,6 +956,7 @@ local function path_to_string(keys)
   return table.concat(parts, "\0")
 end
 
+--: (string) -> table | nil, string | nil
 --- Decode a TOML string into a Lua table.
 -- @param str string: TOML input
 -- @return table|nil: parsed result, or nil on error
