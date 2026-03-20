@@ -1,6 +1,6 @@
 -- lib/doc/cli.lua
 -- CLI entry point for the docgen tool.
--- Usage: luajit lib/doc/cli.lua [--format json|text|markdown] [--package <dir>] <file>...
+-- Usage: luajit lib/doc/cli.lua [--format json|text|markdown|html] [--package <dir>] <file>...
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -33,7 +33,7 @@ while i <= #arg do
 end
 
 if #files == 0 and not pkg_dir then
-    io.stderr:write("usage: luajit lib/doc/cli.lua [--format json|text|markdown] [--package <dir>] <file>...\n")
+    io.stderr:write("usage: luajit lib/doc/cli.lua [--format json|text|markdown|html] [--package <dir>] <file>...\n")
     os.exit(1)
 end
 
@@ -57,7 +57,9 @@ for _, filename in ipairs(files) do
     end
 end
 
-if format == "markdown" then
+if format == "html" then
+    io.write(doc.format_html(results))
+elseif format == "markdown" then
     io.write(doc.format_markdown(results))
 elseif format == "text" then
     for _, result in ipairs(results) do

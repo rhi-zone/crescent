@@ -282,6 +282,122 @@ return M
 end)
 
 -- ---------------------------------------------------------------------------
+-- Test: HTML output
+-- ---------------------------------------------------------------------------
+T.describe("docgen: HTML output", function()
+    T.it("produces valid HTML with doctype and structure", function()
+        local source = [[
+local M = {}
+--- Add two numbers.
+M.add = function(a, b) return a + b end
+M.version = "1.0"
+return M
+]]
+        local result = doc.generate_string(source, "html_test.lua")
+        T.ok(result, "result should not be nil")
+        local html = doc.format_html(result)
+        T.ok(html:find("<!DOCTYPE html>", 1, true), "should start with DOCTYPE")
+        T.ok(html:find("<html", 1, true), "should have html tag")
+        T.ok(html:find("</html>", 1, true), "should close html tag")
+        T.ok(html:find("<head>", 1, true) or html:find("<head ", 1, true), "should have head")
+        T.ok(html:find("<body>", 1, true), "should have body")
+        T.ok(html:find("</body>", 1, true), "should close body")
+    end)
+
+    T.it("contains export names and type signatures", function()
+        local source = [[
+local M = {}
+--- Add two numbers.
+M.add = function(a, b) return a + b end
+M.version = "1.0"
+return M
+]]
+        local result = doc.generate_string(source, "html_test.lua")
+        T.ok(result, "result should not be nil")
+        local html = doc.format_html(result)
+        T.ok(html:find(">add<", 1, true), "should contain export name 'add'")
+        T.ok(html:find(">version<", 1, true), "should contain export name 'version'")
+        T.ok(html:find("<pre>", 1, true), "should have code blocks for type signatures")
+        T.ok(html:find("Add two numbers", 1, true), "should include doc comment")
+    end)
+
+    T.it("includes inline CSS", function()
+        local source = [[
+local M = {}
+M.x = 1
+return M
+]]
+        local result = doc.generate_string(source, "css_test.lua")
+        T.ok(result, "result should not be nil")
+        local html = doc.format_html(result)
+        T.ok(html:find("<style>", 1, true), "should have inline style tag")
+        T.ok(html:find("</style>", 1, true), "should close style tag")
+    end)
+
+    T.it("escapes HTML special characters", function()
+        local source = [[
+local M = {}
+--- Returns a<b result & more.
+M.compare = function(a, b) return a < b end
+return M
+]]
+        local result = doc.generate_string(source, "escape_test.lua")
+        T.ok(result, "result should not be nil")
+        local html = doc.format_html(result)
+        T.ok(html:find("&amp;", 1, true), "should escape & in doc comment")
+        T.ok(html:find("&lt;", 1, true), "should escape < in doc or type")
+    end)
+
+    T.it("handles empty exports", function()
+        local source = [[
+local M = {}
+return M
+]]
+        local result = doc.generate_string(source, "empty.lua")
+        T.ok(result, "result should not be nil")
+        local html = doc.format_html(result)
+        T.ok(html:find("no exports", 1, true), "should show no exports message")
+    end)
+
+    T.it("handles multiple files as sections", function()
+        local src1 = [[
+local M = {}
+M.a = 1
+return M
+]]
+        local src2 = [[
+local M = {}
+M.b = 2
+return M
+]]
+        local r1 = doc.generate_string(src1, "mod_a.lua")
+        local r2 = doc.generate_string(src2, "mod_b.lua")
+        T.ok(r1 and r2, "both results should not be nil")
+        local html = doc.format_html({ r1, r2 })
+        T.ok(html:find("mod_a.lua", 1, true), "should contain first module name")
+        T.ok(html:find("mod_b.lua", 1, true), "should contain second module name")
+        -- Should have two <section> tags
+        local count = 0
+        for _ in html:gmatch("<section>") do count = count + 1 end
+        T.eq(count, 2, "should have two sections")
+    end)
+
+    T.it("includes line references", function()
+        local source = [[
+local M = {}
+--- A function.
+M.foo = function() end
+return M
+]]
+        local result = doc.generate_string(source, "lineref.lua")
+        T.ok(result, "result should not be nil")
+        local html = doc.format_html(result)
+        T.ok(html:find("line-ref", 1, true), "should have line reference class")
+        T.ok(html:find("line ", 1, true), "should have line number text")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Test: module with no return (no exports from return)
 -- ---------------------------------------------------------------------------
 T.describe("docgen: module with no return", function()

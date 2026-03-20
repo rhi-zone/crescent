@@ -318,6 +318,60 @@ M.generate_package = function(dir)
     return results
 end
 
+--- Escape HTML special characters.
+local function html_escape(s)
+    return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
+end
+
+--- Format a doc result (or array of results) as a self-contained HTML page.
+M.format_html = function(results)
+    -- Accept single result or array
+    if results.file then results = { results } end
+    local out = {}
+    out[#out + 1] = '<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">'
+    out[#out + 1] = '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    -- Title: first file or generic
+    local title = #results == 1 and html_escape(results[1].file) or "API Documentation"
+    out[#out + 1] = '<title>' .. title .. '</title>'
+    out[#out + 1] = '<style>'
+    out[#out + 1] = [[*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;line-height:1.6;max-width:52rem;margin:0 auto;padding:1rem 1.5rem;color:#1a1a1a;background:#fff}
+h1{font-size:1.8rem;margin:1.5rem 0 1rem;border-bottom:2px solid #e0e0e0;padding-bottom:0.3rem}
+h2{font-size:1.3rem;margin:1.2rem 0 0.4rem}
+pre{background:#1e1e2e;color:#cdd6f4;padding:0.8rem 1rem;border-radius:6px;overflow-x:auto;font-size:0.9rem;line-height:1.4;margin:0.4rem 0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+p{margin:0.3rem 0 0.6rem}
+.doc{color:#444}
+.line-ref{font-size:0.8rem;color:#888;margin-top:0.2rem}
+.export{margin-bottom:1.2rem;padding-bottom:0.8rem;border-bottom:1px solid #eee}
+.no-exports{color:#888;font-style:italic}
+section{margin-bottom:2rem}]]
+    out[#out + 1] = '</style></head><body>'
+    for _, result in ipairs(results) do
+        out[#out + 1] = '<section>'
+        out[#out + 1] = '<h1>' .. html_escape(result.file) .. '</h1>'
+        if #result.exports == 0 then
+            out[#out + 1] = '<p class="no-exports">(no exports)</p>'
+        else
+            for _, exp in ipairs(result.exports) do
+                out[#out + 1] = '<div class="export">'
+                out[#out + 1] = '<h2>' .. html_escape(exp.name) .. '</h2>'
+                out[#out + 1] = '<pre><code>' .. html_escape(exp.type) .. '</code></pre>'
+                if exp.doc then
+                    out[#out + 1] = '<p class="doc">' .. html_escape(exp.doc) .. '</p>'
+                end
+                if exp.line then
+                    out[#out + 1] = '<p class="line-ref">line ' .. exp.line .. '</p>'
+                end
+                out[#out + 1] = '</div>'
+            end
+        end
+        out[#out + 1] = '</section>'
+    end
+    out[#out + 1] = '</body></html>'
+    return table.concat(out, "\n")
+end
+
 --- Format a doc result (or array of results) as Markdown.
 M.format_markdown = function(results)
     -- Accept single result or array
