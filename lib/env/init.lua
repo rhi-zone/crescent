@@ -20,8 +20,10 @@ local env_iter = function (_, i)
 end
 
 --[[thinnest possible wrapper over `env`]]
+--: () -> (fun(any, integer): integer, string), nil, integer
 mod.env_stateless = function ()	return env_iter, nil, -1 end
 
+--: () -> { [string]: string }
 mod.env = function ()
 	local env = {}
 	while true do

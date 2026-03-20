@@ -5,6 +5,8 @@ end
 local dir_list = require("lib.fs.dir_list")
 
 return {
+	--: (string?) -> fun(): file_info | nil, string?
 	dir_list = dir_list.dir_list,
+	--: (string?) -> file_info | nil, string?
 	dir_info = dir_list.dir_info,
 }

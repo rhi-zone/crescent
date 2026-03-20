@@ -13,6 +13,7 @@ local mod = {}
 --[[resolve path segments textually (eliminates `.` and `..`)]]
 --[[@param base string]]
 --[[@param path string]]
+--: (string, string) -> string
 mod.resolve = function (base, path)
 	base = base:gsub("/$", "")
 	--[[@type string]]
@@ -32,6 +33,7 @@ end
 --[[resolve path using the OS (follows symlinks, returns canonical path)]]
 --[[@param path string]]
 --[[@return string? resolved]]
+--: (string) -> string?
 mod.realpath = function (path)
 	local buf = ffi.C.realpath(path, nil)
 	if buf == nil then return nil end
@@ -44,6 +46,7 @@ end
 --[[@param base string]]
 --[[@param path string]]
 --[[@return string? resolved]]
+--: (string, string) -> string?
 mod.safe_resolve = function (base, path)
 	local textual = mod.resolve(base, path)
 	local real_base = mod.realpath(base)

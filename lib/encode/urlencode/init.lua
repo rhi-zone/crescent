@@ -8,6 +8,7 @@ local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b
 
 --[[converts from string to urlencode]]
 --[[@param string string]]
+--: (string) -> string
 mod.string_to_urlencode = function (string)
 	-- FIXME
 	return string:gsub("[^%w-._~:%[%]@!$'%(%)*+,;=]", function (char)
@@ -18,6 +19,7 @@ end
 
 --[[converts from urlencode to string]]
 --[[@param urlencoded string]]
+--: (string) -> string
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
 	return (urlencoded:gsub("%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(tonumber(code, 16)) end))

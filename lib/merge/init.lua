@@ -8,6 +8,7 @@ local mod = {}
 --[[@generic t]]
 --[[@param ... t]]
 --[[@return t]]
+--: (...table) -> table
 mod.merge = function (...)
 	local ret = {}
 	local next_i = 1

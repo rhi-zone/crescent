@@ -24,6 +24,7 @@ if jit.os == "Windows" then
 
 	local time = ffi.new("FILETIME[1]") --[[@type ptr_c<win32_filetime_c>}]]
 
+	--: () -> number
 	mod.time = function ()
 		time_ffi.GetSystemTimeAsFileTime(time)
 		return tonumber((time[0].dwHighDateTime * 0x100000000ULL + time[0].dwLowDateTime) / 10000000ULL - 11644473600ULL)
@@ -57,6 +58,7 @@ else
 
 	local time = ffi.new("struct timeval [1]") --[[@type ptr_c<timeval_c>]]
 
+	--: () -> number
 	mod.time = function ()
 		time_ffi.gettimeofday(time, nil)
 		return tonumber(time[0].tv_sec) + tonumber(time[0].tv_usec) / 1000000
