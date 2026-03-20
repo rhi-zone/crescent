@@ -79,6 +79,14 @@ Packages that belong in a general-purpose stdlib. Bring to quality bar.
 - `dynamic_library` — needs tests
 - `ffi_unload` — tiny utility
 
+**Functional programming:**
+- `fp/` — 21 subpackages: typeclasses (Mappable, Applicable, Chainable, Foldable,
+  Traversable, Semigroup, Monoid, etc.), data types (Maybe, Either, Fn), optics
+  (lens, prism, iso, traversal), ADT constructors. Designed to stress-test the
+  typechecker's HKT and constraint support — see `docs/fp-design.md` and
+  `docs/typeclass-design.md`. 18 test files, 402 assertions. Needs root `init.lua`
+  and crescent-style type annotations.
+
 **Missing (to build):**
 - `process` — subprocess spawn/pipes/wait
 - `signal` — POSIX signal handling
@@ -134,9 +142,8 @@ Not stdlib material. Either move to a separate repo or archive.
 - `htaccess` — 36 lines, Apache-specific
 - `make` — 44 lines, build tool fragment
 - `base` — 40 lines, number base conversion
-- `fp/` — 21 subdirs of FP abstractions with no root init.lua; decide: invest or remove
-- `it_eval`, `it_fn` — iterator utilities, possibly merge into `iter` module
-- `functional` — no init.lua, overlap with fp/
+- `it_eval`, `it_fn` — point-free expression builders, superseded by `lib/iter`
+- `functional` — no init.lua, superseded by `lib/fp` + `lib/iter`
 - `lil` — 10 lines, wrapper
 
 ## Priority order
@@ -164,23 +171,21 @@ Remaining (need network/system state, harder to test in isolation):
 3. `dns` — name resolution
 4. `inotify` — file watching
 
-### Phase 3 — Missing packages
+### Phase 3 — Missing packages ✓ done 2026-03-20
 
-Build missing stdlib primitives:
+1. ✓ `process` — subprocess spawn/exec via POSIX FFI (873463b)
+2. ✓ `iter` — combinator utilities, 21 functions (committed)
+3. ✓ `rand` — CSPRNG via getrandom(2) + /dev/urandom (306aa1b)
+4. ✓ `hash/hmac` — HMAC construction, RFC test vectors (25918c3)
+5. ✓ `format/msgpack` — pure Lua encode/decode (21a86b1)
+6. ✓ `signal` — POSIX signal handling via FFI (9b50ede)
 
-1. `process` — subprocess spawn, most impactful gap
-2. `iter` — combinators (small, useful everywhere)
-3. `rand` — CSPRNG
-4. `hash/hmac` — HMAC construction over hash/
-5. `format/msgpack` — common wire format
-6. `signal` — POSIX signals
+### Phase 4 — Cleanup (partial, 2026-03-20)
 
-### Phase 4 — Cleanup
-
-1. Archive Tier C packages (move to `archive/` or separate repo)
-2. Merge or delete Tier D packages
-3. Resolve `dep.*` coupling in Tier A/B packages
-4. Type annotations across all Tier A packages
+1. ✓ Archive Tier C/D packages — 46 moved to archive/ (1f84ced); fp/ restored
+   to lib/ (Tier A — typechecker stress test, not application-specific)
+2. Resolve `dep.*` coupling in Tier A/B packages
+3. Type annotations across all Tier A packages
 
 ### Phase 5 — Namespace expansion
 
