@@ -19,10 +19,10 @@
     - Unseal mode (`{ unseal = true }`) — search through $Opaque wrappers
     - Opaque pattern queries — `$Opaque<string>` means "any opaque wrapping string"
     - Accept type_id + ctx as query (programmatic, not just strings)
-    - Subtype ranking (exact > subtype > supertype, currently binary)
-    - Arity pre-filtering before check_string (avoid typechecker for obvious non-matches)
     - Acceleration structures for registry-scale indexes (bloom filter, inverted index)
-    - Persistent index — serialize to disk, reload without re-typechecking
+    - [x] Subtype ranking (exact > subtype > supertype) — 3-level scoring
+    - [x] Arity pre-filtering before check_string
+    - [x] Persistent index — save_index/load_index JSON, CLI --save-index/--load-index
   - [ ] Stabilise `--dump` output as machine-readable JSON (exported bindings + type sigs)
   - [ ] Static docs site (bun) — renders docgen JSON; search calls type-search endpoint or
     runs unification client-side via WASM build of the typechecker.
@@ -49,11 +49,26 @@
   Near-term candidates: access control design (see below), module-level LSP cache,
   soundness gap 3 (generic variance). See typechecker section below for full list.
 
+- [ ] **Stdlib rewrites** — vendored packages currently in `lib/` violate the ownership
+  rule (docs/stdlib-design.md). Each needs a fresh crescent-native rewrite before the
+  registry exists and the vendored copy can be removed:
+  - [ ] `lib/format/json/` — rewrite lunajson as crescent-native JSON (pure Lua tier +
+    FFI tier for throughput). Current nil,err wrapper buys time.
+  - [ ] `lib/format/cbor/` — rewrite vendored CBOR. Low priority until cbor sees more use.
+  - [ ] `lib/encode/base64/` — rewrite lbase64. Small scope, good first rewrite task.
+  - [ ] `lib/hash/sha1/` — rewrite mpeterv/sha1. Already heavily patched; sha256 shows
+    the tiered pattern to follow.
+  - [ ] `lib/ljsocket/` — largest and most complex. Blocked on registry (http/websocket
+    depend on it); rewrite as part of a network stack audit.
+
 - [ ] **Stdlib buildout** — see `docs/stdlib-roadmap.md`. Phase 1–3 done (2026-03-20):
   path guards, init.lua entry points, error convention sweep, tests for core packages,
   new packages (process, iter, rand, signal, format/msgpack, format/toml, hash/hmac).
   46 app-specific packages archived. Remaining: dep.* coupling resolution, type
-  annotations across Tier A, tests for ljsocket/tls/dns/inotify.
+  annotations across Tier A (done for 24 owned packages; vendored code skipped),
+  tests for ljsocket/tls/dns/inotify.
+  [x] dep.* coupling resolved (a79167d) — 8 dep paths across 28 files updated.
+  [x] HTML docgen output (582247c) — `--format html` with inline CSS.
 
 - [ ] **Typechecker: HKT type argument extraction** — when `<F, A>(fa: F<A>)` is called
   with `Maybe<number>`, the solver can't extract `F = Maybe, A = number` from the
