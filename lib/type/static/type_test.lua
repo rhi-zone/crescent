@@ -6333,3 +6333,97 @@ local x = f("hello")
 ]], "")
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Overload body checking
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: overload body checking", function()
+    assert.it("function body satisfying both overloads produces no errors", function()
+        -- Identity function: x is string under overload 1, number under overload 2.
+        -- Returning x works for both since the return type matches the param type.
+        no_errors([[
+--: (string) -> string
+--: (number) -> number
+local function f(x)
+    return x
+end
+]])
+    end)
+
+    assert.it("function body satisfying both overloads (function expression form)", function()
+        no_errors([[
+--: (string) -> string
+--: (number) -> number
+local f = function(x)
+    return x
+end
+]])
+    end)
+
+    assert.it("body violating one overload reports error tagged with that overload", function()
+        -- x + 1 fails for string overload (cannot do arithmetic on string),
+        -- passes for number overload.
+        has_error([[
+--: (string) -> string
+--: (number) -> number
+local function f(x)
+    return x + 1
+end
+]], "overload 1")
+        has_error([[
+--: (string) -> string
+--: (number) -> number
+local function f(x)
+    return x + 1
+end
+]], "%(string%) %-> string")
+    end)
+
+    assert.it("body violating the other overload reports error tagged with that overload", function()
+        -- string.rep fails for number overload.
+        has_error([[
+--: (string) -> integer
+--: (boolean) -> integer
+local function f(x)
+    return x + 1
+end
+]], "overload 2")
+    end)
+
+    assert.it("body violating both overloads reports two errors", function()
+        -- x + 1 fails for both string and boolean.
+        local ec = check(([[
+--: (string) -> number
+--: (boolean) -> number
+local function f(x)
+    return x + 1
+end
+]]))
+        assert.eq(#ec.errors, 2)
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(msg:find("overload 1"))
+        assert.ok(msg:find("overload 2"))
+    end)
+
+    assert.it("explicit intersection annotation triggers per-overload body check", function()
+        -- Single --: with explicit & syntax
+        has_error([[
+--: ((string) -> string) & ((number) -> number)
+local function f(x)
+    return x + 1
+end
+]], "overload 1")
+    end)
+
+    assert.it("function body with no errors when overloads are all satisfied", function()
+        no_errors([[
+--: (string) -> string
+--: (number) -> number
+--: (boolean) -> boolean
+local function f(x)
+    return x
+end
+]])
+    end)
+end)
