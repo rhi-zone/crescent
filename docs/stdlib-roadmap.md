@@ -141,26 +141,28 @@ Not stdlib material. Either move to a separate repo or archive.
 
 ## Priority order
 
-### Phase 1 — Foundation (immediate)
+### Phase 1 — Foundation (immediate) ✓ done 2026-03-20
 
-Mechanical sweep that can be parallelized across packages:
+1. ✓ Add `init.lua` to all Tier A packages that lack one (fs, dns, mimetype)
+2. ✓ Add path guard to all Tier A packages (~23 packages)
+3. ✓ Error convention sweep — `dynamic_library` fixed; others already correct
 
-1. **Add `init.lua` to all Tier A packages that lack one** (fs, dns, mimetype)
-2. **Add path guard to all Tier A packages** (~15 packages)
-3. **Error convention sweep** — change `error()` to `nil, err` at public
-   boundaries in Tier A packages
+### Phase 2 — Test coverage (partial, 2026-03-20)
 
-### Phase 2 — Test coverage
+Done:
+- ✓ `epoll` — 22 assertions
+- ✓ `timerfd` — 18 assertions
+- ✓ `time` — 7 assertions
+- ✓ `env` — skips gracefully (needs compiled .so)
+- ✓ `fs` — 26 assertions
+- ✓ `mimetype` — 32 assertions
+- ✓ Hash parity (sha1/sha256) — 67 assertions
 
-Write tests for untested Tier A packages. Priority by dependents:
-
+Remaining (need network/system state, harder to test in isolation):
 1. `ljsocket` — everything network depends on it
-2. `epoll` — async I/O foundation
-3. `tls` — HTTPS depends on it
-4. `dns` — name resolution
-5. `time`, `env`, `fs` — system primitives
-6. `inotify`, `timerfd` — event sources
-7. Hash parity tests — sha1 vs sha256 shared interface
+2. `tls` — HTTPS depends on it
+3. `dns` — name resolution
+4. `inotify` — file watching
 
 ### Phase 3 — Missing packages
 

@@ -8,4 +8,5 @@ end
 local M = {}
 M.sha256 = require("lib.hash.sha256")
 M.sha1   = require("lib.hash.sha1")
+M.hmac   = require("lib.hash.hmac")
 return M
