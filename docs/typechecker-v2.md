@@ -50,6 +50,35 @@ code (if any exists temporarily) is excluded. This replaces the need for a
 separate lint tool entirely — `lib/stdlib/lint.lua` was a prototype to identify
 the gap; the typechecker is the destination.
 
+## Why this isn't feature creep
+
+The risk with expanding scope is turning the checker into a ball of mud. That
+doesn't happen here because type checking, linting, and dead-code analysis are
+all the same operation — traverse the AST, apply rules, emit diagnostics — with
+different rule sets. The architecture doesn't change.
+
+The ball-of-mud risk is real but comes from a different place: **mixing rule
+logic with core infrastructure**. The constraint that prevents it:
+
+```
+parse → infer → reference graph → [rule passes] → diagnostics
+```
+
+Rule passes get read-only access to the fully-resolved AST, type info, and
+reference graph. They emit diagnostics. They don't touch inference, don't touch
+parsing, can't corrupt the solver. Adding a rule is adding a pass — not a patch
+into the core. This is the same boundary rustc/clippy maintain: clippy is a
+separate crate that walks the same HIR, not a patch into the type solver.
+
+**What would actually be feature creep:**
+- Formatter — requires round-trip fidelity, whitespace-preserving AST, totally
+  different output model
+- Refactoring / rename — requires write-back, symbol renaming across files
+
+Those touch genuinely different problems with different constraints. Diagnostics-
+only analysis is a clean boundary. Everything that fits inside "traverse AST,
+emit diagnostics, touch nothing" belongs here.
+
 ## Non-goals
 
 - Lua 5.2+ compatibility for the checker itself (it's a LuaJIT tool)
