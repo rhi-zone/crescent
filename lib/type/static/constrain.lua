@@ -92,6 +92,7 @@ local ANN_DECL = defs.ANN_DECL
 local TAG_ANY      = defs.TAG_ANY
 local TAG_UNKNOWN  = defs.TAG_UNKNOWN
 local TAG_NIL      = defs.TAG_NIL
+local TAG_BOOLEAN  = defs.TAG_BOOLEAN
 local TAG_NUMBER   = defs.TAG_NUMBER
 local TAG_INTEGER  = defs.TAG_INTEGER
 local TAG_STRING   = defs.TAG_STRING
@@ -906,6 +907,30 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local obj_nid = n.data[0]
     local obj_tid = gen_expr(ctx, obj_nid)
     local fname_id = n.data[1]
+    -- Check that the object type can have fields before emitting C_INDEX.
+    -- TAG_VAR (unresolved), TAG_ANY, TAG_UNKNOWN, TAG_UNION are all fine — let C_INDEX handle them.
+    do
+        local resolved = types_mod.find(ctx, obj_tid)
+        local ot = ctx.types:get(resolved)
+        local no_fields = false
+        if ot.tag == TAG_NIL then
+            no_fields = true
+        elseif ot.tag == TAG_BOOLEAN then
+            no_fields = true
+        elseif ot.tag == TAG_LITERAL then
+            local lk = ot.data[0]
+            -- LIT_BOOLEAN and number literals (LIT_NUMBER, LIT_INTEGER) cannot have fields.
+            -- LIT_STRING is OK — strings have a metatable with methods in Lua.
+            if lk == LIT_BOOLEAN or lk == LIT_NUMBER or lk == LIT_INTEGER then
+                no_fields = true
+            end
+        end
+        if no_fields then
+            local t_str = types_mod.display(ctx, resolved)
+            report(ctx, n.line, n.col, E.FIELD_ON_PRIMITIVE, { t = t_str })
+            return fresh_var(ctx)
+        end
+    end
     local res = fresh_var(ctx)
     emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_STRING, fname_id), res, n.line, n.col })
     -- Track field access for LSP go-to-def (only for simple identifier objects)
@@ -1580,6 +1605,9 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rhs_count = n.data[3]
     local rhs_types = gen_expr_list(ctx, n.data[2], rhs_count)
+    -- Consume any preceding --: annotation so it doesn't spill to the next statement.
+    -- We read it first so we can use it for NODE_FIELD_EXPR targets below.
+    local stmt_ann = get_ann(ctx, n.line)
 
     local last_rhs_is_call = false
     if rhs_count > 0 then
@@ -1625,6 +1653,20 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             local obj_tid = types_mod.find(ctx, gen_expr(ctx, obj_nid))
             local ot = ctx.types:get(obj_tid)
             if ot.tag == TAG_TABLE then
+                -- If a --: annotation precedes this statement, it declares the expected
+                -- type for the RHS.  Check rhs_tid <: ann_tid and use the annotation type
+                -- as the canonical field type so subsequent uses see the declared type.
+                -- The raw ann.type_id is an annotation-pool ID; resolve it to a checker
+                -- type ID via resolve_annotation_type (same as LOCAL_STMT does).
+                local ann_field_tid
+                if stmt_ann and stmt_ann.kind == ANN_TYPE then
+                    ann_field_tid = resolve_annotation_type(ctx, stmt_ann.type_id)
+                    local ann_resolved = types_mod.find(ctx, ann_field_tid)
+                    local ann_t = ctx.types:get(ann_resolved)
+                    if ann_t.tag ~= TAG_VAR and ann_t.tag ~= TAG_ROWVAR then
+                        emit(ctx, { C_SUB, rhs_tid, ann_field_tid, tn.line, tn.col })
+                    end
+                end
                 local fe = types_mod.table_field(ctx, obj_tid, field_id)
                 if fe then
                     -- Readonly check: assignment to a readonly field is a type error
@@ -1633,14 +1675,20 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         report(ctx, tn.line, tn.col, E.FIELD_READONLY,
                             { field = fname })
                     end
-                    -- Re-assignment: check type compatibility (widen to base type first)
-                    local expected = types_mod.widen(ctx, fe.type_id)
-                    local et = ctx.types:get(types_mod.find(ctx, expected))
-                    if et.tag ~= TAG_VAR then
-                        emit(ctx, { C_SUB, rhs_tid, expected, tn.line, tn.col })
+                    -- Re-assignment: check type compatibility (widen to base type first).
+                    -- When an annotation is present it was already checked above; skip the
+                    -- inferred-type check to avoid a duplicate (or conflicting) constraint.
+                    if not ann_field_tid then
+                        local expected = types_mod.widen(ctx, fe.type_id)
+                        local et = ctx.types:get(types_mod.find(ctx, expected))
+                        if et.tag ~= TAG_VAR then
+                            emit(ctx, { C_SUB, rhs_tid, expected, tn.line, tn.col })
+                        end
                     end
                 else
-                    -- Add field
+                    -- Add field.  Use the annotation type as the field's stored type when
+                    -- one is present; this makes the declared type visible to later reads.
+                    local field_tid = ann_field_tid or rhs_tid
                     local fields, indexers, rv, meta = {}, {}, ot.data[4], {}
                     local fs, fl = ot.data[0], ot.data[1]
                     for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
@@ -1652,7 +1700,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         ix = ix + 2
                     end
                     for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
-                    fields[#fields + 1] = types_mod.make_field(ctx, field_id, rhs_tid, field_flags(ctx, field_id))
+                    fields[#fields + 1] = types_mod.make_field(ctx, field_id, field_tid, field_flags(ctx, field_id))
                     local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
                     local ot2 = ctx.types:get(obj_tid)
                     local new_t = ctx.types:get(new_tbl)
@@ -1713,6 +1761,9 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             end
         end
     end
+    -- Consume the annotation so it doesn't spill to the next statement via the
+    -- line-1 fallback in get_ann.
+    consume_ann(ctx, n.line)
 end
 
 StmtRule[NODE_DO_STMT] = function(ctx, nid)

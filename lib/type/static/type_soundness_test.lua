@@ -308,14 +308,28 @@ return M
 ]])
     end)
 
-    assert.it("annotation on M.field mismatches — BUG: not currently enforced", function()
-        -- BUG: annotation on M.field assignment is not enforced; checker does not
-        -- check --: annotation against the assigned value for field assignments.
-        -- Documenting current behavior: no error produced.
-        no_errors([[
+    assert.it("annotation on M.field mismatches — error", function()
+        has_error([[
 local M = {}
 --: string
 M.name = 42
+]], "cannot assign")
+    end)
+
+    assert.it("annotation on M.field matches — no error", function()
+        no_errors([[
+local M = {}
+--: string
+M.name = "foo"
+return M
+]])
+    end)
+
+    assert.it("unannotated M.field assignment — no change in behavior", function()
+        no_errors([[
+local M = {}
+M.name = "foo"
+return M
 ]])
     end)
 end)
@@ -1945,14 +1959,12 @@ t.x = f()
 ]], "")
     end)
 
-    assert.it("accessing field on nil-annotated value — BUG: no error produced", function()
-        -- BUG: The checker does not currently error on field access on nil.
-        -- This is a soundness gap — nil.foo would be a runtime error.
-        no_errors([[
+    assert.it("accessing field on nil-annotated value", function()
+        has_error([[
 --: nil
 local x = nil
 local y = x.foo
-]])
+]], "cannot have fields")
     end)
 
     assert.it("accessing field on number must fail", function()
@@ -1963,14 +1975,12 @@ local y = x.foo
 ]], "")
     end)
 
-    assert.it("accessing field on boolean-annotated value — BUG: no error produced", function()
-        -- BUG: The checker does not currently error on field access on boolean.
-        -- This is a soundness gap — true.foo would be a runtime error.
-        no_errors([[
+    assert.it("accessing field on boolean-annotated value", function()
+        has_error([[
 --: boolean
 local x = true
 local y = x.foo
-]])
+]], "cannot have fields")
     end)
 end)
 
