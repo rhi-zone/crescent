@@ -185,6 +185,90 @@ describe("search.query scoring", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Persistent index serialization
+-- ---------------------------------------------------------------------------
+describe("search.save_index / load_index", function()
+    local tmpfile = "/tmp/crescent_search_test_" .. os.time() .. ".json"
+
+    it("save_index writes valid JSON to a file", function()
+        local index = {
+            { name = "encode", file = "lib/example/init.lua", type = "(string) -> string" },
+            { name = "decode", file = "lib/example/init.lua", type = "(string) -> string" },
+        }
+        local ok, err = search.save_index(index, tmpfile)
+        T.ok(ok, "save_index should succeed")
+        -- Verify file exists and contains JSON
+        local fh = io.open(tmpfile, "r")
+        T.ok(fh ~= nil, "file should exist")
+        local content = fh:read("*a")
+        fh:close()
+        T.ok(#content > 0, "file should not be empty")
+        T.ok(content:sub(1, 1) == "[", "JSON should start with [")
+    end)
+
+    it("load_index reads back identical content", function()
+        local original = {
+            { name = "encode", file = "lib/example/init.lua", type = "(string) -> string" },
+            { name = "decode", file = "lib/example/init.lua", type = "(string) -> string" },
+        }
+        search.save_index(original, tmpfile)
+        local loaded, err = search.load_index(tmpfile)
+        T.ok(loaded ~= nil, "load_index should succeed: " .. tostring(err))
+        T.eq(#loaded, #original)
+        for i = 1, #original do
+            T.eq(loaded[i].name, original[i].name)
+            T.eq(loaded[i].file, original[i].file)
+            T.eq(loaded[i].type, original[i].type)
+        end
+    end)
+
+    it("round-trip: build_index_from_docs -> save -> load -> query", function()
+        local docs = {
+            {
+                file = "lib/example/init.lua",
+                exports = {
+                    { name = "encode", type = "(string) -> string" },
+                    { name = "count",  type = "(string) -> number" },
+                    { name = "run",    type = "() -> nil" },
+                },
+            },
+        }
+        local index = search.build_index_from_docs(docs)
+        search.save_index(index, tmpfile)
+        local loaded = search.load_index(tmpfile)
+        T.ok(loaded ~= nil, "loaded index should not be nil")
+
+        -- Query original and loaded should return same results
+        local matches_orig   = search.query("(string) -> string", index)
+        local matches_loaded = search.query("(string) -> string", loaded)
+        T.eq(#matches_orig, #matches_loaded)
+        for i = 1, #matches_orig do
+            T.eq(matches_orig[i].name, matches_loaded[i].name)
+            T.eq(matches_orig[i].score, matches_loaded[i].score)
+        end
+    end)
+
+    it("load_index returns nil for nonexistent file", function()
+        local loaded, err = search.load_index("/tmp/crescent_nonexistent_" .. os.time() .. ".json")
+        T.ok(loaded == nil, "should return nil for missing file")
+        T.ok(err ~= nil, "should return error message")
+    end)
+
+    it("build_and_save builds and saves in one step", function()
+        local rt_file = "/tmp/crescent_search_bas_test_" .. os.time() .. ".json"
+        local index = search.build_and_save({"lib/encode/base64/init.lua"}, rt_file)
+        T.ok(#index > 0, "should build index")
+        local loaded = search.load_index(rt_file)
+        T.ok(loaded ~= nil, "should load saved index")
+        T.eq(#loaded, #index)
+        os.remove(rt_file)
+    end)
+
+    -- Cleanup
+    os.remove(tmpfile)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Integration test with real modules (if available)
 -- ---------------------------------------------------------------------------
 describe("search.build_index (real files)", function()

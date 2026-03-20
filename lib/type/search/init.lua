@@ -25,6 +25,7 @@ local types_mod  = require("lib.type.static.types")
 local unify_mod  = require("lib.type.static.unify")
 local intern_mod = require("lib.type.static.intern")
 local defs       = require("lib.type.static.defs")
+local json       = require("lib.format.json")
 
 local TAG_TABLE    = defs.TAG_TABLE
 local TAG_FUNCTION = defs.TAG_FUNCTION
@@ -242,6 +243,42 @@ M.query = function(query_type_str, index, opts)
     end
 
     return matches
+end
+
+-- ---------------------------------------------------------------------------
+-- Persistent index serialization
+-- ---------------------------------------------------------------------------
+
+--- Serialize an index to JSON string and write to disk.
+--- index: array of { name, file, type } as returned by build_index.
+--- filepath: path to write JSON to.
+M.save_index = function(index, filepath)
+    local s = json.encode(index)
+    local fh, err = io.open(filepath, "w")
+    if not fh then return nil, err end
+    fh:write(s)
+    fh:close()
+    return true
+end
+
+--- Load a previously saved index from disk.
+--- Returns the index array, or nil + error string on failure.
+M.load_index = function(filepath)
+    local fh, err = io.open(filepath, "r")
+    if not fh then return nil, err end
+    local s = fh:read("*a")
+    fh:close()
+    local ok, result = pcall(json.decode, s)
+    if not ok then return nil, result end
+    return result
+end
+
+--- Build index and save to disk in one step.
+--- Returns the index array.
+M.build_and_save = function(files, filepath)
+    local index = M.build_index(files)
+    M.save_index(index, filepath)
+    return index
 end
 
 return M
