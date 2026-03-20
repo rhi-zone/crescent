@@ -41,6 +41,26 @@
   Near-term candidates: access control design (see below), module-level LSP cache,
   soundness gap 3 (generic variance). See typechecker section below for full list.
 
+- [ ] **Stdlib buildout** — see `docs/stdlib-roadmap.md`. Phase 1–3 done (2026-03-20):
+  path guards, init.lua entry points, error convention sweep, tests for core packages,
+  new packages (process, iter, rand, signal, format/msgpack, format/toml, hash/hmac).
+  46 app-specific packages archived. Remaining: dep.* coupling resolution, type
+  annotations across Tier A, tests for ljsocket/tls/dns/inotify.
+
+- [ ] **Typechecker: HKT type argument extraction** — when `<F, A>(fa: F<A>)` is called
+  with `Maybe<number>`, the solver can't extract `F = Maybe, A = number` from the
+  expanded structural type. Once expanded, constructor/argument decomposition is lost.
+  Constraints like `<F, A: Semigroup>(fa: F<A>)` are unenforceable — `A` is unbound.
+  Blocks: typed `fmap`, typeclass-polymorphic functions, `lib/fp/` full type safety.
+  Fix requires nominal type preservation or bidirectional inference before expansion.
+  See `docs/type-system.md` line 862.
+
+- [ ] **Typechecker: generic variance** — all generics are currently invariant.
+  `Box<Dog>` is not a subtype of `Box<Animal>`. Blocks HKT subtype relationships
+  (`F<A> <: G<A>`) and natural covariant container usage. Needs design before
+  implementation — declaration-site vs use-site, inference vs annotation.
+  See `docs/type-system.md` line 864, `docs/soundness-audit.md` gap 3.
+
 ## security (fix soon)
 - [x] http/router: path traversal via symlinks — `path.safe_resolve()` with FFI `realpath()`
 - [x] http/server: reads one packet, not until headers complete — loop until `\r\n\r\n`, then read body by Content-Length
