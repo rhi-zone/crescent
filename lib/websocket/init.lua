@@ -10,6 +10,7 @@ local mod = {}
 
 -- https://datatracker.ietf.org/doc/html/rfc6455#section-7.4.1
 --[[@enum websocket_status]]
+--: table
 mod.status_ids = {
 	normal = 1000,
 	going_away = 1001,
@@ -39,6 +40,7 @@ local err = function (sock, body)
 end
 
 --[[@enum websocket_opcode]]
+--: table
 mod.opcode = {
 	continuation = 0, text = 1, binary = 2,
 	close = 8, ping = 9, pong = 10,
@@ -83,6 +85,7 @@ local is_valid_opcode = {
 --[[@enum websocket_error]]
 -- **Not** guaranteed to stay the same across versions.
 -- Highly recommended to use the enum members directly
+--: table
 mod.error = {
 	invalid_format = 1,
 	invalid_opcode = 2,
@@ -222,7 +225,9 @@ local encode = function (msg)
 end
 
 -- Expose frame codec for testing and advanced use.
+--: (table) -> string
 mod._encode = encode
+--: (string, table) -> table, boolean, table, number, number
 mod._decode = decode
 
 -- TODO(policy): consider enforcing a maximum incoming frame/packet size to
@@ -236,6 +241,7 @@ mod._decode = decode
 --[[@param read fun(sock: luajitsocket, msg: websocket_message)]]
 --[[@param close fun(sock: luajitsocket)|nil]]
 --[[@param epoll epoll]]
+--: (table, table, (table, table) -> nil, (table) -> nil, table) -> (table) -> nil, () -> nil
 mod.websocket = function (sock, req, read, close, epoll)
 	if (req.headers["upgrade"] or {})[1] ~= "websocket" or (req.headers["connection"] or {})[1] ~= "Upgrade" then return nil end
 	-- TODO(api): return a numeric error code here instead of sending the HTTP
