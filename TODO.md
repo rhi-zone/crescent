@@ -1,5 +1,14 @@
 # TODO
 
+## typechecker soundness gaps (found by type_soundness_test.lua)
+
+- [ ] **Field access on nil/boolean** — `nil.foo` and `true.foo` produce no error. These are runtime errors that the checker should catch. (type_soundness_test.lua: "accessing field on nil-annotated value", "accessing field on boolean-annotated value")
+- [ ] **Annotation on M.field assignment not enforced** — `--: string` before `M.name = 42` does not produce an error. Annotations on field assignments to module tables are ignored. (type_soundness_test.lua: "annotation on M.field mismatches")
+- [ ] **Missing return detection** — annotated `-> string` function with only conditional return (one branch returns, other falls through) does not error. The implicit nil return on the non-returning branch should conflict with the annotation. (type_soundness_test.lua: "conditional return: one path returns correct, other falls through")
+- [ ] **Readonly not enforced through intersection** — writing to a readonly field accessed through an intersection type does not error. (type_soundness_test.lua: "writing to readonly field in intersection")
+- [ ] **`and` RHS not narrowed** — `x and x .. "!"` where x is `string|nil` fails with "cannot concatenate string|nil". The RHS of `and` should see x narrowed to string (truthiness narrowing). (type_soundness_test.lua: "and short-circuit narrowing limitation")
+- [ ] **Literal table not assignable to indexer type** — `{ "a", "b" }` cannot be assigned to `{ [number]: string }`, and `{ x = 1 }` cannot be assigned to `{ [string]: number }`. The checker infers concrete positional/named fields rather than matching against indexer types. (type_soundness_test.lua: "number indexer array", "string indexer dictionary")
+
 ## priorities (medium horizon)
 
 - [ ] **Registry + docs site** (`pkg.crescent.run`) — see `docs/registry-design.md` for full vision.
