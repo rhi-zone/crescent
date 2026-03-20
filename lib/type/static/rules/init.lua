@@ -59,7 +59,7 @@ function M.load_all()
     if _loaded then return end
     _loaded = true
     local base = "lib.type.static.rules."
-    local pass_names = { "unannotated", "assert_in_lib", "naming", "bare_bit" }
+    local pass_names = { "unannotated", "assert_in_lib", "naming", "bare_bit", "predicate_return", "dead_locals" }
     for _, pname in ipairs(pass_names) do
         local ok, err = pcall(require, base .. pname)
         if not ok then

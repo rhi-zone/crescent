@@ -47,7 +47,7 @@ end
 T.describe("rules: infrastructure", function()
     T.it("passes() returns a list of registered passes", function()
         local passes = rules_mod.passes()
-        T.ok(#passes >= 4, "at least 4 passes registered")
+        T.ok(#passes >= 6, "at least 6 passes registered")
     end)
 
     T.it("registered pass names include expected passes", function()
@@ -55,10 +55,12 @@ T.describe("rules: infrastructure", function()
         for _, entry in ipairs(rules_mod.passes()) do
             names[entry.name] = true
         end
-        T.ok(names["unannotated"],  "unannotated registered")
-        T.ok(names["assert_in_lib"], "assert_in_lib registered")
-        T.ok(names["naming"],       "naming registered")
-        T.ok(names["bare_bit"],     "bare_bit registered")
+        T.ok(names["unannotated"],       "unannotated registered")
+        T.ok(names["assert_in_lib"],     "assert_in_lib registered")
+        T.ok(names["naming"],            "naming registered")
+        T.ok(names["bare_bit"],          "bare_bit registered")
+        T.ok(names["predicate_return"],  "predicate_return registered")
+        T.ok(names["dead_locals"],       "dead_locals registered")
     end)
 
     T.it("run() is a no-op when ctx is nil", function()
@@ -358,5 +360,135 @@ return M
 ]]
         local err_ctx = check_and_run(src, "mylib.lua")
         T.ok(no_warning(err_ctx, "bare `bit.*`"), "comment-only bit mention not flagged")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- predicate_return pass
+---------------------------------------------------------------------------
+
+T.describe("rules/predicate_return: is_*/has_* should return boolean", function()
+    T.it("fires when M.is_valid returns a number", function()
+        local src = [[
+local M = {}
+--: () -> integer
+M.is_valid = function() return 42 end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(has_warning(err_ctx, "is_valid"), "fires for non-boolean return")
+        T.ok(has_warning(err_ctx, "is_*`/`has_*` should return boolean"), "message mentions predicate convention")
+    end)
+
+    T.it("does not fire when M.is_valid returns boolean", function()
+        local src = [[
+local M = {}
+--: () -> boolean
+M.is_valid = function() return true end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(no_warning(err_ctx, "is_valid"), "no warning for boolean return")
+    end)
+
+    T.it("fires when M.has_item returns a string", function()
+        local src = [[
+local M = {}
+--: (string) -> string
+M.has_item = function(x) return x end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(has_warning(err_ctx, "has_item"), "fires for has_* with non-boolean return")
+    end)
+
+    T.it("does not fire when M.has_item returns boolean", function()
+        local src = [[
+local M = {}
+--: (string) -> boolean
+M.has_item = function(x) return x ~= nil end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(no_warning(err_ctx, "has_item"), "no warning for boolean return in has_*")
+    end)
+
+    T.it("does not fire for names not starting with is_ or has_", function()
+        local src = [[
+local M = {}
+--: () -> integer
+M.get_count = function() return 42 end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(no_warning(err_ctx, "get_count"), "non-predicate name not flagged")
+    end)
+
+    T.it("skips test files", function()
+        local src = [[
+local M = {}
+M.is_valid = function() return 42 end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib_test.lua")
+        T.ok(no_warning(err_ctx, "is_valid"), "skipped for test file")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- dead_locals pass
+---------------------------------------------------------------------------
+
+T.describe("rules/dead_locals: assigned but never read", function()
+    T.it("fires when a local variable is never read", function()
+        local src = [[
+local M = {}
+local x = 1
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(has_warning(err_ctx, "local `x` is assigned but never read"), "fires for unused local")
+    end)
+
+    T.it("does not fire when a local is used in a return", function()
+        local src = [[
+local M = {}
+local x = 1
+return x
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(no_warning(err_ctx, "local `x`"), "no warning when x is returned")
+    end)
+
+    T.it("does not fire when a local is used in an expression", function()
+        local src = [[
+local M = {}
+local x = 10
+--: () -> integer
+M.get = function() return x end
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(no_warning(err_ctx, "local `x`"), "no warning when x is captured in closure")
+    end)
+
+    T.it("does not fire for underscore-prefixed names", function()
+        local src = [[
+local M = {}
+local _unused = 1
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib.lua")
+        T.ok(no_warning(err_ctx, "_unused"), "underscore-prefixed locals are ignored")
+    end)
+
+    T.it("skips test files", function()
+        local src = [[
+local M = {}
+local x = 1
+return M
+]]
+        local err_ctx = check_and_run(src, "mylib_test.lua")
+        T.ok(no_warning(err_ctx, "local `x`"), "skipped for test file")
     end)
 end)
