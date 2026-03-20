@@ -867,3 +867,68 @@ The inference logic (Phase 3) is where users hack. This stays in idiomatic Lua:
 
 The representation layer (Phases 1-2) is FFI machinery. Users don't hack AST
 node layouts or type slot formats — they hack type rules.
+
+## Rule Passes Roadmap
+
+Rule passes run after inference over the resolved AST + type info + reference
+graph. Each pass gets read-only access and emits to `err_ctx.warnings` (or
+`err_ctx.errors` for policy-configured severities). Core inference is untouched.
+
+### Pass shape
+
+```lua
+-- lib/type/static/rules/foo.lua
+local M = {}
+-- ctx: type context from check_file
+-- err_ctx: diagnostic context (M.warning() / M.error())
+-- filepath: source file path
+M.check = function(ctx, err_ctx, filepath) ... end
+return M
+```
+
+Runner: `lib/type/static/rules/init.lua`
+```
+rules.run(ctx, err_ctx, filepath, policy) -> ()
+```
+
+CLI: `--rules` flag (default: on for lib/ files, off otherwise).
+
+### Phase 1 — Infrastructure
+
+- `lib/type/static/rules/init.lua` — runner, policy table, pass registry
+- CLI integration: run passes after check_file, merge into existing diagnostic output
+
+### Phase 2 — AST-level passes (no type info needed)
+
+- `unannotated` — `M.*` assignments without a preceding `--:` annotation node
+- `assert_in_lib` — NODE_CALL with callee name `assert` in non-test files
+- `naming` — module variable not `M`; `M.create`/`M.destroy`/`M.free` naming violations
+- `bare_bit` — `bit.*` field access with no `require("bit")` binding in scope
+
+### Phase 3 — Type-aware passes
+
+- `any_escape` — `any` appearing in a `--:` annotation
+- `predicate_return` — `is_*/has_*` name but inferred return type is not boolean
+- `overloads` — multiple `--:` annotations on one declaration; verify each
+  overload signature independently against the function body (unlike TypeScript,
+  which only checks the implementation signature)
+
+### Phase 4 — Dead code (needs reference graph)
+
+Requires augmenting inference to track which exports are referenced cross-file.
+- `dead_exports` — `M.*` binding never imported in any file in the project
+- `dead_locals` — local variable assigned but never read
+
+### Phase 5 — Architectural (over cross-file reference graph)
+
+- `cycles` — circular require chains
+- `god_module` — module with too many importers or too many imports (thresholds configurable)
+- `layering` — require() from a higher-level namespace into a lower-level one
+  (e.g. `lib/format/` importing `lib/http/` violates the tier ordering)
+
+### Phase 6 — Policy
+
+- `.crescent` config file at project root or any directory
+- Per-rule severity: `error | warning | off`
+- Per-directory overrides: `lib/` gets strict stdlib policy, application code
+  gets looser policy, excluded paths skip all passes
