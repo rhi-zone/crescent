@@ -125,35 +125,16 @@ end
 --[[@return string]] --[[@param str string]]
 mod.binary = function (str) return hex_to_binary(mod.sha1(str)) end
 
---[[Precalculate replacement tables.]]
+-- Delegate HMAC to lib.hash.hmac — no duplicate implementation.
+local _hmac
+local function get_hmac() if not _hmac then _hmac = require("lib.hash.hmac") end; return _hmac end
 
-local xor_with_0x5c = {}
-local xor_with_0x36 = {}
-
-for i = 0, 0xff do
-	xor_with_0x5c[char(i)] = char(bxor(0x5c, i))
-	xor_with_0x36[char(i)] = char(bxor(0x36, i))
-end
-
---[[512 bits.]]
-local BLOCK_SIZE = 64
-
---[[Calculates HMAC message digest for a string, returns it as a hexadecimal ]]
+--[[Calculates HMAC-SHA1 for a string, returns it as a hexadecimal string.]]
 --[[@return string]] --[[@param key string]] --[[@param text string]]
-mod.hmac = function (key, text)
-	if #key > BLOCK_SIZE then
-		key = mod.binary(key)
-	end
+mod.hmac = function (key, text) return get_hmac().sha1(key, text) end
 
-	local key_xord_with_0x36 = key:gsub(".", xor_with_0x36) .. rep(char(0x36), BLOCK_SIZE - #key)
-	local key_xord_with_0x5c = key:gsub(".", xor_with_0x5c) .. rep(char(0x5c), BLOCK_SIZE - #key)
-
-	return mod.sha1(key_xord_with_0x5c .. mod.binary(key_xord_with_0x36 .. text))
-end
-
---[[Calculates HMAC message digest for a string, returns it as a binary string]]
-mod.hmac_binary = function (key, text)
-	return hex_to_binary(mod.hmac(key, text))
-end
+--[[Calculates HMAC-SHA1 for a string, returns it as a binary string.]]
+--[[@return string]] --[[@param key string]] --[[@param text string]]
+mod.hmac_binary = function (key, text) return get_hmac().sha1_binary(key, text) end
 
 return mod
