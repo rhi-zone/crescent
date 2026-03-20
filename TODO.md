@@ -53,6 +53,13 @@
     against each declared signature during inference. Unlike TypeScript, which only
     checks the implementation signature. This is a type system feature, not a lint
     rule — belongs in the inference walk alongside function type checking.
+    Implementation: N inference passes over the same AST body, one per overload
+    signature, standard flow typing applies within each pass. Errors tagged with
+    which overload they came from.
+    Prerequisite: ann.lua currently keyes results by line (`results[line] = result`)
+    so multiple `--:` silently drop all but the last. Fix: accumulate into an array
+    when multiple `--:` appear consecutively before a declaration. Then constrain.lua
+    builds an intersection of function types and runs N body-check passes.
 
 - [ ] **Stdlib rewrites** — vendored packages currently in `lib/` violate the ownership
   rule (docs/stdlib-design.md). Each needs a fresh crescent-native rewrite before the
