@@ -25,7 +25,8 @@ mod.futurify_many = function (fn)
 	return function (...)
 		local params = { ... }
 		local done = false
-		--[[TODO: figure out how to end iteration]]
+		-- Known limitation: iteration has no end signal; caller must track
+		-- termination externally (e.g. sentinel value from the callback).
 		local next = function (step)
 			if done then return end
 			params[#params+1] = step
@@ -36,7 +37,8 @@ mod.futurify_many = function (fn)
 	end
 end
 
---[[TODO: return yield() somehow?]]
+-- Known limitation: the coroutine yield value is not directly exposed to the
+-- caller; use mod.await inside an async function to receive yielded values.
 --: ((...any) -> any) -> (...any) -> ((any) -> nil) -> nil
 mod.async = function (fn)
 	return function (...)
@@ -83,9 +85,7 @@ end
 mod.await_each = function (step, c, v)
 	return function (c2, v2)
 		local future = step(c2, v2)
-		print("future", future)
 		local ret = mod.await(future)
-		print("ret", ret)
 		return ret
 	end, c, v
 end
