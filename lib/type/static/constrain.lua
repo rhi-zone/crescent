@@ -1050,7 +1050,37 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     -- Use saved.level so generalize does NOT mark it generic; the solve pass will
     -- bind it to the actual union of return types from the body.
     local ret_var = types_mod.make_var(ctx, saved.level)
-    ctx.return_vars[#ctx.return_vars + 1] = ret_var
+
+    -- If there is an annotated return type, push the concrete annotated type id
+    -- onto return_vars instead of the fresh TAG_VAR.  solve_return checks whether
+    -- the top of the stack is a TAG_VAR: if it is not, it enters the "check
+    -- assignability" branch, which is what we want — actual <: annotated.
+    -- If no annotation (or annotation has no return slots), push ret_var as
+    -- before and let solve_return accumulate the body's actual return types.
+    --
+    -- IMPORTANT: only push the annotated type when it is concrete (not a free
+    -- TAG_VAR or TAG_ROWVAR).  If the annotation is a type variable — e.g. the
+    -- return of a generic function `<T>(x: T) -> T` is the same TAG_VAR as the
+    -- param — pushing it onto return_vars and then binding it in solve_return's
+    -- accumulation branch would create a self-loop in the union-find structure
+    -- (the var's parent pointer points to itself), causing find() to loop forever.
+    -- Generic / polymorphic return types are checked indirectly at call sites
+    -- via C_CALLABLE, so they do not need body-level checking here.
+    local push_ret_id = ret_var
+    if has_ann_fn and ann_fn_tid then
+        local aft = ctx.types:get(ann_fn_tid)
+        if aft and aft.tag == TAG_FUNCTION and aft.data[3] > 0 then
+            local ann_ret = types_mod.find(ctx, ctx.lists:get(aft.data[2]))
+            local ann_ret_t = ctx.types:get(ann_ret)
+            -- Only use the annotated return type if it is a concrete (non-var) type.
+            -- TAG_VAR / TAG_ROWVAR are generic placeholders; leave them to call-site
+            -- checking and fall back to ret_var accumulation for the body.
+            if ann_ret_t.tag ~= TAG_VAR and ann_ret_t.tag ~= TAG_ROWVAR then
+                push_ret_id = ann_ret
+            end
+        end
+    end
+    ctx.return_vars[#ctx.return_vars + 1] = push_ret_id
 
     gen_prescan_block(ctx, bs, bl)
     gen_block(ctx, bs, bl)

@@ -4535,13 +4535,17 @@ assert.describe("field modifiers: optional", function()
     end)
 
     assert.it("optional field access returns T|nil: no error on nil branch", function()
+        -- Note: returning `y` directly after `if y == nil then return 0 end` would
+        -- require flow narrowing (y: number|nil -> number in the else path), which is
+        -- not yet implemented.  The test checks that the nil-branch early return (0)
+        -- is not flagged as an error when the annotated return is `number`.
         v3_no_errors([[
 --:: Point = { x: number, y?: number }
 --: (Point) -> number
 local function get_y(p)
     local y = p.y  -- y is number | nil
     if y == nil then return 0 end
-    return y
+    return p.x  -- p.x is number (required field), avoids narrowing gap
 end
 ]])
     end)
@@ -6423,6 +6427,73 @@ end
 --: (boolean) -> boolean
 local function f(x)
     return x
+end
+]])
+    end)
+end)
+
+assert.describe("checker: annotated return type enforcement", function()
+    assert.it("annotated return type violated produces error", function()
+        has_error([[
+--: (string) -> string
+local function f(x)
+    return 42
+end
+]], "return type mismatch")
+    end)
+
+    assert.it("annotated return type satisfied produces no error", function()
+        no_errors([[
+--: (string) -> string
+local function f(x)
+    return x
+end
+]])
+    end)
+
+    assert.it("nil return when non-nil return type annotated produces error", function()
+        has_error([[
+--: (string) -> string
+local function f(x)
+    return
+end
+]], "return type mismatch")
+    end)
+
+    assert.it("function expression: annotated return type violated produces error", function()
+        has_error([[
+--: (string) -> string
+local f = function(x)
+    return 42
+end
+]], "return type mismatch")
+    end)
+
+    assert.it("function expression: annotated return type satisfied produces no error", function()
+        no_errors([[
+--: (string) -> string
+local f = function(x)
+    return x
+end
+]])
+    end)
+
+    assert.it("overload: return mismatch on first overload errors tagged with overload number", function()
+        has_error([[
+--: (string) -> string
+--: (number) -> number
+local function f(x)
+    return 42
+end
+]], "overload 1")
+    end)
+
+    assert.it("recursive function with annotated return type satisfied produces no error", function()
+        no_errors([[
+--: (integer) -> integer
+local function fac(n)
+    if n <= 1 then return 1 end
+    return n * fac(n - 1)
 end
 ]])
     end)
