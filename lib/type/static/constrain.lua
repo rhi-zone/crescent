@@ -1118,7 +1118,17 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     ctx.return_vars[#ctx.return_vars + 1] = push_ret_id
 
     gen_prescan_block(ctx, bs, bl)
-    gen_block(ctx, bs, bl)
+    local definitely_returning = gen_block(ctx, bs, bl)
+
+    -- If the function has an annotation and the body does not definitely return on
+    -- all paths, emit an implicit C_RETURN(nil, ret_var) for the fall-through path.
+    -- This makes the solver see nil as a possible return value, which will conflict
+    -- with a non-nil annotated return type and report a missing-return error.
+    -- Unannotated functions are skipped: they infer their return type from actual
+    -- returns, so adding nil would be overly noisy.
+    if has_ann_fn and not definitely_returning then
+        emit(ctx, { C_RETURN, ctx.T_NIL, push_ret_id, 0, 0 })
+    end
 
     ctx.return_vars[#ctx.return_vars] = nil
     ctx.scope = saved
@@ -1430,11 +1440,76 @@ end
 -- Block / statement generation
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer, integer) -> ()
+-- Returns true if stmt nid is an expression-statement that calls a never-returning
+-- function (i.e. a function whose return type is T_NEVER, such as error()).
+-- Uses the current ctx.scope to look up the callee's type.
+local function is_never_call_stmt(ctx, nid)
+    local sn = ctx.nodes:get(nid)
+    if sn.kind ~= NODE_EXPR_STMT then return false end
+    local expr_nid = sn.data[0]
+    local en = ctx.nodes:get(expr_nid)
+    if en.kind ~= NODE_CALL_EXPR then return false end
+    local callee_nid = en.data[0]
+    local cn = ctx.nodes:get(callee_nid)
+    if cn.kind ~= NODE_IDENTIFIER then return false end
+    local fn_tid = env_mod.lookup(ctx.scope, cn.data[0])
+    if not fn_tid then return false end
+    fn_tid = types_mod.find(ctx, fn_tid)
+    local ft = ctx.types:get(fn_tid)
+    if not ft or ft.tag ~= TAG_FUNCTION then return false end
+    -- Check first return type is T_NEVER (data[3] = ret count, data[2] = ret list start).
+    if ft.data[3] < 1 then return false end
+    local ret0 = types_mod.find(ctx, ctx.lists:get(ft.data[2]))
+    return ret0 == ctx.T_NEVER
+end
+
+-- Returns true if the block is definitely returning (every path exits via return or
+-- a call to a never-returning function such as error()).
+-- A block is definitely returning if:
+--   1. It contains a return statement, OR
+--   2. It contains a call to a never-returning function (e.g. error()), OR
+--   3. Its last statement is an if-statement where there is an else branch and
+--      ALL branches are definitely returning (recursive).
+-- This is conservative: only return/never-call/if-all-branches are tracked.
+local function is_definitely_returning(ctx, bs, bl)
+    if bl == 0 then return false end
+    for i = bs, bs + bl - 1 do
+        local nid = ctx.ast_lists:get(i)
+        local sn  = ctx.nodes:get(nid)
+        if sn.kind == NODE_RETURN_STMT then
+            return true
+        end
+        if is_never_call_stmt(ctx, nid) then
+            return true
+        end
+        if sn.kind == NODE_IF_STMT and i == bs + bl - 1 then
+            -- Last statement is an if: check all branches recursively.
+            local clause_start = sn.data[0]
+            local clause_count = sn.data[1]
+            local has_else     = false
+            local all_exit     = true
+            for j = clause_start, clause_start + clause_count - 1 do
+                local cn          = ctx.nodes:get(ctx.ast_lists:get(j))
+                local test_nid    = cn.data[0]
+                local block_start = cn.data[1]
+                local block_len   = cn.data[2]
+                if test_nid < 0 then has_else = true end
+                if not is_definitely_returning(ctx, block_start, block_len) then
+                    all_exit = false
+                end
+            end
+            if has_else and all_exit then return true end
+        end
+    end
+    return false
+end
+
+--: (Ctx, integer, integer) -> boolean
 gen_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
         gen_stmt(ctx, ctx.ast_lists:get(i))
     end
+    return is_definitely_returning(ctx, bs, bl)
 end
 
 -- If all fields of a table literal are same-kind literals (all LIT_INTEGER or all LIT_STRING),

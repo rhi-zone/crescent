@@ -1479,16 +1479,12 @@ end
     end)
 
     assert.it("conditional return: one path returns correct, other falls through", function()
-        -- BUG: If function is annotated -> string but one path doesn't return,
-        -- the implicit nil return should conflict with the annotation.
-        -- Currently the checker does not detect missing returns on non-returning branches.
-        -- Documenting current behavior: no error produced.
-        no_errors([[
+        has_error([[
 --: (boolean) -> string
 local function f(b)
     if b then return "yes" end
 end
-]])
+]], "")
     end)
 end)
 
