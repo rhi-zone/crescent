@@ -313,6 +313,9 @@ local function build_templates()
         [E.NON_EXHAUSTIVE]        = function(a)
             return "non-exhaustive match on '" .. a.name .. "': unhandled " .. a.remaining
         end,
+        [E.FIELD_ON_PRIMITIVE]    = function(a)
+            return "field access on `" .. a.t .. "`: `" .. a.t .. "` cannot have fields"
+        end,
     }
 end
 

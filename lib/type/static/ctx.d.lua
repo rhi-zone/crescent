@@ -57,7 +57,7 @@
 -- Diagnostic error codes (defs.E)
 ---------------------------------------------------------------------------
 
---:: DiagCodes = { FIELD_NOT_FOUND: integer, CALL_ARG_MISMATCH: integer, CALL_ARG_MISSING: integer, ARITH_TYPE: integer, LENGTH_TYPE: integer, COMPARE_TYPE: integer, COMPARE_CROSS: integer, CONCAT_TYPE: integer, UNHANDLED_EXPR: integer, UNKNOWN_IDENTIFIER: integer, VARARG_OUTSIDE_FN: integer, BINARY_OP_UNKNOWN: integer, TYPE_MISMATCH: integer, ASSIGN_MISMATCH: integer, FIELD_REASSIGN: integer, INDEX_ASSIGN_MISMATCH: integer, NO_MATCHING_OVERLOAD: integer, UNION_CALL_MISMATCH: integer, CANNOT_CALL: integer, METHOD_NOT_FOUND: integer, UNNAMED_PARAMS: integer, EXPLICIT_ANY: integer, FIELD_READONLY: integer, NON_EXHAUSTIVE: integer }
+--:: DiagCodes = { FIELD_NOT_FOUND: integer, CALL_ARG_MISMATCH: integer, CALL_ARG_MISSING: integer, ARITH_TYPE: integer, LENGTH_TYPE: integer, COMPARE_TYPE: integer, COMPARE_CROSS: integer, CONCAT_TYPE: integer, UNHANDLED_EXPR: integer, UNKNOWN_IDENTIFIER: integer, VARARG_OUTSIDE_FN: integer, BINARY_OP_UNKNOWN: integer, TYPE_MISMATCH: integer, ASSIGN_MISMATCH: integer, FIELD_REASSIGN: integer, INDEX_ASSIGN_MISMATCH: integer, NO_MATCHING_OVERLOAD: integer, UNION_CALL_MISMATCH: integer, CANNOT_CALL: integer, METHOD_NOT_FOUND: integer, UNNAMED_PARAMS: integer, EXPLICIT_ANY: integer, FIELD_READONLY: integer, NON_EXHAUSTIVE: integer, FIELD_ON_PRIMITIVE: integer }
 
 ---------------------------------------------------------------------------
 -- defs module type: all integer constants plus the E table.
