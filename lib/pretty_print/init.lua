@@ -123,8 +123,9 @@ mod.pretty_print_ = pretty_print_
 --: (any) -> string
 mod.uneval = function(value)
 	local parts = {} --[[@type string[] ]]
-	local write = function(part) parts[parts + 1] = part end
+	local write = function(...) for i = 1, select("#", ...) do parts[#parts + 1] = tostring(select(i, ...)) end end
 	pretty_print_(value, write, true)
+	return table.concat(parts)
 end
 --: (...any) -> nil
 mod.pretty_print = function(...)
