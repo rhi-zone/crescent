@@ -77,7 +77,7 @@ mod.len = function (s, i, j)
 		if i <= j then
 			-- predicted length
 			local plen = high_nibble_to_length[rshift(b, 4)]
-			if plen == 0 or plen == 4 and band(b, 0x40) == 0x40 then return nil, i end
+			if plen == 0 or b >= 0xf8 then return nil, i end
 			for k = i + 1, i + plen - 1 do
 				if band(byte(s, k), 0xc0) ~= 0x80 then return nil, i end
 			end
@@ -95,7 +95,7 @@ mod.codepoint = function (s, i, j)
 	if i < 0 then i = #s + i + 1 end
 	j = j or i
 	if j < 0 then j = #s + j + 1 end
-	if band(byte(s, i), 0xc0) == 0x80 then return error("invalid byte sequence at " .. i) end
+	if band(byte(s, i), 0xc0) == 0x80 then return nil, "invalid UTF-8 sequence" end
 	local cs = {}
 	while i <= j do
 		local b = byte(s, i)
@@ -103,14 +103,15 @@ mod.codepoint = function (s, i, j)
 		while i <= j and band(b, 0x80) == 0 do cs[#cs+1] = b; i = i + 1; b = byte(s, i) end
 		if i <= j then
 			local plen = high_nibble_to_length[rshift(b, 4)]
-			if plen == 0 or plen == 4 and band(b, 0x40) == 0x40 then error("invalid byte sequence at " .. i) end
-			local c = bor(length_to_signifier[plen], band(length_to_mask[plen], b))
+			if plen == 0 or b >= 0xf8 then return nil, "invalid UTF-8 sequence" end
+			local c = band(length_to_mask[plen], b)
 			for k = i + 1, i + plen - 1 do
 				local b2 = byte(s, k)
-				if band(b2, 0xc0) ~= 0x80 then return error("invalid byte sequence at " .. k) end
+				if band(b2, 0xc0) ~= 0x80 then return nil, "invalid UTF-8 sequence" end
 				c = bor(lshift(c, 6), band(b2, 0x3f))
 			end
 			cs[#cs+1] = c
+			i = i + plen
 		end
 	end
 	return unpack(cs)
@@ -122,13 +123,14 @@ local codes_iter = function (s, p)
 	else p = p + high_nibble_to_length[rshift(byte(s, p), 4)] end
 	if p > #s then return end
 	local b = byte(s, p)
-	if b <= 0xff then return p, b end
+	if b < 0x80 then return p, b end
 	local plen = high_nibble_to_length[rshift(b, 4)]
-	if plen == 0 or plen == 4 and band(b, 0x40) == 0x40 then error("invalid byte sequence at " .. p) end
-	local c = bor(length_to_signifier[plen], band(length_to_mask[plen], b))
+	-- invalid byte sequence: stop iteration rather than throwing (iterators cannot return errors)
+	if plen == 0 or b >= 0xf8 then return nil end
+	local c = band(length_to_mask[plen], b)
 	for k = p + 1, p + plen - 1 do
 		local b2 = byte(s, k)
-		if band(b2, 0xc0) ~= 0x80 then return error("invalid byte sequence at " .. k) end
+		if band(b2, 0xc0) ~= 0x80 then return nil end
 		c = bor(lshift(c, 6), band(b2, 0x3f))
 	end
 	return p, c
