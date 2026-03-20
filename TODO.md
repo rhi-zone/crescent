@@ -8,14 +8,22 @@
   Uniquely: **Hoogle-style type search** — parse a query type annotation, unify against every
   exported binding in the index using the existing unify.lua engine. The hard part (type inference)
   is already done. Three sub-projects:
+  - [x] Docgen tool (`lib/doc/`) — extract `---` doc comments + inferred types → JSON/Markdown.
+    `doc.generate(file)` / `doc.generate_string(src)` / `doc.generate_package(dir)`.
+    CLI: `luajit lib/doc/cli.lua [--format json|text|markdown] [--package dir] <file>...`
+    Filters `_`-prefixed exports, extracts parameter names, batch mode.
+  - [x] Type search library (`lib/type/search/`) — Hoogle-style: parse query type annotation,
+    unify against exports using try_unify. `search.build_index(files)` / `search.query(type_str, index)`.
+    CLI: `luajit lib/type/search/cli.lua "(string) -> string" <files...>`
+  - [ ] Type search improvements:
+    - Unseal mode (`{ unseal = true }`) — search through $Opaque wrappers
+    - Opaque pattern queries — `$Opaque<string>` means "any opaque wrapping string"
+    - Accept type_id + ctx as query (programmatic, not just strings)
+    - Subtype ranking (exact > subtype > supertype, currently binary)
+    - Arity pre-filtering before check_string (avoid typechecker for obvious non-matches)
+    - Acceleration structures for registry-scale indexes (bloom filter, inverted index)
+    - Persistent index — serialize to disk, reload without re-typechecking
   - [ ] Stabilise `--dump` output as machine-readable JSON (exported bindings + type sigs)
-  - [ ] Docgen tool (`lib/doc/`) — extract `---` doc comments + inferred types → JSON/HTML.
-    Performance bar: rustdoc-competitive cold-start. Driven by the typechecker, so incremental
-    caching via CRI applies. Output formats: JSON (for registry index), HTML (for docs site),
-    Markdown (for GitHub rendering).
-  - [ ] Type search index — at publish time, serialize all exported function types to index;
-    search = unify(query_type, candidate) over all entries. Backend can be the typechecker
-    itself running as a query engine (no new unification logic needed).
   - [ ] Static docs site (bun) — renders docgen JSON; search calls type-search endpoint or
     runs unification client-side via WASM build of the typechecker.
   - [ ] GitHub Action — on release tag: run typechecker + docgen, publish JSON to index.

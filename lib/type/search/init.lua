@@ -1,6 +1,20 @@
 -- lib/type/search/init.lua
 -- Hoogle-style type search: query by type signature across modules.
 -- Uses the typechecker for structural matching via try_unify.
+--
+-- TODO: immediate improvements
+-- 1. Accept type_id + ctx as query (not just strings) — programmatic queries
+-- 2. Unseal mode: search.query("(string) -> string", index, { unseal = true })
+--    ignores $Opaque wrappers, unifies against underlying types
+-- 3. Opaque pattern queries: searching for $Opaque<string> means "any opaque
+--    wrapping string" (match the type constructor shape, not a specific site)
+-- 4. Subtype ranking: exact match > subtype > supertype (currently binary)
+-- 5. Arity pre-filtering: reject candidates with wrong param count before
+--    check_string (avoids typechecker overhead for obvious non-matches)
+-- 6. Acceleration structures for large indexes: bloom filter on type tags,
+--    inverted index from tag → exports, pre-cluster by arity
+-- 7. Persistent index: serialize index to disk (JSON/binary), reload without
+--    re-typechecking all files — needed for registry-scale search
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
