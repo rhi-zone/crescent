@@ -8,6 +8,47 @@
 - **LSP**: incremental reparse, daemon mode, same core as batch checker
 - **Hackable**: pure LuaJIT + FFI, no build step, no native dependencies beyond libc
 - **Complex type system**: generics, nominal types, tuples, narrowing, discriminated unions, match types, intrinsics, meta slots — comparable to TypeScript in expressiveness
+- **Unified static analysis**: tsc + eslint + knip in one tool — type errors, lint rules, and dead code in a single pass over the same AST
+
+## One tool, not three
+
+The distinction between type checker, linter, and dead-code eliminator is a
+historical accident — all three are static analysis over the same AST with the
+same type information. Splitting them (tsc + eslint + knip, javac + checkstyle,
+go build + go vet + staticcheck) forces each tool to partially re-implement the
+others and produces false positives where type information would resolve ambiguity.
+
+Crescent unifies them:
+
+**Type errors** (what typecheckers do)
+- Wrong argument type, missing field, unresolvable name, etc.
+
+**Lint rules** (what eslint/clippy/go vet do)
+- Unannotated public export on `M`
+- `any` in annotation without justification
+- `assert()` in non-test library code
+- Bare `bit.*` globals without `require("bit")`
+- Predicate name (`is_*`/`has_*`) returning non-boolean — requires type info, can't
+  be done correctly in a regex-based lint tool
+- Constructor not named `M.new` — requires knowing it returns a fresh table
+- Overload signatures inconsistent with body — TypeScript doesn't check this;
+  we do: every declared overload is verified against the function body independently
+- `M.create`/`M.destroy` naming violations — convention enforcement
+- `require` calls inside functions (not at top-level) — performance smell
+
+**Dead code** (what knip does)
+- Exported bindings never imported anywhere in the project
+- Local variables assigned but never read
+- Functions defined but never called
+- `require()`d modules whose exports are never accessed
+
+**Policy layer**
+Rules have severity (error / warning / off) and are configurable per-directory
+via a policy file (`.crescent` in the project root or any subdirectory). `lib/`
+gets the strict stdlib policy. Application code gets a looser policy. Vendored
+code (if any exists temporarily) is excluded. This replaces the need for a
+separate lint tool entirely — `lib/stdlib/lint.lua` was a prototype to identify
+the gap; the typechecker is the destination.
 
 ## Non-goals
 
