@@ -1212,15 +1212,24 @@ local n = s:len()
 end)
 
 assert.describe("soundness: logical operators", function()
-    assert.it("and short-circuit (narrowing limitation)", function()
-        -- BUG: `x and x .. "!"` — the checker does not narrow x in the RHS of `and`.
-        -- x is still string|nil on the right side, so concat fails.
-        -- Documenting current behavior: this produces an error.
-        has_error([[
+    assert.it("and short-circuit narrowing", function()
+        -- `x and x .. "!"` — x is narrowed to string on the RHS of `and`.
+        no_errors([[
 --: string | nil
 local x = "hello"
 local y = x and x .. "!"
-]], "cannot concatenate")
+]])
+        -- number|nil: x is narrowed to number on RHS
+        no_errors([[
+--: number | nil
+local x = 1
+local y = x and x + 1
+]])
+        -- Neither operand is a union: no change, no error
+        no_errors([[
+local x = "hello"
+local y = x and x .. "!"
+]])
     end)
 
     assert.it("or as default value", function()

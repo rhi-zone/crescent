@@ -851,7 +851,16 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
 
     if op == OP_AND then
         gen_expr(ctx, n.data[1])
+        -- Narrow the scope for the RHS: if LHS is truthy, any nil/false has been filtered.
+        -- e.g. `x and x .. "!"` where x: string|nil — x is string when evaluating RHS.
+        local narrow_mod = require("lib.type.static.narrow")
+        local narrowed = narrow_mod.narrow_scope(ctx, n.data[1], true)
+        local saved_scope = ctx.scope
+        if next(narrowed) then
+            ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
+        end
         local right_r = types_mod.find(ctx, gen_expr(ctx, n.data[2]))
+        ctx.scope = saved_scope
         return types_mod.make_union(ctx, { ctx.T_NIL, right_r })
     end
 
