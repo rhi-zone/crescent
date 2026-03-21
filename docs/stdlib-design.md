@@ -84,10 +84,12 @@ Combinator utilities can use this shape:
 - **map** and **filter**: fully stateless — `f` has no upvalues and `s` is
   immutable. `s = {iter_f, iter_s, transform_or_pred}`; the underlying
   iterator's control variable passes through unchanged as `var`.
-- **zip** and **chain**: `f` still has no upvalues, but `s` must be mutable
-  — zip needs two control variables and the `for` loop only threads one
-  through. These are *`f`-stateless* (one shared function, no upvalues) but
-  not *purely functional* (`s` mutates each step).
+- **zip** and **chain**: `f` still has no upvalues. Two control variables are
+  needed; encode them as a tuple table in `var`. Mutate the tuple in place
+  and return the same reference — the `for` loop reassigns `var` to the same
+  pointer, so no allocation per step. `s` stays immutable (invariant state,
+  as Lua intends); the cost is the first exposed loop variable being the
+  internal tuple, which callers discard with `_`.
 
 **Why stateless:** the allocation is in the closure, not the protocol.
 Purely-functional iterators like `next` pay nothing. `f`-stateless iterators
