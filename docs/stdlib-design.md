@@ -66,15 +66,22 @@ additional values). Iteration stops when the first return value is nil.
 for i, x in next, t do ... end
 ```
 
-A stateful closure works as a degenerate triple (state and control are ignored),
-but it allocates. **Hot paths in the stdlib use the triple directly.** Combinator
-utilities (map, filter, zip, chain) exist as conveniences but are not on the
-critical path — callers that care about allocation use the triple.
+Two iterator shapes both use the triple protocol:
 
-**Why the triple:** it is what LuaJIT's `for` desugars to. Wrapping it in a
-closure loses the allocation benefit and breaks the JIT's iterator specialization.
-Stateful closures are fine for ergonomics-sensitive code; the triple is for
-throughput-sensitive code.
+- **Stateless**: `f` has no upvalues; all iteration state lives in `s` and `var`.
+  Zero allocation. `next, t, nil` is the canonical example — `next` is a single
+  function reused across every table iteration.
+- **Stateful**: `f` is a closure that captures mutable upvalues. Allocates one
+  closure at iterator creation time. `s` and `var` are often nil/unused.
+
+**Hot paths in the stdlib use stateless iterators.** Combinator utilities (map,
+filter, zip, chain) exist as conveniences but are not on the critical path —
+callers that care about allocation use stateless iterators directly.
+
+**Why stateless:** the allocation is in the closure, not the triple. Using a
+closure as `f` still uses the triple protocol; it just pays allocation cost.
+Stateless iterators are zero-cost after the `for` setup. The JIT can also
+specialise better when `f` is a known non-closure function.
 
 ---
 
