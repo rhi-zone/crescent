@@ -82,6 +82,24 @@
   [x] dep.* coupling resolved (a79167d) — 8 dep paths across 28 files updated.
   [x] HTML docgen output (582247c) — `--format html` with inline CSS.
 
+- [ ] **Typechecker: nested generic alias application** — `Partial<Partial<T>>`
+  produces `never` even though `Partial<{a: string|nil}>` (the inner result)
+  works fine directly. The bug is in how a generic alias application passes its
+  result as the type argument to an outer alias application. Manifests with any
+  two-level `$EachField` composition. Discovered via type_complex_test.lua.
+
+- [ ] **Typechecker: recursive structural type checking** — `{ head=1, tail=99 }`
+  is accepted where `List<number>` (tail must be `List<number>?`) is expected.
+  The recursive field constraint is not enforced at depth. Likely the unification
+  of the recursive type hits the cycle guard before checking the concrete field.
+
+- [ ] **Runtime type validator** (`lib/type/runtime/`) — Zod/Typebox/Arktype-style
+  schema library: `T.string()`, `T.number()`, `T.object({...})`, `T.union([...])`,
+  `T.array(T.string())`. Returns a validator function `(value) -> true | nil, err`.
+  Pure Lua, no codegen. Key design: validators compose via the same combinators as
+  the static type system. Long-term: static typechecker infers validator types so
+  `local x = T.string():parse(v)` gives `x: string` after the call.
+
 - [ ] **Typechecker: HKT type argument extraction** — when `<F, A>(fa: F<A>)` is called
   with `Maybe<number>`, the solver can't extract `F = Maybe, A = number` from the
   expanded structural type. Once expanded, constructor/argument decomposition is lost.
