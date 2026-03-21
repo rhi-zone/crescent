@@ -801,8 +801,8 @@ f({ tag = "just", value = --[[:number]] 42 })
 ]==])
     end)
 
-    assert.it("PASS: trailing annotation on statement still works (regression)", function()
-        -- Trailing annotation should still apply to the local variable binding.
+    assert.it("PASS: trailing statement annotation unaffected (regression)", function()
+        -- Trailing --: T annotations still apply to variable bindings.
         no_error([[
 local x = 42 --: number
 local y --: number
@@ -810,12 +810,64 @@ y = x
 ]])
     end)
 
-    assert.it("ERROR: cast to wrong type is an error", function()
-        -- --[[:string]] on a table value should cause a type error.
+    assert.it("PASS: preceding-line statement annotation unaffected (regression)", function()
+        -- A preceding-line --: T annotation is a statement annotation, not an
+        -- expression cast. It binds the variable; gen_expr does not consume it.
+        no_error([[
+--: number
+local x = 42
+local y --: number
+y = x
+]])
+    end)
+end)
+
+assert.describe("inline cast: diagnostics — type mismatch is an error", function()
+    assert.it("ERROR: cast integer to string emits mismatch diagnostic", function()
+        -- C_SUB(42, string) fails — the cast is checked, not unchecked.
         has_error([==[
 --: (string) -> nil
 local function f(s) return nil end
 f(--[[:string]] 42)
+]==], "integer.*string")
+    end)
+
+    assert.it("ERROR: cast table to number emits mismatch diagnostic", function()
+        has_error([==[
+--: (number) -> nil
+local function f(n) return nil end
+f(--[[:number]] { x = 1 })
+]==], "")
+    end)
+
+    assert.it("ERROR: cast in table field to wrong type emits diagnostic", function()
+        -- --[[:string]] on a number literal in a table field should error.
+        has_error([==[
+--:: Box<T> = { value: T }
+--: (Box<string>) -> nil
+local function f(b) return nil end
+f({ value = --[[:string]] 42 })
+]==], "integer.*string")
+    end)
+
+    assert.it("ERROR: preceding-line --: T does NOT widen literals (statement only)", function()
+        -- A preceding-line annotation is a statement annotation that binds the
+        -- variable, not an expression cast. The literal type is NOT widened for
+        -- sub-expressions. For expression casts, use --[[:T]] on the same line.
+        -- Here from_maybe infers T=42 (literal) because the preceding-line
+        -- annotation is NOT picked up by gen_expr inside the table constructor.
+        has_error([==[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--: <T>(Maybe<T>, T) -> T
+local function from_maybe(m, default)
+    if m.tag == "just" then return m.value else return default end
+end
+local n = from_maybe({
+    tag = "just",
+    value =
+        --: number
+        42
+}, 0)
 ]==], "")
     end)
 end)
