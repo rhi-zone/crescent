@@ -401,6 +401,51 @@ using a slow tier without trying faster ones first violates the performance cont
 
 ---
 
+### Class pattern
+
+The single-class module pattern: `M` is both the module and the metatable.
+
+```lua
+local M = {}
+M.__index = M
+
+--: (string, number) -> M
+M.new = function(host, port)
+    return setmetatable({host = host, port = port}, M)
+end
+
+--: (M, string) -> boolean
+M.send = function(self, data)
+    -- ...
+end
+```
+
+**Why `M.new` (dot) not `M:new` (colon):** `Foo:new()` desugars to
+`Foo.new(Foo, ...)` — `self` inside the constructor is the class table, not
+the instance. This enables a subtle inheritance trick (`setmetatable({}, self)`
+produces the right instance type when called on a subclass), but `self` meaning
+the class rather than the instance is confusing. Constructors produce the object;
+they are not methods on one. `M.new` (dot) keeps `self` unambiguous.
+
+**Inheritance** — Lua's canonical form is metatable chaining:
+
+```lua
+local Derived = setmetatable({}, {__index = Base})
+Derived.__index = Derived
+
+Derived.new = function(x, y)
+    local self = Base.new(x)
+    self.y = y
+    return setmetatable(self, Derived)
+end
+```
+
+Each extra metatable level adds a lookup cost and super calls are explicit and
+verbose. **Prefer composition.** If you find yourself building a hierarchy,
+the design probably needs revisiting.
+
+---
+
 ### Resource objects
 
 Objects returned by `M.new()` that hold OS resources must implement `:close()`.
