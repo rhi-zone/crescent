@@ -948,6 +948,7 @@ function M.parse_annotations(annotations, pool, filename)
             end
         end)
         if ok and result then
+            result.col = ann.col  -- preserve source column for expression-cast lookup
             results[line] = result
         end
     end

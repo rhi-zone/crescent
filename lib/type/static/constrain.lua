@@ -757,6 +757,24 @@ gen_expr = function(ctx, nid)
         report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
         tid = ctx.T_ANY
     end
+    -- Apply inline block cast: --[[:T]] expr
+    -- Only when the annotation precedes the expression (ann.col < n.col), so
+    -- trailing annotations like `expr --: T` (used by statement handlers) are
+    -- not picked up here. Consuming prevents the cast from being applied again
+    -- to subsequent expressions on the same line.
+    if ctx.ann and n.line and n.line > 0 then
+        local consumed = ctx._ann_consumed
+        local iann = ctx.ann.results[n.line]
+        if iann and iann.kind == ANN_TYPE
+           and not (consumed and consumed[n.line])
+           and iann.col < n.col then
+            local cast_tid = resolve_annotation_type(ctx, iann.type_id)
+            emit(ctx, { C_SUB, tid, cast_tid, n.line, n.col })
+            ctx._ann_consumed = consumed or {}
+            ctx._ann_consumed[n.line] = true
+            tid = cast_tid
+        end
+    end
     -- Record location → type for --annotate mode and LSP hover.
     if n.line and n.line > 0 then
         local ta = ctx.type_at

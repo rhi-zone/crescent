@@ -589,35 +589,41 @@ end
 ]])
     end)
 
-    assert.it("PASS: from_maybe — T inferred from annotated function param", function()
-        -- Function param x has declared type number (not a literal), so T=number
-        -- and the default 0 (integer <: number) satisfies T.
+    assert.it("PASS: from_maybe — T inferred from default when nothing", function()
         no_error([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --: <T>(Maybe<T>, T) -> T
 local function from_maybe(m, default)
     if m.tag == "just" then return m.value else return default end
 end
---: (number) -> number
-local function test(x)
-    return from_maybe({ tag = "just", value = x }, 0)
-end
+local n = from_maybe({ tag = "nothing" }, 0)
 local s = from_maybe({ tag = "nothing" }, "fallback")
 ]])
     end)
 
-    assert.it("ERROR: from_maybe T mismatch between value and default", function()
+    assert.it("ERROR: from_maybe value and default types conflict", function()
         has_error([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --: <T>(Maybe<T>, T) -> T
 local function from_maybe(m, default)
     if m.tag == "just" then return m.value else return default end
 end
---: (number) -> number
-local function test(x)
-    return from_maybe({ tag = "just", value = x }, "wrong")
-end
+from_maybe({ tag = "just", value = 42 }, "wrong")
 ]], "")
+    end)
+
+    assert.it("PASS: from_maybe with --[[:T]] cast widens literal inside table constructor", function()
+        no_error([==[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--: <T>(Maybe<T>, T) -> T
+local function from_maybe(m, default)
+    if m.tag == "just" then return m.value else return default end
+end
+-- Without cast, T would be inferred as literal 42 (not number), causing a
+-- conflict with the number default 0.  The --[[:number]] cast widens 42 to
+-- number so T unifies correctly.
+local n = from_maybe({ tag = "just", value = --[[:number]] 42 }, 0)
+]==])
     end)
 end)
 
@@ -759,7 +765,63 @@ x = { name = "bob" }
 end)
 
 -- ---------------------------------------------------------------------------
--- 8. Complex interactions
+-- 8. Inline block cast --[[:T]] expr
+-- ---------------------------------------------------------------------------
+
+assert.describe("inline cast: --[[:T]] widens sub-expressions", function()
+    assert.it("PASS: cast in table constructor field widens literal", function()
+        -- Without cast, { value = 42 } infers value: 42 (literal).
+        -- With --[[:number]] the field is number, enabling T to unify as number.
+        no_error([==[
+--:: Box<T> = { value: T }
+--: <T>(Box<T>, T) -> T
+local function get(box, default)
+    if box.value ~= nil then return box.value else return default end
+end
+local n = get({ value = --[[:number]] 42 }, 0)
+]==])
+    end)
+
+    assert.it("PASS: cast in function argument list widens literal", function()
+        no_error([==[
+--: (number) -> number
+local function double(x) return x * 2 end
+local n = double(--[[:number]] 42)
+]==])
+    end)
+
+    assert.it("PASS: multiple fields on same line — cast applies only to target", function()
+        -- The --[[:number]] cast is after tag's value "just", so it applies
+        -- only to 42 (which follows it), not to "just".
+        no_error([==[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--: (Maybe<number>) -> nil
+local function f(m) return nil end
+f({ tag = "just", value = --[[:number]] 42 })
+]==])
+    end)
+
+    assert.it("PASS: trailing annotation on statement still works (regression)", function()
+        -- Trailing annotation should still apply to the local variable binding.
+        no_error([[
+local x = 42 --: number
+local y --: number
+y = x
+]])
+    end)
+
+    assert.it("ERROR: cast to wrong type is an error", function()
+        -- --[[:string]] on a table value should cause a type error.
+        has_error([==[
+--: (string) -> nil
+local function f(s) return nil end
+f(--[[:string]] 42)
+]==], "")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- 10. Complex interactions
 -- ---------------------------------------------------------------------------
 
 assert.describe("complex: union of recursive types", function()
@@ -783,7 +845,7 @@ x = { tag = "nothing" }
     end)
 end)
 
-assert.describe("complex: ADT.define runtime integration", function()
+assert.describe("ADT.define runtime integration", function()
     assert.it("PASS: ADT.define call accepted without error", function()
         no_error([[
 local ADT = require("lib.fp.adt")
