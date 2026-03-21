@@ -652,6 +652,31 @@ function Lexer:_lex()
                     if not self:_capture_block_annotation(sep, ann_line, ann_col) then
                         -- Regular long comment: skip content until close
                         self:_skip_long_comment(sep)
+                    else
+                        -- For ANN_TYPE expression casts: if the following expression
+                        -- starts on a different line than the opening --[[, re-attach
+                        -- the annotation to that line so gen_expr's same-line lookup
+                        -- can find it.  col=0 signals "preceding" cast (any valid
+                        -- expression has col >= 1, so iann.col < n.col always holds).
+                        local stored = self.annotations[ann_line]
+                        if stored and stored.kind == defs.ANN_TYPE then
+                            -- Peek ahead past whitespace/newlines without consuming.
+                            local pb = self.b
+                            local pp = self.pos
+                            local pl = self.line
+                            local src2 = self.src
+                            local srclen2 = self.srclen
+                            while pb ~= EOF and (is_space(pb) or is_newline(pb)) do
+                                if is_newline(pb) then pl = pl + 1 end
+                                pb = pp < srclen2 and src2[pp] or EOF
+                                pp = pp + 1
+                            end
+                            if pl ~= ann_line and pb ~= EOF then
+                                self.annotations[ann_line] = nil
+                                stored.col = 0
+                                self.annotations[pl] = stored
+                            end
+                        end
                     end
                 else
                     -- Not a long comment, check for line annotation

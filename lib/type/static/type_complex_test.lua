@@ -820,6 +820,43 @@ local y --: number
 y = x
 ]])
     end)
+
+    assert.it("PASS: multi-line block cast --[[:T]] on separate lines from expr", function()
+        -- The closing ]] and the expression are on different lines.
+        -- The annotation re-attaches to the expression's line automatically.
+        no_error([==[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--: <T>(Maybe<T>, T) -> T
+local function from_maybe(m, default)
+    if m.tag == "just" then return m.value else return default end
+end
+local n = from_maybe({ tag = "just", value = --[[:
+number
+]] 42 }, 0)
+]==])
+    end)
+
+    assert.it("PASS: multi-line block cast with many blank lines before expr", function()
+        -- The user's original case: --[[ on one line, : on another, number
+        -- on another, ]] on another, many blank lines, then 42 on its own line.
+        no_error([==[
+--:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
+--: <T>(Maybe<T>, T) -> T
+local function from_maybe(m, default)
+    if m.tag == "just" then return m.value else return default end
+end
+local n = from_maybe({ tag = "just", value = (--[[
+:
+
+number
+
+]]
+
+42
+
+) }, 0)
+]==])
+    end)
 end)
 
 assert.describe("inline cast: diagnostics — type mismatch is an error", function()
@@ -847,6 +884,16 @@ f(--[[:number]] { x = 1 })
 --: (Box<string>) -> nil
 local function f(b) return nil end
 f({ value = --[[:string]] 42 })
+]==], "integer.*string")
+    end)
+
+    assert.it("ERROR: multi-line block cast to wrong type emits diagnostic", function()
+        has_error([==[
+--: (string) -> nil
+local function f(s) return nil end
+f(--[[:
+string
+]] 42)
 ]==], "integer.*string")
     end)
 
