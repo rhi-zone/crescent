@@ -68,21 +68,32 @@ for i, x in next, t do ... end
 
 Two iterator shapes both use the triple protocol:
 
-- **Stateless**: `f` has no upvalues; all iteration state lives in `s` and `var`.
-  Zero allocation. `next, t, nil` is the canonical example — `next` is a single
-  function reused across every table iteration.
-- **Stateful**: `f` is a closure that captures mutable upvalues. Allocates one
-  closure at iterator creation time. `s` and `var` are often nil/unused.
+- **Stateless**: `f` has no upvalues; all state lives in `s` and `var`.
+  `next, t, nil` is the canonical example — `next` is a single function
+  reused across every table iteration. Zero per-iterator allocation.
+- **Closure-based**: `f` is a closure capturing mutable upvalues. Allocates
+  one closure at iterator creation time. `s` and `var` are often nil/unused.
 
-**Prefer stateless iterators everywhere.** Stateful closures are never necessary
-— complex state can always be placed in a mutable table passed as `s`. They are
-a convenience, not a requirement. Combinator utilities (map, filter, zip, chain)
-exist for ergonomics but should use stateless iterators internally.
+**Prefer stateless iterators.** A closure is never necessary — any state can
+be placed in a table passed as `s`. The allocation is then one table (same
+order as a closure) but `f` itself is a single shared function rather than a
+fresh allocation per iterator.
 
-**Why stateless:** the allocation is in the closure, not the triple. Using a
-closure as `f` still uses the triple protocol; it just pays allocation cost.
-Stateless iterators are zero-cost after the `for` setup. The JIT can also
-specialise better when `f` is a known non-closure function.
+Combinator utilities can use this shape:
+
+- **map** and **filter**: fully stateless — `f` has no upvalues and `s` is
+  immutable. `s = {iter_f, iter_s, transform_or_pred}`; the underlying
+  iterator's control variable passes through unchanged as `var`.
+- **zip** and **chain**: `f` still has no upvalues, but `s` must be mutable
+  — zip needs two control variables and the `for` loop only threads one
+  through. These are *`f`-stateless* (one shared function, no upvalues) but
+  not *purely functional* (`s` mutates each step).
+
+**Why stateless:** the allocation is in the closure, not the protocol.
+Purely-functional iterators like `next` pay nothing. `f`-stateless iterators
+pay one table allocation at creation. Closure-based iterators pay one closure
+allocation at creation. The JIT can also specialise better when `f` is a
+known non-closure function.
 
 ---
 
