@@ -35,6 +35,7 @@ local NODE_BREAK_STMT  = defs.NODE_BREAK_STMT
 local NODE_EXPR_STMT   = defs.NODE_EXPR_STMT
 local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL
 local NODE_CHUNK       = defs.NODE_CHUNK
+local NODE_CAST_EXPR   = defs.NODE_CAST_EXPR
 
 local LIT_STRING    = defs.LIT_STRING
 local LIT_NUMBER    = defs.LIT_NUMBER
@@ -757,24 +758,6 @@ gen_expr = function(ctx, nid)
         report(ctx, n.line, n.col, E.UNHANDLED_EXPR, { kind = n.kind })
         tid = ctx.T_ANY
     end
-    -- Apply inline block cast: --[[:T]] expr
-    -- Only when the annotation precedes the expression (ann.col < n.col), so
-    -- trailing annotations like `expr --: T` (used by statement handlers) are
-    -- not picked up here. Consuming prevents the cast from being applied again
-    -- to subsequent expressions on the same line.
-    if ctx.ann and n.line and n.line > 0 then
-        local consumed = ctx._ann_consumed
-        local iann = ctx.ann.results[n.line]
-        if iann and iann.kind == ANN_TYPE
-           and not (consumed and consumed[n.line])
-           and iann.col < n.col then
-            local cast_tid = resolve_annotation_type(ctx, iann.type_id)
-            emit(ctx, { C_SUB, tid, cast_tid, n.line, n.col })
-            ctx._ann_consumed = consumed or {}
-            ctx._ann_consumed[n.line] = true
-            tid = cast_tid
-        end
-    end
     -- Record location → type for --annotate mode and LSP hover.
     if n.line and n.line > 0 then
         local ta = ctx.type_at
@@ -1452,6 +1435,17 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     emit(ctx, { C_CALLABLE, inst_method, arg_tids, ret, n.line, n.col })
     ctx._last_multi_return = { ret }
     return ret
+end
+
+ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
+    local n = ctx.nodes:get(nid)
+    local inner_tid = gen_expr(ctx, n.data[0])
+    if not ctx.ann then return inner_tid end
+    local ann = ctx.ann.results[n.data[1]]  -- n.data[1] is the negative cast_id
+    if not ann or ann.kind ~= ANN_TYPE then return inner_tid end
+    local cast_tid = resolve_annotation_type(ctx, ann.type_id)
+    emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col })
+    return cast_tid
 end
 
 -- ---------------------------------------------------------------------------

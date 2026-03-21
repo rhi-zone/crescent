@@ -58,6 +58,7 @@ M.NODE_LABEL_STMT       = 24
 M.NODE_EXPR_STMT        = 25
 M.NODE_FUNC_DECL        = 26
 M.NODE_CHUNK            = 27
+M.NODE_CAST_EXPR        = 28
 
 -- Type tags
 M.TAG_NIL               = 0

@@ -408,10 +408,13 @@ assert.describe("lex: annotations", function()
     assert.it("captures block annotation --[[: type ]]", function()
         local L = lex.new("--[[:number]] local x = 1", "test")
         assert.eq(L.tk, defs.TK_LOCAL)
-        local ann = L.annotations[1]
-        assert.ok(ann, "annotation on line 1")
+        -- Block cast annotations are rekeyed to a unique negative ID and
+        -- signalled via _pending_cast_id so the parser can wrap NODE_CAST_EXPR.
+        local ann = L.annotations[L._cast_id_seq]
+        assert.ok(ann, "annotation stored at negative cast_id")
         assert.eq(ann.kind, defs.ANN_TYPE)
         assert.eq(ann.content, "number")
+        assert.ok(L._pending_cast_id ~= nil, "pending cast id set")
     end)
     assert.it("captures block declaration --[[:: Name = T ]]", function()
         local L = lex.new("--[[::Foo = number]] local x = 1", "test")

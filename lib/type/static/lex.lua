@@ -138,6 +138,9 @@ function M.new(source, filename, pool)
         _la_valid = false,
         -- annotations captured during lex
         annotations = {},
+        -- pending expression cast: set by block-cast lexing, consumed by parser
+        _pending_cast_id = nil,
+        _cast_id_seq = 0,
         -- save buffer for building escape-sequence strings
         _buf = {},
         _bufn = 0,
@@ -653,29 +656,16 @@ function Lexer:_lex()
                         -- Regular long comment: skip content until close
                         self:_skip_long_comment(sep)
                     else
-                        -- For ANN_TYPE expression casts: if the following expression
-                        -- starts on a different line than the opening --[[, re-attach
-                        -- the annotation to that line so gen_expr's same-line lookup
-                        -- can find it.  col=0 signals "preceding" cast (any valid
-                        -- expression has col >= 1, so iann.col < n.col always holds).
+                        -- For ANN_TYPE expression casts: rekey to a unique negative
+                        -- ID so it doesn't collide with real line numbers, and signal
+                        -- the parser to wrap the next expression in NODE_CAST_EXPR.
                         local stored = self.annotations[ann_line]
                         if stored and stored.kind == defs.ANN_TYPE then
-                            -- Peek ahead past whitespace/newlines without consuming.
-                            local pb = self.b
-                            local pp = self.pos
-                            local pl = self.line
-                            local src2 = self.src
-                            local srclen2 = self.srclen
-                            while pb ~= EOF and (is_space(pb) or is_newline(pb)) do
-                                if is_newline(pb) then pl = pl + 1 end
-                                pb = pp < srclen2 and src2[pp] or EOF
-                                pp = pp + 1
-                            end
-                            if pl ~= ann_line and pb ~= EOF then
-                                self.annotations[ann_line] = nil
-                                stored.col = 0
-                                self.annotations[pl] = stored
-                            end
+                            self._cast_id_seq = self._cast_id_seq - 1
+                            local cast_id = self._cast_id_seq
+                            self.annotations[ann_line] = nil
+                            self.annotations[cast_id] = stored
+                            self._pending_cast_id = cast_id
                         end
                     end
                 else

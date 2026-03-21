@@ -279,60 +279,64 @@ function M.parse(source, filename, pool)
 
     -- Simple expression: atoms and prefix expressions
     local function parse_simple_expr()
+        local cast_id = L._pending_cast_id
+        if cast_id then L._pending_cast_id = nil end
         local line, col = L._tk_line_out, L._tk_col_out
         local tk = L.tk
+        local inner
         if tk == defs.TK_NUMBER then
-            local n = mknode(defs.NODE_LITERAL, line, col)
-            local nn = nodes:get(n)
+            inner = mknode(defs.NODE_LITERAL, line, col)
+            local nn = nodes:get(inner)
             nn.data[0] = defs.LIT_NUMBER
             nn.data[1], nn.data[2] = double_to_i32x2(L.val)
             L:next()
-            return n
         elseif tk == defs.TK_STRING then
-            local n = mknode(defs.NODE_LITERAL, line, col)
-            nodes:get(n).data[0] = defs.LIT_STRING
-            nodes:get(n).data[1] = L.val
+            inner = mknode(defs.NODE_LITERAL, line, col)
+            nodes:get(inner).data[0] = defs.LIT_STRING
+            nodes:get(inner).data[1] = L.val
             L:next()
-            return n
         elseif tk == defs.TK_NIL then
-            local n = mknode(defs.NODE_LITERAL, line, col)
-            nodes:get(n).data[0] = defs.LIT_NIL
+            inner = mknode(defs.NODE_LITERAL, line, col)
+            nodes:get(inner).data[0] = defs.LIT_NIL
             L:next()
-            return n
         elseif tk == defs.TK_TRUE then
-            local n = mknode(defs.NODE_LITERAL, line, col)
-            nodes:get(n).data[0] = defs.LIT_BOOLEAN
-            nodes:get(n).data[1] = 1
+            inner = mknode(defs.NODE_LITERAL, line, col)
+            nodes:get(inner).data[0] = defs.LIT_BOOLEAN
+            nodes:get(inner).data[1] = 1
             L:next()
-            return n
         elseif tk == defs.TK_FALSE then
-            local n = mknode(defs.NODE_LITERAL, line, col)
-            nodes:get(n).data[0] = defs.LIT_BOOLEAN
-            nodes:get(n).data[1] = 0
+            inner = mknode(defs.NODE_LITERAL, line, col)
+            nodes:get(inner).data[0] = defs.LIT_BOOLEAN
+            nodes:get(inner).data[1] = 0
             L:next()
-            return n
         elseif tk == defs.TK_DOTS then
-            local n = mknode(defs.NODE_VARARG_EXPR, line, col)
+            inner = mknode(defs.NODE_VARARG_EXPR, line, col)
             L:next()
-            return n
         elseif tk == defs.TK_FUNCTION then
             L:next()
             local ps, pl, bs, bl, lastline, has_vararg =
                 parse_params_and_body(false)
-            local n = mknode(defs.NODE_FUNC_EXPR, line, col)
-            local nd = nodes:get(n)
+            inner = mknode(defs.NODE_FUNC_EXPR, line, col)
+            local nd = nodes:get(inner)
             nd.data[0] = ps
             nd.data[1] = pl
             nd.data[2] = bs
             nd.data[3] = bl
             nd.data[4] = lastline
             if has_vararg then nd.flags = defs.FLAG_VARARG end
-            return n
         elseif tk == defs.TK_LBRACE then
-            return parse_table_expr()
+            inner = parse_table_expr()
         else
-            return parse_suffixed_expr()
+            inner = parse_suffixed_expr()
         end
+        if cast_id then
+            local cn = mknode(defs.NODE_CAST_EXPR, line, col)
+            local nd = nodes:get(cn)
+            nd.data[0] = inner
+            nd.data[1] = cast_id
+            return cn
+        end
+        return inner
     end
 
     -- Unary expression
@@ -682,6 +686,7 @@ function M.parse(source, filename, pool)
     end
 
     parse_stmt = function()
+        L._pending_cast_id = nil  -- clear any cast before a statement keyword
         while L:opt(defs.TK_SEMICOLON) do end
         local tk = L.tk
         if tk == defs.TK_IF then return parse_if_stmt()
