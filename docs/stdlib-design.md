@@ -74,9 +74,10 @@ Two iterator shapes both use the triple protocol:
 - **Stateful**: `f` is a closure that captures mutable upvalues. Allocates one
   closure at iterator creation time. `s` and `var` are often nil/unused.
 
-**Hot paths in the stdlib use stateless iterators.** Combinator utilities (map,
-filter, zip, chain) exist as conveniences but are not on the critical path —
-callers that care about allocation use stateless iterators directly.
+**Prefer stateless iterators everywhere.** Use a stateful closure only when the
+iteration state cannot be encoded in `s` and `var` — not as a convenience trade-off.
+Combinator utilities (map, filter, zip, chain) exist for ergonomics but internally
+should use stateless iterators where possible.
 
 **Why stateless:** the allocation is in the closure, not the triple. Using a
 closure as `f` still uses the triple protocol; it just pays allocation cost.
