@@ -21,6 +21,61 @@ local function glob_lua_files(dir)
     return files
 end
 
+-- ── dump helpers ──────────────────────────────────────────────────────────────
+
+-- Escape a string for JSON output.
+local function json_str(s)
+    return '"' .. s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t') .. '"'
+end
+
+--- Return { file, bindings, ["return"] } for filename, or nil if check fails.
+-- bindings is an array of { name, type } sorted by name.
+function M.dump_one(filename)
+    local check_mod  = require("lib.type.static.check")
+    local intern_mod = require("lib.type.static.intern")
+    local types_mod  = require("lib.type.static.types")
+    local _, ctx = check_mod.check_file(filename)
+    if not ctx then return nil end
+    local list = {}
+    for name_id, type_id in pairs(ctx.scope.bindings) do
+        local name = intern_mod.get(ctx.pool, name_id) or tostring(name_id)
+        list[#list + 1] = { name = name, type = types_mod.display(ctx, types_mod.find(ctx, type_id)) }
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    local result = { file = filename, bindings = list }
+    local rets = ctx.module_return_tids
+    if rets and #rets > 0 and rets[1] and #rets[1] > 0 then
+        result["return"] = types_mod.display(ctx, types_mod.find(ctx, rets[1][1]))
+    end
+    return result
+end
+
+--- Dump a list of files as a JSON array string.
+-- Each element: { "file", "bindings": [{name, type},...], "return"? }
+function M.dump_json(filenames)
+    local parts = { "[\n" }
+    local first = true
+    for _, filename in ipairs(filenames) do
+        local r = M.dump_one(filename)
+        if r then
+            if not first then parts[#parts + 1] = ",\n" end
+            first = false
+            parts[#parts + 1] = '  {"file":' .. json_str(r.file) .. ',"bindings":['
+            for j, b in ipairs(r.bindings) do
+                if j > 1 then parts[#parts + 1] = ',' end
+                parts[#parts + 1] = '{"name":' .. json_str(b.name) .. ',"type":' .. json_str(b.type) .. '}'
+            end
+            parts[#parts + 1] = ']'
+            if r["return"] then
+                parts[#parts + 1] = ',"return":' .. json_str(r["return"])
+            end
+            parts[#parts + 1] = '}'
+        end
+    end
+    parts[#parts + 1] = "\n]\n"
+    return table.concat(parts)
+end
+
 --- Main entry point. argv is a 1-indexed list of arguments.
 function M.main(argv)
     local check_mod  = require("lib.type.static.check")
@@ -123,25 +178,19 @@ function M.main(argv)
 
     -- --dump mode: print inferred top-level bindings for each file.
     if dump then
-        for _, filename in ipairs(files) do
-            local _, ctx = check_mod.check_file(filename)
-            if ctx then
-                -- Collect (name_string, type_id) pairs from top-level scope.
-                local pairs_list = {}
-                for name_id, type_id in pairs(ctx.scope.bindings) do
-                    local name = intern_mod.get(ctx.pool, name_id) or tostring(name_id)
-                    pairs_list[#pairs_list + 1] = { name, types_mod.find(ctx, type_id) }
-                end
-                table.sort(pairs_list, function(a, b) return a[1] < b[1] end)
-                io.write("-- " .. filename .. "\n")
-                for _, p in ipairs(pairs_list) do
-                    io.write(p[1] .. ": " .. types_mod.display(ctx, p[2]) .. "\n")
-                end
-                -- Show module return type.
-                local rets = ctx.module_return_tids
-                if rets and #rets > 0 and rets[1] and #rets[1] > 0 then
-                    local ret_tid = types_mod.find(ctx, rets[1][1])
-                    io.write("(return): " .. types_mod.display(ctx, ret_tid) .. "\n")
+        if format == "json" then
+            io.write(M.dump_json(files))
+        else
+            for _, filename in ipairs(files) do
+                local r = M.dump_one(filename)
+                if r then
+                    io.write("-- " .. r.file .. "\n")
+                    for _, b in ipairs(r.bindings) do
+                        io.write(b.name .. ": " .. b.type .. "\n")
+                    end
+                    if r["return"] then
+                        io.write("(return): " .. r["return"] .. "\n")
+                    end
                 end
             end
         end
