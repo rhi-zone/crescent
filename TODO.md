@@ -32,7 +32,7 @@
     - [x] Subtype ranking (exact > subtype > supertype) — 3-level scoring
     - [x] Arity pre-filtering before check_string
     - [x] Persistent index — save_index/load_index JSON, CLI --save-index/--load-index
-  - [ ] Stabilise `--dump` output as machine-readable JSON (exported bindings + type sigs)
+  - [x] Stabilise `--dump` output as machine-readable JSON (exported bindings + type sigs) — `--dump --format json` emits `[{file, bindings:[{name,type}], return}]`; M.dump_one/dump_json testable exports (edaaf6f)
   - [ ] Static docs site (bun) — renders docgen JSON; search calls type-search endpoint or
     runs unification client-side via WASM build of the typechecker.
   - [ ] GitHub Action — on release tag: run typechecker + docgen, publish JSON to index.
