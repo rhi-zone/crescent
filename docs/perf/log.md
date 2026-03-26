@@ -6,6 +6,95 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: three-tier JSON library (lib/format/json)
+
+**Commit:** `122d8ca`
+
+Replaces vendored lunajson with a crescent-native three-tier JSON library:
+pure Lua (Tier 1), LuaJIT FFI scalar (Tier 2), simdjson stub (Tier 3, not
+yet implemented — falls through to Tier 2). Tier selected at module load time.
+
+Benchmark: `luajit docs/perf/json.lua`
+Baseline (lunajson): `luajit docs/perf/json_baseline.lua`
+
+### encode throughput
+
+| scenario | lunajson (µs) | pure (µs) | ffi (µs) | vs lunajson |
+|----------|--------------|-----------|----------|-------------|
+| small object (10 fields) | 2.8 | 2.5 | 2.3 | ~1.1–1.2x faster |
+| large array (1000 numbers) | 94.4 | 86.0 | 87.0 | ~1.1x faster |
+| deeply nested (depth 50) | 21.3 | 19.8 | 20.5 | ~1.05x faster |
+| large string (10 KB, escapes) | 73.3 | 43.7 | 46.0 | **~1.7x faster** |
+
+### decode throughput
+
+| scenario | lunajson (µs) | pure (µs) | ffi (µs) | vs lunajson |
+|----------|--------------|-----------|----------|-------------|
+| small object (10 fields) | 1.0 | 0.9 | 1.0 | comparable |
+| large array (1000 numbers) | 228.2 | 207.6 | 215.8 | ~1.1x faster |
+| deeply nested (depth 50) | 9.2 | 5.5 | 6.5 | **~1.4–1.7x faster** |
+| large string (10 KB, escapes) | 160.3 | 67.7 | 69.7 | **~2.3x faster** |
+
+### Observations
+
+Both tiers run at comparable speed — LuaJIT JIT-compiles both paths. The FFI
+tier's byte-pointer advantage is partially offset by `ffi.string` call overhead
+on safe-run extraction. On most workloads the two tiers are within 5–10% of
+each other; neither is consistently faster.
+
+The largest improvement over lunajson is on string-heavy workloads (2.3x faster
+decode, 1.7x faster encode on 10 KB string with escapes). The new encoder uses a
+pre-built 256-entry escape table and emits safe byte runs directly rather than
+per-byte gsub substitution; the new decoder avoids the gsub + surrogate-pair
+state machine overhead of lunajson.
+
+The simdjson tier (Tier 3) is a stub pending C shim build infrastructure. When
+available it should achieve 2–5x over the FFI tier on large payloads.
+
+### Input sizes
+
+```
+small_obj = 109 bytes   large_arr = 17498 bytes
+deep      = 1053 bytes  large_str = 7011 bytes
+```
+
+### Raw benchmark output (new tiers)
+
+```
+=== JSON benchmark (ffi tier selected) ===
+selected tier: ffi
+
+encode:
+  small object (10 fields), 10000 iters       pure:     2.5 µs  ffi:     2.3 µs  speedup: 1.09x
+  large array (1000 numbers), 1000 iters      pure:    86.0 µs  ffi:    87.0 µs  speedup: 0.99x
+  deeply nested (depth 50), 1000 iters        pure:    19.8 µs  ffi:    20.5 µs  speedup: 0.97x
+  large string (10 KB with escapes), 1000 iters  pure:    43.7 µs  ffi:    46.0 µs  speedup: 0.95x
+
+decode:
+  small object (10 fields), 10000 iters       pure:     0.9 µs  ffi:     1.0 µs  speedup: 0.85x
+  large array (1000 numbers), 1000 iters      pure:   207.6 µs  ffi:   215.8 µs  speedup: 0.96x
+  deeply nested (depth 50), 1000 iters        pure:     5.5 µs  ffi:     6.5 µs  speedup: 0.84x
+  large string (10 KB with escapes), 1000 iters  pure:    67.7 µs  ffi:    69.7 µs  speedup: 0.97x
+```
+
+### Raw benchmark output (lunajson baseline, measured before replacement)
+
+```
+=== lunajson baseline ===
+encode:
+  small object (10 fields)                      2.8 µs/iter
+  large array (1000 numbers)                   94.4 µs/iter
+  deeply nested (depth 50)                     21.3 µs/iter
+  large string (escapes)                       73.3 µs/iter
+decode:
+  small object (10 fields)                      1.0 µs/iter
+  large array (1000 numbers)                  228.2 µs/iter
+  deeply nested (depth 50)                      9.2 µs/iter
+  large string (escapes)                      160.3 µs/iter
+```
+
+---
+
 ## 2026-03-26: pure Lua Myers diff and three-way merge (lib/merge3)
 
 **Commit:** `ada0caf`
