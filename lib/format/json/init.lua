@@ -61,5 +61,6 @@ M.value_to_json = impl._encode_raw
 M.json_to_value = impl._decode_raw
 M._tier        = tier
 M._impl        = impl
+M.schema       = require("lib.format.json.schema")
 
 return M

@@ -525,6 +525,129 @@ T.describe("json: decode parity (pure == ffi)", function()
     end
 end)
 
+-- ── Schema API ────────────────────────────────────────────────────────────────
+
+T.describe("json.schema", function()
+    local schema = require("lib.format.json.schema")
+
+    T.it("constructor returns an object with decode and decode_into", function()
+        local s = schema({"name", "age"})
+        T.ok(type(s) == "table")
+        T.ok(type(s.decode) == "function")
+        T.ok(type(s.decode_into) == "function")
+    end)
+
+    T.it("json.schema is the constructor", function()
+        T.ok(type(json.schema) == "function")
+        local s = json.schema({"x"})
+        T.ok(type(s.decode) == "function")
+    end)
+
+    T.it("decode returns a table with correct string values", function()
+        local s = schema({"name", "city"})
+        local obj, err = s:decode('{"name":"alice","city":"london"}')
+        T.ok(err == nil, "no error")
+        T.eq(obj.name, "alice")
+        T.eq(obj.city, "london")
+    end)
+
+    T.it("decode handles number values", function()
+        local s = schema({"age", "score"})
+        local obj, err = s:decode('{"age":30,"score":99}')
+        T.ok(err == nil, "no error")
+        T.eq(obj.age, 30)
+        T.eq(obj.score, 99)
+    end)
+
+    T.it("decode handles float values", function()
+        local s = schema({"ratio"})
+        local obj, err = s:decode('{"ratio":3.14}')
+        T.ok(err == nil, "no error")
+        T.ok(math.abs(obj.ratio - 3.14) < 1e-10, "ratio is 3.14")
+    end)
+
+    T.it("decode handles boolean true", function()
+        local s = schema({"active"})
+        local obj, err = s:decode('{"active":true}')
+        T.ok(err == nil, "no error")
+        T.eq(obj.active, true)
+    end)
+
+    T.it("decode handles boolean false", function()
+        local s = schema({"active"})
+        local obj, err = s:decode('{"active":false}')
+        T.ok(err == nil, "no error")
+        T.eq(obj.active, false)
+    end)
+
+    T.it("decode handles mixed field types", function()
+        local s = schema({"name", "age", "city", "zip", "active"})
+        local obj, err = s:decode('{"name":"bob","age":25,"city":"paris","zip":"75001","active":true}')
+        T.ok(err == nil, "no error")
+        T.eq(obj.name, "bob")
+        T.eq(obj.age, 25)
+        T.eq(obj.city, "paris")
+        T.eq(obj.zip, "75001")
+        T.eq(obj.active, true)
+    end)
+
+    T.it("unknown fields (not in schema) are still decoded", function()
+        local s = schema({"name"})
+        local obj, err = s:decode('{"name":"alice","extra":"value","count":42}')
+        T.ok(err == nil, "no error")
+        T.eq(obj.name, "alice")
+        -- unknown fields decoded via fallback src:sub()
+        T.eq(obj.extra, "value")
+        T.eq(obj.count, 42)
+    end)
+
+    T.it("decode_into populates the supplied table", function()
+        local s = schema({"name", "age"})
+        local buf = {}
+        s:decode_into('{"name":"carol","age":40}', buf)
+        T.eq(buf.name, "carol")
+        T.eq(buf.age, 40)
+    end)
+
+    T.it("decode_into can reuse a table across calls", function()
+        local s = schema({"x", "y"})
+        local buf = {}
+        s:decode_into('{"x":1,"y":2}', buf)
+        T.eq(buf.x, 1)
+        T.eq(buf.y, 2)
+        s:decode_into('{"x":10,"y":20}', buf)
+        T.eq(buf.x, 10)
+        T.eq(buf.y, 20)
+    end)
+
+    T.it("parity with json.decode: same result on same input", function()
+        local src = '{"name":"dave","age":50,"active":false}'
+        local s = schema({"name", "age", "active"})
+        local schema_obj, err1 = s:decode(src)
+        local std_obj, err2 = json.decode(src)
+        T.ok(err1 == nil, "schema decode ok")
+        T.ok(err2 == nil, "json.decode ok")
+        T.eq(schema_obj.name, std_obj.name)
+        T.eq(schema_obj.age, std_obj.age)
+        T.eq(schema_obj.active, std_obj.active)
+    end)
+
+    T.it("decode is protected: nil input returns nil+err", function()
+        local s = schema({"name"})
+        -- Passing nil to :decode must not crash the caller; pcall wraps the scanner
+        local obj, err = s:decode(nil)
+        T.eq(obj, nil, "nil input: obj is nil")
+        T.ok(type(err) == "string", "nil input: err is a string")
+    end)
+
+    T.it("decode_into throws on nil input (fast path, no pcall)", function()
+        local s = schema({"name"})
+        local buf = {}
+        local ok = pcall(function() s:decode_into(nil, buf) end)
+        T.ok(not ok, "decode_into throws on nil input")
+    end)
+end)
+
 -- ── Round-trip property (via both tiers independently) ────────────────────────
 
 T.describe("json: round-trip", function()
