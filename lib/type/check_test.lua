@@ -86,3 +86,170 @@ assert.fail(check(any, true), "any_of rejects boolean")
 local all = t.all_of(t.struct({ name = t.string }), t.struct({ age = t.number }))
 assert.ok(check(all, { name = "alice", age = 30 }), "all_of match")
 assert.fail(check(all, { name = "alice" }), "all_of partial")
+
+-- ── validate ──────────────────────────────────────────────────────────────────
+
+local validate = require("lib.type.check").validate
+
+-- primitives
+do
+	local v, err = validate(t.integer, 7)
+	assert.eq(v, 7, "validate integer returns value")
+	assert.fail(err, "validate integer no error")
+
+	v, err = validate(t.integer, "7")
+	assert.fail(v, "validate integer rejects string")
+	assert.ok(err, "validate integer has error")
+	assert.ok(err:find("integer"), "validate integer error mentions type")
+
+	v, err = validate(t.string, "hi")
+	assert.eq(v, "hi", "validate string returns value")
+	assert.fail(err)
+
+	v, err = validate(t.boolean, true)
+	assert.eq(v, true, "validate boolean true")
+	assert.fail(err)
+end
+
+-- optional
+do
+	local v, err = validate(t.optional(t.integer), nil)
+	assert.fail(v, "validate optional nil: value is nil")
+	assert.fail(err, "validate optional nil: no error")
+
+	v, err = validate(t.optional(t.integer), 5)
+	assert.eq(v, 5, "validate optional present")
+	assert.fail(err)
+
+	v, err = validate(t.optional(t.integer), "bad")
+	assert.fail(v, "validate optional wrong type")
+	assert.ok(err)
+end
+
+-- struct error paths
+do
+	local s = t.struct({ age = t.integer, name = t.string })
+	local _, err = validate(s, { age = "bad", name = "Alice" })
+	assert.ok(err, "struct validate error")
+	assert.ok(err:find("age"), "struct error includes field name")
+
+	-- nested struct: dotted path
+	local ns = t.struct({ address = t.struct({ city = t.string }) })
+	_, err = validate(ns, { address = { city = 99 } })
+	assert.ok(err)
+	assert.ok(err:find("address"), "nested path includes parent")
+	assert.ok(err:find("city"), "nested path includes field")
+
+	-- struct_exact rejects extras
+	local se = t.struct_exact({ x = t.integer })
+	_, err = validate(se, { x = 1, y = 2 })
+	assert.ok(err)
+	assert.ok(err:find("unexpected"), "struct_exact unexpected field error")
+
+	-- returns original table on success
+	local tbl = { x = 1 }
+	local v, _ = validate(t.struct({ x = t.integer }), tbl)
+	assert.ok(v == tbl, "validate struct returns same table ref")
+end
+
+-- array error path includes index
+do
+	local _, err = validate(t.array(t.integer), { 1, 2, "bad" })
+	assert.ok(err)
+	assert.ok(err:find("%[3%]"), "array error includes index")
+end
+
+-- any_of / all_of
+do
+	local v, err = validate(t.any_of(t.integer, t.string), 3)
+	assert.eq(v, 3); assert.fail(err)
+
+	_, err = validate(t.any_of(t.integer, t.string), true)
+	assert.ok(err, "any_of no match error")
+
+	v, err = validate(t.all_of(t.struct({ x = t.integer }), t.struct({ y = t.string })), { x = 1, y = "a" })
+	assert.ok(v); assert.fail(err)
+end
+
+-- ── coerce ────────────────────────────────────────────────────────────────────
+
+local coerce = require("lib.type.check").coerce
+
+-- scalar coercions
+do
+	-- integer ← integer string
+	local v, err = coerce(t.integer, "42")
+	assert.eq(v, 42, "coerce integer from string"); assert.fail(err)
+
+	-- integer rejects non-integer string
+	_, err = coerce(t.integer, "3.5")
+	assert.ok(err, "coerce integer rejects float string")
+
+	-- integer rejects non-integer number
+	_, err = coerce(t.integer, 3.5)
+	assert.ok(err, "coerce integer rejects float number")
+
+	-- number ← numeric string
+	v, err = coerce(t.number, "2.5")
+	assert.eq(v, 2.5, "coerce number from string"); assert.fail(err)
+
+	-- number rejects non-numeric string
+	_, err = coerce(t.number, "abc")
+	assert.ok(err)
+
+	-- string ← number
+	v, err = coerce(t.string, 42)
+	assert.eq(v, "42", "coerce string from number"); assert.fail(err)
+
+	-- string rejects boolean
+	_, err = coerce(t.string, true)
+	assert.ok(err)
+
+	-- boolean is strict
+	v, err = coerce(t.boolean, true)
+	assert.eq(v, true); assert.fail(err)
+	_, err = coerce(t.boolean, 1)
+	assert.ok(err, "coerce boolean rejects number")
+end
+
+-- struct: returns fresh copy with coerced fields
+do
+	local s = t.struct({ x = t.integer, label = t.string })
+	local v, err = coerce(s, { x = "7", label = 99 })
+	assert.fail(err)
+	assert.eq(v.x, 7, "coerce struct field integer")
+	assert.eq(v.label, "99", "coerce struct field string")
+
+	local orig = { x = "7", label = 99 }
+	v, _ = coerce(s, orig)
+	assert.ok(v ~= orig, "coerce struct returns fresh table")
+end
+
+-- array: fresh copy with coerced items
+do
+	local v, err = coerce(t.array(t.integer), { "1", "2", "3" })
+	assert.fail(err)
+	assert.eq(v[1], 1); assert.eq(v[2], 2); assert.eq(v[3], 3)
+end
+
+-- optional coercion
+do
+	local v, err = coerce(t.optional(t.integer), nil)
+	assert.fail(v); assert.fail(err, "coerce optional nil: no error")
+
+	v, err = coerce(t.optional(t.integer), "5")
+	assert.eq(v, 5, "coerce optional coerces inner"); assert.fail(err)
+end
+
+-- any_of: first matching variant wins
+do
+	-- "10" coerces to integer 10 (integer is tried first)
+	local s = t.any_of(t.integer, t.string)
+	local v, err = coerce(s, "10")
+	assert.fail(err); assert.eq(v, 10, "coerce any_of picks first coercible")
+
+	-- true: string coercer rejects boolean, boolean coercer accepts
+	local s2 = t.any_of(t.string, t.boolean)
+	v, err = coerce(s2, true)
+	assert.fail(err); assert.eq(v, true, "coerce any_of falls through to bool")
+end

@@ -1,5 +1,5 @@
 if not package.path:find("?/init.lua", 1, true) then
-  package.path = package.path .. ";./?/init.lua"
+	package.path = package.path .. ";./?/init.lua"
 end
 
 local ffi = require("ffi")
@@ -33,6 +33,7 @@ ffi.cdef [[
 	int sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int n, void(*)(void*));
 	int sqlite3_bind_double(sqlite3_stmt*, int, double);
 	int sqlite3_bind_int(sqlite3_stmt*, int, int);
+	int sqlite3_bind_int64(sqlite3_stmt*, int, sqlite3_int64);
 	int sqlite3_bind_null(sqlite3_stmt*, int);
 	int sqlite3_bind_text(sqlite3_stmt*,int,const char*,int,void(*)(void*));
 
@@ -42,211 +43,270 @@ ffi.cdef [[
 	const char *sqlite3_errmsg(sqlite3*);
 ]]
 
-local float = ffi.typeof("float")
-local double = ffi.typeof("double")
-local is_float_like_cdata = function (a)
-	local type = ffi.typeof(a)
-	return type == float or type == double
+local double_t = ffi.typeof("double")
+local float_t  = ffi.typeof("float")
+local function is_float_cdata(a)
+	local t = ffi.typeof(a)
+	return t == double_t or t == float_t
 end
 
---[[local SQLITE_STATIC = 0]] --[[application controls lifetime]]
-local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1) --[[sqlite makes copy]]
+local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1) -- sqlite copies the value
 
 -- datatypes
 local SQLITE_INTEGER = 1
-local SQLITE_FLOAT = 2
-local SQLITE_TEXT = 3 --[[in v2 it meant something else]]
-local SQLITE_BLOB = 4
-local SQLITE_NULL = 5
-
---[[@class sqlite_error_c]]
-
--- TODO: enum for the error
---[[@class sqlite_ffi]]
---[[@field sqlite3_last_insert_rowid fun(db: sqlite_c): integer]]
---[[@field sqlite3_get_autocommit fun(db: sqlite_c): integer]]
---[[@field sqlite3_changes fun(db: sqlite_c): integer]]
---[[@field sqlite3_changes64 fun(db: sqlite_c): integer]]
---[[@field sqlite3_open fun(filename: string, ppDb: sqlite_c): sqlite_error_c]]
---[[@field sqlite3_prepare_v2 fun(db: sqlite_c, zSql: string, nByte: integer, ppStmt: sqlite_stmt_c, pzTail: ffi.cdata* | nil): sqlite_error_c]]
---[[@field sqlite3_step fun(stmt: sqlite_stmt_c): sqlite_error_c]]
---[[@field sqlite3_column_count fun(pStmt: sqlite_stmt_c): sqlite_error_c]]
---[[@field sqlite3_column_type fun(pStmt: sqlite_stmt_c, iCol: integer): sqlite_error_c]]
---[[@field sqlite3_column_bytes fun(pStmt: sqlite_stmt_c, iCol: integer): integer]]
---[[@field sqlite3_column_blob fun(pStmt: sqlite_stmt_c, iCol: integer): string_c]]
---[[@field sqlite3_column_double fun(pStmt: sqlite_stmt_c, iCol: integer): number]]
---[[@field sqlite3_bind_blob fun(pStmt: sqlite_stmt_c, iCol: integer, value: ffi.cdata*, n: integer, free: ffi.cdata* | 0 | -1): sqlite_error_c]]
---[[@field sqlite3_bind_double fun(pStmt: sqlite_stmt_c, iCol: integer, value: number): sqlite_error_c]]
---[[@field sqlite3_bind_int fun(pStmt: sqlite_stmt_c, iCol: integer, value: integer): sqlite_error_c]]
---[[@field sqlite3_bind_null fun(pStmt: sqlite_stmt_c, iCol: integer): sqlite_error_c]]
---[[@field sqlite3_bind_text fun(pStmt: sqlite_stmt_c, iCol: integer, value: string, length: integer, free: ffi.cdata* | 0 | -1): sqlite_error_c]]
---[[@field sqlite3_finalize fun(pStmt: sqlite_stmt_c): sqlite_error_c]]
---[[@field sqlite3_reset fun(pStmt: sqlite_stmt_c): sqlite_error_c]]
---[[@field sqlite3_close_v2 fun(db: sqlite_c): sqlite_error_c]]
---[[@field sqlite3_errmsg fun(db: sqlite_c): string_c]]
+local SQLITE_FLOAT   = 2
+local SQLITE_TEXT    = 3
+local SQLITE_BLOB    = 4
+local SQLITE_NULL    = 5
 
 --[[@type sqlite_ffi]]
 local sqlite_ffi
 if ffi.os == "Windows" then
 	if ffi.arch == "x64" then sqlite_ffi = ffi.load("dep/sqlite.dll")
-	--[[assume x86]]
 	else sqlite_ffi = ffi.load("dep/sqlite-x86.dll") end
 elseif ffi.os == "Linux" then
-	--[[TODO: bundle instead of relying on system installation]]
-	sqlite_ffi = ffi.load("sqlite3") --[[@type sqlite_ffi]]
+	sqlite_ffi = ffi.load("sqlite3")
 elseif ffi.os == "OSX" then
-	--[[macOS ships libsqlite3 as part of the OS]]
-	sqlite_ffi = ffi.load("libsqlite3.dylib") --[[@type sqlite_ffi]]
+	sqlite_ffi = ffi.load("libsqlite3.dylib")
 else
 	error("os " .. ffi.os .. " not supported")
 end
 
---[[@param self sqlite]]
-local err = function (self) return ffi.string(sqlite_ffi.sqlite3_errmsg(self.db[0])) end
+-- ── column reading (module-level, no per-row allocation) ─────────────────────
 
---[[@class sqlite_c]]
---[[@class sqlite_stmt_c]]
+-- Each entry reads column i from stmt and returns a Lua value.
+local col_read = {
+	[SQLITE_INTEGER] = function(stmt, i) return sqlite_ffi.sqlite3_column_double(stmt, i) end,
+	[SQLITE_FLOAT]   = function(stmt, i) return sqlite_ffi.sqlite3_column_double(stmt, i) end,
+	[SQLITE_TEXT]    = function(stmt, i)
+		local n = sqlite_ffi.sqlite3_column_bytes(stmt, i)
+		return ffi.string(sqlite_ffi.sqlite3_column_blob(stmt, i), n)
+	end,
+	[SQLITE_BLOB]    = function(stmt, i)
+		local n = sqlite_ffi.sqlite3_column_bytes(stmt, i)
+		return ffi.string(sqlite_ffi.sqlite3_column_blob(stmt, i), n)
+	end,
+	[SQLITE_NULL]    = function() return nil end,
+}
 
---[[we use a class here instead of a module since details are internal anyway]]
+-- ── parameter binding ─────────────────────────────────────────────────────────
+
+--[[@param stmt sqlite_stmt_c]]
+--[[@param params table]]
+--[[@param length integer required because values may be nil]]
+local function bind(stmt, params, length)
+	for i = 1, length do
+		local x = params[i]
+		local t = type(x)
+		if t == "number" then
+			if x % 1 == 0 and x >= -2147483648 and x <= 2147483647 then
+				sqlite_ffi.sqlite3_bind_int(stmt, i, x)
+			else
+				sqlite_ffi.sqlite3_bind_double(stmt, i, x)
+			end
+		elseif t == "string" then
+			sqlite_ffi.sqlite3_bind_text(stmt, i, x, #x, SQLITE_TRANSIENT)
+		elseif t == "boolean" then
+			sqlite_ffi.sqlite3_bind_int(stmt, i, x and 1 or 0)
+		elseif t == "cdata" then
+			local n = tonumber(x)
+			if n ~= nil then
+				if is_float_cdata(x) then sqlite_ffi.sqlite3_bind_double(stmt, i, x)
+				else sqlite_ffi.sqlite3_bind_int64(stmt, i, x) end
+			else
+				error("sqlite bind: cannot bind cdata " .. tostring(ffi.typeof(x)))
+			end
+		elseif x == nil then
+			sqlite_ffi.sqlite3_bind_null(stmt, i)
+		else
+			error("sqlite bind: cannot bind type " .. t)
+		end
+	end
+end
+
+-- ── database ──────────────────────────────────────────────────────────────────
 
 --[[@class sqlite]]
---[[@field db sqlite_c]]
+--[[@field db sqlite3*[1] ]]
 local sqlite = {}
 sqlite.__index = sqlite
 mod.sqlite = sqlite
 
 --[[@return sqlite? database, string? error]] --[[@param path string]]
-sqlite.open = function (self, path)
-	--[[TODO: does the * to ** conversion work properly]]
-	local db = ffi.new("sqlite3 *[1]") --[[@type sqlite_c]]
-	if sqlite_ffi.sqlite3_open(path, db) ~= 0 then return nil, "sqlite: sqlite3_open" end
-	--[[FIXME: why does this need () around it to suppress error]]
-	return (setmetatable({
-		db = db
-	}, self))
-end
---[[@return sqlite? database, string? error]] --[[@param path string]]
-mod.open = function (path) return sqlite:open(path) end
-
-sqlite.close = function (self) sqlite_ffi.sqlite3_close_v2(self.db[0]) end
-
---[[do we need binding for blobs?]]
-
---[[@param stmt sqlite_stmt_c]]
---[[@param params (number|string|boolean?)[] ]]
---[[@param length integer required because values may be nil]]
-local bind = function (stmt, params, length)
-	for i = 1, length do
-		local x = params[i]
-		if type(x) == "number" then
-			sqlite_ffi.sqlite3_bind_double(stmt, i, x)
-		elseif type(x) == "string" then
-			sqlite_ffi.sqlite3_bind_text(stmt, i, x, #x, SQLITE_TRANSIENT)
-		elseif type(x) == "boolean" then
-			sqlite_ffi.sqlite3_bind_int(stmt, i, x and 1 or 0)
-		elseif type(x) == "cdata" and tonumber(x) ~= nil then
-			if is_float_like_cdata(x) then
-				sqlite_ffi.sqlite3_bind_double(stmt, i, x)
-			else
-				sqlite_ffi.sqlite3_bind_int(stmt, i, x)
-			end
-		elseif x == nil then
-			sqlite_ffi.sqlite3_bind_null(stmt, i)
-		else
-			error("sqlite:execute: cannot bind type " .. (type(x) == "cdata" and tostring(ffi.typeof(x)) or type(x)))
-		end
+sqlite.open = function(self, path)
+	local db = ffi.new("sqlite3 *[1]")
+	if sqlite_ffi.sqlite3_open(path, db) ~= 0 then
+		return nil, "sqlite: sqlite3_open failed"
 	end
+	return setmetatable({ db = db }, self)
 end
 
---[[@return integer]]
---[[@diagnostic disable-next-line: return-type-mismatch]]
-sqlite.last_insert_rowid = function (self) return tonumber(sqlite_ffi.sqlite3_last_insert_rowid(self.db[0])) end
-sqlite.get_autocommit = function (self) return sqlite_ffi.sqlite3_get_autocommit(self.db[0]) ~= 0 end
+--[[@return sqlite? database, string? error]] --[[@param path string]]
+mod.open = function(path) return sqlite:open(path) end
+
+sqlite.close = function(self) sqlite_ffi.sqlite3_close_v2(self.db[0]) end
 
 --[[@return integer]]
---[[@diagnostic disable-next-line: return-type-mismatch]]
-sqlite.changes = function (self) return tonumber(sqlite_ffi.sqlite3_changes64(self.db[0])) end
+sqlite.last_insert_rowid = function(self)
+	return tonumber(sqlite_ffi.sqlite3_last_insert_rowid(self.db[0]))
+end
+sqlite.get_autocommit = function(self)
+	return sqlite_ffi.sqlite3_get_autocommit(self.db[0]) ~= 0
+end
+--[[@return integer]]
+sqlite.changes = function(self)
+	return tonumber(sqlite_ffi.sqlite3_changes64(self.db[0]))
+end
+
+local function db_errmsg(self)
+	return ffi.string(sqlite_ffi.sqlite3_errmsg(self.db[0]))
+end
 
 --[[@return true? success, string? error]] --[[@param sql string]] --[[@param ... number|string|boolean?]]
-sqlite.execute = function (self, sql, ...)
+sqlite.execute = function(self, sql, ...)
 	local c_sql = sql
 	local next_sql = ffi.new("const char *[1]")
-	local stmt_ptr = ffi.new("sqlite3_stmt *[1]") --[[@type sqlite_stmt_c]]
+	local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
 	while true do
-		if sqlite_ffi.sqlite3_prepare_v2(self.db[0], c_sql, -1, stmt_ptr, next_sql) ~= 0 then return nil, "sqlite: sqlite3_prepare_v2: " .. err(self) end
+		if sqlite_ffi.sqlite3_prepare_v2(self.db[0], c_sql, -1, stmt_ptr, next_sql) ~= 0 then
+			return nil, "sqlite: prepare: " .. db_errmsg(self)
+		end
 		local stmt = stmt_ptr[0]
 		if stmt == nil then break end
 		bind(stmt, { ... }, select("#", ...))
 		local ret = sqlite_ffi.sqlite3_step(stmt)
-		if ret ~= 101 --[[SQLITE_DONE]] then return nil, "sqlite: sqlite3_step: " .. err(self) end
-		if next_sql[0] == 0 then break end
-		if sqlite_ffi.sqlite3_finalize(stmt) ~= 0 then return nil, "sqlite: sqlite3_finalize: " .. err(self) end
+		if ret ~= 101 then -- SQLITE_DONE
+			local msg = db_errmsg(self)
+			sqlite_ffi.sqlite3_finalize(stmt)
+			return nil, "sqlite: step: " .. msg
+		end
+		sqlite_ffi.sqlite3_finalize(stmt)
 		c_sql = next_sql[0]
+		if c_sql == nil then break end
 	end
 	return true
 end
 
---[[warning: ignores all but the first statement  ]]
---[[the returned iterator still returns errors as `nil, err` so please don't make the first column nullable  ]]
---[[it returns errors when done, and when no columns are `SELECT`ed  ]]
---[[if you don't have a non-nullable column then `SELECT 1` and ignore the first column  ]]
---[[@return (fun():...:unknown)? iterator, string? error]] --[[@param sql string]] --[[@param ... number|string|boolean?]]
-sqlite.query = function (self, sql, ...)
-	local stmt_ptr = ffi.new("sqlite3_stmt *[1]") --[[@type sqlite_stmt_c]]
-	if sqlite_ffi.sqlite3_prepare_v2(self.db[0], sql, #sql+1, stmt_ptr, nil) ~= 0 then return nil, "sqlite: sqlite3_prepare_v2: " .. err(self) end
+-- query: returns an iterator. Each call yields multiple return values (one per column).
+-- Signals done as: nil, "sqlite: done"
+-- Signals error as: nil, "sqlite: <message>"
+-- NOTE: the iterator returns nil for a NULL column; since done is also nil, keep a
+-- non-nullable sentinel column first if any column may be NULL (SELECT 1, col ...).
+--[[@return (fun():...unknown)? iter, string? error]] --[[@param sql string]] --[[@param ... number|string|boolean?]]
+sqlite.query = function(self, sql, ...)
+	local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
+	if sqlite_ffi.sqlite3_prepare_v2(self.db[0], sql, #sql + 1, stmt_ptr, nil) ~= 0 then
+		return nil, "sqlite: prepare: " .. db_errmsg(self)
+	end
 	local stmt = stmt_ptr[0]
 	bind(stmt, { ... }, select("#", ...))
-	return function ()
+	local col_count = sqlite_ffi.sqlite3_column_count(stmt) -- once, before any rows
+	return function()
 		local code = sqlite_ffi.sqlite3_step(stmt)
-		if code == 100 then --[[SQLITE_ROW]]
-			--[[TODO: consider using luajit int64s (not portable!)]]
+		if code == 100 then -- SQLITE_ROW
+			if col_count == 0 then return nil, "sqlite: no columns" end
 			local columns = {}
-			local dispatch = {
-				[SQLITE_INTEGER] = function (i) columns[i + 1] = sqlite_ffi.sqlite3_column_double(stmt, i) end,
-				[SQLITE_FLOAT] = function (i) columns[i + 1] = sqlite_ffi.sqlite3_column_double(stmt, i) end,
-				[SQLITE_TEXT] = function (i)
-					local length = sqlite_ffi.sqlite3_column_bytes(stmt, i)
-					columns[i + 1] = ffi.string(sqlite_ffi.sqlite3_column_blob(stmt, i), length)
-				end,
-				[SQLITE_BLOB] = function (i)
-					local length = sqlite_ffi.sqlite3_column_bytes(stmt, i)
-					columns[i + 1] = ffi.string(sqlite_ffi.sqlite3_column_blob(stmt, i), length)
-				end,
-				[SQLITE_NULL] = function (i) columns[i + 1] = nil end,
-			}
-			for i = 0, sqlite_ffi.sqlite3_column_count(stmt) - 1 do
-				dispatch[sqlite_ffi.sqlite3_column_type(stmt, i)](i)
+			for i = 0, col_count - 1 do
+				columns[i + 1] = col_read[sqlite_ffi.sqlite3_column_type(stmt, i)](stmt, i)
 			end
-			if #columns > 0 then return unpack(columns)
-			else return nil, "sqlite: no columns" end
-		elseif code == 101 then sqlite_ffi.sqlite3_finalize(stmt); return nil, "sqlite: done" --[[SQLITE_DONE]]
-		else return nil, "sqlite: sqlite3_step: unhandled code " .. code end
+			return unpack(columns)
+		elseif code == 101 then -- SQLITE_DONE
+			sqlite_ffi.sqlite3_finalize(stmt)
+			return nil, "sqlite: done"
+		else
+			return nil, "sqlite: step: unhandled code " .. code
+		end
 	end
 end
+
+-- ── prepared statements ───────────────────────────────────────────────────────
+--
+-- db:prepare(sql) → stmt | nil, err
+--
+-- Returns a reusable statement object. The statement is kept compiled across
+-- calls; bind params, execute, then reset for the next use.
+--
+-- stmt:exec(...)   → true | nil, err   (INSERT / UPDATE / DELETE)
+-- stmt:rows(...)   → iterator           (SELECT; same semantics as db:query)
+-- stmt:close()
+
+--[[@class sqlite_stmt]]
+--[[@field _stmt sqlite3_stmt*]]
+--[[@field _db sqlite]]
+local stmt_mt = {}
+stmt_mt.__index = stmt_mt
+
+stmt_mt.close = function(self)
+	if self._stmt ~= nil then
+		sqlite_ffi.sqlite3_finalize(self._stmt)
+		self._stmt = nil
+	end
+end
+
+stmt_mt.exec = function(self, ...)
+	local stmt = self._stmt
+	sqlite_ffi.sqlite3_reset(stmt)
+	bind(stmt, { ... }, select("#", ...))
+	local ret = sqlite_ffi.sqlite3_step(stmt)
+	if ret ~= 101 then -- SQLITE_DONE
+		return nil, "sqlite: step: " .. db_errmsg(self._db)
+	end
+	return true
+end
+
+stmt_mt.rows = function(self, ...)
+	local stmt = self._stmt
+	sqlite_ffi.sqlite3_reset(stmt)
+	bind(stmt, { ... }, select("#", ...))
+	local col_count = sqlite_ffi.sqlite3_column_count(stmt)
+	return function()
+		local code = sqlite_ffi.sqlite3_step(stmt)
+		if code == 100 then -- SQLITE_ROW
+			if col_count == 0 then return nil, "sqlite: no columns" end
+			local columns = {}
+			for i = 0, col_count - 1 do
+				columns[i + 1] = col_read[sqlite_ffi.sqlite3_column_type(stmt, i)](stmt, i)
+			end
+			return unpack(columns)
+		elseif code == 101 then -- SQLITE_DONE
+			return nil, "sqlite: done"
+		else
+			return nil, "sqlite: step: unhandled code " .. code
+		end
+	end
+end
+
+--[[@return sqlite_stmt? stmt, string? err]] --[[@param sql string]]
+sqlite.prepare = function(self, sql)
+	local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
+	if sqlite_ffi.sqlite3_prepare_v2(self.db[0], sql, #sql + 1, stmt_ptr, nil) ~= 0 then
+		return nil, "sqlite: prepare: " .. db_errmsg(self)
+	end
+	return setmetatable({ _stmt = stmt_ptr[0], _db = self }, stmt_mt)
+end
+
+-- ── schema metadata ───────────────────────────────────────────────────────────
 
 --[[@class sqlite_table]]
 --[[@field type "table"|"index"|"view"|"trigger"]]
 --[[@field name string]]
 --[[@field table_name string]]
---[[@field root_page integer the page number of the root b-tree page for tables and indexes, 0 or NULL for everything else]]
+--[[@field root_page integer]]
 --[[@field sql string]]
 
 local table_keyorder = { "type", "name", "table_name", "root_page", "sql" }
 
---[[@return (fun():sqlite_table?)? iterator, string? error]]
-local tables = function (self)
+local function tables_raw(self)
 	local f = self:query("SELECT type, name, tbl_name, rootpage, sql FROM sqlite_schema WHERE type='table' ORDER BY name")
-	return function ()
-		local type, name, table_name, root_page, sql = f()
-		if not type then return end
-		return { type = type, name = name, table_name = table_name, root_page = root_page, sql = sql, __keyorder = table_keyorder }
+	return function()
+		local type_, name, table_name, root_page, sql = f()
+		if not type_ then return end
+		return { type = type_, name = name, table_name = table_name, root_page = root_page, sql = sql, __keyorder = table_keyorder }
 	end
 end
 
---[[@return (fun():name:string)? iterator, string? error]]
-sqlite.tables = package.loaded["lib.functional.iterable"] and function (self)
-	--[[@diagnostic disable-next-line: return-type-mismatch, param-type-mismatch]]
-	return require("lib.functional.iterable").iter(tables(self))
-end or tables
+sqlite.tables = package.loaded["lib.functional.iterable"] and function(self)
+	return require("lib.functional.iterable").iter(tables_raw(self))
+end or tables_raw
 
 return mod
