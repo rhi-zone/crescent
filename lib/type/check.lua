@@ -6,25 +6,16 @@ local mod = {}
 
 mod.checkers = {}
 
---[[@generic T]]
---[[@param schema Schema<T>]]
---[[@param x unknown]]
---[[@return boolean]]
+--: <T>(Schema<T>, unknown) -> boolean
 mod.check = function(schema, x)
 	return mod.checkers[schema.type](schema, x)
 end
 
---[[@return boolean]]
 mod.checkers.integer    = function(_, x) return type(x) == "number" and x % 1 == 0 end
---[[@return boolean]]
 mod.checkers.number     = function(_, x) return type(x) == "number" end
---[[@return boolean]]
 mod.checkers.string     = function(_, x) return type(x) == "string" end
---[[@return boolean]]
 mod.checkers.boolean    = function(_, x) return type(x) == "boolean" end
---[[@return boolean]]
 mod.checkers["nil"]     = function(_, x) return type(x) == "nil" end
---[[@return boolean]]
 mod.checkers.literal    = function(s, x)
 	local v = s.value
 	if type(v) ~= "table" or type(x) ~= "table" then return v == x end
@@ -34,7 +25,6 @@ mod.checkers.literal    = function(s, x)
 	for k in pairs(x) do if v[k] == nil then return false end end
 	return true
 end
---[[@return boolean]]
 mod.checkers.tuple      = function(s, x)
 	--[[checking if x is shorter is unsafe: trailing schemas may be optional]]
 	if type(x) ~= "table" then return false end
@@ -43,7 +33,6 @@ mod.checkers.tuple      = function(s, x)
 	end
 	return true
 end
---[[@return boolean]]
 mod.checkers.struct     = function(s, x)
 	if type(x) ~= "table" then return false end
 	for k, s2 in pairs(s.shape) do
@@ -51,7 +40,6 @@ mod.checkers.struct     = function(s, x)
 	end
 	return true
 end
---[[@return boolean]]
 mod.checkers.struct_exact = function(s, x)
 	if type(x) ~= "table" then return false end
 	for k in pairs(x) do if not s.shape[k] then return false end end
@@ -60,14 +48,12 @@ mod.checkers.struct_exact = function(s, x)
 	end
 	return true
 end
---[[@return boolean]]
 mod.checkers.array      = function(s, x)
 	if type(x) ~= "table" then return false end
 	local s_item = s.item
 	for _, item in ipairs(x) do if not mod.check(s_item, item) then return false end end
 	return true
 end
---[[@return boolean]]
 mod.checkers.dictionary = function(s, x)
 	if type(x) ~= "table" then return false end
 	local s_key, s_value = s.key, s.value
@@ -76,14 +62,11 @@ mod.checkers.dictionary = function(s, x)
 	end
 	return true
 end
---[[@return boolean]]
 mod.checkers.optional   = function(s, x) return x == nil or mod.check(s.inner, x) end
---[[@return boolean]]
 mod.checkers.any_of     = function(s, x)
 	for i = 1, #s.types do if mod.check(s.types[i], x) then return true end end
 	return false
 end
---[[@return boolean]]
 mod.checkers.all_of     = function(s, x)
 	for i = 1, #s.types do if not mod.check(s.types[i], x) then return false end end
 	return true
@@ -223,10 +206,7 @@ validators.all_of     = function(s, x, path)
 	return x
 end
 
---[[@generic T]]
---[[@param schema Schema<T>]]
---[[@param x unknown]]
---[[@return T?, string?]]
+--: <T>(Schema<T>, unknown) -> T?, string?
 mod.validate = function(schema, x)
 	return do_validate(schema, x, nil)
 end
@@ -377,10 +357,7 @@ coercers.all_of     = function(s, x, path)
 	return cur
 end
 
---[[@generic T]]
---[[@param schema Schema<T>]]
---[[@param x unknown]]
---[[@return T?, string?]]
+--: <T>(Schema<T>, unknown) -> T?, string?
 mod.coerce = function(schema, x)
 	return do_coerce(schema, x, nil)
 end
