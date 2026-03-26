@@ -141,6 +141,132 @@ recursive FFI decoders to JIT cleanly without de-recursification.
 
 ---
 
+## 2026-03-26: JSON decode — why C is ~10x faster (diagnosis)
+
+**Commit:** (analysis only, no code change)
+
+### The question
+
+After optimising both decoders, throughput is ~120–170 MB/s. simdjson reports
+~2–3 GB/s. Why the ~10–20x gap?
+
+### Measurements
+
+Benchmark script: `/tmp/jit_cost2.lua`. Input: 90-byte 5-field JSON object
+(`{"name":"Alice","age":30,"city":"NY","zip":10001,"active":true}`).
+
+| operation | cost |
+|---|---|
+| 5 hash table inserts (pre-interned string keys, int values) | 235.9 ns |
+| 5 hash table inserts (pre-interned key+val strings) | 230.8 ns |
+| str_byte loop scan (4-char string, 4 iterations) | 13.7 ns → 3.4 ns/byte |
+| string.find skip_ws pattern call | 48.0 ns |
+| full decode, 90B, pure tier | 633.3 ns |
+| full decode, 90B, ffi tier | 749.6 ns |
+| str_byte scan all 63 non-bracket chars | 373.1 ns |
+
+Derived:
+- Per-insert cost: 47 ns
+- Per-byte scan cost: 3.4 ns → ~294 MB/s raw throughput
+- Hash table cost as share of total (pure): 235 / 633 = **37%**
+- Scan cost as share of total (pure): 373 / 633 = **59%** (upper bound; includes brackets, commas, etc.)
+
+### Why C is faster: three distinct reasons
+
+#### 1. SIMD byte scanning (the visible gap)
+
+Lua scans one byte per loop iteration. LuaJIT compiles this to a small native
+loop, but it is still scalar. At 3.4 ns/byte on a 4 GHz machine, that is ~13.6
+cycles per byte — including the `str_byte` call overhead amortised over the
+loop.
+
+simdjson uses AVX2 to process 32 bytes per cycle in its structural stage:
+classify whitespace, quotes, backslashes, and braces in a single SIMD pass.
+Raw throughput is ~1–2 ns/byte → 500 MB/s–1 GB/s just for scanning, before
+doing anything with the result.
+
+Lua cannot express SIMD. `string.find` dispatches to C but the pattern engine
+is not SIMD-accelerated. The only way to get SIMD scanning from Lua is to call
+a C function that does it internally.
+
+**Gap from scanning alone: ~3x.**
+
+#### 2. Hash table construction (the non-obvious gap)
+
+Every JSON key-value pair that lands in a Lua table costs ~47 ns for the hash
+insert alone (measured above with pre-interned strings — no allocation, just
+writes). For a 5-field object that is 235 ns of irreducible hash overhead.
+
+The full decode of 90 bytes is 633 ns. Even if scanning were instantaneous,
+the minimum decode time is ≥235 ns just to populate the result table. The
+theoretical maximum throughput for a 5-field object, assuming zero-cost
+scanning, is 90 / 235e-9 ≈ **383 MB/s**. We currently achieve 142 MB/s — so
+roughly 40% of the gap from table construction is already visible, and it
+cannot be optimised away in Lua.
+
+simdjson does not build a hash table. It constructs a flat "tape" of 64-bit
+tokens (type + offset pairs) using a pre-allocated arena. Token recording costs
+roughly one 64-bit store per structural character — no hashing, no collision
+chains, no GC. After parsing, field lookup is O(n) tape scan, not O(1) hash —
+but the tape is cache-hot and the allocator is bump-pointer.
+
+**Gap from table construction: ~2x of the remaining gap after scanning.**
+
+#### 3. String allocation and interning (the per-key cost)
+
+Every JSON string value that reaches a Lua table must be an allocated, interned
+Lua string. Lua strings are immutable, heap-allocated, and hash-compared. When
+the decoder extracts a key like `"name"`, it calls `str_sub(src, i, j)`, which:
+1. Copies 4 bytes into a new Lua string object (~16-byte header + content)
+2. Computes a hash over those 4 bytes
+3. Checks the string interning table for deduplication
+4. Returns the interned pointer (or inserts the new string)
+
+For 5 keys + 3 string values = 8 string allocations per object. Even if each
+costs only 20 ns (optimistic for a new interned string), that is 160 ns.
+
+simdjson returns `string_view` — a (pointer, length) pair into the input buffer.
+No copy, no hash, no allocation. The input buffer stays alive for the lifetime
+of the document. Callers who want a `std::string` pay for the copy; those who
+just need to compare or transmit the string pay nothing.
+
+**Gap from string allocation: ~1.5x of remaining gap.**
+
+### Compound effect
+
+The three factors multiply. For a 5-field 90-byte object:
+
+| | Lua (current) | simdjson (estimate) |
+|---|---|---|
+| Byte scanning | ~300 ns (scalar) | ~30 ns (AVX2) |
+| Table/tape construction | ~235 ns (hash) | ~15 ns (bump-alloc tape) |
+| String extraction | ~100 ns (alloc+intern) | ~0 ns (string_view) |
+| **Total** | **~635 ns** | **~45 ns** |
+| **Throughput** | **~142 MB/s** | **~2 GB/s** |
+
+The multipliers compound: 10x scanning × 15x table × ∞x strings ≈ overall
+10–20x gap depending on input characteristics.
+
+### What a `simd.lua` tier can and cannot do
+
+A `simd.lua` tier that calls simdjson and then builds a Lua table would
+eliminate the scanning gap (~3x) and the string_view extraction (~1.5x) but
+keep the hash table construction cost (~2x). Net improvement: roughly 2.5x
+faster than the current pure/FFI tier, reaching ~350–400 MB/s.
+
+To approach simdjson-level throughput from Lua, the tier would need to return a
+lazy userdata (opaque C DOM) rather than a Lua table. Field access would use C
+comparisons against the tape without ever allocating Lua strings. This breaks
+the `decode → Lua table` contract.
+
+**Verdict:** the current pure+FFI tier is close to the optimum for implementations
+that return Lua tables. The remaining gap is an architectural constraint of the
+Lua VM (hash tables + string interning), not an implementation flaw. A simd.lua
+tier is worth implementing only if it returns a lazy DOM userdata, not a Lua
+table.
+
+---
+
 ## 2026-03-26: JSON tier optimisation — pre-optimisation baseline
 
 **Commit:** (baseline before optimisation, same as `122d8ca` code)
