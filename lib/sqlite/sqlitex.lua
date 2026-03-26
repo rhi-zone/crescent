@@ -1,5 +1,4 @@
 local sqlite = require("lib.sqlite")
-local check   = require("lib.type.check")
 
 local mod = {}
 
@@ -182,13 +181,9 @@ end
 -- ── CRUD ──────────────────────────────────────────────────────────────────────
 
 -- insert(value) → rowid | nil, err
--- Validates value against schema, then INSERTs all keyorder fields.
 --[[@param value table]]
 --[[@return integer? rowid, string? err]]
 model.insert = function(self, value)
-	local _, err = check.validate(self.schema, value)
-	if err then return nil, "sqlitex: " .. err end
-
 	local stmt, serr = get_insert_stmt(self)
 	if not stmt then return nil, serr end
 
@@ -240,9 +235,6 @@ end
 --[[@param value table]]
 --[[@return true? ok, string? err]]
 model.update = function(self, value)
-	local _, verr = check.validate(self.schema, value)
-	if verr then return nil, "sqlitex: " .. verr end
-
 	local stmt, err = get_update_stmt(self)
 	if not stmt then return nil, err end
 
