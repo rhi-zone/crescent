@@ -71,10 +71,13 @@
 - [ ] **Stdlib rewrites** — vendored packages currently in `lib/` violate the ownership
   rule (docs/stdlib-design.md). Each needs a fresh crescent-native rewrite before the
   registry exists and the vendored copy can be removed:
-  - [ ] `lib/format/json/` — rewrite lunajson as crescent-native JSON. Three tiers:
-    pure Lua (portable, correctness reference) → FFI scalar (LuaJIT JIT-compiled, no external dep)
-    → simdjson via FFI (SIMD-accelerated, registry-scale throughput). Parity tests + benchmarks
-    required across all tiers. Current nil,err wrapper buys time.
+  - [x] `lib/format/json/` — crescent-native JSON, three tiers (pure/ffi/simd stub).
+    Parity tests + benchmarks done. pure: 72 MB/s, ffi: ~same. See docs/perf/log.md.
+  - [ ] `lib/format/json_sax/` — SAX + zerocopy variant (separate library, different interface).
+    Design: `scan(src, cb(key,val))` and `scan_pos(src, cb(ks,ke,vs,ve))`. Pure tier only
+    (no table alloc = no bottleneck to tier away). Benchmarked: 247 ns / 254 MB/s (SAX) and
+    155 ns / 405 MB/s (zerocopy) on 90B object — 2.1x faster than Node.js JSON.parse.
+    Implement when HTTP layer needs streaming/large JSON parsing. Design notes: docs/perf/log.md.
   - [ ] `lib/format/cbor/` — rewrite vendored CBOR. Low priority until cbor sees more use.
   - [ ] `lib/encode/base64/` — rewrite lbase64. Small scope, good first rewrite task.
   - [ ] `lib/hash/sha1/` — rewrite mpeterv/sha1. Already heavily patched; sha256 shows
