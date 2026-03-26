@@ -256,16 +256,19 @@ local function decode_error(msg)
     error("unexpected token at offset " .. (_pos - 1) .. ": " .. msg, 2)
 end
 
+-- Pattern for non-whitespace: find first non-ws byte.
+local WS_SKIP_PAT = "[^ \t\n\r]"
+
 -- Skip whitespace. Advances _pos.
+-- Uses string.find for bulk scanning — C-implemented, much faster than
+-- byte-by-byte in Lua for runs of whitespace.
 local function skip_ws()
-    while _pos <= _len do
-        local b = str_byte(_src, _pos)
-        if b == 0x20 or b == 0x09 or b == 0x0A or b == 0x0D then
-            _pos = _pos + 1
-        else
-            break
-        end
-    end
+    if _pos > _len then return end
+    local b = str_byte(_src, _pos)
+    -- Fast single-byte check before calling string.find.
+    if b ~= 0x20 and b ~= 0x09 and b ~= 0x0A and b ~= 0x0D then return end
+    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+    _pos = nws or (_len + 1)
 end
 
 -- Forward declaration.
@@ -274,6 +277,11 @@ local decode_value
 -- Decode a JSON string starting after the opening `"`.
 -- On entry _pos points to the first byte of string content.
 -- Returns the Lua string; advances _pos past the closing `"`.
+--
+-- Fast path: use string.find to locate the first " or \ in one C call.
+-- For strings without escapes this means: one str_find + one str_sub.
+-- For strings with escapes: jump to each escape position in one call,
+-- then handle byte-by-byte only at the escape.
 local function decode_string()
     local start = _pos
     local buf = nil   -- lazy: only allocated when escapes present
