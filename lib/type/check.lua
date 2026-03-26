@@ -1,11 +1,13 @@
 local mod = {}
 
+--:: Schema<T> = { __schema: T }
+
 -- ── fast boolean check (hot path, no allocation on failure) ──────────────────
 
 mod.checkers = {}
 
 --[[@generic T]]
---[[@param schema T]]
+--[[@param schema Schema<T>]]
 --[[@param x unknown]]
 --[[@return boolean]]
 mod.check = function(schema, x)
@@ -222,7 +224,7 @@ validators.all_of     = function(s, x, path)
 end
 
 --[[@generic T]]
---[[@param schema T]]
+--[[@param schema Schema<T>]]
 --[[@param x unknown]]
 --[[@return T?, string?]]
 mod.validate = function(schema, x)
@@ -376,7 +378,7 @@ coercers.all_of     = function(s, x, path)
 end
 
 --[[@generic T]]
---[[@param schema T]]
+--[[@param schema Schema<T>]]
 --[[@param x unknown]]
 --[[@return T?, string?]]
 mod.coerce = function(schema, x)
