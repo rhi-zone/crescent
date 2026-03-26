@@ -9,9 +9,11 @@ end
 --   2. Load crescent.lock if present
 --   3. Fetch registry indices for packages not in lockfile
 --   4. Resolve direct deps against lockfile + registry
---   5. BFS work queue: fetch + link each package; read its pkg.lua; enqueue
+--   5. Fast-path check: compare tree hash of lib/<name>/ against lockfile.
+--      On mismatch, warn and skip (unless --force).
+--   6. BFS work queue: fetch + link each package; read its pkg.lua; enqueue
 --      transitive deps (visited set prevents re-install and circular loops)
---   6. Write crescent.lock
+--   7. Write crescent.lock
 
 local ffi = require("ffi")
 local semver  = require("lib.pkg.semver")
@@ -151,6 +153,71 @@ local function verify_checksum(path, expected)
 		return nil, ("checksum mismatch for %s: expected %s, got %s"):format(path, hex_expected, actual)
 	end
 	return true
+end
+
+-- ── Tree hash ─────────────────────────────────────────────────────────────────
+
+--- Compute a deterministic sha256 hash of the installed file tree at dir.
+--
+-- Algorithm:
+--   1. Walk dir recursively; collect all regular files, sorted by relative path.
+--   2. For each file, compute sha256("<relative_path>:<file_contents>") by
+--      piping through sha256sum/openssl.
+--   3. Concatenate all per-file hex hashes (newline-separated) and hash the result.
+-- Returns "sha256:<hex>" or nil, err.
+function M.tree_hash(dir)
+	-- Enumerate files sorted by relative path for determinism.
+	local out, err = popen_read(("find %q -type f | sort"):format(dir))
+	if not out then return nil, err end
+
+	local prefix = dir:gsub("/$", "") .. "/"
+	local entries = {}
+	for path in out:gmatch("[^\n]+") do
+		if path ~= "" then
+			local rel = path
+			if path:sub(1, #prefix) == prefix then
+				rel = path:sub(#prefix + 1)
+			end
+			entries[#entries + 1] = { rel = rel, path = path }
+		end
+	end
+
+	if #entries == 0 then
+		-- Empty directory: hash of the empty string.
+		local empty_hash, h_err = popen_read("printf '' | sha256sum 2>/dev/null || printf '' | openssl dgst -sha256 2>/dev/null")
+		if empty_hash then
+			local hex = empty_hash:match("^(%x+)") or empty_hash:match("(%x+)$")
+			if hex and #hex == 64 then return "sha256:" .. hex end
+		end
+		return nil, "could not compute sha256 for empty tree: " .. tostring(h_err)
+	end
+
+	-- For each file, compute hash of "<relative_path>:<file_contents>".
+	-- We write a small shell pipeline for this: printf "<rel>:" | cat - <file> | sha256sum
+	-- To avoid spawning N processes, concatenate all "<rel>:<contents>" into one
+	-- temp file then hash that.
+	local tmp = os.tmpname()
+	local tf, tf_err = io.open(tmp, "w")
+	if not tf then return nil, "tree_hash: cannot open temp file: " .. tostring(tf_err) end
+
+	for _, e in ipairs(entries) do
+		-- Write "<rel_path>:" header then file contents.
+		tf:write(e.rel .. ":")
+		local contents, r_err = read_file(e.path)
+		if contents == nil then
+			tf:close()
+			os.remove(tmp)
+			return nil, ("tree_hash: cannot read %s: %s"):format(e.path, tostring(r_err))
+		end
+		tf:write(contents)
+		tf:write("\n")
+	end
+	tf:close()
+
+	local hex, h_err = sha256_file(tmp)
+	os.remove(tmp)
+	if not hex then return nil, h_err end
+	return "sha256:" .. hex
 end
 
 -- ── Hardlink / copy ───────────────────────────────────────────────────────────
@@ -342,7 +409,7 @@ end
 -- opts.registry_indices overrides registry_index when present.
 -- Each entry is tried in order; the first that satisfies the constraint wins.
 --
--- Returns: { [name] = { version=str, url=str, checksum=str } } or nil, err
+-- Returns: { [name] = { version=str, url=str, tarball_hash=str } } or nil, err
 function M.resolve(deps, locked, registry_index, opts)
 	opts = opts or {}
 
@@ -400,9 +467,11 @@ function M.resolve(deps, locked, registry_index, opts)
 				locked_entry = nil  -- fall through to registry resolution below
 			else
 				resolved[name] = {
-					version  = locked_entry.version,
-					url      = locked_entry.url,
-					checksum = locked_entry.checksum,
+					version      = locked_entry.version,
+					url          = locked_entry.url,
+					tarball_hash = locked_entry.tarball_hash,
+					tree_hash    = locked_entry.tree_hash,
+					include      = locked_entry.include,
 				}
 			end
 		end
@@ -449,10 +518,10 @@ function M.resolve(deps, locked, registry_index, opts)
 			-- Build URL and checksum URL (these will be fetched for real during install)
 			-- We don't have the checksum yet at resolve time; it will be filled in during fetch.
 			resolved[name] = {
-				version          = best,
-				url              = nil,   -- populated by caller after fetch
-				checksum         = nil,   -- populated after download
-				_needs_fetch     = true,
+				version           = best,
+				url               = nil,   -- populated by caller after fetch
+				tarball_hash      = nil,   -- populated after download
+				_needs_fetch      = true,
 				_winning_registry = winning_registry_url,
 			}
 		end
@@ -461,12 +530,12 @@ function M.resolve(deps, locked, registry_index, opts)
 	return resolved
 end
 
--- ── dep/ fast-path check ──────────────────────────────────────────────────────
+-- ── lib/ fast-path check ──────────────────────────────────────────────────────
 
---- Check whether dep/<name>/pkg.lua exists and matches the expected name+version.
+--- Check whether lib/<name>/pkg.lua exists and matches the expected name+version.
 -- Returns true if the installed package matches; false otherwise.
 function M.dep_ok(project_dir, name, version)
-	local pkg_path = project_dir .. "/dep/" .. name .. "/pkg.lua"
+	local pkg_path = project_dir .. "/lib/" .. name .. "/pkg.lua"
 	local m, _ = manifest.load(pkg_path)
 	if not m then return false end
 	return m.name == name and m.version == version
@@ -475,7 +544,7 @@ end
 -- ── Fetch + extract ───────────────────────────────────────────────────────────
 
 -- Fetch a single package: download tarball, verify checksum, extract to cache.
--- Returns { version, url, checksum } or nil, err.
+-- Returns { version, url, tarball_hash } or nil, err.
 local function fetch_package(name, version, registry, opts)
 	local base = registry:gsub("/$", "")
 	local tarball_url  = ("%s/%s/%s.tar.gz"):format(base, name, version)
@@ -494,7 +563,7 @@ local function fetch_package(name, version, registry, opts)
 			if cs_content then
 				local hex = cs_content:match("^%s*(%x+)%s*$")
 				if hex then
-					return { version = version, url = tarball_url, checksum = "sha256:" .. hex }
+					return { version = version, url = tarball_url, tarball_hash = "sha256:" .. hex }
 				end
 			end
 		end
@@ -502,7 +571,7 @@ local function fetch_package(name, version, registry, opts)
 		if path_exists(tarball_path) then
 			local hex, err = sha256_file(tarball_path)
 			if hex then
-				return { version = version, url = tarball_url, checksum = "sha256:" .. hex }
+				return { version = version, url = tarball_url, tarball_hash = "sha256:" .. hex }
 			end
 		end
 		-- Re-download checksum only
@@ -510,10 +579,10 @@ local function fetch_package(name, version, registry, opts)
 		if cs then
 			local hex = cs:match("^%s*(%x+)%s*$")
 			if hex then
-				return { version = version, url = tarball_url, checksum = "sha256:" .. hex }
+				return { version = version, url = tarball_url, tarball_hash = "sha256:" .. hex }
 			end
 		end
-		return { version = version, url = tarball_url, checksum = "unknown" }
+		return { version = version, url = tarball_url, tarball_hash = "unknown" }
 	end
 
 	log(opts, "fetching %s@%s", name, version)
@@ -555,22 +624,22 @@ local function fetch_package(name, version, registry, opts)
 	-- Save checksum file alongside cache dir for future cache hits
 	write_file(cdir .. ".sha256", expected_hex .. "\n")
 
-	return { version = version, url = tarball_url, checksum = "sha256:" .. expected_hex }
+	return { version = version, url = tarball_url, tarball_hash = "sha256:" .. expected_hex }
 end
 
--- Link a package from the global cache into dep/<name>/ in the project.
+-- Link a package from the global cache into lib/<name>/ in the project.
 local function link_package(project_dir, name, version, opts)
 	local cdir = cache_dir(name, version)
-	local dep_pkg_dir = project_dir .. "/dep/" .. name
+	local lib_pkg_dir = project_dir .. "/lib/" .. name
 
-	-- Remove existing dep dir if present (stale version)
-	if path_exists(dep_pkg_dir) then
-		local rm_ok, rm_err = run_cmd(("rm -rf %q"):format(dep_pkg_dir))
+	-- Remove existing lib dir if present (stale version)
+	if path_exists(lib_pkg_dir) then
+		local rm_ok, rm_err = run_cmd(("rm -rf %q"):format(lib_pkg_dir))
 		if not rm_ok then return nil, rm_err end
 	end
 
-	log(opts, "linking %s@%s into dep/", name, version)
-	return hardlink_tree(cdir, dep_pkg_dir)
+	log(opts, "linking %s@%s into lib/", name, version)
+	return hardlink_tree(cdir, lib_pkg_dir)
 end
 
 -- ── Main install entry point ──────────────────────────────────────────────────
@@ -591,6 +660,7 @@ end
 --- Install all deps listed in pkg.lua in the given project directory.
 -- opts:
 --   frozen     = false   error if pkg.lua diverges from lockfile
+--   force      = false   overwrite lib/<name>/ even if tree hash differs (local modifications)
 --   registry   = "https://pkg.crescent.run"  (single registry, backwards-compat)
 --   registries = { url, ... }                (list; merged with user config + pkg registries)
 --   jobs       = 1       (v1: sequential only — parallel is a later phase)
@@ -718,10 +788,10 @@ function M.run(project_dir, opts)
 		return result
 	end
 
-	-- Ensure dep/ dir exists
-	local dep_ok2, dep_err = mkdir_p(project_dir .. "/dep")
-	if not dep_ok2 then
-		fail("failed to create dep/ dir: " .. tostring(dep_err))
+	-- Ensure lib/ dir exists
+	local lib_ok, lib_err = mkdir_p(project_dir .. "/lib")
+	if not lib_ok then
+		fail("failed to create lib/ dir: " .. tostring(lib_err))
 		return result
 	end
 
@@ -761,16 +831,38 @@ function M.run(project_dir, opts)
 		end
 		visited[name] = true
 
-		-- dep/ fast path: skip if already correct
+		-- lib/ fast path: skip if already correct
 		if M.dep_ok(project_dir, name, version) and not info._needs_fetch then
+			-- Check tree hash for local modifications (unless --force).
+			local locked_entry = new_lock[name]
+			if locked_entry and locked_entry.tree_hash and not opts.force then
+				local lib_dir = project_dir .. "/lib/" .. name
+				local actual_hash, hash_err = M.tree_hash(lib_dir)
+				if actual_hash and actual_hash ~= locked_entry.tree_hash then
+					io.stderr:write(("warning: lib/%s/ has local modifications (run with --force to overwrite)\n"):format(name))
+					result.skipped[#result.skipped + 1] = name
+					-- Preserve existing lockfile entry unchanged
+					if not new_lock[name] then
+						new_lock[name] = {
+							version      = version,
+							url          = info.url or "",
+							tarball_hash = info.tarball_hash or "",
+							include      = info.include or "**",
+						}
+					end
+					goto continue
+				end
+			end
+
 			log(opts, "skipping %s@%s (already installed)", name, version)
 			result.skipped[#result.skipped + 1] = name
 			-- Ensure lockfile entry is present
 			if not new_lock[name] then
 				new_lock[name] = {
-					version  = version,
-					url      = info.url or "",
-					checksum = info.checksum or "",
+					version      = version,
+					url          = info.url or "",
+					tarball_hash = info.tarball_hash or "",
+					include      = info.include or "**",
 				}
 			end
 		else
@@ -781,22 +873,29 @@ function M.run(project_dir, opts)
 				fail(("failed to fetch %s@%s: %s"):format(name, version, tostring(fetch_err)))
 				goto continue
 			end
-			-- Link into dep/
+			-- Link into lib/
 			local lnk_ok, lnk_err = link_package(project_dir, name, version, opts)
 			if not lnk_ok then
 				fail(("failed to link %s@%s: %s"):format(name, version, tostring(lnk_err)))
 				goto continue
 			end
+
+			-- Compute tree hash of freshly installed package
+			local lib_dir = project_dir .. "/lib/" .. name
+			local t_hash, _ = M.tree_hash(lib_dir)
+
 			result.installed[#result.installed + 1] = name
 			new_lock[name] = {
-				version  = fetch_info.version,
-				url      = fetch_info.url,
-				checksum = fetch_info.checksum,
+				version      = fetch_info.version,
+				url          = fetch_info.url,
+				tarball_hash = fetch_info.tarball_hash,
+				tree_hash    = t_hash,
+				include      = info.include or "**",
 			}
 		end
 
 		-- Read the installed package's own pkg.lua to discover transitive deps.
-		local dep_manifest_path = project_dir .. "/dep/" .. name .. "/pkg.lua"
+		local dep_manifest_path = project_dir .. "/lib/" .. name .. "/pkg.lua"
 		local dep_m = manifest.load(dep_manifest_path)
 		if dep_m and dep_m.deps and next(dep_m.deps) ~= nil then
 			-- Filter out already-visited deps before resolving.

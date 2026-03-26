@@ -7,16 +7,19 @@ end
 -- Usage: luajit lib/pkg/cli.lua <command> [args...]
 --
 -- Commands:
---   install [--frozen]          install all deps from pkg.lua / lockfile
---   add <name[@version]>        add dep to pkg.lua, install, update lockfile
---   remove <name>               remove dep, delete dep/<name>/, update lockfile
---   update [name]               re-resolve to latest matching version(s)
---   info <name>                 show package info from registry
+--   install [--frozen] [--force]    install all deps from pkg.lua / lockfile
+--   add <name[@version]>            add dep to pkg.lua, install, update lockfile
+--   remove <name>                   remove dep, delete lib/<name>/, update lockfile
+--   update [name]                   re-resolve to latest matching version(s)
+--   eject <name>                    remove from lockfile; leave lib/<name>/ untouched
+--   diff <name>                     diff lib/<name>/ against cached version (no network)
+--   info <name>                     show package info from registry
 --
 -- Global flags:
---   --verbose                   enable verbose output
---   --registry=URL              override default registry (https://pkg.crescent.run)
---   --jobs=N                    parallelism (default: 1)
+--   --verbose                       enable verbose output
+--   --registry=URL                  override default registry (https://pkg.crescent.run)
+--   --jobs=N                        parallelism (default: 1)
+--   --force                         overwrite local modifications (install only)
 
 local manifest = require("lib.pkg.manifest")
 local lock     = require("lib.pkg.lock")
@@ -66,10 +69,16 @@ local function path_exists(path)
 	return false
 end
 
+-- Return the global cache directory root (~/.crescent/cache).
+local function cache_root()
+	local home = os.getenv("HOME") or "/tmp"
+	return home .. "/.crescent/cache"
+end
+
 -- ── argument parsing ─────────────────────────────────────────────────────────
 
 --- Parse argv into { command, args, flags }.
--- Global flags (--verbose, --registry=X, --jobs=N, --frozen) are extracted.
+-- Global flags (--verbose, --registry=X, --jobs=N, --frozen, --force) are extracted.
 -- Remaining positional args are left in the args list.
 function M.parse_args(argv)
 	local result = {
@@ -78,6 +87,7 @@ function M.parse_args(argv)
 		verbose  = false,
 		frozen   = false,
 		dry_run  = false,
+		force    = false,
 		registry = DEFAULT_REGISTRY,
 		jobs     = 1,
 	}
@@ -98,6 +108,8 @@ function M.parse_args(argv)
 			result.frozen = true
 		elseif v == "--dry-run" then
 			result.dry_run = true
+		elseif v == "--force" then
+			result.force = true
 		elseif v:sub(1, 11) == "--registry=" then
 			result.registry = v:sub(12)
 		elseif v:sub(1, 7) == "--jobs=" then
@@ -132,10 +144,11 @@ end
 
 -- ── commands ─────────────────────────────────────────────────────────────────
 
---- cr install [--frozen]
+--- cr install [--frozen] [--force]
 local function cmd_install(project_dir, parsed)
 	local opts = {
 		frozen   = parsed.frozen,
+		force    = parsed.force,
 		registry = parsed.registry,
 		jobs     = parsed.jobs,
 		verbose  = parsed.verbose,
@@ -255,15 +268,15 @@ local function cmd_remove(project_dir, parsed)
 		return false
 	end
 
-	-- Delete dep/<name>/ directory
-	local dep_dir = project_dir .. "/dep/" .. name
-	if path_exists(dep_dir .. "/pkg.lua") or path_exists(dep_dir) then
-		local rm_ok, rm_err = run_cmd(("rm -rf %q"):format(dep_dir))
+	-- Delete lib/<name>/ directory
+	local lib_dir = project_dir .. "/lib/" .. name
+	if path_exists(lib_dir .. "/pkg.lua") or path_exists(lib_dir) then
+		local rm_ok, rm_err = run_cmd(("rm -rf %q"):format(lib_dir))
 		if not rm_ok then
-			stderr("remove: failed to delete dep/%s: %s", name, tostring(rm_err))
+			stderr("remove: failed to delete lib/%s: %s", name, tostring(rm_err))
 			return false
 		end
-		info("deleted dep/%s/", name)
+		info("deleted lib/%s/", name)
 	end
 
 	-- Remove from crescent.lock
@@ -357,6 +370,120 @@ local function cmd_update(project_dir, parsed)
 	return true
 end
 
+--- cr eject <name>
+-- Removes <name> from crescent.lock (and pkg.lua deps if present), but leaves
+-- lib/<name>/ untouched. After eject the package manager no longer manages
+-- that directory — it is owned by the project.
+local function cmd_eject(project_dir, parsed)
+	local name = parsed.args[1]
+	if not name then
+		stderr("eject: missing package name")
+		stderr("usage: cr eject <name>")
+		return false
+	end
+
+	local lock_path = project_dir .. "/crescent.lock"
+
+	-- Must be in lockfile to eject
+	if not path_exists(lock_path) then
+		stderr("eject: no crescent.lock found")
+		return false
+	end
+
+	local entries, l_err = lock.load(lock_path)
+	if not entries then
+		stderr("eject: failed to parse crescent.lock: %s", tostring(l_err))
+		return false
+	end
+
+	if not entries[name] then
+		stderr("eject: %q is not in crescent.lock", name)
+		return false
+	end
+
+	entries[name] = nil
+	local w_ok, w_err = lock.write(lock_path, entries)
+	if not w_ok then
+		stderr("eject: failed to write crescent.lock: %s", tostring(w_err))
+		return false
+	end
+
+	-- Also remove from pkg.lua deps if present (best-effort; not an error if absent)
+	local pkg_path = project_dir .. "/pkg.lua"
+	if path_exists(pkg_path) then
+		local m, _ = manifest.load(pkg_path)
+		if m and m.deps and m.deps[name] then
+			m.deps[name] = nil
+			manifest.write(pkg_path, m)  -- ignore write errors; lock already updated
+		end
+	end
+
+	info("ejected %s (lib/%s/ is now unmanaged)", name, name)
+	return true
+end
+
+--- cr diff <name>
+-- Diffs lib/<name>/ against ~/.crescent/cache/<name>@<version>/ using diff -r.
+-- No network required — the cache contains the original extracted tree.
+local function cmd_diff(project_dir, parsed)
+	local name = parsed.args[1]
+	if not name then
+		stderr("diff: missing package name")
+		stderr("usage: cr diff <name>")
+		return false
+	end
+
+	local lock_path = project_dir .. "/crescent.lock"
+	if not path_exists(lock_path) then
+		stderr("diff: no crescent.lock found")
+		return false
+	end
+
+	local entries, l_err = lock.load(lock_path)
+	if not entries then
+		stderr("diff: failed to parse crescent.lock: %s", tostring(l_err))
+		return false
+	end
+
+	local entry = entries[name]
+	if not entry then
+		stderr("diff: %q is not in crescent.lock", name)
+		return false
+	end
+
+	local cdir = cache_root() .. "/" .. name .. "@" .. entry.version
+	if not path_exists(cdir) then
+		stderr("diff: cache entry not found for %s@%s (run cr install to populate)", name, entry.version)
+		return false
+	end
+
+	local lib_dir = project_dir .. "/lib/" .. name
+	if not path_exists(lib_dir) then
+		stderr("diff: lib/%s/ does not exist (package not installed locally)", name)
+		return false
+	end
+
+	-- diff -r --unified: show unified diff of the two trees.
+	-- Exit code 0 = no differences, 1 = differences found, 2 = error.
+	local cmd = ("diff -r --unified %q %q"):format(cdir, lib_dir)
+	local fh = io.popen(cmd .. " 2>&1", "r")
+	if not fh then
+		stderr("diff: failed to run diff")
+		return false
+	end
+	local output = fh:read("*a")
+	fh:close()
+
+	if output ~= "" then
+		io.stdout:write(output)
+		if not output:match("\n$") then
+			io.stdout:write("\n")
+		end
+	end
+
+	return true
+end
+
 --- cr publish [--dry-run]
 local function cmd_publish(project_dir, parsed)
 	local opts = {
@@ -436,6 +563,8 @@ local COMMANDS = {
 	add     = cmd_add,
 	remove  = cmd_remove,
 	update  = cmd_update,
+	eject   = cmd_eject,
+	diff    = cmd_diff,
 	info    = cmd_info,
 	publish = cmd_publish,
 }
@@ -444,18 +573,21 @@ local USAGE = [[
 usage: cr <command> [options]
 
 commands:
-  install [--frozen]        install all deps from pkg.lua / lockfile
-  add <name[@version]>      add dep to pkg.lua, install, update lockfile
-  remove <name>             remove dep, delete dep/<name>/, update lockfile
-  update [name]             re-resolve to latest matching version(s)
-  info <name>               show package info from registry
-  publish [--dry-run]       publish package to registry
+  install [--frozen] [--force]  install all deps from pkg.lua / lockfile
+  add <name[@version]>          add dep to pkg.lua, install, update lockfile
+  remove <name>                 remove dep, delete lib/<name>/, update lockfile
+  update [name]                 re-resolve to latest matching version(s)
+  eject <name>                  remove from lockfile; leave lib/<name>/ unmanaged
+  diff <name>                   diff lib/<name>/ against cached version (no network)
+  info <name>                   show package info from registry
+  publish [--dry-run]           publish package to registry
 
 global options:
-  --verbose                 enable verbose logging
-  --registry=URL            registry base URL (default: https://pkg.crescent.run)
-  --jobs=N                  parallel jobs (default: 1)
-  --dry-run                 pack but do not upload (publish only)
+  --verbose                     enable verbose logging
+  --registry=URL                registry base URL (default: https://pkg.crescent.run)
+  --jobs=N                      parallel jobs (default: 1)
+  --force                       overwrite local modifications to lib/ (install only)
+  --dry-run                     pack but do not upload (publish only)
 ]]
 
 --- Main entry point. argv is the arg table (1-indexed positional args).

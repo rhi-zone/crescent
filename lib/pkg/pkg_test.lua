@@ -9,7 +9,7 @@ end
 --   - manifest parsing round-trip
 --   - lockfile parsing round-trip
 --   - resolve: locked deps stay pinned, new deps get resolved from registry
---   - link: hardlink_tree creates correct directory structure in dep/<name>/
+--   - link: hardlink_tree creates correct directory structure in lib/<name>/
 
 local T        = require("lib.test.assert")
 local semver   = require("lib.pkg.semver")
@@ -178,14 +178,18 @@ T.describe("pkg: lockfile parse round-trip", function()
 
 	local INPUT = {
 		sha1 = {
-			version  = "1.0.0",
-			url      = "https://pkg.crescent.run/sha1/1.0.0.tar.gz",
-			checksum = "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			version      = "1.0.0",
+			url          = "https://pkg.crescent.run/sha1/1.0.0.tar.gz",
+			tarball_hash = "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			tree_hash    = "sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+			include      = "**",
 		},
 		lunajson = {
-			version  = "1.3.1",
-			url      = "https://pkg.crescent.run/lunajson/1.3.1.tar.gz",
-			checksum = "sha256:cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe",
+			version      = "1.3.1",
+			url          = "https://pkg.crescent.run/lunajson/1.3.1.tar.gz",
+			tarball_hash = "sha256:cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe",
+			tree_hash    = "sha256:1122334455667788990011223344556677889900112233445566778899001122",
+			include      = "v2/**",
 		},
 	}
 
@@ -193,11 +197,14 @@ T.describe("pkg: lockfile parse round-trip", function()
 		local s = lock.serialize(INPUT)
 		local out, err = lock.parse(s)
 		T.ok(out, tostring(err))
-		T.eq(out.sha1.version,      INPUT.sha1.version)
-		T.eq(out.sha1.url,          INPUT.sha1.url)
-		T.eq(out.sha1.checksum,     INPUT.sha1.checksum)
-		T.eq(out.lunajson.version,  INPUT.lunajson.version)
-		T.eq(out.lunajson.checksum, INPUT.lunajson.checksum)
+		T.eq(out.sha1.version,         INPUT.sha1.version)
+		T.eq(out.sha1.url,             INPUT.sha1.url)
+		T.eq(out.sha1.tarball_hash,    INPUT.sha1.tarball_hash)
+		T.eq(out.sha1.tree_hash,       INPUT.sha1.tree_hash)
+		T.eq(out.sha1.include,         INPUT.sha1.include)
+		T.eq(out.lunajson.version,     INPUT.lunajson.version)
+		T.eq(out.lunajson.tarball_hash, INPUT.lunajson.tarball_hash)
+		T.eq(out.lunajson.include,     INPUT.lunajson.include)
 	end)
 
 	T.it("serialize is idempotent", function()
@@ -258,13 +265,13 @@ T.describe("pkg: resolve — locked deps stay pinned", function()
 	T.it("locked version satisfying constraint is kept as-is", function()
 		local deps   = { sha1 = "^1.0.0" }
 		local locked = {
-			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", checksum = "sha256:abc" },
+			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", tarball_hash = "sha256:abc" },
 		}
 		local r, err = install.resolve(deps, locked, MOCK_INDEX)
 		T.ok(r, tostring(err))
 		T.eq(r.sha1.version, "1.0.0")
 		T.eq(r.sha1.url,     "https://x/sha1/1.0.0.tar.gz")
-		T.eq(r.sha1.checksum, "sha256:abc")
+		T.eq(r.sha1.tarball_hash, "sha256:abc")
 		-- locked entry must NOT be marked as needing a fetch
 		T.fail(r.sha1._needs_fetch)
 	end)
@@ -272,7 +279,7 @@ T.describe("pkg: resolve — locked deps stay pinned", function()
 	T.it("newer locked version still satisfying constraint is kept", function()
 		local deps   = { sha1 = "^1.0.0" }
 		local locked = {
-			sha1 = { version = "1.1.0", url = "https://x/sha1/1.1.0.tar.gz", checksum = "sha256:def" },
+			sha1 = { version = "1.1.0", url = "https://x/sha1/1.1.0.tar.gz", tarball_hash = "sha256:def" },
 		}
 		local r, err = install.resolve(deps, locked, MOCK_INDEX)
 		T.ok(r, tostring(err))
@@ -282,7 +289,7 @@ T.describe("pkg: resolve — locked deps stay pinned", function()
 	T.it("locked version not satisfying constraint triggers re-resolve", function()
 		local deps   = { sha1 = ">=2.0.0" }
 		local locked = {
-			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", checksum = "sha256:old" },
+			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", tarball_hash = "sha256:old" },
 		}
 		local r, err = install.resolve(deps, locked, MOCK_INDEX)
 		T.ok(r, tostring(err))
@@ -295,7 +302,7 @@ T.describe("pkg: resolve — locked deps stay pinned", function()
 		local deps = { sha1 = "^1.0.0", lunajson = "~1.3" }
 		-- sha1 is locked; lunajson is new
 		local locked = {
-			sha1 = { version = "1.1.0", url = "https://x/sha1/1.1.0.tar.gz", checksum = "sha256:aaa" },
+			sha1 = { version = "1.1.0", url = "https://x/sha1/1.1.0.tar.gz", tarball_hash = "sha256:aaa" },
 		}
 		local r, err = install.resolve(deps, locked, MOCK_INDEX)
 		T.ok(r, tostring(err))
@@ -362,7 +369,7 @@ T.describe("pkg: resolve — frozen mode", function()
 	T.it("frozen: locked + satisfied → ok", function()
 		local deps   = { sha1 = "^1.0.0" }
 		local locked = {
-			sha1 = { version = "1.1.0", url = "https://x/1.1.0.tar.gz", checksum = "sha256:x" },
+			sha1 = { version = "1.1.0", url = "https://x/1.1.0.tar.gz", tarball_hash = "sha256:x" },
 		}
 		local r, err = install.resolve(deps, locked, nil, { frozen = true })
 		T.ok(r, tostring(err))
@@ -372,7 +379,7 @@ T.describe("pkg: resolve — frozen mode", function()
 	T.it("frozen: locked version violates constraint → error", function()
 		local deps   = { sha1 = ">=2.0.0" }
 		local locked = {
-			sha1 = { version = "1.0.0", url = "https://x/1.0.0.tar.gz", checksum = "sha256:y" },
+			sha1 = { version = "1.0.0", url = "https://x/1.0.0.tar.gz", tarball_hash = "sha256:y" },
 		}
 		local r, err = install.resolve(deps, locked, nil, { frozen = true })
 		T.eq(r, nil)
@@ -407,29 +414,29 @@ T.describe("pkg: link — correct directory structure", function()
 
 	T.it("dep_ok returns false when pkg.lua has wrong name", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
-		manifest.write(tmp .. "/dep/sha1/pkg.lua", { name = "other", version = "1.0.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		manifest.write(tmp .. "/lib/sha1/pkg.lua", { name = "other", version = "1.0.0" })
 		T.fail(install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
 	T.it("dep_ok returns false when pkg.lua has wrong version", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
-		manifest.write(tmp .. "/dep/sha1/pkg.lua", { name = "sha1", version = "0.9.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		manifest.write(tmp .. "/lib/sha1/pkg.lua", { name = "sha1", version = "0.9.0" })
 		T.fail(install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
 	T.it("dep_ok returns true when name and version both match", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
-		manifest.write(tmp .. "/dep/sha1/pkg.lua", { name = "sha1", version = "1.0.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		manifest.write(tmp .. "/lib/sha1/pkg.lua", { name = "sha1", version = "1.0.0" })
 		T.ok(install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
-	T.it("link creates dep/<name>/ with pkg.lua and source files", function()
+	T.it("link creates lib/<name>/ with pkg.lua and source files", function()
 		-- Build a fake global cache entry for sha1@1.0.0
 		local cache_root = make_tmpdir()
 		local pkg_cache  = cache_root .. "/sha1@1.0.0"
@@ -440,17 +447,17 @@ T.describe("pkg: link — correct directory structure", function()
 
 		-- Build a fake project dir
 		local project = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(project .. "/dep"))
+		os.execute(("mkdir -p %q"):format(project .. "/lib"))
 
 		-- Simulate hardlink_tree by using cp -r (same shell fallback install uses)
-		local dep_dir = project .. "/dep/sha1"
-		os.execute(("cp -r %q %q"):format(pkg_cache, dep_dir))
+		local lib_dir = project .. "/lib/sha1"
+		os.execute(("cp -r %q %q"):format(pkg_cache, lib_dir))
 
 		-- Verify the structure
-		T.ok(file_exists(dep_dir .. "/pkg.lua"),   "dep/sha1/pkg.lua exists")
-		T.ok(file_exists(dep_dir .. "/init.lua"),  "dep/sha1/init.lua exists")
+		T.ok(file_exists(lib_dir .. "/pkg.lua"),   "lib/sha1/pkg.lua exists")
+		T.ok(file_exists(lib_dir .. "/init.lua"),  "lib/sha1/init.lua exists")
 
-		local content = read_file(dep_dir .. "/init.lua")
+		local content = read_file(lib_dir .. "/init.lua")
 		T.ok(content ~= nil, "init.lua is readable")
 		T.ok(content:find("sha1 init") ~= nil, "init.lua has correct content")
 
@@ -470,15 +477,15 @@ T.describe("pkg: link — correct directory structure", function()
 		write_file(pkg_cache .. "/sub/helper.lua", "-- helper\n")
 
 		local project = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(project .. "/dep"))
+		os.execute(("mkdir -p %q"):format(project .. "/lib"))
 
-		local dep_dir = project .. "/dep/mypkg"
-		os.execute(("cp -r %q %q"):format(pkg_cache, dep_dir))
+		local lib_dir = project .. "/lib/mypkg"
+		os.execute(("cp -r %q %q"):format(pkg_cache, lib_dir))
 
-		T.ok(file_exists(dep_dir .. "/pkg.lua"),          "pkg.lua present")
-		T.ok(file_exists(dep_dir .. "/sub/helper.lua"),   "sub/helper.lua present")
+		T.ok(file_exists(lib_dir .. "/pkg.lua"),          "pkg.lua present")
+		T.ok(file_exists(lib_dir .. "/sub/helper.lua"),   "sub/helper.lua present")
 
-		local h = read_file(dep_dir .. "/sub/helper.lua")
+		local h = read_file(lib_dir .. "/sub/helper.lua")
 		T.ok(h ~= nil and h:find("helper") ~= nil, "sub/helper.lua content correct")
 
 		rm_tmpdir(cache_root)

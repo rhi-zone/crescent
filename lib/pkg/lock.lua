@@ -3,18 +3,51 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 -- lib/pkg/lock.lua — crescent.lock parser and serializer
+--
 -- Format: TOML-inspired, text, git-diffable
 --   # comments ignored
 --   blank lines ignored
 --   [name]       starts a package entry
---   key = "val"  assigns a string field (version, url, checksum)
+--   key = "val"  assigns a string field
+--
+-- Current lockfile format (v2):
+--
+--   [sha1]
+--   version      = "1.0.0"
+--   url          = "https://pkg.crescent.run/sha1/1.0.0.tar.gz"
+--   tarball_hash = "sha256:abc123..."
+--   tree_hash    = "sha256:def456..."
+--   include      = "**"
+--
+-- Migration from v1 format:
+--   Old key `checksum` is treated as `tarball_hash` on read.
+--   Old lockfiles without `tree_hash` or `include` parse cleanly:
+--   `tree_hash` defaults to nil, `include` defaults to "**".
+--
+-- Fields:
+--   version      (required) semver string
+--   url          (required) tarball download URL
+--   tarball_hash (required) sha256 of the downloaded tarball: "sha256:<hex>"
+--                (old key: checksum — accepted on read, written as tarball_hash)
+--   tree_hash    (optional) sha256 of the extracted file tree: "sha256:<hex>"
+--   include      (optional) glob pattern of installed files, default "**"
 
 local lock = {}
 
-local VALID_KEYS = { version = true, url = true, checksum = true }
+-- Keys accepted on parse. 'checksum' is the v1 alias for 'tarball_hash'.
+local VALID_KEYS = {
+	version      = true,
+	url          = true,
+	tarball_hash = true,
+	checksum     = true,   -- v1 compat: silently aliased to tarball_hash
+	tree_hash    = true,
+	include      = true,
+}
 
 -- parse(content) → tbl | nil, err
--- tbl is { [name] = { version=..., url=..., checksum=... }, ... }
+-- tbl is { [name] = { version, url, tarball_hash, tree_hash, include }, ... }
+-- tree_hash and include may be nil when absent from the lockfile.
+-- checksum (v1) is mapped to tarball_hash transparently.
 function lock.parse(content)
 	local result = {}
 	local current_name = nil
@@ -56,13 +89,22 @@ function lock.parse(content)
 			if not VALID_KEYS[key] then
 				return nil, ("line %d: unknown key %q"):format(lnum, key)
 			end
-			if current_pkg[key] then
+			-- Normalise v1 'checksum' to 'tarball_hash'
+			local store_key = (key == "checksum") and "tarball_hash" or key
+			if current_pkg[store_key] then
 				return nil, ("line %d: duplicate key %q in [%s]"):format(lnum, key, current_name)
 			end
-			current_pkg[key] = val
+			current_pkg[store_key] = val
 
 		else
 			return nil, ("line %d: unexpected line: %s"):format(lnum, line)
+		end
+	end
+
+	-- Apply defaults for optional fields.
+	for _, pkg in pairs(result) do
+		if pkg.include == nil then
+			pkg.include = "**"
 		end
 	end
 
@@ -82,6 +124,7 @@ end
 
 -- serialize(tbl) → string
 -- Entries sorted alphabetically, deterministic output.
+-- Writes all fields in canonical order: version, url, tarball_hash, tree_hash, include.
 function lock.serialize(tbl)
 	-- collect and sort package names
 	local names = {}
@@ -97,10 +140,14 @@ function lock.serialize(tbl)
 		end
 		parts[#parts + 1] = ("[%s]\n"):format(name)
 		local pkg = tbl[name]
-		-- write in a fixed canonical order: version, url, checksum
-		if pkg.version  then parts[#parts + 1] = ('version  = "%s"\n'):format(pkg.version)  end
-		if pkg.url      then parts[#parts + 1] = ('url      = "%s"\n'):format(pkg.url)       end
-		if pkg.checksum then parts[#parts + 1] = ('checksum = "%s"\n'):format(pkg.checksum)  end
+		-- Canonical field order
+		if pkg.version      then parts[#parts + 1] = ('version      = "%s"\n'):format(pkg.version)      end
+		if pkg.url          then parts[#parts + 1] = ('url          = "%s"\n'):format(pkg.url)           end
+		if pkg.tarball_hash then parts[#parts + 1] = ('tarball_hash = "%s"\n'):format(pkg.tarball_hash)  end
+		if pkg.tree_hash    then parts[#parts + 1] = ('tree_hash    = "%s"\n'):format(pkg.tree_hash)     end
+		-- Always write include (default "**") so the file is self-documenting
+		local inc = pkg.include or "**"
+		parts[#parts + 1] = ('include      = "%s"\n'):format(inc)
 	end
 
 	return table.concat(parts)

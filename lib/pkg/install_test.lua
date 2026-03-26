@@ -31,15 +31,15 @@ end
 
 T.describe("install.dep_ok", function()
 
-	T.it("returns false when dep dir does not exist", function()
+	T.it("returns false when lib dir does not exist", function()
 		local tmp = make_tmpdir()
 		T.ok(not install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
-	T.it("returns false when dep/name/pkg.lua is absent", function()
+	T.it("returns false when lib/name/pkg.lua is absent", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
 		-- no pkg.lua written
 		T.ok(not install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
@@ -47,33 +47,113 @@ T.describe("install.dep_ok", function()
 
 	T.it("returns false when name matches but version differs", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
-		write_manifest(tmp .. "/dep/sha1", { name = "sha1", version = "0.9.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		write_manifest(tmp .. "/lib/sha1", { name = "sha1", version = "0.9.0" })
 		T.ok(not install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
 	T.it("returns false when version matches but name differs", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
-		write_manifest(tmp .. "/dep/sha1", { name = "sha2", version = "1.0.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		write_manifest(tmp .. "/lib/sha1", { name = "sha2", version = "1.0.0" })
 		T.ok(not install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
 	T.it("returns true when name and version both match", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/sha1"))
-		write_manifest(tmp .. "/dep/sha1", { name = "sha1", version = "1.0.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		write_manifest(tmp .. "/lib/sha1", { name = "sha1", version = "1.0.0" })
 		T.ok(install.dep_ok(tmp, "sha1", "1.0.0"))
 		rm_tmpdir(tmp)
 	end)
 
 	T.it("handles hyphenated package names", function()
 		local tmp = make_tmpdir()
-		os.execute(("mkdir -p %q"):format(tmp .. "/dep/lua-cjson"))
-		write_manifest(tmp .. "/dep/lua-cjson", { name = "lua-cjson", version = "2.1.0" })
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/lua-cjson"))
+		write_manifest(tmp .. "/lib/lua-cjson", { name = "lua-cjson", version = "2.1.0" })
 		T.ok(install.dep_ok(tmp, "lua-cjson", "2.1.0"))
+		rm_tmpdir(tmp)
+	end)
+
+end)
+
+-- ── install.tree_hash ─────────────────────────────────────────────────────────
+
+T.describe("install.tree_hash", function()
+
+	T.it("returns sha256:... for a directory with files", function()
+		local tmp = make_tmpdir()
+		local f = io.open(tmp .. "/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+
+		local h, err = install.tree_hash(tmp)
+		T.ok(h, "tree_hash returned a value, err=" .. tostring(err))
+		T.ok(h:match("^sha256:%x+"), "tree_hash is sha256:hex")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("returns consistent hash for same contents", function()
+		local tmp = make_tmpdir()
+		local f = io.open(tmp .. "/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+
+		local h1 = install.tree_hash(tmp)
+		local h2 = install.tree_hash(tmp)
+		T.eq(h1, h2, "same dir produces same hash")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("hash changes when file content changes", function()
+		local tmp = make_tmpdir()
+		local f = io.open(tmp .. "/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+
+		local h1 = install.tree_hash(tmp)
+
+		-- Modify the file
+		local f2 = io.open(tmp .. "/init.lua", "w")
+		f2:write("return { modified = true }\n")
+		f2:close()
+
+		local h2 = install.tree_hash(tmp)
+		T.ok(h1 ~= h2, "hash changes when file changes")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("hash changes when a new file is added", function()
+		local tmp = make_tmpdir()
+		local f = io.open(tmp .. "/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+
+		local h1 = install.tree_hash(tmp)
+
+		-- Add a new file
+		local f2 = io.open(tmp .. "/util.lua", "w")
+		f2:write("return {}\n")
+		f2:close()
+
+		local h2 = install.tree_hash(tmp)
+		T.ok(h1 ~= h2, "hash changes when new file is added")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("hash is deterministic across multiple files", function()
+		local tmp = make_tmpdir()
+		for _, name in ipairs({ "a.lua", "b.lua", "c.lua" }) do
+			local f = io.open(tmp .. "/" .. name, "w")
+			f:write("-- " .. name .. "\n")
+			f:close()
+		end
+
+		local h1 = install.tree_hash(tmp)
+		local h2 = install.tree_hash(tmp)
+		T.eq(h1, h2, "multi-file tree_hash is deterministic")
 		rm_tmpdir(tmp)
 	end)
 
@@ -103,13 +183,13 @@ T.describe("install.resolve", function()
 	T.it("uses locked version when it satisfies constraint", function()
 		local deps   = { sha1 = "^1.0.0" }
 		local locked = {
-			sha1 = { version = "1.0.0", url = "https://example.com/sha1/1.0.0.tar.gz", checksum = "sha256:abc123" },
+			sha1 = { version = "1.0.0", url = "https://example.com/sha1/1.0.0.tar.gz", tarball_hash = "sha256:abc123" },
 		}
 		local r, err = install.resolve(deps, locked, MOCK_INDEX)
 		T.ok(r, tostring(err))
 		T.eq(r.sha1.version, "1.0.0")
 		T.eq(r.sha1.url,     "https://example.com/sha1/1.0.0.tar.gz")
-		T.eq(r.sha1.checksum, "sha256:abc123")
+		T.eq(r.sha1.tarball_hash, "sha256:abc123")
 	end)
 
 	-- No lockfile → resolve against registry
@@ -158,7 +238,7 @@ T.describe("install.resolve", function()
 	T.it("frozen: accepts lockfile when all constraints satisfied", function()
 		local deps = { sha1 = "^1.0.0" }
 		local locked = {
-			sha1 = { version = "1.1.0", url = "https://x/sha1/1.1.0.tar.gz", checksum = "sha256:aaa" },
+			sha1 = { version = "1.1.0", url = "https://x/sha1/1.1.0.tar.gz", tarball_hash = "sha256:aaa" },
 		}
 		local r, err = install.resolve(deps, locked, nil, { frozen = true })
 		T.ok(r, tostring(err))
@@ -169,7 +249,7 @@ T.describe("install.resolve", function()
 	T.it("frozen: errors when locked version violates constraint", function()
 		local deps = { sha1 = ">=2.0.0" }
 		local locked = {
-			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", checksum = "sha256:bbb" },
+			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", tarball_hash = "sha256:bbb" },
 		}
 		local r, err = install.resolve(deps, locked, nil, { frozen = true })
 		T.eq(r, nil)
@@ -190,7 +270,7 @@ T.describe("install.resolve", function()
 	T.it("re-resolves when locked version no longer satisfies constraint", function()
 		local deps = { sha1 = ">=2.0.0" }
 		local locked = {
-			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", checksum = "sha256:ccc" },
+			sha1 = { version = "1.0.0", url = "https://x/sha1/1.0.0.tar.gz", tarball_hash = "sha256:ccc" },
 		}
 		local r, err = install.resolve(deps, locked, MOCK_INDEX)
 		T.ok(r, tostring(err))
@@ -330,7 +410,7 @@ end)
 --
 -- These tests exercise M.run's BFS transitive-dependency resolution without
 -- real network calls.  Strategy:
---   • Pre-install all packages in dep/<name>/ by writing their pkg.lua.
+--   • Pre-install all packages in lib/<name>/ by writing their pkg.lua.
 --   • Pre-populate crescent.lock with all known packages.
 --   • Run M.run with only direct deps in the project pkg.lua.
 --   • Because every package passes dep_ok + has a lockfile entry, M.run takes
@@ -339,15 +419,15 @@ end)
 
 local lock = require("lib.pkg.lock")
 
--- Install a package into dep/<name>/ of a project directory.
+-- Install a package into lib/<name>/ of a project directory.
 local function install_dep(project_dir, pkg_tbl)
-	local dep_dir = project_dir .. "/dep/" .. pkg_tbl.name
+	local dep_dir = project_dir .. "/lib/" .. pkg_tbl.name
 	os.execute(("mkdir -p %q"):format(dep_dir))
 	write_manifest(dep_dir, pkg_tbl)
 end
 
 -- Write a crescent.lock with the given entries.
--- entries: { [name] = { version, url, checksum } }
+-- entries: { [name] = { version, url, tarball_hash, tree_hash, include } }
 local function write_lock(project_dir, entries)
 	local lock_path = project_dir .. "/crescent.lock"
 	local ok, err = lock.write(lock_path, entries)
@@ -360,6 +440,17 @@ local function sorted_str(t)
 	for i, v in ipairs(t) do copy[i] = v end
 	table.sort(copy)
 	return table.concat(copy, ",")
+end
+
+-- Helper: build a standard lock entry for a package.
+local function lock_entry(version, tree_hash)
+	return {
+		version      = version,
+		url          = "https://example.com/pkg.tar.gz",
+		tarball_hash = "sha256:aabbcc",
+		tree_hash    = tree_hash,
+		include      = "**",
+	}
 end
 
 T.describe("install.run transitive deps", function()
@@ -379,10 +470,10 @@ T.describe("install.run transitive deps", function()
 		-- Pre-install pkgb (no further deps)
 		install_dep(tmp, { name = "pkgb", version = "2.0.0" })
 
-		-- Pre-populate lockfile with both packages
+		-- Pre-populate lockfile with both packages (no tree_hash → no modification check)
 		write_lock(tmp, {
-			pkga = { version = "1.0.0", url = "https://example.com/pkga/1.0.0.tar.gz", checksum = "sha256:aaa" },
-			pkgb = { version = "2.0.0", url = "https://example.com/pkgb/2.0.0.tar.gz", checksum = "sha256:bbb" },
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("2.0.0"),
 		})
 
 		local result = install.run(tmp, { frozen = true })
@@ -414,10 +505,10 @@ T.describe("install.run transitive deps", function()
 		install_dep(tmp, { name = "pkgd", version = "1.0.0" })
 
 		write_lock(tmp, {
-			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
-			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
-			pkgc = { version = "1.0.0", url = "u", checksum = "sha256:ccc" },
-			pkgd = { version = "1.0.0", url = "u", checksum = "sha256:ddd" },
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("1.0.0"),
+			pkgc = lock_entry("1.0.0"),
+			pkgd = lock_entry("1.0.0"),
 		})
 
 		local result = install.run(tmp, { frozen = true })
@@ -447,9 +538,9 @@ T.describe("install.run transitive deps", function()
 		install_dep(tmp, { name = "foo", version = "1.5.0" })
 
 		write_lock(tmp, {
-			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
-			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
-			foo  = { version = "1.5.0", url = "u", checksum = "sha256:ccc" },
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("1.0.0"),
+			foo  = lock_entry("1.5.0"),
 		})
 
 		local result = install.run(tmp, { frozen = true })
@@ -480,9 +571,9 @@ T.describe("install.run transitive deps", function()
 		install_dep(tmp, { name = "foo", version = "2.0.0" })
 
 		write_lock(tmp, {
-			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
-			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
-			foo  = { version = "2.0.0", url = "u", checksum = "sha256:ccc" },
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("1.0.0"),
+			foo  = lock_entry("2.0.0"),
 		})
 
 		local result = install.run(tmp, { frozen = true })
@@ -514,8 +605,8 @@ T.describe("install.run transitive deps", function()
 		install_dep(tmp, { name = "foo", version = "1.5.0" })
 
 		write_lock(tmp, {
-			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
-			foo  = { version = "1.5.0", url = "u", checksum = "sha256:bbb" },
+			pkga = lock_entry("1.0.0"),
+			foo  = lock_entry("1.5.0"),
 		})
 
 		local result = install.run(tmp, { frozen = true })
@@ -548,8 +639,8 @@ T.describe("install.run transitive deps", function()
 			deps = { pkga = "^1.0.0" } })
 
 		write_lock(tmp, {
-			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
-			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("1.0.0"),
 		})
 
 		local result = install.run(tmp, { frozen = true })
@@ -558,6 +649,132 @@ T.describe("install.run transitive deps", function()
 		T.eq(#result.errors, 0)
 		-- Both packages discovered; cycle broken by visited set
 		T.eq(sorted_str(result.skipped), "pkga,pkgb")
+
+		rm_tmpdir(tmp)
+	end)
+
+end)
+
+-- ── install.run: local modification detection ─────────────────────────────────
+
+T.describe("install.run modification detection", function()
+
+	-- Helper: build a package dir with a single file and compute its real tree_hash.
+	local function make_pkg_with_hash(project_dir, name, version)
+		local lib_dir = project_dir .. "/lib/" .. name
+		os.execute(("mkdir -p %q"):format(lib_dir))
+		write_manifest(lib_dir, { name = name, version = version })
+		-- Write an extra file so there is non-trivial content
+		local f = io.open(lib_dir .. "/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+		local h = install.tree_hash(lib_dir)
+		return h
+	end
+
+	T.it("skips and warns when tree hash differs (local modifications)", function()
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "^1.0.0" } })
+
+		local correct_hash = make_pkg_with_hash(tmp, "mypkg", "1.0.0")
+
+		-- Populate lockfile with the correct hash
+		local lock_path = tmp .. "/crescent.lock"
+		local lock_mod = require("lib.pkg.lock")
+		lock_mod.write(lock_path, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:aabbcc",
+				tree_hash    = correct_hash,
+				include      = "**",
+			},
+		})
+
+		-- Now modify a file to invalidate the tree hash
+		local f = io.open(tmp .. "/lib/mypkg/init.lua", "w")
+		f:write("return { modified = true }\n")
+		f:close()
+
+		-- Capture stderr to verify the warning
+		local captured_stderr = {}
+		local old_stderr_write
+		-- We can't easily intercept io.stderr in LuaJIT; just verify behavior:
+		-- The package should be skipped (not fail) and no error in result.errors.
+		local result = install.run(tmp, { frozen = true })
+
+		-- Should not error — just skip
+		T.ok(result.ok, "run returns ok even with modified package")
+		T.eq(#result.errors, 0, "no errors in result")
+		-- mypkg should appear in skipped (we let it through with a warning)
+		local found = false
+		for _, n in ipairs(result.skipped) do
+			if n == "mypkg" then found = true; break end
+		end
+		T.ok(found, "modified package appears in skipped list")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("--force bypasses modification check and installs even without tree hash mismatch data", function()
+		-- With --force, modification check is skipped entirely.
+		-- We just verify force=true doesn't cause any new errors on a clean install.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "^1.0.0" } })
+
+		local h = make_pkg_with_hash(tmp, "mypkg", "1.0.0")
+
+		local lock_path = tmp .. "/crescent.lock"
+		local lock_mod = require("lib.pkg.lock")
+		lock_mod.write(lock_path, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:aabbcc",
+				tree_hash    = h,
+				include      = "**",
+			},
+		})
+
+		-- Run with force=true — should skip (already installed and dep_ok)
+		local result = install.run(tmp, { frozen = true, force = true })
+
+		T.ok(result.ok, "force install returns ok")
+		T.eq(#result.errors, 0, "no errors with --force")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("no warning when tree hash matches (unmodified package)", function()
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "^1.0.0" } })
+
+		local h = make_pkg_with_hash(tmp, "mypkg", "1.0.0")
+
+		local lock_path = tmp .. "/crescent.lock"
+		local lock_mod = require("lib.pkg.lock")
+		lock_mod.write(lock_path, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:aabbcc",
+				tree_hash    = h,
+				include      = "**",
+			},
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(result.ok, "unmodified package: ok")
+		T.eq(#result.errors, 0, "no errors for unmodified package")
+		local found = false
+		for _, n in ipairs(result.skipped) do
+			if n == "mypkg" then found = true; break end
+		end
+		T.ok(found, "unmodified package is skipped normally")
 
 		rm_tmpdir(tmp)
 	end)

@@ -67,7 +67,7 @@ local DEFAULT_EXCLUDE_PATTERNS = {
 	"^bench%.lua$",   -- bench.lua at root
 	"^fixtures/",     -- fixtures/ directory
 	"^docs/",         -- docs/ directory
-	"^dep/",          -- dep/ (third-party, not ours)
+	"^dep/",          -- legacy dep/ directory (packages now install to lib/; keep for compat)
 	"^%.git/",        -- .git
 }
 
