@@ -6,6 +6,46 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: base64 encode/decode — baseline
+
+**Commit:** (this change)
+
+Benchmark: `luajit lib/encode/base64/bench.lua`
+
+### Results
+
+```
+base64 benchmark — encode and decode throughput
+
+variant   size       encode MB/s     decode MB/s
+--------------------------------------------------
+std       64B            55.2 MB/s         36.1 MB/s
+std       1KB            91.7 MB/s         54.9 MB/s
+std       64KB           85.8 MB/s         54.9 MB/s
+std       1MB            86.5 MB/s         50.7 MB/s
+url       64B            55.3 MB/s         39.6 MB/s
+url       1KB            96.4 MB/s         58.6 MB/s
+url       64KB           87.1 MB/s         55.1 MB/s
+url       1MB            86.2 MB/s         51.3 MB/s
+```
+
+### Notes
+
+- Encode plateaus at ~86–96 MB/s above 1KB; JIT traces stabilise once the main
+  loop is hot. The 64B case is ~40% slower due to per-call overhead dominating.
+- Decode is consistently ~35–40% slower than encode. The bottleneck is the
+  `gsub("%s", "")` whitespace-strip at the top of every decode call — it
+  allocates a new string even when there is no whitespace to remove. The
+  `string.char` calls inside the decode loop are also larger (4 → 3 bytes) and
+  involve more nil-checks per character.
+- `base64url` is a thin wrapper (one extra table lookup for opts) and performs
+  identically to `std` within measurement noise.
+- Decode hot path: `b64:byte(i, i+3)` + 4 table lookups + `string.char` of
+  3 bytes. The `not da or not db` guard prevents LICM across the loop body,
+  limiting JIT trace quality.
+
+---
+
 ## 2026-03-26: JSON API variants — schema+reuse beats Node.js
 
 **Benchmark scripts:** `docs/perf/json_api.lua` (single decode), `docs/perf/json_collect.lua` (1000-item loop), `docs/perf/json_node.js` (Node.js comparison).
