@@ -34,6 +34,9 @@ end
 
 local lock = {}
 
+-- Current lockfile format version.
+lock.CURRENT_VERSION = 2
+
 -- Keys accepted on parse. 'checksum' is the v1 alias for 'tarball_hash'.
 local VALID_KEYS = {
 	version      = true,
@@ -48,6 +51,9 @@ local VALID_KEYS = {
 -- tbl is { [name] = { version, url, tarball_hash, tree_hash, include }, ... }
 -- tree_hash and include may be nil when absent from the lockfile.
 -- checksum (v1) is mapped to tarball_hash transparently.
+-- Lockfiles without a lockfile_version field are treated as v1 (migrated silently).
+-- Lockfiles with lockfile_version = 2 are the current format.
+-- Any other version value returns an error.
 function lock.parse(content)
 	local result = {}
 	local current_name = nil
@@ -63,6 +69,18 @@ function lock.parse(content)
 		-- skip blank lines and comments
 		if line == "" or line:sub(1, 1) == "#" then
 			-- nothing
+
+		-- top-level lockfile_version field (before any section header)
+		elseif not current_name and line:find("^lockfile_version%s*=") then
+			local ver_str = line:match("^lockfile_version%s*=%s*(.+)$")
+			local ver = tonumber(ver_str)
+			if not ver then
+				return nil, ("line %d: lockfile_version must be a number"):format(lnum)
+			end
+			if ver ~= 1 and ver ~= 2 then
+				return nil, ("unsupported lockfile version: %d — upgrade crescent"):format(ver)
+			end
+			seen_version_field = true
 
 		-- section header: [name]
 		elseif line:sub(1, 1) == "[" then
@@ -133,7 +151,7 @@ function lock.serialize(tbl)
 	end
 	table.sort(names)
 
-	local parts = { "# crescent.lock\n" }
+	local parts = { "# crescent.lock\n\nlockfile_version = 2\n" }
 	for i, name in ipairs(names) do
 		if i > 1 then
 			parts[#parts + 1] = "\n"

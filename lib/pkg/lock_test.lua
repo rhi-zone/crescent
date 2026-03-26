@@ -260,3 +260,102 @@ os.remove(tmpfile)
 local r9, e9 = lock.load("/nonexistent/path/crescent.lock")
 T.ok(not r9, "load nonexistent returns nil")
 T.ok(e9,     "load nonexistent returns error string")
+
+-- ── lockfile_version: CURRENT_VERSION constant ──────────────────────────────
+
+T.eq(lock.CURRENT_VERSION, 2, "CURRENT_VERSION is 2")
+
+-- ── lockfile_version: serialize always writes version field ─────────────────
+
+local versioned_out = lock.serialize({
+	pkg = {
+		version      = "1.0.0",
+		url          = "https://example.com/pkg.tar.gz",
+		tarball_hash = "sha256:abc",
+	},
+})
+T.ok(versioned_out:find("lockfile_version = 2"), "serialize writes lockfile_version = 2")
+
+-- version field appears before first section header
+local pos_ver  = versioned_out:find("lockfile_version")
+local pos_sect = versioned_out:find("%[pkg%]")
+T.ok(pos_ver < pos_sect, "lockfile_version appears before first section")
+
+-- ── lockfile_version: write + load preserves version semantics ──────────────
+
+local tmpfile2 = os.tmpname()
+lock.write(tmpfile2, {
+	pkg = {
+		version      = "2.0.0",
+		url          = "https://example.com/pkg2.tar.gz",
+		tarball_hash = "sha256:def",
+	},
+})
+local loaded2, lerr2 = lock.load(tmpfile2)
+T.ok(loaded2,    "load v2 lockfile (written by lock.write) returns table")
+T.ok(not lerr2,  "load v2 lockfile returns no error")
+T.eq(loaded2.pkg.version, "2.0.0", "loaded v2 lockfile: version field preserved")
+os.remove(tmpfile2)
+
+-- ── lockfile_version: v1 lockfile (no version field) accepted ───────────────
+
+local V1_WITH_NO_VER = [[
+# crescent.lock
+
+[mypkg]
+version      = "3.0.0"
+url          = "https://example.com/mypkg.tar.gz"
+tarball_hash = "sha256:cafebabe"
+]]
+
+local v1_nofield, v1_nofield_err = lock.parse(V1_WITH_NO_VER)
+T.ok(v1_nofield,         "v1 lockfile (no version field) parses successfully")
+T.ok(not v1_nofield_err, "v1 lockfile returns no error")
+T.eq(v1_nofield.mypkg.version, "3.0.0", "v1 lockfile: package version preserved")
+
+-- ── lockfile_version: lockfile_version = 1 also accepted ────────────────────
+
+local V1_EXPLICIT = [[
+lockfile_version = 1
+
+[mypkg]
+version      = "3.1.0"
+url          = "https://example.com/mypkg.tar.gz"
+tarball_hash = "sha256:cafebabe"
+]]
+
+local v1_explicit, v1_explicit_err = lock.parse(V1_EXPLICIT)
+T.ok(v1_explicit,         "lockfile_version = 1 accepted")
+T.ok(not v1_explicit_err, "lockfile_version = 1 returns no error")
+T.eq(v1_explicit.mypkg.version, "3.1.0", "lockfile_version = 1: package version preserved")
+
+-- ── lockfile_version: unknown version returns error ──────────────────────────
+
+local BAD_VER_3 = [[
+lockfile_version = 3
+
+[mypkg]
+version = "1.0.0"
+]]
+local r_bad, e_bad = lock.parse(BAD_VER_3)
+T.ok(not r_bad, "unsupported lockfile version returns nil")
+T.ok(e_bad and e_bad:find("unsupported lockfile version"), "error message mentions unsupported lockfile version")
+T.ok(e_bad and e_bad:find("3"),    "error message includes the bad version number")
+T.ok(e_bad and e_bad:find("upgrade crescent"), "error message mentions upgrade crescent")
+
+-- ── lockfile_version: round-trip through write/load still idempotent ────────
+
+local rt_input = {
+	alpha = {
+		version      = "0.5.0",
+		url          = "https://example.com/alpha.tar.gz",
+		tarball_hash = "sha256:111",
+		tree_hash    = "sha256:222",
+		include      = "**",
+	},
+}
+local rt_ser1 = lock.serialize(rt_input)
+local rt_tbl  = lock.parse(rt_ser1)
+T.ok(rt_tbl, "round-trip v2 parse succeeds")
+local rt_ser2 = lock.serialize(rt_tbl)
+T.eq(rt_ser1, rt_ser2, "v2 round-trip serialize is idempotent")
