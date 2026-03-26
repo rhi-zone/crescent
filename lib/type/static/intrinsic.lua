@@ -249,14 +249,38 @@ local function expand_each_field(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
+-- $Opaque<T>
+-- ---------------------------------------------------------------------------
+-- Produces a TAG_NOMINAL type with a unique identity per (call site, T).
+-- Two uses of $Opaque<integer> at the *same* source location resolve to the
+-- same nominal type; at different source locations they are distinct.
+-- stable_id: the ann_tid of the TAG_TYPE_CALL node (unique per source location)
+local function expand_opaque(ctx, arg_ids, stable_id)
+    if #arg_ids ~= 1 then return ctx.T_NEVER end
+    local T = types_mod.find(ctx, arg_ids[1])
+    if not ctx._opaque_cache then ctx._opaque_cache = {} end
+    local site = ctx._opaque_cache[stable_id]
+    if not site then site = {}; ctx._opaque_cache[stable_id] = site end
+    local instance_id = site[T]
+    if not instance_id then
+        ctx.nominal_id = ctx.nominal_id + 1
+        instance_id = ctx.nominal_id
+        site[T] = instance_id
+    end
+    local opaque_name_id = intern_mod.intern(ctx.pool, "Opaque")
+    return types_mod.make_nominal(ctx, opaque_name_id, instance_id, T)
+end
+
+-- ---------------------------------------------------------------------------
 -- Public entry point
 -- ---------------------------------------------------------------------------
 
--- expand(ctx, name_id, arg_ids) -> type_id
+-- expand(ctx, name_id, arg_ids, stable_id) -> type_id
 -- Called when a TAG_TYPE_CALL has a TAG_INTRINSIC callee.
--- name_id: intern ID of the intrinsic name (string)
--- arg_ids: Lua array of resolved type_ids (the type arguments)
-function M.expand(ctx, name_id, arg_ids)
+-- name_id:   intern ID of the intrinsic name (string)
+-- arg_ids:   Lua array of resolved type_ids (the type arguments)
+-- stable_id: ann_tid of the TAG_TYPE_CALL node (used by $Opaque for memoization)
+function M.expand(ctx, name_id, arg_ids, stable_id)
     local name = intern_mod.get(ctx.pool, name_id) or ""
 
     if name == "Keys" then
@@ -269,6 +293,10 @@ function M.expand(ctx, name_id, arg_ids)
 
     if name == "EachField" then
         return expand_each_field(ctx, arg_ids)
+    end
+
+    if name == "Opaque" then
+        return expand_opaque(ctx, arg_ids, stable_id)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative

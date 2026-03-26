@@ -3,12 +3,11 @@ local mod = {}
 --[[@alias type_ {type:"integer"|"number"|"string"|"boolean"|"nil"}]]
 --[[@alias type_type "integer"|"number"|"string"|"boolean"|"tuple"|"struct"|"struct_exact"|"array"|"dictionary"|"optional"]]
 
--- Schema<T> wraps a value type T. The __schema phantom field carries T at the
--- type level only — never present at runtime. Ideally this would be $Opaque<T>
--- (truly nominal, unforgeble) but $Opaque is not yet implemented. For now the
--- structural phantom field is sufficient for tooling purposes.
--- TODO: replace with $Opaque<T> once the intrinsic is implemented.
---:: Schema<T> = { __schema: T }
+-- Schema<T> wraps a value type T as a nominal opaque type.
+-- Two Schema<T> values with the same T are the same type; Schema<T> and Schema<U>
+-- with different T/U are distinct and incompatible. The underlying T is accessible
+-- through unwrap operations but Schema itself is not structurally matchable.
+--:: Schema<T> = $Opaque<T>
 
 -- UnwrapField maps a $EachField descriptor whose value is Schema<V> to a
 -- descriptor with bare value V, used by struct/tuple constructors to strip the

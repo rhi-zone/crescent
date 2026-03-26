@@ -644,7 +644,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             end
             if not has_unresolved then
                 local intrinsic_mod = require("lib.type.static.intrinsic")
-                return intrinsic_mod.expand(ctx, ct.data[0], arg_ids)
+                return intrinsic_mod.expand(ctx, ct.data[0], arg_ids, ann_tid)
             end
             -- Fall through to store a deferred TAG_TYPE_CALL.
         end

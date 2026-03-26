@@ -6501,3 +6501,64 @@ end
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- $Opaque<T> intrinsic
+---------------------------------------------------------------------------
+
+assert.describe("checker: $Opaque<T>", function()
+    assert.it("$Opaque<integer> is accepted where same opaque type expected", function()
+        no_errors([[
+--:: Token = $Opaque<integer>
+--:: declare t = Token
+--: Token
+local x = t
+]])
+    end)
+
+    assert.it("two $Opaque<integer> at different sites are distinct types", function()
+        has_error([[
+--:: TokenA = $Opaque<integer>
+--:: TokenB = $Opaque<integer>
+--:: declare a = TokenA
+--: TokenB
+local x = a
+]], "nominal")
+    end)
+
+    assert.it("raw integer not assignable to $Opaque<integer>", function()
+        has_error([[
+--:: Token = $Opaque<integer>
+--: Token
+local x = 42
+]], "nominal")
+    end)
+
+    assert.it("$Opaque<integer> not assignable to plain integer", function()
+        has_error([[
+--:: Token = $Opaque<integer>
+--:: declare t = Token
+--: integer
+local x = t
+]], "nominal")
+    end)
+
+    assert.it("Schema<T> pattern: same T compatible, different T incompatible", function()
+        no_errors([[
+--:: Schema<T> = $Opaque<T>
+--:: declare si = Schema<integer>
+--:: declare si2 = Schema<integer>
+--: Schema<integer>
+local x = si
+]])
+    end)
+
+    assert.it("Schema<integer> not assignable to Schema<string>", function()
+        has_error([[
+--:: Schema<T> = $Opaque<T>
+--:: declare si = Schema<integer>
+--: Schema<string>
+local x = si
+]], "nominal")
+    end)
+end)

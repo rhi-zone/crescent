@@ -577,7 +577,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             end
             if not has_unresolved then
                 local intrinsic_mod = require("lib.type.static.intrinsic")
-                return intrinsic_mod.expand(ctx, ct.data[0], new_args)
+                return intrinsic_mod.expand(ctx, ct.data[0], new_args, tid)
             end
         end
         local mk = ctx.lists:mark()

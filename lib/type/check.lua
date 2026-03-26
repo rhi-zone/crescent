@@ -1,6 +1,6 @@
 local mod = {}
 
---:: Schema<T> = { __schema: T }
+--:: Schema<T> = $Opaque<T>
 
 -- ── fast boolean check (hot path, no allocation on failure) ──────────────────
 
