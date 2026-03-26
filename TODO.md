@@ -265,6 +265,13 @@
 - [ ] **Resolve open questions in access-control.md before implementation**: (1) annotation syntax for exported type vs internal type; (2) opt-in syntax at use site for intentional private access; (3) read/write independence in annotation syntax; (4) split FLAG_READONLY into FLAG_IMMUTABLE + FLAG_WRITE_PRIVATE in FieldEntry
 - [ ] **Remove FLAG_PRIVATE** — current `_`-prefix enforcement (session 25) is wrong model. Privacy = absence from exported type + `$Opaque<T>` + `--:: unseal` opt-in. No definition-site whitelist.
 
+### nominal type identity across files (bug)
+- [ ] **`newtype` and `$Opaque<T>` identity is not stable across file boundaries**
+  — nominal IDs (`ctx.nominal_id`) are allocated incrementally per `ctx`, which resets per file check.
+  Two files that both instantiate `Schema<integer>` may get the same nominal_id by accident (if nothing else was allocated first) or different IDs if allocation order differs, making cross-file compatibility undefined behaviour.
+  **Root cause**: nominal identity is a runtime counter, not derived from source content.
+  **Required fix**: stable_id for `$Opaque` (and newtype identity) must be `filename:line:col` of the declaration — computable from the annotation source position, which is deterministic and globally unique. This requires source position to be stored in or recoverable from annotation type nodes (TAG_TYPE_CALL / type-decl AST nodes), then threaded through constrain.lua and env.lua's substitute path to `intrinsic_mod.expand` and `make_nominal`.
+
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
 - [x] **`_G` should be an intrinsic reflecting the global scope**: synthesized as `$GlobalScope` — closed TAG_TABLE (no fallback indexer), named fields per declared global, declared in stdlib.d.lua. TAG_INTRINSIC resolution in constrain.lua checks type aliases first so `$Name` works as a regular type reference when registered. (2026-03-19, 5a42a48)
