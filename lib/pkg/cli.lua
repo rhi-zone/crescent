@@ -24,11 +24,12 @@ end
 --   --strict                        exit 1 on any phantom dep (check command)
 --   --skip-check                    skip phantom dep lint (publish command)
 
-local manifest = require("lib.pkg.manifest")
-local lock     = require("lib.pkg.lock")
-local install  = require("lib.pkg.install")
-local publish  = require("lib.pkg.publish")
-local check    = require("lib.pkg.check")
+local manifest  = require("lib.pkg.manifest")
+local lock      = require("lib.pkg.lock")
+local install   = require("lib.pkg.install")
+local publish   = require("lib.pkg.publish")
+local check     = require("lib.pkg.check")
+local workspace = require("lib.pkg.workspace")
 
 local M = {}
 
@@ -96,6 +97,7 @@ function M.parse_args(argv)
 		overwrite  = false,
 		strict     = false,
 		skip_check = false,
+		workspace  = false,
 		registry   = DEFAULT_REGISTRY,
 		jobs       = 0,
 	}
@@ -112,6 +114,8 @@ function M.parse_args(argv)
 	for _, v in ipairs(list) do
 		if v == "--verbose" then
 			result.verbose = true
+		elseif v == "--workspace" then
+			result.workspace = true
 		elseif v == "--frozen" then
 			result.frozen = true
 		elseif v == "--dry-run" then
@@ -160,8 +164,27 @@ end
 
 -- ── commands ─────────────────────────────────────────────────────────────────
 
---- cr install [--frozen] [--force]
+--- cr install [--frozen] [--force] [--workspace]
 local function cmd_install(project_dir, parsed)
+	-- Workspace detection: if --workspace flag is set or workspace.lua exists in
+	-- any ancestor, use the workspace root as project_dir.
+	local effective_dir = project_dir
+	if parsed.workspace then
+		local ws_root = workspace.find_root(project_dir)
+		if ws_root then
+			effective_dir = ws_root
+		else
+			stderr("install: --workspace specified but no workspace.lua found in %s or any parent", project_dir)
+			return false
+		end
+	else
+		-- Auto-detect: walk up looking for workspace.lua
+		local ws_root = workspace.find_root(project_dir)
+		if ws_root then
+			effective_dir = ws_root
+		end
+	end
+
 	local opts = {
 		frozen   = parsed.frozen,
 		force    = parsed.force,
@@ -170,7 +193,7 @@ local function cmd_install(project_dir, parsed)
 		verbose  = parsed.verbose,
 	}
 
-	local result = install.run(project_dir, opts)
+	local result = install.run(effective_dir, opts)
 
 	for _, name in ipairs(result.installed) do
 		info("installed %s", name)
@@ -894,7 +917,8 @@ local USAGE = [[
 usage: cr <command> [options]
 
 commands:
-  install [--frozen] [--force]          install all deps from pkg.lua / lockfile
+  install [--frozen] [--force] [--workspace]
+                                        install all deps from pkg.lua / lockfile
   add <name[@version]>                  add dep to pkg.lua, install, update lockfile
   remove <name>                         remove dep, delete lib/<name>/, update lockfile
   update [name] [--merge|--overwrite]   re-resolve to latest matching version(s)
@@ -902,13 +926,14 @@ commands:
   diff <name>                           diff lib/<name>/ against cached version (no network)
   info <name>                           show package info from registry
   publish [--dry-run] [--skip-check]    publish package to registry
-  check [--strict]                      scan for phantom dependencies
+  check [--strict] [--workspace]        scan for phantom dependencies
 
 global options:
   --verbose                     enable verbose logging
   --registry=URL                registry base URL (default: https://pkg.crescent.run)
   --jobs=N                      parallel jobs (default: CPU count; 1 = sequential)
   --force                       overwrite local modifications to lib/ (install only)
+  --workspace                   operate at workspace root (auto-detected from workspace.lua)
   --merge                       three-way merge local edits with new version (update only)
   --overwrite                   discard local modifications before update (update only)
   --dry-run                     pack but do not upload (publish only)
