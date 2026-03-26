@@ -1,0 +1,226 @@
+--- HTTP streaming response reader.
+-- Transport-agnostic: wraps a recv_fn() closure that returns bytes.
+-- Works with raw sockets, TLS sockets, or test mocks.
+
+local mod = {}
+
+--[[@class http_stream]]
+--[[@field _recv fun(): string?, string?]]
+--[[@field _buf string]]
+--[[@field _headers table<string, string[]>?]]
+--[[@field _status integer?]]
+--[[@field _status_text string?]]
+--[[@field _version string?]]
+--[[@field _eof boolean]]
+
+local mt = { __index = {} }
+
+--[[@param recv_fn fun(): string?, string?]]
+--[[@return http_stream]]
+mod.new = function(recv_fn)
+	return setmetatable({
+		_recv = recv_fn,
+		_buf = "",
+		_eof = false,
+	}, mt)
+end
+
+--- Fill buffer until it contains pattern or EOF.
+--[[@param self http_stream]]
+--[[@param pattern string]]
+--[[@return integer? pos]]
+local function fill_until(self, pattern)
+	while true do
+		local pos = self._buf:find(pattern, 1, true)
+		if pos then return pos end
+		if self._eof then return nil end
+		local chunk, err = self._recv()
+		if not chunk then
+			self._eof = true
+			return nil
+		end
+		self._buf = self._buf .. chunk
+	end
+end
+
+--- Read and parse HTTP response status line + headers.
+--[[@return table<string, string[]>? headers, string? err]]
+function mt.__index:read_headers()
+	if self._headers then return self._headers end
+	local pos = fill_until(self, "\r\n\r\n")
+	if not pos then return nil, "incomplete headers" end
+
+	local head = self._buf:sub(1, pos - 1)
+	self._buf = self._buf:sub(pos + 4)
+
+	-- parse status line
+	local version_raw, status_raw, status_text = head:match("^([^ ]+) ([^ ]+) ([^\r]*)")
+	if not version_raw then return nil, "invalid status line" end
+
+	self._version = version_raw
+	self._status = tonumber(status_raw)
+	self._status_text = status_text
+
+	-- parse headers
+	local headers = {}
+	local first_crlf = head:find("\r\n", 1, true)
+	local header_block = first_crlf and head:sub(first_crlf + 2) or ""
+	for line in (header_block .. "\r\n"):gmatch("(.-)\r\n") do
+		if #line > 0 then
+			local k, v = line:match("^(.-):%s*(.*)")
+			if k then
+				k = k:lower()
+				local arr = headers[k]
+				if not arr then arr = {}; headers[k] = arr end
+				arr[#arr + 1] = v
+			end
+		end
+	end
+
+	self._headers = headers
+	return headers
+end
+
+--- Return parsed status code.
+--[[@return integer?]]
+function mt.__index:status()
+	return self._status
+end
+
+--- Read full body using Content-Length.
+--[[@return string? body, string? err]]
+function mt.__index:read_body()
+	local headers, err = self:read_headers()
+	if not headers then return nil, err end
+
+	local cl = headers["content-length"]
+	if cl then
+		local len = tonumber(cl[1])
+		if not len then return nil, "invalid content-length" end
+		-- fill buffer until we have enough
+		while #self._buf < len and not self._eof do
+			local chunk
+			chunk, err = self._recv()
+			if not chunk then self._eof = true; break end
+			self._buf = self._buf .. chunk
+		end
+		local body = self._buf:sub(1, len)
+		self._buf = self._buf:sub(len + 1)
+		return body
+	end
+
+	-- no content-length: read until EOF
+	while not self._eof do
+		local chunk
+		chunk, err = self._recv()
+		if not chunk then self._eof = true; break end
+		self._buf = self._buf .. chunk
+	end
+	local body = self._buf
+	self._buf = ""
+	return body
+end
+
+--- Iterator for chunked transfer encoding.
+-- Yields decoded chunk data (not hex lengths or trailers).
+--[[@return fun(): string?]]
+function mt.__index:chunks()
+	local headers, err = self:read_headers()
+	if not headers then return function() return nil end end
+	local done = false
+
+	return function()
+		if done then return nil end
+		-- read chunk size line
+		local pos = fill_until(self, "\r\n")
+		if not pos then done = true; return nil end
+
+		local size_line = self._buf:sub(1, pos - 1)
+		self._buf = self._buf:sub(pos + 2)
+
+		-- strip chunk extensions
+		local hex = size_line:match("^([0-9a-fA-F]+)")
+		if not hex then done = true; return nil end
+
+		local size = tonumber(hex, 16)
+		if not size or size == 0 then done = true; return nil end
+
+		-- read chunk data + trailing \r\n
+		local need = size + 2
+		while #self._buf < need and not self._eof do
+			local chunk
+			chunk, err = self._recv()
+			if not chunk then self._eof = true; break end
+			self._buf = self._buf .. chunk
+		end
+
+		local data = self._buf:sub(1, size)
+		self._buf = self._buf:sub(size + 3) -- skip data + \r\n
+		return data
+	end
+end
+
+--- Iterator for Server-Sent Events.
+-- Yields tables: { event: string?, data: string, id: string? }
+--[[@return fun(): { event: string?, data: string, id: string? }?]]
+function mt.__index:events()
+	local headers, err = self:read_headers()
+	if not headers then return function() return nil end end
+
+	-- SSE state
+	local event_type = nil
+	local data_parts = {}
+	local event_id = nil
+
+	return function()
+		while true do
+			-- try to find next line
+			local pos = fill_until(self, "\n")
+			if not pos then
+				-- EOF: flush pending event
+				if #data_parts > 0 then
+					local ev = { event = event_type, data = table.concat(data_parts, "\n"), id = event_id }
+					data_parts = {}
+					event_type = nil
+					event_id = nil
+					return ev
+				end
+				return nil
+			end
+
+			-- extract line (handle \r\n and \n)
+			local line = self._buf:sub(1, pos - 1)
+			if line:sub(-1) == "\r" then line = line:sub(1, -2) end
+			self._buf = self._buf:sub(pos + 1)
+
+			if line == "" then
+				-- dispatch event
+				if #data_parts > 0 then
+					local ev = { event = event_type, data = table.concat(data_parts, "\n"), id = event_id }
+					data_parts = {}
+					event_type = nil
+					event_id = nil
+					return ev
+				end
+			elseif line:sub(1, 1) == ":" then
+				-- comment, skip
+			else
+				local field, value = line:match("^([^:]+):%s?(.*)")
+				if not field then
+					field = line
+					value = ""
+				end
+				if field == "data" then
+					data_parts[#data_parts + 1] = value
+				elseif field == "event" then
+					event_type = value
+				elseif field == "id" then
+					event_id = value
+				end
+				-- ignore retry and unknown fields
+			end
+		end
+	end
+end
+
+return mod
