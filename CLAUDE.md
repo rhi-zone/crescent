@@ -154,6 +154,11 @@ When doing performance optimization:
 - **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Include raw benchmark output. Most recent entries first.
 - **Include**: file sizes, times, throughput (MB/s), allocation (KB/parse), and speedup ratios.
 
+**LuaJIT benchmark traps:**
+- **Closure identity:** LuaJIT compiles fold/map/filter inner loops as traces guarded on a specific closure *object*. Two syntactically identical `function(x) ... end` expressions at different source locations are different prototypes → different objects → the second misses the guard every iteration → interpreter fallback → fake 8–11x overhead. Always hoist closures to module-level variables and reuse them across bench cases.
+- **Constant folding:** benchmarks that pass the same literal arguments every iteration let JIT fold the entire loop away. Verify results are non-trivial (use a sink that accumulates into an upvalue).
+- **JIT speedup ratio:** if JIT is only 1.0–1.4x faster than interpreter on a hot loop, the bottleneck is C function calls (str_byte, table ops), not Lua bytecode. Further Lua-level optimisation won't help — consider FFI or algorithmic change.
+
 ## Negative Constraints
 
 Do not:
