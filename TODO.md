@@ -46,13 +46,10 @@
   module cache, LuaJIT JIT warm-up tuning. Target: same program runs comparably fast
   in bun and luajit; if not, the design needs revisiting.
 
-- [ ] **Package manager** (`lib/pkg/`) — design in `docs/pkg-design.md`.
-  Key decisions: vendor-first; `dep/` namespace (matches existing `dep.sha1` refs);
-  `pkg.lua` manifest; `crescent.lock` text lockfile; global cache with hardlinks;
-  fork-based parallel fetch (default `--jobs=N`), configurable.
-  Open questions before starting: flat vs namespaced package names, semver parser,
-  lockfile text format (TOML-like vs JSON). See design doc for full detail.
-  Performance bar: bun — I/O-bound, LuaJIT + FFI syscalls should be competitive.
+- [x] **Package manager** (`lib/pkg/`) — core implementation done: semver, manifest, lockfile,
+  install (resolve/fetch/hardlink/lockfile-write), config, CLI (install/add/remove/update/info/publish).
+  438 assertions. Open items: transitive dep resolution, parallel fetch (--jobs), `cr add` registry
+  fetch against a live registry. See design doc for full detail.
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: access control design (see below), module-level LSP cache,
