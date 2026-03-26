@@ -408,23 +408,34 @@ local function cmd_eject(project_dir, parsed)
 		return false
 	end
 
-	-- Also remove from pkg.lua deps if present (best-effort; not an error if absent)
+	-- Also remove from pkg.lua deps if present. Warn if not found there.
 	local pkg_path = project_dir .. "/pkg.lua"
 	if path_exists(pkg_path) then
 		local m, _ = manifest.load(pkg_path)
-		if m and m.deps and m.deps[name] then
-			m.deps[name] = nil
-			manifest.write(pkg_path, m)  -- ignore write errors; lock already updated
+		if m then
+			m.deps = m.deps or {}
+			if m.deps[name] then
+				m.deps[name] = nil
+				manifest.write(pkg_path, m)  -- ignore write errors; lock already updated
+			else
+				io.stderr:write(("warning: %q is not in pkg.lua deps (lockfile entry removed anyway)\n"):format(name))
+			end
 		end
 	end
 
-	info("ejected %s (lib/%s/ is now unmanaged)", name, name)
+	info("ejected %s — lib/%s/ is now yours to own", name, name)
 	return true
 end
 
 --- cr diff <name>
--- Diffs lib/<name>/ against ~/.crescent/cache/<name>@<version>/ using diff -r.
--- No network required — the cache contains the original extracted tree.
+-- Diffs lib/<name>/ against ~/.crescent/cache/<name>@<version>/ for each file
+-- present in lib/<name>/. No network required — the cache holds the original
+-- extracted tree from install time.
+--
+-- Only files currently present in lib/<name>/ are diffed; files that were
+-- excluded by the install glob are not shown (they are absent from lib/ by design).
+--
+-- Exit semantics: returns true if no differences, false on differences or error.
 local function cmd_diff(project_dir, parsed)
 	local name = parsed.args[1]
 	if not name then
@@ -453,7 +464,7 @@ local function cmd_diff(project_dir, parsed)
 
 	local cdir = cache_root() .. "/" .. name .. "@" .. entry.version
 	if not path_exists(cdir) then
-		stderr("diff: cache entry not found for %s@%s (run cr install to populate)", name, entry.version)
+		stderr("diff: cache entry for %s@%s not found — cannot diff (try reinstalling)", name, entry.version)
 		return false
 	end
 
@@ -463,25 +474,45 @@ local function cmd_diff(project_dir, parsed)
 		return false
 	end
 
-	-- diff -r --unified: show unified diff of the two trees.
-	-- Exit code 0 = no differences, 1 = differences found, 2 = error.
-	local cmd = ("diff -r --unified %q %q"):format(cdir, lib_dir)
-	local fh = io.popen(cmd .. " 2>&1", "r")
-	if not fh then
-		stderr("diff: failed to run diff")
+	-- Walk lib/<name>/ and diff each file against its counterpart in the cache.
+	-- This avoids showing spurious deletions for files excluded by the install glob.
+	local find_fh = io.popen(("find %q -type f | sort"):format(lib_dir), "r")
+	if not find_fh then
+		stderr("diff: failed to enumerate lib/%s/", name)
 		return false
 	end
-	local output = fh:read("*a")
-	fh:close()
+	local lib_files = find_fh:read("*a")
+	find_fh:close()
 
-	if output ~= "" then
-		io.stdout:write(output)
-		if not output:match("\n$") then
-			io.stdout:write("\n")
+	-- Normalise lib_dir for stripping prefix
+	local lib_prefix = lib_dir:gsub("/$", "") .. "/"
+	local any_diff = false
+
+	for abs_path in lib_files:gmatch("[^\n]+") do
+		if abs_path ~= "" then
+			local rel = abs_path
+			if abs_path:sub(1, #lib_prefix) == lib_prefix then
+				rel = abs_path:sub(#lib_prefix + 1)
+			end
+			local cache_path = cdir .. "/" .. rel
+			-- diff the two files; exit code 0 = same, 1 = differ
+			local fh = io.popen(("diff --unified %q %q 2>&1"):format(cache_path, abs_path), "r")
+			if fh then
+				local output = fh:read("*a")
+				fh:close()
+				if output ~= "" then
+					io.stdout:write(output)
+					if not output:match("\n$") then
+						io.stdout:write("\n")
+					end
+					any_diff = true
+				end
+			end
 		end
 	end
 
-	return true
+	-- Return false (exit 1) when there are differences, true (exit 0) when clean.
+	return not any_diff
 end
 
 --- cr publish [--dry-run]

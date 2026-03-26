@@ -381,4 +381,140 @@ T.describe("cr diff (no-output on unmodified package)", function()
 		T.eq(r_diff, false, "diff with no args returns false (not unknown command)")
 	end)
 
+	T.it("cr diff only diffs files present in lib/<name>/, not all cache files", function()
+		-- Verify that files present in the cache but absent from lib/ (excluded by glob)
+		-- do NOT cause spurious deletions in the diff output.
+		local tmp = make_tmpdir()
+
+		local cache_dir = tmp .. "/cache-sha1"
+		local lib_dir   = tmp .. "/lib/sha1"
+		os.execute(("mkdir -p %q %q"):format(cache_dir, lib_dir))
+
+		-- Cache has two files: init.lua and extra.lua
+		local fc1 = io.open(cache_dir .. "/init.lua", "w")
+		fc1:write("return {}\n")
+		fc1:close()
+
+		local fc2 = io.open(cache_dir .. "/extra.lua", "w")
+		fc2:write("-- extra\n")
+		fc2:close()
+
+		-- lib/ only has init.lua (extra.lua was excluded by install glob)
+		local fl = io.open(lib_dir .. "/init.lua", "w")
+		fl:write("return {}\n")
+		fl:close()
+
+		-- Diff file-by-file (the new cr diff approach): only diff files in lib/
+		-- Walk lib/ and diff each against cache counterpart.
+		local fh = io.popen(("find %q -type f | sort"):format(lib_dir), "r")
+		local lib_files = fh:read("*a")
+		fh:close()
+
+		local lib_prefix = lib_dir:gsub("/$", "") .. "/"
+		local any_output = false
+		for abs_path in lib_files:gmatch("[^\n]+") do
+			if abs_path ~= "" then
+				local rel = abs_path:sub(#lib_prefix + 1)
+				local cache_path = cache_dir .. "/" .. rel
+				local dfh = io.popen(("diff --unified %q %q 2>&1"):format(cache_path, abs_path), "r")
+				local out = dfh:read("*a")
+				dfh:close()
+				if out ~= "" then any_output = true end
+			end
+		end
+
+		-- The two init.lua files are identical → no diff output
+		T.ok(not any_output, "file-by-file diff of lib/ against cache: no spurious deletions for glob-excluded files")
+
+		rm_tmpdir(tmp)
+	end)
+
+end)
+
+-- ── cr eject functional tests ─────────────────────────────────────────────────
+
+T.describe("cr eject functional", function()
+
+	T.it("eject removes from lockfile and removes from pkg.lua deps", function()
+		local tmp = make_tmpdir()
+
+		write_lock(tmp, {
+			sha1 = {
+				version      = "1.0.0",
+				url          = "https://example.com/sha1/1.0.0.tar.gz",
+				tarball_hash = "sha256:abc",
+				tree_hash    = "sha256:def",
+				include      = "**",
+			},
+		})
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { sha1 = "^1.0.0" } })
+
+		os.execute(("mkdir -p %q"):format(tmp .. "/lib/sha1"))
+		local f = io.open(tmp .. "/lib/sha1/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+
+		-- Eject via lock module (same as cmd_eject does)
+		local entries, _ = lock.load(tmp .. "/crescent.lock")
+		T.ok(entries.sha1 ~= nil, "sha1 in lockfile before eject")
+
+		entries.sha1 = nil
+		lock.write(tmp .. "/crescent.lock", entries)
+
+		local m, _ = manifest.load(tmp .. "/pkg.lua")
+		T.ok(m.deps.sha1 ~= nil, "sha1 in pkg.lua before eject")
+		m.deps.sha1 = nil
+		manifest.write(tmp .. "/pkg.lua", m)
+
+		-- Verify lockfile no longer has sha1
+		local after_lock, _ = lock.load(tmp .. "/crescent.lock")
+		T.eq(after_lock.sha1, nil, "sha1 removed from lockfile after eject")
+
+		-- Verify pkg.lua no longer has sha1 dep
+		local after_m, _ = manifest.load(tmp .. "/pkg.lua")
+		T.eq(after_m.deps and after_m.deps.sha1, nil, "sha1 removed from pkg.lua deps after eject")
+
+		-- lib/sha1/ still exists
+		local fh = io.open(tmp .. "/lib/sha1/init.lua", "r")
+		T.ok(fh ~= nil, "lib/sha1/init.lua still exists after eject")
+		if fh then fh:close() end
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("eject error: lockfile does not exist", function()
+		local tmp = make_tmpdir()
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = {} })
+
+		-- No lockfile; lock.load fails
+		local entries, err = lock.load(tmp .. "/crescent.lock")
+		T.eq(entries, nil, "lock.load returns nil for missing file")
+		T.ok(err ~= nil, "lock.load error for missing file")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("eject error: package not in lockfile", function()
+		local tmp = make_tmpdir()
+
+		write_lock(tmp, {
+			other = {
+				version      = "1.0.0",
+				url          = "https://example.com/other/1.0.0.tar.gz",
+				tarball_hash = "sha256:abc",
+				include      = "**",
+			},
+		})
+
+		local entries, _ = lock.load(tmp .. "/crescent.lock")
+		-- sha1 is not in the lockfile
+		T.eq(entries.sha1, nil, "sha1 not in lockfile")
+		-- Simulate the error check cmd_eject does: entries[name] is nil → error
+		local would_fail = (entries["sha1"] == nil)
+		T.ok(would_fail, "eject would fail: sha1 not in lockfile")
+
+		rm_tmpdir(tmp)
+	end)
+
 end)

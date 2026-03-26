@@ -157,6 +157,32 @@ T.describe("install.tree_hash", function()
 		rm_tmpdir(tmp)
 	end)
 
+	T.it("empty directory returns a stable sha256 hash", function()
+		local tmp = make_tmpdir()
+
+		local h1, err1 = install.tree_hash(tmp)
+		T.ok(h1, "tree_hash returns value for empty dir, err=" .. tostring(err1))
+		T.ok(h1:match("^sha256:%x+"), "empty dir hash is sha256:hex")
+
+		-- Same empty directory → same hash.
+		local h2 = install.tree_hash(tmp)
+		T.eq(h1, h2, "empty dir hash is stable across calls")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("two identical empty directories produce the same hash", function()
+		local tmp1 = make_tmpdir()
+		local tmp2 = make_tmpdir()
+
+		local h1 = install.tree_hash(tmp1)
+		local h2 = install.tree_hash(tmp2)
+		T.eq(h1, h2, "two empty dirs produce the same hash")
+
+		rm_tmpdir(tmp1)
+		rm_tmpdir(tmp2)
+	end)
+
 end)
 
 -- ── install.resolve ───────────────────────────────────────────────────────────
@@ -743,6 +769,102 @@ T.describe("install.run modification detection", function()
 
 		T.ok(result.ok, "force install returns ok")
 		T.eq(#result.errors, 0, "no errors with --force")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("warning message names package and mentions cr eject", function()
+		-- Capture stderr output and verify the warning message format.
+		local tmp = make_tmpdir()
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "^1.0.0" } })
+
+		local correct_hash = make_pkg_with_hash(tmp, "mypkg", "1.0.0")
+
+		local lock_path = tmp .. "/crescent.lock"
+		local lock_mod = require("lib.pkg.lock")
+		lock_mod.write(lock_path, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:aabbcc",
+				tree_hash    = correct_hash,
+				include      = "**",
+			},
+		})
+
+		-- Modify file to trigger warning
+		local f = io.open(tmp .. "/lib/mypkg/init.lua", "w")
+		f:write("return { modified = true }\n")
+		f:close()
+
+		-- Redirect stderr to a temp file so we can read the warning message.
+		local stderr_tmp = os.tmpname()
+		local old_stderr = io.stderr
+		io.stderr = io.open(stderr_tmp, "w")
+
+		install.run(tmp, { frozen = true })
+
+		io.stderr:close()
+		io.stderr = old_stderr
+
+		local warned = io.open(stderr_tmp, "r")
+		local msg = warned and warned:read("*a") or ""
+		if warned then warned:close() end
+		os.remove(stderr_tmp)
+
+		T.ok(msg:find("mypkg"), "warning message names the package")
+		T.ok(msg:find("eject"), "warning message mentions cr eject")
+		T.ok(msg:find("--force"), "warning message mentions --force")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("nil tree_hash in lockfile suppresses modification check", function()
+		-- An old lockfile entry with no tree_hash should not trigger a warning
+		-- or block the install — the entry simply has nothing to compare against.
+		local tmp = make_tmpdir()
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "^1.0.0" } })
+
+		-- Install the package with correct name/version (dep_ok will be true)
+		local lib_dir = tmp .. "/lib/mypkg"
+		os.execute(("mkdir -p %q"):format(lib_dir))
+		write_manifest(lib_dir, { name = "mypkg", version = "1.0.0" })
+		local f = io.open(lib_dir .. "/init.lua", "w")
+		f:write("return {}\n")
+		f:close()
+
+		-- Write lockfile entry WITHOUT tree_hash (nil)
+		local lock_path = tmp .. "/crescent.lock"
+		local lock_mod = require("lib.pkg.lock")
+		lock_mod.write(lock_path, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:aabbcc",
+				-- tree_hash intentionally absent
+				include      = "**",
+			},
+		})
+
+		-- Redirect stderr to a temp file to verify no warning is emitted
+		local stderr_tmp = os.tmpname()
+		local old_stderr = io.stderr
+		io.stderr = io.open(stderr_tmp, "w")
+
+		local result = install.run(tmp, { frozen = true })
+
+		io.stderr:close()
+		io.stderr = old_stderr
+
+		local warned = io.open(stderr_tmp, "r")
+		local msg = warned and warned:read("*a") or ""
+		if warned then warned:close() end
+		os.remove(stderr_tmp)
+
+		-- No warning about local modifications
+		T.ok(not msg:find("local modifications"), "no modification warning when tree_hash is nil")
+		T.ok(result.ok, "result is ok")
+		T.eq(#result.errors, 0, "no errors")
 
 		rm_tmpdir(tmp)
 	end)

@@ -161,9 +161,14 @@ end
 --
 -- Algorithm:
 --   1. Walk dir recursively; collect all regular files, sorted by relative path.
---   2. For each file, compute sha256("<relative_path>:<file_contents>") by
---      piping through sha256sum/openssl.
---   3. Concatenate all per-file hex hashes (newline-separated) and hash the result.
+--   2. Build a manifest string by concatenating, for each file in sorted order:
+--        "<relative_path>:<file_contents>\n"
+--   3. sha256 the entire manifest string in one pass.
+--
+-- This means the hash is over the full manifest blob — same files in the same
+-- directory structure always produce the same hash regardless of filesystem order.
+-- Adding, removing, or modifying any file changes the hash.
+--
 -- Returns "sha256:<hex>" or nil, err.
 function M.tree_hash(dir)
 	-- Enumerate files sorted by relative path for determinism.
@@ -1034,7 +1039,7 @@ function M.run(project_dir, opts)
 				local lib_dir = project_dir .. "/lib/" .. name
 				local actual_hash, hash_err = M.tree_hash(lib_dir)
 				if actual_hash and actual_hash ~= locked_entry.tree_hash then
-					io.stderr:write(("warning: lib/%s/ has local modifications (run with --force to overwrite)\n"):format(name))
+					io.stderr:write(("warning: lib/%s/ has local modifications — skipping (use --force to overwrite, cr eject %s to keep changes)\n"):format(name, name))
 					result.skipped[#result.skipped + 1] = name
 					-- Preserve existing lockfile entry unchanged
 					if not new_lock[name] then
