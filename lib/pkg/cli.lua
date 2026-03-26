@@ -14,17 +14,21 @@ end
 --   eject <name>                    remove from lockfile; leave lib/<name>/ untouched
 --   diff <name>                     diff lib/<name>/ against cached version (no network)
 --   info <name>                     show package info from registry
+--   check [--strict]                scan current package for phantom deps
 --
 -- Global flags:
 --   --verbose                       enable verbose output
 --   --registry=URL                  override default registry (https://pkg.crescent.run)
 --   --jobs=N                        parallelism (default: 1)
 --   --force                         overwrite local modifications (install only)
+--   --strict                        exit 1 on any phantom dep (check command)
+--   --skip-check                    skip phantom dep lint (publish command)
 
 local manifest = require("lib.pkg.manifest")
 local lock     = require("lib.pkg.lock")
 local install  = require("lib.pkg.install")
 local publish  = require("lib.pkg.publish")
+local check    = require("lib.pkg.check")
 
 local M = {}
 
@@ -82,16 +86,18 @@ end
 -- Remaining positional args are left in the args list.
 function M.parse_args(argv)
 	local result = {
-		command  = nil,
-		args     = {},
-		verbose  = false,
-		frozen   = false,
-		dry_run  = false,
-		force    = false,
-		merge    = false,
-		overwrite = false,
-		registry = DEFAULT_REGISTRY,
-		jobs     = 1,
+		command    = nil,
+		args       = {},
+		verbose    = false,
+		frozen     = false,
+		dry_run    = false,
+		force      = false,
+		merge      = false,
+		overwrite  = false,
+		strict     = false,
+		skip_check = false,
+		registry   = DEFAULT_REGISTRY,
+		jobs       = 1,
 	}
 
 	local i = 0
@@ -116,6 +122,10 @@ function M.parse_args(argv)
 			result.merge = true
 		elseif v == "--overwrite" then
 			result.overwrite = true
+		elseif v == "--strict" then
+			result.strict = true
+		elseif v == "--skip-check" then
+			result.skip_check = true
 		elseif v:sub(1, 11) == "--registry=" then
 			result.registry = v:sub(12)
 		elseif v:sub(1, 7) == "--jobs=" then
@@ -745,8 +755,25 @@ local function cmd_diff(project_dir, parsed)
 	return not any_diff
 end
 
---- cr publish [--dry-run]
+--- cr publish [--dry-run] [--skip-check]
 local function cmd_publish(project_dir, parsed)
+	-- ── phantom dep lint (skipped when --skip-check is passed) ────────────────
+	if not parsed.skip_check then
+		local check_result = check.scan(project_dir)
+		for _, w in ipairs(check_result.warnings) do
+			io.stderr:write("warning: " .. w .. "\n")
+		end
+		if not check_result.ok then
+			local n = #check_result.phantoms
+			for _, p in ipairs(check_result.phantoms) do
+				io.stdout:write(("phantom dep: lib/%s required in %s:%d but not declared in pkg.lua\n")
+					:format(p.name, p.file, p.line))
+			end
+			stderr("publish aborted: %d phantom dep(s) found — declare them in pkg.lua or use cr check to review", n)
+			return false
+		end
+	end
+
 	local opts = {
 		registry = parsed.registry,
 		dry_run  = parsed.dry_run,
@@ -767,6 +794,38 @@ local function cmd_publish(project_dir, parsed)
 	end
 
 	return true
+end
+
+--- cr check [--strict]
+-- Scans the current package for phantom dependencies.
+-- A phantom dep is a require("lib.X") call in source that is not declared in
+-- pkg.lua.  Without --strict, prints warnings and exits 0.  With --strict,
+-- exits 1 if any phantoms are found.
+local function cmd_check(project_dir, parsed)
+	local result = check.scan(project_dir)
+
+	for _, w in ipairs(result.warnings) do
+		io.stderr:write("warning: " .. w .. "\n")
+	end
+
+	if #result.phantoms == 0 then
+		info("check: no phantom dependencies found")
+		return true
+	end
+
+	for _, p in ipairs(result.phantoms) do
+		io.stdout:write(("phantom dep: lib/%s required in %s:%d but not declared in pkg.lua\n")
+			:format(p.name, p.file, p.line))
+	end
+
+	local n = #result.phantoms
+	if parsed.strict then
+		stderr("check: %d phantom dep(s) found — declare them in pkg.lua", n)
+		return false
+	else
+		io.stdout:write(("check: %d phantom dep(s) found — use cr check --strict to enforce\n"):format(n))
+		return true
+	end
 end
 
 --- cr info <name>
@@ -828,6 +887,7 @@ local COMMANDS = {
 	diff    = cmd_diff,
 	info    = cmd_info,
 	publish = cmd_publish,
+	check   = cmd_check,
 }
 
 local USAGE = [[
@@ -841,7 +901,8 @@ commands:
   eject <name>                          remove from lockfile; leave lib/<name>/ unmanaged
   diff <name>                           diff lib/<name>/ against cached version (no network)
   info <name>                           show package info from registry
-  publish [--dry-run]                   publish package to registry
+  publish [--dry-run] [--skip-check]    publish package to registry
+  check [--strict]                      scan for phantom dependencies
 
 global options:
   --verbose                     enable verbose logging
@@ -851,6 +912,8 @@ global options:
   --merge                       three-way merge local edits with new version (update only)
   --overwrite                   discard local modifications before update (update only)
   --dry-run                     pack but do not upload (publish only)
+  --strict                      exit 1 if phantoms found (check only)
+  --skip-check                  skip phantom dep lint (publish only)
 ]]
 
 --- Main entry point. argv is the arg table (1-indexed positional args).
