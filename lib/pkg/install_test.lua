@@ -325,3 +325,138 @@ T.describe("install._parse_index (JSON parser)", function()
 	end)
 
 end)
+
+-- ── install.run transitive deps ───────────────────────────────────────────────
+--
+-- These tests exercise M.run's BFS transitive-dependency resolution without
+-- real network calls.  Strategy:
+--   • Pre-install all packages in dep/<name>/ by writing their pkg.lua.
+--   • Pre-populate crescent.lock with all known packages.
+--   • Run M.run with only direct deps in the project pkg.lua.
+--   • Because every package passes dep_ok + has a lockfile entry, M.run takes
+--     the "skip" fast path for each and never calls curl.
+--   • The test verifies no errors and the correct set of skipped packages.
+
+local lock = require("lib.pkg.lock")
+
+-- Install a package into dep/<name>/ of a project directory.
+local function install_dep(project_dir, pkg_tbl)
+	local dep_dir = project_dir .. "/dep/" .. pkg_tbl.name
+	os.execute(("mkdir -p %q"):format(dep_dir))
+	write_manifest(dep_dir, pkg_tbl)
+end
+
+-- Write a crescent.lock with the given entries.
+-- entries: { [name] = { version, url, checksum } }
+local function write_lock(project_dir, entries)
+	local lock_path = project_dir .. "/crescent.lock"
+	local ok, err = lock.write(lock_path, entries)
+	T.ok(ok, "write_lock: " .. tostring(err))
+end
+
+-- Sort a list in-place and join it as a comma-separated string.
+local function sorted_str(t)
+	local copy = {}
+	for i, v in ipairs(t) do copy[i] = v end
+	table.sort(copy)
+	return table.concat(copy, ",")
+end
+
+T.describe("install.run transitive deps", function()
+
+	T.it("depth-1 transitive: installs dep's dep (no network)", function()
+		-- Project depends on pkgA which depends on pkgB.
+		-- All packages pre-installed; M.run should discover pkgB transitively.
+		local tmp = make_tmpdir()
+
+		-- Write project manifest (only direct dep: pkga)
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { pkga = "^1.0.0" } })
+
+		-- Pre-install pkga (depends on pkgb)
+		install_dep(tmp, { name = "pkga", version = "1.0.0",
+			deps = { pkgb = "^2.0.0" } })
+
+		-- Pre-install pkgb (no further deps)
+		install_dep(tmp, { name = "pkgb", version = "2.0.0" })
+
+		-- Pre-populate lockfile with both packages
+		write_lock(tmp, {
+			pkga = { version = "1.0.0", url = "https://example.com/pkga/1.0.0.tar.gz", checksum = "sha256:aaa" },
+			pkgb = { version = "2.0.0", url = "https://example.com/pkgb/2.0.0.tar.gz", checksum = "sha256:bbb" },
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(result.ok, "expected ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		-- Both packages should be skipped (pre-installed)
+		T.eq(sorted_str(result.skipped), "pkga,pkgb")
+		-- Nothing actually fetched
+		T.eq(#result.installed, 0)
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("diamond dep: A→B, A→C, B→D, C→D — D installed exactly once", function()
+		-- A depends on B and C; both B and C depend on D.
+		-- D should appear once in skipped, not twice.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0" } })
+
+		install_dep(tmp, { name = "pkga", version = "1.0.0",
+			deps = { pkgb = "^1.0.0", pkgc = "^1.0.0" } })
+		install_dep(tmp, { name = "pkgb", version = "1.0.0",
+			deps = { pkgd = "^1.0.0" } })
+		install_dep(tmp, { name = "pkgc", version = "1.0.0",
+			deps = { pkgd = "^1.0.0" } })
+		install_dep(tmp, { name = "pkgd", version = "1.0.0" })
+
+		write_lock(tmp, {
+			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
+			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
+			pkgc = { version = "1.0.0", url = "u", checksum = "sha256:ccc" },
+			pkgd = { version = "1.0.0", url = "u", checksum = "sha256:ddd" },
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(result.ok, "expected ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		-- All four packages skipped, D only once
+		T.eq(sorted_str(result.skipped), "pkga,pkgb,pkgc,pkgd")
+		T.eq(#result.installed, 0)
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("circular dep guard: A→B→A does not loop", function()
+		-- A depends on B; B depends on A.
+		-- The visited set must prevent infinite recursion.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0" } })
+
+		install_dep(tmp, { name = "pkga", version = "1.0.0",
+			deps = { pkgb = "^1.0.0" } })
+		install_dep(tmp, { name = "pkgb", version = "1.0.0",
+			deps = { pkga = "^1.0.0" } })
+
+		write_lock(tmp, {
+			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
+			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(result.ok, "expected ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		-- Both packages discovered; cycle broken by visited set
+		T.eq(sorted_str(result.skipped), "pkga,pkgb")
+
+		rm_tmpdir(tmp)
+	end)
+
+end)

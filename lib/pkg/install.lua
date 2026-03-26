@@ -7,13 +7,11 @@ end
 -- Steps:
 --   1. Parse pkg.lua (direct deps + constraints)
 --   2. Load crescent.lock if present
---   3. Resolve: check lockfile for pinned versions; query registry for new/changed deps
---   4. Verify dep/ fast path: skip packages already installed at the right version
---   5. Fetch missing packages (sequential for v1):
---        - Check global cache (~/.crescent/cache/<name>@<version>/)
---        - Download tarball if not cached; verify checksum
---   6. Extract: untar into global cache, then hardlink (or copy) into dep/<name>/
---   7. Write crescent.lock
+--   3. Fetch registry indices for packages not in lockfile
+--   4. Resolve direct deps against lockfile + registry
+--   5. BFS work queue: fetch + link each package; read its pkg.lua; enqueue
+--      transitive deps (visited set prevents re-install and circular loops)
+--   6. Write crescent.lock
 
 local ffi = require("ffi")
 local semver  = require("lib.pkg.semver")
@@ -663,24 +661,7 @@ function M.run(project_dir, opts)
 		locked = l
 	end
 
-	-- 3. Fast path: if every dep is already installed correctly, done.
-	local all_ok = true
-	for name, _ in pairs(deps) do
-		local entry = locked[name]
-		if not entry or not M.dep_ok(project_dir, name, entry.version) then
-			all_ok = false
-			break
-		end
-	end
-	if all_ok and not opts.frozen then
-		log(opts, "all dependencies up to date (fast path)")
-		for name in pairs(deps) do
-			result.skipped[#result.skipped + 1] = name
-		end
-		return result
-	end
-
-	-- 4. Fetch registry indices for any packages that aren't in the lockfile.
+	-- 3. Fetch registry indices for any packages that aren't in the lockfile.
 	-- Cache index fetches so each registry URL is only fetched once.
 	local needs_registry = false
 	for name, constraint in pairs(deps) do
@@ -744,7 +725,7 @@ function M.run(project_dir, opts)
 		return result
 	end
 
-	-- 6. Fetch + link each package
+	-- 6. Fetch + link each package (with transitive dependency resolution)
 	local new_lock = {}
 
 	-- Carry over all existing locked entries (transitive deps etc.)
@@ -752,14 +733,33 @@ function M.run(project_dir, opts)
 		new_lock[k] = v
 	end
 
-	-- Sort names for deterministic processing
+	-- visited: tracks packages that have been processed (fetched+linked or skipped)
+	-- in this run, to avoid re-installing or infinite loops from circular deps.
+	local visited = {}
+
+	-- Work queue: start with directly-resolved packages.
+	-- Each entry is { name=str, info={version,url,...} }
+	local queue = {}
 	local names = {}
 	for name in pairs(resolved) do names[#names+1] = name end
 	table.sort(names)
-
 	for _, name in ipairs(names) do
-		local info = resolved[name]
+		queue[#queue+1] = { name = name, info = resolved[name] }
+	end
+
+	local qi = 1  -- queue read index (breadth-first)
+	while qi <= #queue do
+		local item = queue[qi]
+		qi = qi + 1
+		local name = item.name
+		local info = item.info
 		local version = info.version
+
+		-- Skip if already processed in this run
+		if visited[name] then
+			goto continue
+		end
+		visited[name] = true
 
 		-- dep/ fast path: skip if already correct
 		if M.dep_ok(project_dir, name, version) and not info._needs_fetch then
@@ -779,21 +779,54 @@ function M.run(project_dir, opts)
 			local fetch_info, fetch_err = fetch_package(name, version, fetch_registry, opts)
 			if not fetch_info then
 				fail(("failed to fetch %s@%s: %s"):format(name, version, tostring(fetch_err)))
-			else
-				-- Link into dep/
-				local lnk_ok, lnk_err = link_package(project_dir, name, version, opts)
-				if not lnk_ok then
-					fail(("failed to link %s@%s: %s"):format(name, version, tostring(lnk_err)))
+				goto continue
+			end
+			-- Link into dep/
+			local lnk_ok, lnk_err = link_package(project_dir, name, version, opts)
+			if not lnk_ok then
+				fail(("failed to link %s@%s: %s"):format(name, version, tostring(lnk_err)))
+				goto continue
+			end
+			result.installed[#result.installed + 1] = name
+			new_lock[name] = {
+				version  = fetch_info.version,
+				url      = fetch_info.url,
+				checksum = fetch_info.checksum,
+			}
+		end
+
+		-- Read the installed package's own pkg.lua to discover transitive deps.
+		local dep_manifest_path = project_dir .. "/dep/" .. name .. "/pkg.lua"
+		local dep_m = manifest.load(dep_manifest_path)
+		if dep_m and dep_m.deps and next(dep_m.deps) ~= nil then
+			-- Filter out already-visited deps before resolving.
+			local new_deps = {}
+			for dep_name, constraint in pairs(dep_m.deps) do
+				if not visited[dep_name] then
+					new_deps[dep_name] = constraint
+				end
+			end
+
+			if next(new_deps) ~= nil then
+				-- Resolve these transitive deps using the same registry indices and locked data.
+				local trans_resolved, trans_err = M.resolve(new_deps, new_lock, nil, resolve_opts)
+				if not trans_resolved then
+					fail(("transitive dep resolution failed for %s: %s"):format(name, tostring(trans_err)))
 				else
-					result.installed[#result.installed + 1] = name
-					new_lock[name] = {
-						version  = fetch_info.version,
-						url      = fetch_info.url,
-						checksum = fetch_info.checksum,
-					}
+					-- Enqueue newly-resolved transitive deps (sorted for determinism).
+					local trans_names = {}
+					for n in pairs(trans_resolved) do trans_names[#trans_names+1] = n end
+					table.sort(trans_names)
+					for _, n in ipairs(trans_names) do
+						if not visited[n] then
+							queue[#queue+1] = { name = n, info = trans_resolved[n] }
+						end
+					end
 				end
 			end
 		end
+
+		::continue::
 	end
 
 	-- 7. Write crescent.lock
