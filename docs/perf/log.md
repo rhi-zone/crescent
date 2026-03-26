@@ -6,6 +6,86 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: utf8 — baseline
+
+**Commit:** (this change)
+
+Benchmark: `luajit lib/encode/utf8/bench.lua`
+
+### Results
+
+```
+utf8 benchmark
+warmup: 3  reps: 10
+
+operation         input             size       ms/op          MB/s
+------------------------------------------------------------------
+is_valid          ascii              1KB       0.003         305.2 MB/s
+is_valid          ascii             64KB       0.055        1144.7 MB/s
+is_valid          ascii              1MB       0.478        2091.2 MB/s
+is_valid          mixed              1KB       0.003         361.7 MB/s
+is_valid          mixed             64KB       0.166         377.4 MB/s
+is_valid          mixed              1MB       2.658         376.2 MB/s
+is_valid          cjk                1KB       0.006         168.2 MB/s
+is_valid          cjk               64KB       0.363         172.4 MB/s
+is_valid          cjk                1MB       5.843         171.2 MB/s
+
+len               ascii              1KB       0.004         244.1 MB/s
+len               ascii             64KB       0.052        1197.3 MB/s
+len               ascii              1MB       0.851        1174.8 MB/s
+len               mixed              1KB       0.002         488.3 MB/s
+len               mixed             64KB       0.128         487.9 MB/s
+len               mixed              1MB       1.987         503.3 MB/s
+len               cjk                1KB       0.004         243.9 MB/s
+len               cjk               64KB       0.125         499.2 MB/s
+len               cjk                1MB       1.978         505.6 MB/s
+
+codes (iter)      ascii              1KB       0.009         112.2 MB/s
+codes (iter)      ascii             64KB       0.347         180.3 MB/s
+codes (iter)      ascii              1MB       5.515         181.3 MB/s
+codes (iter)      mixed              1KB       0.005         195.3 MB/s
+codes (iter)      mixed             64KB       0.320         195.5 MB/s
+codes (iter)      mixed              1MB       5.142         194.5 MB/s
+codes (iter)      cjk                1KB       0.003         295.6 MB/s
+codes (iter)      cjk               64KB       0.193         324.0 MB/s
+codes (iter)      cjk                1MB       3.281         304.8 MB/s
+
+codepoint         ascii              1KB       0.010          96.7 MB/s
+codepoint         ascii             64KB       0.480         130.3 MB/s
+codepoint         ascii              1MB       6.958         143.7 MB/s
+codepoint         mixed              1KB       0.038          25.4 MB/s
+codepoint         mixed             64KB       1.563          40.0 MB/s
+codepoint         mixed              1MB      24.718          40.5 MB/s
+codepoint         cjk                1KB       0.029          33.1 MB/s
+codepoint         cjk               64KB       1.345          46.5 MB/s
+codepoint         cjk                1MB      21.142          47.3 MB/s
+```
+
+### Notes
+
+**`is_valid` is the fastest path** — pure byte-scan with early return, no output
+allocation. ASCII gets a JIT-friendly tight loop and reaches ~2 GB/s at 1MB. Mixed
+and CJK hover around 170–390 MB/s; CJK is slower because every byte triggers
+continuation-byte accounting (remain counter).
+
+**`len` and `codes` run at similar throughput (~180–530 MB/s)** — both walk every
+character. `len` has a tight ASCII inner loop that gives it an edge on ASCII-heavy
+inputs (1.2 GB/s at 64KB). `codes` pays extra per iteration because the iterator
+protocol returns two values and the loop body executes in the caller's frame.
+
+**`codepoint` (256-byte chunks) is 3–5× slower than `codes` on multibyte inputs.**
+The bottleneck is the intermediate `cs` table: every call to `codepoint` allocates
+a fresh table, appends codepoints, and calls `unpack`. The chunk-boundary overhead
+(256 extra `math.min` + loop overhead per 256 bytes) is visible but secondary.
+On ASCII the gap narrows because the ASCII inner loop avoids the table writes.
+
+**JIT traces compile well for `is_valid` and `len`** — the inner ASCII loop is a
+tight counted loop with no function calls. `codes` and `codepoint` involve more
+branching per character but still trace. The 1KB → 64KB jump on `is_valid` (ASCII:
+300 → 1145 MB/s) shows the JIT warming up across the warmup iterations.
+
+---
+
 ## 2026-03-26: iter combinators — overhead baseline
 
 **Commit:** ff9659d
