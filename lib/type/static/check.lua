@@ -73,6 +73,46 @@ local function extract_export_tid(ctx)
     return ctx.T_ANY
 end
 
+-- Extract file-level type aliases from ctx.scope for CRI serialization.
+-- Returns an array of { name, body, params, nominal, resolved_bounds }.
+-- Only collects aliases from the file's own scope (not prelude/parent).
+local function extract_type_aliases(ctx)
+    local result = {}
+    local scope = ctx.scope
+    if not scope or not scope.type_bindings then return result end
+    for name_id, alias in pairs(scope.type_bindings) do
+        if alias and alias.body then
+            local name = intern_mod.get(ctx.pool, name_id)
+            if name then
+                local params_strs = nil
+                if alias.params and #alias.params > 0 then
+                    params_strs = {}
+                    for _, pid in ipairs(alias.params) do
+                        params_strs[#params_strs + 1] = intern_mod.get(ctx.pool, pid) or ""
+                    end
+                end
+                local bounds = nil
+                if alias.resolved_bounds then
+                    bounds = {}
+                    for j, bid in ipairs(alias.resolved_bounds) do
+                        bounds[j] = bid  -- type_id or nil
+                    end
+                end
+                result[#result + 1] = {
+                    name = name,
+                    body = alias.body,
+                    params = params_strs,
+                    nominal = alias.nominal or false,
+                    resolved_bounds = bounds,
+                }
+            end
+        end
+    end
+    -- Sort by name for deterministic serialization.
+    table.sort(result, function(a, b) return a.name < b.name end)
+    return result
+end
+
 -- ---------------------------------------------------------------------------
 -- Module name → file path resolution
 -- Translates a Lua module name ("a.b.c") to a relative path ("a/b/c.lua").
@@ -158,7 +198,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
         -- Check session cache: if dep has cri_bytes, deserialise into current ctx.
         local function load_and_tag(cri_bytes, source_file)
             local before = ctx.types.len
-            local ok, exports = cri_read.load(cri_bytes, ctx)
+            local ok, exports, aliases = cri_read.load(cri_bytes, ctx)
             if ok and exports["__ret"] then
                 -- Mark all type IDs created by this load as originating from source_file.
                 if ctx.type_origins then
@@ -166,17 +206,17 @@ function M.check_file(filename, parent_scope, explicit_pool)
                         ctx.type_origins[i] = source_file
                     end
                 end
-                return exports["__ret"]
+                return exports["__ret"], aliases
             end
-            return nil
+            return nil, nil
         end
 
         if _session[dep_path] then
             local dep = _session[dep_path]
             local cri = dep.cri_bytes
             if cri then
-                local ret = load_and_tag(cri, dep_path)
-                if ret then return ret end
+                local ret, aliases = load_and_tag(cri, dep_path)
+                if ret then return ret, aliases end
             end
             -- Dep was checked but has no serializable export (e.g. T_ANY): return nil.
             return nil
@@ -190,8 +230,8 @@ function M.check_file(filename, parent_scope, explicit_pool)
             if dep2 then
                 local cri2 = dep2.cri_bytes
                 if cri2 then
-                    local ret = load_and_tag(cri2, dep_path)
-                    if ret then return ret end
+                    local ret, aliases = load_and_tag(cri2, dep_path)
+                    if ret then return ret, aliases end
                 end
             end
         end
@@ -246,7 +286,8 @@ function M.check_file(filename, parent_scope, explicit_pool)
     local cri_bytes_stored = nil
     if ctx and export_tid and export_tid ~= ctx.T_ANY then
         local exp_map = { ["__ret"] = export_tid }
-        local ok_ser, cri_bytes = pcall(cri_write.serialize, ctx, exp_map)
+        local alias_list = ctx and extract_type_aliases(ctx) or {}
+        local ok_ser, cri_bytes = pcall(cri_write.serialize, ctx, exp_map, alias_list)
         if ok_ser then
             cri_bytes_stored = cri_bytes
             if src_hash then
@@ -284,8 +325,8 @@ function M.check_string_with_deps(source, filename, parent_scope)
         M.check_file(dep_path, parent_scope, _pool)
         checking_deps[dep_path] = nil
         if _session[dep_path] and _session[dep_path].cri_bytes then
-            local ok, exports = cri_read.load(_session[dep_path].cri_bytes, ctx)
-            if ok and exports["__ret"] then return exports["__ret"] end
+            local ok, exports, aliases = cri_read.load(_session[dep_path].cri_bytes, ctx)
+            if ok and exports["__ret"] then return exports["__ret"], aliases end
         end
         return nil
     end
@@ -297,7 +338,9 @@ function M.check_string_with_deps(source, filename, parent_scope)
         if decl_flat then return try_dep(ctx, decl_flat) end
         local decl_init = find_decl_path(rel .. "/init.lua")
         if decl_init then return try_dep(ctx, decl_init) end
-        return try_dep(ctx, rel .. ".lua") or try_dep(ctx, rel .. "/init.lua")
+        local ret, aliases = try_dep(ctx, rel .. ".lua")
+        if ret then return ret, aliases end
+        return try_dep(ctx, rel .. "/init.lua")
     end
 
     return run_v3(source, filename, parent_scope, _pool, cri_loader)

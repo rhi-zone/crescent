@@ -276,11 +276,11 @@
   distinct types. The fix requires module type imports — when check.lua does
   `require("lib.type")`, its annotations should resolve `Schema` from init.lua's
   exported type aliases, not from a re-declaration. Tracked below.
-- [ ] **Module type imports**: type aliases from required modules are not in scope for annotations.
-  `local t = require("lib.type")` makes `t.integer` etc. value-typed correctly, but
-  `--:: Schema<T> = $Opaque<T>` in check.lua can't reference init.lua's `Schema` alias.
-  Fix: when resolving a type name that is undefined in the current scope, look it up in
-  the exported type table of required modules (via `ctx.require_sources` → load cri → scan aliases).
+- [x] **Module type imports**: type aliases from required modules are now in scope for annotations.
+  CRI Section 6 serializes/deserializes type aliases. When `require()` resolves via
+  cri_loader, aliases are returned alongside exports and injected into scope via
+  `inject_imported_aliases` in constrain.lua. Local declarations take precedence.
+  Fixed: cri_write now registers alias name/param strings in the string table.
 
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.

@@ -6564,3 +6564,147 @@ local x = si
 ]], "nominal")
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Module type imports: type aliases from required modules available in scope
+-- ---------------------------------------------------------------------------
+assert.describe("module type imports", function()
+    -- Helper: check a module source, extract its export type and aliases,
+    -- serialize to CRI, then check a consumer source with a cri_loader that
+    -- returns both the export type and aliases.
+    local function check_with_module(mod_src, use_src, mod_name)
+        mod_name = mod_name or "mymod"
+        local pool = intern.new()
+        local _, mod_ctx = check_mod.check_string(mod_src, mod_name .. ".lua", nil, pool)
+        -- Extract export type
+        local rets = mod_ctx.module_return_tids
+        local m_tid = rets and rets[1] and types_mod.find(mod_ctx, rets[1][1])
+        local exp_map = {}
+        if m_tid then exp_map["__ret"] = m_tid end
+        -- Extract type aliases
+        local alias_list = {}
+        if mod_ctx.scope and mod_ctx.scope.type_bindings then
+            for name_id, alias in pairs(mod_ctx.scope.type_bindings) do
+                if alias and alias.body then
+                    local name = intern.get(mod_ctx.pool, name_id)
+                    if name then
+                        local params_strs = nil
+                        if alias.params and #alias.params > 0 then
+                            params_strs = {}
+                            for _, pid in ipairs(alias.params) do
+                                params_strs[#params_strs + 1] = intern.get(mod_ctx.pool, pid) or ""
+                            end
+                        end
+                        local bounds = nil
+                        if alias.resolved_bounds then
+                            bounds = {}
+                            for j, bid in ipairs(alias.resolved_bounds) do
+                                bounds[j] = bid
+                            end
+                        end
+                        alias_list[#alias_list + 1] = {
+                            name = name, body = alias.body,
+                            params = params_strs,
+                            nominal = alias.nominal or false,
+                            resolved_bounds = bounds,
+                        }
+                    end
+                end
+            end
+            table.sort(alias_list, function(a, b) return a.name < b.name end)
+        end
+        local cri_bytes = cri_write.serialize(mod_ctx, exp_map, alias_list)
+
+        local function cri_loader(ctx, req_name)
+            if req_name ~= mod_name then return nil end
+            local ok, exports, aliases = cri_read.load(cri_bytes, ctx)
+            if ok then return exports["__ret"], aliases end
+            return nil
+        end
+
+        return check_mod.check_string(use_src, "use.lua", nil, pool, cri_loader)
+    end
+
+    assert.it("simple type alias imported from module", function()
+        local err = check_with_module([[
+--:: MyType = integer
+local M = {}
+return M
+]], [[
+local M = require("mymod")
+--: MyType
+local x = 42
+]])
+        assert.eq(#err.errors, 0)
+    end)
+
+    assert.it("imported alias rejects wrong type", function()
+        local err = check_with_module([[
+--:: MyType = integer
+local M = {}
+return M
+]], [[
+local M = require("mymod")
+--: MyType
+local x = "hello"
+]])
+        assert.ok(#err.errors > 0)
+    end)
+
+    assert.it("generic type alias imported from module", function()
+        local err = check_with_module([[
+--:: Wrapper<T> = { value: T }
+local M = {}
+return M
+]], [[
+local M = require("mymod")
+--: Wrapper<integer>
+local x = { value = 42 }
+]])
+        assert.eq(#err.errors, 0)
+    end)
+
+    assert.it("generic alias rejects wrong inner type", function()
+        local err = check_with_module([[
+--:: Wrapper<T> = { value: T }
+local M = {}
+return M
+]], [[
+local M = require("mymod")
+--: Wrapper<integer>
+local x = { value = "oops" }
+]])
+        assert.ok(#err.errors > 0)
+    end)
+
+    assert.it("local type alias takes precedence over import", function()
+        -- If the consumer re-declares the same type name, the local wins.
+        local err = check_with_module([[
+--:: MyType = integer
+local M = {}
+return M
+]], [[
+local M = require("mymod")
+--:: MyType = string
+--: MyType
+local x = "hello"
+]])
+        assert.eq(#err.errors, 0)
+    end)
+
+    assert.it("multiple aliases imported from same module", function()
+        local err = check_with_module([[
+--:: Foo = integer
+--:: Bar = string
+local M = {}
+return M
+]], [[
+local M = require("mymod")
+--: Foo
+local x = 42
+--: Bar
+local y = "hi"
+]])
+        assert.eq(#err.errors, 0)
+    end)
+end)

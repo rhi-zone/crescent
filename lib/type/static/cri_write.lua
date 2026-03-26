@@ -359,7 +359,7 @@ end
 -- Serialize a set of named exports from ctx.
 -- exports: { [name_string] = type_id }
 -- Returns the raw .cri bytes as a Lua string, with SHA-256 filled in.
-function M.serialize(ctx, exports)
+function M.serialize(ctx, exports, type_aliases)
     -- Clean up any leftover side table from a previous call.
     ctx._cri_table_fields = {}
 
@@ -379,6 +379,23 @@ function M.serialize(ctx, exports)
         end
     end
 
+    -- Intern type alias names and add their body types as roots.
+    type_aliases = type_aliases or {}
+    for _, alias in ipairs(type_aliases) do
+        intern_mod.intern(ctx.pool, alias.name)
+        if alias.body then root_tids[#root_tids + 1] = resolve(ctx, alias.body) end
+        if alias.params then
+            for _, pname in ipairs(alias.params) do
+                intern_mod.intern(ctx.pool, pname)
+            end
+        end
+        if alias.resolved_bounds then
+            for _, bid in ipairs(alias.resolved_bounds) do
+                if bid then root_tids[#root_tids + 1] = resolve(ctx, bid) end
+            end
+        end
+    end
+
     -- Reachability walk
     local R = collect(ctx, root_tids)
     local seen_types      = R.seen_types
@@ -395,6 +412,26 @@ function M.serialize(ctx, exports)
             local idx = #str_order
             seen_strings[sid] = idx
             str_order[#str_order + 1] = sid
+        end
+    end
+
+    -- Ensure type alias name and param strings are in the string table.
+    for _, alias in ipairs(type_aliases) do
+        local sid = intern_mod.intern(ctx.pool, alias.name)
+        if not seen_strings[sid] then
+            local idx = #str_order
+            seen_strings[sid] = idx
+            str_order[#str_order + 1] = sid
+        end
+        if alias.params then
+            for _, pname in ipairs(alias.params) do
+                local psid = intern_mod.intern(ctx.pool, pname)
+                if not seen_strings[psid] then
+                    local pidx = #str_order
+                    seen_strings[psid] = pidx
+                    str_order[#str_order + 1] = psid
+                end
+            end
         end
     end
 
@@ -618,8 +655,45 @@ function M.serialize(ctx, exports)
     local export_bytes = table.concat(export_buf)
 
     -- -----------------------------------------------------------------------
+    -- Section 6: Type Alias Table (optional)
+    -- Layout: count(u32) + for each alias:
+    --   name_id(i32), body_tid(i32), flags(u8), param_count(u8), pad(u16),
+    --   param_name_ids[param_count](i32), bound_tids[param_count](i32)
+    -- flags bit 0 = nominal
+    -- -----------------------------------------------------------------------
+    local alias_bytes = ""
+    if #type_aliases > 0 then
+        local alias_buf = { u32be(#type_aliases) }
+        for _, alias in ipairs(type_aliases) do
+            local name_sid = remap_sid(seen_strings, intern_mod.intern(ctx.pool, alias.name))
+            local body_tid = alias.body and remap_tid(seen_types, ctx, alias.body) or -1
+            local aflags = alias.nominal and 1 or 0
+            local params = alias.params or {}
+            alias_buf[#alias_buf + 1] = i32be(name_sid)
+            alias_buf[#alias_buf + 1] = i32be(body_tid)
+            alias_buf[#alias_buf + 1] = u8(aflags)
+            alias_buf[#alias_buf + 1] = u8(#params)
+            alias_buf[#alias_buf + 1] = u16be(0)  -- padding
+            for _, pname in ipairs(params) do
+                alias_buf[#alias_buf + 1] = i32be(remap_sid(seen_strings, intern_mod.intern(ctx.pool, pname)))
+            end
+            local bounds = alias.resolved_bounds or {}
+            for j = 1, #params do
+                local bid = bounds[j]
+                if bid then
+                    alias_buf[#alias_buf + 1] = i32be(remap_tid(seen_types, ctx, bid))
+                else
+                    alias_buf[#alias_buf + 1] = i32be(-1)
+                end
+            end
+        end
+        alias_bytes = table.concat(alias_buf)
+    end
+
+    -- -----------------------------------------------------------------------
     -- Header (64 bytes)
     -- magic(4) + version(4) + flags(4) + hash(32) + 5×offset(4) = 64
+    -- flags: if non-zero, byte offset of Section 6 (type alias table)
     -- -----------------------------------------------------------------------
     local HEADER_SIZE = 64
     local str_offset    = HEADER_SIZE
@@ -627,10 +701,12 @@ function M.serialize(ctx, exports)
     local field_offset  = type_offset  + #type_bytes
     local list_offset   = field_offset + #field_bytes
     local export_offset = list_offset  + #list_bytes
+    local alias_offset  = export_offset + #export_bytes
+    local flags_val = #type_aliases > 0 and alias_offset or 0
 
     local header = "CRIF"
         .. u32be(1)                    -- version
-        .. u32be(0)                    -- flags
+        .. u32be(flags_val)            -- flags: alias section offset (0 = none)
         .. string.rep("\0", 32)        -- hash (zeroed)
         .. u32be(str_offset)
         .. u32be(type_offset)
@@ -641,7 +717,7 @@ function M.serialize(ctx, exports)
     assert(#header == 64)
 
     -- Assemble
-    local body = header .. str_bytes .. type_bytes .. field_bytes .. list_bytes .. export_bytes
+    local body = header .. str_bytes .. type_bytes .. field_bytes .. list_bytes .. export_bytes .. alias_bytes
 
     -- Compute SHA-256 with hash field zeroed (it is), fill into offset 12.
     local hex = sha256.hash(body)

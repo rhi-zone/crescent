@@ -337,7 +337,60 @@ function M.load(bytes, ctx)
         end
     end
 
-    return true, exports
+    -- -----------------------------------------------------------------------
+    -- Type Alias Table (Section 6, optional)
+    -- Present when header flags field is non-zero (byte offset of section).
+    -- -----------------------------------------------------------------------
+    local aliases = {}
+    local alias_offset = r_u32be(bytes, 8)  -- flags field
+    if alias_offset > 0 and alias_offset < #bytes then
+        local alias_count = r_u32be(bytes, alias_offset)
+        local pos = alias_offset + 4
+        for _ = 1, alias_count do
+            local cri_name_id = r_i32be(bytes, pos)
+            local cri_body_id = r_i32be(bytes, pos + 4)
+            local aflags      = r_u8(bytes, pos + 8)
+            local param_count = r_u8(bytes, pos + 9)
+            pos = pos + 12  -- name(4) + body(4) + flags(1) + count(1) + pad(2)
+
+            local name_sid = rs(cri_name_id)
+            local name     = intern_mod.get(ctx.pool, name_sid)
+            local body_tid = cri_body_id >= 0 and rt(cri_body_id) or nil
+            local nominal  = (aflags % 2) == 1
+
+            local params = nil
+            if param_count > 0 then
+                params = {}
+                for j = 1, param_count do
+                    params[j] = rs(r_i32be(bytes, pos))
+                    pos = pos + 4
+                end
+            else
+                -- skip param_name_ids (0 entries) — pos unchanged
+            end
+
+            local resolved_bounds = nil
+            if param_count > 0 then
+                resolved_bounds = {}
+                for j = 1, param_count do
+                    local bid = r_i32be(bytes, pos)
+                    resolved_bounds[j] = bid >= 0 and rt(bid) or nil
+                    pos = pos + 4
+                end
+            end
+
+            if name then
+                aliases[name] = {
+                    body = body_tid,
+                    params = params,          -- session name_ids (or nil)
+                    nominal = nominal,
+                    resolved_bounds = resolved_bounds,
+                }
+            end
+        end
+    end
+
+    return true, exports, aliases
 end
 
 return M

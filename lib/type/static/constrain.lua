@@ -1319,9 +1319,10 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
                 ctx._last_require_mod = mod_name
                 if ctx.cri_loader then
-                    local exports = ctx.cri_loader(ctx, mod_name)
+                    local exports, aliases = ctx.cri_loader(ctx, mod_name)
                     if exports then
                         ctx._last_multi_return = { exports }
+                        ctx._last_require_aliases = aliases  -- stash for NODE_LOCAL_STMT
                         return exports
                     end
                 end
@@ -1561,6 +1562,33 @@ local function try_promote_enum(ctx, tbl_tid, enum_name_id)
     end
 end
 
+-- Inject type aliases from a required module into the current scope.
+-- aliases: { [name_string] = { body, params, nominal, resolved_bounds } } | nil
+local function inject_imported_aliases(ctx, aliases)
+    if not aliases then return end
+    for name, alias in pairs(aliases) do
+        local name_id = intern_mod.intern(ctx.pool, name)
+        -- Only inject if not already bound (local declarations take precedence).
+        if not env_mod.lookup_type(ctx.scope, name_id) then
+            -- params from cri_read are already session name_ids (or nil).
+            -- Convert params from name_id array to name_id array (already correct format).
+            local params = nil
+            if alias.params then
+                params = {}
+                for j, pid in ipairs(alias.params) do
+                    params[j] = pid
+                end
+            end
+            env_mod.bind_type(ctx.scope, name_id, {
+                body            = alias.body,
+                params          = params,
+                nominal         = alias.nominal or false,
+                resolved_bounds = alias.resolved_bounds,
+            })
+        end
+    end
+end
+
 --: { [integer]: (Ctx, integer) -> (), ... }
 local StmtRule = {}
 
@@ -1582,10 +1610,13 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local es, el = n.data[2], n.data[3]
 
     ctx._last_require_mod = nil
+    ctx._last_require_aliases = nil
     ctx._last_multi_return_override = nil  -- clear before gen so stale values don't persist
     local rhs_types = el > 0 and gen_expr_list(ctx, es, el) or {}
     local stmt_require_mod = ctx._last_require_mod
+    local stmt_require_aliases = ctx._last_require_aliases
     ctx._last_require_mod = nil
+    ctx._last_require_aliases = nil
 
     local last_rhs_is_call = false
     if el > 0 then
@@ -1689,6 +1720,10 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 end
             end
         end
+    end
+    -- Inject type aliases from the required module into the current scope.
+    if stmt_require_aliases then
+        inject_imported_aliases(ctx, stmt_require_aliases)
     end
     -- Consume the annotation for this line so it doesn't spill to the next statement
     -- via the line-1 fallback in get_ann (e.g. `local t --: T \n local v = t.x`).
