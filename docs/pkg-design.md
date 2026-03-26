@@ -39,20 +39,14 @@ Multiple major versions of a package coexist as separate directories:
 ```
 lib/foo/v1/      foo 1.x — init.lua, util.lua, ...
 lib/foo/v2/      foo 2.x — init.lua, util.lua, ...
-lib/foo/init.lua redirect: return require("lib.foo.v2")
+lib/foo/init.lua optional redirect shipped by the author: return require("lib.foo.v2")
 ```
 
 `require("lib.foo.v1")` resolves to `lib/foo/v1/init.lua` via the standard `?/init.lua` path pattern. No tooling required — this is plain `package.path` resolution.
 
 The version subdirectory is not an install artifact — it is part of the require path the author writes at development time. If a package will be consumed as `lib.foo.v2`, the author writes `require("lib.foo.v2.util")` in their own source, and their repo has `lib/foo/v2/` in it. The package manager hardlinks/copies files there for consumers. No path rewriting, ever.
 
-**`lib/<name>/init.lua` redirect**: the package manager writes this file automatically on install, pointing at the current major:
-
-```lua
-return require("lib.foo.v2")
-```
-
-Authors who don't care about stability write `require("lib.foo")` and get the latest. Authors who need stability write `require("lib.foo.v2")` explicitly and never see a breaking change unless they update that require path themselves.
+**`lib/<name>/init.lua` redirect**: if the author ships a redirect in their tarball, it lands at `lib/<name>/init.lua` after extraction. The package manager does not generate this file — it is the author's decision whether to include it. Authors who want `require("lib.foo")` to work write the redirect themselves. Authors who don't include it require callers to use the explicit versioned path.
 
 ---
 
@@ -81,10 +75,13 @@ registry).
 
 ## Lockfile: `crescent.lock`
 
-Text format, git-diffable, committed to VCS. Records the full resolved
-dependency graph (direct + transitive) with exact versions, checksums,
-and source URLs. Nothing in `lib/` installed by the package manager should
-be trusted without a matching lockfile entry.
+Text format, git-diffable, committed to VCS. Records the complete
+reproducible state of everything the package manager manages: exact
+versions, source URLs, include globs, and integrity hashes.
+
+`crescent.lock` is the boundary between "managed by the package manager"
+and "owned by the project". First-party code in `lib/` that was not
+installed by the package manager is not in the lockfile.
 
 ```toml
 # crescent.lock  (do not edit manually)
@@ -92,17 +89,95 @@ be trusted without a matching lockfile entry.
 [sha1]
 version  = "1.0.0"
 url      = "https://pkg.crescent.run/sha1/1.0.0.tar.gz"
-checksum = "sha256:a3f1..."
+include  = "**"
+tarball  = "sha256:a3f1..."
+tree     = "sha256:d9e4..."
 
 [lunajson]
 version  = "1.3.0"
 url      = "https://pkg.crescent.run/lunajson/1.3.0.tar.gz"
-checksum = "sha256:b7c2..."
+include  = "v2/**"
+tarball  = "sha256:b7c2..."
+tree     = "sha256:c1a8..."
 ```
 
-Format is TOML-like but will be parsed by a hand-written Lua parser
-(no external TOML library dependency for the package manager itself).
-Exact grammar TBD; principle: simple enough to parse in ~50 lines of Lua.
+**Two hashes per entry:**
+- `tarball`: verified on download. Detects a corrupt or tampered tarball
+  before extraction.
+- `tree`: hash of the extracted file tree. Used by `cr install` to detect
+  local modifications to `lib/<name>/` after install.
+
+**`include` glob**: the subset of the tarball actually extracted (see
+"Selective installs" below). The lockfile records the union installed,
+which may be wider than what any single dependent requested.
+
+Format is TOML-like but parsed by a hand-written Lua parser (no external
+TOML library dependency for the package manager itself). Exact grammar TBD;
+principle: simple enough to parse in ~50 lines of Lua.
+
+---
+
+## Selective installs
+
+Consumers can declare which parts of a package they want using an include glob:
+
+```bash
+cr add foo --include="v2/**"
+```
+
+The default is `**` (everything). The glob is recorded in `pkg.lua`:
+
+```lua
+deps = {
+  foo = { constraint = "^2.0", include = "v2/**" },
+}
+```
+
+When multiple dependents request different globs of the same package, the
+**union** is installed. This ensures every dependent gets what it asked for
+without requiring the package to be downloaded twice. The lockfile records
+the union actually installed, not the individual requests:
+
+```toml
+[foo]
+version = "2.1.0"
+include = "v2/**"   -- union of all dependent requests
+...
+```
+
+If a new dependent later requests a wider glob (e.g., `**`), `cr install`
+re-links with the expanded union.
+
+---
+
+## Local edits to vendored code
+
+The tree hash in the lockfile lets `cr install` detect modifications to
+`lib/<name>/` after install:
+
+- **On hash mismatch**: warn "lib/foo/ has been modified" and stop. No files
+  are overwritten without explicit consent.
+- **`cr install --force`**: overwrite local changes for all packages.
+
+Additional commands for working with modified vendored code:
+
+```bash
+cr diff foo      # diff lib/foo/ against ~/.crescent/cache/foo@<version>/
+                 # no network required — the cache is already present from install
+cr eject foo     # remove foo from crescent.lock entirely; the package manager
+                 # never touches lib/foo/ again. Explicit primitive for "I own this."
+```
+
+**`cr update`** behavior when local edits are present:
+- `cr update foo` — warns about local changes and stops.
+- `cr update foo --overwrite` — discards local changes, installs new version.
+- `cr update foo --merge` — three-way merge: base = cached old version,
+  ours = local edits, theirs = new version. Uses diff3. The three inputs
+  are all available locally (base from cache, ours from `lib/`, theirs from
+  new cache entry), so no network round-trip beyond the initial fetch.
+
+`cr eject` is the right tool when the intent is permanent ownership. `--merge`
+is the right tool when the intent is to track upstream while keeping local fixes.
 
 ---
 
@@ -114,35 +189,40 @@ Exact grammar TBD; principle: simple enough to parse in ~50 lines of Lua.
 ```
 
 Install links (hardlink on Linux, clonefile/CoW on macOS, copy fallback) from
-the global cache into `lib/<name>/v<N>/`. This means each version lives on disk once
-regardless of how many projects use it.
+the global cache into `lib/<name>/`. This means each version lives on disk once
+regardless of how many projects use it. The cache always holds the full extracted
+tree; selective installs apply the include glob during the link step, not during
+extraction to cache.
 
 ---
 
 ## Install algorithm
 
 ```
-1. Parse pkg.lua (direct deps + constraints)
+1. Parse pkg.lua (direct deps + constraints + per-dep include globs)
 2. Load crescent.lock if present
 3. Resolve:
      - For each dep in pkg.lua, check lockfile for pinned version
      - For new/changed deps, query registry for matching versions
      - With lockfile: fetch tarballs lazily (only what's missing from lib/)
      - Without lockfile: fetch tarballs eagerly in parallel while resolving
+     - Compute union of all include globs for each package (from direct and
+       transitive dependents); record union in updated lockfile
 4. Verify lib/ fast path:
-     - For each expected package, check lib/<name>/v<N>/pkg.lua name+version
+     - For each expected package, check tree hash of lib/<name>/ against lockfile
      - If match: skip (same as bun's early-exit JSON check)
+     - If mismatch: warn "lib/<name>/ has been modified" and stop unless --force
 5. Fetch missing packages (parallel, default --jobs=N where N=CPU count):
      - Check global cache first (~/.crescent/cache/name@version/)
-     - Download tarball if not cached; verify checksum
-6. Link: hardlink (or copy) from global cache into lib/<name>/v<N>/
-7. Write lib/<name>/init.lua redirect pointing at installed major version
-8. Write crescent.lock
+     - Download tarball if not cached; verify tarball hash
+6. Link: hardlink (or copy) from global cache into lib/<name>/,
+     applying the include glob union from step 3
+7. Write crescent.lock
 ```
 
-**Fast path**: if `crescent.lock` exists and `lib/` has correct name+version
-for every entry → skip all network entirely. This is the primary speedup for
-repeat installs (CI warm cache, developer re-install).
+**Fast path**: if `crescent.lock` exists and tree hashes match for every entry
+→ skip all network entirely. This is the primary speedup for repeat installs
+(CI warm cache, developer re-install).
 
 **`--frozen-lockfile`** (or `cr install --frozen`): error if `pkg.lua` diverges
 from lockfile. For CI reproducibility.
@@ -201,9 +281,10 @@ GET /<name>/<version>.tar.gz            → tarball
 GET /<name>/<version>.sha256            → checksum file
 ```
 
-Tarball contains the package files with `pkg.lua` at root, inside a `v<N>/`
-subdirectory matching the major version. The package manager places them at
-`lib/<name>/v<N>/`.
+Tarball is extracted into `lib/<name>/`. If the package author structured their
+tarball with a `v<N>/` subdirectory (the standard practice for versioned
+packages), the extracted result is `lib/<name>/v<N>/`. The package manager
+imposes no directory structure — it extracts and that's it.
 
 Registry metadata responses cached in `~/.crescent/cache/<hash>.meta`
 (binary-encoded for fast repeated reads, same principle as bun's `.npm` cache).
@@ -241,15 +322,21 @@ This mirrors bun's `bun <file>` / `bun <script>` / `bun <command>` UX.
 
 ```bash
 # Package management
-cr install               # install all deps from pkg.lua / lockfile
-cr install --frozen      # CI mode: error on lockfile divergence
-cr add sha1              # add to pkg.lua deps, install, update lockfile
-cr add sha1@1.0.0        # pin exact version
-cr remove sha1           # remove from pkg.lua, update lockfile, delete lib/sha1/
-cr update sha1           # re-resolve to latest matching version, update lockfile
-cr update                # re-resolve all
-cr publish               # publish to registry (TBD)
-cr info sha1             # show package info from registry
+cr install                       # install all deps from pkg.lua / lockfile
+cr install --frozen              # CI mode: error on lockfile divergence
+cr install --force               # overwrite local modifications to lib/
+cr add sha1                      # add to pkg.lua deps, install, update lockfile
+cr add sha1@1.0.0                # pin exact version
+cr add sha1 --include="v2/**"    # install only matching files from tarball
+cr remove sha1                   # remove from pkg.lua, update lockfile, delete lib/sha1/
+cr update sha1                   # re-resolve to latest matching version, update lockfile
+cr update sha1 --overwrite       # update, discarding local changes
+cr update sha1 --merge           # update with three-way merge of local edits
+cr update                        # re-resolve all
+cr diff sha1                     # diff lib/sha1/ against cached version (no network)
+cr eject sha1                    # remove from lockfile; hand ownership to the project
+cr publish                       # publish to registry; lints phantom deps
+cr info sha1                     # show package info from registry
 
 # Tooling
 cr test [files...]       # run test suite (lib/test/cli.lua)
@@ -312,6 +399,25 @@ The real wins:
 LuaJIT calls the same kernel interfaces as bun (Zig). The overhead is Lua
 control-flow wrapping the submission loop, not the I/O itself. With `io_uring`
 the bottleneck shifts to network latency, at which point we're on equal footing.
+
+---
+
+## Phantom dependency linting
+
+`cr publish` (and `cr check`) scans a package's source for every
+`require("lib.X.vN")` (or `require("lib.X")`) call and verifies that `X` is
+declared in the package's own `pkg.lua` with an include glob that covers the
+required path.
+
+This catches the classic npm phantom-dependency problem: a transitive dep
+happens to be present in `lib/` at runtime because some other package brought
+it in, so the missing declaration goes unnoticed until someone removes that
+transitive dep. The lint surfaces it at publish time rather than at a
+consumer's install.
+
+Each package is linted against its own declared deps — not the project's full
+install set. A package that passes lint is self-contained: any project that
+installs it will have exactly what it needs.
 
 ---
 

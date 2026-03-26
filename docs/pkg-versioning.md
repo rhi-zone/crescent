@@ -53,13 +53,11 @@ This means `lib.foo.v1` and `lib.foo.v2` are distinct `package.loaded` keys. The
 - Authors must decide their major version at development time and write it into their require paths. This is not a burden — it is the same discipline Go modules require.
 - Minor and patch versions within a major still use single-version + MVS. `lib/foo/v2/` has exactly one installed version of `foo` 2.x.
 
-The package manager writes `lib/<name>/init.lua` automatically on install:
-
-```lua
-return require("lib.foo.v2")
-```
-
-Authors who don't care about stability write `require("lib.foo")` and get the latest major. Authors who need stability write `require("lib.foo.v2")` explicitly.
+If the author ships a `lib/foo/init.lua` redirect in their tarball, it lands
+after extraction. The package manager does not generate this file. Authors who
+want `require("lib.foo")` to work write the redirect themselves and include it
+in the tarball. Authors who don't include it require callers to use the explicit
+versioned path.
 
 ### Option C: Package-local dep dirs
 
@@ -111,7 +109,7 @@ Within a major version (single-version + MVS), FFI identity is preserved: there 
 
 **Use Option B (versioned subdirectories under `lib/`) as the solution for major-version conflicts. Use Option A (single-version + MVS) within each major version.**
 
-The `lib/foo/v1/` and `lib/foo/v2/` directories coexist without conflict. `package.loaded` keys are distinct. FFI identity is preserved per major version. The package manager installs both without conflict, and writes `lib/foo/init.lua` pointing at the current major.
+The `lib/foo/v1/` and `lib/foo/v2/` directories coexist without conflict. `package.loaded` keys are distinct. FFI identity is preserved per major version. The package manager installs both without conflict. A `lib/foo/init.lua` redirect, if present, was shipped by the author as part of the package — the package manager does not generate it.
 
 MVS is simple to implement correctly and produces deterministic results for minor/patch evolution. The current code's post-hoc conflict check is functionally correct but should be replaced with a proper two-pass resolver: collect all constraints first, then pick versions. This is a straightforward improvement, not a redesign.
 
@@ -127,6 +125,6 @@ The conflict error in `install.lua` (lines 814–817) is correct and should stay
 
 3. Install paths: update `link_package` and `dep_ok` to use `lib/<name>/v<N>/` instead of `dep/<name>/`. The major version `N` is determined from the resolved package's `pkg.lua`.
 
-4. Redirect generation: after linking, write `lib/<name>/init.lua` pointing at the installed major version.
+4. Redirect files: do not generate `lib/<name>/init.lua`. If the tarball includes one, it lands as part of normal extraction. No special handling required.
 
 5. Registry documentation: publish a compat policy that strongly recommends versioned subdirectories for packages that export FFI types or make breaking API changes, and consider encoding `api_version` in `pkg.lua` as a machine-checkable signal. Design TBD.
