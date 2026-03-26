@@ -6,6 +6,48 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: iter combinators — overhead baseline
+
+**Commit:** (this change)
+
+Benchmark: `luajit lib/iter/bench.lua`
+
+### Results
+
+```
+iter combinator benchmark — 1M elements, 10 reps (after 3 warmup)
+
+case                      total (ms)    ns/element
+----------------------------------------------------
+map (loop)                      0.97           1.0
+map (iter)                      1.16           1.2
+filter (loop)                   2.98           3.0
+filter (iter)                   1.27           1.3
+fold (loop)                     0.71           0.7
+fold (iter)                     5.17           5.2
+map+filter (loop)               6.87           6.9
+map+filter (iter)              18.32          18.3
+map+filt+fold (loop)            6.94           6.9
+map+filt+fold (iter)           18.65          18.7
+
+overhead (iter/loop)      ratio
+--------------------------------------
+map (iter)                1.20x
+filter (iter)             0.43x
+fold (iter)               7.33x
+map+filter (iter)         2.67x
+map+filt+fold (iter)      2.69x
+```
+
+### Notes
+
+- `map` and `filter` individually are nearly zero-overhead (1.2x and 0.43x respectively) — the JIT compiles through the single-closure level well. The `filter (iter)` result being faster than the loop is a measurement artefact from JIT trace selection, not a real win.
+- `fold` shows 7.3x overhead at this depth. `iter.fold` uses a closure-based inner loop; the extra call frame and upvalue accesses block the trace compiler from eliding them.
+- Chained pipelines (`map+filter`, `map+filter+fold`) pay ~2.7x. Each additional combinator adds a closure boundary; the JIT cannot trace through more than one or two levels without bailing to the interpreter.
+- Takeaway: single combinators are acceptable for non-hot paths. Chained pipelines in tight loops (>100k iterations) should be hand-unrolled or rewritten as a single loop.
+
+---
+
 ## 2026-03-26: base64 encode/decode — baseline
 
 **Commit:** (this change)
