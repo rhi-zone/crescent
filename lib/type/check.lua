@@ -1,7 +1,5 @@
 local mod = {}
 
---:: Schema<T> = $Opaque<T>
-
 -- ── fast boolean check (hot path, no allocation on failure) ──────────────────
 
 mod.checkers = {}

@@ -6516,7 +6516,9 @@ local x = t
 ]])
     end)
 
-    assert.it("two $Opaque<integer> at different sites are distinct types", function()
+    assert.it("two $Opaque<integer> at different alias definition sites are distinct types", function()
+        -- Each --:: alias declaration is a distinct call site, so TokenA ≠ TokenB
+        -- even though both wrap integer. This is the desired nominal-type semantics.
         has_error([[
 --:: TokenA = $Opaque<integer>
 --:: TokenB = $Opaque<integer>
