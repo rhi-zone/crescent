@@ -1,5 +1,6 @@
 -- lib/encode/base64/bench.lua
 -- Benchmark base64 encode/decode throughput at multiple input sizes.
+-- Shows pure vs ffi tiers side by side.
 -- Run: luajit lib/encode/base64/bench.lua
 
 if not package.path:find("./?/init.lua", 1, true) then
@@ -8,6 +9,8 @@ end
 
 local base64    = require("lib.encode.base64")
 local base64url = require("lib.encode.base64.base64url")
+local pure      = require("lib.encode.base64.pure")
+local ffi_ok, ffi_impl = pcall(require, "lib.encode.base64.ffi")
 
 local WARMUP = 3
 
@@ -45,16 +48,46 @@ local function bench_decode(fn, encoded, orig_bytes, n)
     return mb / (t1 - t0)
 end
 
+-- ── Tier comparison ────────────────────────────────────────────────────────────
+
+io.write("base64 benchmark — encode and decode throughput\n")
+io.write(string.format("active tier: %s\n\n", base64._tier))
+
+-- Per-tier breakdown
+local tiers = { { name = "pure", impl = pure } }
+if ffi_ok and ffi_impl and ffi_impl.encode then
+    tiers[#tiers + 1] = { name = "ffi", impl = ffi_impl }
+end
+
+io.write(string.format("%-6s  %-6s  %14s  %14s\n",
+    "tier", "size", "encode MB/s", "decode MB/s"))
+io.write(string.rep("-", 48) .. "\n")
+
+for _, tier in ipairs(tiers) do
+    for _, s in ipairs(sizes) do
+        local input   = string.rep("x", s.bytes)
+        local encoded = tier.impl.encode(input)
+        local n       = iters_for(s.bytes)
+
+        local enc_mbps = bench(tier.impl.encode, input, n)
+        local dec_mbps = bench_decode(tier.impl.decode, encoded, s.bytes, n)
+
+        io.write(string.format("%-6s  %-6s  %11.1f MB/s  %11.1f MB/s\n",
+            tier.name, s.label, enc_mbps, dec_mbps))
+    end
+end
+
+-- ── Variant comparison (std vs url) using active tier ──────────────────────────
+
+io.write("\n")
+io.write(string.format("%-8s  %-6s  %14s  %14s\n",
+    "variant", "size", "encode MB/s", "decode MB/s"))
+io.write(string.rep("-", 50) .. "\n")
+
 local variants = {
     { name = "std",        enc = base64.encode,    dec = base64.decode },
     { name = "url",        enc = base64url.encode,  dec = base64url.decode },
 }
-
--- Header
-io.write("base64 benchmark — encode and decode throughput\n\n")
-io.write(string.format("%-8s  %-6s  %14s  %14s\n",
-    "variant", "size", "encode MB/s", "decode MB/s"))
-io.write(string.rep("-", 50) .. "\n")
 
 for _, v in ipairs(variants) do
     for _, s in ipairs(sizes) do

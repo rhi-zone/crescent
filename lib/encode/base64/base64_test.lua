@@ -1,4 +1,6 @@
 local base64 = require("lib.encode.base64")
+local pure   = require("lib.encode.base64.pure")
+local ffi_ok, ffi_impl = pcall(require, "lib.encode.base64.ffi")
 local T = require("lib.test.assert")
 
 -- RFC 4648 §10 test vectors
@@ -58,3 +60,49 @@ local all_bytes = {}
 for i = 0, 255 do all_bytes[i+1] = string.char(i) end
 local all_str = table.concat(all_bytes)
 T.eq(base64.decode(base64.encode(all_str)), all_str, "round-trip all bytes")
+
+-- _tier is set
+T.ok(base64._tier == "ffi" or base64._tier == "pure", "tier is ffi or pure")
+T.ok(base64._impl ~= nil, "_impl is set")
+
+-- parity tests: pure vs ffi (50 random-ish inputs of varying sizes 1–1000 bytes)
+if ffi_ok and ffi_impl and ffi_impl.encode then
+    -- Deterministic "random" inputs using a simple LCG.
+    local seed = 0xdeadbeef
+    local function next_byte()
+        seed = (seed * 1664525 + 1013904223) % 0x100000000
+        return seed % 256
+    end
+    local function make_input(len)
+        local bytes2 = {}
+        for i = 1, len do bytes2[i] = string.char(next_byte()) end
+        return table.concat(bytes2)
+    end
+
+    for trial = 1, 50 do
+        local len = (trial * 19 + 1) % 1000 + 1  -- sizes 1..1000, varied
+        local input = make_input(len)
+
+        -- encode parity
+        local pe = pure.encode(input)
+        local fe = ffi_impl.encode(input)
+        T.eq(pe, fe, "parity encode trial " .. trial)
+
+        -- url encode parity
+        local peu = pure.encode(input, {url=true})
+        local feu = ffi_impl.encode(input, {url=true})
+        T.eq(peu, feu, "parity encode url trial " .. trial)
+
+        -- decode round-trip via pure
+        local pd = pure.decode(pe)
+        T.eq(pd, input, "parity pure round-trip trial " .. trial)
+
+        -- decode round-trip via ffi
+        local fd = ffi_impl.decode(fe)
+        T.eq(fd, input, "parity ffi round-trip trial " .. trial)
+
+        -- cross: ffi encodes, pure decodes
+        local pd2 = pure.decode(fe)
+        T.eq(pd2, input, "parity cross-decode trial " .. trial)
+    end
+end
