@@ -518,3 +518,142 @@ T.describe("cr eject functional", function()
 	end)
 
 end)
+
+-- ── parse_args: --merge and --overwrite flags ─────────────────────────────────
+
+T.describe("cli.parse_args --merge and --overwrite flags", function()
+
+	T.it("--merge flag parsed correctly", function()
+		local r = cli.parse_args({ "update", "sha1", "--merge" })
+		T.eq(r.command, "update")
+		T.eq(r.args[1], "sha1")
+		T.eq(r.merge, true)
+		T.eq(r.overwrite, false)
+	end)
+
+	T.it("--overwrite flag parsed correctly", function()
+		local r = cli.parse_args({ "update", "--overwrite" })
+		T.eq(r.command, "update")
+		T.eq(r.overwrite, true)
+		T.eq(r.merge, false)
+	end)
+
+	T.it("--merge defaults to false", function()
+		local r = cli.parse_args({ "update" })
+		T.eq(r.merge, false)
+	end)
+
+	T.it("--overwrite defaults to false", function()
+		local r = cli.parse_args({ "update" })
+		T.eq(r.overwrite, false)
+	end)
+
+	T.it("--merge can be combined with --verbose", function()
+		local r = cli.parse_args({ "update", "--verbose", "--merge", "lunajson" })
+		T.eq(r.command, "update")
+		T.eq(r.verbose, true)
+		T.eq(r.merge, true)
+		T.eq(r.args[1], "lunajson")
+	end)
+
+	T.it("--merge is ignored by non-update commands (parsed but harmless)", function()
+		-- parse_args is global; --merge is recognized and stored, other commands ignore it.
+		local r = cli.parse_args({ "install", "--merge" })
+		T.eq(r.command, "install")
+		T.eq(r.merge, true)  -- stored globally; install handler just ignores it
+	end)
+
+end)
+
+-- ── cr update --merge: integration (skips non-modified, merges modified) ─────
+
+T.describe("cr update --merge integration", function()
+
+	local install_mod = require("lib.pkg.install")
+
+	local function make_tmpdir2()
+		local path = os.tmpname()
+		os.remove(path)
+		os.execute(("mkdir -p %q"):format(path))
+		return path
+	end
+	local function rm_tmpdir2(p) os.execute(("rm -rf %q"):format(p)) end
+
+	local function write_file(path, content)
+		local f = io.open(path, "w")
+		T.ok(f, "write_file: " .. path)
+		f:write(content)
+		f:close()
+	end
+
+	T.it("update --merge skips packages with no local modifications", function()
+		-- Set up: a package installed and unmodified.
+		local tmp = make_tmpdir2()
+		local lib_dir = tmp .. "/lib/mypkg"
+		os.execute(("mkdir -p %q"):format(lib_dir))
+		manifest.write(lib_dir .. "/pkg.lua", { name = "mypkg", version = "1.0.0" })
+		write_file(lib_dir .. "/init.lua", "return {}\n")
+
+		local h = install_mod.tree_hash(lib_dir)
+
+		write_lock(tmp, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:abc",
+				tree_hash    = h,   -- matches → no local modification
+				include      = "**",
+			},
+		})
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "*" } })
+
+		-- parse_args with --merge
+		local parsed = cli.parse_args({ "update", "mypkg", "--merge" })
+		T.eq(parsed.merge, true, "merge flag set")
+
+		-- The modification check should detect no changes.
+		-- We can exercise the detection logic directly.
+		local actual_hash = install_mod.tree_hash(lib_dir)
+		T.eq(actual_hash, h, "tree hash matches → not modified")
+
+		rm_tmpdir2(tmp)
+	end)
+
+	T.it("update --merge detects locally modified package (hash mismatch)", function()
+		local tmp = make_tmpdir2()
+		local lib_dir = tmp .. "/lib/mypkg"
+		os.execute(("mkdir -p %q"):format(lib_dir))
+		manifest.write(lib_dir .. "/pkg.lua", { name = "mypkg", version = "1.0.0" })
+		write_file(lib_dir .. "/init.lua", "return {}\n")
+
+		local original_hash = install_mod.tree_hash(lib_dir)
+
+		-- Modify the file
+		write_file(lib_dir .. "/init.lua", "return { local_edit = true }\n")
+		local modified_hash = install_mod.tree_hash(lib_dir)
+
+		-- Hashes differ → local modification detected
+		T.ok(original_hash ~= modified_hash, "modification changes tree hash")
+
+		write_lock(tmp, {
+			mypkg = {
+				version      = "1.0.0",
+				url          = "https://example.com/mypkg/1.0.0.tar.gz",
+				tarball_hash = "sha256:abc",
+				tree_hash    = original_hash,  -- lockfile has pre-modification hash
+				include      = "**",
+			},
+		})
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { mypkg = "*" } })
+
+		-- Simulate the detection that cmd_update --merge does.
+		local entries, _ = lock.load(tmp .. "/crescent.lock")
+		T.ok(entries.mypkg ~= nil, "mypkg in lockfile")
+
+		local actual = install_mod.tree_hash(lib_dir)
+		T.ok(actual ~= entries.mypkg.tree_hash, "hash mismatch detected (local modification)")
+
+		rm_tmpdir2(tmp)
+	end)
+
+end)

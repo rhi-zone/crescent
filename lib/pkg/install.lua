@@ -1292,6 +1292,273 @@ function M.run(project_dir, opts)
 	return result
 end
 
+-- ── Three-way merge ───────────────────────────────────────────────────────────
+
+--- Detect whether a file is binary by scanning for null bytes.
+-- Returns true if the file appears to be binary.
+local function is_binary_file(path)
+	local f = io.open(path, "rb")
+	if not f then return false end
+	-- Read the first 8 KB — sufficient heuristic for null-byte detection.
+	local chunk = f:read(8192)
+	f:close()
+	if not chunk then return false end
+	return chunk:find("\0", 1, true) ~= nil
+end
+
+--- Enumerate files in a directory recursively.
+-- Returns a table { [rel_path] = true } with paths relative to dir.
+-- Returns nil, err on failure.
+local function enum_files(dir)
+	local out, err = popen_read(("find %q -type f | sort"):format(dir))
+	if not out then return nil, err end
+	local prefix = dir:gsub("/$", "") .. "/"
+	local files = {}
+	for abs_path in out:gmatch("[^\n]+") do
+		if abs_path ~= "" then
+			local rel = abs_path
+			if abs_path:sub(1, #prefix) == prefix then
+				rel = abs_path:sub(#prefix + 1)
+			end
+			files[rel] = true
+		end
+	end
+	return files
+end
+
+--- Perform a three-way merge of a single package.
+--
+-- Three inputs:
+--   base  = ~/.crescent/cache/<name>@<old_version>/  (must exist)
+--   ours  = project_dir/lib/<name>/                  (local modifications)
+--   theirs = ~/.crescent/cache/<name>@<new_version>/ (fetched if not already cached)
+--
+-- For each file in the union of all three trees (filtered by include_glob):
+--   - exists in all three → diff3 -m ours base theirs → write back to ours
+--   - only in theirs      → copy into ours (new file in new version)
+--   - only in ours        → leave alone (locally added file)
+--   - deleted in theirs but modified in ours → warn, leave ours in place
+--   - unchanged base→ours → take theirs (no conflict possible)
+--
+-- Returns { ok=bool, conflicts=N, files_merged=N } or nil, err.
+function M.merge_package(project_dir, name, old_version, new_version, include_glob, opts)
+	opts = opts or {}
+	include_glob = include_glob or "**"
+
+	local base_dir   = cache_dir(name, old_version)
+	local ours_dir   = project_dir .. "/lib/" .. name
+	local theirs_dir = cache_dir(name, new_version)
+
+	-- Verify diff3 is available.
+	local check_ok = os.execute("diff3 --version >/dev/null 2>&1")
+	if check_ok ~= 0 and check_ok ~= true then
+		return nil, "diff3 not found: required for --merge"
+	end
+
+	-- Base cache must exist (needed for three-way merge base).
+	if not path_exists(base_dir) then
+		return nil, ("cache for %s@%s not found — cannot merge (try cr update --overwrite)"):format(name, old_version)
+	end
+
+	-- Theirs cache must also exist (caller should have fetched before calling).
+	if not path_exists(theirs_dir) then
+		return nil, ("cache for %s@%s not found — fetch the new version first"):format(name, new_version)
+	end
+
+	-- Enumerate files in all three trees.
+	local base_files,   b_err = enum_files(base_dir)
+	if not base_files   then return nil, "merge_package: enum base: "   .. tostring(b_err) end
+	local ours_files,   o_err = enum_files(ours_dir)
+	if not ours_files   then return nil, "merge_package: enum ours: "   .. tostring(o_err) end
+	local theirs_files, t_err = enum_files(theirs_dir)
+	if not theirs_files then return nil, "merge_package: enum theirs: " .. tostring(t_err) end
+
+	-- Build the union of all file paths, filtered by the include glob.
+	local all_files = {}
+	local function add_files(tbl)
+		for rel in pairs(tbl) do
+			if M.glob_match(include_glob, rel) then
+				all_files[rel] = true
+			end
+		end
+	end
+	add_files(base_files)
+	add_files(ours_files)
+	add_files(theirs_files)
+
+	-- Collect sorted file list for determinism.
+	local sorted = {}
+	for rel in pairs(all_files) do sorted[#sorted + 1] = rel end
+	table.sort(sorted)
+
+	local conflicts    = 0
+	local files_merged = 0
+	local temp_files   = {}
+
+	-- Cleanup helper: remove all temp files accumulated so far.
+	local function cleanup()
+		for _, p in ipairs(temp_files) do
+			pcall(os.remove, p)
+		end
+	end
+
+	local ok, pcall_err = pcall(function()
+		for _, rel in ipairs(sorted) do
+			local in_base   = base_files[rel]   ~= nil
+			local in_ours   = ours_files[rel]   ~= nil
+			local in_theirs = theirs_files[rel] ~= nil
+
+			local ours_path   = ours_dir   .. "/" .. rel
+			local base_path   = base_dir   .. "/" .. rel
+			local theirs_path = theirs_dir .. "/" .. rel
+
+			if in_theirs and not in_base and not in_ours then
+				-- New file added in new version: copy into ours.
+				local dst_parent = ours_path:match("^(.+)/[^/]+$")
+				if dst_parent then
+					mkdir_p(dst_parent)
+				end
+				local cp_ok, cp_err = copy_file(theirs_path, ours_path)
+				if not cp_ok then
+					error(("merge_package: failed to copy new file %s: %s"):format(rel, tostring(cp_err)))
+				end
+
+			elseif in_ours and not in_theirs and in_base then
+				-- File deleted in new version but present (possibly modified) in ours.
+				-- Compare base vs ours to detect local modification.
+				local base_content = read_file(base_path)
+				local ours_content = read_file(ours_path)
+				if base_content ~= ours_content then
+					io.stderr:write(("warning: merge %s: %s deleted in new version but locally modified — leaving ours in place\n"):format(name, rel))
+				else
+					-- Unmodified in ours, deleted in theirs: remove from ours.
+					os.remove(ours_path)
+				end
+
+			elseif in_ours and not in_theirs and not in_base then
+				-- Locally added file, not in either upstream tree: leave alone.
+
+			elseif in_base and in_ours and in_theirs then
+				-- All three exist: perform three-way merge.
+
+				-- Binary file check: skip merge for binary files.
+				if is_binary_file(ours_path) or is_binary_file(theirs_path) or is_binary_file(base_path) then
+					io.stderr:write(("warning: merge %s: %s appears to be binary — skipping merge, leaving ours in place\n"):format(name, rel))
+				else
+					-- Check if ours == base (no local modification): just take theirs.
+					local base_c = read_file(base_path)
+					local ours_c = read_file(ours_path)
+					if base_c == ours_c then
+						-- No local change: take theirs unconditionally (no conflict possible).
+						local cp_ok, cp_err = copy_file(theirs_path, ours_path)
+						if not cp_ok then
+							error(("merge_package: failed to update unchanged file %s: %s"):format(rel, tostring(cp_err)))
+						end
+					else
+						-- Local modification: run diff3 -m ours base theirs.
+						local tmp_out = os.tmpname()
+						temp_files[#temp_files + 1] = tmp_out
+
+						local cmd = ("diff3 -m %q %q %q > %q 2>/dev/null"):format(
+							ours_path, base_path, theirs_path, tmp_out)
+						-- diff3 exits 0 = clean, 1 = conflicts, 2 = error.
+						local exit_code = os.execute(cmd)
+						-- exit_code is the numeric exit status on LuaJIT (via os.execute).
+						-- On LuaJIT, os.execute returns the raw exit code as an integer.
+						-- 0 = clean, 1 = conflicts, anything else = error.
+						local numeric_code
+						if type(exit_code) == "boolean" then
+							-- Lua 5.1 / LuaJIT: os.execute returns true/false for exit 0/non-0.
+							-- We need the actual code; use io.popen to capture it.
+							-- Re-run to get numeric exit status.
+							local _, _, raw_code = os.execute(cmd)
+							numeric_code = raw_code or (exit_code and 0 or 1)
+						else
+							numeric_code = exit_code
+						end
+
+						local merged_content = read_file(tmp_out)
+						os.remove(tmp_out)
+						-- Remove from temp_files list (already cleaned up).
+						for i = #temp_files, 1, -1 do
+							if temp_files[i] == tmp_out then
+								table.remove(temp_files, i)
+								break
+							end
+						end
+
+						if not merged_content then
+							error(("merge_package: diff3 produced no output for %s"):format(rel))
+						end
+
+						-- Write merged result back.
+						local wf_ok, wf_err = write_file(ours_path, merged_content)
+						if not wf_ok then
+							error(("merge_package: failed to write merged %s: %s"):format(rel, tostring(wf_err)))
+						end
+
+						-- Count conflict markers.
+						local file_conflicts = 0
+						for _ in merged_content:gmatch("<<<<<<<") do
+							file_conflicts = file_conflicts + 1
+						end
+						conflicts = conflicts + file_conflicts
+						files_merged = files_merged + 1
+					end
+				end
+
+			elseif in_theirs and in_base and not in_ours then
+				-- File was in base, unchanged in theirs, deleted locally: leave deleted.
+				-- (ours intentionally removed it; honour that.)
+
+			elseif in_theirs and not in_base and in_ours then
+				-- New file in theirs that also exists in ours (coincidental add): diff3.
+				if is_binary_file(ours_path) or is_binary_file(theirs_path) then
+					io.stderr:write(("warning: merge %s: %s appears to be binary — skipping merge, leaving ours in place\n"):format(name, rel))
+				else
+					-- Create a synthetic empty base for the diff3.
+					local tmp_base = os.tmpname()
+					temp_files[#temp_files + 1] = tmp_base
+					write_file(tmp_base, "")
+
+					local tmp_out = os.tmpname()
+					temp_files[#temp_files + 1] = tmp_out
+
+					local cmd = ("diff3 -m %q %q %q > %q 2>/dev/null"):format(
+						ours_path, tmp_base, theirs_path, tmp_out)
+					os.execute(cmd)
+
+					local merged_content = read_file(tmp_out)
+					os.remove(tmp_base)
+					os.remove(tmp_out)
+					for i = #temp_files, 1, -1 do
+						if temp_files[i] == tmp_base or temp_files[i] == tmp_out then
+							table.remove(temp_files, i)
+						end
+					end
+
+					if merged_content then
+						write_file(ours_path, merged_content)
+						for _ in merged_content:gmatch("<<<<<<<") do
+							conflicts = conflicts + 1
+						end
+						files_merged = files_merged + 1
+					end
+				end
+			end
+			-- Remaining cases (file only in base, not in ours/theirs) → nothing to do.
+		end
+	end)
+
+	if not ok then
+		cleanup()
+		return nil, tostring(pcall_err)
+	end
+
+	cleanup()
+	return { ok = (conflicts == 0), conflicts = conflicts, files_merged = files_merged }
+end
+
 -- ── internals exposed for testing ────────────────────────────────────────────
 M._parse_index = parse_index
 M.glob_union   = glob_union   -- exposed for tests; also used in BFS glob accumulation

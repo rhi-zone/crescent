@@ -78,7 +78,7 @@ end
 -- ── argument parsing ─────────────────────────────────────────────────────────
 
 --- Parse argv into { command, args, flags }.
--- Global flags (--verbose, --registry=X, --jobs=N, --frozen, --force) are extracted.
+-- Global flags (--verbose, --registry=X, --jobs=N, --frozen, --force, --merge) are extracted.
 -- Remaining positional args are left in the args list.
 function M.parse_args(argv)
 	local result = {
@@ -88,6 +88,8 @@ function M.parse_args(argv)
 		frozen   = false,
 		dry_run  = false,
 		force    = false,
+		merge    = false,
+		overwrite = false,
 		registry = DEFAULT_REGISTRY,
 		jobs     = 1,
 	}
@@ -110,6 +112,10 @@ function M.parse_args(argv)
 			result.dry_run = true
 		elseif v == "--force" then
 			result.force = true
+		elseif v == "--merge" then
+			result.merge = true
+		elseif v == "--overwrite" then
+			result.overwrite = true
 		elseif v:sub(1, 11) == "--registry=" then
 			result.registry = v:sub(12)
 		elseif v:sub(1, 7) == "--jobs=" then
@@ -301,9 +307,29 @@ local function cmd_remove(project_dir, parsed)
 	return true
 end
 
---- cr update [name]
+--- cr update [name] [--merge | --overwrite]
+--
+-- --merge: three-way merge local edits with the new version.
+--   Algorithm:
+--   1. Identify locally-modified packages in the target set (tree hash mismatch).
+--   2. For each modified package:
+--      a. Stash lib/<name>/ → lib/<name>.__merge_stash/ (preserves local edits).
+--      b. Drop the lock entry so install re-resolves and links the new version
+--         into lib/<name>/ cleanly.
+--   3. Run install for all packages (modified ones now have empty lib/ so install
+--      fetches and links the new version without interference).
+--   4. For each modified package, run merge_package:
+--        base   = cache of old version (always present from initial install)
+--        ours   = stash (the locally-modified copy)
+--        theirs = new version already in lib/<name>/ (also in cache)
+--      Then replace lib/<name>/ with the merged result.
+--   5. Clean up stashes and update lockfile with merged tree hashes.
+--
+-- --overwrite: discard local changes (maps to install --force).
 local function cmd_update(project_dir, parsed)
-	local target = parsed.args[1]  -- nil means update all
+	local target       = parsed.args[1]  -- nil means update all
+	local do_merge     = parsed.merge
+	local do_overwrite = parsed.overwrite
 
 	-- Load lockfile
 	local lock_path = project_dir .. "/crescent.lock"
@@ -317,8 +343,210 @@ local function cmd_update(project_dir, parsed)
 		entries = l
 	end
 
+	if do_merge then
+		-- ── Phase 1: identify locally-modified packages in the target set ─────
+		local target_names = {}
+		if target then
+			target_names[target] = entries[target]
+		else
+			for k, v in pairs(entries) do
+				target_names[k] = v
+			end
+		end
+
+		local modified = {}  -- name → old lock entry
+		for name, entry in pairs(target_names) do
+			if entry and entry.tree_hash then
+				local lib_dir = project_dir .. "/lib/" .. name
+				local actual_hash, _ = install.tree_hash(lib_dir)
+				if actual_hash and actual_hash ~= entry.tree_hash then
+					modified[name] = entry
+				end
+			end
+		end
+
+		-- ── Phase 2: stash modified packages, drop their lock entries ─────────
+		local stashed = {}   -- name → stash_path
+		local stash_ok = true
+
+		for name, old_entry in pairs(modified) do
+			local lib_dir   = project_dir .. "/lib/" .. name
+			local stash_dir = project_dir .. "/lib/" .. name .. ".__merge_stash"
+
+			-- Remove any leftover stash from a previous interrupted run.
+			os.execute(("rm -rf %q"):format(stash_dir))
+
+			-- Stash: move lib/<name>/ → lib/<name>.__merge_stash/
+			local mv_ok = os.execute(("mv %q %q"):format(lib_dir, stash_dir))
+			if mv_ok ~= 0 and mv_ok ~= true then
+				stderr("update --merge: failed to stash lib/%s/", name)
+				-- Roll back already-stashed packages.
+				for n, sp in pairs(stashed) do
+					local ld = project_dir .. "/lib/" .. n
+					os.execute(("rm -rf %q"):format(ld))
+					os.execute(("mv %q %q"):format(sp, ld))
+				end
+				return false
+			end
+			stashed[name] = stash_dir
+
+			-- Drop from entries so install re-resolves this package.
+			entries[name] = nil
+		end
+
+		-- Drop non-modified target packages too so they get re-resolved.
+		for name in pairs(target_names) do
+			if not modified[name] then
+				entries[name] = nil
+			end
+		end
+
+		-- Write the updated lockfile (modified + other target packages dropped).
+		local w_ok, w_err = lock.write(lock_path, entries)
+		if not w_ok then
+			stderr("update: failed to write crescent.lock: %s", tostring(w_err))
+			-- Restore stashes before aborting.
+			for name, stash_dir in pairs(stashed) do
+				local lib_dir = project_dir .. "/lib/" .. name
+				os.execute(("rm -rf %q"):format(lib_dir))
+				os.execute(("mv %q %q"):format(stash_dir, lib_dir))
+			end
+			return false
+		end
+
+		-- ── Phase 3: run install (resolves + links new versions) ─────────────
+		-- Modified packages now have empty lib/ dirs, so install links new version.
+		-- Non-modified packages are re-resolved normally.
+		local inst_opts = {
+			frozen   = false,
+			force    = false,
+			registry = parsed.registry,
+			jobs     = parsed.jobs,
+			verbose  = parsed.verbose,
+		}
+		local inst_result = install.run(project_dir, inst_opts)
+
+		-- Re-read the lockfile to get the new resolved version for each modified pkg.
+		local new_lock = {}
+		if path_exists(lock_path) then
+			local l2, _ = lock.load(lock_path)
+			if l2 then new_lock = l2 end
+		end
+
+		-- ── Phase 4: merge each stashed package ──────────────────────────────
+		local overall_ok  = inst_result.ok
+		local any_conflict = false
+
+		for name, old_entry in pairs(modified) do
+			local stash_dir  = stashed[name]
+			local lib_dir    = project_dir .. "/lib/" .. name
+			local new_entry  = new_lock[name]
+			local new_version = new_entry and new_entry.version
+			local old_version = old_entry.version
+			local include     = (old_entry.include or "**")
+
+			if not new_version then
+				-- Install couldn't resolve this package (e.g., removed from pkg.lua).
+				-- Restore the stash.
+				io.stderr:write(("warning: update --merge: %s: could not resolve new version — restoring local copy\n"):format(name))
+				os.execute(("rm -rf %q"):format(lib_dir))
+				os.execute(("mv %q %q"):format(stash_dir, lib_dir))
+				stashed[name] = nil
+				-- Restore old lock entry.
+				new_lock[name] = old_entry
+
+			elseif new_version == old_version then
+				-- No version change: restore stash (keep local modifications).
+				if parsed.verbose then
+					info("update --merge: %s@%s unchanged, keeping local modifications", name, old_version)
+				end
+				-- lib/<name>/ now holds the freshly-linked old version.
+				-- Restore the stash back on top (or just swap).
+				os.execute(("rm -rf %q"):format(lib_dir))
+				os.execute(("mv %q %q"):format(stash_dir, lib_dir))
+				stashed[name] = nil
+				-- Restore old lock entry (tree_hash matches original).
+				new_lock[name] = old_entry
+
+			else
+				-- New version was installed into lib/<name>/ by install.
+				-- stash_dir = local modifications ("ours")
+				-- lib/<name>/ = new version ("theirs") — also in cache
+				-- cache/<name>@<old_version>/ = base
+
+				-- Move "theirs" aside so we can reconstruct ours from the stash.
+				-- merge_package uses:
+				--   base   = cache/<name>@<old_version>/
+				--   ours   = lib/<name>/               (currently the stash contents)
+				--   theirs = cache/<name>@<new_version>/
+				-- So we need to restore the stash into lib/<name>/ first, then merge.
+				os.execute(("rm -rf %q"):format(lib_dir))
+				os.execute(("mv %q %q"):format(stash_dir, lib_dir))
+				stashed[name] = nil
+
+				-- Run three-way merge.
+				local merge_result, merge_err = install.merge_package(
+					project_dir, name, old_version, new_version, include, { verbose = parsed.verbose }
+				)
+
+				if not merge_result then
+					stderr("update --merge: %s: %s", name, tostring(merge_err))
+					overall_ok = false
+				elseif not merge_result.ok then
+					-- Conflicts.
+					info("merged %s@%s → %s: %d file(s) have conflicts — resolve manually",
+						name, old_version, new_version, merge_result.conflicts)
+					any_conflict = true
+					overall_ok = false
+					-- Recompute tree_hash and update the lock (with the conflicted state).
+					local t_hash, _ = install.tree_hash(lib_dir)
+					new_lock[name] = {
+						version      = new_version,
+						url          = new_entry.url,
+						tarball_hash = new_entry.tarball_hash,
+						tree_hash    = t_hash,
+						include      = include,
+					}
+				else
+					-- Clean merge.
+					info("merged %s@%s → %s cleanly", name, old_version, new_version)
+					local t_hash, _ = install.tree_hash(lib_dir)
+					new_lock[name] = {
+						version      = new_version,
+						url          = new_entry.url,
+						tarball_hash = new_entry.tarball_hash,
+						tree_hash    = t_hash,
+						include      = include,
+					}
+				end
+			end
+		end
+
+		-- Clean up any remaining stashes (safety net for unexpected error paths).
+		for name, stash_dir in pairs(stashed) do
+			os.execute(("rm -rf %q"):format(stash_dir))
+		end
+
+		-- Write the final lockfile with merged entries.
+		local wf_ok, wf_err = lock.write(lock_path, new_lock)
+		if not wf_ok then
+			stderr("update: failed to write crescent.lock: %s", tostring(wf_err))
+			return false
+		end
+
+		for _, n in ipairs(inst_result.installed) do
+			-- Only report packages that weren't part of the merge set.
+			if not modified[n] then
+				info("updated %s", n)
+			end
+		end
+
+		return overall_ok
+	end  -- end do_merge
+
+	-- ── Standard update (no --merge) ──────────────────────────────────────────
+	-- Drop lock entries for the target set so install re-resolves them.
 	if target then
-		-- Drop only the specified package from the lockfile so install re-resolves it
 		if entries[target] then
 			entries[target] = nil
 			local w_ok, w_err = lock.write(lock_path, entries)
@@ -342,9 +570,11 @@ local function cmd_update(project_dir, parsed)
 		end
 	end
 
-	-- Re-run install (no frozen — we want fresh resolution)
+	-- Re-run install (no frozen — we want fresh resolution).
+	-- --overwrite maps to force=true (discards local changes).
 	local opts_copy = {
 		frozen   = false,
+		force    = do_overwrite or parsed.force,
 		registry = parsed.registry,
 		jobs     = parsed.jobs,
 		verbose  = parsed.verbose,
@@ -604,20 +834,22 @@ local USAGE = [[
 usage: cr <command> [options]
 
 commands:
-  install [--frozen] [--force]  install all deps from pkg.lua / lockfile
-  add <name[@version]>          add dep to pkg.lua, install, update lockfile
-  remove <name>                 remove dep, delete lib/<name>/, update lockfile
-  update [name]                 re-resolve to latest matching version(s)
-  eject <name>                  remove from lockfile; leave lib/<name>/ unmanaged
-  diff <name>                   diff lib/<name>/ against cached version (no network)
-  info <name>                   show package info from registry
-  publish [--dry-run]           publish package to registry
+  install [--frozen] [--force]          install all deps from pkg.lua / lockfile
+  add <name[@version]>                  add dep to pkg.lua, install, update lockfile
+  remove <name>                         remove dep, delete lib/<name>/, update lockfile
+  update [name] [--merge|--overwrite]   re-resolve to latest matching version(s)
+  eject <name>                          remove from lockfile; leave lib/<name>/ unmanaged
+  diff <name>                           diff lib/<name>/ against cached version (no network)
+  info <name>                           show package info from registry
+  publish [--dry-run]                   publish package to registry
 
 global options:
   --verbose                     enable verbose logging
   --registry=URL                registry base URL (default: https://pkg.crescent.run)
   --jobs=N                      parallel jobs (default: 1)
   --force                       overwrite local modifications to lib/ (install only)
+  --merge                       three-way merge local edits with new version (update only)
+  --overwrite                   discard local modifications before update (update only)
   --dry-run                     pack but do not upload (publish only)
 ]]
 

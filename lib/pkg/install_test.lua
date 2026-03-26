@@ -1454,3 +1454,184 @@ T.describe("install.run MVS end-to-end", function()
 	end)
 
 end)
+
+-- ── install.merge_package ──────────────────────────────────────────────────────
+
+-- Helper: write a file into a directory, creating parent dirs.
+local function write_pkg_file(dir, rel, content)
+	local abs = dir .. "/" .. rel
+	local parent = abs:match("^(.+)/[^/]+$")
+	if parent then os.execute(("mkdir -p %q"):format(parent)) end
+	local f, err = io.open(abs, "w")
+	T.ok(f, "write_pkg_file: open " .. abs .. ": " .. tostring(err))
+	f:write(content)
+	f:close()
+end
+
+-- Helper: read a file and return its content string, or nil.
+local function read_pkg_file(dir, rel)
+	local f = io.open(dir .. "/" .. rel, "r")
+	if not f then return nil end
+	local s = f:read("*a")
+	f:close()
+	return s
+end
+
+T.describe("install.merge_package", function()
+
+	-- Check whether diff3 is available.
+	local diff3_ok = os.execute("diff3 --version >/dev/null 2>&1")
+	local diff3_available = (diff3_ok == 0 or diff3_ok == true)
+
+	-- Set up a project with fake cache dirs under the real HOME/.crescent/cache.
+	-- Returns project_dir, ours_dir.
+	local function setup_merge_test(name, old_version, new_version, base_files, ours_files, theirs_files)
+		local tmp       = make_tmpdir()
+		local home      = os.getenv("HOME") or "/tmp"
+		local croot     = home .. "/.crescent/cache"
+		local base_dir   = croot .. "/" .. name .. "@" .. old_version
+		local theirs_dir = croot .. "/" .. name .. "@" .. new_version
+		local ours_dir   = tmp .. "/lib/" .. name
+
+		os.execute(("mkdir -p %q %q %q"):format(base_dir, theirs_dir, ours_dir))
+
+		for rel, content in pairs(base_files   or {}) do write_pkg_file(base_dir,   rel, content) end
+		for rel, content in pairs(ours_files   or {}) do write_pkg_file(ours_dir,   rel, content) end
+		for rel, content in pairs(theirs_files or {}) do write_pkg_file(theirs_dir, rel, content) end
+
+		return tmp, ours_dir
+	end
+
+	local function cleanup_cache(name, old_version, new_version)
+		local home  = os.getenv("HOME") or "/tmp"
+		local croot = home .. "/.crescent/cache"
+		os.execute(("rm -rf %q %q"):format(
+			croot .. "/" .. name .. "@" .. old_version,
+			croot .. "/" .. name .. "@" .. new_version
+		))
+	end
+
+	T.it("no local changes: clean merge, returns ok=true, conflicts=0", function()
+		if not diff3_available then return end
+
+		local name = "mpkg_no_changes"
+		local tmp, ours_dir = setup_merge_test(
+			name, "1.0.0", "2.0.0",
+			{ ["init.lua"] = "return {}\n" },
+			{ ["init.lua"] = "return {}\n" },             -- ours = base (no local change)
+			{ ["init.lua"] = "return { v = 2 }\n" }       -- theirs
+		)
+
+		local result, err = install.merge_package(tmp, name, "1.0.0", "2.0.0", "**")
+		T.ok(result, "merge_package returned result: " .. tostring(err))
+		T.ok(result.ok, "clean merge: ok=true")
+		T.eq(result.conflicts, 0, "no conflicts")
+
+		local content = read_pkg_file(ours_dir, "init.lua")
+		T.ok(content and content:find("v = 2"), "ours updated to theirs when no local change")
+
+		rm_tmpdir(tmp)
+		cleanup_cache(name, "1.0.0", "2.0.0")
+	end)
+
+	T.it("non-conflicting local changes: local edits preserved, new content added", function()
+		if not diff3_available then return end
+
+		-- Use clearly separated changes so diff3 can merge without conflict:
+		-- base: a() returns 1, b() returns 2.
+		-- ours: a() changed to return 42 (local edit); b() unchanged.
+		-- theirs: a() unchanged; b() changed to return 99 (upstream change).
+		-- These edits touch non-overlapping hunks → clean merge.
+		local name = "mpkg_nonconflict"
+		local base_c   = "local function a()\n  return 1\nend\n\nlocal function b()\n  return 2\nend\n\nreturn { a = a, b = b }\n"
+		local ours_c   = "local function a()\n  return 42\nend\n\nlocal function b()\n  return 2\nend\n\nreturn { a = a, b = b }\n"
+		local theirs_c = "local function a()\n  return 1\nend\n\nlocal function b()\n  return 99\nend\n\nreturn { a = a, b = b }\n"
+
+		local tmp, ours_dir = setup_merge_test(
+			name, "1.0.0", "2.0.0",
+			{ ["init.lua"] = base_c },
+			{ ["init.lua"] = ours_c },
+			{ ["init.lua"] = theirs_c }
+		)
+
+		local result, err = install.merge_package(tmp, name, "1.0.0", "2.0.0", "**")
+		T.ok(result, "merge_package succeeded: " .. tostring(err))
+		T.ok(result.ok, "non-conflicting merge: ok=true")
+		T.eq(result.conflicts, 0, "no conflicts")
+		T.ok(result.files_merged >= 1, "at least one file merged")
+
+		local content = read_pkg_file(ours_dir, "init.lua")
+		T.ok(content ~= nil, "init.lua present after merge")
+		T.ok(content:find("42"), "local edit (42) preserved")
+		T.ok(content:find("99"), "upstream edit (99) present")
+
+		rm_tmpdir(tmp)
+		cleanup_cache(name, "1.0.0", "2.0.0")
+	end)
+
+	T.it("conflicting changes: returns ok=false with conflict markers in file", function()
+		if not diff3_available then return end
+
+		local name     = "mpkg_conflict"
+		local base_c   = "local x = 1\nreturn x\n"
+		local ours_c   = "local x = 99\nreturn x\n"
+		local theirs_c = "local x = 42\nreturn x\n"
+
+		local tmp, ours_dir = setup_merge_test(
+			name, "1.0.0", "2.0.0",
+			{ ["init.lua"] = base_c },
+			{ ["init.lua"] = ours_c },
+			{ ["init.lua"] = theirs_c }
+		)
+
+		local result, err = install.merge_package(tmp, name, "1.0.0", "2.0.0", "**")
+		T.ok(result, "merge_package returned result: " .. tostring(err))
+		T.ok(not result.ok, "conflicting merge: ok=false")
+		T.ok(result.conflicts > 0, "conflicts > 0, got: " .. tostring(result.conflicts))
+
+		local content = read_pkg_file(ours_dir, "init.lua")
+		T.ok(content ~= nil, "init.lua present after conflicted merge")
+		T.ok(content:find("<<<<<<<"), "conflict markers present")
+
+		rm_tmpdir(tmp)
+		cleanup_cache(name, "1.0.0", "2.0.0")
+	end)
+
+	T.it("new file in new version: file appears in lib/", function()
+		if not diff3_available then return end
+
+		local name = "mpkg_newfile"
+		local tmp, ours_dir = setup_merge_test(
+			name, "1.0.0", "2.0.0",
+			{ ["init.lua"] = "return {}\n" },
+			{ ["init.lua"] = "return {}\n" },
+			{ ["init.lua"] = "return {}\n", ["util.lua"] = "return {}\n" }
+		)
+
+		local result, err = install.merge_package(tmp, name, "1.0.0", "2.0.0", "**")
+		T.ok(result, "merge_package succeeded: " .. tostring(err))
+		T.ok(result.ok, "clean merge with new file: ok=true")
+		T.eq(result.conflicts, 0, "no conflicts")
+
+		local util_c = read_pkg_file(ours_dir, "util.lua")
+		T.ok(util_c ~= nil, "new file util.lua appeared in lib/ after merge")
+
+		rm_tmpdir(tmp)
+		cleanup_cache(name, "1.0.0", "2.0.0")
+	end)
+
+	T.it("missing base cache: returns nil with actionable error", function()
+		local tmp  = make_tmpdir()
+		local name = "mpkg_no_base_cache"
+
+		-- No cache dirs created → base cache missing error.
+		local result, err = install.merge_package(tmp, name, "9.9.9", "10.0.0", "**")
+		T.ok(result == nil, "merge_package returns nil when base cache missing")
+		T.ok(err ~= nil, "error returned")
+		T.ok(err:find("9.9.9") or err:find("cache") or err:find("not found"),
+			"error mentions version or cache: " .. tostring(err))
+
+		rm_tmpdir(tmp)
+	end)
+
+end)
