@@ -175,6 +175,18 @@
 - [ ] extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
 - [ ] extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
 
+#### https
+- [ ] `lib/https/client.lua`: module-level TLS state (single concurrent connection) — acceptable for now but needs per-request TLS context for concurrency
+- [ ] `lib/https/client.lua`: certificate verification disabled by default — `tls.config_verify()` should be the default; current code omits it for compatibility
+- [ ] `lib/https/serverx.lua`: non-functional (FIXME placeholders, wrong imports) — needs full rewrite
+
+#### ai (`lib/ai/`)
+- [ ] `lib/ai/init.lua`: no retry/backoff on transient errors (429, 5xx)
+- [ ] `lib/ai/providers/anthropic.lua`: tool call streaming only emits on content_block_stop — no partial tool call deltas
+- [ ] `lib/ai/providers/openai.lua`: only flushes first accumulated tool call on finish — multi-tool-call streaming incomplete
+- [ ] `lib/ai/tools.lua`: assistant message in tool loop doesn't carry tool_calls metadata — some providers need it for multi-turn tool conversations
+- [ ] `lib/http/stream.lua`: buffer growth via string concat in hot path — should use table accumulator or FFI buffer
+
 #### websocket
 - [x] 15 TODOs — resolved/categorised (perf/api/extensions/policy/refactor); aa5a4e0
 - [x] Tests — 118 assertions: frame encode/decode, masking, close/ping/pong, error cases
