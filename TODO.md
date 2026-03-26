@@ -202,7 +202,7 @@
 - [ ] LICENSE files: most vendored packages have headers but no LICENSE file — add or verify (ljsocket, lunajson, cbor, sha1, base64, cparser, git)
 - [ ] `package.path` guard missing from websocket and http submodules — add where standalone use is expected
 - [ ] Review and polish all libraries pulled from ~/git/lua (bulk import done)
-- [ ] lib/todo/: conflicts with dep/todo/ (stubs for jpeg, png, xcb, soloud + a sqlitex.lua, webp.lua) — decide what to keep
+- [ ] lib/todo/: conflicts with dep/todo/ (stubs for jpeg, png, xcb, soloud + a sqlitex.lua (old naming), webp.lua) — decide what to keep
 - [ ] Remove or integrate duplicate/overlapping libs (e.g., mock.lua vs mock/, lil.lua vs lil/)
 - [ ] replx: add provenance tracking for lazy-loaded globals (symbol → source module)
 - [ ] FFI bindings: add ABI sanity checks (sizeof/offsetof assertions for wlroots version skew)
