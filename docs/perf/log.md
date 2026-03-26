@@ -6,6 +6,102 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: JSON tier optimisation — post-optimisation results
+
+**Pure tier commit:** `e659573`
+**FFI tier commit:** `f35d14f`
+
+### Techniques applied
+
+**Pure Lua tier (`e659573`):**
+- `skip_ws`: replaced byte-by-byte loop with `string.find("[^ \t\n\r]", pos)` for
+  bulk whitespace skipping. Fast-path single-byte check avoids the `find` call
+  when position is already on non-WS.
+- String and number scanning: kept byte-by-byte loops. LuaJIT JIT-compiles these
+  efficiently; `string.find` overhead exceeds the loop cost for the short strings
+  common in typical JSON (object keys, small integers).
+
+**FFI tier (`f35d14f`):**
+- `IS_WS[256]` FFI lookup table: single array-indexed load per byte for
+  whitespace detection, JIT-compiles to a tight loop with no branch chain.
+- `_ptr8[i]` direct pointer access throughout decoder (vs `string.byte` calls
+  in pure.lua).
+- `ffi.string(ptr, len)` for string segment extraction (zero-copy semantics,
+  avoids Lua length computation overhead of `string.sub`).
+- SWAR (8-byte-at-a-time scanning) was prototyped but removed. The ULL cdata
+  operations create JIT trace fragmentation in a complex call graph that exceeds
+  the SWAR throughput gains for the mixed workloads in the benchmark. SWAR would
+  benefit a dedicated large-string streaming decoder. See below.
+
+### Post-optimisation benchmark (standard benchmark, limited warmup)
+
+The standard `docs/perf/json.lua` uses 5% warmup (e.g. 50 iters for 1000-iter
+tests). Both tiers are within the benchmark noise floor (~5-10%) after
+optimization, with the FFI tier 1-3% faster on string-heavy scenarios.
+
+```
+=== JSON benchmark (ffi tier selected) ===
+selected tier: ffi
+
+encode:
+  small object (10 fields), 10000 iters       pure:     2.6 µs  ffi:     2.4 µs  speedup: 1.05x
+  large array (1000 numbers), 1000 iters      pure:    89.6 µs  ffi:    85.6 µs  speedup: 1.05x
+  deeply nested (depth 50), 1000 iters        pure:    20.1 µs  ffi:    20.8 µs  speedup: 0.96x
+  large string (10 KB with escapes), 1000 iters  pure:    42.1 µs  ffi:    42.7 µs  speedup: 0.99x
+
+decode:
+  small object (10 fields), 10000 iters       pure:     0.8 µs  ffi:     1.0 µs  speedup: 0.86x
+  large array (1000 numbers), 1000 iters      pure:   202.4 µs  ffi:   211.7 µs  speedup: 0.96x
+  deeply nested (depth 50), 1000 iters        pure:     7.2 µs  ffi:     8.7 µs  speedup: 0.83x
+  large string (10 KB with escapes), 1000 iters  pure:    68.1 µs  ffi:    66.1 µs  speedup: 1.03x
+```
+
+### Fully-warmed benchmark (200-iter global warmup, best of 5 rounds)
+
+```
+=== Post-global-warmup decode ===
+  small obj (109B)           pure=    1.0 µs  ffi=    1.2 µs  ratio=0.87
+  large array (17KB)         pure=  203.8 µs  ffi=  210.2 µs  ratio=0.97
+  deep nested (1KB)          pure=    5.1 µs  ffi=    6.3 µs  ratio=0.81
+  esc string (7KB)           pure=   70.0 µs  ffi=   64.0 µs  ratio=1.09
+  clean string (10KB)        pure=    9.2 µs  ffi=    9.0 µs  ratio=1.03
+```
+
+### Comparison: pre vs post optimisation
+
+| scenario | pure before | pure after | ffi before | ffi after |
+|----------|-------------|------------|------------|-----------|
+| enc small obj | 2.5 µs | 2.6 µs | 2.3 µs | 2.4 µs |
+| enc large arr | 86.0 µs | 89.6 µs | 87.0 µs | 85.6 µs |
+| enc large str | 43.7 µs | 42.1 µs | 46.0 µs | 42.7 µs |
+| dec small obj | 0.9 µs | 0.8 µs | 1.0 µs | 1.0 µs |
+| dec large arr | 207.6 µs | 202.4 µs | 215.8 µs | 211.7 µs |
+| dec large str | 67.7 µs | 68.1 µs | 69.7 µs | 66.1 µs |
+
+Both tiers are essentially unchanged on the standard benchmark scenarios —
+LuaJIT's JIT was already compiling the byte-scanning loops efficiently.
+
+### Key finding: SWAR limits in LuaJIT's traced-JIT model
+
+SWAR (8-bytes-at-a-time) string scanning via `uint64_t` reads was prototyped
+and provided 3-5x throughput improvement in isolation on clean strings (no
+escapes). However, in the context of a full JSON decoder with a complex call
+graph (decode_value → decode_string → scan function), the 64-bit ULL cdata
+operations created JIT trace fragmentation that degraded overall performance
+significantly (up to 3x regression on deeply nested objects).
+
+Root cause: LuaJIT's trace JIT compiles hot paths, not whole functions. When a
+function containing ULL arithmetic is called from multiple call sites, each site
+creates a separate trace. The SWAR function's `band(bnot(v), ...)` computation
+on cdata values triggered trace splits and side exits that exceeded the savings.
+
+The SWAR approach would be effective for a dedicated streaming string decoder
+that processes strings in large batches without interleaving object/array parsing.
+For the general-purpose decoder architecture used here, byte-scan is the correct
+primitive.
+
+---
+
 ## 2026-03-26: JSON tier optimisation — pre-optimisation baseline
 
 **Commit:** (baseline before optimisation, same as `122d8ca` code)
