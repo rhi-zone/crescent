@@ -4,6 +4,9 @@ local mod = {}
 
 mod.checkers = {}
 
+--[[@generic T]]
+--[[@param schema T]]
+--[[@param x unknown]]
 --[[@return boolean]]
 mod.check = function(schema, x)
 	return mod.checkers[schema.type](schema, x)
@@ -218,7 +221,10 @@ validators.all_of     = function(s, x, path)
 	return x
 end
 
---[[@return unknown? value, string? err]]
+--[[@generic T]]
+--[[@param schema T]]
+--[[@param x unknown]]
+--[[@return T?, string?]]
 mod.validate = function(schema, x)
 	return do_validate(schema, x, nil)
 end
@@ -369,7 +375,10 @@ coercers.all_of     = function(s, x, path)
 	return cur
 end
 
---[[@return unknown? value, string? err]]
+--[[@generic T]]
+--[[@param schema T]]
+--[[@param x unknown]]
+--[[@return T?, string?]]
 mod.coerce = function(schema, x)
 	return do_coerce(schema, x, nil)
 end
