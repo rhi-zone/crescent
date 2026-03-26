@@ -800,10 +800,22 @@ function M.run(project_dir, opts)
 		local dep_m = manifest.load(dep_manifest_path)
 		if dep_m and dep_m.deps and next(dep_m.deps) ~= nil then
 			-- Filter out already-visited deps before resolving.
+			-- For already-visited deps, verify the selected version still satisfies
+			-- this package's constraint — silent drops can hide version conflicts.
 			local new_deps = {}
 			for dep_name, constraint in pairs(dep_m.deps) do
 				if not visited[dep_name] then
 					new_deps[dep_name] = constraint
+				else
+					-- Already resolved — verify the selected version satisfies this constraint too.
+					local entry = new_lock[dep_name]
+					if entry then
+						local ver = semver.parse(entry.version)
+						if ver and not semver.satisfies(ver, constraint) then
+							fail(("version conflict: %s@%s is selected but %s requires %s %s"):format(
+								dep_name, entry.version, name, dep_name, constraint))
+						end
+					end
 				end
 			end
 

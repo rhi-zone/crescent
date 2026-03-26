@@ -431,6 +431,109 @@ T.describe("install.run transitive deps", function()
 		rm_tmpdir(tmp)
 	end)
 
+	T.it("compatible already-visited dep: no conflict when constraint is satisfied", function()
+		-- A→foo@>=1.0.0 resolved to 1.5.0; B also requires foo@>=1.0.0 — no error.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0", pkgb = "^1.0.0" } })
+
+		-- pkga depends on foo >=1.0.0
+		install_dep(tmp, { name = "pkga", version = "1.0.0",
+			deps = { foo = ">=1.0.0" } })
+		-- pkgb also depends on foo >=1.0.0 (compatible)
+		install_dep(tmp, { name = "pkgb", version = "1.0.0",
+			deps = { foo = ">=1.0.0" } })
+		install_dep(tmp, { name = "foo", version = "1.5.0" })
+
+		write_lock(tmp, {
+			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
+			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
+			foo  = { version = "1.5.0", url = "u", checksum = "sha256:ccc" },
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(result.ok, "expected ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		T.eq(sorted_str(result.skipped), "foo,pkga,pkgb")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("version conflict: selected version does not satisfy transitive constraint", function()
+		-- Project→pkga; pkga→foo@>=2.0.0 (resolved 2.0.0) AND pkga→pkgb;
+		-- pkgb→foo@>=3.0.0. foo is visited before pkgb is processed (sorted BFS),
+		-- so the already-visited conflict check fires.
+		local tmp = make_tmpdir()
+
+		-- Project only directly depends on pkga; pkga pulls in both foo and pkgb.
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0" } })
+
+		-- pkga depends on both foo (>=2.0.0) and pkgb
+		install_dep(tmp, { name = "pkga", version = "1.0.0",
+			deps = { foo = ">=2.0.0", pkgb = "^1.0.0" } })
+		-- pkgb requires foo >=3.0.0 — incompatible with 2.0.0
+		install_dep(tmp, { name = "pkgb", version = "1.0.0",
+			deps = { foo = ">=3.0.0" } })
+		install_dep(tmp, { name = "foo", version = "2.0.0" })
+
+		write_lock(tmp, {
+			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
+			pkgb = { version = "1.0.0", url = "u", checksum = "sha256:bbb" },
+			foo  = { version = "2.0.0", url = "u", checksum = "sha256:ccc" },
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(not result.ok, "expected failure due to version conflict")
+		T.ok(#result.errors > 0, "expected at least one error")
+		local found = false
+		for _, e in ipairs(result.errors) do
+			if e:find("conflict") then
+				found = true
+				break
+			end
+		end
+		T.ok(found, "expected error mentioning 'conflict', got: " .. table.concat(result.errors, "; "))
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("direct vs transitive conflict: project foo@>=1.0.0 resolved 1.5.0, dep requires foo@>=2.0.0", function()
+		-- Project directly depends on foo@>=1.0.0 (resolved 1.5.0).
+		-- pkga transitively requires foo@>=2.0.0 — conflict.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0", foo = ">=1.0.0" } })
+
+		install_dep(tmp, { name = "pkga", version = "1.0.0",
+			deps = { foo = ">=2.0.0" } })
+		install_dep(tmp, { name = "foo", version = "1.5.0" })
+
+		write_lock(tmp, {
+			pkga = { version = "1.0.0", url = "u", checksum = "sha256:aaa" },
+			foo  = { version = "1.5.0", url = "u", checksum = "sha256:bbb" },
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(not result.ok, "expected failure due to version conflict")
+		T.ok(#result.errors > 0, "expected at least one error")
+		local found = false
+		for _, e in ipairs(result.errors) do
+			if e:find("conflict") then
+				found = true
+				break
+			end
+		end
+		T.ok(found, "expected error mentioning 'conflict', got: " .. table.concat(result.errors, "; "))
+
+		rm_tmpdir(tmp)
+	end)
+
 	T.it("circular dep guard: A→B→A does not loop", function()
 		-- A depends on B; B depends on A.
 		-- The visited set must prevent infinite recursion.
