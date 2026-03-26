@@ -96,6 +96,23 @@ mod.codepoint = function (s, i, j)
 	j = j or i
 	if j < 0 then j = #s + j + 1 end
 	if band(byte(s, i), 0xc0) == 0x80 then return nil, "invalid UTF-8 sequence" end
+
+	-- Fast path: single codepoint (most common case) — no table allocation
+	if i == j then
+		local b = byte(s, i)
+		if band(b, 0x80) == 0 then return b end  -- ASCII
+		local plen = high_nibble_to_length[rshift(b, 4)]
+		if plen == 0 or b >= 0xf8 then return nil, "invalid UTF-8 sequence" end
+		local c = band(length_to_mask[plen], b)
+		for k = i + 1, i + plen - 1 do
+			local b2 = byte(s, k)
+			if band(b2, 0xc0) ~= 0x80 then return nil, "invalid UTF-8 sequence" end
+			c = bor(lshift(c, 6), band(b2, 0x3f))
+		end
+		return c
+	end
+
+	-- Range case: collect into table, return with unpack
 	local cs = {}
 	while i <= j do
 		local b = byte(s, i)
