@@ -220,6 +220,138 @@ function M.tree_hash(dir)
 	return "sha256:" .. hex
 end
 
+-- ── Glob matching ─────────────────────────────────────────────────────────────
+
+--- Match a single glob pattern against a relative file path.
+-- Supported wildcards:
+--   **  — matches zero or more path segments (e.g. v2/** matches v2/init.lua)
+--   *   — matches any sequence of non-'/' characters within one segment
+--   ?   — matches a single non-'/' character
+-- The pattern may not contain captures or character classes.
+-- Returns true if the pattern matches the full path.
+local function glob_match_single(pattern, path)
+	-- Build a Lua pattern from the glob pattern.
+	-- We convert segment by segment to handle ** correctly.
+	-- Split pattern on '/' boundaries, handling ** specially.
+
+	-- Escape a literal string segment for Lua pattern matching.
+	local function esc(s)
+		return (s:gsub("([%^%$%(%)%%%.%[%]%+%-%?])", "%%%1"))
+	end
+
+	-- Convert a single non-** glob segment to a Lua pattern fragment.
+	-- * → [^/]* , ? → [^/]
+	local function seg_to_pattern(seg)
+		local parts = {}
+		local i = 1
+		while i <= #seg do
+			local c = seg:sub(i, i)
+			if c == "*" then
+				parts[#parts + 1] = "[^/]*"
+			elseif c == "?" then
+				parts[#parts + 1] = "[^/]"
+			else
+				parts[#parts + 1] = esc(c)
+			end
+			i = i + 1
+		end
+		return table.concat(parts)
+	end
+
+	-- Split a string by '/' into a list of segments (preserving empty strings).
+	local function split_slash(s)
+		local segs = {}
+		for seg in (s .. "/"):gmatch("([^/]*)/") do
+			segs[#segs + 1] = seg
+		end
+		return segs
+	end
+
+	local pat_segs = split_slash(pattern)
+	local path_segs = split_slash(path)
+
+	-- Recursive match over segment lists.
+	-- pi = 1-based index into pat_segs; vi = 1-based index into path_segs.
+	local function match_segs(pi, vi)
+		-- Both exhausted → match.
+		if pi > #pat_segs and vi > #path_segs then return true end
+		-- Pattern exhausted but path still has segments → no match.
+		if pi > #pat_segs then return false end
+
+		local pseg = pat_segs[pi]
+
+		if pseg == "**" then
+			-- ** consumes zero or more path segments.
+			-- Try consuming 0 segments first, then 1, 2, ...
+			for skip = 0, #path_segs - vi + 1 do
+				if match_segs(pi + 1, vi + skip) then
+					return true
+				end
+			end
+			return false
+		else
+			-- Regular segment: must match exactly one path segment.
+			if vi > #path_segs then return false end
+			local vseg = path_segs[vi]
+			local lua_pat = "^" .. seg_to_pattern(pseg) .. "$"
+			if vseg:match(lua_pat) then
+				return match_segs(pi + 1, vi + 1)
+			end
+			return false
+		end
+	end
+
+	return match_segs(1, 1)
+end
+
+--- Match path against a glob pattern or a comma-separated union of glob patterns.
+-- Returns true if the path matches any member of the union.
+--
+-- Examples:
+--   M.glob_match("**", "v2/init.lua")          → true
+--   M.glob_match("v2/**", "v2/util/foo.lua")   → true
+--   M.glob_match("v2/**", "v1/init.lua")        → false
+--   M.glob_match("*.lua", "foo.lua")            → true
+--   M.glob_match("*.lua", "foo/bar.lua")        → false
+--   M.glob_match("v1/**,v2/**", "v1/init.lua")  → true
+function M.glob_match(pattern, path)
+	-- Fast path: ** matches everything.
+	if pattern == "**" then return true end
+	-- Split on commas and test each member.
+	for member in (pattern .. ","):gmatch("([^,]*),") do
+		member = member:match("^%s*(.-)%s*$")  -- trim whitespace
+		if member ~= "" then
+			if member == "**" or glob_match_single(member, path) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--- Compute the union of two include glob strings.
+-- If either is "**", the result is "**".
+-- Otherwise, join unique members with ",".
+local function glob_union(a, b)
+	if a == "**" or b == "**" then return "**" end
+	if a == b then return a end
+	-- Build a set of members from both.
+	local seen = {}
+	local parts = {}
+	local function add_members(s)
+		for member in (s .. ","):gmatch("([^,]*),") do
+			member = member:match("^%s*(.-)%s*$")
+			if member ~= "" and not seen[member] then
+				seen[member] = true
+				parts[#parts + 1] = member
+			end
+		end
+	end
+	add_members(a)
+	add_members(b)
+	return table.concat(parts, ",")
+end
+
 -- ── Hardlink / copy ───────────────────────────────────────────────────────────
 
 -- Copy src to dst using cp. Returns true or nil, err.
@@ -235,9 +367,13 @@ local function hardlink_file(src, dst)
 	return copy_file(src, dst)
 end
 
--- Walk src_dir recursively and hardlink every file into dst_dir.
+--- Walk src_dir recursively and hardlink matching files into dst_dir.
+-- include: optional glob string (default "**" = all files). Files whose
+-- relative path does not match the glob are skipped.
 -- Directories are created as needed.
-local function hardlink_tree(src_dir, dst_dir)
+local function hardlink_tree(src_dir, dst_dir, include)
+	include = include or "**"
+
 	-- Use find to enumerate all files
 	local out, err = popen_read(("find %q -type f"):format(src_dir))
 	if not out then return nil, err end
@@ -249,6 +385,12 @@ local function hardlink_tree(src_dir, dst_dir)
 		if src_path ~= "" then
 			-- Compute relative path
 			local rel = src_path:sub(#src_dir + 2)  -- strip "src_dir/"
+
+			-- Skip files that do not match the include glob.
+			if not M.glob_match(include, rel) then
+				goto next_file
+			end
+
 			local dst_path = dst_dir .. "/" .. rel
 
 			-- Ensure parent dir exists
@@ -262,6 +404,8 @@ local function hardlink_tree(src_dir, dst_dir)
 			if not link_ok then
 				return nil, ("failed to link %s → %s: %s"):format(src_path, dst_path, tostring(link_err))
 			end
+
+			::next_file::
 		end
 	end
 	return true
@@ -401,7 +545,7 @@ end
 -- ── Resolution ────────────────────────────────────────────────────────────────
 
 --- Resolve versions for a deps table against a lockfile and registry indices.
--- deps:           { [name] = constraint_str, ... }
+-- deps:           { [name] = constraint_str | {constraint=str, include=str}, ... }
 -- locked:         lock entries table from lock.load(), or {}
 -- registry_index: parsed /index.json table, or nil (backwards-compat single registry)
 -- opts:           { frozen=bool, registry_indices={{index=tbl, url=str},...} }
@@ -445,7 +589,9 @@ function M.resolve(deps, locked, registry_index, opts)
 
 	local resolved = {}
 
-	for name, constraint in pairs(deps) do
+	for name, dep_value in pairs(deps) do
+		-- dep_value is either a plain constraint string or { constraint=str, include=str }.
+		local constraint = manifest.dep_constraint(dep_value)
 		local locked_entry = locked and locked[name]
 
 		if locked_entry then
@@ -627,19 +773,24 @@ local function fetch_package(name, version, registry, opts)
 	return { version = version, url = tarball_url, tarball_hash = "sha256:" .. expected_hex }
 end
 
--- Link a package from the global cache into lib/<name>/ in the project.
-local function link_package(project_dir, name, version, opts)
+--- Link a package from the global cache into lib/<name>/ in the project.
+-- include: glob string controlling which files are linked (default "**").
+-- The global cache always holds the full unfiltered extraction; the include
+-- glob is applied here during the link step so the cache can be reused when
+-- a different consumer requests a different subset.
+local function link_package(project_dir, name, version, opts, include)
+	include = include or "**"
 	local cdir = cache_dir(name, version)
 	local lib_pkg_dir = project_dir .. "/lib/" .. name
 
-	-- Remove existing lib dir if present (stale version)
+	-- Remove existing lib dir if present (stale version or glob widening).
 	if path_exists(lib_pkg_dir) then
 		local rm_ok, rm_err = run_cmd(("rm -rf %q"):format(lib_pkg_dir))
 		if not rm_ok then return nil, rm_err end
 	end
 
-	log(opts, "linking %s@%s into lib/", name, version)
-	return hardlink_tree(cdir, lib_pkg_dir)
+	log(opts, "linking %s@%s into lib/ (include=%s)", name, version, include)
+	return hardlink_tree(cdir, lib_pkg_dir, include)
 end
 
 -- ── Main install entry point ──────────────────────────────────────────────────
@@ -734,7 +885,8 @@ function M.run(project_dir, opts)
 	-- 3. Fetch registry indices for any packages that aren't in the lockfile.
 	-- Cache index fetches so each registry URL is only fetched once.
 	local needs_registry = false
-	for name, constraint in pairs(deps) do
+	for name, dep_value in pairs(deps) do
+		local constraint = manifest.dep_constraint(dep_value)
 		local entry = locked[name]
 		if not entry then
 			needs_registry = true
@@ -771,14 +923,28 @@ function M.run(project_dir, opts)
 	end
 
 	-- 5. Resolve
+	-- Build constraint-only deps table for resolve() (strips include globs).
+	local constraint_deps = {}
+	for name, dep_value in pairs(deps) do
+		constraint_deps[name] = manifest.dep_constraint(dep_value)
+	end
+
 	local resolve_opts = {
 		frozen           = opts.frozen,
 		registry_indices = registry_indices,
 	}
-	local resolved, res_err = M.resolve(deps, locked, nil, resolve_opts)
+	local resolved, res_err = M.resolve(constraint_deps, locked, nil, resolve_opts)
 	if not resolved then
 		fail("resolution failed: " .. tostring(res_err))
 		return result
+	end
+
+	-- Build initial glob_requests: name → union of requested include globs.
+	-- Seeded from direct deps; extended during BFS as transitive deps declare their own requests.
+	local glob_requests = {}
+	for name, dep_value in pairs(deps) do
+		local inc = manifest.dep_include(dep_value)
+		glob_requests[name] = inc
 	end
 
 	-- Ensure global cache root exists
@@ -831,10 +997,39 @@ function M.run(project_dir, opts)
 		end
 		visited[name] = true
 
+		-- Compute the effective include glob for this package: union of all requests.
+		local effective_include = glob_requests[name] or "**"
+
 		-- lib/ fast path: skip if already correct
 		if M.dep_ok(project_dir, name, version) and not info._needs_fetch then
-			-- Check tree hash for local modifications (unless --force).
+			-- Check whether the include glob has widened since last install.
+			-- If so, re-link from cache with the wider glob (no re-download needed).
 			local locked_entry = new_lock[name]
+			local locked_include = (locked_entry and locked_entry.include) or "**"
+			local glob_widened = (effective_include ~= locked_include)
+
+			if glob_widened then
+				log(opts, "re-linking %s@%s: include widened from %q to %q", name, version, locked_include, effective_include)
+				local lnk_ok, lnk_err = link_package(project_dir, name, version, opts, effective_include)
+				if not lnk_ok then
+					fail(("failed to re-link %s@%s: %s"):format(name, version, tostring(lnk_err)))
+					goto continue
+				end
+				-- Update lockfile entry with new include and refreshed tree hash.
+				local lib_dir = project_dir .. "/lib/" .. name
+				local t_hash, _ = M.tree_hash(lib_dir)
+				new_lock[name] = {
+					version      = version,
+					url          = (locked_entry and locked_entry.url) or info.url or "",
+					tarball_hash = (locked_entry and locked_entry.tarball_hash) or info.tarball_hash or "",
+					tree_hash    = t_hash,
+					include      = effective_include,
+				}
+				result.installed[#result.installed + 1] = name
+				goto process_deps
+			end
+
+			-- Check tree hash for local modifications (unless --force).
 			if locked_entry and locked_entry.tree_hash and not opts.force then
 				local lib_dir = project_dir .. "/lib/" .. name
 				local actual_hash, hash_err = M.tree_hash(lib_dir)
@@ -847,7 +1042,7 @@ function M.run(project_dir, opts)
 							version      = version,
 							url          = info.url or "",
 							tarball_hash = info.tarball_hash or "",
-							include      = info.include or "**",
+							include      = effective_include,
 						}
 					end
 					goto continue
@@ -862,8 +1057,11 @@ function M.run(project_dir, opts)
 					version      = version,
 					url          = info.url or "",
 					tarball_hash = info.tarball_hash or "",
-					include      = info.include or "**",
+					include      = effective_include,
 				}
+			else
+				-- Update include in existing lockfile entry (may be same, but keep in sync).
+				new_lock[name].include = effective_include
 			end
 		else
 			-- Fetch from registry / cache
@@ -873,8 +1071,8 @@ function M.run(project_dir, opts)
 				fail(("failed to fetch %s@%s: %s"):format(name, version, tostring(fetch_err)))
 				goto continue
 			end
-			-- Link into lib/
-			local lnk_ok, lnk_err = link_package(project_dir, name, version, opts)
+			-- Link into lib/ with the effective include glob.
+			local lnk_ok, lnk_err = link_package(project_dir, name, version, opts, effective_include)
 			if not lnk_ok then
 				fail(("failed to link %s@%s: %s"):format(name, version, tostring(lnk_err)))
 				goto continue
@@ -890,19 +1088,27 @@ function M.run(project_dir, opts)
 				url          = fetch_info.url,
 				tarball_hash = fetch_info.tarball_hash,
 				tree_hash    = t_hash,
-				include      = info.include or "**",
+				include      = effective_include,
 			}
 		end
 
+		::process_deps::
 		-- Read the installed package's own pkg.lua to discover transitive deps.
 		local dep_manifest_path = project_dir .. "/lib/" .. name .. "/pkg.lua"
 		local dep_m = manifest.load(dep_manifest_path)
 		if dep_m and dep_m.deps and next(dep_m.deps) ~= nil then
+			-- Accumulate include globs from transitive deps (union merge).
+			for dep_name, dep_value in pairs(dep_m.deps) do
+				local dep_inc = manifest.dep_include(dep_value)
+				glob_requests[dep_name] = glob_union(glob_requests[dep_name] or "**", dep_inc)
+			end
+
 			-- Filter out already-visited deps before resolving.
 			-- For already-visited deps, verify the selected version still satisfies
 			-- this package's constraint — silent drops can hide version conflicts.
 			local new_deps = {}
-			for dep_name, constraint in pairs(dep_m.deps) do
+			for dep_name, dep_value in pairs(dep_m.deps) do
+				local constraint = manifest.dep_constraint(dep_value)
 				if not visited[dep_name] then
 					new_deps[dep_name] = constraint
 				else
@@ -951,7 +1157,8 @@ function M.run(project_dir, opts)
 	return result
 end
 
--- ── parse_index exposed for testing ──────────────────────────────────────────
+-- ── internals exposed for testing ────────────────────────────────────────────
 M._parse_index = parse_index
+M.glob_union   = glob_union   -- exposed for tests; also used in BFS glob accumulation
 
 return M

@@ -45,7 +45,7 @@ function manifest.validate(tbl)
 		return nil, "manifest field 'license' must be a string"
 	end
 
-	-- deps: optional, table of {string = string}
+	-- deps: optional, table of { name = constraint_str } or { name = { constraint=str, include=str } }
 	if tbl.deps ~= nil then
 		if type(tbl.deps) ~= "table" then
 			return nil, "manifest field 'deps' must be a table"
@@ -54,8 +54,18 @@ function manifest.validate(tbl)
 			if type(k) ~= "string" then
 				return nil, "manifest field 'deps' keys must be strings"
 			end
-			if type(v) ~= "string" then
-				return nil, "manifest field 'deps' values must be strings (constraint strings)"
+			if type(v) == "string" then
+				-- plain constraint string: ok
+			elseif type(v) == "table" then
+				-- { constraint = "^1.0", include = "v2/**" } form
+				if type(v.constraint) ~= "string" then
+					return nil, ("manifest field 'deps[%s].constraint' must be a string"):format(k)
+				end
+				if v.include ~= nil and type(v.include) ~= "string" then
+					return nil, ("manifest field 'deps[%s].include' must be a string"):format(k)
+				end
+			else
+				return nil, ("manifest field 'deps[%s]' must be a string or {constraint,include} table"):format(k)
 			end
 		end
 	end
@@ -88,6 +98,23 @@ function manifest.validate(tbl)
 	end
 
 	return true
+end
+
+--- Return the constraint string for a dep entry.
+-- dep_value may be a plain string or { constraint=str, include=str }.
+function manifest.dep_constraint(dep_value)
+	if type(dep_value) == "string" then
+		return dep_value
+	end
+	return dep_value.constraint
+end
+
+--- Return the include glob for a dep entry. Defaults to "**" when not specified.
+function manifest.dep_include(dep_value)
+	if type(dep_value) == "string" then
+		return "**"
+	end
+	return dep_value.include or "**"
 end
 
 -- Load a pkg.lua manifest from disk. Returns the table on success or nil, err.
@@ -153,7 +180,14 @@ function manifest.write(path, tbl)
 			else
 				key_str = "[" .. lua_string(k) .. "]"
 			end
-			lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(tbl.deps[k]) .. ","
+			local v = tbl.deps[k]
+			if type(v) == "string" then
+				lines[#lines + 1] = "    " .. key_str .. " = " .. lua_string(v) .. ","
+			else
+				-- { constraint = "^1.0", include = "v2/**" } form
+				local inc = v.include or "**"
+				lines[#lines + 1] = "    " .. key_str .. " = { constraint = " .. lua_string(v.constraint) .. ", include = " .. lua_string(inc) .. " },"
+			end
 		end
 	end
 
