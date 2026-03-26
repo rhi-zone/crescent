@@ -20,6 +20,7 @@ local semver  = require("lib.pkg.semver")
 local manifest = require("lib.pkg.manifest")
 local lock     = require("lib.pkg.lock")
 local config   = require("lib.pkg.config")
+local merge3   = require("lib.merge3")
 
 ffi.cdef[[
 	int link(const char *oldpath, const char *newpath);
@@ -1349,12 +1350,6 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 	local ours_dir   = project_dir .. "/lib/" .. name
 	local theirs_dir = cache_dir(name, new_version)
 
-	-- Verify diff3 is available.
-	local check_ok = os.execute("diff3 --version >/dev/null 2>&1")
-	if check_ok ~= 0 and check_ok ~= true then
-		return nil, "diff3 not found: required for --merge"
-	end
-
 	-- Base cache must exist (needed for three-way merge base).
 	if not path_exists(base_dir) then
 		return nil, ("cache for %s@%s not found — cannot merge (try cr update --overwrite)"):format(name, old_version)
@@ -1393,14 +1388,6 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 
 	local conflicts    = 0
 	local files_merged = 0
-	local temp_files   = {}
-
-	-- Cleanup helper: remove all temp files accumulated so far.
-	local function cleanup()
-		for _, p in ipairs(temp_files) do
-			pcall(os.remove, p)
-		end
-	end
 
 	local ok, pcall_err = pcall(function()
 		for _, rel in ipairs(sorted) do
@@ -1455,41 +1442,13 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 							error(("merge_package: failed to update unchanged file %s: %s"):format(rel, tostring(cp_err)))
 						end
 					else
-						-- Local modification: run diff3 -m ours base theirs.
-						local tmp_out = os.tmpname()
-						temp_files[#temp_files + 1] = tmp_out
-
-						local cmd = ("diff3 -m %q %q %q > %q 2>/dev/null"):format(
-							ours_path, base_path, theirs_path, tmp_out)
-						-- diff3 exits 0 = clean, 1 = conflicts, 2 = error.
-						local exit_code = os.execute(cmd)
-						-- exit_code is the numeric exit status on LuaJIT (via os.execute).
-						-- On LuaJIT, os.execute returns the raw exit code as an integer.
-						-- 0 = clean, 1 = conflicts, anything else = error.
-						local numeric_code
-						if type(exit_code) == "boolean" then
-							-- Lua 5.1 / LuaJIT: os.execute returns true/false for exit 0/non-0.
-							-- We need the actual code; use io.popen to capture it.
-							-- Re-run to get numeric exit status.
-							local _, _, raw_code = os.execute(cmd)
-							numeric_code = raw_code or (exit_code and 0 or 1)
-						else
-							numeric_code = exit_code
+						-- Local modification: three-way merge with pure Lua.
+						local theirs_c = read_file(theirs_path)
+						if not theirs_c then
+							error(("merge_package: cannot read theirs %s"):format(rel))
 						end
 
-						local merged_content = read_file(tmp_out)
-						os.remove(tmp_out)
-						-- Remove from temp_files list (already cleaned up).
-						for i = #temp_files, 1, -1 do
-							if temp_files[i] == tmp_out then
-								table.remove(temp_files, i)
-								break
-							end
-						end
-
-						if not merged_content then
-							error(("merge_package: diff3 produced no output for %s"):format(rel))
-						end
+						local merged_content, file_conflicts = merge3.merge3(base_c, ours_c, theirs_c)
 
 						-- Write merged result back.
 						local wf_ok, wf_err = write_file(ours_path, merged_content)
@@ -1497,11 +1456,6 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 							error(("merge_package: failed to write merged %s: %s"):format(rel, tostring(wf_err)))
 						end
 
-						-- Count conflict markers.
-						local file_conflicts = 0
-						for _ in merged_content:gmatch("<<<<<<<") do
-							file_conflicts = file_conflicts + 1
-						end
 						conflicts = conflicts + file_conflicts
 						files_merged = files_merged + 1
 					end
@@ -1512,36 +1466,17 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 				-- (ours intentionally removed it; honour that.)
 
 			elseif in_theirs and not in_base and in_ours then
-				-- New file in theirs that also exists in ours (coincidental add): diff3.
+				-- New file in theirs that also exists in ours (coincidental add).
+				-- Merge with an empty synthetic base.
 				if is_binary_file(ours_path) or is_binary_file(theirs_path) then
 					io.stderr:write(("warning: merge %s: %s appears to be binary — skipping merge, leaving ours in place\n"):format(name, rel))
 				else
-					-- Create a synthetic empty base for the diff3.
-					local tmp_base = os.tmpname()
-					temp_files[#temp_files + 1] = tmp_base
-					write_file(tmp_base, "")
-
-					local tmp_out = os.tmpname()
-					temp_files[#temp_files + 1] = tmp_out
-
-					local cmd = ("diff3 -m %q %q %q > %q 2>/dev/null"):format(
-						ours_path, tmp_base, theirs_path, tmp_out)
-					os.execute(cmd)
-
-					local merged_content = read_file(tmp_out)
-					os.remove(tmp_base)
-					os.remove(tmp_out)
-					for i = #temp_files, 1, -1 do
-						if temp_files[i] == tmp_base or temp_files[i] == tmp_out then
-							table.remove(temp_files, i)
-						end
-					end
-
-					if merged_content then
+					local ours_c   = read_file(ours_path)
+					local theirs_c = read_file(theirs_path)
+					if ours_c and theirs_c then
+						local merged_content, file_conflicts = merge3.merge3("", ours_c, theirs_c)
 						write_file(ours_path, merged_content)
-						for _ in merged_content:gmatch("<<<<<<<") do
-							conflicts = conflicts + 1
-						end
+						conflicts    = conflicts    + file_conflicts
 						files_merged = files_merged + 1
 					end
 				end
@@ -1551,11 +1486,9 @@ function M.merge_package(project_dir, name, old_version, new_version, include_gl
 	end)
 
 	if not ok then
-		cleanup()
 		return nil, tostring(pcall_err)
 	end
 
-	cleanup()
 	return { ok = (conflicts == 0), conflicts = conflicts, files_merged = files_merged }
 end
 
