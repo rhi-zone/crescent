@@ -46,10 +46,20 @@
   module cache, LuaJIT JIT warm-up tuning. Target: same program runs comparably fast
   in bun and luajit; if not, the design needs revisiting.
 
-- [x] **Package manager** (`lib/pkg/`) — core implementation done: semver, manifest, lockfile,
-  install (resolve/fetch/hardlink/lockfile-write), config, CLI (install/add/remove/update/info/publish).
-  438 assertions. Open items: transitive dep resolution, parallel fetch (--jobs), `cr add` registry
-  fetch against a live registry. See design doc for full detail.
+- [x] **Package manager** (`lib/pkg/`) — core implementation done. See design docs for full detail.
+  - [x] semver, manifest, lockfile, install (resolve/fetch/hardlink), config, CLI (install/add/remove/update/info/publish/eject/diff)
+  - [x] Transitive dep resolution (BFS, cycle detection, diamond dedup)
+  - [x] Version conflict detection (two-pass MVS resolver, constraint collection)
+  - [x] `dep/` → `lib/` migration; lockfile v2 (include, tarball_hash, tree_hash)
+  - [x] Include glob filtering + union merge across dependents
+  - [x] Tree hash verification + local modification detection
+  - [x] `cr diff`, `cr eject`, `cr update --merge`
+  - [x] Pure Lua three-way merge (`lib/merge3/`) — Myers diff, no external deps
+  - [ ] **Phantom dep linting** — `cr check`/`cr publish` scans require paths vs own `pkg.lua`
+  - [ ] **Parallel fetch** (`--jobs`) — fork-based, I/O-bound, significant on large dep trees
+  - [ ] **Workspaces** — single `crescent.lock` covering all packages in a monorepo; MVS resolver takes union of all workspace `pkg.lua` roots
+  - [ ] **Lockfile format freeze** — add `lockfile_version` field, stabilise before v1 registry use
+  - [ ] **`cr add` / `cr publish`** — blocked on live registry infrastructure
 
 - [ ] **Typechecker** — large ongoing backlog; dedicated sessions welcome.
   Near-term candidates: access control design (see below), module-level LSP cache,
@@ -61,8 +71,10 @@
 - [ ] **Stdlib rewrites** — vendored packages currently in `lib/` violate the ownership
   rule (docs/stdlib-design.md). Each needs a fresh crescent-native rewrite before the
   registry exists and the vendored copy can be removed:
-  - [ ] `lib/format/json/` — rewrite lunajson as crescent-native JSON (pure Lua tier +
-    FFI tier for throughput). Current nil,err wrapper buys time.
+  - [ ] `lib/format/json/` — rewrite lunajson as crescent-native JSON. Three tiers:
+    pure Lua (portable, correctness reference) → FFI scalar (LuaJIT JIT-compiled, no external dep)
+    → simdjson via FFI (SIMD-accelerated, registry-scale throughput). Parity tests + benchmarks
+    required across all tiers. Current nil,err wrapper buys time.
   - [ ] `lib/format/cbor/` — rewrite vendored CBOR. Low priority until cbor sees more use.
   - [ ] `lib/encode/base64/` — rewrite lbase64. Small scope, good first rewrite task.
   - [ ] `lib/hash/sha1/` — rewrite mpeterv/sha1. Already heavily patched; sha256 shows
