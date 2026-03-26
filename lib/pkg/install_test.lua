@@ -1635,3 +1635,93 @@ T.describe("install.merge_package", function()
 	end)
 
 end)
+
+-- ── install.cpu_count ─────────────────────────────────────────────────────────
+
+T.describe("install.cpu_count", function()
+
+	T.it("returns a positive integer", function()
+		local n = install.cpu_count()
+		T.ok(type(n) == "number", "cpu_count returns a number")
+		T.ok(n >= 1, "cpu_count returns at least 1, got " .. tostring(n))
+		T.ok(math.floor(n) == n, "cpu_count returns an integer")
+	end)
+
+end)
+
+-- ── install cli: --jobs default ───────────────────────────────────────────────
+
+local cli = require("lib.pkg.cli")
+
+T.describe("cli.parse_args --jobs", function()
+
+	T.it("--jobs=0 parses as 0 (auto)", function()
+		local p = cli.parse_args({ "install", "--jobs=0" })
+		T.eq(p.jobs, 0)
+	end)
+
+	T.it("default jobs is 0 (auto)", function()
+		local p = cli.parse_args({ "install" })
+		T.eq(p.jobs, 0)
+	end)
+
+	T.it("--jobs=1 parses as 1 (sequential)", function()
+		local p = cli.parse_args({ "install", "--jobs=1" })
+		T.eq(p.jobs, 1)
+	end)
+
+	T.it("--jobs=4 parses as 4", function()
+		local p = cli.parse_args({ "install", "--jobs=4" })
+		T.eq(p.jobs, 4)
+	end)
+
+end)
+
+-- ── install.run: jobs=1 sequential behaviour preserved ───────────────────────
+
+T.describe("install.run jobs=1 sequential", function()
+
+	T.it("jobs=1 with pre-installed packages skips normally", function()
+		-- Verify jobs=1 (sequential) path produces identical behaviour to existing tests.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { pkga = "^1.0.0" } })
+		install_dep(tmp, { name = "pkga", version = "1.0.0" })
+		write_lock(tmp, { pkga = lock_entry("1.0.0") })
+
+		local result = install.run(tmp, { frozen = true, jobs = 1 })
+
+		T.ok(result.ok, "sequential jobs=1: ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		T.eq(#result.skipped, 1)
+		T.eq(result.skipped[1], "pkga")
+		T.eq(#result.installed, 0)
+
+		rm_tmpdir(tmp)
+	end)
+
+end)
+
+-- ── install.run: jobs=0 auto-detect ──────────────────────────────────────────
+
+T.describe("install.run jobs=0 auto-detect", function()
+
+	T.it("jobs=0 resolves to cpu_count and still skips pre-installed packages", function()
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0", deps = { pkga = "^1.0.0" } })
+		install_dep(tmp, { name = "pkga", version = "1.0.0" })
+		write_lock(tmp, { pkga = lock_entry("1.0.0") })
+
+		-- jobs=0 → auto; should work identically to jobs=1 for pre-installed deps.
+		local result = install.run(tmp, { frozen = true, jobs = 0 })
+
+		T.ok(result.ok, "auto jobs=0: ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		T.eq(#result.skipped, 1)
+		T.eq(result.skipped[1], "pkga")
+
+		rm_tmpdir(tmp)
+	end)
+
+end)

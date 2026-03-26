@@ -19,7 +19,7 @@ end
 -- Global flags:
 --   --verbose                       enable verbose output
 --   --registry=URL                  override default registry (https://pkg.crescent.run)
---   --jobs=N                        parallelism (default: 1)
+--   --jobs=N                        parallelism (default: CPU count; 1 = sequential)
 --   --force                         overwrite local modifications (install only)
 --   --strict                        exit 1 on any phantom dep (check command)
 --   --skip-check                    skip phantom dep lint (publish command)
@@ -97,7 +97,7 @@ function M.parse_args(argv)
 		strict     = false,
 		skip_check = false,
 		registry   = DEFAULT_REGISTRY,
-		jobs       = 1,
+		jobs       = 0,
 	}
 
 	local i = 0
@@ -130,7 +130,7 @@ function M.parse_args(argv)
 			result.registry = v:sub(12)
 		elseif v:sub(1, 7) == "--jobs=" then
 			local n = tonumber(v:sub(8))
-			if n and n >= 1 then
+			if n and n >= 0 then
 				result.jobs = math.floor(n)
 			end
 		elseif v:sub(1, 2) == "--" then
@@ -907,7 +907,7 @@ commands:
 global options:
   --verbose                     enable verbose logging
   --registry=URL                registry base URL (default: https://pkg.crescent.run)
-  --jobs=N                      parallel jobs (default: 1)
+  --jobs=N                      parallel jobs (default: CPU count; 1 = sequential)
   --force                       overwrite local modifications to lib/ (install only)
   --merge                       three-way merge local edits with new version (update only)
   --overwrite                   discard local modifications before update (update only)

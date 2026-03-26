@@ -13,7 +13,7 @@ T.describe("cli.parse_args", function()
 		T.eq(r.verbose, false)
 		T.eq(r.frozen, false)
 		T.eq(r.registry, "https://pkg.crescent.run")
-		T.eq(r.jobs, 1)
+		T.eq(r.jobs, 0)
 	end)
 
 	T.it("command with positional arg", function()
@@ -45,7 +45,7 @@ T.describe("cli.parse_args", function()
 
 	T.it("--jobs=N ignores non-integer", function()
 		local r = cli.parse_args({ "install", "--jobs=abc" })
-		T.eq(r.jobs, 1)  -- unchanged
+		T.eq(r.jobs, 0)  -- unchanged (default is 0 = auto)
 	end)
 
 	T.it("multiple flags before command args", function()

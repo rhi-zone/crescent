@@ -28,6 +28,34 @@ ffi.cdef[[
 	int symlink(const char *target, const char *linkpath);
 ]]
 
+-- ── Fork/pipe FFI (for parallel fetch) ───────────────────────────────────────
+
+local fork_available = false
+pcall(function()
+	ffi.cdef[[
+		int fork(void);
+		int waitpid(int pid, int *status, int options);
+		int pipe(int fds[2]);
+		ssize_t read(int fd, void *buf, size_t count);
+		ssize_t write(int fd, const void *buf, size_t count);
+		int close(int fd);
+		long sysconf(int name);
+	]]
+end)
+-- cdef errors if already declared (re-require); probe fork symbol directly.
+pcall(function()
+	fork_available = (ffi.C.fork ~= nil)
+end)
+
+--- Return the number of available CPU cores, or 1 on error / non-Linux.
+-- Uses sysconf(_SC_NPROCESSORS_ONLN) = 84 on Linux.
+local function cpu_count()
+	if not fork_available then return 1 end
+	local ok, n = pcall(function() return ffi.C.sysconf(84) end)
+	if ok and n and n > 0 then return tonumber(n) end
+	return 1
+end
+
 local M = {}
 
 -- ── helpers ───────────────────────────────────────────────────────────────────
@@ -931,6 +959,159 @@ local function link_package(project_dir, name, version, opts, include)
 	return hardlink_tree(cdir, lib_pkg_dir, include)
 end
 
+-- ── Parallel fetch ────────────────────────────────────────────────────────────
+
+-- Run fetch_package for each item in `work` in parallel using fork+pipe.
+-- work: array of { name=str, version=str, registry=str }
+-- jobs: max concurrent workers
+-- opts: passed through to fetch_package (for logging)
+--
+-- Returns: { [name] = fetch_info } on success, { [name] = {err=str} } on failure.
+-- Falls back to sequential execution silently if fork is unavailable.
+local function parallel_fetch(work, jobs, opts)
+	local results = {}
+
+	if #work == 0 then return results end
+
+	-- Sequential fallback when fork is unavailable or jobs==1.
+	if not fork_available or jobs <= 1 then
+		for _, item in ipairs(work) do
+			local info, err = fetch_package(item.name, item.version, item.registry, opts)
+			if info then
+				results[item.name] = info
+			else
+				results[item.name] = { err = tostring(err) }
+			end
+		end
+		return results
+	end
+
+	-- Fork-based parallel fetch.
+	-- For each package: fork a child, child fetches and writes one line to a pipe,
+	-- parent collects up to `jobs` children before waiting for one to finish.
+
+	local pending = {}  -- { pid=int, name=str, read_fd=int }
+	local wi = 1        -- index into work
+
+	local status_buf = ffi.new("int[1]")
+	local pipe_fds   = ffi.new("int[2]")
+
+	local function reap_one()
+		-- Wait for any one child to finish, read its result line, return it.
+		local pid = ffi.C.waitpid(-1, status_buf, 0)
+		if pid <= 0 then return end
+
+		-- Find the pending entry for this pid.
+		local entry = nil
+		local entry_idx = nil
+		for i, p in ipairs(pending) do
+			if p.pid == pid then
+				entry = p
+				entry_idx = i
+				break
+			end
+		end
+		if not entry then return end
+
+		-- Remove from pending list.
+		table.remove(pending, entry_idx)
+
+		-- Read result line from pipe.
+		local buf = ffi.new("uint8_t[4096]")
+		local n = ffi.C.read(entry.read_fd, buf, 4095)
+		ffi.C.close(entry.read_fd)
+
+		if n <= 0 then
+			results[entry.name] = { err = "child produced no output" }
+			return
+		end
+
+		local line = ffi.string(buf, n):match("^([^\n]*)")
+
+		if line:sub(1, 3) == "ok " then
+			-- "ok <name> <version> <url> <tarball_hash>"
+			local ver, url, tarball_hash = line:sub(4 + #entry.name + 1):match("^(%S+) (%S+) (%S+)$")
+			if ver then
+				results[entry.name] = {
+					version      = ver,
+					url          = url,
+					tarball_hash = tarball_hash,
+				}
+			else
+				results[entry.name] = { err = "child response parse failed: " .. line }
+			end
+		elseif line:sub(1, 4) == "err " then
+			local msg = line:sub(5 + #entry.name + 1)
+			results[entry.name] = { err = msg }
+		else
+			results[entry.name] = { err = "unexpected child output: " .. line:sub(1, 80) }
+		end
+	end
+
+	while wi <= #work or #pending > 0 do
+		-- Fork new children while we have capacity and work remaining.
+		while wi <= #work and #pending < jobs do
+			local item = work[wi]
+			wi = wi + 1
+
+			local rc_pipe = ffi.C.pipe(pipe_fds)
+			if rc_pipe ~= 0 then
+				-- pipe() failed — fall back to sequential for this item.
+				local info, err = fetch_package(item.name, item.version, item.registry, opts)
+				if info then
+					results[item.name] = info
+				else
+					results[item.name] = { err = tostring(err) }
+				end
+			else
+				local read_fd  = pipe_fds[0]
+				local write_fd = pipe_fds[1]
+
+				local pid = ffi.C.fork()
+				if pid < 0 then
+					-- fork() failed — close pipe and run sequentially.
+					ffi.C.close(read_fd)
+					ffi.C.close(write_fd)
+					local info, err = fetch_package(item.name, item.version, item.registry, opts)
+					if info then
+						results[item.name] = info
+					else
+						results[item.name] = { err = tostring(err) }
+					end
+				elseif pid == 0 then
+					-- Child: close read end, run fetch, write result, exit.
+					ffi.C.close(read_fd)
+
+					local info, err = fetch_package(item.name, item.version, item.registry, opts)
+					local line
+					if info then
+						line = ("ok %s %s %s %s\n"):format(
+							item.name, info.version, info.url or "", info.tarball_hash or "")
+					else
+						local msg = tostring(err):gsub("\n", " ")
+						line = ("err %s %s\n"):format(item.name, msg)
+					end
+
+					ffi.C.write(write_fd, line, #line)
+					ffi.C.close(write_fd)
+					os.exit(0)
+				else
+					-- Parent: close write end, record pending child.
+					ffi.C.close(write_fd)
+					pending[#pending + 1] = { pid = pid, name = item.name, read_fd = read_fd }
+				end
+			end
+		end
+
+		-- If we have no capacity left (or no more work), wait for a child to finish.
+		if #pending > 0 and (#pending >= jobs or wi > #work) then
+			reap_one()
+		end
+	end
+
+	return results
+end
+
 -- ── Main install entry point ──────────────────────────────────────────────────
 
 -- Deduplicate a list of registry URLs, preserving order (first occurrence wins).
@@ -952,7 +1133,7 @@ end
 --   force      = false   overwrite lib/<name>/ even if tree hash differs (local modifications)
 --   registry   = "https://pkg.crescent.run"  (single registry, backwards-compat)
 --   registries = { url, ... }                (list; merged with user config + pkg registries)
---   jobs       = 1       (v1: sequential only — parallel is a later phase)
+--   jobs       = 0       parallelism: 0 = cpu_count(), 1 = sequential, N = N workers
 --   verbose    = false
 --
 -- Effective registry list (highest priority first):
@@ -961,6 +1142,10 @@ end
 -- Returns: { ok=bool, errors={string,...}, installed={string,...}, skipped={string,...} }
 function M.run(project_dir, opts)
 	opts = opts or {}
+	-- Resolve jobs=0 (auto) to cpu_count() here so all downstream code sees a real number.
+	local jobs = opts.jobs or 1
+	if jobs == 0 then jobs = cpu_count() end
+
 	local result = { ok = true, errors = {}, installed = {}, skipped = {} }
 
 	local function fail(msg)
@@ -1122,6 +1307,28 @@ function M.run(project_dir, opts)
 		new_lock[k] = v
 	end
 
+	-- 6a. Parallel pre-fetch: collect all packages that need fetching and run them
+	-- concurrently (up to `jobs` workers). The link step and BFS remain sequential.
+	-- Only packages with _needs_fetch=true are candidates; packages already in cache
+	-- or already installed are handled inline in the BFS below (no fork needed).
+	local fetch_work = {}
+	local sorted_resolved = {}
+	for name in pairs(resolved) do sorted_resolved[#sorted_resolved+1] = name end
+	table.sort(sorted_resolved)
+	for _, name in ipairs(sorted_resolved) do
+		local info = resolved[name]
+		if info._needs_fetch then
+			fetch_work[#fetch_work+1] = {
+				name     = name,
+				version  = info.version,
+				registry = info._winning_registry or primary_registry,
+			}
+		end
+	end
+
+	-- Run fetches in parallel (falls back to sequential when fork unavailable or jobs==1).
+	local prefetch_results = parallel_fetch(fetch_work, jobs, opts)
+
 	-- visited: tracks packages that have been processed (fetched+linked or skipped)
 	-- in this run, to avoid re-installing or infinite loops from circular deps.
 	local visited = {}
@@ -1217,9 +1424,22 @@ function M.run(project_dir, opts)
 				new_lock[name].include = effective_include
 			end
 		else
-			-- Fetch from registry / cache
-			local fetch_registry = info._winning_registry or primary_registry
-			local fetch_info, fetch_err = fetch_package(name, version, fetch_registry, opts)
+			-- Fetch from registry / cache.
+			-- If a parallel pre-fetch ran for this package, use its cached result.
+			-- Otherwise (e.g. a transitive dep discovered during BFS that wasn't
+			-- in the initial resolved set), fall back to an inline sequential fetch.
+			local fetch_info, fetch_err
+			local pre = prefetch_results[name]
+			if pre then
+				if pre.err then
+					fetch_err = pre.err
+				else
+					fetch_info = pre
+				end
+			else
+				local fetch_registry = info._winning_registry or primary_registry
+				fetch_info, fetch_err = fetch_package(name, version, fetch_registry, opts)
+			end
 			if not fetch_info then
 				fail(("failed to fetch %s@%s: %s"):format(name, version, tostring(fetch_err)))
 				goto continue
@@ -1495,6 +1715,7 @@ end
 -- ── internals exposed for testing ────────────────────────────────────────────
 M._parse_index = parse_index
 M.glob_union   = glob_union   -- exposed for tests; also used in BFS glob accumulation
+M.cpu_count    = cpu_count    -- exposed for testability
 -- M.collect_constraints is already a public method (used by tests)
 
 return M
