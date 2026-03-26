@@ -550,10 +550,18 @@ end
 -- ── Resolution ────────────────────────────────────────────────────────────────
 
 --- Resolve versions for a deps table against a lockfile and registry indices.
--- deps:           { [name] = constraint_str | {constraint=str, include=str}, ... }
+--
+-- deps: { [name] = constraint_str
+--                | {constraint=str, include=str}         (manifest form)
+--                | {{constraint=str, from=str}, ...}     (MVS multi-constraint form)
+--       }
 -- locked:         lock entries table from lock.load(), or {}
 -- registry_index: parsed /index.json table, or nil (backwards-compat single registry)
 -- opts:           { frozen=bool, registry_indices={{index=tbl, url=str},...} }
+--
+-- Multi-constraint form: deps[name] is an array of {constraint=str, from=str} tables.
+-- All constraints must be satisfied simultaneously; the highest satisfying version wins.
+-- When no version satisfies all constraints, the error names every imposing package.
 --
 -- opts.registry_indices overrides registry_index when present.
 -- Each entry is tried in order; the first that satisfies the constraint wins.
@@ -573,50 +581,103 @@ function M.resolve(deps, locked, registry_index, opts)
 		end
 	end
 
-	-- Helper: pick the best satisfying version from a single registry index entry.
-	-- Returns best_version_str, or nil if not found.
-	local function best_from_index(idx_entry, name, constraint)
-		local pkg_info = idx_entry.index[name]
-		if not pkg_info then return nil end
+	-- Helper: pick the best version satisfying ALL constraints from a single registry index.
+	-- constraints: array of {constraint=str, from=str}
+	-- Returns best_version_str, winning_registry_url, or nil if not found.
+	local function best_satisfying_all(name, constraints)
+		-- Collect all versions across registries (union, preserving first-registry priority).
+		-- We need candidates that satisfy ALL constraints.
 		local best = nil
 		local best_parsed = nil
-		for _, ver_str in ipairs(pkg_info.versions or {}) do
-			local ver, _ = semver.parse(ver_str)
-			if ver and semver.satisfies(ver, constraint) then
-				if best_parsed == nil or semver.cmp(ver, best_parsed) > 0 then
-					best = ver_str
-					best_parsed = ver
+		local winning_registry_url = nil
+
+		-- Try each registry in priority order.
+		for _, idx_entry in ipairs(indices) do
+			local pkg_info = idx_entry.index[name]
+			if pkg_info then
+				for _, ver_str in ipairs(pkg_info.versions or {}) do
+					local ver, _ = semver.parse(ver_str)
+					if ver then
+						-- Check ALL constraints.
+						local ok = true
+						for _, c in ipairs(constraints) do
+							if not semver.satisfies(ver, c.constraint) then
+								ok = false
+								break
+							end
+						end
+						if ok then
+							if best_parsed == nil or semver.cmp(ver, best_parsed) > 0 then
+								best = ver_str
+								best_parsed = ver
+								winning_registry_url = idx_entry.url
+							end
+						end
+					end
 				end
 			end
 		end
-		return best
+
+		return best, winning_registry_url
+	end
+
+	-- Helper: collect all available versions across all registries for error messages.
+	local function all_available_versions(name)
+		local seen = {}
+		local vers = {}
+		for _, idx_entry in ipairs(indices) do
+			local pkg_info = idx_entry.index[name]
+			if pkg_info then
+				for _, v in ipairs(pkg_info.versions or {}) do
+					if not seen[v] then
+						seen[v] = true
+						vers[#vers + 1] = v
+					end
+				end
+			end
+		end
+		return vers
 	end
 
 	local resolved = {}
 
 	for name, dep_value in pairs(deps) do
-		-- dep_value is either a plain constraint string or { constraint=str, include=str }.
-		local constraint = manifest.dep_constraint(dep_value)
+		-- Normalise dep_value into a constraints array: [{constraint=str, from=str}, ...]
+		-- Accepted forms:
+		--   ">=1.0"                           → single string
+		--   {constraint=">=1.0", include="*"} → manifest form (dep_constraint extracts str)
+		--   {{constraint=">=1.0", from="A"}, {constraint=">=2.0", from="B"}}  → MVS form
+		local constraints   -- array of {constraint=str, from=str}
+
+		if type(dep_value) == "table" and #dep_value > 0 and type(dep_value[1]) == "table" then
+			-- MVS multi-constraint form: array of {constraint, from} tables.
+			constraints = dep_value
+		else
+			-- Legacy single-constraint form: string or {constraint=str, include=str}.
+			local c_str = manifest.dep_constraint(dep_value)
+			constraints = { { constraint = c_str, from = "direct" } }
+		end
+
 		local locked_entry = locked and locked[name]
 
 		if locked_entry then
-			-- Fast path: locked version satisfies the constraint
+			-- Fast path: check if the locked version satisfies ALL constraints.
 			local locked_ver, parse_err = semver.parse(locked_entry.version)
 			if not locked_ver then
 				return nil, ("locked version for %q is invalid: %s"):format(name, tostring(parse_err))
 			end
-			if not semver.satisfies(locked_ver, constraint) then
-				if opts.frozen then
-					return nil, ("frozen: locked version %s of %q does not satisfy constraint %q"):format(
-						locked_entry.version, name, constraint)
+
+			local all_ok = true
+			local failing_constraint = nil
+			for _, c in ipairs(constraints) do
+				if not semver.satisfies(locked_ver, c.constraint) then
+					all_ok = false
+					failing_constraint = c
+					break
 				end
-				-- Need to re-resolve against registry
-				if #indices == 0 then
-					return nil, ("package %q: locked version %s does not satisfy %q and no registry index available"):format(
-						name, locked_entry.version, constraint)
-				end
-				locked_entry = nil  -- fall through to registry resolution below
-			else
+			end
+
+			if all_ok then
 				resolved[name] = {
 					version      = locked_entry.version,
 					url          = locked_entry.url,
@@ -624,11 +685,18 @@ function M.resolve(deps, locked, registry_index, opts)
 					tree_hash    = locked_entry.tree_hash,
 					include      = locked_entry.include,
 				}
+			else
+				if opts.frozen then
+					return nil, ("version conflict (frozen): locked version %s of %q does not satisfy constraint %q (required by %s)"):format(
+						locked_entry.version, name, failing_constraint.constraint, failing_constraint.from)
+				end
+				-- Fall through to registry resolution below.
+				locked_entry = nil
 			end
 		end
 
 		if not resolved[name] then
-			-- Registry resolution
+			-- Registry resolution: find highest version satisfying all constraints.
 			if opts.frozen then
 				return nil, ("frozen: package %q not in lockfile"):format(name)
 			end
@@ -636,34 +704,29 @@ function M.resolve(deps, locked, registry_index, opts)
 				return nil, ("package %q: not in lockfile and no registry index available"):format(name)
 			end
 
-			-- Scan registries in priority order; first satisfying registry wins.
-			local best = nil
-			local winning_registry_url = nil
-			for _, idx_entry in ipairs(indices) do
-				local ver = best_from_index(idx_entry, name, constraint)
-				if ver then
-					best = ver
-					winning_registry_url = idx_entry.url
-					break
-				end
-			end
+			local best, winning_registry_url = best_satisfying_all(name, constraints)
 
 			if not best then
-				-- Collect all available versions across all registries for the error message.
-				local all_versions = {}
-				for _, idx_entry in ipairs(indices) do
-					local pkg_info = idx_entry.index[name]
-					if pkg_info then
-						for _, v in ipairs(pkg_info.versions or {}) do
-							all_versions[#all_versions + 1] = v
-						end
+				-- Build a detailed conflict error message naming every imposing package.
+				local all_vers = all_available_versions(name)
+				local parts = {}
+				for _, c in ipairs(constraints) do
+					parts[#parts + 1] = ("  %s requires %s %s"):format(c.from, name, c.constraint)
+				end
+				local available_str = #all_vers > 0
+					and ("available versions: %s"):format(table.concat(all_vers, ", "))
+					or ("package %q not found in any registry"):format(name)
+				if #constraints > 1 then
+					return nil, ("version conflict for %s:\n%s\n  %s\n  no version satisfies all constraints"):format(
+						name, table.concat(parts, "\n"), available_str)
+				else
+					-- Single constraint, no version found.
+					if #all_vers == 0 then
+						return nil, ("package %q not found in any registry"):format(name)
 					end
+					return nil, ("no version of %q satisfies constraint %q (available: %s)"):format(
+						name, constraints[1].constraint, table.concat(all_vers, ", "))
 				end
-				if #all_versions == 0 then
-					return nil, ("package %q not found in any registry"):format(name)
-				end
-				return nil, ("no version of %q satisfies constraint %q (available: %s)"):format(
-					name, constraint, table.concat(all_versions, ", "))
 			end
 
 			-- Build URL and checksum URL (these will be fetched for real during install)
@@ -679,6 +742,75 @@ function M.resolve(deps, locked, registry_index, opts)
 	end
 
 	return resolved
+end
+
+--- Pass 1: collect all version constraints across the full dependency graph.
+--
+-- Starting from direct_deps (from the project's pkg.lua), walks transitive
+-- dependencies using the lockfile and installed lib/<name>/pkg.lua files.
+-- Does NOT fetch from the registry.
+--
+-- direct_deps: { [name] = dep_value, ... }  — raw deps table from pkg.lua
+-- locked:      lock entries table, or {}
+-- project_dir: project root path (used to read lib/<name>/pkg.lua)
+-- from_label:  string label for the project (used in constraint attribution, e.g. "myproject")
+--
+-- Returns: { [name] = [{constraint=str, from=str}, ...] }
+-- Each array entry records one constraint on that package, with `from` naming the requirer.
+function M.collect_constraints(direct_deps, locked, project_dir, from_label)
+	from_label = from_label or "project"
+	local all_constraints = {}   -- name → [{constraint, from}, ...]
+	local visited = {}           -- package names already processed
+
+	local function add_constraint(name, constraint, from)
+		if not all_constraints[name] then
+			all_constraints[name] = {}
+		end
+		all_constraints[name][#all_constraints[name] + 1] = { constraint = constraint, from = from }
+	end
+
+	-- Seed with direct deps.
+	local queue = {}  -- [{name, from_label}] — packages whose transitive deps we still need to walk
+	for dep_name, dep_value in pairs(direct_deps) do
+		local c = manifest.dep_constraint(dep_value)
+		add_constraint(dep_name, c, from_label)
+		queue[#queue + 1] = dep_name
+	end
+
+	-- BFS: for each queued package, read its own deps from installed pkg.lua or lockfile.
+	local qi = 1
+	while qi <= #queue do
+		local name = queue[qi]
+		qi = qi + 1
+
+		if visited[name] then goto continue_collect end
+		visited[name] = true
+
+		-- Try to read this package's own pkg.lua (from lib/<name>/pkg.lua if installed).
+		local dep_manifest = nil
+		if project_dir then
+			local dep_m_path = project_dir .. "/lib/" .. name .. "/pkg.lua"
+			dep_manifest = manifest.load(dep_m_path)
+		end
+
+		if dep_manifest and dep_manifest.deps and next(dep_manifest.deps) ~= nil then
+			-- Determine the requirer label (name@version if we know the version).
+			local entry = locked and locked[name]
+			local requirer = entry and (name .. "@" .. entry.version) or name
+
+			for dep_name, dep_value in pairs(dep_manifest.deps) do
+				local c = manifest.dep_constraint(dep_value)
+				add_constraint(dep_name, c, requirer)
+				if not visited[dep_name] then
+					queue[#queue + 1] = dep_name
+				end
+			end
+		end
+
+		::continue_collect::
+	end
+
+	return all_constraints
 end
 
 -- ── lib/ fast-path check ──────────────────────────────────────────────────────
@@ -887,27 +1019,47 @@ function M.run(project_dir, opts)
 		locked = l
 	end
 
-	-- 3. Fetch registry indices for any packages that aren't in the lockfile.
-	-- Cache index fetches so each registry URL is only fetched once.
+	-- 3. Two-pass MVS resolution.
+	--
+	-- Pass 1 (constraint collection): walk the full dependency graph using the
+	-- lockfile and installed lib/<name>/pkg.lua files to collect EVERY version
+	-- constraint on every package.  No registry fetch happens here.
+	--
+	-- Pass 2 (resolution): resolve all packages simultaneously, satisfying all
+	-- collected constraints at once.  This avoids spurious conflicts that arise
+	-- when a direct dep is resolved first against a weak constraint, and a
+	-- stricter transitive constraint is discovered only later.
+
+	-- Pass 1: collect all constraints.
+	local all_constraints = M.collect_constraints(deps, locked, project_dir, m.name or "project")
+
+	-- Determine whether any package needs registry resolution.
+	-- A package needs the registry if it is absent from the lockfile OR if the
+	-- locked version does not satisfy all collected constraints.
 	local needs_registry = false
-	for name, dep_value in pairs(deps) do
-		local constraint = manifest.dep_constraint(dep_value)
-		local entry = locked[name]
-		if not entry then
-			needs_registry = true
-			break
-		end
-		-- Also check if locked version satisfies constraint; if not, need registry
-		local ver, _ = semver.parse(entry.version)
-		if not ver or not semver.satisfies(ver, constraint) then
-			if not opts.frozen then
+	if not opts.frozen then
+		for name, constraints in pairs(all_constraints) do
+			local entry = locked[name]
+			if not entry then
 				needs_registry = true
 				break
 			end
+			local ver = semver.parse(entry.version)
+			if not ver then
+				needs_registry = true
+				break
+			end
+			for _, c in ipairs(constraints) do
+				if not semver.satisfies(ver, c.constraint) then
+					needs_registry = true
+					break
+				end
+			end
+			if needs_registry then break end
 		end
 	end
 
-	-- registry_indices: ordered list of {index=tbl, url=str} for resolve()
+	-- Fetch registry indices (one fetch per registry URL, shared for all packages).
 	local registry_indices = nil
 	if needs_registry then
 		registry_indices = {}
@@ -927,18 +1079,13 @@ function M.run(project_dir, opts)
 		end
 	end
 
-	-- 5. Resolve
-	-- Build constraint-only deps table for resolve() (strips include globs).
-	local constraint_deps = {}
-	for name, dep_value in pairs(deps) do
-		constraint_deps[name] = manifest.dep_constraint(dep_value)
-	end
-
+	-- Pass 2: resolve all packages at once using the multi-constraint form.
+	-- all_constraints[name] is already [{constraint, from}, ...] — the MVS form.
 	local resolve_opts = {
 		frozen           = opts.frozen,
 		registry_indices = registry_indices,
 	}
-	local resolved, res_err = M.resolve(constraint_deps, locked, nil, resolve_opts)
+	local resolved, res_err = M.resolve(all_constraints, locked, nil, resolve_opts)
 	if not resolved then
 		fail("resolution failed: " .. tostring(res_err))
 		return result
@@ -1099,52 +1246,35 @@ function M.run(project_dir, opts)
 
 		::process_deps::
 		-- Read the installed package's own pkg.lua to discover transitive deps.
+		-- All packages are already resolved (Pass 2 above); we only need to:
+		--   1. Accumulate include globs (union merge).
+		--   2. Enqueue transitive deps for the BFS install loop.
+		-- No re-resolution is needed here — MVS collected all constraints upfront.
 		local dep_manifest_path = project_dir .. "/lib/" .. name .. "/pkg.lua"
 		local dep_m = manifest.load(dep_manifest_path)
 		if dep_m and dep_m.deps and next(dep_m.deps) ~= nil then
 			-- Accumulate include globs from transitive deps (union merge).
+			local trans_names = {}
 			for dep_name, dep_value in pairs(dep_m.deps) do
 				local dep_inc = manifest.dep_include(dep_value)
 				glob_requests[dep_name] = glob_union(glob_requests[dep_name] or "**", dep_inc)
-			end
-
-			-- Filter out already-visited deps before resolving.
-			-- For already-visited deps, verify the selected version still satisfies
-			-- this package's constraint — silent drops can hide version conflicts.
-			local new_deps = {}
-			for dep_name, dep_value in pairs(dep_m.deps) do
-				local constraint = manifest.dep_constraint(dep_value)
 				if not visited[dep_name] then
-					new_deps[dep_name] = constraint
-				else
-					-- Already resolved — verify the selected version satisfies this constraint too.
-					local entry = new_lock[dep_name]
-					if entry then
-						local ver = semver.parse(entry.version)
-						if ver and not semver.satisfies(ver, constraint) then
-							fail(("version conflict: %s@%s is selected but %s requires %s %s"):format(
-								dep_name, entry.version, name, dep_name, constraint))
-						end
-					end
+					trans_names[#trans_names + 1] = dep_name
 				end
 			end
 
-			if next(new_deps) ~= nil then
-				-- Resolve these transitive deps using the same registry indices and locked data.
-				local trans_resolved, trans_err = M.resolve(new_deps, new_lock, nil, resolve_opts)
-				if not trans_resolved then
-					fail(("transitive dep resolution failed for %s: %s"):format(name, tostring(trans_err)))
-				else
-					-- Enqueue newly-resolved transitive deps (sorted for determinism).
-					local trans_names = {}
-					for n in pairs(trans_resolved) do trans_names[#trans_names+1] = n end
-					table.sort(trans_names)
-					for _, n in ipairs(trans_names) do
-						if not visited[n] then
-							queue[#queue+1] = { name = n, info = trans_resolved[n] }
-						end
-					end
+			-- Enqueue unvisited transitive deps (sorted for determinism).
+			-- resolved[] contains every package from Pass 2; new transitive deps
+			-- discovered here were also collected in Pass 1 and resolved already.
+			table.sort(trans_names)
+			for _, dep_name in ipairs(trans_names) do
+				local dep_info = resolved[dep_name]
+				if dep_info then
+					queue[#queue + 1] = { name = dep_name, info = dep_info }
 				end
+				-- If dep_info is nil the dep was not in the dependency graph collected
+				-- during Pass 1 (e.g. a package installed outside the package manager).
+				-- Skip silently — it will not be in the lockfile and is not our concern.
 			end
 		end
 
@@ -1165,5 +1295,6 @@ end
 -- ── internals exposed for testing ────────────────────────────────────────────
 M._parse_index = parse_index
 M.glob_union   = glob_union   -- exposed for tests; also used in BFS glob accumulation
+-- M.collect_constraints is already a public method (used by tests)
 
 return M

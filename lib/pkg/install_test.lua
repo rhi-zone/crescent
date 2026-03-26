@@ -1191,3 +1191,266 @@ T.describe("install.run glob union", function()
 	end)
 
 end)
+
+-- ── MVS two-pass resolver ─────────────────────────────────────────────────────
+--
+-- Tests for the two-pass minimum-version-selection resolver:
+--   Pass 1 (collect_constraints): walk dep graph, gather all constraints.
+--   Pass 2 (resolve with multi-constraint form): pick highest version satisfying all.
+
+T.describe("install.collect_constraints", function()
+
+	T.it("collects direct dep constraints", function()
+		local tmp = make_tmpdir()
+		local deps = { sha1 = "^1.0.0", lunajson = ">=1.3.0" }
+		local locked = {}
+		local cc = install.collect_constraints(deps, locked, tmp, "myproject")
+		T.ok(cc.sha1 ~= nil, "sha1 collected")
+		T.ok(cc.lunajson ~= nil, "lunajson collected")
+		T.eq(#cc.sha1, 1)
+		T.eq(cc.sha1[1].constraint, "^1.0.0")
+		T.eq(cc.sha1[1].from, "myproject")
+		T.eq(cc.lunajson[1].constraint, ">=1.3.0")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("collects transitive dep constraints from installed packages", function()
+		local tmp = make_tmpdir()
+		local deps = { pkga = "^1.0.0" }
+		install_dep(tmp, { name = "pkga", version = "1.0.0", deps = { foo = ">=2.0.0" } })
+		local locked = { pkga = lock_entry("1.0.0") }
+		local cc = install.collect_constraints(deps, locked, tmp, "myproject")
+		T.ok(cc.pkga ~= nil, "pkga collected")
+		T.ok(cc.foo ~= nil, "foo collected transitively")
+		T.eq(#cc.foo, 1)
+		T.eq(cc.foo[1].constraint, ">=2.0.0")
+		T.eq(cc.foo[1].from, "pkga@1.0.0")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("collects constraints from multiple imposers on the same package", function()
+		local tmp = make_tmpdir()
+		local deps = { pkga = "^1.0.0", pkgb = "^1.0.0" }
+		install_dep(tmp, { name = "pkga", version = "1.0.0", deps = { foo = ">=1.0.0" } })
+		install_dep(tmp, { name = "pkgb", version = "1.0.0", deps = { foo = ">=2.0.0" } })
+		local locked = {
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("1.0.0"),
+		}
+		local cc = install.collect_constraints(deps, locked, tmp, "myproject")
+		T.ok(cc.foo ~= nil, "foo collected")
+		T.eq(#cc.foo, 2, "two constraints on foo")
+		local found_1 = false
+		local found_2 = false
+		for _, c in ipairs(cc.foo) do
+			if c.constraint == ">=1.0.0" then found_1 = true end
+			if c.constraint == ">=2.0.0" then found_2 = true end
+		end
+		T.ok(found_1, ">=1.0.0 constraint on foo")
+		T.ok(found_2, ">=2.0.0 constraint on foo")
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("handles cycles without infinite loop", function()
+		local tmp = make_tmpdir()
+		local deps = { pkga = "^1.0.0" }
+		install_dep(tmp, { name = "pkga", version = "1.0.0", deps = { pkgb = "^1.0.0" } })
+		install_dep(tmp, { name = "pkgb", version = "1.0.0", deps = { pkga = "^1.0.0" } })
+		local locked = {
+			pkga = lock_entry("1.0.0"),
+			pkgb = lock_entry("1.0.0"),
+		}
+		local cc = install.collect_constraints(deps, locked, tmp, "myproject")
+		T.ok(cc.pkga ~= nil)
+		T.ok(cc.pkgb ~= nil)
+		rm_tmpdir(tmp)
+	end)
+
+end)
+
+T.describe("install.resolve multi-constraint (MVS)", function()
+
+	local MOCK_INDEX_MVS = {
+		foo = {
+			versions = { "1.5.0", "2.0.0", "2.5.0" },
+			latest   = "2.5.0",
+		},
+		bar = {
+			versions = { "1.0.0" },
+			latest   = "1.0.0",
+		},
+	}
+
+	T.it("MVS: resolves two compatible constraints to highest satisfying version", function()
+		local deps = {
+			foo = {
+				{ constraint = ">=1.0.0", from = "myproject" },
+				{ constraint = ">=2.0.0", from = "bar@1.0.0" },
+			},
+		}
+		local r, err = install.resolve(deps, {}, MOCK_INDEX_MVS)
+		T.ok(r, tostring(err))
+		-- Must satisfy BOTH >=1.0.0 and >=2.0.0; highest satisfying is 2.5.0
+		T.eq(r.foo.version, "2.5.0")
+		T.ok(r.foo._needs_fetch, "needs fetch when not in lockfile")
+	end)
+
+	T.it("MVS: single-entry constraint array resolves to highest satisfying version", function()
+		local deps = {
+			foo = { { constraint = ">=1.0.0", from = "myproject" } },
+		}
+		local r, err = install.resolve(deps, {}, MOCK_INDEX_MVS)
+		T.ok(r, tostring(err))
+		T.eq(r.foo.version, "2.5.0")
+	end)
+
+	T.it("MVS: true conflict errors and names both imposers", function()
+		-- foo only has 1.5.0, 2.0.0, 2.5.0; requires >=3.0.0 from badpkg -> no solution.
+		local deps = {
+			foo = {
+				{ constraint = ">=1.0.0", from = "myproject" },
+				{ constraint = ">=3.0.0", from = "badpkg@1.0.0" },
+			},
+		}
+		local r, err = install.resolve(deps, {}, MOCK_INDEX_MVS)
+		T.eq(r, nil, "should fail when no version satisfies all constraints")
+		T.ok(err ~= nil)
+		T.ok(err:find("myproject"),  "error names myproject: "   .. tostring(err))
+		T.ok(err:find("badpkg"),     "error names badpkg: "      .. tostring(err))
+		T.ok(err:find("1%.5%.0") or err:find("2%.0%.0") or err:find("2%.5%.0"),
+			"error lists available versions: " .. tostring(err))
+	end)
+
+	T.it("MVS: locked version satisfying all constraints is used as-is (no fetch)", function()
+		local deps = {
+			foo = {
+				{ constraint = ">=1.0.0", from = "myproject" },
+				{ constraint = ">=2.0.0", from = "bar@1.0.0" },
+			},
+		}
+		local locked = {
+			foo = { version = "2.5.0", url = "https://x/foo/2.5.0.tar.gz", tarball_hash = "sha256:aaa" },
+		}
+		local r, err = install.resolve(deps, locked, MOCK_INDEX_MVS)
+		T.ok(r, tostring(err))
+		T.eq(r.foo.version, "2.5.0")
+		T.ok(not r.foo._needs_fetch, "locked version: no fetch needed")
+	end)
+
+	T.it("MVS: locked version failing any constraint triggers re-resolve", function()
+		local deps = {
+			foo = {
+				{ constraint = ">=1.0.0", from = "myproject" },
+				{ constraint = ">=2.0.0", from = "bar@1.0.0" },
+			},
+		}
+		-- Locked at 1.5.0 -- satisfies >=1.0.0 but NOT >=2.0.0 -> must re-resolve
+		local locked = {
+			foo = { version = "1.5.0", url = "https://x/foo/1.5.0.tar.gz", tarball_hash = "sha256:bbb" },
+		}
+		local r, err = install.resolve(deps, locked, MOCK_INDEX_MVS)
+		T.ok(r, tostring(err))
+		T.eq(r.foo.version, "2.5.0")
+		T.ok(r.foo._needs_fetch)
+	end)
+
+	T.it("MVS: legacy plain-string constraint form still works", function()
+		local deps = { foo = ">=2.0.0" }
+		local r, err = install.resolve(deps, {}, MOCK_INDEX_MVS)
+		T.ok(r, tostring(err))
+		T.eq(r.foo.version, "2.5.0")
+	end)
+
+	T.it("MVS: legacy manifest-form constraint {constraint=str, include=str} still works", function()
+		local deps = { foo = { constraint = ">=2.0.0", include = "v2/**" } }
+		local r, err = install.resolve(deps, {}, MOCK_INDEX_MVS)
+		T.ok(r, tostring(err))
+		T.eq(r.foo.version, "2.5.0")
+	end)
+
+end)
+
+T.describe("install.run MVS end-to-end", function()
+
+	T.it("MVS: collect_constraints + resolve picks correct version across two imposers", function()
+		-- Verify that two imposers on foo produce the right constraint table and
+		-- that resolve picks the highest version satisfying both.
+		local tmp = make_tmpdir()
+
+		install_dep(tmp, { name = "pkga", version = "1.0.0", deps = { foo = ">=2.0.0" } })
+
+		local locked = { pkga = lock_entry("1.0.0") }
+		local direct_deps = { pkga = "^1.0.0", foo = ">=1.0.0" }
+		local cc = install.collect_constraints(direct_deps, locked, tmp, "myproject")
+
+		-- foo must have two constraints
+		T.ok(cc.foo ~= nil, "foo in collected constraints")
+		T.eq(#cc.foo, 2, "two constraints on foo")
+
+		local mock_idx = {
+			foo  = { versions = { "1.5.0", "2.5.0" }, latest = "2.5.0" },
+			pkga = { versions = { "1.0.0" },           latest = "1.0.0" },
+		}
+		local r, err = install.resolve(cc, locked, mock_idx)
+		T.ok(r, "MVS resolved: " .. tostring(err))
+		-- Must pick 2.5.0 (satisfies both >=1.0.0 and >=2.0.0)
+		T.eq(r.foo.version, "2.5.0")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("MVS run: foo locked at version satisfying all constraints succeeds", function()
+		-- Project requires foo>=1.0, pkga requires foo>=2.0.
+		-- foo locked at 2.5.0 satisfies both -> no conflict, no re-fetch needed.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0", foo = ">=1.0.0" } })
+
+		install_dep(tmp, { name = "pkga", version = "1.0.0", deps = { foo = ">=2.0.0" } })
+		install_dep(tmp, { name = "foo",  version = "2.5.0" })
+
+		write_lock(tmp, {
+			pkga = lock_entry("1.0.0"),
+			foo  = lock_entry("2.5.0"),
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(result.ok, "MVS run ok; errors: " .. table.concat(result.errors, ", "))
+		T.eq(#result.errors, 0)
+		T.eq(sorted_str(result.skipped), "foo,pkga")
+
+		rm_tmpdir(tmp)
+	end)
+
+	T.it("MVS run: true conflict errors with names of imposing packages", function()
+		-- Project requires foo>=1.0, pkga requires foo>=3.0.
+		-- Locked foo@2.0.0 satisfies >=1.0 but not >=3.0 -> conflict in frozen mode.
+		local tmp = make_tmpdir()
+
+		write_manifest(tmp, { name = "myapp", version = "1.0.0",
+			deps = { pkga = "^1.0.0", foo = ">=1.0.0" } })
+
+		install_dep(tmp, { name = "pkga", version = "1.0.0", deps = { foo = ">=3.0.0" } })
+		install_dep(tmp, { name = "foo",  version = "2.0.0" })
+
+		write_lock(tmp, {
+			pkga = lock_entry("1.0.0"),
+			foo  = lock_entry("2.0.0"),
+		})
+
+		local result = install.run(tmp, { frozen = true })
+
+		T.ok(not result.ok, "expected conflict failure")
+		T.ok(#result.errors > 0, "at least one error")
+		local err_str = table.concat(result.errors, " ")
+		T.ok(err_str:find("conflict") or err_str:find("foo"),
+			"error mentions conflict or package name: " .. err_str)
+		T.ok(err_str:find("pkga") or err_str:find("myapp"),
+			"error names an imposing package: " .. err_str)
+
+		rm_tmpdir(tmp)
+	end)
+
+end)
