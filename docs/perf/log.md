@@ -6,6 +6,57 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: JSON API variants — schema+reuse beats Node.js
+
+**Benchmark scripts:** `docs/perf/json_api.lua` (single decode), `docs/perf/json_collect.lua` (1000-item loop), `docs/perf/json_node.js` (Node.js comparison).
+
+### Single-decode, 90B 5-field object
+
+| API | ns | MB/s |
+|---|---|---|
+| `pure.decode` (baseline) | 869 | 72 |
+| SAX + callbacks (no table) | 247 | 254 |
+| SAX zerocopy (positions only) | 155 | 405 |
+| schema + fresh table | 524 | 120 |
+| schema + table reuse | 270 | 233 |
+| **Node.js `JSON.parse` warm** | **323** | **198** |
+| Node.js `JSON.parse` cold | 3752 | 17 |
+
+### 1000-object collect loop → array of tables
+
+| API | µs/batch | MB/s |
+|---|---|---|
+| `pure.decode` (baseline) | 814.8 | 81 |
+| schema + fresh table | 503.1 | 131 |
+| SAX → columnar arrays | 355.0 | 186 |
+| schema + reuse + copy | **321.7** | **205** |
+| **Node.js `JSON.parse`** | **334.9** | **197** |
+| SAX → array of tables | 860.4 | 76 |
+
+Schema+reuse+copy wins the collect loop at **205 MB/s vs Node's 197 MB/s**.
+
+### Key findings
+
+**SAX → array of tables is slower than baseline.** Callback overhead (5 calls/object
+× 1000 objects = 5000 extra function calls) erases the scanning gain. SAX is only
+faster when output is columnar (no per-item table) or most fields are skipped.
+
+**Schema+reuse+copy is the right default for collect loops.** The "wasted" copy step
+(`res[i] = {name=_rt.name, ...}`) is cheap: 5 literal-key writes to a fresh table
+that JIT treats as a table constructor. The reuse table's hash slots are pre-allocated
+after the first decode, so subsequent writes are updates, not insertions.
+
+**Node.js shape cache explained.** Node warm (323 ns) vs cold (3752 ns) = 10.5x
+internal speedup from V8 hidden classes. In a collect loop, Node is always warm
+(same shape repeated). LuaJIT has no hidden class equivalent, but schema+reuse
+achieves the same effect manually: pre-allocated hash slots + known constant keys.
+
+**The schema API belongs in `lib/format/json/`.** It is a faster path for
+`decode → table`, not a different interface. A separate `lib/format/json_sax/`
+is justified only for columnar/partial-field use cases.
+
+---
+
 ## 2026-03-26: JSON pure decoder — de-recursify, eliminate NYI trace aborts
 
 **Commit:** (this change)
