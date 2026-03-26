@@ -6,6 +6,38 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: JSON tier optimisation — pre-optimisation baseline
+
+**Commit:** (baseline before optimisation, same as `122d8ca` code)
+
+Measured before any optimisation work. Pure and FFI tiers run at nearly
+identical throughput — FFI is 0–10% slower than pure on most workloads because
+the `ffi.string` call overhead on safe-run extraction cancels the pointer
+advantage. The decoder's string scanning is byte-by-byte in both tiers.
+
+### Baseline raw output
+
+```
+=== JSON benchmark (ffi tier selected) ===
+selected tier: ffi
+
+encode:
+  small object (10 fields), 10000 iters       pure:     2.6 µs  ffi:     2.6 µs  speedup: 1.00x
+  large array (1000 numbers), 1000 iters      pure:    84.7 µs  ffi:    85.8 µs  speedup: 0.99x
+  deeply nested (depth 50), 1000 iters        pure:    20.1 µs  ffi:    21.1 µs  speedup: 0.95x
+  large string (10 KB with escapes), 1000 iters  pure:    42.8 µs  ffi:    43.2 µs  speedup: 0.99x
+
+decode:
+  small object (10 fields), 10000 iters       pure:     0.8 µs  ffi:     1.0 µs  speedup: 0.89x
+  large array (1000 numbers), 1000 iters      pure:   202.3 µs  ffi:   211.6 µs  speedup: 0.96x
+  deeply nested (depth 50), 1000 iters        pure:     5.3 µs  ffi:     6.3 µs  speedup: 0.85x
+  large string (10 KB with escapes), 1000 iters  pure:    57.9 µs  ffi:    63.9 µs  speedup: 0.90x
+
+input sizes: small_obj=109 bytes  large_arr=17498 bytes  deep=1053 bytes  large_str=7011 bytes
+```
+
+---
+
 ## 2026-03-26: three-tier JSON library (lib/format/json)
 
 **Commit:** `122d8ca`
