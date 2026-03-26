@@ -8,7 +8,7 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ## 2026-03-26: iter combinators — overhead baseline
 
-**Commit:** (this change)
+**Commit:** ff9659d
 
 Benchmark: `luajit lib/iter/bench.lua`
 
