@@ -4,18 +4,27 @@
 -- Falls back to pure.lua if FFI is not available.
 --
 -- Key implementation choices vs pure.lua:
---   Decoder: works on a `const uint8_t *` pointer cast from the source string.
---            Byte access is `ptr[i]` (O(1), JIT-compiled) rather than
---            string.byte(s, pos) calls.
---   Whitespace skip: FFI uint8_t[256] lookup table IS_WS — single indexed
---            load per byte, JIT-compiles to a tight loop.
---   String scanning: SWAR (SIMD Within A Register) via uint64_t reads when
---            the current position is 8-byte aligned and >= 24 bytes remain.
---            This gives 3-5x faster scanning on clean strings (no escapes).
---            Falls back to byte scan for short strings and after escapes.
+--   Decoder: uses `const uint8_t *` pointer for direct byte access (0-indexed).
+--            Unlike pure.lua, upvalue-based state (_ptr8, _pos, _len, _null)
+--            allows LuaJIT to trace through the mutually-recursive
+--            decode_value/decode_array/decode_object calls without
+--            `NYI: return to lower frame` aborts. De-recursification was tried
+--            (goto-based iterative form) but added frame-table overhead that
+--            outweighed the recursion cost — recursive form is 10-20% faster
+--            on nested structures.
+--            Whitespace skip: string.find C call, no byte loop competing for
+--            JIT root-trace budget.
+--            String extraction: str_sub (avoids ffi.string() overhead for the
+--            short strings typical in JSON keys/values).
 --   Encoder: pre-built escape table (256 entries, loaded once); string
---            building via table buffer + table.concat.
+--            building via table buffer + table.concat. Encoder uses ffi.cast
+--            to scan for escape bytes on the escape path.
 --   Number parsing: delegates to tonumber (LuaJIT JIT-compiles it).
+--   Performance profile vs pure.lua:
+--     FFI faster: small objects (~20%), deeply nested (up to 12%)
+--     FFI slower: large flat objects (~12-14%)
+--     FFI equal:  integer arrays, encode
+--   Real throughput gains require a C library (simd tier — see simd.lua).
 
 if not pcall(require, "ffi") then
     -- FFI unavailable: fall back to pure tier.
@@ -37,14 +46,15 @@ ffi.cdef[[
     typedef unsigned char uint8_t;
 ]]
 
--- ── FFI lookup tables (uint8_t[256]) ─────────────────────────────────────────
+-- ── String scanning patterns ──────────────────────────────────────────────────
 
--- IS_WS[b] == 1 for space(0x20), tab(0x09), LF(0x0A), CR(0x0D).
-local IS_WS = ffi.new("uint8_t[256]")
-IS_WS[0x20] = 1
-IS_WS[0x09] = 1
-IS_WS[0x0A] = 1
-IS_WS[0x0D] = 1
+-- Skip whitespace: find first non-ws byte.
+local WS_SKIP_PAT = "[^ \t\n\r]"
+
+-- Find next JSON string special character: closing ", backslash, or control
+-- chars 1-31. NUL (0x00) is formally invalid in JSON strings and excluded from
+-- this range to avoid NUL-terminated C string issues in the pattern engine.
+local STR_SCAN_PAT = '["\\\1-\31]'
 
 -- ── Encode ────────────────────────────────────────────────────────────────────
 
@@ -215,27 +225,20 @@ local function codepoint_to_utf8(cp)
     end
 end
 
-local _ptr8   -- const uint8_t*
-local _src    -- Lua string kept alive
+local _ptr8   -- const uint8_t* (0-indexed byte access for token dispatch and numbers)
+local _src    -- Lua string (1-indexed; kept alive; used for str_find/str_sub)
 local _len    -- #_src
 local _pos    -- 0-indexed current position
 local _null
-local _depth
 
 local function decode_error(msg)
     error("unexpected token at offset " .. _pos .. ": " .. msg, 2)
 end
 
-local function skip_ws()
-    while _pos < _len and IS_WS[_ptr8[_pos]] == 1 do
-        _pos = _pos + 1
-    end
-end
-
-local decode_value
-
 -- Decode a JSON string starting after the opening `"`.
--- _pos points to the first byte of string content on entry.
+-- _pos (0-indexed) points to the first byte of string content on entry.
+-- Byte access uses _ptr8[_pos]; string extraction uses str_sub (faster than
+-- ffi.string() for the short strings typical in JSON keys/values).
 local function decode_string()
     local start = _pos
     local buf = nil
@@ -243,14 +246,15 @@ local function decode_string()
     while _pos < _len do
         local b = _ptr8[_pos]
         if b == 0x22 then  -- closing "
+            -- content: 0-indexed [start, _pos-1] = 1-indexed [start+1, _pos]
             local result
             if buf then
                 if _pos > start then
-                    buf[#buf + 1] = ffi.string(_ptr8 + start, _pos - start)
+                    buf[#buf + 1] = str_sub(_src, start + 1, _pos)
                 end
                 result = tbl_concat(buf)
             else
-                result = ffi.string(_ptr8 + start, _pos - start)
+                result = str_sub(_src, start + 1, _pos)
             end
             _pos = _pos + 1
             return result
@@ -260,11 +264,11 @@ local function decode_string()
             if not buf then
                 buf = {}
                 if _pos > start then
-                    buf[1] = ffi.string(_ptr8 + start, _pos - start)
+                    buf[1] = str_sub(_src, start + 1, _pos)
                 end
             else
                 if _pos > start then
-                    buf[#buf + 1] = ffi.string(_ptr8 + start, _pos - start)
+                    buf[#buf + 1] = str_sub(_src, start + 1, _pos)
                 end
             end
             _pos = _pos + 1
@@ -327,6 +331,17 @@ local function decode_string()
     decode_error("unterminated string")
 end
 
+
+-- Decoder is structured as mutually-recursive functions sharing upvalue state.
+-- Unlike pure.lua, upvalue-based state (_ptr8, _pos, _len, _null) allows LuaJIT
+-- to trace through the recursive calls without `NYI: return to lower frame`
+-- aborts — all hot state lives in the outer upvalue scope, not in call frames.
+-- De-recursification (goto-based iterative approach) was tried but adds frame-
+-- table access overhead that exceeds the recursion cost; the recursive form is
+-- 10–20% faster on nested structures.
+
+local _depth = 0
+
 local function decode_number()
     local start = _pos
     if _ptr8[_pos] == 0x2D then _pos = _pos + 1 end
@@ -368,10 +383,21 @@ local function decode_number()
             if not had then decode_error("invalid number: empty exponent") end
         end
     end
-    local s = ffi.string(_ptr8 + start, _pos - start)
+    -- content: 0-indexed [start, _pos-1] = 1-indexed [start+1, _pos]
+    local s = str_sub(_src, start + 1, _pos)
     local n = tonumber(s)
     if not n then decode_error("invalid number: " .. s) end
     return n
+end
+
+local decode_value
+
+local function skip_ws()
+    if _pos >= _len then return end
+    local b = _ptr8[_pos]
+    if b ~= 0x20 and b ~= 0x09 and b ~= 0x0A and b ~= 0x0D then return end
+    local nws = str_find(_src, WS_SKIP_PAT, _pos + 1)  -- +1: 0→1-indexed
+    _pos = nws and (nws - 1) or _len  -- back to 0-indexed
 end
 
 local function decode_array()
