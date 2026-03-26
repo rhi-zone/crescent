@@ -36,6 +36,16 @@ local function sink(v) _sink = _sink + (v or 0) end
 -- Benchmarks
 ----------------------------------------------------------------
 
+-- Closures hoisted to module level so each case reuses the same closure
+-- object. LuaJIT's fold loop compiles a trace guarded on a specific closure
+-- identity; if a second distinct closure object runs the same fold loop, the
+-- guard fails and JIT falls back to interpreter. Sharing one object across all
+-- cases that perform the same operation avoids this.
+local fn_double   = function(v) return v * 2 end
+local fn_odd      = function(v) return v % 2 == 1 end
+local fn_gt_N     = function(v) return v > N end
+local fn_add      = function(a, v) return a + v end
+
 local cases = {}
 
 -- map: multiply each element by 2, sum result
@@ -50,7 +60,7 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "map (iter)",
   fn = function()
-    sink(iter.sum(iter.map(function(v) return v * 2 end, iter.values(src))))
+    sink(iter.sum(iter.map(fn_double, iter.values(src))))
   end,
 }
 
@@ -69,7 +79,7 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "filter (iter)",
   fn = function()
-    sink(iter.sum(iter.filter(function(v) return v % 2 == 1 end, iter.values(src))))
+    sink(iter.sum(iter.filter(fn_odd, iter.values(src))))
   end,
 }
 
@@ -85,7 +95,7 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "fold (iter)",
   fn = function()
-    sink(iter.fold(function(a, v) return a + v end, 0, iter.values(src)))
+    sink(iter.fold(fn_add, 0, iter.values(src)))
   end,
 }
 
@@ -104,9 +114,7 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "map+filter (iter)",
   fn = function()
-    sink(iter.sum(iter.filter(
-      function(v) return v > N end,
-      iter.map(function(v) return v * 2 end, iter.values(src)))))
+    sink(iter.sum(iter.filter(fn_gt_N, iter.map(fn_double, iter.values(src)))))
   end,
 }
 
@@ -125,11 +133,7 @@ cases[#cases+1] = {
 cases[#cases+1] = {
   name = "map+filt+fold (iter)",
   fn = function()
-    sink(iter.fold(
-      function(a, v) return a + v end, 0,
-      iter.filter(
-        function(v) return v > N end,
-        iter.map(function(v) return v * 2 end, iter.values(src)))))
+    sink(iter.fold(fn_add, 0, iter.filter(fn_gt_N, iter.map(fn_double, iter.values(src)))))
   end,
 }
 
