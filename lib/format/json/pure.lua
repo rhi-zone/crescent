@@ -250,7 +250,6 @@ local _src     -- the JSON string
 local _len     -- #_src
 local _pos     -- current byte offset (1-indexed)
 local _null    -- null sentinel value
-local _depth   -- current recursion depth
 
 local function decode_error(msg)
     error("unexpected token at offset " .. (_pos - 1) .. ": " .. msg, 2)
@@ -270,9 +269,6 @@ local function skip_ws()
     local nws = str_find(_src, WS_SKIP_PAT, _pos)
     _pos = nws or (_len + 1)
 end
-
--- Forward declaration.
-local decode_value
 
 -- Decode a JSON string starting after the opening `"`.
 -- On entry _pos points to the first byte of string content.
@@ -416,131 +412,321 @@ local function decode_number()
     return n
 end
 
--- Decode a JSON array. _pos points past the opening '['.
-local function decode_array()
-    _depth = _depth + 1
-    if _depth > 512 then decode_error("nesting depth exceeds 512") end
-    local arr = {}
-    local i = 0
-    skip_ws()
-    if _pos > _len then decode_error("truncated array") end
-    if str_byte(_src, _pos) == 0x5D then  -- empty array: ']'
-        _pos = _pos + 1
-        _depth = _depth - 1
-        return arr
-    end
-    while true do
-        i = i + 1
-        arr[i] = decode_value()
-        skip_ws()
-        if _pos > _len then decode_error("truncated array") end
-        local b = str_byte(_src, _pos)
-        if b == 0x5D then  -- ']'
-            _pos = _pos + 1
-            break
-        elseif b == 0x2C then  -- ','
-            _pos = _pos + 1
-            skip_ws()
-        else
-            decode_error("expected ',' or ']' in array")
+-- Pre-allocated stack frames to avoid GC pressure.
+-- Each frame: { t=table, is_array=bool, key=string|nil, n=int }
+local _stack = {}
+for _i = 1, 512 do _stack[_i] = {t=nil, is_array=false, key=nil, n=0} end
+
+-- Iterative decoder: replaces mutually-recursive decode_value/decode_array/
+-- decode_object. The entire parse path is a single function with goto-based
+-- state transitions, letting LuaJIT trace end-to-end without "return to lower
+-- frame" NYI aborts.
+local function decode_raw(s, null_sentinel)
+    _src  = s
+    _len  = #s
+    _pos  = 1
+    _null = null_sentinel or M.null
+
+    local sp    = 0      -- stack pointer; 0 = top level (no active container)
+    local value          -- the last completed value
+
+    ::PARSE_VALUE::
+    -- Skip leading whitespace.
+    do
+        if _pos <= _len then
+            local b0 = str_byte(_src, _pos)
+            if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                _pos = nws or (_len + 1)
+            end
         end
     end
-    _depth = _depth - 1
-    return arr
-end
 
--- Decode a JSON object. _pos points past the opening '{'.
-local function decode_object()
-    _depth = _depth + 1
-    if _depth > 512 then decode_error("nesting depth exceeds 512") end
-    local obj = {}
-    skip_ws()
-    if _pos > _len then decode_error("truncated object") end
-    if str_byte(_src, _pos) == 0x7D then  -- empty object: '}'
-        _pos = _pos + 1
-        _depth = _depth - 1
-        return obj
-    end
-    while true do
-        -- Key must be a string.
-        if _pos > _len or str_byte(_src, _pos) ~= 0x22 then
+    if _pos > _len then decode_error("unexpected end of input") end
+    local b = str_byte(_src, _pos)
+    _pos = _pos + 1
+
+    if b == 0x22 then          -- " → string (leaf)
+        value = decode_string()
+        goto ASSIGN_VALUE
+
+    elseif b == 0x74 then      -- t → true
+        if str_sub(_src, _pos, _pos + 2) == "rue" then
+            _pos = _pos + 3; value = true; goto ASSIGN_VALUE
+        end
+        decode_error("invalid token")
+
+    elseif b == 0x66 then      -- f → false
+        if str_sub(_src, _pos, _pos + 3) == "alse" then
+            _pos = _pos + 4; value = false; goto ASSIGN_VALUE
+        end
+        decode_error("invalid token")
+
+    elseif b == 0x6E then      -- n → null
+        if str_sub(_src, _pos, _pos + 2) == "ull" then
+            _pos = _pos + 3; value = _null; goto ASSIGN_VALUE
+        end
+        decode_error("invalid token")
+
+    elseif b == 0x2D or (b >= 0x30 and b <= 0x39) then  -- - or digit → number (inlined)
+        do
+            local nstart = _pos - 1  -- first byte already consumed; step back
+            local nb
+            -- Optional minus (already consumed as `b`).
+            local npos = nstart
+            if b == 0x2D then npos = npos + 1 end
+            if npos > _len then decode_error("truncated number") end
+            nb = str_byte(_src, npos)
+            if nb == 0x30 then  -- leading zero
+                npos = npos + 1
+            elseif nb >= 0x31 and nb <= 0x39 then
+                npos = npos + 1
+                while npos <= _len do
+                    nb = str_byte(_src, npos)
+                    if nb >= 0x30 and nb <= 0x39 then npos = npos + 1
+                    else break end
+                end
+            else
+                decode_error("invalid number")
+            end
+            -- Optional fractional part.
+            if npos <= _len and str_byte(_src, npos) == 0x2E then
+                npos = npos + 1
+                local had = false
+                while npos <= _len do
+                    nb = str_byte(_src, npos)
+                    if nb >= 0x30 and nb <= 0x39 then npos = npos + 1; had = true
+                    else break end
+                end
+                if not had then decode_error("invalid number: trailing decimal point") end
+            end
+            -- Optional exponent.
+            if npos <= _len then
+                nb = str_byte(_src, npos)
+                if nb == 0x65 or nb == 0x45 then
+                    npos = npos + 1
+                    if npos <= _len then
+                        nb = str_byte(_src, npos)
+                        if nb == 0x2B or nb == 0x2D then npos = npos + 1 end
+                    end
+                    local had = false
+                    while npos <= _len do
+                        nb = str_byte(_src, npos)
+                        if nb >= 0x30 and nb <= 0x39 then npos = npos + 1; had = true
+                        else break end
+                    end
+                    if not had then decode_error("invalid number: empty exponent") end
+                end
+            end
+            local ns = str_sub(_src, nstart, npos - 1)
+            local nn = tonumber(ns)
+            if not nn then decode_error("invalid number: " .. ns) end
+            _pos = npos
+            value = nn
+        end
+        goto ASSIGN_VALUE
+
+    elseif b == 0x5B then      -- [ → begin array
+        -- Skip whitespace; check for empty array fast path.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
+        if _pos > _len then decode_error("truncated array") end
+        if str_byte(_src, _pos) == 0x5D then  -- ']' empty array
+            _pos = _pos + 1; value = {}; goto ASSIGN_VALUE
+        end
+        -- Push array frame.
+        sp = sp + 1
+        if sp > 512 then decode_error("nesting depth exceeds 512") end
+        local fr = _stack[sp]
+        fr.t        = {}
+        fr.is_array = true
+        fr.key      = nil
+        fr.n        = 0
+        goto PARSE_VALUE
+
+    elseif b == 0x7B then      -- { → begin object
+        -- Skip whitespace; check for empty object fast path.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
+        if _pos > _len then decode_error("truncated object") end
+        if str_byte(_src, _pos) == 0x7D then  -- '}' empty object
+            _pos = _pos + 1; value = {}; goto ASSIGN_VALUE
+        end
+        -- Must have a string key next.
+        if str_byte(_src, _pos) ~= 0x22 then
             decode_error("expected string key in object")
         end
         _pos = _pos + 1  -- consume opening "
         local key = decode_string()
-        skip_ws()
-        -- Colon.
+        -- Skip whitespace before colon.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
         if _pos > _len or str_byte(_src, _pos) ~= 0x3A then
             decode_error("expected ':' after object key")
         end
+        _pos = _pos + 1  -- consume ':'
+        -- Skip whitespace before value.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
+        -- Push object frame.
+        sp = sp + 1
+        if sp > 512 then decode_error("nesting depth exceeds 512") end
+        local fr2 = _stack[sp]
+        fr2.t        = {}
+        fr2.is_array = false
+        fr2.key      = key
+        fr2.n        = 0
+        goto PARSE_VALUE
+
+    else
+        decode_error("unexpected character '" .. str_char(b) .. "'")
+    end
+
+    ::ASSIGN_VALUE::
+    -- value holds the just-completed value. Assign it into the current frame,
+    -- then decide whether the container is done or we need more values.
+    if sp == 0 then
+        -- Top level: done.
+        -- Skip trailing whitespace.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
+        if _pos <= _len then
+            decode_error("trailing garbage after JSON value")
+        end
+        return value
+    end
+
+    local frame = _stack[sp]
+    if frame.is_array then
+        -- Array: append value.
+        local ni = frame.n + 1
+        frame.n = ni
+        frame.t[ni] = value
+        -- Skip whitespace.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
+        if _pos > _len then decode_error("truncated array") end
+        local ab = str_byte(_src, _pos)
         _pos = _pos + 1
-        skip_ws()
-        obj[key] = decode_value()
-        skip_ws()
+        if ab == 0x5D then      -- ']' array done
+            value = frame.t
+            frame.t = nil       -- release reference
+            sp = sp - 1
+            goto ASSIGN_VALUE
+        elseif ab == 0x2C then  -- ',' next element
+            goto PARSE_VALUE
+        else
+            decode_error("expected ',' or ']' in array")
+        end
+    else
+        -- Object: assign value to current key.
+        frame.t[frame.key] = value
+        -- Skip whitespace.
+        do
+            if _pos <= _len then
+                local b0 = str_byte(_src, _pos)
+                if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                    local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                    _pos = nws or (_len + 1)
+                end
+            end
+        end
         if _pos > _len then decode_error("truncated object") end
-        local b = str_byte(_src, _pos)
-        if b == 0x7D then  -- '}'
-            _pos = _pos + 1
-            break
-        elseif b == 0x2C then  -- ','
-            _pos = _pos + 1
-            skip_ws()
+        local ob = str_byte(_src, _pos)
+        _pos = _pos + 1
+        if ob == 0x7D then      -- '}' object done
+            value = frame.t
+            frame.t = nil       -- release reference
+            sp = sp - 1
+            goto ASSIGN_VALUE
+        elseif ob == 0x2C then  -- ',' next key-value pair
+            -- Skip whitespace before key.
+            do
+                if _pos <= _len then
+                    local b0 = str_byte(_src, _pos)
+                    if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                        local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                        _pos = nws or (_len + 1)
+                    end
+                end
+            end
+            if _pos > _len or str_byte(_src, _pos) ~= 0x22 then
+                decode_error("expected string key in object")
+            end
+            _pos = _pos + 1  -- consume '"'
+            local nkey = decode_string()
+            -- Skip whitespace before colon.
+            do
+                if _pos <= _len then
+                    local b0 = str_byte(_src, _pos)
+                    if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                        local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                        _pos = nws or (_len + 1)
+                    end
+                end
+            end
+            if _pos > _len or str_byte(_src, _pos) ~= 0x3A then
+                decode_error("expected ':' after object key")
+            end
+            _pos = _pos + 1  -- consume ':'
+            -- Skip whitespace before value.
+            do
+                if _pos <= _len then
+                    local b0 = str_byte(_src, _pos)
+                    if b0 == 0x20 or b0 == 0x09 or b0 == 0x0A or b0 == 0x0D then
+                        local nws = str_find(_src, WS_SKIP_PAT, _pos)
+                        _pos = nws or (_len + 1)
+                    end
+                end
+            end
+            frame.key = nkey
+            goto PARSE_VALUE
         else
             decode_error("expected ',' or '}' in object")
         end
     end
-    _depth = _depth - 1
-    return obj
-end
-
--- Decode a single JSON value; _pos points at the first byte (after whitespace).
-decode_value = function()
-    skip_ws()
-    if _pos > _len then decode_error("unexpected end of input") end
-    local b = str_byte(_src, _pos)
-    _pos = _pos + 1
-    if b == 0x22 then          -- "  → string
-        return decode_string()
-    elseif b == 0x7B then      -- {  → object
-        return decode_object()
-    elseif b == 0x5B then      -- [  → array
-        return decode_array()
-    elseif b == 0x74 then      -- t  → true
-        if str_sub(_src, _pos, _pos + 2) == "rue" then
-            _pos = _pos + 3; return true
-        end
-        decode_error("invalid token")
-    elseif b == 0x66 then      -- f  → false
-        if str_sub(_src, _pos, _pos + 3) == "alse" then
-            _pos = _pos + 4; return false
-        end
-        decode_error("invalid token")
-    elseif b == 0x6E then      -- n  → null
-        if str_sub(_src, _pos, _pos + 2) == "ull" then
-            _pos = _pos + 3; return _null
-        end
-        decode_error("invalid token")
-    elseif b == 0x2D or (b >= 0x30 and b <= 0x39) then  -- - or 0-9
-        _pos = _pos - 1  -- unget so decode_number sees the first byte
-        return decode_number()
-    else
-        decode_error("unexpected character '" .. str_char(b) .. "'")
-    end
-end
-
--- Raw decode: throws on error.
-local function decode_raw(s, null_sentinel)
-    _src   = s
-    _len   = #s
-    _pos   = 1
-    _null  = null_sentinel or M.null
-    _depth = 0
-    local v = decode_value()
-    skip_ws()
-    if _pos <= _len then
-        decode_error("trailing garbage after JSON value")
-    end
-    return v
 end
 
 -- Public decode: returns (result) or (nil, errmsg).

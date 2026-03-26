@@ -6,6 +6,62 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: JSON pure decoder — de-recursify, eliminate NYI trace aborts
+
+**Commit:** (this change)
+
+### Problem
+
+The previous decoder was mutually recursive: `decode_value` → `decode_array`/
+`decode_object` → `decode_value`. LuaJIT cannot trace across recursive call
+boundaries and emits `NYI: return to lower frame` trace aborts for almost every
+container parse. This forced near-total interpreter fallback on array and object
+decoding.
+
+`luajit -jv` on the old decoder showed repeated:
+```
+[TRACE --- pure.lua:NNN -- NYI: return to lower frame at pure.lua:543]
+```
+
+### Fix
+
+Replaced the recursive call graph with a single iterative `decode_raw` function
+using an explicit context stack (512 pre-allocated frames) and `goto`-based
+state transitions (`PARSE_VALUE` / `ASSIGN_VALUE`). The entire parse path is one
+function with one loop — JIT traces it end-to-end.
+
+Also inlined `decode_number` into `decode_raw` to eliminate its cross-frame
+return. `decode_string` remains a separate function; it has no recursive calls
+and JIT handles leaf-function returns fine.
+
+After the fix, `luajit -jv` on `_decode_raw` (bypassing the `pcall` wrapper)
+shows 0 NYI aborts. The 4 remaining NYIs when calling through `M.decode` are
+from the `pcall` boundary itself, which is unavoidable.
+
+### Benchmark (before / after)
+
+Benchmark script: inline `bench()` calls, 200-iter warmup, 2000 iterations.
+
+| scenario | before | after | speedup |
+|---|---|---|---|
+| decode array 1000 nums (17 KB) | 114 MB/s | 106 MB/s | 0.93x |
+| decode object 100 fields (2.7 KB) | 61 MB/s | 217 MB/s | 3.6x |
+| decode nested depth 50 (1 KB) | 31 MB/s | 58 MB/s | 1.9x |
+
+The array case measures similarly because its hot path is `tonumber()` on float
+strings (unavoidable), and it was already partially JIT-compiled via the
+integer-scanning inner loop. Objects and nested structures benefit most — these
+are the NYI-dominated cases.
+
+### NYI verification
+
+```
+luajit -jv -e "... for i=1,200 do pure._decode_raw(j) end" 2>&1 | grep -c "NYI"
+# output: 0
+```
+
+---
+
 ## 2026-03-26: JSON tier optimisation — post-optimisation results
 
 **Pure tier commit:** `e659573`
