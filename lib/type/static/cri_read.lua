@@ -292,10 +292,11 @@ function M.load(bytes, ctx)
                 slot.data[1] = s; slot.data[2] = l
 
             elseif tag == TAG_TYPE_CALL then
-                -- d[1]=callee_tid, d[2..3]=args list
+                -- d[1]=callee_tid, d[2..3]=args list, d[4]=stable call-site hash
                 local s, l = push_list(d[2], d[3])
                 slot.data[0] = rt(d[1])
                 slot.data[1] = s; slot.data[2] = l
+                slot.data[3] = d[4]  -- stable hash; 0 if old cri without this field
 
             elseif tag == TAG_FORALL then
                 -- d[1..2]=type_params list (cri string IDs stored by writer), d[3]=body_tid

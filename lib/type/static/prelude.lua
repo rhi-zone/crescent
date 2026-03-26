@@ -124,13 +124,14 @@ local function load_decls(ctx, path)
         if r.decl_var then
             env_mod.bind(ctx.scope, r.name_id, resolve(ctx, r.type_id))
         elseif r.newtype then
-            -- Newtype: resolve underlying type, assign a unique nominal identity.
-            -- ann.lua stores data[1]=0 for all newtypes; without a unique identity
-            -- all newtypes would unify with each other (identity-based equality).
+            -- Newtype: resolve underlying type, assign a stable nominal identity.
+            -- Use path (the .d.lua file) + name as the hash key so stdlib newtypes
+            -- are consistent across all files that load this prelude.
             local ann_nom = ctx.ann.types:get(r.type_id)
             local underlying = resolve(ctx, ann_nom.data[2])
-            ctx.nominal_id = ctx.nominal_id + 1
-            local nom = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
+            local name_str = intern_mod.get(ctx.pool, r.name_id) or ""
+            local nominal_id = defs_mod.fnv31(path .. ":newtype:" .. name_str)
+            local nom = types_mod.make_nominal(ctx, r.name_id, nominal_id, underlying)
             local alias = env_mod.lookup_type(ctx.scope, r.name_id)
             if alias then alias.body = nom end
         else

@@ -577,7 +577,9 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             end
             if not has_unresolved then
                 local intrinsic_mod = require("lib.type.static.intrinsic")
-                return intrinsic_mod.expand(ctx, ct.data[0], new_args, tid)
+                -- t.data[3]: stable call-site hash stored by constrain.lua when
+                -- creating this deferred TAG_TYPE_CALL. 0 = legacy/not set.
+                return intrinsic_mod.expand(ctx, ct.data[0], new_args, t.data[3])
             end
         end
         local mk = ctx.lists:mark()

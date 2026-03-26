@@ -252,23 +252,58 @@ end
 -- $Opaque<T>
 -- ---------------------------------------------------------------------------
 -- Produces a TAG_NOMINAL type with a unique identity per (call site, T).
--- Two uses of $Opaque<integer> at the *same* source location resolve to the
--- same nominal type; at different source locations they are distinct.
--- stable_id: the ann_tid of the TAG_TYPE_CALL node (unique per source location)
+-- The identity is a content hash of (stable_id, T_fingerprint), making it
+-- deterministic across check runs for the same source file — unlike a
+-- per-run counter which is unstable once multiple nominal types exist.
+--
+-- stable_id: an int32 content hash of "filename:ann_tid" stored in
+--   TAG_TYPE_CALL.data[3] by constrain.lua. This is stable for the same
+--   source content (annotation parser is deterministic) and globally unique
+--   due to the filename prefix.
+--
+-- T_fingerprint: a stable integer derived from T's structure. Primitive
+--   types use their tag. TAG_NOMINAL uses its own stable identity. Complex
+--   structural types fall back to tag*0x1000+T (per-run, but at least unique
+--   within a run). This means Schema<{x:integer}> is not cross-run stable,
+--   but Schema<integer>, Schema<string>, etc. are.
+
+local fnv31   = defs.fnv31
+local TAG_NOMINAL_I = defs.TAG_NOMINAL
+
+local function T_fingerprint(ctx, T)
+    local t = ctx.types:get(T)
+    local tag = t.tag
+    if tag == defs.TAG_INTEGER  then return 1 end
+    if tag == defs.TAG_NUMBER   then return 2 end
+    if tag == defs.TAG_STRING   then return 3 end
+    if tag == defs.TAG_BOOLEAN  then return 4 end
+    if tag == defs.TAG_NIL      then return 5 end
+    if tag == defs.TAG_ANY      then return 6 end
+    if tag == defs.TAG_NEVER    then return 7 end
+    if tag == TAG_NOMINAL_I     then return t.data[1] end  -- recursive: its own stable id
+    return tag * 0x1000 + T  -- structural types: per-run unique, not cross-run stable
+end
+
 local function expand_opaque(ctx, arg_ids, stable_id)
     if #arg_ids ~= 1 then return ctx.T_NEVER end
     local T = types_mod.find(ctx, arg_ids[1])
-    if not ctx._opaque_cache then ctx._opaque_cache = {} end
-    local site = ctx._opaque_cache[stable_id]
-    if not site then site = {}; ctx._opaque_cache[stable_id] = site end
-    local instance_id = site[T]
-    if not instance_id then
+    -- Derive a deterministic nominal identity from call site + T type.
+    -- If stable_id is 0 (legacy / unset), fall back to per-run counter.
+    local nominal_id
+    if stable_id ~= 0 then
+        nominal_id = fnv31(tostring(stable_id) .. ":" .. tostring(T_fingerprint(ctx, T)))
+    else
         ctx.nominal_id = ctx.nominal_id + 1
-        instance_id = ctx.nominal_id
-        site[T] = instance_id
+        nominal_id = ctx.nominal_id
     end
+    -- Cache to avoid allocating duplicate TAG_NOMINAL nodes per run.
+    if not ctx._opaque_cache then ctx._opaque_cache = {} end
+    local cached = ctx._opaque_cache[nominal_id]
+    if cached then return cached end
     local opaque_name_id = intern_mod.intern(ctx.pool, "Opaque")
-    return types_mod.make_nominal(ctx, opaque_name_id, instance_id, T)
+    local result = types_mod.make_nominal(ctx, opaque_name_id, nominal_id, T)
+    ctx._opaque_cache[nominal_id] = result
+    return result
 end
 
 -- ---------------------------------------------------------------------------
@@ -279,7 +314,8 @@ end
 -- Called when a TAG_TYPE_CALL has a TAG_INTRINSIC callee.
 -- name_id:   intern ID of the intrinsic name (string)
 -- arg_ids:   Lua array of resolved type_ids (the type arguments)
--- stable_id: ann_tid of the TAG_TYPE_CALL node (used by $Opaque for memoization)
+-- stable_id: fnv31(filename:ann_tid) stored in TAG_TYPE_CALL.data[3];
+--            0 means not set (legacy cri or non-deferred path without filename)
 function M.expand(ctx, name_id, arg_ids, stable_id)
     local name = intern_mod.get(ctx.pool, name_id) or ""
 

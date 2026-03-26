@@ -345,4 +345,19 @@ function M.i32x2_to_double(lo, hi)
     return _f64buf.d
 end
 
+-- fnv31: FNV-1a hash of a string, kept in int32 range.
+-- Used to derive stable nominal type identities from source positions.
+-- Collision probability is negligible for practical type declaration counts.
+do
+    local bxor, tobit = require("bit").bxor, require("bit").tobit
+    function M.fnv31(s)
+        local h = tobit(0x811c9dc5)
+        for i = 1, #s do
+            h = bxor(h, s:byte(i))
+            h = tobit(h * 0x01000193)
+        end
+        return h
+    end
+end
+
 return M

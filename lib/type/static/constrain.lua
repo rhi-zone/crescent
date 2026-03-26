@@ -111,6 +111,7 @@ local TAG_TUPLE    = defs.TAG_TUPLE
 local TAG_NEVER       = defs.TAG_NEVER
 local TAG_ENUM_MEMBER = defs.TAG_ENUM_MEMBER
 local TAG_TYPEOF      = defs.TAG_TYPEOF
+local fnv31           = defs.fnv31
 
 local E = defs.E
 
@@ -644,7 +645,8 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             end
             if not has_unresolved then
                 local intrinsic_mod = require("lib.type.static.intrinsic")
-                return intrinsic_mod.expand(ctx, ct.data[0], arg_ids, ann_tid)
+                local stable = fnv31(ctx.filename .. ":" .. tostring(ann_tid))
+                return intrinsic_mod.expand(ctx, ct.data[0], arg_ids, stable)
             end
             -- Fall through to store a deferred TAG_TYPE_CALL.
         end
@@ -656,6 +658,10 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         tct.data[0] = callee
         tct.data[1] = as
         tct.data[2] = al
+        -- data[3]: stable call-site hash for $Opaque memoization. Stable across
+        -- check runs for the same source content (annotation parser is deterministic).
+        -- Propagated through cri so cross-file uses of this alias resolve consistently.
+        tct.data[3] = fnv31(ctx.filename .. ":" .. tostring(ann_tid))
         return id
     end
 
@@ -2436,8 +2442,12 @@ local function process_type_decls(ctx)
                     if r.newtype then
                         local ann_nom = ctx.ann.types:get(r.type_id)
                         local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
-                        ctx.nominal_id = ctx.nominal_id + 1
-                        alias.body = types_mod.make_nominal(ctx, r.name_id, ctx.nominal_id, underlying)
+                        -- Stable nominal identity: hash of (filename, type name).
+                        -- A newtype name is unique within a file; the filename prefix
+                        -- makes it globally unique, so the hash is deterministic across runs.
+                        local name_str = intern_mod.get(ctx.pool, r.name_id) or ""
+                        local nominal_id = fnv31(ctx.filename .. ":newtype:" .. name_str)
+                        alias.body = types_mod.make_nominal(ctx, r.name_id, nominal_id, underlying)
                     else
                         alias.body = resolve_annotation_type(ctx, r.type_id)
                     end

@@ -22,7 +22,7 @@
 --   TAG_FORALL:         data[0..1]=type_params(name_ids in list), data[2]=body_tid
 --   TAG_SPREAD:         data[0]=inner_tid
 --   TAG_INTRINSIC:      data[0]=name_id
---   TAG_TYPE_CALL:      data[0]=callee_tid, data[1..2]=args(list)
+--   TAG_TYPE_CALL:      data[0]=callee_tid, data[1..2]=args(list), data[3]=stable call-site hash
 --
 -- In .cri format, TAG_TABLE.data[0..1] and data[5..6] become direct field pool indices
 -- (the list-of-field-IDs indirection is eliminated at serialization time).
@@ -509,10 +509,11 @@ function M.serialize(ctx, exports)
             d[2] = s; d[3] = l
 
         elseif tag == TAG_TYPE_CALL then
-            -- data[0]=callee_tid, data[1..2]=args list
+            -- data[0]=callee_tid, data[1..2]=args list, data[3]=stable call-site hash
             d[1] = remap_tid(seen_types, ctx, slot.data[0])
             local s, l = map_list(slot.data[1], slot.data[2])
             d[2] = s; d[3] = l
+            d[4] = slot.data[3]  -- stable hash; 0 if not set (primitive TAG_TYPE_CALL from old cri)
 
         elseif tag == TAG_FORALL then
             -- data[0..1]=type_params list (name_ids), data[2]=body_tid
