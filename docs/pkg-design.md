@@ -13,21 +13,46 @@
 
 ## Directory conventions
 
+Everything lives under `lib/`. There is no separate `dep/` directory. The distinction between first-party and third-party code is irrelevant to the runtime — both are just directories under `lib/` that `require` resolves via `package.path`.
+
 ```
-lib/        first-party packages (part of this repo)
-dep/        installed third-party packages (managed by pkg, committed to VCS)
+lib/http/        first-party package
+lib/sha1/        installed third-party package
+lib/lunajson/    installed third-party package
 ```
 
-`dep/` is already the implicit convention — `websocket/init.lua` does
-`require("dep.sha1")` and `require("dep.base64")`. The package manager
-formalises this.
+`lib/` is not configurable. It is where libraries live, always. The convention is the design.
 
 Require paths:
 ```lua
 require("lib.http.format")   -- first-party
-require("dep.sha1")          -- installed dependency
-require("dep.lunajson")      -- installed dependency
+require("lib.sha1")          -- installed dependency
+require("lib.lunajson")      -- installed dependency
 ```
+
+---
+
+## Versioned subdirectories
+
+Multiple major versions of a package coexist as separate directories:
+
+```
+lib/foo/v1/      foo 1.x — init.lua, util.lua, ...
+lib/foo/v2/      foo 2.x — init.lua, util.lua, ...
+lib/foo/init.lua redirect: return require("lib.foo.v2")
+```
+
+`require("lib.foo.v1")` resolves to `lib/foo/v1/init.lua` via the standard `?/init.lua` path pattern. No tooling required — this is plain `package.path` resolution.
+
+The version subdirectory is not an install artifact — it is part of the require path the author writes at development time. If a package will be consumed as `lib.foo.v2`, the author writes `require("lib.foo.v2.util")` in their own source, and their repo has `lib/foo/v2/` in it. The package manager hardlinks/copies files there for consumers. No path rewriting, ever.
+
+**`lib/<name>/init.lua` redirect**: the package manager writes this file automatically on install, pointing at the current major:
+
+```lua
+return require("lib.foo.v2")
+```
+
+Authors who don't care about stability write `require("lib.foo")` and get the latest. Authors who need stability write `require("lib.foo.v2")` explicitly and never see a breaking change unless they update that require path themselves.
 
 ---
 
@@ -58,8 +83,8 @@ registry).
 
 Text format, git-diffable, committed to VCS. Records the full resolved
 dependency graph (direct + transitive) with exact versions, checksums,
-and source URLs. Nothing in `dep/` should be trusted without a matching
-lockfile entry.
+and source URLs. Nothing in `lib/` installed by the package manager should
+be trusted without a matching lockfile entry.
 
 ```toml
 # crescent.lock  (do not edit manually)
@@ -89,7 +114,7 @@ Exact grammar TBD; principle: simple enough to parse in ~50 lines of Lua.
 ```
 
 Install links (hardlink on Linux, clonefile/CoW on macOS, copy fallback) from
-the global cache into `dep/<name>/`. This means each version lives on disk once
+the global cache into `lib/<name>/v<N>/`. This means each version lives on disk once
 regardless of how many projects use it.
 
 ---
@@ -102,19 +127,20 @@ regardless of how many projects use it.
 3. Resolve:
      - For each dep in pkg.lua, check lockfile for pinned version
      - For new/changed deps, query registry for matching versions
-     - With lockfile: fetch tarballs lazily (only what's missing from dep/)
+     - With lockfile: fetch tarballs lazily (only what's missing from lib/)
      - Without lockfile: fetch tarballs eagerly in parallel while resolving
-4. Verify dep/ fast path:
-     - For each expected package, check dep/<name>/pkg.lua name+version
+4. Verify lib/ fast path:
+     - For each expected package, check lib/<name>/v<N>/pkg.lua name+version
      - If match: skip (same as bun's early-exit JSON check)
 5. Fetch missing packages (parallel, default --jobs=N where N=CPU count):
      - Check global cache first (~/.crescent/cache/name@version/)
      - Download tarball if not cached; verify checksum
-6. Link: hardlink (or copy) from global cache into dep/<name>/
-7. Write crescent.lock
+6. Link: hardlink (or copy) from global cache into lib/<name>/v<N>/
+7. Write lib/<name>/init.lua redirect pointing at installed major version
+8. Write crescent.lock
 ```
 
-**Fast path**: if `crescent.lock` exists and `dep/` has correct name+version
+**Fast path**: if `crescent.lock` exists and `lib/` has correct name+version
 for every entry → skip all network entirely. This is the primary speedup for
 repeat installs (CI warm cache, developer re-install).
 
@@ -175,8 +201,9 @@ GET /<name>/<version>.tar.gz            → tarball
 GET /<name>/<version>.sha256            → checksum file
 ```
 
-Tarball contains the package files with `pkg.lua` at root. No `lib/` or
-`dep/` prefix inside — the package manager places them at `dep/<name>/`.
+Tarball contains the package files with `pkg.lua` at root, inside a `v<N>/`
+subdirectory matching the major version. The package manager places them at
+`lib/<name>/v<N>/`.
 
 Registry metadata responses cached in `~/.crescent/cache/<hash>.meta`
 (binary-encoded for fast repeated reads, same principle as bun's `.npm` cache).
@@ -218,7 +245,7 @@ cr install               # install all deps from pkg.lua / lockfile
 cr install --frozen      # CI mode: error on lockfile divergence
 cr add sha1              # add to pkg.lua deps, install, update lockfile
 cr add sha1@1.0.0        # pin exact version
-cr remove sha1           # remove from pkg.lua, update lockfile, delete dep/sha1/
+cr remove sha1           # remove from pkg.lua, update lockfile, delete lib/sha1/
 cr update sha1           # re-resolve to latest matching version, update lockfile
 cr update                # re-resolve all
 cr publish               # publish to registry (TBD)
@@ -291,9 +318,8 @@ the bottleneck shifts to network latency, at which point we're on equal footing.
 ## Open questions (design TBD before implementation)
 
 - **Package name scoping**: flat names (`sha1`) vs namespaced (`rhi/sha1`)?
-  Flat is simpler and consistent with the existing `dep.sha1` convention.
-  Namespacing avoids collisions if third-party registries are supported later.
-  Proposal: flat names for now, registry-qualified in lockfile URL.
+  Flat is simpler. Namespacing avoids collisions if third-party registries are
+  supported later. Proposal: flat names for now, registry-qualified in lockfile URL.
 
 - **Version resolution algorithm**: full semver ranges (`^1.0`, `~1.2`) or
   exact-only? Full semver is more useful but requires a semver parser.
@@ -305,9 +331,9 @@ the bottleneck shifts to network latency, at which point we're on equal footing.
 - **FFI packages**: packages with `.so`/`.dylib` prebuilt binaries need
   platform filtering (cpu + os in pkg.lua). Design slot exists; skip for v1.
 
-- **`dep/` in VCS**: vendor-first means `dep/` is committed. The lockfile
-  is then redundant for reproducibility but remains useful for `cr update`
-  and registry provenance. Keep both.
+- **`lib/` in VCS**: vendor-first means installed packages under `lib/` are
+  committed. The lockfile is then redundant for reproducibility but remains
+  useful for `cr update` and registry provenance. Keep both.
 
 - **Lockfile parser**: hand-written TOML-like parser vs using lunajson (JSON
   lockfile)? JSON is simpler to parse but less readable in diffs. Lean toward
