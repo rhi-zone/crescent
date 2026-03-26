@@ -247,6 +247,36 @@ The three factors multiply. For a 5-field 90-byte object:
 The multipliers compound: 10x scanning × 15x table × ∞x strings ≈ overall
 10–20x gap depending on input characteristics.
 
+### Correction: the Node.js comparison
+
+The simdjson comparison is apples-to-oranges (C struct vs Lua table). The fair
+comparison is Node.js `JSON.parse`, which also returns a language-native object.
+
+Measured on the same 90B input (Node.js 24, LuaJIT 2.1):
+
+| scenario | Lua pure | Node.js V8 |
+|---|---|---|
+| same structure repeated (warm shape cache) | 1052 ns → 86 MB/s | 355 ns → 253 MB/s |
+| different structure each call (cold) | 1981 ns → 46 MB/s | 3752 ns → 24 MB/s |
+
+**V8 is 3x faster on warm shapes. Lua is 1.9x faster on cold shapes.**
+
+V8's advantage comes entirely from **hidden classes** (also called "shapes" or
+"maps"). After parsing `{"name":…,"age":…,"city":…}` once, V8 records the
+property sequence as a transition chain. Subsequent parses with the same
+property order assign values by fixed slot offset — equivalent to
+`obj->slot[0]=v0; obj->slot[1]=v1` in C, not hash table inserts. That is the
+10.5x internal speedup (355 ns warm vs 3752 ns cold).
+
+Lua has no equivalent. Every `t[key] = val` is always a hash insert regardless
+of parse history. LuaJIT traces the loop body but cannot specialise the hash
+table layout across calls the way V8's hidden class system does.
+
+The practical upshot: benchmarks that warm V8's shape cache (same JSON
+structure in a tight loop) make Node.js look much faster than it is for
+production workloads with varied JSON shapes. For one-shot or heterogeneous
+JSON decoding, Lua is faster.
+
 ### What a `simd.lua` tier can and cannot do
 
 A `simd.lua` tier that calls simdjson and then builds a Lua table would
@@ -263,7 +293,8 @@ the `decode → Lua table` contract.
 that return Lua tables. The remaining gap is an architectural constraint of the
 Lua VM (hash tables + string interning), not an implementation flaw. A simd.lua
 tier is worth implementing only if it returns a lazy DOM userdata, not a Lua
-table.
+table. The Node.js gap is 3x for same-structure workloads and does not exist for
+varied-structure workloads.
 
 ---
 
