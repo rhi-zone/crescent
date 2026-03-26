@@ -6,6 +6,83 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-03-26: pure Lua Myers diff and three-way merge (lib/merge3)
+
+**Commit:** `ada0caf`
+
+Replaces `diff3` shell invocation in `lib/pkg/install.lua` with a pure Lua
+implementation. No external dependency — works on Alpine, Windows, macOS,
+anywhere LuaJIT runs.
+
+Benchmark: `luajit docs/perf/merge.lua 200`
+
+### diff throughput by file size (5% of lines changed)
+
+| scenario | lines | µs/call | Klines/s | KB/s |
+|----------|-------|---------|----------|------|
+| diff 100 lines  | 100  | 12.7  | 7,892  | 53,331 |
+| diff 500 lines  | 500  | 105.9 | 4,720  | 35,881 |
+| diff 1000 lines | 1000 | 348.2 | 2,872  | 22,136 |
+| diff 5000 lines | 5000 | 6,637 | 753    | 6,459  |
+
+Targets: < 5 ms for 1000-line file. **0.35 ms — 14x under target.**
+
+### merge3 throughput by conflict density
+
+| scenario | lines | µs/call | Klines/s | conflicts |
+|----------|-------|---------|----------|-----------|
+| 0% conflict, 5% ours-only edit | 1000 | ~0     | fast-path¹ | 0  |
+| 5% conflict                    | 1000 | 738    | 1,355    | 50        |
+| 20% conflict                   | 1000 | 7,521  | 133      | 200       |
+| 500 lines, 10% conflict        | 500  | 638    | 783      | 50        |
+| 5000 lines, 2% conflict        | 5000 | 8,701  | 575      | 97        |
+
+¹ Fast path: when theirs == base, returns ours immediately (string equality).
+
+Targets: < 10 ms for 1000-line file with 10 conflict regions. **0.74 ms at 5%
+conflict density (50 conflicts) — 13x under target.**
+
+### Raw benchmark output
+
+```
+=== diff throughput by file size ===
+scenario                                   lines   µs/call    Klines/s        KB/s
+----------------------------------------------------------------------------------
+diff (100 lines, 5% changed)                 100       12.7      7891.7     53330.8
+diff (500 lines, 5% changed)                 500      105.9      4720.2     35881.0
+diff (1000 lines, 5% changed)               1000      348.2      2871.8     22136.1
+diff (5000 lines, 5% changed)               5000     6636.8       753.4      6458.5
+
+=== merge3 throughput by conflict density ===
+scenario                                           lines   µs/call    Klines/s        KB/s  conflicts
+--------------------------------------------------------------------------------------------------
+merge3 0% conflict, 5% ours-only edit               1000        0.0  33333333.3  256933593.8         0
+merge3 5% conflict                                  1000      738.0      1355.1     10445.0        50
+merge3 20% conflict                                 1000     7521.3       133.0      1024.8       200
+merge3 500 lines, 10% conflict, 5% mod               500      638.4       783.2      5953.6        50
+merge3 5000 lines, 2% conflict                      5000     8701.2       574.6      4926.2        97
+
+=== correctness spot-check ===
+  ok: diff(10 lines) reconstructs correctly
+  ok: diff(100 lines) reconstructs correctly
+  ok: diff(500 lines) reconstructs correctly
+  ok: all round-trip invariants hold
+```
+
+### Comparison to diff3 shell call
+
+The previous `diff3 -m` invocation required:
+- diff3 binary present on PATH (not available on Alpine, Windows)
+- 2–3 temp files per merged file (os.tmpname + write + read + cleanup)
+- fork+exec overhead (~1–5 ms per file on Linux)
+- Complex exit-code detection workaround for LuaJIT vs Lua 5.1
+
+The pure Lua implementation: zero shell calls, zero temp files, zero external
+dependency. For a package with 20 files needing merge, savings are ~20–100 ms
+of fork overhead alone, plus elimination of temp file I/O.
+
+---
+
 ## 2026-03-17: SHA-256 tiered implementation
 
 **Commit:** `bb16c30`
