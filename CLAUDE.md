@@ -87,6 +87,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **LuaJIT-first, not LuaJIT-only.** Target LuaJIT but don't gratuitously break Lua 5.2+ compatibility. Pure Lua code shouldn't depend on LuaJIT quirks. FFI and `bit.*` are inherently LuaJIT-only, but everything else should work on standard Lua if it doesn't sacrifice performance.
 
+**Cross-platform.** Vendorable means portable — libraries must work on Linux, macOS, and Windows unless they explicitly wrap a platform-specific API (like epoll). Don't assume any single OS.
+
 **Composable.** Libraries depend on each other minimally. Pick what you need, ignore the rest.
 
 **Single source of truth.** The typechecker reads FFI cdefs directly — no duplicate type definitions.
