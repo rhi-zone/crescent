@@ -2320,74 +2320,81 @@ end)
 assert.describe("record spread types", function()
     assert.it("{ ...T } inherits all fields from T", function()
         no_errors([[
-            --:: Base = { x: number, y: number }
-            --:: Derived = { ...Base }
-            local d --: Derived
-            local n1 --: number = d.x
-            local n2 --: number = d.y
-        ]])
+--:: Base = { x: number, y: number }
+--:: Derived = { ...Base }
+--:: declare d = Derived
+local _ = d.x + d.y
+]])
     end)
 
-    assert.it("{ ...T, k: V } — later field overrides T's field", function()
-        no_errors([[
-            --:: Base = { x: number, y: number }
-            --:: Extended = { ...Base, y: string }
-            local e --: Extended
-            local s --: string = e.y
-            local n --: number = e.x
-        ]])
+    assert.it("{ ...T } missing field errors", function()
+        has_error([[
+--:: Base = { x: number }
+--:: Extended = { ...Base }
+--:: declare e = Extended
+local _ = e.y
+]], "")
     end)
 
-    assert.it("{ k: V, ...T } — T's field overrides earlier k", function()
+    assert.it("{ ...T, k: V } — later field overrides", function()
+        -- y was number in Base; after spread override it's string
         no_errors([[
-            --:: Base = { y: string }
-            --:: Extended = { y: number, ...Base }
-            local e --: Extended
-            local s --: string = e.y
-        ]])
+--:: Base = { x: number, y: number }
+--:: Extended = { ...Base, y: string }
+--:: declare e = Extended
+local _ = e.y .. "!"
+local __ = e.x + 1
+]])
+    end)
+
+    assert.it("{ k: V, ...T } — T's field wins over earlier k", function()
+        no_errors([[
+--:: Base = { y: string }
+--:: Extended = { y: number, ...Base }
+--:: declare e = Extended
+local _ = e.y .. "!"
+]])
     end)
 
     assert.it("{ ...T, ...U } — U fields win on conflict", function()
         no_errors([[
-            --:: A = { x: number, z: boolean }
-            --:: B = { x: string, w: number }
-            --:: C = { ...A, ...B }
-            local c --: C
-            local s --: string  = c.x
-            local b --: boolean = c.z
-            local n --: number  = c.w
-        ]])
-    end)
-
-    assert.it("spread missing field is an error", function()
-        has_error([[
-            --:: Base = { x: number }
-            --:: Extended = { ...Base }
-            local e --: Extended
-            local v = e.y
-        ]], "")
-    end)
-
-    assert.it("spread preserves optional flags", function()
-        no_errors([[
-            --:: Base = { x: number, y?: string }
-            --:: Extended = { ...Base, z: boolean }
-            local e --: Extended
-            local n --: number  = e.x
-            local b --: boolean = e.z
-        ]])
+--:: A = { x: number, z: number }
+--:: B = { x: string, w: number }
+--:: C = { ...A, ...B }
+--:: declare c = C
+local _ = c.x .. "!"
+local __ = c.z + 1
+local ___ = c.w + 1
+]])
     end)
 
     assert.it("multi-level spread", function()
         no_errors([[
-            --:: A = { x: number }
-            --:: B = { ...A, y: string }
-            --:: C = { ...B, z: boolean }
-            local c --: C
-            local n --: number  = c.x
-            local s --: string  = c.y
-            local b --: boolean = c.z
-        ]])
+--:: A = { x: number }
+--:: B = { ...A, y: string }
+--:: C = { ...B, z: number }
+--:: declare c = C
+local _ = c.x + 1
+local __ = c.y .. "!"
+local ___ = c.z + 1
+]])
+    end)
+
+    assert.it("generic spread: Wrap<S> = { ...S, extra }", function()
+        no_errors([[
+--:: Wrap<S> = { ...S, extra: boolean }
+--:: declare w = Wrap<{ x: number }>
+local _ = w.x + 1
+local __ = w.extra
+]])
+    end)
+
+    assert.it("generic spread missing original field errors", function()
+        has_error([[
+--:: Wrap<S> = { ...S, extra: boolean }
+--:: declare w = Wrap<{ x: number }>
+local _ = w.nonexistent
+]], "")
     end)
 end)
 

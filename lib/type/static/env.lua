@@ -431,11 +431,39 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
 
     if tag == TAG_TABLE then
         local new_field_ids = {}
+        local field_pos = {}  -- name_id -> index in new_field_ids; later entries win
+        local function add_subst_field(new_fid, name_id)
+            if field_pos[name_id] then
+                new_field_ids[field_pos[name_id]] = new_fid
+            else
+                new_field_ids[#new_field_ids + 1] = new_fid
+                field_pos[name_id] = #new_field_ids
+            end
+        end
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
-            local new_type = substitute_inner(ctx, fe.type_id, mapping, seen)
-            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+            if fe.name_id == -1 then
+                -- Spread placeholder: substitute inner, then expand if now concrete.
+                local new_sp = substitute_inner(ctx, fe.type_id, mapping, seen)
+                local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp))
+                local exp_id = types_mod.find(ctx, sp_t.data[0])
+                local exp_t  = ctx.types:get(exp_id)
+                if exp_t.tag == TAG_TABLE then
+                    for j = exp_t.data[0], exp_t.data[0] + exp_t.data[1] - 1 do
+                        local inner_fid = ctx.lists:get(j)
+                        local inner_fe  = ctx.fields:get(inner_fid)
+                        local copied = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                        add_subst_field(copied, inner_fe.name_id)
+                    end
+                else
+                    -- Still unresolved — keep placeholder
+                    new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, -1, new_sp, 0)
+                end
+            else
+                local new_type = substitute_inner(ctx, fe.type_id, mapping, seen)
+                add_subst_field(types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0), fe.name_id)
+            end
         end
         local new_indexers = {}
         local is, il = t.data[2], t.data[3]

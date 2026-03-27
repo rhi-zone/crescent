@@ -431,8 +431,12 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                         add_field(new_fid, inner_fe.name_id)
                     end
                 end
-                -- If inner type is not a concrete table (TAG_VAR etc.), skip silently.
-                -- Generic spreads require unify.lua support and are tracked as future work.
+                -- Inner type is not yet concrete (TAG_NAMED generic param, TAG_VAR, etc.).
+                -- Keep as a runtime TAG_SPREAD placeholder field so substitute_inner
+                -- in env.lua can expand it once the type variable is instantiated.
+                local sp = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
+                ctx.types:get(sp).data[0] = inner_tid
+                field_ids[#field_ids + 1] = types_mod.make_field(ctx, -1, sp, 0)
             else
                 local ft = resolve_annotation_type(ctx, fe.type_id, seen)
                 add_field(types_mod.make_field(ctx, fe.name_id, ft, fe.flags), fe.name_id)
