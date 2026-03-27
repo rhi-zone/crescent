@@ -238,10 +238,17 @@ describe("ai/providers/openai_compat", function()
 
 	it("should have a registry of well-known providers", function()
 		local expected = {
+			-- tier 1: major
 			"openai", "groq", "deepseek", "mistral", "xai", "perplexity", "cerebras",
+			-- tier 2: inference platforms
 			"togetherai", "fireworks", "deepinfra", "sambanova", "nebius", "novita",
-			"hyperbolic", "lambda", "openrouter", "huggingface", "moonshot", "yi",
-			"cohere", "ovh",
+			"hyperbolic", "lambda",
+			-- tier 3: aggregators
+			"openrouter", "huggingface",
+			-- tier 3b: open-source hosts
+			"chutes", "featherless", "friendli", "parasail", "mancer", "infermatic", "venice",
+			-- tier 4: regional/niche
+			"moonshot", "yi", "ai21", "alibaba", "stepfun", "minimax", "cohere", "ovh",
 		}
 		for _, name in ipairs(expected) do
 			T.ok(compat.registry[name], name .. " in registry")

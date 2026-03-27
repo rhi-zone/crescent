@@ -492,6 +492,36 @@ mod.registry = {
 		host = "router.huggingface.co",
 		api_key_env = "HF_TOKEN",
 	},
+	-- ── Tier 3b: open-source model hosts ───────────────────────────────────
+	chutes = {
+		host = "api.chutes.ai",
+		api_key_env = "CHUTES_API_KEY",
+	},
+	featherless = {
+		host = "api.featherless.ai",
+		api_key_env = "FEATHERLESS_API_KEY",
+	},
+	friendli = {
+		host = "inference.friendli.ai",
+		api_key_env = "FRIENDLI_TOKEN",
+	},
+	parasail = {
+		host = "api.parasail.io",
+		api_key_env = "PARASAIL_API_KEY",
+	},
+	mancer = {
+		host = "neuro.mancer.tech",
+		api_key_env = "MANCER_API_KEY",
+	},
+	infermatic = {
+		host = "api.infermatic.ai",
+		api_key_env = "INFERMATIC_API_KEY",
+	},
+	venice = {
+		host = "api.venice.ai",
+		chat_path = "/api/v1/chat/completions",
+		api_key_env = "VENICE_API_KEY",
+	},
 	-- ── Tier 4: regional / niche ────────────────────────────────────────────
 	moonshot = {
 		host = "api.moonshot.cn",
@@ -500,6 +530,25 @@ mod.registry = {
 	yi = {
 		host = "api.lingyiwanwu.com",
 		api_key_env = "YI_API_KEY",
+	},
+	ai21 = {
+		host = "api.ai21.com",
+		chat_path = "/studio/v1/chat/completions",
+		api_key_env = "AI21_API_KEY",
+	},
+	alibaba = {
+		host = "dashscope-intl.aliyuncs.com",
+		chat_path = "/compatible-mode/v1/chat/completions",
+		embeddings_path = "/compatible-mode/v1/embeddings",
+		api_key_env = "DASHSCOPE_API_KEY",
+	},
+	stepfun = {
+		host = "api.stepfun.com",
+		api_key_env = "STEPFUN_API_KEY",
+	},
+	minimax = {
+		host = "api.minimaxi.chat",
+		api_key_env = "MINIMAX_API_KEY",
 	},
 	cohere = {
 		host = "api.cohere.ai",
