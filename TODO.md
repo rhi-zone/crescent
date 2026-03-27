@@ -9,6 +9,10 @@
 - [x] **Literal table not assignable to indexer type** — fixed 0b40861
 - [x] **Missing return detection** — fixed; `is_definitely_returning` analysis in constrain.lua emits implicit nil C_RETURN for non-definitely-returning annotated functions.
 
+## typechecker missing features
+
+- [ ] **Record spread types** — `{ ...T, k: V }`, `{ ...T, ...U }`, `{ k: V, ...T }` as type-level operations. `TAG_SPREAD` is parsed and propagated but unify.lua has no rule to merge spread fields into a concrete table type. Semantics: spread fields are merged left-to-right, later fields win on conflict. Load-bearing for: compile-time-safe builder pattern (`Builder<{ ...S, ...T }>`), `Partial`/`Pick`/`Omit` composed with spreads (already used in docs/type-system.md examples), any API that tracks accumulated type state generically. Implementation: unify.lua needs a `TAG_SPREAD` case that resolves the inner type and merges its fields into the containing table.
+
 ## typechecker narrowing gaps
 
 - [ ] **Narrowing doesn't apply to locals assigned from function call returns** — at narrowing time during constraint generation, locals assigned from function calls are still TAG_VAR (unsolved constraint variables). `types.subtract(TAG_VAR, T_NIL)` returns TAG_VAR unchanged. Workaround: add `--: T?` annotation to the receiving local so it gets a concrete type. Affects all `if not x then return end` patterns where `x` comes from a function call.
