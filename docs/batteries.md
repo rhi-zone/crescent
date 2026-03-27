@@ -39,6 +39,14 @@ for every LLM call and tool invocation.
 | Persistence | `lib/sqlite` |
 | Protocol / API | `lib/http`, `lib/jsonrpc` |
 
+### Full-stack dashboard
+
+A production admin dashboard/control plane: web backend, auth, database with
+migrations, realtime updates, structured logging, frontend via `lib/reactive_optics`
++ `lib/lua2ts`. Not a new library — an application pattern that exercises the entire
+stack end-to-end. If this works without reaching outside crescent, the ecosystem is
+real for the web/ops crowd.
+
 The key insight: the model is not the container of state. State lives in a real data
 structure; the model is a function over it. The context window is a view, not the truth.
 
