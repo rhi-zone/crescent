@@ -95,15 +95,17 @@
   [x] dep.* coupling resolved (a79167d) — 8 dep paths across 28 files updated.
   [x] HTML docgen output (582247c) — `--format html` with inline CSS.
 
-- [ ] **Typechecker: self-referential `--::` declarations** — `ai_provider` type in
-  `lib/ai/types.lua` references itself (fields have `ai_provider` return types).
-  The checker reports "undefined type" for the self-reference. Same-file `--::` types
-  should be visible to other `--::` and `--:` annotations in the same file.
-  **High priority** — blocks type-checking any library with recursive type declarations.
+- [x] **Typechecker: multiline `--::` declarations** — lexer now concatenates
+  continuation `--::` lines when brackets are unbalanced. Forward references between
+  `--::` types in the same file work via the existing two-pass design.
+  **Note**: multi-return function types in record fields must use parens:
+  `generate: (req: T) -> (R?, string?)` not `-> R?, string?` (comma is ambiguous
+  with field separator).
 
-- [ ] **Typechecker: narrowing after early return** — `if not x then return end` should
-  narrow `x` from `T?` to `T` on subsequent lines. Currently doesn't, causing false
-  "cannot perform arithmetic on nil" errors (e.g. `lib/http/stream.lua`).
+- [ ] **Typechecker: annotation parser multi-return in record fields** — bare
+  `-> R?, string?` inside `{ ... }` is ambiguous (`,` could be field separator or
+  multi-return separator). Workaround: parenthesize returns `-> (R?, string?)`.
+  Could fix by parsing return types greedily until `,` followed by an identifier + `:`.
 
 - [ ] **Typechecker: type-level imports** — `--:: import "lib.ai.types"` or similar,
   analogous to TypeScript's `import type`. The checker already resolves `require()` for

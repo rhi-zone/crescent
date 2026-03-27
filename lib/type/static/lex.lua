@@ -527,6 +527,75 @@ function Lexer:_capture_line_annotation(ann_line, ann_col)
         content_end = self.pos - 1  -- don't include the newline byte
     end
     local content = ffi.string(self.src + start, content_end - start)
+
+    -- For ANN_DECL, check for continuation lines starting with --::
+    -- Only continue if brackets are unbalanced (the declaration isn't complete yet).
+    if kind == defs.ANN_DECL then
+        local parts = { content }
+        local depth = 0
+        for i = 1, #content do
+            local c = content:byte(i)
+            if c == 123 or c == 40 or c == 91 then depth = depth + 1  -- { ( [
+            elseif c == 125 or c == 41 or c == 93 then depth = depth - 1  -- } ) ]
+            end
+        end
+        while depth > 0 and self.b ~= EOF do
+            -- Save position to restore if next line isn't a continuation
+            local save_pos = self.pos
+            local save_b = self.b
+            local save_line = self.line
+            local save_col = self.col
+            -- Skip newline
+            if is_newline(self.b) then self:_incline() end
+            -- Skip leading whitespace (spaces/tabs)
+            while self.b == B_SPACE or self.b == 9 do self:_nextbyte() end
+            -- Check for --::
+            local is_cont = false
+            if self.b == B_MINUS then
+                self:_nextbyte()
+                if self.b == B_MINUS then
+                    self:_nextbyte()
+                    if self.b == B_COLON then
+                        self:_nextbyte()
+                        if self.b == B_COLON then
+                            self:_nextbyte()
+                            is_cont = true
+                        end
+                    end
+                end
+            end
+            if not is_cont then
+                -- Not a continuation line, restore position
+                self.pos = save_pos
+                self.b = save_b
+                self.line = save_line
+                self.col = save_col
+                break
+            end
+            -- Continuation line confirmed, skip optional space
+            if self.b == B_SPACE then self:_nextbyte() end
+            -- Capture rest of line
+            local cstart = self.pos - 1
+            while self.b ~= EOF and not is_newline(self.b) do
+                self:_nextbyte()
+            end
+            local cend = self.pos
+            if self.b ~= EOF then cend = self.pos - 1 end
+            local line_content = ffi.string(self.src + cstart, cend - cstart)
+            parts[#parts + 1] = line_content
+            -- Update bracket depth
+            for i = 1, #line_content do
+                local c = line_content:byte(i)
+                if c == 123 or c == 40 or c == 91 then depth = depth + 1
+                elseif c == 125 or c == 41 or c == 93 then depth = depth - 1
+                end
+            end
+        end
+        if #parts > 1 then
+            content = table.concat(parts, " ")
+        end
+    end
+
     self.annotations[ann_line] = {
         kind = kind,
         content = content,
