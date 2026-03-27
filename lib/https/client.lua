@@ -3,6 +3,9 @@ local socket = require("lib.ljsocket")
 local tls = require("lib.tls")
 local format = require("lib.http.format")
 
+--:: http_client_request = { method: string, host: string, port?: number, path: string, headers: { [string]: string }, body: string }
+--:: http_client_response = { version: number, status: number, status_text: string, headers: { [string]: string }, body: string }
+
 local mod = {}
 
 local buf = ffi.new("char[65536]")
@@ -66,6 +69,7 @@ mod.request = function(req)
 	end
 
 	-- read response headers
+	--: string[]
 	local parts = {}
 	local total = 0
 	local header_end
@@ -95,10 +99,10 @@ mod.request = function(req)
 	end
 
 	-- read remaining body if Content-Length specified
-	local content_length = res.headers["content-length"]
-	if content_length then
-		content_length = tonumber(content_length[1])
-		if content_length then
+	local cl_header = res.headers["content-length"]
+	if cl_header then
+		local content_length = tonumber(cl_header[1]) or 0
+		if content_length > 0 then
 			local body_start = header_end + 4
 			local body_so_far = #data - body_start
 			while body_so_far < content_length do
