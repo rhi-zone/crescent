@@ -122,6 +122,21 @@ protocol definition is the library.
 **`lib/openapi`** — OpenAPI 3.x client/server from a spec file. Request validation,
 response serialization, typed route handlers.
 
+### Missing — frontend vertical
+
+**`lib/reactive`** — reactive optics. Signals focused through optics (lenses, prisms,
+traversals) as the reactivity primitive. `signal:focus(lens)` produces a derived signal
+that reads and writes structurally through the lens; reactivity flows through optic
+composition rather than imperative synchronization functions. Lawful by construction —
+lens laws (get-set, set-get, set-set) guarantee derived state is always consistent.
+
+Built on `lib/fp/` (lenses, prisms, traversals already exist there). The novel piece is
+the marriage: optics as the *structure* of derived state, signals as the *propagation*
+mechanism. Prior art: `~/git/rhizone/rainbow/` (TypeScript prototype).
+
+Paired with `lib/lua2ts`: write reactive UI logic in Lua, emit typed TypeScript, run in
+the browser. Same optic algebra server-side and client-side, no impedance mismatch.
+
 ### Missing — world state
 
 **`lib/ecs` or equivalent** — durable, queryable, mutable entity store. Named entities,
