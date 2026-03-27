@@ -16,6 +16,12 @@
 - [x] **Multi-return annotation on single-var capture** — fixed in solve_sub: when actual is TAG_TUPLE and expected is scalar, project first element. Annotated `local x --: string; x = f()` where f returns (string, number) now type-checks correctly.
 - [x] **Optional field absence in structural assignment** — already works. `{x=1}` satisfies `{x: number, y?: number}` because unify.lua skips absent optional fields (line 470: `if band(bfe.flags, FLAG_OPTIONAL) == 0 then`).
 
+## future libraries
+
+- [ ] **`lib/task/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
+
+- [ ] **`lib/world/`** — LambdaMOO-analogue world simulation primitives. Entity-component state (user-defined schemas, not hardcoded), spatial graph (locations containing entities), turn loop (input → parse intent → validate → apply mutations → assemble context → render output), sandboxed player script hosting (env-based, `require` whitelist). LLM is the prose/narration layer — reads curated world state, writes output, optionally returns structured mutation intents. Input and output are user-defined renderers (RP prose, MUD-style room descriptions, etc.) over the same world model.
+
 ## priorities (medium horizon)
 
 - [ ] **Registry + docs site** (`pkg.crescent.run`) — see `docs/registry-design.md` for full vision.
