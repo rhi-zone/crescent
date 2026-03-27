@@ -1,5 +1,4 @@
--- https://www.ietf.org/rfc/rfc1035.txt
--- section 4
+-- RFC 1035 §4 — Message format
 
 local mod = {}
 
@@ -11,7 +10,7 @@ local sub = string.sub; local concat = table.concat
 
 -- LINT: disallow duplicate values
 
--- 3.2.2
+-- RFC 1035 §3.2.2 — TYPE values
 --[[@enum dns_type]]
 mod.type = {
 	A = 1, --[[a host address - see RFC1035]]
@@ -115,6 +114,8 @@ end
 mod.type_name = {}
 for k, v in pairs(mod.type) do mod.type_name[v] = k end
 
+-- RFC 1035 §4.1.4 — Name compression
+-- RFC 1035 §3.1 — Label format
 mod.string_to_domain_name = function (s, i) --[[@param s string]] --[[@param i integer]]
 	i = i or 1
 	local length = byte(s, i)
@@ -139,10 +140,20 @@ mod.string_to_domain_name = function (s, i) --[[@param s string]] --[[@param i i
 	return parts, i
 end
 
+-- RFC 1035 §3.1 — Encode domain name to wire format
+mod.domain_name_to_string = function(parts)
+	local out = {}
+	for _, part in ipairs(parts) do
+		assert(#part <= 0x3f, "domain_name_to_string: label too long")
+		out[#out + 1] = char(#part) .. part
+	end
+	return concat(out)
+end
+
 mod.decoders = {
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.1]]
+	-- RFC 1035 §3.3.1
 	[mod.type.CNAME] = mod.string_to_domain_name,
-		--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.2]]
+	-- RFC 1035 §3.3.2
 	[mod.type.HINFO] = function (s, i) --[[@param s string]]
 		i = i or 1
 		local length = s:byte(i)
@@ -153,24 +164,24 @@ mod.decoders = {
 		i = i + length + 1
 		return { cpu = cpu, os = os }, i
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.3]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.3 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MB] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.4]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.4 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MD] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.5]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.5 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MF] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.6]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.6 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MG] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.7]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.7 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MINFO] = function (s, i)
 		local rmailbx, emailbx
 		rmailbx, i = mod.string_to_domain_name(s, i)
 		emailbx, i = mod.string_to_domain_name(s, i)
 		return { rmailbx = rmailbx, emailbx = emailbx }, i
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.8]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.8 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.MR] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.9]]
+	-- RFC 1035 §3.3.9
 	[mod.type.MX] = function (s, i)
 		i = i or 1
 		local b1, b2 = s:byte(i, i + 1)
@@ -179,14 +190,13 @@ mod.decoders = {
 		exchange, i = mod.string_to_domain_name(s, i + 2)
 		return { preference = preference, exchange = exchange }, i
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.10]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.3.10 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.NULL] = function (s, i, length) i = i or 1; return s:sub(i, i + length - 1), i + length end,
-	--[[s must be the full string for ns to return the correct values]]
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.11]]
+	-- RFC 1035 §3.3.11 — s must be the full string for ns to return the correct values
 	[mod.type.NS] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.12]]
+	-- RFC 1035 §3.3.12
 	[mod.type.PTR] = mod.string_to_domain_name,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.13]]
+	-- RFC 1035 §3.3.13
 	[mod.type.SOA] = function (s, i) --[[@param s string]] --[[@param i integer]]
 		i = i or 1
 		local mname, rname
@@ -204,7 +214,7 @@ mod.decoders = {
 		local minimum = bor(lshift(b1, 24), lshift(b2, 16), lshift(b3, 8), b4)
 		return { mname = mname, rname = rname, serial = serial, refresh = refresh, retry = retry, expire = expire, minimum = minimum }, i + 20
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.3.14]]
+	-- RFC 1035 §3.3.14
 	[mod.type.TXT] = function (s, i, length) --[[@param s string]]
 		i = i or 1
 		local end_ = i + length - 1
@@ -212,18 +222,19 @@ mod.decoders = {
 		while i <= end_ do
 			local length2 = s:byte(i)
 			ret[#ret+1] = s:sub(i + 1, i + length2)
-			i = i + length + 1
+			i = i + length2 + 1
 		end
-		return ret, length
+		return ret, i
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.4.1]]
+	-- RFC 1035 §3.4.1
 	[mod.type.A] = function (s, i) i = i or 1; return { s:byte(i, i + 3) }, i + 4 end, --[[@param s string]]
-	--[[https://www.rfc-editor.org/rfc/rfc1035#section-3.4.2]] --[[@diagnostic disable-next-line: deprecated]]
+	-- RFC 1035 §3.4.2 --[[@diagnostic disable-next-line: deprecated]]
 	[mod.type.WKS] = function (s, i, length) --[[@param s string]] --[[@param length integer]]
 		i = i or 1; return { address = { s:byte(i, i + 3) }, protocol = s:byte(i + 4), bitmap = s:sub(i + 5, i + length - 1) }, i + length
 	end,
+	-- RFC 3596 §2.2 — AAAA RDATA
 	[mod.type.AAAA] = function (s, i) i = i or 1; return { s:byte(i, i + 15) }, i + 16 end, --[[@param s string]]
-	--[[https://www.rfc-editor.org/rfc/rfc4034#section-5]]
+	-- RFC 4034 §5
 	[mod.type.DS] = function (s, i, length) --[[@param s string]]
 		i = i or 1
 		local b1, b2 = s:byte(i, i + 1)
@@ -233,7 +244,7 @@ mod.decoders = {
 		local digest = s:sub(i + 4, i + length - 1)
 		return { key_tag = key_tag, algorithm = algorithm, digest_type = digest_type, digest = digest }, i + length
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc4034#section-3]]
+	-- RFC 4034 §3
 	[mod.type.RRSIG] = function (s, i, length) --[[@param s string]]
 		local end_ = i + length
 		i = i or 1
@@ -259,7 +270,7 @@ mod.decoders = {
 			signers_name = signers_name, signature = signature,
 		}, end_
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc4034#section-4]]
+	-- RFC 4034 §4
 	[mod.type.NSEC] = function (s, i, length) --[[@param s string]]
 		i = i or 1
 		local end_ = i + length
@@ -289,7 +300,7 @@ mod.decoders = {
 		end
 		return { next_domain_name = next_domain_name, types = types }, end_
 	end,
-	--[[https://www.rfc-editor.org/rfc/rfc4034#section-2]]
+	-- RFC 4034 §2
 	[mod.type.DNSKEY] = function (s, i, length)
 		i = i or 1
 		local b1, b2 = s:byte(i, i + 1)
@@ -303,7 +314,7 @@ mod.decoders = {
 	end,
 }
 
---[[https://www.rfc-editor.org/rfc/rfc4034#appendix-A.1]]
+-- RFC 4034 §2–5 (appendix A.1)
 --[[@enum dnssec_algorithm]]
 mod.dnssec_algorithm = {
 	RSAMD5 = 1, --[[RSA/MD5. NOT RECOMMENDED. - see RFC2537]]
@@ -319,7 +330,7 @@ mod.dnssec_algorithm = {
 mod.dnssec_algorithm_name = {}
 for k, v in pairs(mod.dnssec_algorithm) do mod.dnssec_algorithm_name[v] = k end
 
---[[https://www.rfc-editor.org/rfc/rfc4034#appendix-A.2]]
+-- RFC 4034 §2–5 (appendix A.2)
 --[[@enum dnssec_digest_type]]
 mod.dnssec_digest_type = {
 	["SHA-1"] = 1, --[[MANDATORY]]
@@ -327,9 +338,56 @@ mod.dnssec_digest_type = {
 --[[@type table<dnssec_digest_type, string>]]
 mod.dnssec_digest_type_name = {}
 
--- TODO: mod.encoders
+mod.encoders = {
+	-- RFC 1035 §3.3.1
+	[mod.type.CNAME] = mod.domain_name_to_string,
+	-- RFC 1035 §3.3.11
+	[mod.type.NS] = mod.domain_name_to_string,
+	-- RFC 1035 §3.3.12
+	[mod.type.PTR] = mod.domain_name_to_string,
+	-- RFC 1035 §3.3.14
+	[mod.type.TXT] = function(strs)
+		local out = {}
+		for _, s in ipairs(strs) do
+			out[#out + 1] = char(#s) .. s
+		end
+		return concat(out)
+	end,
+	-- RFC 1035 §3.4.1
+	[mod.type.A] = function(arr)
+		return char(arr[1], arr[2], arr[3], arr[4])
+	end,
+	-- RFC 3596 §2.2
+	[mod.type.AAAA] = function(arr)
+		return char(
+			arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7], arr[8],
+			arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15], arr[16]
+		)
+	end,
+	-- RFC 1035 §3.3.9
+	[mod.type.MX] = function(rec)
+		local parts = mod.domain_name_to_string(rec.exchange)
+		return char(rshift(rec.preference, 8), band(rec.preference, 0xff)) .. parts
+	end,
+	-- RFC 1035 §3.3.13
+	[mod.type.SOA] = function(rec)
+		local mname = mod.domain_name_to_string(rec.mname)
+		local rname = mod.domain_name_to_string(rec.rname)
+		return mname .. rname .. char(
+			rshift(rec.serial, 24), band(rshift(rec.serial, 16), 0xff), band(rshift(rec.serial, 8), 0xff), band(rec.serial, 0xff),
+			rshift(rec.refresh, 24), band(rshift(rec.refresh, 16), 0xff), band(rshift(rec.refresh, 8), 0xff), band(rec.refresh, 0xff),
+			rshift(rec.retry, 24), band(rshift(rec.retry, 16), 0xff), band(rshift(rec.retry, 8), 0xff), band(rec.retry, 0xff),
+			rshift(rec.expire, 24), band(rshift(rec.expire, 16), 0xff), band(rshift(rec.expire, 8), 0xff), band(rec.expire, 0xff),
+			rshift(rec.minimum, 24), band(rshift(rec.minimum, 16), 0xff), band(rshift(rec.minimum, 8), 0xff), band(rec.minimum, 0xff)
+		)
+	end,
+	-- RFC 1035 §3.3.2
+	[mod.type.HINFO] = function(rec)
+		return char(#rec.cpu) .. rec.cpu .. char(#rec.os) .. rec.os
+	end,
+}
 
--- 3.2.4
+-- RFC 1035 §3.2.4 — CLASS values
 --[[@enum dns_class]]
 mod.class = {
 	IN = 1, --[[the Internet]]
@@ -361,6 +419,9 @@ for k, v in pairs(mod.response_code) do mod.response_code_name[v] = k end
 -- TODO: encoding queries, using compression
 
 -- remember all names must end with the root ("")
+-- RFC 1035 §4.1.1 — Header
+-- RFC 1035 §4.1.2 — Question
+-- RFC 1035 §4.1.3 — Resource record
 --[[@param msg dns_message]]
 mod.dns_message_to_string = function (msg)
 	local question_count = #(msg.questions or empty_table)
@@ -432,6 +493,9 @@ mod.dns_message_to_string = function (msg)
 	return concat(parts)
 end
 
+-- RFC 1035 §4.1.1 — Header
+-- RFC 1035 §4.1.2 — Question
+-- RFC 1035 §4.1.3 — Resource record
 --[[@param s string]]
 mod.string_to_dns_message = function (s)
 	assert(#s >= 12, "string_to_dns_message: message too short, length was " .. #s)

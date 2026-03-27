@@ -1,3 +1,4 @@
+-- Display formatters for decoded DNS RDATA (see RFC 1035 §3.3, RFC 3596 §2.2, RFC 4034 §2–5)
 local dns = require("lib.dns.format")
 
 local mod = {}

@@ -14,7 +14,7 @@ local lower = string.lower
 local concat = table.concat
 
 -- RFC 9110 §9.1 — Methods
---: table
+--: { [string]: string }
 mod.method = {
 	GET = "GET", HEAD = "HEAD", POST = "POST", PUT = "PUT",
 	DELETE = "DELETE", CONNECT = "CONNECT", OPTIONS = "OPTIONS",
@@ -284,7 +284,7 @@ mod.http_response_to_string = function(res)
 end
 
 -- Backward-compatible: serialize client request. Old API used .path, .host at top level.
---: (http_client_request) -> string
+--: ({ method: string?, path: string?, host: string, headers: { [string]: string[] }?, body: string? }) -> string
 mod.http_client_request_to_string = function(req)
 	local parts = {}
 	parts[#parts + 1] = (req.method or "GET") .. " " .. (req.path or "/") .. " HTTP/1.1\r\nHost: " .. req.host .. "\r\n"

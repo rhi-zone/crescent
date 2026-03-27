@@ -709,6 +709,27 @@ See `docs/pkg-design.md` for full design.
 - [ ] `cr publish` — not yet implemented
 - [ ] Package manifest `files` field — declare which files get installed (source only; tests, benchmarks, fixtures, docs stay in the repo). Installed footprint should be just the `.lua` files needed to run. Key to avoiding node_modules-scale bloat when vendoring.
 
+## protocol rewrites — deferred
+
+- [ ] **HTTP/1.1 server rewrite** — async, keep-alive (Connection: keep-alive), persistent connections. Blocked on socket layer rewrite.
+- [ ] **HTTP/1.1 client rewrite** — connection pooling, redirect following, proper error recovery.
+- [ ] **HTTPS rewrite** — module-level TLS state bug, `ffi.new("FIXME")` in serverx. Blocked on socket + TLS.
+- [ ] **HTTP/2** (RFC 9113) — HPACK header compression, binary framing, stream multiplexing, flow control, server push. Major new implementation.
+- [ ] **HTTP/3** (RFC 9114) + **QUIC** (RFC 9000) — UDP-based transport, 0-RTT, connection migration. Requires QUIC implementation first.
+- [ ] **HTTP trailer fields** (RFC 9112 §7) — currently ignored in stream.lua chunks().
+- [ ] **Transfer-Encoding: gzip/deflate** decompression in stream.lua.
+- [ ] **Path traversal audit** — `lib/http/router/static.lua` and `staticx.lua` have directory traversal vulnerabilities.
+- [ ] **WebSocket: permessage-deflate** (RFC 7692) — compression extension.
+- [ ] **WebSocket: max frame/message size policy** — currently unbounded, memory exhaustion risk.
+- [ ] **WebSocket: client-side** — initiating connections (currently server-side only).
+- [ ] **WebSocket: subprotocol negotiation** (RFC 6455 §4.2.2).
+- [ ] **DNS: UDP client** (RFC 1035 §4.2.1) — 512-byte limit, TC flag, fallback to TCP.
+- [ ] **DNS: EDNS(0)** (RFC 6891) — OPT pseudo-record, larger responses.
+- [ ] **DNS: server implementation** — `lib/dns/server.lua` stub exists.
+- [ ] **DNS: master file parser** (RFC 1035 §5) — `lib/dns/format_master_file.lua` stub exists.
+- [ ] **DNS-over-HTTPS** (RFC 8484), **DNS-over-TLS** (RFC 7858).
+- [ ] **Socket layer rewrite** — replace vendored ljsocket with cross-platform `lib/socket/` (POSIX + Winsock FFI). Prerequisite for proper async server, keep-alive, connection pooling.
+
 ## stretch goals (low priority, high reward)
 
 - [ ] **Backend framework** (`lib/web/`) — high-quality, typed, idiomatic Lua web framework.

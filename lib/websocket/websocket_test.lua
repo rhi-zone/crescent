@@ -386,3 +386,154 @@ T.describe("constants", function()
 		end
 	end)
 end)
+
+-- ── frame module direct import ──────────────────────────────────────────────
+
+local frame = require("lib.websocket.frame")
+
+T.describe("frame module", function()
+	T.it("encode matches ws._encode", function()
+		local msg = { type = "text", payload = "hello" }
+		T.eq(frame.encode(msg), ws._encode(msg))
+	end)
+
+	T.it("status codes accessible", function()
+		T.eq(frame.status.normal, 1000)
+		T.eq(frame.status.protocol_error, 1002)
+	end)
+
+	T.it("error codes accessible", function()
+		T.eq(frame.error.invalid_format, 1)
+		T.eq(frame.error.frame_is_not_masked, 3)
+	end)
+end)
+
+-- ── encode_masked ───────────────────────────────────────────────────────────
+
+T.describe("encode_masked", function()
+	T.it("produces masked frame decodable by decode", function()
+		local msg = { type = "text", payload = "hello" }
+		local masked = frame.encode_masked(msg, 0x37, 0xfa, 0x21, 0x3d)
+		T.ok(masked ~= nil)
+		-- mask bit should be set
+		T.ok(bit.band(masked:byte(2), 0x80) ~= 0, "mask bit set")
+		-- decode should recover original
+		local decoded, fin = frame.decode(masked)
+		T.ok(decoded ~= nil)
+		T.eq(decoded.payload, "hello")
+		T.eq(fin, true)
+	end)
+
+	T.it("binary frame masked round-trip", function()
+		local payload = "\x00\x01\x02\xff\xfe\xfd"
+		local msg = { type = "binary", payload = payload }
+		local masked = frame.encode_masked(msg, 0xab, 0xcd, 0xef, 0x01)
+		T.ok(masked ~= nil)
+		local decoded = frame.decode(masked)
+		T.ok(decoded ~= nil)
+		T.eq(decoded.payload, payload)
+		T.eq(decoded.type, "binary")
+	end)
+
+	T.it("ping frame masked round-trip", function()
+		local msg = { type = "ping", payload = "keepalive" }
+		local masked = frame.encode_masked(msg, 0x11, 0x22, 0x33, 0x44)
+		T.ok(masked ~= nil)
+		local decoded = frame.decode(masked)
+		T.ok(decoded ~= nil)
+		T.eq(decoded.type, "ping")
+		T.eq(decoded.payload, "keepalive")
+	end)
+
+	T.it("empty payload", function()
+		local msg = { type = "text", payload = "" }
+		local masked = frame.encode_masked(msg, 0x01, 0x02, 0x03, 0x04)
+		T.ok(masked ~= nil)
+		local decoded = frame.decode(masked)
+		T.ok(decoded ~= nil)
+		T.eq(decoded.payload, "")
+	end)
+
+	T.it("unknown type returns nil", function()
+		local masked = frame.encode_masked({ type = "invalid" }, 0, 0, 0, 0)
+		T.eq(masked, nil)
+	end)
+end)
+
+-- ── 64-bit payload ──────────────────────────────────────────────────────────
+
+T.describe("large payload", function()
+	T.it("encode uses 64-bit length for >65535 bytes", function()
+		local payload = string.rep("x", 65536)
+		local encoded = frame.encode({ type = "binary", payload = payload })
+		T.ok(encoded ~= nil)
+		-- byte 2 should be 127 (64-bit length indicator), no mask bit on server frame
+		T.eq(encoded:byte(2), 127)
+		-- verify total length: 2 (header) + 8 (length) + 65536 (payload) = 65546
+		T.eq(#encoded, 65546)
+		-- payload should be at the end
+		T.eq(encoded:sub(-5), "xxxxx")
+	end)
+end)
+
+-- ── fragmentation ───────────────────────────────────────────────────────────
+
+T.describe("fragmentation", function()
+	T.it("text frame followed by continuation", function()
+		-- First frame: text, FIN=0
+		local frame1 = make_client_frame(0x1, false, "hello ", { 0, 0, 0, 0 })
+		-- Second frame: continuation, FIN=1
+		local frame2 = make_client_frame(0x0, true, "world", { 0, 0, 0, 0 })
+		local msg1, fin1 = ws._decode(frame1)
+		T.ok(msg1 ~= nil)
+		T.eq(fin1, false, "first frame not final")
+		T.eq(msg1.type, "text")
+		T.eq(msg1.payload, "hello ")
+		-- pass accumulated message to continuation
+		local msg2, fin2 = ws._decode(frame2, msg1)
+		T.ok(msg2 ~= nil)
+		T.eq(fin2, true, "second frame is final")
+		T.eq(msg2.payload, "hello world")
+	end)
+
+	T.it("binary fragmentation", function()
+		local frame1 = make_client_frame(0x2, false, "\x01\x02", { 0, 0, 0, 0 })
+		local frame2 = make_client_frame(0x0, true, "\x03\x04", { 0, 0, 0, 0 })
+		local msg1 = ws._decode(frame1)
+		T.ok(msg1 ~= nil)
+		local msg2, fin = ws._decode(frame2, msg1)
+		T.ok(msg2 ~= nil)
+		T.eq(fin, true)
+		T.eq(msg2.payload, "\x01\x02\x03\x04")
+	end)
+
+	T.it("three-part fragmentation", function()
+		local f1 = make_client_frame(0x1, false, "a", { 0, 0, 0, 0 })
+		local f2 = make_client_frame(0x0, false, "b", { 0, 0, 0, 0 })
+		local f3 = make_client_frame(0x0, true, "c", { 0, 0, 0, 0 })
+		local msg1 = ws._decode(f1)
+		T.ok(msg1 ~= nil)
+		local msg2 = ws._decode(f2, msg1)
+		T.ok(msg2 ~= nil)
+		local msg3, fin = ws._decode(f3, msg2)
+		T.ok(msg3 ~= nil)
+		T.eq(fin, true)
+		T.eq(msg3.payload, "abc")
+	end)
+end)
+
+-- ── close frame with reason ─────────────────────────────────────────────────
+
+T.describe("close with reason", function()
+	T.it("encode and decode close with status + reason", function()
+		-- Encode: status 1001 + reason "going away"
+		local status_bytes = string.char(0x03, 0xe9) -- 1001
+		local payload = status_bytes .. "going away"
+		local frame_data = make_client_frame(0x8, true, payload, { 0, 0, 0, 0 })
+		local msg = ws._decode(frame_data)
+		T.ok(msg ~= nil)
+		T.eq(msg.type, "close")
+		T.eq(msg.status, 1001)
+		T.eq(msg.payload, "going away")
+	end)
+end)
