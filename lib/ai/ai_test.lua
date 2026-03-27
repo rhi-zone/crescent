@@ -30,6 +30,22 @@ local function make_mock_provider(opts)
 				return deltas[i]
 			end
 		end,
+		embed = opts.embed_fn or function(req)
+			if opts.embed_err then return nil, opts.embed_err end
+			return { embedding = { 0.1, 0.2, 0.3 }, usage = { input_tokens = 3 } }
+		end,
+		embed_many = opts.embed_many_fn or function(req)
+			if opts.embed_many_err then return nil, opts.embed_many_err end
+			local embeddings = {}
+			for i = 1, #req.values do
+				embeddings[i] = { 0.1 * i, 0.2 * i }
+			end
+			return { embeddings = embeddings, usage = { input_tokens = #req.values } }
+		end,
+		generate_image = opts.generate_image_fn or function(req)
+			if opts.image_err then return nil, opts.image_err end
+			return { images = { { b64_json = "AAAA" } } }
+		end,
 	}
 end
 
@@ -68,6 +84,22 @@ describe("ai", function()
 			})
 			T.eq(res, nil)
 			T.ok(err:find("unknown provider"), "error mentions unknown provider")
+		end)
+
+		it("should auto-register OpenAI-compatible providers from registry", function()
+			-- groq, deepseek, etc. should resolve via openai_compat.registry
+			-- We can't actually connect, but we can verify the provider is created
+			-- by checking that it doesn't return "unknown provider"
+			local has_compat = pcall(require, "lib.ai.providers.openai_compat")
+			if has_compat then
+				local res, err = ai.generate({
+					model = "groq:llama-3-70b",
+					messages = { { role = "user", content = "hi" } },
+				})
+				-- Should fail with "GROQ_API_KEY not set", NOT "unknown provider"
+				T.eq(res, nil)
+				T.ok(err:find("GROQ_API_KEY"), "groq resolved from compat registry")
+			end
 		end)
 	end)
 
@@ -135,10 +167,110 @@ describe("ai", function()
 			local mock = make_mock_provider({ stream_err = "connection failed" })
 			ai.register("streamerr", mock)
 			local iter, err = ai.stream({ model = "streamerr:m1", messages = { { role = "user", content = "hi" } } })
-			-- stream returns an iterator even on error; the error is the second return
 			T.ok(err, "error returned")
 			T.eq(err, "connection failed")
 		end)
+	end)
+
+	describe("embed", function()
+		it("should return embedding vector", function()
+			local mock = make_mock_provider()
+			ai.register("embedmock", mock)
+			local res, err = ai.embed({
+				model = "embedmock:text-embedding-3-small",
+				value = "hello world",
+			})
+			T.ok(res, "response returned: " .. tostring(err))
+			T.eq(#res.embedding, 3)
+			T.eq(res.embedding[1], 0.1)
+			T.eq(res.usage.input_tokens, 3)
+		end)
+
+		it("should return error when provider has no embed", function()
+			ai.register("noembed", { generate = function() end, stream = function() end })
+			local res, err = ai.embed({ model = "noembed:m1", value = "hi" })
+			T.eq(res, nil)
+			T.ok(err:find("does not support"), "says not supported")
+		end)
+	end)
+
+	describe("embed_many", function()
+		it("should return multiple embeddings", function()
+			local mock = make_mock_provider()
+			ai.register("embedmany", mock)
+			local res, err = ai.embed_many({
+				model = "embedmany:text-embedding-3-small",
+				values = { "hello", "world", "foo" },
+			})
+			T.ok(res, "response returned: " .. tostring(err))
+			T.eq(#res.embeddings, 3)
+			T.eq(res.embeddings[2][1], 0.2)
+		end)
+	end)
+
+	describe("generate_image", function()
+		it("should return image data", function()
+			local mock = make_mock_provider()
+			ai.register("imgmock", mock)
+			local res, err = ai.generate_image({
+				model = "imgmock:dall-e-3",
+				prompt = "a cat",
+			})
+			T.ok(res, "response returned: " .. tostring(err))
+			T.eq(#res.images, 1)
+			T.eq(res.images[1].b64_json, "AAAA")
+		end)
+
+		it("should return error when provider has no generate_image", function()
+			ai.register("noimg", { generate = function() end, stream = function() end })
+			local res, err = ai.generate_image({ model = "noimg:m1", prompt = "cat" })
+			T.eq(res, nil)
+			T.ok(err:find("does not support"), "says not supported")
+		end)
+	end)
+end)
+
+-- ── OpenAI-compatible factory ──────────────────────────────────────────────────
+
+describe("ai/providers/openai_compat", function()
+	local has_compat, compat = pcall(require, "lib.ai.providers.openai_compat")
+	if not has_compat then return end
+
+	it("should have a registry of well-known providers", function()
+		T.ok(compat.registry.openai, "openai in registry")
+		T.ok(compat.registry.groq, "groq in registry")
+		T.ok(compat.registry.deepseek, "deepseek in registry")
+		T.ok(compat.registry.togetherai, "togetherai in registry")
+		T.ok(compat.registry.fireworks, "fireworks in registry")
+		T.ok(compat.registry.deepinfra, "deepinfra in registry")
+		T.ok(compat.registry.cerebras, "cerebras in registry")
+		T.ok(compat.registry.perplexity, "perplexity in registry")
+		T.ok(compat.registry.xai, "xai in registry")
+		T.ok(compat.registry.mistral, "mistral in registry")
+	end)
+
+	it("should create provider with correct API key error", function()
+		local p = compat.create({
+			name = "test",
+			host = "api.test.com",
+			api_key_env = "TEST_NONEXISTENT_KEY",
+		})
+		local res, err = p.generate({ model = "m1", messages = { { role = "user", content = "hi" } } })
+		T.eq(res, nil)
+		T.eq(err, "TEST_NONEXISTENT_KEY not set")
+	end)
+
+	it("created provider should have embed and generate_image methods", function()
+		local p = compat.create({
+			name = "test2",
+			host = "api.test.com",
+			api_key_env = "TEST_NONEXISTENT_KEY_2",
+		})
+		T.ok(p.generate, "has generate")
+		T.ok(p.stream, "has stream")
+		T.ok(p.embed, "has embed")
+		T.ok(p.embed_many, "has embed_many")
+		T.ok(p.generate_image, "has generate_image")
 	end)
 end)
 
@@ -186,6 +318,36 @@ if has_tls_oai then
 				})
 				T.eq(res, nil)
 				T.eq(err, "OPENAI_API_KEY not set")
+			end
+		end)
+	end)
+end
+
+-- ── Google provider (requires libtls) ──────────────────────────────────────────
+
+local has_tls_google, google = pcall(require, "lib.ai.providers.google")
+
+if has_tls_google then
+	describe("ai/providers/google", function()
+		it("should require GOOGLE_API_KEY", function()
+			if not os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENERATIVE_AI_API_KEY") then
+				local res, err = google.generate({
+					model = "gemini-2.0-flash",
+					messages = { { role = "user", content = "hi" } },
+				})
+				T.eq(res, nil)
+				T.eq(err, "GOOGLE_API_KEY not set")
+			end
+		end)
+
+		it("embed should require GOOGLE_API_KEY", function()
+			if not os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENERATIVE_AI_API_KEY") then
+				local res, err = google.embed({
+					model = "text-embedding-004",
+					value = "hello",
+				})
+				T.eq(res, nil)
+				T.eq(err, "GOOGLE_API_KEY not set")
 			end
 		end)
 	end)
@@ -321,7 +483,7 @@ describe("ai/tools", function()
 	end)
 end)
 
--- ── Live tests (gated on env vars) ────────────────────────────────────────────
+-- ── Live tests (gated on env vars + libtls) ────────────────────────────────────
 
 if has_tls and os.getenv("ANTHROPIC_API_KEY") then
 	describe("ai/live/anthropic", function()
