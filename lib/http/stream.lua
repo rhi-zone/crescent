@@ -5,7 +5,7 @@
 
 local mod = {}
 
---:: http_stream = { _recv: () -> string?, _buf: string, _headers: { [string]: string[] }?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
+--:: http_stream = { _recv: () -> string?, _buf: string, _pos: integer, _headers: { [string]: string[] }?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
 
 local mt = { __index = {} }
 
@@ -13,8 +13,23 @@ mod.new = function(recv_fn)
 	return setmetatable({
 		_recv = recv_fn,
 		_buf = "",
+		_pos = 1,
 		_eof = false,
 	}, mt)
+end
+
+--- Number of unread bytes currently in the buffer.
+local function buf_len(self)
+	return #self._buf - self._pos + 1
+end
+
+--- Compact the buffer when the consumed prefix is larger than the remaining data.
+-- Avoids unbounded memory growth from accumulated prefixes.
+local function maybe_compact(self)
+	if self._pos > 1 and self._pos > (#self._buf / 2) then
+		self._buf = self._buf:sub(self._pos)
+		self._pos = 1
+	end
 end
 
 --- Fill buffer until it contains pattern or EOF.
@@ -24,7 +39,7 @@ end
 --: (http_stream, string) -> integer?
 local function fill_until(self, pattern)
 	while true do
-		local pos = self._buf:find(pattern, 1, true)
+		local pos = self._buf:find(pattern, self._pos, true)
 		if pos then return pos end
 		if self._eof then return nil end
 		--: string?
@@ -33,6 +48,8 @@ local function fill_until(self, pattern)
 			self._eof = true
 			return nil
 		end
+		-- Compact before appending to keep _buf small.
+		maybe_compact(self)
 		self._buf = self._buf .. recv_result
 	end
 end
@@ -45,8 +62,9 @@ function mt.__index:read_headers()
 	local pos = fill_until(self, "\r\n\r\n")
 	if not pos then return nil, "incomplete headers" end
 
-	local head = self._buf:sub(1, pos - 1)
-	self._buf = self._buf:sub(pos + 4)
+	local head = self._buf:sub(self._pos, pos - 1)
+	self._pos = pos + 4
+	maybe_compact(self)
 
 	-- parse status line
 	local version_raw, status_raw, status_text = head:match("^([^ ]+) ([^ ]+) ([^\r]*)")
@@ -93,13 +111,15 @@ function mt.__index:read_body()
 		local len = tonumber(cl[1])
 		if not len then return nil, "invalid content-length" end
 		-- fill buffer until we have enough
-		while #self._buf < len and not self._eof do
+		while buf_len(self) < len and not self._eof do
 			local chunk = self._recv()
 			if not chunk then self._eof = true; break end
+			maybe_compact(self)
 			self._buf = self._buf .. chunk
 		end
-		local body = self._buf:sub(1, len)
-		self._buf = self._buf:sub(len + 1)
+		local body = self._buf:sub(self._pos, self._pos + len - 1)
+		self._pos = self._pos + len
+		maybe_compact(self)
 		return body
 	end
 
@@ -107,10 +127,12 @@ function mt.__index:read_body()
 	while not self._eof do
 		local chunk = self._recv()
 		if not chunk then self._eof = true; break end
+		maybe_compact(self)
 		self._buf = self._buf .. chunk
 	end
-	local body = self._buf
+	local body = self._buf:sub(self._pos)
 	self._buf = ""
+	self._pos = 1
 	return body
 end
 
@@ -129,8 +151,9 @@ function mt.__index:chunks()
 		local pos = fill_until(self, "\r\n")
 		if not pos then done = true; return nil end
 
-		local size_line = self._buf:sub(1, pos - 1)
-		self._buf = self._buf:sub(pos + 2)
+		local size_line = self._buf:sub(self._pos, pos - 1)
+		self._pos = pos + 2
+		maybe_compact(self)
 
 		-- strip chunk extensions
 		local hex = size_line:match("^([0-9a-fA-F]+)")
@@ -142,14 +165,16 @@ function mt.__index:chunks()
 
 		-- read chunk data + trailing \r\n
 		local need = size + 2
-		while #self._buf < need and not self._eof do
+		while buf_len(self) < need and not self._eof do
 			local chunk = self._recv()
 			if not chunk then self._eof = true; break end
+			maybe_compact(self)
 			self._buf = self._buf .. chunk
 		end
 
-		local data = self._buf:sub(1, size)
-		self._buf = self._buf:sub(size + 3) -- skip data + \r\n
+		local data = self._buf:sub(self._pos, self._pos + size - 1)
+		self._pos = self._pos + size + 2 -- skip data + \r\n
+		maybe_compact(self)
 		return data
 	end
 end
@@ -183,9 +208,10 @@ function mt.__index:events()
 			end
 
 			-- extract line (handle \r\n and \n)
-			local line = self._buf:sub(1, pos - 1)
+			local line = self._buf:sub(self._pos, pos - 1)
 			if line:sub(-1) == "\r" then line = line:sub(1, -2) end
-			self._buf = self._buf:sub(pos + 1)
+			self._pos = pos + 1
+			maybe_compact(self)
 
 			if line == "" then
 				-- dispatch event
