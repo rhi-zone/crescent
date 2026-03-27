@@ -201,6 +201,17 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
 - `lib/embed` — embedding utilities on top of `lib/ai`: batch embedding, vector
   similarity search, nearest-neighbor retrieval. Builds on `lib/vec`.
 
+**`lib/logic`** *(logic programming)* — relational/logic programming substrate.
+
+- `lib/ukanren` — microKanren port. The original is ~40 lines of Scheme; a Lua port
+  is a beautiful demonstration of hackability. Goals, unification, streams.
+- `lib/datalog` — Datalog engine. Rule-based queries over structured data. Practically
+  useful: dependency analysis, reachability queries, rule-based inference. Pure Lua.
+  Builds on `lib/ukanren` or standalone depending on design.
+
+These serve both the language tooling crowd (type inference helpers, program analysis)
+and anyone who wants declarative query semantics without a full SQL engine.
+
 **`lib/parse`** *(lower priority, niche)* — general-purpose parsing substrate. Lexer
 utilities, parser combinators, AST construction. Extracted from the typechecker's own
 parser (`lib/type/static/lex.lua`, `parse.lua`) into reusable primitives. For anyone
