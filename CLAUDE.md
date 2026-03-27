@@ -163,6 +163,14 @@ When doing performance optimization:
 - **Constant folding:** benchmarks that pass the same literal arguments every iteration let JIT fold the entire loop away. Verify results are non-trivial (use a sink that accumulates into an upvalue).
 - **JIT speedup ratio:** if JIT is only 1.0–1.4x faster than interpreter on a hot loop, the bottleneck is C function calls (str_byte, table ops), not Lua bytecode. Further Lua-level optimisation won't help — consider FFI or algorithmic change.
 
+## Sandboxing
+
+Crescent can safely host untrusted user scripts via standard Lua env-based sandboxing. The key insight: **`ffi` is `require("ffi")` — it's a module, not a global.** If the sandbox environment omits `require` (or uses a whitelist-based `require`), untrusted code cannot reach `ffi` and cannot escape the sandbox.
+
+This means multi-user worlds with player-authored scripts are viable in pure crescent — no modified VM needed. The sandbox granularity is just a matter of what environment you hand each script.
+
+Do not assume LuaJIT sandboxing is impossible. The common concern (FFI escape) is addressed by controlling `require`.
+
 ## Negative Constraints
 
 Do not:
