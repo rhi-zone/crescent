@@ -145,6 +145,45 @@ Useful for games, simulations, workflow state, the RP substrate. The shape of th
 library is still open; ECS is one design, a graph database is another, a document
 store is a third. The right answer is derived from real consumers (Lumen, RP) first.
 
+### Missing — application verticals
+
+Higher-level libraries that assemble primitives into complete vertical solutions.
+A new user building in a given domain shouldn't need to compose primitives themselves.
+The vertical is complete — not 90%, 100%. Partial verticals create the same pressure
+to abandon as partial stdlib implementations.
+
+**`lib/web`** — full web backend vertical. Builds on `lib/http`, adds: middleware
+pipeline, session management, cookie handling, CSRF protection, static file serving,
+route groups. The "Rails without opinions" answer for crescent web apps.
+
+**`lib/db`** — database vertical. Builds on `lib/sqlite`, adds: migrations, query
+builder, schema management, connection pooling. Raw SQLite is not enough for real apps.
+
+**`lib/auth`** — authentication and authorization. JWT, OAuth 2.0 / OIDC, session
+tokens, password hashing (Argon2, bcrypt). Every web app needs this; nobody wants to
+write it.
+
+**`lib/email`** — SMTP client, email composition (MIME, attachments), template
+rendering. Boring but load-bearing for any application with user accounts.
+
+**`lib/queue`** — task queues and scheduling. Cron-style job scheduling, deferred
+execution, retry with backoff. Backed by SQLite for persistence. Builds on
+`lib/orchestration` for execution semantics.
+
+**`lib/search`** — search vertical. Full-text search via SQLite FTS5 (near-term) +
+semantic search via embeddings (`lib/ai`) for vector similarity. Needed by Lumen and
+any content-heavy application.
+
+**`lib/realtime`** — pub/sub, presence, event sourcing patterns. Builds on
+`lib/websocket`. Needed by collaborative applications, live UIs, multiplayer.
+
+**`lib/tui`** — terminal UI. Layouts, widgets, keyboard input, color/style. Needed
+for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
+`lib/cli` (arg parsing) and raw terminal FFI.
+
+**`lib/notify`** — push notifications, webhooks, alerting. Outbound HTTP webhooks,
+email notifications (via `lib/email`), SMS gateway integrations.
+
 ### Missing — transpiler (future)
 
 **`lib/lua2ts`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
