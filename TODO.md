@@ -86,7 +86,7 @@
     155 ns / 405 MB/s (zerocopy) on 90B object — 2.1x faster than Node.js JSON.parse.
     Implement when HTTP layer needs streaming/large JSON parsing. Design notes: docs/perf/log.md.
   - [ ] `lib/format/cbor/` — rewrite vendored CBOR. Low priority until cbor sees more use.
-  - [ ] `lib/encode/base64/` — rewrite lbase64. Small scope, good first rewrite task.
+  - [x] `lib/encode/base64/` — rewritten. Three-tier (simd stub > ffi > pure), RFC 4648 §4+§5, 108-line tests.
   - [ ] `lib/hash/sha1/` — rewrite mpeterv/sha1. Already heavily patched; sha256 shows
     the tiered pattern to follow.
   - [ ] `lib/ljsocket/` — largest and most complex. Blocked on registry (http/websocket
@@ -718,7 +718,7 @@ See `docs/pkg-design.md` for full design.
 - [ ] **HTTP/3** (RFC 9114) + **QUIC** (RFC 9000) — UDP-based transport, 0-RTT, connection migration. Requires QUIC implementation first.
 - [ ] **HTTP trailer fields** (RFC 9112 §7) — currently ignored in stream.lua chunks().
 - [ ] **Transfer-Encoding: gzip/deflate** decompression in stream.lua.
-- [ ] **Path traversal audit** — `lib/http/router/static.lua` and `staticx.lua` have directory traversal vulnerabilities.
+- [x] **Path traversal audit** — `lib/http/router/static.lua` and `staticx.lua` use `path.safe_resolve()` (realpath + prefix check). No vulnerabilities found.
 - [ ] **WebSocket: permessage-deflate** (RFC 7692) — compression extension.
 - [ ] **WebSocket: max frame/message size policy** — currently unbounded, memory exhaustion risk.
 - [ ] **WebSocket: client-side** — initiating connections (currently server-side only).

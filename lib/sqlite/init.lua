@@ -64,12 +64,21 @@ local sqlite_ffi
 if ffi.os == "Windows" then
 	if ffi.arch == "x64" then sqlite_ffi = ffi.load("dep/sqlite.dll")
 	else sqlite_ffi = ffi.load("dep/sqlite-x86.dll") end
-elseif ffi.os == "Linux" then
-	sqlite_ffi = ffi.load("sqlite3")
-elseif ffi.os == "OSX" then
-	sqlite_ffi = ffi.load("libsqlite3.dylib")
 else
-	error("os " .. ffi.os .. " not supported")
+	-- Try bare name first (works on both Linux and macOS when sqlite3 is in
+	-- the linker search path), then fall back to platform-specific filenames.
+	local names = {
+		"sqlite3",
+		"libsqlite3.so", "libsqlite3.so.0",           -- Linux
+		"libsqlite3.dylib", "/usr/lib/libsqlite3.dylib", -- macOS
+	}
+	for _, name in ipairs(names) do
+		local ok, lib = pcall(ffi.load, name)
+		if ok then sqlite_ffi = lib; break end
+	end
+	if not sqlite_ffi then
+		error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
+	end
 end
 
 -- ── column reading (module-level, no per-row allocation) ─────────────────────
