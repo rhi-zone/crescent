@@ -18,9 +18,9 @@
 
 ## future libraries
 
-- [ ] **`lib/task/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
+- [ ] **`lib/orchestration/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
 
-- [ ] **`lib/world/`** — LambdaMOO-analogue world simulation primitives. Entity-component state (user-defined schemas, not hardcoded), spatial graph (locations containing entities), turn loop (input → parse intent → validate → apply mutations → assemble context → render output), sandboxed player script hosting (env-based, `require` whitelist). LLM is the prose/narration layer — reads curated world state, writes output, optionally returns structured mutation intents. Input and output are user-defined renderers (RP prose, MUD-style room descriptions, etc.) over the same world model.
+- [ ] **`lib/ecs/`** — entity-component substrate. Named entities, typed components, spatial containment (entities inside entities), mutable state store. User-defined schemas — no hardcoded concepts like "room" or "inventory". The primitive for building world simulations, games, or any entity-centric stateful system. Turn loop, perception rules, mutation rules, and renderers (RP prose, MUD-style, etc.) are built on top by the user.
 
 ## priorities (medium horizon)
 
