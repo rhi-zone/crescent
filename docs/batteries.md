@@ -184,6 +184,23 @@ for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
 **`lib/notify`** — push notifications, webhooks, alerting. Outbound HTTP webhooks,
 email notifications (via `lib/email`), SMS gateway integrations.
 
+**`lib/ml`** *(data/ML vertical)* — classical ML and inference, not training. Tiered
+as everywhere else: pure Lua reference implementations (hackable, readable, the thing
+you study to understand the algorithm) + FFI bindings to real libraries as the fast tier.
+
+- `lib/vec` — dense vector math: dot product, cosine similarity, norms. The primitive
+  everything else builds on.
+- `lib/tfidf` — TF-IDF text scoring, document similarity. Pure Lua. Useful for Lumen
+  search and any content-heavy application.
+- `lib/knn` — k-nearest neighbors. Pure Lua reference + optional FFI fast path.
+- `lib/xgboost` — gradient boosted trees. Pure Lua implementation (a few hundred lines
+  — decision trees are simple, boosting is just iteration) as the hackable reference;
+  FFI binding to the real xgboost library as the fast tier. Parity tests between them.
+- `lib/onnx` — ONNX runtime FFI bindings. Run any exported model from PyTorch, sklearn,
+  etc. FFI-only (no pure Lua equivalent — the model format is the spec).
+- `lib/embed` — embedding utilities on top of `lib/ai`: batch embedding, vector
+  similarity search, nearest-neighbor retrieval. Builds on `lib/vec`.
+
 **`lib/parse`** *(lower priority, niche)* — general-purpose parsing substrate. Lexer
 utilities, parser combinators, AST construction. Extracted from the typechecker's own
 parser (`lib/type/static/lex.lua`, `parse.lua`) into reusable primitives. For anyone
