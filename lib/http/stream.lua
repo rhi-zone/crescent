@@ -1,4 +1,5 @@
 --- HTTP streaming response reader.
+-- RFC 9112 §6 — Message body transfer
 -- Transport-agnostic: wraps a recv_fn() closure that returns bytes.
 -- Works with raw sockets, TLS sockets, or test mocks.
 
@@ -37,6 +38,7 @@ local function fill_until(self, pattern)
 end
 
 --- Read and parse HTTP response status line + headers.
+-- RFC 9112 §5 — Field lines
 function mt.__index:read_headers()
 	if self._headers then return self._headers end
 	--: integer?
@@ -80,6 +82,7 @@ function mt.__index:status()
 end
 
 --- Read full body using Content-Length.
+-- RFC 9112 §6.3 / RFC 9110 §8.6 — Body length from Content-Length
 function mt.__index:read_body()
 	local headers, err = self:read_headers()
 	if not headers then return nil, err end
@@ -112,6 +115,7 @@ function mt.__index:read_body()
 end
 
 --- Iterator for chunked transfer encoding.
+-- RFC 9112 §6.1 — Chunked transfer coding
 -- Yields decoded chunk data (not hex lengths or trailers).
 function mt.__index:chunks()
 	local headers, err = self:read_headers()

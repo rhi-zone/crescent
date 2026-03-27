@@ -1,44 +1,305 @@
-local format = require("lib.http.format")
-
-local function assert_eq(a, b, msg)
-	if a ~= b then error(msg .. ": expected " .. tostring(b) .. ", got " .. tostring(a), 2) end
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
 end
 
--- parse a basic GET request
-local raw = "GET /path?foo=bar&baz=qux HTTP/1.1\r\nHost: example.com\r\nAccept: */*\r\n\r\n"
-local req = format.string_to_http_request(raw)
-assert(req, "should parse request")
-assert_eq(req.method, "GET", "method")
-assert_eq(req.path, "/path", "path")
-assert_eq(req.params.foo, "bar", "param foo")
-assert_eq(req.params.baz, "qux", "param baz")
-assert_eq(req.version, 1.1, "version")
-assert_eq(req.headers["host"][1], "example.com", "host header")
+local format = require("lib.http.format")
+local cookies = require("lib.http.format.cookies")
+local T = require("lib.test.assert")
 
--- parse POST with body
-local raw_post = "POST /submit HTTP/1.1\r\nHost: example.com\r\nContent-Length: 11\r\n\r\nhello=world"
-local req_post = format.string_to_http_request(raw_post)
-assert(req_post, "should parse POST")
-assert_eq(req_post.method, "POST", "post method")
-assert_eq(req_post.body, "hello=world", "post body")
+T.describe("parse_request", function()
+	T.it("basic GET request", function()
+		local raw = "GET /path?foo=bar HTTP/1.1\r\nHost: example.com\r\nAccept: */*\r\n\r\n"
+		local req, pos = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.method, "GET")
+		T.eq(req.target, "/path?foo=bar")
+		T.eq(req.version, "HTTP/1.1")
+		T.eq(req.headers["host"][1], "example.com")
+		T.eq(req.headers["accept"][1], "*/*")
+	end)
 
--- serialize a response
-local res_str = format.http_response_to_string({
-	status = 200,
-	headers = { ["content-type"] = "text/plain" },
-	body = "ok",
-})
-assert(res_str:find("HTTP/1.1 200 OK"), "status line")
-assert(res_str:find("Content%-Length: 2"), "content-length")
-assert(res_str:find("ok$"), "body at end")
+	T.it("POST with body", function()
+		local raw = "POST /submit HTTP/1.1\r\nHost: example.com\r\nContent-Length: 11\r\n\r\nhello=world"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.method, "POST")
+		T.eq(req.body, "hello=world")
+	end)
 
--- error on invalid input
-local bad, err = format.string_to_http_request("not http")
-assert_eq(bad, nil, "should fail on bad input")
-assert(err, "should have error message")
+	T.it("headers are lowercased", function()
+		local raw = "GET / HTTP/1.1\r\nContent-Type: text/html\r\nX-Custom: foo\r\n\r\n"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.headers["content-type"][1], "text/html")
+		T.eq(req.headers["x-custom"][1], "foo")
+	end)
 
--- query params with encoded characters
-local raw_enc = "GET /search?q=hello%20world HTTP/1.1\r\nHost: example.com\r\n\r\n"
-local req_enc = format.string_to_http_request(raw_enc)
-assert(req_enc, "should parse encoded request")
-assert_eq(req_enc.params.q, "hello world", "decoded param")
+	T.it("multiple values for same header", function()
+		local raw = "GET / HTTP/1.1\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(#req.headers["set-cookie"], 2)
+		T.eq(req.headers["set-cookie"][1], "a=1")
+		T.eq(req.headers["set-cookie"][2], "b=2")
+	end)
+
+	-- RFC 9112 §5.6 — obs-fold
+	T.it("obs-fold: continuation line with SP", function()
+		local raw = "GET / HTTP/1.1\r\nX-Long: value1\r\n value2\r\n\r\n"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.headers["x-long"][1], "value1 value2")
+	end)
+
+	T.it("obs-fold: continuation line with HTAB", function()
+		local raw = "GET / HTTP/1.1\r\nX-Long: value1\r\n\tvalue2\r\n\r\n"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.headers["x-long"][1], "value1 value2")
+	end)
+
+	-- RFC 9110 §5.5 — OWS trimming
+	T.it("OWS trimming on header values", function()
+		local raw = "GET / HTTP/1.1\r\nX-Padded:   value   \r\n\r\n"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.headers["x-padded"][1], "value")
+	end)
+
+	T.it("nil body when empty", function()
+		local raw = "GET / HTTP/1.1\r\nHost: x\r\n\r\n"
+		local req = format.parse_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.body, nil)
+	end)
+
+	T.it("returns error on incomplete message", function()
+		local req, pos, err = format.parse_request("GET / HTTP/1.1\r\nHost: x\r\n")
+		T.eq(req, nil)
+		T.ok(err ~= nil)
+	end)
+
+	T.it("returns error on malformed request line", function()
+		local req, pos, err = format.parse_request("BADLINE\r\n\r\n")
+		T.eq(req, nil)
+		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("parse_response", function()
+	T.it("basic 200 response", function()
+		local raw = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+		local res = format.parse_response(raw)
+		T.ok(res ~= nil)
+		T.eq(res.status, 200)
+		T.eq(res.reason, "OK")
+		T.eq(res.version, "HTTP/1.1")
+		T.eq(res.body, "ok")
+	end)
+
+	T.it("response with no body", function()
+		local raw = "HTTP/1.1 204 No Content\r\n\r\n"
+		local res = format.parse_response(raw)
+		T.ok(res ~= nil)
+		T.eq(res.status, 204)
+		T.eq(res.reason, "No Content")
+		T.eq(res.body, nil)
+	end)
+
+	T.it("response with empty reason phrase", function()
+		local raw = "HTTP/1.1 200 \r\nContent-Length: 0\r\n\r\n"
+		local res = format.parse_response(raw)
+		T.ok(res ~= nil)
+		T.eq(res.status, 200)
+		T.eq(res.reason, "")
+	end)
+
+	T.it("multiple header values", function()
+		local raw = "HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 0\r\n\r\n"
+		local res = format.parse_response(raw)
+		T.ok(res ~= nil)
+		T.eq(#res.headers["set-cookie"], 2)
+	end)
+
+	T.it("error on incomplete", function()
+		local res, pos, err = format.parse_response("HTTP/1.1 200")
+		T.eq(res, nil)
+		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("serialize_request", function()
+	T.it("basic request", function()
+		local s = format.serialize_request({
+			method = "GET", target = "/foo", version = "HTTP/1.1",
+			headers = { host = { "example.com" } },
+		})
+		T.ok(s:find("GET /foo HTTP/1.1\r\n"))
+		T.ok(s:find("host: example.com\r\n"))
+		T.ok(s:find("\r\n\r\n"))
+	end)
+
+	T.it("request with body", function()
+		local s = format.serialize_request({
+			method = "POST", target = "/data", version = "HTTP/1.1",
+			headers = { ["content-length"] = { "5" } },
+			body = "hello",
+		})
+		T.ok(s:find("hello$"))
+	end)
+end)
+
+T.describe("serialize_response", function()
+	T.it("basic response", function()
+		local s = format.serialize_response({
+			status = 200, reason = "OK", version = "HTTP/1.1",
+			headers = { ["content-type"] = { "text/plain" } },
+			body = "ok",
+		})
+		T.ok(s:find("HTTP/1.1 200 OK\r\n"))
+		T.ok(s:find("content%-type: text/plain\r\n"))
+		T.ok(s:find("content%-length: 2\r\n"))
+		T.ok(s:find("ok$"))
+	end)
+
+	T.it("adds content-length if missing", function()
+		local s = format.serialize_response({
+			status = 200, body = "test",
+		})
+		T.ok(s:find("content%-length: 4\r\n"))
+	end)
+
+	T.it("does not duplicate content-length", function()
+		local s = format.serialize_response({
+			status = 200,
+			headers = { ["content-length"] = { "4" } },
+			body = "test",
+		})
+		-- should only appear once
+		local count = 0
+		for _ in s:gmatch("content%-length") do count = count + 1 end
+		T.eq(count, 1)
+	end)
+
+	T.it("defaults to 200 OK", function()
+		local s = format.serialize_response({ body = "" })
+		T.ok(s:find("HTTP/1.1 200 OK\r\n"))
+	end)
+end)
+
+T.describe("round-trip", function()
+	T.it("request round-trip", function()
+		local original = {
+			method = "PUT", target = "/api/item", version = "HTTP/1.1",
+			headers = { ["content-type"] = { "application/json" }, host = { "api.example.com" } },
+			body = '{"key":"value"}',
+		}
+		local wire = format.serialize_request(original)
+		local parsed = format.parse_request(wire)
+		T.ok(parsed ~= nil)
+		T.eq(parsed.method, "PUT")
+		T.eq(parsed.target, "/api/item")
+		T.eq(parsed.version, "HTTP/1.1")
+		T.eq(parsed.headers["content-type"][1], "application/json")
+		T.eq(parsed.headers["host"][1], "api.example.com")
+	end)
+
+	T.it("response round-trip", function()
+		local original = {
+			status = 404, reason = "Not Found", version = "HTTP/1.1",
+			headers = { ["content-type"] = { "text/plain" } },
+			body = "not found",
+		}
+		local wire = format.serialize_response(original)
+		local parsed = format.parse_response(wire)
+		T.ok(parsed ~= nil)
+		T.eq(parsed.status, 404)
+		T.eq(parsed.reason, "Not Found")
+		T.eq(parsed.body, "not found")
+	end)
+end)
+
+T.describe("backward compat", function()
+	T.it("string_to_http_request still works", function()
+		local raw = "GET /path HTTP/1.1\r\nHost: example.com\r\n\r\n"
+		local req = format.string_to_http_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.method, "GET")
+	end)
+
+	T.it("string_to_http_request sets legacy .path field", function()
+		local raw = "GET /path?foo=bar HTTP/1.1\r\nHost: example.com\r\n\r\n"
+		local req = format.string_to_http_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.path, "/path")
+	end)
+
+	T.it("string_to_http_request sets legacy .params field", function()
+		local raw = "GET /search?q=hello%20world HTTP/1.1\r\nHost: example.com\r\n\r\n"
+		local req = format.string_to_http_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.params.q, "hello world")
+	end)
+
+	T.it("string_to_http_request sets numeric .version", function()
+		local raw = "GET / HTTP/1.1\r\nHost: x\r\n\r\n"
+		local req = format.string_to_http_request(raw)
+		T.ok(req ~= nil)
+		T.eq(req.version, 1.1)
+	end)
+
+	T.it("string_to_http_client_response still works", function()
+		local raw = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+		local res = format.string_to_http_client_response(raw)
+		T.ok(res ~= nil)
+		T.eq(res.status, 200)
+		T.eq(res.status_text, "OK")
+	end)
+
+	T.it("http_response_to_string still works", function()
+		local s = format.http_response_to_string({
+			status = 200,
+			headers = { ["content-type"] = "text/plain" },
+			body = "ok",
+		})
+		T.ok(s:find("200"))
+		T.ok(s:find("ok"))
+	end)
+
+	T.it("http_client_request_to_string still works", function()
+		local s = format.http_client_request_to_string({
+			method = "GET", path = "/", host = "example.com",
+			headers = {},
+		})
+		T.ok(s:find("GET / HTTP/1.1"))
+		T.ok(s:find("Host: example.com"))
+	end)
+end)
+
+T.describe("cookies", function()
+	T.it("parse single cookie", function()
+		local req = { headers = { cookie = { "session=abc123" } } }
+		local c = cookies.parse_cookies(req)
+		T.ok(c ~= nil)
+		T.eq(c.session, "abc123")
+	end)
+
+	T.it("parse multiple cookies", function()
+		local req = { headers = { cookie = { "a=1; b=2; c=3" } } }
+		local c = cookies.parse_cookies(req)
+		T.ok(c ~= nil)
+		T.eq(c.a, "1")
+		T.eq(c.b, "2")
+		T.eq(c.c, "3")
+	end)
+
+	T.it("no cookie header returns nil", function()
+		local req = { headers = {} }
+		local c = cookies.parse_cookies(req)
+		T.eq(c, nil)
+	end)
+
+	T.it("backward compat alias", function()
+		T.eq(cookies.http_request_to_cookies, cookies.parse_cookies)
+	end)
+end)

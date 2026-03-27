@@ -1,9 +1,14 @@
+-- RFC 9110 §15 — Status Codes
+
 local mod = {}
 
+-- RFC 9110 §15 — Standard status codes
 mod.status_names = {
+	-- RFC 9110 §15.2 — Informational 1xx
 	[100] = "Continue",
 	[101] = "Switching Protocols",
 	[102] = "Processing",
+	-- RFC 9110 §15.3 — Successful 2xx
 	[200] = "OK",
 	[201] = "Created",
 	[202] = "Accepted",
@@ -11,6 +16,7 @@ mod.status_names = {
 	[204] = "No Content",
 	[206] = "Partial Content",
 	[207] = "Multi-Status",
+	-- RFC 9110 §15.4 — Redirection 3xx
 	[300] = "Multiple Choices",
 	[301] = "Moved Permanently",
 	[302] = "Found",
@@ -19,6 +25,7 @@ mod.status_names = {
 	[305] = "Use Proxy",
 	[307] = "Temporary Redirect",
 	[308] = "Permanent Redirect",
+	-- RFC 9110 §15.5 — Client Error 4xx
 	[400] = "Bad Request",
 	[401] = "Unauthorized",
 	[402] = "Payment Required",
@@ -37,8 +44,6 @@ mod.status_names = {
 	[415] = "Unsupported Media Type",
 	[416] = "Request Range Not Satisfiable",
 	[417] = "Expectation Failed",
-	[418] = "I'm a teapot",
-	[420] = "Enhance Your Calm",
 	[421] = "Misdirected Request",
 	[422] = "Unprocessable Entity",
 	[423] = "Locked",
@@ -47,12 +52,8 @@ mod.status_names = {
 	[426] = "Upgrade Required",
 	[429] = "Too Many Requests",
 	[431] = "Request Header Fields Too Large",
-	[444] = "No Response",
-	[450] = "Blocked by Windows Parental Controls",
 	[451] = "Unavailable For Legal Reasons",
-	[497] = "HTTP Request Sent to HTTPS Port",
-	[498] = "Token expired/invalid",
-	[499] = "Client Closed Request",
+	-- RFC 9110 §15.6 — Server Error 5xx
 	[500] = "Internal Server Error",
 	[501] = "Not Implemented",
 	[502] = "Bad Gateway",
@@ -61,14 +62,25 @@ mod.status_names = {
 	[506] = "Variant Also Negotiates",
 	[507] = "Insufficient Storage",
 	[508] = "Loop Detected",
-	[509] = "Bandwidth Limit Exceeded",
 	[510] = "Not Extended",
 	[511] = "Network Authentication Required",
-	[521] = "Web Server Is Down",
-	[522] = "Connection Timed Out",
-	[523] = "Origin Is Unreachable",
-	[525] = "SSL Handshake Failed",
-	[599] = "Network Connect Timeout Error",
+}
+
+-- Non-standard / vendor codes not defined in RFC 9110
+mod.nonstandard_status_names = {
+	[418] = "I'm a teapot",           -- RFC 2324 (joke RFC)
+	[420] = "Enhance Your Calm",      -- Twitter
+	[444] = "No Response",            -- nginx
+	[450] = "Blocked by Windows Parental Controls", -- Microsoft
+	[497] = "HTTP Request Sent to HTTPS Port", -- nginx
+	[498] = "Token expired/invalid",  -- Esri
+	[499] = "Client Closed Request",  -- nginx
+	[509] = "Bandwidth Limit Exceeded", -- cPanel/Apache
+	[521] = "Web Server Is Down",     -- Cloudflare
+	[522] = "Connection Timed Out",   -- Cloudflare
+	[523] = "Origin Is Unreachable",  -- Cloudflare
+	[525] = "SSL Handshake Failed",   -- Cloudflare
+	[599] = "Network Connect Timeout Error", -- proxy
 }
 
 --[[@enum http_status]]
