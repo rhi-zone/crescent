@@ -168,6 +168,48 @@ dependency graph of concrete libraries downward until you find things with no
 dependencies — those are the primitives. Do not design primitives in isolation and hope
 they fit; design them by following what real libraries actually need.
 
+## Types as Ecosystem Accelerator
+
+The value proposition of crescent's type system is not correctness alone — it is that
+**design accelerates growth**. In a fully-annotated ecosystem, types are simultaneously
+documentation, contracts, and discovery. You do not read docs to know what a function
+takes; the type tells you. You do not write glue to compose two libraries; their types
+either fit or they don't, and the checker tells you immediately.
+
+This compounds: each new typed library makes every other library more composable, because
+types are the coordination mechanism and they require no coordination to use.
+
+### Typed holes via `unknown`
+
+A global annotation `_: unknown` is a typed hole — a named placeholder that says "this
+position needs a value; its type is not yet determined." The typechecker propagates
+`unknown` through every call site that uses it, forcing narrowing everywhere it appears.
+No special hole machinery is needed: `unknown` already errors at use sites and already
+requires explicit narrowing. The hole IS the type system.
+
+This means a stdlib definition file can annotate incomplete areas with `_: unknown`, and
+the type graph will automatically flag every consumer of an unfinished interface. The
+incompleteness is visible and loud, not silent.
+
+### Protocol bindings as typed libraries
+
+A protocol library (`lib/lsp`, `lib/mcp`, `lib/jsonrpc`) ships with every method
+pre-typed. You implement handlers; the types are already there. The protocol definition
+*is* the library — you do not write schemas, you do not duplicate type information, you
+simply register a handler and the typechecker validates it against the protocol spec.
+
+```lua
+local lsp = require("lib.lsp")
+lsp:on_hover(function(params)   -- params: HoverParams, return: Hover
+    return { contents = "..." } -- typechecked against the LSP spec
+end)
+lsp:serve()
+```
+
+This pattern applies to any protocol: LSP, MCP, JSON-RPC, OpenAPI. The substrate is
+`lib/jsonrpc`; the bindings are typed method registrations. Different protocols, same
+primitive.
+
 ## Access Control (deferred)
 
 Access control design is intentionally deferred. The wrong approach is to inherit
