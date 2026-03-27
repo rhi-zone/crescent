@@ -13,8 +13,8 @@
 
 - [ ] **Narrowing doesn't apply to locals assigned from function call returns** — at narrowing time during constraint generation, locals assigned from function calls are still TAG_VAR (unsolved constraint variables). `types.subtract(TAG_VAR, T_NIL)` returns TAG_VAR unchanged. Workaround: add `--: T?` annotation to the receiving local so it gets a concrete type. Affects all `if not x then return end` patterns where `x` comes from a function call.
 - [x] **`or` condition narrowing overwrites previous narrowing for same variable** — `if not x or x == 0 then return end` failed to narrow `x` because the second `record_narrowing` call overwrote the first. Fixed: `record_narrowing` now chains through `narrowed[name_id]`.
-- [ ] **Multi-return annotation on single-var capture** — `--: string?` on `local x = multi_return_fn()` fails with "cannot assign tuple to scalar" when the function's return type is a tuple. The annotation should check against the first return value only.
-- [ ] **Optional field absence in structural assignment** — `setmetatable({x=1}, mt)` not assignable to `{x: number, y: string?}` because the literal table lacks `y`. Optional fields should be satisfiable by absence.
+- [x] **Multi-return annotation on single-var capture** — fixed in solve_sub: when actual is TAG_TUPLE and expected is scalar, project first element. Annotated `local x --: string; x = f()` where f returns (string, number) now type-checks correctly.
+- [x] **Optional field absence in structural assignment** — already works. `{x=1}` satisfies `{x: number, y?: number}` because unify.lua skips absent optional fields (line 470: `if band(bfe.flags, FLAG_OPTIONAL) == 0 then`).
 
 ## priorities (medium horizon)
 
@@ -334,7 +334,7 @@
 ### annotation syntax gaps
 - [x] **Open table syntax in .d.lua**: `{ ... }` bare spread in table annotation creates a row variable; `{ fields..., ... }` = open table. `_G` now declared in stdlib.d.lua. (2026-03-03, commit 6e197c5)
 - [x] **`typeof` annotation**: `typeof x` captures the inferred type of binding `x`. TAG_TYPEOF = 25; ann.lua recognises `typeof <ident>`; resolve_annotation_type does scope lookup. Top-level `--::` decls with typeof are deferred until after gen_block. (2026-03-19, 913110e)
-- [ ] **`typeof` in function signatures**: all cases currently fail — `resolve_annotation_type` resolves all param/return types before any param name is in scope. Fix: pre-bind all param names as `TAG_VAR` placeholders before resolving any annotation, enabling forward refs `(x: typeof y, y: T)`, backward refs `(x: T, y: typeof x)`, return refs `-> typeof x`, and mutual refs `(a: typeof b, b: typeof a)` (circular → both unify to same type var, resolved at call site). Three failing tests added.
+- [x] **`typeof` in function signatures**: pre-bind param names as TAG_VAR placeholders before resolving annotations. All cases work: forward refs, backward refs, return refs, mutual refs.
 
 ### performance (v2 redesign)
 **Full redesign in progress. See `docs/typechecker-v2.md` for architecture.**

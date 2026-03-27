@@ -241,6 +241,20 @@ local function solve_sub(ctx, c)
     local expected = find(ctx, c[3])
     local line, col = c[4], c[5]
 
+    -- Multi-return tuple assigned to scalar: project the first element.
+    -- In Lua `local x = f()` where f() returns (T, U, ...) → x gets T.
+    -- When C_SUB receives a tuple on the left but a non-tuple on the right,
+    -- check the first element instead of the whole tuple.
+    do
+        local at = ctx.types:get(actual)
+        local et = ctx.types:get(expected)
+        if at.tag == TAG_TUPLE and et.tag ~= TAG_TUPLE then
+            actual = at.data[1] > 0
+                and find(ctx, ctx.lists:get(at.data[0]))
+                or ctx.T_NIL
+        end
+    end
+
     -- Fast path: check direct assignability without widening.
     -- Allows literal types to satisfy union/literal expectations, e.g. "ok" → "ok"|"error",
     -- or 3.14 → 3.14 (float literal narrowing round-trip).

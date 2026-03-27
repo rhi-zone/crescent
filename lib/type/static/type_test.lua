@@ -6150,15 +6150,6 @@ local y = val
 ]])
     end)
 
-    -- TODO: typeof in function signatures currently fails — resolve_annotation_type
-    -- resolves all param/return types before any param names are bound in scope.
-    -- Fix: pre-bind all param names as TAG_VAR placeholders, then resolve all
-    -- param type annotations (enabling forward refs), then resolve return types.
-    -- Cases that must work:
-    --   (x: T) -> typeof x          -- return same type as param
-    --   (x: T, y: typeof x)         -- later param same type as earlier
-    --   (x: typeof y, y: T)         -- earlier param same type as later (forward ref)
-    --   (a: typeof b, b: typeof a)  -- mutual: both unify to same type variable
     assert.it("typeof in function return type refers to param type", function()
         v3_no_errors([[
 --: (x: integer) -> typeof x
@@ -6706,5 +6697,44 @@ local x = 42
 local y = "hi"
 ]])
         assert.eq(#err.errors, 0)
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Multi-return truncation: annotated single-var receiving multi-return call
+-- ---------------------------------------------------------------------------
+
+assert.describe("multi-return truncation: annotated single-var from call", function()
+    assert.it("annotated local: scalar annotation on multi-return call projects first slot", function()
+        -- local x --: string; x = f() where f: () -> (string, number)
+        -- x gets the first return value, so string <: string passes.
+        v3_no_errors([[
+local f --: () -> (string, number)
+local x --: string
+x = f()
+]])
+    end)
+
+    assert.it("inline annotation: --: string on local = multi-return call", function()
+        v3_no_errors([[
+local f --: () -> (string, number)
+local x = f() --: string
+]])
+    end)
+
+    assert.it("nullable annotation: --: string? on single-var from multi-return", function()
+        v3_no_errors([[
+local f --: () -> (string, number)
+local x --: string?
+x = f()
+]])
+    end)
+
+    assert.it("wrong annotation: type error when first slot doesn't match", function()
+        v3_has_error([[
+local f --: () -> (string, number)
+local x --: number
+x = f()
+]], "cannot assign")
     end)
 end)
