@@ -4,11 +4,10 @@
 
 local mod = {}
 
---:: http_stream = { _recv: () -> string?, string?, _buf: string, _headers: { [string]: string[] }?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
+--:: http_stream = { _recv: () -> string?, _buf: string, _headers: { [string]: string[] }?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
 
 local mt = { __index = {} }
 
---: (() -> string?, string?) -> http_stream
 mod.new = function(recv_fn)
 	return setmetatable({
 		_recv = recv_fn,
@@ -18,25 +17,29 @@ mod.new = function(recv_fn)
 end
 
 --- Fill buffer until it contains pattern or EOF.
+-- NOTE: annotations work around typechecker limitation — narrowing doesn't
+-- apply to locals assigned from function call returns (TAG_VAR not yet resolved
+-- at narrowing time). See TODO.md.
 --: (http_stream, string) -> integer?
 local function fill_until(self, pattern)
 	while true do
 		local pos = self._buf:find(pattern, 1, true)
 		if pos then return pos end
 		if self._eof then return nil end
-		local chunk, err = self._recv()
-		if not chunk then
+		--: string?
+		local recv_result = self._recv()
+		if not recv_result then
 			self._eof = true
 			return nil
 		end
-		self._buf = self._buf .. chunk
+		self._buf = self._buf .. recv_result
 	end
 end
 
 --- Read and parse HTTP response status line + headers.
---: () -> { [string]: string[] }?, string?
 function mt.__index:read_headers()
 	if self._headers then return self._headers end
+	--: integer?
 	local pos = fill_until(self, "\r\n\r\n")
 	if not pos then return nil, "incomplete headers" end
 
@@ -72,25 +75,23 @@ function mt.__index:read_headers()
 end
 
 --- Return parsed status code.
---: () -> integer?
 function mt.__index:status()
 	return self._status
 end
 
 --- Read full body using Content-Length.
---: () -> string?, string?
 function mt.__index:read_body()
 	local headers, err = self:read_headers()
 	if not headers then return nil, err end
 
 	local cl = headers["content-length"]
 	if cl then
+		--: number?
 		local len = tonumber(cl[1])
 		if not len then return nil, "invalid content-length" end
 		-- fill buffer until we have enough
 		while #self._buf < len and not self._eof do
-			local chunk
-			chunk, err = self._recv()
+			local chunk = self._recv()
 			if not chunk then self._eof = true; break end
 			self._buf = self._buf .. chunk
 		end
@@ -101,8 +102,7 @@ function mt.__index:read_body()
 
 	-- no content-length: read until EOF
 	while not self._eof do
-		local chunk
-		chunk, err = self._recv()
+		local chunk = self._recv()
 		if not chunk then self._eof = true; break end
 		self._buf = self._buf .. chunk
 	end
@@ -113,7 +113,6 @@ end
 
 --- Iterator for chunked transfer encoding.
 -- Yields decoded chunk data (not hex lengths or trailers).
---: () -> () -> string?
 function mt.__index:chunks()
 	local headers, err = self:read_headers()
 	if not headers then return function() return nil end end
@@ -122,6 +121,7 @@ function mt.__index:chunks()
 	return function()
 		if done then return nil end
 		-- read chunk size line
+		--: integer?
 		local pos = fill_until(self, "\r\n")
 		if not pos then done = true; return nil end
 
@@ -132,14 +132,14 @@ function mt.__index:chunks()
 		local hex = size_line:match("^([0-9a-fA-F]+)")
 		if not hex then done = true; return nil end
 
+		--: number?
 		local size = tonumber(hex, 16)
 		if not size or size == 0 then done = true; return nil end
 
 		-- read chunk data + trailing \r\n
 		local need = size + 2
 		while #self._buf < need and not self._eof do
-			local chunk
-			chunk, err = self._recv()
+			local chunk = self._recv()
 			if not chunk then self._eof = true; break end
 			self._buf = self._buf .. chunk
 		end
@@ -152,7 +152,6 @@ end
 
 --- Iterator for Server-Sent Events.
 -- Yields tables: { event: string?, data: string, id: string? }
---: () -> () -> { event: string?, data: string, id: string? }?
 function mt.__index:events()
 	local headers, err = self:read_headers()
 	if not headers then return function() return nil end end
@@ -165,6 +164,7 @@ function mt.__index:events()
 	return function()
 		while true do
 			-- try to find next line
+			--: integer?
 			local pos = fill_until(self, "\n")
 			if not pos then
 				-- EOF: flush pending event

@@ -508,13 +508,15 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
 end
 
 -- Apply a single narrowing info to the 'narrowed' map.
+-- When narrowed[name_id] already has an entry (e.g. from a prior arm of `and`/`or`),
+-- apply the new narrowing to the already-narrowed type so both constraints compose.
 --: (Ctx, NarrowInfo?, { [integer]: integer, ... }, boolean) -> ()
 local function record_narrowing(ctx, info, narrowed, is_truthy)
     if not info then return end
     local name_id = info_name_id(info)
     if not name_id then return end
     local env_mod = require("lib.type.static.env")
-    local current_ty = env_mod.lookup(ctx.scope, name_id)
+    local current_ty = narrowed[name_id] or env_mod.lookup(ctx.scope, name_id)
     if not current_ty then return end
     narrowed[name_id] = apply_narrowing(ctx, info, current_ty, is_truthy)
     -- Propagate correlated multi-return narrowings when any binding is narrowed.

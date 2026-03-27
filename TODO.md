@@ -9,6 +9,13 @@
 - [x] **Literal table not assignable to indexer type** — fixed 0b40861
 - [x] **Missing return detection** — fixed; `is_definitely_returning` analysis in constrain.lua emits implicit nil C_RETURN for non-definitely-returning annotated functions.
 
+## typechecker narrowing gaps
+
+- [ ] **Narrowing doesn't apply to locals assigned from function call returns** — at narrowing time during constraint generation, locals assigned from function calls are still TAG_VAR (unsolved constraint variables). `types.subtract(TAG_VAR, T_NIL)` returns TAG_VAR unchanged. Workaround: add `--: T?` annotation to the receiving local so it gets a concrete type. Affects all `if not x then return end` patterns where `x` comes from a function call.
+- [x] **`or` condition narrowing overwrites previous narrowing for same variable** — `if not x or x == 0 then return end` failed to narrow `x` because the second `record_narrowing` call overwrote the first. Fixed: `record_narrowing` now chains through `narrowed[name_id]`.
+- [ ] **Multi-return annotation on single-var capture** — `--: string?` on `local x = multi_return_fn()` fails with "cannot assign tuple to scalar" when the function's return type is a tuple. The annotation should check against the first return value only.
+- [ ] **Optional field absence in structural assignment** — `setmetatable({x=1}, mt)` not assignable to `{x: number, y: string?}` because the literal table lacks `y`. Optional fields should be satisfiable by absence.
+
 ## priorities (medium horizon)
 
 - [ ] **Registry + docs site** (`pkg.crescent.run`) — see `docs/registry-design.md` for full vision.
