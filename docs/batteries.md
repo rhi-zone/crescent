@@ -184,6 +184,15 @@ for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
 **`lib/notify`** — push notifications, webhooks, alerting. Outbound HTTP webhooks,
 email notifications (via `lib/email`), SMS gateway integrations.
 
+### Missing — typechecker features (load-bearing for the ecosystem)
+
+**Record spread types** — `{ ...T, k: V }` as a type-level operation. Needed for
+the compile-time-safe builder pattern: `builder:with(val: T): Builder<{ ...S, ...T }>`.
+Without this, generic builders can't track accumulated state in the type system.
+`S & { k: V }` is not equivalent — intersection of two closed tables is `never` unless
+identical. Spread is the correct primitive: produces a new closed type with all of S's
+keys plus the override. This is a planned typechecker feature, not yet implemented.
+
 ### Missing — transpiler (future)
 
 **`lib/lua2ts`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
