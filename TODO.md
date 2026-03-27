@@ -20,6 +20,8 @@
 
 - [ ] **`lib/orchestration/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
 
+- [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST; emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua` in ~/git/lua (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross. Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra annotation work.
+
 - [ ] **`lib/ecs/`** — entity-component substrate. Named entities, typed components, spatial containment (entities inside entities), mutable state store. User-defined schemas — no hardcoded concepts like "room" or "inventory". The primitive for building world simulations, games, or any entity-centric stateful system. Turn loop, perception rules, mutation rules, and renderers (RP prose, MUD-style, etc.) are built on top by the user.
 
 ## priorities (medium horizon)
