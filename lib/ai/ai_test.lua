@@ -237,16 +237,15 @@ describe("ai/providers/openai_compat", function()
 	if not has_compat then return end
 
 	it("should have a registry of well-known providers", function()
-		T.ok(compat.registry.openai, "openai in registry")
-		T.ok(compat.registry.groq, "groq in registry")
-		T.ok(compat.registry.deepseek, "deepseek in registry")
-		T.ok(compat.registry.togetherai, "togetherai in registry")
-		T.ok(compat.registry.fireworks, "fireworks in registry")
-		T.ok(compat.registry.deepinfra, "deepinfra in registry")
-		T.ok(compat.registry.cerebras, "cerebras in registry")
-		T.ok(compat.registry.perplexity, "perplexity in registry")
-		T.ok(compat.registry.xai, "xai in registry")
-		T.ok(compat.registry.mistral, "mistral in registry")
+		local expected = {
+			"openai", "groq", "deepseek", "mistral", "xai", "perplexity", "cerebras",
+			"togetherai", "fireworks", "deepinfra", "sambanova", "nebius", "novita",
+			"hyperbolic", "lambda", "openrouter", "huggingface", "moonshot", "yi",
+			"cohere", "ovh",
+		}
+		for _, name in ipairs(expected) do
+			T.ok(compat.registry[name], name .. " in registry")
+		end
 	end)
 
 	it("should create provider with correct API key error", function()

@@ -408,8 +408,10 @@ mod.create = function(config)
 end
 
 --- Registry of well-known OpenAI-compatible providers.
--- { name, host, api_key_env, chat_path?, embeddings_path?, images_path? }
+-- { host, api_key_env, chat_path?, embeddings_path?, images_path? }
+-- All use Bearer token auth and /v1/chat/completions unless overridden.
 mod.registry = {
+	-- ── Tier 1: major providers ─────────────────────────────────────────────
 	openai = {
 		host = "api.openai.com",
 		api_key_env = "OPENAI_API_KEY",
@@ -424,6 +426,23 @@ mod.registry = {
 		host = "api.deepseek.com",
 		api_key_env = "DEEPSEEK_API_KEY",
 	},
+	mistral = {
+		host = "api.mistral.ai",
+		api_key_env = "MISTRAL_API_KEY",
+	},
+	xai = {
+		host = "api.x.ai",
+		api_key_env = "XAI_API_KEY",
+	},
+	perplexity = {
+		host = "api.perplexity.ai",
+		api_key_env = "PERPLEXITY_API_KEY",
+	},
+	cerebras = {
+		host = "api.cerebras.ai",
+		api_key_env = "CEREBRAS_API_KEY",
+	},
+	-- ── Tier 2: inference platforms ─────────────────────────────────────────
 	togetherai = {
 		host = "api.together.xyz",
 		api_key_env = "TOGETHER_API_KEY",
@@ -441,21 +460,56 @@ mod.registry = {
 		embeddings_path = "/v1/openai/embeddings",
 		api_key_env = "DEEPINFRA_API_KEY",
 	},
-	cerebras = {
-		host = "api.cerebras.ai",
-		api_key_env = "CEREBRAS_API_KEY",
+	sambanova = {
+		host = "api.sambanova.ai",
+		api_key_env = "SAMBANOVA_API_KEY",
 	},
-	perplexity = {
-		host = "api.perplexity.ai",
-		api_key_env = "PERPLEXITY_API_KEY",
+	nebius = {
+		host = "api.studio.nebius.ai",
+		api_key_env = "NEBIUS_API_KEY",
 	},
-	xai = {
-		host = "api.x.ai",
-		api_key_env = "XAI_API_KEY",
+	novita = {
+		host = "api.novita.ai",
+		chat_path = "/v3/openai/chat/completions",
+		embeddings_path = "/v3/openai/embeddings",
+		api_key_env = "NOVITA_API_KEY",
 	},
-	mistral = {
-		host = "api.mistral.ai",
-		api_key_env = "MISTRAL_API_KEY",
+	hyperbolic = {
+		host = "api.hyperbolic.xyz",
+		api_key_env = "HYPERBOLIC_API_KEY",
+	},
+	lambda = {
+		host = "api.lambdalabs.com",
+		api_key_env = "LAMBDA_API_KEY",
+	},
+	-- ── Tier 3: aggregators / routers ───────────────────────────────────────
+	openrouter = {
+		host = "openrouter.ai",
+		chat_path = "/api/v1/chat/completions",
+		api_key_env = "OPENROUTER_API_KEY",
+	},
+	huggingface = {
+		host = "router.huggingface.co",
+		api_key_env = "HF_TOKEN",
+	},
+	-- ── Tier 4: regional / niche ────────────────────────────────────────────
+	moonshot = {
+		host = "api.moonshot.cn",
+		api_key_env = "MOONSHOT_API_KEY",
+	},
+	yi = {
+		host = "api.lingyiwanwu.com",
+		api_key_env = "YI_API_KEY",
+	},
+	cohere = {
+		host = "api.cohere.ai",
+		chat_path = "/compatibility/v1/chat/completions",
+		embeddings_path = "/compatibility/v1/embeddings",
+		api_key_env = "COHERE_API_KEY",
+	},
+	ovh = {
+		host = "oai.endpoints.kepler.ai.cloud.ovh.net",
+		api_key_env = "OVH_AI_API_KEY",
 	},
 }
 
