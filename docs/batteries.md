@@ -124,7 +124,7 @@ response serialization, typed route handlers.
 
 ### Missing — frontend vertical
 
-**`lib/reactive`** — reactive optics. Signals focused through optics (lenses, prisms,
+**`lib/reactive_optics`** — reactive optics. Signals focused through optics (lenses, prisms,
 traversals) as the reactivity primitive. `signal:focus(lens)` produces a derived signal
 that reads and writes structurally through the lens; reactivity flows through optic
 composition rather than imperative synchronization functions. Lawful by construction —
