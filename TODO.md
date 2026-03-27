@@ -95,6 +95,21 @@
   [x] dep.* coupling resolved (a79167d) — 8 dep paths across 28 files updated.
   [x] HTML docgen output (582247c) — `--format html` with inline CSS.
 
+- [ ] **Typechecker: self-referential `--::` declarations** — `ai_provider` type in
+  `lib/ai/types.lua` references itself (fields have `ai_provider` return types).
+  The checker reports "undefined type" for the self-reference. Same-file `--::` types
+  should be visible to other `--::` and `--:` annotations in the same file.
+  **High priority** — blocks type-checking any library with recursive type declarations.
+
+- [ ] **Typechecker: narrowing after early return** — `if not x then return end` should
+  narrow `x` from `T?` to `T` on subsequent lines. Currently doesn't, causing false
+  "cannot perform arithmetic on nil" errors (e.g. `lib/http/stream.lua`).
+
+- [ ] **Typechecker: type-level imports** — `--:: import "lib.ai.types"` or similar,
+  analogous to TypeScript's `import type`. The checker already resolves `require()` for
+  cross-module types; this would be the annotation-only equivalent for files that only
+  need the types, not the runtime module.
+
 - [ ] **Typechecker: nested generic alias application** — `Partial<Partial<T>>`
   produces `never` even though `Partial<{a: string|nil}>` (the inner result)
   works fine directly. The bug is in how a generic alias application passes its

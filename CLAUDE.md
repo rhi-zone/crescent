@@ -95,6 +95,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Workflow
 
+**Run the typechecker on files you write or modify.** `luajit lib/type/static/cli.lua <file>...` — do this before committing. Annotations use `--:` (type on preceding line) and `--::` (type declarations), never EmmyLua (`---@param`, `---@return`, `--[[@param]]`, `fun()`). Function types use `() -> T` syntax, not `fun(): T`. Use `{ [K]: V }` for map types, not `table<K, V>`.
+
 **Minimize file churn.** When editing a file, read it once, plan all changes, and apply them in one pass.
 
 **`normalize view` is available** for structural outlines of files and directories:

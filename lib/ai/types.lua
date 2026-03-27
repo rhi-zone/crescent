@@ -6,9 +6,9 @@
 
 --:: ai_message = { role: "system" | "user" | "assistant" | "tool", content: string, tool_call_id?: string, name?: string }
 
---:: ai_tool = { name: string, description: string, parameters: table }
+--:: ai_tool = { name: string, description: string, parameters: { [string]: any } }
 
---:: ai_tool_call = { id: string, name: string, arguments: table }
+--:: ai_tool_call = { id: string, name: string, arguments: { [string]: any } }
 
 --:: ai_request = {
 --::   model: string,

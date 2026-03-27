@@ -4,7 +4,7 @@
 
 local mod = {}
 
---:: http_stream = { _recv: () -> string?, string?, _buf: string, _headers: table<string, string[]>?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
+--:: http_stream = { _recv: () -> string?, string?, _buf: string, _headers: { [string]: string[] }?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
 
 local mt = { __index = {} }
 
@@ -34,7 +34,7 @@ local function fill_until(self, pattern)
 end
 
 --- Read and parse HTTP response status line + headers.
---: () -> table<string, string[]>?, string?
+--: () -> { [string]: string[] }?, string?
 function mt.__index:read_headers()
 	if self._headers then return self._headers end
 	local pos = fill_until(self, "\r\n\r\n")
