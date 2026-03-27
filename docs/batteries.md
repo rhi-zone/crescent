@@ -184,6 +184,14 @@ for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
 **`lib/notify`** — push notifications, webhooks, alerting. Outbound HTTP webhooks,
 email notifications (via `lib/email`), SMS gateway integrations.
 
+**`lib/parse`** *(lower priority, niche)* — general-purpose parsing substrate. Lexer
+utilities, parser combinators, AST construction. Extracted from the typechecker's own
+parser (`lib/type/static/lex.lua`, `parse.lua`) into reusable primitives. For anyone
+building a language, DSL, config format, query language, or linter. Crescent already
+does this for itself — the question is whether those primitives become first-class
+`lib/` libraries. Also: `lib/asm` (assembler utilities) and `lib/ir` (intermediate
+representation) as stretch goals for the language tooling niche.
+
 ### Missing — typechecker features (load-bearing for the ecosystem)
 
 **Record spread types** — `{ ...T, k: V }` as a type-level operation. Needed for
