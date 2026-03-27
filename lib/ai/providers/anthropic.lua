@@ -97,8 +97,7 @@ local function parse_response(body)
 	}
 end
 
---[[@param req ai_request]]
---[[@return ai_response?, string?]]
+--: (ai_request) -> ai_response?, string?
 mod.generate = function(req)
 	local api_key = get_api_key()
 	if not api_key then return nil, "ANTHROPIC_API_KEY not set" end
@@ -136,8 +135,7 @@ mod.generate = function(req)
 	return parse_response(res.body)
 end
 
---[[@param req ai_request]]
---[[@return fun(): ai_delta?, string?]]
+--: (ai_request) -> (() -> ai_delta?)?, string?
 mod.stream = function(req)
 	local api_key = get_api_key()
 	if not api_key then return nil, "ANTHROPIC_API_KEY not set" end

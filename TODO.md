@@ -83,7 +83,8 @@
   - [ ] `lib/hash/sha1/` — rewrite mpeterv/sha1. Already heavily patched; sha256 shows
     the tiered pattern to follow.
   - [ ] `lib/ljsocket/` — largest and most complex. Blocked on registry (http/websocket
-    depend on it); rewrite as part of a network stack audit.
+    depend on it); rewrite as cross-platform `lib/socket/` (POSIX + winsock via FFI).
+  - [x] `lib/cparser/`, `lib/cmark/`, `lib/plterm/` + `lib/cli/ple.lua` — deleted (unused vendored code).
 
 - [ ] **Stdlib buildout** — see `docs/stdlib-roadmap.md`. Phase 1–3 done (2026-03-20):
   path guards, init.lua entry points, error convention sweep, tests for core packages,

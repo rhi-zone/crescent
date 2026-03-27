@@ -113,8 +113,7 @@ local function parse_response(body)
 	}
 end
 
---[[@param req ai_request]]
---[[@return ai_response?, string?]]
+--: (ai_request) -> ai_response?, string?
 mod.generate = function(req)
 	local api_key, err = get_api_key()
 	if not api_key then return nil, err end
@@ -155,8 +154,7 @@ mod.generate = function(req)
 	return parse_response(res.body)
 end
 
---[[@param req ai_request]]
---[[@return fun(): ai_delta?, string?]]
+--: (ai_request) -> (() -> ai_delta?)?, string?
 mod.stream = function(req)
 	local api_key, err = get_api_key()
 	if not api_key then return nil, err end
@@ -261,8 +259,7 @@ mod.stream = function(req)
 end
 
 --- Embed a single value.
---[[@param req { model: string, value: string }]]
---[[@return { embedding: number[], usage: table? }?, string?]]
+--: (ai_embed_request) -> ai_embed_response?, string?
 mod.embed = function(req)
 	local api_key, err = get_api_key()
 	if not api_key then return nil, err end
@@ -301,8 +298,7 @@ mod.embed = function(req)
 end
 
 --- Embed multiple values.
---[[@param req { model: string, values: string[] }]]
---[[@return { embeddings: number[][], usage: table? }?, string?]]
+--: (ai_embed_many_request) -> ai_embed_many_response?, string?
 mod.embed_many = function(req)
 	local api_key, err = get_api_key()
 	if not api_key then return nil, err end

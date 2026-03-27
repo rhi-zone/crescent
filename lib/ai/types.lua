@@ -56,7 +56,7 @@
 
 --:: ai_provider = {
 --::   generate: (req: ai_request) -> ai_response?, string?,
---::   stream: (req: ai_request) -> (fun(): ai_delta?)?, string?,
+--::   stream: (req: ai_request) -> (() -> ai_delta?)?, string?,
 --::   embed?: (req: ai_embed_request) -> ai_embed_response?, string?,
 --::   embed_many?: (req: ai_embed_many_request) -> ai_embed_many_response?, string?,
 --::   generate_image?: (req: ai_image_request) -> ai_image_response?, string?,

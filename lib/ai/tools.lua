@@ -9,8 +9,7 @@ local mod = {}
 --- Run an agentic tool loop.
 -- Calls ai.generate in a loop, executes tool calls via handlers,
 -- appends results, repeats until no more tool calls or max_rounds.
---[[@param opts { model: string, messages: ai_message[], tools: ai_tool[], handlers: table<string, fun(args: table): string>, max_rounds?: integer, max_tokens?: integer, temperature?: number, provider?: ai_provider }]]
---[[@return ai_response?, string?]]
+--: ({ model: string, messages: ai_message[], tools: ai_tool[], handlers: table<string, (args: table) -> string>, max_rounds?: integer, max_tokens?: integer, temperature?: number, provider?: ai_provider }) -> ai_response?, string?
 mod.run = function(opts)
 	local messages = {}
 	for i = 1, #opts.messages do

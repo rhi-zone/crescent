@@ -99,8 +99,7 @@ local function make_bearer_headers(api_key, body_str)
 end
 
 --- Create an OpenAI-compatible provider.
---[[@param config { name: string, host: string, chat_path?: string, embeddings_path?: string, images_path?: string, api_key_env: string, make_headers?: fun(api_key: string, body_str: string): table }]]
---[[@return ai_provider]]
+--: ({ name: string, host: string, chat_path?: string, embeddings_path?: string, images_path?: string, api_key_env: string, make_headers?: (api_key: string, body_str: string) -> table }) -> ai_provider
 mod.create = function(config)
 	local host = config.host
 	local chat_path = config.chat_path or "/v1/chat/completions"
@@ -117,8 +116,7 @@ mod.create = function(config)
 
 	local provider = {}
 
-	--[[@param req ai_request]]
-	--[[@return ai_response?, string?]]
+	--: (ai_request) -> ai_response?, string?
 	provider.generate = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -150,8 +148,7 @@ mod.create = function(config)
 		return parse_chat_response(res.body)
 	end
 
-	--[[@param req ai_request]]
-	--[[@return fun(): ai_delta?, string?]]
+	--: (ai_request) -> (() -> ai_delta?)?, string?
 	provider.stream = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -269,8 +266,7 @@ mod.create = function(config)
 	end
 
 	--- Embed a single value.
-	--[[@param req { model: string, value: string }]]
-	--[[@return { embedding: number[], usage: table? }?, string?]]
+	--: (ai_embed_request) -> ai_embed_response?, string?
 	provider.embed = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -310,8 +306,7 @@ mod.create = function(config)
 	end
 
 	--- Embed multiple values.
-	--[[@param req { model: string, values: string[] }]]
-	--[[@return { embeddings: number[][], usage: table? }?, string?]]
+	--: (ai_embed_many_request) -> ai_embed_many_response?, string?
 	provider.embed_many = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -358,8 +353,7 @@ mod.create = function(config)
 	end
 
 	--- Generate an image.
-	--[[@param req { model: string, prompt: string, n?: integer, size?: string }]]
-	--[[@return { images: { url?: string, b64_json?: string }[] }?, string?]]
+	--: (ai_image_request) -> ai_image_response?, string?
 	provider.generate_image = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end

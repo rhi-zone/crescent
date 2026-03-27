@@ -9,8 +9,7 @@ local buf = ffi.new("char[65536]")
 
 --[[TODO: module-level TLS state limits to one concurrent connection — acceptable for now]]
 
---[[@param req http_client_request]]
---[[@return http_client_response?, string?]]
+--: (http_client_request) -> http_client_response?, string?
 mod.request = function(req)
 	req.body = req.body or ""
 	local client, err = socket.create("inet", "stream", "tcp")
@@ -124,8 +123,7 @@ mod.request = function(req)
 	return res
 end
 
---[[@param req http_client_request]]
---[[@return fun(): string?, string? recv_fn, fun() close_fn]]
+--: (http_client_request) -> (() -> string?, string?)?, (() -> nil)? | nil, string?
 mod.stream = function(req)
 	req.body = req.body or ""
 	local client, err = socket.create("inet", "stream", "tcp")

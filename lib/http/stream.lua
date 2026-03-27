@@ -4,19 +4,11 @@
 
 local mod = {}
 
---[[@class http_stream]]
---[[@field _recv fun(): string?, string?]]
---[[@field _buf string]]
---[[@field _headers table<string, string[]>?]]
---[[@field _status integer?]]
---[[@field _status_text string?]]
---[[@field _version string?]]
---[[@field _eof boolean]]
+--:: http_stream = { _recv: () -> string?, string?, _buf: string, _headers: table<string, string[]>?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
 
 local mt = { __index = {} }
 
---[[@param recv_fn fun(): string?, string?]]
---[[@return http_stream]]
+--: (() -> string?, string?) -> http_stream
 mod.new = function(recv_fn)
 	return setmetatable({
 		_recv = recv_fn,
@@ -26,9 +18,7 @@ mod.new = function(recv_fn)
 end
 
 --- Fill buffer until it contains pattern or EOF.
---[[@param self http_stream]]
---[[@param pattern string]]
---[[@return integer? pos]]
+--: (http_stream, string) -> integer?
 local function fill_until(self, pattern)
 	while true do
 		local pos = self._buf:find(pattern, 1, true)
@@ -44,7 +34,7 @@ local function fill_until(self, pattern)
 end
 
 --- Read and parse HTTP response status line + headers.
---[[@return table<string, string[]>? headers, string? err]]
+--: () -> table<string, string[]>?, string?
 function mt.__index:read_headers()
 	if self._headers then return self._headers end
 	local pos = fill_until(self, "\r\n\r\n")
@@ -82,13 +72,13 @@ function mt.__index:read_headers()
 end
 
 --- Return parsed status code.
---[[@return integer?]]
+--: () -> integer?
 function mt.__index:status()
 	return self._status
 end
 
 --- Read full body using Content-Length.
---[[@return string? body, string? err]]
+--: () -> string?, string?
 function mt.__index:read_body()
 	local headers, err = self:read_headers()
 	if not headers then return nil, err end
@@ -123,7 +113,7 @@ end
 
 --- Iterator for chunked transfer encoding.
 -- Yields decoded chunk data (not hex lengths or trailers).
---[[@return fun(): string?]]
+--: () -> () -> string?
 function mt.__index:chunks()
 	local headers, err = self:read_headers()
 	if not headers then return function() return nil end end
@@ -162,7 +152,7 @@ end
 
 --- Iterator for Server-Sent Events.
 -- Yields tables: { event: string?, data: string, id: string? }
---[[@return fun(): { event: string?, data: string, id: string? }?]]
+--: () -> () -> { event: string?, data: string, id: string? }?
 function mt.__index:events()
 	local headers, err = self:read_headers()
 	if not headers then return function() return nil end end

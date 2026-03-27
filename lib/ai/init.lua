@@ -60,8 +60,7 @@ local function make_provider_req(req)
 end
 
 --- Non-streaming generation.
---[[@param req ai_request]]
---[[@return ai_response?, string?]]
+--: (ai_request) -> ai_response?, string?
 mod.generate = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -69,8 +68,7 @@ mod.generate = function(req)
 end
 
 --- Streaming generation — returns closure iterator.
---[[@param req ai_request]]
---[[@return fun(): ai_delta?]]
+--: (ai_request) -> (() -> ai_delta?)?, string?
 mod.stream = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then
@@ -80,8 +78,7 @@ mod.stream = function(req)
 end
 
 --- Embed a single value.
---[[@param req { model: string, value: string, provider?: string|ai_provider }]]
---[[@return { embedding: number[], usage: table? }?, string?]]
+--: (ai_embed_request) -> ai_embed_response?, string?
 mod.embed = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -90,8 +87,7 @@ mod.embed = function(req)
 end
 
 --- Embed multiple values.
---[[@param req { model: string, values: string[], provider?: string|ai_provider }]]
---[[@return { embeddings: number[][], usage: table? }?, string?]]
+--: (ai_embed_many_request) -> ai_embed_many_response?, string?
 mod.embed_many = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -100,8 +96,7 @@ mod.embed_many = function(req)
 end
 
 --- Generate an image.
---[[@param req { model: string, prompt: string, n?: integer, size?: string, provider?: string|ai_provider }]]
---[[@return { images: table[] }?, string?]]
+--: (ai_image_request) -> ai_image_response?, string?
 mod.generate_image = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -110,8 +105,7 @@ mod.generate_image = function(req)
 end
 
 --- Register a custom provider.
---[[@param name string]]
---[[@param provider ai_provider]]
+--: (string, ai_provider) -> nil
 mod.register = function(name, provider)
 	providers[name] = provider
 end
