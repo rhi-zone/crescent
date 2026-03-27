@@ -158,6 +158,44 @@ Ordered by how many other things unblock:
 12. **Template engine** — unblocks prose assembly, HTML generation.
 13. **World state lib** — unblocks RP substrate, Lumen entity model.
 
+## Why vendor-first doesn't mean bloat
+
+The npm cautionary tale is not about vendoring — it's about **fragmentation**. Thousands
+of packages with no shared conventions, no coherent design, no single source of truth.
+Each package is its own island. Modularity without coherence produces a dependency graph
+that no one can audit or reason about.
+
+Crescent's modularity is within a bounded, coherent system. `lib/` has one error
+convention, one iterator protocol, one type annotation syntax, one naming convention.
+Any two libraries compose because they were designed together. The dependency direction
+is always *toward* `lib/`, never outward into an unbounded third-party graph.
+
+Vendoring `lib/http` means vendoring `lib/http` — not `lib/http` plus its transitive
+dependencies, because those dependencies are also in `lib/`, which is already there.
+The graph is shallow by design, not by accident.
+
+The LuaJIT binary is ~500KB. A typical application's `dep/` is a handful of `.lua`
+files. The whole thing fits in a git repo. That's not bloat — that's a complete,
+auditable, self-contained artifact.
+
+## Vendored runtime
+
+LuaJIT binaries are vendored directly in the repo — one per platform
+(linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, windows-x86_64).
+A bootstrap script selects the right one.
+
+LuaJIT's release cadence is effectively frozen (2.1 beta has been stable for years),
+so the binary doesn't change without a deliberate commit. Vendoring it means:
+
+- No "install LuaJIT" step in the getting-started story
+- No version variance across users (distro packages, 2.0 vs 2.1, patched forks)
+- The repo is the complete runtime — clone and run, nothing else required
+- Full vertical ownership: libraries, tooling, and runtime are all in one place,
+  all auditable, all yours
+
+The only external dependency left is a C compiler for any FFI work that needs
+it — which is as close to a universal assumption as exists.
+
 ## The typed ecosystem flywheel
 
 Every library in `lib/` is fully annotated with crescent-style `--:` types. The
