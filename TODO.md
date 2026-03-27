@@ -11,7 +11,7 @@
 
 ## typechecker missing features
 
-- [ ] **Record spread types** — `{ ...T, k: V }`, `{ ...T, ...U }`, `{ k: V, ...T }` as type-level operations. `TAG_SPREAD` is parsed and propagated but unify.lua has no rule to merge spread fields into a concrete table type. Semantics: spread fields are merged left-to-right, later fields win on conflict. Load-bearing for: compile-time-safe builder pattern (`Builder<{ ...S, ...T }>`), `Partial`/`Pick`/`Omit` composed with spreads (already used in docs/type-system.md examples), any API that tracks accumulated type state generically. Implementation: unify.lua needs a `TAG_SPREAD` case that resolves the inner type and merges its fields into the containing table.
+- [x] **Record spread types** — `{ ...T, k: V }`, `{ ...T, ...U }`, `{ k: V, ...T }` as type-level operations. `TAG_SPREAD` is parsed and propagated but unify.lua has no rule to merge spread fields into a concrete table type. Semantics: spread fields are merged left-to-right, later fields win on conflict. Load-bearing for: compile-time-safe builder pattern (`Builder<{ ...S, ...T }>`), `Partial`/`Pick`/`Omit` composed with spreads (already used in docs/type-system.md examples), any API that tracks accumulated type state generically. Implementation: unify.lua needs a `TAG_SPREAD` case that resolves the inner type and merges its fields into the containing table.
 
 ## typechecker narrowing gaps
 
