@@ -404,11 +404,39 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == TAG_TABLE then
         seen[ann_tid] = true
         local field_ids = {}
+        local field_pos = {}  -- name_id -> index in field_ids; later entries win (override semantics)
+        local function add_field(new_fid, name_id)
+            if field_pos[name_id] then
+                field_ids[field_pos[name_id]] = new_fid
+            else
+                field_ids[#field_ids + 1] = new_fid
+                field_pos[name_id] = #field_ids
+            end
+        end
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             local fid = ctx.ann.lists:get(i)
             local fe  = ctx.ann.fields:get(fid)
-            local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
-            field_ids[#field_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.flags)
+            if fe.name_id == -1 then
+                -- Spread entry: { ...T, ... }
+                -- fe.type_id is a TAG_SPREAD annotation node; .data[0] is the inner ann type.
+                local spread_at = ctx.ann.types:get(fe.type_id)
+                local inner_tid = resolve_annotation_type(ctx, spread_at.data[0], seen)
+                inner_tid = types_mod.find(ctx, inner_tid)
+                local inner_t = ctx.types:get(inner_tid)
+                if inner_t.tag == TAG_TABLE then
+                    for j = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                        local inner_fid = ctx.lists:get(j)
+                        local inner_fe  = ctx.fields:get(inner_fid)
+                        local new_fid = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                        add_field(new_fid, inner_fe.name_id)
+                    end
+                end
+                -- If inner type is not a concrete table (TAG_VAR etc.), skip silently.
+                -- Generic spreads require unify.lua support and are tracked as future work.
+            else
+                local ft = resolve_annotation_type(ctx, fe.type_id, seen)
+                add_field(types_mod.make_field(ctx, fe.name_id, ft, fe.flags), fe.name_id)
+            end
         end
         local indexers = {}
         local is, il = at.data[2], at.data[3]
