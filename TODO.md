@@ -186,6 +186,13 @@
 - [ ] `lib/ai/providers/openai.lua`: only flushes first accumulated tool call on finish — multi-tool-call streaming incomplete
 - [ ] `lib/ai/tools.lua`: assistant message in tool loop doesn't carry tool_calls metadata — some providers need it for multi-turn tool conversations
 - [ ] `lib/http/stream.lua`: buffer growth via string concat in hot path — should use table accumulator or FFI buffer
+- [ ] **low-prio** providers needing custom adapters (not OpenAI-compatible):
+  - Azure OpenAI (`api-key` header instead of `Authorization: Bearer`)
+  - Amazon Bedrock (SigV4 signing)
+  - Google Vertex AI (GCP OAuth, different endpoint from Gemini API)
+  - Replicate (predictions API, polling model)
+  - Cloudflare Workers AI (`account_id` in URL path)
+  - Reka (own request format)
 
 #### websocket
 - [x] 15 TODOs — resolved/categorised (perf/api/extensions/policy/refactor); aa5a4e0

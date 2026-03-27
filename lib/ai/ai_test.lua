@@ -55,11 +55,12 @@ describe("ai", function()
 	local ai = require("lib.ai")
 
 	describe("provider resolution", function()
-		it("should parse provider:model prefix", function()
+		it("should resolve provider by string name", function()
 			local mock = make_mock_provider()
 			ai.register("testprov", mock)
 			local res, err = ai.generate({
-				model = "testprov:test-model",
+				provider = "testprov",
+				model = "test-model",
 				messages = { { role = "user", content = "hi" } },
 			})
 			T.ok(res, "response returned")
@@ -69,9 +70,9 @@ describe("ai", function()
 		it("should use explicit provider table", function()
 			local mock = make_mock_provider({ generate_text = "custom" })
 			local res = ai.generate({
+				provider = mock,
 				model = "anything",
 				messages = { { role = "user", content = "hi" } },
-				provider = mock,
 			})
 			T.ok(res)
 			T.eq(res.text, "custom")
@@ -79,7 +80,8 @@ describe("ai", function()
 
 		it("should return error for unknown provider", function()
 			local res, err = ai.generate({
-				model = "nonexistent:model",
+				provider = "nonexistent",
+				model = "model",
 				messages = { { role = "user", content = "hi" } },
 			})
 			T.eq(res, nil)
@@ -87,13 +89,11 @@ describe("ai", function()
 		end)
 
 		it("should auto-register OpenAI-compatible providers from registry", function()
-			-- groq, deepseek, etc. should resolve via openai_compat.registry
-			-- We can't actually connect, but we can verify the provider is created
-			-- by checking that it doesn't return "unknown provider"
 			local has_compat = pcall(require, "lib.ai.providers.openai_compat")
 			if has_compat then
 				local res, err = ai.generate({
-					model = "groq:llama-3-70b",
+					provider = "groq",
+					model = "llama-3-70b",
 					messages = { { role = "user", content = "hi" } },
 				})
 				-- Should fail with "GROQ_API_KEY not set", NOT "unknown provider"
@@ -111,7 +111,7 @@ describe("ai", function()
 			})
 			ai.register("mock", mock)
 			local res = ai.generate({
-				model = "mock:m1",
+				provider = "mock", model = "m1",
 				messages = { { role = "user", content = "hi" } },
 			})
 			T.ok(res)
@@ -125,7 +125,7 @@ describe("ai", function()
 			local mock = make_mock_provider({ generate_err = "rate limited" })
 			ai.register("errmock", mock)
 			local res, err = ai.generate({
-				model = "errmock:m1",
+				provider = "errmock", model = "m1",
 				messages = { { role = "user", content = "hi" } },
 			})
 			T.eq(res, nil)
@@ -140,7 +140,7 @@ describe("ai", function()
 			})
 			ai.register("toolmock", mock)
 			local res = ai.generate({
-				model = "toolmock:m1",
+				provider = "toolmock", model = "m1",
 				messages = { { role = "user", content = "weather?" } },
 				tools = { { name = "get_weather", description = "Get weather", parameters = {} } },
 			})
@@ -157,7 +157,7 @@ describe("ai", function()
 			local mock = make_mock_provider()
 			ai.register("streammock", mock)
 			local parts = {}
-			for delta in ai.stream({ model = "streammock:m1", messages = { { role = "user", content = "hi" } } }) do
+			for delta in ai.stream({ provider = "streammock", model = "m1", messages = { { role = "user", content = "hi" } } }) do
 				if delta.text then parts[#parts + 1] = delta.text end
 			end
 			T.eq(table.concat(parts), "hello")
@@ -166,7 +166,7 @@ describe("ai", function()
 		it("should handle stream errors", function()
 			local mock = make_mock_provider({ stream_err = "connection failed" })
 			ai.register("streamerr", mock)
-			local iter, err = ai.stream({ model = "streamerr:m1", messages = { { role = "user", content = "hi" } } })
+			local iter, err = ai.stream({ provider = "streamerr", model = "m1", messages = { { role = "user", content = "hi" } } })
 			T.ok(err, "error returned")
 			T.eq(err, "connection failed")
 		end)
@@ -177,7 +177,7 @@ describe("ai", function()
 			local mock = make_mock_provider()
 			ai.register("embedmock", mock)
 			local res, err = ai.embed({
-				model = "embedmock:text-embedding-3-small",
+				provider = "embedmock", model = "text-embedding-3-small",
 				value = "hello world",
 			})
 			T.ok(res, "response returned: " .. tostring(err))
@@ -188,7 +188,7 @@ describe("ai", function()
 
 		it("should return error when provider has no embed", function()
 			ai.register("noembed", { generate = function() end, stream = function() end })
-			local res, err = ai.embed({ model = "noembed:m1", value = "hi" })
+			local res, err = ai.embed({ provider = "noembed", model = "m1", value = "hi" })
 			T.eq(res, nil)
 			T.ok(err:find("does not support"), "says not supported")
 		end)
@@ -199,7 +199,7 @@ describe("ai", function()
 			local mock = make_mock_provider()
 			ai.register("embedmany", mock)
 			local res, err = ai.embed_many({
-				model = "embedmany:text-embedding-3-small",
+				provider = "embedmany", model = "text-embedding-3-small",
 				values = { "hello", "world", "foo" },
 			})
 			T.ok(res, "response returned: " .. tostring(err))
@@ -213,7 +213,7 @@ describe("ai", function()
 			local mock = make_mock_provider()
 			ai.register("imgmock", mock)
 			local res, err = ai.generate_image({
-				model = "imgmock:dall-e-3",
+				provider = "imgmock", model = "dall-e-3",
 				prompt = "a cat",
 			})
 			T.ok(res, "response returned: " .. tostring(err))
@@ -223,7 +223,7 @@ describe("ai", function()
 
 		it("should return error when provider has no generate_image", function()
 			ai.register("noimg", { generate = function() end, stream = function() end })
-			local res, err = ai.generate_image({ model = "noimg:m1", prompt = "cat" })
+			local res, err = ai.generate_image({ provider = "noimg", model = "m1", prompt = "cat" })
 			T.eq(res, nil)
 			T.ok(err:find("does not support"), "says not supported")
 		end)
@@ -392,7 +392,7 @@ describe("ai/tools", function()
 
 		local handler_called = false
 		local res, err = tools_mod.run({
-			model = "toolloop:m1",
+			provider = "toolloop", model = "m1",
 			messages = { { role = "user", content = "what's the weather in NYC?" } },
 			tools = { { name = "get_weather", description = "Get weather", parameters = {} } },
 			handlers = {
@@ -422,7 +422,7 @@ describe("ai/tools", function()
 		ai.register("looper", mock)
 
 		local res, err = tools_mod.run({
-			model = "looper:m1",
+			provider = "looper", model = "m1",
 			messages = { { role = "user", content = "loop" } },
 			tools = { { name = "loop", description = "Loop", parameters = {} } },
 			handlers = { loop = function() return "{}" end },
@@ -451,7 +451,7 @@ describe("ai/tools", function()
 		ai.register("unk", mock)
 
 		local res = tools_mod.run({
-			model = "unk:m1",
+			provider = "unk", model = "m1",
 			messages = { { role = "user", content = "test" } },
 			tools = {},
 			handlers = {},
@@ -479,7 +479,7 @@ describe("ai/tools", function()
 		ai.register("errtool", mock)
 
 		local res = tools_mod.run({
-			model = "errtool:m1",
+			provider = "errtool", model = "m1",
 			messages = { { role = "user", content = "test" } },
 			tools = { { name = "boom", description = "Boom", parameters = {} } },
 			handlers = { boom = function() error("kaboom") end },
@@ -497,7 +497,7 @@ if has_tls and os.getenv("ANTHROPIC_API_KEY") then
 
 		it("should generate a response", function()
 			local res, err = ai.generate({
-				model = "anthropic:claude-sonnet-4-20250514",
+				provider = "anthropic", model = "claude-sonnet-4-20250514",
 				messages = { { role = "user", content = "Say exactly: hello" } },
 				max_tokens = 32,
 			})
@@ -509,7 +509,7 @@ if has_tls and os.getenv("ANTHROPIC_API_KEY") then
 		it("should stream a response", function()
 			local parts = {}
 			for delta in ai.stream({
-				model = "anthropic:claude-sonnet-4-20250514",
+				provider = "anthropic", model = "claude-sonnet-4-20250514",
 				messages = { { role = "user", content = "Say exactly: hi" } },
 				max_tokens = 32,
 			}) do

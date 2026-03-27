@@ -31,34 +31,30 @@ local function get_provider(name)
 	return nil
 end
 
---- Parse model string: "provider:model_name" -> provider_name, model_name
-local function parse_model(model)
-	local provider_name, model_name = model:match("^([^:]+):(.+)$")
-	if provider_name then return provider_name, model_name end
-	return nil, model
-end
-
 --- Resolve provider from request.
+-- Priority: req.provider (string name or table) > "openai" default.
+-- The model field is always just the model name.
 local function resolve(req)
-	if req.provider then
-		return req.provider, req.model
+	local prov = req.provider
+	if prov then
+		if type(prov) == "string" then
+			local p = get_provider(prov)
+			if not p then return nil, nil, "unknown provider: " .. prov end
+			return p, req.model
+		end
+		-- provider is a table (custom provider)
+		return prov, req.model
 	end
-	local provider_name, model_name = parse_model(req.model)
-	if provider_name then
-		local p = get_provider(provider_name)
-		if not p then return nil, nil, "unknown provider: " .. provider_name end
-		return p, model_name
-	end
+	-- no provider specified: default to openai
 	local p = get_provider("openai")
 	if not p then return nil, nil, "openai provider not available" end
-	return p, model_name
+	return p, req.model
 end
 
---- Copy request table, substituting model name and clearing provider.
-local function make_provider_req(req, model_name)
+--- Copy request table, clearing provider field.
+local function make_provider_req(req)
 	local r = {}
 	for k, v in pairs(req) do r[k] = v end
-	r.model = model_name
 	r.provider = nil
 	return r
 end
@@ -69,7 +65,7 @@ end
 mod.generate = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
-	return provider.generate(make_provider_req(req, model_name))
+	return provider.generate(make_provider_req(req))
 end
 
 --- Streaming generation — returns closure iterator.
@@ -80,37 +76,37 @@ mod.stream = function(req)
 	if not provider then
 		return function() return nil end, err
 	end
-	return provider.stream(make_provider_req(req, model_name))
+	return provider.stream(make_provider_req(req))
 end
 
 --- Embed a single value.
---[[@param req { model: string, value: string, provider?: ai_provider }]]
+--[[@param req { model: string, value: string, provider?: string|ai_provider }]]
 --[[@return { embedding: number[], usage: table? }?, string?]]
 mod.embed = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
 	if not provider.embed then return nil, "provider does not support embeddings" end
-	return provider.embed(make_provider_req(req, model_name))
+	return provider.embed(make_provider_req(req))
 end
 
 --- Embed multiple values.
---[[@param req { model: string, values: string[], provider?: ai_provider }]]
+--[[@param req { model: string, values: string[], provider?: string|ai_provider }]]
 --[[@return { embeddings: number[][], usage: table? }?, string?]]
 mod.embed_many = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
 	if not provider.embed_many then return nil, "provider does not support batch embeddings" end
-	return provider.embed_many(make_provider_req(req, model_name))
+	return provider.embed_many(make_provider_req(req))
 end
 
 --- Generate an image.
---[[@param req { model: string, prompt: string, n?: integer, size?: string, provider?: ai_provider }]]
+--[[@param req { model: string, prompt: string, n?: integer, size?: string, provider?: string|ai_provider }]]
 --[[@return { images: table[] }?, string?]]
 mod.generate_image = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
 	if not provider.generate_image then return nil, "provider does not support image generation" end
-	return provider.generate_image(make_provider_req(req, model_name))
+	return provider.generate_image(make_provider_req(req))
 end
 
 --- Register a custom provider.
