@@ -44,6 +44,7 @@ cd docs && bun dev           # Local docs
 - **Bugs and gaps found during testing → TODO.md in the same commit, not just the commit message.** A gap mentioned only in a commit message is invisible to future sessions.
 - **Completed items → mark `[x]` in TODO.md in the same commit that completes them.** Stale `[ ]` entries for done work are false debt.
 - **Every design decision with API/syntax implications → CLAUDE.md or docs/ immediately.** If it would matter to a future session that has never seen this conversation, write it now.
+- **Ad-hoc design conclusions must be written to docs/ in the same response that resolves them.** The signal: if 3+ messages were spent figuring something out, the answer must be committed to docs/ before the conversation moves on. Not as a TODO — as the actual doc edit. The failure mode is "noted" without writing, which evaporates. This applies especially to semantic questions (what does X mean, how does Y work, what is the identity source of Z) — these have no obvious syntax/API implication but are exactly what gets re-debated from scratch in future sessions.
 
 **Conversation is not memory.** Anything said in chat evaporates at session end — including within long sessions due to context compaction. If it implies future behavior change, write it to CLAUDE.md immediately — or it will not happen.
 
