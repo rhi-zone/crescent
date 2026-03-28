@@ -575,8 +575,7 @@ local function solve_index(ctx, c)
             return true
         end
         if obj_t.tag == TAG_UNKNOWN then
-            add_error(ctx, line, col, "value of type `unknown` must be narrowed before indexing")
-            bind_to(ctx, res_tid, ctx.T_ANY)
+            bind_to(ctx, res_tid, ctx.T_UNKNOWN)
             return true
         end
         if obj_t.tag == TAG_NEVER then
