@@ -1,24 +1,16 @@
 # TODO
 
-## CRITICAL: multi-return representation is fundamentally broken
+## CRITICAL: typechecker needs thorough invariant-based tests and fuzzing
 
-**Prerequisite: typechecker must be in a non-broken state before starting this.**
+**Prerequisite: typechecker must be in a non-broken state before starting.**
 
-The current multi-return design has a soundness hole: `-> ((integer, integer) | (nil, string))` is interpreted as a multi-return union-of-patterns, making it impossible to annotate a function returning a *single value* of that union type. These two things are conflated and cannot be distinguished.
+The test suite is wide (8000+ assertions) but was written alongside the implementation — it tests behaviors, not invariants. Design-level bugs (like the multi-return representation issue) go undetected because no test asserts what a given annotation *cannot* mean, only that specific behaviors work. This needs to be fixed before the typechecker can be considered reliable.
 
-Fix: introduce explicit spread syntax for multi-return union patterns:
-- `-> ...((integer, integer) | (nil, string))` — multi-return described by union of patterns
-- `-> ((integer, integer) | (nil, string))` — single return value of that union type
-
-Required changes:
-- Annotation parser: TAG_SPREAD in return position (`-> ...(T)`)
-- Annotation parser: TAG_SPREAD in argument lists (symmetric)
-- `solve_callable`: spread return → unify ret_tid with inner union-of-tuples; plain rl=1 → 1-tuple
-- `peek_callee_ret_union`: detect TAG_SPREAD → return inner union-of-tuples as-is; non-spread rl=1 → always wrap in 1-tuple (no union-of-tuples exception)
-- stdlib.d.lua: update `string.find`, `io.open`, and similar to `-> ...((T, T) | (nil, string))`
-- Tests: spread return narrowing, spread in arg position, single union-of-tuples value (no spread = no multi-return behavior), round-trip `fn(g())` where g has spread return
-
-Also: the return type representation has other known issues (eager narrowing requires peek workaround because locals from calls are still TAG_VAR at constraint-gen time). This redesign is the opportunity to fix the whole layer correctly.
+Goals:
+- **Invariant tests**: explicit "this annotation means X and not Y" tests. E.g. `-> ((T, U) | (V, W))` should be a single return value of that type, not a multi-return pattern (currently it's conflated). These tests should fail if the semantic model is violated, not just if the output changes.
+- **Fuzz-based soundness**: generate random well-typed programs, verify the typechecker accepts them; generate random ill-typed programs (known violations), verify it rejects them. Use `lib/test/fuzz.lua` + `lib/test/arb.lua`. Known invariants to fuzz against: if a program is accepted, substituting a subtype for any variable should still be accepted; if a union type is narrowed, the narrowed type must be assignable to the original.
+- **Representation completeness**: for every type constructor (union, intersection, tuple, function, table, literal, spread), assert that the full range of expressible types can be round-tripped through annotation parsing → type ID → display without losing information.
+- **Multi-return redesign** (one known bug): `-> ...((T, U) | (V, W))` as explicit spread syntax for multi-return union patterns, distinguishing from single-value union return. See design notes in session history.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
