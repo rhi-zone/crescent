@@ -240,42 +240,42 @@ local function build_templates()
         end,
         [E.CALL_ARG_MISSING]      = function(a)
             local label = a.param_name and ("`" .. a.param_name .. "`") or ("argument " .. a.idx)
-            return label .. ": missing required argument (expected '" .. a.exp .. "', got nil)"
+            return label .. ": missing required argument (expected `" .. a.exp .. "`, got nil)"
         end,
         [E.ARITH_TYPE]            = function(a)
-            return "cannot perform arithmetic on '" .. a.t .. "'"
+            return "cannot perform arithmetic on `" .. a.t .. "`"
         end,
         [E.LENGTH_TYPE]           = function(a)
-            return "cannot get length of '" .. a.t .. "'"
+            return "cannot get length of `" .. a.t .. "`"
         end,
         [E.COMPARE_TYPE]          = function(a)
-            return "cannot compare '" .. a.t .. "'"
+            return "cannot compare `" .. a.t .. "`"
         end,
         [E.COMPARE_CROSS]         = function(a)
-            return "cannot compare '" .. a.left .. "' with '" .. a.right .. "'"
+            return "cannot compare `" .. a.left .. "` with `" .. a.right .. "`"
         end,
         [E.CONCAT_TYPE]           = function(a)
-            return "cannot concatenate '" .. a.t .. "'"
+            return "cannot concatenate `" .. a.t .. "`"
         end,
         [E.UNHANDLED_EXPR]        = function(a)
             return "unhandled expr kind " .. a.kind
         end,
         [E.UNKNOWN_IDENTIFIER]    = function(a)
-            return "unknown identifier '" .. a.name .. "'"
+            return "unknown identifier `" .. a.name .. "`"
         end,
         [E.VARARG_OUTSIDE_FN]     = function(_a)
-            return "'...' used outside a vararg function"
+            return "`...` used outside a vararg function"
         end,
         [E.BINARY_OP_UNKNOWN]     = function(a)
             return "unknown binary operator " .. a.op
         end,
         [E.TYPE_MISMATCH]         = function(a)
-            local msg = "type mismatch: '" .. a.got .. "' is not assignable to '" .. a.exp .. "'"
+            local msg = "type mismatch: `" .. a.got .. "` is not assignable to `" .. a.exp .. "`"
             if a.detail then msg = msg .. ": " .. a.detail end
             return msg
         end,
         [E.ASSIGN_MISMATCH]       = function(a)
-            local msg = "cannot assign '" .. a.got .. "' to '" .. a.name .. "'"
+            local msg = "cannot assign `" .. a.got .. "` to `" .. a.name .. "`"
             if a.detail then msg = msg .. ": " .. a.detail end
             return msg
         end,
@@ -294,24 +294,24 @@ local function build_templates()
             return a.msg  -- pre-formatted multi-line string
         end,
         [E.CANNOT_CALL]           = function(a)
-            return "cannot call type '" .. a.t .. "'"
+            return "cannot call type `" .. a.t .. "`"
         end,
         [E.METHOD_NOT_FOUND]      = function(a)
-            return "no method '" .. a.method .. "' on type '" .. a.t .. "'"
+            return "no method `" .. a.method .. "` on type `" .. a.t .. "`"
         end,
         [E.UNNAMED_PARAMS]        = function(_a)
             return "declared function type has unnamed parameters"
-                .. " \xe2\x80\x94 add 'name: type' to show names in error messages"
+                .. " \xe2\x80\x94 add `name: type` to show names in error messages"
         end,
         [E.EXPLICIT_ANY]          = function(_a)
             return "explicit `any` in annotation \xe2\x80\x94"
                 .. " use `unknown` for an unconstrained value, or a specific type"
         end,
         [E.FIELD_READONLY]        = function(a)
-            return "cannot assign to readonly field '" .. a.field .. "'"
+            return "cannot assign to readonly field `" .. a.field .. "`"
         end,
         [E.NON_EXHAUSTIVE]        = function(a)
-            return "non-exhaustive match on '" .. a.name .. "': unhandled " .. a.remaining
+            return "non-exhaustive match on `" .. a.name .. "`: unhandled " .. a.remaining
         end,
         [E.FIELD_ON_PRIMITIVE]    = function(a)
             return "field access on `" .. a.t .. "`: `" .. a.t .. "` cannot have fields"

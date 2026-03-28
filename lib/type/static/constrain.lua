@@ -225,7 +225,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             local name_str = intern_local.get(ctx.pool, name_id) or "?"
             local err_line = ctx._ann_warn_line
             errors_mod.error(ctx.err, ctx.filename, err_line, 0,
-                "typeof: unknown identifier '" .. name_str .. "'")
+                "typeof: unknown identifier `" .. name_str .. "`")
             return ctx.T_UNKNOWN
         end
         local resolved = types_mod.find(ctx, tid)
@@ -279,7 +279,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                 return id
             end
             local err_line = ctx._ann_warn_line
-            errors_mod.error(ctx.err, ctx.filename, err_line, 0, "undefined type '" .. name_str .. "'")
+            errors_mod.error(ctx.err, ctx.filename, err_line, 0, "undefined type `" .. name_str .. "`")
             return ctx.T_ANY
         end
 
@@ -506,9 +506,9 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                                     local bt_str = types_mod.display(ctx, bt_field)
                                     local line = ctx._ann_warn_line
                                     errors_mod.error(ctx.err, ctx.filename, line, 0,
-                                        "intersection field conflict: field '" .. fname
-                                        .. "' has incompatible types '"
-                                        .. at_str .. "' and '" .. bt_str .. "'")
+                                        "intersection field conflict: field `" .. fname
+                                        .. "` has incompatible types `"
+                                        .. at_str .. "` and `" .. bt_str .. "`")
                                     return ctx.T_NEVER
                                 end
                             end

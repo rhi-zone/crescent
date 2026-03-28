@@ -229,8 +229,8 @@ local function solve_unify(ctx, c)
     local ok, err = unify_mod.unify(ctx, t1, t2)
     if not ok then
         add_error(ctx, c[4], c[5],
-            "type mismatch: cannot unify '" .. types_mod.display_short(ctx, t1)
-            .. "' with '" .. types_mod.display_short(ctx, t2) .. "'"
+            "type mismatch: cannot unify `" .. types_mod.display_short(ctx, t1)
+            .. "` with `" .. types_mod.display_short(ctx, t2) .. "`"
             .. (err and (": " .. err) or ""))
     end
     return ok
@@ -291,15 +291,15 @@ local function solve_sub(ctx, c)
                 local fail_tid = #failing == 1 and failing[1]
                     or types_mod.make_union(ctx, failing)
                 add_error(ctx, line, col,
-                    "expects '" .. types_mod.display_short(ctx, expected)
-                    .. "', but argument might also be '"
-                    .. types_mod.display_short(ctx, fail_tid) .. "'")
+                    "expects `" .. types_mod.display_short(ctx, expected)
+                    .. "`, but argument might also be `"
+                    .. types_mod.display_short(ctx, fail_tid) .. "`")
                 return false
             end
         end
         add_error(ctx, line, col,
-            "cannot assign '" .. types_mod.display_short(ctx, actual)
-            .. "' to '" .. types_mod.display_short(ctx, expected) .. "'"
+            "cannot assign `" .. types_mod.display_short(ctx, actual)
+            .. "` to `" .. types_mod.display_short(ctx, expected) .. "`"
             .. (err and (": " .. err) or ""))
     end
     return ok
@@ -407,9 +407,9 @@ local function solve_bound(ctx, c)
         local result = match_mod.evaluate(ctx, new_mt)
         if find(ctx, result) == ctx.T_NEVER then
             add_error(ctx, line, col,
-                "type argument '" .. types_mod.display_short(ctx, actual)
-                .. "' does not satisfy constraint '"
-                .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "'")
+                "type argument `" .. types_mod.display_short(ctx, actual)
+                .. "` does not satisfy constraint `"
+                .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "`")
             return false
         end
         return true
@@ -423,9 +423,9 @@ local function solve_bound(ctx, c)
     local widened_bound = widen_deep(ctx, resolved_bound)
     if not unify_mod.try_unify(ctx, widened, widened_bound) then
         add_error(ctx, line, col,
-            "type argument '" .. types_mod.display_short(ctx, actual)
-            .. "' does not satisfy constraint '"
-            .. types_mod.display_short(ctx, resolved_bound) .. "'")
+            "type argument `" .. types_mod.display_short(ctx, actual)
+            .. "` does not satisfy constraint `"
+            .. types_mod.display_short(ctx, resolved_bound) .. "`")
         return false
     end
     return true
@@ -600,7 +600,7 @@ local function solve_index(ctx, c)
                 if origin and origin ~= ctx.filename then
                     local fname = intern_mod.get(ctx.pool, name_id) or "?"
                     add_error(ctx, line, col,
-                        "field '" .. fname .. "' is private to '" .. origin .. "'")
+                        "field `" .. fname .. "` is private to `" .. origin .. "`")
                     bind_to(ctx, res_tid, ctx.T_ANY)
                     return false
                 end
@@ -872,7 +872,7 @@ local function solve_callable(ctx, c)
         end
         if #members == 0 then
             add_error(ctx, line, col,
-                "cannot call value of type '" .. types_mod.display_short(ctx, callee_tid) .. "'")
+                "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
             bind_to(ctx, ret_tid, ctx.T_ANY)
             return false
         end
@@ -920,8 +920,8 @@ local function solve_callable(ctx, c)
                 .. (#reasons > 0 and (" — " .. reasons[1]) or "")
         end
         add_error(ctx, line, col,
-            "no matching overload for '"
-            .. types_mod.display_short(ctx, callee_tid) .. "':\n  "
+            "no matching overload for `"
+            .. types_mod.display_short(ctx, callee_tid) .. "`:\n  "
             .. table.concat(cands, "\n  "))
         bind_to(ctx, ret_tid, ctx.T_ANY)
         return false
@@ -935,8 +935,8 @@ local function solve_callable(ctx, c)
             local mid = find(ctx, ctx.lists:get(i))
             local mt  = ctx.types:get(mid)
             if mt.tag ~= TAG_FUNCTION then
-                fail_msgs[#fail_msgs + 1] = "union member '"
-                    .. types_mod.display_short(ctx, mid) .. "' is not callable"
+                fail_msgs[#fail_msgs + 1] = "union member `"
+                    .. types_mod.display_short(ctx, mid) .. "` is not callable"
             else
                 local member_ok = true
                 for j = 0, mt.data[1] - 1 do
@@ -944,9 +944,9 @@ local function solve_callable(ctx, c)
                     local act_tid = arg_tids[j + 1]
                     if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
                         member_ok = false
-                        fail_msgs[#fail_msgs + 1] = "argument rejected by union members: '"
+                        fail_msgs[#fail_msgs + 1] = "argument rejected by union members: `"
                             .. types_mod.display_short(ctx, mid)
-                            .. "' does not accept argument " .. (j + 1)
+                            .. "` does not accept argument " .. (j + 1)
                         break
                     end
                 end
@@ -971,7 +971,7 @@ local function solve_callable(ctx, c)
 
     -- Non-function: error
     add_error(ctx, line, col,
-        "cannot call value of type '" .. types_mod.display_short(ctx, callee_tid) .. "'")
+        "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
     bind_to(ctx, ret_tid, ctx.T_ANY)
     return false
 end
@@ -999,19 +999,19 @@ local function solve_arith(ctx, c)
         local bad_tid = (lr == nil) and lhs_tid or rhs_tid
         if op_name == "__concat" then
             add_error(ctx, line, col,
-                "cannot concatenate type '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+                "cannot concatenate type `" .. types_mod.display_short(ctx, bad_tid) .. "`")
             unify_mod.unify(ctx, res_tid, ctx.T_STRING)
         elseif op_name == "__len" then
             add_error(ctx, line, col,
-                "cannot take length of type '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+                "cannot take length of type `" .. types_mod.display_short(ctx, bad_tid) .. "`")
             unify_mod.unify(ctx, res_tid, ctx.T_INTEGER)
         elseif op_name == "__unm" then
             add_error(ctx, line, col,
-                "cannot negate value of type '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+                "cannot negate value of type `" .. types_mod.display_short(ctx, bad_tid) .. "`")
             unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
         else
             add_error(ctx, line, col,
-                "cannot perform arithmetic on '" .. types_mod.display_short(ctx, bad_tid) .. "'")
+                "cannot perform arithmetic on `" .. types_mod.display_short(ctx, bad_tid) .. "`")
             unify_mod.unify(ctx, res_tid, ctx.T_NUMBER)
         end
         return false
@@ -1050,19 +1050,19 @@ local function solve_compare(ctx, c)
 
     if lk == false then
         add_error(ctx, line, col,
-            "cannot compare '" .. types_mod.display_short(ctx, lhs_tid) .. "' with '<'")
+            "cannot compare `" .. types_mod.display_short(ctx, lhs_tid) .. "` with `<`")
         return false
     end
     if rk == false then
         add_error(ctx, line, col,
-            "cannot compare '" .. types_mod.display_short(ctx, rhs_tid) .. "' with '<'")
+            "cannot compare `" .. types_mod.display_short(ctx, rhs_tid) .. "` with `<`")
         return false
     end
     -- Cross-type comparison (string vs number): error
     if lk and rk and lk ~= rk and lk ~= true and rk ~= true then
         add_error(ctx, line, col,
-            "cannot compare '" .. types_mod.display_short(ctx, lhs_tid)
-            .. "' with '" .. types_mod.display_short(ctx, rhs_tid) .. "'")
+            "cannot compare `" .. types_mod.display_short(ctx, lhs_tid)
+            .. "` with `" .. types_mod.display_short(ctx, rhs_tid) .. "`")
         return false
     end
     return true

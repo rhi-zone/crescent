@@ -3413,7 +3413,7 @@ local y = p.second .. "!"
     assert.it("undefined type name errors", function()
         has_error([[
 --:: declare x = NonExistent
-]], "undefined type 'NonExistent'")
+]], "undefined type `NonExistent`")
     end)
 
     -- Box<any>: any type arg is a permanent wildcard, not a concrete binding.
