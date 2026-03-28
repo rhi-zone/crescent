@@ -15,6 +15,8 @@
 
 ## typechecker narrowing gaps
 
+- [ ] **Optional field narrowing** — `if opts.f then opts.f(x) end` does not narrow `opts.f` to non-nil for the call. The second field read is checked independently and still returns the union type. Workaround: extract to a local first (`local f = opts.f; if f then f(x) end`) — but this only works if the local is assigned before the check, not from a call return.
+- [ ] **lib/ljsocket type declarations** — `lib/ljsocket` has no `--::` crescent annotations. Any library that uses ljsocket objects (lib/socket, lib/tcp, lib/websocket, lib/https) cannot be fully typechecked. Fix: add `--:: luajitsocket = { ... }` declarations to `lib/ljsocket/init.lua`.
 - [ ] **Narrowing doesn't apply to locals assigned from function call returns** — at narrowing time during constraint generation, locals assigned from function calls are still TAG_VAR (unsolved constraint variables). `types.subtract(TAG_VAR, T_NIL)` returns TAG_VAR unchanged. Workaround: add `--: T?` annotation to the receiving local so it gets a concrete type. Affects all `if not x then return end` patterns where `x` comes from a function call.
 - [x] **`or` condition narrowing overwrites previous narrowing for same variable** — `if not x or x == 0 then return end` failed to narrow `x` because the second `record_narrowing` call overwrote the first. Fixed: `record_narrowing` now chains through `narrowed[name_id]`.
 - [x] **Multi-return annotation on single-var capture** — fixed in solve_sub: when actual is TAG_TUPLE and expected is scalar, project first element. Annotated `local x --: string; x = f()` where f returns (string, number) now type-checks correctly.

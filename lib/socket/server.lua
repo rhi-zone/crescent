@@ -3,16 +3,15 @@ local epoll_ = require("lib.epoll")
 
 local M = {}
 
+-- NOTE: lib/ljsocket has no crescent type annotations; interactions with
+-- ljsocket objects are untyped until lib/ljsocket gets --:: declarations.
+
 --:: server_opts = { host: string?, on_client: ((unknown) -> nil)?, on_client_close: ((unknown) -> nil)? }
 
 -- Bind and listen on port. callback(client, state) -> state is called on each
 -- readable event per client. epoll is optional — if omitted, a new one is
 -- created and the call blocks until the server socket is closed.
 M.server = function(callback, port, epoll, opts)
-    --: (unknown, unknown) -> unknown
-    --: integer
-    --: unknown?
-    --: server_opts?
     opts = opts or {}
     local is_running = not epoll
     epoll = epoll or epoll_.new()
@@ -27,16 +26,14 @@ M.server = function(callback, port, epoll, opts)
         local state, remove_client
         local client_close = client.close
         client.close = function()
-            local f = opts.on_client_close
-            if f then f(client) end
+            if opts.on_client_close then opts.on_client_close(client) end
             client_close(client)
             remove_client()
         end
         _, remove_client = epoll:add(client.fd, function()
             state = callback(client, state)
         end, client.close)
-        local f = opts.on_client
-        if f then f(client) end
+        if opts.on_client then opts.on_client(client) end
     end, is_running and function() is_running = false end or nil)
 
     local server_close = server.close
