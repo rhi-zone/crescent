@@ -29,6 +29,8 @@ Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert the
 
 **Performance**: include a benchmark gate — if typechecking throughput on a fixed corpus regresses beyond a threshold, the fuzz suite should flag it. The typechecker has a performance bar (tsgo-competitive) and regressions are as bad as correctness failures.
 
+**Performance note on multi-return redesign**: always wrapping rl=0 and rl=1 returns in TAG_TUPLE adds allocation + C_INDEX destructuring overhead on every call site. We may want to re-specialize these cases (bind directly, skip the tuple barrier) after measuring. Don't assume the overhead is acceptable — benchmark first.
+
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
 - [x] **Field access on nil/boolean** — fixed f1a9882
