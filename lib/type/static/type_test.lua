@@ -5212,6 +5212,167 @@ local function only_num(x) return x end
 local r = only_num("should fail")
 ]], "does not satisfy constraint")
     end)
+
+    -- -----------------------------------------------------------------------
+    -- Non-exhaustive match on union
+    -- -----------------------------------------------------------------------
+
+    assert.it("PASS: non-exhaustive match on union — covered arm resolves, uncovered arm gives never", function()
+        -- Tag<T> only covers string, not number.
+        -- Tag<string | number>: string arm → "yes"; number arm → no match → never.
+        -- Distribution: "yes" | never = "yes".
+        -- Assigning "yes" must succeed; assigning a number must fail.
+        v3_no_errors([[
+--:: Tag<T> = match T { string => "yes" }
+--:: R = Tag<string | number>
+local x --: R
+x = "yes"
+]])
+        v3_has_error([[
+--:: Tag<T> = match T { string => "yes" }
+--:: R = Tag<string | number>
+local x --: R
+local n --: number
+x = n
+]])
+    end)
+
+    -- -----------------------------------------------------------------------
+    -- Wrong arm result type used downstream
+    -- -----------------------------------------------------------------------
+
+    assert.it("PASS: wrong arm result type downstream — union result rejected by string-only param", function()
+        -- Mixed<T> produces string | integer when T is string | number.
+        -- Passing the result to a (string)->nil function must error because the
+        -- integer arm is reachable.
+        v3_has_error([[
+--:: Mixed<T> = match T { string => string, number => integer }
+--:: R = Mixed<string | number>
+--: (string) -> nil
+local function only_str(s) return nil end
+local x --: R
+only_str(x)
+]], "")
+    end)
+
+    -- -----------------------------------------------------------------------
+    -- Unreachable arm
+    -- -----------------------------------------------------------------------
+
+    assert.it("PASS: unreachable arm — match string with number arm produces never for that arm", function()
+        -- Tag<string>: string arm → "a"; number arm never reached → never.
+        -- Result = "a"; assigning "b" must fail.
+        v3_no_errors([[
+--:: Tag<T> = match T { string => "a", number => "b" }
+--:: R = Tag<string>
+local x --: R
+x = "a"
+]])
+        v3_has_error([[
+--:: Tag<T> = match T { string => "a", number => "b" }
+--:: R = Tag<string>
+local x --: R
+x = "b"
+]])
+    end)
+
+    -- -----------------------------------------------------------------------
+    -- Match on never → never
+    -- -----------------------------------------------------------------------
+
+    assert.it("PASS: match on never → never — no arm fires, result is never", function()
+        -- match never { string => integer }: the input is never, so no arm ever
+        -- matches; the result is never. Assigning integer must fail.
+        v3_no_errors([[
+--:: NeverMatch<T> = match T { string => integer }
+--:: R = NeverMatch<never>
+local x --: R
+]])
+        v3_has_error([[
+--:: NeverMatch<T> = match T { string => integer }
+--:: R = NeverMatch<never>
+local x --: R
+local n --: integer
+x = n
+]], "never")
+    end)
+
+    -- -----------------------------------------------------------------------
+    -- Nested match types (concrete inner args)
+    -- -----------------------------------------------------------------------
+
+    assert.it("PASS: nested match types — outer dispatches to inner via concrete args", function()
+        -- Box<string> = string; Box<number> = number.
+        -- Outer<string> = Box<string> = string; Outer<number> = Box<number> = number.
+        -- Cross-assignment must fail.
+        v3_no_errors([[
+--:: Box<T> = match T { string => string, number => number }
+--:: Outer<T> = match T { string => Box<string>, number => Box<number>, _ => never }
+--:: S = Outer<string>
+--:: N = Outer<number>
+local x --: S
+local y --: N
+x = "hi"
+y = 42
+]])
+        v3_has_error([[
+--:: Box<T> = match T { string => string, number => number }
+--:: Outer<T> = match T { string => Box<string>, number => Box<number>, _ => never }
+--:: S = Outer<string>
+local x --: S
+x = 42
+]], "")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- $Require / module declarations: basic coverage
+-- ---------------------------------------------------------------------------
+
+assert.describe("adversarial: $Require basic coverage via --:: module declarations", function()
+
+    assert.it("PASS: --:: module declaration: require returns declared type, field is integer", function()
+        -- --:: module "test.mod": { x: integer } declares the type for require("test.mod").
+        -- m.x should be integer; passing it to an integer-typed function must succeed.
+        no_errors([[
+--:: module "test.mod": { x: integer }
+local m = require("test.mod")
+local v = m.x
+--: (integer) -> nil
+local function f(n) return nil end
+f(v)
+]])
+    end)
+
+    assert.it("PASS: --:: module declaration: wrong type for field is an error", function()
+        -- m.x is integer; assigning a string to it must error.
+        has_error([[
+--:: module "test.mod": { x: integer }
+local m = require("test.mod")
+--: (string) -> nil
+local function f(s) return nil end
+f(m.x)
+]], "")
+    end)
+
+    assert.it("PASS: --:: module declaration with function field — call succeeds with correct arg", function()
+        -- greet: (string) -> string; calling greet("hi") must produce string.
+        no_errors([[
+--:: module "greetmod": { greet: (string) -> string }
+local m = require("greetmod")
+local result = m.greet("hello")
+]])
+    end)
+
+    assert.it("PASS: --:: module declaration with function field — call with wrong arg type errors", function()
+        -- greet expects string; passing integer must error.
+        has_error([[
+--:: module "greetmod": { greet: (string) -> string }
+local m = require("greetmod")
+m.greet(42)
+]], "")
+    end)
+
 end)
 
 assert.describe("adversarial: $EachField interactions", function()
