@@ -272,6 +272,12 @@ Not libraries (do not rewrite, repurpose instead):
   Blocks: typed `fmap`, typeclass-polymorphic functions, `lib/fp/` full type safety.
   Fix requires nominal type preservation or bidirectional inference before expansion.
   See `docs/type-system.md` line 862.
+  **GAP-HKT1 (found 2026-03-29)**: chained fmap result is not re-usable as an HKT argument — the return type of `fmap(f, ma)` loses its constructor identity and cannot be passed to another HKT-parameterised function. Demonstrated in lib/fp/ type_complex_test.lua.
+
+- [ ] **Typechecker: `{ [K]: V }` type param not substituted as indexer key** — when a
+  generic type parameter is used as the key type of an indexer (`{ [K]: V }`), the
+  parameter is not substituted at instantiation. The indexer key stays as the raw type
+  variable rather than the concrete argument. Found 2026-03-29 via lib/fp/ testing.
 
 - [ ] **Typechecker: generic variance** — all generics are currently invariant.
   `Box<Dog>` is not a subtype of `Box<Animal>`. Blocks HKT subtype relationships
