@@ -1065,7 +1065,9 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
         while i < is + il - 1 do
             return types_mod.find(ctx, ctx.lists:get(i + 1))
         end
-        if obj_t.data[4] >= 0 then return ctx.T_UNKNOWN end
+        -- Open table: unknown index (caller must narrow); closed table: also unknown
+        -- (no matching indexer means the access is unsound, but T_UNKNOWN is safer than T_ANY)
+        return ctx.T_UNKNOWN
     end
 
     return ctx.T_ANY
@@ -1994,7 +1996,8 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         for k = 0, 6 do ot2.data[k] = new_t.data[k] end
                     end
                 else
-                    -- Non-literal key: check rhs against indexer value type if known
+                    -- Non-literal key: check rhs against indexer value type if known,
+                    -- or add an indexer to open tables (loop-populated: t[i] = v).
                     local is2, il2 = ot.data[2], ot.data[3]
                     if il2 > 0 then
                         -- Check first indexer pair's value type
@@ -2002,6 +2005,23 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                         local ivt = ctx.types:get(idx_val)
                         if ivt.tag ~= TAG_VAR then
                             emit(ctx, { C_SUB, rhs_tid, idx_val, tn.line, tn.col })
+                        end
+                    else
+                        -- No existing indexer: add one for this key/value type pair.
+                        -- Only for open tables (row_var_id != -1); closed tables reject
+                        -- writes to undeclared index patterns.
+                        local rv = ot.data[4]
+                        if rv ~= -1 then
+                            local key_wid = types_mod.widen(ctx, key_tid)
+                            local fields, indexers, meta = {}, { key_wid, rhs_tid }, {}
+                            local fs, fl = ot.data[0], ot.data[1]
+                            for j = fs, fs + fl - 1 do fields[#fields + 1] = ctx.lists:get(j) end
+                            for j = ot.data[5], ot.data[5] + ot.data[6] - 1 do meta[#meta + 1] = ctx.lists:get(j) end
+                            local new_tbl = types_mod.make_table(ctx, fields, indexers, rv, meta)
+                            -- Re-fetch ot after make_table (arena:grow() may have moved it)
+                            local ot2 = ctx.types:get(obj_tid)
+                            local new_t = ctx.types:get(new_tbl)
+                            for k = 0, 6 do ot2.data[k] = new_t.data[k] end
                         end
                     end
                 end
