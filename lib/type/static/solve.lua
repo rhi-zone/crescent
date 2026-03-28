@@ -62,6 +62,10 @@ local function add_error(ctx, line, col, msg)
     errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
+local function add_warning(ctx, line, col, msg)
+    errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
+end
+
 -- Widen literal to base type for Sub constraints.
 local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
@@ -253,6 +257,22 @@ local function solve_sub(ctx, c)
             actual = at.data[1] > 0
                 and find(ctx, ctx.lists:get(at.data[0]))
                 or ctx.T_NIL
+        end
+    end
+
+    -- Redundant cast warning: if this C_SUB was emitted by a cast expression (c[6]=true),
+    -- and the inferred type is structurally identical to the asserted type, warn.
+    -- Excludes any on either side: any unifies with everything so it's not "redundant",
+    -- it's an explicit opt-out.
+    if c[6] then
+        local et = ctx.types:get(expected)
+        local widened = widen_for_sub(ctx, actual)
+        local wt = ctx.types:get(widened)
+        if wt.tag ~= TAG_ANY and et.tag ~= TAG_ANY
+            and types_mod.types_equal(ctx, widened, expected) then
+            add_warning(ctx, line, col,
+                "redundant type assertion: expression already has type `"
+                .. types_mod.display_short(ctx, widened) .. "`")
         end
     end
 

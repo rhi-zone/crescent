@@ -1483,7 +1483,7 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     local ann = ctx.ann.results[n.data[1]]  -- n.data[1] is the negative cast_id
     if not ann or ann.kind ~= ANN_TYPE then return inner_tid end
     local cast_tid = resolve_annotation_type(ctx, ann.type_id)
-    emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col })
+    emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col, true })  -- true = is_cast
     return cast_tid
 end
 

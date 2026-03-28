@@ -43,6 +43,28 @@ local function error_count(src)
     return #ec.errors, ec
 end
 
+local function has_warning(src, pattern)
+    local ec = check(src)
+    local msg = errors_mod.format_plain(ec)
+    if not msg:find("warning:") then
+        assert.ok(false, "expected warning matching '" .. pattern .. "' but got none\n" .. msg)
+    elseif pattern and not msg:find(pattern) then
+        assert.ok(false, "expected warning matching '" .. pattern .. "' but got:\n" .. msg)
+    else
+        assert.ok(true)
+    end
+end
+
+local function no_warnings(src)
+    local ec = check(src)
+    local msg = errors_mod.format_plain(ec)
+    if msg:find("warning:") then
+        assert.ok(false, "expected no warnings but got:\n" .. msg)
+    else
+        assert.ok(true)
+    end
+end
+
 ---------------------------------------------------------------------------
 -- PRIMITIVES
 ---------------------------------------------------------------------------
@@ -2478,5 +2500,54 @@ local f --: f
 local x --: any
 f(x)
 ]])
+    end)
+end)
+
+assert.describe("redundant type assertion warning", function()
+    assert.it("warns when cast type equals inferred type", function()
+        has_warning([==[
+local x --: integer
+local y = (--[[: integer]] x)
+]==], "redundant")
+    end)
+
+    assert.it("warns when cast widens a literal (widen result is same type)", function()
+        -- x=1 infers as literal `1`, widens to `integer`; cast to `integer` is redundant
+        has_warning([==[
+local x = 1
+local y = (--[[: integer]] x)
+]==], "redundant")
+    end)
+
+    assert.it("does not warn when cast widens to a broader type", function()
+        no_warnings([==[
+local x = 1
+local y = (--[[: number]] x)
+]==])
+    end)
+
+    assert.it("does not warn when cast changes the type", function()
+        local ec = check([==[
+local x --: integer
+local y = (--[[: string]] x)
+]==])
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(not msg:find("redundant"), "should not warn redundant on wrong cast")
+    end)
+
+    assert.it("does not warn redundant when either side is any", function()
+        local ec = check([==[
+local x --: any
+local y = (--[[: any]] x)
+]==])
+        local msg = errors_mod.format_plain(ec)
+        assert.ok(not msg:find("redundant"), "should not warn redundant when any is involved")
+    end)
+
+    assert.it("warns on string cast of string", function()
+        has_warning([==[
+local x --: string
+local y = (--[[: string]] x)
+]==], "redundant")
     end)
 end)
