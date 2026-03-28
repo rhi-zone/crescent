@@ -1373,12 +1373,41 @@ local function peek_callee_ret_union(ctx, callee_n)
     if fn_t.tag ~= TAG_FUNCTION or fn_t.data[3] ~= 1 then return nil end
     local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
     local ret_t = ctx.types:get(ret_slot)
-    if ret_t.tag ~= TAG_UNION then return nil end
-    for i = ret_t.data[0], ret_t.data[0] + ret_t.data[1] - 1 do
-        local arm = types_mod.find(ctx, ctx.lists:get(i))
-        if ctx.types:get(arm).tag ~= TAG_TUPLE then return nil end
-    end
+    -- Reject unresolved types; accept anything concrete.
+    -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
+    -- and fall back to direct binding for scalars/plain unions (single return).
+    if ret_t.tag == TAG_VAR or ret_t.tag == TAG_ROWVAR then return nil end
     return ret_slot
+end
+
+-- Extract the type at slot N from a TAG_TUPLE or union-of-TAG_TUPLEs at constraint-gen time.
+-- Returns nil when tid is TAG_VAR or not a tuple/union-of-tuples.
+local function eager_slot(ctx, tid, slot)
+    local t = ctx.types:get(tid)
+    if t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return nil end
+    if t.tag == defs.TAG_TUPLE then
+        if slot < t.data[1] then
+            return types_mod.find(ctx, ctx.lists:get(t.data[0] + slot))
+        end
+        return ctx.T_NIL
+    end
+    if t.tag == TAG_UNION then
+        local parts = {}
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local arm = types_mod.find(ctx, ctx.lists:get(i))
+            local arm_t = ctx.types:get(arm)
+            if arm_t.tag ~= defs.TAG_TUPLE then return nil end
+            if slot < arm_t.data[1] then
+                parts[#parts + 1] = types_mod.find(ctx, ctx.lists:get(arm_t.data[0] + slot))
+            else
+                parts[#parts + 1] = ctx.T_NIL
+            end
+        end
+        if #parts == 0 then return ctx.T_NIL end
+        if #parts == 1 then return parts[1] end
+        return types_mod.make_union(ctx, parts)
+    end
+    return nil
 end
 
 --: (Ctx, integer) -> integer
@@ -1786,12 +1815,26 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             -- Bindings at index i >= (el-1) come from the last (call) expression.
             local call_slot = (last_rhs_is_call and el > 0) and (i - (el - 1)) or -1
             if call_slot >= 0 and call_ret_tid then
-                -- Project slot from the call's multi-return tuple/union via C_INDEX.
-                local slot_var = fresh_var(ctx)
-                emit(ctx, { C_INDEX, call_ret_tid,
-                    types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
-                    slot_var, n.line, n.col })
-                bind_tid = slot_var
+                -- Eagerly compute the slot type when call_ret_tid is concrete.
+                -- Concrete bindings allow if-not guards to narrow at constraint-gen time.
+                local concrete = eager_slot(ctx, call_ret_tid, call_slot)
+                if concrete then
+                    -- TAG_TUPLE or union-of-tuples: extract slot N.
+                    bind_tid = concrete
+                else
+                    local crt = ctx.types:get(types_mod.find(ctx, call_ret_tid))
+                    if crt.tag ~= TAG_VAR and crt.tag ~= TAG_ROWVAR then
+                        -- Single-value return (plain union, scalar): bind directly at slot 0.
+                        bind_tid = call_slot == 0 and call_ret_tid or ctx.T_NIL
+                    else
+                        -- Unresolved (unannotated function): defer via C_INDEX.
+                        local slot_var = fresh_var(ctx)
+                        emit(ctx, { C_INDEX, call_ret_tid,
+                            types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                            slot_var, n.line, n.col })
+                        bind_tid = slot_var
+                    end
+                end
                 if not ctx._multi_ret then ctx._multi_ret = {} end
                 ctx._multi_ret[name_id] = { source_tid = call_ret_tid, slot = call_slot, call_uid = nid }
             elseif rhs_tid then
@@ -1866,11 +1909,21 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
         local call_slot = (last_rhs_is_call and rhs_count > 0) and (i - (rhs_count - 1)) or -1
         local rhs_tid
         if call_slot >= 0 and assign_call_ret_tid then
-            local slot_var = fresh_var(ctx)
-            emit(ctx, { C_INDEX, assign_call_ret_tid,
-                types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
-                slot_var, n.line, n.col })
-            rhs_tid = slot_var
+            local concrete = eager_slot(ctx, assign_call_ret_tid, call_slot)
+            if concrete then
+                rhs_tid = concrete
+            else
+                local crt = ctx.types:get(types_mod.find(ctx, assign_call_ret_tid))
+                if crt.tag ~= TAG_VAR and crt.tag ~= TAG_ROWVAR then
+                    rhs_tid = call_slot == 0 and assign_call_ret_tid or ctx.T_NIL
+                else
+                    local slot_var = fresh_var(ctx)
+                    emit(ctx, { C_INDEX, assign_call_ret_tid,
+                        types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                        slot_var, n.line, n.col })
+                    rhs_tid = slot_var
+                end
+            end
         else
             rhs_tid = rhs_types[i + 1] or (last_rhs_is_call and ctx.T_ANY or ctx.T_NIL)
         end
