@@ -146,12 +146,13 @@ end
 ---------------------------------------------------------------------------
 
 -- Initialize FFI support on ctx.
--- Allocates ctx.T_FFI_C (open table accumulating C namespace symbols)
+-- Allocates ctx.T_FFI_C (closed table accumulating C namespace symbols)
 -- and ctx.cdef_typedefs (intern_id → type_id for typedef names).
 -- Registers ffi_C as a type alias in the module-level scope.
 function M.init(ctx)
-    -- Open table with row variable: fields accumulate via table_add_field as ffi.cdef runs.
-    ctx.T_FFI_C = types_mod.make_table(ctx, {}, {}, types_mod.make_rowvar(ctx, 0), {})
+    -- Closed table (-1 row var): only fields declared via ffi.cdef are accessible.
+    -- Accessing an undeclared symbol is a type error ("field doesn't exist").
+    ctx.T_FFI_C = types_mod.make_table(ctx, {}, {}, -1, {})
     ctx.cdef_typedefs = {}
 
     -- Register as type alias so annotation code can reference "ffi_C" by name.

@@ -37,13 +37,13 @@ end
 ---------------------------------------------------------------------------
 
 assert.describe("cdef: init", function()
-    assert.it("allocates ctx.T_FFI_C as an open table", function()
+    assert.it("allocates ctx.T_FFI_C as a closed table", function()
         local ctx = new_ctx()
         assert.ok(ctx.T_FFI_C, "T_FFI_C should be set")
         local t = ctx.types:get(ctx.T_FFI_C)
         assert.eq(t.tag, defs.TAG_TABLE)
-        -- Open table: row_var_id >= 0
-        assert.ok(t.data[4] >= 0, "T_FFI_C should be an open table (row_var_id >= 0)")
+        -- Closed table: row_var_id == -1 (undeclared fields are errors, not unknown)
+        assert.eq(t.data[4], -1, "T_FFI_C should be a closed table (row_var_id == -1)")
     end)
 
     assert.it("allocates ctx.cdef_typedefs as an empty table", function()

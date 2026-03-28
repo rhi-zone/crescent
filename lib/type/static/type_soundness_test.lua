@@ -2570,11 +2570,11 @@ local v = ffi.C.make_vec(3, 4)
 ]])
     end)
 
-    assert.it("ffi.C.nonexistent_fn() errors: unknown must be narrowed before calling", function()
+    assert.it("ffi.C.nonexistent_fn() errors: field doesn't exist", function()
         has_error([[
 local ffi = require("ffi")
 local r = ffi.C.nonexistent_fn()
-]], "unknown")
+]], "doesn't exist")
     end)
 
     assert.it("ffi.C is typed (not unknown) — direct access is allowed without narrowing", function()
