@@ -26,7 +26,7 @@ These exist in `lib/` but are legacy/stubs — not crescent-native (wrong annota
 no init.lua, no tests, incomplete, or just placeholder files). Do not rely on them as-is;
 they need to be rewritten before use.
 
-- [ ] **`lib/mcp/`** — stubs with FIXME/TODO throughout, wrong annotation style, no tests. Needed for MCP protocol support (`lib/jsonrpc` → `lib/mcp` stack). Rewrite once `lib/jsonrpc` exists.
+- [ ] **`lib/mcp/`** — MUD Client Protocol (moo.mud.org/mcp/mcp2.html), not Model Context Protocol. Stubs with FIXME/TODO throughout, wrong annotation style, no tests. Low priority; rewrite if/when MUD substrate needs it.
 - [ ] **`lib/github/`** — uses EmmyLua `---@class` annotations instead of `--::`/`--:`, no tests. Rewrite once needed for registry tooling.
 - [ ] **`lib/markdown/`** — incomplete parser, FIXME comments, no tests. Rewrite when needed (Lumen, docs site).
 - [ ] **`lib/imap/`** — EmmyLua style, incomplete RFC 9051 parser, no init.lua, no tests. Low priority.
@@ -45,6 +45,12 @@ Not libraries (do not rewrite, repurpose instead):
 - [ ] **`lib/orchestration/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
 
 - [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST; emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua` in ~/git/lua (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross. Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra annotation work.
+
+- [ ] **`lib/jsonrpc/`** — request/response dispatch over stdio or TCP. Substrate for LSP, Model Context Protocol, and any JSON-RPC protocol. Transport abstraction, method registry, typed handler registration.
+
+- [ ] **`lib/lsp/`** — LSP method bindings on top of `lib/jsonrpc`. Every method pre-typed from the LSP spec; you register handlers. Currently `lib/type/static/lsp.lua` rolls its own JSON-RPC — this replaces that.
+
+- [ ] **`lib/model_context_protocol/`** — Model Context Protocol client/server on top of `lib/jsonrpc`. (Note: `lib/mcp/` is MUD Client Protocol, unrelated.)
 
 - [ ] **`lib/ecs/`** — entity-component substrate. Named entities, typed components, spatial containment (entities inside entities), mutable state store. User-defined schemas — no hardcoded concepts like "room" or "inventory". The primitive for building world simulations, games, or any entity-centric stateful system. Turn loop, perception rules, mutation rules, and renderers (RP prose, MUD-style, etc.) are built on top by the user.
 
