@@ -265,6 +265,17 @@ Ordered by how many other things unblock:
 12. **Template engine** — unblocks prose assembly, HTML generation.
 13. **World state lib** — unblocks RP substrate, Lumen entity model.
 
+## The logical conclusion
+
+The verticals compound. Web backend + CLI tooling + system primitives + package manager
++ typechecker + shell utilities + TUI = a complete userspace. Not a goal, but a natural
+endpoint: if crescent is genuinely batteries-included, you could build everything above
+the kernel line in it. coreutils, a shell, a service manager, a text editor. All
+vendorable, all typed, all cross-platform.
+
+The package manager already exists. The typechecker already exists. The rest is just
+a long TODO list.
+
 ## Why vendor-first doesn't mean bloat
 
 The npm cautionary tale is not about vendoring — it's about **fragmentation**. Thousands
