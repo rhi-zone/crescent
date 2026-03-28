@@ -56,11 +56,11 @@ To expose a subset of fields:
 
 External callers see only `start` and `stop`. Internal code works with the full `InternalHttpServer` type.
 
-`$Opaque<T>` with no second argument produces a **nominal opaque newtype** — not an empty table type. The distinction matters: `{}` is structurally compatible with any other empty table, but `$Opaque<HttpServer>` is nominally distinct from `$Opaque<ConnectionPool>` even though both expose nothing. The identity comes from `T`. Callers can only thread the value through functions that accept it — they cannot inspect or construct it. This is how OCaml abstract types work.
+`$Opaque<T>` with no second argument produces a **nominal opaque newtype** — not an empty table type. The distinction matters: `{}` is structurally compatible with any other empty table, but `$Opaque<HttpServer>` is nominally distinct from `$Opaque<ConnectionPool>` even though both expose nothing. Nominal identity comes from the **declaration site** — each `--::` declaration anchors a fresh nominal ID. `T` is the wrapped shape: it determines what `unseal` recovers and what fields are valid to expose in `U`, but it is not the source of identity. Two `$Opaque<HttpServer>` at different declaration sites are different types. Callers can only thread the value through functions that accept it — they cannot inspect or construct it. This is how OCaml abstract types work.
 
 `U` in `$Opaque<T, U>` is not a standalone structural type — it is an **open view of `T`**. The external type is `U + sealed row variable` containing the hidden portion of `T`. This has several consequences:
 
-- `$Opaque<HttpServer, { start: () -> () }>` ≠ `$Opaque<ConnectionPool, { start: () -> () }>` even with identical `U` — nominal identity still comes from `T`
+- `$Opaque<HttpServer, { start: () -> () }>` ≠ `$Opaque<ConnectionPool, { start: () -> () }>` even with identical `U` — nominal identity comes from the declaration site, and the two declarations are at different sites
 - `$Opaque<T, U>` is assignable to `$Opaque<T>` (drop exposed fields, go fully opaque) — identity preserved
 - `--:: unseal T` unseals the row variable, recovering the full `T`; the typechecker knows the sealed portion IS `T`
 - The fields declared in `U` are checked against `T` — you cannot expose a field that does not exist in `T`
