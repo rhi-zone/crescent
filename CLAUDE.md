@@ -64,7 +64,7 @@ See `docs/conventions.md` for the full spec. Short version:
 - Codecs: `string_to_foo`/`foo_to_string` as primary names (type-in-the-name); `encode`/`decode` always aliased for swappability
 - Protocols: `connect` / `send` / `recv` / `close` — transport injected via opts, never created internally
 - Tiers: system > FFI > pure Lua, selected at load time, each independent, `M._tier` for introspection
-- Annotations: `--:` / `--::` only, `unknown` not `any`
+- Annotations: `--:` / `--::` only. `unknown` = TS `unknown` (caller must narrow). `any` = TS `any` (opt-out). Prefer `unknown`; `any` only when explicitly opting out and documented why.
 
 ## Implementation Patterns
 

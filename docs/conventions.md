@@ -97,8 +97,11 @@ lib/foo/
 ## Type annotations
 
 - Use `--:` (inline, preceding line) and `--::` (declarations). Never EmmyLua.
-- `unknown` for dynamic/untyped data — forces narrowing at use sites.
-- `any` only when explicitly opting out of checking (document why).
+- `unknown` is TypeScript `unknown`: the type is not statically known, caller must narrow
+  before use. Use for genuinely dynamic data, external values whose shape isn't declared,
+  or values that could be anything at runtime.
+- `any` is TypeScript `any`: opts out of checking entirely. Use only as an explicit
+  escape hatch — document why. Never use `any` just to silence a type error.
 - Annotate all public API functions. Internal helpers are encouraged but not required.
 
 ## Performance
