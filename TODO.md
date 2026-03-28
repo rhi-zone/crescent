@@ -19,7 +19,10 @@ The full type system expressed as invariants (not exhaustive, but the spirit):
 Every feature needs its own invariant class:
 - **Spread multi-return**: slot extraction, narrowing propagation across slots, spread in argument position
 - **HKTs**: applying a type constructor to a type argument produces the correct instantiation; HKT + generic constraints compose correctly
-- **Every intrinsic** (`pcall`, `type()`, `assert`, `$FfiC`, `$Require`, etc.): each intrinsic has a specific contract that must hold under all inputs
+- **Every intrinsic** — full list, each with its own contract:
+  - Special-cased builtins: `require` (module lookup → declared type or unknown), `pcall`/`xpcall` (wraps return as `(true, ret...) | (false, string)`), `pairs`/`ipairs` (typed iteration over concrete table), `type()` (narrows in branch), `assert`, `error`, `select`
+  - Type-level intrinsics: `$Keys<T>` (union of string literal field names), `$EachField<T, F>` (maps F over each field), `$EachUnion<T, F>` (maps F over each union arm), `$Opaque<T>` / `$Opaque<T, U>` (nominal newtype with optional exposed view), `$FfiC` (closed table from ffi.cdef calls), `$GlobalScope` (closed table of declared globals), `$Name` (string literal of declaration name), `$Require<T>` (module type from string literal — not yet implemented as intrinsic)
+  - stdlib functions with special-cased return shapes: `string.find` (union-of-tuples multi-return), `io.open` (file handle or nil+string), `string.byte` (multi-return integers), `string.match`/`gmatch`/`gsub`
 - **Match/narrowing patterns**: `if type(x) == "string"`, `if x then`, `if not x`, `if x == nil`, `and`/`or` chains — each must narrow to exactly what the spec says, no more, no less
 - **Generic constraints**: a generic `<T: Constraint>` rejects instantiations that violate the constraint; accepts all that satisfy it
 - **Literal types**: `1` is assignable to `integer` and `1` but not `2`; literal widening is explicit not implicit
@@ -32,6 +35,18 @@ Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert the
 The bar to beat is `@typescript/native-preview` (tsgo / ts7 — the Go rewrite of tsc). Benchmark methodology: construct a representative "nice" TypeScript program and a structurally similar Lua program, compare cold-start + incremental throughput. Also include pathological Lua cases (deep union chains, heavily generic code, large files) that have no TS equivalent — these stress the solver and expose regressions invisible in the nice-program comparison.
 
 **Performance note on multi-return redesign**: always wrapping rl=0 and rl=1 returns in TAG_TUPLE adds allocation + C_INDEX destructuring overhead on every call site. We may want to re-specialize these cases (bind directly, skip the tuple barrier) after measuring. Don't assume the overhead is acceptable — benchmark first.
+
+## CRITICAL: write implementer specs before delegating
+
+Each item below needs a self-contained spec in `docs/` (or inline in TODO) that a subagent can implement from without reading session history. Design decisions scattered across TODO.md + docs/type-system.md + session notes are not enough — an implementer needs: what to build, what files to touch, what the data representation is, what tests to write.
+
+Items that currently lack an implementer-ready spec:
+- [ ] **TAG_SPREAD in return position** — annotation parser change, `peek_callee_ret_union` detection, `solve_callable` spread path, stdlib annotation updates (`string.find`, `io.open`, `string.byte`). Spec needed: exact syntax (`-> ...(T)` vs `-> ...T`), AST node, constrain.lua/solve.lua changes.
+- [ ] **`$Opaque<T, U>` two-arg form** — `U` is a structural open view of `T` checked against `T`'s fields; sealed remainder as `TAG_ROWVAR`; `unseal` unseals it. Spec needed: intrinsic.lua expansion, unify.lua assignability, `--:: unseal` syntax + constrain.lua handling.
+- [ ] **Argument literal widening at typevar binding** — `0` should bind as `integer`, not `LIT_INTEGER(0)`, in user-defined generics. Spec needed: where in constrain.lua/solve.lua widening happens, which sites are "user generic" vs "intrinsic" (intrinsics inspect the literal directly).
+- [ ] **GAP-HKT3 fix: `$Opaque` keys in lib/fp/** — apply the typeclass dispatch key pattern to `lib/fp/mappable`, `applicable`, etc. Spec needed: the `--:: MappableKey: $Opaque` declaration form, how `fa[Mappable.key]` resolves via `FLAG_OPAQUE_KEY`, which files change.
+- [ ] **`$Require<T>` as parameterized intrinsic** — `resolve_named_type` needs a `TAG_TYPE_CALL` case where callee is `TAG_INTRINSIC` and arg is a bound string literal; look up `ctx.module_types`. Spec needed: exact solve.lua/intrinsic.lua changes, stdlib.d.lua milestone declaration.
+- [ ] **Invariant-based fuzz suite** — needs a concrete test file skeleton: which invariants become which `fuzz.it` cases, how programs are generated (arb.lua generators for Lua AST fragments), how the typechecker is invoked in-process.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
