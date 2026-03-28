@@ -1377,7 +1377,17 @@ local function peek_callee_ret_union(ctx, callee_n)
     -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
     -- and fall back to direct binding for scalars/plain unions (single return).
     if ret_t.tag == TAG_VAR or ret_t.tag == TAG_ROWVAR then return nil end
-    return ret_slot
+    -- Union-of-tuples (pcall-like): return as-is — eager_slot handles this shape directly.
+    if ret_t.tag == TAG_UNION then
+        local all_tuples = true
+        for i = ret_t.data[0], ret_t.data[0] + ret_t.data[1] - 1 do
+            local arm = types_mod.find(ctx, ctx.lists:get(i))
+            if ctx.types:get(arm).tag ~= defs.TAG_TUPLE then all_tuples = false; break end
+        end
+        if all_tuples then return ret_slot end
+    end
+    -- Single-value return: wrap in a 1-tuple so call_ret_tid is always tuple-shaped.
+    return types_mod.make_tuple(ctx, { ret_slot })
 end
 
 -- Extract the type at slot N from a TAG_TUPLE or union-of-TAG_TUPLEs at constraint-gen time.
@@ -1819,21 +1829,15 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 -- Concrete bindings allow if-not guards to narrow at constraint-gen time.
                 local concrete = eager_slot(ctx, call_ret_tid, call_slot)
                 if concrete then
-                    -- TAG_TUPLE or union-of-tuples: extract slot N.
+                    -- Annotated callee: call_ret_tid is TAG_TUPLE or union-of-tuples.
                     bind_tid = concrete
                 else
-                    local crt = ctx.types:get(types_mod.find(ctx, call_ret_tid))
-                    if crt.tag ~= TAG_VAR and crt.tag ~= TAG_ROWVAR then
-                        -- Single-value return (plain union, scalar): bind directly at slot 0.
-                        bind_tid = call_slot == 0 and call_ret_tid or ctx.T_NIL
-                    else
-                        -- Unresolved (unannotated function): defer via C_INDEX.
-                        local slot_var = fresh_var(ctx)
-                        emit(ctx, { C_INDEX, call_ret_tid,
-                            types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
-                            slot_var, n.line, n.col })
-                        bind_tid = slot_var
-                    end
+                    -- Unannotated callee: defer via C_INDEX until solve binds the tuple.
+                    local slot_var = fresh_var(ctx)
+                    emit(ctx, { C_INDEX, call_ret_tid,
+                        types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                        slot_var, n.line, n.col })
+                    bind_tid = slot_var
                 end
                 if not ctx._multi_ret then ctx._multi_ret = {} end
                 ctx._multi_ret[name_id] = { source_tid = call_ret_tid, slot = call_slot, call_uid = nid }
@@ -1913,16 +1917,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
             if concrete then
                 rhs_tid = concrete
             else
-                local crt = ctx.types:get(types_mod.find(ctx, assign_call_ret_tid))
-                if crt.tag ~= TAG_VAR and crt.tag ~= TAG_ROWVAR then
-                    rhs_tid = call_slot == 0 and assign_call_ret_tid or ctx.T_NIL
-                else
-                    local slot_var = fresh_var(ctx)
-                    emit(ctx, { C_INDEX, assign_call_ret_tid,
-                        types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
-                        slot_var, n.line, n.col })
-                    rhs_tid = slot_var
-                end
+                local slot_var = fresh_var(ctx)
+                emit(ctx, { C_INDEX, assign_call_ret_tid,
+                    types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                    slot_var, n.line, n.col })
+                rhs_tid = slot_var
             end
         else
             rhs_tid = rhs_types[i + 1] or (last_rhs_is_call and ctx.T_ANY or ctx.T_NIL)
