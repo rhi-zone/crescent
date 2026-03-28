@@ -19,6 +19,20 @@
 - [ ] **`module "name": T` syntax + `$Require<Path>` intrinsic** — `require` should be typed as `$Require<Path>` where `Path` is a literal string. The checker resolves `$Require<"ffi">` by looking up `"ffi"` in the module registry (declared via `module "ffi": T` in `stdlib.d.lua` or `.d.lua` files). First-party crescent modules already resolve via `ctx.cri_loader`; this extends that to external/stdlib modules. Undeclared modules → `unknown` (forces narrowing at use site) rather than `any` (silent bypass).
 - [ ] **`$FfiC` intrinsic** — `ffi.C` should be typed as `$FfiC`, a special type the checker resolves to `ctx.T_FFI_C` (the live table accumulating fields from `ffi.cdef` calls). Currently `T_FFI_C` is allocated and populated correctly but never bound to `ffi.C` in the value scope because `ffi` itself is `any`.
 
+## typechecker type guards and assertions
+
+TypeScript's type guards can lie — `function isString(x): x is string { return true }` typechecks fine. We should do better.
+
+- [ ] **User-defined type guards** — `(x: unknown) -> x is T` return type that narrows the argument at the call site. Existing narrowing infrastructure handles the propagation; the new piece is the `x is T` predicate return type and recognizing it in `solve_callable`.
+
+- [ ] **Assertion functions** — `(x: unknown) -> asserts x is T` narrows after the call (unconditional narrowing, errors if condition is false at runtime). `assert(x)` and `assert(type(x) == "string")` are the common patterns.
+
+- [ ] **Verified type guards** — rather than trusting the annotation, verify that the function body actually performs checks consistent with the declared predicate. If the body provably returns true for non-T values, emit a warning. This is beyond TS — TS never verifies guards, it just trusts them. Even partial verification (detecting trivially lying guards) would be a win.
+
+- [ ] **Predicate narrowing from `type()` calls** — `type(x) == "string"` should narrow `x` to `string` in the branch. Currently `type()` returns `string` but the checker doesn't connect the result to the original value. This is a precondition for assertion functions working on `type()` checks.
+
+- [ ] **`assert()` as a built-in assertion** — `assert(x)` narrows `x` to non-nil/non-false in the continuation. Already partially works via existing narrowing; needs to be robust for the `assert(x, msg)` two-argument form too.
+
 ## typechecker warnings / quality-of-life
 
 - [ ] **Redundant type assertion warning** — when a `--[[: T]]` cast asserts the exact same type the expression already has, emit a warning (like eslint's no-unnecessary-type-assertion). Must use structural equality, not mutual unifiability — `any` unifies bidirectionally with everything but is not the same type as anything else.
