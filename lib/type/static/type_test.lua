@@ -6748,6 +6748,65 @@ local x = si
 end)
 
 -- ---------------------------------------------------------------------------
+-- $Opaque<T, U> two-arg form
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: $Opaque<T, U> two-arg form", function()
+    assert.it("field in U is accessible on $Opaque<T, U> handle", function()
+        no_errors([[
+--:: Server = $Opaque<{ host: string, port: integer }, { host: string }>
+--:: declare s = Server
+--: string
+local h = s.host
+]])
+    end)
+
+    assert.it("field not in U is inaccessible (error)", function()
+        has_error([[
+--:: Server = $Opaque<{ host: string, port: integer }, { host: string }>
+--:: declare s = Server
+--: integer
+local p = s.port
+]], "not exposed")
+    end)
+
+    assert.it("$Opaque<T, U> value accepted where same alias expected", function()
+        no_errors([[
+--:: Server = $Opaque<{ host: string, port: integer }, { host: string }>
+--:: declare s = Server
+--: Server
+local s2 = s
+]])
+    end)
+
+    assert.it("two $Opaque<T, U> at different declaration sites are distinct types", function()
+        has_error([[
+--:: ServerA = $Opaque<{ host: string }, { host: string }>
+--:: ServerB = $Opaque<{ host: string }, { host: string }>
+--:: declare a = ServerA
+--: ServerB
+local x = a
+]], "nominal")
+    end)
+
+    assert.it("U field not in T is a declaration-time error", function()
+        has_error([[
+--:: Bad = $Opaque<{ host: string }, { missing: integer }>
+--:: declare b = Bad
+]], "does not exist")
+    end)
+
+    assert.it("one-arg $Opaque<T> field access errors with unseal message", function()
+        has_error([[
+--:: Token = $Opaque<{ x: integer }>
+--:: declare t = Token
+--: integer
+local v = t.x
+]], "unseal")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Module type imports: type aliases from required modules available in scope
 -- ---------------------------------------------------------------------------
 assert.describe("module type imports", function()

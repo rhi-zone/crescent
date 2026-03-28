@@ -612,8 +612,41 @@ local function solve_index(ctx, c)
         return true
     end
 
-    -- Nominal: unwrap
+    -- Nominal: check opaque view, then unwrap.
+    -- TAG_NOMINAL types are produced either by $Opaque or by --:: newtype.
+    -- $Opaque nominals are tracked in ctx._opaque_nominals.
+    --   Two-arg: ctx._opaque_view[identity] = U; field access resolves through U.
+    --   One-arg: no view entry; field access is always an error.
+    -- newtype nominals: fall through to unwrap as usual.
     if obj_t.tag == TAG_NOMINAL then
+        local nom_identity = obj_t.data[1]
+        if ctx._opaque_nominals and ctx._opaque_nominals[nom_identity] then
+            local fname = intern_mod.get(ctx.pool, name_id) or "?"
+            if ctx._opaque_view and ctx._opaque_view[nom_identity] ~= nil then
+                -- Two-arg $Opaque<T, U>: resolve field through U.
+                local view_tid = ctx._opaque_view[nom_identity]
+                local vfe = types_mod.table_field(ctx, view_tid, name_id)
+                if vfe then
+                    local ft = find(ctx, vfe.type_id)
+                    if band(vfe.flags, FLAG_OPTIONAL) ~= 0 then
+                        ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+                    end
+                    unify_mod.unify(ctx, res_tid, ft)
+                    return true
+                else
+                    add_error(ctx, line, col,
+                        "field `" .. fname .. "` is not exposed by opaque type — use unseal")
+                    bind_to(ctx, res_tid, ctx.T_ANY)
+                    return false
+                end
+            else
+                -- One-arg $Opaque<T>: no field access.
+                add_error(ctx, line, col,
+                    "cannot access fields of opaque type — use unseal to recover inner type")
+                bind_to(ctx, res_tid, ctx.T_ANY)
+                return false
+            end
+        end
         obj_tid = find(ctx, obj_t.data[2])
         obj_t   = ctx.types:get(obj_tid)
     end

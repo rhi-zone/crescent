@@ -285,7 +285,7 @@ local function T_fingerprint(ctx, T)
 end
 
 local function expand_opaque(ctx, arg_ids, stable_id)
-    if #arg_ids ~= 1 then return ctx.T_NEVER end
+    if #arg_ids < 1 or #arg_ids > 2 then return ctx.T_NEVER end
     local T = types_mod.find(ctx, arg_ids[1])
     -- Derive a deterministic nominal identity from call site + T type.
     -- If stable_id is 0 (legacy / unset), fall back to per-run counter.
@@ -303,6 +303,48 @@ local function expand_opaque(ctx, arg_ids, stable_id)
     local opaque_name_id = intern_mod.intern(ctx.pool, "Opaque")
     local result = types_mod.make_nominal(ctx, opaque_name_id, nominal_id, T)
     ctx._opaque_cache[nominal_id] = result
+    -- Track which nominal_ids were produced by $Opaque (vs --:: newtype).
+    -- solve.lua uses this to block field access on opaque types.
+    if not ctx._opaque_nominals then ctx._opaque_nominals = {} end
+    ctx._opaque_nominals[nominal_id] = true
+
+    -- Two-arg form: $Opaque<T, U> — U is the exposed structural view.
+    -- Validate that U is a structural subtype of T (all fields in U exist in T
+    -- with compatible types), then store U in the side table.
+    if #arg_ids >= 2 then
+        local U_tid = types_mod.find(ctx, arg_ids[2])
+        local ut = ctx.types:get(U_tid)
+        local t  = ctx.types:get(T)
+        -- Only validate when U is a table type and T is a table type.
+        if ut.tag == TAG_TABLE and t.tag == TAG_TABLE then
+            local unify_mod = require("lib.type.static.unify")
+            local errors_mod = require("lib.type.static.errors")
+            for i = ut.data[0], ut.data[0] + ut.data[1] - 1 do
+                local fid = ctx.lists:get(i)
+                local ufe = ctx.fields:get(fid)
+                if ufe.name_id >= 0 then
+                    local tfe = types_mod.table_field(ctx, T, ufe.name_id)
+                    local fname = intern_mod.get(ctx.pool, ufe.name_id) or "?"
+                    if not tfe then
+                        errors_mod.error(ctx.err, ctx.filename, 0, 0,
+                            "$Opaque<T, U>: exposed field `" .. fname
+                            .. "` does not exist in inner type T")
+                    else
+                        -- U's field type must be compatible with T's field type.
+                        if not unify_mod.try_unify(ctx, types_mod.find(ctx, ufe.type_id),
+                                                        types_mod.find(ctx, tfe.type_id), {}) then
+                            errors_mod.error(ctx.err, ctx.filename, 0, 0,
+                                "$Opaque<T, U>: exposed field `" .. fname
+                                .. "` has incompatible type in inner type T")
+                        end
+                    end
+                end
+            end
+        end
+        if not ctx._opaque_view then ctx._opaque_view = {} end
+        ctx._opaque_view[nominal_id] = U_tid
+    end
+
     return result
 end
 
