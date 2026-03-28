@@ -53,7 +53,11 @@ The bar to beat is `@typescript/native-preview` (tsgo / ts7 — the Go rewrite o
 ## typechecker stdlib / module typing
 
 - [x] **`module "name": T` syntax** — `--:: module "name": T` declares the type returned by `require("name")`. Implemented in ann.lua (ANN_MODULE), constrain.lua (module_types registry), prelude.lua (loaded from .d.lua files). Undeclared modules → `unknown`. stdlib.d.lua now declares `"ffi"` and `"bit"` properly.
-- [ ] **`$Require<Path>` intrinsic** — require currently does a direct lookup; could be surfaced as a type-level `$Require<"ffi">` for use in annotations. Low priority — the lookup works, this is just syntactic.
+- [ ] **`$Require<Path>` intrinsic** — `require()` is currently special-cased in constrain.lua: when the arg is a string literal, it does the `ctx.module_types` lookup inline. The aspirational form `--:: declare require: <T: string>(module: T): $Require<T>` needs three features not yet implemented together:
+  1. **Constrained generics** — `<T: string>` now parsed and enforced via C_BOUND (commit 50706d2); but `string` as a kind bound means "must be a string literal", which requires literal type propagation into the bound check.
+  2. **Literal type propagation through generics** — calling `require("lib.json")` must bind `T` to `LIT_STRING "lib.json"`, not widened `string`. This is in tension with the argument-widening rule (literals widen to base type at call sites to avoid pinning typevars). Resolution: widening applies to user generics but NOT to intrinsics like `$Require<T>` — the intrinsic evaluation checks if the bound TV is a string literal specifically.
+  3. **Parameterized intrinsics** — `$Require<T>` where `T` is a type variable, resolvable only when `T` is a bound string literal. `resolve_named_type` currently only handles TAG_NAMED (concrete names), not TAG_TYPE_CALL on type variables.
+  Until all three are done, `require()` stays special-cased. The milestone marker: `--:: declare require: <T: string>(module: T): $Require<T>` in stdlib.d.lua must typecheck and produce correct module types.
 - [x] **`$FfiC` intrinsic** — implemented. `TAG_FFIC = 26`, deferred resolution in solve.lua, cdef.lua makes `T_FFI_C` closed (undeclared C symbols error), stdlib.d.lua declares `C: $FfiC`.
 
 ## typechecker type guards and assertions
@@ -266,6 +270,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   (2) cross-file type alias resolution in bracket-key annotation position already works
   via the existing FLAG_OPAQUE_KEY + LIT_OPAQUE_KEY path once the key IS a declared type.
   Eliminates `{ [any]: any }` from fp dispatch tables.
+
+- [ ] **Typechecker: table-valued dispatch key (GAP-HKT3)** — `fa[TC]` where `TC` is a module table used as a dispatch key produces `T_UNKNOWN` (open-table miss). The checker does not track table identity as a lookup key — it only resolves literal strings and opaque keys. So `fa[Mappable].map(...)` is untyped throughout. The typeclass dispatch key pattern (above) resolves this for `$Opaque` keys but not for raw module-table keys. Until `$Opaque` keys are used, `lib/fp/` dispatch is invisible to the typechecker and calling with wrong args produces no error.
+
+- [ ] **Typechecker: argument literal widening** — literal `0` passed to a generic function pins the typevar to `LIT_INTEGER(0)`. Subsequent calls with `number` fail because `number !<: LIT_INTEGER(0)`. Correct rule: in argument position, literals widen to their base type before binding a typevar (`0` → `integer`, `"foo"` → `string`, `false` → `boolean`). `widen_deep` was added for generic constraint checks but is not applied at call-site typevar binding. **Tension with `$Require<T>`**: `require("lib.json")` must bind `T = LIT_STRING "lib.json"` (literal preserved) for parameterized intrinsics to work. Resolution: widening applies to user-defined generics; intrinsic evaluation paths bypass widening and inspect the literal directly. Until fixed, any generic called with a literal constant may produce surprising pinning errors on the second call.
 
 - [ ] **Refinement types / control-flow narrowing system** — type guards, assertions, and
   `type()` narrowing are all instances of a general `refine_true`/`refine_false` algebra.
