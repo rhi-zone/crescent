@@ -370,6 +370,8 @@ Circular requires: the checker detects cycles and assigns `any` to the cycle-bre
 
 Missing modules: error, not silent `any`. If you `require` something that doesn't exist, that's a bug.
 
+**`$Require<T>` and literal propagation**: the aspirational stdlib.d.lua declaration is `--:: declare require: <T: string>(module: T): $Require<T>`. When `T` resolves to a string literal (e.g. `require("lib.json")` binds `T = LIT_STRING "lib.json"`), `$Require<T>` evaluates by looking up `ctx.module_types["lib.json"]`. When `T` is `string` (non-literal), `$Require<T>` returns `unknown`. The constraint `<T: string>` is correct and does not need to say "must be a literal" — the intrinsic simply handles both cases. This means argument literal widening (which normally widens `"lib.json"` to `string` before binding a typevar) must NOT apply to intrinsic resolution paths; intrinsics inspect the bound TV's tag after solving. Currently `require()` is special-cased in constrain.lua instead; removing that special case requires parameterized intrinsic evaluation (`resolve_named_type` handling `TAG_TYPE_CALL` on type variables).
+
 ### Error recovery: `any` with warnings
 
 When inference fails partway through a function, the checker assigns `any` to the failed expression and continues. Every implicit `any` emits a warning. This means:
@@ -411,6 +413,8 @@ Constraints on type parameters use the same structural types as everything else.
 ```
 
 `<T: C>` means "T must be assignable to C." Since crescent is structural, this works naturally — `<T: { x: number }>` means "any table with at least an `x: number` field." No need for Rust-style trait bounds or Haskell-style typeclasses. The constraint *is* the structure.
+
+**`<T: string>` does not mean "T must be a string literal."** It means T must be assignable to `string` — so T can be `string` itself, or a literal type like `"foo"`, or a union of string literals. This is the same semantics as TypeScript's `T extends string`. Whether T resolves to a specific literal at a call site depends on whether argument literal widening is applied (see argument widening below), not on the constraint.
 
 Multiple constraints compose with `&`: `<T: Readable & Closeable>` means T must satisfy both.
 
