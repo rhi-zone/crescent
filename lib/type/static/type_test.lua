@@ -7103,3 +7103,94 @@ end
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- TAG_SPREAD explicit multi-return syntax
+---------------------------------------------------------------------------
+
+assert.describe("TAG_SPREAD: explicit -> ...(T) multi-return syntax", function()
+    assert.it("-> integer (no spread): single value, no multi-return narrowing", function()
+        -- y gets nil (beyond the 1-tuple), x gets integer. No error.
+        no_errors([[
+--: () -> integer
+local function f() return 1 end
+local x, y = f()
+local n = x + 1
+]])
+    end)
+
+    assert.it("-> integer (no spread): y is nil — arithmetic on y errors", function()
+        has_error([[
+--: () -> integer
+local function f() return 1 end
+local x, y = f()
+local n = y + 1
+]])
+    end)
+
+    assert.it("-> ...(integer): 1-slot multi-return; x gets integer, y gets nil", function()
+        no_errors([[
+--: () -> ...(integer)
+local function f() return 1 end
+local x, y = f()
+local n = x + 1
+]])
+    end)
+
+    assert.it("-> ...(integer): y is nil — arithmetic on y errors", function()
+        has_error([[
+--: () -> ...(integer)
+local function f() return 1 end
+local x, y = f()
+local n = y + 1
+]])
+    end)
+
+    assert.it("-> ...((integer, integer) | (nil, string)): narrowing works after nil-check on first slot", function()
+        -- Use string.find which is annotated -> ...((integer, integer) | (nil, nil))
+        no_errors([[
+local s, e = string.find("hello", "ell")
+if s then
+    local len = e - s
+end
+]])
+    end)
+
+    assert.it("-> ...((integer, integer) | (nil, string)): guard pattern narrows continuation", function()
+        -- Use string.find which is annotated -> ...((integer, integer) | (nil, nil))
+        no_errors([[
+local s, e = string.find("hello", "ell")
+if not s then return end
+local len = e - s
+]])
+    end)
+
+    assert.it("-> ((integer, integer) | (nil, string)) (no spread): no correlated narrowing, treated as single value", function()
+        -- Without spread, the union-of-tuples is a single value.
+        -- The entire union-of-tuples becomes the first (and only) slot.
+        -- e is nil (beyond slot 0 of the 1-tuple), so arithmetic on e errors.
+        has_error([[
+--:: myfind: (s: string, p: string) -> ((integer, integer) | (nil, nil))
+local s, e = myfind("hello", "ell")
+if not s then return end
+local len = e - s
+]])
+    end)
+
+    assert.it("string.find: local s, e still narrows correctly after re-annotation", function()
+        no_errors([[
+local s, e = string.find("hello world", "world")
+if s then
+    local len = e - s
+end
+]])
+    end)
+
+    assert.it("string.find: guard pattern still narrows continuation after re-annotation", function()
+        no_errors([[
+local s, e = string.find("hello world", "world")
+if not s then return end
+local len = e - s
+]])
+    end)
+end)

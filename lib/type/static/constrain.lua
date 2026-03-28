@@ -1377,16 +1377,12 @@ local function peek_callee_ret_union(ctx, callee_n)
     -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
     -- and fall back to direct binding for scalars/plain unions (single return).
     if ret_t.tag == TAG_VAR or ret_t.tag == TAG_ROWVAR then return nil end
-    -- Union-of-tuples (pcall-like): return as-is — eager_slot handles this shape directly.
-    if ret_t.tag == TAG_UNION then
-        local all_tuples = true
-        for i = ret_t.data[0], ret_t.data[0] + ret_t.data[1] - 1 do
-            local arm = types_mod.find(ctx, ctx.lists:get(i))
-            if ctx.types:get(arm).tag ~= defs.TAG_TUPLE then all_tuples = false; break end
-        end
-        if all_tuples then return ret_slot end
+    -- Explicit multi-return: TAG_SPREAD in return position wraps the tuple/union-of-tuples.
+    -- Unwrap and return the inner type directly — eager_slot handles it.
+    if ret_t.tag == defs.TAG_SPREAD then
+        return types_mod.find(ctx, ret_t.data[0])
     end
-    -- Single-value return: wrap in a 1-tuple so call_ret_tid is always tuple-shaped.
+    -- Single-value return (no spread): always wrap in a 1-tuple.
     return types_mod.make_tuple(ctx, { ret_slot })
 end
 

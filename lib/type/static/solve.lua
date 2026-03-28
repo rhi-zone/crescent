@@ -30,6 +30,7 @@ local TAG_NAMED        = defs.TAG_NAMED
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
 local TAG_FFIC         = defs.TAG_FFIC
+local TAG_SPREAD       = defs.TAG_SPREAD
 
 local LIT_INTEGER   = defs.LIT_INTEGER
 local LIT_NUMBER    = defs.LIT_NUMBER
@@ -1157,8 +1158,14 @@ local function solve_return(ctx, c)
     local ret_var_t  = ctx.types:get(ret_var_id)
 
     if ret_var_t.tag ~= TAG_VAR then
-        -- Annotated return type: check assignability
+        -- Annotated return type: check assignability.
+        -- TAG_SPREAD in return position means multi-return; unwrap to the inner type
+        -- so that `return 1` is checked against `integer`, not `...integer`.
         local expected_tid = find(ctx, ret_var_id)
+        local et = ctx.types:get(expected_tid)
+        if et.tag == TAG_SPREAD then
+            expected_tid = find(ctx, et.data[0])
+        end
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
         if not ok then
             add_error(ctx, line, col,

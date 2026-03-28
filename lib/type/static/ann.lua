@@ -305,12 +305,25 @@ function M.parse_annotations(annotations, pool, filename)
                 skip_ws(s)
                 if s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "->" then
                     s.pos = s.pos + 2
-                    local ret = parse_type(s)
-                    if union_contains_fn(ret) then
-                        warnings[#warnings + 1] = { line = s.line, col = 1,
-                            msg = "function type in union return position"
-                                .. " — wrap each function type in parens:"
-                                .. " `(() -> A) | (() -> B)`" }
+                    skip_ws(s)
+                    local ret
+                    if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
+                        -- -> ...(T): explicit multi-return spread
+                        s.pos = s.pos + 3
+                        expect_char(s, "(")
+                        local inner = parse_type(s)
+                        expect_char(s, ")")
+                        local sp = alloc_type(defs.TAG_SPREAD)
+                        types:get(sp).data[0] = inner
+                        ret = sp
+                    else
+                        ret = parse_type(s)
+                        if union_contains_fn(ret) then
+                            warnings[#warnings + 1] = { line = s.line, col = 1,
+                                msg = "function type in union return position"
+                                    .. " — wrap each function type in parens:"
+                                    .. " `(() -> A) | (() -> B)`" }
+                        end
                     end
                     local fn = alloc_type(defs.TAG_FUNCTION)
                     local ft = types:get(fn)
@@ -359,7 +372,17 @@ function M.parse_annotations(annotations, pool, filename)
                 s.pos = s.pos + 2
                 -- Parse return type(s)
                 local returns = {}
-                if peek(s) == byte("(") then
+                skip_ws(s)
+                if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
+                    -- -> ...(T): explicit multi-return spread
+                    s.pos = s.pos + 3
+                    expect_char(s, "(")
+                    local inner = parse_type(s)
+                    expect_char(s, ")")
+                    local sp = alloc_type(defs.TAG_SPREAD)
+                    types:get(sp).data[0] = inner
+                    returns[1] = sp
+                elseif peek(s) == byte("(") then
                     advance(s)
                     if peek(s) ~= byte(")") then
                         returns[1] = parse_type(s)
@@ -808,7 +831,20 @@ function M.parse_annotations(annotations, pool, filename)
         skip_ws(s)
         if s.pos + 1 <= s.len and sub(s.src, s.pos, s.pos + 1) == "->" then
             s.pos = s.pos + 2
-            local ret = parse_type(s)  -- right-recursive for right-associativity
+            skip_ws(s)
+            local ret
+            if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
+                -- -> ...(T): explicit multi-return spread
+                s.pos = s.pos + 3
+                expect_char(s, "(")
+                local inner = parse_type(s)
+                expect_char(s, ")")
+                local sp = alloc_type(defs.TAG_SPREAD)
+                types:get(sp).data[0] = inner
+                ret = sp
+            else
+                ret = parse_type(s)  -- right-recursive for right-associativity
+            end
             local ps, pl = flush_type_list({ left })
             local rs, rl = flush_type_list({ ret })
             local fn = alloc_type(defs.TAG_FUNCTION)
