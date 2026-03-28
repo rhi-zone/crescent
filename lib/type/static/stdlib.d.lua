@@ -46,7 +46,7 @@
 --::   copy:   (unknown, unknown, integer) -> nil,
 --::   fill:   (unknown, integer) -> nil,
 --::   string: (unknown, integer?) -> string,
---::   C:      unknown,
+--::   C:      $FfiC,
 --:: }
 --:: module "bit": {
 --::   tobit:   (x: number) -> integer,

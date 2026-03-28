@@ -191,6 +191,7 @@ Ctx = {
   T_NEVER:      integer,
   T_INTEGER:    integer,
   T_UNKNOWN:    integer,
+  T_FFI_C:      integer?,
   filename:     string,
   -- LSP / annotation data fields populated by constrain.lua
   return_vars:     { [integer]: integer, ... },

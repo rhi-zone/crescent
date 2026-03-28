@@ -29,6 +29,7 @@ local TAG_TUPLE        = defs.TAG_TUPLE
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
+local TAG_FFIC         = defs.TAG_FFIC
 
 local LIT_INTEGER   = defs.LIT_INTEGER
 local LIT_NUMBER    = defs.LIT_NUMBER
@@ -72,6 +73,18 @@ end
 --: (Ctx, integer) -> integer
 local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
+end
+
+-- Resolve TAG_FFIC to ctx.T_FFI_C.
+-- If tid is TAG_FFIC, returns ctx.T_FFI_C (or T_ANY as fallback).
+-- Otherwise returns tid unchanged.
+--: (Ctx, integer) -> any
+local function resolve_ffic(ctx, tid)
+    if ctx.types:get(tid).tag == TAG_FFIC then
+        -- ctx.T_FFI_C is integer? — use T_ANY when unset (no ffi initialized).
+        return ctx.T_FFI_C or ctx.T_ANY
+    end
+    return tid
 end
 
 -- Deeply widen a type: widens top-level literals AND literal-typed table fields.
@@ -581,7 +594,7 @@ local function solve_index(ctx, c)
 
     -- LIT_STRING key: named field access (was solve_has_field)
     local name_id  = key_t.data[1]
-    local obj_tid  = find(ctx, obj_tid_raw)
+    local obj_tid  = resolve_ffic(ctx, find(ctx, obj_tid_raw))
     local obj_t = ctx.types:get(obj_tid)
 
     if obj_t.tag == TAG_ANY then

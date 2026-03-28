@@ -94,6 +94,9 @@ M.TAG_ENUM_MEMBER       = 24  -- named enum member: EnumName.MemberName
 M.TAG_TYPEOF            = 25  -- annotation-only: typeof <ident> — capture inferred type of a binding
 -- TypeSlot layout for TAG_TYPEOF (annotation arena only, never in the checker's type arena):
 --   data[0] = name_id  (intern ID of the identifier to look up)
+M.TAG_FFIC              = 26  -- magic: the live ffi.C table for this compilation unit
+-- TAG_FFIC has no data slots; it resolves to ctx.T_FFI_C at check time.
+-- Written as $FfiC in annotations; the solver substitutes it with ctx.T_FFI_C.
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0

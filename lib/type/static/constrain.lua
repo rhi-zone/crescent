@@ -208,6 +208,13 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local id = types_mod.alloc_type(ctx, defs.TAG_CDATA)
         return id
     end
+    if tag == defs.TAG_FFIC then
+        -- $FfiC is a magic type: the live ffi.C table for this compilation unit.
+        -- It is kept as TAG_FFIC in the checker's type arena so that solve.lua
+        -- can substitute ctx.T_FFI_C dynamically at the time of field access.
+        -- This avoids capturing a stale (or nil) T_FFI_C during stdlib.d.lua loading.
+        return types_mod.alloc_type(ctx, defs.TAG_FFIC)
+    end
 
     if tag == TAG_LITERAL then
         if at.data[0] == LIT_NUMBER then

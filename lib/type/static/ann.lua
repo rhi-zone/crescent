@@ -269,6 +269,10 @@ function M.parse_annotations(annotations, pool, filename)
             advance(s)
             local name = scan_word(s)
             if not name then scan_error(s, "expected intrinsic name after '$'") end
+            -- $FfiC is a zero-argument magic type: the live ffi.C table.
+            if name == "FfiC" then
+                return alloc_type(defs.TAG_FFIC)
+            end
             local name_id = intern_mod.intern(pool, name)
             local base = alloc_type(defs.TAG_INTRINSIC)
             types:get(base).data[0] = name_id

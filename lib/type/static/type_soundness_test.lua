@@ -2551,3 +2551,37 @@ local y = (--[[: string]] x)
 ]==], "redundant")
     end)
 end)
+
+assert.describe("ffi.C intrinsic ($FfiC)", function()
+    assert.it("ffi.C.func after ffi.cdef produces no error when called", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("int add(int a, int b);")
+local result = ffi.C.add(1, 2)
+]])
+    end)
+
+    assert.it("ffi.C.struct_fn after ffi.cdef produces no error", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("typedef struct { int x; int y; } Vec2;")
+ffi.cdef("Vec2 make_vec(int x, int y);")
+local v = ffi.C.make_vec(3, 4)
+]])
+    end)
+
+    assert.it("ffi.C.nonexistent_fn() errors: unknown must be narrowed before calling", function()
+        has_error([[
+local ffi = require("ffi")
+local r = ffi.C.nonexistent_fn()
+]], "unknown")
+    end)
+
+    assert.it("ffi.C is typed (not unknown) — direct access is allowed without narrowing", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("int get_val(void);")
+local fn = ffi.C.get_val
+]])
+    end)
+end)
