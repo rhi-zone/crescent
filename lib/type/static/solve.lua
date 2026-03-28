@@ -29,6 +29,7 @@ local TAG_TUPLE        = defs.TAG_TUPLE
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_TYPE_CALL    = defs.TAG_TYPE_CALL
+local TAG_INTRINSIC    = defs.TAG_INTRINSIC
 local TAG_FFIC         = defs.TAG_FFIC
 local TAG_SPREAD       = defs.TAG_SPREAD
 
@@ -74,6 +75,29 @@ end
 --: (Ctx, integer) -> integer
 local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
+end
+
+-- Evaluate a deferred TAG_TYPE_CALL(TAG_INTRINSIC, ...) after all type variables
+-- in the args have been bound by the solver.  Used when a generic function's return
+-- type is a parameterized intrinsic application (e.g. $Require<T>): after argument
+-- unification, T is bound, so we can call the intrinsic immediately.
+-- Returns the evaluated type id, or the original tid if not applicable.
+--: (Ctx, integer) -> integer
+local function resolve_deferred_intrinsic(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag ~= TAG_TYPE_CALL then return tid end
+    local callee_id = find(ctx, t.data[0])
+    local ct = ctx.types:get(callee_id)
+    if ct.tag ~= TAG_INTRINSIC then return tid end
+    -- Collect resolved arg type ids.
+    local arg_ids = {}
+    for i = t.data[1], t.data[1] + t.data[2] - 1 do
+        arg_ids[#arg_ids + 1] = find(ctx, ctx.lists:get(i))
+    end
+    local intrinsic_mod = require("lib.type.static.intrinsic")
+    -- stable_id is stored in data[3]; 0 means not set.
+    local stable = t.data[3]
+    return intrinsic_mod.expand(ctx, ct.data[0], arg_ids, stable)
 end
 
 -- Widen a literal type to its base type at argument position.
@@ -982,6 +1006,10 @@ local function solve_callable(ctx, c)
             unify_mod.unify(ctx, ret_tid, ctx.T_NIL)
         elseif rl == 1 then
             local first_ret = find(ctx, ctx.lists:get(callee_t.data[2]))
+            -- Parameterized intrinsic return: evaluate deferred TAG_TYPE_CALL(TAG_INTRINSIC,...)
+            -- now that all type variables from argument unification are bound.
+            -- E.g. $Require<T> where T was bound to LIT_STRING("mod") during param unification.
+            first_ret = resolve_deferred_intrinsic(ctx, first_ret)
             unify_mod.unify(ctx, ret_tid, first_ret)
         else
             -- Multiple return values: assemble TAG_TUPLE so C_INDEX can project slots.

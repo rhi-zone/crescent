@@ -18,6 +18,7 @@ local TAG_UNION        = defs.TAG_UNION
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_ANY          = defs.TAG_ANY
+local TAG_LITERAL      = defs.TAG_LITERAL
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
@@ -249,6 +250,31 @@ local function expand_each_field(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
+-- $Require<T>
+-- ---------------------------------------------------------------------------
+-- Type-level require: given a string literal type T, look up the declared
+-- module type for that module name.  Returns the declared type if found,
+-- T_UNKNOWN otherwise.
+--
+-- Used by the generic function declaration:
+--   declare require: <T: string>(module: T) -> $Require<T>
+-- When T is bound to LIT_STRING("mod.name"), $Require<T> evaluates to the
+-- type declared via --:: module "mod.name": { ... }.
+local function expand_require(ctx, arg_ids)
+    if #arg_ids ~= 1 then return ctx.T_UNKNOWN end
+    local T_tid = types_mod.find(ctx, arg_ids[1])
+    local T_t = ctx.types:get(T_tid)
+    if T_t.tag == TAG_LITERAL and T_t.data[0] == LIT_STRING then
+        local module_name = intern_mod.get(ctx.pool, T_t.data[1])
+        if module_name and ctx.module_types then
+            local declared = ctx.module_types[module_name]
+            if declared then return declared end
+        end
+    end
+    return ctx.T_UNKNOWN
+end
+
+-- ---------------------------------------------------------------------------
 -- $Opaque<T>
 -- ---------------------------------------------------------------------------
 -- Produces a TAG_NOMINAL type with a unique identity per (call site, T).
@@ -375,6 +401,10 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Opaque" then
         return expand_opaque(ctx, arg_ids, stable_id)
+    end
+
+    if name == "Require" then
+        return expand_require(ctx, arg_ids)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative

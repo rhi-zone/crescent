@@ -2616,6 +2616,13 @@ local function process_type_decls(ctx)
     -- gen_block, because typeof looks up value bindings that don't exist during prescan.
     local typeof_decls = {}
 
+    -- Pass 0: populate ctx.module_types from --:: module declarations before any type
+    -- alias bodies are resolved.  This ensures $Require<"mod"> annotations in type
+    -- aliases (e.g. --:: R = $Require<"mod">) can look up the module type immediately.
+    for _, r in ipairs(module_decls) do
+        ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
+    end
+
     -- Pass 1: register all type alias names (body=nil) so forward refs are visible.
     for _, r in ipairs(decls) do
         if not r.decl_var then
@@ -2740,12 +2747,6 @@ local function process_type_decls(ctx)
             end
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
         end
-    end
-
-    -- Process module declarations: --:: module "name": T
-    -- Stores the resolved type in ctx.module_types so require("name") returns T.
-    for _, r in ipairs(module_decls) do
-        ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
     end
 
     return typeof_decls
