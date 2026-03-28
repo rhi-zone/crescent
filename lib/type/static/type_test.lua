@@ -6879,3 +6879,36 @@ end
 ]], "unknown")
     end)
 end)
+
+assert.describe("checker: nested multi-return narrowing isolation", function()
+    assert.it("two find calls: guarding sp2==nil does not re-nil sp1", function()
+        no_errors([[
+local find = string.find
+local sub  = string.sub
+local function test(s)
+    local sp1 = find(s, " ", 1, true)
+    if not sp1 then return nil end
+    local sp2 = find(s, " ", sp1 + 1, true)
+    if sp2 then
+        local r1 = sub(s, sp1 + 1, sp2 - 1)
+    else
+        local r2 = sub(s, sp1 + 1)
+    end
+end
+]])
+    end)
+
+    assert.it("two find calls: sp1 still arithmetic-valid in else branch after sp2 guard", function()
+        no_errors([[
+local find = string.find
+local function test(s)
+    local sp1 = find(s, " ", 1, true)
+    if not sp1 then return end
+    local sp2 = find(s, " ", sp1 + 1, true)
+    if not sp2 then
+        local x = sp1 + 1
+    end
+end
+]])
+    end)
+end)

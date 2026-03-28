@@ -490,7 +490,8 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
     -- This overrides apply_narrowing's result for the primary binding when it cannot
     -- narrow an unbound TAG_VAR (e.g. string.find: slot_var subtract nil = unchanged).
     for other_id, other_entry in pairs(ctx._multi_ret) do
-        if other_entry.source_tid == entry.source_tid then
+        if (entry.call_uid and other_entry.call_uid == entry.call_uid) or
+           (not entry.call_uid and other_entry.source_tid == entry.source_tid) then
             if env_mod.lookup(ctx.scope, other_id) then
                 local parts = {}
                 for _, arm in ipairs(surviving) do

@@ -1793,7 +1793,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                     slot_var, n.line, n.col })
                 bind_tid = slot_var
                 if not ctx._multi_ret then ctx._multi_ret = {} end
-                ctx._multi_ret[name_id] = { source_tid = call_ret_tid, slot = call_slot }
+                ctx._multi_ret[name_id] = { source_tid = call_ret_tid, slot = call_slot, call_uid = nid }
             elseif rhs_tid then
                 local rt = ctx.types:get(types_mod.find(ctx, rhs_tid))
                 if rt.tag == TAG_LITERAL and rt.data[0] == LIT_BOOLEAN then
@@ -1900,7 +1900,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                 -- Track correlated multi-return for narrowing propagation (e.g. x, y = f())
                 if call_slot >= 0 and assign_call_ret_tid then
                     if not ctx._multi_ret then ctx._multi_ret = {} end
-                    ctx._multi_ret[name_id] = { source_tid = assign_call_ret_tid, slot = call_slot }
+                    ctx._multi_ret[name_id] = { source_tid = assign_call_ret_tid, slot = call_slot, call_uid = nid }
                 end
             else
                 local s = ctx.scope
