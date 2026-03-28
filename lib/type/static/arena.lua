@@ -6,6 +6,9 @@ local ffi = require("ffi")
 
 local M = {}
 
+--:: ArenaBase = { cap: integer, len: integer, items: unknown, grow: (ArenaBase) -> () }
+--:: PoolBase = { cap: integer, len: integer, items: unknown, grow: (PoolBase) -> () }
+
 -- Generic arena factory for a given FFI ctype.
 -- Returns an arena with alloc/reset/grow/get and raw .items access.
 local function new_arena(ct, initial_cap)
@@ -19,9 +22,11 @@ local function new_arena(ct, initial_cap)
         len = 0,
     }
 
+    --: (ArenaBase) -> integer
     function arena:alloc()
         local i = self.len
-        if i >= self.cap then self:grow() end
+        local cap = self.cap
+        if i >= cap then self:grow() end
         self.len = i + 1
         return i
     end
@@ -34,10 +39,13 @@ local function new_arena(ct, initial_cap)
         self.len = 0
     end
 
+    --: (ArenaBase) -> ()
     function arena:grow()
-        local new_cap = self.cap * 2
+        local old_cap = self.cap
+        local new_cap = old_cap * 2
         local new_items = ct_arr(new_cap)
-        ffi.copy(new_items, self.items, self.len * elem_size)
+        local old_len = self.len
+        ffi.copy(new_items, self.items, old_len * elem_size)
         self.items = new_items
         self.cap = new_cap
     end
@@ -68,21 +76,26 @@ function M.new_list_pool(initial_cap)
         len = 0,
     }
 
+    --: (PoolBase) -> integer
     function pool:mark()
         return self.len
     end
 
+    --: (PoolBase) -> ()
     function pool:push(value)
         local i = self.len
-        if i >= self.cap then self:grow() end
+        local cap = self.cap
+        if i >= cap then self:grow() end
         self.items[i] = value
         self.len = i + 1
     end
 
+    --: (PoolBase) -> (integer, integer)
     function pool:since(start)
         return start, self.len - start
     end
 
+    --: (PoolBase) -> unknown
     function pool:get(i)
         return self.items[i]
     end
@@ -91,10 +104,13 @@ function M.new_list_pool(initial_cap)
         self.len = 0
     end
 
+    --: (PoolBase) -> ()
     function pool:grow()
-        local new_cap = self.cap * 2
+        local old_cap = self.cap
+        local new_cap = old_cap * 2
         local new_items = int32_arr(new_cap)
-        ffi.copy(new_items, self.items, self.len * 4)
+        local old_len = self.len
+        ffi.copy(new_items, self.items, old_len * 4)
         self.items = new_items
         self.cap = new_cap
     end

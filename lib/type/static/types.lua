@@ -132,6 +132,7 @@ M.T_NEVER   = 5
 M.T_INTEGER = 6
 M.T_UNKNOWN = 7
 
+--: (TypeSlotArena, integer) -> integer
 local function alloc_zero(types, tag)
     local i = types:alloc()
     local t = types:get(i)
@@ -203,7 +204,7 @@ end
 -- Union-find with path compression.
 -- For TAG_VAR / TAG_ROWVAR: follow data[2] chain until root.
 -- For all other tags: return tid directly.
---: (Ctx, number) -> integer
+--: (Ctx, integer) -> integer
 function M.find(ctx, tid)
     local types = ctx.types
     -- Find root
@@ -342,6 +343,7 @@ end
 -- Make a FieldEntry and return its arena ID.
 -- flags: bitmask of FLAG_OPTIONAL, FLAG_READONLY, FLAG_PRIVATE.
 -- For backward compat, if flags is a boolean it is treated as FLAG_OPTIONAL.
+--: (Ctx, integer, integer, unknown) -> integer
 function M.make_field(ctx, name_id, type_id, flags)
     local fid = ctx.fields:alloc()
     local fe = ctx.fields:get(fid)
@@ -481,6 +483,7 @@ end
 
 --: (Ctx, { [integer]: integer, ... }) -> integer
 function M.make_union(ctx, member_ids)
+    --: { [integer]: integer, ... }
     local flat = {}
     for i = 1, #member_ids do
         local rtid = M.find(ctx, member_ids[i])
@@ -563,6 +566,7 @@ end
 
 -- Filter a union-of-tuples to arms where slot[slot_index] satisfies predicate_fn.
 -- Returns array of surviving arm type_ids, or nil if source is not TAG_UNION.
+--: (Ctx, integer, integer, (integer) -> boolean) -> ({ [integer]: integer, ... }?)
 function M.filter_tuple_union_arms(ctx, union_tid, slot_index, predicate_fn)
     local u = ctx.types:get(M.find(ctx, union_tid))
     if u.tag ~= TAG_UNION then return nil end
@@ -730,6 +734,7 @@ end
 
 -- Look up a named field in a table type. Returns (FieldEntry*, field_arena_id) or nil.
 -- Skips opaque-key fields (FLAG_OPAQUE_KEY): those are matched by opaque key lookup, not by name.
+--: (Ctx, integer, integer) -> (FieldEntry?, integer?)
 function M.table_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)  -- caller must have called find()
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
@@ -745,6 +750,7 @@ end
 -- Look up an opaque-key field (FLAG_OPAQUE_KEY) by the variable name that serves as the key.
 -- key_name_id: intern ID of the variable name used as the key (e.g. intern("Mappable")).
 -- Returns (FieldEntry*, field_arena_id) or nil.
+--: (Ctx, integer, integer) -> (FieldEntry?, integer?)
 function M.table_opaque_field(ctx, tbl_tid, key_name_id)
     local t = ctx.types:get(tbl_tid)
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
@@ -758,6 +764,7 @@ function M.table_opaque_field(ctx, tbl_tid, key_name_id)
 end
 
 -- Look up a named field in the meta slots of a table type.
+--: (Ctx, integer, integer) -> (FieldEntry?, integer?)
 function M.table_meta_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)
     for i = t.data[5], t.data[5] + t.data[6] - 1 do
@@ -769,6 +776,7 @@ function M.table_meta_field(ctx, tbl_tid, name_id)
 end
 
 -- Subtract a type from a union (remove members matching exclude).
+--: (Ctx, integer, integer) -> integer
 function M.subtract(ctx, tid, exclude_tid)
     tid = M.find(ctx, tid)
     exclude_tid = M.find(ctx, exclude_tid)
@@ -777,6 +785,7 @@ function M.subtract(ctx, tid, exclude_tid)
         if M.types_equal(ctx, tid, exclude_tid) then return ctx.T_NEVER end
         return tid
     end
+    --: { [integer]: integer, ... }
     local remaining = {}
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
         local mid = M.find(ctx, ctx.lists:get(i))
@@ -792,6 +801,7 @@ end
 --- Filter a union to members that also appear in ref_tid (set intersection for unions).
 --- For non-union tid: return tid if it equals ref_tid, else T_NEVER.
 --- Used when accumulating guard_narrowings with no arm_info (compound conditions).
+--: (Ctx, integer, integer) -> integer
 function M.filter_union(ctx, tid, ref_tid)
     tid     = M.find(ctx, tid)
     ref_tid = M.find(ctx, ref_tid)
@@ -802,6 +812,7 @@ function M.filter_union(ctx, tid, ref_tid)
         if M.types_equal(ctx, after, ref_tid) then return ctx.T_NEVER end
         return tid
     end
+    --: { [integer]: integer, ... }
     local kept = {}
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
         local mid = M.find(ctx, ctx.lists:get(i))
@@ -818,6 +829,7 @@ end
 
 -- Narrow a union by field discriminant. positive=true: keep members where field COULD be lit_intern_id.
 -- lit_kind defaults to LIT_STRING for backwards compat.
+--: (Ctx, integer, integer, integer, boolean, integer?) -> integer
 function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit_kind)
     lit_kind = lit_kind or LIT_STRING
     tid = M.find(ctx, tid)
@@ -827,7 +839,7 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
         if t.tag == TAG_TABLE then
             local fe = M.table_field(ctx, tid, field_name_id)
             if fe then
-                local frt = M.find(ctx, fe.type_id)
+                local frt = M.find(ctx, fe.type_id or 0)
                 local ft = ctx.types:get(frt)
                 if ft.tag == TAG_LITERAL and ft.data[0] == lit_kind then
                     local definite = (ft.data[1] == lit_intern_id)
@@ -838,6 +850,7 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
         end
         return tid
     end
+    --: { [integer]: integer, ... }
     local result = {}
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
         local mid = M.find(ctx, ctx.lists:get(i))
@@ -847,7 +860,7 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
         if mt.tag == TAG_TABLE then
             local fe = M.table_field(ctx, mid, field_name_id)
             if fe then
-                local frt = M.find(ctx, fe.type_id)
+                local frt = M.find(ctx, fe.type_id or 0)
                 local ft = ctx.types:get(frt)
                 if ft.tag == TAG_LITERAL and ft.data[0] == lit_kind then
                     definite_match = (ft.data[1] == lit_intern_id)
@@ -869,9 +882,10 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
 end
 
 -- Display a type as a human-readable string (cold path).
+--: (Ctx, unknown, unknown) -> string
 function M.display(ctx, tid, seen)
     if type(tid) ~= "number" then return "?" end
-    tid = M.find(ctx, tid)
+    tid = M.find(ctx, math.floor(tid))
     local t = ctx.types:get(tid)
     local tag = t.tag
 
@@ -1085,6 +1099,7 @@ end
 -- Table mutation helpers (used by constrain, cdef)
 -- ---------------------------------------------------------------------------
 
+--: (Ctx, integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
 function M.snapshot_table(ctx, obj_tid)
     local ot = ctx.types:get(obj_tid)
     local fs, fl = ot.data[0], ot.data[1]

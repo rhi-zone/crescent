@@ -40,6 +40,9 @@ local E_OFFSET = 3
 local E_LEN    = 4
 local E_ID     = 5
 
+--:: StringPool = { ht_cap: integer, ht_mask: integer, ht_count: integer, next_id: integer, buf_count: integer, entries: { [integer]: unknown, ... }, bufs: { [integer]: unknown, ... }, rev: { [integer]: unknown, ... }, map: { [string]: integer, ... }, _anchors: { [integer]: string, ... } }
+
+--: (StringPool) -> ()
 local function ht_grow(pool)
     local old = pool.entries
     local old_cap = pool.ht_cap
@@ -120,6 +123,7 @@ end
 -- ptr: const uint8_t* to the bytes
 -- len: byte count
 -- buf_id, offset: where this string lives (for storage in the entry)
+--: (StringPool, unknown, integer, integer, integer) -> integer
 function M.intern_raw(pool, ptr, len, buf_id, offset)
     local h = fnv1a(ptr, len)
     local mask = pool.ht_mask
@@ -148,6 +152,7 @@ function M.intern_raw(pool, ptr, len, buf_id, offset)
 end
 
 -- Intern from Lua string (cold path — for escape strings, tests, etc).
+--: (StringPool, string) -> integer
 function M.intern(pool, s)
     -- Fast path: check Lua map (covers keywords + previously interned strings)
     local map_id = pool.map[s]

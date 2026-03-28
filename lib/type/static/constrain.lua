@@ -75,6 +75,7 @@ local band            = require("bit").band
 local bor             = require("bit").bor
 
 -- Compute field flags, auto-setting FLAG_PRIVATE for `_`-prefixed names.
+--: (Ctx, integer, integer?) -> integer
 local function field_flags(ctx, name_id, base_flags)
     base_flags = base_flags or 0
     if type(base_flags) == "boolean" then
@@ -167,6 +168,7 @@ local function emit(ctx, constraint)
     ctx.constraints[#ctx.constraints + 1] = constraint
 end
 
+--: (Ctx) -> integer
 local function fresh_var(ctx)
     return types_mod.make_var(ctx, ctx.scope.level)
 end
@@ -709,7 +711,9 @@ end
 -- (intersection in the annotation arena) when there are multiple, the single entry
 -- as-is when there is exactly one, or nil when there are none.
 -- "Preceding-line" means lines strictly before the declaration line (not inline).
+--: (Ctx, integer) -> { kind: integer, type_id: integer, ... }?
 local function collect_preceding_run(ctx, decl_line)
+    if not ctx.ann then return nil end
     local results = ctx.ann.results
     local consumed = ctx._ann_consumed
     -- Scan backward from decl_line - 1 collecting consecutive ANN_TYPE entries.
@@ -738,6 +742,7 @@ local function collect_preceding_run(ctx, decl_line)
     return { kind = ANN_TYPE, type_id = inter_id }
 end
 
+--: (Ctx, integer) -> { kind: integer, type_id: integer, ... }?
 local function get_ann(ctx, line)
     if not ctx.ann then return nil end
     local consumed = ctx._ann_consumed
@@ -748,6 +753,7 @@ local function get_ann(ctx, line)
     return collect_preceding_run(ctx, line)
 end
 
+--: (Ctx, integer) -> ()
 local function consume_ann(ctx, line)
     if not ctx.ann then return end
     local r = ctx.ann.results[line]
@@ -806,6 +812,7 @@ gen_expr = function(ctx, nid)
     return tid
 end
 
+--: (Ctx, integer) -> { [integer]: integer, ... }
 local function gen_expr_multi(ctx, nid)
     local n = ctx.nodes:get(nid)
     if n.kind == NODE_CALL_EXPR or n.kind == NODE_METHOD_CALL then
@@ -814,13 +821,15 @@ local function gen_expr_multi(ctx, nid)
             local primary = rule(ctx, nid)
             local mr = ctx._last_multi_return
             ctx._last_multi_return = nil
-            if mr then return mr end
-            return { primary }
+            --: { [integer]: integer, ... }
+            local fallback = { primary }
+            return mr or fallback
         end
     end
     return { gen_expr(ctx, nid) }
 end
 
+--: (Ctx, integer, integer) -> { [integer]: integer, ... }
 local function gen_expr_list(ctx, es, el)
     if el == 0 then return {} end
     local result = {}
@@ -833,6 +842,7 @@ local function gen_expr_list(ctx, es, el)
     return result
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_LITERAL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local kind = n.data[0]
@@ -849,6 +859,7 @@ ExprRule[NODE_LITERAL] = function(ctx, nid)
     return ctx.T_ANY
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local name_id = n.data[0]
@@ -859,6 +870,7 @@ ExprRule[NODE_IDENTIFIER] = function(ctx, nid)
     return ctx.T_ANY
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_VARARG_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local vararg_id = intern_mod.intern(ctx.pool, "...")
@@ -868,6 +880,7 @@ ExprRule[NODE_VARARG_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local op = n.data[0]
@@ -886,6 +899,7 @@ ExprRule[NODE_UNARY_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local op = n.data[0]
@@ -942,6 +956,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local obj_nid = n.data[0]
@@ -985,6 +1000,7 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     return res
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local key_nid = n.data[1]
@@ -1044,6 +1060,7 @@ ExprRule[NODE_INDEX_EXPR] = function(ctx, nid)
     return ctx.T_ANY
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local field_ids = {}
@@ -1216,6 +1233,7 @@ end
 -- isolation, collecting errors. If any overload produces errors, re-emits them
 -- tagged with "overload N: <type> — <message>".
 -- Returns the intersection_tid so the caller can bind the variable to it.
+--: (Ctx, integer, integer, integer, integer, boolean, integer, integer?, integer?) -> integer
 local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
                                                 intersection_tid, node_line, node_col)
     local solve_mod = require("lib.type.static.solve")
@@ -1275,6 +1293,7 @@ local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
     return intersection_tid
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
@@ -1305,6 +1324,7 @@ end
 -- variables. Returns the concrete ret-slot type id, or nil if not resolvable.
 -- Used to detect union-of-tuples return types (e.g. string.find, io.open) so
 -- that LOCAL_STMT can correlate bindings at narrowing time.
+--: (Ctx, ASTNode) -> integer?
 local function peek_callee_ret_union(ctx, callee_n)
     local fn_tid = nil
     if callee_n.kind == NODE_IDENTIFIER then
@@ -1334,6 +1354,7 @@ local function peek_callee_ret_union(ctx, callee_n)
     return ret_slot
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local callee_nid = n.data[0]
@@ -1373,7 +1394,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 local arg0_n   = ctx.nodes:get(arg0_nid)
                 if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
                     local c_str = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
-                    if ctx.ffi_hooks.process then
+                    if ctx.ffi_hooks then
                         ctx.ffi_hooks.process(ctx, c_str)
                     end
                 end
@@ -1442,6 +1463,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     return ret
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local recv_tid = gen_expr(ctx, n.data[0])
@@ -1476,6 +1498,7 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     return ret
 end
 
+--: (Ctx, integer) -> integer
 ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local inner_tid = gen_expr(ctx, n.data[0])
@@ -1494,6 +1517,7 @@ end
 -- Returns true if stmt nid is an expression-statement that calls a never-returning
 -- function (i.e. a function whose return type is T_NEVER, such as error()).
 -- Uses the current ctx.scope to look up the callee's type.
+--: (Ctx, integer) -> boolean
 local function is_never_call_stmt(ctx, nid)
     local sn = ctx.nodes:get(nid)
     if sn.kind ~= NODE_EXPR_STMT then return false end
@@ -1522,6 +1546,7 @@ end
 --   3. Its last statement is an if-statement where there is an else branch and
 --      ALL branches are definitely returning (recursive).
 -- This is conservative: only return/never-call/if-all-branches are tracked.
+--: (Ctx, integer, integer) -> boolean
 local function is_definitely_returning(ctx, bs, bl)
     if bl == 0 then return false end
     for i = bs, bs + bl - 1 do
@@ -1567,6 +1592,7 @@ end
 -- rewrite each field's type_id to a TAG_ENUM_MEMBER so `Status.OK` displays as `Status.OK`.
 -- enum_name_id is the intern ID of the variable name (e.g. "Status").
 -- No-op when fields are mixed kinds, empty, or contain non-literals.
+--: (Ctx, integer, integer) -> ()
 local function try_promote_enum(ctx, tbl_tid, enum_name_id)
     local ot = ctx.types:get(types_mod.find(ctx, tbl_tid))
     if ot.tag ~= TAG_TABLE then return end
@@ -1596,6 +1622,7 @@ end
 
 -- Inject type aliases from a required module into the current scope.
 -- aliases: { [name_string] = { body, params, nominal, resolved_bounds } } | nil
+--: (Ctx, { [string]: TypeAlias, ... }?) -> ()
 local function inject_imported_aliases(ctx, aliases)
     if not aliases then return end
     for name, alias in pairs(aliases) do
@@ -1631,11 +1658,13 @@ gen_stmt = function(ctx, nid)
     if rule then rule(ctx, nid) end
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_EXPR_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     gen_expr(ctx, n.data[0])
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local ns, nl = n.data[0], n.data[1]
@@ -1661,9 +1690,10 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     -- call_ret_tid: the multi-return source (pcall intrinsic union, or last RHS ret var).
     local call_ret_tid = nil
     if last_rhs_is_call then
-        if ctx._last_multi_return_override then
-            call_ret_tid = ctx._last_multi_return_override
-            ctx._last_multi_return_override = nil
+        local override = ctx._last_multi_return_override
+        ctx._last_multi_return_override = nil
+        if override then
+            call_ret_tid = override
         else
             call_ret_tid = rhs_types[el]  -- the call's ret var
         end
@@ -1762,6 +1792,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     consume_ann(ctx, n.line)
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local rhs_count = n.data[3]
@@ -1944,6 +1975,7 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
     consume_ann(ctx, n.line)
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_DO_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local saved = ctx.scope
@@ -1952,6 +1984,7 @@ StmtRule[NODE_DO_STMT] = function(ctx, nid)
     ctx.scope = saved
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_WHILE_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     gen_expr(ctx, n.data[0])
@@ -1963,6 +1996,7 @@ StmtRule[NODE_WHILE_STMT] = function(ctx, nid)
     ctx.scope = saved
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_REPEAT_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local saved = ctx.scope
@@ -2157,6 +2191,7 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
     end
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_FOR_NUM] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     gen_expr(ctx, n.data[1])
@@ -2169,6 +2204,7 @@ StmtRule[NODE_FOR_NUM] = function(ctx, nid)
     ctx.scope = saved
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_FOR_IN] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
 
@@ -2243,6 +2279,7 @@ StmtRule[NODE_FOR_IN] = function(ctx, nid)
     ctx.scope = saved
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local ret_tids = gen_expr_list(ctx, n.data[0], n.data[1])
@@ -2253,8 +2290,10 @@ StmtRule[NODE_RETURN_STMT] = function(ctx, nid)
     end
 end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_BREAK_STMT] = function(_ctx, _nid) end
 
+--: (Ctx, integer) -> ()
 StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local name_n = ctx.nodes:get(n.data[0])
@@ -2415,16 +2454,19 @@ end
 -- Type declaration processing
 -- ---------------------------------------------------------------------------
 
+--: (Ctx) -> ()
 local function process_type_decls(ctx)
     if not ctx.ann then return nil end
-    if ctx.ann.warnings then
-        for _, w in ipairs(ctx.ann.warnings) do
+    -- After this guard, ctx.ann is narrowed to AnnResult (field_presence narrowing on ctx).
+    local ann = ctx.ann
+    if ann.warnings then
+        for _, w in ipairs(ann.warnings) do
             errors_mod.warning(ctx.err, ctx.filename, w.line or 0, w.col or 0, w.msg)
         end
     end
     local decls = {}
     local decl_lines = {}
-    for line, result in pairs(ctx.ann.results) do
+    for line, result in pairs(ann.results) do
         if result.kind == ANN_DECL then
             decls[#decls + 1] = result
             decl_lines[result] = line
@@ -2444,7 +2486,7 @@ local function process_type_decls(ctx)
             if r.type_params_len and r.type_params_len > 0 then
                 params = {}
                 for i = r.type_params_start, r.type_params_start + r.type_params_len - 1 do
-                    params[#params + 1] = ctx.ann.lists:get(i)
+                    params[#params + 1] = ann.lists:get(i)
                 end
             end
             -- Extract raw (annotation-arena) bound type IDs, if any.
@@ -2453,7 +2495,7 @@ local function process_type_decls(ctx)
             if r.type_bounds_len and r.type_bounds_len > 0 then
                 raw_bounds = {}
                 for i = r.type_bounds_start, r.type_bounds_start + r.type_bounds_len - 1 do
-                    raw_bounds[#raw_bounds + 1] = ctx.ann.lists:get(i)
+                    raw_bounds[#raw_bounds + 1] = ann.lists:get(i)
                 end
             end
             env_mod.bind_type(ctx.scope, r.name_id, {
@@ -2472,7 +2514,7 @@ local function process_type_decls(ctx)
     for _, r in ipairs(decls) do
         if not r.decl_var then
             -- Detect bare typeof body — defer until value bindings are in scope.
-            local at = ctx.ann.types:get(r.type_id)
+            local at = ann.types:get(r.type_id)
             if at.tag == TAG_TYPEOF then
                 typeof_decls[#typeof_decls + 1] = { r = r, line = decl_lines[r] }
             else
@@ -2481,7 +2523,7 @@ local function process_type_decls(ctx)
                 if at.tag == defs.TAG_FUNCTION then
                     fn_at = at
                 elseif at.tag == defs.TAG_FORALL then
-                    local body = ctx.ann.types:get(at.data[2])
+                    local body = ann.types:get(at.data[2])
                     if body.tag == defs.TAG_FUNCTION then fn_at = body end
                 end
                 if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
@@ -2496,18 +2538,22 @@ local function process_type_decls(ctx)
                     -- instead of erroring on unresolved parameter names.
                     local old_scope = ctx.scope
                     if alias.params and #alias.params > 0 then
-                        local temp = env_mod.new(ctx.scope.level + 1)
-                        temp.parent = ctx.scope
+                        --: Scope
+                        local scope = ctx.scope
+                        local temp = env_mod.new(scope.level + 1)
+                        temp.parent = scope
                         for _, param_name_id in ipairs(alias.params) do
                             local ph = types_mod.alloc_type(ctx, defs.TAG_NAMED)
-                            ctx.types:get(ph).data[0] = param_name_id
+                            --: TypeSlotArena
+                            local types = ctx.types
+                            types:get(ph).data[0] = param_name_id
                             env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
                         end
                         ctx.scope = temp
                     end
 
                     if r.newtype then
-                        local ann_nom = ctx.ann.types:get(r.type_id)
+                        local ann_nom = ann.types:get(r.type_id)
                         local underlying = resolve_annotation_type(ctx, ann_nom.data[2])
                         -- Stable nominal identity: hash of (filename, type name).
                         -- A newtype name is unique within a file; the filename prefix
@@ -2544,12 +2590,12 @@ local function process_type_decls(ctx)
     for _, r in ipairs(decls) do
         if r.decl_var then
             -- Warn on function type declarations with unnamed parameters.
-            local at = ctx.ann.types:get(r.type_id)
+            local at = ann.types:get(r.type_id)
             local fn_at
             if at.tag == defs.TAG_FUNCTION then
                 fn_at = at
             elseif at.tag == defs.TAG_FORALL then
-                local body = ctx.ann.types:get(at.data[2])
+                local body = ann.types:get(at.data[2])
                 if body.tag == defs.TAG_FUNCTION then fn_at = body end
             end
             if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
@@ -2650,7 +2696,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
 
     if cri_loader then ctx.cri_loader = cri_loader end
 
-    if ctx.ffi_hooks and ctx.ffi_hooks.init then
+    if ctx.ffi_hooks then
         ctx.ffi_hooks.init(ctx)
     end
 

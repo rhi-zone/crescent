@@ -58,15 +58,18 @@ local M = {}
 -- Helpers
 -- ---------------------------------------------------------------------------
 
+--: (Ctx, integer?, integer?, string) -> ()
 local function add_error(ctx, line, col, msg)
     errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
+--: (Ctx, integer?, integer?, string) -> ()
 local function add_warning(ctx, line, col, msg)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
 -- Widen literal to base type for Sub constraints.
+--: (Ctx, integer) -> integer
 local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
 end
@@ -74,6 +77,7 @@ end
 -- Deeply widen a type: widens top-level literals AND literal-typed table fields.
 -- Used when comparing inferred (non-annotated) types in bound checks, so that
 -- a table inferred as {x: 1} is treated as {x: number} for structural comparison.
+--: (Ctx, integer, { [integer]: boolean?, ... }?) -> integer
 local function widen_deep(ctx, tid, seen)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -111,6 +115,7 @@ end
 
 -- Check if a type contains any unbound free TAG_VAR (depth-first, with cycle guard).
 -- Used to decide whether the fast path in solve_callable can safely skip unify().
+--: (Ctx, integer, { [integer]: boolean, ... }?) -> boolean
 local function contains_free_var(ctx, tid, seen)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -148,6 +153,7 @@ end
 
 -- Bind a free type var to a target type directly (bypasses unify's bilateral-any short-circuit).
 -- Use this when we want to resolve a result VAR to a concrete type (T_ANY, T_UNKNOWN, etc.).
+--: (Ctx, integer, integer) -> ()
 local function bind_to(ctx, tid, target)
     local root = find(ctx, tid)
     local t = ctx.types:get(root)
@@ -164,6 +170,7 @@ local ARITH_OPS_SET = {
 }
 
 -- Check metamethod on a TABLE type (not primitives — prim_meta lookup not needed here).
+--: (Ctx, integer, string) -> integer?
 local function table_meta_op_ret(ctx, tbl_tid, mm_name)
     local mm_id = intern_mod.intern(ctx.pool, mm_name)
     local fe = types_mod.table_meta_field(ctx, tbl_tid, mm_id)
@@ -180,6 +187,7 @@ end
 -- Checks table metamethods first, then prim_meta for primitive types.
 -- TAG_UNION: all arms must support the op; result is union of arm results.
 -- Returns result TID, ctx.T_ANY (any/unknown operand), or nil (not supported).
+--: (Ctx, string, integer) -> integer?
 local function meta_op_ret_impl(ctx, op_name, tid)
     tid = find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -228,6 +236,7 @@ end
 -- Constraint handlers
 -- ---------------------------------------------------------------------------
 
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_unify(ctx, c)
     local t1 = find(ctx, c[2])
     local t2 = find(ctx, c[3])
@@ -241,6 +250,7 @@ local function solve_unify(ctx, c)
     return ok
 end
 
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_sub(ctx, c)
     local actual   = find(ctx, c[2])
     local expected = find(ctx, c[3])
@@ -329,6 +339,7 @@ end
 -- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
 -- Defers while left_tid is still a free TAG_VAR (not yet resolved).
 -- Once concrete: result = subtract(left, nil) | right.
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_or(ctx, c)
     local left_tid   = c[2]
     local right_tid  = c[3]
@@ -354,6 +365,7 @@ end
 --     If the result is TAG_NEVER, the constraint is violated.
 --   - For other bounds: check try_unify(widen(actual), bound).
 -- Skips enforcement when the bound is TAG_NAMED (unapplied kind constraint).
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_bound(ctx, c)
     local tv_id    = c[2]
     local bound_id = c[3]
@@ -454,6 +466,7 @@ end
 
 -- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for named field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot.
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_index(ctx, c)
     local obj_tid_raw = find(ctx, c[2])
     local key_tid  = find(ctx, c[3])
@@ -771,6 +784,7 @@ local function solve_index(ctx, c)
     return true
 end
 
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_callable(ctx, c)
     local callee_raw = c[2]   -- raw stored id (may be TAG_VAR for method calls)
     local callee_tid = find(ctx, callee_raw)
@@ -1023,6 +1037,7 @@ local function solve_callable(ctx, c)
     return false
 end
 
+--: (Ctx, { [integer]: any, ... }) -> boolean?
 local function solve_arith(ctx, c)
     local op_name  = c[2]
     local lhs_tid  = find(ctx, c[3])
@@ -1073,6 +1088,7 @@ local function solve_arith(ctx, c)
     return true
 end
 
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_compare(ctx, c)
     local lhs_tid = find(ctx, c[2])
     local rhs_tid = find(ctx, c[3])
@@ -1115,6 +1131,7 @@ local function solve_compare(ctx, c)
     return true
 end
 
+--: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_return(ctx, c)
     local val_tid   = find(ctx, c[2])
     local line, col = c[4], c[5]
@@ -1166,6 +1183,7 @@ end
 -- Solver
 -- ---------------------------------------------------------------------------
 
+--: (Ctx, { [integer]: { [integer]: any, ... }, ... }) -> ()
 function M.solve(ctx, constraints)
     -- Dispatch table by constraint kind
     local handlers = {
@@ -1183,7 +1201,8 @@ function M.solve(ctx, constraints)
     -- Iterate to fixpoint (max 3 passes for recursive types).
     -- Suppress error emission on all but the final pass to avoid duplicates.
     local real_err = ctx.err
-    local silent_err = { errors = {}, warnings = {} }
+    --: ErrCtx
+    local silent_err = { errors = {}, warnings = {}, source_lines = {} }
 
     for pass = 1, 3 do
         local changed = false

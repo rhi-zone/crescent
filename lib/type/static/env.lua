@@ -125,6 +125,7 @@ end
 -- Walk a type graph and mark free vars at level > `level` as generic.
 -- This is done in-place (mutates the TypeSlot flags).
 -- seen: set of type_ids to prevent cycles
+--: (Ctx, integer, integer, { [integer]: boolean, ... }) -> ()
 local function generalize_inner(ctx, tid, level, seen)
     tid = types_mod.find(ctx, tid)
     if seen[tid] then return end
@@ -191,6 +192,7 @@ local function generalize_inner(ctx, tid, level, seen)
 end
 
 -- Generalize: mark free vars above level as generic (for let-polymorphism).
+--: (Ctx, integer, integer) -> ()
 function M.generalize(ctx, tid, level)
     generalize_inner(ctx, tid, level, {})
 end
@@ -198,6 +200,7 @@ end
 -- Instantiate: deep-copy a type, replacing generic vars with fresh vars.
 -- mapping: { var_type_id -> fresh_var_type_id } (shared across recursion)
 -- seen: { type_id -> copied_type_id } (cycle detection for circular tables)
+--: (Ctx, integer, integer, { [integer]: integer, ... }, { [integer]: integer?, ... }) -> integer
 local function instantiate_inner(ctx, tid, level, mapping, seen)
     tid = types_mod.find(ctx, tid)
 
@@ -242,7 +245,7 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
     end
 
     if tag == TAG_TABLE then
-        if seen[tid] then return seen[tid] end
+        if seen[tid] then return seen[tid] or tid end
         -- Pre-register to handle cycles
         local result_id = types_mod.make_table(ctx, {}, {}, -1, {})
         seen[tid] = result_id
@@ -371,6 +374,7 @@ end
 -- Instantiate: replace generic vars with fresh vars at current level.
 -- Returns (result_tid, mapping) where mapping is { [orig_generic_tv_id] = fresh_tv_id }.
 -- If out_mapping is provided it is used (and populated) instead of a fresh table.
+--: (Ctx, integer, integer, { [integer]: integer, ... }?) -> (integer, { [integer]: integer, ... })
 function M.instantiate(ctx, tid, level, out_mapping)
     local mapping = out_mapping or {}
     local result = instantiate_inner(ctx, tid, level, mapping, {})
@@ -380,6 +384,7 @@ end
 -- Substitute: replace TAG_NAMED references matching mapping keys.
 -- mapping:    { [name_id] -> type_id }
 -- eval_seen:  cycle-detection set shared with match.evaluate (optional)
+--: (Ctx, integer, { [integer]: integer, ... }, { [integer]: boolean?, ... }, { [integer]: boolean, ... }?) -> integer
 local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     tid = types_mod.find(ctx, tid)
     if seen[tid] then return tid end
@@ -408,15 +413,15 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     if tag == TAG_FUNCTION then
         local params = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            params[#params + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            params[#params + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         local returns = {}
         for i = t.data[2], t.data[2] + t.data[3] - 1 do
-            returns[#returns + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            returns[#returns + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         local vararg_id = t.data[4]
         if vararg_id >= 0 then
-            vararg_id = substitute_inner(ctx, vararg_id, mapping, seen)
+            vararg_id = substitute_inner(ctx, vararg_id, mapping, seen, eval_seen)
         end
         local param_name_ids = nil
         if t.data[6] > 0 then
@@ -445,7 +450,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
             local fe = ctx.fields:get(fid)
             if fe.name_id == -1 then
                 -- Spread placeholder: substitute inner, then expand if now concrete.
-                local new_sp = substitute_inner(ctx, fe.type_id, mapping, seen)
+                local new_sp = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
                 local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp))
                 local exp_id = types_mod.find(ctx, sp_t.data[0])
                 local exp_t  = ctx.types:get(exp_id)
@@ -461,7 +466,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                     new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, -1, new_sp, 0)
                 end
             else
-                local new_type = substitute_inner(ctx, fe.type_id, mapping, seen)
+                local new_type = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
                 add_subst_field(types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0), fe.name_id)
             end
         end
@@ -469,15 +474,15 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         local is, il = t.data[2], t.data[3]
         local i = is
         while i < is + il - 1 do
-            new_indexers[#new_indexers + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
-            new_indexers[#new_indexers + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen)
+            new_indexers[#new_indexers + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
+            new_indexers[#new_indexers + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen, eval_seen)
             i = i + 2
         end
         local new_meta = {}
         for j = t.data[5], t.data[5] + t.data[6] - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
-            local new_type = substitute_inner(ctx, fe.type_id, mapping, seen)
+            local new_type = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
             new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
         end
         seen[tid] = nil
@@ -487,7 +492,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     if tag == TAG_UNION then
         local members = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            members[#members + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            members[#members + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
         return types_mod.make_union(ctx, members)
@@ -496,7 +501,7 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     if tag == TAG_INTERSECTION then
         local members = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            members[#members + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            members[#members + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
         return types_mod.make_intersection(ctx, members)
@@ -505,14 +510,14 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     if tag == TAG_TUPLE then
         local elems = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            elems[#elems + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            elems[#elems + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
         return types_mod.make_tuple(ctx, elems)
     end
 
     if tag == TAG_SPREAD then
-        local inner = substitute_inner(ctx, t.data[0], mapping, seen)
+        local inner = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
         seen[tid] = nil
         local id = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
         ctx.types:get(id).data[0] = inner
@@ -563,10 +568,10 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     -- Substitute through callee and args so that when F is replaced by a concrete
     -- type constructor (e.g. Maybe), the application can be evaluated later.
     if tag == defs.TAG_TYPE_CALL then
-        local callee_id = substitute_inner(ctx, t.data[0], mapping, seen)
+        local callee_id = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
         local new_args = {}
         for i = t.data[1], t.data[1] + t.data[2] - 1 do
-            new_args[#new_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen)
+            new_args[#new_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
         end
         seen[tid] = nil
         -- Arity check: if the callee is now a concrete non-generic type (not a
@@ -627,12 +632,14 @@ end
 -- Substitute named type refs in a type.
 -- mapping:    { [name_id] -> type_id }
 -- eval_seen:  optional cycle-detection set from an enclosing match.evaluate call
+--: (Ctx, integer, { [integer]: integer, ... }, { [integer]: boolean, ... }?) -> integer
 function M.substitute(ctx, tid, mapping, eval_seen)
     return substitute_inner(ctx, tid, mapping, {}, eval_seen)
 end
 
 -- Resolve a named type alias: look up in scope, apply type args.
 -- Returns (resolved_type_id, nil) or (nil, error_message).
+--: (Ctx, Scope, integer, { [integer]: integer, ... }?) -> (integer?, string?)
 function M.resolve_named_type(ctx, scope, name_id, arg_ids)
     local alias = M.lookup_type(scope, name_id)
     if not alias then
@@ -650,11 +657,11 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
     end
 
     -- Generic alias: check arity
-    if not arg_ids or #arg_ids ~= #alias.params then
+    local arg_ids_len = arg_ids and #arg_ids or 0
+    if not arg_ids or arg_ids_len ~= #alias.params then
         local name = require("lib.type.static.intern").get(ctx.pool, name_id) or "?"
         local expected = #alias.params
-        local got = arg_ids and #arg_ids or 0
-        return nil, "type '" .. name .. "' expects " .. expected .. " argument(s), got " .. got
+        return nil, "type '" .. name .. "' expects " .. expected .. " argument(s), got " .. arg_ids_len
     end
 
     -- Build substitution mapping

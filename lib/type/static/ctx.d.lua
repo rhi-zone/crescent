@@ -26,12 +26,12 @@
 -- Index parameter is always integer (arena slot index).
 ---------------------------------------------------------------------------
 
---:: ASTNodeArena   = { get: (ASTNodeArena,   integer) -> ASTNode,   len: integer, ... }
---:: TypeSlotArena  = { get: (TypeSlotArena,  integer) -> TypeSlot,  len: integer, ... }
---:: FieldEntryArena = { get: (FieldEntryArena, integer) -> FieldEntry, len: integer, ... }
+--:: ASTNodeArena    = { get: (ASTNodeArena,    integer) -> ASTNode,    alloc: (ASTNodeArena)    -> integer, len: integer, ... }
+--:: TypeSlotArena   = { get: (TypeSlotArena,   integer) -> TypeSlot,   alloc: (TypeSlotArena)   -> integer, len: integer, ... }
+--:: FieldEntryArena = { get: (FieldEntryArena, integer) -> FieldEntry, alloc: (FieldEntryArena) -> integer, len: integer, ... }
 
 -- List pool: flat int32_t array. :get(i) returns integer.
---:: ListPool = { get: (ListPool, integer) -> integer, len: integer, mark: (ListPool) -> integer, push: (ListPool, integer) -> (), flush: (ListPool, integer) -> (integer, integer), ... }
+--:: ListPool = { get: (ListPool, integer) -> integer, len: integer, mark: (ListPool) -> integer, push: (ListPool, integer) -> (), since: (ListPool, integer) -> (integer, integer), ... }
 
 -- Intern pool: string interning table with hash map.
 -- next_id is the only field accessed directly in checker code.
@@ -39,7 +39,7 @@
 
 -- Annotation arena result returned by ann.parse_annotations().
 -- Types/fields/lists use the same arena shapes as the main checker.
---:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: string, ... }, pool: InternPool }
+--:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: string, ... }, pool: InternPool, make_intersection: ({ [integer]: integer, ... }) -> integer }
 
 -- Error context from errors.lua.
 --:: ErrCtx = { errors: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, warnings: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
@@ -52,6 +52,9 @@
 
 -- Entry in ctx._multi_ret: tracks which source tuple a binding came from.
 --:: MultiRetEntry = { source_tid: integer, slot: integer }
+
+-- Detail table returned by M.unify on error (for nested error paths).
+--:: UnifyDetail = { kind: string, path: { [integer]: unknown, ... }?, got: integer, expected: integer, ... }
 
 ---------------------------------------------------------------------------
 -- Diagnostic error codes (defs.E)
@@ -99,6 +102,34 @@ DefsModule = {
   OP_NE: integer, OP_LT: integer, OP_LE: integer, OP_GT: integer,
   OP_GE: integer, OP_AND: integer, OP_OR: integer, OP_UNM: integer,
   OP_NOT: integer, OP_LEN: integer,
+  FLAG_OPAQUE_KEY: integer, LIT_OPAQUE_KEY: integer,
+  NODE_CAST_EXPR: integer,
+  fnv31: (string) -> integer,
+  i32x2_to_double: (integer, integer) -> number,
+  double_to_i32x2: (number) -> (integer, integer),
+  keywords: { [integer]: string, ... },
+  TK_AND: integer, TK_BREAK: integer, TK_DO: integer,
+  TK_ELSE: integer, TK_ELSEIF: integer, TK_END: integer,
+  TK_FALSE: integer, TK_FOR: integer, TK_FUNCTION: integer,
+  TK_GOTO: integer, TK_IF: integer, TK_IN: integer,
+  TK_LOCAL: integer, TK_NIL: integer, TK_NOT: integer,
+  TK_OR: integer, TK_REPEAT: integer, TK_RETURN: integer,
+  TK_THEN: integer, TK_TRUE: integer, TK_UNTIL: integer,
+  TK_WHILE: integer, TK_CONCAT: integer, TK_DOTS: integer,
+  TK_EQ: integer, TK_GE: integer, TK_LE: integer,
+  TK_NE: integer, TK_LABEL: integer, TK_PLUS: integer,
+  TK_MINUS: integer, TK_STAR: integer, TK_SLASH: integer,
+  TK_PERCENT: integer, TK_CARET: integer, TK_HASH: integer,
+  TK_AMPERSAND: integer, TK_TILDE: integer, TK_PIPE: integer,
+  TK_LSHIFT: integer, TK_RSHIFT: integer, TK_DSLASH: integer,
+  TK_LT: integer, TK_GT: integer, TK_ASSIGN: integer,
+  TK_LPAREN: integer, TK_RPAREN: integer, TK_LBRACE: integer,
+  TK_RBRACE: integer, TK_LBRACKET: integer, TK_RBRACKET: integer,
+  TK_DCOLON: integer, TK_SEMICOLON: integer, TK_COLON: integer,
+  TK_COMMA: integer, TK_DOT: integer, TK_NAME: integer,
+  TK_NUMBER: integer, TK_STRING: integer, TK_EOF: integer,
+  char_to_token: { [integer]: integer, ... },
+  token_name: { [integer]: string, ... },
   ...
 }
 ]]
@@ -139,13 +170,16 @@ Ctx = {
   module_types: { [string]: integer, ... },
   module_return_tids: { [integer]: { [integer]: integer, ... }, ... }?,
   cri_loader:   ((Ctx, string) -> integer)?,
-  ffi_hooks:    { process: ((Ctx, string) -> ())?, init: ((Ctx) -> ())?, ... }?,
+  ffi_hooks:    { process: (unknown, string) -> (), init: (unknown) -> (), ... }?,
   _last_multi_return:          { [integer]: integer, ... }?,
   _last_multi_return_override: integer?,
   _multi_ret:      { [integer]: MultiRetEntry, ... },
   _ann_warn_line:  integer,
   _ann_consumed:   { [integer]: boolean, ... }?,
-  constraints:     { [integer]: { [integer]: unknown, ... }, ... },
+  -- Constraint arrays are intentionally heterogeneous: values may be integer,
+  -- string (op_name in C_ARITH), or { [integer]: integer, ... } (arg_tids in C_CALLABLE).
+  -- Using any here because the type system cannot track per-index types in a table array.
+  constraints:     { [integer]: { [integer]: any, ... }, ... },
   var_counter:  integer,
   nominal_id:   integer,
   level:        integer,
@@ -158,6 +192,19 @@ Ctx = {
   T_INTEGER:    integer,
   T_UNKNOWN:    integer,
   filename:     string,
+  -- LSP / annotation data fields populated by constrain.lua
+  return_vars:     { [integer]: integer, ... },
+  type_at:         { [integer]: integer, ... },
+  name_at:         { [integer]: integer, ... },
+  field_at:        { [integer]: integer, ... },
+  def_sites:       { [integer]: { line: integer, col: integer, ... }, ... },
+  require_sources: { [integer]: string, ... },
+  type_origins:    { [integer]: string, ... },
+  _resolving_func_ann_scope: boolean?,
+  _in_match_arm:             boolean?,
+  _allow_unapplied_constructors: boolean?,
+  _forall_bounds:  { [integer]: integer, ... },
+  lit_cache:       { [integer]: integer, ... },
   ...
 }
 ]]

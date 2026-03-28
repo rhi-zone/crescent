@@ -46,6 +46,7 @@ local find = types_mod.find
 -- Occurs check: does the var at `var_tid` (after find) appear in type `tid`?
 -- var_tid must be the root of a TAG_VAR or TAG_ROWVAR.
 -- seen: set of already-visited type IDs to break cycles (recursive/self-referential types).
+--: (Ctx, integer, integer, { [integer]: boolean, ... }?) -> boolean
 local function occurs(ctx, var_tid, tid, seen)
     tid = find(ctx, tid)
     if tid == var_tid then return true end
@@ -94,13 +95,14 @@ local function occurs(ctx, var_tid, tid, seen)
     end
 
     if tag == TAG_SPREAD then
-        return occurs(ctx, var_tid, t.data[0], seen)
+        return occurs(ctx, var_tid, t.data[0], seen or {})
     end
 
     return false
 end
 
 -- Adjust levels: lower the level of free vars in `tid` to max_level.
+--: (Ctx, integer, integer, { [integer]: boolean, ... }?) -> ()
 local function adjust_levels(ctx, tid, max_level, seen)
     tid = find(ctx, tid)
     if seen and seen[tid] then return end
@@ -154,6 +156,7 @@ end
 
 -- Bind a type variable to a type.
 -- Returns true, or false + error message.
+--: (Ctx, integer, integer) -> (boolean, string?)
 local function bind_var(ctx, var_tid, target_tid)
     -- var_tid is already find()'d to root
     if occurs(ctx, var_tid, target_tid) then
@@ -200,12 +203,14 @@ local function is_primitive_tag(tag)
 end
 
 -- Helper: get intern_id for meta slot name
+--: (Ctx, string) -> integer
 local function meta_intern_id(ctx, name)
     return intern_mod.intern(ctx.pool, name)
 end
 
 -- unify(ctx, a, b): check if a is assignable to b, binding vars as needed.
 -- Returns true, or false + error_message [+ detail_table]
+--: (Ctx, integer, integer) -> (boolean, string?, UnifyDetail?)
 function M.unify(ctx, a, b)
     a = find(ctx, a)
     b = find(ctx, b)
@@ -252,10 +257,12 @@ function M.unify(ctx, a, b)
 
     -- Type variable binding (TAG_ROWVAR is treated the same as TAG_VAR for binding)
     if ta.tag == TAG_VAR or ta.tag == TAG_ROWVAR then
-        return bind_var(ctx, a, b)
+        local ok, msg = bind_var(ctx, a, b)
+        return ok, msg
     end
     if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then
-        return bind_var(ctx, b, a)
+        local ok, msg = bind_var(ctx, b, a)
+        return ok, msg
     end
 
     -- Nominal types: identity-based
@@ -336,8 +343,10 @@ function M.unify(ctx, a, b)
             local mid = find(ctx, ctx.lists:get(i))
             local ok, _, detail = M.unify(ctx, a, mid)
             if ok then return true end
-            if detail and detail.kind == "mismatch" then
-                local depth = detail.path and #detail.path or 0
+            --: UnifyDetail?
+            local det = detail
+            if det and det.kind == "mismatch" then
+                local depth = det.path and #det.path or 0
                 if depth > best_depth then
                     best_detail = detail
                     best_depth = depth
@@ -494,8 +503,9 @@ function M.unify(ctx, a, b)
                 local ok, err, detail = M.unify(ctx, aft, bft)
                 if not ok then
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                    local d = detail or { kind = "mismatch", path = {}, got = aft, expected = bft }
-                    if d.kind == "mismatch" then
+                    --: UnifyDetail?
+                    local d = detail
+                    if d and d.kind == "mismatch" then
                         local new_path = { fname }
                         if d.path then
                             for _, p in ipairs(d.path) do new_path[#new_path + 1] = p end
@@ -663,6 +673,7 @@ end
 
 -- Read-only unification: checks assignability without mutating type variables.
 -- Returns ok (boolean). Does not bind type variables.
+--: (Ctx, integer, integer) -> boolean
 function M.try_unify(ctx, a, b)
     a = find(ctx, a)
     b = find(ctx, b)
@@ -697,7 +708,8 @@ function M.try_unify(ctx, a, b)
 
     if ta.tag == TAG_ENUM_MEMBER then
         if tb.tag == TAG_ENUM_MEMBER then
-            return ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
+            if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1] then return true end
+            return false
         end
         local kind = ta.data[2]
         if kind == LIT_INTEGER then

@@ -110,6 +110,42 @@ end
 -- Lexer state
 ---------------------------------------------------------------------------
 
+--[[::
+LexState = {
+  src: any, srclen: integer, pos: integer, b: integer,
+  line: integer, col: integer, tk: integer, val: integer,
+  pool: unknown, _buf_id: integer, filename: string,
+  _la_tk: integer, _la_val: integer, _la_line: integer, _la_col: integer,
+  _la_valid: boolean, _pending_cast_id: integer?, _cast_id_seq: integer,
+  _buf: { [integer]: integer, ... }, _bufn: integer,
+  _tk_line: integer?, _tk_col: integer?,
+  _tk_line_out: integer?, _tk_col_out: integer?,
+  annotations: { [integer]: unknown, ... },
+  _nextbyte: (LexState) -> integer,
+  _peekbyte: (LexState) -> integer,
+  _incline: (LexState) -> (),
+  _buf_reset: (LexState) -> (),
+  _buf_save: (LexState, integer) -> (),
+  _buf_tostring: (LexState) -> string,
+  error: (LexState, string) -> never,
+  _tk_error: (LexState, string) -> never,
+  _skip_sep: (LexState) -> integer,
+  _read_long_string: (LexState, integer) -> string,
+  _skip_long_comment: (LexState, integer) -> (),
+  _read_escape: (LexState) -> (),
+  _read_string: (LexState, integer) -> integer,
+  _read_number: (LexState) -> number,
+  _capture_line_annotation: (LexState, integer, integer) -> boolean,
+  _capture_block_annotation: (LexState, integer, integer, integer) -> boolean,
+  _lex: (LexState) -> (integer, unknown),
+  next: (LexState) -> integer,
+  lookahead: (LexState) -> integer,
+  expect: (LexState, integer) -> integer,
+  opt: (LexState, integer) -> boolean,
+  ...
+}
+]]
+
 local Lexer = {}
 Lexer.__index = Lexer
 
@@ -118,6 +154,7 @@ function M.new(source, filename, pool)
     local src = ffi.cast(uint8_ptr, source)
     local len = #source
     local buf_id = intern_mod.register_buf(pool, src, source)
+    --: LexState
     local ls = setmetatable({
         src    = src,
         srclen = len,
@@ -173,6 +210,7 @@ end
 -- Byte-level helpers
 ---------------------------------------------------------------------------
 
+--: (LexState) -> integer
 function Lexer:_nextbyte()
     if self.pos >= self.srclen then
         self.b = EOF
@@ -185,11 +223,13 @@ function Lexer:_nextbyte()
     return b
 end
 
+--: (LexState) -> integer
 function Lexer:_peekbyte()
     if self.pos >= self.srclen then return EOF end
     return self.src[self.pos]
 end
 
+--: (LexState) -> ()
 function Lexer:_incline()
     local old = self.b
     self:_nextbyte()
@@ -204,16 +244,19 @@ end
 -- Save buffer (only for escape-sequence strings)
 ---------------------------------------------------------------------------
 
+--: (LexState) -> ()
 function Lexer:_buf_reset()
     self._bufn = 0
 end
 
+--: (LexState, integer) -> ()
 function Lexer:_buf_save(b)
     local n = self._bufn + 1
     self._buf[n] = b
     self._bufn = n
 end
 
+--: (LexState) -> string
 function Lexer:_buf_tostring()
     local t = {}
     for i = 1, self._bufn do
@@ -226,10 +269,12 @@ end
 -- Error handling
 ---------------------------------------------------------------------------
 
+--: (LexState, string) -> never
 function Lexer:error(msg)
     error(format("%s:%d:%d: %s", self.filename, self.line, self.col, msg), 0)
 end
 
+--: (LexState, string) -> never
 function Lexer:_tk_error(msg)
     error(format("%s:%d:%d: %s", self.filename, self._tk_line, self._tk_col, msg), 0)
 end
@@ -241,6 +286,7 @@ end
 -- Count separator level: self.b must be '[' or ']'.
 -- Returns count of '=' between matching brackets, or negative if no match.
 -- Advances past the bracket + equals + (matching bracket stays in self.b).
+--: (LexState) -> integer
 function Lexer:_skip_sep()
     local count = 0
     local s = self.b
@@ -253,11 +299,13 @@ function Lexer:_skip_sep()
     return self.b == s and count or (-count - 1)
 end
 
+--: (LexState, integer) -> string
 function Lexer:_read_long_string(sep)
     -- self.b is on the 2nd '['. Advance past it.
     self:_nextbyte()
     if is_newline(self.b) then self:_incline() end
     -- Record content start
+    --: integer
     local start = self.pos - 1
     if self.b == EOF then start = self.pos end
     -- Scan for closing bracket
@@ -269,6 +317,7 @@ function Lexer:_read_long_string(sep)
         if self.b == EOF then
             self:error("unfinished long string")
         elseif self.b == B_RBRK then
+            --: integer
             local content_end = self.pos - 1  -- position before ']'
             local count = 0
             self:_nextbyte()
@@ -279,8 +328,10 @@ function Lexer:_read_long_string(sep)
                     return ffi.string(self.src + start, content_end - start)
                 else
                     -- flush remaining plain segment
-                    if content_end > start then
-                        parts[#parts + 1] = ffi.string(self.src + start, content_end - start)
+                    --: integer
+                    local s0 = start
+                    if content_end > s0 then
+                        parts[#parts + 1] = ffi.string(self.src + s0, content_end - s0)
                     end
                     return table.concat(parts)
                 end
@@ -293,8 +344,10 @@ function Lexer:_read_long_string(sep)
                     -- Need to normalize, switch to parts mode
                     plain = false
                     parts = {}
-                    if self.pos - 1 > start then
-                        parts[#parts + 1] = ffi.string(self.src + start, self.pos - 1 - start)
+                    --: integer
+                    local s1 = start
+                    if self.pos - 1 > s1 then
+                        parts[#parts + 1] = ffi.string(self.src + s1, self.pos - 1 - s1)
                     end
                     parts[#parts + 1] = "\n"
                     self:_incline()
@@ -306,8 +359,10 @@ function Lexer:_read_long_string(sep)
                     if next_pos < self.srclen and self.src[next_pos] == B_CR then
                         plain = false
                         parts = {}
-                        if self.pos - 1 > start then
-                            parts[#parts + 1] = ffi.string(self.src + start, self.pos - 1 - start)
+                        --: integer
+                        local s2 = start
+                        if self.pos - 1 > s2 then
+                            parts[#parts + 1] = ffi.string(self.src + s2, self.pos - 1 - s2)
                         end
                         parts[#parts + 1] = "\n"
                         self:_incline()
@@ -319,8 +374,10 @@ function Lexer:_read_long_string(sep)
                 end
             else
                 -- Already in parts mode
-                if self.pos - 1 > start then
-                    parts[#parts + 1] = ffi.string(self.src + start, self.pos - 1 - start)
+                --: integer
+                local s3 = start
+                if self.pos - 1 > s3 then
+                    parts[#parts + 1] = ffi.string(self.src + s3, self.pos - 1 - s3)
                 end
                 parts[#parts + 1] = "\n"
                 self:_incline()
@@ -331,10 +388,12 @@ function Lexer:_read_long_string(sep)
             self:_nextbyte()
         end
     end
+    return ""  -- unreachable: loop only exits via return or error
 end
 
 -- Skip a long comment body. Caller already advanced past the opening [=*[
 -- and leading newline.
+--: (LexState, integer) -> ()
 function Lexer:_skip_long_comment(sep)
     while true do
         if self.b == EOF then
@@ -360,6 +419,7 @@ end
 -- String reading
 ---------------------------------------------------------------------------
 
+--: (LexState) -> ()
 function Lexer:_read_escape()
     local c = self:_nextbyte()  -- skip '\\'
     local esc = escapes[c]
@@ -367,8 +427,10 @@ function Lexer:_read_escape()
         self:_buf_save(esc)
         self:_nextbyte()
     elseif c == B_x then  -- \xNN
+        --: integer
         local h1 = hex_val(self:_nextbyte())
         if h1 < 0 then self:error("invalid escape sequence") end
+        --: integer
         local h2 = hex_val(self:_nextbyte())
         if h2 < 0 then self:error("invalid escape sequence") end
         self:_buf_save(h1 * 16 + h2)
@@ -407,6 +469,7 @@ function Lexer:_read_escape()
 end
 
 -- Returns intern ID directly.
+--: (LexState, integer) -> integer
 function Lexer:_read_string(delim)
     -- self.b is on the opening delimiter. Skip it.
     self:_nextbyte()
@@ -453,12 +516,14 @@ function Lexer:_read_string(delim)
             self:_nextbyte()
         end
     end
+    return 0  -- unreachable: loop only exits via return or error
 end
 
 ---------------------------------------------------------------------------
 -- Number reading
 ---------------------------------------------------------------------------
 
+--: (LexState) -> number
 function Lexer:_read_number()
     -- Scan the number token using pointer arithmetic.
     -- Numbers: digits, hex digits, '.', 'e'/'E'/'p'/'P' optionally followed by +/-.
@@ -491,15 +556,16 @@ function Lexer:_read_number()
     if self.b == EOF then
         str = ffi.string(self.src + start, self.srclen - start)
     end
-    local x = tonumber(str)
-    if not x then self:error("malformed number") end
-    return x
+    local xraw = tonumber(str)
+    if not xraw then self:error("malformed number") end
+    return xraw or 0
 end
 
 ---------------------------------------------------------------------------
 -- Annotation capture
 ---------------------------------------------------------------------------
 
+--: (LexState, integer, integer) -> boolean
 function Lexer:_capture_line_annotation(ann_line, ann_col)
     -- We've already consumed "--". Check what follows.
     -- --: type      → ANN_TYPE
@@ -604,6 +670,7 @@ function Lexer:_capture_line_annotation(ann_line, ann_col)
     return true
 end
 
+--: (LexState, integer, integer, integer) -> boolean
 function Lexer:_capture_block_annotation(sep, ann_line, ann_col)
     -- Caller already advanced past the 2nd '[' and skipped leading newline.
     -- Check if content starts with ':'
@@ -659,6 +726,7 @@ end
 -- Main lex function
 ---------------------------------------------------------------------------
 
+--: (LexState) -> (integer, unknown)
 function Lexer:_lex()
     while true do
         self._tk_line = self.line
@@ -710,7 +778,7 @@ function Lexer:_lex()
             if self.b ~= B_MINUS then return defs.TK_MINUS, 0 end
             -- Comment
             local ann_line = self.line
-            local ann_col = self._tk_col
+            local ann_col = self._tk_col or 0
             self:_nextbyte()  -- skip second '-'
             if self.b == B_LBRK then
                 -- Possible long comment
@@ -837,12 +905,14 @@ function Lexer:_lex()
             self:error(format("unexpected character '%s'", char(b)))
         end
     end
+    return 0, nil  -- unreachable: loop only exits via return or error
 end
 
 ---------------------------------------------------------------------------
 -- Public API
 ---------------------------------------------------------------------------
 
+--: (LexState) -> integer
 function Lexer:next()
     if self._la_valid then
         self.tk   = self._la_tk
@@ -858,19 +928,21 @@ function Lexer:next()
     return self.tk
 end
 
+--: (LexState) -> integer
 function Lexer:lookahead()
     if self._la_valid then return self._la_tk end
-    local save_line = self._tk_line
-    local save_col = self._tk_col
+    local save_line = self._tk_line or 0
+    local save_col = self._tk_col or 0
     self._la_tk, self._la_val = self:_lex()
-    self._la_line = self._tk_line
-    self._la_col = self._tk_col
+    self._la_line = self._tk_line or 0
+    self._la_col = self._tk_col or 0
     self._la_valid = true
     self._tk_line = save_line
     self._tk_col = save_col
     return self._la_tk
 end
 
+--: (LexState, integer) -> integer
 function Lexer:expect(tk)
     if self.tk ~= tk then
         self:error(format("expected '%s', got '%s'",
@@ -880,6 +952,7 @@ function Lexer:expect(tk)
     return self:next()
 end
 
+--: (LexState, integer) -> boolean
 function Lexer:opt(tk)
     if self.tk == tk then
         self:next()

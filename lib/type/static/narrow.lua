@@ -39,7 +39,7 @@ local i32x2_to_double = defs.i32x2_to_double
 
 local M = {}
 
---:: NarrowInfo = { kind: string, inner: NarrowInfo?, name_id: integer?, obj_name_id: integer?, field_name_id: integer?, positive: boolean?, type_str: string?, member_tid: integer?, lit_intern_id: integer?, lit_kind: integer?, lit_id: integer? }
+--:: NarrowInfo = { kind: string, inner?: { kind: string, name_id?: integer, obj_name_id?: integer, field_name_id?: integer, positive?: boolean, type_str?: string, member_tid?: integer, lit_intern_id?: integer, lit_id?: integer, ... }, name_id?: integer, obj_name_id?: integer, field_name_id?: integer, positive?: boolean, type_str?: string, member_tid?: integer, lit_intern_id?: integer, lit_kind?: integer, lit_id?: integer, ... }
 
 -- Extract narrowing information from a test expression node.
 -- Returns a narrowing_info table or nil.
@@ -214,6 +214,7 @@ end
 -- Narrow a table type so a specific field has nil subtracted from its type.
 -- Used for field-presence narrowing: after `if not x.field then return end`,
 -- x.field is guaranteed non-nil in the continuation.
+--: (Ctx, integer, integer) -> integer
 local function narrow_field_non_nil(ctx, tid, field_name_id)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -381,10 +382,11 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
                     return ctx.T_NEVER
                 end
             end
-            return info.member_tid
+            return info.member_tid or ctx.T_NEVER
         else
             -- Falsy: subtract the enum member from the type.
-            return types_mod.subtract(ctx, ty_id, info.member_tid)
+            local mem_tid = info.member_tid or ctx.T_NEVER
+            return types_mod.subtract(ctx, ty_id, mem_tid)
         end
     end
 
@@ -427,6 +429,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
 end
 
 -- Extract the name_id targeted by a narrowing info struct.
+--: (NarrowInfo) -> integer?
 local function info_name_id(info)
     if info.kind == "nil_check" or info.kind == "type_check" or info.kind == "lit_eq" then
         return info.name_id
@@ -455,6 +458,7 @@ end
 -- from the surviving arms of the source union-of-tuples.
 -- Return true if a concrete type is considered truthy (not nil, not literal false).
 -- Returns nil if uncertain (e.g. TAG_VAR — not yet solved).
+--: (Ctx, integer) -> boolean?
 local function arm_slot_truthy(ctx, tid)
     local t = ctx.types:get(types_mod.find(ctx, tid))
     if t.tag == TAG_NIL   then return false end
@@ -466,6 +470,7 @@ local function arm_slot_truthy(ctx, tid)
     return true
 end
 
+--: (Ctx, integer, integer, boolean, { [integer]: integer, ... }) -> ()
 local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_truthy, narrowed)
     local entry = ctx._multi_ret and ctx._multi_ret[name_id]
     if not entry then return end
@@ -513,8 +518,8 @@ end
 --: (Ctx, NarrowInfo?, { [integer]: integer, ... }, boolean) -> ()
 local function record_narrowing(ctx, info, narrowed, is_truthy)
     if not info then return end
-    local name_id = info_name_id(info)
-    if not name_id then return end
+    local name_id = info_name_id(info) or 0
+    if name_id == 0 then return end
     local env_mod = require("lib.type.static.env")
     local current_ty = narrowed[name_id] or env_mod.lookup(ctx.scope, name_id)
     if not current_ty then return end
