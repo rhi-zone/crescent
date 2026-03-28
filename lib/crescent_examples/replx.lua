@@ -102,11 +102,12 @@ local http_mod_to_obj = function (mod) --[[@param mod { send: fun(req: http_clie
 			if not path then path = "/" end
 			local host, port = host_and_port:match("(.-):(.+)")
 			host = host or host_and_port
-			return http.string_to_http_client_response(send({
+			local raw = send({
 				--[[@diagnostic disable-next-line: assign-type-mismatch]]
 				host = host, path = path, method = method, port = tonumber(port),
 				body = opts.body or "", headers = opts.headers or {},
-			}))
+			})
+			return (http.parse_response(raw))
 		end
 	end
 	return {

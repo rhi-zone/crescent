@@ -7,7 +7,7 @@ local mod = {}
 
 local ffi = require("ffi")
 local buf = ffi.new("char[65536]")
-local err_res = http.http_response_to_string({ status = 400, headers = {} })
+local err_res = http.serialize_response({ status = 400, headers = {} })
 local max_header_size = 65536
 
 --[[@param handler http_callback]]
@@ -29,7 +29,7 @@ mod.make_connection_handler = function (handler)
 			if header_end then parts = { combined } end
 		end
 		local data = parts[1]
-		local req, i = http.string_to_http_request(data)
+		local req, i = http.parse_request(data)
 		if not req or not i then client:send(err_res); return end
 		--[[read remaining body if Content-Length specified]]
 		local content_length = req.headers["content-length"]
@@ -46,14 +46,14 @@ mod.make_connection_handler = function (handler)
 				end
 				if #parts > 1 then
 					data = table.concat(parts)
-					req = http.string_to_http_request(data)
+					req = http.parse_request(data)
 					if not req then client:send(err_res); return end
 				end
 			end
 		end
 		local res = { headers = {} } --[[@type http_response]]
 		handler(req, res, client)
-		client:send(http.http_response_to_string(res))
+		client:send(http.serialize_response(res))
 		client:close()
 	end
 end

@@ -13,13 +13,13 @@ mod.make_connection_handler = function (handler)
 		local s = client:receive()
 		if not s then return end --[[silently fail]]
 		--[[TODO: multi-packet bodies]]
-		local req, i = http.string_to_http_request(s)
-		if not req or not i then client:send(http.http_response_to_string({ status = 400, headers = {} })); return end
+		local req, i = http.parse_request(s)
+		if not req or not i then client:send(http.serialize_response({ status = 400, headers = {} })); return end
 		local res = { headers = {} } --[[@type http_response]]
 		local pid = ffi.C.fork()
 		if pid ~= 0 then client:close(); print("main ok") return end
 		handler(req, res, client)
-		client:send(http.http_response_to_string(res))
+		client:send(http.serialize_response(res))
 		client:close()
 		os.exit(0)
 	end

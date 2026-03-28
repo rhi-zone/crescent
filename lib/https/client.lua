@@ -48,11 +48,12 @@ end
 
 local function add_default_headers(req)
 	req.headers = req.headers or {}
+	if not req.headers["Host"] then req.headers["Host"] = { req.host } end
 	if not req.headers["User-Agent"] then
-		req.headers["User-Agent"] = "crescent/0.1"
+		req.headers["User-Agent"] = { "crescent/0.1" }
 	end
 	if req.body and #req.body > 0 and not req.headers["Content-Length"] then
-		req.headers["Content-Length"] = tostring(#req.body)
+		req.headers["Content-Length"] = { tostring(#req.body) }
 	end
 end
 
@@ -76,7 +77,7 @@ M.request = function(req)
 
 	add_default_headers(req)
 
-	ok, err = client:send(format.http_client_request_to_string(req))
+	ok, err = client:send(format.serialize_request({ method = req.method, target = req.path or "/", version = req.version or "HTTP/1.1", headers = req.headers, body = req.body }))
 	if not ok then
 		tls_teardown(client_tls, tls_config)
 		client:close()
@@ -102,11 +103,11 @@ M.request = function(req)
 	end
 
 	local data = parts[1]
-	local res = format.string_to_http_client_response(data)
+	local res, _, parse_err = format.parse_response(data)
 	if not res then
 		tls_teardown(client_tls, tls_config)
 		client:close()
-		return nil, "failed to parse response"
+		return nil, parse_err or "failed to parse response"
 	end
 
 	-- read remaining body if Content-Length specified
@@ -125,7 +126,7 @@ M.request = function(req)
 			end
 			if #parts > 1 then
 				data = table.concat(parts)
-				res = format.string_to_http_client_response(data)
+				res = format.parse_response(data)
 			end
 		end
 	end
@@ -160,7 +161,7 @@ M.stream = function(req)
 
 	add_default_headers(req)
 
-	ok, err = client:send(format.http_client_request_to_string(req))
+	ok, err = client:send(format.serialize_request({ method = req.method, target = req.path or "/", version = req.version or "HTTP/1.1", headers = req.headers, body = req.body }))
 	if not ok then
 		tls_teardown(client_tls, tls_config)
 		client:close()

@@ -219,62 +219,6 @@ T.describe("round-trip", function()
 	end)
 end)
 
-T.describe("backward compat", function()
-	T.it("string_to_http_request still works", function()
-		local raw = "GET /path HTTP/1.1\r\nHost: example.com\r\n\r\n"
-		local req = format.string_to_http_request(raw)
-		T.ok(req ~= nil)
-		T.eq(req.method, "GET")
-	end)
-
-	T.it("string_to_http_request sets legacy .path field", function()
-		local raw = "GET /path?foo=bar HTTP/1.1\r\nHost: example.com\r\n\r\n"
-		local req = format.string_to_http_request(raw)
-		T.ok(req ~= nil)
-		T.eq(req.path, "/path")
-	end)
-
-	T.it("string_to_http_request sets legacy .params field", function()
-		local raw = "GET /search?q=hello%20world HTTP/1.1\r\nHost: example.com\r\n\r\n"
-		local req = format.string_to_http_request(raw)
-		T.ok(req ~= nil)
-		T.eq(req.params.q, "hello world")
-	end)
-
-	T.it("string_to_http_request sets numeric .version", function()
-		local raw = "GET / HTTP/1.1\r\nHost: x\r\n\r\n"
-		local req = format.string_to_http_request(raw)
-		T.ok(req ~= nil)
-		T.eq(req.version, 1.1)
-	end)
-
-	T.it("string_to_http_client_response still works", function()
-		local raw = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
-		local res = format.string_to_http_client_response(raw)
-		T.ok(res ~= nil)
-		T.eq(res.status, 200)
-		T.eq(res.status_text, "OK")
-	end)
-
-	T.it("http_response_to_string still works", function()
-		local s = format.http_response_to_string({
-			status = 200,
-			headers = { ["content-type"] = "text/plain" },
-			body = "ok",
-		})
-		T.ok(s:find("200"))
-		T.ok(s:find("ok"))
-	end)
-
-	T.it("http_client_request_to_string still works", function()
-		local s = format.http_client_request_to_string({
-			method = "GET", path = "/", host = "example.com",
-			headers = {},
-		})
-		T.ok(s:find("GET / HTTP/1.1"))
-		T.ok(s:find("Host: example.com"))
-	end)
-end)
 
 T.describe("cookies", function()
 	T.it("parse single cookie", function()

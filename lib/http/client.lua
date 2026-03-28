@@ -13,7 +13,9 @@ mod.send = function (req)
 	local ok
 	ok, err = client:connect(req.host, req.port or "http")
 	if not ok then return nil, err end
-	ok, err = client:send(format.http_client_request_to_string(req))
+	req.headers = req.headers or {}
+	if not req.headers["Host"] then req.headers["Host"] = { req.host } end
+	ok, err = client:send(format.serialize_request({ method = req.method, target = req.path or "/", version = req.version or "HTTP/1.1", headers = req.headers, body = req.body }))
 	if not ok then return nil, err end
 	return client:receive()
 end

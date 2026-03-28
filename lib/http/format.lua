@@ -2,7 +2,6 @@
 -- RFC 9112 — HTTP/1.1 Message Syntax
 -- RFC 9110 — HTTP Semantics
 
-local urlencode_to_string = require("lib.encode.urlencode").urlencode_to_string
 local status_names = require("lib.http.status").status_names
 
 local mod = {}
@@ -25,6 +24,7 @@ mod.method = {
 -- Handles obs-fold (§5.6 obsolete line folding) and OWS trimming.
 --: (string) -> { [string]: string[] }
 local function parse_headers(block)
+	--: { [string]: { [integer]: string } }
 	local headers = {}
 	local pos = 1
 	local len = #block
@@ -69,12 +69,12 @@ local function parse_headers(block)
 	return headers
 end
 
--- RFC 9112 §2.1 — find CRLFCRLF separator, return (head_end_pos, body_start_pos)
---: (string, integer) -> integer?, integer?
+-- RFC 9112 §2.1 — find CRLFCRLF separator, return position of \r\n\r\n or nil.
+-- Caller derives body_start as head_end + 4.
+--: (string, integer) -> integer?
 local function find_head_end(s, i)
 	local pos = find(s, "\r\n\r\n", i, true)
-	if not pos then return nil, nil end
-	return pos, pos + 4
+	return pos
 end
 
 -- RFC 9112 §3 — Parse request from wire bytes.
@@ -84,8 +84,9 @@ end
 mod.parse_request = function(s, i)
 	i = i or 1
 	-- RFC 9112 §2.1 — message = start-line CRLF *( field-line CRLF ) CRLF [ message-body ]
-	local head_end, body_start = find_head_end(s, i)
+	local head_end = find_head_end(s, i)
 	if not head_end then return nil, nil, "incomplete message" end
+	local body_start = head_end + 4
 	-- RFC 9112 §3 — request-line = method SP request-target SP HTTP-version
 	local line_end = find(s, "\r\n", i, true)
 	if not line_end then return nil, nil, "incomplete request line" end
@@ -119,8 +120,9 @@ end
 --: (string, integer?) -> http_response?, integer?, string?
 mod.parse_response = function(s, i)
 	i = i or 1
-	local head_end, body_start = find_head_end(s, i)
+	local head_end = find_head_end(s, i)
 	if not head_end then return nil, nil, "incomplete message" end
+	local body_start = head_end + 4
 	-- RFC 9112 §4 — status-line = HTTP-version SP status-code SP [ reason-phrase ]
 	local line_end = find(s, "\r\n", i, true)
 	if not line_end then return nil, nil, "incomplete status line" end
@@ -137,8 +139,15 @@ mod.parse_response = function(s, i)
 		status_str = sub(status_line, sp1 + 1)
 		reason = ""
 	end
-	local status = tonumber(status_str)
-	if not status then return nil, nil, "invalid status code" end
+	-- RFC 9112 §4 — status-code is exactly 3 decimal digits
+	if #status_str ~= 3 then return nil, nil, "invalid status code" end
+	local b1 = byte(status_str, 1)
+	local b2 = byte(status_str, 2)
+	local b3 = byte(status_str, 3)
+	if b1 < 48 or b1 > 57 or b2 < 48 or b2 > 57 or b3 < 48 or b3 > 57 then
+		return nil, nil, "invalid status code"
+	end
+	local status = (b1 - 48) * 100 + (b2 - 48) * 10 + (b3 - 48)
 	-- headers
 	local header_block = sub(s, line_end + 2, head_end - 1)
 	local headers = parse_headers(header_block .. "\r\n")
@@ -163,12 +172,8 @@ mod.serialize_request = function(req)
 	parts[1] = (req.method or "GET") .. " " .. (req.target or "/") .. " " .. (req.version or "HTTP/1.1") .. "\r\n"
 	-- field lines
 	for name, values in pairs(req.headers or {}) do
-		if type(values) == "table" then
-			for j = 1, #values do
-				parts[#parts + 1] = name .. ": " .. values[j] .. "\r\n"
-			end
-		else
-			parts[#parts + 1] = name .. ": " .. values .. "\r\n"
+		for j = 1, #values do
+			parts[#parts + 1] = name .. ": " .. values[j] .. "\r\n"
 		end
 	end
 	parts[#parts + 1] = "\r\n"
@@ -189,12 +194,8 @@ mod.serialize_response = function(res)
 	local body = res.body or ""
 	local has_cl = false
 	for name, values in pairs(res.headers or {}) do
-		if type(values) == "table" then
-			for j = 1, #values do
-				parts[#parts + 1] = name .. ": " .. values[j] .. "\r\n"
-			end
-		else
-			parts[#parts + 1] = name .. ": " .. values .. "\r\n"
+		for j = 1, #values do
+			parts[#parts + 1] = name .. ": " .. values[j] .. "\r\n"
 		end
 		if lower(name) == "content-length" then has_cl = true end
 	end
@@ -203,100 +204,6 @@ mod.serialize_response = function(res)
 	end
 	parts[#parts + 1] = "\r\n"
 	parts[#parts + 1] = body
-	return concat(parts)
-end
-
--- Backward-compatible: parse request and add legacy .path, .params, .version fields.
---: (string, integer?) -> http_request?, integer?, string?
-mod.string_to_http_request = function(s, i)
-	local req, pos, err = mod.parse_request(s, i)
-	if not req then return nil, err end
-	-- Old API: .path = path without query string, .params = decoded query params, .version = number
-	local target = req.target or "/"
-	local path = target
-	local params = {}
-	local qmark = find(target, "?", 1, true)
-	if qmark then
-		path = sub(target, 1, qmark - 1)
-		local params_str = sub(target, qmark + 1)
-		for k, v in params_str:gmatch("([^=&]*)=?([^&]*)&?") do
-			params[urlencode_to_string(k)] = urlencode_to_string(v)
-		end
-	end
-	req.path = path
-	req.params = params
-	-- Old API: version was a number (e.g. 1.1)
-	local ver_num = tonumber(req.version:match("HTTP/([0-9.]+)"))
-	if ver_num then req.version = ver_num end
-	return req, pos
-end
-
--- Backward-compatible: parse client response, adds .status_text alias for .reason.
---: (string, integer?) -> http_response?, integer?
-mod.string_to_http_client_response = function(s, i)
-	local res, pos, err = mod.parse_response(s, i)
-	if not res then return nil end
-	-- Old API: .status_text instead of .reason, .version was a number
-	res.status_text = res.reason
-	local ver_num = tonumber(res.version:match("HTTP/([0-9.]+)"))
-	if ver_num then res.version = ver_num end
-	return res, pos
-end
-
--- Backward-compatible: serialize response. Old API used title-case headers and status_text.
---: (http_response) -> string
-mod.http_response_to_string = function(res)
-	res.body = res.body or ""
-	local parts = {}
-	-- Old API: status_text, or fall back to status_names
-	local status = res.status or 200
-	local reason = res.status_text or res.reason or status_names[status] or status_names[200]
-	parts[#parts + 1] = "HTTP/1.1 " .. status .. " " .. reason .. "\r\n"
-	local res_headers = {}
-	for k, v in pairs(res.headers or {}) do
-		-- Old API normalised to Title-Case; preserve that behaviour
-		local title = k:gsub("^%l", string.upper):gsub("-%l", string.upper)
-		res_headers[title] = v
-	end
-	-- Content-Type first (old behaviour)
-	if res_headers["Content-Type"] ~= nil then
-		local ct = res_headers["Content-Type"]
-		parts[#parts + 1] = "Content-Type: " .. (type(ct) == "table" and ct[1] or ct) .. "\r\n"
-		res_headers["Content-Type"] = nil
-	end
-	-- Content-Length (use provided or compute from body)
-	local cl = res_headers["Content-Length"]
-	parts[#parts + 1] = "Content-Length: " .. (cl and (type(cl) == "table" and cl[1] or cl) or #res.body) .. "\r\n"
-	res_headers["Content-Length"] = nil
-	-- remaining headers
-	for k, v in pairs(res_headers) do
-		if type(v) == "table" then
-			for j = 1, #v do
-				parts[#parts + 1] = k .. ": " .. v[j] .. "\r\n"
-			end
-		else
-			parts[#parts + 1] = k .. ": " .. v .. "\r\n"
-		end
-	end
-	parts[#parts + 1] = "\r\n"
-	parts[#parts + 1] = res.body
-	return concat(parts)
-end
-
--- Backward-compatible: serialize client request. Old API used .path, .host at top level.
---: ({ method: string?, path: string?, host: string, headers: { [string]: string[] }?, body: string? }) -> string
-mod.http_client_request_to_string = function(req)
-	local parts = {}
-	parts[#parts + 1] = (req.method or "GET") .. " " .. (req.path or "/") .. " HTTP/1.1\r\nHost: " .. req.host .. "\r\n"
-	for k, v_ in pairs(req.headers or {}) do
-		if type(v_) == "table" then
-			for _, v in ipairs(v_) do parts[#parts + 1] = k .. ": " .. v .. "\r\n" end
-		else
-			parts[#parts + 1] = k .. ": " .. v_ .. "\r\n"
-		end
-	end
-	parts[#parts + 1] = "\r\n"
-	parts[#parts + 1] = req.body or ""
 	return concat(parts)
 end
 
