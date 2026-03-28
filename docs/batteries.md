@@ -189,6 +189,17 @@ any content-heavy application.
 for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
 `lib/cli` (arg parsing) and raw terminal FFI.
 
+**`lib/ansi`** — low-level terminal: escape codes, colors, cursor movement, terminal
+queries (size, capabilities). Pure Lua, no deps. The primitive everything TUI builds on.
+
+**`lib/tui`** — widget layer: layouts, boxes, text, input, scrolling, borders. Builds
+on `lib/ansi`. Imperative API — draw what you want, when you want.
+
+**`lib/tui/reactive`** *(opt-in)* — reactive binding for `lib/tui`. Wire
+`lib/reactive_optics` signals to widget state; only affected widgets redraw on change.
+Same model as the browser frontend (`lib/reactive_optics` + `lib/lua2ts`), different
+render target. The terminal is just another output surface.
+
 **`lib/notify`** — push notifications, webhooks, alerting. Outbound HTTP webhooks,
 email notifications (via `lib/email`), SMS gateway integrations.
 
