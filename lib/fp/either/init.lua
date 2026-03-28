@@ -121,22 +121,22 @@ end
 local function make_left_mt()
 	--: { [any]: any }
 	local index = {
-		[Mappable]   = left_f_impl,
-		[Applicable] = left_ap_impl,
-		[Foldable]   = left_foldable_impl,
-		[Semigroup]  = left_sg_impl,
+		[Mappable.key]   = left_f_impl,
+		[Applicable.key] = left_ap_impl,
+		[Foldable.key]   = left_foldable_impl,
+		[Semigroup.key]  = left_sg_impl,
 	}
 	if Chainable then
-		index[Chainable] = make_left_chainable_impl()
+		index[Chainable.key] = make_left_chainable_impl()
 	end
 	if Alt then
-		index[Alt] = left_alt_impl
+		index[Alt.key] = left_alt_impl
 	end
 	if Bifunctor then
-		index[Bifunctor] = left_bifunctor_impl
+		index[Bifunctor.key] = left_bifunctor_impl
 	end
 	if Traversable then
-		index[Traversable] = make_left_traversable_impl()
+		index[Traversable.key] = make_left_traversable_impl()
 	end
 	return {
 		__index = index,
@@ -238,22 +238,22 @@ end
 local function make_right_mt()
 	--: { [any]: any }
 	local index = {
-		[Mappable]   = right_f_impl,
-		[Applicable] = right_ap_impl,
-		[Foldable]   = right_foldable_impl,
-		[Semigroup]  = right_sg_impl,
+		[Mappable.key]   = right_f_impl,
+		[Applicable.key] = right_ap_impl,
+		[Foldable.key]   = right_foldable_impl,
+		[Semigroup.key]  = right_sg_impl,
 	}
 	if Chainable then
-		index[Chainable] = make_right_chainable_impl()
+		index[Chainable.key] = make_right_chainable_impl()
 	end
 	if Alt then
-		index[Alt] = right_alt_impl
+		index[Alt.key] = right_alt_impl
 	end
 	if Bifunctor then
-		index[Bifunctor] = right_bifunctor_impl
+		index[Bifunctor.key] = right_bifunctor_impl
 	end
 	if Traversable then
-		index[Traversable] = make_right_traversable_impl()
+		index[Traversable.key] = make_right_traversable_impl()
 	end
 	return {
 		__index = index,

@@ -12,23 +12,28 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: ProfunctorKey = $Opaque
+
 local Profunctor = {}
+
+-- The module itself is the dispatch key.
+Profunctor.key = Profunctor
 
 local function id(x) return x end
 
 -- dimap: contramap input with f, map output with g
 function Profunctor.dimap(f, g, fbc)
-	return fbc[Profunctor].dimap(f, g, fbc)
+	return fbc[Profunctor.key].dimap(f, g, fbc)
 end
 
 -- lmap: contramap input only (dimap(f, id, fbc))
 function Profunctor.lmap(f, fbc)
-	return fbc[Profunctor].dimap(f, id, fbc)
+	return fbc[Profunctor.key].dimap(f, id, fbc)
 end
 
 -- rmap: map output only (dimap(id, g, fbc))
 function Profunctor.rmap(g, fbc)
-	return fbc[Profunctor].dimap(id, g, fbc)
+	return fbc[Profunctor.key].dimap(id, g, fbc)
 end
 
 return Profunctor

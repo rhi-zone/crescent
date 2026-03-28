@@ -15,12 +15,17 @@ end
 
 local Applicable = require("lib.fp.applicable")
 
+--:: TraversableKey = $Opaque
+
 local Traversable = {}
 
+-- The module itself is the dispatch key.
+Traversable.key = Traversable
+
 -- traverse :: Applicable f => (a -> f b) -> t a -> f (t b)
--- Dispatches to ta[Traversable].traverse(f, ta, ctor).
+-- Dispatches to ta[Traversable.key].traverse(f, ta, ctor).
 function Traversable.traverse(f, ta, ctor)
-	return ta[Traversable].traverse(f, ta, ctor)
+	return ta[Traversable.key].traverse(f, ta, ctor)
 end
 
 -- sequence :: Applicable f => t (f a) -> f (t a)

@@ -12,11 +12,16 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: AltKey = $Opaque
+
 local Alt = {}
+
+-- The module itself is the dispatch key.
+Alt.key = Alt
 
 -- alt: choose fa if available, otherwise fall back to fb
 function Alt.alt(fa, fb)
-	return fa[Alt].alt(fa, fb)
+	return fa[Alt.key].alt(fa, fb)
 end
 
 return Alt

@@ -5,12 +5,17 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: FoldableKey = $Opaque
+
 local Foldable = {}
+
+-- The module itself is the dispatch key.
+Foldable.key = Foldable
 
 -- foldr :: (a -> b -> b) -> b -> t a -> b
 -- right-fold over the structure
 function Foldable.foldr(f, z, ta)
-	return ta[Foldable].foldr(f, z, ta)
+	return ta[Foldable.key].foldr(f, z, ta)
 end
 
 -- foldMap :: Monoid m => (a -> m) -> t a -> m
@@ -19,7 +24,7 @@ end
 -- dispatch empty() on without an element. Pass Just(x) when the Monoid
 -- instance is needed.
 function Foldable.foldMap(f, ta)
-	return ta[Foldable].foldMap(f, ta)
+	return ta[Foldable.key].foldMap(f, ta)
 end
 
 -- fold :: Monoid m => t m -> m
@@ -27,7 +32,7 @@ end
 -- Note: fold on Nothing errors for the same reason as foldMap — no instance
 -- to dispatch empty() on without an element.
 function Foldable.fold(ta)
-	return ta[Foldable].fold(ta)
+	return ta[Foldable.key].fold(ta)
 end
 
 return Foldable

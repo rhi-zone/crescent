@@ -12,23 +12,28 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: BifunctorKey = $Opaque
+
 local Bifunctor = {}
+
+-- The module itself is the dispatch key.
+Bifunctor.key = Bifunctor
 
 local function id(x) return x end
 
 -- bimap: map f over the first type parameter, g over the second
 function Bifunctor.bimap(f, g, fab)
-	return fab[Bifunctor].bimap(f, g, fab)
+	return fab[Bifunctor.key].bimap(f, g, fab)
 end
 
 -- lmap: map over the first type parameter only (bimap(f, id, fab))
 function Bifunctor.lmap(f, fab)
-	return fab[Bifunctor].bimap(f, id, fab)
+	return fab[Bifunctor.key].bimap(f, id, fab)
 end
 
 -- rmap: map over the second type parameter only (bimap(id, g, fab))
 function Bifunctor.rmap(g, fab)
-	return fab[Bifunctor].bimap(id, g, fab)
+	return fab[Bifunctor.key].bimap(id, g, fab)
 end
 
 return Bifunctor

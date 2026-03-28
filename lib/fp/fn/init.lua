@@ -79,13 +79,13 @@ local fn_profunctor_impl = {
 
 --: { [any]: any }
 local fn_index = {
-	[Mappable]   = fn_mappable_impl,
-	[Applicable] = fn_applicable_impl,
-	[Chainable]  = fn_chainable_impl,
+	[Mappable.key]   = fn_mappable_impl,
+	[Applicable.key] = fn_applicable_impl,
+	[Chainable.key]  = fn_chainable_impl,
 }
 
 if Profunctor then
-	fn_index[Profunctor] = fn_profunctor_impl
+	fn_index[Profunctor.key] = fn_profunctor_impl
 end
 
 local fn_mt = {

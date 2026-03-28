@@ -107,18 +107,18 @@ local nothing_alt_impl = {
 local function make_nothing_mt()
 	--: { [any]: any }
 	local index = {
-		[Mappable]   = nothing_f_impl,
-		[Applicable] = nothing_ap_impl,
-		[Chainable]  = nothing_chainable_impl,
-		[Foldable]   = nothing_foldable_impl,
-		[Semigroup]  = nothing_sg_impl,
-		[Monoid]     = nothing_m_impl,
+		[Mappable.key]   = nothing_f_impl,
+		[Applicable.key] = nothing_ap_impl,
+		[Chainable.key]  = nothing_chainable_impl,
+		[Foldable.key]   = nothing_foldable_impl,
+		[Semigroup.key]  = nothing_sg_impl,
+		[Monoid.key]     = nothing_m_impl,
 	}
 	if Alt then
-		index[Alt] = nothing_alt_impl
+		index[Alt.key] = nothing_alt_impl
 	end
 	if Traversable then
-		index[Traversable] = make_nothing_traversable_impl()
+		index[Traversable.key] = make_nothing_traversable_impl()
 	end
 	return {
 		__index = index,
@@ -214,18 +214,18 @@ local just_alt_impl = {
 local function make_just_mt()
 	--: { [any]: any }
 	local index = {
-		[Mappable]   = just_f_impl,
-		[Applicable] = just_ap_impl,
-		[Chainable]  = just_chainable_impl,
-		[Foldable]   = just_foldable_impl,
-		[Semigroup]  = just_sg_impl,
-		[Monoid]     = just_m_impl,
+		[Mappable.key]   = just_f_impl,
+		[Applicable.key] = just_ap_impl,
+		[Chainable.key]  = just_chainable_impl,
+		[Foldable.key]   = just_foldable_impl,
+		[Semigroup.key]  = just_sg_impl,
+		[Monoid.key]     = just_m_impl,
 	}
 	if Alt then
-		index[Alt] = just_alt_impl
+		index[Alt.key] = just_alt_impl
 	end
 	if Traversable then
-		index[Traversable] = make_just_traversable_impl()
+		index[Traversable.key] = make_just_traversable_impl()
 	end
 	return {
 		__index = index,

@@ -19,7 +19,7 @@ local m_impl = {
 }
 
 local mt = {
-	__index = { [Semigroup] = sg_impl, [Monoid] = m_impl },
+	__index = { [Semigroup.key] = sg_impl, [Monoid.key] = m_impl },
 	__tostring = function(self)
 		return "Product(" .. tostring(self.value) .. ")"
 	end,

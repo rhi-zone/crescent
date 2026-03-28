@@ -12,7 +12,7 @@ local impl = {
 }
 
 local mt = {
-	__index = { [Semigroup] = impl },
+	__index = { [Semigroup.key] = impl },
 	__tostring = function(self)
 		return "Last(" .. tostring(self.value) .. ")"
 	end,

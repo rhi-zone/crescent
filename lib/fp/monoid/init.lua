@@ -7,18 +7,23 @@ end
 
 local Semigroup = require("lib.fp.semigroup")
 
+--:: MonoidKey = $Opaque
+
 local Monoid = {}
+
+-- The module itself is the dispatch key.
+Monoid.key = Monoid
 
 -- empty: return the identity element for the monoid instance of `a`
 function Monoid.empty(a)
-	return a[Monoid].empty()
+	return a[Monoid.key].empty()
 end
 
 -- fold: combine all elements of a non-empty list using the Monoid instance
 -- dispatches via the first element; starts from empty and appends each value
 function Monoid.fold(list)
 	assert(#list > 0, "Monoid.fold: empty list (no instance to dispatch on)")
-	local impl = list[1][Monoid]
+	local impl = list[1][Monoid.key]
 	local acc = impl.empty()
 	for _, v in ipairs(list) do
 		acc = Semigroup.append(acc, v)

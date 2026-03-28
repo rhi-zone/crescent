@@ -6,11 +6,16 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--:: ChainableKey = $Opaque
+
 local Chainable = {}
+
+-- The module itself is the dispatch key.
+Chainable.key = Chainable
 
 -- bind: sequence a chainable action, threading the inner value into f
 function Chainable.bind(ma, f)
-	return ma[Chainable].bind(ma, f)
+	return ma[Chainable.key].bind(ma, f)
 end
 
 -- then_: sequence two chainable actions, discard left result
