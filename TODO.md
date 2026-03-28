@@ -16,7 +16,7 @@
 ## typechecker stdlib / module typing
 
 - [ ] **`declare x: T` syntax** — fix `stdlib.d.lua` which uses `declare x = T` (type alias syntax) instead of `declare x: T` (value declaration). `declare ffi = any` should be `declare ffi: any` pending proper typing.
-- [ ] **`module "name": T` syntax** — first-class way to declare the type of an external module. `require("ffi")` currently returns `any` because there's no module registry for external modules. `ctx.cri_loader` handles first-party crescent modules; need a parallel lookup for declared modules. `stdlib.d.lua` would contain `module "ffi": { C: $FfiC, cdef: (string) -> nil, ... }`, `module "bit": { ... }`. Without this, every `require()` of an external module returns `any` and bypasses all checking.
+- [ ] **`module "name": T` syntax + `$Require<Path>` intrinsic** — `require` should be typed as `$Require<Path>` where `Path` is a literal string. The checker resolves `$Require<"ffi">` by looking up `"ffi"` in the module registry (declared via `module "ffi": T` in `stdlib.d.lua` or `.d.lua` files). First-party crescent modules already resolve via `ctx.cri_loader`; this extends that to external/stdlib modules. Undeclared modules → `unknown` (forces narrowing at use site) rather than `any` (silent bypass).
 - [ ] **`$FfiC` intrinsic** — `ffi.C` should be typed as `$FfiC`, a special type the checker resolves to `ctx.T_FFI_C` (the live table accumulating fields from `ffi.cdef` calls). Currently `T_FFI_C` is allocated and populated correctly but never bound to `ffi.C` in the value scope because `ffi` itself is `any`.
 
 ## typechecker warnings / quality-of-life
