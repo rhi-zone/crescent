@@ -5304,6 +5304,36 @@ local x --: Partial<{ name: string, age: number }>
 x = { name = "hi" }
 ]])
     end)
+
+    assert.it("PASS: Partial<T> — only second field present (FLAG_OPTIONAL on first)", function()
+        -- { y = "hello" } satisfies Partial<{ x: number, y: string }> because x is optional.
+        v3_no_errors([[
+--:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ x: number, y: string }>
+x = { y = "hello" }
+]])
+    end)
+
+    assert.it("PASS: Partial<T> — only first field present (FLAG_OPTIONAL on second)", function()
+        -- { x = 1 } satisfies Partial<{ x: number, y: string }> because y is optional.
+        v3_no_errors([[
+--:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ x: number, y: string }>
+x = { x = 1 }
+]])
+    end)
+
+    assert.it("PASS: Partial<T> — empty table satisfies (all fields FLAG_OPTIONAL)", function()
+        -- {} satisfies Partial<{ x: number, y: string }> because both fields are optional.
+        v3_no_errors([[
+--:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ x: number, y: string }>
+x = {}
+]])
+    end)
 end)
 
 assert.describe("adversarial: $EachUnion interactions", function()
