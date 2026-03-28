@@ -24,10 +24,10 @@ if not value then error(err) end
 Every format library exposes both a descriptive name and uniform slot names:
 
 ```lua
-M.string_to_foo(s, opts?) -> foo | (nil, errmsg)   -- descriptive primary
-M.foo_to_string(v, opts?) -> string | (nil, errmsg) -- descriptive primary
-M.decode = M.string_to_foo   -- uniform interface alias
-M.encode = M.foo_to_string   -- uniform interface alias
+M.string_to_foo(s, opts?) -> foo | (nil, errmsg)      -- descriptive primary
+M.foo_to_string(v, opts?) -> string | (nil, errmsg)   -- descriptive primary
+M.decode(s, opts?) -> foo | (nil, errmsg)              -- uniform alias
+M.encode(v, opts?) -> string | (nil, errmsg)           -- uniform alias
 ```
 
 - `a_to_b` names are the primary — they say exactly what goes in and what comes out.
