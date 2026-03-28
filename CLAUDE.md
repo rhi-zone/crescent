@@ -19,7 +19,8 @@ lib/          — all packages (http, websocket, dns, sqlite, fs, ljsocket, ...)
 lib/type/     — typechecker (parses LuaJIT FFI cdefs)
 lib/pkg/      — package manager
 lib/test/     — test runner
-lib/cli/      — CLI tools
+lib/crescent_examples/ — small scripts demonstrating crescent (not a library)
+lib/cli/      — CLI arg parsing library (future)
 doc/          — documentation
 ```
 

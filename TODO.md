@@ -36,7 +36,7 @@ they need to be rewritten before use.
 - [ ] **`lib/posix/`** — 6-line execv/execlp stub. Absorb into `lib/process/` or expand when needed.
 
 Not libraries (do not rewrite, repurpose instead):
-- `lib/cli/` — ~40 loose executable scripts. Not a unified library; keep as examples/tools.
+- `lib/crescent_examples/` — collection of small scripts demonstrating crescent. Not a unified library.
 - `lib/linux/` — raw OS FFI definitions. Keep as a definitions file, not a library.
 - `lib/stdlib/` — compliance linter. Keep as a linter, not a library.
 
@@ -129,7 +129,7 @@ Not libraries (do not rewrite, repurpose instead):
     the tiered pattern to follow.
   - [ ] `lib/ljsocket/` — largest and most complex. Blocked on registry (http/websocket
     depend on it); rewrite as cross-platform `lib/socket/` (POSIX + winsock via FFI).
-  - [x] `lib/cparser/`, `lib/cmark/`, `lib/plterm/` + `lib/cli/ple.lua` — deleted (unused vendored code).
+  - [x] `lib/cparser/`, `lib/cmark/`, `lib/plterm/` + `lib/crescent_examples/ple.lua` — deleted (unused vendored code).
 
 - [ ] **Stdlib buildout** — see `docs/stdlib-roadmap.md`. Phase 1–3 done (2026-03-20):
   path guards, init.lua entry points, error convention sweep, tests for core packages,
@@ -223,7 +223,7 @@ Not libraries (do not rewrite, repurpose instead):
 - [ ] `lib/love/` — game framework bindings
 - [ ] `lib/tree_sitter/` — parse library bindings
 - [ ] `lib/ljltk/` — Lua parser/compiler (third-party origin)
-- [ ] `lib/cli/` — collection of executable scripts, not a stdlib package
+- [ ] `lib/crescent_examples/` — collection of small scripts demonstrating crescent
 
 **Missing init.lua (35+ packages):** http, https, fs, socket, tcp, dns, imap, irc, test, and others — violates "every package is a directory with init.lua entry point". Many of these also need rewrites, so add init.lua as part of the rewrite, not as a standalone fix.
 
@@ -274,10 +274,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] `install.lua`: resolver and downloader — implemented (resolve, fetch, link, run)
 - [x] `config.lua`: `~/.crescent/config.lua` loading with defaults
 
-#### cli (lib/cli/)
+#### cli (lib/crescent_examples/)
 - [ ] Scripts mix `main()` logic with library code — not composable
 - [ ] Many scripts have implicit dep on lib/ layout; add path fixups or document
-- [ ] Review lib/cli/ scripts for which are worth keeping vs deleting
+- [ ] Review lib/crescent_examples/ scripts — sort into per-library homes or keep as demos
 
 #### cross-cutting
 - [ ] Standardise error return style: prefer `nil, err` for recoverable errors; `error()` only for invariant violations. Affected: http/client (uses assert), cbor/lunajson (uses error() for encode failures — acceptable but document the choice)
