@@ -20,6 +20,26 @@
 - [x] **Multi-return annotation on single-var capture** — fixed in solve_sub: when actual is TAG_TUPLE and expected is scalar, project first element. Annotated `local x --: string; x = f()` where f returns (string, number) now type-checks correctly.
 - [x] **Optional field absence in structural assignment** — already works. `{x=1}` satisfies `{x: number, y?: number}` because unify.lua skips absent optional fields (line 470: `if band(bfe.flags, FLAG_OPTIONAL) == 0 then`).
 
+## libraries needing rewrite from scratch
+
+These exist in `lib/` but are legacy/stubs — not crescent-native (wrong annotation style,
+no init.lua, no tests, incomplete, or just placeholder files). Do not rely on them as-is;
+they need to be rewritten before use.
+
+- [ ] **`lib/mcp/`** — stubs with FIXME/TODO throughout, wrong annotation style, no tests. Needed for MCP protocol support (`lib/jsonrpc` → `lib/mcp` stack). Rewrite once `lib/jsonrpc` exists.
+- [ ] **`lib/github/`** — uses EmmyLua `---@class` annotations instead of `--::`/`--:`, no tests. Rewrite once needed for registry tooling.
+- [ ] **`lib/markdown/`** — incomplete parser, FIXME comments, no tests. Rewrite when needed (Lumen, docs site).
+- [ ] **`lib/imap/`** — EmmyLua style, incomplete RFC 9051 parser, no init.lua, no tests. Low priority.
+- [ ] **`lib/wave/`** — WAVE/PCM format parser, no init.lua, no tests. Low priority (audio ingestion for Lumen).
+- [ ] **`lib/socket/`** — effectively a stub (client.lua is 1 line). Superseded by `lib/ljsocket` + `lib/tcp`. Can be deleted or left until needed.
+- [ ] **`lib/https/`** — no init.lua, minimal content. Needs proper init.lua + integration with `lib/tls`.
+- [ ] **`lib/posix/`** — 6-line execv/execlp stub. Absorb into `lib/process/` or expand when needed.
+
+Not libraries (do not rewrite, repurpose instead):
+- `lib/cli/` — ~40 loose executable scripts. Not a unified library; keep as examples/tools.
+- `lib/linux/` — raw OS FFI definitions. Keep as a definitions file, not a library.
+- `lib/stdlib/` — compliance linter. Keep as a linter, not a library.
+
 ## future libraries
 
 - [ ] **`lib/orchestration/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
