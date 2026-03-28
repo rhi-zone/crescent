@@ -1848,9 +1848,32 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
         last_rhs_is_call = (last_rhs_n.kind == NODE_CALL_EXPR or last_rhs_n.kind == NODE_METHOD_CALL)
     end
 
+    -- For call-derived bindings with correlated multi-return (like string.find),
+    -- use _last_multi_return_override to slot-extract each target, mirroring LOCAL_STMT.
+    local assign_call_ret_tid = nil
+    if last_rhs_is_call then
+        local override = ctx._last_multi_return_override
+        ctx._last_multi_return_override = nil
+        if override then
+            assign_call_ret_tid = override
+        else
+            assign_call_ret_tid = rhs_types[rhs_count]
+        end
+    end
+
     for i = 0, n.data[1] - 1 do
         local target_nid = ctx.ast_lists:get(n.data[0] + i)
-        local rhs_tid = rhs_types[i + 1] or (last_rhs_is_call and ctx.T_ANY or ctx.T_NIL)
+        local call_slot = (last_rhs_is_call and rhs_count > 0) and (i - (rhs_count - 1)) or -1
+        local rhs_tid
+        if call_slot >= 0 and assign_call_ret_tid then
+            local slot_var = fresh_var(ctx)
+            emit(ctx, { C_INDEX, assign_call_ret_tid,
+                types_mod.make_literal(ctx, LIT_INTEGER, call_slot),
+                slot_var, n.line, n.col })
+            rhs_tid = slot_var
+        else
+            rhs_tid = rhs_types[i + 1] or (last_rhs_is_call and ctx.T_ANY or ctx.T_NIL)
+        end
         local tn = ctx.nodes:get(target_nid)
 
         if tn.kind == NODE_IDENTIFIER then
@@ -1874,6 +1897,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     emit(ctx, { C_SUB, rhs_tid, check_against, tn.line, tn.col })
                 end
                 env_mod.bind(ctx.scope, name_id, rhs_tid)
+                -- Track correlated multi-return for narrowing propagation (e.g. x, y = f())
+                if call_slot >= 0 and assign_call_ret_tid then
+                    if not ctx._multi_ret then ctx._multi_ret = {} end
+                    ctx._multi_ret[name_id] = { source_tid = assign_call_ret_tid, slot = call_slot }
+                end
             else
                 local s = ctx.scope
                 while s.parent do s = s.parent end
