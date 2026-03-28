@@ -57,6 +57,15 @@ cd docs && bun dev           # Local docs
 
 **Do the work properly.** Don't leave workarounds or hacks undocumented. When asked to analyze X, actually read X — don't synthesize from conversation.
 
+## Library Conventions
+
+See `docs/conventions.md` for the full spec. Short version:
+- Errors: `(nil, errmsg)` return, never throw from data errors
+- Codecs: `encode(value, opts?) -> string`, `decode(string, opts?) -> value` — uniform slot names
+- Protocols: `connect` / `send` / `recv` / `close` — transport injected via opts, never created internally
+- Tiers: system > FFI > pure Lua, selected at load time, each independent, `M._tier` for introspection
+- Annotations: `--:` / `--::` only, `unknown` not `any`
+
 ## Implementation Patterns
 
 **When one implementation can't satisfy all legitimate use cases, provide multiple and let the caller choose.** This takes two forms:
