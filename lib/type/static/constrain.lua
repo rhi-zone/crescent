@@ -996,6 +996,9 @@ ExprRule[NODE_FIELD_EXPR] = function(ctx, nid)
     end
     local res = fresh_var(ctx)
     emit(ctx, { C_INDEX, obj_tid, types_mod.make_literal(ctx, LIT_STRING, fname_id), res, n.line, n.col })
+    -- Record the field-access origin so peek_callee_ret_union can trace local aliases
+    -- like `local find = string.find` back to the concrete function type.
+    ctx._var_origin[res] = { obj_tid, fname_id }
     -- Track field access for LSP go-to-def (only for simple identifier objects)
     local obj_n = ctx.nodes:get(obj_nid)
     if obj_n.kind == NODE_IDENTIFIER then
@@ -1337,7 +1340,21 @@ local function peek_callee_ret_union(ctx, callee_n)
     local fn_tid = nil
     if callee_n.kind == NODE_IDENTIFIER then
         local tid = env_mod.lookup(ctx.scope, callee_n.data[0])
-        if tid then fn_tid = types_mod.find(ctx, tid) end
+        if tid then
+            fn_tid = types_mod.find(ctx, tid)
+            -- If fn_tid is still an unresolved TAG_VAR (e.g. `local find = string.find`
+            -- where the field access result is a fresh var), trace through _var_origin
+            -- to find the concrete function type one level up.
+            local ft = ctx.types:get(fn_tid)
+            if ft.tag == TAG_VAR then
+                local origin = ctx._var_origin[fn_tid]
+                if origin then
+                    local src_obj = types_mod.find(ctx, origin[1])
+                    local fe = types_mod.table_field(ctx, src_obj, origin[2])
+                    if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
+                end
+            end
+        end
     elseif callee_n.kind == NODE_FIELD_EXPR then
         local obj_n = ctx.nodes:get(callee_n.data[0])
         if obj_n.kind == NODE_IDENTIFIER then
@@ -2681,6 +2698,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx._last_multi_return_override = nil
     ctx._last_require_mod           = nil
     ctx._multi_ret                  = {}
+    ctx._var_origin        = {}   -- [var_id] -> {obj_tid, field_name_id}: field-access origin for TAG_VAR results
     ctx.nominal_id         = 0
     ctx.type_at            = {}
     ctx.name_at            = {}
