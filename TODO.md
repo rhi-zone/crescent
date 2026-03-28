@@ -15,9 +15,9 @@
 
 ## typechecker stdlib / module typing
 
-- [ ] **`declare x: T` syntax** — fix `stdlib.d.lua` which uses `declare x = T` (type alias syntax) instead of `declare x: T` (value declaration). `declare ffi = any` should be `declare ffi: any` pending proper typing.
-- [ ] **`module "name": T` syntax + `$Require<Path>` intrinsic** — `require` should be typed as `$Require<Path>` where `Path` is a literal string. The checker resolves `$Require<"ffi">` by looking up `"ffi"` in the module registry (declared via `module "ffi": T` in `stdlib.d.lua` or `.d.lua` files). First-party crescent modules already resolve via `ctx.cri_loader`; this extends that to external/stdlib modules. Undeclared modules → `unknown` (forces narrowing at use site) rather than `any` (silent bypass).
-- [ ] **`$FfiC` intrinsic** — `ffi.C` should be typed as `$FfiC`, a special type the checker resolves to `ctx.T_FFI_C` (the live table accumulating fields from `ffi.cdef` calls). Currently `T_FFI_C` is allocated and populated correctly but never bound to `ffi.C` in the value scope because `ffi` itself is `any`.
+- [x] **`module "name": T` syntax** — `--:: module "name": T` declares the type returned by `require("name")`. Implemented in ann.lua (ANN_MODULE), constrain.lua (module_types registry), prelude.lua (loaded from .d.lua files). Undeclared modules → `unknown`. stdlib.d.lua now declares `"ffi"` and `"bit"` properly.
+- [ ] **`$Require<Path>` intrinsic** — require currently does a direct lookup; could be surfaced as a type-level `$Require<"ffi">` for use in annotations. Low priority — the lookup works, this is just syntactic.
+- [ ] **`$FfiC` intrinsic** — `ffi.C` is currently typed as `unknown` in stdlib.d.lua. It should be `$FfiC`, resolved to `ctx.T_FFI_C` (the live table accumulating fields from `ffi.cdef` calls). `T_FFI_C` is allocated and populated correctly by cdef.lua; the missing piece is wiring `$FfiC` as an intrinsic that resolves to it.
 
 ## typechecker type guards and assertions
 
