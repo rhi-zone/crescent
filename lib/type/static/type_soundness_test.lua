@@ -2415,3 +2415,68 @@ assert.describe("soundness: adversarial number edge cases", function()
         no_errors("local x = 0")
     end)
 end)
+
+assert.describe("unknown vs any", function()
+    -- unknown: caller must narrow before use (TS unknown semantics)
+    -- any: opts out of checking entirely (TS any semantics)
+
+    assert.it("unknown: field access is an error", function()
+        has_error([[
+local x --: unknown
+local y = x.foo
+]], "must be narrowed")
+    end)
+
+    assert.it("unknown: call is an error", function()
+        has_error([[
+local x --: unknown
+x()
+]], "must be narrowed")
+    end)
+
+    assert.it("unknown: arithmetic is an error", function()
+        has_error([[
+local x --: unknown
+local y = x + 1
+]], "cannot perform arithmetic")
+    end)
+
+    assert.it("unknown: passing to typed param is an error", function()
+        has_error([[
+--:: f = (string) -> nil
+local f --: f
+local x --: unknown
+f(x)
+]], "must be narrowed")
+    end)
+
+    assert.it("any: field access is allowed", function()
+        no_errors([[
+local x --: any
+local y = x.foo
+]])
+    end)
+
+    assert.it("any: call is allowed", function()
+        no_errors([[
+local x --: any
+x()
+]])
+    end)
+
+    assert.it("any: arithmetic is allowed", function()
+        no_errors([[
+local x --: any
+local y = x + 1
+]])
+    end)
+
+    assert.it("any: passing to typed param is allowed", function()
+        no_errors([[
+--:: f = (string) -> nil
+local f --: f
+local x --: any
+f(x)
+]])
+    end)
+end)

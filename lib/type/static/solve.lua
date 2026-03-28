@@ -179,7 +179,8 @@ end
 local function meta_op_ret_impl(ctx, op_name, tid)
     tid = find(ctx, tid)
     local t = ctx.types:get(tid)
-    if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN then return ctx.T_ANY end
+    if t.tag == TAG_ANY then return ctx.T_ANY end
+    if t.tag == TAG_UNKNOWN then return nil end  -- unknown must be narrowed first
     if t.tag == TAG_TABLE then
         local r = table_meta_op_ret(ctx, tid, op_name)
         if r then return r end
@@ -451,8 +452,13 @@ local function solve_index(ctx, c)
         local obj_tid = find(ctx, obj_tid_raw)
         local obj_t   = ctx.types:get(obj_tid)
 
-        if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
-            bind_to(ctx, res_tid, obj_t.tag == TAG_ANY and ctx.T_ANY or ctx.T_UNKNOWN)
+        if obj_t.tag == TAG_ANY then
+            bind_to(ctx, res_tid, ctx.T_ANY)
+            return true
+        end
+        if obj_t.tag == TAG_UNKNOWN then
+            add_error(ctx, line, col, "value of type `unknown` must be narrowed before indexing")
+            bind_to(ctx, res_tid, ctx.T_ANY)
             return true
         end
         if obj_t.tag == TAG_NEVER then
@@ -518,7 +524,12 @@ local function solve_index(ctx, c)
             bind_to(ctx, res_tid, result)
             return true
         end
-        if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
+        if obj_t.tag == TAG_ANY then
+            bind_to(ctx, res_tid, ctx.T_ANY)
+            return true
+        end
+        if obj_t.tag == TAG_UNKNOWN then
+            add_error(ctx, line, col, "value of type `unknown` must be narrowed before indexing")
             bind_to(ctx, res_tid, ctx.T_ANY)
             return true
         end
@@ -540,9 +551,13 @@ local function solve_index(ctx, c)
     local obj_tid  = find(ctx, obj_tid_raw)
     local obj_t = ctx.types:get(obj_tid)
 
-    if obj_t.tag == TAG_ANY or obj_t.tag == TAG_UNKNOWN then
-        -- Resolve result to T_ANY/T_UNKNOWN silently
-        bind_to(ctx, res_tid, obj_t.tag == TAG_ANY and ctx.T_ANY or ctx.T_UNKNOWN)
+    if obj_t.tag == TAG_ANY then
+        bind_to(ctx, res_tid, ctx.T_ANY)
+        return true
+    end
+    if obj_t.tag == TAG_UNKNOWN then
+        add_error(ctx, line, col, "value of type `unknown` must be narrowed before indexing")
+        bind_to(ctx, res_tid, ctx.T_ANY)
         return true
     end
 
@@ -665,8 +680,11 @@ local function solve_index(ctx, c)
             elseif mt.tag == TAG_ANY then
                 bind_to(ctx, res_tid, ctx.T_ANY)
                 return true
-            elseif mt.tag == TAG_UNKNOWN or mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
-                -- Unknown/unresolved types are open — field may exist
+            elseif mt.tag == TAG_UNKNOWN then
+                -- unknown in a union: field access on this arm requires narrowing
+                field_types[#field_types + 1] = ctx.T_UNKNOWN
+            elseif mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
+                -- Unresolved — field may exist
                 open_miss = true
             else
                 closed_miss = true
@@ -705,7 +723,11 @@ local function solve_index(ctx, c)
             elseif mt.tag == TAG_ANY then
                 bind_to(ctx, res_tid, ctx.T_ANY)
                 return true
-            elseif mt.tag == TAG_UNKNOWN or mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
+            elseif mt.tag == TAG_UNKNOWN then
+                -- unknown in an intersection: result is unknown (requires narrowing at use site)
+                field_types[#field_types + 1] = ctx.T_UNKNOWN
+                all_miss = false
+            elseif mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
                 any_open = true
                 all_miss = false
             end
@@ -737,7 +759,12 @@ local function solve_callable(ctx, c)
     local line, col  = c[5], c[6]
     local callee_t   = ctx.types:get(callee_tid)
 
-    if callee_t.tag == TAG_ANY or callee_t.tag == TAG_UNKNOWN then
+    if callee_t.tag == TAG_ANY then
+        bind_to(ctx, ret_tid, ctx.T_ANY)
+        return true
+    end
+    if callee_t.tag == TAG_UNKNOWN then
+        add_error(ctx, line, col, "value of type `unknown` must be narrowed before calling")
         bind_to(ctx, ret_tid, ctx.T_ANY)
         return true
     end
