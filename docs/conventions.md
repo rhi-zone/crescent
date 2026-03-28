@@ -21,17 +21,19 @@ if not value then error(err) end
 
 ## Codec interface (formats)
 
-Every format library exposes:
+Every format library exposes both a descriptive name and uniform slot names:
 
 ```lua
-M.encode(value, opts?) -> string | (nil, errmsg)
-M.decode(string, opts?) -> value | (nil, errmsg)
+M.string_to_foo(s, opts?) -> foo | (nil, errmsg)   -- descriptive primary
+M.foo_to_string(v, opts?) -> string | (nil, errmsg) -- descriptive primary
+M.decode = M.string_to_foo   -- uniform interface alias
+M.encode = M.foo_to_string   -- uniform interface alias
 ```
 
-- `encode`/`decode` are the canonical slot names. This is the interface you program
-  against when swapping codecs or passing one as a value.
-- Internal helpers may use descriptive names (`headers_to_string`, `parse_frame`, etc.)
-  but the public interface is always `encode`/`decode`.
+- `a_to_b` names are the primary — they say exactly what goes in and what comes out.
+  `parse_request` is ambiguous (from bytes? from a file?). `string_to_request` is not.
+- `encode`/`decode` are always aliased as the uniform slot names for swappability —
+  when passing a codec as a value or writing code that works across formats.
 - Null sentinels: if the format distinguishes null from absent, expose `M.null` as a
   sentinel value. Callers use `value == M.null` to test.
 - Options: pass as a trailing table `opts`. Never positional booleans.

@@ -61,7 +61,7 @@ cd docs && bun dev           # Local docs
 
 See `docs/conventions.md` for the full spec. Short version:
 - Errors: `(nil, errmsg)` return, never throw from data errors
-- Codecs: `encode(value, opts?) -> string`, `decode(string, opts?) -> value` — uniform slot names
+- Codecs: `string_to_foo`/`foo_to_string` as primary names (type-in-the-name); `encode`/`decode` always aliased for swappability
 - Protocols: `connect` / `send` / `recv` / `close` — transport injected via opts, never created internally
 - Tiers: system > FFI > pure Lua, selected at load time, each independent, `M._tier` for introspection
 - Annotations: `--:` / `--::` only, `unknown` not `any`
