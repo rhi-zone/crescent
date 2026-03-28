@@ -105,6 +105,7 @@ local nothing_alt_impl = {
 }
 
 local function make_nothing_mt()
+	--: { [any]: any }
 	local index = {
 		[Mappable]   = nothing_f_impl,
 		[Applicable] = nothing_ap_impl,
@@ -211,6 +212,7 @@ local just_alt_impl = {
 }
 
 local function make_just_mt()
+	--: { [any]: any }
 	local index = {
 		[Mappable]   = just_f_impl,
 		[Applicable] = just_ap_impl,
