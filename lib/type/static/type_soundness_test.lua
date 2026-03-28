@@ -2584,4 +2584,83 @@ ffi.cdef("int get_val(void);")
 local fn = ffi.C.get_val
 ]])
     end)
+
+    assert.it("char* returning function — result is string, no narrowing needed", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("char* getenv(const char* name);")
+local s = ffi.C.getenv("HOME")
+local n = #s
+]])
+    end)
+
+    assert.it("void-returning function — result is nil", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("void free_buf(int handle);")
+local r = ffi.C.free_buf(0)
+]])
+    end)
+
+    assert.it("wrong arg type to C function — errors", function()
+        has_error([[
+local ffi = require("ffi")
+ffi.cdef("int add(int a, int b);")
+local r = ffi.C.add("hello", 2)
+]])
+    end)
+
+    assert.it("enum constant accessible via ffi.C — typed as integer", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("enum { ENOENT = 2, EACCES = 13 };")
+local code = ffi.C.ENOENT
+local _sum = code + 1
+]])
+    end)
+
+    assert.it("struct pointer — fields accessible via [0] dereference", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("typedef struct { int x; int y; } Vec2;")
+ffi.cdef("Vec2* get_vec(void);")
+local p = ffi.C.get_vec()
+local v = p[0]
+local _x = v.x + v.y
+]])
+    end)
+
+    assert.it("struct pointer — direct field access (intersection spreads struct fields)", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("typedef struct { int width; int height; } Size;")
+ffi.cdef("Size* get_size(void);")
+local p = ffi.C.get_size()
+local _w = p.width
+]])
+    end)
+
+    assert.it("array type — integer indexing yields element type", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("int* get_array(void);")
+]])
+    end)
+
+    assert.it("vararg C function — callable with extra args", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("int strlen(const char* s, ...);")
+local n = ffi.C.strlen("hello")
+]])
+    end)
+
+    assert.it("typedef resolves and is reusable across cdefs", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("typedef struct { float r; float g; float b; } Color;")
+ffi.cdef("Color make_color(float r, float g, float b);")
+local c = ffi.C.make_color(1.0, 0.5, 0.0)
+]])
+    end)
 end)
