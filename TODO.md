@@ -15,7 +15,7 @@
 
 ## typechecker warnings / quality-of-life
 
-- [ ] **Redundant type assertion warning** — when a `--[[: T]]` cast asserts the exact same type the expression already has, emit a warning (like eslint's no-unnecessary-type-assertion). Requires comparing the inferred type of the expression against the asserted type via try_unify in both directions.
+- [ ] **Redundant type assertion warning** — when a `--[[: T]]` cast asserts the exact same type the expression already has, emit a warning (like eslint's no-unnecessary-type-assertion). Must use structural equality, not mutual unifiability — `any` unifies bidirectionally with everything but is not the same type as anything else.
 
 ## typechecker narrowing gaps
 
