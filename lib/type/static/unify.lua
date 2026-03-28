@@ -208,12 +208,35 @@ local function meta_intern_id(ctx, name)
     return intern_mod.intern(ctx.pool, name)
 end
 
+-- Shallow copy of a 2D seen table.
+-- Used before disjunctive iterations (union RHS, intersection LHS) so that
+-- entries set by a failed alternative don't contaminate subsequent alternatives.
+-- Each branch inherits the parent's cycle-guard entries (the current proof path)
+-- but sibling branches cannot see each other's entries.
+local function copy_seen(s)
+    local c = {}
+    for k, v in pairs(s) do
+        local iv = {}
+        for k2 in pairs(v) do iv[k2] = true end
+        c[k] = iv
+    end
+    return c
+end
+
 -- unify(ctx, a, b): check if a is assignable to b, binding vars as needed.
 -- Returns true, or false + error_message [+ detail_table]
---: (Ctx, integer, integer) -> (boolean, string?, UnifyDetail?)
-function M.unify(ctx, a, b)
+-- seen: coinductive cycle guard — pair already being unified returns true immediately.
+--: (Ctx, integer, integer, { [integer]: { [integer]: boolean }? }?) -> (boolean, string?, UnifyDetail?)
+function M.unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)
+
+    -- Coinductive cycle detection: if we're already unifying (a,b) in this chain,
+    -- assume compatible. Handles recursive/mutually-referential table types (typeclasses, etc).
+    seen = seen or {}
+    if seen[a] and seen[a][b] then return true end
+    seen[a] = seen[a] or {}
+    seen[a][b] = true
 
     -- Named types (unresolved): treat as any
     if ctx.types:get(a).tag == TAG_NAMED then return true end
@@ -328,7 +351,7 @@ function M.unify(ctx, a, b)
     if ta.tag == TAG_UNION then
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
             local mid = find(ctx, ctx.lists:get(i))
-            local ok, err = M.unify(ctx, mid, b)
+            local ok, err = M.unify(ctx, mid, b, seen)
             if not ok then
                 return false, types_mod.display(ctx, mid) .. " in union is not assignable to " .. types_mod.display(ctx, b)
             end
@@ -336,12 +359,13 @@ function M.unify(ctx, a, b)
         return true
     end
 
-    -- Union on RHS: LHS must be assignable to at least one member
+    -- Union on RHS: LHS must be assignable to at least one member.
+    -- Use copy_seen for each alternative: failed branches must not contaminate siblings.
     if tb.tag == TAG_UNION then
         local best_detail, best_depth = nil, -1
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
             local mid = find(ctx, ctx.lists:get(i))
-            local ok, _, detail = M.unify(ctx, a, mid)
+            local ok, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
             if ok then return true end
             --: UnifyDetail?
             local det = detail
@@ -360,16 +384,17 @@ function M.unify(ctx, a, b)
     -- Intersection on RHS: LHS must satisfy all members
     if tb.tag == TAG_INTERSECTION then
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            local ok, err = M.unify(ctx, a, ctx.lists:get(i))
+            local ok, err = M.unify(ctx, a, ctx.lists:get(i), seen)
             if not ok then return false, err end
         end
         return true
     end
 
-    -- Intersection on LHS: at least one member satisfies RHS
+    -- Intersection on LHS: at least one member satisfies RHS.
+    -- Use copy_seen for each alternative.
     if ta.tag == TAG_INTERSECTION then
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
-            local ok = M.unify(ctx, ctx.lists:get(i), b)
+            local ok = M.unify(ctx, ctx.lists:get(i), b, copy_seen(seen))
             if ok then return true end
         end
         -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
@@ -384,7 +409,7 @@ function M.unify(ctx, a, b)
                         local mid = find(ctx, ctx.lists:get(j))
                         local mfe = types_mod.table_field(ctx, mid, bfe.name_id)
                         if mfe then
-                            local ok2 = M.unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id))
+                            local ok2 = M.unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id), seen)
                             if ok2 then found = true; break end
                         end
                     end
@@ -413,7 +438,7 @@ function M.unify(ctx, a, b)
                 bp_id = ctx.T_NIL
             end
             -- Contravariant: b's param assignable to a's param
-            local ok, err = M.unify(ctx, bp_id, ap_id)
+            local ok, err = M.unify(ctx, bp_id, ap_id, seen)
             if not ok then
                 return false, "parameter " .. (i + 1) .. ": " .. (err or "type mismatch")
             end
@@ -432,7 +457,7 @@ function M.unify(ctx, a, b)
             else
                 br_id = ctx.T_NIL
             end
-            local ok, err = M.unify(ctx, ar_id, br_id)
+            local ok, err = M.unify(ctx, ar_id, br_id, seen)
             if not ok then
                 return false, "return " .. (i + 1) .. ": " .. (err or "type mismatch")
             end
@@ -485,7 +510,7 @@ function M.unify(ctx, a, b)
                         local kt = find(ctx, ctx.lists:get(j))
                         if ctx.types:get(kt).tag == TAG_STRING then
                             local vt = find(ctx, ctx.lists:get(j + 1))
-                            local ok = M.unify(ctx, vt, bft)
+                            local ok = M.unify(ctx, vt, bft, seen)
                             if ok then found = true; break end
                         end
                         j = j + 2
@@ -500,7 +525,7 @@ function M.unify(ctx, a, b)
                 end
             else
                 local aft = find(ctx, afe.type_id)
-                local ok, err, detail = M.unify(ctx, aft, bft)
+                local ok, err, detail = M.unify(ctx, aft, bft, seen)
                 if not ok then
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                     --: UnifyDetail?
@@ -526,9 +551,9 @@ function M.unify(ctx, a, b)
             local j = ais
             while j < ais + ail - 1 do
                 local ak = find(ctx, ctx.lists:get(j))
-                if M.unify(ctx, ak, bk) then
+                if M.unify(ctx, ak, bk, seen) then
                     local av = find(ctx, ctx.lists:get(j + 1))
-                    local ok, err = M.unify(ctx, av, bv)
+                    local ok, err = M.unify(ctx, av, bv, seen)
                     if not ok then
                         return false, "indexer value: " .. (err or "type mismatch")
                     end
@@ -554,7 +579,7 @@ function M.unify(ctx, a, b)
                             local fname = intern_mod.get(ctx.pool, afe.name_id)
                             if fname and fname:match("^%d+$") then
                                 local av = find(ctx, afe.type_id)
-                                local ok, err = M.unify(ctx, av, bv)
+                                local ok, err = M.unify(ctx, av, bv, seen)
                                 if not ok then
                                     return false, "positional element " .. fname .. ": " .. (err or "type mismatch")
                                 end
@@ -582,7 +607,7 @@ function M.unify(ctx, a, b)
                     return false, "missing metatable slot '#" .. mname .. "'"
                 end
             else
-                local ok, err = M.unify(ctx, find(ctx, amf.type_id), find(ctx, bfe.type_id))
+                local ok, err = M.unify(ctx, find(ctx, amf.type_id), find(ctx, bfe.type_id), seen)
                 if not ok then
                     local mname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
                     return false, "#" .. mname .. ": " .. (err or "type mismatch")
@@ -620,7 +645,7 @@ function M.unify(ctx, a, b)
                             if key_ok then
                                 local bv = find(ctx, ctx.lists:get(j + 1))
                                 local av = find(ctx, afe.type_id)
-                                local ok2, err2 = M.unify(ctx, av, bv)
+                                local ok2, err2 = M.unify(ctx, av, bv, seen)
                                 if ok2 then
                                     covered = true; break
                                 else
@@ -648,7 +673,7 @@ function M.unify(ctx, a, b)
         for i = 0, ta.data[1] - 1 do
             local ae = find(ctx, ctx.lists:get(ta.data[0] + i))
             local be = find(ctx, ctx.lists:get(tb.data[0] + i))
-            local ok, err = M.unify(ctx, ae, be)
+            local ok, err = M.unify(ctx, ae, be, seen)
             if not ok then
                 return false, "tuple element " .. (i + 1) .. ": " .. (err or "type mismatch")
             end
@@ -673,10 +698,17 @@ end
 
 -- Read-only unification: checks assignability without mutating type variables.
 -- Returns ok (boolean). Does not bind type variables.
---: (Ctx, integer, integer) -> boolean
-function M.try_unify(ctx, a, b)
+-- seen: coinductive cycle guard (same semantics as M.unify).
+--: (Ctx, integer, integer, { [integer]: { [integer]: boolean }? }?) -> boolean
+function M.try_unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)
+
+    -- Coinductive cycle detection
+    seen = seen or {}
+    if seen[a] and seen[a][b] then return true end
+    seen[a] = seen[a] or {}
+    seen[a][b] = true
 
     local ta = ctx.types:get(a)
     local tb = ctx.types:get(b)
@@ -697,7 +729,7 @@ function M.try_unify(ctx, a, b)
     -- Union LHS: all members must be assignable to b.
     if ta.tag == TAG_UNION then
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
-            if not M.try_unify(ctx, ctx.lists:get(i), b) then return false end
+            if not M.try_unify(ctx, ctx.lists:get(i), b, seen) then return false end
         end
         return true
     end
@@ -738,25 +770,26 @@ function M.try_unify(ctx, a, b)
         end
     end
 
+    -- Disjunctive: use copy_seen so failed alternatives don't contaminate siblings.
     if tb.tag == TAG_UNION then
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            if M.try_unify(ctx, a, ctx.lists:get(i)) then return true end
+            if M.try_unify(ctx, a, ctx.lists:get(i), copy_seen(seen)) then return true end
         end
         return false
     end
 
-    -- Intersection on RHS: a must satisfy ALL members (a must be assignable to each constraint).
+    -- Intersection on RHS: a must satisfy ALL members (conjunctive — shared seen is fine).
     if tb.tag == TAG_INTERSECTION then
         for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            if not M.try_unify(ctx, a, ctx.lists:get(i)) then return false end
+            if not M.try_unify(ctx, a, ctx.lists:get(i), seen) then return false end
         end
         return true
     end
 
-    -- Intersection on LHS: satisfies b if ANY member satisfies b (intersection <: each member).
+    -- Intersection on LHS: satisfies b if ANY member satisfies b (disjunctive — copy seen).
     if ta.tag == TAG_INTERSECTION then
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
-            if M.try_unify(ctx, ctx.lists:get(i), b) then return true end
+            if M.try_unify(ctx, ctx.lists:get(i), b, copy_seen(seen)) then return true end
         end
         -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
         if tb.tag == TAG_TABLE then
@@ -769,7 +802,7 @@ function M.try_unify(ctx, a, b)
                         local mid = find(ctx, ctx.lists:get(j))
                         local mfe = types_mod.table_field(ctx, mid, bfe.name_id)
                         if mfe then
-                            if M.try_unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id)) then
+                            if M.try_unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id), seen) then
                                 found = true; break
                             end
                         end
@@ -788,7 +821,7 @@ function M.try_unify(ctx, a, b)
         for i = 0, max_p - 1 do
             local ap = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i)) or ctx.T_NIL
             local bp = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i)) or ctx.T_NIL
-            if not M.try_unify(ctx, bp, ap) then return false end
+            if not M.try_unify(ctx, bp, ap, seen) then return false end
         end
         return true
     end
@@ -799,7 +832,7 @@ function M.try_unify(ctx, a, b)
             local afe = types_mod.table_field(ctx, a, bfe.name_id)
             if not afe and band(bfe.flags, FLAG_OPTIONAL) == 0 then return false end
             if afe then
-                if not M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id)) then
+                if not M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id), seen) then
                     return false
                 end
             end
