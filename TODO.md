@@ -1,10 +1,22 @@
 # TODO
 
-## CRITICAL: fuzz the typechecker against known invariants
+## CRITICAL: fuzz the typechecker against the full type system spec as invariants
 
 **Prerequisite: typechecker must be in a non-broken state before starting.**
 
-The test suite tests behaviors, not invariants. Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert invariants hold — not specific outputs. Known invariants to start from: substituting a subtype for a variable in an accepted program must still be accepted; narrowing a union must produce a type assignable to the original; if a program is rejected, adding a correct type annotation must not make it pass.
+The test suite tests behaviors, not invariants. The invariants must encode the **spirit** of the type system from first principles — not mirror the implementation, which is likely wrong in places.
+
+The full type system expressed as invariants (not exhaustive, but the spirit):
+- **Subtyping**: if `A <: B`, every program that typechecks with a value of type B must also typecheck with a value of type A in its place
+- **Union introduction**: a value of type A is assignable to `A | B`; a value of type B is assignable to `A | B`
+- **Union elimination**: code that handles both A and B handles `A | B`
+- **Intersection**: a value of type `A & B` is usable as both A and B independently
+- **Function**: calling `(A) -> B` with a value of type A always produces a value of type B; calling with a non-A is always rejected
+- **Narrowing**: after a nil check on `T | nil`, the type in the non-nil branch is `T`; `T` is a subtype of the original
+- **Annotation soundness**: a function whose body is accepted with return type `T` annotation cannot produce a value outside `T`
+- **Multi-return**: slot N of a multi-return must be the declared type for that slot; extra slots are nil
+
+Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert these invariants hold across random inputs. The fuzz targets should be derived from the spec, not from reading the implementation.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
