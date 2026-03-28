@@ -6800,3 +6800,82 @@ local result = m.greet("hello")
 ]])
     end)
 end)
+
+assert.describe("checker: multi-return narrowing via aliased function call", function()
+    assert.it("local alias of string.find narrows both variables after guard", function()
+        no_errors([[
+local find = string.find
+local function test(s)
+    local a, b = find(s, "x", 1, true)
+    if not a then return end
+    local x = a - 1
+    local y = b + 1
+end
+]])
+    end)
+
+    assert.it("single-capture alias of string.find narrows after guard", function()
+        no_errors([[
+local find = string.find
+local function test(s)
+    local a = find(s, "x", 1, true)
+    if not a then return end
+    local x = a - 1
+end
+]])
+    end)
+
+    assert.it("reassignment a,b = string.find narrows both after guard", function()
+        no_errors([[
+local function test(s)
+    local a = nil
+    local b = nil
+    a, b = string.find(s, "x", 1, true)
+    if not a then return end
+    local x = a - 1
+    local y = b + 1
+end
+]])
+    end)
+
+    assert.it("loop reassignment: c = string.find narrows after guard", function()
+        no_errors([[
+local function test(data)
+    local pos = 1
+    local crlf = nil
+    while true do
+        crlf = string.find(data, "\r\n", pos, true)
+        if not crlf then break end
+        pos = crlf + 2
+    end
+end
+]])
+    end)
+end)
+
+assert.describe("checker: loop-populated table indexer inference", function()
+    assert.it("enc[i] = v in loop adds integer indexer so enc[1] is not unknown", function()
+        no_errors([[
+local function test(data)
+    --: { [integer]: integer, ... }
+    data = data
+    local enc = {}
+    for i = 1, #data do
+        enc[i] = data[i] + 0
+    end
+    local x = enc[1]
+end
+]])
+    end)
+
+    assert.it("closed table with no integer indexer returns unknown for t[i]", function()
+        has_error([[
+--:: Point = { x: integer, y: integer }
+local function test()
+    --: Point
+    local q = { x = 1, y = 2 }
+    local z = q[1] + 1
+end
+]], "unknown")
+    end)
+end)
