@@ -6738,3 +6738,65 @@ x = f()
 ]], "cannot assign")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- module declarations: --:: module "name": T
+---------------------------------------------------------------------------
+
+assert.describe("module declarations", function()
+    -- require("bit") with typed module declaration: band result is integer
+    assert.it("require('bit').band result is integer (no error passing to integer param)", function()
+        no_errors([[
+local bit = require("bit")
+local x = bit.band(1, 2)
+--: (integer) -> nil
+local function f(n) return nil end
+f(x)
+]])
+    end)
+
+    -- require("bit") field access works without narrowing
+    assert.it("require('bit') field access no error", function()
+        no_errors([[
+local bit = require("bit")
+local y = bit.bor(3, 4)
+]])
+    end)
+
+    -- require("ffi") is typed: field access works
+    assert.it("require('ffi') field access no error", function()
+        no_errors([[
+local ffi = require("ffi")
+ffi.cdef("typedef int myint;")
+]])
+    end)
+
+    -- require of unknown module returns unknown: field access is an error
+    assert.it("require('unknown_module') field access is an error", function()
+        has_error([[
+local m = require("unknown_module")
+local x = m.foo
+]], "narrowed")
+    end)
+
+    -- user-file module declaration: --:: module "mymod": { x: integer }
+    assert.it("user --:: module declaration: require returns declared type", function()
+        no_errors([[
+--:: module "mymod": { x: integer }
+local m = require("mymod")
+local v = m.x
+--: (integer) -> nil
+local function f(n) return nil end
+f(v)
+]])
+    end)
+
+    -- user-file module declaration overrides unknown fallback
+    assert.it("user --:: module declaration makes field access valid", function()
+        no_errors([[
+--:: module "mymod": { greet: (string) -> string }
+local m = require("mymod")
+local result = m.greet("hello")
+]])
+    end)
+end)

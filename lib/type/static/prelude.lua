@@ -95,11 +95,14 @@ local function load_decls(ctx, path)
 
     local resolve = constrain_mod.resolve_annotation_type
 
-    -- Collect all ANN_DECL results.
+    -- Collect all ANN_DECL and ANN_MODULE results.
     local decls = {}
+    local module_decls = {}
     for _, r in pairs(ar.results) do
         if r.kind == defs_mod.ANN_DECL then
             decls[#decls + 1] = r
+        elseif r.kind == defs_mod.ANN_MODULE then
+            module_decls[#module_decls + 1] = r
         end
     end
 
@@ -139,6 +142,12 @@ local function load_decls(ctx, path)
             local alias = env_mod.lookup_type(ctx.scope, r.name_id)
             if alias then alias.body = resolved end
         end
+    end
+
+    -- Pass 3: resolve module declarations and store in ctx.module_types.
+    -- --:: module "name": T  declares the type returned by require("name").
+    for _, r in ipairs(module_decls) do
+        ctx.module_types[r.mod_name] = resolve(ctx, r.type_id)
     end
 
     ctx.ann = saved_ann

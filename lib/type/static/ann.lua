@@ -842,6 +842,13 @@ function M.parse_annotations(annotations, pool, filename)
                     local type_id = parse_type(s)
                     return { kind = defs.ANN_DECL, type_id = type_id, name_id = vname_id, decl_var = true }
                 end
+                -- module "name": T  — declares the type returned by require("name")
+                if word == "module" then
+                    local mod_name = scan_string(s)
+                    expect_char(s, ":")
+                    local type_id = parse_type(s)
+                    return { kind = defs.ANN_MODULE, mod_name = mod_name, type_id = type_id }
+                end
                 if word == "newtype" then
                     local name = scan_word(s)
                     if not name then scan_error(s, "expected name after 'newtype'") end

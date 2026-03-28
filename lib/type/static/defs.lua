@@ -202,6 +202,7 @@ M.FLAG_OPAQUE_KEY       = 0x08  -- field keyed by an opaque table value (typecla
 M.ANN_TYPE              = 0
 M.ANN_DECL              = 1
 M.ANN_TYPE_ARGS         = 2
+M.ANN_MODULE            = 3  -- --:: module "name": T  (declares require("name") return type)
 
 -- Operator precedence table (left * 256 + right)
 M.binop_priority = {

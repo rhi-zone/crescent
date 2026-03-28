@@ -37,26 +37,34 @@
 --:: declare newproxy = (mt: any?) -> any
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
---:: declare ffi = any
+--:: module "ffi": {
+--::   cdef:   (string) -> nil,
+--::   new:    (string, ...any) -> unknown,
+--::   cast:   (string, unknown) -> unknown,
+--::   sizeof: (string) -> integer,
+--::   typeof: (string) -> unknown,
+--::   copy:   (unknown, unknown, integer) -> nil,
+--::   fill:   (unknown, integer) -> nil,
+--::   string: (unknown, integer?) -> string,
+--::   C:      unknown,
+--:: }
+--:: module "bit": {
+--::   tobit:   (x: number) -> integer,
+--::   tohex:   (x: integer, n: integer?) -> string,
+--::   bnot:    (x: integer) -> integer,
+--::   band:    (x: integer, ...integer) -> integer,
+--::   bor:     (x: integer, ...integer) -> integer,
+--::   bxor:    (x: integer, ...integer) -> integer,
+--::   lshift:  (x: integer, n: integer) -> integer,
+--::   rshift:  (x: integer, n: integer) -> integer,
+--::   arshift: (x: integer, n: integer) -> integer,
+--::   bswap:   (x: integer) -> integer,
+--::   rol:     (x: integer, n: integer) -> integer,
+--::   ror:     (x: integer, n: integer) -> integer
+--:: }
 --:: declare _G = $GlobalScope
 --:: declare package = { path: string, cpath: string, loaded: { [string]: any, ... }, preload: { [string]: any, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
---[[::
-declare bit = {
-    tobit:   (x: number) -> integer,
-    tohex:   (x: integer, n: integer?) -> string,
-    bnot:    (x: integer) -> integer,
-    band:    (x: integer, ...integer) -> integer,
-    bor:     (x: integer, ...integer) -> integer,
-    bxor:    (x: integer, ...integer) -> integer,
-    lshift:  (x: integer, n: integer) -> integer,
-    rshift:  (x: integer, n: integer) -> integer,
-    arshift: (x: integer, n: integer) -> integer,
-    bswap:   (x: integer) -> integer,
-    rol:     (x: integer, n: integer) -> integer,
-    ror:     (x: integer, n: integer) -> integer
-}
-]]
 --:: declare jit = any
 
 ---------------------------------------------------------------------------

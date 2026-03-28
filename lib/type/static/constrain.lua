@@ -88,8 +88,9 @@ local function field_flags(ctx, name_id, base_flags)
     return base_flags
 end
 
-local ANN_TYPE = defs.ANN_TYPE
-local ANN_DECL = defs.ANN_DECL
+local ANN_TYPE   = defs.ANN_TYPE
+local ANN_DECL   = defs.ANN_DECL
+local ANN_MODULE = defs.ANN_MODULE
 
 local TAG_ANY      = defs.TAG_ANY
 local TAG_UNKNOWN  = defs.TAG_UNKNOWN
@@ -1371,6 +1372,13 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
                 local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
                 ctx._last_require_mod = mod_name
+                -- module_types: declared via --:: module "name": T (prelude or user file).
+                -- Checked before cri_loader so explicit declarations always win.
+                local declared_type = ctx.module_types[mod_name]
+                if declared_type then
+                    ctx._last_multi_return = { declared_type }
+                    return declared_type
+                end
                 if ctx.cri_loader then
                     local exports, aliases = ctx.cri_loader(ctx, mod_name)
                     if exports then
@@ -1378,6 +1386,12 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                         ctx._last_require_aliases = aliases  -- stash for NODE_LOCAL_STMT
                         return exports
                     end
+                    -- cri_loader present but unresolvable: fall through to any for error
+                    -- recovery (same behavior as before module declarations existed).
+                else
+                    -- No cri_loader and no module declaration: return unknown.
+                    -- unknown forces narrowing before use; prevents silent any spreading.
+                    return ctx.T_UNKNOWN
                 end
             end
         end
@@ -2466,10 +2480,13 @@ local function process_type_decls(ctx)
     end
     local decls = {}
     local decl_lines = {}
+    local module_decls = {}
     for line, result in pairs(ann.results) do
         if result.kind == ANN_DECL then
             decls[#decls + 1] = result
             decl_lines[result] = line
+        elseif result.kind == ANN_MODULE then
+            module_decls[#module_decls + 1] = result
         end
     end
     -- Sort by source line so forward references resolve in file order.
@@ -2603,6 +2620,12 @@ local function process_type_decls(ctx)
             end
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
         end
+    end
+
+    -- Process module declarations: --:: module "name": T
+    -- Stores the resolved type in ctx.module_types so require("name") returns T.
+    for _, r in ipairs(module_decls) do
+        ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
     end
 
     return typeof_decls

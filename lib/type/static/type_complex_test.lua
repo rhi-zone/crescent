@@ -945,15 +945,19 @@ x = { tag = "nothing" }
 end)
 
 assert.describe("ADT.define runtime integration", function()
+    -- ADT module is untyped; declare it as any for these runtime tests.
+    -- In a real project, the module would be declared with --:: module "lib.fp.adt": {...}
+    local ADT_HEADER = "--:: module \"lib.fp.adt\": any\n"
+
     assert.it("PASS: ADT.define call accepted without error", function()
-        no_error([[
+        no_error(ADT_HEADER .. [[
 local ADT = require("lib.fp.adt")
 local Maybe = ADT.define({"Just", 1}, {"Nothing", 0})
 ]])
     end)
 
     assert.it("PASS: ADT.is returns boolean", function()
-        no_error([[
+        no_error(ADT_HEADER .. [[
 local ADT = require("lib.fp.adt")
 local Maybe = ADT.define({"Just", 1}, {"Nothing", 0})
 local x = Maybe.just(42)
@@ -967,7 +971,7 @@ f(ok)
     assert.it("PASS: structural type alias used alongside ADT runtime", function()
         -- The --:: alias and the runtime ADT coexist; structural typing
         -- is checked against the alias, not against ADT.define's return type.
-        no_error([[
+        no_error(ADT_HEADER .. [[
 local ADT = require("lib.fp.adt")
 local Maybe = ADT.define({"Just", 1}, {"Nothing", 0})
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
