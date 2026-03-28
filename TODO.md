@@ -56,7 +56,7 @@ Each item below needs a self-contained spec in `docs/` (or inline in TODO) that 
 
 Items that currently lack an implementer-ready spec:
 - [x] **TAG_SPREAD in return position** — spec written: `docs/tag-spread-spec.md`. Ready to delegate.
-- [x] **`$Opaque<T, U>` two-arg form** — spec written: `docs/opaque-two-arg-spec.md`. Ready to delegate. (`--:: unseal` deferred to follow-up.)
+- [x] **`$Opaque<T, U>` two-arg form** — implemented (ae91a98). Fields in U accessible; fields not in U error; one-arg opaque field access errors. `ctx._opaque_nominals` + `ctx._opaque_view` side tables. (`--:: unseal` deferred.)
 - [x] **Argument literal widening at typevar binding** — spec written: `docs/argument-literal-widening-spec.md`. Ready to delegate.
 - [x] **GAP-HKT3 fix: `$Opaque` keys in lib/fp/** — applied to all 10 typeclass modules + 9 instance modules. `fa[Mappable.key]` now resolves via FLAG_OPAQUE_KEY. (2026-03-29, 839610f)
 - [ ] **`$Require<T>` as parameterized intrinsic** — `resolve_named_type` needs a `TAG_TYPE_CALL` case where callee is `TAG_INTRINSIC` and arg is a bound string literal; look up `ctx.module_types`. Spec needed: exact solve.lua/intrinsic.lua changes, stdlib.d.lua milestone declaration.
