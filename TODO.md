@@ -35,6 +35,10 @@ The bar to beat is `@typescript/native-preview` (tsgo / ts7 — the Go rewrite o
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
+- [x] **`unknown` was not strict** — `TAG_UNKNOWN` was behaving like `TAG_ANY`: field access, calls, and arithmetic silently passed through. Fixed in solve.lua: all three now emit errors. `unknown` requires narrowing first.
+- [x] **Coinductive cycle detection in unify.lua** — `lib/fp/maybe` and `lib/fp/either` caused stack overflow during typechecking. Fixed by adding `seen` parameter with `copy_seen()` for disjunctive iterations.
+- [ ] **`match` type adversarial coverage** — no tests for: non-exhaustive match on union (should error), wrong arm result type used downstream (should error), unreachable arm (should warn), match on `never` → `never`, nested match types. `$Require<>` has zero tests.
+
 - [x] **Field access on nil/boolean** — fixed f1a9882
 - [x] **Annotation on M.field assignment not enforced** — fixed 08fd6a4
 - [x] **`and` RHS not narrowed** — fixed 11cf377
@@ -50,7 +54,7 @@ The bar to beat is `@typescript/native-preview` (tsgo / ts7 — the Go rewrite o
 
 - [x] **`module "name": T` syntax** — `--:: module "name": T` declares the type returned by `require("name")`. Implemented in ann.lua (ANN_MODULE), constrain.lua (module_types registry), prelude.lua (loaded from .d.lua files). Undeclared modules → `unknown`. stdlib.d.lua now declares `"ffi"` and `"bit"` properly.
 - [ ] **`$Require<Path>` intrinsic** — require currently does a direct lookup; could be surfaced as a type-level `$Require<"ffi">` for use in annotations. Low priority — the lookup works, this is just syntactic.
-- [ ] **`$FfiC` intrinsic** — `ffi.C` is currently typed as `unknown` in stdlib.d.lua. It should be `$FfiC`, resolved to `ctx.T_FFI_C` (the live table accumulating fields from `ffi.cdef` calls). `T_FFI_C` is allocated and populated correctly by cdef.lua; the missing piece is wiring `$FfiC` as an intrinsic that resolves to it.
+- [x] **`$FfiC` intrinsic** — implemented. `TAG_FFIC = 26`, deferred resolution in solve.lua, cdef.lua makes `T_FFI_C` closed (undeclared C symbols error), stdlib.d.lua declares `C: $FfiC`.
 
 ## typechecker type guards and assertions
 
@@ -68,12 +72,12 @@ TypeScript's type guards can lie — `function isString(x): x is string { return
 
 ## typechecker warnings / quality-of-life
 
-- [ ] **Redundant type assertion warning** — when a `--[[: T]]` cast asserts the exact same type the expression already has, emit a warning (like eslint's no-unnecessary-type-assertion). Must use structural equality, not mutual unifiability — `any` unifies bidirectionally with everything but is not the same type as anything else.
+- [x] **Redundant type assertion warning** — implemented. `NODE_CAST_EXPR` emits a warning when a `--[[: T]]` cast asserts a structurally identical type; excludes `any` on either side.
 
 ## typechecker narrowing gaps
 
 - [ ] **Optional field narrowing** — `if opts.f then opts.f(x) end` does not narrow `opts.f` to non-nil for the call. The second field read is checked independently and still returns the union type. Workaround: extract to a local first (`local f = opts.f; if f then f(x) end`) — but this only works if the local is assigned before the check, not from a call return.
-- [ ] **`ffi.C` typed from file-local cdefs** — `ffi.C` should be a closed table type whose fields are derived from all `ffi.cdef(...)` calls in the same file. The typechecker already parses cdefs (cdecl_lex.lua + cdecl_parse.lua); the missing piece is collecting those declarations into a table type and binding it to `ffi.C` in the file's scope. File-local by design — each file's cdef block declares different things.
+- [x] **`ffi.C` typed from file-local cdefs** — implemented via `$FfiC`. `ffi.C` resolves to `ctx.T_FFI_C`, a closed table accumulated from `ffi.cdef(...)` calls in the file. Undeclared C symbols are errors.
 - [ ] **lib/ljsocket type declarations** — `lib/ljsocket` has no `--::` crescent annotations. Any library that uses ljsocket objects (lib/socket, lib/tcp, lib/websocket, lib/https) cannot be fully typechecked. Fix: add `--:: luajitsocket = { ... }` declarations to `lib/ljsocket/init.lua`.
 - [ ] **Narrowing doesn't apply to locals assigned from function call returns** — at narrowing time during constraint generation, locals assigned from function calls are still TAG_VAR (unsolved constraint variables). `types.subtract(TAG_VAR, T_NIL)` returns TAG_VAR unchanged. Workaround: add `--: T?` annotation to the receiving local so it gets a concrete type. Affects all `if not x then return end` patterns where `x` comes from a function call.
 - [x] **`or` condition narrowing overwrites previous narrowing for same variable** — `if not x or x == 0 then return end` failed to narrow `x` because the second `record_narrowing` call overwrote the first. Fixed: `record_narrowing` now chains through `narrowed[name_id]`.
@@ -90,7 +94,7 @@ they need to be rewritten before use.
 - [ ] **`lib/github/`** — uses EmmyLua `---@class` annotations instead of `--::`/`--:`, no tests. Rewrite once needed for registry tooling.
 - [ ] **`lib/markdown/`** — incomplete parser, FIXME comments, no tests. Rewrite when needed (Lumen, docs site).
 - [ ] **`lib/imap/`** — EmmyLua style, incomplete RFC 9051 parser, no init.lua, no tests. Low priority.
-- [ ] **`lib/wave/`** — WAVE/PCM format parser, no init.lua, no tests. Low priority (audio ingestion for Lumen).
+- [x] **`lib/wave/`** — rewritten with init.lua + wave_test.lua (32 assertions).
 - [ ] **`lib/socket/`** — effectively a stub (client.lua is 1 line). Superseded by `lib/ljsocket` + `lib/tcp`. Can be deleted or left until needed.
 - [ ] **`lib/https/`** — no init.lua, minimal content. Needs proper init.lua + integration with `lib/tls`.
 - [ ] **`lib/posix/`** — 6-line execv/execlp stub. Absorb into `lib/process/` or expand when needed.
@@ -102,7 +106,7 @@ Not libraries (do not rewrite, repurpose instead):
 
 ## future libraries
 
-- [ ] **`lib/orchestration/`** — nanites-equivalent orchestration substrate in pure Lua. Tasks as data (serializable tables), dynamic graph via `ctx:spawn`, frontier (pending) vs exec graph (lineage/audit), pluggable executors, combinators (map, refine, retry). Same design patterns as nanites-core but no Rust dependency. LLM calls go direct to OpenAI-compatible APIs. This is the orchestration layer for Lua programs the way nanites is for Rust programs.
+- [x] **`lib/orchestration/`** — implemented: graph.lua, context.lua, exec.lua, combinators.lua (map/retry/refine), init.lua, executor/ai.lua, orchestration_test.lua (27 assertions).
 
 - [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST; emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua` in ~/git/lua (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross. Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra annotation work.
 
