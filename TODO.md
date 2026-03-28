@@ -1,5 +1,25 @@
 # TODO
 
+## CRITICAL: multi-return representation is fundamentally broken
+
+**Prerequisite: typechecker must be in a non-broken state before starting this.**
+
+The current multi-return design has a soundness hole: `-> ((integer, integer) | (nil, string))` is interpreted as a multi-return union-of-patterns, making it impossible to annotate a function returning a *single value* of that union type. These two things are conflated and cannot be distinguished.
+
+Fix: introduce explicit spread syntax for multi-return union patterns:
+- `-> ...((integer, integer) | (nil, string))` — multi-return described by union of patterns
+- `-> ((integer, integer) | (nil, string))` — single return value of that union type
+
+Required changes:
+- Annotation parser: TAG_SPREAD in return position (`-> ...(T)`)
+- Annotation parser: TAG_SPREAD in argument lists (symmetric)
+- `solve_callable`: spread return → unify ret_tid with inner union-of-tuples; plain rl=1 → 1-tuple
+- `peek_callee_ret_union`: detect TAG_SPREAD → return inner union-of-tuples as-is; non-spread rl=1 → always wrap in 1-tuple (no union-of-tuples exception)
+- stdlib.d.lua: update `string.find`, `io.open`, and similar to `-> ...((T, T) | (nil, string))`
+- Tests: spread return narrowing, spread in arg position, single union-of-tuples value (no spread = no multi-return behavior), round-trip `fn(g())` where g has spread return
+
+Also: the return type representation has other known issues (eager narrowing requires peek workaround because locals from calls are still TAG_VAR at constraint-gen time). This redesign is the opportunity to fix the whole layer correctly.
+
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
 - [x] **Field access on nil/boolean** — fixed f1a9882
