@@ -13,6 +13,12 @@
 
 - [x] **Record spread types** — `{ ...T, k: V }`, `{ ...T, ...U }`, `{ k: V, ...T }` as type-level operations. `TAG_SPREAD` is parsed and propagated but unify.lua has no rule to merge spread fields into a concrete table type. Semantics: spread fields are merged left-to-right, later fields win on conflict. Load-bearing for: compile-time-safe builder pattern (`Builder<{ ...S, ...T }>`), `Partial`/`Pick`/`Omit` composed with spreads (already used in docs/type-system.md examples), any API that tracks accumulated type state generically. Implementation: unify.lua needs a `TAG_SPREAD` case that resolves the inner type and merges its fields into the containing table.
 
+## typechecker stdlib / module typing
+
+- [ ] **`declare x: T` syntax** — fix `stdlib.d.lua` which uses `declare x = T` (type alias syntax) instead of `declare x: T` (value declaration). `declare ffi = any` should be `declare ffi: any` pending proper typing.
+- [ ] **`module "name": T` syntax** — first-class way to declare the type of an external module. `require("ffi")` currently returns `any` because there's no module registry for external modules. `ctx.cri_loader` handles first-party crescent modules; need a parallel lookup for declared modules. `stdlib.d.lua` would contain `module "ffi": { C: $FfiC, cdef: (string) -> nil, ... }`, `module "bit": { ... }`. Without this, every `require()` of an external module returns `any` and bypasses all checking.
+- [ ] **`$FfiC` intrinsic** — `ffi.C` should be typed as `$FfiC`, a special type the checker resolves to `ctx.T_FFI_C` (the live table accumulating fields from `ffi.cdef` calls). Currently `T_FFI_C` is allocated and populated correctly but never bound to `ffi.C` in the value scope because `ffi` itself is `any`.
+
 ## typechecker warnings / quality-of-life
 
 - [ ] **Redundant type assertion warning** — when a `--[[: T]]` cast asserts the exact same type the expression already has, emit a warning (like eslint's no-unnecessary-type-assertion). Must use structural equality, not mutual unifiability — `any` unifies bidirectionally with everything but is not the same type as anything else.
