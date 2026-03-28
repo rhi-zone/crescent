@@ -76,6 +76,23 @@ local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
 end
 
+-- Widen a literal type to its base type at argument position.
+-- Applies when binding a fresh typevar (TAG_VAR) to an argument's inferred type.
+-- Rule: argument position is not a narrowing position — a literal `0` passed to a
+-- generic <T>(x: T) binds T to `integer`, not to `0`.  This lets subsequent calls
+-- with different integer literals (e.g. id(0); id(1)) all succeed.
+-- Does NOT recurse into table fields (unlike widen_deep).
+-- Does NOT apply to concrete annotated parameter types (e.g. (x: 0) -> nil).
+--   LIT_INTEGER(n) -> integer
+--   LIT_NUMBER(f)  -> number
+--   LIT_STRING(s)  -> string
+--   LIT_BOOLEAN(b) -> boolean
+--   LIT_OPAQUE_KEY -> unchanged (not a user literal)
+--: (Ctx, integer) -> integer
+local function widen_literal(ctx, tid)
+    return types_mod.widen(ctx, tid)
+end
+
 -- Resolve TAG_FFIC to ctx.T_FFI_C.
 -- If tid is TAG_FFIC, returns ctx.T_FFI_C (or T_ANY as fallback).
 -- Otherwise returns tid unchanged.
@@ -895,7 +912,17 @@ local function solve_callable(ctx, c)
                   and unify_mod.try_unify(ctx, act_r, exp_tid) then
                     -- ok
                 else
-                local widened = widen_for_sub(ctx, act_tid)
+                -- Argument-literal widening (argument position is not a narrowing position).
+                -- When exp_tid is a fresh TAG_VAR (generic instantiation), widen the actual
+                -- to its base type before binding so that e.g. id(0); id(1) both pass with
+                -- T = integer rather than T = LIT_INTEGER(0) on the first call.
+                -- For concrete annotated params (e.g. (x: 0) -> nil), the fast path already
+                -- handles direct assignability; we reach here only when fast path is skipped
+                -- (TAG_VAR, closed table, or contains free vars), so widening is correct in
+                -- all three cases.
+                local widened = (et.tag == TAG_VAR or et.tag == TAG_ROWVAR)
+                    and widen_literal(ctx, act_tid)
+                    or  widen_for_sub(ctx, act_tid)
                 local ok, err = unify_mod.unify(ctx, widened, exp_tid)
                 if not ok then
                     -- "might also be" union message

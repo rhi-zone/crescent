@@ -7253,3 +7253,97 @@ local len = e - s
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Argument literal widening
+-- Literals passed to generic functions widen to their base type before binding
+-- the typevar, so id(0); id(1) both pass with T = integer, not T = LIT_INTEGER(0).
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: argument literal widening", function()
+    assert.it("id(0); id(1) both pass — different integer literals, same generic", function()
+        v3_no_errors([[
+--: <A>(x: A) -> A
+local function id(x) return x end
+local a = id(0)
+local b = id(1)
+]])
+    end)
+
+    assert.it("id(0); id('x') passes — different literal types, each call gets fresh T", function()
+        v3_no_errors([[
+--: <A>(x: A) -> A
+local function id(x) return x end
+local a = id(0)
+local b = id("x")
+]])
+    end)
+
+    assert.it("sel(0, 1) passes — two integer literals to same typevar in one call", function()
+        v3_no_errors([[
+--: <A>(x: A, y: A) -> A
+local function sel(x, y) return x end
+local r = sel(0, 1)
+]])
+    end)
+
+    assert.it("sel('a', 'b') passes — two string literals to same typevar in one call", function()
+        v3_no_errors([[
+--: <A>(x: A, y: A) -> A
+local function sel(x, y) return x end
+local r = sel("a", "b")
+]])
+    end)
+
+    assert.it("sel(true, false) passes — two boolean literals to same typevar in one call", function()
+        v3_no_errors([[
+--: <A>(x: A, y: A) -> A
+local function sel(x, y) return x end
+local r = sel(true, false)
+]])
+    end)
+
+    assert.it("multiple calls with different literal types all pass", function()
+        v3_no_errors([[
+--: <A>(x: A) -> A
+local function id(x) return x end
+local a = id(0)
+local b = id(1)
+local c = id(42)
+local d = id("hello")
+local e = id(true)
+]])
+    end)
+
+    assert.it("concrete annotation (x: 0) rejects 1 — widening does not apply to concrete params", function()
+        has_error([[
+--: (x: 0) -> nil
+local function zero_only(x) end
+local a = zero_only(1)
+]], "cannot pass")
+    end)
+
+    assert.it("concrete annotation (x: 0) accepts 0", function()
+        no_errors([[
+--: (x: 0) -> nil
+local function zero_only(x) end
+local a = zero_only(0)
+]])
+    end)
+
+    assert.it("sel(0, 'x') errors — different base types to same typevar", function()
+        v3_has_error([[
+--: <A>(x: A, y: A) -> A
+local function sel(x, y) return x end
+local r = sel(0, "x")
+]], "cannot pass")
+    end)
+
+    assert.it("require() still returns declared module type, not unknown", function()
+        no_errors([[
+--:: module "mymod": { value: integer }
+local m = require("mymod")
+local v = m.value + 1
+]])
+    end)
+end)
