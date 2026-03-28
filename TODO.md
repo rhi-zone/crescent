@@ -16,7 +16,18 @@ The full type system expressed as invariants (not exhaustive, but the spirit):
 - **Annotation soundness**: a function whose body is accepted with return type `T` annotation cannot produce a value outside `T`
 - **Multi-return**: slot N of a multi-return must be the declared type for that slot; extra slots are nil
 
-Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert these invariants hold across random inputs. The fuzz targets should be derived from the spec, not from reading the implementation.
+Every feature needs its own invariant class:
+- **Spread multi-return**: slot extraction, narrowing propagation across slots, spread in argument position
+- **HKTs**: applying a type constructor to a type argument produces the correct instantiation; HKT + generic constraints compose correctly
+- **Every intrinsic** (`pcall`, `type()`, `assert`, `$FfiC`, `$Require`, etc.): each intrinsic has a specific contract that must hold under all inputs
+- **Match/narrowing patterns**: `if type(x) == "string"`, `if x then`, `if not x`, `if x == nil`, `and`/`or` chains — each must narrow to exactly what the spec says, no more, no less
+- **Generic constraints**: a generic `<T: Constraint>` rejects instantiations that violate the constraint; accepts all that satisfy it
+- **Literal types**: `1` is assignable to `integer` and `1` but not `2`; literal widening is explicit not implicit
+- **Generic constraints on HKTs**: `<F: Functor>` where F is itself a type constructor — fmap must typecheck correctly for any valid F
+
+Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert these invariants hold across random inputs. Fuzz targets derived from the spec, not the implementation.
+
+**Performance**: include a benchmark gate — if typechecking throughput on a fixed corpus regresses beyond a threshold, the fuzz suite should flag it. The typechecker has a performance bar (tsgo-competitive) and regressions are as bad as correctness failures.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
