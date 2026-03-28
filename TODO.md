@@ -73,6 +73,7 @@ TypeScript's type guards can lie — `function isString(x): x is string { return
 ## typechecker warnings / quality-of-life
 
 - [x] **Redundant type assertion warning** — implemented. `NODE_CAST_EXPR` emits a warning when a `--[[: T]]` cast asserts a structurally identical type; excludes `any` on either side.
+- [ ] **Error message quoting audit** — `solve.lua`, `constrain.lua`, and `errors.lua` mix single-quote and backtick style for type names in error messages. All type names in error messages should use backticks. Needs a grep-and-fix sweep.
 
 ## typechecker narrowing gaps
 
@@ -91,12 +92,12 @@ no init.lua, no tests, incomplete, or just placeholder files). Do not rely on th
 they need to be rewritten before use.
 
 - [ ] **`lib/mud_cp/`** — MUD Client Protocol (moo.mud.org/mcp/mcp2.html). Stubs with FIXME/TODO throughout, wrong annotation style, no tests. Low priority; rewrite if/when MUD substrate needs it.
-- [ ] **`lib/github/`** — uses EmmyLua `---@class` annotations instead of `--::`/`--:`, no tests. Rewrite once needed for registry tooling.
+- [x] **`lib/github/`** — rewritten with crescent annotations and tests (9 assertions).
 - [ ] **`lib/markdown/`** — incomplete parser, FIXME comments, no tests. Rewrite when needed (Lumen, docs site).
 - [ ] **`lib/imap/`** — EmmyLua style, incomplete RFC 9051 parser, no init.lua, no tests. Low priority.
 - [x] **`lib/wave/`** — rewritten with init.lua + wave_test.lua (32 assertions).
 - [ ] **`lib/socket/`** — effectively a stub (client.lua is 1 line). Superseded by `lib/ljsocket` + `lib/tcp`. Can be deleted or left until needed.
-- [ ] **`lib/https/`** — no init.lua, minimal content. Needs proper init.lua + integration with `lib/tls`.
+- [ ] **`lib/https/`** — client.lua and init.lua done (callbacks on instance, receive added, per-request TLS context). serverx.lua deleted (was broken stub). Certificate verification still disabled by default.
 - [ ] **`lib/posix/`** — 6-line execv/execlp stub. Absorb into `lib/process/` or expand when needed.
 
 Not libraries (do not rewrite, repurpose instead):
@@ -106,7 +107,21 @@ Not libraries (do not rewrite, repurpose instead):
 
 ## future libraries
 
+See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteries.md is authoritative.
+
 - [x] **`lib/orchestration/`** — implemented: graph.lua, context.lua, exec.lua, combinators.lua (map/retry/refine), init.lua, executor/ai.lua, orchestration_test.lua (27 assertions).
+- [ ] **`lib/cli/`** — arg-parsing library. Namespace freed (old `lib/cli/` renamed to `lib/crescent_examples/`). Not yet implemented.
+- [ ] **`lib/datetime/`** — date/time parsing, formatting, arithmetic. Critical missing primitive.
+- [ ] **`lib/regex/`** — PCRE or LPEG wrapper with crescent-native API.
+- [ ] **`lib/uuid/`** — UUID v4/v7 generation.
+- [ ] **`lib/log/`** — structured logging/tracing with levels and sinks.
+- [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
+- [ ] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
+- [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
+- [ ] **`lib/reactive/`** — reactive signals. `lib/reactive_optics/` combines with `lib/fp/` optics.
+- [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
+- [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
+- [ ] **`lib/parse/`** / **`lib/asm/`** / **`lib/ir/`** — language tooling vertical.
 
 - [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST; emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua` in ~/git/lua (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross. Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra annotation work.
 
@@ -368,7 +383,7 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] No tests — add coverage for query, parameter binding, iteration, error paths (sqlite_test.lua, 72 assertions)
 - [x] `db:close()` bug: passes `self.db` (`sqlite3 *[1]`) to `sqlite3_close_v2` which expects `sqlite3 *`; should be `self.db[0]` — fixed (4b9ae58)
 - [ ] blob support missing (TODO in source) — `sqlite3_bind_blob` declared in FFI cdef but unreachable from Lua API
-- [ ] macOS: dlopen path for libsqlite3 not set (Linux-only currently)
+- [x] macOS: dlopen path for libsqlite3 — fixed with pcall-based multi-name fallback (commit 4f67ac9)
 
 #### pkg
 - [x] `install.lua`: resolver and downloader — implemented (resolve, fetch, link, run)

@@ -41,8 +41,13 @@ cd docs && bun dev           # Local docs
 - Design decisions, key insights → docs/ or CLAUDE.md
 - Future/deferred scope → TODO.md **before** writing any code, not after
 - **Every observed problem → TODO.md. No exceptions.** Code comments and conversation mentions are not tracked items. If you write a TODO comment in source, the next action is to open TODO.md and write the entry.
+- **Bugs and gaps found during testing → TODO.md in the same commit, not just the commit message.** A gap mentioned only in a commit message is invisible to future sessions.
+- **Completed items → mark `[x]` in TODO.md in the same commit that completes them.** Stale `[ ]` entries for done work are false debt.
+- **Every design decision with API/syntax implications → CLAUDE.md or docs/ immediately.** If it would matter to a future session that has never seen this conversation, write it now.
 
-**Conversation is not memory.** Anything said in chat evaporates at session end. If it implies future behavior change, write it to CLAUDE.md immediately — or it will not happen.
+**Conversation is not memory.** Anything said in chat evaporates at session end — including within long sessions due to context compaction. If it implies future behavior change, write it to CLAUDE.md immediately — or it will not happen.
+
+**`docs/batteries.md` is the definitive ecosystem scope document.** Before discussing future libraries or the project roadmap, read it. It tracks what's planned, what's done, and the full vertical stack. If a new library is decided on, add it to batteries.md AND TODO.md.
 
 **Warning — these phrases mean something needs to be written down right now:**
 - "I won't do X again" / "I'll remember to..." / "I've learned that..."
