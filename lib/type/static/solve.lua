@@ -427,9 +427,9 @@ local function solve_bound(ctx, c)
                 local bound_name = intern_mod.get(ctx.pool, bt.data[0]) or "?"
                 local kind_arrows = string.rep("* -> ", bound_arity) .. "*"
                 add_error(ctx, line, col,
-                    "type '" .. types_mod.display_short(ctx, actual)
-                    .. "' has kind *, expected kind " .. kind_arrows
-                    .. " (bound '" .. bound_name .. "' requires arity "
+                    "type `" .. types_mod.display_short(ctx, actual)
+                    .. "` has kind *, expected kind " .. kind_arrows
+                    .. " (bound `" .. bound_name .. "` requires arity "
                     .. bound_arity .. ")")
                 return false
             end
@@ -645,7 +645,7 @@ local function solve_index(ctx, c)
             end
             -- Primitive with no matching method: error
             local fname = intern_mod.get(ctx.pool, name_id) or "?"
-            add_error(ctx, line, col, "no method '" .. fname .. "' on this type")
+            add_error(ctx, line, col, "no method `" .. fname .. "` on this type")
             bind_to(ctx, res_tid, ctx.T_ANY)
             return false
         end
@@ -690,7 +690,7 @@ local function solve_index(ctx, c)
             return true
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
-        add_error(ctx, line, col, "field '" .. fname .. "' doesn't exist")
+        add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist")
         bind_to(ctx, res_tid, ctx.T_ANY)
         return false
     end
@@ -743,7 +743,7 @@ local function solve_index(ctx, c)
             return true
         end
         local fname = intern_mod.get(ctx.pool, name_id) or "?"
-        add_error(ctx, line, col, "field '" .. fname .. "' doesn't exist in union")
+        add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist in union")
         bind_to(ctx, res_tid, ctx.T_ANY)
         return false
     end
@@ -779,7 +779,7 @@ local function solve_index(ctx, c)
         end
         if all_miss and not any_open then
             local fname = intern_mod.get(ctx.pool, name_id) or "?"
-            add_error(ctx, line, col, "field '" .. fname .. "' doesn't exist")
+            add_error(ctx, line, col, "field `" .. fname .. "` doesn't exist")
             bind_to(ctx, res_tid, ctx.T_ANY)
             return false
         end
@@ -897,10 +897,10 @@ local function solve_callable(ctx, c)
                         add_error(ctx, line, col, union_msg)
                     else
                         add_error(ctx, line, col,
-                            "argument " .. (i + 1) .. ": cannot pass '"
+                            "argument " .. (i + 1) .. ": cannot pass `"
                             .. types_mod.display_short(ctx, act_tid)
-                            .. "' where '"
-                            .. types_mod.display_short(ctx, exp_tid) .. "' expected"
+                            .. "` where `"
+                            .. types_mod.display_short(ctx, exp_tid) .. "` expected"
                             .. (err and (": " .. err) or ""))
                     end
                 end
@@ -910,8 +910,8 @@ local function solve_callable(ctx, c)
                 local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
                 if not ok then
                     add_error(ctx, line, col,
-                        "missing argument " .. (i + 1) .. " (expected '"
-                        .. types_mod.display_short(ctx, exp_tid) .. "')")
+                        "missing argument " .. (i + 1) .. " (expected `"
+                        .. types_mod.display_short(ctx, exp_tid) .. "`)")
                 end
             end
         end
@@ -981,10 +981,10 @@ local function solve_callable(ctx, c)
                 if act_tid then
                     local a = find(ctx, act_tid)
                     if not unify_mod.try_unify(ctx, a, exp_tid) then
-                        reasons[#reasons + 1] = "cannot pass '"
+                        reasons[#reasons + 1] = "cannot pass `"
                             .. types_mod.display_short(ctx, a)
-                            .. "' where '"
-                            .. types_mod.display_short(ctx, exp_tid) .. "' expected"
+                            .. "` where `"
+                            .. types_mod.display_short(ctx, exp_tid) .. "` expected"
                     end
                 end
             end
@@ -1162,9 +1162,9 @@ local function solve_return(ctx, c)
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
         if not ok then
             add_error(ctx, line, col,
-                "return type mismatch: cannot return '"
+                "return type mismatch: cannot return `"
                 .. types_mod.display_short(ctx, val_tid)
-                .. "': " .. (err or "type mismatch"))
+                .. "`: " .. (err or "type mismatch"))
         end
         return ok
     end

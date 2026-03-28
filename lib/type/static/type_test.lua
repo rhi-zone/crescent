@@ -2517,14 +2517,14 @@ local t = s:lower():upper()
 local s = "hello"
 --: string
 local t = s:nosuchmethod()
-]], "no method 'nosuchmethod'")
+]], "no method `nosuchmethod`")
     end)
     assert.it("method call on non-string primitive is an error", function()
         has_error([[
 local n = 42
 --: number
 local t = n:upper()
-]], "no method 'upper'")
+]], "no method `upper`")
     end)
 end)
 
@@ -3041,7 +3041,7 @@ local y = fn("hello")
     end)
 
     assert.it("mismatch shows argument failure reason", function()
-        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "cannot pass 'true'")
+        has_error(OVERLOAD_HEADER .. "local x = fn(true)", "cannot pass `true`")
     end)
 end)
 
