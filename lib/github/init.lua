@@ -1,249 +1,113 @@
-local json_to_value = require("lib.format.json").json_to_value
-local http = require("lib.https.client")
+-- lib/github/init.lua
+-- GitHub REST API client for crescent.
+-- All methods return (value, nil) on success, (nil, errmsg) on failure.
 
-local mod = {}
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
 
---[[@class github_uri: string]]
---[[@class github_date_time: string]]
+local json = require("lib.format.json")
 
---[[@class github_commit]]
---[[@field sha string]]
---[[@field url github_uri]]
-
---[[@class github_required_status_check]]
---[[@field context string]]
---[[@field app_id integer|nil]]
-
---[[@class github_required_status_checks]]
---[[@field url? string]]
---[[@field enforcement_level? string]]
---[[@field contexts string[] ]]
---[[@field checks github_required_status_check[] ]]
---[[@field contexts_url? string]]
---[[@field strict? boolean]]
-
---[[@class github_enforce_admins]]
---[[@field url github_uri]]
---[[@field enabled boolean]]
-
---[[@class github_simple_user]]
---[[@field name? string|nil]]
---[[@field email? string|nil]]
---[[@field login string]]
---[[@field id integer]]
---[[@field node_id string]]
---[[@field avatar_url github_uri]]
---[[@field gravatar_id string|nil]]
---[[@field url github_uri]]
---[[@field html_url github_uri]]
---[[@field followers_url github_uri]]
---[[@field following_url string]]
---[[@field gists_url string]]
---[[@field starred_url string]]
---[[@field subscriptions_url github_uri]]
---[[@field organizations_url github_uri]]
---[[@field repos_url github_uri]]
---[[@field events_url string]]
---[[@field received_events_url github_uri]]
---[[@field type string]]
---[[@field site_admin boolean]]
---[[@field starred_at? string e.g. `2020-07-09T00:17:55Z`]]
-
---[[@class github_permissions]]
---[[@field pull boolean]]
---[[@field triage boolean]]
---[[@field push boolean]]
---[[@field maintain boolean]]
---[[@field admin boolean]]
-
---[[@class github_team_simple]]
---[[@field id integer]]
---[[@field node_id string]]
---[[@field url github_uri]]
---[[@field members_url string]]
---[[@field name string]]
---[[@field description string|nil]]
---[[@field permission string]]
---[[@field privacy? string]]
---[[@field html_url github_uri]]
---[[@field repositories_url github_uri]]
---[[@field slug string]]
---[[@field ldap_dn string]]
-
---[[@class github_team]]
---[[@field id integer]]
---[[@field node_id string]]
---[[@field name string]]
---[[@field slug string]]
---[[@field description string|nil]]
---[[@field privacy? string]]
---[[@field permission string]]
---[[@field permissions? github_permissions]]
---[[@field url github_uri]]
---[[@field html_url github_uri]]
---[[@field members_url string]]
---[[@field repositories_url github_uri]]
---[[@field parent github_team_simple|nil]]
-
---[[properties can be `read`/`write`... what else?]]
---[[@class github_app_permissions: { [string]: string }]]
---[[@field issues string]]
---[[@field checks string]]
---[[@field metadata string]]
---[[@field contents string]]
---[[@field deployments string]]
-
---[[@class github_app]]
---[[@field id integer]]
---[[@field slug? string]]
---[[@field node_id string]]
---[[@field owner github_simple_user|nil]]
---[[@field name string]]
---[[@field description string|nil]]
---[[@field external_url github_uri]]
---[[@field html_url github_uri]]
---[[@field created_at github_date_time]]
---[[@field updated_at github_date_time]]
---[[@field permissions github_app_permissions]]
---[[@field events string[] ]]
---[[@field installations_count? integer]]
---[[@field client_id? string]]
---[[@field client_secret? string]]
---[[@field webhook_secret? string|nil]]
---[[@field pem? string]]
-
---[[@class github_dismissal_restrictions]]
---[[@field users? github_simple_user[] ]]
---[[@field teams? github_team[] ]]
---[[@field apps? github_app[] ]]
---[[@field url? string]]
---[[@field users_url? string]]
---[[@field teams_url? string]]
-
---[[@class github_bypass_pull_request_allowances]]
---[[@field users? github_simple_user[] ]]
---[[@field teams? github_team[] ]]
---[[@field apps? github_app[] ]]
-
---[[@class github_required_pull_request_reviews]]
---[[@field url? github_uri]]
---[[@field dismissal_restrictions? github_dismissal_restrictions]]
---[[@field bypass_pull_request_allowances? github_bypass_pull_request_allowances]]
---[[@field dismiss_stale_reviews boolean]]
---[[@field require_code_owner_reviews boolean]]
---[[@field required_approving_review_count? integer `[0,6]`]]
---[[@field require_last_push_approval? boolean default `false`]]
-
---[[@class github_branch_restriction_policy]]
---[[@field url github_uri]]
---[[@field users_url github_uri]]
---[[@field teams_url github_uri]]
---[[@field apps_url github_uri]]
---[[@field users github_simple_user[] schema outdated compared to other instances]]
---[[@field teams github_team[] schema outdated compared to other instances]]
---[[@field apps github_app[] schema outdated compared to other instances]]
-
---[[@class github_feature]]
---[[@field enabled? boolean]]
-
---[[@class github_feature_default_false]]
---[[@field enabled? boolean default `false`]]
-
---[[@class github_required_signatures]]
---[[@field url github_uri]]
---[[@field enabled boolean]]
-
---[[@class github_branch_protection]]
---[[@field url? string]]
---[[@field enabled? boolean]]
---[[@field required_status_checks? github_required_status_checks]]
---[[@field enforce_admins? github_enforce_admins]]
---[[@field required_pull_request_reviews? github_required_pull_request_reviews]]
---[[@field restrictions? github_branch_restriction_policy]]
---[[@field required_linear_history? github_feature]]
---[[@field allow_force_pushes? github_feature]]
---[[@field allow_deletions? github_feature]]
---[[@field block_creations? github_feature]]
---[[@field required_conversation_resolution? github_feature]]
---[[@field name? string]]
---[[@field protection_url? string]]
---[[@field required_signatures? github_required_signatures]]
---[[@field lock_branch? github_feature_default_false]]
---[[@field allow_fork_syncing? github_feature_default_false]]
-
---[[@class github_short_branch]]
---[[@field name string]]
---[[@field commit github_commit]]
---[[@field protected boolean]]
---[[@field protection? github_branch_protection]]
---[[@field protection_url? github_uri]]
-
-mod.api_host = "api.github.com"
-mod.api_path = ""
-
-mod.common_headers = {
-	{ "Accept", { "application/vnd.github+json" } },
-	--[[FIXME: { "Authorization", { "Bearer <YOUR-TOKEN>" } },]]
-	{ "X-GitHub-Api-Version", { "2022-11-28" } },
-}
-
-local error = {
-	[403] = "Forbidden",
-	[404] = "Resource not found",
-	[422] = "Validation failed, or the endpoint has been spammed",
-}
-
---[[https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28]]
---[[@return github_short_branch[]?, string? error]] --[[@param owner string]] --[[@param repo string]]
-mod.list_branches = function (owner, repo)
-	local res = http.request({
-		method = "GET",
-		host = mod.api_host,
-		path = (mod.api_path .. "repos/%s/%s/branches"):format(owner, repo),
-		headers = mod.common_headers,
-	})
-	if res.status == 200 then
-		--[[@diagnostic disable-next-line: return-type-mismatch]]
-		return json_to_value(res.body)
-	else
-		return error[res.status]
+-- Lazy-load the HTTPS client so that requiring lib.github does not fail
+-- in environments where TLS is unavailable (e.g. test runners without libtls).
+local _http
+local function http()
+	if not _http then
+		_http = require("lib.https.client")
 	end
+	return _http
 end
 
---[[@return github_branch_with_protection, string? error]] --[[@param owner string]] --[[@param repo string]] --[[@param branch string]]
-mod.get_branch = function (owner, repo, branch)
-	local res = http.request({
-		method = "GET",
-		host = mod.api_host,
-		path = (mod.api_path .. "repos/%s/%s/branches/%s"):format(owner, repo, branch),
-		headers = mod.common_headers,
-	})
-	if res.status == 200 then
-		--[[@diagnostic disable-next-line: return-type-mismatch]]
-		return json_to_value(res.body)
-	else
-		return error[res.status]
+--:: github_client = { token: string? }
+
+local M = {}
+
+local BASE_HOST = "api.github.com"
+local API_VERSION = "2022-11-28"
+
+-- Build the common headers table for a client, including Authorization if token is set.
+--: (github_client) -> { [string]: string[] }
+local function make_headers(self)
+	local headers = {
+		["Accept"] = { "application/vnd.github+json" },
+		["X-GitHub-Api-Version"] = { API_VERSION },
+	}
+	if self.token then
+		headers["Authorization"] = { "Bearer " .. self.token }
 	end
+	return headers
 end
 
---[[@return github_branch_with_protection]] --[[@param owner string]] --[[@param repo string]] --[[@param branch string]] --[[@param new_name string]]
-mod.rename_branch = function (owner, repo, branch, new_name)
-	local res = http.request({
-		method = "POST",
-		host = mod.api_host,
-		path = (mod.api_path .. "repos/%s/%s/branches/%s/rename"):format(owner, repo, branch),
-		headers = mod.common_headers,
-		body = new_name
+-- Send an HTTP request to the GitHub API and return the parsed JSON body.
+-- method: HTTP method string (e.g. "GET", "POST", "PATCH")
+-- path:   API path starting with "/" (e.g. "/repos/owner/repo/branches")
+-- body:   optional request body string (already JSON-encoded)
+--: (github_client, string, string, string?) -> unknown, string?
+local function request(self, method, path, body)
+	local headers = make_headers(self)
+	if body then
+		headers["Content-Type"] = { "application/json" }
+	end
+	local res, err = http().request({
+		method = method,
+		host = BASE_HOST,
+		path = path,
+		headers = headers,
+		body = body,
 	})
-	--[[@diagnostic disable-next-line: return-type-mismatch]]
-	return json_to_value(res.body)
+	if not res then
+		return nil, err
+	end
+	if res.status >= 400 then
+		return nil, "github: HTTP " .. res.status .. ": " .. (res.body or "")
+	end
+	local value, decode_err = json.decode(res.body or "")
+	if not value then
+		return nil, "github: JSON decode failed: " .. (decode_err or "unknown")
+	end
+	return value
 end
 
-local sync_branch_error = {
-	[409] = "The branch could not be synced because of a merge conflict",
-	[422] = "The branch could not be synced, but not because of a merge conflict"
-}
+-- client metatable: methods are called as client:method(...)
+local client_mt = {}
+client_mt.__index = client_mt
 
-return mod
+client_mt.request = function(self, method, path, body)
+	return request(self, method, path, body)
+end
 
---[[IMPL]]
+-- Repos
+
+-- List branches for a repository.
+-- https://docs.github.com/en/rest/branches/branches#list-branches
+--: (github_client, string, string) -> unknown, string?
+client_mt.list_branches = function(self, owner, repo)
+	return request(self, "GET", "/repos/" .. owner .. "/" .. repo .. "/branches")
+end
+
+-- Get a branch.
+-- https://docs.github.com/en/rest/branches/branches#get-a-branch
+--: (github_client, string, string, string) -> unknown, string?
+client_mt.get_branch = function(self, owner, repo, branch)
+	return request(self, "GET", "/repos/" .. owner .. "/" .. repo .. "/branches/" .. branch)
+end
+
+-- Rename a branch.
+-- https://docs.github.com/en/rest/branches/branches#rename-a-branch
+--: (github_client, string, string, string, string) -> unknown, string?
+client_mt.rename_branch = function(self, owner, repo, old_name, new_name)
+	local body, err = json.encode({ new_name = new_name })
+	if not body then
+		return nil, "github: JSON encode failed: " .. (err or "unknown")
+	end
+	return request(self, "POST", "/repos/" .. owner .. "/" .. repo .. "/branches/" .. old_name .. "/rename", body)
+end
+
+-- Construct a new GitHub API client.
+-- token is a GitHub personal access token; pass nil for unauthenticated (public API only).
+--: (string?) -> github_client
+M.new = function(token)
+	return setmetatable({ token = token }, client_mt)
+end
+
+return M
