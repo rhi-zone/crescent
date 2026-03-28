@@ -10,7 +10,7 @@ local mcp_handlers = {
 
 local write
 --- @diagnostic disable-next-line: param-type-mismatch
-write = require("lib.tcp.client").client(arg[1], tonumber(arg[2]), require("lib.mcp.client").wrap(function (msg)
+write = require("lib.tcp.client").client(arg[1], tonumber(arg[2]), require("lib.mud_cp.client").wrap(function (msg)
 end, function (type, value)
 	local fn = mcp_handlers[type]
 	if fn then fn(write) end

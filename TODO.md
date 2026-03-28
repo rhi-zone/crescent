@@ -26,7 +26,7 @@ These exist in `lib/` but are legacy/stubs — not crescent-native (wrong annota
 no init.lua, no tests, incomplete, or just placeholder files). Do not rely on them as-is;
 they need to be rewritten before use.
 
-- [ ] **`lib/mcp/`** — MUD Client Protocol (moo.mud.org/mcp/mcp2.html), not Model Context Protocol. Stubs with FIXME/TODO throughout, wrong annotation style, no tests. Low priority; rewrite if/when MUD substrate needs it.
+- [ ] **`lib/mud_cp/`** — MUD Client Protocol (moo.mud.org/mcp/mcp2.html). Stubs with FIXME/TODO throughout, wrong annotation style, no tests. Low priority; rewrite if/when MUD substrate needs it.
 - [ ] **`lib/github/`** — uses EmmyLua `---@class` annotations instead of `--::`/`--:`, no tests. Rewrite once needed for registry tooling.
 - [ ] **`lib/markdown/`** — incomplete parser, FIXME comments, no tests. Rewrite when needed (Lumen, docs site).
 - [ ] **`lib/imap/`** — EmmyLua style, incomplete RFC 9051 parser, no init.lua, no tests. Low priority.
@@ -50,7 +50,7 @@ Not libraries (do not rewrite, repurpose instead):
 
 - [ ] **`lib/lsp/`** — LSP method bindings on top of `lib/jsonrpc`. Every method pre-typed from the LSP spec; you register handlers. Currently `lib/type/static/lsp.lua` rolls its own JSON-RPC — this replaces that.
 
-- [ ] **`lib/model_context_protocol/`** — Model Context Protocol client/server on top of `lib/jsonrpc`. (Note: `lib/mcp/` is MUD Client Protocol, unrelated.)
+- [ ] **`lib/mcp/`** — Model Context Protocol client/server on top of `lib/jsonrpc`. (Note: `lib/mud_cp/` is the old MUD Client Protocol implementation — unrelated.)
 
 - [ ] **`lib/ecs/`** — entity-component substrate. Named entities, typed components, spatial containment (entities inside entities), mutable state store. User-defined schemas — no hardcoded concepts like "room" or "inventory". The primitive for building world simulations, games, or any entity-centric stateful system. Turn loop, perception rules, mutation rules, and renderers (RP prose, MUD-style, etc.) are built on top by the user.
 

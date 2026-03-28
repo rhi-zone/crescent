@@ -193,7 +193,7 @@ incompleteness is visible and loud, not silent.
 
 ### Protocol bindings as typed libraries
 
-A protocol library (`lib/lsp`, `lib/mcp`, `lib/jsonrpc`) ships with every method
+A protocol library (`lib/lsp`, `lib/mcp` (Model Context Protocol), `lib/jsonrpc`) ships with every method
 pre-typed. You implement handlers; the types are already there. The protocol definition
 *is* the library — you do not write schemas, you do not duplicate type information, you
 simply register a handler and the typechecker validates it against the protocol spec.

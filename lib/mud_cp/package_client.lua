@@ -1,4 +1,4 @@
-local base = require("lib.mcp.client")
+local base = require("lib.mud_cp.client")
 
 local mod = {}
 

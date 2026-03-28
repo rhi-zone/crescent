@@ -125,7 +125,7 @@ TCP, HTTP), method registry, typed handler registration.
 pre-typed from the LSP spec. You register handlers; the types are already there. The
 protocol definition is the library.
 
-**`lib/mcp`** — same pattern for the Model Context Protocol.
+**`lib/mcp`** — same pattern for the Model Context Protocol. (Note: `lib/mud_cp/` is the existing MUD Client Protocol implementation — unrelated.)
 
 **`lib/openapi`** — OpenAPI 3.x client/server from a spec file. Request validation,
 response serialization, typed route handlers.
@@ -334,7 +334,7 @@ typechecker reads these directly. The result:
   name. New library → immediately searchable.
 - **Composition** — libraries snap together without glue code because their interfaces
   are explicit contracts, not conventions.
-- **Protocol bindings** — a pre-typed protocol library (`lib/lsp`, `lib/mcp`) means
+- **Protocol bindings** — a pre-typed protocol library (`lib/lsp`, `lib/mcp` (Model Context Protocol)) means
   you implement handlers and the typechecker validates them against the spec. You never
   write a schema; the types are the schema.
 - **Typed holes** — `_: unknown` in a stdlib definition is a typed hole. `unknown`
