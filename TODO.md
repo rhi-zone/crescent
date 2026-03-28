@@ -1,16 +1,10 @@
 # TODO
 
-## CRITICAL: typechecker needs thorough invariant-based tests and fuzzing
+## CRITICAL: fuzz the typechecker against known invariants
 
 **Prerequisite: typechecker must be in a non-broken state before starting.**
 
-The test suite is wide (8000+ assertions) but was written alongside the implementation — it tests behaviors, not invariants. Design-level bugs (like the multi-return representation issue) go undetected because no test asserts what a given annotation *cannot* mean, only that specific behaviors work. This needs to be fixed before the typechecker can be considered reliable.
-
-Goals:
-- **Invariant tests**: explicit "this annotation means X and not Y" tests. E.g. `-> ((T, U) | (V, W))` should be a single return value of that type, not a multi-return pattern (currently it's conflated). These tests should fail if the semantic model is violated, not just if the output changes.
-- **Fuzz-based soundness**: generate random well-typed programs, verify the typechecker accepts them; generate random ill-typed programs (known violations), verify it rejects them. Use `lib/test/fuzz.lua` + `lib/test/arb.lua`. Known invariants to fuzz against: if a program is accepted, substituting a subtype for any variable should still be accepted; if a union type is narrowed, the narrowed type must be assignable to the original.
-- **Representation completeness**: for every type constructor (union, intersection, tuple, function, table, literal, spread), assert that the full range of expressible types can be round-tripped through annotation parsing → type ID → display without losing information.
-- **Multi-return redesign** (one known bug): `-> ...((T, U) | (V, W))` as explicit spread syntax for multi-return union patterns, distinguishing from single-value union return. See design notes in session history.
+The test suite tests behaviors, not invariants. Use `lib/test/fuzz.lua` + `lib/test/arb.lua` to generate programs and assert invariants hold — not specific outputs. Known invariants to start from: substituting a subtype for a variable in an accepted program must still be accepted; narrowing a union must produce a type assignable to the original; if a program is rejected, adding a correct type annotation must not make it pass.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
