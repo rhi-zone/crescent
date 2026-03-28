@@ -804,7 +804,7 @@ Blocking items for cutover:
 - [ ] unnamed-params warn in --:: declare — `--:: declare fn = (T1, T2) -> R` should warn when
   param types are unnamed. Feature exists in v2 path but not v3 process_type_decls. Test fails
   after 2026-03-17 silent-crash fix.
-- [ ] $EachField descriptor `optional` flag — `$EachField` transform produces `V | nil` fields, not FLAG_OPTIONAL fields. A proper `Partial<T>` (absent fields allowed) needs the descriptor to carry `optional: true`. Currently `{ key: K, value: V? }` makes fields nil-able but still structurally required in table literals.
+- [x] $EachField descriptor `optional` flag — already implemented; `optional: true` in descriptor sets FLAG_OPTIONAL on output fields. Tests added (e31c6bd).
 - [x] $EachField / $EachUnion full transform evaluation — descriptors, union distribution, any input all working (2026-03-19)
 - [ ] Typed holes / completions
 - [x] **Match type pattern-bound variables** — fixed 2026-03-19 (commit 13e9603)
