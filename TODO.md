@@ -202,6 +202,36 @@ Not libraries (do not rewrite, repurpose instead):
   the static type system. Long-term: static typechecker infers validator types so
   `local x = T.string():parse(v)` gives `x: string` after the call.
 
+- [ ] **Typeclass dispatch key pattern** — `lib/fp/` dispatch tables annotated `{ [any]: any }` today.
+  Correct design: each typeclass module exposes a `.key` field declared `--:: FooKey: $Opaque`,
+  dispatch table annotated `{ [FooKey]: FooImpl, [BarKey]: BarImpl, ... }`, and
+  `fa[Mappable.key]` in code resolves via the existing FLAG_OPAQUE_KEY mechanism keyed by
+  the nominal `$Opaque` type instead of just the variable name string. Requires:
+  (1) `$Opaque` declaration in each typeclass module (mappable, applicable, etc.),
+  (2) cross-file type alias resolution in bracket-key annotation position already works
+  via the existing FLAG_OPAQUE_KEY + LIT_OPAQUE_KEY path once the key IS a declared type.
+  Eliminates `{ [any]: any }` from fp dispatch tables.
+
+- [ ] **Refinement types / control-flow narrowing system** — type guards, assertions, and
+  `type()` narrowing are all instances of a general `refine_true`/`refine_false` algebra.
+  Needed: (1) `assert(e)` narrows after the call (`x: T` in continuation); (2) `x is T`
+  return type syntax for bool guards — checker *verifies* body, unlike TS which trusts;
+  (3) `asserts x is T` return type for void assertions; (4) `T & asserts x is T` for
+  functions that both return a value AND narrow a parameter (TS cannot express this);
+  (5) `and`/`or`/`not` compose refinements automatically; (6) `getmetatable(x) == MT`
+  narrows to MT's registered type; (7) exhaustiveness on `if type(x) == ...` chains.
+  Design doc: `docs/type-system.md` § "Refinement types: the general system".
+
+- [ ] **Difference types `T \ U`** — false branch of any narrowing produces `T \ U`, not
+  open `~T`. Expressible as `Exclude<T, U> = match T { U => never, _ => T }`. Standalone
+  `~T` only valid within Lua's closed `type()` universe (8 known values). Implement as
+  false-branch refinement in constrain.lua + `Exclude` in the type prelude.
+
+- [ ] **Type operations standard library** — `docs/type-system.md` § "Type operations are
+  library aliases". Ship in prelude: `Exclude`, `Extract`, `NonNil`, `ReturnType`,
+  `ElemType`, `UnwrapMaybe`, `Flatten`, `Partial`, `Required`, `Pick`, `Omit`.
+  All expressible as `--::` aliases over `match` — no new compiler intrinsics needed.
+
 - [ ] **Typechecker: HKT type argument extraction** — when `<F, A>(fa: F<A>)` is called
   with `Maybe<number>`, the solver can't extract `F = Maybe, A = number` from the
   expanded structural type. Once expanded, constructor/argument decomposition is lost.

@@ -1223,6 +1223,121 @@ Genuinely unresolved — needs dedicated design work:
 
 ## Feature Design Decisions
 
+### Refinement types: the general system
+
+Type guards, type assertions, and `type()` narrowing are all instances of a single general mechanism: **control-flow refinement**. Every boolean expression `e` produces a pair of type environments:
+
+```
+refine_true(env, e)   -- environment entering the `then` branch
+refine_false(env, e)  -- environment entering the `else` branch
+```
+
+These compose naturally:
+- `not e` → swap true/false
+- `e1 and e2` → true: apply both; false: union of negations
+- `e1 or e2` → true: union; false: apply both negations
+
+Specific forms are special cases:
+
+**`type(x) == "string"`** — built-in refine rule. True: `x: string`. False: `x: T \ string` (see difference types below).
+
+**`assert(e)`** — applies `refine_true(env, e)` after the call. False branch is `never` (assert throws). Narrows like `if e then` but in straight-line code.
+
+**`getmetatable(x) == MT`** — when MT is a known registered metatable, narrows `x` to the associated type on the true branch.
+
+**User-defined type guard functions** — declared with `x is T` return type. The checker verifies the body: on the `return true` path, does `x` actually narrow to `T`? (Unlike TypeScript, which trusts the annotation without verification.)
+
+**User-defined assertion functions** — declared with `asserts x is T` return type. After the call, `x: T` in the continuation; the function throws if the invariant fails.
+
+**`match` arms** — each pattern generates a `refine_true` environment for that arm's body. Exhaustiveness checking: if the union of all `refine_true` environments doesn't cover the input type, error (unless a catch-all `_` or `else` branch exists).
+
+### Type guard syntax
+
+In function return type position:
+
+```lua
+--: (x: unknown) -> x is string
+-- bool guard: true → x:string, false → x: T\string
+
+--: (x: unknown) -> asserts x is string
+-- assertion: after call, x:string; throws if not
+
+--: (x: T | nil, msg: string) -> T & asserts x is T
+-- returns T AND narrows the input — TypeScript cannot express this
+-- unwrap-or-throw pattern
+
+--: (x: unknown, y: unknown) -> (x is string, y is number)
+-- multi-variable narrowing in one predicate
+```
+
+The `& asserts` form is the key gap over TypeScript: a function that both returns a value and provides narrowing evidence. TypeScript treats `asserts` and return types as mutually exclusive. Crescent treats narrowing as a composable intersection with the return type.
+
+### Difference types `T \ U`
+
+General negated types (`~T`) are unsound in an open type system — `~string` gives no positive information and no operations are statically valid on it.
+
+**Difference types `T \ U`** are sound: the result is always a subtype of `T`, with `U` subtracted. They arise naturally as the false-branch refinement of any narrowing predicate:
+
+- `type(x) == "string"` false branch: `x: T \ string`
+- `x == nil` false branch: `x: T \ nil` = `NonNil<T>`
+- `x.tag == "just"` false branch: `x: (Just<A> | Nothing) \ Just<A>` = `Nothing`
+
+Difference types are also expressible as a library type alias using `match`:
+
+```lua
+--:: Exclude<T, U> = match T { U => never, _ => T }
+--:: NonNil<T>     = Exclude<T, nil>
+--:: Diff<T, U>    = Exclude<T, U>
+```
+
+Standalone `~T` is only valid when `T` is within a **closed universe** (Lua's `type()` return values: `nil | boolean | number | string | function | table | thread | userdata`). In that case `~string` is `nil | boolean | number | function | table | thread | userdata` — a concrete, finite type. The checker knows this set is closed.
+
+### Type operations are library aliases, not syntax
+
+Every derived type operation is expressible as a `--::` alias using the primitive algebra (`|`, `&`, `match`, `never`, `unknown`, `$Opaque`, `newtype`). No dedicated syntax needed:
+
+```lua
+--:: Exclude<T, U>     = match T { U => never, _ => T }
+--:: Extract<T, U>     = match T { U => T, _ => never }
+--:: NonNil<T>         = Exclude<T, nil>
+--:: ReturnType<T>     = match T { (...) -> R => R, _ => never }
+--:: ElemType<T>       = match T { { [integer]: A } => A, _ => never }
+--:: UnwrapMaybe<T>    = match T { Maybe<A> => A, _ => never }
+--:: Flatten<T>        = match T { { [integer]: A } => A | T, _ => T }
+```
+
+The standard prelude (`lib/type/prelude.lua`) ships these as a type standard library. Callers import them as type aliases — no compiler magic, just `match`.
+
+### Typeclass dispatch keys: `$Opaque` tokens
+
+The fp library uses module tables as typeclass dispatch keys (`index[Mappable] = impl`). Typing this heterogeneous table as `{ [any]: any }` is correct but too loose.
+
+**Correct design:** each typeclass module exposes a `.key` field declared `$Opaque` — a pure identity token with no structural content:
+
+```lua
+-- lib/fp/mappable/init.lua
+--:: MappableKey: $Opaque
+local MappableKey = {}
+Mappable.key = MappableKey
+
+function Mappable.map(f, fa)
+    return fa[Mappable.key].map(f, fa)
+end
+```
+
+The dispatch table becomes a properly typed closed record:
+
+```lua
+--: { [MappableKey]: MappableFImpl, [ApplicableKey]: ApplicableApImpl, ... }
+local index = {}
+index[Mappable.key]   = nothing_f_impl
+index[Applicable.key] = nothing_ap_impl
+```
+
+`MappableKey` and `ApplicableKey` are distinct `$Opaque` nominal types — they don't unify with each other. `index[Mappable.key]` resolves via `FLAG_OPAQUE_KEY` to `MappableFImpl`. No `{ [any]: any }` needed.
+
+`Mappable` itself remains a structural module type (`{ map: fn, key: MappableKey }`). Only the key is nominal.
+
 Concrete decisions made during implementation. Each entry records the decision, the rejected alternatives, and the reasoning — so we don't relitigate.
 
 ### Field modifiers: optional, readonly, private
