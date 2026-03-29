@@ -106,7 +106,7 @@ Items that currently lack an implementer-ready spec:
 
 TypeScript's type guards can lie — `function isString(x): x is string { return true }` typechecks fine. We should do better.
 
-- [ ] **User-defined type guards** — `(x: unknown) -> x is T` return type that narrows the argument at the call site. Existing narrowing infrastructure handles the propagation; the new piece is the `x is T` predicate return type and recognizing it in `solve_callable`.
+- [x] **User-defined type guards** — implemented (0e3be6f, 2026-03-30). `(x: unknown) -> x is T` return type: ann.lua parses the predicate, stores in pool._type_predicates; narrow.lua `guard_check` kind narrows the argument at call sites (truthy/falsy/negated). Body return type is enforced as boolean.
 
 - [ ] **Assertion functions** — `(x: unknown) -> asserts x is T` narrows after the call (unconditional narrowing, errors if condition is false at runtime). `assert(x)` and `assert(type(x) == "string")` are the common patterns.
 
