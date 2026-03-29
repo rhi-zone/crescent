@@ -134,6 +134,6 @@ correctness including the pipeline before the solver.
   intersection-of-union cases. A separate `arb_type_deep` using `size - 1` for
   the algebra suite (where no parsing is needed) would give better coverage
   there. See TODO.md.
-- Deeply-nested types (depth >~30) trigger a parser stack overflow, producing
-  nil-message errors. Grammar-level tests pre-check and skip these. This is a
-  parser bug, not a generator design choice. See TODO.md.
+- Deeply-nested types beyond MAX_TYPE_DEPTH (64) now produce a diagnostic
+  ("type annotation too deeply nested") instead of a stack overflow. Grammar-level
+  tests pre-check and skip these by testing for any error. Fixed 2026-03-29.
