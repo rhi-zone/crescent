@@ -510,14 +510,18 @@ Crescent rejects imperative type-level computation. Not because of Turing-comple
 
 Type-level operations fall into distinct categories. TypeScript unifies most of these under "mapped types" — one flexible syntax that can do everything. Crescent separates them because they're conceptually different and compose differently:
 
-**Intrinsics** — compiler-supported, `$` prefix, declared as `= intrinsic` in prelude. `$` means "compiler magic, not user-definable." If it has `$`, the compiler implements it. If it doesn't, you can read the definition:
-- `$EachField<T, F>` — apply F to each field of T (F receives a field descriptor)
-- `$EachUnion<T, F>` — apply F to each member of union T, re-union results
-- `$Keys<T>` — string literal union of a record's keys
-- `T[K]` — indexed access, look up a field's type by key (syntax, not `$`-prefixed)
-- `F(Args...)` — call a function type, resolve overloads, return the return type (syntax, not `$`-prefixed)
+**Intrinsics** — compiler-supported, declared as `= intrinsic` in prelude. The `$` sigil is a temporary marker for types that require compiler support and cannot yet be expressed as user-defined `match` aliases. The goal is to eliminate `$` entirely: once `match` arm patterns for indexer types (`{ [K]: V }`) and function types (`(...) -> R`) are implemented, every current `$`-prefixed type except `$Require` and `$Opaque` becomes a regular prelude alias. `$` must not be extended to new types — if a new type operation is needed, the right answer is to extend `match` patterns, not add another intrinsic.
 
-`$EachField` is the key primitive — it iterates over fields, passing each as a `{ key: K, value: V, optional: boolean, readonly: boolean }` descriptor to the user-defined transform F. The transform is a regular type-level function (match or simple generic). `$EachField` collects the transformed field descriptors back into a table type.
+Current intrinsics and their intended replacements:
+- `$Keys<T>` → `match T { { [K]: V } => K }` once indexer arm patterns work — **`$Keys` is just `keyof T`, sigil-named**
+- `$EachField<T, F>` → needs indexer arm patterns + field-descriptor construction — may remain as intrinsic longer
+- `$EachUnion<T, F>` → needs union arm distribution in match — may be expressible once match distribution is implemented
+- `$PcallReturn<F>` → `match F { (...) -> R => (true, ...R) | (false, string) }` once function-type arms + tuple-spread work
+- `$PairsReturn<T>`, `$IpairsReturn<T>` → expressible via `$Keys<T>` + indexer lookup once those work
+- `$Require<T>` — stays intrinsic: module system integration (reads .cri files, resolves module paths)
+- `$Opaque<T>`, `$Opaque<T, U>` — stays intrinsic: nominal identity tied to declaration site
+
+`$EachField` is the key iteration primitive — it iterates over fields, passing each as a `{ key: K, value: V, optional: boolean, readonly: boolean }` descriptor to the user-defined transform F. The transform is a regular type-level function (match or simple generic). `$EachField` collects the transformed field descriptors back into a table type.
 
 **Everything else is user-definable** in the prelude using match + intrinsics:
 
