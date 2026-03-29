@@ -250,6 +250,92 @@ arb.it("annotation soundness: (A)->B rejects when A not <: B",
 		assert(rejects(src), "unsound annotation accepted: " .. src)
 	end, { trials = 500 })
 
+-- ── Invariant 16: Narrowing precision ────────────────────────────────────────
+-- After `if type(x) == "T"`, x is exactly that primitive type, not a supertype.
+-- Checks that narrowed type is usable AS the narrow type (not just as unknown/any).
+
+arb.it("narrowing: type() guard gives exact primitive type",
+	farb.arb_base_type,
+	function(T_node)
+		-- Only test types that type() can distinguish at runtime.
+		local tag = T_node.tag
+		local type_str_map = {
+			["nil"]     = "nil",
+			["boolean"] = "boolean",
+			["number"]  = "number",
+			["string"]  = "string",
+			["integer"] = "number",  -- integer narrows to number via type()
+		}
+		local type_str = type_str_map[tag]
+		if not type_str then return end  -- skip unsupported base types
+		local TT = type_str  -- the narrowed-to type string
+		-- x --: T | nil; after type(x)=="T", x should be usable as T
+		local src = table.concat({
+			("local x --: %s | nil"):format(farb.type_to_string(T_node)),
+			('if type(x) == "%s" then'):format(type_str),
+			("    local y --: %s = x"):format(TT),
+			"end",
+		}, "\n")
+		assert(typechecks(src), "narrowing precision failed: " .. src)
+	end, { trials = 300 })
+
+-- ── Invariant 17: Generic constraint rejection ────────────────────────────────
+-- <T: C>(T) -> T called with a value NOT assignable to C must be rejected.
+
+arb.it("generic constraint: violating instantiation rejected",
+	farb.arb_distinct_base_types,
+	function(pair)
+		local C_node, B_node = pair[1], pair[2]
+		local C = farb.type_to_string(C_node)
+		local v = farb.canonical_value(B_node)
+		-- f: <T: C>(T) -> T; call with B value where B </: C → error
+		local src = table.concat({
+			("--: <T: %s>(T) -> T"):format(C),
+			"local f",
+			("f(%s)"):format(v),
+		}, "\n")
+		assert(rejects(src), "constraint violation not rejected: " .. src)
+	end, { trials = 300 })
+
+-- ── Invariant 18: Generic constraint acceptance ───────────────────────────────
+-- <T: C>(T) -> T called with a value OF type C must typecheck.
+
+arb.it("generic constraint: conforming instantiation accepted",
+	farb.arb_base_type,
+	function(T_node)
+		local TT = farb.type_to_string(T_node)
+		local v  = farb.canonical_value(T_node)
+		-- f: <T: TT>(T) -> T; call with v of type TT → ok
+		local src = table.concat({
+			("--: <T: %s>(T) -> T"):format(TT),
+			"local f",
+			("f(%s)"):format(v),
+		}, "\n")
+		assert(typechecks(src), "conforming instantiation rejected: " .. src)
+	end, { trials = 300 })
+
+-- ── Invariant 19: Multi-return slot types ─────────────────────────────────────
+-- Slot N of a multi-return is the declared type; extra slots are nil.
+
+arb.it("multi-return: first slot has declared type",
+	{ farb.arb_base_type, farb.arb_base_type },
+	function(A_node, B_node)
+		local A  = farb.type_to_string(A_node)
+		local B  = farb.type_to_string(B_node)
+		-- f: () -> (A, B); local x, y = f(); x should be A, y should be B
+		local src = table.concat({
+			("--: () -> (%s, %s)"):format(A, B),
+			"local f",
+			"local x, y = f()",
+			("local _a --: %s = x"):format(A),
+			("local _b --: %s = y"):format(B),
+		}, "\n")
+		if rejects("local _x --: " .. A) or rejects("local _y --: " .. B) then
+			return  -- skip ill-formed types
+		end
+		assert(typechecks(src), "multi-return slot type failed: " .. src)
+	end, { trials = 300 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

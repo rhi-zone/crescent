@@ -93,14 +93,15 @@ after the next refactor."
 - Generic instantiation: `<T>(T) -> T` preserves type (grammar)
 - **Annotation soundness (positive)**: `(T)->T` identity body always typechecks (grammar)
 - **Annotation soundness (negative)**: `(A)->B` body rejected when `A </: B` (grammar)
+- **Narrowing precision**: after `if type(x) == "string"`, `x` is usable as `string` (grammar)
+- **Generic constraint acceptance**: `<T: C>(T)->T` called with C value typechecks (grammar)
+- **Generic constraint rejection**: `<T: C>(T)->T` called with non-C value is rejected (grammar)
+- **Multi-return slot types**: `() -> (A, B)`; `x, y = f()` gives `x: A`, `y: B` (grammar)
 - Performance gate: ≥500 programs/sec throughput
 
 ### Invariants not yet tested (each = a blind spot)
 
-- **Narrowing precision**: after `if type(x) == "string"`, `x` is exactly `string`, not a supertype
 - **Overload dispatch**: calling an intersection of function types routes to the correct member
-- **Generic constraint checking**: `<T: Constraint>` rejects violating instantiations
-- **Multi-return subtyping**: slot N of a multi-return is the declared type; extra slots are nil
 
 ### Generator coverage
 

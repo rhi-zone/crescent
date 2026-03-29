@@ -34,21 +34,12 @@ The bar to beat is `@typescript/native-preview` (tsgo / ts7 — the Go rewrite o
 
 **Performance note on multi-return redesign**: always wrapping rl=0 and rl=1 returns in TAG_TUPLE adds allocation + C_INDEX destructuring overhead on every call site. We may want to re-specialize these cases (bind directly, skip the tuple barrier) after measuring. Don't assume the overhead is acceptable — benchmark first.
 
-## CRITICAL: write docs/semantics.md
+## ~~CRITICAL: write docs/semantics.md~~ DONE (8ec327c)
 
-`docs/type-system.md` is design rationale — *why* we made choices. It is not a semantics spec.
-There is no canonical document that defines:
-- The subtyping relation `A <: B` for every tag pair (TAG_NUMBER, TAG_LITERAL, TAG_UNION, TAG_TABLE, TAG_TUPLE, TAG_FUNCTION, TAG_VAR, TAG_ROWVAR, TAG_ANY, TAG_NEVER, TAG_UNKNOWN, TAG_NOMINAL, TAG_MATCH_TYPE, ...)
-- Typing rules for every expression form (local, assign, call, field access, index, binary op, unary op, if/else, for, return, ...)
-- Precise contracts for every intrinsic (`$Keys<T>`, `$EachField<T,F>`, `$EachUnion<T,F>`, `$Opaque<T>`, `$Opaque<T,U>`, `$FfiC`, `$GlobalScope`, `$Name`, `$Require<T>`)
-- What each builtin means at the type level (before it can be de-specialcased, its semantics must be written down)
-- The meaning of each annotation form (`->`, `|`, `&`, `?`, `...`, `<T>`, `<T: B>`, `{ [K]: V }`, `{ ...T }`, `--:: unseal`, etc.)
-
-Without this, the implementation IS the spec — including its bugs. Every session re-derives rules from potentially-wrong code. Delegation is unsafe because the implementer has no ground truth. Fuzzing is incomplete because "correct" is undefined.
-
-**Format**: semi-formal is fine — precise English rules + examples, not Hindley-Milner notation. But each rule must be unambiguous enough that two implementers reading it independently would write the same code.
-
-**Priority**: write this BEFORE implementing anything new. Each new feature adds a rule; write the rule first, then implement it.
+`docs/semantics.md` now covers: all type tags + data layouts, the complete
+subtyping relation (19 cases), expression typing rules, the constraint solver,
+narrowing, annotation syntax, invariants (incl. untested blind spots), and
+intrinsic contracts. Read it before touching typechecker internals.
 
 ## CRITICAL: write implementer specs before delegating
 
