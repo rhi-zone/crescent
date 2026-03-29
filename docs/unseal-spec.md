@@ -22,7 +22,7 @@ This is the crescent equivalent of Rust's `unsafe {}` — explicitly visible in 
 
 ## Why Not an Expression Intrinsic
 
-`$` prefix is for type-level intrinsics in annotation position (`$Keys<T>`, `$EachField<T,F>`, etc.). Using `$unseal(x)` in expression position would mix the two namespaces. The `--::` form is correct: it's a type-level annotation that affects the scope, not a runtime operation.
+`$` is not a valid Lua identifier character — `$unseal(x)` would be a syntax error in Lua code. `$Name` only works in annotation strings because the annotation parser handles it specially. The `--::` form is correct: unseal is a type-level declaration that affects the scope, not a runtime operation.
 
 ## Grammar
 
