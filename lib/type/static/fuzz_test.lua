@@ -191,6 +191,27 @@ arb.it("no false positives on valid corpus",
 		assert(typechecks(src), "valid program rejected: " .. src)
 	end, { trials = #valid_corpus * 10 })
 
+-- ── Invariant 11: Function covariant return (grammar-level) ──────────────────
+-- Assigning (A) -> A to (A) -> (A | B) must typecheck because A <: A | B.
+
+arb.it("function: covariant return (grammar)",
+	{ farb.arb_base_type, farb.arb_base_type },
+	function(A_node, B_node)
+		local A = farb.type_to_string(A_node)
+		local B = farb.type_to_string(B_node)
+		-- Pre-check: skip if either type annotation is ill-formed standalone
+		if rejects("local x --: " .. A) then return end
+		if rejects("local x --: " .. B) then return end
+		-- (A) -> A is assignable to (A) -> (A | B)
+		local src = table.concat({
+			("--: (%s) -> %s"):format(A, A),
+			"local f",
+			("--: (%s) -> (%s | %s)"):format(A, A, B),
+			"local g = f",
+		}, "\n")
+		assert(typechecks(src), "covariant return (grammar) failed: " .. src)
+	end, { trials = 300 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

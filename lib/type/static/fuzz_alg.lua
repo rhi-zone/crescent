@@ -213,4 +213,118 @@ arb.it("[alg] union idempotent: A | A <: A",
 			.. " should be <: " .. type_str(T_node))
 	end, { trials = 2000 })
 
+-- 9. Transitivity via constructed union chain
+-- A <: A|B (union intro) and A|B <: A|B|C (union intro again) implies A <: A|B|C
+arb.it("[alg] transitivity: A <: A|B and A|B <: A|B|C implies A <: A|B|C",
+	{ farb.arb_type, farb.arb_type, farb.arb_type },
+	function(A_node, B_node, C_node)
+		local ctx      = make_ctx()
+		local a        = ast_to_tid(ctx, A_node)
+		local b        = ast_to_tid(ctx, B_node)
+		local c        = ast_to_tid(ctx, C_node)
+		local a_or_b   = types_mod.make_union(ctx, { a, b })
+		local a_or_b_c = types_mod.make_union(ctx, { a_or_b, c })
+		-- middle step: A|B <: A|B|C
+		assert(subtype(ctx, a_or_b, a_or_b_c),
+			"union chain intro failed: "
+			.. type_str(A_node) .. " | " .. type_str(B_node)
+			.. " should be <: "
+			.. type_str(A_node) .. " | " .. type_str(B_node) .. " | " .. type_str(C_node))
+		-- transitivity: A <: A|B|C
+		assert(subtype(ctx, a, a_or_b_c),
+			"transitivity failed: "
+			.. type_str(A_node)
+			.. " should be <: "
+			.. type_str(A_node) .. " | " .. type_str(B_node) .. " | " .. type_str(C_node))
+	end, { trials = 2000 })
+
+-- 10. Intersection intro: T <: T & T
+arb.it("[alg] intersection intro: T <: T & T",
+	farb.arb_type,
+	function(T_node)
+		local ctx   = make_ctx()
+		local tid   = ast_to_tid(ctx, T_node)
+		local t_and = types_mod.make_intersection(ctx, { tid, tid })
+		assert(subtype(ctx, tid, t_and),
+			"intersection intro failed: " .. type_str(T_node)
+			.. " should be <: " .. type_str(T_node) .. " & " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 11. Literal subtyping: lit <: base type
+-- lit_int <: integer and <: number; lit_str <: string; lit_bool <: boolean
+arb.it("[alg] literal subtyping: lit <: base type",
+	farb.arb_type_leaf,
+	function(leaf)
+		local tag = leaf.tag
+		-- Only test literal nodes; skip base types, nil, never, unknown (reflexivity covers those)
+		if tag ~= "lit_int" and tag ~= "lit_str" and tag ~= "lit_bool" then return end
+		local ctx = make_ctx()
+		local tid = ast_to_tid(ctx, leaf)
+		if tag == "lit_int" then
+			assert(subtype(ctx, tid, ctx.T_INTEGER),
+				"lit_int should be <: integer for value " .. tostring(leaf.value))
+			assert(subtype(ctx, tid, ctx.T_NUMBER),
+				"lit_int should be <: number for value " .. tostring(leaf.value))
+		elseif tag == "lit_str" then
+			assert(subtype(ctx, tid, ctx.T_STRING),
+				"lit_str should be <: string for value " .. leaf.value)
+		elseif tag == "lit_bool" then
+			assert(subtype(ctx, tid, ctx.T_BOOLEAN),
+				"lit_bool should be <: boolean for value " .. tostring(leaf.value))
+		end
+	end, { trials = 2000 })
+
+-- 12. Literal asymmetry: integer is not <: lit_int(n)
+-- Base types are supertypes of specific literals, not subtypes.
+arb.it("[alg] literal asymmetry: integer is not <: lit_int(n)",
+	arb.int(0, 99),
+	function(n)
+		local ctx     = make_ctx()
+		local lit_tid = types_mod.make_literal(ctx, LIT_INTEGER, n)
+		-- lit_int(n) <: integer (should hold)
+		assert(subtype(ctx, lit_tid, ctx.T_INTEGER),
+			"lit_int(" .. n .. ") should be <: integer")
+		-- integer </: lit_int(n) (should NOT hold)
+		assert(not subtype(ctx, ctx.T_INTEGER, lit_tid),
+			"integer should NOT be <: lit_int(" .. n .. ")")
+	end, { trials = 200 })
+
+-- 13. Function subtyping: covariant return
+-- (A) -> C  <:  (A) -> (C | B)   because C <: C | B
+arb.it("[alg] function: covariant return",
+	{ farb.arb_type, farb.arb_type, farb.arb_type },
+	function(A_node, B_node, C_node)
+		local ctx      = make_ctx()
+		local a        = ast_to_tid(ctx, A_node)
+		local b        = ast_to_tid(ctx, B_node)
+		local c        = ast_to_tid(ctx, C_node)
+		local c_or_b   = types_mod.make_union(ctx, { c, b })
+		local f_narrow = types_mod.make_func(ctx, { a }, { c },     -1)
+		local f_wide   = types_mod.make_func(ctx, { a }, { c_or_b }, -1)
+		assert(subtype(ctx, f_narrow, f_wide),
+			"covariant return failed: ("
+			.. type_str(A_node) .. ") -> " .. type_str(C_node)
+			.. " should be <: ("
+			.. type_str(A_node) .. ") -> " .. type_str(C_node) .. " | " .. type_str(B_node))
+	end, { trials = 2000 })
+
+-- 14. Function subtyping: contravariant param
+-- (A | B) -> C  <:  (A) -> C   because accepting more is a subtype of accepting less
+arb.it("[alg] function: contravariant param",
+	{ farb.arb_type, farb.arb_type, farb.arb_type },
+	function(A_node, B_node, C_node)
+		local ctx        = make_ctx()
+		local a          = ast_to_tid(ctx, A_node)
+		local b          = ast_to_tid(ctx, B_node)
+		local c          = ast_to_tid(ctx, C_node)
+		local a_or_b     = types_mod.make_union(ctx, { a, b })
+		local f_wide_par = types_mod.make_func(ctx, { a_or_b }, { c }, -1)
+		local f_narr_par = types_mod.make_func(ctx, { a },      { c }, -1)
+		assert(subtype(ctx, f_wide_par, f_narr_par),
+			"contravariant param failed: ("
+			.. type_str(A_node) .. " | " .. type_str(B_node) .. ") -> " .. type_str(C_node)
+			.. " should be <: ("
+			.. type_str(A_node) .. ") -> " .. type_str(C_node))
+	end, { trials = 2000 })
+
 return {}
