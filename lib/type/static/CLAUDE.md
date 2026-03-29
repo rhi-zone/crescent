@@ -76,25 +76,27 @@ after the next refactor."
 
 ### Invariants currently tested
 
-- Reflexivity: `T <: T` (both algebra-level via type IDs and grammar-level via annotation strings)
-- Union introduction: `A <: A | B` and `B <: A | B`
-- Intersection elimination: `A & B <: A` and `A & B <: B`
+- Reflexivity: `T <: T` (algebra + grammar)
+- Union introduction: `A <: A | B` and `B <: A | B` (both orderings)
 - Union idempotent: `A | A <: A`
+- Intersection elimination: `A & B <: A` and `A & B <: B`
+- Intersection introduction: `T <: T & T`
 - Optional: `T <: T | nil` and `nil <: T | nil`
-- Function: correct arg accepted, wrong arg rejected
-- Narrowing: `if x then` excludes nil
-- Literal precision: `42` has type `42`, not just `integer`
-- Generic instantiation: `<T>(T) -> T` preserves type
+- Transitivity: `A <: A|B` and `A|B <: A|B|C` implies `A <: A|B|C` (via union chain)
+- Literal subtyping: `lit_int <: integer`, `lit_int <: number`, `lit_str <: string`, `lit_bool <: boolean`
+- Literal asymmetry: `lit_int(n) <: integer` but `integer </: lit_int(n)`
+- Function covariant return: `(A)->C <: (A)->(C|B)` (algebra + grammar)
+- Function contravariant param: `(A|B)->C <: (A)->C`
+- Function: correct arg accepted, wrong arg rejected (grammar)
+- Narrowing: `if x then` excludes nil (grammar)
+- Literal precision: `42` has type `42`, not just `integer` (grammar)
+- Generic instantiation: `<T>(T) -> T` preserves type (grammar)
 - Performance gate: ≥500 programs/sec throughput
 
 ### Invariants not yet tested (each = a blind spot)
 
-- **Transitivity**: `A <: B` and `B <: C` implies `A <: C`
-- **Intersection introduction**: `x <: A` and `x <: B` implies `x <: A & B`
-- **Function subtyping**: `(B) -> A <: (A) -> B` (contravariant params, covariant returns)
 - **Annotation soundness**: a function body accepted under return type `T` cannot produce non-`T`
 - **Narrowing precision**: after `if type(x) == "string"`, `x` is exactly `string`, not a supertype
-- **Literal asymmetry**: `42 <: integer` but `integer </: 42`
 - **Overload dispatch**: calling an intersection of function types routes to the correct member
 - **Generic constraint checking**: `<T: Constraint>` rejects violating instantiations
 - **Multi-return subtyping**: slot N of a multi-return is the declared type; extra slots are nil
