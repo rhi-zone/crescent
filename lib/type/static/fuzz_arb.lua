@@ -1,452 +1,304 @@
 -- lib/type/static/fuzz_arb.lua
--- String-level Lua source fragment generators for typechecker fuzz testing.
+-- Structured type AST generators with arb.lua integration.
 --
--- These generators produce Lua source strings (or type annotation strings),
--- not AST nodes. They are used by fuzz_test.lua to construct random programs
--- and check type system invariants.
+-- Type AST nodes (plain tables):
+--   { tag="base",     name="integer"|"number"|"string"|"boolean" }
+--   { tag="nil" }
+--   { tag="lit_int",  value=n }
+--   { tag="lit_str",  value='"..."' }     -- value includes surrounding quotes
+--   { tag="lit_bool", value=true|false }
+--   { tag="union",    a=node, b=node }
+--   { tag="inter",    a=node, b=node }
+--   { tag="func",     params={node,...}, ret=node }   -- ret may be a tuple node
+--   { tag="tuple",    types={node,...} }              -- multi-return, only in ret position
+--   { tag="record",   fields={{name=str, type=node},...} }
+--   { tag="indexer",  key="string"|"integer", val=node }
 --
 -- API:
---   arb_base_type(rng)              -> type string: "integer"|"number"|"string"|"boolean"
---   arb_type(rng, depth)            -> type annotation string (recursive, depth controls size)
---   arb_value_of_type(rng, T)       -> Lua literal string matching type T
---   arb_distinct_types(rng)         -> A, B  where a value of B is NOT assignable where A is expected
---   arb_table_type(rng, depth)      -> a table type string (record or indexer)
+--   M.type_to_string(node)           -> annotation string (precedence-correct)
+--   M.arb_type                       -> arb generator for type AST nodes (with shrinking)
+--   M.arb_base_type                  -> arb generator: one of the four base types
+--   M.arb_type_leaf                  -> arb generator: base types + literals + nil
+--   M.canonical_value(node)          -> a fixed Lua literal string matching the type
+--   M.arb_value_for(node)            -> arb generator for Lua literal strings of that type
+--   M.arb_distinct_base_types        -> arb generator: {A,B} where B is not <: A
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local arb = require("lib.test.arb")
+
 local M = {}
 
--- ── Base types ────────────────────────────────────────────────────────────────
+-- ── Precedence-aware serializer ───────────────────────────────────────────────
+-- Precedence values (lower = lower precedence = outermost in expression):
+--   -> (func) = 10 < | (union) = 20 < & (inter) = 30 < atoms = ∞
+--
+-- A node needs parens when its precedence < the outer context's precedence.
+-- This ensures (A) -> B used in a union becomes ((A) -> B) | C, and
+-- (A | B) used in an intersection becomes (A | B) & C.
 
-local BASE_TYPES = { "integer", "number", "string", "boolean" }
+local PREC_FUNC  = 10
+local PREC_UNION = 20
+local PREC_INTER = 30
 
--- arb_base_type: pick one of the four base types uniformly.
--- Returns a type annotation string.
-function M.arb_base_type(rng)
-	return BASE_TYPES[rng:int(1, #BASE_TYPES)]
-end
+local function to_str(node, outer)
+	outer = outer or 0
+	local s, p
 
--- ── String/value pools ────────────────────────────────────────────────────────
-
--- Small pool of string literals that are valid Lua (no special escapes needed).
-local STRING_LITERALS = {
-	[["hello"]], [["world"]], [["foo"]], [["bar"]], [["baz"]],
-	[["a"]], [["test"]], [["lua"]], [["crescent"]], [[""]],
-	[["abc"]], [["xyz"]], [["one"]], [["two"]], [["three"]],
-}
-
--- Field names for generated table records.
-local FIELD_NAMES = { "x", "y", "z", "n", "s", "flag", "value", "name", "key", "data" }
-
--- ── Recursive type generator ──────────────────────────────────────────────────
-
--- arb_table_type: generate a table type string (record or string/integer indexer).
--- Used internally and exported for arb_distinct_types.
-local function arb_table_type(rng, depth)
-	local kind = rng:int(1, 3)
-	if kind == 1 then
-		-- Single-field record
-		local field = FIELD_NAMES[rng:int(1, #FIELD_NAMES)]
-		local vtype = M.arb_type(rng, depth - 1)
-		return "{ " .. field .. ": " .. vtype .. " }"
-	elseif kind == 2 then
-		-- Two-field record
-		local f1 = FIELD_NAMES[rng:int(1, #FIELD_NAMES)]
-		-- Pick a second field name different from f1
-		local f2
-		repeat f2 = FIELD_NAMES[rng:int(1, #FIELD_NAMES)] until f2 ~= f1
-		local t1 = M.arb_type(rng, depth - 1)
-		local t2 = M.arb_type(rng, depth - 1)
-		return "{ " .. f1 .. ": " .. t1 .. ", " .. f2 .. ": " .. t2 .. " }"
-	else
-		-- Indexer: [string]: T or [integer]: T
-		local key = rng:bool() and "string" or "integer"
-		local vtype = M.arb_type(rng, depth - 1)
-		return "{ [" .. key .. "]: " .. vtype .. " }"
-	end
-end
-
-M.arb_table_type = arb_table_type
-
--- arb_type: generate a random type annotation string.
--- depth starts at 3; at depth <= 0 always emits a base type.
--- Weighting: ~40% base types, ~60% complex types (when depth > 0).
-function M.arb_type(rng, depth)
-	if depth == nil then depth = 3 end
-
-	-- At depth 0, only emit base types or literal types (no recursion).
-	if depth <= 0 then
-		local pick = rng:int(1, 8)
-		if pick <= 3 then
-			return BASE_TYPES[rng:int(1, #BASE_TYPES)]
-		elseif pick == 4 then
-			return "nil"
-		elseif pick == 5 then
-			return tostring(rng:int(0, 99))
-		elseif pick == 6 then
-			return STRING_LITERALS[rng:int(1, #STRING_LITERALS)]
-		elseif pick == 7 then
-			return "true"
+	if     node.tag == "base"     then return node.name
+	elseif node.tag == "nil"      then return "nil"
+	elseif node.tag == "lit_int"  then return tostring(node.value)
+	elseif node.tag == "lit_str"  then return node.value   -- includes surrounding quotes
+	elseif node.tag == "lit_bool" then return node.value and "true" or "false"
+	elseif node.tag == "union" then
+		p = PREC_UNION
+		s = to_str(node.a, p) .. " | " .. to_str(node.b, p)
+	elseif node.tag == "inter" then
+		p = PREC_INTER
+		s = to_str(node.a, p) .. " & " .. to_str(node.b, p)
+	elseif node.tag == "func" then
+		p = PREC_FUNC
+		local parts = {}
+		for _, param in ipairs(node.params) do
+			parts[#parts + 1] = to_str(param, 0)
+		end
+		local ret_s
+		if node.ret.tag == "tuple" then
+			local rt = {}
+			for _, r in ipairs(node.ret.types) do rt[#rt + 1] = to_str(r, 0) end
+			ret_s = "(" .. table.concat(rt, ", ") .. ")"
 		else
-			return "false"
+			ret_s = to_str(node.ret, 0)
 		end
-	end
-
-	-- Weighted choice: roll 1–10.
-	-- 1–4 → base type kinds (40%)
-	-- 5–10 → complex type kinds (60%)
-	local roll = rng:int(1, 10)
-
-	-- Base type (40%)
-	if roll <= 3 then
-		return BASE_TYPES[rng:int(1, #BASE_TYPES)]
-	elseif roll == 4 then
-		-- Literal types: integer literal, string literal, boolean literal, nil
-		local lkind = rng:int(1, 4)
-		if lkind == 1 then
-			return tostring(rng:int(0, 99))
-		elseif lkind == 2 then
-			return STRING_LITERALS[rng:int(1, #STRING_LITERALS)]
-		elseif lkind == 3 then
-			return "true"
-		else
-			return "false"
-		end
-
-	-- Union (15%)
-	elseif roll == 5 then
-		local A = M.arb_type(rng, depth - 1)
-		local B = M.arb_type(rng, depth - 1)
-		return A .. " | " .. B
-
-	-- Optional: T? (10%)
-	elseif roll == 6 then
-		local T = M.arb_type(rng, depth - 1)
-		return T .. "?"
-
-	-- Table (record or indexer) (15%)
-	elseif roll == 7 then
-		return arb_table_type(rng, depth)
-
-	-- Function single-return (10%)
-	elseif roll == 8 then
-		local param = M.arb_type(rng, depth - 1)
-		local ret   = M.arb_type(rng, depth - 1)
-		return "(" .. param .. ") -> " .. ret
-
-	-- Function multi-return (5%)
-	elseif roll == 9 then
-		local param = M.arb_type(rng, depth - 1)
-		local r1    = M.arb_type(rng, depth - 1)
-		local r2    = M.arb_type(rng, depth - 1)
-		return "(" .. param .. ") -> (" .. r1 .. ", " .. r2 .. ")"
-
-	-- Intersection of two table types (5%)
-	else
-		local A = arb_table_type(rng, depth - 1)
-		local B = arb_table_type(rng, depth - 1)
-		return A .. " & " .. B
-	end
-end
-
--- ── Value generator ───────────────────────────────────────────────────────────
-
--- Forward declaration for recursive calls.
-local arb_value_of_type
-
--- Extract the return type from a function type string like "(A) -> B" or "(A) -> (B, C)".
--- Returns a simple type string to generate a value for, or nil on failure.
-local function extract_ret_type(T)
-	-- Find the last occurrence of " -> " to handle nested function types.
-	local arrow_pos = nil
-	local search_from = 1
-	while true do
-		local pos = T:find(" %-> ", search_from, false)
-		if not pos then break end
-		arrow_pos = pos
-		search_from = pos + 1
-	end
-	if not arrow_pos then return nil end
-
-	local ret_str = T:sub(arrow_pos + 4)  -- skip " -> "
-	ret_str = ret_str:match("^%s*(.-)%s*$")  -- trim
-
-	-- Multi-return wrapped in parens: (A, B) — take first return type.
-	local inner = ret_str:match("^%((.-)%)$")
-	if inner then
-		-- Take just the first type before the comma.
-		local first = inner:match("^([^,]+)")
-		if first then
-			return first:match("^%s*(.-)%s*$")
-		end
-		return inner
-	end
-
-	return ret_str
-end
-
--- Parse a union "A | B" splitting at the top-level pipe (not inside parens/braces).
--- Returns A, B or nil if not a union.
-local function split_union(T)
-	local depth = 0
-	for i = 1, #T do
-		local c = T:sub(i, i)
-		if c == "(" or c == "{" or c == "<" then
-			depth = depth + 1
-		elseif c == ")" or c == "}" or c == ">" then
-			depth = depth - 1
-		elseif c == "|" and depth == 0 then
-			-- Check it's " | " (with spaces).
-			if T:sub(i - 1, i - 1) == " " and T:sub(i + 1, i + 1) == " " then
-				local A = T:sub(1, i - 2):match("^%s*(.-)%s*$")
-				local B = T:sub(i + 2):match("^%s*(.-)%s*$")
-				return A, B
-			end
-		end
-	end
-	return nil
-end
-
--- arb_value_of_type: produce a Lua literal string whose type matches T.
--- Returns "nil" as fallback for unrecognized types.
-arb_value_of_type = function(rng, T)
-	if T == nil then return "nil" end
-
-	-- Base types
-	if T == "integer" then
-		return tostring(rng:int(0, 100))
-	elseif T == "number" then
-		local n = rng:int(0, 99)
-		return n .. ".5"
-	elseif T == "string" then
-		return STRING_LITERALS[rng:int(1, #STRING_LITERALS)]
-	elseif T == "boolean" then
-		return rng:bool() and "true" or "false"
-	elseif T == "nil" then
-		return "nil"
-	end
-
-	-- Boolean literals
-	if T == "true" or T == "false" then
-		return T
-	end
-
-	-- Integer literal (matches optional minus sign then digits only)
-	if T:match("^%-?%d+$") then
-		return T
-	end
-
-	-- String literal (starts with a double-quote)
-	if T:match('^"') then
-		return T
-	end
-
-	-- Optional: "T?" — strip the trailing ? to get T, then 50% nil, 50% value of T
-	local opt_inner = T:match("^(.+)%?$")
-	if opt_inner then
-		if rng:bool() then
-			return "nil"
-		else
-			return arb_value_of_type(rng, opt_inner)
-		end
-	end
-
-	-- Union: "A | B" — pick one arm and generate a value for it.
-	-- Handle " | nil" as a special optional form first.
-	if T:find(" | nil", 1, true) then
-		local base = T:gsub(" | nil", ""):match("^%s*(.-)%s*$")
-		if rng:bool() then
-			return "nil"
-		else
-			return arb_value_of_type(rng, base)
-		end
-	end
-	if T:find("nil | ", 1, true) then
-		local base = T:gsub("nil | ", ""):match("^%s*(.-)%s*$")
-		if rng:bool() then
-			return "nil"
-		else
-			return arb_value_of_type(rng, base)
-		end
-	end
-
-	local union_A, union_B = split_union(T)
-	if union_A and union_B then
-		if rng:bool() then
-			return arb_value_of_type(rng, union_A)
-		else
-			return arb_value_of_type(rng, union_B)
-		end
-	end
-
-	-- Intersection: "A & B" — must be two table types; produce a merged table literal.
-	-- We detect & at top level (outside parens/braces).
-	local inter_A, inter_B
-	do
-		local depth = 0
-		for i = 1, #T do
-			local c = T:sub(i, i)
-			if c == "(" or c == "{" or c == "<" then
-				depth = depth + 1
-			elseif c == ")" or c == "}" or c == ">" then
-				depth = depth - 1
-			elseif c == "&" and depth == 0 then
-				if T:sub(i - 1, i - 1) == " " and T:sub(i + 1, i + 1) == " " then
-					inter_A = T:sub(1, i - 2):match("^%s*(.-)%s*$")
-					inter_B = T:sub(i + 2):match("^%s*(.-)%s*$")
-					break
-				end
-			end
-		end
-	end
-	if inter_A and inter_B then
-		-- Simple strategy: produce a table literal that merges fields of both.
-		-- Extract fields from each arm (look for "field: type" patterns inside braces).
-		local function extract_field_pairs(tbl_str)
-			local inner = tbl_str:match("^%{%s*(.-)%s*%}$")
-			if not inner then return {} end
-			local pairs_list = {}
-			-- Match "name: type" entries (simple single-field tables only).
-			for fname, ftype in inner:gmatch("(%a[%w_]*):%s*([^,}]+)") do
-				pairs_list[#pairs_list + 1] = { fname, ftype:match("^%s*(.-)%s*$") }
-			end
-			return pairs_list
-		end
-		local fields_A = extract_field_pairs(inter_A)
-		local fields_B = extract_field_pairs(inter_B)
-		-- Merge fields, deduplicating by name.
-		local seen = {}
+		s = "(" .. table.concat(parts, ", ") .. ") -> " .. ret_s
+	elseif node.tag == "record" then
 		local entries = {}
-		for _, fp in ipairs(fields_A) do
-			if not seen[fp[1]] then
-				seen[fp[1]] = true
-				entries[#entries + 1] = fp[1] .. " = " .. arb_value_of_type(rng, fp[2])
-			end
-		end
-		for _, fp in ipairs(fields_B) do
-			if not seen[fp[1]] then
-				seen[fp[1]] = true
-				entries[#entries + 1] = fp[1] .. " = " .. arb_value_of_type(rng, fp[2])
-			end
-		end
-		if #entries == 0 then
-			-- Fallback: both may be indexers; produce a simple table
-			return "{ }"
+		for _, f in ipairs(node.fields) do
+			entries[#entries + 1] = f.name .. ": " .. to_str(f.type, 0)
 		end
 		return "{ " .. table.concat(entries, ", ") .. " }"
+	elseif node.tag == "indexer" then
+		return "{ [" .. node.key .. "]: " .. to_str(node.val, 0) .. " }"
+	else
+		return "unknown"
 	end
 
-	-- Table record: "{ field: T }" or "{ f1: T1, f2: T2 }"
-	local tbl_inner = T:match("^%{%s*(.-)%s*%}$")
-	if tbl_inner then
-		-- Check for indexer: [key]: value
-		local key_type, val_type_str = tbl_inner:match("^%[(%a+)%]:%s*(.+)$")
-		if key_type and val_type_str then
-			val_type_str = val_type_str:match("^%s*(.-)%s*$")
-			local val = arb_value_of_type(rng, val_type_str)
-			if key_type == "string" then
-				return '{ ["k"] = ' .. val .. " }"
-			else
-				-- integer indexer
-				return "{ " .. val .. " }"
+	if p and p < outer then return "(" .. s .. ")" end
+	return s
+end
+
+M.type_to_string = to_str
+
+-- ── Singleton constants ───────────────────────────────────────────────────────
+
+M.T_INTEGER = { tag = "base", name = "integer" }
+M.T_NUMBER  = { tag = "base", name = "number"  }
+M.T_STRING  = { tag = "base", name = "string"  }
+M.T_BOOLEAN = { tag = "base", name = "boolean" }
+M.T_NIL     = { tag = "nil" }
+M.T_TRUE    = { tag = "lit_bool", value = true  }
+M.T_FALSE   = { tag = "lit_bool", value = false }
+
+-- ── Pools ─────────────────────────────────────────────────────────────────────
+
+local STRING_LITS = {
+	'"hello"', '"world"', '"foo"', '"bar"', '"baz"',
+	'"a"', '"test"', '"lua"', '"crescent"', '""',
+	'"abc"', '"xyz"',
+}
+
+local FIELD_NAMES = { "x", "y", "z", "n", "s", "flag", "value", "name", "key", "data" }
+
+-- ── arb_base_type ─────────────────────────────────────────────────────────────
+-- Uniform over the four base types (integer, number, string, boolean).
+
+M.arb_base_type = arb.one_of({
+	arb.constant(M.T_INTEGER),
+	arb.constant(M.T_NUMBER),
+	arb.constant(M.T_STRING),
+	arb.constant(M.T_BOOLEAN),
+})
+
+-- ── arb_type_leaf ─────────────────────────────────────────────────────────────
+-- Atoms only: base types, literal types, nil. No recursion.
+
+M.arb_type_leaf = arb.frequency({
+	{ 4, arb.constant(M.T_INTEGER) },
+	{ 4, arb.constant(M.T_NUMBER)  },
+	{ 4, arb.constant(M.T_STRING)  },
+	{ 4, arb.constant(M.T_BOOLEAN) },
+	{ 1, arb.constant(M.T_NIL)     },
+	{ 2, arb.map(arb.int(0, 99), function(n)
+			return { tag = "lit_int", value = n }
+		end) },
+	{ 2, arb.map(arb.int(1, #STRING_LITS), function(i)
+			return { tag = "lit_str", value = STRING_LITS[i] }
+		end) },
+	{ 1, arb.constant(M.T_TRUE)  },
+	{ 1, arb.constant(M.T_FALSE) },
+})
+
+-- ── arb_type (recursive) ──────────────────────────────────────────────────────
+-- Depth-limited via arb.sized. At size 0: only atoms. At size N: all forms.
+-- Sub-types are generated at size N-1 to ensure termination.
+--
+-- Forward reference needed for self-recursion.
+
+local arb_type       -- assigned below
+local arb_type_lazy = {   -- thin proxy, resolved after assignment
+	generate = function(rng, sz) return arb_type.generate(rng, sz) end,
+	shrink   = function(v, c)   return arb_type.shrink(v, c) end,
+}
+
+-- arb_field_name: uniform over field name pool (shrinks toward index 1 = "x")
+local arb_field_name = arb.map(
+	arb.int(1, #FIELD_NAMES),
+	function(i) return FIELD_NAMES[i] end
+)
+
+arb_type = arb.sized(function(size)
+	if size <= 0 then return M.arb_type_leaf end
+
+	-- Halve the size budget at each level so the total number of AST nodes grows
+	-- as O(size) rather than O(branching^size).  With sub_size = size - 1 and
+	-- branching factor up to 3, size=64 produces ~3^64 nodes (catastrophic).
+	-- With halving, max depth = floor(log2(size)) ≈ 6 at size=64, and total
+	-- nodes are bounded by 3^6 = 729.  Grammar-level tests must parse the type
+	-- string, so string length must stay manageable.
+	local sub_size = math.max(0, math.floor(size / 2))
+	-- sub: delegates to arb_type_lazy at reduced size
+	local sub = {
+		generate = function(rng, _) return arb_type_lazy.generate(rng, sub_size) end,
+		shrink   = arb_type_lazy.shrink,
+	}
+
+	-- Single-field record: { name: T }
+	local arb_record1 = arb.map(
+		arb.tuple({ arb_field_name, sub }),
+		function(p)
+			return { tag = "record", fields = { { name = p[1], type = p[2] } } }
+		end
+	)
+
+	-- Two-field record: { name1: T1, name2: T2 } — collapses to one field if names collide
+	local arb_record2 = arb.map(
+		arb.tuple({ arb_field_name, sub, arb_field_name, sub }),
+		function(q)
+			if q[1] == q[3] then
+				-- Colliding names: just use the first field
+				return { tag = "record", fields = { { name = q[1], type = q[2] } } }
 			end
+			return { tag = "record", fields = {
+				{ name = q[1], type = q[2] },
+				{ name = q[3], type = q[4] },
+			}}
 		end
+	)
 
-		-- Named fields: collect "name: type" pairs.
-		local field_entries = {}
-		for fname, ftype in tbl_inner:gmatch("(%a[%w_]*):%s*([^,}]+)") do
-			ftype = ftype:match("^%s*(.-)%s*$")
-			field_entries[#field_entries + 1] = fname .. " = " .. arb_value_of_type(rng, ftype)
+	-- Indexer: [string|integer]: T
+	local arb_indexer = arb.map(
+		arb.tuple({ arb.bool, sub }),
+		function(p)
+			return { tag = "indexer", key = p[1] and "string" or "integer", val = p[2] }
 		end
-		if #field_entries > 0 then
-			return "{ " .. table.concat(field_entries, ", ") .. " }"
+	)
+
+	-- Single-return function: (P) -> R
+	local arb_func1 = arb.map(
+		arb.tuple({ sub, sub }),
+		function(p) return { tag = "func", params = { p[1] }, ret = p[2] } end
+	)
+
+	-- Multi-return function: (P) -> (R1, R2)
+	local arb_func2 = arb.map(
+		arb.tuple({ sub, sub, sub }),
+		function(t)
+			return { tag = "func", params = { t[1] },
+			         ret = { tag = "tuple", types = { t[2], t[3] } } }
 		end
-		-- Empty or unrecognized table shape
-		return "{ }"
+	)
+
+	return arb.frequency({
+		{ 10, M.arb_type_leaf },
+		{  4, arb.map(arb.tuple({ sub, sub }),
+				function(p) return { tag = "union", a = p[1], b = p[2] } end) },
+		{  3, arb.map(arb.tuple({ sub, sub }),
+				function(p) return { tag = "inter", a = p[1], b = p[2] } end) },
+		{  4, arb_record1 },
+		{  2, arb_record2 },
+		{  2, arb_indexer },
+		{  3, arb_func1   },
+		{  1, arb_func2   },
+	})
+end)
+
+M.arb_type = arb_type
+
+-- ── Value generators ──────────────────────────────────────────────────────────
+
+-- canonical_value: a fixed Lua literal for a leaf type node.
+-- Returns "nil" for complex types (union, func, table) — callers should restrict
+-- value-based invariants to base/literal types.
+function M.canonical_value(node)
+	if node.tag == "base" then
+		local n = node.name
+		if     n == "integer" then return "42"
+		elseif n == "number"  then return "3.5"
+		elseif n == "string"  then return '"hello"'
+		elseif n == "boolean" then return "true"
+		end
+	elseif node.tag == "nil"      then return "nil"
+	elseif node.tag == "lit_int"  then return tostring(node.value)
+	elseif node.tag == "lit_str"  then return node.value
+	elseif node.tag == "lit_bool" then return node.value and "true" or "false"
 	end
-
-	-- Function type: any "(…) -> …" pattern.
-	-- Generate a function literal that returns a value of the return type.
-	if T:find(" -> ", 1, true) or T:match("^%(.*%)") then
-		local ret_type = extract_ret_type(T)
-		local ret_val
-		if ret_type then
-			ret_val = arb_value_of_type(rng, ret_type)
-		else
-			ret_val = "nil"
-		end
-		return "function() return " .. ret_val .. " end"
-	end
-
-	-- Fallback: nil (useful signal that generator encountered an unknown shape)
 	return "nil"
 end
 
-M.arb_value_of_type = arb_value_of_type
+-- arb_value_for: arb generator for Lua literal strings matching a leaf type node.
+-- For complex types, generates "nil" (conservative fallback).
+function M.arb_value_for(node)
+	if node.tag == "base" then
+		local n = node.name
+		if n == "integer" then
+			return arb.map(arb.int(0, 100), function(v) return tostring(v) end)
+		elseif n == "number" then
+			return arb.map(arb.int(0, 99), function(v) return v .. ".5" end)
+		elseif n == "string" then
+			return arb.map(arb.int(1, #STRING_LITS), function(i) return STRING_LITS[i] end)
+		elseif n == "boolean" then
+			return arb.map(arb.bool, function(b) return b and "true" or "false" end)
+		end
+	elseif node.tag == "nil"      then return arb.constant("nil")
+	elseif node.tag == "lit_int"  then return arb.constant(tostring(node.value))
+	elseif node.tag == "lit_str"  then return arb.constant(node.value)
+	elseif node.tag == "lit_bool" then
+		return arb.constant(node.value and "true" or "false")
+	end
+	return arb.constant("nil")
+end
 
 -- ── Distinct types ────────────────────────────────────────────────────────────
 
--- Categories of types with no subtyping between categories.
--- integer ⊆ number so they share a category; we never pair within a category.
---
--- Categories:
---   1 = numeric  (integer, number, integer-literal)
---   2 = string   (string, string-literal)
---   3 = boolean  (boolean, true, false)
---   4 = table-record
---   5 = table-indexer
---   6 = function-type
+-- is_subtype_base: true if B is a subtype of A among base types.
+-- The only non-reflexive subtyping among bases: integer <: number.
+local function is_subtype_base(B_node, A_node)
+	if B_node.tag ~= "base" or A_node.tag ~= "base" then return false end
+	local B, A = B_node.name, A_node.name
+	if B == A then return true end
+	if B == "integer" and A == "number" then return true end
+	return false
+end
 
-local CATEGORY_COUNT = 6
-
-local function arb_type_in_category(rng, cat, depth)
-	if cat == 1 then
-		local pick = rng:int(1, 3)
-		if pick == 1 then return "integer"
-		elseif pick == 2 then return "number"
-		else return tostring(rng:int(0, 49))
-		end
-	elseif cat == 2 then
-		if rng:bool() then
-			return "string"
-		else
-			return STRING_LITERALS[rng:int(1, #STRING_LITERALS)]
-		end
-	elseif cat == 3 then
-		local pick = rng:int(1, 3)
-		if pick == 1 then return "boolean"
-		elseif pick == 2 then return "true"
-		else return "false"
-		end
-	elseif cat == 4 then
-		-- Table record
-		local field = FIELD_NAMES[rng:int(1, #FIELD_NAMES)]
-		local vtype = BASE_TYPES[rng:int(1, #BASE_TYPES)]
-		return "{ " .. field .. ": " .. vtype .. " }"
-	elseif cat == 5 then
-		-- Table indexer
-		local key = rng:bool() and "string" or "integer"
-		local vtype = BASE_TYPES[rng:int(1, #BASE_TYPES)]
-		return "{ [" .. key .. "]: " .. vtype .. " }"
-	else
-		-- Function type
-		local param = BASE_TYPES[rng:int(1, #BASE_TYPES)]
-		local ret   = BASE_TYPES[rng:int(1, #BASE_TYPES)]
-		return "(" .. param .. ") -> " .. ret
+-- arb_distinct_base_types: generates {A, B} pairs where B is NOT a subtype of A.
+-- Used for "wrong arg rejected" invariants.
+M.arb_distinct_base_types = arb.filter(
+	arb.tuple({ M.arb_base_type, M.arb_base_type }),
+	function(pair)
+		return not is_subtype_base(pair[2], pair[1])
 	end
-end
-
--- arb_distinct_types: pick two types A, B from DIFFERENT structural categories.
--- A value of type B is definitely NOT assignable where A is expected.
-function M.arb_distinct_types(rng)
-	local cat_A = rng:int(1, CATEGORY_COUNT)
-	local cat_B
-	repeat cat_B = rng:int(1, CATEGORY_COUNT) until cat_B ~= cat_A
-	local A = arb_type_in_category(rng, cat_A, 2)
-	local B = arb_type_in_category(rng, cat_B, 2)
-	return A, B
-end
+)
 
 return M

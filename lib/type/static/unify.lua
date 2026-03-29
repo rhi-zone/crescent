@@ -359,43 +359,45 @@ function M.unify(ctx, a, b, seen)
         return true
     end
 
-    -- Union on RHS: LHS must be assignable to at least one member.
-    -- Use copy_seen for each alternative: failed branches must not contaminate siblings.
-    if tb.tag == TAG_UNION then
-        local best_detail, best_depth = nil, -1
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            local mid = find(ctx, ctx.lists:get(i))
-            local ok, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
-            if ok then return true end
-            --: UnifyDetail?
-            local det = detail
-            if det and det.kind == "mismatch" then
-                local depth = det.path and #det.path or 0
-                if depth > best_depth then
-                    best_detail = detail
-                    best_depth = depth
-                end
-            end
-        end
-        return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'",
-            best_detail
-    end
-
-    -- Intersection on RHS: LHS must satisfy all members
-    if tb.tag == TAG_INTERSECTION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            local ok, err = M.unify(ctx, a, ctx.lists:get(i), seen)
-            if not ok then return false, err end
-        end
-        return true
-    end
-
     -- Intersection on LHS: at least one member satisfies RHS.
+    -- This block handles all composite RHS cases too, so the standalone union/intersection-on-RHS
+    -- checks below only fire when ta is NOT an intersection.
     -- Use copy_seen for each alternative.
     if ta.tag == TAG_INTERSECTION then
+        -- Step 1: any single member of the intersection satisfies b?
+        -- This correctly handles (A & (B|C)) <: (B|C) by checking (B|C) member against union b.
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
             local ok = M.unify(ctx, ctx.lists:get(i), b, copy_seen(seen))
             if ok then return true end
+        end
+        -- Step 2: dispatch on b's structure for cases no single member covers.
+        if tb.tag == TAG_UNION then
+            -- Try the full intersection against each union member (e.g. merged-fields vs TABLE member).
+            local best_detail, best_depth = nil, -1
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                local mid = find(ctx, ctx.lists:get(i))
+                local ok2, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
+                if ok2 then return true end
+                --: UnifyDetail?
+                local det = detail
+                if det and det.kind == "mismatch" then
+                    local depth = det.path and #det.path or 0
+                    if depth > best_depth then
+                        best_detail = detail
+                        best_depth = depth
+                    end
+                end
+            end
+            return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'",
+                best_detail
+        end
+        if tb.tag == TAG_INTERSECTION then
+            -- LHS must satisfy ALL RHS members (conjunction).
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                local ok2, err = M.unify(ctx, a, ctx.lists:get(i), seen)
+                if not ok2 then return false, err end
+            end
+            return true
         end
         -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
         -- For each required field in b, at least one intersection member must cover it.
@@ -419,6 +421,39 @@ function M.unify(ctx, a, b, seen)
             if all_covered then return true end
         end
         return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'"
+    end
+
+    -- Union on RHS: LHS must be assignable to at least one member.
+    -- (Only reached when ta is NOT an intersection.)
+    -- Use copy_seen for each alternative: failed branches must not contaminate siblings.
+    if tb.tag == TAG_UNION then
+        local best_detail, best_depth = nil, -1
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local ok, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
+            if ok then return true end
+            --: UnifyDetail?
+            local det = detail
+            if det and det.kind == "mismatch" then
+                local depth = det.path and #det.path or 0
+                if depth > best_depth then
+                    best_detail = detail
+                    best_depth = depth
+                end
+            end
+        end
+        return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'",
+            best_detail
+    end
+
+    -- Intersection on RHS: LHS must satisfy all members.
+    -- (Only reached when ta is NOT an intersection.)
+    if tb.tag == TAG_INTERSECTION then
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            local ok, err = M.unify(ctx, a, ctx.lists:get(i), seen)
+            if not ok then return false, err end
+        end
+        return true
     end
 
     -- Function types: contravariant params, covariant returns
@@ -713,6 +748,9 @@ function M.try_unify(ctx, a, b, seen)
     local ta = ctx.types:get(a)
     local tb = ctx.types:get(b)
 
+    -- Same type ID: trivially reflexive.
+    if a == b then return true end
+
     if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
     if tb.tag == TAG_UNKNOWN then return true end
     if ta.tag == TAG_UNKNOWN then return false end
@@ -770,26 +808,29 @@ function M.try_unify(ctx, a, b, seen)
         end
     end
 
-    -- Disjunctive: use copy_seen so failed alternatives don't contaminate siblings.
-    if tb.tag == TAG_UNION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            if M.try_unify(ctx, a, ctx.lists:get(i), copy_seen(seen)) then return true end
-        end
-        return false
-    end
-
-    -- Intersection on RHS: a must satisfy ALL members (conjunctive — shared seen is fine).
-    if tb.tag == TAG_INTERSECTION then
-        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-            if not M.try_unify(ctx, a, ctx.lists:get(i), seen) then return false end
-        end
-        return true
-    end
-
     -- Intersection on LHS: satisfies b if ANY member satisfies b (disjunctive — copy seen).
+    -- This block handles all composite RHS cases too, so the standalone union/intersection-on-RHS
+    -- checks below only fire when ta is NOT an intersection.
     if ta.tag == TAG_INTERSECTION then
+        -- Step 1: any single member of the intersection satisfies b?
+        -- This correctly handles (A & (B|C)) <: (B|C) by checking (B|C) member against union b.
         for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
             if M.try_unify(ctx, ctx.lists:get(i), b, copy_seen(seen)) then return true end
+        end
+        -- Step 2: dispatch on b's structure for cases no single member covers.
+        if tb.tag == TAG_UNION then
+            -- Try the full intersection against each union member (e.g. merged-fields vs TABLE member).
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                if M.try_unify(ctx, a, ctx.lists:get(i), copy_seen(seen)) then return true end
+            end
+            return false
+        end
+        if tb.tag == TAG_INTERSECTION then
+            -- LHS must satisfy ALL RHS members (conjunction).
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                if not M.try_unify(ctx, a, ctx.lists:get(i), seen) then return false end
+            end
+            return true
         end
         -- Merged-fields fallback: {f:T} & {g:U} <: {f:T, g:U}
         if tb.tag == TAG_TABLE then
@@ -813,6 +854,24 @@ function M.try_unify(ctx, a, b, seen)
             if all_covered then return true end
         end
         return false
+    end
+
+    -- Disjunctive: use copy_seen so failed alternatives don't contaminate siblings.
+    -- (Only reached when ta is NOT an intersection.)
+    if tb.tag == TAG_UNION then
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            if M.try_unify(ctx, a, ctx.lists:get(i), copy_seen(seen)) then return true end
+        end
+        return false
+    end
+
+    -- Intersection on RHS: a must satisfy ALL members (conjunctive — shared seen is fine).
+    -- (Only reached when ta is NOT an intersection.)
+    if tb.tag == TAG_INTERSECTION then
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            if not M.try_unify(ctx, a, ctx.lists:get(i), seen) then return false end
+        end
+        return true
     end
 
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
