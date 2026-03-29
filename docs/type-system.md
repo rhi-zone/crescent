@@ -520,6 +520,7 @@ Current intrinsics and their intended replacements:
 - `$PairsReturn<T>`, `$IpairsReturn<T>` → expressible via `$Keys<T>` + indexer lookup once those work
 - `$Require<T>` — stays intrinsic: module system integration (reads .cri files, resolves module paths)
 - `$Opaque<T>`, `$Opaque<T, U>` — stays intrinsic: nominal identity tied to declaration site
+- `$FfiC` — stays intrinsic: builds a closed table type from ffi.cdef call sites in the current file; not expressible as a type alias
 
 `$EachField` is the key iteration primitive — it iterates over fields, passing each as a `{ key: K, value: V, optional: boolean, readonly: boolean }` descriptor to the user-defined transform F. The transform is a regular type-level function (match or simple generic). `$EachField` collects the transformed field descriptors back into a table type.
 
