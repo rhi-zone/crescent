@@ -73,7 +73,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **`pcall`/`xpcall` de-specialcase** — implemented (d7950de): `$PcallReturn<F>` intrinsic.
 - [x] **`pairs`/`ipairs` de-specialcase** — implemented (d7950de): `$PairsReturn<T>`/`$IpairsReturn<T>` intrinsics.
 - [x] **Self-check regression: constrain.lua 60 errors** — fixed (5c23738): `--:` annotations added across constrain.lua, narrow.lua, check.lua, solve.lua, lsp.lua, ctx.d.lua, type_soundness_test.lua. All now self-check at 0 errors.
-- [ ] **Self-check: match.lua 22 errors** — pre-existing 16 errors plus 6 added when implementing indexer arm patterns. All are the same class: `ctx.lists:get()`/`ctx.fields:get()` returning `unknown` (ctx is unannotated), and `merge_bindings` returning `nil` assigned to `{}`. Fix requires either annotating the `ctx` parameter with the full `Ctx` type alias, or adding per-call `--:` casts to every pool access. Deferred as part of a broader match.lua annotation pass.
+- [x] **Self-check: match.lua annotation pass** — fixed (6740aeb, 2026-03-30): added Ctx type to function signatures; --: integer for lists/fields:get(); --: any for merge_bindings. 0 errors, 6 intentional any warnings.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
@@ -108,7 +108,7 @@ TypeScript's type guards can lie — `function isString(x): x is string { return
 
 - [x] **User-defined type guards** — implemented (0e3be6f, 2026-03-30). `(x: unknown) -> x is T` return type: ann.lua parses the predicate, stores in pool._type_predicates; narrow.lua `guard_check` kind narrows the argument at call sites (truthy/falsy/negated). Body return type is enforced as boolean.
 
-- [ ] **Assertion functions** — `(x: unknown) -> asserts x is T` narrows after the call (unconditional narrowing, errors if condition is false at runtime). `assert(x)` and `assert(type(x) == "string")` are the common patterns.
+- [x] **Assertion functions** — implemented (6740aeb, 2026-03-30): `(x: T) -> asserts x is GuardType` parses in ann.lua, unconditional scope narrowing in StmtRule[NODE_EXPR_STMT]. Also fixed latent bug: predicate IDs now propagated from annotation arena to ctx.types arena.
 
 - [ ] **Verified type guards** — rather than trusting the annotation, verify that the function body actually performs checks consistent with the declared predicate. If the body provably returns true for non-T values, emit a warning. This is beyond TS — TS never verifies guards, it just trusts them. Even partial verification (detecting trivially lying guards) would be a win.
 
