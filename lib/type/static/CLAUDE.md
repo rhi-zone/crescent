@@ -101,11 +101,11 @@ after the next refactor."
 
 ### Generator coverage
 
-`fuzz_arb.lua` generates: base types, literals, nil, union, intersection,
-function (single- and multi-return), record, indexer.
+`fuzz_arb.lua` generates: base types, literals, nil, never, unknown, union,
+intersection, function (single- and multi-return), record, indexer.
 
-Not generated: `any`, `never`, `unknown`, type variables (`<T>`), `match`
-types, nominal/opaque types, enum members, spread types, named aliases.
+Not generated: `any`, type variables (`<T>`), `match` types, nominal/opaque
+types, enum members, spread types, named aliases.
 
 These are not covered because they require syntax or context the current
 generator doesn't support — not because they're unimportant. `never` and

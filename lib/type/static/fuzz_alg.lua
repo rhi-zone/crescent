@@ -42,6 +42,8 @@ ast_to_tid = function(ctx, node)
 	local tag = node.tag
 
 	if     tag == "nil"      then return ctx.T_NIL
+	elseif tag == "never"    then return ctx.T_NEVER
+	elseif tag == "unknown"  then return ctx.T_UNKNOWN
 	elseif tag == "base"     then
 		local n = node.name
 		if     n == "integer" then return ctx.T_INTEGER

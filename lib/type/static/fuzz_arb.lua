@@ -49,6 +49,8 @@ local function to_str(node, outer)
 
 	if     node.tag == "base"     then return node.name
 	elseif node.tag == "nil"      then return "nil"
+	elseif node.tag == "never"    then return "never"
+	elseif node.tag == "unknown"  then return "unknown"
 	elseif node.tag == "lit_int"  then return tostring(node.value)
 	elseif node.tag == "lit_str"  then return node.value   -- includes surrounding quotes
 	elseif node.tag == "lit_bool" then return node.value and "true" or "false"
@@ -93,11 +95,13 @@ M.type_to_string = to_str
 
 -- ── Singleton constants ───────────────────────────────────────────────────────
 
-M.T_INTEGER = { tag = "base", name = "integer" }
-M.T_NUMBER  = { tag = "base", name = "number"  }
-M.T_STRING  = { tag = "base", name = "string"  }
-M.T_BOOLEAN = { tag = "base", name = "boolean" }
+M.T_INTEGER = { tag = "base",    name = "integer" }
+M.T_NUMBER  = { tag = "base",    name = "number"  }
+M.T_STRING  = { tag = "base",    name = "string"  }
+M.T_BOOLEAN = { tag = "base",    name = "boolean" }
 M.T_NIL     = { tag = "nil" }
+M.T_NEVER   = { tag = "never" }
+M.T_UNKNOWN = { tag = "unknown" }
 M.T_TRUE    = { tag = "lit_bool", value = true  }
 M.T_FALSE   = { tag = "lit_bool", value = false }
 
@@ -130,6 +134,8 @@ M.arb_type_leaf = arb.frequency({
 	{ 4, arb.constant(M.T_STRING)  },
 	{ 4, arb.constant(M.T_BOOLEAN) },
 	{ 1, arb.constant(M.T_NIL)     },
+	{ 1, arb.constant(M.T_NEVER)   },
+	{ 1, arb.constant(M.T_UNKNOWN) },
 	{ 2, arb.map(arb.int(0, 99), function(n)
 			return { tag = "lit_int", value = n }
 		end) },
