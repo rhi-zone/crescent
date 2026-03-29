@@ -99,7 +99,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Fast.** Performance at all costs. LuaJIT is fast — don't waste it. Avoid allocations in hot paths, prefer tables over closures, measure before and after.
 
-**Tooling performance bar: bun (general), tsgo for the typechecker.** The test runner, package manager, and CLI tooling must be competitive with bun in wall-clock time. The typechecker specifically must be competitive with `@typescript/native-preview` (tsgo / ts7 — the Go rewrite of tsc). Benchmark methodology for the typechecker: a representative "nice" TypeScript program vs a structurally similar Lua program (cold-start + incremental), plus pathological Lua cases (deep union chains, heavily generic code, large files) that stress the solver. If a LuaJIT implementation is not within striking distance on the same workload, that is a signal to reconsider the design — not to accept the gap. Benchmark before shipping.
+**Tooling performance bar: bun (general), tsgo for the typechecker.** The test runner, package manager, and CLI tooling must be competitive with bun in wall-clock time. The typechecker specifically must be competitive with `@typescript/native-preview` (tsgo / ts7 — the Go rewrite of tsc). See `lib/type/static/CLAUDE.md` for benchmark methodology.
 
 **LuaJIT-first, not LuaJIT-only.** Target LuaJIT but don't gratuitously break Lua 5.2+ compatibility. Pure Lua code shouldn't depend on LuaJIT quirks. FFI and `bit.*` are inherently LuaJIT-only, but everything else should work on standard Lua if it doesn't sacrifice performance.
 
@@ -121,12 +121,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 ~/git/rhizone/normalize/target/debug/normalize view <dir>     # directory structure
 ```
 
-**On typechecker topics, read `docs/type-system.md` in full before doing anything.** Front-load the entire file into context. Design decisions are written there. Don't improvise from first principles.
-
-**This rule has been violated before.** `C_ARITH` was implemented with `is_numeric_tid` / `is_int_compat_tid` predicates instead of the `prim_meta` metamethod dispatch prescribed by Principle 10. The fix required a full rewrite. The correct pattern: ask "does prim_meta / metamethod lookup handle this?" before adding any new predicate or special case to the solver. If yes — use prim_meta. If no — read the design doc again before proceeding.
-
-**No new `$`-prefixed intrinsics.** The `$` sigil marks type operations that require compiler support because `match` arm patterns don't yet cover them. Adding a new `$Whatever` is wrong — the right answer is to extend `match` patterns so the operation becomes user-definable. Current `$`-prefixed types are provisional and will be eliminated as `match` gains function-type arms (`(...) -> R`) and indexer arms (`{ [K]: V }`). The only permanent intrinsics are `$Require` (module system), `$Opaque` (nominal identity), and `$FfiC` (builds closed table from ffi.cdef call sites). If you find yourself writing a new `$` intrinsic, stop and ask what `match` pattern is missing instead.
-
+**On typechecker topics, read `lib/type/static/CLAUDE.md` and `docs/type-system.md` in full before doing anything.** Design decisions, solver rules, fuzz suite design, and performance bar are all there. Don't improvise from first principles.
 
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
