@@ -336,6 +336,44 @@ arb.it("multi-return: first slot has declared type",
 		assert(typechecks(src), "multi-return slot type failed: " .. src)
 	end, { trials = 300 })
 
+-- ── Invariant 20: Overload dispatch (acceptance) ─────────────────────────────
+-- (A)->R1 & (B)->R2 called with a value of type A typechecks.
+
+arb.it("overload: calling with first overload arg typechecks",
+	farb.arb_distinct_base_types,
+	function(pair)
+		local A_node, B_node = pair[1], pair[2]
+		local A = farb.type_to_string(A_node)
+		local B = farb.type_to_string(B_node)
+		local v = farb.canonical_value(A_node)
+		-- f: (A)->nil & (B)->nil; call with A value → ok
+		local src = table.concat({
+			("--: ((%s) -> nil) & ((%s) -> nil)"):format(A, B),
+			"local f",
+			("f(%s)"):format(v),
+		}, "\n")
+		assert(typechecks(src), "overload acceptance failed: " .. src)
+	end, { trials = 300 })
+
+-- ── Invariant 21: Overload dispatch (rejection) ───────────────────────────────
+-- (A)->R1 & (B)->R2 called with a value of type C (C not A and not B) is rejected.
+
+arb.it("overload: calling with non-matching arg rejected",
+	farb.arb_triple_distinct_base_types,
+	function(triple)
+		if not triple then return end
+		local A_node, B_node, C_node = triple[1], triple[2], triple[3]
+		local A = farb.type_to_string(A_node)
+		local B = farb.type_to_string(B_node)
+		local v = farb.canonical_value(C_node)
+		local src = table.concat({
+			("--: ((%s) -> nil) & ((%s) -> nil)"):format(A, B),
+			"local f",
+			("f(%s)"):format(v),
+		}, "\n")
+		assert(rejects(src), "overload non-match not rejected: " .. src)
+	end, { trials = 300 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

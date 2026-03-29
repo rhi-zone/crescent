@@ -341,4 +341,20 @@ M.arb_distinct_base_types = arb.filter(
 	end
 )
 
+-- arb_triple_distinct_base_types: generates {A, B, C} triples where no type is
+-- a subtype of any other (pairwise distinct under subtyping).
+-- Used for overload rejection invariants where C is neither A nor B.
+M.arb_triple_distinct_base_types = arb.filter(
+	arb.tuple({ M.arb_base_type, M.arb_base_type, M.arb_base_type }),
+	function(triple)
+		local A, B, C = triple[1], triple[2], triple[3]
+		-- C must not be a subtype of A or B (so calling with C is wrong for both)
+		-- A and B must be distinct (otherwise the overload is degenerate)
+		return not is_subtype_base(C, A)
+		   and not is_subtype_base(C, B)
+		   and not is_subtype_base(A, B)
+		   and not is_subtype_base(B, A)
+	end
+)
+
 return M

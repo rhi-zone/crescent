@@ -97,11 +97,11 @@ after the next refactor."
 - **Generic constraint acceptance**: `<T: C>(T)->T` called with C value typechecks (grammar)
 - **Generic constraint rejection**: `<T: C>(T)->T` called with non-C value is rejected (grammar)
 - **Multi-return slot types**: `() -> (A, B)`; `x, y = f()` gives `x: A`, `y: B` (grammar)
+- **Overload dispatch (acceptance)**: `(A)->nil & (B)->nil` called with A value typechecks (grammar)
+- **Overload dispatch (rejection)**: `(A)->nil & (B)->nil` called with C (C not A, not B) is rejected (grammar)
 - Performance gate: ≥500 programs/sec throughput
 
 ### Invariants not yet tested (each = a blind spot)
-
-- **Overload dispatch**: calling an intersection of function types routes to the correct member
 
 ### Generator coverage
 
