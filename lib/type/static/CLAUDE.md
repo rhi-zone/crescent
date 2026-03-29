@@ -31,7 +31,7 @@ a new `$Whatever` is wrong — the right answer is to extend `match` patterns so
 the operation becomes user-definable. Current `$`-prefixed types are
 provisional and will be eliminated as `match` gains:
 - function-type arms: `(...) -> R` — not yet implemented
-- indexer arms: `{ [K]: V }` — **implemented** (match.lua, 2026-03-29). Binds K → indexer key type, V → indexer value type. `$PairsReturn`/`$IpairsReturn`/`$Keys` cannot yet be expressed as prelude aliases because their result types reference the full input type T — matching the whole subject as a binding is not yet supported.
+- indexer arms: `{ [K]: V }` — **implemented** (match.lua, 2026-03-29). Binds K → indexer key type, V → indexer value type. Alias-param substitution happens before match evaluation, so T in result expressions is already concrete. `$PairsReturn<{ [string]: integer }>` CAN be expressed as a match alias for indexer tables. Full replacement of `$PairsReturn`/`$IpairsReturn`/`$Keys` needs named-field fallback arms (K=string, V=union of all field values) which requires either `$EachField`-level iteration or a dedicated pattern — not yet possible.
 
 The only permanent intrinsics are `$Require` (module system), `$Opaque`
 (nominal identity), and `$FfiC` (builds closed table from ffi.cdef call
