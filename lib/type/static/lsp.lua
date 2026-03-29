@@ -30,6 +30,7 @@ local EMPTY_ARRAY = {[0] = 0}
 -- Wire protocol
 -- ---------------------------------------------------------------------------
 
+--: (any) -> ()
 local function send(msg)
     local body = json.encode(msg, NULL)
     io.stdout:write("Content-Length: " .. #body .. "\r\n\r\n" .. body)
