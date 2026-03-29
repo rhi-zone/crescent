@@ -395,49 +395,93 @@ function M.parse_annotations(annotations, pool, filename)
                     end
                     expect_char(s, ")")
                 else
-                    -- Detect type predicate syntax: `name is T`
-                    -- Only valid when `name` is a known param name.
+                    -- Detect assertion predicate syntax: `asserts name is T`
+                    -- and type predicate syntax: `name is T`
+                    -- Both are only valid when `name` is a known param name.
                     local guard_detected = false
                     if has_param_names then
                         local save_pos = s.pos
-                        local pred_word = scan_word(s)
-                        if pred_word then
-                            -- Find the param index for this name
-                            local guard_param_idx = nil
-                            for pi, nm_id in ipairs(item_names) do
-                                if nm_id ~= 0 then
-                                    local pname = intern_mod.get(pool, nm_id)
-                                    if pname == pred_word then
-                                        guard_param_idx = pi - 1; break
+                        -- Check for "asserts" keyword first.
+                        local assert_kw = s.pos + 6 <= s.len
+                            and sub(s.src, s.pos, s.pos + 6) == "asserts"
+                            and not is_ident(byte(s.src, s.pos + 7) or 0)
+                        if assert_kw then
+                            s.pos = s.pos + 7
+                            skip_ws(s)
+                            local pred_word = scan_word(s)
+                            if pred_word then
+                                local assert_param_idx = nil
+                                for pi, nm_id in ipairs(item_names) do
+                                    if nm_id ~= 0 then
+                                        local pname = intern_mod.get(pool, nm_id)
+                                        if pname == pred_word then
+                                            assert_param_idx = pi - 1; break
+                                        end
+                                    end
+                                end
+                                if assert_param_idx then
+                                    skip_ws(s)
+                                    local is_kw2 = s.pos + 1 <= s.len
+                                        and sub(s.src, s.pos, s.pos + 1) == "is"
+                                        and not is_ident(byte(s.src, s.pos + 2) or 0)
+                                    if is_kw2 then
+                                        s.pos = s.pos + 2
+                                        skip_ws(s)
+                                        local assert_tid = parse_type(s)
+                                        -- Assertion functions return nil (void).
+                                        local ret_nil = alloc_type(defs.TAG_NIL)
+                                        returns[1] = ret_nil
+                                        -- Store assertion predicate info for narrowing.
+                                        pool._pending_assert_predicate = {
+                                            param_idx = assert_param_idx,
+                                            type_id   = assert_tid,
+                                        }
+                                        guard_detected = true
                                     end
                                 end
                             end
-                            if guard_param_idx then
-                                skip_ws(s)
-                                -- Check for keyword "is" (not followed by ident char)
-                                local is_kw = s.pos + 1 <= s.len
-                                    and sub(s.src, s.pos, s.pos + 1) == "is"
-                                    and not is_ident(byte(s.src, s.pos + 2) or 0)
-                                if is_kw then
-                                    s.pos = s.pos + 2
+                            if not guard_detected then s.pos = save_pos end
+                        end
+                        if not guard_detected then
+                            local pred_word = scan_word(s)
+                            if pred_word then
+                                -- Find the param index for this name
+                                local guard_param_idx = nil
+                                for pi, nm_id in ipairs(item_names) do
+                                    if nm_id ~= 0 then
+                                        local pname = intern_mod.get(pool, nm_id)
+                                        if pname == pred_word then
+                                            guard_param_idx = pi - 1; break
+                                        end
+                                    end
+                                end
+                                if guard_param_idx then
                                     skip_ws(s)
-                                    local guard_tid = parse_type(s)
-                                    -- Type predicate functions return boolean.
-                                    local ret_bool = alloc_type(defs.TAG_BOOLEAN)
-                                    returns[1] = ret_bool
-                                    -- Store predicate info in pool for narrowing lookup.
-                                    pool._type_predicates = pool._type_predicates or {}
-                                    -- fn_type_id is assigned below; we need to patch it after
-                                    -- alloc_type(TAG_FUNCTION). Use a deferred table entry.
-                                    pool._pending_predicate = {
-                                        param_idx = guard_param_idx,
-                                        type_id   = guard_tid,
-                                    }
-                                    guard_detected = true
+                                    -- Check for keyword "is" (not followed by ident char)
+                                    local is_kw = s.pos + 1 <= s.len
+                                        and sub(s.src, s.pos, s.pos + 1) == "is"
+                                        and not is_ident(byte(s.src, s.pos + 2) or 0)
+                                    if is_kw then
+                                        s.pos = s.pos + 2
+                                        skip_ws(s)
+                                        local guard_tid = parse_type(s)
+                                        -- Type predicate functions return boolean.
+                                        local ret_bool = alloc_type(defs.TAG_BOOLEAN)
+                                        returns[1] = ret_bool
+                                        -- Store predicate info in pool for narrowing lookup.
+                                        pool._type_predicates = pool._type_predicates or {}
+                                        -- fn_type_id is assigned below; we need to patch it after
+                                        -- alloc_type(TAG_FUNCTION). Use a deferred table entry.
+                                        pool._pending_predicate = {
+                                            param_idx = guard_param_idx,
+                                            type_id   = guard_tid,
+                                        }
+                                        guard_detected = true
+                                    end
                                 end
                             end
+                            if not guard_detected then s.pos = save_pos end
                         end
-                        if not guard_detected then s.pos = save_pos end
                     end
                     if not guard_detected then
                         returns[1] = parse_type(s)
@@ -478,6 +522,12 @@ function M.parse_annotations(annotations, pool, filename)
                     pool._type_predicates = pool._type_predicates or {}
                     pool._type_predicates[fn] = pool._pending_predicate
                     pool._pending_predicate = nil
+                end
+                -- Attach deferred assertion predicate info to pool (set by asserts detection above).
+                if pool._pending_assert_predicate then
+                    pool._assert_predicates = pool._assert_predicates or {}
+                    pool._assert_predicates[fn] = pool._pending_assert_predicate
+                    pool._pending_assert_predicate = nil
                 end
                 return fn
             end

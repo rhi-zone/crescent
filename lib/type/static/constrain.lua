@@ -409,7 +409,26 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             ctx._resolving_func_ann_scope = saved_flag
         end
         seen[ann_tid] = nil
-        return types_mod.make_func(ctx, params, returns, vararg_id, param_name_ids)
+        local resolved_fn = types_mod.make_func(ctx, params, returns, vararg_id, param_name_ids)
+        -- Propagate type predicate / assertion predicate from annotation arena ID to
+        -- the resolved ctx.types ID so that narrow.lua / constrain.lua can look it up
+        -- by the runtime type ID (which is in ctx.types, not the annotation arena).
+        -- The predicate's type_id is also in the annotation arena and must be resolved.
+        if ctx.pool._type_predicates and ctx.pool._type_predicates[ann_tid] then
+            local raw = ctx.pool._type_predicates[ann_tid]
+            ctx.pool._type_predicates[resolved_fn] = {
+                param_idx = raw.param_idx,
+                type_id   = resolve_annotation_type(ctx, raw.type_id, seen),
+            }
+        end
+        if ctx.pool._assert_predicates and ctx.pool._assert_predicates[ann_tid] then
+            local raw = ctx.pool._assert_predicates[ann_tid]
+            ctx.pool._assert_predicates[resolved_fn] = {
+                param_idx = raw.param_idx,
+                type_id   = resolve_annotation_type(ctx, raw.type_id, seen),
+            }
+        end
+        return resolved_fn
     end
 
     if tag == TAG_TABLE then
@@ -1232,6 +1251,17 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
     local fn_tid = types_mod.make_func(ctx, param_tids, returns, vararg_id, param_name_ids)
 
+    -- Propagate type/assertion predicate from the annotation type ID to the runtime
+    -- fn_tid so that narrow.lua / constrain.lua can look it up by the bound type ID.
+    if ann_fn_tid then
+        if ctx.pool._type_predicates and ctx.pool._type_predicates[ann_fn_tid] then
+            ctx.pool._type_predicates[fn_tid] = ctx.pool._type_predicates[ann_fn_tid]
+        end
+        if ctx.pool._assert_predicates and ctx.pool._assert_predicates[ann_fn_tid] then
+            ctx.pool._assert_predicates[fn_tid] = ctx.pool._assert_predicates[ann_fn_tid]
+        end
+    end
+
     -- Monomorphic inference: params stay as free TAG_VARs so that call-site C_CALLABLE
     -- constraints bind them directly.  Body constraints (C_ARITH, C_COMPARE, etc.) defer
     -- until params are concrete, then resolve with the actual call-site types.
@@ -1847,7 +1877,31 @@ end
 --: (Ctx, integer) -> ()
 StmtRule[NODE_EXPR_STMT] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
-    gen_expr(ctx, n.data[0])
+    local expr_nid = n.data[0]
+    gen_expr(ctx, expr_nid)
+    -- After the call, check if the callee is an assertion predicate.
+    -- If so, narrow the argument in the current scope (continuation narrowing).
+    local en = ctx.nodes:get(expr_nid)
+    if en and en.kind == NODE_CALL_EXPR then
+        local callee_n = ctx.nodes:get(en.data[0])
+        if callee_n and callee_n.kind == NODE_IDENTIFIER then
+            local callee_tid = env_mod.lookup(ctx.scope, callee_n.data[0])
+            if callee_tid then
+                callee_tid = types_mod.find(ctx, callee_tid)
+                local pred = ctx.pool._assert_predicates
+                    and ctx.pool._assert_predicates[callee_tid]
+                if pred and en.data[2] > pred.param_idx then
+                    local arg_nid = ctx.ast_lists:get(en.data[1] + pred.param_idx)
+                    local arg_n = ctx.nodes:get(arg_nid)
+                    if arg_n and arg_n.kind == NODE_IDENTIFIER then
+                        local name_id = arg_n.data[0]
+                        -- Bind the narrowed type directly in the current scope.
+                        env_mod.bind(ctx.scope, name_id, pred.type_id)
+                    end
+                end
+            end
+        end
+    end
 end
 
 --: (Ctx, integer) -> ()

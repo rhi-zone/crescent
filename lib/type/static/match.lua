@@ -41,9 +41,12 @@ end
 -- Check if `ty_id` matches `pat_id`.
 -- Returns (ok, bindings_table_or_nil).
 -- bindings: { [name_id] -> type_id } for named patterns (type variables).
+--: (Ctx, integer, integer) -> (boolean, { [integer]: integer, ... }?)
 function M.match_pattern(ctx, ty_id, pat_id)
-    ty_id  = types_mod.find(ctx, ty_id)
-    pat_id = types_mod.find(ctx, pat_id)
+    --: integer
+    local ty_id  = types_mod.find(ctx, ty_id)
+    --: integer
+    local pat_id = types_mod.find(ctx, pat_id)
 
     local tt = ctx.types:get(ty_id)
     local pt = ctx.types:get(pat_id)
@@ -89,16 +92,20 @@ function M.match_pattern(ctx, ty_id, pat_id)
     -- Every named field in the pattern must be present in the input type.
     -- Every indexer pair in the pattern must be matched positionally against the subject's indexers.
     if pt.tag == TAG_TABLE and tt.tag == TAG_TABLE then
+        --: any
         local bindings = {}
         -- Each named field in the pattern must exist in the actual type.
         for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+            --: integer
             local pfid = ctx.lists:get(pi)
+            --: any
             local pfe  = ctx.fields:get(pfid)
             -- Find the matching field in the input type
             local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
             if not afe then return false, nil end
             local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id)
             if not ok then return false, nil end
+            --: any
             bindings = merge_bindings(bindings, sub_bindings)
             if bindings == nil then return false, nil end
         end
@@ -121,11 +128,13 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 local tv_id = ctx.lists:get(tis + i * 2 + 1)
                 local ok, sub = M.match_pattern(ctx, tk_id, pk_id)
                 if not ok then return false, nil end
-                bindings = merge_bindings(bindings, sub) --: any
+                --: any
+                bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
                 ok, sub = M.match_pattern(ctx, tv_id, pv_id)
                 if not ok then return false, nil end
-                bindings = merge_bindings(bindings, sub) --: any
+                --: any
+                bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end
         end
@@ -137,6 +146,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
     if pt.tag == TAG_FUNCTION then
         -- The input must also be a function
         if tt.tag ~= TAG_FUNCTION then return false, nil end
+        --: any
         local bindings = {}
         -- Match params
         local ppl = pt.data[1]  -- param count in pattern
@@ -145,10 +155,13 @@ function M.match_pattern(ctx, ty_id, pat_id)
         if ppl > 0 then
             if tpl ~= ppl then return false, nil end
             for i = 0, ppl - 1 do
+                --: integer
                 local p_param = ctx.lists:get(pt.data[0] + i)
+                --: integer
                 local t_param = ctx.lists:get(tt.data[0] + i)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param)
                 if not ok then return false, nil end
+                --: any
                 bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end
@@ -160,6 +173,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
             if t_va < 0 then return false, nil end
             local ok, sub = M.match_pattern(ctx, t_va, p_va)
             if not ok then return false, nil end
+            --: any
             bindings = merge_bindings(bindings, sub)
             if bindings == nil then return false, nil end
         end
@@ -198,7 +212,8 @@ function M.match_pattern(ctx, ty_id, pat_id)
                     end
                     local ok, sub = M.match_pattern(ctx, bound_tid, p_ret0_canon)
                     if not ok then return false, nil end
-                    bindings = merge_bindings(bindings, sub) --: any
+                    --: any
+                    bindings = merge_bindings(bindings, sub)
                     if bindings == nil then return false, nil end
                     return true, bindings
                 end
@@ -212,7 +227,8 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 local t_ret = ctx.lists:get(tt.data[2] + i)
                 local ok, sub = M.match_pattern(ctx, t_ret, p_ret)
                 if not ok then return false, nil end
-                bindings = merge_bindings(bindings, sub) --: any
+                --: any
+                bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end
         end
@@ -226,6 +242,7 @@ end
 -- mt_id: type_id of a TAG_MATCH_TYPE slot
 -- seen:  { [mt_id] -> true } cycle-detection set (shared across recursive calls)
 -- Returns the result type_id of the first matching arm, or T_NEVER.
+--: (Ctx, integer, { [integer]: boolean, ... }?) -> integer
 function M.evaluate(ctx, mt_id, seen)
     seen = seen or {}
 
@@ -234,6 +251,7 @@ function M.evaluate(ctx, mt_id, seen)
     if seen[mt_id] then return ctx.T_NEVER end
     seen[mt_id] = true
 
+    --: any
     local mt = ctx.types:get(mt_id)
     if mt.tag ~= TAG_MATCH_TYPE then
         seen[mt_id] = nil
@@ -249,14 +267,18 @@ function M.evaluate(ctx, mt_id, seen)
     -- This is required by the design: "Distribution still applies. When a match
     -- receives a union, it distributes: each union member is matched independently,
     -- results are re-unioned."
+    --: any
     local param_t = ctx.types:get(param_id)
     if param_t.tag == TAG_UNION then
+        --: { [integer]: integer, ... }
         local results = {}
         for ui = param_t.data[0], param_t.data[0] + param_t.data[1] - 1 do
+            --: integer
             local member_id = types_mod.find(ctx, ctx.lists:get(ui))
             -- Build a temporary match-type node with this member as the param.
             -- Reuse the existing arms slice from the list pool (no new allocation).
             local sub_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
+            --: any
             local sub_mtt = ctx.types:get(sub_mt)
             sub_mtt.data[0] = member_id
             sub_mtt.data[1] = arms_start
@@ -271,7 +293,9 @@ function M.evaluate(ctx, mt_id, seen)
 
     local i = arms_start
     while i < arms_start + arms_len - 1 do
+        --: integer
         local pat_id = ctx.lists:get(i)
+        --: integer
         local res_id = ctx.lists:get(i + 1)
         local ok, bindings = M.match_pattern(ctx, param_id, pat_id)
         if ok then

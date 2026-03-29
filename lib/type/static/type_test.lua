@@ -7626,3 +7626,55 @@ end
 ]], "")
     end)
 end)
+
+assert.describe("checker: assertion functions (asserts x is T)", function()
+    assert.it("asserts x is string narrows v after call", function()
+        no_errors([[
+--: (x: unknown) -> asserts x is string
+local function assert_str(x)
+    assert(type(x) == "string", "expected string")
+end
+--: (string) -> nil
+local function take_str(s) end
+local v --: unknown
+assert_str(v)
+take_str(v)
+]])
+    end)
+
+    assert.it("asserts x is integer narrows v to integer", function()
+        no_errors([[
+--: (x: unknown) -> asserts x is integer
+local function assert_int(x)
+    assert(type(x) == "number", "expected integer")
+end
+local v --: unknown
+assert_int(v)
+local n --: integer = v
+]])
+    end)
+
+    assert.it("asserts narrows union: string | integer narrowed to string", function()
+        no_errors([[
+--: (x: string | integer) -> asserts x is string
+local function assert_str(x) end
+--: (string) -> nil
+local function take_str(s) end
+local v --: string | integer
+assert_str(v)
+take_str(v)
+]])
+    end)
+
+    assert.it("asserts narrowed v passed to wrong type is rejected", function()
+        has_error([[
+--: (x: unknown) -> asserts x is string
+local function assert_str(x) end
+--: (integer) -> nil
+local function take_int(n) end
+local v --: unknown
+assert_str(v)
+take_int(v)
+]], "")
+    end)
+end)
