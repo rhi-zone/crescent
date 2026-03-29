@@ -68,7 +68,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **`unknown` was not strict** — `TAG_UNKNOWN` was behaving like `TAG_ANY`: field access, calls, and arithmetic silently passed through. Fixed in solve.lua: all three now emit errors. `unknown` requires narrowing first.
 - [x] **Coinductive cycle detection in unify.lua** — `lib/fp/maybe` and `lib/fp/either` caused stack overflow during typechecking. Fixed by adding `seen` parameter with `copy_seen()` for disjunctive iterations.
 - [x] **`match` type adversarial coverage** — non-exhaustive match on union, wrong arm result type downstream, unreachable arm, match on `never` → `never`, nested match types (concrete inner args), and `--:: module` declaration / require basic coverage all tested. Note: unreachable arm does not warn (no diagnostic emitted).
-- [ ] **Typechecker: nested match typevar not forwarded to inner type call** — `Outer<T> = match T { string => Inner<T>, _ => never }` resolves `Inner<T>` to `never` instead of `Inner<string>`. The match arm body is not evaluated with the matched type variable bound to the concrete arm type. (Found 2026-03-29 via adversarial tests.)
+- [x] **Typechecker: nested match typevar not forwarded to inner type call** — fixed (85c92d6). Root cause: `substitute_inner`'s TAG_MATCH_TYPE handler didn't defer when subject was TAG_NAMED (only deferred for TAG_VAR/TAG_ROWVAR). Fix: added TAG_NAMED to the deferred-evaluation guard in env.lua.
 
 - [x] **Field access on nil/boolean** — fixed f1a9882
 - [x] **Annotation on M.field assignment not enforced** — fixed 08fd6a4
