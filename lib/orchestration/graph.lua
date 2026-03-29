@@ -5,13 +5,15 @@ end
 local M = {}
 
 --:: task_status = "pending" | "running" | "done" | "error"
+--:: task = { id: string, type: string, input: unknown, parent_id: string?, status: task_status, output: unknown, error: string?, spawned: string[], log: string[] }
+--:: graph = { tasks: { [string]: task }, root: string?, _seq: integer }
 
 --: () -> graph
 function M.new()
 	return { tasks = {}, root = nil, _seq = 0 }
 end
 
---: (graph, table, string?) -> string
+--: (graph, any, string?) -> string
 function M.add(g, task_def, parent_id)
 	g._seq = g._seq + 1
 	local id = "task_" .. g._seq
@@ -36,18 +38,21 @@ function M.add(g, task_def, parent_id)
 	return id
 end
 
---: (graph, string) -> table?
+--: (graph, string) -> task?
 function M.get(g, id)
 	return g.tasks[id]
 end
 
---: (graph) -> () -> table?
+--- Iterate over all tasks in the graph (no guaranteed order).
+--: (graph) -> () -> any
 function M.tasks(g)
 	local ids = {}
 	for id in pairs(g.tasks) do ids[#ids + 1] = id end
+	local n = #ids
 	local i = 0
 	return function()
 		i = i + 1
+		if i > n then return nil end
 		return g.tasks[ids[i]]
 	end
 end

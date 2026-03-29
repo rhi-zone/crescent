@@ -7,13 +7,13 @@ local ctx_mod   = require("lib.orchestration.context")
 
 local M = {}
 
---: (graph, table, table, string) -> nil
+--: (unknown, any, any, string) -> nil
 function M.run_task(g, executors, hooks, task_id)
 	local task = graph_mod.get(g, task_id)
 	if not task then error("unknown task id: " .. tostring(task_id)) end
 	if task.status ~= "pending" then return end
 
-	local executor = executors[task.type]
+	local executor = executors[task.type] --: any
 	if not executor then
 		task.status = "error"
 		task.error  = "no executor for task type: " .. tostring(task.type)
@@ -34,11 +34,12 @@ function M.run_task(g, executors, hooks, task_id)
 	if hooks and hooks.on_task then hooks.on_task(task) end
 end
 
---: (table, table?) -> unknown, graph
+--: (unknown, any?) -> unknown, unknown
 function M.run(task_def, opts)
 	opts = opts or {}
-	local executors = opts.executors or {}
-	local hooks     = { on_task = opts.on_task }
+	local opts_any  = opts --: any
+	local executors = opts_any.executors or {}
+	local hooks     = { on_task = opts_any.on_task }
 
 	local g = graph_mod.new()
 	local root_id = graph_mod.add(g, task_def, nil)

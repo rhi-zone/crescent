@@ -6,10 +6,13 @@ local graph_mod = require("lib.orchestration.graph")
 
 local M = {}
 
+--:: ctx = { task_id: string }
+
 -- forward declaration — exec.lua sets this to avoid a circular require
+--: any
 M._run_task = nil
 
---: (graph, table, table, string) -> ctx
+--: (unknown, any, any, string) -> ctx
 function M.make(g, executors, hooks, task_id)
 	local ctx = {}
 	ctx.task_id = task_id
