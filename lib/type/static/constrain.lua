@@ -674,6 +674,11 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             -- $EachField<T, F>).  A placeholder is identified by its alias
             -- in scope having body == the TAG_NAMED node itself (set by
             -- process_type_decls for generic alias params).
+            -- Also defer when any arg is a FLAG_GENERIC TAG_VAR (a type parameter
+            -- from a FORALL context, e.g. T in <T: string>(m: T) -> $Require<T>).
+            -- In both cases the intrinsic cannot be evaluated until the arg is
+            -- concretely bound at a call site; the solver calls it via
+            -- resolve_deferred_intrinsic after argument unification.
             local has_unresolved = false
             for _, aid in ipairs(arg_ids) do
                 local at2 = ctx.types:get(types_mod.find(ctx, aid))
@@ -683,6 +688,10 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
                         has_unresolved = true
                         break
                     end
+                end
+                if at2.tag == defs.TAG_VAR and at2.flags == defs.FLAG_GENERIC then
+                    has_unresolved = true
+                    break
                 end
             end
             if not has_unresolved then
@@ -1377,6 +1386,10 @@ local function peek_callee_ret_union(ctx, callee_n)
     -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
     -- and fall back to direct binding for scalars/plain unions (single return).
     if ret_t.tag == TAG_VAR or ret_t.tag == TAG_ROWVAR then return nil end
+    -- Deferred parameterized intrinsic: TAG_TYPE_CALL(TAG_INTRINSIC,...) in return position.
+    -- The return type is not concrete yet — the solver resolves it after argument binding
+    -- (via resolve_deferred_intrinsic).  Do not peek; let the C_INDEX/slot path handle it.
+    if ret_t.tag == defs.TAG_TYPE_CALL then return nil end
     -- Explicit multi-return: TAG_SPREAD in return position wraps the tuple/union-of-tuples.
     -- Unwrap and return the inner type directly — eager_slot handles it.
     if ret_t.tag == defs.TAG_SPREAD then
@@ -1423,7 +1436,11 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     local callee_tid = gen_expr(ctx, callee_nid)
     local arg_tids = gen_expr_list(ctx, n.data[1], n.data[2])
 
-    -- require() passthrough
+    -- require() side-effect tracking: record module name for require_sources and
+    -- invoke cri_loader for type alias injection.  Type resolution is handled by
+    -- $Require<T> via the solver; this block extracts the literal module name and
+    -- loads aliases at constraint-gen time so NODE_LOCAL_STMT can inject them into
+    -- scope before the rest of the source file is processed.
     local callee_n = ctx.nodes:get(callee_nid)
     if callee_n.kind == NODE_IDENTIFIER and n.data[2] >= 1 then
         local fname = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
@@ -1433,26 +1450,14 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
             if arg0_n and arg0_n.kind == NODE_LITERAL and arg0_n.data[2] == LIT_STRING then
                 local mod_name = intern_mod.get(ctx.pool, arg0_n.data[1]) or ""
                 ctx._last_require_mod = mod_name
-                -- module_types: declared via --:: module "name": T (prelude or user file).
-                -- Checked before cri_loader so explicit declarations always win.
-                local declared_type = ctx.module_types[mod_name]
-                if declared_type then
-                    ctx._last_multi_return = { declared_type }
-                    return declared_type
-                end
+                -- Invoke cri_loader at gen time to get type aliases for injection.
+                -- The returned exports type is ignored here (resolved later by $Require<T>
+                -- via the solver); we only care about aliases for scope injection.
                 if ctx.cri_loader then
-                    local exports, aliases = ctx.cri_loader(ctx, mod_name)
-                    if exports then
-                        ctx._last_multi_return = { exports }
-                        ctx._last_require_aliases = aliases  -- stash for NODE_LOCAL_STMT
-                        return exports
+                    local _, aliases = ctx.cri_loader(ctx, mod_name)
+                    if aliases then
+                        ctx._last_require_aliases = aliases
                     end
-                    -- cri_loader present but unresolvable: fall through to any for error
-                    -- recovery (same behavior as before module declarations existed).
-                else
-                    -- No cri_loader and no module declaration: return unknown.
-                    -- unknown forces narrowing before use; prevents silent any spreading.
-                    return ctx.T_UNKNOWN
                 end
             end
         end

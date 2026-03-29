@@ -77,6 +77,29 @@ local function widen_for_sub(ctx, tid)
     return types_mod.widen(ctx, tid)
 end
 
+-- Return true if type variable `tv_id` appears directly in the args of any
+-- deferred TAG_TYPE_CALL(TAG_INTRINSIC, ...) in the return list of `callee_t`.
+-- Used to decide whether to skip argument literal widening: when the return type
+-- is a parameterized intrinsic (e.g. $Require<T>) and T is one of its args, the
+-- caller must preserve the literal type so the intrinsic can resolve the module.
+--: (Ctx, { tag: integer, data: { [integer]: integer, ... }, ... }, integer) -> boolean
+local function ret_uses_tv_in_intrinsic(ctx, callee_t, tv_id)
+    local rl = callee_t.data[3]
+    for ri = 0, rl - 1 do
+        local ret_tid = ctx.lists:get(callee_t.data[2] + ri)
+        local rt = ctx.types:get(ret_tid)
+        if rt.tag == TAG_TYPE_CALL then
+            local callee_id = ctx.types:get(rt.data[0])
+            if callee_id and callee_id.tag == TAG_INTRINSIC then
+                for ai = rt.data[1], rt.data[1] + rt.data[2] - 1 do
+                    if ctx.lists:get(ai) == tv_id then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
 -- Evaluate a deferred TAG_TYPE_CALL(TAG_INTRINSIC, ...) after all type variables
 -- in the args have been bound by the solver.  Used when a generic function's return
 -- type is a parameterized intrinsic application (e.g. $Require<T>): after argument
@@ -944,7 +967,13 @@ local function solve_callable(ctx, c)
                 -- handles direct assignability; we reach here only when fast path is skipped
                 -- (TAG_VAR, closed table, or contains free vars), so widening is correct in
                 -- all three cases.
-                local widened = (et.tag == TAG_VAR or et.tag == TAG_ROWVAR)
+                -- Exemption: when this TAG_VAR appears as an arg to a parameterized intrinsic
+                -- in the return type (e.g. $Require<T>), the literal must be preserved so the
+                -- intrinsic can resolve the concrete type.  Skip widening in that case.
+                local skip_widen = (et.tag == TAG_VAR)
+                    and ret_uses_tv_in_intrinsic(ctx, callee_t, exp_tid)
+                local widened = skip_widen and find(ctx, act_tid)
+                    or (et.tag == TAG_VAR or et.tag == TAG_ROWVAR)
                     and widen_literal(ctx, act_tid)
                     or  widen_for_sub(ctx, act_tid)
                 local ok, err = unify_mod.unify(ctx, widened, exp_tid)

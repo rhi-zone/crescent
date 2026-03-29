@@ -266,9 +266,28 @@ local function expand_require(ctx, arg_ids)
     local T_t = ctx.types:get(T_tid)
     if T_t.tag == TAG_LITERAL and T_t.data[0] == LIT_STRING then
         local module_name = intern_mod.get(ctx.pool, T_t.data[1])
-        if module_name and ctx.module_types then
-            local declared = ctx.module_types[module_name]
-            if declared then return declared end
+        if module_name then
+            -- Side effect: record module name so NODE_LOCAL_STMT can populate
+            -- ctx.require_sources (used by LSP go-to-def).
+            ctx._last_require_mod = module_name
+            -- module_types: declared via --:: module "name": T (prelude or user file).
+            -- Checked before cri_loader so explicit declarations always win.
+            if ctx.module_types then
+                local declared = ctx.module_types[module_name]
+                if declared then return declared end
+            end
+            -- cri_loader: resolve cross-file types from .cri cache.
+            if ctx.cri_loader then
+                local exports, aliases = ctx.cri_loader(ctx, module_name)
+                if exports then
+                    ctx._last_require_aliases = aliases
+                    return exports
+                end
+                -- cri_loader present but unresolvable: fall through to T_ANY for
+                -- error recovery (same behaviour as the old special case).
+                return ctx.T_ANY
+            end
+            -- No cri_loader and no module declaration: T_UNKNOWN forces narrowing.
         end
     end
     return ctx.T_UNKNOWN

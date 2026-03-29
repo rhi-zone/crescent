@@ -7381,15 +7381,16 @@ local _ = v.foo
 
     assert.it("$Require<T> in generic return position: module field access typechecks", function()
         -- A user-declared generic function whose return type is $Require<T>.
-        -- When called with a string literal argument, the constraint solver binds T to
-        -- LIT_STRING("test.mod"). Argument literal widening widens T to string before
-        -- binding, so $Require<string> = unknown — the intrinsic path is exercised
-        -- but returns unknown, consistent with spec section "Argument Literal NOT Widened".
-        -- This test verifies no internal crash and that the path is reached.
+        -- The literal widening exemption preserves T as LIT_STRING("test.mod"), so
+        -- $Require<T> resolves to { x: integer } — the concrete declared module type.
+        -- The caller gets a typed result; field access on it is valid.
+        -- Note: the function body must return a compatible type; here we use `any` body
+        -- to avoid a return-mismatch error since we are only testing the call site.
         v3_no_errors([[
 --:: module "test.mod": { x: integer }
 --: <T: string>(m: T) -> $Require<T>
-local function load_mod(m) end
+local function load_mod(m) return nil --: any
+end
 local result = load_mod("test.mod")
 ]])
     end)

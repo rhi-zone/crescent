@@ -16,10 +16,7 @@
 --:: declare assert = (val: any, ...any) -> any
 --:: declare pcall = (fn: any, ...any) -> (boolean, any)
 --:: declare xpcall = (fn: any, msgh: any, ...any) -> (boolean, any)
---:: declare require = (modname: string) -> any
--- TODO: once argument literal widening exemption for intrinsic-return calls is
--- implemented, replace the above with the typed form:
---   --:: declare require: <T: string>(module: T) -> $Require<T>
+--:: declare require = <T: string>(module: T) -> $Require<T>
 --:: declare select = (index: any, ...any) -> any
 --:: declare rawget = (t: any, k: any) -> any
 --:: declare rawset = (t: any, k: any, v: any) -> any
