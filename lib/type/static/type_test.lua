@@ -7369,6 +7369,50 @@ local src --: { x: integer, name: string }
 local dst = src
 ]])
     end)
+
+    assert.it("spread over union: shared field accessible", function()
+        -- { ...(A | B) } where both A and B have field x — x: integer | string
+        no_errors([[
+--:: WithX = { ...(({ x: integer }) | ({ x: string })) }
+local v --: WithX
+local _ --: integer | string
+_ = v.x
+]])
+    end)
+
+    assert.it("spread over union: field only in one arm is optional", function()
+        -- A has y, B does not — y should be optional (integer?)
+        no_errors([[
+--:: Spread = { ...(({ x: integer, y: integer }) | ({ x: string })) }
+local v --: Spread
+local _ --: integer | string
+_ = v.x
+]])
+    end)
+
+    assert.it("spread over union: instantiated alias with union arg", function()
+        -- WithName<T> = { ...T, name: string }; T = { age: integer } | { id: string }
+        no_errors([[
+--:: WithName<T> = { ...T, name: string }
+--:: TwoKinds = { age: integer } | { id: string }
+local function make() --: () -> WithName<TwoKinds>
+    error("mock")
+end
+local v = make()
+local _ --: string
+_ = v.name
+]])
+    end)
+
+    assert.it("spread over union: missing union field is still an error", function()
+        -- dst expects { ...(A | B), z: integer } but src is missing z
+        has_error([[
+--:: AB = { x: integer } | { x: string }
+local src --: { x: integer }
+--: { ...AB, z: integer }
+local dst = src
+]])
+    end)
 end)
 
 -- ---------------------------------------------------------------------------

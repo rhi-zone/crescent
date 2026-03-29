@@ -461,6 +461,52 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                         local copied = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
                         add_subst_field(copied, inner_fe.name_id)
                     end
+                elseif exp_t.tag == TAG_UNION then
+                    -- Distribute spread over union members: { ...(A | B), k: V }.
+                    -- Field type = union of types from members that have it.
+                    -- Field is optional if not all members have it.
+                    local arms_start = exp_t.data[0]
+                    local arms_len   = exp_t.data[1]
+                    local all_tables = true
+                    for k = arms_start, arms_start + arms_len - 1 do
+                        local arm_t = ctx.types:get(types_mod.find(ctx, ctx.lists:get(k)))
+                        if arm_t.tag ~= TAG_TABLE then all_tables = false; break end
+                    end
+                    if all_tables then
+                        -- Collect field types per name across all arms.
+                        --: { [integer]: { [integer]: integer, ... }, ... }
+                        local field_type_lists = {}  -- name_id -> { type_id, ... }
+                        --: { [integer]: integer, ... }
+                        local field_counts     = {}  -- name_id -> number of arms with it
+                        --: { [integer]: integer, ... }
+                        local field_order      = {}  -- ordered list of name_ids (first seen)
+                        for k = arms_start, arms_start + arms_len - 1 do
+                            local arm_tid = types_mod.find(ctx, ctx.lists:get(k))
+                            local arm_t   = ctx.types:get(arm_tid)
+                            for j = arm_t.data[0], arm_t.data[0] + arm_t.data[1] - 1 do
+                                local inner_fe = ctx.fields:get(ctx.lists:get(j))
+                                if inner_fe.name_id ~= -1 then
+                                    if not field_type_lists[inner_fe.name_id] then
+                                        field_type_lists[inner_fe.name_id] = {}
+                                        field_counts[inner_fe.name_id]     = 0
+                                        field_order[#field_order + 1] = inner_fe.name_id
+                                    end
+                                    local fl = field_type_lists[inner_fe.name_id]
+                                    fl[#fl + 1] = inner_fe.type_id
+                                    field_counts[inner_fe.name_id] = field_counts[inner_fe.name_id] + 1
+                                end
+                            end
+                        end
+                        for _, name_id in ipairs(field_order) do
+                            local union_tid  = types_mod.make_union(ctx, field_type_lists[name_id])
+                            local is_opt     = field_counts[name_id] < arms_len
+                            local copied     = types_mod.make_field(ctx, name_id, union_tid, is_opt)
+                            add_subst_field(copied, name_id)
+                        end
+                    else
+                        -- Not all union arms are tables — keep placeholder
+                        new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, -1, new_sp, 0)
+                    end
                 else
                     -- Still unresolved — keep placeholder
                     new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, -1, new_sp, 0)

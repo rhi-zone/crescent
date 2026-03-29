@@ -807,6 +807,55 @@ local function solve_index(ctx, c)
             unify_mod.unify(ctx, res_tid, ft)
             return true
         end
+        -- Spread field fallback: check { ...T } placeholders when named field not found.
+        -- Handles { ...(A | B) } where the union wasn't distributed at substitution time.
+        for si = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
+            local sfe = ctx.fields:get(ctx.lists:get(si))
+            if sfe.name_id == -1 then
+                local sp_t = ctx.types:get(find(ctx, sfe.type_id))
+                if sp_t.tag == TAG_SPREAD then
+                    local inner_tid = find(ctx, sp_t.data[0])
+                    local inner_t   = ctx.types:get(inner_tid)
+                    if inner_t.tag == TAG_TABLE then
+                        local sfe2 = types_mod.table_field(ctx, inner_tid, name_id)
+                        if sfe2 then
+                            local ft = find(ctx, sfe2.type_id)
+                            if band(sfe2.flags, defs.FLAG_OPTIONAL) ~= 0 then
+                                ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+                            end
+                            unify_mod.unify(ctx, res_tid, ft)
+                            return true
+                        end
+                    elseif inner_t.tag == TAG_UNION then
+                        -- Collect field types from all union arms that have it.
+                        local field_types = {}
+                        local all_have   = true
+                        for ai = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                            local arm_tid = find(ctx, ctx.lists:get(ai))
+                            local arm_t   = ctx.types:get(arm_tid)
+                            if arm_t.tag == TAG_TABLE then
+                                local afe = types_mod.table_field(ctx, arm_tid, name_id)
+                                if afe then
+                                    field_types[#field_types + 1] = find(ctx, afe.type_id)
+                                else
+                                    all_have = false
+                                end
+                            else
+                                all_have = false
+                            end
+                        end
+                        if #field_types > 0 then
+                            local ft = types_mod.make_union(ctx, field_types)
+                            if not all_have then
+                                ft = types_mod.make_union(ctx, { ft, ctx.T_NIL })
+                            end
+                            unify_mod.unify(ctx, res_tid, ft)
+                            return true
+                        end
+                    end
+                end
+            end
+        end
         -- String indexer fallback
         local is, il = obj_t.data[2], obj_t.data[3]
         local i = is
