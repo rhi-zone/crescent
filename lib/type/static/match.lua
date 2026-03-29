@@ -82,14 +82,15 @@ function M.match_pattern(ctx, ty_id, pat_id)
         if kind == LIT_BOOLEAN and pt.tag == TAG_BOOLEAN then return true, {} end
     end
 
-    -- Table pattern: structural match with field-level capture variables.
+    -- Table pattern: structural match with field-level and indexer capture variables.
     -- { key: K, value: V } matched against an actual table collects bindings
     -- for each field whose pattern type is a bare TAG_NAMED (capture var).
-    -- Every field in the pattern must be present in the input type.
+    -- { [K]: V } matched against a table with an indexer binds K → key type, V → value type.
+    -- Every named field in the pattern must be present in the input type.
+    -- Every indexer pair in the pattern must be matched positionally against the subject's indexers.
     if pt.tag == TAG_TABLE and tt.tag == TAG_TABLE then
         local bindings = {}
-        -- Each field in the pattern must exist in the actual type and its
-        -- pattern sub-type must match the corresponding field type.
+        -- Each named field in the pattern must exist in the actual type.
         for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
             local pfid = ctx.lists:get(pi)
             local pfe  = ctx.fields:get(pfid)
@@ -100,6 +101,33 @@ function M.match_pattern(ctx, ty_id, pat_id)
             if not ok then return false, nil end
             bindings = merge_bindings(bindings, sub_bindings)
             if bindings == nil then return false, nil end
+        end
+        -- If the pattern has indexer pairs, match them positionally against the subject.
+        -- { [K]: V } binds K → subject key type, V → subject value type.
+        local pil = pt.data[3]
+        if pil >= 2 then
+            -- Subject must have at least as many indexer pairs as the pattern requires.
+            if tt.data[3] < pil then return false, nil end
+            local pis = pt.data[2]
+            local tis = tt.data[2]
+            for i = 0, pil / 2 - 1 do
+                --: integer
+                local pk_id = ctx.lists:get(pis + i * 2)
+                --: integer
+                local pv_id = ctx.lists:get(pis + i * 2 + 1)
+                --: integer
+                local tk_id = ctx.lists:get(tis + i * 2)
+                --: integer
+                local tv_id = ctx.lists:get(tis + i * 2 + 1)
+                local ok, sub = M.match_pattern(ctx, tk_id, pk_id)
+                if not ok then return false, nil end
+                bindings = merge_bindings(bindings, sub) --: any
+                if bindings == nil then return false, nil end
+                ok, sub = M.match_pattern(ctx, tv_id, pv_id)
+                if not ok then return false, nil end
+                bindings = merge_bindings(bindings, sub) --: any
+                if bindings == nil then return false, nil end
+            end
         end
         return true, bindings
     end

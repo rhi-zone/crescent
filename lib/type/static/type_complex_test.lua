@@ -1109,6 +1109,60 @@ x = { tag = "nothing" }
     end)
 end)
 
+-- ---------------------------------------------------------------------------
+-- match: indexer arm patterns { [K]: V }
+-- ---------------------------------------------------------------------------
+
+assert.describe("match: indexer arm patterns", function()
+    assert.it("PASS: extract value type from indexer via { [K]: V } => V", function()
+        no_error([[
+--:: ValueOf<T> = match T { { [K]: V } => V }
+local x --: ValueOf<{ [string]: integer }>
+--: integer
+local y = x
+]])
+    end)
+
+    assert.it("PASS: extract key type from indexer via { [K]: V } => K", function()
+        no_error([[
+--:: KeyOf<T> = match T { { [K]: V } => K }
+local x --: KeyOf<{ [string]: integer }>
+--: string
+local y = x
+]])
+    end)
+
+    assert.it("PASS: integer-indexed table extracts correct value type", function()
+        no_error([[
+--:: ElementType<T> = match T { { [integer]: V } => V }
+local arr --: { [integer]: number }
+local x --: ElementType<{ [integer]: number }>
+--: number
+local y = x
+]])
+    end)
+
+    assert.it("PASS: indexer pattern does not match named-field-only table", function()
+        -- A table with only named fields has no indexer, so { [K]: V } should fail to match.
+        -- The result is never (no arm matches).
+        no_error([[
+--:: ValueOf<T> = match T { { [K]: V } => V }
+local x --: ValueOf<{ name: string }>
+-- x has type never (no indexer arm matched)
+]])
+    end)
+
+    assert.it("PASS: combined field and indexer pattern", function()
+        no_error([[
+--:: DescribeMap<T> = match T { { len: L, [K]: V } => { key: K, value: V, len: L } }
+local x --: DescribeMap<{ len: integer, [string]: number }>
+local k --: string  = x.key
+local v --: number  = x.value
+local l --: integer = x.len
+]])
+    end)
+end)
+
 assert.describe("ADT.define runtime integration", function()
     -- ADT module is untyped; declare it as any for these runtime tests.
     -- In a real project, the module would be declared with --:: module "lib.fp.adt": {...}
