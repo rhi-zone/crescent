@@ -72,8 +72,11 @@ local function new_scanner(content, filename, line)
         len = #content,
         filename = filename or "?",
         line = line or 0,
+        depth = 0,   -- recursive parse_type depth; guards against stack overflow
     }
 end
+
+local MAX_TYPE_DEPTH = 64  -- parser stack limit; deeply-nested types beyond this produce an error
 
 --: (Scanner, string) -> never
 local function scan_error(s, msg)
@@ -815,6 +818,12 @@ function M.parse_annotations(annotations, pool, filename)
     -- This allows F<A> -> F<B> (bare, without surrounding parens) and
     -- ((A -> B) -> F<A> -> F<B>) where the outer parens are transparent grouping.
     parse_type = function(s)
+        s.depth = s.depth + 1
+        if s.depth > MAX_TYPE_DEPTH then
+            s.depth_limit_hit = true
+            scan_error(s, "type annotation too deeply nested (max depth " .. MAX_TYPE_DEPTH .. ")")
+        end
+        local result
         local left = parse_intersection(s)
         if opt_char(s, "|") then
             local members = { left, parse_intersection(s) }
@@ -852,9 +861,12 @@ function M.parse_annotations(annotations, pool, filename)
             ft.data[0] = ps; ft.data[1] = pl
             ft.data[2] = rs; ft.data[3] = rl
             ft.data[4] = -1
-            return fn
+            result = fn
+        else
+            result = left
         end
-        return left
+        s.depth = s.depth - 1
+        return result
     end
 
     -------------------------------------------------------------------
@@ -1003,6 +1015,11 @@ function M.parse_annotations(annotations, pool, filename)
         end)
         if ok and result then
             results[line] = result
+        elseif not ok and s.depth_limit_hit then
+            -- Re-throw depth-limit errors so the outer pcall in constrain.lua
+            -- can report them as diagnostics. Other parse errors (e.g. malformed
+            -- or out-of-context annotations) are silently skipped.
+            error(result, 0)
         end
     end
 

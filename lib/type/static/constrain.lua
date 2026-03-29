@@ -2957,7 +2957,12 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     local lex_annotations = pr_lexer and pr_lexer.annotations
     if lex_annotations and next(lex_annotations) then
         local ok_ann, ar = pcall(ann_mod.parse_annotations, lex_annotations, pool, filename)
-        if ok_ann then ctx.ann = ar end
+        if ok_ann then
+            ctx.ann = ar
+        else
+            -- Annotation parse error (e.g. type too deeply nested): report as a diagnostic.
+            errors_mod.error(ctx.err, filename, 0, 0, "annotation parse error: " .. tostring(ar))
+        end
     end
 
     if cri_loader then ctx.cri_loader = cri_loader end
