@@ -206,6 +206,7 @@ M.ANN_TYPE              = 0
 M.ANN_DECL              = 1
 M.ANN_TYPE_ARGS         = 2
 M.ANN_MODULE            = 3  -- --:: module "name": T  (declares require("name") return type)
+M.ANN_UNSEAL            = 4  -- --:: unseal Name        (rebinds opaque variable to inner type)
 
 -- Operator precedence table (left * 256 + right)
 M.binop_priority = {

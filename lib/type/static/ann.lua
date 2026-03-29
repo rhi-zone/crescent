@@ -889,6 +889,13 @@ function M.parse_annotations(annotations, pool, filename)
                     local type_id = parse_type(s)
                     return { kind = defs.ANN_MODULE, mod_name = mod_name, type_id = type_id }
                 end
+                -- unseal Name — rebinds opaque variable to its inner type in current scope
+                if word == "unseal" then
+                    local name = scan_word(s)
+                    if not name then scan_error(s, "expected identifier after 'unseal'") end
+                    local name_id = intern_mod.intern(pool, name)
+                    return { kind = defs.ANN_UNSEAL, name_id = name_id }
+                end
                 if word == "newtype" then
                     local name = scan_word(s)
                     if not name then scan_error(s, "expected name after 'newtype'") end

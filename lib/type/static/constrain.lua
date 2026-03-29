@@ -91,6 +91,7 @@ end
 local ANN_TYPE   = defs.ANN_TYPE
 local ANN_DECL   = defs.ANN_DECL
 local ANN_MODULE = defs.ANN_MODULE
+local ANN_UNSEAL = defs.ANN_UNSEAL
 
 local TAG_ANY      = defs.TAG_ANY
 local TAG_UNKNOWN  = defs.TAG_UNKNOWN
@@ -1660,10 +1661,56 @@ local function is_definitely_returning(ctx, bs, bl)
     return false
 end
 
+-- Apply any --:: unseal annotations at lines strictly before `before_line`
+-- that have not yet been applied in this run.
+-- Unseals rebind the named variable in ctx.scope to its opaque inner type T.
+local function apply_unseals_before(ctx, before_line)
+    if not ctx.ann then return end
+    local results = ctx.ann.results
+    if not results then return end
+    local applied = ctx._unseal_applied
+    for line, r in pairs(results) do
+        if r.kind == ANN_UNSEAL and line < before_line then
+            if not (applied and applied[line]) then
+                if not applied then
+                    ctx._unseal_applied = {}
+                    applied = ctx._unseal_applied
+                end
+                applied[line] = true
+                local name_id = r.name_id
+                local var_tid = env_mod.lookup(ctx.scope, name_id)
+                local vname = intern_mod.get(ctx.pool, name_id) or "?"
+                if not var_tid then
+                    errors_mod.error(ctx.err, ctx.filename, line, 1,
+                        "unseal: `" .. vname .. "` is not in scope")
+                else
+                    local resolved = types_mod.find(ctx, var_tid)
+                    local nt = ctx.types:get(resolved)
+                    if nt.tag ~= TAG_NOMINAL then
+                        errors_mod.error(ctx.err, ctx.filename, line, 1,
+                            "unseal: `" .. vname .. "` is not an opaque type")
+                    elseif not (ctx._opaque_nominals and ctx._opaque_nominals[nt.data[1]]) then
+                        errors_mod.error(ctx.err, ctx.filename, line, 1,
+                            "unseal: `" .. vname .. "` is a newtype, not an opaque type — unseal only works with $Opaque<T>")
+                    else
+                        local inner_tid = types_mod.find(ctx, nt.data[2])
+                        env_mod.bind(ctx.scope, name_id, inner_tid)
+                    end
+                end
+            end
+        end
+    end
+end
+
 --: (Ctx, integer, integer) -> boolean
 gen_block = function(ctx, bs, bl)
     for i = bs, bs + bl - 1 do
-        gen_stmt(ctx, ctx.ast_lists:get(i))
+        local sid = ctx.ast_lists:get(i)
+        local sn  = ctx.nodes:get(sid)
+        if ctx.ann and sn.line and sn.line > 0 then
+            apply_unseals_before(ctx, sn.line)
+        end
+        gen_stmt(ctx, sid)
     end
     return is_definitely_returning(ctx, bs, bl)
 end

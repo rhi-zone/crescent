@@ -7409,3 +7409,94 @@ f(v.y)
     end)
 
 end)
+
+-- ---------------------------------------------------------------------------
+-- --:: unseal
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: --:: unseal", function()
+    assert.it("after unseal, hidden field access works (one-arg $Opaque<T>)", function()
+        no_errors([[
+--:: Server = $Opaque<{ host: string, hidden_field: integer }>
+--:: declare server = Server
+--:: unseal server
+--: string
+local v = server.host
+--: integer
+local h = server.hidden_field
+]])
+    end)
+
+    assert.it("before unseal, hidden field access errors", function()
+        has_error([[
+--:: Server = $Opaque<{ host: string, hidden_field: integer }>
+--:: declare server = Server
+--: integer
+local bad = server.hidden_field
+--:: unseal server
+--: string
+local ok = server.host
+]], "unseal")
+    end)
+
+    assert.it("unseal on a non-opaque variable errors", function()
+        has_error([[
+local x = 42
+--:: unseal x
+local y = x
+]], "not an opaque type")
+    end)
+
+    assert.it("unseal on a newtype nominal errors", function()
+        has_error([[
+--:: newtype UserId = integer
+--:: declare id = UserId
+--:: unseal id
+local v = id
+]], "newtype")
+    end)
+
+    assert.it("two-arg $Opaque<T, U>: unseal reveals full T, not just U", function()
+        -- U only exposes `start`, hidden_field is only in T.
+        no_errors([[
+--:: Server = $Opaque<{ start: boolean, hidden_field: integer }, { start: boolean }>
+--:: declare server = Server
+--:: unseal server
+--: integer
+local h = server.hidden_field
+]])
+    end)
+
+    assert.it("two-arg $Opaque<T, U>: before unseal, field in U is accessible", function()
+        no_errors([[
+--:: Server = $Opaque<{ start: boolean, hidden_field: integer }, { start: boolean }>
+--:: declare server = Server
+--: boolean
+local s = server.start
+]])
+    end)
+
+    assert.it("two-arg $Opaque<T, U>: before unseal, field not in U errors", function()
+        has_error([[
+--:: Server = $Opaque<{ start: boolean, hidden_field: integer }, { start: boolean }>
+--:: declare server = Server
+--: integer
+local h = server.hidden_field
+]], "not exposed")
+    end)
+
+    assert.it("unseal inside do block does not affect outer scope", function()
+        -- Inside the do block, server is unsealed. Outside, it is still opaque.
+        -- The outer access after the block should error.
+        has_error([[
+--:: Server = $Opaque<{ host: string, hidden_field: integer }>
+--:: declare server = Server
+do
+--:: unseal server
+local inner = server.hidden_field
+end
+--: integer
+local outer = server.hidden_field
+]], "unseal")
+    end)
+end)
