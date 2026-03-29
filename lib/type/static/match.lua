@@ -167,13 +167,52 @@ function M.match_pattern(ctx, ty_id, pat_id)
         local prl = pt.data[3]
         local trl = tt.data[3]
         if prl > 0 then
+            -- Special case: single capture variable in return position.
+            -- `() -> R` where R is a bare TAG_NAMED (capture var) binds R to:
+            --   trl=0: never (void function has no return to bind)
+            --   trl=1: the single return type
+            --   trl>1: a tuple of all return types
+            -- This enables `ReturnType<F> = match F { () -> R => R }` for any F.
+            if prl == 1 then
+                --: integer
+                local p_ret0 = ctx.lists:get(pt.data[2])
+                --: integer
+                local p_ret0_canon = types_mod.find(ctx, p_ret0)
+                local p_ret0_t = ctx.types:get(p_ret0_canon)
+                if p_ret0_t.tag == TAG_NAMED and p_ret0_t.data[2] == 0 then
+                    if trl == 0 then return false, nil end
+                    -- Bind R to first return type (trl=1) or tuple of all returns (trl>1).
+                    -- trl>1 tuple-binding enables `PcallReturn<F> = match F { () -> R => (true, R) | ... }`
+                    -- where R is a tuple that can be spread with future `(true, ...R)` syntax.
+                    local bound_tid
+                    if trl == 1 then
+                        --: integer
+                        bound_tid = ctx.lists:get(tt.data[2])
+                    else
+                        local rets = {}
+                        for ri = 0, trl - 1 do
+                            --: integer
+                            rets[ri + 1] = ctx.lists:get(tt.data[2] + ri)
+                        end
+                        bound_tid = types_mod.make_tuple(ctx, rets)
+                    end
+                    local ok, sub = M.match_pattern(ctx, bound_tid, p_ret0_canon)
+                    if not ok then return false, nil end
+                    bindings = merge_bindings(bindings, sub) --: any
+                    if bindings == nil then return false, nil end
+                    return true, bindings
+                end
+            end
+            -- Normal case: strict return count match.
             if trl ~= prl then return false, nil end
             for i = 0, prl - 1 do
+                --: integer
                 local p_ret = ctx.lists:get(pt.data[2] + i)
+                --: integer
                 local t_ret = ctx.lists:get(tt.data[2] + i)
                 local ok, sub = M.match_pattern(ctx, t_ret, p_ret)
                 if not ok then return false, nil end
-                bindings = merge_bindings(bindings, sub)
+                bindings = merge_bindings(bindings, sub) --: any
                 if bindings == nil then return false, nil end
             end
         end

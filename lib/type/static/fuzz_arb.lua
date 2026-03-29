@@ -242,6 +242,40 @@ end)
 
 M.arb_type = arb_type
 
+-- ── arb_type_deep (algebra-level only) ────────────────────────────────────────
+-- Like arb_type but uses sub_size = size - 1 to generate deeper type trees.
+-- Safe ONLY for algebra-level tests (fuzz_alg.lua) where types are constructed
+-- as IDs rather than parsed as strings — no exponential string blowup risk.
+-- Capped at sub_size = min(size-1, 8) to bound node count (2^8 = 256 per trial).
+-- Produces deeper intersection-of-union structures that arb_type under-tests.
+
+local arb_type_deep       -- assigned below
+local arb_type_deep_lazy = {
+	generate = function(rng, sz) return arb_type_deep.generate(rng, sz) end,
+	shrink   = function(v, c)   return arb_type_deep.shrink(v, c) end,
+}
+
+arb_type_deep = arb.sized(function(size)
+	if size <= 0 then return M.arb_type_leaf end
+	-- Use size-1 for deeper trees, but cap at 8 to prevent 2^N node blowup.
+	local sub_size = math.max(0, math.min(size - 1, 8))
+	local sub = {
+		generate = function(rng, _) return arb_type_deep_lazy.generate(rng, sub_size) end,
+		shrink   = arb_type_deep_lazy.shrink,
+	}
+	return arb.frequency({
+		{  8, M.arb_type_leaf },
+		{  5, arb.map(arb.tuple({ sub, sub }),
+				function(p) return { tag = "union", a = p[1], b = p[2] } end) },
+		{  4, arb.map(arb.tuple({ sub, sub }),
+				function(p) return { tag = "inter", a = p[1], b = p[2] } end) },
+		{  2, arb.map(arb.tuple({ sub, sub }),
+				function(p) return { tag = "func", params = { p[1] }, ret = p[2] } end) },
+	})
+end)
+
+M.arb_type_deep = arb_type_deep
+
 -- ── Value generators ──────────────────────────────────────────────────────────
 
 -- canonical_value: a fixed Lua literal for a leaf type node.

@@ -1200,3 +1200,80 @@ x = { tag = "nothing" }
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- match: function-type arm patterns () -> R
+-- ---------------------------------------------------------------------------
+
+assert.describe("match: function-type arm patterns", function()
+    assert.it("PASS: ReturnType<F> extracts single return type", function()
+        no_error([[
+--:: ReturnType<F> = match F { () -> R => R }
+local x --: ReturnType<(integer) -> string>
+--: string
+local y = x
+]])
+    end)
+
+    assert.it("PASS: ReturnType<F> matches regardless of param count", function()
+        no_error([[
+--:: ReturnType<F> = match F { () -> R => R }
+local x --: ReturnType<(integer, string, boolean) -> number>
+--: number
+local y = x
+]])
+    end)
+
+    assert.it("PASS: ReturnType<F> multi-return binds tuple, truncates to first in single-slot", function()
+        no_error([[
+--:: ReturnType<F> = match F { () -> R => R }
+local x --: ReturnType<(integer) -> (string, boolean)>
+--: string
+local y = x
+]])
+    end)
+
+    assert.it("PASS: ReturnType<F> on () -> () gives nil (empty parens = nil type)", function()
+        -- `()` in return position parses as nil, so `() -> ()` returns nil.
+        -- ReturnType binds R to nil.
+        no_error([[
+--:: ReturnType<F> = match F { () -> R => R }
+local x --: ReturnType<() -> ()>
+--: nil
+local y = x
+]])
+    end)
+
+    assert.it("PASS: ReturnType<F> non-function gives never", function()
+        no_error([[
+--:: ReturnType<F> = match F { () -> R => R }
+local x --: ReturnType<integer>
+--: never
+local y = x
+]])
+    end)
+
+    assert.it("PASS: PcallReturn-style: prepend true to single return", function()
+        -- x has type (true, string) | (false, string)
+        no_error([[
+--:: PcallReturn<F> = match F { () -> R => (true, R) | (false, string) }
+local x --: PcallReturn<(integer) -> string>
+-- Assign to union-of-tuples type — verifies shape is correct
+--: (true, string) | (false, string)
+local ok = x
+]])
+    end)
+
+    assert.it("PASS: function pattern with specific param type still restricts", function()
+        -- (integer) -> R only matches (integer)->something, not (string)->something
+        no_error([[
+--:: IntReturnType<F> = match F { (integer) -> R => R, () -> R => never }
+local x1 --: IntReturnType<(integer) -> string>
+--: string
+local y1 = x1
+local x2 --: IntReturnType<(string) -> number>
+--: never
+local y2 = x2
+]])
+    end)
+end)

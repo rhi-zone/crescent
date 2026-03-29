@@ -212,6 +212,44 @@ arb.it("function: covariant return (grammar)",
 		assert(typechecks(src), "covariant return (grammar) failed: " .. src)
 	end, { trials = 300 })
 
+-- ── Invariant 12: Annotation soundness (positive) ────────────────────────────
+-- A function annotated (T) -> T with body `return x` must always typecheck.
+-- This catches regressions where the return-type check rejects a valid T.
+
+arb.it("annotation soundness: (T)->T identity body typechecks",
+	farb.arb_base_type,
+	function(T_node)
+		local TT  = farb.type_to_string(T_node)
+		local src = table.concat({
+			("--: (%s) -> %s"):format(TT, TT),
+			"local function f(x) return x end",
+		}, "\n")
+		assert(typechecks(src), "identity body rejected: " .. src)
+	end, { trials = 500 })
+
+-- ── Invariant 13: Annotation soundness (negative) ────────────────────────────
+-- A function annotated (A) -> B where A is not a subtype of B must reject
+-- a body that returns its parameter directly.
+
+arb.it("annotation soundness: (A)->B rejects when A not <: B",
+	farb.arb_distinct_base_types,
+	function(pair)
+		-- arb_distinct_base_types guarantees pair[2] NOT <: pair[1].
+		-- Use pair[2] as param (A) and pair[1] as return (B) so A NOT <: B.
+		local A_node, B_node = pair[2], pair[1]
+		local A = farb.type_to_string(A_node)
+		local B = farb.type_to_string(B_node)
+		-- Pre-check: skip ill-formed annotations
+		if rejects("local x --: " .. A) then return end
+		if rejects("local x --: " .. B) then return end
+		-- (A) -> B with `return x` (x: A) should fail when A not <: B
+		local src = table.concat({
+			("--: (%s) -> %s"):format(A, B),
+			"local function f(x) return x end",
+		}, "\n")
+		assert(rejects(src), "unsound annotation accepted: " .. src)
+	end, { trials = 500 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

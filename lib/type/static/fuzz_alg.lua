@@ -327,4 +327,57 @@ arb.it("[alg] function: contravariant param",
 			.. type_str(A_node) .. ") -> " .. type_str(C_node))
 	end, { trials = 2000 })
 
+-- ── Deep-type stress invariants ───────────────────────────────────────────────
+-- Use arb_type_deep for deeper intersection-of-union structures that arb_type
+-- under-tests due to its halved sub_size. These are algebra-level only (no parsing).
+
+-- 15. Deep reflexivity: T <: T at greater nesting depth
+arb.it("[alg] deep reflexivity: deeply-nested T <: T",
+	farb.arb_type_deep,
+	function(T_node)
+		local ctx = make_ctx()
+		local tid = ast_to_tid(ctx, T_node)
+		assert(subtype(ctx, tid, tid),
+			"deep reflexivity failed: " .. type_str(T_node))
+	end, { trials = 1000 })
+
+-- 16. Deep union intro: A <: A | B with deep types
+arb.it("[alg] deep union intro: A <: A | B (deep)",
+	{ farb.arb_type_deep, farb.arb_type_deep },
+	function(A_node, B_node)
+		local ctx = make_ctx()
+		local a   = ast_to_tid(ctx, A_node)
+		local b   = ast_to_tid(ctx, B_node)
+		local a_b = types_mod.make_union(ctx, { a, b })
+		assert(subtype(ctx, a, a_b),
+			"deep union intro failed: " .. type_str(A_node)
+			.. " <: " .. type_str(A_node) .. " | " .. type_str(B_node))
+	end, { trials = 1000 })
+
+-- 17. Deep intersection elim: A & B <: A with deep types
+arb.it("[alg] deep inter elim: A & B <: A (deep)",
+	{ farb.arb_type_deep, farb.arb_type_deep },
+	function(A_node, B_node)
+		local ctx = make_ctx()
+		local a   = ast_to_tid(ctx, A_node)
+		local b   = ast_to_tid(ctx, B_node)
+		local a_b = types_mod.make_intersection(ctx, { a, b })
+		assert(subtype(ctx, a_b, a),
+			"deep inter elim failed: " .. type_str(A_node)
+			.. " & " .. type_str(B_node)
+			.. " should be <: " .. type_str(A_node))
+	end, { trials = 1000 })
+
+-- 18. Deep intersection intro: T <: T & T with deep types
+arb.it("[alg] deep intersection intro: T <: T & T (deep)",
+	farb.arb_type_deep,
+	function(T_node)
+		local ctx   = make_ctx()
+		local tid   = ast_to_tid(ctx, T_node)
+		local t_and = types_mod.make_intersection(ctx, { tid, tid })
+		assert(subtype(ctx, tid, t_and),
+			"deep intersection intro failed: " .. type_str(T_node)
+			.. " should be <: " .. type_str(T_node) .. " & " .. type_str(T_node))
+	end, { trials = 1000 })
+
 return {}

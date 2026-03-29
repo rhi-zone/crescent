@@ -30,7 +30,7 @@ need compiler support because `match` arm patterns don't yet cover them. Adding
 a new `$Whatever` is wrong — the right answer is to extend `match` patterns so
 the operation becomes user-definable. Current `$`-prefixed types are
 provisional and will be eliminated as `match` gains:
-- function-type arms: `(...) -> R` — not yet implemented
+- function-type arms: `() -> R` — **implemented** (match.lua, 2026-03-29). `() -> R` with 0 params in the pattern matches ANY function (param count not constrained). R binds to single return type, or tuple for multi-return. `(A, B) -> R` with explicit params still requires exact param count match. Remaining: `(true, ...R)` spread-in-tuple-position for full $PcallReturn replacement.
 - indexer arms: `{ [K]: V }` — **implemented** (match.lua, 2026-03-29). Binds K → indexer key type, V → indexer value type. Alias-param substitution happens before match evaluation, so T in result expressions is already concrete. `$PairsReturn<{ [string]: integer }>` CAN be expressed as a match alias for indexer tables. Full replacement of `$PairsReturn`/`$IpairsReturn`/`$Keys` needs named-field fallback arms (K=string, V=union of all field values) which requires either `$EachField`-level iteration or a dedicated pattern — not yet possible.
 
 The only permanent intrinsics are `$Require` (module system), `$Opaque`
@@ -76,11 +76,11 @@ after the next refactor."
 
 ### Invariants currently tested
 
-- Reflexivity: `T <: T` (algebra + grammar)
-- Union introduction: `A <: A | B` and `B <: A | B` (both orderings)
+- Reflexivity: `T <: T` (algebra + grammar + deep)
+- Union introduction: `A <: A | B` and `B <: A | B` (both orderings, algebra + grammar + deep)
 - Union idempotent: `A | A <: A`
-- Intersection elimination: `A & B <: A` and `A & B <: B`
-- Intersection introduction: `T <: T & T`
+- Intersection elimination: `A & B <: A` and `A & B <: B` (algebra + deep)
+- Intersection introduction: `T <: T & T` (algebra + deep)
 - Optional: `T <: T | nil` and `nil <: T | nil`
 - Transitivity: `A <: A|B` and `A|B <: A|B|C` implies `A <: A|B|C` (via union chain)
 - Literal subtyping: `lit_int <: integer`, `lit_int <: number`, `lit_str <: string`, `lit_bool <: boolean`
@@ -91,11 +91,12 @@ after the next refactor."
 - Narrowing: `if x then` excludes nil (grammar)
 - Literal precision: `42` has type `42`, not just `integer` (grammar)
 - Generic instantiation: `<T>(T) -> T` preserves type (grammar)
+- **Annotation soundness (positive)**: `(T)->T` identity body always typechecks (grammar)
+- **Annotation soundness (negative)**: `(A)->B` body rejected when `A </: B` (grammar)
 - Performance gate: ≥500 programs/sec throughput
 
 ### Invariants not yet tested (each = a blind spot)
 
-- **Annotation soundness**: a function body accepted under return type `T` cannot produce non-`T`
 - **Narrowing precision**: after `if type(x) == "string"`, `x` is exactly `string`, not a supertype
 - **Overload dispatch**: calling an intersection of function types routes to the correct member
 - **Generic constraint checking**: `<T: Constraint>` rejects violating instantiations
