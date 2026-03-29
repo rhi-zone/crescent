@@ -395,12 +395,58 @@ function M.parse_annotations(annotations, pool, filename)
                     end
                     expect_char(s, ")")
                 else
-                    returns[1] = parse_type(s)
-                    if union_contains_fn(returns[1]) then
-                        warnings[#warnings + 1] = { line = s.line, col = 1,
-                            msg = "function type in union return position"
-                                .. " — wrap each function type in parens:"
-                                .. " `((A) -> B) | ((A) -> C)`" }
+                    -- Detect type predicate syntax: `name is T`
+                    -- Only valid when `name` is a known param name.
+                    local guard_detected = false
+                    if has_param_names then
+                        local save_pos = s.pos
+                        local pred_word = scan_word(s)
+                        if pred_word then
+                            -- Find the param index for this name
+                            local guard_param_idx = nil
+                            for pi, nm_id in ipairs(item_names) do
+                                if nm_id ~= 0 then
+                                    local pname = intern_mod.get(pool, nm_id)
+                                    if pname == pred_word then
+                                        guard_param_idx = pi - 1; break
+                                    end
+                                end
+                            end
+                            if guard_param_idx then
+                                skip_ws(s)
+                                -- Check for keyword "is" (not followed by ident char)
+                                local is_kw = s.pos + 1 <= s.len
+                                    and sub(s.src, s.pos, s.pos + 1) == "is"
+                                    and not is_ident(byte(s.src, s.pos + 2) or 0)
+                                if is_kw then
+                                    s.pos = s.pos + 2
+                                    skip_ws(s)
+                                    local guard_tid = parse_type(s)
+                                    -- Type predicate functions return boolean.
+                                    local ret_bool = alloc_type(defs.TAG_BOOLEAN)
+                                    returns[1] = ret_bool
+                                    -- Store predicate info in pool for narrowing lookup.
+                                    pool._type_predicates = pool._type_predicates or {}
+                                    -- fn_type_id is assigned below; we need to patch it after
+                                    -- alloc_type(TAG_FUNCTION). Use a deferred table entry.
+                                    pool._pending_predicate = {
+                                        param_idx = guard_param_idx,
+                                        type_id   = guard_tid,
+                                    }
+                                    guard_detected = true
+                                end
+                            end
+                        end
+                        if not guard_detected then s.pos = save_pos end
+                    end
+                    if not guard_detected then
+                        returns[1] = parse_type(s)
+                        if union_contains_fn(returns[1]) then
+                            warnings[#warnings + 1] = { line = s.line, col = 1,
+                                msg = "function type in union return position"
+                                    .. " — wrap each function type in parens:"
+                                    .. " `((A) -> B) | ((A) -> C)`" }
+                        end
                     end
                 end
                 -- Extract trailing spread as vararg
@@ -426,6 +472,12 @@ function M.parse_annotations(annotations, pool, filename)
                     local pns, pnl = flush_type_list(item_names)
                     ft.data[5] = pns
                     ft.data[6] = pnl
+                end
+                -- Attach deferred type predicate info to pool (set by guard detection above).
+                if pool._pending_predicate then
+                    pool._type_predicates = pool._type_predicates or {}
+                    pool._type_predicates[fn] = pool._pending_predicate
+                    pool._pending_predicate = nil
                 end
                 return fn
             end

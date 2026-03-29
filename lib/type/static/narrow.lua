@@ -66,6 +66,33 @@ local function extract_narrowing(ctx, nid)
         return { kind = "nil_check", name_id = n.data[0], positive = true }
     end
 
+    -- Bare call expression: `if is_str(v) then`.
+    -- If the callee is a user-defined type predicate, extract the guard narrowing.
+    if n.kind == NODE_CALL_EXPR then
+        local callee = ctx.nodes:get(n.data[0])
+        if callee and callee.kind == NODE_IDENTIFIER then
+            local env_mod = require("lib.type.static.env")
+            local callee_tid = env_mod.lookup(ctx.scope, callee.data[0])
+            if callee_tid then
+                callee_tid = types_mod.find(ctx, callee_tid)
+                local pred = ctx.pool._type_predicates
+                    and ctx.pool._type_predicates[callee_tid]
+                if pred and n.data[2] > pred.param_idx then
+                    local arg_nid = ctx.ast_lists:get(n.data[1] + pred.param_idx)
+                    local arg = ctx.nodes:get(arg_nid)
+                    if arg and arg.kind == NODE_IDENTIFIER then
+                        return {
+                            kind          = "guard_check",
+                            name_id       = arg.data[0],
+                            guard_type_id = pred.type_id,
+                            positive      = true,
+                        }
+                    end
+                end
+            end
+        end
+    end
+
     -- Field access: `if x.field then` / `if not x.field then`.
     -- Treat as a presence check on x's field (positive=true means field is non-nil).
     if n.kind == NODE_FIELD_EXPR then
@@ -411,6 +438,29 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             -- Remove members matching the type
             return types_mod.subtract(ctx, t, target_id)
         end
+    elseif info.kind == "guard_check" then
+        -- User-defined type predicate: `is_str(x)` where is_str: (x: T) -> x is GuardType.
+        -- Same logic as type_check but the target type is a direct type_id (not a string).
+        local target_id = types_mod.find(ctx, info.guard_type_id)
+        local tt = ctx.types:get(t)
+        if in_truthy == info.positive then
+            if tt.tag == TAG_UNION then
+                local matching = {}
+                local unify_mod = require("lib.type.static.unify")
+                for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                    local mid = types_mod.find(ctx, ctx.lists:get(i))
+                    if unify_mod.try_unify(ctx, mid, target_id) then
+                        matching[#matching + 1] = mid
+                    end
+                end
+                if #matching == 0 then return target_id end
+                if #matching == 1 then return matching[1] end
+                return types_mod.make_union(ctx, matching)
+            end
+            return target_id
+        else
+            return types_mod.subtract(ctx, t, target_id)
+        end
     else
         -- Unknown kind: no narrowing possible — return the type unchanged.
         return ty_id
@@ -420,7 +470,8 @@ end
 -- Extract the name_id targeted by a narrowing info struct.
 --: (NarrowInfo) -> integer?
 local function info_name_id(info)
-    if info.kind == "nil_check" or info.kind == "type_check" or info.kind == "lit_eq" then
+    if info.kind == "nil_check" or info.kind == "type_check" or info.kind == "lit_eq"
+        or info.kind == "guard_check" then
         return info.name_id
     elseif info.kind == "field_disc" then
         return info.name_id
@@ -437,6 +488,8 @@ local function info_name_id(info)
             return inner.name_id
         elseif inner.kind == "field_presence" then
             return inner.obj_name_id
+        elseif inner.kind == "guard_check" then
+            return inner.name_id
         else
             -- Nested negation or unknown kind: no target name available.
             return nil

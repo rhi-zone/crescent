@@ -7571,3 +7571,58 @@ local outer = server.hidden_field
 ]], "unseal")
     end)
 end)
+
+assert.describe("checker: user-defined type guards", function()
+    assert.it("basic guard: if is_str(v) narrows v to string", function()
+        no_errors([[
+--: (x: unknown) -> x is string
+local function is_str(x) return type(x) == "string" end
+local v --: unknown
+if is_str(v) then
+    local s --: string = v
+end
+]])
+    end)
+
+    assert.it("guard on union: is_int(v) keeps only integer members", function()
+        no_errors([[
+--: (x: string | integer) -> x is integer
+local function is_int(x) return type(x) == "number" end
+local v --: string | integer
+if is_int(v) then
+    local n --: integer = v
+end
+]])
+    end)
+
+    assert.it("negated guard: not is_str(v) narrows away string", function()
+        no_errors([[
+--: (x: unknown) -> x is string
+local function is_str(x) return type(x) == "string" end
+local v --: string | integer
+if not is_str(v) then
+    local n --: integer = v
+end
+]])
+    end)
+
+    assert.it("type predicate return enforces boolean body", function()
+        no_errors([[
+--: (x: unknown) -> x is string
+local function is_str(x) return type(x) == "string" end
+]])
+    end)
+
+    assert.it("guard narrows: string narrowed v passed to integer param is rejected", function()
+        has_error([[
+--: (x: unknown) -> x is string
+local function is_str(x) return type(x) == "string" end
+--: (integer) -> nil
+local function take_int(n) end
+local v --: string | integer
+if is_str(v) then
+    take_int(v)
+end
+]], "")
+    end)
+end)
