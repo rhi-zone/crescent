@@ -62,6 +62,12 @@ Items that currently lack an implementer-ready spec:
 - [x] **GAP-HKT3 fix: `$Opaque` keys in lib/fp/** — applied to all 10 typeclass modules + 9 instance modules. `fa[Mappable.key]` now resolves via FLAG_OPAQUE_KEY. (2026-03-29, 839610f)
 - [x] **`$Require<T>` as parameterized intrinsic** — implemented (9d92308). `expand_require` in intrinsic.lua; `resolve_deferred_intrinsic` in solve.lua evaluates TAG_TYPE_CALL on TAG_INTRINSIC callees after arg solving. Module declaration processing moved to pass 0. constrain.lua special case preserved pending full de-specialcase.
 - [ ] **De-specialcase builtins** — `require` (f468b72), `pcall`/`xpcall` (d7950de), `pairs`/`ipairs` (d7950de) done. Remaining: `type()`, `assert`, `error`, `select`, `string.match`/`gmatch`/`gsub`. `string.find`/`io.open`/`string.byte` have `-> ...()` annotations — verify their constrain.lua paths are also gone.
+- [ ] **Type-level operators to eliminate remaining intrinsics** — `$PcallReturn`, `$PairsReturn`, `$IpairsReturn`, `$Keys`, `$EachField` are intrinsics only because the type grammar lacks expressiveness. Once these operators exist, all become user-definable in stdlib.d.lua:
+  - `ReturnType<F>` — F's return as a spread/tuple type (needed for `$PcallReturn`)
+  - `(A, ...T)` in type position — tuple prepend where T is a spread typevar (needed for `$PcallReturn`)
+  - `keyof T` — key union of T's indexer or field names (needed for `$PairsReturn`, `$IpairsReturn`, `$Keys`)
+  - `T[K]` — index type lookup (needed for `$PairsReturn`, `$IpairsReturn`, `$EachField`)
+  These are all standard operators (TypeScript has all four). After implementing them, `$Require<T>` and `$Opaque<T>` remain as intrinsics (they interact with the module system and nominal identity respectively — not pure type-level computation).
 - [x] **Invariant-based fuzz suite** — implemented (e3d5f96): `lib/type/static/fuzz_test.lua` + `fuzz_arb.lua`. 6 invariants + performance gate (≥500 programs/sec).
 - [x] **`pcall`/`xpcall` de-specialcase** — implemented (d7950de): `$PcallReturn<F>` intrinsic.
 - [x] **`pairs`/`ipairs` de-specialcase** — implemented (d7950de): `$PairsReturn<T>`/`$IpairsReturn<T>` intrinsics.
