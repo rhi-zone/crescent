@@ -14,8 +14,8 @@
 --:: declare type = (val: any) -> string
 --:: declare error = (msg: any, level: any?) -> never
 --:: declare assert = (val: any, ...any) -> any
---:: declare pcall = (fn: any, ...any) -> (boolean, any)
---:: declare xpcall = (fn: any, msgh: any, ...any) -> (boolean, any)
+--:: declare pcall = <F: function>(f: F, ...any) -> ...($PcallReturn<F>)
+--:: declare xpcall = <F: function>(f: F, handler: (string) -> string, ...any) -> ...($PcallReturn<F>)
 --:: declare require = <T: string>(module: T) -> $Require<T>
 --:: declare select = (index: any, ...any) -> any
 --:: declare rawget = (t: any, k: any) -> any
@@ -23,8 +23,8 @@
 --:: declare rawequal = (a: any, b: any) -> boolean
 --:: declare rawlen = (t: any) -> integer
 --:: declare unpack = (t: any, i: any?, j: any?) -> any
---:: declare pairs = (t: any) -> ((any, any) -> (any, any), any, any)
---:: declare ipairs = (t: any) -> ((any, integer) -> (integer, any), any, integer)
+--:: declare pairs = <T>(t: T) -> ...($PairsReturn<T>)
+--:: declare ipairs = <T>(t: T) -> ...($IpairsReturn<T>)
 --:: declare next = (t: any, k: any?) -> (any, any)
 --:: declare setmetatable = <T, U>(t: T, mt: { __index: U, ... }) -> T & U
 --:: declare getmetatable = (t: any) -> any

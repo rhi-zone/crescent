@@ -2397,6 +2397,30 @@ end
     assert.it("ipairs over untyped table still works (no false positive)", function()
         no_errors("for i, v in ipairs({}) do end")
     end)
+    assert.it("pairs over field-only table: v is widened to integer|string union", function()
+        -- { x = 1, y = 'hello' } has no indexer; K=string, V=integer|string (widened from literals)
+        no_errors([[
+local t = { x = 1, y = "hello" }
+for k, v in pairs(t) do
+    local s = v
+end
+]])
+    end)
+    assert.it("ipairs over array literal: v is widened to integer (no error on v+1)", function()
+        -- { 1, 2, 3 } has no indexer; ipairs extracts field values widened to integer
+        no_errors([[
+local arr = { 1, 2, 3 }
+for i, v in ipairs(arr) do
+    local x = v + 1
+end
+]])
+    end)
+    assert.it("pairs over unknown-typed var: no error (k/v both unknown)", function()
+        no_errors([[
+local t
+for k, v in pairs(t) do end
+]])
+    end)
 end)
 
 assert.describe("checker: pcall/xpcall return type narrowing", function()
@@ -6061,6 +6085,53 @@ local ok, val = xpcall(double, tostring, 5)
 if ok then
     local x = val + 1
 end
+]])
+    end)
+
+    -- $PcallReturn<F> intrinsic tests (de-specialcase pcall/xpcall)
+    assert.it("$PcallReturn: f:()->string — ok: boolean, val: string|string (true+false arms)", function()
+        -- val is string in the success arm (fn return) and string in the fail arm (error msg).
+        -- The union of two strings is still string — no error using val as string.
+        v3_no_errors([[
+--: () -> string
+local function f() return "hello" end
+local ok, val = pcall(f)
+if ok then
+    local s --: string
+    s = val
+end
+]])
+    end)
+
+    assert.it("$PcallReturn: f:()->integer — val narrows to integer after if ok then", function()
+        v3_no_errors([[
+--: () -> integer
+local function f() return 42 end
+local ok, val = pcall(f)
+if ok then
+    local x = val + 1
+end
+]])
+    end)
+
+    assert.it("$PcallReturn: f:()->never — success arm is (true), fail arm is (false,string)", function()
+        -- When f returns never, the success tuple is (true) with no value.
+        -- In the failure branch, err should be string.
+        v3_no_errors([[
+--: () -> never
+local function f() error("boom") end
+local ok, err = pcall(f)
+if not ok then
+    local s --: string
+    s = err
+end
+]])
+    end)
+
+    assert.it("$PcallReturn: unannotated f — ok: boolean, rest: unknown (no error)", function()
+        v3_no_errors([[
+local function f() end
+local ok, val = pcall(f)
 ]])
     end)
 

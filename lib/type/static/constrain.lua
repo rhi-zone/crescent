@@ -1343,6 +1343,66 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid)
 end
 
+-- Try to eagerly evaluate a deferred intrinsic return at constraint-gen time.
+-- When an instantiated callee has `-> ...$SomeIntrinsic<F>` as its return type,
+-- the intrinsic args (which are fresh TVs from let-polymorphism instantiation)
+-- can often be resolved immediately from the actual call-site arg types.  This
+-- lets _last_multi_return_override be set eagerly so that if-guard narrowing
+-- (e.g. `if ok then`) can filter union arms at constraint-gen time rather than
+-- waiting until the solver runs.
+--
+-- Returns the evaluated type id (a concrete union-of-tuples), or nil if not
+-- applicable (non-spread return, non-intrinsic inner, or args still unresolved).
+--: (Ctx, integer, { [integer]: integer, ... }) -> integer?
+local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids)
+    local callee_t = ctx.types:get(types_mod.find(ctx, inst_callee_tid))
+    if callee_t.tag ~= TAG_FUNCTION or callee_t.data[3] ~= 1 then return nil end
+    local ret_slot = types_mod.find(ctx, ctx.lists:get(callee_t.data[2]))
+    local ret_t = ctx.types:get(ret_slot)
+    -- Must be TAG_SPREAD wrapping a TAG_TYPE_CALL(TAG_INTRINSIC, ...)
+    if ret_t.tag ~= defs.TAG_SPREAD then return nil end
+    local inner = types_mod.find(ctx, ret_t.data[0])
+    local inner_t = ctx.types:get(inner)
+    if inner_t.tag ~= defs.TAG_TYPE_CALL then return nil end
+    local callee_id = types_mod.find(ctx, inner_t.data[0])
+    local ct = ctx.types:get(callee_id)
+    if ct.tag ~= defs.TAG_INTRINSIC then return nil end
+    -- Resolve each intrinsic arg: if it is a fresh TAG_VAR from instantiation,
+    -- find which function parameter position it came from and substitute the
+    -- actual argument type.
+    local resolved = {}
+    local params_len = callee_t.data[1]
+    for i = inner_t.data[1], inner_t.data[1] + inner_t.data[2] - 1 do
+        local tv = types_mod.find(ctx, ctx.lists:get(i))
+        local tv_t = ctx.types:get(tv)
+        if tv_t.tag == TAG_VAR then
+            local found = nil
+            for pi = 0, params_len - 1 do
+                local param = types_mod.find(ctx, ctx.lists:get(callee_t.data[0] + pi))
+                if param == tv then
+                    if arg_tids[pi + 1] then
+                        found = types_mod.find(ctx, arg_tids[pi + 1])
+                    end
+                    break
+                end
+            end
+            resolved[#resolved + 1] = found or tv
+        else
+            resolved[#resolved + 1] = tv
+        end
+    end
+    -- Only eagerly evaluate intrinsics whose result is a union-of-tuples used for
+    -- correlated narrowing (e.g. $PcallReturn<F>).  Intrinsics that return single
+    -- tuples or plain types ($PairsReturn, $IpairsReturn, $Require, etc.) must be
+    -- left deferred — they are resolved by the solver after parameter unification,
+    -- which is correct.  Eager evaluation of those would create orphaned type nodes
+    -- and could interfere with for-in loop handling.
+    local intrinsic_name = intern_mod.get(ctx.pool, ct.data[0]) or ""
+    if intrinsic_name ~= "PcallReturn" then return nil end
+    local intrinsic_mod = require("lib.type.static.intrinsic")
+    return intrinsic_mod.expand(ctx, ct.data[0], resolved, inner_t.data[3])
+end
+
 -- Peek at the declared return type of a callee without going through constraint
 -- variables. Returns the concrete ret-slot type id, or nil if not resolvable.
 -- Used to detect union-of-tuples return types (e.g. string.find, io.open) so
@@ -1507,28 +1567,15 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     emit(ctx, { C_CALLABLE, inst_callee, arg_tids, ret, n.line, n.col })
     ctx._last_multi_return = { ret }
 
-    -- pcall/xpcall intrinsic: synthesise (true, fn_ret) | (false, string) union.
-    -- Stored in _last_multi_return_override for LOCAL_STMT to use as call_ret_tid.
-    if callee_n.kind == NODE_IDENTIFIER then
-        local fname = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
-        if (fname == "pcall" or fname == "xpcall") and #arg_tids >= 1 then
-            local fn_arg_tid = types_mod.find(ctx, arg_tids[1])
-            local fn_t = ctx.types:get(fn_arg_tid)
-            -- Collect fn return types (first slot only for simplicity)
-            local fn_rets = {}
-            if fn_t.tag == TAG_FUNCTION and fn_t.data[3] > 0 then
-                fn_rets[1] = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
-            elseif fn_t.tag == TAG_FUNCTION then
-                fn_rets[1] = ctx.T_NIL
-            else
-                fn_rets[1] = ctx.T_ANY
-            end
-            local true_lit  = types_mod.make_literal(ctx, LIT_BOOLEAN, 1)
-            local false_lit = types_mod.make_literal(ctx, LIT_BOOLEAN, 0)
-            local success_arm = types_mod.make_tuple(ctx, { true_lit, fn_rets[1] })
-            local failure_arm = types_mod.make_tuple(ctx, { false_lit, ctx.T_STRING })
-            ctx._last_multi_return_override = types_mod.make_union(ctx, { success_arm, failure_arm })
-        end
+    -- Eagerly evaluate $PcallReturn<F> at constraint-gen time so that
+    -- _last_multi_return_override is available for if-guard narrowing.
+    -- This replaces the former name-based pcall/xpcall special case.
+    -- Only applies to $PcallReturn (union-of-tuples needing correlated narrowing);
+    -- other intrinsics ($IpairsReturn, $PairsReturn, $Require, ...) are resolved
+    -- by resolve_deferred_intrinsic in the solver after parameter unification.
+    local eager = try_eager_intrinsic_return(ctx, inst_callee, arg_tids)
+    if eager then
+        ctx._last_multi_return_override = eager
     end
 
     -- General union-of-tuples override: any callee declared to return a
@@ -2393,74 +2440,56 @@ end
 --: (Ctx, integer) -> ()
 StmtRule[NODE_FOR_IN] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
-
-    -- Pre-inspect: detect pairs(t)/ipairs(t) to extract typed loop vars from the table.
-    local typed_iter_returns = nil
-    if n.data[3] == 1 then
-        local call_nid = ctx.ast_lists:get(n.data[2])
-        local call_n = ctx.nodes:get(call_nid)
-        if call_n.kind == NODE_CALL_EXPR and call_n.data[2] == 1 then
-            local callee_n = ctx.nodes:get(call_n.data[0])
-            if callee_n.kind == NODE_IDENTIFIER then
-                local fn_name = intern_mod.get(ctx.pool, callee_n.data[0]) or ""
-                if fn_name == "pairs" or fn_name == "ipairs" then
-                    local arg_nid = ctx.ast_lists:get(call_n.data[1])
-                    local arg_n = ctx.nodes:get(arg_nid)
-                    -- Only inspect identifiers to avoid double constraint emission.
-                    local arg_tid = nil
-                    if arg_n.kind == NODE_IDENTIFIER then
-                        arg_tid = env_mod.lookup(ctx.scope, arg_n.data[0])
-                        if arg_tid then arg_tid = types_mod.find(ctx, arg_tid) end
-                    end
-                    local at = arg_tid and ctx.types:get(arg_tid)
-                    if at and at.tag == TAG_TABLE and at.data[3] >= 2 then
-                        local is = at.data[2]
-                        if fn_name == "ipairs" then
-                            local j = is
-                            while j < is + at.data[3] - 1 do
-                                local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
-                                if kt.tag == TAG_NUMBER or kt.tag == TAG_INTEGER then
-                                    typed_iter_returns = {
-                                        ctx.T_INTEGER,
-                                        types_mod.find(ctx, ctx.lists:get(j + 1))
-                                    }
-                                    break
-                                end
-                                j = j + 2
-                            end
-                        else  -- pairs: use first indexer → (K, V)
-                            local k = types_mod.find(ctx, ctx.lists:get(is))
-                            local v = types_mod.find(ctx, ctx.lists:get(is + 1))
-                            typed_iter_returns = { k, v }
-                        end
-                    end
-                end
-            end
-        end
-    end
-
     local iter_types = gen_expr_list(ctx, n.data[2], n.data[3])
     local saved = ctx.scope
     ctx.scope = env_mod.child(ctx.scope)
     local ns, nl = n.data[0], n.data[1]
-    -- Extract loop-var types from iterator function's return types.
-    local iter_func_returns = {}
-    if #iter_types > 0 then
-        local ft = types_mod.find(ctx, iter_types[1])
-        local ftt = ctx.types:get(ft)
-        if ftt.tag == TAG_FUNCTION then
-            for j = ftt.data[2], ftt.data[2] + ftt.data[3] - 1 do
-                iter_func_returns[#iter_func_returns + 1] = types_mod.find(ctx, ctx.lists:get(j))
-            end
-        end
+
+    -- Determine the iterator function type and call-args (state, initial_key).
+    -- For a single-expr explist (e.g. pairs(t)/ipairs(t)), the expression returns
+    -- an iterator triple (iter_fn, state, initial_key) as a TAG_TUPLE.  We extract
+    -- iter_fn via C_INDEX so the solver can project it once the triple is resolved.
+    -- For multi-expr explists (e.g. `for k,v in next, t, nil`), iter_types already
+    -- contains the three components directly.
+    local iter_fn_tid, state_tid, key0_tid
+    if n.data[3] == 1 and #iter_types >= 1 then
+        -- Single-expr: explist returns a triple (may be TAG_VAR pointing at a tuple).
+        local triple_var = iter_types[1]
+        iter_fn_tid = fresh_var(ctx)
+        emit(ctx, { C_INDEX, triple_var,
+            types_mod.make_literal(ctx, LIT_INTEGER, 0),
+            iter_fn_tid, n.line, n.col })
+        state_tid = fresh_var(ctx)
+        emit(ctx, { C_INDEX, triple_var,
+            types_mod.make_literal(ctx, LIT_INTEGER, 1),
+            state_tid, n.line, n.col })
+        key0_tid = fresh_var(ctx)
+        emit(ctx, { C_INDEX, triple_var,
+            types_mod.make_literal(ctx, LIT_INTEGER, 2),
+            key0_tid, n.line, n.col })
+    else
+        -- Multi-expr: iter_types[1] = iter_fn, [2] = state, [3] = initial_key.
+        iter_fn_tid = iter_types[1] or ctx.T_ANY
+        state_tid   = iter_types[2] or ctx.T_NIL
+        key0_tid    = iter_types[3] or ctx.T_NIL
     end
+
+    -- Emit C_CALLABLE for the iterator function call: iter_fn(state, initial_key).
+    -- The return type (a tuple of loop-var types) is projected slot-by-slot into
+    -- individual loop variables via C_INDEX.
+    local loop_ret_var = fresh_var(ctx)
+    emit(ctx, { C_CALLABLE, iter_fn_tid, { state_tid, key0_tid },
+        loop_ret_var, n.line, n.col })
+
     for i = 0, nl - 1 do
         local name_id = ctx.ast_lists:get(ns + i)
-        local t = (typed_iter_returns and typed_iter_returns[i + 1])
-               or iter_func_returns[i + 1]
-               or ctx.T_ANY
-        env_mod.bind(ctx.scope, name_id, t)
+        local slot_var = fresh_var(ctx)
+        emit(ctx, { C_INDEX, loop_ret_var,
+            types_mod.make_literal(ctx, LIT_INTEGER, i),
+            slot_var, n.line, n.col })
+        env_mod.bind(ctx.scope, name_id, slot_var)
     end
+
     gen_block(ctx, n.data[4], n.data[5])
     ctx.scope = saved
 end

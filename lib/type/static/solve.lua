@@ -108,6 +108,20 @@ end
 --: (Ctx, integer) -> integer
 local function resolve_deferred_intrinsic(ctx, tid)
     local t = ctx.types:get(tid)
+    -- TAG_SPREAD wrapping a TAG_TYPE_CALL intrinsic: unwrap and evaluate.
+    -- Handles `-> ...($IpairsReturn<T>)` / `-> ...($PairsReturn<T>)` return types,
+    -- which are stored as TAG_SPREAD(TAG_TYPE_CALL(TAG_INTRINSIC, ...)).
+    -- The result (a TAG_TUPLE iterator triple) is returned directly so the caller
+    -- can unify ret_tid with the tuple, enabling C_INDEX projection in for-in.
+    if t.tag == TAG_SPREAD then
+        local inner_tid = find(ctx, t.data[0])
+        local inner_t = ctx.types:get(inner_tid)
+        if inner_t.tag ~= TAG_TYPE_CALL then
+            return tid  -- spread wrapping a non-intrinsic: leave unchanged
+        end
+        t = inner_t
+        tid = inner_tid
+    end
     if t.tag ~= TAG_TYPE_CALL then return tid end
     local callee_id = find(ctx, t.data[0])
     local ct = ctx.types:get(callee_id)
@@ -521,6 +535,22 @@ local function solve_bound(ctx, c)
                 "type argument `" .. types_mod.display_short(ctx, actual)
                 .. "` does not satisfy constraint `"
                 .. types_mod.display_short(ctx, find(ctx, bound_id)) .. "`")
+            return false
+        end
+        return true
+    end
+
+    -- `function` bound (<F: function>): kind-check only — actual must be a function type.
+    -- The annotation `function` keyword resolves to `(...any) -> ()` which would reject
+    -- any specific function type under structural unification.  Instead, just verify the
+    -- actual type is callable.  TAG_ANY is accepted (it opts out of type checking).
+    if bt.tag == TAG_FUNCTION then
+        local wa_tid = find(ctx, widen_deep(ctx, actual))
+        local wa_tag = ctx.types:get(wa_tid).tag
+        if wa_tag ~= TAG_FUNCTION and wa_tag ~= TAG_ANY and wa_tag ~= TAG_UNKNOWN then
+            add_error(ctx, line, col,
+                "type argument `" .. types_mod.display_short(ctx, actual)
+                .. "` does not satisfy constraint `function`")
             return false
         end
         return true

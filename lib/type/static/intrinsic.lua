@@ -4,9 +4,12 @@
 -- has a TAG_INTRINSIC callee.
 --
 -- Supported intrinsics:
---   $Keys<T>         — string literal union of field names in T
---   $EachUnion<T, F> — apply F to each member of union T, re-union results
---   $EachField<T, F> — apply F to each field descriptor of T, collect into table
+--   $Keys<T>           — string literal union of field names in T
+--   $EachUnion<T, F>   — apply F to each member of union T, re-union results
+--   $EachField<T, F>   — apply F to each field descriptor of T, collect into table
+--   $PairsReturn<T>    — iterator triple for pairs() over T
+--   $IpairsReturn<T>   — iterator triple for ipairs() over T
+--   $PcallReturn<F>    — (true, ...F_returns) | (false, string) union for pcall/xpcall
 
 local defs      = require("lib.type.static.defs")
 local types_mod = require("lib.type.static.types")
@@ -250,6 +253,206 @@ local function expand_each_field(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
+-- $PairsReturn<T> and $IpairsReturn<T>
+-- ---------------------------------------------------------------------------
+-- $PairsReturn<T> evaluates to a TAG_TUPLE: (iter_fn, T, K?)
+-- where iter_fn: (T, K?) -> (K?, V), K/V extracted from T's indexer or fields.
+-- $IpairsReturn<T> is like $PairsReturn<T> but K is always integer.
+--
+-- K/V extraction rules for pairs:
+--   - TAG_TABLE with indexer: K = indexer key type, V = indexer value type
+--   - TAG_TABLE with only named fields (no indexer): K = string, V = union of field value types
+--   - TAG_TABLE with no indexer and no fields (empty open table): K = string, V = unknown
+--   - Anything else (TAG_VAR, TAG_ANY, TAG_UNKNOWN, etc.): K = unknown, V = unknown
+--
+-- K/V extraction rules for ipairs:
+--   - K is always integer
+--   - V = numeric indexer value type (integer key), or union of positional field value types
+--   - If neither found: V = unknown
+
+-- Extract K and V types from a table type for pairs().
+local function extract_pairs_kv(ctx, T_tid)
+    T_tid = types_mod.find(ctx, T_tid)
+    local T_t = ctx.types:get(T_tid)
+    if T_t.tag ~= TAG_TABLE then
+        -- Non-table (any, unknown, var, etc.): return unknown, unknown
+        return ctx.T_UNKNOWN, ctx.T_UNKNOWN
+    end
+    -- Check for an indexer
+    if T_t.data[3] >= 2 then
+        local K_tid = types_mod.find(ctx, ctx.lists:get(T_t.data[2]))
+        local V_tid = types_mod.find(ctx, ctx.lists:get(T_t.data[2] + 1))
+        return K_tid, V_tid
+    end
+    -- No indexer: use named fields
+    if T_t.data[1] > 0 then
+        local val_members = {}
+        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe  = ctx.fields:get(fid)
+            if fe.name_id >= 0 then  -- skip spread markers
+                -- Widen literals (e.g. LIT_INTEGER(1) -> integer) so that
+                -- `for k, v in pairs({ x = 1, y = "hi" })` gives v: integer | string.
+                val_members[#val_members + 1] = types_mod.widen(ctx, fe.type_id)
+            end
+        end
+        local V_tid
+        if #val_members == 0 then
+            V_tid = ctx.T_UNKNOWN
+        elseif #val_members == 1 then
+            V_tid = val_members[1]
+        else
+            V_tid = types_mod.make_union(ctx, val_members)
+        end
+        return ctx.T_STRING, V_tid
+    end
+    -- Empty or open table: K=string (Lua's pairs always yields string keys for plain tables)
+    return ctx.T_STRING, ctx.T_UNKNOWN
+end
+
+-- Extract V type from a table type for ipairs() (K is always integer).
+local function extract_ipairs_v(ctx, T_tid)
+    T_tid = types_mod.find(ctx, T_tid)
+    local T_t = ctx.types:get(T_tid)
+    if T_t.tag ~= TAG_TABLE then
+        return ctx.T_UNKNOWN
+    end
+    -- Look for an integer-compatible indexer
+    if T_t.data[3] >= 2 then
+        local j = T_t.data[2]
+        while j < T_t.data[2] + T_t.data[3] - 1 do
+            local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
+            if kt.tag == defs.TAG_NUMBER or kt.tag == defs.TAG_INTEGER then
+                return types_mod.find(ctx, ctx.lists:get(j + 1))
+            end
+            j = j + 2
+        end
+    end
+    -- No integer indexer: try positional (named "1","2",...) fields
+    -- Collect value types from all named fields (positional array entries).
+    -- Widen literals so `ipairs({1,2,3})` yields v: integer, not v: 1|2|3.
+    if T_t.data[1] > 0 then
+        local val_members = {}
+        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe  = ctx.fields:get(fid)
+            if fe.name_id >= 0 then
+                val_members[#val_members + 1] = types_mod.widen(ctx, fe.type_id)
+            end
+        end
+        if #val_members == 1 then return val_members[1] end
+        if #val_members > 1 then return types_mod.make_union(ctx, val_members) end
+    end
+    return ctx.T_UNKNOWN
+end
+
+-- Build the iterator triple tuple: (iter_fn, T, K?)
+-- iter_fn: (T, K?) -> (K, V)
+-- The return key is K (not K?) because the for-in body only executes when the
+-- iterator returns a non-nil first value.  Using K? in return position causes
+-- false-positive arithmetic errors on loop index variables in the body.
+-- The initial key in the triple is K? (nil on the very first call).
+local function build_iter_triple(ctx, T_tid, K_tid, V_tid)
+    -- K? = K | nil  (initial key is nil on the first call)
+    local K_opt_tid = types_mod.make_union(ctx, { K_tid, ctx.T_NIL })
+    -- iter_fn: (T, K?) -> (K, V)  — K non-optional: body only runs when K is non-nil
+    local iter_fn_tid = types_mod.make_func(ctx, { T_tid, K_opt_tid }, { K_tid, V_tid }, -1, nil)
+    -- triple: (iter_fn, T, K?)
+    return types_mod.make_tuple(ctx, { iter_fn_tid, T_tid, K_opt_tid })
+end
+
+local function expand_pairs_return(ctx, arg_ids)
+    if #arg_ids ~= 1 then return ctx.T_NEVER end
+    local T_tid = types_mod.find(ctx, arg_ids[1])
+    local K_tid, V_tid = extract_pairs_kv(ctx, T_tid)
+    return build_iter_triple(ctx, T_tid, K_tid, V_tid)
+end
+
+local function expand_ipairs_return(ctx, arg_ids)
+    if #arg_ids ~= 1 then return ctx.T_NEVER end
+    local T_tid = types_mod.find(ctx, arg_ids[1])
+    local V_tid = extract_ipairs_v(ctx, T_tid)
+    return build_iter_triple(ctx, T_tid, ctx.T_INTEGER, V_tid)
+end
+
+-- ---------------------------------------------------------------------------
+-- $PcallReturn<F>
+-- ---------------------------------------------------------------------------
+-- Given a function type F, produce the pcall return union:
+--   (true, ...F_returns) | (false, string)
+--
+-- Cases:
+--   F is TAG_FUNCTION with multiple returns (R1, R2, ...):
+--     success tuple = (true, R1, R2, ...)
+--   F is TAG_FUNCTION with one return R (not TAG_SPREAD):
+--     success tuple = (true, R)
+--   F is TAG_FUNCTION with one return TAG_SPREAD wrapping a union-of-tuples:
+--     distribute: each arm (R1, ...) becomes (true, R1, ...), plus (false, string)
+--   F is TAG_FUNCTION with zero returns (void):
+--     success tuple = (true)
+--   F is not TAG_FUNCTION (TAG_VAR, TAG_ANY, TAG_UNKNOWN, etc.):
+--     return T_UNKNOWN
+local function expand_pcall_return(ctx, arg_ids)
+    if #arg_ids ~= 1 then return ctx.T_UNKNOWN end
+    local F_tid = types_mod.find(ctx, arg_ids[1])
+    local F_t = ctx.types:get(F_tid)
+    if F_t.tag ~= defs.TAG_FUNCTION then return ctx.T_UNKNOWN end
+
+    local true_lit   = types_mod.make_literal(ctx, LIT_BOOLEAN, 1)
+    local false_lit  = types_mod.make_literal(ctx, LIT_BOOLEAN, 0)
+    local fail_tuple = types_mod.make_tuple(ctx, { false_lit, ctx.T_STRING })
+
+    local rl = F_t.data[3]  -- returns_len
+
+    if rl == 0 then
+        -- void return: success arm has only `true`
+        local success_tuple = types_mod.make_tuple(ctx, { true_lit })
+        return types_mod.make_union(ctx, { success_tuple, fail_tuple })
+    elseif rl == 1 then
+        local ret_slot = types_mod.find(ctx, ctx.lists:get(F_t.data[2]))
+        local ret_t = ctx.types:get(ret_slot)
+        -- TAG_SPREAD in return position: unwrap and distribute over inner type
+        if ret_t.tag == defs.TAG_SPREAD then
+            local inner_tid = types_mod.find(ctx, ret_t.data[0])
+            local inner_t = ctx.types:get(inner_tid)
+            -- union-of-tuples: distribute true-prepend over each arm
+            if inner_t.tag == TAG_UNION then
+                local arms = { fail_tuple }
+                for i = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                    local arm = types_mod.find(ctx, ctx.lists:get(i))
+                    local arm_t = ctx.types:get(arm)
+                    if arm_t.tag == defs.TAG_TUPLE then
+                        local slots = { true_lit }
+                        for j = 0, arm_t.data[1] - 1 do
+                            slots[#slots + 1] = types_mod.find(ctx,
+                                ctx.lists:get(arm_t.data[0] + j))
+                        end
+                        arms[#arms + 1] = types_mod.make_tuple(ctx, slots)
+                    else
+                        arms[#arms + 1] = types_mod.make_tuple(ctx, { true_lit, arm })
+                    end
+                end
+                return types_mod.make_union(ctx, arms)
+            end
+            -- single type or tuple inside spread: treat as plain
+            local success_tuple = types_mod.make_tuple(ctx, { true_lit, inner_tid })
+            return types_mod.make_union(ctx, { success_tuple, fail_tuple })
+        end
+        -- plain single return
+        local success_tuple = types_mod.make_tuple(ctx, { true_lit, ret_slot })
+        return types_mod.make_union(ctx, { success_tuple, fail_tuple })
+    else
+        -- multiple return values: collect all into success tuple
+        local slots = { true_lit }
+        for ri = 0, rl - 1 do
+            slots[#slots + 1] = types_mod.find(ctx, ctx.lists:get(F_t.data[2] + ri))
+        end
+        local success_tuple = types_mod.make_tuple(ctx, slots)
+        return types_mod.make_union(ctx, { success_tuple, fail_tuple })
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- $Require<T>
 -- ---------------------------------------------------------------------------
 -- Type-level require: given a string literal type T, look up the declared
@@ -424,6 +627,18 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Require" then
         return expand_require(ctx, arg_ids)
+    end
+
+    if name == "PairsReturn" then
+        return expand_pairs_return(ctx, arg_ids)
+    end
+
+    if name == "IpairsReturn" then
+        return expand_ipairs_return(ctx, arg_ids)
+    end
+
+    if name == "PcallReturn" then
+        return expand_pcall_return(ctx, arg_ids)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative
