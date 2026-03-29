@@ -39,13 +39,13 @@
 
 -- Annotation arena result returned by ann.parse_annotations().
 -- Types/fields/lists use the same arena shapes as the main checker.
---:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: string, ... }, pool: InternPool, make_intersection: ({ [integer]: integer, ... }) -> integer }
+--:: AnnResult = { types: TypeSlotArena, fields: FieldEntryArena, lists: ListPool, results: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, ... }, warnings: { [integer]: { line: integer, col: integer, msg: string, ... }, ... }, pool: InternPool, make_intersection: ({ [integer]: integer, ... }) -> integer }
 
 -- Error context from errors.lua.
 --:: ErrCtx = { errors: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, warnings: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
 
 -- Type alias table stored in scope.type_bindings.
---:: TypeAlias = { body: integer, params: { [integer]: integer, ... }?, ... }
+--:: TypeAlias = { body: integer, params: { [integer]: integer, ... }?, raw_bounds: { [integer]: integer, ... }?, resolved_bounds: { [integer]: integer | nil, ... }?, nominal: boolean, ... }
 
 -- Scope frame: linked list of binding tables.
 --:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope?, level: integer }

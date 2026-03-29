@@ -314,7 +314,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             -- its own (the error is arity mismatch: "does not take type arguments") AND the
             -- alias body is an abstract type (TAG_VAR = forall param; TAG_NAMED = placeholder).
             -- Constraint violations (alias HAS params, arg fails bound check) are NOT deferred.
-            local ai = arg_ids or {}
+            local ai = arg_ids or {} --: { [integer]: integer, ... }
             if #ai > 0 and alias.body
                 and (not alias.params or #alias.params == 0) then
                 local body_id = types_mod.find(ctx, alias.body)
@@ -614,7 +614,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
     if tag == defs.TAG_MATCH_TYPE then
         seen[ann_tid] = true
         local param = resolve_annotation_type(ctx, at.data[0], seen)
-        local arms = {}
+        local arms = {} --: { [integer]: integer, ... }
         local as, al = at.data[1], at.data[2]
         -- Arm patterns and bodies may contain free names (e.g. `A` in `{ value: A } => A`).
         -- These are pattern-capture variables, not errors. Set _in_match_arm so that
@@ -659,7 +659,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if ct.tag == defs.TAG_INTRINSIC then
             ctx._allow_unapplied_constructors = true
         end
-        local arg_ids = {}
+        local arg_ids = {} --: { [integer]: integer, ... }
         for i = at.data[1], at.data[1] + at.data[2] - 1 do
             arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
         end
@@ -1096,6 +1096,7 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
         local key_nid = fn.data[0]
 
         if key_nid == -1 then
+            --: integer
             local pos_key = intern_mod.intern(ctx.pool, tostring(pos_idx))
             field_ids[#field_ids + 1] = types_mod.make_field(ctx, pos_key, val_tid, field_flags(ctx, pos_key))
             pos_idx = pos_idx + 1
@@ -1306,7 +1307,11 @@ local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
         -- Re-emit any errors from this overload, tagged with which overload
         if #pass_err.errors > 0 then
             local type_str = types_mod.display(ctx, member_tid)
-            for _, e in ipairs(pass_err.errors) do
+            --: any
+            local pass_err_any = pass_err
+            --: { [integer]: { msg: string, line: integer, col: integer, ... }, ... }
+            local err_entries = pass_err_any.errors
+            for _, e in ipairs(err_entries) do
                 local tagged_msg = "overload " .. oi .. ": " .. type_str .. " — " .. e.msg
                 errors_mod.error(saved_err, ctx.filename, e.line, e.col, tagged_msg)
             end
@@ -1461,8 +1466,10 @@ local function peek_callee_ret_union(ctx, callee_n)
 end
 
 -- Extract the type at slot N from a TAG_TUPLE or union-of-TAG_TUPLEs at constraint-gen time.
--- Returns nil when tid is TAG_VAR or not a tuple/union-of-tuples.
+-- Returns nil when tid is TAG_VAR, nil, or not a tuple/union-of-tuples.
+--: (Ctx, integer?, integer) -> integer?
 local function eager_slot(ctx, tid, slot)
+    if not tid then return nil end
     local t = ctx.types:get(tid)
     if t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return nil end
     if t.tag == defs.TAG_TUPLE then
@@ -1472,7 +1479,7 @@ local function eager_slot(ctx, tid, slot)
         return ctx.T_NIL
     end
     if t.tag == TAG_UNION then
-        local parts = {}
+        local parts = {} --: { [integer]: integer, ... }
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
             local arm = types_mod.find(ctx, ctx.lists:get(i))
             local arm_t = ctx.types:get(arm)
@@ -1711,12 +1718,15 @@ end
 -- Apply any --:: unseal annotations at lines strictly before `before_line`
 -- that have not yet been applied in this run.
 -- Unseals rebind the named variable in ctx.scope to its opaque inner type T.
+--: (Ctx, integer) -> ()
 local function apply_unseals_before(ctx, before_line)
     if not ctx.ann then return end
     local results = ctx.ann.results
     if not results then return end
     local applied = ctx._unseal_applied
     for line, r in pairs(results) do
+        --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }
+        local r = r
         if r.kind == ANN_UNSEAL and line < before_line then
             if not (applied and applied[line]) then
                 if not applied then
@@ -1724,6 +1734,7 @@ local function apply_unseals_before(ctx, before_line)
                     applied = ctx._unseal_applied
                 end
                 applied[line] = true
+                --: integer
                 local name_id = r.name_id
                 local var_tid = env_mod.lookup(ctx.scope, name_id)
                 local vname = intern_mod.get(ctx.pool, name_id) or "?"
@@ -1731,6 +1742,7 @@ local function apply_unseals_before(ctx, before_line)
                     errors_mod.error(ctx.err, ctx.filename, line, 1,
                         "unseal: `" .. vname .. "` is not in scope")
                 else
+                    --: integer
                     local resolved = types_mod.find(ctx, var_tid)
                     local nt = ctx.types:get(resolved)
                     if nt.tag ~= TAG_NOMINAL then
@@ -1773,7 +1785,7 @@ local function try_promote_enum(ctx, tbl_tid, enum_name_id)
     local fs, fl = ot.data[0], ot.data[1]
     if fl == 0 then return end
     local lit_kind = nil
-    local entries = {}  -- {feid, member_name_id, lit_kind, value}
+    local entries = {} --: { [integer]: { feid: integer, member_name_id: integer, lit_kind: integer, value: integer, ... }, ... }
     for i = fs, fs + fl - 1 do
         local fe = ctx.fields:get(ctx.lists:get(i))
         local vt = ctx.types:get(types_mod.find(ctx, fe.type_id))
@@ -2292,7 +2304,11 @@ StmtRule[NODE_IF_STMT] = function(ctx, nid)
                 end
             end
             if next(else_neg) then
-                ctx.scope = narrow_mod.apply_narrowed(ctx, else_neg)
+                -- Direct assignment triggers a typechecker bug when else_neg is
+                -- built by pairs() loops ($PairsReturn leaks into call result type).
+                -- Intermediate variable breaks the constraint chain.
+                local else_scope = narrow_mod.apply_narrowed(ctx, else_neg)
+                ctx.scope = else_scope
             else
                 ctx.scope = env_mod.child(saved)
             end
@@ -2669,7 +2685,7 @@ end
 -- Type declaration processing
 -- ---------------------------------------------------------------------------
 
---: (Ctx) -> ()
+--: (Ctx) -> { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... } | nil
 local function process_type_decls(ctx)
     if not ctx.ann then return nil end
     -- After this guard, ctx.ann is narrowed to AnnResult (field_presence narrowing on ctx).
@@ -2679,10 +2695,15 @@ local function process_type_decls(ctx)
             errors_mod.warning(ctx.err, ctx.filename, w.line or 0, w.col or 0, w.msg)
         end
     end
-    local decls = {}
+    local decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, ... }, ... }
+    -- decl_lines uses table-reference keys (result records as keys), which the
+    -- typechecker cannot track. Annotate as any so indexed access returns any (→ integer).
+    --: any
     local decl_lines = {}
-    local module_decls = {}
+    local module_decls = {} --: { [integer]: { kind: integer, type_id: integer, mod_name: string, ... }, ... }
     for line, result in pairs(ann.results) do
+        --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, mod_name: string, ... }
+        local result = result
         if result.kind == ANN_DECL then
             decls[#decls + 1] = result
             decl_lines[result] = line
@@ -2695,7 +2716,7 @@ local function process_type_decls(ctx)
 
     -- Identify decls whose body is a bare TAG_TYPEOF — these must be deferred until after
     -- gen_block, because typeof looks up value bindings that don't exist during prescan.
-    local typeof_decls = {}
+    local typeof_decls = {} --: { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... }
 
     -- Pass 0: populate ctx.module_types from --:: module declarations before any type
     -- alias bodies are resolved.  This ensures $Require<"mod"> annotations in type
@@ -2741,7 +2762,9 @@ local function process_type_decls(ctx)
             -- Detect bare typeof body — defer until value bindings are in scope.
             local at = ann.types:get(r.type_id)
             if at.tag == TAG_TYPEOF then
-                typeof_decls[#typeof_decls + 1] = { r = r, line = decl_lines[r] }
+                --: integer
+                local r_line = decl_lines[r]
+                typeof_decls[#typeof_decls + 1] = { r = r, line = r_line }
             else
                 -- Warn on function type declarations with unnamed parameters.
                 local fn_at
@@ -2752,7 +2775,9 @@ local function process_type_decls(ctx)
                     if body.tag == defs.TAG_FUNCTION then fn_at = body end
                 end
                 if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
-                    warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
+                    --: integer
+                    local r_line = decl_lines[r]
+                    warn(ctx, r_line, 1, E.UNNAMED_PARAMS, {})
                 end
 
                 local alias = env_mod.lookup_type(ctx.scope, r.name_id)
@@ -2795,7 +2820,8 @@ local function process_type_decls(ctx)
                     -- that reference other params (e.g. <T: { x: U }, U>) resolve correctly.
                     if alias.raw_bounds then
                         alias.resolved_bounds = {}
-                        for _, raw_id in ipairs(alias.raw_bounds) do
+                        local rb = alias.raw_bounds or {} --: { [integer]: integer, ... }
+                        for _, raw_id in ipairs(rb) do
                             if raw_id == -1 then
                                 alias.resolved_bounds[#alias.resolved_bounds + 1] = nil
                             else
@@ -2824,7 +2850,9 @@ local function process_type_decls(ctx)
                 if body.tag == defs.TAG_FUNCTION then fn_at = body end
             end
             if fn_at and fn_at.data[1] > 0 and fn_at.data[6] == 0 then
-                warn(ctx, decl_lines[r], 1, E.UNNAMED_PARAMS, {})
+                --: integer
+                local r_line = decl_lines[r]
+                warn(ctx, r_line, 1, E.UNNAMED_PARAMS, {})
             end
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
         end
@@ -2835,6 +2863,7 @@ end
 
 -- Resolve deferred `--:: Name = typeof ident` declarations.
 -- Called after gen_block so that value bindings from local statements are in ctx.scope.
+--: (Ctx, { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... }) -> ()
 local function process_typeof_decls(ctx, typeof_decls)
     for _, entry in ipairs(typeof_decls) do
         local r = entry.r
@@ -2908,13 +2937,24 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
         errors_mod.error(ctx.err, filename or "?", 0, 0, tostring(pr))
         return ctx, {}
     end
+    -- pcall erases the parse result type; cast via any to annotate fields.
+    --: any
+    local pr_any = pr
+    --: ListPool
+    local pr_lists = pr_any.lists
+    --: ASTNodeArena
+    local pr_nodes = pr_any.nodes
+    --: { annotations: { [integer]: unknown, ... }, ... } | nil
+    local pr_lexer = pr_any.lexer
+    --: integer | nil
+    local pr_root = pr_any.root
 
-    ctx.ast_lists = pr.lists
-    ctx.nodes     = pr.nodes
+    ctx.ast_lists = pr_lists
+    ctx.nodes     = pr_nodes
 
     errors_mod.set_source(ctx.err, filename or "?", source)
 
-    local lex_annotations = pr.lexer and pr.lexer.annotations
+    local lex_annotations = pr_lexer and pr_lexer.annotations
     if lex_annotations and next(lex_annotations) then
         local ok_ann, ar = pcall(ann_mod.parse_annotations, lex_annotations, pool, filename)
         if ok_ann then ctx.ann = ar end
@@ -2928,7 +2968,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
 
     local typeof_decls = process_type_decls(ctx)
 
-    local chunk = pr.root and ctx.nodes:get(pr.root)
+    local chunk = pr_root and ctx.nodes:get(pr_root)
     if chunk then
         local bs, bl = chunk.data[0], chunk.data[1]
         gen_prescan_block(ctx, bs, bl)

@@ -591,6 +591,7 @@ function M.extract_narrowing_info(ctx, nid)
 end
 
 -- Apply narrowed types to a scope (for if-branch entry).
+--: (Ctx, { [integer]: integer, ... }) -> Scope
 function M.apply_narrowed(ctx, narrowed)
     local env_mod = require("lib.type.static.env")
     local new_scope = env_mod.child(ctx.scope)
