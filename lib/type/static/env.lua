@@ -549,13 +549,16 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         mtt.data[0] = new_param
         mtt.data[1] = ms
         mtt.data[2] = ml
-        -- Only evaluate the match if the subject is concrete (not a free variable).
-        -- If the subject is still a free TAG_VAR (e.g. a forall param TV during bound
-        -- registration), return the unevaluated TAG_MATCH_TYPE node so that it can
-        -- be evaluated later in solve_bound once the TV is bound to an actual type.
+        -- Only evaluate the match if the subject is concrete (not a free variable
+        -- or unresolved placeholder).
+        -- TAG_VAR / TAG_ROWVAR: forall param TV not yet bound — defer.
+        -- TAG_NAMED: unresolved generic-alias placeholder (e.g. the T in an outer
+        -- match body like `match T { string => Box<T> }` being evaluated during
+        -- alias body resolution before T is concrete) — must also defer, otherwise
+        -- match.evaluate sees an abstract subject and returns never for every arm.
         local resolved_param = types_mod.find(ctx, new_param)
         local rpt = ctx.types:get(resolved_param)
-        if rpt.tag == TAG_VAR or rpt.tag == TAG_ROWVAR then
+        if rpt.tag == TAG_VAR or rpt.tag == TAG_ROWVAR or rpt.tag == defs.TAG_NAMED then
             return new_mt
         end
         -- Param is concrete: evaluate the match now.

@@ -5298,16 +5298,20 @@ x = n
     end)
 
     -- -----------------------------------------------------------------------
-    -- Nested match types (concrete inner args)
+    -- Nested match types — outer arm body uses outer type variable
     -- -----------------------------------------------------------------------
 
-    assert.it("PASS: nested match types — outer dispatches to inner via concrete args", function()
-        -- Box<string> = string; Box<number> = number.
-        -- Outer<string> = Box<string> = string; Outer<number> = Box<number> = number.
-        -- Cross-assignment must fail.
+    assert.it("PASS: nested match types — outer dispatches to inner via outer T", function()
+        -- Box<T> = match T { string => string, number => number }
+        -- Outer<T> = match T { string => Box<T>, number => Box<T>, _ => never }
+        -- When evaluating Outer<string>: T is bound to string in the arm body Box<T>,
+        -- so Box<T> = Box<string> = string.  Cross-assignment must fail.
+        -- (Previously this produced never because substitute evaluated Box<T> with
+        -- T=placeholder before T was concrete — fixed by deferring match evaluation
+        -- when subject is TAG_NAMED.)
         v3_no_errors([[
 --:: Box<T> = match T { string => string, number => number }
---:: Outer<T> = match T { string => Box<string>, number => Box<number>, _ => never }
+--:: Outer<T> = match T { string => Box<T>, number => Box<T>, _ => never }
 --:: S = Outer<string>
 --:: N = Outer<number>
 local x --: S
@@ -5317,7 +5321,7 @@ y = 42
 ]])
         v3_has_error([[
 --:: Box<T> = match T { string => string, number => number }
---:: Outer<T> = match T { string => Box<string>, number => Box<number>, _ => never }
+--:: Outer<T> = match T { string => Box<T>, number => Box<T>, _ => never }
 --:: S = Outer<string>
 local x --: S
 x = 42
