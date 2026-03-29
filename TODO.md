@@ -112,14 +112,14 @@ TypeScript's type guards can lie — `function isString(x): x is string { return
 
 - [ ] **Verified type guards** — rather than trusting the annotation, verify that the function body actually performs checks consistent with the declared predicate. If the body provably returns true for non-T values, emit a warning. This is beyond TS — TS never verifies guards, it just trusts them. Even partial verification (detecting trivially lying guards) would be a win.
 
-- [ ] **Predicate narrowing from `type()` calls** — `type(x) == "string"` should narrow `x` to `string` in the branch. Currently `type()` returns `string` but the checker doesn't connect the result to the original value. This is a precondition for assertion functions working on `type()` checks.
+- [x] **Predicate narrowing from `type()` calls** — implemented in `narrow.lua` (extract_narrowing detects `type(x) == "string"` pattern; apply_narrowing filters union members). All forms: `type(x) == "string"`, `type(x) ~= "string"`, multi-branch, `any`, `unknown`.
 
-- [ ] **`assert()` as a built-in assertion** — `assert(x)` narrows `x` to non-nil/non-false in the continuation. Already partially works via existing narrowing; needs to be robust for the `assert(x, msg)` two-argument form too.
+- [x] **`assert()` as a built-in assertion** — `assert(x)` and `assert(x, msg)` both narrow `x` to non-nil/non-false in the continuation.
 
 ## typechecker warnings / quality-of-life
 
 - [x] **Redundant type assertion warning** — implemented. `NODE_CAST_EXPR` emits a warning when a `--[[: T]]` cast asserts a structurally identical type; excludes `any` on either side.
-- [ ] **Error message quoting audit** — `solve.lua`, `constrain.lua`, and `errors.lua` mix single-quote and backtick style for type names in error messages. All type names in error messages should use backticks. Needs a grep-and-fix sweep.
+- [x] **Error message quoting audit** — fixed in `unify.lua` (2026-03-30): 8 error strings used single quotes around type names; converted to backtick style. All type names in error messages now use backticks.
 
 ## typechecker narrowing gaps
 
@@ -315,7 +315,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 
 - [x] **Typechecker: table-valued dispatch key (GAP-HKT3)** — applied to all lib/fp/ typeclass and instance modules. `fa[Mappable.key]` resolves via FLAG_OPAQUE_KEY to the instance type. Callers annotate parameters with `{ [MappableKey]: { map: ... } }` for type-checked dispatch. (2026-03-29, 839610f)
 
-- [ ] **Typechecker: argument literal widening** — literal `0` passed to a generic function pins the typevar to `LIT_INTEGER(0)`. Subsequent calls with `number` fail because `number !<: LIT_INTEGER(0)`. Correct rule: in argument position, literals widen to their base type before binding a typevar (`0` → `integer`, `"foo"` → `string`, `false` → `boolean`). `widen_deep` was added for generic constraint checks but is not applied at call-site typevar binding. **Note on `$Require<T>`**: `$Require<T>` needs `T` to remain a string literal (not widened to `string`), so the intrinsic can do the module lookup. The resolution is that widening applies to user-defined generics at typevar binding; intrinsics like `$Require<T>` are not user-defined generics — they are resolved separately by the intrinsic evaluation path, which inspects the bound TV's actual tag after solving. No special exemption needed at binding time; the intrinsic just checks `T.tag == TAG_LITERAL and T.data[0] == LIT_STRING` when evaluating. Until argument widening is fixed, any generic called with a literal constant may produce surprising pinning errors on the second call.
+- [x] **Typechecker: argument literal widening** — implemented in `solve.lua` (`widen_literal` applied at typevar binding; `ret_uses_tv_in_intrinsic` exempts `$Require<T>` to preserve string literal for module lookup). Confirmed: `id(0); id(1)` and `id(0); id('x')` both work.
 
 - [ ] **Refinement types / control-flow narrowing system** — type guards, assertions, and
   `type()` narrowing are all instances of a general `refine_true`/`refine_false` algebra.

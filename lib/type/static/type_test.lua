@@ -3354,7 +3354,7 @@ local x = uid
 --:: declare uid = UserId
 --: PostId
 local y = uid
-]], "nominal type 'UserId' is not 'PostId'")
+]], "nominal type `UserId` is not `PostId`")
     end)
 
     assert.it("underlying type not assignable to newtype", function()

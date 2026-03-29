@@ -272,7 +272,7 @@ function M.unify(ctx, a, b, seen)
         return true
     end
     if ta.tag == TAG_UNKNOWN then
-        return false, "value of type 'unknown' must be narrowed before use (got unknown, expected '" .. types_mod.display(ctx, b) .. "')"
+        return false, "value of type `unknown` must be narrowed before use (got unknown, expected `" .. types_mod.display(ctx, b) .. "`)"
     end
 
     -- never is bottom
@@ -293,15 +293,15 @@ function M.unify(ctx, a, b, seen)
         if ta.data[1] == tb.data[1] then return true end
         local na = intern_mod.get(ctx.pool, ta.data[0]) or "?"
         local nb = intern_mod.get(ctx.pool, tb.data[0]) or "?"
-        return false, "nominal type '" .. na .. "' is not '" .. nb .. "'"
+        return false, "nominal type `" .. na .. "` is not `" .. nb .. "`"
     end
     if ta.tag == TAG_NOMINAL then
         local na = intern_mod.get(ctx.pool, ta.data[0]) or "?"
-        return false, "nominal type '" .. na .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'"
+        return false, "nominal type `" .. na .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`"
     end
     if tb.tag == TAG_NOMINAL then
         local nb = intern_mod.get(ctx.pool, tb.data[0]) or "?"
-        return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to nominal type '" .. nb .. "'"
+        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to nominal type `" .. nb .. "`"
     end
 
     -- integer <: number (every integer is a number; not the reverse)
@@ -332,7 +332,7 @@ function M.unify(ctx, a, b, seen)
         if tb.tag == TAG_LITERAL then
             if ta.data[0] == tb.data[0] and ta.data[1] == tb.data[1]
               and (ta.data[0] ~= LIT_NUMBER or ta.data[2] == tb.data[2]) then return true end
-            return false, "'" .. types_mod.display(ctx, a) .. "' is not '" .. types_mod.display(ctx, b) .. "'"
+            return false, "`" .. types_mod.display(ctx, a) .. "` is not `" .. types_mod.display(ctx, b) .. "`"
         end
         local kind = ta.data[0]
         if (kind == LIT_STRING  and tb.tag == TAG_STRING)  then return true end
@@ -353,7 +353,7 @@ function M.unify(ctx, a, b, seen)
             local mid = find(ctx, ctx.lists:get(i))
             local ok, err = M.unify(ctx, mid, b, seen)
             if not ok then
-                return false, types_mod.display(ctx, mid) .. " in union is not assignable to " .. types_mod.display(ctx, b)
+                return false, "`" .. types_mod.display(ctx, mid) .. "` in union is not assignable to `" .. types_mod.display(ctx, b) .. "`"
             end
         end
         return true
@@ -388,7 +388,7 @@ function M.unify(ctx, a, b, seen)
                     end
                 end
             end
-            return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'",
+            return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`",
                 best_detail
         end
         if tb.tag == TAG_INTERSECTION then
@@ -420,7 +420,7 @@ function M.unify(ctx, a, b, seen)
             end
             if all_covered then return true end
         end
-        return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'"
+        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`"
     end
 
     -- Union on RHS: LHS must be assignable to at least one member.
@@ -442,7 +442,7 @@ function M.unify(ctx, a, b, seen)
                 end
             end
         end
-        return false, "'" .. types_mod.display(ctx, a) .. "' is not assignable to '" .. types_mod.display(ctx, b) .. "'",
+        return false, "`" .. types_mod.display(ctx, a) .. "` is not assignable to `" .. types_mod.display(ctx, b) .. "`",
             best_detail
     end
 
@@ -727,7 +727,7 @@ function M.unify(ctx, a, b, seen)
     if ta.tag == TAG_CDATA or tb.tag == TAG_CDATA then return true end
 
     return false,
-        "cannot assign '" .. types_mod.display(ctx, a) .. "' to '" .. types_mod.display(ctx, b) .. "'",
+        "cannot assign `" .. types_mod.display(ctx, a) .. "` to `" .. types_mod.display(ctx, b) .. "`",
         { kind = "mismatch", path = {}, got = a, expected = b }
 end
 
