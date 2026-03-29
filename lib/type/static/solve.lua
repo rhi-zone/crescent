@@ -157,7 +157,7 @@ end
 -- Resolve TAG_FFIC to ctx.T_FFI_C.
 -- If tid is TAG_FFIC, returns ctx.T_FFI_C (or T_ANY as fallback).
 -- Otherwise returns tid unchanged.
---: (Ctx, integer) -> any
+--: (Ctx, integer) -> integer
 local function resolve_ffic(ctx, tid)
     if ctx.types:get(tid).tag == TAG_FFIC then
         -- ctx.T_FFI_C is integer? — use T_ANY when unset (no ffi initialized).
@@ -328,6 +328,8 @@ end
 -- Constraint handlers
 -- ---------------------------------------------------------------------------
 
+-- any: constraint arrays are heterogeneous (integer kind tag, then mixed integer/string
+-- fields per constraint type) — no tuple/heterogeneous-array type available.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_unify(ctx, c)
     local t1 = find(ctx, c[2])
@@ -342,6 +344,7 @@ local function solve_unify(ctx, c)
     return ok
 end
 
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_sub(ctx, c)
     local actual   = find(ctx, c[2])
@@ -431,6 +434,7 @@ end
 -- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
 -- Defers while left_tid is still a free TAG_VAR (not yet resolved).
 -- Once concrete: result = subtract(left, nil) | right.
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_or(ctx, c)
     local left_tid   = c[2]
@@ -457,6 +461,7 @@ end
 --     If the result is TAG_NEVER, the constraint is violated.
 --   - For other bounds: check try_unify(widen(actual), bound).
 -- Skips enforcement when the bound is TAG_NAMED (unapplied kind constraint).
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_bound(ctx, c)
     local tv_id    = c[2]
@@ -574,6 +579,7 @@ end
 
 -- Solve a slot/field index: C_INDEX = { C_INDEX, obj_tid, key_tid, res_tid, line, col }
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for named field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot.
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_index(ctx, c)
     local obj_tid_raw = find(ctx, c[2])
@@ -924,6 +930,7 @@ local function solve_index(ctx, c)
     return true
 end
 
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_callable(ctx, c)
     local callee_raw = c[2]   -- raw stored id (may be TAG_VAR for method calls)
@@ -1197,6 +1204,8 @@ local function solve_callable(ctx, c)
     return false
 end
 
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+-- c[2] is a string (op_name like "__add"), remaining fields are integers.
 --: (Ctx, { [integer]: any, ... }) -> boolean?
 local function solve_arith(ctx, c)
     local op_name  = c[2]
@@ -1248,6 +1257,7 @@ local function solve_arith(ctx, c)
     return true
 end
 
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_compare(ctx, c)
     local lhs_tid = find(ctx, c[2])
@@ -1291,6 +1301,7 @@ local function solve_compare(ctx, c)
     return true
 end
 
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
 --: (Ctx, { [integer]: any, ... }) -> boolean
 local function solve_return(ctx, c)
     local val_tid   = find(ctx, c[2])
@@ -1349,6 +1360,7 @@ end
 -- Solver
 -- ---------------------------------------------------------------------------
 
+-- any: constraints is a list of heterogeneous arrays — see solve_unify comment.
 --: (Ctx, { [integer]: { [integer]: any, ... }, ... }) -> ()
 function M.solve(ctx, constraints)
     -- Dispatch table by constraint kind

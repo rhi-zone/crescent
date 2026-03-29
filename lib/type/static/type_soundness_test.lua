@@ -2607,7 +2607,7 @@ local r = ffi.C.free_buf(0)
 local ffi = require("ffi")
 ffi.cdef("int add(int a, int b);")
 local r = ffi.C.add("hello", 2)
-]])
+]], "cannot pass")
     end)
 
     assert.it("enum constant accessible via ffi.C — typed as integer", function()

@@ -143,11 +143,11 @@ DefsModule = {
 -- ignore the return value so -> () is the correct external signature.
 ---------------------------------------------------------------------------
 
---:: declare report = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
---:: declare warn = (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
---:: declare warn_raw = (Ctx, integer?, integer?, string) -> ()
+--:: declare report = (ctx: Ctx, line: integer?, col: integer?, code: integer, args: { [string]: unknown, ... }) -> ()
+--:: declare warn = (ctx: Ctx, line: integer?, col: integer?, code: integer, args: { [string]: unknown, ... }) -> ()
+--:: declare warn_raw = (ctx: Ctx, line: integer?, col: integer?, msg: string) -> ()
 -- snapshot_table: (ctx, TAG_TABLE type_id) -> (field_ids, indexer_pairs, row_var_id, meta_field_ids)
---:: declare snapshot_table = (Ctx, integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
+--:: declare snapshot_table = (ctx: Ctx, type_id: integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
 
 ---------------------------------------------------------------------------
 -- Ctx: the central checker state object.

@@ -283,7 +283,9 @@ function M.check_file(filename, parent_scope, explicit_pool)
     local export_tid = ctx and extract_export_tid(ctx) or nil
 
     -- Serialize to .cri and store in disk cache.
-    local cri_bytes_stored = nil
+    -- any: pcall second return is unknown; typechecker cannot track pcall result types.
+    -- cri_write.serialize returns string on success; we know this from the API contract.
+    local cri_bytes_stored = nil --: any
     if ctx and export_tid and export_tid ~= ctx.T_ANY then
         local exp_map = { ["__ret"] = export_tid }
         local alias_list = ctx and extract_type_aliases(ctx) or {}

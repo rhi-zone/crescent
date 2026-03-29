@@ -286,9 +286,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
     if info.kind == "negation" then
         local inner = info.inner or info  -- non-nil: negation always has inner
         return apply_narrowing(ctx, inner, ty_id, not in_truthy)
-    end
-
-    if info.kind == "nil_check" then
+    elseif info.kind == "nil_check" then
         -- positive=true: info says "x ~= nil" (not nil is truthy direction)
         -- in truthy branch with ~=nil: remove nil (and literal false for boolean truthiness)
         -- in falsy branch with ~=nil: keep only nil
@@ -321,9 +319,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             if tt.tag == TAG_LITERAL and tt.data[0] == LIT_NIL then return t end
             return ctx.T_NEVER
         end
-    end
-
-    if info.kind == "field_disc" then
+    elseif info.kind == "field_disc" then
         if in_truthy == info.positive then
             -- keep members where field matches
             return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, true, info.lit_kind)
@@ -331,9 +327,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             -- remove members where field matches
             return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, false, info.lit_kind)
         end
-    end
-
-    if info.kind == "lit_eq" then
+    elseif info.kind == "lit_eq" then
         local lit_tid = types_mod.make_literal(ctx, info.lit_kind, info.lit_id)
         local unify_mod = require("lib.type.static.unify")
         if in_truthy == info.positive then
@@ -360,9 +354,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             -- Falsy branch: subtract the literal from the type.
             return types_mod.subtract(ctx, ty_id, lit_tid)
         end
-    end
-
-    if info.kind == "enum_eq" then
+    elseif info.kind == "enum_eq" then
         local unify_mod = require("lib.type.static.unify")
         if in_truthy == info.positive then
             -- Truthy: narrow to this specific enum member.
@@ -388,9 +380,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             local mem_tid = info.member_tid or ctx.T_NEVER
             return types_mod.subtract(ctx, ty_id, mem_tid)
         end
-    end
-
-    if info.kind == "field_presence" then
+    elseif info.kind == "field_presence" then
         -- positive=true: field is truthy (non-nil) when in_truthy matches.
         local field_is_nonnull = (info.positive == in_truthy)
         if field_is_nonnull then
@@ -399,9 +389,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         end
         -- Conservative: don't narrow to nil in the falsy direction.
         return ty_id
-    end
-
-    if info.kind == "type_check" then
+    elseif info.kind == "type_check" then
         -- Build the target type
         local target_id = types_mod.typeof_to_id(ctx, info.type_str)
         local tt = ctx.types:get(t)
@@ -423,9 +411,10 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             -- Remove members matching the type
             return types_mod.subtract(ctx, t, target_id)
         end
+    else
+        -- Unknown kind: no narrowing possible — return the type unchanged.
+        return ty_id
     end
-
-    return ty_id
 end
 
 -- Extract the name_id targeted by a narrowing info struct.
@@ -448,6 +437,9 @@ local function info_name_id(info)
             return inner.name_id
         elseif inner.kind == "field_presence" then
             return inner.obj_name_id
+        else
+            -- Nested negation or unknown kind: no target name available.
+            return nil
         end
     end
     return nil
@@ -533,8 +525,10 @@ local function record_narrowing(ctx, info, narrowed, is_truthy)
         if inf.kind == "negation" then
             local inner = inf.inner or inf  -- non-nil: negation always has inner
             return effective_truthy(inner, not it)
+        else
+            -- All non-negation kinds: direction is unchanged.
+            return it
         end
-        return it
     end
     propagate_multi_ret_narrowing(ctx, name_id, narrowed[name_id],
         effective_truthy(info, is_truthy), narrowed)
