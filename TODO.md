@@ -62,7 +62,9 @@ Items that currently lack an implementer-ready spec:
 - [x] **GAP-HKT3 fix: `$Opaque` keys in lib/fp/** — applied to all 10 typeclass modules + 9 instance modules. `fa[Mappable.key]` now resolves via FLAG_OPAQUE_KEY. (2026-03-29, 839610f)
 - [x] **`$Require<T>` as parameterized intrinsic** — implemented (9d92308). `expand_require` in intrinsic.lua; `resolve_deferred_intrinsic` in solve.lua evaluates TAG_TYPE_CALL on TAG_INTRINSIC callees after arg solving. Module declaration processing moved to pass 0. constrain.lua special case preserved pending full de-specialcase.
 - [ ] **De-specialcase builtins** — `require` de-specialcased (f468b72). Remaining: `pcall`/`xpcall` (needs TAG_SPREAD variadic capture + union return), `pairs`/`ipairs` (needs typed iterator return), `type()`, `assert`, `error`, `select`, `string.match`/`gmatch`/`gsub`. `string.find`/`io.open`/`string.byte` have `-> ...()` annotations — verify their constrain.lua paths are also gone.
-- [ ] **Invariant-based fuzz suite** — needs a concrete test file skeleton: which invariants become which `fuzz.it` cases, how programs are generated (arb.lua generators for Lua AST fragments), how the typechecker is invoked in-process.
+- [x] **Invariant-based fuzz suite** — spec written: `docs/fuzz-suite-spec.md`. Ready to delegate.
+- [x] **`pcall`/`xpcall` de-specialcase** — spec written: `docs/pcall-despecialcase-spec.md`. `$PcallReturn<F>` intrinsic. Ready to delegate.
+- [x] **`pairs`/`ipairs` de-specialcase** — spec written: `docs/pairs-despecialcase-spec.md`. `$PairsReturn<T>`/`$IpairsReturn<T>` intrinsics. Ready to delegate.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
