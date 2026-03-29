@@ -4,74 +4,70 @@
 
 `$Opaque<T>` and `$Opaque<T, U>` are now implemented. Callers holding an opaque handle can access fields declared in `U` (two-arg form) but cannot access the full inner type `T`. `--:: unseal` is the explicit opt-in to recover `T`.
 
-## Design (from docs/access-control.md)
+## Design
 
-`--:: unseal Foo` in a scope means: within this scope, `Foo` has type `T` instead of `$Opaque<T, ...>`. This is the crescent equivalent of Rust's `unsafe {}` — it screams "something deliberate is happening here" and is impossible to do accidentally.
-
-## V1 Implementation: `$unseal(x)` intrinsic function
-
-Rather than a scope-mutation declaration, v1 uses an intrinsic expression:
-
-```lua
-local inner = $unseal(handle)
---: InternalType
-```
-
-Or with inline annotation:
-```lua
-local inner = --[[: InternalType]] $unseal(handle)
-```
-
-`$unseal(x)` is an intrinsic that takes an opaque handle and returns its inner type `T`. The typechecker evaluates `$unseal(x)` by:
-1. Resolving `x`'s type to `TAG_NOMINAL`
-2. Checking `ctx._opaque_nominals[nominal_id]` — must be an opaque nominal (error if not)
-3. Returning the inner type stored in the nominal node
-
-This is safe because: the caller explicitly writes `$unseal`, making intentional access visible in code review. No accidental unsealing.
-
-## Annotation-level unseal: `--:: unseal Name`
-
-For use in type annotations (not expression code), allow:
-```lua
---:: unseal HttpServer
-```
-
-Effect: within the `--::` annotation scope following this declaration, `HttpServer` refers to the inner structural type, not the opaque wrapper. Used when writing type aliases that need to inspect opaque internals.
-
-This is lower priority than the expression-level `$unseal()`. Implement expression-level first.
-
-## Implementation
-
-### intrinsic.lua — `$unseal` as a type-level intrinsic
-
-`$unseal` is unusual — it's used as an expression intrinsic, not a type-level one. It needs special handling in constrain.lua/solve.lua.
-
-In constrain.lua, when `ExprRule[NODE_CALL_EXPR]` encounters a callee named `$unseal`:
-1. Get the argument type `arg_tid`
-2. Find it: `obj_t = ctx.types:get(find(ctx, arg_tid))`
-3. If `obj_t.tag != TAG_NOMINAL` or `ctx._opaque_nominals[nominal_id]` is nil: error "argument to $unseal must be an opaque type"
-4. Return the inner type stored in the nominal: `obj_t.data[inner_type_slot]`
-
-The return type is known at constraint-gen time (no deferred solving needed) because opaque types store their inner type at creation.
-
-### Result: inner type is usable directly
+`--:: unseal Foo` is a `--::` declaration (same syntax family as `--:: x: T`, `--:: module "m": T`, etc.) that rebinds the variable `Foo` to its inner type in the scope following the declaration. The typechecker resolves `Foo`'s opaque nominal, extracts the inner `T`, and shadows the binding.
 
 ```lua
 local server --: $Opaque<InternalServer, { start: () -> () }>
-local internal = $unseal(server)  -- type: InternalServer
-internal.hidden_field  -- OK
+
+server.start()       -- OK (exposed in U)
+server.hidden_field  -- ERROR: not exposed by opaque type
+
+--:: unseal server
+server.hidden_field  -- OK: server now has type InternalServer
 ```
+
+This is the crescent equivalent of Rust's `unsafe {}` — explicitly visible in code review, impossible to do accidentally.
+
+## Why Not an Expression Intrinsic
+
+`$` prefix is for type-level intrinsics in annotation position (`$Keys<T>`, `$EachField<T,F>`, etc.). Using `$unseal(x)` in expression position would mix the two namespaces. The `--::` form is correct: it's a type-level annotation that affects the scope, not a runtime operation.
+
+## Grammar
+
+```
+--:: unseal <identifier>
+```
+
+Parsed by `constrain.lua`'s `--::` annotation handler. The identifier must resolve to a variable in the current scope whose type is a `TAG_NOMINAL` with `ctx._opaque_nominals[nominal_id]` set.
+
+## Implementation
+
+### ann.lua — parse `unseal` keyword
+
+In the `--::` annotation parser, add a branch for the keyword `unseal`:
+```
+if word == "unseal" then
+    local name = scan_word(s)
+    emit ANN_UNSEAL { name = name }
+end
+```
+
+### constrain.lua — handle ANN_UNSEAL
+
+In the annotation handler for `--::` declarations, handle `ANN_UNSEAL`:
+1. Look up `name` in current scope → `var_tid`
+2. Find the type: `obj_t = ctx.types:get(find(ctx, var_tid))`
+3. Validate: `obj_t.tag == TAG_NOMINAL` and `ctx._opaque_nominals[nominal_id]` — error if not
+4. Extract inner type from nominal (the `T` stored at creation in `expand_opaque`)
+5. Rebind `name` in the current scope to the inner type: `env.set(ctx.scope, name_id, inner_tid)`
+
+### Scoping
+
+`--:: unseal` affects the scope from the declaration point forward (like a variable reassignment). If inside a block, the unseal does not propagate outside. This is consistent with how `--::` type annotations on locals work.
 
 ## Tests
 
-1. `$unseal` on a one-arg opaque returns the inner type; field access works
-2. `$unseal` on a two-arg opaque returns the inner type (same as one-arg)
-3. `$unseal` on a non-opaque type (plain table) is an error
-4. `$unseal` on a newtype nominal is an error (newtype ≠ opaque)
-5. The inner type returned by `$unseal` is the full structural type, not the exposed view
+1. After `--:: unseal server`, field access on hidden fields works
+2. Before `--:: unseal server`, hidden field access errors
+3. `--:: unseal x` on a non-opaque variable is an error
+4. `--:: unseal x` on a `newtype` nominal is an error (newtype ≠ opaque)
+5. Unseal inside a block does not affect outer scope (if block scoping is enforced)
+6. Two-arg opaque: unseal reveals full `T`, not just the exposed `U`
 
 ## Files to Touch
 
-- `lib/type/static/constrain.lua` — ExprRule for `$unseal` call
+- `lib/type/static/ann.lua` — parse `--:: unseal Name`
+- `lib/type/static/constrain.lua` — handle ANN_UNSEAL, scope rebinding
 - `lib/type/static/type_test.lua` — tests
-- `lib/type/static/intrinsic.lua` — register `$unseal` name (even if implementation is in constrain.lua)
