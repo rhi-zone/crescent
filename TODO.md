@@ -65,6 +65,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **Invariant-based fuzz suite** — implemented (e3d5f96): `lib/type/static/fuzz_test.lua` + `fuzz_arb.lua`. 6 invariants + performance gate (≥500 programs/sec).
 - [x] **`pcall`/`xpcall` de-specialcase** — implemented (d7950de): `$PcallReturn<F>` intrinsic.
 - [x] **`pairs`/`ipairs` de-specialcase** — implemented (d7950de): `$PairsReturn<T>`/`$IpairsReturn<T>` intrinsics.
+- [ ] **Self-check regression: constrain.lua 60 errors** — `luajit lib/type/static/cli.lua lib/type/static/constrain.lua` should produce 0 errors (CLAUDE.md requirement) but now shows 60 `unknown` indexing/argument errors. Likely pre-existing annotation gaps that became visible as the type system tightened. Add `--:` annotations to untyped variables in constrain.lua to restore 0-error self-check.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
 
