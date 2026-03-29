@@ -46,7 +46,7 @@ local find = types_mod.find
 -- Occurs check: does the var at `var_tid` (after find) appear in type `tid`?
 -- var_tid must be the root of a TAG_VAR or TAG_ROWVAR.
 -- seen: set of already-visited type IDs to break cycles (recursive/self-referential types).
---: (Ctx, integer, integer, { [integer]: boolean, ... }?) -> boolean
+--: (ctx: Ctx, var_tid: integer, tid: integer, seen: { [integer]: boolean, ... }?) -> boolean
 local function occurs(ctx, var_tid, tid, seen)
     tid = find(ctx, tid)
     if tid == var_tid then return true end
@@ -102,7 +102,7 @@ local function occurs(ctx, var_tid, tid, seen)
 end
 
 -- Adjust levels: lower the level of free vars in `tid` to max_level.
---: (Ctx, integer, integer, { [integer]: boolean, ... }?) -> ()
+--: (ctx: Ctx, tid: integer, max_level: integer, seen: { [integer]: boolean, ... }?) -> ()
 local function adjust_levels(ctx, tid, max_level, seen)
     tid = find(ctx, tid)
     if seen and seen[tid] then return end
@@ -156,7 +156,7 @@ end
 
 -- Bind a type variable to a type.
 -- Returns true, or false + error message.
---: (Ctx, integer, integer) -> (boolean, string?)
+--: (ctx: Ctx, var_tid: integer, target_tid: integer) -> (boolean, string?)
 local function bind_var(ctx, var_tid, target_tid)
     -- var_tid is already find()'d to root
     if occurs(ctx, var_tid, target_tid) then
@@ -165,6 +165,7 @@ local function bind_var(ctx, var_tid, target_tid)
         local target_root = find(ctx, target_tid)
         local tt = ctx.types:get(target_root)
         if tt.tag == TAG_UNION then
+            --: { [integer]: integer, ... }
             local filtered = {}
             for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
                 local mid = find(ctx, ctx.lists:get(i))
@@ -173,6 +174,7 @@ local function bind_var(ctx, var_tid, target_tid)
                 end
             end
             if #filtered < tt.data[1] then
+                --: integer
                 local new_ty
                 if #filtered == 0 then
                     new_ty = ctx.T_NEVER
@@ -203,7 +205,7 @@ local function is_primitive_tag(tag)
 end
 
 -- Helper: get intern_id for meta slot name
---: (Ctx, string) -> integer
+--: (ctx: Ctx, name: string) -> integer
 local function meta_intern_id(ctx, name)
     return intern_mod.intern(ctx.pool, name)
 end
@@ -217,7 +219,7 @@ local function copy_seen(s)
     local c = {}
     for k, v in pairs(s) do
         local iv = {}
-        for k2 in pairs(v) do iv[k2] = true end
+        if v then for k2 in pairs(v) do iv[k2] = true end end
         c[k] = iv
     end
     return c
@@ -226,7 +228,7 @@ end
 -- unify(ctx, a, b): check if a is assignable to b, binding vars as needed.
 -- Returns true, or false + error_message [+ detail_table]
 -- seen: coinductive cycle guard — pair already being unified returns true immediately.
---: (Ctx, integer, integer, { [integer]: { [integer]: boolean }? }?) -> (boolean, string?, UnifyDetail?)
+--: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean }? }?) -> (boolean, string?, UnifyDetail?)
 function M.unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)
@@ -534,6 +536,59 @@ function M.unify(ctx, a, b, seen)
             local bfid = ctx.lists:get(i)
             local bfe = ctx.fields:get(bfid)
             local bft = find(ctx, bfe.type_id)
+            -- Handle spread fields { ...T, ... }: expand the inner table's
+            -- fields and check each one against a, as if they were direct fields.
+            if bfe.name_id == -1 then
+                local spread_t = ctx.types:get(bft)
+                if spread_t.tag == TAG_SPREAD then
+                    local inner_tid = find(ctx, spread_t.data[0])
+                    local inner_t = ctx.types:get(inner_tid)
+                    if inner_t.tag == TAG_TABLE then
+                        for j = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                            local jfid = ctx.lists:get(j)
+                            local jfe  = ctx.fields:get(jfid)
+                            if jfe.name_id == -1 then goto spread_next end
+                            local jft  = find(ctx, jfe.type_id)
+                            local afe2 = types_mod.table_field(ctx, a, jfe.name_id)
+                            if not afe2 then
+                                if band(jfe.flags, FLAG_OPTIONAL) == 0 then
+                                    local ais, ail = ta.data[2], ta.data[3]
+                                    local found = false
+                                    local k = ais
+                                    while k < ais + ail - 1 do
+                                        local kt = find(ctx, ctx.lists:get(k))
+                                        if ctx.types:get(kt).tag == TAG_STRING then
+                                            local vt = find(ctx, ctx.lists:get(k + 1))
+                                            if M.unify(ctx, vt, jft, seen) then
+                                                found = true; break
+                                            end
+                                        end
+                                        k = k + 2
+                                    end
+                                    if not found and ta.data[4] >= 0 then found = true end
+                                    if not found then
+                                        local fname = intern_mod.get(ctx.pool, jfe.name_id) or "?"
+                                        return false,
+                                            "missing field `" .. fname .. "` (from spread)",
+                                            { kind = "missing_field", field = fname }
+                                    end
+                                end
+                            else
+                                local aft = find(ctx, afe2.type_id)
+                                local ok2, err2 = M.unify(ctx, aft, jft, seen)
+                                if not ok2 then
+                                    local fname = intern_mod.get(ctx.pool, jfe.name_id) or "?"
+                                    return false,
+                                        "field `" .. fname .. "` (from spread): " .. (err2 or "type mismatch")
+                                end
+                            end
+                            ::spread_next::
+                        end
+                    end
+                    -- inner type not a concrete table: conservatively pass
+                end
+                goto continue
+            end
             local afe, afid = types_mod.table_field(ctx, a, bfe.name_id)
             if not afe then
                 if band(bfe.flags, FLAG_OPTIONAL) == 0 then
@@ -575,6 +630,7 @@ function M.unify(ctx, a, b, seen)
                     return false, "field '" .. fname .. "': " .. (err or "type mismatch"), d
                 end
             end
+            ::continue::
         end
 
         -- Unify indexers
@@ -734,7 +790,7 @@ end
 -- Read-only unification: checks assignability without mutating type variables.
 -- Returns ok (boolean). Does not bind type variables.
 -- seen: coinductive cycle guard (same semantics as M.unify).
---: (Ctx, integer, integer, { [integer]: { [integer]: boolean }? }?) -> boolean
+--: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean }? }?) -> boolean
 function M.try_unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)

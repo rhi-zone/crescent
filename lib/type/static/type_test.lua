@@ -7330,6 +7330,136 @@ local len = e - s
 end)
 
 -- ---------------------------------------------------------------------------
+-- Record spread unification { ...T, field: V }
+-- ---------------------------------------------------------------------------
+
+assert.describe("record spread unification: { ...T, field: V }", function()
+    assert.it("source satisfies spread annotation: all spread fields present", function()
+        no_errors([[
+--:: Base = { x: integer, y: integer }
+local src --: { x: integer, y: integer, z: integer }
+--: { ...Base, z: integer }
+local dst = src
+]])
+    end)
+
+    assert.it("source missing spread field: error", function()
+        has_error([[
+--:: Base = { x: integer, y: integer }
+local src --: { x: integer, z: integer }
+--: { ...Base, z: integer }
+local dst = src
+]])
+    end)
+
+    assert.it("spread field type mismatch: error", function()
+        has_error([[
+--:: Base = { x: integer, y: integer }
+local src --: { x: string, y: integer, z: integer }
+--: { ...Base, z: integer }
+local dst = src
+]])
+    end)
+
+    assert.it("spread-only annotation: source with exact fields", function()
+        no_errors([[
+--:: Base = { x: integer, name: string }
+local src --: { x: integer, name: string }
+--: { ...Base }
+local dst = src
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- stdlib declarations: string, table, math, io, os
+-- ---------------------------------------------------------------------------
+
+assert.describe("stdlib: string table declared", function()
+    assert.it("string.upper returns string", function()
+        no_errors([[
+--: string
+local x = string.upper("hello")
+]])
+    end)
+
+    assert.it("string.len returns integer", function()
+        no_errors([[
+--: integer
+local n = string.len("hello")
+]])
+    end)
+
+    assert.it("string.format returns string", function()
+        no_errors([[
+--: string
+local s = string.format("%d", 42)
+]])
+    end)
+
+    assert.it("string.sub returns string", function()
+        no_errors([[
+--: string
+local s = string.sub("hello", 2, 4)
+]])
+    end)
+end)
+
+assert.describe("stdlib: math table declared", function()
+    assert.it("math.floor returns integer", function()
+        no_errors([[
+--: integer
+local n = math.floor(3.14)
+]])
+    end)
+
+    assert.it("math.ceil returns integer", function()
+        no_errors([[
+--: integer
+local n = math.ceil(3.14)
+]])
+    end)
+
+    assert.it("math.abs returns number", function()
+        no_errors([[
+--: number
+local n = math.abs(-5)
+]])
+    end)
+
+    assert.it("math.floor assigned to integer: ok", function()
+        no_errors([[
+local n --: integer = math.floor(3.7)
+]])
+    end)
+end)
+
+assert.describe("stdlib: table table declared", function()
+    assert.it("table.concat returns string", function()
+        no_errors([[
+--: string
+local s = table.concat({"a", "b"}, ",")
+]])
+    end)
+end)
+
+assert.describe("stdlib: os table declared", function()
+    assert.it("os.time returns integer", function()
+        no_errors([[
+--: integer
+local t = os.time()
+]])
+    end)
+
+    assert.it("os.getenv returns string?", function()
+        no_errors([[
+--: string?
+local v = os.getenv("HOME")
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Argument literal widening
 -- Literals passed to generic functions widen to their base type before binding
 -- the typevar, so id(0); id(1) both pass with T = integer, not T = LIT_INTEGER(0).
