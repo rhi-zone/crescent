@@ -453,13 +453,13 @@ end
 end)
 
 -- ── P4: $Throw inside match — only fires for selected arms ────────────────────
+-- Note: $Throw<"literal"> fires eagerly at alias declaration time, not per-arm.
+-- To defer $Throw to arm selection, use a type arg: $Throw<T, " suffix">.
+-- This matches the pattern in type_test.lua "match alias using $Throw".
 
 T.it("P4a: CheckedId<integer> — integer arm, no throw — 0 errors", function()
 	local src = [[
---:: CheckedId<T> = match T {
---::   integer => integer,
---::   _ => $Throw<"expected integer">
---:: }
+--:: CheckedId<T> = match T { integer => integer, _ => $Throw<T, " is not integer"> }
 local x --: CheckedId<integer>
 local _ok --: integer = x
 ]]
@@ -469,10 +469,7 @@ end)
 
 T.it("P4b: CheckedId<string> — _ arm, throw fires — 1 error", function()
 	local src = [[
---:: CheckedId<T> = match T {
---::   integer => integer,
---::   _ => $Throw<"expected integer">
---:: }
+--:: CheckedId<T> = match T { integer => integer, _ => $Throw<T, " is not integer"> }
 local x --: CheckedId<string>
 ]]
 	local ec = check.check_string(src, "fuzz_test_P4b")
@@ -501,11 +498,15 @@ local _a --: { value: integer, label: boolean } = x
 	T.eq(#ec.errors, 0, "P5b: expected 0 errors, got " .. #ec.errors)
 end)
 
-T.it("P5c: Wrap<integer> with wrong label type — 1 error", function()
+-- Note: `local x --: T` only narrows the variable; it does not enforce structural
+-- field-level compatibility on assignment. Use a function return annotation to
+-- assert that Wrap<integer> (label: string) is NOT assignable to label: integer.
+T.it("P5c: Wrap<integer> label is string not integer — 1 error via return check", function()
 	local src = [[
 --:: Wrap<T, U = string> = { value: T, label: U }
 local x --: Wrap<integer>
-local _wrong --: { value: integer, label: integer } = x
+--: () -> { value: integer, label: integer }
+local function f() return x end
 ]]
 	local ec = check.check_string(src, "fuzz_test_P5c")
 	T.eq(#ec.errors, 1, "P5c: expected 1 error, got " .. #ec.errors)

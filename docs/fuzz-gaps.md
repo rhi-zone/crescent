@@ -127,9 +127,9 @@ check fails independently of the oracle. Both errors fire correctly — exactly 
 
 These extend fuzz_test.lua program patterns.
 
-### P1: Pick/Omit correctness
-Program: `Pick<{ x: integer, y: string }, "x">` contains only `x` field.
-Assert: accessing `.x` on result: no error. Accessing `.y`: error (field not found).
+### P1: Pick/Omit correctness — DONE (fuzz_test.lua P1a/P1b)
+- [x] `Pick<{name,age}, "name">.name` accessible — 0 errors (P1a)
+- [x] `Pick<{name,age}, "name">.age` not accessible — 1 error (P1b)
 
 ### P2: param capture programs
 Program using `Parameters<F>` — result type used in an annotation.
@@ -144,18 +144,18 @@ May require `typeof` operator — not yet implemented. Defer until then.
 - [x] P3a: `setmetatable({}, { __index = fn })` typechecks — 0 errors (fuzz_test.lua)
 - [x] P3b: `setmetatable(v, mt)` with typed Vec/VecMeta typechecks — 0 errors (fuzz_test.lua)
 
-### P4: $Throw inside match — only fires for selected arms
-```lua
---:: CheckedId<T> = match T {
---::   integer => integer,
---::   _ => $Throw<"expected integer">
---:: }
-```
-`CheckedId<integer>` → no diagnostic. `CheckedId<string>` → diagnostic.
-Assert: error count is 0 for integer, 1 for string.
+### P4: $Throw inside match — only fires for selected arms — DONE (fuzz_test.lua P4a/P4b)
+- [x] `CheckedId<integer>` — integer arm taken, no throw — 0 errors (P4a)
+- [x] `CheckedId<string>` — wildcard arm taken, throw fires — 1 error (P4b)
+Note: `$Throw<"literal">` fires eagerly at alias declaration time. Defer by using a type arg:
+`$Throw<T, " suffix">` — only fires when the arm is selected and T is concrete.
 
-### P5: generic defaults in programs
-A function with defaulted type params called with/without explicit type arg.
+### P5: generic defaults in programs — DONE (fuzz_test.lua P5a/P5b/P5c)
+- [x] `Wrap<integer>` defaults `U` to `string` — 0 errors (P5a)
+- [x] `Wrap<integer, boolean>` overrides default — 0 errors (P5b)
+- [x] `Wrap<integer>` label is `string` not `integer` — 1 error via function return check (P5c)
+Note: `local x --: T` only narrows the variable; use function return annotation to assert
+structural field-level mismatch (see CLAUDE.md "Annotation enforcement gotcha").
 
 ---
 
