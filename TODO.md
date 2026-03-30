@@ -85,6 +85,10 @@ Items that currently lack an implementer-ready spec:
 - [x] **Literal table not assignable to indexer type** — fixed 0b40861
 - [x] **Missing return detection** — fixed; `is_definitely_returning` analysis in constrain.lua emits implicit nil C_RETURN for non-definitely-returning annotated functions.
 
+## typechecker match semantics gaps
+
+- [ ] **Intersection types are opaque in match arms** — `match (A & B) { A => X }` gives `never`, not `X`. The match evaluator does not decompose intersection types: only `%R` (capture) and `_` (wildcard) fire for intersection inputs. This diverges from TypeScript conditional types where `(A & B) extends A` is true (because `A & B <: A` via intersection elimination). The correct semantics: match should use `try_unify(input_member, arm_pattern)` to decide if an arm fires, the same check it uses for union members. Intersection distribution would mirror union distribution (`match (A | B)` distributes over each member). Currently untested because the fuzz suite (MA7 invariants) only tests capture/wildcard arms for intersection inputs — specific-type arms are not asserted. Design decision required: intentional simplification, or correctness gap to fix?
+
 ## typechecker missing features
 
 - [x] **Record spread types** — `{ ...T, k: V }`, `{ ...T, ...U }`, `{ k: V, ...T }` as type-level operations. Unification added (33640d0): unify.lua checks spread fields by expanding inner TAG_TABLE and verifying each required field exists in the actual. Gap: **spread-union distribution** — when the spread inner type is a TAG_UNION (`{ ...(A | B), k: V }`), env.lua `substitute_inner` keeps a placeholder instead of distributing. Correct fix: distribute over union members in `env.lua:substitute_inner`, then handle in `solve.lua` field lookup and unify.lua. Needed for builder pattern and mapped-type aliases instantiated with union types.
