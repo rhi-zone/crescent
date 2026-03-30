@@ -185,14 +185,11 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   field loop not handling `{`-started positional entries. `...Rest` splice already
   worked. `MakeOptional`, `MakeReadonly`, `DropOptional`, `Partial<T>` all tested.
 
-- [ ] **Interface declaration syntax `--:: Name: Base`** — **[SPECCED]** docs/interface-declaration-spec.md.
-  Syntax: `--:: Name<T>: Constraint<T> = body`. Two effects: (1) definition-time structural
-  check `body <: Constraint<T>`, emits `E.CONSTRAINT_MISMATCH = 26` if fails; (2) populates
-  `ctx.declared_subtypes` oracle — `try_unify(Monad<X>, Functor<X>)` hits oracle in O(1)
-  instead of re-walking fields. Error at declaration, not at call sites. Works with assigned
-  properties (field inference closes the row variable before the check). Implementation order:
-  ann.lua parse → check.lua verify + register → defs.lua E code → errors.lua template →
-  unify.lua oracle lookup.
+- [x] **Interface declaration syntax `--:: Name: Base`** — implemented (551cbdb, 2026-03-30).
+  `--:: Name<T>: Constraint<T> = body`: (1) checks `body <: Constraint<T>` at definition,
+  emits E.CONSTRAINT_MISMATCH = 26 on failure; (2) registers ctx.declared_subtypes oracle
+  so try_unify(Name<X>, Constraint<X>) short-circuits in O(1). ann.lua parses `: Constraint`
+  before `=`; constrain.lua resolves + registers + checks; unify.lua oracle-first for TAG_NAMED pairs.
 
 - [x] **Partial application of generic aliases** — implemented (22f1e8f, 2026-03-30). TAG_PARTIAL_APP = 31.
   Under-arity alias call (1–N-1 args) returns TAG_PARTIAL_APP(name_id, partial_args).
