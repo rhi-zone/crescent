@@ -22,6 +22,8 @@
 --   M.canonical_value(node)          -> a fixed Lua literal string matching the type
 --   M.arb_value_for(node)            -> arb generator for Lua literal strings of that type
 --   M.arb_distinct_base_types        -> arb generator: {A,B} where B is not <: A
+--   M.arb_named_alias                -> arb generator: {alias_name, body, decl}
+--   M.arb_enum_table                 -> arb generator: enum-style Lua table source string
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -51,6 +53,7 @@ local function to_str(node, outer)
 	elseif node.tag == "nil"      then return "nil"
 	elseif node.tag == "never"    then return "never"
 	elseif node.tag == "unknown"  then return "unknown"
+	elseif node.tag == "any"      then return "any"
 	elseif node.tag == "lit_int"  then return tostring(node.value)
 	elseif node.tag == "lit_str"  then return node.value   -- includes surrounding quotes
 	elseif node.tag == "lit_bool" then return node.value and "true" or "false"
@@ -102,6 +105,7 @@ M.T_BOOLEAN = { tag = "base",    name = "boolean" }
 M.T_NIL     = { tag = "nil" }
 M.T_NEVER   = { tag = "never" }
 M.T_UNKNOWN = { tag = "unknown" }
+M.T_ANY     = { tag = "any" }
 M.T_TRUE    = { tag = "lit_bool", value = true  }
 M.T_FALSE   = { tag = "lit_bool", value = false }
 
@@ -237,6 +241,7 @@ arb_type = arb.sized(function(size)
 		{  2, arb_indexer },
 		{  3, arb_func1   },
 		{  1, arb_func2   },
+		{  1, arb.constant(M.T_ANY) },
 	})
 end)
 
@@ -354,6 +359,66 @@ M.arb_triple_distinct_base_types = arb.filter(
 		   and not is_subtype_base(C, B)
 		   and not is_subtype_base(A, B)
 		   and not is_subtype_base(B, A)
+	end
+)
+
+-- ── arb_named_alias ───────────────────────────────────────────────────────────
+-- Generates a named type alias declaration.
+-- Returns a plain table: { alias_name=str, body=str, decl=str }
+--   alias_name  the short alias identifier (e.g. "T1")
+--   body        the type string (e.g. "integer | string")
+--   decl        the full annotation line (e.g. "--:: T1 = integer | string\n")
+-- Intended for use as a preamble in generated programs. The alias can then be
+-- used as a type annotation in the body of the program.
+
+local ALIAS_NAMES = { "T1", "T2", "T3", "T4", "T5" }
+
+M.arb_named_alias = arb.map(
+	arb.tuple({
+		arb.map(arb.int(1, #ALIAS_NAMES), function(i) return ALIAS_NAMES[i] end),
+		arb_type,
+	}),
+	function(p)
+		local alias_name = p[1]
+		local type_node  = p[2]
+		local body       = to_str(type_node, 0)
+		return {
+			alias_name = alias_name,
+			body       = body,
+			decl       = "--:: " .. alias_name .. " = " .. body .. "\n",
+		}
+	end
+)
+
+-- ── arb_enum_table ────────────────────────────────────────────────────────────
+-- Generates an enum-style Lua table expression (source string).
+-- Produces either all-integer or all-string-literal fields with 2-4 members.
+-- Field names are drawn from ENUM_MEMBER_NAMES (distinct per table by index).
+-- Example output: "{ A = 1, B = 2, C = 3 }" or '{ X = "x", Y = "y" }'
+
+local ENUM_MEMBER_NAMES = { "A", "B", "C", "D", "E", "F" }
+
+M.arb_enum_table = arb.map(
+	arb.tuple({
+		arb.bool,           -- kind: true = integer values, false = string values
+		arb.int(2, 4),      -- number of members
+	}),
+	function(p)
+		local int_kind = p[1]
+		local count    = p[2]
+		local entries  = {}
+		for i = 1, count do
+			local name = ENUM_MEMBER_NAMES[i]
+			local val
+			if int_kind then
+				val = tostring(i)
+			else
+				-- use lowercase version of the name as the string value
+				val = '"' .. name:lower() .. '"'
+			end
+			entries[i] = name .. " = " .. val
+		end
+		return "{ " .. table.concat(entries, ", ") .. " }"
 	end
 )
 

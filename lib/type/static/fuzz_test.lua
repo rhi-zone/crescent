@@ -374,6 +374,17 @@ arb.it("overload: calling with non-matching arg rejected",
 		assert(rejects(src), "overload non-match not rejected: " .. src)
 	end, { trials = 300 })
 
+-- ── Invariant 22: Enum table typechecks ──────────────────────────────────────
+-- A table literal whose fields are all integer or all string literals is a
+-- valid Lua expression the typechecker must accept without errors.
+
+arb.it("enum: table with integer or string literal fields typechecks",
+	farb.arb_enum_table,
+	function(tbl_src)
+		local src = "local E = " .. tbl_src
+		assert(typechecks(src), "enum table rejected: " .. src)
+	end, { trials = 200 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()
