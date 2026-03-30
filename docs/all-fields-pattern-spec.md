@@ -168,10 +168,20 @@ This is consistent with what ipairs actually does: it only works on sequence-lik
 
 ### Why not `{ ...[K: integer]: V }`?
 
-`{ ...[K: integer]: V }` as a pattern that constrains the key type is *not wrong* — it
-would mean "match only if all keys are integers." But this makes the pattern fallible,
-which breaks its role as a total catch-all. The downstream-filter approach (`match K { ...
-}`) is more composable: the pattern always matches, and the filtering is explicit.
+Two separate needs are in play:
+
+1. **Filter which entries appear in results** (ipairs semantics: "yield only integer-keyed
+   entries, ignore the rest") — handled by downstream `match K { integer => ..., _ => never }`.
+   The pattern itself stays total; the filtering is explicit in the result expression.
+
+2. **Constrain the input shape** ("this table must have these fields / this structure") —
+   handled by pattern intersection `P & { ...[K]: V }`, where `P` can be any pattern:
+   `{ [integer]: unknown } & { ...[K]: V }` requires an integer indexer;
+   `{ foo: string, bar: number, ... } & { ...[K]: V }` requires specific named fields.
+
+`{ ...[K: integer]: V }` conflates these two: it looks like an input constraint but acts
+like a result filter. Keeping them separate is cleaner — `{ ...[K]: V }` is always total,
+and the caller chooses to filter results or constrain inputs via the mechanisms above.
 
 ## Implementation in `match.lua`
 
@@ -262,3 +272,25 @@ Once `{ ...[K]: V }` is implemented and the above tests pass:
 
 The `{ ...[K]: V }` pattern follows the same "total catch-all" design as `() -> R` in
 function-arm patterns: it always succeeds and is intended as the fallback arm.
+
+## Future: Pattern Intersection (`P & Q`)
+
+Pattern intersection `P & { ...[K]: V }` would allow constraining the *input* while
+binding K/V from all entries. For example:
+
+```lua
+--:: FooBarEntries<T> = match T {
+--::   { foo: string, bar: number, ... } & { ...[K]: V } => (K, V)
+--:: }
+```
+
+This requires a table with `foo` and `bar` fields (P constrains the input), then binds
+K and V from all its entries. The two operations are orthogonal:
+
+- **`{ ...[K]: V }` result filter** (`match K { integer => ... }`): controls what appears
+  in the *output* of the match result expression.
+- **Pattern intersection** (`P & { ...[K]: V }`): controls what *input* types are accepted.
+
+Pattern `&` is not needed for `{ ...[K]: V }` itself — the existing use cases (PairsReturn,
+IpairsReturn, Keys, Values) are all covered without it. It's a separate future feature that
+composes naturally with this pattern when input-shape constraints are needed.
