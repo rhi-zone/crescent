@@ -8,11 +8,15 @@ Part of the [rhi ecosystem](https://rhi.zone).
 
 ## Structure
 
-- **lib/** — standard library modules (http, websocket, dns, sqlite, fs, ...)
-- **type/** — typechecker with FFI cdef parsing
-- **pkg/** — vendor-first package manager
-- **cli/** — command-line tools built on lib/
-- **dep/** — vendored third-party code
+All packages live under `lib/`:
+
+- **lib/** — standard library modules (http, websocket, dns, sqlite, fs, path, ...)
+- **lib/type/static/** — static typechecker with constraint-based inference, LSP daemon, lint rule passes, type search
+- **lib/pkg/** — vendor-first package manager (semver, manifest, lockfile)
+- **lib/test/** — test runner, property testing, fuzz testing
+- **lib/orchestration/** — task graph, executor registry, AI executor
+- **lib/fp/** — functional programming typeclasses and optics
+- **lib/ai/** — LLM provider dispatch (Anthropic, OpenAI, Google)
 
 ## Philosophy
 
@@ -23,6 +27,7 @@ Crescent is that ecosystem. Not a framework — a collection of libraries you ca
 ## Development
 
 ```bash
-nix develop              # Enter dev shell
-luajit cli/test.lua      # Run tests
+nix develop                  # Enter dev shell
+luajit lib/test/cli.lua      # Run tests
+cd docs && bun dev           # Local docs
 ```

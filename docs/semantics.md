@@ -46,6 +46,16 @@ payload. All type IDs are arena indices (integers ≥ 1).
 | 24 | `TAG_ENUM_MEMBER`  | Enum table member. See §1.9. |
 | 25 | `TAG_TYPEOF`       | Deferred identifier type-of lookup. |
 | 26 | `TAG_FFIC`         | FFI C table (resolved from ffi.cdef call sites). |
+| 27 | `TAG_CAPTURE`      | Pattern-position capture variable `%Name`. Matches anything; binds in match result. |
+| 28 | `TAG_PAT_ALL_FIELDS` | `{ ...[%K]: %V }` pattern: distributes over all fields; K binds key type, V binds value type. |
+| 29 | `TAG_PAT_REST_FIELDS` | `{ ...[%Rest] }` pattern: rest-field capture in table pattern position. |
+| 30 | `TAG_PAT_META_SPREAD` | `{ #...%M }` pattern: captures all meta slots of input as a table. |
+| 31 | `TAG_PARTIAL_APP`  | Partially-applied generic alias `Alias<A>` with fewer args than required. |
+
+Tags 27–31 are **annotation-arena-only** (pattern AST nodes produced by the annotation
+parser; TAG_CAPTURE, TAG_PAT_ALL_FIELDS, TAG_PAT_REST_FIELDS, TAG_PAT_META_SPREAD are
+never written to the main type arena). TAG_PARTIAL_APP appears in the type arena as a
+deferred instantiation resolved during solve.
 
 ### 1.2 TAG_LITERAL
 
@@ -760,6 +770,9 @@ contract.
 | `$Keys<T>` | Union of string literal types for all named field names in T. Equivalent to TypeScript `keyof T`. |
 | `$Values<T>` | Union of widened value types for all fields/entries in T. For `{ [K]: V }`: returns V. For named-field table: returns union of `widen(field_type)` for each field. For `TAG_UNION`: union of `$Values<arm>`. Counterpart to `$Keys<T>`. |
 | `$IpairsValues<T>` | Like `$Values<T>` but restricted to numeric/positional entries. For `{ [integer]: V }` or `{ [number]: V }`: returns V. For array-like named fields (keys "1", "2", ...): returns union of their value types. |
+| `$EachField<T, F>` | Maps type alias F over each field descriptor of T. F is called with a descriptor table `{ name, type, optional, readonly }`; F must return a tuple of field descriptor(s). Result is a new table type assembled from all returned descriptors. Implements `Readonly<T>`, `Partial<T>`, `Required<T>`, `Pick<T, K>`, etc. |
+| `$Throw<E>` | Type-level error: signals an unresolvable match arm. Never assignable to/from any type. E is the error message literal. Used inside match arms to enforce exhaustiveness. |
+| `$Catch<T, E>` | Evaluates T; if T resolves to `$Throw<...>`, returns E instead. Type-level pcall pair for `$Throw`. Only meaningful at annotation boundaries (not inside inference). |
 
 `$Values` and `$IpairsValues` together replace the former `$PairsReturn<T>` and
 `$IpairsReturn<T>` compiler intrinsics.  Those are now expressed as user-definable
@@ -780,5 +793,6 @@ match aliases in `stdlib.d.lua`:
 `(true, ...R)` spread-in-tuple-position syntax, 2026-03-30).
 
 Permanent intrinsics (will not be eliminated): `$Require`, `$Opaque`, `$FfiC`,
-`$GlobalScope`. Remaining provisional: `$Keys`, `$Values`, `$IpairsValues`,
+`$GlobalScope`, `$Throw`, `$Catch`. Remaining provisional (may become user-definable
+match aliases once the type system matures): `$Keys`, `$Values`, `$IpairsValues`,
 `$EachField`, `$EachUnion`.

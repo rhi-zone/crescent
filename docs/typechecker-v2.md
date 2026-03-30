@@ -1,5 +1,13 @@
 # Typechecker v2 — Performance-First Redesign
 
+> **Note:** This document describes the v2 architectural design (flat-array AST,
+> arena allocation, integer type tags). The data structures described here are
+> implemented, but the specific tag numbers and the inference algorithm have
+> evolved significantly. For current tag assignments and layouts, see
+> `docs/semantics.md` (the ground-truth formal spec). For the inference algorithm
+> used today, see `docs/typechecker-v3.md` (constraint-based solver that replaced
+> the original online unification described here).
+
 ## Goals
 
 - **Cold-start performance**: competitive with tsgo (Go port of TypeScript compiler)

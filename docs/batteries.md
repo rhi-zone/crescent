@@ -56,7 +56,15 @@ structure; the model is a function over it. The context window is a view, not th
 
 - **Test infrastructure** — runner, property testing, fuzz testing, fixture/snapshot,
   integrated shrinking, parallel execution
-- **Typechecker** — static checker, LSP daemon, SARIF output
+- **Typechecker** — static checker, LSP daemon, SARIF/JSON output; constraint-based
+  inference (v2 flat-array AST + arena allocation, v3 constraint solver); fuzz suite
+  (algebra invariants, eval-tier computation contracts, grammar-tier end-to-end);
+  lint rule passes (unannotated exports, assert-in-lib, naming, bare-bit, dead-locals,
+  predicate return type); type search by signature; generic parameter defaults;
+  interface declarations (`--:: Name: Base`) with oracle; partial application of generic
+  aliases; `$EachField` flatMap; `$Throw`/`$Catch` type-level error pair;
+  spread-in-tuple-position for multi-return; `%Name` capture sigil and `{ ...[%K]: %V }`
+  all-fields pattern; function-type and indexer arm patterns in match types
 - **Network** — HTTP (client + server), WebSockets, DNS, TLS (partial)
 - **Storage** — SQLite
 - **Encoding** — JSON, CBOR, base64, UTF-8, URL encoding, MessagePack
@@ -241,12 +249,10 @@ representation) as stretch goals for the language tooling niche.
 
 ### Missing — typechecker features (load-bearing for the ecosystem)
 
-**Record spread types** — `{ ...T, k: V }` as a type-level operation. Needed for
-the compile-time-safe builder pattern: `builder:with(val: T): Builder<{ ...S, ...T }>`.
-Without this, generic builders can't track accumulated state in the type system.
-`S & { k: V }` is not equivalent — intersection of two closed tables is `never` unless
-identical. Spread is the correct primitive: produces a new closed type with all of S's
-keys plus the override. This is a planned typechecker feature, not yet implemented.
+**Record spread union distribution** — `{ ...(A | B), k: V }` where the spread inner
+type is a union. The basic `{ ...T, k: V }` spread is implemented; what remains is
+distribution over union members in `env.lua:substitute_inner`. Needed for builder
+patterns and mapped-type aliases instantiated with union types.
 
 ### Missing — transpiler (future)
 

@@ -2,7 +2,7 @@
 
 For each tag, every cell is either **✓ impl+tested**, **P partial**, **N/A by design**, or **✗ missing**.
 
-Last updated: 2026-03-15
+Last updated: 2026-03-31
 
 ---
 
@@ -34,6 +34,14 @@ Last updated: 2026-03-15
 | 21 | TAG_SPREAD | variadic type (`...T`) |
 | 22 | TAG_NAMED | unresolved type name |
 | 23 | TAG_CDATA | FFI cdata (opaque) |
+| 24 | TAG_ENUM_MEMBER | Named enum member (EnumName.MemberName literal) |
+| 25 | TAG_TYPEOF | Annotation-only: `typeof <ident>` deferred lookup |
+| 26 | TAG_FFIC | FFI C table resolved from `ffi.cdef` call sites |
+| 27 | TAG_CAPTURE | Pattern-position capture variable `%Name` (annotation arena only) |
+| 28 | TAG_PAT_ALL_FIELDS | `{ ...[%K]: %V }` all-fields pattern (annotation arena only) |
+| 29 | TAG_PAT_REST_FIELDS | `{ ...[%Rest] }` rest-field capture pattern (annotation arena only) |
+| 30 | TAG_PAT_META_SPREAD | `{ #...%M }` meta-slot spread pattern (annotation arena only) |
+| 31 | TAG_PARTIAL_APP | Partially-applied generic alias (deferred instantiation) |
 
 ---
 
@@ -78,6 +86,14 @@ Operations:
 | TAG_SPREAD | N/A | N/A | N/A | P (falls to error) | P (false) | N/A | ✓ | ✓ | ✓ | ✓ | ✓ |
 | TAG_NAMED | ✓ (treat as any) | ✓ (treat as any) | ✓ (treat as any) | ✓ (treat as any) | ✓ (passthrough) | N/A | ✓ | N/A (resolve first) | N/A | N/A | ✓ (resolves) |
 | TAG_CDATA | N/A | N/A | N/A | ✓ (universal) | ✓ (universal) | N/A | ✓ | ✓ | N/A | N/A | ✓ |
+| TAG_ENUM_MEMBER | N/A | N/A | N/A | ✓ (literal-eq) | ✓ | ✓ (lit-eq disc) | ✓ | ✓ | N/A | N/A | ✓ |
+| TAG_TYPEOF | N/A | N/A | N/A | N/A | N/A | N/A | ✓ | N/A | N/A | N/A | ✓ (resolves in ann pass) |
+| TAG_FFIC | ✓ | ✓ | N/A | ✓ (cdef-backed) | ✓ | N/A | ✓ | N/A (internal) | N/A | N/A | ✓ |
+| TAG_CAPTURE | N/A | N/A | N/A | N/A | N/A | N/A | ✓ | N/A (pattern) | N/A | N/A | N/A (ann-only) |
+| TAG_PAT_ALL_FIELDS | N/A | N/A | N/A | N/A | N/A | N/A | ✓ | N/A (pattern) | N/A | N/A | N/A (ann-only) |
+| TAG_PAT_REST_FIELDS | N/A | N/A | N/A | N/A | N/A | N/A | ✓ | N/A (pattern) | N/A | N/A | N/A (ann-only) |
+| TAG_PAT_META_SPREAD | N/A | N/A | N/A | N/A | N/A | N/A | ✓ | N/A (pattern) | N/A | N/A | N/A (ann-only) |
+| TAG_PARTIAL_APP | N/A | N/A | N/A | P (falls to error) | P (false) | N/A | ✓ | N/A (deferred) | N/A | N/A | ✓ (deferred inst) |
 
 **P = partial** means the tag reaches a generic fall-through that returns false/error rather than a correct rule.
 
