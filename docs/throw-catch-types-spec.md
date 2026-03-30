@@ -12,16 +12,16 @@ Each argument in `Msg` is either a string literal (emitted verbatim) or a type (
 to its display form). The checker concatenates them to form the diagnostic text.
 
 ```lua
---:: AssertExtends<T, U> = match T {
---::   U => T,
---::   _ => $Throw<T, " is not assignable to ", U>
---:: }
-
---:: Readonly<T> = match T {
---::   { ...[%K]: %V } => T,  -- (requires all-fields pattern)
---::   _ => $Throw<"Readonly<", T, "> requires a table type">
+--:: MustBeHomogeneous<T> = match T {
+--::   { [%K]: %V } => T,
+--::   _ => $Throw<T, " must be a homogeneous indexer table, not a named-field table">
 --:: }
 ```
+
+Note: `AssertExtends<T, U>` does NOT need `$Throw` — use a generic constraint instead:
+`--:: AssertExtends<T: U, U>`. Generic constraints are checked by the solver and produce
+standard diagnostics. `$Throw` is only for structural checks via `match` where the
+default solver message would be too opaque and a custom message adds real clarity.
 
 `$Throw` is a **permanent intrinsic** — it has a diagnostic side effect (emitting a
 message at the use site) that cannot be expressed as pure type computation. It joins
@@ -127,10 +127,9 @@ The parallel is intentional. Lua programmers already understand this model.
 ## Examples
 
 ```lua
---:: NonNullable<T>  = match T { nil => $Throw<"NonNullable: got nil">, T => T }
---:: Exact<T, U>     = match T { U => match U { T => T, _ => $Throw<T, " ≠ ", U> }, _ => $Throw<T, " is not ", U> }
---:: MaybeReadonly<T> = $Catch<Readonly<T>, T>
---:: TryKeys<T>       = $Catch<Keys<T>, never>
+--:: MustBeHomogeneous<T> = match T { { [%K]: %V } => T, _ => $Throw<T, " must be a homogeneous table"> }
+--:: MaybeReadonly<T>      = $Catch<Readonly<T>, T>   -- only if Readonly uses $Throw
+--:: TryKeys<T>            = $Catch<Keys<T>, never>   -- only if Keys uses $Throw
 ```
 
 ## Implementation
