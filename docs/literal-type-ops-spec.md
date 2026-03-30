@@ -1,10 +1,10 @@
 # Type-Level Literal Operations
 
-## Status: needs careful design — not yet specced
+## Conclusion: none of these are needed yet
 
-Operations on literal types at the type level. String concatenation is one case;
-numeric arithmetic and other literal ops are equally in scope. This file captures
-known design questions before implementation.
+After analysis, no type-level literal op has a concrete crescent use case that
+justifies implementation now. Implement on demand. The reasoning for each is below
+— preserved so future sessions don't re-derive it from scratch.
 
 ## String concatenation: `..`
 
@@ -42,14 +42,13 @@ even lower priority than result-position `..`.
 
 ## Tuple length: `#T`
 
-`#{ A, B, C }` → `3` as `LIT_INTEGER`. The most immediately useful numeric op:
+`#{ A, B, C }` → `3` as `LIT_INTEGER`. Seemingly useful for:
 
-- `Arity<F> = match F { (...%P) -> _ => #P }` — once `(...%P)` param capture is implemented
-- `Repeat<T, N>`: accumulate a tuple, stop when `#Acc` matches N — no arithmetic needed
-- `TupleAt<T, N>`: direct indexed access `T[N]` — already works with numeric literals
+- `Arity<F> = match F { (...%P) -> _ => #P }` — but what do you *do* with the arity? Comparing two function arities is very niche.
+- `Repeat<T, N>`: accumulate a tuple, stop when `#Acc` matches N — but parameterized fixed-length tuples are rare; known-N tuples are just written directly.
+- `TupleAt<T, N>`: already works via direct indexed access `T[N]` — no `#tuple` needed.
 
-These cover the cases that naively seem to need arithmetic. TS solves the same
-problems with tuple accumulator tricks; crescent can do the same with `#tuple`.
+No concrete use case identified. Implement when one appears.
 
 ## Numeric arithmetic: `+`, `-`, etc.
 
@@ -70,7 +69,7 @@ Trivially expressible as match aliases — no new primitives needed:
 --:: Or<A, B>  = match A { true => true, false => B }
 ```
 
-## Recommended approach
+## When to implement
 
-1. `#tuple` length — concrete use cases exist today (`Arity<F>`, `Repeat`, etc.)
-2. String `..` and `LIT_INTEGER` arithmetic — only on concrete demand.
+Implement any of the above when a concrete crescent library requires it. Do not
+implement speculatively — the reasoning above exists precisely to prevent that.
