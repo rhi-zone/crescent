@@ -13,13 +13,15 @@ These extend fuzz_alg.lua. All use direct type construction (fast, 2000 trials).
 - [x] `T <: never | T` — invariant 26
 - [x] `never & T <: never` — invariant 27
 
-### A2: readonly field semantics — PARTIALLY DONE
+### A2: readonly field semantics — DONE
 - [x] `{ readonly x: T } <: { readonly x: T }` — reflexivity: invariant 24
 - [x] `{ x: T } <: { readonly x: T }` — mutable satisfies readonly: invariant 28
-- [ ] `{ readonly x: T } </: { x: T }` — NOT testable at algebra level (unify.lua).
+- [x] writing to a readonly field is rejected — grammar-level A2c (fuzz_test.lua)
+- [x] reading a readonly field is allowed — grammar-level A2d (fuzz_test.lua)
+Note: `{ readonly x: T } </: { x: T }` is NOT testable at algebra level (unify.lua).
   FLAG_READONLY is a write-site constraint enforced in constrain.lua, not unify.lua.
   try_unify checks structural shape only; readonly does not affect structural subtyping.
-  Needs a grammar-level test (fuzz_test.lua) that exercises a write to a readonly field.
+  Grammar-level write-rejection tests (A2c/A2d) provide the coverage instead.
 
 ### A3: function arity — DONE (invariants 30–31, fuzz_alg.lua)
 - [x] `(A, B) -> C </: (A) -> C` — extra required param fails: invariant 30
@@ -35,7 +37,7 @@ all of integer/number/string/boolean.
 Fixed by adding meta field iteration to `try_unify`'s TAG_TABLE branch (unify.lua), mirroring
 the logic already in `M.unify`. `table_meta_field` is used for lookup; the check mirrors regular
 field checking: missing required meta field → false; optional mismatch → false; recursive try_unify
-on types. Grammar-level coverage (P3) still open for full setmetatable programs.
+on types. Grammar-level coverage (P3) now done — see fuzz_test.lua P3a/P3b.
 
 ---
 
@@ -138,9 +140,9 @@ local p --: Parameters<typeof f>  -- can't yet express typeof, skip?
 ```
 May require `typeof` operator — not yet implemented. Defer until then.
 
-### P3: meta slot programs
-Program: `setmetatable(t, mt)` return type carries meta slots.
-Field access on result uses `__index`. Verify it typechecks correctly.
+### P3: meta slot programs — DONE
+- [x] P3a: `setmetatable({}, { __index = fn })` typechecks — 0 errors (fuzz_test.lua)
+- [x] P3b: `setmetatable(v, mt)` with typed Vec/VecMeta typechecks — 0 errors (fuzz_test.lua)
 
 ### P4: $Throw inside match — only fires for selected arms
 ```lua

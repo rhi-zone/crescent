@@ -421,6 +421,142 @@ arb.it("EachField KeepAll: $EachField<{x:T}, KeepAll> compatible with {x:T}",
 		assert(typechecks(src), "EachField KeepAll partial program failed: " .. src)
 	end, { trials = 300 })
 
+-- ── P1: Pick/Omit correctness (grammar-tier) ─────────────────────────────────
+-- Pick<T, Keys> contains only the named fields; accessing others is an error.
+
+T.it("P1a: Pick<{name,age}, \"name\">.name accessible — 0 errors", function()
+	local src = [[
+--:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
+--:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
+--: () -> string
+local function get_name()
+  local p --: Pick<{ name: string, age: integer }, "name">
+  return p.name
+end
+]]
+	local ec = check.check_string(src, "fuzz_test_P1a")
+	T.eq(#ec.errors, 0, "P1a: expected 0 errors, got " .. #ec.errors)
+end)
+
+T.it("P1b: Pick<{name,age}, \"name\">.age not accessible — 1 error", function()
+	local src = [[
+--:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
+--:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
+--: () -> integer
+local function get_age()
+  local p --: Pick<{ name: string, age: integer }, "name">
+  return p.age
+end
+]]
+	local ec = check.check_string(src, "fuzz_test_P1b")
+	T.eq(#ec.errors, 1, "P1b: expected 1 error, got " .. #ec.errors)
+end)
+
+-- ── P4: $Throw inside match — only fires for selected arms ────────────────────
+
+T.it("P4a: CheckedId<integer> — integer arm, no throw — 0 errors", function()
+	local src = [[
+--:: CheckedId<T> = match T {
+--::   integer => integer,
+--::   _ => $Throw<"expected integer">
+--:: }
+local x --: CheckedId<integer>
+local _ok --: integer = x
+]]
+	local ec = check.check_string(src, "fuzz_test_P4a")
+	T.eq(#ec.errors, 0, "P4a: expected 0 errors, got " .. #ec.errors)
+end)
+
+T.it("P4b: CheckedId<string> — _ arm, throw fires — 1 error", function()
+	local src = [[
+--:: CheckedId<T> = match T {
+--::   integer => integer,
+--::   _ => $Throw<"expected integer">
+--:: }
+local x --: CheckedId<string>
+]]
+	local ec = check.check_string(src, "fuzz_test_P4b")
+	T.eq(#ec.errors, 1, "P4b: expected 1 error, got " .. #ec.errors)
+end)
+
+-- ── P5: generic defaults in programs ─────────────────────────────────────────
+
+T.it("P5a: Wrap<integer> defaults U to string — 0 errors", function()
+	local src = [[
+--:: Wrap<T, U = string> = { value: T, label: U }
+local x --: Wrap<integer>
+local _a --: { value: integer, label: string } = x
+]]
+	local ec = check.check_string(src, "fuzz_test_P5a")
+	T.eq(#ec.errors, 0, "P5a: expected 0 errors, got " .. #ec.errors)
+end)
+
+T.it("P5b: Wrap<integer, boolean> overrides default — 0 errors", function()
+	local src = [[
+--:: Wrap<T, U = string> = { value: T, label: U }
+local x --: Wrap<integer, boolean>
+local _a --: { value: integer, label: boolean } = x
+]]
+	local ec = check.check_string(src, "fuzz_test_P5b")
+	T.eq(#ec.errors, 0, "P5b: expected 0 errors, got " .. #ec.errors)
+end)
+
+T.it("P5c: Wrap<integer> with wrong label type — 1 error", function()
+	local src = [[
+--:: Wrap<T, U = string> = { value: T, label: U }
+local x --: Wrap<integer>
+local _wrong --: { value: integer, label: integer } = x
+]]
+	local ec = check.check_string(src, "fuzz_test_P5c")
+	T.eq(#ec.errors, 1, "P5c: expected 1 error, got " .. #ec.errors)
+end)
+
+-- ── A2c/A2d: Readonly field write rejection (grammar-level) ──────────────────
+-- FLAG_READONLY is a write-site constraint enforced in constrain.lua.
+-- Reading a readonly field is always fine; writing must be rejected.
+
+T.it("A2c: writing to a readonly field is rejected — 1 error", function()
+	local src = [[
+local t --: { readonly x: integer }
+t.x = 42
+]]
+	local ec = check.check_string(src, "fuzz_test_A2c")
+	T.eq(#ec.errors, 1, "A2c: expected 1 error, got " .. #ec.errors)
+end)
+
+T.it("A2d: reading a readonly field is allowed — 0 errors", function()
+	local src = [[
+local t --: { readonly x: integer }
+local _read --: integer = t.x
+]]
+	local ec = check.check_string(src, "fuzz_test_A2d")
+	T.eq(#ec.errors, 0, "A2d: expected 0 errors, got " .. #ec.errors)
+end)
+
+-- ── P3: setmetatable meta slot programs ───────────────────────────────────────
+-- setmetatable<T, MT>(t: T, mt: MT) -> T & { #...MT }
+-- The result carries all meta slots from MT spread into the intersection type.
+
+T.it("P3a: setmetatable result carries __index meta slot — 0 errors", function()
+	local src = [[
+local t = setmetatable({}, { __index = function(_, k) return k end })
+]]
+	local ec = check.check_string(src, "fuzz_test_P3a")
+	T.eq(#ec.errors, 0, "P3a: expected 0 errors, got " .. #ec.errors)
+end)
+
+T.it("P3b: setmetatable with typed Vec and VecMeta — 0 errors", function()
+	local src = [[
+--:: Vec = { x: integer }
+--:: VecMeta = { __add: (Vec, Vec) -> Vec }
+local mt --: VecMeta
+local v --: Vec
+local result = setmetatable(v, mt)
+]]
+	local ec = check.check_string(src, "fuzz_test_P3b")
+	T.eq(#ec.errors, 0, "P3b: expected 0 errors, got " .. #ec.errors)
+end)
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()
