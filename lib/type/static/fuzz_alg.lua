@@ -429,7 +429,22 @@ arb.it("[alg] optional field reflexivity: { x?: T } <: { x?: T }",
 			"optional reflexivity failed for T = " .. type_str(T_node))
 	end, { trials = 2000 })
 
--- 22. Readonly field reflexivity: { readonly x: T } <: { readonly x: T }
+-- 22. Optional field NOT subtype of required: { x?: T } </: { x: T }
+arb.it("[alg] optional field NOT <: required field: { x?: T } </: { x: T }",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx  = make_ctx()
+		local xid  = intern_mod.intern(ctx.pool, "x")
+		local tid  = ast_to_tid(ctx, T_node)
+		local opt  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_OPTIONAL) }, nil, -1)
+		local req  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, 0) }, nil, -1)
+		assert(not subtype(ctx, opt, req),
+			"optional field should NOT be <: required field for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 24. Readonly field reflexivity: { readonly x: T } <: { readonly x: T }
 arb.it("[alg] readonly field reflexivity: { readonly x: T } <: { readonly x: T }",
 	farb.arb_base_type,
 	function(T_node)

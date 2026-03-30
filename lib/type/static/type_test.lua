@@ -4625,6 +4625,22 @@ local p --: Point
 p = { x = 1, y = 2 }
 ]])
     end)
+
+    assert.it("optional field NOT assignable to required field position", function()
+        v3_has_error([[
+local x --: { name?: string }
+local y --: { name: string }
+y = x
+]], "optional")
+    end)
+
+    assert.it("required field IS assignable to optional field position", function()
+        v3_no_errors([[
+local a --: { name: string }
+local b --: { name?: string }
+b = a
+]])
+    end)
 end)
 
 assert.describe("field modifiers: readonly", function()

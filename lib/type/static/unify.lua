@@ -614,6 +614,14 @@ function M.unify(ctx, a, b, seen)
                     end
                 end
             else
+                -- If target field is required but source field is optional, reject:
+                -- { x?: T } is not a subtype of { x: T }
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 and band(afe.flags, FLAG_OPTIONAL) ~= 0 then
+                    local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
+                    return false, "field '" .. fname .. "': optional field cannot satisfy required field",
+                        { kind = "mismatch", path = { fname },
+                          got = "optional field", expected = "required field" }
+                end
                 local aft = find(ctx, afe.type_id)
                 local ok, err, detail = M.unify(ctx, aft, bft, seen)
                 if not ok then
@@ -976,6 +984,10 @@ function M.try_unify(ctx, a, b, seen)
             local afe = types_mod.table_field(ctx, a, bfe.name_id)
             if not afe and band(bfe.flags, FLAG_OPTIONAL) == 0 then return false end
             if afe then
+                -- Optional field cannot satisfy a required field
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 and band(afe.flags, FLAG_OPTIONAL) ~= 0 then
+                    return false
+                end
                 if not M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id), seen) then
                     return false
                 end
