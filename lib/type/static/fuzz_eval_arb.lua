@@ -64,6 +64,21 @@ function M.arb_union_table(rng, size)
 	return t1 .. " | " .. t2
 end
 
+-- arb_union_base: generate a union of two distinct base types.
+-- Returns { lhs, rhs, type_str } where lhs and rhs are distinct base type strings
+-- and type_str is "A | B". Never generates `any`.
+function M.arb_union_base(rng, size)
+	local bases = { "integer", "number", "string", "boolean" }
+	local i = math.floor(rng:float() * 4) + 1
+	local j
+	repeat j = math.floor(rng:float() * 4) + 1 until j ~= i
+	return {
+		lhs = bases[i],
+		rhs = bases[j],
+		type_str = bases[i] .. " | " .. bases[j]
+	}
+end
+
 -- arb_function_parts: generate a function type broken into parts.
 -- Returns a table: { params = string[], ret = string, type_str = string }
 -- 0–3 params (all base types), return type is a base type.

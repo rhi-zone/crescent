@@ -51,8 +51,10 @@ extension before the invariants can be tested.
 - [x] `arb_function_parts(rng, size)` — returns `{ params, ret, type_str }` for invariant building
 Both added to fuzz_eval_arb.lua. 0–3 params, base types only, never `any`.
 
-### G2: union type subjects for match
-Extend `arb_union_table` to also generate `A | B` where A and B are base types (not just tables). Needed for: match capture on union, distributivity.
+### G2: union type subjects for match — DONE
+- [x] `arb_union_base(rng, size)` — returns `{ lhs, rhs, type_str }` for two distinct base types (fuzz_eval_arb.lua)
+- [x] G2a: `CaptureId<A | B> == A | B` — capture on union round-trips (500 trials, fuzz_eval.lua)
+- [x] G2b: `$EachField<T1|T2, KeepAll> == $EachField<T1,KeepAll> | $EachField<T2,KeepAll>` — EachField distributivity over union of tables (500 trials, fuzz_eval.lua)
 
 ---
 

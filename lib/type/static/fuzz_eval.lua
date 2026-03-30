@@ -98,6 +98,14 @@ local arb_function_parts = {
 	shrink = function(_, _) return function() return nil end end,
 }
 
+-- arb generator for union-of-base-types: { lhs, rhs, type_str }.
+local arb_union_base = {
+	generate = function(rng, sz)
+		return earb.arb_union_base(rng, sz), nil
+	end,
+	shrink = function(_, _) return function() return nil end end,
+}
+
 -- ── EachField invariants (500 trials each) ────────────────────────────────────
 
 -- 1. KeepAll identity: $EachField<T, KeepAll> == T (bidirectional)
@@ -725,6 +733,40 @@ arb.it("[eval] E11: MakeOptional idempotent: applying twice == applying once",
 			"MakeOptional(T) <: MakeOptional(MakeOptional(T)) failed for T = " .. t_str)
 		assert(check_sub(twice_str, once_str),
 			"MakeOptional(MakeOptional(T)) <: MakeOptional(T) failed for T = " .. t_str)
+	end, { trials = 500 })
+
+-- ── G2a: capture on union round-trips ────────────────────────────────────────
+-- CaptureId<A | B> == A | B where A and B are distinct base types.
+-- Generating and re-emitting the union via a capture preserves the type.
+
+arb.it("[eval] G2a: CaptureId<A | B> == A | B for union of distinct base types",
+	arb_union_base,
+	function(u)
+		local union_str = u.type_str  -- "A | B"
+		local cap_str   = "CaptureId<" .. union_str .. ">"
+		assert(check_sub(cap_str, union_str),
+			"CaptureId<A|B> <: A|B failed for A|B = " .. union_str)
+		assert(check_sub(union_str, cap_str),
+			"A|B <: CaptureId<A|B> failed for A|B = " .. union_str)
+	end, { trials = 500 })
+
+-- ── G2b: EachField distributivity over union of tables ───────────────────────
+-- $EachField<T1 | T2, KeepAll> == $EachField<T1, KeepAll> | $EachField<T2, KeepAll>
+-- == T1 | T2 (by KeepAll identity, invariant 1).
+-- Tests that EachField distributes over a union of table types.
+
+arb.it("[eval] G2b: EachField<T1|T2, KeepAll> == EachField<T1,KeepAll> | EachField<T2,KeepAll>",
+	{ arb_table_type, arb_table_type },
+	function(t1_str, t2_str)
+		local union_str = t1_str .. " | " .. t2_str
+		-- Dist1: EachField applied to the union directly
+		local dist1 = "$EachField<" .. union_str .. ", KeepAll>"
+		-- Dist2: EachField applied per-member then unioned
+		local dist2 = "$EachField<" .. t1_str .. ", KeepAll> | $EachField<" .. t2_str .. ", KeepAll>"
+		assert(check_sub(dist1, dist2),
+			"EachField<T1|T2,KeepAll> <: EachField<T1,KeepAll>|EachField<T2,KeepAll> failed for T1=" .. t1_str .. " T2=" .. t2_str)
+		assert(check_sub(dist2, dist1),
+			"EachField<T1,KeepAll>|EachField<T2,KeepAll> <: EachField<T1|T2,KeepAll> failed for T1=" .. t1_str .. " T2=" .. t2_str)
 	end, { trials = 500 })
 
 return {}
