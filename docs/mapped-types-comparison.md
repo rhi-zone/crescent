@@ -114,17 +114,24 @@ F (a match alias using `%` captures), collects transformed fields into **one new
 Handles flag manipulation that `{ ...[%K]: %V }` cannot express.
 
 ```lua
---:: Partial<T>  = $EachField<T, match { key: %K, value: %V, optional: _, readonly: %RO }
---::                              { _ => { key: K, value: V, optional: true, readonly: RO } }>
---:: Required<T> = $EachField<T, match { key: %K, value: %V, optional: _, readonly: %RO }
---::                              { _ => { key: K, value: V, optional: false, readonly: RO } }>
---:: Readonly<T> = $EachField<T, match { key: %K, value: %V, optional: %OPT, readonly: _ }
---::                              { _ => { key: K, value: V, optional: OPT, readonly: true } }>
+--:: MakeOptional = match { key: %K, value: %V, optional: _, readonly: %RO }
+--::               { _ => { key: K, value: V, optional: true, readonly: RO } }
+--:: Partial<T>  = $EachField<T, MakeOptional>
+
+--:: MakeRequired = match { key: %K, value: %V, optional: _, readonly: %RO }
+--::               { _ => { key: K, value: V, optional: false, readonly: RO } }
+--:: Required<T> = $EachField<T, MakeRequired>
+
+--:: MakeReadonly = match { key: %K, value: %V, optional: %OPT, readonly: _ }
+--::               { _ => { key: K, value: V, optional: OPT, readonly: true } }
+--:: Readonly<T> = $EachField<T, MakeReadonly>
 ```
 
-F is a match alias; the descriptor fields `optional` and `readonly` carry the
-FLAG_OPTIONAL / FLAG_READONLY bits. `$EachField` is a **permanent intrinsic** — the
-gather/flag-write operation cannot be expressed as pure match computation.
+F is a **named alias passed unapplied** — same syntactic position as an HKT constraint
+argument. No inline anonymous match expressions in type argument position. The descriptor
+fields `optional` and `readonly` carry the FLAG_OPTIONAL / FLAG_READONLY bits.
+`$EachField` is a **permanent intrinsic** — the gather/flag-write operation cannot be
+expressed as pure match computation.
 
 The two primitives are complementary:
 - Distribution (`{ ...[%K]: %V }`) — read fields, union results, no flag access

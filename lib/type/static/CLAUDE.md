@@ -48,9 +48,10 @@ redundant:**
   expression per field, unions results. For PairsReturn, Keys, Values.
   Does NOT expose optional/readonly flags. Result is a union, not a table.
 - `$EachField<T, F>` — **gather/map**: iterates fields, passes a descriptor
-  `{ key, value, optional, readonly }` to F (a match alias using `%` captures),
-  collects transformed fields into ONE new table. Required for flag manipulation:
-  `Partial<T>`, `Required<T>`, `Readonly<T>`. Cannot be replaced by distribution.
+  `{ key, value, optional, readonly }` to F (a **named alias passed unapplied** —
+  no inline match expressions in type argument position), collects transformed
+  fields into ONE new table. Required for flag manipulation: `Partial<T>`,
+  `Required<T>`, `Readonly<T>`. Cannot be replaced by distribution.
 
 If you find yourself writing a new `$` intrinsic, stop and ask what
 `match` pattern is missing instead.
