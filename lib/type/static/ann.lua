@@ -495,14 +495,21 @@ function M.parse_annotations(annotations, pool, filename)
                         end
                     end
                 end
-                -- Extract trailing spread as vararg
+                -- Extract trailing spread as vararg.
+                -- A TAG_SPREAD(TAG_CAPTURE) is a rest-capture param (...%P), NOT a vararg —
+                -- leave it in the params list for match.lua to handle as a rest capture.
                 local vararg_ann_id = -1
                 if #items > 0 then
                     local last_t = types:get(items[#items])
                     if last_t.tag == defs.TAG_SPREAD then
-                        vararg_ann_id = last_t.data[0]
-                        items[#items] = nil
-                        item_names[#item_names] = nil
+                        local inner_t = types:get(last_t.data[0])
+                        if inner_t.tag ~= defs.TAG_CAPTURE then
+                            -- Normal vararg: ...T where T is not a capture
+                            vararg_ann_id = last_t.data[0]
+                            items[#items] = nil
+                            item_names[#item_names] = nil
+                        end
+                        -- else: TAG_SPREAD(TAG_CAPTURE) = rest-capture param; leave in items list
                     end
                 end
                 local ps, pl = flush_type_list(items)
@@ -674,6 +681,24 @@ function M.parse_annotations(annotations, pool, filename)
                             -- PAT_ALL_FIELDS is a standalone pattern; close the braces and return.
                             expect_char(s, "}")
                             return paf
+                        elseif nb == B_PERCENT then
+                            -- ...%Rest: rest-field capture. Captures remaining unmatched fields.
+                            -- Used in: { field: _, ...%Rest } to avoid enumerating pass-through fields.
+                            advance(s)  -- skip '%'
+                            local rest_name = scan_word(s)
+                            if not rest_name then scan_error(s, "expected capture name after '%'") end
+                            local rest_name_id = intern_mod.intern(pool, rest_name)
+                            local prf = alloc_type(defs.TAG_PAT_REST_FIELDS)
+                            types:get(prf).data[0] = rest_name_id
+                            -- Store as a field with name_id = -2 (rest capture marker)
+                            local fi = fields:alloc()
+                            local fe = fields:get(fi)
+                            fe.name_id = -2  -- rest capture marker (distinct from -1 spread)
+                            fe.type_id = prf
+                            fe.flags = 0
+                            flds[#flds + 1] = fi
+                            -- Must be last; break out of the field loop
+                            break
                         elseif nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
                             -- Bare ...: open-table row variable marker.
                             row_var_ann_id = alloc_type(defs.TAG_ROWVAR)

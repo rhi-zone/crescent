@@ -8314,3 +8314,94 @@ local x --: Pair<integer>
 ]], "non%-default type parameter after default")
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Feature: table-pattern rest capture { field: %X, ...%Rest }
+-- ---------------------------------------------------------------------------
+
+assert.describe("match: table-pattern rest capture { field: _, ...%Rest }", function()
+    assert.it("PASS: ...%Rest binds remaining fields after named matches", function()
+        -- { x: _ } matches x; ...%Rest captures y and z into a synthetic table.
+        v3_no_errors([[
+--:: RestOf<D> = match D { { x: _, ...%Rest } => Rest }
+--:: T = { x: integer, y: string, z: boolean }
+--:: R = RestOf<T>
+local v --: R
+v = { y = "hi", z = true }
+]])
+    end)
+
+    assert.it("PASS: ...Rest in result splices captured fields back", function()
+        -- Override x field, keep the rest via ...Rest
+        v3_no_errors([[
+--:: Override<D> = match D { { x: _, ...%Rest } => { x: string, ...Rest } }
+--:: T = { x: integer, y: string, z: boolean }
+--:: R = Override<T>
+local v --: R
+v = { x = "hello", y = "world", z = true }
+]])
+    end)
+
+    assert.it("PASS: MakeOptional via $EachField with ...%Rest (backward-compat plain descriptor)", function()
+        -- MakeOptional uses plain descriptor return (backward-compat single-descriptor path).
+        -- ...%Rest captures readonly from the $EachField descriptor and splices it back.
+        -- Note: brace-tuple result `{ { ...Rest } }` requires a grammar extension not yet
+        -- implemented (nested table literals in brace-tuple position); use flat descriptor instead.
+        v3_no_errors([[
+--:: MakeOptional<D> = match D { { key: %K, value: %V, optional: _, ...%Rest } => { key: K, value: V?, optional: true, ...Rest } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+--:: R = Partial<{ x: integer }>
+local v --: R
+v = {}
+v = { x = 42 }
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Feature: param-list rest capture (...%P) -> T and (A, ...%P) -> T
+-- ---------------------------------------------------------------------------
+
+assert.describe("match: param-list rest capture (...%P) -> T", function()
+    assert.it("PASS: Parameters<F> captures all params as tuple", function()
+        -- (...%P) -> unknown matches any function; P is the full param tuple.
+        v3_no_errors([[
+--:: Parameters<F> = match F { (...%P) -> unknown => P }
+--:: R = Parameters<(integer, string) -> boolean>
+local v --: R
+local v2 --: (integer, string)
+v2 = v
+]])
+    end)
+
+    assert.it("PASS: Tail<F> captures params after first", function()
+        -- (integer, ...%P) -> unknown: first param must be integer; P is the rest.
+        v3_no_errors([[
+--:: Tail<F> = match F { (integer, ...%P) -> unknown => P }
+--:: R = Tail<(integer, string, boolean) -> nil>
+local v --: R
+local v2 --: (string, boolean)
+v2 = v
+]])
+    end)
+
+    assert.it("PASS: Last<F> captures last param type", function()
+        -- (...%P, %L) -> unknown: L binds to the last param (a single type, not tuple).
+        v3_no_errors([[
+--:: Last<F> = match F { (...%P, %L) -> unknown => L }
+--:: R = Last<(integer, string) -> nil>
+local v --: R
+local v2 --: string
+v2 = v
+]])
+    end)
+
+    assert.it("PASS: Init<F> captures all but last param as tuple", function()
+        -- (...%P, %L) -> unknown: P is all params except last (a 1-tuple here).
+        v3_no_errors([[
+--:: Init<F> = match F { (...%P, %L) -> unknown => P }
+--:: R = Init<(integer, string) -> nil>
+local v --: R
+]])
+    end)
+end)

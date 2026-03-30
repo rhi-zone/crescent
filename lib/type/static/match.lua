@@ -21,8 +21,10 @@ local TAG_INTERSECTION   = defs.TAG_INTERSECTION
 local TAG_TUPLE          = defs.TAG_TUPLE
 local TAG_UNKNOWN        = defs.TAG_UNKNOWN
 local TAG_NEVER          = defs.TAG_NEVER
-local TAG_CAPTURE        = defs.TAG_CAPTURE
-local TAG_PAT_ALL_FIELDS = defs.TAG_PAT_ALL_FIELDS
+local TAG_CAPTURE         = defs.TAG_CAPTURE
+local TAG_PAT_ALL_FIELDS  = defs.TAG_PAT_ALL_FIELDS
+local TAG_PAT_REST_FIELDS = defs.TAG_PAT_REST_FIELDS
+local TAG_SPREAD          = defs.TAG_SPREAD
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -128,19 +130,52 @@ function M.match_pattern(ctx, ty_id, pat_id)
     if pt.tag == TAG_TABLE and tt.tag == TAG_TABLE then
         --: any
         local bindings = {}
+        -- Track which field name_ids are explicitly matched by the pattern.
+        --: { [integer]: boolean, ... }
+        local matched_name_ids = {}
+        -- Rest-field capture node (TAG_PAT_REST_FIELDS), if present in the pattern.
+        local rest_capture_name_id = nil
         -- Each named field in the pattern must exist in the actual type.
+        -- Also detect the rest-capture field (name_id == -2).
         for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
             --: integer
             local pfid = ctx.lists:get(pi)
             --: any
             local pfe  = ctx.fields:get(pfid)
-            -- Find the matching field in the input type
-            local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
-            if not afe then return false, nil end
-            local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id)
-            if not ok then return false, nil end
+            if pfe.name_id == -2 then
+                -- Rest-field capture: store the capture name_id for later processing.
+                local prf_t = ctx.types:get(types_mod.find(ctx, pfe.type_id))
+                rest_capture_name_id = prf_t.data[0]
+            else
+                -- Find the matching field in the input type
+                local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
+                if not afe then return false, nil end
+                local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id)
+                if not ok then return false, nil end
+                --: any
+                bindings = merge_bindings(bindings, sub_bindings)
+                if bindings == nil then return false, nil end
+                matched_name_ids[pfe.name_id] = true
+            end
+        end
+        -- If the pattern has a rest-field capture (...%Rest), collect all fields from the
+        -- actual type that were NOT explicitly matched and bind them to a synthetic table.
+        if rest_capture_name_id then
+            local rest_field_ids = {}
+            for ti = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                --: integer
+                local tfid = ctx.lists:get(ti)
+                --: any
+                local tfe  = ctx.fields:get(tfid)
+                if tfe.name_id >= 0 and not matched_name_ids[tfe.name_id] then
+                    local copied = types_mod.make_field(ctx, tfe.name_id, tfe.type_id, tfe.flags)
+                    rest_field_ids[#rest_field_ids + 1] = copied
+                end
+            end
+            -- Build the synthetic rest table (closed, no indexers)
+            local rest_tid = types_mod.make_table(ctx, rest_field_ids, {}, -1, {})
             --: any
-            bindings = merge_bindings(bindings, sub_bindings)
+            bindings = merge_bindings(bindings, { [rest_capture_name_id] = rest_tid })
             if bindings == nil then return false, nil end
         end
         -- If the pattern has indexer pairs, match them positionally against the subject.
@@ -176,7 +211,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
     end
 
     -- Function pattern: match param and return types, collecting capture bindings.
-    -- e.g. (...P) -> R or (A, B) -> C
+    -- e.g. (...%P) -> R or (A, B) -> C
     if pt.tag == TAG_FUNCTION then
         -- The input must also be a function
         if tt.tag ~= TAG_FUNCTION then return false, nil end
@@ -185,8 +220,71 @@ function M.match_pattern(ctx, ty_id, pat_id)
         -- Match params
         local ppl = pt.data[1]  -- param count in pattern
         local tpl = tt.data[1]  -- param count in input
-        -- If pattern has params, match them positionally
+
+        -- Detect rest-capture param: TAG_SPREAD(TAG_CAPTURE) anywhere in the param list.
+        -- Evaluator matches concrete prefix params left-to-right and concrete suffix params
+        -- right-to-left; the middle is bound as a tuple to the capture variable.
+        local rest_pos = nil     -- 0-based index of TAG_SPREAD(TAG_CAPTURE) in pattern params
+        local rest_name_id = nil
         if ppl > 0 then
+            for i = 0, ppl - 1 do
+                --: integer
+                local p_param = ctx.lists:get(pt.data[0] + i)
+                local p_param_t = ctx.types:get(types_mod.find(ctx, p_param))
+                if p_param_t.tag == TAG_SPREAD then
+                    local inner_t = ctx.types:get(types_mod.find(ctx, p_param_t.data[0]))
+                    if inner_t.tag == TAG_CAPTURE then
+                        rest_pos = i
+                        rest_name_id = inner_t.data[0]
+                        break
+                    end
+                end
+            end
+        end
+
+        if rest_pos ~= nil then
+            -- Rest-capture mode: prefix = rest_pos params, suffix = ppl - rest_pos - 1 params.
+            local prefix_len = rest_pos
+            local suffix_len = ppl - rest_pos - 1
+            -- Actual function must have at least prefix_len + suffix_len params.
+            if tpl < prefix_len + suffix_len then return false, nil end
+            -- Match prefix params
+            for i = 0, prefix_len - 1 do
+                --: integer
+                local p_param = ctx.lists:get(pt.data[0] + i)
+                --: integer
+                local t_param = ctx.lists:get(tt.data[0] + i)
+                local ok, sub = M.match_pattern(ctx, t_param, p_param)
+                if not ok then return false, nil end
+                --: any
+                bindings = merge_bindings(bindings, sub)
+                if bindings == nil then return false, nil end
+            end
+            -- Match suffix params (right-to-left)
+            for j = 0, suffix_len - 1 do
+                --: integer
+                local p_param = ctx.lists:get(pt.data[0] + ppl - 1 - j)
+                --: integer
+                local t_param = ctx.lists:get(tt.data[0] + tpl - 1 - j)
+                local ok, sub = M.match_pattern(ctx, t_param, p_param)
+                if not ok then return false, nil end
+                --: any
+                bindings = merge_bindings(bindings, sub)
+                if bindings == nil then return false, nil end
+            end
+            -- Collect middle params as a tuple for the rest capture.
+            -- Always a tuple even for 0 or 1 params (the caller can spread ...P in result position).
+            local middle_count = tpl - prefix_len - suffix_len
+            local middle_ids = {}
+            for i = 0, middle_count - 1 do
+                middle_ids[i + 1] = ctx.lists:get(tt.data[0] + prefix_len + i)
+            end
+            local rest_tid = types_mod.make_tuple(ctx, middle_ids)
+            --: any
+            bindings = merge_bindings(bindings, { [rest_name_id] = rest_tid })
+            if bindings == nil then return false, nil end
+        elseif ppl > 0 then
+            -- Normal mode: match params positionally (exact count)
             if tpl ~= ppl then return false, nil end
             for i = 0, ppl - 1 do
                 --: integer

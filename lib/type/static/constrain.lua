@@ -446,7 +446,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             local fid = ctx.ann.lists:get(i)
             local fe  = ctx.ann.fields:get(fid)
-            if fe.name_id == -1 then
+            if fe.name_id == -2 then
+                -- Rest-field capture: { ...[%Rest] } in a match pattern.
+                -- fe.type_id is a TAG_PAT_REST_FIELDS annotation node.
+                -- Resolve and preserve it in the checker arena as name_id=-2 field.
+                local prf_at = ctx.ann.types:get(fe.type_id)
+                local prf_id = types_mod.alloc_type(ctx, defs.TAG_PAT_REST_FIELDS)
+                ctx.types:get(prf_id).data[0] = prf_at.data[0]  -- name_id
+                field_ids[#field_ids + 1] = types_mod.make_field(ctx, -2, prf_id, 0)
+            elseif fe.name_id == -1 then
                 -- Spread entry: { ...T, ... }
                 -- fe.type_id is a TAG_SPREAD annotation node; .data[0] is the inner ann type.
                 local spread_at = ctx.ann.types:get(fe.type_id)
@@ -633,6 +641,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         local nt = ctx.types:get(id)
         nt.data[0] = at.data[0]  -- k_name_id
         nt.data[1] = at.data[1]  -- v_name_id
+        return id
+    end
+
+    if tag == defs.TAG_PAT_REST_FIELDS then
+        -- Preserve rest-fields capture node in the checker arena.
+        -- TAG_PAT_REST_FIELDS is used in table match arm pattern position;
+        -- match.lua collects remaining unmatched fields and binds them to name_id.
+        local id = types_mod.alloc_type(ctx, defs.TAG_PAT_REST_FIELDS)
+        ctx.types:get(id).data[0] = at.data[0]  -- name_id
         return id
     end
 

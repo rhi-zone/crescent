@@ -111,6 +111,12 @@ M.TAG_PAT_ALL_FIELDS    = 28  -- { ...[%K]: %V } pattern: distributes over all f
 --            TAG_ANY/TAG_UNKNOWN -> one iteration K=unknown, V=unknown;
 --            TAG_NEVER -> zero iterations -> never.
 -- Always matches (total pattern). Used only in annotation arena pattern positions.
+M.TAG_PAT_REST_FIELDS   = 29  -- { ...[%Rest] } pattern: rest-field capture in table pattern
+-- TypeSlot layout for TAG_PAT_REST_FIELDS:
+--   data[0] = name_id  (intern ID of the rest capture variable name)
+-- When encountered in a table match pattern, collects all fields NOT explicitly matched
+-- by named fields in the pattern into a synthetic table type and binds name_id → that type.
+-- Used only in annotation arena pattern positions; never in checker arena result positions.
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0

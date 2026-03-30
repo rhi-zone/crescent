@@ -198,15 +198,15 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   `PickKey<Keys>` is a partially applied alias used as an HKT argument. Needed for
   Pick<T, Keys> and Omit<T, Keys>. Not yet designed.
 
-- [ ] **`{ ...[%K]: %V }` table-pattern rest capture** — `{ field: %X, ...%Rest }` in
+- [x] **`{ ...[%K]: %V }` table-pattern rest capture** — `{ field: %X, ...%Rest }` in
   match patterns: captures remaining fields into Rest; `...Rest` in result splices them
   back. Specced in docs/capture-sigil-spec.md. Needed for $EachField F aliases.
-  Implementation: ann.lua + match.lua.
+  Implementation: ann.lua + match.lua. Done 2026-03-30.
 
-- [ ] **`(...%P) -> T` and `(A, ...%P) -> T` param captures** — specced in
+- [x] **`(...%P) -> T` and `(A, ...%P) -> T` param captures** — specced in
   docs/capture-sigil-spec.md. Enables Parameters<F>, Tail<F>, Last<F>, Init<F>.
   At most one `...%P` per param list, may appear anywhere. Implementation: ann.lua +
-  match.lua.
+  match.lua. Done 2026-03-30.
 
 - [ ] **`{ #...%M }` meta-slot spread** — specced in docs/meta-spread-spec.md.
   `setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }`. `MetaOf<T>` alias.
