@@ -51,7 +51,9 @@
 --:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope?, level: integer }
 
 -- Entry in ctx._multi_ret: tracks which source tuple a binding came from.
---:: MultiRetEntry = { source_tid: integer, slot: integer }
+-- call_uid is the AST node ID of the call expression; used to correlate all bindings
+-- from the same call site so narrowing is applied consistently across all return slots.
+--:: MultiRetEntry = { source_tid: integer, slot: integer, call_uid: integer? }
 
 -- Detail table returned by M.unify on error (for nested error paths).
 --:: UnifyDetail = { kind: string, path: { [integer]: unknown, ... }?, got: integer, expected: integer, ... }

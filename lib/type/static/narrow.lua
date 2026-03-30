@@ -252,6 +252,7 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
         local is, il = t.data[2], t.data[3]
         local rv     = t.data[4]
         local ms, ml = t.data[5], t.data[6]
+        --: { [integer]: { fid: integer, name_id: integer, type_id: integer, flags: integer }, ... }
         local field_data = {}
         for i = fs, fs + fl - 1 do
             local fid = ctx.lists:get(i)
@@ -288,6 +289,7 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
     elseif t.tag == TAG_UNION then
         -- Collect member IDs before recursing (allocation may reallocate list pool)
         local s, l = t.data[0], t.data[1]
+        --: { [integer]: integer, ... }
         local member_ids = {}
         for i = s, s + l - 1 do
             member_ids[#member_ids + 1] = types_mod.find(ctx, ctx.lists:get(i))
@@ -330,6 +332,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             local tt = ctx.types:get(t)
             if tt.tag == TAG_VAR or tt.tag == TAG_ANY then return ty_id end
             if tt.tag == TAG_UNION then
+                --: { [integer]: integer, ... }
                 local nil_members = {}
                 for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
@@ -423,6 +426,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         if in_truthy == info.positive then
             -- Keep only members matching the type
             if tt.tag == TAG_UNION then
+                --: { [integer]: integer, ... }
                 local matching = {}
                 for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
                     local mid = types_mod.find(ctx, ctx.lists:get(i))
@@ -445,6 +449,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
         local tt = ctx.types:get(t)
         if in_truthy == info.positive then
             if tt.tag == TAG_UNION then
+                --: { [integer]: integer, ... }
                 local matching = {}
                 local unify_mod = require("lib.type.static.unify")
                 for i = tt.data[0], tt.data[0] + tt.data[1] - 1 do
@@ -531,6 +536,8 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
             return truthy == is_truthy
         end)
     if not surviving or #surviving == 0 then return end
+    --: { [integer]: integer, ... }
+    local surviving_arms = surviving
     -- Re-derive ALL correlated bindings (including name_id itself) from surviving arms.
     -- This overrides apply_narrowing's result for the primary binding when it cannot
     -- narrow an unbound TAG_VAR (e.g. string.find: slot_var subtract nil = unchanged).
@@ -538,8 +545,9 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
         if (entry.call_uid and other_entry.call_uid == entry.call_uid) or
            (not entry.call_uid and other_entry.source_tid == entry.source_tid) then
             if env_mod.lookup(ctx.scope, other_id) then
+                --: { [integer]: integer, ... }
                 local parts = {}
-                for _, arm in ipairs(surviving) do
+                for _, arm in ipairs(surviving_arms) do
                     local arm_t = ctx.types:get(arm)
                     if arm_t.data[1] > other_entry.slot then
                         parts[#parts + 1] = types_mod.find(ctx,

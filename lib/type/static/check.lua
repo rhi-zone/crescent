@@ -30,6 +30,7 @@ end
 local _session = {}
 
 -- Currently-being-checked set: prevents re-entrant check_file calls.
+--: { [string]: boolean?, ... }
 local _checking = {}
 
 -- Shared intern pool for multi-file sessions — lazy-initialised.
@@ -81,28 +82,30 @@ local function extract_type_aliases(ctx)
     local scope = ctx.scope
     if not scope or not scope.type_bindings then return result end
     for name_id, alias in pairs(scope.type_bindings) do
-        if alias and alias.body then
+        --: any  -- pairs() returns unknown values; TypeAlias is the actual type
+        local al = alias
+        if al and al.body then
             local name = intern_mod.get(ctx.pool, name_id)
             if name then
                 local params_strs = nil
-                if alias.params and #alias.params > 0 then
+                if al.params and #al.params > 0 then
                     params_strs = {}
-                    for _, pid in ipairs(alias.params) do
+                    for _, pid in ipairs(al.params) do
                         params_strs[#params_strs + 1] = intern_mod.get(ctx.pool, pid) or ""
                     end
                 end
                 local bounds = nil
-                if alias.resolved_bounds then
+                if al.resolved_bounds then
                     bounds = {}
-                    for j, bid in ipairs(alias.resolved_bounds) do
+                    for j, bid in ipairs(al.resolved_bounds) do
                         bounds[j] = bid  -- type_id or nil
                     end
                 end
                 result[#result + 1] = {
                     name = name,
-                    body = alias.body,
+                    body = al.body,
                     params = params_strs,
-                    nominal = alias.nominal or false,
+                    nominal = al.nominal or false,
                     resolved_bounds = bounds,
                 }
             end
@@ -154,13 +157,15 @@ end
 -- Shares the session pool across calls.
 -- If the disk cache is enabled, attempts a cache hit before checking.
 -- Records the file's export_tid in the session cache for require() resolution.
+--: (string, Scope?, InternPool?) -> (ErrCtx, Ctx?)
 function M.check_file(filename, parent_scope, explicit_pool)
     -- Normalise path (basic: strip leading "./" only)
     if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
 
-    if _session[filename] then
-        local s = _session[filename]
-        return s.err_ctx, s.ctx
+    --: SessionEntry?
+    local cached = _session[filename]
+    if cached then
+        return cached.err_ctx, cached.ctx
     end
     -- Prevent re-entrant checks (circular require chains).
     if _checking[filename] then
@@ -360,6 +365,7 @@ M.check_string_v3 = M.check_string
 -- ---------------------------------------------------------------------------
 -- Check multiple files and return a combined error context.
 -- Files share an intern pool for efficient string interning.
+--: ({ [integer]: string, ... }, Scope?) -> ErrCtx
 function M.check_files(filenames, parent_scope)
     _pool = _pool or intern_mod.new()
     local combined = errors_mod.new_ctx()
