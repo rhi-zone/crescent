@@ -39,11 +39,11 @@ The result carries the regular fields of T plus all meta slots from MT.
 to setmetatable". With a match pattern `{ #...M }` that extracts the meta source:
 
 ```lua
---:: MetaOf<T> = match T { { #...M } => M, _ => nil }
+--:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
 --:: declare getmetatable = <T>(t: T) -> MetaOf<T>
 ```
 
-`{ #...M }` in a match arm binds M to the table type reconstructed from T's meta slots
+`{ #...%M }` in a match arm binds M to the table type reconstructed from T's meta slots
 (the inverse of spreading). If T has no meta slots, the arm fails and the fallback `nil` applies — matching
 Lua's runtime behaviour where tables without metatables return nil.
 
@@ -58,13 +58,13 @@ but M is a structural reconstruction, not MT itself.
 
 The meta-slot analogue of `{ ...[K]: V }` (all-fields) and `{ [K]: V }` (indexer).
 
-| Pattern        | Extracts              | Binds       |
-|----------------|-----------------------|-------------|
-| `{ [K]: V }`   | Indexer               | K, V        |
-| `{ ...[K]: V }`| All fields            | K, V        |
-| `{ #...M }`    | All meta slots        | M (as table type) |
+| Pattern          | Extracts              | Binds       |
+|------------------|-----------------------|-------------|
+| `{ [%K]: %V }`   | Indexer               | K, V        |
+| `{ ...[%K]: %V }`| All fields            | K, V        |
+| `{ #...%M }`     | All meta slots        | M (as table type) |
 
-`{ #...M }` succeeds if T has any meta slots; fails if T has none (allowing a fallback arm).
+`{ #...%M }` succeeds if T has any meta slots; fails if T has none (allowing a fallback arm).
 
 ## Arithmetic types
 
@@ -81,7 +81,7 @@ metamethod. `number_meta` is already declared in stdlib.d.lua.
 
 - `{ #...T }` in ann.lua: parsed as a spread entry in the meta slot list of the table,
   stored as TAG_SPREAD in the meta list (parallel to how `{ ...T }` works for fields).
-- `{ #...M }` match pattern: new `PAT_META_SPREAD` kind in match.lua; binds M to
+- `{ #...%M }` match pattern: new `PAT_META_SPREAD` kind in match.lua; binds M to
   `make_table(ctx, {}, {}, meta_field_list)` — a table type reconstructed from
   the input's meta slots.
 - `setmetatable` return type: `T & { #...MT }` — intersection where one member is a

@@ -14,7 +14,7 @@
 --:: declare type = (val: any) -> string
 --:: declare error = (msg: any, level: any?) -> never
 --:: declare assert = (val: any, ...any) -> any
---:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 --:: declare pcall = <F: function>(f: F, ...any) -> ...(PcallReturn<F>)
 --:: declare xpcall = <F: function>(f: F, handler: (string) -> string, ...any) -> ...(PcallReturn<F>)
 --:: declare require = <T: string>(module: T) -> $Require<T>
@@ -28,8 +28,8 @@
 --:: declare ipairs = <T>(t: T) -> ...(IpairsReturn<T>)
 
 --:: PairsReturn<T> = match T {
---::   { [K]: V } => (K, V),
---::   T          => (string, $Values<T>)
+--::   { [%K]: %V } => (K, V),
+--::   T            => (string, $Values<T>)
 --:: }
 
 --:: IpairsReturn<T> = match T {

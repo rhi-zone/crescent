@@ -17,8 +17,8 @@ Example:
 
 ```lua
 --:: PairsReturn<T> = match T {
---::   { [K]: V }    => (K, V),        -- indexer case (already exists)
---::   { ...[K]: V } => (string, V)    -- named-field case: K is always string
+--::   { [%K]: %V }    => (K, V),        -- indexer case (already exists)
+--::   { ...[%K]: %V } => (string, V)    -- named-field case: K is always string
 --:: }
 ```
 
@@ -85,8 +85,8 @@ In a match with both arms:
 
 ```lua
 --:: PairsReturn<T> = match T {
---::   { [K]: V }    => (K, V),
---::   { ...[K]: V } => (string, V)
+--::   { [%K]: %V }    => (K, V),
+--::   { ...[%K]: %V } => (string, V)
 --:: }
 ```
 
@@ -100,13 +100,13 @@ intrinsics become expressible in stdlib.d.lua:
 
 ```lua
 --:: PairsReturn<T> = match T {
---::   { [K]: V }    => (K, V),
---::   { ...[K]: V } => (string, V)
+--::   { [%K]: %V }    => (K, V),
+--::   { ...[%K]: %V } => (string, V)
 --:: }
 
 --:: IpairsReturn<T> = match T {
---::   { [K]: V }    => match K { integer => (integer, V), _ => never },
---::   { ...[K]: V } => never
+--::   { [%K]: %V }    => match K { integer => (integer, V), _ => never },
+--::   { ...[%K]: %V } => never
 --:: }
 
 --:: $Keys<T> ... -- see below
@@ -116,8 +116,8 @@ intrinsics become expressible in stdlib.d.lua:
 
 ```lua
 --:: Keys<T> = match T {
---::   { [K]: V }    => K,
---::   { ...[K]: V } => string
+--::   { [%K]: %V }    => K,
+--::   { ...[%K]: %V } => string
 --:: }
 ```
 
@@ -127,8 +127,8 @@ Once `{ ...[K]: V }` exists, `$Keys` can be deleted.
 
 ```lua
 --:: Values<T> = match T {
---::   { [K]: V }    => V,
---::   { ...[K]: V } => V
+--::   { [%K]: %V }    => V,
+--::   { ...[%K]: %V } => V
 --:: }
 ```
 
@@ -154,8 +154,8 @@ match to filter:
 
 ```lua
 --:: IpairsReturn<T> = match T {
---::   { [K]: V }    => match K { integer => (integer, V), _ => never },
---::   { ...[K]: V } => never
+--::   { [%K]: %V }    => match K { integer => (integer, V), _ => never },
+--::   { ...[%K]: %V } => never
 --:: }
 ```
 
@@ -241,8 +241,8 @@ PAT_ALL_FIELDS = N   -- new constant in defs.lua (or match.lua)
 
 Add to `lib/type/static/type_test.lua`:
 
-1. `match { x = 1, y = "hello" } { { ...[K]: V } => V }` → `integer | string`
-2. `match { [string]: integer } { { ...[K]: V } => K }` → `string`
+1. `match { x = 1, y = "hello" } { { ...[%K]: %V } => V }` → `integer | string`
+2. `match { [string]: integer } { { ...[%K]: %V } => K }` → `string`
 3. `PairsReturn<{ x: integer, y: string }>` → `(string, integer | string)`
 4. `PairsReturn<{ [string]: integer }>` → `(string, integer)`
 5. `IpairsReturn<{ [integer]: string }>` → `(integer, string)`
@@ -264,11 +264,11 @@ Once `{ ...[K]: V }` is implemented and the above tests pass:
 
 ## Relation to Existing Patterns
 
-| Pattern         | Matches           | Binds            | Can fail? |
-|-----------------|-------------------|------------------|-----------|
-| `{ [K]: V }`    | Indexer tables    | K=key, V=value   | Yes (no indexer → fail) |
-| `{ ...[K]: V }` | Any table (total) | K=key∪, V=val∪  | No        |
-| `() -> R`       | Any function      | R=return type    | No        |
+| Pattern           | Matches           | Binds            | Can fail? |
+|-------------------|-------------------|------------------|-----------|
+| `{ [%K]: %V }`    | Indexer tables    | K=key, V=value   | Yes (no indexer → fail) |
+| `{ ...[%K]: %V }` | Any table (total) | K=key∪, V=val∪  | No        |
+| `() -> %R`        | Any function      | R=return type    | No        |
 
 The `{ ...[K]: V }` pattern follows the same "total catch-all" design as `() -> R` in
 function-arm patterns: it always succeeds and is intended as the fallback arm.
@@ -280,19 +280,19 @@ arbitrary pattern P while binding K/V from all entries. P can be anything:
 
 ```lua
 --:: Entries<T> = match T {
---::   { foo: string, ... }    & { ...[K]: V } => (K, V),  -- named field constraint
---::   { [integer]: unknown }  & { ...[K]: V } => (K, V),  -- indexer constraint
---::   (A | B)                 & { ...[K]: V } => (K, V),  -- union type constraint
---::   () -> unknown           & { ...[K]: V } => (K, V),  -- callable objects (__call tables)
+--::   { foo: string, ... }    & { ...[%K]: %V } => (K, V),  -- named field constraint
+--::   { [integer]: unknown }  & { ...[%K]: %V } => (K, V),  -- indexer constraint
+--::   (A | B)                 & { ...[%K]: %V } => (K, V),  -- union type constraint
+--::   () -> unknown           & { ...[%K]: %V } => (K, V),  -- callable objects (__call tables)
 --:: }
 ```
 
 The two operations are orthogonal:
 
-- **`{ ...[K]: V }` result filter** (`match K { integer => ... }`): controls what appears
+- **`{ ...[%K]: %V }` result filter** (`match K { integer => ... }`): controls what appears
   in the *output* of the match result expression.
-- **Pattern intersection** (`P & { ...[K]: V }`): controls what *input* types are accepted.
+- **Pattern intersection** (`P & { ...[%K]: %V }`): controls what *input* types are accepted.
 
-Pattern `&` is not needed for `{ ...[K]: V }` itself — the existing use cases (PairsReturn,
+Pattern `&` is not needed for `{ ...[%K]: %V }` itself — the existing use cases (PairsReturn,
 IpairsReturn, Keys, Values) are all covered without it. It's a separate future feature that
 composes naturally with this pattern when input-shape constraints are needed.

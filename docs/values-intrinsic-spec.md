@@ -7,8 +7,8 @@ user-definable match aliases instead of compiler intrinsics. Specifically:
 
 ```lua
 --:: PairsReturn<T> = match T {
---::   { [K]: V } => (K, V),
---::   T          => (string, $Values<T>)
+--::   { [%K]: %V } => (K, V),
+--::   T            => (string, $Values<T>)
 --:: }
 
 --:: IpairsReturn<T> = match T {
@@ -94,8 +94,8 @@ into a standalone function and call it from both the existing
 --:: declare ipairs = <T>(t: T) -> ...(IpairsReturn<T>)
 
 --:: PairsReturn<T> = match T {
---::   { [K]: V } => (K, V),
---::   T          => (string, $Values<T>)
+--::   { [%K]: %V } => (K, V),
+--::   T            => (string, $Values<T>)
 --:: }
 
 --:: IpairsReturn<T> = match T {

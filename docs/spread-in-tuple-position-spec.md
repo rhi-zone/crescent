@@ -6,16 +6,16 @@ Enable `$PcallReturn<F>` to be expressed as a user-definable match alias
 instead of a compiler intrinsic. Specifically:
 
 ```lua
---:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 ```
 
-Where `R` is bound to the multi-return tuple of F by the existing `() -> R`
+Where `R` is bound to the multi-return tuple of F by the existing `() -> %R`
 function-arm pattern (see match.lua lines 185-218), and `...R` splices R's
 elements into the result tuple.
 
 ## Current State
 
-`() -> R` in a match arm already binds R:
+`() -> %R` in a match arm already binds R:
 - If F returns 1 value: R = that value type (e.g. `integer`)
 - If F returns N>1 values: R = TAG_TUPLE(all return types)
 
@@ -49,7 +49,7 @@ when processing a TAG_TUPLE that contains a trailing TAG_SPREAD entry):
 
 This allows `$PcallReturn<F>` to be written entirely in stdlib.d.lua:
 ```lua
---:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 ```
 and the `$PcallReturn` intrinsic in `intrinsic.lua` can be deleted.
 
@@ -113,7 +113,7 @@ end
 ```lua
 --:: declare pcall  = <F: function>(f: F, ...any) -> ...(PcallReturn<F>)
 --:: declare xpcall = <F: function>(f: F, handler: (string) -> string, ...any) -> ...(PcallReturn<F>)
---:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 ```
 
 ### intrinsic.lua — delete $PcallReturn expansion
