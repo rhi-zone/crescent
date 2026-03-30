@@ -679,8 +679,26 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
             ctx._allow_unapplied_constructors = true
         end
         local arg_ids = {} --: { [integer]: integer, ... }
-        for i = at.data[1], at.data[1] + at.data[2] - 1 do
+        -- $Catch<T, Default?> must intercept $Throw inside T.
+        -- Set catch_mode before resolving the first arg only.
+        local is_catch_intrinsic = ct.tag == defs.TAG_INTRINSIC
+            and intern_mod.get(ctx.pool, ct.data[0]) == "Catch"
+        local ann_arg_start = at.data[1]
+        local ann_arg_count = at.data[2]
+        if is_catch_intrinsic then
+            ctx.catch_mode = true
+            ctx.catch_threw = false
+        end
+        for i = ann_arg_start, ann_arg_start + ann_arg_count - 1 do
+            -- After the first arg of $Catch, disable catch_mode so Default
+            -- is resolved normally (its throws are not intercepted).
+            if is_catch_intrinsic and i == ann_arg_start + 1 then
+                ctx.catch_mode = false
+            end
             arg_ids[#arg_ids + 1] = resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen)
+        end
+        if is_catch_intrinsic then
+            ctx.catch_mode = false
         end
         ctx._allow_unapplied_constructors = prev_allow
         seen[ann_tid] = nil

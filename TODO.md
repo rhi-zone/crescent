@@ -175,6 +175,48 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 
 - [ ] **`lib/ecs/`** — entity-component substrate. Named entities, typed components, spatial containment (entities inside entities), mutable state store. User-defined schemas — no hardcoded concepts like "room" or "inventory". The primitive for building world simulations, games, or any entity-centric stateful system. Turn loop, perception rules, mutation rules, and renderers (RP prose, MUD-style, etc.) are built on top by the user.
 
+## typechecker type-level features (designed this session, needs implementation)
+
+- [ ] **`$EachField<T, F>` intrinsic** — per-field flatMap. Spec: docs/each-field-spec.md.
+  F is a single-param named alias returning `{}` (drop), `{ D }` (keep/transform), or
+  `{ D1, D2 }` (expand). Descriptor: `{ key, value, optional, readonly }`. F uses
+  `{ flag: _, ...%Rest } => { flag: newval, ...Rest }` pattern. Permanent intrinsic —
+  gather + flag write cannot be expressed as pure match. Enables Partial, Required,
+  Readonly, Writable, NonOptional. Open question: parameterized F for Pick/Omit requires
+  partial application of generic aliases (not yet designed).
+
+- [ ] **Interface declaration syntax `--:: Name: Base`** — explicit refinement at
+  definition site. `--:: Monad<T>: Functor<T> = { ... }` declares Monad as an intentional
+  extension of Functor — if Functor gains a required field, Monad breaks at declaration
+  (not silently at use sites). Same for concrete types: `--:: MyList: Functor<integer> = { ... }`.
+  Uses `:` consistent with generic constraints `<T: U>`. Bidirectional inference from the
+  declared base type guides method body checking (reduces annotation burden). Needs design
+  for: how the declared base propagates into field/method inference, interaction with
+  structural typing. Not yet specced.
+
+- [ ] **Partial application of generic aliases** — `$EachField<T, PickKey<Keys>>` where
+  `PickKey<Keys>` is a partially applied alias used as an HKT argument. Needed for
+  Pick<T, Keys> and Omit<T, Keys>. Not yet designed.
+
+- [ ] **`{ ...[%K]: %V }` table-pattern rest capture** — `{ field: %X, ...%Rest }` in
+  match patterns: captures remaining fields into Rest; `...Rest` in result splices them
+  back. Specced in docs/capture-sigil-spec.md. Needed for $EachField F aliases.
+  Implementation: ann.lua + match.lua.
+
+- [ ] **`(...%P) -> T` and `(A, ...%P) -> T` param captures** — specced in
+  docs/capture-sigil-spec.md. Enables Parameters<F>, Tail<F>, Last<F>, Init<F>.
+  At most one `...%P` per param list, may appear anywhere. Implementation: ann.lua +
+  match.lua.
+
+- [ ] **`{ #...%M }` meta-slot spread** — specced in docs/meta-spread-spec.md.
+  `setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }`. `MetaOf<T>` alias.
+  Implementation: ann.lua + match.lua + types.lua.
+
+- [ ] **Literal type ops** — see docs/literal-type-ops-spec.md. Conclusion: none needed
+  now. Implement on demand. Boolean ops expressible as match aliases (no primitives needed).
+  String `..` has no crescent use case (JS-heritage motivation doesn't apply). `#tuple`
+  and `LIT_INTEGER` arithmetic have no concrete use cases yet.
+
 ## priorities (medium horizon)
 
 - [ ] **Registry + docs site** (`pkg.crescent.run`) — see `docs/registry-design.md` for full vision.

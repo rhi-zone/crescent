@@ -9,10 +9,13 @@
 --   $IpairsValues<T>   — union of numeric/positional field value types in T
 --   $EachUnion<T, F>   — apply F to each member of union T, re-union results
 --   $EachField<T, F>   — apply F to each field descriptor of T, collect into table
+--   $Throw<...Msg>     — emit a diagnostic at the use site; returns never
+--   $Catch<T, Default?> — suppress $Throw inside T; return Default (or never) if thrown
 
-local defs      = require("lib.type.static.defs")
-local types_mod = require("lib.type.static.types")
+local defs       = require("lib.type.static.defs")
+local types_mod  = require("lib.type.static.types")
 local intern_mod = require("lib.type.static.intern")
+local errors_mod = require("lib.type.static.errors")
 local band       = require("bit").band
 
 local TAG_TABLE        = defs.TAG_TABLE
