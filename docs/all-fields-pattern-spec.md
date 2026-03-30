@@ -283,7 +283,7 @@ arbitrary pattern P while binding K/V from all entries. P can be anything:
 --::   { foo: string, ... }    & { ...[K]: V } => (K, V),  -- named field constraint
 --::   { [integer]: unknown }  & { ...[K]: V } => (K, V),  -- indexer constraint
 --::   (A | B)                 & { ...[K]: V } => (K, V),  -- union type constraint
---::   () -> unknown           & { ...[K]: V } => (K, V),  -- function (odd but legal)
+--::   () -> unknown           & { ...[K]: V } => (K, V),  -- callable objects (__call tables)
 --:: }
 ```
 
