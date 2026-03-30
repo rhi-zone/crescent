@@ -111,9 +111,12 @@ function M.match_pattern(ctx, ty_id, pat_id)
     end
     if tt.tag == TAG_LITERAL then
         local kind = tt.data[0]
-        if kind == LIT_STRING  and pt.tag == TAG_STRING  then return true, {} end
-        if kind == LIT_NUMBER  and pt.tag == TAG_NUMBER  then return true, {} end
-        if kind == LIT_BOOLEAN and pt.tag == TAG_BOOLEAN then return true, {} end
+        if kind == LIT_STRING   and pt.tag == TAG_STRING  then return true, {} end
+        if kind == LIT_NUMBER   and pt.tag == TAG_NUMBER  then return true, {} end
+        if kind == LIT_BOOLEAN  and pt.tag == TAG_BOOLEAN then return true, {} end
+        -- LIT_INTEGER: subtype of both integer and number
+        if kind == defs.LIT_INTEGER and pt.tag == TAG_INTEGER then return true, {} end
+        if kind == defs.LIT_INTEGER and pt.tag == TAG_NUMBER  then return true, {} end
     end
 
     -- Table pattern: structural match with field-level and indexer capture variables.
@@ -340,6 +343,7 @@ function M.evaluate(ctx, mt_id, seen)
         if pat_t.tag == TAG_PAT_ALL_FIELDS then
             local k_name_id = pat_t.data[0]
             local v_name_id = pat_t.data[1]
+            --: { [integer]: integer, ... }
             local results = {}
             local env_mod = require("lib.type.static.env")
 
@@ -356,13 +360,25 @@ function M.evaluate(ctx, mt_id, seen)
                 -- One synthetic iteration: K=unknown, V=unknown
                 results[#results + 1] = eval_with_kv(ctx.T_UNKNOWN, ctx.T_UNKNOWN)
             elseif pt.tag == TAG_TABLE then
-                -- Named fields: K = lit_string(field_name), V = field_type
+                -- Named fields: K = lit_integer(name) if name is an integer, else lit_string(name)
+                local intern_mod_af = require("lib.type.static.intern")
                 for fi_idx = pt.data[0], pt.data[0] + pt.data[1] - 1 do
                     local fid = ctx.lists:get(fi_idx)
                     local fe  = ctx.fields:get(fid)
                     if fe.name_id >= 0 then  -- skip spread markers (name_id == -1)
-                        local k_tid = types_mod.make_literal(ctx, defs.LIT_STRING, fe.name_id)
-                        local v_tid = types_mod.find(ctx, fe.type_id)
+                        local field_name = intern_mod_af.get(ctx.pool, fe.name_id) or ""
+                        local int_val = tonumber(field_name)
+                        local k_tid
+                        if int_val and math.floor(int_val) == int_val then
+                            -- Integer-named field (e.g. positional array element { 1, 2, 3 })
+                            k_tid = types_mod.make_literal(ctx, defs.LIT_INTEGER, int_val)
+                        else
+                            k_tid = types_mod.make_literal(ctx, defs.LIT_STRING, fe.name_id)
+                        end
+                        -- Widen value types: literal integer → integer, literal string → string, etc.
+                        -- This ensures that iterating over `{ 1, 2, 3 }` gives V = integer,
+                        -- not the narrow literal types `1 | 2 | 3`.
+                        local v_tid = types_mod.widen(ctx, fe.type_id)
                         results[#results + 1] = eval_with_kv(k_tid, v_tid)
                     end
                 end
@@ -374,10 +390,9 @@ function M.evaluate(ctx, mt_id, seen)
                     results[#results + 1] = eval_with_kv(k_tid, v_tid)
                     j = j + 2
                 end
-                -- If no fields and no indexers: one unknown iteration (open/empty table)
-                if pt.data[1] == 0 and pt.data[3] == 0 then
-                    results[#results + 1] = eval_with_kv(ctx.T_UNKNOWN, ctx.T_UNKNOWN)
-                end
+                -- If no fields and no indexers: zero iterations → never (empty/closed table).
+                -- For open tables (with a row variable), the TAG_UNKNOWN/TAG_ANY branch above
+                -- handles the case. An empty closed table has no keys to iterate over.
             else
                 -- Non-table, non-union: one unknown iteration
                 results[#results + 1] = eval_with_kv(ctx.T_UNKNOWN, ctx.T_UNKNOWN)

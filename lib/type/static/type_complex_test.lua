@@ -838,7 +838,7 @@ assert.describe("$Keys adversarial", function()
     assert.it("PASS: valid keys accepted", function()
         no_error([[
 --:: T = { x: number, y: number, z: number }
---:: K = $Keys<T>
+--:: K = Keys<T>
 --: (K) -> nil
 local function f(k) return nil end
 f("x")
@@ -850,7 +850,7 @@ f("z")
     assert.it("ERROR: value not in key union rejected", function()
         has_error([[
 --:: T = { a: number, b: string }
---:: K = $Keys<T>
+--:: K = Keys<T>
 --: (K) -> nil
 local function f(k) return nil end
 f("c")
@@ -860,7 +860,7 @@ f("c")
     assert.it("PASS: $Keys used as index type", function()
         no_error([[
 --:: Row = { name: string, age: number }
---:: K = $Keys<Row>
+--:: K = Keys<Row>
 --: (Row, K) -> any
 local function get(row, key)
     return row[key]
@@ -871,7 +871,7 @@ end
     assert.it("PASS: $Keys of empty table produces never — function is untouchable", function()
         no_error([[
 --:: Empty = {}
---:: K = $Keys<Empty>
+--:: K = Keys<Empty>
 --: (K) -> nil
 local function f(k) return nil end
 ]])
@@ -885,7 +885,7 @@ end)
 assert.describe("$EachField adversarial", function()
     assert.it("PASS: Partial<T> makes all fields nullable", function()
         no_error([[
---:: MakeOpt<F> = match F { { key: K, value: V } => { key: K, value: V? } }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
 --:: Partial<T> = $EachField<T, MakeOpt>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "alice", age = 30 }
@@ -896,7 +896,7 @@ x = { name = nil, age = nil }
     assert.it("PASS: Partial<T> directly with already-nullable value type", function()
         -- Partial<{a: string | nil}> should be {a: string | nil} (nil|nil normalises).
         no_error([[
---:: MakeOpt<F> = match F { { key: K, value: V } => { key: K, value: V? } }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
 --:: Partial<T> = $EachField<T, MakeOpt>
 local x --: Partial<{ a: string | nil }>
 x = { a = nil }
@@ -909,7 +909,7 @@ x = { a = "hello" }
     -- type argument to the outer alias. Tracked in TODO.md.
     assert.it("GAP-NEST: Partial<Partial<T>> produces never (known bug)", function()
         local ec = v3([[
---:: MakeOpt<F> = match F { { key: K, value: V } => { key: K, value: V? } }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
 --:: Partial<T>   = $EachField<T, MakeOpt>
 --:: BiPartial<T> = Partial<Partial<T>>
 local x --: BiPartial<{ a: string }>
@@ -921,7 +921,7 @@ x = { a = nil }
 
     assert.it("PASS: $EachField identity transform (value type preserved)", function()
         no_error([[
---:: Id<F> = match F { { key: K, value: V } => { key: K, value: V } }
+--:: Id<F> = match F { { key: %K, value: %V } => { key: K, value: V } }
 --:: Same<T> = $EachField<T, Id>
 local x --: Same<{ name: string }>
 x = { name = "bob" }
@@ -1116,7 +1116,7 @@ end)
 assert.describe("match: indexer arm patterns", function()
     assert.it("PASS: extract value type from indexer via { [K]: V } => V", function()
         no_error([[
---:: ValueOf<T> = match T { { [K]: V } => V }
+--:: ValueOf<T> = match T { { [%K]: %V } => V }
 local x --: ValueOf<{ [string]: integer }>
 --: integer
 local y = x
@@ -1125,7 +1125,7 @@ local y = x
 
     assert.it("PASS: extract key type from indexer via { [K]: V } => K", function()
         no_error([[
---:: KeyOf<T> = match T { { [K]: V } => K }
+--:: KeyOf<T> = match T { { [%K]: %V } => K }
 local x --: KeyOf<{ [string]: integer }>
 --: string
 local y = x
@@ -1134,7 +1134,7 @@ local y = x
 
     assert.it("PASS: integer-indexed table extracts correct value type", function()
         no_error([[
---:: ElementType<T> = match T { { [integer]: V } => V }
+--:: ElementType<T> = match T { { [integer]: %V } => V }
 local arr --: { [integer]: number }
 local x --: ElementType<{ [integer]: number }>
 --: number
@@ -1146,7 +1146,7 @@ local y = x
         -- A table with only named fields has no indexer, so { [K]: V } should fail to match.
         -- The result is never (no arm matches).
         no_error([[
---:: ValueOf<T> = match T { { [K]: V } => V }
+--:: ValueOf<T> = match T { { [%K]: %V } => V }
 local x --: ValueOf<{ name: string }>
 -- x has type never (no indexer arm matched)
 ]])
@@ -1154,7 +1154,7 @@ local x --: ValueOf<{ name: string }>
 
     assert.it("PASS: combined field and indexer pattern", function()
         no_error([[
---:: DescribeMap<T> = match T { { len: L, [K]: V } => { key: K, value: V, len: L } }
+--:: DescribeMap<T> = match T { { len: %L, [%K]: %V } => { key: K, value: V, len: L } }
 local x --: DescribeMap<{ len: integer, [string]: number }>
 local k --: string  = x.key
 local v --: number  = x.value

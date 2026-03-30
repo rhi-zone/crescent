@@ -137,16 +137,45 @@ local function resolve_deferred_intrinsic(ctx, tid)
             end
             local match_mod = require("lib.type.static.match")
             local result_tid = match_mod.evaluate(ctx, inner_tid)
-            -- If the result is a 2-tuple (K, V), build a full iterator triple
-            -- so the for-in handler's C_INDEX(triple, 0) gets an iter_fn,
-            -- not a bare key type.  Other match results (unions, 1-tuples, etc.)
-            -- are returned as-is.
-            local result_t = ctx.types:get(find(ctx, result_tid))
+            -- If the result is a 2-tuple (K, V) or a union of 2-tuples,
+            -- build a full iterator triple so the for-in handler's
+            -- C_INDEX(triple, 0) gets an iter_fn, not a bare key type.
+            -- Union-of-2-tuples arises from { ...[%K]: %V } distribution:
+            -- e.g. PairsReturn<{ x: integer, y: string }> = ("x",integer)|("y",string)
+            -- → collapse to K = "x"|"y", V = integer|string → iter_fn: (T, K?) -> (K,V).
+            local intrinsic_mod = require("lib.type.static.intrinsic")
+            local result_canon = find(ctx, result_tid)
+            local result_t = ctx.types:get(result_canon)
             if result_t.tag == TAG_TUPLE and result_t.data[1] == 2 then
                 local K_tid = find(ctx, ctx.lists:get(result_t.data[0]))
                 local V_tid = find(ctx, ctx.lists:get(result_t.data[0] + 1))
-                local intrinsic_mod = require("lib.type.static.intrinsic")
                 return intrinsic_mod.build_iter_triple(ctx, param_resolved, K_tid, V_tid)
+            end
+            if result_t.tag == TAG_UNION then
+                -- Check if all union members are 2-tuples; if so, collapse K and V.
+                local ks, vs = {}, {}
+                local all_pairs = true
+                for ui = result_t.data[0], result_t.data[0] + result_t.data[1] - 1 do
+                    local member = ctx.types:get(find(ctx, ctx.lists:get(ui)))
+                    if member.tag == TAG_TUPLE and member.data[1] == 2 then
+                        ks[#ks + 1] = find(ctx, ctx.lists:get(member.data[0]))
+                        vs[#vs + 1] = find(ctx, ctx.lists:get(member.data[0] + 1))
+                    elseif member.tag == TAG_NEVER then
+                        -- skip never members (e.g. from filtered-out ipairs arms)
+                    else
+                        all_pairs = false
+                        break
+                    end
+                end
+                if all_pairs and #ks > 0 then
+                    local K_tid = #ks == 1 and ks[1] or types_mod.make_union(ctx, ks)
+                    local V_tid = #vs == 1 and vs[1] or types_mod.make_union(ctx, vs)
+                    return intrinsic_mod.build_iter_triple(ctx, param_resolved, K_tid, V_tid)
+                end
+                if all_pairs and #ks == 0 then
+                    -- All members were never: result is never (no valid iteration)
+                    return ctx.T_NEVER
+                end
             end
             return result_tid
         end

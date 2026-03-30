@@ -97,6 +97,20 @@ M.TAG_TYPEOF            = 25  -- annotation-only: typeof <ident> — capture inf
 M.TAG_FFIC              = 26  -- magic: the live ffi.C table for this compilation unit
 -- TAG_FFIC has no data slots; it resolves to ctx.T_FFI_C at check time.
 -- Written as $FfiC in annotations; the solver substitutes it with ctx.T_FFI_C.
+M.TAG_CAPTURE           = 27  -- pattern-position capture variable: %Name
+-- TypeSlot layout for TAG_CAPTURE:
+--   data[0] = name_id  (intern ID of the capture variable name)
+-- When encountered in a match pattern, binds name_id -> resolved input type.
+-- Always succeeds (acts as wildcard). Used only in annotation arena; never in checker arena.
+M.TAG_PAT_ALL_FIELDS    = 28  -- { ...[%K]: %V } pattern: distributes over all fields of input
+-- TypeSlot layout for TAG_PAT_ALL_FIELDS:
+--   data[0] = k_name_id  (intern ID of the key capture variable name)
+--   data[1] = v_name_id  (intern ID of the value capture variable name)
+-- Evaluator: for each named field -> K = lit_string(name), V = field_type;
+--            for each indexer -> K = key_type, V = value_type;
+--            TAG_ANY/TAG_UNKNOWN -> one iteration K=unknown, V=unknown;
+--            TAG_NEVER -> zero iterations -> never.
+-- Always matches (total pattern). Used only in annotation arena pattern positions.
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0

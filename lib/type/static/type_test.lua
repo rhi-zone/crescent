@@ -5097,6 +5097,135 @@ x = "only"
     end)
 end)
 
+assert.describe("capture sigil: %Name in match patterns", function()
+    assert.it("indexer capture: match { x: integer } { { [%K]: %V } => K } gives string", function()
+        -- { x: integer } has no indexer, so { [%K]: %V } doesn't match — result is never.
+        -- Use a table WITH an indexer.
+        v3_no_errors([[
+--:: T = { [string]: integer }
+--:: K = match T { { [%K]: %V } => K }
+local x --: K
+x = "hello"
+]])
+    end)
+
+    assert.it("wildcard capture: match integer { %T => T } captures and returns integer", function()
+        v3_no_errors([[
+--:: Cap<T> = match T { %T => T }
+--:: R = Cap<integer>
+local x --: R
+x = 42
+]])
+    end)
+
+    assert.it("concrete name pattern: known type resolves, arm fires on subtype", function()
+        -- `integer` is a concrete pattern; integer value should match
+        v3_no_errors([[
+--:: NumberOrNot<T> = match T { number => "yes", _ => "no" }
+--:: R = NumberOrNot<integer>
+local x --: R
+x = "yes"
+]])
+    end)
+
+    assert.it("bare name pattern that is not in scope: arm fails → never", function()
+        -- `Undefined` is not a declared alias, so the arm fails; result is never.
+        -- A function accepting `never` cannot be called with any value.
+        v3_has_error([[
+--:: R = match integer { Undefined => string }
+--: (R) -> nil
+local function f(r) return nil end
+f("anything")
+]], "")
+    end)
+end)
+
+assert.describe("all-fields pattern: { ...[%K]: %V }", function()
+    assert.it("PairsReturn over named-field table: k is string literal union", function()
+        -- PairsReturn<{ x: integer, y: string }> distributes to ("x", integer)|("y", string).
+        -- After iter triple collapsing: K = "x"|"y", V = integer|string.
+        v3_no_errors([[
+--: (t: { x: integer, y: string }) -> nil
+local function test(t)
+    for k, v in pairs(t) do
+        local _k --: "x" | "y"
+        _k = k
+    end
+    return nil
+end
+]])
+    end)
+
+    assert.it("PairsReturn over indexer table: k is key type, v is value type", function()
+        -- PairsReturn<{ [string]: integer }> → (string, integer)
+        v3_no_errors([[
+--: { [string]: integer }
+local m = {}
+for k, v in pairs(m) do
+    local _k --: string
+    _k = k
+    local x = v + 1
+end
+]])
+    end)
+
+    assert.it("IpairsReturn over integer-indexer table: v is value type", function()
+        -- IpairsReturn<{ [integer]: string }> → (integer, string)
+        v3_no_errors([[
+--: { [integer]: string }
+local arr = {}
+for i, v in ipairs(arr) do
+    local _v --: string
+    _v = v
+end
+]])
+    end)
+
+    assert.it("IpairsReturn over named-field-only table: v is never (non-integer keys)", function()
+        -- { x: integer } has field key "x" (string literal), not integer-typed.
+        -- match "x" { number => ... } fails → IpairsReturn = never.
+        v3_no_errors([[
+--: (t: { x: integer }) -> nil
+local function test(t)
+    for i, v in ipairs(t) do
+        -- loop body is unreachable (iter triple based on never)
+    end
+    return nil
+end
+]])
+    end)
+
+    assert.it("Keys<{ x: integer, y: string }> = \"x\" | \"y\"", function()
+        v3_no_errors([[
+--:: K = Keys<{ x: integer, y: string }>
+local a --: K
+a = "x"
+a = "y"
+]])
+        v3_has_error([[
+--:: K = Keys<{ x: integer, y: string }>
+--: (K) -> nil
+local function f(k) return nil end
+f("z")
+]], "")
+    end)
+
+    assert.it("Values<{ x: integer, y: string }> = integer | string", function()
+        v3_no_errors([[
+--:: V = Values<{ x: integer, y: string }>
+local a --: V
+a = 42
+a = "hi"
+]])
+        v3_has_error([[
+--:: V = Values<{ x: integer, y: string }>
+--: (V) -> nil
+local function f(v) return nil end
+f(true)
+]], "")
+    end)
+end)
+
 assert.describe("intrinsic: $EachUnion<T, F>", function()
     assert.it("applies match type to each union member and re-unions", function()
         -- match number => string; match boolean => "true"|"false"
@@ -5126,7 +5255,7 @@ assert.describe("intrinsic: $EachField<T, F>", function()
         -- Identity<F> = match F { F => F } returns the descriptor unchanged.
         -- $EachField<{ a: number }, Identity> => { a: number }
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: R = $EachField<{ a: number }, Identity>
 local x --: R
 x = { a = 42 }
@@ -5135,7 +5264,7 @@ x = { a = 42 }
 
     assert.it("identity on multi-field table preserves all fields", function()
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: R = $EachField<{ x: number, y: string }, Identity>
 local v --: R
 v = { x = 1, y = "hi" }
@@ -5171,7 +5300,7 @@ x = 42
     assert.it("PASS: Unwrap<Unwrap<T>> double application — resolves to inner type", function()
         -- Inner = Unwrap<{ value: string }> = string; Outer = Unwrap<string> = string.
         v3_no_errors([[
---:: Unwrap<T> = match T { { value: %A } => A, T => T }
+--:: Unwrap<T> = match T { { value: %A } => A, %T => T }
 --:: Inner = Unwrap<{ value: string }>
 --:: Outer = Unwrap<Inner>
 local x --: Outer
@@ -5229,7 +5358,7 @@ x = true
         -- independently; a boolean must not be.
         -- Test number assignment (separate from string to avoid literal narrowing).
         v3_no_errors([[
---:: Wide<T> = match T { number => number | string, T => T }
+--:: Wide<T> = match T { number => number | string, %T => T }
 --:: R = Wide<number>
 local x --: R
 local n --: number
@@ -5237,7 +5366,7 @@ x = n
 ]])
         -- Test string assignment independently.
         v3_no_errors([[
---:: Wide<T> = match T { number => number | string, T => T }
+--:: Wide<T> = match T { number => number | string, %T => T }
 --:: R = Wide<number>
 local x --: R
 local s --: string
@@ -5245,7 +5374,7 @@ x = s
 ]])
         -- Boolean must not be assignable to number | string.
         v3_has_error([[
---:: Wide<T> = match T { number => number | string, T => T }
+--:: Wide<T> = match T { number => number | string, %T => T }
 --:: R = Wide<number>
 local x --: R
 x = true
@@ -5257,13 +5386,13 @@ x = true
         -- NumOnly<T> returns number for number, never for anything else.
         -- only_num("hello") passes string → NumOnly<string> = never → error.
         v3_no_errors([[
---:: NumOnly<T> = match T { number => number, T => never }
+--:: NumOnly<T> = match T { number => number, %T => never }
 --: <T: NumOnly<T>>(x: T) -> T
 local function only_num(x) return x end
 local r = only_num(42)
 ]])
         v3_has_error([[
---:: NumOnly<T> = match T { number => number, T => never }
+--:: NumOnly<T> = match T { number => number, %T => never }
 --: <T: NumOnly<T>>(x: T) -> T
 local function only_num(x) return x end
 local r = only_num("should fail")
@@ -5442,7 +5571,7 @@ assert.describe("adversarial: $EachField interactions", function()
         -- $EachField<Closed, Identity> round-trips through the descriptor; the
         -- result still has field x: number so assigning { x = 1 } is accepted.
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: Closed = { x: number }
 --:: R = $EachField<Closed, Identity>
 local v --: R
@@ -5455,7 +5584,7 @@ v = { x = 1 }
         -- arm's fields and unions the results: { a: number } | { b: string }.
         -- Assigning either shape must succeed; assigning a wrong type must fail.
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: A = { a: number }
 --:: B = { b: string }
 --:: R = $EachField<A | B, Identity>
@@ -5463,7 +5592,7 @@ local v --: R
 v = { a = 1 }
 ]])
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: A = { a: number }
 --:: B = { b: string }
 --:: R = $EachField<A | B, Identity>
@@ -5477,7 +5606,7 @@ v = { b = "hi" }
         -- G to the result's fields.  The result is structurally identical to T
         -- when both F and G are Identity, so { a = 42 } is accepted.
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: R = $EachField<$EachField<{ a: number }, Identity>, Identity>
 local v --: R
 v = { a = 42 }
@@ -5488,7 +5617,7 @@ v = { a = 42 }
         -- Confirm that after Identity transform the structural check still fires
         -- for a wrong-typed field value.
         v3_has_error([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: R = $EachField<{ n: number }, Identity>
 --: (R) -> nil
 local function accept(r) return nil end
@@ -5588,20 +5717,20 @@ x = "b"
 ]])
     end)
 
-    assert.it("PASS: $EachUnion + $Keys composition — intrinsics compose correctly", function()
-        -- $EachUnion<$Keys<T>, Identity> correctly resolves to "foo" | "bar".
+    assert.it("PASS: $EachUnion + Keys<T> composition — intrinsics compose correctly", function()
+        -- $EachUnion<Keys<T>, Identity> correctly resolves to "foo" | "bar".
         -- Verified: --dump shows x: "foo" | "bar".
         v3_no_errors([[
 --:: T = { foo: number, bar: string }
---:: Identity<X> = match X { X => X }
---:: R = $EachUnion<$Keys<T>, Identity>
+--:: Identity<X> = match X { %X => X }
+--:: R = $EachUnion<Keys<T>, Identity>
 local x --: R
 x = "foo"
 ]])
         v3_no_errors([[
 --:: T = { foo: number, bar: string }
---:: Identity<X> = match X { X => X }
---:: R = $EachUnion<$Keys<T>, Identity>
+--:: Identity<X> = match X { %X => X }
+--:: R = $EachUnion<Keys<T>, Identity>
 local x --: R
 x = "bar"
 ]])
@@ -5749,13 +5878,13 @@ x = src
         -- fields, the safe widened result is `any`, not `never`.
         -- Assigning any value to the result must succeed.
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: R = $EachField<any, Identity>
 local x --: R
 x = "anything"
 ]])
         v3_no_errors([[
---:: Identity<F> = match F { F => F }
+--:: Identity<F> = match F { %F => F }
 --:: R = $EachField<any, Identity>
 local x --: R
 x = 42
