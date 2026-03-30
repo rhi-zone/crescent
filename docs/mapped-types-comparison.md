@@ -121,36 +121,33 @@ This subsumes separate map/filter/remap operations. `Pick`, `Omit`, `Readonly`,
 `Partial`, key renaming — all expressible as different F aliases.
 
 ```lua
--- flag transforms (map)
---:: MakeOptional = match { optional: _, ...%Rest } { _ => { optional: true,  ...Rest } }
---:: MakeRequired = match { optional: _, ...%Rest } { _ => { optional: false, ...Rest } }
---:: MakeReadonly = match { readonly: _, ...%Rest } { _ => { readonly: true,  ...Rest } }
---:: MakeWritable = match { readonly: _, ...%Rest } { _ => { readonly: false, ...Rest } }
+-- flag transforms (map) — F returns a 1-tuple (D,)
+--:: MakeOptional<D> = match D { { optional: _, ...%Rest } => ({ optional: true,  ...Rest },) }
+--:: MakeRequired<D> = match D { { optional: _, ...%Rest } => ({ optional: false, ...Rest },) }
+--:: MakeReadonly<D> = match D { { readonly: _, ...%Rest } => ({ readonly: true,  ...Rest },) }
+--:: MakeWritable<D> = match D { { readonly: _, ...%Rest } => ({ readonly: false, ...Rest },) }
 --:: Partial<T>  = $EachField<T, MakeOptional>
 --:: Required<T> = $EachField<T, MakeRequired>
 --:: Readonly<T> = $EachField<T, MakeReadonly>
 --:: Writable<T> = $EachField<T, MakeWritable>
 
--- filter: F returns never to drop the field
---:: DropOptional = match { optional: %OPT, ...%Rest } { true => never, _ => Rest }
---:: NonOptional<T> = $EachField<T, DropOptional>
+-- filter — F returns () to drop, (D,) to keep
+--:: DropOptional<D> = match D { { optional: true, ... } => (), _ => (D,) }
+--:: NonOptional<T>  = $EachField<T, DropOptional>
 
--- remap: F returns descriptor with different key
---:: ToGetter = match { key: %K, value: %V, ...%Rest } { _ => { key: "get_" .. K, value: () -> V, ...Rest } }
---:: Getters<T> = $EachField<T, ToGetter>
+-- remap — F returns descriptor with different key
+--:: ToGetter<D> = match D { { key: %K, value: %V, ...%Rest } => ({ key: "get_" .. K, value: () -> V, ...Rest },) }
+--:: Getters<T>  = $EachField<T, ToGetter>
 ```
 
-F is a **named alias passed unapplied**. `...%Rest` captures everything not being
-changed and splices it back — you only name what you're transforming. The descriptor
-fields `optional` and `readonly` carry the FLAG_OPTIONAL / FLAG_READONLY bits.
-`$EachField` is a **permanent intrinsic** — per-field gather with flag access cannot
-be expressed as pure match computation.
+F is a **single-parameter named alias passed unapplied**. It always returns a **tuple
+of descriptors**: `()` drops the field, `(D,)` keeps/transforms it, `(D1, D2)` expands
+it. `...%Rest` captures everything not being changed — you only name what you're
+transforming. See docs/each-field-spec.md for the full spec.
 
-**Open question: parameterized F.** `Pick<T, Keys>` and `Omit<T, Keys>` need F to
-close over a `Keys` parameter. With named-alias-only F, this requires a separately
-named alias per key set, which is impractical. Resolution options: allow partially
-applied aliases as HKT arguments (`$EachField<T, PickKey<Keys>>`), or allow inline
-match in `$EachField`'s F position only. Not yet decided.
+**Open question: parameterized F.** `Pick<T, Keys>` needs F to close over `Keys` —
+requires partial application of generic aliases (`$EachField<T, PickKey<Keys>>`). Not
+yet designed.
 
 The two primitives are complementary:
 - Distribution (`{ ...[%K]: %V }`) — read fields, union results, no flag access
