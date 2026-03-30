@@ -3130,9 +3130,8 @@ local function process_type_decls(ctx)
                         -- Extract the constraint name_id from the annotation-arena TAG_NAMED node.
                         local ann_ct = ann.types:get(ctid)
                         local constraint_name_id = ann_ct.data[0]
-                        -- Always register the subtype pair (even if the check fails).
-                        ctx.declared_subtypes[r.name_id] = constraint_name_id
                         -- Structural check: body <: constraint
+                        -- Only register the oracle pair if the check passes.
                         if alias.body and not unify_mod.try_unify(ctx, alias.body, constraint_tid) then
                             local name_str = intern_mod.get(ctx.pool, r.name_id) or "?"
                             local cstr_str = types_mod.display_short(ctx, constraint_tid)
@@ -3145,6 +3144,9 @@ local function process_type_decls(ctx)
                                     constraint = cstr_str,
                                     detail     = "`" .. body_str .. "` is not assignable to `" .. cstr_str .. "`",
                                 }))
+                        else
+                            -- Check passed: register oracle pair so try_unify can short-circuit.
+                            ctx.declared_subtypes[r.name_id] = constraint_name_id
                         end
                     end
 
