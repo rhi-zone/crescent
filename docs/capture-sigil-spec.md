@@ -36,6 +36,8 @@ The `%` sigil makes captures unambiguous regardless of what names happen to be i
 --:: ReturnType<F>  = match F { () -> %R => R }
 --:: Parameters<F>  = match F { (...%P) -> unknown => P }     -- all params as tuple
 --:: Tail<F>        = match F { (integer, ...%P) -> unknown => P }  -- params after first
+--:: Last<F>        = match F { (...%P, %L) -> unknown => L }       -- last param type
+--:: Init<F>        = match F { (...%P, %L) -> unknown => P }       -- all but last
 --:: Keys<T>        = match T { { [%K]: %V } => K, { ...[%K]: %V } => string }
 --:: Values<T>      = match T { { [%K]: %V } => V, { ...[%K]: %V } => V }
 --:: MetaOf<T>      = match T { { #...%M } => M, _ => nil }
@@ -68,7 +70,7 @@ In ann.lua, wherever a name is expected in a pattern position, try `%` first:
 
 - `() -> %Name` — return capture in function arm
 - `(...%Name) -> T` — rest capture: all params as tuple, must be only param
-- `(A, B, ...%Name) -> T` — rest capture after concrete prefix params; `...%Name` must be last
+- `(A, ...%Name, B) -> T` — rest capture with concrete prefix and/or suffix params; at most one `...%Name` per param list. Evaluator matches concrete params from both ends; `...%Name` captures the middle as a tuple.
 - `{ [%Name]: %Name }` — key and value captures in indexer arm
 - `{ ...[%Name]: %Name }` — key and value captures in all-fields arm
 - `{ #...%Name }` — meta-slot capture in meta-spread arm
