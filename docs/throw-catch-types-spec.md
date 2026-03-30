@@ -45,6 +45,38 @@ If `Default` is omitted, returns `T` with all `$Throw` nodes replaced by `never`
 `$Catch` is also a **permanent intrinsic** — it suppresses diagnostic side effects,
 which is a meta-operation on the type checker state.
 
+## When NOT to use `$Throw` — bidirectional inference
+
+**`$Throw` should be used sparingly.** The type solver evaluates aliases multiple times,
+tentatively, while exploring constraints — `$Throw` fires as a side effect every time,
+producing spurious diagnostics for branches that are ultimately not taken. This violates
+the assumption that type computation is pure.
+
+`$Throw` is only appropriate at the **outermost annotation boundary** where evaluation
+is definitive and deliberate:
+
+```lua
+--: AssertExtends<MyType, SomeInterface>  -- fires once, at this site, on purpose
+local x = ...
+```
+
+**Do not use `$Throw` inside type transformations** like `Readonly<T>`, `Partial<T>`, etc.
+These are called speculatively during inference. For non-applicable inputs, return `never`
+or the identity type — let the caller use `$Catch` if they want a message, or just accept
+that `Readonly<integer>` = `integer` (passthrough) or `never` (strict).
+
+The correct `Readonly<T>` does not use `$Throw`:
+
+```lua
+--:: Readonly<T> = match T {
+--::   { ...[%K]: %V } => T,  -- transform the table
+--::   T => T                  -- passthrough for non-tables (or: _ => never for strict)
+--:: }
+```
+
+`$Throw` is for **assertion aliases used at annotation sites** — not for transformation
+aliases used internally by other types.
+
 ## Scope: authored contracts only
 
 `$Catch` intercepts only explicit `$Throw`s placed by the alias author. Regular type
