@@ -195,6 +195,58 @@ arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2",
 			"CaptureId<T1|T2> <: T1|T2 failed for T = " .. union_str)
 	end, { trials = 500 })
 
+-- 6b. CaptureId identity for table types: CaptureId<T> == T for random table T
+arb.it("[eval] match CaptureId<T> == T for table types",
+	arb_table_type,
+	function(t_str)
+		local ci_str = "CaptureId<" .. t_str .. ">"
+		assert(check_sub(t_str, ci_str),
+			"T <: CaptureId<T> failed for table T = " .. t_str)
+		assert(check_sub(ci_str, t_str),
+			"CaptureId<T> <: T failed for table T = " .. t_str)
+	end, { trials = 500 })
+
+-- 6c. CaptureId identity for function types: CaptureId<F> == F for random function F
+arb.it("[eval] match CaptureId<F> == F for function types",
+	arb_function_parts,
+	function(fp)
+		local ci_str = "CaptureId<" .. fp.type_str .. ">"
+		assert(check_sub(fp.type_str, ci_str),
+			"F <: CaptureId<F> failed for F = " .. fp.type_str)
+		assert(check_sub(ci_str, fp.type_str),
+			"CaptureId<F> <: F failed for F = " .. fp.type_str)
+	end, { trials = 500 })
+
+-- 7b. WildConst for table types: WildConst<T> <: integer for any table T
+arb.it("[eval] match WildConst<T> <: integer for table types",
+	arb_table_type,
+	function(t_str)
+		local wc_str = "WildConst<" .. t_str .. ">"
+		assert(check_sub(wc_str, "integer"),
+			"WildConst<T> <: integer failed for table T = " .. t_str)
+	end, { trials = 500 })
+
+-- 7c. WildConst for function types: WildConst<F> <: integer for any function F
+arb.it("[eval] match WildConst<F> <: integer for function types",
+	arb_function_parts,
+	function(fp)
+		local wc_str = "WildConst<" .. fp.type_str .. ">"
+		assert(check_sub(wc_str, "integer"),
+			"WildConst<F> <: integer failed for F = " .. fp.type_str)
+	end, { trials = 500 })
+
+-- 8b. CaptureId union round-trip for table union: CaptureId<T1 | T2> == T1 | T2
+arb.it("[eval] match CaptureId<T1 | T2> == T1 | T2 for table union",
+	{ arb_table_type, arb_table_type },
+	function(t1, t2)
+		local union_str = t1 .. " | " .. t2
+		local ci_str = "CaptureId<" .. union_str .. ">"
+		assert(check_sub(union_str, ci_str),
+			"T1|T2 <: CaptureId<T1|T2> failed for tables T = " .. union_str)
+		assert(check_sub(ci_str, union_str),
+			"CaptureId<T1|T2> <: T1|T2 failed for tables T = " .. union_str)
+	end, { trials = 500 })
+
 -- ── Oracle invariants (2000 trials each, algebra-level type construction) ─────
 
 -- Bare typing context for oracle tests (no prelude, no parsing).

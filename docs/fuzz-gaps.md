@@ -1,8 +1,8 @@
 # Fuzz Suite Gaps
 
-Current state after 2026-03-31 update: 22 algebra invariants, 28 eval invariants,
-24 grammar invariants. The three-tier architecture is in place but coverage is thin.
-This file tracks what's missing, ordered by priority.
+Current state after 2026-03-31 update: 39 algebra invariants, 33 eval invariants (18 arb.it
++ 15 T.it, 500 trials each for arb), 15 grammar programs. The three-tier architecture
+is in place. This file tracks remaining gaps.
 
 ## Tier 1 (Algebra) gaps
 
@@ -30,6 +30,17 @@ Note: uses `arb_base_type` for B so `nil </: B` always holds — contravariant p
 position 2 inserts T_NIL for the target, so try_unify checks `nil <: B`, which fails for
 all of integer/number/string/boolean.
 
+### A5: lattice boundaries — DONE (invariants 25–33, fuzz_alg.lua)
+- [x] `never <: T` for all T — bottom type is subtype of everything
+- [x] `T <: unknown` for all T — everything is subtype of top
+- [x] `base_type </: never` — base types are not subtypes of bottom (negative)
+- [x] `unknown </: base_type` — top is not assignable without narrowing (negative)
+- [x] `unknown | T <: unknown` — union with top stays top
+- [x] `unknown & T <: T` — intersection with top gives the other
+- [x] `T <: unknown & T` — T is in any intersection with top
+- [x] `(unknown)->T <: (base_type)->T` — contravariance with top: wider param OK
+- [x] `(base_type)->T </: (unknown)->T` — contravariance: narrower param fails (negative)
+
 ### A4: meta slot subtyping — DONE (invariants 32–34, fuzz_alg.lua)
 - [x] `{ #__add: T } <: { #__add: T }` — meta reflexivity: invariant 32
 - [x] `{ #__add: T, #__sub: U } <: { #__add: T }` — meta elimination (source has more): invariant 33
@@ -55,6 +66,14 @@ Both added to fuzz_eval_arb.lua. 0–3 params, base types only, never `any`.
 - [x] `arb_union_base(rng, size)` — returns `{ lhs, rhs, type_str }` for two distinct base types (fuzz_eval_arb.lua)
 - [x] G2a: `CaptureId<A | B> == A | B` — capture on union round-trips (500 trials, fuzz_eval.lua)
 - [x] G2b: `$EachField<T1|T2, KeepAll> == $EachField<T1,KeepAll> | $EachField<T2,KeepAll>` — EachField distributivity over union of tables (500 trials, fuzz_eval.lua)
+
+### G3: match identity for non-base types — DONE (fuzz_eval.lua 6b–8b)
+- [x] `CaptureId<T> == T` for random table types (500 trials) — 6b
+- [x] `CaptureId<F> == F` for random function types (500 trials) — 6c
+- [x] `WildConst<T> <: integer` for random table types (500 trials) — 7b
+- [x] `WildConst<F> <: integer` for random function types (500 trials) — 7c
+- [x] `CaptureId<T1 | T2> == T1 | T2` for random table union (500 trials) — 8b
+Previously, match identity was only tested for 4 base types.
 
 ---
 
