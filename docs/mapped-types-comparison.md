@@ -107,32 +107,50 @@ expose optional/readonly flags, and the result is a union, not a reconstructed t
 --:: Values<T> = match T { { ...[%K]: %V } => V }
 ```
 
-### `$EachField<T, F>` — per-field gather/map (specced, permanent intrinsic)
+### `$EachField<T, F>` — general per-field transform (specced, permanent intrinsic)
 
 Iterates each field of T, passes a descriptor `{ key, value, optional, readonly }` to
-F (a match alias using `%` captures), collects transformed fields into **one new table**.
-Handles flag manipulation that `{ ...[%K]: %V }` cannot express.
+F (a match alias using `%` captures), collects results into **one new table**.
+F's return value determines what happens to each field:
+
+- **returns descriptor** → field included (with any modifications to key/value/flags)
+- **returns `never`** → field dropped
+- any combination per-field — map, filter, and remap are all the same primitive
+
+This subsumes separate map/filter/remap operations. `Pick`, `Omit`, `Readonly`,
+`Partial`, key renaming — all expressible as different F aliases.
 
 ```lua
+-- flag transforms (map)
 --:: MakeOptional = match { optional: _, ...%Rest } { _ => { optional: true,  ...Rest } }
---:: Partial<T>  = $EachField<T, MakeOptional>
-
 --:: MakeRequired = match { optional: _, ...%Rest } { _ => { optional: false, ...Rest } }
---:: Required<T> = $EachField<T, MakeRequired>
-
 --:: MakeReadonly = match { readonly: _, ...%Rest } { _ => { readonly: true,  ...Rest } }
---:: Readonly<T> = $EachField<T, MakeReadonly>
-
 --:: MakeWritable = match { readonly: _, ...%Rest } { _ => { readonly: false, ...Rest } }
+--:: Partial<T>  = $EachField<T, MakeOptional>
+--:: Required<T> = $EachField<T, MakeRequired>
+--:: Readonly<T> = $EachField<T, MakeReadonly>
 --:: Writable<T> = $EachField<T, MakeWritable>
+
+-- filter: F returns never to drop the field
+--:: DropOptional = match { optional: %OPT, ...%Rest } { true => never, _ => Rest }
+--:: NonOptional<T> = $EachField<T, DropOptional>
+
+-- remap: F returns descriptor with different key
+--:: ToGetter = match { key: %K, value: %V, ...%Rest } { _ => { key: "get_" .. K, value: () -> V, ...Rest } }
+--:: Getters<T> = $EachField<T, ToGetter>
 ```
 
-F is a **named alias passed unapplied** — same syntactic position as an HKT constraint
-argument. No inline anonymous match expressions in type argument position. `...%Rest`
-captures everything not being transformed (key, value, other flags) and splices it back —
-you only name the field you're changing. The descriptor fields `optional` and `readonly`
-carry the FLAG_OPTIONAL / FLAG_READONLY bits. `$EachField` is a **permanent intrinsic** —
-the gather/flag-write operation cannot be expressed as pure match computation.
+F is a **named alias passed unapplied**. `...%Rest` captures everything not being
+changed and splices it back — you only name what you're transforming. The descriptor
+fields `optional` and `readonly` carry the FLAG_OPTIONAL / FLAG_READONLY bits.
+`$EachField` is a **permanent intrinsic** — per-field gather with flag access cannot
+be expressed as pure match computation.
+
+**Open question: parameterized F.** `Pick<T, Keys>` and `Omit<T, Keys>` need F to
+close over a `Keys` parameter. With named-alias-only F, this requires a separately
+named alias per key set, which is impractical. Resolution options: allow partially
+applied aliases as HKT arguments (`$EachField<T, PickKey<Keys>>`), or allow inline
+match in `$EachField`'s F position only. Not yet decided.
 
 The two primitives are complementary:
 - Distribution (`{ ...[%K]: %V }`) — read fields, union results, no flag access
@@ -156,6 +174,17 @@ rules. What happens to `Partial<A | B>` should be obvious from the alias definit
 **Modifier control is worth having** — optionality (`FLAG_OPTIONAL`) and readonly
 (`FLAG_READONLY`) already exist as field flags. Syntax for adding/removing them in type
 transformations is a real need. The +/-modifier syntax from TS is clean and worth adapting.
+
+**Expose flags as data, not syntax** — TS's `+?`/`-?`/`+readonly`/`-readonly` are
+baked into the mapped type syntax; you can't reflect on whether a field *is* optional
+inside a mapped arm. Crescent's `$EachField` descriptor exposes flags as actual fields
+— F can read them, branch on them, or drop fields that have them. More general, no
+special syntax.
+
+**Map, filter, remap are one primitive** — TS needs mapped types (transform), conditional
+types (filter via `never`), and template literal types (remap keys) as separate mechanisms
+that compose awkwardly. Crescent's `$EachField` handles all three: F returns a descriptor
+(transform/remap) or `never` (filter). One primitive, composable F aliases.
 
 **Keep read and write symmetric** — `{ ...[%K]: %V }` reads; its complement in result
 position should write. This symmetry is easier to learn than TS's different syntax for
