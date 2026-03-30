@@ -106,4 +106,17 @@ function M.arb_function_type(rng, size)
 	return M.arb_function_parts(rng, size).type_str
 end
 
+-- arb_base_type_quad: pick all 4 base types in a random order.
+-- Returns { a, b, c, d } — all four of integer/number/string/boolean, all distinct.
+-- Used to build match arms with no ambiguity (each arm key is unique).
+function M.arb_base_type_quad(rng)
+	local bases = { "integer", "number", "string", "boolean" }
+	-- Fisher-Yates shuffle
+	for i = 4, 2, -1 do
+		local j = math.floor(rng:float() * i) + 1
+		bases[i], bases[j] = bases[j], bases[i]
+	end
+	return { a = bases[1], b = bases[2], c = bases[3], d = bases[4] }
+end
+
 return M

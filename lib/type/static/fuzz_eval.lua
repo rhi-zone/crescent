@@ -66,6 +66,15 @@ local function check_eq(a_str, b_str)
 	return check_sub(a_str, b_str) and check_sub(b_str, a_str)
 end
 
+-- check_sub_ext: like check_sub but prepends extra_scope before FIXED_SCOPE.
+-- Used when the test needs inline alias declarations not in FIXED_SCOPE.
+local function check_sub_ext(a_str, b_str, extra_scope)
+	local src = extra_scope .. FIXED_SCOPE
+		.. "local _fuzz_a --: " .. a_str .. "\n"
+		.. "local _fuzz_b --: " .. b_str .. " = _fuzz_a\n"
+	return typechecks(src)
+end
+
 -- arb generator for a table type string (uses earb, wraps with arb.generate protocol).
 local arb_table_type = {
 	generate = function(rng, sz)
@@ -819,6 +828,63 @@ arb.it("[eval] G2b: EachField<T1|T2, KeepAll> == EachField<T1,KeepAll> | EachFie
 			"EachField<T1|T2,KeepAll> <: EachField<T1,KeepAll>|EachField<T2,KeepAll> failed for T1=" .. t1_str .. " T2=" .. t2_str)
 		assert(check_sub(dist2, dist1),
 			"EachField<T1,KeepAll>|EachField<T2,KeepAll> <: EachField<T1|T2,KeepAll> failed for T1=" .. t1_str .. " T2=" .. t2_str)
+	end, { trials = 500 })
+
+-- ── MA: multi-arm match expression invariants ────────────────────────────────
+-- Tests that the match evaluator correctly dispatches to the right arm,
+-- distributes over unions, and produces `never` for non-matching inputs.
+
+-- arb generator for a base-type quad: all 4 base types in a random order.
+local arb_base_type_quad = {
+	generate = function(rng, _) return earb.arb_base_type_quad(rng), nil end,
+	shrink   = function(_, _) return function() return nil end end,
+}
+
+-- MA1: arm selectivity — correct arm fires (500 trials)
+-- Declare match T { q.a => q.c, q.b => q.d }.
+-- Assert MatchTwo<q.a> == q.c and MatchTwo<q.b> == q.d (bidirectional each).
+arb.it("[eval] MA1: match arm selectivity — correct arm fires",
+	arb_base_type_quad,
+	function(q)
+		local decl = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
+			q.a, q.c, q.b, q.d)
+		-- MatchTwo<q.a> == q.c
+		assert(check_sub_ext("MatchTwo<" .. q.a .. ">", q.c, decl),
+			"MatchTwo<" .. q.a .. "> should <: " .. q.c)
+		assert(check_sub_ext(q.c, "MatchTwo<" .. q.a .. ">", decl),
+			q.c .. " should <: MatchTwo<" .. q.a .. ">")
+		-- MatchTwo<q.b> == q.d
+		assert(check_sub_ext("MatchTwo<" .. q.b .. ">", q.d, decl),
+			"MatchTwo<" .. q.b .. "> should <: " .. q.d)
+		assert(check_sub_ext(q.d, "MatchTwo<" .. q.b .. ">", decl),
+			q.d .. " should <: MatchTwo<" .. q.b .. ">")
+	end, { trials = 500 })
+
+-- MA2: distributivity over union (500 trials)
+-- match (A | B) { A => C, B => D } == C | D
+arb.it("[eval] MA2: match distributivity — match (A|B) { A => C, B => D } == C | D",
+	arb_base_type_quad,
+	function(q)
+		local decl     = ("--:: MatchTwo<T> = match T { %s => %s, %s => %s }\n"):format(
+			q.a, q.c, q.b, q.d)
+		local result   = "MatchTwo<" .. q.a .. " | " .. q.b .. ">"
+		local expected = q.c .. " | " .. q.d
+		assert(check_sub_ext(result, expected, decl),
+			result .. " should <: " .. expected)
+		assert(check_sub_ext(expected, result, decl),
+			expected .. " should <: " .. result)
+	end, { trials = 500 })
+
+-- MA3: non-matching input gives never (500 trials)
+-- match D { A => C, B => C } applied to D (not A, not B) == never
+arb.it("[eval] MA3: match non-matching input == never",
+	arb_base_type_quad,
+	function(q)
+		-- Arms cover q.a and q.b; input is q.d (guaranteed ≠ q.a and ≠ q.b since all 4 distinct)
+		local decl = ("--:: MatchNone<T> = match T { %s => %s, %s => %s }\n"):format(
+			q.a, q.c, q.b, q.c)
+		assert(check_sub_ext("MatchNone<" .. q.d .. ">", "never", decl),
+			"MatchNone<" .. q.d .. "> should <: never (no arm matches)")
 	end, { trials = 500 })
 
 return {}

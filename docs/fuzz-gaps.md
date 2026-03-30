@@ -1,6 +1,6 @@
 # Fuzz Suite Gaps
 
-Current state after 2026-03-31 update: 39 algebra invariants, 33 eval invariants (18 arb.it
+Current state after 2026-03-31 update: 39 algebra invariants, 36 eval invariants (21 arb.it
 + 15 T.it, 500 trials each for arb), 15 grammar programs. The three-tier architecture
 is in place. This file tracks remaining gaps.
 
@@ -178,6 +178,13 @@ Note: `$Throw<"literal">` fires eagerly at alias declaration time. Defer by usin
 - [x] `Wrap<integer>` label is `string` not `integer` — 1 error via function return check (P5c)
 Note: `local x --: T` only narrows the variable; use function return annotation to assert
 structural field-level mismatch (see CLAUDE.md "Annotation enforcement gotcha").
+
+### MA: multi-arm match expression — DONE (fuzz_eval.lua MA1–MA3)
+- [x] MA1: arm selectivity — `match T { A => C, B => D }` with `T = A` gives `C`, `T = B` gives `D` (bidirectional, 500 trials)
+- [x] MA2: distributivity over union — `match (A|B) { A => C, B => D } == C | D` (bidirectional, 500 trials)
+- [x] MA3: non-matching input gives `never` — `match D { A => C, B => C }` with `D ∉ {A, B}` gives `never` (500 trials)
+Uses `arb_base_type_quad` (all 4 distinct base types in random order) so arm keys are always unambiguous.
+`check_sub_ext(a, b, extra_scope)` helper added to fuzz_eval.lua for inline alias declarations.
 
 ---
 
