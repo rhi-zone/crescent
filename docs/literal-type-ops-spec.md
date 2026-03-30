@@ -11,9 +11,15 @@ known design questions before implementation.
 `"prefix_" .. K` where K is a string literal → new string literal. Distributes
 over union K via existing match semantics — no special distribution rule needed.
 
-**Low priority.** Template literal types (`get_${K}`, `on${EventName}`) are a niche
-pattern chosen for specific API aesthetics — not a fundamental need. The structured
-alternative works equally well in both TS and Lua:
+**Low priority.** Template literal types exist primarily to retrofit types onto
+JavaScript's stringly-typed API patterns: `addEventListener("click", ...)`,
+`getX()`/`setX()` Java-style conventions, `data-*` HTML attributes, CSS property
+names. These patterns exist because JS is historically dynamic and string-keyed —
+TypeScript inherited them and needed type-level string manipulation to describe them.
+
+Lua/crescent has none of this heritage. No DOM, no Java-style getter/setter
+convention, no stringly-typed event system. The primary motivation for template
+literal types doesn't apply. The structured alternative is equally clean:
 
 ```lua
 --:: ToGetSet<D> = match D { { key: %K, value: %V, ...%Rest }
