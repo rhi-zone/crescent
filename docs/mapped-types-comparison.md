@@ -17,14 +17,17 @@ type Getters<T> = { [K in keyof T as `get_${string & K}`]: () => T[K] }
 ## What crescent can express today
 
 ```lua
---:: Keys<T>   = match T { { [%K]: %V } => K, { ...[%K]: %V } => string }
---:: Values<T> = match T { { [%K]: %V } => V, { ...[%K]: %V } => V }
---:: Record<K, V> = { [K]: V }
---:: ReturnType<F> = match F { () -> %R => R }
+--:: PairsReturn<T>  = match T { { ...[%K]: %V } => (K, V) }   -- precise! ("x", integer) | ("y", string)
+--:: IpairsReturn<T> = match T { { ...[%K]: %V } => match K { integer => (integer, V), _ => never } }
+--:: Keys<T>         = match T { { ...[%K]: %V } => K }         -- "x" | "y" (literal keys)
+--:: Values<T>       = match T { { ...[%K]: %V } => V }
+--:: Record<K, V>    = { [K]: V }
+--:: ReturnType<F>   = match F { () -> %R => R }
 ```
 
-After `{ ...[%K]: %V }` is implemented: union of all keys, union of all values. **Reading**
-only.
+After `{ ...[%K]: %V }` is implemented. **Distribution** is per-field — preserves K/V
+correspondence within each field evaluation. The gap is **gather/reconstruct**: producing
+a single transformed table from all fields.
 
 ## The core gap: read vs. read-write
 
@@ -35,15 +38,21 @@ TS mapped types maintain **per-field correspondence**:
 type Partial<T> = { [K in keyof T]?: T[K] }
 ```
 
-Crescent's `{ ...[%K]: %V }` collapses to unions:
+Crescent's `{ ...[%K]: %V }` **distributes per-field** — for each field, K and V are
+bound to that field's specific key and value, the result is evaluated, and results are
+unioned. For `{ x: integer, y: string } => (K, V)` this gives `("x", integer) | ("y", string)`.
+
+Per-field correspondence IS maintained — but the result is a **union of per-field
+evaluations**, not a reconstructed table. `Partial<T>` requires gathering all fields
+into one table:
 
 ```lua
--- %K = "x" | "y", %V = integer | string — correspondence is lost
--- Can't say "for each K, make the corresponding V optional"
+-- WRONG: gives { ["x"]: integer? } | { ["y"]: string? } — not Partial<T>
+--:: Partial<T> = match T { { ...[%K]: %V } => { [K]: V? } }
 ```
 
-`Partial<T>` is inexpressible in crescent today. The `{ ...[%K]: %V }` pattern gives you
-the union of all (K, V) but not the ability to iterate each pair and reconstruct a table.
+`Partial<T>` is inexpressible because distribution produces a union of single-field tables,
+not one table with all fields. A separate **gather/reconstruct** mechanism is needed.
 
 ## What TS got right
 

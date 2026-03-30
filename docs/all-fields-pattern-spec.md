@@ -3,8 +3,8 @@
 ## Goal
 
 Enable `$Keys`, `$Values`, `$IpairsValues`, `$PairsReturn`, and `$IpairsReturn` to be
-eliminated as intrinsics by providing a single match arm pattern that distributes over
-**all** entries in a table type — both named fields and indexers.
+eliminated as intrinsics by providing a single match arm pattern that **distributes**
+over every entry in a table type — both named fields and indexers.
 
 ## Pattern Syntax
 
@@ -13,224 +13,138 @@ match_arm_pattern ::= ...
                     | "{" "..." "[" name "]" ":" name "}"  -- all-fields pattern
 ```
 
-Example:
+## Semantics: per-field distribution
 
-```lua
---:: PairsReturn<T> = match T {
---::   { [%K]: %V }    => (K, V),        -- indexer case (already exists)
---::   { ...[%K]: %V } => (string, V)    -- named-field case: K is always string
---:: }
-```
+`{ ...[%K]: %V }` distributes over each field in the table, the same way match
+distributes over union arms. For each field, K and V are bound to that field's
+specific key and value types, the result expression is evaluated, and all results
+are unioned.
 
-The `{ ...[K]: V }` pattern matches **any table type** (it never fails to match) and binds:
-- `K` → the union of all key types (string literal names widened to `string`, plus any indexer key type)
-- `V` → the union of all widened value types (same as `$Values<T>`)
+For `{ x: integer, y: string }` with arm `{ ...[%K]: %V } => (K, V)`:
+- field `x`: K = `"x"`, V = `integer` → `("x", integer)`
+- field `y`: K = `"y"`, V = `string`   → `("y", string)`
+- result: `("x", integer) | ("y", string)`
 
-## Semantics
+This is exactly what `pairs()` iterates — a discriminated union of (key, value) pairs,
+one per field. Far more precise than a collapsed `(string, integer | string)`.
 
-For a table type `T`:
+For an indexer table `{ [integer]: string }`:
+- indexer: K = `integer`, V = `string` → `(integer, string)`
 
-```
-{ ...[K]: V } matches T:
-  - Always succeeds (even for empty tables, open tables, and non-tables — see below)
-  - K binds to: union of string (if any named fields exist)
-                 ∪ indexer_key_type (if T has an indexer { [KI]: VI })
-                 = unknown   if T has neither
-  - V binds to: $Values<T>  (union of widened value types, same semantics)
-```
+For a mixed table `{ x: integer, [integer]: string }`:
+- field `x`: K = `"x"`, V = `integer` → `("x", integer)`
+- indexer:   K = `integer`, V = `string`  → `(integer, string)`
+- result: `("x", integer) | (integer, string)`
 
-For non-table types, the pattern still succeeds but binds `K` and `V` to `unknown`.
-This keeps the match total — callers can use it as a catch-all arm.
-
-### Named fields
-
-For a table with only named fields `{ x: integer, y: string }`:
-
-- `K` → `string`  (all named-field keys are string literals, widened)
-- `V` → `integer | string`  (union of all widened field value types)
-
-### Indexer
-
-For a table with an indexer `{ [string]: integer }`:
-
-- `K` → `string`
-- `V` → `integer`
-
-### Mixed (named fields + indexer)
-
-For `{ x: integer, [string]: boolean }`:
-
-- `K` → `string`  (string from fields ∪ string from indexer = string)
-- `V` → `integer | boolean`
+The pattern **always matches** (total) — it never fails an arm.
 
 ### TAG_UNION input
 
-For `T1 | T2` — distribute: `K` = union of all arm K-bindings, `V` = union of all arm V-bindings.
+Distribute over union arms first (standard match behaviour), then distribute over each
+arm's fields. Results from all arms and all fields are unioned.
 
 ### TAG_ANY / TAG_UNKNOWN / TAG_VAR
 
-- `K` → `unknown`, `V` → `unknown`
+One synthetic iteration: K = `unknown`, V = `unknown`. Keeps the pattern total.
 
 ### TAG_NEVER
 
-- `K` → `never`, `V` → `never`
+Zero iterations — result is `never` (empty union).
 
-## Relationship to `{ [K]: V }` (indexer pattern)
+## Consequence: simplified stdlib aliases
 
-The existing `{ [K]: V }` pattern (already implemented) matches **only** tables that have
-an explicit indexer. It fails for named-field tables. The new `{ ...[K]: V }` pattern
-**always succeeds** and covers both cases.
-
-In a match with both arms:
+Because `{ ...[%K]: %V }` distributes precisely per-field, PairsReturn collapses to one arm:
 
 ```lua
---:: PairsReturn<T> = match T {
---::   { [%K]: %V }    => (K, V),
---::   { ...[%K]: %V } => (string, V)
---:: }
+--:: PairsReturn<T>  = match T { { ...[%K]: %V } => (K, V) }
+--:: IpairsReturn<T> = match T { { ...[%K]: %V } => match K { integer => (integer, V), _ => never } }
+--:: Keys<T>         = match T { { ...[%K]: %V } => K }
+--:: Values<T>       = match T { { ...[%K]: %V } => V }
 ```
 
-The first arm handles indexer tables (K can be non-string). The second arm is the
-fallback for named-field tables (K is always `string` after widening).
+The `{ [%K]: %V }` arm in `PairsReturn` is no longer needed — `{ ...[%K]: %V }` handles
+indexer tables (K = indexer key type, one iteration) and named-field tables (K = string
+literal per field, N iterations) uniformly.
+
+`IpairsReturn`: for `{ [integer]: string }`, K = `integer` → match K passes → `(integer, string)`.
+For `{ x: integer }`, K = `"x"` → match K fails → `never`. Correct with one arm.
+
+`Keys<T>` for `{ x: integer, y: string }` → `"x" | "y"` (union of per-field K results).
+`Values<T>` for `{ x: integer, y: string }` → `integer | string` ✓
 
 ## Eliminating All Remaining Intrinsics
 
-With `{ ...[K]: V }` and the already-implemented `{ [K]: V }`, all remaining provisional
-intrinsics become expressible in stdlib.d.lua:
+With `{ ...[%K]: %V }`, all remaining provisional intrinsics become expressible:
 
 ```lua
---:: PairsReturn<T> = match T {
---::   { [%K]: %V }    => (K, V),
---::   { ...[%K]: %V } => (string, V)
---:: }
-
---:: IpairsReturn<T> = match T {
---::   { [%K]: %V }    => match K { integer => (integer, V), _ => never },
---::   { ...[%K]: %V } => never
---:: }
-
---:: $Keys<T> ... -- see below
+--:: PairsReturn<T>  = match T { { ...[%K]: %V } => (K, V) }
+--:: IpairsReturn<T> = match T { { ...[%K]: %V } => match K { integer => (integer, V), _ => never } }
+--:: Keys<T>         = match T { { ...[%K]: %V } => K }
+--:: Values<T>       = match T { { ...[%K]: %V } => V }
 ```
 
-### `$Keys<T>` via `{ ...[K]: V }`
+Delete `$PairsReturn`, `$IpairsReturn`, `$Keys`, `$Values`, `$IpairsValues` from intrinsic.lua.
+`$PcallReturn` already eliminated (spread-in-tuple-position, 2026-03-30).
 
-```lua
---:: Keys<T> = match T {
---::   { [%K]: %V }    => K,
---::   { ...[%K]: %V } => string
---:: }
-```
-
-Once `{ ...[K]: V }` exists, `$Keys` can be deleted.
-
-### `$Values<T>` and `$IpairsValues<T>`
-
-```lua
---:: Values<T> = match T {
---::   { [%K]: %V }    => V,
---::   { ...[%K]: %V } => V
---:: }
-```
-
-`$Values` and `$IpairsValues` can be deleted.
-
-### Result: zero provisional `$`-intrinsics
-
-After this pattern is implemented, the permanent intrinsics are:
-- `$Require` — module system hook
-- `$Opaque` — nominal identity
-- `$FfiC` — closes over `ffi.cdef` call sites
-- `$GlobalScope` — the global environment type
-
-All other `$`-prefixed operations (`$PcallReturn` already eliminated,
-`$PairsReturn`/`$IpairsReturn` already eliminated, `$Values`/`$IpairsValues` would be
-eliminated) become match aliases expressible in stdlib.d.lua.
+Permanent intrinsics after migration: `$Require`, `$Opaque`, `$FfiC`, `$GlobalScope`.
 
 ## ipairs and integer-key filtering
 
-`ipairs` only yields integer-keyed entries. The approach is **not** a key-type constraint
-on the pattern itself (no `{ ...[K: integer]: V }` syntax) — instead, use a downstream
-match to filter:
+The downstream `match K { integer => ..., _ => never }` approach still applies — see
+§Semantics above. `{ ...[%K]: %V }` is always total; filtering happens in the result.
+
+## What `{ ...[%K]: %V }` does NOT do: per-field reconstruction
+
+Per-field distribution gives a **union of result expressions** — one per field. This is
+right for iteration (PairsReturn, Keys, Values) but cannot reconstruct a single table
+with all fields transformed. `Partial<T>` is inexpressible:
 
 ```lua
---:: IpairsReturn<T> = match T {
---::   { [%K]: %V }    => match K { integer => (integer, V), _ => never },
---::   { ...[%K]: %V } => never
---:: }
+-- WRONG: distributes, gives { ["x"]: integer? } | { ["y"]: string? } — not Partial<T>
+--:: Partial<T> = match T { { ...[%K]: %V } => { [K]: V? } }
 ```
 
-- The `{ [K]: V }` arm matches tables with an explicit indexer. `match K { integer => ... }`
-  narrows the result: if the indexer key is `integer`, yield `(integer, V)`; otherwise `never`.
-- The `{ ...[K]: V }` fallback arm produces `never` for named-field tables (ipairs doesn't
-  iterate them meaningfully — they have no numeric ordering).
+Table reconstruction (gather all fields into one table with per-field transformation)
+requires a separate mechanism — see docs/mapped-types-comparison.md for options.
 
-This is consistent with what ipairs actually does: it only works on sequence-like tables.
+## Relationship to `{ [%K]: %V }` (indexer pattern)
 
-### Why not `{ ...[K: integer]: V }`?
-
-Two separate needs are in play:
-
-1. **Filter which entries appear in results** (ipairs semantics: "yield only integer-keyed
-   entries, ignore the rest") — handled by downstream `match K { integer => ..., _ => never }`.
-   The pattern itself stays total; the filtering is explicit in the result expression.
-
-2. **Constrain the input shape** ("this table must have these fields / this structure") —
-   handled by pattern intersection `P & { ...[K]: V }`, where `P` can be any pattern:
-   `{ [integer]: unknown } & { ...[K]: V }` requires an integer indexer;
-   `{ foo: string, bar: number, ... } & { ...[K]: V }` requires specific named fields.
-
-`{ ...[K: integer]: V }` conflates these two: it looks like an input constraint but acts
-like a result filter. Keeping them separate is cleaner — `{ ...[K]: V }` is always total,
-and the caller chooses to filter results or constrain inputs via the mechanisms above.
+`{ [%K]: %V }` matches only tables with an explicit indexer (fails for named-field
+tables). `{ ...[%K]: %V }` is total and subsumes it — if the input has an indexer,
+the indexer is iterated; if it has named fields, those are iterated. The `{ [%K]: %V }`
+arm is only needed when you want to *fail* on named-field tables.
 
 ## Implementation in `match.lua`
 
-The `{ ...[K]: V }` pattern is a new case in `eval_match_arm`. At match-arm evaluation time:
-
-1. **Detect** the pattern: a table pattern with `...` before `[K]: V`.
-   Syntactically this is distinguished from `{ [K]: V }` by the leading `...`.
-
-2. **Always succeed** (never return `nil`).
-
-3. **Bind K**: collect key types:
-   - For each named field: add `string` (widened from literal names)
-   - For indexer `{ [KI]: VI }`: add `KI`
-   - Union all collected types → if none, bind `K` = `unknown`
-
-4. **Bind V**: use the same logic as `extract_values(ctx, T_tid, false)` from intrinsic.lua
-   (or equivalently, call `$Values<T>`). Bind `V` = result.
-
-5. **For TAG_UNION input**: distribute across arms, union K-bindings and V-bindings.
-
-6. **For TAG_ANY/TAG_UNKNOWN/TAG_VAR/TAG_NEVER**: bind K and V appropriately (unknown/never).
-
-### Parsed representation
-
-In ann.lua, when parsing a match arm pattern `{ ...[K]: V }`:
-
-- Emit a new `PAT_ALL_FIELDS` pattern node with two binding names: K and V
-- Distinct from `PAT_INDEXER` (`{ [K]: V }`)
-
-### In `match.lua:eval_match_arm`
-
-Add a branch for `PAT_ALL_FIELDS`:
+`{ ...[%K]: %V }` is a `PAT_ALL_FIELDS` node. In `eval_match_arm`:
 
 ```lua
 elseif pat.kind == PAT_ALL_FIELDS then
-    local k_name = pat.k_name
-    local v_name = pat.v_name
-    local k_tid, v_tid = eval_all_fields(ctx, input_tid)
-    local new_mapping = copy_mapping(mapping)
-    new_mapping[k_name] = k_tid
-    new_mapping[v_name] = v_tid
-    return eval_result_expr(ctx, arm.result, new_mapping)
+    local results = {}
+    -- iterate named fields
+    for each (name_id, value_tid) in table_fields(ctx, input_tid) do
+        local mapping = copy_mapping(mapping)
+        mapping[pat.k_name] = make_lit_string(ctx, name_id)
+        mapping[pat.v_name] = value_tid
+        results[#results+1] = eval_result_expr(ctx, arm.result, mapping)
+    end
+    -- iterate indexers
+    for each (key_tid, value_tid) in table_indexers(ctx, input_tid) do
+        local mapping = copy_mapping(mapping)
+        mapping[pat.k_name] = key_tid
+        mapping[pat.v_name] = value_tid
+        results[#results+1] = eval_result_expr(ctx, arm.result, mapping)
+    end
+    -- TAG_ANY/TAG_UNKNOWN: one synthetic K=unknown, V=unknown iteration
+    -- TAG_NEVER: zero iterations (return never)
+    return types_mod.make_union(ctx, results)
 ```
 
-`eval_all_fields(ctx, tid)` computes K and V for any input type (the logic described in §Semantics above).
+This replaces `eval_all_fields(ctx, tid)` — no longer needed as a (K_union, V_union)
+extractor. `extract_values` in intrinsic.lua is also deleted once $Values/$IpairsValues
+are migrated to match aliases.
 
 ## Data Representation
-
-In the parsed AST for a match arm pattern, add:
 
 ```lua
 PAT_ALL_FIELDS = N   -- new constant in defs.lua (or match.lua)
@@ -241,42 +155,20 @@ PAT_ALL_FIELDS = N   -- new constant in defs.lua (or match.lua)
 
 Add to `lib/type/static/type_test.lua`:
 
-1. `match { x = 1, y = "hello" } { { ...[%K]: %V } => V }` → `integer | string`
-2. `match { [string]: integer } { { ...[%K]: %V } => K }` → `string`
-3. `PairsReturn<{ x: integer, y: string }>` → `(string, integer | string)`
-4. `PairsReturn<{ [string]: integer }>` → `(string, integer)`
-5. `IpairsReturn<{ [integer]: string }>` → `(integer, string)`
-6. `IpairsReturn<{ x: integer }>` → `never` (named-field tables yield never from ipairs)
-7. `Keys<{ x: integer, y: string }>` → `string`
-8. `Keys<{ [integer]: boolean }>` → `integer`
-9. `Values<{ x: integer, y: string }>` → `integer | string`
-10. Regression: existing pairs/ipairs tests still pass after `$Values`/`$IpairsValues` are deleted
-
-## Migration: deleting `$Values` and `$IpairsValues`
-
-Once `{ ...[K]: V }` is implemented and the above tests pass:
-
-1. Replace `PairsReturn` and `IpairsReturn` in stdlib.d.lua with the new match-alias forms
-2. Replace `Keys` (if added to stdlib) with the new form
-3. Delete `$Values` and `$IpairsValues` branches from `intrinsic.lua`
-4. Delete `extract_values` from `intrinsic.lua` (logic now lives in `match.lua:eval_all_fields`)
-5. Update `docs/semantics.md` §8 — remove `$Values`/`$IpairsValues` rows
-
-## Relation to Existing Patterns
-
-| Pattern           | Matches           | Binds            | Can fail? |
-|-------------------|-------------------|------------------|-----------|
-| `{ [%K]: %V }`    | Indexer tables    | K=key, V=value   | Yes (no indexer → fail) |
-| `{ ...[%K]: %V }` | Any table (total) | K=key∪, V=val∪  | No        |
-| `() -> %R`        | Any function      | R=return type    | No        |
-
-The `{ ...[K]: V }` pattern follows the same "total catch-all" design as `() -> R` in
-function-arm patterns: it always succeeds and is intended as the fallback arm.
+1. `PairsReturn<{ x: integer, y: string }>` → `("x", integer) | ("y", string)` (precise!)
+2. `PairsReturn<{ [string]: integer }>` → `(string, integer)`
+3. `IpairsReturn<{ [integer]: string }>` → `(integer, string)`
+4. `IpairsReturn<{ x: integer }>` → `never`
+5. `Keys<{ x: integer, y: string }>` → `"x" | "y"` (literal, not widened `string`)
+6. `Keys<{ [integer]: boolean }>` → `integer`
+7. `Values<{ x: integer, y: string }>` → `integer | string`
+8. `match { x = 1, y = "hello" } { { ...[%K]: %V } => (K, V) }` → `("x", integer) | ("y", string)`
+9. Regression: existing pairs/ipairs tests still pass
 
 ## Future: Pattern Intersection (`P & Q`)
 
-Pattern intersection `P & { ...[K]: V }` would allow constraining the *input* with an
-arbitrary pattern P while binding K/V from all entries. P can be anything:
+`P & { ...[%K]: %V }` — P constrains the input, `{ ...[%K]: %V }` distributes over its
+fields. P is arbitrary:
 
 ```lua
 --:: Entries<T> = match T {
@@ -286,13 +178,3 @@ arbitrary pattern P while binding K/V from all entries. P can be anything:
 --::   () -> unknown           & { ...[%K]: %V } => (K, V),  -- callable objects (__call tables)
 --:: }
 ```
-
-The two operations are orthogonal:
-
-- **`{ ...[%K]: %V }` result filter** (`match K { integer => ... }`): controls what appears
-  in the *output* of the match result expression.
-- **Pattern intersection** (`P & { ...[%K]: %V }`): controls what *input* types are accepted.
-
-Pattern `&` is not needed for `{ ...[%K]: %V }` itself — the existing use cases (PairsReturn,
-IpairsReturn, Keys, Values) are all covered without it. It's a separate future feature that
-composes naturally with this pattern when input-shape constraints are needed.
