@@ -40,26 +40,32 @@ even lower priority than result-position `..`.
 
 **Case transforms**: only on concrete demand.
 
-## Numeric arithmetic
+## Tuple length: `#T`
 
-Crescent has `LIT_INTEGER` as a first-class type. Type-level integer arithmetic is
-a genuine extension TS never got — useful for tuple length, array indexing, recursive
-type counting.
+`#{ A, B, C }` → `3` as `LIT_INTEGER`. The most immediately useful numeric op:
 
-- `LIT_INTEGER(n) + LIT_INTEGER(m)` → `LIT_INTEGER(n + m)`
-- `(1 | 2 | 3) + 1` → `2 | 3 | 4` via match distribution
-- `integer + integer` (widened) → `integer`
-- Division, negative numbers, floats: restrict to `LIT_INTEGER` `+`/`-` in v1
+- `Arity<F> = match F { (...%P) -> _ => #P }` — once `(...%P)` param capture is implemented
+- `Repeat<T, N>`: accumulate a tuple, stop when `#Acc` matches N — no arithmetic needed
+- `TupleAt<T, N>`: direct indexed access `T[N]` — already works with numeric literals
+
+These cover the cases that naively seem to need arithmetic. TS solves the same
+problems with tuple accumulator tricks; crescent can do the same with `#tuple`.
+
+## Numeric arithmetic: `+`, `-`, etc.
+
+Crescent has `LIT_INTEGER` as a first-class type — arithmetic would be a genuine
+capability TS lacks. But the concrete use cases fold:
+- `Repeat<T, N>` → accumulator + `#tuple` (no `N-1` needed)
+- `TupleAt<T, N>` → direct indexing (no arithmetic needed)
+
+No concrete use case identified yet. Implement when one appears.
 
 ## Other literal ops
 
-- **Tuple length**: `#(A, B, C)` → `3` as `LIT_INTEGER`. Enables `Arity<F>`.
-- **Boolean**: `not true` → `false`. Probably only useful inside $EachField
-  descriptor arms. Low priority.
+- **Boolean**: `not true` → `false`. Low priority, no concrete use case.
+- **String `..`**: see above — low priority, JS-heritage motivation doesn't apply.
 
 ## Recommended approach
 
-1. String `..` in result expressions with numeric coercion (TS-compatible) first.
-2. `LIT_INTEGER` arithmetic (`+`, `-`) second.
-3. Pattern extraction (`"prefix_" .. %Suffix` in arm patterns) — separate pass.
-4. Case transforms, tuple length, boolean ops only on concrete demand.
+1. `#tuple` length — concrete use cases exist today (`Arity<F>`, `Repeat`, etc.)
+2. Everything else — only on concrete demand.
