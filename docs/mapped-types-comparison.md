@@ -122,6 +122,9 @@ Handles flag manipulation that `{ ...[%K]: %V }` cannot express.
 
 --:: MakeReadonly = match { readonly: _, ...%Rest } { _ => { readonly: true,  ...Rest } }
 --:: Readonly<T> = $EachField<T, MakeReadonly>
+
+--:: MakeWritable = match { readonly: _, ...%Rest } { _ => { readonly: false, ...Rest } }
+--:: Writable<T> = $EachField<T, MakeWritable>
 ```
 
 F is a **named alias passed unapplied** — same syntactic position as an HKT constraint
