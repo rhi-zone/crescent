@@ -50,8 +50,10 @@ redundant:**
 - `$EachField<T, F>` — **gather/map**: iterates fields, passes a descriptor
   `{ key, value, optional, readonly }` to F (a **named alias passed unapplied** —
   no inline match expressions in type argument position), collects transformed
-  fields into ONE new table. Required for flag manipulation: `Partial<T>`,
-  `Required<T>`, `Readonly<T>`. Cannot be replaced by distribution.
+  fields into ONE new table. F uses `...%Rest` to pass through unrecognized
+  descriptor fields (`{ key: %K, value: %V, optional: _, ...%Rest } => { key: K, value: V, optional: true, ...Rest }`).
+  Required for flag manipulation: `Partial<T>`, `Required<T>`, `Readonly<T>`.
+  Cannot be replaced by distribution.
 
 If you find yourself writing a new `$` intrinsic, stop and ask what
 `match` pattern is missing instead.

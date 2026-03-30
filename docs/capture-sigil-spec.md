@@ -74,6 +74,10 @@ In ann.lua, wherever a name is expected in a pattern position, try `%` first:
 - `{ [%Name]: %Name }` — key and value captures in indexer arm
 - `{ ...[%Name]: %Name }` — key and value captures in all-fields arm
 - `{ #...%Name }` — meta-slot capture in meta-spread arm
+- `{ field: %Name, ...%Rest }` — named-field captures with rest capture: `...%Rest`
+  binds the remaining fields as a table spread; `...Rest` in result position splices
+  them back. Useful for pass-through transforms that must survive new fields being
+  added to the descriptor. At most one `...%Rest` per table pattern.
 
 At the pattern node level, captures are stored as `TAG_CAPTURE(name_id)` rather than
 `TAG_NAMED(name_id)`. The evaluator in match.lua adds `name → resolved_type` to the
