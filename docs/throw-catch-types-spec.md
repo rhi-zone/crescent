@@ -45,6 +45,20 @@ If `Default` is omitted, returns `T` with all `$Throw` nodes replaced by `never`
 `$Catch` is also a **permanent intrinsic** — it suppresses diagnostic side effects,
 which is a meta-operation on the type checker state.
 
+## Scope: authored contracts only
+
+`$Catch` intercepts only explicit `$Throw`s placed by the alias author. Regular type
+errors — solver diagnostics like "expected integer, got string" — are NOT `$Throw`s and
+are NOT intercepted by `$Catch`. This is intentional:
+
+- `$Throw` marks an **expected failure mode** the author anticipated and documented.
+- Solver errors are **genuine bugs** in user code — silently swallowing them via `$Catch`
+  would hide real mistakes.
+
+`$Catch<Readonly<T>, T>` only does anything if `Readonly<T>` was authored with a
+`$Throw` arm. Without it, `Readonly<integer>` might return `never` silently and `$Catch`
+has nothing to intercept. The pair is an opt-in contract, not a general error suppressor.
+
 ## The Union Problem — Resolved
 
 Without `$Catch`, `integer | $Throw<"oops">` would require a heuristic: fire the throw
