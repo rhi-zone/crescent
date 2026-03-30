@@ -66,10 +66,14 @@ These go in fuzz_eval.lua. Grouped by feature.
 - `DropOptional<{ x?: integer, y: string }>` == `{ y: string }` — filter removes optional field
 - `NonOptional<T>` where T has mixed required/optional — only required fields survive
 
-### E3: partial application round-trip
-`F<A><B>` == `F<A, B>` for any 2-param alias. Test with PickKey:
-- `PickKey<"x", D>` == `PickKey<"x"><D>` for a fixed descriptor D
-Requires: apply the alias both ways, assert results are structurally equal.
+### E3: partial application round-trip — DONE (fuzz_eval.lua E3a–E3d)
+- [x] `Pick<{ x: integer, y: string }, "x">.x` accessible — 0 errors (E3a)
+- [x] `Pick<{ x: integer, y: string }, "x">.y` not accessible — 1 error (E3b)
+- [x] `Omit<{ x: integer, y: string }, "x">.y` accessible — 0 errors (E3c)
+- [x] `$EachField<T, PickKey<"x">> == Pick<T, "x">` bidirectional round-trip (E3d)
+PickKey/OmitKey/Pick/Omit declared via nested match. Partial-application path
+(`PickKey<"x">` as unapplied alias passed to `$EachField`) and direct-application path
+(`Pick<T, "x">`) produce the same structural type.
 
 ### E4: all-fields pattern correctness — DONE (fuzz_eval.lua E4a–E4c)
 - [x] `Keys<{ x: integer, y: string }>` == `"x" | "y"` — E4a
@@ -100,9 +104,10 @@ Note: implementation always registers the oracle pair even on failure (constrain
 but variable bindings carry the resolved body type (not the name), so the call-site structural
 check fails independently of the oracle. Both errors fire correctly — exactly 2 total.
 
-### E9: match exhaustiveness on union
-`match (A | B) { A => X, B => X }` == X for base type combinations.
-Test: declare match alias, apply to union, check result is X with 0 errors.
+### E9: match exhaustiveness on union — DONE (fuzz_eval.lua E9a–E9c)
+- [x] `Normalize<integer | string>` == `string` (both arms → string, E9a)
+- [x] `MapTypes<integer | string>` <: `boolean | integer` (both arm results present, E9b)
+- [x] `Ignores<integer>` == `string` (never arm never fires, E9c)
 
 ### E10: capture in function return position — DONE (fuzz_eval.lua E10a–E10d)
 - [x] E10a: `ReturnType<() -> integer>` == `integer` (fixed)
