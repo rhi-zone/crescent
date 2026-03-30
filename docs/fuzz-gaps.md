@@ -1,7 +1,7 @@
 # Fuzz Suite Gaps
 
-Current state after 2026-03-31 update: 39 algebra invariants, 36 eval invariants (21 arb.it
-+ 15 T.it, 500 trials each for arb), 15 grammar programs. The three-tier architecture
+Current state after 2026-03-31 update: 39 algebra invariants, 57 eval invariants (22 arb.it
++ 21 T.it, 500 trials each for arb), 15 grammar programs. The three-tier architecture
 is in place. This file tracks remaining gaps.
 
 ## Tier 1 (Algebra) gaps
@@ -179,12 +179,23 @@ Note: `$Throw<"literal">` fires eagerly at alias declaration time. Defer by usin
 Note: `local x --: T` only narrows the variable; use function return annotation to assert
 structural field-level mismatch (see CLAUDE.md "Annotation enforcement gotcha").
 
-### MA: multi-arm match expression — DONE (fuzz_eval.lua MA1–MA3)
+### MA: multi-arm match expression — DONE (fuzz_eval.lua MA1–MA6)
 - [x] MA1: arm selectivity — `match T { A => C, B => D }` with `T = A` gives `C`, `T = B` gives `D` (bidirectional, 500 trials)
 - [x] MA2: distributivity over union — `match (A|B) { A => C, B => D } == C | D` (bidirectional, 500 trials)
 - [x] MA3: non-matching input gives `never` — `match D { A => C, B => C }` with `D ∉ {A, B}` gives `never` (500 trials)
-Uses `arb_base_type_quad` (all 4 distinct base types in random order) so arm keys are always unambiguous.
-`check_sub_ext(a, b, extra_scope)` helper added to fuzz_eval.lua for inline alias declarations.
+- [x] MA4a: `FieldX<{ x: integer, y: string }>` == `integer` — structural arm extracts x field (bidirectional, fn-return)
+- [x] MA4b: `FieldX<{ x: string }>` == `string` — single-field table extraction (bidirectional, fn-return)
+- [x] MA4r: `FieldX<T>` == x-field-type when T has x, else `never` — random table types (500 trials, fn-return bidirectional)
+- [x] MA5: `FieldX<{ y: integer }>` == `never` — no x field gives never (bidirectional, fn-return)
+- [x] MA5b: `FieldX<{ y: string, z: boolean }>` == `never` — multi-field, no x (bidirectional, fn-return)
+- [x] MA6a: `IsX<{ x: integer }>` == `boolean` — exact type in pattern selects first arm (bidirectional, fn-return)
+- [x] MA6b: `IsX<{ x: string }>` == `never` — wrong field type falls to wildcard (bidirectional, fn-return)
+Uses `arb_base_type_quad` (all 4 distinct base types in random order) for MA1–MA3 so arm keys are always unambiguous.
+`check_sub_ext(a, b, extra_scope)` and `check_sub_fn`/`check_eq_fn` helpers in fuzz_eval.lua.
+Note: `check_sub` (local assignment) does NOT enforce primitive type mismatches (CLAUDE.md "annotation enforcement gotcha").
+MA4–MA6 use `check_sub_fn` (function-return annotation) which enforces `A </: B` correctly.
+`FieldX<T> = match T { { x: %V } => V }` — open structural pattern matches any table with x field,
+captures its type; tables without x give `never`.
 
 ---
 

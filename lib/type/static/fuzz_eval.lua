@@ -887,4 +887,111 @@ arb.it("[eval] MA3: match non-matching input == never",
 			"MatchNone<" .. q.d .. "> should <: never (no arm matches)")
 	end, { trials = 500 })
 
+-- ── MA4–MA6: structural table-pattern arms ───────────────────────────────────
+-- Tests that match arms with concrete structural patterns correctly extract
+-- captured fields, return never for non-matching tables, and dispatch to the
+-- correct arm when a pattern specifies an exact field type.
+
+-- check_sub_fn: enforce A <: B via function-return annotation (not local assignment).
+-- Local assignment does not enforce primitive type mismatches (annotation gotcha in CLAUDE.md).
+-- Function-return annotation does: `--: () -> B / local function f() return a end` fails iff A </: B.
+local function check_sub_fn(a_str, b_str, prelude)
+	prelude = prelude or ""
+	local src = prelude
+		.. "local _ma_a --: " .. a_str .. "\n"
+		.. "--: () -> " .. b_str .. "\n"
+		.. "local function _ma_f() return _ma_a end\n"
+	return typechecks(src)
+end
+
+-- check_eq_fn: bidirectional check_sub_fn.
+local function check_eq_fn(a_str, b_str, prelude)
+	return check_sub_fn(a_str, b_str, prelude) and check_sub_fn(b_str, a_str, prelude)
+end
+
+-- Shared declaration: FieldX<T> extracts the x field type (or never if no x).
+local MA_FIELDX_DECL = "--:: FieldX<T> = match T { { x: %V } => V }\n"
+
+-- MA4a (fixed): FieldX<{ x: integer, y: string }> == integer (bidirectional)
+-- The pattern matches and captures the x field; y is ignored (open structural match).
+T.it("[eval] MA4a: FieldX<{ x: integer, y: string }> == integer (bidirectional, fn-return)", function()
+	T.ok(
+		check_eq_fn("FieldX<{ x: integer, y: string }>", "integer", MA_FIELDX_DECL),
+		"FieldX<{ x: integer, y: string }> should equal integer bidirectionally"
+	)
+end)
+
+-- MA4b (fixed): FieldX<{ x: string }> == string (single-field table, fn-return)
+T.it("[eval] MA4b: FieldX<{ x: string }> == string (bidirectional, fn-return)", function()
+	T.ok(
+		check_eq_fn("FieldX<{ x: string }>", "string", MA_FIELDX_DECL),
+		"FieldX<{ x: string }> should equal string bidirectionally"
+	)
+end)
+
+-- MA5 (fixed): non-matching table gives never (bidirectional)
+-- { y: integer } has no x field; FieldX should produce never.
+T.it("[eval] MA5: FieldX<{ y: integer }> == never (bidirectional, fn-return)", function()
+	T.ok(
+		check_eq_fn("FieldX<{ y: integer }>", "never", MA_FIELDX_DECL),
+		"FieldX<{ y: integer }> should equal never bidirectionally"
+	)
+end)
+
+-- MA5b (fixed): multi-field table with no x field also gives never.
+T.it("[eval] MA5b: FieldX<{ y: string, z: boolean }> == never (bidirectional, fn-return)", function()
+	T.ok(
+		check_eq_fn("FieldX<{ y: string, z: boolean }>", "never", MA_FIELDX_DECL),
+		"FieldX<{ y: string, z: boolean }> should equal never bidirectionally"
+	)
+end)
+
+-- MA6a (fixed): exact type in pattern selects first arm
+-- IsX<{ x: integer }> == boolean (x: integer matches the first arm)
+local MA_ISX_DECL = "--:: IsX<T> = match T { { x: integer } => boolean, _ => never }\n"
+T.it("[eval] MA6a: IsX<{ x: integer }> == boolean (exact type pattern, fn-return)", function()
+	T.ok(
+		check_eq_fn("IsX<{ x: integer }>", "boolean", MA_ISX_DECL),
+		"IsX<{ x: integer }> should equal boolean bidirectionally"
+	)
+end)
+
+-- MA6b (fixed): exact type pattern — wrong field type falls to wildcard
+-- IsX<{ x: string }> == never (x: string doesn't match the x: integer pattern)
+T.it("[eval] MA6b: IsX<{ x: string }> == never (exact type mismatch -> wildcard, fn-return)", function()
+	T.ok(
+		check_eq_fn("IsX<{ x: string }>", "never", MA_ISX_DECL),
+		"IsX<{ x: string }> should equal never bidirectionally"
+	)
+end)
+
+-- MA4r (random): for randomly generated tables, FieldX<T> == x-field-type when T has x,
+-- or never when T lacks x.
+-- Strategy: arb_table_type generates '{ x: T, ... }' strings from FIELD_NAMES = {x,y,z,n,s}.
+-- We inspect the string for "x: <type>" to determine if x is present and what its base type is.
+-- The match `{ x: %V }` is an open structural pattern — it matches any table with an x field.
+--
+-- Pattern for detection: look for "x: <base>" (not preceded by non-space, to avoid e.g. "nx:").
+-- arb_table_type always produces "{ x: T, ... }" so "x: " can appear only at field boundaries.
+-- Since field names are single chars (x,y,z,n,s) and format is "<name>: <type>", we match
+-- the pattern "%f[%a]x: (%a+)" which matches "x" at a word boundary followed by ": <type>".
+arb.it("[eval] MA4r: FieldX<T> == x-field-type (has x) or never (no x) for random tables",
+	arb_table_type,
+	function(t_str)
+		-- Extract x-field base type from the string, if present.
+		-- arb_table_type format: '{ [readonly ]<name>[?]: <base>, ... }'
+		-- We look for "x[?]: <base>" — optional "?" before the colon.
+		local x_type = t_str:match("%f[%a]x%??:%s*(%a+)")
+		local fieldx_str = "FieldX<" .. t_str .. ">"
+		if x_type then
+			-- T has field x: FieldX<T> must equal the x-field base type (bidirectional)
+			assert(check_eq_fn(fieldx_str, x_type, MA_FIELDX_DECL),
+				"FieldX<" .. t_str .. "> should equal " .. x_type .. " (x present), got mismatch")
+		else
+			-- T has no x field: FieldX<T> must equal never (bidirectional)
+			assert(check_eq_fn(fieldx_str, "never", MA_FIELDX_DECL),
+				"FieldX<" .. t_str .. "> should equal never (no x field), got mismatch")
+		end
+	end, { trials = 500 })
+
 return {}
