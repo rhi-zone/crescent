@@ -830,6 +830,51 @@ arb.it("[eval] G2b: EachField<T1|T2, KeepAll> == EachField<T1,KeepAll> | EachFie
 			"EachField<T1,KeepAll>|EachField<T2,KeepAll> <: EachField<T1|T2,KeepAll> failed for T1=" .. t1_str .. " T2=" .. t2_str)
 	end, { trials = 500 })
 
+-- ── MA8: EachField flag-alias distributivity over union ──────────────────────
+-- For each flag-manipulating alias F, assert:
+--   $EachField<T1 | T2, F> == $EachField<T1, F> | $EachField<T2, F>
+-- (bidirectional subtype check, 500 trials each)
+
+-- MA8a: MakeOptional distributes over union
+arb.it("[eval] MA8a: EachField<T1|T2, MakeOptional> distributes over union",
+	{ arb_table_type, arb_table_type },
+	function(t1, t2)
+		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeOptional>"
+		local rhs = "$EachField<" .. t1 .. ", MakeOptional> | $EachField<" .. t2 .. ", MakeOptional>"
+		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
+		assert(check_sub(rhs, lhs), rhs .. " should <: " .. lhs)
+	end, { trials = 500 })
+
+-- MA8b: MakeRequired distributes over union
+arb.it("[eval] MA8b: EachField<T1|T2, MakeRequired> distributes over union",
+	{ arb_table_type, arb_table_type },
+	function(t1, t2)
+		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeRequired>"
+		local rhs = "$EachField<" .. t1 .. ", MakeRequired> | $EachField<" .. t2 .. ", MakeRequired>"
+		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
+		assert(check_sub(rhs, lhs), rhs .. " should <: " .. lhs)
+	end, { trials = 500 })
+
+-- MA8c: MakeReadonly distributes over union
+arb.it("[eval] MA8c: EachField<T1|T2, MakeReadonly> distributes over union",
+	{ arb_table_type, arb_table_type },
+	function(t1, t2)
+		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeReadonly>"
+		local rhs = "$EachField<" .. t1 .. ", MakeReadonly> | $EachField<" .. t2 .. ", MakeReadonly>"
+		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
+		assert(check_sub(rhs, lhs), rhs .. " should <: " .. lhs)
+	end, { trials = 500 })
+
+-- MA8d: MakeWritable distributes over union
+arb.it("[eval] MA8d: EachField<T1|T2, MakeWritable> distributes over union",
+	{ arb_table_type, arb_table_type },
+	function(t1, t2)
+		local lhs = "$EachField<" .. t1 .. " | " .. t2 .. ", MakeWritable>"
+		local rhs = "$EachField<" .. t1 .. ", MakeWritable> | $EachField<" .. t2 .. ", MakeWritable>"
+		assert(check_sub(lhs, rhs), lhs .. " should <: " .. rhs)
+		assert(check_sub(rhs, lhs), rhs .. " should <: " .. lhs)
+	end, { trials = 500 })
+
 -- ── MA: multi-arm match expression invariants ────────────────────────────────
 -- Tests that the match evaluator correctly dispatches to the right arm,
 -- distributes over unions, and produces `never` for non-matching inputs.

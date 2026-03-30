@@ -179,6 +179,13 @@ Note: `$Throw<"literal">` fires eagerly at alias declaration time. Defer by usin
 Note: `local x --: T` only narrows the variable; use function return annotation to assert
 structural field-level mismatch (see CLAUDE.md "Annotation enforcement gotcha").
 
+### MA8: EachField flag-alias distributivity over union — DONE (fuzz_eval.lua MA8a–MA8d)
+- [x] MA8a: `$EachField<T1|T2, MakeOptional>` == `$EachField<T1, MakeOptional> | $EachField<T2, MakeOptional>` (500 trials, bidirectional)
+- [x] MA8b: `$EachField<T1|T2, MakeRequired>` == `$EachField<T1, MakeRequired> | $EachField<T2, MakeRequired>` (500 trials, bidirectional)
+- [x] MA8c: `$EachField<T1|T2, MakeReadonly>` == `$EachField<T1, MakeReadonly> | $EachField<T2, MakeReadonly>` (500 trials, bidirectional)
+- [x] MA8d: `$EachField<T1|T2, MakeWritable>` == `$EachField<T1, MakeWritable> | $EachField<T2, MakeWritable>` (500 trials, bidirectional)
+Uses `{ arb_table_type, arb_table_type }` generators with `check_sub` (FIXED_SCOPE already declares all four aliases).
+
 ### MA: multi-arm match expression — DONE (fuzz_eval.lua MA1–MA6)
 - [x] MA1: arm selectivity — `match T { A => C, B => D }` with `T = A` gives `C`, `T = B` gives `D` (bidirectional, 500 trials)
 - [x] MA2: distributivity over union — `match (A|B) { A => C, B => D } == C | D` (bidirectional, 500 trials)
