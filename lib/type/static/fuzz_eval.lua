@@ -245,4 +245,112 @@ T.it("[eval] oracle placeholder: unresolved named aliases pass try_unify", funct
 	T.eq(ok_count, 2000, "placeholder semantics: all 2000 trials should return true")
 end)
 
+-- ── E1: EachField never propagation ──────────────────────────────────────────
+
+-- E1a: $EachField<never, KeepAll> | integer == integer
+-- If EachField<never, KeepAll> == never, then `never | integer` simplifies to
+-- `integer`, so assigning x: (EachField<never,KeepAll> | integer) to integer
+-- should produce 0 errors.
+T.it("[eval] E1: EachField<never, KeepAll> | integer == integer (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: TEachNever = $EachField<never, KeepAll>
+--:: TResult = TEachNever | integer
+local x --: TResult
+local _e1a --: integer = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E1a")
+	T.eq(#ec.errors, 0, "EachField<never,KeepAll>|integer == integer: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E1b: $EachField<never, KeepAll> resolves without crashing (no errors in
+-- a program that simply declares and uses the type as never).
+T.it("[eval] E1: EachField<never, KeepAll> used as never — no crash", function()
+	local src = FIXED_SCOPE .. [[
+--:: TNever = $EachField<never, KeepAll>
+local x --: TNever
+local _e1b --: never = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E1b")
+	T.eq(#ec.errors, 0, "EachField<never,KeepAll> as never: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- ── E6: $Throw/$Catch interaction ────────────────────────────────────────────
+
+-- E6a: $Catch returns default when $Throw is present
+T.it("[eval] E6a: $Catch<$Throw<msg>, integer> == integer (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: Caught = $Catch<$Throw<"test error">, integer>
+local x --: Caught
+local _e6a --: integer = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E6a")
+	T.eq(#ec.errors, 0, "Catch<Throw<msg>,integer>==integer: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E6b: $Catch passes through non-throw types
+T.it("[eval] E6b: $Catch<string, integer> == string (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: NotCaught = $Catch<string, integer>
+local x --: NotCaught
+local _e6b --: string = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E6b")
+	T.eq(#ec.errors, 0, "Catch<string,integer>==string: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E6c: $Throw without $Catch produces exactly 1 diagnostic containing the message
+T.it("[eval] E6c: $Throw<msg> without catch produces 1 error with the message", function()
+	local src = FIXED_SCOPE .. [[
+--:: Bad = $Throw<"this is wrong">
+local x --: Bad
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E6c")
+	T.eq(#ec.errors, 1, "Throw without catch: expected 1 error, got " .. tostring(#ec.errors))
+	if #ec.errors == 1 then
+		local msg = ec.errors[1].msg or ""
+		T.ok(msg:find("this is wrong", 1, true) ~= nil,
+			"Throw error message should contain 'this is wrong', got: " .. msg)
+	end
+end)
+
+-- ── E7: generic defaults ──────────────────────────────────────────────────────
+
+-- E7a: default applied when second arg is omitted
+-- Use function return annotation to enforce the type check.
+T.it("[eval] E7a: WithDefault<integer> uses default U=string (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: WithDefault<T, U = string> = { a: T, b: U }
+local x --: WithDefault<integer>
+--: () -> { a: integer, b: string }
+local function f() return x end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E7a")
+	T.eq(#ec.errors, 0, "WithDefault<integer>: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E7b: explicit second arg overrides the default
+T.it("[eval] E7b: WithDefault<integer, boolean> overrides default (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: WithDefault<T, U = string> = { a: T, b: U }
+local x --: WithDefault<integer, boolean>
+--: () -> { a: integer, b: boolean }
+local function f() return x end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E7b")
+	T.eq(#ec.errors, 0, "WithDefault<integer,boolean>: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E7c: default NOT used when arg provided — WithDefault<integer> gives b: string,
+-- so returning it where b: boolean is expected must produce 1 error.
+T.it("[eval] E7c: WithDefault<integer> b is string not boolean — 1 error", function()
+	local src = FIXED_SCOPE .. [[
+--:: WithDefault<T, U = string> = { a: T, b: U }
+local x --: WithDefault<integer>
+--: () -> { a: integer, b: boolean }
+local function f() return x end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E7c")
+	T.eq(#ec.errors, 1, "WithDefault<integer> b mismatch: expected 1 error, got " .. tostring(#ec.errors))
+end)
+
 return {}
