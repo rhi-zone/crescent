@@ -64,8 +64,9 @@ returning the descriptor unchanged.
 --:: Getters<T>  = $EachField<T, ToGetter>
 ```
 
-Key renaming requires type-level string concatenation — see docs/string-pattern-spec.md
-(not yet written).
+Key renaming requires type-level string concatenation — see docs/string-type-ops-spec.md.
+Not yet implemented; several design questions remain open (numeric coercion, pattern
+extraction, case transforms).
 
 ### Expand (one field → many)
 
