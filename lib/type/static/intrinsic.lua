@@ -9,7 +9,6 @@
 --   $IpairsValues<T>   — union of numeric/positional field value types in T
 --   $EachUnion<T, F>   — apply F to each member of union T, re-union results
 --   $EachField<T, F>   — apply F to each field descriptor of T, collect into table
---   $PcallReturn<F>    — (true, ...F_returns) | (false, string) union for pcall/xpcall
 
 local defs      = require("lib.type.static.defs")
 local types_mod = require("lib.type.static.types")
@@ -474,83 +473,6 @@ local function expand_ipairs_return(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
--- $PcallReturn<F>
--- ---------------------------------------------------------------------------
--- Given a function type F, produce the pcall return union:
---   (true, ...F_returns) | (false, string)
---
--- Cases:
---   F is TAG_FUNCTION with multiple returns (R1, R2, ...):
---     success tuple = (true, R1, R2, ...)
---   F is TAG_FUNCTION with one return R (not TAG_SPREAD):
---     success tuple = (true, R)
---   F is TAG_FUNCTION with one return TAG_SPREAD wrapping a union-of-tuples:
---     distribute: each arm (R1, ...) becomes (true, R1, ...), plus (false, string)
---   F is TAG_FUNCTION with zero returns (void):
---     success tuple = (true)
---   F is not TAG_FUNCTION (TAG_VAR, TAG_ANY, TAG_UNKNOWN, etc.):
---     return T_UNKNOWN
-local function expand_pcall_return(ctx, arg_ids)
-    if #arg_ids ~= 1 then return ctx.T_UNKNOWN end
-    local F_tid = types_mod.find(ctx, arg_ids[1])
-    local F_t = ctx.types:get(F_tid)
-    if F_t.tag ~= defs.TAG_FUNCTION then return ctx.T_UNKNOWN end
-
-    local true_lit   = types_mod.make_literal(ctx, LIT_BOOLEAN, 1)
-    local false_lit  = types_mod.make_literal(ctx, LIT_BOOLEAN, 0)
-    local fail_tuple = types_mod.make_tuple(ctx, { false_lit, ctx.T_STRING })
-
-    local rl = F_t.data[3]  -- returns_len
-
-    if rl == 0 then
-        -- void return: success arm has only `true`
-        local success_tuple = types_mod.make_tuple(ctx, { true_lit })
-        return types_mod.make_union(ctx, { success_tuple, fail_tuple })
-    elseif rl == 1 then
-        local ret_slot = types_mod.find(ctx, ctx.lists:get(F_t.data[2]))
-        local ret_t = ctx.types:get(ret_slot)
-        -- TAG_SPREAD in return position: unwrap and distribute over inner type
-        if ret_t.tag == defs.TAG_SPREAD then
-            local inner_tid = types_mod.find(ctx, ret_t.data[0])
-            local inner_t = ctx.types:get(inner_tid)
-            -- union-of-tuples: distribute true-prepend over each arm
-            if inner_t.tag == TAG_UNION then
-                local arms = { fail_tuple }
-                for i = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
-                    local arm = types_mod.find(ctx, ctx.lists:get(i))
-                    local arm_t = ctx.types:get(arm)
-                    if arm_t.tag == defs.TAG_TUPLE then
-                        local slots = { true_lit }
-                        for j = 0, arm_t.data[1] - 1 do
-                            slots[#slots + 1] = types_mod.find(ctx,
-                                ctx.lists:get(arm_t.data[0] + j))
-                        end
-                        arms[#arms + 1] = types_mod.make_tuple(ctx, slots)
-                    else
-                        arms[#arms + 1] = types_mod.make_tuple(ctx, { true_lit, arm })
-                    end
-                end
-                return types_mod.make_union(ctx, arms)
-            end
-            -- single type or tuple inside spread: treat as plain
-            local success_tuple = types_mod.make_tuple(ctx, { true_lit, inner_tid })
-            return types_mod.make_union(ctx, { success_tuple, fail_tuple })
-        end
-        -- plain single return
-        local success_tuple = types_mod.make_tuple(ctx, { true_lit, ret_slot })
-        return types_mod.make_union(ctx, { success_tuple, fail_tuple })
-    else
-        -- multiple return values: collect all into success tuple
-        local slots = { true_lit }
-        for ri = 0, rl - 1 do
-            slots[#slots + 1] = types_mod.find(ctx, ctx.lists:get(F_t.data[2] + ri))
-        end
-        local success_tuple = types_mod.make_tuple(ctx, slots)
-        return types_mod.make_union(ctx, { success_tuple, fail_tuple })
-    end
-end
-
--- ---------------------------------------------------------------------------
 -- $Require<T>
 -- ---------------------------------------------------------------------------
 -- Type-level require: given a string literal type T, look up the declared
@@ -744,10 +666,6 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Require" then
         return expand_require(ctx, arg_ids)
-    end
-
-    if name == "PcallReturn" then
-        return expand_pcall_return(ctx, arg_ids)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative

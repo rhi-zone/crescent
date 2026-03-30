@@ -14,8 +14,9 @@
 --:: declare type = (val: any) -> string
 --:: declare error = (msg: any, level: any?) -> never
 --:: declare assert = (val: any, ...any) -> any
---:: declare pcall = <F: function>(f: F, ...any) -> ...($PcallReturn<F>)
---:: declare xpcall = <F: function>(f: F, handler: (string) -> string, ...any) -> ...($PcallReturn<F>)
+--:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: declare pcall = <F: function>(f: F, ...any) -> ...(PcallReturn<F>)
+--:: declare xpcall = <F: function>(f: F, handler: (string) -> string, ...any) -> ...(PcallReturn<F>)
 --:: declare require = <T: string>(module: T) -> $Require<T>
 --:: declare select = (("#") -> integer) & ((integer, ...any) -> any)
 --:: declare rawget = (t: any, k: any) -> any

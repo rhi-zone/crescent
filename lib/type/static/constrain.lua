@@ -1432,105 +1432,7 @@ local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids)
         return nil
     end
 
-    if inner_t.tag ~= defs.TAG_TYPE_CALL then return nil end
-    local callee_id = types_mod.find(ctx, inner_t.data[0])
-    local ct = ctx.types:get(callee_id)
-
-    -- TAG_TYPE_CALL(TAG_NAMED(match_alias), TV_F): eagerly evaluate match aliases
-    -- like PcallReturn<F> expressed as user-defined match aliases (not intrinsics).
-    -- After instantiation, inner is TAG_TYPE_CALL(TAG_NAMED("PcallReturn"), fresh_TV_F).
-    -- Resolve each arg: if it's a fresh TAG_VAR from instantiation, find the concrete
-    -- call-site arg type. Then look up the alias and substitute + evaluate.
-    if ct.tag == TAG_NAMED and ct.data[2] == 0 then
-        -- Simple alias name (no args) — look up in scope
-        local alias = env_mod.lookup_type(ctx.scope, ct.data[0])
-        if alias and alias.body then
-            local alias_body_t = ctx.types:get(types_mod.find(ctx, alias.body))
-            if alias_body_t.tag == defs.TAG_MATCH_TYPE then
-                -- It's a match alias. Resolve the type args.
-                local resolved_args = {}
-                local params_len = callee_t.data[1]
-                for i = inner_t.data[1], inner_t.data[1] + inner_t.data[2] - 1 do
-                    local tv = types_mod.find(ctx, ctx.lists:get(i))
-                    local tv_t = ctx.types:get(tv)
-                    if tv_t.tag == TAG_VAR then
-                        local found_arg = nil
-                        for pi = 0, params_len - 1 do
-                            local param = types_mod.find(ctx, ctx.lists:get(callee_t.data[0] + pi))
-                            if param == tv then
-                                if arg_tids[pi + 1] then
-                                    found_arg = types_mod.find(ctx, arg_tids[pi + 1])
-                                end
-                                break
-                            end
-                        end
-                        resolved_args[#resolved_args + 1] = found_arg or tv
-                    else
-                        resolved_args[#resolved_args + 1] = tv
-                    end
-                end
-                -- Check all args are concrete (no remaining TVs)
-                local all_concrete = true
-                for _, aid in ipairs(resolved_args) do
-                    if ctx.types:get(aid).tag == TAG_VAR then all_concrete = false; break end
-                end
-                if all_concrete and #resolved_args > 0 then
-                    -- Build mapping: alias params → resolved args
-                    if alias.params and #alias.params == #resolved_args then
-                        local mapping = {}
-                        for pi, param_name_id in ipairs(alias.params) do
-                            mapping[param_name_id] = resolved_args[pi]
-                        end
-                        -- Substitute into the match alias body and evaluate.
-                        local env_m = require("lib.type.static.env")
-                        local concrete_mt = env_m.substitute(ctx, alias.body, mapping, {})
-                        local mt_t = ctx.types:get(types_mod.find(ctx, concrete_mt))
-                        if mt_t.tag == defs.TAG_MATCH_TYPE then
-                            local match_mod = require("lib.type.static.match")
-                            return match_mod.evaluate(ctx, concrete_mt, {})
-                        end
-                        return concrete_mt
-                    end
-                end
-            end
-        end
-    end
-
-    if ct.tag ~= defs.TAG_INTRINSIC then return nil end
-    -- Resolve each intrinsic arg: if it is a fresh TAG_VAR from instantiation,
-    -- find which function parameter position it came from and substitute the
-    -- actual argument type.
-    local resolved = {}
-    local params_len = callee_t.data[1]
-    for i = inner_t.data[1], inner_t.data[1] + inner_t.data[2] - 1 do
-        local tv = types_mod.find(ctx, ctx.lists:get(i))
-        local tv_t = ctx.types:get(tv)
-        if tv_t.tag == TAG_VAR then
-            local found = nil
-            for pi = 0, params_len - 1 do
-                local param = types_mod.find(ctx, ctx.lists:get(callee_t.data[0] + pi))
-                if param == tv then
-                    if arg_tids[pi + 1] then
-                        found = types_mod.find(ctx, arg_tids[pi + 1])
-                    end
-                    break
-                end
-            end
-            resolved[#resolved + 1] = found or tv
-        else
-            resolved[#resolved + 1] = tv
-        end
-    end
-    -- Only eagerly evaluate intrinsics whose result is a union-of-tuples used for
-    -- correlated narrowing (e.g. $PcallReturn<F>).  Intrinsics that return single
-    -- tuples or plain types ($PairsReturn, $IpairsReturn, $Require, etc.) must be
-    -- left deferred — they are resolved by the solver after parameter unification,
-    -- which is correct.  Eager evaluation of those would create orphaned type nodes
-    -- and could interfere with for-in loop handling.
-    local intrinsic_name = intern_mod.get(ctx.pool, ct.data[0]) or ""
-    if intrinsic_name ~= "PcallReturn" then return nil end
-    local intrinsic_mod = require("lib.type.static.intrinsic")
-    return intrinsic_mod.expand(ctx, ct.data[0], resolved, inner_t.data[3])
+    return nil
 end
 
 -- Peek at the declared return type of a callee without going through constraint
@@ -1597,9 +1499,21 @@ local function eager_slot(ctx, tid, slot)
     if not tid then return nil end
     local t = ctx.types:get(tid)
     if t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return nil end
+    -- Unwrap TAG_SPREAD when extracting a slot: TAG_SPREAD(T) in position N
+    -- means T was spread here.  The slot value is T (or T's inner type if T is
+    -- a tuple), not the spread itself.  This covers the case where `(true, ...R)`
+    -- was stored with an unresolved R (TAG_VAR) — the caller gets R directly
+    -- and the type variable will be resolved by the solver later.
+    local function unwrap_spread(elem_id)
+        local et = ctx.types:get(elem_id)
+        if et.tag == defs.TAG_SPREAD then
+            return types_mod.find(ctx, et.data[0])
+        end
+        return elem_id
+    end
     if t.tag == defs.TAG_TUPLE then
         if slot < t.data[1] then
-            return types_mod.find(ctx, ctx.lists:get(t.data[0] + slot))
+            return unwrap_spread(types_mod.find(ctx, ctx.lists:get(t.data[0] + slot)))
         end
         return ctx.T_NIL
     end
@@ -1610,7 +1524,7 @@ local function eager_slot(ctx, tid, slot)
             local arm_t = ctx.types:get(arm)
             if arm_t.tag ~= defs.TAG_TUPLE then return nil end
             if slot < arm_t.data[1] then
-                parts[#parts + 1] = types_mod.find(ctx, ctx.lists:get(arm_t.data[0] + slot))
+                parts[#parts + 1] = unwrap_spread(types_mod.find(ctx, ctx.lists:get(arm_t.data[0] + slot)))
             else
                 parts[#parts + 1] = ctx.T_NIL
             end

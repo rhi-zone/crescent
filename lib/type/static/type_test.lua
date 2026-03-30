@@ -6168,6 +6168,63 @@ local ok, val = pcall(f)
 ]])
     end)
 
+    -- spread-in-tuple-position tests: (true, ...R) in match alias result expressions.
+    -- These test the full `PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }`
+    -- semantics now that $PcallReturn is deleted and PcallReturn is a user-defined match alias.
+    assert.it("spread-in-tuple: PcallReturn single return splice — (true, integer) | (false, string)", function()
+        -- PcallReturn<() -> integer> should resolve to (true, integer) | (false, string)
+        -- after the spread ...R splices R=integer into the tuple.
+        v3_no_errors([[
+--:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+local x --: PcallReturn<(integer) -> integer>
+--: (true, integer) | (false, string)
+local ok = x
+]])
+    end)
+
+    assert.it("spread-in-tuple: PcallReturn multi-return splice — (true, integer, string) | (false, string)", function()
+        -- PcallReturn with multi-return function: R is bound to a tuple, spread splices elements.
+        v3_no_errors([[
+--:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+local x --: PcallReturn<() -> (integer, string)>
+--: (true, integer, string) | (false, string)
+local ok = x
+]])
+    end)
+
+    assert.it("spread-in-tuple: pcall single-return annotated — if ok then arith passes", function()
+        v3_no_errors([[
+--: () -> integer
+local function f() return 42 end
+local ok, x = pcall(f)
+if ok then
+    local n = x + 1
+end
+]])
+    end)
+
+    assert.it("spread-in-tuple: pcall single-return unannotated — if ok then arith passes", function()
+        v3_no_errors([[
+local function f()
+    return 42
+end
+local ok, x = pcall(f)
+if ok then
+    local n = x + 1
+end
+]])
+    end)
+
+    assert.it("spread-in-tuple: pcall error-path narrowing — if not ok then string ops pass", function()
+        v3_no_errors([[
+local function f() error("boom") end
+local ok, err = pcall(f)
+if not ok then
+    local s = err .. "!"
+end
+]])
+    end)
+
     assert.it("io.open success: if f then narrows f to non-nil file handle", function()
         v3_no_errors([[
 local f, err = io.open("test.txt", "r")

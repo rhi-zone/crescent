@@ -550,8 +550,15 @@ local function propagate_multi_ret_narrowing(ctx, name_id, narrowed_tid, is_trut
                 for _, arm in ipairs(surviving_arms) do
                     local arm_t = ctx.types:get(arm)
                     if arm_t.data[1] > other_entry.slot then
-                        parts[#parts + 1] = types_mod.find(ctx,
+                        local elem = types_mod.find(ctx,
                             ctx.lists:get(arm_t.data[0] + other_entry.slot))
+                        -- Unwrap TAG_SPREAD: (true, ...R) stores TAG_SPREAD(R) at slot 1.
+                        -- After if-guard narrowing, the slot value is R, not the spread.
+                        local elem_t = ctx.types:get(elem)
+                        if elem_t.tag == defs.TAG_SPREAD then
+                            elem = types_mod.find(ctx, elem_t.data[0])
+                        end
+                        parts[#parts + 1] = elem
                     else
                         parts[#parts + 1] = ctx.T_NIL
                     end
