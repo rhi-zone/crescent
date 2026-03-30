@@ -1,7 +1,7 @@
 # Fuzz Suite Gaps
 
-Current state after 2026-03-31 update: 39 algebra invariants, 57 eval invariants (22 arb.it
-+ 21 T.it, 500 trials each for arb), 15 grammar programs. The three-tier architecture
+Current state after 2026-03-31 update: 39 algebra invariants, 64 eval invariants (22 arb.it
++ 28 T.it, 500 trials each for arb), 15 grammar programs. The three-tier architecture
 is in place. This file tracks remaining gaps.
 
 ## Tier 1 (Algebra) gaps
@@ -185,6 +185,28 @@ structural field-level mismatch (see CLAUDE.md "Annotation enforcement gotcha").
 - [x] MA8c: `$EachField<T1|T2, MakeReadonly>` == `$EachField<T1, MakeReadonly> | $EachField<T2, MakeReadonly>` (500 trials, bidirectional)
 - [x] MA8d: `$EachField<T1|T2, MakeWritable>` == `$EachField<T1, MakeWritable> | $EachField<T2, MakeWritable>` (500 trials, bidirectional)
 Uses `{ arb_table_type, arb_table_type }` generators with `check_sub` (FIXED_SCOPE already declares all four aliases).
+
+### MA7: Intersection-type inputs to match — DONE (fuzz_eval.lua MA7a–MA7c)
+- [x] MA7a: `CaptureId<A & B>` == `A & B` — capture arm `%R` handles intersections bidirectionally (fn-return)
+- [x] MA7b: `WildConst<A & B>` == `integer` — wildcard `_` arm fires for intersection inputs (fn-return)
+- [x] MA7c: specific-type arm skipped for intersection input; wildcard fires — 0 errors positive + 1 error negative
+
+Key finding (probed 2026-03-31): intersection inputs are treated **opaque** by the match evaluator.
+A specific-type arm (`integer =>`) does NOT fire when given `integer & T` — the intersection is not
+decomposed into its members. Only wildcard-style arms match intersections:
+- `%R => R` (capture): captures the full intersection, returns it unchanged
+- `_ => X` (wildcard): always fires, returns X
+Specific-type arms produce `never` for intersection inputs (or fall to `_` if present).
+This is NOT per-member distribution.
+
+### MA9: Composed match aliases — DONE (fuzz_eval.lua MA9a–MA9d)
+- [x] MA9a: `Outer<integer>` == `Inner<integer>` == `string` (two-level alias composition, bidirectional fn-return)
+- [x] MA9b: `Outer<string>` == `Inner<string>` == `integer` (different concrete input, bidirectional fn-return)
+- [x] MA9c: `Outer<integer | string>` == `string | boolean` (union distributes through composition, bidirectional fn-return)
+- [x] MA9d: `Outer<integer>` != `integer` — composition is not identity (negative, 1 error)
+
+`Outer<T> = match T { %R => Inner<R> }` where `Inner` is another match alias. Both two-level chain
+and union propagation through composition work correctly. Probed three-level nesting — also works.
 
 ### MA: multi-arm match expression — DONE (fuzz_eval.lua MA1–MA6)
 - [x] MA1: arm selectivity — `match T { A => C, B => D }` with `T = A` gives `C`, `T = B` gives `D` (bidirectional, 500 trials)

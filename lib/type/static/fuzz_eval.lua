@@ -1010,6 +1010,76 @@ T.it("[eval] MA6b: IsX<{ x: string }> == never (exact type mismatch -> wildcard,
 	)
 end)
 
+-- ── MA7: Intersection-type inputs to match ───────────────────────────────────
+-- Key finding: intersection inputs are treated OPAQUE by the match evaluator.
+-- A specific-type arm (e.g. `integer =>`) does NOT fire when given `integer & T` —
+-- the intersection is not decomposed.  Only wildcard-style arms match:
+--   - `%R => R`  (capture arm): captures the full intersection, returns it as-is
+--   - `_ => X`   (wildcard arm): always fires, returns X
+-- Specific-type arms (e.g. `integer => X`) never fire for intersection inputs;
+-- such inputs fall through to `_` or produce `never` if no wildcard is present.
+-- This is the current implementation semantics; it is NOT per-member distribution.
+
+-- MA7a: CaptureId<A & B> == A & B (capture arm handles intersections, bidirectional)
+T.it("[eval] MA7a: CaptureId<integer & string> == integer & string (bidirectional, fn-return)", function()
+	local decl = "--:: CaptureId2<T> = match T { %R => R }\n"
+	-- Forward: CaptureId<A&B> <: A&B
+	local fwd_src = decl
+		.. "local x --: CaptureId2<integer & string>\n"
+		.. "--: () -> integer & string\n"
+		.. "local function f() return x end\n"
+	local ec_fwd = check_mod.check_string(fwd_src, "fuzz_eval_MA7a_fwd")
+	T.eq(#ec_fwd.errors, 0, "MA7a-fwd: CaptureId<integer&string> <: integer&string: expected 0 errors, got " .. #ec_fwd.errors)
+	-- Reverse: A&B <: CaptureId<A&B>
+	local rev_src = decl
+		.. "local x --: integer & string\n"
+		.. "--: () -> CaptureId2<integer & string>\n"
+		.. "local function f() return x end\n"
+	local ec_rev = check_mod.check_string(rev_src, "fuzz_eval_MA7a_rev")
+	T.eq(#ec_rev.errors, 0, "MA7a-rev: integer&string <: CaptureId<integer&string>: expected 0 errors, got " .. #ec_rev.errors)
+end)
+
+-- MA7b: WildConst<A & B> == integer (wildcard arm fires for intersection inputs)
+-- _ always matches, so match T { _ => integer } gives integer even when T = A & B.
+T.it("[eval] MA7b: WildConst<integer & string> == integer (wildcard arm, fn-return)", function()
+	local decl = "--:: WildConst2<T> = match T { _ => integer }\n"
+	-- Forward: WildConst<A&B> <: integer
+	local fwd_src = decl
+		.. "local x --: WildConst2<integer & string>\n"
+		.. "--: () -> integer\n"
+		.. "local function f() return x end\n"
+	local ec_fwd = check_mod.check_string(fwd_src, "fuzz_eval_MA7b_fwd")
+	T.eq(#ec_fwd.errors, 0, "MA7b-fwd: WildConst<integer&string> <: integer: expected 0 errors, got " .. #ec_fwd.errors)
+	-- Reverse: integer <: WildConst<A&B>
+	local rev_src = decl
+		.. "local x --: integer\n"
+		.. "--: () -> WildConst2<integer & string>\n"
+		.. "local function f() return x end\n"
+	local ec_rev = check_mod.check_string(rev_src, "fuzz_eval_MA7b_rev")
+	T.eq(#ec_rev.errors, 0, "MA7b-rev: integer <: WildConst<integer&string>: expected 0 errors, got " .. #ec_rev.errors)
+end)
+
+-- MA7c: Specific-type arm does NOT fire for intersection input — falls to wildcard.
+-- match T { integer => boolean, _ => string } with T = integer & string gives string
+-- (not boolean), because the intersection is opaque to the integer arm.
+T.it("[eval] MA7c: specific arm skipped for intersection, wildcard fires — 0 errors", function()
+	local decl = "--:: IntOrWild<T> = match T { integer => boolean, _ => string }\n"
+	-- Forward: IntOrWild<integer & string> <: string  (wildcard fired, not integer arm)
+	local fwd_src = decl
+		.. "local x --: IntOrWild<integer & string>\n"
+		.. "--: () -> string\n"
+		.. "local function f() return x end\n"
+	local ec_fwd = check_mod.check_string(fwd_src, "fuzz_eval_MA7c_fwd")
+	T.eq(#ec_fwd.errors, 0, "MA7c-fwd: IntOrWild<integer&string> <: string: expected 0, got " .. #ec_fwd.errors)
+	-- Negative: boolean should NOT be <: IntOrWild<integer & string> (result is string, not boolean)
+	local neg_src = decl
+		.. "local x --: boolean\n"
+		.. "--: () -> IntOrWild<integer & string>\n"
+		.. "local function f() return x end\n"
+	local ec_neg = check_mod.check_string(neg_src, "fuzz_eval_MA7c_neg")
+	T.eq(#ec_neg.errors, 1, "MA7c-neg: boolean should NOT <: IntOrWild<integer&string> (expected 1 error, got " .. #ec_neg.errors .. ")")
+end)
+
 -- MA4r (random): for randomly generated tables, FieldX<T> == x-field-type when T has x,
 -- or never when T lacks x.
 -- Strategy: arb_table_type generates '{ x: T, ... }' strings from FIELD_NAMES = {x,y,z,n,s}.
@@ -1038,5 +1108,60 @@ arb.it("[eval] MA4r: FieldX<T> == x-field-type (has x) or never (no x) for rando
 				"FieldX<" .. t_str .. "> should equal never (no x field), got mismatch")
 		end
 	end, { trials = 500 })
+
+-- ── MA9: Composed match aliases ───────────────────────────────────────────────
+-- Tests that a match alias whose result expression is another match alias
+-- (Outer<T> = match T { %R => Inner<R> }) correctly defers and evaluates the
+-- inner alias with the captured type.
+-- Semantics verified: Inner is applied with the bound capture R; union inputs
+-- distribute through the composition (since match distributes over union); and
+-- three levels of nesting also work.
+
+-- Declarations for MA9 tests.
+local MA9_DECL = table.concat({
+	"--:: Inner<T>  = match T { integer => string, string => integer }",
+	"--:: Outer<T>  = match T { %R => Inner<R> }",
+}, "\n") .. "\n"
+
+-- MA9a: Outer<integer> == Inner<integer> == string (bidirectional, fn-return)
+T.it("[eval] MA9a: Outer<integer> == string via Inner<integer> (bidirectional, fn-return)", function()
+	T.ok(
+		check_eq_fn("Outer<integer>", "string", MA9_DECL),
+		"MA9a: Outer<integer> should equal string bidirectionally"
+	)
+end)
+
+-- MA9b: Outer<string> == Inner<string> == integer (bidirectional, fn-return)
+T.it("[eval] MA9b: Outer<string> == integer via Inner<string> (bidirectional, fn-return)", function()
+	T.ok(
+		check_eq_fn("Outer<string>", "integer", MA9_DECL),
+		"MA9b: Outer<string> should equal integer bidirectionally"
+	)
+end)
+
+-- MA9c: Outer<integer | string> == Inner<integer | string> == string | integer
+-- Union distributes through the composed alias (outer match distributes over union,
+-- then each member runs through Inner).
+T.it("[eval] MA9c: Outer<integer | string> == string | integer (union distributes, fn-return)", function()
+	local decl = table.concat({
+		"--:: Inner2<T>  = match T { integer => string, string => boolean }",
+		"--:: Outer2<T>  = match T { %R => Inner2<R> }",
+	}, "\n") .. "\n"
+	T.ok(
+		check_eq_fn("Outer2<integer | string>", "string | boolean", decl),
+		"MA9c: Outer2<integer|string> should equal string|boolean bidirectionally"
+	)
+end)
+
+-- MA9d (negative): Outer<integer> != integer — the composition transforms the type.
+-- If composition were a no-op, Outer<integer> would equal integer. It should not.
+T.it("[eval] MA9d: Outer<integer> NOT integer — composition is not identity (1 error)", function()
+	local src = MA9_DECL
+		.. "local x --: Outer<integer>\n"
+		.. "--: () -> integer\n"
+		.. "local function f() return x end\n"
+	local ec = check_mod.check_string(src, "fuzz_eval_MA9d")
+	T.eq(#ec.errors, 1, "MA9d: Outer<integer> should NOT equal integer (expected 1 error, got " .. #ec.errors .. ")")
+end)
 
 return {}
