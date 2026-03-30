@@ -60,12 +60,17 @@ capability TS lacks. But the concrete use cases fold:
 
 No concrete use case identified yet. Implement when one appears.
 
-## Other literal ops
+## Boolean ops
 
-- **Boolean**: `not true` → `false`. Low priority, no concrete use case.
-- **String `..`**: see above — low priority, JS-heritage motivation doesn't apply.
+Trivially expressible as match aliases — no new primitives needed:
+
+```lua
+--:: Not<B>    = match B { true => false, false => true }
+--:: And<A, B> = match A { true => B, false => false }
+--:: Or<A, B>  = match A { true => true, false => B }
+```
 
 ## Recommended approach
 
 1. `#tuple` length — concrete use cases exist today (`Arity<F>`, `Repeat`, etc.)
-2. Everything else — only on concrete demand.
+2. String `..` and `LIT_INTEGER` arithmetic — only on concrete demand.
