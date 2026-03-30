@@ -177,13 +177,13 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 
 ## typechecker type-level features (designed this session, needs implementation)
 
-- [ ] **`$EachField<T, F>` intrinsic** — per-field flatMap. Spec: docs/each-field-spec.md.
-  F is a single-param named alias returning `{}` (drop), `{ D }` (keep/transform), or
-  `{ D1, D2 }` (expand). Descriptor: `{ key, value, optional, readonly }`. F uses
-  `{ flag: _, ...%Rest } => { flag: newval, ...Rest }` pattern. Permanent intrinsic —
-  gather + flag write cannot be expressed as pure match. Enables Partial, Required,
-  Readonly, Writable, NonOptional. Open question: parameterized F for Pick/Omit requires
-  partial application of generic aliases (not yet designed).
+- [x] **`$EachField<T, F>` intrinsic** — flatMap semantics implemented (fbb00f5, 2026-03-30).
+  F returns a brace-tuple: `{}` = drop, `{ D }` = keep/transform, `{ D1, D2 }` = expand.
+  Detection: empty TAG_TABLE → drop; positional-indexer TAG_TABLE → multi-element tuple;
+  anything else → backward-compat single-descriptor. **Known gap**: ann.lua cannot parse
+  nested table literals as brace-tuple elements — `{ { optional: true, ...Rest } }` is
+  not yet expressible. MakeOptional-style F aliases using `...%Rest` require both rest
+  capture (see below) AND a grammar extension for nested table result expressions.
 
 - [ ] **Interface declaration syntax `--:: Name: Base`** — explicit refinement at
   definition site. `--:: Monad<T>: Functor<T> = { ... }` declares Monad as an intentional
