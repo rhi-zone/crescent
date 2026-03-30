@@ -518,4 +518,46 @@ arb.it("[alg] mutable satisfies readonly: { x: T } <: { readonly x: T }",
 -- The write-position rejection is tested at the grammar level (fuzz_test.lua A2 grammar variant).
 -- This invariant is documented here as a known gap; see docs/fuzz-gaps.md A2.
 
+-- ── A3: function arity invariants ─────────────────────────────────────────────
+
+-- 30. Extra required param fails: (A, B) -> C </: (A) -> C
+-- A function requiring 2 params does NOT satisfy a type expecting only 1 param.
+-- Contravariant param check: target has 1 param; at position 2, target pads with T_NIL.
+-- try_unify checks T_NIL <: B (i.e. nil <: B). For any base type B, nil is not a subtype.
+-- Uses arb_base_type for B so B is always one of integer/number/string/boolean (no nil).
+arb.it("[alg] A3: extra required param fails: (A, B) -> C </: (A) -> C",
+	{ farb.arb_type, farb.arb_base_type, farb.arb_type },
+	function(A_node, B_node, C_node)
+		local ctx  = make_ctx()
+		local a    = ast_to_tid(ctx, A_node)
+		local b    = ast_to_tid(ctx, B_node)
+		local c    = ast_to_tid(ctx, C_node)
+		local f2   = types_mod.make_func(ctx, { a, b }, { c }, -1)
+		local f1   = types_mod.make_func(ctx, { a },    { c }, -1)
+		assert(not subtype(ctx, f2, f1),
+			"(A, B) -> C should NOT be <: (A) -> C: ("
+			.. type_str(A_node) .. ", " .. type_str(B_node) .. ") -> " .. type_str(C_node))
+	end, { trials = 2000 })
+
+-- 31. Fewer params OK: (A) -> C <: (A) -> C
+-- A function with one param satisfies a type with one param (reflexivity sanity check).
+arb.it("[alg] A3: fewer params OK: (A) -> C <: (A) -> C",
+	{ farb.arb_type, farb.arb_type },
+	function(A_node, C_node)
+		local ctx = make_ctx()
+		local a   = ast_to_tid(ctx, A_node)
+		local c   = ast_to_tid(ctx, C_node)
+		local f   = types_mod.make_func(ctx, { a }, { c }, -1)
+		assert(subtype(ctx, f, f),
+			"(A) -> C should be <: (A) -> C (reflexivity): ("
+			.. type_str(A_node) .. ") -> " .. type_str(C_node))
+	end, { trials = 2000 })
+
+-- NOTE: A4 (meta slot subtyping) is skipped at the algebra level.
+-- try_unify does not check meta fields — the TAG_TABLE branch only iterates regular fields
+-- (data[0]/data[1]). Meta field checking is only performed in M.unify (used in constrain.lua).
+-- All try_unify(ctx, meta_tbl_a, meta_tbl_b) calls return true trivially when neither table
+-- has regular fields, making meta slot invariants untestable at this level.
+-- See docs/fuzz-gaps.md A4 for the skip rationale and suggested grammar-level alternative.
+
 return {}

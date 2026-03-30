@@ -21,13 +21,20 @@ These extend fuzz_alg.lua. All use direct type construction (fast, 2000 trials).
   try_unify checks structural shape only; readonly does not affect structural subtyping.
   Needs a grammar-level test (fuzz_test.lua) that exercises a write to a readonly field.
 
-### A3: function arity
-- `(A, B) -> C </: (A) -> C` — extra required param, source function needs two args
-- `(A) -> C <: (A, B?) -> C` — source accepting one arg satisfies target with optional second
+### A3: function arity — DONE (invariants 30–31, fuzz_alg.lua)
+- [x] `(A, B) -> C </: (A) -> C` — extra required param fails: invariant 30
+- [x] `(A) -> C <: (A) -> C` — reflexivity sanity check: invariant 31
+Note: uses `arb_base_type` for B so `nil </: B` always holds — contravariant padding at
+position 2 inserts T_NIL for the target, so try_unify checks `nil <: B`, which fails for
+all of integer/number/string/boolean.
 
-### A4: meta slot subtyping
-- `{ #__add: T } <: { #__add: T }` — reflexivity
-- `{ #__add: T, #__sub: U } <: { #__add: T }` — elimination (more slots satisfies fewer)
+### A4: meta slot subtyping — SKIPPED (try_unify does not check meta fields)
+`try_unify` only iterates regular fields (data[0]/data[1]) in the TAG_TABLE branch (unify.lua
+lines 981–997). Meta field checking lives only in `M.unify`, used by constrain.lua. All
+try_unify calls on meta-only tables return true trivially regardless of meta slot presence or
+type mismatch, making algebra-level invariants vacuously true and non-informative.
+Grammar-level alternative (P3): build programs using `setmetatable` and typed meta slots,
+verifying metamethod access typechecks correctly via the full constrain.lua pipeline.
 
 ---
 
