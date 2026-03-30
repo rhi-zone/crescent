@@ -35,7 +35,7 @@ provisional and will be eliminated as `match` gains:
 - indexer arms: `{ [%K]: %V }` — **implemented** (match.lua, 2026-03-29). Binds K → indexer key type, V → indexer value type. Alias-param substitution happens before match evaluation, so T in result expressions is already concrete. Handles indexer tables. Named-field fallback is the `{ ...[%K]: %V }` pattern below.
 - all-fields pattern: `{ ...[%K]: %V }` — **specced** (docs/all-fields-pattern-spec.md, 2026-03-30). Total catch-all that always matches any table. **Per-field distribution**: for each field, K and V are bound to that field's specific key and value types, the result expression is evaluated, results are unioned. `{ x: integer, y: string } => (K, V)` → `("x", integer) | ("y", string)` (precise, not `(string, integer|string)`). Enables elimination of `$Keys`, `$Values`, `$IpairsValues`, `$PairsReturn`, `$IpairsReturn`. IpairsReturn uses downstream `match K { integer => ..., _ => never }` to filter. Does NOT expose optional/readonly flags — flag manipulation requires `$EachField`. See spec for full semantics and migration plan.
 - capture sigil: `%Name` — **specced** (docs/capture-sigil-spec.md, 2026-03-30). A name in a match pattern is a capture iff prefixed with `%`. Result expressions use bare names. No implicit unbound-name fallback. Alias params (`T`, `F`, etc.) are concrete — substituted before match evaluation, never need `%`. Implementation: `TAG_CAPTURE(name_id)` vs `TAG_NAMED(name_id)` in pattern position.
-- 1-tuple syntax: `(T,)` — **specced** (docs/tuple-type-spec.md, 2026-03-30). Trailing comma distinguishes 1-tuple from grouped expression — `(T)` = grouping, `(T,)` = 1-element tuple. Required for `$EachField` F return type (F always returns a tuple of descriptors: `()` drop, `(D,)` keep, `(D1, D2)` expand). Table-pattern rest capture `{ field: %X, ...%Rest }` also specced in docs/capture-sigil-spec.md.
+- table-pattern rest capture: `{ field: %X, ...%Rest }` — **specced** (docs/capture-sigil-spec.md, 2026-03-30). Captures remaining fields into `Rest`; `...Rest` in result position splices them back. Used in `$EachField` F aliases to avoid enumerating unchanged fields.
 
 The permanent intrinsics are `$Require` (module system), `$Opaque`
 (nominal identity), `$FfiC` (builds closed table from ffi.cdef call sites),
@@ -48,11 +48,11 @@ redundant:**
 - `{ ...[%K]: %V }` — **distribution**: iterates fields, evaluates a result
   expression per field, unions results. For PairsReturn, Keys, Values.
   Does NOT expose optional/readonly flags. Result is a union, not a table.
-- `$EachField<T, F>` — **gather/map**: iterates fields, passes a descriptor
+- `$EachField<T, F>` — **per-field flatMap**: iterates fields, passes a descriptor
   `{ key, value, optional, readonly }` to F (a **named alias passed unapplied** —
-  no inline match expressions in type argument position), collects transformed
-  fields into ONE new table. F names only the field being changed; `...%Rest`
-  captures everything else and splices it back (`{ optional: _, ...%Rest } => { optional: true, ...Rest }`).
+  no inline match expressions). F returns a **brace-tuple of descriptors**: `{}` drops
+  the field, `{ D }` keeps/transforms it, `{ D1, D2 }` expands it. Tuple syntax is
+  braces — `(T)` is grouping, `{ T }` is a 1-element tuple.
   Required for flag manipulation: `Partial<T>`, `Required<T>`, `Readonly<T>`.
   Cannot be replaced by distribution.
 

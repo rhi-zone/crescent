@@ -113,37 +113,34 @@ Iterates each field of T, passes a descriptor `{ key, value, optional, readonly 
 F (a match alias using `%` captures), collects results into **one new table**.
 F's return value determines what happens to each field:
 
-- **returns descriptor** → field included (with any modifications to key/value/flags)
-- **returns `never`** → field dropped
-- any combination per-field — map, filter, and remap are all the same primitive
+- **F returns `{ D }`** — field included (map / transform)
+- **F returns `{}`** — field dropped (filter)
+- **F returns `{ D1, D2 }`** — field expanded (flatMap)
 
-This subsumes separate map/filter/remap operations. `Pick`, `Omit`, `Readonly`,
-`Partial`, key renaming — all expressible as different F aliases.
+Tuple syntax is braces: `{ A, B }` is a 2-tuple, `{}` is empty. This subsumes
+separate map/filter/remap operations.
 
 ```lua
--- flag transforms (map) — F returns a 1-tuple (D,)
---:: MakeOptional<D> = match D { { optional: _, ...%Rest } => ({ optional: true,  ...Rest },) }
---:: MakeRequired<D> = match D { { optional: _, ...%Rest } => ({ optional: false, ...Rest },) }
---:: MakeReadonly<D> = match D { { readonly: _, ...%Rest } => ({ readonly: true,  ...Rest },) }
---:: MakeWritable<D> = match D { { readonly: _, ...%Rest } => ({ readonly: false, ...Rest },) }
+-- flag transforms (map)
+--:: MakeOptional<D> = match D { { optional: _, ...%Rest } => { { optional: true,  ...Rest } } }
+--:: MakeRequired<D> = match D { { optional: _, ...%Rest } => { { optional: false, ...Rest } } }
+--:: MakeReadonly<D> = match D { { readonly: _, ...%Rest } => { { readonly: true,  ...Rest } } }
+--:: MakeWritable<D> = match D { { readonly: _, ...%Rest } => { { readonly: false, ...Rest } } }
 --:: Partial<T>  = $EachField<T, MakeOptional>
 --:: Required<T> = $EachField<T, MakeRequired>
 --:: Readonly<T> = $EachField<T, MakeReadonly>
 --:: Writable<T> = $EachField<T, MakeWritable>
 
--- filter — F returns () to drop, (D,) to keep
---:: DropOptional<D> = match D { { optional: true, ... } => (), _ => (D,) }
+-- filter: {} drops, { D } keeps
+--:: DropOptional<D> = match D { { optional: true, ... } => {}, _ => { D } }
 --:: NonOptional<T>  = $EachField<T, DropOptional>
 
--- remap — F returns descriptor with different key (requires type-level "..", not yet specced)
--- --:: ToGetter<D> = match D { { key: %K, value: %V, ...%Rest } => ({ key: "get_" .. K, value: () -> V, ...Rest },) }
+-- remap: requires type-level .., not yet specced
+-- --:: ToGetter<D> = match D { { key: %K, value: %V, ...%Rest } => { { key: "get_" .. K, value: () -> V, ...Rest } } }
 -- --:: Getters<T>  = $EachField<T, ToGetter>
 ```
 
-F is a **single-parameter named alias passed unapplied**. It always returns a **tuple
-of descriptors**: `()` drops the field, `(D,)` keeps/transforms it, `(D1, D2)` expands
-it. `...%Rest` captures everything not being changed — you only name what you're
-transforming. See docs/each-field-spec.md for the full spec.
+F is a **single-parameter named alias passed unapplied**. See docs/each-field-spec.md.
 
 **Open question: parameterized F.** `Pick<T, Keys>` needs F to close over `Keys` —
 requires partial application of generic aliases (`$EachField<T, PickKey<Keys>>`). Not
