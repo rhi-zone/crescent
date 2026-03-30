@@ -1,6 +1,6 @@
 # Fuzz Suite Gaps
 
-Current state after 2026-03-30 redesign: 22 algebra invariants, 23 eval invariants,
+Current state after 2026-03-31 update: 22 algebra invariants, 28 eval invariants,
 24 grammar invariants. The three-tier architecture is in place but coverage is thin.
 This file tracks what's missing, ordered by priority.
 
@@ -58,13 +58,14 @@ Extend `arb_union_table` to also generate `A | B` where A and B are base types (
 
 These go in fuzz_eval.lua. Grouped by feature.
 
-### E1: never propagation through EachField
-- `$EachField<never, KeepAll>` — should produce `never` (no fields to iterate)
-- `$EachField<T | never, KeepAll>` == `$EachField<T, KeepAll>` == T
+### E1: never propagation through EachField — DONE (fuzz_eval.lua E1a–E1b)
+- [x] `$EachField<never, KeepAll> | integer == integer` — EachField over never is never (E1a)
+- [x] `$EachField<never, KeepAll>` usable as `never` — no crash, 0 errors (E1b)
 
-### E2: EachField filter correctness
-- `DropOptional<{ x?: integer, y: string }>` == `{ y: string }` — filter removes optional field
-- `NonOptional<T>` where T has mixed required/optional — only required fields survive
+### E2: EachField filter correctness — DONE (fuzz_eval.lua E2a–E2b)
+- [x] `DropOptional<{ x?: integer, y: string }>` keeps `.y` accessible, drops `.x` (E2a)
+- [x] `DropOptional<{ x: integer, y: string }>` == identity on all-required table (E2b)
+DropOptional declared inline: `match D { { optional: true, ...%Rest } => {}, _ => { D } }`
 
 ### E3: partial application round-trip — DONE (fuzz_eval.lua E3a–E3d)
 - [x] `Pick<{ x: integer, y: string }, "x">.x` accessible — 0 errors (E3a)
@@ -87,15 +88,15 @@ These test the `{ ...[%K]: %V }` all-fields pattern properties.
 - [x] E5c: `Parameters<F>` == param tuple for random function types (500 trials, random)
 Note: `Last` and `Init` not tested here (deferred — require 1-element tuple literals, not yet stabilized).
 
-### E6: $Throw/$Catch interaction
-- `$Catch<$Throw<"msg">, integer>` == `integer` (catch swallows throw, returns default)
-- `$Catch<string, integer>` == `string` (no throw, value passes through)
-Fixed test (not randomly generated — $Throw/Catch take literal message strings).
+### E6: $Throw/$Catch interaction — DONE (fuzz_eval.lua E6a–E6c)
+- [x] `$Catch<$Throw<"msg">, integer>` == `integer` — catch returns default (E6a)
+- [x] `$Catch<string, integer>` == `string` — no throw, value passes through (E6b)
+- [x] `$Throw<"msg">` without $Catch produces exactly 1 diagnostic with the message (E6c)
 
-### E7: generic defaults
-- `WithDefault<integer>` where `WithDefault<T, U = string> = { a: T, b: U }` → `{ a: integer, b: string }`
-- Missing second arg uses default
-Fixed test with hardcoded alias.
+### E7: generic defaults — DONE (fuzz_eval.lua E7a–E7c)
+- [x] `WithDefault<integer>` uses default `U = string` → `{ a: integer, b: string }` (E7a)
+- [x] `WithDefault<integer, boolean>` overrides default → `{ a: integer, b: boolean }` (E7b)
+- [x] `WithDefault<integer>` b is `string` not `boolean` → 1 error (E7c, negative test)
 
 ### E8: oracle non-population on failed declaration — DONE (fuzz_eval.lua E8)
 - [x] Failed `--:: BadImpl: HasX = { y: string }` emits CONSTRAINT_MISMATCH
@@ -115,9 +116,8 @@ check fails independently of the oracle. Both errors fire correctly — exactly 
 - [x] E10c: `ReturnType<() -> (integer, string)>` is a tuple `(integer, string)` (fixed)
 - [x] E10d: `ReturnType<() -> C>` == `C` for random 0-param function types (500 trials)
 
-### E11: MakeOptional idempotent
-`$EachField<$EachField<T, MakeOptional>, MakeOptional>` == `$EachField<T, MakeOptional>`
-Applying MakeOptional twice == applying once.
+### E11: MakeOptional idempotent — DONE (fuzz_eval.lua E11)
+- [x] `$EachField<$EachField<T, MakeOptional>, MakeOptional>` == `$EachField<T, MakeOptional>` (500 trials, bidirectional)
 
 ---
 

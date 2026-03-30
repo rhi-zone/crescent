@@ -489,6 +489,56 @@ local function f2() return pa end
 	T.eq(#ec.errors, 0, "E3d: PickDirect == PickAlias should produce 0 errors, got " .. tostring(#ec.errors))
 end)
 
+-- ── E2: EachField filter correctness ─────────────────────────────────────────
+-- DropOptional: drops fields where optional==true, keeps required fields.
+-- Declared inline (not in FIXED_SCOPE) since it's only used here.
+
+local E2_DECL = "--:: DropOptional<D> = match D { { optional: true, ...%Rest } => {}, _ => { D } }\n"
+
+-- E2a: DropOptional removes optional fields — { x?: integer, y: string } → { y: string }
+-- The optional field x is dropped; y (required) survives.
+-- Test: x.y is accessible (0 errors), x.x is NOT accessible (1 error).
+T.it("[eval] E2a: DropOptional removes optional fields — .y accessible, .x dropped", function()
+	-- E2a-pos: .y is accessible after DropOptional
+	local src_pos = E2_DECL .. [[
+local t --: $EachField<{ x?: integer, y: string }, DropOptional>
+--: () -> string
+local function get_y() return t.y end
+]]
+	local ec_pos = check_mod.check_string(src_pos, "fuzz_eval_E2a_pos")
+	T.eq(#ec_pos.errors, 0,
+		"E2a-pos: .y should be accessible after DropOptional, got " .. tostring(#ec_pos.errors) .. " errors")
+
+	-- E2a-neg: .x is NOT accessible after DropOptional (optional field was dropped)
+	local src_neg = E2_DECL .. [[
+local t --: $EachField<{ x?: integer, y: string }, DropOptional>
+--: () -> integer
+local function get_x() return t.x end
+]]
+	local ec_neg = check_mod.check_string(src_neg, "fuzz_eval_E2a_neg")
+	T.eq(#ec_neg.errors, 1,
+		"E2a-neg: .x should be dropped by DropOptional (expected 1 error), got " .. tostring(#ec_neg.errors))
+end)
+
+-- E2b: DropOptional on a fully required table == identity (bidirectional)
+-- $EachField<{ x: integer, y: string }, DropOptional> == { x: integer, y: string }
+-- No optional fields means nothing is dropped.
+T.it("[eval] E2b: DropOptional on all-required table == identity (bidirectional, 0 errors)", function()
+	local src = E2_DECL .. FIXED_SCOPE .. [[
+--:: AllRequired = { x: integer, y: string }
+--:: Dropped     = $EachField<AllRequired, DropOptional>
+local d --: Dropped
+local r --: AllRequired
+--: () -> AllRequired
+local function f1() return d end
+--: () -> Dropped
+local function f2() return r end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E2b")
+	T.eq(#ec.errors, 0,
+		"E2b: DropOptional on all-required table should equal original, got " .. tostring(#ec.errors) .. " errors")
+end)
+
 -- ── E9: match exhaustiveness on union ────────────────────────────────────────
 -- match (A | B) { A => X, B => X } == X for concrete type pairs.
 -- When all arms of a match on a union produce the same type X, the result is X.
@@ -660,6 +710,21 @@ arb.it("[eval] E10d: ReturnType<() -> C> == C for random 0-param function types"
 			"ReturnType<() -> C> <: C failed for C = " .. ret_str)
 		assert(check_sub(ret_str, rt_str),
 			"C <: ReturnType<() -> C> failed for C = " .. ret_str)
+	end, { trials = 500 })
+
+-- ── E11: MakeOptional idempotent ─────────────────────────────────────────────
+-- $EachField<$EachField<T, MakeOptional>, MakeOptional> == $EachField<T, MakeOptional>
+-- Applying MakeOptional twice produces the same type as applying it once.
+
+arb.it("[eval] E11: MakeOptional idempotent: applying twice == applying once",
+	arb_table_type,
+	function(t_str)
+		local once_str  = "$EachField<" .. t_str .. ", MakeOptional>"
+		local twice_str = "$EachField<$EachField<" .. t_str .. ", MakeOptional>, MakeOptional>"
+		assert(check_sub(once_str, twice_str),
+			"MakeOptional(T) <: MakeOptional(MakeOptional(T)) failed for T = " .. t_str)
+		assert(check_sub(twice_str, once_str),
+			"MakeOptional(MakeOptional(T)) <: MakeOptional(T) failed for T = " .. t_str)
 	end, { trials = 500 })
 
 return {}
