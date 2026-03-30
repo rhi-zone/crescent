@@ -612,11 +612,17 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         local new_arms = {}
         local as, al = t.data[1], t.data[2]
         local i = as
+        -- Set _in_match_arm_subst so that $Throw in result expressions is
+        -- deferred (not evaluated eagerly). The throw should only fire when
+        -- match.evaluate actually picks that arm.
+        local prev_in_match_arm_subst = ctx._in_match_arm_subst
+        ctx._in_match_arm_subst = true
         while i < as + al - 1 do
             new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i),     EMPTY_MAP, seen, eval_seen)
             new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping,   seen, eval_seen)
             i = i + 2
         end
+        ctx._in_match_arm_subst = prev_in_match_arm_subst
         seen[tid] = nil
         local mk = ctx.lists:mark()
         for _, aid in ipairs(new_arms) do ctx.lists:push(aid) end
@@ -683,23 +689,31 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         -- resolve_deferred_intrinsic in solve.lua once the TV is bound to a concrete type).
         local ct = ctx.types:get(callee_id)
         if ct.tag == defs.TAG_INTRINSIC then
-            local has_unresolved = false
-            for _, aid in ipairs(new_args) do
-                local at2 = ctx.types:get(types_mod.find(ctx, aid))
-                if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
-                    has_unresolved = true
-                    break
+            -- $Throw must not be evaluated eagerly during match arm result substitution.
+            -- It should only fire when its arm is actually taken by match.evaluate.
+            -- When _in_match_arm_subst is true, leave $Throw as a deferred TAG_TYPE_CALL
+            -- so match.evaluate can fire it after confirming the arm is selected.
+            local intr_name = require("lib.type.static.intern").get(ctx.pool, ct.data[0]) or ""
+            local defer_throw = intr_name == "Throw" and ctx._in_match_arm_subst
+            if not defer_throw then
+                local has_unresolved = false
+                for _, aid in ipairs(new_args) do
+                    local at2 = ctx.types:get(types_mod.find(ctx, aid))
+                    if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                        has_unresolved = true
+                        break
+                    end
+                    if at2.tag == defs.TAG_VAR or at2.tag == TAG_ROWVAR then
+                        has_unresolved = true
+                        break
+                    end
                 end
-                if at2.tag == defs.TAG_VAR or at2.tag == TAG_ROWVAR then
-                    has_unresolved = true
-                    break
+                if not has_unresolved then
+                    local intrinsic_mod = require("lib.type.static.intrinsic")
+                    -- t.data[3]: stable call-site hash stored by constrain.lua when
+                    -- creating this deferred TAG_TYPE_CALL. 0 = legacy/not set.
+                    return intrinsic_mod.expand(ctx, ct.data[0], new_args, t.data[3])
                 end
-            end
-            if not has_unresolved then
-                local intrinsic_mod = require("lib.type.static.intrinsic")
-                -- t.data[3]: stable call-site hash stored by constrain.lua when
-                -- creating this deferred TAG_TYPE_CALL. 0 = legacy/not set.
-                return intrinsic_mod.expand(ctx, ct.data[0], new_args, t.data[3])
             end
         end
         local mk = ctx.lists:mark()
@@ -743,18 +757,38 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
         return alias.body
     end
 
-    -- Generic alias: check arity
+    -- Generic alias: check arity, applying defaults for missing trailing args.
     local arg_ids_len = arg_ids and #arg_ids or 0
-    if not arg_ids or arg_ids_len ~= #alias.params then
+    local param_count = #alias.params
+    -- Count required params (those without a default).
+    local required_count = param_count
+    if alias.resolved_defaults then
+        for i = param_count, 1, -1 do
+            if alias.resolved_defaults[i] ~= nil then
+                required_count = i - 1
+            else
+                break
+            end
+        end
+    end
+    if arg_ids_len > param_count or arg_ids_len < required_count then
         local name = require("lib.type.static.intern").get(ctx.pool, name_id) or "?"
-        local expected = #alias.params
-        return nil, "type '" .. name .. "' expects " .. expected .. " argument(s), got " .. arg_ids_len
+        if required_count == param_count then
+            return nil, "type '" .. name .. "' expects " .. param_count .. " argument(s), got " .. arg_ids_len
+        else
+            return nil, "type '" .. name .. "' expects " .. required_count .. " to " .. param_count .. " argument(s), got " .. arg_ids_len
+        end
     end
 
-    -- Build substitution mapping
+    -- Build substitution mapping, filling in defaults for missing args.
     local mapping = {}
-    for i = 1, #alias.params do
-        mapping[alias.params[i]] = arg_ids[i]
+    for i = 1, param_count do
+        if arg_ids and i <= arg_ids_len then
+            mapping[alias.params[i]] = arg_ids[i]
+        else
+            -- Use the resolved default for this parameter.
+            mapping[alias.params[i]] = alias.resolved_defaults[i]
+        end
     end
 
     -- Cycle guard: alias.body == nil means we are currently constructing this
@@ -770,7 +804,8 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
         for i = 1, #alias.params do
             local bound = alias.resolved_bounds[i]
             if bound ~= nil then
-                local arg = arg_ids[i]
+                -- Use mapping so default-filled args are also checked (arg_ids may be nil).
+                local arg = mapping[alias.params[i]]
                 -- Use try_unify to check structural assignability (read-only, no side effects).
                 -- Widen literal arg types first so `{ x: 1 }` satisfies `{ x: number }`.
                 local widened_arg = types_mod.widen(ctx, arg)

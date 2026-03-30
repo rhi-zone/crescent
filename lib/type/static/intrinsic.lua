@@ -620,6 +620,62 @@ local function expand_opaque(ctx, arg_ids, stable_id)
 end
 
 -- ---------------------------------------------------------------------------
+-- $Throw<...Msg>
+-- ---------------------------------------------------------------------------
+-- Variadic. Each arg is either a string literal (emitted verbatim) or a type
+-- (rendered via types_mod.display). Concatenates args to form the diagnostic
+-- message. Emits a diagnostic at the current use-site location and returns
+-- T_NEVER. If ctx.catch_mode is true, does not emit — instead sets
+-- ctx.catch_threw = true and returns T_NEVER silently.
+local function expand_throw(ctx, arg_ids)
+    -- Build the message by concatenating each arg.
+    local parts = {}
+    for _, tid in ipairs(arg_ids) do
+        local resolved = types_mod.find(ctx, tid)
+        local t = ctx.types:get(resolved)
+        -- String literal arg: emit the raw string value without quotes.
+        if t.tag == TAG_LITERAL and t.data[0] == LIT_STRING then
+            local s = intern_mod.get(ctx.pool, t.data[1])
+            parts[#parts + 1] = s or ""
+        else
+            -- Type arg: render to display form.
+            parts[#parts + 1] = types_mod.display(ctx, resolved)
+        end
+    end
+    local msg = table.concat(parts)
+    if ctx.catch_mode then
+        ctx.catch_threw = true
+    else
+        local line = ctx._ann_warn_line or 0
+        errors_mod.error(ctx.err, ctx.filename, line, 0, msg)
+    end
+    return ctx.T_NEVER
+end
+
+-- ---------------------------------------------------------------------------
+-- $Catch<T, Default?>
+-- ---------------------------------------------------------------------------
+-- The first arg (T) is already resolved under catch_mode = true (set by
+-- constrain.lua before arg resolution). If any $Throw fired during T's
+-- resolution, ctx.catch_threw is true. Return Default (arg 2) when caught,
+-- or T_NEVER if Default is omitted. If no throw occurred, return T as-is.
+local function expand_catch(ctx, arg_ids)
+    if #arg_ids < 1 then
+        return ctx.T_NEVER
+    end
+    local t_tid = types_mod.find(ctx, arg_ids[1])
+    if ctx.catch_threw then
+        -- A $Throw was intercepted inside T.
+        if #arg_ids >= 2 then
+            return types_mod.find(ctx, arg_ids[2])
+        end
+        return ctx.T_NEVER
+    end
+    -- No throw: return T unchanged.
+    return t_tid
+end
+
+-- ---------------------------------------------------------------------------
 -- Public entry point
 -- ---------------------------------------------------------------------------
 
@@ -637,24 +693,6 @@ M.build_iter_triple = build_iter_triple
 function M.expand(ctx, name_id, arg_ids, stable_id)
     local name = intern_mod.get(ctx.pool, name_id) or ""
 
-    if name == "Keys" then
-        return expand_keys(ctx, arg_ids)
-    end
-
-    if name == "Values" then
-        -- $Values<T>: union of widened field value types
-        if #arg_ids < 1 then return ctx.T_UNKNOWN end
-        local T_tid = types_mod.find(ctx, arg_ids[1])
-        return extract_values(ctx, T_tid, false)
-    end
-
-    if name == "IpairsValues" then
-        -- $IpairsValues<T>: union of numeric/positional field value types
-        if #arg_ids < 1 then return ctx.T_UNKNOWN end
-        local T_tid = types_mod.find(ctx, arg_ids[1])
-        return extract_values(ctx, T_tid, true)
-    end
-
     if name == "EachUnion" then
         return expand_each_union(ctx, arg_ids)
     end
@@ -669,6 +707,14 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Require" then
         return expand_require(ctx, arg_ids)
+    end
+
+    if name == "Throw" then
+        return expand_throw(ctx, arg_ids)
+    end
+
+    if name == "Catch" then
+        return expand_catch(ctx, arg_ids)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative

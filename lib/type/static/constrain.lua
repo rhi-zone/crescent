@@ -2776,6 +2776,11 @@ local function process_type_decls(ctx)
             errors_mod.warning(ctx.err, ctx.filename, w.line or 0, w.col or 0, w.msg)
         end
     end
+    if ann.parse_errors then
+        for _, e in ipairs(ann.parse_errors) do
+            errors_mod.error(ctx.err, ctx.filename, e.line or 0, e.col or 0, e.msg)
+        end
+    end
     local decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, ... }, ... }
     -- decl_lines uses table-reference keys (result records as keys), which the
     -- typechecker cannot track. Annotate as any so indexed access returns any (→ integer).
@@ -2825,11 +2830,21 @@ local function process_type_decls(ctx)
                     raw_bounds[#raw_bounds + 1] = ann.lists:get(i)
                 end
             end
+            -- Extract raw (annotation-arena) default type IDs, if any.
+            -- -1 entries are "no default" sentinels. resolved_defaults is filled in Pass 2a.
+            local raw_defaults = nil
+            if r.type_defaults_len and r.type_defaults_len > 0 then
+                raw_defaults = {}
+                for i = r.type_defaults_start, r.type_defaults_start + r.type_defaults_len - 1 do
+                    raw_defaults[#raw_defaults + 1] = ann.lists:get(i)
+                end
+            end
             env_mod.bind_type(ctx.scope, r.name_id, {
-                body        = nil,
-                params      = params,
-                nominal     = r.newtype or false,
-                raw_bounds  = raw_bounds,   -- annotation-arena IDs; resolved in Pass 2a
+                body         = nil,
+                params       = params,
+                nominal      = r.newtype or false,
+                raw_bounds   = raw_bounds,    -- annotation-arena IDs; resolved in Pass 2a
+                raw_defaults = raw_defaults,  -- annotation-arena IDs; resolved in Pass 2a
             })
         end
     end
@@ -2912,6 +2927,42 @@ local function process_type_decls(ctx)
                         end
                     end
 
+                    -- Resolve raw_defaults (annotation-arena IDs) into checker-context type IDs.
+                    -- Also check each resolved default satisfies its corresponding bound at
+                    -- definition site: Default <: Bound.
+                    if alias.raw_defaults then
+                        alias.resolved_defaults = {}
+                        local rd = alias.raw_defaults or {} --: { [integer]: integer, ... }
+                        for i, raw_id in ipairs(rd) do
+                            if raw_id == -1 then
+                                alias.resolved_defaults[i] = nil
+                            else
+                                local default_tid = resolve_annotation_type(ctx, raw_id)
+                                alias.resolved_defaults[i] = default_tid
+                                -- Check default satisfies bound at definition site.
+                                if alias.resolved_bounds then
+                                    local bound = alias.resolved_bounds[i]
+                                    if bound ~= nil then
+                                        local unify_mod = require("lib.type.static.unify")
+                                        local widened_default = types_mod.widen(ctx, default_tid)
+                                        if not unify_mod.try_unify(ctx, widened_default, bound) then
+                                            local param_name = alias.params and alias.params[i]
+                                                and (intern_mod.get(ctx.pool, alias.params[i]) or "?") or "?"
+                                            local def_str = types_mod.display_short(ctx, default_tid)
+                                            local bnd_str = types_mod.display_short(ctx, bound)
+                                            --: integer
+                                            local r_line = decl_lines[r]
+                                            errors_mod.error(ctx.err, ctx.filename, r_line, 1,
+                                                "default type '" .. def_str
+                                                .. "' does not satisfy constraint '" .. bnd_str
+                                                .. "' for parameter '" .. param_name .. "'")
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+
                     ctx.scope = old_scope
                 end
             end
@@ -2988,6 +3039,9 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx._multi_ret                  = {}
     ctx._var_origin        = {}   -- [var_id] -> {obj_tid, field_name_id}: field-access origin for TAG_VAR results
     ctx.nominal_id         = 0
+    ctx.catch_mode         = false   -- true while inside $Catch<T, ...> first-arg resolution
+    ctx.catch_threw        = false   -- set to true by $Throw when catch_mode is active
+    ctx._in_match_arm_subst = false  -- true during match arm result substitution (defers $Throw)
     ctx.type_at            = {}
     ctx.name_at            = {}
     ctx.field_at           = {}

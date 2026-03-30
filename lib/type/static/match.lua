@@ -5,20 +5,24 @@
 local defs = require("lib.type.static.defs")
 local types_mod = require("lib.type.static.types")
 
-local TAG_ANY          = defs.TAG_ANY
-local TAG_NIL          = defs.TAG_NIL
-local TAG_BOOLEAN      = defs.TAG_BOOLEAN
-local TAG_NUMBER       = defs.TAG_NUMBER
-local TAG_STRING       = defs.TAG_STRING
-local TAG_INTEGER      = defs.TAG_INTEGER
-local TAG_LITERAL      = defs.TAG_LITERAL
-local TAG_NAMED        = defs.TAG_NAMED
-local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
-local TAG_TABLE        = defs.TAG_TABLE
-local TAG_FUNCTION     = defs.TAG_FUNCTION
-local TAG_UNION        = defs.TAG_UNION
-local TAG_INTERSECTION = defs.TAG_INTERSECTION
-local TAG_TUPLE        = defs.TAG_TUPLE
+local TAG_ANY            = defs.TAG_ANY
+local TAG_NIL            = defs.TAG_NIL
+local TAG_BOOLEAN        = defs.TAG_BOOLEAN
+local TAG_NUMBER         = defs.TAG_NUMBER
+local TAG_STRING         = defs.TAG_STRING
+local TAG_INTEGER        = defs.TAG_INTEGER
+local TAG_LITERAL        = defs.TAG_LITERAL
+local TAG_NAMED          = defs.TAG_NAMED
+local TAG_MATCH_TYPE     = defs.TAG_MATCH_TYPE
+local TAG_TABLE          = defs.TAG_TABLE
+local TAG_FUNCTION       = defs.TAG_FUNCTION
+local TAG_UNION          = defs.TAG_UNION
+local TAG_INTERSECTION   = defs.TAG_INTERSECTION
+local TAG_TUPLE          = defs.TAG_TUPLE
+local TAG_UNKNOWN        = defs.TAG_UNKNOWN
+local TAG_NEVER          = defs.TAG_NEVER
+local TAG_CAPTURE        = defs.TAG_CAPTURE
+local TAG_PAT_ALL_FIELDS = defs.TAG_PAT_ALL_FIELDS
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -54,10 +58,37 @@ function M.match_pattern(ctx, ty_id, pat_id)
     -- any pattern matches everything
     if pt.tag == TAG_ANY then return true, {} end
 
-    -- Named pattern (type variable in match context): binds
-    -- A bare name with no args is a capture variable that matches anything.
-    if pt.tag == TAG_NAMED and pt.data[2] == 0 then  -- no args
+    -- Explicit capture: %Name → always matches, binds name_id → input type
+    if pt.tag == TAG_CAPTURE then
         return true, { [pt.data[0]] = ty_id }
+    end
+
+    -- Named pattern (bare name, no type args) in pattern position → concrete type lookup.
+    -- Exception: `_` is a wildcard that always succeeds without binding.
+    -- For all other bare names: look up in scope; fail the arm if not found.
+    -- (Previously this was an implicit capture; now TAG_CAPTURE handles that.)
+    if pt.tag == TAG_NAMED and pt.data[2] == 0 then  -- no args
+        -- `_` wildcard: always succeeds, no binding
+        local intern_mod = require("lib.type.static.intern")
+        local name = intern_mod.get(ctx.pool, pt.data[0]) or ""
+        if name == "_" then
+            return true, {}
+        end
+        local env_mod = require("lib.type.static.env")
+        local scope = ctx.scope
+        if scope then
+            local resolved = env_mod.resolve_named_type(ctx, scope, pt.data[0], {})
+            if resolved then
+                -- Resolved: check subtype compatibility (ty_id <: resolved)
+                local unify_mod = require("lib.type.static.unify")
+                if unify_mod.try_unify(ctx, ty_id, resolved, {}) then
+                    return true, {}
+                end
+                return false, nil
+            end
+        end
+        -- Name not in scope: arm fails (no implicit capture fallback)
+        return false, nil
     end
 
     -- Exact primitive match
@@ -182,18 +213,19 @@ function M.match_pattern(ctx, ty_id, pat_id)
         local trl = tt.data[3]
         if prl > 0 then
             -- Special case: single capture variable in return position.
-            -- `() -> R` where R is a bare TAG_NAMED (capture var) binds R to:
+            -- `() -> %R` where %R is a TAG_CAPTURE binds R to:
             --   trl=0: never (void function has no return to bind)
             --   trl=1: the single return type
             --   trl>1: a tuple of all return types
-            -- This enables `ReturnType<F> = match F { () -> R => R }` for any F.
+            -- This enables `ReturnType<F> = match F { () -> %R => R }` for any F.
             if prl == 1 then
                 --: integer
                 local p_ret0 = ctx.lists:get(pt.data[2])
                 --: integer
                 local p_ret0_canon = types_mod.find(ctx, p_ret0)
                 local p_ret0_t = ctx.types:get(p_ret0_canon)
-                if p_ret0_t.tag == TAG_NAMED and p_ret0_t.data[2] == 0 then
+                if p_ret0_t.tag == TAG_CAPTURE or
+                   (p_ret0_t.tag == TAG_NAMED and p_ret0_t.data[2] == 0) then
                     if trl == 0 then return false, nil end
                     -- Bind R to first return type (trl=1) or tuple of all returns (trl>1).
                     -- trl>1 tuple-binding enables `PcallReturn<F> = match F { () -> R => (true, R) | ... }`
@@ -297,17 +329,99 @@ function M.evaluate(ctx, mt_id, seen)
         local pat_id = ctx.lists:get(i)
         --: integer
         local res_id = ctx.lists:get(i + 1)
+
+        -- TAG_PAT_ALL_FIELDS: { ...[%K]: %V } distributes over every field of the input.
+        -- For each named field: K = lit_string(name), V = field_type.
+        -- For each indexer: K = key_type, V = value_type.
+        -- TAG_ANY/TAG_UNKNOWN: one iteration K=unknown, V=unknown.
+        -- TAG_NEVER: zero iterations → contribute nothing.
+        -- Always matches (total).
+        local pat_t = ctx.types:get(types_mod.find(ctx, pat_id))
+        if pat_t.tag == TAG_PAT_ALL_FIELDS then
+            local k_name_id = pat_t.data[0]
+            local v_name_id = pat_t.data[1]
+            local results = {}
+            local env_mod = require("lib.type.static.env")
+
+            -- Helper: evaluate result expression with K → k_tid, V → v_tid bound
+            local function eval_with_kv(k_tid, v_tid)
+                local bindings = { [k_name_id] = k_tid, [v_name_id] = v_tid }
+                return env_mod.substitute(ctx, res_id, bindings, seen)
+            end
+
+            local pt = ctx.types:get(param_id)
+            if pt.tag == TAG_NEVER then
+                -- Zero iterations: contribute nothing
+            elseif pt.tag == TAG_ANY or pt.tag == TAG_UNKNOWN then
+                -- One synthetic iteration: K=unknown, V=unknown
+                results[#results + 1] = eval_with_kv(ctx.T_UNKNOWN, ctx.T_UNKNOWN)
+            elseif pt.tag == TAG_TABLE then
+                -- Named fields: K = lit_string(field_name), V = field_type
+                for fi_idx = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+                    local fid = ctx.lists:get(fi_idx)
+                    local fe  = ctx.fields:get(fid)
+                    if fe.name_id >= 0 then  -- skip spread markers (name_id == -1)
+                        local k_tid = types_mod.make_literal(ctx, defs.LIT_STRING, fe.name_id)
+                        local v_tid = types_mod.find(ctx, fe.type_id)
+                        results[#results + 1] = eval_with_kv(k_tid, v_tid)
+                    end
+                end
+                -- Indexers: K = key_type, V = value_type
+                local j = pt.data[2]
+                while j < pt.data[2] + pt.data[3] - 1 do
+                    local k_tid = types_mod.find(ctx, ctx.lists:get(j))
+                    local v_tid = types_mod.find(ctx, ctx.lists:get(j + 1))
+                    results[#results + 1] = eval_with_kv(k_tid, v_tid)
+                    j = j + 2
+                end
+                -- If no fields and no indexers: one unknown iteration (open/empty table)
+                if pt.data[1] == 0 and pt.data[3] == 0 then
+                    results[#results + 1] = eval_with_kv(ctx.T_UNKNOWN, ctx.T_UNKNOWN)
+                end
+            else
+                -- Non-table, non-union: one unknown iteration
+                results[#results + 1] = eval_with_kv(ctx.T_UNKNOWN, ctx.T_UNKNOWN)
+            end
+
+            seen[mt_id] = nil
+            if #results == 0 then return ctx.T_NEVER end
+            if #results == 1 then return results[1] end
+            return types_mod.make_union(ctx, results)
+        end
+
         local ok, bindings = M.match_pattern(ctx, param_id, pat_id)
         if ok then
             seen[mt_id] = nil
+            local result
             if bindings and next(bindings) then
                 -- Substitute bindings into result, passing seen so that any
                 -- TAG_MATCH_TYPE nodes encountered during substitution share
                 -- this cycle-detection set.
                 local env_mod = require("lib.type.static.env")
-                return env_mod.substitute(ctx, res_id, bindings, seen)
+                result = env_mod.substitute(ctx, res_id, bindings, seen)
+            else
+                result = res_id
             end
-            return res_id
+            -- Evaluate any deferred $Throw that was left as a TAG_TYPE_CALL
+            -- during arm substitution (to prevent spurious throws from arms
+            -- that are not taken). Now that this arm IS taken, fire it.
+            result = types_mod.find(ctx, result)
+            local rt = ctx.types:get(result)
+            if rt.tag == defs.TAG_TYPE_CALL then
+                local callee_t = ctx.types:get(types_mod.find(ctx, rt.data[0]))
+                if callee_t.tag == defs.TAG_INTRINSIC then
+                    local intr_name = require("lib.type.static.intern").get(ctx.pool, callee_t.data[0]) or ""
+                    if intr_name == "Throw" then
+                        local arg_ids = {}
+                        for j = rt.data[1], rt.data[1] + rt.data[2] - 1 do
+                            arg_ids[#arg_ids + 1] = ctx.lists:get(j)
+                        end
+                        local intrinsic_mod = require("lib.type.static.intrinsic")
+                        result = intrinsic_mod.expand(ctx, callee_t.data[0], arg_ids, rt.data[3])
+                    end
+                end
+            end
+            return result
         end
         i = i + 2
     end

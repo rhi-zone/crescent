@@ -2432,8 +2432,8 @@ for k, v in pairs(t) do
 end
 ]])
     end)
-    assert.it("$Values<T>: named-field table → v+1 errors (v is string|integer, not number)", function()
-        -- $Values<{ x: integer, y: string }> = integer | string
+    assert.it("Values<T>: named-field table → v+1 errors (v is string|integer, not number)", function()
+        -- Values<{ x: integer, y: string }> = integer | string
         -- Assigning to a number var should fail
         has_error([[
 --: { x: integer, y: string }
@@ -2444,8 +2444,8 @@ for k, v in pairs(t) do
 end
 ]], "cannot")
     end)
-    assert.it("$IpairsValues<T>: numeric-indexer table gives element type, no error on v+1", function()
-        -- $IpairsValues<{ [number]: integer }> = integer; v + 1 is valid
+    assert.it("IpairsReturn: numeric-indexer table gives element type, no error on v+1", function()
+        -- IpairsReturn<{ [number]: integer }> = (integer, integer); v + 1 is valid
         no_errors([[
 --: { [number]: integer }
 local arr = {}
@@ -4952,7 +4952,7 @@ local x --: Partial<{ name: string, age: number }>
         -- Fields are nil-able but still structurally required in table literals.
         -- True optional (absent) fields require FLAG_OPTIONAL, a separate mechanism.
         v3_no_errors([[
---:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V? } }
+--:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "bob", age = 30 }
@@ -5055,11 +5055,11 @@ end)
 -- 6. Intrinsic type-level operations: $Keys, $EachUnion, $EachField
 -- ---------------------------------------------------------------------------
 
-assert.describe("intrinsic: $Keys<T>", function()
+assert.describe("intrinsic: Keys<T> (was $Keys)", function()
     assert.it("produces string literal union of field names", function()
         v3_no_errors([[
 --:: T = { a: number, b: string }
---:: K = $Keys<T>
+--:: K = Keys<T>
 local x --: K
 x = "a"
 x = "b"
@@ -5071,26 +5071,26 @@ x = "b"
         -- without mutable-variable widening.
         v3_has_error([[
 --:: T = { a: number, b: string }
---:: K = $Keys<T>
+--:: K = Keys<T>
 --: (K) -> nil
 local function accept_key(k) return nil end
 accept_key("c")
 ]], "")
     end)
 
-    assert.it("$Keys of empty table is never", function()
+    assert.it("Keys of empty table is never", function()
         -- T_NEVER means the type cannot be satisfied — no value can be passed
         v3_has_error([[
---:: K = $Keys<{}>
+--:: K = Keys<{}>
 --: (K) -> nil
 local function accept_key(k) return nil end
 accept_key("anything")
 ]], "")
     end)
 
-    assert.it("$Keys of single-field table is a single string literal", function()
+    assert.it("Keys of single-field table is a single string literal", function()
         v3_no_errors([[
---:: K = $Keys<{ only: number }>
+--:: K = Keys<{ only: number }>
 local x --: K
 x = "only"
 ]])
@@ -5161,7 +5161,7 @@ assert.describe("adversarial: match type edge cases", function()
         -- `match T { { value: A } => A, T => T }` binds A to the value field
         -- type when T is a table with a `value` field.
         v3_no_errors([[
---:: Unwrap<T> = match T { { value: A } => A, T => T }
+--:: Unwrap<T> = match T { { value: %A } => A, T => T }
 --:: R = Unwrap<{ value: number }>
 local x --: R
 x = 42
@@ -5171,7 +5171,7 @@ x = 42
     assert.it("PASS: Unwrap<Unwrap<T>> double application — resolves to inner type", function()
         -- Inner = Unwrap<{ value: string }> = string; Outer = Unwrap<string> = string.
         v3_no_errors([[
---:: Unwrap<T> = match T { { value: A } => A, T => T }
+--:: Unwrap<T> = match T { { value: %A } => A, T => T }
 --:: Inner = Unwrap<{ value: string }>
 --:: Outer = Unwrap<Inner>
 local x --: Outer
@@ -5499,7 +5499,7 @@ accept({ n = "wrong" })
     assert.it("PASS: $EachField where F descriptor match uses pattern vars — K, V captured correctly", function()
         -- Pattern vars K, V in `{ key: K, value: V }` are now bound at match time.
         v3_no_errors([[
---:: MakeOpt<F> = match F { { key: K, value: V } => { key: K, value: V }, F => F }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V }, F => F }
 --:: R = $EachField<{ name: string }, MakeOpt>
 local v --: R
 ]])
@@ -5507,7 +5507,7 @@ local v --: R
 
     assert.it("PASS: Unwrap<T> — pattern capture var in table pattern", function()
         v3_no_errors([[
---:: Unwrap<T> = match T { { value: A } => A, T => T }
+--:: Unwrap<T> = match T { { value: %A } => A, T => T }
 local x --: Unwrap<{ value: number }>
 x = 42
 ]])
@@ -5520,7 +5520,7 @@ x = 42
         -- { name = "hi" } satisfies Partial<{ name: string, age: number }> because
         -- age is optional in the result.
         v3_no_errors([[
---:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "hi" }
@@ -5530,7 +5530,7 @@ x = { name = "hi" }
     assert.it("PASS: Partial<T> — only second field present (FLAG_OPTIONAL on first)", function()
         -- { y = "hello" } satisfies Partial<{ x: number, y: string }> because x is optional.
         v3_no_errors([[
---:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ x: number, y: string }>
 x = { y = "hello" }
@@ -5540,7 +5540,7 @@ x = { y = "hello" }
     assert.it("PASS: Partial<T> — only first field present (FLAG_OPTIONAL on second)", function()
         -- { x = 1 } satisfies Partial<{ x: number, y: string }> because y is optional.
         v3_no_errors([[
---:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ x: number, y: string }>
 x = { x = 1 }
@@ -5550,7 +5550,7 @@ x = { x = 1 }
     assert.it("PASS: Partial<T> — empty table satisfies (all fields FLAG_OPTIONAL)", function()
         -- {} satisfies Partial<{ x: number, y: string }> because both fields are optional.
         v3_no_errors([[
---:: MakeOptional<F> = match F { { key: K, value: V } => { key: K, value: V, optional: true } }
+--:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ x: number, y: string }>
 x = {}
@@ -6175,7 +6175,7 @@ local ok, val = pcall(f)
         -- PcallReturn<() -> integer> should resolve to (true, integer) | (false, string)
         -- after the spread ...R splices R=integer into the tuple.
         v3_no_errors([[
---:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 local x --: PcallReturn<(integer) -> integer>
 --: (true, integer) | (false, string)
 local ok = x
@@ -6185,7 +6185,7 @@ local ok = x
     assert.it("spread-in-tuple: PcallReturn multi-return splice — (true, integer, string) | (false, string)", function()
         -- PcallReturn with multi-return function: R is bound to a tuple, spread splices elements.
         v3_no_errors([[
---:: PcallReturn<F> = match F { () -> R => (true, ...R) | (false, string) }
+--:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 local x --: PcallReturn<() -> (integer, string)>
 --: (true, integer, string) | (false, string)
 local ok = x
@@ -7956,5 +7956,144 @@ local v --: unknown
 assert_str(v)
 take_int(v)
 ]], "")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- $Throw / $Catch intrinsics
+-- ---------------------------------------------------------------------------
+
+assert.describe("intrinsic: $Throw<...Msg>", function()
+    assert.it("$Throw at annotation site emits a diagnostic; type is never", function()
+        -- $Throw<"oops"> resolves to never and emits a diagnostic.
+        -- Assigning never to a string param should give an error, but we just
+        -- check that the Throw message itself appears.
+        v3_has_error([[
+--:: BadType = $Throw<"oops">
+local x --: BadType
+]], "oops")
+    end)
+
+    assert.it("$Throw with a type arg renders the type in the message", function()
+        -- $Throw<integer, " is not allowed here"> emits "integer is not allowed here"
+        v3_has_error([[
+--:: Reject<T> = $Throw<T, " is not allowed here">
+--:: R = Reject<integer>
+local x --: R
+]], "integer is not allowed here")
+    end)
+end)
+
+assert.describe("intrinsic: $Catch<T, Default?>", function()
+    assert.it("$Catch suppresses $Throw and returns Default", function()
+        -- $Catch<$Throw<"oops">, integer> → integer, no diagnostic
+        v3_no_errors([[
+--:: Safe = $Catch<$Throw<"oops">, integer>
+--: (integer) -> nil
+local function take_int(n) end
+local x --: Safe
+take_int(x)
+]])
+    end)
+
+    assert.it("$Catch with no throw returns T unchanged", function()
+        -- $Catch<integer, string> → integer (no throw, Default ignored)
+        v3_no_errors([[
+--:: Safe = $Catch<integer, string>
+--: (integer) -> nil
+local function take_int(n) end
+local x --: Safe
+take_int(x)
+]])
+    end)
+
+    assert.it("$Catch<$Throw<'x'>> with no Default returns never", function()
+        -- No Default → returns never when thrown, no diagnostic
+        v3_no_errors([[
+--:: Safe = $Catch<$Throw<"x">>
+local x --: Safe
+]])
+    end)
+
+    assert.it("match alias using $Throw fires for non-table, not for table", function()
+        -- MustBeTable<T>: table arg → T; non-table → $Throw
+        v3_has_error([[
+--:: MustBeTable<T> = match T { { x: integer } => T, _ => $Throw<T, " must be a table"> }
+--:: R = MustBeTable<integer>
+local x --: R
+]], "integer must be a table")
+
+        -- Table arg: should not fire
+        v3_no_errors([[
+--:: Point = { x: integer }
+--:: MustBeTable<T> = match T { { x: integer } => T, _ => $Throw<T, " must be a table"> }
+--:: R = MustBeTable<Point>
+local x --: R
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Generic parameter defaults: <T = Default>
+-- ---------------------------------------------------------------------------
+
+assert.describe("generic parameter defaults: <T = Default>", function()
+    assert.it("Nullable with no args uses default (unknown)", function()
+        -- Nullable<T = unknown> = T | nil; bare Nullable => unknown | nil
+        v3_no_errors([[
+--:: Nullable<T = unknown> = T | nil
+local x --: Nullable
+local y --: string | nil = x
+]])
+    end)
+
+    assert.it("Nullable<integer> uses explicit arg (integer)", function()
+        v3_no_errors([[
+--:: Nullable<T = unknown> = T | nil
+local x --: Nullable<integer>
+local y --: integer | nil = x
+]])
+    end)
+
+    assert.it("Result<integer> uses E default (string)", function()
+        -- E defaults to string; Result<integer> = { ok: true, value: integer } | { ok: false, error: string }
+        v3_no_errors([[
+--:: Result<T, E = string> = { ok: true, value: T } | { ok: false, error: E }
+local x --: Result<integer>
+]])
+    end)
+
+    assert.it("Result<integer, Error> uses explicit E", function()
+        v3_no_errors([[
+--:: Error = { msg: string }
+--:: Result<T, E = string> = { ok: true, value: T } | { ok: false, error: E }
+local x --: Result<integer, Error>
+]])
+    end)
+
+    assert.it("<T: number = integer> — valid default, no error at definition", function()
+        v3_no_errors([[
+--:: Clamp<T: number = integer> = T
+local x --: Clamp
+]])
+    end)
+
+    assert.it("<T: number = string> — invalid default, error at definition site", function()
+        v3_has_error([[
+--:: Clamp<T: number = string> = T
+]], "does not satisfy constraint")
+    end)
+
+    assert.it("<A, B = string> — trailing default is valid", function()
+        v3_no_errors([[
+--:: Pair<A, B = string> = { first: A, second: B }
+local x --: Pair<integer>
+]])
+    end)
+
+    assert.it("<A = string, B> — non-default after default is a parse error", function()
+        v3_has_error([[
+--:: Bad<A = string, B> = { a: A, b: B }
+]], "non%-default type parameter after default")
     end)
 end)
