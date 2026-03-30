@@ -139,17 +139,27 @@ generator doesn't support — not because they're unimportant. `never` and
 `unknown` are particularly valuable additions: `never` enables exhaustiveness
 testing, `unknown` tests the narrowing-required boundary.
 
-### Two levels of fuzz
+### Three levels of fuzz
 
 - **`fuzz_alg.lua`** (algebra-level): constructs type IDs directly, no parsing.
   Runs 2000 trials per invariant. Fast. Tests the type algebra in isolation.
+- **`fuzz_eval.lua`** (eval-level): fixed mini-programs with pre-declared type
+  aliases. Tests type-level computation contracts: EachField, match, $Throw/$Catch,
+  generic defaults, interface oracle, partial application. 500 trials for random
+  invariants; fixed programs for deterministic ones. Uses `fuzz_eval_arb.lua` for
+  table type string generation.
 - **`fuzz_test.lua`** (grammar-level): parses annotation strings through the
   full pipeline. Runs 500 trials per invariant. Slower; exercises parsing,
   annotation handling, and constraint generation together.
 
-Both must pass. The algebra suite tests structural properties that should hold
-regardless of how types are parsed. The grammar suite tests end-to-end
-correctness including the pipeline before the solver.
+All three must pass. See `docs/fuzz-gaps.md` for the full gap list.
+
+**Annotation enforcement gotcha**: `local x --: T` does NOT enforce structural
+field-level compatibility on assignment — it only narrows the variable's type.
+To test that a type `T` structurally satisfies `U`, use a function return
+annotation: `local function f() --: U ... end` where the body returns a `T`
+value. This is why fuzz_eval.lua uses function return patterns for structural
+equivalence assertions.
 
 ### Known generator limitations
 
