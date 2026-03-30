@@ -276,15 +276,18 @@ function-arm patterns: it always succeeds and is intended as the fallback arm.
 ## Future: Pattern Intersection (`P & Q`)
 
 Pattern intersection `P & { ...[K]: V }` would allow constraining the *input* with an
-arbitrary pattern P while binding K/V from all entries:
+arbitrary pattern P while binding K/V from all entries. P can be anything:
 
 ```lua
 --:: Entries<T> = match T {
---::   { foo: string, ... } & { ...[K]: V } => (K, V)
+--::   { foo: string, ... }    & { ...[K]: V } => (K, V),  -- named field constraint
+--::   { [integer]: unknown }  & { ...[K]: V } => (K, V),  -- indexer constraint
+--::   (A | B)                 & { ...[K]: V } => (K, V),  -- union type constraint
+--::   () -> unknown           & { ...[K]: V } => (K, V),  -- function (odd but legal)
 --:: }
 ```
 
-P is arbitrary — any existing match pattern. The two operations are orthogonal:
+The two operations are orthogonal:
 
 - **`{ ...[K]: V }` result filter** (`match K { integer => ... }`): controls what appears
   in the *output* of the match result expression.
