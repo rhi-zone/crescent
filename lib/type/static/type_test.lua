@@ -5775,6 +5775,63 @@ v = { a = 1, b = "x" }
 
 end)
 
+-- ---------------------------------------------------------------------------
+-- $EachField with rest-capture (brace-tuple result + ...Rest splice)
+-- Tests the grammar extension: { { optional: true, ...Rest } } in result position.
+-- ---------------------------------------------------------------------------
+
+assert.describe("$EachField: rest-capture F aliases with brace-tuple result", function()
+
+    assert.it("PASS: MakeOptional via rest-capture makes all fields optional", function()
+        -- MakeOptional<D> = match D { { optional: _, ...%Rest } => { { optional: true, ...Rest } } }
+        -- ...%Rest captures remaining descriptor fields (key, value, readonly).
+        -- { { optional: true, ...Rest } } is a brace-1-tuple whose element is a descriptor.
+        -- $EachField<{ x: integer }, MakeOptional> => { x?: integer }
+        v3_no_errors([[
+--:: MakeOptional<D> = match D { { optional: _, ...%Rest } => { { optional: true, ...Rest } } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ x: integer, y: string }>
+x = { x = 1 }
+x = { y = "hi" }
+x = {}
+]])
+    end)
+
+    assert.it("PASS: MakeReadonly via rest-capture makes all fields readonly", function()
+        -- MakeReadonly<D> = match D { { readonly: _, ...%Rest } => { { readonly: true, ...Rest } } }
+        -- $EachField<{ x: integer }, MakeReadonly> => { readonly x: integer }
+        v3_no_errors([[
+--:: MakeReadonly<D> = match D { { readonly: _, ...%Rest } => { { readonly: true, ...Rest } } }
+--:: Readonly_<T> = $EachField<T, MakeReadonly>
+local x --: Readonly_<{ x: integer, y: string }>
+x = { x = 1, y = "hi" }
+]])
+    end)
+
+    assert.it("PASS: DropOptional filter — drops optional fields, keeps required", function()
+        -- DropOptional<D> = match D { { optional: true, ... } => {}, _ => { D } }
+        -- $EachField<{ x?: integer, y: string }, DropOptional> => { y: string }
+        v3_no_errors([[
+--:: DropOptional<D> = match D { { optional: true, ... } => {}, _ => { D } }
+--:: NonOptional<T> = $EachField<T, DropOptional>
+local x --: NonOptional<{ x?: integer, y: string }>
+x = { y = "hi" }
+]])
+    end)
+
+    assert.it("PASS: Partial end-to-end — field assignment accepts missing fields", function()
+        -- Full end-to-end: Partial<T> uses rest-capture MakeOptional.
+        -- Assigning a table with only one field to Partial<{ x: integer, y: string }> must succeed.
+        v3_no_errors([[
+--:: MakeOptional<D> = match D { { optional: _, ...%Rest } => { { optional: true, ...Rest } } }
+--:: Partial<T> = $EachField<T, MakeOptional>
+local x --: Partial<{ x: integer, y: string }>
+x = { x = 1 }
+]])
+    end)
+
+end)
+
 assert.describe("adversarial: $EachUnion interactions", function()
 
     assert.it("PASS: $EachUnion on a non-union (single type) passes through F", function()

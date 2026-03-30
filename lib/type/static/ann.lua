@@ -716,6 +716,13 @@ function M.parse_annotations(annotations, pool, filename)
                             fe.flags = 0
                             flds[#flds + 1] = fi
                         end
+                    elseif fb and fb ~= byte("}") and fb ~= byte(",") and fb ~= byte(";") then
+                        -- Positional type entry starting with a non-ident character
+                        -- (e.g. { {inner_table} } for brace-tuples, ("type"), etc.)
+                        local val_type = parse_type(s)
+                        local num_type = alloc_type(defs.TAG_NUMBER)
+                        indexers[#indexers + 1] = num_type
+                        indexers[#indexers + 1] = val_type
                     else
                         break
                     end
