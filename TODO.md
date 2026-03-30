@@ -180,10 +180,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] **`$EachField<T, F>` intrinsic** — flatMap semantics implemented (fbb00f5, 2026-03-30).
   F returns a brace-tuple: `{}` = drop, `{ D }` = keep/transform, `{ D1, D2 }` = expand.
   Detection: empty TAG_TABLE → drop; positional-indexer TAG_TABLE → multi-element tuple;
-  anything else → backward-compat single-descriptor. **Known gap**: ann.lua cannot parse
-  nested table literals as brace-tuple elements — `{ { optional: true, ...Rest } }` is
-  not yet expressible. MakeOptional-style F aliases using `...%Rest` require both rest
-  capture (see below) AND a grammar extension for nested table result expressions.
+  anything else → backward-compat single-descriptor. Grammar gap fixed (124c438):
+  `{ { optional: true, ...Rest } }` now parses — root cause was `else break` in the
+  field loop not handling `{`-started positional entries. `...Rest` splice already
+  worked. `MakeOptional`, `MakeReadonly`, `DropOptional`, `Partial<T>` all tested.
 
 - [ ] **Interface declaration syntax `--:: Name: Base`** — explicit refinement at
   definition site. `--:: Monad<T>: Functor<T> = { ... }` declares Monad as an intentional
