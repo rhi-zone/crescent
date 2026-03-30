@@ -459,9 +459,114 @@ arb.it("[alg] readonly field reflexivity: { readonly x: T } <: { readonly x: T }
 			"readonly reflexivity failed for T = " .. type_str(T_node))
 	end, { trials = 2000 })
 
+-- ── Lattice boundaries ────────────────────────────────────────────────────────
+-- never is the bottom type (subtype of everything).
+-- unknown is the top type (everything is a subtype of it).
+
+-- 25. never <: T  for all T
+arb.it("[alg] lattice: never <: T for all T",
+	farb.arb_type,
+	function(T_node)
+		local ctx   = make_ctx()
+		local t_tid = ast_to_tid(ctx, T_node)
+		assert(subtype(ctx, ctx.T_NEVER, t_tid),
+			"never should be <: T for all T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 26. T <: unknown  for all T
+arb.it("[alg] lattice: T <: unknown for all T",
+	farb.arb_type,
+	function(T_node)
+		local ctx   = make_ctx()
+		local t_tid = ast_to_tid(ctx, T_node)
+		assert(subtype(ctx, t_tid, ctx.T_UNKNOWN),
+			"T should be <: unknown for all T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 27. base_type </: never  (nothing non-never is a subtype of never)
+-- Uses arb_base_type (integer/number/string/boolean) — these are concrete,
+-- never is strictly smaller than all of them.
+arb.it("[alg] lattice: base_type </: never",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx   = make_ctx()
+		local t_tid = ast_to_tid(ctx, T_node)
+		assert(not subtype(ctx, t_tid, ctx.T_NEVER),
+			"base_type should NOT be <: never, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 28. unknown </: base_type  (unknown is not assignable to concrete types without narrowing)
+-- unknown is the top — you can't flow it into a concrete type without a typecast.
+arb.it("[alg] lattice: unknown </: base_type",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx   = make_ctx()
+		local t_tid = ast_to_tid(ctx, T_node)
+		assert(not subtype(ctx, ctx.T_UNKNOWN, t_tid),
+			"unknown should NOT be <: base_type, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 29. unknown | T <: unknown  (union with top is still top)
+arb.it("[alg] lattice: unknown | T <: unknown",
+	farb.arb_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local unk_t  = types_mod.make_union(ctx, { ctx.T_UNKNOWN, t_tid })
+		assert(subtype(ctx, unk_t, ctx.T_UNKNOWN),
+			"unknown | T should be <: unknown, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 30. unknown & T <: T  (intersection with top is the other type)
+arb.it("[alg] lattice: unknown & T <: T",
+	farb.arb_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local unk_t  = types_mod.make_intersection(ctx, { ctx.T_UNKNOWN, t_tid })
+		assert(subtype(ctx, unk_t, t_tid),
+			"unknown & T should be <: T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 31. T <: unknown & T  (T is subtype of intersection with top)
+arb.it("[alg] lattice: T <: unknown & T",
+	farb.arb_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local unk_t  = types_mod.make_intersection(ctx, { ctx.T_UNKNOWN, t_tid })
+		assert(subtype(ctx, t_tid, unk_t),
+			"T should be <: unknown & T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 32. (unknown)->T <: (integer)->T  (contra: integer <: unknown, so wider param OK)
+arb.it("[alg] lattice: (unknown)->T <: (base_type)->T via contravariance",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		-- (unknown) -> T_node  <:  (base_type) -> T_node
+		local fn_unk = types_mod.make_func(ctx, { ctx.T_UNKNOWN }, { t_tid })
+		local fn_base = types_mod.make_func(ctx, { t_tid }, { t_tid })
+		assert(subtype(ctx, fn_unk, fn_base),
+			"(unknown)->T should be <: (base_type)->T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 33. (integer)->T </: (unknown)->T  (contra: unknown </: integer, narrower param fails)
+arb.it("[alg] lattice: (base_type)->T </: (unknown)->T",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local fn_base = types_mod.make_func(ctx, { t_tid }, { t_tid })
+		local fn_unk  = types_mod.make_func(ctx, { ctx.T_UNKNOWN }, { t_tid })
+		assert(not subtype(ctx, fn_base, fn_unk),
+			"(base_type)->T should NOT be <: (unknown)->T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
 -- ── A1: never propagation ─────────────────────────────────────────────────────
 
--- 25. never | T <: T  (union with never collapses on the subtype side)
+-- 28. never | T <: T  (union with never collapses on the subtype side)
 arb.it("[alg] never propagation: never | T <: T",
 	farb.arb_type,
 	function(T_node)
@@ -472,7 +577,7 @@ arb.it("[alg] never propagation: never | T <: T",
 			"never | T should be <: T, failed for T = " .. type_str(T_node))
 	end, { trials = 2000 })
 
--- 26. T <: never | T  (union intro with never on left side)
+-- 29. T <: never | T  (union intro with never on left side)
 arb.it("[alg] never propagation: T <: never | T",
 	farb.arb_type,
 	function(T_node)
@@ -483,7 +588,7 @@ arb.it("[alg] never propagation: T <: never | T",
 			"T should be <: never | T, failed for T = " .. type_str(T_node))
 	end, { trials = 2000 })
 
--- 27. never & T <: never  (intersection with never collapses to never)
+-- 30. never & T <: never  (intersection with never collapses to never)
 arb.it("[alg] never propagation: never & T <: never",
 	farb.arb_type,
 	function(T_node)
