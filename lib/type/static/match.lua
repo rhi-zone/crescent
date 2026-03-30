@@ -400,6 +400,19 @@ function M.match_pattern(ctx, ty_id, pat_id)
         return true, bindings
     end
 
+    -- Union pattern: ty_id matches if it is a subtype of the union.
+    -- This occurs when an alias param like `Keys` (bound to `"x" | "y"`) is used
+    -- directly as a pattern after substitution replaces it with the union type.
+    -- Use try_unify for subtype checking: try_unify(ctx, actual, expected) succeeds
+    -- when actual <: expected.
+    if pt.tag == TAG_UNION then
+        local unify_mod = require("lib.type.static.unify")
+        if unify_mod.try_unify(ctx, ty_id, pat_id, {}) then
+            return true, {}
+        end
+        return false, nil
+    end
+
     return false, nil
 end
 

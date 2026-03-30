@@ -306,7 +306,31 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         end
 
         local resolved, resolve_err = env_mod.resolve_named_type(ctx, ctx.scope, name_id, arg_ids)
-        if resolved then return resolved end
+        if resolved then
+            -- If the result is a TAG_PARTIAL_APP and we are NOT in an HKT
+            -- context (e.g. as an arg to an intrinsic like $EachField),
+            -- emit an arity error. TAG_PARTIAL_APP in a concrete-type position
+            -- is a usage error: the alias needs more type arguments.
+            local rt = ctx.types:get(resolved)
+            if rt.tag == defs.TAG_PARTIAL_APP and not ctx._allow_unapplied_constructors then
+                local param_count = alias.params and #alias.params or 0
+                local required_count = param_count
+                if alias.resolved_defaults then
+                    for i = param_count, 1, -1 do
+                        if alias.resolved_defaults[i] ~= nil then
+                            required_count = i - 1
+                        else
+                            break
+                        end
+                    end
+                end
+                errors_mod.error(ctx.err, ctx.filename, ctx._ann_warn_line, 0,
+                    "type '" .. name_str .. "' expects " .. required_count
+                    .. " argument(s), got " .. (arg_ids and #arg_ids or 0))
+                return ctx.T_NEVER
+            end
+            return resolved
+        end
         -- Arity mismatch or similar resolution error.
         if resolve_err then
             -- HKT deferred application: F<A> where F is a type variable (forall param or
@@ -692,6 +716,24 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         return id
     end
 
+    if tag == defs.TAG_PARTIAL_APP then
+        -- Partial application node: copy to checker arena preserving name_id and list data.
+        -- The annotation arena stores partial args in its own lists; copy them into
+        -- the checker's list pool so the checker-arena node is self-contained.
+        local mk = ctx.lists:mark()
+        for i = at.data[1], at.data[1] + at.data[2] - 1 do
+            -- Each list entry is an annotation type_id; resolve it first.
+            ctx.lists:push(resolve_annotation_type(ctx, ctx.ann.lists:get(i), seen))
+        end
+        local ls, ll = ctx.lists:since(mk)
+        local id = types_mod.alloc_type(ctx, defs.TAG_PARTIAL_APP)
+        local pt = ctx.types:get(id)
+        pt.data[0] = at.data[0]  -- name_id
+        pt.data[1] = ls
+        pt.data[2] = ll
+        return id
+    end
+
     if tag == defs.TAG_INTRINSIC then
         -- If this intrinsic name is a registered type alias (e.g. $GlobalScope),
         -- resolve it like TAG_NAMED. Otherwise keep it as an opaque intrinsic node
@@ -776,11 +818,39 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         if is_catch_intrinsic then
             ctx.catch_mode = false
         end
+        local in_hkt_context = ctx._allow_unapplied_constructors
         ctx._allow_unapplied_constructors = prev_allow
         seen[ann_tid] = nil
         if ct.tag == TAG_NAMED then
             local resolved = env_mod.resolve_named_type(ctx, ctx.scope, ct.data[0], arg_ids)
-            if resolved then return resolved end
+            if resolved then
+                -- If the result is a TAG_PARTIAL_APP and we are NOT in an HKT
+                -- context (e.g. as an arg to an intrinsic like $EachField),
+                -- emit an arity error. TAG_PARTIAL_APP in a concrete-type position
+                -- is a usage error.
+                local rt = ctx.types:get(resolved)
+                if rt.tag == defs.TAG_PARTIAL_APP and not in_hkt_context then
+                    local alias = env_mod.lookup_type(ctx.scope, ct.data[0])
+                    local name = intern_mod.get(ctx.pool, ct.data[0]) or "?"
+                    local param_count = alias and alias.params and #alias.params or 0
+                    local required_count = param_count
+                    if alias and alias.resolved_defaults then
+                        for i = param_count, 1, -1 do
+                            if alias.resolved_defaults[i] ~= nil then
+                                required_count = i - 1
+                            else
+                                break
+                            end
+                        end
+                    end
+                    local err_mod = require("lib.type.static.errors")
+                    err_mod.error(ctx.err, ctx.filename, 0, 0,
+                        "type '" .. name .. "' expects " .. required_count
+                        .. " argument(s), got " .. #arg_ids)
+                    return ctx.T_NEVER
+                end
+                return resolved
+            end
         end
         if ct.tag == defs.TAG_INTRINSIC then
             -- Defer when any arg is a placeholder TAG_NAMED (an unresolved type

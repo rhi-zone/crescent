@@ -8531,3 +8531,51 @@ local sum = result + result
 ]])
     end)
 end)
+
+assert.describe("partial application of generic aliases: TAG_PARTIAL_APP", function()
+    assert.it("PASS: PickKey<Keys, D> partially applied as PickKey<\"x\"> passes to $EachField", function()
+        -- Pick<T, Keys> = $EachField<T, PickKey<Keys>>
+        -- PickKey<"x"> is a TAG_PARTIAL_APP; apply_type_fn completes it with each field descriptor D.
+        -- Pick<{ x: integer, y: string }, "x"> => { x: integer }
+        v3_no_errors([[
+--:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
+--:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
+--:: R = Pick<{ x: integer, y: string }, "x">
+local v --: R
+local v2 --: { x: integer }
+v2 = v
+]])
+    end)
+
+    assert.it("PASS: OmitKey<Keys, D> / Omit<T, Keys> drops matching field", function()
+        -- Omit<{ x: integer, y: string }, "x"> => { y: string }
+        v3_no_errors([[
+--:: OmitKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => {}, _ => { D } }, _ => { D } }
+--:: Omit<T, Keys> = $EachField<T, OmitKey<Keys>>
+--:: R = Omit<{ x: integer, y: string }, "x">
+local v --: R
+local v2 --: { y: string }
+v2 = v
+]])
+    end)
+
+    assert.it("PASS: Pick with union key set retains all matching fields", function()
+        -- Pick<{ x: integer, y: string, z: boolean }, "x" | "y"> => { x: integer, y: string }
+        v3_no_errors([[
+--:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
+--:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
+--:: R = Pick<{ x: integer, y: string, z: boolean }, "x" | "y">
+local v --: R
+local v2 --: { x: integer, y: string }
+v2 = v
+]])
+    end)
+
+    assert.it("PASS: too-many-args is still an arity error", function()
+        -- PickKey<"x", D, extra> — three args for a two-param alias — is still an error.
+        v3_has_error([[
+--:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
+--:: R = PickKey<"x", integer, string>
+]], "expects")
+    end)
+end)

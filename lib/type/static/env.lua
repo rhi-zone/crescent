@@ -644,13 +644,13 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         -- Substitute into the param
         local new_param = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
         -- Substitute into each arm.
-        -- Patterns: bare TAG_NAMED nodes are capture variables (binding sites), not
-        -- references to alias params.  Pass an empty mapping for pattern substitution
-        -- so that `T =>` catch-all patterns stay as TAG_NAMED and are recognized by
-        -- match_pattern as capture variables, not converted to TAG_VARs.
+        -- Patterns: apply the full mapping so that alias params used as concrete matchers
+        -- (e.g. `Keys` in `match K { Keys => ... }`) get replaced with their concrete types.
+        -- TAG_NAMED nodes NOT in the mapping are left unchanged (concrete type lookups like
+        -- `integer`, `string`, or legacy catch-all names). TAG_CAPTURE nodes (`%Name`) are
+        -- never in the mapping and always pass through as-is.
         -- Results: apply the full mapping so that references to alias params (e.g. T
         -- in `$Values<T>`) are correctly replaced with concrete types.
-        local EMPTY_MAP = {}
         local new_arms = {}
         local as, al = t.data[1], t.data[2]
         local i = as
@@ -660,8 +660,8 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         local prev_in_match_arm_subst = ctx._in_match_arm_subst
         ctx._in_match_arm_subst = true
         while i < as + al - 1 do
-            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i),     EMPTY_MAP, seen, eval_seen)
-            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping,   seen, eval_seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i),     mapping, seen, eval_seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen, eval_seen)
             i = i + 2
         end
         ctx._in_match_arm_subst = prev_in_match_arm_subst
@@ -758,6 +758,27 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                 end
             end
         end
+        -- When callee is a TAG_NAMED alias (e.g. PickKey in PickKey<Keys> after
+        -- Keys is substituted) and all args are concrete, try to resolve the alias.
+        -- This handles partial application: PickKey<"x"> → TAG_PARTIAL_APP.
+        if ct.tag == defs.TAG_NAMED then
+            local has_unresolved = false
+            for _, aid in ipairs(new_args) do
+                local at2 = ctx.types:get(types_mod.find(ctx, aid))
+                if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                    has_unresolved = true
+                    break
+                end
+                if at2.tag == defs.TAG_VAR or at2.tag == TAG_ROWVAR then
+                    has_unresolved = true
+                    break
+                end
+            end
+            if not has_unresolved then
+                local resolved = M.resolve_named_type(ctx, ctx.scope, ct.data[0], new_args)
+                if resolved then return resolved end
+            end
+        end
         local mk = ctx.lists:mark()
         for _, aid in ipairs(new_args) do ctx.lists:push(aid) end
         local as, al = ctx.lists:since(mk)
@@ -765,6 +786,46 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         ctx.types:get(id).data[0] = callee_id
         ctx.types:get(id).data[1] = as
         ctx.types:get(id).data[2] = al
+        return id
+    end
+
+    -- TAG_PARTIAL_APP: partially-applied generic alias.
+    -- Substitute through partial args so that alias params (e.g. Keys) get replaced
+    -- with their concrete types when the enclosing alias body is instantiated.
+    -- If all resulting args are still concrete (no TAG_VAR/unresolved TAG_NAMED),
+    -- attempt to re-evaluate via resolve_named_type (which may produce a fully-resolved
+    -- type, another TAG_PARTIAL_APP, or a concrete result).
+    if tag == defs.TAG_PARTIAL_APP then
+        local new_partial_args = {}
+        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+            new_partial_args[#new_partial_args + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
+        end
+        seen[tid] = nil
+        -- Check if any arg is still unresolved
+        local has_unresolved = false
+        for _, aid in ipairs(new_partial_args) do
+            local at2 = ctx.types:get(types_mod.find(ctx, aid))
+            if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                has_unresolved = true; break
+            end
+            if at2.tag == TAG_VAR or at2.tag == TAG_ROWVAR then
+                has_unresolved = true; break
+            end
+        end
+        if not has_unresolved then
+            -- Try to re-evaluate with the now-concrete args
+            local resolved = M.resolve_named_type(ctx, ctx.scope, t.data[0], new_partial_args)
+            if resolved then return resolved end
+        end
+        -- Still unresolved: rebuild the TAG_PARTIAL_APP with substituted args
+        local mk = ctx.lists:mark()
+        for _, aid in ipairs(new_partial_args) do ctx.lists:push(aid) end
+        local ls, ll = ctx.lists:since(mk)
+        local id = types_mod.alloc_type(ctx, defs.TAG_PARTIAL_APP)
+        local pt = ctx.types:get(id)
+        pt.data[0] = t.data[0]  -- name_id unchanged
+        pt.data[1] = ls
+        pt.data[2] = ll
         return id
     end
 
@@ -813,7 +874,34 @@ function M.resolve_named_type(ctx, scope, name_id, arg_ids)
             end
         end
     end
-    if arg_ids_len > param_count or arg_ids_len < required_count then
+    if arg_ids_len > param_count then
+        local name = require("lib.type.static.intern").get(ctx.pool, name_id) or "?"
+        if required_count == param_count then
+            return nil, "type '" .. name .. "' expects " .. param_count .. " argument(s), got " .. arg_ids_len
+        else
+            return nil, "type '" .. name .. "' expects " .. required_count .. " to " .. param_count .. " argument(s), got " .. arg_ids_len
+        end
+    end
+
+    -- Partial application: at least one arg supplied but not enough to fully apply.
+    -- Return TAG_PARTIAL_APP so the caller can later supply the remaining arg(s)
+    -- via apply_type_fn (e.g. $EachField<T, PickKey<"x">>).
+    -- Zero-arg partial application (arg_ids_len == 0) is not supported — that is
+    -- just an unapplied alias (handled above as TAG_NAMED); emit an arity error.
+    if arg_ids_len >= 1 and arg_ids_len < required_count then
+        local mk = ctx.lists:mark()
+        for _, aid in ipairs(arg_ids) do ctx.lists:push(aid) end
+        local ls, ll = ctx.lists:since(mk)
+        local id = types_mod.alloc_type(ctx, defs.TAG_PARTIAL_APP)
+        local pt = ctx.types:get(id)
+        pt.data[0] = name_id
+        pt.data[1] = ls
+        pt.data[2] = ll
+        return id
+    end
+
+    -- Zero-arg under-arity: arity error (alias has params but caller supplied none).
+    if arg_ids_len < required_count then
         local name = require("lib.type.static.intern").get(ctx.pool, name_id) or "?"
         if required_count == param_count then
             return nil, "type '" .. name .. "' expects " .. param_count .. " argument(s), got " .. arg_ids_len

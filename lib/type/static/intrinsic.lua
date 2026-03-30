@@ -89,6 +89,20 @@ local function apply_type_fn(ctx, fn_tid, member_tid)
         if resolved then return resolved end
     end
 
+    if ft.tag == defs.TAG_PARTIAL_APP then
+        -- Complete the partial application by appending the new arg.
+        local env_mod = require("lib.type.static.env")
+        local name_id = ft.data[0]
+        local partial_args = {}
+        for i = ft.data[1], ft.data[1] + ft.data[2] - 1 do
+            partial_args[#partial_args + 1] = ctx.lists:get(i)
+        end
+        partial_args[#partial_args + 1] = member_tid
+        local resolved = env_mod.resolve_named_type(ctx, ctx.scope, name_id, partial_args)
+        if resolved then return resolved end
+        return ctx.T_NEVER
+    end
+
     -- Unknown function form — return T_NEVER for this arm
     return ctx.T_NEVER
 end

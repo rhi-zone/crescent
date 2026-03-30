@@ -123,6 +123,14 @@ M.TAG_PAT_META_SPREAD   = 30  -- { #...%M } pattern: captures all meta slots of 
 -- Succeeds if the input type has at least one meta slot; fails otherwise (enabling _ => nil fallback).
 -- Binds name_id → a synthetic table type with empty regular fields and meta list = input's meta slots.
 -- Used only in annotation arena pattern positions; never in checker arena result positions.
+M.TAG_PARTIAL_APP       = 31  -- partially-applied generic alias: Alias<A> with fewer args than required
+-- TypeSlot layout for TAG_PARTIAL_APP:
+--   data[0] = name_id    (intern ID of the alias name)
+--   data[1] = list start (partial args list in ctx.lists)
+--   data[2] = list length
+-- Created by resolve_named_type when arg_ids_len >= 1 and arg_ids_len < required_count.
+-- Consumed by apply_type_fn (intrinsic.lua): appends one more arg and calls resolve_named_type.
+-- Passes through substitute_inner unchanged (partial args are already concrete at creation time).
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0
