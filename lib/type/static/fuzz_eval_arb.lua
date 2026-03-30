@@ -64,4 +64,31 @@ function M.arb_union_table(rng, size)
 	return t1 .. " | " .. t2
 end
 
+-- arb_function_parts: generate a function type broken into parts.
+-- Returns a table: { params = string[], ret = string, type_str = string }
+-- 0–3 params (all base types), return type is a base type.
+-- Never generates `any`.
+function M.arb_function_parts(rng, size)
+	local n_params = math.floor(rng:float() * math.min(4, (size or 3) + 1))  -- 0 to 3
+	local params = {}
+	for i = 1, n_params do
+		params[i] = M.arb_base_type(rng)
+	end
+	local ret = M.arb_base_type(rng)
+	local type_str
+	if n_params == 0 then
+		type_str = "() -> " .. ret
+	else
+		type_str = "(" .. table.concat(params, ", ") .. ") -> " .. ret
+	end
+	return { params = params, ret = ret, type_str = type_str }
+end
+
+-- arb_function_type: generate a function type annotation string: "(A, B) -> C".
+-- 0–3 params (all base types), return type is a base type.
+-- Never generates `any`.
+function M.arb_function_type(rng, size)
+	return M.arb_function_parts(rng, size).type_str
+end
+
 return M

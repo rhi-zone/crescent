@@ -39,6 +39,10 @@ local FIXED_SCOPE = [[
 --:: MakeWritable<D> = match D { { readonly: _, ...%Rest } => { { readonly: false, ...Rest } } }
 --:: CaptureId<T>    = match T { %R => R }
 --:: WildConst<T>    = match T { _ => integer }
+--:: Parameters<F>   = match F { (...%P) -> unknown => P }
+--:: First<F>        = match F { (%A, ...%Rest) -> unknown => A }
+--:: Tail<F>         = match F { (%A, ...%Rest) -> unknown => Rest }
+--:: ReturnType<F>   = match F { () -> %R => R }
 ]]
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -82,6 +86,14 @@ local arb_union_table = {
 local arb_base_type = {
 	generate = function(rng, _)
 		return earb.arb_base_type(rng), nil
+	end,
+	shrink = function(_, _) return function() return nil end end,
+}
+
+-- arb generator for function parts { params, ret, type_str }.
+local arb_function_parts = {
+	generate = function(rng, sz)
+		return earb.arb_function_parts(rng, sz), nil
 	end,
 	shrink = function(_, _) return function() return nil end end,
 }
@@ -413,6 +425,109 @@ T.it("[eval] E4c: Keys<{ [integer]: boolean }> == integer (bidirectional)", func
 	)
 end)
 
+-- ── E3: partial application round-trip ───────────────────────────────────────
+-- Pick<T, Keys> == $EachField<T, PickKey<Keys>> — partial application vs full application.
+-- Tests that F<A><B> and F<A, B> produce the same structural type.
+
+-- Declarations shared across E3 tests.
+local E3_PICK_DECL = table.concat({
+	"--:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }",
+	"--:: OmitKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => {}, _ => { D } }, _ => { D } }",
+	"--:: Pick<T, Keys>  = $EachField<T, PickKey<Keys>>",
+	"--:: Omit<T, Keys>  = $EachField<T, OmitKey<Keys>>",
+}, "\n") .. "\n"
+
+-- E3a: Pick selects the right field — x.x accessible (0 errors).
+-- Use function return annotation to enforce structural check (CLAUDE.md annotation gotcha).
+T.it("[eval] E3a: Pick<{ x: integer, y: string }, \"x\">.x accessible — 0 errors", function()
+	local src = E3_PICK_DECL .. [[
+local x --: Pick<{ x: integer, y: string }, "x">
+--: () -> integer
+local function get_x() return x.x end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E3a")
+	T.eq(#ec.errors, 0, "E3a: accessing .x on Pick result should produce 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E3b: Pick removes the non-selected field — x.y is not accessible (1 error).
+T.it("[eval] E3b: Pick<{ x: integer, y: string }, \"x\">.y not accessible — 1 error", function()
+	local src = E3_PICK_DECL .. [[
+local x --: Pick<{ x: integer, y: string }, "x">
+--: () -> string
+local function get_y() return x.y end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E3b")
+	T.eq(#ec.errors, 1, "E3b: accessing .y on Pick result should produce 1 error, got " .. tostring(#ec.errors))
+end)
+
+-- E3c: Omit removes the named field — x.y accessible (0 errors).
+T.it("[eval] E3c: Omit<{ x: integer, y: string }, \"x\">.y accessible — 0 errors", function()
+	local src = E3_PICK_DECL .. [[
+local x --: Omit<{ x: integer, y: string }, "x">
+--: () -> string
+local function get_y() return x.y end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E3c")
+	T.eq(#ec.errors, 0, "E3c: accessing .y on Omit result should produce 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E3d: PickDirect == PickAlias — partial application round-trip (bidirectional).
+-- $EachField<T, PickKey<"x">> == Pick<T, "x">: the partial-application path and the
+-- direct alias-application path must produce the same structural type.
+T.it('[eval] E3d: $EachField<T, PickKey<"x">> == Pick<T, "x"> (bidirectional, 0 errors)', function()
+	local src = E3_PICK_DECL .. [[
+--:: PickDirect = $EachField<{ x: integer, y: string }, PickKey<"x">>
+--:: PickAlias  = Pick<{ x: integer, y: string }, "x">
+local pd --: PickDirect
+local pa --: PickAlias
+--: () -> PickAlias
+local function f1() return pd end
+--: () -> PickDirect
+local function f2() return pa end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E3d")
+	T.eq(#ec.errors, 0, "E3d: PickDirect == PickAlias should produce 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- ── E9: match exhaustiveness on union ────────────────────────────────────────
+-- match (A | B) { A => X, B => X } == X for concrete type pairs.
+-- When all arms of a match on a union produce the same type X, the result is X.
+
+-- E9a: Normalize<integer | string> == string (both arms → string, 0 errors).
+T.it("[eval] E9a: Normalize<integer | string> == string (0 errors)", function()
+	local src = [[
+--:: Normalize<T> = match T { integer => string, string => string }
+local x --: Normalize<integer | string>
+local _e9a --: string = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E9a")
+	T.eq(#ec.errors, 0, "E9a: Normalize<integer|string>==string: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E9b: MapTypes<integer | string> <: boolean | integer (both arm results present).
+-- MapTypes maps integer→boolean and string→integer, so the union has both result types.
+T.it("[eval] E9b: MapTypes<integer | string> == boolean | integer (0 errors)", function()
+	local src = [[
+--:: MapTypes<T> = match T { integer => boolean, string => integer }
+local x --: MapTypes<integer | string>
+local _e9b --: boolean | integer = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E9b")
+	T.eq(#ec.errors, 0, "E9b: MapTypes<integer|string> <: boolean|integer: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E9c: never arm is ignored — Ignores<integer> == string (0 errors).
+-- The never arm `never => boolean` can never match, so Ignores<integer> == string.
+T.it("[eval] E9c: Ignores<integer> == string, never arm ignored (0 errors)", function()
+	local src = [[
+--:: Ignores<T> = match T { integer => string, never => boolean }
+local x --: Ignores<integer>
+local _e9c --: string = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E9c")
+	T.eq(#ec.errors, 0, "E9c: Ignores<integer>==string (never arm ignored): expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
 -- ── E8: oracle non-population on failed declaration ───────────────────────────
 -- When --:: A: B fails the structural check, the oracle still registers the pair
 -- (implementation always registers), BUT the resolved body of A (which is what
@@ -451,5 +566,100 @@ T.it("[eval] E8: failed --:: decl emits 2 errors (decl mismatch + call-site mism
 			"E8 error[2] should be a structural mismatch at call site, got: " .. msg2)
 	end
 end)
+
+-- ── E5: param capture invariants ─────────────────────────────────────────────
+
+-- E5a (fixed): Parameters<(integer, string) -> boolean> == (integer, string)
+T.it("[eval] E5a: Parameters<(integer, string) -> boolean> == (integer, string) (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: P1 = Parameters<(integer, string) -> boolean>
+local x --: P1
+--: () -> (integer, string)
+local function f() return x[1], x[2] end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E5a")
+	T.eq(#ec.errors, 0, "E5a: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E5b (fixed): Tail<(integer, string, boolean) -> nil> == (string, boolean)
+T.it("[eval] E5b: Tail<(integer, string, boolean) -> nil> == (string, boolean) (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+--:: TailTest = Tail<(integer, string, boolean) -> nil>
+local x --: TailTest
+--: () -> (string, boolean)
+local function f() return x[1], x[2] end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E5b")
+	T.eq(#ec.errors, 0, "E5b: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E5c (random): for a randomly generated function type (A, B, ...) -> C,
+-- Parameters<(A, B, ...) -> C> should be bidirectionally assignable to (A, B, ...).
+arb.it("[eval] E5c: Parameters<F> == param tuple for random function types",
+	arb_function_parts,
+	function(parts)
+		local fn_str = parts.type_str
+		local params = parts.params
+		-- If no params, Parameters gives an empty tuple — skip (nothing interesting to assert)
+		if #params == 0 then return end
+		-- Build expected tuple type string: "(A, B, ...)"
+		local tuple_str = "(" .. table.concat(params, ", ") .. ")"
+		-- Parameters<fn_str> should == tuple_str bidirectionally
+		local params_str = "Parameters<" .. fn_str .. ">"
+		assert(check_sub(params_str, tuple_str),
+			"Parameters<F> <: param-tuple failed for F = " .. fn_str)
+		assert(check_sub(tuple_str, params_str),
+			"param-tuple <: Parameters<F> failed for F = " .. fn_str)
+	end, { trials = 500 })
+
+-- ── E10: function return capture ──────────────────────────────────────────────
+
+-- E10a (fixed): ReturnType<() -> integer> == integer
+T.it("[eval] E10a: ReturnType<() -> integer> == integer (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+local x --: ReturnType<() -> integer>
+local _e10a --: integer = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E10a")
+	T.eq(#ec.errors, 0, "E10a: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E10b (fixed): ReturnType<() -> string> == string
+T.it("[eval] E10b: ReturnType<() -> string> == string (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+local x --: ReturnType<() -> string>
+local _e10b --: string = x
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E10b")
+	T.eq(#ec.errors, 0, "E10b: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E10c (fixed): ReturnType<() -> (integer, string)> captures a tuple
+-- The captured R is a tuple (integer, string); assign element-wise.
+T.it("[eval] E10c: ReturnType<() -> (integer, string)> is a tuple (integer, string) (0 errors)", function()
+	local src = FIXED_SCOPE .. [[
+local x --: ReturnType<() -> (integer, string)>
+--: () -> (integer, string)
+local function f() return x[1], x[2] end
+]]
+	local ec = check_mod.check_string(src, "fuzz_eval_E10c")
+	T.eq(#ec.errors, 0, "E10c: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- E10b_rand (random): for arb_function_parts generating () -> C (0 params),
+-- ReturnType<() -> C> == C.
+arb.it("[eval] E10d: ReturnType<() -> C> == C for random 0-param function types",
+	arb_function_parts,
+	function(parts)
+		-- Only test zero-param functions for this invariant (ReturnType uses () -> %R pattern)
+		if #parts.params ~= 0 then return end
+		local fn_str  = parts.type_str  -- "() -> C"
+		local ret_str = parts.ret        -- "C"
+		local rt_str  = "ReturnType<" .. fn_str .. ">"
+		assert(check_sub(rt_str, ret_str),
+			"ReturnType<() -> C> <: C failed for C = " .. ret_str)
+		assert(check_sub(ret_str, rt_str),
+			"C <: ReturnType<() -> C> failed for C = " .. ret_str)
+	end, { trials = 500 })
 
 return {}
