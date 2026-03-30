@@ -459,4 +459,63 @@ arb.it("[alg] readonly field reflexivity: { readonly x: T } <: { readonly x: T }
 			"readonly reflexivity failed for T = " .. type_str(T_node))
 	end, { trials = 2000 })
 
+-- ── A1: never propagation ─────────────────────────────────────────────────────
+
+-- 25. never | T <: T  (union with never collapses on the subtype side)
+arb.it("[alg] never propagation: never | T <: T",
+	farb.arb_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local nev_t  = types_mod.make_union(ctx, { ctx.T_NEVER, t_tid })
+		assert(subtype(ctx, nev_t, t_tid),
+			"never | T should be <: T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 26. T <: never | T  (union intro with never on left side)
+arb.it("[alg] never propagation: T <: never | T",
+	farb.arb_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local nev_t  = types_mod.make_union(ctx, { ctx.T_NEVER, t_tid })
+		assert(subtype(ctx, t_tid, nev_t),
+			"T should be <: never | T, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 27. never & T <: never  (intersection with never collapses to never)
+arb.it("[alg] never propagation: never & T <: never",
+	farb.arb_type,
+	function(T_node)
+		local ctx    = make_ctx()
+		local t_tid  = ast_to_tid(ctx, T_node)
+		local nev_t  = types_mod.make_intersection(ctx, { ctx.T_NEVER, t_tid })
+		assert(subtype(ctx, nev_t, ctx.T_NEVER),
+			"never & T should be <: never, failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- ── A2: readonly field semantics ──────────────────────────────────────────────
+
+-- 28. Mutable satisfies readonly: { x: T } <: { readonly x: T }
+-- A mutable field source can be used wherever a readonly field is expected.
+arb.it("[alg] mutable satisfies readonly: { x: T } <: { readonly x: T }",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx  = make_ctx()
+		local xid  = intern_mod.intern(ctx.pool, "x")
+		local tid  = ast_to_tid(ctx, T_node)
+		local mut  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, 0) }, nil, -1)
+		local ro   = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_READONLY) }, nil, -1)
+		assert(subtype(ctx, mut, ro),
+			"{ x: T } should be <: { readonly x: T } for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 29. NOTE: { readonly x: T } </: { x: T } is NOT enforceable at the unify level.
+-- FLAG_READONLY is a write-site constraint enforced in constrain.lua, not in unify.lua.
+-- try_unify only checks structural shape; readonly does not affect structural subtyping.
+-- The write-position rejection is tested at the grammar level (fuzz_test.lua A2 grammar variant).
+-- This invariant is documented here as a known gap; see docs/fuzz-gaps.md A2.
+
 return {}
