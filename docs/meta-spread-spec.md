@@ -39,14 +39,13 @@ The result carries the regular fields of T plus all meta slots from MT.
 to setmetatable". With a match pattern `{ #...M }` that extracts the meta source:
 
 ```lua
---:: MetaOf<T> = match T { { #...M } => M | _ => any }
+--:: MetaOf<T> = match T { { #...M } => M, _ => nil }
 --:: declare getmetatable = <T>(t: T) -> MetaOf<T>
 ```
 
 `{ #...M }` in a match arm binds M to the table type reconstructed from T's meta slots
-(the inverse of spreading). If T has no meta slots, the arm fails and the fallback `any`
-applies (matches Lua's runtime behaviour: tables without metatables return nil, but
-`any` is safer than `nil` here since protected metatables return their `__metatable` field).
+(the inverse of spreading). If T has no meta slots, the arm fails and the fallback `nil` applies — matching
+Lua's runtime behaviour where tables without metatables return nil.
 
 ### Limitation: roundtrip fidelity
 
