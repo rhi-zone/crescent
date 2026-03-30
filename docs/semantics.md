@@ -755,7 +755,6 @@ contract.
 | `$Require<T>` | T must be a string literal; result = the type declared for module T via `--:: module "T": ...`; T_UNKNOWN if not declared. |
 | `$Opaque<T>` | Nominal newtype over T. Field access errors. Only accessible after `--:: unseal`. |
 | `$Opaque<T, U>` | Like `$Opaque<T>` but fields in U are accessible without unsealing. |
-| `$PcallReturn<F>` | `(true, ...ReturnType<F>) \| (false, string)`. For single-return F, result is `(true, R) \| (false, string)`. Multi-return awaits spread-in-tuple-position syntax. |
 | `$FfiC` | Closed table built from `ffi.cdef` call sites. Each declared symbol becomes a field. |
 | `$GlobalScope` | Closed table of all globals declared via `--:: declare`. |
 | `$Keys<T>` | Union of string literal types for all named field names in T. Equivalent to TypeScript `keyof T`. |
@@ -777,6 +776,9 @@ match aliases in `stdlib.d.lua`:
 --:: }
 ```
 
+`PcallReturn<F>` is also now a match alias in `stdlib.d.lua` (implemented via
+`(true, ...R)` spread-in-tuple-position syntax, 2026-03-30).
+
 Permanent intrinsics (will not be eliminated): `$Require`, `$Opaque`, `$FfiC`,
-`$GlobalScope`. All others are provisional and will be replaced by user-definable
-match aliases once match gains the necessary pattern forms.
+`$GlobalScope`. Remaining provisional: `$Keys`, `$Values`, `$IpairsValues`,
+`$EachField`, `$EachUnion`.
