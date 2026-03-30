@@ -7503,6 +7503,22 @@ local v = os.getenv("HOME")
     end)
 end)
 
+assert.describe("stdlib: select overloads", function()
+    assert.it("select('#', ...) returns integer", function()
+        no_errors([[
+--: integer
+local n = select('#', "a", "b", "c")
+]])
+    end)
+
+    assert.it("select(n, ...) returns any", function()
+        no_errors([[
+--: any
+local v = select(1, "a", "b")
+]])
+    end)
+end)
+
 -- ---------------------------------------------------------------------------
 -- Argument literal widening
 -- Literals passed to generic functions widen to their base type before binding

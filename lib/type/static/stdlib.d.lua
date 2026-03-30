@@ -17,7 +17,7 @@
 --:: declare pcall = <F: function>(f: F, ...any) -> ...($PcallReturn<F>)
 --:: declare xpcall = <F: function>(f: F, handler: (string) -> string, ...any) -> ...($PcallReturn<F>)
 --:: declare require = <T: string>(module: T) -> $Require<T>
---:: declare select = (index: any, ...any) -> any
+--:: declare select = (("#") -> integer) & ((integer, ...any) -> any)
 --:: declare rawget = (t: any, k: any) -> any
 --:: declare rawset = (t: any, k: any, v: any) -> any
 --:: declare rawequal = (a: any, b: any) -> boolean
