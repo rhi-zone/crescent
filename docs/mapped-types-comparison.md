@@ -135,9 +135,9 @@ This subsumes separate map/filter/remap operations. `Pick`, `Omit`, `Readonly`,
 --:: DropOptional<D> = match D { { optional: true, ... } => (), _ => (D,) }
 --:: NonOptional<T>  = $EachField<T, DropOptional>
 
--- remap — F returns descriptor with different key
---:: ToGetter<D> = match D { { key: %K, value: %V, ...%Rest } => ({ key: "get_" .. K, value: () -> V, ...Rest },) }
---:: Getters<T>  = $EachField<T, ToGetter>
+-- remap — F returns descriptor with different key (requires type-level "..", not yet specced)
+-- --:: ToGetter<D> = match D { { key: %K, value: %V, ...%Rest } => ({ key: "get_" .. K, value: () -> V, ...Rest },) }
+-- --:: Getters<T>  = $EachField<T, ToGetter>
 ```
 
 F is a **single-parameter named alias passed unapplied**. It always returns a **tuple

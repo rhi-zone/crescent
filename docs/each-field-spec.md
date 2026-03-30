@@ -69,12 +69,11 @@ Key renaming requires type-level string concatenation — see docs/string-patter
 
 ### Expand (one field → many)
 
-```lua
---:: ToGetterSetter<D> = match D { { key: %K, value: %V, ...%Rest } =>
---::   ({ key: "get_" .. K, value: () -> V,    ...Rest },
---::    { key: "set_" .. K, value: (V) -> nil, ...Rest }) }
---:: GettersAndSetters<T> = $EachField<T, ToGetterSetter>
-```
+No concrete examples yet — all natural expand cases (getter+setter generation,
+field splitting) require type-level string concatenation (`"get_" .. K`), which
+is not yet specced. The tuple return shape `(D1, D2)` is theoretically supported
+by the flatMap semantics but has no working stdlib examples until string
+manipulation is available.
 
 ## Open question: parameterized F
 
