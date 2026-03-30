@@ -558,6 +558,54 @@ local result = setmetatable(v, mt)
 	T.eq(#ec.errors, 0, "P3b: expected 0 errors, got " .. #ec.errors)
 end)
 
+-- ── P2: param capture programs (typeof) ───────────────────────────────────────
+-- Parameters<typeof f> extracts the param tuple of a concrete function binding.
+-- typeof is already implemented; this is the grammar-level test that ties it to
+-- param captures via match function-type arms.
+
+T.it("P2a: Parameters<typeof f> == (integer, string) — bidirectional — 0 errors", function()
+	-- Use %R (not _ or unknown) in return position so void and non-void both match.
+	-- Use a non-void return so the alias matches; annotate f with a full function type.
+	local src = [[
+--:: Parameters<F> = match F { (...%P) -> %R => P }
+--: (integer, string) -> boolean
+local function f(a, b) return true end
+local p  --: Parameters<typeof f>
+local xy --: (integer, string)
+--: () -> (integer, string)
+local function fwd() return p  end   -- Parameters<typeof f> <: (integer, string)
+--: () -> Parameters<typeof f>
+local function rev() return xy end   -- (integer, string)   <: Parameters<typeof f>
+]]
+	local ec = check.check_string(src, "fuzz_test_P2a")
+	T.eq(#ec.errors, 0, "P2a: Parameters<typeof f> bidirectional: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+T.it("P2b: Parameters<typeof g> wrong type rejected — 1 error", function()
+	local src = [[
+--:: Parameters<F> = match F { (...%P) -> %R => P }
+--: (integer, string) -> boolean
+local function g(a, b) return true end
+local p  --: Parameters<typeof g>
+--: () -> (string, integer)
+local function bad() return p end  -- (integer, string) </: (string, integer)
+]]
+	local ec = check.check_string(src, "fuzz_test_P2b")
+	T.eq(#ec.errors, 1, "P2b: wrong param order rejected: expected 1 error, got " .. tostring(#ec.errors))
+end)
+
+T.it("P2c: ReturnType<typeof h> == boolean — 0 errors", function()
+	local src = [[
+--:: ReturnType<F> = match F { () -> %R => R }
+--: () -> boolean
+local function h() return true end
+local r  --: ReturnType<typeof h>
+local _ok --: boolean = r
+]]
+	local ec = check.check_string(src, "fuzz_test_P2c")
+	T.eq(#ec.errors, 0, "P2c: ReturnType<typeof h>==boolean: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

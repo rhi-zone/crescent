@@ -133,14 +133,15 @@ These extend fuzz_test.lua program patterns.
 - [x] `Pick<{name,age}, "name">.name` accessible — 0 errors (P1a)
 - [x] `Pick<{name,age}, "name">.age` not accessible — 1 error (P1b)
 
-### P2: param capture programs
-Program using `Parameters<F>` — result type used in an annotation.
-```lua
---:: Parameters<F> = match F { (...%P) -> unknown => P }
-local function f(a --: integer, b --: string) end
-local p --: Parameters<typeof f>  -- can't yet express typeof, skip?
-```
-May require `typeof` operator — not yet implemented. Defer until then.
+### P2: param capture programs — DONE (fuzz_test.lua P2a–P2c)
+- [x] `Parameters<typeof f>` == `(integer, string)` bidirectionally (P2a)
+- [x] Wrong param order `(string, integer)` rejected — 1 error (P2b)
+- [x] `ReturnType<typeof h>` == `boolean` (P2c)
+Notes: `typeof` was already implemented. Use `-> %R` (not `-> _` or `-> unknown`) in the
+pattern return position — `_` doesn't match void `-> ()`, `unknown` doesn't match non-unknown
+returns; `%R` captures and ignores any return type. Inline params with `--:` on same line
+as other params silently swallow the rest of the line (Lua comment); annotate via
+`--: (A, B) -> C` on the preceding line instead.
 
 ### P3: meta slot programs — DONE
 - [x] P3a: `setmetatable({}, { __index = fn })` typechecks — 0 errors (fuzz_test.lua)
