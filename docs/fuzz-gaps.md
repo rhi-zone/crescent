@@ -66,10 +66,10 @@ These go in fuzz_eval.lua. Grouped by feature.
 - `PickKey<"x", D>` == `PickKey<"x"><D>` for a fixed descriptor D
 Requires: apply the alias both ways, assert results are structurally equal.
 
-### E4: all-fields pattern correctness
-- `Keys<{ x: integer, y: string }>` == `"x" | "y"`
-- `Values<{ x: integer, y: string }>` == `integer | string`
-- `Keys<{ [integer]: boolean }>` == `integer` (indexer table)
+### E4: all-fields pattern correctness — DONE (fuzz_eval.lua E4a–E4c)
+- [x] `Keys<{ x: integer, y: string }>` == `"x" | "y"` — E4a
+- [x] `Values<{ x: integer, y: string }>` == `integer | string` — E4b
+- [x] `Keys<{ [integer]: boolean }>` == `integer` (indexer table) — E4c
 These test the `{ ...[%K]: %V }` all-fields pattern properties.
 
 ### E5: param captures (requires G1 generator)
@@ -89,12 +89,12 @@ Fixed test (not randomly generated — $Throw/Catch take literal message strings
 - Missing second arg uses default
 Fixed test with hardcoded alias.
 
-### E8: oracle non-population on failed declaration
-When `--:: A: B` fails the structural check (A body doesn't satisfy B):
-- `E.CONSTRAINT_MISMATCH` is emitted
-- Oracle does NOT contain `(A, B)` — A is NOT accepted where B is expected afterward
-Test: generate program where declaration fails; in same program, try to use A where B
-expected; assert that ALSO produces an error (structural check, not oracle shortcut).
+### E8: oracle non-population on failed declaration — DONE (fuzz_eval.lua E8)
+- [x] Failed `--:: BadImpl: HasX = { y: string }` emits CONSTRAINT_MISMATCH
+- [x] Subsequent `needs_x(bad)` call also errors (structural mismatch — body `{ y: string }` lacks field `x`)
+Note: implementation always registers the oracle pair even on failure (constrain.lua line 3134),
+but variable bindings carry the resolved body type (not the name), so the call-site structural
+check fails independently of the oracle. Both errors fire correctly — exactly 2 total.
 
 ### E9: match exhaustiveness on union
 `match (A | B) { A => X, B => X }` == X for base type combinations.

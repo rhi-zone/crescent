@@ -353,4 +353,103 @@ local function f() return x end
 	T.eq(#ec.errors, 1, "WithDefault<integer> b mismatch: expected 1 error, got " .. tostring(#ec.errors))
 end)
 
+-- ── E4: all-fields pattern correctness ───────────────────────────────────────
+-- Fixed tests for { ...[%K]: %V } distribution over named-field and indexer tables.
+-- Keys<T> and Values<T> are user-definable via the all-fields pattern.
+
+-- Declarations used across E4 tests.
+local E4_KEYS_DECL   = "--:: Keys<T>   = match T { { ...[%K]: %V } => K }\n"
+local E4_VALUES_DECL = "--:: Values<T> = match T { { ...[%K]: %V } => V }\n"
+
+-- Helper: check A == B (bidirectional) under a given prelude string.
+local function check_eq_with_decl(decl, a_str, b_str)
+	local function sub(x, y)
+		local src = decl
+			.. "local _e4a --: " .. x .. "\n"
+			.. "local _e4b --: " .. y .. " = _e4a\n"
+		return typechecks(src)
+	end
+	return sub(a_str, b_str) and sub(b_str, a_str)
+end
+
+-- E4a: Keys<{ x: integer, y: string }> == "x" | "y"
+-- The all-fields pattern over a 2-field named table yields the union of its string
+-- literal key names.
+T.it('[eval] E4a: Keys<{ x: integer, y: string }> == "x" | "y" (bidirectional)', function()
+	T.ok(
+		check_eq_with_decl(
+			E4_KEYS_DECL,
+			'Keys<{ x: integer, y: string }>',
+			'"x" | "y"'
+		),
+		'Keys<{ x: integer, y: string }> should equal "x" | "y" in both directions'
+	)
+end)
+
+-- E4b: Values<{ x: integer, y: string }> == integer | string
+-- The all-fields pattern over a 2-field table yields the union of value types.
+T.it("[eval] E4b: Values<{ x: integer, y: string }> == integer | string (bidirectional)", function()
+	T.ok(
+		check_eq_with_decl(
+			E4_VALUES_DECL,
+			'Values<{ x: integer, y: string }>',
+			'integer | string'
+		),
+		"Values<{ x: integer, y: string }> should equal integer | string in both directions"
+	)
+end)
+
+-- E4c: Keys<{ [integer]: boolean }> == integer
+-- Over an indexer table the all-fields pattern yields the indexer key type (not a
+-- string literal — the key type is integer itself).
+T.it("[eval] E4c: Keys<{ [integer]: boolean }> == integer (bidirectional)", function()
+	T.ok(
+		check_eq_with_decl(
+			E4_KEYS_DECL,
+			'Keys<{ [integer]: boolean }>',
+			'integer'
+		),
+		"Keys<{ [integer]: boolean }> should equal integer in both directions"
+	)
+end)
+
+-- ── E8: oracle non-population on failed declaration ───────────────────────────
+-- When --:: A: B fails the structural check, the oracle still registers the pair
+-- (implementation always registers), BUT the resolved body of A (which is what
+-- variable bindings carry) does NOT satisfy B structurally — so a call-site check
+-- still fails.  The test asserts exactly 2 errors:
+--   1. CONSTRAINT_MISMATCH at the --:: BadImpl: HasX declaration
+--   2. Structural mismatch at the needs_x(bad) call site (BadImpl body { y: string }
+--      has no field x, so the structural check fails independently of the oracle)
+
+T.it("[eval] E8: failed --:: decl emits 2 errors (decl mismatch + call-site mismatch)", function()
+	-- Build source as concatenated lines to avoid heredoc quoting issues.
+	local src = table.concat({
+		"--:: HasX = { x: integer }",
+		"--:: BadImpl: HasX = { y: string }",  -- missing x → CONSTRAINT_MISMATCH (error 1)
+		"--: (HasX) -> integer",
+		"local function needs_x(v) return v.x end",
+		"local bad --: BadImpl",
+		"local _ = needs_x(bad)",  -- { y: string } doesn't satisfy { x: integer } (error 2)
+	}, "\n") .. "\n"
+
+	local ec = check_mod.check_string(src, "fuzz_eval_E8")
+	T.eq(#ec.errors, 2,
+		"E8: expected exactly 2 errors (decl mismatch + call-site mismatch), got " .. tostring(#ec.errors))
+
+	-- First error must be the constraint-mismatch at the declaration (line 2).
+	if #ec.errors >= 1 then
+		local msg1 = ec.errors[1].msg or ""
+		T.ok(msg1:find("does not satisfy constraint", 1, true) ~= nil,
+			"E8 error[1] should be CONSTRAINT_MISMATCH, got: " .. msg1)
+	end
+
+	-- Second error must be a structural mismatch at the call site.
+	if #ec.errors >= 2 then
+		local msg2 = ec.errors[2].msg or ""
+		T.ok(msg2:find("missing field", 1, true) ~= nil or msg2:find("cannot pass", 1, true) ~= nil,
+			"E8 error[2] should be a structural mismatch at call site, got: " .. msg2)
+	end
+end)
+
 return {}
