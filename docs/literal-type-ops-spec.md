@@ -11,24 +11,28 @@ known design questions before implementation.
 `"prefix_" .. K` where K is a string literal → new string literal. Distributes
 over union K via existing match semantics — no special distribution rule needed.
 
-**Numerics in `..`**: TS prior art — template literals accept `string | number |
-bigint | boolean | null | undefined`, e.g. `` `prefix_${1 | 2 | 3}` `` →
-`"prefix_1" | "prefix_2" | "prefix_3"`. Crescent follows the same rule: `LIT_INTEGER`
-and `LIT_NUMBER` coerce to their string representation in `..`. Integer key fields
-produce string keys when concatenated.
+**Low priority.** Template literal types (`get_${K}`, `on${EventName}`) are a niche
+pattern chosen for specific API aesthetics — not a fundamental need. The structured
+alternative works equally well in both TS and Lua:
 
-**Widened string**: `"prefix_" .. string` = `string`. `string .. string` in pattern
-position for extraction — arm fails (can't extract from non-literal).
+```lua
+--:: ToGetSet<D> = match D { { key: %K, value: %V, ...%Rest }
+--::   => { { key: K, value: { get: () -> V, set: (V) -> nil }, ...Rest } } }
+```
 
-**Pattern extraction**: `"get_" .. %Suffix` as a match arm pattern. Natural in
-crescent; TS required `infer R extends string` hacks. Open questions:
-- Input doesn't match prefix → arm fails, match continues
-- Input is widened `string` → arm fails
-- Multiple segments: `"get_" .. %Mid .. "_id"` — ambiguity needs thought
+Same key, value wrapped in `{ get, set }` — no string ops needed. Implement `..`
+when a concrete library actually needs flat string-key generation.
 
-**Case transforms**: TS added `Uppercase`/`Lowercase`/`Capitalize`/`Uncapitalize`
-as permanent intrinsics. Lua has `string.upper`/`string.lower` — natural parallel,
-but only on concrete demand.
+**Numerics in `..`** (when implemented): follow TS prior art — `LIT_INTEGER` and
+`LIT_NUMBER` coerce to string representation. `"field_" .. (1 | 2 | 3)` →
+`"field_1" | "field_2" | "field_3"`.
+
+**Widened string**: `"prefix_" .. string` = `string`.
+
+**Pattern extraction** (`"get_" .. %Suffix` in arm patterns): separate design pass,
+even lower priority than result-position `..`.
+
+**Case transforms**: only on concrete demand.
 
 ## Numeric arithmetic
 
