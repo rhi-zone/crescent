@@ -20,6 +20,7 @@ local band       = require("bit").band
 
 local TAG_TABLE        = defs.TAG_TABLE
 local TAG_UNION        = defs.TAG_UNION
+local TAG_TUPLE        = defs.TAG_TUPLE
 local TAG_MATCH_TYPE   = defs.TAG_MATCH_TYPE
 local TAG_NAMED        = defs.TAG_NAMED
 local TAG_ANY          = defs.TAG_ANY
@@ -166,6 +167,94 @@ local function descriptor_field(ctx, tbl_tid, slot_name)
     return nil
 end
 
+-- Extract a single descriptor table (tag TAG_TABLE) and push the resulting
+-- output field onto out_fields.  fe is the original FieldEntry (used for
+-- fallback name/type when the descriptor doesn't supply them).
+local function push_descriptor_field(ctx, out_fields, desc_tid, fe)
+    desc_tid = types_mod.find(ctx, desc_tid)
+    local key_tid   = descriptor_field(ctx, desc_tid, "key")
+    local val_tid   = descriptor_field(ctx, desc_tid, "value")
+    local opt_tid   = descriptor_field(ctx, desc_tid, "optional")
+    local ro_tid    = descriptor_field(ctx, desc_tid, "readonly")
+
+    -- Determine output field name from key slot
+    -- Expect a LIT_STRING result; fall back to original name
+    local out_name_id = fe.name_id
+    if key_tid then
+        local kt = ctx.types:get(key_tid)
+        if kt.tag == defs.TAG_LITERAL and kt.data[0] == LIT_STRING then
+            out_name_id = kt.data[1]
+        end
+    end
+
+    -- Determine output field type
+    local out_val_tid = val_tid or types_mod.find(ctx, fe.type_id)
+
+    -- Determine flags
+    local out_flags = 0
+    if opt_tid then
+        local ot = ctx.types:get(opt_tid)
+        if ot.tag == defs.TAG_LITERAL and ot.data[0] == LIT_BOOLEAN and ot.data[1] == 1 then
+            out_flags = out_flags + FLAG_OPTIONAL
+        end
+    end
+    if ro_tid then
+        local rt = ctx.types:get(ro_tid)
+        if rt.tag == defs.TAG_LITERAL and rt.data[0] == LIT_BOOLEAN and rt.data[1] == 1 then
+            out_flags = out_flags + FLAG_READONLY
+        end
+    end
+
+    out_fields[#out_fields + 1] = types_mod.make_field(ctx, out_name_id, out_val_tid, out_flags)
+end
+
+-- Interpret the result of F(descriptor) as a tuple of descriptors.
+-- Returns a list of descriptor type IDs to add to the output (0 = drop).
+--
+-- Three representations accepted:
+--   TAG_TUPLE (paren-tuple):  {  elements via lists  }
+--   TAG_TABLE empty closed:   {} from annotation → brace-empty-tuple → drop
+--   TAG_TABLE positional:     { D } or { D1, D2 } from annotation → brace-positional-tuple
+--   anything else:            backward-compat single descriptor
+local function collect_result_descriptors(ctx, result_tid, out)
+    result_tid = types_mod.find(ctx, result_tid)
+    local rt = ctx.types:get(result_tid)
+
+    if rt.tag == TAG_TUPLE then
+        -- Paren-tuple: () = drop, (D1, D2) = expand.
+        for j = rt.data[0], rt.data[0] + rt.data[1] - 1 do
+            out[#out + 1] = types_mod.find(ctx, ctx.lists:get(j))
+        end
+        return
+    end
+
+    if rt.tag == TAG_TABLE then
+        local fl = rt.data[1]   -- named fields count
+        local il = rt.data[3]   -- indexer list length (pairs: il/2 entries)
+        local rv = rt.data[4]   -- row var (-1 = closed)
+        if fl == 0 and rv == -1 then
+            if il == 0 then
+                -- {} (empty closed table) → brace-empty-tuple: drop the field.
+                return
+            else
+                -- { D } or { D1, D2 } → positional entries → brace-positional-tuple.
+                -- Indexer list is stored as pairs (key_type, val_type).
+                -- Each positional entry D becomes a descriptor element.
+                local is = rt.data[2]
+                local j = is + 1  -- +1: skip key type of first pair, take value type
+                while j < is + il do
+                    out[#out + 1] = types_mod.find(ctx, ctx.lists:get(j))
+                    j = j + 2  -- advance past (key, value) pair
+                end
+                return
+            end
+        end
+    end
+
+    -- Backward compat: non-tuple result treated as single descriptor.
+    out[#out + 1] = result_tid
+end
+
 local function expand_each_field_table(ctx, tbl_tid, fn_tid)
     local tt = ctx.types:get(tbl_tid)
     if tt.tag ~= TAG_TABLE then
@@ -181,45 +270,13 @@ local function expand_each_field_table(ctx, tbl_tid, fn_tid)
             -- Build descriptor table for this field
             local desc_tid = make_field_descriptor(ctx, fe)
 
-            -- Apply F to the descriptor
+            -- Apply F to the descriptor — collect zero or more output descriptors.
             local result_tid = apply_type_fn(ctx, fn_tid, desc_tid)
-
-            -- Extract key/value/optional/readonly from result
-            -- (F is expected to return a compatible descriptor)
-            local key_tid   = descriptor_field(ctx, result_tid, "key")
-            local val_tid   = descriptor_field(ctx, result_tid, "value")
-            local opt_tid   = descriptor_field(ctx, result_tid, "optional")
-            local ro_tid    = descriptor_field(ctx, result_tid, "readonly")
-
-            -- Determine output field name from key slot
-            -- Expect a LIT_STRING result; fall back to original name
-            local out_name_id = fe.name_id
-            if key_tid then
-                local kt = ctx.types:get(key_tid)
-                if kt.tag == defs.TAG_LITERAL and kt.data[0] == LIT_STRING then
-                    out_name_id = kt.data[1]
-                end
+            local descs = {}
+            collect_result_descriptors(ctx, result_tid, descs)
+            for _, d_tid in ipairs(descs) do
+                push_descriptor_field(ctx, out_fields, d_tid, fe)
             end
-
-            -- Determine output field type
-            local out_val_tid = val_tid or types_mod.find(ctx, fe.type_id)
-
-            -- Determine flags
-            local out_flags = 0
-            if opt_tid then
-                local ot = ctx.types:get(opt_tid)
-                if ot.tag == defs.TAG_LITERAL and ot.data[0] == LIT_BOOLEAN and ot.data[1] == 1 then
-                    out_flags = out_flags + FLAG_OPTIONAL
-                end
-            end
-            if ro_tid then
-                local rt = ctx.types:get(ro_tid)
-                if rt.tag == defs.TAG_LITERAL and rt.data[0] == LIT_BOOLEAN and rt.data[1] == 1 then
-                    out_flags = out_flags + FLAG_READONLY
-                end
-            end
-
-            out_fields[#out_fields + 1] = types_mod.make_field(ctx, out_name_id, out_val_tid, out_flags)
         end
     end
 
