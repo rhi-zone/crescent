@@ -385,6 +385,42 @@ arb.it("enum: table with integer or string literal fields typechecks",
 		assert(typechecks(src), "enum table rejected: " .. src)
 	end, { trials = 200 })
 
+-- ── Invariant 23: Interface oracle E2E ───────────────────────────────────────
+-- Declaring `--:: A: B` makes A a declared subtype of B.
+-- A is declared to implement B by having all B's fields plus extras.
+-- A value of type A can be assigned to a variable of type B (oracle hit).
+
+arb.it("interface oracle: A: B declaration allows A where B expected",
+	farb.arb_base_type,
+	function(T_node)
+		local T = farb.type_to_string(T_node)
+		-- HasB has a single field of type T.
+		-- MyType: HasB is a subtype of HasB, adding an extra field y.
+		-- This is structurally valid (MyType has fld:T which satisfies HasB).
+		local src = table.concat({
+			"--:: HasB = { fld: " .. T .. " }",
+			"--:: MyType: HasB = { fld: " .. T .. ", extra: integer }",
+			"local val --: MyType",
+			"local z --: HasB = val",
+		}, "\n")
+		assert(typechecks(src), "interface oracle E2E failed: " .. src)
+	end, { trials = 300 })
+
+-- ── Invariant 24: EachField KeepAll partial program typechecks ────────────────
+-- $EachField<{ x: T }, KeepAll> is assignable to { x: T } and vice versa.
+
+arb.it("EachField KeepAll: $EachField<{x:T}, KeepAll> compatible with {x:T}",
+	farb.arb_base_type,
+	function(T_node)
+		local TT = farb.type_to_string(T_node)
+		local src = table.concat({
+			"--:: KeepAll<D> = match D { _ => { D } }",
+			"local x --: $EachField<{ x: " .. TT .. " }, KeepAll>",
+			"local y --: { x: " .. TT .. " } = x",
+		}, "\n")
+		assert(typechecks(src), "EachField KeepAll partial program failed: " .. src)
+	end, { trials = 300 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

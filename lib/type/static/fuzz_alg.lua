@@ -17,9 +17,11 @@ local defs       = require("lib.type.static.defs")
 local arb        = require("lib.test.arb")
 local farb       = require("lib.type.static.fuzz_arb")
 
-local LIT_INTEGER = defs.LIT_INTEGER
-local LIT_STRING  = defs.LIT_STRING
-local LIT_BOOLEAN = defs.LIT_BOOLEAN
+local LIT_INTEGER   = defs.LIT_INTEGER
+local LIT_STRING    = defs.LIT_STRING
+local LIT_BOOLEAN   = defs.LIT_BOOLEAN
+local FLAG_OPTIONAL = defs.FLAG_OPTIONAL
+local FLAG_READONLY = defs.FLAG_READONLY
 
 -- ── Bare typing context ───────────────────────────────────────────────────────
 -- Creates a minimal ctx sufficient for type construction and unification.
@@ -90,7 +92,7 @@ ast_to_tid = function(ctx, node)
 		for _, f in ipairs(node.fields) do
 			local nid = intern_mod.intern(ctx.pool, f.name)
 			local tid = ast_to_tid(ctx, f.type)
-			fids[#fids + 1] = types_mod.make_field(ctx, nid, tid, 0)
+			fids[#fids + 1] = types_mod.make_field(ctx, nid, tid, f.flags or 0)
 		end
 		return types_mod.make_table(ctx, fids, nil, -1)
 
@@ -379,5 +381,67 @@ arb.it("[alg] deep intersection intro: T <: T & T (deep)",
 			"deep intersection intro failed: " .. type_str(T_node)
 			.. " should be <: " .. type_str(T_node) .. " & " .. type_str(T_node))
 	end, { trials = 1000 })
+
+-- ── Optional/readonly field invariants ────────────────────────────────────────
+
+-- 19. Required field satisfies optional slot: { x: T } <: { x?: T }
+arb.it("[alg] required field <: optional field: { x: T } <: { x?: T }",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx  = make_ctx()
+		local xid  = intern_mod.intern(ctx.pool, "x")
+		local tid  = ast_to_tid(ctx, T_node)
+		local req  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, 0) }, nil, -1)
+		local opt  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_OPTIONAL) }, nil, -1)
+		assert(subtype(ctx, req, opt),
+			"required <: optional failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 20. Optional field absent field is covered: {} <: { x?: T }
+-- An optional field in the target means source can omit the field entirely.
+arb.it("[alg] empty table <: optional-field table: {} <: { x?: T }",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx   = make_ctx()
+		local xid   = intern_mod.intern(ctx.pool, "x")
+		local tid   = ast_to_tid(ctx, T_node)
+		local empty = types_mod.make_table(ctx, {}, nil, -1)
+		local opt   = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_OPTIONAL) }, nil, -1)
+		assert(subtype(ctx, empty, opt),
+			"{} should be <: { x?: T } for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 21. Optional field reflexivity: { x?: T } <: { x?: T }
+arb.it("[alg] optional field reflexivity: { x?: T } <: { x?: T }",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx  = make_ctx()
+		local xid  = intern_mod.intern(ctx.pool, "x")
+		local tid  = ast_to_tid(ctx, T_node)
+		local opt  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_OPTIONAL) }, nil, -1)
+		local opt2 = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_OPTIONAL) }, nil, -1)
+		assert(subtype(ctx, opt, opt2),
+			"optional reflexivity failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 22. Readonly field reflexivity: { readonly x: T } <: { readonly x: T }
+arb.it("[alg] readonly field reflexivity: { readonly x: T } <: { readonly x: T }",
+	farb.arb_base_type,
+	function(T_node)
+		local ctx  = make_ctx()
+		local xid  = intern_mod.intern(ctx.pool, "x")
+		local tid  = ast_to_tid(ctx, T_node)
+		local ro   = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_READONLY) }, nil, -1)
+		local ro2  = types_mod.make_table(ctx,
+			{ types_mod.make_field(ctx, xid, tid, FLAG_READONLY) }, nil, -1)
+		assert(subtype(ctx, ro, ro2),
+			"readonly reflexivity failed for T = " .. type_str(T_node))
+	end, { trials = 2000 })
 
 return {}

@@ -81,7 +81,10 @@ local function to_str(node, outer)
 	elseif node.tag == "record" then
 		local entries = {}
 		for _, f in ipairs(node.fields) do
-			entries[#entries + 1] = f.name .. ": " .. to_str(f.type, 0)
+			local flags = f.flags or 0
+			local opt = (flags % 2 >= 1) and "?" or ""        -- bit 0: FLAG_OPTIONAL
+			local ro  = (flags >= 2)      and "readonly " or "" -- bit 1: FLAG_READONLY
+			entries[#entries + 1] = ro .. f.name .. opt .. ": " .. to_str(f.type, 0)
 		end
 		return "{ " .. table.concat(entries, ", ") .. " }"
 	elseif node.tag == "indexer" then
@@ -184,25 +187,38 @@ arb_type = arb.sized(function(size)
 		shrink   = arb_type_lazy.shrink,
 	}
 
-	-- Single-field record: { name: T }
-	local arb_record1 = arb.map(
-		arb.tuple({ arb_field_name, sub }),
+	-- arb_field_flags: generates a flags value for a record field.
+	-- 30% chance of optional, 20% chance of readonly (independent).
+	-- Produces 0, FLAG_OPTIONAL (1), FLAG_READONLY (2), or FLAG_OPTIONAL|FLAG_READONLY (3).
+	local arb_field_flags = arb.map(
+		arb.tuple({ arb.bool, arb.bool, arb.bool, arb.bool, arb.bool }),
 		function(p)
-			return { tag = "record", fields = { { name = p[1], type = p[2] } } }
+			-- p[1]|p[2]|p[3]: optional with prob ~3/5 ... use p[1]&p[2] for ~25% optional
+			local opt = (p[1] and p[2]) and 1 or 0          -- ~25% optional
+			local ro  = (p[3] and p[4] and p[5]) and 2 or 0 -- ~12% readonly
+			return opt + ro
+		end
+	)
+
+	-- Single-field record: { name: T } possibly with flags
+	local arb_record1 = arb.map(
+		arb.tuple({ arb_field_name, sub, arb_field_flags }),
+		function(p)
+			return { tag = "record", fields = { { name = p[1], type = p[2], flags = p[3] } } }
 		end
 	)
 
 	-- Two-field record: { name1: T1, name2: T2 } — collapses to one field if names collide
 	local arb_record2 = arb.map(
-		arb.tuple({ arb_field_name, sub, arb_field_name, sub }),
+		arb.tuple({ arb_field_name, sub, arb_field_flags, arb_field_name, sub, arb_field_flags }),
 		function(q)
-			if q[1] == q[3] then
+			if q[1] == q[4] then
 				-- Colliding names: just use the first field
-				return { tag = "record", fields = { { name = q[1], type = q[2] } } }
+				return { tag = "record", fields = { { name = q[1], type = q[2], flags = q[3] } } }
 			end
 			return { tag = "record", fields = {
-				{ name = q[1], type = q[2] },
-				{ name = q[3], type = q[4] },
+				{ name = q[1], type = q[2], flags = q[3] },
+				{ name = q[4], type = q[5], flags = q[6] },
 			}}
 		end
 	)
