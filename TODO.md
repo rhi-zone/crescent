@@ -194,9 +194,11 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   ann.lua parse → check.lua verify + register → defs.lua E code → errors.lua template →
   unify.lua oracle lookup.
 
-- [ ] **Partial application of generic aliases** — `$EachField<T, PickKey<Keys>>` where
-  `PickKey<Keys>` is a partially applied alias used as an HKT argument. Needed for
-  Pick<T, Keys> and Omit<T, Keys>. Not yet designed.
+- [x] **Partial application of generic aliases** — implemented (22f1e8f, 2026-03-30). TAG_PARTIAL_APP = 31.
+  Under-arity alias call (1–N-1 args) returns TAG_PARTIAL_APP(name_id, partial_args).
+  apply_type_fn completes the call. substitute_inner re-evaluates when args become concrete.
+  match.lua TAG_UNION pattern added (needed for `match K { Keys => ... }` where Keys is a union).
+  Enables Pick<T, Keys> and Omit<T, Keys> via $EachField + PickKey<Keys> partial app.
 
 - [x] **`{ ...[%K]: %V }` table-pattern rest capture** — `{ field: %X, ...%Rest }` in
   match patterns: captures remaining fields into Rest; `...Rest` in result splices them
