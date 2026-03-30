@@ -2421,6 +2421,39 @@ local t
 for k, v in pairs(t) do end
 ]])
     end)
+    assert.it("pairs over named-field table: k is string, v is integer|string", function()
+        -- Indexer arm { [K]: V } does not match (named fields only); catch-all fires.
+        -- K = string (named field keys are always strings), V = $Values<T> = integer|string
+        no_errors([[
+local t = { name = "alice", age = 30 }
+for k, v in pairs(t) do
+    local _k --: string
+    _k = k
+end
+]])
+    end)
+    assert.it("$Values<T>: named-field table → v+1 errors (v is string|integer, not number)", function()
+        -- $Values<{ x: integer, y: string }> = integer | string
+        -- Assigning to a number var should fail
+        has_error([[
+--: { x: integer, y: string }
+local t = {}
+for k, v in pairs(t) do
+    local n --: number
+    n = v
+end
+]], "cannot")
+    end)
+    assert.it("$IpairsValues<T>: numeric-indexer table gives element type, no error on v+1", function()
+        -- $IpairsValues<{ [number]: integer }> = integer; v + 1 is valid
+        no_errors([[
+--: { [number]: integer }
+local arr = {}
+for i, v in ipairs(arr) do
+    local x = v + 1
+end
+]])
+    end)
 end)
 
 assert.describe("checker: pcall/xpcall return type narrowing", function()

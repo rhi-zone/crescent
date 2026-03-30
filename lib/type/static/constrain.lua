@@ -1394,13 +1394,108 @@ local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids)
     if callee_t.tag ~= TAG_FUNCTION or callee_t.data[3] ~= 1 then return nil end
     local ret_slot = types_mod.find(ctx, ctx.lists:get(callee_t.data[2]))
     local ret_t = ctx.types:get(ret_slot)
-    -- Must be TAG_SPREAD wrapping a TAG_TYPE_CALL(TAG_INTRINSIC, ...)
+    -- Must be TAG_SPREAD wrapping a TAG_TYPE_CALL(TAG_INTRINSIC, ...) or TAG_MATCH_TYPE
     if ret_t.tag ~= defs.TAG_SPREAD then return nil end
     local inner = types_mod.find(ctx, ret_t.data[0])
     local inner_t = ctx.types:get(inner)
+
+    -- TAG_MATCH_TYPE in return spread: evaluate eagerly if match param is concrete.
+    -- This handles match-alias equivalents of $PcallReturn (e.g. PcallReturn<F>).
+    if inner_t.tag == defs.TAG_MATCH_TYPE then
+        local match_param = types_mod.find(ctx, inner_t.data[0])
+        local mpt = ctx.types:get(match_param)
+        if mpt.tag == TAG_VAR then
+            -- Find the function parameter this generic TV corresponds to and resolve
+            -- it to the actual argument type.
+            local params_len = callee_t.data[1]
+            local concrete_arg = nil
+            for pi = 0, params_len - 1 do
+                local param = types_mod.find(ctx, ctx.lists:get(callee_t.data[0] + pi))
+                if param == match_param then
+                    if arg_tids[pi + 1] then
+                        concrete_arg = types_mod.find(ctx, arg_tids[pi + 1])
+                    end
+                    break
+                end
+            end
+            if concrete_arg and ctx.types:get(concrete_arg).tag ~= TAG_VAR then
+                -- Create a new match type with the concrete param and same arms.
+                local new_mt = types_mod.alloc_type(ctx, defs.TAG_MATCH_TYPE)
+                local mtt = ctx.types:get(new_mt)
+                mtt.data[0] = concrete_arg
+                mtt.data[1] = inner_t.data[1]
+                mtt.data[2] = inner_t.data[2]
+                local match_mod = require("lib.type.static.match")
+                return match_mod.evaluate(ctx, new_mt, {})
+            end
+        end
+        return nil
+    end
+
     if inner_t.tag ~= defs.TAG_TYPE_CALL then return nil end
     local callee_id = types_mod.find(ctx, inner_t.data[0])
     local ct = ctx.types:get(callee_id)
+
+    -- TAG_TYPE_CALL(TAG_NAMED(match_alias), TV_F): eagerly evaluate match aliases
+    -- like PcallReturn<F> expressed as user-defined match aliases (not intrinsics).
+    -- After instantiation, inner is TAG_TYPE_CALL(TAG_NAMED("PcallReturn"), fresh_TV_F).
+    -- Resolve each arg: if it's a fresh TAG_VAR from instantiation, find the concrete
+    -- call-site arg type. Then look up the alias and substitute + evaluate.
+    if ct.tag == TAG_NAMED and ct.data[2] == 0 then
+        -- Simple alias name (no args) — look up in scope
+        local alias = env_mod.lookup_type(ctx.scope, ct.data[0])
+        if alias and alias.body then
+            local alias_body_t = ctx.types:get(types_mod.find(ctx, alias.body))
+            if alias_body_t.tag == defs.TAG_MATCH_TYPE then
+                -- It's a match alias. Resolve the type args.
+                local resolved_args = {}
+                local params_len = callee_t.data[1]
+                for i = inner_t.data[1], inner_t.data[1] + inner_t.data[2] - 1 do
+                    local tv = types_mod.find(ctx, ctx.lists:get(i))
+                    local tv_t = ctx.types:get(tv)
+                    if tv_t.tag == TAG_VAR then
+                        local found_arg = nil
+                        for pi = 0, params_len - 1 do
+                            local param = types_mod.find(ctx, ctx.lists:get(callee_t.data[0] + pi))
+                            if param == tv then
+                                if arg_tids[pi + 1] then
+                                    found_arg = types_mod.find(ctx, arg_tids[pi + 1])
+                                end
+                                break
+                            end
+                        end
+                        resolved_args[#resolved_args + 1] = found_arg or tv
+                    else
+                        resolved_args[#resolved_args + 1] = tv
+                    end
+                end
+                -- Check all args are concrete (no remaining TVs)
+                local all_concrete = true
+                for _, aid in ipairs(resolved_args) do
+                    if ctx.types:get(aid).tag == TAG_VAR then all_concrete = false; break end
+                end
+                if all_concrete and #resolved_args > 0 then
+                    -- Build mapping: alias params → resolved args
+                    if alias.params and #alias.params == #resolved_args then
+                        local mapping = {}
+                        for pi, param_name_id in ipairs(alias.params) do
+                            mapping[param_name_id] = resolved_args[pi]
+                        end
+                        -- Substitute into the match alias body and evaluate.
+                        local env_m = require("lib.type.static.env")
+                        local concrete_mt = env_m.substitute(ctx, alias.body, mapping, {})
+                        local mt_t = ctx.types:get(types_mod.find(ctx, concrete_mt))
+                        if mt_t.tag == defs.TAG_MATCH_TYPE then
+                            local match_mod = require("lib.type.static.match")
+                            return match_mod.evaluate(ctx, concrete_mt, {})
+                        end
+                        return concrete_mt
+                    end
+                end
+            end
+        end
+    end
+
     if ct.tag ~= defs.TAG_INTRINSIC then return nil end
     -- Resolve each intrinsic arg: if it is a fresh TAG_VAR from instantiation,
     -- find which function parameter position it came from and substitute the

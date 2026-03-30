@@ -113,9 +113,43 @@ local function resolve_deferred_intrinsic(ctx, tid)
     -- which are stored as TAG_SPREAD(TAG_TYPE_CALL(TAG_INTRINSIC, ...)).
     -- The result (a TAG_TUPLE iterator triple) is returned directly so the caller
     -- can unify ret_tid with the tuple, enabling C_INDEX projection in for-in.
+    --
+    -- Also handles TAG_SPREAD wrapping a TAG_MATCH_TYPE whose param is now concrete
+    -- (param was a generic TV bound during solve_callable argument unification).
+    -- PairsReturn<T>/IpairsReturn<T> match aliases use this path.
     if t.tag == TAG_SPREAD then
         local inner_tid = find(ctx, t.data[0])
         local inner_t = ctx.types:get(inner_tid)
+        -- TAG_MATCH_TYPE with a now-concrete param: evaluate the match.
+        -- PairsReturn<T>/IpairsReturn<T> match aliases return a 2-tuple (K, V);
+        -- wrap the result in a full iterator triple so the for-in handler can
+        -- extract iter_fn at slot 0.  The match param (data[0]) is the table
+        -- type T used as iterator state.
+        if inner_t.tag == TAG_MATCH_TYPE then
+            local param_resolved = find(ctx, inner_t.data[0])
+            local param_t = ctx.types:get(param_resolved)
+            -- Defer only when param is an unresolved generic-alias placeholder (TAG_NAMED).
+            -- TAG_VAR / TAG_ROWVAR are free type variables: evaluate the match anyway —
+            -- PairsReturn/IpairsReturn catch-all arms handle non-table subjects by
+            -- returning (string, unknown) or (integer, unknown).
+            if param_t.tag == TAG_NAMED then
+                return tid  -- alias param placeholder — still deferred
+            end
+            local match_mod = require("lib.type.static.match")
+            local result_tid = match_mod.evaluate(ctx, inner_tid)
+            -- If the result is a 2-tuple (K, V), build a full iterator triple
+            -- so the for-in handler's C_INDEX(triple, 0) gets an iter_fn,
+            -- not a bare key type.  Other match results (unions, 1-tuples, etc.)
+            -- are returned as-is.
+            local result_t = ctx.types:get(find(ctx, result_tid))
+            if result_t.tag == TAG_TUPLE and result_t.data[1] == 2 then
+                local K_tid = find(ctx, ctx.lists:get(result_t.data[0]))
+                local V_tid = find(ctx, ctx.lists:get(result_t.data[0] + 1))
+                local intrinsic_mod = require("lib.type.static.intrinsic")
+                return intrinsic_mod.build_iter_triple(ctx, param_resolved, K_tid, V_tid)
+            end
+            return result_tid
+        end
         if inner_t.tag ~= TAG_TYPE_CALL then
             return tid  -- spread wrapping a non-intrinsic: leave unchanged
         end

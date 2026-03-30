@@ -121,8 +121,38 @@ local function load_decls(ctx, path)
         end
     end
 
-    -- Pass 2: resolve all type bodies and bind.
+    -- Pass 2a: resolve plain type alias bodies (non-decl_var, non-newtype) first
+    -- so that variable declarations in Pass 2b can reference fully-resolved aliases.
+    -- This mirrors constrain.lua's Pass 2a/2b split and is required when a variable
+    -- declaration references a generic alias (e.g. `declare pairs` uses PairsReturn<T>).
     local types_mod = require("lib.type.static.types")
+    for _, r in ipairs(decls) do
+        if not r.decl_var and not r.newtype then
+            local alias = env_mod.lookup_type(ctx.scope, r.name_id)
+            -- For generic aliases, push a temporary scope where each type
+            -- parameter is bound to a TAG_NAMED placeholder.  This mirrors the
+            -- logic in constrain.lua (Pass 2a) and allows the alias body to
+            -- reference its own parameters (e.g. `match T { ... }`) without
+            -- triggering "undefined type" errors.
+            local old_scope = ctx.scope
+            if alias and alias.params and #alias.params > 0 then
+                local temp = env_mod.new(ctx.scope.level + 1)
+                temp.parent = ctx.scope
+                for _, param_name_id in ipairs(alias.params) do
+                    local ph = types_mod.alloc_type(ctx, defs_mod.TAG_NAMED)
+                    ctx.types:get(ph).data[0] = param_name_id
+                    env_mod.bind_type(temp, param_name_id, { body = ph, params = nil, nominal = false })
+                end
+                ctx.scope = temp
+            end
+            local resolved = resolve(ctx, r.type_id)
+            ctx.scope = old_scope
+            if alias then alias.body = resolved end
+        end
+    end
+
+    -- Pass 2b: resolve newtypes and variable declarations (which may reference
+    -- aliases resolved in Pass 2a).
     for _, r in ipairs(decls) do
         if r.decl_var then
             env_mod.bind(ctx.scope, r.name_id, resolve(ctx, r.type_id))
@@ -137,10 +167,6 @@ local function load_decls(ctx, path)
             local nom = types_mod.make_nominal(ctx, r.name_id, nominal_id, underlying)
             local alias = env_mod.lookup_type(ctx.scope, r.name_id)
             if alias then alias.body = nom end
-        else
-            local resolved = resolve(ctx, r.type_id)
-            local alias = env_mod.lookup_type(ctx.scope, r.name_id)
-            if alias then alias.body = resolved end
         end
     end
 

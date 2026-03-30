@@ -756,11 +756,26 @@ contract.
 | `$Opaque<T>` | Nominal newtype over T. Field access errors. Only accessible after `--:: unseal`. |
 | `$Opaque<T, U>` | Like `$Opaque<T>` but fields in U are accessible without unsealing. |
 | `$PcallReturn<F>` | `(true, ...ReturnType<F>) \| (false, string)`. For single-return F, result is `(true, R) \| (false, string)`. Multi-return awaits spread-in-tuple-position syntax. |
-| `$PairsReturn<T>` | For `T = { [K]: V }`: iterator yielding `(K, V)`. Full de-specialization awaits field-values union pattern in match. |
-| `$IpairsReturn<T>` | For array-like T: iterator yielding `(integer, element_type)`. |
 | `$FfiC` | Closed table built from `ffi.cdef` call sites. Each declared symbol becomes a field. |
 | `$GlobalScope` | Closed table of all globals declared via `--:: declare`. |
 | `$Keys<T>` | Union of string literal types for all named field names in T. Equivalent to TypeScript `keyof T`. |
+| `$Values<T>` | Union of widened value types for all fields/entries in T. For `{ [K]: V }`: returns V. For named-field table: returns union of `widen(field_type)` for each field. For `TAG_UNION`: union of `$Values<arm>`. Counterpart to `$Keys<T>`. |
+| `$IpairsValues<T>` | Like `$Values<T>` but restricted to numeric/positional entries. For `{ [integer]: V }` or `{ [number]: V }`: returns V. For array-like named fields (keys "1", "2", ...): returns union of their value types. |
+
+`$Values` and `$IpairsValues` together replace the former `$PairsReturn<T>` and
+`$IpairsReturn<T>` compiler intrinsics.  Those are now expressed as user-definable
+match aliases in `stdlib.d.lua`:
+
+```lua
+--:: PairsReturn<T> = match T {
+--::   { [K]: V } => (K, V),
+--::   T          => (string, $Values<T>)
+--:: }
+
+--:: IpairsReturn<T> = match T {
+--::   T => (integer, $IpairsValues<T>)
+--:: }
+```
 
 Permanent intrinsics (will not be eliminated): `$Require`, `$Opaque`, `$FfiC`,
 `$GlobalScope`. All others are provisional and will be replaced by user-definable

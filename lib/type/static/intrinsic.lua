@@ -5,10 +5,10 @@
 --
 -- Supported intrinsics:
 --   $Keys<T>           — string literal union of field names in T
+--   $Values<T>         — union of widened field value types in T (pairs complement)
+--   $IpairsValues<T>   — union of numeric/positional field value types in T
 --   $EachUnion<T, F>   — apply F to each member of union T, re-union results
 --   $EachField<T, F>   — apply F to each field descriptor of T, collect into table
---   $PairsReturn<T>    — iterator triple for pairs() over T
---   $IpairsReturn<T>   — iterator triple for ipairs() over T
 --   $PcallReturn<F>    — (true, ...F_returns) | (false, string) union for pcall/xpcall
 
 local defs      = require("lib.type.static.defs")
@@ -253,12 +253,110 @@ local function expand_each_field(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
--- $PairsReturn<T> and $IpairsReturn<T>
+-- $Values<T> and $IpairsValues<T>
 -- ---------------------------------------------------------------------------
--- $PairsReturn<T> evaluates to a TAG_TUPLE: (iter_fn, T, K?)
--- where iter_fn: (T, K?) -> (K?, V), K/V extracted from T's indexer or fields.
--- $IpairsReturn<T> is like $PairsReturn<T> but K is always integer.
+-- $Values<T>: union of widened field value types in T.
+--   - TAG_TABLE with indexer: return indexer value type
+--   - TAG_TABLE with only named fields: return union of widen(field.type)
+--   - TAG_TABLE empty/open with no fields: return T_UNKNOWN
+--   - TAG_UNION: return union of $Values<arm> for each arm
+--   - TAG_INTERSECTION: return $Values<first member that is TAG_TABLE>
+--   - TAG_ANY/TAG_UNKNOWN/TAG_VAR/other: return T_UNKNOWN
+--   - TAG_NEVER: return T_NEVER
 --
+-- $IpairsValues<T>: restricted to numeric indexers and positional fields.
+--   - TAG_TABLE with integer indexer: return indexer value type
+--   - TAG_TABLE with positional fields: return union of their value types (widened)
+--   - Otherwise: return T_UNKNOWN
+local function extract_values(ctx, T_tid, ipairs_mode)
+    T_tid = types_mod.find(ctx, T_tid)
+    local T_t = ctx.types:get(T_tid)
+
+    -- TAG_NEVER: return never
+    if T_t.tag == defs.TAG_NEVER then
+        return ctx.T_NEVER
+    end
+
+    -- TAG_UNION: distribute over each arm
+    if T_t.tag == TAG_UNION then
+        local members = {}
+        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+            local arm_tid = types_mod.find(ctx, ctx.lists:get(i))
+            members[#members + 1] = extract_values(ctx, arm_tid, ipairs_mode)
+        end
+        if #members == 0 then return ctx.T_NEVER end
+        return types_mod.make_union(ctx, members)
+    end
+
+    -- TAG_INTERSECTION: first TAG_TABLE member
+    if T_t.tag == defs.TAG_INTERSECTION then
+        for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+            local arm_tid = types_mod.find(ctx, ctx.lists:get(i))
+            local arm_t = ctx.types:get(arm_tid)
+            if arm_t.tag == TAG_TABLE then
+                return extract_values(ctx, arm_tid, ipairs_mode)
+            end
+        end
+        return ctx.T_UNKNOWN
+    end
+
+    -- Non-table: return unknown
+    if T_t.tag ~= TAG_TABLE then
+        return ctx.T_UNKNOWN
+    end
+
+    if ipairs_mode then
+        -- ipairs: prefer integer indexer
+        if T_t.data[3] >= 2 then
+            local j = T_t.data[2]
+            while j < T_t.data[2] + T_t.data[3] - 1 do
+                local kt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(j)))
+                if kt.tag == defs.TAG_NUMBER or kt.tag == defs.TAG_INTEGER then
+                    return types_mod.find(ctx, ctx.lists:get(j + 1))
+                end
+                j = j + 2
+            end
+        end
+        -- Positional fields: widen value types
+        if T_t.data[1] > 0 then
+            local val_members = {}
+            for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+                local fid = ctx.lists:get(i)
+                local fe  = ctx.fields:get(fid)
+                if fe.name_id >= 0 then
+                    val_members[#val_members + 1] = types_mod.widen(ctx, fe.type_id)
+                end
+            end
+            if #val_members == 1 then return val_members[1] end
+            if #val_members > 1 then return types_mod.make_union(ctx, val_members) end
+        end
+        return ctx.T_UNKNOWN
+    else
+        -- pairs: prefer indexer value type
+        if T_t.data[3] >= 2 then
+            return types_mod.find(ctx, ctx.lists:get(T_t.data[2] + 1))
+        end
+        -- Named fields: widen value types
+        if T_t.data[1] > 0 then
+            local val_members = {}
+            for i = T_t.data[0], T_t.data[0] + T_t.data[1] - 1 do
+                local fid = ctx.lists:get(i)
+                local fe  = ctx.fields:get(fid)
+                if fe.name_id >= 0 then
+                    val_members[#val_members + 1] = types_mod.widen(ctx, fe.type_id)
+                end
+            end
+            if #val_members == 0 then return ctx.T_UNKNOWN end
+            if #val_members == 1 then return val_members[1] end
+            return types_mod.make_union(ctx, val_members)
+        end
+        return ctx.T_UNKNOWN
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- $PairsReturn<T> and $IpairsReturn<T>  (intrinsic helpers kept for build_iter_triple)
+-- ---------------------------------------------------------------------------
 -- K/V extraction rules for pairs:
 --   - TAG_TABLE with indexer: K = indexer key type, V = indexer value type
 --   - TAG_TABLE with only named fields (no indexer): K = string, V = union of field value types
@@ -600,6 +698,11 @@ end
 -- Public entry point
 -- ---------------------------------------------------------------------------
 
+-- Exported so that solve.lua can build iterator triples when evaluating
+-- PairsReturn<T>/IpairsReturn<T> match aliases that return (K, V) 2-tuples.
+-- See resolve_deferred_intrinsic in solve.lua.
+M.build_iter_triple = build_iter_triple
+
 -- expand(ctx, name_id, arg_ids, stable_id) -> type_id
 -- Called when a TAG_TYPE_CALL has a TAG_INTRINSIC callee.
 -- name_id:   intern ID of the intrinsic name (string)
@@ -611,6 +714,20 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Keys" then
         return expand_keys(ctx, arg_ids)
+    end
+
+    if name == "Values" then
+        -- $Values<T>: union of widened field value types
+        if #arg_ids < 1 then return ctx.T_UNKNOWN end
+        local T_tid = types_mod.find(ctx, arg_ids[1])
+        return extract_values(ctx, T_tid, false)
+    end
+
+    if name == "IpairsValues" then
+        -- $IpairsValues<T>: union of numeric/positional field value types
+        if #arg_ids < 1 then return ctx.T_UNKNOWN end
+        local T_tid = types_mod.find(ctx, arg_ids[1])
+        return extract_values(ctx, T_tid, true)
     end
 
     if name == "EachUnion" then
@@ -627,14 +744,6 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Require" then
         return expand_require(ctx, arg_ids)
-    end
-
-    if name == "PairsReturn" then
-        return expand_pairs_return(ctx, arg_ids)
-    end
-
-    if name == "IpairsReturn" then
-        return expand_ipairs_return(ctx, arg_ids)
     end
 
     if name == "PcallReturn" then

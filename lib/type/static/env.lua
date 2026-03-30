@@ -554,12 +554,37 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     end
 
     if tag == TAG_TUPLE then
-        local elems = {}
+        local new_elems = {}
         for i = t.data[0], t.data[0] + t.data[1] - 1 do
-            elems[#elems + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
+            local elem_tid = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
+            local elem_t   = ctx.types:get(types_mod.find(ctx, elem_tid))
+            if elem_t.tag == TAG_SPREAD then
+                -- Splice spread-in-tuple-position: (A, ...R) with R=integer → (A, integer)
+                -- (A, ...R) with R=tuple(X,Y) → (A, X, Y); (A, ...never) → (A)
+                -- If the inner type is still unresolved (TAG_NAMED or TAG_VAR), keep the
+                -- TAG_SPREAD in the element list so a later substitution pass can splice it.
+                local inner_tid = types_mod.find(ctx, elem_t.data[0])
+                local inner_t   = ctx.types:get(inner_tid)
+                if inner_t.tag == TAG_TUPLE then
+                    -- Multi-return tuple: splice all elements in-place
+                    for j = inner_t.data[0], inner_t.data[0] + inner_t.data[1] - 1 do
+                        new_elems[#new_elems + 1] = ctx.lists:get(j)
+                    end
+                elseif inner_t.tag == TAG_VAR or inner_t.tag == TAG_ROWVAR
+                    or inner_t.tag == defs.TAG_NAMED then
+                    -- Still unresolved: preserve the (substituted) TAG_SPREAD for later
+                    new_elems[#new_elems + 1] = elem_tid
+                elseif inner_t.tag ~= defs.TAG_NEVER then
+                    -- Single concrete type: treat as 1-element spread
+                    new_elems[#new_elems + 1] = inner_tid
+                end
+                -- TAG_NEVER: contribute zero elements
+            else
+                new_elems[#new_elems + 1] = elem_tid
+            end
         end
         seen[tid] = nil
-        return types_mod.make_tuple(ctx, elems)
+        return types_mod.make_tuple(ctx, new_elems)
     end
 
     if tag == TAG_SPREAD then
@@ -576,14 +601,20 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     if tag == defs.TAG_MATCH_TYPE then
         -- Substitute into the param
         local new_param = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
-        -- Substitute into each arm (patterns and results may contain capture-var placeholders
-        -- that are not in `mapping` — those stay as TAG_NAMED and are handled by match_pattern)
+        -- Substitute into each arm.
+        -- Patterns: bare TAG_NAMED nodes are capture variables (binding sites), not
+        -- references to alias params.  Pass an empty mapping for pattern substitution
+        -- so that `T =>` catch-all patterns stay as TAG_NAMED and are recognized by
+        -- match_pattern as capture variables, not converted to TAG_VARs.
+        -- Results: apply the full mapping so that references to alias params (e.g. T
+        -- in `$Values<T>`) are correctly replaced with concrete types.
+        local EMPTY_MAP = {}
         local new_arms = {}
         local as, al = t.data[1], t.data[2]
         local i = as
         while i < as + al - 1 do
-            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i), mapping, seen, eval_seen)
-            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping, seen, eval_seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i),     EMPTY_MAP, seen, eval_seen)
+            new_arms[#new_arms + 1] = substitute_inner(ctx, ctx.lists:get(i + 1), mapping,   seen, eval_seen)
             i = i + 2
         end
         seen[tid] = nil
@@ -647,12 +678,19 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         -- present in the mapping (i.e. substitution didn't replace it).  A TAG_NAMED
         -- that is NOT in the mapping is a reference to a concrete named alias (e.g.
         -- MakeOptional) and is handled correctly by apply_type_fn inside the intrinsic.
+        -- A free TAG_VAR arg means the intrinsic arg is not yet concrete; defer by
+        -- leaving the TAG_TYPE_CALL node intact for later evaluation (e.g. via
+        -- resolve_deferred_intrinsic in solve.lua once the TV is bound to a concrete type).
         local ct = ctx.types:get(callee_id)
         if ct.tag == defs.TAG_INTRINSIC then
             local has_unresolved = false
             for _, aid in ipairs(new_args) do
                 local at2 = ctx.types:get(types_mod.find(ctx, aid))
                 if at2.tag == defs.TAG_NAMED and mapping[at2.data[0]] ~= nil then
+                    has_unresolved = true
+                    break
+                end
+                if at2.tag == defs.TAG_VAR or at2.tag == TAG_ROWVAR then
                     has_unresolved = true
                     break
                 end
