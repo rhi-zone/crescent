@@ -61,6 +61,9 @@ field       ::= modifiers name ": " base_type
 modifiers   ::= ("readonly ")? ("?")?    -- optional/readonly flags
 name        ::= one of {x, y, z, n, s}
 base_type   ::= "integer" | "string" | "boolean" | "number"
+              -- NOTE: never generate `any` — `any <: T` and `T <: any` for all T,
+              -- so bidirectional assignment passes trivially for any X == any, making
+              -- equivalence assertions meaningless.
 ```
 
 Constraints:
