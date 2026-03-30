@@ -616,6 +616,26 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         return id
     end
 
+    if tag == defs.TAG_CAPTURE then
+        -- Preserve capture node in the checker arena with the same name_id.
+        -- TAG_CAPTURE is used only in match arm pattern position; match.lua
+        -- binds name_id -> resolved input type when the arm is evaluated.
+        local id = types_mod.alloc_type(ctx, defs.TAG_CAPTURE)
+        ctx.types:get(id).data[0] = at.data[0]  -- name_id
+        return id
+    end
+
+    if tag == defs.TAG_PAT_ALL_FIELDS then
+        -- Preserve all-fields pattern node in the checker arena.
+        -- TAG_PAT_ALL_FIELDS is used only in match arm pattern position;
+        -- match.lua distributes over all fields and indexers of the input type.
+        local id = types_mod.alloc_type(ctx, defs.TAG_PAT_ALL_FIELDS)
+        local nt = ctx.types:get(id)
+        nt.data[0] = at.data[0]  -- k_name_id
+        nt.data[1] = at.data[1]  -- v_name_id
+        return id
+    end
+
     if tag == defs.TAG_INTRINSIC then
         -- If this intrinsic name is a registered type alias (e.g. $GlobalScope),
         -- resolve it like TAG_NAMED. Otherwise keep it as an opaque intrinsic node
@@ -2781,14 +2801,14 @@ local function process_type_decls(ctx)
             errors_mod.error(ctx.err, ctx.filename, e.line or 0, e.col or 0, e.msg)
         end
     end
-    local decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, ... }, ... }
+    local decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, ... }, ... }
     -- decl_lines uses table-reference keys (result records as keys), which the
     -- typechecker cannot track. Annotate as any so indexed access returns any (→ integer).
     --: any
     local decl_lines = {}
     local module_decls = {} --: { [integer]: { kind: integer, type_id: integer, mod_name: string, ... }, ... }
     for line, result in pairs(ann.results) do
-        --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, mod_name: string, ... }
+        --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, mod_name: string, ... }
         local result = result
         if result.kind == ANN_DECL then
             decls[#decls + 1] = result

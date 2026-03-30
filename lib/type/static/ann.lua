@@ -32,6 +32,7 @@ local B_DQUOT = 34
 local B_SQUOT = 39
 local B_DOT   = 46
 local B_DOLLAR = 36
+local B_PERCENT = 37
 
 local function is_ident_start(b)
     return (b >= B_a and b <= B_z) or (b >= B_A and b <= B_Z) or b == B_UNDER
@@ -222,8 +223,9 @@ function M.parse_annotations(annotations, pool, filename)
     -- Forward declaration
     local parse_type
 
-    -- Accumulated parse warnings (populated during parsing, returned with the result).
+    -- Accumulated parse warnings and errors (populated during parsing, returned with the result).
     local warnings = {}
+    local parse_errors = {}  -- errors that survive the inner pcall (ordering errors, etc.)
 
     -- Check if an annotation type ID is a union containing at least one function type.
     -- Used to warn on `(A) -> B | (C) -> D` which parses as `(A) -> (B | (C) -> D)`.
@@ -644,13 +646,40 @@ function M.parse_annotations(annotations, pool, filename)
                     elseif fb == byte(".") and s.pos + 2 <= s.len
                         and sub(s.src, s.pos, s.pos + 2) == "..." then
                         s.pos = s.pos + 3
-                        -- Bare ...: open-table row variable marker.
-                        -- ...T: spread base type (extends another table's fields).
+                        -- Check for all-fields pattern: ...[%K]: %V → TAG_PAT_ALL_FIELDS
+                        -- Must be the sole entry in the braces.
                         local nb = peek(s)
-                        if nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
+                        if nb == byte("[") then
+                            advance(s)  -- skip '['
+                            if peek(s) ~= B_PERCENT then
+                                scan_error(s, "expected '%' capture sigil in ...[%K]: %V pattern")
+                            end
+                            advance(s)  -- skip '%'
+                            local k_name = scan_word(s)
+                            if not k_name then scan_error(s, "expected capture name after '%'") end
+                            expect_char(s, "]")
+                            expect_char(s, ":")
+                            if peek(s) ~= B_PERCENT then
+                                scan_error(s, "expected '%' capture sigil in ...[%K]: %V pattern")
+                            end
+                            advance(s)  -- skip '%'
+                            local v_name = scan_word(s)
+                            if not v_name then scan_error(s, "expected capture name after '%'") end
+                            local k_name_id = intern_mod.intern(pool, k_name)
+                            local v_name_id = intern_mod.intern(pool, v_name)
+                            local paf = alloc_type(defs.TAG_PAT_ALL_FIELDS)
+                            local paft = types:get(paf)
+                            paft.data[0] = k_name_id
+                            paft.data[1] = v_name_id
+                            -- PAT_ALL_FIELDS is a standalone pattern; close the braces and return.
+                            expect_char(s, "}")
+                            return paf
+                        elseif nb == byte("}") or nb == byte(",") or nb == byte(";") or not nb then
+                            -- Bare ...: open-table row variable marker.
                             row_var_ann_id = alloc_type(defs.TAG_ROWVAR)
                             break
                         else
+                            -- ...T: spread base type (extends another table's fields).
                             local inner = parse_type(s)
                             local sp = alloc_type(defs.TAG_SPREAD)
                             types:get(sp).data[0] = inner
@@ -753,6 +782,19 @@ function M.parse_annotations(annotations, pool, filename)
             ft.data[3] = bds
             ft.data[4] = bdl
             return forall
+        end
+
+        -- Capture sigil: %Name → TAG_CAPTURE(name_id)
+        -- A name prefixed with % is an explicit capture in a match pattern.
+        -- At use sites (result expressions) captures are referenced by bare name.
+        if b == B_PERCENT then
+            advance(s)  -- skip '%'
+            local name = scan_word(s)
+            if not name then scan_error(s, "expected capture name after '%'") end
+            local name_id = intern_mod.intern(pool, name)
+            local cap = alloc_type(defs.TAG_CAPTURE)
+            types:get(cap).data[0] = name_id
+            return cap
         end
 
         -- Word: could be primitive, keyword (typeof/match/newtype/function), or named type
@@ -1029,29 +1071,54 @@ function M.parse_annotations(annotations, pool, filename)
                 local name_id = intern_mod.intern(pool, name)
                 local type_params
                 local type_bounds     -- parallel to type_params; nil entry = no bound
+                local type_defaults   -- parallel to type_params; nil entry = no default
                 local has_type_bounds = false
+                local has_type_defaults = false
                 if peek(s) == byte("<") then
                     advance(s)
                     type_params = {}
                     type_bounds = {}
+                    type_defaults = {}
+                    -- Use explicit count to avoid sparse-table issues with nil entries.
+                    -- (Assigning nil to a Lua table is a no-op, so #table skips nil holes.)
+                    local nparam = 0
                     local first_param = scan_word(s)
                     if not first_param then scan_error(s, "expected type parameter") end
-                    type_params[1] = intern_mod.intern(pool, first_param)
+                    nparam = nparam + 1
+                    type_params[nparam] = intern_mod.intern(pool, first_param)
                     if opt_char(s, ":") then
-                        type_bounds[1] = parse_type(s)
+                        type_bounds[nparam] = parse_type(s)
                         has_type_bounds = true
-                    else
-                        type_bounds[1] = nil
                     end
+                    if opt_char(s, "=") then
+                        type_defaults[nparam] = parse_type(s)
+                        has_type_defaults = true
+                    end
+                    local saw_default = type_defaults[nparam] ~= nil
                     while opt_char(s, ",") do
                         local p = scan_word(s)
                         if not p then scan_error(s, "expected type parameter") end
-                        type_params[#type_params + 1] = intern_mod.intern(pool, p)
+                        nparam = nparam + 1
+                        type_params[nparam] = intern_mod.intern(pool, p)
                         if opt_char(s, ":") then
-                            type_bounds[#type_bounds + 1] = parse_type(s)
+                            type_bounds[nparam] = parse_type(s)
                             has_type_bounds = true
+                        end
+                        if opt_char(s, "=") then
+                            type_defaults[nparam] = parse_type(s)
+                            has_type_defaults = true
+                            saw_default = true
                         else
-                            type_bounds[#type_bounds + 1] = nil
+                            if saw_default then
+                                -- Non-default parameter after a default: ordering error.
+                                -- Store as a parse error (survives the inner pcall via
+                                -- parse_errors list) rather than throwing, so the result
+                                -- is still parsed but the error is reported by constrain.lua.
+                                parse_errors[#parse_errors + 1] = {
+                                    line = s.line, col = s.pos,
+                                    msg = "non-default type parameter after default parameter",
+                                }
+                            end
                         end
                     end
                     expect_char(s, ">")
@@ -1075,6 +1142,19 @@ function M.parse_annotations(annotations, pool, filename)
                     local _bds, _bdl = flush_type_list(bound_ids)
                     bds = _bds; bdl = _bdl
                 end
+                -- Store defaults parallel to type_params: -1 sentinel for "no default".
+                -- Iterate by type_params length to avoid sparse-table issues (type_defaults
+                -- may have nil holes when some params have no default).
+                local dds, ddl = 0, 0
+                if has_type_defaults and type_defaults and type_params then
+                    local default_ids = {}
+                    for i = 1, #type_params do
+                        local dv = type_defaults[i]
+                        default_ids[i] = dv ~= nil and dv or -1
+                    end
+                    local _dds, _ddl = flush_type_list(default_ids)
+                    dds = _dds; ddl = _ddl
+                end
                 return {
                     kind = defs.ANN_DECL,
                     type_id = type_id,
@@ -1083,6 +1163,8 @@ function M.parse_annotations(annotations, pool, filename)
                     type_params_len = tpl,
                     type_bounds_start = bds,
                     type_bounds_len = bdl,
+                    type_defaults_start = dds,
+                    type_defaults_len = ddl,
                 }
             elseif ann.kind == defs.ANN_TYPE_ARGS then
                 -- Parse <T, U> — type arguments for call-site specialization
@@ -1141,6 +1223,7 @@ function M.parse_annotations(annotations, pool, filename)
         lists = type_lists,
         results = results,
         warnings = warnings,
+        parse_errors = parse_errors,
         pool = pool,
         make_intersection = make_intersection_ann,
     }
