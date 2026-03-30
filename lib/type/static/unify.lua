@@ -993,6 +993,20 @@ function M.try_unify(ctx, a, b, seen)
                 end
             end
         end
+        -- Check meta fields: each required meta field in tb must exist in ta with compatible type
+        for i = tb.data[5], tb.data[5] + tb.data[6] - 1 do
+            local bfe = ctx.fields:get(ctx.lists:get(i))
+            local amf = types_mod.table_meta_field(ctx, a, bfe.name_id)
+            if not amf and band(bfe.flags, FLAG_OPTIONAL) == 0 then return false end
+            if amf then
+                if band(bfe.flags, FLAG_OPTIONAL) == 0 and band(amf.flags, FLAG_OPTIONAL) ~= 0 then
+                    return false
+                end
+                if not M.try_unify(ctx, find(ctx, amf.type_id), find(ctx, bfe.type_id), seen) then
+                    return false
+                end
+            end
+        end
         return true
     end
 

@@ -28,13 +28,14 @@ Note: uses `arb_base_type` for B so `nil </: B` always holds — contravariant p
 position 2 inserts T_NIL for the target, so try_unify checks `nil <: B`, which fails for
 all of integer/number/string/boolean.
 
-### A4: meta slot subtyping — SKIPPED (try_unify does not check meta fields)
-`try_unify` only iterates regular fields (data[0]/data[1]) in the TAG_TABLE branch (unify.lua
-lines 981–997). Meta field checking lives only in `M.unify`, used by constrain.lua. All
-try_unify calls on meta-only tables return true trivially regardless of meta slot presence or
-type mismatch, making algebra-level invariants vacuously true and non-informative.
-Grammar-level alternative (P3): build programs using `setmetatable` and typed meta slots,
-verifying metamethod access typechecks correctly via the full constrain.lua pipeline.
+### A4: meta slot subtyping — DONE (invariants 32–34, fuzz_alg.lua)
+- [x] `{ #__add: T } <: { #__add: T }` — meta reflexivity: invariant 32
+- [x] `{ #__add: T, #__sub: U } <: { #__add: T }` — meta elimination (source has more): invariant 33
+- [x] `{} </: { #__add: T }` — missing required meta field fails: invariant 34
+Fixed by adding meta field iteration to `try_unify`'s TAG_TABLE branch (unify.lua), mirroring
+the logic already in `M.unify`. `table_meta_field` is used for lookup; the check mirrors regular
+field checking: missing required meta field → false; optional mismatch → false; recursive try_unify
+on types. Grammar-level coverage (P3) still open for full setmetatable programs.
 
 ---
 

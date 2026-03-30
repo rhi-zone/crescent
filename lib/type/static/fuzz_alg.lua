@@ -553,11 +553,55 @@ arb.it("[alg] A3: fewer params OK: (A) -> C <: (A) -> C",
 			.. type_str(A_node) .. ") -> " .. type_str(C_node))
 	end, { trials = 2000 })
 
--- NOTE: A4 (meta slot subtyping) is skipped at the algebra level.
--- try_unify does not check meta fields — the TAG_TABLE branch only iterates regular fields
--- (data[0]/data[1]). Meta field checking is only performed in M.unify (used in constrain.lua).
--- All try_unify(ctx, meta_tbl_a, meta_tbl_b) calls return true trivially when neither table
--- has regular fields, making meta slot invariants untestable at this level.
--- See docs/fuzz-gaps.md A4 for the skip rationale and suggested grammar-level alternative.
+-- 32. A4: meta reflexivity: { #__add: T } <: { #__add: T }
+arb.it("[alg] A4: meta reflexivity: { #__add: T } <: { #__add: T }",
+	{ farb.arb_type },
+	function(T_node)
+		local ctx    = make_ctx()
+		local tid    = ast_to_tid(ctx, T_node)
+		local add_id = intern_mod.intern(ctx.pool, "__add")
+		local mfid   = types_mod.make_field(ctx, add_id, tid, 0)
+		local tbl    = types_mod.make_table(ctx, {}, nil, -1, { mfid })
+		assert(subtype(ctx, tbl, tbl),
+			"{ #__add: T } <: { #__add: T } (meta reflexivity) failed for T = "
+			.. type_str(T_node))
+	end, { trials = 2000 })
+
+-- 33. A4: meta elimination: { #__add: T, #__sub: U } <: { #__add: T }
+-- (source has more meta fields, satisfies fewer — width subtyping for meta slots)
+arb.it("[alg] A4: meta elimination: { #__add: T, #__sub: U } <: { #__add: T }",
+	{ farb.arb_type, farb.arb_type },
+	function(T_node, U_node)
+		local ctx    = make_ctx()
+		local tid    = ast_to_tid(ctx, T_node)
+		local uid    = ast_to_tid(ctx, U_node)
+		local add_id = intern_mod.intern(ctx.pool, "__add")
+		local sub_id = intern_mod.intern(ctx.pool, "__sub")
+		local src    = types_mod.make_table(ctx, {}, nil, -1, {
+			types_mod.make_field(ctx, add_id, tid, 0),
+			types_mod.make_field(ctx, sub_id, uid, 0),
+		})
+		local tgt    = types_mod.make_table(ctx, {}, nil, -1, {
+			types_mod.make_field(ctx, add_id, tid, 0),
+		})
+		assert(subtype(ctx, src, tgt),
+			"{ #__add: T, #__sub: U } <: { #__add: T } (meta elimination) failed for T = "
+			.. type_str(T_node) .. ", U = " .. type_str(U_node))
+	end, { trials = 2000 })
+
+-- 34. A4: missing required meta field fails: {} </: { #__add: T }
+arb.it("[alg] A4: missing required meta field fails: {} </: { #__add: T }",
+	{ farb.arb_type },
+	function(T_node)
+		local ctx    = make_ctx()
+		local tid    = ast_to_tid(ctx, T_node)
+		local add_id = intern_mod.intern(ctx.pool, "__add")
+		local mfid   = types_mod.make_field(ctx, add_id, tid, 0)
+		local empty  = types_mod.make_table(ctx, {}, nil, -1)
+		local tgt    = types_mod.make_table(ctx, {}, nil, -1, { mfid })
+		assert(not subtype(ctx, empty, tgt),
+			"{} should NOT be <: { #__add: T } (missing required meta field) for T = "
+			.. type_str(T_node))
+	end, { trials = 2000 })
 
 return {}
