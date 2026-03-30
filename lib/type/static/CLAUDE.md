@@ -50,8 +50,8 @@ redundant:**
 - `$EachField<T, F>` — **gather/map**: iterates fields, passes a descriptor
   `{ key, value, optional, readonly }` to F (a **named alias passed unapplied** —
   no inline match expressions in type argument position), collects transformed
-  fields into ONE new table. F uses `...%Rest` to pass through unrecognized
-  descriptor fields (`{ key: %K, value: %V, optional: _, ...%Rest } => { key: K, value: V, optional: true, ...Rest }`).
+  fields into ONE new table. F names only the field being changed; `...%Rest`
+  captures everything else and splices it back (`{ optional: _, ...%Rest } => { optional: true, ...Rest }`).
   Required for flag manipulation: `Partial<T>`, `Required<T>`, `Readonly<T>`.
   Cannot be replaced by distribution.
 

@@ -114,25 +114,22 @@ F (a match alias using `%` captures), collects transformed fields into **one new
 Handles flag manipulation that `{ ...[%K]: %V }` cannot express.
 
 ```lua
---:: MakeOptional = match { key: %K, value: %V, optional: _, ...%Rest }
---::               { _ => { key: K, value: V, optional: true, ...Rest } }
+--:: MakeOptional = match { optional: _, ...%Rest } { _ => { optional: true,  ...Rest } }
 --:: Partial<T>  = $EachField<T, MakeOptional>
 
---:: MakeRequired = match { key: %K, value: %V, optional: _, ...%Rest }
---::               { _ => { key: K, value: V, optional: false, ...Rest } }
+--:: MakeRequired = match { optional: _, ...%Rest } { _ => { optional: false, ...Rest } }
 --:: Required<T> = $EachField<T, MakeRequired>
 
---:: MakeReadonly = match { key: %K, value: %V, readonly: _, ...%Rest }
---::               { _ => { key: K, value: V, readonly: true, ...Rest } }
+--:: MakeReadonly = match { readonly: _, ...%Rest } { _ => { readonly: true,  ...Rest } }
 --:: Readonly<T> = $EachField<T, MakeReadonly>
 ```
 
 F is a **named alias passed unapplied** — same syntactic position as an HKT constraint
 argument. No inline anonymous match expressions in type argument position. `...%Rest`
-captures remaining descriptor fields and is spread back in the result — forward-compatible
-if new descriptor fields are added. The descriptor fields `optional` and `readonly` carry
-the FLAG_OPTIONAL / FLAG_READONLY bits. `$EachField` is a **permanent intrinsic** — the
-gather/flag-write operation cannot be expressed as pure match computation.
+captures everything not being transformed (key, value, other flags) and splices it back —
+you only name the field you're changing. The descriptor fields `optional` and `readonly`
+carry the FLAG_OPTIONAL / FLAG_READONLY bits. `$EachField` is a **permanent intrinsic** —
+the gather/flag-write operation cannot be expressed as pure match computation.
 
 The two primitives are complementary:
 - Distribution (`{ ...[%K]: %V }`) — read fields, union results, no flag access
