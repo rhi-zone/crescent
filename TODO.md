@@ -185,14 +185,14 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   field loop not handling `{`-started positional entries. `...Rest` splice already
   worked. `MakeOptional`, `MakeReadonly`, `DropOptional`, `Partial<T>` all tested.
 
-- [ ] **Interface declaration syntax `--:: Name: Base`** — explicit refinement at
-  definition site. `--:: Monad<T>: Functor<T> = { ... }` declares Monad as an intentional
-  extension of Functor — if Functor gains a required field, Monad breaks at declaration
-  (not silently at use sites). Same for concrete types: `--:: MyList: Functor<integer> = { ... }`.
-  Uses `:` consistent with generic constraints `<T: U>`. Bidirectional inference from the
-  declared base type guides method body checking (reduces annotation burden). Needs design
-  for: how the declared base propagates into field/method inference, interaction with
-  structural typing. Not yet specced.
+- [ ] **Interface declaration syntax `--:: Name: Base`** — **[SPECCED]** docs/interface-declaration-spec.md.
+  Syntax: `--:: Name<T>: Constraint<T> = body`. Two effects: (1) definition-time structural
+  check `body <: Constraint<T>`, emits `E.CONSTRAINT_MISMATCH = 26` if fails; (2) populates
+  `ctx.declared_subtypes` oracle — `try_unify(Monad<X>, Functor<X>)` hits oracle in O(1)
+  instead of re-walking fields. Error at declaration, not at call sites. Works with assigned
+  properties (field inference closes the row variable before the check). Implementation order:
+  ann.lua parse → check.lua verify + register → defs.lua E code → errors.lua template →
+  unify.lua oracle lookup.
 
 - [ ] **Partial application of generic aliases** — `$EachField<T, PickKey<Keys>>` where
   `PickKey<Keys>` is a partially applied alias used as an HKT argument. Needed for
