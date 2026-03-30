@@ -33,12 +33,26 @@ provisional and will be eliminated as `match` gains:
 - function-type arms: `() -> %R` — **implemented** (match.lua, 2026-03-29). `() -> %R` with 0 params in the pattern matches ANY function (param count not constrained). R binds to single return type, or tuple for multi-return. `(A, B) -> %R` with explicit params still requires exact param count match. **Specced (not yet implemented):** `(...%P) -> T` — rest capture in param position, binds all params as a tuple to P (enables `Parameters<F>`); `(A, ...%P) -> T` — concrete prefix params + rest capture, binds remaining params to P (enables `Tail<F>` etc.). At most one `...%P` per param list; may appear anywhere — evaluator matches concrete params from both ends, `...%P` captures the middle.
 - spread-in-tuple-position: `(true, ...R)` — **implemented** (2026-03-30). `...R` in the last position of a tuple result expression splices R's elements. `R = integer` → `(true, integer)`. `R = (integer, string)` → `(true, integer, string)`. `R = never` (void fn) → `(true)`. Enabled `$PcallReturn` to be deleted and replaced by `PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }` in stdlib.d.lua. Implementation: env.lua TAG_TUPLE splice (preserves TAG_SPREAD when inner is TAG_VAR/TAG_NAMED for deferred evaluation); constrain.lua eager_slot unwraps TAG_SPREAD; narrow.lua propagate_multi_ret_narrowing unwraps TAG_SPREAD when extracting slots.
 - indexer arms: `{ [%K]: %V }` — **implemented** (match.lua, 2026-03-29). Binds K → indexer key type, V → indexer value type. Alias-param substitution happens before match evaluation, so T in result expressions is already concrete. Handles indexer tables. Named-field fallback is the `{ ...[%K]: %V }` pattern below.
-- all-fields pattern: `{ ...[%K]: %V }` — **specced** (docs/all-fields-pattern-spec.md, 2026-03-30). Total catch-all that always matches any table. K → union of all key types (string for named fields, indexer key type if present). V → union of all widened value types (same as `$Values<T>`). Enables elimination of `$Keys`, `$Values`, `$IpairsValues`. IpairsReturn uses downstream `match K { integer => ..., _ => never }` to filter — no key-type constraint syntax in the pattern itself. See spec for full semantics and migration plan.
+- all-fields pattern: `{ ...[%K]: %V }` — **specced** (docs/all-fields-pattern-spec.md, 2026-03-30). Total catch-all that always matches any table. **Per-field distribution**: for each field, K and V are bound to that field's specific key and value types, the result expression is evaluated, results are unioned. `{ x: integer, y: string } => (K, V)` → `("x", integer) | ("y", string)` (precise, not `(string, integer|string)`). Enables elimination of `$Keys`, `$Values`, `$IpairsValues`, `$PairsReturn`, `$IpairsReturn`. IpairsReturn uses downstream `match K { integer => ..., _ => never }` to filter. Does NOT expose optional/readonly flags — flag manipulation requires `$EachField`. See spec for full semantics and migration plan.
 - capture sigil: `%Name` — **specced** (docs/capture-sigil-spec.md, 2026-03-30). A name in a match pattern is a capture iff prefixed with `%`. Result expressions use bare names. No implicit unbound-name fallback. Alias params (`T`, `F`, etc.) are concrete — substituted before match evaluation, never need `%`. Implementation: `TAG_CAPTURE(name_id)` vs `TAG_NAMED(name_id)` in pattern position.
 
-The only permanent intrinsics are `$Require` (module system), `$Opaque`
-(nominal identity), and `$FfiC` (builds closed table from ffi.cdef call
-sites). If you find yourself writing a new `$` intrinsic, stop and ask what
+The permanent intrinsics are `$Require` (module system), `$Opaque`
+(nominal identity), `$FfiC` (builds closed table from ffi.cdef call sites),
+`$Throw` / `$Catch` (type-level error/pcall — diagnostic side effects, not
+expressible as pure computation), and `$EachField` (per-field gather/map with
+flag access — complements `{ ...[%K]: %V }` but is not replaceable by it).
+
+**`{ ...[%K]: %V }` vs `$EachField` — complementary primitives, not
+redundant:**
+- `{ ...[%K]: %V }` — **distribution**: iterates fields, evaluates a result
+  expression per field, unions results. For PairsReturn, Keys, Values.
+  Does NOT expose optional/readonly flags. Result is a union, not a table.
+- `$EachField<T, F>` — **gather/map**: iterates fields, passes a descriptor
+  `{ key, value, optional, readonly }` to F (a match alias using `%` captures),
+  collects transformed fields into ONE new table. Required for flag manipulation:
+  `Partial<T>`, `Required<T>`, `Readonly<T>`. Cannot be replaced by distribution.
+
+If you find yourself writing a new `$` intrinsic, stop and ask what
 `match` pattern is missing instead.
 
 ## Performance bar

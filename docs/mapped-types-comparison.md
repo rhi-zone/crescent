@@ -94,47 +94,41 @@ cliffs on deep recursive types (though improved in TS 5.x).
 
 ## Closing the gap in crescent
 
-The core missing primitive is **per-field iteration with reconstruction**: for each field
-in T, apply a transformation to (K, V) and emit a new field.
+Two distinct primitives are needed, not one:
 
-Options being considered, in order of invasiveness:
+### `{ ...[%K]: %V }` — per-field distribution (already specced)
 
-### Option A: `$MapFields<T, F>` intrinsic
-
-```lua
---:: Partial<T>  = $MapFields<T, <K, V>(K, V) -> (K, V?)>
---:: Required<T> = $MapFields<T, <K, V>(K, V?) -> (K, V)>
-```
-
-F is a type-level function from (K, V) → (K', V'). Returns a new table. Intrinsic because
-it requires per-field iteration that match patterns can't currently express. Not a
-permanent intrinsic — should be eliminated once a pattern form covers it.
-
-### Option B: New match result syntax — table reconstruction
-
-Extend match result expressions to support building a new table from the match bindings:
+For each field, K and V are bound, the result expression is evaluated, results are
+unioned. Right for PairsReturn, Keys, Values — anything that reads fields. Does NOT
+expose optional/readonly flags, and the result is a union, not a reconstructed table.
 
 ```lua
---:: Partial<T> = match T { { ...[%K]: %V } => table { [K]: V? } }
+--:: Keys<T>   = match T { { ...[%K]: %V } => K }
+--:: Values<T> = match T { { ...[%K]: %V } => V }
 ```
 
-`table { ... }` in a result expression is a new table type constructor that iterates the
-matched fields rather than producing a union. Semantics: for each (K, V) pair captured
-from the all-fields pattern, emit a field `K: V?`.
+### `$EachField<T, F>` — per-field gather/map (specced, permanent intrinsic)
 
-This is the cleanest design — it's the "write" complement to `{ ...[%K]: %V }`'s "read",
-and fits naturally in the match result position.
-
-### Option C: Key modifier directives on `{ ...[%K]: %V }` itself
+Iterates each field of T, passes a descriptor `{ key, value, optional, readonly }` to
+F (a match alias using `%` captures), collects transformed fields into **one new table**.
+Handles flag manipulation that `{ ...[%K]: %V }` cannot express.
 
 ```lua
---:: Partial<T>  = match T { { ...[%K]: %V  } => { ...[K]: V? } }
---:: Required<T> = match T { { ...[%K]: %V? } => { ...[K]: V  } }
+--:: Partial<T>  = $EachField<T, match { key: %K, value: %V, optional: _, readonly: %RO }
+--::                              { _ => { key: K, value: V, optional: true, readonly: RO } }>
+--:: Required<T> = $EachField<T, match { key: %K, value: %V, optional: _, readonly: %RO }
+--::                              { _ => { key: K, value: V, optional: false, readonly: RO } }>
+--:: Readonly<T> = $EachField<T, match { key: %K, value: %V, optional: %OPT, readonly: _ }
+--::                              { _ => { key: K, value: V, optional: OPT, readonly: true } }>
 ```
 
-The result `{ ...[K]: V? }` spreads the captured fields back as a table with modified
-flag. Requires `{ ...[K]: V }` in result position to be syntactically distinct from the
-pattern position. Simpler than option B but conflates pattern and result syntax.
+F is a match alias; the descriptor fields `optional` and `readonly` carry the
+FLAG_OPTIONAL / FLAG_READONLY bits. `$EachField` is a **permanent intrinsic** — the
+gather/flag-write operation cannot be expressed as pure match computation.
+
+The two primitives are complementary:
+- Distribution (`{ ...[%K]: %V }`) — read fields, union results, no flag access
+- Gather/map (`$EachField`) — read fields + flags, transform, emit one table
 
 ## Key lessons for crescent design
 
