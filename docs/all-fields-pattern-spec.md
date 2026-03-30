@@ -276,16 +276,32 @@ function-arm patterns: it always succeeds and is intended as the fallback arm.
 ## Future: Pattern Intersection (`P & Q`)
 
 Pattern intersection `P & { ...[K]: V }` would allow constraining the *input* while
-binding K/V from all entries. For example:
+binding K/V from all entries. Concrete cases worth preserving:
 
 ```lua
+-- Tables with specific named fields:
 --:: FooBarEntries<T> = match T {
 --::   { foo: string, bar: number, ... } & { ...[K]: V } => (K, V)
 --:: }
+
+-- Tables with an integer indexer (K is already integer after the constraint):
+--:: IntIndexedEntries<T> = match T {
+--::   { [integer]: unknown } & { ...[K]: V } => (K, V)
+--:: }
+-- Note: K here is integer (from the indexer), not string | integer —
+-- the left pattern restricts which tables match, so V also only comes
+-- from integer-indexed entries when the table is a pure indexer table.
+-- For mixed tables { x: string, [integer]: boolean }, K would be
+-- string | integer because { ...[K]: V } still sees all fields.
+
+-- Union of known shapes:
+--:: ShapeAOrB<T> = match T {
+--::   (A | B) & { ...[K]: V } => (K, V)
+--:: }
+-- Accepts only tables that are subtypes of A | B; binds all their entries.
 ```
 
-This requires a table with `foo` and `bar` fields (P constrains the input), then binds
-K and V from all its entries. The two operations are orthogonal:
+These are all real use cases that would be awkward to express without `&`. The two operations are orthogonal:
 
 - **`{ ...[K]: V }` result filter** (`match K { integer => ... }`): controls what appears
   in the *output* of the match result expression.
