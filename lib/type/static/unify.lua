@@ -818,6 +818,35 @@ function M.try_unify(ctx, a, b, seen)
     -- unknown type is compatible with the expected type (soundness-audit.md Gap 1).
     if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then return true end
     if ta.tag == TAG_ROWVAR then return true end
+    -- TAG_NAMED oracle: when both sides are named aliases, check declared_subtypes
+    -- before falling back to structural comparison (which would just return true).
+    if ta.tag == TAG_NAMED and tb.tag == TAG_NAMED then
+        local a_name = ta.data[0]
+        local b_name = tb.data[0]
+        -- Same alias: trivially subtype.
+        if a_name == b_name then return true end
+        -- Oracle lookup: is (a_name, b_name) a declared subtype pair?
+        local ds = ctx.declared_subtypes
+        if ds and ds[a_name] == b_name then
+            -- Args check: if actual and expected both have args, each must unify.
+            local a_al = ta.data[2]  -- args len (0 for non-generic checker-arena nodes)
+            local b_al = tb.data[2]
+            if a_al == 0 and b_al == 0 then
+                return true  -- non-generic oracle hit
+            end
+            if a_al == b_al then
+                for i = 0, a_al - 1 do
+                    local aa = ctx.lists:get(ta.data[1] + i)
+                    local ba = ctx.lists:get(tb.data[1] + i)
+                    if not M.try_unify(ctx, aa, ba, seen) then return false end
+                end
+                return true
+            end
+            -- Arg count mismatch: fall through (structural will return true anyway)
+        end
+        -- No oracle hit: keep original blanket-pass for unresolved named placeholders.
+        return true
+    end
     if ta.tag == TAG_NAMED or tb.tag == TAG_NAMED then return true end
 
     -- Union LHS: all members must be assignable to b.

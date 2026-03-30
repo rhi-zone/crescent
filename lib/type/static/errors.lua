@@ -316,6 +316,11 @@ local function build_templates()
         [E.FIELD_ON_PRIMITIVE]    = function(a)
             return "field access on `" .. a.t .. "`: `" .. a.t .. "` cannot have fields"
         end,
+        [E.CONSTRAINT_MISMATCH]   = function(a)
+            local msg = "'" .. a.name .. "' does not satisfy constraint '" .. a.constraint .. "'"
+            if a.detail then msg = msg .. ": " .. a.detail end
+            return msg
+        end,
     }
 end
 

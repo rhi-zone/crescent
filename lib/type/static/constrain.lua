@@ -3116,6 +3116,38 @@ local function process_type_decls(ctx)
                         end
                     end
 
+                    -- Interface constraint check: --:: Name<T>: Constraint<T> = body
+                    -- Register (name_id, constraint_name_id) in ctx.declared_subtypes and
+                    -- verify body <: Constraint at definition time (symbolic check with TAG_VAR params).
+                    --: any
+                    local r_any = r
+                    if r_any.constraint_type_id then
+                        local unify_mod = require("lib.type.static.unify")
+                        --: integer
+                        local ctid = r_any.constraint_type_id
+                        -- Resolve the constraint type using the same param scope.
+                        local constraint_tid = resolve_annotation_type(ctx, ctid)
+                        -- Extract the constraint name_id from the annotation-arena TAG_NAMED node.
+                        local ann_ct = ann.types:get(ctid)
+                        local constraint_name_id = ann_ct.data[0]
+                        -- Always register the subtype pair (even if the check fails).
+                        ctx.declared_subtypes[r.name_id] = constraint_name_id
+                        -- Structural check: body <: constraint
+                        if alias.body and not unify_mod.try_unify(ctx, alias.body, constraint_tid) then
+                            local name_str = intern_mod.get(ctx.pool, r.name_id) or "?"
+                            local cstr_str = types_mod.display_short(ctx, constraint_tid)
+                            local body_str = types_mod.display_short(ctx, alias.body)
+                            --: integer
+                            local r_line = decl_lines[r]
+                            errors_mod.error(ctx.err, ctx.filename, r_line, 1,
+                                errors_mod.format_diag(E.CONSTRAINT_MISMATCH, {
+                                    name       = name_str,
+                                    constraint = cstr_str,
+                                    detail     = "`" .. body_str .. "` is not assignable to `" .. cstr_str .. "`",
+                                }))
+                        end
+                    end
+
                     ctx.scope = old_scope
                 end
             end
@@ -3200,6 +3232,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     ctx.field_at           = {}
     ctx.def_sites          = {}
     ctx.require_sources    = {}
+    ctx.declared_subtypes  = {}   -- [alias_name_id] = constraint_name_id; populated by interface declarations
     ctx.type_origins       = {}   -- [type_id] -> filename; populated for cross-file types
     ctx.constraints        = {}   -- v3: emitted constraints
     ctx._forall_bounds     = {}   -- [generic_tv_id] -> resolved_bound_type_id

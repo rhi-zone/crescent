@@ -1191,6 +1191,42 @@ function M.parse_annotations(annotations, pool, filename)
                     end
                     expect_char(s, ">")
                 end
+                -- Optional `: ConstraintName<args>` between param list and `=`.
+                -- The constraint must be a named type alias (no inline type expressions).
+                local constraint_type_id = nil
+                if opt_char(s, ":") then
+                    local cname = scan_word(s)
+                    if not cname then
+                        scan_error(s, "expected constraint name after ':'")
+                    end
+                    local cname_id = intern_mod.intern(pool, cname)
+                    -- Parse optional <args> for the constraint.
+                    local carg_ids = nil
+                    if peek(s) == byte("<") then
+                        advance(s)
+                        carg_ids = {}
+                        local cfirst = parse_type(s)
+                        carg_ids[#carg_ids + 1] = cfirst
+                        while opt_char(s, ",") do
+                            carg_ids[#carg_ids + 1] = parse_type(s)
+                        end
+                        expect_char(s, ">")
+                    end
+                    -- Build a TAG_NAMED node in the annotation arena for the constraint.
+                    local ctid = alloc_type(defs.TAG_NAMED)
+                    local ct = types:get(ctid)
+                    ct.data[0] = cname_id
+                    if carg_ids and #carg_ids > 0 then
+                        local cs, cl = flush_type_list(carg_ids)
+                        ct = types:get(ctid)  -- re-fetch after possible arena grow
+                        ct.data[1] = cs
+                        ct.data[2] = cl
+                    else
+                        ct.data[1] = 0
+                        ct.data[2] = 0
+                    end
+                    constraint_type_id = ctid
+                end
                 expect_char(s, "=")
                 local type_id = parse_type(s)
                 local tps, tpl = 0, 0
@@ -1233,6 +1269,7 @@ function M.parse_annotations(annotations, pool, filename)
                     type_bounds_len = bdl,
                     type_defaults_start = dds,
                     type_defaults_len = ddl,
+                    constraint_type_id = constraint_type_id,
                 }
             elseif ann.kind == defs.ANN_TYPE_ARGS then
                 -- Parse <T, U> — type arguments for call-site specialization

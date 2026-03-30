@@ -8579,3 +8579,71 @@ v2 = v
 ]], "expects")
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Interface declaration: --:: Name<T>: Constraint<T> = body
+-- ---------------------------------------------------------------------------
+
+assert.describe("interface declaration: --:: Name: Constraint = body", function()
+    -- Test 1: declaration check passes when body satisfies constraint
+    assert.it("PASS: declaration satisfies constraint (body has required field)", function()
+        v3_no_errors([[
+--:: Addable = { x: number, y: number }
+--:: Vec2: Addable = { x: number, y: number }
+]])
+    end)
+
+    -- Test 2: declaration check fails when body does not satisfy constraint
+    assert.it("FAIL: declaration does not satisfy constraint (missing fields)", function()
+        v3_has_error([[
+--:: Addable = { x: number, y: number }
+--:: Bad: Addable = { z: string }
+]], "does not satisfy constraint")
+    end)
+
+    -- Test 3: oracle hit — passing Vec2 where Addable expected succeeds via oracle
+    assert.it("PASS: oracle hit — Vec2 passes where Addable expected (no structural walk)", function()
+        v3_no_errors([[
+--:: Addable = { x: number, y: number }
+--:: Vec2: Addable = { x: number, y: number }
+local v --: Vec2
+local a --: Addable
+a = v
+]])
+    end)
+
+    -- Test 4: generic declaration check passes
+    assert.it("PASS: generic alias with constraint passes when body satisfies it", function()
+        v3_no_errors([[
+--:: Container<T> = { value: T }
+--:: Box<T>: Container<T> = { value: T }
+]])
+    end)
+
+    -- Test 5: oracle miss — wrong type args fail
+    assert.it("FAIL: oracle miss — wrong type args still fail", function()
+        v3_has_error([[
+--:: Container<T> = { value: T }
+--:: Box<T>: Container<T> = { value: T }
+local b --: Box<integer>
+local c --: Container<string>
+c = b
+]], "cannot assign")
+    end)
+
+    -- Test 6: non-generic with constraint
+    assert.it("PASS: non-generic alias with constraint, body satisfies it", function()
+        v3_no_errors([[
+--:: Printable = { to_string: (any) -> string }
+--:: Logger: Printable = { to_string: (any) -> string, level: integer }
+]])
+    end)
+
+    -- Test 7: constraint name appears in the error message
+    assert.it("FAIL: error message names both alias and constraint", function()
+        v3_has_error([[
+--:: Shape = { area: (any) -> number }
+--:: Circle: Shape = { radius: number }
+]], "Circle")
+    end)
+end)

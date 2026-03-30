@@ -362,6 +362,7 @@ M.E.EXPLICIT_ANY            = 22  -- explicit `any` in annotation (warning)
 M.E.FIELD_READONLY          = 23  -- assignment to a readonly field
 M.E.NON_EXHAUSTIVE          = 24  -- if-chain over union doesn't cover all members (warning)
 M.E.FIELD_ON_PRIMITIVE      = 25  -- field access on a type that cannot have fields (nil, boolean, number literal)
+M.E.CONSTRAINT_MISMATCH     = 26  -- type alias body does not satisfy declared constraint
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
 M.keywords = {
