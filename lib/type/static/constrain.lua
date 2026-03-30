@@ -496,8 +496,38 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         for j = at.data[5], at.data[5] + at.data[6] - 1 do
             local fid = ctx.ann.lists:get(j)
             local fe  = ctx.ann.fields:get(fid)
-            local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
-            meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.flags)
+            if fe.name_id == -3 then
+                -- Meta-spread capture pattern: #...%M in a match pattern.
+                -- fe.type_id is a TAG_PAT_META_SPREAD annotation node.
+                -- Preserve it in the checker arena as name_id=-3 meta field.
+                local pms_at = ctx.ann.types:get(fe.type_id)
+                local pms_id = types_mod.alloc_type(ctx, defs.TAG_PAT_META_SPREAD)
+                ctx.types:get(pms_id).data[0] = pms_at.data[0]  -- name_id
+                meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, -3, pms_id, 0)
+            elseif fe.name_id == -1 then
+                -- Meta-spread entry: #...T — spreads all meta slots from T into this table.
+                -- fe.type_id is a TAG_SPREAD annotation node; .data[0] is the inner ann type.
+                local spread_at = ctx.ann.types:get(fe.type_id)
+                local inner_tid = resolve_annotation_type(ctx, spread_at.data[0], seen)
+                inner_tid = types_mod.find(ctx, inner_tid)
+                local inner_t = ctx.types:get(inner_tid)
+                if inner_t.tag == TAG_TABLE then
+                    -- Copy all meta slots from the inner type into this table's meta list.
+                    for k = inner_t.data[5], inner_t.data[5] + inner_t.data[6] - 1 do
+                        local inner_fid = ctx.lists:get(k)
+                        local inner_fe  = ctx.fields:get(inner_fid)
+                        meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                    end
+                end
+                -- Keep a TAG_SPREAD placeholder so env.lua substitute_inner can expand it
+                -- once any type variable is instantiated.
+                local sp = types_mod.alloc_type(ctx, defs.TAG_SPREAD)
+                ctx.types:get(sp).data[0] = inner_tid
+                meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, -1, sp, 0)
+            else
+                local ft  = resolve_annotation_type(ctx, fe.type_id, seen)
+                meta_ids[#meta_ids + 1] = types_mod.make_field(ctx, fe.name_id, ft, fe.flags)
+            end
         end
         seen[ann_tid] = nil
         return types_mod.make_table(ctx, field_ids, indexers, row_var, meta_ids)
@@ -649,6 +679,15 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         -- TAG_PAT_REST_FIELDS is used in table match arm pattern position;
         -- match.lua collects remaining unmatched fields and binds them to name_id.
         local id = types_mod.alloc_type(ctx, defs.TAG_PAT_REST_FIELDS)
+        ctx.types:get(id).data[0] = at.data[0]  -- name_id
+        return id
+    end
+
+    if tag == defs.TAG_PAT_META_SPREAD then
+        -- Preserve meta-spread capture node in the checker arena.
+        -- TAG_PAT_META_SPREAD is used in table match arm pattern position;
+        -- match.lua collects all meta slots from the input and binds them to name_id.
+        local id = types_mod.alloc_type(ctx, defs.TAG_PAT_META_SPREAD)
         ctx.types:get(id).data[0] = at.data[0]  -- name_id
         return id
     end
@@ -1528,6 +1567,13 @@ local function peek_callee_ret_union(ctx, callee_n)
     if not fn_tid then return nil end
     local fn_t = ctx.types:get(fn_tid)
     if fn_t.tag ~= TAG_FUNCTION or fn_t.data[3] ~= 1 then return nil end
+    -- Skip generic functions: their return type contains FLAG_GENERIC vars that won't be
+    -- bound in the solver (only the instantiated fresh vars get bound at call sites).
+    -- Peeking at the generic template would bind the local to the wrong (generic) type.
+    for pi = fn_t.data[0], fn_t.data[0] + fn_t.data[1] - 1 do
+        local ptid = types_mod.find(ctx, ctx.lists:get(pi))
+        if ctx.types:get(ptid).flags == defs.FLAG_GENERIC then return nil end
+    end
     local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
     local ret_t = ctx.types:get(ret_slot)
     -- Reject unresolved types; accept anything concrete.

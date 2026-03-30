@@ -764,6 +764,7 @@ function M.table_opaque_field(ctx, tbl_tid, key_name_id)
 end
 
 -- Look up a named field in the meta slots of a table type.
+-- Follows spread placeholders (name_id == -1) by resolving their inner type.
 --: (Ctx, integer, integer) -> (FieldEntry?, integer?)
 function M.table_meta_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)
@@ -771,6 +772,18 @@ function M.table_meta_field(ctx, tbl_tid, name_id)
         local fid = ctx.lists:get(i)
         local fe = ctx.fields:get(fid)
         if fe.name_id == name_id then return fe, fid end
+        if fe.name_id == -1 then
+            -- Spread placeholder: resolve the inner type and search its meta slots.
+            local sp_t  = ctx.types:get(M.find(ctx, fe.type_id))
+            if sp_t.tag == TAG_SPREAD then
+                local inner_tid = M.find(ctx, sp_t.data[0])
+                local inner_t   = ctx.types:get(inner_tid)
+                if inner_t.tag == TAG_TABLE then
+                    local found_fe, found_fid = M.table_meta_field(ctx, inner_tid, name_id)
+                    if found_fe then return found_fe, found_fid end
+                end
+            end
+        end
     end
     return nil
 end

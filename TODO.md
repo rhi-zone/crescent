@@ -208,9 +208,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   At most one `...%P` per param list, may appear anywhere. Implementation: ann.lua +
   match.lua. Done 2026-03-30.
 
-- [ ] **`{ #...%M }` meta-slot spread** — specced in docs/meta-spread-spec.md.
+- [x] **`{ #...%M }` meta-slot spread** — specced in docs/meta-spread-spec.md.
   `setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }`. `MetaOf<T>` alias.
-  Implementation: ann.lua + match.lua + types.lua.
+  Implementation: ann.lua + match.lua + types.lua + constrain.lua + env.lua + defs.lua.
+  Done 2026-03-30.
 
 - [ ] **Literal type ops** — see docs/literal-type-ops-spec.md. Conclusion: none needed
   now. Implement on demand. Boolean ops expressible as match aliases (no primitives needed).

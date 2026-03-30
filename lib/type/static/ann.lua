@@ -561,19 +561,55 @@ function M.parse_annotations(annotations, pool, filename)
                 while true do
                     local fb = peek(s)
                     if fb == byte("#") then
-                        -- Meta slot: #__add: type
                         advance(s)
-                        local name = scan_word(s)
-                        if not name then scan_error(s, "expected meta name after '#'") end
-                        local optional = opt_char(s, "?")
-                        expect_char(s, ":")
-                        local ftype = parse_type(s)
-                        local fi = fields:alloc()
-                        local fe = fields:get(fi)
-                        fe.name_id = intern_mod.intern(pool, name)
-                        fe.type_id = ftype
-                        fe.flags = optional and FLAG_OPTIONAL or 0
-                        metas[#metas + 1] = fi
+                        -- Check for #...T (meta-spread) or #...%M (meta-spread capture pattern)
+                        skip_ws(s)
+                        if s.pos + 2 <= s.len and sub(s.src, s.pos, s.pos + 2) == "..." then
+                            s.pos = s.pos + 3
+                            skip_ws(s)
+                            local nb2 = peek_raw(s)
+                            if nb2 == B_PERCENT then
+                                -- #...%M: meta-spread capture pattern (for match arm patterns)
+                                advance(s)  -- skip '%'
+                                local cap_name = scan_word(s)
+                                if not cap_name then scan_error(s, "expected capture name after '#...%'") end
+                                local cap_name_id = intern_mod.intern(pool, cap_name)
+                                local pms = alloc_type(defs.TAG_PAT_META_SPREAD)
+                                types:get(pms).data[0] = cap_name_id
+                                -- Store as special field with name_id = -3 (meta-spread marker)
+                                local fi = fields:alloc()
+                                local fe = fields:get(fi)
+                                fe.name_id = -3  -- meta-spread capture marker
+                                fe.type_id = pms
+                                fe.flags = 0
+                                metas[#metas + 1] = fi
+                            else
+                                -- #...T: meta-spread (spreads all meta slots from T into this table)
+                                local inner = parse_type(s)
+                                local sp = alloc_type(defs.TAG_SPREAD)
+                                types:get(sp).data[0] = inner
+                                -- Store as special meta field with name_id = -1 (spread marker)
+                                local fi = fields:alloc()
+                                local fe = fields:get(fi)
+                                fe.name_id = -1  -- meta-spread marker
+                                fe.type_id = sp
+                                fe.flags = 0
+                                metas[#metas + 1] = fi
+                            end
+                        else
+                            -- Meta slot: #__add: type
+                            local name = scan_word(s)
+                            if not name then scan_error(s, "expected meta name after '#'") end
+                            local optional = opt_char(s, "?")
+                            expect_char(s, ":")
+                            local ftype = parse_type(s)
+                            local fi = fields:alloc()
+                            local fe = fields:get(fi)
+                            fe.name_id = intern_mod.intern(pool, name)
+                            fe.type_id = ftype
+                            fe.flags = optional and FLAG_OPTIONAL or 0
+                            metas[#metas + 1] = fi
+                        end
                     elseif fb == byte("[") then
                         -- Indexer: [K]: V
                         -- Peek: if the bracket contains a single bare identifier that is not a

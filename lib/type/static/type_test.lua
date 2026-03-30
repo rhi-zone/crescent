@@ -8462,3 +8462,72 @@ local v --: R
 ]])
     end)
 end)
+
+assert.describe("meta-slot spread: { #...T } and { #...%M } pattern", function()
+    assert.it("{ #...T } spread: table with meta-spread enables operator dispatch via spread meta slots", function()
+        -- number_meta has #__add; Vec with #...number_meta should also support + via __add.
+        v3_no_errors([[
+--:: number_meta = { #__add: (number, number) -> number }
+--:: Vec = { x: number, #...number_meta }
+--: (Vec, Vec) -> number
+local function vec_add(a, b)
+    return a + b
+end
+]])
+    end)
+
+    assert.it("{ #...%M } match pattern: MetaOf on type with meta slots returns meta table", function()
+        -- MetaOf<T> = match T { { #...%M } => M, _ => nil }
+        -- A type with a meta slot: MetaOf should not return nil.
+        v3_no_errors([[
+--:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
+--:: MyMeta = { #__add: (number, number) -> number }
+--:: WithMeta = { x: integer, #...MyMeta }
+--:: R = MetaOf<WithMeta>
+local v --: R
+-- R should not be nil alone: it should unify with nil (being M | nil)
+local n --: nil
+-- This SHOULD fail: R could be the meta table, not nil
+]])
+    end)
+
+    assert.it("{ #...%M } match pattern: MetaOf on type with no meta slots returns nil", function()
+        -- A plain table with no meta slots: MetaOf should give nil.
+        v3_no_errors([[
+--:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
+--:: PlainTable = { x: integer }
+--:: R = MetaOf<PlainTable>
+local v --: R
+local n --: nil
+n = v
+]])
+    end)
+
+    assert.it("setmetatable: return type still has regular fields from t", function()
+        -- setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
+        -- The result should still have the fields of T.
+        v3_no_errors([[
+--:: MyMeta = { #__add: (any, any) -> any }
+local mt --: MyMeta
+--: { x: integer }
+local t = { x = 1 }
+local result = setmetatable(t, mt)
+-- result is { x: integer } & { #...MyMeta }, regular field x still accessible
+local _x --: integer
+_x = result.x
+]])
+    end)
+
+    assert.it("setmetatable: return type with __add meta slot enables + operator", function()
+        -- setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
+        -- The result carries meta slots, so __add enables + operator.
+        v3_no_errors([[
+--:: MyMeta = { #__add: (any, any) -> integer }
+local mt --: MyMeta
+local t = { x = 1 }
+local result = setmetatable(t, mt)
+-- result has #__add via meta spread, so + should be valid
+local sum = result + result
+]])
+    end)
+end)

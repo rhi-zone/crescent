@@ -117,6 +117,12 @@ M.TAG_PAT_REST_FIELDS   = 29  -- { ...[%Rest] } pattern: rest-field capture in t
 -- When encountered in a table match pattern, collects all fields NOT explicitly matched
 -- by named fields in the pattern into a synthetic table type and binds name_id → that type.
 -- Used only in annotation arena pattern positions; never in checker arena result positions.
+M.TAG_PAT_META_SPREAD   = 30  -- { #...%M } pattern: captures all meta slots of input as a table
+-- TypeSlot layout for TAG_PAT_META_SPREAD:
+--   data[0] = name_id  (intern ID of the capture variable name)
+-- Succeeds if the input type has at least one meta slot; fails otherwise (enabling _ => nil fallback).
+-- Binds name_id → a synthetic table type with empty regular fields and meta list = input's meta slots.
+-- Used only in annotation arena pattern positions; never in checker arena result positions.
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0

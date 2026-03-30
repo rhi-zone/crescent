@@ -21,10 +21,11 @@ local TAG_INTERSECTION   = defs.TAG_INTERSECTION
 local TAG_TUPLE          = defs.TAG_TUPLE
 local TAG_UNKNOWN        = defs.TAG_UNKNOWN
 local TAG_NEVER          = defs.TAG_NEVER
-local TAG_CAPTURE         = defs.TAG_CAPTURE
-local TAG_PAT_ALL_FIELDS  = defs.TAG_PAT_ALL_FIELDS
-local TAG_PAT_REST_FIELDS = defs.TAG_PAT_REST_FIELDS
-local TAG_SPREAD          = defs.TAG_SPREAD
+local TAG_CAPTURE          = defs.TAG_CAPTURE
+local TAG_PAT_ALL_FIELDS   = defs.TAG_PAT_ALL_FIELDS
+local TAG_PAT_REST_FIELDS  = defs.TAG_PAT_REST_FIELDS
+local TAG_PAT_META_SPREAD  = defs.TAG_PAT_META_SPREAD
+local TAG_SPREAD           = defs.TAG_SPREAD
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
@@ -205,6 +206,37 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 --: any
                 bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
+            end
+        end
+        -- If the pattern has a meta-spread capture (#...%M in the meta slot list),
+        -- collect all meta slots from the input and bind M to a synthetic table.
+        -- Succeeds only if the input has at least one meta slot; fails otherwise.
+        local pml = pt.data[6]
+        if pml > 0 then
+            for mi = pt.data[5], pt.data[5] + pml - 1 do
+                local mfid = ctx.lists:get(mi)
+                local mfe  = ctx.fields:get(mfid)
+                if mfe.name_id == -3 then
+                    -- Meta-spread capture: #...%M
+                    local pms_t = ctx.types:get(types_mod.find(ctx, mfe.type_id))
+                    local cap_name_id = pms_t.data[0]
+                    -- Fail if input has no meta slots
+                    if tt.data[6] == 0 then return false, nil end
+                    -- Build synthetic table from input's meta slots
+                    local syn_meta_ids = {}
+                    for ti2 = tt.data[5], tt.data[5] + tt.data[6] - 1 do
+                        local inner_fid = ctx.lists:get(ti2)
+                        local inner_fe  = ctx.fields:get(inner_fid)
+                        if inner_fe.name_id >= 0 then  -- skip spread markers
+                            syn_meta_ids[#syn_meta_ids + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                        end
+                    end
+                    if #syn_meta_ids == 0 then return false, nil end
+                    local syn_tid = types_mod.make_table(ctx, {}, {}, -1, syn_meta_ids)
+                    --: any
+                    bindings = merge_bindings(bindings, { [cap_name_id] = syn_tid })
+                    if bindings == nil then return false, nil end
+                end
             end
         end
         return true, bindings

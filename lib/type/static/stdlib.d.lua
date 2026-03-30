@@ -32,8 +32,9 @@
 --:: Keys<T>         = match T { { ...[%K]: %V } => K }
 --:: Values<T>       = match T { { ...[%K]: %V } => V }
 --:: declare next = (t: any, k: any?) -> (any, any)
---:: declare setmetatable = <T, U>(t: T, mt: { __index: U, ... }) -> T & U
---:: declare getmetatable = (t: any) -> any
+--:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
+--:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
+--:: declare getmetatable = <T>(t: T) -> MetaOf<T>
 --:: declare collectgarbage = (opt: any?, arg: any?) -> any
 --:: declare gcinfo = () -> integer
 --:: declare dofile = (filename: any?) -> any

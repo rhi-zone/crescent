@@ -272,8 +272,29 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
         for j = t.data[5], t.data[5] + t.data[6] - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
-            local new_type = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
-            new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+            if fe.name_id == -1 then
+                -- Meta-spread placeholder: instantiate inner, then expand if now concrete.
+                local new_sp_inner = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
+                local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp_inner))
+                local exp_id = types_mod.find(ctx, sp_t.data[0])
+                local exp_t  = ctx.types:get(exp_id)
+                if exp_t.tag == TAG_TABLE then
+                    -- Copy meta slots from the resolved type
+                    for k = exp_t.data[5], exp_t.data[5] + exp_t.data[6] - 1 do
+                        local inner_fid = ctx.lists:get(k)
+                        local inner_fe  = ctx.fields:get(inner_fid)
+                        if inner_fe.name_id >= 0 then
+                            new_meta[#new_meta + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                        end
+                    end
+                else
+                    -- Still unresolved — keep placeholder
+                    new_meta[#new_meta + 1] = types_mod.make_field(ctx, -1, new_sp_inner, 0)
+                end
+            else
+                local new_type = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
+                new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+            end
         end
 
         local row_var = t.data[4]
@@ -528,8 +549,29 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         for j = t.data[5], t.data[5] + t.data[6] - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
-            local new_type = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
-            new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+            if fe.name_id == -1 then
+                -- Meta-spread placeholder: substitute inner, then expand if now concrete.
+                local new_sp = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
+                local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp))
+                local exp_id = types_mod.find(ctx, sp_t.data[0])
+                local exp_t  = ctx.types:get(exp_id)
+                if exp_t.tag == TAG_TABLE then
+                    -- Copy meta slots from the resolved type
+                    for k = exp_t.data[5], exp_t.data[5] + exp_t.data[6] - 1 do
+                        local inner_fid = ctx.lists:get(k)
+                        local inner_fe  = ctx.fields:get(inner_fid)
+                        if inner_fe.name_id >= 0 then
+                            new_meta[#new_meta + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                        end
+                    end
+                else
+                    -- Still unresolved — keep placeholder
+                    new_meta[#new_meta + 1] = types_mod.make_field(ctx, -1, new_sp, 0)
+                end
+            else
+                local new_type = substitute_inner(ctx, fe.type_id, mapping, seen, eval_seen)
+                new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+            end
         end
         seen[tid] = nil
         return types_mod.make_table(ctx, new_field_ids, new_indexers, t.data[4], new_meta)
