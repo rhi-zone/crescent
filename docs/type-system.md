@@ -789,9 +789,16 @@ The correct algorithm is **coinductive field-merging structural matching**:
 - TAG_INTERSECTION input against a structural pattern: for each field the pattern asks for, look up that field's type in each intersection member independently, then intersect the results. `{ x: integer } & { y: string }` against `{ x: %V, y: %W }`: field `x` comes from member 1, field `y` from member 2 — no cross-product. TAG_NAMED members are coinductively expanded to extract their fields before the merge.
 - TAG_NAMED: expand one level; add `(ty_id, pat_id)` to a seen-set; if already in seen → coinductive hypothesis, assume match (equi-recursive semantics). Each pair visited at most once.
 
-**Memoization** is the trivial fast path on top of this: cache `(mt_id, param_id) → result_type_id` across evaluations. Distinct concern from the seen-set — the seen-set prevents infinite loops *within* a single evaluation (coinductive cycle detection); memoization reuses completed results *across* evaluations. For recursive types, the combination is: first evaluation of `(match_List, List<T>)` expands coinductively and terminates via the coinductive hypothesis; every subsequent occurrence — all tail positions throughout the program — is an O(1) cache hit. Without memoization, each occurrence re-triggers expansion.
+**Open vs closed members in intersection field lookup.** For each pattern field `x`, scan all intersection members and apply:
+- Member declares `x: T` (open or closed) → contributes `T` to the intersection
+- Open member lacks `x` → skip; the row variable may carry `x` but its type is unknown, and `T & unknown = T`, so the open member imposes no constraint
+- Closed member lacks `x` → contributes `never`; a closed table forbids fields not in its declaration, so `x` cannot exist → field type `never` → pattern fails immediately
 
-**`flatten_to_table` is the fast path for pure-TABLE intersections**: when all intersection members are already TAG_TABLE with no named types, field-merging is a single flat scan — no expansion, no seen-set. Same semantics as the general algorithm, O(total fields). The coinductive algorithm generalises this to handle TAG_NAMED members. `to_dnf` should be removed; `flatten_to_table` (or an equivalent inline scan) stays as the base case.
+Example: `{ x: integer }` (closed) & `{ y: string }` (open) against `{ x: %V }` — open member lacks `x`, skip it; closed member contributes `x: integer`; `%V = integer`, arm fires. But `{ x: integer }` (closed) & `{ y: string }` (closed) against `{ x: %V }` — second closed member lacks `x` → `never` → arm does not fire.
+
+`flatten_to_table` and `to_dnf` both get this wrong: they ignore missing fields entirely and treat open and closed members identically. Both should be removed in favour of the correct coinductive scan.
+
+**Memoization** is the trivial fast path: cache `(mt_id, param_id) → result_type_id` across evaluations. Distinct from the seen-set — the seen-set prevents infinite loops *within* a single evaluation; memoization reuses completed results *across* evaluations. For recursive types: first evaluation expands coinductively and terminates via the coinductive hypothesis; every subsequent occurrence is an O(1) cache hit.
 
 **Prior art.** The individual pieces are proven — what's new is the combination targeting a dynamically-typed language:
 
