@@ -1098,13 +1098,13 @@ T.it("[eval] MA7d: integer & { x: string } triggers integer arm — boolean resu
 		.. "local function f() return x end\n"
 	local ec_fwd = check_mod.check_string(fwd_src, "fuzz_eval_MA7d_fwd")
 	T.eq(#ec_fwd.errors, 0, "MA7d-fwd: IntArmOnly<integer & {x:string}> <: boolean: expected 0, got " .. #ec_fwd.errors)
-	-- Negative: never should NOT be <: IntArmOnly<integer & { x: string }> (result is boolean)
+	-- Negative: integer should NOT be <: IntArmOnly<integer & { x: string }> (result is boolean, not integer)
 	local neg_src = decl
-		.. "local x --: never\n"
+		.. "local x --: integer\n"
 		.. "--: () -> IntArmOnly<integer & { x: string }>\n"
 		.. "local function f() return x end\n"
 	local ec_neg = check_mod.check_string(neg_src, "fuzz_eval_MA7d_neg")
-	T.eq(#ec_neg.errors, 1, "MA7d-neg: never should NOT <: IntArmOnly<integer&{x:string}> (expected 1 error, got " .. #ec_neg.errors .. ")")
+	T.eq(#ec_neg.errors, 1, "MA7d-neg: integer should NOT <: IntArmOnly<integer&{x:string}> (expected 1 error, got " .. #ec_neg.errors .. ")")
 end)
 
 -- MA7e: structural TABLE pattern with capture fires for intersection input
