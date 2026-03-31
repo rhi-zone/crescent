@@ -87,7 +87,7 @@ Items that currently lack an implementer-ready spec:
 
 ## typechecker match semantics gaps
 
-- [ ] **Intersection types are opaque in match arms** — `match (A & B) { A => X }` gives `never`, not `X`. The match evaluator does not decompose intersection types: only `%R` (capture) and `_` (wildcard) fire for intersection inputs. This diverges from TypeScript conditional types where `(A & B) extends A` is true (because `A & B <: A` via intersection elimination). The correct semantics: match should use `try_unify(input_member, arm_pattern)` to decide if an arm fires, the same check it uses for union members. Intersection distribution would mirror union distribution (`match (A | B)` distributes over each member). Currently untested because the fuzz suite (MA7 invariants) only tests capture/wildcard arms for intersection inputs — specific-type arms are not asserted. Design decision required: intentional simplification, or correctness gap to fix?
+- [x] **Intersection types are opaque in match arms** — FIXED (0ace6b0). `match (A & B) { A => X }` now gives `X` when `A & B <: A`. Two fix paths in `match_pattern`: TAG_TABLE patterns iterate each member and recurse (bindings propagate); all other patterns use `try_unify` fallback. `match ({ x: integer } & { y: string }) { { x: %V } => V }` now gives `integer`.
 
 ## typechecker missing features
 
