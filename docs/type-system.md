@@ -768,6 +768,19 @@ They're not conceptually special — they're common patterns that deserve dedica
 
 **Distribution still applies.** When a match receives a union, it distributes: each union member is matched independently, results are re-unioned. This keeps match arms simple — they never see unions.
 
+**Distribution over intersections via DNF normalization.** Intersections also require distribution in some cases. `A & (B | C)` must become `(A & B) | (A & C)` before dispatch — otherwise the intersection is opaque and no arm fires. The evaluator normalizes inputs to disjunctive normal form (DNF = union of intersections of atomics) before arm dispatch.
+
+DNF rules (applied in `M.evaluate` before the arm loop):
+- `to_dnf(A | B)` = flatten both recursively
+- `to_dnf(A & B)` = cross-product of `to_dnf(A)` × `to_dnf(B)` (each pair combined as a flat intersection)
+- `to_dnf(atomic)` = `{atomic}` — everything that is not TAG_UNION or TAG_INTERSECTION
+
+**Named types and recursive types are atomic in DNF.** TAG_NAMED aliases are opaque to `to_dnf` — they are treated as atomic even if their expansion is a union or intersection. The reason is hard: expanding a recursive type (e.g. `List<T> = { head: T, tail: List<T> } | nil`) would loop forever, and even non-recursive expansion causes exponential blowup. TAG_MATCH_TYPE nodes that appear inside a compound type are likewise atomic — evaluating them eagerly would also loop for recursive match aliases.
+
+This means `to_dnf` only distributes *algebraic connectives that are structurally present* in the type graph. Named types and pending match evaluations that happen to wrap unions or intersections are not distributed by DNF — they reach `match_pattern` as-is, where `try_unify`'s one-level-at-a-time expansion handles them (with coinductive cycle detection).
+
+**For pure-table intersections**, after DNF produces a single term that is a TAG_INTERSECTION of TAG_TABLEs, the evaluator merges all member fields into one flat TAG_TABLE via `flatten_to_table` before arm dispatch. This allows structural patterns like `{ x: %V, y: %W }` to see fields from all intersection members simultaneously.
+
 **Prior art.** The individual pieces are proven — what's new is the combination targeting a dynamically-typed language:
 
 - **Scala 3 match types** (2020): the closest direct analog. Structural pattern matching at the type level, with reduction semantics. Main pain point: interaction with Scala's subtyping and path-dependent types creates edge cases. Crescent's simpler type system (no path-dependence, no implicits, no variance annotations) has less surface area for those issues. Crescent does have HKTs — unapplied generics like `Mappable<F>` where `F :: * -> *` — but not Scala's implicit resolution or variance complexity.
