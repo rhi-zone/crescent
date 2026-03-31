@@ -236,55 +236,50 @@ captures its type; tables without x give `never`.
 These are correctness gaps in the match evaluator discovered during DNF normalization work.
 Not yet fuzzed — add invariants here when fixing.
 
-### MX1: Empty-bindings gap in match_pattern TAG_INTERSECTION fallback
+### MX1–MX3: Unified root cause — coinductive structural matching not implemented
 
-**Bug.** `match_pattern`'s TAG_INTERSECTION fallback (the `try_unify` path, lines ~531–535) returns
-`true, {}` on success — empty bindings. For a structural pattern like `{ x: %V }`, the capture `%V`
-is never bound. `env.substitute` passes TAG_CAPTURE nodes through unchanged (no error, no resolution).
-The result expression silently contains unresolved captures.
+MX1, MX2, and MX3 are the same underlying problem: `match_pattern` cannot correctly handle input
+types that involve TAG_NAMED aliases or TAG_MATCH_TYPE nodes, because it has no mechanism to expand
+or evaluate them and no seen-set for cycle detection.
 
-Trigger: any match where the input type is a TAG_INTERSECTION that survives `flatten_to_table`
-(i.e., contains a non-TABLE member like TAG_NAMED or TAG_MATCH_TYPE), and the arm has a structural
-pattern with capture variables.
+**Symptoms:**
 
-The same issue affects the TAG_UNION pattern handler (lines ~516–522): also returns `{}`.
+- **MX1** — TAG_INTERSECTION fallback (`try_unify` path) returns `true, {}` (empty bindings) on
+  success. For `{ x: %V }` against `{ x: integer } & SomeAlias`, `%V` is never bound. TAG_CAPTURE
+  nodes pass through `env.substitute` unchanged — silent unresolved captures in the result. Returning
+  false instead is ALSO wrong: `A & B <: A`, so the arm should fire if any member matches.
 
-**Root cause:** The subtype-check path (`try_unify`) can confirm `A <: B` but cannot extract
-structural bindings. Only `match_pattern`'s own structural code path produces bindings, and that
-path requires a flat TAG_TABLE actual type.
+- **MX2** — `try_unify` does not expand named types. A TAG_NAMED is either checked via the oracle
+  or blanket-accepted. `try_unify(NamedAlias, { x: integer })` returns `true` regardless of whether
+  `NamedAlias` actually has `x`. The subtype check is unsound. Partial TABLE-member merging doesn't
+  help — if `SomeAlias = { x: string }`, merging only the TABLE members and ignoring `SomeAlias`'s
+  contribution gives a wrong binding for `%V` (should be `integer & string`, not just `integer`).
 
-**Fix direction:** For a mixed intersection (some TAG_TABLE members, some TAG_NAMED/TAG_MATCH_TYPE):
-(a) merge only the TAG_TABLE members via `flatten_to_table`, (b) do structural matching against the
-merged table to get bindings, (c) verify non-TABLE members via `try_unify` separately (no bindings
-expected from them). This requires splitting `flatten_to_table` into "merge what we can, check the
-rest."
+- **MX3** — TAG_MATCH_TYPE is completely opaque to `try_unify`. Not handled at all.
 
-### MX2: TAG_NAMED non-expansion in try_unify
+**The correct algorithm: coinductive structural matching**
 
-**Design gap.** `try_unify` does not expand named types. A TAG_NAMED encountered as one side of a
-comparison is either checked via the oracle (both sides named) or blanket-accepted (`return true` when
-one side is named). No structural matching happens.
+DNF normalization (`to_dnf`) is correct and efficient for structurally-present connectives (no named
+types), achieving O(N) for N nodes already in the type graph. But DNF is exponential when named types
+must be expanded first: `(A₁|B₁) & ... & (Aₖ|Bₖ)` materializes 2ᵏ terms.
 
-This means `try_unify(ctx, NamedAlias, { x: integer }, {})` returns `true` regardless of whether
-`NamedAlias` actually has an `x: integer` field. The subtype check is unsound for named types in
-intersection fallback context.
+The right approach for named/recursive types is coinductive structural matching with a `(ty_id,
+pat_id)` seen-set threaded through `match_pattern`:
 
-**Interaction with MX1:** Even if MX1 were fixed (structural bindings extracted from TABLE portion),
-the try_unify verification of non-TABLE members would be unsound for TAG_NAMED members.
+- TAG_UNION: match each member, union the results
+- TAG_INTERSECTION `A & B` against `P`: match A → bindings₁, match B → bindings₂, combine
+  (`%V` bound by both → `%V = T1 & T2` as a lazy intersection node, O(1) per variable)
+- TAG_NAMED: expand one level, add `(ty_id, pat_id)` to seen, recurse; if pair already in seen →
+  coinductive hypothesis, assume match (equi-recursive semantics)
+- TAG_MATCH_TYPE: evaluate first (with seen propagation), then recurse on the result
 
-**Fix direction:** `try_unify` needs one-level named-type expansion with a coinductive seen-set, the
-same mechanism described in the "Recursive types" section of type-system.md.
+Complexity: O(N × P) for N nodes in the de-aliased type, P nodes in the pattern — linear in N for
+a fixed pattern. Each `(ty_id, pat_id)` pair visited at most once. No cross-product materialized.
 
-### MX3: TAG_MATCH_TYPE completely opaque to try_unify
-
-**Design gap.** TAG_MATCH_TYPE is not handled by `try_unify` at all. A match type inside an
-intersection is either blanket-accepted (if the intersection check falls to the one-side-named
-`return true`) or fails silently. The match type is never evaluated during unification.
-
-**Note:** Eagerly evaluating TAG_MATCH_TYPE inside try_unify is not safe — recursive match aliases
-would loop. The correct approach is to evaluate the match type first (with `seen` propagation) and
-then unify against the result. But try_unify has no `seen` parameter. Plumbing `seen` through
-try_unify or finding another mechanism is required.
+**Fix:** Add `seen` parameter to `match_pattern`. Handle TAG_NAMED expansion and TAG_MATCH_TYPE
+evaluation inside `match_pattern` using the seen-set. Handle TAG_INTERSECTION by matching each
+member and intersecting bindings. Keep `to_dnf` as a fast path for the structural case (no named
+types). Remove the `try_unify` fallback for structural patterns with captures.
 
 ---
 
