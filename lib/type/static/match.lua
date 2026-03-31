@@ -33,6 +33,114 @@ local LIT_BOOLEAN = defs.LIT_BOOLEAN
 
 local M = {}
 
+-- ── DNF normalization helpers ───────────────────────────────────────────────
+
+-- Collect the atomic members of ty_id into `out`.
+-- If ty_id is TAG_INTERSECTION, recurse into its members (flatten).
+-- Otherwise append ty_id directly.
+local function collect_atoms(ctx, ty_id, out)
+    local t = ctx.types:get(ty_id)
+    if t.tag == TAG_INTERSECTION then
+        for i = 0, t.data[1] - 1 do
+            collect_atoms(ctx, ctx.lists:get(t.data[0] + i), out)
+        end
+    else
+        out[#out + 1] = ty_id
+    end
+end
+
+-- Intersect two (possibly-intersection) type IDs into a single flat intersection.
+local function intersect_atoms(ctx, a, b)
+    local atoms = {}
+    collect_atoms(ctx, a, atoms)
+    collect_atoms(ctx, b, atoms)
+    if #atoms == 1 then return atoms[1] end
+    return types_mod.make_intersection(ctx, atoms)
+end
+
+-- Convert ty_id to disjunctive normal form: a Lua array of type IDs,
+-- each representing one term (product / intersection-of-atomics).
+-- Rules:
+--   to_dnf(A | B) = to_dnf(A) ++ to_dnf(B)
+--   to_dnf(A & B) = cross-product of to_dnf(A) × to_dnf(B)
+--   to_dnf(atomic) = { ty_id }
+local function to_dnf(ctx, ty_id)
+    local t = ctx.types:get(ty_id)
+    if t.tag == TAG_UNION then
+        local result = {}
+        for i = 0, t.data[1] - 1 do
+            local member = ctx.lists:get(t.data[0] + i)
+            local terms = to_dnf(ctx, member)
+            for _, term in ipairs(terms) do
+                result[#result + 1] = term
+            end
+        end
+        return result
+    elseif t.tag == TAG_INTERSECTION then
+        -- Gather DNFs of all members, then cross-product.
+        local member_dnfs = {}
+        for i = 0, t.data[1] - 1 do
+            local member = ctx.lists:get(t.data[0] + i)
+            member_dnfs[#member_dnfs + 1] = to_dnf(ctx, member)
+        end
+        if #member_dnfs == 0 then return { ty_id } end
+        local current = member_dnfs[1]
+        for k = 2, #member_dnfs do
+            local next_terms = {}
+            for _, a in ipairs(current) do
+                for _, b in ipairs(member_dnfs[k]) do
+                    next_terms[#next_terms + 1] = intersect_atoms(ctx, a, b)
+                end
+            end
+            current = next_terms
+        end
+        return current
+    else
+        return { ty_id }
+    end
+end
+
+-- If ty_id is a TAG_INTERSECTION of TAG_TABLE members, merge all their fields
+-- into one flat TAG_TABLE.  Otherwise return ty_id unchanged.
+local function flatten_to_table(ctx, ty_id)
+    local t = ctx.types:get(ty_id)
+    if t.tag ~= TAG_INTERSECTION then return ty_id end
+    -- Collect all members; fail fast if any is not a TAG_TABLE.
+    local members = {}
+    for i = 0, t.data[1] - 1 do
+        local mid = ctx.lists:get(t.data[0] + i)
+        local mt = ctx.types:get(mid)
+        if mt.tag ~= TAG_TABLE then return ty_id end  -- non-table member: leave as-is
+        members[#members + 1] = mid
+    end
+    -- All members are TAG_TABLE: merge fields from all of them.
+    local merged_field_ids = {}
+    local seen_names = {}
+    for _, mid in ipairs(members) do
+        local mt = ctx.types:get(mid)
+        for fi = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+            local fid = ctx.lists:get(fi)
+            local fe  = ctx.fields:get(fid)
+            if fe.name_id >= 0 and not seen_names[fe.name_id] then
+                seen_names[fe.name_id] = true
+                merged_field_ids[#merged_field_ids + 1] = fid
+            end
+        end
+    end
+    -- Use indexers and row-var from the first member.
+    local mt0 = ctx.types:get(members[1])
+    local indexer_pairs = {}
+    for ii = mt0.data[2], mt0.data[2] + mt0.data[3] - 1 do
+        indexer_pairs[#indexer_pairs + 1] = ctx.lists:get(ii)
+    end
+    local row_var_id = mt0.data[4]
+    local meta_field_ids = {}
+    for mi = mt0.data[5], mt0.data[5] + mt0.data[6] - 1 do
+        meta_field_ids[#meta_field_ids + 1] = ctx.lists:get(mi)
+    end
+    return types_mod.make_table(ctx, merged_field_ids, indexer_pairs, row_var_id, meta_field_ids)
+end
+
 -- Merge two bindings tables, returning merged or nil on conflict.
 local function merge_bindings(a, b)
     if not b then return a end
@@ -413,30 +521,18 @@ function M.match_pattern(ctx, ty_id, pat_id)
         return false, nil
     end
 
-    -- TAG_INTERSECTION fallback:
-    -- For TAG_TABLE patterns with captures (e.g. { x: %V }): try each member of the
-    -- intersection independently via match_pattern. Return the first member that matches
-    -- along with its bindings. This implements intersection elimination: A & B <: A (and <: B),
-    -- so if A structurally matches the pattern, the arm fires.
-    -- For all other patterns (named types, primitives, table patterns without captures):
-    -- use try_unify for subtype checking — try_unify handles intersection elimination.
+    -- Intersection fallback: try_unify handles intersection elimination for
+    -- non-table intersections (e.g. integer & string matched against integer)
+    -- that survive after DNF normalization in M.evaluate.
+    -- Only applies when the input type is TAG_INTERSECTION — the original
+    -- band-aid's non-TABLE branch, preserved here.  Other failure cases
+    -- (including never, which is bottom but should not match arbitrary arms)
+    -- fall through to false so that match { string => T } on never stays never.
     if tt.tag == TAG_INTERSECTION then
-        if pt.tag == TAG_TABLE then
-            -- Try each member of the intersection; return first match with its bindings.
-            for i = 0, tt.data[1] - 1 do
-                --: integer
-                local member_id = ctx.lists:get(tt.data[0] + i)
-                local ok, bindings = M.match_pattern(ctx, member_id, pat_id)
-                if ok then return true, bindings end
-            end
-            return false, nil
-        end
-        -- Non-TABLE patterns: try_unify handles intersection elimination.
         local unify_mod = require("lib.type.static.unify")
         if unify_mod.try_unify(ctx, ty_id, pat_id, {}) then
             return true, {}
         end
-        return false, nil
     end
 
     return false, nil
@@ -466,25 +562,22 @@ function M.evaluate(ctx, mt_id, seen)
     local arms_start = mt.data[1]
     local arms_len   = mt.data[2]
 
-    -- Distribution over union inputs: match T { ... } where T is a union
-    -- evaluates each union member independently and re-unions the results.
-    -- This is required by the design: "Distribution still applies. When a match
-    -- receives a union, it distributes: each union member is matched independently,
-    -- results are re-unioned."
-    --: any
-    local param_t = ctx.types:get(param_id)
-    if param_t.tag == TAG_UNION then
+    -- DNF normalization: distribute over union and intersection inputs.
+    -- to_dnf converts A | B → [A, B] and A & (B | C) → [A&B, A&C] etc.
+    -- Each DNF term is matched independently; results are re-unioned.
+    -- For a single DNF term that is a pure-table intersection, flatten it
+    -- into one merged table before arm dispatch.
+    local dnf_terms = to_dnf(ctx, param_id)
+    if #dnf_terms > 1 then
         --: { [integer]: integer, ... }
         local results = {}
-        for ui = param_t.data[0], param_t.data[0] + param_t.data[1] - 1 do
-            --: integer
-            local member_id = types_mod.find(ctx, ctx.lists:get(ui))
-            -- Build a temporary match-type node with this member as the param.
+        for _, term_id in ipairs(dnf_terms) do
+            -- Build a temporary match-type node with this term as the param.
             -- Reuse the existing arms slice from the list pool (no new allocation).
             local sub_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
             --: any
             local sub_mtt = ctx.types:get(sub_mt)
-            sub_mtt.data[0] = member_id
+            sub_mtt.data[0] = term_id
             sub_mtt.data[1] = arms_start
             sub_mtt.data[2] = arms_len
             results[#results + 1] = M.evaluate(ctx, sub_mt, seen)
@@ -493,6 +586,12 @@ function M.evaluate(ctx, mt_id, seen)
         if #results == 0 then return ctx.T_NEVER end
         if #results == 1 then return results[1] end
         return types_mod.make_union(ctx, results)
+    end
+    -- Single DNF term: flatten pure-table intersections into one merged table.
+    if #dnf_terms == 1 and dnf_terms[1] ~= param_id then
+        param_id = flatten_to_table(ctx, dnf_terms[1])
+    else
+        param_id = flatten_to_table(ctx, param_id)
     end
 
     local i = arms_start

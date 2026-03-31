@@ -1124,6 +1124,39 @@ end
 	T.eq(#ec.errors, 0, "MA7e: expected 0 errors, got " .. tostring(#ec.errors))
 end)
 
+-- MA7f: cross-member field capture after DNF flatten.
+-- { x: integer } & { y: string } flattened to one merged table; pattern { x: %V, y: %W } => V
+-- should bind V = integer (x comes from the first member).
+T.it("[eval] MA7f: cross-member fields accessible after DNF flatten — { x:%V, y:%W } => V gives integer", function()
+	local src = [[
+--:: FieldXY_MA7f<T> = match T { { x: %V, y: %W } => V }
+--: () -> integer
+local function f()
+	local r --: FieldXY_MA7f<{ x: integer } & { y: string }>
+	return r
+end
+]]
+	local ec = check_mod.check_string(src, "fuzz_test_MA7f")
+	T.eq(#ec.errors, 0, "MA7f: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
+-- MA7g: DNF handles A & (B | C) by distributing: (A & B) | (A & C).
+-- match (integer & (string | boolean)) { integer => "yes", _ => "no" }:
+-- to_dnf gives [integer & string, integer & boolean]; each term <: integer → "yes".
+-- Result is "yes" | "yes" = "yes".
+T.it("[eval] MA7g: A & (B|C) distributes via DNF — integer & (string|boolean) → integer arm fires", function()
+	local src = [[
+--:: IntOrWild_MA7g<T> = match T { integer => boolean, _ => string }
+--: () -> boolean
+local function f()
+	local r --: IntOrWild_MA7g<integer & (string | boolean)>
+	return r
+end
+]]
+	local ec = check_mod.check_string(src, "fuzz_test_MA7g")
+	T.eq(#ec.errors, 0, "MA7g: expected 0 errors, got " .. tostring(#ec.errors))
+end)
+
 -- MA4r (random): for randomly generated tables, FieldX<T> == x-field-type when T has x,
 -- or never when T lacks x.
 -- Strategy: arb_table_type generates '{ x: T, ... }' strings from FIELD_NAMES = {x,y,z,n,s}.
