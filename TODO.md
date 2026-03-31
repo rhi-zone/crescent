@@ -87,7 +87,7 @@ Items that currently lack an implementer-ready spec:
 
 ## typechecker match semantics gaps
 
-- [x] **Intersection types are opaque in match arms** — FIXED (0ace6b0). `match (A & B) { A => X }` now gives `X` when `A & B <: A`. Two fix paths in `match_pattern`: TAG_TABLE patterns iterate each member and recurse (bindings propagate); all other patterns use `try_unify` fallback. `match ({ x: integer } & { y: string }) { { x: %V } => V }` now gives `integer`.
+- [x] **Intersection types are opaque in match arms** — FIXED properly (521226a). DNF normalization in `M.evaluate`: `to_dnf` expands `A|(B&C)` and `A&(B|C)` into terms; each term dispatched independently. For pure-table intersections, `flatten_to_table` merges all member fields into one TAG_TABLE so structural patterns see all fields. Band-aid (0ace6b0) replaced.
 
 ## typechecker missing features
 

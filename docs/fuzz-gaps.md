@@ -186,18 +186,21 @@ structural field-level mismatch (see CLAUDE.md "Annotation enforcement gotcha").
 - [x] MA8d: `$EachField<T1|T2, MakeWritable>` == `$EachField<T1, MakeWritable> | $EachField<T2, MakeWritable>` (500 trials, bidirectional)
 Uses `{ arb_table_type, arb_table_type }` generators with `check_sub` (FIXED_SCOPE already declares all four aliases).
 
-### MA7: Intersection-type inputs to match — DONE (fuzz_eval.lua MA7a–MA7c)
+### MA7: Intersection-type inputs to match — DONE (fuzz_eval.lua MA7a–MA7g)
 - [x] MA7a: `CaptureId<A & B>` == `A & B` — capture arm `%R` handles intersections bidirectionally (fn-return)
 - [x] MA7b: `WildConst<A & B>` == `integer` — wildcard `_` arm fires for intersection inputs (fn-return)
-- [x] MA7c: specific-type arm skipped for intersection input; wildcard fires — 0 errors positive + 1 error negative
+- [x] MA7c: specific-type arm fires for intersection input after DNF fix (updated after 521226a)
+- [x] MA7d: intersection input with non-matching arm → `never` (updated after 521226a)
+- [x] MA7e: `{ x: integer } & { y: string }` structural match — `{ x: %V } => V` gives `integer`
+- [x] MA7f: cross-member field capture after DNF flatten — `{ x:%V, y:%W } => V` gives `integer`
+- [x] MA7g: `A & (B|C)` distributes via DNF — `integer & (string|boolean)` matches integer arm correctly
 
-Key finding (probed 2026-03-31): intersection inputs are treated **opaque** by the match evaluator.
-A specific-type arm (`integer =>`) does NOT fire when given `integer & T` — the intersection is not
-decomposed into its members. Only wildcard-style arms match intersections:
-- `%R => R` (capture): captures the full intersection, returns it unchanged
-- `_ => X` (wildcard): always fires, returns X
-Specific-type arms produce `never` for intersection inputs (or fall to `_` if present).
-This is NOT per-member distribution.
+Fixed properly in 521226a: DNF normalization (`to_dnf`) in `M.evaluate` replaces both the original
+union distribution and the 0ace6b0 band-aid. Rules:
+- `to_dnf(A | B)` = flatten members recursively
+- `to_dnf(A & B)` = cross-product of member DNFs (distributes intersection over union)
+- Pure-table intersection terms: `flatten_to_table` merges all member fields into one TAG_TABLE
+  so structural patterns (`{ x: %V }`) can see fields from all intersection members.
 
 ### MA9: Composed match aliases — DONE (fuzz_eval.lua MA9a–MA9d)
 - [x] MA9a: `Outer<integer>` == `Inner<integer>` == `string` (two-level alias composition, bidirectional fn-return)
