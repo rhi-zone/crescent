@@ -257,35 +257,28 @@ or evaluate them and no seen-set for cycle detection.
 
 - **MX3** — TAG_MATCH_TYPE is completely opaque to `try_unify`. Not handled at all.
 
-**The correct algorithm: coinductive structural matching**
+**The correct algorithm: coinductive field-merging structural matching**
 
-DNF normalization (`to_dnf`) is correct and efficient for structurally-present connectives (no named
-types), achieving O(N) for N nodes already in the type graph. But DNF is exponential when named types
-must be expanded first: `(A₁|B₁) & ... & (Aₖ|Bₖ)` materializes 2ᵏ terms.
+DNF is exponential even for structurally-present connectives: `(A₁|B₁) & (A₂|B₂) & ... & (Aₖ|Bₖ)`
+materializes 2ᵏ terms — O(∏ union sizes). Coinductive matching is O(∑ union sizes): for each field
+the pattern asks for, look up that field in each intersection member independently and intersect the
+results. `(A|B).x` and `(C|D).x` are 2+2 lookups; DNF forces 2×2 combinations. Remove `to_dnf`.
 
-The right approach for named/recursive types is coinductive structural matching with a `(ty_id,
-pat_id)` seen-set threaded through `match_pattern`:
+Algorithm (add `seen` parameter to `match_pattern`):
+- TAG_UNION: match each member independently, union results
+- TAG_INTERSECTION: for each pattern field, look up field type in each member (coinductively
+  expanding TAG_NAMED members), intersect the per-member field types, bind capture to result
+- TAG_NAMED: expand one level, add `(ty_id, pat_id)` to seen, recurse; if in seen → assume match
+- TAG_MATCH_TYPE: evaluate (with seen propagation), recurse on result
+- Remove `try_unify` fallback for structural patterns with captures
 
-- TAG_UNION: match each member independently, union the results
-- TAG_INTERSECTION against a structural pattern: collect all fields from ALL members (coinductively
-  expanding TAG_NAMED members), merge field types (intersecting when same name appears in multiple
-  members), match the pattern against the merged field set once. Per-member independent matching is
-  wrong: `{ x: integer } & { y: string }` against `{ x: %V, y: %W }` requires seeing x AND y
-  simultaneously — neither member alone satisfies the full pattern.
-- TAG_NAMED: expand one level, add `(ty_id, pat_id)` to seen, recurse; if pair already in seen →
-  coinductive hypothesis, assume match (equi-recursive semantics)
-- TAG_MATCH_TYPE: evaluate first (with seen propagation), then recurse on the result
+**Memoization** is the trivial fast path: cache `(mt_id, param_id) → result_type_id` across
+evaluations. The seen-set prevents loops *within* an evaluation; memoization reuses completed
+results *across* evaluations. For recursive types: first hit expands coinductively and terminates
+via the coinductive hypothesis; all subsequent occurrences (tail positions etc.) are O(1) lookups.
 
-The current `to_dnf` + `flatten_to_table` is correct for the pure-TABLE intersection case: it IS
-the field-merge step, just without needing expansion. The coinductive approach generalises it.
-
-Complexity: O(N × P) — linear in type size for a fixed pattern. Each `(ty_id, pat_id)` pair
-visited at most once. No cross-product materialized.
-
-**Fix:** Add `seen` parameter to `match_pattern`. Handle TAG_NAMED expansion and TAG_MATCH_TYPE
-evaluation inside `match_pattern` using the seen-set. Handle TAG_INTERSECTION by matching each
-member and intersecting bindings. Keep `to_dnf` as a fast path for the structural case (no named
-types). Remove the `try_unify` fallback for structural patterns with captures.
+**`flatten_to_table`** stays as the base case for pure-TAG_TABLE intersections: single flat field
+scan, no expansion, no seen-set needed. Same semantics as the general algorithm.
 
 ---
 
