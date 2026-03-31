@@ -10,7 +10,7 @@
 
 This is hard to express in a single generic type because:
 1. The key and value types depend on the concrete table type `T`
-2. The iterator function must be typed `(T, K) -> (K?, V)`
+2. The iterator function must be typed `(T, K) -> (K | nil, V)`
 3. `K` and `V` must be extracted from `T`'s indexer or fields
 
 ## Approach: `$PairsIter<T>` and `$PairsKey<T>`, `$PairsVal<T>` Intrinsics
@@ -38,7 +38,7 @@ Rather than three separate intrinsics, one intrinsic produces the whole iterator
 ```
 
 `$PairsReturn<T>` evaluates to a TAG_TUPLE of `(iter_fn, T, key_or_nil)` where:
-- `iter_fn` has type `(T, K?) -> (K?, V)` with K/V extracted from T
+- `iter_fn` has type `(T, K | nil) -> (K | nil, V)` with K/V extracted from T
 - K = T's indexer key type; if no indexer, union of all field name literal types
 - V = T's indexer value type; if no indexer, union of all field value types
 
@@ -60,9 +60,9 @@ local function expand_pairs_return(ctx, arg_ids)
     local T_t = ctx.types:get(T_tid)
     -- extract indexer key/value types from T
     local K_tid, V_tid = extract_table_kv(ctx, T_tid)
-    -- build iter_fn: (T, K?) -> (K?, V)
+    -- build iter_fn: (T, K | nil) -> (K | nil, V)
     local iter_fn = -- TAG_FUNCTION { params: {T_tid, union(K_tid, T_NIL)}, ret: TAG_TUPLE{union(K_tid, T_NIL), V_tid} }
-    -- return tuple: (iter_fn, T, K?)
+    -- return tuple: (iter_fn, T, K | nil)
     return types_mod.make_tuple(ctx, { iter_fn, T_tid, types_mod.make_union(ctx, {K_tid, ctx.T_NIL}) })
 end
 ```

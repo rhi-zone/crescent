@@ -47,8 +47,8 @@ evaluations**, not a reconstructed table. `Partial<T>` requires gathering all fi
 into one table:
 
 ```lua
--- WRONG: gives { ["x"]: integer? } | { ["y"]: string? } — not Partial<T>
---:: Partial<T> = match T { { ...[%K]: %V } => { [K]: V? } }
+-- WRONG: gives { ["x"]: integer | nil } | { ["y"]: string | nil } — not Partial<T>
+--:: Partial<T> = match T { { ...[%K]: %V } => { [K]: V | nil } }
 ```
 
 `Partial<T>` is inexpressible because distribution produces a union of single-field tables,

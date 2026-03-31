@@ -245,7 +245,7 @@ Tables are the universal compound type. A table type has:
 - **Indexers**: `{ [string]: number }` — dynamic keys. `{ [number]: T }` for arrays, `{ [string]: T }` for dictionaries.
 - **Row variable**: open vs. closed. Open tables accept extra fields. Closed tables don't.
 
-`T?` is sugar for `T | nil`.
+Optionality is expressed as `T | nil` — no dedicated postfix syntax. Adding syntax for one specific union pattern (`?` for `| nil`) creates a precedent that every common pattern deserves sugar, leading to syntax complexity explosion. The union operator already handles this.
 
 ### Tuples
 
@@ -886,8 +886,8 @@ HKTs — abstracting over type constructors — fall out of existing machinery. 
 --:: Lift<F: T1, A> = F<A>
 -- F must be a single-param type constructor
 
---:: MakeOptional<T> = T?
-Lift<MakeOptional, number>    -- number? (MakeOptional is * -> *)
+--:: MakeOptional<T> = T | nil
+Lift<MakeOptional, number>    -- number | nil (MakeOptional is * -> *)
 
 -- Tighter bound: F must produce something with a value field
 --:: Wrapper<T> = { value: T }
@@ -957,7 +957,7 @@ The checker loads a prelude before checking user code — type aliases and stdli
 --:: Dict<K, V> = { [K]: V }
 --:: Map<K, V> = { [K]: V }          -- alias if preferred
 --:: Set<T> = { [T]: boolean }
---:: Optional<T> = T?                 -- explicit form of T | nil
+--:: Optional<T> = T | nil
 ```
 
 **Intrinsics** (`$` prefix = compiler magic, declared as `= intrinsic`):

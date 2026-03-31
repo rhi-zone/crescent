@@ -683,7 +683,6 @@ Type annotations appear in Lua comments. Two forms:
 T ::= primitive | "nil" | "never" | "unknown" | "any"
     | T "|" T          -- union
     | T "&" T          -- intersection
-    | T "?"            -- shorthand for T | nil
     | "(" T ")"        -- grouping
     | "(" params ")" "->" T       -- function type
     | "(" params ")" "->" "..." "(" T ")"  -- multi-return spread

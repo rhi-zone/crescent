@@ -79,10 +79,10 @@ end
 `coroutine.resume` and `coroutine.wrap` are typed accordingly:
 
 ```lua
---: <Y, S, R> (Coroutine<Y, S, R>, S?) -> (boolean, Y | R)
+--: <Y, S, R> (Coroutine<Y, S, R>, S | nil) -> (boolean, Y | R)
 coroutine.resume
 
---: <Y, S, R> (() -> Coroutine<Y, S, R>) -> ((S?) -> Y | R)
+--: <Y, S, R> (() -> Coroutine<Y, S, R>) -> ((S | nil) -> Y | R)
 coroutine.wrap
 ```
 
