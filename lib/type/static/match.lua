@@ -413,6 +413,32 @@ function M.match_pattern(ctx, ty_id, pat_id)
         return false, nil
     end
 
+    -- TAG_INTERSECTION fallback:
+    -- For TAG_TABLE patterns with captures (e.g. { x: %V }): try each member of the
+    -- intersection independently via match_pattern. Return the first member that matches
+    -- along with its bindings. This implements intersection elimination: A & B <: A (and <: B),
+    -- so if A structurally matches the pattern, the arm fires.
+    -- For all other patterns (named types, primitives, table patterns without captures):
+    -- use try_unify for subtype checking — try_unify handles intersection elimination.
+    if tt.tag == TAG_INTERSECTION then
+        if pt.tag == TAG_TABLE then
+            -- Try each member of the intersection; return first match with its bindings.
+            for i = 0, tt.data[1] - 1 do
+                --: integer
+                local member_id = ctx.lists:get(tt.data[0] + i)
+                local ok, bindings = M.match_pattern(ctx, member_id, pat_id)
+                if ok then return true, bindings end
+            end
+            return false, nil
+        end
+        -- Non-TABLE patterns: try_unify handles intersection elimination.
+        local unify_mod = require("lib.type.static.unify")
+        if unify_mod.try_unify(ctx, ty_id, pat_id, {}) then
+            return true, {}
+        end
+        return false, nil
+    end
+
     return false, nil
 end
 

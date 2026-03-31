@@ -1011,14 +1011,20 @@ T.it("[eval] MA6b: IsX<{ x: string }> == never (exact type mismatch -> wildcard,
 end)
 
 -- ── MA7: Intersection-type inputs to match ───────────────────────────────────
--- Key finding: intersection inputs are treated OPAQUE by the match evaluator.
--- A specific-type arm (e.g. `integer =>`) does NOT fire when given `integer & T` —
--- the intersection is not decomposed.  Only wildcard-style arms match:
---   - `%R => R`  (capture arm): captures the full intersection, returns it as-is
---   - `_ => X`   (wildcard arm): always fires, returns X
--- Specific-type arms (e.g. `integer => X`) never fire for intersection inputs;
--- such inputs fall through to `_` or produce `never` if no wildcard is present.
--- This is the current implementation semantics; it is NOT per-member distribution.
+-- Intersection inputs: two classes of arm behaviour.
+--
+-- 1. TABLE structural patterns with captures (e.g. `{ x: %V }`):
+--    The evaluator tries each member of the intersection independently via match_pattern.
+--    The FIRST member that structurally matches fires its arm and contributes its bindings.
+--    Basis: intersection elimination — A & B <: A, so if A matches the pattern, the arm fires.
+--
+-- 2. All other patterns (concrete types like `integer =>`, primitives, named types):
+--    The intersection is treated as a unit via try_unify.
+--    A specific-type arm (e.g. `integer =>`) does NOT fire for `integer & T` —
+--    try_unify checks subtyping of the whole intersection, not per-member decomposition.
+--    Only wildcard-style arms match:
+--      - `%R => R`  (capture arm): captures the full intersection, returns it as-is
+--      - `_ => X`   (wildcard arm): always fires, returns X
 
 -- MA7a: CaptureId<A & B> == A & B (capture arm handles intersections, bidirectional)
 T.it("[eval] MA7a: CaptureId<integer & string> == integer & string (bidirectional, fn-return)", function()
@@ -1059,25 +1065,63 @@ T.it("[eval] MA7b: WildConst<integer & string> == integer (wildcard arm, fn-retu
 	T.eq(#ec_rev.errors, 0, "MA7b-rev: integer <: WildConst<integer&string>: expected 0 errors, got " .. #ec_rev.errors)
 end)
 
--- MA7c: Specific-type arm does NOT fire for intersection input — falls to wildcard.
--- match T { integer => boolean, _ => string } with T = integer & string gives string
--- (not boolean), because the intersection is opaque to the integer arm.
-T.it("[eval] MA7c: specific arm skipped for intersection, wildcard fires — 0 errors", function()
+-- MA7c: Specific-type arm FIRES for intersection input via intersection elimination.
+-- match T { integer => boolean, _ => string } with T = integer & string gives boolean
+-- because integer & string <: integer (intersection elimination), so the integer arm fires.
+T.it("[eval] MA7c: specific arm fires for intersection via elimination — 0 errors", function()
 	local decl = "--:: IntOrWild<T> = match T { integer => boolean, _ => string }\n"
-	-- Forward: IntOrWild<integer & string> <: string  (wildcard fired, not integer arm)
+	-- Forward: IntOrWild<integer & string> <: boolean  (integer arm fired via intersection elimination)
 	local fwd_src = decl
 		.. "local x --: IntOrWild<integer & string>\n"
-		.. "--: () -> string\n"
+		.. "--: () -> boolean\n"
 		.. "local function f() return x end\n"
 	local ec_fwd = check_mod.check_string(fwd_src, "fuzz_eval_MA7c_fwd")
-	T.eq(#ec_fwd.errors, 0, "MA7c-fwd: IntOrWild<integer&string> <: string: expected 0, got " .. #ec_fwd.errors)
-	-- Negative: boolean should NOT be <: IntOrWild<integer & string> (result is string, not boolean)
+	T.eq(#ec_fwd.errors, 0, "MA7c-fwd: IntOrWild<integer&string> <: boolean: expected 0, got " .. #ec_fwd.errors)
+	-- Negative: string should NOT be <: IntOrWild<integer & string> (result is boolean, not string)
 	local neg_src = decl
-		.. "local x --: boolean\n"
+		.. "local x --: string\n"
 		.. "--: () -> IntOrWild<integer & string>\n"
 		.. "local function f() return x end\n"
 	local ec_neg = check_mod.check_string(neg_src, "fuzz_eval_MA7c_neg")
-	T.eq(#ec_neg.errors, 1, "MA7c-neg: boolean should NOT <: IntOrWild<integer&string> (expected 1 error, got " .. #ec_neg.errors .. ")")
+	T.eq(#ec_neg.errors, 1, "MA7c-neg: string should NOT <: IntOrWild<integer&string> (expected 1 error, got " .. #ec_neg.errors .. ")")
+end)
+
+-- MA7d: Intersection with unrelated type still triggers the matching arm.
+-- match (integer & { x: string }) { integer => boolean, _ => never } gives boolean
+-- because integer & { x: string } <: integer via intersection elimination.
+T.it("[eval] MA7d: integer & { x: string } triggers integer arm — boolean result", function()
+	local decl = "--:: IntArmOnly<T> = match T { integer => boolean, _ => never }\n"
+	-- Forward: IntArmOnly<integer & { x: string }> <: boolean
+	local fwd_src = decl
+		.. "local x --: IntArmOnly<integer & { x: string }>\n"
+		.. "--: () -> boolean\n"
+		.. "local function f() return x end\n"
+	local ec_fwd = check_mod.check_string(fwd_src, "fuzz_eval_MA7d_fwd")
+	T.eq(#ec_fwd.errors, 0, "MA7d-fwd: IntArmOnly<integer & {x:string}> <: boolean: expected 0, got " .. #ec_fwd.errors)
+	-- Negative: never should NOT be <: IntArmOnly<integer & { x: string }> (result is boolean)
+	local neg_src = decl
+		.. "local x --: never\n"
+		.. "--: () -> IntArmOnly<integer & { x: string }>\n"
+		.. "local function f() return x end\n"
+	local ec_neg = check_mod.check_string(neg_src, "fuzz_eval_MA7d_neg")
+	T.eq(#ec_neg.errors, 1, "MA7d-neg: never should NOT <: IntArmOnly<integer&{x:string}> (expected 1 error, got " .. #ec_neg.errors .. ")")
+end)
+
+-- MA7e: structural TABLE pattern with capture fires for intersection input
+-- { x: %V } must match { x: integer } & { y: string } and bind V = integer.
+-- Basis: intersection elimination — A & B <: A, so the pattern { x: %V } matches
+-- member A = { x: integer } and V binds to integer.
+T.it("[eval] MA7e: structural pattern { x: %V } matches intersection input (MA7e)", function()
+	local src = [[
+--:: FieldX_MA7e<T> = match T { { x: %V } => V }
+--: () -> integer
+local function f()
+	local r --: FieldX_MA7e<{ x: integer } & { y: string }>
+	return r
+end
+]]
+	local ec = check_mod.check_string(src, "fuzz_test_MA7e")
+	T.eq(#ec.errors, 0, "MA7e: expected 0 errors, got " .. tostring(#ec.errors))
 end)
 
 -- MA4r (random): for randomly generated tables, FieldX<T> == x-field-type when T has x,
