@@ -266,15 +266,21 @@ must be expanded first: `(A₁|B₁) & ... & (Aₖ|Bₖ)` materializes 2ᵏ term
 The right approach for named/recursive types is coinductive structural matching with a `(ty_id,
 pat_id)` seen-set threaded through `match_pattern`:
 
-- TAG_UNION: match each member, union the results
-- TAG_INTERSECTION `A & B` against `P`: match A → bindings₁, match B → bindings₂, combine
-  (`%V` bound by both → `%V = T1 & T2` as a lazy intersection node, O(1) per variable)
+- TAG_UNION: match each member independently, union the results
+- TAG_INTERSECTION against a structural pattern: collect all fields from ALL members (coinductively
+  expanding TAG_NAMED members), merge field types (intersecting when same name appears in multiple
+  members), match the pattern against the merged field set once. Per-member independent matching is
+  wrong: `{ x: integer } & { y: string }` against `{ x: %V, y: %W }` requires seeing x AND y
+  simultaneously — neither member alone satisfies the full pattern.
 - TAG_NAMED: expand one level, add `(ty_id, pat_id)` to seen, recurse; if pair already in seen →
   coinductive hypothesis, assume match (equi-recursive semantics)
 - TAG_MATCH_TYPE: evaluate first (with seen propagation), then recurse on the result
 
-Complexity: O(N × P) for N nodes in the de-aliased type, P nodes in the pattern — linear in N for
-a fixed pattern. Each `(ty_id, pat_id)` pair visited at most once. No cross-product materialized.
+The current `to_dnf` + `flatten_to_table` is correct for the pure-TABLE intersection case: it IS
+the field-merge step, just without needing expansion. The coinductive approach generalises it.
+
+Complexity: O(N × P) — linear in type size for a fixed pattern. Each `(ty_id, pat_id)` pair
+visited at most once. No cross-product materialized.
 
 **Fix:** Add `seen` parameter to `match_pattern`. Handle TAG_NAMED expansion and TAG_MATCH_TYPE
 evaluation inside `match_pattern` using the seen-set. Handle TAG_INTERSECTION by matching each

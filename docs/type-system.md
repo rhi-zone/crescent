@@ -783,14 +783,14 @@ This means `to_dnf` only distributes *algebraic connectives that are structurall
 
 **DNF is not the right algorithm for named/recursive types.** DNF works for structurally-present connectives because the cross-product is bounded by what is already in the type graph. But when named types must be expanded first, DNF becomes exponential: `(A₁|B₁) & (A₂|B₂) & ... & (Aₖ|Bₖ)` materializes 2ᵏ terms before any matching begins. Each de-aliased union member multiplies the term count.
 
-The correct algorithm for matching against a type with N nodes in its fully de-aliased representation is **coinductive structural matching** — O(N × P) for a pattern of size P, linear in N for a fixed pattern:
+The correct algorithm for matching against a type with N nodes in its fully de-aliased representation is **coinductive field-merging structural matching** — O(N × P) for a pattern of size P, linear in N for a fixed pattern:
 
-- Each `(ty_id, pat_id)` pair is visited at most once; the seen-set short-circuits cycles.
-- TAG_UNION input: match each member, union the results — no precomputation.
-- TAG_INTERSECTION input `A & B` against pattern `P`: match A → bindings₁, match B → bindings₂, combine (`%V` bound by both → `%V = T1 & T2`, a lazy intersection node, O(1)). No cross-product materialized.
-- TAG_NAMED: expand one level, add `(ty_id, pat_id)` to seen, recurse; if already in seen → coinductive hypothesis, assume match.
+- TAG_UNION input: match each member independently, union the results.
+- TAG_INTERSECTION input against a structural pattern: **collect all fields from all members** (coinductively expanding any TAG_NAMED members), merge field types (intersecting when the same field name appears in multiple members), then match the pattern against the merged field set once. This is the correct semantics — `{ x: integer } & { y: string }` against `{ x: %V, y: %W }` must see both `x` and `y` simultaneously. Matching each member independently fails: neither member alone satisfies the full pattern.
+- TAG_NAMED: expand one level with a `(ty_id, pat_id)` seen-set; if already in seen → coinductive hypothesis, assume match (equi-recursive semantics).
+- Each `(ty_id, pat_id)` pair visited at most once; seen-set short-circuits cycles.
 
-This is strictly better than DNF for named types, and equivalent to it for structurally-present connectives (same computation, different organization). The current `to_dnf` in `M.evaluate` is a correct optimization for the common case (no named types, connectives already unfolded) and should remain. The general case requires coinductive matching with a seen-set threaded through `match_pattern`.
+The current `to_dnf` + `flatten_to_table` is a correct fast path for this: when all intersection members are already TAG_TABLE (no named types), merging fields is just `flatten_to_table` — exact same semantics, no expansion needed. The coinductive approach generalises this to handle TAG_NAMED members by coinductively extracting their fields before merging. Keep `to_dnf` as the fast path; add coinductive expansion for the named-type case.
 
 **Prior art.** The individual pieces are proven — what's new is the combination targeting a dynamically-typed language:
 
