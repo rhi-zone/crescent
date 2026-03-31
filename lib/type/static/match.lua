@@ -39,6 +39,7 @@ local M = {}
 -- Returns the resolved type_id, or nil if it cannot be expanded
 -- (undefined alias, arity error, or cycle detected via seen_named).
 -- seen_named: { [ty_id] = true } — prevents re-expanding the same named node.
+--: (Ctx, integer, { [integer]: boolean, ... }) -> integer?
 local function expand_named(ctx, ty_id, seen_named)
     if seen_named[ty_id] then return nil end
     local t = ctx.types:get(ty_id)
@@ -49,7 +50,9 @@ local function expand_named(ctx, ty_id, seen_named)
     if args_len > 0 then
         arg_ids = {}
         for i = t.data[1], t.data[1] + args_len - 1 do
-            arg_ids[#arg_ids + 1] = ctx.lists:get(i)
+            --: integer
+            local aid = ctx.lists:get(i)
+            arg_ids[#arg_ids + 1] = aid
         end
     end
     local env_mod = require("lib.type.static.env")
@@ -71,6 +74,7 @@ end
 --   nil       — neutral: open member that doesn't mention this field (skip, don't intersect)
 -- The `seen_named` table prevents infinite expansion of recursive named types.
 -- The `pat_seen` table is the match_pattern coinductive seen-set (passed through).
+--: (Ctx, integer, integer, { [integer]: boolean, ... }, { [string]: boolean, ... }) -> integer?
 local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen)
     ty_id = types_mod.find(ctx, ty_id)
     local t = ctx.types:get(ty_id)
@@ -92,8 +96,10 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
 
     if t.tag == TAG_INTERSECTION then
         -- Recurse into each intersection member and intersect contributions.
+        --: { [integer]: integer, ... }
         local contributions = {}
         for i = 0, t.data[1] - 1 do
+            --: integer
             local mid = ctx.lists:get(t.data[0] + i)
             local contrib = intersect_field_in_type(ctx, mid, name_id, seen_named, pat_seen)
             if contrib == ctx.T_NEVER then
@@ -104,6 +110,7 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
             end
         end
         if #contributions == 0 then return nil end
+        --: integer
         if #contributions == 1 then return contributions[1] end
         return types_mod.make_intersection(ctx, contributions)
     end
@@ -112,8 +119,10 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
         -- Contribute the union of each member's field type.
         -- If any member returns nil (open, missing), that member contributes T_UNKNOWN
         -- (since an open member might have the field at runtime).
+        --: { [integer]: integer, ... }
         local parts = {}
         for i = 0, t.data[1] - 1 do
+            --: integer
             local mid = ctx.lists:get(t.data[0] + i)
             local contrib = intersect_field_in_type(ctx, mid, name_id, seen_named, pat_seen)
             if contrib == ctx.T_NEVER then
@@ -127,6 +136,7 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
             end
         end
         if #parts == 0 then return nil end
+        --: integer
         if #parts == 1 then return parts[1] end
         return types_mod.make_union(ctx, parts)
     end
@@ -253,7 +263,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
     if pt.tag == TAG_TABLE then
         -- If the input is a TAG_TABLE, use direct structural matching.
         if tt.tag == TAG_TABLE then
-            --: any
+            --: { [integer]: integer, ... }?
             local bindings = {}
             -- Track which field name_ids are explicitly matched by the pattern.
             --: { [integer]: boolean, ... }
@@ -265,7 +275,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
                 --: integer
                 local pfid = ctx.lists:get(pi)
-                --: any
                 local pfe  = ctx.fields:get(pfid)
                 if pfe.name_id == -2 then
                     -- Rest-field capture: store the capture name_id for later processing.
@@ -290,7 +299,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 for ti = tt.data[0], tt.data[0] + tt.data[1] - 1 do
                     --: integer
                     local tfid = ctx.lists:get(ti)
-                    --: any
                     local tfe  = ctx.fields:get(tfid)
                     if tfe.name_id >= 0 and not matched_name_ids[tfe.name_id] then
                         local copied = types_mod.make_field(ctx, tfe.name_id, tfe.type_id, tfe.flags)
@@ -378,7 +386,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             end
             seen[cycle_key] = true
 
-            --: any
+            --: { [integer]: integer, ... }?
             local bindings = {}
             local seen_named = {}  -- per-field-lookup expansion guard
 
@@ -387,7 +395,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
                 --: integer
                 local pfid = ctx.lists:get(pi)
-                --: any
                 local pfe  = ctx.fields:get(pfid)
                 if pfe.name_id == -2 then
                     -- Rest-field capture: deferred (handled below if needed)
@@ -487,13 +494,15 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             local expanded = expand_named(ctx, ty_id, seen_named)
             seen[cycle_key] = nil
             if not expanded then return false, nil end
-            return M.match_pattern(ctx, expanded, pat_id, seen)
+            local ok, b = M.match_pattern(ctx, expanded, pat_id, seen)
+            return ok, b
         end
 
         -- Input is TAG_MATCH_TYPE: evaluate then recurse.
         if tt.tag == TAG_MATCH_TYPE then
             local result = M.evaluate(ctx, ty_id, seen)
-            return M.match_pattern(ctx, result, pat_id, seen)
+            local ok, b = M.match_pattern(ctx, result, pat_id, seen)
+            return ok, b
         end
 
         -- For all other input tags (non-table): table pattern fails.
@@ -505,7 +514,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
     if pt.tag == TAG_FUNCTION then
         -- The input must also be a function
         if tt.tag ~= TAG_FUNCTION then return false, nil end
-        --: any
+        --: { [integer]: integer, ... }?
         local bindings = {}
         -- Match params
         local ppl = pt.data[1]  -- param count in pattern
@@ -699,13 +708,15 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
         local expanded = expand_named(ctx, ty_id, seen_named)
         seen[cycle_key] = nil
         if not expanded then return false, nil end
-        return M.match_pattern(ctx, expanded, pat_id, seen)
+        local ok, b = M.match_pattern(ctx, expanded, pat_id, seen)
+        return ok, b
     end
 
     -- Match-type input: evaluate then retry.
     if tt.tag == TAG_MATCH_TYPE then
         local result = M.evaluate(ctx, ty_id, seen)
-        return M.match_pattern(ctx, result, pat_id, seen)
+        local ok, b = M.match_pattern(ctx, result, pat_id, seen)
+        return ok, b
     end
 
     return false, nil
@@ -724,7 +735,6 @@ function M.evaluate(ctx, mt_id, seen)
     if seen[mt_id] then return ctx.T_NEVER end
     seen[mt_id] = true
 
-    --: any
     local mt = ctx.types:get(mt_id)
     if mt.tag ~= TAG_MATCH_TYPE then
         seen[mt_id] = nil
@@ -757,7 +767,6 @@ function M.evaluate(ctx, mt_id, seen)
             -- Build a temporary match-type node with this member as the param.
             -- Reuse the existing arms slice from the list pool (no new allocation).
             local sub_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
-            --: any
             local sub_mtt = ctx.types:get(sub_mt)
             sub_mtt.data[0] = member_id
             sub_mtt.data[1] = arms_start
