@@ -22,7 +22,7 @@ function M.register(type_name, fn)
 	M._registry[type_name] = fn
 end
 
---: (unknown, any?) -> unknown, unknown
+--: (unknown, any | nil) -> unknown, unknown
 function M.run(task_def, opts)
 	opts = opts or {}
 	local opts_any = opts --: any

@@ -25,7 +25,7 @@ end
 -- err_ctx:  diagnostic context to receive warnings/errors
 -- filepath: source file path (string)
 -- policy:   optional table { [rule_name] = "error"|"warning"|"off" }
---: (table?, table, string, table?) -> ()
+--: (table | nil, table, string, table | nil) -> ()
 function M.run(ctx, err_ctx, filepath, policy)
     if not ctx then return end
     policy = policy or {}

@@ -230,7 +230,7 @@ function M.find(ctx, tid)
 end
 
 -- Make a fresh type variable at the given level.
---: (Ctx, integer?) -> integer
+--: (Ctx, integer | nil) -> integer
 function M.make_var(ctx, level)
     ctx.var_counter = ctx.var_counter + 1
     local id = alloc_zero(ctx.types, TAG_VAR)
@@ -242,7 +242,7 @@ function M.make_var(ctx, level)
 end
 
 -- Make a fresh row variable at the given level.
---: (Ctx, integer?) -> integer
+--: (Ctx, integer | nil) -> integer
 function M.make_rowvar(ctx, level)
     ctx.var_counter = ctx.var_counter + 1
     local id = alloc_zero(ctx.types, TAG_ROWVAR)
@@ -256,7 +256,7 @@ end
 -- Make a literal type.
 -- kind: LIT_STRING/LIT_NUMBER/LIT_BOOLEAN/LIT_NIL
 -- val: intern_id (for string) or 1/0 (for boolean) or double (for number)
---: (Ctx, integer, integer?) -> integer
+--: (Ctx, integer, integer | nil) -> integer
 function M.make_literal(ctx, kind, val)
     -- Intern literals so the same value always maps to the same type_id.
     -- This prevents union dedup from missing duplicate literal members.
@@ -312,7 +312,7 @@ end
 -- params, returns: Lua arrays of type_ids
 -- vararg_id: type_id or -1 for no vararg
 -- param_name_ids: optional Lua array of intern IDs (one per param); stored in data[5]/data[6]
---: (Ctx, { [integer]: integer, ... }, { [integer]: integer, ... }, integer?, { [integer]: integer, ... }?) -> integer
+--: (Ctx, { [integer]: integer, ... }, { [integer]: integer, ... }, integer | nil, { [integer]: integer, ... } | nil) -> integer
 function M.make_func(ctx, params, returns, vararg_id, param_name_ids)
     local m = ctx.lists:mark()
     for i = 1, #params do ctx.lists:push(params[i]) end
@@ -372,7 +372,7 @@ end
 -- indexer_pairs: flat Lua array of type_ids [key0, val0, key1, val1, ...]
 -- row_var_id: type_id or -1
 -- meta_field_ids: Lua array of field_arena IDs for __meta slots
---: (Ctx, { [integer]: integer, ... }?, { [integer]: integer, ... }?, integer?, { [integer]: integer, ... }?) -> integer
+--: (Ctx, { [integer]: integer, ... } | nil, { [integer]: integer, ... } | nil, integer | nil, { [integer]: integer, ... } | nil) -> integer
 function M.make_table(ctx, field_ids, indexer_pairs, row_var_id, meta_field_ids)
     field_ids    = field_ids    or {}
     indexer_pairs = indexer_pairs or {}
@@ -566,7 +566,7 @@ end
 
 -- Filter a union-of-tuples to arms where slot[slot_index] satisfies predicate_fn.
 -- Returns array of surviving arm type_ids, or nil if source is not TAG_UNION.
---: (Ctx, integer, integer, (integer) -> boolean) -> ({ [integer]: integer, ... }?)
+--: (Ctx, integer, integer, (integer) -> boolean) -> ({ [integer]: integer, ... } | nil)
 function M.filter_tuple_union_arms(ctx, union_tid, slot_index, predicate_fn)
     local u = ctx.types:get(M.find(ctx, union_tid))
     if u.tag ~= TAG_UNION then return nil end
@@ -734,7 +734,7 @@ end
 
 -- Look up a named field in a table type. Returns (FieldEntry*, field_arena_id) or nil.
 -- Skips opaque-key fields (FLAG_OPAQUE_KEY): those are matched by opaque key lookup, not by name.
---: (Ctx, integer, integer) -> (FieldEntry?, integer?)
+--: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
 function M.table_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)  -- caller must have called find()
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
@@ -750,7 +750,7 @@ end
 -- Look up an opaque-key field (FLAG_OPAQUE_KEY) by the variable name that serves as the key.
 -- key_name_id: intern ID of the variable name used as the key (e.g. intern("Mappable")).
 -- Returns (FieldEntry*, field_arena_id) or nil.
---: (Ctx, integer, integer) -> (FieldEntry?, integer?)
+--: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
 function M.table_opaque_field(ctx, tbl_tid, key_name_id)
     local t = ctx.types:get(tbl_tid)
     for i = t.data[0], t.data[0] + t.data[1] - 1 do
@@ -765,7 +765,7 @@ end
 
 -- Look up a named field in the meta slots of a table type.
 -- Follows spread placeholders (name_id == -1) by resolving their inner type.
---: (Ctx, integer, integer) -> (FieldEntry?, integer?)
+--: (Ctx, integer, integer) -> (FieldEntry | nil, integer | nil)
 function M.table_meta_field(ctx, tbl_tid, name_id)
     local t = ctx.types:get(tbl_tid)
     for i = t.data[5], t.data[5] + t.data[6] - 1 do
@@ -842,7 +842,7 @@ end
 
 -- Narrow a union by field discriminant. positive=true: keep members where field COULD be lit_intern_id.
 -- lit_kind defaults to LIT_STRING for backwards compat.
---: (Ctx, integer, integer, integer, boolean, integer?) -> integer
+--: (Ctx, integer, integer, integer, boolean, integer | nil) -> integer
 function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit_kind)
     lit_kind = lit_kind or LIT_STRING
     tid = M.find(ctx, tid)

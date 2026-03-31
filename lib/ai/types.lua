@@ -21,17 +21,17 @@
 --:: }
 
 --:: ai_response = {
---::   text: string?,
---::   tool_calls: ai_tool_call[]?,
+--::   text: string | nil,
+--::   tool_calls: ai_tool_call[] | nil,
 --::   finish_reason: string,
---::   usage: { input_tokens: integer, output_tokens: integer }?,
+--::   usage: { input_tokens: integer, output_tokens: integer } | nil,
 --:: }
 
 --:: ai_delta = {
---::   text: string?,
---::   tool_call: ai_tool_call?,
---::   finish_reason: string?,
---::   usage: { input_tokens: integer, output_tokens: integer }?,
+--::   text: string | nil,
+--::   tool_call: ai_tool_call | nil,
+--::   finish_reason: string | nil,
+--::   usage: { input_tokens: integer, output_tokens: integer } | nil,
 --:: }
 
 -- ── Embeddings ──────────────────────────────────────────────────────────────────
@@ -40,9 +40,9 @@
 
 --:: ai_embed_many_request = { model: string, values: string[], provider?: ai_provider }
 
---:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer }? }
+--:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer } | nil }
 
---:: ai_embed_many_response = { embeddings: number[][], usage: { input_tokens: integer }? }
+--:: ai_embed_many_response = { embeddings: number[][], usage: { input_tokens: integer } | nil }
 
 -- ── Image generation ────────────────────────────────────────────────────────────
 
@@ -55,11 +55,11 @@
 -- ── Provider ────────────────────────────────────────────────────────────────────
 
 --:: ai_provider = {
---::   generate: (req: ai_request) -> (ai_response?, string?),
---::   stream: (req: ai_request) -> ((() -> ai_delta?)?, string?),
---::   embed?: (req: ai_embed_request) -> (ai_embed_response?, string?),
---::   embed_many?: (req: ai_embed_many_request) -> (ai_embed_many_response?, string?),
---::   generate_image?: (req: ai_image_request) -> (ai_image_response?, string?),
+--::   generate: (req: ai_request) -> (ai_response | nil, string | nil),
+--::   stream: (req: ai_request) -> ((() -> ai_delta | nil) | nil, string | nil),
+--::   embed?: (req: ai_embed_request) -> (ai_embed_response | nil, string | nil),
+--::   embed_many?: (req: ai_embed_many_request) -> (ai_embed_many_response | nil, string | nil),
+--::   generate_image?: (req: ai_image_request) -> (ai_image_response | nil, string | nil),
 --:: }
 
 return {}

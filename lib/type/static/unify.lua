@@ -46,7 +46,7 @@ local find = types_mod.find
 -- Occurs check: does the var at `var_tid` (after find) appear in type `tid`?
 -- var_tid must be the root of a TAG_VAR or TAG_ROWVAR.
 -- seen: set of already-visited type IDs to break cycles (recursive/self-referential types).
---: (ctx: Ctx, var_tid: integer, tid: integer, seen: { [integer]: boolean, ... }?) -> boolean
+--: (ctx: Ctx, var_tid: integer, tid: integer, seen: { [integer]: boolean, ... } | nil) -> boolean
 local function occurs(ctx, var_tid, tid, seen)
     tid = find(ctx, tid)
     if tid == var_tid then return true end
@@ -102,7 +102,7 @@ local function occurs(ctx, var_tid, tid, seen)
 end
 
 -- Adjust levels: lower the level of free vars in `tid` to max_level.
---: (ctx: Ctx, tid: integer, max_level: integer, seen: { [integer]: boolean, ... }?) -> ()
+--: (ctx: Ctx, tid: integer, max_level: integer, seen: { [integer]: boolean, ... } | nil) -> ()
 local function adjust_levels(ctx, tid, max_level, seen)
     tid = find(ctx, tid)
     if seen and seen[tid] then return end
@@ -156,7 +156,7 @@ end
 
 -- Bind a type variable to a type.
 -- Returns true, or false + error message.
---: (ctx: Ctx, var_tid: integer, target_tid: integer) -> (boolean, string?)
+--: (ctx: Ctx, var_tid: integer, target_tid: integer) -> (boolean, string | nil)
 local function bind_var(ctx, var_tid, target_tid)
     -- var_tid is already find()'d to root
     if occurs(ctx, var_tid, target_tid) then
@@ -228,7 +228,7 @@ end
 -- unify(ctx, a, b): check if a is assignable to b, binding vars as needed.
 -- Returns true, or false + error_message [+ detail_table]
 -- seen: coinductive cycle guard — pair already being unified returns true immediately.
---: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean }? }?) -> (boolean, string?, UnifyDetail?)
+--: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean } | nil } | nil) -> (boolean, string | nil, UnifyDetail | nil)
 function M.unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)
@@ -380,7 +380,7 @@ function M.unify(ctx, a, b, seen)
                 local mid = find(ctx, ctx.lists:get(i))
                 local ok2, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
                 if ok2 then return true end
-                --: UnifyDetail?
+                --: UnifyDetail | nil
                 local det = detail
                 if det and det.kind == "mismatch" then
                     local depth = det.path and #det.path or 0
@@ -434,7 +434,7 @@ function M.unify(ctx, a, b, seen)
             local mid = find(ctx, ctx.lists:get(i))
             local ok, _, detail = M.unify(ctx, a, mid, copy_seen(seen))
             if ok then return true end
-            --: UnifyDetail?
+            --: UnifyDetail | nil
             local det = detail
             if det and det.kind == "mismatch" then
                 local depth = det.path and #det.path or 0
@@ -626,7 +626,7 @@ function M.unify(ctx, a, b, seen)
                 local ok, err, detail = M.unify(ctx, aft, bft, seen)
                 if not ok then
                     local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                    --: UnifyDetail?
+                    --: UnifyDetail | nil
                     local d = detail
                     if d and d.kind == "mismatch" then
                         local new_path = { fname }
@@ -798,7 +798,7 @@ end
 -- Read-only unification: checks assignability without mutating type variables.
 -- Returns ok (boolean). Does not bind type variables.
 -- seen: coinductive cycle guard (same semantics as M.unify).
---: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean }? }?) -> boolean
+--: (ctx: Ctx, a: integer, b: integer, seen: { [integer]: { [integer]: boolean } | nil } | nil) -> boolean
 function M.try_unify(ctx, a, b, seen)
     a = find(ctx, a)
     b = find(ctx, b)

@@ -45,18 +45,18 @@
 --:: ErrCtx = { errors: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, warnings: { [integer]: { file: string, line: integer, col: integer, msg: string, ... }, ... }, source_lines: { [string]: { [integer]: string, ... }, ... } }
 
 -- Type alias table stored in scope.type_bindings.
---:: TypeAlias = { body: integer, params: { [integer]: integer, ... }?, raw_bounds: { [integer]: integer, ... }?, resolved_bounds: { [integer]: integer | nil, ... }?, raw_defaults: { [integer]: integer, ... }?, resolved_defaults: { [integer]: integer | nil, ... }?, nominal: boolean, ... }
+--:: TypeAlias = { body: integer, params: { [integer]: integer, ... } | nil, raw_bounds: { [integer]: integer, ... } | nil, resolved_bounds: { [integer]: integer | nil, ... } | nil, raw_defaults: { [integer]: integer, ... } | nil, resolved_defaults: { [integer]: integer | nil, ... } | nil, nominal: boolean, ... }
 
 -- Scope frame: linked list of binding tables.
---:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope?, level: integer }
+--:: Scope = { bindings: { [integer]: integer, ... }, type_bindings: { [integer]: TypeAlias, ... }, annotation_types: { [integer]: integer, ... }, parent: Scope | nil, level: integer }
 
 -- Entry in ctx._multi_ret: tracks which source tuple a binding came from.
 -- call_uid is the AST node ID of the call expression; used to correlate all bindings
 -- from the same call site so narrowing is applied consistently across all return slots.
---:: MultiRetEntry = { source_tid: integer, slot: integer, call_uid: integer? }
+--:: MultiRetEntry = { source_tid: integer, slot: integer, call_uid: integer | nil }
 
 -- Detail table returned by M.unify on error (for nested error paths).
---:: UnifyDetail = { kind: string, path: { [integer]: unknown, ... }?, got: integer, expected: integer, ... }
+--:: UnifyDetail = { kind: string, path: { [integer]: unknown, ... } | nil, got: integer, expected: integer, ... }
 
 ---------------------------------------------------------------------------
 -- Diagnostic error codes (defs.E)
@@ -145,9 +145,9 @@ DefsModule = {
 -- ignore the return value so -> () is the correct external signature.
 ---------------------------------------------------------------------------
 
---:: declare report = (ctx: Ctx, line: integer?, col: integer?, code: integer, args: { [string]: unknown, ... }) -> ()
---:: declare warn = (ctx: Ctx, line: integer?, col: integer?, code: integer, args: { [string]: unknown, ... }) -> ()
---:: declare warn_raw = (ctx: Ctx, line: integer?, col: integer?, msg: string) -> ()
+--:: declare report = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: unknown, ... }) -> ()
+--:: declare warn = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: unknown, ... }) -> ()
+--:: declare warn_raw = (ctx: Ctx, line: integer | nil, col: integer | nil, msg: string) -> ()
 -- snapshot_table: (ctx, TAG_TABLE type_id) -> (field_ids, indexer_pairs, row_var_id, meta_field_ids)
 --:: declare snapshot_table = (ctx: Ctx, type_id: integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
 
@@ -163,21 +163,21 @@ Ctx = {
   ast_lists:    ListPool,
   nodes:        ASTNodeArena,
   pool:         InternPool,
-  ann:          AnnResult?,
+  ann:          AnnResult | nil,
   err:          ErrCtx,
   scope:        Scope,
   numvals:      { [integer]: number, ... },
   prim_index:   { [integer]: integer, ... },
   prim_meta:    { [integer]: integer, ... },
   module_types: { [string]: integer, ... },
-  module_return_tids: { [integer]: { [integer]: integer, ... }, ... }?,
-  cri_loader:   ((Ctx, string) -> integer)?,
-  ffi_hooks:    { process: (unknown, string) -> (), init: (unknown) -> (), ... }?,
-  _last_multi_return:          { [integer]: integer, ... }?,
-  _last_multi_return_override: integer?,
+  module_return_tids: { [integer]: { [integer]: integer, ... }, ... } | nil,
+  cri_loader:   ((Ctx, string) -> integer) | nil,
+  ffi_hooks:    { process: (unknown, string) -> (), init: (unknown) -> (), ... } | nil,
+  _last_multi_return:          { [integer]: integer, ... } | nil,
+  _last_multi_return_override: integer | nil,
   _multi_ret:      { [integer]: MultiRetEntry, ... },
   _ann_warn_line:  integer,
-  _ann_consumed:   { [integer]: boolean, ... }?,
+  _ann_consumed:   { [integer]: boolean, ... } | nil,
   -- Constraint arrays are intentionally heterogeneous: values may be integer,
   -- string (op_name in C_ARITH), or { [integer]: integer, ... } (arg_tids in C_CALLABLE).
   -- Using any here because the type system cannot track per-index types in a table array.
@@ -193,7 +193,7 @@ Ctx = {
   T_NEVER:      integer,
   T_INTEGER:    integer,
   T_UNKNOWN:    integer,
-  T_FFI_C:      integer?,
+  T_FFI_C:      integer | nil,
   filename:     string,
   -- LSP / annotation data fields populated by constrain.lua
   return_vars:     { [integer]: integer, ... },
@@ -203,9 +203,9 @@ Ctx = {
   def_sites:       { [integer]: { line: integer, col: integer, ... }, ... },
   require_sources: { [integer]: string, ... },
   type_origins:    { [integer]: string, ... },
-  _resolving_func_ann_scope: boolean?,
-  _in_match_arm:             boolean?,
-  _allow_unapplied_constructors: boolean?,
+  _resolving_func_ann_scope: boolean | nil,
+  _in_match_arm:             boolean | nil,
+  _allow_unapplied_constructors: boolean | nil,
   _forall_bounds:  { [integer]: integer, ... },
   lit_cache:       { [integer]: integer, ... },
   ...

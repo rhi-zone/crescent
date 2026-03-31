@@ -59,7 +59,7 @@ end
 
 -- Send an HTTPS request and return the full response.
 -- Returns (nil, errmsg) on any failure.
---: (http_request) -> http_response?, string?
+--: (http_request) -> http_response | nil, string | nil
 M.request = function(req)
 	req.body = req.body or ""
 	local client, err = socket.create("inet", "stream", "tcp")
@@ -143,7 +143,7 @@ end
 --   recv_fn() -> string?, string? — yields chunks; nil signals end or error.
 --   close_fn() -> nil             — releases TLS and socket resources.
 -- On failure: returns (nil, errmsg).
---: (http_request) -> ((() -> string?, string?)?, (() -> nil)?) | (nil, string?)
+--: (http_request) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | nil) | (nil, string | nil)
 M.stream = function(req)
 	req.body = req.body or ""
 	local client, err = socket.create("inet", "stream", "tcp")

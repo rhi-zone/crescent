@@ -9,7 +9,7 @@ local M = {}
 
 --[[@param filename string]]
 --[[@return string? mimetype]]
---: (string) -> string?
+--: (string) -> string | nil
 M.by_name = function(filename)
 	return by_name.mimetype(filename)
 end
@@ -17,7 +17,7 @@ end
 --[[@param buffer string]]
 --[[@param pos integer?]]
 --[[@return string? ext, string? mimetype]]
---: (string, integer?) -> string?, string?
+--: (string, integer | nil) -> string | nil, string | nil
 M.by_contents = function(buffer, pos)
 	return by_contents.mimetype(buffer, pos)
 end
@@ -25,7 +25,7 @@ end
 --[[@param filename string]]
 --[[@param buffer string]]
 --[[@return string? mimetype]]
---: (string, string) -> string?
+--: (string, string) -> string | nil
 M.detect = function(filename, buffer)
 	local mt = by_name.mimetype(filename)
 	if mt then return mt end

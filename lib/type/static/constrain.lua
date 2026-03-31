@@ -75,7 +75,7 @@ local band            = require("bit").band
 local bor             = require("bit").bor
 
 -- Compute field flags, auto-setting FLAG_PRIVATE for `_`-prefixed names.
---: (Ctx, integer, integer?) -> integer
+--: (Ctx, integer, integer | nil) -> integer
 local function field_flags(ctx, name_id, base_flags)
     base_flags = base_flags or 0
     if type(base_flags) == "boolean" then
@@ -153,13 +153,13 @@ M.C_OR        = C_OR
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function report(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     return errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
---: (Ctx, integer?, integer?, integer, { [string]: unknown, ... }) -> ()
+--: (Ctx, integer | nil, integer | nil, integer, { [string]: unknown, ... }) -> ()
 local function warn(ctx, line, col, code, args)
     local msg = errors_mod.format_diag(code, args)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
@@ -181,7 +181,7 @@ end
 
 local resolve_annotation_type
 
---: (Ctx, integer, { [integer]: boolean, ... }?) -> integer
+--: (Ctx, integer, { [integer]: boolean, ... } | nil) -> integer
 resolve_annotation_type = function(ctx, ann_tid, seen)
     if not ctx.ann then return ctx.T_ANY end
     seen = seen or {}
@@ -912,7 +912,7 @@ end
 -- (intersection in the annotation arena) when there are multiple, the single entry
 -- as-is when there is exactly one, or nil when there are none.
 -- "Preceding-line" means lines strictly before the declaration line (not inline).
---: (Ctx, integer) -> { kind: integer, type_id: integer, ... }?
+--: (Ctx, integer) -> { kind: integer, type_id: integer, ... } | nil
 local function collect_preceding_run(ctx, decl_line)
     if not ctx.ann then return nil end
     local results = ctx.ann.results
@@ -943,7 +943,7 @@ local function collect_preceding_run(ctx, decl_line)
     return { kind = ANN_TYPE, type_id = inter_id }
 end
 
---: (Ctx, integer) -> { kind: integer, type_id: integer, ... }?
+--: (Ctx, integer) -> { kind: integer, type_id: integer, ... } | nil
 local function get_ann(ctx, line)
     if not ctx.ann then return nil end
     local consumed = ctx._ann_consumed
@@ -1298,7 +1298,7 @@ end
 
 -- Generate constraints for a function body.
 -- Returns the function type_id.
---: (Ctx, integer, integer, integer, integer, boolean, integer?) -> integer
+--: (Ctx, integer, integer, integer, integer, boolean, integer | nil) -> integer
 gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local fn_scope = env_mod.child(ctx.scope)
     local param_tids = {} --: { [integer]: integer, ... }
@@ -1451,7 +1451,7 @@ end
 -- isolation, collecting errors. If any overload produces errors, re-emits them
 -- tagged with "overload N: <type> — <message>".
 -- Returns the intersection_tid so the caller can bind the variable to it.
---: (Ctx, integer, integer, integer, integer, boolean, integer, integer?, integer?) -> integer
+--: (Ctx, integer, integer, integer, integer, boolean, integer, integer | nil, integer | nil) -> integer
 local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
                                                 intersection_tid, node_line, node_col)
     local solve_mod = require("lib.type.static.solve")
@@ -1552,7 +1552,7 @@ end
 --
 -- Returns the evaluated type id (a concrete union-of-tuples), or nil if not
 -- applicable (non-spread return, non-intrinsic inner, or args still unresolved).
---: (Ctx, integer, { [integer]: integer, ... }) -> integer?
+--: (Ctx, integer, { [integer]: integer, ... }) -> integer | nil
 local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids)
     local callee_t = ctx.types:get(types_mod.find(ctx, inst_callee_tid))
     if callee_t.tag ~= TAG_FUNCTION or callee_t.data[3] ~= 1 then return nil end
@@ -1603,7 +1603,7 @@ end
 -- variables. Returns the concrete ret-slot type id, or nil if not resolvable.
 -- Used to detect union-of-tuples return types (e.g. string.find, io.open) so
 -- that LOCAL_STMT can correlate bindings at narrowing time.
---: (Ctx, ASTNode) -> integer?
+--: (Ctx, ASTNode) -> integer | nil
 local function peek_callee_ret_union(ctx, callee_n)
     local fn_tid = nil
     if callee_n.kind == NODE_IDENTIFIER then
@@ -1665,7 +1665,7 @@ end
 
 -- Extract the type at slot N from a TAG_TUPLE or union-of-TAG_TUPLEs at constraint-gen time.
 -- Returns nil when tid is TAG_VAR, nil, or not a tuple/union-of-tuples.
---: (Ctx, integer?, integer) -> integer?
+--: (Ctx, integer | nil, integer) -> integer | nil
 local function eager_slot(ctx, tid, slot)
     if not tid then return nil end
     local t = ctx.types:get(tid)
@@ -2018,7 +2018,7 @@ end
 
 -- Inject type aliases from a required module into the current scope.
 -- aliases: { [name_string] = { body, params, nominal, resolved_bounds } } | nil
---: (Ctx, { [string]: TypeAlias, ... }?) -> ()
+--: (Ctx, { [string]: TypeAlias, ... } | nil) -> ()
 local function inject_imported_aliases(ctx, aliases)
     if not aliases then return end
     for name, alias in pairs(aliases) do

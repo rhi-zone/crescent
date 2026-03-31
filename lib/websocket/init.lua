@@ -40,10 +40,10 @@ mod.error = frame.error
 mod.frame = frame
 
 -- Expose frame codec for testing and advanced use (backward compat).
---: (table) -> string?
+--: (table) -> string | nil
 mod._encode = frame.encode
 -- Backward-compat: decode(packet, acc?) returning msg, fin_or_err, mask, mi, remaining_len
---: (string, table?) -> table?, boolean|integer, table?, integer?, integer
+--: (string, table | nil) -> table | nil, boolean|integer, table | nil, integer | nil, integer
 mod._decode = function(packet, acc)
 	return frame._decode_full(packet, acc)
 end

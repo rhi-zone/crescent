@@ -34,7 +34,7 @@ function M.run_task(g, executors, hooks, task_id)
 	if hooks and hooks.on_task then hooks.on_task(task) end
 end
 
---: (unknown, any?) -> unknown, unknown
+--: (unknown, any | nil) -> unknown, unknown
 function M.run(task_def, opts)
 	opts = opts or {}
 	local opts_any  = opts --: any

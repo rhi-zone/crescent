@@ -55,7 +55,7 @@ local M = {}
 --     — `x.field` is truthy (positive=true means: x.field is non-nil in the truthy branch)
 --   { kind = "enum_eq", name_id = int, member_tid = int, positive = bool }
 --     — `x == Enum.Member`: narrows x to the enum member type (preserves EnumName.Member display)
---: (Ctx, integer) -> NarrowInfo?
+--: (Ctx, integer) -> NarrowInfo | nil
 local function extract_narrowing(ctx, nid)
     local n = ctx.nodes:get(nid)
     if not n then return nil end
@@ -473,7 +473,7 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
 end
 
 -- Extract the name_id targeted by a narrowing info struct.
---: (NarrowInfo) -> integer?
+--: (NarrowInfo) -> integer | nil
 local function info_name_id(info)
     if info.kind == "nil_check" or info.kind == "type_check" or info.kind == "lit_eq"
         or info.kind == "guard_check" then
@@ -508,7 +508,7 @@ end
 -- from the surviving arms of the source union-of-tuples.
 -- Return true if a concrete type is considered truthy (not nil, not literal false).
 -- Returns nil if uncertain (e.g. TAG_VAR — not yet solved).
---: (Ctx, integer) -> boolean?
+--: (Ctx, integer) -> boolean | nil
 local function arm_slot_truthy(ctx, tid)
     local t = ctx.types:get(types_mod.find(ctx, tid))
     if t.tag == TAG_NIL   then return false end
@@ -576,7 +576,7 @@ end
 -- Apply a single narrowing info to the 'narrowed' map.
 -- When narrowed[name_id] already has an entry (e.g. from a prior arm of `and`/`or`),
 -- apply the new narrowing to the already-narrowed type so both constraints compose.
---: (Ctx, NarrowInfo?, { [integer]: integer, ... }, boolean) -> ()
+--: (Ctx, NarrowInfo | nil, { [integer]: integer, ... }, boolean) -> ()
 local function record_narrowing(ctx, info, narrowed, is_truthy)
     if not info then return end
     local name_id = info_name_id(info) or 0
@@ -647,7 +647,7 @@ end
 
 -- Extract narrowing info from a test expression node, without looking up types.
 -- Exposed for constrain.lua to reuse per-arm narrowing info.
---: (Ctx, integer) -> NarrowInfo?
+--: (Ctx, integer) -> NarrowInfo | nil
 function M.extract_narrowing_info(ctx, nid)
     return extract_narrowing(ctx, nid)
 end

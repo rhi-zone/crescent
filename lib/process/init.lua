@@ -56,7 +56,7 @@ local function decode_status(status)
   return 128 + lo
 end
 
---: (string, string[]?, { stdin: string?, cwd: string?, env: { [string]: string }? }?) -> number, string, string | nil, string
+--: (string, string[] | nil, { stdin: string | nil, cwd: string | nil, env: { [string]: string } | nil } | nil) -> number, string, string | nil, string
 function mod.exec(cmd, args, opts)
   opts = opts or {}
 
@@ -174,7 +174,7 @@ function handle:wait()
   return decode_status(int1[0])
 end
 
---: (string, string[]?, { cwd: string?, env: { [string]: string }? }?) -> { pid: number, kill: (self, number?) -> nil, wait: (self) -> number } | nil, string?
+--: (string, string[] | nil, { cwd: string | nil, env: { [string]: string } | nil } | nil) -> { pid: number, kill: (self, number | nil) -> nil, wait: (self) -> number } | nil, string | nil
 function mod.spawn(cmd, args, opts)
   opts = opts or {}
 

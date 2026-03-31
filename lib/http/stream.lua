@@ -5,7 +5,7 @@
 
 local mod = {}
 
---:: http_stream = { _recv: () -> string?, _buf: string, _pos: integer, _headers: { [string]: string[] }?, _status: integer?, _status_text: string?, _version: string?, _eof: boolean }
+--:: http_stream = { _recv: () -> string | nil, _buf: string, _pos: integer, _headers: { [string]: string[] } | nil, _status: integer | nil, _status_text: string | nil, _version: string | nil, _eof: boolean }
 
 local mt = { __index = {} }
 
@@ -36,13 +36,13 @@ end
 -- NOTE: annotations work around typechecker limitation — narrowing doesn't
 -- apply to locals assigned from function call returns (TAG_VAR not yet resolved
 -- at narrowing time). See TODO.md.
---: (http_stream, string) -> integer?
+--: (http_stream, string) -> integer | nil
 local function fill_until(self, pattern)
 	while true do
 		local pos = self._buf:find(pattern, self._pos, true)
 		if pos then return pos end
 		if self._eof then return nil end
-		--: string?
+		--: string | nil
 		local recv_result = self._recv()
 		if not recv_result then
 			self._eof = true
@@ -58,7 +58,7 @@ end
 -- RFC 9112 §5 — Field lines
 function mt.__index:read_headers()
 	if self._headers then return self._headers end
-	--: integer?
+	--: integer | nil
 	local pos = fill_until(self, "\r\n\r\n")
 	if not pos then return nil, "incomplete headers" end
 
@@ -107,7 +107,7 @@ function mt.__index:read_body()
 
 	local cl = headers["content-length"]
 	if cl then
-		--: number?
+		--: number | nil
 		local len = tonumber(cl[1])
 		if not len then return nil, "invalid content-length" end
 		-- fill buffer until we have enough
@@ -147,7 +147,7 @@ function mt.__index:chunks()
 	return function()
 		if done then return nil end
 		-- read chunk size line
-		--: integer?
+		--: integer | nil
 		local pos = fill_until(self, "\r\n")
 		if not pos then done = true; return nil end
 
@@ -159,7 +159,7 @@ function mt.__index:chunks()
 		local hex = size_line:match("^([0-9a-fA-F]+)")
 		if not hex then done = true; return nil end
 
-		--: number?
+		--: number | nil
 		local size = tonumber(hex, 16)
 		if not size or size == 0 then done = true; return nil end
 
@@ -193,7 +193,7 @@ function mt.__index:events()
 	return function()
 		while true do
 			-- try to find next line
-			--: integer?
+			--: integer | nil
 			local pos = fill_until(self, "\n")
 			if not pos then
 				-- EOF: flush pending event

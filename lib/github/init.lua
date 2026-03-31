@@ -18,7 +18,7 @@ local function http()
 	return _http
 end
 
---:: github_client = { token: string? }
+--:: github_client = { token: string | nil }
 
 local M = {}
 
@@ -42,7 +42,7 @@ end
 -- method: HTTP method string (e.g. "GET", "POST", "PATCH")
 -- path:   API path starting with "/" (e.g. "/repos/owner/repo/branches")
 -- body:   optional request body string (already JSON-encoded)
---: (github_client, string, string, string?) -> unknown, string?
+--: (github_client, string, string, string | nil) -> unknown, string | nil
 local function request(self, method, path, body)
 	local headers = make_headers(self)
 	if body then
@@ -80,21 +80,21 @@ end
 
 -- List branches for a repository.
 -- https://docs.github.com/en/rest/branches/branches#list-branches
---: (github_client, string, string) -> unknown, string?
+--: (github_client, string, string) -> unknown, string | nil
 client_mt.list_branches = function(self, owner, repo)
 	return request(self, "GET", "/repos/" .. owner .. "/" .. repo .. "/branches")
 end
 
 -- Get a branch.
 -- https://docs.github.com/en/rest/branches/branches#get-a-branch
---: (github_client, string, string, string) -> unknown, string?
+--: (github_client, string, string, string) -> unknown, string | nil
 client_mt.get_branch = function(self, owner, repo, branch)
 	return request(self, "GET", "/repos/" .. owner .. "/" .. repo .. "/branches/" .. branch)
 end
 
 -- Rename a branch.
 -- https://docs.github.com/en/rest/branches/branches#rename-a-branch
---: (github_client, string, string, string, string) -> unknown, string?
+--: (github_client, string, string, string, string) -> unknown, string | nil
 client_mt.rename_branch = function(self, owner, repo, old_name, new_name)
 	local body, err = json.encode({ new_name = new_name })
 	if not body then
@@ -105,7 +105,7 @@ end
 
 -- Construct a new GitHub API client.
 -- token is a GitHub personal access token; pass nil for unauthenticated (public API only).
---: (string?) -> github_client
+--: (string | nil) -> github_client
 M.new = function(token)
 	return setmetatable({ token = token }, client_mt)
 end

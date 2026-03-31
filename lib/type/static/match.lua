@@ -39,7 +39,7 @@ local M = {}
 -- Returns the resolved type_id, or nil if it cannot be expanded
 -- (undefined alias, arity error, or cycle detected via seen_named).
 -- seen_named: { [ty_id] = true } — prevents re-expanding the same named node.
---: (Ctx, integer, { [integer]: boolean, ... }) -> integer?
+--: (Ctx, integer, { [integer]: boolean, ... }) -> integer | nil
 local function expand_named(ctx, ty_id, seen_named)
     if seen_named[ty_id] then return nil end
     local t = ctx.types:get(ty_id)
@@ -74,7 +74,7 @@ end
 --   nil       — neutral: open member that doesn't mention this field (skip, don't intersect)
 -- The `seen_named` table prevents infinite expansion of recursive named types.
 -- The `pat_seen` table is the match_pattern coinductive seen-set (passed through).
---: (Ctx, integer, integer, { [integer]: boolean, ... }, { [string]: boolean, ... }) -> integer?
+--: (Ctx, integer, integer, { [integer]: boolean, ... }, { [string]: boolean, ... }) -> integer | nil
 local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen)
     ty_id = types_mod.find(ctx, ty_id)
     local t = ctx.types:get(ty_id)
@@ -178,7 +178,7 @@ end
 -- Returns (ok, bindings_table_or_nil).
 -- bindings: { [name_id] -> type_id } for named patterns (type variables).
 -- seen: { ["ty_id:pat_id"] = true } coinductive cycle-detection set.
---: (Ctx, integer, integer, { [string]: boolean, ... }?) -> (boolean, { [integer]: integer, ... }?)
+--: (Ctx, integer, integer, { [string]: boolean, ... } | nil) -> (boolean, { [integer]: integer, ... } | nil)
 function M.match_pattern(ctx, ty_id, pat_id, seen)
     seen = seen or {}
 
@@ -263,7 +263,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
     if pt.tag == TAG_TABLE then
         -- If the input is a TAG_TABLE, use direct structural matching.
         if tt.tag == TAG_TABLE then
-            --: { [integer]: integer, ... }?
+            --: { [integer]: integer, ... } | nil
             local bindings = {}
             -- Track which field name_ids are explicitly matched by the pattern.
             --: { [integer]: boolean, ... }
@@ -386,7 +386,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             end
             seen[cycle_key] = true
 
-            --: { [integer]: integer, ... }?
+            --: { [integer]: integer, ... } | nil
             local bindings = {}
             local seen_named = {}  -- per-field-lookup expansion guard
 
@@ -514,7 +514,7 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
     if pt.tag == TAG_FUNCTION then
         -- The input must also be a function
         if tt.tag ~= TAG_FUNCTION then return false, nil end
-        --: { [integer]: integer, ... }?
+        --: { [integer]: integer, ... } | nil
         local bindings = {}
         -- Match params
         local ppl = pt.data[1]  -- param count in pattern
@@ -726,7 +726,7 @@ end
 -- mt_id: type_id of a TAG_MATCH_TYPE slot
 -- seen:  { [mt_id] -> true } cycle-detection set (shared across recursive calls)
 -- Returns the result type_id of the first matching arm, or T_NEVER.
---: (Ctx, integer, { [integer]: boolean, ... }?) -> integer
+--: (Ctx, integer, { [integer]: boolean, ... } | nil) -> integer
 function M.evaluate(ctx, mt_id, seen)
     seen = seen or {}
 

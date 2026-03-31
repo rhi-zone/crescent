@@ -40,10 +40,10 @@ mod.array = function(item) return { type = "array", item = item } end
 --: <K, V>(Schema<K>, Schema<V>) -> Schema<table<K, V>>
 mod.dictionary = function(key, value) return { type = "dictionary", key = key, value = value } end
 
---: <T>(Schema<T>) -> Schema<T?>
+--: <T>(Schema<T>) -> Schema<T | nil>
 mod.optional = function(t) return { type = "optional", inner = t } end
 
---: <T, U, V, W, X, Y, Z, A, B>(Schema<T>, Schema<U>?, Schema<V>?, Schema<W>?, Schema<X>?, Schema<Y>?, Schema<Z>?, Schema<A>?, ...Schema<B>) -> Schema<T | U | V | W | X | Y | Z | A | B>
+--: <T, U, V, W, X, Y, Z, A, B>(Schema<T>, Schema<U> | nil, Schema<V> | nil, Schema<W> | nil, Schema<X> | nil, Schema<Y> | nil, Schema<Z> | nil, Schema<A> | nil, ...Schema<B>) -> Schema<T | U | V | W | X | Y | Z | A | B>
 mod.any_of = function(t, u, v, w, x, y, z, a, ...) return { type = "any_of", types = { t, u, v, w, x, y, z, a, ... } } end
 
 -- NOTE: all_of should return an intersection type; not yet expressible.

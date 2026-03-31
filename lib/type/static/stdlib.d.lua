@@ -10,9 +10,9 @@
 
 --:: declare print = (...any) -> ()
 --:: declare tostring = (val: any) -> string
---:: declare tonumber = (val: any, base: any?) -> number?
+--:: declare tonumber = (val: any, base: any | nil) -> number | nil
 --:: declare type = (val: any) -> string
---:: declare error = (msg: any, level: any?) -> never
+--:: declare error = (msg: any, level: any | nil) -> never
 --:: declare assert = (val: any, ...any) -> any
 --:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 --:: declare pcall = <F: function>(f: F, ...any) -> ...(PcallReturn<F>)
@@ -23,7 +23,7 @@
 --:: declare rawset = (t: any, k: any, v: any) -> any
 --:: declare rawequal = (a: any, b: any) -> boolean
 --:: declare rawlen = (t: any) -> integer
---:: declare unpack = (t: any, i: any?, j: any?) -> any
+--:: declare unpack = (t: any, i: any | nil, j: any | nil) -> any
 --:: declare pairs = <T>(t: T) -> ...(PairsReturn<T>)
 --:: declare ipairs = <T>(t: T) -> ...(IpairsReturn<T>)
 
@@ -31,17 +31,17 @@
 --:: IpairsReturn<T> = match T { { ...[%K]: %V } => match K { number => (integer, V), _ => never } }
 --:: Keys<T>         = match T { { ...[%K]: %V } => K }
 --:: Values<T>       = match T { { ...[%K]: %V } => V }
---:: declare next = (t: any, k: any?) -> (any, any)
+--:: declare next = (t: any, k: any | nil) -> (any, any)
 --:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
 --:: declare getmetatable = <T>(t: T) -> MetaOf<T>
---:: declare collectgarbage = (opt: any?, arg: any?) -> any
+--:: declare collectgarbage = (opt: any | nil, arg: any | nil) -> any
 --:: declare gcinfo = () -> integer
---:: declare dofile = (filename: any?) -> any
---:: declare loadfile = (filename: any?) -> (any, any?)
---:: declare loadstring = (s: string, chunkname: any?) -> (any, any?)
---:: declare load = (chunk: any, chunkname: any?, mode: any?, env: any?) -> (any, any?)
---:: declare newproxy = (mt: any?) -> any
+--:: declare dofile = (filename: any | nil) -> any
+--:: declare loadfile = (filename: any | nil) -> (any, any | nil)
+--:: declare loadstring = (s: string, chunkname: any | nil) -> (any, any | nil)
+--:: declare load = (chunk: any, chunkname: any | nil, mode: any | nil, env: any | nil) -> (any, any | nil)
+--:: declare newproxy = (mt: any | nil) -> any
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
 --:: module "ffi": {
@@ -52,12 +52,12 @@
 --::   typeof: (string) -> unknown,
 --::   copy:   (unknown, unknown, integer) -> nil,
 --::   fill:   (unknown, integer) -> nil,
---::   string: (unknown, integer?) -> string,
+--::   string: (unknown, integer | nil) -> string,
 --::   C:      $FfiC,
 --:: }
 --:: module "bit": {
 --::   tobit:   (x: number) -> integer,
---::   tohex:   (x: integer, n: integer?) -> string,
+--::   tohex:   (x: integer, n: integer | nil) -> string,
 --::   bnot:    (x: integer) -> integer,
 --::   band:    (x: integer, ...integer) -> integer,
 --::   bor:     (x: integer, ...integer) -> integer,
@@ -81,18 +81,18 @@
 --:: declare string = {
 --::     format:  (fmt: string, ...any) -> string,
 --::     len:     (s: string) -> integer,
---::     sub:     (s: string, i: integer, j: any?) -> string,
---::     find:    (s: string, pattern: string, init: any?, plain: any?) -> ...((integer, integer) | (nil, nil)),
---::     match:   (s: string, pattern: string, init: any?) -> any,
+--::     sub:     (s: string, i: integer, j: any | nil) -> string,
+--::     find:    (s: string, pattern: string, init: any | nil, plain: any | nil) -> ...((integer, integer) | (nil, nil)),
+--::     match:   (s: string, pattern: string, init: any | nil) -> any,
 --::     gmatch:  (s: string, pattern: string) -> any,
---::     gsub:    (s: string, pattern: string, repl: any, n: any?) -> (string, integer),
---::     rep:     (s: string, n: integer, sep: any?) -> string,
---::     byte:    (s: string, i: any?, j: any?) -> ...(integer),
+--::     gsub:    (s: string, pattern: string, repl: any, n: any | nil) -> (string, integer),
+--::     rep:     (s: string, n: integer, sep: any | nil) -> string,
+--::     byte:    (s: string, i: any | nil, j: any | nil) -> ...(integer),
 --::     char:    (...integer) -> string,
 --::     upper:   (s: string) -> string,
 --::     lower:   (s: string) -> string,
 --::     reverse: (s: string) -> string,
---::     dump:    (fn: any, strip: any?) -> string
+--::     dump:    (fn: any, strip: any | nil) -> string
 --:: }
 
 ---------------------------------------------------------------------------
@@ -101,11 +101,11 @@
 
 --:: declare table = {
 --::     insert:  (t: any, v: any) -> (),
---::     remove:  (t: any, pos: any?) -> any,
---::     concat:  (t: any, sep: any?, i: any?, j: any?) -> string,
---::     sort:    (t: any, comp: any?) -> (),
---::     unpack:  (t: any, i: any?, j: any?) -> any,
---::     move:    (a1: any, f: integer, e: integer, t: integer, a2: any?) -> any,
+--::     remove:  (t: any, pos: any | nil) -> any,
+--::     concat:  (t: any, sep: any | nil, i: any | nil, j: any | nil) -> string,
+--::     sort:    (t: any, comp: any | nil) -> (),
+--::     unpack:  (t: any, i: any | nil, j: any | nil) -> any,
+--::     move:    (a1: any, f: integer, e: integer, t: integer, a2: any | nil) -> any,
 --::     maxn:    (t: any) -> integer
 --:: }
 
@@ -120,7 +120,7 @@
 --::     sqrt:       (x: number) -> number,
 --::     max:        (x: number, ...number) -> number,
 --::     min:        (x: number, ...number) -> number,
---::     random:     (m: any?, n: any?) -> number,
+--::     random:     (m: any | nil, n: any | nil) -> number,
 --::     randomseed: (x: number) -> (),
 --::     sin:        (x: number) -> number,
 --::     cos:        (x: number) -> number,
@@ -130,7 +130,7 @@
 --::     atan:       (x: number) -> number,
 --::     atan2:      (y: number, x: number) -> number,
 --::     exp:        (x: number) -> number,
---::     log:        (x: number, base: any?) -> number,
+--::     log:        (x: number, base: any | nil) -> number,
 --::     log10:      (x: number) -> number,
 --::     pow:        (x: number, y: number) -> number,
 --::     fmod:       (x: number, y: number) -> number,
@@ -148,12 +148,12 @@
 ---------------------------------------------------------------------------
 
 --:: declare io = {
---::     open:    (path: string, mode: any?) -> (any, any?),
---::     close:   (file: any?) -> any,
+--::     open:    (path: string, mode: any | nil) -> (any, any | nil),
+--::     close:   (file: any | nil) -> any,
 --::     write:   (...any) -> any,
 --::     read:    (...any) -> any,
---::     lines:   (filename: any?, ...any) -> any,
---::     popen:   (cmd: string, mode: any?) -> (any, any?),
+--::     lines:   (filename: any | nil, ...any) -> any,
+--::     popen:   (cmd: string, mode: any | nil) -> (any, any | nil),
 --::     tmpfile: () -> any,
 --::     stdin:   any,
 --::     stdout:  any,
@@ -165,16 +165,16 @@
 ---------------------------------------------------------------------------
 
 --:: declare os = {
---::     time:     (t: any?) -> integer,
+--::     time:     (t: any | nil) -> integer,
 --::     clock:    () -> number,
---::     date:     (format: any?, time: any?) -> any,
---::     exit:     (code: any?, close: any?) -> (),
---::     getenv:   (name: string) -> string?,
+--::     date:     (format: any | nil, time: any | nil) -> any,
+--::     exit:     (code: any | nil, close: any | nil) -> (),
+--::     getenv:   (name: string) -> string | nil,
 --::     difftime: (t2: number, t1: number) -> number,
---::     rename:   (oldname: string, newname: string) -> (boolean, any?),
---::     remove:   (path: string) -> (boolean, any?),
+--::     rename:   (oldname: string, newname: string) -> (boolean, any | nil),
+--::     remove:   (path: string) -> (boolean, any | nil),
 --::     tmpname:  () -> string,
---::     execute:  (cmd: any?) -> (any, any?, integer?)
+--::     execute:  (cmd: any | nil) -> (any, any | nil, integer | nil)
 --:: }
 
 ---------------------------------------------------------------------------
@@ -196,13 +196,13 @@
 ---------------------------------------------------------------------------
 
 --:: declare debug = {
---::     getinfo:      (thread_or_f: any, what: any?) -> any,
---::     traceback:    (thread_or_msg: any?, msg: any?, level: any?) -> string,
---::     sethook:      (thread_or_fn: any, mask: any, count: any?) -> (),
+--::     getinfo:      (thread_or_f: any, what: any | nil) -> any,
+--::     traceback:    (thread_or_msg: any | nil, msg: any | nil, level: any | nil) -> string,
+--::     sethook:      (thread_or_fn: any, mask: any, count: any | nil) -> (),
 --::     getlocal:     (level: any, local_: integer) -> (string, any),
 --::     setlocal:     (level: any, local_: integer, value: any) -> string,
 --::     getmetatable: (t: any) -> any,
---::     setmetatable: (t: any, mt: any?) -> any
+--::     setmetatable: (t: any, mt: any | nil) -> any
 --:: }
 
 ---------------------------------------------------------------------------

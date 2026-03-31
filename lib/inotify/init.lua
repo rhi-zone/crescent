@@ -86,7 +86,7 @@ local inotify = {
 }
 inotify.__index = inotify
 
---: (inotify, epoll, number?) -> inotify
+--: (inotify, epoll, number | nil) -> inotify
 --[[@param epoll epoll]] --[[@param flags? inotify_flag]]
 inotify.new = function (self, epoll, flags)
 	local fd
@@ -110,7 +110,7 @@ inotify.new = function (self, epoll, flags)
 	--[[FIXME: destructor]]
 	return setmetatable(instance, self)
 end
---: (epoll, number?) -> inotify
+--: (epoll, number | nil) -> inotify
 --[[@param epoll epoll]] --[[@param flags? inotify_flag]]
 mod.new = function (epoll, flags) return inotify:new(epoll, flags) end
 

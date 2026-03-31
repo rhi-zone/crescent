@@ -5,15 +5,15 @@ end
 local M = {}
 
 --:: task_status = "pending" | "running" | "done" | "error"
---:: task = { id: string, type: string, input: unknown, parent_id: string?, status: task_status, output: unknown, error: string?, spawned: string[], log: string[] }
---:: graph = { tasks: { [string]: task }, root: string?, _seq: integer }
+--:: task = { id: string, type: string, input: unknown, parent_id: string | nil, status: task_status, output: unknown, error: string | nil, spawned: string[], log: string[] }
+--:: graph = { tasks: { [string]: task }, root: string | nil, _seq: integer }
 
 --: () -> graph
 function M.new()
 	return { tasks = {}, root = nil, _seq = 0 }
 end
 
---: (graph, any, string?) -> string
+--: (graph, any, string | nil) -> string
 function M.add(g, task_def, parent_id)
 	g._seq = g._seq + 1
 	local id = "task_" .. g._seq
@@ -38,7 +38,7 @@ function M.add(g, task_def, parent_id)
 	return id
 end
 
---: (graph, string) -> task?
+--: (graph, string) -> task | nil
 function M.get(g, id)
 	return g.tasks[id]
 end

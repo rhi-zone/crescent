@@ -19,7 +19,7 @@ local iter = {}
 ----------------------------------------------------------------
 
 --- Integer range iterator. Infers direction from start/stop when step is nil.
---: (number, number, number?) -> () -> number?
+--: (number, number, number | nil) -> () -> number | nil
 function iter.range(start, stop, step)
   if step == 0 then error("iter.range: step cannot be 0") end
   step = step or (start <= stop and 1 or -1)
@@ -297,7 +297,7 @@ function iter.all(pred, f, s, c)
 end
 
 --- First value matching predicate, or nil.
---: ((any) -> boolean, (any, any) -> any, any, any) -> any?
+--: ((any) -> boolean, (any, any) -> any, any, any) -> any | nil
 function iter.find(pred, f, s, c)
   while true do
     local v = f(s, c)

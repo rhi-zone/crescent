@@ -204,7 +204,7 @@ validators.all_of     = function(s, x, path)
 	return x
 end
 
---: <T>(Schema<T>, unknown) -> T?, string?
+--: <T>(Schema<T>, unknown) -> T | nil, string | nil
 mod.validate = function(schema, x)
 	return do_validate(schema, x, nil)
 end
@@ -355,7 +355,7 @@ coercers.all_of     = function(s, x, path)
 	return cur
 end
 
---: <T>(Schema<T>, unknown) -> T?, string?
+--: <T>(Schema<T>, unknown) -> T | nil, string | nil
 mod.coerce = function(schema, x)
 	return do_coerce(schema, x, nil)
 end

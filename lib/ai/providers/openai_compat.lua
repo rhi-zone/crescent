@@ -116,7 +116,7 @@ mod.create = function(config)
 
 	local provider = {}
 
-	--: (ai_request) -> ai_response?, string?
+	--: (ai_request) -> ai_response | nil, string | nil
 	provider.generate = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -148,7 +148,7 @@ mod.create = function(config)
 		return parse_chat_response(res.body)
 	end
 
-	--: (ai_request) -> (() -> ai_delta?)?, string?
+	--: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
 	provider.stream = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -266,7 +266,7 @@ mod.create = function(config)
 	end
 
 	--- Embed a single value.
-	--: (ai_embed_request) -> ai_embed_response?, string?
+	--: (ai_embed_request) -> ai_embed_response | nil, string | nil
 	provider.embed = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -306,7 +306,7 @@ mod.create = function(config)
 	end
 
 	--- Embed multiple values.
-	--: (ai_embed_many_request) -> ai_embed_many_response?, string?
+	--: (ai_embed_many_request) -> ai_embed_many_response | nil, string | nil
 	provider.embed_many = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end
@@ -353,7 +353,7 @@ mod.create = function(config)
 	end
 
 	--- Generate an image.
-	--: (ai_image_request) -> ai_image_response?, string?
+	--: (ai_image_request) -> ai_image_response | nil, string | nil
 	provider.generate_image = function(req)
 		local api_key, err = get_api_key()
 		if not api_key then return nil, err end

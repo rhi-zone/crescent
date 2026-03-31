@@ -25,12 +25,12 @@ end
 
 -- Session cache: absolute_filename → { err_ctx, ctx, export_tid, cri_bytes }
 -- Simple per-session, no invalidation. Cleared by M.clear_cache().
---:: SessionEntry = { err_ctx: ErrCtx, ctx: Ctx?, export_tid: integer?, cri_bytes: string? }
---: { [string]: SessionEntry?, ... }
+--:: SessionEntry = { err_ctx: ErrCtx, ctx: Ctx | nil, export_tid: integer | nil, cri_bytes: string | nil }
+--: { [string]: SessionEntry | nil, ... }
 local _session = {}
 
 -- Currently-being-checked set: prevents re-entrant check_file calls.
---: { [string]: boolean?, ... }
+--: { [string]: boolean | nil, ... }
 local _checking = {}
 
 -- Shared intern pool for multi-file sessions — lazy-initialised.
@@ -157,12 +157,12 @@ end
 -- Shares the session pool across calls.
 -- If the disk cache is enabled, attempts a cache hit before checking.
 -- Records the file's export_tid in the session cache for require() resolution.
---: (string, Scope?, InternPool?) -> (ErrCtx, Ctx?)
+--: (string, Scope | nil, InternPool | nil) -> (ErrCtx, Ctx | nil)
 function M.check_file(filename, parent_scope, explicit_pool)
     -- Normalise path (basic: strip leading "./" only)
     if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
 
-    --: SessionEntry?
+    --: SessionEntry | nil
     local cached = _session[filename]
     if cached then
         return cached.err_ctx, cached.ctx
@@ -365,7 +365,7 @@ M.check_string_v3 = M.check_string
 -- ---------------------------------------------------------------------------
 -- Check multiple files and return a combined error context.
 -- Files share an intern pool for efficient string interning.
---: ({ [integer]: string, ... }, Scope?) -> ErrCtx
+--: ({ [integer]: string, ... }, Scope | nil) -> ErrCtx
 function M.check_files(filenames, parent_scope)
     _pool = _pool or intern_mod.new()
     local combined = errors_mod.new_ctx()

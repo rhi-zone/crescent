@@ -6,7 +6,7 @@ local M = {}
 -- NOTE: lib/ljsocket has no crescent type annotations; interactions with
 -- ljsocket objects are untyped until lib/ljsocket gets --:: declarations.
 
---:: server_opts = { host: string?, on_client: ((unknown) -> nil)?, on_client_close: ((unknown) -> nil)? }
+--:: server_opts = { host: string | nil, on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil }
 
 -- Bind and listen on port. callback(client, state) -> state is called on each
 -- readable event per client. epoll is optional — if omitted, a new one is

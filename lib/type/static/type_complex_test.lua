@@ -49,7 +49,7 @@ end
 assert.describe("recursive types: singly-linked list", function()
     assert.it("PASS: List<T> declaration accepted", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
+--:: List<T> = { head: T, tail: List<T> | nil }
 local x --: List<number>
 x = { head = 1, tail = nil }
 ]])
@@ -57,7 +57,7 @@ x = { head = 1, tail = nil }
 
     assert.it("PASS: nested cons cell accepted", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
+--:: List<T> = { head: T, tail: List<T> | nil }
 local x --: List<number>
 x = { head = 1, tail = { head = 2, tail = nil } }
 ]])
@@ -65,7 +65,7 @@ x = { head = 1, tail = { head = 2, tail = nil } }
 
     assert.it("ERROR: wrong head type in cons cell", function()
         has_error([[
---:: List<T> = { head: T, tail: List<T>? }
+--:: List<T> = { head: T, tail: List<T> | nil }
 --: (List<number>) -> nil
 local function f(lst) return nil end
 f({ head = "oops", tail = nil })
@@ -74,7 +74,7 @@ f({ head = "oops", tail = nil })
 
     assert.it("PASS: function over List<T> is well-typed", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
+--:: List<T> = { head: T, tail: List<T> | nil }
 --: (List<number>) -> number
 local function hd(lst) return lst.head end
 ]])
@@ -86,7 +86,7 @@ local function hd(lst) return lst.head end
         -- This should error but doesn't: the recursive field constraint is not
         -- enforced at depth. Tracked in TODO.md.
         local ec = v3([[
---:: List<T> = { head: T, tail: List<T>? }
+--:: List<T> = { head: T, tail: List<T> | nil }
 --: (List<number>) -> nil
 local function f(lst) return nil end
 f({ head = 1, tail = 99 })
@@ -99,7 +99,7 @@ end)
 assert.describe("recursive types: binary tree", function()
     assert.it("PASS: Tree<T> leaf and branch accepted", function()
         no_error([[
---:: Tree<T> = { value: T, left: Tree<T>?, right: Tree<T>? }
+--:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
 local leaf --: Tree<number>
 leaf = { value = 1, left = nil, right = nil }
 local branch --: Tree<number>
@@ -109,7 +109,7 @@ branch = { value = 0, left = leaf, right = leaf }
 
     assert.it("ERROR: wrong value type in tree node", function()
         has_error([[
---:: Tree<T> = { value: T, left: Tree<T>?, right: Tree<T>? }
+--:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
 --: (Tree<number>) -> nil
 local function f(t) return nil end
 f({ value = "nope", left = nil, right = nil })
@@ -118,7 +118,7 @@ f({ value = "nope", left = nil, right = nil })
 
     assert.it("PASS: Tree<string> independent of Tree<number>", function()
         no_error([[
---:: Tree<T> = { value: T, left: Tree<T>?, right: Tree<T>? }
+--:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
 local x --: Tree<string>
 x = { value = "hello", left = nil, right = nil }
 ]])
@@ -131,8 +131,8 @@ assert.describe("recursive types: mutual recursion with discriminants", function
     -- equivalent (both unfold to the same infinite tree).
     assert.it("PASS: Even and Odd values accepted for their own type", function()
         no_error([[
---:: Even = { parity: "even", pred: Odd? }
---:: Odd  = { parity: "odd",  pred: Even? }
+--:: Even = { parity: "even", pred: Odd | nil }
+--:: Odd  = { parity: "odd",  pred: Even | nil }
 local zero --: Even
 zero = { parity = "even", pred = nil }
 local one --: Odd
@@ -144,8 +144,8 @@ two = { parity = "even", pred = one }
 
     assert.it("ERROR: Even assigned to Odd — discriminant mismatch", function()
         has_error([[
---:: Even = { parity: "even", pred: Odd? }
---:: Odd  = { parity: "odd",  pred: Even? }
+--:: Even = { parity: "even", pred: Odd | nil }
+--:: Odd  = { parity: "odd",  pred: Even | nil }
 --: (Odd) -> nil
 local function f(o) return nil end
 local zero --: Even
@@ -158,8 +158,8 @@ f(zero)
         -- Under equi-recursive structural typing, { pred: Odd? } and { pred: Even? }
         -- unfold to identical infinite trees. This is correct type theory behavior.
         no_error([[
---:: Even = { pred: Odd? }
---:: Odd  = { pred: Even? }
+--:: Even = { pred: Odd | nil }
+--:: Odd  = { pred: Even | nil }
 local x --: Even
 local y --: Odd
 y = x
@@ -624,8 +624,8 @@ end
 
     assert.it("PASS: fmap for List<T> (recursive)", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <A, B>((A -> B), List<A>?) -> List<B>?
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <A, B>((A -> B), List<A> | nil) -> List<B> | nil
 local function fmap_list(f, lst)
     if lst == nil then
         return nil
@@ -640,8 +640,8 @@ end)
 assert.describe("typeclass: Foldable foldr", function()
     assert.it("PASS: foldr for List<T>", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <A, B>((A, B) -> B, B, List<A>?) -> B
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <A, B>((A, B) -> B, B, List<A> | nil) -> B
 local function foldr(f, z, lst)
     if lst == nil then
         return z
@@ -654,8 +654,8 @@ end
 
     assert.it("PASS: foldr used to sum a list", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <A, B>((A, B) -> B, B, List<A>?) -> B
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <A, B>((A, B) -> B, B, List<A> | nil) -> B
 local function foldr(f, z, lst)
     if lst == nil then return z else return f(lst.head, foldr(f, z, lst.tail)) end
 end
@@ -668,8 +668,8 @@ end
 
     assert.it("ERROR: foldr accumulator wrong type at call site", function()
         has_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <A, B>((A, B) -> B, B, List<A>?) -> B
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <A, B>((A, B) -> B, B, List<A> | nil) -> B
 local function foldr(f, z, lst)
     if lst == nil then return z else return f(lst.head, foldr(f, z, lst.tail)) end
 end
@@ -795,8 +795,8 @@ end)
 assert.describe("generic: recursive functions over ADTs", function()
     assert.it("PASS: length of List<T> for any T", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <T>(List<T>?) -> number
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <T>(List<T> | nil) -> number
 local function length(lst)
     if lst == nil then return 0 else return 1 + length(lst.tail) end
 end
@@ -805,8 +805,8 @@ end
 
     assert.it("PASS: map over List<T>", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <A, B>((A -> B), List<A>?) -> List<B>?
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <A, B>((A -> B), List<A> | nil) -> List<B> | nil
 local function list_map(f, lst)
     if lst == nil then
         return nil
@@ -819,8 +819,8 @@ end
 
     assert.it("PASS: elem check in List<T>", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
---: <T>(T, List<T>?) -> boolean
+--:: List<T> = { head: T, tail: List<T> | nil }
+--: <T>(T, List<T> | nil) -> boolean
 local function elem(x, lst)
     if lst == nil then return false end
     if lst.head == x then return true end
@@ -885,7 +885,7 @@ end)
 assert.describe("$EachField adversarial", function()
     assert.it("PASS: Partial<T> makes all fields nullable", function()
         no_error([[
---:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T> = $EachField<T, MakeOpt>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "alice", age = 30 }
@@ -896,7 +896,7 @@ x = { name = nil, age = nil }
     assert.it("PASS: Partial<T> directly with already-nullable value type", function()
         -- Partial<{a: string | nil}> should be {a: string | nil} (nil|nil normalises).
         no_error([[
---:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T> = $EachField<T, MakeOpt>
 local x --: Partial<{ a: string | nil }>
 x = { a = nil }
@@ -909,7 +909,7 @@ x = { a = "hello" }
     -- type argument to the outer alias. Tracked in TODO.md.
     assert.it("GAP-NEST: Partial<Partial<T>> produces never (known bug)", function()
         local ec = v3([[
---:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
+--:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T>   = $EachField<T, MakeOpt>
 --:: BiPartial<T> = Partial<Partial<T>>
 local x --: BiPartial<{ a: string }>
@@ -1091,7 +1091,7 @@ end)
 assert.describe("complex: union of recursive types", function()
     assert.it("PASS: List<number> | List<string>", function()
         no_error([[
---:: List<T> = { head: T, tail: List<T>? }
+--:: List<T> = { head: T, tail: List<T> | nil }
 local x --: List<number> | List<string>
 x = { head = 1, tail = nil }
 x = { head = "a", tail = nil }
@@ -1100,7 +1100,7 @@ x = { head = "a", tail = nil }
 
     assert.it("PASS: Maybe<List<T>> nesting", function()
         no_error([[
---:: List<T>  = { head: T, tail: List<T>? }
+--:: List<T>  = { head: T, tail: List<T> | nil }
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 local x --: Maybe<List<number>>
 x = { tag = "just",    value = { head = 1, tail = nil } }

@@ -50,7 +50,7 @@ mod.SIGTSTP = 20
 local callbacks = {} --[[@type table<integer, ffi.cdata*>]]
 
 --- Install a Lua function as a signal handler.
---: (number, (number) -> nil) -> boolean | nil, string?
+--: (number, (number) -> nil) -> boolean | nil, string | nil
 function mod.handle(signum, fn)
   -- Free previous callback for this signal if any
   local prev = callbacks[signum]
@@ -66,7 +66,7 @@ function mod.handle(signum, fn)
 end
 
 --- Ignore a signal.
---: (number) -> boolean | nil, string?
+--: (number) -> boolean | nil, string | nil
 function mod.ignore(signum)
   local prev = callbacks[signum]
   local ret = ffi.C.signal(signum, SIG_IGN)
@@ -79,7 +79,7 @@ function mod.ignore(signum)
 end
 
 --- Reset a signal to its default handler.
---: (number) -> boolean | nil, string?
+--: (number) -> boolean | nil, string | nil
 function mod.default(signum)
   local prev = callbacks[signum]
   local ret = ffi.C.signal(signum, SIG_DFL)
@@ -92,7 +92,7 @@ function mod.default(signum)
 end
 
 --- Send a signal to a process.
---: (number, number) -> boolean | nil, string?
+--: (number, number) -> boolean | nil, string | nil
 function mod.kill(pid, signum)
   local ret = ffi.C.kill(pid, signum)
   if ret ~= 0 then return nil, "kill() failed" end
@@ -106,7 +106,7 @@ function mod.getpid()
 end
 
 --- Block a signal.
---: (number) -> boolean | nil, string?
+--: (number) -> boolean | nil, string | nil
 function mod.block(signum)
   local set = ffi.new("sigset_t")
   ffi.C.sigemptyset(set)
@@ -117,7 +117,7 @@ function mod.block(signum)
 end
 
 --- Unblock a signal.
---: (number) -> boolean | nil, string?
+--: (number) -> boolean | nil, string | nil
 function mod.unblock(signum)
   local set = ffi.new("sigset_t")
   ffi.C.sigemptyset(set)

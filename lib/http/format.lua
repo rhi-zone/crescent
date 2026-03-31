@@ -71,7 +71,7 @@ end
 
 -- RFC 9112 §2.1 — find CRLFCRLF separator, return position of \r\n\r\n or nil.
 -- Caller derives body_start as head_end + 4.
---: (string, integer) -> integer?
+--: (string, integer) -> integer | nil
 local function find_head_end(s, i)
 	local pos = find(s, "\r\n\r\n", i, true)
 	return pos
@@ -79,8 +79,8 @@ end
 
 -- RFC 9112 §3 — Parse request from wire bytes.
 -- Returns: request table, next position, or nil + nil + error string.
---:: http_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string? }
---: (string, integer?) -> http_request?, integer?, string?
+--:: http_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil }
+--: (string, integer | nil) -> http_request | nil, integer | nil, string | nil
 mod.parse_request = function(s, i)
 	i = i or 1
 	-- RFC 9112 §2.1 — message = start-line CRLF *( field-line CRLF ) CRLF [ message-body ]
@@ -116,8 +116,8 @@ end
 
 -- RFC 9112 §4 — Parse response from wire bytes.
 -- Returns: response table, next position, or nil + nil + error string.
---:: http_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string? }
---: (string, integer?) -> http_response?, integer?, string?
+--:: http_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil }
+--: (string, integer | nil) -> http_response | nil, integer | nil, string | nil
 mod.parse_response = function(s, i)
 	i = i or 1
 	local head_end = find_head_end(s, i)

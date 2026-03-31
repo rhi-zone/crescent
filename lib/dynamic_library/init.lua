@@ -30,7 +30,7 @@ local DynamicLibrary = {}
 mod.DynamicLibrary = DynamicLibrary
 DynamicLibrary.__index = DynamicLibrary
 
---: (string) -> (DynamicLibrary?, string?)
+--: (string) -> (DynamicLibrary | nil, string | nil)
 ---@param path string The path to the dynamic library
 ---@return DynamicLibrary? library, string? error
 function DynamicLibrary.open(path)
@@ -42,7 +42,7 @@ function DynamicLibrary.open(path)
   return setmetatable({ handle = handle }, DynamicLibrary)
 end
 
---: (DynamicLibrary, string) -> (cdata?, string?)
+--: (DynamicLibrary, string) -> (cdata | nil, string | nil)
 ---@param name string The name of the symbol to look up
 ---@return ptr_c<nil>? symbol, string? error
 function DynamicLibrary:symbol(name)

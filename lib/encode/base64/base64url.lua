@@ -10,7 +10,7 @@ local base64 = require("lib.encode.base64")
 local M = {}
 local URL_OPTS = {url = true}
 
---: (string, { pad: boolean? }?) -> string
+--: (string, { pad: boolean | nil } | nil) -> string
 M.encode = function(str, opts)
     if opts then
         opts.url = true

@@ -5,7 +5,7 @@
 
 local mod = {}
 
---: (http_request) -> { [string]: string }?
+--: (http_request) -> { [string]: string } | nil
 mod.parse_cookies = function(req)
 	local cookie_hdr = (req.headers["cookie"] or {})[1]
 	if not cookie_hdr then return nil end

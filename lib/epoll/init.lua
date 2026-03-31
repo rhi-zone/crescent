@@ -128,7 +128,7 @@ local remove_fd = function (self, fd)
 	end
 end
 
---: (epoll, number, (string) -> nil, (() -> nil)?, boolean?) -> (((string) -> nil)?, (() -> nil)?, string?)
+--: (epoll, number, (string) -> nil, (() -> nil) | nil, boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 --[[@return epoll_write? write, epoll_remove? remove, string? err]]
 --[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]] --[[@param weak boolean? if false, self.count is not incremented]]
 epoll.add = function (self, fd, read, close, weak)
@@ -170,7 +170,7 @@ epoll.add = function (self, fd, read, close, weak)
 end
 mod.add = epoll.add
 
---: (epoll, number, (string) -> nil, (() -> nil)?) -> (((string) -> nil)?, (() -> nil)?, string?)
+--: (epoll, number, (string) -> nil, (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 --[[@return epoll_write? write, epoll_remove? remove, string? error]]
 --[[@param fd fd_c]] --[[@param read epoll_read]] --[[@param close epoll_close?]]
 epoll.modify = function (self, fd, read, close)

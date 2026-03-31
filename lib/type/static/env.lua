@@ -75,7 +75,7 @@ end
 
 -- Look up a name (intern ID) up the scope chain.
 -- Returns type_id or nil.
---: (Scope, integer) -> integer?
+--: (Scope, integer) -> integer | nil
 function M.lookup(scope, name_id)
     local s = scope
     while s do
@@ -200,7 +200,7 @@ end
 -- Instantiate: deep-copy a type, replacing generic vars with fresh vars.
 -- mapping: { var_type_id -> fresh_var_type_id } (shared across recursion)
 -- seen: { type_id -> copied_type_id } (cycle detection for circular tables)
---: (Ctx, integer, integer, { [integer]: integer, ... }, { [integer]: integer?, ... }) -> integer
+--: (Ctx, integer, integer, { [integer]: integer, ... }, { [integer]: integer | nil, ... }) -> integer
 local function instantiate_inner(ctx, tid, level, mapping, seen)
     tid = types_mod.find(ctx, tid)
 
@@ -395,7 +395,7 @@ end
 -- Instantiate: replace generic vars with fresh vars at current level.
 -- Returns (result_tid, mapping) where mapping is { [orig_generic_tv_id] = fresh_tv_id }.
 -- If out_mapping is provided it is used (and populated) instead of a fresh table.
---: (Ctx, integer, integer, { [integer]: integer, ... }?) -> (integer, { [integer]: integer, ... })
+--: (Ctx, integer, integer, { [integer]: integer, ... } | nil) -> (integer, { [integer]: integer, ... })
 function M.instantiate(ctx, tid, level, out_mapping)
     local mapping = out_mapping or {}
     local result = instantiate_inner(ctx, tid, level, mapping, {})
@@ -405,7 +405,7 @@ end
 -- Substitute: replace TAG_NAMED references matching mapping keys.
 -- mapping:    { [name_id] -> type_id }
 -- eval_seen:  cycle-detection set shared with match.evaluate (optional)
---: (Ctx, integer, { [integer]: integer, ... }, { [integer]: boolean?, ... }, { [integer]: boolean, ... }?) -> integer
+--: (Ctx, integer, { [integer]: integer, ... }, { [integer]: boolean | nil, ... }, { [integer]: boolean, ... } | nil) -> integer
 local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
     tid = types_mod.find(ctx, tid)
     if seen[tid] then return tid end
@@ -836,14 +836,14 @@ end
 -- Substitute named type refs in a type.
 -- mapping:    { [name_id] -> type_id }
 -- eval_seen:  optional cycle-detection set from an enclosing match.evaluate call
---: (Ctx, integer, { [integer]: integer, ... }, { [integer]: boolean, ... }?) -> integer
+--: (Ctx, integer, { [integer]: integer, ... }, { [integer]: boolean, ... } | nil) -> integer
 function M.substitute(ctx, tid, mapping, eval_seen)
     return substitute_inner(ctx, tid, mapping, {}, eval_seen)
 end
 
 -- Resolve a named type alias: look up in scope, apply type args.
 -- Returns (resolved_type_id, nil) or (nil, error_message).
---: (Ctx, Scope, integer, { [integer]: integer, ... }?) -> (integer?, string?)
+--: (Ctx, Scope, integer, { [integer]: integer, ... } | nil) -> (integer | nil, string | nil)
 function M.resolve_named_type(ctx, scope, name_id, arg_ids)
     local alias = M.lookup_type(scope, name_id)
     if not alias then

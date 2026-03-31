@@ -15,7 +15,7 @@ end
 
 -- Store source text for a file so formatters can display context lines.
 -- Call this once after creating an err_ctx, before reporting errors.
---: (ErrCtx, string, string?) -> ()
+--: (ErrCtx, string, string | nil) -> ()
 function M.set_source(err_ctx, filename, source)
     local src = source or ""
     if src == "" then return end
@@ -53,7 +53,7 @@ end
 
 -- Attach a secondary note to an error entry returned by M.error.
 -- note: { filename, line, col, msg }
---: (DiagEntry?, string, integer, integer, string) -> ()
+--: (DiagEntry | nil, string, integer, integer, string) -> ()
 function M.add_note(entry, filename, line, col, msg)
     if not entry then return end
     entry.notes[#entry.notes + 1] = {
@@ -87,7 +87,7 @@ end
 
 -- Append source context (line + caret) to an output lines table.
 -- col is 0-indexed. line_num is 1-indexed.
---: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... }?, string, integer, integer?) -> ()
+--: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... } | nil, string, integer, integer | nil) -> ()
 local function append_context(out, source_lines, filename, line_num, col)
     if not source_lines then return end
     local file_lines = source_lines[filename]
@@ -102,7 +102,7 @@ local function append_context(out, source_lines, filename, line_num, col)
 end
 
 -- Append notes to an output lines table (plain text).
---: ({ [integer]: string, ... }, { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... }?, { [string]: { [integer]: string, ... }, ... }?) -> ()
+--: ({ [integer]: string, ... }, { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... } | nil, { [string]: { [integer]: string, ... }, ... } | nil) -> ()
 local function append_notes_plain(out, notes, source_lines)
     if not notes then return end
     for _, note in ipairs(notes) do
@@ -141,7 +141,7 @@ local ANSI = {
 }
 
 -- Append ANSI-colored source context to an output lines table.
---: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... }?, string, integer, integer?, string?) -> ()
+--: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... } | nil, string, integer, integer | nil, string | nil) -> ()
 local function append_context_ansi(out, source_lines, filename, line_num, col, caret_color)
     if not source_lines then return end
     local file_lines = source_lines[filename]
@@ -157,7 +157,7 @@ local function append_context_ansi(out, source_lines, filename, line_num, col, c
 end
 
 -- Append notes to an output lines table (ANSI).
---: ({ [integer]: string, ... }, { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... }?, { [string]: { [integer]: string, ... }, ... }?) -> ()
+--: ({ [integer]: string, ... }, { [integer]: { filename: string, line: integer, col: integer, msg: string }, ... } | nil, { [string]: { [integer]: string, ... }, ... } | nil) -> ()
 local function append_notes_ansi(out, notes, source_lines)
     if not notes then return end
     for _, note in ipairs(notes) do

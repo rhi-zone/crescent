@@ -1084,9 +1084,9 @@ assert.describe("ann: composite types", function()
         assert.eq(t.tag, defs.TAG_UNION)
         assert.eq(t.data[1], 2)  -- 2 members
     end)
-    assert.it("parses nullable", function()
+    assert.it("parses nullable union", function()
         local r = ann.parse_annotations(
-            { [1] = { kind = defs.ANN_TYPE, content = "string?" } }, nil, "test")
+            { [1] = { kind = defs.ANN_TYPE, content = "string | nil" } }, nil, "test")
         local t = r.types:get(r.results[1].type_id)
         assert.eq(t.tag, defs.TAG_UNION)
         assert.eq(t.data[1], 2)  -- string | nil
@@ -1990,7 +1990,7 @@ assert.describe("checker: nil narrowing", function()
     assert.it("nil check narrows type in truthy branch", function()
         -- Should not error: x is narrowed to non-nil in the if body
         no_errors([[
---: string?
+--: string | nil
 local x = "hello"
 if x ~= nil then
     local y = x .. " world"
@@ -2212,9 +2212,9 @@ assert.describe("checker: or-guard narrowing (Cat E compound or)", function()
         no_errors([[
 --:: T = { val: string }
 local function foo(x, y)
-    --: T?
+    --: T | nil
     x = x
-    --: T?
+    --: T | nil
     y = y
     if not x or not y then return end
     local a = x.val
@@ -2228,7 +2228,7 @@ end
 local function bar(row, flag)
     --: Row
     row = row
-    --: string?
+    --: string | nil
     flag = flag
     if not row.field or not flag then return end
     local f = row.field
@@ -2240,9 +2240,9 @@ end
         no_errors([[
 --:: T = { val: number }
 local function baz(x, y)
-    --: T?
+    --: T | nil
     x = x
-    --: T?
+    --: T | nil
     y = y
     if x == nil or y == nil then return end
     local a = x.val
@@ -2272,7 +2272,7 @@ local y = x .. "!"
     end)
     assert.it("or-expression with annotated nil var → concrete right side type", function()
         no_errors([[
---: string?
+--: string | nil
 local a = nil
 local b = a or "default"
 local c = b .. "!"
@@ -2293,7 +2293,7 @@ assert.describe("checker: branch-join / post-if type merging", function()
         -- After the if, x was either non-nil (unchanged) or reassigned to "default".
         -- Both paths end with x = string, so x:upper() is safe.
         no_errors([[
---: string?
+--: string | nil
 local x = "hello"
 if x == nil then
     x = "default"
@@ -2319,7 +2319,7 @@ end
         -- x starts as integer; branch assigns "world" to it.
         -- After the if: x = string|integer.
         no_errors([[
---: string?
+--: string | nil
 local x = nil
 if true then
     x = "set"
@@ -2330,7 +2330,7 @@ end
         -- Inside `if x == nil`, x is narrowed to nil.
         -- Assigning string to x should check against declared string|nil, not narrowed nil.
         no_errors([[
---: string?
+--: string | nil
 local x = "original"
 if x == nil then
     x = "replacement"
@@ -2648,7 +2648,7 @@ assert.describe("checker: concat type checking via prim_meta", function()
     end)
     assert.it("string? (string|nil) concat is an error", function()
         -- eol annotation makes s typed as string|nil; nil member fails concat check
-        has_error("local s = 'a' --: string?\nlocal x = s .. '!'", "concatenate")
+        has_error("local s = 'a' --: string | nil\nlocal x = s .. '!'", "concatenate")
     end)
     assert.it("string .. string is valid", function()
         no_errors("local x = 'a' .. 'b'")
@@ -3721,7 +3721,7 @@ end
 local function use_str(s) end
 
 local function test(t)
-    --: { x: string? }
+    --: { x: string | nil }
     t = t
     if t.x then
         use_str(t.x)
@@ -4968,7 +4968,7 @@ local x --: Partial<{ name: string, age: number }>
         -- Fields are nil-able but still structurally required in table literals.
         -- True optional (absent) fields require FLAG_OPTIONAL, a separate mechanism.
         v3_no_errors([[
---:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V? } }
+--:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 local x --: Partial<{ name: string, age: number }>
 x = { name = "bob", age = 30 }
@@ -7430,7 +7430,7 @@ local x = f() --: string
     assert.it("nullable annotation: --: string? on single-var from multi-return", function()
         v3_no_errors([[
 local f --: () -> (string, number)
-local x --: string?
+local x --: string | nil
 x = f()
 ]])
     end)
@@ -7877,7 +7877,7 @@ local t = os.time()
 
     assert.it("os.getenv returns string?", function()
         no_errors([[
---: string?
+--: string | nil
 local v = os.getenv("HOME")
 ]])
     end)
@@ -8421,7 +8421,7 @@ v = { x = "hello", y = "world", z = true }
         -- Note: brace-tuple result `{ { ...Rest } }` requires a grammar extension not yet
         -- implemented (nested table literals in brace-tuple position); use flat descriptor instead.
         v3_no_errors([[
---:: MakeOptional<D> = match D { { key: %K, value: %V, optional: _, ...%Rest } => { key: K, value: V?, optional: true, ...Rest } }
+--:: MakeOptional<D> = match D { { key: %K, value: %V, optional: _, ...%Rest } => { key: K, value: V | nil, optional: true, ...Rest } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 --:: R = Partial<{ x: integer }>
 local v --: R

@@ -61,12 +61,12 @@ local M = {}
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---: (Ctx, integer?, integer?, string) -> ()
+--: (Ctx, integer | nil, integer | nil, string) -> ()
 local function add_error(ctx, line, col, msg)
     errors_mod.error(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
 
---: (Ctx, integer?, integer?, string) -> ()
+--: (Ctx, integer | nil, integer | nil, string) -> ()
 local function add_warning(ctx, line, col, msg)
     errors_mod.warning(ctx.err, ctx.filename, line or 0, col or 0, msg)
 end
@@ -232,7 +232,7 @@ end
 -- Deeply widen a type: widens top-level literals AND literal-typed table fields.
 -- Used when comparing inferred (non-annotated) types in bound checks, so that
 -- a table inferred as {x: 1} is treated as {x: number} for structural comparison.
---: (Ctx, integer, { [integer]: boolean?, ... }?) -> integer
+--: (Ctx, integer, { [integer]: boolean | nil, ... } | nil) -> integer
 local function widen_deep(ctx, tid, seen)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -270,7 +270,7 @@ end
 
 -- Check if a type contains any unbound free TAG_VAR (depth-first, with cycle guard).
 -- Used to decide whether the fast path in solve_callable can safely skip unify().
---: (Ctx, integer, { [integer]: boolean, ... }?) -> boolean
+--: (Ctx, integer, { [integer]: boolean, ... } | nil) -> boolean
 local function contains_free_var(ctx, tid, seen)
     tid = types_mod.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -325,7 +325,7 @@ local ARITH_OPS_SET = {
 }
 
 -- Check metamethod on a TABLE type (not primitives — prim_meta lookup not needed here).
---: (Ctx, integer, string) -> integer?
+--: (Ctx, integer, string) -> integer | nil
 local function table_meta_op_ret(ctx, tbl_tid, mm_name)
     local mm_id = intern_mod.intern(ctx.pool, mm_name)
     local fe = types_mod.table_meta_field(ctx, tbl_tid, mm_id)
@@ -342,7 +342,7 @@ end
 -- Checks table metamethods first, then prim_meta for primitive types.
 -- TAG_UNION: all arms must support the op; result is union of arm results.
 -- Returns result TID, ctx.T_ANY (any/unknown operand), or nil (not supported).
---: (Ctx, string, integer) -> integer?
+--: (Ctx, string, integer) -> integer | nil
 local function meta_op_ret_impl(ctx, op_name, tid)
     tid = find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -1318,7 +1318,7 @@ end
 
 -- any: constraint arrays are heterogeneous — see solve_unify comment.
 -- c[2] is a string (op_name like "__add"), remaining fields are integers.
---: (Ctx, { [integer]: any, ... }) -> boolean?
+--: (Ctx, { [integer]: any, ... }) -> boolean | nil
 local function solve_arith(ctx, c)
     local op_name  = c[2]
     local lhs_tid  = find(ctx, c[3])

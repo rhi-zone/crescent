@@ -60,7 +60,7 @@ local function make_provider_req(req)
 end
 
 --- Non-streaming generation.
---: (ai_request) -> ai_response?, string?
+--: (ai_request) -> ai_response | nil, string | nil
 mod.generate = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -68,7 +68,7 @@ mod.generate = function(req)
 end
 
 --- Streaming generation — returns closure iterator.
---: (ai_request) -> (() -> ai_delta?)?, string?
+--: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
 mod.stream = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then
@@ -78,7 +78,7 @@ mod.stream = function(req)
 end
 
 --- Embed a single value.
---: (ai_embed_request) -> ai_embed_response?, string?
+--: (ai_embed_request) -> ai_embed_response | nil, string | nil
 mod.embed = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -87,7 +87,7 @@ mod.embed = function(req)
 end
 
 --- Embed multiple values.
---: (ai_embed_many_request) -> ai_embed_many_response?, string?
+--: (ai_embed_many_request) -> ai_embed_many_response | nil, string | nil
 mod.embed_many = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end
@@ -96,7 +96,7 @@ mod.embed_many = function(req)
 end
 
 --- Generate an image.
---: (ai_image_request) -> ai_image_response?, string?
+--: (ai_image_request) -> ai_image_response | nil, string | nil
 mod.generate_image = function(req)
 	local provider, model_name, err = resolve(req)
 	if not provider then return nil, err end

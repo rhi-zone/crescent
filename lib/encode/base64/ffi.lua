@@ -56,7 +56,7 @@ local PAD = string.byte("=")
 -- Encode binary string to base64.
 -- opts.url = true  → URL-safe alphabet
 -- opts.pad = false → omit = padding (default: include padding)
---: (string, { url: boolean?, pad: boolean? }?) -> string
+--: (string, { url: boolean | nil, pad: boolean | nil } | nil) -> string
 M.encode = function(str, opts)
     local enc = (opts and opts.url) and url_enc or std_enc
     local pad = not (opts and opts.pad == false)
@@ -104,7 +104,7 @@ end
 -- Decode base64 string to binary.
 -- opts.url = true → URL-safe alphabet
 -- Whitespace is skipped inline. Returns nil, err on invalid input.
---: (string, { url: boolean? }?) -> string
+--: (string, { url: boolean | nil } | nil) -> string
 M.decode = function(b64, opts)
     local dec = (opts and opts.url) and url_dec or std_dec
     local n = #b64

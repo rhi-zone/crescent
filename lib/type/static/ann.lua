@@ -65,7 +65,7 @@ local prim_tags = {
 
 --:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer }
 
---: (string, string?, integer?) -> Scanner
+--: (string, string | nil, integer | nil) -> Scanner
 local function new_scanner(content, filename, line)
     return {
         src = content,
@@ -96,14 +96,14 @@ local function skip_ws(s)
     end
 end
 
---: (Scanner) -> integer?
+--: (Scanner) -> integer | nil
 local function peek(s)
     skip_ws(s)
     if s.pos > s.len then return nil end
     return byte(s.src, s.pos)
 end
 
---: (Scanner) -> integer?
+--: (Scanner) -> integer | nil
 local function peek_raw(s)
     if s.pos > s.len then return nil end
     return byte(s.src, s.pos)
@@ -133,7 +133,7 @@ local function opt_char(s, ch)
     return false
 end
 
---: (Scanner) -> string?
+--: (Scanner) -> string | nil
 local function scan_word(s)
     skip_ws(s)
     local start = s.pos
@@ -972,19 +972,11 @@ function M.parse_annotations(annotations, pool, filename)
         scan_error(s, "unexpected character '" .. string.char(b) .. "'")
     end
 
-    -- Parse postfix: ? (nullable) and [] (array)
+    -- Parse postfix: [] (array)
     local function parse_postfix(s)
         local ty = parse_primary(s)
         while true do
-            if opt_char(s, "?") then
-                -- Nullable: T? → T | nil
-                local nil_type = alloc_type(defs.TAG_NIL)
-                local ms, ml = flush_type_list({ ty, nil_type })
-                local union = alloc_type(defs.TAG_UNION)
-                types:get(union).data[0] = ms
-                types:get(union).data[1] = ml
-                ty = union
-            elseif peek(s) == byte("[") then
+            if peek(s) == byte("[") then
                 -- Check for [] (array) vs [K] (which would be indexer, handled in table)
                 local save = s.pos
                 advance(s)  -- skip '['

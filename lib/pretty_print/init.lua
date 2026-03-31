@@ -118,7 +118,7 @@ pretty_print_ = function(value, write, not_top_level, opts, seen)
 	pretty_printers[type(value)](value, write, seen)
 	if not not_top_level and not opts.no_trailing_newline then write("\n") end
 end
---: (any, ((string) -> nil)?, boolean?, { no_trailing_newline: boolean?, no_print_nil: boolean? }?, { [any]: boolean }?) -> nil
+--: (any, ((string) -> nil) | nil, boolean | nil, { no_trailing_newline: boolean | nil, no_print_nil: boolean | nil } | nil, { [any]: boolean } | nil) -> nil
 mod.pretty_print_ = pretty_print_
 --: (any) -> string
 mod.uneval = function(value)
