@@ -1157,6 +1157,58 @@ end
 	T.eq(#ec.errors, 0, "MA7g: expected 0 errors, got " .. tostring(#ec.errors))
 end)
 
+-- MX1: closed-member-lacks-field → never.
+-- { x: integer } (closed) & { y: string } (closed) against pattern { x: %V } should give
+-- integer (x comes from member 1; member 2 lacks x but member 1 has it — only
+-- closed members that DON'T have the requested field short-circuit to never when
+-- the intersection includes at least one member with it... wait, the semantics are:
+-- if ANY closed member lacks the field, the field cannot exist in the intersection.
+-- { x: integer } & { y: string }: member 2 is closed and lacks x → T_NEVER → pattern fails.
+-- Result: FieldX_MX1<{ x: integer } & { y: string }> == never.
+T.it("[eval] MX1: closed member lacking field makes intersection pattern fail → never", function()
+	local src = [[
+--:: FieldX_MX1<T> = match T { { x: %V } => V }
+--: () -> never
+local function f()
+	local r --: FieldX_MX1<{ x: integer } & { y: string }>
+	return r
+end
+]]
+	local ec = check_mod.check_string(src, "fuzz_test_MX1")
+	T.eq(#ec.errors, 0, "MX1: expected 0 errors (result is never), got " .. tostring(#ec.errors))
+end)
+
+-- MX1b: open member lacking field is neutral (does not short-circuit).
+-- { x: integer, ... } (open) & { y: string } (closed, lacks x): member 2 is closed and lacks x
+-- → T_NEVER → pattern fails.
+T.it("[eval] MX1b: closed member lacking field in mixed open/closed intersection → never", function()
+	local src = [[
+--:: FieldX_MX1b<T> = match T { { x: %V } => V }
+--: () -> never
+local function f()
+	local r --: FieldX_MX1b<{ x: integer, ...} & { y: string }>
+	return r
+end
+]]
+	local ec = check_mod.check_string(src, "fuzz_test_MX1b")
+	T.eq(#ec.errors, 0, "MX1b: expected 0 errors (result is never), got " .. tostring(#ec.errors))
+end)
+
+-- MX1c: two open members, one has x → pattern succeeds.
+-- { x: integer, ... } & { y: string, ... }: both open; member 1 has x → V = integer.
+T.it("[eval] MX1c: open members — field from one open member succeeds", function()
+	local src = [[
+--:: FieldX_MX1c<T> = match T { { x: %V } => V }
+--: () -> integer
+local function f()
+	local r --: FieldX_MX1c<{ x: integer, ...} & { y: string, ...}>
+	return r
+end
+]]
+	local ec = check_mod.check_string(src, "fuzz_test_MX1c")
+	T.eq(#ec.errors, 0, "MX1c: expected 0 errors (V=integer), got " .. tostring(#ec.errors))
+end)
+
 -- MA4r (random): for randomly generated tables, FieldX<T> == x-field-type when T has x,
 -- or never when T lacks x.
 -- Strategy: arb_table_type generates '{ x: T, ... }' strings from FIELD_NAMES = {x,y,z,n,s}.

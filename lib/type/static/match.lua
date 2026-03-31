@@ -33,112 +33,123 @@ local LIT_BOOLEAN = defs.LIT_BOOLEAN
 
 local M = {}
 
--- ── DNF normalization helpers ───────────────────────────────────────────────
+-- ── Coinductive field-merging helpers ──────────────────────────────────────────
 
--- Collect the atomic members of ty_id into `out`.
--- If ty_id is TAG_INTERSECTION, recurse into its members (flatten).
--- Otherwise append ty_id directly.
-local function collect_atoms(ctx, ty_id, out)
+-- Expand a TAG_NAMED type one level using env.resolve_named_type.
+-- Returns the resolved type_id, or nil if it cannot be expanded
+-- (undefined alias, arity error, or cycle detected via seen_named).
+-- seen_named: { [ty_id] = true } — prevents re-expanding the same named node.
+local function expand_named(ctx, ty_id, seen_named)
+    if seen_named[ty_id] then return nil end
     local t = ctx.types:get(ty_id)
+    if t.tag ~= TAG_NAMED then return nil end
+    local name_id  = t.data[0]
+    local args_len = t.data[2]
+    local arg_ids  = nil
+    if args_len > 0 then
+        arg_ids = {}
+        for i = t.data[1], t.data[1] + args_len - 1 do
+            arg_ids[#arg_ids + 1] = ctx.lists:get(i)
+        end
+    end
+    local env_mod = require("lib.type.static.env")
+    local scope = ctx.scope
+    if not scope then return nil end
+    seen_named[ty_id] = true
+    local resolved = env_mod.resolve_named_type(ctx, scope, name_id, arg_ids)
+    -- Note: we do NOT clear seen_named[ty_id] after returning — once expanded,
+    -- we assume the result terminates; the coinductive hypothesis prevents re-entry.
+    if not resolved then
+        return nil
+    end
+    return types_mod.find(ctx, resolved)
+end
+
+-- intersect_field_in_type: look up field `name_id` in type `ty_id` coinductively.
+-- Returns:
+--   type_id   — the field's type (possibly T_NEVER if a closed member lacks the field)
+--   nil       — neutral: open member that doesn't mention this field (skip, don't intersect)
+-- The `seen_named` table prevents infinite expansion of recursive named types.
+-- The `pat_seen` table is the match_pattern coinductive seen-set (passed through).
+local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen)
+    ty_id = types_mod.find(ctx, ty_id)
+    local t = ctx.types:get(ty_id)
+
+    if t.tag == TAG_TABLE then
+        -- Look up the field directly.
+        local fe = types_mod.table_field(ctx, ty_id, name_id)
+        if fe then
+            return fe.type_id
+        end
+        -- Field absent: open or closed?
+        -- data[4] >= 0 means has row variable (open table).
+        if t.data[4] >= 0 then
+            return nil  -- open: neutral, skip
+        else
+            return ctx.T_NEVER  -- closed: this member forbids the field
+        end
+    end
+
     if t.tag == TAG_INTERSECTION then
+        -- Recurse into each intersection member and intersect contributions.
+        local contributions = {}
         for i = 0, t.data[1] - 1 do
-            collect_atoms(ctx, ctx.lists:get(t.data[0] + i), out)
+            local mid = ctx.lists:get(t.data[0] + i)
+            local contrib = intersect_field_in_type(ctx, mid, name_id, seen_named, pat_seen)
+            if contrib == ctx.T_NEVER then
+                return ctx.T_NEVER  -- fast-fail
+            end
+            if contrib ~= nil then
+                contributions[#contributions + 1] = contrib
+            end
         end
-    else
-        out[#out + 1] = ty_id
+        if #contributions == 0 then return nil end
+        if #contributions == 1 then return contributions[1] end
+        return types_mod.make_intersection(ctx, contributions)
     end
-end
 
--- Intersect two (possibly-intersection) type IDs into a single flat intersection.
-local function intersect_atoms(ctx, a, b)
-    local atoms = {}
-    collect_atoms(ctx, a, atoms)
-    collect_atoms(ctx, b, atoms)
-    if #atoms == 1 then return atoms[1] end
-    return types_mod.make_intersection(ctx, atoms)
-end
-
--- Convert ty_id to disjunctive normal form: a Lua array of type IDs,
--- each representing one term (product / intersection-of-atomics).
--- Rules:
---   to_dnf(A | B) = to_dnf(A) ++ to_dnf(B)
---   to_dnf(A & B) = cross-product of to_dnf(A) × to_dnf(B)
---   to_dnf(atomic) = { ty_id }
-local function to_dnf(ctx, ty_id)
-    local t = ctx.types:get(ty_id)
     if t.tag == TAG_UNION then
-        local result = {}
+        -- Contribute the union of each member's field type.
+        -- If any member returns nil (open, missing), that member contributes T_UNKNOWN
+        -- (since an open member might have the field at runtime).
+        local parts = {}
         for i = 0, t.data[1] - 1 do
-            local member = ctx.lists:get(t.data[0] + i)
-            local terms = to_dnf(ctx, member)
-            for _, term in ipairs(terms) do
-                result[#result + 1] = term
+            local mid = ctx.lists:get(t.data[0] + i)
+            local contrib = intersect_field_in_type(ctx, mid, name_id, seen_named, pat_seen)
+            if contrib == ctx.T_NEVER then
+                -- This union member cannot have the field — contribute never (it will be filtered)
+                parts[#parts + 1] = ctx.T_NEVER
+            elseif contrib == nil then
+                -- Open member, might have it: contribute unknown
+                parts[#parts + 1] = ctx.T_UNKNOWN
+            else
+                parts[#parts + 1] = contrib
             end
         end
-        return result
-    elseif t.tag == TAG_INTERSECTION then
-        -- Gather DNFs of all members, then cross-product.
-        local member_dnfs = {}
-        for i = 0, t.data[1] - 1 do
-            local member = ctx.lists:get(t.data[0] + i)
-            member_dnfs[#member_dnfs + 1] = to_dnf(ctx, member)
-        end
-        if #member_dnfs == 0 then return { ty_id } end
-        local current = member_dnfs[1]
-        for k = 2, #member_dnfs do
-            local next_terms = {}
-            for _, a in ipairs(current) do
-                for _, b in ipairs(member_dnfs[k]) do
-                    next_terms[#next_terms + 1] = intersect_atoms(ctx, a, b)
-                end
-            end
-            current = next_terms
-        end
-        return current
-    else
-        return { ty_id }
+        if #parts == 0 then return nil end
+        if #parts == 1 then return parts[1] end
+        return types_mod.make_union(ctx, parts)
     end
-end
 
--- If ty_id is a TAG_INTERSECTION of TAG_TABLE members, merge all their fields
--- into one flat TAG_TABLE.  Otherwise return ty_id unchanged.
-local function flatten_to_table(ctx, ty_id)
-    local t = ctx.types:get(ty_id)
-    if t.tag ~= TAG_INTERSECTION then return ty_id end
-    -- Collect all members; fail fast if any is not a TAG_TABLE.
-    local members = {}
-    for i = 0, t.data[1] - 1 do
-        local mid = ctx.lists:get(t.data[0] + i)
-        local mt = ctx.types:get(mid)
-        if mt.tag ~= TAG_TABLE then return ty_id end  -- non-table member: leave as-is
-        members[#members + 1] = mid
+    if t.tag == TAG_NAMED then
+        -- Coinductive hypothesis: if we've seen this node, assume compatible (neutral).
+        if seen_named[ty_id] then return nil end
+        local expanded = expand_named(ctx, ty_id, seen_named)
+        if not expanded then return nil end
+        return intersect_field_in_type(ctx, expanded, name_id, seen_named, pat_seen)
     end
-    -- All members are TAG_TABLE: merge fields from all of them.
-    local merged_field_ids = {}
-    local seen_names = {}
-    for _, mid in ipairs(members) do
-        local mt = ctx.types:get(mid)
-        for fi = mt.data[0], mt.data[0] + mt.data[1] - 1 do
-            local fid = ctx.lists:get(fi)
-            local fe  = ctx.fields:get(fid)
-            if fe.name_id >= 0 and not seen_names[fe.name_id] then
-                seen_names[fe.name_id] = true
-                merged_field_ids[#merged_field_ids + 1] = fid
-            end
-        end
+
+    if t.tag == TAG_MATCH_TYPE then
+        -- Evaluate the match type, then recurse on the result.
+        local result = M.evaluate(ctx, ty_id, pat_seen)
+        result = types_mod.find(ctx, result)
+        return intersect_field_in_type(ctx, result, name_id, seen_named, pat_seen)
     end
-    -- Use indexers and row-var from the first member.
-    local mt0 = ctx.types:get(members[1])
-    local indexer_pairs = {}
-    for ii = mt0.data[2], mt0.data[2] + mt0.data[3] - 1 do
-        indexer_pairs[#indexer_pairs + 1] = ctx.lists:get(ii)
-    end
-    local row_var_id = mt0.data[4]
-    local meta_field_ids = {}
-    for mi = mt0.data[5], mt0.data[5] + mt0.data[6] - 1 do
-        meta_field_ids[#meta_field_ids + 1] = ctx.lists:get(mi)
-    end
-    return types_mod.make_table(ctx, merged_field_ids, indexer_pairs, row_var_id, meta_field_ids)
+
+    -- Other tags (primitives, functions, etc.): no fields, treat as closed non-table.
+    -- Returning T_NEVER would be too strict — these are not "closed tables that lack x".
+    -- Return nil (neutral) so we don't abort the intersection unnecessarily.
+    return nil
 end
 
 -- Merge two bindings tables, returning merged or nil on conflict.
@@ -156,8 +167,11 @@ end
 -- Check if `ty_id` matches `pat_id`.
 -- Returns (ok, bindings_table_or_nil).
 -- bindings: { [name_id] -> type_id } for named patterns (type variables).
---: (Ctx, integer, integer) -> (boolean, { [integer]: integer, ... }?)
-function M.match_pattern(ctx, ty_id, pat_id)
+-- seen: { ["ty_id:pat_id"] = true } coinductive cycle-detection set.
+--: (Ctx, integer, integer, { [string]: boolean, ... }?) -> (boolean, { [integer]: integer, ... }?)
+function M.match_pattern(ctx, ty_id, pat_id, seen)
+    seen = seen or {}
+
     --: integer
     local ty_id  = types_mod.find(ctx, ty_id)
     --: integer
@@ -236,118 +250,254 @@ function M.match_pattern(ctx, ty_id, pat_id)
     -- { [K]: V } matched against a table with an indexer binds K → key type, V → value type.
     -- Every named field in the pattern must be present in the input type.
     -- Every indexer pair in the pattern must be matched positionally against the subject's indexers.
-    if pt.tag == TAG_TABLE and tt.tag == TAG_TABLE then
-        --: any
-        local bindings = {}
-        -- Track which field name_ids are explicitly matched by the pattern.
-        --: { [integer]: boolean, ... }
-        local matched_name_ids = {}
-        -- Rest-field capture node (TAG_PAT_REST_FIELDS), if present in the pattern.
-        local rest_capture_name_id = nil
-        -- Each named field in the pattern must exist in the actual type.
-        -- Also detect the rest-capture field (name_id == -2).
-        for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
-            --: integer
-            local pfid = ctx.lists:get(pi)
+    if pt.tag == TAG_TABLE then
+        -- If the input is a TAG_TABLE, use direct structural matching.
+        if tt.tag == TAG_TABLE then
             --: any
-            local pfe  = ctx.fields:get(pfid)
-            if pfe.name_id == -2 then
-                -- Rest-field capture: store the capture name_id for later processing.
-                local prf_t = ctx.types:get(types_mod.find(ctx, pfe.type_id))
-                rest_capture_name_id = prf_t.data[0]
-            else
-                -- Find the matching field in the input type
-                local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
-                if not afe then return false, nil end
-                local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id)
-                if not ok then return false, nil end
-                --: any
-                bindings = merge_bindings(bindings, sub_bindings)
-                if bindings == nil then return false, nil end
-                matched_name_ids[pfe.name_id] = true
-            end
-        end
-        -- If the pattern has a rest-field capture (...%Rest), collect all fields from the
-        -- actual type that were NOT explicitly matched and bind them to a synthetic table.
-        if rest_capture_name_id then
-            local rest_field_ids = {}
-            for ti = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+            local bindings = {}
+            -- Track which field name_ids are explicitly matched by the pattern.
+            --: { [integer]: boolean, ... }
+            local matched_name_ids = {}
+            -- Rest-field capture node (TAG_PAT_REST_FIELDS), if present in the pattern.
+            local rest_capture_name_id = nil
+            -- Each named field in the pattern must exist in the actual type.
+            -- Also detect the rest-capture field (name_id == -2).
+            for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
                 --: integer
-                local tfid = ctx.lists:get(ti)
+                local pfid = ctx.lists:get(pi)
                 --: any
-                local tfe  = ctx.fields:get(tfid)
-                if tfe.name_id >= 0 and not matched_name_ids[tfe.name_id] then
-                    local copied = types_mod.make_field(ctx, tfe.name_id, tfe.type_id, tfe.flags)
-                    rest_field_ids[#rest_field_ids + 1] = copied
+                local pfe  = ctx.fields:get(pfid)
+                if pfe.name_id == -2 then
+                    -- Rest-field capture: store the capture name_id for later processing.
+                    local prf_t = ctx.types:get(types_mod.find(ctx, pfe.type_id))
+                    rest_capture_name_id = prf_t.data[0]
+                else
+                    -- Find the matching field in the input type
+                    local afe = types_mod.table_field(ctx, ty_id, pfe.name_id)
+                    if not afe then return false, nil end
+                    local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id, seen)
+                    if not ok then return false, nil end
+                    --: any
+                    bindings = merge_bindings(bindings, sub_bindings)
+                    if bindings == nil then return false, nil end
+                    matched_name_ids[pfe.name_id] = true
                 end
             end
-            -- Build the synthetic rest table (closed, no indexers)
-            local rest_tid = types_mod.make_table(ctx, rest_field_ids, {}, -1, {})
-            --: any
-            bindings = merge_bindings(bindings, { [rest_capture_name_id] = rest_tid })
-            if bindings == nil then return false, nil end
-        end
-        -- If the pattern has indexer pairs, match them positionally against the subject.
-        -- { [K]: V } binds K → subject key type, V → subject value type.
-        local pil = pt.data[3]
-        if pil >= 2 then
-            -- Subject must have at least as many indexer pairs as the pattern requires.
-            if tt.data[3] < pil then return false, nil end
-            local pis = pt.data[2]
-            local tis = tt.data[2]
-            for i = 0, pil / 2 - 1 do
-                --: integer
-                local pk_id = ctx.lists:get(pis + i * 2)
-                --: integer
-                local pv_id = ctx.lists:get(pis + i * 2 + 1)
-                --: integer
-                local tk_id = ctx.lists:get(tis + i * 2)
-                --: integer
-                local tv_id = ctx.lists:get(tis + i * 2 + 1)
-                local ok, sub = M.match_pattern(ctx, tk_id, pk_id)
-                if not ok then return false, nil end
+            -- If the pattern has a rest-field capture (...%Rest), collect all fields from the
+            -- actual type that were NOT explicitly matched and bind them to a synthetic table.
+            if rest_capture_name_id then
+                local rest_field_ids = {}
+                for ti = tt.data[0], tt.data[0] + tt.data[1] - 1 do
+                    --: integer
+                    local tfid = ctx.lists:get(ti)
+                    --: any
+                    local tfe  = ctx.fields:get(tfid)
+                    if tfe.name_id >= 0 and not matched_name_ids[tfe.name_id] then
+                        local copied = types_mod.make_field(ctx, tfe.name_id, tfe.type_id, tfe.flags)
+                        rest_field_ids[#rest_field_ids + 1] = copied
+                    end
+                end
+                -- Build the synthetic rest table (closed, no indexers)
+                local rest_tid = types_mod.make_table(ctx, rest_field_ids, {}, -1, {})
                 --: any
-                bindings = merge_bindings(bindings, sub)
-                if bindings == nil then return false, nil end
-                ok, sub = M.match_pattern(ctx, tv_id, pv_id)
-                if not ok then return false, nil end
-                --: any
-                bindings = merge_bindings(bindings, sub)
+                bindings = merge_bindings(bindings, { [rest_capture_name_id] = rest_tid })
                 if bindings == nil then return false, nil end
             end
-        end
-        -- If the pattern has a meta-spread capture (#...%M in the meta slot list),
-        -- collect all meta slots from the input and bind M to a synthetic table.
-        -- Succeeds only if the input has at least one meta slot; fails otherwise.
-        local pml = pt.data[6]
-        if pml > 0 then
-            for mi = pt.data[5], pt.data[5] + pml - 1 do
-                local mfid = ctx.lists:get(mi)
-                local mfe  = ctx.fields:get(mfid)
-                if mfe.name_id == -3 then
-                    -- Meta-spread capture: #...%M
-                    local pms_t = ctx.types:get(types_mod.find(ctx, mfe.type_id))
-                    local cap_name_id = pms_t.data[0]
-                    -- Fail if input has no meta slots
-                    if tt.data[6] == 0 then return false, nil end
-                    -- Build synthetic table from input's meta slots
-                    local syn_meta_ids = {}
-                    for ti2 = tt.data[5], tt.data[5] + tt.data[6] - 1 do
-                        local inner_fid = ctx.lists:get(ti2)
-                        local inner_fe  = ctx.fields:get(inner_fid)
-                        if inner_fe.name_id >= 0 then  -- skip spread markers
-                            syn_meta_ids[#syn_meta_ids + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
-                        end
-                    end
-                    if #syn_meta_ids == 0 then return false, nil end
-                    local syn_tid = types_mod.make_table(ctx, {}, {}, -1, syn_meta_ids)
+            -- If the pattern has indexer pairs, match them positionally against the subject.
+            -- { [K]: V } binds K → subject key type, V → subject value type.
+            local pil = pt.data[3]
+            if pil >= 2 then
+                -- Subject must have at least as many indexer pairs as the pattern requires.
+                if tt.data[3] < pil then return false, nil end
+                local pis = pt.data[2]
+                local tis = tt.data[2]
+                for i = 0, pil / 2 - 1 do
+                    --: integer
+                    local pk_id = ctx.lists:get(pis + i * 2)
+                    --: integer
+                    local pv_id = ctx.lists:get(pis + i * 2 + 1)
+                    --: integer
+                    local tk_id = ctx.lists:get(tis + i * 2)
+                    --: integer
+                    local tv_id = ctx.lists:get(tis + i * 2 + 1)
+                    local ok, sub = M.match_pattern(ctx, tk_id, pk_id, seen)
+                    if not ok then return false, nil end
                     --: any
-                    bindings = merge_bindings(bindings, { [cap_name_id] = syn_tid })
+                    bindings = merge_bindings(bindings, sub)
+                    if bindings == nil then return false, nil end
+                    ok, sub = M.match_pattern(ctx, tv_id, pv_id, seen)
+                    if not ok then return false, nil end
+                    --: any
+                    bindings = merge_bindings(bindings, sub)
                     if bindings == nil then return false, nil end
                 end
             end
+            -- If the pattern has a meta-spread capture (#...%M in the meta slot list),
+            -- collect all meta slots from the input and bind M to a synthetic table.
+            -- Succeeds only if the input has at least one meta slot; fails otherwise.
+            local pml = pt.data[6]
+            if pml > 0 then
+                for mi = pt.data[5], pt.data[5] + pml - 1 do
+                    local mfid = ctx.lists:get(mi)
+                    local mfe  = ctx.fields:get(mfid)
+                    if mfe.name_id == -3 then
+                        -- Meta-spread capture: #...%M
+                        local pms_t = ctx.types:get(types_mod.find(ctx, mfe.type_id))
+                        local cap_name_id = pms_t.data[0]
+                        -- Fail if input has no meta slots
+                        if tt.data[6] == 0 then return false, nil end
+                        -- Build synthetic table from input's meta slots
+                        local syn_meta_ids = {}
+                        for ti2 = tt.data[5], tt.data[5] + tt.data[6] - 1 do
+                            local inner_fid = ctx.lists:get(ti2)
+                            local inner_fe  = ctx.fields:get(inner_fid)
+                            if inner_fe.name_id >= 0 then  -- skip spread markers
+                                syn_meta_ids[#syn_meta_ids + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                            end
+                        end
+                        if #syn_meta_ids == 0 then return false, nil end
+                        local syn_tid = types_mod.make_table(ctx, {}, {}, -1, syn_meta_ids)
+                        --: any
+                        bindings = merge_bindings(bindings, { [cap_name_id] = syn_tid })
+                        if bindings == nil then return false, nil end
+                    end
+                end
+            end
+            return true, bindings
         end
-        return true, bindings
+
+        -- Input is TAG_INTERSECTION: coinductive field-merging structural match.
+        -- For each named field in the pattern, look it up in every intersection member
+        -- and intersect the contributions. If any closed member lacks the field → T_NEVER
+        -- → fail. Open members that lack the field contribute nil (neutral, skip).
+        if tt.tag == TAG_INTERSECTION then
+            local cycle_key = ty_id .. ":" .. pat_id
+            if seen[cycle_key] then
+                -- Coinductive hypothesis: assume match succeeds, no bindings
+                return true, {}
+            end
+            seen[cycle_key] = true
+
+            --: any
+            local bindings = {}
+            local seen_named = {}  -- per-field-lookup expansion guard
+
+            -- Check pattern fields via coinductive field merging
+            local rest_capture_name_id = nil
+            for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+                --: integer
+                local pfid = ctx.lists:get(pi)
+                --: any
+                local pfe  = ctx.fields:get(pfid)
+                if pfe.name_id == -2 then
+                    -- Rest-field capture: deferred (handled below if needed)
+                    local prf_t = ctx.types:get(types_mod.find(ctx, pfe.type_id))
+                    rest_capture_name_id = prf_t.data[0]
+                else
+                    -- Collect this field's type from all intersection members.
+                    local field_ty = intersect_field_in_type(ctx, ty_id, pfe.name_id, seen_named, seen)
+                    if field_ty == nil then
+                        -- All members are open and none has the field: pattern fails
+                        -- (open intersection doesn't guarantee the field exists).
+                        seen[cycle_key] = nil
+                        return false, nil
+                    end
+                    if types_mod.find(ctx, field_ty) == ctx.T_NEVER then
+                        -- A closed member forbids the field: pattern fails.
+                        seen[cycle_key] = nil
+                        return false, nil
+                    end
+                    -- Now match the field's merged type against the pattern field type.
+                    local ok, sub_bindings = M.match_pattern(ctx, field_ty, pfe.type_id, seen)
+                    if not ok then
+                        seen[cycle_key] = nil
+                        return false, nil
+                    end
+                    --: any
+                    bindings = merge_bindings(bindings, sub_bindings)
+                    if bindings == nil then
+                        seen[cycle_key] = nil
+                        return false, nil
+                    end
+                end
+            end
+
+            -- Rest-field capture for intersection: collect fields from each member
+            -- that are not explicitly matched by the pattern, then union/intersect.
+            -- This is a best-effort: we enumerate fields from the first TAG_TABLE member.
+            if rest_capture_name_id then
+                local matched_name_ids = {}
+                for pi = pt.data[0], pt.data[0] + pt.data[1] - 1 do
+                    local pfid = ctx.lists:get(pi)
+                    local pfe  = ctx.fields:get(pfid)
+                    if pfe.name_id >= 0 then
+                        matched_name_ids[pfe.name_id] = true
+                    end
+                end
+                -- Gather unmatched fields from all TABLE members.
+                local rest_names = {}  -- name_id → true, deduped
+                local rest_field_ids = {}
+                for i = 0, tt.data[1] - 1 do
+                    local mid = ctx.lists:get(tt.data[0] + i)
+                    local mt = ctx.types:get(types_mod.find(ctx, mid))
+                    if mt.tag == TAG_TABLE then
+                        for fi = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+                            local fid = ctx.lists:get(fi)
+                            local fe  = ctx.fields:get(fid)
+                            if fe.name_id >= 0 and not matched_name_ids[fe.name_id] and not rest_names[fe.name_id] then
+                                rest_names[fe.name_id] = true
+                                local copied = types_mod.make_field(ctx, fe.name_id, fe.type_id, fe.flags)
+                                rest_field_ids[#rest_field_ids + 1] = copied
+                            end
+                        end
+                    end
+                end
+                local rest_tid = types_mod.make_table(ctx, rest_field_ids, {}, -1, {})
+                --: any
+                bindings = merge_bindings(bindings, { [rest_capture_name_id] = rest_tid })
+                if bindings == nil then
+                    seen[cycle_key] = nil
+                    return false, nil
+                end
+            end
+
+            -- Pattern indexers: for intersection inputs, check that any pattern indexer
+            -- is satisfied by the intersection. Use try_unify as a subtype check.
+            local pil = pt.data[3]
+            if pil >= 2 then
+                local unify_mod = require("lib.type.static.unify")
+                if not unify_mod.try_unify(ctx, ty_id, pat_id, {}) then
+                    seen[cycle_key] = nil
+                    return false, nil
+                end
+            end
+
+            seen[cycle_key] = nil
+            return true, bindings
+        end
+
+        -- Input is TAG_NAMED: expand one level and recurse.
+        if tt.tag == TAG_NAMED then
+            local cycle_key = ty_id .. ":" .. pat_id
+            if seen[cycle_key] then
+                return true, {}  -- coinductive hypothesis
+            end
+            seen[cycle_key] = true
+            local seen_named = {}
+            local expanded = expand_named(ctx, ty_id, seen_named)
+            seen[cycle_key] = nil
+            if not expanded then return false, nil end
+            return M.match_pattern(ctx, expanded, pat_id, seen)
+        end
+
+        -- Input is TAG_MATCH_TYPE: evaluate then recurse.
+        if tt.tag == TAG_MATCH_TYPE then
+            local result = M.evaluate(ctx, ty_id, seen)
+            return M.match_pattern(ctx, result, pat_id, seen)
+        end
+
+        -- For all other input tags (non-table): table pattern fails.
+        return false, nil
     end
 
     -- Function pattern: match param and return types, collecting capture bindings.
@@ -394,7 +544,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 local p_param = ctx.lists:get(pt.data[0] + i)
                 --: integer
                 local t_param = ctx.lists:get(tt.data[0] + i)
-                local ok, sub = M.match_pattern(ctx, t_param, p_param)
+                local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
                 --: any
                 bindings = merge_bindings(bindings, sub)
@@ -406,7 +556,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 local p_param = ctx.lists:get(pt.data[0] + ppl - 1 - j)
                 --: integer
                 local t_param = ctx.lists:get(tt.data[0] + tpl - 1 - j)
-                local ok, sub = M.match_pattern(ctx, t_param, p_param)
+                local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
                 --: any
                 bindings = merge_bindings(bindings, sub)
@@ -431,7 +581,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 local p_param = ctx.lists:get(pt.data[0] + i)
                 --: integer
                 local t_param = ctx.lists:get(tt.data[0] + i)
-                local ok, sub = M.match_pattern(ctx, t_param, p_param)
+                local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
                 --: any
                 bindings = merge_bindings(bindings, sub)
@@ -443,7 +593,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
         if p_va >= 0 then
             local t_va = tt.data[4]
             if t_va < 0 then return false, nil end
-            local ok, sub = M.match_pattern(ctx, t_va, p_va)
+            local ok, sub = M.match_pattern(ctx, t_va, p_va, seen)
             if not ok then return false, nil end
             --: any
             bindings = merge_bindings(bindings, sub)
@@ -483,7 +633,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
                         end
                         bound_tid = types_mod.make_tuple(ctx, rets)
                     end
-                    local ok, sub = M.match_pattern(ctx, bound_tid, p_ret0_canon)
+                    local ok, sub = M.match_pattern(ctx, bound_tid, p_ret0_canon, seen)
                     if not ok then return false, nil end
                     --: any
                     bindings = merge_bindings(bindings, sub)
@@ -498,7 +648,7 @@ function M.match_pattern(ctx, ty_id, pat_id)
                 local p_ret = ctx.lists:get(pt.data[2] + i)
                 --: integer
                 local t_ret = ctx.lists:get(tt.data[2] + i)
-                local ok, sub = M.match_pattern(ctx, t_ret, p_ret)
+                local ok, sub = M.match_pattern(ctx, t_ret, p_ret, seen)
                 if not ok then return false, nil end
                 --: any
                 bindings = merge_bindings(bindings, sub)
@@ -521,18 +671,41 @@ function M.match_pattern(ctx, ty_id, pat_id)
         return false, nil
     end
 
-    -- Intersection fallback: try_unify handles intersection elimination for
-    -- non-table intersections (e.g. integer & string matched against integer)
-    -- that survive after DNF normalization in M.evaluate.
-    -- Only applies when the input type is TAG_INTERSECTION — the original
-    -- band-aid's non-TABLE branch, preserved here.  Other failure cases
-    -- (including never, which is bottom but should not match arbitrary arms)
-    -- fall through to false so that match { string => T } on never stays never.
+    -- Intersection input against non-table, non-union, non-function patterns:
+    -- use intersection elimination — A & B <: A, so if any member matches, the arm fires.
+    -- This handles cases like `match (integer & string) { integer => T }` (MA7c) and
+    -- `match (integer & (string | boolean)) { integer => T }` (MA7g, where the union
+    -- is inside the intersection).
+    -- No bindings are produced (the pattern has no captures at this point).
     if tt.tag == TAG_INTERSECTION then
-        local unify_mod = require("lib.type.static.unify")
-        if unify_mod.try_unify(ctx, ty_id, pat_id, {}) then
-            return true, {}
+        for i = 0, tt.data[1] - 1 do
+            local mid = ctx.lists:get(tt.data[0] + i)
+            local ok, sub = M.match_pattern(ctx, mid, pat_id, seen)
+            if ok then
+                return true, sub or {}
+            end
         end
+        return false, nil
+    end
+
+    -- Named input against non-table patterns: expand one level and retry.
+    if tt.tag == TAG_NAMED then
+        local cycle_key = ty_id .. ":" .. pat_id
+        if seen[cycle_key] then
+            return true, {}  -- coinductive hypothesis
+        end
+        seen[cycle_key] = true
+        local seen_named = {}
+        local expanded = expand_named(ctx, ty_id, seen_named)
+        seen[cycle_key] = nil
+        if not expanded then return false, nil end
+        return M.match_pattern(ctx, expanded, pat_id, seen)
+    end
+
+    -- Match-type input: evaluate then retry.
+    if tt.tag == TAG_MATCH_TYPE then
+        local result = M.evaluate(ctx, ty_id, seen)
+        return M.match_pattern(ctx, result, pat_id, seen)
     end
 
     return false, nil
@@ -562,37 +735,51 @@ function M.evaluate(ctx, mt_id, seen)
     local arms_start = mt.data[1]
     local arms_len   = mt.data[2]
 
-    -- DNF normalization: distribute over union and intersection inputs.
-    -- to_dnf converts A | B → [A, B] and A & (B | C) → [A&B, A&C] etc.
-    -- Each DNF term is matched independently; results are re-unioned.
-    -- For a single DNF term that is a pure-table intersection, flatten it
-    -- into one merged table before arm dispatch.
-    local dnf_terms = to_dnf(ctx, param_id)
-    if #dnf_terms > 1 then
+    -- Memoization: cache (mt_id, param_id) → result across evaluations.
+    -- The seen-set prevents loops within an evaluation; the cache reuses completed results.
+    ctx.match_cache = ctx.match_cache or {}
+    local cache_key = mt_id .. ":" .. param_id
+    local cached = ctx.match_cache[cache_key]
+    if cached ~= nil then
+        seen[mt_id] = nil
+        return cached
+    end
+
+    -- Fast path: distribute over union inputs only.
+    -- TAG_UNION: match each member independently, union the results.
+    -- TAG_INTERSECTION and TAG_NAMED: pass straight to arm loop; match_pattern handles them.
+    local top = ctx.types:get(param_id)
+    if top.tag == TAG_UNION then
         --: { [integer]: integer, ... }
         local results = {}
-        for _, term_id in ipairs(dnf_terms) do
-            -- Build a temporary match-type node with this term as the param.
+        for idx = 0, top.data[1] - 1 do
+            local member_id = ctx.lists:get(top.data[0] + idx)
+            -- Build a temporary match-type node with this member as the param.
             -- Reuse the existing arms slice from the list pool (no new allocation).
             local sub_mt = types_mod.alloc_type(ctx, TAG_MATCH_TYPE)
             --: any
             local sub_mtt = ctx.types:get(sub_mt)
-            sub_mtt.data[0] = term_id
+            sub_mtt.data[0] = member_id
             sub_mtt.data[1] = arms_start
             sub_mtt.data[2] = arms_len
             results[#results + 1] = M.evaluate(ctx, sub_mt, seen)
         end
         seen[mt_id] = nil
-        if #results == 0 then return ctx.T_NEVER end
-        if #results == 1 then return results[1] end
-        return types_mod.make_union(ctx, results)
+        local result
+        if #results == 0 then
+            result = ctx.T_NEVER
+        elseif #results == 1 then
+            result = results[1]
+        else
+            result = types_mod.make_union(ctx, results)
+        end
+        ctx.match_cache[cache_key] = result
+        return result
     end
-    -- Single DNF term: flatten pure-table intersections into one merged table.
-    if #dnf_terms == 1 and dnf_terms[1] ~= param_id then
-        param_id = flatten_to_table(ctx, dnf_terms[1])
-    else
-        param_id = flatten_to_table(ctx, param_id)
-    end
+
+    -- Arm loop: TAG_INTERSECTION and TAG_NAMED inputs go directly here.
+    -- match_pattern handles coinductive expansion and field merging.
+    local pat_seen = {}  -- per-evaluation coinductive seen-set for match_pattern
 
     local i = arms_start
     while i < arms_start + arms_len - 1 do
@@ -667,12 +854,19 @@ function M.evaluate(ctx, mt_id, seen)
             end
 
             seen[mt_id] = nil
-            if #results == 0 then return ctx.T_NEVER end
-            if #results == 1 then return results[1] end
-            return types_mod.make_union(ctx, results)
+            local result
+            if #results == 0 then
+                result = ctx.T_NEVER
+            elseif #results == 1 then
+                result = results[1]
+            else
+                result = types_mod.make_union(ctx, results)
+            end
+            ctx.match_cache[cache_key] = result
+            return result
         end
 
-        local ok, bindings = M.match_pattern(ctx, param_id, pat_id)
+        local ok, bindings = M.match_pattern(ctx, param_id, pat_id, pat_seen)
         if ok then
             seen[mt_id] = nil
             local result
@@ -704,12 +898,14 @@ function M.evaluate(ctx, mt_id, seen)
                     end
                 end
             end
+            ctx.match_cache[cache_key] = result
             return result
         end
         i = i + 2
     end
 
     seen[mt_id] = nil
+    ctx.match_cache[cache_key] = ctx.T_NEVER
     return ctx.T_NEVER
 end
 

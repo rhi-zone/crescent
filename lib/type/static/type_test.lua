@@ -8600,6 +8600,48 @@ end)
 -- Interface declaration: --:: Name<T>: Constraint<T> = body
 -- ---------------------------------------------------------------------------
 
+assert.describe("match: coinductive intersection field-merging", function()
+    -- Closed member lacks the pattern field → the field cannot exist in the intersection.
+    -- { x: integer } (closed) & { y: string } (closed): member 2 lacks x → pattern fails → never.
+    assert.it("closed member lacking field: { x: integer } & { y: string } against { x: %V } → never", function()
+        v3_no_errors([[
+--:: FieldX_closed<T> = match T { { x: %V } => V }
+--: () -> never
+local function f()
+    local r --: FieldX_closed<{ x: integer } & { y: string }>
+    return r
+end
+]])
+    end)
+
+    -- Open member lacking the pattern field is neutral (does not short-circuit).
+    -- { x: integer } (closed, has x) & { y: string, ... } (open, no x): open member is neutral.
+    -- Only member 1 contributes x → V = integer.
+    assert.it("open member lacking field is neutral; closed member with field wins", function()
+        v3_no_errors([[
+--:: FieldX_open<T> = match T { { x: %V } => V }
+--: () -> integer
+local function f()
+    local r --: FieldX_open<{ x: integer } & { y: string, ...}>
+    return r
+end
+]])
+    end)
+
+    -- Cross-member field merge: { x: integer, ... } & { y: string, ... }, pattern { x: %V, y: %W } => V.
+    -- Both members are open; x comes from member 1, y from member 2. V = integer.
+    assert.it("cross-member fields merged: { x: integer, ... } & { y: string, ... } pattern { x: %V, y: %W } => V gives integer", function()
+        v3_no_errors([[
+--:: FieldXY_merge<T> = match T { { x: %V, y: %W } => V }
+--: () -> integer
+local function f()
+    local r --: FieldXY_merge<{ x: integer, ...} & { y: string, ...}>
+    return r
+end
+]])
+    end)
+end)
+
 assert.describe("interface declaration: --:: Name: Constraint = body", function()
     -- Test 1: declaration check passes when body satisfies constraint
     assert.it("PASS: declaration satisfies constraint (body has required field)", function()

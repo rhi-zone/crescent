@@ -234,51 +234,45 @@ captures its type; tables without x give `never`.
 ## match.lua structural gaps (found 2026-03-31)
 
 These are correctness gaps in the match evaluator discovered during DNF normalization work.
-Not yet fuzzed — add invariants here when fixing.
 
-### MX1–MX3: Unified root cause — coinductive structural matching not implemented
+### MX1–MX3: Coinductive field-merging structural matching — DONE (2026-03-31)
 
-MX1, MX2, and MX3 are the same underlying problem: `match_pattern` cannot correctly handle input
-types that involve TAG_NAMED aliases or TAG_MATCH_TYPE nodes, because it has no mechanism to expand
-or evaluate them and no seen-set for cycle detection.
+Implemented in `match.lua`. `collect_atoms`, `intersect_atoms`, `to_dnf`, `flatten_to_table`
+removed. `match_pattern` now takes a `seen` coinductive set. `M.evaluate` uses union-distribution
+fast path only; TAG_INTERSECTION and TAG_NAMED inputs go straight to the arm loop.
 
-**Symptoms:**
+**What was fixed:**
 
-- **MX1** — TAG_INTERSECTION fallback (`try_unify` path) returns `true, {}` (empty bindings) on
-  success. For `{ x: %V }` against `{ x: integer } & SomeAlias`, `%V` is never bound. TAG_CAPTURE
-  nodes pass through `env.substitute` unchanged — silent unresolved captures in the result. Returning
-  false instead is ALSO wrong: `A & B <: A`, so the arm should fire if any member matches.
+- **MX1** — TAG_INTERSECTION against TABLE pattern: coinductive `intersect_field_in_type` helper
+  looks up each pattern field in every intersection member. Closed member lacking the field → T_NEVER
+  → arm fails. Open member lacking the field → neutral (skip). Produces correct capture bindings.
 
-- **MX2** — `try_unify` does not expand named types. A TAG_NAMED is either checked via the oracle
-  or blanket-accepted. `try_unify(NamedAlias, { x: integer })` returns `true` regardless of whether
-  `NamedAlias` actually has `x`. The subtype check is unsound. Partial TABLE-member merging doesn't
-  help — if `SomeAlias = { x: string }`, merging only the TABLE members and ignoring `SomeAlias`'s
-  contribution gives a wrong binding for `%V` (should be `integer & string`, not just `integer`).
+- **MX2** — TAG_NAMED expansion: `expand_named` calls `env.resolve_named_type` with args
+  reconstructed from the checker arena. `seen_named` prevents re-expansion cycles. Used inside
+  `intersect_field_in_type` for named members of intersections.
 
-- **MX3** — TAG_MATCH_TYPE is completely opaque to `try_unify`. Not handled at all.
+- **MX3** — TAG_MATCH_TYPE inputs: evaluated via `M.evaluate` (with `seen` propagation), result
+  recurses into `match_pattern`. Both structural and non-structural patterns work.
 
-**The correct algorithm: coinductive field-merging structural matching**
+**Tests added:**
+- `type_test.lua`: "match: coinductive intersection field-merging" — 3 cases:
+  closed member lacks field → never; open member lacks field is neutral; cross-member field merge.
+- `fuzz_eval.lua` MX1/MX1b/MX1c: same semantics as fuzz-style tests.
 
-DNF is exponential even for structurally-present connectives: `(A₁|B₁) & (A₂|B₂) & ... & (Aₖ|Bₖ)`
-materializes 2ᵏ terms — O(∏ union sizes). Coinductive matching is O(∑ union sizes): for each field
-the pattern asks for, look up that field in each intersection member independently and intersect the
-results. `(A|B).x` and `(C|D).x` are 2+2 lookups; DNF forces 2×2 combinations. Remove `to_dnf`.
+**Open/closed semantics:**
+- TAG_TABLE with `data[4] >= 0` = open (has row variable) → neutral on missing field
+- TAG_TABLE with `data[4] < 0` = closed → T_NEVER on missing field
+- Non-table, non-intersection, non-union members: neutral (non-table primitives don't carry fields)
 
-Algorithm (add `seen` parameter to `match_pattern`):
-- TAG_UNION: match each member independently, union results
-- TAG_INTERSECTION: for each pattern field, look up field type in each member (coinductively
-  expanding TAG_NAMED members), intersect the per-member field types, bind capture to result
+**Algorithm (add `seen` parameter to `match_pattern`):
+- TAG_UNION: match each member independently, union results (in M.evaluate fast path)
+- TAG_INTERSECTION (TABLE pattern): `intersect_field_in_type` per field, intersect contributions
+- TAG_INTERSECTION (non-TABLE pattern): intersection elimination — try each member, first match wins
 - TAG_NAMED: expand one level, add `(ty_id, pat_id)` to seen, recurse; if in seen → assume match
 - TAG_MATCH_TYPE: evaluate (with seen propagation), recurse on result
-- Remove `try_unify` fallback for structural patterns with captures
 
-**Memoization** is the trivial fast path: cache `(mt_id, param_id) → result_type_id` across
-evaluations. The seen-set prevents loops *within* an evaluation; memoization reuses completed
-results *across* evaluations. For recursive types: first hit expands coinductively and terminates
-via the coinductive hypothesis; all subsequent occurrences (tail positions etc.) are O(1) lookups.
-
-**`flatten_to_table`** stays as the base case for pure-TAG_TABLE intersections: single flat field
-scan, no expansion, no seen-set needed. Same semantics as the general algorithm.
+**Memoization:** `ctx.match_cache` keyed on `mt_id .. ":" .. param_id`. Cache is per-ctx.
+The seen-set prevents loops *within* an evaluation; memoization reuses completed results *across*.
 
 ---
 
