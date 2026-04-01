@@ -102,6 +102,26 @@ Items that currently lack an implementer-ready spec:
   Until both are done, `require()` stays special-cased. Milestone: `--:: declare require: <T: string>(module: T): $Require<T>` in stdlib.d.lua typechecks and produces correct module types.
 - [x] **`$FfiC` intrinsic** — implemented. `TAG_FFIC = 26`, deferred resolution in solve.lua, cdef.lua makes `T_FFI_C` closed (undeclared C symbols error), stdlib.d.lua declares `C: $FfiC`.
 
+## stdlib.d.lua coverage gaps (audit 2026-04-01)
+
+- [ ] **Over-broad `any` return types** — 11 functions use `any` where more specific types are feasible:
+  - `assert` → should preserve first arg type (`typeof(val)`)
+  - `string.match` → `string | nil` or capture tuple
+  - `string.gmatch` → iterator function, not `any`
+  - `coroutine.create` → should be generic over function type
+  - `coroutine.wrap` → should preserve function signature
+  - `coroutine.resume` → second return should be `...any` (multi-return)
+  - `coroutine.status` → `"running" | "suspended" | "normal" | "dead"`
+  - `os.date` → `string | { [string]: integer }` (format-dependent)
+  - `io.open` / `io.popen` → file handle should be opaque type, not `any`
+  - `table.remove` → `any | nil`
+- [ ] **Missing stdlib functions** (13 total):
+  - `io.flush`, `io.input`, `io.output` (medium priority — used in servers)
+  - `ffi.load`, `ffi.gc`, `ffi.metatype`, `ffi.istype`, `ffi.alignof`, `ffi.offsetof`, `ffi.abi`, `ffi.errno` (medium — needed for C interop)
+  - `os.setlocale` (low)
+  - `debug.getupvalue`, `debug.setupvalue` (low — introspection)
+- [ ] **`$GlobalScope` intrinsic undocumented** — used in stdlib.d.lua but not listed as a permanent intrinsic in CLAUDE.md. Document or replace.
+
 ## typechecker type guards and assertions
 
 TypeScript's type guards can lie — `function isString(x): x is string { return true }` typechecks fine. We should do better.
