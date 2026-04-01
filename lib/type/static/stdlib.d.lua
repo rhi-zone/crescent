@@ -53,7 +53,15 @@
 --::   copy:   (unknown, unknown, integer) -> nil,
 --::   fill:   (unknown, integer) -> nil,
 --::   string: (unknown, integer | nil) -> string,
---::   C:      $FfiC,
+--::   load:      (name: string, global: boolean | nil) -> any,
+--::   gc:        (cdata: any, finalizer: ((...any) -> any) | nil) -> any,
+--::   metatype:  (ct: any, metatable: { [string]: any }) -> any,
+--::   istype:    (ct: any, obj: any) -> boolean,
+--::   alignof:   (ct: any) -> integer,
+--::   offsetof:  (ct: any, field: string) -> integer,
+--::   abi:       (param: string) -> boolean,
+--::   errno:     (newerr: integer | nil) -> integer,
+--::   C:         $FfiC,
 --:: }
 --:: module "bit": {
 --::   tobit:   (x: number) -> integer,
@@ -155,6 +163,9 @@
 --::     lines:   (filename: any | nil, ...any) -> any,
 --::     popen:   (cmd: string, mode: any | nil) -> (any, any | nil),
 --::     tmpfile: () -> any,
+--::     flush:   () -> boolean | nil, string | nil,
+--::     input:   (file: string | nil) -> any,
+--::     output:  (file: string | nil) -> any,
 --::     stdin:   any,
 --::     stdout:  any,
 --::     stderr:  any
