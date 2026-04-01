@@ -104,22 +104,15 @@ Items that currently lack an implementer-ready spec:
 
 ## stdlib.d.lua coverage gaps (audit 2026-04-01)
 
-- [ ] **Over-broad `any` return types** — 11 functions use `any` where more specific types are feasible:
-  - `assert` → should preserve first arg type (`typeof(val)`)
-  - `string.match` → `string | nil` or capture tuple
-  - `string.gmatch` → iterator function, not `any`
-  - `coroutine.create` → should be generic over function type
-  - `coroutine.wrap` → should preserve function signature
-  - `coroutine.resume` → second return should be `...any` (multi-return)
-  - `coroutine.status` → `"running" | "suspended" | "normal" | "dead"`
-  - `os.date` → `string | { [string]: integer }` (format-dependent)
-  - `io.open` / `io.popen` → file handle should be opaque type, not `any`
-  - `table.remove` → `any | nil`
-- [ ] **Missing stdlib functions** (13 total):
-  - `io.flush`, `io.input`, `io.output` (medium priority — used in servers)
-  - `ffi.load`, `ffi.gc`, `ffi.metatype`, `ffi.istype`, `ffi.alignof`, `ffi.offsetof`, `ffi.abi`, `ffi.errno` (medium — needed for C interop)
+- [x] **Over-broad `any` return types** — PARTIALLY FIXED (06c6b38). Tightened 7: `coroutine.status` (literal union), `string.gmatch` (`function`), `table.remove` (`any | nil`), `coroutine.create`/`wrap`/`resume`/`yield` (function params + multi-return). Remaining:
+  - `assert` → needs `typeof(val)` (type-level computation)
+  - `string.match` → needs pattern-dependent captures
+  - `os.date` → format-dependent return (`string | { [string]: integer }`)
+  - `io.open` / `io.popen` → needs file handle opaque type
+  - Parser limitation: function types in table field return positions break the annotation parser silently
+- [x] **Missing stdlib functions** — FIXED (819179f). Added `io.flush`/`input`/`output` + 8 `ffi.*` functions. Remaining:
   - `os.setlocale` (low)
-  - `debug.getupvalue`, `debug.setupvalue` (low — introspection)
+  - `debug.getupvalue`, `debug.setupvalue` (low)
 - [ ] **`$GlobalScope` intrinsic undocumented** — used in stdlib.d.lua but not listed as a permanent intrinsic in CLAUDE.md. Document or replace.
 
 ## typechecker type guards and assertions
