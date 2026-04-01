@@ -332,8 +332,19 @@ function M.parse_annotations(annotations, pool, filename)
                     end
                     local fn = alloc_type(defs.TAG_FUNCTION)
                     local ft = types:get(fn)
-                    -- no params, no returns list — single return
-                    local rs, rl = flush_type_list({ ret })
+                    -- Unpack TAG_TUPLE as multi-return (handles -> (A, B) correctly
+                    -- while allowing -> () -> T to parse as returning a function).
+                    local ret_t = types:get(ret)
+                    local rets
+                    if ret_t.tag == defs.TAG_TUPLE then
+                        rets = {}
+                        for i = 0, ret_t.data[1] - 1 do
+                            rets[#rets + 1] = type_lists:get(ret_t.data[0] + i)
+                        end
+                    else
+                        rets = { ret }
+                    end
+                    local rs, rl = flush_type_list(rets)
                     ft.data[2] = rs
                     ft.data[3] = rl
                     ft.data[4] = -1
@@ -387,15 +398,6 @@ function M.parse_annotations(annotations, pool, filename)
                     local sp = alloc_type(defs.TAG_SPREAD)
                     types:get(sp).data[0] = inner
                     returns[1] = sp
-                elseif peek(s) == byte("(") then
-                    advance(s)
-                    if peek(s) ~= byte(")") then
-                        returns[1] = parse_type(s)
-                        while opt_char(s, ",") do
-                            returns[#returns + 1] = parse_type(s)
-                        end
-                    end
-                    expect_char(s, ")")
                 else
                     -- Detect assertion predicate syntax: `asserts name is T`
                     -- and type predicate syntax: `name is T`
@@ -487,7 +489,17 @@ function M.parse_annotations(annotations, pool, filename)
                     end
                     if not guard_detected then
                         returns[1] = parse_type(s)
-                        if union_contains_fn(returns[1]) then
+                        -- If parse_type returned a TAG_TUPLE, unpack its elements
+                        -- as multiple return types. This handles -> (A, B) multi-return
+                        -- while allowing -> () -> T to correctly parse as returning a function.
+                        local ret1_t = types:get(returns[1])
+                        if ret1_t.tag == defs.TAG_TUPLE then
+                            local ts, tl = ret1_t.data[0], ret1_t.data[1]
+                            returns = {}
+                            for i = 0, tl - 1 do
+                                returns[#returns + 1] = type_lists:get(ts + i)
+                            end
+                        elseif union_contains_fn(returns[1]) then
                             warnings[#warnings + 1] = { line = s.line, col = 1,
                                 msg = "function type in union return position"
                                     .. " — wrap each function type in parens:"
