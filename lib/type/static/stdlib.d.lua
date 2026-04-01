@@ -92,7 +92,7 @@
 --::     sub:     (s: string, i: integer, j: any | nil) -> string,
 --::     find:    (s: string, pattern: string, init: any | nil, plain: any | nil) -> ...((integer, integer) | (nil, nil)),
 --::     match:   (s: string, pattern: string, init: any | nil) -> any,
---::     gmatch:  (s: string, pattern: string) -> any,
+--::     gmatch:  (s: string, pattern: string) -> function,
 --::     gsub:    (s: string, pattern: string, repl: any, n: any | nil) -> (string, integer),
 --::     rep:     (s: string, n: integer, sep: any | nil) -> string,
 --::     byte:    (s: string, i: any | nil, j: any | nil) -> ...(integer),
@@ -109,7 +109,7 @@
 
 --:: declare table = {
 --::     insert:  (t: any, v: any) -> (),
---::     remove:  (t: any, pos: any | nil) -> any,
+--::     remove:  (t: any, pos: any | nil) -> any | nil,
 --::     concat:  (t: any, sep: any | nil, i: any | nil, j: any | nil) -> string,
 --::     sort:    (t: any, comp: any | nil) -> (),
 --::     unpack:  (t: any, i: any | nil, j: any | nil) -> any,
@@ -193,11 +193,11 @@
 ---------------------------------------------------------------------------
 
 --:: declare coroutine = {
---::     create:     (fn: any) -> any,
---::     resume:     (co: any, ...any) -> (boolean, any),
---::     yield:      (...any) -> any,
---::     wrap:       (fn: any) -> any,
---::     status:     (co: any) -> string,
+--::     create:     (fn: (...any) -> ...any) -> any,
+--::     resume:     (co: any, ...any) -> (boolean, ...any),
+--::     yield:      (...any) -> ...any,
+--::     wrap:       (fn: (...any) -> ...any) -> (...any) -> ...any,
+--::     status:     (co: any) -> "running" | "suspended" | "normal" | "dead",
 --::     running:    () -> (any, boolean),
 --::     isyieldable: () -> boolean
 --:: }
