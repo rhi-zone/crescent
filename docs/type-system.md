@@ -205,6 +205,12 @@ Resolved design choices. Sections with dedicated design docs link to them; brief
 ### Type narrowing: full flow analysis
 → See [typechecker-v3.md](typechecker-v3.md) and [semantics.md](semantics.md) (narrowing rules)
 
+**Flow typing is not inference.** These are separate concerns that must not be conflated:
+- **Inference** resolves type variables from usage constraints. `?A` → `string | nil`.
+- **Flow typing** refines known types based on control flow. `string | nil` → `string` after a nil guard.
+
+The architecture is two passes: (1) constraint generation + solving resolves all type variables, (2) a post-solve flow typing pass walks control flow and applies narrowings to the now-concrete types. Narrowing never participates in constraint solving — no subtraction constraints, no fixpoint interaction with the solver. Narrowing stays lexical/scoped: scope exit reverts to the pre-narrowing resolved type; early-return patterns work because there is no join point.
+
 ### Metatypes: `__index` drives the model
 → See [semantics.md](semantics.md) (metatype rules)
 
