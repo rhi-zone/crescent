@@ -284,13 +284,33 @@ Separate from the package manager's manifest. Optional; the checker works withou
 
 Concrete decisions made during implementation, kept here because they have no dedicated doc.
 
-### Field modifiers: optional, readonly, private
+### Field modifiers: attributes, not keywords
 
-FieldEntry gains a flags word — stride changes from 2 to 3: `(name_id, type_id, flags)`.
+**Current implementation** (to be replaced): FieldEntry has a packed flags byte (`FLAG_OPTIONAL`, `FLAG_READONLY`, `FLAG_PRIVATE`). Syntax is per-keyword: `readonly name: T`, `name?: T`. Each new modifier requires parser changes and a new flag bit.
 
-- `FLAG_OPTIONAL = 0x01` — field may be absent; access returns `T|nil`.
-- `FLAG_READONLY = 0x02` — assignment to this field is a type error.
-- `FLAG_PRIVATE` — superseded by [access-control.md](access-control.md).
+**Design direction: field attributes.** Field modifiers are arbitrary named metadata attached to fields via a general attribute syntax, not per-modifier keywords. Prior art: Java `@annotations`, C# `[attributes]`, Rust `#[attributes]`, C++ `[[attributes]]`, Python decorators, Go struct tags — every major language converges on this pattern because the problem (metadata on declarations) is universal.
+
+Proposed syntax (sigil TBD):
+```lua
+--: { @readonly x: integer, @optional y: string }
+--: { @deprecated @readonly z: boolean }
+```
+
+The parser collects `@name` attributes on fields without knowing what they mean. The checker defines which attributes it understands (`@readonly`, `@optional`, etc.). New attributes (`@deprecated`, `@lazy`, `@sealed`, whatever) require zero parser changes.
+
+**Why not per-modifier keywords:** each keyword (`readonly`, `writeonly`, `optional`, `final`, `const`, `private`, `protected`, ...) adds parsing complexity and is closed — adding a new modifier means changing the parser. Attributes are open — the parser handles the general mechanism, the checker interprets specific names.
+
+**Why not infer from usage:** inference tells you what IS (descriptive), annotations tell you what SHOULD BE (prescriptive). Type systems are prescriptive — `@readonly` means "writing is a bug," not "happens to not be written currently." Inference loses prescriptive intent and causes spooky action at a distance (one new write silently removes readonly for everyone).
+
+**Why not `+`/`-` variance markers:** `+integer` and `-integer` conflict with numeric literals. Symbols aren't free.
+
+**For `$EachField` / mapped types:** attributes are type-level data on the field descriptor. Match can inspect them, transforms can add/remove/change them. `MakeOptional<T>` = iterate fields of T, add `@optional` to each. `MakeReadonly<T>` = add `@readonly` to each. No special flag-mutation API — just attribute manipulation via the same match/transform mechanism as value types.
+
+**Open questions:**
+- Attribute sigil: `@name`, `#name`, or something else? (`#` is already used for meta-fields in the current syntax)
+- Should attributes carry arguments? `@deprecated("use foo instead")`, `@range(0, 100)`
+- How to represent attributes in the type arena (extend FieldEntry? separate attribute list?)
+- Interaction with `$EachField`: does the transform function see attributes as fields on the descriptor, or as a separate attribute list?
 
 Syntax: `field?: T` for optional, `readonly field: T` for readonly. No table-level `readonly` keyword — `Readonly<T>` is a library type (mapped type in the prelude).
 
