@@ -4934,6 +4934,61 @@ map_box(tostring, { other = 1 })
 end)
 
 -- ---------------------------------------------------------------------------
+-- 3b. Function types as table field values in annotations
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: function types as table field values", function()
+    assert.it("PASS: function type fields in table annotation", function()
+        v3_no_errors([[
+--: { f: (integer) -> string, g: () -> boolean }
+local t = { f = function(x) return tostring(x) end, g = function() return true end }
+]])
+    end)
+
+    assert.it("PASS: function returning function as table field value", function()
+        v3_no_errors([[
+--: { factory: (x: string) -> () -> string }
+local t = { factory = function(s) return function() return s end end }
+]])
+    end)
+
+    assert.it("PASS: function returning function field followed by another field", function()
+        v3_no_errors([[
+--: { factory: (x: string) -> () -> string, name: string }
+local t = { factory = function(s) return function() return s end end, name = "test" }
+]])
+    end)
+
+    assert.it("PASS: no-params multi-return with tuple unpacking", function()
+        v3_no_errors([[
+--: () -> (string, boolean)
+local function f()
+    return "hi", true
+end
+local s, b = f()
+--: string
+local s2 = s
+--: boolean
+local b2 = b
+]])
+    end)
+
+    assert.it("PASS: params multi-return still works", function()
+        v3_no_errors([[
+--: (integer) -> (string, boolean)
+local function f(x)
+    return tostring(x), true
+end
+local s, b = f(42)
+--: string
+local s2 = s
+--: boolean
+local b2 = b
+]])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- 4. ADT match types: $EachField and partial type-level application
 -- ---------------------------------------------------------------------------
 
