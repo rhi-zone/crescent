@@ -209,7 +209,9 @@ Resolved design choices. Sections with dedicated design docs link to them; brief
 - **Inference** resolves type variables from usage constraints. `?A` → `string | nil`.
 - **Flow typing** refines known types based on control flow. `string | nil` → `string` after a nil guard.
 
-The architecture is two passes: (1) constraint generation + solving resolves all type variables, (2) a post-solve flow typing pass walks control flow and applies narrowings to the now-concrete types. Narrowing never participates in constraint solving — no subtraction constraints, no fixpoint interaction with the solver. Narrowing stays lexical/scoped: scope exit reverts to the pre-narrowing resolved type; early-return patterns work because there is no join point.
+The principle is two passes: (1) constraint generation + solving resolves all type variables, (2) a post-solve flow typing pass applies narrowings to the now-concrete types. Narrowing stays lexical/scoped: scope exit reverts to the pre-narrowing resolved type; early-return patterns work because there is no join point.
+
+**Open problem:** constraints from narrowed scopes reference the un-narrowed type variable, not the narrowed concrete type. `local x = f(); if x then x:upper() end` generates `?A:upper()` against the un-narrowed `?A = string | nil`, which fails — but should succeed because `x` is `string` in the narrowed scope. A pure post-solve pass avoids fixpoint issues but must somehow re-evaluate constraints that depend on narrowed variables. Design options in TODO.md.
 
 ### Metatypes: `__index` drives the model
 → See [semantics.md](semantics.md) (metatype rules)
