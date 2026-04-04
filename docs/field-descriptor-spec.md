@@ -163,11 +163,7 @@ Option 2 is the most natural if descriptors are already matchable tables. Option
 - `{ ["foo"]: %V }` — predicate form: succeeds only for tables with a "foo" field.
 - `{ ...[%K]: %V }` — **removed**. Under rest semantics, `...` means "capture the remaining fields as a group," which is equivalent to `{ [%K]: %V }` — so `...` adds nothing. The previous iteration behavior now belongs to `{ [%K]: %V }` alone.
 
-**Rest capture and openness in result position:** In a match arm result expression, table types are constructed the same way as in annotations. `{ x: integer, ... }` is an open table type — the trailing `...` is the openness marker. This applies to constructed results too:
-- `{ x: X, ...Rest }` — closed table: field x plus Rest's fields
-- `{ x: X, ...Rest, ... }` — open table: field x plus Rest's fields, and the table is open
-
-The `...Rest` (spread) and the trailing `...` (openness marker) are distinct; same distinction as in regular table type syntax.
+**Rest capture preserves openness:** `...%Rest` binds Rest to the complete remaining row — a closed type if the input was closed, an open type if the input was open. In result position, `{ x: X, ...Rest }` reconstructs with that preserved openness. No separate trailing `...` needed.
 
 **`$EachField<T, F>` is for transformation** (table → table). `{ [%K]: %V }` distribution is for extraction (table → union). They are complementary; `$Keys<T>`, `Values<T>`, `PairsReturn<T>` all reduce to `match T { { [%K]: %V } => ... }`.
 

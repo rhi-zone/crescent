@@ -75,11 +75,9 @@ In ann.lua, wherever a name is expected in a pattern position, try `%` first:
   `string` (or a subtype).
 - `{ #...%Name }` — meta-slot capture in meta-spread arm
 - `{ field: %Name, ...%Rest }` — named-field captures with rest capture: `...%Rest`
-  binds remaining fields as a row variable. At most one `...%Rest` per table pattern.
-  In result position: `{ field: X, ...Rest }` reconstructs a closed table;
-  `{ field: X, ...Rest, ... }` reconstructs an open table — the trailing `...` is the
-  same openness marker as in regular table type syntax (`{ x: integer, ... }`), separate
-  from the spread `...Rest`.
+  binds the remaining fields as a row — closed if the input was closed, open if the
+  input was open. At most one `...%Rest` per table pattern. In result position,
+  `{ field: X, ...Rest }` reconstructs with Rest's preserved openness.
 
 At the pattern node level, captures are stored as `TAG_CAPTURE(name_id)` rather than
 `TAG_NAMED(name_id)`. The evaluator in match.lua adds `name → resolved_type` to the
