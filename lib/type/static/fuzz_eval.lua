@@ -439,8 +439,8 @@ end)
 -- Keys<T> and Values<T> are user-definable via the all-fields pattern.
 
 -- Declarations used across E4 tests.
-local E4_KEYS_DECL   = "--:: Keys<T>   = match T { { [%K]: %V } => K }\n"
-local E4_VALUES_DECL = "--:: Values<T> = match T { { [%K]: %V } => V }\n"
+local E4_KEYS_DECL   = "--:: Keys<T>   = match T { { ...[%K]: %V } => K }\n"
+local E4_VALUES_DECL = "--:: Values<T> = match T { { ...[%K]: %V } => V }\n"
 
 -- Helper: check A == B (bidirectional) under a given prelude string.
 local function check_eq_with_decl(decl, a_str, b_str)

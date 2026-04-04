@@ -157,15 +157,21 @@ Option 2 is the most natural if descriptors are already matchable tables. Option
 
 ### Resolved: All-fields pattern and descriptors
 
-**`{ [%K]: %V }` distributes over all field entries.** The bracket notation `{ [K]: V }` means "a table entry with key K and value V." With captures, it runs once per field entry in the input (named fields and indexers alike) and unions results. No `...` needed.
+**`{ ...[%K]: %V }` is per-field distribution; `{ [%K]: %V }` matches one indexer.**
 
-- `{ [%K]: %V }` in a match arm — field-entry distribution: K and V bind to each entry's key and value types; results are unioned.
-- `{ ["foo"]: %V }` — predicate form: succeeds only for tables with a "foo" field.
-- `{ ...[%K]: %V }` — **removed**. Under rest semantics, `...` means "capture the remaining fields as a group," which is equivalent to `{ [%K]: %V }` — so `...` adds nothing. The previous iteration behavior now belongs to `{ [%K]: %V }` alone.
+`{ [%K]: %V }` matches the table's indexer — one structural element, consistent with `{ %X }`
+matching positional entry [1]. No distribution.
 
-**Rest capture preserves openness:** `...%Rest` binds Rest to the complete remaining row — a closed type if the input was closed, an open type if the input was open. In result position, `{ x: X, ...Rest }` reconstructs with that preserved openness. No separate trailing `...` needed.
+`{ ...[%K]: %V }` iterates all field entries (named + indexer), binding K and V per entry,
+unioning results. The `...` here is a type-level-only iteration operator, not rest/spread.
+This is the only iteration mechanism in match syntax.
 
-**`$EachField<T, F>` is for transformation** (table → table). `{ [%K]: %V }` distribution is for extraction (table → union). They are complementary; `$Keys<T>`, `Values<T>`, `PairsReturn<T>` all reduce to `match T { { [%K]: %V } => ... }`.
+`$EachField<T, F>` is for transformation (table → table). `{ ...[%K]: %V }` is for extraction
+(table → union). They are complementary.
+
+**Rest capture and openness:** `...%Rest` captures remaining named fields as a closed table
+type. Result `{ ...Rest }` = closed output. Result `{ ...Rest, ... }` = open output.
+`Open<T>` and `Closed<T>` are expressible as one-arm match types (see docs/type-system.md).
 
 ## Prior Art
 

@@ -797,7 +797,7 @@ function M.evaluate(ctx, mt_id, seen)
         --: integer
         local res_id = ctx.lists:get(i + 1)
 
-        -- TAG_PAT_ALL_FIELDS: { [%K]: %V } with capture key — distributes over every field of the input.
+        -- TAG_PAT_ALL_FIELDS: { ...[%K]: %V } distributes over every field of the input.
         -- For each named field: K = lit_string(name), V = field_type.
         -- For each indexer: K = key_type, V = value_type.
         -- TAG_ANY/TAG_UNKNOWN: one iteration K=unknown, V=unknown.

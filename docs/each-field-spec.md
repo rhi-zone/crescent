@@ -107,14 +107,14 @@ tuple-return semantics cannot be expressed as pure match computation.
 
 Indexer fields: `key` = indexer key type (e.g. `integer`), not a string literal.
 
-## Relation to `{ [%K]: %V }` distribution
+## Relation to `{ ...[%K]: %V }`
 
-`{ [%K]: %V }` in a match arm distributes over all field entries and unions results — suitable for
-reading/extracting types (`Keys<T>`, `Values<T>`, `PairsReturn<T>`). `$EachField` gathers per-field
-results into a new table — suitable for writing/transforming fields. They are complementary:
+`{ ...[%K]: %V }` distributes per-field and unions results — right for reading fields
+(PairsReturn, Keys, Values). `$EachField` gathers per-field results into one new table
+— right for writing/transforming fields. They are complementary, not redundant:
 
-- `match T { { [%K]: %V } => K }` — union of all key types (result is a union type)
+- `match T { { ...[%K]: %V } => K }` — union of all key types (result is a union type)
 - `$EachField<T, MakeOptional>` — new table with all fields made optional (result is a table type)
 
-`{ ...[%K]: %V }` syntax is removed. The `[%K]: %V` bracket notation already means "a field entry
-with key K and value V" — no `...` needed for distribution.
+`{ [%K]: %V }` (without `...`) matches ONE structural element — the table's indexer. It does NOT
+distribute. `{ ...[%K]: %V }` is the iteration form.
