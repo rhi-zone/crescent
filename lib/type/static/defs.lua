@@ -102,7 +102,7 @@ M.TAG_CAPTURE           = 27  -- pattern-position capture variable: %Name
 --   data[0] = name_id  (intern ID of the capture variable name)
 -- When encountered in a match pattern, binds name_id -> resolved input type.
 -- Always succeeds (acts as wildcard). Used only in annotation arena; never in checker arena.
-M.TAG_PAT_ALL_FIELDS    = 28  -- { ...[%K]: %V } pattern: distributes over all fields of input
+M.TAG_PAT_ALL_FIELDS    = 28  -- { [%K]: %V } with capture key: distributes over all fields of input
 -- TypeSlot layout for TAG_PAT_ALL_FIELDS:
 --   data[0] = k_name_id  (intern ID of the key capture variable name)
 --   data[1] = v_name_id  (intern ID of the value capture variable name)

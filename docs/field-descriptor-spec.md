@@ -155,15 +155,21 @@ The core design question. Attributes are transforms on flags, but how does a mat
 
 Option 2 is the most natural if descriptors are already matchable tables. Option 4 is simplest if generality isn't needed yet.
 
-### Open: All-fields pattern and descriptors
+### Resolved: All-fields pattern and descriptors
 
-The current `{ ...[%K]: %V }` binds key and value from each field. With descriptors, should it bind the full descriptor?
+**`{ [%K]: %V }` distributes over all field entries.** The bracket notation `{ [K]: V }` means "a table entry with key K and value V." With captures, it runs once per field entry in the input (named fields and indexers alike) and unions results. No `...` needed.
 
-Problem: `{ ...%D }` looks like tuple rest capture, not field iteration. These are different operations with the same syntax — ambiguous. Needs either:
-- Different syntax for "iterate field descriptors" vs "capture tuple rest"
-- Or: the all-fields pattern always produces descriptors, and `{ ...[%K]: %V }` is sugar for destructuring `D.key` as K and `D.value` as V
+- `{ [%K]: %V }` in a match arm — field-entry distribution: K and V bind to each entry's key and value types; results are unioned.
+- `{ ["foo"]: %V }` — predicate form: succeeds only for tables with a "foo" field.
+- `{ ...[%K]: %V }` — **removed**. Under rest semantics, `...` means "capture the remaining fields as a group," which is equivalent to `{ [%K]: %V }` — so `...` adds nothing. The previous iteration behavior now belongs to `{ [%K]: %V }` alone.
 
-This is tied to the broader `$EachField` question: if match can iterate descriptors and `$EachField` can collect results into a table, the two mechanisms need to be clearly distinct in syntax.
+**Rest capture and openness in result position:** In a match arm result expression, table types are constructed the same way as in annotations. `{ x: integer, ... }` is an open table type — the trailing `...` is the openness marker. This applies to constructed results too:
+- `{ x: X, ...Rest }` — closed table: field x plus Rest's fields
+- `{ x: X, ...Rest, ... }` — open table: field x plus Rest's fields, and the table is open
+
+The `...Rest` (spread) and the trailing `...` (openness marker) are distinct; same distinction as in regular table type syntax.
+
+**`$EachField<T, F>` is for transformation** (table → table). `{ [%K]: %V }` distribution is for extraction (table → union). They are complementary; `$Keys<T>`, `Values<T>`, `PairsReturn<T>` all reduce to `match T { { [%K]: %V } => ... }`.
 
 ## Prior Art
 

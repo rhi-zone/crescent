@@ -27,10 +27,10 @@
 --:: declare pairs = <T>(t: T) -> ...(PairsReturn<T>)
 --:: declare ipairs = <T>(t: T) -> ...(IpairsReturn<T>)
 
---:: PairsReturn<T>  = match T { { ...[%K]: %V } => (K, V) }
---:: IpairsReturn<T> = match T { { ...[%K]: %V } => match K { number => (integer, V), _ => never } }
---:: Keys<T>         = match T { { ...[%K]: %V } => K }
---:: Values<T>       = match T { { ...[%K]: %V } => V }
+--:: PairsReturn<T>  = match T { { [%K]: %V } => (K, V) }
+--:: IpairsReturn<T> = match T { { [%K]: %V } => match K { number => (integer, V), _ => never } }
+--:: Keys<T>         = match T { { [%K]: %V } => K }
+--:: Values<T>       = match T { { [%K]: %V } => V }
 --:: declare next = (t: any, k: any | nil) -> (any, any)
 --:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }

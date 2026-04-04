@@ -5211,7 +5211,7 @@ f("anything")
     end)
 end)
 
-assert.describe("all-fields pattern: { ...[%K]: %V }", function()
+assert.describe("all-fields pattern: { [%K]: %V } distribution", function()
     assert.it("PairsReturn over named-field table: k is string literal union", function()
         -- PairsReturn<{ x: integer, y: string }> distributes to ("x", integer)|("y", string).
         -- After iter triple collapsing: K = "x"|"y", V = integer|string.

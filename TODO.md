@@ -87,6 +87,8 @@ Items that currently lack an implementer-ready spec:
 
 ## typechecker match semantics gaps
 
+- [ ] **`Parameters<typeof f>` captures only first param** — `Parameters<F> = match F { (...%P) -> %R => P }` gives `integer` instead of `(integer, string)` when F = `typeof f` and f: `(integer, string) -> boolean`. `(...%P)` rest capture in function patterns should bind P to a tuple of all params. Broken specifically when the function type comes from `typeof` (i.e. the concrete function type is available at match time). Tracked by fuzz_test.lua P2a/P2b (pre-existing failure).
+
 - [x] **Intersection types are opaque in match arms** — FIXED properly (521226a). DNF normalization in `M.evaluate`: `to_dnf` expands `A|(B&C)` and `A&(B|C)` into terms; each term dispatched independently. For pure-table intersections, `flatten_to_table` merges all member fields into one TAG_TABLE so structural patterns see all fields. Band-aid (0ace6b0) replaced.
 
 ## typechecker missing features

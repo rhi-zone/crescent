@@ -652,8 +652,26 @@ function M.parse_annotations(annotations, pool, filename)
                             expect_char(s, "]")
                             expect_char(s, ":")
                             local val_type = parse_type(s)
-                            indexers[#indexers + 1] = key_type
-                            indexers[#indexers + 1] = val_type
+                            -- { [%K]: %V } with capture key → field-entry distribution (TAG_PAT_ALL_FIELDS).
+                            -- Distributes over all named fields and indexers, unioning results.
+                            -- { ["foo"]: %V } or { [string]: %V } with concrete key → regular indexer predicate.
+                            local kt = types:get(key_type)
+                            if kt.tag == defs.TAG_CAPTURE then
+                                local k_name_id = kt.data[0]
+                                local vt = types:get(val_type)
+                                local v_name_id = vt.tag == defs.TAG_CAPTURE and vt.data[0]
+                                    or intern_mod.intern(pool, "_")  -- wildcard if V is concrete
+                                local paf = alloc_type(defs.TAG_PAT_ALL_FIELDS)
+                                local paft = types:get(paf)
+                                paft.data[0] = k_name_id
+                                paft.data[1] = v_name_id
+                                -- PAT_ALL_FIELDS is standalone; close braces and return.
+                                expect_char(s, "}")
+                                return paf
+                            else
+                                indexers[#indexers + 1] = key_type
+                                indexers[#indexers + 1] = val_type
+                            end
                         end
                     elseif fb and is_ident_start(fb or 0) then
                         -- Field: [readonly] name[?]: type
@@ -701,35 +719,8 @@ function M.parse_annotations(annotations, pool, filename)
                     elseif fb == byte(".") and s.pos + 2 <= s.len
                         and sub(s.src, s.pos, s.pos + 2) == "..." then
                         s.pos = s.pos + 3
-                        -- Check for all-fields pattern: ...[%K]: %V → TAG_PAT_ALL_FIELDS
-                        -- Must be the sole entry in the braces.
                         local nb = peek(s)
-                        if nb == byte("[") then
-                            advance(s)  -- skip '['
-                            if peek(s) ~= B_PERCENT then
-                                scan_error(s, "expected '%' capture sigil in ...[%K]: %V pattern")
-                            end
-                            advance(s)  -- skip '%'
-                            local k_name = scan_word(s)
-                            if not k_name then scan_error(s, "expected capture name after '%'") end
-                            expect_char(s, "]")
-                            expect_char(s, ":")
-                            if peek(s) ~= B_PERCENT then
-                                scan_error(s, "expected '%' capture sigil in ...[%K]: %V pattern")
-                            end
-                            advance(s)  -- skip '%'
-                            local v_name = scan_word(s)
-                            if not v_name then scan_error(s, "expected capture name after '%'") end
-                            local k_name_id = intern_mod.intern(pool, k_name)
-                            local v_name_id = intern_mod.intern(pool, v_name)
-                            local paf = alloc_type(defs.TAG_PAT_ALL_FIELDS)
-                            local paft = types:get(paf)
-                            paft.data[0] = k_name_id
-                            paft.data[1] = v_name_id
-                            -- PAT_ALL_FIELDS is a standalone pattern; close the braces and return.
-                            expect_char(s, "}")
-                            return paf
-                        elseif nb == B_PERCENT then
+                        if nb == B_PERCENT then
                             -- ...%Rest: rest-field capture. Captures remaining unmatched fields.
                             -- Used in: { field: _, ...%Rest } to avoid enumerating pass-through fields.
                             advance(s)  -- skip '%'

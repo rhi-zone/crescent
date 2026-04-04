@@ -38,15 +38,12 @@ The `%` sigil makes captures unambiguous regardless of what names happen to be i
 --:: Tail<F>        = match F { (integer, ...%P) -> unknown => P }  -- params after first
 --:: Last<F>        = match F { (...%P, %L) -> unknown => L }       -- last param type
 --:: Init<F>        = match F { (...%P, %L) -> unknown => P }       -- all but last
---:: Keys<T>        = match T { { [%K]: %V } => K, { ...[%K]: %V } => string }
---:: Values<T>      = match T { { [%K]: %V } => V, { ...[%K]: %V } => V }
+--:: Keys<T>        = match T { { [%K]: %V } => K }     -- distributes over all field entries
+--:: Values<T>      = match T { { [%K]: %V } => V }     -- distributes over all field entries
 --:: MetaOf<T>      = match T { { #...%M } => M, _ => nil }
 
 --:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
---:: PairsReturn<T> = match T {
---::   { [%K]: %V }    => (K, V),
---::   { ...[%K]: %V } => (string, V)
---:: }
+--:: PairsReturn<T> = match T { { [%K]: %V } => (K, V) }
 ```
 
 Alias params (`T`, `F`, `A`, `B`, ...) are always concrete — they are declared in the
@@ -59,8 +56,8 @@ capture in multiple arms independently:
 
 ```lua
 --:: Foo<T> = match T {
---::   { [%K]: %V } => K,   -- %K bound here
---::   { ...[%K]: %V } => K -- %K bound independently here
+--::   { [%K]: %V } => K,  -- distributes over all field entries
+--::   _ => never
 --:: }
 ```
 
@@ -71,13 +68,18 @@ In ann.lua, wherever a name is expected in a pattern position, try `%` first:
 - `() -> %Name` — return capture in function arm
 - `(...%Name) -> T` — rest capture: all params as tuple, must be only param
 - `(A, ...%Name, B) -> T` — rest capture with concrete prefix and/or suffix params; at most one `...%Name` per param list. Evaluator matches concrete params from both ends; `...%Name` captures the middle as a tuple.
-- `{ [%Name]: %Name }` — key and value captures in indexer arm
-- `{ ...[%Name]: %Name }` — key and value captures in all-fields arm
+- `{ [%K]: %V }` — field-entry distribution: the arm runs once per field entry in the
+  input (named fields and indexers alike), binding K and V to that entry's key and value
+  types. Results are unioned. `{ ["foo"]: %V }` is the predicate form — matches only
+  tables with a "foo" field. `{ [string]: %V }` matches only entries whose key type is
+  `string` (or a subtype).
 - `{ #...%Name }` — meta-slot capture in meta-spread arm
 - `{ field: %Name, ...%Rest }` — named-field captures with rest capture: `...%Rest`
-  binds the remaining fields as a table spread; `...Rest` in result position splices
-  them back. Useful for pass-through transforms that must survive new fields being
-  added to the descriptor. At most one `...%Rest` per table pattern.
+  binds remaining fields as a row variable. At most one `...%Rest` per table pattern.
+  In result position: `{ field: X, ...Rest }` reconstructs a closed table;
+  `{ field: X, ...Rest, ... }` reconstructs an open table — the trailing `...` is the
+  same openness marker as in regular table type syntax (`{ x: integer, ... }`), separate
+  from the spread `...Rest`.
 
 At the pattern node level, captures are stored as `TAG_CAPTURE(name_id)` rather than
 `TAG_NAMED(name_id)`. The evaluator in match.lua adds `name → resolved_type` to the
@@ -92,7 +94,6 @@ All existing match patterns in stdlib.d.lua use `%`:
 |--------------------|--------------------|
 | `() -> R`          | `() -> %R`         |
 | `{ [K]: V }`       | `{ [%K]: %V }`     |
-| `{ ...[K]: V }`    | `{ ...[%K]: %V }`  |
 | `{ #...M }`        | `{ #...%M }`       |
 | `(...P) -> T`      | `(...%P) -> T`     |
 
