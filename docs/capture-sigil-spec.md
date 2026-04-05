@@ -68,11 +68,15 @@ In ann.lua, wherever a name is expected in a pattern position, try `%` first:
 - `() -> %Name` — return capture in function arm
 - `(...%Name) -> T` — rest capture: all params as tuple, must be only param
 - `(A, ...%Name, B) -> T` — rest capture with concrete prefix and/or suffix params; at most one `...%Name` per param list. Evaluator matches concrete params from both ends; `...%Name` captures the middle as a tuple.
-- `{ [%K]: %V }` — indexer capture: matches the table's indexer. K = key type, V = value type.
-  `{ ["foo"]: %V }` matches a named field. Each matches ONE structural element (no distribution).
-- `{ ...[%K]: %V }` — per-field distribution: iterates all field entries (named fields
-  and indexers), binding K and V per entry, unioning results. The `...` here means
-  "iterate all fields" — a type-level-only overload, not rest/spread.
+- `{ ["foo"]: %V }` — named field capture: concrete key, matches field "foo". Deterministic.
+  `{ [string]: %V }` — concrete type key, matches the string-keyed indexer. Deterministic.
+  **Capture keys `[%K]` are only valid in `{ ...[%K]: %V }` (the iteration form).** A lone
+  `{ [%K]: %V }` or `{ [%K]: %V, ...%Rest }` is a footgun: field order in LuaJIT tables is
+  non-deterministic, so which field "head" binds to K/V is arbitrary. This makes order-dependent
+  operations silently wrong. Use `{ ...[%K]: %V }` to iterate, or concrete keys to address.
+- `{ ...[%K]: %V }` — per-field distribution: iterates ALL field entries (named fields
+  and indexers), binding K and V per entry, unioning results. The only valid form with
+  capture keys. The `...` marks this as iteration, not a single structural match.
 - `{ #...%Name }` — meta-slot capture in meta-spread arm
 - `{ field: %Name, ...%Rest }` — named-field captures with rest capture: `...%Rest`
   binds remaining named fields (always a closed table type). At most one `...%Rest` per
