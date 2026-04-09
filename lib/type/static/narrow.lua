@@ -263,11 +263,18 @@ local function narrow_field_non_nil(ctx, tid, field_name_id)
         -- Build new field list, replacing target field with non-nil version.
         local new_field_ids = {}
         local changed = false
+        local FLAG_OPTIONAL_CLEAR = bit.bnot(defs.FLAG_OPTIONAL)
         for _, fd in ipairs(field_data) do
             if fd.name_id == field_name_id then
+                -- Two sources of nil to strip:
+                --   1. The type itself contains nil (e.g. { x: T | nil }) — subtract it.
+                --   2. FLAG_OPTIONAL causes solve_index to re-add nil dynamically — clear it.
+                -- Both must be handled: a field declared `f?: T` has FLAG_OPTIONAL set
+                -- and type_id = T (no nil in the stored type), so subtract alone is not enough.
                 local non_nil = types_mod.subtract(ctx, fd.type_id, ctx.T_NIL)
-                if non_nil ~= fd.type_id then
-                    local new_fid = types_mod.make_field(ctx, fd.name_id, non_nil, band(fd.flags, defs.FLAG_OPTIONAL) ~= 0)
+                local new_flags = band(fd.flags, FLAG_OPTIONAL_CLEAR)
+                if non_nil ~= fd.type_id or new_flags ~= fd.flags then
+                    local new_fid = types_mod.make_field(ctx, fd.name_id, non_nil, new_flags)
                     new_field_ids[#new_field_ids + 1] = new_fid
                     changed = true
                 else
