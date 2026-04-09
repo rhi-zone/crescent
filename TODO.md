@@ -173,6 +173,32 @@ Not libraries (do not rewrite, repurpose instead):
 - `lib/linux/` — raw OS FFI definitions. Keep as a definitions file, not a library.
 - `lib/stdlib/` — compliance linter. Keep as a linter, not a library.
 
+## near-term (next sessions)
+
+- [ ] **`lib/asm/emit/arm64.lua`** — NEON machine code emitter. Same structure as `emit/x64.lua`
+  but NEON encoding (A64 instruction format). Gate tests on `cpu.neon` (always true on arm64).
+- [ ] **`lib/asm/` convenience wrapper** — `lib/asm/init.lua` single-call API:
+  `asm.compile(kernel_fn, ctype)` → selects abi (cpu.arch), calls `ra.allocate`, calls `emit.compile`.
+  Hides the ra/abi/emit wiring from callers.
+- [ ] **`lib/reactive/`** — signal primitives. See entry in future libraries section.
+  Start point: `signal`, `computed`, `effect`, `batch`. Rainbow is the API reference.
+- [ ] **Fuzz suite gaps** — `docs/fuzz-gaps.md` lists A1–A2 and E1/E6/E7 as ready to implement now.
+- [ ] **`lib/bundle/`** — Lua module bundler. Entry point → resolve static requires → inline →
+  treeshake → constant fold `--define` values → single file output. Discussed 2026-04-10.
+  See design notes: no dynamic `require()` support (warn/error), uses `lib/type/static/` AST.
+
+## lib/asm — SIMD kernel compiler
+
+- [x] `lib/asm/cpu.lua` — CPU feature detection (sse2/avx/avx2/neon, arch)
+- [x] `lib/asm/ra.lua` — linear scan register allocator with aliasing model (51 assertions)
+- [x] `lib/asm/ir.lua` — virtual register IR builder, live interval computation, loop backedge extension
+- [x] `lib/asm/abi/x64.lua` — SysV AMD64 + Win64 register files (407 assertions)
+- [x] `lib/asm/abi/arm64.lua` — AAPCS64 register file
+- [x] `lib/asm/emit/x64.lua` — x86-64 machine code emitter: VEX-encoded AVX instructions,
+  mmap executable memory, full vmulps/vaddps/vsubps/vdivps/vfmadd213ps + loop (27 assertions, AVX-gated)
+- [ ] `lib/asm/emit/arm64.lua` — NEON emitter (A64 encoding)
+- [ ] `lib/asm/init.lua` — convenience wrapper: `asm.compile(kernel_fn, ctype)`
+
 ## lib/stb — image decode/resize (vendored stb)
 
 - [x] Package scaffold: tier selection (vendored > system-vips > pure-lua), `lib/stb/init.lua`, `lib/stb/ffi.lua`, `lib/stb/pure/resize.lua` (nearest-neighbor, full), `lib/stb/pure/image.lua` (PNG stub), `lib/stb/build.lua`, `lib/stb/src/README.md`, `lib/stb/stb_test.lua` (80 assertions)
@@ -212,7 +238,8 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   Again: no dependency on Rainbow — same algebra, separate codebases.
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
-- [ ] **`lib/parse/`** / **`lib/asm/`** / **`lib/ir/`** — language tooling vertical.
+- [ ] **`lib/parse/`** / **`lib/ir/`** — language tooling vertical (compiler IR, parser combinator).
+- [x] **`lib/asm/`** — SIMD kernel compiler: cpu detection, linear scan RA, virtual IR, x64 emitter. See `## lib/asm` section above.
 
 - [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
   emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua`
