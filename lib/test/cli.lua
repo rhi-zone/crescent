@@ -57,6 +57,29 @@ local function parse_args(argv)
 	return coverage, jobs_arg, files
 end
 
+-- ── display helpers ──────────────────────────────────────────────────────────
+
+local function build_counts(pass, fail, skip)
+	if pass + fail + skip == 0 then return nil end
+	local parts = {}
+	if pass > 0 then parts[#parts+1] = pass .. " passed" end
+	if skip > 0 then parts[#parts+1] = skip .. " skipped" end
+	if fail > 0 then parts[#parts+1] = fail .. " failed" end
+	return table.concat(parts, ", ")
+end
+
+local function build_summary(pass_files, fail_files, skip, total_files, assertions)
+	local parts = { pass_files .. " passed" }
+	if skip > 0 then parts[#parts+1] = skip .. " skipped" end
+	parts[#parts+1] = fail_files .. " failed"
+	parts[#parts+1] = total_files .. " total"
+	local s = table.concat(parts, ", ")
+	if assertions > 0 then
+		s = s .. "  (" .. assertions .. " assertion" .. (assertions ~= 1 and "s" or "") .. ")"
+	end
+	return s
+end
+
 -- ── file discovery ────────────────────────────────────────────────────────────
 
 local function find_test_files()
@@ -82,7 +105,7 @@ local function run_sequential(file_list, coverage)
 	local assert_mod = require("lib.test.assert")
 
 	local total_pass_files, total_fail_files = 0, 0
-	local grand_pass, grand_fail = 0, 0
+	local grand_pass, grand_fail, grand_skip = 0, 0, 0
 
 	for _, file in ipairs(file_list) do
 		assert_mod._reset()
@@ -91,15 +114,9 @@ local function run_sequential(file_list, coverage)
 
 		grand_pass = grand_pass + summary.pass
 		grand_fail = grand_fail + summary.fail
+		grand_skip = grand_skip + summary.skip
 
-		local counts
-		if summary.pass + summary.fail > 0 then
-			if summary.fail == 0 then
-				counts = summary.pass .. " passed"
-			else
-				counts = summary.pass .. " passed, " .. summary.fail .. " failed"
-			end
-		end
+		local counts = build_counts(summary.pass, summary.fail, summary.skip)
 
 		if ok and summary.fail == 0 then
 			total_pass_files = total_pass_files + 1
@@ -131,10 +148,7 @@ local function run_sequential(file_list, coverage)
 
 	print("")
 	local total_assertions = grand_pass + grand_fail
-	io.write(total_pass_files .. " passed, " .. total_fail_files .. " failed, " .. #file_list .. " total")
-	if total_assertions > 0 then
-		io.write("  (" .. total_assertions .. " assertion" .. (total_assertions ~= 1 and "s" or "") .. ")")
-	end
+	io.write(build_summary(total_pass_files, total_fail_files, grand_skip, #file_list, total_assertions))
 	io.write("\n")
 
 	if cov then
@@ -183,23 +197,22 @@ local function decode_test(s)
 end
 
 -- Encode a full file result into a single line.
-local function encode_result(file, ok_file, pass, fail, pcall_err, tests)
+-- LINE: STATUS file pass fail skip pcall_err tests_list
+local function encode_result(file, ok_file, pass, fail, skip, pcall_err, tests)
 	local status = (ok_file and fail == 0) and "PASS" or "FAIL"
-	-- encode tests list
 	local tests_enc = {}
 	for _, t in ipairs(tests or {}) do
 		tests_enc[#tests_enc + 1] = urlencode(encode_test(t))
 	end
 	local tests_str = table.concat(tests_enc, ",")
 	local pcall_enc = urlencode(pcall_err or "")
-	-- LINE: STATUS file pass fail pcall_err tests_list
 	return status .. " " .. urlencode(file) .. " " .. pass .. " " .. fail
-		.. " " .. pcall_enc .. " " .. tests_str
+		.. " " .. (skip or 0) .. " " .. pcall_enc .. " " .. tests_str
 end
 
 local function decode_result(line)
-	local status, file_enc, pass_s, fail_s, pcall_enc, tests_str =
-		line:match("^(%u+) (%S+) (%d+) (%d+) (%S*) ?(.*)$")
+	local status, file_enc, pass_s, fail_s, skip_s, pcall_enc, tests_str =
+		line:match("^(%u+) (%S+) (%d+) (%d+) (%d+) (%S*) ?(.*)$")
 	if not status then return nil end
 
 	local tests = {}
@@ -215,6 +228,7 @@ local function decode_result(line)
 		file      = urldecode(file_enc),
 		pass      = tonumber(pass_s),
 		fail      = tonumber(fail_s),
+		skip      = tonumber(skip_s) or 0,
 		pcall_err = urldecode(pcall_enc),
 		tests     = tests,
 	}
@@ -236,6 +250,7 @@ local function run_worker(file_subset, write_fd)
 			ok,
 			summary.pass,
 			summary.fail,
+			summary.skip,
 			not ok and tostring(err) or nil,
 			summary.tests
 		) .. "\n"
@@ -342,26 +357,19 @@ local function run_parallel(file_list, n)
 
 	-- Print in sorted (deterministic) file order.
 	local total_pass_files, total_fail_files = 0, 0
-	local grand_pass, grand_fail = 0, 0
+	local grand_pass, grand_fail, grand_skip = 0, 0, 0
 
 	for _, file in ipairs(file_list) do
 		local r = results_by_file[file]
 		if not r then
-			-- Shouldn't happen; treat as error.
 			io.write("  FAIL  " .. file .. "  (no result from worker)\n")
 			total_fail_files = total_fail_files + 1
 		else
 			grand_pass = grand_pass + r.pass
 			grand_fail = grand_fail + r.fail
+			grand_skip = grand_skip + r.skip
 
-			local counts
-			if r.pass + r.fail > 0 then
-				if r.fail == 0 then
-					counts = r.pass .. " passed"
-				else
-					counts = r.pass .. " passed, " .. r.fail .. " failed"
-				end
-			end
+			local counts = build_counts(r.pass, r.fail, r.skip)
 
 			if r.status == "PASS" then
 				total_pass_files = total_pass_files + 1
@@ -390,10 +398,7 @@ local function run_parallel(file_list, n)
 
 	print("")
 	local total_assertions = grand_pass + grand_fail
-	io.write(total_pass_files .. " passed, " .. total_fail_files .. " failed, " .. #file_list .. " total")
-	if total_assertions > 0 then
-		io.write("  (" .. total_assertions .. " assertion" .. (total_assertions ~= 1 and "s" or "") .. ")")
-	end
+	io.write(build_summary(total_pass_files, total_fail_files, grand_skip, #file_list, total_assertions))
 	io.write("\n")
 
 	if total_fail_files > 0 then os.exit(1) end

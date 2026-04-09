@@ -76,8 +76,7 @@ end)
 T.describe("emit.x64 vmulps kernel", function()
   T.it("multiplies float[8] arrays correctly", function()
     if not have_avx then
-      T.ok(true, "skipped: AVX not available on this CPU")
-      return
+      T.skip("AVX not available on this CPU")
     end
     -- Kernel: (dst: ptr, a: ptr, b: ptr, n: i64)
     -- Body: single iteration over 8 floats (no loop for simplicity).
@@ -129,8 +128,7 @@ end)
 T.describe("emit.x64 vaddps kernel", function()
   T.it("adds float[8] arrays correctly", function()
     if not have_avx then
-      T.ok(true, "skipped: AVX not available on this CPU")
-      return
+      T.skip("AVX not available on this CPU")
     end
     local k   = ir.kernel({ "ptr", "ptr", "ptr" }, {})
     local dst = k:arg(1)
@@ -170,8 +168,7 @@ end)
 T.describe("emit.x64 vmulps loop kernel", function()
   T.it("multiplies 32-element float arrays with a loop", function()
     if not have_avx then
-      T.ok(true, "skipped: AVX not available on this CPU")
-      return
+      T.skip("AVX not available on this CPU")
     end
     -- Kernel: (dst: ptr, a: ptr, b: ptr, n: i64)
     -- Loop: i = 0; while i < n: dst[i..i+8] = a[i..i+8] * b[i..i+8]; i += 32
