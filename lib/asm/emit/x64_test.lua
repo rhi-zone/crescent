@@ -7,6 +7,7 @@ local ir   = require("lib.asm.ir")
 local ra   = require("lib.asm.ra")
 local abi  = require("lib.asm.abi.x64")
 local emit = require("lib.asm.emit.x64")
+local cpu  = require("lib.asm.cpu")
 local ffi  = require("ffi")
 
 -- Skip on non-x86-64.
@@ -18,6 +19,9 @@ if not jit or jit.arch ~= "x64" then
   end)
   return
 end
+
+-- YMM instructions (VMOVDQU ymm, VMULPS, VADDPS etc.) require AVX.
+local have_avx = cpu.avx
 
 -- ---------------------------------------------------------------------------
 -- Helper: compile a kernel and return the callable.
@@ -67,9 +71,14 @@ end)
 
 -- ---------------------------------------------------------------------------
 -- Test 3: VMULPS kernel — element-wise multiply of two float[8] arrays
+-- Requires AVX (256-bit YMM registers).
 -- ---------------------------------------------------------------------------
 T.describe("emit.x64 vmulps kernel", function()
   T.it("multiplies float[8] arrays correctly", function()
+    if not have_avx then
+      T.ok(true, "skipped: AVX not available on this CPU")
+      return
+    end
     -- Kernel: (dst: ptr, a: ptr, b: ptr, n: i64)
     -- Body: single iteration over 8 floats (no loop for simplicity).
     --   va  = load(a, 0)    → f32x8
@@ -115,9 +124,14 @@ end)
 
 -- ---------------------------------------------------------------------------
 -- Test 4: VADDPS kernel
+-- Requires AVX.
 -- ---------------------------------------------------------------------------
 T.describe("emit.x64 vaddps kernel", function()
   T.it("adds float[8] arrays correctly", function()
+    if not have_avx then
+      T.ok(true, "skipped: AVX not available on this CPU")
+      return
+    end
     local k   = ir.kernel({ "ptr", "ptr", "ptr" }, {})
     local dst = k:arg(1)
     local a   = k:arg(2)
@@ -151,9 +165,14 @@ end)
 
 -- ---------------------------------------------------------------------------
 -- Test 5: VMULPS loop kernel — element-wise multiply of float[N] arrays
+-- Requires AVX.
 -- ---------------------------------------------------------------------------
 T.describe("emit.x64 vmulps loop kernel", function()
   T.it("multiplies 32-element float arrays with a loop", function()
+    if not have_avx then
+      T.ok(true, "skipped: AVX not available on this CPU")
+      return
+    end
     -- Kernel: (dst: ptr, a: ptr, b: ptr, n: i64)
     -- Loop: i = 0; while i < n: dst[i..i+8] = a[i..i+8] * b[i..i+8]; i += 32
     -- (n is in bytes; 8 floats = 32 bytes)
