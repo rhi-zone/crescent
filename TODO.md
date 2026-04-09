@@ -173,6 +173,15 @@ Not libraries (do not rewrite, repurpose instead):
 - `lib/linux/` — raw OS FFI definitions. Keep as a definitions file, not a library.
 - `lib/stdlib/` — compliance linter. Keep as a linter, not a library.
 
+## lib/stb — image decode/resize (vendored stb)
+
+- [x] Package scaffold: tier selection (vendored > system-vips > pure-lua), `lib/stb/init.lua`, `lib/stb/ffi.lua`, `lib/stb/pure/resize.lua` (nearest-neighbor, full), `lib/stb/pure/image.lua` (PNG stub), `lib/stb/build.lua`, `lib/stb/src/README.md`, `lib/stb/stb_test.lua` (80 assertions)
+- [ ] Download stb headers and compile vendored binaries for all 5 platforms via CI (`lib/stb/build.lua`)
+- [ ] Implement pure Lua PNG decoder in `lib/png/` and wire into `lib/stb/pure/image.lua`
+- [ ] Implement system-vips decode/resize wrappers in `lib/stb/init.lua` try_system_vips()
+- [ ] Parity tests: vendored vs pure-lua resize on random pixel buffers (identical output)
+- [ ] Benchmarks: vendored stbir vs pure-lua nearest-neighbor; record in `docs/perf/log.md`
+
 ## future libraries
 
 See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteries.md is authoritative.
