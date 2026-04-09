@@ -5,7 +5,7 @@
 See `docs/batteries.md` for full design. Primitives the platform needs that don't exist yet:
 
 - [ ] `lib/format/png` — read/write tEXt metadata chunks (distribution format for cards)
-- [ ] `lib/sandbox` — capability-based sandbox for turn scripts (design needed; this is security-critical, must be first-class from the start)
+- [x] `lib/sandbox` — capability-based sandbox for turn scripts (457edea)
 - [x] `lib/reactive_optics` — Rainbow port for Lua (reactive UI, optics-based)
 - [ ] `lib/ecs` or equivalent entity store — mutable world state with SQLite backing
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
