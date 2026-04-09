@@ -183,6 +183,20 @@ Not libraries (do not rewrite, repurpose instead):
 - [ ] **`lib/reactive/`** — signal primitives. See entry in future libraries section.
   Start point: `signal`, `computed`, `effect`, `batch`. Rainbow is the API reference.
 - [ ] **Fuzz suite gaps** — `docs/fuzz-gaps.md` lists A1–A2 and E1/E6/E7 as ready to implement now.
+- [ ] **`Parameters<typeof f>` rest capture** — pre-existing `fuzz_test.lua` failure (P2a/P2b).
+  `(...%P) ->` in match arm binds only first param when F comes from `typeof`. Fix in match.lua
+  or env.lua rest-capture logic for concrete function types.
+- [ ] **Spread-union distribution** — `{ ...(A | B), k: V }` keeps a placeholder instead of
+  distributing. Fix in `env.lua:substitute_inner`: distribute over union members, handle in
+  `solve.lua` field lookup and `unify.lua`. Needed for builder pattern + mapped-type aliases.
+- [ ] **Optional field narrowing** — `if opts.f then opts.f(x) end` still errors: second read
+  of `opts.f` returns the union type, not narrowed non-nil. Workaround (extract to local) is
+  known; real fix requires field-access narrowing in narrow.lua.
+- [ ] **Narrowing for function-call return locals** — `local x = f(); if not x then return end`
+  does not narrow `x` in the continuation because `x` is TAG_VAR at narrowing time. Three
+  architectural options in TODO (a/b/c); needs a design decision before implementation.
+- [ ] **`$GlobalScope` undocumented** — used in stdlib.d.lua for `_G` but not listed as a
+  permanent intrinsic in CLAUDE.md or docs/. Document intent or replace with a simpler mechanism.
 - [ ] **`lib/bundle/`** — Lua module bundler. Entry point → resolve static requires → inline →
   treeshake → constant fold `--define` values → single file output. Discussed 2026-04-10.
   See design notes: no dynamic `require()` support (warn/error), uses `lib/type/static/` AST.
