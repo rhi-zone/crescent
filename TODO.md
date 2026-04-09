@@ -195,12 +195,29 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
 - [ ] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
 - [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
-- [ ] **`lib/reactive/`** — reactive signals. `lib/reactive_optics/` combines with `lib/fp/` optics.
+- [ ] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
+  Core API: `signal(init)` → `{get, set, update}`, `computed(fn, deps)`, `effect(fn)`, `batch(fn)`.
+  Reference implementation: **Rainbow** at `~/git/rhizone/rainbow/` — full TypeScript signal layer
+  with `Signal<A>`, `ReadonlySignal<A>`, `computed()`, `cond()`, `batch()`, `product()`, `stateful()`,
+  React/Vue adapters, ~90 tests including property-based law tests. Port the algebra, not the syntax.
+
+- [ ] **`lib/reactive_optics/`** — signals focused through optics. `signal:focus(lens)` produces a
+  derived signal that reads/writes structurally; composition of optics guarantees state consistency
+  by construction (lens laws: get-set, set-get, set-set). Combines `lib/reactive/` with `lib/fp/optics/`
+  (lens, prism, iso, traversal — already built). The key combinator: `focus(signal, optic)` →
+  `{get(), set(v), update(fn)}` where get/set delegate through the optic.
+  Reference: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
 - [ ] **`lib/parse/`** / **`lib/asm/`** / **`lib/ir/`** — language tooling vertical.
 
-- [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST; emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua` in ~/git/lua (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross. Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra annotation work.
+- [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
+  emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua`
+  (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross.
+  Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra
+  annotation work. Primary use case: write `lib/reactive_optics/` logic in Lua, emit typed TS,
+  run in browser alongside Rainbow components. Rainbow (`~/git/rhizone/rainbow/`) is the
+  deployment target — `lib/lua2ts/` output is designed to compose with Rainbow's signal/optics layer.
 
 - [ ] **`lib/jsonrpc/`** — request/response dispatch over stdio or TCP. Substrate for LSP, Model Context Protocol, and any JSON-RPC protocol. Transport abstraction, method registry, typed handler registration.
 
@@ -1015,6 +1032,13 @@ See `docs/pkg-design.md` for full design.
   SQLite ORM layer + templating. API inspired by Lapis/Sinatra but first-class crescent types
   throughout. Goal: write a web app in Lua that a Rails/Express developer finds familiar.
 
-- [ ] **Frontend framework** (`lib/ui/`) — Lua-to-JS via lib/js transpiler (already exists).
-  Component model, reactivity, DOM bindings. Stretch: WASM build of LuaJIT for true client-side
-  Lua. Very early/experimental — depends on lib/js maturity first.
+- [ ] **Reactive frontend** — three-layer stack, each independently useful:
+  1. `lib/reactive/` + `lib/reactive_optics/` — signal + optics algebra in Lua (see above)
+  2. `lib/lua2ts/` — transpile Lua state logic to typed TypeScript for browser deployment
+  3. Rainbow integration — emit code that composes with Rainbow's signal/optics/component layer
+     (`~/git/rhizone/rainbow/`). Rainbow is the **reference implementation** of the reactive
+     algebra: `Signal<A>`, `computed()`, `batch()`, `focus(signal, lens)`, React/Vue adapters,
+     router, form binding, ~90 property-based tests. The Lua layer is a parallel implementation
+     of the same algebra — not a wrapper around Rainbow, a peer.
+  TUI variant: `lib/tui/reactive` — same `lib/reactive_optics/` model, terminal renderer instead
+  of DOM. Depends on `lib/tui/` and `lib/ansi/` first.
