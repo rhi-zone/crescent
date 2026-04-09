@@ -1,5 +1,24 @@
 # TODO
 
+## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
+
+Phase 1 (`lib/mdast`) is complete. Known gaps for Phase 2:
+
+- **Setext headings** — underline style (`===`/`---`): requires one line of lookahead in
+  the block parser. Currently not supported; ATX headings only.
+- **Link reference definitions** — `[text][id]` and `[text][]` reference-style links use
+  the collected `_defs` table but inline parsing doesn't resolve them yet. Only inline
+  links `[text](url)` work.
+- **HTML block classification** — HTML blocks are treated as a single passthrough (emit
+  until blank line). CommonMark defines 7 HTML block types with different termination
+  rules. Current impl is a simplified version.
+- **Tight vs loose lists** — all lists are effectively tight. Loose lists (blank line
+  between items) should wrap item content in `<p>` tags in HTML output.
+- **Autolinks** — `<url>` and `<email>` forms not handled.
+- **GFM extensions** — tables, strikethrough (`~~text~~`), task list items (`- [x]`).
+- **`mdast.stringify` completeness** — round-trip is best-effort; complex nested
+  structures may not stringify perfectly.
+
 ## CRITICAL: fuzz the typechecker against the full type system spec as invariants
 
 **Prerequisite: typechecker must be in a non-broken state before starting.**

@@ -77,6 +77,10 @@ structure; the model is a function over it. The context window is a view, not th
 - **Orchestration** — task graph, execution engine, combinators (map/retry/refine),
   LLM executor at `lib/orchestration/executor/ai`
 - **Package manager** — semver, manifest, lockfile (install not yet implemented)
+- **Markdown** — `lib/mdast`: CommonMark parser (Phase 1) producing mdast-compatible AST
+  nodes; block structure (headings, paragraphs, fenced/indented code, thematic breaks,
+  blockquotes, lists, HTML, link definitions) + inline parsing (emphasis, strong,
+  inline code, links, images, hard breaks); `mdast.stringify` for basic round-trip
 
 ### Missing — stdlib tier
 
