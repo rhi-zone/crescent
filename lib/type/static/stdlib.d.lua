@@ -31,6 +31,8 @@
 --:: IpairsReturn<T> = match T { { ...[%K]: %V } => match K { number => (integer, V), _ => never } }
 --:: Keys<T>         = match T { { ...[%K]: %V } => K }
 --:: Values<T>       = match T { { ...[%K]: %V } => V }
+--:: Open<T>         = match T { { ...%Rest } => { ...Rest, ... } }
+--:: Closed<T>       = match T { { ...%Rest } => { ...Rest } }
 --:: declare next = (t: any, k: any | nil) -> (any, any)
 --:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }

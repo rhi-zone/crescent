@@ -652,8 +652,32 @@ function M.parse_annotations(annotations, pool, filename)
                             expect_char(s, "]")
                             expect_char(s, ":")
                             local val_type = parse_type(s)
-                            indexers[#indexers + 1] = key_type
-                            indexers[#indexers + 1] = val_type
+                            local kt = types:get(key_type)
+                            if kt.tag == defs.TAG_LITERAL and kt.data[0] == defs.LIT_STRING then
+                                -- { ["foo"]: V } → named field entry (equivalent to { foo: V })
+                                local name_id = kt.data[1]
+                                local fi = fields:alloc()
+                                local fe = fields:get(fi)
+                                fe.name_id = name_id
+                                fe.type_id = val_type
+                                fe.flags = 0
+                                flds[#flds + 1] = fi
+                            elseif kt.tag == defs.TAG_CAPTURE then
+                                -- { [%K]: V } is a footgun: field order is non-deterministic.
+                                -- Use { ...[%K]: %V } for per-field distribution instead.
+                                -- Push to parse_errors so it survives the inner pcall.
+                                local cap_name = intern_mod.get(pool, kt.data[0]) or "?"
+                                parse_errors[#parse_errors + 1] = {
+                                    line = s.line, col = s.pos,
+                                    msg = "capture key [%" .. cap_name ..
+                                        "] requires ... prefix — use { ...[%K]: %V }",
+                                }
+                                scan_error(s, "capture key [%" .. cap_name ..
+                                    "] requires ... prefix — use { ...[%K]: %V }")
+                            else
+                                indexers[#indexers + 1] = key_type
+                                indexers[#indexers + 1] = val_type
+                            end
                         end
                     elseif fb and is_ident_start(fb or 0) then
                         -- Field: [readonly] name[?]: type

@@ -5169,12 +5169,11 @@ x = "only"
 end)
 
 assert.describe("capture sigil: %Name in match patterns", function()
-    assert.it("indexer capture: match { x: integer } { { [%K]: %V } => K } gives string", function()
-        -- { x: integer } has no indexer, so { [%K]: %V } doesn't match — result is never.
-        -- Use a table WITH an indexer.
+    assert.it("indexer capture: match { [string]: integer } { { ...[%K]: %V } => K } gives string", function()
+        -- { [string]: integer } has one indexer; { ...[%K]: %V } distributes K=string, V=integer.
         v3_no_errors([[
 --:: T = { [string]: integer }
---:: K = match T { { [%K]: %V } => K }
+--:: K = match T { { ...[%K]: %V } => K }
 local x --: K
 x = "hello"
 ]])
@@ -8758,5 +8757,69 @@ c = b
 --:: Shape = { area: (any) -> number }
 --:: Circle: Shape = { radius: number }
 ]], "Circle")
+    end)
+end)
+
+assert.describe("bracket string key: { [\"foo\"]: V } → named field", function()
+    assert.it("{ [\"x\"]: integer } is equivalent to { x: integer }", function()
+        v3_no_errors([[
+--:: T = { ["x"]: integer }
+local t --: T
+local n --: integer
+n = t.x
+]])
+    end)
+
+    assert.it("{ [\"a\"]: string, [\"b\"]: integer } has both named fields", function()
+        v3_no_errors([[
+--:: T = { ["a"]: string, ["b"]: integer }
+local t --: T
+local s --: string
+local n --: integer
+s = t.a
+n = t.b
+]])
+    end)
+
+    assert.it("capture key [%K] without ... prefix is a parse error", function()
+        v3_has_error([[
+--:: T = { [string]: integer }
+--:: K = match T { { [%K]: %V } => K }
+]], "requires ... prefix")
+    end)
+end)
+
+assert.describe("Open/Closed transforms", function()
+    assert.it("Open<T> makes a closed table open", function()
+        -- Open table: known field is typed, unknown fields return unknown (no 'field not found' error)
+        v3_no_errors([[
+--:: Base = { x: integer }
+--:: O = Open<Base>
+local t --: O
+local n --: integer
+n = t.x
+local extra = t.extra
+]])
+    end)
+
+    assert.it("Closed<T> keeps a closed table closed", function()
+        v3_has_error([[
+--:: Base = { x: integer }
+--:: C = Closed<Base>
+local t --: C
+local extra = t.extra
+]], "")
+    end)
+
+    assert.it("{ ...Rest, ... } parses and marks table as open", function()
+        -- Spread + bare ... produces an open table: known fields typed, unknown fields no error
+        v3_no_errors([[
+--:: Passthrough<T> = match T { { ...%Rest } => { ...Rest, ... } }
+--:: R = Passthrough<{ x: integer }>
+local t --: R
+local n --: integer
+n = t.x
+local extra = t.extra
+]])
     end)
 end)

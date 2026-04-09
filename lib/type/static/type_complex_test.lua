@@ -1111,23 +1111,26 @@ end)
 
 -- ---------------------------------------------------------------------------
 -- match: indexer arm patterns { [K]: V }
+-- { [%K]: %V } (bare capture key) is now forbidden — use { ...[%K]: %V } to iterate
+-- all fields, or { [concrete_type]: %V } to match a specific indexer.
 -- ---------------------------------------------------------------------------
 
 assert.describe("match: indexer arm patterns", function()
-    assert.it("PASS: extract value type from indexer via { [K]: V } => V", function()
+    assert.it("PASS: extract value type from indexer via { [string]: V } => V", function()
         no_error([[
---:: ValueOf<T> = match T { { [%K]: %V } => V }
+--:: ValueOf<T> = match T { { [string]: %V } => V }
 local x --: ValueOf<{ [string]: integer }>
 --: integer
 local y = x
 ]])
     end)
 
-    assert.it("PASS: extract key type from indexer via { [K]: V } => K", function()
+    assert.it("PASS: extract value type from all fields via { ...[K]: V } => V", function()
+        -- { ...[%K]: %V } iterates all fields and unions their value types
         no_error([[
---:: KeyOf<T> = match T { { [%K]: %V } => K }
-local x --: KeyOf<{ [string]: integer }>
---: string
+--:: Values<T> = match T { { ...[%K]: %V } => V }
+local x --: Values<{ [string]: integer }>
+--: integer
 local y = x
 ]])
     end)
@@ -1142,21 +1145,20 @@ local y = x
 ]])
     end)
 
-    assert.it("PASS: indexer pattern does not match named-field-only table", function()
-        -- A table with only named fields has no indexer, so { [K]: V } should fail to match.
+    assert.it("PASS: concrete indexer pattern does not match named-field-only table", function()
+        -- A table with only named fields has no string indexer, so { [string]: V } fails to match.
         -- The result is never (no arm matches).
         no_error([[
---:: ValueOf<T> = match T { { [%K]: %V } => V }
+--:: ValueOf<T> = match T { { [string]: %V } => V }
 local x --: ValueOf<{ name: string }>
--- x has type never (no indexer arm matched)
+-- x has type never (no string-indexed indexer matched)
 ]])
     end)
 
     assert.it("PASS: combined field and indexer pattern", function()
         no_error([[
---:: DescribeMap<T> = match T { { len: %L, [%K]: %V } => { key: K, value: V, len: L } }
+--:: DescribeMap<T> = match T { { len: %L, [string]: %V } => { value: V, len: L } }
 local x --: DescribeMap<{ len: integer, [string]: number }>
-local k --: string  = x.key
 local v --: number  = x.value
 local l --: integer = x.len
 ]])
