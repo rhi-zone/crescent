@@ -12,7 +12,14 @@ See `docs/batteries.md` for full design. Primitives the platform needs that don'
 
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
 
-Phase 1 (`lib/mdast`) is complete. Known gaps for Phase 2:
+**Phase 1 (`lib/mdast`) was one-shotted by a subagent — treat as draft, not complete.**
+Before marking done: run against the CommonMark spec fixture suite (287 examples),
+add snapshot/fixture tests for representative inputs, benchmark throughput vs a
+reference implementation. Expect bugs in emphasis delimiter edge cases, list
+indentation, and nested structures. Do not build `lib/hast` on top until mdast is
+fixture-validated.
+
+Known gaps for Phase 2:
 
 - **Setext headings** — underline style (`===`/`---`): requires one line of lookahead in
   the block parser. Currently not supported; ATX headings only.
