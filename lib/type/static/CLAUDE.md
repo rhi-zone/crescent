@@ -39,11 +39,13 @@ provisional and will be eliminated as `match` gains:
 - meta-slot spread in table types: `{ #...T }` — **implemented** (ann.lua + constrain.lua + env.lua + types.lua, 2026-03-30). Spreads all meta slots from type T into the table. Represented as a meta field entry with `name_id == -1` holding a `TAG_SPREAD` node. `table_meta_field` in types.lua follows spread placeholders. `instantiate_inner` / `substitute_inner` in env.lua expand the spread when the inner type is a known TAG_TABLE, or keep the placeholder for deferred expansion. `resolve_annotation_type` eagerly expands spread when the inner type resolves to TAG_TABLE. Enables `setmetatable` to type as `<T, MT>(t: T, mt: MT) -> T & { #...MT }`.
 - meta-spread capture pattern: `{ #...%M }` — **implemented** (ann.lua + match.lua + constrain.lua + defs.lua, 2026-03-30). `TAG_PAT_META_SPREAD = 30`; meta field entry with `name_id == -3` holding a `TAG_PAT_META_SPREAD` node. Pattern fails if the input has no meta slots. On success, binds the capture name to a synthetic closed table containing the input's named meta slots. `MetaOf<T> = match T { { #...%M } => M, _ => nil }` — enables typed `getmetatable`. Also fixed latent bug: `peek_callee_ret_union` now skips generic functions (returns nil if any param has FLAG_GENERIC), preventing the generic template return type from being used instead of the per-call-site instantiated one.
 
-The permanent intrinsics are `$Require` (module system), `$Opaque`
-(nominal identity), `$FfiC` (builds closed table from ffi.cdef call sites),
-`$Throw` / `$Catch` (type-level error/pcall — diagnostic side effects, not
-expressible as pure computation), and `$EachField` (per-field gather/map with
-flag/descriptor access — complements `{ ...[%K]: %V }` but is not replaceable by it).
+The permanent intrinsics are:
+- `$Require<T>` — module system; needs literal type propagation through generics
+- `$Opaque<T>` / `$Opaque<T, U>` — nominal identity; newtype with optional exposed view
+- `$FfiC` — builds a closed TAG_TABLE from `ffi.cdef(...)` call sites in the file; `ffi.C` resolves to this so undeclared C symbols are errors
+- `$GlobalScope` — builds a closed TAG_TABLE mirroring all `--:: declare` globals; used to type `_G` in stdlib.d.lua. Synthesized in `prelude.lua` after all stdlib declarations are loaded, then patched into the pre-registered alias so `--:: declare _G = $GlobalScope` resolves correctly. Same pattern as `$FfiC` but scoped to declared globals rather than cdef symbols.
+- `$Throw<T>` / `$Catch<T, Default>` — type-level error/pcall; diagnostic side effects not expressible as pure computation
+- `$EachField<T, F>` — per-field flatMap with flag/descriptor access; complements `{ ...[%K]: %V }` but not replaceable by it (needs flag access + brace-tuple result, not just union of values)
 
 **`{ ...[%K]: %V }` vs `$EachField` — complementary primitives, not redundant:**
 - `{ ...[%K]: %V }` — **distribution**: iterates fields, evaluates a result
