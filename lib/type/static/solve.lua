@@ -1435,6 +1435,19 @@ local function solve_return(ctx, c)
         local et = ctx.types:get(expected_tid)
         if et.tag == TAG_SPREAD then
             expected_tid = find(ctx, et.data[0])
+            et = ctx.types:get(expected_tid)
+        end
+        -- When the annotated return is a TAG_TUPLE (multi-return packed as tuple)
+        -- and the actual value is also a TAG_TUPLE, unify them directly — this
+        -- handles `return p` where p: Parameters<typeof f> = (integer, string).
+        -- When the actual value is NOT a tuple (normal `return a, b` path where
+        -- only the first expression is emitted via C_RETURN), use slot 0 of the
+        -- expected tuple for the per-slot check.
+        if et.tag == TAG_TUPLE and ctx.types:get(widened).tag ~= TAG_TUPLE then
+            -- Normal multi-return: `return a, b` — ret_tids[1] = a, check against slot 0.
+            if et.data[1] > 0 then
+                expected_tid = find(ctx, ctx.lists:get(et.data[0]))
+            end
         end
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
         if not ok then

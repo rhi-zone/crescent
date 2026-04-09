@@ -1374,7 +1374,31 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
             -- TAG_VAR / TAG_ROWVAR are generic placeholders; leave them to call-site
             -- checking and fall back to ret_var accumulation for the body.
             if ann_ret_t.tag ~= TAG_VAR and ann_ret_t.tag ~= TAG_ROWVAR then
-                push_ret_id = ann_ret
+                if aft.data[3] == 1 then
+                    -- Single return slot: use it directly.
+                    push_ret_id = ann_ret
+                else
+                    -- Multiple return slots: pack as a TAG_TUPLE so that a single
+                    -- tuple-typed expression (e.g. Parameters<typeof f>) can be
+                    -- returned and checked against all slots at once.  solve_return
+                    -- handles both cases: TAG_TUPLE actual spread across TAG_TUPLE
+                    -- expected, and scalar actual against TAG_TUPLE expected (where
+                    -- only slot 0 is used — the normal `return a, b` path).
+                    local slot_ids = {}
+                    local all_concrete = true
+                    for si = aft.data[2], aft.data[2] + aft.data[3] - 1 do
+                        local slot_tid = types_mod.find(ctx, ctx.lists:get(si))
+                        local slot_t = ctx.types:get(slot_tid)
+                        if slot_t.tag == TAG_VAR or slot_t.tag == TAG_ROWVAR then
+                            all_concrete = false
+                            break
+                        end
+                        slot_ids[#slot_ids + 1] = slot_tid
+                    end
+                    if all_concrete then
+                        push_ret_id = types_mod.make_tuple(ctx, slot_ids)
+                    end
+                end
             end
         end
     end
@@ -2492,7 +2516,12 @@ local function branch_scope_diff(ctx, branch_scope, base_scope)
     local s = branch_scope
     while s and s ~= base_scope do
         for name_id, type_id in pairs(s.bindings) do
-            if result[name_id] == nil and env_mod.lookup(base_scope, name_id) ~= nil then
+            -- Skip narrowing-derived bindings: these are scope-scoped (temporary) type
+            -- refinements set by apply_narrowed. They should not be treated as real
+            -- assignments made inside the branch, and must not be propagated to the
+            -- join point or continuation scope via branch_scope_diff.
+            if result[name_id] == nil and env_mod.lookup(base_scope, name_id) ~= nil
+               and not (s.narrowed_names and s.narrowed_names[name_id]) then
                 result[name_id] = type_id
             end
         end
