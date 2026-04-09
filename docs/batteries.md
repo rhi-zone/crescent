@@ -116,7 +116,7 @@ worldstate queries; the lorebook editor is only needed for the compatibility sur
 | Prose assembly | Lua string ops (no dedicated library needed) |
 | Reactive UI | `lib/reactive_optics` |
 | HTTP server/API | `lib/http` |
-| Card format (PNG + metadata) | `lib/format/png` (tEXt chunks) |
+| Card format (PNG + metadata) | `lib/png` (chunk r/w, tEXt helpers) |
 | Capability sandbox | `lib/sandbox` (to be designed) |
 | Thumbnail generation | stb_image_resize via FFI (compiled in) |
 
