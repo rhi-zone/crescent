@@ -197,18 +197,19 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
 - [ ] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
   Core API: `signal(init)` → `{get, set, update}`, `computed(fn, deps)`, `effect(fn)`, `batch(fn)`.
-  **This is the single source of truth** — `lib/lua2ts/` transpiles it to TypeScript for browser
-  deployment. The transpiled output replaces Rainbow's hand-written signal layer.
-  Correctness reference: **Rainbow** (`~/git/rhizone/rainbow/`) — its test suite validates the
-  transpiled output. Rainbow's `Signal<A>`, `computed()`, `cond()`, `batch()`, `product()`,
-  `stateful()` define the expected API surface and semantics.
+  No dependencies outside crescent — not even on Rainbow.
+  **Rainbow** (`~/git/rhizone/rainbow/`) is a parallel TypeScript implementation of the same algebra,
+  maintained separately. It defines the intended API surface and semantics (`Signal<A>`, `computed()`,
+  `cond()`, `batch()`, `product()`, `stateful()`). The Lua and TS implementations are peers —
+  neither depends on the other. `lib/lua2ts/` can transpile this to standalone TS that is
+  API-compatible with Rainbow but does not import from it.
 
 - [ ] **`lib/reactive_optics/`** — signals focused through optics. `signal:focus(lens)` produces a
   derived signal that reads/writes structurally; lens laws (get-set, set-get, set-set) guarantee
   state consistency by construction. Combines `lib/reactive/` with `lib/fp/optics/` (already built).
   Key combinator: `focus(signal, optic)` → `{get(), set(v), update(fn)}`.
-  Also transpiled to TS via `lib/lua2ts/` — replaces Rainbow's hand-written optics layer.
-  Rainbow's optics tests (`~/git/rhizone/rainbow/src/optics/`) are the correctness reference.
+  Parallel TS implementation: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
+  Again: no dependency on Rainbow — same algebra, separate codebases.
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
 - [ ] **`lib/parse/`** / **`lib/asm/`** / **`lib/ir/`** — language tooling vertical.
@@ -1034,13 +1035,13 @@ See `docs/pkg-design.md` for full design.
   SQLite ORM layer + templating. API inspired by Lapis/Sinatra but first-class crescent types
   throughout. Goal: write a web app in Lua that a Rails/Express developer finds familiar.
 
-- [ ] **Reactive frontend** — two-layer stack:
-  1. Write `lib/reactive/` + `lib/reactive_optics/` in Lua (single source of truth)
-  2. `lib/lua2ts/` transpiles them to TypeScript — the transpiled output *is* the browser library,
-     replacing Rainbow's hand-written core. Rainbow's React/Vue adapters, router, form binding,
-     and component layer sit on top of the transpiled output unchanged.
-  Rainbow (`~/git/rhizone/rainbow/`) is the **correctness reference and consumer ecosystem**,
-  not a parallel implementation. Its ~90 tests (including property-based law tests) validate
-  the transpiled output. Its adapters and examples are the deployment target.
+- [ ] **Reactive frontend** — Lua implementation + optional TS deployment:
+  1. `lib/reactive/` + `lib/reactive_optics/` are self-contained Lua libraries
+  2. `lib/lua2ts/` can transpile them to standalone TypeScript (no Rainbow import)
+  3. The transpiled TS is API-compatible with Rainbow so it drops into Rainbow-based apps,
+     but crescent has zero runtime dependency on Rainbow — not even as an optional dep
+  Rainbow (`~/git/rhizone/rainbow/`) is a parallel implementation of the same algebra in TS,
+  maintained in the rhi ecosystem. Same relationship as Rust crates ↔ crescent libraries:
+  peers, not wrappers. ~90 tests in Rainbow serve as a cross-implementation parity reference.
   TUI variant: `lib/tui/reactive` — same `lib/reactive_optics/` model, terminal renderer.
   Depends on `lib/tui/` and `lib/ansi/` first.
