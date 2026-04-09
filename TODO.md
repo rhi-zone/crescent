@@ -6,7 +6,7 @@ See `docs/batteries.md` for full design. Primitives the platform needs that don'
 
 - [ ] `lib/format/png` — read/write tEXt metadata chunks (distribution format for cards)
 - [ ] `lib/sandbox` — capability-based sandbox for turn scripts (design needed; this is security-critical, must be first-class from the start)
-- [ ] `lib/reactive_optics` — Rainbow port for Lua (reactive UI, optics-based)
+- [x] `lib/reactive_optics` — Rainbow port for Lua (reactive UI, optics-based)
 - [ ] `lib/ecs` or equivalent entity store — mutable world state with SQLite backing
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
@@ -223,7 +223,7 @@ Not libraries (do not rewrite, repurpose instead):
 - [ ] **`lib/asm/` convenience wrapper** — `lib/asm/init.lua` single-call API:
   `asm.compile(kernel_fn, ctype)` → selects abi (cpu.arch), calls `ra.allocate`, calls `emit.compile`.
   Hides the ra/abi/emit wiring from callers.
-- [ ] **`lib/reactive/`** — signal primitives. See entry in future libraries section.
+- [x] **`lib/reactive/`** — signal primitives. See entry in future libraries section.
   Start point: `signal`, `computed`, `effect`, `batch`. Rainbow is the API reference.
 - [x] **Fuzz suite gaps** — `docs/fuzz-gaps.md` fully done (all A/E/G/P tiers checked off).
 - [ ] **`Parameters<typeof f>` rest capture** — pre-existing `fuzz_test.lua` failure (P2a/P2b).
@@ -278,7 +278,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
 - [ ] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
 - [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
-- [ ] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
+- [x] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
   Core API: `signal(init)` → `{get, set, update}`, `computed(fn, deps)`, `effect(fn)`, `batch(fn)`.
   No dependencies outside crescent — not even on Rainbow.
   **Rainbow** (`~/git/rhizone/rainbow/`) is a parallel TypeScript implementation of the same algebra,
@@ -286,13 +286,15 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   `cond()`, `batch()`, `product()`, `stateful()`). The Lua and TS implementations are peers —
   neither depends on the other. `lib/lua2ts/` can transpile this to standalone TS that is
   API-compatible with Rainbow but does not import from it.
+  **Done**: dccd023. signal/computed/effect/batch/focused/narrowed. 56 assertions.
 
-- [ ] **`lib/reactive_optics/`** — signals focused through optics. `signal:focus(lens)` produces a
+- [x] **`lib/reactive_optics/`** — signals focused through optics. `signal:focus(lens)` produces a
   derived signal that reads/writes structurally; lens laws (get-set, set-get, set-set) guarantee
   state consistency by construction. Combines `lib/reactive/` with `lib/fp/optics/` (already built).
   Key combinator: `focus(signal, optic)` → `{get(), set(v), update(fn)}`.
   Parallel TS implementation: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
   Again: no dependency on Rainbow — same algebra, separate codebases.
+  **Done**: dccd023. field/compose_focus/focus/narrow. 9 assertions.
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
 - [ ] **`lib/protocol/capnp`** — zero-copy binary serialization via Cap'n Proto. Wire format reader + writer using LuaJIT FFI (fixed-width fields + typed pointers → direct buffer casting, near-zero allocation). Pure reader first; `.capnp` schema parser deferred (hand-write schemas as Lua tables initially). RPC layer (`lib/capnprpc`) separate. Moderately high priority — genuine capability gap over JSON/CBOR for high-throughput IPC.
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
