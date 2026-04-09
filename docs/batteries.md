@@ -125,6 +125,15 @@ reference. Note: pure Lua AES is slow; system tier is the real implementation.
 with a config file. The format is small and well-specified; a pure Lua parser is
 reasonable.
 
+### Missing — binary serialization
+
+**`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
+read Cap'n Proto messages with near-zero allocation by casting directly into the wire
+buffer (fixed-width fields + typed pointers, no varint parsing). Wire format reader +
+writer first; `.capnp` schema parser deferred (hand-write schemas as Lua tables
+initially). RPC layer (`lib/capnprpc`) separate. Genuine capability gap over JSON/CBOR
+for high-throughput IPC and inter-process data sharing.
+
 ### Missing — protocol bindings
 
 Protocol libraries that expose a typed API, not just a raw wire format:
