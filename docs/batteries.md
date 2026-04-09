@@ -25,6 +25,30 @@ web archiving. Every piece maps to a crescent primitive:
 
 Lumen is the proof that crescent's stdlib is broad enough for real applications.
 
+### Distribution thesis
+
+The complete crescent ecosystem — every library in this document implemented — is
+approximately **~8MB of pure Lua** plus ~4MB of runtime (LuaJIT binary, SQLite,
+vendored stb binaries). **~12MB total.**
+
+SillyTavern, for comparison, is 433MB installed (334MB `node_modules` alone). A
+typical Node.js app's dependency tree exceeds the entire crescent ecosystem before
+the first line of application code runs.
+
+This isn't just "lean" — it's small enough to travel inside other things. An RP
+frontend, a game, a dev tool, a CLI utility: anything users will download without
+asking questions. The download is honest about what it is; users just have a small
+mental model of what "RP frontend" implies. What they actually install is a complete,
+hackable, vendorable computing substrate.
+
+The propagation mechanism is inspection. Every file is readable Lua with no build step.
+Someone opens the install directory, reads `lib/reactive/init.lua`, understands it,
+copies it into their own project. That's how the ecosystem spreads — not through a
+registry, through curiosity.
+
+**The goal:** get LuaJIT + crescent onto every machine by being the best version of
+whatever people actually want to download. The OS layer arrives as a footnote.
+
 ### Portable application substrate
 
 Self-contained, portable applications: logic + state + UI bundled into a single
