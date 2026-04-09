@@ -45,6 +45,11 @@ end
 -- Bind a name (intern ID) to a type_id in the given scope.
 function M.bind(scope, name_id, type_id)
     scope.bindings[name_id] = type_id
+    -- If this scope is a narrowed scope and we're overwriting a narrowed binding with a
+    -- real assignment, clear the narrowing flag so branch_scope_diff picks it up correctly.
+    if scope.narrowed_names and scope.narrowed_names[name_id] then
+        scope.narrowed_names[name_id] = nil
+    end
 end
 
 -- Bind a type alias in the given scope.
@@ -483,9 +488,10 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                         add_subst_field(copied, inner_fe.name_id)
                     end
                 elseif exp_t.tag == TAG_UNION then
-                    -- Distribute spread over union members: { ...(A | B), k: V }.
-                    -- Field type = union of types from members that have it.
-                    -- Field is optional if not all members have it.
+                    -- Distribute spread over union members:
+                    --   { ...(A | B), k: V } → { ...A, k: V } | { ...B, k: V }
+                    -- This is true union distribution: each arm gets its own table,
+                    -- not a single table with unioned field types.
                     local arms_start = exp_t.data[0]
                     local arms_len   = exp_t.data[1]
                     local all_tables = true
@@ -494,36 +500,102 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
                         if arm_t.tag ~= TAG_TABLE then all_tables = false; break end
                     end
                     if all_tables then
-                        -- Collect field types per name across all arms.
-                        --: { [integer]: { [integer]: integer, ... }, ... }
-                        local field_type_lists = {}  -- name_id -> { type_id, ... }
-                        --: { [integer]: integer, ... }
-                        local field_counts     = {}  -- name_id -> number of arms with it
-                        --: { [integer]: integer, ... }
-                        local field_order      = {}  -- ordered list of name_ids (first seen)
-                        for k = arms_start, arms_start + arms_len - 1 do
-                            local arm_tid = types_mod.find(ctx, ctx.lists:get(k))
-                            local arm_t   = ctx.types:get(arm_tid)
-                            for j = arm_t.data[0], arm_t.data[0] + arm_t.data[1] - 1 do
-                                local inner_fe = ctx.fields:get(ctx.lists:get(j))
-                                if inner_fe.name_id ~= -1 then
-                                    if not field_type_lists[inner_fe.name_id] then
-                                        field_type_lists[inner_fe.name_id] = {}
-                                        field_counts[inner_fe.name_id]     = 0
-                                        field_order[#field_order + 1] = inner_fe.name_id
+                        -- Build indexers and meta once — they are shared across all union arms.
+                        local dist_indexers = {}
+                        do
+                            local is2, il2 = t.data[2], t.data[3]
+                            local j = is2
+                            while j < is2 + il2 - 1 do
+                                dist_indexers[#dist_indexers + 1] = substitute_inner(ctx, ctx.lists:get(j),     mapping, seen, eval_seen)
+                                dist_indexers[#dist_indexers + 1] = substitute_inner(ctx, ctx.lists:get(j + 1), mapping, seen, eval_seen)
+                                j = j + 2
+                            end
+                        end
+                        local dist_meta = {}
+                        do
+                            for j = t.data[5], t.data[5] + t.data[6] - 1 do
+                                local mfid = ctx.lists:get(j)
+                                local mfe  = ctx.fields:get(mfid)
+                                if mfe.name_id == -1 then
+                                    local new_msp  = substitute_inner(ctx, mfe.type_id, mapping, seen, eval_seen)
+                                    local msp_t    = ctx.types:get(types_mod.find(ctx, new_msp))
+                                    local mexp_id  = types_mod.find(ctx, msp_t.data[0])
+                                    local mexp_t   = ctx.types:get(mexp_id)
+                                    if mexp_t.tag == TAG_TABLE then
+                                        for mk = mexp_t.data[5], mexp_t.data[5] + mexp_t.data[6] - 1 do
+                                            local mife = ctx.fields:get(ctx.lists:get(mk))
+                                            if mife.name_id >= 0 then
+                                                dist_meta[#dist_meta + 1] = types_mod.make_field(ctx, mife.name_id, mife.type_id, mife.flags)
+                                            end
+                                        end
+                                    else
+                                        dist_meta[#dist_meta + 1] = types_mod.make_field(ctx, -1, new_msp, 0)
                                     end
-                                    local fl = field_type_lists[inner_fe.name_id]
-                                    fl[#fl + 1] = inner_fe.type_id
-                                    field_counts[inner_fe.name_id] = field_counts[inner_fe.name_id] + 1
+                                else
+                                    local new_mtype = substitute_inner(ctx, mfe.type_id, mapping, seen, eval_seen)
+                                    dist_meta[#dist_meta + 1] = types_mod.make_field(ctx, mfe.name_id, new_mtype, band(mfe.flags, defs.FLAG_OPTIONAL) ~= 0)
                                 end
                             end
                         end
-                        for _, name_id in ipairs(field_order) do
-                            local union_tid  = types_mod.make_union(ctx, field_type_lists[name_id])
-                            local is_opt     = field_counts[name_id] < arms_len
-                            local copied     = types_mod.make_field(ctx, name_id, union_tid, is_opt)
-                            add_subst_field(copied, name_id)
+                        -- For each union arm, build the full field list:
+                        --   fields before this spread (already in new_field_ids)
+                        --   + this arm's spread fields
+                        --   + fields after this spread (remaining in the original field list)
+                        seen[tid] = nil
+                        local union_members = {}
+                        for k = arms_start, arms_start + arms_len - 1 do
+                            local arm_tid = types_mod.find(ctx, ctx.lists:get(k))
+                            local arm_t2  = ctx.types:get(arm_tid)
+                            local arm_fids = {}
+                            local arm_fpos = {}
+                            local function add_af(new_fid, name_id)
+                                if arm_fpos[name_id] then
+                                    arm_fids[arm_fpos[name_id]] = new_fid
+                                else
+                                    arm_fids[#arm_fids + 1] = new_fid
+                                    arm_fpos[name_id] = #arm_fids
+                                end
+                            end
+                            -- Copy fields accumulated before this spread
+                            for _, prev_fid in ipairs(new_field_ids) do
+                                local prev_fe = ctx.fields:get(prev_fid)
+                                if prev_fe.name_id ~= -1 then
+                                    add_af(prev_fid, prev_fe.name_id)
+                                end
+                            end
+                            -- Expand this arm's spread fields
+                            for j = arm_t2.data[0], arm_t2.data[0] + arm_t2.data[1] - 1 do
+                                local inner_fe = ctx.fields:get(ctx.lists:get(j))
+                                if inner_fe.name_id ~= -1 then
+                                    add_af(types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags), inner_fe.name_id)
+                                end
+                            end
+                            -- Process remaining fields after this spread position
+                            for fi = i + 1, t.data[0] + t.data[1] - 1 do
+                                local rfe = ctx.fields:get(ctx.lists:get(fi))
+                                if rfe.name_id == -1 then
+                                    local r_new_sp = substitute_inner(ctx, rfe.type_id, mapping, seen, eval_seen)
+                                    local r_sp_t   = ctx.types:get(types_mod.find(ctx, r_new_sp))
+                                    local r_exp_id = types_mod.find(ctx, r_sp_t.data[0])
+                                    local r_exp_t  = ctx.types:get(r_exp_id)
+                                    if r_exp_t.tag == TAG_TABLE then
+                                        for j2 = r_exp_t.data[0], r_exp_t.data[0] + r_exp_t.data[1] - 1 do
+                                            local rife = ctx.fields:get(ctx.lists:get(j2))
+                                            if rife.name_id ~= -1 then
+                                                add_af(types_mod.make_field(ctx, rife.name_id, rife.type_id, rife.flags), rife.name_id)
+                                            end
+                                        end
+                                    else
+                                        arm_fids[#arm_fids + 1] = types_mod.make_field(ctx, -1, r_new_sp, 0)
+                                    end
+                                else
+                                    local r_new_type = substitute_inner(ctx, rfe.type_id, mapping, seen, eval_seen)
+                                    add_af(types_mod.make_field(ctx, rfe.name_id, r_new_type, band(rfe.flags, defs.FLAG_OPTIONAL) ~= 0), rfe.name_id)
+                                end
+                            end
+                            union_members[#union_members + 1] = types_mod.make_table(ctx, arm_fids, dist_indexers, t.data[4], dist_meta)
                         end
+                        return types_mod.make_union(ctx, union_members)
                     else
                         -- Not all union arms are tables — keep placeholder
                         new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, -1, new_sp, 0)

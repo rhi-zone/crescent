@@ -7847,6 +7847,74 @@ local src --: { x: integer }
 local dst = src
 ]])
     end)
+
+    -- Spread-union distribution tests: { ...(A|B) } must be { ...A } | { ...B },
+    -- not a flat table with unioned field types.
+    assert.it("spread-union distributes: extra field present in both arms", function()
+        -- { ...(A|B), k: V } should distribute to { ...A, k: V } | { ...B, k: V }.
+        -- A value of type { ...A, k: V } is assignable to the distributed union.
+        no_errors([[
+--:: A = { x: integer }
+--:: B = { x: string }
+--:: WithK<T> = { ...T, k: boolean }
+--:: Dist = WithK<A | B>
+-- Dist = { x: integer, k: boolean } | { x: string, k: boolean }
+-- A value with concrete arm A satisfies the union
+local function make_a() --: () -> { x: integer, k: boolean }
+    error("mock")
+end
+local v = make_a()
+--: Dist
+local dst = v
+]])
+    end)
+
+    assert.it("spread-union distributes: shared extra field accessible on all arms", function()
+        -- { ...(A|B), k: V } — k is in both arms, so k is accessible without nil
+        no_errors([[
+--:: A = { x: integer }
+--:: B = { x: string }
+--:: WithK<T> = { ...T, k: boolean }
+--:: Dist = WithK<A | B>
+local v --: Dist
+--: boolean
+local _ = v.k
+]])
+    end)
+
+    assert.it("spread-union distributes: arm-specific field not accessible as definite on union", function()
+        -- { ...(A|B) } where A has y but B does not:
+        -- result is { x: integer, y: integer } | { x: string }
+        -- v.y is only available on the first arm, so accessing it on the union should error.
+        has_error([[
+--:: A = { x: integer, y: integer }
+--:: B = { x: string }
+--:: Dist = { ...(A | B) }
+local v --: Dist
+--: integer
+local _ = v.y
+]])
+    end)
+
+    assert.it("spread-union distributes: builder pattern produces union", function()
+        -- WithName<T> = { ...T, name: string } with T = A | B
+        -- Result must be { ...A, name: string } | { ...B, name: string }
+        -- A value of concrete arm { id: string, name: string } must satisfy the union.
+        no_errors([[
+--:: Tagged<T> = { ...T, tag: string }
+--:: Num = { n: integer }
+--:: Str = { s: string }
+--:: NumOrStr = Num | Str
+--:: TaggedResult = Tagged<NumOrStr>
+-- TaggedResult = { n: integer, tag: string } | { s: string, tag: string }
+local function make() --: () -> { n: integer, tag: string }
+    error("mock")
+end
+local v = make()
+--: TaggedResult
+local dst = v
+]])
+    end)
 end)
 
 -- ---------------------------------------------------------------------------
