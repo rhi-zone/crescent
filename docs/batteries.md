@@ -25,19 +25,76 @@ web archiving. Every piece maps to a crescent primitive:
 
 Lumen is the proof that crescent's stdlib is broad enough for real applications.
 
-### RP substrate
+### Portable application substrate
 
-Stateful, LLM-driven narrative: world state that the model reads and writes, prose
-generated from state rather than inferred from conversation, proper lineage tracking
-for every LLM call and tool invocation.
+Self-contained, portable applications: logic + state + UI bundled into a single
+distributable artifact that runs anywhere LuaJIT runs. Zero setup, zero dependencies
+beyond the vendored runtime. The entire app is the artifact.
 
-| RP component | Crescent primitive |
+Motivating targets: an LLM interaction platform (replacing SillyTavern, Talemate,
+Claude Code), a file manager, a markdown viewer, a unified workspace (Deskspace-in-Lua)
+— each dissolving an artificial app boundary. The long-term direction: every user-facing
+layer of the OS-as-Lua goal.
+
+**LLM interaction platform** — generic enough to replace SillyTavern, Talemate, and
+Claude Code, not by being all three, but by being the substrate they're programs on
+top of.
+
+**Core thesis (from `lib/orchestration`):** the LLM is a stateless oracle. Conversation
+is context poisoning. The right unit is a function call. The orchestrator is a program,
+not an agent. ST/Talemate/Claude Code are different programs that call LLMs — the
+platform gives primitives and requires you to write the loop.
+
+**Distribution format:** programs embedded in PNG metadata. A "character" or scenario
+is a Lua script in a PNG tEXt chunk — the image is the distributable. Visual
+representation and executable loop in one file, zero extra dependencies (LuaJIT is
+already vendored). The card carries:
+- The interaction loop (turn script)
+- The world state schema
+- The editor UI (via `lib/reactive_optics`)
+- Its own import/export logic for CCv2/charx/etc — the card is self-describing,
+  the platform has no hardcoded knowledge of any card format
+
+**What this fixes about SillyTavern:**
+- No database → SQLite, search is instant, tags are joins
+- Conversation-as-foundation → loop is user code; accumulation is a choice
+- LLM-derived worldstate → state is written by the program, read by the LLM, never held by it
+- Entity isolation → each character is a function call with explicit inputs; cross-contamination impossible by construction
+- Lorebook triggers = fields pretending to be a language → predicates are code
+- 23k characters, no index, full CCv2 JSON blob → indexed, virtualized, thumbnails on import
+
+**Security:** capability-based. The turn script gets exactly the capabilities it's
+handed — LLM oracle, worldstate read/write, render surface. No ambient authority. The
+threat surface is "what capabilities did the platform hand this card?" — auditable and
+small. UI code (Rainbow/reactive_optics) is lower-risk; sanitization at the render
+boundary is sufficient.
+
+**Architecture:** Lua HTTP server + SQLite + `lib/reactive_optics` frontend. Cap'n Proto
+for the control plane if latency becomes a problem (promise pipelining eliminates
+roundtrip chains). Thumbnail generation via stb_image_resize compiled into the binary
+(zero runtime dep).
+
+**Other frontends follow the same pattern:**
+- File manager — browse, preview, edit as one surface (Deskspace-in-Lua)
+- Markdown viewer / editor
+- Archive tool
+- Eventually: the entire user-facing OS layer
+
+**CCv2/lorebook compatibility** is best-in-class but a footnote: CCv2 is lossless
+import, lossy export. The card embeds its own import/export logic — the platform has
+no hardcoded knowledge of CCv2, charx, or any other format. Lorebooks dissolve into
+worldstate queries; the lorebook editor is only needed for the compatibility surface.
+
+| Component | Crescent primitive |
 |---|---|
-| World state | `lib/ecs` or equivalent mutable entity store |
+| World state | `lib/sqlite` + entity model |
 | LLM task dispatch | `lib/orchestration` + `lib/orchestration/executor/ai` |
-| Prose assembly | `lib/template` (string interpolation over state) |
-| Persistence | `lib/sqlite` |
-| Protocol / API | `lib/http`, `lib/jsonrpc` |
+| Prose assembly | `lib/template` |
+| Reactive UI | `lib/reactive_optics` |
+| HTTP server/API | `lib/http` |
+| Card format (PNG + metadata) | `lib/format/png` (tEXt chunks) |
+| Capability sandbox | `lib/sandbox` (to be designed) |
+| Thumbnail generation | stb_image_resize via FFI (compiled in) |
 
 ### Full-stack dashboard
 
