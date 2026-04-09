@@ -271,6 +271,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   Parallel TS implementation: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
   Again: no dependency on Rainbow — same algebra, separate codebases.
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
+- [ ] **`lib/protocol/capnp`** — zero-copy binary serialization via Cap'n Proto. Wire format reader + writer using LuaJIT FFI (fixed-width fields + typed pointers → direct buffer casting, near-zero allocation). Pure reader first; `.capnp` schema parser deferred (hand-write schemas as Lua tables initially). RPC layer (`lib/capnprpc`) separate. Moderately high priority — genuine capability gap over JSON/CBOR for high-throughput IPC.
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
 - [ ] **`lib/parse/`** / **`lib/ir/`** — language tooling vertical (compiler IR, parser combinator).
 - [x] **`lib/asm/`** — SIMD kernel compiler: cpu detection, linear scan RA, virtual IR, x64 emitter. See `## lib/asm` section above.
