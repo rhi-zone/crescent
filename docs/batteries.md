@@ -113,7 +113,7 @@ worldstate queries; the lorebook editor is only needed for the compatibility sur
 |---|---|
 | World state | `lib/sqlite` + entity model |
 | LLM task dispatch | `lib/orchestration` + `lib/orchestration/executor/ai` |
-| Prose assembly | `lib/template` |
+| Prose assembly | Lua string ops (no dedicated library needed) |
 | Reactive UI | `lib/reactive_optics` |
 | HTTP server/API | `lib/http` |
 | Card format (PNG + metadata) | `lib/format/png` (tEXt chunks) |
@@ -194,9 +194,9 @@ Design: v4 (random) via `lib/rand`, v7 (time-ordered) for database keys.
 **Compression** — no zlib/gzip, no zstd. Needed for HTTP content encoding, storage,
 sync. Design: system library tier (zlib, zstd via FFI) + pure Lua tier for zlib deflate.
 
-**Template engine** — string interpolation over a data table. Needed for prose
-assembly (RP), HTML generation, config rendering. Design: minimal — `{{var}}` and
-`{{#block}}` are sufficient; avoid logic-heavy templates.
+**Template formats** — standard specs (`lib/mustache`, `lib/handlebars`, etc.) are
+worth adding as libraries. A bespoke `lib/template/` for prose assembly is not — Lua
+string concatenation and `string.format` are sufficient for that use case.
 
 **More crypto** — AES-GCM (needed for sync encryption), HKDF (key derivation),
 ChaCha20-Poly1305. Design: system library tier (libcrypto via FFI), pure Lua for
