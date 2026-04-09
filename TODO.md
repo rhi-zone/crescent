@@ -29,6 +29,12 @@ Phase 1 (`lib/mdast`) is complete. Known gaps for Phase 2:
 - **`mdast.stringify` completeness** — round-trip is best-effort; complex nested
   structures may not stringify perfectly.
 
+## lib/hast and unified pipeline
+
+- [ ] **`lib/hast`** — mdast-to-hast transformer + HTML serializer. Input: mdast Root node. Output: hast Root node (element/text/raw nodes following hast spec). `hast.stringify(tree)` → HTML string. Phase 1: cover all mdast Phase 1 node types.
+- [ ] **`lib/unified`** — thin pipeline runner: `unified.pipeline({ parse, ...transforms, stringify })` applies a list of `(tree) -> tree` functions in sequence. No plugin system yet — just function composition. Enables `mdast.parse | mdast_to_hast | hast.stringify` as a one-liner.
+- [ ] **`lib/rehype`** (eventually) — hast plugins (slug, autolink headings, syntax highlight, sanitize). Port from rehype ecosystem once hast is stable.
+
 ## CRITICAL: fuzz the typechecker against the full type system spec as invariants
 
 **Prerequisite: typechecker must be in a non-broken state before starting.**
