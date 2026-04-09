@@ -4641,6 +4641,31 @@ local b --: { name?: string }
 b = a
 ]])
     end)
+
+    assert.it("optional field narrowing: if opts.f then opts.f(42) end — no error inside guard", function()
+        v3_no_errors([[
+--:: opts_t = { f?: (integer) -> string }
+--: (string) -> nil
+local function use_str(s) end
+local opts --: opts_t
+opts = opts
+if opts.f then
+    use_str(opts.f(42))
+end
+]])
+    end)
+
+    assert.it("optional field narrowing: if not opts.f then return end — early-return narrows continuation", function()
+        v3_no_errors([[
+--:: opts_t = { f?: (integer) -> string }
+--: (string) -> nil
+local function use_str(s) end
+local opts --: opts_t
+opts = opts
+if not opts.f then return end
+use_str(opts.f(42))
+]])
+    end)
 end)
 
 assert.describe("field modifiers: readonly", function()
