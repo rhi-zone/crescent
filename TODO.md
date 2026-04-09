@@ -197,16 +197,18 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
 - [ ] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
   Core API: `signal(init)` → `{get, set, update}`, `computed(fn, deps)`, `effect(fn)`, `batch(fn)`.
-  Reference implementation: **Rainbow** at `~/git/rhizone/rainbow/` — full TypeScript signal layer
-  with `Signal<A>`, `ReadonlySignal<A>`, `computed()`, `cond()`, `batch()`, `product()`, `stateful()`,
-  React/Vue adapters, ~90 tests including property-based law tests. Port the algebra, not the syntax.
+  **This is the single source of truth** — `lib/lua2ts/` transpiles it to TypeScript for browser
+  deployment. The transpiled output replaces Rainbow's hand-written signal layer.
+  Correctness reference: **Rainbow** (`~/git/rhizone/rainbow/`) — its test suite validates the
+  transpiled output. Rainbow's `Signal<A>`, `computed()`, `cond()`, `batch()`, `product()`,
+  `stateful()` define the expected API surface and semantics.
 
 - [ ] **`lib/reactive_optics/`** — signals focused through optics. `signal:focus(lens)` produces a
-  derived signal that reads/writes structurally; composition of optics guarantees state consistency
-  by construction (lens laws: get-set, set-get, set-set). Combines `lib/reactive/` with `lib/fp/optics/`
-  (lens, prism, iso, traversal — already built). The key combinator: `focus(signal, optic)` →
-  `{get(), set(v), update(fn)}` where get/set delegate through the optic.
-  Reference: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
+  derived signal that reads/writes structurally; lens laws (get-set, set-get, set-set) guarantee
+  state consistency by construction. Combines `lib/reactive/` with `lib/fp/optics/` (already built).
+  Key combinator: `focus(signal, optic)` → `{get(), set(v), update(fn)}`.
+  Also transpiled to TS via `lib/lua2ts/` — replaces Rainbow's hand-written optics layer.
+  Rainbow's optics tests (`~/git/rhizone/rainbow/src/optics/`) are the correctness reference.
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
 - [ ] **`lib/parse/`** / **`lib/asm/`** / **`lib/ir/`** — language tooling vertical.
@@ -1032,13 +1034,13 @@ See `docs/pkg-design.md` for full design.
   SQLite ORM layer + templating. API inspired by Lapis/Sinatra but first-class crescent types
   throughout. Goal: write a web app in Lua that a Rails/Express developer finds familiar.
 
-- [ ] **Reactive frontend** — three-layer stack, each independently useful:
-  1. `lib/reactive/` + `lib/reactive_optics/` — signal + optics algebra in Lua (see above)
-  2. `lib/lua2ts/` — transpile Lua state logic to typed TypeScript for browser deployment
-  3. Rainbow integration — emit code that composes with Rainbow's signal/optics/component layer
-     (`~/git/rhizone/rainbow/`). Rainbow is the **reference implementation** of the reactive
-     algebra: `Signal<A>`, `computed()`, `batch()`, `focus(signal, lens)`, React/Vue adapters,
-     router, form binding, ~90 property-based tests. The Lua layer is a parallel implementation
-     of the same algebra — not a wrapper around Rainbow, a peer.
-  TUI variant: `lib/tui/reactive` — same `lib/reactive_optics/` model, terminal renderer instead
-  of DOM. Depends on `lib/tui/` and `lib/ansi/` first.
+- [ ] **Reactive frontend** — two-layer stack:
+  1. Write `lib/reactive/` + `lib/reactive_optics/` in Lua (single source of truth)
+  2. `lib/lua2ts/` transpiles them to TypeScript — the transpiled output *is* the browser library,
+     replacing Rainbow's hand-written core. Rainbow's React/Vue adapters, router, form binding,
+     and component layer sit on top of the transpiled output unchanged.
+  Rainbow (`~/git/rhizone/rainbow/`) is the **correctness reference and consumer ecosystem**,
+  not a parallel implementation. Its ~90 tests (including property-based law tests) validate
+  the transpiled output. Its adapters and examples are the deployment target.
+  TUI variant: `lib/tui/reactive` — same `lib/reactive_optics/` model, terminal renderer.
+  Depends on `lib/tui/` and `lib/ansi/` first.
