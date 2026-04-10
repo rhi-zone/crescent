@@ -359,9 +359,8 @@ local pass_thresholds = {
   ["Lists"]                   = 1.00,  -- 26/26
   ["Code spans"]              = 0.90,
   ["Emphasis and strong emphasis"] = 1.00,  -- 132/132
-  -- Links: ex491 requires inline HTML spanning newlines (raw HTML section, skipped).
   -- Images: all 22/22 passing.
-  ["Links"]                   = 0.98,  -- 89/90; ex491 unfixable without raw HTML support
+  ["Links"]                   = 1.00,  -- 90/90; ex491 fixed: open tags allow newlines (§6.6)
   ["Images"]                  = 1.00,
   ["Hard line breaks"]        = 0.85,
   ["Soft line breaks"]        = 1.00,

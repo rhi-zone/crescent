@@ -1240,7 +1240,7 @@ local function tokenize_inlines(src, defs)
             -- Strictly: char after tag name must be ' ', '\t', '>', '/', or end.
             p3 = after_name
             local c3 = str_byte(src, p3)
-            local valid_after = (c3 == 62 or c3 == 47 or c3 == 32 or c3 == 9 or p3 > len)
+            local valid_after = (c3 == 62 or c3 == 47 or c3 == 32 or c3 == 9 or c3 == 10 or p3 > len)
             if valid_after then
               while p3 <= len do
                 local tc = str_byte(src, p3)
@@ -1250,7 +1250,8 @@ local function tokenize_inlines(src, defs)
                   if str_byte(src, p3+1) == 62 then
                     is_html = true; p2 = p3 + 2; break
                   else break end
-                elseif tc == 10 then break  -- no newlines
+                elseif tc == 10 then  -- newline allowed inside open tags (CommonMark §6.6)
+                  p3 = p3 + 1
                 elseif tc == 34 or tc == 39 then  -- quoted attribute value
                   local qt = tc
                   p3 = p3 + 1
