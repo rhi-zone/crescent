@@ -300,19 +300,22 @@ convenience helpers (query returning named row tables, query_one, transaction).
 exp/nbf validation, PBKDF2-SHA256 password hashing (PHC-format), random token generation,
 HMAC-SHA256, timing-safe comparison. 44 assertions. OAuth 2.0/OIDC deferred.
 
-**`lib/email`** — SMTP client, email composition (MIME, attachments), template
-rendering. Boring but load-bearing for any application with user accounts.
+**`lib/email`** — implemented. Email composition (RFC 5322 MIME: text/html/multipart,
+attachments, inline images, quoted-printable, base64, RFC 2047 encoded subjects) +
+SMTP client (EHLO, STARTTLS, AUTH LOGIN/PLAIN, send with dot-stuffing) with injectable
+transport. Mock transport for testing. 71 assertions.
 
 **`lib/queue`** — implemented. SQLite-backed task queue: push/pop/ack/fail with
 exponential backoff, priority ordering, delayed jobs, recurring schedules, dead-letter
 queue, process convenience loop. 69 assertions.
 
-**`lib/search`** — search vertical. Full-text search via SQLite FTS5 (near-term) +
-semantic search via embeddings (`lib/ai`) for vector similarity. Needed by Lumen and
-any content-heavy application.
+**`lib/search`** — implemented. SQLite FTS5 full-text search + brute-force vector
+cosine similarity (via `lib/vec`) + hybrid search with configurable weights.
+Collections with typed fields, metadata, document CRUD. 65 assertions.
 
-**`lib/realtime`** — pub/sub, presence, event sourcing patterns. Builds on
-`lib/websocket`. Needed by collaborative applications, live UIs, multiplayer.
+**`lib/realtime`** — implemented. In-process pub/sub hub with wildcard patterns,
+presence tracking with join/leave/update hooks, event store with stream aggregation.
+83 assertions. Network integration (WebSocket bridge) deferred.
 
 **`lib/tui`** — terminal UI. Layouts, widgets, keyboard input, color/style. Needed
 for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
@@ -339,8 +342,8 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
 - `lib/vec` — **implemented**. Dense vector math with FFI and pure Lua tiers:
   new/zeros/ones/random/linspace, add/sub/mul/div/scale/neg, dot/norm/cosine/distance,
   sum/mean/min/max/argmin/argmax, normalize. 192 assertions.
-- `lib/tfidf` — TF-IDF text scoring, document similarity. Pure Lua. Useful for Lumen
-  search and any content-heavy application.
+- `lib/tfidf` — **implemented**. TF-IDF text scoring, corpus search ranking, keyword
+  extraction, cosine similarity. Tokenizer with stopword filtering. 61 assertions.
 - `lib/knn` — k-nearest neighbors. Pure Lua reference + optional FFI fast path.
 - `lib/xgboost` — gradient boosted trees. Pure Lua implementation (a few hundred lines
   — decision trees are simple, boosting is just iteration) as the hackable reference;

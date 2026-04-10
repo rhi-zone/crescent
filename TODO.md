@@ -301,7 +301,11 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   Parallel TS implementation: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
   Again: no dependency on Rainbow — same algebra, separate codebases.
   **Done**: dccd023. field/compose_focus/focus/narrow. 9 assertions.
-- [ ] **`lib/ml/`** — ML vertical: `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
+- [ ] **`lib/ml/`** — ML vertical: `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
+- [x] **`lib/tfidf/`** — TF-IDF text scoring, cosine similarity, corpus search, keyword extraction. 61 assertions.
+- [x] **`lib/search/`** — FTS5 full-text + vector similarity + hybrid search on SQLite. 65 assertions.
+- [x] **`lib/email/`** — email composition (RFC 5322 MIME) + SMTP client with mock transport. 71 assertions.
+- [x] **`lib/realtime/`** — pub/sub hub, presence tracking, event store with aggregation. 83 assertions.
 - [x] **`lib/vec/`** — dense vector math with FFI and pure Lua tiers. 192 assertions.
 - [x] **`lib/web/`** — web application framework: middleware, routing, cookies, CORS, CSRF, static files. 56 assertions.
 - [x] **`lib/auth/`** — JWT (HS256), PBKDF2-SHA256 password hashing, token generation, HMAC-SHA256. 44 assertions.
