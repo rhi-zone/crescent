@@ -49,9 +49,11 @@ function M.sse_session(write_fn)
 				str = content
 			else
 				if not json then json = require("lib.format.json") end
-				local encode = json.encode
-				local enc = type(encode) == "function" and encode(content) or nil
-				str = enc or tostring(content)
+				local enc, enc_err = json.encode(content)
+				if not enc then
+					error("sse_session: failed to encode content: " .. tostring(enc_err), 2)
+				end
+				str = enc
 			end
 			write_fn("data: " .. str .. "\n\n")
 		end,

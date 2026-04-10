@@ -108,30 +108,64 @@ end
 
 -- computed(fn, deps) — read-only derived signal.
 -- fn: () -> T; deps: array of signals or computed values.
--- Recomputes on every get(). Notifies subscribers only when output changes.
+-- Memoized: fn() only runs when a dep has changed since the last get().
+-- Notifies subscribers only when the output value changes (via is_same).
+-- Call c.dispose() when the computed is no longer needed to release dep subscriptions.
 function M.computed(fn, deps)
 	local c = {}
+	local _cache     -- last computed value
+	local _dirty = true  -- start dirty: first get() always computes
+	local _subs = {}     -- { handler -> wrapped_fn }: our subscribers
+
+	-- Notify all our subscribers with the current (recomputed) value.
+	local function notify()
+		local next_val = c.get()
+		for _, wrapped in pairs(_subs) do wrapped(next_val) end
+	end
+
+	-- Single shared dep handler — shared reference enables batch deduplication:
+	-- if multiple deps change in one batch, _pending[on_dep] is overwritten to
+	-- the last thunk, so notify() fires once after all dep changes are applied.
+	local function on_dep()
+		_dirty = true
+		notify()
+	end
+
+	-- Eagerly subscribe to all deps so _dirty is always up-to-date,
+	-- even when nothing has called c.subscribe() yet.
+	local _dep_unsubs = {}
+	for i = 1, #deps do
+		_dep_unsubs[i] = deps[i].subscribe(on_dep)
+	end
 
 	function c.get()
-		return fn()
+		if _dirty then
+			_cache = fn()
+			_dirty = false
+		end
+		return _cache
 	end
 
 	-- subscribe(handler) -> unsubscribe
+	-- handler receives the new computed value whenever it changes.
 	function c.subscribe(handler)
 		local prev = c.get()
-		local unsubs = {}
-		for i = 1, #deps do
-			unsubs[i] = deps[i].subscribe(function()
-				local next_val = c.get()
-				if not is_same(prev, next_val) then
-					prev = next_val
-					handler(next_val)
-				end
-			end)
+		local function wrapped(next_val)
+			if not is_same(prev, next_val) then
+				prev = next_val
+				handler(next_val)
+			end
 		end
-		return function()
-			for i = 1, #unsubs do unsubs[i]() end
-		end
+		_subs[handler] = wrapped
+		return function() _subs[handler] = nil end
+	end
+
+	-- dispose() — unsubscribe from all deps. Call when the computed is no
+	-- longer needed to prevent the dep→computed subscription from keeping
+	-- the computed (and its fn closure) alive.
+	function c.dispose()
+		for i = 1, #_dep_unsubs do _dep_unsubs[i]() end
+		_dep_unsubs = {}
 	end
 
 	-- focus(lens) -> read-only computed through a lens

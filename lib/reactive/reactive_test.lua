@@ -134,6 +134,18 @@ T.describe("computed", function()
 		b.set(20)
 		T.eq(c.get(), 30)
 	end)
+
+	T.it("fn only called once per dep change — memoized reads", function()
+		local s = R.signal(1)
+		local calls = 0
+		local c = R.computed(function() calls = calls + 1; return s.get() * 2 end, {s})
+		T.eq(c.get(), 2);  T.eq(calls, 1)  -- first get computes
+		T.eq(c.get(), 2);  T.eq(calls, 1)  -- second get uses cache
+		T.eq(c.get(), 2);  T.eq(calls, 1)  -- still cached
+		s.set(5)
+		T.eq(c.get(), 10); T.eq(calls, 2)  -- dep changed → recomputes once
+		T.eq(c.get(), 10); T.eq(calls, 2)  -- cached again
+	end)
 end)
 
 T.describe("effect", function()
