@@ -182,13 +182,13 @@ most use cases. Design: sans-I/O core, injectable scheduler, `lib/reactor` or
 anything timestamped. Design: POSIX time via FFI, timezone support via tzdata,
 formatting per RFC 3339 / ISO 8601.
 
-**Regex** — no pattern matching beyond Lua's built-in `string.find` / `string.gmatch`.
-Needed for search syntax, text processing, URL routing. Design: PCRE2 via FFI (system
-library tier) + a pure Lua fallback for basic patterns.
+**Regex** (`lib/regex`) — implemented. PCRE2 FFI system tier + pure Lua backtracking
+fallback. API: `compile`, `match`, `find`, `gmatch`, `gsub`, `split`. Compiled regex
+objects for reuse. 70+ assertions with parity tests between tiers.
 
-**CLI arg parsing** — `lib/cli` implemented. Clap-inspired builder API: subcommands,
+**CLI arg parsing** (`lib/cli`) — implemented. Declarative spec API: subcommands,
 typed flags/options, auto-generated help/version, shell completions (bash/zsh/fish),
-combined short flags, array options, positionals. 67 assertions.
+combined short flags, array options, positionals. 70 assertions.
 
 **Structured logging** (`lib/log`) — implemented. Named loggers with level filtering,
 structured fields, and pluggable sinks. API: `log.new(name, opts)`, `:trace/debug/info/warn/error(msg, fields?)`,
@@ -206,17 +206,18 @@ API: `uuid.v4()`, `uuid.v7()`, `uuid.parse(s)`, `uuid.fmt(b)`, `uuid.is_valid(s)
 inflate, streaming, zlib/gzip/raw formats) + pure Lua tier (inflate only, RFC 1951).
 Parity-tested. zstd deferred. 24 assertions.
 
-**Template formats** — standard specs (`lib/mustache`, `lib/handlebars`, etc.) are
-worth adding as libraries. A bespoke `lib/template/` for prose assembly is not — Lua
-string concatenation and `string.format` are sufficient for that use case.
+**Mustache** (`lib/mustache`) — implemented. Spec-compliant Mustache template engine:
+variable interpolation (escaped/unescaped), sections (conditional/iteration/lambda),
+inverted sections, comments, partials with indentation inheritance, set delimiter,
+dot notation, implicit iterator, standalone line handling, context stack. 43 assertions.
 
 **More crypto** — AES-GCM (needed for sync encryption), HKDF (key derivation),
 ChaCha20-Poly1305. Design: system library tier (libcrypto via FFI), pure Lua for
 reference. Note: pure Lua AES is slow; system tier is the real implementation.
 
-**TOML** — config file format. Needed by the package manager and any application
-with a config file. The format is small and well-specified; a pure Lua parser is
-reasonable.
+**TOML** (`lib/toml`) — implemented. Full TOML v1.0 parser and encoder. All value
+types, dotted keys, table headers, array of tables, inline tables/arrays, all string
+types with escapes, datetime types. Round-trip encode/decode. 93 assertions.
 
 ### Missing — binary serialization
 
@@ -288,8 +289,10 @@ to abandon as partial stdlib implementations.
 pipeline, session management, cookie handling, CSRF protection, static file serving,
 route groups. The "Rails without opinions" answer for crescent web apps.
 
-**`lib/db`** — database vertical. Builds on `lib/sqlite`, adds: migrations, query
-builder, schema management, connection pooling. Raw SQLite is not enough for real apps.
+**`lib/db`** — implemented. Database vertical on `lib/sqlite`: version-tracked
+migrations (transactional), chainable query builder (select/insert/update/delete),
+convenience helpers (query returning named row tables, query_one, transaction).
+60 assertions.
 
 **`lib/auth`** — authentication and authorization. JWT, OAuth 2.0 / OIDC, session
 tokens, password hashing (Argon2, bcrypt). Every web app needs this; nobody wants to

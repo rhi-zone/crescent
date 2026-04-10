@@ -276,9 +276,9 @@ Not libraries (do not rewrite, repurpose instead):
 See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteries.md is authoritative.
 
 - [x] **`lib/taskgraph/`** — implemented: graph.lua, context.lua, exec.lua, combinators.lua (map/retry/refine), init.lua, executor/ai.lua, orchestration_test.lua (27 assertions).
-- [x] **`lib/cli/`** — arg-parsing library. Clap-inspired builder API: flags, options, positionals, subcommands, type coercion, auto-help/version, shell completions. 67 assertions.
+- [x] **`lib/cli/`** — arg-parsing library. Declarative spec API: flags, options, positionals, subcommands, type coercion, auto-help/version, shell completions. 70 assertions.
 - [x] **`lib/datetime/`** — date/time parsing, formatting, arithmetic. ISO 8601, Unix timestamps, offset-aware arithmetic. 186 assertions (c6e9bbb).
-- [ ] **`lib/regex/`** — PCRE or LPEG wrapper with crescent-native API.
+- [x] **`lib/regex/`** — PCRE2 FFI system tier + pure Lua backtracking fallback. compile/match/find/gmatch/gsub/split. 70+ assertions.
 - [x] **`lib/uuid/`** — UUID v4/v7 generation. v4 (random), v7 (timestamp+monotonic). FFI tiers: getrandom → arc4random_buf → /dev/urandom → pure. 250 assertions.
 - [x] **`lib/log/`** — structured logging with levels and sinks. log.new(), collect_sink, file_sink, stderr/stdout_sink, text/json/ansi formats, child loggers, set_level, add/remove sink. 80 assertions.
 - [x] **`lib/compress/`** — zlib/gzip via FFI (system tier) + pure Lua inflate (RFC 1951). Two tiers: system-zlib (full deflate+inflate) and pure-lua (inflate only). Streaming and one-shot APIs. 24 assertions.
