@@ -62,9 +62,13 @@ mod.send_async = function (req, cb, ep)
 	local remove  -- forward-declared so the read callback can capture it as an upvalue
 
 	local _ -- write callback (unused by client)
-	_, remove = ep:add(client.fd, function (chunk)
+	_, remove = ep:add(client.fd, function ()
 		if done then return end
-		buf[#buf + 1] = chunk
+		-- epoll notifies readability; we read from the socket ourselves.
+		local chunk = client:receive()
+		if chunk and #chunk > 0 then
+			buf[#buf + 1] = chunk
+		end
 		-- Check if we have a complete response: headers terminated + content-length satisfied.
 		local data = table.concat(buf)
 		local resp = format.parse_response(data)
