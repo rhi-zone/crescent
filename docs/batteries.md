@@ -185,9 +185,13 @@ library tier) + a pure Lua fallback for basic patterns.
 **CLI arg parsing** — `lib/cli` exists but its scope is unclear. Need a clap-equivalent:
 subcommands, typed flags, auto-generated help, completions. Every CLI tool needs this.
 
-**Structured logging / tracing** — no observability layer. `print` is not production
-logging. Need: log levels, structured fields, pluggable sinks (stderr, file, journald),
-optional OpenTelemetry-compatible trace IDs.
+**Structured logging** (`lib/log`) — implemented. Named loggers with level filtering,
+structured fields, and pluggable sinks. API: `log.new(name, opts)`, `:trace/debug/info/warn/error(msg, fields?)`,
+`:child(suffix)`, `:set_level(level)`, `:add_sink(fn)`, `:remove_sink(fn)`.
+Built-in sinks: `stderr_sink`, `stdout_sink`, `file_sink`, `collect_sink` (testing).
+Formats: `text` (2026-04-10T12:00:00Z INFO  [name] msg key=val), `json` (one JSON object per line),
+`ansi` (colored, uses lib/ansi, falls back to text when disabled).
+OpenTelemetry trace IDs not yet implemented.
 
 **UUID** (`lib/uuid`) — implemented. v4 (random) and v7 (timestamp+monotonic, sortable).
 FFI tiers: getrandom (Linux) → arc4random_buf (macOS/BSD) → /dev/urandom → pure Lua.
