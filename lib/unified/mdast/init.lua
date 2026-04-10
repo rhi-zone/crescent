@@ -763,25 +763,54 @@ local function tokenize_inlines(src, defs)
       local delim_char = b
       while pos <= len and str_byte(src, pos) == delim_char do pos = pos + 1 end
       local delim_count = pos - delim_start
-      -- Determine can_open / can_close per CommonMark rules (simplified).
-      local before_b = (delim_start > 1) and str_byte(src, delim_start - 1) or 0
-      local after_b  = (pos <= len) and str_byte(src, pos) or 0
-      local function is_ws_or_eol(c) return c == 0 or c == 32 or c == 9 or c == 10 end
-      local function is_punct(c)
-        return (c >= 33 and c <= 47) or (c >= 58 and c <= 64) or
-               (c >= 91 and c <= 96) or (c >= 123 and c <= 126)
+      -- Determine can_open / can_close per CommonMark §6.1 rules.
+      -- We need the Unicode codepoint before and after the delimiter run.
+      -- For ASCII bytes we use the byte directly; for multi-byte UTF-8 we decode.
+      local function decode_utf8_before(s, p)
+        -- Return the leading byte of the UTF-8 codepoint ending at position p-1.
+        -- For single-byte (< 128), returns that byte. For multi-byte, returns the
+        -- leading byte (which lets us classify: leading byte >= 0xC0 = non-ASCII).
+        if p <= 1 then return 0 end
+        local b = str_byte(s, p - 1)
+        if b < 128 then return b end
+        -- Multi-byte UTF-8: walk back to find leading byte.
+        local i = p - 1
+        while i > 1 and str_byte(s, i) >= 128 and str_byte(s, i) < 192 do i = i - 1 end
+        return str_byte(s, i) or 0
       end
-      local left_flanking = not is_ws_or_eol(after_b) and
-        (not is_punct(after_b) or is_ws_or_eol(before_b) or is_punct(before_b))
-      local right_flanking = not is_ws_or_eol(before_b) and
-        (not is_punct(before_b) or is_ws_or_eol(after_b) or is_punct(after_b))
+      -- For the character after, just use the first byte of the next codepoint.
+      local before_first = decode_utf8_before(src, delim_start)
+      local before_b = before_first  -- leading byte of codepoint before run
+      local after_b  = (pos <= len) and str_byte(src, pos) or 0  -- leading byte of codepoint after
+
+      -- Unicode whitespace: space, tab, newline, \r, \f, \v.
+      -- Non-ASCII codepoints are NOT whitespace here.
+      local function is_unicode_ws(c)
+        return c == 0 or c == 32 or c == 9 or c == 10 or c == 13 or c == 12 or c == 11
+      end
+      -- Unicode punctuation: ASCII punctuation characters only (codepoints U+0021..U+007E
+      -- that are not alphanumeric), plus we treat non-ASCII leading bytes (>= 0xC0) as
+      -- potential Unicode punctuation only if they're in known punct ranges — but for
+      -- simplicity we handle only ASCII punct here; non-ASCII are treated as letters.
+      local function is_unicode_punct(c)
+        -- Only ASCII punctuation; non-ASCII (c >= 128) treated as non-punctuation (letters/symbols).
+        return c < 128 and c > 32 and (
+          (c >= 33 and c <= 47) or (c >= 58 and c <= 64) or
+          (c >= 91 and c <= 96) or (c >= 123 and c <= 126))
+      end
+      local left_flanking = not is_unicode_ws(after_b) and
+        (not is_unicode_punct(after_b) or is_unicode_ws(before_b) or is_unicode_punct(before_b))
+      local right_flanking = not is_unicode_ws(before_b) and
+        (not is_unicode_punct(before_b) or is_unicode_ws(after_b) or is_unicode_punct(after_b))
       local can_open, can_close
       if delim_char == 42 then  -- *
         can_open  = left_flanking
         can_close = right_flanking
-      else  -- _
-        can_open  = left_flanking and (not right_flanking or is_punct(before_b))
-        can_close = right_flanking and (not left_flanking or is_punct(after_b))
+      else  -- _: additional restriction per CommonMark §6.1 rules 1 and 2.
+        -- can_open: left-flanking AND (NOT right-flanking OR preceded by Unicode punctuation)
+        can_open  = left_flanking and (not right_flanking or is_unicode_punct(before_b))
+        -- can_close: right-flanking AND (NOT left-flanking OR followed by Unicode punctuation)
+        can_close = right_flanking and (not left_flanking or is_unicode_punct(after_b))
       end
       tokens[#tokens + 1] = {
         type = "delim",
@@ -994,21 +1023,137 @@ local function resolve_inlines(tokens, defs)
   end
 
   -- Second pass: resolve emphasis/strong delimiters.
-  -- We walk the resolved token list and use the opener stack algorithm.
-  local out = {}       -- final inline nodes
-  local delim_stack = {}  -- stack of { idx_in_out, char, count, can_open, can_close }
+  -- Implements CommonMark §6.1 delimiter stack algorithm.
+  --
+  -- We maintain a flat list `out` of nodes and a `delim_stack` tracking open
+  -- delimiter runs. Each delimiter stack entry records:
+  --   idx_in_out  — index in `out` of the placeholder node
+  --   char        — byte value (42='*', 95='_')
+  --   count       — remaining chars in the run (decremented as chars are consumed)
+  --   orig_count  — original run length (for the odd-sum rule)
+  --   can_open / can_close
+  local out = {}
+  local delim_stack = {}
 
   local function emit(node)
     out[#out + 1] = node
   end
 
   local function emit_text(v)
-    -- Merge with previous text node if possible.
     if #out > 0 and out[#out].type == "text" then
       out[#out].value = out[#out].value .. v
     else
       out[#out + 1] = { type = "text", value = v }
     end
+  end
+
+  -- Process one delimiter token (possibly recursing for remaining counts).
+  -- This is called both for tokens from `resolved` and for synthetic remainder tokens.
+  local function process_delim(tok)
+    if tok.can_close then
+      -- Search delimiter stack from top for a matching opener.
+      local found = nil
+      for di = #delim_stack, 1, -1 do
+        local d = delim_stack[di]
+        if d.char == tok.char and d.can_open then
+          -- CommonMark rule 17: if both can_open and can_close, the sum of the
+          -- original run lengths must not be a multiple of 3 (unless both are
+          -- multiples of 3).
+          local ok = true
+          if (d.can_open and d.can_close) or (tok.can_open and tok.can_close) then
+            local s = (d.orig_count + tok.count)
+            if s % 3 == 0 and not (d.orig_count % 3 == 0 and tok.count % 3 == 0) then
+              ok = false
+            end
+          end
+          if ok then
+            found = di
+            break
+          end
+        end
+      end
+
+      if found then
+        local opener = delim_stack[found]
+        -- Use 2 chars if both have >= 2, otherwise 1.
+        local use = (opener.count >= 2 and tok.count >= 2) and 2 or 1
+        local node_type = use == 2 and "strong" or "emphasis"
+
+        -- Convert any intermediate (between found+1 and top of stack) delim
+        -- placeholders in `out` to text — they are "enclosed" by this match.
+        for k = found + 1, #delim_stack do
+          local d2 = delim_stack[k]
+          local ph = out[d2.idx_in_out]
+          if ph and ph.type == "_delim_placeholder" then
+            ph.type = "text"
+            ph.value = str_rep(str_char(d2.char), d2.count)
+          end
+        end
+        -- Remove intermediate stack entries.
+        for k = #delim_stack, found + 1, -1 do delim_stack[k] = nil end
+
+        -- Collect children: everything in `out` after the opener placeholder.
+        local children = {}
+        for k = opener.idx_in_out + 1, #out do
+          children[#children + 1] = out[k]
+        end
+        -- Trim out back to the opener placeholder position (remove placeholder too).
+        for k = #out, opener.idx_in_out, -1 do out[k] = nil end
+
+        local rem_open = opener.count - use
+
+        if rem_open > 0 then
+          -- Opener partially consumed: update opener stack entry.
+          opener.count = rem_open
+          local new_idx = #out + 1
+          out[new_idx] = { type = "_delim_placeholder", char = tok.char, count = rem_open }
+          opener.idx_in_out = new_idx
+          emit({ type = node_type, children = children })
+        else
+          -- Opener fully consumed: remove it from the stack.
+          for k = #delim_stack, found, -1 do delim_stack[k] = nil end
+          emit({ type = node_type, children = children })
+        end
+
+        -- Closer's remaining chars: re-process as a new closer token.
+        local rem_close = tok.count - use
+        if rem_close > 0 then
+          process_delim({
+            type = "delim",
+            char = tok.char,
+            count = rem_close,
+            orig_count = rem_close,
+            can_open = tok.can_open,
+            can_close = tok.can_close,
+          })
+        end
+        return  -- matched
+      end
+      -- No matching opener found.
+      if not tok.can_open then
+        -- Pure closer with no match: emit as text.
+        emit_text(str_rep(str_char(tok.char), tok.count))
+        return
+      end
+      -- Falls through to opener handling below (can_open and can_close but no match).
+    end
+
+    -- Opener (or can_open+can_close with no match as closer): push to delimiter stack
+    -- only if can_open. Otherwise emit as text.
+    if not tok.can_open then
+      emit_text(str_rep(str_char(tok.char), tok.count))
+      return
+    end
+    local idx = #out + 1
+    out[idx] = { type = "_delim_placeholder", char = tok.char, count = tok.count }
+    delim_stack[#delim_stack + 1] = {
+      idx_in_out = idx,
+      char = tok.char,
+      count = tok.count,
+      orig_count = tok.orig_count or tok.count,
+      can_open = tok.can_open,
+      can_close = tok.can_close,
+    }
   end
 
   for _, tok in ipairs(resolved) do
@@ -1019,80 +1164,14 @@ local function resolve_inlines(tokens, defs)
     elseif tok.type == "hardbreak" then
       emit({ type = "break" })
     elseif tok.type == "softbreak" then
-      -- Soft break: emit as a node so renderers can choose \n or space.
       emit({ type = "softBreak" })
     elseif tok.type == "node" then
       emit(tok.node)
     elseif tok.type == "link_open" or tok.type == "image_open" then
-      -- Unmatched opens (bracket_stack cleanup above should have handled most).
       emit_text(tok.type == "image_open" and "![" or "[")
     elseif tok.type == "delim" then
-      -- Closer: look back through delimiter stack for matching opener.
-      if tok.can_close then
-        local found = nil
-        for di = #delim_stack, 1, -1 do
-          local d = delim_stack[di]
-          if d.char == tok.char and d.can_open then
-            found = di
-            break
-          end
-        end
-        if found then
-          local opener = delim_stack[found]
-          -- How many chars to use: 1 (emphasis) or 2 (strong), prefer 2.
-          local use = (opener.count >= 2 and tok.count >= 2) and 2 or 1
-          local node_type = use == 2 and "strong" or "emphasis"
-          -- Collect all out[] entries after opener.idx_in_out as children.
-          local children = {}
-          for k = opener.idx_in_out + 1, #out do
-            children[#children + 1] = out[k]
-          end
-          -- Trim out back to opener position.
-          for k = #out, opener.idx_in_out, -1 do
-            out[k] = nil
-          end
-          -- If opener had remaining delims, emit them as text before the node.
-          local rem_open = opener.count - use
-          if rem_open > 0 then
-            emit_text(str_rep(str_char(tok.char), rem_open))
-          end
-          emit({ type = node_type, children = children })
-          -- Remove delimiter stack entries from found onward.
-          for k = #delim_stack, found, -1 do
-            delim_stack[k] = nil
-          end
-          -- If closer has remaining delims, re-process as new closer.
-          local rem_close = tok.count - use
-          if rem_close > 0 then
-            -- Push as a new text delimiter opportunity.
-            local new_tok = {
-              type = "delim",
-              char = tok.char,
-              count = rem_close,
-              can_open = tok.can_open,
-              can_close = tok.can_close,
-            }
-            -- Re-add to end of out as placeholder for next closer search.
-            -- Simplification: just emit as text (gives correct output for common cases).
-            emit_text(str_rep(str_char(tok.char), rem_close))
-          end
-        else
-          -- No matching opener: emit as text.
-          emit_text(str_rep(str_char(tok.char), tok.count))
-        end
-      else
-        -- Opener (or neither): push to delimiter stack.
-        local idx = #out + 1  -- position after which children will be inserted
-        -- Emit a placeholder text (will be removed if matched later).
-        out[#out + 1] = { type = "_delim_placeholder", char = tok.char, count = tok.count }
-        delim_stack[#delim_stack + 1] = {
-          idx_in_out = idx,
-          char = tok.char,
-          count = tok.count,
-          can_open = tok.can_open,
-          can_close = tok.can_close,
-        }
-      end
+      tok.orig_count = tok.count
+      process_delim(tok)
     end
   end
 
