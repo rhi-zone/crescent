@@ -138,10 +138,8 @@ The crescent hast implementation uses `tag` and `props` rather than the spec's `
 | List items | 48/48 (100%) | |
 | Lists | 26/26 (100%) | |
 | Emphasis/Strong | 132/132 (100%) | |
-| Links | 89/90 (98.9%) | ex491: newline inside angle-bracket URL — requires multi-line raw passthrough |
-| Images | ~80% | Same inline parser as Links; most gaps now fixed |
-
-One remaining known gap: ex491 (`[link](<foo\nbar>)` — literal newline inside `<…>` URL). Requires raw HTML passthrough across line boundaries; deferred.
+| Links | 90/90 (100%) | |
+| Images | ~80% | Some edge cases remain in image-specific inline parsing |
 
 `lib/unified/remark_math` works around one mdast limitation (backslash stripping in inline parsing) using a pre-parse placeholder technique.
 
