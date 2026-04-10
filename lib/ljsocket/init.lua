@@ -1028,33 +1028,36 @@ do
 			ffi.sizeof(val))
 	end
 
-	--[[@param host string|{ addrinfo: unknown }]]
+	--[[@param host string|{ host: string?, service: string? }]]
 	--[[@param service "http"|"https"|"ftp"|"ssh"|string|integer]]
 	meta.connect = function(self, host, service)
-		local res
-		if type(host) == "table" and host.addrinfo then
-			res = host
-		else
-			local err
-			--[[@diagnostic disable-next-line: param-type-mismatch]]
-			res, err = mod.find_first_address(host, service, {
-				family = self.family,
-				socket_type = self.socket_type,
-				protocol = self.protocol
-			})
-			if not res then return res, "ljsocket.find_first_address: " .. err end
+		-- Accept an addrinfo-like table (from find_first_address): extract host+service.
+		if type(host) == "table" then
+			local tbl = host
+			host = tbl.host or tbl.ip
+			service = tbl.service or service
 		end
-		local ok, err, num = socket.connect(self.fd, res.addrinfo.ai_addr, res.addrinfo.ai_addrlen)
-		if not ok and not self.blocking then
+		-- Resolve fresh to get a live addrinfo pointer.
+		local hints = ffi.new("struct addrinfo", {
+			ai_family  = AF.lookup[self.family] or 0,
+			ai_socktype = SOCK.lookup[self.socket_type] or 0,
+			ai_protocol = IPPROTO.lookup[self.protocol] or 0,
+		})
+		local out = ffi.new("struct addrinfo*[1]")
+		local ok, err = socket.getaddrinfo(host, tostring(service or ""), hints, out)
+		if not ok then return nil, "ljsocket.connect: " .. (err or "getaddrinfo failed") end
+		local ok2, err2, num = socket.connect(self.fd, out[0].ai_addr, out[0].ai_addrlen)
+		ffi.C.freeaddrinfo(out[0])
+		if not ok2 and not self.blocking then
 			if timeout_messages[num] then
 				self.timeout_connected = { host, service }
 				return true
 			end
-		elseif self.on_connect then
+		elseif ok2 and self.on_connect then
 			--[[@diagnostic disable-next-line: param-type-mismatch]]
 			self:on_connect(host, service)
 		end
-		if not ok then return ok, err, num end
+		if not ok2 then return ok2, err2, num end
 		return true
 	end
 
@@ -1071,19 +1074,28 @@ do
 	--[[@param service? "http"|"https"|"ftp"|"ssh"|string|integer path if unix socket]]
 	meta.bind = function(self, host, service)
 		if host == "*" then host = nil end
-		local res
-		local err
-		if type(host) == "table" and host.addrinfo then
-			res = host
-		else
-			res, err = mod.find_first_address(host, tostring(service), {
-				family = self.family,
-				socket_type = self.socket_type,
-				protocol = self.protocol
-			})
-			if not res then return res, err end
+		-- Accept an addrinfo-like table (from find_first_address / mod.bind):
+		-- tbl.host is the original hostname (nil when binding to any address).
+		if type(host) == "table" then
+			local tbl = host
+			host = tbl.host  -- nil → bind to any address (passive)
+			service = tostring(tbl.service or service or "")
 		end
-		return socket.bind(self.fd, res.addrinfo.ai_addr, res.addrinfo.ai_addrlen)
+		-- Resolve fresh to get a live addrinfo pointer.
+		-- get_address_info calls freeaddrinfo and cannot be used here.
+		local passive = host == nil
+		local hints = ffi.new("struct addrinfo", {
+			ai_family  = AF.lookup[self.family] or 0,
+			ai_socktype = SOCK.lookup[self.socket_type] or 0,
+			ai_protocol = IPPROTO.lookup[self.protocol] or 0,
+			ai_flags   = passive and AI.lookup["passive"] or 0,
+		})
+		local out = ffi.new("struct addrinfo*[1]")
+		local ok, err = socket.getaddrinfo(host, tostring(service or ""), hints, out)
+		if not ok then return nil, err end
+		local ret = socket.bind(self.fd, out[0].ai_addr, out[0].ai_addrlen)
+		ffi.C.freeaddrinfo(out[0])
+		return ret
 	end
 
 	meta.listen = function(self, max_connections)
