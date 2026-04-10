@@ -139,7 +139,7 @@ The crescent hast implementation uses `tag` and `props` rather than the spec's `
 | Lists | 26/26 (100%) | |
 | Emphasis/Strong | 132/132 (100%) | |
 | Links | 90/90 (100%) | |
-| Images | ~80% | Some edge cases remain in image-specific inline parsing |
+| Images | 22/22 (100%) | |
 
 `lib/unified/remark_math` works around one mdast limitation (backslash stripping in inline parsing) using a pre-parse placeholder technique.
 
