@@ -538,6 +538,38 @@ end
 
 local parse_inlines  -- forward declaration
 
+-- Normalize a link reference label per CommonMark §6.6:
+-- collapse whitespace sequences to a single space, then lowercase.
+local function normalize_label(s)
+  s = s:gsub("%s+", " ")
+  s = s:match("^%s*(.-)%s*$") or s  -- trim
+  return s:lower()
+end
+
+-- Scan a reference label starting at pos: expects '[', returns label text and end pos, or nil.
+local function scan_ref_label(src, pos)
+  if str_byte(src, pos) ~= 91 then return nil end  -- '['
+  local len = #src
+  local i = pos + 1
+  local start = i
+  -- Labels may span at most one line and must not contain unescaped '[' or ']'.
+  while i <= len do
+    local b = str_byte(src, i)
+    if b == 93 then  -- ']'
+      return str_sub(src, start, i - 1), i + 1
+    elseif b == 91 then  -- '[' unescaped — invalid label
+      return nil
+    elseif b == 92 then  -- backslash escape
+      i = i + 2
+    elseif b == 10 then  -- newline — labels may cross one line, skip
+      i = i + 1
+    else
+      i = i + 1
+    end
+  end
+  return nil  -- unclosed label
+end
+
 -- Scan for a backtick run starting at `pos` in `src`.
 -- Returns the closing position (after the closing backticks) and the content, or nil.
 local function scan_code_span(src, pos, tick_len)
@@ -646,9 +678,11 @@ end
 -- For emphasis/strong processing after tokenizing.
 
 -- Simple inline tokenizer: produces a flat list of tokens, then resolves delimiters.
--- Token types: "text", "code", "hardbreak", "softbreak", "delim", "link_open", "link_close", "image_open"
+-- Token types: "text", "code", "hardbreak", "softbreak", "delim", "link_open", "link_close",
+--              "link_ref_close", "image_open"
+-- link_ref_close has: ref (string, normalized label for full-ref) or collapsed (bool) or shortcut (bool)
 
-local function tokenize_inlines(src)
+local function tokenize_inlines(src, defs)
   local tokens = {}
   local len = #src
   local pos = 1
@@ -774,17 +808,39 @@ local function tokenize_inlines(src)
       pos = pos + 1
       text_start = pos
 
-    -- ']': potential link close + destination.
+    -- ']': potential link close + destination or reference.
     elseif b == 93 then  -- ']'
       flush_text(pos)
       pos = pos + 1
-      -- Try to parse (url "title") immediately.
+      -- Try to parse (url "title") immediately → inline link.
       local url, title, end_pos = parse_link_dest(src, pos)
       if url ~= nil then
         tokens[#tokens + 1] = { type = "link_close", url = url, title = title }
         pos = end_pos
+      elseif defs then
+        -- Try reference forms (only when defs table is available).
+        -- Full reference: [text][ref]
+        local ref_label, ref_end = scan_ref_label(src, pos)
+        if ref_label ~= nil and ref_label ~= "" then
+          -- Non-empty [ref] after ] → full reference link.
+          local norm = normalize_label(ref_label)
+          if defs[norm] then
+            tokens[#tokens + 1] = { type = "link_ref_close", ref = norm }
+            pos = ref_end
+          else
+            -- Ref not in defs: fall back — emit ] as text, don't consume the [ref].
+            tokens[#tokens + 1] = { type = "text", value = "]" }
+          end
+        elseif ref_label == "" then
+          -- Empty [] after ] → collapsed reference: label = text between opener brackets.
+          tokens[#tokens + 1] = { type = "link_ref_close", collapsed = true }
+          pos = pos + 2  -- skip the '[]'
+        else
+          -- No [ref] → shortcut reference: label = text between opener brackets.
+          tokens[#tokens + 1] = { type = "link_ref_close", shortcut = true }
+        end
       else
-        -- No destination: treat as text.
+        -- No destination and no defs: treat as text.
         tokens[#tokens + 1] = { type = "text", value = "]" }
       end
       text_start = pos
@@ -798,10 +854,41 @@ local function tokenize_inlines(src)
   return tokens
 end
 
+-- Extract plain text content from a list of tokens (for label matching in ref links).
+-- Includes text, code, delimiters (as their literal chars), and break tokens.
+local function tokens_to_label(inner_tokens)
+  local parts = {}
+  for _, t in ipairs(inner_tokens) do
+    if t.type == "text" then
+      parts[#parts + 1] = t.value or ""
+    elseif t.type == "code" then
+      parts[#parts + 1] = t.value or ""
+    elseif t.type == "delim" then
+      parts[#parts + 1] = str_rep(str_char(t.char), t.count)
+    elseif t.type == "softbreak" or t.type == "hardbreak" then
+      parts[#parts + 1] = " "
+    elseif t.type == "node" then
+      -- Resolved node inside label: extract text recursively.
+      local function extract(node)
+        if node.type == "text" then return node.value or ""
+        elseif node.type == "inlineCode" then return node.value or ""
+        elseif node.children then
+          local ps = {}
+          for _, c in ipairs(node.children) do ps[#ps+1] = extract(c) end
+          return tbl_concat(ps)
+        end
+        return ""
+      end
+      parts[#parts + 1] = extract(t.node)
+    end
+  end
+  return normalize_label(tbl_concat(parts))
+end
+
 -- Resolve delimiter tokens into emphasis/strong nodes.
 -- Also resolves link/image open-close pairs.
 -- Returns array of inline nodes.
-local function resolve_inlines(tokens)
+local function resolve_inlines(tokens, defs)
   local result = {}
 
   -- First pass: resolve links/images.
@@ -819,37 +906,77 @@ local function resolve_inlines(tokens)
       bracket_stack[#bracket_stack + 1] = { idx = #resolved + 1, is_image = tok.type == "image_open" }
       resolved[#resolved + 1] = tok
       i = i + 1
-    elseif tok.type == "link_close" then
+    elseif tok.type == "link_close" or tok.type == "link_ref_close" then
       if #bracket_stack > 0 then
         local frame = bracket_stack[#bracket_stack]
-        bracket_stack[#bracket_stack] = nil
         -- Collect content tokens between frame.idx and current position.
         local inner_tokens = {}
         for k = frame.idx + 1, #resolved do
           inner_tokens[#inner_tokens + 1] = resolved[k]
         end
-        -- Remove the bracket open and everything after from resolved.
-        for k = #resolved, frame.idx, -1 do
-          resolved[k] = nil
+
+        local url, title
+        local matched = false
+
+        if tok.type == "link_close" then
+          -- Inline link: always matched (url may be empty string).
+          url = tok.url
+          title = tok.title
+          matched = true
+        elseif defs then
+          -- Reference link: resolve label against defs.
+          local label
+          if tok.ref then
+            -- Full reference [text][ref]: label is tok.ref (already normalized).
+            label = tok.ref
+          else
+            -- Collapsed [ref][] or shortcut [ref]: label = text from inner tokens.
+            label = tokens_to_label(inner_tokens)
+          end
+          local def = defs[label]
+          if def then
+            url = def.url
+            title = def.title
+            matched = true
+          end
         end
-        -- Recursively resolve inner tokens (for nested emphasis, etc.).
-        -- But we can't call resolve_inlines here without risk; just use them directly.
-        local node_type = frame.is_image and "image" or "link"
-        local link_node = {
-          type = node_type,
-          url = tok.url,
-          title = tok.title,
-          children = resolve_inlines(inner_tokens),
-        }
-        if frame.is_image then
-          -- For images, children → alt text; follow mdast: alt is in children as text.
-          link_node.alt = nil  -- computed from children by caller if needed
+
+        if matched then
+          bracket_stack[#bracket_stack] = nil
+          -- Remove the bracket open and everything after from resolved.
+          for k = #resolved, frame.idx, -1 do
+            resolved[k] = nil
+          end
+          local node_type = frame.is_image and "image" or "link"
+          local link_node = {
+            type = node_type,
+            url = url,
+            title = title,
+            children = resolve_inlines(inner_tokens, defs),
+          }
+          if frame.is_image then
+            link_node.alt = nil  -- computed from children by caller if needed
+          end
+          resolved[#resolved + 1] = { type = "node", node = link_node }
+        else
+          -- Unmatched reference (label not in defs): emit as text.
+          bracket_stack[#bracket_stack] = nil
+          for k = #resolved, frame.idx, -1 do
+            resolved[k] = nil
+          end
+          -- Re-emit the opener as '[' or '!['.
+          resolved[#resolved + 1] = { type = "text", value = frame.is_image and "![" or "[" }
+          -- Re-emit inner tokens as-is.
+          for _, t in ipairs(inner_tokens) do
+            resolved[#resolved + 1] = t
+          end
+          -- Re-emit the closing ']' as text.
+          resolved[#resolved + 1] = { type = "text", value = "]" }
         end
-        resolved[#resolved + 1] = { type = "node", node = link_node }
       else
         -- Unmatched ]: emit as text.
         resolved[#resolved + 1] = { type = "text", value = "]" }
-        if tok.url then
+        if tok.type == "link_close" and tok.url then
           resolved[#resolved + 1] = { type = "text", value = "(" .. tok.url .. ")" }
         end
       end
@@ -993,25 +1120,25 @@ local function resolve_inlines(tokens)
   return result
 end
 
-parse_inlines = function(src)
+parse_inlines = function(src, defs)
   if not src or src == "" then return {} end
-  local tokens = tokenize_inlines(src)
-  return resolve_inlines(tokens)
+  local tokens = tokenize_inlines(src, defs)
+  return resolve_inlines(tokens, defs)
 end
 
 -- ── Phase 2: inline expansion pass ────────────────────────────────────────────
 
 -- Walk block tree and fill `children` for nodes that have `_raw`.
-local function expand_inlines(nodes)
+local function expand_inlines(nodes, defs)
   for _, node in ipairs(nodes) do
     if node.type == "heading" or node.type == "paragraph" then
       local raw = node._raw or ""
       -- Strip trailing whitespace (not significant at end of block).
       raw = raw:match("^(.-)%s*$") or raw
-      node.children = parse_inlines(raw)
+      node.children = parse_inlines(raw, defs)
       node._raw = nil
     elseif node.children then
-      expand_inlines(node.children)
+      expand_inlines(node.children, defs)
     end
   end
 end
@@ -1025,11 +1152,11 @@ M.parse = function(src)
   end
   local lines = split_lines(src)
   local blocks, defs = parse_blocks(lines, 1, #lines)
-  expand_inlines(blocks)
+  expand_inlines(blocks, defs)
   return {
     type = "root",
     children = blocks,
-    _defs = defs,  -- link reference definitions (internal, for future use)
+    _defs = defs,  -- link reference definitions (exposed for downstream use)
   }
 end
 

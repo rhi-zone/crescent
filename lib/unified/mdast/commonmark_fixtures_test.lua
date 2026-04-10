@@ -286,10 +286,10 @@ local pass_thresholds = {
   ["Lists"]                   = 0.60,
   ["Code spans"]              = 0.90,
   ["Emphasis and strong emphasis"] = 0.70,
-  -- Links/Images: many tests require link reference definitions (skipped section).
-  -- Achievable rate with inline links only.
-  ["Links"]                   = 0.30,
-  ["Images"]                  = 0.25,
+  -- Links/Images: reference link resolution now implemented; remaining failures are
+  -- URL percent-encoding, link title edge cases, and nested structure issues.
+  ["Links"]                   = 0.60,
+  ["Images"]                  = 0.55,
   ["Hard line breaks"]        = 0.85,
   ["Soft line breaks"]        = 1.00,
   ["Textual content"]         = 1.00,

@@ -396,6 +396,86 @@ T.describe("root", function()
   end)
 end)
 
+-- ── Link reference definitions ────────────────────────────────────────────────
+
+T.describe("link reference definitions", function()
+  -- Helper: find first paragraph in tree (definition blocks come before it).
+  local function para(t)
+    for _, c in ipairs(t.children) do
+      if c.type == "paragraph" then return c end
+    end
+  end
+
+  -- Full reference: [text][ref]
+  T.it("full reference link", function()
+    local t = mdast.parse("[foo]: /url \"title\"\n\n[bar][foo]")
+    local p = para(t)
+    T.eq(p.type, "paragraph")
+    local link = p.children[1]
+    T.eq(link.type, "link")
+    T.eq(link.url, "/url")
+    T.eq(link.title, "title")
+    T.eq(link.children[1].value, "bar")
+  end)
+
+  -- Collapsed reference: [ref][]
+  T.it("collapsed reference link", function()
+    local t = mdast.parse("[foo]: /url\n\n[foo][]")
+    local link = para(t).children[1]
+    T.eq(link.type, "link")
+    T.eq(link.url, "/url")
+    T.eq(link.children[1].value, "foo")
+  end)
+
+  -- Shortcut reference: [ref]
+  T.it("shortcut reference link", function()
+    local t = mdast.parse("[foo]: /url\n\n[foo]")
+    local link = para(t).children[1]
+    T.eq(link.type, "link")
+    T.eq(link.url, "/url")
+    T.eq(link.children[1].value, "foo")
+  end)
+
+  -- Image full reference: ![alt][ref]
+  T.it("full reference image", function()
+    local t = mdast.parse("[foo]: /img.png \"alt title\"\n\n![my alt][foo]")
+    local img = para(t).children[1]
+    T.eq(img.type, "image")
+    T.eq(img.url, "/img.png")
+    T.eq(img.title, "alt title")
+    T.eq(img.children[1].value, "my alt")
+  end)
+
+  -- Image shortcut: ![ref]
+  T.it("shortcut reference image", function()
+    local t = mdast.parse("[foo]: /img.png\n\n![foo]")
+    local img = para(t).children[1]
+    T.eq(img.type, "image")
+    T.eq(img.url, "/img.png")
+  end)
+
+  -- Case-insensitive label matching
+  T.it("label matching is case-insensitive", function()
+    local t = mdast.parse("[FOO]: /url\n\n[foo]")
+    local link = para(t).children[1]
+    T.eq(link.type, "link")
+    T.eq(link.url, "/url")
+  end)
+
+  -- Undefined reference: leave as literal text
+  T.it("undefined reference is literal text", function()
+    local t = mdast.parse("[bar]")
+    local p = first(t)
+    T.eq(p.type, "paragraph")
+    -- Should be text, not a link node
+    local found_link = false
+    for _, c in ipairs(p.children or {}) do
+      if c.type == "link" then found_link = true end
+    end
+    T.eq(found_link, false)
+  end)
+end)
+
 -- ── Stringify ─────────────────────────────────────────────────────────────────
 
 T.describe("stringify", function()
