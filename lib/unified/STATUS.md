@@ -16,7 +16,7 @@ Not ported (intentional):
 
 | Package | JS reference | Status | Notes |
 |---|---|---|---|
-| `mdast` | [mdast](https://github.com/syntax-tree/mdast) | ✅ done | CommonMark parser; 73–100% fixture coverage |
+| `mdast` | [mdast](https://github.com/syntax-tree/mdast) | ✅ done | CommonMark parser; links 67%, images 59%, emphasis 73%, lists 69–73%; 100% on core sections |
 | `remark` | [remark](https://github.com/remarkjs/remark) | ✅ done | Markdown preset (parse + stringify) |
 | `remark_rehype` | [remark-rehype](https://github.com/remarkjs/remark-rehype) | ✅ done | mdast→hast bridge plugin |
 | `remark_gfm` | [remark-gfm](https://github.com/remarkjs/remark-gfm) | ✅ done | tables, strikethrough, task lists, autolinks |
@@ -129,7 +129,13 @@ Not yet ported:
 The crescent hast implementation uses `tag` and `props` rather than the spec's `tagName` and `properties`. This is an intentional deviation (shorter, more Lua-idiomatic), but it means any JS plugin ported without reading `lib/unified/hast/init.lua` first will use the wrong field names. Noted in each plugin's commit.
 
 ### mdast fixture coverage
-`lib/unified/mdast` passes 100% of core CommonMark sections and 73–93% of lists/emphasis. The remaining gaps are tracked in `TODO.md`. `lib/unified/remark_math` works around one mdast limitation (backslash stripping) using a pre-parse placeholder technique.
+`lib/unified/mdast` passes 100% of core CommonMark sections. Known gaps (investigated 2026-04-10):
+
+- **Links / Images**: 67% / 59% — reference link resolution now implemented (was 34%/27%). Remaining failures are edge cases in label normalisation and nested bracket handling.
+- **Emphasis / Strong**: 73% — `can_open`/`can_close` flanking delimiter rules don't fully handle Unicode punctuation categories or all word-boundary interactions.
+- **Lists / List Items**: 69–73% — loose/tight detection is over-broad (blank lines within an item incorrectly mark the whole list loose); indented-code-block interaction with list continuation not fully handled.
+
+`lib/unified/remark_math` works around one mdast limitation (backslash stripping in inline parsing) using a pre-parse placeholder technique.
 
 ### rehype parser stub
 `lib/unified/rehype/init.lua` registers a stub parser (`{type="root", children={}, raw=source}`) because a real HTML→hast parser is a substantial project. `rehype_raw` covers the most common use case (embedded HTML in Markdown). A full HTML parser would go in `lib/html` or `lib/unified/rehype_parse`.
