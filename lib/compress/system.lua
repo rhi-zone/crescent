@@ -1,0 +1,313 @@
+-- lib/compress/system.lua
+-- Tier 1: zlib compression via FFI bindings to system libz.
+-- Wraps compress2/uncompress for one-shot and deflateInit2_/inflateInit2_ for streaming.
+
+local ffi = require("ffi")
+local bit = require("bit")
+
+ffi.cdef [[
+  const char *zlibVersion(void);
+
+  typedef unsigned long uLong;
+  typedef unsigned int uInt;
+  typedef unsigned char Byte;
+  typedef Byte *Bytef;
+  typedef void *voidpf;
+  typedef uLong uLongf;
+
+  typedef struct z_stream_s {
+    const Bytef *next_in;
+    uInt avail_in;
+    uLong total_in;
+    Bytef *next_out;
+    uInt avail_out;
+    uLong total_out;
+    const char *msg;
+    void *state;
+    voidpf zalloc;
+    voidpf zfree;
+    voidpf opaque;
+    int data_type;
+    uLong adler;
+    uLong reserved;
+  } z_stream;
+
+  int compress2(Bytef *dest, uLongf *destLen,
+                const Bytef *source, uLong sourceLen, int level);
+  int uncompress(Bytef *dest, uLongf *destLen,
+                 const Bytef *source, uLong sourceLen);
+
+  int deflateInit2_(z_stream *strm, int level, int method,
+                    int windowBits, int memLevel, int strategy,
+                    const char *version, int stream_size);
+  int deflate(z_stream *strm, int flush);
+  int deflateEnd(z_stream *strm);
+
+  int inflateInit2_(z_stream *strm, int windowBits,
+                    const char *version, int stream_size);
+  int inflate(z_stream *strm, int flush);
+  int inflateEnd(z_stream *strm);
+]]
+
+-- Try known library names
+local ok, zlib
+for _, name in ipairs({ "z", "zlib", "zlib1", "libz" }) do
+  ok, zlib = pcall(ffi.load, name)
+  if ok then break end
+end
+if not ok then
+  error("zlib not found: " .. tostring(zlib))
+end
+
+local Z_OK            = 0
+local Z_STREAM_END    = 1
+local Z_FINISH        = 4
+local Z_NO_FLUSH      = 0
+local Z_DEFLATED      = 8
+local Z_DEFAULT_STRATEGY = 0
+
+local CHUNK = 65536
+
+local z_version = zlib.zlibVersion()
+local z_stream_size = ffi.sizeof("z_stream")
+
+--: (string) -> number
+local function window_bits_deflate(format)
+  if format == "raw" then return -15 end
+  if format == "gzip" then return 15 + 16 end
+  return 15 -- zlib (default)
+end
+
+--: (string) -> number
+local function window_bits_inflate(format)
+  if format == "raw" then return -15 end
+  if format == "gzip" then return 15 + 16 end
+  -- zlib default, but also auto-detect gzip
+  return 15 + 32
+end
+
+local dest_len_buf = ffi.new("uLongf[1]")
+
+-- ── One-shot deflate ─────────────────────────────────────────────────────────
+
+--: (string, table?) -> string?, string?
+local function deflate(input, opts)
+  opts = opts or {}
+  local level = opts.level or 6
+  local format = opts.format or "zlib"
+
+  local src = ffi.cast("const Bytef *", input)
+  local src_len = #input
+
+  -- Use streaming API for format support (compress2 only does zlib)
+  local strm = ffi.new("z_stream")
+  local wb = window_bits_deflate(format)
+  local ret = zlib.deflateInit2_(strm, level, Z_DEFLATED, wb, 8,
+                                  Z_DEFAULT_STRATEGY, z_version, z_stream_size)
+  if ret ~= Z_OK then
+    return nil, "deflateInit2 failed: " .. ret
+  end
+
+  strm.next_in = src
+  strm.avail_in = src_len
+
+  local chunks = {}
+  local buf = ffi.new("Byte[?]", CHUNK)
+
+  repeat
+    strm.next_out = buf
+    strm.avail_out = CHUNK
+    ret = zlib.deflate(strm, Z_FINISH)
+    if ret ~= Z_OK and ret ~= Z_STREAM_END then
+      zlib.deflateEnd(strm)
+      return nil, "deflate failed: " .. ret
+    end
+    local have = CHUNK - strm.avail_out
+    if have > 0 then
+      chunks[#chunks + 1] = ffi.string(buf, have)
+    end
+  until ret == Z_STREAM_END
+
+  zlib.deflateEnd(strm)
+  return table.concat(chunks)
+end
+
+-- ── One-shot inflate ─────────────────────────────────────────────────────────
+
+--: (string, table?) -> string?, string?
+local function inflate(input, opts)
+  opts = opts or {}
+  local format = opts.format or "zlib"
+
+  local src = ffi.cast("const Bytef *", input)
+  local src_len = #input
+
+  local strm = ffi.new("z_stream")
+  local wb = window_bits_inflate(format)
+  local ret = zlib.inflateInit2_(strm, wb, z_version, z_stream_size)
+  if ret ~= Z_OK then
+    return nil, "inflateInit2 failed: " .. ret
+  end
+
+  strm.next_in = src
+  strm.avail_in = src_len
+
+  local chunks = {}
+  local buf = ffi.new("Byte[?]", CHUNK)
+
+  repeat
+    strm.next_out = buf
+    strm.avail_out = CHUNK
+    ret = zlib.inflate(strm, Z_NO_FLUSH)
+    if ret ~= Z_OK and ret ~= Z_STREAM_END then
+      zlib.inflateEnd(strm)
+      local msg = strm.msg ~= nil and ffi.string(strm.msg) or ("code " .. ret)
+      return nil, "inflate failed: " .. msg
+    end
+    local have = CHUNK - strm.avail_out
+    if have > 0 then
+      chunks[#chunks + 1] = ffi.string(buf, have)
+    end
+  until ret == Z_STREAM_END
+
+  zlib.inflateEnd(strm)
+  return table.concat(chunks)
+end
+
+-- ── Streaming deflater ───────────────────────────────────────────────────────
+
+--: (table?) -> table
+local function deflater(opts)
+  opts = opts or {}
+  local level = opts.level or 6
+  local format = opts.format or "zlib"
+
+  local strm = ffi.new("z_stream")
+  local wb = window_bits_deflate(format)
+  local ret = zlib.deflateInit2_(strm, level, Z_DEFLATED, wb, 8,
+                                  Z_DEFAULT_STRATEGY, z_version, z_stream_size)
+  if ret ~= Z_OK then
+    return nil, "deflateInit2 failed: " .. ret
+  end
+
+  local chunks = {}
+  local buf = ffi.new("Byte[?]", CHUNK)
+  local finished = false
+
+  return {
+    --: (string) -> boolean?, string?
+    push = function(chunk)
+      if finished then return nil, "deflater already finished" end
+      local src = ffi.cast("const Bytef *", chunk)
+      strm.next_in = src
+      strm.avail_in = #chunk
+      repeat
+        strm.next_out = buf
+        strm.avail_out = CHUNK
+        ret = zlib.deflate(strm, Z_NO_FLUSH)
+        if ret ~= Z_OK then
+          zlib.deflateEnd(strm)
+          return nil, "deflate failed: " .. ret
+        end
+        local have = CHUNK - strm.avail_out
+        if have > 0 then
+          chunks[#chunks + 1] = ffi.string(buf, have)
+        end
+      until strm.avail_out ~= 0
+      return true
+    end,
+    --: () -> string?, string?
+    finish = function()
+      if finished then return nil, "deflater already finished" end
+      finished = true
+      strm.next_in = nil
+      strm.avail_in = 0
+      repeat
+        strm.next_out = buf
+        strm.avail_out = CHUNK
+        ret = zlib.deflate(strm, Z_FINISH)
+        if ret ~= Z_OK and ret ~= Z_STREAM_END then
+          zlib.deflateEnd(strm)
+          return nil, "deflate finish failed: " .. ret
+        end
+        local have = CHUNK - strm.avail_out
+        if have > 0 then
+          chunks[#chunks + 1] = ffi.string(buf, have)
+        end
+      until ret == Z_STREAM_END
+      zlib.deflateEnd(strm)
+      return table.concat(chunks)
+    end,
+  }
+end
+
+-- ── Streaming inflater ───────────────────────────────────────────────────────
+
+--: (table?) -> table
+local function inflater(opts)
+  opts = opts or {}
+  local format = opts.format or "zlib"
+
+  local strm = ffi.new("z_stream")
+  local wb = window_bits_inflate(format)
+  local ret = zlib.inflateInit2_(strm, wb, z_version, z_stream_size)
+  if ret ~= Z_OK then
+    return nil, "inflateInit2 failed: " .. ret
+  end
+
+  local chunks = {}
+  local buf = ffi.new("Byte[?]", CHUNK)
+  local finished = false
+
+  return {
+    --: (string) -> boolean?, string?
+    push = function(chunk)
+      if finished then return nil, "inflater already finished" end
+      local src = ffi.cast("const Bytef *", chunk)
+      strm.next_in = src
+      strm.avail_in = #chunk
+      repeat
+        strm.next_out = buf
+        strm.avail_out = CHUNK
+        ret = zlib.inflate(strm, Z_NO_FLUSH)
+        if ret == Z_STREAM_END then
+          local have = CHUNK - strm.avail_out
+          if have > 0 then
+            chunks[#chunks + 1] = ffi.string(buf, have)
+          end
+          finished = true
+          zlib.inflateEnd(strm)
+          return true
+        end
+        if ret ~= Z_OK then
+          zlib.inflateEnd(strm)
+          local msg = strm.msg ~= nil and ffi.string(strm.msg) or ("code " .. ret)
+          return nil, "inflate failed: " .. msg
+        end
+        local have = CHUNK - strm.avail_out
+        if have > 0 then
+          chunks[#chunks + 1] = ffi.string(buf, have)
+        end
+      until strm.avail_out ~= 0
+      return true
+    end,
+    --: () -> string?, string?
+    finish = function()
+      if not finished then
+        finished = true
+        zlib.inflateEnd(strm)
+      end
+      return table.concat(chunks)
+    end,
+  }
+end
+
+local M = {}
+M.deflate = deflate
+M.inflate = inflate
+M.encode = deflate
+M.decode = inflate
+M.deflater = deflater
+M.inflater = inflater
+M._tier = "system-zlib"
+return M
