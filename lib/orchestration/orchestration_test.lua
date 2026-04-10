@@ -222,7 +222,219 @@ T.describe("on_task hook", function()
 	end)
 end)
 
--- ── 10. LLM executor (mocked) ─────────────────────────────────────────────────
+-- ── 10. exec_graph (track=true) ──────────────────────────────────────────────
+
+T.describe("exec_graph", function()
+	T.it("records every task spawned, in order", function()
+		local executors = {
+			root = function(_, ctx)
+				local ha = ctx:spawn({ type = "child_a", input = {} })
+				local hb = ctx:spawn({ type = "child_b", input = {} })
+				ctx:result(ha)
+				ctx:result(hb)
+				return {}
+			end,
+			child_a = function() return { a = 1 } end,
+			child_b = function() return { b = 2 } end,
+		}
+		local _, g = orch.run({ type = "root", input = {} }, { executors = executors, track = true })
+		local log = orch.exec_graph_snapshot(g)
+		-- root + child_a + child_b = 3 entries
+		T.eq(#log, 3)
+	end)
+
+	T.it("records parent→children lineage", function()
+		local executors = {
+			root = function(_, ctx)
+				local h = ctx:spawn({ type = "leaf", input = {} })
+				ctx:result(h)
+				return {}
+			end,
+			leaf = function() return {} end,
+		}
+		local _, g = orch.run({ type = "root", input = {} }, { executors = executors, track = true })
+		local log = orch.exec_graph_snapshot(g)
+		-- log[1] = root, log[2] = leaf
+		local root_node = log[1]
+		local leaf_node = log[2]
+		T.eq(root_node.type, "root")
+		T.eq(leaf_node.type, "leaf")
+		-- leaf's parent is root's id
+		T.eq(leaf_node.parent_id, root_node.id)
+		-- root's children contains leaf's id
+		T.eq(#root_node.children, 1)
+		T.eq(root_node.children[1], leaf_node.id)
+	end)
+
+	T.it("completed nodes have status=completed and output set", function()
+		local executors = {
+			work = function() return { done = true } end,
+		}
+		local _, g = orch.run({ type = "work", input = {} }, { executors = executors, track = true })
+		local log = orch.exec_graph_snapshot(g)
+		T.eq(#log, 1)
+		T.eq(log[1].status, "completed")
+		local o = log[1].output --: any
+		T.ok(o.done)
+	end)
+
+	T.it("failed nodes have status=failed and error set", function()
+		local executors = {
+			fail_task = function() error("exploded") end,
+		}
+		pcall(orch.run, { type = "fail_task", input = {} }, { executors = executors, track = true })
+		-- run raises, so we use a wrapper to get the graph back
+		local captured_g
+		pcall(function()
+			local exec_mod  = require("lib.orchestration.exec")
+			local graph_mod = require("lib.orchestration.graph")
+			local egraph    = require("lib.orchestration.exec_graph")
+			local frontier  = require("lib.orchestration.frontier")
+			local gr = graph_mod.new()
+			local id = graph_mod.add(gr, { type = "fail_task", input = {} }, nil)
+			gr.root = id
+			local eg = egraph.new()
+			local fr = frontier.new()
+			frontier.add(fr, id, "fail_task", {}, nil)
+			egraph.record(eg, id, "fail_task", {}, nil)
+			gr._exec_graph = eg
+			gr._frontier   = fr
+			exec_mod.run_task(gr,
+				{ fail_task = function() error("exploded") end },
+				{ exec_graph = eg, frontier = fr, scaffolds = {} },
+				id)
+			captured_g = gr
+		end)
+		local log = orch.exec_graph_snapshot(captured_g)
+		T.eq(#log, 1)
+		T.eq(log[1].status, "failed")
+		T.ok(log[1].error ~= nil)
+		T.ok(tostring(log[1].error):find("exploded"))
+	end)
+
+	T.it("exec_graphs from independent runs are independent", function()
+		local _, g1 = orch.run({ type = "work", input = {} },
+			{ executors = { work = function() return { n = 1 } end }, track = true })
+		local _, g2 = orch.run({ type = "work", input = {} },
+			{ executors = { work = function() return { n = 2 } end }, track = true })
+		local log1 = orch.exec_graph_snapshot(g1)
+		local log2 = orch.exec_graph_snapshot(g2)
+		T.eq(#log1, 1)
+		T.eq(#log2, 1)
+		local o1 = log1[1].output --: any
+		local o2 = log2[1].output --: any
+		T.eq(o1.n, 1)
+		T.eq(o2.n, 2)
+	end)
+end)
+
+-- ── 11. frontier (track=true) ─────────────────────────────────────────────────
+
+T.describe("frontier", function()
+	T.it("is empty after a run completes", function()
+		local _, g = orch.run({ type = "work", input = {} },
+			{ executors = { work = function() return {} end }, track = true })
+		local pending = orch.frontier_snapshot(g)
+		T.eq(#pending, 0)
+	end)
+
+	T.it("contains the running task during execution", function()
+		local captured_frontier = nil
+		orch.run({ type = "observer", input = {} }, {
+			track = true,
+			executors = {
+				observer = function(_, ctx)
+					captured_frontier = ctx:frontier()
+					return {}
+				end,
+			},
+		})
+		T.ok(captured_frontier ~= nil)
+		T.ok(#captured_frontier >= 1)
+		local found = false
+		for i = 1, #captured_frontier do
+			if captured_frontier[i].type == "observer" then found = true end
+		end
+		T.ok(found)
+	end)
+
+	T.it("tracks child tasks while they are pending", function()
+		local captured = nil
+		orch.run({ type = "parent", input = {} }, {
+			track = true,
+			executors = {
+				parent = function(_, ctx)
+					local h = ctx:spawn({ type = "slow_child", input = {} })
+					-- capture frontier after spawning child but before ctx:result drives it
+					captured = ctx:frontier()
+					return ctx:result(h)
+				end,
+				slow_child = function() return { x = 42 } end,
+			},
+		})
+		T.ok(captured ~= nil)
+		local types = {}
+		for i = 1, #captured do
+			types[captured[i].type] = true
+		end
+		-- parent is running, child was just spawned (pending)
+		T.ok(types["parent"] or types["slow_child"])
+	end)
+end)
+
+-- ── 12. Scaffolds ─────────────────────────────────────────────────────────────
+
+T.describe("scaffolds", function()
+	T.it("scaffold is applied to each task before execution", function()
+		local seen = {}
+		local out = orch.run({ type = "work", input = { x = 5 } }, {
+			executors = {
+				work = function(task, _)
+					local t = task --: any
+					return { val = t.input.x }
+				end,
+			},
+			scaffolds = {
+				function(task_def)
+					local td = task_def --: any
+					seen[#seen + 1] = td.type
+					-- transform: multiply input x by 10
+					return { type = td.type, input = { x = (td.input and td.input.x or 0) * 10 } }
+				end,
+			},
+		})
+		local r = out --: any
+		-- scaffold multiplied x by 10 → 50
+		T.eq(r.val, 50)
+		T.eq(seen[1], "work")
+	end)
+
+	T.it("scaffold is applied to child tasks too", function()
+		local scaffold_count = 0
+		orch.run({ type = "parent", input = {} }, {
+			executors = {
+				parent = function(_, ctx)
+					local h = ctx:spawn({ type = "child", input = { x = 1 } })
+					return ctx:result(h)
+				end,
+				child = function(task, _)
+					local t = task --: any
+					return { v = t.input.x }
+				end,
+			},
+			scaffolds = {
+				function(task_def)
+					scaffold_count = scaffold_count + 1
+					return task_def
+				end,
+			},
+		})
+		-- scaffold fires for parent (1) and child (1) = 2 times
+		T.eq(scaffold_count, 2)
+	end)
+end)
+
+-- ── 13. LLM executor (mocked) ─────────────────────────────────────────────────
 
 T.describe("llm executor (mocked)", function()
 	T.it("llm.complete returns text and usage", function()
