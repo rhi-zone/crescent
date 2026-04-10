@@ -63,12 +63,13 @@ Not yet ported:
 | `rehype_katex` | [rehype-katex](https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex) | ✅ done | math nodes → span/div wrappers; browser renders via KaTeX/MathJax |
 | `rehype_raw` | [rehype-raw](https://github.com/rehypejs/rehype-raw) | ✅ done | parse `{type="html"}` raw strings into hast elements |
 | `rehype_meta` | [rehype-meta](https://github.com/rehypejs/rehype-meta) | ✅ done | inject title/meta/og/twitter into `<head>` |
+| `rehype_remove_comments` | [rehype-remove-comments](https://github.com/rehypejs/rehype-remove-comments) | ✅ done | strip comment nodes; opts.preserve callback for selective retention |
+| `rehype_xast` | [rehype-xast](https://github.com/rehypejs/rehype-xast) | ✅ done | hast→xast bridge; raw→text (no XML round-trip); boolean props as name=name |
 
 Not yet ported:
 - **rehype-parse** — full HTML string → hast parser. `rehype_raw` covers the most common case (embedded HTML in Markdown). A full HTML parser is a larger project (`lib/html` or similar).
 - **rehype-prism** / **rehype-shiki** / **rehype-starry-night** — alternative syntax highlighters. `rehype_highlight` covers the common case with a built-in tokenizer; these require bundling external grammars.
 - **rehype-rewrite** — rewrite hast nodes via selector API. Requires `unist-util-select` equivalent.
-- **rehype-remove-comments** — strip HTML comment nodes. Trivial to add.
 - **rehype-toc** — rehype-side TOC (inserts `<nav>` from headings). Overlaps with `remark_toc`; lower priority.
 - **rehype-responsive-table** — wrap tables in a scrollable container. Trivial.
 
@@ -86,13 +87,13 @@ Not yet ported:
 | `retext_simplify` | [retext-simplify](https://github.com/retextjs/retext-simplify) | ✅ done | ~50 complex→simple word suggestions |
 | `retext_equality` | [retext-equality](https://github.com/retextjs/retext-equality) | ✅ done | ~40 biased/insensitive term flags |
 | `retext_contractions` | [retext-contractions](https://github.com/retextjs/retext-contractions) | ✅ done | missing apostrophe detection; smart/straight quote opts |
+| `retext_repeated_words` | [retext-repeated-words](https://github.com/retextjs/retext-repeated-words) | ✅ done | consecutive repeated word detection; punctuation resets chain |
+| `retext_indefinite_article` | [retext-indefinite-article](https://github.com/retextjs/retext-indefinite-article) | ✅ done | a/an checker; silent-h table; you-sound u-words; abbreviation letter-sounds |
+| `retext_intensify` | [retext-intensify](https://github.com/retextjs/retext-intensify) | ✅ done | 45-word weasel-word list; opts.ignore |
+| `retext_sentence_spacing` | [retext-sentence-spacing](https://github.com/retextjs/retext-sentence-spacing) | ✅ done | inter-sentence whitespace check; opts.preferred (default 1) |
 
 Not yet ported:
 - **retext-spelling** — spell checking. Requires a word list (~100K entries). Worth doing once `lib/compress` exists (to ship a compressed dictionary).
-- **retext-indefinite-article** — `a` vs `an` checker. Small, self-contained; easy to add.
-- **retext-repeated-words** — detects "the the" repetition. Trivial.
-- **retext-sentence-spacing** — checks spaces between sentences. Trivial.
-- **retext-intensify** — weasel word detection ("very", "really", "quite"). Small table-lookup.
 - **retext-overuse** — word overuse detection. Overlaps with `retext_keywords`.
 - **retext-quotes** — check quote style (straight vs curly). Mostly covered by `retext_contractions`.
 - **retext-diacritics** — suggest diacritics (café vs cafe). Needs a lookup table.
@@ -108,7 +109,6 @@ Not yet ported:
 Not yet ported:
 - **xast-util-from-xml** — XML string → xast parser. Requires a full XML parser (`lib/xml` or similar).
 - **xast-util-visit** — tree visitor for xast. See unist-util-visit below.
-- **rehype-xast** — hast → xast bridge. Simple structural mapping; easy to add.
 
 ## Unist utilities (shared tree utilities)
 
