@@ -502,6 +502,27 @@ parse_blocks = function(lines, i, j)
             if cind >= iwidth then
               item_lines[#item_lines + 1] = strip_indent(cl, iwidth)
               i = i + 1
+            elseif #item_lines > 0 and item_lines[#item_lines] ~= "" then
+              -- Lazy continuation: the last item line is non-blank (we're inside a paragraph).
+              -- Check the line can lazily continue (not a block-level interrupt).
+              local lrest = str_sub(cl, cind + 1)  -- stripped content
+              local can_lazy = true
+              -- Cannot lazy-continue past a blank line, ATX heading, thematic break,
+              -- fenced code, or block quote (these are hard stops).
+              if is_blank(cl) then can_lazy = false
+              elseif lrest:match("^#{1,6}[ \t]") or lrest:match("^#{1,6}$") then can_lazy = false  -- ATX heading
+              elseif lrest:match("^[-*_][ \t]*[-*_][ \t]*[-*_]") then can_lazy = false  -- thematic break
+              elseif lrest:match("^[`~][`~][`~]") then can_lazy = false  -- fenced code
+              elseif lrest:match("^>") then can_lazy = false  -- block quote
+              elseif match_list_item(cl) then can_lazy = false  -- another list item
+              end
+              if can_lazy then
+                -- Strip the line's actual indentation and include as lazy continuation.
+                item_lines[#item_lines + 1] = lrest
+                i = i + 1
+              else
+                break
+              end
             else
               break
             end
