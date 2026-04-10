@@ -154,7 +154,7 @@ function M.server(opts)
         if next(s._resources) or next(s._resource_templates) then capabilities.resources = {} end
         if next(s._prompts) then capabilities.prompts = {} end
         return {
-            protocolVersion = "2024-11-05",
+            protocolVersion = "2025-11-25",
             capabilities = capabilities,
             serverInfo = { name = s._name, version = s._version },
         }

@@ -1,103 +1,98 @@
+-- lib/cli/init.lua
+-- Declarative CLI argument parser.
+--
+-- Usage:
+--   local cli = require("lib.cli")
+--   local args, err = cli.parse(arg, {
+--     name = "myapp", desc = "A tool", version = "1.0.0",
+--     flags   = { verbose = { short = "v", desc = "Verbose" } },
+--     options = { output  = { short = "o", desc = "Out file", default = "-" } },
+--     positionals = { { name = "input", desc = "Input file", required = true } },
+--     commands = { build = { desc = "Build", flags = { release = {} } } },
+--   })
+
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
---: module
 local M = {}
 
--- ── Command (shared metatable for app and subcommands) ─────────────────────
+-- ── Spec normalization ────────────────────────────────────────────────────
 
-local Command = {}
-Command.__index = Command
+-- Build lookup tables from a spec table. Mutates spec in place, adding
+-- _flag_order, _option_order, _short_to_flag, _short_to_option,
+-- _command_order, and normalized positionals/commands.
+--: ({ [string]: unknown }) -> nil
+local function normalize(spec)
+	spec.name = spec.name or "app"
+	spec.desc = spec.desc or ""
+	spec.flags = spec.flags or {}
+	spec.options = spec.options or {}
+	spec.positionals = spec.positionals or {}
+	spec.commands = spec.commands or {}
 
---: (string, string?) -> Command
-local function new_command(name, desc)
-	return setmetatable({
-		_name = name,
-		_desc = desc or "",
-		_version = nil,
-		_flags = {},       -- {name = {short=, desc=}}
-		_options = {},     -- {name = {short=, desc=, default=, type=, array=}}
-		_positionals = {}, -- {{name=, desc=, required=}}
-		_commands = {},    -- {name = Command}
-		_command_order = {},
-		_action_fn = nil,
-		_flag_order = {},
-		_option_order = {},
-		_short_to_flag = {},
-		_short_to_option = {},
-	}, Command)
-end
+	-- Sorted iteration order for flags/options (deterministic help output).
+	-- Use insertion order if the caller passes an array-like structure,
+	-- otherwise sort alphabetically.
+	local flag_order = {}
+	local option_order = {}
+	local command_order = {}
 
---: (string) -> Command
-function Command:version(v)
-	self._version = v
-	return self
-end
-
---: (string, {short: string?, desc: string?}) -> Command
-function Command:flag(name, opts)
-	opts = opts or {}
-	self._flags[name] = { short = opts.short, desc = opts.desc or "" }
-	self._flag_order[#self._flag_order + 1] = name
-	if opts.short then
-		self._short_to_flag[opts.short] = name
+	for name in pairs(spec.flags) do
+		flag_order[#flag_order + 1] = name
 	end
-	return self
-end
+	table.sort(flag_order)
+	spec._flag_order = flag_order
 
---: (string, {short: string?, desc: string?, default: unknown?, type: string?, array: boolean?}) -> Command
-function Command:option(name, opts)
-	opts = opts or {}
-	self._options[name] = {
-		short = opts.short,
-		desc = opts.desc or "",
-		default = opts.default,
-		type = opts.type,
-		array = opts.array or false,
-	}
-	self._option_order[#self._option_order + 1] = name
-	if opts.short then
-		self._short_to_option[opts.short] = name
+	for name in pairs(spec.options) do
+		option_order[#option_order + 1] = name
 	end
-	return self
+	table.sort(option_order)
+	spec._option_order = option_order
+
+	for name in pairs(spec.commands) do
+		command_order[#command_order + 1] = name
+	end
+	table.sort(command_order)
+	spec._command_order = command_order
+
+	-- Short-flag/option reverse maps.
+	local s2f, s2o = {}, {}
+	for name, f in pairs(spec.flags) do
+		f.desc = f.desc or ""
+		if f.short then s2f[f.short] = name end
+	end
+	for name, o in pairs(spec.options) do
+		o.desc = o.desc or ""
+		if o.short then s2o[o.short] = name end
+	end
+	spec._short_to_flag = s2f
+	spec._short_to_option = s2o
+
+	-- Normalize positionals (ensure each has .name, .desc, .required).
+	for i = 1, #spec.positionals do
+		local p = spec.positionals[i]
+		p.desc = p.desc or ""
+		p.required = p.required or false
+	end
+
+	-- Recursively normalize subcommands.
+	for name, cmd in pairs(spec.commands) do
+		cmd.name = name
+		normalize(cmd)
+	end
 end
 
---: (string, {desc: string?, required: boolean?}) -> Command
-function Command:positional(name, opts)
-	opts = opts or {}
-	self._positionals[#self._positionals + 1] = {
-		name = name,
-		desc = opts.desc or "",
-		required = opts.required or false,
-	}
-	return self
-end
+-- ── Help text generation ──────────────────────────────────────────────────
 
---: (string, string?) -> Command
-function Command:command(name, desc)
-	local cmd = new_command(name, desc)
-	self._commands[name] = cmd
-	self._command_order[#self._command_order + 1] = name
-	return cmd
-end
-
---: ((table) -> unknown) -> Command
-function Command:action(fn)
-	self._action_fn = fn
-	return self
-end
-
--- ── Help text generation ───────────────────────────────────────────────────
-
---: (Command, string?) -> string
-local function generate_help(cmd, program_name)
+--: ({ [string]: unknown }, string?) -> string
+local function generate_help(spec, program_name)
 	local parts = {}
-	local pname = program_name or cmd._name
+	local pname = program_name or spec.name
 
 	-- Header
-	if cmd._desc ~= "" then
-		parts[#parts + 1] = pname .. " - " .. cmd._desc
+	if spec.desc ~= "" then
+		parts[#parts + 1] = pname .. " - " .. spec.desc
 	else
 		parts[#parts + 1] = pname
 	end
@@ -105,14 +100,14 @@ local function generate_help(cmd, program_name)
 
 	-- Usage line
 	local usage = "Usage: " .. pname
-	if #cmd._flag_order > 0 or #cmd._option_order > 0 then
+	if #spec._flag_order > 0 or #spec._option_order > 0 then
 		usage = usage .. " [options]"
 	end
-	if #cmd._command_order > 0 then
+	if #spec._command_order > 0 then
 		usage = usage .. " [command]"
 	end
-	for i = 1, #cmd._positionals do
-		local p = cmd._positionals[i]
+	for i = 1, #spec.positionals do
+		local p = spec.positionals[i]
 		if p.required then
 			usage = usage .. " <" .. p.name .. ">"
 		else
@@ -123,13 +118,12 @@ local function generate_help(cmd, program_name)
 	parts[#parts + 1] = ""
 
 	-- Positionals
-	if #cmd._positionals > 0 then
+	if #spec.positionals > 0 then
 		parts[#parts + 1] = "Arguments:"
-		for i = 1, #cmd._positionals do
-			local p = cmd._positionals[i]
+		for i = 1, #spec.positionals do
+			local p = spec.positionals[i]
 			local line = "  <" .. p.name .. ">"
 			if p.desc ~= "" then
-				-- pad to column 17
 				local pad = 17 - #line
 				if pad < 2 then pad = 2 end
 				line = line .. string.rep(" ", pad) .. p.desc
@@ -141,9 +135,9 @@ local function generate_help(cmd, program_name)
 
 	-- Options
 	parts[#parts + 1] = "Options:"
-	for i = 1, #cmd._flag_order do
-		local name = cmd._flag_order[i]
-		local f = cmd._flags[name]
+	for i = 1, #spec._flag_order do
+		local name = spec._flag_order[i]
+		local f = spec.flags[name]
 		local left
 		if f.short then
 			left = "  -" .. f.short .. ", --" .. name
@@ -152,12 +146,11 @@ local function generate_help(cmd, program_name)
 		end
 		local pad = 17 - #left
 		if pad < 2 then pad = 2 end
-		local line = left .. string.rep(" ", pad) .. f.desc
-		parts[#parts + 1] = line
+		parts[#parts + 1] = left .. string.rep(" ", pad) .. f.desc
 	end
-	for i = 1, #cmd._option_order do
-		local name = cmd._option_order[i]
-		local o = cmd._options[name]
+	for i = 1, #spec._option_order do
+		local name = spec._option_order[i]
+		local o = spec.options[name]
 		local left
 		if o.short then
 			left = "  -" .. o.short .. ", --" .. name
@@ -172,23 +165,22 @@ local function generate_help(cmd, program_name)
 		end
 		parts[#parts + 1] = line
 	end
-	-- Built-in help
 	parts[#parts + 1] = "  -h, --help     Show this help"
-	if cmd._version then
+	if spec.version then
 		parts[#parts + 1] = "      --version  Show version"
 	end
 	parts[#parts + 1] = ""
 
 	-- Commands
-	if #cmd._command_order > 0 then
+	if #spec._command_order > 0 then
 		parts[#parts + 1] = "Commands:"
-		for i = 1, #cmd._command_order do
-			local cname = cmd._command_order[i]
-			local c = cmd._commands[cname]
+		for i = 1, #spec._command_order do
+			local cname = spec._command_order[i]
+			local c = spec.commands[cname]
 			local left = "  " .. cname
 			local pad = 17 - #left
 			if pad < 2 then pad = 2 end
-			parts[#parts + 1] = left .. string.rep(" ", pad) .. c._desc
+			parts[#parts + 1] = left .. string.rep(" ", pad) .. (c.desc or "")
 		end
 		parts[#parts + 1] = ""
 	end
@@ -196,7 +188,7 @@ local function generate_help(cmd, program_name)
 	return table.concat(parts, "\n")
 end
 
--- ── Coerce value by type ───────────────────────────────────────────────────
+-- ── Coerce value by type ──────────────────────────────────────────────────
 
 --: (string, string?) -> (unknown, string?)
 local function coerce(value, typ)
@@ -210,18 +202,18 @@ local function coerce(value, typ)
 	return value, nil
 end
 
--- ── Parse argv against a command ───────────────────────────────────────────
+-- ── Parse argv against a spec ─────────────────────────────────────────────
 
---: (Command, string[], string?) -> (table?, string?)
-local function parse_command(cmd, argv, program_name)
+--: ({ [string]: unknown }, string[], string?) -> (table?, string?)
+local function parse_spec(spec, argv, program_name)
 	local args = {}
 	local pos_index = 1
 	local dashdash = false
 	local i = 1
-	local pname = program_name or cmd._name
+	local pname = program_name or spec.name
 
 	-- Apply defaults
-	for name, o in pairs(cmd._options) do
+	for name, o in pairs(spec.options) do
 		if o.default ~= nil then
 			args[name] = o.default
 		end
@@ -234,9 +226,8 @@ local function parse_command(cmd, argv, program_name)
 		local a = argv[i]
 
 		if dashdash then
-			-- Everything after -- is positional
-			if pos_index <= #cmd._positionals then
-				args[cmd._positionals[pos_index].name] = a
+			if pos_index <= #spec.positionals then
+				args[spec.positionals[pos_index].name] = a
 				pos_index = pos_index + 1
 			end
 			i = i + 1
@@ -244,9 +235,9 @@ local function parse_command(cmd, argv, program_name)
 			dashdash = true
 			i = i + 1
 		elseif a == "--help" or a == "-h" then
-			return nil, generate_help(cmd, pname)
-		elseif a == "--version" and cmd._version then
-			return nil, cmd._version
+			return nil, generate_help(spec, pname)
+		elseif a == "--version" and spec.version then
+			return nil, spec.version
 		elseif a:sub(1, 2) == "--" then
 			-- Long flag/option
 			local eq_pos = a:find("=", 3, true)
@@ -258,10 +249,10 @@ local function parse_command(cmd, argv, program_name)
 				name = a:sub(3)
 			end
 
-			if cmd._flags[name] then
+			if spec.flags[name] then
 				args[name] = (args[name] or 0) + 1
 				i = i + 1
-			elseif cmd._options[name] then
+			elseif spec.options[name] then
 				if not value then
 					i = i + 1
 					if i > #argv then
@@ -269,11 +260,11 @@ local function parse_command(cmd, argv, program_name)
 					end
 					value = argv[i]
 				end
-				local coerced, err = coerce(value, cmd._options[name].type)
+				local coerced, err = coerce(value, spec.options[name].type)
 				if not coerced and err then
 					return nil, "option --" .. name .. ": " .. err
 				end
-				if cmd._options[name].array then
+				if spec.options[name].array then
 					local arr = args[name]
 					arr[#arr + 1] = coerced
 				else
@@ -289,19 +280,17 @@ local function parse_command(cmd, argv, program_name)
 			while j <= #a do
 				local ch = a:sub(j, j)
 
-				if cmd._short_to_flag[ch] then
-					local fname = cmd._short_to_flag[ch]
+				if spec._short_to_flag[ch] then
+					local fname = spec._short_to_flag[ch]
 					args[fname] = (args[fname] or 0) + 1
 					j = j + 1
-				elseif cmd._short_to_option[ch] then
-					local oname = cmd._short_to_option[ch]
+				elseif spec._short_to_option[ch] then
+					local oname = spec._short_to_option[ch]
 					local value
 					if j < #a then
-						-- Rest of the arg is the value: -ofile
 						value = a:sub(j + 1)
 						j = #a + 1
 					else
-						-- Next arg is the value: -o file
 						i = i + 1
 						if i > #argv then
 							return nil, "option -" .. ch .. " requires a value"
@@ -309,11 +298,11 @@ local function parse_command(cmd, argv, program_name)
 						value = argv[i]
 						j = j + 1
 					end
-					local coerced, err = coerce(value, cmd._options[oname].type)
+					local coerced, err = coerce(value, spec.options[oname].type)
 					if not coerced and err then
 						return nil, "option -" .. ch .. ": " .. err
 					end
-					if cmd._options[oname].array then
+					if spec.options[oname].array then
 						local arr = args[oname]
 						arr[#arr + 1] = coerced
 					else
@@ -325,20 +314,18 @@ local function parse_command(cmd, argv, program_name)
 			end
 			i = i + 1
 		else
-			-- Check for subcommand
-			if #cmd._command_order > 0 and cmd._commands[a] then
-				local subcmd = cmd._commands[a]
+			-- Subcommand?
+			if spec.commands[a] then
+				local subcmd = spec.commands[a]
 				args._command = a
-				-- Parse remaining args with the subcommand
 				local sub_argv = {}
 				for k = i + 1, #argv do
 					sub_argv[#sub_argv + 1] = argv[k]
 				end
-				local sub_args, err = parse_command(subcmd, sub_argv, pname .. " " .. a)
+				local sub_args, err = parse_spec(subcmd, sub_argv, pname .. " " .. a)
 				if not sub_args then
 					return nil, err
 				end
-				-- Merge subcommand args into parent
 				for k, v in pairs(sub_args) do
 					args[k] = v
 				end
@@ -346,8 +333,8 @@ local function parse_command(cmd, argv, program_name)
 			end
 
 			-- Positional
-			if pos_index <= #cmd._positionals then
-				args[cmd._positionals[pos_index].name] = a
+			if pos_index <= #spec.positionals then
+				args[spec.positionals[pos_index].name] = a
 				pos_index = pos_index + 1
 			end
 			i = i + 1
@@ -355,8 +342,8 @@ local function parse_command(cmd, argv, program_name)
 	end
 
 	-- Check required positionals
-	for idx = 1, #cmd._positionals do
-		local p = cmd._positionals[idx]
+	for idx = 1, #spec.positionals do
+		local p = spec.positionals[idx]
 		if p.required and args[p.name] == nil then
 			return nil, "missing required argument: <" .. p.name .. ">"
 		end
@@ -365,145 +352,155 @@ local function parse_command(cmd, argv, program_name)
 	return args, nil
 end
 
--- ── Public parse / run ─────────────────────────────────────────────────────
+-- ── Shell completions ─────────────────────────────────────────────────────
 
---: (string[]) -> (table?, string?)
-function Command:parse(argv)
-	return parse_command(self, argv, self._name)
-end
-
---: (string[]) -> (unknown, string?)
-function Command:run(argv)
-	local args, err = self:parse(argv)
-	if not args then
-		return nil, err
-	end
-
-	-- If a subcommand matched and has an action, run it
-	if args._command and self._commands[args._command] then
-		local subcmd = self._commands[args._command]
-		if subcmd._action_fn then
-			return subcmd._action_fn(args)
-		end
-	end
-
-	-- Otherwise run the app-level action
-	if self._action_fn then
-		return self._action_fn(args)
-	end
-
-	return args, nil
-end
-
--- ── Shell completions ──────────────────────────────────────────────────────
-
---: (string) -> string
-function Command:completions(shell)
-	if shell == "bash" then
-		return self:_completions_bash()
-	elseif shell == "zsh" then
-		return self:_completions_zsh()
-	elseif shell == "fish" then
-		return self:_completions_fish()
-	end
-	return ""
-end
-
---: () -> string
-function Command:_completions_bash()
-	local parts = {}
-	local name = self._name
-	parts[#parts + 1] = "_" .. name .. "_completions() {"
-	parts[#parts + 1] = "  local cur=${COMP_WORDS[COMP_CWORD]}"
-	parts[#parts + 1] = "  local opts=\"--help"
+--: ({ [string]: unknown }) -> string
+local function completions_bash(spec)
+	local name = spec.name
 	local opts = { "--help" }
-	if self._version then opts[#opts + 1] = "--version" end
-	for i = 1, #self._flag_order do
-		opts[#opts + 1] = "--" .. self._flag_order[i]
+	if spec.version then opts[#opts + 1] = "--version" end
+	for i = 1, #spec._flag_order do
+		opts[#opts + 1] = "--" .. spec._flag_order[i]
 	end
-	for i = 1, #self._option_order do
-		opts[#opts + 1] = "--" .. self._option_order[i]
+	for i = 1, #spec._option_order do
+		opts[#opts + 1] = "--" .. spec._option_order[i]
 	end
-	for i = 1, #self._command_order do
-		opts[#opts + 1] = self._command_order[i]
+	for i = 1, #spec._command_order do
+		opts[#opts + 1] = spec._command_order[i]
 	end
-	parts[3] = "  local opts=\"" .. table.concat(opts, " ") .. "\""
-	parts[#parts + 1] = "  COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") )"
-	parts[#parts + 1] = "}"
-	parts[#parts + 1] = "complete -F _" .. name .. "_completions " .. name
-	parts[#parts + 1] = ""
+	local parts = {
+		"_" .. name .. "_completions() {",
+		"  local cur=${COMP_WORDS[COMP_CWORD]}",
+		"  local opts=\"" .. table.concat(opts, " ") .. "\"",
+		"  COMPREPLY=( $(compgen -W \"$opts\" -- \"$cur\") )",
+		"}",
+		"complete -F _" .. name .. "_completions " .. name,
+		"",
+	}
 	return table.concat(parts, "\n")
 end
 
---: () -> string
-function Command:_completions_zsh()
-	local parts = {}
-	local name = self._name
-	parts[#parts + 1] = "#compdef " .. name
-	parts[#parts + 1] = "_" .. name .. "() {"
-	parts[#parts + 1] = "  _arguments \\"
-	parts[#parts + 1] = "    '(-h --help)'{-h,--help}'[Show help]' \\"
-	if self._version then
+--: ({ [string]: unknown }) -> string
+local function completions_zsh(spec)
+	local name = spec.name
+	local parts = {
+		"#compdef " .. name,
+		"_" .. name .. "() {",
+		"  _arguments \\",
+		"    '(-h --help)'{-h,--help}'[Show help]' \\",
+	}
+	if spec.version then
 		parts[#parts + 1] = "    '--version[Show version]' \\"
 	end
-	for i = 1, #self._flag_order do
-		local fname = self._flag_order[i]
-		local f = self._flags[fname]
-		local short = f.short and ("(-" .. f.short .. " --" .. fname .. ")'{-" .. f.short .. ",--" .. fname .. "}'") or ("'--" .. fname .. "'")
+	for i = 1, #spec._flag_order do
+		local fname = spec._flag_order[i]
+		local f = spec.flags[fname]
+		local short = f.short
+			and ("(-" .. f.short .. " --" .. fname .. ")'{-" .. f.short .. ",--" .. fname .. "}'")
+			or ("'--" .. fname .. "'")
 		parts[#parts + 1] = "    " .. short .. "[" .. f.desc .. "] \\"
 	end
-	for i = 1, #self._option_order do
-		local oname = self._option_order[i]
-		local o = self._options[oname]
-		local short = o.short and ("(-" .. o.short .. " --" .. oname .. ")'{-" .. o.short .. ",--" .. oname .. "}'") or ("'--" .. oname .. "'")
+	for i = 1, #spec._option_order do
+		local oname = spec._option_order[i]
+		local o = spec.options[oname]
+		local short = o.short
+			and ("(-" .. o.short .. " --" .. oname .. ")'{-" .. o.short .. ",--" .. oname .. "}'")
+			or ("'--" .. oname .. "'")
 		parts[#parts + 1] = "    " .. short .. "[" .. o.desc .. "]:value: \\"
 	end
-	if #self._command_order > 0 then
-		parts[#parts + 1] = "    '1:command:(" .. table.concat(self._command_order, " ") .. ")'"
+	if #spec._command_order > 0 then
+		parts[#parts + 1] = "    '1:command:(" .. table.concat(spec._command_order, " ") .. ")'"
 	end
 	parts[#parts + 1] = "}"
 	parts[#parts + 1] = ""
 	return table.concat(parts, "\n")
 end
 
---: () -> string
-function Command:_completions_fish()
-	local parts = {}
-	local name = self._name
-	parts[#parts + 1] = "complete -c " .. name .. " -s h -l help -d 'Show help'"
-	if self._version then
+--: ({ [string]: unknown }) -> string
+local function completions_fish(spec)
+	local name = spec.name
+	local parts = {
+		"complete -c " .. name .. " -s h -l help -d 'Show help'",
+	}
+	if spec.version then
 		parts[#parts + 1] = "complete -c " .. name .. " -l version -d 'Show version'"
 	end
-	for i = 1, #self._flag_order do
-		local fname = self._flag_order[i]
-		local f = self._flags[fname]
+	for i = 1, #spec._flag_order do
+		local fname = spec._flag_order[i]
+		local f = spec.flags[fname]
 		local line = "complete -c " .. name
 		if f.short then line = line .. " -s " .. f.short end
 		line = line .. " -l " .. fname .. " -d '" .. f.desc .. "'"
 		parts[#parts + 1] = line
 	end
-	for i = 1, #self._option_order do
-		local oname = self._option_order[i]
-		local o = self._options[oname]
+	for i = 1, #spec._option_order do
+		local oname = spec._option_order[i]
+		local o = spec.options[oname]
 		local line = "complete -c " .. name
 		if o.short then line = line .. " -s " .. o.short end
 		line = line .. " -l " .. oname .. " -r -d '" .. o.desc .. "'"
 		parts[#parts + 1] = line
 	end
-	for i = 1, #self._command_order do
-		local cname = self._command_order[i]
-		local c = self._commands[cname]
-		parts[#parts + 1] = "complete -c " .. name .. " -a " .. cname .. " -d '" .. c._desc .. "'"
+	for i = 1, #spec._command_order do
+		local cname = spec._command_order[i]
+		local c = spec.commands[cname]
+		parts[#parts + 1] = "complete -c " .. name .. " -a " .. cname .. " -d '" .. (c.desc or "") .. "'"
 	end
 	parts[#parts + 1] = ""
 	return table.concat(parts, "\n")
 end
 
--- ── Constructor ────────────────────────────────────────────────────────────
+-- ── Public API ────────────────────────────────────────────────────────────
 
---: (string, string?) -> Command
-function M.app(name, desc)
-	return new_command(name, desc)
+-- Parse argv against a declarative spec.
+-- Returns (args_table, nil) on success, (nil, errmsg_or_help) on failure/help/version.
+--: (string[], { [string]: unknown }) -> (table?, string?)
+function M.parse(argv, spec)
+	spec = spec or {}
+	normalize(spec)
+	return parse_spec(spec, argv)
+end
+
+-- Parse + invoke action. If the matched (sub)command has an action field,
+-- call it with the parsed args. Returns action result or (nil, errmsg).
+--: (string[], { [string]: unknown }) -> (unknown, string?)
+function M.run(argv, spec)
+	spec = spec or {}
+	normalize(spec)
+	local args, err = parse_spec(spec, argv)
+	if not args then
+		return nil, err
+	end
+
+	if args._command and spec.commands[args._command] then
+		local subcmd = spec.commands[args._command]
+		if subcmd.action then
+			return subcmd.action(args)
+		end
+	end
+
+	if spec.action then
+		return spec.action(args)
+	end
+
+	return args, nil
+end
+
+-- Generate shell completions for a spec.
+--: ({ [string]: unknown }, string) -> string
+function M.completions(spec, shell)
+	normalize(spec)
+	if shell == "bash" then return completions_bash(spec) end
+	if shell == "zsh" then return completions_zsh(spec) end
+	if shell == "fish" then return completions_fish(spec) end
+	return ""
+end
+
+-- Generate help text for a spec.
+--: ({ [string]: unknown }) -> string
+function M.help(spec)
+	normalize(spec)
+	return generate_help(spec)
 end
 
 return M

@@ -244,7 +244,7 @@ notifications (publishDiagnostics, logMessage, showMessage). 60 assertions.
 
 **`lib/mcp`** — implemented. MCP server on top of `lib/jsonrpc`. Tool/resource/prompt
 registration, URI template resources, capability negotiation, logging with level filtering,
-argument completions. Protocol version 2024-11-05. 44 assertions.
+argument completions. Protocol version 2025-11-25. 44 assertions.
 (Note: `lib/mud_cp/` is the existing MUD Client Protocol implementation — unrelated.)
 
 **`lib/openapi`** — OpenAPI 3.x client/server from a spec file. Request validation,
