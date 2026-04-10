@@ -115,10 +115,10 @@ Not yet ported:
 | Package | JS reference | Status | Notes |
 |---|---|---|---|
 | `unist_util_visit` | [unist-util-visit](https://github.com/syntax-tree/unist-util-visit) | ✅ done | depth-first visitor; SKIP/EXIT/REMOVE signals; with_parents variant |
-| `unist_util_find` | [unist-util-find](https://github.com/syntax-tree/unist-util-find) | medium | find first node matching a test |
-| `unist_util_filter` | [unist-util-filter](https://github.com/syntax-tree/unist-util-filter) | medium | filter tree, returning copy with only matching nodes |
-| `unist_util_map` | [unist-util-map](https://github.com/syntax-tree/unist-util-map) | medium | map over tree nodes |
-| `unist_util_remove` | [unist-util-remove](https://github.com/syntax-tree/unist-util-remove) | medium | remove nodes matching test (mutating) |
+| `unist_util_find` | [unist-util-find](https://github.com/syntax-tree/unist-util-find) | ✅ done | find first node matching type or predicate |
+| `unist_util_filter` | [unist-util-filter](https://github.com/syntax-tree/unist-util-filter) | ✅ done | filter tree to matching nodes, returning new tree |
+| `unist_util_map` | [unist-util-map](https://github.com/syntax-tree/unist-util-map) | ✅ done | map over tree nodes returning new tree |
+| `unist_util_remove` | [unist-util-remove](https://github.com/syntax-tree/unist-util-remove) | ✅ done | remove matching nodes in-place |
 | `unist_util_select` | [unist-util-select](https://github.com/syntax-tree/unist-util-select) | low | CSS-selector-like queries on AST nodes |
 | `unist_util_position` | [unist-util-position](https://github.com/syntax-tree/unist-util-position) | low | position info utilities |
 
