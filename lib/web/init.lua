@@ -1,0 +1,518 @@
+-- lib/web/init.lua
+-- Web application framework — middleware pipeline, routing, cookie handling,
+-- CSRF protection, static file serving. Operates on request/response tables
+-- directly, fully testable without a running HTTP server.
+
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
+
+local json = require("lib.format.json")
+
+local M = {}
+
+local clock = os.clock
+local concat = table.concat
+local insert = table.insert
+local find = string.find
+local sub = string.sub
+local lower = string.lower
+local format = string.format
+local open = io.open
+
+-- ── Query string parsing ─────────────────────────────────────────────────────
+
+--: (string) -> { [string]: string }
+local function parse_query(qs)
+	local params = {}
+	local pos = 1
+	local len = #qs
+	while pos <= len do
+		local amp = find(qs, "&", pos, true)
+		local pair = sub(qs, pos, amp and amp - 1 or len)
+		pos = amp and amp + 1 or len + 1
+		local eq = find(pair, "=", 1, true)
+		if eq then
+			local key = sub(pair, 1, eq - 1)
+			local val = sub(pair, eq + 1)
+			-- Decode percent-encoding
+			key = key:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+			val = val:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+			key = key:gsub("+", " ")
+			val = val:gsub("+", " ")
+			params[key] = val
+		elseif #pair > 0 then
+			local key = pair:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+			key = key:gsub("+", " ")
+			params[key] = ""
+		end
+	end
+	return params
+end
+
+-- ── Path splitting ───────────────────────────────────────────────────────────
+
+--: (string) -> string[]
+local function split_path(path)
+	local parts = {}
+	local pos = 1
+	local len = #path
+	-- skip leading /
+	if pos <= len and sub(path, pos, pos) == "/" then pos = pos + 1 end
+	while pos <= len do
+		local slash = find(path, "/", pos, true)
+		if slash then
+			parts[#parts + 1] = sub(path, pos, slash - 1)
+			pos = slash + 1
+		else
+			parts[#parts + 1] = sub(path, pos)
+			break
+		end
+	end
+	return parts
+end
+
+-- ── Route matching ───────────────────────────────────────────────────────────
+
+--: (string[], string[]) -> { [string]: string } | nil
+local function match_route(pattern_parts, path_parts)
+	if #pattern_parts ~= #path_parts then return nil end
+	local params = {}
+	for i = 1, #pattern_parts do
+		local pat = pattern_parts[i]
+		local seg = path_parts[i]
+		if sub(pat, 1, 1) == ":" then
+			params[sub(pat, 2)] = seg
+		elseif pat ~= seg then
+			return nil
+		end
+	end
+	return params
+end
+
+-- ── Content type map ─────────────────────────────────────────────────────────
+
+--: { [string]: string }
+local EXT_TYPES = {
+	html = "text/html",
+	htm = "text/html",
+	css = "text/css",
+	js = "application/javascript",
+	json = "application/json",
+	png = "image/png",
+	jpg = "image/jpeg",
+	jpeg = "image/jpeg",
+	gif = "image/gif",
+	svg = "image/svg+xml",
+	txt = "text/plain",
+	xml = "application/xml",
+	pdf = "application/pdf",
+	ico = "image/x-icon",
+	woff = "font/woff",
+	woff2 = "font/woff2",
+	ttf = "font/ttf",
+	otf = "font/otf",
+}
+
+--: (string) -> string
+local function content_type_for(path)
+	local dot = path:match(".*%.()")
+	if dot then
+		local ext = lower(sub(path, dot))
+		return EXT_TYPES[ext] or "application/octet-stream"
+	end
+	return "application/octet-stream"
+end
+
+-- ── Response helpers ─────────────────────────────────────────────────────────
+
+local res_mt = {}
+res_mt.__index = res_mt
+
+--: (table, table) -> table
+function res_mt:json(data)
+	self.headers["Content-Type"] = "application/json"
+	local ok, encoded = pcall(json.encode, data)
+	if ok then
+		self.body = encoded
+	else
+		self.body = "{}"
+	end
+	return self
+end
+
+--: (table, string) -> table
+function res_mt:html(s)
+	self.headers["Content-Type"] = "text/html"
+	self.body = s
+	return self
+end
+
+--: (table, integer) -> table
+function res_mt:set_status(code)
+	self.status = code
+	return self
+end
+
+--: (table, string, integer?) -> table
+function res_mt:redirect(url, code)
+	self.status = code or 302
+	self.headers["Location"] = url
+	return self
+end
+
+-- ── App ──────────────────────────────────────────────────────────────────────
+
+local App = {}
+App.__index = App
+
+--: () -> table
+function M.app()
+	local self = setmetatable({}, App)
+	self._middleware = {}
+	self._routes = {}
+	return self
+end
+
+--: (table, function) -> table
+function App:use(mw)
+	self._middleware[#self._middleware + 1] = mw
+	return self
+end
+
+-- Internal: add a route
+--: (table, string, string, function) -> ()
+function App:_add_route(method, path, handler)
+	self._routes[#self._routes + 1] = {
+		method = method:upper(),
+		pattern_parts = split_path(path),
+		pattern = path,
+		handler = handler,
+	}
+end
+
+function App:get(path, handler) self:_add_route("GET", path, handler) return self end
+function App:post(path, handler) self:_add_route("POST", path, handler) return self end
+function App:put(path, handler) self:_add_route("PUT", path, handler) return self end
+function App:delete(path, handler) self:_add_route("DELETE", path, handler) return self end
+function App:patch(path, handler) self:_add_route("PATCH", path, handler) return self end
+function App:options(path, handler) self:_add_route("OPTIONS", path, handler) return self end
+function App:head(path, handler) self:_add_route("HEAD", path, handler) return self end
+
+-- ── Route groups ─────────────────────────────────────────────────────────────
+
+local Group = {}
+Group.__index = Group
+
+--: (table, string) -> table
+function App:group(prefix)
+	return setmetatable({ _app = self, _prefix = prefix }, Group)
+end
+
+function Group:get(path, handler) self._app:_add_route("GET", self._prefix .. path, handler) return self end
+function Group:post(path, handler) self._app:_add_route("POST", self._prefix .. path, handler) return self end
+function Group:put(path, handler) self._app:_add_route("PUT", self._prefix .. path, handler) return self end
+function Group:delete(path, handler) self._app:_add_route("DELETE", self._prefix .. path, handler) return self end
+function Group:patch(path, handler) self._app:_add_route("PATCH", self._prefix .. path, handler) return self end
+function Group:options(path, handler) self._app:_add_route("OPTIONS", self._prefix .. path, handler) return self end
+function Group:head(path, handler) self._app:_add_route("HEAD", self._prefix .. path, handler) return self end
+
+-- ── Request dispatch ─────────────────────────────────────────────────────────
+
+--: (table, table) -> table
+function App:handle(req)
+	-- Parse query string from path
+	local qmark = find(req.path, "?", 1, true)
+	if qmark then
+		req.query = parse_query(sub(req.path, qmark + 1))
+		req.path = sub(req.path, 1, qmark - 1)
+	else
+		req.query = req.query or {}
+	end
+	req.params = req.params or {}
+	req.method = (req.method or "GET"):upper()
+	if not req.headers then req.headers = {} end
+
+	local res = setmetatable({
+		status = 200,
+		headers = { ["Content-Type"] = "text/plain" },
+		body = "",
+	}, res_mt)
+
+	-- Build middleware chain + route dispatch
+	local mw = self._middleware
+	local routes = self._routes
+	local idx = 0
+
+	local function next_mw()
+		idx = idx + 1
+		if idx <= #mw then
+			mw[idx](req, res, next_mw)
+		else
+			-- After all middleware, do route dispatch
+			local path_parts = split_path(req.path)
+			local method = req.method
+
+			-- First pass: exact match (no params)
+			for i = 1, #routes do
+				local r = routes[i]
+				if r.method == method then
+					local params = match_route(r.pattern_parts, path_parts)
+					if params then
+						local has_params = false
+						for _ in pairs(params) do has_params = true; break end
+						if not has_params then
+							req.params = params
+							r.handler(req, res)
+							return
+						end
+					end
+				end
+			end
+
+			-- Second pass: parameterized match
+			for i = 1, #routes do
+				local r = routes[i]
+				if r.method == method then
+					local params = match_route(r.pattern_parts, path_parts)
+					if params then
+						req.params = params
+						r.handler(req, res)
+						return
+					end
+				end
+			end
+
+			-- No route matched
+			res.status = 404
+			res.body = "Not Found"
+		end
+	end
+
+	next_mw()
+	return res
+end
+
+-- ── Built-in middleware: logger ───────────────────────────────────────────────
+
+--: (table?) -> function
+function M.logger(opts)
+	--: (string?) -> (string) -> ()
+	local log_fn = opts and opts.log or print
+	return function(req, res, next)
+		req._start_time = clock()
+		next()
+		local elapsed = clock() - req._start_time
+		log_fn(format("%s %s %d %.3fms", req.method, req.path, res.status, elapsed * 1000))
+	end
+end
+
+-- ── Built-in middleware: CORS ────────────────────────────────────────────────
+
+--: (table?) -> function
+function M.cors(opts)
+	opts = opts or {}
+	local origins = opts.origins or { "*" }
+	local methods = opts.methods or { "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS" }
+	local headers_allowed = opts.headers or { "Content-Type", "Authorization", "X-CSRF-Token" }
+	local max_age = opts.max_age or "86400"
+
+	local origin_str = concat(origins, ", ")
+	local methods_str = concat(methods, ", ")
+	local headers_str = concat(headers_allowed, ", ")
+
+	return function(req, res, next)
+		res.headers["Access-Control-Allow-Origin"] = origin_str
+		res.headers["Access-Control-Allow-Methods"] = methods_str
+		res.headers["Access-Control-Allow-Headers"] = headers_str
+
+		if req.method == "OPTIONS" then
+			res.headers["Access-Control-Max-Age"] = max_age
+			res.status = 204
+			res.body = ""
+			return
+		end
+
+		next()
+	end
+end
+
+-- ── Built-in middleware: static files ────────────────────────────────────────
+
+--: (string, string) -> function
+function M.static(url_prefix, dir)
+	-- Normalize: ensure url_prefix starts with / and has no trailing /
+	if sub(url_prefix, 1, 1) ~= "/" then url_prefix = "/" .. url_prefix end
+	if sub(url_prefix, -1) == "/" and #url_prefix > 1 then
+		url_prefix = sub(url_prefix, 1, -2)
+	end
+	-- Normalize dir: remove trailing /
+	if sub(dir, -1) == "/" and #dir > 1 then
+		dir = sub(dir, 1, -2)
+	end
+
+	local prefix_len = #url_prefix
+
+	return function(req, res, next)
+		if req.method ~= "GET" and req.method ~= "HEAD" then
+			next()
+			return
+		end
+
+		local path = req.path
+		if sub(path, 1, prefix_len) ~= url_prefix then
+			next()
+			return
+		end
+
+		-- Check that the character after the prefix is / or end-of-string
+		local rest = sub(path, prefix_len + 1)
+		if rest == "" then rest = "/" end
+		if sub(rest, 1, 1) ~= "/" then
+			next()
+			return
+		end
+
+		-- Security: reject path traversal
+		if find(rest, "..", 1, true) then
+			next()
+			return
+		end
+
+		local file_path = dir .. rest
+		local f = open(file_path, "rb")
+		if not f then
+			next()
+			return
+		end
+		local contents = f:read("*a")
+		f:close()
+
+		res.status = 200
+		res.headers["Content-Type"] = content_type_for(file_path)
+		res.body = contents
+	end
+end
+
+-- ── Built-in middleware: JSON body parser ────────────────────────────────────
+
+--: () -> function
+function M.json_body()
+	return function(req, res, next)
+		local ct = req.headers["content-type"] or req.headers["Content-Type"] or ""
+		if find(ct, "application/json", 1, true) and type(req.body) == "string" and #req.body > 0 then
+			local ok, decoded = pcall(json.decode, req.body)
+			if ok and decoded ~= nil then
+				req.body = decoded
+			end
+		end
+		next()
+	end
+end
+
+-- ── Built-in middleware: cookies ──────────────────────────────────────────────
+
+--: () -> function
+function M.cookies()
+	return function(req, res, next)
+		-- Parse Cookie header
+		local cookie_header = req.headers["cookie"] or req.headers["Cookie"] or ""
+		local cookies = {}
+		for pair in cookie_header:gmatch("[^;]+") do
+			pair = pair:match("^%s*(.-)%s*$") -- trim
+			local eq = find(pair, "=", 1, true)
+			if eq then
+				local name = sub(pair, 1, eq - 1)
+				local val = sub(pair, eq + 1)
+				cookies[name] = val
+			end
+		end
+		req.cookies = cookies
+
+		-- Add set_cookie method to response
+		--: (table, string, string, table?) -> table
+		function res:set_cookie(name, value, opts)
+			opts = opts or {}
+			local parts = { name .. "=" .. value }
+			if opts.path then parts[#parts + 1] = "Path=" .. opts.path end
+			if opts.domain then parts[#parts + 1] = "Domain=" .. opts.domain end
+			if opts.maxAge then parts[#parts + 1] = "Max-Age=" .. tostring(opts.maxAge) end
+			if opts.httpOnly then parts[#parts + 1] = "HttpOnly" end
+			if opts.secure then parts[#parts + 1] = "Secure" end
+			if opts.sameSite then parts[#parts + 1] = "SameSite=" .. opts.sameSite end
+			local cookie_str = concat(parts, "; ")
+
+			-- Append to Set-Cookie (can have multiple)
+			if not self.headers["Set-Cookie"] then
+				self.headers["Set-Cookie"] = cookie_str
+			elseif type(self.headers["Set-Cookie"]) == "string" then
+				self.headers["Set-Cookie"] = { self.headers["Set-Cookie"], cookie_str }
+			else
+				self.headers["Set-Cookie"][#self.headers["Set-Cookie"] + 1] = cookie_str
+			end
+			return self
+		end
+
+		next()
+	end
+end
+
+-- ── Built-in middleware: CSRF ────────────────────────────────────────────────
+
+--: (table) -> function
+function M.csrf(opts)
+	local secret = opts.secret or error("web.csrf requires opts.secret")
+
+	-- Simple token generation: secret .. ":" .. session_id-like value
+	-- In real usage, this would use HMAC. For now, concatenation + comparison.
+	local function make_token(session_key)
+		return secret .. ":" .. (session_key or "default")
+	end
+
+	local function verify_token(token, session_key)
+		local expected = make_token(session_key)
+		-- Constant-time comparison (best effort in Lua)
+		if #token ~= #expected then return false end
+		local diff = 0
+		for i = 1, #token do
+			diff = diff + (string.byte(token, i) == string.byte(expected, i) and 0 or 1)
+		end
+		return diff == 0
+	end
+
+	return function(req, res, next)
+		local method = req.method
+		local session_key = req.cookies and req.cookies["session"] or "default"
+		local token = make_token(session_key)
+
+		-- For safe methods, provide the token
+		if method == "GET" or method == "HEAD" or method == "OPTIONS" then
+			res.csrf_token = token
+			next()
+			return
+		end
+
+		-- For unsafe methods, validate the token
+		local req_token = req.headers["x-csrf-token"] or req.headers["X-CSRF-Token"]
+		if not req_token and type(req.body) == "table" then
+			req_token = req.body._csrf
+		end
+
+		if not req_token or not verify_token(req_token, session_key) then
+			res.status = 403
+			res.body = "Forbidden: invalid CSRF token"
+			return
+		end
+
+		res.csrf_token = token
+		next()
+	end
+end
+
+-- ── Exports ──────────────────────────────────────────────────────────────────
+
+M.parse_query = parse_query
+M.split_path = split_path
+M.content_type_for = content_type_for
+
+return M
