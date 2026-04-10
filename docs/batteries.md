@@ -189,8 +189,9 @@ subcommands, typed flags, auto-generated help, completions. Every CLI tool needs
 logging. Need: log levels, structured fields, pluggable sinks (stderr, file, journald),
 optional OpenTelemetry-compatible trace IDs.
 
-**UUID** — trivial but missing. Needed for entity IDs, request IDs, sync records.
-Design: v4 (random) via `lib/rand`, v7 (time-ordered) for database keys.
+**UUID** (`lib/uuid`) — implemented. v4 (random) and v7 (timestamp+monotonic, sortable).
+FFI tiers: getrandom (Linux) → arc4random_buf (macOS/BSD) → /dev/urandom → pure Lua.
+API: `uuid.v4()`, `uuid.v7()`, `uuid.parse(s)`, `uuid.fmt(b)`, `uuid.is_valid(s)`, `uuid._tier`.
 
 **Compression** — no zlib/gzip, no zstd. Needed for HTTP content encoding, storage,
 sync. Design: system library tier (zlib, zstd via FFI) + pure Lua tier for zlib deflate.
@@ -375,7 +376,7 @@ Ordered by how many other things unblock:
 6. **`lib/lsp`** — unlocks: building language servers with crescent (including
    crescent's own LSP daemon, which currently lives in `lib/type/static/lsp.lua`
    and would benefit from a proper protocol layer).
-7. **UUID** — small, unblocks entity IDs everywhere.
+7. **UUID** — done (`lib/uuid`). Unblocks entity IDs everywhere.
 8. **TOML** — unblocks package manager config, application config.
 9. **Regex** — unblocks search syntax, text processing.
 10. **Compression** — unblocks HTTP content encoding, sync.
