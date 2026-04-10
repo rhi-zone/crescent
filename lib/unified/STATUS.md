@@ -112,11 +112,9 @@ Not yet ported:
 
 ## Unist utilities (shared tree utilities)
 
-None of the `unist-util-*` packages have been ported. These are generic tree utilities used across all AST types. Currently each plugin reimplements its own tree walker inline.
-
-| Package | JS reference | Priority | Notes |
+| Package | JS reference | Status | Notes |
 |---|---|---|---|
-| `unist_util_visit` | [unist-util-visit](https://github.com/syntax-tree/unist-util-visit) | **high** | depth-first visitor with enter/exit; would eliminate duplicated walk loops in every plugin |
+| `unist_util_visit` | [unist-util-visit](https://github.com/syntax-tree/unist-util-visit) | ✅ done | depth-first visitor; SKIP/EXIT/REMOVE signals; with_parents variant |
 | `unist_util_find` | [unist-util-find](https://github.com/syntax-tree/unist-util-find) | medium | find first node matching a test |
 | `unist_util_filter` | [unist-util-filter](https://github.com/syntax-tree/unist-util-filter) | medium | filter tree, returning copy with only matching nodes |
 | `unist_util_map` | [unist-util-map](https://github.com/syntax-tree/unist-util-map) | medium | map over tree nodes |
@@ -124,7 +122,6 @@ None of the `unist-util-*` packages have been ported. These are generic tree uti
 | `unist_util_select` | [unist-util-select](https://github.com/syntax-tree/unist-util-select) | low | CSS-selector-like queries on AST nodes |
 | `unist_util_position` | [unist-util-position](https://github.com/syntax-tree/unist-util-position) | low | position info utilities |
 
-`unist_util_visit` is the highest-value missing piece — most plugins would shrink significantly if they could call `visit(tree, "text", fn)` instead of hand-rolling a recursive walker.
 
 ## Known gaps and limitations
 
