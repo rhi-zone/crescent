@@ -154,6 +154,53 @@ Presets are `.lua` files with metadata. No runtime machinery: the platform brows
 the preset library, the user picks one, it drops into the card's script chunk.
 Users fork presets freely; the platform has no opinion about what they do next.
 
+## Self-contained cards
+
+Every CCv2-compatible card imported by the platform has the editor scripts embedded
+directly in it as zTXt chunks:
+
+```
+card.png
+├── chara                    (original CCv2 JSON, untouched)
+├── crescent:data            (structured data layer)
+├── crescent:ui              (interaction loop)
+├── crescent:editor          (card editor)
+└── crescent:lorebook_editor (lorebook editor)
+```
+
+The platform loads whichever chunk the user invokes — run mode uses `crescent:ui`,
+edit mode uses `crescent:editor`. Same file, same capabilities, different entry point.
+
+Sharing a card shares the exact editor version that produced it. No separate editor
+install step; the card is the complete application.
+
+The platform can optionally upgrade embedded scripts to a newer version, but the
+upgrade logic is itself a script — the platform does not hardcode any migration policy.
+
+## Everything else is scripts
+
+The platform is not a card management platform, an import pipeline, or a library
+browser. Those are scripts that ship as first-party defaults:
+
+| What it feels like | What it actually is |
+|---|---|
+| Card library / search UI | Script with `caps.fs` + `caps.render` |
+| CCv2 import pipeline | Script with `caps.fs` + `caps.png` |
+| Mutate-on-import logic | Script (stamps editor chunks into imported card) |
+| Card editor | Script embedded in each card |
+| Lorebook editor | Script embedded in each card |
+| Preset browser | Script with `caps.fs` |
+
+These ship alongside the platform as first-party scripts. They are not platform code.
+They are replaceable, forkable, and auditable — and distributed the same way as any
+other card.
+
+The platform owns exactly two things:
+1. Run a script with the capabilities the host decides to grant
+2. Provide a render surface
+
+Everything else is user-land.
+
 ## What the platform does not own
 
 - **World state model**: the script chooses its storage. If it wants SQLite it requests
@@ -163,3 +210,7 @@ Users fork presets freely; the platform has no opinion about what they do next.
 - **Conversation history**: the script decides whether to accumulate, how much to keep,
   and how to structure it. Accumulation is a choice, not a default.
 - **Any external format**: CCv2, charx, TOML, YAML — all parsed by scripts.
+- **Card management**: no built-in library, search, tagging, or import UI. These are
+  scripts with filesystem capabilities.
+- **Migration policy**: upgrade logic for embedded editor scripts is a script, not a
+  platform concern.
