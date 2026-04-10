@@ -154,25 +154,31 @@ Presets are `.lua` files with metadata. No runtime machinery: the platform brows
 the preset library, the user picks one, it drops into the card's script chunk.
 Users fork presets freely; the platform has no opinion about what they do next.
 
-## Bookmarks
+## Saved state pattern
 
-Bookmarks are a first-class platform primitive — not an afterthought. Every meaningful
-state the platform can render is addressable and returnable: a card interaction session,
-the card library viewer, the lorebook editor, a specific branch in a chat tree, a world
-state snapshot. There is no distinction between "current app" and "saved state."
+Not a library — a pattern that platform scripts implement on top of SQLite.
 
-The current session is itself a bookmark. Reboot restores it automatically.
+The core idea: every meaningful state the platform can render is addressable and
+returnable. A card interaction session, the card library viewer, a specific branch in a
+chat tree, a world state snapshot — all are saved states you can return to. There is no
+distinction between "current app" and "saved state." The current session is itself a
+saved state; reboot restores it automatically.
 
-**Open metadata.** A bookmark carries arbitrary user-defined metadata — tags, summaries,
-preview images, timestamps, relationships to other bookmarks, custom fields. Tags are
-one type of metadata. Relations are another. There is no fixed schema; each bookmark
-carries what makes sense for it. Organisation (filtering, grouping, searching) is
-queries over metadata — not folders, not a fixed hierarchy.
+**Implementation.** A saved state is a SQLite row: a state reference (enough to
+reconstruct the view) plus open metadata. No fixed schema — each script decides what
+metadata makes sense. Tags, summaries, preview images, timestamps, relationships to
+other states — all just columns or a JSON blob. Organisation is queries, not folders.
 
-**Everything is a bookmark.** The card library viewer is a script — it is also a
-bookmark. Switching from editing a card to running it is navigating between bookmarks.
-The platform's navigation model is the bookmark system; there is no separate concept
-of "which app is open."
+**Everything navigable is a saved state.** The card library viewer script, the card
+editor, an interaction session, a chat tree branch — navigating between them is
+selecting a saved state. The platform's navigation model IS this pattern; there is no
+separate concept of "which app is open."
+
+**When building the full app:** implement as a `saved_states` SQLite table with a
+`state_ref` column (JSON, script-defined schema), a `metadata` column (open JSON), and
+whatever indexed columns are needed for fast queries (type, created_at, tags). The
+current session row is always present and updated on every navigation. On reboot, load
+the most recent row and resume.
 
 ## Self-contained cards
 
