@@ -17,26 +17,26 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 **[x] Phase 2 fixture validation substantially complete.** CommonMark 0.31.2 spec fixture suite
 validated via `lib/unified/mdast/commonmark_fixtures_test.lua`. Current pass rates (652 examples):
 - Block structure (ATX, setext, fenced code, indented code, paragraphs, thematic breaks): 100%
-- Block quotes: 100%, Thematic breaks: 100%, List items: 100%, Lists: 96% (25/26)
-- Emphasis: 95% (125/132), Code spans: 91% (20/22)
-- Links: 88% (79/90), Images: 100%, Hard line breaks: 87%
+- Block quotes: 100%, Thematic breaks: 100%, List items: 100%, Lists: **100%** (26/26)
+- Emphasis: **100%** (132/132), Code spans: 91% (20/22)
+- Links: **98.9%** (89/90), Images: 100%, Hard line breaks: 87%
 - Tabs: 73% (8/11) — tab expansion in indented code/list contexts
 
-Remaining known gaps (Phase 3 targets):
+**[x] Phase 3 CommonMark compliance pass complete** (commit 8728def, 2026-04-10). All gaps from Phase 2 fixed:
+- ex312 (lists lazy continuation): item_lazy_set tracks lazy lines; parse_blocks skips list-item match for them.
+- Emphasis with inline HTML (ex475-ex481): tokenizer scans `<tag>`, `</tag>`, `<!-- -->`, `<![CDATA[…]]>`, `<?…?>`, `<!DECL>` as opaque html tokens; delimiters inside are never paired.
+- Unicode punctuation/whitespace: full codepoint decoding via decode_utf8_at/before; U+00A0 NBSP as whitespace; Sc currency symbols (£, €) as punctuation to match cmark.
+- HTML entity decoding in link URLs and titles (decode_entities, encode_url non-ASCII bytes).
+- Backslash escapes in link titles.
+- Multi-line link reference definitions (two-line join in block parser).
+- Unicode case folding for link labels (ẞ → ss).
 
-- **ex312 (lists)** — `    - e` at 4-space indent should be lazy content of preceding item,
-  not a new list item. Requires tracking lazy lines through parse_blocks list-interrupt check.
-- **Emphasis with inline HTML** (ex475-ex481) — `*<img title="*"/>*` etc. Inline HTML
-  elements must be parsed before emphasis to avoid `*` inside attributes closing delimiters.
-- **ex354** — Unicode non-ASCII character before closing `*` (e.g. `*£*`) treated as
-  left-flanking in CommonMark. Requires full Unicode category table (Pc/Pd/Pe/Pf/Pi/Po/Ps)
-  to properly classify non-ASCII characters as punctuation vs letter.
-- **Links** — ex503 (HTML entity decoding in URLs), ex506/507 (title parsing edge cases),
-  ex524/526/536/538 (inline HTML inside link text), ex540 (Unicode case-fold for labels),
-  ex541 (multi-line definition labels).
+Remaining known gaps (acceptable, no fix planned):
+
+- **ex491 (links)** — `[link](<foo\nbar>)` newline inside angle-bracket URL; valid raw HTML pass-through across newlines. Unfixable without implementing raw HTML block section (skipped).
 - **HTML blocks** — 7 block types with different termination rules (skipped).
-- **Autolinks** — `<url>` and `<email>` forms (skipped).
-- **Backslash escapes / Entity references** — full entity name → character conversion (skipped).
+- **Autolinks** — `<url>` and `<email>` forms (skipped section; autolinks ARE rendered correctly via html token detection in inline renderer).
+- **Backslash escapes / Entity references** — full entity name → character conversion (skipped section).
 - **GFM extensions** — tables, strikethrough (`~~text~~`), task list items (`- [x]`).
 - **`mdast.stringify` completeness** — round-trip is best-effort; complex nested
   structures may not stringify perfectly.
