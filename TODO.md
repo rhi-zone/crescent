@@ -14,24 +14,29 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
 
-**[x] Phase 2 fixture validation complete.** CommonMark 0.31.2 spec fixture suite
-validated via `lib/mdast/commonmark_fixtures_test.lua`. Current pass rates (652 examples):
+**[x] Phase 2 fixture validation substantially complete.** CommonMark 0.31.2 spec fixture suite
+validated via `lib/unified/mdast/commonmark_fixtures_test.lua`. Current pass rates (652 examples):
 - Block structure (ATX, setext, fenced code, indented code, paragraphs, thematic breaks): 100%
-- Lists/list items: 68–73% (complex nesting/continuation edge cases)
-- Block quotes: 76%, Emphasis: 72.7%
-- Links: 34%, Images: 27% (many tests require reference-style links = not implemented)
+- Block quotes: 100%, Thematic breaks: 100%, List items: 100%, Lists: 96% (25/26)
+- Emphasis: 95% (125/132), Code spans: 91% (20/22)
+- Links: 88% (79/90), Images: 100%, Hard line breaks: 87%
+- Tabs: 73% (8/11) — tab expansion in indented code/list contexts
 
 Remaining known gaps (Phase 3 targets):
 
-- **Link reference definitions** — `[text][id]` and `[text][]` reference-style links use
-  the collected `_defs` table but inline parsing doesn't resolve them yet. Only inline
-  links `[text](url)` work. This blocks many links/images tests from passing.
-- **HTML block classification** — HTML blocks are treated as a single passthrough (emit
-  until blank line). CommonMark defines 7 HTML block types with different termination
-  rules. Current impl is a simplified version.
-- **Emphasis edge cases** — ~28% failure rate in emphasis/strong; complex delimiter
-  interactions (multiline, inside HTML, rule 9 violations) not handled.
-- **Autolinks** — `<url>` and `<email>` forms not handled.
+- **ex312 (lists)** — `    - e` at 4-space indent should be lazy content of preceding item,
+  not a new list item. Requires tracking lazy lines through parse_blocks list-interrupt check.
+- **Emphasis with inline HTML** (ex475-ex481) — `*<img title="*"/>*` etc. Inline HTML
+  elements must be parsed before emphasis to avoid `*` inside attributes closing delimiters.
+- **ex354** — Unicode non-ASCII character before closing `*` (e.g. `*£*`) treated as
+  left-flanking in CommonMark. Requires full Unicode category table (Pc/Pd/Pe/Pf/Pi/Po/Ps)
+  to properly classify non-ASCII characters as punctuation vs letter.
+- **Links** — ex503 (HTML entity decoding in URLs), ex506/507 (title parsing edge cases),
+  ex524/526/536/538 (inline HTML inside link text), ex540 (Unicode case-fold for labels),
+  ex541 (multi-line definition labels).
+- **HTML blocks** — 7 block types with different termination rules (skipped).
+- **Autolinks** — `<url>` and `<email>` forms (skipped).
+- **Backslash escapes / Entity references** — full entity name → character conversion (skipped).
 - **GFM extensions** — tables, strikethrough (`~~text~~`), task list items (`- [x]`).
 - **`mdast.stringify` completeness** — round-trip is best-effort; complex nested
   structures may not stringify perfectly.
