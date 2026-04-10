@@ -328,7 +328,7 @@ end
 local pass_thresholds = {
   ["Thematic breaks"]         = 1.00,
   ["ATX headings"]            = 1.00,
-  ["Setext headings"]         = 0.90,
+  ["Setext headings"]         = 0.95,
   ["Indented code blocks"]    = 1.00,
   ["Fenced code blocks"]      = 1.00,
   ["Paragraphs"]              = 1.00,
