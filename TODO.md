@@ -7,6 +7,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/png` — chunk-level PNG reader/writer, tEXt metadata helpers (6d78b94)
 - [x] `lib/sandbox` — capability-based sandbox for turn scripts (457edea)
 - [x] `lib/reactive_optics` — Rainbow port for Lua (reactive UI, optics-based)
+- [x] `lib/platform` — card loader + capability factories: `caps.png` (allowlist-gated chunk r/w), `caps.llm` (OpenAI-compatible HTTP), `caps.render` (SSE + collect sessions), `caps.fs` (scoped file I/O). 47 assertions.
 - [ ] `lib/ecs` or equivalent entity store — mutable world state with SQLite backing
 - [ ] **Saved state pattern** — when building the full app: `saved_states` SQLite table with `state_ref` (JSON, script-defined), `metadata` (open JSON), indexed columns for queries. Current session = always-present row, updated on every navigation, restored on reboot. See `docs/platform-design.md` "Saved state pattern" for full design. Not a library — a schema + script pattern.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep

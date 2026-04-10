@@ -117,7 +117,8 @@ worldstate queries; the lorebook editor is only needed for the compatibility sur
 | Reactive UI | `lib/reactive_optics` |
 | HTTP server/API | `lib/http` |
 | Card format (PNG + metadata) | `lib/png` (chunk r/w, tEXt helpers) |
-| Capability sandbox | `lib/sandbox` (to be designed) |
+| Capability sandbox | `lib/sandbox` |
+| Platform runner + cap factories | `lib/platform` (card loader, `caps.png`, `caps.llm`, `caps.render`, `caps.fs`) |
 | Thumbnail generation | stb_image_resize via FFI (compiled in) |
 
 ### Full-stack dashboard
