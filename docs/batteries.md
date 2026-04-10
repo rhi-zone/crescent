@@ -285,25 +285,27 @@ A new user building in a given domain shouldn't need to compose primitives thems
 The vertical is complete — not 90%, 100%. Partial verticals create the same pressure
 to abandon as partial stdlib implementations.
 
-**`lib/web`** — full web backend vertical. Builds on `lib/http`, adds: middleware
-pipeline, session management, cookie handling, CSRF protection, static file serving,
-route groups. The "Rails without opinions" answer for crescent web apps.
+**`lib/web`** — implemented. Web application framework: middleware pipeline,
+pattern-based routing with `:param` capture, route groups, query string parsing.
+Built-in middleware: logger, CORS, static file serving, JSON body parsing, cookies,
+CSRF protection. Response helpers: json/html/redirect. Fully testable via
+`app:handle(req)` without a network. 56 assertions.
 
 **`lib/db`** — implemented. Database vertical on `lib/sqlite`: version-tracked
 migrations (transactional), chainable query builder (select/insert/update/delete),
 convenience helpers (query returning named row tables, query_one, transaction).
 60 assertions.
 
-**`lib/auth`** — authentication and authorization. JWT, OAuth 2.0 / OIDC, session
-tokens, password hashing (Argon2, bcrypt). Every web app needs this; nobody wants to
-write it.
+**`lib/auth`** — implemented. Authentication primitives: JWT (HS256) encode/decode with
+exp/nbf validation, PBKDF2-SHA256 password hashing (PHC-format), random token generation,
+HMAC-SHA256, timing-safe comparison. 44 assertions. OAuth 2.0/OIDC deferred.
 
 **`lib/email`** — SMTP client, email composition (MIME, attachments), template
 rendering. Boring but load-bearing for any application with user accounts.
 
-**`lib/queue`** — task queues and scheduling. Cron-style job scheduling, deferred
-execution, retry with backoff. Backed by SQLite for persistence. Builds on
-`lib/taskgraph` for execution semantics.
+**`lib/queue`** — implemented. SQLite-backed task queue: push/pop/ack/fail with
+exponential backoff, priority ordering, delayed jobs, recurring schedules, dead-letter
+queue, process convenience loop. 69 assertions.
 
 **`lib/search`** — search vertical. Full-text search via SQLite FTS5 (near-term) +
 semantic search via embeddings (`lib/ai`) for vector similarity. Needed by Lumen and
@@ -334,8 +336,9 @@ email notifications (via `lib/email`), SMS gateway integrations.
 as everywhere else: pure Lua reference implementations (hackable, readable, the thing
 you study to understand the algorithm) + FFI bindings to real libraries as the fast tier.
 
-- `lib/vec` — dense vector math: dot product, cosine similarity, norms. The primitive
-  everything else builds on.
+- `lib/vec` — **implemented**. Dense vector math with FFI and pure Lua tiers:
+  new/zeros/ones/random/linspace, add/sub/mul/div/scale/neg, dot/norm/cosine/distance,
+  sum/mean/min/max/argmin/argmax, normalize. 192 assertions.
 - `lib/tfidf` — TF-IDF text scoring, document similarity. Pure Lua. Useful for Lumen
   search and any content-heavy application.
 - `lib/knn` — k-nearest neighbors. Pure Lua reference + optional FFI fast path.
