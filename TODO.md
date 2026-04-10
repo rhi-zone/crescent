@@ -272,7 +272,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 
 - [x] **`lib/taskgraph/`** — implemented: graph.lua, context.lua, exec.lua, combinators.lua (map/retry/refine), init.lua, executor/ai.lua, orchestration_test.lua (27 assertions).
 - [ ] **`lib/cli/`** — arg-parsing library. Namespace freed (old `lib/cli/` renamed to `lib/crescent_examples/`). Not yet implemented.
-- [ ] **`lib/datetime/`** — date/time parsing, formatting, arithmetic. Critical missing primitive.
+- [x] **`lib/datetime/`** — date/time parsing, formatting, arithmetic. ISO 8601, Unix timestamps, offset-aware arithmetic. 186 assertions (c6e9bbb).
 - [ ] **`lib/regex/`** — PCRE or LPEG wrapper with crescent-native API.
 - [ ] **`lib/uuid/`** — UUID v4/v7 generation.
 - [ ] **`lib/log/`** — structured logging/tracing with levels and sinks.
