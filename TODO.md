@@ -39,7 +39,7 @@ Remaining known gaps (Phase 3 targets):
 
 ## lib/hast and unified pipeline
 
-- [ ] **`lib/hast`** — mdast-to-hast transformer + HTML serializer. Input: mdast Root node. Output: hast Root node (element/text/raw nodes following hast spec). `hast.stringify(tree)` → HTML string. Phase 1: cover all mdast Phase 1 node types.
+- [x] **`lib/hast`** — mdast-to-hast transformer + HTML serializer. Input: mdast Root node. Output: hast Root node (element/text/raw nodes following hast spec). `hast.to_html(tree)` → HTML string. Phase 1: covers all mdast Phase 1 node types. 66 assertions.
 - [ ] **`lib/unified`** — thin pipeline runner: `unified.pipeline({ parse, ...transforms, stringify })` applies a list of `(tree) -> tree` functions in sequence. No plugin system yet — just function composition. Enables `mdast.parse | mdast_to_hast | hast.stringify` as a one-liner.
 - [ ] **`lib/rehype`** (eventually) — hast plugins (slug, autolink headings, syntax highlight, sanitize). Port from rehype ecosystem once hast is stable.
 
@@ -304,7 +304,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/parse/`** / **`lib/ir/`** — language tooling vertical (compiler IR, parser combinator).
 - [x] **`lib/asm/`** — SIMD kernel compiler: cpu detection, linear scan RA, virtual IR, x64 emitter. See `## lib/asm` section above.
 
-- [ ] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
+- [x] **`lib/lua2ts/`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
   emitting TS syntax instead of Lua syntax is mostly mechanical. Prior art: `dep/lua2js.lua`
   (AST printer that outputs JS syntax). Metatables are the awkward mapping; FFI doesn't cross.
   Crescent's type annotations map directly to TS types — typed Lua → typed TS with no extra

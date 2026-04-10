@@ -1,0 +1,941 @@
+-- lib/lua2ts/init.lua
+-- Lua → TypeScript transpiler.
+-- Walks the crescent AST (from lib/type/static/parse) and emits TypeScript.
+--
+-- Usage:
+--   local lua2ts = require("lib.lua2ts")
+--   local ts, err = lua2ts.transpile(lua_source, opts)
+--   local ts, err = lua2ts.transpile_file(path, opts)
+--
+-- opts:
+--   filename : string           (for error messages, default "?")
+--   module   : "esm" | "cjs"   (default "esm")
+--   strict   : boolean          (emit // @ts-strict-mode, default false)
+
+if not package.path:find("./?/init.lua", 1, true) then
+    package.path = "./?/init.lua;" .. package.path
+end
+
+local parse_mod  = require("lib.type.static.parse")
+local intern_mod = require("lib.type.static.intern")
+local defs       = require("lib.type.static.defs")
+local i32x2_to_double = defs.i32x2_to_double
+
+local M = {}
+
+-- ---------------------------------------------------------------------------
+-- Operator tables
+-- ---------------------------------------------------------------------------
+
+local binop_str = {
+    [defs.OP_ADD]    = "+",
+    [defs.OP_SUB]    = "-",
+    [defs.OP_MUL]    = "*",
+    [defs.OP_DIV]    = "/",
+    [defs.OP_MOD]    = "%",
+    [defs.OP_POW]    = "**",
+    [defs.OP_CONCAT] = "+",   -- Lua .. → JS/TS string concat with +
+    [defs.OP_EQ]     = "===",
+    [defs.OP_NE]     = "!==",
+    [defs.OP_LT]     = "<",
+    [defs.OP_LE]     = "<=",
+    [defs.OP_GT]     = ">",
+    [defs.OP_GE]     = ">=",
+    [defs.OP_AND]    = "&&",
+    [defs.OP_OR]     = "||",
+}
+
+-- Precedence (lower = looser binding; matches TypeScript)
+local binop_prec = {
+    [defs.OP_OR]     = 1,
+    [defs.OP_AND]    = 2,
+    [defs.OP_EQ]     = 3,
+    [defs.OP_NE]     = 3,
+    [defs.OP_LT]     = 4,
+    [defs.OP_LE]     = 4,
+    [defs.OP_GT]     = 4,
+    [defs.OP_GE]     = 4,
+    [defs.OP_CONCAT] = 5,
+    [defs.OP_ADD]    = 6,
+    [defs.OP_SUB]    = 6,
+    [defs.OP_MUL]    = 7,
+    [defs.OP_DIV]    = 7,
+    [defs.OP_MOD]    = 7,
+    [defs.OP_POW]    = 9,  -- right-assoc, emit with parens on left
+}
+
+-- ---------------------------------------------------------------------------
+-- Annotation comment scanner
+-- Extracts --: and --:: comments from source, keyed by line number.
+-- Returns { [lineno] = { kind="type"|"decl", content=string } }
+-- ---------------------------------------------------------------------------
+local function scan_annotations(source)
+    local anns = {}
+    local lineno = 1
+    local i = 1
+    local len = #source
+    while i <= len do
+        local nl = source:find("\n", i, true)
+        local line_end = nl and nl - 1 or len
+        local line = source:sub(i, line_end)
+        -- look for --:: or --: in the line
+        local dcolon = line:match("%-%-::(.*)$")
+        if dcolon then
+            anns[lineno] = { kind = "decl", content = dcolon:match("^%s*(.-)%s*$") }
+        else
+            local colon = line:match("%-%-:([^:].*)$")
+            if not colon then colon = line:match("%-%-:()") and "" end  -- bare --:
+            if colon then
+                anns[lineno] = { kind = "type", content = colon:match("^%s*(.-)%s*$") }
+            end
+        end
+        lineno = lineno + 1
+        i = (nl and nl + 1) or (len + 1)
+    end
+    return anns
+end
+
+-- ---------------------------------------------------------------------------
+-- Type annotation → TypeScript type string
+-- Translates the crescent annotation mini-language to TS types.
+-- This is a best-effort string transform; does not parse the full type grammar.
+-- ---------------------------------------------------------------------------
+local function ann_to_ts(content)
+    if not content or content == "" then return nil end
+    -- nil → null
+    content = content:gsub("%bnil", "null")
+    -- integer → number
+    content = content:gsub("integer", "number")
+    -- (A, B) -> C  →  (a: A, b: B) => C
+    -- We use a simple pattern for the common single-arrow case.
+    -- For now: replace -> with =>
+    content = content:gsub("%->" , "=>")
+    -- { [string]: V } → Record<string, V>
+    content = content:gsub("{%s*%[string%]%s*:%s*(.-)%s*}", function(v)
+        return "Record<string, " .. v .. ">"
+    end)
+    -- T? → T | null
+    content = content:gsub("([%w_]+)%?", "%1 | null")
+    return content
+end
+
+-- ---------------------------------------------------------------------------
+-- Emit context
+-- Produces indented TS output line by line.
+-- ---------------------------------------------------------------------------
+local function new_ctx(pool, nodes, lists, source, opts)
+    local ctx = {
+        pool   = pool,
+        nodes  = nodes,
+        lists  = lists,
+        indent = 0,
+        lines  = {},    -- collected output lines
+        -- annotation map: lineno → { kind, content }
+        anns   = scan_annotations(source),
+        opts   = opts or {},
+        -- pending ESM imports: { modname → alias }
+        imports = {},
+        import_order = {},
+    }
+
+    function ctx:istr()
+        return string.rep("  ", self.indent)
+    end
+
+    function ctx:emit(line)
+        self.lines[#self.lines + 1] = self:istr() .. line
+    end
+
+    function ctx:raw(line)
+        self.lines[#self.lines + 1] = line
+    end
+
+    -- Intern ID → Lua string
+    function ctx:name(id)
+        return intern_mod.get(self.pool, id) or ("__id" .. tostring(id))
+    end
+
+    -- Retrieve items from the list pool as a Lua array of int32 values.
+    function ctx:list(start, len)
+        local result = {}
+        for i = 0, len - 1 do
+            result[i + 1] = tonumber(self.lists:get(start + i))
+        end
+        return result
+    end
+
+    -- Get node data as Lua values (not raw FFI cdata).
+    function ctx:node(id)
+        local n = self.nodes:get(id)
+        return {
+            kind  = tonumber(n.kind),
+            flags = tonumber(n.flags),
+            line  = tonumber(n.line),
+            col   = tonumber(n.col),
+            d     = {
+                tonumber(n.data[0]),
+                tonumber(n.data[1]),
+                tonumber(n.data[2]),
+                tonumber(n.data[3]),
+                tonumber(n.data[4]),
+                tonumber(n.data[5]),
+            },
+        }
+    end
+
+    -- Annotation for line N (the --: on the line preceding the declaration).
+    function ctx:ann_for(lineno)
+        -- The annotation is on the line before the declaration.
+        return self.anns[lineno - 1]
+    end
+
+    -- Register an ESM import.
+    function ctx:add_import(alias, modname)
+        if not self.imports[modname] then
+            self.imports[modname] = alias
+            self.import_order[#self.import_order + 1] = modname
+        end
+    end
+
+    return ctx
+end
+
+-- ---------------------------------------------------------------------------
+-- Expression emitter — returns a string
+-- ---------------------------------------------------------------------------
+local emit_expr  -- forward declaration
+local emit_stmt  -- forward declaration
+local emit_block -- forward declaration
+
+-- Escape a Lua string literal for JS/TS output.
+local function escape_str(s)
+    return s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n')
+              :gsub('\r', '\\r'):gsub('\t', '\\t')
+end
+
+-- Returns true if the expression needs parentheses at the given parent precedence.
+local function needs_parens(prec, parent_prec)
+    return prec < parent_prec
+end
+
+-- Emit a comma-separated list of expressions.
+local function emit_expr_list(ctx, starts, lens)
+    local items = ctx:list(starts, lens)
+    local parts = {}
+    for i, nid in ipairs(items) do
+        parts[i] = emit_expr(ctx, nid, 0)
+    end
+    return table.concat(parts, ", ")
+end
+
+-- Emit a single parameter name from an intern ID.
+local function param_name(ctx, id)
+    local s = ctx:name(id)
+    return s == "..." and "...args" or s
+end
+
+emit_expr = function(ctx, nid, parent_prec)
+    local n = ctx:node(nid)
+    local kind = n.kind
+    local d = n.d
+
+    if kind == defs.NODE_LITERAL then
+        local lit_kind = d[1]
+        if lit_kind == defs.LIT_STRING then
+            local s = ctx:name(d[2])
+            return '"' .. escape_str(s) .. '"'
+        elseif lit_kind == defs.LIT_NUMBER then
+            local v = i32x2_to_double(d[2], d[3])
+            return tostring(v)
+        elseif lit_kind == defs.LIT_INTEGER then
+            return tostring(d[2])
+        elseif lit_kind == defs.LIT_BOOLEAN then
+            return d[2] == 1 and "true" or "false"
+        elseif lit_kind == defs.LIT_NIL then
+            return "null"
+        else
+            return "/* unknown literal */"
+        end
+
+    elseif kind == defs.NODE_IDENTIFIER then
+        local name = ctx:name(d[1])
+        return name
+
+    elseif kind == defs.NODE_VARARG_EXPR then
+        return "...args"
+
+    elseif kind == defs.NODE_UNARY_EXPR then
+        local op = d[1]
+        local operand_id = d[2]
+        if op == defs.OP_LEN then
+            -- #foo → foo.length
+            return emit_expr(ctx, operand_id, 100) .. ".length"
+        elseif op == defs.OP_UNM then
+            local e = emit_expr(ctx, operand_id, 8)
+            return "-" .. e
+        elseif op == defs.OP_NOT then
+            local e = emit_expr(ctx, operand_id, 8)
+            return "!" .. e
+        else
+            return "/* unary? */" .. emit_expr(ctx, operand_id, 0)
+        end
+
+    elseif kind == defs.NODE_BINARY_EXPR then
+        local op = d[1]
+        local left_id = d[2]
+        local right_id = d[3]
+        local op_s = binop_str[op] or "/* op? */"
+        local prec = binop_prec[op] or 5
+        local le = emit_expr(ctx, left_id, prec)
+        local re = emit_expr(ctx, right_id, prec + 1)  -- left-assoc by default
+        if op == defs.OP_POW then
+            re = emit_expr(ctx, right_id, prec)  -- right-assoc: no extra +1
+        end
+        local result = le .. " " .. op_s .. " " .. re
+        if needs_parens(prec, parent_prec) then
+            return "(" .. result .. ")"
+        end
+        return result
+
+    elseif kind == defs.NODE_FIELD_EXPR then
+        local obj_id = d[1]
+        local field_id = d[2]
+        local obj = emit_expr(ctx, obj_id, 100)
+        local field = ctx:name(field_id)
+        return obj .. "." .. field
+
+    elseif kind == defs.NODE_INDEX_EXPR then
+        local obj_id = d[1]
+        local idx_id = d[2]
+        local obj = emit_expr(ctx, obj_id, 100)
+        local idx = emit_expr(ctx, idx_id, 0)
+        return obj .. "[" .. idx .. "]"
+
+    elseif kind == defs.NODE_METHOD_CALL then
+        -- obj:method(args) → obj.method(args)
+        local obj_id = d[1]
+        local method_id = d[2]
+        local args_start = d[3]
+        local args_len = d[4]
+        local obj = emit_expr(ctx, obj_id, 100)
+        local method = ctx:name(method_id)
+        local args = emit_expr_list(ctx, args_start, args_len)
+        return obj .. "." .. method .. "(" .. args .. ")"
+
+    elseif kind == defs.NODE_CALL_EXPR then
+        local callee_id = d[1]
+        local args_start = d[2]
+        local args_len = d[3]
+        -- Check for special callees
+        local callee_n = ctx:node(callee_id)
+        -- error("msg") → throw new Error("msg")
+        if callee_n.kind == defs.NODE_IDENTIFIER then
+            local callee_name = ctx:name(callee_n.d[1])
+            if callee_name == "error" then
+                local args = emit_expr_list(ctx, args_start, args_len)
+                return "(() => { throw new Error(" .. args .. "); })()"
+            elseif callee_name == "ipairs" then
+                -- ipairs(t) → t.entries()
+                if args_len == 1 then
+                    local arg_items = ctx:list(args_start, args_len)
+                    local t = emit_expr(ctx, arg_items[1], 100)
+                    return t .. ".entries()"
+                end
+            elseif callee_name == "pairs" then
+                -- pairs(t) → Object.entries(t)
+                if args_len == 1 then
+                    local arg_items = ctx:list(args_start, args_len)
+                    local t = emit_expr(ctx, arg_items[1], 100)
+                    return "Object.entries(" .. t .. ")"
+                end
+            elseif callee_name == "require" then
+                -- require("lib.foo") → handled at call-site statement level
+                -- return as-is for now; import hoisting happens in stmt handler
+                local args = emit_expr_list(ctx, args_start, args_len)
+                return "require(" .. args .. ")"
+            elseif callee_name == "pcall" then
+                -- pcall(f, ...) → try { return [true, f(...)]; } catch(e) { return [false, e.message]; }
+                -- Wrap as IIFE
+                if args_len >= 1 then
+                    local arg_items = ctx:list(args_start, args_len)
+                    local fn = emit_expr(ctx, arg_items[1], 100)
+                    local rest_parts = {}
+                    for i = 2, args_len do
+                        rest_parts[#rest_parts + 1] = emit_expr(ctx, arg_items[i], 0)
+                    end
+                    local rest = table.concat(rest_parts, ", ")
+                    return "(() => { try { return [true, " .. fn .. "(" .. rest .. ")]; } catch(__e) { return [false, (__e as Error).message]; } })()"
+                end
+            end
+        end
+        -- Check for x.new(...) → new x(...)
+        if callee_n.kind == defs.NODE_FIELD_EXPR then
+            local field_name = ctx:name(callee_n.d[2])
+            if field_name == "new" then
+                local obj = emit_expr(ctx, callee_n.d[1], 100)
+                local args = emit_expr_list(ctx, args_start, args_len)
+                return "new " .. obj .. "(" .. args .. ")"
+            end
+        end
+        local callee = emit_expr(ctx, callee_id, 100)
+        local args = emit_expr_list(ctx, args_start, args_len)
+        return callee .. "(" .. args .. ")"
+
+    elseif kind == defs.NODE_FUNC_EXPR then
+        -- function(params) body end → (params) => { body }
+        local ps = d[1]
+        local pl = d[2]
+        local bs = d[3]
+        local bl = d[4]
+        local has_vararg = (n.flags % 2) == 1  -- FLAG_VARARG = 1
+        local params = ctx:list(ps, pl)
+        local param_parts = {}
+        for i, pid in ipairs(params) do
+            param_parts[i] = param_name(ctx, pid)
+        end
+        if has_vararg then
+            param_parts[#param_parts + 1] = "...args"
+        end
+        local pstr = table.concat(param_parts, ", ")
+        -- Inline the body into an arrow function
+        local saved_lines = ctx.lines
+        ctx.lines = {}
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        local body_lines = ctx.lines
+        ctx.lines = saved_lines
+        local body_str = table.concat(body_lines, "\n")
+        return "(" .. pstr .. ") => {\n" .. body_str .. "\n" .. ctx:istr() .. "}"
+
+    elseif kind == defs.NODE_TABLE_EXPR then
+        local fs = d[1]
+        local fl = d[2]
+        if fl == 0 then return "{}" end
+        local fields = ctx:list(fs, fl)
+        -- Determine if array (all positional) or object (any keyed)
+        local is_array = true
+        for _, fid in ipairs(fields) do
+            local fn = ctx:node(fid)
+            if fn.d[1] ~= -1 then  -- -1 = positional
+                is_array = false
+                break
+            end
+        end
+        local parts = {}
+        if is_array then
+            for _, fid in ipairs(fields) do
+                local fn = ctx:node(fid)
+                parts[#parts + 1] = emit_expr(ctx, fn.d[2], 0)
+            end
+            return "[" .. table.concat(parts, ", ") .. "]"
+        else
+            for _, fid in ipairs(fields) do
+                local fn = ctx:node(fid)
+                local key_id = fn.d[1]
+                local val_id = fn.d[2]
+                if key_id == -1 then
+                    -- positional in a mixed table: use numeric key
+                    parts[#parts + 1] = emit_expr(ctx, val_id, 0)
+                else
+                    local key_n = ctx:node(key_id)
+                    local val_s = emit_expr(ctx, val_id, 0)
+                    if key_n.kind == defs.NODE_LITERAL and key_n.d[1] == defs.LIT_STRING then
+                        local key_s = ctx:name(key_n.d[2])
+                        -- Use identifier syntax if valid, else quoted
+                        if key_s:match("^[%a_][%w_]*$") then
+                            parts[#parts + 1] = key_s .. ": " .. val_s
+                        else
+                            parts[#parts + 1] = '["' .. escape_str(key_s) .. '"]: ' .. val_s
+                        end
+                    elseif key_n.kind == defs.NODE_LITERAL and key_n.d[1] == defs.LIT_INTEGER then
+                        parts[#parts + 1] = "[" .. tostring(key_n.d[2]) .. "]: " .. val_s
+                    else
+                        local key_s = emit_expr(ctx, key_id, 0)
+                        parts[#parts + 1] = "[" .. key_s .. "]: " .. val_s
+                    end
+                end
+            end
+            return "{" .. table.concat(parts, ", ") .. "}"
+        end
+
+    elseif kind == defs.NODE_CAST_EXPR then
+        -- --[[ : T ]] expr — pass through; type information lost at expression level
+        return emit_expr(ctx, d[1], parent_prec)
+
+    else
+        return "/* TODO: expr kind=" .. tostring(kind) .. " */"
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Statement emitter
+-- ---------------------------------------------------------------------------
+
+-- Emit param list with optional type annotation.
+local function emit_params(ctx, ps, pl, has_vararg, ann_content)
+    local params = ctx:list(ps, pl)
+    local param_parts = {}
+    for i, pid in ipairs(params) do
+        param_parts[i] = param_name(ctx, pid)
+    end
+    if has_vararg then
+        param_parts[#param_parts + 1] = "...args"
+    end
+    -- If annotation exists, attach types (best-effort: split by comma)
+    if ann_content then
+        local ts_ann = ann_to_ts(ann_content)
+        -- Try to extract parameter types from (A, B) -> C form
+        local param_types_str = ts_ann and ts_ann:match("^%((.-)%)%s*=>") or nil
+        if param_types_str then
+            local types_list = {}
+            for t in (param_types_str .. ","):gmatch("([^,]+),") do
+                types_list[#types_list + 1] = t:match("^%s*(.-)%s*$")
+            end
+            for i, pname in ipairs(param_parts) do
+                if types_list[i] and not pname:match("^%.%.%.") then
+                    param_parts[i] = pname .. ": " .. types_list[i]
+                end
+            end
+        end
+    end
+    return table.concat(param_parts, ", ")
+end
+
+-- Emit a return type annotation suffix (": ReturnType" or "").
+local function emit_return_type(ann_content)
+    if not ann_content then return "" end
+    local ts = ann_to_ts(ann_content)
+    if not ts then return "" end
+    local ret = ts:match("%s*=>%s*(.+)$")
+    if ret then return ": " .. ret end
+    return ""
+end
+
+-- Check if a call expression is `require("mod")` and return the module name.
+local function get_require_mod(ctx, nid)
+    local n = ctx:node(nid)
+    if n.kind ~= defs.NODE_CALL_EXPR then return nil end
+    local callee_n = ctx:node(n.d[1])
+    if callee_n.kind ~= defs.NODE_IDENTIFIER then return nil end
+    local callee_name = ctx:name(callee_n.d[1])
+    if callee_name ~= "require" then return nil end
+    local args_len = n.d[3]
+    if args_len ~= 1 then return nil end
+    local arg_items = ctx:list(n.d[2], 1)
+    local arg_n = ctx:node(arg_items[1])
+    if arg_n.kind ~= defs.NODE_LITERAL or arg_n.d[1] ~= defs.LIT_STRING then return nil end
+    return ctx:name(arg_n.d[2])
+end
+
+-- Convert a module name like "lib.foo.bar" to an import path like "./lib/foo/bar".
+local function mod_to_import_path(modname)
+    return "./" .. modname:gsub("%.", "/")
+end
+
+-- Derive a variable alias from a module name: "lib.foo.bar" → "bar".
+local function mod_to_alias(modname)
+    return modname:match("([^%.]+)$") or modname
+end
+
+emit_stmt = function(ctx, nid)
+    local n = ctx:node(nid)
+    local kind = n.kind
+    local d = n.d
+
+    if kind == defs.NODE_LOCAL_STMT then
+        local ns = d[1]
+        local nl = d[2]
+        local es = d[3]
+        local el = d[4]
+        local names = ctx:list(ns, nl)
+        -- Build name strings
+        local name_parts = {}
+        for i, nid2 in ipairs(names) do
+            name_parts[i] = ctx:name(nid2)
+        end
+        -- Check for annotation on preceding line
+        local ann = ctx:ann_for(n.line)
+        local ann_content = ann and ann.content or nil
+
+        if el == 0 then
+            -- local x [, y] (no initializer) → let x [, y]
+            if #name_parts == 1 then
+                local ts_type = ann_content and (": " .. (ann_to_ts(ann_content) or "unknown")) or ""
+                ctx:emit("let " .. name_parts[1] .. ts_type .. ";")
+            else
+                ctx:emit("let [" .. table.concat(name_parts, ", ") .. "];")
+            end
+        elseif el == 1 then
+            -- Single initializer
+            local exprs = ctx:list(es, el)
+            local expr_id = exprs[1]
+            -- Special case: require("lib.foo") → import
+            local mod_name = get_require_mod(ctx, expr_id)
+            if mod_name and ctx.opts.module ~= "cjs" then
+                local alias = name_parts[1]
+                local path = mod_to_import_path(mod_name)
+                ctx:add_import(alias, path)
+                -- Don't emit a local statement; the import will be hoisted.
+                return
+            end
+            local val = emit_expr(ctx, expr_id, 0)
+            if #name_parts == 1 then
+                local ts_type = ann_content and (": " .. (ann_to_ts(ann_content) or "unknown")) or ""
+                ctx:emit("const " .. name_parts[1] .. ts_type .. " = " .. val .. ";")
+            else
+                -- Destructure multiple names from single value (multi-return)
+                ctx:emit("const [" .. table.concat(name_parts, ", ") .. "] = " .. val .. ";")
+            end
+        else
+            -- Multiple initializers (uncommon)
+            local exprs = ctx:list(es, el)
+            local val_parts = {}
+            for i, eid in ipairs(exprs) do
+                val_parts[i] = emit_expr(ctx, eid, 0)
+            end
+            if #name_parts == 1 then
+                ctx:emit("const " .. name_parts[1] .. " = " .. val_parts[1] .. ";")
+            else
+                ctx:emit("const [" .. table.concat(name_parts, ", ") .. "] = [" .. table.concat(val_parts, ", ") .. "];")
+            end
+        end
+
+    elseif kind == defs.NODE_FUNC_DECL then
+        -- function name(params) body end  OR  local function name(params) body end
+        local name_node_id = d[1]
+        local ps = d[2]
+        local pl = d[3]
+        local bs = d[4]
+        local bl = d[5]
+        local has_vararg = (n.flags % 2) == 1  -- FLAG_VARARG = 1
+        local is_local = (n.flags % 4) >= 2    -- FLAG_LOCAL = 2
+
+        local ann = ctx:ann_for(n.line)
+        local ann_content = ann and ann.content or nil
+
+        local name_n = ctx:node(name_node_id)
+        local is_method = name_n.kind == defs.NODE_FIELD_EXPR
+
+        local param_str = emit_params(ctx, ps, pl, has_vararg, ann_content)
+        local ret_type = emit_return_type(ann_content)
+
+        if is_method then
+            -- function Foo.bar(params) ... end → Foo.bar = function(params): RetType { ... }
+            local name_s = emit_expr(ctx, name_node_id, 0)
+            ctx:emit(name_s .. " = function(" .. param_str .. ")" .. ret_type .. " {")
+        else
+            local fname = ctx:name(name_n.d[1])
+            if is_local then
+                ctx:emit("function " .. fname .. "(" .. param_str .. ")" .. ret_type .. " {")
+            else
+                ctx:emit("function " .. fname .. "(" .. param_str .. ")" .. ret_type .. " {")
+            end
+        end
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+
+    elseif kind == defs.NODE_ASSIGN_STMT then
+        local ts = d[1]
+        local tl = d[2]
+        local es = d[3]
+        local el = d[4]
+        local targets = ctx:list(ts, tl)
+        local exprs = ctx:list(es, el)
+        -- Emit each assignment; if counts differ, emit as destructure
+        if #targets == 1 then
+            local lhs = emit_expr(ctx, targets[1], 0)
+            local rhs = emit_expr(ctx, exprs[1], 0)
+            ctx:emit(lhs .. " = " .. rhs .. ";")
+        else
+            local lhs_parts = {}
+            for i, tid in ipairs(targets) do
+                lhs_parts[i] = emit_expr(ctx, tid, 0)
+            end
+            local rhs_parts = {}
+            for i, eid in ipairs(exprs) do
+                rhs_parts[i] = emit_expr(ctx, eid, 0)
+            end
+            ctx:emit("[" .. table.concat(lhs_parts, ", ") .. "] = [" .. table.concat(rhs_parts, ", ") .. "];")
+        end
+
+    elseif kind == defs.NODE_EXPR_STMT then
+        local expr_id = d[1]
+        local expr_n = ctx:node(expr_id)
+        -- error("msg") as a statement
+        if expr_n.kind == defs.NODE_CALL_EXPR then
+            local callee_n = ctx:node(expr_n.d[1])
+            if callee_n.kind == defs.NODE_IDENTIFIER then
+                local cname = ctx:name(callee_n.d[1])
+                if cname == "error" then
+                    local args = emit_expr_list(ctx, expr_n.d[2], expr_n.d[3])
+                    ctx:emit("throw new Error(" .. args .. ");")
+                    return
+                end
+            end
+        end
+        ctx:emit(emit_expr(ctx, expr_id, 0) .. ";")
+
+    elseif kind == defs.NODE_RETURN_STMT then
+        local rs = d[1]
+        local rl = d[2]
+        if rl == 0 then
+            ctx:emit("return;")
+        elseif rl == 1 then
+            local exprs = ctx:list(rs, rl)
+            ctx:emit("return " .. emit_expr(ctx, exprs[1], 0) .. ";")
+        else
+            local exprs = ctx:list(rs, rl)
+            local parts = {}
+            for i, eid in ipairs(exprs) do
+                parts[i] = emit_expr(ctx, eid, 0)
+            end
+            ctx:emit("return [" .. table.concat(parts, ", ") .. "];")
+        end
+
+    elseif kind == defs.NODE_IF_STMT then
+        local cs = d[1]
+        local cl = d[2]
+        local clauses = ctx:list(cs, cl)
+        for i, cid in ipairs(clauses) do
+            local cn = ctx:node(cid)
+            local test_id = cn.d[1]
+            local bs = cn.d[2]
+            local bl = cn.d[3]
+            if test_id == -1 then
+                -- else clause
+                ctx:emit("} else {")
+            elseif i == 1 then
+                ctx:emit("if (" .. emit_expr(ctx, test_id, 0) .. ") {")
+            else
+                ctx:emit("} else if (" .. emit_expr(ctx, test_id, 0) .. ") {")
+            end
+            ctx.indent = ctx.indent + 1
+            emit_block(ctx, bs, bl)
+            ctx.indent = ctx.indent - 1
+        end
+        ctx:emit("}")
+
+    elseif kind == defs.NODE_WHILE_STMT then
+        local test_id = d[1]
+        local bs = d[2]
+        local bl = d[3]
+        ctx:emit("while (" .. emit_expr(ctx, test_id, 0) .. ") {")
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+
+    elseif kind == defs.NODE_REPEAT_STMT then
+        local test_id = d[1]
+        local bs = d[2]
+        local bl = d[3]
+        ctx:emit("do {")
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("} while (!(" .. emit_expr(ctx, test_id, 0) .. "));")
+
+    elseif kind == defs.NODE_DO_STMT then
+        local bs = d[1]
+        local bl = d[2]
+        ctx:emit("{")
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+
+    elseif kind == defs.NODE_FOR_NUM then
+        -- for i = init, limit [, step] do ... end
+        local var_id = d[1]
+        local init_id = d[2]
+        local limit_id = d[3]
+        local step_id = d[4]  -- -1 if no step
+        local bs = d[5]
+        local bl = d[6]
+        local vname = ctx:name(var_id)
+        local init_s = emit_expr(ctx, init_id, 0)
+        local limit_s = emit_expr(ctx, limit_id, 0)
+        -- Adjust init for 0-indexing (subtract 1 from numeric literals)
+        local init_n = ctx:node(init_id)
+        local adjusted_init
+        if init_n.kind == defs.NODE_LITERAL and init_n.d[1] == defs.LIT_INTEGER then
+            adjusted_init = tostring(init_n.d[2] - 1)
+        elseif init_n.kind == defs.NODE_LITERAL and init_n.d[1] == defs.LIT_NUMBER then
+            local v = i32x2_to_double(init_n.d[2], init_n.d[3])
+            adjusted_init = tostring(v - 1)
+        else
+            adjusted_init = "(" .. init_s .. ") - 1"
+        end
+        local step_s
+        if step_id == -1 then
+            step_s = "1"
+        else
+            step_s = emit_expr(ctx, step_id, 0)
+        end
+        -- Check if limit is a length expression (#foo) to use < instead of <=
+        local limit_n = ctx:node(limit_id)
+        local cmp
+        if limit_n.kind == defs.NODE_UNARY_EXPR and limit_n.d[1] == defs.OP_LEN then
+            cmp = "<"
+        else
+            cmp = "<="
+        end
+        local header = string.format(
+            "for (let %s = %s; %s %s %s; %s += %s) {",
+            vname, adjusted_init, vname, cmp, limit_s, vname, step_s
+        )
+        ctx:emit(header)
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+
+    elseif kind == defs.NODE_FOR_IN then
+        -- for k, v in expr do ... end
+        local ns = d[1]
+        local nl = d[2]
+        local es = d[3]
+        local el = d[4]
+        local bs = d[5]
+        local bl = d[6]
+        local names = ctx:list(ns, nl)
+        local exprs = ctx:list(es, el)
+        local name_parts = {}
+        for i, nid2 in ipairs(names) do
+            name_parts[i] = ctx:name(nid2)
+        end
+        local var_str = #name_parts > 1
+            and "[" .. table.concat(name_parts, ", ") .. "]"
+            or name_parts[1]
+        -- Detect ipairs/pairs by inspecting the expression
+        -- emit_expr already handles ipairs → .entries() and pairs → Object.entries()
+        local iter_s = emit_expr_list(ctx, es, el)
+        ctx:emit("for (const " .. var_str .. " of " .. iter_s .. ") {")
+        ctx.indent = ctx.indent + 1
+        emit_block(ctx, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+
+    elseif kind == defs.NODE_BREAK_STMT then
+        ctx:emit("break;")
+
+    elseif kind == defs.NODE_GOTO_STMT then
+        local label_id = d[1]
+        ctx:emit("continue " .. ctx:name(label_id) .. ";")
+
+    elseif kind == defs.NODE_LABEL_STMT then
+        local label_id = d[1]
+        ctx:emit(ctx:name(label_id) .. ":")
+
+    elseif kind == defs.NODE_CHUNK then
+        local bs = d[1]
+        local bl = d[2]
+        emit_block(ctx, bs, bl)
+
+    else
+        ctx:emit("/* TODO: stmt kind=" .. tostring(kind) .. " */")
+    end
+end
+
+emit_block = function(ctx, bs, bl)
+    local stmts = ctx:list(bs, bl)
+    for _, sid in ipairs(stmts) do
+        emit_stmt(ctx, sid)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Annotation declaration emitter
+-- Emits `--::` type declarations as TypeScript type aliases.
+-- ---------------------------------------------------------------------------
+local function emit_decl_annotations(ctx)
+    local lines = {}
+    -- Scan all annotations for ANN_DECL kind
+    for _, ann in pairs(ctx.anns) do
+        if ann.kind == "decl" then
+            -- content like "Foo = { x: integer }"
+            local name, body = ann.content:match("^([%a_][%w_]*)%s*=%s*(.+)$")
+            if name and body then
+                local ts_body = ann_to_ts(body)
+                lines[#lines + 1] = "export type " .. name .. " = " .. ts_body .. ";"
+            end
+        end
+    end
+    return lines
+end
+
+-- ---------------------------------------------------------------------------
+-- Public API
+-- ---------------------------------------------------------------------------
+
+--: (string, { filename: string?, module: string?, strict: boolean? }?) -> (string | nil, string | nil)
+function M.transpile(source, opts)
+    opts = opts or {}
+    local filename = opts.filename or "?"
+    local ok, result = pcall(function()
+        local parsed = parse_mod.parse(source, filename)
+        local ctx = new_ctx(parsed.pool, parsed.nodes, parsed.lists, source, opts)
+
+        -- Walk the root chunk
+        local root = ctx:node(parsed.root)
+        if root.kind ~= defs.NODE_CHUNK then
+            return nil, "expected chunk root"
+        end
+        emit_block(ctx, root.d[1], root.d[2])
+
+        -- Collect type declarations from --:: annotations
+        local decl_lines = emit_decl_annotations(ctx)
+
+        -- Build output
+        local out = {}
+
+        -- Header
+        if opts.strict then
+            out[#out + 1] = "// @ts-strict-mode"
+        end
+
+        -- ESM imports (hoisted)
+        if opts.module ~= "cjs" and #ctx.import_order > 0 then
+            for _, path in ipairs(ctx.import_order) do
+                local alias = ctx.imports[path]
+                out[#out + 1] = 'import * as ' .. alias .. ' from "' .. path .. '";'
+            end
+            out[#out + 1] = ""
+        end
+
+        -- Type declarations
+        if #decl_lines > 0 then
+            for _, dl in ipairs(decl_lines) do
+                out[#out + 1] = dl
+            end
+            out[#out + 1] = ""
+        end
+
+        -- Body
+        for _, line in ipairs(ctx.lines) do
+            out[#out + 1] = line
+        end
+
+        return table.concat(out, "\n")
+    end)
+    if not ok then
+        return nil, tostring(result)
+    end
+    return result
+end
+
+--: (string, { filename: string?, module: string?, strict: boolean? }?) -> (string | nil, string | nil)
+function M.transpile_file(path, opts)
+    local f, err = io.open(path, "r")
+    if not f then return nil, "cannot open " .. path .. ": " .. (err or "?") end
+    local source = f:read("*a")
+    f:close()
+    opts = opts or {}
+    opts.filename = opts.filename or path
+    return M.transpile(source, opts)
+end
+
+return M

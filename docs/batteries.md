@@ -163,6 +163,10 @@ structure; the model is a function over it. The context window is a view, not th
   nodes; block structure (headings, paragraphs, fenced/indented code, thematic breaks,
   blockquotes, lists, HTML, link definitions) + inline parsing (emphasis, strong,
   inline code, links, images, hard breaks); `mdast.stringify` for basic round-trip
+- **HTML AST** — `lib/hast`: mdast-to-hast transformer + HTML serializer. Converts a
+  mdast tree to a hast tree (element/text/raw nodes), then serializes to an HTML string.
+  Convenience: `hast.md_to_html(source)` runs the full mdast → hast → HTML pipeline.
+  Covers all mdast Phase 1 node types including tables.
 
 ### Missing — stdlib tier
 
@@ -360,12 +364,17 @@ type is a union. The basic `{ ...T, k: V }` spread is implemented; what remains 
 distribution over union members in `env.lua:substitute_inner`. Needed for builder
 patterns and mapped-type aliases instantiated with union types.
 
-### Missing — transpiler (future)
+### Done — transpiler
 
-**`lib/lua2ts`** — Lua → TypeScript transpiler. The typechecker already builds an AST;
-emitting TS syntax is largely mechanical. Prior art: `dep/lua2js.lua` in the legacy
-repo. Metatables are the awkward mapping; FFI doesn't cross. Crescent type annotations
-map directly to TS types.
+**`lib/lua2ts`** — Lua → TypeScript transpiler. Walks the crescent AST (from
+`lib/type/static/parse`) and emits TypeScript. Handles: `local` → `const`/`let`,
+`==`/`~=` → `===`/`!==`, `^` → `**`, `and`/`or`/`not` → `&&`/`||`/`!`,
+`#foo` → `foo.length`, `x:method(args)` → `x.method(args)`, `x.new(...)` →
+`new x(...)`, `error("msg")` → `throw new Error("msg")`, `require("lib.foo")` →
+ESM `import * as foo from "./lib/foo"`, `for i = 1, n` → 0-indexed for loop,
+`ipairs(t)` → `t.entries()`, `pairs(t)` → `Object.entries(t)`, `pcall(f, ...)` →
+try/catch IIFE, `--:` annotations → TypeScript type signatures. FFI/debug/bit.* calls
+emit `/* TODO */` comments. Metatables are emitted as plain objects. 112 tests.
 
 ## Priority order
 
