@@ -1,0 +1,65 @@
+-- lib/unified/retext_sentiment/retext_sentiment_test.lua
+local T      = require("lib.test.assert")
+local retext = require("lib.unified.retext")
+local plugin = require("lib.unified.retext_sentiment")
+
+T.describe("retext_sentiment", function()
+  T.it("populates root.data.sentiment", function()
+    local proc = retext():use(plugin.plugin)
+    local tree = proc:parse("I love this great product.")
+    tree = proc:run(tree)
+    T.ok(tree.data ~= nil, "data exists")
+    T.ok(tree.data.sentiment ~= nil, "sentiment key exists")
+  end)
+
+  T.it("positive text has positive score", function()
+    local proc = retext():use(plugin.plugin)
+    local tree = proc:parse("This is excellent. I love it. Fantastic work!")
+    tree = proc:run(tree)
+    local s = tree.data.sentiment
+    T.ok(s.score > 0, "positive score for positive text")
+    T.ok(#s.positive > 0, "has positive words")
+    T.eq(#s.negative, 0, "no negative words")
+  end)
+
+  T.it("negative text has negative score", function()
+    local proc = retext():use(plugin.plugin)
+    local tree = proc:parse("This is terrible. I hate it. Awful work.")
+    tree = proc:run(tree)
+    local s = tree.data.sentiment
+    T.ok(s.score < 0, "negative score for negative text")
+    T.ok(#s.negative > 0, "has negative words")
+    T.eq(#s.positive, 0, "no positive words")
+  end)
+
+  T.it("neutral text has zero score", function()
+    local proc = retext():use(plugin.plugin)
+    local tree = proc:parse("The cat sat on the mat.")
+    tree = proc:run(tree)
+    local s = tree.data.sentiment
+    T.eq(s.score, 0, "neutral text has score 0")
+    T.eq(#s.positive, 0, "no positive words")
+    T.eq(#s.negative, 0, "no negative words")
+  end)
+
+  T.it("comparative is score divided by word count", function()
+    local proc = retext():use(plugin.plugin)
+    local tree = proc:parse("I love Lua.")
+    tree = proc:run(tree)
+    local s = tree.data.sentiment
+    -- "love" = 3, total words = 3 (I, love, Lua)
+    T.eq(s.score, 3, "score is 3 for 'love'")
+    T.ok(math.abs(s.comparative - 1.0) < 0.01, "comparative = 3/3 = 1.0")
+  end)
+
+  T.it("sentiment fields have correct types", function()
+    local proc = retext():use(plugin.plugin)
+    local tree = proc:parse("Good and bad.")
+    tree = proc:run(tree)
+    local s = tree.data.sentiment
+    T.ok(type(s.score) == "number", "score is number")
+    T.ok(type(s.comparative) == "number", "comparative is number")
+    T.ok(type(s.positive) == "table", "positive is table")
+    T.ok(type(s.negative) == "table", "negative is table")
+  end)
+end)
