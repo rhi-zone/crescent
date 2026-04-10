@@ -100,22 +100,15 @@ local function render_inlines(children)
   return table.concat(parts)
 end
 
--- Detect if a list is loose (any item has a blank line after it, or contains
--- a block-level child other than a single paragraph).
--- We detect this from the AST: a list is loose if any listItem has >1 block
--- children, or if any listItem's child is not a paragraph-wrapped inline.
+-- Detect if a list is loose per CommonMark spec §5.3.
+-- A list is loose if the list node has _loose=true (blank lines between items)
+-- OR if any item has _loose=true (blank lines within the item).
 local function is_loose_list(node)
-  -- Heuristic: loose if any listItem contains more than one block child,
-  -- or if a listItem has a paragraph that is not the only child.
+  if node._loose then return true end
   for _, item in ipairs(node.children or {}) do
-    local ch = item.children or {}
-    if #ch > 1 then return true end
-    -- If the single child is itself a list or blockquote, it's tight for this item.
-    -- Also: if any item is an empty paragraph, check for blank lines.
-    -- We rely on the _loose flag set by parse_blocks when available.
     if item._loose then return true end
   end
-  return node._loose or false
+  return false
 end
 
 -- Render a block node to HTML string.
@@ -193,17 +186,26 @@ render_node = function(node, opts)
           parts[#parts + 1] = "<li>" .. content .. "</li>\n"
         elseif #ch == 0 then
           parts[#parts + 1] = "<li></li>\n"
+        elseif ch[1].type == "paragraph" then
+          -- First child is a paragraph: unwrap it, rest follow as blocks.
+          local inner = render_inlines(ch[1].children) .. "\n"
+          for ci = 2, #ch do
+            inner = inner .. render_node(ch[ci])
+          end
+          parts[#parts + 1] = "<li>" .. inner .. "</li>\n"
         else
-          -- Multiple children in a tight item: first paragraph unwrapped, rest block.
+          -- First child is a block (not paragraph): use block rendering with newline after <li>.
+          -- For tight items, subsequent paragraphs are unwrapped (inline content only).
           local inner = ""
           for ci, c in ipairs(ch) do
-            if ci == 1 and c.type == "paragraph" then
-              inner = render_inlines(c.children) .. "\n"
+            if c.type == "paragraph" then
+              -- Tight: render paragraph content without <p> wrapper.
+              inner = inner .. render_inlines(c.children) .. "\n"
             else
               inner = inner .. render_node(c)
             end
           end
-          parts[#parts + 1] = "<li>" .. inner .. "</li>\n"
+          parts[#parts + 1] = "<li>\n" .. inner .. "</li>\n"
         end
       end
     end

@@ -283,14 +283,19 @@ local parse_blocks
 
 -- Parse a sequence of lines into block nodes.
 -- `lines` is an array of strings, `i` is the starting index, `j` is the end index.
--- Returns array of block nodes.
+-- Returns: array of block nodes, defs table, had_top_blank (blank between top-level blocks).
 parse_blocks = function(lines, i, j)
   local nodes = {}
   -- Collect link definitions into a table passed through inline parsing.
   local defs = {}
+  -- Track whether a blank line appeared between top-level blocks.
+  local had_top_blank = false
+  local last_was_blank = false
 
   local function add(node)
+    if last_was_blank and #nodes > 0 then had_top_blank = true end
     nodes[#nodes + 1] = node
+    last_was_blank = false
   end
 
   while i <= j do
@@ -298,6 +303,7 @@ parse_blocks = function(lines, i, j)
 
     -- 1. Blank line: skip.
     if is_blank(line) then
+      last_was_blank = true
       i = i + 1
 
     -- 2. ATX heading.
@@ -361,19 +367,31 @@ parse_blocks = function(lines, i, j)
     -- 6. Blockquote.
     elseif match_blockquote(line) then
       -- Collect all consecutive blockquote lines (lazy continuation allowed).
+      -- Lazy continuation: a non-> non-blank line can continue a blockquote
+      -- if it would not start a new block structure (i.e., is paragraph text).
       local bq_lines = {}
+      local last_was_para = false  -- tracks if last non-blank BQ line was paragraph text
       while i <= j do
         local l = lines[i]
         local bq_content = match_blockquote(l)
         if bq_content then
           bq_lines[#bq_lines + 1] = bq_content
+          -- Is this line paragraph-continuation content (not a block-level interrupt)?
+          last_was_para = not (match_atx_heading(bq_content) or is_thematic_break(bq_content)
+            or match_fence_open(bq_content) or count_indent(bq_content) >= 4
+            or is_blank(bq_content))
           i = i + 1
         elseif is_blank(l) then
-          -- Blank line: end of blockquote.
+          -- Blank line terminates blockquote (no lazy continuation across blank).
           break
+        elseif last_was_para and not match_atx_heading(l) and not is_thematic_break(l)
+            and not match_fence_open(l) and not match_blockquote(l)
+            and not match_list_item(l) and count_indent(l) < 4 then
+          -- Lazy continuation: treat as paragraph continuation inside blockquote.
+          bq_lines[#bq_lines + 1] = l
+          last_was_para = true
+          i = i + 1
         else
-          -- Lazy continuation: non-blank line without > is part of blockquote
-          -- if we're in an open paragraph. Simpler: stop at non-> non-blank.
           break
         end
       end
@@ -470,15 +488,18 @@ parse_blocks = function(lines, i, j)
           end
         end
 
-        if item_blank then list_node._loose = true end
+        -- (item_blank not used to set list loose here; list loose comes from
+        --  prev_blank between siblings or from item looseness computed below)
 
         while #item_lines > 0 and item_lines[#item_lines] == "" do
           item_lines[#item_lines] = nil
         end
 
-        local ich = parse_blocks(item_lines, 1, #item_lines)
+        local ich, _, item_had_top_blank = parse_blocks(item_lines, 1, #item_lines)
+        -- Item is loose if its direct block children are separated by blank lines.
+        local item_loose = item_had_top_blank
         list_node.children[#list_node.children + 1] = {
-          type = "listItem", checked = nil, _loose = item_blank, children = ich
+          type = "listItem", checked = nil, _loose = item_loose, children = ich
         }
       end
 
@@ -513,9 +534,13 @@ parse_blocks = function(lines, i, j)
           break
         end
         -- List items interrupt paragraphs (unordered always; ordered only if start=1).
+        -- Exception: empty list items (bare markers) cannot interrupt a paragraph.
         if #para_lines > 0 then
-          local lt, lm, ln = match_list_item(l)
-          if lt == "bullet" or (lt == "ordered" and ln == 1) then break end
+          local lt, lm, ln, lcont = match_list_item(l)
+          local is_empty = lcont == nil or lcont == ""
+          if not is_empty then
+            if lt == "bullet" or (lt == "ordered" and ln == 1) then break end
+          end
         end
         -- Strip up to 3 leading spaces from paragraph lines.
         local sl = strip_indent(l, math.min(count_indent(l), 3))
@@ -528,7 +553,7 @@ parse_blocks = function(lines, i, j)
     end
   end
 
-  return nodes, defs
+  return nodes, defs, had_top_blank
 end
 
 -- ── Inline parsing ────────────────────────────────────────────────────────────
