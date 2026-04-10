@@ -302,7 +302,7 @@ for `cr` (the package manager CLI) and any interactive CLI tool. Builds on
 **`lib/ansi`** — low-level terminal: escape codes, colors, cursor movement, terminal
 queries (size, capabilities). Pure Lua, no deps. The primitive everything TUI builds on.
 
-**`lib/tui`** — widget layer: layouts, boxes, text, input, scrolling, borders. Builds
+**`lib/tui`** ✓ — widget layer: layouts, boxes, text, input, scrolling, borders. Builds
 on `lib/ansi`. Imperative API — draw what you want, when you want.
 
 **`lib/tui/reactive`** *(opt-in)* — reactive binding for `lib/tui`. Wire

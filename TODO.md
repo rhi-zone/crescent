@@ -278,7 +278,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/log/`** — structured logging/tracing with levels and sinks.
 - [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
 - [x] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
-- [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
+- [x] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
 - [x] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
   Core API: `signal(init)` → `{get, set, update}`, `computed(fn, deps)`, `effect(fn)`, `batch(fn)`.
   No dependencies outside crescent — not even on Rainbow.
