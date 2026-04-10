@@ -248,13 +248,17 @@ mechanism. Prior art: `~/git/rhizone/rainbow/` (TypeScript prototype).
 Paired with `lib/lua2ts`: write reactive UI logic in Lua, emit typed TypeScript, run in
 the browser. Same optic algebra server-side and client-side, no impedance mismatch.
 
-### Missing — world state
+### World state
 
-**`lib/ecs` or equivalent** — durable, queryable, mutable entity store. Named entities,
-typed components, spatial containment. User-defined schemas — no hardcoded concepts.
-Useful for games, simulations, workflow state, the RP substrate. The shape of this
-library is still open; ECS is one design, a graph database is another, a document
-store is a third. The right answer is derived from real consumers (Lumen, RP) first.
+**`lib/ecs`** — SQLite-backed entity-component store. Entities have integer IDs;
+components are named typed values (any Lua value, JSON-encoded) attached to entities.
+API: `create` / `destroy` / `set` / `get` / `remove` / `query` / `components`. Query
+supports optional predicate filtering. Schema uses `ON DELETE CASCADE` so destroying an
+entity removes all its components atomically. 30 assertions. Status: **done**.
+
+Possible future extension: spatial indexing, graph-style edges, or a document-store
+variant. The current design is intentionally minimal — derive shape from real consumers
+(Lumen, RP) before adding complexity.
 
 ### Missing — application verticals
 
