@@ -84,7 +84,12 @@ end
 function M.load_and_run(path, env, opts)
 	local card, err = M.load_card(path)
 	if not card then return false, err end
-	return M.run_card(card, env, opts)
+	-- FIXME: typechecker: does not narrow `card` to non-nil in function call
+	-- arguments even after `if not card then return end`. Use direct field access
+	-- to bypass the nil branch instead of delegating to run_card.
+	opts = opts or {}
+	opts.name = opts.name or ("@" .. tostring(card.path))
+	return sandbox.run(card.script, env, opts)
 end
 
 -- caps: lazy proxy for the four capability factory sub-modules.

@@ -54,7 +54,7 @@ function M.llm_cap(config)
 				["Content-Length"] = { tostring(#body) },
 			}
 			if api_key then
-				headers["Authorization"] = { "Bearer " .. api_key }
+				headers["Authorization"] = { "Bearer " .. tostring(api_key) }
 			end
 
 			local resp, err = http.send({

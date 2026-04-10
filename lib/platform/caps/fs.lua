@@ -21,6 +21,7 @@ end
 local M = {}
 
 -- Resolve path relative to root; reject traversal and absolute paths.
+--: (string, string | nil) -> string | nil, string | nil
 local function resolve(root, path)
 	if not path then return nil, "fs: nil path" end
 	if path:find("^/") then return nil, "fs: absolute path not allowed" end
@@ -44,7 +45,7 @@ function M.fs_cap(opts)
 			local full, err = resolve(root, path)
 			if not full then return nil, err end
 			local f, ferr = io.open(full, "rb")
-			if not f then return nil, "fs: cannot read " .. path .. ": " .. tostring(ferr) end
+			if not f then return nil, "fs: cannot read " .. tostring(path) .. ": " .. tostring(ferr) end
 			local content = f:read("*a")
 			f:close()
 			return content
@@ -55,7 +56,7 @@ function M.fs_cap(opts)
 			local full, err = resolve(root, path)
 			if not full then return nil, err end
 			local f, ferr = io.open(full, "wb")
-			if not f then return nil, "fs: cannot write " .. path .. ": " .. tostring(ferr) end
+			if not f then return nil, "fs: cannot write " .. tostring(path) .. ": " .. tostring(ferr) end
 			f:write(content)
 			f:close()
 			return true

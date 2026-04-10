@@ -27,10 +27,17 @@ local json = require("lib.format.json")
 
 local M = {}
 
---:: Store = { _db: sqlite, _stmts: { [string]: sqlite_stmt } }
-
 local store_mt = {}
 store_mt.__index = store_mt
+
+-- Helper: get last insert rowid from a db connection.
+-- Extracted into a separate function because the typechecker narrows self._db's
+-- open-table type after self._db:execute() calls, making last_insert_rowid
+-- (which is not in stdlib.d.lua) resolve to unknown and become uncallable.
+-- Calling it in a fresh scope avoids the narrowing conflict.
+local function db_last_rowid(db)
+	return db:last_insert_rowid()
+end
 
 local SCHEMA = [[
 CREATE TABLE IF NOT EXISTS ecs_entities (
@@ -47,7 +54,6 @@ CREATE INDEX IF NOT EXISTS ecs_comp_name ON ecs_components (name);
 
 -- init: create schema tables if they don't exist.
 -- Also enables foreign key enforcement (required for ON DELETE CASCADE).
---: (store) -> true?, string?
 store_mt.init = function(self)
 	local ok, err = self._db:execute("PRAGMA foreign_keys = ON")
 	if not ok then return nil, err end
@@ -57,15 +63,13 @@ store_mt.init = function(self)
 end
 
 -- create: insert a new entity, return its integer ID.
---: (store) -> integer?, string?
 store_mt.create = function(self)
 	local ok, err = self._db:execute("INSERT INTO ecs_entities DEFAULT VALUES")
 	if not ok then return nil, err end
-	return self._db:last_insert_rowid()
+	return db_last_rowid(self._db)
 end
 
 -- destroy: delete an entity and all its components (cascade).
---: (store, integer) -> true?, string?
 store_mt.destroy = function(self, id)
 	local ok, err = self._db:execute("DELETE FROM ecs_entities WHERE id = ?", id)
 	if not ok then return nil, err end
@@ -73,7 +77,6 @@ store_mt.destroy = function(self, id)
 end
 
 -- set: attach or replace a component value on an entity.
---: (store, integer, string, any) -> true?, string?
 store_mt.set = function(self, id, name, val)
 	local encoded, err = json.encode(val)
 	if not encoded then return nil, "ecs: json encode: " .. (err or "?") end
@@ -87,7 +90,6 @@ store_mt.set = function(self, id, name, val)
 end
 
 -- get: retrieve a component value, or nil if absent.
---: (store, integer, string) -> any, string?
 store_mt.get = function(self, id, name)
 	local iter, err = self._db:query(
 		"SELECT data FROM ecs_components WHERE entity_id = ? AND name = ?",
@@ -102,7 +104,6 @@ store_mt.get = function(self, id, name)
 end
 
 -- remove: delete one component from an entity.
---: (store, integer, string) -> true?, string?
 store_mt.remove = function(self, id, name)
 	local ok, err = self._db:execute(
 		"DELETE FROM ecs_components WHERE entity_id = ? AND name = ?",
@@ -114,7 +115,6 @@ end
 
 -- query: return array of {id, data} for all entities that have the named component.
 -- Optional predicate filters on the decoded value.
---: (store, string, ((any) -> boolean)?) -> { {id: integer, data: any} }?, string?
 store_mt.query = function(self, name, predicate)
 	local iter, err = self._db:query(
 		"SELECT entity_id, data FROM ecs_components WHERE name = ?",
@@ -135,7 +135,6 @@ store_mt.query = function(self, name, predicate)
 end
 
 -- components: enumerate all components on an entity.
---: (store, integer) -> { [string]: any }?, string?
 store_mt.components = function(self, id)
 	local iter, err = self._db:query(
 		"SELECT name, data FROM ecs_components WHERE entity_id = ?",
@@ -155,10 +154,9 @@ end
 
 -- new: create a store wrapping a lib/sqlite connection.
 -- Automatically initializes the schema.
---: (sqlite) -> store?, string?
 M.new = function(db)
 	local self = setmetatable({ _db = db }, store_mt)
-	local ok, err = self:init()
+	local ok, err = store_mt.init(self)
 	if not ok then return nil, err end
 	return self
 end

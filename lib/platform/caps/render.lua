@@ -30,7 +30,8 @@ function M.render_cap(session)
 			session:push(content)
 		end,
 		flush = function ()
-			if session.flush then session:flush() end
+			local flush = session.flush
+			if type(flush) == "function" then flush(session) end
 		end,
 	}
 end
@@ -48,7 +49,9 @@ function M.sse_session(write_fn)
 				str = content
 			else
 				if not json then json = require("lib.format.json") end
-				str = json.encode(content) or tostring(content)
+				local encode = json.encode
+				local enc = type(encode) == "function" and encode(content) or nil
+				str = enc or tostring(content)
 			end
 			write_fn("data: " .. str .. "\n\n")
 		end,
