@@ -14,29 +14,28 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
 
-**Phase 1 (`lib/mdast`) was one-shotted by a subagent — treat as draft, not complete.**
-Before marking done: run against the CommonMark spec fixture suite (287 examples),
-add snapshot/fixture tests for representative inputs, benchmark throughput vs a
-reference implementation. Expect bugs in emphasis delimiter edge cases, list
-indentation, and nested structures. Do not build `lib/hast` on top until mdast is
-fixture-validated.
+**[x] Phase 2 fixture validation complete.** CommonMark 0.31.2 spec fixture suite
+validated via `lib/mdast/commonmark_fixtures_test.lua`. Current pass rates (652 examples):
+- Block structure (ATX, setext, fenced code, indented code, paragraphs, thematic breaks): 100%
+- Lists/list items: 68–73% (complex nesting/continuation edge cases)
+- Block quotes: 76%, Emphasis: 72.7%
+- Links: 34%, Images: 27% (many tests require reference-style links = not implemented)
 
-Known gaps for Phase 2:
+Remaining known gaps (Phase 3 targets):
 
-- **Setext headings** — underline style (`===`/`---`): requires one line of lookahead in
-  the block parser. Currently not supported; ATX headings only.
 - **Link reference definitions** — `[text][id]` and `[text][]` reference-style links use
   the collected `_defs` table but inline parsing doesn't resolve them yet. Only inline
-  links `[text](url)` work.
+  links `[text](url)` work. This blocks many links/images tests from passing.
 - **HTML block classification** — HTML blocks are treated as a single passthrough (emit
   until blank line). CommonMark defines 7 HTML block types with different termination
   rules. Current impl is a simplified version.
-- **Tight vs loose lists** — all lists are effectively tight. Loose lists (blank line
-  between items) should wrap item content in `<p>` tags in HTML output.
+- **Emphasis edge cases** — ~28% failure rate in emphasis/strong; complex delimiter
+  interactions (multiline, inside HTML, rule 9 violations) not handled.
 - **Autolinks** — `<url>` and `<email>` forms not handled.
 - **GFM extensions** — tables, strikethrough (`~~text~~`), task list items (`- [x]`).
 - **`mdast.stringify` completeness** — round-trip is best-effort; complex nested
   structures may not stringify perfectly.
+- **Benchmarks** — no throughput benchmark committed yet (needed before lib/hast).
 
 ## lib/hast and unified pipeline
 
@@ -278,7 +277,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/uuid/`** — UUID v4/v7 generation.
 - [ ] **`lib/log/`** — structured logging/tracing with levels and sinks.
 - [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
-- [ ] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
+- [x] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
 - [ ] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
 - [x] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
   Core API: `signal(init)` → `{get, set, update}`, `computed(fn, deps)`, `effect(fn)`, `batch(fn)`.

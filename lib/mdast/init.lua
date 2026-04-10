@@ -113,8 +113,11 @@ local function is_blank(line)
 end
 
 -- Check if line is a thematic break: 3+ of the same char (-, *, _), optional spaces.
+-- Must have <= 3 spaces of leading indent.
 local function is_thematic_break(line)
-  local stripped = line:match("^%s*(.-)%s*$") or line
+  local indent, col = count_indent(line)
+  if indent > 3 then return false end
+  local stripped = str_sub(line, col):match("^(.-)%s*$") or str_sub(line, col)
   local ch = str_sub(stripped, 1, 1)
   if ch ~= "-" and ch ~= "*" and ch ~= "_" then return false end
   local count = 0
@@ -131,13 +134,16 @@ local function is_thematic_break(line)
 end
 
 -- Check for ATX heading. Returns depth (1-6) and rest content, or nil.
--- Lua patterns don't support {n,m}, so we use + and check length manually.
+-- Allows up to 3 spaces of leading indent.
 local function match_atx_heading(line)
-  local hashes = line:match("^(#+)")
+  local indent, col = count_indent(line)
+  if indent > 3 then return nil end
+  local stripped = str_sub(line, col)
+  local hashes = stripped:match("^(#+)")
   if not hashes or #hashes > 6 then return nil end
   local depth = #hashes
   -- Must be followed by space/tab or end of line.
-  local after_hashes = str_sub(line, depth + 1)
+  local after_hashes = str_sub(stripped, depth + 1)
   if after_hashes == "" or after_hashes:match("^%s*$") then
     -- Heading with no content.
     return depth, ""
@@ -147,18 +153,16 @@ local function match_atx_heading(line)
     -- Not a heading (no space after hashes).
     return nil
   end
+  -- Content: strip leading/trailing spaces.
   local rest = after_hashes:match("^%s+(.-)%s*$") or ""
-  -- Strip optional closing sequence: space(s) + one or more #, optionally trailing spaces.
-  local trimmed = rest:match("^(.-) +#+%s*$") or rest:match("^(.-) +#%s*$")
-  -- Also handle: all hashes case.
-  if not trimmed then trimmed = rest:match("^(#+)$") end
-  if not trimmed then trimmed = rest:match("^(.-)%s*#+%s*$") end
-  -- Only apply trim if rest ends with # (preceded by space).
-  if rest:match(" #+%s*$") then
-    trimmed = rest:match("^(.-)%s* +#+%s*$") or rest:match("^(.*%S)%s* +#+%s*$")
-    if not trimmed and rest:match("^#+%s*$") then trimmed = "" end
+  -- Strip optional closing sequence: trailing space + 1+ hashes + optional spaces.
+  -- Rule: trailing # sequence is only stripped if preceded by a space.
+  if rest:match("%s+#+%s*$") then
+    local closed = rest:match("^(.-)%s+#+%s*$")
+    if closed ~= nil then rest = closed end
+  elseif rest:match("^#+%s*$") then
+    rest = ""
   end
-  rest = trimmed or rest
   return depth, rest
 end
 
@@ -209,24 +213,32 @@ local function match_list_item(line)
   local indent, col = count_indent(line)
   if indent > 3 then return nil end
   local rest = str_sub(line, col)
-  -- Bullet list: -, +, * followed by space or tab.
-  local bullet = rest:match("^([%-%+%*])[ \t]")
+  -- Bullet list: -, +, * followed by space/tab or at end-of-line (empty item).
+  local bullet = rest:match("^([%-%+%*])$")  -- bare marker at EOL = empty item
   if bullet then
-    local after = str_sub(rest, 3)
-    -- Actually may have more spaces: CommonMark rule: 1-4 spaces after marker.
-    local spaces_after = 1
-    local i = 2
-    while str_byte(rest, i) == 32 or str_byte(rest, i) == 9 do
+    return "bullet", bullet, nil, "", indent + 2
+  end
+  bullet = rest:match("^([%-%+%*])[ \t]")
+  if bullet then
+    -- Count extra spaces after the mandatory space (CommonMark: 1-4 spaces total).
+    -- rest[1]=bullet, rest[2]=mandatory_space, rest[3+]=extra_spaces/content.
+    local spaces_after = 1  -- mandatory space counts as 1
+    local i = 3             -- start after the mandatory space
+    while (str_byte(rest, i) == 32 or str_byte(rest, i) == 9) and spaces_after < 4 do
       spaces_after = spaces_after + 1
       i = i + 1
     end
-    after = str_sub(rest, i)
+    local after = str_sub(rest, i)
     return "bullet", bullet, nil, after, indent + 1 + spaces_after
   end
   -- Ordered list: digits followed by . or ) then space.
   local num_str, delim = rest:match("^(%d+)([%.%)])")
   if num_str and #num_str <= 9 then
     local i = #num_str + 2  -- after digit(s) + delimiter
+    -- Check for bare marker at EOL (empty ordered item).
+    if i > #rest then
+      return "ordered", delim, tonumber(num_str), "", indent + #num_str + 2
+    end
     local spaces_after = 0
     while str_byte(rest, i) == 32 or str_byte(rest, i) == 9 do
       spaces_after = spaces_after + 1
@@ -393,49 +405,64 @@ parse_blocks = function(lines, i, j)
         type = "list",
         ordered = ordered,
         start = ordered and start_num or nil,
+        _loose = false,
         children = {}
       }
 
-      -- Parse list items.
-      while i <= j do
-        local l = lines[i]
-        if is_blank(l) then
-          i = i + 1
-          -- Blank line: skip, but next item might continue or end.
-          break
-        end
-        local item_type, item_marker, item_num, item_content, item_width = match_list_item(l)
-        if not item_type then break end
-        -- Must be same list type.
-        if item_type ~= list_type then break end
-        -- Ordered: delimiter must match.
-        if ordered and item_marker ~= marker_char then break end
-        -- Bullet: marker char must match.
-        if not ordered and item_marker ~= marker_char then break end
+      local prev_blank = false
 
-        -- Collect item lines.
-        local item_lines = { item_content }
+      while i <= j do
+        -- Skip leading blank lines; detect loose.
+        if is_blank(lines[i]) then
+          local ni = i
+          while ni <= j and is_blank(lines[ni]) do ni = ni + 1 end
+          if ni > j then break end
+          local nt, nm = match_list_item(lines[ni])
+          local same = (nt == list_type) and
+            ((ordered and nm == marker_char) or (not ordered and nm == marker_char))
+          if not same then break end
+          list_node._loose = true
+          prev_blank = true
+          i = ni
+        end
+        if i > j then break end
+
+        local it, im, inum, icont, iwidth = match_list_item(lines[i])
+        if not it or it ~= list_type then break end
+        if ordered and im ~= marker_char then break end
+        if not ordered and im ~= marker_char then break end
+
+        if prev_blank then list_node._loose = true end
+        prev_blank = false
+
+        local item_lines = {}
+        if icont ~= nil then item_lines[1] = icont end
         i = i + 1
-        -- Continuation lines: indented by at least marker_width spaces.
+
+        local item_blank = false
         while i <= j do
           local cl = lines[i]
           if is_blank(cl) then
-            item_lines[#item_lines + 1] = ""
-            i = i + 1
-            -- Check if next non-blank line is continuation.
-            local ni = i
+            local ni = i + 1
             while ni <= j and is_blank(lines[ni]) do ni = ni + 1 end
             if ni > j then break end
-            local next_indent = count_indent(lines[ni])
-            if next_indent >= item_width then
-              -- Continuation after blank; blanks already added.
+            local nind = count_indent(lines[ni])
+            local nt2, nm2 = match_list_item(lines[ni])
+            local next_same = (nt2 == list_type) and
+              ((ordered and nm2 == marker_char) or (not ordered and nm2 == marker_char))
+            if nind >= iwidth then
+              item_lines[#item_lines + 1] = ""
+              item_blank = true
+              i = i + 1
+            elseif next_same then
+              break
             else
               break
             end
           else
-            local cl_indent = count_indent(cl)
-            if cl_indent >= item_width then
-              item_lines[#item_lines + 1] = strip_indent(cl, item_width)
+            local cind = count_indent(cl)
+            if cind >= iwidth then
+              item_lines[#item_lines + 1] = strip_indent(cl, iwidth)
               i = i + 1
             else
               break
@@ -443,46 +470,60 @@ parse_blocks = function(lines, i, j)
           end
         end
 
-        -- Strip trailing blanks from item_lines.
+        if item_blank then list_node._loose = true end
+
         while #item_lines > 0 and item_lines[#item_lines] == "" do
           item_lines[#item_lines] = nil
         end
 
-        local item_children = parse_blocks(item_lines, 1, #item_lines)
-        local item_node = { type = "listItem", checked = nil, children = item_children }
-        list_node.children[#list_node.children + 1] = item_node
-
-        -- After item, check for blank line before next.
-        if i <= j and is_blank(lines[i]) then
-          i = i + 1
-          break
-        end
+        local ich = parse_blocks(item_lines, 1, #item_lines)
+        list_node.children[#list_node.children + 1] = {
+          type = "listItem", checked = nil, _loose = item_blank, children = ich
+        }
       end
 
       add(list_node)
 
-      -- Continue to next list item(s) via outer while loop if same list type continues.
-      -- (Handled by jumping back to top of while loop.)
-
-    -- 10. Paragraph (catch-all).
+    -- 10. Paragraph (catch-all) — also handles setext headings.
     else
       local para_lines = {}
       while i <= j do
         local l = lines[i]
-        if is_blank(l) then
-          break
+        if is_blank(l) then break end
+        -- Setext heading underline check (only when we have para content already).
+        if #para_lines > 0 then
+          local si, sc = count_indent(l)
+          if si <= 3 then
+            local sr = str_sub(l, sc):match("^(.-)%s*$") or str_sub(l, sc)
+            local sch = (sr ~= "" and sr:match("^[=]+$") and "=")
+              or (sr ~= "" and sr:match("^[-]+$") and "-") or nil
+            if sch then
+              local depth = (sch == "=") and 1 or 2
+              add({ type = "heading", depth = depth,
+                    _raw = tbl_concat(para_lines, "\n"), children = nil })
+              i = i + 1
+              para_lines = {}
+              break
+            end
+          end
         end
-        -- Interrupt paragraph: heading, thematic break, fenced code, list, blockquote.
+        -- Interrupt: ATX heading, thematic break, fenced code, blockquote.
         if match_atx_heading(l) or is_thematic_break(l) or match_fence_open(l)
-            or match_blockquote(l) or match_list_item(l) then
+            or match_blockquote(l) then
           break
         end
-        para_lines[#para_lines + 1] = l
+        -- List items interrupt paragraphs (unordered always; ordered only if start=1).
+        if #para_lines > 0 then
+          local lt, lm, ln = match_list_item(l)
+          if lt == "bullet" or (lt == "ordered" and ln == 1) then break end
+        end
+        -- Strip up to 3 leading spaces from paragraph lines.
+        local sl = strip_indent(l, math.min(count_indent(l), 3))
+        para_lines[#para_lines + 1] = sl
         i = i + 1
       end
       if #para_lines > 0 then
-        local raw = tbl_concat(para_lines, "\n")
-        add({ type = "paragraph", _raw = raw, children = nil })
+        add({ type = "paragraph", _raw = tbl_concat(para_lines, "\n"), children = nil })
       end
     end
   end
@@ -646,6 +687,8 @@ local function tokenize_inlines(src)
       if next_b == 10 then  -- '\n' → hard break.
         tokens[#tokens + 1] = { type = "hardbreak" }
         pos = pos + 2
+        -- Strip leading spaces on next line.
+        while pos <= len and str_byte(src, pos) == 32 do pos = pos + 1 end
       elseif next_b then
         -- Escaped character: emit as text.
         tokens[#tokens + 1] = { type = "text", value = str_char(next_b) }
@@ -656,19 +699,27 @@ local function tokenize_inlines(src)
       end
       text_start = pos
 
-    -- Newline: soft break or hard break (two spaces + newline).
+    -- Newline: soft break or hard break (two+ trailing spaces + newline).
     elseif b == 10 then
-      -- Check for two trailing spaces before the \n.
-      local is_hard = (pos >= 3 and str_byte(src, pos - 1) == 32 and str_byte(src, pos - 2) == 32)
-      -- Flush text up to (and not including) the trailing spaces for hard break.
+      -- Count trailing spaces before the \n.
+      local trail = pos - 1
+      while trail >= text_start and str_byte(src, trail) == 32 do
+        trail = trail - 1
+      end
+      local n_trailing = pos - 1 - trail
+      local is_hard = n_trailing >= 2
       if is_hard then
-        flush_text(pos - 2)
+        -- Flush up to last non-space (strips trailing spaces).
+        flush_text(trail + 1)
         tokens[#tokens + 1] = { type = "hardbreak" }
       else
-        flush_text(pos)
+        -- Soft break: strip trailing spaces from text too.
+        flush_text(trail + 1)
         tokens[#tokens + 1] = { type = "softbreak" }
       end
       pos = pos + 1
+      -- Strip leading spaces on next line (CommonMark: up to 3 leading spaces stripped).
+      while pos <= len and str_byte(src, pos) == 32 do pos = pos + 1 end
       text_start = pos
 
     -- Asterisk or underscore: potential emphasis/strong delimiter.
@@ -841,8 +892,8 @@ local function resolve_inlines(tokens)
     elseif tok.type == "hardbreak" then
       emit({ type = "break" })
     elseif tok.type == "softbreak" then
-      -- Soft break: emit as space for simplicity (CommonMark allows renderer choice).
-      emit_text(" ")
+      -- Soft break: emit as a node so renderers can choose \n or space.
+      emit({ type = "softBreak" })
     elseif tok.type == "node" then
       emit(tok.node)
     elseif tok.type == "link_open" or tok.type == "image_open" then
@@ -954,7 +1005,10 @@ end
 local function expand_inlines(nodes)
   for _, node in ipairs(nodes) do
     if node.type == "heading" or node.type == "paragraph" then
-      node.children = parse_inlines(node._raw or "")
+      local raw = node._raw or ""
+      -- Strip trailing whitespace (not significant at end of block).
+      raw = raw:match("^(.-)%s*$") or raw
+      node.children = parse_inlines(raw)
       node._raw = nil
     elseif node.children then
       expand_inlines(node.children)
