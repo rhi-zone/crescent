@@ -41,6 +41,48 @@ local function esc_attr(s)
   return s
 end
 
+-- Percent-encode a URL for use in href/src attributes.
+-- Encodes characters that CommonMark's reference implementation encodes.
+-- Already-encoded sequences (%XX) are left alone.
+local function encode_url(s)
+  -- Encode characters not allowed unencoded in HTML href attributes.
+  -- CommonMark encodes: space, ", \, <, >, [, ], ^, `, {, |, }
+  -- Do NOT double-encode already-encoded %XX sequences.
+  local result = {}
+  local i = 1
+  local len = #s
+  while i <= len do
+    local b = s:byte(i)
+    if b == 37 then  -- '%': check if already-encoded %XX
+      local h1, h2 = s:byte(i+1), s:byte(i+2)
+      local hex = "0123456789ABCDEFabcdef"
+      local is_hex1 = h1 and hex:find(string.char(h1), 1, true)
+      local is_hex2 = h2 and hex:find(string.char(h2), 1, true)
+      if is_hex1 and is_hex2 then
+        result[#result + 1] = s:sub(i, i+2)
+        i = i + 3
+      else
+        result[#result + 1] = "%25"
+        i = i + 1
+      end
+    elseif b == 32 then result[#result+1] = "%20"; i = i+1
+    elseif b == 34 then result[#result+1] = "%22"; i = i+1
+    elseif b == 92 then result[#result+1] = "%5C"; i = i+1
+    elseif b == 60 then result[#result+1] = "%3C"; i = i+1
+    elseif b == 62 then result[#result+1] = "%3E"; i = i+1
+    elseif b == 91 then result[#result+1] = "%5B"; i = i+1
+    elseif b == 93 then result[#result+1] = "%5D"; i = i+1
+    elseif b == 94 then result[#result+1] = "%5E"; i = i+1
+    elseif b == 96 then result[#result+1] = "%60"; i = i+1
+    elseif b == 123 then result[#result+1] = "%7B"; i = i+1
+    elseif b == 124 then result[#result+1] = "%7C"; i = i+1
+    elseif b == 125 then result[#result+1] = "%7D"; i = i+1
+    else result[#result+1] = s:sub(i,i); i = i+1
+    end
+  end
+  return table.concat(result)
+end
+
 -- Render inline children to a flat string.
 render_inline = function(node)
   local t = node.type
@@ -61,7 +103,7 @@ render_inline = function(node)
     end
     return "<strong>" .. inner .. "</strong>"
   elseif t == "link" then
-    local href = esc_attr(node.url or "")
+    local href = esc_attr(encode_url(node.url or ""))
     local title_attr = node.title and (' title="' .. esc_attr(node.title) .. '"') or ""
     local inner = ""
     for _, c in ipairs(node.children or {}) do
@@ -69,14 +111,20 @@ render_inline = function(node)
     end
     return '<a href="' .. href .. '"' .. title_attr .. ">" .. inner .. "</a>"
   elseif t == "image" then
-    -- alt text: plain text from children, entities escaped, no HTML tags.
-    local alt = ""
-    for _, c in ipairs(node.children or {}) do
-      if c.type == "text" then
-        alt = alt .. esc_html(c.value or "")
+    -- alt text: plain text extracted recursively from all inline children (no HTML tags).
+    local function extract_text(nodes)
+      local parts = {}
+      for _, c in ipairs(nodes or {}) do
+        if c.type == "text" or c.type == "inlineCode" then
+          parts[#parts + 1] = esc_html(c.value or "")
+        elseif c.children then
+          parts[#parts + 1] = extract_text(c.children)
+        end
       end
+      return table.concat(parts)
     end
-    local src = esc_attr(node.url or "")
+    local alt = extract_text(node.children)
+    local src = esc_attr(encode_url(node.url or ""))
     local title_attr = node.title and (' title="' .. esc_attr(node.title) .. '"') or ""
     return '<img src="' .. src .. '" alt="' .. alt .. '"' .. title_attr .. " />"
   elseif t == "break" then
@@ -276,26 +324,26 @@ end
 -- Minimum pass rates per section (0.0 – 1.0).
 -- Sections not listed default to 0 (informational only, no assertion failure).
 local pass_thresholds = {
-  ["Thematic breaks"]         = 0.85,
+  ["Thematic breaks"]         = 0.90,
   ["ATX headings"]            = 1.00,
   ["Setext headings"]         = 0.90,
   ["Indented code blocks"]    = 1.00,
   ["Fenced code blocks"]      = 1.00,
   ["Paragraphs"]              = 1.00,
   ["Blank lines"]             = 1.00,
-  ["Block quotes"]            = 0.70,
-  ["List items"]              = 0.65,
-  ["Lists"]                   = 0.60,
+  ["Block quotes"]            = 0.90,
+  ["List items"]              = 0.75,
+  ["Lists"]                   = 0.85,
   ["Code spans"]              = 0.90,
-  ["Emphasis and strong emphasis"] = 0.70,
-  -- Links/Images: reference link resolution now implemented; remaining failures are
-  -- URL percent-encoding, link title edge cases, and nested structure issues.
-  ["Links"]                   = 0.60,
-  ["Images"]                  = 0.55,
+  ["Emphasis and strong emphasis"] = 0.90,
+  -- Links: remaining failures are inline HTML (<bar attr>), entity encoding, and edge cases.
+  -- Images: all 22/22 passing.
+  ["Links"]                   = 0.80,
+  ["Images"]                  = 1.00,
   ["Hard line breaks"]        = 0.85,
   ["Soft line breaks"]        = 1.00,
   ["Textual content"]         = 1.00,
-  ["Tabs"]                    = 0.50,
+  ["Tabs"]                    = 0.65,
   ["Precedence"]              = 1.00,
 }
 
@@ -306,7 +354,7 @@ local skip_sections = {
   ["Autolinks"]     = true,  -- <url> / <email> not implemented
   ["Entity and numeric character references"] = true, -- HTML entity decoding
   ["Backslash escapes"] = true, -- entity output differs from raw pass-through
-  ["Link reference definitions"] = true,  -- ref-style links not implemented
+  ["Link reference definitions"] = true,  -- covered inline by links/images sections
   ["Inlines"]       = true,  -- meta section
 }
 

@@ -257,6 +257,23 @@ local function match_definition(line)
   local label, rest = line:match("^%s*%[(.-)%]:%s*(.*)")
   if not label then return nil end
   if #label == 0 then return nil end
+  -- Labels cannot contain unescaped '[' or ']' (CommonMark §4.7).
+  -- An unescaped bracket is one not preceded by '\'.
+  -- Check for unescaped brackets by scanning the label string.
+  do
+    local llen = #label
+    local li = 1
+    while li <= llen do
+      local lb = str_byte(label, li)
+      if lb == 92 then  -- backslash: skip next char
+        li = li + 2
+      elseif lb == 91 or lb == 93 then  -- unescaped '[' or ']'
+        return nil
+      else
+        li = li + 1
+      end
+    end
+  end
   -- url may be <...> or bare word (no spaces).
   local url, after
   if str_byte(rest, 1) == 60 then  -- '<'
@@ -409,9 +426,12 @@ parse_blocks = function(lines, i, j)
       add({ type = "html", value = tbl_concat(html_lines, "\n") })
 
     -- 8. Link definition: [label]: url
+    -- First definition wins (subsequent definitions for same label are ignored).
     elseif line:match("^%s*%[.-%]:") and match_definition(line) then
       local label, url, title = match_definition(line)
-      defs[label] = { url = url, title = title }
+      if not defs[label] then
+        defs[label] = { url = url, title = title }
+      end
       add({ type = "definition", label = label, url = url, title = title })
       i = i + 1
 
@@ -565,6 +585,9 @@ local parse_inlines  -- forward declaration
 
 -- Normalize a link reference label per CommonMark §6.6:
 -- collapse whitespace sequences to a single space, then lowercase.
+-- Note: backslash escapes are NOT processed — `\!` ≠ `!` in labels.
+-- Backslash-escaped brackets (\[ \]) just happen to be the same raw string in both
+-- definition and reference, so they match correctly without special handling.
 local function normalize_label(s)
   s = s:gsub("%s+", " ")
   s = s:match("^%s*(.-)%s*$") or s  -- trim
@@ -627,41 +650,89 @@ local function parse_link_dest(src, pos)
   if str_byte(src, pos) ~= 40 then return nil end  -- '('
   pos = pos + 1
   local len = #src
-  -- Skip whitespace.
-  while pos <= len and (str_byte(src, pos) == 32 or str_byte(src, pos) == 9) do
-    pos = pos + 1
+  -- Skip optional whitespace (including newlines).
+  while pos <= len do
+    local b = str_byte(src, pos)
+    if b == 32 or b == 9 or b == 10 or b == 13 then pos = pos + 1 else break end
   end
   -- URL: either <...> or run of non-whitespace, non-paren chars (balanced parens allowed).
   local url
   if pos <= len and str_byte(src, pos) == 60 then  -- '<'
-    local e = str_find(src, ">", pos + 1, true)
-    if not e then return nil end
-    url = str_sub(src, pos + 1, e - 1)
-    pos = e + 1
+    -- Angle-bracket URL: cannot contain line endings or unescaped '<' or '>'.
+    -- Backslash IS an escape for '>' (and other chars) inside <...>.
+    -- Spaces are allowed (will be percent-encoded by renderer).
+    pos = pos + 1
+    local url_parts = {}
+    local valid = true
+    while pos <= len do
+      local b = str_byte(src, pos)
+      if b == 62 then  -- unescaped '>' → end of URL
+        break
+      elseif b == 60 or b == 10 then  -- '<' or newline: invalid
+        valid = false
+        break
+      elseif b == 92 then  -- backslash escape
+        local nb = str_byte(src, pos + 1)
+        if nb == 62 then  -- '\>' → escaped '>', include as '>'
+          url_parts[#url_parts + 1] = ">"
+          pos = pos + 2
+        elseif nb then
+          url_parts[#url_parts + 1] = "\\" .. str_char(nb)
+          pos = pos + 2
+        else
+          url_parts[#url_parts + 1] = "\\"
+          pos = pos + 1
+        end
+      else
+        url_parts[#url_parts + 1] = str_char(b)
+        pos = pos + 1
+      end
+    end
+    if not valid or pos > len then return nil end
+    url = tbl_concat(url_parts)
+    pos = pos + 1  -- skip '>'
   else
-    -- Bare URL: stop at space, ), EOF. Allow balanced parens.
+    -- Bare URL: stop at space, ), EOF. Allow balanced parens and backslash escapes.
     local depth = 0
-    local start = pos
+    local parts = {}
     while pos <= len do
       local b = str_byte(src, pos)
       if b == 40 then       -- '('
         depth = depth + 1
+        parts[#parts + 1] = "("
         pos = pos + 1
       elseif b == 41 then   -- ')'
         if depth == 0 then break end
         depth = depth - 1
+        parts[#parts + 1] = ")"
         pos = pos + 1
+      elseif b == 92 then   -- backslash
+        local nb = str_byte(src, pos + 1)
+        -- Only ASCII punctuation is escapable (§2.4).
+        local is_punct = nb and (
+          (nb >= 33 and nb <= 47) or (nb >= 58 and nb <= 64) or
+          (nb >= 91 and nb <= 96) or (nb >= 123 and nb <= 126))
+        if is_punct then
+          -- Backslash-escaped ASCII punctuation: include the literal char.
+          parts[#parts + 1] = str_char(nb)
+          pos = pos + 2
+        else
+          parts[#parts + 1] = "\\"
+          pos = pos + 1
+        end
       elseif b == 32 or b == 9 or b == 10 then
         break
       else
+        parts[#parts + 1] = str_char(b)
         pos = pos + 1
       end
     end
-    url = str_sub(src, start, pos - 1)
+    url = tbl_concat(parts)
   end
-  -- Skip whitespace.
-  while pos <= len and (str_byte(src, pos) == 32 or str_byte(src, pos) == 9) do
-    pos = pos + 1
+  -- Skip optional whitespace (including newlines) before title.
+  while pos <= len do
+    local b = str_byte(src, pos)
+    if b == 32 or b == 9 or b == 10 or b == 13 then pos = pos + 1 else break end
   end
   -- Optional title: "...", '...', (...).
   local title
@@ -690,9 +761,10 @@ local function parse_link_dest(src, pos)
       end
     end
   end
-  -- Skip whitespace.
-  while pos <= len and (str_byte(src, pos) == 32 or str_byte(src, pos) == 9) do
-    pos = pos + 1
+  -- Skip optional whitespace (including newlines) before closing ')'.
+  while pos <= len do
+    local b = str_byte(src, pos)
+    if b == 32 or b == 9 or b == 10 or b == 13 then pos = pos + 1 else break end
   end
   -- Expect ')'.
   if pos > len or str_byte(src, pos) ~= 41 then return nil end
@@ -849,7 +921,10 @@ local function tokenize_inlines(src, defs)
     -- '[': potential link or image open.
     elseif b == 91 then  -- '['
       flush_text(pos)
-      local is_image = (pos > 1 and str_byte(src, pos - 1) == 33)  -- '!'
+      -- Check for image prefix '!': must be literal '!' (not a backslash-escaped '!').
+      -- A backslash-escaped '!' (\!) should produce a literal '!' followed by a link, not image.
+      local is_image = (pos > 1 and str_byte(src, pos - 1) == 33 and
+                        not (pos > 2 and str_byte(src, pos - 2) == 92))  -- '!' not preceded by '\'
       -- Remove the '!' from previous text token if image.
       if is_image and #tokens > 0 and tokens[#tokens].type == "text" then
         local tv = tokens[#tokens].value
@@ -887,11 +962,13 @@ local function tokenize_inlines(src, defs)
           end
         elseif ref_label == "" then
           -- Empty [] after ] → collapsed reference: label = text between opener brackets.
-          tokens[#tokens + 1] = { type = "link_ref_close", collapsed = true }
+          -- Store close_pos (position of ']' in src) so resolve_inlines can extract raw label.
+          tokens[#tokens + 1] = { type = "link_ref_close", collapsed = true, close_pos = pos - 1 }
           pos = pos + 2  -- skip the '[]'
         else
           -- No [ref] → shortcut reference: label = text between opener brackets.
-          tokens[#tokens + 1] = { type = "link_ref_close", shortcut = true }
+          -- Store close_pos (position of ']' in src) so resolve_inlines can extract raw label.
+          tokens[#tokens + 1] = { type = "link_ref_close", shortcut = true, close_pos = pos - 1 }
         end
       else
         -- No destination and no defs: treat as text.
@@ -942,7 +1019,7 @@ end
 -- Resolve delimiter tokens into emphasis/strong nodes.
 -- Also resolves link/image open-close pairs.
 -- Returns array of inline nodes.
-local function resolve_inlines(tokens, defs)
+local function resolve_inlines(tokens, defs, src)
   local result = {}
 
   -- First pass: resolve links/images.
@@ -952,17 +1029,24 @@ local function resolve_inlines(tokens, defs)
   local resolved = {}  -- new token list after link resolution
 
   -- We need to track bracket stack.
-  local bracket_stack = {}  -- stack of indices into `tokens` where link_open/image_open appear
+  -- Each frame: { idx, is_image, inactive }
+  -- inactive=true: deactivated link_open (can't form a link, becomes '[' text)
+  local bracket_stack = {}
 
   while i <= n do
     local tok = tokens[i]
     if tok.type == "link_open" or tok.type == "image_open" then
-      bracket_stack[#bracket_stack + 1] = { idx = #resolved + 1, is_image = tok.type == "image_open" }
+      bracket_stack[#bracket_stack + 1] = {
+        idx = #resolved + 1,
+        is_image = tok.type == "image_open",
+        inactive = false,
+      }
       resolved[#resolved + 1] = tok
       i = i + 1
     elseif tok.type == "link_close" or tok.type == "link_ref_close" then
       if #bracket_stack > 0 then
         local frame = bracket_stack[#bracket_stack]
+
         -- Collect content tokens between frame.idx and current position.
         local inner_tokens = {}
         for k = frame.idx + 1, #resolved do
@@ -972,60 +1056,86 @@ local function resolve_inlines(tokens, defs)
         local url, title
         local matched = false
 
-        if tok.type == "link_close" then
-          -- Inline link: always matched (url may be empty string).
-          url = tok.url
-          title = tok.title
-          matched = true
-        elseif defs then
-          -- Reference link: resolve label against defs.
-          local label
-          if tok.ref then
-            -- Full reference [text][ref]: label is tok.ref (already normalized).
-            label = tok.ref
-          else
-            -- Collapsed [ref][] or shortcut [ref]: label = text from inner tokens.
-            label = tokens_to_label(inner_tokens)
-          end
-          local def = defs[label]
-          if def then
-            url = def.url
-            title = def.title
+        -- Inactive frames cannot match (links can't be inside links).
+        if not frame.inactive then
+          if tok.type == "link_close" then
+            url = tok.url
+            title = tok.title
             matched = true
+          elseif defs then
+            local label
+            if tok.ref then
+              label = tok.ref
+            elseif src and tok.close_pos then
+              -- Shortcut/collapsed: use raw source text for label (preserves backslashes, etc.).
+              -- opener token in resolved[frame.idx] has .pos = position of '[' in src.
+              local opener_tok = resolved[frame.idx]
+              if opener_tok and opener_tok.pos then
+                local raw = str_sub(src, opener_tok.pos + 1, tok.close_pos - 1)
+                label = normalize_label(raw)
+              else
+                label = tokens_to_label(inner_tokens)
+              end
+            else
+              label = tokens_to_label(inner_tokens)
+            end
+            local def = defs[label]
+            if def then
+              url = def.url
+              title = def.title
+              matched = true
+            end
           end
         end
 
         if matched then
           bracket_stack[#bracket_stack] = nil
-          -- Remove the bracket open and everything after from resolved.
-          for k = #resolved, frame.idx, -1 do
-            resolved[k] = nil
-          end
+          for k = #resolved, frame.idx, -1 do resolved[k] = nil end
           local node_type = frame.is_image and "image" or "link"
           local link_node = {
             type = node_type,
             url = url,
             title = title,
-            children = resolve_inlines(inner_tokens, defs),
+            children = resolve_inlines(inner_tokens, defs, src),
           }
-          if frame.is_image then
-            link_node.alt = nil  -- computed from children by caller if needed
-          end
           resolved[#resolved + 1] = { type = "node", node = link_node }
-        else
-          -- Unmatched reference (label not in defs): emit as text.
-          bracket_stack[#bracket_stack] = nil
-          for k = #resolved, frame.idx, -1 do
-            resolved[k] = nil
+          -- CommonMark: after a link is created, deactivate all link_open (not image_open)
+          -- frames remaining in the bracket_stack (links can't contain links).
+          if node_type == "link" then
+            for _, outer_frame in ipairs(bracket_stack) do
+              if not outer_frame.is_image then
+                outer_frame.inactive = true
+              end
+            end
           end
-          -- Re-emit the opener as '[' or '!['.
+        else
+          -- Unmatched (no dest or inactive): emit as text.
+          bracket_stack[#bracket_stack] = nil
+          for k = #resolved, frame.idx, -1 do resolved[k] = nil end
           resolved[#resolved + 1] = { type = "text", value = frame.is_image and "![" or "[" }
-          -- Re-emit inner tokens as-is.
           for _, t in ipairs(inner_tokens) do
             resolved[#resolved + 1] = t
           end
-          -- Re-emit the closing ']' as text.
           resolved[#resolved + 1] = { type = "text", value = "]" }
+          -- Re-emit consumed suffix (url or reference label) so it can be processed.
+          if tok.type == "link_close" and tok.url ~= nil then
+            -- Re-emit the (url) that was consumed by this token.
+            local title_part = tok.title and (' "' .. tok.title .. '"') or ""
+            resolved[#resolved + 1] = { type = "text", value = "(" .. tok.url .. title_part .. ")" }
+          elseif tok.type == "link_ref_close" and tok.ref and defs then
+            -- The [ref] was consumed. Emit it as a link node if defined, otherwise as text.
+            local def = defs[tok.ref]
+            if def then
+              resolved[#resolved + 1] = { type = "node", node = {
+                type = "link", url = def.url, title = def.title,
+                children = { { type = "text", value = tok.ref } },
+              }}
+            else
+              resolved[#resolved + 1] = { type = "text", value = "[" .. tok.ref .. "]" }
+            end
+          elseif tok.type == "link_ref_close" and tok.collapsed then
+            resolved[#resolved + 1] = { type = "text", value = "[]" }
+          end
         end
       else
         -- Unmatched ]: emit as text.
@@ -1041,10 +1151,14 @@ local function resolve_inlines(tokens, defs)
     end
   end
 
-  -- Unmatched link/image opens: convert to text '['.
+  -- Unmatched link/image opens: convert to text '[' or '!['.
   for _, frame in ipairs(bracket_stack) do
-    resolved[frame.idx].type = "text"
-    resolved[frame.idx].value = (resolved[frame.idx].type == "image_open") and "![" or "["
+    local tok2 = resolved[frame.idx]
+    if tok2 then
+      local is_img = tok2.type == "image_open"
+      tok2.type = "text"
+      tok2.value = is_img and "![" or "["
+    end
   end
 
   -- Second pass: resolve emphasis/strong delimiters.
@@ -1227,7 +1341,7 @@ end
 parse_inlines = function(src, defs)
   if not src or src == "" then return {} end
   local tokens = tokenize_inlines(src, defs)
-  return resolve_inlines(tokens, defs)
+  return resolve_inlines(tokens, defs, src)
 end
 
 -- ── Phase 2: inline expansion pass ────────────────────────────────────────────
