@@ -154,6 +154,26 @@ Presets are `.lua` files with metadata. No runtime machinery: the platform brows
 the preset library, the user picks one, it drops into the card's script chunk.
 Users fork presets freely; the platform has no opinion about what they do next.
 
+## Bookmarks
+
+Bookmarks are a first-class platform primitive — not an afterthought. Every meaningful
+state the platform can render is addressable and returnable: a card interaction session,
+the card library viewer, the lorebook editor, a specific branch in a chat tree, a world
+state snapshot. There is no distinction between "current app" and "saved state."
+
+The current session is itself a bookmark. Reboot restores it automatically.
+
+**Open metadata.** A bookmark carries arbitrary user-defined metadata — tags, summaries,
+preview images, timestamps, relationships to other bookmarks, custom fields. Tags are
+one type of metadata. Relations are another. There is no fixed schema; each bookmark
+carries what makes sense for it. Organisation (filtering, grouping, searching) is
+queries over metadata — not folders, not a fixed hierarchy.
+
+**Everything is a bookmark.** The card library viewer is a script — it is also a
+bookmark. Switching from editing a card to running it is navigating between bookmarks.
+The platform's navigation model is the bookmark system; there is no separate concept
+of "which app is open."
+
 ## Self-contained cards
 
 Every CCv2-compatible card imported by the platform has the editor scripts embedded
