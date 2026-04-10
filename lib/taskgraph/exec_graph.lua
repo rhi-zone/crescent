@@ -2,7 +2,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
--- lib/orchestration/exec_graph — monotonic audit log of every task spawned.
+-- lib/taskgraph/exec_graph — monotonic audit log of every task spawned.
 --
 -- Only populated when the runtime is created with { track = true }.
 -- Never shrinks. Nodes record full lifecycle: pending → running → completed/failed.

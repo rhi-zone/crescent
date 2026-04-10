@@ -2,14 +2,14 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local exec        = require("lib.orchestration.exec")
-local combinators = require("lib.orchestration.combinators")
+local exec        = require("lib.taskgraph.exec")
+local combinators = require("lib.taskgraph.combinators")
 
 local M = {}
 
-M.graph      = require("lib.orchestration.graph")
-M.frontier   = require("lib.orchestration.frontier")
-M.exec_graph = require("lib.orchestration.exec_graph")
+M.graph      = require("lib.taskgraph.graph")
+M.frontier   = require("lib.taskgraph.frontier")
+M.exec_graph = require("lib.taskgraph.exec_graph")
 
 -- Global executor registry.
 M._registry = {}

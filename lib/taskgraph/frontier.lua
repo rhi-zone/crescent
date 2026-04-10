@@ -2,7 +2,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
--- lib/orchestration/frontier — live set of pending+running tasks.
+-- lib/taskgraph/frontier — live set of pending+running tasks.
 --
 -- Only populated when the runtime is created with { track = true }.
 -- Nodes are added on spawn and removed when a task finishes (done or error).

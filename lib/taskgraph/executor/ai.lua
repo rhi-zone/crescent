@@ -1,12 +1,12 @@
--- AI executor for lib/orchestration.
+-- AI executor for lib/taskgraph.
 -- Registers "llm.complete" and "llm.tool_loop" task types.
 --
 -- Usage:
---   local orch = require("lib.orchestration")
---   require("lib.orchestration.executor.ai").register(orch)
+--   local orch = require("lib.taskgraph")
+--   require("lib.taskgraph.executor.ai").register(orch)
 --
 -- Or standalone:
---   local ai_exec = require("lib.orchestration.executor.ai")
+--   local ai_exec = require("lib.taskgraph.executor.ai")
 --   local executors = ai_exec.executors   -- merge into your own executor table
 
 if not package.path:find("./?/init.lua", 1, true) then

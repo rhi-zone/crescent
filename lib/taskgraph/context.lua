@@ -2,9 +2,9 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local graph_mod      = require("lib.orchestration.graph")
-local frontier_mod   = require("lib.orchestration.frontier")
-local exec_graph_mod = require("lib.orchestration.exec_graph")
+local graph_mod      = require("lib.taskgraph.graph")
+local frontier_mod   = require("lib.taskgraph.frontier")
+local exec_graph_mod = require("lib.taskgraph.exec_graph")
 
 local M = {}
 

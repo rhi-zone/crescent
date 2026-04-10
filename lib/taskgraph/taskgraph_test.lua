@@ -3,7 +3,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local T    = require("lib.test.assert")
-local orch = require("lib.orchestration")
+local orch = require("lib.taskgraph")
 
 -- ── 1. Echo task ─────────────────────────────────────────────────────────────
 
@@ -72,8 +72,8 @@ T.describe("error propagation", function()
 		local captured_g
 		pcall(function()
 			local function boom_exec() error("kaboom") end
-			local exec_mod = require("lib.orchestration.exec")
-			local graph_mod = require("lib.orchestration.graph")
+			local exec_mod = require("lib.taskgraph.exec")
+			local graph_mod = require("lib.taskgraph.graph")
 			local gr = graph_mod.new()
 			local id = graph_mod.add(gr, { type = "boom", input = {} }, nil)
 			gr.root = id
@@ -286,10 +286,10 @@ T.describe("exec_graph", function()
 		-- run raises, so we use a wrapper to get the graph back
 		local captured_g
 		pcall(function()
-			local exec_mod  = require("lib.orchestration.exec")
-			local graph_mod = require("lib.orchestration.graph")
-			local egraph    = require("lib.orchestration.exec_graph")
-			local frontier  = require("lib.orchestration.frontier")
+			local exec_mod  = require("lib.taskgraph.exec")
+			local graph_mod = require("lib.taskgraph.graph")
+			local egraph    = require("lib.taskgraph.exec_graph")
+			local frontier  = require("lib.taskgraph.frontier")
 			local gr = graph_mod.new()
 			local id = graph_mod.add(gr, { type = "fail_task", input = {} }, nil)
 			gr.root = id
@@ -445,7 +445,7 @@ T.describe("llm executor (mocked)", function()
 			return { text = "mock response", usage = { input = 10, output = 5 } }
 		end
 
-		local ai_exec = require("lib.orchestration.executor.ai")
+		local ai_exec = require("lib.taskgraph.executor.ai")
 		local out = orch.run(
 			{
 				type  = "llm.complete",
@@ -477,7 +477,7 @@ T.describe("llm executor (mocked)", function()
 			end
 		end
 
-		local ai_exec = require("lib.orchestration.executor.ai")
+		local ai_exec = require("lib.taskgraph.executor.ai")
 		local executors = {
 			add     = function(t, _) return { result = t.input.a + t.input.b } end,
 		}
