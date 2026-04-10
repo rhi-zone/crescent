@@ -274,7 +274,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] **`lib/cli/`** — arg-parsing library. Namespace freed (old `lib/cli/` renamed to `lib/crescent_examples/`). Not yet implemented.
 - [x] **`lib/datetime/`** — date/time parsing, formatting, arithmetic. ISO 8601, Unix timestamps, offset-aware arithmetic. 186 assertions (c6e9bbb).
 - [ ] **`lib/regex/`** — PCRE or LPEG wrapper with crescent-native API.
-- [ ] **`lib/uuid/`** — UUID v4/v7 generation.
+- [x] **`lib/uuid/`** — UUID v4/v7 generation. v4 (random), v7 (timestamp+monotonic). FFI tiers: getrandom → arc4random_buf → /dev/urandom → pure. 250 assertions.
 - [ ] **`lib/log/`** — structured logging/tracing with levels and sinks.
 - [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
 - [x] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
