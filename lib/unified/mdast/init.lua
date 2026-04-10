@@ -407,8 +407,10 @@ parse_blocks = function(lines, i, j)
           break
         elseif last_was_para and not match_atx_heading(l) and not is_thematic_break(l)
             and not match_fence_open(l) and not match_blockquote(l)
-            and not match_list_item(l) and count_indent(l) < 4 then
+            and not match_list_item(l) then
           -- Lazy continuation: treat as paragraph continuation inside blockquote.
+          -- Note: even 4+-space indented lines can lazily continue (they're paragraph text,
+          -- not code blocks in this context).
           bq_lines[#bq_lines + 1] = l
           last_was_para = true
           i = i + 1
