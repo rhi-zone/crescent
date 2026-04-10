@@ -107,6 +107,11 @@ end
 mod.new = function () return epoll:new() end
 
 --[[@param fd fd_c]] --[[@param read epoll_read]]
+-- If the read callback accepts a parameter, epoll wraps it to read from the fd
+-- via raw read_c and deliver the data as a string. If the callback takes no
+-- parameters, it is called as a bare notification and must read from the fd
+-- itself (e.g. via ljsocket:receive()). Mixing read_c and ljsocket receive on
+-- the same fd is undefined — use one or the other consistently.
 local read_cb = function (fd, read)
 	return function ()
 		--[[FIXME: ioctl to get full message in one call]]
