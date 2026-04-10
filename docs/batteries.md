@@ -15,11 +15,11 @@ web archiving. Every piece maps to a crescent primitive:
 
 | Lumen feature | Crescent primitive |
 |---|---|
-| Ingest pipeline | `lib/orchestration`, `lib/fs`, `lib/process` |
+| Ingest pipeline | `lib/taskgraph`, `lib/fs`, `lib/process` |
 | PDF/image/audio parsing | `lib/format/*`, `lib/process` (subprocess) |
 | Web archiving | `lib/http`, `lib/html` |
 | Full-text search | `lib/sqlite` (FTS5) |
-| Tag inference | `lib/orchestration/executor/ai` |
+| Tag inference | `lib/taskgraph/executor/ai` |
 | E2E encrypted sync | `lib/http`, `lib/crypto` (AES-GCM, HKDF) |
 | CLI | `lib/cli` (arg parsing) |
 
@@ -64,7 +64,7 @@ layer of the OS-as-Lua goal.
 Claude Code, not by being all three, but by being the substrate they're programs on
 top of.
 
-**Core thesis (from `lib/orchestration`):** the LLM is a stateless oracle. Conversation
+**Core thesis (from `lib/taskgraph`):** the LLM is a stateless oracle. Conversation
 is context poisoning. The right unit is a function call. The orchestrator is a program,
 not an agent. ST/Talemate/Claude Code are different programs that call LLMs — the
 platform gives primitives and requires you to write the loop.
@@ -112,7 +112,7 @@ worldstate queries; the lorebook editor is only needed for the compatibility sur
 | Component | Crescent primitive |
 |---|---|
 | World state | `lib/sqlite` + entity model |
-| LLM task dispatch | `lib/orchestration` + `lib/orchestration/executor/ai` |
+| LLM task dispatch | `lib/taskgraph` + `lib/taskgraph/executor/ai` |
 | Prose assembly | Lua string ops (no dedicated library needed) |
 | Reactive UI | `lib/reactive_optics` |
 | HTTP server/API | `lib/http` |
@@ -156,7 +156,7 @@ structure; the model is a function over it. The context window is a view, not th
 - **Functional** — fp/ typeclasses (Maybe, Either, lens, prism), iter combinators
 - **AI** — provider dispatch (Anthropic, OpenAI, Google), streaming, embeddings, tools
 - **Orchestration** — task graph, execution engine, combinators (map/retry/refine),
-  LLM executor at `lib/orchestration/executor/ai`
+  LLM executor at `lib/taskgraph/executor/ai`
 - **Package manager** — semver, manifest, lockfile (install not yet implemented)
 - **Markdown** — `lib/mdast`: CommonMark parser (Phase 1) producing mdast-compatible AST
   nodes; block structure (headings, paragraphs, fenced/indented code, thematic breaks,
@@ -278,7 +278,7 @@ rendering. Boring but load-bearing for any application with user accounts.
 
 **`lib/queue`** — task queues and scheduling. Cron-style job scheduling, deferred
 execution, retry with backoff. Backed by SQLite for persistence. Builds on
-`lib/orchestration` for execution semantics.
+`lib/taskgraph` for execution semantics.
 
 **`lib/search`** — search vertical. Full-text search via SQLite FTS5 (near-term) +
 semantic search via embeddings (`lib/ai`) for vector similarity. Needed by Lumen and
