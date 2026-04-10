@@ -222,7 +222,9 @@ Protocol libraries that expose a typed API, not just a raw wire format:
 
 **`lib/jsonrpc`** — request/response dispatch layer over stdio or TCP. The substrate
 for LSP, MCP, and any other JSON-RPC protocol. Design: transport abstraction (stdio,
-TCP, HTTP), method registry, typed handler registration.
+TCP, HTTP), method registry, typed handler registration. **Done** — dispatcher,
+stdio transport (Content-Length framing), table transport (testing), batch requests,
+error codes, and test suite implemented.
 
 **`lib/lsp`** — LSP method bindings on top of `lib/jsonrpc`. Ships with every method
 pre-typed from the LSP spec. You register handlers; the types are already there. The

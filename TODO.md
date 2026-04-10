@@ -313,7 +313,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   run in browser alongside Rainbow components. Rainbow (`~/git/rhizone/rainbow/`) is the
   deployment target — `lib/lua2ts/` output is designed to compose with Rainbow's signal/optics layer.
 
-- [ ] **`lib/jsonrpc/`** — request/response dispatch over stdio or TCP. Substrate for LSP, Model Context Protocol, and any JSON-RPC protocol. Transport abstraction, method registry, typed handler registration.
+- [x] **`lib/jsonrpc/`** — request/response dispatch over stdio or TCP. Substrate for LSP, Model Context Protocol, and any JSON-RPC protocol. Transport abstraction, method registry, typed handler registration.
 
 - [ ] **`lib/lsp/`** — LSP method bindings on top of `lib/jsonrpc`. Every method pre-typed from the LSP spec; you register handlers. Currently `lib/type/static/lsp.lua` rolls its own JSON-RPC — this replaces that.
 
