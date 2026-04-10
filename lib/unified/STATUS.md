@@ -16,7 +16,7 @@ Not ported (intentional):
 
 | Package | JS reference | Status | Notes |
 |---|---|---|---|
-| `mdast` | [mdast](https://github.com/syntax-tree/mdast) | ✅ done | CommonMark parser; links 67%, images 59%, emphasis 73%, lists 69–73%; 100% on core sections |
+| `mdast` | [mdast](https://github.com/syntax-tree/mdast) | ✅ done | CommonMark parser; setext/blockquotes/list-items 100%; lists 96%; emphasis 95%; links 88%; images 59% |
 | `remark` | [remark](https://github.com/remarkjs/remark) | ✅ done | Markdown preset (parse + stringify) |
 | `remark_rehype` | [remark-rehype](https://github.com/remarkjs/remark-rehype) | ✅ done | mdast→hast bridge plugin |
 | `remark_gfm` | [remark-gfm](https://github.com/remarkjs/remark-gfm) | ✅ done | tables, strikethrough, task lists, autolinks |
@@ -129,11 +129,19 @@ Not yet ported:
 The crescent hast implementation uses `tag` and `props` rather than the spec's `tagName` and `properties`. This is an intentional deviation (shorter, more Lua-idiomatic), but it means any JS plugin ported without reading `lib/unified/hast/init.lua` first will use the wrong field names. Noted in each plugin's commit.
 
 ### mdast fixture coverage
-`lib/unified/mdast` passes 100% of core CommonMark sections. Known gaps (investigated 2026-04-10):
+`lib/unified/mdast` as of 2026-04-10:
 
-- **Links / Images**: 67% / 59% — reference link resolution now implemented (was 34%/27%). Remaining failures are edge cases in label normalisation and nested bracket handling.
-- **Emphasis / Strong**: 73% — `can_open`/`can_close` flanking delimiter rules don't fully handle Unicode punctuation categories or all word-boundary interactions.
-- **Lists / List Items**: 69–73% — loose/tight detection is over-broad (blank lines within an item incorrectly mark the whole list loose); indented-code-block interaction with list continuation not fully handled.
+| Section | Score | Notes |
+|---|---|---|
+| Setext headings | 27/27 (100%) | |
+| Block quotes | 25/25 (100%) | |
+| List items | 48/48 (100%) | |
+| Lists | 25/26 (96%) | ex312: lazy continuation + list-item-interrupt interaction |
+| Emphasis/Strong | 125/132 (95%) | 7 failures require inline HTML or full Unicode punctuation tables |
+| Links | 79/90 (88%) | 11 failures: HTML entity decoding, multi-line labels, inline HTML in links |
+| Images | ~59% | Same inline parser gaps as Links |
+
+Remaining hard gaps require either a Unicode punctuation table or HTML entity decoding — both deferred but tracked in TODO.md.
 
 `lib/unified/remark_math` works around one mdast limitation (backslash stripping in inline parsing) using a pre-parse placeholder technique.
 
