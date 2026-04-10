@@ -136,12 +136,12 @@ The crescent hast implementation uses `tag` and `props` rather than the spec's `
 | Setext headings | 27/27 (100%) | |
 | Block quotes | 25/25 (100%) | |
 | List items | 48/48 (100%) | |
-| Lists | 25/26 (96%) | ex312: lazy continuation + list-item-interrupt interaction |
-| Emphasis/Strong | 125/132 (95%) | 7 failures require inline HTML or full Unicode punctuation tables |
-| Links | 79/90 (88%) | 11 failures: HTML entity decoding, multi-line labels, inline HTML in links |
-| Images | ~59% | Same inline parser gaps as Links |
+| Lists | 26/26 (100%) | |
+| Emphasis/Strong | 132/132 (100%) | |
+| Links | 89/90 (98.9%) | ex491: newline inside angle-bracket URL — requires multi-line raw passthrough |
+| Images | ~80% | Same inline parser as Links; most gaps now fixed |
 
-Remaining hard gaps require either a Unicode punctuation table or HTML entity decoding — both deferred but tracked in TODO.md.
+One remaining known gap: ex491 (`[link](<foo\nbar>)` — literal newline inside `<…>` URL). Requires raw HTML passthrough across line boundaries; deferred.
 
 `lib/unified/remark_math` works around one mdast limitation (backslash stripping in inline parsing) using a pre-parse placeholder technique.
 
