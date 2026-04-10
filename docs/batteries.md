@@ -186,8 +186,9 @@ formatting per RFC 3339 / ISO 8601.
 Needed for search syntax, text processing, URL routing. Design: PCRE2 via FFI (system
 library tier) + a pure Lua fallback for basic patterns.
 
-**CLI arg parsing** — `lib/cli` exists but its scope is unclear. Need a clap-equivalent:
-subcommands, typed flags, auto-generated help, completions. Every CLI tool needs this.
+**CLI arg parsing** — `lib/cli` implemented. Clap-inspired builder API: subcommands,
+typed flags/options, auto-generated help/version, shell completions (bash/zsh/fish),
+combined short flags, array options, positionals. 67 assertions.
 
 **Structured logging** (`lib/log`) — implemented. Named loggers with level filtering,
 structured fields, and pluggable sinks. API: `log.new(name, opts)`, `:trace/debug/info/warn/error(msg, fields?)`,
@@ -201,8 +202,9 @@ OpenTelemetry trace IDs not yet implemented.
 FFI tiers: getrandom (Linux) → arc4random_buf (macOS/BSD) → /dev/urandom → pure Lua.
 API: `uuid.v4()`, `uuid.v7()`, `uuid.parse(s)`, `uuid.fmt(b)`, `uuid.is_valid(s)`, `uuid._tier`.
 
-**Compression** — no zlib/gzip, no zstd. Needed for HTTP content encoding, storage,
-sync. Design: system library tier (zlib, zstd via FFI) + pure Lua tier for zlib deflate.
+**Compression** (`lib/compress`) — implemented. System tier (zlib FFI: full deflate +
+inflate, streaming, zlib/gzip/raw formats) + pure Lua tier (inflate only, RFC 1951).
+Parity-tested. zstd deferred. 24 assertions.
 
 **Template formats** — standard specs (`lib/mustache`, `lib/handlebars`, etc.) are
 worth adding as libraries. A bespoke `lib/template/` for prose assembly is not — Lua
@@ -235,11 +237,15 @@ TCP, HTTP), method registry, typed handler registration. **Done** — dispatcher
 stdio transport (Content-Length framing), table transport (testing), batch requests,
 error codes, and test suite implemented.
 
-**`lib/lsp`** — LSP method bindings on top of `lib/jsonrpc`. Ships with every method
-pre-typed from the LSP spec. You register handlers; the types are already there. The
-protocol definition is the library.
+**`lib/lsp`** — implemented. LSP method bindings on top of `lib/jsonrpc`. Server builder
+with `on_*` registration for all core LSP methods, auto-capability detection from
+registered handlers, lifecycle management (initialize/shutdown/exit), server-to-client
+notifications (publishDiagnostics, logMessage, showMessage). 60 assertions.
 
-**`lib/mcp`** — same pattern for the Model Context Protocol. (Note: `lib/mud_cp/` is the existing MUD Client Protocol implementation — unrelated.)
+**`lib/mcp`** — implemented. MCP server on top of `lib/jsonrpc`. Tool/resource/prompt
+registration, URI template resources, capability negotiation, logging with level filtering,
+argument completions. Protocol version 2024-11-05. 44 assertions.
+(Note: `lib/mud_cp/` is the existing MUD Client Protocol implementation — unrelated.)
 
 **`lib/openapi`** — OpenAPI 3.x client/server from a spec file. Request validation,
 response serialization, typed route handlers.

@@ -276,12 +276,12 @@ Not libraries (do not rewrite, repurpose instead):
 See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteries.md is authoritative.
 
 - [x] **`lib/taskgraph/`** — implemented: graph.lua, context.lua, exec.lua, combinators.lua (map/retry/refine), init.lua, executor/ai.lua, orchestration_test.lua (27 assertions).
-- [ ] **`lib/cli/`** — arg-parsing library. Namespace freed (old `lib/cli/` renamed to `lib/crescent_examples/`). Not yet implemented.
+- [x] **`lib/cli/`** — arg-parsing library. Clap-inspired builder API: flags, options, positionals, subcommands, type coercion, auto-help/version, shell completions. 67 assertions.
 - [x] **`lib/datetime/`** — date/time parsing, formatting, arithmetic. ISO 8601, Unix timestamps, offset-aware arithmetic. 186 assertions (c6e9bbb).
 - [ ] **`lib/regex/`** — PCRE or LPEG wrapper with crescent-native API.
 - [x] **`lib/uuid/`** — UUID v4/v7 generation. v4 (random), v7 (timestamp+monotonic). FFI tiers: getrandom → arc4random_buf → /dev/urandom → pure. 250 assertions.
 - [x] **`lib/log/`** — structured logging with levels and sinks. log.new(), collect_sink, file_sink, stderr/stdout_sink, text/json/ansi formats, child loggers, set_level, add/remove sink. 80 assertions.
-- [ ] **`lib/compress/`** — zlib/gzip/zstd via FFI.
+- [x] **`lib/compress/`** — zlib/gzip via FFI (system tier) + pure Lua inflate (RFC 1951). Two tiers: system-zlib (full deflate+inflate) and pure-lua (inflate only). Streaming and one-shot APIs. 24 assertions.
 - [x] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
 - [x] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
 - [x] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
@@ -319,9 +319,9 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 
 - [x] **`lib/jsonrpc/`** — request/response dispatch over stdio or TCP. Substrate for LSP, Model Context Protocol, and any JSON-RPC protocol. Transport abstraction, method registry, typed handler registration. (1d4f85e)
 
-- [ ] **`lib/lsp/`** — LSP method bindings on top of `lib/jsonrpc`. Every method pre-typed from the LSP spec; you register handlers. Currently `lib/type/static/lsp.lua` rolls its own JSON-RPC — this replaces that.
+- [x] **`lib/lsp/`** — LSP method bindings on top of `lib/jsonrpc`. Server builder with `on_*` registration, auto-capability detection, lifecycle handling. Covers: initialize, hover, completion, definition, references, documentSymbol, signatureHelp, formatting, rename, codeAction, diagnostic, text sync. 60 assertions.
 
-- [ ] **`lib/mcp/`** — Model Context Protocol client/server on top of `lib/jsonrpc`. (Note: `lib/mud_cp/` is the old MUD Client Protocol implementation — unrelated.)
+- [x] **`lib/mcp/`** — Model Context Protocol server on top of `lib/jsonrpc`. Tool/resource/prompt registration, capability negotiation, logging with level filtering, completions. 44 assertions.
 
 - [ ] **`lib/ecs/`** — entity-component substrate. Named entities, typed components, spatial containment (entities inside entities), mutable state store. User-defined schemas — no hardcoded concepts like "room" or "inventory". The primitive for building world simulations, games, or any entity-centric stateful system. Turn loop, perception rules, mutation rules, and renderers (RP prose, MUD-style, etc.) are built on top by the user.
 
