@@ -296,6 +296,8 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   Again: no dependency on Rainbow — same algebra, separate codebases.
   **Done**: dccd023. field/compose_focus/focus/narrow. 9 assertions.
 - [ ] **`lib/ml/`** — ML vertical: `lib/vec` (dense vectors FFI), `lib/tfidf`, `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
+- [ ] **`lib/nanites/`** — nanites-style task-graph executor for parallel LLM dispatch. Non-agentic, non-conversational: LLM invocations are pure function calls (task = data, executor = resource owner). Extends `lib/orchestration` with: dynamic graph growth (tasks spawn child tasks at runtime), frontier (live pending task tree), exec_graph (monotonic audit log), scaffold hooks. Parallelism via epoll-backed `lib/http` (see entry above). vLLM integration: `caps.llm` points at local vLLM server (OpenAI-compatible API), scripts don't see the difference. Reference: `~/git/rhizone/nanites/`.
+
 - [ ] **`lib/protocol/capnp`** — zero-copy binary serialization via Cap'n Proto. Wire format reader + writer using LuaJIT FFI (fixed-width fields + typed pointers → direct buffer casting, near-zero allocation). Pure reader first; `.capnp` schema parser deferred (hand-write schemas as Lua tables initially). RPC layer (`lib/capnprpc`) separate. Moderately high priority — genuine capability gap over JSON/CBOR for high-throughput IPC.
 - [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
 - [ ] **`lib/parse/`** / **`lib/ir/`** — language tooling vertical (compiler IR, parser combinator).
@@ -581,6 +583,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] `http/client`: replace `assert(socket.create(...))` with `return nil, err` — fails with unhelpful message on socket error
 - [ ] `http/format`: silently drops unparseable headers — log or return error
 - [ ] extract network layer (client.lua, server.lua) — needs lib/ljsocket, lib/epoll, lib/socket/server.lua
+- [ ] **`lib/http/client.lua` epoll support** — add optional `epoll` parameter (same pattern as `~/git/lua/lib/tcp/client.lua`). Non-blocking socket + epoll callback registration so multiple concurrent HTTP requests (e.g. parallel vLLM calls) can share one event loop. Prerequisite for parallel nanite fleet.
 - [ ] extract routers — needs lib/path, lib/mimetype, lib/fs, lib/lunajson
 
 #### https
