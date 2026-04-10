@@ -301,7 +301,8 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   Parallel TS implementation: Rainbow's optics layer (`~/git/rhizone/rainbow/src/optics/`).
   Again: no dependency on Rainbow — same algebra, separate codebases.
   **Done**: dccd023. field/compose_focus/focus/narrow. 9 assertions.
-- [ ] **`lib/ml/`** — ML vertical: `lib/knn`, `lib/xgboost` (pure Lua reference + FFI).
+- [ ] **`lib/ml/`** — ML vertical: `lib/xgboost` (pure Lua reference + FFI).
+- [x] **`lib/knn/`** — k-nearest neighbors with euclidean/cosine/manhattan distance, classification, regression. 55 assertions.
 - [x] **`lib/tfidf/`** — TF-IDF text scoring, cosine similarity, corpus search, keyword extraction. 61 assertions.
 - [x] **`lib/search/`** — FTS5 full-text + vector similarity + hybrid search on SQLite. 65 assertions.
 - [x] **`lib/email/`** — email composition (RFC 5322 MIME) + SMTP client with mock transport. 71 assertions.
@@ -313,7 +314,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] **`lib/taskgraph` frontier/exec_graph/scaffolds** — absorbed from nanites design. Dynamic graph growth, frontier (live pending set, opt-in via `track=true`), exec_graph (monotonic audit log), scaffolds (pre-execution hooks). 53 assertions. Parallel LLM dispatch still needs epoll-backed HTTP (see entry above); vLLM integration (`caps.llm` → local vLLM OpenAI-compatible API) is a follow-on. Reference: `~/git/rhizone/nanites/`.
 
 - [ ] **`lib/protocol/capnp`** — zero-copy binary serialization via Cap'n Proto. Wire format reader + writer using LuaJIT FFI (fixed-width fields + typed pointers → direct buffer casting, near-zero allocation). Pure reader first; `.capnp` schema parser deferred (hand-write schemas as Lua tables initially). RPC layer (`lib/capnprpc`) separate. Moderately high priority — genuine capability gap over JSON/CBOR for high-throughput IPC.
-- [ ] **`lib/ukanren/`** / **`lib/datalog/`** — logic programming vertical.
+- [ ] **`lib/ukanren/`** — microKanren port.
+- [x] **`lib/datalog/`** — pure Lua Datalog engine, naive bottom-up evaluation, recursive rules, guards. 87 assertions.
+- [x] **`lib/crypto/`** — AES-256-GCM (system libcrypto FFI), ChaCha20-Poly1305 (system + pure Lua), HKDF-SHA256, random_bytes. 36 assertions + 10 skipped (AES without libcrypto).
+- [x] **`lib/openapi/`** — OpenAPI 3.x parser, $ref resolution, request/response validation, JSON Schema subset, lib/web router integration. 111 assertions.
 - [ ] **`lib/parse/`** / **`lib/ir/`** — language tooling vertical (compiler IR, parser combinator).
 - [x] **`lib/asm/`** — SIMD kernel compiler: cpu detection, linear scan RA, virtual IR, x64 emitter. See `## lib/asm` section above.
 

@@ -211,9 +211,10 @@ variable interpolation (escaped/unescaped), sections (conditional/iteration/lamb
 inverted sections, comments, partials with indentation inheritance, set delimiter,
 dot notation, implicit iterator, standalone line handling, context stack. 43 assertions.
 
-**More crypto** — AES-GCM (needed for sync encryption), HKDF (key derivation),
-ChaCha20-Poly1305. Design: system library tier (libcrypto via FFI), pure Lua for
-reference. Note: pure Lua AES is slow; system tier is the real implementation.
+**Crypto** (`lib/crypto`) — implemented. AES-256-GCM (system libcrypto FFI),
+ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
+random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
+36 assertions + 10 skipped without libcrypto.
 
 **TOML** (`lib/toml`) — implemented. Full TOML v1.0 parser and encoder. All value
 types, dotted keys, table headers, array of tables, inline tables/arrays, all string
@@ -248,8 +249,9 @@ registration, URI template resources, capability negotiation, logging with level
 argument completions. Protocol version 2025-11-25. 44 assertions.
 (Note: `lib/mud_cp/` is the existing MUD Client Protocol implementation — unrelated.)
 
-**`lib/openapi`** — OpenAPI 3.x client/server from a spec file. Request validation,
-response serialization, typed route handlers.
+**`lib/openapi`** — implemented. OpenAPI 3.x spec parser with `$ref` resolution,
+request/response validation (JSON Schema subset), and `lib/web` router integration
+via `spec:mount(app, handlers)`. 111 assertions.
 
 ### Missing — frontend vertical
 
@@ -344,7 +346,8 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
   sum/mean/min/max/argmin/argmax, normalize. 192 assertions.
 - `lib/tfidf` — **implemented**. TF-IDF text scoring, corpus search ranking, keyword
   extraction, cosine similarity. Tokenizer with stopword filtering. 61 assertions.
-- `lib/knn` — k-nearest neighbors. Pure Lua reference + optional FFI fast path.
+- `lib/knn` — **implemented**. k-nearest neighbors: brute-force top-k, classify (majority
+  vote + weighted), regress, euclidean/cosine/manhattan + custom distance. 55 assertions.
 - `lib/xgboost` — gradient boosted trees. Pure Lua implementation (a few hundred lines
   — decision trees are simple, boosting is just iteration) as the hackable reference;
   FFI binding to the real xgboost library as the fast tier. Parity tests between them.
@@ -357,9 +360,9 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
 
 - `lib/ukanren` — microKanren port. The original is ~40 lines of Scheme; a Lua port
   is a beautiful demonstration of hackability. Goals, unification, streams.
-- `lib/datalog` — Datalog engine. Rule-based queries over structured data. Practically
-  useful: dependency analysis, reachability queries, rule-based inference. Pure Lua.
-  Builds on `lib/ukanren` or standalone depending on design.
+- `lib/datalog` — **implemented**. Pure Lua Datalog engine: naive bottom-up evaluation
+  to fixpoint, recursive rules, guard functions, query with wildcards and named bindings.
+  87 assertions.
 
 These serve both the language tooling crowd (type inference helpers, program analysis)
 and anyone who wants declarative query semantics without a full SQL engine.
