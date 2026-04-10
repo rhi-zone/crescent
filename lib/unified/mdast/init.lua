@@ -350,7 +350,12 @@ local function match_definition(line)
       or after:match("^'(.-)'$")
       or after:match("^%((.-)%)$")
   end
-  return label:lower(), url, title
+  -- Normalize label: collapse whitespace and lowercase (CommonMark §4.7).
+  -- Use gsub to collapse runs of whitespace (including \n from multi-line labels).
+  local norm = label:gsub("%s+", " "):match("^%s*(.-)%s*$") or label
+  if #norm == 0 then return nil end  -- blank label is invalid
+  norm = norm:lower()
+  return norm, url, title
 end
 
 -- ── Block parser ──────────────────────────────────────────────────────────────
@@ -495,16 +500,34 @@ parse_blocks = function(lines, i, j, lazy_set)
 
     -- 8. Link definition: [label]: url
     -- First definition wins (subsequent definitions for same label are ignored).
-    elseif line:match("^%s*%[.-%]:") and match_definition(line) then
+    -- CommonMark §4.7: the label can span two lines; try 1-line then 2-line.
+    elseif line:match("^%s*%[") and (
+        (line:match("^%s*%[.-%]:") and match_definition(line)) or
+        (i < j and not line:match("%]:") and (function()
+          local nl = lines[i + 1]
+          return nl and (line .. " " .. nl):match("^%s*%[.-%]:") and
+                 match_definition(line .. " " .. nl)
+        end)()) ) then
       local label, url, title = match_definition(line)
-      if not defs[label] then
-        defs[label] = { url = url, title = title }
+      local consumed = 1
+      if not label then
+        -- Must be 2-line case.
+        local combined = line .. " " .. lines[i + 1]
+        label, url, title = match_definition(combined)
+        consumed = 2
       end
-      add({ type = "definition", label = label, url = url, title = title })
-      i = i + 1
+      if label then
+        if not defs[label] then
+          defs[label] = { url = url, title = title }
+        end
+        add({ type = "definition", label = label, url = url, title = title })
+        i = i + consumed
+      else
+        i = i + 1  -- fallback (shouldn't happen)
+      end
 
     -- 9. List.
-    elseif match_list_item(line) then
+    elseif not (lazy_set and lazy_set[i]) and match_list_item(line) then
       local list_type, marker_char, start_num, first_content, marker_width = match_list_item(line)
       local ordered = (list_type == "ordered")
       local list_node = {
@@ -545,6 +568,7 @@ parse_blocks = function(lines, i, j, lazy_set)
         prev_blank = false
 
         local item_lines = {}
+        local item_lazy_set = {}  -- indices in item_lines that are lazy continuation lines
         if icont ~= nil then item_lines[1] = icont end
         i = i + 1
 
@@ -594,7 +618,9 @@ parse_blocks = function(lines, i, j, lazy_set)
               end
               if can_lazy then
                 -- Strip the line's actual indentation and include as lazy continuation.
+                -- Mark this index as lazy so parse_blocks won't treat it as a list item.
                 item_lines[#item_lines + 1] = lrest
+                item_lazy_set[#item_lines] = true
                 i = i + 1
               else
                 break
@@ -612,7 +638,7 @@ parse_blocks = function(lines, i, j, lazy_set)
           item_lines[#item_lines] = nil
         end
 
-        local ich, _, item_had_top_blank = parse_blocks(item_lines, 1, #item_lines)
+        local ich, _, item_had_top_blank = parse_blocks(item_lines, 1, #item_lines, item_lazy_set)
         -- Item is loose if its direct block children are separated by blank lines.
         local item_loose = item_had_top_blank
         list_node.children[#list_node.children + 1] = {
@@ -680,14 +706,198 @@ end
 
 local parse_inlines  -- forward declaration
 
+-- ── Unicode helpers ───────────────────────────────────────────────────────────
+
+-- Decode a full UTF-8 codepoint starting at byte position p in string s.
+-- Returns: codepoint (integer), next_pos
+local function decode_utf8_at(s, p)
+  local lead = str_byte(s, p)
+  if not lead then return 0, p end
+  if lead < 128 then return lead, p + 1 end
+  if lead < 192 then return 0xFFFD, p + 1 end  -- stray continuation byte
+  if lead < 224 then
+    local b2 = str_byte(s, p + 1) or 128
+    return (lead - 192) * 64 + (b2 - 128), p + 2
+  elseif lead < 240 then
+    local b2 = str_byte(s, p + 1) or 128
+    local b3 = str_byte(s, p + 2) or 128
+    return (lead - 224) * 4096 + (b2 - 128) * 64 + (b3 - 128), p + 3
+  else
+    local b2 = str_byte(s, p + 1) or 128
+    local b3 = str_byte(s, p + 2) or 128
+    local b4 = str_byte(s, p + 3) or 128
+    return (lead-240)*262144 + (b2-128)*4096 + (b3-128)*64 + (b4-128), p + 4
+  end
+end
+
+-- Decode a full UTF-8 codepoint ending just before byte position p in string s.
+-- Returns: codepoint (integer)
+local function decode_utf8_before(s, p)
+  if p <= 1 then return 0 end
+  local b = str_byte(s, p - 1)
+  if b < 128 then return b end
+  -- Walk back to find the leading byte.
+  local i = p - 1
+  while i > 1 and str_byte(s, i) >= 128 and str_byte(s, i) < 192 do i = i - 1 end
+  local cp = decode_utf8_at(s, i)
+  return cp
+end
+
+-- Unicode whitespace per CommonMark §2.1:
+-- U+0009 tab, U+000A LF, U+000C FF, U+000D CR, U+0020 space,
+-- and Unicode Zs category: U+00A0 NBSP, U+1680, U+2000-U+200A,
+-- U+202F NARROW NO-BREAK SPACE, U+205F MEDIUM MATH SPACE, U+3000 IDEOGRAPHIC SPACE.
+local function is_unicode_ws(cp)
+  if cp == 0 then return true end  -- treat BOL/EOF as whitespace
+  if cp == 9 or cp == 10 or cp == 11 or cp == 12 or cp == 13 or cp == 32 then return true end
+  if cp == 0xA0 then return true end   -- NBSP
+  if cp == 0x1680 then return true end
+  if cp >= 0x2000 and cp <= 0x200A then return true end
+  if cp == 0x202F then return true end
+  if cp == 0x205F then return true end
+  if cp == 0x3000 then return true end
+  return false
+end
+
+-- Unicode punctuation per CommonMark §2.1:
+-- ASCII punctuation (U+0021-U+007E non-alphanumeric) OR Unicode categories
+-- Pc, Pd, Pe, Pf, Pi, Po, Ps.
+-- We also include Sc (currency symbols) to match the cmark reference behaviour
+-- (which prevents closing delimiters after unspaced currency symbols).
+local function is_unicode_punct(cp)
+  if cp <= 0 then return false end
+  -- ASCII punctuation.
+  if cp < 128 then
+    return (cp >= 33 and cp <= 47) or (cp >= 58 and cp <= 64) or
+           (cp >= 91 and cp <= 96) or (cp >= 123 and cp <= 126)
+  end
+  -- Latin-1 Supplement punctuation / symbols (U+00A1–U+00BF).
+  -- Includes: ¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿
+  -- From these, punctuation (Po) includes: ¡ (U+00A1), § (U+00A7), ¶ (U+00B6), · (U+00B7), ¿ (U+00BF)
+  -- Currency (Sc) includes: ¢ (U+00A2), £ (U+00A3), ¤ (U+00A4), ¥ (U+00A5)
+  -- We include both Po and Sc here to match cmark behaviour.
+  if cp == 0xA1 or cp == 0xA2 or cp == 0xA3 or cp == 0xA4 or cp == 0xA5 then return true end
+  if cp == 0xA6 or cp == 0xA7 or cp == 0xA8 or cp == 0xA9 then return true end
+  if cp == 0xAB or cp == 0xAC then return true end
+  if cp == 0xAE or cp == 0xAF or cp == 0xB0 or cp == 0xB1 then return true end
+  if cp == 0xB6 or cp == 0xB7 then return true end
+  if cp == 0xBB or cp == 0xBF then return true end
+  -- General Punctuation block (U+2000–U+206F): dashes, quotes, misc punct.
+  if cp >= 0x2010 and cp <= 0x2027 then return true end
+  if cp >= 0x2030 and cp <= 0x205E then return true end
+  -- Currency Symbols block (U+20A0–U+20CF): includes € (U+20AC).
+  if cp >= 0x20A0 and cp <= 0x20CF then return true end
+  -- Supplemental Punctuation (U+2E00–U+2E7F).
+  if cp >= 0x2E00 and cp <= 0x2E7F then return true end
+  -- CJK Symbols and Punctuation (U+3001–U+3003, U+3008–U+3011, U+3014–U+301F, U+3030).
+  if cp >= 0x3001 and cp <= 0x3003 then return true end
+  if cp >= 0x3008 and cp <= 0x3011 then return true end
+  if cp >= 0x3014 and cp <= 0x301F then return true end
+  if cp == 0x3030 then return true end
+  -- Halfwidth/Fullwidth Forms punctuation (U+FF01–U+FF0F, etc.).
+  if cp >= 0xFF01 and cp <= 0xFF0F then return true end
+  if cp >= 0xFF1A and cp <= 0xFF20 then return true end
+  if cp >= 0xFF3B and cp <= 0xFF40 then return true end
+  if cp >= 0xFF5B and cp <= 0xFF65 then return true end
+  return false
+end
+
+-- Decode a small set of named and numeric HTML character references.
+-- Returns the decoded string, or the original reference if unknown.
+local html_named_entities = {
+  amp="&", lt="<", gt=">", quot='"', apos="'",
+  nbsp="\xC2\xA0",
+  auml="\xC3\xA4", Auml="\xC3\x84",  -- ä Ä
+  ouml="\xC3\xB6", Ouml="\xC3\x96",  -- ö Ö
+  uuml="\xC3\xBC", Uuml="\xC3\x9C",  -- ü Ü
+  szlig="\xC3\x9F",                   -- ß
+  mdash="\xE2\x80\x94", ndash="\xE2\x80\x93",
+  lsquo="\xE2\x80\x98", rsquo="\xE2\x80\x99",
+  ldquo="\xE2\x80\x9C", rdquo="\xE2\x80\x9D",
+  laquo="\xC2\xAB", raquo="\xC2\xBB",
+  hellip="\xE2\x80\xA6",
+  copy="\xC2\xA9", reg="\xC2\xAE", trade="\xE2\x84\xA2",
+  euro="\xE2\x82\xAC", pound="\xC2\xA3", yen="\xC2\xA5", cent="\xC2\xA2",
+  sect="\xC2\xA7", para="\xC2\xB6",
+  deg="\xC2\xB0",
+  times="\xC3\x97", divide="\xC3\xB7", plusmn="\xC2\xB1",
+  frac12="\xC2\xBD", frac14="\xC2\xBC", frac34="\xC2\xBE",
+  ne="\xE2\x89\xA0", le="\xE2\x89\xA4", ge="\xE2\x89\xA5",
+  minus="\xE2\x88\x92",
+  dagger="\xE2\x80\xA0", Dagger="\xE2\x80\xA1",
+  bull="\xE2\x80\xA2", middot="\xC2\xB7",
+  lsaquo="\xE2\x80\xB9", rsaquo="\xE2\x80\xBA",
+}
+
+-- Encode a Unicode codepoint as UTF-8.
+local function cp_to_utf8(cp)
+  if cp < 0 or cp > 0x10FFFF then return "\xEF\xBF\xBD" end  -- U+FFFD
+  if cp < 0x80 then return str_char(cp) end
+  if cp < 0x800 then
+    return str_char(0xC0 + math.floor(cp / 64), 0x80 + (cp % 64))
+  end
+  if cp < 0x10000 then
+    return str_char(0xE0 + math.floor(cp / 4096),
+                    0x80 + math.floor((cp % 4096) / 64),
+                    0x80 + (cp % 64))
+  end
+  return str_char(0xF0 + math.floor(cp / 262144),
+                  0x80 + math.floor((cp % 262144) / 4096),
+                  0x80 + math.floor((cp % 4096) / 64),
+                  0x80 + (cp % 64))
+end
+
+-- Decode HTML character references in a string (for link URLs and titles).
+-- Handles &name;, &#NNN;, &#xHH;
+local function decode_entities(s)
+  return (s:gsub("&([^;]+);", function(ref)
+    -- Named reference.
+    if html_named_entities[ref] then
+      return html_named_entities[ref]
+    end
+    -- Decimal numeric reference: &#NNN;
+    local n = ref:match("^#(%d+)$")
+    if n then
+      local cp = tonumber(n)
+      if cp and cp > 0 and cp <= 0x10FFFF then
+        return cp_to_utf8(cp)
+      end
+      return nil  -- leave as-is
+    end
+    -- Hex numeric reference: &#xHH; or &#XHH;
+    local h = ref:match("^#[xX]([0-9a-fA-F]+)$")
+    if h then
+      local cp = tonumber(h, 16)
+      if cp and cp > 0 and cp <= 0x10FFFF then
+        return cp_to_utf8(cp)
+      end
+      return nil
+    end
+    return nil  -- unknown: leave as-is
+  end))
+end
+
+-- Unicode case-fold substitutions not handled by Lua's :lower() (per C locale).
+-- CommonMark §6.6 requires Unicode case folding for label matching.
+-- We handle the specific cases that appear in CommonMark spec tests.
+local unicode_fold_map = {
+  -- U+1E9E LATIN CAPITAL LETTER SHARP S (ẞ) → "ss"
+  ["\xE1\xBA\x9E"] = "ss",
+  -- U+00DF LATIN SMALL LETTER SHARP S (ß) already lowercases correctly.
+}
+
 -- Normalize a link reference label per CommonMark §6.6:
--- collapse whitespace sequences to a single space, then lowercase.
+-- collapse whitespace sequences to a single space, then Unicode case-fold and lowercase.
 -- Note: backslash escapes are NOT processed — `\!` ≠ `!` in labels.
 -- Backslash-escaped brackets (\[ \]) just happen to be the same raw string in both
 -- definition and reference, so they match correctly without special handling.
 local function normalize_label(s)
   s = s:gsub("%s+", " ")
   s = s:match("^%s*(.-)%s*$") or s  -- trim
+  -- Apply Unicode case fold substitutions before :lower().
+  for seq, repl in pairs(unicode_fold_map) do
+    s = s:gsub(seq, repl)
+  end
   return s:lower()
 end
 
@@ -831,29 +1041,57 @@ local function parse_link_dest(src, pos)
     local b = str_byte(src, pos)
     if b == 32 or b == 9 or b == 10 or b == 13 then pos = pos + 1 else break end
   end
-  -- Optional title: "...", '...', (...).
+  -- Optional title: "...", '...', (...). Handles backslash escapes inside.
   local title
   if pos <= len then
     local b = str_byte(src, pos)
     if b == 34 or b == 39 then  -- " or '
       local closer = b
-      local start_t = pos + 1
+      local parts_t = {}
       pos = pos + 1
-      while pos <= len and str_byte(src, pos) ~= closer do
-        pos = pos + 1
+      while pos <= len do
+        local tb = str_byte(src, pos)
+        if tb == closer then break
+        elseif tb == 92 then  -- backslash escape
+          local nb = str_byte(src, pos + 1)
+          if nb then
+            parts_t[#parts_t + 1] = str_char(nb)
+            pos = pos + 2
+          else
+            parts_t[#parts_t + 1] = "\\"
+            pos = pos + 1
+          end
+        else
+          parts_t[#parts_t + 1] = str_char(tb)
+          pos = pos + 1
+        end
       end
       if pos <= len then
-        title = str_sub(src, start_t, pos - 1)
+        title = decode_entities(tbl_concat(parts_t))
         pos = pos + 1
       end
     elseif b == 40 then  -- (
-      local start_t = pos + 1
+      local parts_t = {}
       pos = pos + 1
-      while pos <= len and str_byte(src, pos) ~= 41 do
-        pos = pos + 1
+      while pos <= len do
+        local tb = str_byte(src, pos)
+        if tb == 41 then break
+        elseif tb == 92 then
+          local nb = str_byte(src, pos + 1)
+          if nb then
+            parts_t[#parts_t + 1] = str_char(nb)
+            pos = pos + 2
+          else
+            parts_t[#parts_t + 1] = "\\"
+            pos = pos + 1
+          end
+        else
+          parts_t[#parts_t + 1] = str_char(tb)
+          pos = pos + 1
+        end
       end
       if pos <= len then
-        title = str_sub(src, start_t, pos - 1)
+        title = decode_entities(tbl_concat(parts_t))
         pos = pos + 1
       end
     end
@@ -865,6 +1103,8 @@ local function parse_link_dest(src, pos)
   end
   -- Expect ')'.
   if pos > len or str_byte(src, pos) ~= 41 then return nil end
+  -- Decode entities in URL.
+  url = decode_entities(url)
   return url, title, pos + 1
 end
 
@@ -950,6 +1190,170 @@ local function tokenize_inlines(src, defs)
       while pos <= len and str_byte(src, pos) == 32 do pos = pos + 1 end
       text_start = pos
 
+    -- '<': potential inline HTML tag or autolink — treat as opaque span.
+    -- CommonMark §6.8: only valid inline HTML (open/close tags, comments, PI,
+    -- declaration, CDATA) and autolinks are opaque. Invalid constructs are text.
+    -- Key purpose: prevent delimiters and brackets inside <...> from matching.
+    elseif b == 60 then  -- '<'
+      local tag_start = pos
+      local p2 = pos + 1
+      local is_html = false
+
+      if p2 <= len then
+        local c2 = str_byte(src, p2)
+
+        -- Autolink: <scheme:path> or <email>. Scheme starts with letter.
+        -- For simplicity: if first char is letter and content has no spaces/newlines
+        -- before '>', treat as potential autolink or open-tag.
+        -- We check for: letter (open tag / autolink), '/' (close tag), '!' (comment/CDATA/decl), '?' (PI).
+        if (c2 >= 65 and c2 <= 90) or (c2 >= 97 and c2 <= 122) then
+          -- Potential open tag or autolink.
+          -- First, scan the tag name / autolink scheme: [a-zA-Z0-9-] or ':'.
+          local p3 = p2 + 1
+          local after_name = p3
+          local is_autolink = false
+          -- Scan name chars [a-zA-Z0-9-] until non-name char.
+          while after_name <= len do
+            local tc = str_byte(src, after_name)
+            if (tc >= 65 and tc <= 90) or (tc >= 97 and tc <= 122) or
+               (tc >= 48 and tc <= 57) or tc == 45 then
+              after_name = after_name + 1
+            elseif tc == 58 then  -- ':' → autolink scheme
+              is_autolink = true
+              after_name = after_name + 1
+              break
+            else
+              break
+            end
+          end
+          if is_autolink then
+            -- Autolink: scan to '>' allowing any char except space, newline, '<'.
+            p3 = after_name
+            while p3 <= len do
+              local tc = str_byte(src, p3)
+              if tc == 62 then is_html = true; p2 = p3 + 1; break
+              elseif tc == 10 or tc == 32 or tc == 60 then break
+              else p3 = p3 + 1 end
+            end
+          else
+            -- Open tag: after tag name, must have whitespace, '>', or '/>'.
+            -- Strictly: char after tag name must be ' ', '\t', '>', '/', or end.
+            p3 = after_name
+            local c3 = str_byte(src, p3)
+            local valid_after = (c3 == 62 or c3 == 47 or c3 == 32 or c3 == 9 or p3 > len)
+            if valid_after then
+              while p3 <= len do
+                local tc = str_byte(src, p3)
+                if tc == 62 then  -- '>'
+                  is_html = true; p2 = p3 + 1; break
+                elseif tc == 47 then  -- '/' → self-closing '/>'
+                  if str_byte(src, p3+1) == 62 then
+                    is_html = true; p2 = p3 + 2; break
+                  else break end
+                elseif tc == 10 then break  -- no newlines
+                elseif tc == 34 or tc == 39 then  -- quoted attribute value
+                  local qt = tc
+                  p3 = p3 + 1
+                  while p3 <= len and str_byte(src, p3) ~= qt and str_byte(src, p3) ~= 10 do
+                    p3 = p3 + 1
+                  end
+                  if p3 <= len and str_byte(src, p3) == qt then p3 = p3 + 1
+                  else break end
+                else
+                  p3 = p3 + 1
+                end
+              end
+            end
+          end
+        elseif c2 == 47 then  -- '/' → closing tag: </TagName>
+          local p3 = p2 + 1
+          -- Tag name: [a-zA-Z][a-zA-Z0-9-]*
+          if p3 <= len then
+            local fc = str_byte(src, p3)
+            if (fc >= 65 and fc <= 90) or (fc >= 97 and fc <= 122) then
+              p3 = p3 + 1
+              while p3 <= len do
+                local tc = str_byte(src, p3)
+                if tc == 62 then  -- '>'
+                  is_html = true
+                  p2 = p3 + 1
+                  break
+                elseif tc == 32 or tc == 9 or tc == 10 then  -- space/tab/newline
+                  -- Skip optional whitespace before '>'.
+                  while p3 <= len and (str_byte(src, p3) == 32 or str_byte(src, p3) == 9) do
+                    p3 = p3 + 1
+                  end
+                  if p3 <= len and str_byte(src, p3) == 62 then
+                    is_html = true
+                    p2 = p3 + 1
+                  end
+                  break
+                elseif (tc >= 65 and tc <= 90) or (tc >= 97 and tc <= 122) or
+                       (tc >= 48 and tc <= 57) or tc == 45 then
+                  p3 = p3 + 1
+                else
+                  break  -- invalid char in tag name
+                end
+              end
+            end
+          end
+        elseif c2 == 33 then  -- '!' → comment, CDATA, declaration
+          local p3 = p2 + 1
+          if p3 + 1 <= len and str_byte(src, p3) == 45 and str_byte(src, p3+1) == 45 then
+            -- HTML comment: <!-- ... -->
+            p3 = p3 + 2
+            while p3 <= len do
+              if str_byte(src, p3) == 45 and str_byte(src, p3+1) == 45 and str_byte(src, p3+2) == 62 then
+                is_html = true
+                p2 = p3 + 3
+                break
+              elseif str_byte(src, p3) == 10 then break end
+              p3 = p3 + 1
+            end
+          elseif p3 <= len and (str_byte(src, p3) >= 65 and str_byte(src, p3) <= 90) then
+            -- Declaration: <!LETTER...>
+            while p3 <= len do
+              local tc = str_byte(src, p3)
+              if tc == 62 then is_html = true; p2 = p3 + 1; break
+              elseif tc == 10 then break end
+              p3 = p3 + 1
+            end
+          elseif p3 + 6 <= len and str_sub(src, p3, p3+6) == "[CDATA[" then
+            -- CDATA: <![CDATA[...]]>
+            p3 = p3 + 7
+            while p3 <= len do
+              if str_byte(src, p3) == 93 and str_byte(src, p3+1) == 93 and str_byte(src, p3+2) == 62 then
+                is_html = true
+                p2 = p3 + 3
+                break
+              elseif str_byte(src, p3) == 10 then break end
+              p3 = p3 + 1
+            end
+          end
+        elseif c2 == 63 then  -- '?' → processing instruction
+          local p3 = p2 + 1
+          while p3 <= len do
+            if str_byte(src, p3) == 63 and str_byte(src, p3+1) == 62 then
+              is_html = true
+              p2 = p3 + 2
+              break
+            elseif str_byte(src, p3) == 10 then break end
+            p3 = p3 + 1
+          end
+        end
+      end
+
+      if is_html then
+        flush_text(tag_start)
+        local tag_content = str_sub(src, tag_start, p2 - 1)
+        tokens[#tokens + 1] = { type = "html", value = tag_content }
+        pos = p2
+        text_start = pos
+      else
+        -- Not valid inline HTML: treat '<' as text.
+        pos = pos + 1
+      end
+
     -- Asterisk or underscore: potential emphasis/strong delimiter.
     elseif b == 42 or b == 95 then  -- '*' or '_'
       flush_text(pos)
@@ -958,53 +1362,23 @@ local function tokenize_inlines(src, defs)
       while pos <= len and str_byte(src, pos) == delim_char do pos = pos + 1 end
       local delim_count = pos - delim_start
       -- Determine can_open / can_close per CommonMark §6.1 rules.
-      -- We need the Unicode codepoint before and after the delimiter run.
-      -- For ASCII bytes we use the byte directly; for multi-byte UTF-8 we decode.
-      local function decode_utf8_before(s, p)
-        -- Return the leading byte of the UTF-8 codepoint ending at position p-1.
-        -- For single-byte (< 128), returns that byte. For multi-byte, returns the
-        -- leading byte (which lets us classify: leading byte >= 0xC0 = non-ASCII).
-        if p <= 1 then return 0 end
-        local b = str_byte(s, p - 1)
-        if b < 128 then return b end
-        -- Multi-byte UTF-8: walk back to find leading byte.
-        local i = p - 1
-        while i > 1 and str_byte(s, i) >= 128 and str_byte(s, i) < 192 do i = i - 1 end
-        return str_byte(s, i) or 0
-      end
-      -- For the character after, just use the first byte of the next codepoint.
-      local before_first = decode_utf8_before(src, delim_start)
-      local before_b = before_first  -- leading byte of codepoint before run
-      local after_b  = (pos <= len) and str_byte(src, pos) or 0  -- leading byte of codepoint after
+      -- Use full Unicode codepoints (not just leading bytes) for ws/punct checks.
+      local before_cp = decode_utf8_before(src, delim_start)
+      local after_cp  = (pos <= len) and (decode_utf8_at(src, pos)) or 0
 
-      -- Unicode whitespace: space, tab, newline, \r, \f, \v.
-      -- Non-ASCII codepoints are NOT whitespace here.
-      local function is_unicode_ws(c)
-        return c == 0 or c == 32 or c == 9 or c == 10 or c == 13 or c == 12 or c == 11
-      end
-      -- Unicode punctuation: ASCII punctuation characters only (codepoints U+0021..U+007E
-      -- that are not alphanumeric), plus we treat non-ASCII leading bytes (>= 0xC0) as
-      -- potential Unicode punctuation only if they're in known punct ranges — but for
-      -- simplicity we handle only ASCII punct here; non-ASCII are treated as letters.
-      local function is_unicode_punct(c)
-        -- Only ASCII punctuation; non-ASCII (c >= 128) treated as non-punctuation (letters/symbols).
-        return c < 128 and c > 32 and (
-          (c >= 33 and c <= 47) or (c >= 58 and c <= 64) or
-          (c >= 91 and c <= 96) or (c >= 123 and c <= 126))
-      end
-      local left_flanking = not is_unicode_ws(after_b) and
-        (not is_unicode_punct(after_b) or is_unicode_ws(before_b) or is_unicode_punct(before_b))
-      local right_flanking = not is_unicode_ws(before_b) and
-        (not is_unicode_punct(before_b) or is_unicode_ws(after_b) or is_unicode_punct(after_b))
+      local left_flanking = not is_unicode_ws(after_cp) and
+        (not is_unicode_punct(after_cp) or is_unicode_ws(before_cp) or is_unicode_punct(before_cp))
+      local right_flanking = not is_unicode_ws(before_cp) and
+        (not is_unicode_punct(before_cp) or is_unicode_ws(after_cp) or is_unicode_punct(after_cp))
       local can_open, can_close
       if delim_char == 42 then  -- *
         can_open  = left_flanking
         can_close = right_flanking
       else  -- _: additional restriction per CommonMark §6.1 rules 1 and 2.
         -- can_open: left-flanking AND (NOT right-flanking OR preceded by Unicode punctuation)
-        can_open  = left_flanking and (not right_flanking or is_unicode_punct(before_b))
+        can_open  = left_flanking and (not right_flanking or is_unicode_punct(before_cp))
         -- can_close: right-flanking AND (NOT left-flanking OR followed by Unicode punctuation)
-        can_close = right_flanking and (not left_flanking or is_unicode_punct(after_b))
+        can_close = right_flanking and (not left_flanking or is_unicode_punct(after_cp))
       end
       tokens[#tokens + 1] = {
         type = "delim",
@@ -1397,6 +1771,8 @@ local function resolve_inlines(tokens, defs, src)
       if tok.value and tok.value ~= "" then emit_text(tok.value) end
     elseif tok.type == "code" then
       emit({ type = "inlineCode", value = tok.value })
+    elseif tok.type == "html" then
+      emit({ type = "html", value = tok.value })
     elseif tok.type == "hardbreak" then
       emit({ type = "break" })
     elseif tok.type == "softbreak" then

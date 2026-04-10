@@ -77,6 +77,7 @@ local function encode_url(s)
     elseif b == 123 then result[#result+1] = "%7B"; i = i+1
     elseif b == 124 then result[#result+1] = "%7C"; i = i+1
     elseif b == 125 then result[#result+1] = "%7D"; i = i+1
+    elseif b >= 128 then result[#result+1] = string.format("%%%02X", b); i = i+1
     else result[#result+1] = s:sub(i,i); i = i+1
     end
   end
@@ -132,7 +133,20 @@ render_inline = function(node)
   elseif t == "softBreak" then
     return "\n"
   elseif t == "html" then
-    return node.value or ""
+    local v = node.value or ""
+    -- Detect autolinks: <scheme:content> where content has no spaces or '<'.
+    -- CommonMark §6.9: autolink = <absolute-URI> or <email-address>.
+    local url = v:match("^<([a-zA-Z][a-zA-Z0-9+%-.]+:[^%s<>]*)>$")
+    if url then
+      local href = esc_attr(encode_url(url))
+      return '<a href="' .. href .. '">' .. esc_html(url) .. "</a>"
+    end
+    -- Email autolink: <user@host>
+    local email = v:match("^<([^@%s]+@[^%s<>]+)>$")
+    if email then
+      return '<a href="mailto:' .. esc_attr(email) .. '">' .. esc_html(email) .. "</a>"
+    end
+    return v
   else
     return ""
   end
@@ -235,9 +249,17 @@ render_node = function(node, opts)
           parts[#parts + 1] = "<li></li>\n"
         elseif ch[1].type == "paragraph" then
           -- First child is a paragraph: unwrap it, rest follow as blocks.
+          -- In tight mode, subsequent paragraph children are also unwrapped.
           local inner = render_inlines(ch[1].children) .. "\n"
           for ci = 2, #ch do
-            inner = inner .. render_node(ch[ci])
+            local c = ch[ci]
+            if c.type == "paragraph" then
+              -- Tight: unwrap paragraph content without <p> wrapper.
+              local nl = (ci < #ch) and "\n" or ""
+              inner = inner .. render_inlines(c.children) .. nl
+            else
+              inner = inner .. render_node(c)
+            end
           end
           parts[#parts + 1] = "<li>" .. inner .. "</li>\n"
         else
@@ -334,12 +356,12 @@ local pass_thresholds = {
   ["Blank lines"]             = 1.00,
   ["Block quotes"]            = 1.00,
   ["List items"]              = 1.00,  -- 48/48
-  ["Lists"]                   = 0.95,  -- 25/26; ex312 requires complex lazy continuation semantics
+  ["Lists"]                   = 1.00,  -- 26/26
   ["Code spans"]              = 0.90,
-  ["Emphasis and strong emphasis"] = 0.94,  -- 125/132; remaining need inline HTML or Unicode tables
-  -- Links: remaining failures are inline HTML (<bar attr>), entity encoding, and edge cases.
+  ["Emphasis and strong emphasis"] = 1.00,  -- 132/132
+  -- Links: ex491 requires inline HTML spanning newlines (raw HTML section, skipped).
   -- Images: all 22/22 passing.
-  ["Links"]                   = 0.87,  -- 79/90
+  ["Links"]                   = 0.98,  -- 89/90; ex491 unfixable without raw HTML support
   ["Images"]                  = 1.00,
   ["Hard line breaks"]        = 0.85,
   ["Soft line breaks"]        = 1.00,
