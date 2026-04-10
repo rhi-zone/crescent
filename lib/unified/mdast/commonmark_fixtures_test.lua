@@ -248,7 +248,9 @@ render_node = function(node, opts)
           for ci, c in ipairs(ch) do
             if c.type == "paragraph" then
               -- Tight: render paragraph content without <p> wrapper.
-              inner = inner .. render_inlines(c.children) .. "\n"
+              -- Add newline only if this is not the last child.
+              local nl = (ci < #ch) and "\n" or ""
+              inner = inner .. render_inlines(c.children) .. nl
             else
               inner = inner .. render_node(c)
             end
@@ -332,7 +334,7 @@ local pass_thresholds = {
   ["Paragraphs"]              = 1.00,
   ["Blank lines"]             = 1.00,
   ["Block quotes"]            = 0.90,
-  ["List items"]              = 0.75,
+  ["List items"]              = 0.90,
   ["Lists"]                   = 0.85,
   ["Code spans"]              = 0.90,
   ["Emphasis and strong emphasis"] = 0.90,

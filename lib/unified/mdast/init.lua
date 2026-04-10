@@ -229,7 +229,9 @@ local function match_list_item(line)
       i = i + 1
     end
     local after = str_sub(rest, i)
-    return "bullet", bullet, nil, after, indent + 1 + spaces_after
+    -- If after is empty (trailing spaces only), use minimum iwidth (indent + 2).
+    local iw = after == "" and (indent + 2) or (indent + 1 + spaces_after)
+    return "bullet", bullet, nil, after, iw
   end
   -- Ordered list: digits followed by . or ) then space.
   local num_str, delim = rest:match("^(%d+)([%.%)])")
@@ -246,7 +248,9 @@ local function match_list_item(line)
     end
     if spaces_after == 0 then return nil end  -- must have at least one space
     local after = str_sub(rest, i)
-    return "ordered", delim, tonumber(num_str), after, indent + #num_str + 1 + spaces_after
+    -- If after is empty (trailing spaces only), use minimum iwidth (indent + marker + 2).
+    local iw = after == "" and (indent + #num_str + 2) or (indent + #num_str + 1 + spaces_after)
+    return "ordered", delim, tonumber(num_str), after, iw
   end
   return nil
 end
@@ -488,7 +492,12 @@ parse_blocks = function(lines, i, j)
             local nt2, nm2 = match_list_item(lines[ni])
             local next_same = (nt2 == list_type) and
               ((ordered and nm2 == marker_char) or (not ordered and nm2 == marker_char))
-            if nind >= iwidth then
+            -- For a truly empty item (no non-empty content yet), a blank line ends it.
+            local has_content = false
+            for _, il in ipairs(item_lines) do
+              if il ~= "" then has_content = true; break end
+            end
+            if nind >= iwidth and has_content then
               item_lines[#item_lines + 1] = ""
               item_blank = true
               i = i + 1
