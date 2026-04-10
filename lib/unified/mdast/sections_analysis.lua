@@ -99,7 +99,9 @@ render_node = function(node)
     local lang_attr = ""
     if node.lang and node.lang ~= "" then lang_attr = ' class="language-'..esc_attr(node.lang)..'"' end
     local value = esc_html(node.value or "")
-    if value ~= "" and value:sub(-1) ~= "\n" then value = value .. "\n" end
+    -- CommonMark: each source line ends with \n, so the final value always ends with \n.
+    -- Always append \n so trailing blank lines are preserved correctly.
+    if value ~= "" then value = value .. "\n" end
     return "<pre><code"..lang_attr..">"..value.."</code></pre>\n"
   elseif t == "thematicBreak" then return "<hr />\n"
   elseif t == "blockquote" then

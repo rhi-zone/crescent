@@ -190,10 +190,9 @@ render_node = function(node, opts)
       lang_attr = ' class="language-' .. esc_attr(node.lang) .. '"'
     end
     local value = esc_html(node.value or "")
-    -- Code block content always ends with \n in CommonMark HTML output.
-    if value ~= "" and value:sub(-1) ~= "\n" then
-      value = value .. "\n"
-    end
+    -- CommonMark: each source line ends with \n, so the final value always ends with \n.
+    -- Always append \n so trailing blank lines are preserved correctly.
+    if value ~= "" then value = value .. "\n" end
     return "<pre><code" .. lang_attr .. ">" .. value .. "</code></pre>\n"
 
   elseif t == "thematicBreak" then
@@ -328,19 +327,19 @@ end
 local pass_thresholds = {
   ["Thematic breaks"]         = 1.00,
   ["ATX headings"]            = 1.00,
-  ["Setext headings"]         = 0.95,
+  ["Setext headings"]         = 1.00,  -- 27/27
   ["Indented code blocks"]    = 1.00,
   ["Fenced code blocks"]      = 1.00,
   ["Paragraphs"]              = 1.00,
   ["Blank lines"]             = 1.00,
   ["Block quotes"]            = 1.00,
-  ["List items"]              = 0.90,
-  ["Lists"]                   = 0.85,
+  ["List items"]              = 1.00,  -- 48/48
+  ["Lists"]                   = 0.95,  -- 25/26; ex312 requires complex lazy continuation semantics
   ["Code spans"]              = 0.90,
-  ["Emphasis and strong emphasis"] = 0.90,
+  ["Emphasis and strong emphasis"] = 0.94,  -- 125/132; remaining need inline HTML or Unicode tables
   -- Links: remaining failures are inline HTML (<bar attr>), entity encoding, and edge cases.
   -- Images: all 22/22 passing.
-  ["Links"]                   = 0.80,
+  ["Links"]                   = 0.87,  -- 79/90
   ["Images"]                  = 1.00,
   ["Hard line breaks"]        = 0.85,
   ["Soft line breaks"]        = 1.00,

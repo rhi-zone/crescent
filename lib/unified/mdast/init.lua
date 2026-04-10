@@ -294,9 +294,18 @@ local function match_list_item(line)
       i = i + 1
     end
     if spaces_after == 0 then return nil end  -- must have at least one space
+    -- CommonMark §5.2: if 5+ spaces after marker, only 1 space consumed; rest is content.
+    local marker_len = #num_str + 1  -- digits + delimiter
+    if spaces_after >= 5 then
+      -- Only 1 space consumed; the remaining spaces are part of content (indented code).
+      local iw = indent + marker_len + 1  -- marker_start + marker_len + 1_space
+      -- after starts at the second character after the delimiter (first space), i.e. marker_len+2
+      local after = str_sub(rest, marker_len + 2)
+      return "ordered", delim, tonumber(num_str), after, iw
+    end
     local after = str_sub(rest, i)
     -- If after is empty (trailing spaces only), use minimum iwidth (indent + marker + 2).
-    local iw = after == "" and (indent + #num_str + 2) or (indent + #num_str + 1 + spaces_after)
+    local iw = after == "" and (indent + marker_len + 1) or (indent + marker_len + spaces_after)
     return "ordered", delim, tonumber(num_str), after, iw
   end
   return nil
@@ -351,8 +360,10 @@ local parse_blocks
 
 -- Parse a sequence of lines into block nodes.
 -- `lines` is an array of strings, `i` is the starting index, `j` is the end index.
+-- `lazy_set` is an optional table of line indices (1-based) that were added via lazy
+-- continuation and should NOT be treated as setext underlines.
 -- Returns: array of block nodes, defs table, had_top_blank (blank between top-level blocks).
-parse_blocks = function(lines, i, j)
+parse_blocks = function(lines, i, j, lazy_set)
   local nodes = {}
   -- Collect link definitions into a table passed through inline parsing.
   local defs = {}
@@ -438,6 +449,7 @@ parse_blocks = function(lines, i, j)
       -- Lazy continuation: a non-> non-blank line can continue a blockquote
       -- if it would not start a new block structure (i.e., is paragraph text).
       local bq_lines = {}
+      local bq_lazy = {}  -- set of 1-based indices that are lazily continued
       local last_was_para = false  -- tracks if last non-blank BQ line was paragraph text
       while i <= j do
         local l = lines[i]
@@ -458,14 +470,17 @@ parse_blocks = function(lines, i, j)
           -- Lazy continuation: treat as paragraph continuation inside blockquote.
           -- Note: even 4+-space indented lines can lazily continue (they're paragraph text,
           -- not code blocks in this context).
+          -- Setext underline candidates (=== or ---) are tracked as lazy so parse_blocks
+          -- will not promote them to setext headings (CommonMark ex93).
           bq_lines[#bq_lines + 1] = l
+          bq_lazy[#bq_lines] = true
           last_was_para = true
           i = i + 1
         else
           break
         end
       end
-      local bq_children = parse_blocks(bq_lines, 1, #bq_lines)
+      local bq_children = parse_blocks(bq_lines, 1, #bq_lines, bq_lazy)
       add({ type = "blockquote", children = bq_children })
 
     -- 7. HTML block (block-level HTML elements only per CommonMark §4.6).
@@ -614,7 +629,7 @@ parse_blocks = function(lines, i, j)
         local l = lines[i]
         if is_blank(l) then break end
         -- Setext heading underline check (only when we have para content already).
-        if #para_lines > 0 then
+        if #para_lines > 0 and not (lazy_set and lazy_set[i]) then
           local si, sc = count_indent(l)
           if si <= 3 then
             local sr = str_sub(l, sc):match("^(.-)%s*$") or str_sub(l, sc)
