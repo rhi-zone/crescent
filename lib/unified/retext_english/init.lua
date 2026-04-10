@@ -61,8 +61,9 @@ local function tokenize_sentence(s)
   return children
 end
 
--- Split a paragraph string into sentence strings.
--- Sentence boundaries: . ! ? followed by whitespace or end of string.
+-- Split a paragraph string into sentence strings, preserving inter-sentence
+-- whitespace. Returns an array of { text=string, ws=string|nil } entries.
+-- ws is the whitespace that followed the sentence terminator (or nil for last).
 local function split_sentences(para)
   local sentences = {}
   local start = 1
@@ -73,10 +74,13 @@ local function split_sentences(para)
     if c == "." or c == "!" or c == "?" then
       -- Check if followed by whitespace or end.
       if i == n or para:sub(i + 1, i + 1):match("[ \t\n]") then
-        sentences[#sentences + 1] = para:sub(start, i)
-        -- Skip trailing whitespace after the sentence terminator.
+        local sent_text = para:sub(start, i)
+        -- Collect trailing whitespace after the sentence terminator.
         local j = i + 1
+        local ws_start = j
         while j <= n and para:sub(j, j):match("[ \t]") do j = j + 1 end
+        local ws = (j > ws_start) and para:sub(ws_start, j - 1) or nil
+        sentences[#sentences + 1] = { text = sent_text, ws = ws }
         start = j
         i = j
       else
@@ -90,7 +94,7 @@ local function split_sentences(para)
   if start <= n then
     local tail = para:sub(start, n)
     if tail:match("[^ \t\n]") then
-      sentences[#sentences + 1] = tail
+      sentences[#sentences + 1] = { text = tail, ws = nil }
     end
   end
   return sentences
@@ -122,10 +126,14 @@ function M.parse(source)
   for _, para_text in ipairs(raw_paras) do
     local sent_strs = split_sentences(para_text)
     local sent_nodes = {}
-    for _, sent_str in ipairs(sent_strs) do
-      local children = tokenize_sentence(sent_str)
+    for si, sent_entry in ipairs(sent_strs) do
+      local children = tokenize_sentence(sent_entry.text)
       if #children > 0 then
         sent_nodes[#sent_nodes + 1] = nlcst.sentence(children)
+      end
+      -- Insert a WhiteSpaceNode between sentences (not after the last one).
+      if sent_entry.ws and si < #sent_strs then
+        sent_nodes[#sent_nodes + 1] = nlcst.whitespace(sent_entry.ws)
       end
     end
     if #sent_nodes > 0 then
