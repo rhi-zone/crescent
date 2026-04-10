@@ -326,7 +326,7 @@ end
 -- Minimum pass rates per section (0.0 – 1.0).
 -- Sections not listed default to 0 (informational only, no assertion failure).
 local pass_thresholds = {
-  ["Thematic breaks"]         = 0.90,
+  ["Thematic breaks"]         = 1.00,
   ["ATX headings"]            = 1.00,
   ["Setext headings"]         = 0.90,
   ["Indented code blocks"]    = 1.00,

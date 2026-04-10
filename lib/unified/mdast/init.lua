@@ -469,6 +469,9 @@ parse_blocks = function(lines, i, j)
         end
         if i > j then break end
 
+        -- Thematic breaks and ATX headings always interrupt a list.
+        if is_thematic_break(lines[i]) or match_atx_heading(lines[i]) then break end
+
         local it, im, inum, icont, iwidth = match_list_item(lines[i])
         if not it or it ~= list_type then break end
         if ordered and im ~= marker_char then break end
