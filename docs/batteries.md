@@ -265,6 +265,22 @@ transitions, history tracking, introspection. 125 assertions.
 comparator, O(n) heapify, merge, heap sort, keyed mode with push_or_update/remove,
 drain iterator. 615 assertions.
 
+**Set** (`lib/set`) — implemented. Mathematical set: union, intersection, difference,
+symmetric difference, subset/superset/disjoint tests, map/filter/reduce. O(1)
+membership. 108 assertions.
+
+**Ring Buffer** (`lib/ringbuf`) — implemented. Fixed-size circular buffer: O(1)
+push/pop from both ends, overflow wrapping, sliding window, 1-based indexing,
+drain, iterator. 111 assertions.
+
+**Trie** (`lib/trie`) — implemented. Prefix tree: insert/get/has/remove, has_prefix,
+find_prefix, count_prefix, longest_prefix (routing), autocomplete with limit,
+sorted iteration. 108 assertions.
+
+**Glob** (`lib/glob`) — implemented. Glob pattern matching: `*` (any non-/), `**`
+(recursive), `?` (single char), `[abc]`/`[a-z]`/`[!abc]` (char classes), `{a,b}`
+(brace alternation). compile/match/filter/to_pattern/is_glob. 151 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
