@@ -713,6 +713,347 @@ T.describe("interval tree: overlap queries", function()
   end)
 end)
 
+-- ── Named constructors ───────────────────────────────────────────────────────
+
+T.describe("interval: named constructors", function()
+  T.it("closed(a,b) creates [a,b]", function()
+    local i = interval.closed(1, 5)
+    T.ok(i.lo_closed)
+    T.ok(i.hi_closed)
+    T.eq(i:low(), 1)
+    T.eq(i:high(), 5)
+    T.ok(i:contains(1))
+    T.ok(i:contains(5))
+  end)
+
+  T.it("open(a,b) creates (a,b)", function()
+    local i = interval.open(1, 5)
+    T.ok(not i.lo_closed)
+    T.ok(not i.hi_closed)
+    T.ok(not i:contains(1))
+    T.ok(not i:contains(5))
+    T.ok(i:contains(3))
+  end)
+
+  T.it("lopen(a,b) creates (a,b]", function()
+    local i = interval.lopen(1, 5)
+    T.ok(not i.lo_closed)
+    T.ok(i.hi_closed)
+    T.ok(not i:contains(1))
+    T.ok(i:contains(5))
+  end)
+
+  T.it("ropen(a,b) creates [a,b)", function()
+    local i = interval.ropen(1, 5)
+    T.ok(i.lo_closed)
+    T.ok(not i.hi_closed)
+    T.ok(i:contains(1))
+    T.ok(not i:contains(5))
+  end)
+
+  T.it("point(x) creates [x,x]", function()
+    local i = interval.point(7)
+    T.eq(i:low(), 7)
+    T.eq(i:high(), 7)
+    T.ok(not i:is_empty())
+    T.ok(i:contains(7))
+    T.ok(not i:contains(6))
+    T.eq(i:length(), 0)
+  end)
+
+  T.it("empty() creates an empty interval", function()
+    local i = interval.empty()
+    T.ok(i:is_empty())
+    T.ok(not i:contains(0))
+  end)
+
+  T.it("infinite() creates (-inf,+inf)", function()
+    local i = interval.infinite()
+    T.ok(i:contains(0))
+    T.ok(i:contains(1e300))
+    T.ok(i:contains(-1e300))
+    T.ok(i:lo_open())
+    T.ok(i:hi_open())
+  end)
+end)
+
+-- ── lo_open/hi_open accessors ────────────────────────────────────────────────
+-- Note: lo() / hi() would shadow the instance fields lo/hi, so low() / high()
+-- are the canonical method names; lo_open() / hi_open() don't collide.
+
+T.describe("interval: lo_open/hi_open accessors", function()
+  T.it("low() and high() return bounds", function()
+    local i = interval.closed(3, 9)
+    T.eq(i:low(), 3)
+    T.eq(i:high(), 9)
+  end)
+
+  T.it("lo_open() reflects openness", function()
+    T.ok(not interval.closed(1, 5):lo_open())
+    T.ok(interval.open(1, 5):lo_open())
+    T.ok(interval.lopen(1, 5):lo_open())
+    T.ok(not interval.ropen(1, 5):lo_open())
+  end)
+
+  T.it("hi_open() reflects openness", function()
+    T.ok(not interval.closed(1, 5):hi_open())
+    T.ok(interval.open(1, 5):hi_open())
+    T.ok(not interval.lopen(1, 5):hi_open())
+    T.ok(interval.ropen(1, 5):hi_open())
+  end)
+end)
+
+-- ── intersect alias ──────────────────────────────────────────────────────────
+
+T.describe("interval: intersect alias", function()
+  T.it("intersect is the same as intersection", function()
+    local a = interval.closed(1, 5)
+    local b = interval.closed(3, 8)
+    local i1 = a:intersect(b)
+    local i2 = a:intersection(b)
+    T.eq(i1, i2)
+  end)
+
+  T.it("intersect of disjoint intervals is empty", function()
+    local i = interval.closed(1, 3):intersect(interval.closed(5, 8))
+    T.ok(i:is_empty())
+  end)
+end)
+
+-- ── complement ──────────────────────────────────────────────────────────────
+
+T.describe("interval: complement", function()
+  T.it("[3,7] complement is (-inf,3) ∪ (7,+inf)", function()
+    local c = interval.closed(3, 7):complement()
+    T.eq(#c, 2)
+    -- left part: (-inf, 3] -- no: open at 3
+    T.ok(not c[1].hi_closed)   -- 3 is open in the complement
+    T.eq(c[1].hi, 3)
+    T.ok(not c[2].lo_closed)   -- 7 is open in the complement
+    T.eq(c[2].lo, 7)
+    -- These complement parts should not contain 3 or 7 themselves
+    T.ok(not c[1]:contains(3))
+    T.ok(not c[2]:contains(7))
+    -- But do contain values outside
+    T.ok(c[1]:contains(0))
+    T.ok(c[2]:contains(100))
+  end)
+
+  T.it("(3,7) complement has closed boundary endpoints", function()
+    local c = interval.open(3, 7):complement()
+    T.eq(#c, 2)
+    T.ok(c[1].hi_closed)   -- lo was open, so complement's right boundary is closed
+    T.ok(c[1]:contains(3))
+    T.ok(c[2].lo_closed)
+    T.ok(c[2]:contains(7))
+  end)
+
+  T.it("complement of empty interval is all of R", function()
+    local c = interval.empty():complement()
+    T.eq(#c, 1)
+    T.ok(c[1]:contains(0))
+    T.ok(c[1]:contains(1e200))
+  end)
+
+  T.it("infinite interval complement is empty list", function()
+    local c = interval.infinite():complement()
+    T.eq(#c, 0)
+  end)
+end)
+
+-- ── arithmetic ───────────────────────────────────────────────────────────────
+
+T.describe("interval: add", function()
+  T.it("[1,3] + [2,4] = [3,7]", function()
+    local r = interval.closed(1, 3):add(interval.closed(2, 4))
+    T.eq(r:low(), 3)
+    T.eq(r:high(), 7)
+    T.ok(r.lo_closed)
+    T.ok(r.hi_closed)
+  end)
+
+  T.it("[1,3] + [-1,0] = [0,3]", function()
+    local r = interval.closed(1, 3):add(interval.closed(-1, 0))
+    T.eq(r:low(), 0)
+    T.eq(r:high(), 3)
+  end)
+
+  T.it("openness propagates: [1,3) + [2,4] = [3,7)", function()
+    local r = interval.ropen(1, 3):add(interval.closed(2, 4))
+    T.eq(r:low(), 3)
+    T.eq(r:high(), 7)
+    T.ok(r.lo_closed)
+    T.ok(not r.hi_closed)
+  end)
+
+  T.it("empty + anything = empty", function()
+    T.ok(interval.empty():add(interval.closed(1, 5)):is_empty())
+  end)
+
+  T.it("+ metamethod works", function()
+    local r = interval.closed(1, 2) + interval.closed(3, 4)
+    T.eq(r:low(), 4)
+    T.eq(r:high(), 6)
+  end)
+end)
+
+T.describe("interval: sub", function()
+  T.it("[2,5] - [1,3] = [-1,4]", function()
+    local r = interval.closed(2, 5):sub(interval.closed(1, 3))
+    T.eq(r:low(), -1)
+    T.eq(r:high(), 4)
+  end)
+
+  T.it("[0,10] - [0,10] = [-10,10]", function()
+    local r = interval.closed(0, 10):sub(interval.closed(0, 10))
+    T.eq(r:low(), -10)
+    T.eq(r:high(), 10)
+  end)
+
+  T.it("- metamethod works", function()
+    local r = interval.closed(5, 8) - interval.closed(1, 2)
+    T.eq(r:low(), 3)
+    T.eq(r:high(), 7)
+  end)
+end)
+
+T.describe("interval: mul", function()
+  T.it("[2,3] * [4,5] = [8,15]", function()
+    local r = interval.closed(2, 3):mul(interval.closed(4, 5))
+    T.eq(r:low(), 8)
+    T.eq(r:high(), 15)
+  end)
+
+  T.it("[-2,3] * [4,5] = [-10,15]", function()
+    local r = interval.closed(-2, 3):mul(interval.closed(4, 5))
+    T.eq(r:low(), -10)
+    T.eq(r:high(), 15)
+  end)
+
+  T.it("[-3,-1] * [-4,-2] = [2,12]", function()
+    local r = interval.closed(-3, -1):mul(interval.closed(-4, -2))
+    T.eq(r:low(), 2)
+    T.eq(r:high(), 12)
+  end)
+
+  T.it("* metamethod works", function()
+    local r = interval.closed(1, 2) * interval.closed(3, 4)
+    T.eq(r:low(), 3)
+    T.eq(r:high(), 8)
+  end)
+
+  T.it("empty * anything = empty", function()
+    T.ok(interval.empty():mul(interval.closed(1, 5)):is_empty())
+  end)
+end)
+
+T.describe("interval: div", function()
+  T.it("[4,8] / [2,4] = [1,4]", function()
+    local r, err = interval.closed(4, 8):div(interval.closed(2, 4))
+    T.eq(err, nil)
+    T.eq(r:low(), 1)
+    T.eq(r:high(), 4)
+  end)
+
+  T.it("[1,6] / [2,3] = [1/3, 3]", function()
+    local r, err = interval.closed(1, 6):div(interval.closed(2, 3))
+    T.eq(err, nil)
+    -- [1,6] * [1/3, 1/2] = [1/3, 3]
+    T.ok(math.abs(r:low() - 1/3) < 1e-12)
+    T.ok(math.abs(r:high() - 3) < 1e-12)
+  end)
+
+  T.it("div by interval containing 0 returns nil,err", function()
+    local r, err = interval.closed(1, 5):div(interval.closed(-1, 2))
+    T.eq(r, nil)
+    T.ok(type(err) == "string")
+  end)
+
+  T.it("div by interval with 0 at endpoint (closed) returns nil,err", function()
+    local r, err = interval.closed(1, 5):div(interval.closed(0, 2))
+    T.eq(r, nil)
+    T.ok(type(err) == "string")
+  end)
+
+  T.it("div by interval with 0 at open endpoint succeeds", function()
+    -- (0, 2] does not contain 0 (open), so division is valid
+    local r, err = interval.closed(2, 8):div(interval.lopen(0, 2))
+    T.eq(err, nil)
+    T.ok(r ~= nil)
+    T.eq(r:low(), 1)   -- 2/2
+  end)
+end)
+
+-- ── set:add / set:intervals / set:is_empty ───────────────────────────────────
+
+T.describe("set: add, intervals, is_empty", function()
+  T.it("add merges into a set", function()
+    local s = interval.set({})
+    s:add(interval.closed(1, 3))
+    s:add(interval.closed(5, 8))
+    T.eq(s.n, 2)
+    T.ok(s:contains(2))
+    T.ok(s:contains(6))
+    T.ok(not s:contains(4))
+  end)
+
+  T.it("add merges overlapping intervals", function()
+    local s = interval.set({ interval.closed(1, 5) })
+    s:add(interval.closed(3, 8))
+    T.eq(s.n, 1)
+    T.eq(s.intervals[1], interval.closed(1, 8))
+  end)
+
+  T.it("add empty interval is a no-op", function()
+    local s = interval.set({ interval.closed(1, 5) })
+    s:add(interval.empty())
+    T.eq(s.n, 1)
+  end)
+
+  T.it("get_intervals() returns sorted list", function()
+    local s = interval.set({ interval.closed(5, 8), interval.closed(1, 3) }):normalize()
+    local ivs = s:get_intervals()
+    T.eq(#ivs, 2)
+    T.eq(ivs[1]:low(), 1)
+    T.eq(ivs[2]:low(), 5)
+  end)
+
+  T.it("is_empty on empty set", function()
+    T.ok(interval.set({}):is_empty())
+  end)
+
+  T.it("is_empty on non-empty set", function()
+    T.ok(not interval.set({ interval.closed(1, 3) }):is_empty())
+  end)
+
+  T.it("set:intersect with interval", function()
+    local s = interval.set({ interval.closed(1, 6) })
+    local r = s:intersect(interval.closed(3, 10))
+    T.eq(r.n, 1)
+    T.eq(r.intervals[1], interval.closed(3, 6))
+  end)
+end)
+
+-- ── tostring for named constructors ──────────────────────────────────────────
+
+T.describe("interval: tostring via named constructors", function()
+  T.it("closed tostring", function()
+    T.eq(tostring(interval.closed(1, 5)), "[1, 5]")
+  end)
+
+  T.it("open tostring", function()
+    T.eq(tostring(interval.open(1, 5)), "(1, 5)")
+  end)
+
+  T.it("ropen tostring", function()
+    T.eq(tostring(interval.ropen(1, 5)), "[1, 5)")
+  end)
+
+  T.it("lopen tostring", function()
+    T.eq(tostring(interval.lopen(1, 5)), "(1, 5]")
+  end)
+end)
+
 -- ── Report ────────────────────────────────────────────────────────────────────
 
 local summary = T._summary()

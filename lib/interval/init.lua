@@ -12,13 +12,34 @@ local M = {}
 M._tier = "pure"
 
 local floor = math.floor
+local huge = math.huge
+local min4 = function(a, b, c, d)
+  local m = a
+  if b < m then m = b end
+  if c < m then m = c end
+  if d < m then m = d end
+  return m
+end
+local max4 = function(a, b, c, d)
+  local m = a
+  if b > m then m = b end
+  if c > m then m = c end
+  if d > m then m = d end
+  return m
+end
 
 -- ---------------------------------------------------------------------------
 -- Interval object
 -- ---------------------------------------------------------------------------
 
 local Interval = {}
-Interval.__index = Interval
+-- Use a function __index so that methods named 'lo', 'hi', etc. take priority
+-- over the identically-named instance fields when called as methods.
+Interval.__index = function(t, k)
+  local m = rawget(Interval, k)
+  if m ~= nil then return m end
+  return rawget(t, k)
+end
 
 -- Create a new interval.
 -- lo_closed: whether the low end is closed (default true)
@@ -32,15 +53,40 @@ function M.new(lo, hi, lo_closed, hi_closed)
   }, Interval)
 end
 
+-- Named constructors.
+-- M.closed(a, b)   -> [a, b]
+function M.closed(a, b)  return M.new(a, b, true,  true)  end
+-- M.open(a, b)     -> (a, b)
+function M.open(a, b)    return M.new(a, b, false, false) end
+-- M.lopen(a, b)    -> (a, b]   left-open, right-closed
+function M.lopen(a, b)   return M.new(a, b, false, true)  end
+-- M.ropen(a, b)    -> [a, b)   left-closed, right-open
+function M.ropen(a, b)   return M.new(a, b, true,  false) end
+-- M.point(x)       -> [x, x]
+function M.point(x)      return M.new(x, x, true,  true)  end
+-- M.empty()        -> empty interval (lo > hi)
+function M.empty()       return M.new(1, 0, true,  true)  end
+-- M.infinite()     -> (-inf, +inf)
+function M.infinite()    return M.new(-huge, huge, false, false) end
+
 -- Low bound.
 function Interval:low() return self.lo end
+-- Alias: lo() for API compatibility.
+function Interval:lo() return self.lo end
 -- Alias used by legacy code.
 function Interval:get_lo() return self.lo end
 
 -- High bound.
 function Interval:high() return self.hi end
+-- Alias: hi() for API compatibility.
+function Interval:hi() return self.hi end
 -- Alias used by legacy code.
 function Interval:get_hi() return self.hi end
+
+-- True if the lower bound is open (not closed).
+function Interval:lo_open() return not self.lo_closed end
+-- True if the upper bound is open (not closed).
+function Interval:hi_open() return not self.hi_closed end
 
 -- Size / width: high - low (ignoring openness).
 function Interval:size() return self.hi - self.lo end
@@ -199,6 +245,106 @@ function Interval:difference(other)
   end
 end
 
+-- intersect: alias for intersection.
+function Interval:intersect(other)
+  return self:intersection(other)
+end
+
+-- complement: returns a list of intervals covering (-inf,lo) and (hi,+inf).
+-- Open/closed endpoints are inverted at the boundary.
+-- Returns {} for an empty interval (complement is all of R, represented as one infinite interval).
+function Interval:complement()
+  if self:is_empty() then
+    return { M.new(-huge, huge, false, false) }
+  end
+  local result = {}
+  if self.lo ~= -huge then
+    result[#result + 1] = M.new(-huge, self.lo, false, not self.lo_closed)
+  end
+  if self.hi ~= huge then
+    result[#result + 1] = M.new(self.hi, huge, not self.hi_closed, false)
+  end
+  return result
+end
+
+-- ---------------------------------------------------------------------------
+-- Interval arithmetic
+-- ---------------------------------------------------------------------------
+
+-- [a,b] + [c,d] = [a+c, b+d]
+-- Openness: open if either corresponding bound is open.
+function Interval:add(other)
+  if self:is_empty() or other:is_empty() then return M.empty() end
+  return M.new(
+    self.lo + other.lo, self.hi + other.hi,
+    self.lo_closed and other.lo_closed,
+    self.hi_closed and other.hi_closed
+  )
+end
+
+-- [a,b] - [c,d] = [a-d, b-c]
+function Interval:sub(other)
+  if self:is_empty() or other:is_empty() then return M.empty() end
+  return M.new(
+    self.lo - other.hi, self.hi - other.lo,
+    self.lo_closed and other.hi_closed,
+    self.hi_closed and other.lo_closed
+  )
+end
+
+-- [a,b] * [c,d] = [min(ac,ad,bc,bd), max(ac,ad,bc,bd)]
+-- Openness: each endpoint is open if the contributing factor is open.
+function Interval:mul(other)
+  if self:is_empty() or other:is_empty() then return M.empty() end
+  local ac = self.lo * other.lo
+  local ad = self.lo * other.hi
+  local bc = self.hi * other.lo
+  local bd = self.hi * other.hi
+  local lo = min4(ac, ad, bc, bd)
+  local hi = max4(ac, ad, bc, bd)
+  -- Determine openness conservatively: open if any involved bound is open.
+  -- We pick the pair of bounds that achieved lo/hi.
+  local function bound_open(val, aval, bval, a_open, b_open)
+    if val == aval then return a_open end
+    if val == bval then return b_open end
+    -- fallback: open
+    return true
+  end
+  local ac_lo_open = not self.lo_closed or not other.lo_closed
+  local ad_lo_open = not self.lo_closed or not other.hi_closed
+  local bc_lo_open = not self.hi_closed or not other.lo_closed
+  local bd_lo_open = not self.hi_closed or not other.hi_closed
+  local lo_open
+  if lo == ac then lo_open = ac_lo_open
+  elseif lo == ad then lo_open = ad_lo_open
+  elseif lo == bc then lo_open = bc_lo_open
+  else lo_open = bd_lo_open end
+  local hi_open
+  if hi == bd then hi_open = bd_lo_open
+  elseif hi == bc then hi_open = bc_lo_open
+  elseif hi == ad then hi_open = ad_lo_open
+  else hi_open = ac_lo_open end
+  return M.new(lo, hi, not lo_open, not hi_open)
+end
+
+-- [a,b] / [c,d] = [a,b] * [1/d, 1/c]
+-- Returns nil, errmsg if 0 is in [c,d].
+function Interval:div(other)
+  if self:is_empty() or other:is_empty() then return M.empty() end
+  -- Check if 0 is in other.
+  if other:contains(0) then
+    return nil, "division by interval containing zero"
+  end
+  local inv = M.new(1 / other.hi, 1 / other.lo, other.hi_closed, other.lo_closed)
+  return self:mul(inv)
+end
+
+-- Metamethods for arithmetic.
+function Interval:__add(other) return self:add(other) end
+function Interval:__sub(other) return self:sub(other) end
+function Interval:__mul(other) return self:mul(other) end
+function Interval:__div(other) return self:div(other) end
+
 -- Shift interval by offset.
 function Interval:shift(offset)
   return M.new(self.lo + offset, self.hi + offset, self.lo_closed, self.hi_closed)
@@ -294,7 +440,12 @@ M.Range = Range
 -- ---------------------------------------------------------------------------
 
 local Set = {}
-Set.__index = Set
+-- Method lookup takes priority over identically-named instance fields (e.g. 'intervals').
+Set.__index = function(t, k)
+  local m = rawget(Set, k)
+  if m ~= nil then return m end
+  return rawget(t, k)
+end
 
 -- Create an interval set from a list of intervals.
 -- Call :normalize() to sort and merge overlapping intervals.
@@ -371,6 +522,43 @@ function Set:intersection(other)
     end
   end
   return M.set(ivs):normalize()
+end
+
+-- Add an interval to the set, merging with any that overlap or touch.
+function Set:add(iv)
+  if iv:is_empty() then return self end
+  self.n = self.n + 1
+  self.intervals[self.n] = iv
+  -- Re-normalize in place.
+  local normalized = M.set(self.intervals):normalize()
+  self.intervals = normalized.intervals
+  self.n = normalized.n
+  return self
+end
+
+-- Return a copy of the intervals list (sorted, disjoint, non-empty).
+-- Named get_intervals() to avoid shadowing the 'intervals' instance field.
+function Set:get_intervals()
+  local result = {}
+  for i = 1, self.n do result[i] = self.intervals[i] end
+  return result
+end
+
+-- True if the set has no intervals (or all are empty).
+function Set:is_empty()
+  for i = 1, self.n do
+    if not self.intervals[i]:is_empty() then return false end
+  end
+  return true
+end
+
+-- intersect: alias for intersection (accepts Interval or Set).
+function Set:intersect(other)
+  -- wrap a plain interval in a set for uniform handling
+  if getmetatable(other) ~= Set then
+    other = M.set({ other })
+  end
+  return self:intersection(other)
 end
 
 function Set:__tostring()
