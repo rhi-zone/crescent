@@ -383,6 +383,26 @@ comparator, and constraint solver. Comparison metamethods, `inc_major`/`minor`/`
 constraint parsing (`>=`, `<`, `^`, `~`, `*`, `x`/`X` wildcards, compound AND). `sort`,
 `max`, `min`, `is_valid`. 234 assertions. (Separate from `lib/pkg/semver.lua`.)
 
+**Base32** (`lib/base32`) — **implemented**. Base32 encoding and decoding (RFC 4648): standard
+alphabet (A-Z2-7), extended hex alphabet (0-9A-V, order-preserving), and Crockford variant
+(human-friendly, case-insensitive, maps I/L→1 and O→0, no padding). `encode`/`decode` plus
+`encode_hex`/`encode_crockford` variants. 62 assertions.
+
+**CBOR** (`lib/cbor`) — **implemented**. CBOR (RFC 7049) binary encoder/decoder. All major
+types: unsigned/negative integers, byte strings, text strings, arrays, maps, tagged values,
+floats (16/32/64-bit decode, 64-bit encode), true/false/null. Indefinite-length arrays, maps,
+and strings. `M.bytes(s)` wrapper for byte strings. Pure Lua + FFI float64 tier. 171 assertions.
+
+**Chan** (`lib/chan`) — **implemented**. Go-style coroutine channels. Buffered and unbuffered
+(rendezvous), `send`/`recv`/`close`, non-blocking `try_send`/`try_recv`, `M.select(cases)` for
+multiplexing, `M.go(fn)` coroutine spawn, `M.run(fn)` round-robin scheduler for driving
+coroutines to completion in tests. 65 assertions.
+
+**Proto** (`lib/proto`) — **implemented**. Protocol Buffers 3 wire format encoder/decoder.
+Schema-as-Lua-tables (no .proto parser). All wire types: varint (int32/int64/uint/sint/bool/enum),
+64-bit (double/fixed64), LEN (string/bytes/embedded message/packed repeated), 32-bit (float/fixed32).
+Zigzag encoding for sint32/sint64. Repeated fields. 75 assertions.
+
 **MD5** (`lib/hash/md5`) — **implemented**. Pure Lua MD5 digest (RFC 1321). One-shot
 `md5(data)` returns 16-byte binary digest; `md5_hex(data)` returns 32-char hex string.
 Streaming `new_md5()` with `update`/`digest`/`reset`. 62 assertions.
