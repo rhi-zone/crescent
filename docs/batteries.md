@@ -338,6 +338,33 @@ aliases. 92 assertions.
 (subtree collection), `longest_prefix` (longest key that is prefix of query), `autocomplete`,
 `each` (sorted), `to_array`, `height`. Edge-splitting for common prefixes. 427 assertions.
 
+**Matrix Ext** (`lib/matrix_ext`) — **implemented**. Advanced linear algebra on top of
+`lib/matrix`. LU decomposition (Doolittle + partial pivoting), `solve(A, b)`, `det`, `inv`.
+QR (modified Gram-Schmidt). Cholesky (SPD matrices). Jacobi eigenvalues for symmetric
+matrices. One-sided Jacobi SVD. Power iteration. `rank`, `pinv` (Moore-Penrose), `norm_frobenius`,
+`norm_2`, `mul`, `transpose`. 129 assertions.
+
+**CSV Query** (`lib/csv_query`) — **implemented**. SQL-like query engine for in-memory
+tabular data. `from_csv/from_rows/from_arrays`. Immutable DataFrame ops: `select`, `where`,
+`order_by`, `limit`, `offset`, `group_by` (sum/count/min/max/avg/first/last), `join`,
+`left_join`, `distinct`, `add_column`, `drop`, `rename`. `col_values`, `describe`
+(numeric stats), `to_csv`. Uses `lib/csv` when available. 144 assertions.
+
+**DSP** (`lib/dsp`) — **implemented**. Discrete signal processing. Cooley-Tukey radix-2
+`fft`/`ifft`, `fft_mag`, `psd`. `convolve`, `correlate`, `autocorrelate`. Windows: Hann,
+Hamming, Blackman, Bartlett. FIR filters: `lpf`/`hpf`/`bpf` (windowed-sinc), `apply_fir`.
+IIR biquad (Audio EQ Cookbook): lowpass/highpass/bandpass/notch, direct form II transposed.
+`resample` (linear). Stats: `rms`, `energy`, `mean`, `variance`, `peak`, `zero_crossings`.
+Generators: `sine/cosine/sawtooth/square/noise/chirp/impulse`. 654 assertions.
+
+**JSON Schema** (`lib/jsonschema`) — **implemented**. JSON Schema draft-07 validator.
+`validate(schema, value)` → `true` or `nil, errors`. `compile(schema)` → reusable fn.
+`is_valid`. Full keyword coverage: type, enum/const, string (minLength/maxLength/pattern),
+number (min/max/exclusive/multipleOf), array (items/tuple/additionalItems/minItems/maxItems/
+uniqueItems/contains), object (properties/required/additionalProperties/patternProperties/
+dependencies/propertyNames), allOf/anyOf/oneOf/not, if/then/else, `$ref`+definitions.
+173 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
