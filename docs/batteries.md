@@ -273,6 +273,16 @@ membership. 108 assertions.
 push/pop from both ends, overflow wrapping, sliding window, 1-based indexing,
 drain, iterator. 111 assertions.
 
+**Humanize** (`lib/humanize`) — **implemented**. Human-readable formatting: `bytes` (B/KB/MB/…
+binary and SI), `parse_bytes`, `duration` (w/d/h/m/s/ms, compact/long/max_parts options),
+`parse_duration`, `ordinal` (1st/2nd/3rd/nth, teen exceptions), `number` (thousands separator),
+`percentage`, `relative` (past/future fuzzy), `plural` (irregular forms), `list` (Oxford comma). 85 assertions.
+
+**Path** (`lib/path`) — **implemented**. Cross-platform filesystem path manipulation (pure
+string ops, no I/O): `join`, `split`, `basename`, `dirname`, `splitext`, `ext`, `is_absolute`,
+`normalize` (resolves `..`/`.`), `relative`, `parts`, `commonpath`, `expanduser`. Platform
+sep/pathsep from `package.config`. 78 assertions.
+
 **Trie** (`lib/trie`) — implemented. Prefix tree: insert/get/has/remove, has_prefix,
 find_prefix, count_prefix, longest_prefix (routing), autocomplete with limit,
 sorted iteration. 108 assertions.
