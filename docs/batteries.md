@@ -231,6 +231,23 @@ streaming decoder. Codec aliases: `decode`/`encode`, `string_to_rows`/`rows_to_s
 calls, inline transitive dependencies, emit self-contained single file. Circular
 dependency handling, shebang injection, `analyze` for dependency listing. 99 assertions.
 
+**Graph** (`lib/graph`) — implemented. Directed/undirected graphs with adjacency list.
+Algorithms: BFS, DFS, topological sort (Kahn's), Dijkstra shortest path, cycle detection,
+connected components, Tarjan's SCC, transpose. 164 assertions.
+
+**Cache** (`lib/cache`) — implemented. LRU cache with optional TTL. Doubly-linked list
+for O(1) promote/evict, injectable clock for testing, eviction callbacks, resize,
+bulk get/set. 102 assertions.
+
+**Validate** (`lib/validate`) — implemented. Schema validation for Lua tables. Composable
+validators: string/number/integer/boolean/table/func/any/nil/literal, optional, one_of,
+all_of, array, map, record, custom. Dotted error paths. 193 assertions.
+
+**Stream** (`lib/stream`) — implemented. Lazy iterator combinators: from_array, range,
+generate, iterate. Transforms: map, filter, take, drop, flat_map, zip, chain, enumerate,
+unique, dedup, scan, chunks, intersperse. Terminals: to_array, reduce, count, sum, min,
+max, find, any, all, join, partition, group_by. 120 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can

@@ -250,6 +250,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/diff/`** — Myers diff algorithm: diff arrays/strings, unified format, patch, LCS. 96 assertions.
 - [x] **`lib/csv/`** — RFC 4180 CSV parser/encoder: quoting, headers, streaming decoder. 135 assertions.
 - [x] **`lib/embed/`** — Vector index/search on lib/vec: kNN, cosine/euclidean/dot, metadata filter, serialize. 112 assertions.
+- [x] **`lib/graph/`** — Graph data structures + algorithms: BFS, DFS, Dijkstra, topological sort, SCC, cycle detection. 164 assertions.
+- [x] **`lib/cache/`** — LRU cache with TTL, eviction callbacks, injectable clock, resize. 102 assertions.
+- [x] **`lib/validate/`** — Schema validation for Lua tables: composable validators, records, arrays, combinators. 193 assertions.
+- [x] **`lib/stream/`** — Lazy iterator combinators: map, filter, reduce, take, zip, flat_map, chunks, etc. 120 assertions.
 
 ## lib/asm — SIMD kernel compiler
 
