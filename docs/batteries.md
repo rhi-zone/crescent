@@ -334,8 +334,9 @@ on `lib/ansi`. Imperative API — draw what you want, when you want.
 Same model as the browser frontend (`lib/reactive_optics` + `lib/lua2ts`), different
 render target. The terminal is just another output surface.
 
-**`lib/notify`** — push notifications, webhooks, alerting. Outbound HTTP webhooks,
-email notifications (via `lib/email`), SMS gateway integrations.
+**`lib/notify`** — **implemented**. Notification dispatch: channels (email/webhook/console),
+router (rule-based routing), batch aggregation, rate limiting, retry with backoff,
+template rendering. 78 assertions.
 
 **`lib/ml`** *(data/ML vertical)* — classical ML and inference, not training. Tiered
 as everywhere else: pure Lua reference implementations (hackable, readable, the thing
@@ -348,9 +349,9 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
   extraction, cosine similarity. Tokenizer with stopword filtering. 61 assertions.
 - `lib/knn` — **implemented**. k-nearest neighbors: brute-force top-k, classify (majority
   vote + weighted), regress, euclidean/cosine/manhattan + custom distance. 55 assertions.
-- `lib/xgboost` — gradient boosted trees. Pure Lua implementation (a few hundred lines
-  — decision trees are simple, boosting is just iteration) as the hackable reference;
-  FFI binding to the real xgboost library as the fast tier. Parity tests between them.
+- `lib/xgboost` — **implemented**. Gradient boosted trees: MSE/logistic objectives,
+  max_depth/min_samples/learning_rate/subsample, feature importance, serialization.
+  Pure Lua reference implementation. 95 assertions.
 - `lib/onnx` — ONNX runtime FFI bindings. Run any exported model from PyTorch, sklearn,
   etc. FFI-only (no pure Lua equivalent — the model format is the spec).
 - `lib/embed` — embedding utilities on top of `lib/ai`: batch embedding, vector
@@ -358,8 +359,8 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
 
 **`lib/logic`** *(logic programming)* — relational/logic programming substrate.
 
-- `lib/ukanren` — microKanren port. The original is ~40 lines of Scheme; a Lua port
-  is a beautiful demonstration of hackability. Goals, unification, streams.
+- `lib/ukanren` — **implemented**. microKanren port: unification, goals (eq, conj, disj),
+  fresh variables, reification, fair interleaving (zzz/pull), run/run_all. 52 assertions.
 - `lib/datalog` — **implemented**. Pure Lua Datalog engine: naive bottom-up evaluation
   to fixpoint, recursive rules, guard functions, query with wildcards and named bindings.
   87 assertions.
@@ -367,13 +368,11 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
 These serve both the language tooling crowd (type inference helpers, program analysis)
 and anyone who wants declarative query semantics without a full SQL engine.
 
-**`lib/parse`** *(lower priority, niche)* — general-purpose parsing substrate. Lexer
-utilities, parser combinators, AST construction. Extracted from the typechecker's own
-parser (`lib/type/static/lex.lua`, `parse.lua`) into reusable primitives. For anyone
-building a language, DSL, config format, query language, or linter. Crescent already
-does this for itself — the question is whether those primitives become first-class
-`lib/` libraries. Also: `lib/asm` (assembler utilities) and `lib/ir` (intermediate
-representation) as stretch goals for the language tooling niche.
+**`lib/parse`** — **implemented**. Parser combinators: literal, pattern, seq, alt, many,
+many1, opt, map, sep_by, between, lazy, whitespace, number, string, identifier.
+Composable grammar construction. 92 assertions. Also: `lib/asm` (assembler utilities,
+implemented) and `lib/ir` (intermediate representation, not yet implemented) as stretch
+goals for the language tooling niche.
 
 ### Missing — typechecker features (load-bearing for the ecosystem)
 
