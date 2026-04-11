@@ -220,6 +220,11 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**JWT** (`lib/jwt`) — **implemented**. JSON Web Tokens (RFC 7519). `encode(payload, secret)`
+/ `decode(token, secret)` / `decode_unverified(token)`. HS256 (HMAC-SHA256) signing and
+verification; timing-safe signature comparison; `exp`/`nbf` claim validation; `now()`/
+`exp_in(seconds)` helpers. 59 assertions.
+
 **AES** (`lib/crypto/aes`) — **implemented**. AES-128/192/256 block cipher, pure Lua.
 ECB, CBC, CTR modes; PKCS#7 padding/unpadding; streaming CTR encryption; key caching.
 Verified against NIST FIPS 197 Appendix B and AES-192/256 vectors. 45 assertions.
