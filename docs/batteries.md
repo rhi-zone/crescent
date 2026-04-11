@@ -364,6 +364,25 @@ from_array. Operators: map, filter, take, skip, distinct, reduce, scan, flat_map
 concat, merge, take_while, skip_while, buffer, to_array. Combinators: merge, concat,
 zip, combine_latest. Subjects and replay subjects. 510 assertions.
 
+**Bencode** (`lib/bencode`) — **implemented**. Bencode encoder/decoder (BitTorrent
+encoding format): integers, byte strings, lists, dictionaries with sorted keys.
+Codec aliases: `encode`/`decode`, `table_to_string`/`string_to_table`. 90 assertions.
+
+**MessagePack** (`lib/msgpack`) — **implemented**. MessagePack binary serialization:
+nil, boolean, integer (fixint through uint32/int32), float64, string, binary, array,
+map. Pure Lua, big-endian byte packing. `M.bin(s)` for binary-typed strings. Codec
+aliases. 524 assertions.
+
+**Result** (`lib/result`) — **implemented**. Result type (Ok/Err) like Rust's
+`Result<T, E>`. Monadic chaining: `map`, `and_then`, `or_else`, `map_err`, `inspect`.
+`from`/`to_pair` for Lua convention interop, `try` for pcall wrapping, `all`/`any`
+combinators. 124 assertions.
+
+**SemVer** (`lib/semver`) — **implemented**. Semantic Versioning 2.0.0 parser,
+comparator, and constraint solver. Comparison metamethods, `inc_major`/`minor`/`patch`,
+constraint parsing (`>=`, `<`, `^`, `~`, `*`, `x`/`X` wildcards, compound AND). `sort`,
+`max`, `min`, `is_valid`. 234 assertions. (Separate from `lib/pkg/semver.lua`.)
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
