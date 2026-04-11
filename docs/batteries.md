@@ -218,10 +218,10 @@ random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 types, dotted keys, table headers, array of tables, inline tables/arrays, all string
 types with escapes, datetime types. Round-trip encode/decode. 93 assertions.
 
-**CSV** (`lib/csv`) — implemented. RFC 4180 CSV parser and encoder: quoting, escaped
-quotes, embedded newlines, CRLF/LF, header mode (keyed tables), custom delimiters,
-streaming decoder. Codec aliases: `decode`/`encode`, `string_to_rows`/`rows_to_string`.
-135 assertions.
+**CSV** (`lib/csv`) — implemented. RFC 4180 CSV parser and encoder: quoting, doubled-quote
+escaping, embedded newlines, CRLF/LF/CR, `headers` mode (keyed tables), `coerce` (auto
+number/bool), `trim`, custom separator. `decode_row`/`encode_row`, `encode_records`,
+`iter`, streaming push `decoder`. Codec aliases: `decode`/`encode`. 220 assertions.
 
 **Diff** (`lib/diff`) — implemented. Myers diff algorithm (O(ND)): `diff` (arrays),
 `diff_strings` (line-level), `unified` (unified format output), `patch` (apply edits),
@@ -308,8 +308,13 @@ and `crc32_hex`, streaming `new(seed?)` with `update`/`digest`/`hex`/`reset`. Se
 `polar_to_cart`, `distance`, `dot2d`/`cross2d`. 151 assertions.
 
 **Trie** (`lib/trie`) — implemented. Prefix tree: insert/get/has/remove, has_prefix,
-find_prefix, count_prefix, longest_prefix (routing), autocomplete with limit,
-sorted iteration. 108 assertions.
+find_prefix, count_prefix, longest_prefix (routing), autocomplete/completions with limit,
+sorted iteration via `iter`/`all`. `compressed` option (radix-trie interface). 150 assertions.
+
+**Bloom Filter** (`lib/bloom`) — **implemented**. Probabilistic set membership. `bloom.new(n, p)`
+(capacity + false-positive rate) or `bloom.new_raw(m, k)`. FNV-1a + polynomial double hashing
+(Kirsch-Mitzenmacher). `add`/`has`/`clear`/`count`/`union`/`intersection`/`to_string`/`from_string`.
+Counting filter (`counting_new`) with `remove` and `count_of`. 468 assertions.
 
 **Glob** (`lib/glob`) — implemented. Glob pattern matching: `*` (any non-/), `**`
 (recursive), `?` (single char), `[abc]`/`[a-z]`/`[!abc]` (char classes), `{a,b}`

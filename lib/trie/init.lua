@@ -1,5 +1,5 @@
-if not package.path:find("?/init.lua", 1, true) then
-  package.path = package.path .. ";./?/init.lua"
+if not package.path:find("./?/init.lua", 1, true) then
+  package.path = "./?/init.lua;" .. package.path
 end
 
 -- Trie (prefix tree) data structure.
@@ -8,11 +8,13 @@ end
 
 local M = {}
 
---: () -> Trie
-function M.new()
+-- opts.compressed: if true, logically a radix/Patricia trie (no-op at this tier; same interface)
+--: (opts?: { compressed: boolean | nil }) -> Trie
+function M.new(opts)
   local self = {
     _root = { children = {} },
     _size = 0,
+    _compressed = opts and opts.compressed or false,
   }
   return setmetatable(self, { __index = M })
 end
@@ -274,5 +276,27 @@ function M:clear()
   self._root = { children = {} }
   self._size = 0
 end
+
+-- Aliases for spec-compatible API names.
+-- delete: alias for remove. Returns true if key existed, false if not.
+--: (key: string) -> boolean
+function M:delete(key)
+  local old = self:remove(key)
+  return old ~= nil
+end
+
+-- completions: alias for autocomplete. Returns sorted key list with given prefix.
+--: (prefix: string, limit?: number) -> {string}
+M.completions = M.autocomplete
+
+-- all: alias for keys. Returns all keys sorted.
+--: () -> {string}
+M.all = M.keys
+
+-- iter: alias for pairs. Iterator over (key, value) in sorted order.
+--: () -> () -> string?, unknown?
+M.iter = M.pairs
+
+M._tier = "pure"
 
 return M
