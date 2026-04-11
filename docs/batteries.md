@@ -263,6 +263,12 @@ matches(), next/prev occurrence, next_n(), describe(). 185 assertions.
 transitions, guards, actions, on_enter/on_exit callbacks. Wildcard and multi-source
 transitions, history tracking, introspection. 125 assertions.
 
+**Automata** (`lib/automata`) — **implemented**. NFA/DFA construction and simulation.
+NFA with epsilon transitions, DFA with single-state stepping. Algorithms: subset
+construction (NFA→DFA), Hopcroft minimization, complement, product construction
+(intersection/union). Thompson's construction from regex (`.`, `|`, `*`, `+`, `?`,
+`()`, literals). `to_dot()` for GraphViz output. 184 assertions.
+
 **Heap** (`lib/heap`) — implemented. Binary heap (priority queue): min/max/custom
 comparator, O(n) heapify, merge, heap sort, keyed mode with push_or_update/remove,
 drain iterator. 615 assertions.
@@ -311,6 +317,12 @@ and `crc32_hex`, streaming `new(seed?)` with `update`/`digest`/`hex`/`reset`. Se
 find_prefix, count_prefix, longest_prefix (routing), autocomplete/completions with limit,
 sorted iteration via `iter`/`all`. `compressed` option (radix-trie interface). 150 assertions.
 
+**Bench** (`lib/bench`) — **implemented**. Micro-benchmarking framework. `bench.run(fn, opts)` with
+warmup, auto-batching, injectable clock. Result: `mean_ns`/`median_ns`/`min_ns`/`max_ns`/`stddev_ns`/
+`ops_per_sec`, `:format()`. `bench.suite` for named comparisons with speedup ratios.
+`bench.throughput` for bytes/sec. `bench.stats`, `bench.format_ns`, `bench.format_ops`.
+`bench.calibrate()` measures loop overhead. 89 assertions.
+
 **Bloom Filter** (`lib/bloom`) — **implemented**. Probabilistic set membership. `bloom.new(n, p)`
 (capacity + false-positive rate) or `bloom.new_raw(m, k)`. FNV-1a + polynomial double hashing
 (Kirsch-Mitzenmacher). `add`/`has`/`clear`/`count`/`union`/`intersection`/`to_string`/`from_string`.
@@ -322,8 +334,8 @@ Counting filter (`counting_new`) with `remove` and `count_of`. 468 assertions.
 
 **Matrix** (`lib/matrix`) — implemented. 2D matrix math: flat row-major storage,
 arithmetic (add/sub/mul/scale), transpose, trace, determinant, inverse, solve Ax=b
-via Gaussian elimination with partial pivoting, map, reshape, Frobenius norm.
-169 assertions.
+via Gaussian elimination with partial pivoting, map/zip, reshape, LU decomposition,
+Frobenius norm, slice, `__add`/`__sub`/`__mul`/`__eq` metamethods. 281 assertions.
 
 **Bits** (`lib/bits`) — implemented. Bitset (32-bit word array): set/clear/toggle/get,
 popcount, any/none/all, and/or/xor/not set operations. Bloom filter: optimal sizing,
@@ -362,6 +374,11 @@ Two-phase propagation (glitch-free). Lazy computed with dirty tracking. `stop()`
 **BigInt** (`lib/bigint`) — implemented. Arbitrary precision integers: base 10^7
 chunks, add/sub/mul/div/mod/pow, GCD/LCM, factorial, hex conversion. Full metamethods
 (+, -, *, /, %, ^, ==, <). 172 assertions.
+
+**BigNum** (`lib/bignum`) — **implemented**. Arbitrary precision decimal floating-point
+(`{sign, digits, exp}` representation). `new`/`parse`/`from_number`; arithmetic (`+`,`-`,`*`,`/`,
+`%`); rounding (`round`, `floor`, `ceil`, `trunc`); `sqrt` (Newton-Raphson), `pow`, `pi`
+(Machin's formula); `set_precision`/`get_precision` (default 50 digits). 157 assertions.
 
 **Router** (`lib/router`) — implemented. Radix tree URL router: static segments,
 `:param` captures, `*wildcard` catch-all, inline params, method dispatch, route

@@ -122,7 +122,7 @@ function M.solve(A, b)
   local aug = {}
   local ad = A._data
   local bd = b._data
-  if not bd or #bd ~= n then
+  if not bd or #bd ~= n or b._cols ~= 1 then
     return nil, "b must be a column vector with " .. n .. " rows"
   end
   for i = 1, n do
@@ -548,5 +548,226 @@ Mt.__tostring = function(self)
   end
   return table.concat(lines, "\n")
 end
+
+-- ---------------------------------------------------------------------------
+-- Additional API (spec-complete additions)
+-- ---------------------------------------------------------------------------
+
+--- Create a matrix from a flat row-major array (alias requested by spec).
+--: (rows: number, cols: number, arr: { [number]: number }) -> table | (nil, string)
+function M.from_array(rows, cols, arr)
+  return M.new(rows, cols, arr)
+end
+
+--- Return {rows, cols} as a Lua array (spec: A:size() -> {r,c}).
+-- The existing size() returns two values; shape() returns a table.
+--: () -> { [number]: number }
+function M:shape()
+  return { self._rows, self._cols }
+end
+
+--- Diagonal elements as a flat Lua array.
+--: () -> { [number]: number }
+function M:diagonal()
+  local n = self._rows < self._cols and self._rows or self._cols
+  local c = self._cols
+  local d = self._data
+  local out = {}
+  for i = 1, n do out[i] = d[(i - 1) * c + i] end
+  return out
+end
+
+--- Sum of all elements.
+--: () -> number
+function M:sum()
+  local n = self._rows * self._cols
+  local a = self._data
+  local s = 0
+  for i = 1, n do s = s + a[i] end
+  return s
+end
+
+--- Minimum element.
+--: () -> number
+function M:min()
+  local a = self._data
+  local n = self._rows * self._cols
+  local m = a[1]
+  for i = 2, n do if a[i] < m then m = a[i] end end
+  return m
+end
+
+--- Maximum element.
+--: () -> number
+function M:max()
+  local a = self._data
+  local n = self._rows * self._cols
+  local m = a[1]
+  for i = 2, n do if a[i] > m then m = a[i] end end
+  return m
+end
+
+--- Element-wise fn(a, b) with another matrix of the same shape.
+--: (other: table, fn: (number, number) -> number) -> table | (nil, string)
+function M:zip(other, fn)
+  local r, c = self._rows, self._cols
+  if r ~= other._rows or c ~= other._cols then
+    return nil, "dimension mismatch for zip"
+  end
+  local n = r * c
+  local a, b = self._data, other._data
+  local d = {}
+  for i = 1, n do d[i] = fn(a[i], b[i]) end
+  return setmetatable({ _rows = r, _cols = c, _data = d }, Mt)
+end
+
+--- Inverse (alias: inv, for spec compatibility).
+--: () -> table | (nil, string)
+function M:inv()
+  return self:inverse()
+end
+
+--- LU decomposition with partial pivoting.
+-- Returns L (lower triangular, unit diagonal) and U (upper triangular).
+-- Pivoting is absorbed into U; the decomposition satisfies P*A = L*U for some
+-- permutation P, and L*U approximates A up to row swaps.
+--: () -> table, table | (nil, string)
+function M:lu()
+  if self._rows ~= self._cols then
+    return nil, "LU decomposition requires square matrix"
+  end
+  local n = self._rows
+  -- Copy into mutable 2D array
+  local a = {}
+  local d = self._data
+  for i = 1, n do
+    a[i] = {}
+    local base = (i - 1) * n
+    for j = 1, n do a[i][j] = d[base + j] end
+  end
+  -- In-place LU with partial pivoting (Doolittle)
+  for k = 1, n do
+    local max_val = abs(a[k][k])
+    local max_row = k
+    for i = k + 1, n do
+      local v = abs(a[i][k])
+      if v > max_val then max_val = v; max_row = i end
+    end
+    if max_row ~= k then a[k], a[max_row] = a[max_row], a[k] end
+    local pivot = a[k][k]
+    if abs(pivot) >= 1e-15 then
+      for i = k + 1, n do
+        a[i][k] = a[i][k] / pivot
+        for j = k + 1, n do
+          a[i][j] = a[i][j] - a[i][k] * a[k][j]
+        end
+      end
+    end
+  end
+  -- Extract L and U
+  local ld, ud = {}, {}
+  local total = n * n
+  for p = 1, total do ld[p] = 0; ud[p] = 0 end
+  for i = 1, n do
+    for j = 1, n do
+      local pos = (i - 1) * n + j
+      if i > j then
+        ld[pos] = a[i][j]
+      elseif i == j then
+        ld[pos] = 1
+        ud[pos] = a[i][j]
+      else
+        ud[pos] = a[i][j]
+      end
+    end
+  end
+  return setmetatable({ _rows = n, _cols = n, _data = ld }, Mt),
+         setmetatable({ _rows = n, _cols = n, _data = ud }, Mt)
+end
+
+--- Submatrix from (r1,c1) to (r2,c2) inclusive (1-indexed).
+--: (r1: number, c1: number, r2: number, c2: number) -> table | (nil, string)
+function M:slice(r1, c1, r2, c2)
+  local r, c = self._rows, self._cols
+  if r1 < 1 or c1 < 1 or r2 > r or c2 > c or r1 > r2 or c1 > c2 then
+    return nil, "slice indices out of range"
+  end
+  local nr = r2 - r1 + 1
+  local nc = c2 - c1 + 1
+  local d = self._data
+  local out = {}
+  local k = 0
+  for i = r1, r2 do
+    local base = (i - 1) * c
+    for j = c1, c2 do
+      k = k + 1
+      out[k] = d[base + j]
+    end
+  end
+  return setmetatable({ _rows = nr, _cols = nc, _data = out }, Mt)
+end
+
+--- Approximate element-wise equality with tolerance.
+--: (other: table, tol: number?) -> boolean
+function M:approx_eq(other, tol)
+  return self:eq(other, tol or 1e-9)
+end
+
+--- Formatted string like "[[1 2 3]\n [4 5 6]]".
+--: () -> string
+function M:to_string()
+  local r, c = self._rows, self._cols
+  local d = self._data
+  local function fmt(v)
+    if v == floor(v) and abs(v) < 1e15 then
+      return tostring(floor(v))
+    end
+    return string.format("%.6g", v)
+  end
+  local row_strs = {}
+  for i = 1, r do
+    local parts = {}
+    local base = (i - 1) * c
+    for j = 1, c do parts[j] = fmt(d[base + j]) end
+    row_strs[i] = table.concat(parts, " ")
+  end
+  if r == 1 then
+    return "[[" .. row_strs[1] .. "]]"
+  end
+  local lines = {}
+  lines[1] = "[[" .. row_strs[1] .. "]"
+  for i = 2, r - 1 do
+    lines[i] = " [" .. row_strs[i] .. "]"
+  end
+  lines[r] = " [" .. row_strs[r] .. "]]"
+  return table.concat(lines, "\n")
+end
+
+--- Operator overloads (element-wise / matrix multiply).
+Mt.__add = function(a, b)
+  return a:add(b)
+end
+
+Mt.__sub = function(a, b)
+  return a:sub(b)
+end
+
+--- __mul: matrix*matrix → matrix multiply; matrix*number or number*matrix → scalar.
+Mt.__mul = function(a, b)
+  if type(b) == "number" then return a:scale(b) end
+  if type(a) == "number" then return b:scale(a) end
+  return a:mul(b)
+end
+
+Mt.__unm = function(a)
+  return a:neg()
+end
+
+--- __eq: element-wise exact equality (used by Lua == operator).
+Mt.__eq = function(a, b)
+  return a:eq(b)
+end
+
+M._tier = "pure"
 
 return M

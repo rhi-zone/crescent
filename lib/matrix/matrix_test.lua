@@ -503,4 +503,407 @@ T.describe("matrix", function()
       T.eq(m:get(1, 1), 1, "matrix data should be independent copy")
     end)
   end)
+
+  -- -------------------------------------------------------------------------
+  -- from_array (flat row-major, spec alias)
+  -- -------------------------------------------------------------------------
+  T.describe("from_array", function()
+    T.it("creates matrix from flat row-major array", function()
+      local B = matrix.from_array(3, 3, {
+        1, 2, 3,
+        4, 5, 6,
+        7, 8, 9,
+      })
+      T.eq(B:rows(), 3)
+      T.eq(B:cols(), 3)
+      T.eq(B:get(1, 2), 2)
+      T.eq(B:get(2, 1), 4)
+      T.eq(B:get(3, 3), 9)
+    end)
+
+    T.it("from_array 3x2 non-square", function()
+      local m = matrix.from_array(3, 2, {1, 2, 3, 4, 5, 6})
+      T.eq(m:rows(), 3)
+      T.eq(m:cols(), 2)
+      T.eq(m:get(2, 2), 4)
+      T.eq(m:get(3, 1), 5)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- shape / size returning table
+  -- -------------------------------------------------------------------------
+  T.describe("shape", function()
+    T.it("returns {rows, cols} table", function()
+      local m = matrix.new(4, 5)
+      local s = m:shape()
+      T.eq(s[1], 4)
+      T.eq(s[2], 5)
+    end)
+
+    T.it("1x1 shape", function()
+      local m = matrix.new(1, 1)
+      local s = m:shape()
+      T.eq(s[1], 1)
+      T.eq(s[2], 1)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- diagonal
+  -- -------------------------------------------------------------------------
+  T.describe("diagonal", function()
+    T.it("square matrix diagonal", function()
+      local B = matrix.from_array(3, 3, {1,2,3,4,5,6,7,8,9})
+      local d = B:diagonal()
+      T.eq(d[1], 1)
+      T.eq(d[2], 5)
+      T.eq(d[3], 9)
+      T.eq(#d, 3)
+    end)
+
+    T.it("non-square 2x3 diagonal (min dimension)", function()
+      local m = matrix.from_array(2, 3, {1,2,3,4,5,6})
+      local d = m:diagonal()
+      T.eq(#d, 2)
+      T.eq(d[1], 1)
+      T.eq(d[2], 5)
+    end)
+
+    T.it("identity diagonal is all ones", function()
+      local d = matrix.identity(4):diagonal()
+      for i = 1, 4 do T.eq(d[i], 1) end
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- Operator overloads: +, -, *, unary -
+  -- -------------------------------------------------------------------------
+  T.describe("operator overloads", function()
+    local A = matrix.from_array(2, 2, {1,2,3,4})
+    local B = matrix.from_array(2, 2, {5,6,7,8})
+
+    T.it("__add element-wise", function()
+      local C = A + B
+      T.eq(C:get(1,1), 6)
+      T.eq(C:get(1,2), 8)
+      T.eq(C:get(2,1), 10)
+      T.eq(C:get(2,2), 12)
+    end)
+
+    T.it("__sub element-wise", function()
+      local C = B - A
+      T.eq(C:get(1,1), 4)
+      T.eq(C:get(2,2), 4)
+    end)
+
+    T.it("__mul matrix multiply", function()
+      local C = A * B
+      -- [1 2]*[5 6] = [1*5+2*7, 1*6+2*8] = [19, 22]
+      -- [3 4] [7 8]   [3*5+4*7, 3*6+4*8]   [43, 50]
+      T.eq(C:get(1,1), 19)
+      T.eq(C:get(1,2), 22)
+      T.eq(C:get(2,1), 43)
+      T.eq(C:get(2,2), 50)
+    end)
+
+    T.it("__mul scalar right", function()
+      local C = A * 3
+      T.eq(C:get(1,1), 3)
+      T.eq(C:get(2,2), 12)
+    end)
+
+    T.it("__mul scalar left", function()
+      local C = 2 * A
+      T.eq(C:get(1,1), 2)
+      T.eq(C:get(2,2), 8)
+    end)
+
+    T.it("__unm negation", function()
+      local C = -A
+      T.eq(C:get(1,1), -1)
+      T.eq(C:get(1,2), -2)
+      T.eq(C:get(2,1), -3)
+      T.eq(C:get(2,2), -4)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- sum / min / max
+  -- -------------------------------------------------------------------------
+  T.describe("aggregation", function()
+    T.it("sum of elements", function()
+      local m = matrix.from_array(2, 3, {1,2,3,4,5,6})
+      T.eq(m:sum(), 21)
+    end)
+
+    T.it("sum of identity(3) is 3", function()
+      T.eq(matrix.identity(3):sum(), 3)
+    end)
+
+    T.it("min element", function()
+      local m = matrix.from_array(2, 2, {3,-1,7,2})
+      T.eq(m:min(), -1)
+    end)
+
+    T.it("max element", function()
+      local m = matrix.from_array(2, 2, {3,-1,7,2})
+      T.eq(m:max(), 7)
+    end)
+
+    T.it("min and max on 1x1", function()
+      local m = matrix.new(1, 1, {42})
+      T.eq(m:min(), 42)
+      T.eq(m:max(), 42)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- zip
+  -- -------------------------------------------------------------------------
+  T.describe("zip", function()
+    T.it("element-wise add via zip", function()
+      local a = matrix.from_array(2, 2, {1,2,3,4})
+      local b = matrix.from_array(2, 2, {10,20,30,40})
+      local c = a:zip(b, function(x, y) return x + y end)
+      T.eq(c:get(1,1), 11)
+      T.eq(c:get(2,2), 44)
+    end)
+
+    T.it("element-wise product via zip", function()
+      local a = matrix.from_array(1, 3, {2,3,4})
+      local b = matrix.from_array(1, 3, {5,6,7})
+      local c = a:zip(b, function(x, y) return x * y end)
+      T.eq(c:get(1,1), 10)
+      T.eq(c:get(1,2), 18)
+      T.eq(c:get(1,3), 28)
+    end)
+
+    T.it("zip rejects dimension mismatch", function()
+      local a = matrix.new(2,2)
+      local b = matrix.new(2,3)
+      local c, err = a:zip(b, function(x,y) return x+y end)
+      T.eq(c, nil)
+      T.ok(err)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- inv (alias for inverse)
+  -- -------------------------------------------------------------------------
+  T.describe("inv", function()
+    T.it("inv is alias for inverse", function()
+      local m = matrix.from_array(2, 2, {4,7,2,6})
+      local inv = m:inv()
+      T.ok(inv, "inv should succeed")
+      local prod = m:mul(inv)
+      T.ok(prod:eq(matrix.identity(2), 1e-9), "M*M^-1=I")
+    end)
+
+    T.it("inv of singular returns nil", function()
+      local m = matrix.from_array(2, 2, {1,2,2,4})
+      local inv, err = m:inv()
+      T.eq(inv, nil)
+      T.ok(err)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- LU decomposition
+  -- -------------------------------------------------------------------------
+  T.describe("lu", function()
+    T.it("L is lower triangular with unit diagonal", function()
+      local A = matrix.from_array(3, 3, {2,1,1, 4,3,3, 8,7,9})
+      local L, U = A:lu()
+      T.ok(L, "L exists")
+      T.ok(U, "U exists")
+      -- Unit diagonal
+      T.ok(math.abs(L:get(1,1) - 1) < 1e-9)
+      T.ok(math.abs(L:get(2,2) - 1) < 1e-9)
+      T.ok(math.abs(L:get(3,3) - 1) < 1e-9)
+      -- Upper triangle of L is zero
+      T.ok(math.abs(L:get(1,2)) < 1e-9)
+      T.ok(math.abs(L:get(1,3)) < 1e-9)
+      T.ok(math.abs(L:get(2,3)) < 1e-9)
+      -- Lower triangle of U is zero
+      T.ok(math.abs(U:get(2,1)) < 1e-9)
+      T.ok(math.abs(U:get(3,1)) < 1e-9)
+      T.ok(math.abs(U:get(3,2)) < 1e-9)
+    end)
+
+    T.it("LU rejects non-square", function()
+      local m = matrix.new(2, 3)
+      local L, err = m:lu()
+      T.eq(L, nil)
+      T.ok(err)
+    end)
+
+    T.it("2x2 LU product equals original when no pivoting", function()
+      -- Row 1 has larger pivot (4 > 1), so no swap occurs: L*U = A exactly.
+      local A = matrix.from_array(2, 2, {4,3,2,1})
+      local L, U = A:lu()
+      local LU = L:mul(U)
+      T.ok(LU:eq(A, 1e-9), "L*U = A when no pivot swap")
+    end)
+
+    T.it("3x3 L*U reconstructs A when leading element is largest", function()
+      -- Diagonal-dominant: pivots are already the largest, no row swaps.
+      local A = matrix.from_array(3, 3, {10,2,1, 1,8,2, 2,1,9})
+      local L, U = A:lu()
+      local LU = L:mul(U)
+      T.ok(LU:eq(A, 1e-9), "L*U = A")
+    end)
+
+    T.it("identity lu gives L=I, U=I", function()
+      local I = matrix.identity(3)
+      local L, U = I:lu()
+      T.ok(L:eq(matrix.identity(3), 1e-9), "L=I")
+      T.ok(U:eq(matrix.identity(3), 1e-9), "U=I")
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- slice
+  -- -------------------------------------------------------------------------
+  T.describe("slice", function()
+    T.it("extract 2x2 submatrix from 3x3", function()
+      local B = matrix.from_array(3, 3, {1,2,3,4,5,6,7,8,9})
+      local S = B:slice(1, 1, 2, 2)
+      T.eq(S:rows(), 2)
+      T.eq(S:cols(), 2)
+      T.eq(S:get(1,1), 1)
+      T.eq(S:get(1,2), 2)
+      T.eq(S:get(2,1), 4)
+      T.eq(S:get(2,2), 5)
+    end)
+
+    T.it("slice full matrix returns equal copy", function()
+      local B = matrix.from_array(2, 3, {1,2,3,4,5,6})
+      local S = B:slice(1, 1, 2, 3)
+      T.ok(S:eq(B))
+    end)
+
+    T.it("slice single element", function()
+      local B = matrix.from_array(3, 3, {1,2,3,4,5,6,7,8,9})
+      local S = B:slice(2, 2, 2, 2)
+      T.eq(S:rows(), 1)
+      T.eq(S:cols(), 1)
+      T.eq(S:get(1,1), 5)
+    end)
+
+    T.it("slice bottom-right 2x2", function()
+      local B = matrix.from_array(3, 3, {1,2,3,4,5,6,7,8,9})
+      local S = B:slice(2, 2, 3, 3)
+      T.eq(S:get(1,1), 5)
+      T.eq(S:get(1,2), 6)
+      T.eq(S:get(2,1), 8)
+      T.eq(S:get(2,2), 9)
+    end)
+
+    T.it("slice out-of-range returns nil", function()
+      local B = matrix.from_array(2, 2, {1,2,3,4})
+      local S, err = B:slice(1, 1, 3, 2)
+      T.eq(S, nil)
+      T.ok(err)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- approx_eq
+  -- -------------------------------------------------------------------------
+  T.describe("approx_eq", function()
+    T.it("exact equal matrices", function()
+      local a = matrix.from_array(2, 2, {1,2,3,4})
+      local b = matrix.from_array(2, 2, {1,2,3,4})
+      T.ok(a:approx_eq(b))
+    end)
+
+    T.it("within default tolerance", function()
+      local a = matrix.from_array(1, 2, {1.0, 2.0})
+      local b = matrix.from_array(1, 2, {1.0 + 1e-10, 2.0 - 1e-10})
+      T.ok(a:approx_eq(b))
+    end)
+
+    T.it("outside default tolerance", function()
+      local a = matrix.from_array(1, 2, {1.0, 2.0})
+      local b = matrix.from_array(1, 2, {1.1, 2.0})
+      T.ok(not a:approx_eq(b))
+    end)
+
+    T.it("custom tolerance", function()
+      local a = matrix.from_array(1, 1, {1.0})
+      local b = matrix.from_array(1, 1, {1.05})
+      T.ok(not a:approx_eq(b, 0.01))
+      T.ok(a:approx_eq(b, 0.1))
+    end)
+
+    T.it("different shapes are not approx equal", function()
+      local a = matrix.new(2, 2)
+      local b = matrix.new(2, 3)
+      T.ok(not a:approx_eq(b))
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- to_string (formatted [[...]] output)
+  -- -------------------------------------------------------------------------
+  T.describe("to_string", function()
+    T.it("1x1 formatted output", function()
+      local m = matrix.new(1, 1, {7})
+      T.eq(m:to_string(), "[[7]]")
+    end)
+
+    T.it("1x3 single row", function()
+      local m = matrix.from_array(1, 3, {1, 2, 3})
+      T.eq(m:to_string(), "[[1 2 3]]")
+    end)
+
+    T.it("2x3 multi-row format", function()
+      local m = matrix.from_array(2, 3, {1,2,3,4,5,6})
+      local s = m:to_string()
+      T.ok(s:find("%[%[1 2 3%]"), "first row starts with [[")
+      T.ok(s:find("%[4 5 6%]%]"), "last row ends with ]]")
+      T.ok(s:find("\n"), "multi-row has newline")
+    end)
+
+    T.it("3x3 from spec example", function()
+      local m = matrix.from_array(3, 3, {1,2,3,4,5,6,7,8,9})
+      local s = m:to_string()
+      T.eq(s, "[[1 2 3]\n [4 5 6]\n [7 8 9]]")
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- solve: verify Ax=b for 3x3 and edge cases
+  -- -------------------------------------------------------------------------
+  T.describe("solve extended", function()
+    T.it("solve returns n×1 matrix", function()
+      local A = matrix.from_array(2, 2, {1,0,0,1})
+      local b = matrix.new(2, 1, {3, 7})
+      local x = matrix.solve(A, b)
+      T.ok(x, "solution exists")
+      T.eq(x:rows(), 2)
+      T.eq(x:cols(), 1)
+      T.eq(x:get(1,1), 3)
+      T.eq(x:get(2,1), 7)
+    end)
+
+    T.it("solve b must be column vector", function()
+      local A = matrix.from_array(2, 2, {1,0,0,1})
+      local b = matrix.from_array(1, 2, {3, 7})  -- wrong: 1x2 not 2x1
+      local x, err = matrix.solve(A, b)
+      T.eq(x, nil)
+      T.ok(err)
+    end)
+  end)
+
+  -- -------------------------------------------------------------------------
+  -- M._tier
+  -- -------------------------------------------------------------------------
+  T.describe("module metadata", function()
+    T.it("_tier is pure", function()
+      T.eq(matrix._tier, "pure")
+    end)
+  end)
+
 end)
