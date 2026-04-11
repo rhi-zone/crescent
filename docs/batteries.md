@@ -220,6 +220,19 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**TOTP** (`lib/totp`) — **implemented**. HOTP (RFC 4226) and TOTP (RFC 6238) one-time
+passwords. `hotp(key, counter)`, `totp(key, opts)`, `totp_base32(secret, opts)`,
+`verify(secret, code, opts)` (time-window), `new_secret()`, `otpauth_uri()` for QR codes.
+Verified against RFC 4226 Appendix D and RFC 6238 Appendix B vectors. 66 assertions.
+
+**Base58** (`lib/base58`) — **implemented**. Base58 and Base58Check encoding (Bitcoin/IPFS
+alphabet). `encode`/`decode`, `encode_check`/`decode_check` (double-SHA256 checksum).
+Leading zero bytes map to leading '1' characters. 70 assertions.
+
+**PEM** (`lib/pem`) — **implemented**. PEM format parser/writer (RFC 7468). `decode`,
+`decode_all`, `encode(label, data)`, `is_pem`, `label`. Handles CRLF, blank lines,
+label validation. Base64 body decode/encode. Used for TLS certs, keys, CSRs. 85 assertions.
+
 **JWT** (`lib/jwt`) — **implemented**. JSON Web Tokens (RFC 7519). `encode(payload, secret)`
 / `decode(token, secret)` / `decode_unverified(token)`. HS256 (HMAC-SHA256) signing and
 verification; timing-safe signature comparison; `exp`/`nbf` claim validation; `now()`/
