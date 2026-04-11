@@ -236,6 +236,30 @@ over `lib/unified/mdast` + `lib/unified/hast`. `mdit.new(opts)` / `md:render` / 
 / `md:use(plugin)`. Options: `html`, `breaks`, `linkify`, `typographer`. Plugins:
 `tasklist`, `table`, `abbr`, `deflist`, `footnote`. 101 assertions.
 
+**Rational** (`lib/rational`) — **implemented**. Exact rational arithmetic. `new(p, q)`
+normalizes via GCD, keeps denominator positive. Arithmetic: `add/sub/mul/div/neg/abs/pow/inv`.
+Comparison: `eq/lt/le`. Conversion: `to_number/to_string`. `from_float(x, max_denom)` via
+Stern-Brocot mediant. Full metamethods (`+`, `-`, `*`, `/`, `==`, `<`, `<=`, `tostring`).
+Coerces plain integers. 119 assertions.
+
+**Dice** (`lib/dice`) — **implemented**. Dice notation parser and roller. Recursive-descent
+parser handles `NdS`, `d%`, `dF`/`dF.2`, keep-highest `k`/keep-lowest `kl`, exploding `!`,
+parentheses, unary negation, compound expressions (`3d6+2d4`). `roll(expr, rng)`,
+`roll_detailed` (breakdown), `stats` (closed-form mean/variance + simulation fallback),
+`simulate(n)`. Deterministic with custom RNG. 234 assertions.
+
+**Soundex** (`lib/soundex`) — **implemented**. Phonetic algorithm library. `soundex(word)` →
+US National Archives 4-char code. `soundex_refined`. `metaphone(word)` (Lawrence Philips
+1990). `double_metaphone(word)` → primary, secondary (full 2000 algorithm; handles Germanic,
+Romance, Slavic, Greek). `nysiis(word)`. `sounds_like(a, b)`, `similarity(a, b)` (LCS-based
+score). 79 assertions.
+
+**Roman** (`lib/roman`) — **implemented**. Roman numeral encoding/decoding. `encode(n, opts)`:
+subtractive (default) or additive (`opts.additive`), lowercase (`opts.lower`), range 1–3999.
+`decode(s)`: case-insensitive, accepts both forms. `is_valid(s)`, `normalize(s)` (IIII→IV,
+VIIII→IX, etc.). Round-trip verified for all 1–3999. `to_roman`/`from_roman` aliases.
+109 assertions.
+
 **Geometry** (`lib/geom`) — **implemented**. 2D/3D computational geometry. Points,
 vectors (add/sub/scale/dot/cross/len/normalize/rotate/perp), segments (intersection,
 closest-point), lines (signed distance, intersection), circles, AABB, triangles
