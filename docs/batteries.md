@@ -283,6 +283,28 @@ iCalendar-inspired recurring events (`daily/weekly/monthly/yearly`, `count`, `un
 `by_day`, `by_month_day`). `easter(year)` (Anonymous Gregorian). `is_weekend`.
 193 assertions.
 
+**Aho-Corasick** (`lib/aho_corasick`) — **implemented**. Multi-pattern string matching
+automaton. `new(patterns)` builds trie with BFS failure links and output sets. `search(text)`
+→ `{start, pattern, index}` for all overlapping matches. `search_cb` (callback, zero alloc).
+`find` (first match), `contains` (early exit). `replace(text, {pattern→repl} or fn)` greedy
+longest-match. Handles binary/UTF-8 byte sequences. 103 assertions.
+
+**HyperLogLog** (`lib/hyperloglog`) — **implemented**. HyperLogLog++ probabilistic
+cardinality estimator. `new(precision)` (4–16 bits, default 12; ~0.81/sqrt(2^b) error).
+`add(element)`, `count()` (with small/large-range corrections). `merge(other)` (union).
+`serialize`/`deserialize`. MurmurHash3 32-bit with safe 16-bit multiply splits. 60 assertions.
+
+**Cuckoo Filter** (`lib/cuckoo`) — **implemented**. Probabilistic set with delete support
+(Fan et al. 2014). `new(capacity, opts)` (`fingerprint_bits=8`, `bucket_size=4`). `insert`,
+`contains`, `delete`. 2-way set-associative with partial-key cuckoo hashing; alternate bucket
+computable from fingerprint alone. `load_factor`, `count`, `false_positive_rate`.
+`serialize`/`deserialize`. 1565 assertions.
+
+**Count-Min Sketch** (`lib/count_min`) — **implemented**. Probabilistic frequency estimator
+(Cormode & Muthukrishnan 2005). `new(epsilon, delta)` auto-derives width/depth. `update`,
+`query` (always ≥ true count). `update_conservative` (reduces overcount). `merge`, `reset`,
+`total`, `heavy_hitters(k)` (opt-in). `serialize`/`deserialize`. 84 assertions.
+
 **Geometry** (`lib/geom`) — **implemented**. 2D/3D computational geometry. Points,
 vectors (add/sub/scale/dot/cross/len/normalize/rotate/perp), segments (intersection,
 closest-point), lines (signed distance, intersection), circles, AABB, triangles
