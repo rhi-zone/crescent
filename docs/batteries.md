@@ -283,6 +283,27 @@ matches(), next/prev occurrence, next_n(), describe(). 185 assertions.
 transitions, guards, actions, on_enter/on_exit callbacks. Wildcard and multi-source
 transitions, history tracking, introspection. 125 assertions.
 
+**VM** (`lib/vm`) — **implemented**. Stack-based bytecode virtual machine. 30 opcodes:
+stack (PUSH/POP/DUP/SWAP/ROT), arithmetic, comparison, logic, LOAD/STORE (named env),
+control flow (JMP/JMP_IF/JMP_IFNOT/CALL/RET), HALT/NOP/PRINT. Label resolution at
+program build time. Step mode for debugging. 89 assertions.
+
+**Grammar** (`lib/grammar`) — **implemented**. PEG parser combinator library with packrat
+memoization. Primitives: `lit`, `any`, `eof`, `range`, `set`, `not_set`. Combinators:
+`seq`, `alt`, `opt`, `star`, `plus`, `times`, `between`, `not_`, `and_`, `capture`.
+`G.grammar({rules})` for recursive grammars with `G.ref()` forward references.
+178 assertions.
+
+**Bencode** (`lib/bencode`) — **implemented**. BitTorrent bencode (BEP 3) encoder/decoder.
+Integers, strings, lists, dicts (sorted keys). Strict validation: no leading zeros,
+no negative zero, sorted dict keys, non-string dict key error. `decode_all` for streams.
+Codec aliases. 152 assertions.
+
+**K-d Tree** (`lib/kdtree`) — **implemented**. Spatial index for k-dimensional points.
+Median-split build (O(n log n)). Nearest neighbor (NN with pruning), knn (max-heap),
+range (radius), box (AABB). Dynamic `insert` + `rebuild`. Arbitrary dimensions.
+Points or `{point, data}` pairs. 164 assertions.
+
 **Automata** (`lib/automata`) — **implemented**. NFA/DFA construction and simulation.
 NFA with epsilon transitions, DFA with single-state stepping. Algorithms: subset
 construction (NFA→DFA), Hopcroft minimization, complement, product construction
