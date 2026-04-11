@@ -220,6 +220,20 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**AES** (`lib/crypto/aes`) — **implemented**. AES-128/192/256 block cipher, pure Lua.
+ECB, CBC, CTR modes; PKCS#7 padding/unpadding; streaming CTR encryption; key caching.
+Verified against NIST FIPS 197 Appendix B and AES-192/256 vectors. 45 assertions.
+
+**Base85** (`lib/codec/base85`) — **implemented**. Three Base85 variants: RFC 1924
+(alphanumeric-safe), Z85 (ZeroMQ), Ascii85/btoa (Adobe). `encode`/`decode` per variant,
+streaming encoder (chunk-at-a-time with flush). Verified against published test vectors.
+104 assertions.
+
+**JSON** (`lib/json`) — **implemented**. Pure Lua JSON parser and serializer. Full
+RFC 8259: all value types, Unicode escapes (`\uXXXX`), surrogate pairs, all escape
+sequences. Options: `indent` (pretty-print), `sort_keys`, `allow_nan`. `encode`/`decode`
+codec aliases. 281 assertions.
+
 **TOML** (`lib/toml`) — implemented. Full TOML v1.0 parser and encoder. All value
 types, dotted keys, table headers, array of tables, inline tables/arrays, all string
 types with escapes, datetime types. Round-trip encode/decode. 93 assertions.
@@ -231,7 +245,7 @@ number/bool), `trim`, custom separator. `decode_row`/`encode_row`, `encode_recor
 
 **Diff** (`lib/diff`) — implemented. Myers diff algorithm (O(ND)): `diff` (arrays),
 `diff_strings` (line-level), `unified` (unified format output), `patch` (apply edits),
-`lcs` (longest common subsequence). 96 assertions.
+`lcs` (longest common subsequence). 135 assertions.
 
 **Bundle** (`lib/bundle`) — implemented. Lua module bundler: resolve static `require()`
 calls, inline transitive dependencies, emit self-contained single file. Circular
@@ -283,6 +297,11 @@ matches(), next/prev occurrence, next_n(), describe(). 185 assertions.
 transitions, guards, actions, on_enter/on_exit callbacks. Wildcard and multi-source
 transitions, history tracking, introspection. 125 assertions.
 
+**State** (`lib/state`) — **implemented**. Finite state machine with richer runtime model:
+`add_state`, `add_transition` with guard callbacks, `on_enter`/`on_exit` per state,
+`on_transition` listeners, `trigger(event, payload)`, `can(event)`, `state()`/`history()`.
+114 assertions.
+
 **VM** (`lib/vm`) — **implemented**. Stack-based bytecode virtual machine. 30 opcodes:
 stack (PUSH/POP/DUP/SWAP/ROT), arithmetic, comparison, logic, LOAD/STORE (named env),
 control flow (JMP/JMP_IF/JMP_IFNOT/CALL/RET), HALT/NOP/PRINT. Label resolution at
@@ -318,9 +337,20 @@ drain iterator. 615 assertions.
 symmetric difference, subset/superset/disjoint tests, map/filter/reduce. O(1)
 membership. 108 assertions.
 
+**Skip List** (`lib/skiplist`) — **implemented**. Probabilistic ordered data structure,
+O(log n) insert/delete/search. Augmented with order statistics: `rank(key)`, `at_rank(r)`.
+Forward and reverse iterators, `min`/`max`, `range(lo, hi)`, custom comparator.
+127 assertions.
+
+**Geo** (`lib/geo`) — **implemented**. Geospatial utilities: Haversine distance, Vincenty
+ellipsoidal distance (WGS-84), bearing (initial/final), destination point, midpoint.
+Geohash encode/decode/neighbors (all 8 directions). Point-in-polygon (ray casting),
+bounding box. `deg_to_rad`/`rad_to_deg`. 96 assertions.
+
 **Ring Buffer** (`lib/ringbuf`) — implemented. Fixed-size circular buffer: O(1)
 push/pop from both ends, overflow wrapping, sliding window, 1-based indexing,
-drain, iterator. 111 assertions.
+drain, iterator. Byte-oriented variant (`ringbuf.bytes`) for streaming I/O:
+`write`/`read`/`peek`/`discard`. 143 assertions.
 
 **Humanize** (`lib/humanize`) — **implemented**. Human-readable formatting: `bytes` (B/KB/MB/…
 binary and SI), `parse_bytes`, `duration` (w/d/h/m/s/ms, compact/long/max_parts options),

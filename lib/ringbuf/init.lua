@@ -2,147 +2,240 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--- Ring buffer (circular buffer) library.
+-- Two flavors:
+--   ringbuf.new(capacity)   — general-purpose, stores arbitrary Lua values
+--   ringbuf.bytes(capacity) — byte-oriented, stores a flat byte stream
+
 local M = {}
 
---:: RingBuf = { buf: { [number]: unknown }, head: number, len: number, cap: number }
+--: string
+M._tier = "pure"
 
-local RB = {}
-RB.__index = RB
+-- ── value ring buffer ─────────────────────────────────────────────────────────
 
---: (capacity: number) -> RingBuf | (nil, string)
+local RingBuf = {}
+RingBuf.__index = RingBuf
+
+--- Create a new value ring buffer with the given capacity.
+--: (capacity: number) -> RingBuf
 function M.new(capacity)
-	if type(capacity) ~= "number" or capacity < 1 or capacity ~= math.floor(capacity) then
-		return nil, "capacity must be a positive integer"
-	end
+	assert(type(capacity) == "number" and capacity >= 1 and capacity == math.floor(capacity),
+		"capacity must be a positive integer")
+	-- _head: 1-based index of oldest item
+	-- _tail: 1-based index of next write slot
+	-- Indices are stored 1-based; wrap via (idx % cap + 1) where cap = _cap
 	return setmetatable({
-		buf = {},
-		head = 0, -- index into buf (0-based internally)
-		len = 0,
-		cap = capacity,
-	}, RB)
+		_buf  = {},
+		_head = 1,
+		_tail = 1,
+		_len  = 0,
+		_cap  = capacity,
+	}, RingBuf)
 end
 
---: (self: RingBuf) -> number
-function RB:size()
-	return self.len
-end
-
---: (self: RingBuf) -> number
-function RB:capacity()
-	return self.cap
-end
-
---: (self: RingBuf) -> boolean
-function RB:empty()
-	return self.len == 0
-end
-
---: (self: RingBuf) -> boolean
-function RB:full()
-	return self.len == self.cap
-end
-
---: (self: RingBuf, v: unknown) -> ()
-function RB:push_back(v)
-	if self.len == self.cap then
-		-- overwrite oldest (head), advance head
-		self.buf[self.head] = v
-		self.head = (self.head + 1) % self.cap
-	else
-		local tail = (self.head + self.len) % self.cap
-		self.buf[tail] = v
-		self.len = self.len + 1
+--- Push a value. Returns true on success, (nil, "full") when at capacity.
+function RingBuf:push(v)
+	if self._len == self._cap then
+		return nil, "full"
 	end
+	self._buf[self._tail] = v
+	self._tail = self._tail % self._cap + 1
+	self._len  = self._len + 1
+	return true
 end
 
---: (self: RingBuf, v: unknown) -> ()
-function RB:push_front(v)
-	if self.len == self.cap then
-		-- overwrite newest (tail - 1), move head back
-		self.head = (self.head - 1) % self.cap
-		self.buf[self.head] = v
-	else
-		self.head = (self.head - 1) % self.cap
-		self.buf[self.head] = v
-		self.len = self.len + 1
+--- Push a value, evicting the oldest item if the buffer is full.
+function RingBuf:push_overwrite(v)
+	if self._len == self._cap then
+		self._buf[self._head] = nil
+		self._head = self._head % self._cap + 1
+		self._len  = self._len - 1
 	end
+	self._buf[self._tail] = v
+	self._tail = self._tail % self._cap + 1
+	self._len  = self._len + 1
 end
 
---: (self: RingBuf) -> unknown | nil
-function RB:pop_front()
-	if self.len == 0 then return nil end
-	local v = self.buf[self.head]
-	self.buf[self.head] = nil
-	self.head = (self.head + 1) % self.cap
-	self.len = self.len - 1
+--- Pop the oldest value. Returns value, or nil when empty.
+function RingBuf:pop()
+	if self._len == 0 then return nil end
+	local v = self._buf[self._head]
+	self._buf[self._head] = nil
+	self._head = self._head % self._cap + 1
+	self._len  = self._len - 1
 	return v
 end
 
---: (self: RingBuf) -> unknown | nil
-function RB:pop_back()
-	if self.len == 0 then return nil end
-	local tail = (self.head + self.len - 1) % self.cap
-	local v = self.buf[tail]
-	self.buf[tail] = nil
-	self.len = self.len - 1
-	return v
+--- Peek at the oldest value without removing it. Returns value or nil.
+function RingBuf:peek()
+	if self._len == 0 then return nil end
+	return self._buf[self._head]
 end
 
---: (self: RingBuf) -> unknown | nil
-function RB:peek_front()
-	if self.len == 0 then return nil end
-	return self.buf[self.head]
+--- Peek at the newest value without removing it. Returns value or nil.
+function RingBuf:peek_newest()
+	if self._len == 0 then return nil end
+	-- _tail points to next write slot; newest is one slot before that.
+	local idx = (self._tail - 2) % self._cap + 1
+	return self._buf[idx]
 end
 
---: (self: RingBuf) -> unknown | nil
-function RB:peek_back()
-	if self.len == 0 then return nil end
-	local tail = (self.head + self.len - 1) % self.cap
-	return self.buf[tail]
+--- Return true if the buffer has no items.
+function RingBuf:is_empty()
+	return self._len == 0
 end
 
---: (self: RingBuf, i: number) -> unknown | nil
-function RB:get(i)
-	if i < 1 or i > self.len then return nil end
-	local idx = (self.head + i - 1) % self.cap
-	return self.buf[idx]
+--- Return true if the buffer is at capacity.
+function RingBuf:is_full()
+	return self._len == self._cap
 end
 
---: (self: RingBuf) -> ()
-function RB:clear()
-	for j = 0, self.cap - 1 do
-		self.buf[j] = nil
+--- Return the number of items currently in the buffer.
+function RingBuf:len()
+	return self._len
+end
+
+--- Return the maximum capacity of the buffer.
+function RingBuf:capacity()
+	return self._cap
+end
+
+--- Remove all items from the buffer.
+function RingBuf:clear()
+	for i = 1, self._cap do
+		self._buf[i] = nil
 	end
-	self.head = 0
-	self.len = 0
+	self._head = 1
+	self._tail = 1
+	self._len  = 0
 end
 
---: (self: RingBuf) -> { [number]: unknown }
-function RB:to_array()
+--- Return a sequential table snapshot of the buffer, oldest first.
+function RingBuf:to_array()
 	local out = {}
-	for j = 0, self.len - 1 do
-		out[j + 1] = self.buf[(self.head + j) % self.cap]
+	local idx = self._head
+	local cap = self._cap
+	local buf = self._buf
+	for i = 1, self._len do
+		out[i] = buf[idx]
+		idx = idx % cap + 1
 	end
 	return out
 end
 
---: (self: RingBuf) -> () -> (number, unknown) | nil
-function RB:iter()
-	local j = 0
-	local head, cap, len = self.head, self.cap, self.len
+--- Return an iterator over the buffer values, oldest first.
+-- Usage: for v in r:iter() do ... end
+function RingBuf:iter()
+	local idx       = self._head
+	local remaining = self._len
+	local cap       = self._cap
+	local buf       = self._buf
 	return function()
-		if j >= len then return nil end
-		local idx = (head + j) % cap
-		j = j + 1
-		return j, self.buf[idx]
+		if remaining == 0 then return nil end
+		local v = buf[idx]
+		idx       = idx % cap + 1
+		remaining = remaining - 1
+		return v
 	end
 end
 
---: (self: RingBuf) -> { [number]: unknown }
-function RB:drain()
-	local out = self:to_array()
-	self:clear()
-	return out
+-- ── byte ring buffer ──────────────────────────────────────────────────────────
+
+local ByteRingBuf = {}
+ByteRingBuf.__index = ByteRingBuf
+
+--- Create a new byte ring buffer with the given capacity (bytes).
+--: (capacity: number) -> ByteRingBuf
+function M.bytes(capacity)
+	assert(type(capacity) == "number" and capacity >= 1 and capacity == math.floor(capacity),
+		"capacity must be a positive integer")
+	return setmetatable({
+		_buf  = {},  -- 1-indexed byte storage (numbers 0-255)
+		_head = 1,   -- index of oldest byte
+		_tail = 1,   -- index where next byte will be written
+		_len  = 0,
+		_cap  = capacity,
+	}, ByteRingBuf)
+end
+
+--- Push a string of bytes into the buffer.
+-- Returns true on success, (nil, "not enough space") if insufficient room.
+function ByteRingBuf:push_string(s)
+	local slen = #s
+	if slen == 0 then return true end
+	if slen > self._cap - self._len then
+		return nil, "not enough space"
+	end
+	local buf  = self._buf
+	local tail = self._tail
+	local cap  = self._cap
+	for i = 1, slen do
+		buf[tail] = s:byte(i)
+		tail = tail % cap + 1
+	end
+	self._tail = tail
+	self._len  = self._len + slen
+	return true
+end
+
+--- Pop n bytes from the buffer as a string (destructive).
+-- Returns the string, or (nil, "not enough data") if fewer than n bytes available.
+function ByteRingBuf:pop_string(n)
+	if n == 0 then return "" end
+	if n > self._len then
+		return nil, "not enough data"
+	end
+	local buf  = self._buf
+	local head = self._head
+	local cap  = self._cap
+	local t    = {}
+	for i = 1, n do
+		t[i]  = buf[head]
+		buf[head] = nil
+		head  = head % cap + 1
+	end
+	self._head = head
+	self._len  = self._len - n
+	return string.char(unpack(t))
+end
+
+--- Peek at the next n bytes as a string without consuming them.
+-- Returns the string, or (nil, "not enough data").
+function ByteRingBuf:peek_string(n)
+	if n == 0 then return "" end
+	if n > self._len then
+		return nil, "not enough data"
+	end
+	local buf = self._buf
+	local idx = self._head
+	local cap = self._cap
+	local t   = {}
+	for i = 1, n do
+		t[i] = buf[idx]
+		idx  = idx % cap + 1
+	end
+	return string.char(unpack(t))
+end
+
+--- Return the number of bytes currently stored.
+function ByteRingBuf:available()
+	return self._len
+end
+
+--- Return the number of bytes that can still be written.
+function ByteRingBuf:free()
+	return self._cap - self._len
+end
+
+--- Remove all bytes from the buffer.
+function ByteRingBuf:clear()
+	for i = 1, self._cap do
+		self._buf[i] = nil
+	end
+	self._head = 1
+	self._tail = 1
+	self._len  = 0
 end
 
 return M
