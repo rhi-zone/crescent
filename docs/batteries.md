@@ -220,6 +220,26 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**Ed25519** (`lib/ed25519`) — **implemented**. Ed25519 digital signatures (RFC 8032). Two
+tiers: system (`libsodium` FFI) and pure Lua (inline SHA-512 + GF(2^255-19) field
+arithmetic + extended Edwards coordinates). `keypair(seed)`, `sign(privkey, msg)`,
+`verify(pubkey, msg, sig)`. Verified against libsodium. 55 assertions.
+
+**ChaCha20** (`lib/chacha20`) — **implemented**. ChaCha20 stream cipher and
+ChaCha20-Poly1305 AEAD (RFC 7539). `encrypt/decrypt`, `keystream`, `aead_encrypt/
+aead_decrypt`. Pure Lua with FFI `uint64_t` for Poly1305 130-bit arithmetic.
+Verified against RFC 7539 test vectors. 66 assertions.
+
+**MurmurHash3** (`lib/murmurhash`) — **implemented**. All three MurmurHash3 variants:
+`x86_32` (32-bit output), `x86_128` (128-bit, 32-bit platform), `x64_128` (128-bit,
+64-bit platform, uses FFI `uint64_t`). `hash32`/`hash128` aliases. `*_hex` variants.
+Verified against Python mmh3 and C reference. 63 assertions.
+
+**scrypt** (`lib/scrypt`) — **implemented**. scrypt password-based KDF (RFC 7914).
+`derive(password, salt, N, r, p, dklen)`, `derive_hex`, `verify`. Pure Lua Salsa20/8
+core + scryptBlockMix + scryptROMix. Uses `lib/pbkdf2` for HMAC-SHA256 steps.
+Verified against RFC 7914 §12 test vectors. 41 assertions.
+
 **ASN.1** (`lib/asn1`) — **implemented**. DER (Distinguished Encoding Rules) parser and
 writer (RFC 5280). `decode_tlv`, `decode_sequence`, typed decoders (`decode_integer`,
 `decode_boolean`, `decode_oid`, `decode_bit_string`, `decode_string`, `decode_time`),
