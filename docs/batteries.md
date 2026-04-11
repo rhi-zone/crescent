@@ -220,6 +220,27 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**ASN.1** (`lib/asn1`) — **implemented**. DER (Distinguished Encoding Rules) parser and
+writer (RFC 5280). `decode_tlv`, `decode_sequence`, typed decoders (`decode_integer`,
+`decode_boolean`, `decode_oid`, `decode_bit_string`, `decode_string`, `decode_time`),
+`decode` dispatcher. Encoders: `encode_tlv/null/boolean/integer/octet_string/
+utf8_string/sequence/oid`. Round-trip verified. 146 assertions.
+
+**PBKDF2** (`lib/pbkdf2`) — **implemented**. Password-Based Key Derivation Function 2
+(RFC 8018 §5.2). `derive(password, salt, iterations, dklen)`, `derive_hex`,
+`verify` (timing-safe). Supports SHA-1 and SHA-256 PRFs via `lib/hash/hmac`.
+Verified against all RFC 6070 test vectors. 37 assertions.
+
+**SipHash** (`lib/siphash`) — **implemented**. SipHash-2-4 and SipHash-1-3 PRF (64-bit
+output). `hash/hash_hex/hash_pair` (SipHash-2-4), `hash13/hash13_hex` (SipHash-1-3).
+LuaJIT FFI `uint64_t` for 64-bit arithmetic. Verified against reference vectors.
+42 assertions.
+
+**LZ4** (`lib/lz4`) — **implemented**. LZ4 block and frame format (pure Lua).
+`compress_block`/`decompress_block` (raw LZ4 block), `compress`/`decompress` (LZ4
+frame with magic + end-mark). Greedy hash-table compressor; overlapping-match
+copy support. `encode`/`decode` aliases. 81 assertions.
+
 **TOTP** (`lib/totp`) — **implemented**. HOTP (RFC 4226) and TOTP (RFC 6238) one-time
 passwords. `hotp(key, counter)`, `totp(key, opts)`, `totp_base32(secret, opts)`,
 `verify(secret, code, opts)` (time-window), `new_secret()`, `otpauth_uri()` for QR codes.
