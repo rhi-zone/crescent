@@ -220,6 +220,22 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**Finance** (`lib/finance`) — **implemented**. Financial math: TVM (`pv`/`fv`/`npv`/`irr`/
+`pmt`/`nper`/annuities), compound interest (`ear`/`apr_to_apy`/continuous), amortization
+schedules, statistical finance (`returns`/`volatility`/`sharpe`/`max_drawdown`/`cagr`),
+Black-Scholes option pricing (`bs_call`/`bs_put`/`bs_delta_*`/`norm_cdf`). 121 assertions.
+
+**Statistics** (`lib/stats`) — **implemented**. Comprehensive statistics: descriptive
+(mean/median/mode/variance/std/skewness/kurtosis/quantile/IQR), correlation (Pearson/
+Spearman/covariance), distributions (normal/t/chi²/Poisson/binomial with CDF/PDF/inv),
+hypothesis testing (t-test one/two-sample, chi²-test, correlation-test), linear/multiple
+regression, histogram/frequency. 172 assertions.
+
+**Markdown-it** (`lib/markdown_it`) — **implemented**. High-level Markdown→HTML pipeline
+over `lib/unified/mdast` + `lib/unified/hast`. `mdit.new(opts)` / `md:render` / `md:parse`
+/ `md:use(plugin)`. Options: `html`, `breaks`, `linkify`, `typographer`. Plugins:
+`tasklist`, `table`, `abbr`, `deflist`, `footnote`. 101 assertions.
+
 **Geometry** (`lib/geom`) — **implemented**. 2D/3D computational geometry. Points,
 vectors (add/sub/scale/dot/cross/len/normalize/rotate/perp), segments (intersection,
 closest-point), lines (signed distance, intersection), circles, AABB, triangles
