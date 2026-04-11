@@ -403,6 +403,26 @@ Schema-as-Lua-tables (no .proto parser). All wire types: varint (int32/int64/uin
 64-bit (double/fixed64), LEN (string/bytes/embedded message/packed repeated), 32-bit (float/fixed32).
 Zigzag encoding for sint32/sint64. Repeated fields. 75 assertions.
 
+**NDJSON** (`lib/ndjson`) — **implemented**. Newline-Delimited JSON (JSON Lines) encoder and
+decoder. `encode(array)` / `decode(str)` bulk, `encode_line(v)` / `decode_line(line)` per-line,
+`iter(str)` lazy iterator, stateful `encoder()` with `:write`/`:lines`. Skips blank lines and
+`#`-prefixed comment lines. 81 assertions.
+
+**Markdown** (`lib/markdown`) — **implemented**. Markdown to HTML and plain text renderer.
+Block elements: ATX/setext headings, paragraphs, blockquotes, unordered/ordered lists, fenced
+and indented code blocks, thematic breaks. Inline: bold, italic, bold+italic, inline code,
+links, images, auto-links, HTML escaping, hard line breaks. `to_html`/`to_text`. 86 assertions.
+
+**Multipart** (`lib/multipart`) — **implemented**. MIME multipart encoder/decoder (RFC 2046).
+Builder API: `new(boundary)`, `:field`, `:file`, `:part`, `:body`, `:content_type`. One-shot
+`encode(parts)`. `decode(body, boundary)` parses headers, name/filename, body per part. 
+`parse_boundary(Content-Type header)`. Handles `\r\n` and `\n` line endings. 85 assertions.
+
+**INI** (`lib/ini`) — **implemented**. INI file parser and serializer. Sections, global keys,
+`;`/`#` comments, inline comments, quoted values, blank lines. Options: `coerce` (numbers/bools),
+`lowercase`, `sort`. `get(t, section, key)` helper. `encode`/`decode` with `string_to_table`/
+`table_to_string` aliases. 130 assertions.
+
 **MD5** (`lib/hash/md5`) — **implemented**. Pure Lua MD5 digest (RFC 1321). One-shot
 `md5(data)` returns 16-byte binary digest; `md5_hex(data)` returns 32-char hex string.
 Streaming `new_md5()` with `update`/`digest`/`reset`. 62 assertions.
