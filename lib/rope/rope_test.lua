@@ -365,4 +365,74 @@ T.describe("rope", function()
     end)
   end)
 
+  T.describe("spec aliases", function()
+    T.it("rope:len() == rope:length()", function()
+      local r = rope.new("hello")
+      T.eq(r:len(), 5)
+      T.eq(r:len(), r:length())
+    end)
+
+    T.it("rope:str() == rope:to_string()", function()
+      local r = rope.new("hello world")
+      T.eq(r:str(), "hello world")
+      T.eq(r:str(), r:to_string())
+    end)
+
+    T.it("rope:len() on empty", function()
+      T.eq(rope.new():len(), 0)
+    end)
+
+    -- Note: LuaJIT does not support __len metamethod on plain tables
+    -- (Lua 5.2+ feature). Use :len() or :length() instead.
+    T.it("M.concat(a, b) rope+rope", function()
+      local r = rope.concat(rope.new("hello"), rope.new(" world"))
+      T.eq(r:str(), "hello world")
+      T.eq(r:len(), 11)
+    end)
+
+    T.it("M.concat(a, b) string+rope", function()
+      local r = rope.concat("hello", rope.new(" world"))
+      T.eq(r:str(), "hello world")
+    end)
+
+    T.it("M.concat(a, b) rope+string", function()
+      local r = rope.concat(rope.new("hello"), " world")
+      T.eq(r:str(), "hello world")
+    end)
+
+    T.it("stress: 100 single-char inserts match naive concat", function()
+      local r = rope.new()
+      local naive = ""
+      for i = 1, 100 do
+        local ch = string.char(97 + (i - 1) % 26)
+        r = r:insert(r:len() + 1, ch)
+        naive = naive .. ch
+      end
+      T.eq(r:str(), naive)
+      T.eq(r:len(), 100)
+    end)
+
+    T.it("1000 insert operations produce correct final string", function()
+      local r = rope.new("x")
+      local naive = "x"
+      for i = 1, 1000 do
+        r = r:insert(r:len() + 1, "a")
+        naive = naive .. "a"
+      end
+      T.eq(r:len(), 1001)
+      T.eq(r:str(), naive)
+    end)
+
+    T.it("rebalance does not change content on deep rope", function()
+      local r = rope.new()
+      for i = 1, 200 do
+        r = r .. rope.new(tostring(i))
+      end
+      local s = r:str()
+      local rb = r:rebalance()
+      T.eq(rb:str(), s)
+      T.eq(rb:len(), #s)
+    end)
+  end)
+
 end)

@@ -134,17 +134,33 @@ function M.new(s)
   return wrap(leaf(s))
 end
 
+-- M.concat(a, b): concat two ropes (or strings) as a module-level function
+function M.concat(a, b)
+  if type(a) == "string" then a = M.new(a) end
+  if type(b) == "string" then b = M.new(b) end
+  return wrap(smart_concat(a._node, b._node))
+end
+
 function Rope:length()
   return self._node.len
 end
+
+-- spec alias
+Rope.len = Rope.length
 
 function Rope:to_string()
   return node_to_string(self._node)
 end
 
+-- spec alias
+Rope.str = Rope.to_string
+
 Rope.__tostring = function(self)
   return node_to_string(self._node)
 end
+
+-- Note: __len is a Lua 5.2+ feature; LuaJIT does not invoke it on plain
+-- tables, so `#rope` returns the raw table length (0). Use :len() instead.
 
 function Rope:char_at(i)
   if i < 1 or i > self._node.len then
