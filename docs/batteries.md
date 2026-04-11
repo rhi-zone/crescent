@@ -305,6 +305,23 @@ computable from fingerprint alone. `load_factor`, `count`, `false_positive_rate`
 `query` (always ≥ true count). `update_conservative` (reduces overcount). `merge`, `reset`,
 `total`, `heavy_hitters(k)` (opt-in). `serialize`/`deserialize`. 84 assertions.
 
+**Quadtree** (`lib/quadtree`) — **implemented**. Point quadtree for 2D spatial queries.
+`new(bounds, capacity)`. `insert(x, y, data)`, `remove`, `query_rect`, `query_circle`,
+`nearest`, `knn(cx, cy, k)`. Lazy-deletion-free recursive subdivision into NW/NE/SW/SE
+quadrants. `rect_min_dist` pruning for nearest neighbor. `move`, `rebuild`, `each`,
+`bbox`, `depth`. Half-open intervals for clean quadrant membership. 425 assertions.
+
+**Suffix Array** (`lib/suffix_array`) — **implemented**. O(n log n) suffix array
+construction (Manber-Myers prefix doubling). O(n) LCP array (Kasai algorithm). O(m log n)
+pattern search via binary search. `search`, `count`, `find`, `contains`. `longest_repeated`
+(max LCP entry). `M.lcs_str(s1, s2)` longest common substring via concatenation trick.
+85 assertions.
+
+**Pairing Heap** (`lib/pairing_heap`) — **implemented**. Pairing heap: O(1) insert/merge,
+O(log n) amortized pop/decrease-key. `insert` → handle, `peek`, `pop`, `decrease_key`,
+`remove`. Two-pass pairing of children on pop. Lazy deletion for remove/decrease_key.
+Destructive `merge(other)`. Custom comparator (min/max). `to_sorted`. 81 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
