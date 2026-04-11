@@ -400,6 +400,26 @@ zip, combine_latest. Subjects and replay subjects. 510 assertions.
 encoding format): integers, byte strings, lists, dictionaries with sorted keys.
 Codec aliases: `encode`/`decode`, `table_to_string`/`string_to_table`. 90 assertions.
 
+**Either** (`lib/either`) — **implemented**. `Either<L,R>` (Left/Right) and `Maybe<T>` (Some/None)
+algebraic data types. Full functor/monad interface: `map`, `map_left`, `and_then`, `or_else`, `fold`,
+`unwrap`/`unwrap_or`/`unwrap_or_else`. Conversions: `to_pair`/`from_pair`, `to_maybe`/`to_right`.
+`None` is a callable singleton. 95 assertions.
+
+**Circuit Breaker** (`lib/circuit_breaker`) — **implemented**. Circuit breaker pattern for fault
+tolerance. States: closed/open/half_open. Configurable `failure_threshold`, `success_threshold`,
+`timeout`, `clock` (injectable), `is_failure` predicate, `on_state_change` callback. `call(fn)` via
+pcall. `trip`/`reset`. `wrap(fn)` for permanent wrapping. 85 assertions.
+
+**Config** (`lib/config`) — **implemented**. Layered configuration management. Chainable:
+`:defaults(t)`, `:layer(t)`, `:env(prefix)` (APP_DB_HOST → db.host), `:args(t)`. Priority:
+args > env > layers > defaults. Typed accessors: `int`/`float`/`bool`/`string`/`list`. `:ns(prefix)`
+namespace view. `:to_table()` snapshot. `:validate({required, types})`. Injectable `env_reader`. 76 assertions.
+
+**PubSub** (`lib/pubsub`) — **implemented**. In-process pub/sub event bus with topic routing.
+Wildcard patterns: `*` (one segment), `**`/`#` (any depth), `?` (single char). `subscribe`/`once`/
+`unsubscribe_all`/`use` (middleware). `publish`/`publish_async`+`flush`. `filter` predicate per
+subscription. `subscriber_count`/`topics`/`clear`. 67 assertions.
+
 **Pipeline** (`lib/pipeline`) — **implemented**. Lazy data pipeline: `from`/`range`/`generate`/
 `repeat_val`/`concat_sources`/`empty` sources. Transforms (all lazy): `map`, `filter`, `flat_map`,
 `take`/`drop`/`take_while`/`drop_while`, `enumerate`, `zip`, `batch`, `flatten`, `unique`, `tap`,
