@@ -400,6 +400,28 @@ zip, combine_latest. Subjects and replay subjects. 510 assertions.
 encoding format): integers, byte strings, lists, dictionaries with sorted keys.
 Codec aliases: `encode`/`decode`, `table_to_string`/`string_to_table`. 90 assertions.
 
+**Pipeline** (`lib/pipeline`) — **implemented**. Lazy data pipeline: `from`/`range`/`generate`/
+`repeat_val`/`concat_sources`/`empty` sources. Transforms (all lazy): `map`, `filter`, `flat_map`,
+`take`/`drop`/`take_while`/`drop_while`, `enumerate`, `zip`, `batch`, `flatten`, `unique`, `tap`,
+`scan`, `window`. Sinks: `collect`, `reduce`, `each`, `count`, `first`, `last`, `sum`, `min`/`max`,
+`any`/`all`, `find`, `to_map`, `group_by`, `join`, `drain`. 108 assertions.
+
+**Schema Gen** (`lib/schema_gen`) — **implemented**. JSON Schema inference, generation, validation,
+and DSL. `infer(data)` produces schema from sample. `infer_many(samples)` merges (required keys = present
+in all). `generate(schema)` produces deterministic examples; `generate_random` for random. `validate(schema, data)`
+checks type/required/properties/enum/min/max. DSL: `M.string/number/object/array/enum/one_of/nullable/ref`.
+138 assertions.
+
+**Patch** (`lib/patch`) — **implemented**. JSON Patch (RFC 6902) and JSON Pointer (RFC 6901).
+Pointer: `get`/`set`/`remove`, `~0`/`~1` escaping, 0-based array indexing. Patch ops: `add`,
+`remove`, `replace`, `move`, `copy`, `test`. `diff(a, b)` generates minimal patch. Round-trip:
+`apply(diff(a,b), a) ≡ b`. 109 assertions.
+
+**Semaphore** (`lib/semaphore`) — **implemented**. Coroutine concurrency primitives: counting
+`semaphore` (acquire/release/try_acquire), `mutex` (lock/unlock/with RAII), `cond` (wait/signal/
+broadcast), `waitgroup` (add/done/wait), `once`. Built-in `go`/`run` scheduler (no external deps).
+52 assertions.
+
 **Wire** (`lib/wire`) — **implemented**. Binary protocol framing: Writer (builds binary strings) and
 Reader (cursor into binary data). Types: uint8/16/32, int8/16/32, float32/64 (LE+BE), unsigned
 LEB128 varint, signed LEB128 (zigzag), raw bytes, length-prefixed strings (u8/u16/u32/varint prefix).
