@@ -347,6 +347,23 @@ normalization. IPv6, protocol-relative, data URIs. 152 assertions.
 `{{{ expr }}}` (raw), `{% code %}` (Lua), `{# comment #}`. Compiles to Lua functions.
 Built-in filters (upper, lower, trim, length, default). 100 assertions.
 
+**Rate Limit** (`lib/ratelimit`) — implemented. Rate limiting algorithms: token bucket,
+sliding window, fixed window, leaky bucket. Per-key multi-tenant support. Injectable
+clock for testing. 367 assertions.
+
+**i18n** (`lib/i18n`) — implemented. Internationalization: translation lookup with
+`{{var}}` interpolation, dot-notation nested keys, pluralization with built-in rules
+for en/es/fr/de/ja/zh/ar, locale switching, fallback locale. 85 assertions.
+
+**Codec** (`lib/codec`) — implemented. Codec composition utilities: chain (encode
+left→right, decode right→left), conditional, map, identity. Built-in: hex, rot13,
+reverse, xor. Roundtrip helper. 103 assertions.
+
+**Observable** (`lib/observable`) — implemented. Reactive push-based streams: create, of,
+from_array. Operators: map, filter, take, skip, distinct, reduce, scan, flat_map, tap,
+concat, merge, take_while, skip_while, buffer, to_array. Combinators: merge, concat,
+zip, combine_latest. Subjects and replay subjects. 510 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can

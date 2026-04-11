@@ -278,6 +278,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/mime/`** — MIME type lookup: 120+ types, extension↔type, charset, content_type. 102 assertions.
 - [x] **`lib/url/`** — URL parser/builder: RFC 3986, query strings, percent-encoding, resolve, normalize. 152 assertions.
 - [x] **`lib/template/`** — String template engine: {{ expr }}, {% code %}, {# comment #}, filters, compile. 100 assertions.
+- [x] **`lib/ratelimit/`** — Rate limiting: token bucket, sliding/fixed window, leaky bucket, per-key. 367 assertions.
+- [x] **`lib/i18n/`** — Internationalization: translations, interpolation, pluralization, locale fallback. 85 assertions.
+- [x] **`lib/codec/`** — Codec composition: chain, conditional, map, hex/rot13/xor built-ins. 103 assertions.
+- [x] **`lib/observable/`** — Reactive streams: operators (map/filter/take/flat_map), subjects, combinators. 510 assertions.
 
 ## lib/asm — SIMD kernel compiler
 
