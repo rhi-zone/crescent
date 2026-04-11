@@ -2,64 +2,25 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
---- Coroutine-based concurrency primitives.
--- Semaphore, mutex, condition variable, WaitGroup, and Once.
--- All primitives work with the built-in scheduler (M.run / M.go).
+--- Coroutine-friendly synchronization primitives for LuaJIT.
+-- Semaphore, mutex, event, condition variable, and channel.
+-- All blocking operations use coroutine.yield() — no OS blocking.
+-- Designed for use with a cooperative scheduler or direct coroutine management.
 -- Pure Lua — no FFI, no OS threads.
 local M = {}
 M._tier = "pure"
 
 -- ---------------------------------------------------------------------------
--- Minimal coroutine scheduler
+-- Internal: resume queue helpers
 -- ---------------------------------------------------------------------------
 
-local _ready = {}
-
--- Tracks which coroutines are doing a blocking wait (yield_me).
--- Such coroutines have already been placed in a primitive's waiter list, so
--- the scheduler must NOT re-enqueue them automatically when they yield.
--- Plain coroutine.yield() from user code is NOT in this set, so the scheduler
--- treats it as a voluntary context switch and re-enqueues the coroutine.
-local _blocking = {}
-
---- Spawn a coroutine to be run by the current scheduler.
-function M.go(fn)
-  _ready[#_ready + 1] = coroutine.create(fn)
-end
-
---- Run fn as the root coroutine of a scheduler event loop.
--- Nested M.run calls each get their own _ready queue that is restored on exit.
-function M.run(fn)
-  local prev = _ready
-  _ready = {}
-  M.go(fn)
-  while #_ready > 0 do
-    local q = _ready
-    _ready = {}
-    for _, co in ipairs(q) do
-      local ok, err = coroutine.resume(co)
-      if not ok then
-        _ready = prev
-        error(err, 2)
-      end
-      -- If the coroutine is still alive and did NOT mark itself as blocking,
-      -- it did a voluntary yield — re-enqueue it for the next scheduler turn.
-      if coroutine.status(co) == "suspended" and not _blocking[co] then
-        _ready[#_ready + 1] = co
-      end
-      _blocking[co] = nil
-    end
+-- Enqueue a coroutine to be resumed. Called by release/fire/signal/broadcast/send/recv.
+-- We resume directly here so the caller drives scheduling.
+local function resume_co(co, ...)
+  local ok, err = coroutine.resume(co, ...)
+  if not ok then
+    error("semaphore: resumed coroutine errored: " .. tostring(err), 2)
   end
-  _ready = prev
-end
-
--- Internal: yield the current coroutine and mark it as blocking.
--- The calling code is responsible for placing this coroutine in a waiter list
--- so it will be re-enqueued when the resource becomes available.
-local function yield_me()
-  local co = coroutine.running()
-  _blocking[co] = true
-  coroutine.yield()
 end
 
 -- ---------------------------------------------------------------------------
@@ -69,23 +30,38 @@ end
 local Sem = {}
 Sem.__index = Sem
 
---- Create a counting semaphore with initial count n (n >= 0).
-function M.semaphore(n)
-  if n == nil then n = 1 end
-  return setmetatable({ _count = n, _waiters = {} }, Sem)
+--- Create a counting semaphore with initial count (default 1 = binary semaphore).
+function M.new(initial)
+  if initial == nil then initial = 1 end
+  return setmetatable({ _count = initial, _waiters = {} }, Sem)
 end
 
---- Decrement the semaphore. Yields if count is 0.
+--- Decrement count. If count <= 0, suspends the current coroutine until released.
 function Sem:acquire()
-  while self._count <= 0 do
-    local co = coroutine.running()
-    self._waiters[#self._waiters + 1] = co
-    yield_me()
+  if self._count > 0 then
+    self._count = self._count - 1
+    return
   end
-  self._count = self._count - 1
+  -- Must yield — place ourselves in the waiter queue.
+  local co = coroutine.running()
+  self._waiters[#self._waiters + 1] = co
+  coroutine.yield()
+  -- When we are resumed by release(), count was already decremented for us
+  -- (release transfers the slot directly rather than incrementing then decrementing).
 end
 
---- Try to acquire without blocking. Returns true on success, false otherwise.
+--- Increment count. If there are suspended acquirers, resume the first one.
+function Sem:release()
+  if #self._waiters > 0 then
+    -- Transfer the slot directly: don't increment, just wake the waiter.
+    local co = table.remove(self._waiters, 1)
+    resume_co(co)
+  else
+    self._count = self._count + 1
+  end
+end
+
+--- Try to acquire without blocking. Returns true on success, false if count is 0.
 function Sem:try_acquire()
   if self._count > 0 then
     self._count = self._count - 1
@@ -94,175 +70,273 @@ function Sem:try_acquire()
   return false
 end
 
---- Increment the semaphore. Wakes one waiter if any.
-function Sem:release()
-  self._count = self._count + 1
-  if #self._waiters > 0 then
-    local co = table.remove(self._waiters, 1)
-    _ready[#_ready + 1] = co
-  end
-end
-
 --- Return the current count.
 function Sem:count()
   return self._count
 end
 
--- ---------------------------------------------------------------------------
--- Mutex (binary semaphore)
--- ---------------------------------------------------------------------------
-
-local Mtx = {}
-Mtx.__index = Mtx
-
---- Create an unlocked mutex.
-function M.mutex()
-  return setmetatable({ _locked = false, _waiters = {} }, Mtx)
+--- Return the number of coroutines currently waiting to acquire.
+function Sem:waiting()
+  return #self._waiters
 end
 
---- Acquire the mutex. Yields if already locked.
-function Mtx:lock()
-  while self._locked do
-    local co = coroutine.running()
-    self._waiters[#self._waiters + 1] = co
-    yield_me()
-  end
-  self._locked = true
-end
-
---- Try to acquire without blocking. Returns true on success.
-function Mtx:try_lock()
-  if not self._locked then
-    self._locked = true
-    return true
-  end
-  return false
-end
-
---- Release the mutex. Wakes one waiter if any.
-function Mtx:unlock()
-  if not self._locked then
-    return nil, "mutex: unlock of unlocked mutex"
-  end
-  self._locked = false
-  if #self._waiters > 0 then
-    local co = table.remove(self._waiters, 1)
-    _ready[#_ready + 1] = co
-  end
-  return true
-end
-
---- Return true if the mutex is currently locked.
-function Mtx:is_locked()
-  return self._locked
-end
-
---- Run fn while holding the mutex. Unlocks even if fn errors.
-function Mtx:with(fn)
-  self:lock()
+--- Acquire, call fn(), then release. Releases even if fn errors.
+function Sem:with(fn)
+  self:acquire()
   local ok, err = pcall(fn)
-  self:unlock()
+  self:release()
   if not ok then error(err, 2) end
 end
 
+--- Create a mutex (binary semaphore, initial count 1).
+function M.mutex()
+  return M.new(1)
+end
+
 -- ---------------------------------------------------------------------------
--- Condition variable
+-- Event: one-shot broadcast signal
+-- ---------------------------------------------------------------------------
+
+local Ev = {}
+Ev.__index = Ev
+
+--- Create a new event (initially not fired).
+function M.event()
+  return setmetatable({ _fired = false, _waiters = {} }, Ev)
+end
+
+--- Suspend the current coroutine until fire() is called.
+-- If already fired, returns immediately.
+function Ev:wait()
+  if self._fired then return end
+  local co = coroutine.running()
+  self._waiters[#self._waiters + 1] = co
+  coroutine.yield()
+end
+
+--- Fire the event, waking all waiting coroutines.
+-- Future calls to wait() will return immediately.
+function Ev:fire()
+  if self._fired then return end
+  self._fired = true
+  local waiters = self._waiters
+  self._waiters = {}
+  for i = 1, #waiters do
+    resume_co(waiters[i])
+  end
+end
+
+--- Reset the event so that future wait() calls block again.
+function Ev:reset()
+  self._fired = false
+end
+
+--- Return true if the event has been fired.
+function Ev:is_fired()
+  return self._fired
+end
+
+-- ---------------------------------------------------------------------------
+-- Condition variable (pthread_cond style)
 -- ---------------------------------------------------------------------------
 
 local CV = {}
 CV.__index = CV
 
---- Create a condition variable associated with mutex m.
-function M.cond(m)
-  return setmetatable({ _mutex = m, _waiters = {} }, CV)
+--- Create a condition variable.
+function M.cond()
+  return setmetatable({ _waiters = {} }, CV)
 end
 
---- Atomically release the mutex and yield; reacquires on wake.
-function CV:wait()
+--- Atomically release mutex and suspend. Re-acquires mutex before returning.
+-- mutex must be a semaphore/mutex object with acquire()/release() methods.
+function CV:wait(mutex)
   local co = coroutine.running()
   self._waiters[#self._waiters + 1] = co
-  self._mutex:unlock()
-  yield_me()
-  -- Reacquire mutex before returning. Schedule ourselves back on the ready
-  -- queue after acquiring — use the same blocking acquire path.
-  self._mutex:lock()
+  mutex:release()
+  coroutine.yield()
+  -- Re-acquire mutex before returning to caller.
+  mutex:acquire()
 end
 
---- Wake one waiter.
+--- Wake one waiting coroutine.
 function CV:signal()
   if #self._waiters > 0 then
     local co = table.remove(self._waiters, 1)
-    _ready[#_ready + 1] = co
+    resume_co(co)
   end
 end
 
---- Wake all waiters.
+--- Wake all waiting coroutines.
 function CV:broadcast()
-  for i = 1, #self._waiters do
-    _ready[#_ready + 1] = self._waiters[i]
-    self._waiters[i] = nil
+  local waiters = self._waiters
+  self._waiters = {}
+  for i = 1, #waiters do
+    resume_co(waiters[i])
   end
 end
 
 -- ---------------------------------------------------------------------------
--- WaitGroup
+-- Channel: buffered message queue
 -- ---------------------------------------------------------------------------
 
-local WG = {}
-WG.__index = WG
+local Ch = {}
+Ch.__index = Ch
 
---- Create a WaitGroup with counter starting at 0.
-function M.waitgroup()
-  return setmetatable({ _count = 0, _waiters = {} }, WG)
+--- Create a channel with the given buffer capacity (0 = unbuffered/rendezvous).
+function M.channel(capacity)
+  if capacity == nil then capacity = 0 end
+  return setmetatable({
+    _cap      = capacity,
+    _buf      = {},        -- circular buffer values
+    _head     = 1,         -- index of next item to read
+    _tail     = 1,         -- index where next item will be written
+    _len      = 0,         -- number of items in buffer
+    _closed   = false,
+    _senders  = {},        -- {co, value} pairs waiting to send
+    _recvers  = {},        -- coroutines waiting to receive
+  }, Ch)
 end
 
---- Add n to the counter (n may be negative).
-function WG:add(n)
-  self._count = self._count + n
-  if self._count < 0 then
-    error("waitgroup: negative counter", 2)
+--- Send a value. Blocks if the buffer is full (or unbuffered and no receiver ready).
+-- Returns nil, "closed" if the channel is closed.
+function Ch:send(value)
+  if self._closed then
+    return nil, "closed"
   end
-  if self._count == 0 then
-    -- Wake all waiters.
-    for i = 1, #self._waiters do
-      _ready[#_ready + 1] = self._waiters[i]
-      self._waiters[i] = nil
+  -- If there is a waiting receiver, hand off directly (rendezvous or drain path).
+  if #self._recvers > 0 then
+    local co = table.remove(self._recvers, 1)
+    resume_co(co, value, true)
+    return true
+  end
+  -- If there is buffer space, enqueue.
+  if self._len < self._cap then
+    self._buf[self._tail] = value
+    self._tail = self._tail % self._cap + 1
+    self._len = self._len + 1
+    return true
+  end
+  -- No space — block.
+  local co = coroutine.running()
+  self._senders[#self._senders + 1] = { co, value }
+  coroutine.yield()
+  -- Resumed by a receiver that took our value.
+  return true
+end
+
+--- Receive a value. Blocks if the buffer is empty and no sender is ready.
+-- Returns value, true on success; nil, "closed" on closed+empty channel.
+function Ch:recv()
+  -- If there are buffered items, return the oldest.
+  if self._len > 0 then
+    local value = self._buf[self._head]
+    self._buf[self._head] = nil
+    self._head = self._head % self._cap + 1
+    self._len = self._len - 1
+    -- If a sender was blocked, let it enqueue its value now.
+    if #self._senders > 0 then
+      local entry = table.remove(self._senders, 1)
+      local sco, sval = entry[1], entry[2]
+      self._buf[self._tail] = sval
+      self._tail = self._tail % self._cap + 1
+      self._len = self._len + 1
+      resume_co(sco)
     end
+    return value, true
+  end
+  -- No buffered items. If a sender is waiting (unbuffered rendezvous or blocked sender), take directly.
+  if #self._senders > 0 then
+    local entry = table.remove(self._senders, 1)
+    local sco, sval = entry[1], entry[2]
+    resume_co(sco)
+    return sval, true
+  end
+  -- Channel is empty. If closed, signal that.
+  if self._closed then
+    return nil, "closed"
+  end
+  -- Block until something is sent.
+  local co = coroutine.running()
+  self._recvers[#self._recvers + 1] = co
+  local value, ok = coroutine.yield()
+  -- Resumed by send() with (value, true), or by close() with (nil, "closed").
+  return value, ok
+end
+
+--- Non-blocking send. Returns true if sent, false if full or closed.
+function Ch:try_send(value)
+  if self._closed then return false end
+  if #self._recvers > 0 then
+    local co = table.remove(self._recvers, 1)
+    resume_co(co, value, true)
+    return true
+  end
+  if self._len < self._cap then
+    self._buf[self._tail] = value
+    self._tail = self._tail % self._cap + 1
+    self._len = self._len + 1
+    return true
+  end
+  return false
+end
+
+--- Non-blocking receive. Returns value, true on success; nil, false if empty.
+-- Returns nil, "closed" if closed and empty.
+function Ch:try_recv()
+  if self._len > 0 then
+    local value = self._buf[self._head]
+    self._buf[self._head] = nil
+    self._head = self._head % self._cap + 1
+    self._len = self._len - 1
+    if #self._senders > 0 then
+      local entry = table.remove(self._senders, 1)
+      local sco, sval = entry[1], entry[2]
+      self._buf[self._tail] = sval
+      self._tail = self._tail % self._cap + 1
+      self._len = self._len + 1
+      resume_co(sco)
+    end
+    return value, true
+  end
+  if #self._senders > 0 then
+    local entry = table.remove(self._senders, 1)
+    local sco, sval = entry[1], entry[2]
+    resume_co(sco)
+    return sval, true
+  end
+  if self._closed then
+    return nil, "closed"
+  end
+  return nil, false
+end
+
+--- Close the channel. Pending receivers are woken with nil, "closed".
+-- Further sends return nil, "closed". Pending items can still be drained.
+function Ch:close()
+  if self._closed then return end
+  self._closed = true
+  -- Wake all waiting receivers with the closed signal.
+  local recvers = self._recvers
+  self._recvers = {}
+  for i = 1, #recvers do
+    resume_co(recvers[i], nil, "closed")
   end
 end
 
---- Decrement counter by 1.
-function WG:done()
-  self:add(-1)
+--- Return true if the channel is closed.
+function Ch:is_closed()
+  return self._closed
 end
 
---- Yield until the counter reaches 0.
-function WG:wait()
-  while self._count > 0 do
-    local co = coroutine.running()
-    self._waiters[#self._waiters + 1] = co
-    yield_me()
-  end
+--- Return the number of items currently in the buffer.
+function Ch:len()
+  return self._len
 end
 
--- ---------------------------------------------------------------------------
--- Once
--- ---------------------------------------------------------------------------
-
-local Once = {}
-Once.__index = Once
-
---- Create a Once object. The function passed to do_ runs at most once.
-function M.once()
-  return setmetatable({ _done = false }, Once)
-end
-
---- Call fn if it has not been called before on this Once.
-function Once:do_(fn)
-  if not self._done then
-    self._done = true
-    fn()
-  end
+--- Return the channel capacity.
+function Ch:cap()
+  return self._cap
 end
 
 return M
