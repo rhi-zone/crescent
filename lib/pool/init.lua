@@ -1,161 +1,115 @@
--- lib/pool/init.lua — object pool and connection pool
--- Reuse expensive-to-create objects (database connections, buffers, workers).
--- Fixed-size pool with acquire/release, health checks, idle timeout.
-
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
 local M = {}
 
--- ── Pool prototype ───────────────────────────────────────────────────────────
+M._tier = "pure"
 
-local Pool = {}
-Pool.__index = Pool
+local pool_mt = {}
+pool_mt.__index = pool_mt
 
---: (Pool) -> number
-function Pool:size()
-	return self._idle_count + self._in_use_count
-end
-
---: (Pool) -> number
-function Pool:idle()
-	return self._idle_count
-end
-
---: (Pool) -> number
-function Pool:in_use()
-	return self._in_use_count
-end
-
---: (Pool) -> { size: number, idle: number, in_use: number, created: number, reused: number }
-function Pool:stats()
-	return {
-		size = self._idle_count + self._in_use_count,
-		idle = self._idle_count,
-		in_use = self._in_use_count,
-		created = self._created,
-		reused = self._reused,
-	}
-end
-
---: (Pool) -> unknown, string?
-function Pool:acquire()
-	-- try to reuse an idle object
-	while self._idle_count > 0 do
-		local obj = self._idle[self._idle_count]
-		self._idle[self._idle_count] = nil
-		self._idle_count = self._idle_count - 1
-		-- validate before handing out
-		if self._validate then
-			local ok = self._validate(obj)
-			if not ok then
-				-- destroy invalid object, don't count as in-use
-				if self._destroy then self._destroy(obj) end
-				-- loop to try next idle object
-			else
-				self._checked_out[obj] = true
-				self._in_use_count = self._in_use_count + 1
-				self._reused = self._reused + 1
-				return obj
-			end
-		else
-			self._checked_out[obj] = true
-			self._in_use_count = self._in_use_count + 1
-			self._reused = self._reused + 1
-			return obj
-		end
-	end
-	-- no idle objects; create if under max
-	if self._idle_count + self._in_use_count >= self._max then
-		return nil, "pool exhausted"
+function pool_mt:acquire()
+	local idle = self._idle
+	local n = #idle
+	if n > 0 then
+		local obj = idle[n]
+		idle[n] = nil
+		if self._on_acquire then self._on_acquire(obj) end
+		return obj
 	end
 	local obj = self._create()
-	self._created = self._created + 1
-	self._checked_out[obj] = true
-	self._in_use_count = self._in_use_count + 1
+	if self._on_acquire then self._on_acquire(obj) end
 	return obj
 end
 
---: (Pool, unknown) -> true | (nil, string)
-function Pool:release(obj)
-	if not self._checked_out[obj] then
-		return nil, "object not from this pool"
+function pool_mt:release(obj)
+	local idle = self._idle
+	local max = self._max
+	if max == nil or #idle < max then
+		if self._reset then self._reset(obj) end
+		idle[#idle + 1] = obj
 	end
-	self._checked_out[obj] = nil
-	self._in_use_count = self._in_use_count - 1
-	-- reset state before returning to pool
-	if self._reset then self._reset(obj) end
-	self._idle_count = self._idle_count + 1
-	self._idle[self._idle_count] = obj
-	return true
+	if self._on_release then self._on_release(obj) end
 end
 
---: (Pool, (unknown) -> unknown) -> unknown, string?
-function Pool:with(fn)
-	local obj, err = self:acquire()
-	if not obj then return nil, err end
+function pool_mt:use(fn)
+	local obj = self:acquire()
 	local ok, result = pcall(fn, obj)
 	self:release(obj)
-	if not ok then error(result, 2) end
+	if not ok then
+		error(result, 2)
+	end
 	return result
 end
 
---: (Pool) -> nil
-function Pool:drain()
-	for i = 1, self._idle_count do
-		local obj = self._idle[i]
-		if self._destroy then self._destroy(obj) end
-		self._idle[i] = nil
-	end
-	self._idle_count = 0
+function pool_mt:size()
+	return #self._idle
 end
 
--- ── Constructor ──────────────────────────────────────────────────────────────
+function pool_mt:capacity()
+	return self._max
+end
 
---: ({ size: number, create: () -> unknown, destroy: ((unknown) -> nil)?, validate: ((unknown) -> boolean)?, reset: ((unknown) -> nil)? }) -> Pool
+function pool_mt:drain()
+	local idle = self._idle
+	for i = #idle, 1, -1 do
+		idle[i] = nil
+	end
+end
+
+function pool_mt:prefill(n)
+	for _ = 1, n do
+		local obj = self._create()
+		if self._reset then self._reset(obj) end
+		self._idle[#self._idle + 1] = obj
+	end
+end
+
+-- Create a new object pool.
+-- opts.create:     function() -> object  (required)
+-- opts.reset:      function(obj)          (optional; called before returning to pool)
+-- opts.max:        number                 (max idle objects; default: unlimited)
+-- opts.on_acquire: function(obj)          (optional hook)
+-- opts.on_release: function(obj)          (optional hook)
 function M.new(opts)
 	if not opts or not opts.create then
-		return nil, "opts.create is required"
+		return nil, "pool.new: opts.create is required"
 	end
-	if not opts.size or opts.size < 1 then
-		return nil, "opts.size must be >= 1"
-	end
-	local p = setmetatable({
-		_max = opts.size,
-		_create = opts.create,
-		_destroy = opts.destroy,
-		_validate = opts.validate,
-		_reset = opts.reset,
-		_idle = {},
-		_idle_count = 0,
-		_checked_out = {},
-		_in_use_count = 0,
-		_created = 0,
-		_reused = 0,
-	}, Pool)
-	return p
+	local self = setmetatable({}, pool_mt)
+	self._idle = {}
+	self._create = opts.create
+	self._reset = opts.reset
+	self._max = opts.max
+	self._on_acquire = opts.on_acquire
+	self._on_release = opts.on_release
+	return self
 end
 
--- ── Buffer pool ──────────────────────────────────────────────────────────────
-
---: ({ size: number, buffer_size: number? }) -> Pool
-function M.buffers(opts)
-	local buf_size = (opts and opts.buffer_size) or 4096
-	local pool_size = (opts and opts.size) or 16
-	return M.new({
-		size = pool_size,
-		create = function()
-			--: { [number]: number, n: number, cap: number }
-			local buf = { n = 0, cap = buf_size }
-			return buf
-		end,
-		reset = function(buf)
-			-- clear contents without deallocating
-			for i = 1, buf.n do buf[i] = nil end
-			buf.n = 0
-		end,
-	})
+-- Typed pool for tables.
+-- template: table of default values; acquired tables are copies of template.
+-- On release, all keys are wiped and template values are restored.
+-- max: optional max pool size.
+function M.table_pool(template, max)
+	local tmpl = template or {}
+	local function create()
+		local t = {}
+		for k, v in pairs(tmpl) do
+			t[k] = v
+		end
+		return t
+	end
+	local function reset(t)
+		-- wipe all keys
+		for k in pairs(t) do
+			t[k] = nil
+		end
+		-- restore template values
+		for k, v in pairs(tmpl) do
+			t[k] = v
+		end
+	end
+	return M.new({ create = create, reset = reset, max = max })
 end
 
 return M

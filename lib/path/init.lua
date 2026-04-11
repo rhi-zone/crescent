@@ -1,62 +1,309 @@
-if not package.path:find("?/init.lua", 1, true) then
-  package.path = package.path .. ";./?/init.lua"
+-- lib/path: cross-platform filesystem path manipulation (pure string ops, no I/O)
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
 end
 
-local ffi = require("ffi")
-ffi.cdef [[
-	char *realpath(const char *path, char *resolved_path);
-	void free(void *ptr);
-]]
+local M = {}
 
-local mod = {}
+M._tier = "pure"
 
---[[resolve path segments textually (eliminates `.` and `..`)]]
---[[@param base string]]
---[[@param path string]]
---: (string, string) -> string
-mod.resolve = function (base, path)
-	base = base:gsub("/$", "")
-	--[[@type string]]
-	if path:byte(1) == 0x2f --[["/"]] then path = path:sub(2) end
-	local path_parts = {base} --[[@type string[] ]]
-	local path_it = path:gmatch("([^/]+)")
-	while true do
-		local part = path_it()
-		if not part then break end
-		if part == ".." then if #path_parts > 1 then path_parts[#path_parts] = nil end
-		elseif part == "." then --[[ignored]]
-		else path_parts[#path_parts+1] = part end
+-- Platform detection via package.config (first char is dir separator)
+local _plat_sep = package.config:sub(1, 1)
+M.sep     = _plat_sep
+M.altsep  = _plat_sep == "\\" and "/" or nil
+M.pathsep = _plat_sep == "\\" and ";" or ":"
+M.devnull = _plat_sep == "\\" and "nul" or "/dev/null"
+
+-- Normalize input: treat both / and \ as separators (always use / internally)
+local function norm_seps(s)
+	return (s:gsub("\\", "/"))
+end
+
+-- Convert output back to platform sep
+local function to_native(s)
+	if M.sep == "/" then return s end
+	return (s:gsub("/", "\\"))
+end
+
+-- Split a normalized (forward-slash) path into drive and rest.
+-- On Unix, drive is always "".
+-- On Windows, drive can be "C:" for drive-letter paths.
+local function splitdrive(p)
+	if p:match("^%a:/") or p:match("^%a:$") then
+		return p:sub(1, 2), p:sub(3)
 	end
-	return table.concat(path_parts, "/")
+	return "", p
 end
 
---[[resolve path using the OS (follows symlinks, returns canonical path)]]
---[[@param path string]]
---[[@return string? resolved]]
---: (string) -> string | nil
-mod.realpath = function (path)
-	local buf = ffi.C.realpath(path, nil)
-	if buf == nil then return nil end
-	local resolved = ffi.string(buf)
-	ffi.C.free(buf)
-	return resolved
+-- Check if path is absolute (internal, uses normalized forward slashes).
+local function is_abs_norm(n)
+	if n:sub(1, 1) == "/" then return true end
+	-- Windows: C:/ or UNC //
+	if n:match("^%a:/") then return true end
+	if n:sub(1, 2) == "//" then return true end
+	return false
 end
 
---[[resolve path and verify it stays within base (symlink-safe)]]
---[[@param base string]]
---[[@param path string]]
---[[@return string? resolved]]
---: (string, string) -> string | nil
-mod.safe_resolve = function (base, path)
-	local textual = mod.resolve(base, path)
-	local real_base = mod.realpath(base)
-	if not real_base then return nil end
-	local real_path = mod.realpath(textual)
-	if not real_path then return nil end
-	if real_path:sub(1, #real_base) ~= real_base then return nil end
-	local next_char = real_path:byte(#real_base + 1)
-	if next_char ~= nil and next_char ~= 0x2f --[["/"]] then return nil end
-	return real_path
+---Check if path is absolute.
+--: (string) -> boolean
+M.is_absolute = function(p)
+	if p == nil or p == "" then return false end
+	return is_abs_norm(norm_seps(p))
 end
 
-return mod
+---Join path components. An absolute component resets the path.
+--: (...string) -> string
+M.join = function(...)
+	local args = { ... }
+	local result = ""
+	for _, p in ipairs(args) do
+		if p ~= nil and p ~= "" then
+			if is_abs_norm(norm_seps(p)) then
+				result = p
+			elseif result == "" then
+				result = p
+			else
+				-- strip trailing sep from result
+				local r = norm_seps(result):gsub("/+$", "")
+				result = r .. "/" .. norm_seps(p)
+			end
+		end
+	end
+	return to_native(result)
+end
+
+---Split path into (dir, file) pair.
+--: (string) -> string, string
+M.split = function(p)
+	local n = norm_seps(p)
+	-- Find last slash
+	local i = #n
+	while i > 0 and n:sub(i, i) ~= "/" do
+		i = i - 1
+	end
+	if i == 0 then
+		return ".", n
+	end
+	local dir = n:sub(1, i):gsub("/+$", "")
+	local file = n:sub(i + 1)
+	if dir == "" then dir = "/" end
+	return to_native(dir), file
+end
+
+---Get the last component (filename). Strips trailing separators.
+--: (string) -> string
+M.basename = function(p)
+	local n = norm_seps(p):gsub("/+$", "")
+	if n == "" then return "" end
+	local i = #n
+	while i > 0 and n:sub(i, i) ~= "/" do
+		i = i - 1
+	end
+	return n:sub(i + 1)
+end
+
+---Get directory component of path.
+--: (string) -> string
+M.dirname = function(p)
+	local dir, _ = M.split(p)
+	return dir
+end
+
+---Split extension from path. Returns (root, ext).
+--- Dotfiles like ".bashrc" have no extension.
+--: (string) -> string, string
+M.splitext = function(p)
+	local n = norm_seps(p)
+	-- Find the basename start position
+	local slash = 0
+	for i = #n, 1, -1 do
+		if n:sub(i, i) == "/" then
+			slash = i
+			break
+		end
+	end
+	local base = n:sub(slash + 1)
+	local prefix = n:sub(1, slash)  -- everything up to and including last slash
+
+	-- Find last dot in basename, skipping a leading dot
+	local start = 1
+	if base:sub(1, 1) == "." then start = 2 end
+
+	local dot_pos = nil
+	for i = #base, start, -1 do
+		if base:sub(i, i) == "." then
+			dot_pos = i
+			break
+		end
+	end
+
+	if dot_pos == nil then
+		return to_native(p), ""
+	end
+
+	local root = prefix .. base:sub(1, dot_pos - 1)
+	local ext = base:sub(dot_pos)
+	return to_native(root), ext
+end
+
+---Get file extension (last dot suffix).
+--: (string) -> string
+M.ext = function(p)
+	local _, e = M.splitext(p)
+	return e
+end
+
+---Normalize: resolve . and .., collapse multiple separators.
+--: (string) -> string
+M.normalize = function(p)
+	local n = norm_seps(p)
+	local drive, rest = splitdrive(n)
+	local is_abs = rest:sub(1, 1) == "/"
+	local prefix = drive .. (is_abs and "/" or "")
+
+	local parts = {}
+	for part in rest:gmatch("[^/]+") do
+		parts[#parts + 1] = part
+	end
+
+	local stack = {}
+	for _, part in ipairs(parts) do
+		if part == "." then
+			-- skip
+		elseif part == ".." then
+			if #stack > 0 and stack[#stack] ~= ".." then
+				stack[#stack] = nil
+			elseif not is_abs then
+				stack[#stack + 1] = ".."
+			end
+			-- absolute: silently ignore going above root
+		else
+			stack[#stack + 1] = part
+		end
+	end
+
+	local result
+	if #stack == 0 then
+		result = prefix ~= "" and prefix or "."
+	else
+		result = prefix .. table.concat(stack, "/")
+	end
+
+	return to_native(result)
+end
+
+---Split path into all components.
+--: (string) -> { [number]: string }
+M.parts = function(p)
+	local n = norm_seps(p)
+	local drive, rest = splitdrive(n)
+	local is_abs = rest:sub(1, 1) == "/"
+	local result = {}
+
+	if is_abs then
+		result[#result + 1] = to_native(drive .. "/")
+	elseif drive ~= "" then
+		result[#result + 1] = drive
+	end
+
+	for part in rest:gmatch("[^/]+") do
+		result[#result + 1] = part
+	end
+
+	return result
+end
+
+---Compute relative path from `start` to `path`.
+--: (string, string) -> string
+M.relative = function(path, start)
+	local p = norm_seps(M.normalize(path))
+	local s = norm_seps(M.normalize(start))
+
+	local function split_parts(str)
+		local t = {}
+		for part in str:gmatch("[^/]+") do
+			t[#t + 1] = part
+		end
+		return t
+	end
+
+	local p_parts = split_parts(p)
+	local s_parts = split_parts(s)
+
+	local common = 0
+	local min_len = math.min(#p_parts, #s_parts)
+	for i = 1, min_len do
+		if p_parts[i] == s_parts[i] then
+			common = i
+		else
+			break
+		end
+	end
+
+	local result = {}
+	for _ = 1, #s_parts - common do
+		result[#result + 1] = ".."
+	end
+	for i = common + 1, #p_parts do
+		result[#result + 1] = p_parts[i]
+	end
+
+	if #result == 0 then return "." end
+	return to_native(table.concat(result, "/"))
+end
+
+---Find common path prefix of a list of paths.
+--: ({ [number]: string }) -> string
+M.commonpath = function(paths)
+	if not paths or #paths == 0 then return "" end
+
+	local all_parts = {}
+	for _, path in ipairs(paths) do
+		local n = norm_seps(M.normalize(path))
+		local t = {}
+		for part in n:gmatch("[^/]+") do
+			t[#t + 1] = part
+		end
+		all_parts[#all_parts + 1] = t
+	end
+
+	local min_len = #all_parts[1]
+	for i = 2, #all_parts do
+		if #all_parts[i] < min_len then min_len = #all_parts[i] end
+	end
+
+	local common = {}
+	for i = 1, min_len do
+		local val = all_parts[1][i]
+		local match = true
+		for j = 2, #all_parts do
+			if all_parts[j][i] ~= val then
+				match = false
+				break
+			end
+		end
+		if match then
+			common[#common + 1] = val
+		else
+			break
+		end
+	end
+
+	if #common == 0 then return "" end
+	return to_native(table.concat(common, "/"))
+end
+
+---Expand leading ~ to home directory (reads HOME or USERPROFILE env var).
+--: (string) -> string
+M.expanduser = function(p)
+	if p:sub(1, 1) ~= "~" then return p end
+	local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
+	if p == "~" then return home end
+	local rest = p:sub(2):gsub("^[/\\]", "")
+	if home == "" then
+		return to_native("~/" .. rest)
+	end
+	return M.join(home, rest)
+end
+
+return M
