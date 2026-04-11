@@ -283,6 +283,28 @@ string ops, no I/O): `join`, `split`, `basename`, `dirname`, `splitext`, `ext`, 
 `normalize` (resolves `..`/`.`), `relative`, `parts`, `commonpath`, `expanduser`. Platform
 sep/pathsep from `package.config`. 78 assertions.
 
+**CRC32** (`lib/hash/crc32`) — **implemented**. CRC32 checksum (reflected polynomial 0xEDB88320,
+ISO 3309 / zlib / gzip / PNG). Pre-computed 256-entry lookup table. One-shot `crc32(data, seed?)`
+and `crc32_hex`, streaming `new(seed?)` with `update`/`digest`/`hex`/`reset`. Seeded chaining:
+`crc32(b, crc32(a)) == crc32(a..b)`. 39 assertions.
+
+**Table Extensions** (`lib/table_ext`) — **implemented**. 50+ table utilities: `map`, `filter`,
+`reduce`, `flat_map`, `flatten`, `find`, `any`/`all`/`none`, `group_by`, `unique`, `zip`/`unzip`,
+`chunk`, `sort_by`, `keys`/`values`/`entries`/`from_entries`, `merge`/`deep_merge`, `pick`/`omit`,
+`invert`, `deep_copy`, `deep_equal`, `is_array`, `range`, `shuffle`, `sample`. 194 assertions.
+
+**String Extensions** (`lib/string_ext`) — **implemented**. 40+ string utilities: `starts_with`,
+`ends_with`, `contains`, `count`, `trim`, `pad_left`/`pad_right`/`center`, `truncate`, `wrap`,
+`snake_case`/`camel_case`/`pascal_case`/`kebab_case`, `split`/`split_n`/`lines`/`chars`, 
+`replace`/`replace_all`, `escape_pattern`, `escape_html`/`unescape_html`, `escape_uri`/`unescape_uri`.
+147 assertions.
+
+**Math Extensions** (`lib/math_ext`) — **implemented**. `clamp`, `lerp`, `remap`, `smoothstep`,
+`sign`, `round`/`round_to`/`wrap`/`snap`, `approx_eq`. Number theory: `gcd`, `lcm`, `is_prime`,
+`primes` (sieve), `factorize`, `is_power_of_two`. Statistics: `mean`, `median`, `mode`, `variance`,
+`stddev`, `percentile`, `histogram`. Easing: quad/cubic/sine in/out/in-out. Geometry: `deg_to_rad`,
+`polar_to_cart`, `distance`, `dot2d`/`cross2d`. 151 assertions.
+
 **Trie** (`lib/trie`) — implemented. Prefix tree: insert/get/has/remove, has_prefix,
 find_prefix, count_prefix, longest_prefix (routing), autocomplete with limit,
 sorted iteration. 108 assertions.
