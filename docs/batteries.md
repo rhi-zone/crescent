@@ -400,6 +400,24 @@ zip, combine_latest. Subjects and replay subjects. 510 assertions.
 encoding format): integers, byte strings, lists, dictionaries with sorted keys.
 Codec aliases: `encode`/`decode`, `table_to_string`/`string_to_table`. 90 assertions.
 
+**Wire** (`lib/wire`) — **implemented**. Binary protocol framing: Writer (builds binary strings) and
+Reader (cursor into binary data). Types: uint8/16/32, int8/16/32, float32/64 (LE+BE), unsigned
+LEB128 varint, signed LEB128 (zigzag), raw bytes, length-prefixed strings (u8/u16/u32/varint prefix).
+`M.frame`/`M.unframe` for length-prefixed messages. Streaming `unframer` for TCP chunks. 141 assertions.
+
+**Struct** (`lib/struct`) — **implemented**. C-style struct pack/unpack (Python `struct`-compatible
+format strings). Byte order: `<`/`>`/`!`/`=`. Format chars: `b B h H i I l L q Q f d s Ns c ? x`.
+Repeat counts (`4B`). `pack`/`unpack`/`calcsize`/`compile`. FFI unions for float/double/int64. 97 assertions.
+
+**S-Expressions** (`lib/sexp`) — **implemented**. Lisp-style S-expression parser and serializer.
+`M.sym(name)`/`M.is_sym(v)` for symbols. `decode`/`encode`, `decode_all`/`encode_all`. Comment
+stripping, `'x` quote shorthand → `(quote x)`, `#t`/`#f` booleans. Round-trip correct. 137 assertions.
+
+**Statemachine** (`lib/statemachine`) — **implemented**. Hierarchical statechart library (Harel/XState
+style). Compound states with sub-states, `initial`, entry/exit actions, guards, event transitions,
+context object, relative target resolution. Immutable `transition(state, event)` and mutable `service`.
+`matches("active.working")` pattern. 74 assertions.
+
 **MessagePack** (`lib/msgpack`) — **implemented**. MessagePack binary serialization:
 nil, boolean, integer (fixint through uint32/int32), float64, string, binary, array,
 map. Pure Lua, big-endian byte packing. `M.bin(s)` for binary-typed strings. Codec
