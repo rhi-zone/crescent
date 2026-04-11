@@ -180,6 +180,12 @@ most use cases. Design: sans-I/O core, injectable scheduler, `lib/reactor` or
 
 **Datetime** (`lib/datetime`) — implemented. Date/time library exists.
 
+**Time** (`lib/time`) — **implemented**. Durations and timestamps. Duration stored as
+integer nanoseconds; supports ns/us/ms/s/min/h/d units. `components()`, arithmetic
+(`+`/`-`/`*`/`/`), `format()`/`format_short()`/`format_precise()`, `duration_parse("5h30m")`.
+Timestamps: `from_unix`/`from_unix_ms`/`now()`, `format_rfc3339`, `parse_rfc3339` (TZ offset,
+fractional seconds). 116 assertions.
+
 **Regex** (`lib/regex`) — implemented. PCRE2 FFI system tier + pure Lua backtracking
 fallback. API: `compile`, `match`, `find`, `gmatch`, `gsub`, `split`. Compiled regex
 objects for reuse. 70+ assertions with parity tests between tiers.
@@ -240,9 +246,23 @@ connected components, Kruskal MST (union-find), Tarjan's SCC, `transpose`. 179 a
 for O(1) promote/evict, injectable clock for testing, eviction callbacks, resize,
 bulk get/set. 102 assertions.
 
+**LRU** (`lib/lru`) — **implemented**. LRU cache + LFU + 2Q variants. All O(1) via
+doubly-linked lists. TTL with injectable clock, per-entry override, `on_evict` callback.
+`get_or_set`, `mget`/`mset`, `iter`/`keys`/`values` (MRU order), hit_rate/stats.
+LFU: O'Neil algorithm, frequency introspection. 2Q: "in" FIFO + "out" LRU + ghost set.
+176 assertions.
+
 **Validate** (`lib/validate`) — implemented. Schema validation for Lua tables. Composable
 validators: string/number/integer/boolean/table/func/any/nil/literal, optional, one_of,
 all_of, array, map, record, custom. Dotted error paths. 193 assertions.
+
+**JSON Schema** (`lib/json_schema`) — **implemented**. JSON Schema draft-7 validator.
+`compile(schema)` → reusable validator; `validate(value, schema)` one-shot. All keywords:
+type/enum/const, string (minLength/maxLength/pattern/format), number (min/max/exclusive/
+multipleOf), array (items/additionalItems/uniqueItems/contains), object (properties/
+required/additionalProperties/patternProperties/dependencies), allOf/anyOf/oneOf/not,
+if/then/else, `$ref`+definitions, format (email/uri/date/ipv4/ipv6), OpenAPI `nullable`.
+Error objects with RFC 6901 paths. 212 assertions.
 
 **Stream** (`lib/stream`) — implemented. Lazy iterator combinators: from_array, range,
 generate, iterate. Transforms: map, filter, take, drop, flat_map, zip, chain, enumerate,
@@ -415,6 +435,12 @@ generation. Compound extensions (tar.gz). 102 assertions.
 **URL** (`lib/url`) — implemented. RFC 3986 URL parser/builder: parse into components,
 build from parts, query string encode/decode, percent-encoding, reference resolution,
 normalization. IPv6, protocol-relative, data URIs. 152 assertions.
+
+**Net** (`lib/net`) — **implemented**. Network address data structures (no I/O). IPv4:
+parse, to_number, is_private/loopback/multicast/broadcast/link_local. IPv6: parse with
+`::` compression, RFC-compliant to_string. CIDR: network/broadcast/netmask, contains,
+iter_hosts, supernet. URL parse/build (complements lib/url), url_encode/decode,
+query_encode/decode. MAC: parse colon/dash, is_broadcast/multicast, OUI. 163 assertions.
 
 **Template** (`lib/template`) — implemented. String template engine: `{{ expr }}` (escaped),
 `{{{ expr }}}` (raw), `{% code %}` (Lua), `{# comment #}`. Compiles to Lua functions.
