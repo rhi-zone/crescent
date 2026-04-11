@@ -299,6 +299,22 @@ Combinators: all, race, all_settled, any. Synchronous execution model. 92 assert
 union, intersection. Collection ops: merge overlapping, find gaps, span. Interval tree
 for efficient point/overlap queries. 110 assertions.
 
+**Deque** (`lib/deque`) — implemented. Growable double-ended queue: O(1) amortized
+push/pop both ends, 1-based get/set, rotate, forward/reverse iteration, contains.
+1160 assertions.
+
+**BigInt** (`lib/bigint`) — implemented. Arbitrary precision integers: base 10^7
+chunks, add/sub/mul/div/mod/pow, GCD/LCM, factorial, hex conversion. Full metamethods
+(+, -, *, /, %, ^, ==, <). 172 assertions.
+
+**Router** (`lib/router`) — implemented. Radix tree URL router: static segments,
+`:param` captures, `*wildcard` catch-all, inline params, method dispatch, route
+groups with prefix nesting. Static > param > wildcard priority. 158 assertions.
+
+**Retry** (`lib/retry`) — implemented. Retry with configurable backoff (none, linear,
+exponential, fibonacci, custom), jitter, retry_on predicate, on_retry callback.
+Reusable policies. Circuit breaker (closed/open/half_open). 177 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
