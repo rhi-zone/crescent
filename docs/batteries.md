@@ -305,6 +305,23 @@ computable from fingerprint alone. `load_factor`, `count`, `false_positive_rate`
 `query` (always ≥ true count). `update_conservative` (reduces overcount). `merge`, `reset`,
 `total`, `heavy_hitters(k)` (opt-in). `serialize`/`deserialize`. 84 assertions.
 
+**Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
+primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
+`each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
+`M.merge(l, r)`. Custom comparator. Xorshift RNG for priorities. 687 assertions.
+
+**Levenshtein** (`lib/levenshtein`) — **implemented**. String edit distance suite.
+`distance(s, t)` (Wagner-Fischer, 2-row), `distance_weighted` (custom costs),
+`damerau` (full with transpositions), `osa` (Optimal String Alignment), `lcs` (LCS length).
+`jaro`, `jaro_winkler` (similarity 0..1). `fuzzy_find/fuzzy_find_all` (Bitap shift-or
+approximate matching). `closest(query, candidates, n)`. `is_subsequence`. 101 assertions.
+
+**Graph Layout** (`lib/graph_layout`) — **implemented**. 2D graph layout algorithms.
+`force_directed` (Fruchterman-Reingold: repulsive/attractive forces, temperature cooling,
+gravity, canvas clamping). `circular`, `grid`, `random_layout`. `hierarchical` (topological
+sort + barycentric crossing-reduction, `"down"`/`"right"` directions). `normalize`,
+`bbox`, `centroid`. Input: `{nodes, edges}` table. Output: `{[id]={x,y}}`. 206 assertions.
+
 **Geometry** (`lib/geom`) — **implemented**. 2D/3D computational geometry. Points,
 vectors (add/sub/scale/dot/cross/len/normalize/rotate/perp), segments (intersection,
 closest-point), lines (signed distance, intersection), circles, AABB, triangles
