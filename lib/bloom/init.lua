@@ -155,18 +155,25 @@ function Bloom:false_positive_rate()
   return (1 - exp(-k * n / m)) ^ k
 end
 
--- Serialize as: 4-byte big-endian m, then nwords * 4 bytes (big-endian words).
--- The m header allows from_string to restore the exact bit-array size.
+-- Serialize as: 4-byte big-endian m, 4-byte big-endian k, then nwords * 4 bytes.
+-- k is embedded so bloom.deserialize() needs no extra parameter.
 function Bloom:to_string()
   local nwords = self._nwords
   local m = self._m
+  local k = self._k
   local t = {}
-  -- Header: m as big-endian uint32
+  -- Header: m then k as big-endian uint32
   t[#t + 1] = string.char(
     band(rshift(m, 24), 0xFF),
     band(rshift(m, 16), 0xFF),
     band(rshift(m,  8), 0xFF),
     band(m, 0xFF)
+  )
+  t[#t + 1] = string.char(
+    band(rshift(k, 24), 0xFF),
+    band(rshift(k, 16), 0xFF),
+    band(rshift(k,  8), 0xFF),
+    band(k, 0xFF)
   )
   for i = 1, nwords do
     local w = self._bits[i] or 0
@@ -180,6 +187,9 @@ function Bloom:to_string()
   return table.concat(t)
 end
 
+-- serialize is an alias for to_string
+Bloom.serialize = Bloom.to_string
+
 -- Union: OR of bit arrays. Returns new Bloom filter. Same m and k required.
 function Bloom:union(other)
   if self._m ~= other._m or self._k ~= other._k then
@@ -192,6 +202,17 @@ function Bloom:union(other)
   return nb
 end
 
+-- merge: in-place union — OR other's bits into self. Same m and k required.
+function Bloom:merge(other)
+  if self._m ~= other._m or self._k ~= other._k then
+    return nil, "bloom:merge: incompatible filters (m or k mismatch)"
+  end
+  for i = 1, self._nwords do
+    self._bits[i] = bor(self._bits[i] or 0, other._bits[i] or 0)
+  end
+  return self
+end
+
 -- Intersection: AND of bit arrays. Returns new Bloom filter. Same m and k required.
 function Bloom:intersection(other)
   if self._m ~= other._m or self._k ~= other._k then
@@ -202,6 +223,27 @@ function Bloom:intersection(other)
     nb._bits[i] = band(self._bits[i] or 0, other._bits[i] or 0)
   end
   return nb
+end
+
+-- intersect: in-place intersection — AND self's bits with other's. Same m and k required.
+function Bloom:intersect(other)
+  if self._m ~= other._m or self._k ~= other._k then
+    return nil, "bloom:intersect: incompatible filters (m or k mismatch)"
+  end
+  for i = 1, self._nwords do
+    self._bits[i] = band(self._bits[i] or 0, other._bits[i] or 0)
+  end
+  return self
+end
+
+-- bit_count: total number of bits in the filter
+function Bloom:bit_count()
+  return self._m
+end
+
+-- hash_count: number of hash functions
+function Bloom:hash_count()
+  return self._k
 end
 
 -- ---------------------------------------------------------------------------
@@ -231,20 +273,26 @@ function M.new(n, p)
   return M.new_raw(m, k)
 end
 
--- Reconstruct from serialized string (produced by to_string) and hash count k.
--- Format: 4-byte big-endian m header, followed by nwords*4 bytes of bit-array data.
-function M.from_string(s, k)
+-- Reconstruct from serialized string produced by to_string/serialize.
+-- Format (8-byte header): 4-byte big-endian m, 4-byte big-endian k, then nwords*4 bytes.
+-- The optional second argument k is ignored when using the new format (k is in header).
+function M.from_string(s, _k_ignored)
   local nbytes = #s
-  -- Must have at least the 4-byte header and remaining bytes in multiples of 4
-  if nbytes < 4 or (nbytes - 4) % 4 ~= 0 then
+  -- Minimum: 8-byte header + 0 data words
+  if nbytes < 8 or (nbytes - 8) % 4 ~= 0 then
     return nil, "bloom.from_string: invalid serialized string (bad length)"
   end
   local mh1, mh2, mh3, mh4 = string.byte(s, 1, 4)
   local m = bor(lshift(mh1, 24), lshift(mh2, 16), lshift(mh3, 8), mh4)
-  local nwords = (nbytes - 4) / 4
+  local kh1, kh2, kh3, kh4 = string.byte(s, 5, 8)
+  local k = bor(lshift(kh1, 24), lshift(kh2, 16), lshift(kh3, 8), kh4)
+  if k == 0 then
+    return nil, "bloom.from_string: invalid serialized string (k=0)"
+  end
+  local nwords = (nbytes - 8) / 4
   local bits = {}
   for i = 1, nwords do
-    local off = 4 + (i - 1) * 4 + 1
+    local off = 8 + (i - 1) * 4 + 1
     local b1, b2, b3, b4 = string.byte(s, off, off + 3)
     bits[i] = bor(
       lshift(b1, 24),
@@ -259,6 +307,12 @@ function M.from_string(s, k)
     _nwords = nwords,
     _bits   = bits,
   }, Bloom)
+end
+
+-- deserialize: reconstruct from a string produced by serialize() (new format only).
+-- k is embedded in the header — no second argument needed.
+function M.deserialize(s)
+  return M.from_string(s)
 end
 
 -- ---------------------------------------------------------------------------
@@ -374,6 +428,19 @@ function M.counting_new(n, p)
   local m = optimal_m(n, p)
   local k = optimal_k(m, n)
   return M.counting_new_raw(m, k)
+end
+
+-- counting: alias for counting_new
+M.counting = M.counting_new
+
+-- optimal_params: return {bits=m, hashes=k} for given capacity and FP rate
+function M.optimal_params(n, p)
+  if not n or not p or n < 1 or p <= 0 or p >= 1 then
+    return nil, "bloom.optimal_params: n must be >= 1 and 0 < p < 1"
+  end
+  local m = optimal_m(n, p)
+  local k = optimal_k(m, n)
+  return { bits = m, hashes = k }
 end
 
 return M

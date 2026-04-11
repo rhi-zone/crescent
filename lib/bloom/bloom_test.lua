@@ -255,11 +255,11 @@ T.describe("to_string / from_string", function()
     for i = 1, 100 do b:add("serial-" .. i) end
     local s = b:to_string()
     T.ok(type(s) == "string", "to_string returns string")
-    -- Format: 4-byte m header + nwords * 4 bytes
+    -- New format: 8-byte header (m + k) + nwords * 4 bytes
     local nwords = math.ceil(b:capacity() / 32)
-    T.eq(#s, 4 + nwords * 4, "serialized length correct")
+    T.eq(#s, 8 + nwords * 4, "serialized length correct (new format)")
 
-    local b2 = bloom.from_string(s, b:num_hashes())
+    local b2 = bloom.from_string(s)
     T.ok(b2, "from_string succeeded")
     T.eq(b2:capacity(), b:capacity(), "m preserved")
     T.eq(b2:num_hashes(), b:num_hashes(), "k preserved")
@@ -269,16 +269,16 @@ T.describe("to_string / from_string", function()
     end
   end)
 
-  T.it("from_string returns nil,err for bad length", function()
-    -- 3 bytes: too short even for the 4-byte header
-    local b2, err = bloom.from_string("abc", 3)
+  T.it("from_string returns nil,err for too-short string", function()
+    -- 3 bytes: too short for the 8-byte header
+    local b2, err = bloom.from_string("abc")
     T.fail(b2, "should fail")
     T.ok(err, "has error")
   end)
 
   T.it("from_string returns nil,err for non-multiple-of-4 data portion", function()
-    -- 4-byte header + 3 data bytes = invalid (data not multiple of 4)
-    local b2, err = bloom.from_string("\0\0\0\x80abc", 3)
+    -- 8-byte header + 1 data byte = 9 bytes total: data portion not multiple of 4
+    local b2, err = bloom.from_string("\0\0\0\x80\0\0\0\3\1")
     T.fail(b2, "should fail")
     T.ok(err, "has error")
   end)
@@ -286,8 +286,201 @@ T.describe("to_string / from_string", function()
   T.it("empty filter serializes and deserializes", function()
     local b = bloom.new_raw(128, 3)
     local s = b:to_string()
-    local b2 = bloom.from_string(s, 3)
+    local b2 = bloom.from_string(s)
     T.eq(b2:count(), 0, "empty after round-trip")
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- New API: bit_count / hash_count / merge / intersect / serialize / deserialize
+-- ---------------------------------------------------------------------------
+
+T.describe("bit_count / hash_count", function()
+  T.it("bit_count returns total bits (same as capacity)", function()
+    local b = bloom.new_raw(1024, 5)
+    T.eq(b:bit_count(), 1024)
+  end)
+
+  T.it("hash_count returns number of hash functions (same as num_hashes)", function()
+    local b = bloom.new_raw(1024, 5)
+    T.eq(b:hash_count(), 5)
+  end)
+
+  T.it("bit_count and capacity agree", function()
+    local b = bloom.new(500, 0.02)
+    T.eq(b:bit_count(), b:capacity())
+  end)
+
+  T.it("hash_count and num_hashes agree", function()
+    local b = bloom.new(500, 0.02)
+    T.eq(b:hash_count(), b:num_hashes())
+  end)
+end)
+
+T.describe("merge (in-place union)", function()
+  T.it("merge adds other's members into self", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(1024, 4)
+    b1:add("alpha")
+    b2:add("beta")
+    b1:merge(b2)
+    T.ok(b1:has("alpha"), "alpha still in b1")
+    T.ok(b1:has("beta"), "beta now in b1 via merge")
+  end)
+
+  T.it("merge returns self", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(1024, 4)
+    local ret = b1:merge(b2)
+    T.ok(ret == b1, "merge returns self")
+  end)
+
+  T.it("merge does not modify other", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(1024, 4)
+    b1:add("x")
+    b2:merge(b1)
+    T.fail(b1:has("anything-in-b2"), "b1 items not leaked to original b1")
+    -- b1 itself is unchanged by b2's merge
+    T.ok(b1:has("x"), "b1 still has x")
+  end)
+
+  T.it("merge returns nil,err for incompatible filters", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(2048, 4)
+    local r, err = b1:merge(b2)
+    T.fail(r, "should fail")
+    T.ok(err, "has error")
+  end)
+end)
+
+T.describe("intersect (in-place intersection)", function()
+  T.it("intersect keeps only shared items", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(1024, 4)
+    b1:add("shared")
+    b2:add("shared")
+    b1:add("only1")
+    b2:add("only2")
+    b1:intersect(b2)
+    T.ok(b1:has("shared"), "shared item still present")
+    T.fail(b1:has("only1"), "only1 cleared by intersect")
+    T.fail(b1:has("only2"), "only2 not in b1 after intersect")
+  end)
+
+  T.it("intersect returns self", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(1024, 4)
+    local ret = b1:intersect(b2)
+    T.ok(ret == b1, "intersect returns self")
+  end)
+
+  T.it("intersect returns nil,err for incompatible filters", function()
+    local b1 = bloom.new_raw(1024, 4)
+    local b2 = bloom.new_raw(512, 4)
+    local r, err = b1:intersect(b2)
+    T.fail(r, "should fail")
+    T.ok(err, "has error")
+  end)
+end)
+
+T.describe("serialize / deserialize", function()
+  T.it("serialize returns a string", function()
+    local b = bloom.new(100, 0.01)
+    b:add("hello")
+    local s = b:serialize()
+    T.ok(type(s) == "string", "serialize returns string")
+    T.ok(#s > 0, "non-empty")
+  end)
+
+  T.it("serialize is an alias for to_string", function()
+    local b = bloom.new_raw(256, 3)
+    b:add("test")
+    T.eq(b:serialize(), b:to_string(), "serialize == to_string")
+  end)
+
+  T.it("deserialize round-trip preserves membership", function()
+    local b = bloom.new(200, 0.01)
+    for i = 1, 50 do b:add("item-" .. i) end
+    local s = b:serialize()
+    local b2 = bloom.deserialize(s)
+    T.ok(b2, "deserialize succeeded")
+    T.eq(b2:bit_count(), b:bit_count(), "bit_count preserved")
+    T.eq(b2:hash_count(), b:hash_count(), "hash_count preserved")
+    for i = 1, 50 do
+      T.ok(b2:has("item-" .. i), "item-" .. i .. " present after deserialize")
+    end
+  end)
+
+  T.it("deserialize returns nil,err for bad input", function()
+    local b2, err = bloom.deserialize("x")
+    T.fail(b2, "should fail")
+    T.ok(err, "has error")
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- bloom.counting alias
+-- ---------------------------------------------------------------------------
+
+T.describe("bloom.counting alias", function()
+  T.it("bloom.counting is same as bloom.counting_new", function()
+    local cb1 = bloom.counting(100, 0.01)
+    local cb2 = bloom.counting_new(100, 0.01)
+    T.ok(cb1, "counting returns filter")
+    T.eq(cb1:capacity(), cb2:capacity(), "same params")
+    T.eq(cb1:num_hashes(), cb2:num_hashes(), "same k")
+  end)
+
+  T.it("counting filter supports add/has/remove", function()
+    local cb = bloom.counting(100, 0.01)
+    cb:add("x")
+    T.ok(cb:has("x"), "has after add")
+    cb:remove("x")
+    T.fail(cb:has("x"), "gone after remove")
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- bloom.optimal_params
+-- ---------------------------------------------------------------------------
+
+T.describe("bloom.optimal_params", function()
+  T.it("returns bits and hashes table", function()
+    local p = bloom.optimal_params(1000, 0.01)
+    T.ok(p, "returns table")
+    T.ok(p.bits and p.bits > 0, "bits > 0")
+    T.ok(p.hashes and p.hashes >= 1, "hashes >= 1")
+  end)
+
+  T.it("bits matches new filter capacity", function()
+    local p = bloom.optimal_params(1000, 0.01)
+    local b = bloom.new(1000, 0.01)
+    T.eq(p.bits, b:capacity(), "bits matches capacity")
+  end)
+
+  T.it("hashes matches new filter num_hashes", function()
+    local p = bloom.optimal_params(1000, 0.01)
+    local b = bloom.new(1000, 0.01)
+    T.eq(p.hashes, b:num_hashes(), "hashes matches num_hashes")
+  end)
+
+  T.it("returns nil,err for invalid params", function()
+    local p, err = bloom.optimal_params(0, 0.01)
+    T.fail(p, "should fail")
+    T.ok(err, "has error")
+  end)
+
+  T.it("lower FP rate gives more bits", function()
+    local p1 = bloom.optimal_params(1000, 0.01)
+    local p2 = bloom.optimal_params(1000, 0.10)
+    T.ok(p1.bits > p2.bits, "1% FP needs more bits than 10% FP")
+  end)
+
+  T.it("larger capacity gives more bits", function()
+    local p1 = bloom.optimal_params(10000, 0.01)
+    local p2 = bloom.optimal_params(1000, 0.01)
+    T.ok(p1.bits > p2.bits, "10k items needs more bits than 1k")
   end)
 end)
 

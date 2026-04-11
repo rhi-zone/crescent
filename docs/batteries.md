@@ -220,6 +220,23 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**Argon2** (`lib/argon2`) — **implemented**. Argon2 password hashing (RFC 9106).
+Two tiers: system (`libargon2` FFI — Argon2d/i/id) and pure Lua (Argon2i, t=1/m=8/p=1,
+inline BLAKE2b). `hash`, `hash_encoded` (PHC string), `verify`. 43 assertions.
+
+**X.509** (`lib/x509`) — **implemented**. X.509 certificate parser (RFC 5280).
+`parse_der`/`parse_pem`. Parses: version, serial, subject/issuer (CN/O/C/OU/L/ST),
+validity (ISO 8601), signature algorithm, SubjectPublicKeyInfo, extensions, SHA-256
+fingerprint. Uses `lib/asn1` + `lib/pem`. Tested against real CA certs. 101 assertions.
+
+**Snappy** (`lib/snappy`) — **implemented**. Snappy compression (Google format).
+`compress`/`decompress` (pure Lua greedy LZ77 + varint framing). Handles literal
+elements, copy-1/2/4. `encode`/`decode` aliases. 68 assertions.
+
+**Bloom** (`lib/bloom`) — updated. Added `merge`/`intersect` (in-place), `serialize`/
+`deserialize`, `bit_count`/`hash_count`, `optimal_params`, `counting` alias.
+Updated serialization header to 8 bytes (m+k). 557 assertions (was 468).
+
 **Ed25519** (`lib/ed25519`) — **implemented**. Ed25519 digital signatures (RFC 8032). Two
 tiers: system (`libsodium` FFI) and pure Lua (inline SHA-512 + GF(2^255-19) field
 arithmetic + extended Edwards coordinates). `keypair(seed)`, `sign(privkey, msg)`,
