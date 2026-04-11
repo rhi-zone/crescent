@@ -220,6 +220,22 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**Geometry** (`lib/geom`) — **implemented**. 2D/3D computational geometry. Points,
+vectors (add/sub/scale/dot/cross/len/normalize/rotate/perp), segments (intersection,
+closest-point), lines (signed distance, intersection), circles, AABB, triangles
+(area/circumcircle/barycentric containment), polygons (Shoelace area, centroid,
+convex hull, point-in-polygon), 3D vectors, planes, angle utilities. 198 assertions.
+
+**Color Science** (`lib/color_space`) — **implemented**. Extended color space conversions:
+sRGB↔linear (IEC 61966-2-1), sRGB↔XYZ (D65), XYZ↔CIELAB, Lab↔LCH, OKLab (2020),
+HSLuv (perceptually uniform HSL). Color difference: CIEDE76, CIEDE2000. Perceptual
+mixing in Lab and OKLab. 139 assertions.
+
+**Units** (`lib/units`) — **implemented**. Unit conversion across 11 categories:
+length, mass, time, temperature (offset-aware), area, volume, speed, pressure, energy,
+digital storage, angle. `convert`, `parse` (e.g. "5 km", "72°F"), `format`, `list`,
+`categories`, `known`. 148 assertions.
+
 **Poly1305** (`lib/poly1305`) — **implemented**. Poly1305 one-time MAC (RFC 8439 §2.5).
 `auth(key, msg)`, `auth_hex`, `verify` (timing-safe). Streaming: `new(key)` → `ctx:update`
 / `ctx:finish()`. 5×26-bit limb arithmetic mod 2^130-5 via FFI `uint64_t`. RFC §2.5.2
