@@ -262,6 +262,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/ringbuf/`** — Fixed-size ring buffer: O(1) push/pop both ends, overflow wrapping. 111 assertions.
 - [x] **`lib/trie/`** — Prefix tree: autocomplete, longest prefix match, prefix counting. 108 assertions.
 - [x] **`lib/glob/`** — Glob pattern matching: *, **, ?, [...], {a,b}, compile/match/filter. 151 assertions.
+- [x] **`lib/matrix/`** — 2D matrix math: arithmetic, transpose, determinant, inverse, solve Ax=b, Gaussian elimination. 169 assertions.
+- [x] **`lib/bits/`** — Bitset + Bloom filter: set/clear/toggle, popcount, set operations, FNV-1a hashing. 157 assertions.
+- [x] **`lib/promise/`** — Promises/A+: resolve/reject, and_then/catch/finally, all/race/any/all_settled. 92 assertions.
+- [x] **`lib/interval/`** — Interval arithmetic + tree: contains, overlaps, merge, gaps, point/overlap queries. 110 assertions.
 
 ## lib/asm — SIMD kernel compiler
 

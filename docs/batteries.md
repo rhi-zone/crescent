@@ -281,6 +281,24 @@ sorted iteration. 108 assertions.
 (recursive), `?` (single char), `[abc]`/`[a-z]`/`[!abc]` (char classes), `{a,b}`
 (brace alternation). compile/match/filter/to_pattern/is_glob. 151 assertions.
 
+**Matrix** (`lib/matrix`) — implemented. 2D matrix math: flat row-major storage,
+arithmetic (add/sub/mul/scale), transpose, trace, determinant, inverse, solve Ax=b
+via Gaussian elimination with partial pivoting, map, reshape, Frobenius norm.
+169 assertions.
+
+**Bits** (`lib/bits`) — implemented. Bitset (32-bit word array): set/clear/toggle/get,
+popcount, any/none/all, and/or/xor/not set operations. Bloom filter: optimal sizing,
+double-hashing FNV-1a, add/test/union, FP rate estimation. Uses LuaJIT `bit` when
+available. 157 assertions.
+
+**Promise** (`lib/promise`) — implemented. Promises/A+ for async composition:
+resolve/reject, and_then/catch/finally chaining, nested promise unwrapping.
+Combinators: all, race, all_settled, any. Synchronous execution model. 92 assertions.
+
+**Interval** (`lib/interval`) — implemented. Interval arithmetic: contains, overlaps,
+union, intersection. Collection ops: merge overlapping, find gaps, span. Interval tree
+for efficient point/overlap queries. 110 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
