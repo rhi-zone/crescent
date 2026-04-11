@@ -232,8 +232,9 @@ calls, inline transitive dependencies, emit self-contained single file. Circular
 dependency handling, shebang injection, `analyze` for dependency listing. 99 assertions.
 
 **Graph** (`lib/graph`) — implemented. Directed/undirected graphs with adjacency list.
-Algorithms: BFS, DFS, topological sort (Kahn's), Dijkstra shortest path, cycle detection,
-connected components, Tarjan's SCC, transpose. 164 assertions.
+Node/edge API with optional data; directed in/out neighbors; auto-creates nodes on `add_edge`.
+Algorithms: BFS, DFS, topological sort (Kahn's), Dijkstra shortest path (O(V²)), cycle detection,
+connected components, Kruskal MST (union-find), Tarjan's SCC, `transpose`. 179 assertions.
 
 **Cache** (`lib/cache`) — implemented. LRU cache with optional TTL. Doubly-linked list
 for O(1) promote/evict, injectable clock for testing, eviction callbacks, resize,
@@ -249,9 +250,10 @@ unique, dedup, scan, chunks, intersperse. Terminals: to_array, reduce, count, su
 max, find, any, all, join, partition, group_by. 120 assertions.
 
 **Color** (`lib/color`) — implemented. Color spaces: RGB, HSL, HSV, hex, named CSS
-colors. Constructors, conversions, manipulation (lighten, darken, saturate, rotate,
-complement, invert, mix). WCAG contrast ratio, luminance, palette generation.
-198 assertions.
+colors. Constructors: `rgb`/`rgba`/`rgbf`/`hex`/`hsl`/`hsv`. Conversions, manipulation
+(lighten, darken, saturate, desaturate, rotate, complement, invert, mix). WCAG luminance
+and contrast ratio, `is_light`/`is_dark`, `gradient(colors, t)`, 20 named colors.
+172 assertions.
 
 **Cron** (`lib/cron`) — implemented. Cron expression parser and scheduler. 5-field
 expressions, ranges, steps, lists, named months/days, shorthands (@hourly, @daily, etc).
@@ -327,9 +329,11 @@ available. 157 assertions.
 resolve/reject, and_then/catch/finally chaining, nested promise unwrapping.
 Combinators: all, race, all_settled, any. Synchronous execution model. 92 assertions.
 
-**Interval** (`lib/interval`) — implemented. Interval arithmetic: contains, overlaps,
-union, intersection. Collection ops: merge overlapping, find gaps, span. Interval tree
-for efficient point/overlap queries. 110 assertions.
+**Interval** (`lib/interval`) — implemented. Interval arithmetic with half-open endpoint
+support (`lo_closed`/`hi_closed`). Contains, overlaps, intersection, union, difference,
+shift/scale/clamp, before/after. `M.range(lo, hi, step)` integer iteration. `M.set(intervals)`
+with normalize/union/intersection. Collection ops: merge, gaps, span. Interval tree for
+efficient point/overlap queries. 191 assertions.
 
 **Deque** (`lib/deque`) — implemented. Growable double-ended queue: O(1) amortized
 push/pop both ends, 1-based get/set, rotate, forward/reverse iteration, contains.
@@ -387,9 +391,12 @@ clock for testing. 367 assertions.
 `{{var}}` interpolation, dot-notation nested keys, pluralization with built-in rules
 for en/es/fr/de/ja/zh/ar, locale switching, fallback locale. 85 assertions.
 
-**Codec** (`lib/codec`) — implemented. Codec composition utilities: chain (encode
-left→right, decode right→left), conditional, map, identity. Built-in: hex, rot13,
-reverse, xor. Roundtrip helper. 103 assertions.
+**Codec** (`lib/codec`) — implemented. Codec registry and composition utilities.
+`register`/`get`/`list`; `chain(...)` (encode left→right, decode right→left).
+`lib/codec/hex`: encode/decode, case-insensitive decode, `upper` flag, `encode_chunks`,
+hex dump (`dump`), streaming `encoder`. Aliases: `string_to_hex`/`hex_to_string`.
+74 assertions (codec_test). Plus older composition utils (rot13, reverse, xor, conditional,
+map, identity).
 
 **Observable** (`lib/observable`) — implemented. Reactive push-based streams: create, of,
 from_array. Operators: map, filter, take, skip, distinct, reduce, scan, flat_map, tap,
@@ -531,6 +538,28 @@ literal/folded block scalars, scalar type resolution. `decode`/`encode`/`decode_
 **IR** (`lib/ir`) — **implemented**. In-memory intermediate representation graph.
 Typed nodes with attributes, directed edges with labels, CFG/SSA helpers, DFS/BFS
 traversal, dominator trees, liveness analysis. 163 assertions.
+
+**Cursor** (`lib/cursor`) — **implemented**. Cursor-based and offset pagination helpers.
+`encode_cursor`/`decode_cursor` (opaque base64-encoded JSON tokens), `paginate(items, opts)`
+returns `{items, next_cursor, prev_cursor, has_next, has_prev}`. `page_by_offset` for
+offset/limit. Works with any sortable key type. 118 assertions.
+
+**Money** (`lib/money`) — **implemented**. Monetary value arithmetic using integer minor
+units to avoid float precision issues. `new(amount, currency, decimals)`, arithmetic
+(`add`, `sub`, `mul`, `div`), comparison, rounding modes (floor, ceil, round, banker's),
+`allocate(ratios)` for split-without-loss, `format` with currency symbol/locale. 107 assertions.
+
+**Expr** (`lib/expr`) — **implemented**. Safe arithmetic and boolean expression evaluator.
+Recursive-descent parser: operators (`+`, `-`, `*`, `/`, `%`, `^`), comparisons, logical
+(`and`/`or`/`not`), ternary (`? :`), string concat (`..`), variables from an environment
+table. No `load`/`dostring` — fully sandboxed. `eval(expr, env)` and `parse(expr)` for
+AST access. 92 assertions.
+
+**Debounce** (`lib/debounce`) — **implemented**. Debounce, throttle, once, and batch
+utilities with injectable clock for deterministic testing. `new(fn, delay_ms)` fires after
+quiet period; `throttle(fn, interval_ms)` rate-limits; `once(fn)` single-fire with `reset`;
+`batch(fn, delay_ms)` collects `push(...)` calls and fires with full batch. All have
+`flush`/`cancel`/`pending`/`check(now)`. 74 assertions.
 
 ### Missing — binary serialization
 
