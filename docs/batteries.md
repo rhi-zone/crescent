@@ -331,6 +331,22 @@ configurable delimiter. Codec aliases. 90 assertions.
 callbacks, acquire/release, `with()` convenience, stats tracking, drain. Specialized
 buffer pool. 117 assertions.
 
+**Schema** (`lib/schema`) — implemented. Database DDL migration DSL: create/alter/drop
+table, column types (integer/text/real/blob/boolean/timestamp), constraints (PK, NOT NULL,
+UNIQUE, DEFAULT, FK, CHECK), indexes. Generates portable SQL strings. 137 assertions.
+
+**MIME** (`lib/mime`) — implemented. MIME type database: 120+ extension-to-type mappings,
+reverse lookup, charset detection, text/binary classification, content_type header
+generation. Compound extensions (tar.gz). 102 assertions.
+
+**URL** (`lib/url`) — implemented. RFC 3986 URL parser/builder: parse into components,
+build from parts, query string encode/decode, percent-encoding, reference resolution,
+normalization. IPv6, protocol-relative, data URIs. 152 assertions.
+
+**Template** (`lib/template`) — implemented. String template engine: `{{ expr }}` (escaped),
+`{{{ expr }}}` (raw), `{% code %}` (Lua), `{# comment #}`. Compiles to Lua functions.
+Built-in filters (upper, lower, trim, length, default). 100 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can

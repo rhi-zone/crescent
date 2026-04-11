@@ -274,6 +274,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/event/`** — Event emitter: on/once/off, wildcards, priority, stop propagation, mixin. 107 assertions.
 - [x] **`lib/ini/`** — INI parser/encoder: sections, comments, quoted values, multiline. 90 assertions.
 - [x] **`lib/pool/`** — Object pool: acquire/release, health checks, with(), buffer pool. 117 assertions.
+- [x] **`lib/schema/`** — Database DDL migration DSL: create/alter/drop table, column types, constraints, indexes. 137 assertions.
+- [x] **`lib/mime/`** — MIME type lookup: 120+ types, extension↔type, charset, content_type. 102 assertions.
+- [x] **`lib/url/`** — URL parser/builder: RFC 3986, query strings, percent-encoding, resolve, normalize. 152 assertions.
+- [x] **`lib/template/`** — String template engine: {{ expr }}, {% code %}, {# comment #}, filters, compile. 100 assertions.
 
 ## lib/asm — SIMD kernel compiler
 
