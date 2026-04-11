@@ -220,6 +220,21 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**Poly1305** (`lib/poly1305`) — **implemented**. Poly1305 one-time MAC (RFC 8439 §2.5).
+`auth(key, msg)`, `auth_hex`, `verify` (timing-safe). Streaming: `new(key)` → `ctx:update`
+/ `ctx:finish()`. 5×26-bit limb arithmetic mod 2^130-5 via FFI `uint64_t`. RFC §2.5.2
+and Appendix A.3 vectors verified. 75 assertions.
+
+**Noise** (`lib/noise`) — **implemented**. Procedural noise for terrain/texture generation.
+Perlin noise 2D/3D (Ken Perlin 2002 improved), Simplex noise 2D/3D (Gustavson), Fractal
+Brownian Motion (`fbm2`/`fbm3`, configurable octaves/persistence/lacunarity/scale).
+`seeded(n)` for independent instances. `normalize` to [0,1]. 641 assertions.
+
+**Easing** (`lib/easing`) — **implemented**. 33 Robert Penner easing functions for
+animation: `linear` + `in/out/in_out` variants for `quad`, `cubic`, `quart`, `quint`,
+`sine`, `expo`, `circ`, `back`, `elastic`, `bounce`. `get(name)`, `names()`,
+`interpolate(t, from, to, ease_fn)`. 482 assertions.
+
 **Brotli** (`lib/brotli`) — **implemented**. Brotli compression (RFC 7932). System tier
 (`libbrotlidec`/`libbrotlienc` FFI, nix store discovery) with stub fallback. `compress`/
 `decompress`, `encode`/`decode` aliases, quality/lgwin/mode options. 46 assertions.
