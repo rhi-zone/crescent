@@ -322,6 +322,22 @@ O(log n) amortized pop/decrease-key. `insert` → handle, `peek`, `pop`, `decrea
 `remove`. Two-pass pairing of children on pop. Lazy deletion for remove/decrease_key.
 Destructive `merge(other)`. Custom comparator (min/max). `to_sorted`. 81 assertions.
 
+**Bitset** (`lib/bitset`) — **implemented**. Dense bitset backed by 32-bit int array.
+`set/clear/flip/test/get` individual bits. `set_range/clear_range/flip_range`. Set ops:
+`band/bor/bxor/bnot/andnot` (return new) + `_inplace` variants. `count` (Kernighan
+popcount), `next_set/next_clear`, `to_array`, `subset`, `intersects`, `from_bits`.
+Auto-grows on set. 237 assertions.
+
+**Rope** (`lib/rope`) — **implemented**. Rope binary tree for O(log n) string editing.
+`M.new(s)`, `concat`, `split(i)`, `insert(i, s)`, `delete(lo, hi)`, `sub(lo, hi)`,
+`char_at(i)`, `rebalance`. Auto-rebalances when depth exceeds threshold. `str`/`len`
+aliases. 92 assertions.
+
+**Patricia Trie** (`lib/patricia_trie`) — **implemented**. Compressed radix trie
+(Patricia tree). `insert`, `get`, `contains`, `remove` (with node merging). `prefix_search`
+(subtree collection), `longest_prefix` (longest key that is prefix of query), `autocomplete`,
+`each` (sorted), `to_array`, `height`. Edge-splitting for common prefixes. 427 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
