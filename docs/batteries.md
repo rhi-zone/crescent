@@ -260,6 +260,29 @@ subtractive (default) or additive (`opts.additive`), lowercase (`opts.lower`), r
 VIIII→IX, etc.). Round-trip verified for all 1–3999. `to_roman`/`from_roman` aliases.
 109 assertions.
 
+**Interval** (`lib/interval`) — **implemented**. Interval arithmetic on the real line.
+`closed/open/lopen/ropen/point/empty/infinite` constructors. `contains`, `overlaps`,
+`intersect`, `union`, `difference`, `complement`. Interval arithmetic: `add/sub/mul/div`
+(standard rules; `div` errors if divisor contains 0). Metamethods: `+`, `-`, `*`, `/`,
+`==`, `tostring`. Multi-interval `Set` with auto-merge on insert. Interval tree included.
+312 assertions.
+
+**Semaphore** (`lib/semaphore`) — **implemented**. Coroutine-friendly synchronization
+primitives. `new(n)` counting semaphore: `acquire/release/try_acquire/count/waiting/with`.
+`mutex()` sugar. `event()`: `wait/fire/reset/is_fired` (one-shot broadcast). `cond()`:
+`wait(mutex)/signal/broadcast`. `channel(capacity)`: circular buffer, blocking
+`send/recv`, non-blocking `try_send/try_recv`, `close/is_closed/len/cap`. All blocking
+ops use `coroutine.yield`. 122 assertions.
+
+**Calendar** (`lib/calendar`) — **implemented**. Proleptic Gregorian calendar arithmetic.
+`date(y, m, d)`, `today()`, `from_ordinal(n)`, `from_iso("YYYY-MM-DD")`. Properties:
+`day_of_week` (ISO 1=Mon), `day_of_year`, `week_of_year` (ISO 8601), `is_leap_year`,
+`days_in_month`. Arithmetic: `add_days/months/years`, `diff_days`. Metamethods: `-`
+(integer days), `==`, `<`, `<=`. `range(start, stop, step)` iterator. `recur(opts)`:
+iCalendar-inspired recurring events (`daily/weekly/monthly/yearly`, `count`, `until`,
+`by_day`, `by_month_day`). `easter(year)` (Anonymous Gregorian). `is_weekend`.
+193 assertions.
+
 **Geometry** (`lib/geom`) — **implemented**. 2D/3D computational geometry. Points,
 vectors (add/sub/scale/dot/cross/len/normalize/rotate/perp), segments (intersection,
 closest-point), lines (signed distance, intersection), circles, AABB, triangles
