@@ -270,6 +270,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/bigint/`** — Arbitrary precision integers: base 10^7, add/sub/mul/div/pow, GCD/LCM, hex. 172 assertions.
 - [x] **`lib/router/`** — Radix tree URL router: :params, *wildcards, method dispatch, groups. 158 assertions.
 - [x] **`lib/retry/`** — Retry with backoff (none/linear/exponential/fibonacci) + circuit breaker. 177 assertions.
+- [x] **`lib/base64/`** — Base64 encode/decode (RFC 4648), URL-safe variant. 145 assertions.
+- [x] **`lib/event/`** — Event emitter: on/once/off, wildcards, priority, stop propagation, mixin. 107 assertions.
+- [x] **`lib/ini/`** — INI parser/encoder: sections, comments, quoted values, multiline. 90 assertions.
+- [x] **`lib/pool/`** — Object pool: acquire/release, health checks, with(), buffer pool. 117 assertions.
 
 ## lib/asm — SIMD kernel compiler
 

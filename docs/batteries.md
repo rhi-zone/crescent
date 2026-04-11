@@ -315,6 +315,22 @@ groups with prefix nesting. Static > param > wildcard priority. 158 assertions.
 exponential, fibonacci, custom), jitter, retry_on predicate, on_retry callback.
 Reusable policies. Circuit breaker (closed/open/half_open). 177 assertions.
 
+**Base64** (`lib/base64`) — implemented. RFC 4648 Base64 encode/decode: standard and
+URL-safe alphabets, padding control, whitespace stripping. Codec aliases per
+conventions. 145 assertions.
+
+**Event** (`lib/event`) — implemented. Event emitter / pub-sub: on/once/off, wildcard
+patterns (`user.*`, `*`), priority ordering, stop propagation, listener IDs,
+`event.mixin()` for adding to any table. 107 assertions.
+
+**INI** (`lib/ini`) — implemented. INI file parser/encoder: `[section]` headers,
+`key=value` pairs, `;`/`#` comments, quoted values, backslash continuation,
+configurable delimiter. Codec aliases. 90 assertions.
+
+**Pool** (`lib/pool`) — implemented. Object pool: create/destroy/validate/reset
+callbacks, acquire/release, `with()` convenience, stats tracking, drain. Specialized
+buffer pool. 117 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
