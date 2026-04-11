@@ -220,6 +220,24 @@ ChaCha20-Poly1305 (system + pure Lua reference), HKDF-SHA256 (RFC 5869),
 random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 36 assertions + 10 skipped without libcrypto.
 
+**Brotli** (`lib/brotli`) — **implemented**. Brotli compression (RFC 7932). System tier
+(`libbrotlidec`/`libbrotlienc` FFI, nix store discovery) with stub fallback. `compress`/
+`decompress`, `encode`/`decode` aliases, quality/lgwin/mode options. 46 assertions.
+
+**Zstd** (`lib/zstd`) — **implemented**. Zstandard compression (RFC 8878). System tier
+(`libzstd` FFI, nix store discovery) with stub fallback. `compress(input, {level=3})`/
+`decompress`, `is_zstd` (magic check). 59 assertions.
+
+**X25519 / Curve25519** (`lib/curve25519`) — **implemented**. X25519 Diffie-Hellman key
+exchange (RFC 7748). Pure Lua TweetNaCl-style 16-limb GF(2^255-19) arithmetic. Montgomery
+ladder scalar multiplication. `clamp`, `public_key`, `diffie_hellman`, `keypair`.
+RFC 7748 §6.2 iterative vectors verified. 1043 assertions.
+
+**BLAKE2** (`lib/blake2`) — **implemented**. BLAKE2b (64-bit, up to 64-byte digest) and
+BLAKE2s (32-bit, up to 32-byte digest) — RFC 7693. `b/b_binary` and `s/s_binary`.
+Keyed hashing support. BLAKE2b uses FFI `uint64_t`; BLAKE2s uses `bit.*`.
+RFC 7693 Appendix A vectors verified. 69 assertions.
+
 **Argon2** (`lib/argon2`) — **implemented**. Argon2 password hashing (RFC 9106).
 Two tiers: system (`libargon2` FFI — Argon2d/i/id) and pure Lua (Argon2i, t=1/m=8/p=1,
 inline BLAKE2b). `hash`, `hash_encoded` (PHC string), `verify`. 43 assertions.
