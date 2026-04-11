@@ -178,9 +178,7 @@ connections. Everything currently blocks. This is the single change that unlocks
 most use cases. Design: sans-I/O core, injectable scheduler, `lib/reactor` or
 `lib/loop`.
 
-**Datetime** — no date/time library at all. Needed by Lumen (timeline), logging,
-anything timestamped. Design: POSIX time via FFI, timezone support via tzdata,
-formatting per RFC 3339 / ISO 8601.
+**Datetime** (`lib/datetime`) — implemented. Date/time library exists.
 
 **Regex** (`lib/regex`) — implemented. PCRE2 FFI system tier + pure Lua backtracking
 fallback. API: `compile`, `match`, `find`, `gmatch`, `gsub`, `split`. Compiled regex
@@ -219,6 +217,19 @@ random_bytes. Pure Lua tier has ChaCha20+HKDF; AES requires libcrypto.
 **TOML** (`lib/toml`) — implemented. Full TOML v1.0 parser and encoder. All value
 types, dotted keys, table headers, array of tables, inline tables/arrays, all string
 types with escapes, datetime types. Round-trip encode/decode. 93 assertions.
+
+**CSV** (`lib/csv`) — implemented. RFC 4180 CSV parser and encoder: quoting, escaped
+quotes, embedded newlines, CRLF/LF, header mode (keyed tables), custom delimiters,
+streaming decoder. Codec aliases: `decode`/`encode`, `string_to_rows`/`rows_to_string`.
+135 assertions.
+
+**Diff** (`lib/diff`) — implemented. Myers diff algorithm (O(ND)): `diff` (arrays),
+`diff_strings` (line-level), `unified` (unified format output), `patch` (apply edits),
+`lcs` (longest common subsequence). 96 assertions.
+
+**Bundle** (`lib/bundle`) — implemented. Lua module bundler: resolve static `require()`
+calls, inline transitive dependencies, emit self-contained single file. Circular
+dependency handling, shebang injection, `analyze` for dependency listing. 99 assertions.
 
 ### Missing — binary serialization
 
@@ -354,8 +365,9 @@ you study to understand the algorithm) + FFI bindings to real libraries as the f
   Pure Lua reference implementation. 95 assertions.
 - `lib/onnx` — ONNX runtime FFI bindings. Run any exported model from PyTorch, sklearn,
   etc. FFI-only (no pure Lua equivalent — the model format is the spec).
-- `lib/embed` — embedding utilities on top of `lib/ai`: batch embedding, vector
-  similarity search, nearest-neighbor retrieval. Builds on `lib/vec`.
+- `lib/embed` — **implemented**. In-memory vector index: add/remove/search with cosine,
+  euclidean, or dot-product metrics. Metadata filtering, batch add, serialize/deserialize.
+  Brute-force kNN on `lib/vec`. 112 assertions.
 
 **`lib/logic`** *(logic programming)* — relational/logic programming substrate.
 

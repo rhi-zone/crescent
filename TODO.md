@@ -246,9 +246,10 @@ Not libraries (do not rewrite, repurpose instead):
   architectural options in TODO (a/b/c); needs a design decision before implementation.
 - [x] **`$GlobalScope` documented** — added to permanent intrinsics list in `lib/type/static/CLAUDE.md`.
   Synthesizes a closed TAG_TABLE from all `--:: declare` globals; same pattern as `$FfiC` but for `_G`.
-- [ ] **`lib/bundle/`** — Lua module bundler. Entry point → resolve static requires → inline →
-  treeshake → constant fold `--define` values → single file output. Discussed 2026-04-10.
-  See design notes: no dynamic `require()` support (warn/error), uses `lib/type/static/` AST.
+- [x] **`lib/bundle/`** — Lua module bundler. Resolve static requires, inline modules, single-file output. Circular dependency handling. 99 assertions.
+- [x] **`lib/diff/`** — Myers diff algorithm: diff arrays/strings, unified format, patch, LCS. 96 assertions.
+- [x] **`lib/csv/`** — RFC 4180 CSV parser/encoder: quoting, headers, streaming decoder. 135 assertions.
+- [x] **`lib/embed/`** — Vector index/search on lib/vec: kNN, cosine/euclidean/dot, metadata filter, serialize. 112 assertions.
 
 ## lib/asm — SIMD kernel compiler
 
