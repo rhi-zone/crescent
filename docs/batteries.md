@@ -248,6 +248,23 @@ generate, iterate. Transforms: map, filter, take, drop, flat_map, zip, chain, en
 unique, dedup, scan, chunks, intersperse. Terminals: to_array, reduce, count, sum, min,
 max, find, any, all, join, partition, group_by. 120 assertions.
 
+**Color** (`lib/color`) — implemented. Color spaces: RGB, HSL, HSV, hex, named CSS
+colors. Constructors, conversions, manipulation (lighten, darken, saturate, rotate,
+complement, invert, mix). WCAG contrast ratio, luminance, palette generation.
+198 assertions.
+
+**Cron** (`lib/cron`) — implemented. Cron expression parser and scheduler. 5-field
+expressions, ranges, steps, lists, named months/days, shorthands (@hourly, @daily, etc).
+matches(), next/prev occurrence, next_n(), describe(). 185 assertions.
+
+**FSM** (`lib/fsm`) — implemented. Finite state machine: declarative config with states,
+transitions, guards, actions, on_enter/on_exit callbacks. Wildcard and multi-source
+transitions, history tracking, introspection. 125 assertions.
+
+**Heap** (`lib/heap`) — implemented. Binary heap (priority queue): min/max/custom
+comparator, O(n) heapify, merge, heap sort, keyed mode with push_or_update/remove,
+drain iterator. 615 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can

@@ -254,6 +254,10 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/cache/`** — LRU cache with TTL, eviction callbacks, injectable clock, resize. 102 assertions.
 - [x] **`lib/validate/`** — Schema validation for Lua tables: composable validators, records, arrays, combinators. 193 assertions.
 - [x] **`lib/stream/`** — Lazy iterator combinators: map, filter, reduce, take, zip, flat_map, chunks, etc. 120 assertions.
+- [x] **`lib/color/`** — Color manipulation: RGB/HSL/HSV/hex conversion, lighten/darken/mix, WCAG contrast. 198 assertions.
+- [x] **`lib/cron/`** — Cron expression parser: matches, next/prev scheduling, shorthands, describe. 185 assertions.
+- [x] **`lib/fsm/`** — Finite state machine: declarative transitions, guards, actions, wildcards, history. 125 assertions.
+- [x] **`lib/heap/`** — Binary heap/priority queue: min/max/custom, heap sort, merge, keyed mode. 615 assertions.
 
 ## lib/asm — SIMD kernel compiler
 
