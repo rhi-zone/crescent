@@ -383,6 +383,23 @@ comparator, and constraint solver. Comparison metamethods, `inc_major`/`minor`/`
 constraint parsing (`>=`, `<`, `^`, `~`, `*`, `x`/`X` wildcards, compound AND). `sort`,
 `max`, `min`, `is_valid`. 234 assertions. (Separate from `lib/pkg/semver.lua`.)
 
+**MD5** (`lib/hash/md5`) — **implemented**. Pure Lua MD5 digest (RFC 1321). One-shot
+`md5(data)` returns 16-byte binary digest; `md5_hex(data)` returns 32-char hex string.
+Streaming `new_md5()` with `update`/`digest`/`reset`. 62 assertions.
+
+**xxHash** (`lib/hash/xxhash`) — **implemented**. xxHash32 (pure Lua) and xxHash64
+(LuaJIT FFI uint64). One-shot `xxh32`/`xxh64` plus streaming `new32`/`new64` with
+`update`/`digest`/`reset`. Official spec test vectors verified. 43 assertions.
+
+**YAML** (`lib/format/yaml`) — **implemented**. YAML 1.2 decoder and encoder. Block
+and flow styles, nested mappings/sequences, anchors/aliases, multi-document streams,
+literal/folded block scalars, scalar type resolution. `decode`/`encode`/`decode_all`.
+99 assertions.
+
+**IR** (`lib/ir`) — **implemented**. In-memory intermediate representation graph.
+Typed nodes with attributes, directed edges with labels, CFG/SSA helpers, DFS/BFS
+traversal, dominator trees, liveness analysis. 163 assertions.
+
 ### Missing — binary serialization
 
 **`lib/protocol/capnp`** — Cap'n Proto zero-copy binary serialization. LuaJIT FFI can
@@ -535,7 +552,7 @@ and anyone who wants declarative query semantics without a full SQL engine.
 **`lib/parse`** — **implemented**. Parser combinators: literal, pattern, seq, alt, many,
 many1, opt, map, sep_by, between, lazy, whitespace, number, string, identifier.
 Composable grammar construction. 92 assertions. Also: `lib/asm` (assembler utilities,
-implemented) and `lib/ir` (intermediate representation, not yet implemented) as stretch
+implemented) and `lib/ir` (intermediate representation, **implemented**) as stretch
 goals for the language tooling niche.
 
 ### Missing — typechecker features (load-bearing for the ecosystem)
