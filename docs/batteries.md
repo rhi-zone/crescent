@@ -344,6 +344,21 @@ efficient point/overlap queries. 191 assertions.
 push/pop both ends, 1-based get/set, rotate, forward/reverse iteration, contains.
 1160 assertions.
 
+**Rope** (`lib/rope`) — **implemented**. Persistent rope data structure for efficient
+large-string editing. Leaf + concat nodes, auto-rebalance (depth threshold), O(log n)
+`char_at`/`sub`/`insert`/`delete`/`split`/`concat`. `..` operator and `__eq` metamethods.
+DFS `iter()` over leaves. 77 assertions.
+
+**Bitset** (`lib/bitset`) — **implemented**. Dense bitset backed by 32-bit integer words.
+`set`/`get`/`clear`/`flip`, popcount, `any`/`none`/`all`, `band`/`bor`/`bxor`/`bnot`/
+`difference`, `iter()` over set positions, `to_array`/`to_string`/`to_hex`/`from_hex`.
+Dynamic bitset (auto-grows). Bounds check with `(nil, errmsg)` on out-of-range. 223 assertions.
+
+**Signals** (`lib/signals`) — **implemented**. Fine-grained auto-tracking reactive signals
+(SolidJS/Preact Signals style). `create`/`computed`/`effect`/`batch`/`memo`/`untrack`/`on`.
+Two-phase propagation (glitch-free). Lazy computed with dirty tracking. `stop()` cleanup.
+`sig:peek()` method. 96 assertions. (Distinct from `lib/reactive` which uses explicit dep arrays.)
+
 **BigInt** (`lib/bigint`) — implemented. Arbitrary precision integers: base 10^7
 chunks, add/sub/mul/div/mod/pow, GCD/LCM, factorial, hex conversion. Full metamethods
 (+, -, *, /, %, ^, ==, <). 172 assertions.
@@ -653,9 +668,11 @@ attachments, inline images, quoted-printable, base64, RFC 2047 encoded subjects)
 SMTP client (EHLO, STARTTLS, AUTH LOGIN/PLAIN, send with dot-stuffing) with injectable
 transport. Mock transport for testing. 71 assertions.
 
-**`lib/queue`** — implemented. SQLite-backed task queue: push/pop/ack/fail with
+**`lib/queue`** — implemented. SQLite-backed task queue (original): push/pop/ack/fail with
 exponential backoff, priority ordering, delayed jobs, recurring schedules, dead-letter
-queue, process convenience loop. 69 assertions.
+queue. 69 assertions. Also: in-memory priority queue (binary min/max-heap), FIFO queue
+(growable ring buffer with push_front/pop_back), fixed-capacity ring buffer.
+`heapify`/`heapsort`. 209 assertions (queue_test.lua).
 
 **`lib/search`** — implemented. SQLite FTS5 full-text search + brute-force vector
 cosine similarity (via `lib/vec`) + hybrid search with configurable weights.
