@@ -1,328 +1,343 @@
 -- lib/event_sourcing/init.lua
--- Event sourcing pattern: append-only event log with projections, snapshots, sagas.
--- Pure Lua — no dependencies, works on LuaJIT and PUC-Rio Lua 5.2+.
+-- Event sourcing primitives: event store, aggregate roots, projections,
+-- sagas (process managers), and snapshot-aware aggregate loading.
+--
+-- Design:
+--   - Events are immutable plain tables.
+--   - The store is in-memory; callers inject persistence by wrapping it or by
+--     reading/writing the streams themselves.
+--   - Optimistic concurrency: expected_version must match stream length.
+--   - Projections are pure functions over event streams — no side effects.
+--   - Snapshots reduce replay cost for long-lived aggregates.
 
 if not package.path:find("./?/init.lua", 1, true) then
-    package.path = "./?/init.lua;" .. package.path
+  package.path = "./?/init.lua;" .. package.path
 end
 
 local M = {}
+
+--: string
 M._tier = "pure"
 
--- ── Helpers ──────────────────────────────────────────────────────────────────
+-- ---------------------------------------------------------------------------
+-- Internal helpers
+-- ---------------------------------------------------------------------------
 
+local _id_seq = 0
 local function next_id()
-    -- Simple monotonic id using a module-level counter + timestamp hint.
-    -- Not globally unique across processes, but sufficient for in-process use.
-    M._id_counter = (M._id_counter or 0) + 1
-    return M._id_counter
+  _id_seq = _id_seq + 1
+  return _id_seq
 end
 
--- ── Event Store ───────────────────────────────────────────────────────────────
-
---:: EventStore = {
---::   append: (self, aggregate_id: string, event_type: string, payload: unknown, metadata: unknown) -> unknown
---::   events_for: (self, aggregate_id: string) -> unknown
---::   events_after: (self, sequence: number) -> unknown
---::   events_of_type: (self, event_type: string) -> unknown
---::   all_events: (self) -> unknown
---::   event_count: (self) -> number
---::   latest_sequence: (self, aggregate_id: string) -> number
---:: }
-
-local EventStore = {}
-EventStore.__index = EventStore
-
-function EventStore:append(aggregate_id, event_type, payload, metadata)
-    if type(aggregate_id) ~= "string" or aggregate_id == "" then
-        return nil, "aggregate_id must be a non-empty string"
-    end
-    if type(event_type) ~= "string" or event_type == "" then
-        return nil, "event_type must be a non-empty string"
-    end
-
-    self._global_sequence = self._global_sequence + 1
-
-    if not self._by_aggregate[aggregate_id] then
-        self._by_aggregate[aggregate_id] = {}
-    end
-    local agg_events = self._by_aggregate[aggregate_id]
-    local seq = #agg_events + 1
-
-    local event = {
-        id               = next_id(),
-        aggregate_id     = aggregate_id,
-        event_type       = event_type,
-        payload          = payload,
-        metadata         = metadata or {},
-        sequence         = seq,
-        global_sequence  = self._global_sequence,
-    }
-
-    agg_events[seq] = event
-    self._all[#self._all + 1] = event
-
-    if self._max_events and #self._all > self._max_events then
-        return nil, "event store at capacity"
-    end
-
-    return event
+local function shallow_copy(t)
+  local out = {}
+  for k, v in pairs(t) do out[k] = v end
+  return out
 end
 
-function EventStore:events_for(aggregate_id)
-    local agg = self._by_aggregate[aggregate_id]
-    if not agg then return {} end
-    local result = {}
-    for i = 1, #agg do result[i] = agg[i] end
-    return result
+-- ---------------------------------------------------------------------------
+-- Event constructor
+-- M.event(type, data, opts) -> event
+--   opts: { aggregate_id, aggregate_type, version, metadata }
+--
+-- Returns a plain table:
+--   { id, type, aggregate_id, aggregate_type, version, timestamp, data, metadata }
+-- ---------------------------------------------------------------------------
+
+function M.event(event_type, data, opts)
+  opts = opts or {}
+  return {
+    id             = next_id(),
+    type           = event_type,
+    aggregate_id   = opts.aggregate_id,
+    aggregate_type = opts.aggregate_type,
+    version        = opts.version or 0,
+    timestamp      = os.time(),
+    data           = data or {},
+    metadata       = opts.metadata or {},
+  }
 end
 
-function EventStore:events_after(sequence)
-    local result = {}
-    for i = 1, #self._all do
-        local e = self._all[i]
-        if e.global_sequence > sequence then
-            result[#result + 1] = e
+-- ---------------------------------------------------------------------------
+-- Event store
+-- M.store() -> store
+-- ---------------------------------------------------------------------------
+
+local Store = {}
+Store.__index = Store
+
+-- store:append(aggregate_id, events, expected_version) -> true | nil, err
+--   expected_version:
+--     nil  — no version check
+--     0    — stream must not yet exist
+--     n    — stream must currently be at exactly version n (optimistic concurrency)
+function Store:append(aggregate_id, events, expected_version)
+  if not aggregate_id then
+    return nil, "aggregate_id required"
+  end
+  if type(events) ~= "table" then
+    return nil, "events must be a table"
+  end
+
+  local stream = self._streams[aggregate_id]
+  if not stream then
+    stream = {}
+    self._streams[aggregate_id] = stream
+  end
+
+  local current_version = #stream
+
+  if expected_version ~= nil then
+    if current_version ~= expected_version then
+      return nil, "concurrency conflict: expected version " ..
+        tostring(expected_version) .. " but stream is at " ..
+        tostring(current_version)
+    end
+  end
+
+  for i = 1, #events do
+    local ev = events[i]
+    local version = current_version + i
+    local stamped = shallow_copy(ev)
+    stamped.aggregate_id  = aggregate_id
+    stamped.version       = version
+    stamped.position      = self._global_position + 1
+    self._global_position = self._global_position + 1
+    stream[version] = stamped
+    -- Notify subscribers.
+    for j = 1, #self._subscribers do
+      self._subscribers[j](stamped)
+    end
+  end
+
+  return true
+end
+
+-- store:load(aggregate_id, opts) -> events
+--   opts: { from_version, to_version, limit }
+function Store:load(aggregate_id, opts)
+  opts = opts or {}
+  local stream = self._streams[aggregate_id]
+  if not stream then return {} end
+
+  local from  = opts.from_version or 1
+  local to    = opts.to_version   or #stream
+  local limit = opts.limit
+
+  local out   = {}
+  local count = 0
+  for v = from, to do
+    if stream[v] then
+      count = count + 1
+      out[count] = stream[v]
+      if limit and count >= limit then break end
+    end
+  end
+  return out
+end
+
+-- store:load_all(opts) -> events  (ordered by global position)
+--   opts: { from_position, limit, aggregate_type }
+function Store:load_all(opts)
+  opts = opts or {}
+  local from_pos   = opts.from_position or 1
+  local limit      = opts.limit
+  local filter_type = opts.aggregate_type
+
+  local all = {}
+  for _, stream in pairs(self._streams) do
+    for _, ev in ipairs(stream) do
+      if ev.position >= from_pos then
+        if not filter_type or ev.aggregate_type == filter_type then
+          all[#all + 1] = ev
         end
+      end
     end
-    return result
+  end
+  table.sort(all, function(a, b) return a.position < b.position end)
+
+  if limit and #all > limit then
+    local trimmed = {}
+    for i = 1, limit do trimmed[i] = all[i] end
+    return trimmed
+  end
+  return all
 end
 
-function EventStore:events_of_type(event_type)
-    local result = {}
-    for i = 1, #self._all do
-        local e = self._all[i]
-        if e.event_type == event_type then
-            result[#result + 1] = e
-        end
-    end
-    return result
+-- store:subscribe(handler)  — handler(event) called for each appended event
+function Store:subscribe(handler)
+  self._subscribers[#self._subscribers + 1] = handler
 end
 
-function EventStore:all_events()
-    local result = {}
-    for i = 1, #self._all do result[i] = self._all[i] end
-    return result
+-- store:snapshot(aggregate_id, state, version)
+function Store:snapshot(aggregate_id, state, version)
+  self._snapshots[aggregate_id] = { state = state, version = version }
 end
 
-function EventStore:event_count()
-    return #self._all
+-- store:load_snapshot(aggregate_id) -> { state, version } | nil
+function Store:load_snapshot(aggregate_id)
+  return self._snapshots[aggregate_id]
 end
 
-function EventStore:latest_sequence(aggregate_id)
-    local agg = self._by_aggregate[aggregate_id]
-    if not agg or #agg == 0 then return 0 end
-    return #agg
+function M.store()
+  return setmetatable({
+    _streams         = {},
+    _snapshots       = {},
+    _subscribers     = {},
+    _global_position = 0,
+  }, Store)
 end
 
--- Create a new event store.
--- opts.max_events: optional capacity limit
-function M.store(opts)
-    opts = opts or {}
-    local self = setmetatable({}, EventStore)
-    self._by_aggregate  = {}
-    self._all           = {}
-    self._global_sequence = 0
-    self._max_events    = opts.max_events
-    return self
-end
+-- ---------------------------------------------------------------------------
+-- Aggregate root
+-- M.aggregate(agg_type, handlers) -> aggregate_class
+--   handlers: { EventType = function(state, event) -> new_state }
+--
+-- aggregate_class.new(id) -> agg
+-- agg:apply(events) -> agg          (replay; mutates in place, returns self)
+-- agg:raise(event_type, data) -> agg (stage + apply one event, returns self)
+-- agg.pending_events                (uncommitted events)
+-- agg.version                       (integer)
+-- agg.state                         (current state table)
+-- agg.id                            (aggregate id)
+-- ---------------------------------------------------------------------------
 
--- ── Aggregate ─────────────────────────────────────────────────────────────────
+function M.aggregate(agg_type, handlers)
+  local AggClass   = {}
+  AggClass.__index = AggClass
 
-local Aggregate = {}
-Aggregate.__index = Aggregate
+  function AggClass.new(id)
+    return setmetatable({
+      id             = id,
+      version        = 0,
+      state          = {},
+      pending_events = {},
+    }, AggClass)
+  end
 
-function Aggregate:apply(event)
-    local handler = self._handlers[event.event_type]
-    if handler then
-        local new_state = handler(self._state, event)
-        if new_state ~= nil then
-            self._state = new_state
-        end
-    end
-    self._version = self._version + 1
-end
-
-function Aggregate:replay(events)
+  -- Replay a list of already-stored events (no enqueueing).
+  function AggClass:apply(events)
     for i = 1, #events do
-        self:apply(events[i])
+      local ev      = events[i]
+      local handler = handlers[ev.type]
+      if handler then
+        self.state = handler(self.state, ev) or self.state
+      end
+      self.version = ev.version
     end
-end
-
-function Aggregate:state()
-    return self._state
-end
-
-function Aggregate:version()
-    return self._version
-end
-
--- Create a new aggregate.
--- opts.handlers = {event_type = function(state, event) return new_state end}
--- opts.initial_state: starting state (deep copy not performed — caller owns it)
-function M.aggregate(aggregate_id, opts)
-    opts = opts or {}
-    local self = setmetatable({}, Aggregate)
-    self._id       = aggregate_id
-    self._handlers = opts.handlers or {}
-    self._state    = opts.initial_state or {}
-    self._version  = 0
     return self
-end
+  end
 
--- ── Projection ────────────────────────────────────────────────────────────────
-
-local Projection = {}
-Projection.__index = Projection
-
-function Projection:handle(event)
-    local handler = self._handlers[event.event_type]
+  -- Stage a new domain event: construct it, apply it locally, enqueue it.
+  function AggClass:raise(event_type, data)
+    local next_version = self.version + 1
+    local ev = M.event(event_type, data, {
+      aggregate_id   = self.id,
+      aggregate_type = agg_type,
+      version        = next_version,
+    })
+    local handler = handlers[event_type]
     if handler then
-        local new_state = handler(self._state, event)
-        if new_state ~= nil then
-            self._state = new_state
-        end
+      self.state = handler(self.state, ev) or self.state
     end
-    if event.global_sequence and event.global_sequence > self._checkpoint then
-        self._checkpoint = event.global_sequence
-    end
+    self.version = next_version
+    self.pending_events[#self.pending_events + 1] = ev
+    return self
+  end
+
+  return AggClass
 end
 
-function Projection:handle_all(events)
+-- ---------------------------------------------------------------------------
+-- Projection (read model)
+-- M.projection(handlers) -> proj
+--   handlers: { EventType = function(state, event) -> new_state }
+--
+-- proj:handle(event) -> proj
+-- proj:handle_all(events) -> proj
+-- proj.state
+-- ---------------------------------------------------------------------------
+
+function M.projection(handlers)
+  local proj = {
+    state     = {},
+    _handlers = handlers,
+  }
+
+  function proj:handle(event)
+    local handler = self._handlers[event.type]
+    if handler then
+      self.state = handler(self.state, event) or self.state
+    end
+    return self
+  end
+
+  function proj:handle_all(events)
     for i = 1, #events do
-        self:handle(events[i])
+      self:handle(events[i])
     end
-end
-
-function Projection:state()
-    return self._state
-end
-
-function Projection:checkpoint()
-    return self._checkpoint
-end
-
--- Create a new projection.
--- opts.handlers = {event_type = function(state, event) return new_state end}
--- opts.initial_state: starting state
-function M.projection(name, opts)
-    opts = opts or {}
-    local self = setmetatable({}, Projection)
-    self._name       = name
-    self._handlers   = opts.handlers or {}
-    self._state      = opts.initial_state or {}
-    self._checkpoint = 0
     return self
+  end
+
+  return proj
 end
 
--- ── Snapshot Store ────────────────────────────────────────────────────────────
+-- ---------------------------------------------------------------------------
+-- Saga (process manager — coordinates across aggregates)
+-- M.saga(handlers) -> saga_class
+--   handlers: { EventType = function(state, event) -> { commands = [...], state = ... } }
+--
+-- saga_class.new() -> saga_instance
+-- saga_instance:handle(event) -> { commands }
+-- saga_instance.state
+-- ---------------------------------------------------------------------------
 
-local SnapshotStore = {}
-SnapshotStore.__index = SnapshotStore
+function M.saga(handlers)
+  local SagaClass   = {}
+  SagaClass.__index = SagaClass
 
-function SnapshotStore:save(aggregate_id, state, version)
-    if type(aggregate_id) ~= "string" or aggregate_id == "" then
-        return nil, "aggregate_id must be a non-empty string"
+  function SagaClass.new()
+    return setmetatable({ state = {} }, SagaClass)
+  end
+
+  function SagaClass:handle(event)
+    local handler = handlers[event.type]
+    if not handler then
+      return { commands = {} }
     end
-    self._snaps[aggregate_id] = { state = state, version = version }
-    -- Track most recent by version across all aggregates.
-    if not self._latest or version > self._latest.version then
-        self._latest = { aggregate_id = aggregate_id, version = version }
+    local result = handler(self.state, event)
+    if result and result.state ~= nil then
+      self.state = result.state
     end
-    return true
+    return { commands = result and result.commands or {} }
+  end
+
+  return SagaClass
 end
 
-function SnapshotStore:load(aggregate_id)
-    return self._snaps[aggregate_id]
-end
+-- ---------------------------------------------------------------------------
+-- Snapshot-aware aggregate loader
+-- M.load_aggregate(store, aggregate_class, id) -> agg | nil, err
+--   1. Load snapshot (if any).
+--   2. Replay events from snapshot version + 1 onwards.
+-- ---------------------------------------------------------------------------
 
-function SnapshotStore:latest()
-    return self._latest
-end
+function M.load_aggregate(store, aggregate_class, id)
+  if not store then           return nil, "store required" end
+  if not aggregate_class then return nil, "aggregate_class required" end
+  if not id then              return nil, "id required" end
 
-function SnapshotStore:clear(aggregate_id)
-    self._snaps[aggregate_id] = nil
-    -- Recompute latest if we cleared the latest.
-    if self._latest and self._latest.aggregate_id == aggregate_id then
-        self._latest = nil
-        for id, snap in pairs(self._snaps) do
-            if not self._latest or snap.version > self._latest.version then
-                self._latest = { aggregate_id = id, version = snap.version }
-            end
-        end
-    end
-end
+  local agg  = aggregate_class.new(id)
+  local snap = store:load_snapshot(id)
+  if snap then
+    agg.state   = snap.state
+    agg.version = snap.version
+  end
 
-function M.snapshot_store()
-    local self = setmetatable({}, SnapshotStore)
-    self._snaps  = {}
-    self._latest = nil
-    return self
-end
+  local events = store:load(id, { from_version = agg.version + 1 })
+  agg:apply(events)
 
--- ── Saga ──────────────────────────────────────────────────────────────────────
-
-local Saga = {}
-Saga.__index = Saga
-
-function Saga:handle(event)
-    if self._done then return {} end
-
-    local step = self._steps[self._step_index]
-    if not step then
-        self._done = true
-        return {}
-    end
-
-    if event.event_type ~= step.event_type then
-        -- Not the event this step is waiting for; ignore.
-        return {}
-    end
-
-    local new_state, commands = step.handler(self._state, event)
-    if new_state ~= nil then
-        self._state = new_state
-    end
-    self._step_index = self._step_index + 1
-    if self._step_index > #self._steps then
-        self._done = true
-    end
-    return commands or {}
-end
-
-function Saga:state()
-    return self._state
-end
-
-function Saga:done()
-    return self._done
-end
-
--- Create a new saga.
--- opts.steps = array of {event_type, handler(state, event) -> new_state, commands}
--- opts.initial_state: starting state
-function M.saga(name, opts)
-    opts = opts or {}
-    local self = setmetatable({}, Saga)
-    self._name        = name
-    self._steps       = opts.steps or {}
-    self._state       = opts.initial_state or {}
-    self._step_index  = 1
-    self._done        = #self._steps == 0
-    return self
-end
-
--- ── Command ───────────────────────────────────────────────────────────────────
-
--- Create a CQRS command object.
-function M.command(cmd_type, payload, metadata)
-    return {
-        id        = next_id(),
-        type      = cmd_type,
-        payload   = payload or {},
-        metadata  = metadata or {},
-        timestamp = os.time(),
-    }
+  return agg
 end
 
 return M
