@@ -838,6 +838,24 @@ query, opts)` — field resolution with default table resolver; custom resolvers
 fragment spreads; inline fragments; variables substitution; resolver errors collected into `errors` array
 with partial data. 142 assertions.
 
+**Deepcopy** (`lib/deepcopy`) — **implemented**. Deep copy, freeze, structural diff/patch, and table utilities.
+`copy(t, opts?)` — deep copy with cycle detection, metatable preservation, optional transform hook. `shallow(t)`.
+`freeze(t)`/`freeze_deep(t)` — immutable proxy (writes raise error). `equal(a,b,opts?)` — deep equality.
+`diff(a,b)` — `{path, old, new}` change list. `patch(t, diff)`. `merge`/`deep_merge`. `get`/`set`/`delete`
+by dot-path. `flatten`/`unflatten`. `keys`/`values`/`entries` (sorted). `pick`/`omit`. 142 assertions.
+
+**Text Justify** (`lib/text_justify`) — **implemented**. Text layout and justification utilities.
+`wrap(text, width)` — word wrap with optional long-word breaking. `left`/`right`/`center`/`justify` —
+single-line alignment. `paragraph(text, width, mode)` — wrap + justify (last line left in justify mode).
+`columns(rows, widths, opts)` — multi-column layout. `table(data, opts)` — ASCII art tables with `+---+`
+borders, per-column alignment. `truncate(s, max, ellipsis?)`. `pad_left`/`pad_right`/`pad_center`.
+`indent(text, n)` / `dedent(text)`. 110 assertions.
+
+**Env Schema** (`lib/env_schema`) — **implemented**. Typed environment variable validation.
+`env.string/number/integer/boolean/enum/list/url/port` field types with required, default, min/max,
+pattern. `schema(def):parse(source)` — injectable string-keyed table, collects all errors.
+`schema:template()` — generates commented `.env` skeleton. 184 assertions.
+
 **Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
 Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
 angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
