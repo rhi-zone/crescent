@@ -547,6 +547,29 @@ take_while/drop_while/zip/enumerate/chunk/unique/sort/reverse/flatten/scan/tap.
 Sinks: collect/first/last/count/sum/reduce/each/to_set/group_by/partition. `M.steps` +
 `M.compose` for reusable fragments. 72 assertions.
 
+**SAT Solver** (`lib/sat`) — **implemented**. DPLL with unit propagation and pure literal
+elimination. `M.solve({clauses, vars})` → `{sat, assignment}`. `M.solve_all`, `M.count`.
+Named-variable builder: `M.formula():var(name):clause(...):solve()`. CNF encodings:
+`at_most_one`, `at_least_one`, `exactly_one`. Tested: 3-coloring, pigeonhole (UNSAT),
+4-queens. 54 assertions.
+
+**Flow Network** (`lib/flow_network`) — **implemented**. `M.network()` with `add_edge`,
+`max_flow` (Edmonds-Karp BFS Ford-Fulkerson), `min_cut` (residual-BFS S-T partition),
+`min_cost_flow` (SPFA successive shortest paths), `reset`. `M.bipartite_matching({left,
+right, edges})` → matched pairs via max-flow reduction. `M.max_matching_size`. 38 assertions.
+
+**Voronoi** (`lib/voronoi`) — **implemented**. Delaunay triangulation (Bowyer-Watson
+incremental) + Voronoi diagram derived via circumcenter half-plane intersection + clipped
+to bounding box (Sutherland-Hodgman). `M.compute(sites, bounds)` → cells with vertices/
+neighbors. `M.delaunay(sites)` → triangles+edges. `M.nearest_site`, `M.find_cell`.
+`M.lloyd(sites, bounds, opts)` (Lloyd's relaxation). 49 assertions.
+
+**Reactive Database** (`lib/reactive_db`) — **implemented**. In-memory relational DB with
+live queries. `db:table(name, {schema, primary_key})`. CRUD: `insert/update/upsert/delete/get`.
+Query builder: `where`/`order_by`/`limit`/`offset`/`join`/`select`/`count`/`first`. Hash
+indexes. `subscribe(fn)` → unsub (insert/update/delete events). `live_query(filter, fn)`
+auto-updating materialized view. `db:transaction(fn)` with rollback on error. 86 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
