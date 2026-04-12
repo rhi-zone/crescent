@@ -886,6 +886,18 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 `tlv(opts)` — Type-Length-Value. `encode_varint`/`decode_varint` — unsigned LEB128.
 `pack`/`unpack` — struct codec (`>/<` endian, B/H/I/Q/b/h/i/q/s). `framer`/`receiver` — stream wrappers. 157 assertions.
 
+**Tracing** (`lib/tracing`) — **implemented**. OpenTelemetry-inspired distributed tracing.
+`T.provider({exporter, id_seed})` — `tracer("name")` → `tracer:start_span(name, opts)` / `tracer:with_span(name, fn)`. Span: `set_attribute`/`add_event`/`set_status`/`finish`. `T.memory_exporter()` — `spans()`/`reset()`. `T.console_exporter()`. W3C TraceContext: `T.inject(span)` → `"00-traceid-spanid-01"`, `T.extract(header)`. `T.to_json(spans)` — OTLP-like JSON. PRNG via xorshift32. 106 assertions.
+
+**Connection Pool** (`lib/connection_pool`) — **implemented**. Generic connection pool with health checking and lifecycle hooks.
+`CP.new({create, destroy, validate, min_size, max_size, idle_timeout, max_lifetime, clock})`. `pool:acquire()` / `pool:release(conn)` — LIFO idle stack with validation. `pool:with(fn)` — auto-release. `pool:evict()` — stale connection cleanup. `pool:warm()` / `pool:drain()` / `pool:close()` / `pool:resize(n)`. `pool:stats()` — size/idle/active/created/destroyed/acquire_count. 125 assertions.
+
+**Spatial Hash** (`lib/spatial_hash`) — **implemented**. 2D spatial hash grid for O(1) average proximity queries.
+`SH.new(cell_size)`. `grid:insert(id,x,y)` / `grid:insert_rect(id,x,y,w,h)` / `grid:remove(id)`. `grid:query_point(x,y)` / `grid:query_rect(x,y,w,h)` / `grid:query_radius(cx,cy,r)` — exact distance check. `grid:nearest(x,y,n)`. `grid:move`/`grid:move_rect`. `grid:pairs(fn)` — broad-phase collision pairs. `grid:stats()`. 103 assertions.
+
+**CSS Parser** (`lib/css_parser`) — **implemented**. CSS tokenizer, selector parser, declaration parser, and specificity.
+`CSS.tokenize(str)` — full CSS Syntax Level 3 (ident/string/number/dimension/percentage/hash/at-keyword/function/url/all brackets, comments stripped). `CSS.parse_declarations(str)` — `{property, value, important}` array. `CSS.parse_selector(str)` — compound selectors with type/id/class/attribute/pseudo, combinators ` `/`>`/`+`/`~`, comma lists. `CSS.parse(str)` — full stylesheet (style rules + at-rules). `CSS.matches(sel, element)`. `CSS.specificity(sel)` → `{a,b,c}`. `CSS.stringify`. 234 assertions.
+
 **YAML** (`lib/yaml`) — **implemented**. YAML 1.2 parser and serializer.
 `yaml.decode(str)` / `yaml.parse(str)` — plain/quoted/block scalars, boolean/integer/float/null coercion, block+flow sequences/mappings, literal `|` and folded `>` block scalars, comments, anchors/aliases, `---` document markers. `yaml.encode(val, opts)` / `yaml.stringify(val, opts)` — `opts.indent` (default 2), `opts.sort_keys`. 153 assertions.
 
