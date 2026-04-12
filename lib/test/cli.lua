@@ -94,16 +94,17 @@ local function find_test_files()
 end
 
 -- Expand a list of paths: directories → find *_test.lua under them; files kept as-is.
+local function is_directory(p)
+	-- Use test -d shell builtin: exits 0 if directory, 1 otherwise.
+	local rc = os.execute("test -d " .. p)
+	-- os.execute returns true/0 on success in LuaJIT
+	return rc == true or rc == 0
+end
+
 local function expand_paths(paths)
 	local out = {}
 	for _, p in ipairs(paths) do
-		-- Check if p is a directory by trying to open it as a file (fails for dirs).
-		local f = io.open(p, "r")
-		if f then
-			f:close()
-			out[#out + 1] = p
-		else
-			-- Assume directory; discover test files under it.
+		if is_directory(p) then
 			local handle = io.popen("find " .. p .. " -name '*_test.lua' -type f | sort")
 			if handle then
 				for line in handle:lines() do
@@ -111,6 +112,8 @@ local function expand_paths(paths)
 				end
 				handle:close()
 			end
+		else
+			out[#out + 1] = p
 		end
 	end
 	return out
