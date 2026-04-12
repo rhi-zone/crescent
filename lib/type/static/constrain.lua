@@ -91,7 +91,8 @@ end
 local ANN_TYPE   = defs.ANN_TYPE
 local ANN_DECL   = defs.ANN_DECL
 local ANN_MODULE = defs.ANN_MODULE
-local ANN_UNSEAL = defs.ANN_UNSEAL
+local ANN_UNSEAL  = defs.ANN_UNSEAL
+local ANN_REQUIRE = defs.ANN_REQUIRE
 
 local TAG_ANY      = defs.TAG_ANY
 local TAG_UNKNOWN  = defs.TAG_UNKNOWN
@@ -213,7 +214,7 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         -- $FfiC is a magic type: the live ffi.C table for this compilation unit.
         -- It is kept as TAG_FFIC in the checker's type arena so that solve.lua
         -- can substitute ctx.T_FFI_C dynamically at the time of field access.
-        -- This avoids capturing a stale (or nil) T_FFI_C during stdlib.d.lua loading.
+        -- This avoids capturing a stale (or nil) T_FFI_C during stdlib_types.lua loading.
         return types_mod.alloc_type(ctx, defs.TAG_FFIC)
     end
 
@@ -2945,11 +2946,55 @@ gen_prescan_block = function(ctx, bs, bl)
 end
 
 -- ---------------------------------------------------------------------------
+-- Declaration file loader (for --:: require "mod.path")
+-- ---------------------------------------------------------------------------
+-- process_type_decls is defined below; load_decl_file calls it, so we need
+-- to pre-declare the variable and assign the function body separately to
+-- avoid the Lua gotcha where `local function f` inside an expression scope
+-- creates a new local that shadows the forward-declared one.
+--
+-- Lua scoping rule: `local x = expr` does NOT put x in scope inside expr.
+-- Therefore `load_decl_file` closes over the pre-declared `process_type_decls`
+-- slot, and the assignment below fills that slot before any call can occur.
+local process_type_decls
+
+-- Load a declaration file into ctx.scope.
+-- Translates "lib.web.js_types" → "lib/web/js_types.lua", parses it, and
+-- processes its type alias and declare bindings using process_type_decls.
+--: (Ctx, string) -> nil
+local function load_decl_file(ctx, mod_name)
+    local parse_mod = require("lib.type.static.parse")
+    -- Resolve module name to file path: "lib.web.js_types" → "lib/web/js_types.lua"
+    local rel_path = mod_name:gsub("%.", "/") .. ".lua"
+    local f = io.open(rel_path, "r")
+    if not f then return end
+    local source = f:read("*a")
+    f:close()
+
+    local ok_p, pr = pcall(parse_mod.parse, source, rel_path, ctx.pool)
+    if not ok_p then return end
+    --: any
+    local pr_any = pr
+    local ok_a, ar = pcall(ann_mod.parse_annotations, pr_any.lexer.annotations, ctx.pool, rel_path)
+    if not ok_a then return end
+
+    -- Temporarily swap ctx.ann and ctx.filename so process_type_decls operates
+    -- on the loaded file's annotations and reports errors under the right filename.
+    local saved_ann      = ctx.ann
+    local saved_filename = ctx.filename
+    ctx.ann      = ar
+    ctx.filename = rel_path
+    process_type_decls(ctx)
+    ctx.ann      = saved_ann
+    ctx.filename = saved_filename
+end
+
+-- ---------------------------------------------------------------------------
 -- Type declaration processing
 -- ---------------------------------------------------------------------------
 
 --: (Ctx) -> { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... } | nil
-local function process_type_decls(ctx)
+process_type_decls = function(ctx)
     if not ctx.ann then return nil end
     -- After this guard, ctx.ann is narrowed to AnnResult (field_presence narrowing on ctx).
     local ann = ctx.ann
@@ -2969,6 +3014,10 @@ local function process_type_decls(ctx)
     --: any
     local decl_lines = {}
     local module_decls = {} --: { [integer]: { kind: integer, type_id: integer, mod_name: string, ... }, ... }
+    -- require_decl_lines: result record → source line (same pattern as decl_lines)
+    --: any
+    local require_decl_lines = {}
+    local require_decls = {} --: { [integer]: { kind: integer, mod_name: string, ... }, ... }
     for line, result in pairs(ann.results) do
         --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, mod_name: string, ... }
         local result = result
@@ -2977,14 +3026,31 @@ local function process_type_decls(ctx)
             decl_lines[result] = line
         elseif result.kind == ANN_MODULE then
             module_decls[#module_decls + 1] = result
+        elseif result.kind == ANN_REQUIRE then
+            require_decls[#require_decls + 1] = result
+            require_decl_lines[result] = line
         end
     end
     -- Sort by source line so forward references resolve in file order.
     table.sort(decls, function(a, b) return (decl_lines[a] or 0) < (decl_lines[b] or 0) end)
+    -- Sort require_decls by line so they load in source order.
+    if #require_decls > 1 then
+        local rl = require_decl_lines
+        table.sort(require_decls, function(a, b) return (rl[a] or 0) < (rl[b] or 0) end)
+    end
 
     -- Identify decls whose body is a bare TAG_TYPEOF — these must be deferred until after
     -- gen_block, because typeof looks up value bindings that don't exist during prescan.
     local typeof_decls = {} --: { [integer]: { r: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, ... }, line: integer, ... }, ... }
+
+    -- Pass -1: load --:: require "mod.path" declaration files before the file's own
+    -- declarations are processed.  This ensures types declared in the loaded files are
+    -- in scope when Pass 0–2b resolve the current file's type aliases and variables.
+    for _, r in ipairs(require_decls) do
+        --: any
+        local ra = r
+        load_decl_file(ctx, ra.mod_name)
+    end
 
     -- Pass 0: populate ctx.module_types from --:: module declarations before any type
     -- alias bodies are resolved.  This ensures $Require<"mod"> annotations in type
@@ -3272,8 +3338,8 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
     if not parent_scope then
         local prelude = require("lib.type.static.prelude")
         -- Use populate_checker when self-checking typechecker source files so that
-        -- ctx.d.lua declarations (report, infer_expr_multi, etc.) are in scope.
-        -- For all other files, use populate (stdlib.d.lua only) to avoid leaking
+        -- ctx_types.lua declarations (report, infer_expr_multi, etc.) are in scope.
+        -- For all other files, use populate (stdlib_types.lua only) to avoid leaking
         -- typechecker-internal names into user file scope.
         local fn = filename or ""
         if fn:find("lib/type/static/", 1, true) or fn:find("lib\\type\\static\\", 1, true) then

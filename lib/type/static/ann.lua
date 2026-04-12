@@ -1141,6 +1141,11 @@ function M.parse_annotations(annotations, pool, filename)
                     local type_id = parse_type(s)
                     return { kind = defs.ANN_MODULE, mod_name = mod_name, type_id = type_id }
                 end
+                -- require "mod.path" — load a declaration file into scope
+                if word == "require" then
+                    local mod_name = scan_string(s)
+                    return { kind = defs.ANN_REQUIRE, mod_name = mod_name }
+                end
                 -- unseal Name — rebinds opaque variable to its inner type in current scope
                 if word == "unseal" then
                     local name = scan_word(s)
