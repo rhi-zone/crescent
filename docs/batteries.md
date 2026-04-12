@@ -398,6 +398,25 @@ parent refs. `find`, `find_all`, `xpath_simple` (`a/b/c` + `//tag`), `text_conte
 `attr`. `serialize(node, opts)` (indent, XML declaration). Builder: `element/text_node/
 comment_node`. `escape`/`unescape` (entity + numeric refs). `ns_split`. 148 assertions.
 
+**Huffman** (`lib/huffman`) — **implemented**. Huffman encoding/decoding. `build_tree(freqs)`,
+`build_codes(tree)` (bitstring codes). `encode_symbols`/`decode_symbols` (bit-packed bytes).
+`compress`/`decompress` (byte-level Huffman on strings). Canonical Huffman codes
+(`canonical_codes`). `code_lengths`, `entropy` (Shannon), `expected_length`. Deterministic
+tie-breaking for reproducible codes. `serialize_freqs`/`deserialize_freqs`. 127 assertions.
+
+**RLE** (`lib/rle`) — **implemented**. Run-length encoding + classical compression pipeline.
+Basic RLE (count+byte pairs), PCX-style (control-byte escape). BWT (Burrows-Wheeler
+Transform) + inverse. MTF (Move-To-Front) encode/decode. Combined pipeline: BWT→MTF→RLE
+`compress`/`decompress` (like bzip2 core). Delta encoding for number arrays and byte strings.
+190 assertions.
+
+**Decimal** (`lib/decimal`) — **implemented**. Exact decimal arithmetic. `{coeff, exp}`
+representation (value = coeff × 10^exp). `new(value)` from number/string/scientific
+notation. `add/sub/mul/div`. `round(places, mode)`: half_up/half_down/half_even/floor/ceil/
+truncate. `cmp/eq/lt/le`. `to_string/to_number/to_integer/scale`. `is_zero/is_negative/sign`.
+Metamethods: `+`, `-`, `*`, `/`, `==`, `<`, `<=`. `sum`, `average`. Classic `0.1+0.2==0.3`
+passes. 127 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
