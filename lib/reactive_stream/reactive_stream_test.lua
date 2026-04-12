@@ -1,0 +1,771 @@
+if not package.path:find("./?/init.lua", 1, true) then
+  package.path = "./?/init.lua;" .. package.path
+end
+
+local T = require("lib.test.assert")
+local S = require("lib.reactive_stream")
+
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+
+local function arr_eq(a, b)
+  if #a ~= #b then return false end
+  for i = 1, #a do
+    if a[i] ~= b[i] then return false end
+  end
+  return true
+end
+
+-- ── from_array ────────────────────────────────────────────────────────────────
+
+T.describe("from_array", function()
+  T.it("empty array yields empty stream", function()
+    local r = S.from_array({}):to_array()
+    T.eq(#r, 0)
+  end)
+  T.it("collects in order", function()
+    local r = S.from_array({ 1, 2, 3 }):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1], 1)
+    T.eq(r[2], 2)
+    T.eq(r[3], 3)
+  end)
+  T.it("single element", function()
+    local r = S.from_array({ 42 }):to_array()
+    T.eq(#r, 1)
+    T.eq(r[1], 42)
+  end)
+end)
+
+-- ── range ─────────────────────────────────────────────────────────────────────
+
+T.describe("range", function()
+  T.it("1 to 10 inclusive", function()
+    local r = S.range(1, 10):to_array()
+    T.eq(#r, 10)
+    T.eq(r[1], 1)
+    T.eq(r[10], 10)
+  end)
+  T.it("step 2", function()
+    local r = S.range(1, 9, 2):to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 1)
+    T.eq(r[5], 9)
+  end)
+  T.it("descending range", function()
+    local r = S.range(5, 1, -1):to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 5)
+    T.eq(r[5], 1)
+  end)
+  T.it("empty range step > 0 when start > stop", function()
+    local r = S.range(5, 3):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+-- ── of / empty ────────────────────────────────────────────────────────────────
+
+T.describe("of", function()
+  T.it("single value", function()
+    local r = S.of(99):to_array()
+    T.eq(#r, 1)
+    T.eq(r[1], 99)
+  end)
+  T.it("multiple values", function()
+    local r = S.of(10, 20, 30):to_array()
+    T.eq(#r, 3)
+    T.eq(r[2], 20)
+  end)
+end)
+
+T.describe("empty", function()
+  T.it("yields nothing", function()
+    local r = S.empty():to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+-- ── repeat_ ───────────────────────────────────────────────────────────────────
+
+T.describe("repeat_", function()
+  T.it("finite repeat", function()
+    local r = S.repeat_("x", 4):to_array()
+    T.eq(#r, 4)
+    T.eq(r[1], "x")
+    T.eq(r[4], "x")
+  end)
+  T.it("infinite repeat truncated by take", function()
+    local r = S.repeat_(7):take(3):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1], 7)
+    T.eq(r[3], 7)
+  end)
+end)
+
+-- ── generate ──────────────────────────────────────────────────────────────────
+
+T.describe("generate", function()
+  T.it("fibonacci first 10 terms", function()
+    -- fn(state) -> value, new_state where state = {a, b}
+    local r = S.generate(function(st)
+      return st[1], { st[2], st[1] + st[2] }
+    end, { 1, 1 }):take(10):to_array()
+    T.eq(#r, 10)
+    T.eq(r[1], 1)
+    T.eq(r[2], 1)
+    T.eq(r[3], 2)
+    T.eq(r[4], 3)
+    T.eq(r[5], 5)
+    T.eq(r[6], 8)
+    T.eq(r[7], 13)
+    T.eq(r[8], 21)
+    T.eq(r[9], 34)
+    T.eq(r[10], 55)
+  end)
+  T.it("terminates when fn returns nil", function()
+    -- countdown from 3 to 1
+    local r = S.generate(function(n)
+      if n < 1 then return nil end
+      return n, n - 1
+    end, 3):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1], 3)
+    T.eq(r[3], 1)
+  end)
+end)
+
+-- ── chars / lines ─────────────────────────────────────────────────────────────
+
+T.describe("chars", function()
+  T.it("splits string into characters", function()
+    local r = S.chars("hello"):to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], "h")
+    T.eq(r[5], "o")
+  end)
+  T.it("empty string yields nothing", function()
+    local r = S.chars(""):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+T.describe("lines", function()
+  T.it("splits by newline", function()
+    local r = S.lines("a\nb\nc"):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1], "a")
+    T.eq(r[2], "b")
+    T.eq(r[3], "c")
+  end)
+  T.it("trailing newline", function()
+    local r = S.lines("a\nb\n"):to_array()
+    T.eq(#r, 2)
+    T.eq(r[1], "a")
+    T.eq(r[2], "b")
+  end)
+  T.it("single line no newline", function()
+    local r = S.lines("hello"):to_array()
+    T.eq(#r, 1)
+    T.eq(r[1], "hello")
+  end)
+end)
+
+-- ── map ───────────────────────────────────────────────────────────────────────
+
+T.describe("map", function()
+  T.it("doubles each element", function()
+    local r = S.from_array({ 1, 2, 3, 4 }):map(function(x) return x * 2 end):to_array()
+    T.eq(#r, 4)
+    T.eq(r[1], 2)
+    T.eq(r[4], 8)
+  end)
+  T.it("string transform", function()
+    local r = S.from_array({ "a", "b" }):map(string.upper):to_array()
+    T.eq(r[1], "A")
+    T.eq(r[2], "B")
+  end)
+end)
+
+-- ── filter ────────────────────────────────────────────────────────────────────
+
+T.describe("filter", function()
+  T.it("keeps even numbers", function()
+    local r = S.range(1, 10):filter(function(x) return x % 2 == 0 end):to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 2)
+    T.eq(r[5], 10)
+  end)
+  T.it("all filtered out", function()
+    local r = S.range(1, 5):filter(function(x) return x > 100 end):to_array()
+    T.eq(#r, 0)
+  end)
+  T.it("none filtered out", function()
+    local r = S.range(1, 3):filter(function(x) return x > 0 end):to_array()
+    T.eq(#r, 3)
+  end)
+end)
+
+-- ── take / drop ───────────────────────────────────────────────────────────────
+
+T.describe("take", function()
+  T.it("first 3 of 10", function()
+    local r = S.range(1, 10):take(3):to_array()
+    T.eq(#r, 3)
+    T.eq(r[3], 3)
+  end)
+  T.it("take 0 yields nothing", function()
+    local r = S.range(1, 10):take(0):to_array()
+    T.eq(#r, 0)
+  end)
+  T.it("take more than available", function()
+    local r = S.range(1, 3):take(10):to_array()
+    T.eq(#r, 3)
+  end)
+  T.it("lazy — infinite stream", function()
+    local r = S.repeat_(1):take(5):to_array()
+    T.eq(#r, 5)
+  end)
+end)
+
+T.describe("drop", function()
+  T.it("skip first 3", function()
+    local r = S.range(1, 5):drop(3):to_array()
+    T.eq(#r, 2)
+    T.eq(r[1], 4)
+    T.eq(r[2], 5)
+  end)
+  T.it("drop 0 keeps all", function()
+    local r = S.range(1, 3):drop(0):to_array()
+    T.eq(#r, 3)
+  end)
+  T.it("drop all", function()
+    local r = S.range(1, 3):drop(3):to_array()
+    T.eq(#r, 0)
+  end)
+  T.it("drop more than length", function()
+    local r = S.range(1, 3):drop(10):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+-- ── take_while / drop_while ───────────────────────────────────────────────────
+
+T.describe("take_while", function()
+  T.it("takes while less than 5", function()
+    local r = S.range(1, 10):take_while(function(x) return x < 5 end):to_array()
+    T.eq(#r, 4)
+    T.eq(r[4], 4)
+  end)
+  T.it("none taken when pred false from start", function()
+    local r = S.range(1, 5):take_while(function(x) return x > 100 end):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+T.describe("drop_while", function()
+  T.it("drops while less than 4", function()
+    local r = S.range(1, 6):drop_while(function(x) return x < 4 end):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1], 4)
+    T.eq(r[3], 6)
+  end)
+  T.it("none dropped when pred false from start", function()
+    local r = S.range(1, 3):drop_while(function(x) return x > 100 end):to_array()
+    T.eq(#r, 3)
+  end)
+end)
+
+-- ── zip / zip_with ────────────────────────────────────────────────────────────
+
+T.describe("zip", function()
+  T.it("parallel pairing", function()
+    local r = S.from_array({ 1, 2, 3 }):zip(S.from_array({ "a", "b", "c" })):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1][1], 1)
+    T.eq(r[1][2], "a")
+    T.eq(r[3][1], 3)
+    T.eq(r[3][2], "c")
+  end)
+  T.it("stops at shortest", function()
+    local r = S.from_array({ 1, 2, 3 }):zip(S.from_array({ "a", "b" })):to_array()
+    T.eq(#r, 2)
+  end)
+end)
+
+T.describe("zip_with", function()
+  T.it("sums pairs", function()
+    local r = S.from_array({ 1, 2, 3 }):zip_with(
+      S.from_array({ 10, 20, 30 }),
+      function(a, b) return a + b end
+    ):to_array()
+    T.eq(#r, 3)
+    T.eq(r[1], 11)
+    T.eq(r[2], 22)
+    T.eq(r[3], 33)
+  end)
+end)
+
+-- ── flat_map ──────────────────────────────────────────────────────────────────
+
+T.describe("flat_map", function()
+  T.it("each element to a stream", function()
+    local r = S.from_array({ 1, 2, 3 }):flat_map(function(x)
+      return S.from_array({ x, x * 10 })
+    end):to_array()
+    T.eq(#r, 6)
+    T.eq(r[1], 1)
+    T.eq(r[2], 10)
+    T.eq(r[3], 2)
+    T.eq(r[4], 20)
+    T.eq(r[5], 3)
+    T.eq(r[6], 30)
+  end)
+  T.it("empty inner streams", function()
+    local r = S.from_array({ 1, 2, 3 }):flat_map(function(_)
+      return S.empty()
+    end):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+-- ── enumerate ─────────────────────────────────────────────────────────────────
+
+T.describe("enumerate", function()
+  T.it("index-value pairs 1-indexed", function()
+    local r = S.from_array({ "a", "b", "c" }):enumerate():to_array()
+    T.eq(#r, 3)
+    T.eq(r[1][1], 1)
+    T.eq(r[1][2], "a")
+    T.eq(r[3][1], 3)
+    T.eq(r[3][2], "c")
+  end)
+end)
+
+-- ── flatten ───────────────────────────────────────────────────────────────────
+
+T.describe("flatten", function()
+  T.it("stream of streams", function()
+    local r = S.from_array({
+      S.from_array({ 1, 2 }),
+      S.from_array({ 3, 4 }),
+      S.from_array({ 5 }),
+    }):flatten():to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 1)
+    T.eq(r[5], 5)
+  end)
+end)
+
+-- ── chunk ─────────────────────────────────────────────────────────────────────
+
+T.describe("chunk", function()
+  T.it("groups of 3", function()
+    local r = S.range(1, 9):chunk(3):to_array()
+    T.eq(#r, 3)
+    T.ok(arr_eq(r[1], { 1, 2, 3 }))
+    T.ok(arr_eq(r[2], { 4, 5, 6 }))
+    T.ok(arr_eq(r[3], { 7, 8, 9 }))
+  end)
+  T.it("last chunk smaller", function()
+    local r = S.range(1, 5):chunk(3):to_array()
+    T.eq(#r, 2)
+    T.ok(arr_eq(r[1], { 1, 2, 3 }))
+    T.ok(arr_eq(r[2], { 4, 5 }))
+  end)
+  T.it("empty stream", function()
+    local r = S.empty():chunk(3):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+-- ── window ────────────────────────────────────────────────────────────────────
+
+T.describe("window", function()
+  T.it("sliding window size 3 over 5 elements", function()
+    local r = S.range(1, 5):window(3):to_array()
+    T.eq(#r, 3)
+    T.ok(arr_eq(r[1], { 1, 2, 3 }))
+    T.ok(arr_eq(r[2], { 2, 3, 4 }))
+    T.ok(arr_eq(r[3], { 3, 4, 5 }))
+  end)
+  T.it("window larger than stream → single window", function()
+    local r = S.range(1, 3):window(3):to_array()
+    T.eq(#r, 1)
+    T.ok(arr_eq(r[1], { 1, 2, 3 }))
+  end)
+  T.it("window too big → no windows", function()
+    local r = S.range(1, 2):window(3):to_array()
+    T.eq(#r, 0)
+  end)
+end)
+
+-- ── distinct / unique ─────────────────────────────────────────────────────────
+
+T.describe("distinct (consecutive dedup)", function()
+  T.it("removes consecutive duplicates", function()
+    local r = S.from_array({ 1, 1, 2, 2, 3, 1, 1 }):distinct():to_array()
+    T.eq(#r, 4)
+    T.eq(r[1], 1)
+    T.eq(r[2], 2)
+    T.eq(r[3], 3)
+    T.eq(r[4], 1)
+  end)
+  T.it("no duplicates unchanged", function()
+    local r = S.from_array({ 1, 2, 3 }):distinct():to_array()
+    T.eq(#r, 3)
+  end)
+end)
+
+T.describe("unique (global dedup)", function()
+  T.it("removes all duplicates", function()
+    local r = S.from_array({ 1, 2, 1, 3, 2, 4 }):unique():to_array()
+    T.eq(#r, 4)
+    T.eq(r[1], 1)
+    T.eq(r[2], 2)
+    T.eq(r[3], 3)
+    T.eq(r[4], 4)
+  end)
+end)
+
+-- ── sort / reverse ────────────────────────────────────────────────────────────
+
+T.describe("sort", function()
+  T.it("default ascending sort", function()
+    local r = S.from_array({ 5, 1, 3, 2, 4 }):sort():to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 1)
+    T.eq(r[5], 5)
+  end)
+  T.it("custom comparator descending", function()
+    local r = S.from_array({ 3, 1, 4, 1, 5 }):sort(function(a, b) return a > b end):to_array()
+    T.eq(r[1], 5)
+    T.eq(r[5], 1)
+  end)
+end)
+
+T.describe("reverse", function()
+  T.it("reverses order", function()
+    local r = S.from_array({ 1, 2, 3, 4, 5 }):reverse():to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 5)
+    T.eq(r[5], 1)
+  end)
+end)
+
+-- ── concat (method) ───────────────────────────────────────────────────────────
+
+T.describe("concat (method)", function()
+  T.it("one stream then another", function()
+    local r = S.from_array({ 1, 2 }):concat(S.from_array({ 3, 4, 5 })):to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 1)
+    T.eq(r[5], 5)
+  end)
+  T.it("concat with empty", function()
+    local r = S.from_array({ 1, 2 }):concat(S.empty()):to_array()
+    T.eq(#r, 2)
+  end)
+end)
+
+-- ── fold / reduce ─────────────────────────────────────────────────────────────
+
+T.describe("fold", function()
+  T.it("sum via fold", function()
+    local r = S.range(1, 5):fold(function(acc, v) return acc + v end, 0)
+    T.eq(r, 15)
+  end)
+  T.it("string concat via fold", function()
+    local r = S.from_array({ "a", "b", "c" }):fold(function(acc, v) return acc .. v end, "")
+    T.eq(r, "abc")
+  end)
+end)
+
+T.describe("reduce", function()
+  T.it("max via reduce", function()
+    local r = S.from_array({ 3, 1, 4, 1, 5, 9 }):reduce(function(a, b) return a > b and a or b end)
+    T.eq(r, 9)
+  end)
+  T.it("reduce on single element", function()
+    local r = S.of(42):reduce(function(a, b) return a + b end)
+    T.eq(r, 42)
+  end)
+  T.it("reduce on empty returns nil", function()
+    local r = S.empty():reduce(function(a, b) return a + b end)
+    T.eq(r, nil)
+  end)
+end)
+
+-- ── sum / count ───────────────────────────────────────────────────────────────
+
+T.describe("sum", function()
+  T.it("sums numbers", function()
+    T.eq(S.range(1, 100):sum(), 5050)
+  end)
+  T.it("empty sum is 0", function()
+    T.eq(S.empty():sum(), 0)
+  end)
+end)
+
+T.describe("count", function()
+  T.it("counts elements", function()
+    T.eq(S.range(1, 10):count(), 10)
+  end)
+  T.it("empty count is 0", function()
+    T.eq(S.empty():count(), 0)
+  end)
+end)
+
+-- ── first / last ──────────────────────────────────────────────────────────────
+
+T.describe("first", function()
+  T.it("returns first element", function()
+    T.eq(S.range(5, 10):first(), 5)
+  end)
+  T.it("returns nil for empty stream", function()
+    T.eq(S.empty():first(), nil)
+  end)
+end)
+
+T.describe("last", function()
+  T.it("returns last element", function()
+    T.eq(S.range(1, 7):last(), 7)
+  end)
+  T.it("returns nil for empty stream", function()
+    T.eq(S.empty():last(), nil)
+  end)
+end)
+
+-- ── min / max ─────────────────────────────────────────────────────────────────
+
+T.describe("min", function()
+  T.it("finds minimum", function()
+    T.eq(S.from_array({ 5, 3, 8, 1, 4 }):min(), 1)
+  end)
+  T.it("empty returns nil", function()
+    T.eq(S.empty():min(), nil)
+  end)
+  T.it("custom comparator (max-heap → finds max)", function()
+    -- cmp(v, m) returns true when v should replace m
+    -- so cmp = v > m finds the maximum
+    local r = S.from_array({ 5, 3, 8, 1, 4 }):min(function(v, m) return v > m end)
+    T.eq(r, 8)
+  end)
+end)
+
+T.describe("max", function()
+  T.it("finds maximum", function()
+    T.eq(S.from_array({ 5, 3, 8, 1, 4 }):max(), 8)
+  end)
+  T.it("empty returns nil", function()
+    T.eq(S.empty():max(), nil)
+  end)
+end)
+
+-- ── any / all ─────────────────────────────────────────────────────────────────
+
+T.describe("any", function()
+  T.it("true when any element matches", function()
+    T.ok(S.range(1, 10):any(function(x) return x == 5 end))
+  end)
+  T.it("false when none match", function()
+    T.ok(not S.range(1, 10):any(function(x) return x > 100 end))
+  end)
+  T.it("false on empty stream", function()
+    T.ok(not S.empty():any(function(_) return true end))
+  end)
+end)
+
+T.describe("all", function()
+  T.it("true when all match", function()
+    T.ok(S.range(1, 5):all(function(x) return x > 0 end))
+  end)
+  T.it("false when any doesn't match", function()
+    T.ok(not S.range(1, 5):all(function(x) return x < 4 end))
+  end)
+  T.it("true on empty stream", function()
+    T.ok(S.empty():all(function(_) return false end))
+  end)
+end)
+
+-- ── find ──────────────────────────────────────────────────────────────────────
+
+T.describe("find", function()
+  T.it("finds first matching element", function()
+    T.eq(S.range(1, 10):find(function(x) return x > 5 end), 6)
+  end)
+  T.it("returns nil when not found", function()
+    T.eq(S.range(1, 5):find(function(x) return x > 100 end), nil)
+  end)
+end)
+
+-- ── join ──────────────────────────────────────────────────────────────────────
+
+T.describe("join", function()
+  T.it("concatenates with separator", function()
+    T.eq(S.from_array({ "a", "b", "c" }):join(", "), "a, b, c")
+  end)
+  T.it("default separator is empty string", function()
+    T.eq(S.chars("hello"):join(), "hello")
+  end)
+  T.it("empty stream joins to empty string", function()
+    T.eq(S.empty():join(","), "")
+  end)
+end)
+
+-- ── to_set / to_map ───────────────────────────────────────────────────────────
+
+T.describe("to_set", function()
+  T.it("creates boolean membership map", function()
+    local s = S.from_array({ "a", "b", "c", "a" }):to_set()
+    T.ok(s["a"])
+    T.ok(s["b"])
+    T.ok(s["c"])
+  end)
+end)
+
+T.describe("to_map", function()
+  T.it("key_fn only — identity values", function()
+    local m = S.from_array({ 1, 2, 3 }):to_map(function(x) return x * 10 end)
+    T.eq(m[10], 1)
+    T.eq(m[20], 2)
+    T.eq(m[30], 3)
+  end)
+  T.it("key_fn and val_fn", function()
+    local m = S.from_array({ "foo", "bar" }):to_map(
+      function(s) return s end,
+      function(s) return #s end
+    )
+    T.eq(m["foo"], 3)
+    T.eq(m["bar"], 3)
+  end)
+end)
+
+-- ── partition ─────────────────────────────────────────────────────────────────
+
+T.describe("partition", function()
+  T.it("splits into two arrays", function()
+    local t, f = S.range(1, 6):partition(function(x) return x % 2 == 0 end)
+    T.eq(#t, 3)
+    T.eq(#f, 3)
+    T.eq(t[1], 2)
+    T.eq(f[1], 1)
+  end)
+end)
+
+-- ── group_by ──────────────────────────────────────────────────────────────────
+
+T.describe("group_by", function()
+  T.it("groups numbers by parity", function()
+    local g = S.range(1, 6):group_by(function(x)
+      return x % 2 == 0 and "even" or "odd"
+    end)
+    T.eq(#g["even"], 3)
+    T.eq(#g["odd"], 3)
+    T.eq(g["even"][1], 2)
+    T.eq(g["odd"][1], 1)
+  end)
+  T.it("group by first letter", function()
+    local g = S.from_array({ "ant", "ape", "bat", "bee" }):group_by(function(s) return s:sub(1, 1) end)
+    T.eq(#g["a"], 2)
+    T.eq(#g["b"], 2)
+  end)
+end)
+
+-- ── M.concat (multi-stream) ───────────────────────────────────────────────────
+
+T.describe("M.concat", function()
+  T.it("two streams", function()
+    local r = S.concat(S.from_array({ 1, 2 }), S.from_array({ 3, 4 })):to_array()
+    T.eq(#r, 4)
+    T.eq(r[1], 1)
+    T.eq(r[4], 4)
+  end)
+  T.it("three streams", function()
+    local r = S.concat(S.of(1), S.of(2), S.of(3)):to_array()
+    T.eq(#r, 3)
+    T.eq(r[2], 2)
+  end)
+  T.it("with empty streams", function()
+    local r = S.concat(S.empty(), S.of(1), S.empty(), S.of(2)):to_array()
+    T.eq(#r, 2)
+    T.eq(r[1], 1)
+    T.eq(r[2], 2)
+  end)
+end)
+
+-- ── M.zip (multi-stream) ──────────────────────────────────────────────────────
+
+T.describe("M.zip", function()
+  T.it("zips three streams into arrays", function()
+    local r = S.zip(
+      S.from_array({ 1, 2, 3 }),
+      S.from_array({ 4, 5, 6 }),
+      S.from_array({ 7, 8, 9 })
+    ):to_array()
+    T.eq(#r, 3)
+    T.ok(arr_eq(r[1], { 1, 4, 7 }))
+    T.ok(arr_eq(r[3], { 3, 6, 9 }))
+  end)
+  T.it("stops at shortest", function()
+    local r = S.zip(S.of(1, 2, 3), S.of("a", "b")):to_array()
+    T.eq(#r, 2)
+  end)
+end)
+
+-- ── M.merge ───────────────────────────────────────────────────────────────────
+
+T.describe("M.merge", function()
+  T.it("round-robin from two equal-length streams", function()
+    local r = S.merge(S.from_array({ 1, 2 }), S.from_array({ 3, 4 })):to_array()
+    -- Round-robin: 1, 3, 2, 4
+    T.eq(#r, 4)
+    -- All values present
+    local s = {}
+    for _, v in ipairs(r) do s[v] = true end
+    T.ok(s[1])
+    T.ok(s[2])
+    T.ok(s[3])
+    T.ok(s[4])
+  end)
+  T.it("unequal length streams", function()
+    local r = S.merge(S.of(1), S.of(2, 3, 4)):to_array()
+    T.eq(#r, 4)
+  end)
+end)
+
+-- ── Lazy evaluation ───────────────────────────────────────────────────────────
+
+T.describe("lazy evaluation", function()
+  T.it("take from infinite stream", function()
+    local r = S.generate(function(n) return n, n + 1 end, 0):take(100):to_array()
+    T.eq(#r, 100)
+    T.eq(r[1], 0)
+    T.eq(r[100], 99)
+  end)
+  T.it("filter on infinite stream with take", function()
+    local r = S.generate(function(n) return n, n + 1 end, 1)
+      :filter(function(x) return x % 3 == 0 end)
+      :take(5)
+      :to_array()
+    T.eq(#r, 5)
+    T.eq(r[1], 3)
+    T.eq(r[2], 6)
+    T.eq(r[5], 15)
+  end)
+  T.it("chained map/filter/take does not blow up", function()
+    local r = S.repeat_(1)
+      :map(function(x) return x + 1 end)
+      :filter(function(x) return x > 0 end)
+      :take(50)
+      :to_array()
+    T.eq(#r, 50)
+  end)
+end)
+
+-- ── _tier ─────────────────────────────────────────────────────────────────────
+
+T.describe("module metadata", function()
+  T.it("_tier is pure", function()
+    T.eq(S._tier, "pure")
+  end)
+end)
