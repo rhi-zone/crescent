@@ -958,6 +958,15 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Locale** (`lib/locale`) — **implemented**. i18n/l10n library with message catalogs, plural forms, and number formatting.
 `M.locale(str)` → `{language, region}`. `M.catalog(locale)` — `:add/add_plural/add_all/t(key,params)/tn(key,n,params)`. `M.plural_rule(locale)` — CLDR rules for 15+ languages (en/fr/de/ru/pl/ar/ja/zh/ko...). `M.format_number/parse_number` — locale thousands/decimal separators. `M.format_currency` — 25 currencies with symbol position. `M.format_date` — full/long/medium/short styles. `M.format_relative` — "3 minutes ago", "in 5 days". `M.collate`, `M.to_upper/lower`, `M.word_count`, `M.truncate`. 103 assertions.
 
+**Network Simulation** (`lib/network_sim`) — **implemented**. Deterministic network simulator with fault injection for testing distributed systems.
+`M.network(opts)` — creates a seeded logical-time network. Node registration/removal, `send`/`broadcast`, `tick(n)` to advance time and deliver messages. Fault injection: `partition`/`heal`/`partition_all`, `set_latency`, `set_loss_rate`, `set_duplicate_rate`. Reliable vs unreliable sends. `pending()`/`history()` introspection. `M.reliable_broadcast` and `M.majority_vote` consensus helpers. 84 assertions.
+
+**HAMT** (`lib/hamt`) — **implemented**. Persistent Hash Array Mapped Trie — immutable hash map with structural sharing.
+`hamt.new()` → empty map. `:set(k,v)` / `:get(k)` / `:delete(k)` / `:has(k)` / `:size()` — all return new maps (path copying). `:pairs()` iterator. `:to_table()` / `hamt.from_table(t)`. `hamt.merge(m1, m2)` (second wins). 32-way branching (5 bits/level), FNV-1a hash, collision nodes. Keys: strings or numbers. 196 assertions.
+
+**Parser Combinators** (`lib/parser_combinators`) — **implemented**. Composable parser combinator library.
+Primitives: `lit`, `char`, `char_class`, `any_char`, `digit`, `letter`, `whitespace`, `eof`, `succeed`, `fail`. Combinators: `seq`, `choice`, `many`, `many1`, `optional`, `skip`, `map`, `between`, `sep_by`, `sep_by1`, `lazy` (for recursive grammars), `not_followed_by`. Runners: `P.parse(parser, input)` / `P.parse_all(parser, input)`. Error messages include position. 178 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
