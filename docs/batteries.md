@@ -739,6 +739,37 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**Vigenère** (`lib/vigenere`) — **implemented**. Classical cipher suite with analysis tools.
+Ciphers: `caesar_encrypt`/`decrypt`, `rot13`, `atbash`, `vigenere_encrypt`/`decrypt`,
+`beaufort_encrypt`/`decrypt` (self-reciprocal), `autokey_encrypt`/`decrypt`, `playfair_encrypt`/
+`decrypt` (5×5 key square, J→I merger, X padding). Analysis: `letter_frequencies`,
+`chi_squared`, `index_of_coincidence` (0.065 English / 0.038 random), `friedman_test`,
+`kasiski_test`. Cracking: `crack_caesar` (brute-force 26 shifts), `crack_vigenere_keylen`
+(IC cosets), `crack_vigenere`. 157 assertions.
+
+**Disjoint Set** (`lib/disjoint_set`) — **implemented**. Union-Find with four variants.
+`DSU.new(n)` — basic path compression + union by rank; `find`, `union`, `connected`,
+`component_size`, `count`, `components`. `DSU.named()` — string-keyed auto-creating elements;
+`component`, `components` table. `DSU.persistent(n)` — union by rank without path compression,
+explicit undo stack; `save`/`restore` for backtracking. `DSU.weighted(n)` — XOR parity weights
+for bipartite detection; `merge`, `diff`, `is_bipartite`. 614 assertions.
+
+**Number Theory** (`lib/number_theory`) — **implemented**. Algorithms for mathematics and
+cryptography. Primality: `is_prime` (Miller-Rabin, deterministic), `next_prime`/`prev_prime`.
+Factorization: `factorize` (Pollard's rho + Brent), `factors`, `divisors`, `num_divisors`,
+`sum_divisors`. GCD: `gcd`, `lcm`, `gcd_ext`, `coprime`. Modular: `mod_pow`, `mod_inv`,
+`chinese_remainder` (CRT), `euler_phi`, `carmichael_lambda`. Properties: `is_perfect`,
+`is_abundant`, `is_square`, `is_power`, `isqrt`. `primes_up_to` (sieve), `jacobi`/`legendre`.
+212 assertions.
+
+**Decision Tree** (`lib/decision_tree`) — **implemented**. ID3/C4.5 decision tree classifier
+and random forest. `DT.train(dataset, opts)` with `algorithm="id3"|"c45"`, `max_depth`,
+`min_samples`, `features`. `tree:predict`, `predict_proba`, `predict_all`, `accuracy`.
+`feature_importance` (entropy reduction), `print`, `to_rules`, `serialize`/`deserialize`.
+`DT.prune` (reduced-error pruning). `DT.forest` — bootstrap + per-split random feature
+selection (`"sqrt"`, `"log2"`), majority vote, averaged probabilities. Classic tennis dataset
+tests. 102 assertions.
+
 **Shamir Secret Sharing** (`lib/shamir`) — **implemented**. Shamir's Secret Sharing (k-of-n
 threshold) in GF(256). Self-contained GF(256) with AES polynomial (log/exp tables, O(1)
 multiply). `split(secret, n, k)` builds a random degree-(k-1) polynomial per byte, evaluates
