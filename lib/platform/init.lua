@@ -162,6 +162,43 @@ local function make_tar_loader(entries)
 	end
 end
 
+-- validate_caps(manifest, entry_key, env) -> true | nil, err
+-- Checks that env contains all required caps declared in the manifest.
+-- env is the flat sandbox environment table (sandbox.env merges globals directly).
+-- Top-level caps use the shorthand { cap_name = "required" | "optional" }.
+-- Per-entrypoint caps use { cap_name = { type = string, required = bool } }.
+-- Returns nil, errmsg if any required cap is absent from env.
+local function validate_caps(manifest, entry_key, env)
+	local globals = env or {}
+
+	-- Top-level caps: { cap_name = "required" | "optional" }
+	local top_caps = manifest and manifest.caps
+	if top_caps then
+		for cap_name, cap_spec in pairs(top_caps) do
+			local is_required = cap_spec == "required" or cap_spec == true
+			if is_required and globals[cap_name] == nil then
+				return nil, "missing required cap: " .. tostring(cap_name) .. " (type: " .. tostring(cap_name) .. ")"
+			end
+		end
+	end
+
+	-- Per-entrypoint caps: { cap_name = { type = string, required = bool } }
+	local entry_map = manifest and manifest.entry
+	local entry_def = entry_map and entry_map[entry_key]
+	local entry_caps = type(entry_def) == "table" and entry_def.caps
+	if entry_caps then
+		for cap_name, cap_spec in pairs(entry_caps) do
+			local cap_type = type(cap_spec) == "table" and cap_spec.type or tostring(cap_name)
+			local is_required = type(cap_spec) == "table" and cap_spec.required ~= false or cap_spec == "required" or cap_spec == true
+			if is_required and globals[cap_name] == nil then
+				return nil, "missing required cap: " .. tostring(cap_name) .. " (type: " .. tostring(cap_type) .. ")"
+			end
+		end
+	end
+
+	return true
+end
+
 -- run_entry(app, entry_key, env, opts?) -> ok, result | err
 -- Looks up entry_key in app.manifest.entry, finds the file in app.entries,
 -- injects a tar-backed require loader into env, and runs the entrypoint.
@@ -178,6 +215,11 @@ function M.run_entry(app, entry_key, env, opts)
 	local entry_path = type(entry_def) == "table" and entry_def.main or entry_def
 	if not entry_path then
 		return false, "platform: entry '" .. tostring(entry_key) .. "' has no 'main' field"
+	end
+
+	local caps_ok, caps_err = validate_caps(app.manifest, entry_key, env)
+	if not caps_ok then
+		return false, caps_err
 	end
 
 	local src = tar.get(app.entries, entry_path)

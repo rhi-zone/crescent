@@ -397,6 +397,81 @@ T.describe("platform.run_entry", function ()
 	end)
 end)
 
+-- ── cap validation ────────────────────────────────────────────────────────────
+
+T.describe("platform.run_entry cap validation", function ()
+	-- Helper: build an app with the given manifest and a trivial main.lua.
+	local function make_app(manifest)
+		local bytes = make_test_app({ ["main.lua"] = "return true" }, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		return app
+	end
+
+	T.it("required per-entry cap present → ok", function ()
+		local manifest = {
+			name = "app", version = "1.0.0",
+			entry = {
+				dom = {
+					main = "main.lua",
+					caps = { render = { type = "render", required = true } },
+				},
+			},
+		}
+		local app = make_app(manifest)
+		local env = sandbox.env(sandbox.stdlib, { globals = { render = {} } })
+		local ok, err = platform.run_entry(app, "dom", env)
+		T.ok(ok, tostring(err))
+	end)
+
+	T.it("required per-entry cap missing → error with cap name and type", function ()
+		local manifest = {
+			name = "app", version = "1.0.0",
+			entry = {
+				dom = {
+					main = "main.lua",
+					caps = { render = { type = "render", required = true } },
+				},
+			},
+		}
+		local app = make_app(manifest)
+		local env = sandbox.env(sandbox.stdlib)  -- no globals.render
+		local ok, err = platform.run_entry(app, "dom", env)
+		T.ok(not ok)
+		T.ok(err ~= nil and err:find("render"),   "err mentions cap name: " .. tostring(err))
+	end)
+
+	T.it("optional per-entry cap missing → ok", function ()
+		local manifest = {
+			name = "app", version = "1.0.0",
+			entry = {
+				dom = {
+					main = "main.lua",
+					caps = { llm_summary = { type = "llm", required = false } },
+				},
+			},
+		}
+		local app = make_app(manifest)
+		local env = sandbox.env(sandbox.stdlib)  -- no globals.llm_summary
+		local ok, err = platform.run_entry(app, "dom", env)
+		T.ok(ok, tostring(err))
+	end)
+
+	T.it("top-level required cap missing → error", function ()
+		local manifest = {
+			name = "app", version = "1.0.0",
+			caps  = { db = "required" },
+			entry = { headless = "main.lua" },
+		}
+		local app = make_app(manifest)
+		local env = sandbox.env(sandbox.stdlib)  -- no globals.db
+		local ok, err = platform.run_entry(app, "headless", env)
+		T.ok(not ok)
+		T.ok(err ~= nil and err:find("db"), "err mentions cap name: " .. tostring(err))
+	end)
+end)
+
 -- ── platform.load_and_run_entry ───────────────────────────────────────────────
 
 T.describe("platform.load_and_run_entry", function ()
