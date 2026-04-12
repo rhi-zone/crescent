@@ -502,6 +502,31 @@ references. `world:system(components, fn)` + `run(sys, ...)`. `count(name?)`. Ev
 `on`/`emit`; lifecycle events fire automatically (entity_created/destroyed, component_added/
 removed). `world:clear()`. Multiple independent worlds. 70 assertions.
 
+**Hierarchical State Machine** (`lib/state_machine_hsm`) — **implemented**. Statechart with
+nested states, entry/exit actions, LCA-based transition (parent states not re-fired on
+sibling transitions). Guards (`guard(ctx, event)`) and actions on transitions. Shallow
+and deep history states. Bubble-up event handling (child inherits parent handlers).
+`M.chart(spec):machine({context})`. `machine:send(event)`, `state()` (dot-notation path),
+`in_state(name)`. 42 assertions.
+
+**Complex Numbers** (`lib/complex`) — **implemented**. Complex arithmetic with operator
+overloading. `M.new(re, im?)`, `M.from_polar(r, theta)`, `M.i`/`M.zero`/`M.one`.
+Metamethods: `__add`, `__sub`, `__mul`, `__div`, `__pow`, `__unm`, `__eq`, `__tostring`.
+Mixed real/complex coercion. Methods: `abs()`, `arg()`, `conj()`, `sq()`, `polar()`.
+Functions: `sqrt`, `exp`, `log`, `sin`, `cos`, `tan`, `pow`, `roots`. 84 assertions.
+
+**Sparse Matrix** (`lib/sparse_matrix`) — **implemented**. Three independent formats:
+DOK (dictionary-of-keys, flat table keyed `i*2^20+j`), CSR (compressed sparse row, fast
+`mul_vec`), COO (triples list). `set`/`get`/`del`/`nnz`. Arithmetic: `+`, `*`, scalar.
+Transpose, `mul_vec`. Norms: 1, inf, Frobenius. `each()` iterator. `to_dense`/`from_dense`.
+Format conversions: `to_csr`/`to_dok`/`to_coo`. Zero-stripping maintained. 100 assertions.
+
+**Time Series** (`lib/time_series`) — **implemented**. Monotonic time series with binary search.
+`series:push(t,v)`, `at(t, interp?)` (exact or linear interpolation), `range(t0,t1)`,
+`stats(t0?,t1?)` (min/max/mean/stddev/count). `resample(interval, agg)`, `rolling(n, agg)`.
+`diff`, `cumsum`, `apply(fn)`, `normalize`. `downsample(n)` (LTTB algorithm). `outliers`
+(z-score/IQR). `M.merge(s1,s2,fn)`, `M.align(s1,s2)`. 79 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
