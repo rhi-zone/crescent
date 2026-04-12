@@ -739,6 +739,36 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**Graph Coloring** (`lib/graph_coloring`) — **implemented**. Graph coloring algorithms.
+`GC.greedy` (Welsh-Powell: sort by degree, assign lowest free color); `GC.dsatur` (saturation
+degree, generally fewer colors); `GC.backtrack(graph, k)` — exact k-coloring with pruning;
+`GC.chromatic_number` — minimum k via backtracking; `GC.valid`/`GC.num_colors`. `GC.is_bipartite`
+(BFS 2-coloring). `GC.edge_color` — greedy edge coloring (Δ or Δ+1 by Vizing's theorem).
+`GC.map_color` — 4-color backtracking. `GC.register_alloc`. Tested on K3/K4/C5/C6/Petersen.
+98 assertions.
+
+**Automata 2D** (`lib/automata_2d`) — **implemented**. Advanced 2D cellular automata.
+`CA.dense(w,h,opts)` — flat-array double-buffer grid; `opts.rule` accepts B/S strings or named
+rules; toroidal wrap. `CA.sparse(rule_fn)` — infinite hash-based grid (`"x,y"` string keys);
+efficient for sparse patterns. Built-in rules: `life`, `highlife`, `seeds`, `day_and_night`,
+`anneal`, `replicator`. `CA.parse_rule("B3/S23")`. RLE codec: `rle_decode`/`rle_encode`.
+Patterns: glider, blinker, block, glider_gun. 154 assertions.
+
+**Functional** (`lib/functional`) — **implemented**. Comprehensive FP toolkit. Array ops: `map`,
+`filter`, `reduce`/`reduce_right`, `flat_map`, `zip`/`zip_with`/`unzip`, `take`/`drop`/
+`take_while`/`drop_while`, `chunk`, `window`, `flatten`/`flatten1`, `unique`, `group_by`,
+`sort_by`, `count_by`, `partition`, `find`/`find_index`, `any`/`all`/`none`, `sum`/`product`/
+`min`/`max`. Combinators: `compose`/`pipe`, `memoize`, `once`, `partial`, `curry`, `flip`,
+`negate`, `juxt`, `tap`. Transducers: `map_xf`/`filter_xf`/`take_xf`/`comp_xf`/`transduce`.
+Iteration: `range`, `repeat_val`, `iterate`, `cycle`. 125 assertions.
+
+**Mini ORM** (`lib/mini_orm`) — **implemented**. In-memory ORM with query builder and migrations.
+`ORM.database()` + `db:model(name, schema)`. CRUD: `create`, `find`, `find_by`, `where`, `all`,
+`count`, `update`, `delete`, `update_where`, `delete_where`. Chainable query: `where_gt/lt/gte/lte/
+like`, `order_by`, `limit`/`offset`. Validation: required, unique, max_length, type. Relationships:
+`belongs_to`/`has_many` via foreign keys. Transactions: copy-on-write rollback. Migrations:
+`add_column`/`remove_column`/`rename_column` with version tracking. Dump/load. 104 assertions.
+
 **Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
 Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
 angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
