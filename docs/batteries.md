@@ -967,6 +967,9 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Parser Combinators** (`lib/parser_combinators`) — **implemented**. Composable parser combinator library.
 Primitives: `lit`, `char`, `char_class`, `any_char`, `digit`, `letter`, `whitespace`, `eof`, `succeed`, `fail`. Combinators: `seq`, `choice`, `many`, `many1`, `optional`, `skip`, `map`, `between`, `sep_by`, `sep_by1`, `lazy` (for recursive grammars), `not_followed_by`. Runners: `P.parse(parser, input)` / `P.parse_all(parser, input)`. Error messages include position. 178 assertions.
 
+**Finite Automata** (`lib/finite_automata`) — **implemented**. DFA/NFA construction, simulation, subset construction, and minimization.
+`FA.dfa(spec)` / `FA.nfa(spec)` — build automata from transition tables. `dfa:run(input)` — accepts string or symbol array. `dfa:trace(input)` — state sequence + accepted bool. `nfa:run(input)` — epsilon-closure simulation. `nfa:to_dfa()` — subset construction. `dfa:minimize()` — Hopcroft's algorithm. `FA.equivalent(dfa1, dfa2)` — product-DFA equivalence check. `dfa:enumerate(max_length)` — all accepted strings. Epsilon transitions via `""` key. 88 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
