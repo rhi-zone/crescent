@@ -949,6 +949,15 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Markup** (`lib/markup`) — **implemented**. Markdown/RST/AsciiDoc to HTML converter with shared AST.
 `M.markdown(text)` / `M.rst(text)` / `M.asciidoc(text)` → HTML. `M.parse_markdown/parse_rst/parse_asciidoc` → AST. `M.ast_to_html/ast_to_text`. Markdown: headings h1-h6, bold, italic, inline code, fenced code blocks, unordered/ordered lists (nested), links, images, blockquotes, horizontal rule. RST/AsciiDoc: headings, bold, italic, code. Shared Document AST. 128 assertions.
 
+**MIDI** (`lib/midi`) — **implemented**. MIDI file parser, encoder, track builder, and note utilities.
+`M.parse(data)` → `{format, ticks_per_beat, tracks}` with all SMF event types. `M.encode(midi_file)` → binary with running status optimization. `M.to_seconds` — tick→time with tempo map. `M.note_name/note_number/note_frequency`. `M.vlq_encode/decode`. TrackBuilder: `:note_on/off/note/tempo/program/text/build()`. FileBuilder: `:add_track/build()`. 293 assertions.
+
+**Testing Utils** (`lib/testing_utils`) — **implemented**. Mocks, spies, parameterized tests, benchmarks, and HTTP recorder.
+`M.spy(fn?)` / `M.stub(value)` / `M.mock(obj, method)` — call recording with `:restore()`. `M.each(cases, fn)` — parameterized test runner. `M.bench/bench_compare` — timing harness with warmup. `M.deep_eq(a, b)` → `bool, diff_path`. Matchers: `M.contains`, `M.matches`, `M.any_of`, `M.instance_of`. `M.fake_clock(start)` — injectable time with `:advance/tick/freeze/as_fn`. `M.http_recorder` — expectation-based HTTP mock client. 94 assertions.
+
+**Locale** (`lib/locale`) — **implemented**. i18n/l10n library with message catalogs, plural forms, and number formatting.
+`M.locale(str)` → `{language, region}`. `M.catalog(locale)` — `:add/add_plural/add_all/t(key,params)/tn(key,n,params)`. `M.plural_rule(locale)` — CLDR rules for 15+ languages (en/fr/de/ru/pl/ar/ja/zh/ko...). `M.format_number/parse_number` — locale thousands/decimal separators. `M.format_currency` — 25 currencies with symbol position. `M.format_date` — full/long/medium/short styles. `M.format_relative` — "3 minutes ago", "in 5 days". `M.collate`, `M.to_upper/lower`, `M.word_count`, `M.truncate`. 103 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
