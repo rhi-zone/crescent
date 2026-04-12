@@ -55,70 +55,56 @@ Self-contained, portable applications: logic + state + UI bundled into a single
 distributable artifact that runs anywhere LuaJIT runs. Zero setup, zero dependencies
 beyond the vendored runtime. The entire app is the artifact.
 
-Motivating targets: an LLM interaction platform (replacing SillyTavern, Talemate,
-Claude Code), a file manager, a markdown viewer, a unified workspace (Deskspace-in-Lua)
-— each dissolving an artificial app boundary. The long-term direction: every user-facing
-layer of the OS-as-Lua goal.
+Motivating targets: an LLM interaction app, a file manager, a markdown viewer, a
+unified workspace (Deskspace-in-Lua) — each dissolving an artificial app boundary.
+The long-term direction: every user-facing layer of the OS-as-Lua goal.
 
-**LLM interaction platform** — generic enough to replace SillyTavern, Talemate, and
-Claude Code, not by being all three, but by being the substrate they're programs on
-top of.
+**The app format** (`lib/platform`): a gzipped tar archive with a `manifest.json`,
+optionally embedded in an image file (PNG/JPEG/WebP). The image is decoration — the
+app is the tarball. Multiple entrypoints (`dom`, `mcp`, `tui`, `headless`, ...) in one
+file; the host picks what it needs. Capabilities are declared per-entrypoint and
+granted by the operator. SillyTavern-style character cards, IDEs, node editors,
+dashboards — all the same format.
 
 **Core thesis (from `lib/taskgraph`):** the LLM is a stateless oracle. Conversation
 is context poisoning. The right unit is a function call. The orchestrator is a program,
-not an agent. ST/Talemate/Claude Code are different programs that call LLMs — the
-platform gives primitives and requires you to write the loop.
+not an agent. SillyTavern, Talemate, Claude Code are different programs that call LLMs
+— the platform gives primitives and requires you to write the loop.
 
-**Distribution format:** programs embedded in PNG metadata. A "character" or scenario
-is a Lua script in a PNG tEXt chunk — the image is the distributable. Visual
-representation and executable loop in one file, zero extra dependencies (LuaJIT is
-already vendored). The card carries:
-- The interaction loop (turn script)
-- The world state schema
-- The editor UI (via `lib/reactive_optics`)
-- Its own import/export logic for CCv2/charx/etc — the card is self-describing,
-  the platform has no hardcoded knowledge of any card format
+**LLM interaction app** (SillyTavern as prior art): SillyTavern pioneered the
+character-card-as-distributable idea and the CCv2 format. What it gets wrong:
 
-**What this fixes about SillyTavern:**
 - No database → SQLite, search is instant, tags are joins
 - Conversation-as-foundation → loop is user code; accumulation is a choice
 - LLM-derived worldstate → state is written by the program, read by the LLM, never held by it
 - Entity isolation → each character is a function call with explicit inputs; cross-contamination impossible by construction
 - Lorebook triggers = fields pretending to be a language → predicates are code
 - 23k characters, no index, full CCv2 JSON blob → indexed, virtualized, thumbnails on import
-
-**Security:** capability-based. The turn script gets exactly the capabilities it's
-handed — LLM oracle, worldstate read/write, render surface. No ambient authority. The
-threat surface is "what capabilities did the platform hand this card?" — auditable and
-small. UI code (Rainbow/reactive_optics) is lower-risk; sanitization at the render
-boundary is sufficient.
-
-**Architecture:** Lua HTTP server + SQLite + `lib/reactive_optics` frontend. Cap'n Proto
-for the control plane if latency becomes a problem (promise pipelining eliminates
-roundtrip chains). Thumbnail generation via stb_image_resize compiled into the binary
-(zero runtime dep).
-
-**Other frontends follow the same pattern:**
-- File manager — browse, preview, edit as one surface (Deskspace-in-Lua)
-- Markdown viewer / editor
-- Archive tool
-- Eventually: the entire user-facing OS layer
+- 433MB installed (334MB `node_modules`) → ~12MB total for the entire crescent ecosystem
 
 **CCv2/lorebook compatibility** is best-in-class but a footnote: CCv2 is lossless
-import, lossy export. The card embeds its own import/export logic — the platform has
+import, lossy export. The app embeds its own import/export logic — the platform has
 no hardcoded knowledge of CCv2, charx, or any other format. Lorebooks dissolve into
 worldstate queries; the lorebook editor is only needed for the compatibility surface.
 
+**Security:** capability-based sandbox. Each entrypoint declares the caps it needs;
+the operator approves them. No ambient authority. The threat surface is auditable and
+small.
+
+**Architecture:** Lua HTTP server + SQLite + `lib/reactive_optics` + `lib/web/reactive_dom`
+frontend. Thumbnail generation via stb_image_resize via FFI.
+
 | Component | Crescent primitive |
 |---|---|
+| App format | `lib/platform` + `lib/tar` + `lib/png` |
+| Capability sandbox | `lib/sandbox` |
+| Cap factories | `lib/platform/caps/{llm,fs,png,render}` |
 | World state | `lib/sqlite` + entity model |
 | LLM task dispatch | `lib/taskgraph` + `lib/taskgraph/executor/ai` |
-| Prose assembly | Lua string ops (no dedicated library needed) |
-| Reactive UI | `lib/reactive_optics` |
+| Reactive UI (server) | `lib/reactive_optics` |
+| Reactive UI (browser) | `lib/web/reactive_dom` + `lib/widget` |
+| Browser type shims | `lib/web/js.d.lua` |
 | HTTP server/API | `lib/http` |
-| Card format (PNG + metadata) | `lib/png` (chunk r/w, tEXt helpers) |
-| Capability sandbox | `lib/sandbox` |
-| Platform runner + cap factories | `lib/platform` (card loader, `caps.png`, `caps.llm`, `caps.render`, `caps.fs`) |
 | Thumbnail generation | stb_image_resize via FFI (compiled in) |
 
 ### Full-stack dashboard
