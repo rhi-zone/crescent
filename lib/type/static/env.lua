@@ -206,6 +206,71 @@ end
 -- mapping: { var_type_id -> fresh_var_type_id } (shared across recursion)
 -- seen: { type_id -> copied_type_id } (cycle detection for circular tables)
 --: (Ctx, integer, integer, { [integer]: integer, ... }, { [integer]: integer | nil, ... }) -> integer
+-- Check whether a type contains any generic type variable (TAG_VAR / TAG_ROWVAR
+-- with FLAG_GENERIC).  Returns false immediately when a concrete leaf is reached.
+-- Uses a `seen` table to break cycles (TAG_TABLE and TAG_FUNCTION can be cyclic
+-- when types reference themselves through field/return-type chains).
+--: (Ctx, integer, { [integer]: boolean, ... } | nil) -> boolean
+local function has_generic_var(ctx, tid, seen)
+    tid = types_mod.find(ctx, tid)
+    local t   = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_VAR or tag == TAG_ROWVAR then
+        return t.flags == FLAG_GENERIC
+    end
+    seen = seen or {}
+    if seen[tid] then return false end
+    seen[tid] = true
+    if tag == TAG_FUNCTION then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        for i = t.data[2], t.data[2] + t.data[3] - 1 do
+            if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        if t.data[4] >= 0 and has_generic_var(ctx, t.data[4], seen) then return true end
+        return false
+    end
+    if tag == TAG_TABLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            local fe = ctx.fields:get(ctx.lists:get(i))
+            if has_generic_var(ctx, fe.type_id, seen) then return true end
+        end
+        if t.data[4] >= 0 and has_generic_var(ctx, t.data[4], seen) then return true end
+        for j = t.data[5], t.data[5] + t.data[6] - 1 do
+            local fe = ctx.fields:get(ctx.lists:get(j))
+            if has_generic_var(ctx, fe.type_id, seen) then return true end
+        end
+        return false
+    end
+    if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
+        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+            if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        return false
+    end
+    if tag == defs.TAG_SPREAD then
+        return has_generic_var(ctx, t.data[0], seen)
+    end
+    -- TAG_TYPE_CALL: callee + args list (e.g. $Require<T>, PairsReturn<T>)
+    if tag == defs.TAG_TYPE_CALL then
+        if has_generic_var(ctx, t.data[0], seen) then return true end
+        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+            if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        return false
+    end
+    -- TAG_MATCH_TYPE: subject + arms pairs
+    if tag == defs.TAG_MATCH_TYPE then
+        if has_generic_var(ctx, t.data[0], seen) then return true end
+        for i = t.data[1], t.data[1] + t.data[2] - 1 do
+            if has_generic_var(ctx, ctx.lists:get(i), seen) then return true end
+        end
+        return false
+    end
+    return false
+end
+
 local function instantiate_inner(ctx, tid, level, mapping, seen)
     tid = types_mod.find(ctx, tid)
 
@@ -223,6 +288,13 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
             end
             return mapping[tid]
         end
+        return tid
+    end
+
+    -- Fast path: if the type contains no generic vars, return it unchanged.
+    -- This avoids deep-copying large concrete types (e.g. HTMLElement) and
+    -- prevents arena-invalidation crashes when copied types trigger arena growth.
+    if not has_generic_var(ctx, tid, nil) then
         return tid
     end
 
@@ -251,45 +323,70 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
 
     if tag == TAG_TABLE then
         if seen[tid] then return seen[tid] or tid end
-        -- Pre-register to handle cycles
+        -- Snapshot all needed type data BEFORE any arena-modifying operations.
+        -- make_table / make_field / instantiate_inner can all grow ctx.types or
+        -- ctx.fields, invalidating any FFI pointer previously obtained via :get().
+        local fields_start   = t.data[0]
+        local fields_len     = t.data[1]
+        local indexers_start = t.data[2]
+        local indexers_len   = t.data[3]
+        local row_var_orig   = t.data[4]
+        local meta_start     = t.data[5]
+        local meta_len       = t.data[6]
+
+        -- Pre-register to handle cycles (make_table can grow ctx.types, invalidating t)
         local result_id = types_mod.make_table(ctx, {}, {}, -1, {})
         seen[tid] = result_id
 
-        -- Now build the actual fields
+        -- Build fields: snapshot each fe before calling instantiate_inner
         local new_field_ids = {}
-        for i = t.data[0], t.data[0] + t.data[1] - 1 do
+        for i = fields_start, fields_start + fields_len - 1 do
             local fid = ctx.lists:get(i)
             local fe = ctx.fields:get(fid)
-            local new_type = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
-            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+            -- Snapshot fe data before instantiate_inner, which can grow ctx.fields
+            local fe_type_id = fe.type_id
+            local fe_name_id = fe.name_id
+            local fe_flags   = fe.flags
+            local new_type = instantiate_inner(ctx, fe_type_id, level, mapping, seen)
+            new_field_ids[#new_field_ids + 1] = types_mod.make_field(ctx, fe_name_id, new_type, band(fe_flags, defs.FLAG_OPTIONAL) ~= 0)
         end
 
         local new_indexers = {}
-        local is, il = t.data[2], t.data[3]
-        local i = is
-        while i < is + il - 1 do
+        local i = indexers_start
+        while i < indexers_start + indexers_len - 1 do
             new_indexers[#new_indexers + 1] = instantiate_inner(ctx, ctx.lists:get(i), level, mapping, seen)
             new_indexers[#new_indexers + 1] = instantiate_inner(ctx, ctx.lists:get(i + 1), level, mapping, seen)
             i = i + 2
         end
 
         local new_meta = {}
-        for j = t.data[5], t.data[5] + t.data[6] - 1 do
+        for j = meta_start, meta_start + meta_len - 1 do
             local fid = ctx.lists:get(j)
             local fe = ctx.fields:get(fid)
-            if fe.name_id == -1 then
+            -- Snapshot fe data before instantiate_inner, which can grow ctx.fields
+            local fe_type_id = fe.type_id
+            local fe_name_id = fe.name_id
+            local fe_flags   = fe.flags
+            if fe_name_id == -1 then
                 -- Meta-spread placeholder: instantiate inner, then expand if now concrete.
-                local new_sp_inner = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
+                local new_sp_inner = instantiate_inner(ctx, fe_type_id, level, mapping, seen)
                 local sp_t   = ctx.types:get(types_mod.find(ctx, new_sp_inner))
                 local exp_id = types_mod.find(ctx, sp_t.data[0])
                 local exp_t  = ctx.types:get(exp_id)
                 if exp_t.tag == TAG_TABLE then
-                    -- Copy meta slots from the resolved type
-                    for k = exp_t.data[5], exp_t.data[5] + exp_t.data[6] - 1 do
+                    -- Copy meta slots from the resolved type.
+                    -- Snapshot exp_t bounds before the loop (make_field can grow ctx.types).
+                    local exp_ms = exp_t.data[5]
+                    local exp_ml = exp_t.data[6]
+                    for k = exp_ms, exp_ms + exp_ml - 1 do
                         local inner_fid = ctx.lists:get(k)
                         local inner_fe  = ctx.fields:get(inner_fid)
-                        if inner_fe.name_id >= 0 then
-                            new_meta[#new_meta + 1] = types_mod.make_field(ctx, inner_fe.name_id, inner_fe.type_id, inner_fe.flags)
+                        -- Snapshot before make_field grows ctx.fields
+                        local inner_name = inner_fe.name_id
+                        local inner_type = inner_fe.type_id
+                        local inner_flg  = inner_fe.flags
+                        if inner_name >= 0 then
+                            new_meta[#new_meta + 1] = types_mod.make_field(ctx, inner_name, inner_type, inner_flg)
                         end
                     end
                 else
@@ -297,25 +394,24 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
                     new_meta[#new_meta + 1] = types_mod.make_field(ctx, -1, new_sp_inner, 0)
                 end
             else
-                local new_type = instantiate_inner(ctx, fe.type_id, level, mapping, seen)
-                new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe.name_id, new_type, band(fe.flags, defs.FLAG_OPTIONAL) ~= 0)
+                local new_type = instantiate_inner(ctx, fe_type_id, level, mapping, seen)
+                new_meta[#new_meta + 1] = types_mod.make_field(ctx, fe_name_id, new_type, band(fe_flags, defs.FLAG_OPTIONAL) ~= 0)
             end
         end
 
-        local row_var = t.data[4]
+        local row_var = row_var_orig
         if row_var >= 0 then
             row_var = instantiate_inner(ctx, row_var, level, mapping, seen)
         end
 
-        -- Rebuild the result table with actual data
+        -- Rebuild the result table with actual data.
         -- (can't modify in-place after make_table since lists are immutable)
-        -- Just overwrite the result_id's data
-        local rt = ctx.types:get(result_id)
+        -- Just overwrite the result_id's data.
         -- We need to re-allocate: make_table appended to the list pool.
         -- It's simpler to just re-create, but the cycle dict already points to result_id.
         -- Solution: write fields into the result TypeSlot directly after creating them.
         local new_result = types_mod.make_table(ctx, new_field_ids, new_indexers, row_var, new_meta)
-        -- Copy new_result data into result_id
+        -- Re-fetch both pointers after make_table (arena may have grown)
         local nrt = ctx.types:get(new_result)
         local rrt = ctx.types:get(result_id)
         for k = 0, 6 do rrt.data[k] = nrt.data[k] end

@@ -19,103 +19,99 @@ end
 local M = {}
 
 -- ── Type declarations ─────────────────────────────────────────────────────────
---
--- `document` is a browser runtime global not in the typechecker prelude.
--- Declared as `any` to opt out of checking — callers supply the real DOM or a
--- mock. The `node` field on each El type is also `any` for the same reason:
--- the full DOM type hierarchy lives in lib/web/js_types.lua and is not
--- auto-loaded by the typechecker. When typechecking browser-facing code, pass
--- js_types.lua as an additional input to get full DOM type coverage.
+--:: require "lib.web.js_types"
+-- js_types.lua uses self-parameter style (Document, string) -> HTMLElement but
+-- browser DOM is always called with dot notation (no explicit self).
+-- Declare document as any so implementation calls are unchecked;
+-- callers still benefit from typed node fields (HTMLElement etc.) on El values.
 --:: declare document = any
 
 -- Base El type: nominal wrapper pairing a tag name with a DOM node.
--- `node` is `any` here because DOM types (HTMLElement etc.) are not in the
--- typechecker prelude. Pass lib/web/js_types.lua to get full DOM types.
---:: El = { _tag: string, node: any }
+--:: El = { _tag: string, node: HTMLElement }
 
 -- Individual element types (nominal aliases over El)
---:: HtmlEl       = { _tag: string, node: any }
---:: HeadEl       = { _tag: string, node: any }
---:: BodyEl       = { _tag: string, node: any }
---:: DivEl        = { _tag: string, node: any }
---:: SectionEl    = { _tag: string, node: any }
---:: ArticleEl    = { _tag: string, node: any }
---:: AsideEl      = { _tag: string, node: any }
---:: HeaderEl     = { _tag: string, node: any }
---:: FooterEl     = { _tag: string, node: any }
---:: MainEl       = { _tag: string, node: any }
---:: NavEl        = { _tag: string, node: any }
---:: H1El         = { _tag: string, node: any }
---:: H2El         = { _tag: string, node: any }
---:: H3El         = { _tag: string, node: any }
---:: H4El         = { _tag: string, node: any }
---:: H5El         = { _tag: string, node: any }
---:: H6El         = { _tag: string, node: any }
---:: PEl          = { _tag: string, node: any }
---:: SpanEl       = { _tag: string, node: any }
---:: AEl          = { _tag: string, node: any }
---:: EmEl         = { _tag: string, node: any }
---:: StrongEl     = { _tag: string, node: any }
---:: CodeEl       = { _tag: string, node: any }
---:: PreEl        = { _tag: string, node: any }
---:: BlockquoteEl = { _tag: string, node: any }
---:: IEl          = { _tag: string, node: any }
---:: BEl          = { _tag: string, node: any }
---:: SmallEl      = { _tag: string, node: any }
---:: AbbrEl       = { _tag: string, node: any }
---:: BrEl         = { _tag: string, node: any }
---:: HrEl         = { _tag: string, node: any }
---:: ImgEl        = { _tag: string, node: any }
---:: UlEl         = { _tag: string, node: any }
---:: OlEl         = { _tag: string, node: any }
---:: LiEl         = { _tag: string, node: any }
---:: DlEl         = { _tag: string, node: any }
---:: DtEl         = { _tag: string, node: any }
---:: DdEl         = { _tag: string, node: any }
---:: TableEl      = { _tag: string, node: any }
---:: TheadEl      = { _tag: string, node: any }
---:: TbodyEl      = { _tag: string, node: any }
---:: TfootEl      = { _tag: string, node: any }
---:: TrEl         = { _tag: string, node: any }
---:: ThEl         = { _tag: string, node: any }
---:: TdEl         = { _tag: string, node: any }
---:: FormEl       = { _tag: string, node: any }
---:: InputEl      = { _tag: string, node: any }
---:: LabelEl      = { _tag: string, node: any }
---:: FieldsetEl   = { _tag: string, node: any }
---:: LegendEl     = { _tag: string, node: any }
---:: SelectEl     = { _tag: string, node: any }
---:: OptionEl     = { _tag: string, node: any }
---:: TextareaEl   = { _tag: string, node: any }
---:: ButtonEl     = { _tag: string, node: any }
---:: IframeEl     = { _tag: string, node: any }
---:: VideoEl      = { _tag: string, node: any }
---:: AudioEl      = { _tag: string, node: any }
---:: SourceEl     = { _tag: string, node: any }
---:: CanvasEl     = { _tag: string, node: any }
---:: SvgEl        = { _tag: string, node: any }
---:: StyleEl      = { _tag: string, node: any }
---:: ScriptEl     = { _tag: string, node: any }
---:: MetaEl       = { _tag: string, node: any }
---:: LinkEl       = { _tag: string, node: any }
---:: TitleEl      = { _tag: string, node: any }
---:: TextNodeEl   = { _tag: string, node: any }
+--:: HtmlEl       = { _tag: string, node: HTMLElement }
+--:: HeadEl       = { _tag: string, node: HTMLElement }
+--:: BodyEl       = { _tag: string, node: HTMLElement }
+--:: DivEl        = { _tag: string, node: HTMLElement }
+--:: SectionEl    = { _tag: string, node: HTMLElement }
+--:: ArticleEl    = { _tag: string, node: HTMLElement }
+--:: AsideEl      = { _tag: string, node: HTMLElement }
+--:: HeaderEl     = { _tag: string, node: HTMLElement }
+--:: FooterEl     = { _tag: string, node: HTMLElement }
+--:: MainEl       = { _tag: string, node: HTMLElement }
+--:: NavEl        = { _tag: string, node: HTMLElement }
+--:: H1El         = { _tag: string, node: HTMLElement }
+--:: H2El         = { _tag: string, node: HTMLElement }
+--:: H3El         = { _tag: string, node: HTMLElement }
+--:: H4El         = { _tag: string, node: HTMLElement }
+--:: H5El         = { _tag: string, node: HTMLElement }
+--:: H6El         = { _tag: string, node: HTMLElement }
+--:: PEl          = { _tag: string, node: HTMLElement }
+--:: SpanEl       = { _tag: string, node: HTMLElement }
+--:: AEl          = { _tag: string, node: HTMLElement }
+--:: EmEl         = { _tag: string, node: HTMLElement }
+--:: StrongEl     = { _tag: string, node: HTMLElement }
+--:: CodeEl       = { _tag: string, node: HTMLElement }
+--:: PreEl        = { _tag: string, node: HTMLElement }
+--:: BlockquoteEl = { _tag: string, node: HTMLElement }
+--:: IEl          = { _tag: string, node: HTMLElement }
+--:: BEl          = { _tag: string, node: HTMLElement }
+--:: SmallEl      = { _tag: string, node: HTMLElement }
+--:: AbbrEl       = { _tag: string, node: HTMLElement }
+--:: BrEl         = { _tag: string, node: HTMLElement }
+--:: HrEl         = { _tag: string, node: HTMLElement }
+--:: ImgEl        = { _tag: string, node: HTMLElement }
+--:: UlEl         = { _tag: string, node: HTMLElement }
+--:: OlEl         = { _tag: string, node: HTMLElement }
+--:: LiEl         = { _tag: string, node: HTMLElement }
+--:: DlEl         = { _tag: string, node: HTMLElement }
+--:: DtEl         = { _tag: string, node: HTMLElement }
+--:: DdEl         = { _tag: string, node: HTMLElement }
+--:: TableEl      = { _tag: string, node: HTMLElement }
+--:: TheadEl      = { _tag: string, node: HTMLElement }
+--:: TbodyEl      = { _tag: string, node: HTMLElement }
+--:: TfootEl      = { _tag: string, node: HTMLElement }
+--:: TrEl         = { _tag: string, node: HTMLElement }
+--:: ThEl         = { _tag: string, node: HTMLElement }
+--:: TdEl         = { _tag: string, node: HTMLElement }
+--:: FormEl       = { _tag: string, node: HTMLFormElement }
+--:: InputEl      = { _tag: string, node: HTMLInputElement }
+--:: LabelEl      = { _tag: string, node: HTMLElement }
+--:: FieldsetEl   = { _tag: string, node: HTMLElement }
+--:: LegendEl     = { _tag: string, node: HTMLElement }
+--:: SelectEl     = { _tag: string, node: HTMLSelectElement }
+--:: OptionEl     = { _tag: string, node: HTMLElement }
+--:: TextareaEl   = { _tag: string, node: HTMLTextAreaElement }
+--:: ButtonEl     = { _tag: string, node: HTMLElement }
+--:: IframeEl     = { _tag: string, node: HTMLElement }
+--:: VideoEl      = { _tag: string, node: HTMLVideoElement }
+--:: AudioEl      = { _tag: string, node: HTMLAudioElement }
+--:: SourceEl     = { _tag: string, node: HTMLElement }
+--:: CanvasEl     = { _tag: string, node: HTMLCanvasElement }
+--:: SvgEl        = { _tag: string, node: HTMLElement }
+--:: StyleEl      = { _tag: string, node: HTMLElement }
+--:: ScriptEl     = { _tag: string, node: HTMLElement }
+--:: MetaEl       = { _tag: string, node: HTMLElement }
+--:: LinkEl       = { _tag: string, node: HTMLElement }
+--:: TitleEl      = { _tag: string, node: HTMLElement }
+--:: TextNodeEl   = { _tag: string, node: HTMLElement }
 
 -- SVG child element types
---:: CircleEl         = { _tag: string, node: any }
---:: EllipseEl        = { _tag: string, node: any }
---:: RectEl           = { _tag: string, node: any }
---:: LineEl           = { _tag: string, node: any }
---:: PolylineEl       = { _tag: string, node: any }
---:: PolygonEl        = { _tag: string, node: any }
---:: PathEl           = { _tag: string, node: any }
---:: SvgTextEl        = { _tag: string, node: any }
---:: TspanEl          = { _tag: string, node: any }
---:: GEl              = { _tag: string, node: any }
---:: DefsEl           = { _tag: string, node: any }
---:: SymbolEl         = { _tag: string, node: any }
---:: UseEl            = { _tag: string, node: any }
---:: ClipPathEl       = { _tag: string, node: any }
+--:: CircleEl         = { _tag: string, node: HTMLElement }
+--:: EllipseEl        = { _tag: string, node: HTMLElement }
+--:: RectEl           = { _tag: string, node: HTMLElement }
+--:: LineEl           = { _tag: string, node: HTMLElement }
+--:: PolylineEl       = { _tag: string, node: HTMLElement }
+--:: PolygonEl        = { _tag: string, node: HTMLElement }
+--:: PathEl           = { _tag: string, node: HTMLElement }
+--:: SvgTextEl        = { _tag: string, node: HTMLElement }
+--:: TspanEl          = { _tag: string, node: HTMLElement }
+--:: GEl              = { _tag: string, node: HTMLElement }
+--:: DefsEl           = { _tag: string, node: HTMLElement }
+--:: SymbolEl         = { _tag: string, node: HTMLElement }
+--:: UseEl            = { _tag: string, node: HTMLElement }
+--:: ClipPathEl       = { _tag: string, node: HTMLElement }
 --:: MaskEl           = { _tag: string, node: any }
 --:: LinearGradientEl = { _tag: string, node: any }
 --:: RadialGradientEl = { _tag: string, node: any }
@@ -152,6 +148,7 @@ local SVG_NS = "http://www.w3.org/2000/svg"
 
 -- Apply attributes table to a DOM node.
 -- Skips nil/false values; true becomes empty string (boolean attribute).
+--: (any, any) -> nil
 local function apply_attrs(node, attrs)
 	for k, v in pairs(attrs) do
 		if v ~= nil and v ~= false then
