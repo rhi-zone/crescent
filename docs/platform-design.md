@@ -24,21 +24,30 @@ The platform has no opinion about what the script does. The script is the progra
 Capabilities are plain Lua tables passed to the sandbox. The platform owns the
 implementations; the script receives exactly what it's granted.
 
+**Two kinds of cap:**
+- **State caps** expose `Signal<T>` values — reactive cells the script reads and
+  subscribes to. Changes propagate instantly; no polling, no restart.
+- **Action caps** expose functions — imperative calls like `llm.call`, `fs.write`.
+
+This means live cap swapping (e.g. switching LLM backend mid-session) works without
+restart for state caps — the script holds a signal reference and the host pushes a
+new value through it.
+
 ```lua
--- example grant for a CCv2-style card
+-- example grant
 sandbox.run(script, sandbox.env(
   sandbox.stdlib,
   { globals = {
-    png    = png_cap({ allow = {"chara", "crescent"} }),
-    llm    = llm_cap(model_config),
-    render = render_cap(session),
+    png    = png_cap({ allow = {"chara"} }),
+    llm    = llm_cap(model_config),   -- action cap: llm.call(messages)
+    config = config_cap(user_dir),    -- state cap: config.theme, config.presets, ...
   }}
 ))
 ```
 
 ### `caps.png` — chunk access
 
-Read and write tEXt chunks in the card's PNG file by name.
+Read and write metadata chunks in the app's image file by name.
 
 ```lua
 caps.png.text(name)           -- read chunk, returns string | nil
@@ -48,15 +57,14 @@ caps.png.set_text(name, val)  -- write chunk
 The `png_cap` constructor accepts an optional allowlist:
 
 ```lua
-png_cap({ allow = {"chara", "crescent"} })  -- only these chunks accessible
-png_cap()                                    -- unrestricted (trusted scripts only)
+png_cap({ allow = {"chara"} })  -- only these chunks accessible
+png_cap()                        -- unrestricted (trusted scripts only)
 ```
 
-Denied chunk access errors immediately, same as sandbox's require whitelist.
-All format parsing (JSON, base64, etc.) is the script's responsibility. The platform
-never interprets chunk contents.
+Denied chunk access errors immediately. All format parsing (JSON, base64, etc.) is
+the script's responsibility. The platform never interprets chunk contents.
 
-### `caps.llm` — LLM oracle
+### `caps.llm` — LLM oracle (action cap)
 
 A stateless function call. The LLM is not a participant; it is a tool.
 
@@ -67,18 +75,34 @@ local response = caps.llm.call(messages)  -- messages: array of {role, content}
 Model selection, API keys, and retry logic are the capability implementation's concern.
 The script assembles the messages array however it wants.
 
-### `caps.render` — UI surface
+### `caps.render` — UI surface (action cap)
 
-Push content to the render surface. The render surface is defined by the host
-(HTTP + reactive UI); the script pushes structured or plain content to it.
+Push content to the render surface.
 
 ```lua
 caps.render.push(content)
 ```
 
-### `caps.fs` (optional) — file access
+### `caps.fs` (optional) — file access (action cap)
 
 Granted only to explicitly trusted scripts. Scoped to a directory.
+
+### `caps.config` (optional) — user-level config (state cap)
+
+Exposes user-owned configuration as signals: UI preferences, global presets, global
+lorebooks, theme. Scoped to a user config directory (`~/.crescent/` by default).
+
+```lua
+caps.config.theme        -- Signal<string>: current theme name
+caps.config.presets      -- Signal<Preset[]>: user's global presets
+caps.config.lorebooks    -- Signal<Lorebook[]>: user's global lorebooks
+caps.config.ui           -- Signal<table>: arbitrary UI layout/pref overrides
+```
+
+Apps that don't declare `caps.config` never read user config and are fully
+self-contained. Apps that do declare it get live-updating user preferences with no
+extra plumbing — the signal propagates changes to every subscribed component
+automatically.
 
 ## Script / data separation
 

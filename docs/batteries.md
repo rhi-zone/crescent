@@ -98,13 +98,14 @@ frontend. Thumbnail generation via stb_image_resize via FFI.
 |---|---|
 | App format | `lib/platform` + `lib/tar` + `lib/png` |
 | Capability sandbox | `lib/sandbox` |
-| Cap factories | `lib/platform/caps/{llm,fs,png,render}` |
+| Cap factories | `lib/platform/caps/{llm,fs,png,render,config}` |
 | World state | `lib/sqlite` + entity model |
 | LLM task dispatch | `lib/taskgraph` + `lib/taskgraph/executor/ai` |
 | Reactive UI (server) | `lib/reactive_optics` |
 | Reactive UI (browser) | `lib/web/reactive_dom` + `lib/widget` |
 | Browser type shims | `lib/web/js.d.lua` |
 | HTTP server/API | `lib/http` |
+| User config (signals) | `lib/platform/caps/config` |
 | Thumbnail generation | stb_image_resize via FFI (compiled in) |
 
 ### Full-stack dashboard
