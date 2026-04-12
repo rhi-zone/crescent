@@ -392,6 +392,31 @@ text search box or flat tag list. The query widget lets users compose conditions
 input ("blonde D cup") is the primary construction mechanism; the projectional view
 is the inspector and tweaker.
 
+## HTTP server wiring
+
+The `dom` entrypoint is Lua source. The HTTP server transpiles it to JS on first
+request via `lib/lua2ts`, caches the result in memory, and serves it statically.
+No build step, no `dist/` directory in the tarball.
+
+```
+GET /          → minimal HTML bootstrap shell (inline string, no file)
+GET /app.js    → lua2ts(dom_entrypoint_source), cached after first run
+GET /static/*  → files from the tarball by path
+GET /api/*     → routed to app request handlers (Lua, sandboxed)
+```
+
+The HTML bootstrap is ~5 lines: `<!DOCTYPE html>` + `<script src="/app.js">`. The JS
+bootstraps the reactive DOM from there. Dependencies (`lib/reactive`, `lib/widget`,
+`lib/web/reactive_dom`) are included in the lua2ts output — they are part of the
+tarball and transpiled together with the entrypoint.
+
+The cache invalidates on app reload (tarball changes). On first request there is a
+one-time transpilation cost; subsequent requests are instant.
+
+**Type checking browser-target code** requires loading `lib/web/js.d.lua` as an
+additional prelude. The typechecker CLI needs a `--prelude` flag for this — tracked
+in TODO.md.
+
 ## UI design principles
 
 These apply to all first-party app UIs (library shell, conversation app, editors).
