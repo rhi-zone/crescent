@@ -886,6 +886,30 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 `tlv(opts)` — Type-Length-Value. `encode_varint`/`decode_varint` — unsigned LEB128.
 `pack`/`unpack` — struct codec (`>/<` endian, B/H/I/Q/b/h/i/q/s). `framer`/`receiver` — stream wrappers. 157 assertions.
 
+**String Template** (`lib/string_template`) — **implemented**. String interpolation with format specs, defaults, and multiple syntax variants.
+`ST.render(template, vars, opts)` — `{{key}}`, `${key}`, `{key}`, `%{key}` delimiters. Format specs: `{{key:%.2f}}`, `{{key:upper/lower/trim/len=N}}`. Default values: `{{key|default}}`. Conditional blocks: `{{#if key}}...{{/if}}`. Loops: `{{#each list}}...{{/each}}`. Partials via `opts.partials`. Strict mode rejects undefined keys. 142 assertions.
+
+**LRU TTL** (`lib/lru_ttl`) — **implemented**. LRU cache with TTL expiry, per-entry TTL, stats, and events.
+`lru_ttl.new(opts)` — `capacity`, `default_ttl`. `set(k,v,ttl)` / `get(k)` / `delete(k)` / `has(k)`. Automatic expiry on access. `evict_expired()` for sweep. `stats()` — hits/misses/evictions. `on_evict(fn)` callback. `resize(n)`. `keys()` / `values()` / `entries()` / `to_table()`. `peek(k)` — no LRU update. `set_many`/`get_many`/`delete_many`. `clear()` / `size()`. 156 assertions.
+
+**Query Builder** (`lib/query_builder`) — **implemented**. Fluent parameterized SQL query builder.
+`QB.select(table)` — `columns`/`columns_raw`, `where`/`where_or`/`where_in`/`where_not_in`/`where_null`/`where_not_null`/`where_between`/`where_like`/`where_raw`, `join`/`left_join`/`right_join`/`full_join`, `order_by`, `limit`, `offset`, `group_by`, `having`, `union`. `QB.insert`/`QB.update`/`QB.delete`. Subqueries as values. `count()`/`exists()` shorthands. `:build()` → `(sql, params)`. 129 assertions.
+
+**Geo Hash** (`lib/geo_hash`) — **implemented**. Geohash encode/decode with neighbors and bounding box.
+`GH.encode(lat, lon, precision)` — base32 geohash string. `GH.decode(hash)` — `{lat, lon, lat_err, lon_err}`. `GH.bbox(hash)` — bounding box. `GH.neighbor(hash, dir)` — adjacent cell (n/s/e/w/ne/nw/se/sw). `GH.neighbors(hash)` — all 8. `GH.within_radius(lat, lon, radius_m, precision)` — candidate hashes covering a circle. `GH.distance(h1, h2)` — haversine meters. 324 assertions.
+
+**Observer** (`lib/observer`) — **implemented**. Reactive Observable pattern with operators and subjects.
+`O.new(subscriber_fn)` — cold observable. `O.from_array`/`O.from_fn`/`O.of`. Operators: `map`/`filter`/`take`/`drop`/`take_while`/`drop_while`/`flat_map`/`reduce`/`scan`/`each`/`zip_with`/`tap`/`debounce`/`throttle`. Combinators: `merge`/`concat`/`zip`/`combine_latest`. `O.Subject` — hot observable (multicast). `O.BehaviorSubject` — current-value Subject. Synchronous. 189 assertions.
+
+**Validation** (`lib/validation`) — **implemented**. Composable schema validation with coercion and structured error trees.
+`V.string`/`V.number`/`V.integer`/`V.boolean`/`V.table`/`V.array`/`V.any`. Refinements: `:min`/`:max`/`:length`/`:pattern`/`:enum`/`:custom`. Coercion: `:coerce()` auto-converts strings to numbers/booleans. `V.object({key=schema})` — optional fields. `V.union`/`V.intersection`. `:nullable()`. `schema:validate(val)` → `(val, nil)` or `(nil, errors)`. Structured error trees with path/message/value. 183 assertions.
+
+**Task Runner** (`lib/task_runner`) — **implemented**. Dependency-aware task runner with topological scheduling.
+`TR.runner(tasks_def)` — `name`, `deps`, `action(ctx)`. `runner:plan()` — topological sort. `runner:validate()` — cycle detection, unknown-dep check. `runner:run(opts)` — executes in dependency order; `opts.only` for subset. `ctx.results[name]` — access prior outputs. `runner:dry_run()` — ordered plan without executing. 62 assertions.
+
+**Feature Flags** (`lib/feature_flags`) — **implemented**. Feature toggle system with rollout %, rules, variants, and overrides.
+`FF.manager(opts)` — `define(name, def)`: `default_enabled`, `rollout_pct`, `rules` (match+enable/variant), `variants` (name+weight). `manager:enabled(name, ctx)` / `manager:variant(name, ctx)` — weighted random variant. `manager:override`/`remove_override`. `manager:snapshot()`/`restore(snap)`. `manager:get_all(ctx)`. 137 assertions.
+
 **iCalendar** (`lib/ical`) — **implemented**. iCalendar (RFC 5545) parser and builder.
 `ical.parse(s)` — full parser with content-line unfolding, VCALENDAR/VEVENT/VTODO/VALARM.
 `parse_datetime`/`parse_date`/`format_datetime`/`format_date`. `parse_property` — `NAME;PARAM=val:value`.
