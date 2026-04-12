@@ -886,6 +886,18 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 `tlv(opts)` — Type-Length-Value. `encode_varint`/`decode_varint` — unsigned LEB128.
 `pack`/`unpack` — struct codec (`>/<` endian, B/H/I/Q/b/h/i/q/s). `framer`/`receiver` — stream wrappers. 157 assertions.
 
+**XPath** (`lib/xpath`) — **implemented**. XPath 1.0 evaluator for lib/xml DOM.
+`xpath.eval(node, expr)` / `xpath.select` / `xpath.first` / `xpath.string` / `xpath.number` / `xpath.boolean`. Location paths: `/`, `//`, `.`, `..`, `tag`, `*`, `@attr`, `text()`, `node()`. Axes: child/descendant/ancestor/parent/self/following-sibling/preceding-sibling/attribute. Predicates: `[n]`, `[@attr]`, `[@attr="val"]`, `[tag]`, `[last()]`, `[contains(...)]`. Functions: count/last/position/string/number/boolean/not/contains/starts-with/string-length/normalize-space/translate/substring/concat/name. Operators: `=`/`!=`/`<`/`>`/`<=`/`>=`/and/or/+/-/*/div/mod/`|`. `xpath.compile(expr)`. 151 assertions.
+
+**JSON Patch** (`lib/json_patch`) — **implemented**. RFC 6902 JSON Patch and RFC 6901 JSON Pointer.
+`JP.pointer_get`/`pointer_set`/`pointer_del` — navigate/mutate nested tables with 0→1 index conversion and `~0`/`~1` escaping. `JP.escape`/`unescape`/`build`/`parse`. `JP.apply(doc, patch)` — atomic patch application (deep-copied doc); ops: add/remove/replace/move/copy/test. `JP.diff(a, b)` — minimal patch generation (LCS for arrays, key-by-key for objects). `JP.validate_patch`. 193 assertions.
+
+**Service Registry** (`lib/service_registry`) — **implemented**. Service discovery with health checks, load balancing, and TTL.
+`SR.new({clock, ttl})`. `reg:register(name, {host, port, meta, tags})` → id. `reg:discover(name, {tags=...})` — healthy non-expired instances. `reg:get(name, strategy)` — round_robin/random/least_conn. `reg:healthy`/`unhealthy`/`heartbeat`. `reg:connection_open`/`close`. `reg:watch(name, fn)` → unwatch. `reg:services()`/`stats()`/`evict_expired()`. Injectable clock. 94 assertions.
+
+**Gradient Descent** (`lib/gradient_descent`) — **implemented**. Numerical optimization algorithms.
+`GD.gradient_descent(f, grad, p0, opts)` — batch GD with momentum. `GD.sgd` — stochastic. `GD.adam` — Adam optimizer (β1/β2/ε). `GD.rmsprop`. `GD.lbfgs` — L-BFGS with two-loop recursion and backtracking line search. `GD.conjugate_gradient(A, b)` — CG linear solver. `GD.numerical_gradient` — finite differences. `GD.line_search` — Armijo backtracking. All return `{params, loss, iters, converged, history?}`. Injectable callback, record_history. 136 assertions.
+
 **Porter Stemmer** (`lib/porter_stemmer`) — **implemented**. Porter1/Porter2 stemmer with stop words and text indexing.
 `PS.stem(word)` / `PS.stem_porter1` — Porter 1980 (5 steps). `PS.stem_porter2` — Snowball English with R1/R2 regions. `PS.stem_all(words, algo)`. `PS.normalize(word)` — lowercase+strip. `PS.stem_text(text, opts)` — tokenize+filter+stem. `PS.stop_words` (~155 words), `PS.is_stop_word`. `PS.index(documents)` — inverted index with stemmed keys and per-doc positions. 125 assertions.
 
