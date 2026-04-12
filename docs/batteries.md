@@ -417,6 +417,33 @@ truncate. `cmp/eq/lt/le`. `to_string/to_number/to_integer/scale`. `is_zero/is_ne
 Metamethods: `+`, `-`, `*`, `/`, `==`, `<`, `<=`. `sum`, `average`. Classic `0.1+0.2==0.3`
 passes. 127 assertions.
 
+**CRC** (`lib/crc`) — **implemented**. Cyclic redundancy checks. Table-driven CRC-32
+(IEEE 802.3), CRC-32C (Castagnoli), CRC-16/IBM, CRC-16/CCITT-FALSE, CRC-8, CRC-8/MAXIM,
+CRC-64/ECMA-182 (hi/lo pair). Incremental updates. `generic` (configurable poly/width/
+init/refin/refout/xorout). `make_table`. `crc32_hex`/`crc16_hex`. `M.CHECK` vectors for
+"123456789". Correct unsigned normalization of LuaJIT signed results. 837 assertions.
+
+**Hamming** (`lib/hamming`) — **implemented**. Error-correcting codes. Hamming(n,k):
+`encode`/`decode`/`syndrome` (single-bit correction). SECDED (single-correct/double-detect).
+Parity: `parity_bit`, `add/check_parity_bytes`. Repetition code with majority vote.
+Internet checksum (RFC 1071). Adler-32 (incremental). Fletcher-16/32. Luhn
+`check`/`digit`. `popcount`, `hamming_distance`, `min_distance`. 115 assertions.
+
+**Interpolation** (`lib/interpolation`) — **implemented**. Numerical interpolation and
+curve fitting. 1D: `lerp`, `inv_lerp`, `clamp`, `remap`, `smoothstep`, `smootherstep`.
+Piecewise: `piecewise_linear`, `cubic_spline` (Thomas algorithm), `catmull_rom`,
+`monotone_cubic` (Fritsch-Carlson). Polynomial: `lagrange`, `newton_interp/eval`. 2D
+curves: `bezier` (de Casteljau), `bspline` (Cox-de Boor). Regression: `linear_regression`,
+`poly_regression`, `poly_eval` (Horner). `nearest`. 160 assertions.
+
+**Geometry 3D** (`lib/geometry_3d`) — **implemented**. 3D mesh + solid geometry.
+Vec3 ops (add/sub/dot/cross/norm/lerp). Ray intersections: Möller-Trumbore triangle,
+sphere (quadratic), AABB (slab), plane. Mesh: `face_normal`, `vertex_normals`, `mesh_aabb`,
+`mesh_bsphere`, `mesh_area`, `mesh_volume` (divergence theorem), `point_in_mesh` (ray
+casting). 4×4 row-major matrices: translate/scale/rotate/mul/transform. Quaternions:
+`from_axis_angle`, `mul`, `rotate`, `slerp`. Mesh generators: cube, UV sphere, plane.
+139 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
