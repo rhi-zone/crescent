@@ -937,6 +937,9 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Log Parser** (`lib/log_parser`) — **implemented**. Multi-format log parser with filtering and aggregation.
 `M.parse(line, format)` — combined/common/nginx, syslog, json, logfmt, auto-detect. `M.parse_lines(text, format)` — entries + errors array. `M.detect(line)`. `M.pattern(fmt)` — custom `%{name:type}` named captures (str/int/float/ip/timestamp). Filter: `filter_status`, `filter_method`, `filter_path`, `filter_time`. Aggregate: `count_by`, `sum_by`, `top_n`, `percentile`. `parse_clf_time`, `parse_iso8601`, `format_bytes`. 125 assertions.
 
+**Protocol Buffer** (`lib/protocol_buffer`) — **implemented**. Protobuf wire format encoder/decoder with schema-driven API.
+`M.encode(schema, msg)` / `M.decode(schema, bytes)` — schema is a Lua table `{ field_name = {field_num, type, ...} }`. All types: int32/64, uint32/64, sint32/64, bool, fixed32/64, sfixed32/64, float, double, string, bytes, nested message. `M.encode_raw/decode_raw` for manual field construction. `M.encode_varint/decode_varint`, `M.encode_zigzag/decode_zigzag`. `M.validate`. Unknown fields preserved in `msg._unknown`. Packed repeated fields. FFI for float/double/int64 bit patterns (LuaJIT). 134 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
