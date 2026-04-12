@@ -886,6 +886,18 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 `tlv(opts)` — Type-Length-Value. `encode_varint`/`decode_varint` — unsigned LEB128.
 `pack`/`unpack` — struct codec (`>/<` endian, B/H/I/Q/b/h/i/q/s). `framer`/`receiver` — stream wrappers. 157 assertions.
 
+**YAML** (`lib/yaml`) — **implemented**. YAML 1.2 parser and serializer.
+`yaml.decode(str)` / `yaml.parse(str)` — plain/quoted/block scalars, boolean/integer/float/null coercion, block+flow sequences/mappings, literal `|` and folded `>` block scalars, comments, anchors/aliases, `---` document markers. `yaml.encode(val, opts)` / `yaml.stringify(val, opts)` — `opts.indent` (default 2), `opts.sort_keys`. 153 assertions.
+
+**Metric** (`lib/metric`) — **implemented**. Prometheus-compatible metrics collection.
+`reg = M.registry()`. `reg:counter(name, help, labels)` — `inc`/`get`. `reg:gauge(name, help, labels)` — `set`/`inc`/`dec`/`get`. `reg:histogram(name, help, labels, buckets)` — `observe`/`sum`/`count`/`buckets` (cumulative, auto `+Inf`). `reg:summary(...)` — `observe`/`sum`/`count`. `reg:render()` — Prometheus text format (`# HELP`, `# TYPE`, labeled values). Global default registry via `M.counter`/`M.gauge`/`M.render()`. 104 assertions.
+
+**Symbolic Diff** (`lib/symbolic_diff`) — **implemented**. Symbolic differentiation of mathematical expressions.
+Tagged-table AST (`num`/`var`/`add`/`sub`/`mul`/`div`/`pow`/`neg`/`sin`/`cos`/`ln`/`exp`). `SD.diff(expr, var)` — all rules: constant/variable, product/quotient/chain, power (constant + general `f^g`), trig, ln, exp. `SD.simplify(expr)` — identity rules + constant folding (fixpoint iteration). `SD.eval(expr, env)` — substitution to number. `SD.gradient(expr, vars)`. Operator overloading (`+`/`-`/`*`/`/`/`^`/unary minus/`tostring`). 143 assertions.
+
+**Barcode** (`lib/barcode`) — **implemented**. 1D barcode encoder with SVG output.
+`BC.code128(str)` — Code B subset, printable ASCII 32-126, check symbol. `BC.ean13(digits)` — full spec (L/G/R-codes, parity table, check digit). `BC.ean8`/`BC.upca`. `BC.code39(str)` — A-Z 0-9 plus special chars. All return `bars` array (0=white, 1=black). `BC.to_svg(bars, opts)` — SVG with configurable height/bar_width/quiet_zone/text. `BC.bar_widths(bars)` — run-length decode. `BC.ean13_check_digit`/`BC.upca_check_digit`. 112 assertions.
+
 **String Template** (`lib/string_template`) — **implemented**. String interpolation with format specs, defaults, and multiple syntax variants.
 `ST.render(template, vars, opts)` — `{{key}}`, `${key}`, `{key}`, `%{key}` delimiters. Format specs: `{{key:%.2f}}`, `{{key:upper/lower/trim/len=N}}`. Default values: `{{key|default}}`. Conditional blocks: `{{#if key}}...{{/if}}`. Loops: `{{#each list}}...{{/each}}`. Partials via `opts.partials`. Strict mode rejects undefined keys. 142 assertions.
 
