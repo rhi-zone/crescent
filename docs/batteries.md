@@ -631,6 +631,30 @@ rule priority. `^`-anchored Lua patterns. Line/col tracking. `:tokenize(input)` 
 array with `{type,value,line,col}`. `:iter(input)` lazy iterator. Mode-based tokenization
 via `:in_mode(name, sublexer)`. Error: `(nil, {message, line, col})`. 76 assertions.
 
+**Logic Circuit** (`lib/logic_circuit`) — **implemented**. Digital logic simulation. Gate types:
+AND/OR/NOT/NAND/NOR/XOR/XNOR/BUFFER/MUX/DEMUX. `circuit:input/output/gate/connect/eval/
+truth_table`. D flip-flop (rising-edge), SR latch. `M.from_bool(expr)` parses boolean
+expressions. Quine-McCluskey minimization (`M.simplify_bool`). `gate_count/critical_path`.
+145 assertions.
+
+**Spreadsheet** (`lib/spreadsheet`) — **implemented**. Formula evaluation with dependency
+graph and auto-recalculation. Cell refs (A1, $A$1), ranges (A1:B3). Operators + functions:
+SUM/AVERAGE/MIN/MAX/COUNT/COUNTA, IF/AND/OR/IFERROR, CONCAT/LEFT/RIGHT/MID/LEN/TRIM,
+VLOOKUP/INDEX/MATCH. Error values: #DIV/0!, #REF!, #NAME!, #CIRC!. `to_csv`/`from_csv`.
+34 assertions.
+
+**Color Palette** (`lib/color_palette`) — **implemented**. Palette generation with harmony
+rules: `complementary`, `split_complementary`, `triadic`, `tetradic`, `analogous`,
+`monochromatic`. `tints/shades/tones` scales. `gradient(c1,c2,n)`. WCAG contrast ratio,
+`check_contrast(AA/AAA)`, `best_foreground`. `distance` (euclidean/CIE76). `nearest`,
+`sort`, `deduplicate`, `quantize` (median-cut). 5 preset palettes. `to_css_vars`. 239 assertions.
+
+**Layout Engine** (`lib/layout`) — **implemented**. Flexbox-inspired 2D box layout.
+`M.box({direction, flex, padding, gap, align_items, justify_content, position})`. Fixed,
+flex, fill sizing. `M.grid({columns, rows, gap})` with px and fractional (fr) tracks.
+`M.cell({col, row, col_span})`. `M.compute(root)` → result with `:get(id)` → `{x,y,w,h}`.
+Absolute positioning, aspect ratio, min/max constraints. 125 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
