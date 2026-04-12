@@ -127,15 +127,20 @@ local function resolve_module_path(mod_name)
     return path
 end
 
--- Given a resolved module file path, return the companion .d.lua declaration path
+-- Given a resolved module file path, return the companion declaration path
 -- if it exists on disk, otherwise nil.
--- Convention: lib/foo/init.lua  → lib/foo/init.d.lua
---             lib/foo.lua       → lib/foo.d.lua
+-- Convention: lib/foo/init.lua  → lib/foo/init_types.lua (preferred) or lib/foo/init.d.lua
+--             lib/foo.lua       → lib/foo_types.lua (preferred) or lib/foo.d.lua
 local function find_decl_path(src_path)
-    local d = src_path:gsub("%.lua$", ".d.lua")
-    if d == src_path then return nil end
-    local f = io.open(d, "r")
-    if f then f:close(); return d end
+    if src_path:sub(-4) ~= ".lua" then return nil end
+    local base = src_path:sub(1, -5)
+    -- Prefer _types.lua convention; fall back to legacy .d.lua
+    local types = base .. "_types.lua"
+    local f = io.open(types, "r")
+    if f then f:close(); return types end
+    local d = base .. ".d.lua"
+    local g = io.open(d, "r")
+    if g then g:close(); return d end
     return nil
 end
 
@@ -182,9 +187,9 @@ function M.check_file(filename, parent_scope, explicit_pool)
     local function cri_loader(ctx, mod_name)
         if not _disk_cache_dir then return nil end
         local dep_path = resolve_module_path(mod_name)
-        -- Prefer a companion .d.lua declaration file when present.
-        -- e.g. lib/lunajson/init.d.lua overrides lib/lunajson/init.lua for typing.
-        -- Also try the init.lua form: lib/foo.lua → lib/foo/init.lua → lib/foo/init.d.lua
+        -- Prefer a companion _types.lua declaration file when present.
+        -- e.g. lib/lunajson/init_types.lua overrides lib/lunajson/init.lua for typing.
+        -- Also try the init.lua form: lib/foo.lua → lib/foo/init.lua → lib/foo/init_types.lua
         local decl = find_decl_path(dep_path)
         if not decl then
             local init_path = dep_path:gsub("%.lua$", "/init.lua")
@@ -339,7 +344,7 @@ function M.check_string_with_deps(source, filename, parent_scope)
     end
 
     local function cri_loader(ctx, mod_name)
-        -- Prefer .d.lua declaration file when present; fall back to .lua / init.lua.
+        -- Prefer _types.lua declaration file when present; fall back to .lua / init.lua.
         local rel = mod_name:gsub("%.", "/")
         local decl_flat = find_decl_path(rel .. ".lua")
         if decl_flat then return try_dep(ctx, decl_flat) end

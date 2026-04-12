@@ -39,7 +39,7 @@ Everything except the inference pass:
 - Type arena, integer type tags, union-find (`find`, `bind_var`)
 - Types: TAG_TABLE, TAG_UNION, TAG_INTERSECTION, TAG_FUNC, TAG_TUPLE,
   TAG_LITERAL, TAG_ENUM_MEMBER, TAG_ROWVAR, TAG_UNKNOWN, TAG_ANY, TAG_NEVER, ...
-- Prelude, stdlib.d.lua, ann.lua
+- Prelude, stdlib_types.lua, ann.lua
 - .cri format, cache.lua, cri_read/write
 - errors.lua, check.lua, cli.lua, lsp.lua
 

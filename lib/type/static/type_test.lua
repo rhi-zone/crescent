@@ -6899,12 +6899,12 @@ same_type(1, 2)
 end)
 
 ---------------------------------------------------------------------------
--- prelude: ctx.d.lua scope isolation
+-- prelude: ctx_types.lua scope isolation
 ---------------------------------------------------------------------------
 
-assert.describe("prelude: ctx.d.lua scope isolation", function()
+assert.describe("prelude: ctx_types.lua scope isolation", function()
     assert.it("checker-internal names (report, infer_expr_multi) absent from user scope", function()
-        -- These names are declared in ctx.d.lua, which is only loaded when
+        -- These names are declared in ctx_types.lua, which is only loaded when
         -- checking typechecker source files (lib/type/static/**). They must
         -- not appear in the scope of an ordinary user file.
         local _, ctx = check_mod.check_string("local x = 1", "user_file.lua")
@@ -6920,7 +6920,7 @@ assert.describe("prelude: ctx.d.lua scope isolation", function()
 
     assert.it("checker-internal names present when checking lib/type/static/ files", function()
         -- When the filename matches lib/type/static/, populate_checker is used
-        -- and ctx.d.lua declarations appear in scope.
+        -- and ctx_types.lua declarations appear in scope.
         local _, ctx = check_mod.check_string("local x = 1", "lib/type/static/constrain.lua")
         local intern_mod2 = require("lib.type.static.intern")
         local env_mod2 = require("lib.type.static.env")

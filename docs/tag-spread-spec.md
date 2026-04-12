@@ -77,7 +77,7 @@ For `rl > 1` (multiple capture targets), the existing C_INDEX path already handl
 ### constrain.lua — argument spread (future)
 `fn(string.find(s, p))` — the last argument is a spread. Not part of this spec; tracked separately.
 
-## stdlib.d.lua Updates Required
+## stdlib_types.lua Updates Required
 
 Functions currently using the union-of-tuples hack must be re-annotated:
 

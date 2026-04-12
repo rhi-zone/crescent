@@ -6,7 +6,7 @@
 
 ## Goal
 
-Express `pcall`'s type in stdlib.d.lua, remove the constrain.lua special case.
+Express `pcall`'s type in stdlib_types.lua, remove the constrain.lua special case.
 
 ## The Type
 
@@ -24,7 +24,7 @@ The return type depends on `f`'s return type. This requires a type-level intrins
 - If F's return is TAG_NEVER: produces `((true) | (false, string))` (no returns on success)
 - If F is not a function type (TAG_VAR, TAG_ANY, etc.): return `T_UNKNOWN`
 
-## stdlib.d.lua Declaration
+## stdlib_types.lua Declaration
 
 ```lua
 --:: declare pcall: <F: function>(f: F, ...) -> ...$PcallReturn<F>
@@ -64,7 +64,7 @@ The `...` in `pcall(f, ...)` passes remaining args to `f`. In the generic declar
 
 ### Removing the constrain.lua special case
 
-After `$PcallReturn<F>` is implemented and the declaration is in stdlib.d.lua, run tests. If all pass, delete the `fname == "pcall"` / `fname == "xpcall"` blocks in constrain.lua.
+After `$PcallReturn<F>` is implemented and the declaration is in stdlib_types.lua, run tests. If all pass, delete the `fname == "pcall"` / `fname == "xpcall"` blocks in constrain.lua.
 
 ## Tests
 

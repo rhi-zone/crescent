@@ -75,7 +75,7 @@ The primary use case for `{ #...T }` in user code is arithmetic value types:
 ```
 
 This lets `+`, `-`, `*` etc. typecheck on Vec2 values without writing out each
-metamethod. `number_meta` is already declared in stdlib.d.lua.
+metamethod. `number_meta` is already declared in stdlib_types.lua.
 
 ## Implementation notes
 

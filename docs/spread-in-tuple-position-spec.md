@@ -47,7 +47,7 @@ when processing a TAG_TUPLE that contains a trailing TAG_SPREAD entry):
 4. If the binding is **TAG_NEVER** (F returns nothing): the spread contributes
    zero elements — `(true, ...never)` → TAG_TUPLE(true_lit).
 
-This allows `$PcallReturn<F>` to be written entirely in stdlib.d.lua:
+This allows `$PcallReturn<F>` to be written entirely in stdlib_types.lua:
 ```lua
 --:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
 ```
@@ -108,7 +108,7 @@ if tag == TAG_TUPLE then
 end
 ```
 
-### stdlib.d.lua — replace $PcallReturn intrinsic declaration
+### stdlib_types.lua — replace $PcallReturn intrinsic declaration
 
 ```lua
 --:: declare pcall  = <F: function>(f: F, ...any) -> ...(PcallReturn<F>)

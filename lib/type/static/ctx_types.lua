@@ -1,4 +1,4 @@
--- lib/type/static/ctx.d.lua
+-- lib/type/static/ctx_types.lua
 -- Type declaration for the checker context (ctx) struct.
 -- Loaded by prelude.populate_checker() when self-checking typechecker source files.
 --

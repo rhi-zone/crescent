@@ -20,7 +20,7 @@ Three intrinsics:
 - `$PairsKey<T>` — the key type of T's indexer (or `string` for field-only tables, `integer` for arrays)
 - `$PairsVal<T>` — the value type of T's indexer (or union of all field value types for field-only tables)
 
-### stdlib.d.lua Declaration
+### stdlib_types.lua Declaration
 
 ```lua
 --:: declare pairs: <T>(t: T) -> ...($PairsIter<T>, T, $PairsKey<T>?)

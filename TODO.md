@@ -68,7 +68,7 @@ Every feature needs its own invariant class:
 - **Spread multi-return**: slot extraction, narrowing propagation across slots, spread in argument position
 - **HKTs**: applying a type constructor to a type argument produces the correct instantiation; HKT + generic constraints compose correctly
 - **Every intrinsic** — full list, each with its own contract. Type-level intrinsics: `$Keys<T>` (union of string literal field names), `$EachField<T, F>` (maps F over each field), `$EachUnion<T, F>` (maps F over each union arm), `$Opaque<T>` / `$Opaque<T, U>` (nominal newtype with optional exposed view), `$FfiC` (closed table from ffi.cdef calls), `$GlobalScope` (closed table of declared globals), `$Name` (string literal of declaration name), `$Require<T>` (module type from string literal).
-  - **Note: builtins must not be special-cased.** `require`, `pcall`/`xpcall`, `pairs`/`ipairs`, `type()`, `assert`, `error`, `select`, and stdlib functions like `string.find`/`io.open`/`string.byte` are currently hardcoded in constrain.lua. Each special case is a missing type system feature — the goal is to eliminate all of them by making stdlib.d.lua declarations expressive enough. The fuzz suite should verify each builtin's contract holds AND that the contract is expressible without special-casing. Removing a special case and replacing it with a stdlib.d.lua declaration is a correctness win, not just cleanup.
+  - **Note: builtins must not be special-cased.** `require`, `pcall`/`xpcall`, `pairs`/`ipairs`, `type()`, `assert`, `error`, `select`, and stdlib functions like `string.find`/`io.open`/`string.byte` are currently hardcoded in constrain.lua. Each special case is a missing type system feature — the goal is to eliminate all of them by making stdlib_types.lua declarations expressive enough. The fuzz suite should verify each builtin's contract holds AND that the contract is expressible without special-casing. Removing a special case and replacing it with a stdlib_types.lua declaration is a correctness win, not just cleanup.
 - **Match/narrowing patterns**: `if type(x) == "string"`, `if x then`, `if not x`, `if x == nil`, `and`/`or` chains — each must narrow to exactly what the spec says, no more, no less
 - **Generic constraints**: a generic `<T: Constraint>` rejects instantiations that violate the constraint; accepts all that satisfy it
 - **Literal types**: `1` is assignable to `integer` and `1` but not `2`; literal widening is explicit not implicit
@@ -100,8 +100,8 @@ Items that currently lack an implementer-ready spec:
 - [x] **Argument literal widening at typevar binding** — was already handled by `widen_for_sub` in `solve_callable`. Clarified with explicit `widen_literal` helper + comments + 10 tests confirming the behavior (ad58bc6).
 - [x] **GAP-HKT3 fix: `$Opaque` keys in lib/fp/** — applied to all 10 typeclass modules + 9 instance modules. `fa[Mappable.key]` now resolves via FLAG_OPAQUE_KEY. (2026-03-29, 839610f)
 - [x] **`$Require<T>` as parameterized intrinsic** — implemented (9d92308). `expand_require` in intrinsic.lua; `resolve_deferred_intrinsic` in solve.lua evaluates TAG_TYPE_CALL on TAG_INTRINSIC callees after arg solving. Module declaration processing moved to pass 0. constrain.lua special case preserved pending full de-specialcase.
-- [ ] **De-specialcase builtins** — `require` (f468b72), `pcall`/`xpcall` (d7950de), `pairs`/`ipairs` (d7950de) done. All stdlib tables (string/table/math/io/os/coroutine/debug + primitive meta types) now declared in stdlib.d.lua (33640d0). Remaining special-casing: `type()` narrowing in narrow.lua (justified, can stay), `require()` side effects in constrain.lua (architectural). Still too-loose: `select()` (needs overloads or literal matching), `string.match`/`gmatch`/`gsub` (need pattern introspection). `assert` and `error` are clean.
-- [x] **Eliminate intrinsics via `match` arm patterns** — MOSTLY DONE. Function-type arms, indexer arms, spread-in-tuple-position, all-fields pattern, and capture sigil all implemented (2026-03-29–30). `$PcallReturn`, `$PairsReturn`, `$IpairsReturn`, `$Keys`, `$Values`, `$IpairsValues` all deleted and replaced with pure match aliases in stdlib.d.lua.
+- [ ] **De-specialcase builtins** — `require` (f468b72), `pcall`/`xpcall` (d7950de), `pairs`/`ipairs` (d7950de) done. All stdlib tables (string/table/math/io/os/coroutine/debug + primitive meta types) now declared in stdlib_types.lua (33640d0). Remaining special-casing: `type()` narrowing in narrow.lua (justified, can stay), `require()` side effects in constrain.lua (architectural). Still too-loose: `select()` (needs overloads or literal matching), `string.match`/`gmatch`/`gsub` (need pattern introspection). `assert` and `error` are clean.
+- [x] **Eliminate intrinsics via `match` arm patterns** — MOSTLY DONE. Function-type arms, indexer arms, spread-in-tuple-position, all-fields pattern, and capture sigil all implemented (2026-03-29–30). `$PcallReturn`, `$PairsReturn`, `$IpairsReturn`, `$Keys`, `$Values`, `$IpairsValues` all deleted and replaced with pure match aliases in stdlib_types.lua.
   **Remaining intrinsics (permanent or blocked):**
   - `$Require<T>` — permanent; module system, needs literal type propagation through generics
   - `$Opaque<T>` — permanent; nominal identity
@@ -114,7 +114,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **fuzz_arb.lua sub_size halving reduces deep-type coverage** — added `M.arb_type_deep` (2026-03-29): uses `sub_size = min(size-1, 8)` for deeper trees, capped at 8 to prevent 2^N blowup. Used in fuzz_alg.lua invariants 15-18 (deep reflexivity, deep union intro, deep inter elim, deep intersection intro). Grammar-level tests still use halved arb_type (must parse strings).
 - [x] **`pcall`/`xpcall` de-specialcase** — implemented (d7950de): `$PcallReturn<F>` intrinsic.
 - [x] **`pairs`/`ipairs` de-specialcase** — implemented (d7950de): `$PairsReturn<T>`/`$IpairsReturn<T>` intrinsics.
-- [x] **Self-check regression: constrain.lua 60 errors** — fixed (5c23738): `--:` annotations added across constrain.lua, narrow.lua, check.lua, solve.lua, lsp.lua, ctx.d.lua, type_soundness_test.lua. All now self-check at 0 errors.
+- [x] **Self-check regression: constrain.lua 60 errors** — fixed (5c23738): `--:` annotations added across constrain.lua, narrow.lua, check.lua, solve.lua, lsp.lua, ctx_types.lua, type_soundness_test.lua. All now self-check at 0 errors.
 - [x] **Self-check: match.lua annotation pass** — fixed (6740aeb, 2026-03-30): added Ctx type to function signatures; --: integer for lists/fields:get(); --: any for merge_bindings. 0 errors, 6 intentional any warnings.
 
 ## typechecker soundness gaps (found by type_soundness_test.lua)
@@ -145,14 +145,14 @@ Items that currently lack an implementer-ready spec:
 
 ## typechecker stdlib / module typing
 
-- [x] **`module "name": T` syntax** — `--:: module "name": T` declares the type returned by `require("name")`. Implemented in ann.lua (ANN_MODULE), constrain.lua (module_types registry), prelude.lua (loaded from .d.lua files). Undeclared modules → `unknown`. stdlib.d.lua now declares `"ffi"` and `"bit"` properly.
+- [x] **`module "name": T` syntax** — `--:: module "name": T` declares the type returned by `require("name")`. Implemented in ann.lua (ANN_MODULE), constrain.lua (module_types registry), prelude.lua (loaded from .d.lua files). Undeclared modules → `unknown`. stdlib_types.lua now declares `"ffi"` and `"bit"` properly.
 - [ ] **`$Require<Path>` intrinsic** — `require()` is currently special-cased in constrain.lua: when the arg is a string literal, it does the `ctx.module_types` lookup inline. The aspirational form `--:: declare require: <T: string>(module: T): $Require<T>` needs two features not yet implemented:
   1. **Literal type propagation through generics** — calling `require("lib.json")` must bind `T` to `LIT_STRING "lib.json"`, not widened `string`. This is in tension with the argument-widening rule (literals widen to base type at call sites to avoid pinning typevars). The intrinsic doesn't need a special bound — `$Require<T>` evaluates to `module_types[T.literal_value]` if T resolved to a string literal, else `unknown`. The constraint `<T: string>` means "T must be assignable to string" (same semantics as TS `extends string`) — not "must be a literal", which is the bound's correct meaning and is already enforced by C_BOUND.
   2. **Parameterized intrinsics** — `$Require<T>` where `T` is a type variable, resolvable only when T is a bound literal. `resolve_named_type` currently only handles TAG_NAMED (concrete names), not TAG_TYPE_CALL on type variables.
-  Until both are done, `require()` stays special-cased. Milestone: `--:: declare require: <T: string>(module: T): $Require<T>` in stdlib.d.lua typechecks and produces correct module types.
-- [x] **`$FfiC` intrinsic** — implemented. `TAG_FFIC = 26`, deferred resolution in solve.lua, cdef.lua makes `T_FFI_C` closed (undeclared C symbols error), stdlib.d.lua declares `C: $FfiC`.
+  Until both are done, `require()` stays special-cased. Milestone: `--:: declare require: <T: string>(module: T): $Require<T>` in stdlib_types.lua typechecks and produces correct module types.
+- [x] **`$FfiC` intrinsic** — implemented. `TAG_FFIC = 26`, deferred resolution in solve.lua, cdef.lua makes `T_FFI_C` closed (undeclared C symbols error), stdlib_types.lua declares `C: $FfiC`.
 
-## stdlib.d.lua coverage gaps (audit 2026-04-01)
+## stdlib_types.lua coverage gaps (audit 2026-04-01)
 
 - [x] **Over-broad `any` return types** — PARTIALLY FIXED (06c6b38). Tightened 7: `coroutine.status` (literal union), `string.gmatch` (`function`), `table.remove` (`any | nil`), `coroutine.create`/`wrap`/`resume`/`yield` (function params + multi-return). Remaining:
   - `assert` → needs `typeof(val)` (type-level computation)
@@ -163,7 +163,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **Missing stdlib functions** — FIXED (819179f). Added `io.flush`/`input`/`output` + 8 `ffi.*` functions. Remaining:
   - `os.setlocale` (low)
   - `debug.getupvalue`, `debug.setupvalue` (low)
-- [ ] **`$GlobalScope` intrinsic undocumented** — used in stdlib.d.lua but not listed as a permanent intrinsic in CLAUDE.md. Document or replace.
+- [ ] **`$GlobalScope` intrinsic undocumented** — used in stdlib_types.lua but not listed as a permanent intrinsic in CLAUDE.md. Document or replace.
 
 ## typechecker type guards and assertions
 
@@ -783,11 +783,11 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 
 ### known false negatives (v2)
 - [x] **nil/boolean concat**: `nil .. "a"` silently passed — fixed by replacing is_concat_scalar tag whitelist with `__concat` metamethod presence check via meta_op_ret/prim_meta. nil and boolean have no __concat → correctly fail. string|nil union member fails correctly.
-- [x] **`_G` should be an intrinsic reflecting the global scope**: synthesized as `$GlobalScope` — closed TAG_TABLE (no fallback indexer), named fields per declared global, declared in stdlib.d.lua. TAG_INTRINSIC resolution in constrain.lua checks type aliases first so `$Name` works as a regular type reference when registered. (2026-03-19, 5a42a48)
-- [x] **`ctx.d.lua` leaks internal bindings into user scope**: `populate()` now only loads stdlib.d.lua; `populate_checker()` loads both. (2026-03-19, 9c9f788)
+- [x] **`_G` should be an intrinsic reflecting the global scope**: synthesized as `$GlobalScope` — closed TAG_TABLE (no fallback indexer), named fields per declared global, declared in stdlib_types.lua. TAG_INTRINSIC resolution in constrain.lua checks type aliases first so `$Name` works as a regular type reference when registered. (2026-03-19, 5a42a48)
+- [x] **`ctx_types.lua` leaks internal bindings into user scope**: `populate()` now only loads stdlib_types.lua; `populate_checker()` loads both. (2026-03-19, 9c9f788)
 
 ### annotation syntax gaps
-- [x] **Open table syntax in .d.lua**: `{ ... }` bare spread in table annotation creates a row variable; `{ fields..., ... }` = open table. `_G` now declared in stdlib.d.lua. (2026-03-03, commit 6e197c5)
+- [x] **Open table syntax in .d.lua**: `{ ... }` bare spread in table annotation creates a row variable; `{ fields..., ... }` = open table. `_G` now declared in stdlib_types.lua. (2026-03-03, commit 6e197c5)
 - [x] **`typeof` annotation**: `typeof x` captures the inferred type of binding `x`. TAG_TYPEOF = 25; ann.lua recognises `typeof <ident>`; resolve_annotation_type does scope lookup. Top-level `--::` decls with typeof are deferred until after gen_block. (2026-03-19, 913110e)
 - [x] **`typeof` in function signatures**: pre-bind param names as TAG_VAR placeholders before resolving annotations. All cases work: forward refs, backward refs, return refs, mutual refs.
 
@@ -876,7 +876,7 @@ Cat J — **FIXED 2026-03-02** (commit 0a91819):
 
 Cat G — string meta architecture: **FIXED 2026-03-02**
 - `ctx.prim_index` (TAG_* → __index TID) for method dispatch; `ctx.prim_meta` (TAG_* → op-metamethods TID) for operator dispatch.
-- Both populated by prelude.populate() from stdlib.d.lua aliases (number_meta, integer_meta, string_meta_ops, string var).
+- Both populated by prelude.populate() from stdlib_types.lua aliases (number_meta, integer_meta, string_meta_ops, string var).
 - infer.lua NODE_METHOD_CALL: generic prim_index[tag] lookup; literal strings normalized to TAG_STRING.
 - infer.lua meta_op_ret: extended to check prim_meta for primitives — unary `-integer` now returns integer (not number).
 - infer.lua binary dispatch (ARITH/CMP/CONCAT): TAG_TABLE guard prevents prim_meta from short-circuiting error checks and mixed-type arithmetic.
@@ -943,7 +943,7 @@ Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs
 - [x] String method dispatch (`s:gsub(...)` via prim_meta) — prim_index lookup in solve_has_field
 - [x] prim_index / metamethod lookup for primitives — same
 - [x] Narrowing (type(), nil checks, `if x.tag == "foo"`) — narrow_scope/apply_narrowed in constrain.lua
-- [x] pcall / xpcall — already correct via stdlib.d.lua `any` param declarations
+- [x] pcall / xpcall — already correct via stdlib_types.lua `any` param declarations
 - [x] Iterator inference (`for k, v in pairs(t)`) — already implemented in constrain.lua
 - [x] `or`-expression union inference (`x or default` → `T | U`) — already implemented in constrain.lua
 - [x] Correlated multi-return narrowing — C_INDEX + filter_tuple_union_arms + pcall intrinsic; io.open/string.find union-of-tuples stdlib types (2026-03-19)
@@ -955,8 +955,8 @@ Entrypoint: `check.check_string_v3(src)`. Status: Phase 1 (parallel) — v3 runs
 
 **Phase 3 — annotation pass (after Phase 2 cutover):**
 - [x] Rewrite remaining sumneko-syntax `.d.lua` files in crescent annotation syntax
-  (`--:` / `--::`). Files: `lib/http/format.d.lua`, `lib/lsp/types.d.lua`,
-  `lib/imap/format.d.lua`, `lib/matrix/format.d.lua`. Done: commit `2a9ec10`.
+  (`--:` / `--::`). Files: `lib/http/format_types.lua`, `lib/lsp/types.d.lua`,
+  `lib/imap/format_types.lua`, `lib/matrix/format_types.lua`. Done: commit `2a9ec10`.
 - [ ] Strip all `--:` annotations from own codebase, run v3, record error set
 - [ ] Re-annotate only where errors appear (load-bearing annotations)
 - [ ] Mark inference-gap annotations with `-- TODO: v3 gap` comment so they're removable in bulk when the gap closes
@@ -1000,11 +1000,11 @@ Blocking items for cutover:
   - "missing required argument" now shows expected type: **DONE** (2026-03-10) — `argument 1: missing required argument (expected 'string', got nil)`
   - Long type truncation: **DONE** (2026-03-10) — display_short() at 120 chars with …
   - "missing required argument" now includes parameter name: **DONE** (2026-03-10) — `argument 1 'opts': missing required argument...`; param name IDs stored in TypeSlot data[5]/data[6], threaded through instantiate/substitute
-  - Named params in annotations: **DONE** (2026-03-10) — `(x: integer, y: string) -> boolean` syntax in ann.lua; stdlib.d.lua updated to use named params throughout; resolve_annotation_type passes names to make_func via data[5]/data[6]
+  - Named params in annotations: **DONE** (2026-03-10) — `(x: integer, y: string) -> boolean` syntax in ann.lua; stdlib_types.lua updated to use named params throughout; resolve_annotation_type passes names to make_func via data[5]/data[6]
   - Warn on annotation-only functions missing param names: **DONE** (2026-03-10) — `process_type_decls` in infer.lua emits a warning for `--:: declare fn = (T1, T2) -> ret` where the function type has params but no names; inline `--:` annotations on real functions don't warn (names come from AST)
   - [x] Overload mismatch: show *which* overload candidates existed and why each one failed (candidate-by-candidate diff) — **DONE** (2026-03-11): try_call_args (non-mutating) tries each candidate; first match wins; if none match, reports "no matching overload" with per-candidate argument errors
   - **DONE** (2026-03-15): Error message wording overhaul — natural English, no jargon. Patterns: `` `name` is `X`, but this location expects `Y` `` (field re-assign); `` `foo.baz` doesn't exist `` (field not found, no field listing); `` `arg` is `X`, but `fn` expects `Y` `` (call mismatch, uniform regardless of whether X is unknown). Secondary spans for field errors via reparse-on-error (same-file: AST walk; cross-module: reparse from disk). "Did you mean" and "consider annotating" suggestions removed — exact error is enough.
-  - ctx.d.lua — **DONE** (2026-03-15): `lib/type/static/ctx.d.lua` declares `Ctx` type alias; loaded by prelude.lua; ~30 functions in infer.lua annotated; self-check 0 errors.
+  - ctx_types.lua — **DONE** (2026-03-15): `lib/type/static/ctx_types.lua` declares `Ctx` type alias; loaded by prelude.lua; ~30 functions in infer.lua annotated; self-check 0 errors.
   - Field re-assignment type-check — **DONE** (2026-03-15): `` `name` is `X`, but this location expects `Y` `` with secondary "set to `X` here:" span.
   - Remaining gap: suggestions still listed as open below — actually dropped; error messages are intentionally minimal ("exact error, no more, no less")
 - [ ] High-perf SHA-256 for .cri content addressing: current pure-Lua impl is correct but slow
@@ -1015,8 +1015,8 @@ Blocking items for cutover:
 - [x] `<T>` explicit generic annotation syntax — `--: <T>(T) -> T` on a function; forall vars are generic typevars, freshened at each call site; composes with type-alias params (`--:: Name<T> = …`)
 - [x] Partially inferred / partially specified generics — `f --[[:<json.Format, _>]] (val)` where `_` means infer. Annotation on any line `[callee.line, node.line]` (node.line = `(` line). Lua 5.1/LuaJIT constraint: `(` cannot be on a new line from the callee (ambiguous call syntax), so annotation must share the callee's line in practice. Lua 5.2+ compat removes this restriction.
 - [x] Parse LuaJIT FFI cdef blocks
-- [x] **stdlib.d.lua: type `bit.*` library** — all bit.* fns typed, return integer
-- [ ] **stdlib.d.lua: multi-target support** — stdlib types differ by runtime/version (LuaJIT vs Lua 5.1/5.2/5.3/5.4); currently stdlib.d.lua targets LuaJIT but isn't labelled as such; design needed: separate .d.lua files per target, or conditional sections, or CLI `--target` flag that selects which prelude to load
+- [x] **stdlib_types.lua: type `bit.*` library** — all bit.* fns typed, return integer
+- [ ] **stdlib_types.lua: multi-target support** — stdlib types differ by runtime/version (LuaJIT vs Lua 5.1/5.2/5.3/5.4); currently stdlib_types.lua targets LuaJIT but isn't labelled as such; design needed: separate .d.lua files per target, or conditional sections, or CLI `--target` flag that selects which prelude to load
 - [x] Field assignment `M.foo = val` now adds the field to M's table type via NODE_FIELD_EXPR handling in NODE_ASSIGN_STMT. Structural-inference guard: skip when existing field type is TAG_VAR (prevents Cat J regression where `s.pos = s.pos + 1` binds the structural typevar).
 - [x] **Index assignment type-check** (`t[k] = v`) — 2026-03-15: string literal keys handled as field assignment (add/check named field); non-literal keys checked against matching indexer if present; TAG_VAR tables constrained to have `[key_type]: val_type` indexer. Conservative: no indexer added to extensible tables with no matching indexer (avoids false positives on `returns[#returns+1] = v` patterns). Field re-assignment for index exprs now matches field-expr behavior.
   - Session 15 (2026-03-15, 8486a33): enforcement tightened — error on type mismatch for concrete key types (literal, integer, etc.); skip check only when indexer key is T_ANY/T_UNKNOWN (dynamic dispatch tables). `{ [1]: string }` with `arr[1] = 42` now errors correctly.
@@ -1024,12 +1024,12 @@ Blocking items for cutover:
 - [x] **LIT_NUMBER float fix** — Session 16 (2026-03-15, b00b27b): `double_to_i32x2`/`i32x2_to_double` helpers in defs.lua. Lex, parse, ann, types, infer, cri all updated. numvals side-array removed. Non-integer floats now produce `LIT_NUMBER` (not `T_NUMBER`), enabling `x == 3.14` narrowing.
 - [x] **`x == 3.14` narrowing** — (2026-03-15, b629ef6): `make_lit_eq` in narrow.lua extended to handle LIT_NUMBER non-integer floats via `i32x2_to_double`. `M.unify`/`M.try_unify` in unify.lua fixed to compare `data[2]` for LIT_NUMBER literals (was only comparing `data[1]`).
 - [x] **Enum inference** — Session 16 (2026-03-15): `TAG_ENUM_MEMBER = 24` (defs/types/unify/narrow/infer). All-literal same-kind table fields promoted to enum members via `try_promote_enum` in `StmtRule[NODE_LOCAL_STMT]`. `Status.OK` displays as `Status.OK`, `EnumMember <: integer/string` in unify. `x == Status.OK` narrowing via `enum_eq` kind in narrow.lua. Mixed-kind tables not promoted. Tests: 5 new assertions.
-- [x] **Newtype IDs for type/intern/node IDs** — Session 16 (2026-03-15, f0cc150): `TypeId`, `InternId`, `NodeId`, `ListIdx` declared in ctx.d.lua. `load_decls` pass 2 in prelude.lua assigns unique `nominal_id` per newtype (was all 0, making them unify).
+- [x] **Newtype IDs for type/intern/node IDs** — Session 16 (2026-03-15, f0cc150): `TypeId`, `InternId`, `NodeId`, `ListIdx` declared in ctx_types.lua. `load_decls` pass 2 in prelude.lua assigns unique `nominal_id` per newtype (was all 0, making them unify).
 - [x] **Explicit `any` warning** — Session 16 (2026-03-15): DONE. `resolve_annotation_type` emits a warning when `TAG_ANY` is encountered in an explicit annotation (`ctx._ann_warn_line` set at call sites in LOCAL_STMT, FUNC_EXPR, FUNC_DECL). infer.lua annotations fixed (55 → 0 warnings).
 - [x] **Structured diagnostics** — Session 16 (2026-03-15, 3cfd4b2): `M.E` table with 22 integer error codes in defs.lua. `errors.format_diag(code, args)` with per-code template closures. `report`/`warn` now take `(ctx, line, col, code, args)`. All 28 call sites updated.
-- [x] v2 stdlib.d.lua: stdlib.d.lua created (2026-03-02); prelude.lua replaced with load_decls().
+- [x] v2 stdlib_types.lua: stdlib_types.lua created (2026-03-02); prelude.lua replaced with load_decls().
   `--:: declare name = type` for variable bindings; `--[[:: name = { ... }]]` for type aliases.
-  Primitive meta types (number_meta, integer_meta, string_meta_ops) declared in stdlib.d.lua;
+  Primitive meta types (number_meta, integer_meta, string_meta_ops) declared in stdlib_types.lua;
   derived into ctx fields after load_decls runs.
 - [x] ann.lua: `declare` keyword added to ANN_DECL parser for variable bindings (vs type aliases).
 - [x] ann.lua: function data[4] (vararg) fixed — trailing `...T` SPREAD now extracted correctly.

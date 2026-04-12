@@ -775,7 +775,7 @@ contract.
 
 `$Values` and `$IpairsValues` together replace the former `$PairsReturn<T>` and
 `$IpairsReturn<T>` compiler intrinsics.  Those are now expressed as user-definable
-match aliases in `stdlib.d.lua`:
+match aliases in `stdlib_types.lua`:
 
 ```lua
 --:: PairsReturn<T> = match T {
@@ -788,7 +788,7 @@ match aliases in `stdlib.d.lua`:
 --:: }
 ```
 
-`PcallReturn<F>` is also now a match alias in `stdlib.d.lua` (implemented via
+`PcallReturn<F>` is also now a match alias in `stdlib_types.lua` (implemented via
 `(true, ...R)` spread-in-tuple-position syntax, 2026-03-30).
 
 Permanent intrinsics (will not be eliminated): `$Require`, `$Opaque`, `$FfiC`,

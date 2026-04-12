@@ -54,7 +54,7 @@ they match a single pattern against the whole type, not iterate.
 
 `$Values<T>` is the minimal addition: one new intrinsic that encapsulates
 the field-iteration logic already in `extract_pairs_kv`. Once it exists,
-`$PairsReturn` and `$IpairsReturn` become expressible in stdlib.d.lua and
+`$PairsReturn` and `$IpairsReturn` become expressible in stdlib_types.lua and
 their intrinsic branches can be deleted.
 
 The long-term goal (elimination of all `$`-prefixed intrinsics except
@@ -87,7 +87,7 @@ end
 into a standalone function and call it from both the existing
 `extract_pairs_kv` and the new `$Values`/`$IpairsValues` branches.
 
-### stdlib.d.lua — replace $PairsReturn and $IpairsReturn
+### stdlib_types.lua — replace $PairsReturn and $IpairsReturn
 
 ```lua
 --:: declare pairs  = <T>(t: T) -> ...(PairsReturn<T>)
@@ -110,7 +110,7 @@ concrete at the time the match arms are tried.
 
 ### intrinsic.lua — delete $PairsReturn and $IpairsReturn branches
 
-Once the match aliases are in stdlib.d.lua and tests pass, delete the
+Once the match aliases are in stdlib_types.lua and tests pass, delete the
 `PairsReturn` and `IpairsReturn` branches from `resolve_intrinsic`.
 
 ## Known Limitation: $PairsReturn Scope Leak

@@ -4,9 +4,9 @@
 
 `require()` is special-cased in `constrain.lua`: when the argument is a string literal, it looks up `ctx.module_types[literal_value]` inline. This is a hardcoded special case that violates the principle "builtins must not be special-cased."
 
-The goal: declare `require` in `stdlib.d.lua` as a generic function using `$Require<T>`, remove the constrain.lua special case.
+The goal: declare `require` in `stdlib_types.lua` as a generic function using `$Require<T>`, remove the constrain.lua special case.
 
-## Target stdlib.d.lua Declaration
+## Target stdlib_types.lua Declaration
 
 ```lua
 --:: declare require: <T: string>(module: T) -> $Require<T>
@@ -77,7 +77,7 @@ Alternative (simpler): since `require()` is currently the only case, keep the co
 Only after:
 1. Parameterized intrinsic evaluation is implemented and tested
 2. Argument literal widening exemption for intrinsic calls is implemented
-3. `--:: declare require: <T: string>(module: T) -> $Require<T>` in stdlib.d.lua passes and produces correct types
+3. `--:: declare require: <T: string>(module: T) -> $Require<T>` in stdlib_types.lua passes and produces correct types
 
 Then: delete the `if fname == "require" then ... end` block in constrain.lua.
 
@@ -94,5 +94,5 @@ Then: delete the `if fname == "require" then ... end` block in constrain.lua.
 - `lib/type/static/intrinsic.lua` — `expand_require`, dispatch registration
 - `lib/type/static/solve.lua` — TAG_TYPE_CALL on TAG_INTRINSIC callee
 - `lib/type/static/constrain.lua` — argument widening exemption; eventually remove require special case
-- `lib/type/static/stdlib.d.lua` — milestone declaration
+- `lib/type/static/stdlib_types.lua` — milestone declaration
 - `lib/type/static/type_test.lua` — tests

@@ -34,7 +34,7 @@ local M = {}
 -- if the pool's next_id differs from the expected first stdlib ID (22) at
 -- populate time, the cache is bypassed and a full re-parse is done.
 --
--- Call M.clear_cache() to force re-parsing (e.g. if stdlib .d.lua files
+-- Call M.clear_cache() to force re-parsing (e.g. if stdlib _types.lua files
 -- change at runtime, which should not happen in normal usage).
 local _cache = {}   -- path → { ar, strings, first_id }
 
@@ -42,7 +42,7 @@ function M.clear_cache()
     _cache = {}
 end
 
--- Parse a .d.lua declaration file and populate ctx.scope.
+-- Parse a _types.lua declaration file and populate ctx.scope.
 -- Uses the annotation pipeline.
 -- Variable declarations (--:: declare name = type) are bound in ctx.scope.
 -- Type aliases (--:: Name = type) are registered in ctx.scope.type_bindings.
@@ -212,7 +212,7 @@ end
 -- Must be called AFTER load_decls so that all stdlib (and optionally checker)
 -- bindings are already in scope.  Pre-register the $GlobalScope alias before
 -- load_decls and call this function after; it patches the alias body and
--- re-binds _G so the declaration in stdlib.d.lua resolves correctly.
+-- re-binds _G so the declaration in stdlib_types.lua resolves correctly.
 local function synthesize_G(ctx)
     local types_mod = require("lib.type.static.types")
 
@@ -231,7 +231,7 @@ local function synthesize_G(ctx)
 
     -- Patch the pre-registered $GlobalScope alias so that $GlobalScope resolves
     -- to this type everywhere (including the --:: declare _G = $GlobalScope in
-    -- stdlib.d.lua that was already processed with a placeholder body).
+    -- stdlib_types.lua that was already processed with a placeholder body).
     local gs_name_id = intern_mod.intern(ctx.pool, "GlobalScope")
     local alias = env_mod.lookup_type(ctx.scope, gs_name_id)
     if alias then alias.body = g_tid end
@@ -243,7 +243,7 @@ local function synthesize_G(ctx)
 end
 
 -- Pre-register the $GlobalScope type alias with a T_ANY placeholder so that
--- --:: declare _G = $GlobalScope in stdlib.d.lua can resolve without error.
+-- --:: declare _G = $GlobalScope in stdlib_types.lua can resolve without error.
 -- synthesize_G() patches this alias body with the real type after load_decls.
 local function prereq_G(ctx)
     local gs_name_id = intern_mod.intern(ctx.pool, "GlobalScope")
@@ -251,28 +251,28 @@ local function prereq_G(ctx)
 end
 
 -- Populate ctx.scope with Lua 5.1 / LuaJIT stdlib bindings.
--- Only loads stdlib.d.lua — does NOT load ctx.d.lua.
--- ctx.d.lua declares typechecker-internal functions and must not appear in
+-- Only loads stdlib_types.lua — does NOT load ctx_types.lua.
+-- ctx_types.lua declares typechecker-internal functions and must not appear in
 -- user-file scope; use populate_checker() for self-checking typechecker sources.
 function M.populate(ctx)
     local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     prereq_G(ctx)
-    load_decls(ctx, dir .. "stdlib.d.lua")
+    load_decls(ctx, dir .. "stdlib_types.lua")
     synthesize_G(ctx)
 end
 
--- Populate ctx.scope with stdlib AND typechecker-internal declarations (ctx.d.lua).
+-- Populate ctx.scope with stdlib AND typechecker-internal declarations (ctx_types.lua).
 -- Use this only when checking typechecker source files themselves, so that
 -- internal functions like `report`, `infer_expr_multi`, etc. are in scope.
--- Re-synthesizes _G after loading ctx.d.lua so that checker-internal names are
+-- Re-synthesizes _G after loading ctx_types.lua so that checker-internal names are
 -- also reachable via _G when self-checking.
 function M.populate_checker(ctx)
     local src_path = debug.getinfo(1, "S").source:gsub("^@", "")
     local dir = src_path:match("^(.+/)[^/]+$") or "./"
     prereq_G(ctx)
-    load_decls(ctx, dir .. "stdlib.d.lua")
-    load_decls(ctx, dir .. "ctx.d.lua")
+    load_decls(ctx, dir .. "stdlib_types.lua")
+    load_decls(ctx, dir .. "ctx_types.lua")
     synthesize_G(ctx)
 end
 

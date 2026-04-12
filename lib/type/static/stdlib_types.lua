@@ -1,4 +1,4 @@
--- lib/type/static/stdlib.d.lua
+-- lib/type/static/stdlib_types.lua
 -- Lua 5.1 / LuaJIT standard library type declarations.
 -- Loaded by prelude.populate(); no executable code here.
 -- Variable bindings use --:: declare name = type.

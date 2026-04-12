@@ -33,7 +33,7 @@ store_mt.__index = store_mt
 -- Helper: get last insert rowid from a db connection.
 -- Extracted into a separate function because the typechecker narrows self._db's
 -- open-table type after self._db:execute() calls, making last_insert_rowid
--- (which is not in stdlib.d.lua) resolve to unknown and become uncallable.
+-- (which is not in stdlib_types.lua) resolve to unknown and become uncallable.
 -- Calling it in a fresh scope avoids the narrowing conflict.
 local function db_last_rowid(db)
 	return db:last_insert_rowid()

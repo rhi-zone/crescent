@@ -90,7 +90,7 @@ concrete type lookup (must resolve or the arm fails).
 
 ## Migration
 
-All existing match patterns in stdlib.d.lua use `%`:
+All existing match patterns in stdlib_types.lua use `%`:
 
 | Before             | After              |
 |--------------------|--------------------|
