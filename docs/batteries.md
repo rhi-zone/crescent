@@ -495,6 +495,33 @@ or scalar). Size/RGBA color interpolated over lifetime fraction. `emitter:update
 `burst(n)`, `each(fn)`, `stop`/`start`/`reset`. Built-in affectors: gravity, drag, attractor,
 turbulence. Custom affectors via `add_affector(fn)`. 66 assertions.
 
+**Entity-Component System** (`lib/entity_component`) — **implemented**. Lightweight in-memory
+ECS distinct from the SQLite-backed `lib/ecs`. `world:register(name, defaults)`, `entity()`,
+`add`/`remove`/`get`/`has`/`destroy`. `world:query(...)` iterator yields live component
+references. `world:system(components, fn)` + `run(sys, ...)`. `count(name?)`. Event bus:
+`on`/`emit`; lifecycle events fire automatically (entity_created/destroyed, component_added/
+removed). `world:clear()`. Multiple independent worlds. 70 assertions.
+
+**Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
+with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
+time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
+`{moves, apply, terminal, evaluate}`. Transposition table when `game.hash` provided. Move
+ordering hook. Tested with tic-tac-toe and pick-from-pile. 23 assertions.
+
+**Genetic Algorithm** (`lib/genetic`) — **implemented**. Evolutionary optimization framework.
+`M.run(opts)` / `M.step(pop, opts)`. Selection: tournament, roulette wheel, rank-based.
+Elitism (top N survive unchanged). Early stopping on fitness plateau. Built-in genome helpers:
+`M.genomes.binary(n)` (bit-flip/single-point), `M.genomes.real(n, lo, hi)` (blend crossover),
+`M.genomes.permutation(n)` (OX1 crossover, swap mutation). History: `{gen, best, avg}` per
+generation. 55 assertions.
+
+**Convex Hull** (`lib/convex_hull`) — **implemented**. 2D computational geometry.
+`convex_hull` (Graham scan), `quickhull`. `point_in_hull` (O(log n) binary search),
+`point_in_polygon` (winding number). Polygon: `area` (shoelace), `centroid`, `perimeter`,
+`is_convex`. `douglas_peucker` simplification. `min_bounding_circle` (Welzl). Line geometry:
+`segments_intersect`, `segment_intersection`, `point_to_segment_dist`. `triangulate`
+(ear-clipping, n-2 triangles). 52 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
