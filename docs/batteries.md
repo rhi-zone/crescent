@@ -710,6 +710,32 @@ Iteration: `elements` (repeated), `pairs`, `keys`. Set ops (return new multisets
 `scale`. Predicates: `subset`, `eq`. Functional: `map` (merges counts for same new element),
 `filter`, `each`. Analytics: `most_common`, `least_common`. 114 assertions.
 
+**Inverted Index** (`lib/inverted_index`) — **implemented**. Full-text search inverted index
+with BM25 scoring. `II.new(opts)` with configurable k1, b, tokenizer, stemmer. `add` /
+`add_all` / `remove`. `search(query, opts)` — OR/AND boolean with optional `limit`,
+returns `{id, score}` pairs sorted by score. `phrase_search` — position-based adjacency.
+`doc_count` / `term_count` / `terms_for`. `serialize`/`deserialize` round-trip. 74 assertions.
+
+**CRC-32** (`lib/crc32`) — **implemented**. CRC-32 checksum variants: IEEE 802.3 (zlib/gzip/PNG
+polynomial `0xEDB88320`), Castagnoli (iSCSI/SCTP/Btrfs `0x82F63B78`), Koopman (`0xEB31D82E`).
+Streaming accumulator via `M.stream()` (`:update`/`:finish`/`:hex`/`:reset`). `M.combine` —
+GF(2) matrix exponentiation for combining two CRCs without re-processing A.
+Check vectors: IEEE `"123456789"` → `0xCBF43926`, Castagnoli → `0xE3069283`. 60 assertions.
+
+**LZ77** (`lib/lz77`) — **implemented**. Pure Lua LZ77 sliding-window compression.
+Frame format: `LZ77` magic + 1-byte window_bits + 4-byte LE original length + token stream.
+Greedy hash-chain match search (32-candidate max). Tokens: literal (`0x00` + byte), match
+(`0x01` + 2-byte dist + 2-byte len), end (`0xFF`). `M.compress`/`M.decompress`; streaming
+`M.compressor()`/`M.decompressor()`. Codec aliases `encode`/`decode`. 1000 'a's → 17 bytes.
+92 assertions.
+
+**Duration** (`lib/duration`) — **implemented**. Time duration parsing, formatting, and
+arithmetic. `D.new(seconds)`, `D.from_parts({days,hours,minutes,seconds,milliseconds})`,
+`D.parse` handles composite strings (`"1h30m45s"`, `"2d 4h 30m"`, `"1:30:45"`, `"1.5h"`,
+negative). `format()` modes: default, `"HH:MM:SS"`, `"compact"`, `"long"` (singular/plural),
+`"iso"` (ISO 8601 PT...), `"clock"`. Arithmetic: `add/sub/mul/div/neg/abs`. Constants:
+`D.SECOND/MINUTE/HOUR/DAY/WEEK`. 110 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
