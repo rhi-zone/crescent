@@ -281,3 +281,108 @@ end)
 T.describe("index access", function()
     has("local x = t[k]", "t[k]", "index access")
 end)
+
+-- ---------------------------------------------------------------------------
+-- OOP class pattern: __index = table metatable
+-- ---------------------------------------------------------------------------
+
+local oop_basic = [[
+local M = {}
+M.__index = M
+
+function M.new(x, y)
+  local self = setmetatable({}, M)
+  self.x = x
+  self.y = y
+  return self
+end
+
+function M:greet()
+  return "hi " .. self.x
+end
+
+function M.version()
+  return 1
+end
+]]
+
+T.describe("OOP: class keyword emitted", function()
+    has(oop_basic, "class M {", "class declaration")
+    hasnt(oop_basic, "local M = {}", "no local table decl")
+    hasnt(oop_basic, "M.__index = M", "no __index assignment")
+end)
+
+T.describe("OOP: constructor emitted", function()
+    has(oop_basic, "constructor(x, y)", "constructor signature")
+    has(oop_basic, "const self = this;", "self = this preamble in ctor")
+    -- setmetatable call must be removed
+    hasnt(oop_basic, "setmetatable", "no setmetatable call")
+    -- return self must be removed from constructor
+    hasnt(oop_basic, "return self", "no return self in ctor")
+end)
+
+T.describe("OOP: instance method emitted", function()
+    has(oop_basic, "greet()", "instance method signature (no self param)")
+    has(oop_basic, "const self = this;", "self = this preamble in method")
+end)
+
+T.describe("OOP: static method emitted", function()
+    has(oop_basic, "static version()", "static method")
+end)
+
+T.describe("OOP: setmetatable with {__index=M} variant", function()
+    local src = [[
+local A = {}
+A.__index = A
+
+function A.new(v)
+  local self = setmetatable({}, { __index = A })
+  self.v = v
+  return self
+end
+
+function A:get()
+  return self.v
+end
+]]
+    has(src, "class A {", "class from {__index=M}")
+    hasnt(src, "setmetatable", "no setmetatable")
+    has(src, "constructor(v)", "constructor")
+    has(src, "get()", "instance method")
+end)
+
+T.describe("OOP: explicit self parameter", function()
+    local src = [[
+local Vec = {}
+Vec.__index = Vec
+
+function Vec.new(x, y)
+  local self = setmetatable({}, Vec)
+  self.x = x
+  self.y = y
+  return self
+end
+
+function Vec.dot(self, other)
+  return self.x * other.x + self.y * other.y
+end
+]]
+    has(src, "class Vec {", "class emitted")
+    has(src, "dot(other)", "explicit self stripped from params")
+    hasnt(src, "dot(self,", "no self in emitted params")
+end)
+
+T.describe("OOP: plain table without __index stays unchanged", function()
+    local src = [[
+local t = {}
+t.x = 1
+]]
+    has(src, "const t = {}", "plain table is const, not class")
+    hasnt(src, "class t", "no class for plain table")
+end)
+
+T.describe("OOP: M.new() → new M() still works after class synthesis", function()
+    -- When calling the constructor from outside the class definition, x.new(...)
+    -- is already translated to new x(...) by the existing rule.
+    has("local obj = M.new(1, 2)", "new M(1, 2)", "x.new → new x still works")
+end)

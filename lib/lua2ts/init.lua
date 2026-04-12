@@ -843,7 +843,12 @@ end
 emit_block = function(ctx, bs, bl)
     local stmts = ctx:list(bs, bl)
     for _, sid in ipairs(stmts) do
-        emit_stmt(ctx, sid)
+        -- Skip statements that have been absorbed into class declarations.
+        if ctx.skip_stmts and ctx.skip_stmts[sid] then
+            -- (absorbed into a class declaration)
+        else
+            emit_stmt(ctx, sid)
+        end
     end
 end
 
@@ -868,6 +873,319 @@ local function emit_decl_annotations(ctx)
 end
 
 -- ---------------------------------------------------------------------------
+-- Class pattern scanner
+--
+-- Detects the Lua OOP prototype pattern at chunk level and returns a table
+-- describing each discovered class prototype so the emitter can emit TS
+-- `class` syntax instead of individual statements.
+--
+-- Detected patterns (all at top-level of the chunk):
+--   local M = {}                       → proto declaration
+--   M.__index = M                      → marks M as a class prototype
+--   function M.new(...) ... end        → constructor
+--   function M:method(...)             → instance method (self prepended by parser)
+--   function M.method(self, ...)       → instance method (explicit self)
+--   function M.static(...)             → static method (no self)
+--
+-- Returns: { [proto_name] = ClassInfo }
+-- ClassInfo = {
+--   decl_id       : node id of `local M = {}` (to skip)
+--   index_id      : node id of `M.__index = M` (to skip)
+--   ctor_id       : node id of `function M.new(...)` (to emit as constructor)
+--   methods       : array of { id, name, is_static }
+-- }
+-- skip_ids: set of all stmt ids that should NOT be emitted by emit_stmt.
+-- ---------------------------------------------------------------------------
+
+-- Returns the single string name of an identifier node, or nil.
+local function ident_name(ctx, nid)
+    local n = ctx:node(nid)
+    if n.kind ~= defs.NODE_IDENTIFIER then return nil end
+    return ctx:name(n.d[1])
+end
+
+-- Returns (obj_name, field_name) if nid is a NODE_FIELD_EXPR whose object is
+-- a simple identifier, otherwise nil.
+local function field_of_ident(ctx, nid)
+    local n = ctx:node(nid)
+    if n.kind ~= defs.NODE_FIELD_EXPR then return nil end
+    local obj_name = ident_name(ctx, n.d[1])
+    if not obj_name then return nil end
+    local field_name = ctx:name(n.d[2])
+    return obj_name, field_name
+end
+
+-- Returns true if nid is a call to setmetatable(_, proto_name) or
+-- setmetatable(_, { __index = proto_name }).
+local function is_setmetatable_call(ctx, nid, proto_name)
+    local n = ctx:node(nid)
+    if n.kind ~= defs.NODE_CALL_EXPR then return false end
+    local callee_n = ctx:node(n.d[1])
+    if callee_n.kind ~= defs.NODE_IDENTIFIER then return false end
+    if ctx:name(callee_n.d[1]) ~= "setmetatable" then return false end
+    if n.d[3] ~= 2 then return false end  -- must have exactly 2 args
+    local args = ctx:list(n.d[2], 2)
+    local mt_n = ctx:node(args[2])
+    -- setmetatable(t, M)
+    if mt_n.kind == defs.NODE_IDENTIFIER then
+        return ctx:name(mt_n.d[1]) == proto_name
+    end
+    -- setmetatable(t, { __index = M })
+    if mt_n.kind == defs.NODE_TABLE_EXPR and mt_n.d[2] == 1 then
+        local fields = ctx:list(mt_n.d[1], 1)
+        local fn = ctx:node(fields[1])
+        -- key must be __index
+        if fn.d[1] == -1 then return false end  -- positional field
+        local key_n = ctx:node(fn.d[1])
+        if key_n.kind ~= defs.NODE_LITERAL or key_n.d[1] ~= defs.LIT_STRING then return false end
+        if ctx:name(key_n.d[2]) ~= "__index" then return false end
+        -- value must be proto_name
+        local val_name = ident_name(ctx, fn.d[2])
+        return val_name == proto_name
+    end
+    return false
+end
+
+local function scan_classes(ctx, stmt_ids)
+    local classes = {}   -- { [proto_name] = ClassInfo }
+    local skip    = {}   -- { [stmt_id] = true }
+
+    -- Pass 1: find `local M = {}` and `M.__index = M`.
+    for _, sid in ipairs(stmt_ids) do
+        local sn = ctx:node(sid)
+
+        -- local M = {}
+        if sn.kind == defs.NODE_LOCAL_STMT then
+            local names = ctx:list(sn.d[1], sn.d[2])
+            if sn.d[2] == 1 and sn.d[4] == 1 then
+                local name = ctx:name(names[1])
+                local exprs = ctx:list(sn.d[3], 1)
+                local val_n = ctx:node(exprs[1])
+                if val_n.kind == defs.NODE_TABLE_EXPR and val_n.d[2] == 0 then
+                    -- `local M = {}` — candidate prototype declaration
+                    if not classes[name] then
+                        classes[name] = {
+                            decl_id  = sid,
+                            index_id = nil,
+                            ctor_id  = nil,
+                            methods  = {},
+                        }
+                    end
+                end
+            end
+
+        -- M.__index = M
+        elseif sn.kind == defs.NODE_ASSIGN_STMT then
+            if sn.d[2] == 1 and sn.d[4] == 1 then
+                local targets = ctx:list(sn.d[1], 1)
+                local exprs   = ctx:list(sn.d[3], 1)
+                local obj, field = field_of_ident(ctx, targets[1])
+                if obj and field == "__index" then
+                    local rhs = ident_name(ctx, exprs[1])
+                    if rhs == obj and classes[obj] then
+                        classes[obj].index_id = sid
+                        skip[sid] = true
+                    end
+                end
+            end
+        end
+    end
+
+    -- Remove candidates that never got M.__index = M (they're not OOP prototypes).
+    for name, info in pairs(classes) do
+        if not info.index_id then
+            classes[name] = nil
+        end
+    end
+
+    -- Pass 2: find constructor and methods.
+    for _, sid in ipairs(stmt_ids) do
+        local sn = ctx:node(sid)
+        if sn.kind == defs.NODE_FUNC_DECL then
+            local name_nid = sn.d[1]
+            local obj, field = field_of_ident(ctx, name_nid)
+            if obj and classes[obj] then
+                local info = classes[obj]
+                if field == "new" then
+                    info.ctor_id = sid
+                    skip[sid] = true
+                else
+                    -- Determine if instance method: first param is "self"
+                    local is_instance = false
+                    local ps, pl = sn.d[2], sn.d[3]
+                    if pl >= 1 then
+                        local params = ctx:list(ps, pl)
+                        local first_name = ctx:name(params[1])
+                        if first_name == "self" then
+                            is_instance = true
+                        end
+                    end
+                    info.methods[#info.methods + 1] = {
+                        id        = sid,
+                        name      = field,
+                        is_static = not is_instance,
+                    }
+                    skip[sid] = true
+                end
+            end
+        end
+    end
+
+    -- Mark decl_id for skipping only for confirmed prototypes.
+    for _, info in pairs(classes) do
+        skip[info.decl_id] = true
+        if info.ctor_id then skip[info.ctor_id] = true end
+    end
+
+    return classes, skip
+end
+
+-- Emit a constructor body, transforming it into a TypeScript constructor.
+-- Skips: `local self = setmetatable(...)` and `return self` statements.
+-- Replaces field assignments `self.x = v` with `this.x = v`.
+local function emit_ctor_body(ctx, proto_name, bs, bl)
+    local stmts = ctx:list(bs, bl)
+    for _, sid in ipairs(stmts) do
+        local sn = ctx:node(sid)
+
+        -- Skip: local self = setmetatable({}, M) (or { __index = M })
+        if sn.kind == defs.NODE_LOCAL_STMT then
+            local names = ctx:list(sn.d[1], sn.d[2])
+            if sn.d[2] == 1 and sn.d[4] == 1 then
+                if ctx:name(names[1]) == "self" then
+                    local exprs = ctx:list(sn.d[3], 1)
+                    if is_setmetatable_call(ctx, exprs[1], proto_name) then
+                        -- Skip this statement.
+                        goto continue
+                    end
+                end
+            end
+        end
+
+        -- Skip: return self
+        if sn.kind == defs.NODE_RETURN_STMT then
+            if sn.d[2] == 1 then
+                local exprs = ctx:list(sn.d[1], 1)
+                local ret_name = ident_name(ctx, exprs[1])
+                if ret_name == "self" then
+                    goto continue
+                end
+            end
+        end
+
+        emit_stmt(ctx, sid)
+        ::continue::
+    end
+end
+
+-- Emit a constructor body preamble: `const self = this;` so that field
+-- assignments like `self.x = v` in the Lua body work as `this.x`.
+-- This is emitted before the body statements (after the setmetatable skip).
+local function emit_ctor_body_with_self(ctx, proto_name, bs, bl)
+    ctx:emit("const self = this;")
+    emit_ctor_body(ctx, proto_name, bs, bl)
+end
+
+-- Emit a method body, replacing `self` with `this` in all expressions.
+-- We do this by temporarily replacing `self` identifier emissions.
+-- Actually: since we just strip `self` from param list and rely on `this`
+-- being implicit, we don't need to rewrite the body — `self` references
+-- in JS/TS are just `self` (a valid identifier). However, TS classes use
+-- `this`, so we emit a `const self = this;` preamble so the body works.
+local function emit_method_body(ctx, bs, bl)
+    ctx:emit("const self = this;")
+    emit_block(ctx, bs, bl)
+end
+
+-- Emit a full class declaration for a detected prototype.
+local function emit_class(ctx, proto_name, info)
+    ctx:emit("class " .. proto_name .. " {")
+    ctx.indent = ctx.indent + 1
+
+    -- Constructor
+    if info.ctor_id then
+        local cn = ctx:node(info.ctor_id)
+        local ps, pl = cn.d[2], cn.d[3]
+        local bs, bl = cn.d[4], cn.d[5]
+        local has_vararg = (cn.flags % 2) == 1
+        -- ctor params: strip nothing (new() has no implicit self)
+        local params = ctx:list(ps, pl)
+        local param_parts = {}
+        for i, pid in ipairs(params) do
+            param_parts[i] = param_name(ctx, pid)
+        end
+        if has_vararg then param_parts[#param_parts + 1] = "...args" end
+        ctx:emit("constructor(" .. table.concat(param_parts, ", ") .. ") {")
+        ctx.indent = ctx.indent + 1
+        emit_ctor_body_with_self(ctx, proto_name, bs, bl)
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+    end
+
+    -- Methods
+    for _, minfo in ipairs(info.methods) do
+        local mn = ctx:node(minfo.id)
+        local ps, pl = mn.d[2], mn.d[3]
+        local bs, bl = mn.d[4], mn.d[5]
+        local has_vararg = (mn.flags % 2) == 1
+        local params = ctx:list(ps, pl)
+        local param_parts = {}
+        local start_idx = 1
+        if not minfo.is_static and pl >= 1 then
+            -- strip self from param list
+            local first = ctx:name(params[1])
+            if first == "self" then start_idx = 2 end
+        end
+        for i = start_idx, pl do
+            param_parts[#param_parts + 1] = param_name(ctx, params[i])
+        end
+        if has_vararg then param_parts[#param_parts + 1] = "...args" end
+        local pstr = table.concat(param_parts, ", ")
+        local prefix = minfo.is_static and "static " or ""
+        ctx:emit(prefix .. minfo.name .. "(" .. pstr .. ") {")
+        ctx.indent = ctx.indent + 1
+        if not minfo.is_static then
+            emit_method_body(ctx, bs, bl)
+        else
+            emit_block(ctx, bs, bl)
+        end
+        ctx.indent = ctx.indent - 1
+        ctx:emit("}")
+    end
+
+    ctx.indent = ctx.indent - 1
+    ctx:emit("}")
+end
+
+-- Emit the top-level chunk, scanning for class patterns first.
+local function emit_chunk_with_classes(ctx, bs, bl)
+    local stmt_ids = ctx:list(bs, bl)
+
+    -- Scan for prototype class patterns.
+    local classes, skip = scan_classes(ctx, stmt_ids)
+    ctx.skip_stmts = skip
+
+    -- Emit class declarations in declaration order (preserve source order).
+    -- We do this by emitting classes when we hit their decl_id statement.
+    -- Mark each class by its decl_id for ordered emission.
+    local class_at_decl = {}
+    for name, info in pairs(classes) do
+        class_at_decl[info.decl_id] = { name = name, info = info }
+    end
+
+    for _, sid in ipairs(stmt_ids) do
+        if class_at_decl[sid] then
+            -- Emit the class declaration in place of the `local M = {}` statement.
+            local entry = class_at_decl[sid]
+            emit_class(ctx, entry.name, entry.info)
+        elseif not skip[sid] then
+            emit_stmt(ctx, sid)
+        end
+        -- (else: skip — absorbed into class)
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
 
@@ -884,7 +1202,7 @@ function M.transpile(source, opts)
         if root.kind ~= defs.NODE_CHUNK then
             return nil, "expected chunk root"
         end
-        emit_block(ctx, root.d[1], root.d[2])
+        emit_chunk_with_classes(ctx, root.d[1], root.d[2])
 
         -- Collect type declarations from --:: annotations
         local decl_lines = emit_decl_annotations(ctx)

@@ -363,6 +363,23 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   run in browser alongside Rainbow components. Rainbow (`~/git/rhizone/rainbow/`) is the
   deployment target — `lib/lua2ts/` output is designed to compose with Rainbow's signal/optics layer.
 
+- [x] **`lib/lua2ts/`: `__index = table` metatable → TS class** — top-level `local M = {}` +
+  `M.__index = M` → `class M { ... }`. Handles `setmetatable({}, M)` and
+  `setmetatable({}, { __index = M })` constructor variants. Instance methods (`function M:f()`
+  and `function M.f(self, ...)`), static methods, and `function M.new(...)` constructor.
+  Emits `const self = this;` preamble so method bodies work without rewriting identifiers.
+
+- [ ] **`lib/lua2ts/`: OOP patterns not yet translated** (known limitations):
+  - `__index = function(t, k)` — dynamic indexer; would need JS `Proxy`. Currently emitted as-is.
+  - Inheritance: `setmetatable(Child, { __index = Parent })` at module level (not in `new`).
+    Would need `class Child extends Parent`. Not yet detected.
+  - `M.__index = M` where M is NOT a local `{}` declaration (e.g., assigned via `require`).
+    Not detected; passes through unchanged.
+  - Multiple return from constructor beyond `return self` (e.g., `return self, err`).
+    The `return self` skip only triggers for single-value returns of `self`.
+  - Method bodies are given `const self = this;` but `self` in nested closures inside methods
+    will capture the `const self`, not the outer `this` — correct for Lua semantics.
+
 - [x] **`lib/jsonrpc/`** — request/response dispatch over stdio or TCP. Substrate for LSP, Model Context Protocol, and any JSON-RPC protocol. Transport abstraction, method registry, typed handler registration. (1d4f85e)
 
 - [x] **`lib/lsp/`** — LSP method bindings on top of `lib/jsonrpc`. Server builder with `on_*` registration, auto-capability detection, lifecycle handling. Covers: initialize, hover, completion, definition, references, documentSymbol, signatureHelp, formatting, rename, codeAction, diagnostic, text sync. 60 assertions.
