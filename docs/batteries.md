@@ -739,6 +739,34 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**Shamir Secret Sharing** (`lib/shamir`) — **implemented**. Shamir's Secret Sharing (k-of-n
+threshold) in GF(256). Self-contained GF(256) with AES polynomial (log/exp tables, O(1)
+multiply). `split(secret, n, k)` builds a random degree-(k-1) polynomial per byte, evaluates
+at x=1..n. `join(shares)` reconstructs via Lagrange interpolation. `encode_shares` /
+`decode_shares` (`"XX:yyhex"` format). `split_hex`/`join_hex` convenience wrappers.
+Tested with (2,2), (3,2), (5,3), (10,5), (255,128); all secret lengths; information-theoretic
+property verified. 99 assertions.
+
+**Merkle Tree** (`lib/merkle`) — **implemented**. Merkle tree with SHA-256 (domain-separated:
+leaf `H("\x00"||data)`, interior `H("\x01"||left||right)`). `merkle.build(blocks)` pads to
+power-of-2 by duplicating last leaf. `tree:proof(i)` — Merkle proof as `{hash, side}` steps.
+`merkle.verify(data, proof, root)` — proof verification. `tree:update(i, data)` — incremental
+in-place update. `build_from_hashes`, `serialize`/`deserialize`. 100-leaf round-trip. 250 assertions.
+
+**Counting Bloom Filters** (`lib/bloom_count`) — **implemented**. Three probabilistic set
+structures. `BC.counting` — counting Bloom filter (4-bit or 8-bit counters, supports deletion);
+`add`/`remove`/`contains`/`count`/`false_positive_rate`. `BC.cuckoo` — cuckoo filter with
+fingerprint-based deletion, dual-bucket scheme, max-kicks eviction; `add`/`remove`/`contains`/
+`load_factor`. `BC.scalable` — auto-expanding Bloom filter; grows when >90% full, tightens
+error rate per level. 749 assertions.
+
+**Roman Numeral** (`lib/roman_numeral`) — **implemented**. Rich Roman numeral conversion.
+`to_roman`/`from_roman` (1–3999, case-insensitive); `valid` (strict canonical check: IIII/IIX
+→ false); `to_roman_additive` (historical additive: IIII for 4); `to_roman_large`/
+`from_roman_large` (vinculum via parentheses, 1–3,999,999); `to_ordinal` (Ist/IInd/IIIrd/IVth,
+11th/12th/13th handled); `to_unicode`/`from_unicode` (U+2160–U+216F precomposed forms 1–12,
+50, 100, 500, 1000); `format(n, opts)` with style/case/ordinal. 162 assertions.
+
 **Inverted Index** (`lib/inverted_index`) — **implemented**. Full-text search inverted index
 with BM25 scoring. `II.new(opts)` with configurable k1, b, tokenizer, stemmer. `add` /
 `add_all` / `remove`. `search(query, opts)` — OR/AND boolean with optional `limit`,
