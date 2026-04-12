@@ -739,6 +739,33 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
+Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
+angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
+with positional correction and friction. `world:collisions()` — manifolds with normal/depth/
+contact point. `world:distance_joint` — stiffness-based constraint. `world:particle` — simplified
+mass-point API. 82 assertions.
+
+**Tilemap** (`lib/tilemap`) — **implemented**. Tile-based map for games and simulations.
+Flat array storage. `get`/`set`/`fill`/`fill_border`/`copy_region`/`flood_fill`. `find`/`count`/
+`neighbors4`/`neighbors8`. A* pathfinding with 4/8-dir, manhattan/euclidean/chebyshev heuristics,
+custom `passable` function. Procedural: `random_rooms` (non-overlapping rooms + L-corridors),
+`cellular_automata` (2-buffer smoothing, configurable birth/survive rules). `serialize`/
+`deserialize`. Multi-layer: `TM.layers`. 178 assertions.
+
+**Event Sourcing** (`lib/event_sourcing`) — **implemented**. Event sourcing pattern for CQRS.
+`ES.store` — append-only log with per-aggregate + global sequences; `append`, `events_for`,
+`events_after`, `events_of_type`. `ES.aggregate` — replay handlers to build state. `ES.projection`
+— cross-aggregate read model with `checkpoint`. `ES.snapshot_store` — save/load/latest.
+`ES.saga` — step-indexed state machine returning commands. `ES.command` — CQRS command with
+auto-id. Bank account domain tested. 96 assertions.
+
+**Actor** (`lib/actor`) — **implemented**. Coroutine-based actor model (cooperative multitasking).
+`A.system()` → `spawn(fn)`, `send(pid, msg)`, `call(pid, msg, timeout_ms)`, `whereis(name)`,
+`stop`, `alive`, `actor_count`. `ctx:receive([timeout_ms])` yields coroutine. `ctx:link`/
+`ctx:monitor` — crash propagation. `system:step`/`run`/`run_until_idle`. `system:supervisor`
+— one_for_one/one_for_all/rest_for_one restart strategies with max_restarts/period. 79 assertions.
+
 **SVG** (`lib/svg`) — **implemented**. SVG document builder for programmatic vector graphics.
 `SVG.new(w, h, opts)` — element tree with `rect`, `circle`, `ellipse`, `line`, `polyline`,
 `polygon`, `path`, `text`. `SVG.path()` — fluent builder (M/L/H/V/C/Q/S/A/Z). Groups via
