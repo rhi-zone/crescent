@@ -925,6 +925,12 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Image Processing** (`lib/image_processing`) — **implemented**. Pure Lua image processing with filters, transforms, and drawing.
 `M.new(w,h,ch)` / `M.from_bytes` / `img:to_bytes` / `img:get`/`img:set`. Color: `rgb_to_grayscale`, `rgb_to_hsv`/`hsv_to_rgb`, `apply_lut`. Ops: `brightness`, `contrast`, `invert`, `threshold`, `gamma`. Geometry: `crop`, `flip_h`, `flip_v`, `rotate_90`, `scale_nearest`, `scale_bilinear`. Filters: `convolve`, `blur_box`, `blur_gaussian`, `sharpen`, `edge_detect` (Sobel), `emboss`. Histogram `histogram`/`equalize`. Drawing: `fill`, `draw_rect`, `fill_rect`. 177 assertions.
 
+**OAuth** (`lib/oauth`) — **implemented**. OAuth 2.0 URL builder, PKCE, JWT decode, and token helpers.
+`M.auth_url(opts)` — authorization code flow URL. `M.token_request(grant_type, opts)` — form body + headers for all 4 grant types. `M.parse_token_response(json)`. PKCE: `M.pkce_verifier` / `M.pkce_challenge` (plain + S256 with injected sha256_fn). `M.jwt_decode` / `M.jwt_expired` / `M.jwt_claims` — decode only, no signature verification. `M.url_encode/decode`, `M.build_query/parse_query`, `M.base64url_encode/decode`, `M.random_state`. Minimal recursive JSON parser included. 134 assertions.
+
+**Reactive Store** (`lib/reactive_store`) — **implemented**. Redux-style reactive store with slices, selectors, and middleware.
+`M.store(reducer, state, opts)` — `:dispatch(action)`, `:get_state()`, `:subscribe(fn)→unsub`, `:get_state_at(i)`. `M.action(type)` creator. `M.combine(reducers)`. `M.slice(opts)` → `{ reducer, actions }`. `M.selector(fn)` — memoized. `M.derived(store, fn)` — reactive derived value. Middleware: `M.logger`, `M.thunk`, `M.batch`. `M.update/update_in/get_in` — shallow immutable helpers. 77 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
