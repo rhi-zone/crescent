@@ -769,6 +769,30 @@ like`, `order_by`, `limit`/`offset`. Validation: required, unique, max_length, t
 `belongs_to`/`has_many` via foreign keys. Transactions: copy-on-write rollback. Migrations:
 `add_column`/`remove_column`/`rename_column` with version tracking. Dump/load. 104 assertions.
 
+**Template Engine** (`lib/template_engine`) — **implemented**. Jinja2-inspired template engine.
+`M.render(template, context)` / `M.compile(template)` → callable. Tags: `{{ expr }}` (expression),
+`{% if/elseif/else/endif %}`, `{% for k,v in expr %}...{% endfor %}`, `{% raw %}...{% endraw %}`.
+Filters: `upper`, `lower`, `trim`, `len`, `default`, `escape`. Dot and bracket access on context
+tables. `M.env(opts)` for sandbox with custom filters. 93 assertions.
+
+**Game Math** (`lib/game_math`) — **implemented**. vec2/vec3/mat4/quat/AABB primitives.
+`vec2`/`vec3`: add/sub/mul/div, dot, cross, length, normalize, lerp, reflect, distance. `mat4`:
+identity, translate/scale/rotate, multiply, transpose, inverse, perspective/ortho/look_at.
+`quat`: from_axis_angle, mul, slerp, to_mat4, normalize, conjugate. `AABB`: contains, intersects,
+union, expand, center, size. Metamethods for operator syntax. 262 assertions.
+
+**Hot Reload** (`lib/hot_reload`) — **implemented**. File-based hot code reloading for development.
+`M.watch(module_path)` → watcher. `watcher:check()` — mtime-polls, reloads if changed, returns
+new module. `watcher:get()` — current module. `M.watcher(paths, callback)` — multi-file watcher
+with callback. `M.mock_fs` for testable mtime injection. 73 assertions.
+
+**State Machine** (`lib/state_machine`) — **implemented**. Finite state machine with guards and context.
+`M.new(def)`: `initial`, `states` map, optional `context`. States have `on` (event→transition),
+`on_enter`/`on_exit` callbacks. Transitions: plain string target or `{target, guard?, action?}`.
+`sm:send(event)` — fires on_exit → action → on_enter; returns true if transitioned. `sm:can(event)`
+— tests guard without side effects. `sm:state()`, `sm:states()`, `sm:transitions()`. `sm:snapshot()` /
+`M.restore(def, snap)` for serialization. Full validation at construction time. 73 assertions.
+
 **Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
 Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
 angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
