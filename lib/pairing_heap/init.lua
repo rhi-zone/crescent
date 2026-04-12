@@ -51,12 +51,12 @@ local function pair_children(children, cmp)
   return result
 end
 
--- Advance root past lazily-deleted nodes, rebuilding heap as needed
+-- Advance root past lazily-deleted nodes, rebuilding heap as needed.
+-- Does NOT touch _n: remove() already decremented it at removal time.
 local function normalize(heap)
   while heap._root ~= nil and heap._root.removed do
     local children = heap._root.children
     heap._root.children = nil  -- help GC
-    heap._n = heap._n - 1
     heap._root = pair_children(children, heap._cmp)
   end
 end
