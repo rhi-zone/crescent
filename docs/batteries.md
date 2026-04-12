@@ -874,6 +874,18 @@ pattern. `schema(def):parse(source)` — injectable string-keyed table, collects
 `add_column`, `distinct`, `explode`, `group_by`+`agg`, `join` (inner), `pivot`, `describe`, `to_array`.
 Aggregators: `count`, `sum`, `avg`, `min`, `max`, `first`, `last`, `collect`. 95 assertions.
 
+**Command Queue** (`lib/command_queue`) — **implemented**. Command pattern with undo/redo history.
+`CQ.history(opts)`: `execute`/`undo`/`redo`, `can_undo`/`can_redo`, `peek_undo`/`peek_redo`, `list`,
+`clear`, `max_size`. `CQ.compound(commands)` — group as single undo step. `history:batch(fn)` —
+scope-collect to compound. `history:transaction(fn)` — batch with rollback on error.
+`CQ.queue()` — FIFO execution, stops on error. `CQ.priority_queue()` — ordered by priority. 96 assertions.
+
+**Wire Protocol** (`lib/wire_protocol`) — **implemented**. Binary framing codecs for TCP protocols.
+`length_prefixed(opts)` — 1/2/4/8-byte length header, big/little endian, streaming decoder.
+`delimited(opts)` — delimiter-based (default `\n`). `fixed(opts)` — fixed-size with padding/truncation.
+`tlv(opts)` — Type-Length-Value. `encode_varint`/`decode_varint` — unsigned LEB128.
+`pack`/`unpack` — struct codec (`>/<` endian, B/H/I/Q/b/h/i/q/s). `framer`/`receiver` — stream wrappers. 157 assertions.
+
 **iCalendar** (`lib/ical`) — **implemented**. iCalendar (RFC 5545) parser and builder.
 `ical.parse(s)` — full parser with content-line unfolding, VCALENDAR/VEVENT/VTODO/VALARM.
 `parse_datetime`/`parse_date`/`format_datetime`/`format_date`. `parse_property` — `NAME;PARAM=val:value`.
