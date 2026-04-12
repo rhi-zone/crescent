@@ -1,357 +1,487 @@
-if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
+if not package.path:find("./?/init.lua", 1, true) then
+  package.path = "./?/init.lua;" .. package.path
+end
 
 local T = require("lib.test.assert")
-local search = require("lib.search")
+local S = require("lib.search")
 
 local describe, it = T.describe, T.it
 
-describe("search", function()
-  it("open creates an index", function()
-    local idx, err = search.open(":memory:")
-    T.ok(idx, "expected index, got: " .. tostring(err))
-    idx:close()
+describe("search.tokenize", function()
+  it("splits on non-alphanumeric and lowercases", function()
+    local tokens = S.tokenize("Hello, World! Foo-Bar")
+    T.eq(#tokens, 4)
+    T.eq(tokens[1], "hello")
+    T.eq(tokens[2], "world")
+    T.eq(tokens[3], "foo")
+    T.eq(tokens[4], "bar")
   end)
 
-  it("create_collection with fields", function()
-    local idx = search.open(":memory:")
-    local ok, err = idx:create_collection("articles", {
-      fields = { "title", "body" },
-    })
-    T.ok(ok, "create_collection failed: " .. tostring(err))
-    idx:close()
+  it("handles empty string", function()
+    T.eq(#S.tokenize(""), 0)
+  end)
+end)
+
+describe("search.stem", function()
+  it("removes -ing", function()
+    T.eq(S.stem("running"), "run")
   end)
 
-  it("add a document", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
-    local ok, err = idx:add("articles", {
-      id = "doc1",
-      title = "Hello World",
-      body = "This is a test document",
-    })
-    T.ok(ok, "add failed: " .. tostring(err))
-    T.eq(idx:count("articles"), 1)
-    idx:close()
+  it("removes -ed", function()
+    T.eq(S.stem("stopped"), "stop")
   end)
 
-  it("search finds document by text", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Introduction to Lua",
-      body = "Lua is a lightweight scripting language",
-    })
-    local results, err = idx:search("articles", "lua")
-    T.ok(results, "search failed: " .. tostring(err))
-    T.eq(#results, 1)
-    T.eq(results[1].id, "doc1")
-    T.eq(results[1].title, "Introduction to Lua")
-    idx:close()
+  it("removes trailing -s", function()
+    T.eq(S.stem("cats"), "cat")
   end)
 
-  it("search with multiple documents, relevance ordering", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Cooking recipes",
-      body = "How to make pasta with tomato sauce",
-    })
-    idx:add("articles", {
-      id = "doc2",
-      title = "Lua programming",
-      body = "Lua is great for scripting and embedding in applications using lua",
-    })
-    idx:add("articles", {
-      id = "doc3",
-      title = "Advanced Lua techniques",
-      body = "Lua metatables and coroutines in lua are powerful lua features",
-    })
-    local results, err = idx:search("articles", "lua")
-    T.ok(results, "search failed: " .. tostring(err))
-    T.ok(#results >= 2, "expected at least 2 results, got " .. #results)
-    -- doc3 mentions lua more often, should rank higher (lower/more negative BM25 rank)
-    -- just verify both lua docs are present
-    local ids = {}
-    for i = 1, #results do ids[results[i].id] = true end
-    T.ok(ids["doc2"], "expected doc2 in results")
-    T.ok(ids["doc3"], "expected doc3 in results")
-    T.ok(not ids["doc1"], "doc1 should not match 'lua'")
-    idx:close()
+  it("removes -ly", function()
+    T.eq(S.stem("quickly"), "quick")
   end)
 
-  it("search returns empty array for no match", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Hello World",
-      body = "This is a test",
-    })
-    local results, err = idx:search("articles", "nonexistent")
-    T.ok(results, "search failed: " .. tostring(err))
-    T.eq(#results, 0)
-    idx:close()
+  it("leaves short words unchanged", function()
+    T.eq(S.stem("run"), "run")
+    T.eq(S.stem("be"), "be")
+  end)
+end)
+
+describe("search.highlight", function()
+  it("wraps matched terms in mark tags", function()
+    local out = S.highlight("hello world", { "world" })
+    T.eq(out, "hello <mark>world</mark>")
   end)
 
-  it("search with limit and offset", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
+  it("uses custom tags", function()
+    local out = S.highlight("foo bar baz", { "foo", "baz" }, { open = "[", close = "]" })
+    T.eq(out, "[foo] bar [baz]")
+  end)
+
+  it("is case insensitive for matching", function()
+    local out = S.highlight("Hello World", { "hello" })
+    T.eq(out, "<mark>Hello</mark> World")
+  end)
+
+  it("leaves non-matching text unchanged", function()
+    T.eq(S.highlight("no match here", { "xyz" }), "no match here")
+  end)
+end)
+
+describe("search index: add/search", function()
+  it("finds a document by term", function()
+    local idx = S.index()
+    idx:add("doc1", "the quick brown fox")
+    local r = idx:search(S.term("fox"))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc1")
+  end)
+
+  it("stop words are filtered out", function()
+    local idx = S.index()
+    idx:add("doc1", "the quick brown fox")
+    -- 'the' is a stop word and should not be indexed
+    local r = idx:search(S.term("the"))
+    T.eq(r.total, 0)
+  end)
+
+  it("returns empty results when no match", function()
+    local idx = S.index()
+    idx:add("doc1", "hello world")
+    local r = idx:search(S.term("xyz"))
+    T.eq(r.total, 0)
+    T.eq(#r.results, 0)
+  end)
+
+  it("returns multiple results", function()
+    local idx = S.index()
+    idx:add("doc1", "lua is great")
+    idx:add("doc2", "lua programming rocks")
+    idx:add("doc3", "python is nice")
+    local r = idx:search(S.term("lua"))
+    T.eq(r.total, 2)
+  end)
+
+  it("limit and offset work", function()
+    local idx = S.index()
     for i = 1, 5 do
-      idx:add("articles", {
-        id = "doc" .. i,
-        title = "Lua document " .. i,
-        body = "Content about lua programming number " .. i,
+      idx:add("d" .. i, "lua document number " .. i)
+    end
+    local r1 = idx:search(S.term("lua"), { limit = 2 })
+    T.eq(#r1.results, 2)
+    T.eq(r1.total, 5)
+
+    local r2 = idx:search(S.term("lua"), { limit = 2, offset = 2 })
+    T.eq(#r2.results, 2)
+    -- Different results due to offset
+    T.ok(r1.results[1].id ~= r2.results[1].id or r1.results[2].id ~= r2.results[2].id,
+      "offset should return different documents")
+  end)
+end)
+
+describe("search index: TF-IDF scoring", function()
+  it("more frequent term in fewer docs scores higher", function()
+    local idx = S.index()
+    -- doc1: 'lua' appears 3 times in a short doc
+    idx:add("doc1", "lua lua lua rocks")
+    -- doc2: 'lua' appears once in a long doc with many other words
+    idx:add("doc2", "lua python ruby java go swift kotlin scala clojure haskell")
+
+    local r = idx:search(S.term("lua"), { scorer = "tfidf" })
+    T.eq(r.total, 2)
+    -- doc1 has higher tf, so it should score higher
+    T.eq(r.results[1].id, "doc1")
+  end)
+end)
+
+describe("search index: BM25 scoring", function()
+  it("correct relative ordering", function()
+    local idx = S.index()
+    -- doc_many: 'search' appears many times
+    idx:add("doc_many", "search search search search engine for searching search results")
+    -- doc_few: 'search' appears once
+    idx:add("doc_few", "search engine comparison")
+    -- doc_none: 'search' does not appear
+    idx:add("doc_none", "database management system")
+
+    local r = idx:search(S.term("search"), { scorer = "bm25" })
+    T.eq(r.total, 2)
+    T.eq(r.results[1].id, "doc_many")
+    T.eq(r.results[2].id, "doc_few")
+  end)
+
+  it("custom k1 and b parameters are used", function()
+    local idx = S.index({ bm25_k1 = 2.0, bm25_b = 0.5 })
+    idx:add("d1", "test test test")
+    idx:add("d2", "test")
+    local r = idx:search(S.term("test"), { scorer = "bm25" })
+    T.eq(r.total, 2)
+    T.eq(r.results[1].id, "d1")
+  end)
+end)
+
+describe("search index: phrase search", function()
+  it("finds adjacent terms in order", function()
+    local idx = S.index()
+    idx:add("doc1", "quick brown fox jumped")
+    idx:add("doc2", "brown quick fox jumped")
+    local r = idx:search(S.phrase({ "quick", "brown" }))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc1")
+  end)
+
+  it("does not match non-adjacent terms", function()
+    local idx = S.index()
+    idx:add("doc1", "hello world goodbye")
+    local r = idx:search(S.phrase({ "hello", "goodbye" }))
+    T.eq(r.total, 0)
+  end)
+
+  it("matches exact phrase with multiple words", function()
+    local idx = S.index()
+    -- Use stop_words={} so 'on' is not filtered
+    local idx2 = S.index({ stop_words = {} })
+    idx2:add("doc1", "cat sat on mat")
+    idx2:add("doc2", "cat sat under mat")
+    local r = idx2:search(S.phrase({ "cat", "sat", "on" }))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc1")
+  end)
+
+  it("single word phrase works like term query", function()
+    local idx = S.index()
+    idx:add("doc1", "hello world")
+    local r = idx:search(S.phrase({ "hello" }))
+    T.eq(r.total, 1)
+  end)
+end)
+
+describe("search index: boolean queries", function()
+  it("AND: intersection of posting lists", function()
+    local idx = S.index()
+    idx:add("doc1", "lua rocks")
+    idx:add("doc2", "lua python")
+    idx:add("doc3", "ruby python")
+    local r = idx:search(S.boolean("and", { S.term("lua"), S.term("python") }))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc2")
+  end)
+
+  it("OR: union of posting lists", function()
+    local idx = S.index()
+    idx:add("doc1", "lua rocks")
+    idx:add("doc2", "python rules")
+    idx:add("doc3", "ruby gems")
+    local r = idx:search(S.boolean("or", { S.term("lua"), S.term("python") }))
+    T.eq(r.total, 2)
+    local ids = {}
+    for _, res in ipairs(r.results) do ids[res.id] = true end
+    T.ok(ids["doc1"])
+    T.ok(ids["doc2"])
+    T.ok(not ids["doc3"])
+  end)
+
+  it("NOT: exclusion from all docs", function()
+    local idx = S.index()
+    idx:add("doc1", "lua rocks")
+    idx:add("doc2", "python rules")
+    idx:add("doc3", "ruby gems")
+    -- NOT lua: all docs except doc1
+    local r = idx:search(S.boolean("not", { S.term("lua") }))
+    local ids = {}
+    for _, res in ipairs(r.results) do ids[res.id] = true end
+    T.ok(not ids["doc1"], "doc1 should be excluded")
+    T.ok(ids["doc2"])
+    T.ok(ids["doc3"])
+  end)
+
+  it("AND with three terms", function()
+    local idx = S.index()
+    idx:add("doc1", "foo bar baz")
+    idx:add("doc2", "foo bar")
+    idx:add("doc3", "foo baz")
+    local r = idx:search(S.boolean("and", { S.term("foo"), S.term("bar"), S.term("baz") }))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc1")
+  end)
+
+  it("nested boolean queries", function()
+    local idx = S.index()
+    idx:add("doc1", "lua rocks fast")
+    idx:add("doc2", "python rocks slow")
+    idx:add("doc3", "ruby gems nice")
+    -- (lua OR python) AND rocks
+    local r = idx:search(
+      S.boolean("and", {
+        S.boolean("or", { S.term("lua"), S.term("python") }),
+        S.term("rocks"),
       })
-    end
-    local results, err = idx:search("articles", "lua", { limit = 2 })
-    T.ok(results, "search failed: " .. tostring(err))
-    T.eq(#results, 2)
+    )
+    T.eq(r.total, 2)
+    local ids = {}
+    for _, res in ipairs(r.results) do ids[res.id] = true end
+    T.ok(ids["doc1"])
+    T.ok(ids["doc2"])
+  end)
+end)
 
-    local results2
-    results2, err = idx:search("articles", "lua", { limit = 2, offset = 2 })
-    T.ok(results2, "search with offset failed: " .. tostring(err))
-    T.eq(#results2, 2)
-    -- offset results should be different from first page
-    T.ok(results[1].id ~= results2[1].id, "offset results should differ")
-    idx:close()
+describe("search index: fuzzy search", function()
+  it("finds typo variants within edit distance 1", function()
+    local idx = S.index()
+    idx:add("doc1", "hello world")
+    idx:add("doc2", "python rules")
+    -- 'helo' is distance 1 from 'hello'
+    local r = idx:search(S.fuzzy("helo", 1))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc1")
   end)
 
-  it("search with specific fields", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body", "author" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Lua Guide",
-      body = "A comprehensive guide",
-      author = "Roberto",
+  it("finds exact match at distance 0", function()
+    local idx = S.index()
+    idx:add("doc1", "hello world")
+    local r = idx:search(S.fuzzy("hello", 0))
+    T.eq(r.total, 1)
+  end)
+
+  it("finds variants within edit distance 2", function()
+    local idx = S.index()
+    idx:add("doc1", "programming languages")
+    -- 'progrmming' is distance 1 from 'programming'
+    local r = idx:search(S.fuzzy("progrmming", 2))
+    T.eq(r.total, 1)
+  end)
+
+  it("does not match beyond max_dist", function()
+    local idx = S.index()
+    idx:add("doc1", "elephant")
+    -- 'dog' is very different from 'elephant'
+    local r = idx:search(S.fuzzy("dog", 1))
+    T.eq(r.total, 0)
+  end)
+end)
+
+describe("search index: prefix query", function()
+  it("finds all terms starting with prefix", function()
+    local idx = S.index()
+    idx:add("doc1", "programming rocks")
+    idx:add("doc2", "programs are fun")
+    idx:add("doc3", "python is great")
+    local r = idx:search(S.prefix("prog"))
+    T.eq(r.total, 2)
+    local ids = {}
+    for _, res in ipairs(r.results) do ids[res.id] = true end
+    T.ok(ids["doc1"])
+    T.ok(ids["doc2"])
+    T.ok(not ids["doc3"])
+  end)
+
+  it("empty prefix matches everything", function()
+    local idx = S.index()
+    idx:add("doc1", "foo")
+    idx:add("doc2", "bar")
+    local r = idx:search(S.prefix(""))
+    T.ok(r.total >= 2)
+  end)
+end)
+
+describe("search index: wildcard query", function()
+  it("? matches single character", function()
+    local idx = S.index()
+    idx:add("doc1", "cat bat rat")
+    -- ?at matches cat, bat, rat
+    local r = idx:search(S.wildcard("?at"))
+    T.eq(r.total, 1)  -- all in same doc
+  end)
+
+  it("* matches any sequence", function()
+    local idx = S.index()
+    idx:add("doc1", "programming")
+    idx:add("doc2", "programs")
+    idx:add("doc3", "python")
+    local r = idx:search(S.wildcard("prog*"))
+    T.eq(r.total, 2)
+    local ids = {}
+    for _, res in ipairs(r.results) do ids[res.id] = true end
+    T.ok(ids["doc1"])
+    T.ok(ids["doc2"])
+  end)
+
+  it("*word* finds substrings", function()
+    local idx = S.index()
+    idx:add("doc1", "uncomfortable truth")
+    idx:add("doc2", "comfort zone")
+    idx:add("doc3", "python")
+    local r = idx:search(S.wildcard("*comfort*"))
+    T.eq(r.total, 2)
+  end)
+end)
+
+describe("search index: remove", function()
+  it("doc no longer appears in results after remove", function()
+    local idx = S.index()
+    idx:add("doc1", "lua rocks")
+    idx:add("doc2", "lua rules")
+    T.eq(idx:search(S.term("lua")).total, 2)
+    idx:remove("doc1")
+    local r = idx:search(S.term("lua"))
+    T.eq(r.total, 1)
+    T.eq(r.results[1].id, "doc2")
+  end)
+
+  it("remove non-existent doc is a no-op", function()
+    local idx = S.index()
+    idx:add("doc1", "hello")
+    idx:remove("does_not_exist")
+    T.eq(idx:search(S.term("hello")).total, 1)
+  end)
+end)
+
+describe("search index: update", function()
+  it("updated doc reflects new content", function()
+    local idx = S.index()
+    idx:add("doc1", "hello world")
+    T.eq(idx:search(S.term("hello")).total, 1)
+    T.eq(idx:search(S.term("goodbye")).total, 0)
+    idx:update("doc1", "goodbye world")
+    T.eq(idx:search(S.term("hello")).total, 0)
+    T.eq(idx:search(S.term("goodbye")).total, 1)
+  end)
+
+  it("add with existing id is treated as update", function()
+    local idx = S.index()
+    idx:add("doc1", "foo bar")
+    idx:add("doc1", "baz qux")
+    T.eq(idx:search(S.term("foo")).total, 0)
+    T.eq(idx:search(S.term("baz")).total, 1)
+  end)
+end)
+
+describe("search index: facet", function()
+  it("counts by field value", function()
+    local idx = S.index()
+    idx:add("doc1", "apple fruit", { fields = { category = "fruit" } })
+    idx:add("doc2", "banana fruit", { fields = { category = "fruit" } })
+    idx:add("doc3", "carrot vegetable", { fields = { category = "vegetable" } })
+    idx:add("doc4", "broccoli vegetable", { fields = { category = "vegetable" } })
+    local counts = idx:facet(S.boolean("or", { S.term("fruit"), S.term("vegetable") }), "category")
+    T.eq(counts["fruit"], 2)
+    T.eq(counts["vegetable"], 2)
+  end)
+
+  it("facet on empty results returns empty table", function()
+    local idx = S.index()
+    idx:add("doc1", "hello", { fields = { cat = "x" } })
+    local counts = idx:facet(S.term("nonexistent"), "cat")
+    local n = 0
+    for _ in pairs(counts) do n = n + 1 end
+    T.eq(n, 0)
+  end)
+
+  it("facet with partial fields coverage", function()
+    local idx = S.index()
+    idx:add("doc1", "foo bar", { fields = { tag = "a" } })
+    idx:add("doc2", "foo baz")  -- no fields
+    local counts = idx:facet(S.term("foo"), "tag")
+    T.eq(counts["a"], 1)
+    -- doc2 has no fields, so nothing counted for it
+    local n = 0
+    for _ in pairs(counts) do n = n + 1 end
+    T.eq(n, 1)
+  end)
+end)
+
+describe("search index: explain/highlight", function()
+  it("highlight wraps matched terms in results", function()
+    local idx = S.index()
+    idx:add("doc1", "the quick brown fox")
+    local r = idx:search(S.term("quick"), { explain = true })
+    T.eq(r.total, 1)
+    local res = r.results[1]
+    T.ok(res.highlights, "expected highlights")
+    T.ok(#res.highlights >= 1)
+    local snippet = res.highlights[1].snippet
+    T.ok(snippet:find("<mark>quick</mark>"), "expected <mark>quick</mark> in snippet")
+  end)
+end)
+
+describe("search index: custom tokenizer", function()
+  it("uses provided tokenizer", function()
+    local idx = S.index({
+      tokenize = function(text)
+        -- only split on spaces
+        local tokens = {}
+        for w in text:gmatch("%S+") do tokens[#tokens + 1] = w end
+        return tokens
+      end,
+      stop_words = {},
     })
-    idx:add("articles", {
-      id = "doc2",
-      title = "Cooking Guide",
-      body = "How to cook lua beans",
-      author = "Chef",
-    })
-    -- search only in title field
-    local results, err = idx:search("articles", "lua", { fields = { "title" } })
-    T.ok(results, "search failed: " .. tostring(err))
-    T.eq(#results, 1)
-    T.eq(results[1].id, "doc1")
-    idx:close()
+    idx:add("doc1", "Hello World")
+    -- custom tokenizer preserves case; the stop_words are empty
+    local r = idx:search(S.term("hello world"))
+    -- 'hello world' won't match since tokens are 'Hello' and 'World' (no lowercase)
+    -- but we can search for exact token
+    local r2 = idx:search(S.term("hello"))
+    T.eq(r2.total, 0)  -- 'Hello' != 'hello' in custom tokenizer
+  end)
+end)
+
+describe("search index: edge cases", function()
+  it("empty index returns no results", function()
+    local idx = S.index()
+    local r = idx:search(S.term("anything"))
+    T.eq(r.total, 0)
   end)
 
-  it("update a document, re-search finds updated content", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Old Title",
-      body = "Original content about python",
-    })
-    -- should not find "lua" initially
-    local results = idx:search("articles", "lua")
-    T.eq(#results, 0)
-
-    local ok, err = idx:update("articles", "doc1", { title = "Lua Tutorial", body = "Content about lua" })
-    T.ok(ok, "update failed: " .. tostring(err))
-
-    results = idx:search("articles", "lua")
-    T.eq(#results, 1)
-    T.eq(results[1].title, "Lua Tutorial")
-
-    -- old content should not be found
-    results = idx:search("articles", "python")
-    T.eq(#results, 0)
-    idx:close()
+  it("boolean with invalid op", function()
+    local q, err = S.boolean("xor", {})
+    T.ok(q == nil)
+    T.ok(err ~= nil)
   end)
 
-  it("remove a document, search no longer finds it", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title", "body" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Lua Guide",
-      body = "All about lua",
-    })
-    T.eq(#idx:search("articles", "lua"), 1)
-
-    local ok, err = idx:remove("articles", "doc1")
-    T.ok(ok, "remove failed: " .. tostring(err))
-
-    T.eq(#idx:search("articles", "lua"), 0)
-    T.eq(idx:count("articles"), 0)
-    idx:close()
-  end)
-
-  it("count returns correct count", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title" } })
-    T.eq(idx:count("articles"), 0)
-    idx:add("articles", { id = "a", title = "one" })
-    T.eq(idx:count("articles"), 1)
-    idx:add("articles", { id = "b", title = "two" })
-    T.eq(idx:count("articles"), 2)
-    idx:close()
-  end)
-
-  it("collections lists collection names", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("alpha", { fields = { "text" } })
-    idx:create_collection("beta", { fields = { "text" } })
-    local names = idx:collections()
-    T.eq(#names, 2)
-    T.eq(names[1], "alpha")
-    T.eq(names[2], "beta")
-    idx:close()
-  end)
-
-  it("drop_collection removes everything", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("temp", { fields = { "text" } })
-    idx:add("temp", { id = "x", text = "hello" })
-    T.eq(idx:count("temp"), 1)
-
-    local ok, err = idx:drop_collection("temp")
-    T.ok(ok, "drop failed: " .. tostring(err))
-
-    local names = idx:collections()
-    T.eq(#names, 0)
-    idx:close()
-  end)
-
-  it("vector search: similar returns documents by cosine similarity", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("docs", {
-      fields = { "title" },
-      vector_dims = 3,
-    })
-    idx:add("docs", { id = "a", title = "First", vector = { 1, 0, 0 } })
-    idx:add("docs", { id = "b", title = "Second", vector = { 0, 1, 0 } })
-    idx:add("docs", { id = "c", title = "Third", vector = { 0, 0, 1 } })
-
-    local results, err = idx:similar("docs", { 1, 0, 0 }, { limit = 3 })
-    T.ok(results, "similar failed: " .. tostring(err))
-    T.eq(#results, 3)
-    T.eq(results[1].id, "a")
-    T.ok(results[1].score > 0.99, "expected high similarity for exact match")
-    idx:close()
-  end)
-
-  it("vector search: most similar document ranked first", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("docs", {
-      fields = { "title" },
-      vector_dims = 3,
-    })
-    idx:add("docs", { id = "far", title = "Far", vector = { 0, 0, 1 } })
-    idx:add("docs", { id = "close", title = "Close", vector = { 0.9, 0.1, 0 } })
-    idx:add("docs", { id = "exact", title = "Exact", vector = { 1, 0, 0 } })
-
-    local results = idx:similar("docs", { 1, 0, 0 }, { limit = 3 })
-    T.eq(results[1].id, "exact")
-    T.eq(results[2].id, "close")
-    T.eq(results[3].id, "far")
-    idx:close()
-  end)
-
-  it("hybrid search: combines text and vector scores", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("docs", {
-      fields = { "title", "body" },
-      vector_dims = 3,
-    })
-    idx:add("docs", {
-      id = "text_match",
-      title = "Lua programming",
-      body = "Lua is a scripting language for lua developers who love lua",
-      vector = { 0, 0, 1 },  -- far from query vector
-    })
-    idx:add("docs", {
-      id = "vec_match",
-      title = "Cooking recipes",
-      body = "How to make pasta",
-      vector = { 1, 0, 0 },  -- close to query vector
-    })
-    idx:add("docs", {
-      id = "both_match",
-      title = "Lua tutorial",
-      body = "Learn lua basics",
-      vector = { 0.9, 0.1, 0 },  -- close to query vector
-    })
-
-    local results, err = idx:hybrid("docs", {
-      text = "lua",
-      vector = { 1, 0, 0 },
-      text_weight = 0.5,
-      vector_weight = 0.5,
-      limit = 10,
-    })
-    T.ok(results, "hybrid failed: " .. tostring(err))
-    T.ok(#results >= 2, "expected at least 2 results")
-    -- both_match should score well on both axes
-    local found_both = false
-    for i = 1, #results do
-      if results[i].id == "both_match" then found_both = true end
-    end
-    T.ok(found_both, "expected both_match in results")
-    idx:close()
-  end)
-
-  it("metadata: stored and returned correctly", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("articles", { fields = { "title" } })
-    idx:add("articles", {
-      id = "doc1",
-      title = "Lua Guide",
-      meta = { tags = { "lua", "programming" }, priority = 1 },
-    })
-    local results = idx:search("articles", "lua")
-    T.eq(#results, 1)
-    T.ok(results[1].meta, "expected meta")
-    T.eq(results[1].meta.tags[1], "lua")
-    T.eq(results[1].meta.tags[2], "programming")
-    T.eq(results[1].meta.priority, 1)
-    idx:close()
-  end)
-
-  it("wrap wraps existing sqlite db", function()
-    local sqlite_mod = require("lib.sqlite")
-    local db = sqlite_mod.open(":memory:")
-    local idx, err = search.wrap(db)
-    T.ok(idx, "wrap failed: " .. tostring(err))
-    idx:create_collection("test", { fields = { "text" } })
-    idx:add("test", { id = "a", text = "hello world" })
-    T.eq(idx:count("test"), 1)
-    -- don't close idx (it wraps db), close db directly
-    db:close()
-  end)
-
-  it("multiple collections: isolated from each other", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("alpha", { fields = { "text" } })
-    idx:create_collection("beta", { fields = { "text" } })
-    idx:add("alpha", { id = "a1", text = "lua programming" })
-    idx:add("beta", { id = "b1", text = "cooking recipes" })
-
-    T.eq(idx:count("alpha"), 1)
-    T.eq(idx:count("beta"), 1)
-
-    local alpha_results = idx:search("alpha", "lua")
-    T.eq(#alpha_results, 1)
-    T.eq(alpha_results[1].id, "a1")
-
-    local beta_results = idx:search("beta", "lua")
-    T.eq(#beta_results, 0)
-    idx:close()
-  end)
-
-  it("empty collection: search returns empty, count returns 0", function()
-    local idx = search.open(":memory:")
-    idx:create_collection("empty", { fields = { "title", "body" } })
-    T.eq(idx:count("empty"), 0)
-    local results = idx:search("empty", "anything")
-    T.eq(#results, 0)
-    idx:close()
+  it("multiple removes don't corrupt index", function()
+    local idx = S.index()
+    idx:add("doc1", "foo bar")
+    idx:add("doc2", "foo baz")
+    idx:remove("doc1")
+    idx:remove("doc1")  -- double-remove
+    T.eq(idx:search(S.term("foo")).total, 1)
   end)
 end)

@@ -1,576 +1,590 @@
-if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
-
-local sqlite = require("lib.sqlite")
-local vec = require("lib.vec")
-local json = require("lib.format.json")
+if not package.path:find("./?/init.lua", 1, true) then
+  package.path = "./?/init.lua;" .. package.path
+end
 
 local M = {}
+M._tier = "pure"
 
---: (db: sqlite) -> search_index
-local function make_index(db)
-  local ok, err = db:execute([[
-    CREATE TABLE IF NOT EXISTS _search_collections (
-      name TEXT PRIMARY KEY,
-      config TEXT NOT NULL
-    )
-  ]])
-  if not ok then return nil, err end
-  --: search_index
-  local idx = { _db = db }
-  setmetatable(idx, { __index = M })
-  return idx
+-- Default stop words (common English)
+local DEFAULT_STOP_WORDS = {
+  ["a"]=true, ["an"]=true, ["the"]=true, ["and"]=true, ["or"]=true,
+  ["but"]=true, ["in"]=true, ["on"]=true, ["at"]=true, ["to"]=true,
+  ["for"]=true, ["of"]=true, ["is"]=true, ["it"]=true, ["as"]=true,
+  ["be"]=true, ["by"]=true, ["we"]=true, ["he"]=true, ["she"]=true,
+}
+
+-- Tokenize text: split on non-alphanumeric, lowercase
+--: (text: string) -> {string}
+function M.tokenize(text)
+  local tokens = {}
+  for w in text:lower():gmatch("[%a%d]+") do
+    tokens[#tokens + 1] = w
+  end
+  return tokens
 end
 
---: (path: string) -> search_index?, string?
-function M.open(path)
-  local db, err = sqlite.open(path)
-  if not db then return nil, err end
-  return make_index(db)
-end
-
---: (db: sqlite) -> search_index?, string?
-function M.wrap(db)
-  return make_index(db)
-end
-
---: (self: search_index, name: string, opts: { fields: {string}, vector_dims: number? }) -> true?, string?
-function M.create_collection(self, name, opts)
-  local db = self._db
-  local fields = opts.fields
-  if not fields or #fields == 0 then
-    return nil, "search: create_collection: fields required"
-  end
-
-  local config = json.encode({
-    fields = fields,
-    vector_dims = opts.vector_dims,
-  })
-
-  -- store config
-  local ok, err = db:execute(
-    "INSERT INTO _search_collections (name, config) VALUES (?, ?)",
-    name, config)
-  if not ok then return nil, err end
-
-  -- main document table
-  local col_defs = { "id TEXT PRIMARY KEY", "meta TEXT" }
-  for i = 1, #fields do
-    col_defs[#col_defs + 1] = fields[i] .. " TEXT"
-  end
-  ok, err = db:execute(
-    "CREATE TABLE _search_" .. name .. " (" .. table.concat(col_defs, ", ") .. ")")
-  if not ok then return nil, err end
-
-  -- FTS5 virtual table (external content)
-  local fts_cols = {}
-  for i = 1, #fields do
-    fts_cols[i] = fields[i]
-  end
-  ok, err = db:execute(
-    "CREATE VIRTUAL TABLE _search_" .. name .. "_fts USING fts5(" ..
-    table.concat(fts_cols, ", ") ..
-    ", content='_search_" .. name .. "', content_rowid='rowid')")
-  if not ok then return nil, err end
-
-  -- vector table (only if vector_dims specified)
-  if opts.vector_dims then
-    ok, err = db:execute(
-      "CREATE TABLE _search_" .. name .. "_vectors (id TEXT PRIMARY KEY, data TEXT NOT NULL)")
-    if not ok then return nil, err end
-  end
-
-  return true
-end
-
--- helper: load collection config
---: (self: search_index, name: string) -> { fields: {string}, vector_dims: number? }?, string?
-local function get_config(self, name)
-  local iter, err = self._db:query(
-    "SELECT config FROM _search_collections WHERE name = ?", name)
-  if not iter then return nil, err end
-  local cfg_str = iter()
-  if not cfg_str then return nil, "search: collection not found: " .. name end
-  return json.decode(cfg_str)
-end
-
--- helper: get rowid for a document id
---: (db: sqlite, name: string, doc_id: string) -> number?, string?
-local function get_rowid(db, name, doc_id)
-  local iter, err = db:query(
-    "SELECT rowid FROM _search_" .. name .. " WHERE id = ?", doc_id)
-  if not iter then return nil, err end
-  local rowid = iter()
-  if not rowid then return nil, "search: document not found: " .. doc_id end
-  return rowid
-end
-
---: (self: search_index, name: string, doc: table) -> true?, string?
-function M.add(self, name, doc)
-  local db = self._db
-  local config, err = get_config(self, name)
-  if not config then return nil, err end
-
-  local fields = config.fields
-  local cols = { "id", "meta" }
-  local placeholders = { "?", "?" }
-  local meta_str = doc.meta and json.encode(doc.meta) or ""
-  local n_values = 2
-  local values = {}
-  values[1] = doc.id
-  values[2] = meta_str
-  for i = 1, #fields do
-    cols[#cols + 1] = fields[i]
-    placeholders[#placeholders + 1] = "?"
-    n_values = n_values + 1
-    values[n_values] = doc[fields[i]] or ""
-  end
-
-  local ok
-  ok, err = db:execute(
-    "INSERT INTO _search_" .. name .. " (" .. table.concat(cols, ", ") ..
-    ") VALUES (" .. table.concat(placeholders, ", ") .. ")",
-    unpack(values, 1, n_values))
-  if not ok then return nil, err end
-
-  -- sync FTS index
-  local rowid
-  rowid, err = get_rowid(db, name, doc.id)
-  if not rowid then return nil, err end
-
-  local fts_cols = {}
-  local fts_placeholders = { "?" }
-  local fts_values = { rowid }
-  for i = 1, #fields do
-    fts_cols[i] = fields[i]
-    fts_placeholders[#fts_placeholders + 1] = "?"
-    fts_values[#fts_values + 1] = doc[fields[i]] or ""
-  end
-
-  ok, err = db:execute(
-    "INSERT INTO _search_" .. name .. "_fts (rowid, " .. table.concat(fts_cols, ", ") ..
-    ") VALUES (" .. table.concat(fts_placeholders, ", ") .. ")",
-    unpack(fts_values))
-  if not ok then return nil, err end
-
-  -- vector
-  if doc.vector and config.vector_dims then
-    local vec_json = json.encode(doc.vector)
-    ok, err = db:execute(
-      "INSERT INTO _search_" .. name .. "_vectors (id, data) VALUES (?, ?)",
-      doc.id, vec_json)
-    if not ok then return nil, err end
-  end
-
-  return true
-end
-
---: (self: search_index, name: string, doc_id: string, updates: table) -> true?, string?
-function M.update(self, name, doc_id, updates)
-  local db = self._db
-  local config, err = get_config(self, name)
-  if not config then return nil, err end
-
-  local fields = config.fields
-
-  -- get old rowid for FTS delete
-  local old_rowid
-  old_rowid, err = get_rowid(db, name, doc_id)
-  if not old_rowid then return nil, err end
-
-  -- read old field values for FTS delete command
-  local field_list = table.concat(fields, ", ")
-  local iter
-  iter, err = db:query(
-    "SELECT " .. field_list .. " FROM _search_" .. name .. " WHERE id = ?", doc_id)
-  if not iter then return nil, err end
-  local old_values = { iter() }
-
-  -- delete old FTS entry
-  local fts_del_placeholders = { "?" }
-  local fts_del_values = { old_rowid }
-  for i = 1, #fields do
-    fts_del_placeholders[#fts_del_placeholders + 1] = "?"
-    fts_del_values[#fts_del_values + 1] = old_values[i] or ""
-  end
-  local ok
-  ok, err = db:execute(
-    "INSERT INTO _search_" .. name .. "_fts (_search_" .. name .. "_fts, rowid, " ..
-    field_list .. ") VALUES ('delete', " .. table.concat(fts_del_placeholders, ", ") .. ")",
-    unpack(fts_del_values))
-  if not ok then return nil, err end
-
-  -- update main table
-  local set_parts = {}
-  local set_values = {}
-  for k, v in pairs(updates) do
-    if k ~= "id" and k ~= "vector" and k ~= "meta" then
-      set_parts[#set_parts + 1] = k .. " = ?"
-      set_values[#set_values + 1] = v
+-- Simple Porter-like stemmer (suffix removal, not full Porter2)
+--: (word: string) -> string
+function M.stem(word)
+  local n = #word
+  if n <= 3 then return word end
+  -- -ies -> -y (carries -> carry)
+  if word:sub(-3) == "ies" and n > 4 then return word:sub(1, -4) .. "y" end
+  -- -ves -> -f (leaves -> leaf)
+  if word:sub(-3) == "ves" and n > 4 then return word:sub(1, -4) .. "f" end
+  -- -sses -> -ss
+  if word:sub(-4) == "sses" then return word:sub(1, -3) end
+  -- -ness -> remove
+  if word:sub(-4) == "ness" and n > 5 then return word:sub(1, -5) end
+  -- -ment -> remove
+  if word:sub(-4) == "ment" and n > 5 then return word:sub(1, -5) end
+  -- -ing -> remove (running -> runn, then double-consonant -> run)
+  if word:sub(-3) == "ing" and n > 5 then
+    local stem = word:sub(1, -4)
+    -- un-double final consonant: "runn" -> "run"
+    if #stem >= 2 and stem:sub(-1) == stem:sub(-2, -2) then
+      stem = stem:sub(1, -2)
     end
+    return stem
   end
-  if updates.meta ~= nil then
-    set_parts[#set_parts + 1] = "meta = ?"
-    set_values[#set_values + 1] = json.encode(updates.meta)
+  -- -ed -> remove
+  if word:sub(-2) == "ed" and n > 4 then
+    local stem = word:sub(1, -3)
+    if #stem >= 2 and stem:sub(-1) == stem:sub(-2, -2) then
+      stem = stem:sub(1, -2)
+    end
+    return stem
   end
-  if #set_parts > 0 then
-    set_values[#set_values + 1] = doc_id
-    ok, err = db:execute(
-      "UPDATE _search_" .. name .. " SET " .. table.concat(set_parts, ", ") .. " WHERE id = ?",
-      unpack(set_values))
-    if not ok then return nil, err end
+  -- -er -> remove
+  if word:sub(-2) == "er" and n > 4 then return word:sub(1, -3) end
+  -- -ly -> remove
+  if word:sub(-2) == "ly" and n > 4 then return word:sub(1, -3) end
+  -- -s (not -ss, -us, -is)
+  if word:sub(-1) == "s" and n > 3
+      and word:sub(-2) ~= "ss" and word:sub(-2) ~= "us" and word:sub(-2) ~= "is" then
+    return word:sub(1, -2)
   end
-
-  -- re-read new values for FTS insert
-  iter, err = db:query(
-    "SELECT " .. field_list .. " FROM _search_" .. name .. " WHERE id = ?", doc_id)
-  if not iter then return nil, err end
-  local new_values = { iter() }
-
-  local fts_ins_placeholders = { "?" }
-  local fts_ins_values = { old_rowid }
-  for i = 1, #fields do
-    fts_ins_placeholders[#fts_ins_placeholders + 1] = "?"
-    fts_ins_values[#fts_ins_values + 1] = new_values[i] or ""
-  end
-  ok, err = db:execute(
-    "INSERT INTO _search_" .. name .. "_fts (rowid, " .. field_list ..
-    ") VALUES (" .. table.concat(fts_ins_placeholders, ", ") .. ")",
-    unpack(fts_ins_values))
-  if not ok then return nil, err end
-
-  -- update vector if provided
-  if updates.vector and config.vector_dims then
-    local vec_json = json.encode(updates.vector)
-    ok, err = db:execute(
-      "INSERT OR REPLACE INTO _search_" .. name .. "_vectors (id, data) VALUES (?, ?)",
-      doc_id, vec_json)
-    if not ok then return nil, err end
-  end
-
-  return true
+  return word
 end
 
---: (self: search_index, name: string, doc_id: string) -> true?, string?
-function M.remove(self, name, doc_id)
-  local db = self._db
-  local config, err = get_config(self, name)
-  if not config then return nil, err end
-
-  local fields = config.fields
-
-  -- get rowid and old values for FTS delete
-  local old_rowid
-  old_rowid, err = get_rowid(db, name, doc_id)
-  if not old_rowid then return nil, err end
-
-  local field_list = table.concat(fields, ", ")
-  local iter
-  iter, err = db:query(
-    "SELECT " .. field_list .. " FROM _search_" .. name .. " WHERE id = ?", doc_id)
-  if not iter then return nil, err end
-  local old_values = { iter() }
-
-  -- delete FTS entry
-  local fts_del_placeholders = { "?" }
-  local fts_del_values = { old_rowid }
-  for i = 1, #fields do
-    fts_del_placeholders[#fts_del_placeholders + 1] = "?"
-    fts_del_values[#fts_del_values + 1] = old_values[i] or ""
-  end
-  local ok
-  ok, err = db:execute(
-    "INSERT INTO _search_" .. name .. "_fts (_search_" .. name .. "_fts, rowid, " ..
-    field_list .. ") VALUES ('delete', " .. table.concat(fts_del_placeholders, ", ") .. ")",
-    unpack(fts_del_values))
-  if not ok then return nil, err end
-
-  -- delete from main table
-  ok, err = db:execute("DELETE FROM _search_" .. name .. " WHERE id = ?", doc_id)
-  if not ok then return nil, err end
-
-  -- delete vector
-  if config.vector_dims then
-    ok, err = db:execute("DELETE FROM _search_" .. name .. "_vectors WHERE id = ?", doc_id)
-    if not ok then return nil, err end
-  end
-
-  return true
-end
-
--- helper: build result row from query columns
---: (config: table, doc_id: string, fields_data: table, meta_str: string?) -> table
-local function build_result(config, doc_id, fields_data, meta_str, score)
-  local r = { id = doc_id, score = score }
-  for i = 1, #config.fields do
-    r[config.fields[i]] = fields_data[i]
-  end
-  if meta_str and meta_str ~= "" then
-    r.meta = json.decode(meta_str)
-  end
-  return r
-end
-
---: (self: search_index, name: string, query: string, opts: { limit: number?, offset: number?, fields: {string}? }?) -> {table}?, string?
-function M.search(self, name, query, opts)
+-- Highlight: wrap matched terms in tags
+--: (text: string, terms: {string}, opts: { open: string?, close: string? }?) -> string
+function M.highlight(text, terms, opts)
   opts = opts or {}
-  local db = self._db
-  local config, err = get_config(self, name)
-  if not config then return nil, err end
-
-  local limit = opts.limit or 10
-  local offset = opts.offset or 0
-  local all_fields = config.fields
-
-  -- build FTS match expression
-  local match_expr = query
-  if opts.fields and #opts.fields > 0 then
-    -- search only specific columns: {col1 col2} : query
-    local col_set = "{"
-    for i = 1, #opts.fields do
-      if i > 1 then col_set = col_set .. " " end
-      col_set = col_set .. opts.fields[i]
+  local open_tag = opts.open or "<mark>"
+  local close_tag = opts.close or "</mark>"
+  -- build set of lowercased terms
+  local term_set = {}
+  for i = 1, #terms do
+    term_set[terms[i]:lower()] = true
+  end
+  -- tokenize preserving positions, then reconstruct with highlights
+  local result = {}
+  local pos = 1
+  local len = #text
+  while pos <= len do
+    -- find start of next word
+    local ws, we = text:find("[%a%d]+", pos)
+    if not ws then
+      result[#result + 1] = text:sub(pos)
+      break
     end
-    col_set = col_set .. "}"
-    match_expr = col_set .. " : " .. query
-  end
-
-  local qualified_fields = {}
-  for i = 1, #all_fields do
-    qualified_fields[i] = "s." .. all_fields[i]
-  end
-  local qualified_list = table.concat(qualified_fields, ", ")
-  local sql = "SELECT s.id, s.meta, " .. qualified_list ..
-    " FROM _search_" .. name .. "_fts f" ..
-    " JOIN _search_" .. name .. " s ON f.rowid = s.rowid" ..
-    " WHERE _search_" .. name .. "_fts MATCH ?" ..
-    " ORDER BY rank LIMIT ? OFFSET ?"
-
-  local iter
-  iter, err = db:query(sql, match_expr, limit, offset)
-  if not iter then return nil, err end
-
-  local n_cols = 2 + #all_fields
-  local results = {}
-  while true do
-    local vals = { iter() }
-    -- check for end-of-results: iter returns nil, "sqlite: done"
-    if vals[1] == nil then break end
-    local id = vals[1]
-    local meta_str = vals[2]
-    local fields_data = {}
-    for i = 1, #all_fields do
-      fields_data[i] = vals[i + 2]
+    -- non-word text before word
+    if ws > pos then
+      result[#result + 1] = text:sub(pos, ws - 1)
     end
-    results[#results + 1] = build_result(config, id, fields_data, meta_str, nil)
-  end
-
-  -- add BM25 rank scores via separate query
-  local rank_sql = "SELECT s.id, f.rank FROM _search_" .. name .. "_fts f" ..
-    " JOIN _search_" .. name .. " s ON f.rowid = s.rowid" ..
-    " WHERE _search_" .. name .. "_fts MATCH ?" ..
-    " ORDER BY f.rank LIMIT ? OFFSET ?"
-  iter, err = db:query(rank_sql, match_expr, limit, offset)
-  if not iter then return results end
-
-  local rank_map = {}
-  while true do
-    local id, rank = iter()
-    if id == nil then break end
-    rank_map[id] = rank
-  end
-  for i = 1, #results do
-    results[i].score = rank_map[results[i].id] or 0
-  end
-
-  return results
-end
-
---: (self: search_index, name: string, query_vector: {number}, opts: { limit: number? }?) -> {table}?, string?
-function M.similar(self, name, query_vector, opts)
-  opts = opts or {}
-  local db = self._db
-  local config, err = get_config(self, name)
-  if not config then return nil, err end
-
-  if not config.vector_dims then
-    return nil, "search: collection has no vector dimensions"
-  end
-
-  local limit = opts.limit or 10
-  local qvec = vec.new(query_vector)
-
-  -- load all vectors and compute similarity
-  local iter
-  iter, err = db:query("SELECT id, data FROM _search_" .. name .. "_vectors")
-  if not iter then return nil, err end
-
-  local scored = {}
-  while true do
-    local id, data = iter()
-    if id == nil then break end
-    local t = json.decode(data)
-    local v = vec.new(t)
-    local sim = vec.cosine(qvec, v)
-    scored[#scored + 1] = { id = id, score = sim }
-  end
-
-  -- sort by similarity descending
-  table.sort(scored, function(a, b) return a.score > b.score end)
-
-  -- fetch full documents for top-k
-  local results = {}
-  local all_fields = config.fields
-  local field_list = table.concat(all_fields, ", ")
-  for i = 1, math.min(limit, #scored) do
-    local s = scored[i]
-    iter, err = db:query(
-      "SELECT meta, " .. field_list .. " FROM _search_" .. name .. " WHERE id = ?", s.id)
-    if not iter then return nil, err end
-    local vals = { iter() }
-    local meta_str = vals[1]
-    local fields_data = {}
-    for j = 1, #all_fields do
-      fields_data[j] = vals[j + 1]
-    end
-    results[#results + 1] = build_result(config, s.id, fields_data, meta_str, s.score)
-  end
-
-  return results
-end
-
---: (self: search_index, name: string, opts: { text: string, vector: {number}, text_weight: number?, vector_weight: number?, limit: number? }) -> {table}?, string?
-function M.hybrid(self, name, opts)
-  local db = self._db
-  local config, err = get_config(self, name)
-  if not config then return nil, err end
-
-  local text_weight = opts.text_weight or 0.5
-  local vector_weight = opts.vector_weight or 0.5
-  local limit = opts.limit or 10
-
-  -- run text search (get more than limit to allow good merging)
-  local fetch_n = limit * 3
-  local text_results
-  text_results, err = M.search(self, name, opts.text, { limit = fetch_n })
-  if not text_results then return nil, err end
-
-  -- run vector search
-  local vec_results
-  vec_results, err = M.similar(self, name, opts.vector, { limit = fetch_n })
-  if not vec_results then return nil, err end
-
-  -- normalize text scores to [0,1] (FTS5 rank is negative; more negative = better)
-  local min_rank, max_rank = 0, 0
-  for i = 1, #text_results do
-    local s = text_results[i].score
-    if s < min_rank then min_rank = s end
-    if s > max_rank then max_rank = s end
-  end
-  local rank_range = max_rank - min_rank
-  local text_norm = {}
-  for i = 1, #text_results do
-    local r = text_results[i]
-    -- normalize: most relevant (most negative rank) gets score 1.0
-    if rank_range ~= 0 then
-      text_norm[r.id] = 1.0 - (r.score - min_rank) / rank_range
+    local word = text:sub(ws, we)
+    if term_set[word:lower()] then
+      result[#result + 1] = open_tag .. word .. close_tag
     else
-      text_norm[r.id] = 1.0
+      result[#result + 1] = word
+    end
+    pos = we + 1
+  end
+  return table.concat(result)
+end
+
+-- Edit distance (Levenshtein) between two strings
+--: (a: string, b: string) -> number
+local function edit_distance(a, b)
+  local la, lb = #a, #b
+  if la == 0 then return lb end
+  if lb == 0 then return la end
+  -- two-row DP
+  local prev = {}
+  local curr = {}
+  for j = 0, lb do prev[j] = j end
+  for i = 1, la do
+    curr[0] = i
+    local ai = a:sub(i, i)
+    for j = 1, lb do
+      if ai == b:sub(j, j) then
+        curr[j] = prev[j - 1]
+      else
+        local del = prev[j] + 1
+        local ins = curr[j - 1] + 1
+        local sub = prev[j - 1] + 1
+        local m = del < ins and del or ins
+        curr[j] = m < sub and m or sub
+      end
+    end
+    -- swap
+    prev, curr = curr, prev
+  end
+  return prev[lb]
+end
+
+-- Query constructors
+--: (word: string) -> query
+function M.term(word)
+  return { type = "term", word = word:lower() }
+end
+
+--: (words: {string}) -> query
+function M.phrase(words)
+  local lwords = {}
+  for i = 1, #words do lwords[i] = words[i]:lower() end
+  return { type = "phrase", words = lwords }
+end
+
+--: (op: string, queries: {query}) -> query
+function M.boolean(op, queries)
+  if op ~= "and" and op ~= "or" and op ~= "not" then
+    return nil, "search: boolean op must be 'and', 'or', or 'not'"
+  end
+  return { type = "boolean", op = op, queries = queries }
+end
+
+--: (word: string, max_dist: number) -> query
+function M.fuzzy(word, max_dist)
+  return { type = "fuzzy", word = word:lower(), max_dist = max_dist or 1 }
+end
+
+--: (prefix: string) -> query
+function M.prefix(prefix)
+  return { type = "prefix", prefix = prefix:lower() }
+end
+
+--: (pattern: string) -> query
+function M.wildcard(pattern)
+  return { type = "wildcard", pattern = pattern:lower() }
+end
+
+-- Convert wildcard pattern (? = any char, * = any chars) to Lua pattern
+--: (pattern: string) -> string
+local function wildcard_to_lua_pattern(pattern)
+  local parts = {}
+  for i = 1, #pattern do
+    local c = pattern:sub(i, i)
+    if c == "?" then
+      parts[#parts + 1] = "."
+    elseif c == "*" then
+      parts[#parts + 1] = ".*"
+    elseif c:match("[%(%)%.%%%+%-%[%]%^%$]") then
+      parts[#parts + 1] = "%" .. c
+    else
+      parts[#parts + 1] = c
     end
   end
+  return "^" .. table.concat(parts) .. "$"
+end
 
-  -- vector scores are already cosine similarity [0,1] (approximately)
-  local vec_norm = {}
-  for i = 1, #vec_results do
-    local r = vec_results[i]
-    vec_norm[r.id] = r.score
-  end
+-- Create a new search index
+--: (opts: { tokenize: fn?, normalize: fn?, stop_words: table?, bm25_k1: number?, bm25_b: number? }?) -> index
+function M.index(opts)
+  opts = opts or {}
+  local stop_words = opts.stop_words or DEFAULT_STOP_WORDS
+  local bm25_k1 = opts.bm25_k1 or 1.5
+  local bm25_b  = opts.bm25_b  or 0.75
 
-  -- merge all candidate ids
-  local seen = {}
-  local all_ids = {}
-  for i = 1, #text_results do
-    local id = text_results[i].id
-    if not seen[id] then seen[id] = true; all_ids[#all_ids + 1] = id end
-  end
-  for i = 1, #vec_results do
-    local id = vec_results[i].id
-    if not seen[id] then seen[id] = true; all_ids[#all_ids + 1] = id end
-  end
+  local tokenize_fn = opts.tokenize or M.tokenize
+  local normalize_fn = opts.normalize
 
-  -- compute combined scores
-  local combined = {}
-  for i = 1, #all_ids do
-    local id = all_ids[i]
-    local ts = text_norm[id] or 0
-    local vs = vec_norm[id] or 0
-    combined[#combined + 1] = { id = id, score = text_weight * ts + vector_weight * vs }
-  end
-  table.sort(combined, function(a, b) return a.score > b.score end)
+  -- Inverted index: term -> { doc_id -> { positions: {...}, freq: n } }
+  local inverted = {}
+  -- Document store: doc_id -> { text: string, length: n, fields: table? }
+  local docs = {}
+  local doc_count = 0
+  local total_length = 0  -- sum of all doc lengths (for BM25 avg)
 
-  -- build result set from doc lookup table
-  local doc_map = {}
-  for i = 1, #text_results do
-    local r = text_results[i]
-    doc_map[r.id] = r
-  end
-  for i = 1, #vec_results do
-    local r = vec_results[i]
-    if not doc_map[r.id] then doc_map[r.id] = r end
+  -- Internal: normalize + stop-word filter a token list
+  local function process_tokens(tokens)
+    local result = {}
+    for i = 1, #tokens do
+      local t = tokens[i]
+      if normalize_fn then t = normalize_fn(t) end
+      if not stop_words[t] then
+        result[#result + 1] = t
+      end
+    end
+    return result
   end
 
-  local results = {}
-  for i = 1, math.min(limit, #combined) do
-    local c = combined[i]
-    local doc = doc_map[c.id]
-    if doc then
-      local r = {}
-      for k, v in pairs(doc) do r[k] = v end
-      r.score = c.score
+  local idx = {}
+
+  -- Add a document
+  --: (id: any, text: string, opts: { fields: table? }?) -> index
+  function idx:add(id, text, add_opts)
+    if docs[id] then
+      return self:update(id, text)
+    end
+    add_opts = add_opts or {}
+    local raw_tokens = tokenize_fn(text)
+    local tokens = process_tokens(raw_tokens)
+    local doc_len = #tokens
+
+    docs[id] = { text = text, length = doc_len, fields = add_opts.fields }
+    doc_count = doc_count + 1
+    total_length = total_length + doc_len
+
+    -- Update inverted index
+    for pos, tok in ipairs(tokens) do
+      if not inverted[tok] then inverted[tok] = {} end
+      if not inverted[tok][id] then
+        inverted[tok][id] = { positions = {}, freq = 0 }
+      end
+      local entry = inverted[tok][id]
+      entry.positions[#entry.positions + 1] = pos
+      entry.freq = entry.freq + 1
+    end
+
+    return self
+  end
+
+  -- Remove a document
+  --: (id: any) -> index
+  function idx:remove(id)
+    local doc = docs[id]
+    if not doc then return self end
+
+    -- Remove from inverted index
+    local raw_tokens = tokenize_fn(doc.text)
+    local tokens = process_tokens(raw_tokens)
+    for _, tok in ipairs(tokens) do
+      if inverted[tok] and inverted[tok][id] then
+        inverted[tok][id] = nil
+        -- Clean up empty term entries
+        local has_any = false
+        for _ in pairs(inverted[tok]) do has_any = true; break end
+        if not has_any then inverted[tok] = nil end
+      end
+    end
+
+    total_length = total_length - doc.length
+    doc_count = doc_count - 1
+    docs[id] = nil
+    return self
+  end
+
+  -- Update a document
+  --: (id: any, text: string) -> index
+  function idx:update(id, text)
+    self:remove(id)
+    self:add(id, text)
+    return self
+  end
+
+  -- Get all doc IDs matching a term (returns set: { doc_id -> true })
+  local function posting_set(term)
+    local set = {}
+    local postings = inverted[term]
+    if postings then
+      for doc_id in pairs(postings) do
+        set[doc_id] = true
+      end
+    end
+    return set
+  end
+
+  -- Evaluate a query, returning a set of matching doc_ids
+  local function eval_query(query)
+    local qt = query.type
+    if qt == "term" then
+      return posting_set(query.word)
+
+    elseif qt == "phrase" then
+      -- Find docs containing all words, then check adjacency
+      local words = query.words
+      if #words == 0 then return {} end
+      -- Start with docs that contain the first word
+      local candidates = posting_set(words[1])
+      for i = 2, #words do
+        local next_set = posting_set(words[i])
+        -- Intersect
+        for doc_id in pairs(candidates) do
+          if not next_set[doc_id] then
+            candidates[doc_id] = nil
+          end
+        end
+      end
+      -- Check consecutive positions
+      local result = {}
+      for doc_id in pairs(candidates) do
+        -- Get positions for first word
+        local first_positions = inverted[words[1]][doc_id].positions
+        -- For each starting position, check if all subsequent words follow consecutively
+        for _, start_pos in ipairs(first_positions) do
+          local ok = true
+          for i = 2, #words do
+            local target = start_pos + (i - 1)
+            local found = false
+            for _, p in ipairs(inverted[words[i]][doc_id].positions) do
+              if p == target then found = true; break end
+            end
+            if not found then ok = false; break end
+          end
+          if ok then
+            result[doc_id] = true
+            break
+          end
+        end
+      end
+      return result
+
+    elseif qt == "boolean" then
+      local op = query.op
+      local queries = query.queries
+      if #queries == 0 then return {} end
+
+      if op == "and" then
+        local result = eval_query(queries[1])
+        for i = 2, #queries do
+          local s = eval_query(queries[i])
+          for doc_id in pairs(result) do
+            if not s[doc_id] then result[doc_id] = nil end
+          end
+        end
+        return result
+
+      elseif op == "or" then
+        local result = {}
+        for i = 1, #queries do
+          for doc_id in pairs(eval_query(queries[i])) do
+            result[doc_id] = true
+          end
+        end
+        return result
+
+      elseif op == "not" then
+        -- NOT: all docs minus matches of first query
+        -- If two queries: second is base set, subtract first
+        local exclude = eval_query(queries[1])
+        local base
+        if #queries >= 2 then
+          base = eval_query(queries[2])
+        else
+          base = {}
+          for doc_id in pairs(docs) do base[doc_id] = true end
+        end
+        for doc_id in pairs(exclude) do base[doc_id] = nil end
+        return base
+      end
+
+    elseif qt == "fuzzy" then
+      local word = query.word
+      local max_dist = query.max_dist
+      local result = {}
+      for term in pairs(inverted) do
+        if edit_distance(word, term) <= max_dist then
+          for doc_id in pairs(inverted[term]) do
+            result[doc_id] = true
+          end
+        end
+      end
+      return result
+
+    elseif qt == "prefix" then
+      local prefix = query.prefix
+      local plen = #prefix
+      local result = {}
+      for term in pairs(inverted) do
+        if term:sub(1, plen) == prefix then
+          for doc_id in pairs(inverted[term]) do
+            result[doc_id] = true
+          end
+        end
+      end
+      return result
+
+    elseif qt == "wildcard" then
+      local lua_pat = wildcard_to_lua_pattern(query.pattern)
+      local result = {}
+      for term in pairs(inverted) do
+        if term:match(lua_pat) then
+          for doc_id in pairs(inverted[term]) do
+            result[doc_id] = true
+          end
+        end
+      end
+      return result
+    end
+
+    return {}
+  end
+
+  -- Collect terms relevant to a query (for scoring)
+  local function collect_query_terms(query)
+    local qt = query.type
+    if qt == "term" then
+      return { query.word }
+    elseif qt == "phrase" then
+      return query.words
+    elseif qt == "boolean" then
+      local terms = {}
+      for i = 1, #query.queries do
+        for _, t in ipairs(collect_query_terms(query.queries[i])) do
+          terms[#terms + 1] = t
+        end
+      end
+      return terms
+    elseif qt == "fuzzy" then
+      -- collect all terms within distance
+      local word = query.word
+      local max_dist = query.max_dist
+      local terms = {}
+      for term in pairs(inverted) do
+        if edit_distance(word, term) <= max_dist then
+          terms[#terms + 1] = term
+        end
+      end
+      return terms
+    elseif qt == "prefix" then
+      local prefix = query.prefix
+      local plen = #prefix
+      local terms = {}
+      for term in pairs(inverted) do
+        if term:sub(1, plen) == prefix then terms[#terms + 1] = term end
+      end
+      return terms
+    elseif qt == "wildcard" then
+      local lua_pat = wildcard_to_lua_pattern(query.pattern)
+      local terms = {}
+      for term in pairs(inverted) do
+        if term:match(lua_pat) then terms[#terms + 1] = term end
+      end
+      return terms
+    end
+    return {}
+  end
+
+  -- TF-IDF score for a doc given a list of query terms
+  local function score_tfidf(doc_id, terms)
+    local doc = docs[doc_id]
+    if not doc then return 0 end
+    local score = 0
+    for _, term in ipairs(terms) do
+      local postings = inverted[term]
+      if postings and postings[doc_id] then
+        local tf = postings[doc_id].freq / doc.length
+        local df = 0
+        for _ in pairs(postings) do df = df + 1 end
+        local idf = math.log((doc_count + 1) / (df + 1)) + 1
+        score = score + tf * idf
+      end
+    end
+    return score
+  end
+
+  -- BM25 score for a doc given a list of query terms
+  local function score_bm25(doc_id, terms)
+    local doc = docs[doc_id]
+    if not doc then return 0 end
+    local avg_dl = doc_count > 0 and (total_length / doc_count) or 1
+    local score = 0
+    for _, term in ipairs(terms) do
+      local postings = inverted[term]
+      if postings and postings[doc_id] then
+        local tf = postings[doc_id].freq
+        local df = 0
+        for _ in pairs(postings) do df = df + 1 end
+        local idf = math.log((doc_count - df + 0.5) / (df + 0.5) + 1)
+        local dl = doc.length
+        local tf_norm = (tf * (bm25_k1 + 1)) /
+          (tf + bm25_k1 * (1 - bm25_b + bm25_b * dl / avg_dl))
+        score = score + idf * tf_norm
+      end
+    end
+    return score
+  end
+
+  -- Build highlight snippets for a doc
+  local function make_highlights(doc_id, terms, doc)
+    if not doc then return nil end
+    local text = doc.text
+    local snippet = M.highlight(text, terms)
+    -- positions: collect all match positions
+    local positions = {}
+    local raw_tokens = tokenize_fn(text)
+    local processed = process_tokens(raw_tokens)
+    local term_set = {}
+    for _, t in ipairs(terms) do term_set[t] = true end
+    for pos, tok in ipairs(processed) do
+      if term_set[tok] then positions[#positions + 1] = pos end
+    end
+    return { { field = "text", snippet = snippet, positions = positions } }
+  end
+
+  -- Search
+  --: (query: query, opts: { limit: number?, offset: number?, scorer: string?, explain: boolean? }?) -> { results: {result}, total: number }
+  function idx:search(query, opts)
+    opts = opts or {}
+    local limit  = opts.limit  or 10
+    local offset = opts.offset or 0
+    local scorer = opts.scorer or "bm25"
+    local explain = opts.explain or false
+
+    local matching = eval_query(query)
+    local terms = collect_query_terms(query)
+
+    -- Score each matching doc
+    local scored = {}
+    for doc_id in pairs(matching) do
+      local score
+      if scorer == "tfidf" then
+        score = score_tfidf(doc_id, terms)
+      else
+        score = score_bm25(doc_id, terms)
+      end
+      scored[#scored + 1] = { id = doc_id, score = score }
+    end
+
+    -- Sort by score descending
+    table.sort(scored, function(a, b) return a.score > b.score end)
+
+    local total = #scored
+    local results = {}
+    for i = offset + 1, math.min(offset + limit, total) do
+      local s = scored[i]
+      local doc = docs[s.id]
+      local r = { id = s.id, score = s.score }
+      if explain then
+        r.highlights = make_highlights(s.id, terms, doc)
+      end
       results[#results + 1] = r
     end
+
+    return { results = results, total = total }
   end
 
-  return results
-end
-
---: (self: search_index, name: string) -> number?, string?
-function M.count(self, name)
-  local iter, err = self._db:query("SELECT COUNT(*) FROM _search_" .. name)
-  if not iter then return nil, err end
-  local n = iter()
-  return n or 0
-end
-
---: (self: search_index) -> {string}?, string?
-function M.collections(self)
-  local iter, err = self._db:query("SELECT name FROM _search_collections ORDER BY name")
-  if not iter then return nil, err end
-  local names = {}
-  while true do
-    local name = iter()
-    if name == nil then break end
-    names[#names + 1] = name
+  -- Facet: count results by field value
+  --: (query: query, field: string) -> { [string]: number }
+  function idx:facet(query, field)
+    local matching = eval_query(query)
+    local counts = {}
+    for doc_id in pairs(matching) do
+      local doc = docs[doc_id]
+      if doc and doc.fields then
+        local val = doc.fields[field]
+        if val ~= nil then
+          local key = tostring(val)
+          counts[key] = (counts[key] or 0) + 1
+        end
+      end
+    end
+    return counts
   end
-  return names
-end
 
---: (self: search_index, name: string) -> true?, string?
-function M.drop_collection(self, name)
-  local db = self._db
-  local config = get_config(self, name)
-
-  -- drop tables (ignore errors for tables that might not exist)
-  db:execute("DROP TABLE IF EXISTS _search_" .. name .. "_fts")
-  db:execute("DROP TABLE IF EXISTS _search_" .. name .. "_vectors")
-  db:execute("DROP TABLE IF EXISTS _search_" .. name)
-  db:execute("DELETE FROM _search_collections WHERE name = ?", name)
-
-  return true
-end
-
---: (self: search_index) -> ()
-function M.close(self)
-  self._db:close()
+  return idx
 end
 
 return M
