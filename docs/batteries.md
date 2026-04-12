@@ -655,6 +655,31 @@ flex, fill sizing. `M.grid({columns, rows, gap})` with px and fractional (fr) tr
 `M.cell({col, row, col_span})`. `M.compute(root)` → result with `:get(id)` → `{x,y,w,h}`.
 Absolute positioning, aspect ratio, min/max constraints. 125 assertions.
 
+**Regex Builder** (`lib/regex_builder`) — **implemented**. Fluent DSL for constructing Lua
+pattern strings. `M.new():digit():one_or_more(...):start():finish():build()`. Elements:
+`digit/alpha/alphanumeric/whitespace/lower/upper/punctuation/any/literal/char_class`.
+Quantifiers: `zero_or_more/one_or_more/maybe/exactly`. `capture`, `start/finish` anchors.
+`M.patterns`: 12 prebuilt (integer, float, email, ipv4, hex_color, date_iso, etc.).
+`test/extract/extract_all/replace` wrappers. 70 assertions.
+
+**Segment Tree** (`lib/segment_tree`) — **implemented**. Range queries in O(log n).
+`M.new(arr, combine_fn)` (flat array, power-of-2 size). `query(l,r)`, `update(i,val)`,
+`get(i)`. `M.new_lazy(arr, opts)` with `range_update(l,r,val)` (lazy propagation).
+`M.persistent(arr, fn)` — path-copying immutable versions. `M.sparse(min,max,fn)` for
+huge index ranges. `M.sum/min/max/gcd` helpers. 48 assertions.
+
+**Fenwick Tree** (`lib/fenwick_tree`) — **implemented**. Binary Indexed Tree for prefix
+sums. O(log n) update/query. `M.new(n)`, `M.from_array(arr)` (O(n) build). `update(i,delta)`,
+`set(i,val)`, `get(i)`, `prefix(i)`, `query(l,r)`, `find_kth(k)` (binary lifting).
+`M.new_2d(rows,cols)` for rectangle sums. `M.new_range(n)` (range-update + point-query).
+`M.new_range_range(n)` (range-update + range-query). `M.new_op` (custom operation). 95 assertions.
+
+**Dotenv** (`lib/dotenv`) — **implemented**. `.env` file parser with variable expansion.
+`M.parse(str)`, `M.load(path)`, `M.load_into(t, path)`, `M.load_files(paths, opts)`.
+Formats: bare/double-quoted/single-quoted values, `export` prefix, inline `#` comments,
+`\n\t\\\"` escapes. `${VAR}` and `$VAR` expansion. `M.resolver(path)` → getenv with
+os.getenv fallback. `M.stringify(vars)` auto-quotes. 41 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
