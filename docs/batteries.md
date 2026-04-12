@@ -979,6 +979,12 @@ Primitives: `lit`, `char`, `char_class`, `any_char`, `digit`, `letter`, `whitesp
 **Red-Black Tree** (`lib/red_black_tree`) — **implemented**. Self-balancing BST with O(log n) guaranteed insert/delete/search.
 `RBT.new(opts)`. `insert/get/has/delete`. `min/max`. `pairs()` (sorted). `range(lo, hi)`. `floor/ceiling`. `to_array`. `verify()` — checks all 5 RB invariants + parent pointers. Custom comparator. 386 assertions.
 
+**PEG** (`lib/peg`) — **implemented**. Parsing Expression Grammar library with captures and recursive grammars.
+Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `star`, `plus`, `opt`, `neg` (negative lookahead), `pos` (positive lookahead). `cap(p)` — capture matched substring. `ref("name")` — recursive grammar references. `peg.grammar({start, rules})` → `:match(input)` / `:match_all(input)`. `peg.match(pat, input)` for standalone patterns. 86 assertions.
+
+**Geohash** (`lib/geohash`) — **implemented**. Geohash encode/decode, neighbors, and bounding boxes.
+`geohash.encode(lat, lon, precision)` → hash string. `geohash.decode(hash)` → `{lat, lon, lat_err, lon_err}`. `geohash.decode_bbox(hash)` → `{min_lat, min_lon, max_lat, max_lon}`. `geohash.neighbor(hash, dir)` — 8 directions. `geohash.neighbors(hash)` → table of 8. `geohash.are_neighbors(h1, h2)`. `geohash.within(lat, lon, radius_km, precision)` — bounding-box coverage. 116 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
