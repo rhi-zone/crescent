@@ -9,6 +9,8 @@ local png_mod  = require("lib.png")
 local png_cap  = require("lib.platform.caps.png").png_cap
 local render   = require("lib.platform.caps.render")
 local fs_cap   = require("lib.platform.caps.fs").fs_cap
+local base64   = require("lib.base64")
+local tar      = require("lib.tar")
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -282,6 +284,105 @@ T.describe("caps.fs", function ()
 	end)
 end)
 
+-- ── App helpers ───────────────────────────────────────────────────────────────
+
+-- Pure-Lua gzip wrapper using DEFLATE stored blocks (no compression).
+-- Only used in tests to produce valid gzip data without needing system zlib.
+local function gzip_store(data)
+	local bit = require("bit")
+	local band, bxor, rshift = bit.band, bit.bxor, bit.rshift
+
+	-- CRC-32 table
+	local crc_t = {}
+	for i = 0, 255 do
+		local c = i
+		for _ = 1, 8 do
+			if band(c, 1) == 1 then c = bxor(rshift(c, 1), 0xEDB88320) else c = rshift(c, 1) end
+		end
+		crc_t[i] = c
+	end
+	local function crc32(s)
+		local c = 0xFFFFFFFF
+		for i = 1, #s do
+			c = bxor(rshift(c, 8), crc_t[band(bxor(c, s:byte(i)), 0xFF)])
+		end
+		local v = band(bxor(c, 0xFFFFFFFF), 0xFFFFFFFF)
+		if v < 0 then v = v + 0x100000000 end
+		return v
+	end
+
+	local function le32(n)
+		if n < 0 then n = n + 0x100000000 end
+		return string.char(n%256, math.floor(n/256)%256, math.floor(n/65536)%256, math.floor(n/16777216)%256)
+	end
+	local function le16(n)
+		return string.char(n%256, math.floor(n/256)%256)
+	end
+
+	-- gzip header (no flags, OS=0xff)
+	local header = "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff"
+
+	-- DEFLATE stored blocks (BTYPE=00, BFINAL depends on position)
+	-- Max stored block payload = 65535
+	local MAXBLOCK = 65535
+	local blocks = {}
+	local n = #data
+	local pos = 1
+	while pos <= n or n == 0 do
+		local chunk_end = math.min(pos + MAXBLOCK - 1, n)
+		local chunk = data:sub(pos, chunk_end)
+		local len = #chunk
+		local is_last = chunk_end >= n
+		-- BFINAL=is_last, BTYPE=00 → byte = is_last ? 0x01 : 0x00
+		blocks[#blocks+1] = string.char(is_last and 0x01 or 0x00)
+		blocks[#blocks+1] = le16(len)
+		blocks[#blocks+1] = le16(band(bxor(len, 0xFFFF), 0xFFFF))
+		blocks[#blocks+1] = chunk
+		if is_last then break end
+		pos = chunk_end + 1
+	end
+
+	local crc = crc32(data)
+	local trailer = le32(crc) .. le32(n % 0x100000000)
+	return header .. table.concat(blocks) .. trailer
+end
+
+-- Build an iTXt chunk with keyword "lua" containing base64(gzip(tar(entries))).
+-- entries: array of { name=string, data=string }
+local function make_lua_itxt_chunk(entries_in)
+	local tardata = assert(tar.write(entries_in))
+	local gz      = gzip_store(tardata)
+	local b64     = base64.encode(gz)
+	-- iTXt layout: keyword \0 flag(0) method(0) lang \0 translated_kw \0 text
+	local itxt_data = "lua\0\0\0\0\0" .. b64
+	return { type = "iTXt", data = itxt_data }
+end
+
+-- Build a PNG with a "lua" iTXt app chunk.
+-- files: { [path] = source_string, ... }
+-- manifest: table (will be JSON-encoded)
+local function make_test_app(files, manifest)
+	local entries = {}
+	-- manifest.json first
+	local manifest_json = require("lib.json").encode(manifest)
+	entries[#entries + 1] = { name = "manifest.json", data = manifest_json }
+	for path, src in pairs(files) do
+		entries[#entries + 1] = { name = path, data = src }
+	end
+
+	local chunks = assert(png_mod.read(MINIMAL_PNG_IDAT))
+	local lua_chunk = make_lua_itxt_chunk(entries)
+	-- Insert before IEND
+	local new_chunks = {}
+	for _, c in ipairs(chunks) do
+		if c.type == "IEND" then
+			new_chunks[#new_chunks + 1] = lua_chunk
+		end
+		new_chunks[#new_chunks + 1] = c
+	end
+	return png_mod.write(new_chunks)
+end
+
 -- ── end-to-end: script uses caps inside sandbox ───────────────────────────────
 
 T.describe("platform end-to-end", function ()
@@ -311,5 +412,130 @@ return "done"
 		local items = get_all()
 		T.eq(#items, 1)
 		T.eq(items[1], "got: card-data")
+	end)
+end)
+
+-- ── platform.load_app ─────────────────────────────────────────────────────────
+
+T.describe("platform.load_app", function ()
+	T.it("loads app from lua iTXt chunk", function ()
+		local manifest = { name = "test-app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local bytes = make_test_app({ ["main.lua"] = "return 42" }, manifest)
+		local path  = write_temp(bytes)
+		local app, err = platform.load_app(path)
+		os.remove(path)
+		T.ok(app ~= nil, "app loaded: " .. tostring(err))
+		T.eq(app.manifest.name,    "test-app")
+		T.eq(app.manifest.version, "1.0.0")
+		T.ok(type(app.entries) == "table")
+		T.ok(#app.entries >= 2)  -- manifest.json + main.lua
+	end)
+
+	T.it("returns error for PNG without lua iTXt chunk", function ()
+		local bytes = make_test_card("return 1")
+		local path  = write_temp(bytes)
+		local app, err = platform.load_app(path)
+		os.remove(path)
+		T.ok(app == nil)
+		T.ok(err ~= nil and err:find("lua"))
+	end)
+
+	T.it("returns error for non-existent file", function ()
+		local app, err = platform.load_app("/tmp/no_such_app_xyz.png")
+		T.ok(app == nil)
+		T.ok(err ~= nil)
+	end)
+end)
+
+-- ── platform.run_entry ────────────────────────────────────────────────────────
+
+T.describe("platform.run_entry", function ()
+	T.it("runs headless entrypoint and returns result", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "run.lua" } }
+		local bytes = make_test_app({ ["run.lua"] = "return 7 * 6" }, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)
+		local ok, result = platform.run_entry(app, "headless", env)
+		T.ok(ok, tostring(result))
+		T.eq(result, 42)
+	end)
+
+	T.it("returns error for unknown entry key", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "run.lua" } }
+		local bytes = make_test_app({ ["run.lua"] = "return 1" }, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)
+		local ok, err = platform.run_entry(app, "dom", env)
+		T.ok(not ok)
+		T.ok(err ~= nil and err:find("dom"))
+	end)
+
+	T.it("require resolves modules within the tarball", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local files = {
+			["main.lua"]        = "local u = require('shared.utils'); return u.double(21)",
+			["shared/utils.lua"] = "local M = {}; function M.double(n) return n * 2 end; return M",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)
+		local ok, result = platform.run_entry(app, "headless", env)
+		T.ok(ok, tostring(result))
+		T.eq(result, 42)
+	end)
+
+	T.it("require resolves init.lua convention within tarball", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local files = {
+			["main.lua"]            = "local u = require('shared.utils'); return u.value",
+			["shared/utils/init.lua"] = "return { value = 99 }",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)
+		local ok, result = platform.run_entry(app, "headless", env)
+		T.ok(ok, tostring(result))
+		T.eq(result, 99)
+	end)
+
+	T.it("sandbox blocks require for modules not in tarball and not allowlisted", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local bytes = make_test_app({ ["main.lua"] = "return require('io')" }, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)  -- io not in stdlib modules
+		local ok  = platform.run_entry(app, "headless", env)
+		T.ok(not ok, "require('io') should fail in sandbox")
+	end)
+end)
+
+-- ── platform.load_and_run_entry ───────────────────────────────────────────────
+
+T.describe("platform.load_and_run_entry", function ()
+	T.it("loads and runs in one call", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local bytes = make_test_app({ ["main.lua"] = "return 'hello'" }, manifest)
+		local path  = write_temp(bytes)
+		local env   = sandbox.env(sandbox.stdlib)
+		local ok, result = platform.load_and_run_entry(path, "headless", env)
+		os.remove(path)
+		T.ok(ok, tostring(result))
+		T.eq(result, "hello")
+	end)
+
+	T.it("returns error for non-existent file", function ()
+		local env = sandbox.env(sandbox.stdlib)
+		local ok, err = platform.load_and_run_entry("/tmp/no_such_app.png", "headless", env)
+		T.ok(not ok)
+		T.ok(err ~= nil)
 	end)
 end)
