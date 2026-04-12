@@ -339,20 +339,23 @@ T.describe("common_prefix", function()
   end)
 
   T.it("hashes in different continents share no/short prefix", function()
-    local sf     = GH.encode(37.7749, -122.4194, 7)  -- 9q8yy5h
-    local tokyo  = GH.encode(35.6762, 139.6503,  7)  -- xn76urw-ish
+    local sf     = GH.encode(37.7749, -122.4194, 7)  -- 9q8yyk8
+    local tokyo  = GH.encode(35.6762, 139.6503,  7)  -- xn7...
     local prefix = GH.common_prefix(sf, tokyo)
     T.ok(#prefix < 2, "minimal common prefix for distant hashes: '" .. prefix .. "'")
   end)
 
   T.it("prefix is a valid parent", function()
-    local prefix = GH.common_prefix("9q8yyk8", "9q8yy7n")
+    -- 9q8yyk8 and 9q8yyhx (west neighbor) share prefix "9q8yy"
+    local h1     = "9q8yyk8"
+    local h2     = "9q8yyhx"
+    local prefix = GH.common_prefix(h1, h2)
     T.ok(GH.is_valid(prefix), "prefix is valid hash")
-    local b5h = GH.decode("9q8yyk8")
-    local b7n = GH.decode("9q8yy7n")
-    local bp  = GH.decode(prefix)
-    T.ok(bp.lat.min <= b5h.lat.min and bp.lat.max >= b5h.lat.max, "prefix lat contains 5h")
-    T.ok(bp.lat.min <= b7n.lat.min and bp.lat.max >= b7n.lat.max, "prefix lat contains 7n")
+    local b1 = GH.decode(h1)
+    local b2 = GH.decode(h2)
+    local bp = GH.decode(prefix)
+    T.ok(bp.lat.min <= b1.lat.min and bp.lat.max >= b1.lat.max, "prefix lat contains h1")
+    T.ok(bp.lat.min <= b2.lat.min and bp.lat.max >= b2.lat.max, "prefix lat contains h2")
   end)
 end)
 
