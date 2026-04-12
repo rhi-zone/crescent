@@ -527,6 +527,30 @@ Format conversions: `to_csr`/`to_dok`/`to_coo`. Zero-stripping maintained. 100 a
 `diff`, `cumsum`, `apply(fn)`, `normalize`. `downsample(n)` (LTTB algorithm). `outliers`
 (z-score/IQR). `M.merge(s1,s2,fn)`, `M.align(s1,s2)`. 79 assertions.
 
+**Interval Tree** (`lib/interval_tree`) — **implemented**. Augmented BST for interval queries.
+Each node stores `max_hi` for subtree pruning. `insert(lo,hi,data)`, `delete(lo,hi,data?)`,
+`stab(point)` → matching intervals, `overlap(lo,hi)` → overlapping intervals, `contained(lo,hi)`
+→ fully-inside intervals, `nearest(point)`. `each(fn)` in-order traversal. `len()`.
+`M.from_array` balanced bulk load. 84 assertions.
+
+**Expression Evaluator** (`lib/expr`) — **implemented**. Math expression parser + evaluator
+with symbolic differentiation. `M.eval(str, env?)`, `M.compile(str)` → reusable fn.
+`M.parse` → AST; `M.eval_ast`, `M.to_string`, `M.simplify` (constant folding), `M.diff(ast,
+var)` (symbolic: product/chain/quotient rules, sin/cos/exp/log). `M.vars(ast)`. Operators:
++ - * / ^ % unary-minus. Built-ins: sin/cos/tan/sqrt/exp/log/abs/floor/ceil. 107 assertions.
+
+**Prolog** (`lib/prolog`) — **implemented**. Logic programming with backtracking via Lua
+coroutines. `db:assert(clause)`, `db:retract`, `db:query` → iterator, `query_all`, `query_one`,
+`satisfiable`. Prolog syntax parser (atoms, numbers, variables, compound terms, `:-` rules,
+list sugar). Unification with environment-as-map. Cut (`!`) via `pcall` sentinel.
+Built-ins: is/2, ==/2, \==/2, </>/=/=</>=, not, write, functor, arg. 71 assertions.
+
+**Text Diff** (`lib/text_diff`) — **implemented**. Character-level diff (Myers O(ND)) with
+common prefix/suffix optimization. `{op, text}` format (equal/insert/delete). `M.apply`,
+`M.cleanup_semantic` (word boundary alignment), `M.cleanup_efficiency`. `to_html` (`<ins>`/
+`<del>`), `to_unified` (@@-hunks), `to_patch`/`from_patch` (percent-encoded). `M.stats`
+(similarity). `M.word_diff`. `M.fuzzy_find`. 71 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
