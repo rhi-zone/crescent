@@ -444,6 +444,31 @@ casting). 4×4 row-major matrices: translate/scale/rotate/mul/transform. Quatern
 `from_axis_angle`, `mul`, `rotate`, `slerp`. Mesh generators: cube, UV sphere, plane.
 139 assertions.
 
+**A\*** (`lib/astar`) — **implemented**. Pathfinding suite. A* with binary-heap open
+set and configurable heuristic. Dijkstra (zero heuristic). BFS/DFS (unweighted). Grid
+pathfinding helper: 4/8-directional, passability function, Manhattan/Chebyshev/Euclidean
+heuristics. Flow field for multi-agent navigation. Path smoothing (funnel/line-of-sight).
+`M.graph`, `M.grid`, `M.flow_field`. 181 assertions.
+
+**Behavior Tree** (`lib/behavior_tree`) — **implemented**. Game AI behavior tree engine.
+Node types: sequence (AND), selector (OR), parallel (configurable success/fail threshold),
+decorator (inverter/succeeder/failer/repeat/retry/timeout/cooldown), action/condition
+leaves. Blackboard shared context. Random selector/sequence (shuffled children). Stateful
+resumption across ticks. `bt.tree(root)`, `tree:tick(blackboard)`. 114 assertions.
+
+**Markov Chain** (`lib/markov`) — **implemented**. Markov chain text generation.
+`M.chain(order)` with `train`, `generate`, `next`, `transitions`. Bigram to n-gram (any
+order). Start/end sentinels for sentence boundaries. Weighted random sampling.
+`save`/`load` for serializable snapshots. `M.from_text(text, order)` convenience.
+Stochastic with seeded RNG. 44 assertions.
+
+**L-System** (`lib/lsystem`) — **implemented**. Lindenmayer system procedural generation.
+`M.new({axiom, rules, angle, step})`. Deterministic and stochastic rules (probability
+weights). `expand(n)` iterative rewriting; `expand_iter(n)` step-by-step iterator.
+`turtle(string)` parses to command array (forward/turn/push/pop/pitch/roll/width/color).
+All standard symbols: F/G/f/+/-/|/[/]/&/^/\/!/\`. `M.presets`: `koch_snowflake`,
+`dragon_curve`, `sierpinski`, `plant`, `hilbert`, `pentigree`. 118 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
