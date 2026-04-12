@@ -810,6 +810,27 @@ diff (shared core). Conflict resolution: `ours`/`theirs`/`both`/`manual` modes. 
 to `<cmd>.lua` file, built-in subcommands, or `lib/pkg` run. Supports `run`, `test`, `check`, `fmt`
 subcommands. 61 assertions.
 
+**Hex Dump** (`lib/hex_dump`) — **implemented**. Hex dump and binary inspection utilities.
+`dump(data, opts)` — xxd-style hex dump (configurable width, grouping, address offset, case).
+`to_hex`/`from_hex` — hex string conversion. `parse(dump_str)` — reverses hex dump to binary.
+`diff(a, b)` — annotated hex diff with `>`/`<` markers. `inspect(val, opts)` — recursive Lua
+pretty-printer with cycle detection. `bytes`/`from_bytes` — byte array conversion. `to_bin`/`to_oct`
+— binary/octal strings. `float_bits`/`double_bits` — IEEE 754 bit patterns via FFI. 95 assertions.
+
+**OAuth2** (`lib/oauth2`) — **implemented**. OAuth2 client (RFC 6749) with injectable HTTP transport.
+`client({client_id, client_secret, token_url, http})`. Flows: `client_credentials`, `exchange_code`
+(auth code), `refresh`, `introspect`. `authorization_url` — builds redirect URL. `pkce()` — verifier
++ challenge (BASE64URL(SHA256(verifier))). `decode_jwt` — decode header/payload without verification.
+`token_store` — set/get/is_expired/needs_refresh with injectable clock. Inline pure-Lua SHA-256 and
+base64url for PKCE. 100 assertions.
+
+**GraphQL** (`lib/graphql`) — **implemented**. GraphQL query parser and schema executor.
+`parse(query)` → AST: Document → OperationDefinition → Field/Argument/Fragment/Variable. `parse_schema`
+— SDL type definitions. `schema(def)` — programmatic schema (type, args, resolve per field). `execute(schema,
+query, opts)` — field resolution with default table resolver; custom resolvers; list types; `__typename`;
+fragment spreads; inline fragments; variables substitution; resolver errors collected into `errors` array
+with partial data. 142 assertions.
+
 **Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
 Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
 angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
