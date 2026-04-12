@@ -133,6 +133,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
+**When verifying a newly built library, run only that library's test file — not the full suite.** Use `luajit lib/test/cli.lua lib/mylib/` or `luajit lib/test/cli.lua lib/mylib/mylib_test.lua` directly. The test runner accepts both file paths and directories. Only run the full suite (`luajit lib/test/cli.lua`) when checking global regressions.
+
 ## Context Management
 
 **Use subagents to protect the main context window.** For broad exploration or mechanical multi-file work, delegate to an Explore or general-purpose subagent rather than running searches inline. The subagent returns a distilled summary; raw tool output stays out of the main context.

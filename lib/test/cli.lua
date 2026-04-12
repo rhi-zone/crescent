@@ -93,6 +93,29 @@ local function find_test_files()
 	return files
 end
 
+-- Expand a list of paths: directories → find *_test.lua under them; files kept as-is.
+local function expand_paths(paths)
+	local out = {}
+	for _, p in ipairs(paths) do
+		-- Check if p is a directory by trying to open it as a file (fails for dirs).
+		local f = io.open(p, "r")
+		if f then
+			f:close()
+			out[#out + 1] = p
+		else
+			-- Assume directory; discover test files under it.
+			local handle = io.popen("find " .. p .. " -name '*_test.lua' -type f | sort")
+			if handle then
+				for line in handle:lines() do
+					out[#out + 1] = line
+				end
+				handle:close()
+			end
+		end
+	end
+	return out
+end
+
 -- ── sequential runner (used for coverage and --jobs=1) ───────────────────────
 
 local function run_sequential(file_list, coverage)
@@ -410,7 +433,7 @@ end
 function M.main(argv)
 	local coverage, jobs_arg, explicit_files = parse_args(argv)
 
-	local files = #explicit_files > 0 and explicit_files or find_test_files()
+	local files = #explicit_files > 0 and expand_paths(explicit_files) or find_test_files()
 	if #files == 0 then
 		print("no test files found")
 		os.exit(0)
