@@ -739,6 +739,33 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**Wavelet** (`lib/wavelet`) — **implemented**. Discrete Wavelet Transform for signal processing.
+1D `dwt`/`idwt` (forward/inverse via circular convolution + downsampling). Multi-level:
+`wavedec`/`waverec`. 2D: `dwt2`/`idwt2` (separable row+column passes). Wavelets: Haar,
+db2 (4-tap Daubechies), db4 (8-tap), sym2, coif1. `threshold(coeffs, thresh, mode)` —
+hard/soft thresholding for denoising. `wavelet_info`, `pad_to_power_of_2`. 95 assertions.
+
+**Kalman Filter** (`lib/kalman`) — **implemented**. State estimation for linear and nonlinear
+systems. `K.scalar` — 1D constant-model KF (predict/update, variance decay). `K.multivariate`
+— full matrix KF (F, H, Q, R, x0, P0; `state`/`covariance`). `K.extended` — EKF with
+user-supplied Jacobians `Jf`/`Jh`. `K.tracker1d` — constant-velocity position+velocity model
+(2D state). Inline matrix utilities (mul, transpose, add, sub, inv via Gaussian elimination).
+101 assertions.
+
+**PID Controller** (`lib/pid`) — **implemented**. Proportional-Integral-Derivative controller
+with control-theory utilities. `C.pid` — full PID with anti-windup integral clamping, output
+clamping, `update`/`set_setpoint`/`reset`/`state`. `C.ziegler_nichols(ku, tu, type)` —
+P/PI/PD/PID auto-tuning formulas. `C.cascade` — two-loop cascade controller. `C.rate_limiter`
+— max-rate-of-change limiter. `C.low_pass` — exponential moving average (alpha or cutoff+dt).
+`C.moving_average` — ring-buffer windowed average. `C.deadband`. 72 assertions.
+
+**Grammar Gen** (`lib/grammar_gen`) — **implemented**. Tracery-inspired context-free grammar
+text generation. `G.new(rules, opts)` — define symbol rules as arrays of template strings.
+`expand(template)` — recursive `#symbol.mod1.mod2#` expansion. `expand_symbol`. Modifiers:
+`capitalize`, `uppercase`, `lowercase`, `a`/`an`, `s` (pluralize), `ed`, `ing`. Inline
+assignments: `[var:value]` pushes to context. `push(rules)`/`pop()` for scoped overrides.
+Max-depth guard (default 100). Deterministic with `seed` option. `symbols()`. 101 assertions.
+
 **Vigenère** (`lib/vigenere`) — **implemented**. Classical cipher suite with analysis tools.
 Ciphers: `caesar_encrypt`/`decrypt`, `rot13`, `atbash`, `vigenere_encrypt`/`decrypt`,
 `beaufort_encrypt`/`decrypt` (self-reciprocal), `autokey_encrypt`/`decrypt`, `playfair_encrypt`/
