@@ -710,6 +710,35 @@ Iteration: `elements` (repeated), `pairs`, `keys`. Set ops (return new multisets
 `scale`. Predicates: `subset`, `eq`. Functional: `map` (merges counts for same new element),
 `filter`, `each`. Analytics: `most_common`, `least_common`. 114 assertions.
 
+**Text Stats** (`lib/text_stats`) — **implemented**. Text readability and statistics analysis.
+Basic stats: `char_count`, `letter_count`, `word_count`, `sentence_count`, `paragraph_count`,
+`syllable_count`, `syllables_in_word`. Readability indices: Flesch Reading Ease,
+Flesch-Kincaid Grade, Gunning Fog, SMOG Grade, Automated Readability Index (ARI),
+Coleman-Liau, Dale-Chall. Lexical: `type_token_ratio`, `lexical_density`, `avg_word_length`.
+Frequency: `word_frequency`, `top_words`, `unique_words`. `analyze` returns all stats +
+`reading_level` label. 117 assertions.
+
+**SScanf** (`lib/sscanf`) — **implemented**. C-style scanf/sscanf for structured text parsing.
+`S.sscanf(input, fmt)` returns multiple values; `S.named(input, fmt)` with `%{name}d` syntax
+returns table; `S.scan_all(str, fmt)` parses all lines; `S.matches` (boolean); `S.split`
+(with `skip_empty` option); `S.tokenize`. Format specifiers: `%d`, `%i` (0x/octal prefix),
+`%u`, `%f/%e/%g`, `%s`, `%c`, `%[chars]`, `%[^chars]`, `%%`, `%*` (suppression), width
+specifiers (`%5d`, `%10s`). 117 assertions.
+
+**Luhn** (`lib/luhn`) — **implemented**. Luhn algorithm for payment card validation.
+`luhn.valid` (normalizes spaces/dashes); `luhn.check_digit` (compute check digit for prefix);
+`luhn.generate(prefix, length)` (generate valid number); `luhn.card_type` (Visa, Mastercard,
+Amex, Discover, JCB, Diners Club, UnionPay); `luhn.card_info`, `luhn.card_types`;
+`luhn.format` (card-type-aware grouping: Amex 4-6-5, Diners 4-6-4, others 4-4-4-4). 92 assertions.
+
+**Finite Field** (`lib/finite_field`) — **implemented**. Galois field arithmetic for
+cryptography and error correction. `FF.prime(p)` — GF(p) prime field with extended Euclidean
+inverse, full operator metamethods (`+`, `-`, `*`, `/`, unary `-`, `==`, tostring), negative
+exponents. `FF.gf2n(n, poly, g)` — GF(2^n) binary extension field with carryless multiply,
+log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomial) and
+`FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
+field (Horner eval, O(n²) multiply). 216 assertions.
+
 **Inverted Index** (`lib/inverted_index`) — **implemented**. Full-text search inverted index
 with BM25 scoring. `II.new(opts)` with configurable k1, b, tokenizer, stemmer. `add` /
 `add_all` / `remove`. `search(query, opts)` — OR/AND boolean with optional `limit`,
