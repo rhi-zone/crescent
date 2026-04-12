@@ -856,6 +856,30 @@ borders, per-column alignment. `truncate(s, max, ellipsis?)`. `pad_left`/`pad_ri
 pattern. `schema(def):parse(source)` — injectable string-keyed table, collects all errors.
 `schema:template()` — generates commented `.env` skeleton. 184 assertions.
 
+**Cron Parser** (`lib/cron_parser`) — **implemented**. Cron expression parser and scheduler.
+`cron.parse(expr)` — 5/6-field or `@alias`. `sched:matches(ts)`, `sched:next(ts, n?)`,
+`sched:prev(ts)`, `sched:range(start, end)`. `sched:describe()` — human-readable. Field syntax:
+`*`, `n`, `n-m`, `*/n`, `n-m/n`, comma lists, month/weekday names. `@hourly`/`@daily`/
+`@weekly`/`@monthly`/`@yearly`/`@midnight`. 179 assertions.
+
+**Mediator** (`lib/mediator`) — **implemented**. Mediator pattern with commands, events, and middleware.
+`M.new()`: `register(name, fn)` — one handler per command. `send(name, payload)` → `(result, err)`.
+`on(name, fn)` → token — multiple handlers per event; `emit(name, payload)` calls all (errors isolated).
+`use(mw)` / `use(name, mw)` — global or command-specific middleware (FIFO). `off`/`token:remove`.
+`namespace(prefix)` — sub-mediator with prefixed names. 65 assertions.
+
+**CSV Transform** (`lib/csv_transform`) — **implemented**. CSV transformation pipeline.
+`CT.parse(str)` — RFC-4180 (quoted fields, embedded newlines). `CT.serialize(rows, headers)`.
+`CT.from(rows)` → chainable pipeline: `select`, `rename`, `cast`, `filter`, `map`, `sort`, `limit`,
+`add_column`, `distinct`, `explode`, `group_by`+`agg`, `join` (inner), `pivot`, `describe`, `to_array`.
+Aggregators: `count`, `sum`, `avg`, `min`, `max`, `first`, `last`, `collect`. 95 assertions.
+
+**Pool Allocator** (`lib/pool_allocator`) — **implemented**. Object pool, arena, freelist, ring buffer.
+`pool(opts)`: acquire/release, batch ops, `with(fn)` scoped auto-release, stats (hits/misses/created).
+`fixed_pool` — non-growing, returns `(nil, "pool exhausted")`. `arena(size)` — bump allocator
+(alloc/reset). `freelist(n)` — integer slot allocator with linked free-list. `ring(n)` — FIFO
+circular buffer (push overwrites oldest when full). 144 assertions.
+
 **Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
 Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
 angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
