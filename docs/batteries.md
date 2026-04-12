@@ -378,6 +378,26 @@ Length-delimited framing: `ld_encode/ld_decode`. TLV (configurable type/length b
 `tlv_encode/tlv_decode/tlv_decode_all`. Big-endian pack/unpack: `u8/u16/u32/i8/i16/i32`.
 191 assertions.
 
+**Reactive Stream** (`lib/reactive_stream`) — **implemented**. Lazy pull-based stream
+combinators. Sources: `from_array`, `range`, `of`, `empty`, `repeat_`, `generate` (unfold),
+`chars`, `lines`. Transformers: `map`, `filter`, `flat_map`, `take`, `drop`, `take_while`,
+`drop_while`, `zip`, `zip_with`, `enumerate`, `flatten`, `chunk`, `window`, `distinct`,
+`unique`, `sort`, `reverse`, `concat`. Terminators: `to_array`, `fold`, `reduce`, `sum`,
+`count`, `first`, `last`, `min`, `max`, `any`, `all`, `find`, `join`, `partition`,
+`group_by`. 221 assertions.
+
+**BSON** (`lib/bson`) — **implemented**. Binary JSON (MongoDB wire format). Encodes Lua
+tables as BSON documents (type dispatch: null→0x0a, bool→0x08, int→0x10/0x12, float→0x01,
+string→0x02, array→0x04, document→0x03). `encode`, `decode`, `decode_all`. `M.null`,
+`M.datetime(ms)`, `M.binary(data, subtype)` sentinels. FFI path for IEEE 754 doubles;
+pure-Lua fallback. Little-endian int32/int64 with correct sign extension. 117 assertions.
+
+**XML** (`lib/xml`) — **implemented**. XML 1.0 SAX + DOM parser. SAX: `sax(xml, handlers)`
+fires start/end_element, text, comment, cdata, PI. DOM: `parse(xml)` → element tree with
+parent refs. `find`, `find_all`, `xpath_simple` (`a/b/c` + `//tag`), `text_content`,
+`attr`. `serialize(node, opts)` (indent, XML declaration). Builder: `element/text_node/
+comment_node`. `escape`/`unescape` (entity + numeric refs). `ns_split`. 148 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
