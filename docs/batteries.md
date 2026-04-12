@@ -793,6 +793,23 @@ with callback. `M.mock_fs` for testable mtime injection. 73 assertions.
 — tests guard without side effects. `sm:state()`, `sm:states()`, `sm:transitions()`. `sm:snapshot()` /
 `M.restore(def, snap)` for serialization. Full validation at construction time. 73 assertions.
 
+**Wave** (`lib/wave`) — **implemented**. WAV audio file codec. `M.string_to_wave(s)` → `{sample_rate,
+num_channels, bits_per_sample, data}`. `M.wave_to_string(wave)` → binary WAV string. `encode`/`decode`
+aliases. Pure Lua, handles PCM 8/16/32-bit mono and stereo. 32 assertions.
+
+**Rand** (`lib/rand`) — **implemented**. Cryptographically secure random number generation.
+Tiered: `getrandom(2)` syscall (Linux x86-64/arm64) → `/dev/urandom` fallback. `bytes(n)`,
+`u32()`, `u64()`, `int(min, max)`, `float()` (0..1), `choice(array)`, `shuffle(array)`,
+`hex(n)`, `uuid()` (v4). 1423 assertions.
+
+**Merge3** (`lib/merge3`) — **implemented**. Three-way text merge. `M.merge3(base, ours, theirs)`
+— line-level three-way merge returning merged text or conflict markers. `M.diff(a, b)` — line-level
+diff (shared core). Conflict resolution: `ours`/`theirs`/`both`/`manual` modes. 79 assertions.
+
+**Crescent CLI** (`lib/cr`) — **implemented**. Unified crescent CLI dispatcher. `cr <cmd>` resolves
+to `<cmd>.lua` file, built-in subcommands, or `lib/pkg` run. Supports `run`, `test`, `check`, `fmt`
+subcommands. 61 assertions.
+
 **Physics 2D** (`lib/physics_2d`) — **implemented**. 2D rigid body physics simulation.
 Semi-implicit Euler integration. Bodies: circle and box shapes with mass, restitution, friction,
 angle. Collision detection: circle-circle, circle-box (AABB), box-box. Impulse-based resolution
