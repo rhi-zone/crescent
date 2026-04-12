@@ -469,6 +469,32 @@ weights). `expand(n)` iterative rewriting; `expand_iter(n)` step-by-step iterato
 All standard symbols: F/G/f/+/-/|/[/]/&/^/\/!/\`. `M.presets`: `koch_snowflake`,
 `dragon_curve`, `sierpinski`, `plant`, `hilbert`, `pentigree`. 118 assertions.
 
+**Cellular Automata** (`lib/cellular_automata`) — **implemented**. Conway's Life, Wolfram
+1D rules, multi-state automata. `M.rule1d(n)` for Wolfram elementary rules (0–255):
+`init_single`, `init_random`, `step(row)`, `run(row, steps)`. `M.grid2d(opts)`: toroidal
+2D grid with birth/survive rules, `get`/`set`/`step`/`step_n`/`count_alive`/`to_string`/
+`from_string`/`place_pattern`. Multi-state (`states=3` for Brian's Brain). `M.patterns`:
+9 classic patterns including Gosper Glider Gun. 71 assertions.
+
+**Neural Network** (`lib/neural`) — **implemented**. Feedforward net with backpropagation.
+`M.network({layers, activation, output_activation, seed})`. Activations: sigmoid, relu,
+tanh, linear, softmax. Loss: MSE, cross-entropy. `net:forward`, `net:backward`, `M.train`
+(SGD, mini-batch, Fisher-Yates shuffle), `net:save`/`M.load`. He/Xavier weight init.
+Solves XOR with 2000 epochs. 61 assertions.
+
+**Steering Behaviors** (`lib/steering`) — **implemented**. Craig Reynolds 2D steering for
+game agents. `vec2` with full ops. `agent({position, velocity, max_speed, max_force, mass})`.
+Behaviors: seek, flee, arrive (deceleration ramp), pursue/evade (velocity prediction),
+wander (circle projection), obstacle_avoidance, wall_follow, path_follow, separation,
+cohesion, alignment. `M.combine(weighted_behaviors)`. `M.flock(agents, opts)`. 82 assertions.
+
+**Particle System** (`lib/particle`) — **implemented**. 2D emitter with particle pool.
+`M.emitter({shape, rate, burst, max_particles, lifetime, speed, angle, size, color, gravity,
+drag, rotation_speed, seed})`. Shapes: point/circle/rect/line. Range properties (`{min,max}`
+or scalar). Size/RGBA color interpolated over lifetime fraction. `emitter:update(dt)`,
+`burst(n)`, `each(fn)`, `stop`/`start`/`reset`. Built-in affectors: gravity, drag, attractor,
+turbulence. Custom affectors via `add_affector(fn)`. 66 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
