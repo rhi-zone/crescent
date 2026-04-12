@@ -874,6 +874,12 @@ pattern. `schema(def):parse(source)` — injectable string-keyed table, collects
 `add_column`, `distinct`, `explode`, `group_by`+`agg`, `join` (inner), `pivot`, `describe`, `to_array`.
 Aggregators: `count`, `sum`, `avg`, `min`, `max`, `first`, `last`, `collect`. 95 assertions.
 
+**iCalendar** (`lib/ical`) — **implemented**. iCalendar (RFC 5545) parser and builder.
+`ical.parse(s)` — full parser with content-line unfolding, VCALENDAR/VEVENT/VTODO/VALARM.
+`parse_datetime`/`parse_date`/`format_datetime`/`format_date`. `parse_property` — `NAME;PARAM=val:value`.
+`parse_rrule`/`format_rrule` — FREQ/INTERVAL/COUNT/UNTIL/BYDAY/BYMONTHDAY/BYMONTH. `calendar(opts)`:
+`add_event`/`add_todo`/`to_string` with RFC 5545 line folding (75 octets). 236 assertions.
+
 **Pool Allocator** (`lib/pool_allocator`) — **implemented**. Object pool, arena, freelist, ring buffer.
 `pool(opts)`: acquire/release, batch ops, `with(fn)` scoped auto-release, stats (hits/misses/created).
 `fixed_pool` — non-growing, returns `(nil, "pool exhausted")`. `arena(size)` — bump allocator
