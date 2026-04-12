@@ -913,6 +913,18 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Porter Stemmer** (`lib/porter_stemmer`) — **implemented**. Porter1/Porter2 stemmer with stop words and text indexing.
 `PS.stem(word)` / `PS.stem_porter1` — Porter 1980 (5 steps). `PS.stem_porter2` — Snowball English with R1/R2 regions. `PS.stem_all(words, algo)`. `PS.normalize(word)` — lowercase+strip. `PS.stem_text(text, opts)` — tokenize+filter+stem. `PS.stop_words` (~155 words), `PS.is_stop_word`. `PS.index(documents)` — inverted index with stemmed keys and per-doc positions. 125 assertions.
 
+**Neural Net** (`lib/neural_net`) — **implemented**. Feedforward neural network with backpropagation and mini-batch SGD trainer.
+`M.layer(in, out, activation)` / `M.layer_random(...)` — Xavier init. `M.network(layers)` — `:forward`, `:predict`, `:backward`, `:update`, `:serialize`. Activations: relu, sigmoid, tanh, linear, softmax. Loss: `M.mse`, `M.cross_entropy`, `M.binary_cross_entropy`. `M.trainer(net, opts)` — `:fit(X,Y)` → per-epoch losses, `:evaluate`. `M.deserialize`. XOR and gradient-check tests pass. 105 assertions.
+
+**GraphQL Parser** (`lib/graphql_parser`) — **implemented**. GraphQL query language and SDL parser with AST printer.
+`M.parse(src)` → AST or `(nil, err)`. `M.print(ast)` → normalized 2-space-indented text. `M.get(ast, path)` — dot/bracket path accessor. `M.validate(doc)` → `ok, errors`. All query constructs: queries/mutations/subscriptions, fragments, aliases, directives, variables, all value types. SDL: ObjectType, InterfaceType, UnionType, EnumType, InputObjectType, ScalarType, DirectiveDefinition. Block strings. Round-trip stable. 427 assertions.
+
+**Event Sourcing** (`lib/event_sourcing`) — **implemented**. Event store, aggregate roots, projections, sagas, and snapshotting.
+`M.store()` — `:append(id, events, expected_version)` (optimistic concurrency), `:load(id, opts)`, `:load_all(opts)`, `:subscribe(handler)`, `:snapshot`/`:load_snapshot`. `M.aggregate(type, handlers)` — `:raise`, `:apply`, `.pending_events`, `.version`, `.state`. `M.projection(handlers)`. `M.saga(handlers)` → `{ commands }`. `M.load_aggregate(store, class, id)` — snapshot-aware replay. BankAccount example in tests. 105 assertions.
+
+**Image Processing** (`lib/image_processing`) — **implemented**. Pure Lua image processing with filters, transforms, and drawing.
+`M.new(w,h,ch)` / `M.from_bytes` / `img:to_bytes` / `img:get`/`img:set`. Color: `rgb_to_grayscale`, `rgb_to_hsv`/`hsv_to_rgb`, `apply_lut`. Ops: `brightness`, `contrast`, `invert`, `threshold`, `gamma`. Geometry: `crop`, `flip_h`, `flip_v`, `rotate_90`, `scale_nearest`, `scale_bilinear`. Filters: `convolve`, `blur_box`, `blur_gaussian`, `sharpen`, `edge_detect` (Sobel), `emboss`. Histogram `histogram`/`equalize`. Drawing: `fill`, `draw_rect`, `fill_rect`. 177 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
