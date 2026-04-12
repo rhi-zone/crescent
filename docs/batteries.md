@@ -1003,6 +1003,8 @@ Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `st
 **Task Queue** (`lib/task_queue`) — **implemented**. Priority task queue with retry, delay, and event hooks.
 `TQ.new({max_retries, retry_delay, max_concurrent})`. `q:push({fn, priority, id, delay})` → id. `q:process(n)` → results. `q:tick()` advances clock. Min-heap with FIFO tiebreaking within same priority. Retry on `(nil,err)` or throw. `q:cancel(id)`. `q:stats()`. `q:on("success"|"failure"|"retry", fn)`. 104 assertions.
 
+**Fuzzy Match** (`lib/fuzzy_match`) — **implemented**. Fuzzy string matching with scoring and position highlighting. `fuzzy_match(pattern, str)` → `{score, positions}`. Multi-term matching, case-insensitive, position arrays for highlighting, batch `filter`/`rank` over candidate lists. 102 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
