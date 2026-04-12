@@ -680,6 +680,36 @@ Formats: bare/double-quoted/single-quoted values, `export` prefix, inline `#` co
 `\n\t\\\"` escapes. `${VAR}` and `$VAR` expansion. `M.resolver(path)` → getenv with
 os.getenv fallback. `M.stringify(vars)` auto-quotes. 41 assertions.
 
+**CRDT** (`lib/crdt`) — **implemented**. Conflict-free replicated data types for distributed
+systems. Six types: `gcounter` (grow-only counter, per-replica max on merge), `pncounter`
+(increment+decrement via two G-counters), `lww_register` (last-write-wins register by
+logical timestamp), `tpset` (two-phase set; removed elements never re-added), `orset`
+(observed-remove set with unique add-tags; re-add after remove), `lww_map` (per-key LWW
+with tombstones). All types: `:merge`, `:clone`, `:eq`. Commutativity, idempotency, and
+associativity tested for all six. 69 assertions.
+
+**Persistent** (`lib/persistent`) — **implemented**. Persistent (structurally-sharing,
+immutable) data structures. `P.list` (cons-cell linked list: cons, head, tail, map, filter,
+foldl, concat, reverse), `P.vector` (path-copying array: get, set, append, map, slice),
+`P.map` (path-copying AVL BST: set, get, has, delete, keys, values, merge). Each operation
+returns a new value; originals are never mutated. Helpers: `list_from`, `vector_from`,
+`map_from`, `map_from_pairs`. 149 assertions.
+
+**Word Wrap** (`lib/word_wrap`) — **implemented**. Text line-breaking with greedy and
+optimal algorithms. `wrap.greedy` (first-fit, O(n)); `wrap.optimal` (DP Knuth-Plass
+inspired, minimizes sum-of-squared-slack); `wrap.raggedness` metric; `wrap.paragraph`
+(preserves `\n` between paragraphs); `wrap.justify` (inter-word space distribution);
+`wrap.center`, `wrap.pad_left`, `wrap.truncate` (with ellipsis); `wrap.wrap` (full pipeline
+→ `\n`-joined string). Optimal guaranteed ≤ greedy raggedness. 117 assertions.
+
+**Multiset** (`lib/multiset`) — **implemented**. Multiset/bag: a set where elements may
+appear multiple times. `MS.new()`, `MS.from(array)`, `MS.from_counts(t)`. Mutating ops:
+`add`, `remove`, `remove_all`. Queries: `count`, `contains`, `total`, `distinct`, `is_empty`.
+Iteration: `elements` (repeated), `pairs`, `keys`. Set ops (return new multisets): `union`
+(max counts), `intersection` (min), `sum` (add counts), `difference` (floor-0 subtraction),
+`scale`. Predicates: `subset`, `eq`. Functional: `map` (merges counts for same new element),
+`filter`, `each`. Analytics: `most_common`, `least_common`. 114 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
