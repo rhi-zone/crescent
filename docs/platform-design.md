@@ -114,33 +114,40 @@ The data capability is the abstraction layer. CCv2 fields are one implementation
 Crescent structured data is another. The script sees one API either way — whatever
 the capability implementation returns from `caps.png.text(name)`.
 
-## First-party applications
+## App internal routing
 
-The platform ships two first-class editor applications as preset scripts:
+An app's `dom` entrypoint owns its entire UI — conversation, editor, lorebook editor,
+settings, all of it. Navigation between views is internal to the app, not external
+entrypoints. This gives smooth transitions, shared state across views, and no
+reload between them.
 
-### CCv2 card editor
+The shell has no knowledge of what views an app contains. It launches `dom` and the
+app handles its own routing. A "edit this app" button in the shell just opens the
+app's `dom` entrypoint — the app decides whether to show the editor first or the
+conversation first based on context.
 
-A rich-text editor for CCv2 character cards. Reads and writes the `chara` tEXt chunk
-(base64-encoded JSON). Stores additional structured data in a `crescent` extension
-chunk for round-trip fidelity.
+Format-specific tooling (CCv2 editor, lorebook editor) lives inside the app that
+knows the format. The shell has no idea what CCv2 is and never will.
 
-- Rich text editing of CCv2 fields (description, personality, scenario, etc.)
-- `{{char}}`, `{{user}}` macros render as live inline components; cursor entry expands
-  to raw macro text for editing; toggle between raw and resolved modes
-- Macro replacement is the editor view — no separate preview pane
-- Extension field: structured sub-blocks (sections within personality, etc.) stored in
-  `extensions.crescent`, flattened to plain text for CCv2 export, reconstructed on
-  re-open
+### CCv2 app internal views
 
-### CCv2 lorebook editor
+A first-party CCv2-compatible app ships with these internal views under `dom`:
 
-Purpose-built for CCv2 lorebook structure. Hard-optimized for CCv2's exact shape —
-keyword lists, case sensitivity, scan depth, probability, priority, insertion position.
-No Lua anywhere. Familiar to existing SillyTavern users, better UI.
+**Conversation view** — the interaction loop. LLM calls, worldstate, context
+assembly. The user-facing primary view.
 
-Crescent-native context construction is arbitrary script logic, not a lorebook concept.
-There is no "crescent lorebook editor" — scripts that need dynamic context injection
-write it in code.
+**CCv2 card editor** — rich-text editing of CCv2 fields (description, personality,
+scenario, etc.). `{{char}}`, `{{user}}` macros render as live inline components;
+cursor entry expands to raw macro text for editing. Extension field: structured
+sub-blocks stored in `extensions.crescent`, flattened to plain text for CCv2 export.
+
+**CCv2 lorebook editor** — hard-optimized for CCv2's lorebook shape: keyword lists,
+case sensitivity, scan depth, probability, priority, insertion position. Familiar to
+SillyTavern users.
+
+Crescent-native context construction is arbitrary script logic. There is no
+"crescent lorebook" concept — scripts that need dynamic context injection write it
+in code. The lorebook editor exists only for CCv2 compatibility.
 
 ## Preset library
 
@@ -277,18 +284,57 @@ the card is the complete application.
 The platform can optionally upgrade embedded scripts to a newer version, but the
 upgrade logic is itself a script — the platform does not hardcode any migration policy.
 
+## Library shell
+
+The first-party library shell is an app (in the same format) that browses and launches
+other apps. It is a **unified library browser** over multiple heterogeneous data
+sources, each with an adapter.
+
+**Adapter interface:**
+```lua
+source.list()              -> { id, metadata, open }[]
+source.search(query)       -> { id, metadata, open }[]
+source.write(id, metadata) -> ok | nil, err  -- optional, for writable sources
+```
+
+**Built-in adapters:**
+- Crescent app directory — reads `manifest.json` from installed `.tar.gz`/`.png` files
+- itch butler.db — maps `games` schema to open metadata (read + write)
+- Steam — parses `libraryfolders.vdf` + `appmanifest_*.acf`
+- Filesystem — any directory, entries are files with whatever metadata is extractable
+- Browser bookmarks — Chrome `Bookmarks` JSON, Firefox `places.sqlite`
+- Obsidian / Dendron — frontmatter YAML from `.md` files
+
+**Metadata is open JSON.** Each adapter maps its native format to a `metadata` blob.
+The shell queries it via `json_extract`. No fixed schema — the shell decides what
+fields it knows how to filter on.
+
+**Shells are lenses.** The same underlying library can be viewed through different
+shells:
+- A SillyTavern-style shell queries `$.characters[*].hair.color`, renders a character
+  grid, shows character-specific filters
+- A Steam-style shell queries `$.genre`, `$.playtime`, renders a storefront layout
+- An itch-style shell queries `$.tags`, `$.rating`, renders a game library
+
+Multiple shells can be installed; switching between them is selecting a different app
+to run over the same data. The underlying `saved_states` / installed-apps table is
+shared.
+
+**The shell has no format knowledge.** It launches an app's `dom` entrypoint and the
+app handles its own internal routing (conversation, editor, settings, etc.). An "edit"
+button in the shell just opens `dom` — the app decides what to show.
+
 ## Everything else is scripts
 
-The platform is not a card management platform, an import pipeline, or a library
-browser. Those are scripts that ship as first-party defaults:
+The platform is not a library browser, an import pipeline, or a card manager. Those
+are first-party scripts:
 
 | What it feels like | What it actually is |
 |---|---|
-| Card library / search UI | Script with `caps.fs` + `caps.render` |
+| App library / search UI | Library shell app (described above) |
 | CCv2 import pipeline | Script with `caps.fs` + `caps.png` |
-| Mutate-on-import logic | Script (stamps editor chunks into imported card) |
-| Card editor | `editor` entrypoint in each card's tarball |
-| Lorebook editor | `lorebook_editor` entrypoint in each card's tarball |
+| Mutate-on-import logic | Script (stamps app tarball on import) |
+| Card editor / lorebook editor | Internal views inside each app's `dom` entrypoint |
 | Preset browser | Script with `caps.fs` |
 
 These ship alongside the platform as first-party scripts. They are not platform code.
