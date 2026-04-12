@@ -931,6 +931,12 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Reactive Store** (`lib/reactive_store`) — **implemented**. Redux-style reactive store with slices, selectors, and middleware.
 `M.store(reducer, state, opts)` — `:dispatch(action)`, `:get_state()`, `:subscribe(fn)→unsub`, `:get_state_at(i)`. `M.action(type)` creator. `M.combine(reducers)`. `M.slice(opts)` → `{ reducer, actions }`. `M.selector(fn)` — memoized. `M.derived(store, fn)` — reactive derived value. Middleware: `M.logger`, `M.thunk`, `M.batch`. `M.update/update_in/get_in` — shallow immutable helpers. 77 assertions.
 
+**Async** (`lib/async`) — **implemented**. Promise-based async with combinators, async/await, and event loop.
+`M.promise()` → `(promise, resolve, reject)`. `promise:and_then/catch/finally`. `M.resolved/rejected/defer`. Combinators: `M.all`, `M.race`, `M.any` (aggregate error), `M.all_settled`. `M.async(fn)` wraps coroutine functions; `M.await(promise)` yields inside them. `M.run(promise|fn)` drives synchronously. `M.loop()` — `queue/tick/run_until/clear/sleep`. 128 assertions.
+
+**Log Parser** (`lib/log_parser`) — **implemented**. Multi-format log parser with filtering and aggregation.
+`M.parse(line, format)` — combined/common/nginx, syslog, json, logfmt, auto-detect. `M.parse_lines(text, format)` — entries + errors array. `M.detect(line)`. `M.pattern(fmt)` — custom `%{name:type}` named captures (str/int/float/ip/timestamp). Filter: `filter_status`, `filter_method`, `filter_path`, `filter_time`. Aggregate: `count_by`, `sum_by`, `top_n`, `percentile`. `parse_clf_time`, `parse_iso8601`, `format_bytes`. 125 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
