@@ -1,0 +1,351 @@
+-- lib/web/js.d.lua
+-- DOM and browser API type declarations for use with the crescent typechecker.
+-- Covers core DOM types needed by a reactive widget library.
+-- No executable code — type annotations only.
+
+---------------------------------------------------------------------------
+-- DOMTokenList (classList)
+---------------------------------------------------------------------------
+
+--:: DOMTokenList = {
+--::   length:   integer,
+--::   add:      (DOMTokenList, ...string) -> (),
+--::   remove:   (DOMTokenList, ...string) -> (),
+--::   toggle:   (DOMTokenList, string, boolean | nil) -> boolean,
+--::   contains: (DOMTokenList, string) -> boolean,
+--::   replace:  (DOMTokenList, string, string) -> boolean,
+--::   item:     (DOMTokenList, integer) -> string | nil,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- CSSStyleDeclaration (element.style)
+---------------------------------------------------------------------------
+
+--:: CSSStyleDeclaration = {
+--::   cssText:             string,
+--::   setProperty:         (CSSStyleDeclaration, string, string, string | nil) -> (),
+--::   getPropertyValue:    (CSSStyleDeclaration, string) -> string,
+--::   removeProperty:      (CSSStyleDeclaration, string) -> string,
+--::   [string]:            string,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Events
+---------------------------------------------------------------------------
+
+--:: Event = {
+--::   type:                    string,
+--::   target:                  EventTarget | nil,
+--::   currentTarget:           EventTarget | nil,
+--::   preventDefault:          (Event) -> (),
+--::   stopPropagation:         (Event) -> (),
+--::   stopImmediatePropagation: (Event) -> (),
+--::   bubbles:                 boolean,
+--::   cancelable:              boolean,
+--::   ...
+--:: }
+
+--:: MouseEvent = {
+--::   type:                    string,
+--::   target:                  EventTarget | nil,
+--::   currentTarget:           EventTarget | nil,
+--::   preventDefault:          (MouseEvent) -> (),
+--::   stopPropagation:         (MouseEvent) -> (),
+--::   stopImmediatePropagation: (MouseEvent) -> (),
+--::   bubbles:                 boolean,
+--::   cancelable:              boolean,
+--::   clientX:  number,
+--::   clientY:  number,
+--::   button:   integer,
+--::   buttons:  integer,
+--::   ...
+--:: }
+
+--:: KeyboardEvent = {
+--::   type:                    string,
+--::   target:                  EventTarget | nil,
+--::   currentTarget:           EventTarget | nil,
+--::   preventDefault:          (KeyboardEvent) -> (),
+--::   stopPropagation:         (KeyboardEvent) -> (),
+--::   stopImmediatePropagation: (KeyboardEvent) -> (),
+--::   bubbles:                 boolean,
+--::   cancelable:              boolean,
+--::   key:      string,
+--::   code:     string,
+--::   ctrlKey:  boolean,
+--::   shiftKey: boolean,
+--::   altKey:   boolean,
+--::   metaKey:  boolean,
+--::   ...
+--:: }
+
+--:: InputEvent = {
+--::   type:                    string,
+--::   target:                  EventTarget | nil,
+--::   currentTarget:           EventTarget | nil,
+--::   preventDefault:          (InputEvent) -> (),
+--::   stopPropagation:         (InputEvent) -> (),
+--::   stopImmediatePropagation: (InputEvent) -> (),
+--::   bubbles:                 boolean,
+--::   cancelable:              boolean,
+--::   data:      string | nil,
+--::   inputType: string,
+--::   ...
+--:: }
+
+-- Union of all event types for addEventListener callbacks.
+--:: AnyEvent = Event | MouseEvent | KeyboardEvent | InputEvent
+
+---------------------------------------------------------------------------
+-- EventTarget (base for Node and Window)
+---------------------------------------------------------------------------
+
+--:: EventTarget = {
+--::   addEventListener:    (EventTarget, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (EventTarget, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (EventTarget, Event) -> boolean,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Node
+---------------------------------------------------------------------------
+
+--:: Node = {
+--::   parentNode:   Node | nil,
+--::   childNodes:   { [integer]: Node, length: integer, ... },
+--::   textContent:  string | nil,
+--::   nodeType:     integer,
+--::   nodeName:     string,
+--::   ownerDocument: Document | nil,
+--::   appendChild:  (Node, Node) -> Node,
+--::   removeChild:  (Node, Node) -> Node,
+--::   insertBefore: (Node, Node, Node | nil) -> Node,
+--::   cloneNode:    (Node, boolean | nil) -> Node,
+--::   contains:     (Node, Node | nil) -> boolean,
+--::   addEventListener:    (Node, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (Node, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- NodeList (querySelectorAll result)
+---------------------------------------------------------------------------
+
+--:: NodeList = {
+--::   length: integer,
+--::   item:   (NodeList, integer) -> Node | nil,
+--::   [integer]: Node,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- HTMLCollection (element.children)
+---------------------------------------------------------------------------
+
+--:: HTMLCollection = {
+--::   length: integer,
+--::   item:   (HTMLCollection, integer) -> Element | nil,
+--::   [integer]: Element,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Element: Node
+---------------------------------------------------------------------------
+
+--:: Element = {
+--::   parentNode:    Node | nil,
+--::   childNodes:    { [integer]: Node, length: integer, ... },
+--::   textContent:   string | nil,
+--::   nodeType:      integer,
+--::   nodeName:      string,
+--::   ownerDocument: Document | nil,
+--::   appendChild:   (Element, Node) -> Node,
+--::   removeChild:   (Element, Node) -> Node,
+--::   insertBefore:  (Element, Node, Node | nil) -> Node,
+--::   cloneNode:     (Element, boolean | nil) -> Element,
+--::   contains:      (Element, Node | nil) -> boolean,
+--::   addEventListener:    (Element, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (Element, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   tagName:            string,
+--::   id:                 string,
+--::   className:          string,
+--::   classList:          DOMTokenList,
+--::   style:              CSSStyleDeclaration,
+--::   innerHTML:          string,
+--::   outerHTML:          string,
+--::   children:           HTMLCollection,
+--::   getAttribute:       (Element, string) -> string | nil,
+--::   setAttribute:       (Element, string, string) -> (),
+--::   removeAttribute:    (Element, string) -> (),
+--::   hasAttribute:       (Element, string) -> boolean,
+--::   querySelector:      (Element, string) -> Element | nil,
+--::   querySelectorAll:   (Element, string) -> NodeList,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- HTMLElement: Element
+---------------------------------------------------------------------------
+
+--:: HTMLElement = {
+--::   parentNode:    Node | nil,
+--::   childNodes:    { [integer]: Node, length: integer, ... },
+--::   textContent:   string | nil,
+--::   nodeType:      integer,
+--::   nodeName:      string,
+--::   ownerDocument: Document | nil,
+--::   appendChild:   (HTMLElement, Node) -> Node,
+--::   removeChild:   (HTMLElement, Node) -> Node,
+--::   insertBefore:  (HTMLElement, Node, Node | nil) -> Node,
+--::   cloneNode:     (HTMLElement, boolean | nil) -> HTMLElement,
+--::   contains:      (HTMLElement, Node | nil) -> boolean,
+--::   addEventListener:    (HTMLElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   tagName:            string,
+--::   id:                 string,
+--::   className:          string,
+--::   classList:          DOMTokenList,
+--::   style:              CSSStyleDeclaration,
+--::   innerHTML:          string,
+--::   outerHTML:          string,
+--::   children:           HTMLCollection,
+--::   getAttribute:       (HTMLElement, string) -> string | nil,
+--::   setAttribute:       (HTMLElement, string, string) -> (),
+--::   removeAttribute:    (HTMLElement, string) -> (),
+--::   hasAttribute:       (HTMLElement, string) -> boolean,
+--::   querySelector:      (HTMLElement, string) -> Element | nil,
+--::   querySelectorAll:   (HTMLElement, string) -> NodeList,
+--::   dataset:            { [string]: string, ... },
+--::   offsetWidth:        number,
+--::   offsetHeight:       number,
+--::   focus:              (HTMLElement) -> (),
+--::   blur:               (HTMLElement) -> (),
+--::   click:              (HTMLElement) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Text: Node
+---------------------------------------------------------------------------
+
+--:: Text = {
+--::   parentNode:    Node | nil,
+--::   childNodes:    { [integer]: Node, length: integer, ... },
+--::   textContent:   string | nil,
+--::   nodeType:      integer,
+--::   nodeName:      string,
+--::   ownerDocument: Document | nil,
+--::   appendChild:   (Text, Node) -> Node,
+--::   removeChild:   (Text, Node) -> Node,
+--::   insertBefore:  (Text, Node, Node | nil) -> Node,
+--::   cloneNode:     (Text, boolean | nil) -> Text,
+--::   contains:      (Text, Node | nil) -> boolean,
+--::   addEventListener:    (Text, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (Text, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   data:      string,
+--::   nodeValue: string,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- DocumentFragment: Node
+---------------------------------------------------------------------------
+
+--:: DocumentFragment = {
+--::   parentNode:    Node | nil,
+--::   childNodes:    { [integer]: Node, length: integer, ... },
+--::   textContent:   string | nil,
+--::   nodeType:      integer,
+--::   nodeName:      string,
+--::   ownerDocument: Document | nil,
+--::   appendChild:   (DocumentFragment, Node) -> Node,
+--::   removeChild:   (DocumentFragment, Node) -> Node,
+--::   insertBefore:  (DocumentFragment, Node, Node | nil) -> Node,
+--::   cloneNode:     (DocumentFragment, boolean | nil) -> DocumentFragment,
+--::   contains:      (DocumentFragment, Node | nil) -> boolean,
+--::   addEventListener:    (DocumentFragment, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (DocumentFragment, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   querySelector:     (DocumentFragment, string) -> Element | nil,
+--::   querySelectorAll:  (DocumentFragment, string) -> NodeList,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Document
+---------------------------------------------------------------------------
+
+--:: Document = {
+--::   createElement:          (Document, string) -> HTMLElement,
+--::   createTextNode:         (Document, string) -> Text,
+--::   createDocumentFragment: (Document) -> DocumentFragment,
+--::   querySelector:          (Document, string) -> Element | nil,
+--::   querySelectorAll:       (Document, string) -> NodeList,
+--::   getElementById:         (Document, string) -> HTMLElement | nil,
+--::   body:                   HTMLElement | nil,
+--::   head:                   HTMLElement | nil,
+--::   title:                  string,
+--::   addEventListener:    (Document, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (Document, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Location
+---------------------------------------------------------------------------
+
+--:: Location = {
+--::   href:     string,
+--::   protocol: string,
+--::   host:     string,
+--::   hostname: string,
+--::   port:     string,
+--::   pathname: string,
+--::   search:   string,
+--::   hash:     string,
+--::   assign:   (Location, string) -> (),
+--::   replace:  (Location, string) -> (),
+--::   reload:   (Location) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- History
+---------------------------------------------------------------------------
+
+--:: History = {
+--::   length:     integer,
+--::   scrollRestoration: string,
+--::   state:      unknown,
+--::   pushState:  (History, unknown, string, string | nil) -> (),
+--::   replaceState: (History, unknown, string, string | nil) -> (),
+--::   go:         (History, integer | nil) -> (),
+--::   back:       (History) -> (),
+--::   forward:    (History) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Window / globals
+---------------------------------------------------------------------------
+
+--:: Window = {
+--::   setTimeout:             (Window, (any) -> (), integer, ...any) -> integer,
+--::   clearTimeout:           (Window, integer) -> (),
+--::   setInterval:            (Window, (any) -> (), integer, ...any) -> integer,
+--::   clearInterval:          (Window, integer) -> (),
+--::   requestAnimationFrame:  (Window, (number) -> ()) -> integer,
+--::   cancelAnimationFrame:   (Window, integer) -> (),
+--::   location:               Location,
+--::   history:                History,
+--::   document:               Document,
+--::   addEventListener:    (Window, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (Window, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   ...
+--:: }
+
+--:: declare document = Document
+--:: declare window   = Window
