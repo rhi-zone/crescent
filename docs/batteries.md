@@ -824,6 +824,13 @@ pretty-printer with cycle detection. `bytes`/`from_bytes` — byte array convers
 `token_store` — set/get/is_expired/needs_refresh with injectable clock. Inline pure-Lua SHA-256 and
 base64url for PKCE. 100 assertions.
 
+**SMTP** (`lib/smtp`) — **implemented**. SMTP client (RFC 5321) with injectable transport.
+`session(transport)` → state machine: `ehlo`, `auth_plain`/`auth_login`, `mail_from`, `rcpt_to`,
+`data`, `quit`, `rset`, `noop`. `send(transport, msg, opts)` — high-level driver with EHLO +
+optional AUTH + multi-recipient. `build_message(msg)` — RFC 2822 builder with quoted-printable,
+multipart/alternative HTML+text, Cc/Bcc headers. `parse_response`/`read_response` (multi-line).
+`validate_address`/`parse_address`/`format_address`. 126 assertions.
+
 **GraphQL** (`lib/graphql`) — **implemented**. GraphQL query parser and schema executor.
 `parse(query)` → AST: Document → OperationDefinition → Field/Argument/Fragment/Variable. `parse_schema`
 — SDL type definitions. `schema(def)` — programmatic schema (type, args, resolve per field). `execute(schema,
