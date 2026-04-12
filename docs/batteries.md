@@ -551,6 +551,32 @@ common prefix/suffix optimization. `{op, text}` format (equal/insert/delete). `M
 `<del>`), `to_unified` (@@-hunks), `to_patch`/`from_patch` (percent-encoded). `M.stats`
 (similarity). `M.word_diff`. `M.fuzzy_find`. 71 assertions.
 
+**Bit Array** (`lib/bitarray`) — **implemented**. Compact packed bit storage (0-indexed,
+32-bit words via `bit` lib). `set/get/flip`, `fill`, `popcount`, `first_set/first_clear`.
+Set ops returning new arrays: `and_/or_/xor_/not_`. `each()` iterator for set bits.
+`to_string/from_string` ("01..." format), `to_hex/from_hex`. `slice`, `M.concat`.
+Multi-bit fields: `M.fields(n):write(offset, width, value)/:read`. `M.pack_array` /
+`M.unpack_array` for arbitrary-width packed int arrays. 180 assertions.
+
+**Curry** (`lib/curry`) — **implemented**. Function composition and currying toolkit.
+`M.curry(fn, arity?)` auto-detects arity; supports partial application across calls.
+`M.partial(fn, ...)`, `M.compose` (right-to-left), `M.pipe` (left-to-right). `M.memoize`,
+`M.flip` (swap first two args). `M.identity`, `M.const(x)`, `M.once`, `M.juxt`, `M.apply`,
+`M.complement`, `M.thread`, `M.arity`, `M.unary`/`M.binary`, `M.spread`. 60 assertions.
+
+**Option** (`lib/option`) — **implemented**. Option/Maybe monad for nullable values.
+`M.some(v)`, `M.none`, `M.of(v)`, `M.from_result(ok,err)`, `M.from_fn(fn)`.
+`M.all(opts)` → Some({...}) or None. `M.any(opts)` → first Some.
+Methods: `is_some/is_none`, `unwrap/value`, `unwrap_or/unwrap_or_else`, `map`, `and_then`,
+`or_/or_else`, `filter`, `to_table`, `to_result(msg)`, `to_bool`. `__tostring`, `__eq`.
+68 assertions.
+
+**Ordered Map** (`lib/ordered_map`) — **implemented**. Insertion-order preserving linked hash
+map. Doubly-linked list + hash table for O(1) ops. `set` (update stays in place), `get`,
+`has`, `delete`, `len`. `each/each_reverse` iterators. `keys/values/entries` arrays.
+`at(i)` (1-based, negative from end). `move_to_end/move_to_front`. `slice`, `copy`,
+`map`, `filter`. `M.from_table(t, keys?)`, `M.from_entries`. 83 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
