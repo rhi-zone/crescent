@@ -973,6 +973,12 @@ Primitives: `lit`, `char`, `char_class`, `any_char`, `digit`, `letter`, `whitesp
 `BC.new(node_id, opts)` — create clock (size bits, hash_count hash functions). `clock:tick()` — advance local time. `clock:merge(other)` — OR filters, max time. `BC.happened_before(a, b)` — causal ordering check (filter subset + time). `BC.concurrent(a, b)` — neither happened-before. `clock:serialize()` / `BC.deserialize(t)`. `clock:clone()`. 56 assertions.
 `FA.dfa(spec)` / `FA.nfa(spec)` — build automata from transition tables. `dfa:run(input)` — accepts string or symbol array. `dfa:trace(input)` — state sequence + accepted bool. `nfa:run(input)` — epsilon-closure simulation. `nfa:to_dfa()` — subset construction. `dfa:minimize()` — Hopcroft's algorithm. `FA.equivalent(dfa1, dfa2)` — product-DFA equivalence check. `dfa:enumerate(max_length)` — all accepted strings. Epsilon transitions via `""` key. 88 assertions.
 
+**Raft** (`lib/raft`) — **implemented**. Raft consensus state machine — pure message-passing, no networking.
+`raft.node({id, peers, election_timeout, heartbeat_interval})`. `node:tick()` → outbound msgs. `node:receive(msg)` → outbound msgs. `node:propose(data)` — leader-only. `node:state()` / `node:current_term()` / `node:leader_id()` / `node:log()` / `node:commit_index()` / `node:take_committed()`. All four message types: vote_request/response, append_entries/response. Randomized election jitter to prevent split votes. 91 assertions.
+
+**Red-Black Tree** (`lib/red_black_tree`) — **implemented**. Self-balancing BST with O(log n) guaranteed insert/delete/search.
+`RBT.new(opts)`. `insert/get/has/delete`. `min/max`. `pairs()` (sorted). `range(lo, hi)`. `floor/ceiling`. `to_array`. `verify()` — checks all 5 RB invariants + parent pointers. Custom comparator. 386 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
