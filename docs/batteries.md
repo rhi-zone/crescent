@@ -577,6 +577,33 @@ map. Doubly-linked list + hash table for O(1) ops. `set` (update stays in place)
 `at(i)` (1-based, negative from end). `move_to_end/move_to_front`. `slice`, `copy`,
 `map`, `filter`. `M.from_table(t, keys?)`, `M.from_entries`. 83 assertions.
 
+**Multimap** (`lib/multimap`) — **implemented**. Multi-value map: each key maps to multiple
+values. Three modes: `list` (preserves duplicates and order), `set` (deduplicates per key),
+`sorted` (binary-insertion sort). `put/put_all`, `get/has/has_key`, `remove/remove_all`,
+`key_count/value_count/size`. `each(k,v)` / `each_key(k,vals)`. `invert`, `flatten`,
+`map_values`, `filter_values`. `M.merge`, `M.from_table`. 74 assertions.
+
+**Command / Undo-Redo** (`lib/command`) — **implemented**. Command pattern with undo/redo
+history. `M.command({name, execute, undo})`. `M.history({max_size, on_execute, on_undo,
+on_redo})`. `execute/undo/redo`, `can_undo/can_redo`, `undo_depth/redo_depth`. `entries()`.
+Batch: `begin_batch/commit_batch/rollback_batch`. `transaction(name, fn)` with pcall
+rollback. `record/stop_record/play` for macros. New execute after undo clears redo stack.
+66 assertions.
+
+**Async Queue** (`lib/async_queue`) — **implemented**. Coroutine-based priority work queue.
+`M.new({concurrency, rate, retry, retry_delay, timeout})`. `push(fn_or_spec)` with priority/
+id. `tick(clock?)` advances scheduler. `run_all()` drives to completion. `pause/resume`,
+`cancel(id)/cancel_all/clear`. `stats()` {pending,active,completed,failed,retried}. Events:
+done/error/drain. `M.batcher({key, batch_size, delay, process})` for deduped batch
+processing. 69 assertions.
+
+**Schema Validator** (`lib/schema_validator`) — **implemented**. Zod-inspired fluent schema
+builder. `z.string().min(3).max(50).pattern(...)`, `z.number().integer().positive()`,
+`z.boolean()`, `z.enum(vals)`, `z.literal(v)`, `z.object({fields})`, `z.array(item)`,
+`z.union(schemas)`. `optional/nullable/default(v)/transform(fn)/refine(fn,msg)`. Error
+accumulation: all issues collected, dot-notation paths. `parse(data)` / `safe_parse` →
+`{success, data/error}`. `z.coerce.number/string/boolean`. `z.merge`. 223 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
