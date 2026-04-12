@@ -1013,6 +1013,10 @@ Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `st
 
 **Reactive** (`lib/reactive`) — **implemented**. Reactive signals library (SolidJS-style). `signal`/`computed`/`effect`/`memo`/`batch`/`untrack`/`is_signal`. CLEAN/CHECK/DIRTY state machine eliminates glitches. Diamond dependency support. `lib/signal` is the Unix signals FFI library. 66 assertions.
 
+**Event Emitter** (`lib/event_emitter`) — **implemented**. Node.js-style EventEmitter. `on`/`once`/`off`/`emit`/`prepend_listener`/`prepend_once`/`remove_all_listeners`/`listener_count`/`listeners`/`set_max_listeners`. Wildcard `"*"` listeners. Error event raises if no handler. `EE.mixin(t)`. Chainable API. 89 assertions.
+
+**Retry** (`lib/retry`) — **implemented**. Retry/backoff with circuit breaker. `Retry.retry(fn, opts)` — constant/linear/exponential backoff, jitter, `retry_if`, `on_retry`. `Retry.circuit_breaker(opts)` — closed/open/half_open states, `threshold`, `timeout`, `on_open`/`on_close`. `Retry.with_timeout(fn, ms)`. Injectable clock/sleep for testing. 177 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
