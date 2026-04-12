@@ -1,18 +1,11 @@
 -- lib/platform/init.lua
--- Platform runner: load a card (PNG file), extract its script chunk, run sandboxed.
+-- Platform runner: load a Lua app and run a sandboxed entrypoint.
 --
--- A "card" is a PNG file with:
---   "script" tEXt chunk — Lua code to run (required)
---   "data"   tEXt chunk — structured content the script reads via caps.png (optional)
---   any other tEXt/zTXt chunks the script declares it needs
---
--- A "self-contained app" is a PNG file with:
---   "lua" iTXt chunk — base64(gzip(tar)) containing manifest.json + Lua files
+-- An app is a gzipped tar archive containing manifest.json + Lua files.
+-- It may be distributed as a raw .tar.gz or embedded in an image file
+-- (PNG iTXt "lua" chunk: base64(gzip(tar))).
 --
 -- API:
---   platform.load_card(path)                          -> card | nil, err
---   platform.run_card(card, env, opts?)               -> ok, result | err
---   platform.load_and_run(path, env, opts?)           -> ok, result | err
 --   platform.load_app(path)                           -> app | nil, err
 --   platform.run_entry(app, entry_key, env, opts?)    -> ok, result | err
 --   platform.load_and_run_entry(path, entry_key, env, opts?) -> ok, result | err
@@ -21,34 +14,21 @@
 --   platform.caps.render              -> require("lib.platform.caps.render")
 --   platform.caps.fs                  -> require("lib.platform.caps.fs")
 --
--- card fields:
---   card.path   : string
---   card.chunks : png chunk array  (pass to png_cap if the script needs chunk access)
---   card.script : string           (the Lua source from "script" tEXt chunk)
---   card.data   : string | nil     (from "data" tEXt chunk, if present)
---
 -- app fields:
 --   app.path     : string
---   app.chunks   : png chunk array
---   app.entries  : TarEntry[]      (all files in the tarball)
---   app.manifest : table           (parsed manifest.json: name, version, entry)
+--   app.chunks   : png chunk array | nil  (nil for raw .tar.gz)
+--   app.entries  : TarEntry[]             (all files in the tarball)
+--   app.manifest : table                  (parsed manifest.json: name, version, entry)
 --
 -- Typical usage:
 --   local platform = require("lib.platform")
 --   local sandbox  = require("lib.sandbox")
---   local render   = require("lib.platform.caps.render")
 --   local llm_mod  = require("lib.platform.caps.llm")
 --
---   local session, get_output = render.collect_session()
---   local env = sandbox.env(
---     sandbox.stdlib,
---     { globals = {
---       llm    = llm_mod.llm_cap({ endpoint = "http://localhost:8000", model = "gemma3" }),
---       render = render.render_cap(session),
---       png    = require("lib.platform.caps.png").png_cap(path, { allow = {"chara","crescent"} }),
---     }}
---   )
---   local ok, result = platform.load_and_run("card.png", env)
+--   local env = sandbox.env(sandbox.stdlib, { globals = {
+--     llm = llm_mod.llm_cap({ endpoint = "http://localhost:8000", model = "gemma3" }),
+--   }})
+--   local ok, result = platform.load_and_run_entry("myapp.png", "dom", env)
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -78,15 +58,10 @@ local function get_itxt(chunks, keyword)
 			local data = chunk.data
 			local sep = data:find("\0", 1, true)
 			if sep and data:sub(1, sep - 1) == keyword then
-				-- compression_flag at sep+1, compression_method at sep+2
-				-- language_tag starts at sep+3, ends at next NUL
-				-- translated_keyword ends at next NUL after that
-				-- text starts after the second NUL past sep+2
 				local compression_flag = data:byte(sep + 1)
 				if compression_flag ~= 0 then
 					return nil  -- compressed iTXt not supported here
 				end
-				-- skip: sep+1 (flag) + sep+2 (method) + language_tag\0 + translated_keyword\0
 				local pos = sep + 3  -- start of language_tag
 				local lang_end = data:find("\0", pos, true)
 				if not lang_end then return nil end
@@ -99,67 +74,18 @@ local function get_itxt(chunks, keyword)
 	return nil
 end
 
--- load_card(path) -> card | nil, err
--- Reads a PNG file and extracts the script (required) and data (optional) chunks.
-function M.load_card(path)
-	local f, err = io.open(path, "rb")
-	if not f then return nil, "platform: cannot open " .. tostring(path) .. ": " .. tostring(err) end
-	local bytes = f:read("*a")
-	f:close()
-
-	local chunks, perr = png.read(bytes)
-	if not chunks then return nil, "platform: PNG parse failed: " .. tostring(perr) end
-
-	local script = png.get_text(chunks, "script")
-	if not script then return nil, "platform: card has no 'script' tEXt chunk" end
-
-	return {
-		path   = path,
-		chunks = chunks,
-		script = script,
-		data   = png.get_text(chunks, "data"),
-	}
+-- unpack_tarball(tardata) -> entries | nil, err
+local function unpack_tarball(tardata)
+	return tar.read(tardata)
 end
 
--- run_card(card, env, opts?) -> ok, result | err
--- Runs card.script inside the given sandbox environment.
--- opts.budget: instruction limit (via debug.sethook)
--- opts.name  : chunk name in error messages (default "@<path>")
-function M.run_card(card, env, opts)
-	opts = opts or {}
-	opts.name = opts.name or ("@" .. tostring(card.path))
-	return sandbox.run(card.script, env, opts)
-end
-
--- load_and_run(path, env, opts?) -> ok, result | err
--- Convenience: load_card + run_card in one call.
-function M.load_and_run(path, env, opts)
-	local card, err = M.load_card(path)
-	if not card then return false, err end
-	-- FIXME: typechecker: does not narrow `card` to non-nil in function call
-	-- arguments even after `if not card then return end`. Use direct field access
-	-- to bypass the nil branch instead of delegating to run_card.
-	opts = opts or {}
-	opts.name = opts.name or ("@" .. tostring(card.path))
-	return sandbox.run(card.script, env, opts)
-end
-
--- ── App API (self-contained tar-based cards) ──────────────────────────────────
-
--- load_app(path) -> app | nil, err
--- Reads a PNG, extracts the "lua" iTXt chunk (base64 gzip tar),
--- unpacks the tarball, parses manifest.json, and returns an app table.
-function M.load_app(path)
-	local f, err = io.open(path, "rb")
-	if not f then return nil, "platform: cannot open " .. tostring(path) .. ": " .. tostring(err) end
-	local bytes = f:read("*a")
-	f:close()
-
+-- load_tarball_from_png(path, bytes) -> entries, chunks | nil, err
+local function load_tarball_from_png(path, bytes)
 	local chunks, perr = png.read(bytes)
 	if not chunks then return nil, "platform: PNG parse failed: " .. tostring(perr) end
 
 	local raw = get_itxt(chunks, "lua")
-	if not raw then return nil, "platform: card has no 'lua' iTXt chunk" end
+	if not raw then return nil, "platform: PNG has no 'lua' iTXt chunk" end
 
 	local gz, berr = base64.decode(raw)
 	if not gz then return nil, "platform: base64 decode failed: " .. tostring(berr) end
@@ -167,8 +93,35 @@ function M.load_app(path)
 	local tardata, cerr = compress.inflate(gz, { format = "gzip" })
 	if not tardata then return nil, "platform: gzip decompress failed: " .. tostring(cerr) end
 
-	local entries, terr = tar.read(tardata)
+	local entries, terr = unpack_tarball(tardata)
 	if not entries then return nil, "platform: tar unpack failed: " .. tostring(terr) end
+
+	return entries, chunks
+end
+
+-- load_tarball_from_targz(path, bytes) -> entries | nil, err
+local function load_tarball_from_targz(bytes)
+	local tardata, cerr = compress.inflate(bytes, { format = "gzip" })
+	if not tardata then return nil, "platform: gzip decompress failed: " .. tostring(cerr) end
+	return unpack_tarball(tardata)
+end
+
+-- load_app(path) -> app | nil, err
+-- Loads an app from a .png (iTXt "lua" chunk) or .tar.gz (raw tarball).
+function M.load_app(path)
+	local f, err = io.open(path, "rb")
+	if not f then return nil, "platform: cannot open " .. tostring(path) .. ": " .. tostring(err) end
+	local bytes = f:read("*a")
+	f:close()
+
+	local entries, chunks, lerr
+	if path:match("%.png$") or path:match("%.jpg$") or path:match("%.jpeg$") or path:match("%.webp$") then
+		entries, chunks = load_tarball_from_png(path, bytes)
+		if not entries then return nil, chunks end  -- chunks holds err here on failure
+	else
+		entries, lerr = load_tarball_from_targz(bytes)
+		if not entries then return nil, lerr end
+	end
 
 	local manifest_src = tar.get(entries, "manifest.json")
 	if not manifest_src then return nil, "platform: tarball has no manifest.json" end
@@ -178,7 +131,7 @@ function M.load_app(path)
 
 	return {
 		path     = path,
-		chunks   = chunks,
+		chunks   = chunks,  -- nil for raw .tar.gz
 		entries  = entries,
 		manifest = manifest,
 	}
@@ -190,7 +143,6 @@ end
 -- (Lua loader convention) on miss.
 local function make_tar_loader(entries)
 	return function(modname)
-		-- Convert "foo.bar.baz" -> "foo/bar/baz.lua" and "foo/bar/baz/init.lua"
 		local relpath = modname:gsub("%.", "/")
 		local candidates = {
 			relpath .. ".lua",
@@ -218,9 +170,14 @@ function M.run_entry(app, entry_key, env, opts)
 	if not entry_map then
 		return false, "platform: manifest has no 'entry' table"
 	end
-	local entry_path = entry_map[entry_key]
-	if not entry_path then
+	local entry_def = entry_map[entry_key]
+	if not entry_def then
 		return false, "platform: no entry '" .. tostring(entry_key) .. "' in manifest"
+	end
+	-- entry_def may be a string (path) or a table {main=path, caps={...}}
+	local entry_path = type(entry_def) == "table" and entry_def.main or entry_def
+	if not entry_path then
+		return false, "platform: entry '" .. tostring(entry_key) .. "' has no 'main' field"
 	end
 
 	local src = tar.get(app.entries, entry_path)
@@ -228,29 +185,22 @@ function M.run_entry(app, entry_key, env, opts)
 		return false, "platform: entry file '" .. tostring(entry_path) .. "' not found in tarball"
 	end
 
-	-- Inject tar-backed loader into env at index 2 (before file loaders).
-	-- We extend env with a custom package table that routes require through the tarball.
 	opts = opts or {}
 	opts.name = opts.name or ("@" .. tostring(entry_path))
 
-	-- Build an env copy with a tarball-aware require replacing the sandbox require.
-	-- The tarball loader is injected first; if it misses it falls through to the
-	-- existing sandbox require (which enforces the module allowlist).
 	local tar_loader = make_tar_loader(app.entries)
-	local base_require = env.require  -- sandbox's whitelist require (may be nil)
+	local base_require = env.require
 	local function app_require(modname)
 		local loader_or_err, detail = tar_loader(modname)
 		if type(loader_or_err) == "function" then
 			return loader_or_err()
 		end
-		-- miss: fall through to sandbox require if available
 		if base_require then
 			return base_require(modname)
 		end
 		error("platform: module '" .. tostring(modname) .. "' not found in app tarball", 2)
 	end
 
-	-- Shallow-copy env so we don't mutate the caller's table.
 	local app_env = {}
 	for k, v in pairs(env) do app_env[k] = v end
 	app_env.require = app_require
@@ -266,13 +216,9 @@ function M.load_and_run_entry(path, entry_key, env, opts)
 	return M.run_entry(app, entry_key, env, opts)
 end
 
--- caps: lazy proxy for the four capability factory sub-modules.
--- platform.caps.png  → lib/platform/caps/png.lua
--- platform.caps.llm  → lib/platform/caps/llm.lua
--- platform.caps.render → lib/platform/caps/render.lua
--- platform.caps.fs   → lib/platform/caps/fs.lua
+-- caps: lazy proxy for capability factory sub-modules.
 M.caps = setmetatable({}, {
-	__index = function (t, k)
+	__index = function(t, k)
 		local ok, mod = pcall(require, "lib.platform.caps." .. k)
 		if ok then t[k] = mod; return mod end
 		return nil

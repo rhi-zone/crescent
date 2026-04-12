@@ -7,17 +7,15 @@ entirely in scripts.
 
 ## Core model
 
-A **card** is a PNG file containing:
-- An image (the visual representation / avatar)
-- A `script` tEXt chunk — pure Lua logic, never modified by tooling
-- A `data` tEXt chunk — structured content, owned by the editor
-- Any other tEXt chunks the script declares it needs
+An **app** is a gzipped tar archive containing a `manifest.json` and Lua source files.
+It may be distributed as a raw `.tar.gz` or embedded in an image file (PNG, JPEG, WebP)
+for the "distributable as an image" use case. The image is optional decoration.
 
 The platform:
-1. Loads a card (reads PNG chunks via `lib/png`)
-2. Decides which capabilities to grant the script
-3. Runs the script in a sandbox (`lib/sandbox`) with those capabilities
-4. Provides the render surface (HTTP server + reactive UI)
+1. Loads an app (unpacks the tarball, parses the manifest)
+2. Selects the appropriate entrypoint for the current host
+3. Decides which capabilities to grant (operator approves declared caps)
+4. Runs the entrypoint in a sandbox (`lib/sandbox`) with those capabilities
 
 The platform has no opinion about what the script does. The script is the program.
 
@@ -180,25 +178,101 @@ whatever indexed columns are needed for fast queries (type, created_at, tags). T
 current session row is always present and updated on every navigation. On reboot, load
 the most recent row and resume.
 
-## Self-contained cards
+## Self-contained apps
 
-Every CCv2-compatible card imported by the platform has the editor scripts embedded
-directly in it as zTXt chunks:
+The crescent app format is a **gzipped tar archive** containing a `manifest.json` and
+arbitrary Lua files, shared libraries, and assets. The image wrapper is optional — the
+core format is just the tarball.
+
+**Distribution formats** — the platform accepts all of these:
 
 ```
-card.png
-├── chara                    (original CCv2 JSON, untouched)
-├── crescent:data            (structured data layer)
-├── crescent:ui              (interaction loop)
-├── crescent:editor          (card editor)
-└── crescent:lorebook_editor (lorebook editor)
+myapp.tar.gz              — raw tarball, no image wrapper
+myapp.png                 — PNG with lua iTXt chunk: base64(gzip(tar))
+myapp.jpg / myapp.webp    — JPEG/WebP with XMP metadata: same base64(gzip(tar))
 ```
 
-The platform loads whichever chunk the user invokes — run mode uses `crescent:ui`,
-edit mode uses `crescent:editor`. Same file, same capabilities, different entry point.
+For image-embedded apps, the `lua` metadata key contains `base64(gzip(tar))`, following
+the same convention as CCv2 (`chara` is base64-encoded JSON). The image is decoration —
+the app is the tarball. gzip compression more than offsets the base64 overhead for Lua
+source.
 
-Sharing a card shares the exact editor version that produced it. No separate editor
-install step; the card is the complete application.
+```
+myapp.png
+├── chara   (tEXt — base64 JSON, CCv2 format, untouched — if this app is also a CCv2 card)
+└── lua     (iTXt — base64(gzip(tar)))
+    ├── manifest.json
+    ├── (arbitrary .lua files and assets)
+    └── ...
+```
+
+### Manifest
+
+`manifest.json` declares the app's entrypoints, capability requirements, and metadata.
+JSON so that external tools (`exiftool`, `tar`, `jq`) can inspect apps without a Lua
+runtime.
+
+```json
+{
+  "name": "My Character",
+  "version": "1.0.0",
+  "caps": {
+    "db": "required"
+  },
+  "entry": {
+    "dom": {
+      "main": "ui/dom.lua",
+      "caps": {
+        "llm_main":    { "type": "llm", "required": true },
+        "llm_summary": { "type": "llm", "required": false },
+        "render":      { "type": "render", "required": true }
+      }
+    },
+    "mcp": {
+      "main": "mcp/main.lua",
+      "caps": {
+        "llm": { "type": "llm", "required": true }
+      }
+    },
+    "headless": {
+      "main": "run/batch.lua",
+      "caps": {
+        "llm": { "type": "llm", "required": true },
+        "fs":  { "type": "fs",  "required": false }
+      }
+    }
+  }
+}
+```
+
+**Capability declarations:**
+
+- Top-level `caps` declares caps shared across all entrypoints (e.g. `db` above).
+- Per-entrypoint `caps` declares additional caps specific to that entrypoint.
+- Each cap has a `type` (the capability kind the host must provide) and `required`
+  (if `false`, the cap may be absent — the script receives `nil` for that slot and
+  must handle it).
+- Cap names are the keys the script uses to access them (e.g. `caps.llm_main`).
+  Multiple caps of the same type are supported — names disambiguate them.
+
+**Capability protocol:**
+
+Caps are plain Lua tables. The format makes no assumption about reactivity. If a host
+wants to support live cap swapping without restarting the entrypoint (e.g. switching
+which LLM backend is active), it may wrap caps in signals and pass a signal-aware env
+— but this is a host/script agreement. Scripts that don't need live swapping use caps
+as plain values.
+
+Entrypoint keys are conventions the host understands; unrecognised keys are ignored.
+An app need not implement all entrypoints — it declares only what it supports.
+
+The host reads the manifest, selects the entrypoint it needs, grants the declared caps
+(prompting the operator for approval if needed), and runs the entrypoint sandboxed.
+Shared code between entrypoints is just files in the tarball — `require` resolves
+against the tarball root via a custom loader injected into `package.loaders`.
+
+Sharing a card shares the exact scripts that produced it. No separate install step;
+the card is the complete application.
 
 The platform can optionally upgrade embedded scripts to a newer version, but the
 upgrade logic is itself a script — the platform does not hardcode any migration policy.
@@ -213,8 +287,8 @@ browser. Those are scripts that ship as first-party defaults:
 | Card library / search UI | Script with `caps.fs` + `caps.render` |
 | CCv2 import pipeline | Script with `caps.fs` + `caps.png` |
 | Mutate-on-import logic | Script (stamps editor chunks into imported card) |
-| Card editor | Script embedded in each card |
-| Lorebook editor | Script embedded in each card |
+| Card editor | `editor` entrypoint in each card's tarball |
+| Lorebook editor | `lorebook_editor` entrypoint in each card's tarball |
 | Preset browser | Script with `caps.fs` |
 
 These ship alongside the platform as first-party scripts. They are not platform code.
