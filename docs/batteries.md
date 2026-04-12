@@ -898,6 +898,18 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Gradient Descent** (`lib/gradient_descent`) — **implemented**. Numerical optimization algorithms.
 `GD.gradient_descent(f, grad, p0, opts)` — batch GD with momentum. `GD.sgd` — stochastic. `GD.adam` — Adam optimizer (β1/β2/ε). `GD.rmsprop`. `GD.lbfgs` — L-BFGS with two-loop recursion and backtracking line search. `GD.conjugate_gradient(A, b)` — CG linear solver. `GD.numerical_gradient` — finite differences. `GD.line_search` — Armijo backtracking. All return `{params, loss, iters, converged, history?}`. Injectable callback, record_history. 136 assertions.
 
+**Spell Check** (`lib/spell_check`) — **implemented**. Spell checker with Levenshtein edit-distance suggestions and text correction.
+`SC.new(words?)` — create checker with optional custom dictionary (~500 built-in words). `SC:check(word)` — boolean. `SC:suggest(word, opts)` — sorted candidates within `max_distance`. `SC:check_text(text)` — returns array of `{word, pos, suggestions}`. `SC:correct_text(text)` — unambiguous one-candidate substitution. `SC:add(word)` / `SC:remove(word)`. Ignores capitalized words (proper nouns) and numbers by default. 130 assertions.
+
+**Rate Limiter** (`lib/rate_limiter`) — **implemented**. Six rate-limiting algorithms with injectable clock and stats.
+`RL.token_bucket(opts)` — smooth bursts; `:allow(n)` → `(ok, wait)`. `RL.leaky_bucket` — strict output rate; `:size()` queue depth. `RL.fixed_window(opts)` — per-key counters with `:count(key)` and `:reset(key)`. `RL.sliding_window_log` — precise timestamp-log per key. `RL.sliding_window_counter` — approximate two-window method. `RL.concurrent(max)` — in-flight cap; `:acquire()` returns idempotent release fn. `RL.multi(limiters)` — short-circuits on first denial. 155 assertions.
+
+**Interpolation Curves** (`lib/interpolation_curves`) — **implemented**. Cubic spline, monotone spline, polynomial fit, and 2D arc-length curves.
+`IC.cubic_spline(xs, ys)` — natural cubic spline with `:eval`, `:deriv`, `:deriv2`, `:integrate`. `IC.clamped_spline(xs, ys, dy0, dyn)`. `IC.monotone_spline` — Fritsch-Carlson monotone Hermite. `IC.akima_spline` — local weighted-slope, outlier-resistant. `IC.linear(xs, ys)` — piecewise linear object. `IC.polynomial_fit(xs, ys, degree)` — least-squares Vandermonde with `.r_squared` and `:eval`. `IC.curve_2d(xs, ys, opts)` — arc-length parameterized 2D curve with `:sample(n)` and `:length()`. `IC.resample`. 263 assertions.
+
+**Pagination** (`lib/pagination`) — **implemented**. Offset, page-number, cursor-based, and lazy pagination patterns.
+`P.offset(items, opts)` — `{items, total, page, pages, has_prev, has_next, prev_offset, next_offset}`. `P.pages(items, opts)` — 1-based page pagination with clamping. `P.cursor(items, opts)` — forward-only cursor pagination with optional `key` function. `P.paginator(items, opts)` — stateful in-memory paginator with `:page(n)`, `:next()`, `:prev()`, `:first()`, `:last()`. `P.lazy_paginator(fetch_fn, count_fn, opts)` — same interface for DB/API backends. `P.encode_cursor`/`P.decode_cursor`, `P.window`. 168 assertions.
+
 **Porter Stemmer** (`lib/porter_stemmer`) — **implemented**. Porter1/Porter2 stemmer with stop words and text indexing.
 `PS.stem(word)` / `PS.stem_porter1` — Porter 1980 (5 steps). `PS.stem_porter2` — Snowball English with R1/R2 regions. `PS.stem_all(words, algo)`. `PS.normalize(word)` — lowercase+strip. `PS.stem_text(text, opts)` — tokenize+filter+stem. `PS.stop_words` (~155 words), `PS.is_stop_word`. `PS.index(documents)` — inverted index with stemmed keys and per-doc positions. 125 assertions.
 
