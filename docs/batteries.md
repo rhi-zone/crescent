@@ -739,6 +739,33 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**SVG** (`lib/svg`) — **implemented**. SVG document builder for programmatic vector graphics.
+`SVG.new(w, h, opts)` — element tree with `rect`, `circle`, `ellipse`, `line`, `polyline`,
+`polygon`, `path`, `text`. `SVG.path()` — fluent builder (M/L/H/V/C/Q/S/A/Z). Groups via
+`doc:group(attrs, fn)`. `doc:defs()` — `linear_gradient`, `radial_gradient`, `pattern`,
+`marker`. Attribute underscore→hyphen conversion. XML escaping. Transform helpers:
+`translate`/`scale`/`rotate`. `to_string`/`to_file`. 104 assertions.
+
+**Canvas** (`lib/canvas`) — **implemented**. 2D pixel canvas with drawing primitives.
+RGBA flat-array storage `(y*w+x)*4`. `set`/`get` (bounds-clamped). Primitives: `line`
+(Bresenham), `rect`, `fill_rect`, `circle` (midpoint), `fill_circle`, `triangle` (scanline),
+`ellipse` (midpoint). `text` with built-in 5×7 ASCII bitmap font (32–126). `fill`
+(iterative BFS flood). Image ops: `clear`, `blit`, `crop`, `scale` (nearest neighbor),
+`flip_h`/`flip_v`. Export: `to_ppm` (P6), `to_pgm` (P5), `to_bmp` (24-bit). 183 assertions.
+
+**Noise Gen** (`lib/noise_gen`) — **implemented**. Procedural noise with seed-parameterized API.
+`value2d`/`value3d` (hash+bilinear), `perlin2d`/`perlin3d` (improved Ken Perlin 2002, per-seed
+permutation cache), `simplex2d`/`simplex3d` (Gustavson), `worley2d` (k-th nearest, euclidean/
+manhattan/chebyshev). Fractals: `fbm2d` (octaves/lacunarity/persistence), `turbulence2d`,
+`ridged2d`, `warp2d` (domain warping). `map2d` — full noise map. `normalize` → [0,1]. 570 assertions.
+
+**Reactive Var** (`lib/reactive_var`) — **implemented**. Fine-grained push-pull reactivity
+(SolidJS/MobX-inspired). `R.var(v)` — callable reactive variable (`x()` read, `x(v)` write).
+`R.computed`/`R.memo` — lazy derived values with dirty-flag caching. `R.effect`/`R.autorun` —
+auto-tracked side effects with `stop()`. `R.watch(var, fn(new,old))`. `R.batch` — deferred
+flushing (nested-safe). `R.untracked`. `R.list` — reactive array. `R.map` — reactive map.
+Circular dep guard. 94 assertions.
+
 **Benford's Law** (`lib/benford`) — **implemented**. Fraud detection via Benford's Law.
 `expected`/`expected_all` — first-digit probabilities (log10(1+1/d)). `analyze(numbers)` —
 observed/expected frequencies, MAD (conformity: close/acceptable/marginally/nonconforming),
