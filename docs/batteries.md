@@ -522,6 +522,31 @@ generation. 55 assertions.
 `segments_intersect`, `segment_intersection`, `point_to_segment_dist`. `triangulate`
 (ear-clipping, n-2 triangles). 52 assertions.
 
+**Simulated Annealing** (`lib/simulated_annealing`) — **implemented**. `M.run(opts)` / `M.step`.
+Temperature schedules: exponential, linear, logarithmic, geometric, custom. Boltzmann
+acceptance. Callbacks: `on_accept`, `on_improve`. `track_history` for {step,energy,temp}
+log. `M.tsp(cities, opts)` convenience (Euclidean tour, 2-opt neighbor). Seeded LCG RNG.
+47 assertions.
+
+**Constraint Solver** (`lib/constraint_solver`) — **implemented**. CSP solver with backtracking,
+AC-3 arc consistency, MRV+degree variable ordering, LCV value ordering, forward checking.
+`M.problem()` → `variable(name,domain)`, `constraint(v1,v2,fn)`, `unary(v,fn)`,
+`not_equal`/`less_than`/`greater_than`/`equals`/`all_different`/`arithmetic`. `solve()` /
+`solve_all({limit})`. Tested: map coloring, N-queens, TSP. 98 assertions.
+
+**Memoize** (`lib/memoize`) — **implemented**. `M.memoize(fn, opts)` with `:stats()`,
+`:clear()`, `:invalidate(...)`. `max_size` LRU eviction (O(1) doubly-linked list). TTL with
+injectable clock. Custom key function. Nil-return caching (PRESENT sentinel). `M.thunk(fn)`
+lazy singleton. `M.once(fn)` run-exactly-once. `M.weak(fn)` GC-friendly cache. `M.debounce`.
+66 assertions.
+
+**Pipeline DSL** (`lib/pipeline_dsl`) — **implemented**. Lazy pull-based builder DSL.
+`P.pipeline():source(src):filter():map():collect()`. Sources: `from_array`, `from_iter`,
+`range`, `repeat_value`, `concat_sources`. Transforms: map/filter/flat_map/take/drop/
+take_while/drop_while/zip/enumerate/chunk/unique/sort/reverse/flatten/scan/tap.
+Sinks: collect/first/last/count/sum/reduce/each/to_set/group_by/partition. `M.steps` +
+`M.compose` for reusable fragments. 72 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
