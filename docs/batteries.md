@@ -1005,6 +1005,10 @@ Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `st
 
 **Fuzzy Match** (`lib/fuzzy_match`) — **implemented**. Fuzzy string matching with scoring and position highlighting. `fuzzy_match(pattern, str)` → `{score, positions}`. Multi-term matching, case-insensitive, position arrays for highlighting, batch `filter`/`rank` over candidate lists. 102 assertions.
 
+**LRU Cache** (`lib/lru_cache`) — **implemented**. O(1) LRU cache with doubly-linked list + hash map. `LRU.new(capacity)`. `get`/`set`/`has`/`delete`/`size`/`clear`/`keys` (MRU order)/`peek` (no promotion)/`evict_callback`. Sentinel head/tail nodes; no nil-checks in hot path. 80 assertions.
+
+**Rope** (`lib/rope`) — **implemented**. Persistent rope data structure for efficient string editing. `Rope.new(str)`. `len`/`to_string`/`char_at`/`sub`/`insert`/`delete`/`concat`/`split`. Persistent (non-destructive) — returns new ropes sharing structure. Leaf max 64 bytes; balanced tree on construction. 92 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
