@@ -985,6 +985,15 @@ Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `st
 **Geohash** (`lib/geohash`) — **implemented**. Geohash encode/decode, neighbors, and bounding boxes.
 `geohash.encode(lat, lon, precision)` → hash string. `geohash.decode(hash)` → `{lat, lon, lat_err, lon_err}`. `geohash.decode_bbox(hash)` → `{min_lat, min_lon, max_lat, max_lon}`. `geohash.neighbor(hash, dir)` — 8 directions. `geohash.neighbors(hash)` → table of 8. `geohash.are_neighbors(h1, h2)`. `geohash.within(lat, lon, radius_km, precision)` — bounding-box coverage. 116 assertions.
 
+**Consistent Hash** (`lib/consistent_hash`) — **implemented**. Consistent hashing ring for distributed key routing.
+`ch.new({replicas})` — creates ring with virtual nodes per real node (default 150). `ring:add_node/remove_node`. `ring:get_node(key)` — O(log n) binary search. `ring:get_nodes(key, n)` — n distinct nodes for replication. `ring:distribution(keys)` — balance stats. FNV-1a 32-bit hashing. 587 assertions.
+
+**Bayesian Filter** (`lib/bayesian_filter`) — **implemented**. Multinomial Naive Bayes text classifier with Laplace smoothing.
+`BF.new()`. `clf:train(category, text)`. `clf:classify(text)` → `(label, scores)`. `clf:scores(text)`. `clf:classify_all(texts)`. Log-space scoring with softmax normalization. `clf:serialize()` / `BF.deserialize()`. `clf:reset()`. 40 assertions.
+
+**Reactive** (`lib/reactive`) — **implemented**. Fine-grained reactive signals, computed values, and effects (SolidJS-style).
+`R.signal(v)` — callable (read: `s()`, write: `s(v)`). `R.computed(fn)` — lazy memoized derived value. `R.effect(fn)` → stop function (runs immediately). `R.watch(source, fn)` — fires on change with (new, old). `R.batch(fn)` — defer notifications. `R.untrack(fn)` — read without tracking. Diamond dependency dedup via stale-marking. 66 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
