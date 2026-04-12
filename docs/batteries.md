@@ -365,6 +365,19 @@ uniqueItems/contains), object (properties/required/additionalProperties/patternP
 dependencies/propertyNames), allOf/anyOf/oneOf/not, if/then/else, `$ref`+definitions.
 173 assertions.
 
+**Regexp** (`lib/regexp`) — **implemented**. Thompson NFA regex engine (parallel state
+simulation, no backtracking). Supports `.`, `*`, `+`, `?`, `{n}`, `{n,m}`, `[abc]`,
+`[^abc]`, `[a-z]`, `(...)`, `(?:...)`, `^`, `$`, `|`, `\d\w\s` shorthand. `compile`,
+`test`, `find`, `match`, `find_all`, `sub`, `gsub`, `split`. Fragment-based NFA
+construction with SAVE instructions for capture groups. 198 assertions.
+
+**Netstring** (`lib/netstring`) — **implemented**. Wire framing protocols. Netstring
+(Bernstein format `"5:hello,"`): `encode/decode/decode_all/encode_all`. Streaming
+`decoder()` for fragmented input. Unsigned LEB128 varint: `encode_varint/decode_varint`.
+Length-delimited framing: `ld_encode/ld_decode`. TLV (configurable type/length bytes):
+`tlv_encode/tlv_decode/tlv_decode_all`. Big-endian pack/unpack: `u8/u16/u32/i8/i16/i32`.
+191 assertions.
+
 **Treap** (`lib/treap`) — **implemented**. Randomized BST with split/merge as core
 primitive. Insert, remove, get, contains, min/max, floor/ceil, pred/succ. In-order
 `each(fn)`, `range(lo, hi, fn)`, `to_array`. `split(k)` → (left, right treaps);
