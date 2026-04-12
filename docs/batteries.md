@@ -739,6 +739,36 @@ log/exp table-based O(1) multiply and inverse; prebuilt `FF.GF256` (AES polynomi
 `FF.GF16`. AES test vector: `0x53 * 0xCA = 0x01`. `FF.poly` — polynomial ring over any
 field (Horner eval, O(n²) multiply). 216 assertions.
 
+**Benford's Law** (`lib/benford`) — **implemented**. Fraud detection via Benford's Law.
+`expected`/`expected_all` — first-digit probabilities (log10(1+1/d)). `analyze(numbers)` —
+observed/expected frequencies, MAD (conformity: close/acceptable/marginally/nonconforming),
+chi-squared with p-value (Lanczos log-gamma + incomplete gamma), Z-scores per digit,
+n. `analyze_second`/`analyze_two_digits`. `z_score`, `chi_squared`, `chi_squared_pvalue`.
+`generate(n, opts)` — inverse-transform sampling. `suspicious_digits` — |Z|>1.96 flagging.
+460 assertions.
+
+**Lindenmayer** (`lib/lindenmayer`) — **implemented**. L-system string rewriting with turtle
+graphics. `L.new({axiom, rules, angle})` — string, stochastic (`{prob,rule}` arrays), context-
+sensitive (`"A<B"`/`"B>C"` keys), and parametric (function rules). `sys:generate(n)` — table-
+concat rewriting. `sys:interpret(str, opts)` — turtle graphics → `{type,x1,y1,x2,y2}` commands
+for F/f/+/-/|/[/]. `sys:bounds(cmds)` — bounding box. `sys:to_svg` — auto-scaled SVG.
+Presets: SIERPINSKI_TRIANGLE, DRAGON_CURVE, KOCH_SNOWFLAKE, FERN, BINARY_TREE. 130 assertions.
+
+**Bézier** (`lib/bezier`) — **implemented**. Bézier curves and splines for 2D/3D graphics.
+`B.quadratic(p0,p1,p2)` and `B.cubic(p0,p1,p2,p3)` — explicit formulas; `point`, `tangent`,
+`normal`, `length`, `split` (de Casteljau), `to_points`, `bounding_box`. Cubic extras:
+`to_svg_path`, `inflections`. `B.curve(points)` — general degree via de Casteljau; `derivative`,
+`elevate`. `B.spline(points, opts)` — Catmull-Rom C1 spline through-points. `B.hermite` —
+cubic Hermite with `to_cubic`. 136 assertions.
+
+**Circuit Simulator** (`lib/circuit_sim`) — **implemented**. Analog circuit simulation via
+Modified Nodal Analysis (MNA). `CS.new()` with `node`, `resistor`, `voltage_source`,
+`current_source`, `wire`. `circuit:solve_dc()` → `{node_voltages, branch_currents, power}`.
+`circuit:sweep(comp, param, values)` — parameter sweep. `CS.thevenin`/`CS.norton` — equivalent
+circuit analysis. Convenience: `CS.voltage_divider`, `CS.wheatstone_bridge`. Gaussian
+elimination with partial pivoting. Tested: voltage divider, parallel resistors, KVL/KCL,
+Thevenin/Norton. 61 assertions.
+
 **Wavelet** (`lib/wavelet`) — **implemented**. Discrete Wavelet Transform for signal processing.
 1D `dwt`/`idwt` (forward/inverse via circular convolution + downsampling). Multi-level:
 `wavedec`/`waverec`. 2D: `dwt2`/`idwt2` (separable row+column passes). Wavelets: Haar,
