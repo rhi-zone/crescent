@@ -940,6 +940,15 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 **Protocol Buffer** (`lib/protocol_buffer`) — **implemented**. Protobuf wire format encoder/decoder with schema-driven API.
 `M.encode(schema, msg)` / `M.decode(schema, bytes)` — schema is a Lua table `{ field_name = {field_num, type, ...} }`. All types: int32/64, uint32/64, sint32/64, bool, fixed32/64, sfixed32/64, float, double, string, bytes, nested message. `M.encode_raw/decode_raw` for manual field construction. `M.encode_varint/decode_varint`, `M.encode_zigzag/decode_zigzag`. `M.validate`. Unknown fields preserved in `msg._unknown`. Packed repeated fields. FFI for float/double/int64 bit patterns (LuaJIT). 134 assertions.
 
+**Cryptography** (`lib/cryptography`) — **implemented**. SHA-256/512, HMAC, PBKDF2, ChaCha20, and Poly1305 in pure Lua.
+`M.sha256/sha256_bytes`, `M.sha512/sha512_bytes` — FIPS 180-4. `M.hmac_sha256/hmac_sha512` — RFC 2104. `M.pbkdf2(password, salt, iterations, key_len, hash?)` — RFC 7914. `M.chacha20(key, nonce, counter, data)` — RFC 7539. `M.chacha20_poly1305_encrypt/decrypt` — RFC 8439 AEAD. `M.poly1305(key, data)`. `M.ct_eq` — constant-time comparison. `M.hex/unhex`. All verified against NIST/RFC test vectors. 78 assertions.
+
+**Graph Algorithms** (`lib/graph_algorithms`) — **implemented**. BFS/DFS/Dijkstra/A*/MST/SCC/max-flow.
+`M.graph(opts)` — directed/undirected, weighted. `M.bfs/dfs/bfs_path`. `M.dijkstra/dijkstra_path` (binary min-heap). `M.astar(graph, start, end, heuristic)`. `M.bellman_ford` (negative cycle detection). `M.floyd_warshall` (all-pairs). `M.topological_sort/has_cycle`. `M.connected_components/strongly_connected_components` (Tarjan's). `M.is_bipartite`. `M.minimum_spanning_tree/maximum_spanning_tree` (Kruskal's + Union-Find). `M.max_flow` (Edmonds-Karp). `M.degree_centrality/betweenness_centrality`. 128 assertions.
+
+**Markup** (`lib/markup`) — **implemented**. Markdown/RST/AsciiDoc to HTML converter with shared AST.
+`M.markdown(text)` / `M.rst(text)` / `M.asciidoc(text)` → HTML. `M.parse_markdown/parse_rst/parse_asciidoc` → AST. `M.ast_to_html/ast_to_text`. Markdown: headings h1-h6, bold, italic, inline code, fenced code blocks, unordered/ordered lists (nested), links, images, blockquotes, horizontal rule. RST/AsciiDoc: headings, bold, italic, code. Shared Document AST. 128 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
