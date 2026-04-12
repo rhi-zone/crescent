@@ -997,6 +997,9 @@ Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `st
 **Columnar** (`lib/columnar`) — **implemented**. Columnar in-memory table with select, aggregate, and stats.
 `col.table({columns})` — typed schema (integer/number/string/boolean). `insert`/`insert_many` with type validation. `column(name)` / `row(i)`. `select({where, columns, order_by, desc, limit})`. `aggregate({group_by, aggregations})` with `col.count/avg/sum/min/max` descriptors. `stats(col)` — min/max/mean/sum/count/stddev/nulls. `add_column/drop_column`. `delete(predicate)`. `schema()`. 98 assertions.
 
+**Expression Evaluator** (`lib/expression_evaluator`) — **implemented**. Safe math/logic expression evaluator with recursive descent parser.
+`eval.eval(src, env)` / `eval.compile(src)` → callable. Operators: `+`, `-`, `*`, `/`, `%`, `^` (right-assoc), `..`. Comparisons: `==`, `!=`, `<`, `>`, `<=`, `>=`. Logic: `and`, `or`, `not` (short-circuit). Variables and custom functions via env table. Built-ins: `abs/floor/ceil/sqrt/max/min/round/log/exp/sin/cos/tan/len`. Dot notation. 93 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
