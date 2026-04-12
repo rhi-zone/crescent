@@ -604,6 +604,33 @@ builder. `z.string().min(3).max(50).pattern(...)`, `z.number().integer().positiv
 accumulation: all issues collected, dot-notation paths. `parse(data)` / `safe_parse` →
 `{success, data/error}`. `z.coerce.number/string/boolean`. `z.merge`. 223 assertions.
 
+**NLP Utilities** (`lib/nat_lang`) — **implemented**. Rule-based NLP toolkit. Tokenization:
+`tokenize`/`word_tokenize`/`sent_tokenize`. Porter stemmer, rule-based lemmatizer, stopwords.
+`ngrams`/`skipgrams`. `bag_of_words`/`term_freq`/`tfidf`. `edit_distance`/`similarity`.
+Rule-based `extract_entities` (PERSON/LOCATION/ORGANIZATION/DATE gazetteer). Simplified
+POS tagger (DT/NN/VBZ/JJ/RB/etc.). Lexicon-based `sentiment` (-1..1). `keywords`.
+Flesch reading ease/grade. 103 assertions.
+
+**Graph Query** (`lib/graph_query`) — **implemented**. Query DSL over graphs. `gq.graph()`
+with `node/edge` builders; `gq.query(g)` wraps any graph. `nodes(filter)`, `edges(filter)`.
+`path(from,to,opts)`, `reachable`, `neighbors`. `pattern({nodes,edges})` for subgraph
+matching. Analytics: `betweenness_centrality` (Brandes), `pagerank`, `clustering_coefficient`,
+`connected_components`, `density`, `degree_distribution`. Result queries: `collect/count/
+each/map/filter/first`. 71 assertions.
+
+**Money** (`lib/money`) — **implemented**. Exact monetary arithmetic (integer minor units,
+no float). `M.money(amount, currency)` (integer cents or decimal string). `M.parse("$10.99")`.
+Arithmetic `+/-/*/÷` with currency mismatch errors. `round(mode)` (half_up/half_even/floor/
+ceil). `split(n)` and `allocate(ratios)` guarantee sum = original. `format({thousands})`.
+`M.convert(money, to, {rate})`. 22 ISO 4217 currencies. `is_zero/positive/negative`.
+85 assertions.
+
+**Tokenizer** (`lib/tokenizer`) — **implemented**. Declarative lexer builder with
+`:token(type, pattern, transform?)`, `:skip(pattern)`, `:keyword(...)`. Declaration-order
+rule priority. `^`-anchored Lua patterns. Line/col tracking. `:tokenize(input)` → tokens
+array with `{type,value,line,col}`. `:iter(input)` lazy iterator. Mode-based tokenization
+via `:in_mode(name, sublexer)`. Error: `(nil, {message, line, col})`. 76 assertions.
+
 **Minimax** (`lib/minimax`) — **implemented**. Game tree search suite. `M.search` (minimax
 with alpha-beta pruning), `M.negamax` (symmetric games), `M.iterative_deepening` (IDA* with
 time limit via `os.clock`), `M.mcts` (Monte Carlo Tree Search, UCB1 bandit). Game interface:
