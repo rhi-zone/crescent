@@ -1,6 +1,6 @@
 -- lib/web/js.d.lua
 -- DOM and browser API type declarations for use with the crescent typechecker.
--- Covers core DOM types needed by a reactive widget library.
+-- Covers the full browser API surface area for use in WebAssembly / WASM Lua environments.
 -- No executable code — type annotations only.
 
 ---------------------------------------------------------------------------
@@ -9,12 +9,15 @@
 
 --:: DOMTokenList = {
 --::   length:   integer,
+--::   value:    string,
 --::   add:      (DOMTokenList, ...string) -> (),
 --::   remove:   (DOMTokenList, ...string) -> (),
 --::   toggle:   (DOMTokenList, string, boolean | nil) -> boolean,
 --::   contains: (DOMTokenList, string) -> boolean,
---::   replace:  (DOMTokenList, string, string) -> boolean,
+--::   replace:  (DOMTokenList, string, string) -> (),
+--::   supports: (DOMTokenList, string) -> boolean,
 --::   item:     (DOMTokenList, integer) -> string | nil,
+--::   [integer]: string,
 --::   ...
 --:: }
 
@@ -24,9 +27,12 @@
 
 --:: CSSStyleDeclaration = {
 --::   cssText:             string,
+--::   length:              integer,
 --::   setProperty:         (CSSStyleDeclaration, string, string, string | nil) -> (),
 --::   getPropertyValue:    (CSSStyleDeclaration, string) -> string,
+--::   getPropertyPriority: (CSSStyleDeclaration, string) -> string,
 --::   removeProperty:      (CSSStyleDeclaration, string) -> string,
+--::   item:                (CSSStyleDeclaration, integer) -> string,
 --::   [string]:            string,
 --::   ...
 --:: }
@@ -36,67 +42,529 @@
 ---------------------------------------------------------------------------
 
 --:: Event = {
---::   type:                    string,
---::   target:                  EventTarget | nil,
---::   currentTarget:           EventTarget | nil,
---::   preventDefault:          (Event) -> (),
---::   stopPropagation:         (Event) -> (),
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (Event) -> (),
+--::   stopPropagation:          (Event) -> (),
 --::   stopImmediatePropagation: (Event) -> (),
---::   bubbles:                 boolean,
---::   cancelable:              boolean,
+--::   composedPath:             (Event) -> { [integer]: EventTarget, ... },
+--::   ...
+--:: }
+
+--:: UIEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (UIEvent) -> (),
+--::   stopPropagation:          (UIEvent) -> (),
+--::   stopImmediatePropagation: (UIEvent) -> (),
+--::   composedPath:             (UIEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
 --::   ...
 --:: }
 
 --:: MouseEvent = {
---::   type:                    string,
---::   target:                  EventTarget | nil,
---::   currentTarget:           EventTarget | nil,
---::   preventDefault:          (MouseEvent) -> (),
---::   stopPropagation:         (MouseEvent) -> (),
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (MouseEvent) -> (),
+--::   stopPropagation:          (MouseEvent) -> (),
 --::   stopImmediatePropagation: (MouseEvent) -> (),
---::   bubbles:                 boolean,
---::   cancelable:              boolean,
---::   clientX:  number,
---::   clientY:  number,
---::   button:   integer,
---::   buttons:  integer,
+--::   composedPath:             (MouseEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   clientX:                  number,
+--::   clientY:                  number,
+--::   screenX:                  number,
+--::   screenY:                  number,
+--::   pageX:                    number,
+--::   pageY:                    number,
+--::   offsetX:                  number,
+--::   offsetY:                  number,
+--::   movementX:                number,
+--::   movementY:                number,
+--::   x:                        number,
+--::   y:                        number,
+--::   button:                   integer,
+--::   buttons:                  integer,
+--::   altKey:                   boolean,
+--::   ctrlKey:                  boolean,
+--::   shiftKey:                 boolean,
+--::   metaKey:                  boolean,
+--::   relatedTarget:            EventTarget | nil,
+--::   getModifierState:         (MouseEvent, string) -> boolean,
+--::   ...
+--:: }
+
+--:: PointerEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (PointerEvent) -> (),
+--::   stopPropagation:          (PointerEvent) -> (),
+--::   stopImmediatePropagation: (PointerEvent) -> (),
+--::   composedPath:             (PointerEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   clientX:                  number,
+--::   clientY:                  number,
+--::   screenX:                  number,
+--::   screenY:                  number,
+--::   pageX:                    number,
+--::   pageY:                    number,
+--::   offsetX:                  number,
+--::   offsetY:                  number,
+--::   movementX:                number,
+--::   movementY:                number,
+--::   x:                        number,
+--::   y:                        number,
+--::   button:                   integer,
+--::   buttons:                  integer,
+--::   altKey:                   boolean,
+--::   ctrlKey:                  boolean,
+--::   shiftKey:                 boolean,
+--::   metaKey:                  boolean,
+--::   relatedTarget:            EventTarget | nil,
+--::   pointerId:                integer,
+--::   width:                    number,
+--::   height:                   number,
+--::   pressure:                 number,
+--::   tangentialPressure:       number,
+--::   tiltX:                    integer,
+--::   tiltY:                    integer,
+--::   twist:                    integer,
+--::   pointerType:              string,
+--::   isPrimary:                boolean,
+--::   getCoalescedEvents:       (PointerEvent) -> { [integer]: PointerEvent, ... },
+--::   getPredictedEvents:       (PointerEvent) -> { [integer]: PointerEvent, ... },
+--::   getModifierState:         (PointerEvent, string) -> boolean,
+--::   ...
+--:: }
+
+--:: WheelEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (WheelEvent) -> (),
+--::   stopPropagation:          (WheelEvent) -> (),
+--::   stopImmediatePropagation: (WheelEvent) -> (),
+--::   composedPath:             (WheelEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   clientX:                  number,
+--::   clientY:                  number,
+--::   screenX:                  number,
+--::   screenY:                  number,
+--::   pageX:                    number,
+--::   pageY:                    number,
+--::   offsetX:                  number,
+--::   offsetY:                  number,
+--::   movementX:                number,
+--::   movementY:                number,
+--::   button:                   integer,
+--::   buttons:                  integer,
+--::   altKey:                   boolean,
+--::   ctrlKey:                  boolean,
+--::   shiftKey:                 boolean,
+--::   metaKey:                  boolean,
+--::   deltaX:                   number,
+--::   deltaY:                   number,
+--::   deltaZ:                   number,
+--::   deltaMode:                integer,
 --::   ...
 --:: }
 
 --:: KeyboardEvent = {
---::   type:                    string,
---::   target:                  EventTarget | nil,
---::   currentTarget:           EventTarget | nil,
---::   preventDefault:          (KeyboardEvent) -> (),
---::   stopPropagation:         (KeyboardEvent) -> (),
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (KeyboardEvent) -> (),
+--::   stopPropagation:          (KeyboardEvent) -> (),
 --::   stopImmediatePropagation: (KeyboardEvent) -> (),
---::   bubbles:                 boolean,
---::   cancelable:              boolean,
---::   key:      string,
---::   code:     string,
---::   ctrlKey:  boolean,
---::   shiftKey: boolean,
---::   altKey:   boolean,
---::   metaKey:  boolean,
+--::   composedPath:             (KeyboardEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   key:                      string,
+--::   code:                     string,
+--::   location:                 integer,
+--::   repeat:                   boolean,
+--::   isComposing:              boolean,
+--::   altKey:                   boolean,
+--::   ctrlKey:                  boolean,
+--::   shiftKey:                 boolean,
+--::   metaKey:                  boolean,
+--::   getModifierState:         (KeyboardEvent, string) -> boolean,
+--::   ...
+--:: }
+
+--:: FocusEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (FocusEvent) -> (),
+--::   stopPropagation:          (FocusEvent) -> (),
+--::   stopImmediatePropagation: (FocusEvent) -> (),
+--::   composedPath:             (FocusEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   relatedTarget:            EventTarget | nil,
 --::   ...
 --:: }
 
 --:: InputEvent = {
---::   type:                    string,
---::   target:                  EventTarget | nil,
---::   currentTarget:           EventTarget | nil,
---::   preventDefault:          (InputEvent) -> (),
---::   stopPropagation:         (InputEvent) -> (),
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (InputEvent) -> (),
+--::   stopPropagation:          (InputEvent) -> (),
 --::   stopImmediatePropagation: (InputEvent) -> (),
---::   bubbles:                 boolean,
---::   cancelable:              boolean,
---::   data:      string | nil,
---::   inputType: string,
+--::   composedPath:             (InputEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   data:                     string | nil,
+--::   dataTransfer:             DataTransfer | nil,
+--::   inputType:                string,
+--::   isComposing:              boolean,
+--::   ...
+--:: }
+
+--:: DragEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (DragEvent) -> (),
+--::   stopPropagation:          (DragEvent) -> (),
+--::   stopImmediatePropagation: (DragEvent) -> (),
+--::   composedPath:             (DragEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   clientX:                  number,
+--::   clientY:                  number,
+--::   screenX:                  number,
+--::   screenY:                  number,
+--::   button:                   integer,
+--::   buttons:                  integer,
+--::   altKey:                   boolean,
+--::   ctrlKey:                  boolean,
+--::   shiftKey:                 boolean,
+--::   metaKey:                  boolean,
+--::   dataTransfer:             DataTransfer | nil,
+--::   ...
+--:: }
+
+--:: ClipboardEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (ClipboardEvent) -> (),
+--::   stopPropagation:          (ClipboardEvent) -> (),
+--::   stopImmediatePropagation: (ClipboardEvent) -> (),
+--::   composedPath:             (ClipboardEvent) -> { [integer]: EventTarget, ... },
+--::   clipboardData:            DataTransfer | nil,
+--::   ...
+--:: }
+
+--:: CompositionEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (CompositionEvent) -> (),
+--::   stopPropagation:          (CompositionEvent) -> (),
+--::   stopImmediatePropagation: (CompositionEvent) -> (),
+--::   composedPath:             (CompositionEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   integer,
+--::   data:                     string,
+--::   ...
+--:: }
+
+--:: AnimationEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (AnimationEvent) -> (),
+--::   stopPropagation:          (AnimationEvent) -> (),
+--::   stopImmediatePropagation: (AnimationEvent) -> (),
+--::   composedPath:             (AnimationEvent) -> { [integer]: EventTarget, ... },
+--::   animationName:            string,
+--::   elapsedTime:              number,
+--::   pseudoElement:            string,
+--::   ...
+--:: }
+
+--:: TransitionEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (TransitionEvent) -> (),
+--::   stopPropagation:          (TransitionEvent) -> (),
+--::   stopImmediatePropagation: (TransitionEvent) -> (),
+--::   composedPath:             (TransitionEvent) -> { [integer]: EventTarget, ... },
+--::   propertyName:             string,
+--::   elapsedTime:              number,
+--::   pseudoElement:            string,
+--::   ...
+--:: }
+
+--:: ProgressEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (ProgressEvent) -> (),
+--::   stopPropagation:          (ProgressEvent) -> (),
+--::   stopImmediatePropagation: (ProgressEvent) -> (),
+--::   composedPath:             (ProgressEvent) -> { [integer]: EventTarget, ... },
+--::   lengthComputable:         boolean,
+--::   loaded:                   integer,
+--::   total:                    integer,
+--::   ...
+--:: }
+
+--:: ErrorEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (ErrorEvent) -> (),
+--::   stopPropagation:          (ErrorEvent) -> (),
+--::   stopImmediatePropagation: (ErrorEvent) -> (),
+--::   composedPath:             (ErrorEvent) -> { [integer]: EventTarget, ... },
+--::   message:                  string,
+--::   filename:                 string,
+--::   lineno:                   integer,
+--::   colno:                    integer,
+--::   error:                    unknown,
+--::   ...
+--:: }
+
+--:: MessageEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (MessageEvent) -> (),
+--::   stopPropagation:          (MessageEvent) -> (),
+--::   stopImmediatePropagation: (MessageEvent) -> (),
+--::   composedPath:             (MessageEvent) -> { [integer]: EventTarget, ... },
+--::   data:                     unknown,
+--::   lastEventId:              string,
+--::   origin:                   string,
+--::   ports:                    { [integer]: MessagePort, ... },
+--::   ...
+--:: }
+
+--:: CloseEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (CloseEvent) -> (),
+--::   stopPropagation:          (CloseEvent) -> (),
+--::   stopImmediatePropagation: (CloseEvent) -> (),
+--::   composedPath:             (CloseEvent) -> { [integer]: EventTarget, ... },
+--::   code:                     integer,
+--::   reason:                   string,
+--::   wasClean:                 boolean,
+--::   ...
+--:: }
+
+--:: CustomEvent = {
+--::   type:                     string,
+--::   target:                   EventTarget | nil,
+--::   currentTarget:            EventTarget | nil,
+--::   bubbles:                  boolean,
+--::   cancelable:               boolean,
+--::   composed:                 boolean,
+--::   defaultPrevented:         boolean,
+--::   eventPhase:               integer,
+--::   isTrusted:                boolean,
+--::   timeStamp:                number,
+--::   preventDefault:           (CustomEvent) -> (),
+--::   stopPropagation:          (CustomEvent) -> (),
+--::   stopImmediatePropagation: (CustomEvent) -> (),
+--::   composedPath:             (CustomEvent) -> { [integer]: EventTarget, ... },
+--::   detail:                   unknown,
 --::   ...
 --:: }
 
 -- Union of all event types for addEventListener callbacks.
---:: AnyEvent = Event | MouseEvent | KeyboardEvent | InputEvent
+--:: AnyEvent = Event | UIEvent | MouseEvent | PointerEvent | WheelEvent | KeyboardEvent | FocusEvent | InputEvent | DragEvent | ClipboardEvent | CompositionEvent | AnimationEvent | TransitionEvent | ProgressEvent | ErrorEvent | MessageEvent | CloseEvent | CustomEvent
+
+---------------------------------------------------------------------------
+-- DataTransfer
+---------------------------------------------------------------------------
+
+--:: DataTransferItem = {
+--::   kind:        string,
+--::   type:        string,
+--::   getAsFile:   (DataTransferItem) -> File | nil,
+--::   getAsString: (DataTransferItem, (string) -> ()) -> (),
+--::   ...
+--:: }
+
+--:: DataTransferItemList = {
+--::   length: integer,
+--::   add:    (DataTransferItemList, string, string) -> DataTransferItem | nil,
+--::   clear:  (DataTransferItemList) -> (),
+--::   remove: (DataTransferItemList, integer) -> (),
+--::   [integer]: DataTransferItem,
+--::   ...
+--:: }
+
+--:: DataTransfer = {
+--::   dropEffect:   string,
+--::   effectAllowed: string,
+--::   items:        DataTransferItemList,
+--::   types:        { [integer]: string, ... },
+--::   clearData:    (DataTransfer, string | nil) -> (),
+--::   getData:      (DataTransfer, string) -> string,
+--::   setData:      (DataTransfer, string, string) -> (),
+--::   setDragImage: (DataTransfer, Element, integer, integer) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- File / Blob
+---------------------------------------------------------------------------
+
+--:: Blob = {
+--::   size:        integer,
+--::   type:        string,
+--::   arrayBuffer: (Blob) -> Promise,
+--::   slice:       (Blob, integer | nil, integer | nil, string | nil) -> Blob,
+--::   stream:      (Blob) -> ReadableStream,
+--::   text:        (Blob) -> Promise,
+--::   ...
+--:: }
+
+--:: File = {
+--::   size:               integer,
+--::   type:               string,
+--::   arrayBuffer:        (File) -> Promise,
+--::   slice:              (File, integer | nil, integer | nil, string | nil) -> Blob,
+--::   stream:             (File) -> ReadableStream,
+--::   text:               (File) -> Promise,
+--::   lastModified:       integer,
+--::   name:               string,
+--::   webkitRelativePath: string,
+--::   ...
+--:: }
+
+--:: FileList = {
+--::   length: integer,
+--::   item:   (FileList, integer) -> File | nil,
+--::   [integer]: File,
+--::   ...
+--:: }
 
 ---------------------------------------------------------------------------
 -- EventTarget (base for Node and Window)
@@ -110,23 +578,58 @@
 --:: }
 
 ---------------------------------------------------------------------------
+-- AbortSignal / AbortController
+---------------------------------------------------------------------------
+
+--:: AbortSignal = {
+--::   aborted:            boolean,
+--::   reason:             unknown,
+--::   throwIfAborted:     (AbortSignal) -> (),
+--::   addEventListener:   (AbortSignal, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener:(AbortSignal, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:      (AbortSignal, Event) -> boolean,
+--::   ...
+--:: }
+
+--:: AbortController = {
+--::   signal: AbortSignal,
+--::   abort:  (AbortController, unknown | nil) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
 -- Node
 ---------------------------------------------------------------------------
 
 --:: Node = {
---::   parentNode:   Node | nil,
---::   childNodes:   { [integer]: Node, length: integer, ... },
---::   textContent:  string | nil,
---::   nodeType:     integer,
---::   nodeName:     string,
---::   ownerDocument: Document | nil,
---::   appendChild:  (Node, Node) -> Node,
---::   removeChild:  (Node, Node) -> Node,
---::   insertBefore: (Node, Node, Node | nil) -> Node,
---::   cloneNode:    (Node, boolean | nil) -> Node,
---::   contains:     (Node, Node | nil) -> boolean,
+--::   parentNode:       Node | nil,
+--::   parentElement:    Element | nil,
+--::   childNodes:       { [integer]: Node, length: integer, ... },
+--::   firstChild:       Node | nil,
+--::   lastChild:        Node | nil,
+--::   nextSibling:      Node | nil,
+--::   previousSibling:  Node | nil,
+--::   textContent:      string | nil,
+--::   nodeType:         integer,
+--::   nodeName:         string,
+--::   nodeValue:        string | nil,
+--::   baseURI:          string,
+--::   isConnected:      boolean,
+--::   ownerDocument:    Document | nil,
+--::   appendChild:      (Node, Node) -> Node,
+--::   removeChild:      (Node, Node) -> Node,
+--::   insertBefore:     (Node, Node, Node | nil) -> Node,
+--::   replaceChild:     (Node, Node, Node) -> Node,
+--::   cloneNode:        (Node, boolean | nil) -> Node,
+--::   contains:         (Node, Node | nil) -> boolean,
+--::   hasChildNodes:    (Node) -> boolean,
+--::   normalize:        (Node) -> (),
+--::   isEqualNode:      (Node, Node | nil) -> boolean,
+--::   compareDocumentPosition: (Node, Node) -> integer,
+--::   getRootNode:      (Node) -> Node,
 --::   addEventListener:    (Node, string, (AnyEvent) -> (), boolean | nil) -> (),
 --::   removeEventListener: (Node, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (Node, Event) -> boolean,
 --::   ...
 --:: }
 
@@ -137,6 +640,7 @@
 --:: NodeList = {
 --::   length: integer,
 --::   item:   (NodeList, integer) -> Node | nil,
+--::   forEach: (NodeList, (Node, integer, NodeList) -> ()) -> (),
 --::   [integer]: Node,
 --::   ...
 --:: }
@@ -147,8 +651,9 @@
 
 --:: HTMLCollection = {
 --::   length: integer,
---::   item:   (HTMLCollection, integer) -> Element | nil,
---::   [integer]: Element,
+--::   item:       (HTMLCollection, integer) -> Element | nil,
+--::   namedItem:  (HTMLCollection, string) -> Element | nil,
+--::   [integer]:  Element,
 --::   ...
 --:: }
 
@@ -157,33 +662,101 @@
 ---------------------------------------------------------------------------
 
 --:: Element = {
---::   parentNode:    Node | nil,
---::   childNodes:    { [integer]: Node, length: integer, ... },
---::   textContent:   string | nil,
---::   nodeType:      integer,
---::   nodeName:      string,
---::   ownerDocument: Document | nil,
---::   appendChild:   (Element, Node) -> Node,
---::   removeChild:   (Element, Node) -> Node,
---::   insertBefore:  (Element, Node, Node | nil) -> Node,
---::   cloneNode:     (Element, boolean | nil) -> Element,
---::   contains:      (Element, Node | nil) -> boolean,
+--::   parentNode:         Node | nil,
+--::   parentElement:      Element | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   firstChild:         Node | nil,
+--::   lastChild:          Node | nil,
+--::   nextSibling:        Node | nil,
+--::   previousSibling:    Node | nil,
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   nodeValue:          string | nil,
+--::   baseURI:            string,
+--::   isConnected:        boolean,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (Element, Node) -> Node,
+--::   removeChild:        (Element, Node) -> Node,
+--::   insertBefore:       (Element, Node, Node | nil) -> Node,
+--::   replaceChild:       (Element, Node, Node) -> Node,
+--::   cloneNode:          (Element, boolean | nil) -> Element,
+--::   contains:           (Element, Node | nil) -> boolean,
+--::   hasChildNodes:      (Element) -> boolean,
+--::   normalize:          (Element) -> (),
+--::   isEqualNode:        (Element, Node | nil) -> boolean,
+--::   compareDocumentPosition: (Element, Node) -> integer,
+--::   getRootNode:        (Element) -> Node,
 --::   addEventListener:    (Element, string, (AnyEvent) -> (), boolean | nil) -> (),
 --::   removeEventListener: (Element, string, (AnyEvent) -> (), boolean | nil) -> (),
---::   tagName:            string,
---::   id:                 string,
---::   className:          string,
---::   classList:          DOMTokenList,
---::   style:              CSSStyleDeclaration,
---::   innerHTML:          string,
---::   outerHTML:          string,
---::   children:           HTMLCollection,
---::   getAttribute:       (Element, string) -> string | nil,
---::   setAttribute:       (Element, string, string) -> (),
---::   removeAttribute:    (Element, string) -> (),
---::   hasAttribute:       (Element, string) -> boolean,
---::   querySelector:      (Element, string) -> Element | nil,
---::   querySelectorAll:   (Element, string) -> NodeList,
+--::   dispatchEvent:       (Element, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   innerHTML:           string,
+--::   outerHTML:           string,
+--::   children:            HTMLCollection,
+--::   childElementCount:   integer,
+--::   firstElementChild:   Element | nil,
+--::   lastElementChild:    Element | nil,
+--::   nextElementSibling:  Element | nil,
+--::   previousElementSibling: Element | nil,
+--::   scrollTop:           number,
+--::   scrollLeft:          number,
+--::   scrollWidth:         integer,
+--::   scrollHeight:        integer,
+--::   clientTop:           integer,
+--::   clientLeft:          integer,
+--::   clientWidth:         integer,
+--::   clientHeight:        integer,
+--::   getAttribute:        (Element, string) -> string | nil,
+--::   setAttribute:        (Element, string, string) -> (),
+--::   removeAttribute:     (Element, string) -> (),
+--::   hasAttribute:        (Element, string) -> boolean,
+--::   toggleAttribute:     (Element, string, boolean | nil) -> boolean,
+--::   getAttributeNames:   (Element) -> { [integer]: string, ... },
+--::   getAttributeNS:      (Element, string | nil, string) -> string | nil,
+--::   setAttributeNS:      (Element, string | nil, string, string) -> (),
+--::   removeAttributeNS:   (Element, string | nil, string) -> (),
+--::   hasAttributeNS:      (Element, string | nil, string) -> boolean,
+--::   getBoundingClientRect: (Element) -> DOMRect,
+--::   getClientRects:      (Element) -> { [integer]: DOMRect, ... },
+--::   scrollIntoView:      (Element, boolean | nil) -> (),
+--::   scroll:              (Element, number | nil, number | nil) -> (),
+--::   scrollTo:            (Element, number | nil, number | nil) -> (),
+--::   scrollBy:            (Element, number | nil, number | nil) -> (),
+--::   closest:             (Element, string) -> Element | nil,
+--::   matches:             (Element, string) -> boolean,
+--::   querySelector:       (Element, string) -> Element | nil,
+--::   querySelectorAll:    (Element, string) -> NodeList,
+--::   getElementsByTagName:      (Element, string) -> HTMLCollection,
+--::   getElementsByClassName:    (Element, string) -> HTMLCollection,
+--::   insertAdjacentElement:     (Element, string, Element) -> Element | nil,
+--::   insertAdjacentHTML:        (Element, string, string) -> (),
+--::   insertAdjacentText:        (Element, string, string) -> (),
+--::   after:               (Element, ...unknown) -> (),
+--::   before:              (Element, ...unknown) -> (),
+--::   remove:              (Element) -> (),
+--::   replaceWith:         (Element, ...unknown) -> (),
+--::   append:              (Element, ...unknown) -> (),
+--::   prepend:             (Element, ...unknown) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- DOMRect
+---------------------------------------------------------------------------
+
+--:: DOMRect = {
+--::   x:      number,
+--::   y:      number,
+--::   width:  number,
+--::   height: number,
+--::   top:    number,
+--::   right:  number,
+--::   bottom: number,
+--::   left:   number,
 --::   ...
 --:: }
 
@@ -192,39 +765,652 @@
 ---------------------------------------------------------------------------
 
 --:: HTMLElement = {
---::   parentNode:    Node | nil,
---::   childNodes:    { [integer]: Node, length: integer, ... },
---::   textContent:   string | nil,
---::   nodeType:      integer,
---::   nodeName:      string,
---::   ownerDocument: Document | nil,
---::   appendChild:   (HTMLElement, Node) -> Node,
---::   removeChild:   (HTMLElement, Node) -> Node,
---::   insertBefore:  (HTMLElement, Node, Node | nil) -> Node,
---::   cloneNode:     (HTMLElement, boolean | nil) -> HTMLElement,
---::   contains:      (HTMLElement, Node | nil) -> boolean,
+--::   parentNode:         Node | nil,
+--::   parentElement:      Element | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   firstChild:         Node | nil,
+--::   lastChild:          Node | nil,
+--::   nextSibling:        Node | nil,
+--::   previousSibling:    Node | nil,
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   nodeValue:          string | nil,
+--::   baseURI:            string,
+--::   isConnected:        boolean,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLElement, Node) -> Node,
+--::   removeChild:        (HTMLElement, Node) -> Node,
+--::   insertBefore:       (HTMLElement, Node, Node | nil) -> Node,
+--::   replaceChild:       (HTMLElement, Node, Node) -> Node,
+--::   cloneNode:          (HTMLElement, boolean | nil) -> HTMLElement,
+--::   contains:           (HTMLElement, Node | nil) -> boolean,
+--::   hasChildNodes:      (HTMLElement) -> boolean,
+--::   normalize:          (HTMLElement) -> (),
+--::   isEqualNode:        (HTMLElement, Node | nil) -> boolean,
+--::   compareDocumentPosition: (HTMLElement, Node) -> integer,
+--::   getRootNode:        (HTMLElement) -> Node,
 --::   addEventListener:    (HTMLElement, string, (AnyEvent) -> (), boolean | nil) -> (),
 --::   removeEventListener: (HTMLElement, string, (AnyEvent) -> (), boolean | nil) -> (),
---::   tagName:            string,
---::   id:                 string,
---::   className:          string,
---::   classList:          DOMTokenList,
---::   style:              CSSStyleDeclaration,
---::   innerHTML:          string,
---::   outerHTML:          string,
---::   children:           HTMLCollection,
---::   getAttribute:       (HTMLElement, string) -> string | nil,
---::   setAttribute:       (HTMLElement, string, string) -> (),
---::   removeAttribute:    (HTMLElement, string) -> (),
---::   hasAttribute:       (HTMLElement, string) -> boolean,
---::   querySelector:      (HTMLElement, string) -> Element | nil,
---::   querySelectorAll:   (HTMLElement, string) -> NodeList,
---::   dataset:            { [string]: string, ... },
---::   offsetWidth:        number,
---::   offsetHeight:       number,
---::   focus:              (HTMLElement) -> (),
---::   blur:               (HTMLElement) -> (),
---::   click:              (HTMLElement) -> (),
+--::   dispatchEvent:       (HTMLElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   innerHTML:           string,
+--::   outerHTML:           string,
+--::   children:            HTMLCollection,
+--::   childElementCount:   integer,
+--::   firstElementChild:   Element | nil,
+--::   lastElementChild:    Element | nil,
+--::   nextElementSibling:  Element | nil,
+--::   previousElementSibling: Element | nil,
+--::   scrollTop:           number,
+--::   scrollLeft:          number,
+--::   scrollWidth:         integer,
+--::   scrollHeight:        integer,
+--::   clientTop:           integer,
+--::   clientLeft:          integer,
+--::   clientWidth:         integer,
+--::   clientHeight:        integer,
+--::   getAttribute:        (HTMLElement, string) -> string | nil,
+--::   setAttribute:        (HTMLElement, string, string) -> (),
+--::   removeAttribute:     (HTMLElement, string) -> (),
+--::   hasAttribute:        (HTMLElement, string) -> boolean,
+--::   toggleAttribute:     (HTMLElement, string, boolean | nil) -> boolean,
+--::   getAttributeNames:   (HTMLElement) -> { [integer]: string, ... },
+--::   getAttributeNS:      (HTMLElement, string | nil, string) -> string | nil,
+--::   setAttributeNS:      (HTMLElement, string | nil, string, string) -> (),
+--::   removeAttributeNS:   (HTMLElement, string | nil, string) -> (),
+--::   hasAttributeNS:      (HTMLElement, string | nil, string) -> boolean,
+--::   getBoundingClientRect: (HTMLElement) -> DOMRect,
+--::   getClientRects:      (HTMLElement) -> { [integer]: DOMRect, ... },
+--::   scrollIntoView:      (HTMLElement, boolean | nil) -> (),
+--::   scroll:              (HTMLElement, number | nil, number | nil) -> (),
+--::   scrollTo:            (HTMLElement, number | nil, number | nil) -> (),
+--::   scrollBy:            (HTMLElement, number | nil, number | nil) -> (),
+--::   closest:             (HTMLElement, string) -> Element | nil,
+--::   matches:             (HTMLElement, string) -> boolean,
+--::   querySelector:       (HTMLElement, string) -> Element | nil,
+--::   querySelectorAll:    (HTMLElement, string) -> NodeList,
+--::   getElementsByTagName:      (HTMLElement, string) -> HTMLCollection,
+--::   getElementsByClassName:    (HTMLElement, string) -> HTMLCollection,
+--::   insertAdjacentElement:     (HTMLElement, string, Element) -> Element | nil,
+--::   insertAdjacentHTML:        (HTMLElement, string, string) -> (),
+--::   insertAdjacentText:        (HTMLElement, string, string) -> (),
+--::   after:               (HTMLElement, ...unknown) -> (),
+--::   before:              (HTMLElement, ...unknown) -> (),
+--::   remove:              (HTMLElement) -> (),
+--::   replaceWith:         (HTMLElement, ...unknown) -> (),
+--::   append:              (HTMLElement, ...unknown) -> (),
+--::   prepend:             (HTMLElement, ...unknown) -> (),
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   accessKey:           string,
+--::   accessKeyLabel:      string,
+--::   contentEditable:     string,
+--::   dir:                 string,
+--::   draggable:           boolean,
+--::   enterKeyHint:        string,
+--::   hidden:              boolean,
+--::   inert:               boolean,
+--::   innerText:           string,
+--::   inputMode:           string,
+--::   isContentEditable:   boolean,
+--::   lang:                string,
+--::   nonce:               string,
+--::   offsetWidth:         integer,
+--::   offsetHeight:        integer,
+--::   offsetLeft:          integer,
+--::   offsetTop:           integer,
+--::   offsetParent:        HTMLElement | nil,
+--::   outerText:           string,
+--::   tabIndex:            integer,
+--::   title:               string,
+--::   focus:               (HTMLElement) -> (),
+--::   blur:                (HTMLElement) -> (),
+--::   click:               (HTMLElement) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Form elements
+---------------------------------------------------------------------------
+
+--:: HTMLInputElement = {
+--::   parentNode:         Node | nil,
+--::   parentElement:      Element | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLInputElement, Node) -> Node,
+--::   removeChild:        (HTMLInputElement, Node) -> Node,
+--::   insertBefore:       (HTMLInputElement, Node, Node | nil) -> Node,
+--::   addEventListener:    (HTMLInputElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLInputElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLInputElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   innerHTML:           string,
+--::   getAttribute:        (HTMLInputElement, string) -> string | nil,
+--::   setAttribute:        (HTMLInputElement, string, string) -> (),
+--::   removeAttribute:     (HTMLInputElement, string) -> (),
+--::   hasAttribute:        (HTMLInputElement, string) -> boolean,
+--::   getBoundingClientRect: (HTMLInputElement) -> DOMRect,
+--::   querySelector:       (HTMLInputElement, string) -> Element | nil,
+--::   querySelectorAll:    (HTMLInputElement, string) -> NodeList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   tabIndex:            integer,
+--::   focus:               (HTMLInputElement) -> (),
+--::   blur:                (HTMLInputElement) -> (),
+--::   click:               (HTMLInputElement) -> (),
+--::   accept:              string,
+--::   alt:                 string,
+--::   autocomplete:        string,
+--::   checked:             boolean,
+--::   defaultChecked:      boolean,
+--::   defaultValue:        string,
+--::   disabled:            boolean,
+--::   files:               FileList | nil,
+--::   form:                HTMLFormElement | nil,
+--::   formAction:          string,
+--::   formEnctype:         string,
+--::   formMethod:          string,
+--::   formNoValidate:      boolean,
+--::   formTarget:          string,
+--::   height:              integer,
+--::   indeterminate:       boolean,
+--::   list:                HTMLElement | nil,
+--::   max:                 string,
+--::   maxLength:           integer,
+--::   min:                 string,
+--::   minLength:           integer,
+--::   multiple:            boolean,
+--::   name:                string,
+--::   pattern:             string,
+--::   placeholder:         string,
+--::   readOnly:            boolean,
+--::   required:            boolean,
+--::   selectionDirection:  string | nil,
+--::   selectionEnd:        integer | nil,
+--::   selectionStart:      integer | nil,
+--::   size:                integer,
+--::   src:                 string,
+--::   step:                string,
+--::   type:                string,
+--::   validity:            ValidityState,
+--::   value:               string,
+--::   valueAsDate:         unknown,
+--::   valueAsNumber:       number,
+--::   width:               integer,
+--::   willValidate:        boolean,
+--::   checkValidity:       (HTMLInputElement) -> boolean,
+--::   reportValidity:      (HTMLInputElement) -> boolean,
+--::   select:              (HTMLInputElement) -> (),
+--::   setCustomValidity:   (HTMLInputElement, string) -> (),
+--::   setRangeText:        (HTMLInputElement, string, integer | nil, integer | nil, string | nil) -> (),
+--::   setSelectionRange:   (HTMLInputElement, integer, integer, string | nil) -> (),
+--::   stepDown:            (HTMLInputElement, integer | nil) -> (),
+--::   stepUp:              (HTMLInputElement, integer | nil) -> (),
+--::   ...
+--:: }
+
+--:: HTMLSelectElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLSelectElement, Node) -> Node,
+--::   addEventListener:    (HTMLSelectElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLSelectElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLSelectElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   focus:               (HTMLSelectElement) -> (),
+--::   blur:                (HTMLSelectElement) -> (),
+--::   getAttribute:        (HTMLSelectElement, string) -> string | nil,
+--::   setAttribute:        (HTMLSelectElement, string, string) -> (),
+--::   getBoundingClientRect: (HTMLSelectElement) -> DOMRect,
+--::   autocomplete:        string,
+--::   disabled:            boolean,
+--::   form:                HTMLFormElement | nil,
+--::   labels:              NodeList,
+--::   length:              integer,
+--::   multiple:            boolean,
+--::   name:                string,
+--::   options:             HTMLCollection,
+--::   required:            boolean,
+--::   selectedIndex:       integer,
+--::   selectedOptions:     HTMLCollection,
+--::   size:                integer,
+--::   type:                string,
+--::   validity:            ValidityState,
+--::   value:               string,
+--::   willValidate:        boolean,
+--::   add:                 (HTMLSelectElement, HTMLElement, HTMLElement | integer | nil) -> (),
+--::   checkValidity:       (HTMLSelectElement) -> boolean,
+--::   item:                (HTMLSelectElement, integer) -> HTMLElement | nil,
+--::   namedItem:           (HTMLSelectElement, string) -> HTMLElement | nil,
+--::   remove:              (HTMLSelectElement, integer | nil) -> (),
+--::   reportValidity:      (HTMLSelectElement) -> boolean,
+--::   setCustomValidity:   (HTMLSelectElement, string) -> (),
+--::   [integer]:           HTMLElement,
+--::   ...
+--:: }
+
+--:: HTMLTextAreaElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLTextAreaElement, Node) -> Node,
+--::   addEventListener:    (HTMLTextAreaElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLTextAreaElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLTextAreaElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   focus:               (HTMLTextAreaElement) -> (),
+--::   blur:                (HTMLTextAreaElement) -> (),
+--::   getAttribute:        (HTMLTextAreaElement, string) -> string | nil,
+--::   setAttribute:        (HTMLTextAreaElement, string, string) -> (),
+--::   getBoundingClientRect: (HTMLTextAreaElement) -> DOMRect,
+--::   autocomplete:        string,
+--::   cols:                integer,
+--::   defaultValue:        string,
+--::   disabled:            boolean,
+--::   form:                HTMLFormElement | nil,
+--::   inputMode:           string,
+--::   labels:              NodeList,
+--::   maxLength:           integer,
+--::   minLength:           integer,
+--::   name:                string,
+--::   placeholder:         string,
+--::   readOnly:            boolean,
+--::   required:            boolean,
+--::   rows:                integer,
+--::   selectionDirection:  string,
+--::   selectionEnd:        integer,
+--::   selectionStart:      integer,
+--::   textLength:          integer,
+--::   type:                string,
+--::   validity:            ValidityState,
+--::   value:               string,
+--::   willValidate:        boolean,
+--::   wrap:                string,
+--::   checkValidity:       (HTMLTextAreaElement) -> boolean,
+--::   reportValidity:      (HTMLTextAreaElement) -> boolean,
+--::   select:              (HTMLTextAreaElement) -> (),
+--::   setCustomValidity:   (HTMLTextAreaElement, string) -> (),
+--::   setRangeText:        (HTMLTextAreaElement, string, integer | nil, integer | nil, string | nil) -> (),
+--::   setSelectionRange:   (HTMLTextAreaElement, integer, integer, string | nil) -> (),
+--::   ...
+--:: }
+
+--:: HTMLFormElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLFormElement, Node) -> Node,
+--::   addEventListener:    (HTMLFormElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLFormElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLFormElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   getAttribute:        (HTMLFormElement, string) -> string | nil,
+--::   setAttribute:        (HTMLFormElement, string, string) -> (),
+--::   getBoundingClientRect: (HTMLFormElement) -> DOMRect,
+--::   acceptCharset:       string,
+--::   action:              string,
+--::   autocomplete:        string,
+--::   elements:            HTMLCollection,
+--::   encoding:            string,
+--::   enctype:             string,
+--::   length:              integer,
+--::   method:              string,
+--::   name:                string,
+--::   noValidate:          boolean,
+--::   target:              string,
+--::   checkValidity:       (HTMLFormElement) -> boolean,
+--::   reportValidity:      (HTMLFormElement) -> boolean,
+--::   requestSubmit:       (HTMLFormElement, HTMLElement | nil) -> (),
+--::   reset:               (HTMLFormElement) -> (),
+--::   submit:              (HTMLFormElement) -> (),
+--::   [integer]:           HTMLElement,
+--::   [string]:            HTMLElement,
+--::   ...
+--:: }
+
+--:: ValidityState = {
+--::   badInput:        boolean,
+--::   customError:     boolean,
+--::   patternMismatch: boolean,
+--::   rangeOverflow:   boolean,
+--::   rangeUnderflow:  boolean,
+--::   stepMismatch:    boolean,
+--::   tooLong:         boolean,
+--::   tooShort:        boolean,
+--::   typeMismatch:    boolean,
+--::   valid:           boolean,
+--::   valueMissing:    boolean,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Canvas API
+---------------------------------------------------------------------------
+
+--:: HTMLCanvasElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLCanvasElement, Node) -> Node,
+--::   addEventListener:    (HTMLCanvasElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLCanvasElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLCanvasElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   getAttribute:        (HTMLCanvasElement, string) -> string | nil,
+--::   setAttribute:        (HTMLCanvasElement, string, string) -> (),
+--::   getBoundingClientRect: (HTMLCanvasElement) -> DOMRect,
+--::   width:               integer,
+--::   height:              integer,
+--::   getContext:          (HTMLCanvasElement, string) -> CanvasRenderingContext2D | unknown,
+--::   toDataURL:           (HTMLCanvasElement, string | nil, number | nil) -> string,
+--::   toBlob:              (HTMLCanvasElement, (Blob | nil) -> (), string | nil, number | nil) -> (),
+--::   transferControlToOffscreen: (HTMLCanvasElement) -> unknown,
+--::   ...
+--:: }
+
+--:: CanvasRenderingContext2D = {
+--::   canvas:                  HTMLCanvasElement,
+--::   fillStyle:               string,
+--::   strokeStyle:             string,
+--::   globalAlpha:             number,
+--::   globalCompositeOperation: string,
+--::   lineWidth:               number,
+--::   lineCap:                 string,
+--::   lineJoin:                string,
+--::   miterLimit:              number,
+--::   lineDashOffset:          number,
+--::   shadowOffsetX:           number,
+--::   shadowOffsetY:           number,
+--::   shadowBlur:              number,
+--::   shadowColor:             string,
+--::   filter:                  string,
+--::   imageSmoothingEnabled:   boolean,
+--::   imageSmoothingQuality:   string,
+--::   font:                    string,
+--::   textAlign:               string,
+--::   textBaseline:            string,
+--::   direction:               string,
+--::   save:             (CanvasRenderingContext2D) -> (),
+--::   restore:          (CanvasRenderingContext2D) -> (),
+--::   scale:            (CanvasRenderingContext2D, number, number) -> (),
+--::   rotate:           (CanvasRenderingContext2D, number) -> (),
+--::   translate:        (CanvasRenderingContext2D, number, number) -> (),
+--::   transform:        (CanvasRenderingContext2D, number, number, number, number, number, number) -> (),
+--::   setTransform:     (CanvasRenderingContext2D, number, number, number, number, number, number) -> (),
+--::   resetTransform:   (CanvasRenderingContext2D) -> (),
+--::   getTransform:     (CanvasRenderingContext2D) -> unknown,
+--::   createLinearGradient: (CanvasRenderingContext2D, number, number, number, number) -> CanvasGradient,
+--::   createRadialGradient: (CanvasRenderingContext2D, number, number, number, number, number, number) -> CanvasGradient,
+--::   createConicGradient:  (CanvasRenderingContext2D, number, number, number) -> CanvasGradient,
+--::   createPattern:    (CanvasRenderingContext2D, unknown, string | nil) -> CanvasPattern | nil,
+--::   clearRect:        (CanvasRenderingContext2D, number, number, number, number) -> (),
+--::   fillRect:         (CanvasRenderingContext2D, number, number, number, number) -> (),
+--::   strokeRect:       (CanvasRenderingContext2D, number, number, number, number) -> (),
+--::   fillText:         (CanvasRenderingContext2D, string, number, number, number | nil) -> (),
+--::   strokeText:       (CanvasRenderingContext2D, string, number, number, number | nil) -> (),
+--::   measureText:      (CanvasRenderingContext2D, string) -> TextMetrics,
+--::   drawImage:        (CanvasRenderingContext2D, unknown, number, number, number | nil, number | nil, number | nil, number | nil, number | nil, number | nil) -> (),
+--::   createImageData:  (CanvasRenderingContext2D, integer, integer) -> ImageData,
+--::   getImageData:     (CanvasRenderingContext2D, integer, integer, integer, integer) -> ImageData,
+--::   putImageData:     (CanvasRenderingContext2D, ImageData, integer, integer, integer | nil, integer | nil, integer | nil, integer | nil) -> (),
+--::   beginPath:        (CanvasRenderingContext2D) -> (),
+--::   closePath:        (CanvasRenderingContext2D) -> (),
+--::   moveTo:           (CanvasRenderingContext2D, number, number) -> (),
+--::   lineTo:           (CanvasRenderingContext2D, number, number) -> (),
+--::   bezierCurveTo:    (CanvasRenderingContext2D, number, number, number, number, number, number) -> (),
+--::   quadraticCurveTo: (CanvasRenderingContext2D, number, number, number, number) -> (),
+--::   arc:              (CanvasRenderingContext2D, number, number, number, number, number, boolean | nil) -> (),
+--::   arcTo:            (CanvasRenderingContext2D, number, number, number, number, number) -> (),
+--::   ellipse:          (CanvasRenderingContext2D, number, number, number, number, number, number, number, boolean | nil) -> (),
+--::   rect:             (CanvasRenderingContext2D, number, number, number, number) -> (),
+--::   fill:             (CanvasRenderingContext2D, string | nil) -> (),
+--::   stroke:           (CanvasRenderingContext2D) -> (),
+--::   clip:             (CanvasRenderingContext2D, string | nil) -> (),
+--::   isPointInPath:    (CanvasRenderingContext2D, number, number, string | nil) -> boolean,
+--::   isPointInStroke:  (CanvasRenderingContext2D, number, number) -> boolean,
+--::   setLineDash:      (CanvasRenderingContext2D, { [integer]: number, ... }) -> (),
+--::   getLineDash:      (CanvasRenderingContext2D) -> { [integer]: number, ... },
+--::   drawFocusIfNeeded: (CanvasRenderingContext2D, Element) -> (),
+--::   ...
+--:: }
+
+--:: CanvasGradient = {
+--::   addColorStop: (CanvasGradient, number, string) -> (),
+--::   ...
+--:: }
+
+--:: CanvasPattern = {
+--::   setTransform: (CanvasPattern, unknown | nil) -> (),
+--::   ...
+--:: }
+
+--:: TextMetrics = {
+--::   width:                    number,
+--::   actualBoundingBoxLeft:    number,
+--::   actualBoundingBoxRight:   number,
+--::   fontBoundingBoxAscent:    number,
+--::   fontBoundingBoxDescent:   number,
+--::   actualBoundingBoxAscent:  number,
+--::   actualBoundingBoxDescent: number,
+--::   emHeightAscent:           number,
+--::   emHeightDescent:          number,
+--::   hangingBaseline:          number,
+--::   alphabeticBaseline:       number,
+--::   ideographicBaseline:      number,
+--::   ...
+--:: }
+
+--:: ImageData = {
+--::   data:   unknown,
+--::   width:  integer,
+--::   height: integer,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Media elements
+---------------------------------------------------------------------------
+
+--:: TimeRanges = {
+--::   length: integer,
+--::   start:  (TimeRanges, integer) -> number,
+--::   end:    (TimeRanges, integer) -> number,
+--::   ...
+--:: }
+
+--:: HTMLMediaElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLMediaElement, Node) -> Node,
+--::   addEventListener:    (HTMLMediaElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLMediaElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLMediaElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   getAttribute:        (HTMLMediaElement, string) -> string | nil,
+--::   setAttribute:        (HTMLMediaElement, string, string) -> (),
+--::   getBoundingClientRect: (HTMLMediaElement) -> DOMRect,
+--::   autoplay:            boolean,
+--::   buffered:            TimeRanges,
+--::   controls:            boolean,
+--::   crossOrigin:         string | nil,
+--::   currentSrc:          string,
+--::   currentTime:         number,
+--::   defaultMuted:        boolean,
+--::   defaultPlaybackRate: number,
+--::   disableRemotePlayback: boolean,
+--::   duration:            number,
+--::   ended:               boolean,
+--::   error:               unknown,
+--::   loop:                boolean,
+--::   mediaKeys:           unknown,
+--::   muted:               boolean,
+--::   networkState:        integer,
+--::   paused:              boolean,
+--::   playbackRate:        number,
+--::   played:              TimeRanges,
+--::   preload:             string,
+--::   preservesPitch:      boolean,
+--::   readyState:          integer,
+--::   seekable:            TimeRanges,
+--::   seeking:             boolean,
+--::   src:                 string,
+--::   srcObject:           unknown,
+--::   textTracks:          unknown,
+--::   videoTracks:         unknown,
+--::   volume:              number,
+--::   canPlayType:         (HTMLMediaElement, string) -> string,
+--::   fastSeek:            (HTMLMediaElement, number) -> (),
+--::   load:                (HTMLMediaElement) -> (),
+--::   pause:               (HTMLMediaElement) -> (),
+--::   play:                (HTMLMediaElement) -> Promise,
+--::   ...
+--:: }
+
+--:: HTMLVideoElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLVideoElement, Node) -> Node,
+--::   addEventListener:    (HTMLVideoElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLVideoElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLVideoElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   getAttribute:        (HTMLVideoElement, string) -> string | nil,
+--::   setAttribute:        (HTMLVideoElement, string, string) -> (),
+--::   getBoundingClientRect: (HTMLVideoElement) -> DOMRect,
+--::   autoplay:            boolean,
+--::   buffered:            TimeRanges,
+--::   controls:            boolean,
+--::   crossOrigin:         string | nil,
+--::   currentSrc:          string,
+--::   currentTime:         number,
+--::   defaultMuted:        boolean,
+--::   defaultPlaybackRate: number,
+--::   duration:            number,
+--::   ended:               boolean,
+--::   loop:                boolean,
+--::   muted:               boolean,
+--::   networkState:        integer,
+--::   paused:              boolean,
+--::   playbackRate:        number,
+--::   played:              TimeRanges,
+--::   preload:             string,
+--::   readyState:          integer,
+--::   seekable:            TimeRanges,
+--::   seeking:             boolean,
+--::   src:                 string,
+--::   volume:              number,
+--::   canPlayType:         (HTMLVideoElement, string) -> string,
+--::   load:                (HTMLVideoElement) -> (),
+--::   pause:               (HTMLVideoElement) -> (),
+--::   play:                (HTMLVideoElement) -> Promise,
+--::   height:              integer,
+--::   width:               integer,
+--::   videoHeight:         integer,
+--::   videoWidth:          integer,
+--::   poster:              string,
+--::   playsInline:         boolean,
+--::   requestPictureInPicture: (HTMLVideoElement) -> Promise,
+--::   ...
+--:: }
+
+--:: HTMLAudioElement = {
+--::   parentNode:         Node | nil,
+--::   childNodes:         { [integer]: Node, length: integer, ... },
+--::   textContent:        string | nil,
+--::   nodeType:           integer,
+--::   nodeName:           string,
+--::   ownerDocument:      Document | nil,
+--::   appendChild:        (HTMLAudioElement, Node) -> Node,
+--::   addEventListener:    (HTMLAudioElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (HTMLAudioElement, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (HTMLAudioElement, Event) -> boolean,
+--::   tagName:             string,
+--::   id:                  string,
+--::   className:           string,
+--::   classList:           DOMTokenList,
+--::   dataset:             { [string]: string, ... },
+--::   style:               CSSStyleDeclaration,
+--::   getAttribute:        (HTMLAudioElement, string) -> string | nil,
+--::   setAttribute:        (HTMLAudioElement, string, string) -> (),
+--::   autoplay:            boolean,
+--::   buffered:            TimeRanges,
+--::   controls:            boolean,
+--::   currentSrc:          string,
+--::   currentTime:         number,
+--::   duration:            number,
+--::   ended:               boolean,
+--::   loop:                boolean,
+--::   muted:               boolean,
+--::   paused:              boolean,
+--::   playbackRate:        number,
+--::   src:                 string,
+--::   volume:              number,
+--::   canPlayType:         (HTMLAudioElement, string) -> string,
+--::   load:                (HTMLAudioElement) -> (),
+--::   pause:               (HTMLAudioElement) -> (),
+--::   play:                (HTMLAudioElement) -> Promise,
 --::   ...
 --:: }
 
@@ -233,21 +1419,32 @@
 ---------------------------------------------------------------------------
 
 --:: Text = {
---::   parentNode:    Node | nil,
---::   childNodes:    { [integer]: Node, length: integer, ... },
---::   textContent:   string | nil,
---::   nodeType:      integer,
---::   nodeName:      string,
---::   ownerDocument: Document | nil,
---::   appendChild:   (Text, Node) -> Node,
---::   removeChild:   (Text, Node) -> Node,
---::   insertBefore:  (Text, Node, Node | nil) -> Node,
---::   cloneNode:     (Text, boolean | nil) -> Text,
---::   contains:      (Text, Node | nil) -> boolean,
+--::   parentNode:     Node | nil,
+--::   parentElement:  Element | nil,
+--::   childNodes:     { [integer]: Node, length: integer, ... },
+--::   textContent:    string | nil,
+--::   nodeType:       integer,
+--::   nodeName:       string,
+--::   nodeValue:      string | nil,
+--::   baseURI:        string,
+--::   isConnected:    boolean,
+--::   ownerDocument:  Document | nil,
+--::   appendChild:    (Text, Node) -> Node,
+--::   removeChild:    (Text, Node) -> Node,
+--::   insertBefore:   (Text, Node, Node | nil) -> Node,
+--::   cloneNode:      (Text, boolean | nil) -> Text,
+--::   contains:       (Text, Node | nil) -> boolean,
 --::   addEventListener:    (Text, string, (AnyEvent) -> (), boolean | nil) -> (),
 --::   removeEventListener: (Text, string, (AnyEvent) -> (), boolean | nil) -> (),
---::   data:      string,
---::   nodeValue: string,
+--::   data:           string,
+--::   length:         integer,
+--::   wholeText:      string,
+--::   splitText:      (Text, integer) -> Text,
+--::   appendData:     (Text, string) -> (),
+--::   deleteData:     (Text, integer, integer) -> (),
+--::   insertData:     (Text, integer, string) -> (),
+--::   replaceData:    (Text, integer, integer, string) -> (),
+--::   substringData:  (Text, integer, integer) -> string,
 --::   ...
 --:: }
 
@@ -269,8 +1466,8 @@
 --::   contains:      (DocumentFragment, Node | nil) -> boolean,
 --::   addEventListener:    (DocumentFragment, string, (AnyEvent) -> (), boolean | nil) -> (),
 --::   removeEventListener: (DocumentFragment, string, (AnyEvent) -> (), boolean | nil) -> (),
---::   querySelector:     (DocumentFragment, string) -> Element | nil,
---::   querySelectorAll:  (DocumentFragment, string) -> NodeList,
+--::   querySelector:       (DocumentFragment, string) -> Element | nil,
+--::   querySelectorAll:    (DocumentFragment, string) -> NodeList,
 --::   ...
 --:: }
 
@@ -279,17 +1476,63 @@
 ---------------------------------------------------------------------------
 
 --:: Document = {
---::   createElement:          (Document, string) -> HTMLElement,
---::   createTextNode:         (Document, string) -> Text,
---::   createDocumentFragment: (Document) -> DocumentFragment,
---::   querySelector:          (Document, string) -> Element | nil,
---::   querySelectorAll:       (Document, string) -> NodeList,
---::   getElementById:         (Document, string) -> HTMLElement | nil,
---::   body:                   HTMLElement | nil,
---::   head:                   HTMLElement | nil,
---::   title:                  string,
---::   addEventListener:    (Document, string, (AnyEvent) -> (), boolean | nil) -> (),
---::   removeEventListener: (Document, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   createElement:              (Document, string) -> HTMLElement,
+--::   createElementNS:            (Document, string | nil, string) -> Element,
+--::   createTextNode:             (Document, string) -> Text,
+--::   createDocumentFragment:     (Document) -> DocumentFragment,
+--::   createComment:              (Document, string) -> unknown,
+--::   createEvent:                (Document, string) -> Event,
+--::   createRange:                (Document) -> unknown,
+--::   querySelector:              (Document, string) -> Element | nil,
+--::   querySelectorAll:           (Document, string) -> NodeList,
+--::   getElementById:             (Document, string) -> HTMLElement | nil,
+--::   getElementsByClassName:     (Document, string) -> HTMLCollection,
+--::   getElementsByTagName:       (Document, string) -> HTMLCollection,
+--::   getElementsByName:          (Document, string) -> NodeList,
+--::   importNode:                 (Document, Node, boolean | nil) -> Node,
+--::   adoptNode:                  (Document, Node) -> Node,
+--::   body:                       HTMLElement | nil,
+--::   head:                       HTMLElement | nil,
+--::   title:                      string,
+--::   URL:                        string,
+--::   documentURI:                string,
+--::   characterSet:               string,
+--::   contentType:                string,
+--::   doctype:                    unknown,
+--::   documentElement:            HTMLElement,
+--::   readyState:                 string,
+--::   referrer:                   string,
+--::   cookie:                     string,
+--::   lastModified:               string,
+--::   location:                   Location,
+--::   domain:                     string,
+--::   hidden:                     boolean,
+--::   visibilityState:            string,
+--::   activeElement:              Element | nil,
+--::   fullscreenElement:          Element | nil,
+--::   fullscreenEnabled:          boolean,
+--::   pointerLockElement:         Element | nil,
+--::   scrollingElement:           Element | nil,
+--::   children:                   HTMLCollection,
+--::   childElementCount:          integer,
+--::   firstElementChild:          Element | nil,
+--::   lastElementChild:           Element | nil,
+--::   implementation:             unknown,
+--::   styleSheets:                unknown,
+--::   fonts:                      unknown,
+--::   timeline:                   unknown,
+--::   defaultView:                Window | nil,
+--::   designMode:                 string,
+--::   dir:                        string,
+--::   compatMode:                 string,
+--::   currentScript:              HTMLElement | nil,
+--::   hasFocus:                   (Document) -> boolean,
+--::   execCommand:                (Document, string, boolean | nil, string | nil) -> boolean,
+--::   exitFullscreen:             (Document) -> Promise,
+--::   exitPointerLock:            (Document) -> (),
+--::   addEventListener:           (Document, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener:        (Document, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:              (Document, Event) -> boolean,
 --::   ...
 --:: }
 
@@ -298,17 +1541,19 @@
 ---------------------------------------------------------------------------
 
 --:: Location = {
---::   href:     string,
---::   protocol: string,
---::   host:     string,
---::   hostname: string,
---::   port:     string,
---::   pathname: string,
---::   search:   string,
---::   hash:     string,
---::   assign:   (Location, string) -> (),
---::   replace:  (Location, string) -> (),
---::   reload:   (Location) -> (),
+--::   href:       string,
+--::   protocol:   string,
+--::   host:       string,
+--::   hostname:   string,
+--::   port:       string,
+--::   pathname:   string,
+--::   search:     string,
+--::   hash:       string,
+--::   origin:     string,
+--::   assign:     (Location, string) -> (),
+--::   replace:    (Location, string) -> (),
+--::   reload:     (Location) -> (),
+--::   toString:   (Location) -> string,
 --::   ...
 --:: }
 
@@ -317,14 +1562,430 @@
 ---------------------------------------------------------------------------
 
 --:: History = {
---::   length:     integer,
+--::   length:            integer,
 --::   scrollRestoration: string,
---::   state:      unknown,
---::   pushState:  (History, unknown, string, string | nil) -> (),
---::   replaceState: (History, unknown, string, string | nil) -> (),
---::   go:         (History, integer | nil) -> (),
---::   back:       (History) -> (),
---::   forward:    (History) -> (),
+--::   state:             unknown,
+--::   pushState:         (History, unknown, string, string | nil) -> (),
+--::   replaceState:      (History, unknown, string, string | nil) -> (),
+--::   go:                (History, integer | nil) -> (),
+--::   back:              (History) -> (),
+--::   forward:           (History) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- URL, URLSearchParams
+---------------------------------------------------------------------------
+
+--:: URLSearchParams = {
+--::   append:   (URLSearchParams, string, string) -> (),
+--::   delete:   (URLSearchParams, string) -> (),
+--::   get:      (URLSearchParams, string) -> string | nil,
+--::   getAll:   (URLSearchParams, string) -> { [integer]: string, ... },
+--::   has:      (URLSearchParams, string) -> boolean,
+--::   set:      (URLSearchParams, string, string) -> (),
+--::   sort:     (URLSearchParams) -> (),
+--::   toString: (URLSearchParams) -> string,
+--::   forEach:  (URLSearchParams, (string, string, URLSearchParams) -> ()) -> (),
+--::   ...
+--:: }
+
+--:: URL = {
+--::   hash:         string,
+--::   host:         string,
+--::   hostname:     string,
+--::   href:         string,
+--::   origin:       string,
+--::   password:     string,
+--::   pathname:     string,
+--::   port:         string,
+--::   protocol:     string,
+--::   search:       string,
+--::   searchParams: URLSearchParams,
+--::   username:     string,
+--::   toJSON:       (URL) -> string,
+--::   toString:     (URL) -> string,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Storage (localStorage / sessionStorage)
+---------------------------------------------------------------------------
+
+--:: Storage = {
+--::   length:     integer,
+--::   key:        (Storage, integer) -> string | nil,
+--::   getItem:    (Storage, string) -> string | nil,
+--::   setItem:    (Storage, string, string) -> (),
+--::   removeItem: (Storage, string) -> (),
+--::   clear:      (Storage) -> (),
+--::   [string]:   string | nil,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- XMLHttpRequest
+---------------------------------------------------------------------------
+
+--:: XMLHttpRequest = {
+--::   readyState:          integer,
+--::   response:            unknown,
+--::   responseText:        string,
+--::   responseType:        string,
+--::   responseURL:         string,
+--::   responseXML:         unknown,
+--::   status:              integer,
+--::   statusText:          string,
+--::   timeout:             integer,
+--::   upload:              unknown,
+--::   withCredentials:     boolean,
+--::   abort:               (XMLHttpRequest) -> (),
+--::   getAllResponseHeaders: (XMLHttpRequest) -> string,
+--::   getResponseHeader:   (XMLHttpRequest, string) -> string | nil,
+--::   open:                (XMLHttpRequest, string, string, boolean | nil, string | nil, string | nil) -> (),
+--::   overrideMimeType:    (XMLHttpRequest, string) -> (),
+--::   send:                (XMLHttpRequest, unknown) -> (),
+--::   setRequestHeader:    (XMLHttpRequest, string, string) -> (),
+--::   addEventListener:    (XMLHttpRequest, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (XMLHttpRequest, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (XMLHttpRequest, Event) -> boolean,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Fetch API
+---------------------------------------------------------------------------
+
+--:: Headers = {
+--::   append:   (Headers, string, string) -> (),
+--::   delete:   (Headers, string) -> (),
+--::   entries:  (Headers) -> unknown,
+--::   get:      (Headers, string) -> string | nil,
+--::   getSetCookie: (Headers) -> { [integer]: string, ... },
+--::   has:      (Headers, string) -> boolean,
+--::   keys:     (Headers) -> unknown,
+--::   set:      (Headers, string, string) -> (),
+--::   values:   (Headers) -> unknown,
+--::   forEach:  (Headers, (string, string, Headers) -> ()) -> (),
+--::   ...
+--:: }
+
+--:: Request = {
+--::   body:             unknown,
+--::   bodyUsed:         boolean,
+--::   cache:            string,
+--::   credentials:      string,
+--::   destination:      string,
+--::   headers:          Headers,
+--::   integrity:        string,
+--::   keepalive:        boolean,
+--::   method:           string,
+--::   mode:             string,
+--::   redirect:         string,
+--::   referrer:         string,
+--::   referrerPolicy:   string,
+--::   signal:           AbortSignal,
+--::   url:              string,
+--::   arrayBuffer:      (Request) -> Promise,
+--::   blob:             (Request) -> Promise,
+--::   clone:            (Request) -> Request,
+--::   formData:         (Request) -> Promise,
+--::   json:             (Request) -> Promise,
+--::   text:             (Request) -> Promise,
+--::   ...
+--:: }
+
+--:: Response = {
+--::   body:         unknown,
+--::   bodyUsed:     boolean,
+--::   headers:      Headers,
+--::   ok:           boolean,
+--::   redirected:   boolean,
+--::   status:       integer,
+--::   statusText:   string,
+--::   type:         string,
+--::   url:          string,
+--::   arrayBuffer:  (Response) -> Promise,
+--::   blob:         (Response) -> Promise,
+--::   clone:        (Response) -> Response,
+--::   formData:     (Response) -> Promise,
+--::   json:         (Response) -> Promise,
+--::   text:         (Response) -> Promise,
+--::   ...
+--:: }
+
+-- Promises are opaque; browser Promises resolve via callbacks/then, not coroutines.
+--:: Promise = {
+--::   andThen:  (Promise, (unknown) -> unknown, ((unknown) -> unknown) | nil) -> Promise,
+--::   catch:    (Promise, (unknown) -> unknown) -> Promise,
+--::   finally:  (Promise, () -> ()) -> Promise,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- WebSocket
+---------------------------------------------------------------------------
+
+--:: WebSocket = {
+--::   binaryType:      string,
+--::   bufferedAmount:  integer,
+--::   extensions:      string,
+--::   protocol:        string,
+--::   readyState:      integer,
+--::   url:             string,
+--::   close:           (WebSocket, integer | nil, string | nil) -> (),
+--::   send:            (WebSocket, unknown) -> (),
+--::   addEventListener:    (WebSocket, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (WebSocket, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (WebSocket, Event) -> boolean,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Worker, MessagePort, BroadcastChannel
+---------------------------------------------------------------------------
+
+--:: MessagePort = {
+--::   postMessage:         (MessagePort, unknown, unknown | nil) -> (),
+--::   start:               (MessagePort) -> (),
+--::   close:               (MessagePort) -> (),
+--::   addEventListener:    (MessagePort, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (MessagePort, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (MessagePort, Event) -> boolean,
+--::   ...
+--:: }
+
+--:: Worker = {
+--::   postMessage:         (Worker, unknown, unknown | nil) -> (),
+--::   terminate:           (Worker) -> (),
+--::   addEventListener:    (Worker, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (Worker, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (Worker, Event) -> boolean,
+--::   ...
+--:: }
+
+--:: BroadcastChannel = {
+--::   name:                string,
+--::   postMessage:         (BroadcastChannel, unknown) -> (),
+--::   close:               (BroadcastChannel) -> (),
+--::   addEventListener:    (BroadcastChannel, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener: (BroadcastChannel, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:       (BroadcastChannel, Event) -> boolean,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Observers
+---------------------------------------------------------------------------
+
+--:: MutationRecord = {
+--::   type:               string,
+--::   target:             Node,
+--::   addedNodes:         NodeList,
+--::   removedNodes:       NodeList,
+--::   previousSibling:    Node | nil,
+--::   nextSibling:        Node | nil,
+--::   attributeName:      string | nil,
+--::   attributeNamespace: string | nil,
+--::   oldValue:           string | nil,
+--::   ...
+--:: }
+
+--:: MutationObserver = {
+--::   observe:    (MutationObserver, Node, unknown) -> (),
+--::   disconnect: (MutationObserver) -> (),
+--::   takeRecords: (MutationObserver) -> { [integer]: MutationRecord, ... },
+--::   ...
+--:: }
+
+--:: IntersectionObserverEntry = {
+--::   boundingClientRect:  DOMRect,
+--::   intersectionRatio:   number,
+--::   intersectionRect:    DOMRect,
+--::   isIntersecting:      boolean,
+--::   rootBounds:          DOMRect | nil,
+--::   target:              Element,
+--::   time:                number,
+--::   ...
+--:: }
+
+--:: IntersectionObserver = {
+--::   root:       Element | Document | nil,
+--::   rootMargin: string,
+--::   thresholds: { [integer]: number, ... },
+--::   disconnect: (IntersectionObserver) -> (),
+--::   observe:    (IntersectionObserver, Element) -> (),
+--::   takeRecords: (IntersectionObserver) -> { [integer]: IntersectionObserverEntry, ... },
+--::   unobserve:  (IntersectionObserver, Element) -> (),
+--::   ...
+--:: }
+
+--:: ResizeObserverEntry = {
+--::   borderBoxSize:       { [integer]: unknown, ... },
+--::   contentBoxSize:      { [integer]: unknown, ... },
+--::   contentRect:         DOMRect,
+--::   devicePixelContentBoxSize: { [integer]: unknown, ... },
+--::   target:              Element,
+--::   ...
+--:: }
+
+--:: ResizeObserver = {
+--::   disconnect: (ResizeObserver) -> (),
+--::   observe:    (ResizeObserver, Element, unknown | nil) -> (),
+--::   unobserve:  (ResizeObserver, Element) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Performance API
+---------------------------------------------------------------------------
+
+--:: PerformanceEntry = {
+--::   duration:   number,
+--::   entryType:  string,
+--::   name:       string,
+--::   startTime:  number,
+--::   toJSON:     (PerformanceEntry) -> unknown,
+--::   ...
+--:: }
+
+--:: Performance = {
+--::   timeOrigin:          number,
+--::   navigation:          unknown,
+--::   timing:              unknown,
+--::   eventCounts:         unknown,
+--::   now:                 (Performance) -> number,
+--::   clearMarks:          (Performance, string | nil) -> (),
+--::   clearMeasures:       (Performance, string | nil) -> (),
+--::   clearResourceTimings: (Performance) -> (),
+--::   getEntries:          (Performance) -> { [integer]: PerformanceEntry, ... },
+--::   getEntriesByName:    (Performance, string, string | nil) -> { [integer]: PerformanceEntry, ... },
+--::   getEntriesByType:    (Performance, string) -> { [integer]: PerformanceEntry, ... },
+--::   mark:                (Performance, string) -> PerformanceEntry,
+--::   measure:             (Performance, string, string | nil, string | nil) -> PerformanceEntry,
+--::   setResourceTimingBufferSize: (Performance, integer) -> (),
+--::   toJSON:              (Performance) -> unknown,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Console
+---------------------------------------------------------------------------
+
+--:: Console = {
+--::   log:          (Console, ...any) -> (),
+--::   info:         (Console, ...any) -> (),
+--::   warn:         (Console, ...any) -> (),
+--::   error:        (Console, ...any) -> (),
+--::   debug:        (Console, ...any) -> (),
+--::   trace:        (Console, ...any) -> (),
+--::   dir:          (Console, any, any | nil) -> (),
+--::   dirxml:       (Console, ...any) -> (),
+--::   table:        (Console, any, any | nil) -> (),
+--::   group:        (Console, ...any) -> (),
+--::   groupCollapsed: (Console, ...any) -> (),
+--::   groupEnd:     (Console) -> (),
+--::   count:        (Console, string | nil) -> (),
+--::   countReset:   (Console, string | nil) -> (),
+--::   time:         (Console, string | nil) -> (),
+--::   timeLog:      (Console, string | nil, ...any) -> (),
+--::   timeEnd:      (Console, string | nil) -> (),
+--::   assert:       (Console, boolean, ...any) -> (),
+--::   clear:        (Console) -> (),
+--::   profile:      (Console, string | nil) -> (),
+--::   profileEnd:   (Console, string | nil) -> (),
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Navigator
+---------------------------------------------------------------------------
+
+--:: Navigator = {
+--::   appCodeName:        string,
+--::   appName:            string,
+--::   appVersion:         string,
+--::   connection:         unknown,
+--::   cookieEnabled:      boolean,
+--::   credentials:        unknown,
+--::   deviceMemory:       number,
+--::   doNotTrack:         string | nil,
+--::   geolocation:        unknown,
+--::   hardwareConcurrency: integer,
+--::   language:           string,
+--::   languages:          { [integer]: string, ... },
+--::   locks:              unknown,
+--::   maxTouchPoints:     integer,
+--::   mediaCapabilities:  unknown,
+--::   mediaDevices:       unknown,
+--::   mediaSession:       unknown,
+--::   onLine:             boolean,
+--::   pdfViewerEnabled:   boolean,
+--::   permissions:        unknown,
+--::   platform:           string,
+--::   plugins:            unknown,
+--::   product:            string,
+--::   productSub:         string,
+--::   scheduling:         unknown,
+--::   serviceWorker:      unknown,
+--::   storage:            unknown,
+--::   userActivation:     unknown,
+--::   userAgent:          string,
+--::   userAgentData:      unknown,
+--::   vendor:             string,
+--::   vendorSub:          string,
+--::   vibrate:            (Navigator, unknown) -> boolean,
+--::   sendBeacon:         (Navigator, string, unknown | nil) -> boolean,
+--::   canShare:           (Navigator, unknown | nil) -> boolean,
+--::   clipboard:          unknown,
+--::   share:              (Navigator, unknown | nil) -> Promise,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- Screen
+---------------------------------------------------------------------------
+
+--:: Screen = {
+--::   availHeight:    integer,
+--::   availWidth:     integer,
+--::   colorDepth:     integer,
+--::   height:         integer,
+--::   orientation:    unknown,
+--::   pixelDepth:     integer,
+--::   width:          integer,
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- ReadableStream
+---------------------------------------------------------------------------
+
+--:: ReadableStream = {
+--::   locked:   boolean,
+--::   cancel:   (ReadableStream, unknown | nil) -> Promise,
+--::   getReader: (ReadableStream) -> unknown,
+--::   pipeThrough: (ReadableStream, unknown, unknown | nil) -> ReadableStream,
+--::   pipeTo:   (ReadableStream, unknown, unknown | nil) -> Promise,
+--::   tee:      (ReadableStream) -> { [integer]: ReadableStream, ... },
+--::   ...
+--:: }
+
+---------------------------------------------------------------------------
+-- FormData
+---------------------------------------------------------------------------
+
+--:: FormData = {
+--::   append:   (FormData, string, unknown, string | nil) -> (),
+--::   delete:   (FormData, string) -> (),
+--::   entries:  (FormData) -> unknown,
+--::   get:      (FormData, string) -> unknown,
+--::   getAll:   (FormData, string) -> { [integer]: unknown, ... },
+--::   has:      (FormData, string) -> boolean,
+--::   keys:     (FormData) -> unknown,
+--::   set:      (FormData, string, unknown, string | nil) -> (),
+--::   values:   (FormData) -> unknown,
+--::   forEach:  (FormData, (unknown, string, FormData) -> ()) -> (),
 --::   ...
 --:: }
 
@@ -339,13 +2000,79 @@
 --::   clearInterval:          (Window, integer) -> (),
 --::   requestAnimationFrame:  (Window, (number) -> ()) -> integer,
 --::   cancelAnimationFrame:   (Window, integer) -> (),
+--::   queueMicrotask:         (Window, () -> ()) -> (),
 --::   location:               Location,
 --::   history:                History,
 --::   document:               Document,
---::   addEventListener:    (Window, string, (AnyEvent) -> (), boolean | nil) -> (),
---::   removeEventListener: (Window, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   navigator:              Navigator,
+--::   screen:                 Screen,
+--::   performance:            Performance,
+--::   console:                Console,
+--::   localStorage:           Storage,
+--::   sessionStorage:         Storage,
+--::   innerWidth:             integer,
+--::   innerHeight:            integer,
+--::   outerWidth:             integer,
+--::   outerHeight:            integer,
+--::   scrollX:                number,
+--::   scrollY:                number,
+--::   pageXOffset:            number,
+--::   pageYOffset:            number,
+--::   screenX:                integer,
+--::   screenY:                integer,
+--::   devicePixelRatio:       number,
+--::   name:                   string,
+--::   status:                 string,
+--::   closed:                 boolean,
+--::   parent:                 Window,
+--::   top:                    Window | nil,
+--::   opener:                 Window | nil,
+--::   self:                   Window,
+--::   window:                 Window,
+--::   frames:                 Window,
+--::   frameElement:           Element | nil,
+--::   length:                 integer,
+--::   origin:                 string,
+--::   crossOriginIsolated:    boolean,
+--::   isSecureContext:        boolean,
+--::   crypto:                 unknown,
+--::   indexedDB:              unknown,
+--::   caches:                 unknown,
+--::   fetch:                  (Window, unknown, unknown | nil) -> Promise,
+--::   alert:                  (Window, string | nil) -> (),
+--::   confirm:                (Window, string | nil) -> boolean,
+--::   prompt:                 (Window, string | nil, string | nil) -> string | nil,
+--::   open:                   (Window, string | nil, string | nil, string | nil) -> Window | nil,
+--::   close:                  (Window) -> (),
+--::   stop:                   (Window) -> (),
+--::   focus:                  (Window) -> (),
+--::   blur:                   (Window) -> (),
+--::   scroll:                 (Window, number | nil, number | nil) -> (),
+--::   scrollTo:               (Window, number | nil, number | nil) -> (),
+--::   scrollBy:               (Window, number | nil, number | nil) -> (),
+--::   getComputedStyle:       (Window, Element, string | nil) -> CSSStyleDeclaration,
+--::   getSelection:           (Window) -> unknown,
+--::   matchMedia:             (Window, string) -> unknown,
+--::   resizeTo:               (Window, integer, integer) -> (),
+--::   resizeBy:               (Window, integer, integer) -> (),
+--::   moveTo:                 (Window, integer, integer) -> (),
+--::   moveBy:                 (Window, integer, integer) -> (),
+--::   postMessage:            (Window, unknown, string, unknown | nil) -> (),
+--::   atob:                   (Window, string) -> string,
+--::   btoa:                   (Window, string) -> string,
+--::   addEventListener:       (Window, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   removeEventListener:    (Window, string, (AnyEvent) -> (), boolean | nil) -> (),
+--::   dispatchEvent:          (Window, Event) -> boolean,
 --::   ...
 --:: }
 
---:: declare document = Document
---:: declare window   = Window
+--:: declare document  = Document
+--:: declare window    = Window
+--:: declare navigator = Navigator
+--:: declare screen    = Screen
+--:: declare location  = Location
+--:: declare history   = History
+--:: declare performance = Performance
+--:: declare console   = Console
+--:: declare localStorage   = Storage
+--:: declare sessionStorage  = Storage
