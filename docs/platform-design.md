@@ -173,6 +173,42 @@ Crescent-native context construction is arbitrary script logic. There is no
 "crescent lorebook" concept — scripts that need dynamic context injection write it
 in code. The lorebook editor exists only for CCv2 compatibility.
 
+## Conversation tree schema
+
+The conversation history is a tree stored in SQLite. Each node is a message; branches
+are created by regenerating or editing a turn.
+
+```sql
+CREATE TABLE sessions (
+  id         TEXT PRIMARY KEY,   -- uuid
+  app_id     TEXT NOT NULL,      -- which app/card this belongs to
+  created_at INTEGER NOT NULL,   -- unix timestamp
+  metadata   TEXT                -- open JSON: title, summary, preview image, etc.
+);
+
+CREATE TABLE messages (
+  id                 TEXT PRIMARY KEY,
+  session_id         TEXT NOT NULL REFERENCES sessions(id),
+  parent_id          TEXT REFERENCES messages(id),  -- NULL = root
+  role               TEXT NOT NULL,  -- 'user' | 'assistant' | 'system'
+  content            TEXT NOT NULL,
+  created_at         INTEGER NOT NULL,
+  canonical_child_id TEXT REFERENCES messages(id),  -- saved swipe: last visited child
+  metadata           TEXT  -- open JSON: model used, token count, timing, etc.
+);
+```
+
+**`canonical_child_id`** — every node remembers which child you last navigated to.
+Following `canonical_child_id` from the root reconstructs the active path. Navigating
+into any branch and back out resumes from where you left in that branch. This applies
+to all branches, not just the active one.
+
+**Root**: `SELECT * FROM messages WHERE session_id = ? AND parent_id IS NULL`.
+No `first_message_id` on sessions needed.
+
+**Branching**: insert new child message, update parent's `canonical_child_id` to the
+new child. **Swiping**: change parent's `canonical_child_id` to an existing sibling.
+
 ## Preset library
 
 A preset is a starter script you copy into a card and edit. The script is
