@@ -386,3 +386,40 @@ T.describe("OOP: M.new() → new M() still works after class synthesis", functio
     -- is already translated to new x(...) by the existing rule.
     has("local obj = M.new(1, 2)", "new M(1, 2)", "x.new → new x still works")
 end)
+
+-- ---------------------------------------------------------------------------
+-- __index = OtherTable delegation → Object.setPrototypeOf
+-- ---------------------------------------------------------------------------
+
+T.describe("__index = Base delegation emits Object.setPrototypeOf", function()
+    local src = [[
+local M = {}
+M.__index = Base
+]]
+    has(src, "Object.setPrototypeOf(M, Base)", "delegation emits setPrototypeOf")
+    hasnt(src, "M.__index = Base", "raw __index assignment not emitted")
+end)
+
+T.describe("__index = require(...) delegation emits Object.setPrototypeOf", function()
+    local src = [[
+local M = {}
+M.__index = require("lib.foo")
+]]
+    has(src, "Object.setPrototypeOf(M,", "require delegation emits setPrototypeOf")
+    hasnt(src, "M.__index", "raw __index not emitted")
+end)
+
+T.describe("__index = M self-referential is NOT treated as delegation", function()
+    -- The class pattern absorbs M.__index = M; no setPrototypeOf should appear.
+    local src = [[
+local M = {}
+M.__index = M
+
+function M.new()
+  local self = setmetatable({}, M)
+  return self
+end
+]]
+    hasnt(src, "Object.setPrototypeOf", "no setPrototypeOf for self-referential __index")
+    has(src, "class M {", "class emitted for self-referential pattern")
+end)

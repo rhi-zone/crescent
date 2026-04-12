@@ -1037,7 +1037,29 @@ local function scan_classes(ctx, stmt_ids)
         if info.ctor_id then skip[info.ctor_id] = true end
     end
 
-    return classes, skip
+    -- Pass 3: find M.__index = Other (non-self-referential delegation).
+    -- These are __index assignments where the RHS is not M itself (i.e. not
+    -- the class pattern already handled above).  Emit as Object.setPrototypeOf.
+    -- { [stmt_id] = { lhs = "M", rhs_id = node_id } }
+    local delegations = {}
+    for _, sid in ipairs(stmt_ids) do
+        if not skip[sid] then
+            local sn = ctx:node(sid)
+            if sn.kind == defs.NODE_ASSIGN_STMT and sn.d[2] == 1 and sn.d[4] == 1 then
+                local targets = ctx:list(sn.d[1], 1)
+                local exprs   = ctx:list(sn.d[3], 1)
+                local obj, field = field_of_ident(ctx, targets[1])
+                if obj and field == "__index" then
+                    -- Any __index assignment not already skipped (i.e. not M.__index = M)
+                    -- is a delegation.
+                    delegations[sid] = { lhs = obj, rhs_id = exprs[1] }
+                    skip[sid] = true
+                end
+            end
+        end
+    end
+
+    return classes, skip, delegations
 end
 
 -- Emit a constructor body, transforming it into a TypeScript constructor.
@@ -1161,8 +1183,8 @@ end
 local function emit_chunk_with_classes(ctx, bs, bl)
     local stmt_ids = ctx:list(bs, bl)
 
-    -- Scan for prototype class patterns.
-    local classes, skip = scan_classes(ctx, stmt_ids)
+    -- Scan for prototype class patterns and delegation assignments.
+    local classes, skip, delegations = scan_classes(ctx, stmt_ids)
     ctx.skip_stmts = skip
 
     -- Emit class declarations in declaration order (preserve source order).
@@ -1178,6 +1200,11 @@ local function emit_chunk_with_classes(ctx, bs, bl)
             -- Emit the class declaration in place of the `local M = {}` statement.
             local entry = class_at_decl[sid]
             emit_class(ctx, entry.name, entry.info)
+        elseif delegations[sid] then
+            -- M.__index = Other → Object.setPrototypeOf(M, Other)
+            local d = delegations[sid]
+            local rhs_s = emit_expr(ctx, d.rhs_id, 0)
+            ctx:emit("Object.setPrototypeOf(" .. d.lhs .. ", " .. rhs_s .. ");")
         elseif not skip[sid] then
             emit_stmt(ctx, sid)
         end
