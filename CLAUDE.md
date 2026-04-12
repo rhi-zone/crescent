@@ -121,6 +121,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Run the typechecker on files you write or modify.** `luajit lib/type/static/cli.lua <file>...` — do this before committing. Annotations use `--:` (type on preceding line) and `--::` (type declarations), never EmmyLua (`---@param`, `---@return`, `--[[@param]]`, `fun()`). Function types use `() -> T` syntax, not `fun(): T`. Use `{ [K]: V }` for map types, not `table<K, V>`. Use `unknown` for dynamic/untyped data (forces narrowing), never `any` (silently bypasses checking).
 
+**Declaration-only files use the `_types.lua` suffix** (e.g. `lib/web/js_types.lua`). These contain only `--::` type annotations — no runtime code — and exist as companions to large modules where inlining thousands of lines of annotations would slow down LuaJIT's lexer. Use `--:: require "lib.web.js_types"` to load them in the typechecker; the runtime ignores it. Do not use `.d.lua` suffix — the dot is incompatible with Lua's dot-to-slash require path convention.
+
 **Minimize file churn.** When editing a file, read it once, plan all changes, and apply them in one pass.
 
 **`normalize view` is available** for structural outlines of files and directories:

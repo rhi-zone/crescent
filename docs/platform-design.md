@@ -413,9 +413,9 @@ tarball and transpiled together with the entrypoint.
 The cache invalidates on app reload (tarball changes). On first request there is a
 one-time transpilation cost; subsequent requests are instant.
 
-**Type checking browser-target code** requires loading `lib/web/js.d.lua` as an
-additional prelude. The typechecker CLI needs a `--prelude` flag for this — tracked
-in TODO.md.
+**Type checking browser-target code** requires `--:: require "lib.web.js_types"` at
+the top of browser-facing Lua files. The typechecker loads it as declarations; the
+runtime ignores it (it's a comment).
 
 ## UI design principles
 

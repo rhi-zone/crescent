@@ -1,4 +1,4 @@
--- lib/web/js.d.lua
+-- lib/web/js_types.lua
 -- DOM and browser API type declarations for use with the crescent typechecker.
 -- Covers the full browser API surface area for use in WebAssembly / WASM Lua environments.
 -- No executable code — type annotations only.

@@ -23,14 +23,14 @@ local M = {}
 -- `document` is a browser runtime global not in the typechecker prelude.
 -- Declared as `any` to opt out of checking — callers supply the real DOM or a
 -- mock. The `node` field on each El type is also `any` for the same reason:
--- the full DOM type hierarchy lives in lib/web/js.d.lua and is not
+-- the full DOM type hierarchy lives in lib/web/js_types.lua and is not
 -- auto-loaded by the typechecker. When typechecking browser-facing code, pass
--- js.d.lua as an additional input to get full DOM type coverage.
+-- js_types.lua as an additional input to get full DOM type coverage.
 --:: declare document = any
 
 -- Base El type: nominal wrapper pairing a tag name with a DOM node.
 -- `node` is `any` here because DOM types (HTMLElement etc.) are not in the
--- typechecker prelude. Pass lib/web/js.d.lua to get full DOM types.
+-- typechecker prelude. Pass lib/web/js_types.lua to get full DOM types.
 --:: El = { _tag: string, node: any }
 
 -- Individual element types (nominal aliases over El)
