@@ -886,6 +886,18 @@ scope-collect to compound. `history:transaction(fn)` — batch with rollback on 
 `tlv(opts)` — Type-Length-Value. `encode_varint`/`decode_varint` — unsigned LEB128.
 `pack`/`unpack` — struct codec (`>/<` endian, B/H/I/Q/b/h/i/q/s). `framer`/`receiver` — stream wrappers. 157 assertions.
 
+**Porter Stemmer** (`lib/porter_stemmer`) — **implemented**. Porter1/Porter2 stemmer with stop words and text indexing.
+`PS.stem(word)` / `PS.stem_porter1` — Porter 1980 (5 steps). `PS.stem_porter2` — Snowball English with R1/R2 regions. `PS.stem_all(words, algo)`. `PS.normalize(word)` — lowercase+strip. `PS.stem_text(text, opts)` — tokenize+filter+stem. `PS.stop_words` (~155 words), `PS.is_stop_word`. `PS.index(documents)` — inverted index with stemmed keys and per-doc positions. 125 assertions.
+
+**Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
+1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
+
+**Scheduler** (`lib/scheduler`) — **implemented**. Cooperative coroutine scheduler with priorities, timers, and channels.
+`S.new({clock})` → `sched:spawn(fn, opts)`. Min-heap timer queue, priority-sorted ready queue, round-robin fairness. `ctx.yield()`/`ctx.sleep(t)`/`ctx.await(ch)`/`ctx.send(ch,val)`. `S.channel()`. `sched:after(t,fn)`/`sched:every(t,fn)`. `sched:step()`/`sched:run()`/`sched:run_for(n)`. Hooks: `on_task_done`/`on_task_failed`. `sched:cancel`/`stats()`/`done()`. Injectable clock. 90 assertions.
+
+**Workflow** (`lib/workflow`) — **implemented**. Step-based workflow engine with branching, retry, and serialization.
+`WF.define({steps, start})`. Step: `run`, `on_success`, `on_failure`, `retry`. `wf:start(ctx)` → `instance:run()`/`instance:step()`. Branching: `run` returns step name. Parallel: `run` returns array. Loops: return self. `instance:serialize()`/`wf:restore(snap)`. `wf:validate()` — missing refs, unreachable. Hooks: `on_step_start`/`on_step_done`/`on_step_failed`/`on_complete`. 101 assertions.
+
 **Tracing** (`lib/tracing`) — **implemented**. OpenTelemetry-inspired distributed tracing.
 `T.provider({exporter, id_seed})` — `tracer("name")` → `tracer:start_span(name, opts)` / `tracer:with_span(name, fn)`. Span: `set_attribute`/`add_event`/`set_status`/`finish`. `T.memory_exporter()` — `spans()`/`reset()`. `T.console_exporter()`. W3C TraceContext: `T.inject(span)` → `"00-traceid-spanid-01"`, `T.extract(header)`. `T.to_json(spans)` — OTLP-like JSON. PRNG via xorshift32. 106 assertions.
 
