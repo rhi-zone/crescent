@@ -324,6 +324,37 @@ shared.
 app handles its own internal routing (conversation, editor, settings, etc.). An "edit"
 button in the shell just opens `dom` — the app decides what to show.
 
+**Filtering is a projectional editor.** The filter state is a `Signal<Query>` — a
+structured value composed via widget combinators (`narrow`, `focus`, `each`), not a
+text search box or flat tag list. The query widget lets users compose conditions
+(`hair.color = "blonde" AND cup_size = "D"`). Results are
+`computed(() => db.query(to_sql(query.get())))` — reactive, instant. Natural language
+input ("blonde D cup") is the primary construction mechanism; the projectional view
+is the inspector and tweaker.
+
+## UI design principles
+
+These apply to all first-party app UIs (library shell, conversation app, editors).
+
+**Affordances reflect state, not convention.** Don't add buttons because they are
+conventional — derive the affordance set from the state machine. Ask: what does the
+user most likely want *right now*? Only that is shown active. Affordances that don't
+exist in the current state are not invented.
+
+**Three affordance levels, fixed positions:**
+- **Active** — valid and likely given current state/context
+- **Dimmed** — valid but low probability (e.g. "regenerate" before the model has warmed up, or a rarely-used action)
+- **Disabled** — invalid in current state; shown for muscle memory, blocked from use
+
+Dimming and disabling are distinct. Dimmed means "you could, but probably don't want
+to." Disabled means "you can't right now." Pure removal is only correct when an
+affordance is *never* relevant in a given context (e.g. "regenerate" in the library
+browser). Otherwise, keep it in place — spatial consistency builds muscle memory.
+
+**State machine first.** The UI vocabulary is the set of transitions between states.
+Keyboard shortcuts and gestures fire transitions; components render the current state.
+Undo/redo is state history, not a separate stack.
+
 ## Everything else is scripts
 
 The platform is not a library browser, an import pipeline, or a card manager. Those
