@@ -1009,6 +1009,10 @@ Primitives: `lit`, `cls`, `any`, `eof`, `empty`. Operators: `seq`, `choice`, `st
 
 **Rope** (`lib/rope`) — **implemented**. Persistent rope data structure for efficient string editing. `Rope.new(str)`. `len`/`to_string`/`char_at`/`sub`/`insert`/`delete`/`concat`/`split`. Persistent (non-destructive) — returns new ropes sharing structure. Leaf max 64 bytes; balanced tree on construction. 92 assertions.
 
+**KV Store** (`lib/kv_store`) — **implemented**. In-memory key-value store with TTL expiry, namespaces, and pub/sub. `KV.new({clock})`. `set`/`get`/`has`/`delete`/`set_many`/`get_many`/`expire`/`ttl`/`persist`/`incr`/`decr`/`keys`/`values`/`size`/`clear`/`each`. `namespace(prefix)` proxy. `on_set`/`on_del` callbacks. Injectable clock for testing. 99 assertions.
+
+**Reactive** (`lib/reactive`) — **implemented**. Reactive signals library (SolidJS-style). `signal`/`computed`/`effect`/`memo`/`batch`/`untrack`/`is_signal`. CLEAN/CHECK/DIRTY state machine eliminates glitches. Diamond dependency support. `lib/signal` is the Unix signals FFI library. 66 assertions.
+
 **Bin Packing** (`lib/bin_packing`) — **implemented**. 1D and 2D rectangle bin packing algorithms.
 1D: `first_fit`/`first_fit_decreasing`/`best_fit`/`best_fit_decreasing`/`next_fit`. Helpers: `bin_count`/`utilization`/`validate`. 2D: `guillotine` (short/long-axis split, rotation), `shelf` (row-based, sort by height), `maxrects` (best_short_side/best_long_side/best_area heuristics, containment pruning). `auto_pack` (power-of-2 bin search). `pack_efficiency`. 145 assertions.
 
