@@ -304,7 +304,43 @@ Each field is a textarea (or appropriate input for metadata fields). `{{char}}` 
 `{{user}}` macros render as styled inline chips while editing, expanding to raw text
 on focus (same pattern as Notion inline variables).
 
-## Views (not yet designed)
+## Settings
 
-- **Settings** — LLM selection, impersonate prompt, generation params,
-  lorebook budget %, pin_examples, show/hide continue+impersonate buttons, UI prefs
+### Storage
+
+Settings use a two-layer override pattern:
+
+- **Global defaults** — stored in `caps.config` (host-owned, shared across all apps)
+- **Per-card overrides** — stored in `caps.kv` (scoped to the card)
+
+The card reads `caps.kv.get("setting")` first; falls back to `caps.config.setting`
+if nil; falls back to a hardcoded default if both are nil.
+
+Both caps are declared `required: false`. Cards must work standalone (headless,
+MCP entrypoint) without a host UI — `caps.config` and `caps.kv` may not be
+provided. Hardcoded fallbacks are not optional.
+
+### LLM presets
+
+Named presets stored in `caps.config.presets` — a map of alias → backend config.
+Aliases like `"smart"` or `"gemini"` resolve at runtime to whatever the user has
+configured. The card declares which preset it wants; the host resolves it at launch.
+Changing what `"smart"` means in global settings propagates to all cards that use it.
+
+Per-card override: `caps.kv.get("llm_preset")` — either a preset name (resolved via
+`caps.config.presets`) or an inline config object. Nil means use the global default.
+
+### Settings view
+
+Presented as a form within the card's `dom` entrypoint (internal view, not a
+separate entrypoint). Writes to `caps.kv` for per-card values. Links to the shell's
+global settings for `caps.config` values.
+
+Fields (not yet fully specced):
+- LLM preset selection (global presets + per-card override)
+- Generation params (temperature, max tokens, etc.) — per-card override
+- Context composition order — per-card override over global default
+- Lorebook budget %
+- Show/hide continue + impersonate buttons (global, stored in `caps.config`)
+- Impersonate prompt — per-card override
+- UI preferences (theme etc.) — global only, no per-card override
