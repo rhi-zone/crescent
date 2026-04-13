@@ -353,6 +353,13 @@ runtime.
 {
   "name": "My Character",
   "version": "1.0.0",
+  "meta": {
+    "hair.color": "blonde",
+    "species": "elf",
+    "tags": ["fantasy", "adventure"],
+    "creator": "someone",
+    "rating": "SFW"
+  },
   "caps": {
     "db": "required"
   },
@@ -385,6 +392,11 @@ runtime.
 **Capability declarations:**
 
 - Top-level `caps` declares caps shared across all entrypoints (e.g. `db` above).
+- Top-level `meta` is an open key-value object — author-defined, no fixed schema.
+  Any fields the author wants to expose for search/filtering go here: `hair.color`,
+  `species`, `tags`, `rating`, etc. The shell's projectional search indexes whatever
+  is present. Source adapters (chub, itch) populate this from their native metadata
+  when importing. Tags are just a conventional field in `meta`, not special.
 - Per-entrypoint `caps` declares additional caps specific to that entrypoint.
 - Each cap has a `type` (the capability kind the host must provide), `required`
   (if `false`, the cap may be absent — the script receives `nil` for that slot and

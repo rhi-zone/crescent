@@ -13,12 +13,10 @@ and forkable like any other app.
 
 The primary screen. Full viewport — no sidebars, no panels competing for space.
 
-**Search bar** — always visible, always the entry point. Searches across all metadata:
-name, description, tagline, tags, creator, source (chub/itch/local/etc.), rating,
-CCv2 fields (personality, scenario snippets), and any other adapter-exposed fields.
-Matched fields surface as pinnable facets below the bar — click to lock a filter,
-click again to remove. One search bar for both views; the view toggle doesn't reset
-it.
+**Search bar** — always visible, always the entry point. Searches across all metadata
+fields exposed by the source adapter. Matched fields surface as pinnable facets —
+click to lock a filter, click again to remove. One search bar for both views; the
+view toggle doesn't reset it.
 
 **View toggle** — grid ↔ list. Button in the toolbar + keyboard shortcut (e.g. `v`).
 
@@ -40,11 +38,15 @@ input + pinned facets. Results are `computed(() => caps.db.query(to_sql(query.ge
 Reactive and instant. The shell holds a read-only `caps.db` handle to the platform
 metadata db.
 
-Facets are not just tags — any metadata field is filterable. Pinned facets compose
-with AND; within a facet, multiple values compose with OR.
+Facets are any metadata field — not just tags. Pinned facets compose with AND;
+within a facet, multiple values compose with OR.
 
-**Stretch goal:** local LLM extracts and normalises tags from CCv2 descriptions,
-producing cleaner/more consistent facets than the original card metadata.
+**Metadata schema is open and author-defined.** Each card has a metadata object
+in its manifest with whatever key-value pairs the author chooses: `hair.color`,
+`species`, `setting`, `tags`, `rating`, etc. No fixed schema. The projectional
+search indexes whatever is there. Tags are just one conventional field — not
+special, not required. Cards imported from chub/itch carry their source tags in
+this object automatically via the adapter.
 
 ## Navigation
 
