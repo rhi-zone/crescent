@@ -304,6 +304,14 @@ Each field is a textarea (or appropriate input for metadata fields). `{{char}}` 
 `{{user}}` macros render as styled inline chips while editing, expanding to raw text
 on focus (same pattern as Notion inline variables).
 
+### Navigating many greetings
+
+Cards can have 50+ alternate greetings. Swiping one by one is unusable at that scale.
+Navigation UI: a **preview grid** showing all greetings as truncated text previews,
+with a **search/filter bar** — type a word to filter previews to matching greetings,
+tap any preview to jump directly. Same pattern applies to navigating swipes in the
+conversation view when a message has many branches.
+
 ## Settings
 
 ### Storage
