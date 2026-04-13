@@ -7,22 +7,28 @@ entirely in scripts.
 
 ## Core model
 
-An **app** is a gzipped tar archive containing a `manifest.json` and Lua source files.
-It may be distributed as a raw `.tar.gz` or embedded in an image file (PNG, JPEG, WebP)
-for the "distributable as an image" use case. The image is optional decoration.
+An **app** is a gzipped tar archive containing a `manifest.json`, a **backend**
+(Lua source), and a **frontend** (HTML/CSS/JS). It may be distributed as a raw
+`.tar.gz` or embedded in an image file (PNG, JPEG, WebP) for the "distributable as
+an image" use case. The image is optional decoration.
 
-**Apps can vendor their dependencies.** If the tarball includes a dep, it's used. If
-not, the platform resolves `require` calls against the host's crescent installation.
+The backend is a Lua script that runs on the host. It uses caps (LLM, database,
+config, file I/O) and exposes an HTTP API — a **backend for frontend** (BFF). The
+frontend is static HTML/CSS/JS served from the tarball. It contains zero business
+logic — it renders what the backend tells it to render and sends back what the user
+did. The frontend could be rewritten without understanding any of the app's domain.
+
+**Apps can vendor their Lua dependencies.** If the tarball includes a dep, it's used.
+If not, the platform resolves `require` calls against the host's crescent installation.
 Users with a full crescent distribution can write lightweight apps that `require` host
 libs directly — no vendoring needed.
 
 **First-party apps vendor everything.** Our own apps are fully self-contained — they
-run on vanilla LuaJIT with nothing pre-installed. Every dependency (reactive, json,
-base64, format libs, etc.) is included as plain Lua source. A typical app with full
-UI + format parsing + all transitive deps is ~50KB gzipped. This makes them viral:
-a PNG containing a complete, readable, modifiable application that anyone can run,
-read, and hack. That's crescent's vendorable philosophy as a single distributable
-artifact — and it's why we vendor even common libs into first-party apps.
+run on vanilla LuaJIT with nothing pre-installed. Every Lua dependency (json, base64,
+format libs, etc.) is included as plain Lua source. A typical app with full backend +
+frontend + all transitive deps is ~50KB gzipped. This makes them viral: a PNG
+containing a complete, readable, modifiable application that anyone can run, read, and
+hack.
 
 Security comes from the capability sandbox, not from restricting what code ships in
 the tarball. The app only gets the caps it's explicitly granted — a modified `json.lua`
@@ -44,17 +50,21 @@ Third-party apps can use any layout — the platform just adds the tarball root 
 
 ```
 manifest.json
-dom.lua                         ← app code (tarball root)
-lib/                            ← vendored deps
-  reactive/init.lua
+server.lua                      ← backend entrypoint (BFF)
+static/                         ← frontend (served as-is)
+  index.html
+  app.js
+  style.css
+lib/                            ← vendored Lua deps
   formats/ccv2/card.lua
   format/json/init.lua
   ...
 ```
 
 The platform's require loader searches the tarball root first, then falls back to the
-host's crescent installation. This means `require("dom")` finds the app's own module,
-`require("lib.reactive")` finds the vendored copy (or the host's if stripped).
+host's crescent installation. This means `require("server")` finds the app's own
+module, `require("lib.formats.ccv2.card")` finds the vendored copy (or the host's if
+stripped).
 
 In the monorepo, vendored deps are symlinks to the canonical sources (always in sync,
 zero duplication). `tar -h` dereferences them for distribution.
@@ -122,14 +132,6 @@ local response = caps.llm.call(messages)  -- messages: array of {role, content}
 
 Model selection, API keys, and retry logic are the capability implementation's concern.
 The script assembles the messages array however it wants.
-
-### `caps.render` — UI surface (action cap)
-
-Push content to the render surface.
-
-```lua
-caps.render.push(content)
-```
 
 ### `caps.db` — SQLite database handle (action cap)
 
@@ -255,22 +257,21 @@ the capability implementation returns from `caps.png.text(name)`.
 
 ## App internal routing
 
-An app's `dom` entrypoint owns its entire UI — conversation, editor, lorebook editor,
-settings, all of it. Navigation between views is internal to the app, not external
-entrypoints. This gives smooth transitions, shared state across views, and no
-reload between them.
+An app owns its entire UI — conversation, editor, lorebook editor, settings, all of
+it. Navigation between views is internal to the app. The frontend handles client-side
+routing; the backend handles API routing. Both live in the same tarball.
 
-The shell has no knowledge of what views an app contains. It launches `dom` and the
-app handles its own routing. A "edit this app" button in the shell just opens the
-app's `dom` entrypoint — the app decides whether to show the editor first or the
-conversation first based on context.
+The shell has no knowledge of what views an app contains. It launches the app and the
+app handles its own routing. An "edit this app" button in the shell just opens the
+app — the app decides whether to show the editor first or the conversation first based
+on context.
 
 Format-specific tooling (CCv2 editor, lorebook editor) lives inside the app that
 knows the format. The shell has no idea what CCv2 is and never will.
 
 ### CCv2 app internal views
 
-A first-party CCv2-compatible app ships with these internal views under `dom`:
+A first-party CCv2-compatible app ships with these internal views:
 
 **Conversation view** — the interaction loop. LLM calls, worldstate, context
 assembly. The user-facing primary view.
@@ -412,18 +413,11 @@ runtime.
     "db": "required"
   },
   "entry": {
-    "dom": {
-      "main": "ui/dom.lua",
+    "server": {
+      "main": "server.lua",
       "caps": {
         "llm_main":    { "type": "llm", "required": true },
-        "llm_summary": { "type": "llm", "required": false },
-        "render":      { "type": "render", "required": true }
-      }
-    },
-    "mcp": {
-      "main": "mcp/main.lua",
-      "caps": {
-        "llm": { "type": "llm", "required": true }
+        "llm_summary": { "type": "llm", "required": false }
       }
     },
     "headless": {
@@ -528,9 +522,9 @@ Multiple shells can be installed; switching between them is selecting a differen
 to run over the same data. The underlying `saved_states` / installed-apps table is
 shared.
 
-**The shell has no format knowledge.** It launches an app's `dom` entrypoint and the
-app handles its own internal routing (conversation, editor, settings, etc.). An "edit"
-button in the shell just opens `dom` — the app decides what to show.
+**The shell has no format knowledge.** It launches an app and the app handles its own
+internal routing (conversation, editor, settings, etc.). An "edit" button in the shell
+just opens the app — the app decides what to show.
 
 **Filtering is a projectional editor.** The filter state is a `Signal<Query>` — a
 structured value composed via widget combinators (`narrow`, `focus`, `each`), not a
@@ -540,12 +534,16 @@ text search box or flat tag list. The query widget lets users compose conditions
 input ("blonde D cup") is the primary construction mechanism; the projectional view
 is the inspector and tweaker.
 
-## Remote cap access
+## Backend for frontend (BFF)
 
-Caps are Lua tables with functions. If the caller is in the same process, call the
-function. If the caller is remote (browser, CLI, another service), expose whatever
-HTTP/WebSocket/IPC endpoint you want — that's application code, not platform code.
-`lib/platform/` provides cap factories; it does not dictate how they are served.
+Each app's backend is its own server. It uses caps internally and exposes an HTTP API
+tailored to its frontend. The API is domain-specific — a card app exposes endpoints
+like `POST /message` and `GET /card`, not generic cap proxies. The frontend knows
+nothing about caps, LLM protocols, or database schemas — it talks to its own backend.
+
+`lib/platform/` provides cap factories. The app's backend wires them together and
+serves its frontend from `static/`. How the backend serves HTTP is the app's concern —
+use `lib/http`, write a raw socket handler, whatever works.
 
 ## UI design principles
 
@@ -580,7 +578,7 @@ are first-party scripts:
 | App library / search UI | Library shell app (described above) |
 | CCv2 import pipeline | Script with `caps.fs` + `caps.png` |
 | Mutate-on-import logic | Script (stamps app tarball on import) |
-| Card editor / lorebook editor | Internal views inside each app's `dom` entrypoint |
+| Card editor / lorebook editor | Internal views inside each app's frontend |
 | Preset browser | Script with `caps.fs` |
 
 These ship alongside the platform as first-party scripts. They are not platform code.
@@ -591,11 +589,12 @@ other card.
 
 Three distinct apps compose the first-party experience:
 
-**Card app** — the conversation/interaction app. Owns context assembly, macro
-substitution, lorebook triggering, LLM calls. Vendors `lib/formats/ccv2/` into its
-tarball for CCv2 format knowledge (macro expansion, lorebook format conversion,
-card field parsing). Internal views: conversation, card editor, lorebook editor,
-settings.
+**Card app** — the conversation/interaction app. The backend (Lua) owns context
+assembly, macro substitution, lorebook triggering, LLM calls, and conversation
+persistence. The frontend (HTML/CSS/JS) is a thin UI with zero business logic — it
+renders messages, takes input, and calls backend endpoints. Vendors
+`lib/formats/ccv2/` into the tarball for CCv2 format knowledge. Internal views:
+conversation, card editor, lorebook editor, settings.
 
 **Library app** — a general-purpose collection browser, configurable to show any
 content type: character cards, Steam games, itch games, browser bookmarks, etc.
@@ -623,9 +622,8 @@ In the repo, format libraries live under `lib/formats/` for development and test
 At build time they're copied into the app tarball. The app's `require` sees the
 vendored copy first (tarball loader runs before host loader).
 
-The platform owns exactly two things:
-1. Run a script with the capabilities the host decides to grant
-2. Provide a render surface
+The platform owns exactly one thing: run a script with the capabilities the host
+decides to grant.
 
 Everything else is user-land.
 
