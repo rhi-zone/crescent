@@ -9,7 +9,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/reactive_optics` — Rainbow port for Lua (reactive UI, optics-based)
 - [x] `lib/platform` — card loader + capability factories: `caps.png` (allowlist-gated chunk r/w), `caps.llm` (OpenAI-compatible HTTP), `caps.render` (SSE + collect sessions), `caps.fs` (scoped file I/O). 47 assertions.
 - [x] `lib/ecs` — SQLite-backed entity-component store, mutable world state for sandboxed scripts. 30 assertions.
-- [ ] **Saved state pattern** — when building the full app: `saved_states` SQLite table with `state_ref` (JSON, script-defined), `metadata` (open JSON), indexed columns for queries. Current session = always-present row, updated on every navigation, restored on reboot. See `docs/platform-design.md` "Saved state pattern" for full design. Not a library — a schema + script pattern.
+- [ ] **Saved state pattern — redesign needed** — current design in `docs/platform-design.md` is a sketch (`saved_states` SQLite table, `state_ref` + `metadata` JSON columns). Needs a proper design pass: how does the platform own the schema vs. the script? How does state_ref interact with the conversation tree (`canonical_child_id`)? How does restore-on-reboot work with reactive caps? What does the save/load API look like from inside a sandboxed script? Write the redesign to `docs/platform-design.md` before implementing.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
@@ -1188,6 +1188,12 @@ See `docs/pkg-design.md` for full design.
 - [ ] **DNS: master file parser** (RFC 1035 §5) — `lib/dns/format_master_file.lua` stub exists.
 - [ ] **DNS-over-HTTPS** (RFC 8484), **DNS-over-TLS** (RFC 7858).
 - [ ] **Socket layer rewrite** — replace vendored ljsocket with cross-platform `lib/socket/` (POSIX + Winsock FFI). Prerequisite for proper async server, keep-alive, connection pooling.
+
+## documentation (low priority now, high priority eventually)
+
+- [ ] **Comprehensive library docs** — every `lib/` package documented: purpose, API reference, usage examples. Enough that someone new to the codebase can pick up any library and use it without reading the source.
+- [ ] **Codebase directory files** — `OVERVIEW.md` or `index` files at key directories explaining the shape: what lives where, how pieces relate, what to read first. Not API docs — orientation docs. `lib/OVERVIEW.md`, `lib/platform/OVERVIEW.md`, etc.
+- [ ] **Lua tutorial for beginners** — a crescent-flavored intro to Lua targeting people who know at least one other language. Covers the gotchas (no `++`, `1`-indexed, `local` scoping, metatables), the LuaJIT-specific bits (FFI, `bit.*`), and the crescent conventions. Lives at `docs/lua-primer.md`.
 
 ## stretch goals (low priority, high reward)
 
