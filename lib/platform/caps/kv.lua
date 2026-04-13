@@ -2,13 +2,14 @@
 -- kv_cap(path, opts) -> capability table
 -- Lightweight persistent key-value store backed by SQLite.
 --
--- opts.allow: string[] of allowed key prefixes (nil = unrestricted)
+-- opts.allow:    string[] of allowed key prefixes (nil = unrestricted)
 --   Prefix match: if an entry ends with ".", it matches any key starting with it.
 --   Otherwise the entry is an exact match.
+-- opts.readonly: boolean — if true, set() always errors; get() still works.
 --
 -- Capability API (passed to sandbox as caps.kv):
 --   cap.get(key)         -> string | nil
---   cap.set(key, value)  -- value: string sets; nil deletes
+--   cap.set(key, value)  -- value: string sets; nil deletes (errors if readonly)
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -19,10 +20,11 @@ local sqlite = require("lib.sqlite")
 local M = {}
 
 -- kv_cap(path, opts?) -> {get, set}
---: string -> { allow: string[]? }? -> { get: (string) -> string?, set: (string, string?) -> nil }
+--: string -> { allow: string[]?, readonly: boolean? }? -> { get: (string) -> string?, set: (string, string?) -> nil }
 function M.kv_cap(path, opts)
 	opts = opts or {}
-	local allow = opts.allow  -- nil = unrestricted; string[] = allowlist
+	local allow    = opts.allow     -- nil = unrestricted; string[] = allowlist
+	local readonly = opts.readonly  -- boolean; if true, set() is forbidden
 
 	--: string -> nil
 	local function check_allow(key)
@@ -69,8 +71,11 @@ function M.kv_cap(path, opts)
 			return val
 		end,
 
-		-- set(key, value) -- value: string sets; nil deletes
+		-- set(key, value) -- value: string sets; nil deletes (errors if readonly)
 		set = function(key, value)
+			if readonly then
+				error("kv: readonly", 2)
+			end
 			check_allow(key)
 			if value == nil then
 				local ok2, err2 = stmt_del:exec(key)

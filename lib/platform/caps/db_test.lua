@@ -232,6 +232,74 @@ T.describe("db_cap: params binding", function()
 	end)
 end)
 
+-- ── readonly ─────────────────────────────────────────────────────────────────
+
+T.describe("db_cap: readonly", function()
+	-- Helper: create a file-based db with some data, close it, return the path.
+	local function seeded_db()
+		local path = os.tmpname()
+		local cap, err = db_mod.db_cap(path)
+		assert(cap, "seed db failed: " .. tostring(err))
+		cap.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
+		cap.exec("INSERT INTO t VALUES (1, 'hello')")
+		cap.close()
+		return path
+	end
+
+	T.it("query works in readonly mode", function()
+		local path = seeded_db()
+		local cap, err = db_mod.db_cap(path, { readonly = true })
+		T.ok(cap, err)
+		local rows, rerr = cap.query("SELECT val FROM t WHERE id = ?", { 1 })
+		T.ok(rows, rerr)
+		T.eq(#rows, 1)
+		T.eq(rows[1].val, "hello")
+		cap.close()
+		os.remove(path)
+	end)
+
+	T.it("exec (INSERT) fails in readonly mode", function()
+		local path = seeded_db()
+		local cap, err = db_mod.db_cap(path, { readonly = true })
+		T.ok(cap, err)
+		local ok, eerr = cap.exec("INSERT INTO t VALUES (2, 'nope')")
+		T.fail(ok)
+		T.ok(type(eerr) == "string")
+		cap.close()
+		os.remove(path)
+	end)
+
+	T.it("exec (CREATE TABLE) fails in readonly mode", function()
+		local path = seeded_db()
+		local cap, err = db_mod.db_cap(path, { readonly = true })
+		T.ok(cap, err)
+		local ok, eerr = cap.exec("CREATE TABLE t2 (x INTEGER)")
+		T.fail(ok)
+		T.ok(type(eerr) == "string")
+		cap.close()
+		os.remove(path)
+	end)
+
+	T.it("exec (DELETE) fails in readonly mode", function()
+		local path = seeded_db()
+		local cap, err = db_mod.db_cap(path, { readonly = true })
+		T.ok(cap, err)
+		local ok, eerr = cap.exec("DELETE FROM t WHERE id = 1")
+		T.fail(ok)
+		T.ok(type(eerr) == "string")
+		cap.close()
+		os.remove(path)
+	end)
+
+	T.it("opening nonexistent path readonly fails", function()
+		local path = os.tmpname()
+		os.remove(path)  -- ensure it doesn't exist
+		local cap, err = db_mod.db_cap(path, { readonly = true })
+		T.fail(cap)
+		T.ok(type(err) == "string")
+	end)
+end)
+
 -- ── multiple independent dbs ──────────────────────────────────────────────────
 
 T.describe("db_cap: multiple independent dbs", function()

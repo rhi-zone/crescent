@@ -1,6 +1,8 @@
 -- lib/platform/caps/db.lua
--- db_cap(path) -> capability table
+-- db_cap(path, opts?) -> capability table
 -- Opens (or creates) a SQLite database at path and exposes a safe API.
+--
+-- opts.readonly: boolean — open with SQLITE_OPEN_READONLY (writes fail at SQLite level)
 --
 -- Capability API (passed to sandbox as caps.db):
 --   cap.exec(sql)              -> true | nil, err
@@ -28,6 +30,7 @@ local ok_cdef = pcall(ffi.cdef, [[
 	typedef int64_t             sqlite3_int64;
 
 	int         sqlite3_open(const char *filename, sqlite3 **ppDb);
+	int         sqlite3_open_v2(const char *filename, sqlite3 **ppDb, int flags, const char *zVfs);
 	int         sqlite3_prepare_v2(sqlite3 *db, const char *zSql, int nByte,
 	                               sqlite3_stmt **ppStmt, const char **pzTail);
 	int         sqlite3_step(sqlite3_stmt *);
@@ -74,6 +77,10 @@ else
 end
 
 -- ── constants ─────────────────────────────────────────────────────────────────
+
+local SQLITE_OPEN_READONLY  = 0x00000001
+local SQLITE_OPEN_READWRITE = 0x00000002
+local SQLITE_OPEN_CREATE    = 0x00000004
 
 local SQLITE_ROW  = 100
 local SQLITE_DONE = 101
@@ -129,11 +136,20 @@ end
 
 -- ── constructor ───────────────────────────────────────────────────────────────
 
--- db_cap(path) -> cap | nil, err
+-- db_cap(path, opts?) -> cap | nil, err
 --   path: filesystem path passed to sqlite3_open; ":memory:" is valid.
-function M.db_cap(path)
+--   opts.readonly: boolean — open with SQLITE_OPEN_READONLY (no writes at SQLite level)
+function M.db_cap(path, opts)
+	opts = opts or {}
 	local db_ptr = ffi.new("sqlite3 *[1]")
-	if sqlite_ffi.sqlite3_open(path, db_ptr) ~= 0 then
+	local rc
+	if opts.readonly then
+		rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, SQLITE_OPEN_READONLY, nil)
+	else
+		rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr,
+			SQLITE_OPEN_READWRITE + SQLITE_OPEN_CREATE, nil)
+	end
+	if rc ~= 0 then
 		local msg = ffi.string(sqlite_ffi.sqlite3_errmsg(db_ptr[0]))
 		sqlite_ffi.sqlite3_close_v2(db_ptr[0])
 		return nil, "db_cap: open failed: " .. msg
