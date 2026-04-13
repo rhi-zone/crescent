@@ -109,8 +109,8 @@ host setup per app connection:
   5. hand connection to app
 ```
 
-The authorizer is a small native C shim loaded via FFI — zero LuaJIT callback
-overhead in the hot path.
+The authorizer callback is JIT-compiled via `lib/asm/` — zero LuaJIT trampoline
+overhead, no C dependency.
 
 Multiple db caps with different names if the app needs separate concerns:
 
