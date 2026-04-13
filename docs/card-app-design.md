@@ -118,6 +118,29 @@ caps.llm.call(messages)          -- { role, content }[] -> response string
 caps.llm.count_tokens(text)      -- -> integer (uses backend tokenizer endpoint)
 ```
 
+## Lorebook editor
+
+### Entry structure
+
+Each entry has:
+- **Name** — the entry's title
+- **Keywords** — trigger patterns (Aho-Corasick matched against recent messages)
+- **Content** — prose injected into context when triggered
+- **Meta** — open key-value object, same pattern as card manifest `meta`. Author-defined fields for search/filtering: topic, faction, location, character, etc. No fixed schema.
+- **Settings** — position, depth, order, probability, case sensitivity, sticky, constant, ignore budget (ST parity)
+
+### List view
+
+Entries shown with name + keywords visible at a glance. Sorted by order field by
+default; sortable by any metric (name, uid, enabled status, etc.). Projectional
+search over all fields including `meta` — same search paradigm as the card library,
+no separate search model to learn.
+
+### Entry detail view
+
+Full-screen on mobile. Content textarea, keyword chip input (tag-style), meta fields,
+settings in a collapsible section.
+
 ## Views (not yet designed)
 
 - **Card editor** — CCv2 fields, persona, scenario, system prompt
