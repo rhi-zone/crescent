@@ -32,10 +32,11 @@ local function item_widget(item_signal)
 
 	widget.subscribe_now(item_signal, function(item)
 		if not item then return end
-		name_el.textContent = item.metadata.name or item.id
+		local meta = item.metadata or {}
+		name_el.textContent = meta.name or item.id or ""
 
 		local parts = {}
-		for k, v in pairs(item.metadata) do
+		for k, v in pairs(meta) do
 			if k ~= "name" and type(v) == "string" then
 				parts[#parts + 1] = k .. ": " .. v
 			end
@@ -73,18 +74,21 @@ function M.create(opts)
 		if q == "" then return all end
 		local results = {}
 		for _, item in ipairs(all) do
+			local matched = false
 			-- Search id
-			if item.id:lower():find(q, 1, true) then
-				results[#results + 1] = item
-			else
-				-- Search metadata string values
+			if type(item.id) == "string" and item.id:lower():find(q, 1, true) then
+				matched = true
+			end
+			-- Search metadata string values
+			if not matched and item.metadata then
 				for _, v in pairs(item.metadata) do
 					if type(v) == "string" and v:lower():find(q, 1, true) then
-						results[#results + 1] = item
+						matched = true
 						break
 					end
 				end
 			end
+			if matched then results[#results + 1] = item end
 		end
 		return results
 	end, { search_query, items })
