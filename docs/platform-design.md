@@ -83,6 +83,39 @@ Push content to the render surface.
 caps.render.push(content)
 ```
 
+### `caps.db` — SQLite database handle (action cap)
+
+A pre-opened SQLite connection. The host decides which file to open
+(`~/.crescent/data/<app_id>/<name>.db`); the app never sees a path. If an app
+needs multiple databases it declares multiple db caps with different names:
+
+```json
+"caps": {
+  "conversations": { "type": "db", "required": true },
+  "cache":         { "type": "db", "required": false }
+}
+```
+
+The host constructs each handle and passes it in. The app uses it as a plain
+SQLite connection — creates its own tables, queries freely. Isolation is at the
+file level: each db cap is a separate file, so there is no cross-cap leakage.
+
+### `caps.kv` — key-value store (action cap)
+
+Lightweight persistent storage for small values: current position, per-app
+preferences, flags. The host allowlists which keys/prefixes the app may
+access; denied keys error immediately.
+
+```lua
+caps.kv.get(key)         -- returns string | nil
+caps.kv.set(key, value)  -- value must be string; nil deletes
+```
+
+This is the canonical mechanism for saved state — the app writes its current
+position here on every navigation; the host reads it on next launch and passes
+it back as a startup argument. Apps that only need to remember where they were
+get `caps.kv`, not a full db connection.
+
 ### `caps.fs` (optional) — file access (action cap)
 
 Granted only to explicitly trusted scripts. Scoped to a directory.
@@ -221,29 +254,32 @@ Users fork presets freely; the platform has no opinion about what they do next.
 
 ## Saved state pattern
 
-Not a library — a pattern that platform scripts implement on top of SQLite.
-
 The core idea: every meaningful state the platform can render is addressable and
-returnable. A card interaction session, the card library viewer, a specific branch in a
-chat tree, a world state snapshot — all are saved states you can return to. There is no
-distinction between "current app" and "saved state." The current session is itself a
-saved state; reboot restores it automatically.
+returnable. There is no distinction between "current app" and "saved state." The
+current session is itself a saved state; reboot restores it automatically.
 
-**Implementation.** A saved state is a SQLite row: a state reference (enough to
-reconstruct the view) plus open metadata. No fixed schema — each script decides what
-metadata makes sense. Tags, summaries, preview images, timestamps, relationships to
-other states — all just columns or a JSON blob. Organisation is queries, not folders.
+**Mechanism.** The app writes its current position to `caps.kv` on every navigation
+(e.g. `caps.kv.set("state", json.encode({ session_id = "...", branch_id = "..." })`).
+On next launch, the host reads this value and passes it back as a startup argument.
+The app interprets its own state — the platform stores it opaquely.
 
-**Everything navigable is a saved state.** The card library viewer script, the card
-editor, an interaction session, a chat tree branch — navigating between them is
-selecting a saved state. The platform's navigation model IS this pattern; there is no
-separate concept of "which app is open."
+**Multi-user.** The host is a server; multiple users access it over the network
+(Tailscale or similar). `user_id` is on all persistent data. `caps.kv` and `caps.db`
+are scoped per user per app — users never see each other's state.
 
-**When building the full app:** implement as a `saved_states` SQLite table with a
-`state_ref` column (JSON, script-defined schema), a `metadata` column (open JSON), and
-whatever indexed columns are needed for fast queries (type, created_at, tags). The
-current session row is always present and updated on every navigation. On reboot, load
-the most recent row and resume.
+**Data layout.** Each app gets a directory on the host:
+```
+~/.crescent/data/<user_id>/<app_id>/
+  kv.db          ← caps.kv backing store
+  conversations.db  ← caps.db("conversations"), if declared
+  cache.db          ← caps.db("cache"), if declared
+  ...
+```
+
+**Everything navigable is a saved state.** The card library viewer, the card editor,
+an interaction session, a chat tree branch — navigating between them is writing a new
+`state` key to `caps.kv`. Restore is reading it back. No platform concept of "which
+app is open" beyond this.
 
 ## Self-contained apps
 
