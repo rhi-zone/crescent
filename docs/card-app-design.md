@@ -39,12 +39,13 @@ Single-line text field that expands to a max height (~30% of viewport above
 keyboard) before scrolling internally. Three action buttons alongside it:
 
 - **Send** — sends the current input as a user message
-- **Continue** — continues the last assistant message via prefill (passes existing
-  message as assistant turn prefix). Only available when the active LLM supports
-  prefill; dimmed otherwise.
-- **Impersonate** — generates a user-side message using a configurable impersonate
-  prompt. Cannot use prefill (prompt is different). Prompt is configurable in card
-  settings, with a sensible default.
+- **Continue** *(hidden by default, configurable in settings)* — continues the last
+  assistant message via prefill (passes existing message as assistant turn prefix).
+  Only available when the active LLM supports prefill; dimmed otherwise.
+- **Impersonate** *(hidden by default, configurable in settings)* — generates a
+  user-side message using a configurable impersonate prompt. Cannot use prefill
+  (prompt is different). Prompt is configurable in card settings, with a sensible
+  default.
 
 No regenerate button — swipe left on the last assistant message to regenerate.
 
