@@ -10,6 +10,15 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/platform` — card loader + capability factories: `caps.png` (allowlist-gated chunk r/w), `caps.llm` (OpenAI-compatible HTTP), `caps.render` (SSE + collect sessions), `caps.fs` (scoped file I/O). 47 assertions.
 - [x] `lib/ecs` — SQLite-backed entity-component store, mutable world state for sandboxed scripts. 30 assertions.
 - [x] **Saved state pattern — redesign needed** — current design in `docs/platform-design.md` is a sketch (`saved_states` SQLite table, `state_ref` + `metadata` JSON columns). Needs a proper design pass: how does the platform own the schema vs. the script? How does state_ref interact with the conversation tree (`canonical_child_id`)? How does restore-on-reboot work with reactive caps? What does the save/load API look like from inside a sandboxed script? Write the redesign to `docs/platform-design.md` before implementing.
+- [x] `lib/platform/caps/kv` + `caps/db` readonly support — `opts.readonly` on kv (Lua-level block), `SQLITE_OPEN_READONLY` on db (9ca0489)
+- [x] `lib/formats/ccv2/macro` — ST-compatible macro substitution, 79 assertions (6a21487)
+- [x] `lib/formats/ccv2/lorebook` — lorebook format conversion + trigger engine, 116 assertions (6a21487)
+- [ ] `lib/formats/ccv2/card` — CCv2 card format parser (read/write PNG `chara` chunk JSON)
+- [ ] `shared_db` cap with SQLite authorizer + temp views (per-app isolation)
+- [ ] Context assembly engine — card app logic, vendors `lib/formats/ccv2/`, builds messages array from card fields + lorebook + history + token budget
+- [ ] Card app — first-party CCv2-compatible conversation app (dom entrypoint)
+- [ ] Library app — general-purpose collection browser with adapter interface (cards, Steam, itch, bookmarks)
+- [ ] CCv2 adapter apps — import (PNG/JSON → crescent tarball) and export (tarball → CCv2 PNG) as separate apps
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
