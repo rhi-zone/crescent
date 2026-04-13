@@ -11,6 +11,24 @@ An **app** is a gzipped tar archive containing a `manifest.json` and Lua source 
 It may be distributed as a raw `.tar.gz` or embedded in an image file (PNG, JPEG, WebP)
 for the "distributable as an image" use case. The image is optional decoration.
 
+**Apps vendor all their dependencies.** The tarball is fully self-contained — it runs
+on vanilla LuaJIT with nothing pre-installed. Every dependency the app needs (reactive,
+json, base64, format libs, etc.) is included as plain Lua source. A typical app with
+full UI + format parsing + all transitive deps is ~50KB gzipped.
+
+This is a feature, not a cost. A PNG that contains a complete, readable, modifiable
+application — every line auditable Lua source, no binaries, no build artifacts. You
+hand it to someone and they own it. That's crescent's vendorable philosophy as a
+single distributable artifact.
+
+Security comes from the capability sandbox, not from restricting what code ships in
+the tarball. The app only gets the caps it's explicitly granted — a modified `json.lua`
+can't exfiltrate data because the app has no network access unless granted `caps.llm`
+or similar. The sandbox is the security boundary, not the code review of bundled deps.
+
+In the monorepo, vendored deps are symlinks to the canonical sources (always in sync,
+zero duplication). `tar -h` dereferences them for distribution.
+
 The platform:
 1. Loads an app (unpacks the tarball, parses the manifest)
 2. Selects the appropriate entrypoint for the current host
