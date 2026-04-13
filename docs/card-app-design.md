@@ -137,12 +137,42 @@ Two lorebook formats exist in the wild — both must be supported:
 | `insertion_order` | `order` |
 | `case_sensitive` | `caseSensitive` |
 | `secondary_keys` | `keysecondary` |
+| `position: "before_char"` | `position: 0` |
+| `position: "after_char"` | `position: 1` |
 
-ST-specific fields (no CCv2 equivalent): `uid`, `selectiveLogic`, `vectorized`, `addMemo`, `position` (int), `ignoreBudget`, `excludeRecursion`, `preventRecursion`, `probability`, `useProbability`, `depth`, `scanDepth`, `group`, `groupOverride`, `groupWeight`, `useGroupScoring`, `role`, `sticky`, `cooldown`, `delay`, `triggers`, `displayIndex`, `characterFilter`, `automationId`, `matchWholeWords`, `match*` flags.
+**ST `position` integer values:**
+```
+0 = before          — before character definitions
+1 = after           — after character definitions
+2 = ANTop           — top of Author's Note
+3 = ANBottom        — bottom of Author's Note
+4 = atDepth         — injected at specific chat depth (uses `depth` + `role`)
+5 = EMTop           — top of Example Messages
+6 = EMBottom        — bottom of Example Messages
+7 = outlet          — named outlet injection (uses `outletName`)
+```
 
-When exporting back to CCv2, ST-specific fields are dropped; `extensions` is set to `{}`.
+**`selectiveLogic` values:**
+```
+0 = AND_ANY  — any secondary key triggers (default)
+1 = NOT_ALL  — triggers unless all secondary keys match
+2 = NOT_ANY  — triggers unless any secondary key matches
+3 = AND_ALL  — all secondary keys must match
+```
 
-Crescent uses ST format as the internal representation (richer, superset of CCv2). CCv2 lorebooks are converted on import.
+**`role` values (used when position = 4 / atDepth):**
+```
+0 = system
+1 = user
+2 = assistant
+```
+
+**Implementation notes:**
+- `selective: true` is now always set in ST (all entries are selective); `selectiveLogic` controls the behaviour.
+- ST-specific fields with no CCv2 equivalent: `uid`, `selectiveLogic`, `vectorized`, `addMemo`, `ignoreBudget`, `excludeRecursion`, `preventRecursion`, `probability`, `useProbability`, `depth`, `scanDepth`, `group`, `groupOverride`, `groupWeight`, `useGroupScoring`, `sticky`, `cooldown`, `delay`, `triggers`, `displayIndex`, `characterFilter`, `automationId`, `matchWholeWords`, `match*` flags.
+- When exporting to CCv2: ST-specific fields dropped, `extensions` set to `{}`, position integer → string.
+
+Crescent uses ST format as the internal representation. CCv2 lorebooks are converted on import.
 
 ### Entry structure
 
@@ -166,9 +196,51 @@ no separate search model to learn.
 Full-screen on mobile. Content textarea, keyword chip input (tag-style), meta fields,
 settings in a collapsible section.
 
+## CCv2 card format
+
+`spec: "chara_card_v2"`, `spec_version: "2.0"`, stored as base64 JSON in the PNG `chara` iTXt chunk.
+
+**V1 fields** (all strings, required):
+- `name`, `description`, `personality`, `scenario`, `first_mes`, `mes_example`
+
+**V2 additions:**
+- `creator_notes: string`
+- `system_prompt: string`
+- `post_history_instructions: string`
+- `alternate_greetings: string[]`
+- `character_book?: CharacterBook`
+- `tags: string[]`
+- `creator: string`
+- `character_version: string`
+- `extensions: object` — open record for ST extensions: `depth_prompt?`, `talkativeness?`, `fav?`, `world?`, `regex_scripts?`
+
+**`mes_example` format:** blocks separated by `<START>`. Each message prefixed with `{{char}}:` or `{{user}}:`.
+
+## Macro substitution
+
+ST uses `{{macroName}}` syntax. Substitution happens before sending to the LLM. Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced.
+
+**Character macros:**
+- `{{char}}` — character name
+- `{{user}}` — persona username
+- `{{description}}` / `{{charDescription}}` — `data.description`
+- `{{personality}}` / `{{charPersonality}}` — `data.personality`
+- `{{charScenario}}` — `data.scenario`
+- `{{charPrompt}}` — `data.system_prompt`
+- `{{charInstruction}}` — `data.post_history_instructions`
+- `{{mesExamples}}` / `{{mesExamplesRaw}}` — formatted/raw `mes_example`
+- `{{charDepthPrompt}}` — depth prompt content
+- `{{charCreatorNotes}}` — `data.creator_notes`
+- `{{charFirstMessage}}` — `data.first_mes`
+- `{{charVersion}}` — `data.character_version`
+- `{{persona}}` — user persona description
+
+**Time macros:** `{{time}}`, `{{date}}`, `{{weekday}}`, `{{isotime}}`, `{{isodate}}`, `{{datetimeformat <format>}}`
+
+**Chat macros:** `{{lastMessage}}`, `{{lastMessageId}}`, `{{lastUserMessage}}`, `{{lastCharMessage}}`, `{{firstIncludedMessageId}}`, `{{currentSwipeId}}`
+
 ## Views (not yet designed)
 
-- **Card editor** — CCv2 fields, persona, scenario, system prompt
-- **Lorebook editor** — keyword rules, insertion settings
+- **Card editor** — edit CCv2 fields (name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, alternate_greetings, creator_notes, tags)
 - **Settings** — LLM selection, impersonate prompt, generation params, context
-  composition ordering, lorebook budget %, pin_examples, UI prefs
+  composition ordering, lorebook budget %, pin_examples, show/hide continue+impersonate buttons, UI prefs
