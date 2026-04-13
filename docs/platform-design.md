@@ -337,6 +337,23 @@ The host reads the manifest, selects the entrypoint it needs, grants the declare
 (prompting the operator for approval if needed), and runs the entrypoint sandboxed.
 Shared code between entrypoints is just files in the tarball — `require` resolves
 against the tarball root via a custom loader injected into `package.loaders`.
+Host `lib.*` is always available as a fallback; the tarball loader runs first, so
+any file in the tarball shadows the equivalent host library if paths match.
+
+### Vendoring
+
+Apps should be as self-contained as possible. Pure logic the app owns
+(conversation tree, context assembly, format parsers) is vendored into the
+tarball. Ubiquitous host utilities (`lib.json`, `lib.base64`, `lib.sqlite`)
+can be required from the host — every crescent host ships them, and vendoring
+them adds size with no portability benefit.
+
+**Namespace convention.** The tarball root is the app's implicit namespace —
+`require("conversation")` resolves to `conversation.lua` at the tarball root.
+There is no enforced prefix. If you want `require("app.conversation")` for
+clarity, put the file at `app/conversation.lua` in the tarball. First-party
+apps use `app/` by convention. Someone reading the code sees the path and knows
+where to look.
 
 Sharing a card shares the exact scripts that produced it. No separate install step;
 the card is the complete application.
