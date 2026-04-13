@@ -61,14 +61,28 @@ end
 
 -- ── HTML bootstrap ────────────────────────────────────────────────────────────
 
+-- HTML bootstrap for transpiled Lua dom entries (lua2ts).
 --: string
-local HTML_SHELL = [[<!DOCTYPE html>
+local HTML_TRANSPILED = [[<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>crescent app</title></head>
 <body><script type="module">
 import { caps } from "/runtime.js";
 const app = await import("/app.js");
 if (app.default && app.default.init) await app.default.init(caps);
+</script></body>
+</html>]]
+
+-- HTML bootstrap for static JS entries (hand-written JS in static/).
+--: string
+local HTML_STATIC = [[<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>crescent app</title></head>
+<body><script type="module">
+import { caps } from "/runtime.js";
+const app = await import("/static/app.js");
+if (app.default) await app.default(caps);
+else if (app.init) await app.init(caps);
 </script></body>
 </html>]]
 
@@ -115,11 +129,22 @@ function M.new(app, caps, opts)
 	local entry_path = (type(entry_def) == "table" and entry_def.main) or
 	                   (type(entry_def) == "string" and entry_def) or nil
 
+	-- Detect serving strategy: static if entry path starts with "static/" or
+	-- if no dom entry but tarball has static/app.js or static/index.html.
+	local is_static = false
+	if entry_path and entry_path:sub(1, 7) == "static/" then
+		is_static = true
+	elseif not entry_path then
+		is_static = tar.get(app.entries, "static/app.js") ~= nil
+			or tar.get(app.entries, "static/index.html") ~= nil
+	end
+
 	local srv = setmetatable({
 		_app        = app,
 		_caps       = caps,
 		_entry_key  = entry_key,
 		_entry_path = entry_path,
+		_is_static  = is_static,
 		_js_cache   = nil,
 		_rt_cache   = nil,
 		_dispatch   = rpc.make_dispatcher(caps),
@@ -183,7 +208,15 @@ function Srv:handle(req)
 
 	-- GET /
 	if method == "GET" and path == "/" then
-		return make_res(200, "text/html; charset=utf-8", HTML_SHELL)
+		-- Static apps: check for static/index.html first (full custom HTML)
+		if self._is_static then
+			local custom_html = tar.get(self._app.entries, "static/index.html")
+			if custom_html then
+				return make_res(200, "text/html; charset=utf-8", custom_html)
+			end
+			return make_res(200, "text/html; charset=utf-8", HTML_STATIC)
+		end
+		return make_res(200, "text/html; charset=utf-8", HTML_TRANSPILED)
 	end
 
 	-- GET /app.js

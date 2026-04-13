@@ -542,31 +542,33 @@ is the inspector and tweaker.
 
 ## HTTP server wiring
 
-The `dom` entrypoint is Lua source. The HTTP server transpiles it to JS on first
-request via `lib/lua2ts`, caches the result in memory, and serves it statically.
-No build step, no `dist/` directory in the tarball.
+Apps have two serving strategies for the browser:
+
+**Static JS** — the app ships hand-written JS/HTML in `static/`. The server serves
+these files directly. All complex logic stays server-side in Lua, accessed via the
+RPC bridge. This is the right choice when the UI is simple and the logic is complex
+(card viewer: message list + input box + buttons, while context assembly / lorebook
+matching / macro expansion run server-side). No transpiler, no framework, no
+reactivity overhead. First-party apps should prefer this.
+
+**Transpiled Lua** — the app declares a `dom` entrypoint in Lua. The server
+transpiles it to JS via `lib/lua2ts` on first request and caches the result.
+This is for apps with complex shared logic between server and browser entries,
+where writing the same code twice is worse than the transpilation cost.
 
 ```
-GET /          → HTML bootstrap (imports /runtime.js, then /app.js, calls init(caps))
-GET /app.js    → lua2ts(dom_entrypoint_source), cached after first run
-GET /runtime.js → generated cap proxy module (introspected from caps table)
+GET /          → HTML bootstrap (loads /runtime.js for cap proxies, then app entry)
+GET /runtime.js → generated cap proxy ES module (introspected from caps table)
 GET /static/*  → files from the tarball by path
+GET /app.js    → lua2ts(dom_entrypoint_source), cached (only if dom entry exists)
 POST /api/cap  → RPC dispatch to server-side caps
 ```
 
-The HTML bootstrap loads the runtime module first (which provides async cap proxies),
-then the transpiled app, and calls `app.default.init(caps)` with top-level await.
+For static apps, the HTML bootstrap loads `static/index.html` or `static/app.js`
+directly. For transpiled apps, it loads `/app.js` (the lua2ts output). Both use
+`/runtime.js` for cap proxies.
 
-Dependencies (`lib/reactive`, `lib/widget`, `lib/web/reactive_dom`) are included in
-the lua2ts output — they are part of the tarball and transpiled together with the
-entrypoint.
-
-The cache invalidates on app reload (tarball changes). On first request there is a
-one-time transpilation cost; subsequent requests are instant.
-
-**Type checking browser-target code** requires `--:: require "lib.web.js_types"` at
-the top of browser-facing Lua files. The typechecker loads it as declarations; the
-runtime ignores it (it's a comment).
+The cache invalidates on app reload (tarball changes).
 
 ## Cap bridging (RPC)
 
@@ -615,10 +617,9 @@ if (err) { /* handle error */ }
 Cap-level restrictions (allowlists, readonly flags, authorizer callbacks) are
 enforced by the real cap objects — the RPC layer is a transparent proxy.
 
-**Async boundary**: cap calls are synchronous in Lua but async in the browser
-(fetch returns Promises). lua2ts must emit `async` functions and `await` cap
-calls. This is a lua2ts concern, not an RPC concern — the RPC protocol is the
-same regardless of how the transpiler handles async.
+**Async boundary**: static JS apps handle async naturally (fetch returns Promises,
+callers use `await`). Transpiled Lua apps need lua2ts to emit `async`/`await` —
+this is a lua2ts concern, not an RPC concern.
 
 **Not yet implemented**: streaming (SSE/WebSocket for `llm.call` token-by-token),
 reactive config signals (currently returns snapshot values, not live-updating
@@ -668,12 +669,13 @@ other card.
 
 Three distinct apps compose the first-party experience:
 
-**Card app** — the conversation/interaction app. Owns context assembly, macro
-substitution, lorebook triggering, LLM calls. Vendors `lib/formats/ccv2/` into its
-tarball for CCv2 format knowledge (macro expansion, lorebook format conversion,
-card field parsing). Internal views: conversation, card editor, lorebook editor,
-settings. Minor variation in macro support: simple cards inline `{{char}}`/`{{user}}`
-(3 lines); cards using extended macros vendor the full macro library.
+**Card app** — the conversation/interaction app. Uses the **static JS** serving
+strategy: the browser UI is hand-written vanilla JS (~100 lines for message list +
+input + buttons), while all complex logic runs server-side in Lua — context assembly,
+macro substitution, lorebook Aho-Corasick matching, token budgeting, LLM calls. The
+browser talks to the server exclusively via the RPC cap bridge. Vendors
+`lib/formats/ccv2/` into its tarball for CCv2 format knowledge. Internal views:
+conversation, card editor, lorebook editor, settings.
 
 **Library app** — a general-purpose collection browser, configurable to show any
 content type: character cards, Steam games, itch games, browser bookmarks, etc.

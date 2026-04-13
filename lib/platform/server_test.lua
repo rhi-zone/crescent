@@ -232,19 +232,112 @@ end)
 
 T.describe("platform.server HTML bootstrap", function()
 
-	T.it("references /runtime.js in bootstrap", function()
+	T.it("transpiled app: references /runtime.js and /app.js", function()
 		local srv = server.new(mock_app, mock_caps)
 		local res = srv:handle({ method = "GET", path = "/" })
 		T.eq(res.status, 200)
 		T.ok(res.body:find("/runtime.js", 1, true) ~= nil, "should reference /runtime.js")
+		T.ok(res.body:find("/app.js", 1, true) ~= nil, "should reference /app.js")
+		T.ok(res.body:find("init", 1, true) ~= nil, "should call init")
 	end)
 
-	T.it("imports caps from runtime and calls init", function()
+end)
+
+-- ── Static app serving ───────────────────────────────────────────────────────
+
+local static_app = {
+	path    = "static-test.tar.gz",
+	chunks  = nil,
+	entries = {
+		{ name = "manifest.json",   data = '{"name":"static-test","version":"0.1.0"}' },
+		{ name = "static/app.js",   data = 'export default function(caps) { console.log("hello"); }' },
+		{ name = "static/style.css", data = "body { margin: 0; }" },
+	},
+	manifest = {
+		name    = "static-test",
+		version = "0.1.0",
+	},
+}
+
+local static_app_with_html = {
+	path    = "static-html.tar.gz",
+	chunks  = nil,
+	entries = {
+		{ name = "manifest.json",      data = '{"name":"static-html","version":"0.1.0"}' },
+		{ name = "static/index.html",  data = '<!DOCTYPE html><html><body>custom</body></html>' },
+		{ name = "static/app.js",      data = 'console.log("hi");' },
+	},
+	manifest = {
+		name    = "static-html",
+		version = "0.1.0",
+	},
+}
+
+local static_app_explicit_entry = {
+	path    = "static-entry.tar.gz",
+	chunks  = nil,
+	entries = {
+		{ name = "manifest.json",   data = '{"name":"stest","version":"0.1.0","entry":{"dom":"static/app.js"}}' },
+		{ name = "static/app.js",   data = 'export default function(caps) {}' },
+	},
+	manifest = {
+		name    = "stest",
+		version = "0.1.0",
+		entry   = { dom = "static/app.js" },
+	},
+}
+
+T.describe("platform.server static apps", function()
+
+	T.it("detects static app when no dom entry but static/app.js exists", function()
+		local srv = server.new(static_app, mock_caps)
+		T.eq(srv._is_static, true)
+	end)
+
+	T.it("detects static app when entry path starts with static/", function()
+		local srv = server.new(static_app_explicit_entry, mock_caps)
+		T.eq(srv._is_static, true)
+	end)
+
+	T.it("transpiled app is not detected as static", function()
 		local srv = server.new(mock_app, mock_caps)
+		T.eq(srv._is_static, false)
+	end)
+
+	T.it("static app GET / returns bootstrap referencing /static/app.js", function()
+		local srv = server.new(static_app, mock_caps)
 		local res = srv:handle({ method = "GET", path = "/" })
-		T.ok(res.body:find("import", 1, true) ~= nil, "should use import")
-		T.ok(res.body:find("caps", 1, true) ~= nil, "should reference caps")
-		T.ok(res.body:find("init", 1, true) ~= nil, "should call init")
+		T.eq(res.status, 200)
+		T.ok(res.body:find("/static/app.js", 1, true) ~= nil, "should reference /static/app.js")
+		T.ok(res.body:find("/runtime.js", 1, true) ~= nil, "should still include runtime.js")
+	end)
+
+	T.it("static app with index.html serves custom HTML", function()
+		local srv = server.new(static_app_with_html, mock_caps)
+		local res = srv:handle({ method = "GET", path = "/" })
+		T.eq(res.status, 200)
+		T.ok(res.body:find("custom", 1, true) ~= nil, "should serve custom HTML")
+		-- Custom HTML means the app controls everything — no injected bootstrap
+		T.eq(res.body:find("/runtime.js", 1, true), nil, "custom HTML has no injected runtime")
+	end)
+
+	T.it("static app still serves /runtime.js", function()
+		local srv = server.new(static_app, mock_caps)
+		local res = srv:handle({ method = "GET", path = "/runtime.js" })
+		T.eq(res.status, 200)
+		T.ok(res.body:find("export const caps", 1, true) ~= nil)
+	end)
+
+	T.it("static app still handles POST /api/cap", function()
+		local srv = server.new(static_app, mock_caps)
+		local res = srv:handle({
+			method = "POST",
+			path = "/api/cap",
+			body = json.encode({ cap = "kv", method = "get", args = { "name" } }),
+		})
+		T.eq(res.status, 200)
+		local data = json.decode(res.body)
+		T.eq(data.result, "Alice")
 	end)
 
 end)

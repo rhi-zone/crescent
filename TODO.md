@@ -19,7 +19,9 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 111 assertions
 - [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
 - [x] Cap bridging / RPC — `lib/platform/rpc.lua` (server-side dispatcher) + `lib/platform/runtime.lua` (browser-side cap proxy generator). Server serves `POST /api/cap` and `GET /runtime.js`. 106 assertions across rpc_test, runtime_test, server_test.
-- [ ] lua2ts async support — transpile cap calls as `await`, propagate `async` up through callers. Required for browser-side caps to work end-to-end.
+- [ ] Card app static JS UI — rewrite browser entry as hand-written vanilla JS in `static/`. Replaces Lua dom.lua transpilation path. Logic stays server-side Lua via RPC cap bridge.
+- [ ] Server static entry support — when manifest has no `dom` entry (or entry points to `static/`), serve `static/index.html` as the bootstrap instead of transpiling Lua.
+- [ ] lua2ts async support — transpile cap calls as `await`, propagate `async` up through callers. Only needed for apps using transpiled Lua dom entries (not static JS apps).
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output. Currently only the entrypoint file is transpiled.
 - [ ] Streaming LLM responses — SSE or WebSocket for token-by-token `llm.call` output. Currently returns full response only.
 - [ ] Reactive config over RPC — config cap currently returns snapshot values, not live-updating signals. Needs WebSocket push or polling.
