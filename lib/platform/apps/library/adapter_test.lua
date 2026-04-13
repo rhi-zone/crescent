@@ -1,11 +1,11 @@
--- lib/apps/library/adapter_test.lua
+-- lib/platform/apps/library/adapter_test.lua
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
 local T = require("lib.test.assert")
-local adapter = require("lib.apps.library.adapter")
+local adapter = require("lib.platform.apps.library.adapter")
 
 -- ── Test data ────────────────────────────────────────────────────────────────
 

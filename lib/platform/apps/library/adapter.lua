@@ -1,4 +1,4 @@
--- lib/apps/library/adapter.lua
+-- lib/platform/apps/library/adapter.lua
 -- Adapter interface for the library browser.
 --
 -- An adapter is a table with:

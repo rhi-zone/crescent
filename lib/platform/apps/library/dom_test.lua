@@ -1,4 +1,4 @@
--- lib/apps/library/dom_test.lua
+-- lib/platform/apps/library/dom_test.lua
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -79,7 +79,7 @@ document = {
 }
 
 -- Now require DOM module (needs document global)
-local dom_lib = require("lib.apps.library.dom")
+local dom_lib = require("lib.platform.apps.library.dom")
 
 -- ── Helper ───────────────────────────────────────────────────────────────────
 
@@ -306,7 +306,7 @@ end)
 
 T.describe("dom + adapter integration", function()
 	T.it("loads items from adapter into app", function()
-		local adapter = require("lib.apps.library.adapter")
+		local adapter = require("lib.platform.apps.library.adapter")
 		local src = adapter.static(make_test_items())
 		local app = dom_lib.create()
 		app.set_items(src.list())
@@ -314,7 +314,7 @@ T.describe("dom + adapter integration", function()
 	end)
 
 	T.it("adapter search and app search produce consistent results", function()
-		local adapter = require("lib.apps.library.adapter")
+		local adapter = require("lib.platform.apps.library.adapter")
 		local items = make_test_items()
 		local src = adapter.static(items)
 		local app = dom_lib.create({ items = items })
@@ -331,7 +331,7 @@ T.describe("dom + adapter integration", function()
 	end)
 
 	T.it("composite adapter feeds into app", function()
-		local adapter = require("lib.apps.library.adapter")
+		local adapter = require("lib.platform.apps.library.adapter")
 		local src1 = adapter.static({
 			{ id = "a", metadata = { name = "Alpha" }, open = function() end },
 		})

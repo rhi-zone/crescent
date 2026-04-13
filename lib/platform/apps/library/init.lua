@@ -1,4 +1,4 @@
--- lib/apps/library/init.lua
+-- lib/platform/apps/library/init.lua
 -- Library app — a general-purpose collection browser with an adapter interface.
 --
 -- Re-exports the adapter and DOM modules.
@@ -9,7 +9,7 @@ end
 
 local M = {}
 
-M.adapter = require("lib.apps.library.adapter")
-M.dom = require("lib.apps.library.dom")
+M.adapter = require("lib.platform.apps.library.adapter")
+M.dom = require("lib.platform.apps.library.dom")
 
 return M

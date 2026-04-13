@@ -1,4 +1,4 @@
--- lib/apps/card/dom_test.lua
+-- lib/platform/apps/card/dom_test.lua
 -- Tests for the CCv2 Card App conversation view.
 --
 -- Uses a mock DOM (same pattern as reactive_dom_test.lua) and mock capabilities
@@ -93,7 +93,7 @@ mock_document.body = make_node(1, "body")
 document = mock_document --: any
 
 -- Now load the module (after document is set up)
-local card_dom = require("lib.apps.card.dom")
+local card_dom = require("lib.platform.apps.card.dom")
 local R = require("lib.reactive")
 local widget = require("lib.widget")
 
@@ -110,8 +110,8 @@ local function make_mock_caps(opts)
 		png = {
 			text = opts.png_text or function(keyword)
 				if keyword == "chara" then
-					-- Return a simple JSON card (not base64 for simplicity)
-					return '{"data":{"name":"Test Card","description":"You are a test character.","first_mes":"Hello!"}}'
+					-- Return CCv2 spec-compliant JSON (not base64 for simplicity)
+					return '{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"Test Card","description":"You are a test character.","first_mes":"Hello!","personality":"","scenario":"","mes_example":""}}'
 				end
 				return nil
 			end,
@@ -196,8 +196,8 @@ T.describe("card_dom.load_card", function()
 		local caps = make_mock_caps()
 		local card, err = card_dom.load_card(state, caps)
 		T.ok(card, "card loaded: " .. tostring(err))
-		T.eq(card.data.name, "Test Card")
-		T.eq(state.current_card.get().data.name, "Test Card")
+		T.eq(card.name, "Test Card")
+		T.eq(state.current_card.get().name, "Test Card")
 	end)
 
 	T.it("returns nil when no png capability", function()
@@ -222,7 +222,7 @@ T.describe("card_dom.build_context", function()
 	T.it("builds context with system prompt from card", function()
 		local state = card_dom.create_state()
 		state.current_card.set({
-			data = { description = "You are a test.", first_mes = "Hi!" },
+			name = "Test", description = "You are a test.", first_mes = "Hi!",
 		})
 		local ctx = card_dom.build_context(state)
 		T.eq(#ctx, 2) -- system + greeting (no messages yet)
@@ -235,7 +235,7 @@ T.describe("card_dom.build_context", function()
 	T.it("includes conversation history", function()
 		local state = card_dom.create_state()
 		state.current_card.set({
-			data = { description = "System prompt." },
+			name = "Test", description = "System prompt.",
 		})
 		card_dom.append_message(state, "user", "Hello")
 		card_dom.append_message(state, "assistant", "Hi there")
@@ -394,7 +394,7 @@ T.describe("card_dom.init", function()
 		-- Card should be loaded
 		local card = result.state.current_card.get()
 		T.ok(card, "card loaded")
-		T.eq(card.data.name, "Test Card")
+		T.eq(card.name, "Test Card")
 		-- Greeting should appear as first message
 		local msgs = result.state.messages.get()
 		T.eq(#msgs, 1)

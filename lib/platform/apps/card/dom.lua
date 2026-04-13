@@ -1,4 +1,4 @@
--- lib/apps/card/dom.lua
+-- lib/platform/apps/card/dom.lua
 -- CCv2 Card App — conversation view (dom entrypoint).
 --
 -- Runs in the browser after lua2ts transpilation. Uses reactive DOM to render
@@ -15,9 +15,10 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local R      = require("lib.reactive")
-local dom    = require("lib.web.reactive_dom")
-local widget = require("lib.widget")
+local R        = require("lib.reactive")
+local dom      = require("lib.web.reactive_dom")
+local widget   = require("lib.widget")
+local card_mod = require("lib.formats.ccv2.card")
 
 local M = {}
 
@@ -59,35 +60,23 @@ function M.load_card(state, caps)
 	if not caps or not caps.png then return nil, "no png capability" end
 	local raw = caps.png.text("chara")
 	if not raw then return nil, "no chara chunk" end
-	-- The chara chunk contains base64-encoded JSON.
-	-- In browser context, atob is available; in server context, use lib.base64.
-	-- For now, try to decode as JSON directly (some cards store plain JSON),
-	-- then fall back to base64 decode.
+	-- The chara chunk is base64-encoded CCv2 JSON.
+	-- Decode base64, then use card.from_json for normalization.
 	local json_str = raw
-	-- Try base64 decode if it looks base64-encoded (no leading '{')
 	if json_str:sub(1, 1) ~= "{" then
-		-- Use browser atob or lib.base64 depending on context
 		local ok, b64 = pcall(require, "lib.base64")
 		if ok and b64 then
 			local decoded, err = b64.decode(json_str)
-			if decoded then
-				json_str = decoded
-			else
-				return nil, "base64 decode failed: " .. tostring(err)
-			end
+			if not decoded then return nil, "base64 decode failed: " .. tostring(err) end
+			json_str = decoded
 		elseif type(atob) == "function" then
 			json_str = atob(json_str) --: string
 		else
 			return nil, "cannot decode base64: no decoder available"
 		end
 	end
-	local ok, json_mod = pcall(require, "lib.format.json")
-	if not ok then
-		ok, json_mod = pcall(require, "lib.json")
-	end
-	if not ok then return nil, "no JSON parser available" end
-	local parse_ok, card_data = pcall(json_mod.decode, json_str)
-	if not parse_ok then return nil, "JSON parse failed: " .. tostring(card_data) end
+	local card_data, err = card_mod.from_json(json_str)
+	if not card_data then return nil, err end
 	state.current_card.set(card_data)
 	return card_data
 end
@@ -102,15 +91,12 @@ function M.build_context(state)
 	local context = {}
 	-- System prompt from card
 	if card then
-		local system_text = card.data and card.data.description
-			or card.description
-			or ""
+		local system_text = card.description or ""
 		if #system_text > 0 then
 			context[#context + 1] = { role = "system", content = system_text }
 		end
 		-- First message / greeting
-		local first_msg = card.data and card.data.first_mes
-			or card.first_mes
+		local first_msg = card.first_mes
 		if first_msg and #first_msg > 0 and #msgs == 0 then
 			-- If no messages yet, the greeting is the assistant's opening
 			context[#context + 1] = { role = "assistant", content = first_msg }
@@ -324,7 +310,7 @@ function M.init(caps)
 	-- If card has a greeting and no messages yet, show it
 	local card = state.current_card.get()
 	if card then
-		local first_msg = card.data and card.data.first_mes or card.first_mes
+		local first_msg = card.first_mes
 		if first_msg and #first_msg > 0 then
 			M.append_message(state, "assistant", first_msg)
 		end

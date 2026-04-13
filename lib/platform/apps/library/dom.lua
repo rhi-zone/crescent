@@ -1,4 +1,4 @@
--- lib/apps/library/dom.lua
+-- lib/platform/apps/library/dom.lua
 -- Library browser UI — searchable grid of items from adapters.
 --
 -- Entry point for the DOM renderer. Expects a `document` global (browser or mock).
