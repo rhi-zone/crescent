@@ -85,20 +85,41 @@ caps.render.push(content)
 
 ### `caps.db` — SQLite database handle (action cap)
 
-A pre-opened SQLite connection. The host decides which file to open
-(`~/.crescent/data/<app_id>/<name>.db`); the app never sees a path. If an app
-needs multiple databases it declares multiple db caps with different names:
+A pre-opened SQLite connection. The app writes raw SQL — no structured query
+API. Two isolation tiers:
+
+**Per-app db files** (`"type": "db"`) — the host opens a file scoped to the
+app (`~/.crescent/data/<user_id>/<app_id>/<name>.db`). Isolation is at the
+file level. Use for app-private data (cache, local state).
+
+**Shared db with view isolation** (`"type": "shared_db"`) — the host opens a
+shared platform db (e.g. the conversations db), registers a SQLite authorizer
+that blocks direct access to underlying tables, then creates per-connection
+temp views pre-filtered to `app_id`. The app queries the views with full SQL
+expressiveness; the underlying tables are unreachable. The host (which owns the
+connection without an authorizer) can query across all apps for cross-card
+search.
+
+```
+host setup per app connection:
+  1. open shared.db
+  2. register authorizer → SQLITE_DENY for raw table access
+  3. CREATE TEMP VIEW sessions AS SELECT * FROM sessions WHERE app_id = '<id>'
+  4. CREATE TEMP VIEW messages AS SELECT * FROM messages WHERE app_id = '<id>'
+  5. hand connection to app
+```
+
+The authorizer is a small native C shim loaded via FFI — zero LuaJIT callback
+overhead in the hot path.
+
+Multiple db caps with different names if the app needs separate concerns:
 
 ```json
 "caps": {
-  "conversations": { "type": "db", "required": true },
-  "cache":         { "type": "db", "required": false }
+  "conversations": { "type": "shared_db", "required": true },
+  "cache":         { "type": "db",        "required": false }
 }
 ```
-
-The host constructs each handle and passes it in. The app uses it as a plain
-SQLite connection — creates its own tables, queries freely. Isolation is at the
-file level: each db cap is a separate file, so there is no cross-cap leakage.
 
 The optional `"readonly": true` flag opens the file with `SQLITE_OPEN_READONLY`.
 Use this when an app needs read access to a db it doesn't own — e.g. the shell
