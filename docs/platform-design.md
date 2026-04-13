@@ -29,6 +29,13 @@ the tarball. The app only gets the caps it's explicitly granted — a modified `
 can't exfiltrate data because the app has no network access unless granted `caps.llm`
 or similar. The sandbox is the security boundary, not the code review of bundled deps.
 
+Because the platform resolves `require` as tarball-first then host-fallback, vendored
+deps can be stripped from the tarball without breaking the app — it falls back to the
+host's version. This is rarely a concern: most users never modify the tarball, and
+those who strip vendored deps generally know what they're doing. The tradeoff is the
+same as any vendoring system: pinned (works as tested) vs floating (gets host fixes).
+Stable APIs minimize the risk of silent breakage.
+
 In the monorepo, vendored deps are symlinks to the canonical sources (always in sync,
 zero duplication). `tar -h` dereferences them for distribution.
 
