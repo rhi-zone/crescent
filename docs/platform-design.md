@@ -557,6 +557,43 @@ These ship alongside the platform as first-party scripts. They are not platform 
 They are replaceable, forkable, and auditable — and distributed the same way as any
 other card.
 
+### First-party apps
+
+Three distinct apps compose the first-party experience:
+
+**Card app** — the conversation/interaction app. Owns context assembly, macro
+substitution, lorebook triggering, LLM calls. Vendors `lib/formats/ccv2/` into its
+tarball for CCv2 format knowledge (macro expansion, lorebook format conversion,
+card field parsing). Internal views: conversation, card editor, lorebook editor,
+settings. Minor variation in macro support: simple cards inline `{{char}}`/`{{user}}`
+(3 lines); cards using extended macros vendor the full macro library.
+
+**Library app** — a general-purpose collection browser, configurable to show any
+content type: character cards, Steam games, itch games, browser bookmarks, etc.
+"Bookmarks" save the same app in different views — a character-focused bookmark
+shows character-specific filters; a game-focused bookmark shows game metadata.
+The library app has no format knowledge; it reads open metadata from adapters.
+
+**Adapter apps** — format-specific import/export as separate apps. CCv2 import
+reads a PNG/JSON card, extracts the `chara` chunk, and produces a crescent app
+tarball (stamping the card app's script + the card's data). CCv2 export reverses
+this — extracts card data and writes a standard CCv2 PNG. Import and export are
+separate apps because their capability requirements differ (`caps.fs` + `caps.png`
+for import; `caps.png` for export). Adapters vendor `lib/formats/ccv2/` for
+format parsing.
+
+### Vendoring format libraries
+
+Format knowledge (`lib/formats/ccv2/`) is vendored into app tarballs — not loaded
+from the host. This ensures the card's format parser travels with the card; sharing
+a card shares the exact code that produced it. Host-side `lib.*` utilities
+(`lib.json`, `lib.base64`, `lib.aho_corasick`) are available as fallback requires
+since every crescent host ships them.
+
+In the repo, format libraries live under `lib/formats/` for development and testing.
+At build time they're copied into the app tarball. The app's `require` sees the
+vendored copy first (tarball loader runs before host loader).
+
 The platform owns exactly two things:
 1. Run a script with the capabilities the host decides to grant
 2. Provide a render surface
