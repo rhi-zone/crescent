@@ -219,8 +219,11 @@ settings in a collapsible section.
 ## Macro substitution
 
 ST uses `{{macroName}}` syntax. Substitution happens before sending to the LLM.
-Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced. Full list from
-https://docs.sillytavern.app/usage/core-concepts/macros/ — 98 macros total:
+Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced.
+
+**Minimum viable implementation: `{{char}}` and `{{user}}` only.** Everything
+else is additive. Full list for reference (98 macros, source:
+https://docs.sillytavern.app/usage/core-concepts/macros/):
 
 **Names & participants:** `{{user}}`, `{{char}}`, `{{group}}`, `{{groupNotMuted}}`,
 `{{charIfNotGroup}}`, `{{notChar}}`
