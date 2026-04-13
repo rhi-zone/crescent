@@ -10,6 +10,9 @@ end
 
 local T = require("lib.test.assert")
 local base64 = require("lib.base64")
+local json = require("lib.format.json")
+local card_mod = require("lib.formats.ccv2.card")
+--:: require "lib.formats.ccv2.ccv2_types"
 
 -- ── Mock DOM ────────────────────────────────────────────────────────────────
 
@@ -98,6 +101,21 @@ local card_dom = require("lib.platform.apps.card.dom")
 local R = require("lib.reactive")
 local widget = require("lib.widget")
 
+-- ── Test card data ──────────────────────────────────────────────────────────
+
+--: CardData
+local test_card_data = {
+	name = "Test Card",
+	description = "You are a test character.",
+	first_mes = "Hello!",
+	personality = "",
+	scenario = "",
+	mes_example = "",
+}
+
+-- Encode as a proper CCv2 chara chunk: base64(json(envelope))
+local test_chara_chunk = base64.encode(assert(card_mod.to_json(test_card_data)))
+
 -- ── Mock capabilities ───────────────────────────────────────────────────────
 
 local function make_mock_caps(opts)
@@ -110,10 +128,7 @@ local function make_mock_caps(opts)
 		},
 		png = {
 			text = opts.png_text or function(keyword)
-				if keyword == "chara" then
-					-- Base64-encoded CCv2 JSON, matching the real PNG chara chunk format
-					return base64.encode('{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"Test Card","description":"You are a test character.","first_mes":"Hello!","personality":"","scenario":"","mes_example":""}}')
-				end
+				if keyword == "chara" then return test_chara_chunk end
 				return nil
 			end,
 		},

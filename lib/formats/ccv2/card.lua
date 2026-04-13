@@ -11,6 +11,8 @@ local base64 = require("lib.encode.base64")
 local json = require("lib.format.json")
 local png = require("lib.png")
 
+--:: require "lib.formats.ccv2.ccv2_types"
+
 local M = {}
 M._tier = "pure"
 
@@ -26,7 +28,7 @@ local V2_STRING_FIELDS = { "creator_notes", "system_prompt", "post_history_instr
 -- Fill all defaults for missing optional fields.
 -- ---------------------------------------------------------------------------
 
---: (table) -> table
+--: (CardData) -> CardData
 function M.normalize(data)
   local d = {}
   -- V1 fields (all strings, name required but normalize doesn't error)
@@ -57,7 +59,7 @@ end
 -- Detects V1 (flat, no "spec" field) vs V2 (has "spec" and "data").
 -- ---------------------------------------------------------------------------
 
---: (string) -> table | nil, string
+--: (string) -> CardData | nil, string
 function M.from_json(json_str)
   local obj, err = json.decode(json_str)
   if not obj then
@@ -87,7 +89,7 @@ end
 -- Serialize card data to JSON string wrapped in V2 envelope.
 -- ---------------------------------------------------------------------------
 
---: (table) -> string | nil, string
+--: (CardData) -> string | nil, string
 function M.to_json(data)
   local envelope = {
     spec = "chara_card_v2",
@@ -102,7 +104,7 @@ end
 -- Parse a CCv2 card from PNG bytes.
 -- ---------------------------------------------------------------------------
 
---: (string) -> table | nil, string
+--: (string) -> CardData | nil, string
 function M.from_png(png_bytes)
   local chunks, err = png.read(png_bytes)
   if not chunks then
@@ -157,7 +159,7 @@ end
 -- Write a card data table to PNG bytes.
 -- ---------------------------------------------------------------------------
 
---: (table, string?) -> string | nil, string
+--: (CardData, string?) -> string | nil, string
 function M.to_png(data, png_bytes)
   local json_str, j_err = M.to_json(data)
   if not json_str then
