@@ -1,5 +1,10 @@
 # Shell Design
 
+> **Status: early sketch.** The library view shape is roughed out but not fully
+> specced — adapter API, facet composition rules, grid/list item design, and
+> keyboard navigation all need a dedicated design pass before implementation.
+> The card app design takes priority.
+
 The shell is a first-party crescent app (tarball format, same as any card) that
 browses and launches other apps. It is not part of the platform — it's replaceable
 and forkable like any other app.
