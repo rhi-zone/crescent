@@ -275,8 +275,36 @@ Full macro reference (98 macros, source: https://docs.sillytavern.app/usage/core
 **Utility:** `{{newline}}`, `{{newline::count}}`, `{{space}}`, `{{space::count}}`,
 `{{noop}}`, `{{trim}}`, `{{reverse::text}}`, `{{input}}`, `{{banned::word}}`
 
+## Card editor
+
+Fields are laid out in **context assembly order** — the order they appear in the
+prompt sent to the model. The editor IS the context composition view; there is no
+separate "context composition" panel. Reordering fields in the editor reorders the
+context.
+
+Default order (matches default context assembly order):
+1. System prompt (`system_prompt`)
+2. Character description (`description`)
+3. Character personality (`personality`)
+4. Scenario (`scenario`)
+5. Post-history instructions (`post_history_instructions`)
+6. First message / alternate greetings (`first_mes`, `alternate_greetings`)
+7. Example messages (`mes_example`)
+8. Metadata (`name`, `creator`, `character_version`, `tags`, `creator_notes`)
+
+Most users never reorder — the default order is shown and is already correct.
+Users who customise see their actual configured order, not a separate panel.
+
+This layout is honest: what you see in the editor is what the model sees, in order.
+Other frontends (ST, chub, etc.) show fields in CCv2 spec order (a data format
+order) and maintain a separate context composition panel — disconnected from the
+editor. We don't.
+
+Each field is a textarea (or appropriate input for metadata fields). `{{char}}` and
+`{{user}}` macros render as styled inline chips while editing, expanding to raw text
+on focus (same pattern as Notion inline variables).
+
 ## Views (not yet designed)
 
-- **Card editor** — edit CCv2 fields (name, description, personality, scenario, first_mes, mes_example, system_prompt, post_history_instructions, alternate_greetings, creator_notes, tags)
-- **Settings** — LLM selection, impersonate prompt, generation params, context
-  composition ordering, lorebook budget %, pin_examples, show/hide continue+impersonate buttons, UI prefs
+- **Settings** — LLM selection, impersonate prompt, generation params,
+  lorebook budget %, pin_examples, show/hide continue+impersonate buttons, UI prefs
