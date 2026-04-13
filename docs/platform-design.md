@@ -11,15 +11,18 @@ An **app** is a gzipped tar archive containing a `manifest.json` and Lua source 
 It may be distributed as a raw `.tar.gz` or embedded in an image file (PNG, JPEG, WebP)
 for the "distributable as an image" use case. The image is optional decoration.
 
-**Apps vendor all their dependencies.** The tarball is fully self-contained — it runs
-on vanilla LuaJIT with nothing pre-installed. Every dependency the app needs (reactive,
-json, base64, format libs, etc.) is included as plain Lua source. A typical app with
-full UI + format parsing + all transitive deps is ~50KB gzipped.
+**Apps can vendor their dependencies.** If the tarball includes a dep, it's used. If
+not, the platform resolves `require` calls against the host's crescent installation.
+Users with a full crescent distribution can write lightweight apps that `require` host
+libs directly — no vendoring needed.
 
-This is a feature, not a cost. A PNG that contains a complete, readable, modifiable
-application — every line auditable Lua source, no binaries, no build artifacts. You
-hand it to someone and they own it. That's crescent's vendorable philosophy as a
-single distributable artifact.
+**First-party apps vendor everything.** Our own apps are fully self-contained — they
+run on vanilla LuaJIT with nothing pre-installed. Every dependency (reactive, json,
+base64, format libs, etc.) is included as plain Lua source. A typical app with full
+UI + format parsing + all transitive deps is ~50KB gzipped. This makes them viral:
+a PNG containing a complete, readable, modifiable application that anyone can run,
+read, and hack. That's crescent's vendorable philosophy as a single distributable
+artifact — and it's why we vendor even common libs into first-party apps.
 
 Security comes from the capability sandbox, not from restricting what code ships in
 the tarball. The app only gets the caps it's explicitly granted — a modified `json.lua`
