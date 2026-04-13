@@ -13,15 +13,18 @@
 -- Routes:
 --   GET /          -> minimal HTML bootstrap shell
 --   GET /app.js    -> transpiled dom entrypoint (lua2ts), cached until app reload
+--   GET /runtime.js -> browser-side cap proxy runtime (generated from caps table)
 --   GET /static/*  -> file from app.entries by path suffix
---   GET /api/*     -> stub; returns 404 (TODO: route to app request handlers)
+--   POST /api/cap  -> RPC dispatch to server-side caps
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local tar    = require("lib.tar")
-local lua2ts = require("lib.lua2ts")
+local tar     = require("lib.tar")
+local lua2ts  = require("lib.lua2ts")
+local rpc     = require("lib.platform.rpc")
+local runtime = require("lib.platform.runtime")
 
 local M = {}
 
@@ -62,7 +65,11 @@ end
 local HTML_SHELL = [[<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>crescent app</title></head>
-<body><script src="/app.js" type="module"></script></body>
+<body><script type="module">
+import { caps } from "/runtime.js";
+const app = await import("/app.js");
+if (app.default && app.default.init) await app.default.init(caps);
+</script></body>
 </html>]]
 
 -- ── Response constructors ─────────────────────────────────────────────────────
@@ -114,6 +121,8 @@ function M.new(app, caps, opts)
 		_entry_key  = entry_key,
 		_entry_path = entry_path,
 		_js_cache   = nil,
+		_rt_cache   = nil,
+		_dispatch   = rpc.make_dispatcher(caps),
 		_sock       = nil,
 	}, Srv)
 	--: platform_srv
@@ -186,6 +195,14 @@ function Srv:handle(req)
 		return make_res(200, "application/javascript", js)
 	end
 
+	-- GET /runtime.js — browser-side cap proxies
+	if method == "GET" and path == "/runtime.js" then
+		if not self._rt_cache then
+			self._rt_cache = runtime.generate(self._caps)
+		end
+		return make_res(200, "application/javascript", self._rt_cache)
+	end
+
 	-- GET /static/<path>
 	-- The URL /static/foo/bar.txt maps to tarball path "static/foo/bar.txt"
 	-- (the "static/" prefix is kept as part of the tarball key).
@@ -210,10 +227,16 @@ function Srv:handle(req)
 		return make_res(200, content_type_for(file_path), data)
 	end
 
-	-- GET /api/* — TODO: route to app request handlers (sandboxed)
-	-- Requires design of the app request handler protocol; stub for now.
+	-- POST /api/cap — RPC dispatch to server-side caps
+	if method == "POST" and path == "/api/cap" then
+		local body = req.body or ""
+		local status, resp_body = self._dispatch(body)
+		return make_res(status, "application/json", resp_body)
+	end
+
+	-- Other /api/* routes — reserved for future app request handlers
 	if string.sub(path, 1, 5) == "/api/" then
-		return make_err(404, "API routing not yet implemented")
+		return make_err(404, "Not Found")
 	end
 
 	return make_err(404, "Not Found")
@@ -223,6 +246,7 @@ end
 --: (platform_srv) -> ()
 function Srv:invalidate_cache()
 	self._js_cache = nil
+	self._rt_cache = nil
 end
 
 -- start(host, port) -> ok | nil, err

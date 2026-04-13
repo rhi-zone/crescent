@@ -16,8 +16,13 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/formats/ccv2/card` — CCv2 card format parser (read/write PNG `chara` chunk JSON), 80 assertions
 - [x] `shared_db` cap with SQLite authorizer + `_app_id()` custom function (per-app isolation), 51 assertions
 - [x] Context assembly engine — `lib/formats/ccv2/context`, builds messages array from card fields + lorebook + history + token budget, 60 assertions
-- [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 82 assertions
+- [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 111 assertions
 - [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
+- [x] Cap bridging / RPC — `lib/platform/rpc.lua` (server-side dispatcher) + `lib/platform/runtime.lua` (browser-side cap proxy generator). Server serves `POST /api/cap` and `GET /runtime.js`. 106 assertions across rpc_test, runtime_test, server_test.
+- [ ] lua2ts async support — transpile cap calls as `await`, propagate `async` up through callers. Required for browser-side caps to work end-to-end.
+- [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output. Currently only the entrypoint file is transpiled.
+- [ ] Streaming LLM responses — SSE or WebSocket for token-by-token `llm.call` output. Currently returns full response only.
+- [ ] Reactive config over RPC — config cap currently returns snapshot values, not live-updating signals. Needs WebSocket push or polling.
 - [ ] CCv2 adapter apps — import (PNG/JSON → crescent tarball) and export (tarball → CCv2 PNG) as separate apps
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 

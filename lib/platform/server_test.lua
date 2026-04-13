@@ -7,6 +7,7 @@ end
 
 local T      = require("lib.test.assert")
 local server = require("lib.platform.server")
+local json   = require("lib.json")
 
 -- ── Mock app ──────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ T.describe("platform.server", function()
 		T.eq(res.status, 400)
 	end)
 
-	T.it("GET /api/anything returns 404 (stub)", function()
+	T.it("GET /api/anything returns 404", function()
 		local srv = server.new(mock_app, {})
 		local res = srv:handle({ method = "GET", path = "/api/foo" })
 		T.eq(res.status, 404)
@@ -121,6 +122,129 @@ T.describe("platform.server", function()
 		local res2 = srv:handle({ method = "GET", path = "/app.js" })
 		T.eq(res2.status, 200)
 		T.eq(res1.body, res2.body, "re-transpiled result should be identical")
+	end)
+
+end)
+
+-- ── Mock caps for RPC tests ──────────────────────────────────────────────────
+
+local mock_caps = {
+	llm = {
+		call = function(messages)
+			if not messages or #messages == 0 then
+				return nil, "empty messages"
+			end
+			return "Hello from LLM"
+		end,
+	},
+	kv = {
+		get = function(key)
+			if key == "name" then return "Alice" end
+			return nil
+		end,
+		set = function() end,
+	},
+}
+
+-- ── RPC endpoint tests ───────────────────────────────────────────────────────
+
+T.describe("platform.server POST /api/cap", function()
+
+	T.it("dispatches a successful cap call", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({
+			method = "POST",
+			path = "/api/cap",
+			body = json.encode({ cap = "llm", method = "call", args = { { { role = "user", content = "hi" } } } }),
+		})
+		T.eq(res.status, 200)
+		T.ok(res.headers["Content-Type"]:find("json"), "should be JSON")
+		local data = json.decode(res.body)
+		T.eq(data.result, "Hello from LLM")
+	end)
+
+	T.it("returns error for nil+errmsg cap return", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({
+			method = "POST",
+			path = "/api/cap",
+			body = json.encode({ cap = "llm", method = "call", args = { {} } }),
+		})
+		T.eq(res.status, 200)
+		local data = json.decode(res.body)
+		T.eq(data.error, "empty messages")
+	end)
+
+	T.it("returns 404 for unknown cap", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({
+			method = "POST",
+			path = "/api/cap",
+			body = json.encode({ cap = "nosuch", method = "call" }),
+		})
+		T.eq(res.status, 404)
+	end)
+
+	T.it("returns 400 for invalid JSON body", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({
+			method = "POST",
+			path = "/api/cap",
+			body = "not json",
+		})
+		T.eq(res.status, 400)
+	end)
+
+end)
+
+-- ── Runtime endpoint tests ───────────────────────────────────────────────────
+
+T.describe("platform.server GET /runtime.js", function()
+
+	T.it("returns JavaScript with cap proxies", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({ method = "GET", path = "/runtime.js" })
+		T.eq(res.status, 200)
+		T.ok(res.headers["Content-Type"]:find("javascript"), "Content-Type should be JS")
+		T.ok(res.body:find("export const caps", 1, true) ~= nil, "should export caps")
+		T.ok(res.body:find("llm:", 1, true) ~= nil, "should include llm cap")
+		T.ok(res.body:find("kv:", 1, true) ~= nil, "should include kv cap")
+	end)
+
+	T.it("caches the result", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res1 = srv:handle({ method = "GET", path = "/runtime.js" })
+		local res2 = srv:handle({ method = "GET", path = "/runtime.js" })
+		T.eq(res1.body, res2.body, "should return cached result")
+	end)
+
+	T.it("invalidate_cache clears runtime cache", function()
+		local srv = server.new(mock_app, mock_caps)
+		srv:handle({ method = "GET", path = "/runtime.js" })
+		T.ok(srv._rt_cache ~= nil, "cache should be set")
+		srv:invalidate_cache()
+		T.ok(srv._rt_cache == nil, "cache should be nil after invalidation")
+	end)
+
+end)
+
+-- ── HTML bootstrap tests ─────────────────────────────────────────────────────
+
+T.describe("platform.server HTML bootstrap", function()
+
+	T.it("references /runtime.js in bootstrap", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({ method = "GET", path = "/" })
+		T.eq(res.status, 200)
+		T.ok(res.body:find("/runtime.js", 1, true) ~= nil, "should reference /runtime.js")
+	end)
+
+	T.it("imports caps from runtime and calls init", function()
+		local srv = server.new(mock_app, mock_caps)
+		local res = srv:handle({ method = "GET", path = "/" })
+		T.ok(res.body:find("import", 1, true) ~= nil, "should use import")
+		T.ok(res.body:find("caps", 1, true) ~= nil, "should reference caps")
+		T.ok(res.body:find("init", 1, true) ~= nil, "should call init")
 	end)
 
 end)

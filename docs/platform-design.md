@@ -547,16 +547,19 @@ request via `lib/lua2ts`, caches the result in memory, and serves it statically.
 No build step, no `dist/` directory in the tarball.
 
 ```
-GET /          → minimal HTML bootstrap shell (inline string, no file)
+GET /          → HTML bootstrap (imports /runtime.js, then /app.js, calls init(caps))
 GET /app.js    → lua2ts(dom_entrypoint_source), cached after first run
+GET /runtime.js → generated cap proxy module (introspected from caps table)
 GET /static/*  → files from the tarball by path
-GET /api/*     → routed to app request handlers (Lua, sandboxed)
+POST /api/cap  → RPC dispatch to server-side caps
 ```
 
-The HTML bootstrap is ~5 lines: `<!DOCTYPE html>` + `<script src="/app.js">`. The JS
-bootstraps the reactive DOM from there. Dependencies (`lib/reactive`, `lib/widget`,
-`lib/web/reactive_dom`) are included in the lua2ts output — they are part of the
-tarball and transpiled together with the entrypoint.
+The HTML bootstrap loads the runtime module first (which provides async cap proxies),
+then the transpiled app, and calls `app.default.init(caps)` with top-level await.
+
+Dependencies (`lib/reactive`, `lib/widget`, `lib/web/reactive_dom`) are included in
+the lua2ts output — they are part of the tarball and transpiled together with the
+entrypoint.
 
 The cache invalidates on app reload (tarball changes). On first request there is a
 one-time transpilation cost; subsequent requests are instant.
@@ -564,6 +567,62 @@ one-time transpilation cost; subsequent requests are instant.
 **Type checking browser-target code** requires `--:: require "lib.web.js_types"` at
 the top of browser-facing Lua files. The typechecker loads it as declarations; the
 runtime ignores it (it's a comment).
+
+## Cap bridging (RPC)
+
+Browser-side code cannot call caps directly (they do HTTP, SQLite, file I/O on the
+server). The platform bridges this gap via HTTP RPC.
+
+**Server side** (`lib/platform/rpc.lua`): `rpc.make_dispatcher(caps)` returns a
+function that accepts a JSON request body and dispatches to the real cap objects:
+
+```
+Request:  { "cap": "llm", "method": "call", "args": [messages] }
+Response: { "result": value }    — success (value may be null)
+          { "error": "message" } — cap returned nil,err or threw
+```
+
+The Lua `(nil, errmsg)` convention maps directly: if the cap function returns
+`nil, "some error"`, the response is `{"error": "some error"}` with HTTP 200
+(the call executed, the cap reported failure). Throws map to HTTP 500.
+
+**Browser side** (`lib/platform/runtime.lua`): `runtime.generate(caps)` introspects
+the caps table and generates an ES module exporting async cap proxies:
+
+```js
+// Generated — each method calls POST /api/cap via fetch()
+export const caps = {
+  llm: {
+    call: (...args) => rpc('llm', 'call', args),  // returns Promise<[result, error?]>
+  },
+  kv: {
+    get: (...args) => rpc('kv', 'get', args),
+    set: (...args) => rpc('kv', 'set', args),
+  },
+};
+```
+
+**Browser-side return convention**: `[result, error?]`. On success, `error` is
+undefined. On failure, `result` is null and `error` is the error string. This
+mirrors the Lua multi-return pattern and maps cleanly to destructuring:
+
+```js
+const [response, err] = await caps.llm.call(messages);
+if (err) { /* handle error */ }
+```
+
+**Security**: the RPC dispatcher only exposes caps that the server was given.
+Cap-level restrictions (allowlists, readonly flags, authorizer callbacks) are
+enforced by the real cap objects — the RPC layer is a transparent proxy.
+
+**Async boundary**: cap calls are synchronous in Lua but async in the browser
+(fetch returns Promises). lua2ts must emit `async` functions and `await` cap
+calls. This is a lua2ts concern, not an RPC concern — the RPC protocol is the
+same regardless of how the transpiler handles async.
+
+**Not yet implemented**: streaming (SSE/WebSocket for `llm.call` token-by-token),
+reactive config signals (currently returns snapshot values, not live-updating
+signals). Both are future enhancements on top of the same RPC endpoint.
 
 ## UI design principles
 
