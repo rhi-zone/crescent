@@ -13,7 +13,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/platform/caps/kv` + `caps/db` readonly support — `opts.readonly` on kv (Lua-level block), `SQLITE_OPEN_READONLY` on db (9ca0489)
 - [x] `lib/formats/ccv2/macro` — ST-compatible macro substitution, 79 assertions (6a21487)
 - [x] `lib/formats/ccv2/lorebook` — lorebook format conversion + trigger engine, 116 assertions (6a21487)
-- [ ] `lib/formats/ccv2/card` — CCv2 card format parser (read/write PNG `chara` chunk JSON)
+- [x] `lib/formats/ccv2/card` — CCv2 card format parser (read/write PNG `chara` chunk JSON), 80 assertions
 - [x] `shared_db` cap with SQLite authorizer + `_app_id()` custom function (per-app isolation), 51 assertions
 - [ ] Context assembly engine — card app logic, vendors `lib/formats/ccv2/`, builds messages array from card fields + lorebook + history + token budget
 - [ ] Card app — first-party CCv2-compatible conversation app (dom entrypoint)
