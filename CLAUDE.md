@@ -71,6 +71,8 @@ cd docs && bun dev           # Local docs
 
 **Do the work properly.** Don't leave workarounds or hacks undocumented. When asked to analyze X, actually read X — don't synthesize from conversation.
 
+**Don't invent answers confidently.** During design discussions, the failure mode is stating invented things as if they're obvious — "use a C shim", "minimum viable macro set", "library the script requires" — and forcing the user to correct them one by one. If you don't know the right answer, say so. If you're uncertain, say so. A wrong confident answer is worse than no answer because it wastes the user's time and erodes trust. Think before suggesting; if thinking doesn't produce a good answer, ask instead of guessing.
+
 ## Library Conventions
 
 See `docs/conventions.md` for the full spec. Short version:
