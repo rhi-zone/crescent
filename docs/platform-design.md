@@ -36,9 +36,11 @@ those who strip vendored deps generally know what they're doing. The tradeoff is
 same as any vendoring system: pinned (works as tested) vs floating (gets host fixes).
 Stable APIs minimize the risk of silent breakage.
 
-Vendored deps live under `lib/` inside the tarball, mirroring crescent's require paths.
-A `require("lib.reactive")` resolves to `lib/reactive/init.lua` inside the tarball.
-The app's own code lives at the tarball root alongside `manifest.json`.
+Our first-party apps vendor deps under `lib/` inside the tarball, mirroring crescent's
+require paths. A `require("lib.reactive")` resolves to `lib/reactive/init.lua` inside
+the tarball. The app's own code lives at the tarball root alongside `manifest.json`.
+Third-party apps can use any layout — the platform just adds the tarball root to
+`package.path`.
 
 ```
 manifest.json
