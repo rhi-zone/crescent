@@ -120,14 +120,39 @@ caps.llm.count_tokens(text)      -- -> integer (uses backend tokenizer endpoint)
 
 ## Lorebook editor
 
+### Format compatibility
+
+Two lorebook formats exist in the wild — both must be supported:
+
+**CCv2 (`CharacterBook`)** — embedded in the card's `chara` PNG chunk alongside character data. Simple format: `entries[]` array, each entry has `keys[]`, `content`, `enabled`, `insertion_order`, `selective?`, `secondary_keys?`, `constant?`, `position?` ("before_char"/"after_char"), `case_sensitive?`, `priority?`. Detected by presence of `extensions` field on the book object.
+
+**ST lorebook** — standalone `.json` file. `entries` is a string-keyed object (`{"0": {...}, "1": {...}}`). Richer format with many ST-specific fields beyond CCv2. Detected by absence of `extensions` field.
+
+**Field mapping (CCv2 → ST):**
+
+| CCv2 | ST |
+|---|---|
+| `keys` | `key` |
+| `!enabled` | `disable` |
+| `insertion_order` | `order` |
+| `case_sensitive` | `caseSensitive` |
+| `secondary_keys` | `keysecondary` |
+
+ST-specific fields (no CCv2 equivalent): `uid`, `selectiveLogic`, `vectorized`, `addMemo`, `position` (int), `ignoreBudget`, `excludeRecursion`, `preventRecursion`, `probability`, `useProbability`, `depth`, `scanDepth`, `group`, `groupOverride`, `groupWeight`, `useGroupScoring`, `role`, `sticky`, `cooldown`, `delay`, `triggers`, `displayIndex`, `characterFilter`, `automationId`, `matchWholeWords`, `match*` flags.
+
+When exporting back to CCv2, ST-specific fields are dropped; `extensions` is set to `{}`.
+
+Crescent uses ST format as the internal representation (richer, superset of CCv2). CCv2 lorebooks are converted on import.
+
 ### Entry structure
 
 Each entry has:
-- **Name** — the entry's title
-- **Keywords** — trigger patterns (Aho-Corasick matched against recent messages)
+- **Name** (`comment`) — the entry's title
+- **Keywords** (`key[]`) — primary trigger patterns; supports regex (e.g. `/pattern/i`)
+- **Secondary keywords** (`keysecondary[]`) + `selectiveLogic` (AND/NOT/AND NOT)
 - **Content** — prose injected into context when triggered
-- **Meta** — open key-value object, same pattern as card manifest `meta`. Author-defined fields for search/filtering: topic, faction, location, character, etc. No fixed schema.
-- **Settings** — position, depth, order, probability, case sensitivity, sticky, constant, ignore budget (ST parity)
+- **Meta** — open key-value object for search/filtering (not in ST format — stored in crescent's extended format, dropped on CCv2 export)
+- **Settings** — all ST fields: position, depth, order, probability, sticky, cooldown, constant, ignoreBudget, role, group, characterFilter, etc.
 
 ### List view
 
