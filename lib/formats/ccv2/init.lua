@@ -13,6 +13,7 @@ end
 local M = {}
 
 M.card     = require("lib.formats.ccv2.card")
+M.context  = require("lib.formats.ccv2.context")
 M.macro    = require("lib.formats.ccv2.macro")
 M.lorebook = require("lib.formats.ccv2.lorebook")
 
