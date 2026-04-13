@@ -223,9 +223,9 @@ Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced.
 
 **Most cards only need `{{char}}` and `{{user}}` — implement those inline (3 lines),
 don't vendor the full macro library.** Only include the full library if the card
-actually uses the extended macro set. Legacy angle-bracket syntax and case-insensitive
-matching are similarly optional — include only if needed for compatibility with
-specific imported cards.
+actually uses the extended macro set. Legacy angle-bracket syntax (`<CHAR>`, `<USER>`, `<BOT>`) and case-insensitive
+matching are also simple enough to inline — add them to the same 3-line substitution
+if the card needs them, no separate library required.
 
 Full macro reference (98 macros, source: https://docs.sillytavern.app/usage/core-concepts/macros/):
 
