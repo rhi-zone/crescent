@@ -1,5 +1,5 @@
--- lib/platform/conversation.lua
--- SQLite-backed conversation tree for crescent platform.
+-- lib/conversation/init.lua
+-- SQLite-backed conversation tree. Vendor this file into your app tarball.
 --
 -- Conversations are trees: each message has an optional parent. Every node
 -- tracks which child was last followed (canonical_child_id), so following
@@ -8,7 +8,7 @@
 -- canonical_child_id to an existing sibling without inserting.
 --
 -- API:
---   local conv = require("lib.platform.conversation")
+--   local conv = require("conversation")  -- or wherever you vendor it
 --
 --   local db, err = conv.open(path)
 --

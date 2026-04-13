@@ -1,12 +1,12 @@
--- lib/platform/conversation_test.lua
--- Tests for lib/platform/conversation.lua
+-- lib/conversation/conversation_test.lua
+-- Tests for lib/conversation/init.lua
 
 if not package.path:find("?/init.lua", 1, true) then
 	package.path = package.path .. ";./?/init.lua"
 end
 
 local T    = require("lib.test.assert")
-local conv = require("lib.platform.conversation")
+local conv = require("lib.conversation")
 
 -- Use an in-memory SQLite database for tests.
 local DB_PATH = ":memory:"
