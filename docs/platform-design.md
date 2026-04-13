@@ -100,6 +100,19 @@ The host constructs each handle and passes it in. The app uses it as a plain
 SQLite connection — creates its own tables, queries freely. Isolation is at the
 file level: each db cap is a separate file, so there is no cross-cap leakage.
 
+The optional `"readonly": true` flag opens the file with `SQLITE_OPEN_READONLY`.
+Use this when an app needs read access to a db it doesn't own — e.g. the shell
+app reading the platform's metadata db:
+
+```json
+"caps": {
+  "library": { "type": "db", "required": true, "readonly": true }
+}
+```
+
+The same `readonly` flag applies to `caps.fs` — the host opens the scoped
+directory read-only, write attempts error immediately.
+
 ### `caps.kv` — key-value store (action cap)
 
 Lightweight persistent storage for small values: current position, per-app
@@ -352,9 +365,10 @@ runtime.
 
 - Top-level `caps` declares caps shared across all entrypoints (e.g. `db` above).
 - Per-entrypoint `caps` declares additional caps specific to that entrypoint.
-- Each cap has a `type` (the capability kind the host must provide) and `required`
+- Each cap has a `type` (the capability kind the host must provide), `required`
   (if `false`, the cap may be absent — the script receives `nil` for that slot and
-  must handle it).
+  must handle it), and an optional `readonly` flag (if `true`, the host opens the
+  resource read-only — writes error immediately).
 - Cap names are the keys the script uses to access them (e.g. `caps.llm_main`).
   Multiple caps of the same type are supported — names disambiguate them.
 
