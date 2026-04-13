@@ -540,43 +540,12 @@ text search box or flat tag list. The query widget lets users compose conditions
 input ("blonde D cup") is the primary construction mechanism; the projectional view
 is the inspector and tweaker.
 
-## HTTP server wiring
-
-Apps have two serving strategies for the browser:
-
-**Static JS** — the app ships hand-written JS/HTML in `static/`. The server serves
-these files directly. All complex logic stays server-side in Lua, accessed via the
-RPC bridge. This is the right choice when the UI is simple and the logic is complex
-(card viewer: message list + input box + buttons, while context assembly / lorebook
-matching / macro expansion run server-side). No transpiler, no framework, no
-reactivity overhead. First-party apps should prefer this.
-
-**Transpiled Lua** — the app declares a `dom` entrypoint in Lua. The server
-transpiles it to JS via `lib/lua2ts` on first request and caches the result.
-This is for apps with complex shared logic between server and browser entries,
-where writing the same code twice is worse than the transpilation cost.
-
-```
-GET /          → HTML bootstrap (loads /runtime.js for cap proxies, then app entry)
-GET /runtime.js → generated cap proxy ES module (introspected from caps table)
-GET /static/*  → files from the tarball by path
-GET /app.js    → lua2ts(dom_entrypoint_source), cached (only if dom entry exists)
-POST /api/cap  → RPC dispatch to server-side caps
-```
-
-For static apps, the HTML bootstrap loads `static/index.html` or `static/app.js`
-directly. For transpiled apps, it loads `/app.js` (the lua2ts output). Both use
-`/runtime.js` for cap proxies.
-
-The cache invalidates on app reload (tarball changes).
-
 ## Cap bridging (RPC)
 
 Browser-side code cannot call caps directly (they do HTTP, SQLite, file I/O on the
-server). The platform bridges this gap via HTTP RPC.
-
-**Server side** (`lib/platform/rpc.lua`): `rpc.make_dispatcher(caps)` returns a
-function that accepts a JSON request body and dispatches to the real cap objects:
+host). `lib/platform/rpc.lua` bridges this: `rpc.make_dispatcher(caps)` takes a
+caps table and returns a pure function `dispatch(json_body) -> status, json_body`
+that routes requests to the real cap objects.
 
 ```
 Request:  { "cap": "llm", "method": "call", "args": [messages] }
@@ -588,42 +557,28 @@ The Lua `(nil, errmsg)` convention maps directly: if the cap function returns
 `nil, "some error"`, the response is `{"error": "some error"}` with HTTP 200
 (the call executed, the cap reported failure). Throws map to HTTP 500.
 
-**Browser side** (`lib/platform/runtime.lua`): `runtime.generate(caps)` introspects
-the caps table and generates an ES module exporting async cap proxies:
+**The RPC module is not a server.** It's a pure dispatch function. How you expose
+it (HTTP endpoint, WebSocket message handler, IPC, inline function call in a test)
+is your concern. Wire it into whatever server you're already using.
 
-```js
-// Generated — each method calls POST /api/cap via fetch()
-export const caps = {
-  llm: {
-    call: (...args) => rpc('llm', 'call', args),  // returns Promise<[result, error?]>
-  },
-  kv: {
-    get: (...args) => rpc('kv', 'get', args),
-    set: (...args) => rpc('kv', 'set', args),
-  },
-};
-```
-
-**Browser-side return convention**: `[result, error?]`. On success, `error` is
-undefined. On failure, `result` is null and `error` is the error string. This
-mirrors the Lua multi-return pattern and maps cleanly to destructuring:
-
-```js
-const [response, err] = await caps.llm.call(messages);
-if (err) { /* handle error */ }
-```
-
-**Security**: the RPC dispatcher only exposes caps that the server was given.
+**Security**: the dispatcher only exposes caps in the table it was given.
 Cap-level restrictions (allowlists, readonly flags, authorizer callbacks) are
 enforced by the real cap objects — the RPC layer is a transparent proxy.
 
-**Async boundary**: static JS apps handle async naturally (fetch returns Promises,
-callers use `await`). Transpiled Lua apps need lua2ts to emit `async`/`await` —
-this is a lua2ts concern, not an RPC concern.
+**Browser-side convention**: a cap call returns `[result, error?]`. On success,
+`error` is undefined. On failure, `result` is null and `error` is the error
+string. This mirrors the Lua multi-return pattern:
 
-**Not yet implemented**: streaming (SSE/WebSocket for `llm.call` token-by-token),
-reactive config signals (currently returns snapshot values, not live-updating
-signals). Both are future enhancements on top of the same RPC endpoint.
+```js
+const [response, err] = await rpc("llm", "call", [messages]);
+if (err) { /* handle error */ }
+```
+
+The browser-side fetch wrapper is ~15 lines of JS — write it yourself or copy it
+from `lib/crescent_examples/`. It is not a generated artifact.
+
+**Not yet implemented**: streaming (SSE/WebSocket for token-by-token LLM output),
+reactive config push (currently returns snapshots, not live signals).
 
 ## UI design principles
 
@@ -669,13 +624,11 @@ other card.
 
 Three distinct apps compose the first-party experience:
 
-**Card app** — the conversation/interaction app. Uses the **static JS** serving
-strategy: the browser UI is hand-written vanilla JS (~100 lines for message list +
-input + buttons), while all complex logic runs server-side in Lua — context assembly,
-macro substitution, lorebook Aho-Corasick matching, token budgeting, LLM calls. The
-browser talks to the server exclusively via the RPC cap bridge. Vendors
-`lib/formats/ccv2/` into its tarball for CCv2 format knowledge. Internal views:
-conversation, card editor, lorebook editor, settings.
+**Card app** — the conversation/interaction app. Owns context assembly, macro
+substitution, lorebook triggering, LLM calls. Vendors `lib/formats/ccv2/` into its
+tarball for CCv2 format knowledge (macro expansion, lorebook format conversion,
+card field parsing). Internal views: conversation, card editor, lorebook editor,
+settings.
 
 **Library app** — a general-purpose collection browser, configurable to show any
 content type: character cards, Steam games, itch games, browser bookmarks, etc.
