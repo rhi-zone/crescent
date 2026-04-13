@@ -540,45 +540,12 @@ text search box or flat tag list. The query widget lets users compose conditions
 input ("blonde D cup") is the primary construction mechanism; the projectional view
 is the inspector and tweaker.
 
-## Cap bridging (RPC)
+## Remote cap access
 
-Browser-side code cannot call caps directly (they do HTTP, SQLite, file I/O on the
-host). `lib/platform/rpc.lua` bridges this: `rpc.make_dispatcher(caps)` takes a
-caps table and returns a pure function `dispatch(json_body) -> status, json_body`
-that routes requests to the real cap objects.
-
-```
-Request:  { "cap": "llm", "method": "call", "args": [messages] }
-Response: { "result": value }    — success (value may be null)
-          { "error": "message" } — cap returned nil,err or threw
-```
-
-The Lua `(nil, errmsg)` convention maps directly: if the cap function returns
-`nil, "some error"`, the response is `{"error": "some error"}` with HTTP 200
-(the call executed, the cap reported failure). Throws map to HTTP 500.
-
-**The RPC module is not a server.** It's a pure dispatch function. How you expose
-it (HTTP endpoint, WebSocket message handler, IPC, inline function call in a test)
-is your concern. Wire it into whatever server you're already using.
-
-**Security**: the dispatcher only exposes caps in the table it was given.
-Cap-level restrictions (allowlists, readonly flags, authorizer callbacks) are
-enforced by the real cap objects — the RPC layer is a transparent proxy.
-
-**Browser-side convention**: a cap call returns `[result, error?]`. On success,
-`error` is undefined. On failure, `result` is null and `error` is the error
-string. This mirrors the Lua multi-return pattern:
-
-```js
-const [response, err] = await rpc("llm", "call", [messages]);
-if (err) { /* handle error */ }
-```
-
-The browser-side fetch wrapper is ~15 lines of JS — write it yourself or copy it
-from `lib/crescent_examples/`. It is not a generated artifact.
-
-**Not yet implemented**: streaming (SSE/WebSocket for token-by-token LLM output),
-reactive config push (currently returns snapshots, not live signals).
+Caps are Lua tables with functions. If the caller is in the same process, call the
+function. If the caller is remote (browser, CLI, another service), expose whatever
+HTTP/WebSocket/IPC endpoint you want — that's application code, not platform code.
+`lib/platform/` provides cap factories; it does not dictate how they are served.
 
 ## UI design principles
 

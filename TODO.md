@@ -18,10 +18,10 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Context assembly engine — `lib/formats/ccv2/context`, builds messages array from card fields + lorebook + history + token budget, 60 assertions
 - [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 111 assertions
 - [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
-- [x] Cap RPC dispatcher — `lib/platform/rpc.lua`, pure function: `dispatch(json_body) -> status, json_body`. 43 assertions. Not a server — wire it into whatever HTTP handler you want.
+- [ ] Card app static JS UI — rewrite browser entry as hand-written vanilla JS. Logic stays server-side Lua, browser is just a thin UI.
+- [ ] Streaming LLM responses — SSE or WebSocket for token-by-token `llm.call` output
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
-- [ ] Streaming LLM responses — SSE or WebSocket for token-by-token `llm.call` output.
 - [ ] CCv2 adapter apps — import (PNG/JSON → crescent tarball) and export (tarball → CCv2 PNG) as separate apps
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
