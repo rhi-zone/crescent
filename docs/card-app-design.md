@@ -64,8 +64,63 @@ checkpoint concept — the tree IS the history.
 Stored in a `shared_db` cap (see platform-design.md) so cross-card conversation
 search works from the shell.
 
+## Context assembly
+
+The card script owns context assembly entirely — it builds the messages array and
+calls `caps.llm.call(messages)`. The platform has no opinion about what goes in the
+context.
+
+### Block ordering
+
+User-reorderable (stored in `caps.config`). Default order (matching ST):
+
+1. System prompt (`main`)
+2. Lorebook "before" entries
+3. User persona
+4. Character description
+5. Character personality
+6. Scenario
+7. Lorebook "after" entries
+8. Dialogue examples
+9. Chat history
+10. Post-history system prompt ("jailbreak")
+
+Extension injections (author's note, summary, etc.) are inserted at absolute
+positions within the chat history at a specified depth.
+
+### Token budget
+
+`max_context - max_response_tokens`. The card declares both; `caps.llm` exposes
+`count_tokens(text)` backed by the backend's tokenizer endpoint.
+
+### Trimming strategy (ST parity)
+
+- **Fixed blocks** (system prompt, persona, description, scenario) — always included,
+  consume budget unconditionally. No trimming.
+- **Lorebook** — has its own percentage budget (default 25% of `max_context`). Entries
+  are processed in priority order (sticky first, then by `order` field descending).
+  Once budget overflows, new entries are skipped unless marked `ignoreBudget`.
+- **Dialogue examples** — dropped as whole blocks when over budget. `pin_examples`
+  option guarantees them at the cost of fewer history messages.
+- **Chat history** — the only section truly trimmed. Newest-to-oldest iteration;
+  oldest messages drop first when budget runs out.
+
+### Lorebook scanning
+
+Aho-Corasick (NFA) over all keywords — build the automaton once, scan recent
+messages in a single pass. Scan depth (how many recent messages to check) is
+user-configurable.
+
+### `caps.llm` API
+
+```lua
+caps.llm.call(messages)          -- { role, content }[] -> response string
+caps.llm.count_tokens(text)      -- -> integer (uses backend tokenizer endpoint)
+```
+
 ## Views (not yet designed)
 
 - **Card editor** — CCv2 fields, persona, scenario, system prompt
 - **Lorebook editor** — keyword rules, insertion settings
-- **Settings** — LLM selection, impersonate prompt, generation params, UI prefs
+- **Settings** — LLM selection, impersonate prompt, generation params, context
+  composition ordering, lorebook budget %, pin_examples, UI prefs
