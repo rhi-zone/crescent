@@ -9,6 +9,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local T = require("lib.test.assert")
+local base64 = require("lib.base64")
 
 -- ── Mock DOM ────────────────────────────────────────────────────────────────
 
@@ -110,8 +111,8 @@ local function make_mock_caps(opts)
 		png = {
 			text = opts.png_text or function(keyword)
 				if keyword == "chara" then
-					-- Return CCv2 spec-compliant JSON (not base64 for simplicity)
-					return '{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"Test Card","description":"You are a test character.","first_mes":"Hello!","personality":"","scenario":"","mes_example":""}}'
+					-- Base64-encoded CCv2 JSON, matching the real PNG chara chunk format
+					return base64.encode('{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"Test Card","description":"You are a test character.","first_mes":"Hello!","personality":"","scenario":"","mes_example":""}}')
 				end
 				return nil
 			end,
