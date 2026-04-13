@@ -1,0 +1,15 @@
+-- lib/apps/library/init.lua
+-- Library app — a general-purpose collection browser with an adapter interface.
+--
+-- Re-exports the adapter and DOM modules.
+
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
+
+local M = {}
+
+M.adapter = require("lib.apps.library.adapter")
+M.dom = require("lib.apps.library.dom")
+
+return M

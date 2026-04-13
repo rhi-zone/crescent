@@ -16,8 +16,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/formats/ccv2/card` — CCv2 card format parser (read/write PNG `chara` chunk JSON), 80 assertions
 - [x] `shared_db` cap with SQLite authorizer + `_app_id()` custom function (per-app isolation), 51 assertions
 - [x] Context assembly engine — `lib/formats/ccv2/context`, builds messages array from card fields + lorebook + history + token budget, 60 assertions
-- [ ] Card app — first-party CCv2-compatible conversation app (dom entrypoint)
-- [ ] Library app — general-purpose collection browser with adapter interface (cards, Steam, itch, bookmarks)
+- [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 82 assertions
+- [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
 - [ ] CCv2 adapter apps — import (PNG/JSON → crescent tarball) and export (tarball → CCv2 PNG) as separate apps
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 

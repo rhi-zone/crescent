@@ -1,0 +1,15 @@
+{
+  "name": "Library",
+  "version": "0.1.0",
+  "meta": { "type": "library-app" },
+  "entry": {
+    "dom": {
+      "main": "dom.lua",
+      "caps": {
+        "db": { "type": "db", "required": false, "readonly": true },
+        "kv": { "type": "kv", "required": false },
+        "config": { "type": "config", "required": false }
+      }
+    }
+  }
+}
