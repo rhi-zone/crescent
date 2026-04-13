@@ -36,6 +36,24 @@ those who strip vendored deps generally know what they're doing. The tradeoff is
 same as any vendoring system: pinned (works as tested) vs floating (gets host fixes).
 Stable APIs minimize the risk of silent breakage.
 
+Vendored deps live under `lib/` inside the tarball, mirroring crescent's require paths.
+A `require("lib.reactive")` resolves to `lib/reactive/init.lua` inside the tarball.
+The app's own code lives at the tarball root alongside `manifest.json`.
+
+```
+manifest.json
+dom.lua                         ← app code (tarball root)
+lib/                            ← vendored deps
+  reactive/init.lua
+  formats/ccv2/card.lua
+  format/json/init.lua
+  ...
+```
+
+The platform's require loader searches the tarball root first, then falls back to the
+host's crescent installation. This means `require("dom")` finds the app's own module,
+`require("lib.reactive")` finds the vendored copy (or the host's if stripped).
+
 In the monorepo, vendored deps are symlinks to the canonical sources (always in sync,
 zero duplication). `tar -h` dereferences them for distribution.
 
