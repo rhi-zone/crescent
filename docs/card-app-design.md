@@ -218,10 +218,16 @@ settings in a collapsible section.
 
 ## Macro substitution
 
-ST uses `{{macroName}}` syntax. Substitution happens before sending to the LLM.
+ST uses `{{macroName}}` syntax (case-insensitive: `{{Char}}`, `{{CHAR}}` all work).
 Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced.
 
-Full list (98 macros, source: https://docs.sillytavern.app/usage/core-concepts/macros/):
+**Most cards only need `{{char}}` and `{{user}}` — implement those inline (3 lines),
+don't vendor the full macro library.** Only include the full library if the card
+actually uses the extended macro set. Legacy angle-bracket syntax and case-insensitive
+matching are similarly optional — include only if needed for compatibility with
+specific imported cards.
+
+Full macro reference (98 macros, source: https://docs.sillytavern.app/usage/core-concepts/macros/):
 
 **Names & participants:** `{{user}}`, `{{char}}`, `{{group}}`, `{{groupNotMuted}}`,
 `{{charIfNotGroup}}`, `{{notChar}}`
