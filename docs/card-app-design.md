@@ -218,26 +218,55 @@ settings in a collapsible section.
 
 ## Macro substitution
 
-ST uses `{{macroName}}` syntax. Substitution happens before sending to the LLM. Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced.
+ST uses `{{macroName}}` syntax. Substitution happens before sending to the LLM.
+Legacy aliases `<USER>`, `<BOT>`, `<CHAR>` also replaced. Full list from
+https://docs.sillytavern.app/usage/core-concepts/macros/ — 98 macros total:
 
-**Character macros:**
-- `{{char}}` — character name
-- `{{user}}` — persona username
-- `{{description}}` / `{{charDescription}}` — `data.description`
-- `{{personality}}` / `{{charPersonality}}` — `data.personality`
-- `{{charScenario}}` — `data.scenario`
-- `{{charPrompt}}` — `data.system_prompt`
-- `{{charInstruction}}` — `data.post_history_instructions`
-- `{{mesExamples}}` / `{{mesExamplesRaw}}` — formatted/raw `mes_example`
-- `{{charDepthPrompt}}` — depth prompt content
-- `{{charCreatorNotes}}` — `data.creator_notes`
-- `{{charFirstMessage}}` — `data.first_mes`
-- `{{charVersion}}` — `data.character_version`
-- `{{persona}}` — user persona description
+**Names & participants:** `{{user}}`, `{{char}}`, `{{group}}`, `{{groupNotMuted}}`,
+`{{charIfNotGroup}}`, `{{notChar}}`
 
-**Time macros:** `{{time}}`, `{{date}}`, `{{weekday}}`, `{{isotime}}`, `{{isodate}}`, `{{datetimeformat <format>}}`
+**Character card & persona:** `{{description}}`, `{{personality}}`, `{{scenario}}`,
+`{{persona}}`, `{{charPrompt}}`, `{{charInstruction}}`, `{{charDepthPrompt}}`,
+`{{charCreatorNotes}}`, `{{charVersion}}`, `{{mesExamples}}`, `{{mesExamplesRaw}}`,
+`{{charFirstMessage}}`, `{{original}}`
 
-**Chat macros:** `{{lastMessage}}`, `{{lastMessageId}}`, `{{lastUserMessage}}`, `{{lastCharMessage}}`, `{{firstIncludedMessageId}}`, `{{currentSwipeId}}`
+**Chat history:** `{{lastMessage}}`, `{{lastMessageId}}`, `{{lastUserMessage}}`,
+`{{lastCharMessage}}`, `{{firstIncludedMessageId}}`, `{{firstDisplayedMessageId}}`,
+`{{lastSwipeId}}`, `{{currentSwipeId}}`, `{{allChatRange}}`, `{{summary}}`
+
+**Time & date:** `{{time}}`, `{{time::UTC±offset}}`, `{{date}}`, `{{weekday}}`,
+`{{isotime}}`, `{{isodate}}`, `{{datetimeformat::format}}`, `{{idleDuration}}`,
+`{{timeDiff::left::right}}`
+
+**Variables (local):** `{{getvar::name}}`, `{{setvar::name::value}}`,
+`{{addvar::name::value}}`, `{{incvar::name}}`, `{{decvar::name}}`,
+`{{hasvar::name}}`, `{{deletevar::name}}`
+
+**Variables (global):** `{{getglobalvar::name}}`, `{{setglobalvar::name::value}}`,
+`{{addglobalvar::name::value}}`, `{{incglobalvar::name}}`, `{{decglobalvar::name}}`,
+`{{hasglobalvar::name}}`, `{{deleteglobalvar::name}}`
+
+**Randomization:** `{{random::a::b::c}}` (re-rolls each time),
+`{{pick::a::b::c}}` (stable per chat/position), `{{roll::1d20}}`
+
+**Runtime state:** `{{maxPrompt}}`, `{{maxContextTokens}}`, `{{maxResponseTokens}}`,
+`{{model}}`, `{{isMobile}}`, `{{lastGenerationType}}`, `{{hasExtension::name}}`
+
+**Prompt templates:** `{{systemPrompt}}`, `{{defaultSystemPrompt}}`,
+`{{authorsNote}}`, `{{charAuthorsNote}}`, `{{defaultAuthorsNote}}`,
+`{{instructUserPrefix}}`, `{{instructAssistantPrefix}}`, `{{instructSystemPrefix}}`,
+`{{instructSeparator}}`, `{{instructStop}}`, `{{instructUserFiller}}`,
+`{{instructFirstAssistantPrefix}}`, `{{instructLastAssistantPrefix}}`,
+`{{instructFirstUserPrefix}}`, `{{instructLastUserPrefix}}`,
+`{{instructStoryStringPrefix}}`, `{{instructStoryStringSuffix}}`,
+`{{instructSystemInstructionPrefix}}`, `{{instructAssistantSuffix}}`,
+`{{instructUserSuffix}}`, `{{instructSystemSuffix}}`,
+`{{chatSeparator}}`, `{{chatStart}}`,
+`{{reasoningPrefix}}`, `{{reasoningSuffix}}`, `{{reasoningSeparator}}`,
+`{{charPrefix}}`, `{{charNegativePrefix}}`, `{{outlet::key}}`
+
+**Utility:** `{{newline}}`, `{{newline::count}}`, `{{space}}`, `{{space::count}}`,
+`{{noop}}`, `{{trim}}`, `{{reverse::text}}`, `{{input}}`, `{{banned::word}}`
 
 ## Views (not yet designed)
 
