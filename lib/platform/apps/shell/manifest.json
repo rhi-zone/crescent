@@ -1,0 +1,14 @@
+{
+  "name": "Shell",
+  "version": "0.1.0",
+  "meta": { "type": "shell" },
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "fs": { "type": "fs", "required": true, "root": "~/.crescent/cards" },
+        "config": { "type": "config", "required": false }
+      }
+    }
+  }
+}
