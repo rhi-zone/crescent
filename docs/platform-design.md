@@ -83,27 +83,34 @@ Capabilities are plain Lua tables passed into the sandbox. The platform owns the
 implementations; the script receives exactly what it's granted. Caps are primitives —
 they do one thing. Apps compose them into higher-level behavior.
 
-### Permissions and granularity
+### Permissions model
 
-Every cap goes through a permissions dialog. The app manifest declares what it wants;
-the platform presents each request to the operator for approval. The operator can
-approve, deny, or narrow individual scopes — not just whole caps.
+Every cap goes through a permissions dialog. The operator **grants or denies** each
+named cap independently — no partial grants, no narrowing. The app's manifest
+declaration *is* the scope; the operator either trusts it or doesn't.
 
-Each cap type has its own granularity axes:
+**Granularity via multiple named caps.** An app that needs two HTTP endpoints declares
+two separate `http_client` caps. The operator can grant one and deny the other:
 
-| Cap | Granularity |
-|-----|-------------|
-| `self` | per-chunk keyword, per-entry path/glob, read vs read/write |
-| `http_client` | per-domain, per-method (GET/POST/...), per-path prefix |
-| `http_server` | per-path prefix the app can handle |
-| `kv` | per-key prefix, read vs read/write |
-| `db` | per-table, read/write/create (or authorizer-based view isolation for shared_db) |
-| `fs` | per-directory, read vs read/write |
-| `time` | granted or not (no sub-granularity) |
-| `config` | per-key, read vs read/write |
+```json
+"caps": {
+  "llm_api":    { "type": "http_client", "host": "api.openai.com", "required": true },
+  "analytics":  { "type": "http_client", "host": "telemetry.example.com", "required": false }
+}
+```
 
-The manifest declares the maximum scope the app needs. The operator's grant can be
-a subset. The app receives a cap scoped to whatever was actually approved.
+The app receives `caps.llm_api` and `caps.analytics` as separate tables. If the
+operator denies `analytics`, the app gets nil for that cap and degrades gracefully.
+
+**Split along degradation boundaries.** The app author decides where to split. Each
+optional cap requires dedicated handling — a nil check *and* a fallback path. This
+is real code, not free, so authors are incentivized to split only where it matters.
+The granularity is self-regulating: too many optional caps = too many fallback paths
+to maintain; too few = the operator can't selectively deny.
+
+**Required vs optional.** `"required": true` means the app won't launch without it.
+`"required": false` means the app handles absence. The platform refuses to run the
+app if any required cap is denied.
 
 ### Revocation
 
@@ -130,23 +137,38 @@ The app must handle revocation the same way it handles an optional cap being abs
 check for nil/error returns. Apps that don't handle it will error, which is correct
 behavior for a revoked capability.
 
+### Example manifest
+
+```json
+{
+  "name": "CCv2 Card",
+  "caps": {
+    "self":        { "type": "self",        "required": true },
+    "server":      { "type": "http_server", "required": true },
+    "llm_api":     { "type": "http_client", "host": "api.openai.com", "required": true },
+    "local_llm":   { "type": "http_client", "host": "localhost:11434", "required": false },
+    "conversations": { "type": "db",        "required": true },
+    "settings":    { "type": "kv",          "required": false },
+    "clock":       { "type": "time",        "required": true }
+  }
+}
+```
+
 ### Example grant
 
 ```lua
-sandbox.run(script, sandbox.env(
-  sandbox.stdlib,
-  { globals = { caps = {
-    self        = self_cap(app),
-    http_server = http_server_cap({ port = 7860 }),
-    http_client = http_client_cap({ allow = {
-      { host = "api.openai.com", methods = {"POST"}, path = "/v1/" },
-      { host = "localhost:11434" },
-    }}),
-    kv          = kv_cap(kv_path, { allow = {"settings", "state.", "lorebook"} }),
-    db          = db_cap(db_path, { tables = {"sessions", "messages"}, readonly = false }),
-    time        = time_cap(),
-  }}}
-))
+-- Platform reads manifest, presents permissions dialog to operator.
+-- Operator grants all except "local_llm". Platform constructs caps:
+local caps, revoke_fns = {}, {}
+caps.self, revoke_fns.self               = self_cap(app)
+caps.server, revoke_fns.server           = http_server_cap({ port = 7860 })
+caps.llm_api, revoke_fns.llm_api        = http_client_cap({ host = "api.openai.com" })
+-- caps.local_llm = nil (denied)
+caps.conversations, revoke_fns.conversations = db_cap(db_path)
+caps.settings, revoke_fns.settings       = kv_cap(kv_path)
+caps.clock, revoke_fns.clock             = time_cap()
+
+sandbox.run(script, sandbox.env(sandbox.stdlib, { globals = { caps = caps } }))
 ```
 
 ### `caps.self` — app package access
@@ -264,11 +286,6 @@ caps.time()  -- returns Unix timestamp (integer)
 ### `caps.fs` (optional) — file access
 
 Scoped to a directory. Per-directory read/write granularity.
-
-### `caps.config` (optional) — user-level config
-
-Exposes user-owned configuration: UI preferences, global presets, global
-lorebooks, theme. Scoped to a user config directory (`~/.crescent/` by default).
 
 ## Sandbox security
 
