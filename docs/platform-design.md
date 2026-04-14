@@ -77,6 +77,38 @@ The platform:
 
 The platform has no opinion about what the script does. The script is the program.
 
+## Launching apps
+
+```
+luajit platform.lua <app> [entrypoint] [-- args...]
+```
+
+`<app>` is a path to anything the platform can extract — directory, PNG, JPEG, WebP,
+tarball, tar.gz. The platform figures out the format and unpacks accordingly.
+
+`[entrypoint]` selects which entrypoint from the manifest to run (e.g. `server`,
+`headless`). If omitted, the platform must error — there is no default entrypoint.
+
+`[-- args...]` are passed through to the app's `cli` cap (if granted). Everything
+after `--` is the app's business; the platform doesn't interpret it.
+
+There are no app-specific CLI flags. The platform doesn't know or care what the app
+needs for configuration. App config is the app's problem — it reads settings through
+its own caps (kv, db, etc.) and renders its own setup UI if anything is missing.
+
+**No default app.** Running the platform with no arguments is an error. The platform
+is a runtime, not a shell. The shell is an app like any other.
+
+**First-time config.** When an app launches and needs settings that don't exist yet
+(e.g. no LLM endpoint configured), the app's own UI handles it — a settings page,
+a setup wizard, whatever the app author builds. The platform stores config persistently
+via kv/db caps so the user only configures once.
+
+**Persistent grants.** Cap grants are persisted per-app so the operator isn't prompted
+every launch. The platform stores which caps were granted/denied and reuses those
+decisions on subsequent runs. A `--reset-grants` flag (or similar) clears stored
+grants and re-prompts.
+
 ## Capability surface
 
 Capabilities are plain Lua tables passed into the sandbox. The platform owns the
@@ -283,6 +315,21 @@ caps.clock()  -- returns Unix timestamp (integer)
 Scoped to a directory. Per-directory read/write granularity. Scope dimensions
 apply — an fs cap scoped to `["user", "app"]` gives each app its own directory;
 scoped to `["user"]` gives a shared directory per user.
+
+### `caps.cli` — command-line arguments
+
+The app's portion of `arg` (everything after `--` on the command line). Grant/deny
+controls whether the app can read CLI arguments at all. The value is a plain table
+of strings.
+
+### `caps.stdin` — standard input
+
+Read access to the process's stdin. Grant/deny only.
+
+### `caps.stdout` — standard output
+
+Write access to the process's stdout. Grant/deny only. Separate from `http_server`
+— a headless entrypoint might write to stdout without serving HTTP.
 
 ## Sandbox security
 
@@ -525,7 +572,9 @@ runtime.
       "main": "run/batch.lua",
       "caps": {
         "http_client": { "type": "http_client", "required": true },
-        "fs":          { "type": "fs",          "required": false }
+        "fs":          { "type": "fs",          "required": false },
+        "cli":         { "type": "cli",         "required": false },
+        "stdout":      { "type": "stdout",      "required": true }
       }
     }
   }
