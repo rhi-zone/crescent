@@ -143,16 +143,20 @@ behavior for a revoked capability.
 {
   "name": "CCv2 Card",
   "caps": {
-    "self":        { "type": "self",        "required": true },
-    "server":      { "type": "http_server", "required": true },
-    "llm_api":     { "type": "http_client", "host": "api.openai.com", "required": true },
-    "local_llm":   { "type": "http_client", "host": "localhost:11434", "required": false },
-    "conversations": { "type": "db",        "required": true },
-    "settings":    { "type": "kv",          "required": false },
-    "clock":       { "type": "time",        "required": true }
+    "self":          { "type": "self",        "required": true },
+    "server":        { "type": "http_server", "required": true },
+    "llm_api":       { "type": "http_client", "host": "api.openai.com", "required": true },
+    "local_llm":     { "type": "http_client", "host": "localhost:11434", "required": false },
+    "conversations": { "type": "db",          "required": true },
+    "settings":      { "type": "kv",          "required": false },
+    "user_prefs":    { "type": "kv",          "scope": ["user"], "readonly": true, "required": false },
+    "clock":         { "type": "time",        "required": true }
   }
 }
 ```
+
+`settings` uses default scope `["user", "app"]` — private to this card for this user.
+`user_prefs` uses scope `["user"]` — shared across apps for this user (read-only).
 
 ### Example grant
 
@@ -165,7 +169,8 @@ caps.server, revoke_fns.server           = http_server_cap({ port = 7860 })
 caps.llm_api, revoke_fns.llm_api        = http_client_cap({ host = "api.openai.com" })
 -- caps.local_llm = nil (denied)
 caps.conversations, revoke_fns.conversations = db_cap(db_path)
-caps.settings, revoke_fns.settings       = kv_cap(kv_path)
+caps.settings, revoke_fns.settings       = kv_cap(kv_path)  -- scope: [user, app]
+caps.user_prefs, revoke_fns.user_prefs   = kv_cap(user_prefs_path, { readonly = true })  -- scope: [user]
 caps.clock, revoke_fns.clock             = time_cap()
 
 sandbox.run(script, sandbox.env(sandbox.stdlib, { globals = { caps = caps } }))
@@ -212,26 +217,49 @@ LLM protocol libraries (OpenAI, Anthropic, Ollama, etc.) are app-vendored code
 that uses `caps.http_client` internally. The platform has no LLM knowledge — it
 just controls network access.
 
+### Scope dimensions
+
+The platform provides a set of **context dimensions** — currently `{user, app}`.
+Every storage cap (kv, db) has a **scope**: a subset of dimensions that determines
+isolation. Each included dimension adds isolation; each excluded one shares wider.
+
+```json
+{ "type": "kv", "scope": ["user", "app"] }   // default — fully isolated
+{ "type": "kv", "scope": ["user"] }           // cross-app, per-user
+{ "type": "kv", "scope": ["app"] }            // cross-user, per-app
+{ "type": "kv", "scope": [] }                 // global
+```
+
+Default is maximum isolation (all dimensions included). Removing a dimension widens
+access and requires operator approval. This applies uniformly to kv, db, and any
+future storage cap type.
+
+Adding new dimensions later (team, room, tenant) is just adding them to the set —
+no special cases, no hierarchy. It's a subset selection.
+
+### `caps.kv` — key-value store
+
+Lightweight persistent storage for small values: current position, per-app
+preferences, flags.
+
+```lua
+caps.my_store.get(key)         -- returns string | nil
+caps.my_store.set(key, value)  -- value must be string; nil deletes
+```
+
 ### `caps.db` — SQLite database
 
 A pre-opened SQLite connection. The app writes raw SQL — no structured query API.
+Scope dimensions control isolation (see above).
 
-Two isolation tiers:
-
-**Per-app db files** (`"type": "db"`) — the host opens a file scoped to the
-app (`~/.crescent/data/<user_id>/<app_id>/<name>.db`). Isolation is at the
-file level. Use for app-private data (cache, local state).
-
-**Shared db with view isolation** (`"type": "shared_db"`) — the host opens a
-shared platform db (e.g. the conversations db), registers a SQLite authorizer
-that blocks direct access to underlying tables, then creates per-connection
-temp views pre-filtered to `app_id`. The app queries the views with full SQL
-expressiveness; the underlying tables are unreachable. The host (which owns the
-connection without an authorizer) can query across all apps for cross-card
-search.
+For shared databases where multiple apps access the same tables, the platform
+registers a SQLite authorizer that blocks direct access to underlying tables,
+then creates per-connection temp views pre-filtered by the relevant dimension
+values. The app queries the views with full SQL expressiveness; the underlying
+tables are unreachable.
 
 ```
-host setup per app connection:
+host setup per app connection (scope: ["user"]):
   1. open shared.db
   2. register authorizer → SQLITE_DENY for raw table access
   3. CREATE TEMP VIEW sessions AS SELECT * FROM sessions WHERE app_id = '<id>'
@@ -242,50 +270,19 @@ host setup per app connection:
 The authorizer callback is JIT-compiled via `lib/asm/` — zero LuaJIT trampoline
 overhead, no C dependency.
 
-Multiple db caps with different names if the app needs separate concerns:
-
-```json
-"caps": {
-  "conversations": { "type": "shared_db", "required": true },
-  "cache":         { "type": "db",        "required": false }
-}
-```
-
 The optional `"readonly": true` flag opens the file with `SQLITE_OPEN_READONLY`.
-Use this when an app needs read access to a db it doesn't own — e.g. the shell
-app reading the platform's metadata db:
-
-```json
-"caps": {
-  "library": { "type": "db", "required": true, "readonly": true }
-}
-```
-
-### `caps.kv` — key-value store
-
-Lightweight persistent storage for small values: current position, per-app
-preferences, flags. The host allowlists which keys/prefixes the app may
-access; denied keys error immediately.
-
-```lua
-caps.kv.get(key)         -- returns string | nil
-caps.kv.set(key, value)  -- value must be string; nil deletes
-```
-
-This is the canonical mechanism for saved state — the app writes its current
-position here on every navigation; the host reads it on next launch and passes
-it back as a startup argument. Apps that only need to remember where they were
-get `caps.kv`, not a full db connection.
 
 ### `caps.time` — clock
 
 ```lua
-caps.time()  -- returns Unix timestamp (integer)
+caps.clock()  -- returns Unix timestamp (integer)
 ```
 
 ### `caps.fs` (optional) — file access
 
-Scoped to a directory. Per-directory read/write granularity.
+Scoped to a directory. Per-directory read/write granularity. Scope dimensions
+apply — an fs cap scoped to `["user", "app"]` gives each app its own directory;
+scoped to `["user"]` gives a shared directory per user.
 
 ## Sandbox security
 
