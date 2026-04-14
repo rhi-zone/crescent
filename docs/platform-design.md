@@ -83,16 +83,67 @@ Capabilities are plain Lua tables passed into the sandbox. The platform owns the
 implementations; the script receives exactly what it's granted. Caps are primitives —
 they do one thing. Apps compose them into higher-level behavior.
 
+### Permissions and granularity
+
+Every cap goes through a permissions dialog. The app manifest declares what it wants;
+the platform presents each request to the operator for approval. The operator can
+approve, deny, or narrow individual scopes — not just whole caps.
+
+Each cap type has its own granularity axes:
+
+| Cap | Granularity |
+|-----|-------------|
+| `self` | per-chunk keyword, per-entry path/glob, read vs read/write |
+| `http_client` | per-domain, per-method (GET/POST/...), per-path prefix |
+| `http_server` | per-path prefix the app can handle |
+| `kv` | per-key prefix, read vs read/write |
+| `db` | per-table, read/write/create (or authorizer-based view isolation for shared_db) |
+| `fs` | per-directory, read vs read/write |
+| `time` | granted or not (no sub-granularity) |
+| `config` | per-key, read vs read/write |
+
+The manifest declares the maximum scope the app needs. The operator's grant can be
+a subset. The app receives a cap scoped to whatever was actually approved.
+
+### Revocation
+
+Caps can be revoked mid-session. Each cap function is a closure over internal state
+including a `revoked` boolean flag. The platform holds a revoke handle (a function
+that sets the flag). On revocation, every subsequent call to that cap returns
+`nil, "capability revoked"`. No proxy or metatable needed — just a boolean check
+at the top of each closure.
+
 ```lua
--- example grant
+-- cap factory returns (cap_table, revoke_fn)
+local revoked = false
+local cap = {
+  get = function(key)
+    if revoked then return nil, "capability revoked" end
+    -- ...
+  end,
+}
+local function revoke() revoked = true end
+return cap, revoke  -- platform keeps revoke; app gets cap
+```
+
+The app must handle revocation the same way it handles an optional cap being absent —
+check for nil/error returns. Apps that don't handle it will error, which is correct
+behavior for a revoked capability.
+
+### Example grant
+
+```lua
 sandbox.run(script, sandbox.env(
   sandbox.stdlib,
   { globals = { caps = {
     self        = self_cap(app),
     http_server = http_server_cap({ port = 7860 }),
-    http_client = http_client_cap({ allow = {"api.openai.com", "localhost:11434"} }),
-    kv          = kv_cap(kv_path),
-    db          = db_cap(db_path),
+    http_client = http_client_cap({ allow = {
+      { host = "api.openai.com", methods = {"POST"}, path = "/v1/" },
+      { host = "localhost:11434" },
+    }}),
+    kv          = kv_cap(kv_path, { allow = {"settings", "state.", "lorebook"} }),
+    db          = db_cap(db_path, { tables = {"sessions", "messages"}, readonly = false }),
     time        = time_cap(),
   }}}
 ))
@@ -212,7 +263,7 @@ caps.time()  -- returns Unix timestamp (integer)
 
 ### `caps.fs` (optional) — file access
 
-Granted only to explicitly trusted scripts. Scoped to a directory.
+Scoped to a directory. Per-directory read/write granularity.
 
 ### `caps.config` (optional) — user-level config
 
