@@ -200,6 +200,14 @@ function M.http_server_cap(opts)
 
 			-- For normal (non-SSE) responses, serialize and close.
 			if not is_streaming then
+				-- Normalize header values: app may set strings, serialize expects {string}.
+				if res.headers then
+					for k, v in pairs(res.headers) do
+						if type(v) == "string" then
+							res.headers[k] = { v }
+						end
+					end
+				end
 				client:send(http_format.serialize_response(res))
 				client:close()
 			end
