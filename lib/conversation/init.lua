@@ -437,6 +437,37 @@ db_mt.delete_subtree = function(self, message_id)
 	return { deleted = #ids }
 end
 
+-- get_roots(session_id) -> msgs[] | nil, err
+-- Returns all root messages (parent_id IS NULL) in a session.
+db_mt.get_roots = function(self, session_id)
+	local db = self._db
+	local iter, err = db:query(
+		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata"
+		.. " FROM messages WHERE session_id = ? AND parent_id IS NULL ORDER BY created_at ASC",
+		session_id
+	)
+	if not iter then return nil, err end
+	local results = {}
+	while true do
+		local mid, sid, parent_id, role, content, created_at, canonical_child_id, meta_s = iter()
+		if iter_done(mid, sid) then break end
+		if mid == nil then return nil, "conversation: get_roots query error: " .. tostring(sid) end
+		local meta, merr = decode_metadata(meta_s)
+		if merr then return nil, merr end
+		results[#results + 1] = {
+			id = mid,
+			session_id = sid,
+			parent_id = parent_id,
+			role = role,
+			content = content,
+			created_at = created_at,
+			canonical_child_id = canonical_child_id,
+			metadata = meta,
+		}
+	end
+	return results
+end
+
 -- get_root_children(session_id) -> msgs[] | nil, err
 -- Gets children of the root message (parent_id IS NULL) in a session.
 db_mt.get_root_children = function(self, session_id)

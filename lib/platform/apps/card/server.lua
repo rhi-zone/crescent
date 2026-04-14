@@ -4,6 +4,11 @@
 -- Serves static files + JSON API endpoints for the card conversation UI.
 -- All business logic lives here — the frontend is a dumb terminal.
 --
+-- Messages are stored in a SQLite-backed conversation tree (lib/conversation).
+-- Each message has a parent_id. Siblings (same parent) are what were previously
+-- called "swipes". Editing forks (creates a new sibling). Regenerating creates
+-- a new sibling. The "active path" is the canonical path from root to leaf.
+--
 -- Capabilities (injected via caps table):
 --   caps.llm.call(messages) -> string | nil, err
 --   caps.llm.count_tokens(text) -> integer (optional)
@@ -20,6 +25,7 @@ local card_mod = require("lib.formats.ccv2.card")
 local context_mod = require("lib.formats.ccv2.context")
 local macro_mod = require("lib.formats.ccv2.macro")
 local lorebook_mod = require("lib.formats.ccv2.lorebook")
+local conversation = require("lib.conversation")
 
 local M = {}
 
@@ -67,19 +73,12 @@ end
 
 local function create_state()
 	return {
-		card = nil,       -- CardData
-		lorebook = nil,   -- NormalizedEntry[]
+		card = nil,           -- CardData
+		lorebook = nil,       -- NormalizedEntry[]
 		user_name = "User",
-		messages = {},    -- [{id, role, content}] — active conversation path
-		-- swipes[msg_id] = {items = {{id, content}, ...}, current = N (1-based)}
-		swipes = {},
-		next_id = 0,
+		conv = nil,           -- lib/conversation db handle
+		session_id = nil,     -- active session id
 	}
-end
-
-local function gen_id(state)
-	state.next_id = state.next_id + 1
-	return "m" .. state.next_id
 end
 
 -- ── Card loading ────────────────────────────────────────────────────────────
@@ -105,6 +104,47 @@ local function load_card(state, caps)
 	return card_data
 end
 
+-- ── Tree helpers ────────────────────────────────────────────────────────────
+
+-- get_canonical_path: returns the active path for the session.
+-- Wraps conv:get_canonical_path().
+local function get_canonical_path(state)
+	return state.conv:get_canonical_path(state.session_id)
+end
+
+-- get_siblings: returns all siblings of a message (children of its parent).
+-- For root messages (parent_id is nil), returns all roots in the session.
+local function get_siblings(state, msg)
+	if msg.parent_id == nil then
+		return state.conv:get_roots(state.session_id)
+	end
+	return state.conv:get_children(msg.parent_id)
+end
+
+-- sibling_info: compute sibling_index (0-based) and sibling_count for a message.
+local function sibling_info(state, msg)
+	local siblings, err = get_siblings(state, msg)
+	if not siblings then return 0, 1 end
+	local index = 0
+	for i, s in ipairs(siblings) do
+		if s.id == msg.id then index = i - 1; break end
+	end
+	return index, #siblings
+end
+
+-- msg_response: format a message for the API response.
+local function msg_response(state, msg)
+	local idx, total = sibling_info(state, msg)
+	return {
+		id = msg.id,
+		role = msg.role,
+		content = msg.content,
+		parent_id = msg.parent_id,
+		sibling_index = idx,
+		sibling_count = total,
+	}
+end
+
 -- ── Context assembly ────────────────────────────────────────────────────────
 
 local function make_macro_env(state)
@@ -113,13 +153,18 @@ local function make_macro_env(state)
 	return { char = card.name or "", user = state.user_name }
 end
 
-local function build_context(state, caps)
+local function build_context(state, caps, path)
 	local card = state.card
-	local msgs = state.messages
+	if not path then
+		local err
+		path, err = get_canonical_path(state)
+		if not path then return nil, err end
+	end
+
 	if not card then
 		local result = {}
-		for i = 1, #msgs do
-			result[#result + 1] = { role = msgs[i].role, content = msgs[i].content }
+		for i = 1, #path do
+			result[#result + 1] = { role = path[i].role, content = path[i].content }
 		end
 		return result
 	end
@@ -140,7 +185,7 @@ local function build_context(state, caps)
 
 	local result, err = context_mod.assemble({
 		card = card,
-		history = msgs,
+		history = path,
 		count_tokens = count_tokens,
 		max_context = max_context,
 		max_response = max_response,
@@ -150,78 +195,48 @@ local function build_context(state, caps)
 	})
 	if not result then
 		local fallback = {}
-		for i = 1, #msgs do
-			fallback[#fallback + 1] = { role = msgs[i].role, content = msgs[i].content }
+		for i = 1, #path do
+			fallback[#fallback + 1] = { role = path[i].role, content = path[i].content }
 		end
 		return fallback
 	end
 	return result
 end
 
--- ── Swipe helpers ───────────────────────────────────────────────────────────
-
-local function ensure_swipes(state, msg_id)
-	if state.swipes[msg_id] then return state.swipes[msg_id] end
-	-- Find the message and create a single-entry swipe list
-	for _, msg in ipairs(state.messages) do
-		if msg.id == msg_id then
-			local entry = { items = { { id = msg.id, content = msg.content } }, current = 1 }
-			state.swipes[msg_id] = entry
-			return entry
-		end
+-- build_context_to_parent: build context from root to a given parent message.
+-- Used for generating siblings (swipe/new, edit).
+local function build_context_to_parent(state, caps, parent_id)
+	if parent_id == nil then
+		-- Parent is the session root — context is empty (no messages before root).
+		return build_context(state, caps, {})
 	end
-	return nil
-end
-
-local function swipe_info(state, msg)
-	local entry = state.swipes[msg.id]
-	if not entry then return 0, 1 end
-	return entry.current - 1, #entry.items -- 0-based index for frontend
-end
-
-local function msg_response(state, msg)
-	local idx, total = swipe_info(state, msg)
-	return {
-		id = msg.id,
-		role = msg.role,
-		content = msg.content,
-		swipe_index = idx,
-		swipe_total = total,
-	}
+	-- Walk up from parent_id to root, then reverse.
+	local chain = {}
+	local current_id = parent_id
+	while current_id do
+		local msg, err = state.conv:get_message(current_id)
+		if not msg then return nil, err end
+		chain[#chain + 1] = msg
+		current_id = msg.parent_id
+	end
+	-- Reverse: root first.
+	local path = {}
+	for i = #chain, 1, -1 do
+		path[#path + 1] = chain[i]
+	end
+	return build_context(state, caps, path)
 end
 
 -- ── Persistence ─────────────────────────────────────────────────────────────
 
-local function save_state(state, caps)
+local function save_session_id(state, caps)
 	if not caps.kv then return end
-	local data = {
-		messages = state.messages,
-		swipes = {},
-		next_id = state.next_id,
-	}
-	-- Serialize swipes (only those with >1 alternative)
-	for msg_id, entry in pairs(state.swipes) do
-		if #entry.items > 1 then
-			data.swipes[msg_id] = { items = entry.items, current = entry.current }
-		end
-	end
-	caps.kv.set("card_state", json.encode(data))
+	caps.kv.set("card_session_id", state.session_id)
 end
 
-local function load_state(state, caps)
-	if not caps.kv then return false end
-	local raw = caps.kv.get("card_state")
-	if not raw then return false end
-	local ok, data = pcall(json.decode, raw)
-	if not ok or type(data) ~= "table" then return false end
-	if data.messages then state.messages = data.messages end
-	if data.swipes then
-		for msg_id, entry in pairs(data.swipes) do
-			state.swipes[msg_id] = entry
-		end
-	end
-	if data.next_id then state.next_id = data.next_id end
-	return true
+local function load_session_id(caps)
+	if not caps.kv then return nil end
+	return caps.kv.get("card_session_id")
 end
 
 -- ── Greeting ────────────────────────────────────────────────────────────────
@@ -231,39 +246,49 @@ local function init_greeting(state)
 	if not card or not card.first_mes or #card.first_mes == 0 then return end
 
 	local env = make_macro_env(state)
-	local greeting_id = gen_id(state)
 	local content = macro_mod.substitute(card.first_mes, env)
 
-	local msg = { id = greeting_id, role = "assistant", content = content }
-	state.messages[1] = msg
+	-- Create primary greeting as root message.
+	local msg, err = state.conv:add_message(state.session_id, nil, "assistant", content)
+	if not msg then return end
 
-	-- Populate swipes from alternate_greetings
-	local items = { { id = greeting_id, content = content } }
+	-- Create alternate greetings as root siblings (also parent_id = nil).
 	if card.alternate_greetings then
 		for _, g in ipairs(card.alternate_greetings) do
 			if g and #g > 0 then
-				local alt_id = gen_id(state)
-				items[#items + 1] = { id = alt_id, content = macro_mod.substitute(g, env) }
+				local alt_content = macro_mod.substitute(g, env)
+				state.conv:add_message(state.session_id, nil, "assistant", alt_content)
 			end
 		end
 	end
-	state.swipes[greeting_id] = { items = items, current = 1 }
+
+	-- Swipe back to the first greeting so canonical path starts from it.
+	-- add_message updates nothing for roots (no parent), but the last root added
+	-- will be picked by get_canonical_path (first in query order).
+	-- We need to ensure the first greeting is the one on the canonical path.
+	-- get_canonical_path picks the first root by created_at (or insertion order).
+	-- Since all roots share the same created_at (os.time() granularity is 1s),
+	-- we rely on SQLite rowid ordering which matches insertion order.
+	-- The first root inserted is the primary greeting — this is correct.
 end
 
 -- ── API endpoints ───────────────────────────────────────────────────────────
 
 local function api_get_card(state, _caps, _params, _body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
+	local path = get_canonical_path(state)
 	local data = { name = state.card.name }
-	if #state.messages > 0 and state.messages[1].role == "assistant" then
-		data.greeting = msg_response(state, state.messages[1])
+	if path and #path > 0 and path[1].role == "assistant" then
+		data.greeting = msg_response(state, path[1])
 	end
 	return json_ok(res, data)
 end
 
 local function api_get_messages(state, _caps, _params, _body, res)
+	local path, err = get_canonical_path(state)
+	if not path then return json_err(res, 500, err) end
 	local result = {}
-	for _, msg in ipairs(state.messages) do
+	for _, msg in ipairs(path) do
 		result[#result + 1] = msg_response(state, msg)
 	end
 	return json_ok(res, { messages = result })
@@ -274,29 +299,31 @@ local function api_post_message(state, caps, _params, body, res)
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
 
-	-- Add user message
-	local user_id = gen_id(state)
-	local user_msg = { id = user_id, role = "user", content = text }
-	state.messages[#state.messages + 1] = user_msg
+	-- Find current leaf (last node in canonical path).
+	local path, perr = get_canonical_path(state)
+	if not path then return json_err(res, 500, perr) end
+	local leaf_id = path[#path] and path[#path].id or nil
 
-	-- Call LLM
+	-- Add user message as child of leaf.
+	local user_msg, uerr = state.conv:add_message(state.session_id, leaf_id, "user", text)
+	if not user_msg then return json_err(res, 500, uerr) end
+
+	-- Build context (canonical path now includes user_msg).
 	local context = build_context(state, caps)
 	local response, err = caps.llm.call(context)
 	if not response then
-		-- Remove user message on LLM failure
-		state.messages[#state.messages] = nil
+		-- Rollback: delete user message.
+		state.conv:delete_subtree(user_msg.id)
 		return json_err(res, 502, "LLM error: " .. tostring(err))
 	end
 
-	-- Add assistant message
-	local asst_id = gen_id(state)
-	local asst_msg = { id = asst_id, role = "assistant", content = response }
-	state.messages[#state.messages + 1] = asst_msg
-	state.swipes[asst_id] = { items = { { id = asst_id, content = response } }, current = 1 }
+	-- Add assistant message as child of user message.
+	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
+	if not asst_msg then return json_err(res, 500, aerr) end
 
-	save_state(state, caps)
+	save_session_id(state, caps)
 	return json_ok(res, {
-		user = { id = user_id, role = "user", content = text },
+		user = { id = user_msg.id, role = "user", content = text },
 		assistant = msg_response(state, asst_msg),
 	})
 end
@@ -323,61 +350,67 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
 
-	-- Check streaming support
+	-- Check streaming support.
 	if not caps.llm.call_stream then
-		-- Fall back to non-streaming
+		-- Fall back to non-streaming.
 		return api_post_message(state, caps, _params, body, res)
 	end
 
-	-- Add user message
-	local user_id = gen_id(state)
-	local user_msg = { id = user_id, role = "user", content = text }
-	state.messages[#state.messages + 1] = user_msg
+	-- Find current leaf.
+	local path, perr = get_canonical_path(state)
+	if not path then return json_err(res, 500, perr) end
+	local leaf_id = path[#path] and path[#path].id or nil
 
-	-- Prepare assistant message id
-	local asst_id = gen_id(state)
+	-- Add user message.
+	local user_msg, uerr = state.conv:add_message(state.session_id, leaf_id, "user", text)
+	if not user_msg then return json_err(res, 500, uerr) end
 
-	-- Build context
+	-- Build context.
 	local context = build_context(state, caps)
 
-	-- Start SSE stream
+	-- Start SSE stream.
 	sse_start(sock, res)
 
-	-- Send user message event
+	-- Send user message event.
 	sse_write(sock, json.encode({
 		type = "user",
-		id = user_id,
+		id = user_msg.id,
 		role = "user",
 		content = text,
 	}))
 
-	-- Stream LLM response
+	-- Stream LLM response.
 	local response, err = caps.llm.call_stream(context, function(token)
 		sse_write(sock, json.encode({ type = "token", token = token }))
 	end)
 
 	if not response then
-		-- Remove user message on LLM failure
-		state.messages[#state.messages] = nil
+		-- Rollback: delete user message.
+		state.conv:delete_subtree(user_msg.id)
 		sse_write(sock, json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
 		sock:close()
 		return true
 	end
 
-	-- Add assistant message
-	local asst_msg = { id = asst_id, role = "assistant", content = response }
-	state.messages[#state.messages + 1] = asst_msg
-	state.swipes[asst_id] = { items = { { id = asst_id, content = response } }, current = 1 }
-	save_state(state, caps)
+	-- Add assistant message.
+	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
+	if not asst_msg then
+		sse_write(sock, json.encode({ type = "error", error = "db error: " .. tostring(aerr) }))
+		sock:close()
+		return true
+	end
 
-	-- Send done event with final message data
+	save_session_id(state, caps)
+
+	-- Send done event with final message data.
+	local idx, total = sibling_info(state, asst_msg)
 	sse_write(sock, json.encode({
 		type = "done",
-		id = asst_id,
+		id = asst_msg.id,
 		role = "assistant",
 		content = response,
-		swipe_index = 0,
-		swipe_total = 1,
+		sibling_index = idx,
+		sibling_count = total,
 	}))
 
 	sock:close()
@@ -385,38 +418,37 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 end
 
 local function api_post_continue(state, caps, _params, _body, res)
-	local msgs = state.messages
-	if #msgs == 0 then return json_err(res, 400, "no messages") end
+	local path, perr = get_canonical_path(state)
+	if not path or #path == 0 then return json_err(res, 400, "no messages") end
 
-	local context = build_context(state, caps)
+	local context = build_context(state, caps, path)
 	local response, err = caps.llm.call(context)
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
-	local last = msgs[#msgs]
-	if last.role == "assistant" then
-		-- Append to existing assistant message
-		last.content = last.content .. response
-		-- Update swipe entry if it exists
-		local entry = state.swipes[last.id]
-		if entry then
-			entry.items[entry.current].content = last.content
-		end
+	local leaf = path[#path]
+	if leaf.role == "assistant" then
+		-- Append to existing assistant message (in-place update).
+		local updated, uerr = state.conv:update_message(leaf.id, {
+			content = leaf.content .. response,
+		})
+		if not updated then return json_err(res, 500, uerr) end
+		save_session_id(state, caps)
+		return json_ok(res, msg_response(state, updated))
 	else
-		-- Add new assistant message
-		local asst_id = gen_id(state)
-		local asst_msg = { id = asst_id, role = "assistant", content = response }
-		msgs[#msgs + 1] = asst_msg
-		state.swipes[asst_id] = { items = { { id = asst_id, content = response } }, current = 1 }
-		last = asst_msg
+		-- Add new assistant message as child of leaf.
+		local asst_msg, aerr = state.conv:add_message(
+			state.session_id, leaf.id, "assistant", response
+		)
+		if not asst_msg then return json_err(res, 500, aerr) end
+		save_session_id(state, caps)
+		return json_ok(res, msg_response(state, asst_msg))
 	end
-
-	save_state(state, caps)
-	return json_ok(res, msg_response(state, last))
 end
 
 local function api_post_impersonate(state, caps, _params, body, res)
 	local context = build_context(state, caps)
-	-- Append instruction to generate as the user character
+	if not context then return json_err(res, 500, "failed to build context") end
+	-- Append instruction to generate as the user character.
 	local hint = "Continue the conversation as {{user}}, writing their next message in character."
 	local env = make_macro_env(state)
 	hint = hint:gsub("{{user}}", env.user or "User")
@@ -435,60 +467,48 @@ local function api_get_swipes(state, _caps, params, _body, res)
 	local msg_id = params.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
 
-	local entry = ensure_swipes(state, msg_id)
-	if not entry then return json_err(res, 404, "message not found") end
+	local msg, merr = state.conv:get_message(msg_id)
+	if not msg then return json_err(res, 404, "message not found") end
+
+	local siblings, serr = get_siblings(state, msg)
+	if not siblings then return json_err(res, 500, serr) end
 
 	local swipes = {}
-	for i, item in ipairs(entry.items) do
-		swipes[#swipes + 1] = { id = item.id, content = item.content, index = i - 1 }
+	local current = 0
+	for i, s in ipairs(siblings) do
+		swipes[#swipes + 1] = { id = s.id, content = s.content, index = i - 1 }
+		if s.id == msg_id then current = i - 1 end
 	end
-	return json_ok(res, { swipes = swipes, current = entry.current - 1 })
+	return json_ok(res, { swipes = swipes, current = current })
 end
 
 local function api_post_swipe_new(state, caps, _params, body, res)
 	local msg_id = body and body.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
 
-	-- Find the message and its position
-	local msg_pos
-	for i, msg in ipairs(state.messages) do
-		if msg.id == msg_id then msg_pos = i; break end
-	end
-	if not msg_pos then return json_err(res, 404, "message not found") end
+	local msg, merr = state.conv:get_message(msg_id)
+	if not msg then return json_err(res, 404, "message not found") end
 
-	local entry = ensure_swipes(state, msg_id)
-	if not entry then return json_err(res, 404, "message not found") end
-
-	-- Build context up to the message before this one, then call LLM
-	local saved_messages = state.messages
-	local context_messages = {}
-	for i = 1, msg_pos - 1 do
-		context_messages[i] = saved_messages[i]
-	end
-	state.messages = context_messages
-	local context = build_context(state, caps)
-	state.messages = saved_messages
+	-- Build context up to (but not including) this message.
+	local context, cerr = build_context_to_parent(state, caps, msg.parent_id)
+	if not context then return json_err(res, 500, cerr) end
 
 	local response, err = caps.llm.call(context)
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
-	-- Add new swipe
-	local new_id = gen_id(state)
-	entry.items[#entry.items + 1] = { id = new_id, content = response }
-	entry.current = #entry.items
+	-- Add as sibling (same parent, same role).
+	local new_msg, nerr = state.conv:add_message(
+		state.session_id, msg.parent_id, msg.role, response
+	)
+	if not new_msg then return json_err(res, 500, nerr) end
 
-	-- Update active message
-	state.messages[msg_pos].id = new_id
-	state.messages[msg_pos].content = response
+	-- For root siblings, add_message doesn't update any parent canonical_child_id.
+	-- The canonical path still starts from the first root. We rely on the frontend
+	-- calling /api/branch/navigate to switch to the new sibling.
+	-- For non-root siblings, add_message already updated parent's canonical_child_id.
 
-	save_state(state, caps)
-	return json_ok(res, {
-		id = new_id,
-		role = state.messages[msg_pos].role,
-		content = response,
-		swipe_index = entry.current - 1,
-		swipe_total = #entry.items,
-	})
+	save_session_id(state, caps)
+	return json_ok(res, msg_response(state, new_msg))
 end
 
 local function api_post_message_edit(state, caps, _params, body, res)
@@ -496,94 +516,122 @@ local function api_post_message_edit(state, caps, _params, body, res)
 		return json_err(res, 400, "message_id and content required")
 	end
 	local msg_id = body.message_id
-	local content = body.content
+	local new_content = body.content
 
-	-- Find the message
-	local msg
-	for _, m in ipairs(state.messages) do
-		if m.id == msg_id then msg = m; break end
-	end
+	local msg, merr = state.conv:get_message(msg_id)
 	if not msg then return json_err(res, 404, "message not found") end
 
-	msg.content = content
+	-- Create a new sibling with the edited content (fork).
+	-- The old message and its subtree remain accessible by swiping back.
+	local edited, eerr = state.conv:add_message(
+		state.session_id, msg.parent_id, msg.role, new_content
+	)
+	if not edited then return json_err(res, 500, eerr) end
 
-	-- Update swipe entry if one exists
-	local entry = state.swipes[msg_id]
-	if entry then
-		entry.items[entry.current].content = content
-	end
-
-	save_state(state, caps)
-	return json_ok(res, msg_response(state, msg))
+	save_session_id(state, caps)
+	local resp = msg_response(state, edited)
+	resp.reload_below = true
+	return json_ok(res, resp)
 end
 
-local function api_post_message_delete(state, caps, _params, body, res)
+local function api_post_message_delete(state, _caps, _params, body, res)
 	if not body or not body.message_id then
 		return json_err(res, 400, "message_id required")
 	end
 	local msg_id = body.message_id
 
-	-- Find the message position
-	local pos
-	for i, m in ipairs(state.messages) do
-		if m.id == msg_id then pos = i; break end
-	end
-	if not pos then return json_err(res, 404, "message not found") end
+	local result, err = state.conv:delete_subtree(msg_id)
+	if not result then return json_err(res, 404, "message not found") end
 
-	-- Count messages to delete (from pos to end)
-	local deleted = #state.messages - pos + 1
+	return json_ok(res, { deleted = result.deleted })
+end
 
-	-- Clean up swipe entries for deleted messages
-	for i = pos, #state.messages do
-		state.swipes[state.messages[i].id] = nil
+local function api_post_branch_navigate(state, _caps, _params, body, res)
+	if not body or not body.message_id then
+		return json_err(res, 400, "message_id required")
 	end
 
-	-- Truncate messages from pos onward
-	for i = #state.messages, pos, -1 do
-		state.messages[i] = nil
-	end
+	local msg, merr = state.conv:get_message(body.message_id)
+	if not msg then return json_err(res, 404, "message not found") end
 
-	save_state(state, caps)
-	return json_ok(res, { deleted = deleted })
+	if msg.parent_id ~= nil then
+		-- Non-root: use swipe_to to update parent's canonical_child_id.
+		local ok, err = state.conv:swipe_to(body.message_id)
+		if not ok then return json_err(res, 400, err) end
+	end
+	-- For root messages, get_canonical_path picks the first root by insertion order.
+	-- We don't have root-level canonical tracking yet — this is a known limitation.
+	-- TODO: support root-level swipe navigation.
+
+	local resp = msg_response(state, msg)
+	resp.reload_below = true
+	return json_ok(res, resp)
 end
 
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
-	["GET /api/card"]      = api_get_card,
-	["GET /api/messages"]  = api_get_messages,
-	["POST /api/message"]  = api_post_message,
-	["POST /api/continue"] = api_post_continue,
-	["GET /api/swipes"]    = api_get_swipes,
-	["POST /api/swipe/new"] = api_post_swipe_new,
-	["POST /api/message/edit"] = api_post_message_edit,
-	["POST /api/message/delete"] = api_post_message_delete,
-	["POST /api/message/stream"] = api_post_message_stream,
-	["POST /api/impersonate"] = api_post_impersonate,
+	["GET /api/card"]             = api_get_card,
+	["GET /api/messages"]         = api_get_messages,
+	["POST /api/message"]         = api_post_message,
+	["POST /api/continue"]        = api_post_continue,
+	["GET /api/swipes"]           = api_get_swipes,
+	["POST /api/swipe/new"]       = api_post_swipe_new,
+	["POST /api/message/edit"]    = api_post_message_edit,
+	["POST /api/message/delete"]  = api_post_message_delete,
+	["POST /api/message/stream"]  = api_post_message_stream,
+	["POST /api/impersonate"]     = api_post_impersonate,
+	["POST /api/branch/navigate"] = api_post_branch_navigate,
+	-- Aliases for renamed endpoints.
+	["GET /api/siblings"]         = api_get_swipes,
+	["POST /api/branch/new"]      = api_post_swipe_new,
 }
 
 function M.create(caps, opts)
 	opts = opts or {}
 	local state = create_state()
 
-	-- Read user name from config
+	-- Read user name from config.
 	if caps.config and caps.config.get then
 		local name = caps.config.get("user_name")
 		if name then state.user_name = name end
 	end
 
-	-- Load card
+	-- Load card.
 	load_card(state, caps)
 
-	-- Try to restore saved state
-	local restored = load_state(state, caps)
+	-- Open conversation database.
+	local db_path = opts.db_path or ":memory:"
+	local conv_db, db_err = conversation.open(db_path)
+	if not conv_db then
+		error("card server: failed to open conversation db: " .. tostring(db_err))
+	end
+	state.conv = conv_db
 
-	-- If no saved messages and card has a greeting, show it
-	if not restored or #state.messages == 0 then
+	-- Restore or create session.
+	local session_id = load_session_id(caps)
+	if session_id then
+		local session = conv_db:get_session(session_id)
+		if session then
+			state.session_id = session_id
+		end
+	end
+	if not state.session_id then
+		local session, serr = conv_db:create_session("card")
+		if not session then
+			error("card server: failed to create session: " .. tostring(serr))
+		end
+		state.session_id = session.id
+		save_session_id(state, caps)
+	end
+
+	-- If session has no messages and card has a greeting, create it.
+	local path = get_canonical_path(state)
+	if not path or #path == 0 then
 		init_greeting(state)
 	end
 
-	-- Static file serving
+	-- Static file serving.
 	local ok_static, static_serve = false, nil
 	if not opts.no_static then
 		local static_dir = opts.static_dir or "static"
@@ -593,16 +641,16 @@ function M.create(caps, opts)
 	end
 
 	local function handler(req, res, sock)
-		local path, params = parse_target(req.target)
-		local key = req.method .. " " .. path
+		local req_path, params = parse_target(req.target)
+		local key = req.method .. " " .. req_path
 		local route = routes[key]
 		if route then
-			local body = read_json_body(req)
-			return route(state, caps, params, body, res, sock)
+			local req_body = read_json_body(req)
+			return route(state, caps, params, req_body, res, sock)
 		end
-		-- Static files
+		-- Static files.
 		if ok_static then
-			req.path = path
+			req.path = req_path
 			return static_serve(req, res)
 		end
 	end
