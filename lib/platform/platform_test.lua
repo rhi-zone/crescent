@@ -11,6 +11,7 @@ local render   = require("lib.platform.caps.render")
 local fs_cap   = require("lib.platform.caps.fs").fs_cap
 local base64   = require("lib.base64")
 local tar      = require("lib.tar")
+local json     = require("lib.json")
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -414,6 +415,264 @@ T.describe("platform.load_and_run_entry", function ()
 	T.it("returns error for non-existent file", function ()
 		local env = sandbox.env(sandbox.stdlib)
 		local ok, err = platform.load_and_run_entry("/tmp/no_such_app.png", "headless", env)
+		T.ok(not ok)
+		T.ok(err ~= nil)
+	end)
+end)
+
+-- ── Scope resolution ─────────────────────────────────────────────────────────
+
+T.describe("platform._resolve_data_path", function ()
+	local resolve = platform._resolve_data_path
+
+	T.it("defaults to user+app scope", function ()
+		local p = resolve("kv", nil, { user_id = "u1", app_id = "myapp", data_dir = "/base" })
+		T.eq(p, "/base/u1/myapp/kv.db")
+	end)
+
+	T.it("user-only scope", function ()
+		local p = resolve("kv", { "user" }, { user_id = "u1", app_id = "myapp", data_dir = "/base" })
+		T.eq(p, "/base/u1/kv.db")
+	end)
+
+	T.it("app-only scope", function ()
+		local p = resolve("kv", { "app" }, { user_id = "u1", app_id = "myapp", data_dir = "/base" })
+		T.eq(p, "/base/myapp/kv.db")
+	end)
+
+	T.it("empty scope (global)", function ()
+		local p = resolve("kv", {}, { user_id = "u1", app_id = "myapp", data_dir = "/base" })
+		T.eq(p, "/base/kv.db")
+	end)
+
+	T.it("defaults data_dir to ./data", function ()
+		local p = resolve("kv", { "user", "app" }, { user_id = "u1", app_id = "a1" })
+		T.eq(p, "./data/u1/a1/kv.db")
+	end)
+end)
+
+-- ── make_caps ────────────────────────────────────────────────────────────────
+
+T.describe("platform.make_caps", function ()
+	-- Minimal app for self cap
+	local function dummy_app()
+		return { manifest = { name = "test-app", version = "1.0.0", entry = {} }, entries = {} }
+	end
+
+	T.it("constructs granted required caps", function ()
+		local app = dummy_app()
+		local decls = {
+			self = { type = "self" },
+			time = { type = "time" },
+		}
+		local grants = { self = true, time = true }
+		local caps, revoke = platform.make_caps(app, decls, grants, {})
+		T.ok(caps ~= nil, tostring(revoke))
+		T.ok(caps.self ~= nil, "self cap present")
+		T.ok(caps.time ~= nil, "time cap present")
+		T.eq(caps.self.name(), "test-app")
+		T.ok(type(caps.time.now()) == "number")
+	end)
+
+	T.it("returns error when required cap not granted", function ()
+		local app = dummy_app()
+		local decls = {
+			self = { type = "self", required = true },
+		}
+		local caps, err = platform.make_caps(app, decls, {}, {})
+		T.ok(caps == nil)
+		T.ok(err:find("not granted") ~= nil)
+	end)
+
+	T.it("skips optional cap when not granted", function ()
+		local app = dummy_app()
+		local decls = {
+			time = { type = "time", required = false },
+		}
+		local caps, revoke = platform.make_caps(app, decls, {}, {})
+		T.ok(caps ~= nil, tostring(revoke))
+		T.eq(caps.time, nil)
+	end)
+
+	T.it("constructs kv cap with scope resolution", function ()
+		local app = dummy_app()
+		local decls = {
+			store = { type = "kv", scope = { "user" } },
+		}
+		local grants = { store = true }
+		local ctx = { user_id = "u1", app_id = "a1", data_dir = "/tmp/test-data" }
+		local caps, revoke = platform.make_caps(app, decls, grants, ctx)
+		T.ok(caps ~= nil, tostring(revoke))
+		T.ok(caps.store ~= nil, "kv cap present")
+		T.eq(caps.store._path, "/tmp/test-data/u1/store.db")
+	end)
+
+	T.it("constructs http_client cap with host restriction", function ()
+		local app = dummy_app()
+		local decls = {
+			api = { type = "http_client", host = "example.com" },
+		}
+		local grants = { api = true }
+		local caps, revoke = platform.make_caps(app, decls, grants, {})
+		T.ok(caps ~= nil, tostring(revoke))
+		T.ok(caps.api ~= nil)
+		-- Host restriction: wrong host should fail
+		local r, err = caps.api.get("http://evil.com/foo")
+		T.ok(r == nil)
+		T.ok(err:find("host") ~= nil)
+	end)
+
+	T.it("returns revoke functions for caps that support them", function ()
+		local app = dummy_app()
+		local decls = {
+			server = { type = "http_server", port = 8080 },
+		}
+		local grants = { server = true }
+		local caps, revoke = platform.make_caps(app, decls, grants, {})
+		T.ok(caps ~= nil, tostring(revoke))
+		T.ok(type(revoke) == "table")
+		T.ok(type(revoke.server) == "function", "http_server has revoke fn")
+	end)
+
+	T.it("returns error for unknown required cap type", function ()
+		local app = dummy_app()
+		local decls = {
+			mystery = { type = "unknown_thing", required = true },
+		}
+		local grants = { mystery = true }
+		local caps, err = platform.make_caps(app, decls, grants, {})
+		T.ok(caps == nil)
+		T.ok(err:find("unknown cap type") ~= nil)
+	end)
+
+	T.it("skips unknown optional cap type", function ()
+		local app = dummy_app()
+		local decls = {
+			mystery = { type = "unknown_thing", required = false },
+		}
+		local grants = { mystery = true }
+		local caps, revoke = platform.make_caps(app, decls, grants, {})
+		T.ok(caps ~= nil, tostring(revoke))
+		T.eq(caps.mystery, nil)
+	end)
+end)
+
+-- ── validate_caps ────────────────────────────────────────────────────────────
+
+T.describe("platform.validate_caps", function ()
+	T.it("accepts valid declarations", function ()
+		local ok, err = platform.validate_caps({
+			self = { type = "self" },
+			time = { type = "time" },
+		})
+		T.ok(ok, tostring(err))
+	end)
+
+	T.it("rejects unknown cap type", function ()
+		local ok, err = platform.validate_caps({
+			bad = { type = "nonexistent" },
+		})
+		T.ok(not ok)
+		T.ok(err:find("unknown cap type") ~= nil)
+	end)
+
+	T.it("rejects non-table declaration", function ()
+		local ok, err = platform.validate_caps({
+			bad = "just a string",
+		})
+		T.ok(not ok)
+		T.ok(err:find("must be a table") ~= nil)
+	end)
+
+	T.it("rejects non-table input", function ()
+		local ok, err = platform.validate_caps("not a table")
+		T.ok(not ok)
+		T.ok(err:find("must be a table") ~= nil)
+	end)
+
+	T.it("uses cap name as type when type field is absent", function ()
+		local ok, err = platform.validate_caps({
+			self = {},
+			time = {},
+		})
+		T.ok(ok, tostring(err))
+	end)
+end)
+
+-- ── run_app ──────────────────────────────────────────────────────────────────
+
+T.describe("platform.run_app", function ()
+	T.it("runs app with auto-granted caps", function ()
+		local manifest = {
+			name = "cap-app", version = "1.0.0",
+			caps = { self = { type = "self" }, time = { type = "time" } },
+			entry = { headless = "main.lua" },
+		}
+		local files = {
+			["main.lua"] = "return self.name()",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path = write_temp(bytes)
+		local ok, result, revoke = platform.run_app(path, "headless")
+		os.remove(path)
+		T.ok(ok, tostring(result))
+		T.eq(result, "cap-app")
+		T.ok(type(revoke) == "table")
+	end)
+
+	T.it("merges per-entry caps with top-level caps", function ()
+		local manifest = {
+			name = "merge-app", version = "1.0.0",
+			caps = { self = { type = "self" } },
+			entry = {
+				headless = {
+					main = "main.lua",
+					caps = { time = { type = "time" } },
+				},
+			},
+		}
+		local files = {
+			["main.lua"] = "return type(time.now()) .. ':' .. self.name()",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path = write_temp(bytes)
+		local ok, result = platform.run_app(path, "headless")
+		os.remove(path)
+		T.ok(ok, tostring(result))
+		T.eq(result, "number:merge-app")
+	end)
+
+	T.it("fails when required cap is denied by explicit grants", function ()
+		local manifest = {
+			name = "deny-app", version = "1.0.0",
+			caps = { self = { type = "self" } },
+			entry = { headless = "main.lua" },
+		}
+		local files = { ["main.lua"] = "return 1" }
+		local bytes = make_test_app(files, manifest)
+		local path = write_temp(bytes)
+		local ok, err = platform.run_app(path, "headless", { grants = {} })
+		os.remove(path)
+		T.ok(not ok)
+		T.ok(type(err) == "string" and err:find("not granted") ~= nil)
+	end)
+
+	T.it("works with no caps declared", function ()
+		local manifest = {
+			name = "no-caps-app", version = "1.0.0",
+			entry = { headless = "main.lua" },
+		}
+		local files = { ["main.lua"] = "return 42" }
+		local bytes = make_test_app(files, manifest)
+		local path = write_temp(bytes)
+		local ok, result = platform.run_app(path, "headless")
+		os.remove(path)
+		T.ok(ok, tostring(result))
+		T.eq(result, 42)
+	end)
+
+	T.it("returns error for non-existent file", function ()
+		local ok, err = platform.run_app("/tmp/no_such_app_xyz.png", "headless")
 		T.ok(not ok)
 		T.ok(err ~= nil)
 	end)

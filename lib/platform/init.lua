@@ -225,4 +225,219 @@ M.caps = setmetatable({}, {
 	end,
 })
 
+-- ── Cap type → factory mapping ───────────────────────────────────────────────
+
+-- Each entry: { module = "lib.platform.caps.X", factory = "X_cap", args_fn }
+-- args_fn(declaration, app, context, data_path) -> args for factory, or nil, err
+local CAP_FACTORIES = {
+	self = {
+		mod = "lib.platform.caps.self",
+		build = function(decl, app) return require("lib.platform.caps.self").self_cap(app) end,
+	},
+	http_server = {
+		mod = "lib.platform.caps.http_server",
+		build = function(decl)
+			return require("lib.platform.caps.http_server").http_server_cap({ port = decl.port or 0 })
+		end,
+	},
+	http_client = {
+		mod = "lib.platform.caps.http_client",
+		build = function(decl)
+			return require("lib.platform.caps.http_client").http_client_cap({ host = decl.host })
+		end,
+	},
+	kv = {
+		mod = "lib.platform.caps.kv",
+		build = function(decl, app, context, data_path)
+			return require("lib.platform.caps.kv").kv_cap(data_path)
+		end,
+	},
+	db = {
+		mod = "lib.platform.caps.kv",  -- fallback to kv until db.lua exists
+		build = function(decl, app, context, data_path)
+			-- Use dedicated db cap if it exists, otherwise fall back to kv
+			local ok, db_mod = pcall(require, "lib.platform.caps.db")
+			if ok and db_mod.db_cap then
+				return db_mod.db_cap(data_path)
+			end
+			return require("lib.platform.caps.kv").kv_cap(data_path)
+		end,
+	},
+	time = {
+		mod = "lib.platform.caps.time",
+		build = function() return require("lib.platform.caps.time").time_cap() end,
+	},
+}
+
+-- ── Scope resolution ─────────────────────────────────────────────────────────
+
+-- resolve_data_path(cap_name, scope, context) -> string
+-- Builds a backing-store path from scope dimensions and context.
+-- scope: array of dimension names (default {"user", "app"})
+-- context: {user_id, app_id, data_dir}
+local function resolve_data_path(cap_name, scope, context)
+	local base = context.data_dir or "./data"
+	scope = scope or { "user", "app" }
+	local dimension_values = {
+		user = context.user_id,
+		app  = context.app_id,
+	}
+	local parts = { base }
+	for i = 1, #scope do
+		local dim = scope[i]
+		local val = dimension_values[dim]
+		if val then
+			parts[#parts + 1] = val
+		end
+	end
+	parts[#parts + 1] = cap_name .. ".db"
+	return table.concat(parts, "/")
+end
+M._resolve_data_path = resolve_data_path  -- exposed for testing
+
+-- ── make_caps ────────────────────────────────────────────────────────────────
+
+-- make_caps(app, cap_declarations, operator_grants, context)
+--   -> caps_table, revoke_fns_table
+--   or nil, err
+--
+-- cap_declarations: { cap_name = { type=string, required=bool, ...}, ... }
+-- operator_grants:  { cap_name = true, ... }
+-- context:          { user_id=string, app_id=string, data_dir=string }
+function M.make_caps(app, cap_declarations, operator_grants, context)
+	context = context or {}
+	operator_grants = operator_grants or {}
+	local caps = {}
+	local revoke_fns = {}
+
+	for name, decl in pairs(cap_declarations) do
+		local cap_type = decl.type or name
+		local required = decl.required ~= false  -- default true
+
+		if not operator_grants[name] then
+			if required then
+				return nil, "platform: required cap '" .. name .. "' not granted by operator"
+			end
+			-- optional and not granted: skip
+		else
+			local factory = CAP_FACTORIES[cap_type]
+			if not factory then
+				if required then
+					return nil, "platform: unknown cap type '" .. cap_type .. "' for cap '" .. name .. "'"
+				end
+				-- unknown optional cap type: skip
+			else
+				-- Resolve data path for storage caps
+				local data_path
+				if cap_type == "kv" or cap_type == "db" then
+					data_path = resolve_data_path(name, decl.scope, context)
+				end
+
+				local cap, revoke_or_err = factory.build(decl, app, context, data_path)
+				if not cap then
+					return nil, "platform: failed to build cap '" .. name .. "': " .. tostring(revoke_or_err)
+				end
+				caps[name] = cap
+				if type(revoke_or_err) == "function" then
+					revoke_fns[name] = revoke_or_err
+				end
+			end
+		end
+	end
+
+	return caps, revoke_fns
+end
+
+-- ── validate_caps ────────────────────────────────────────────────────────────
+
+-- validate_caps(cap_declarations) -> true | nil, err
+-- Checks that all declared caps have a known type and valid structure.
+function M.validate_caps(cap_declarations)
+	if type(cap_declarations) ~= "table" then
+		return nil, "platform: caps must be a table"
+	end
+	for name, decl in pairs(cap_declarations) do
+		if type(decl) ~= "table" then
+			return nil, "platform: cap '" .. tostring(name) .. "' must be a table"
+		end
+		local cap_type = decl.type or name
+		if not CAP_FACTORIES[cap_type] then
+			return nil, "platform: unknown cap type '" .. tostring(cap_type) .. "' for cap '" .. tostring(name) .. "'"
+		end
+	end
+	return true
+end
+
+-- ── run_app ──────────────────────────────────────────────────────────────────
+
+-- run_app(path, entry_key, opts?) -> ok, result, revoke_fns | false, err
+-- High-level convenience: load app, construct caps from manifest, run entry.
+--
+-- opts.context       : {user_id, app_id, data_dir}
+-- opts.grants        : {cap_name=true, ...} — if nil, auto-grants everything
+-- opts.sandbox_opts  : passed through to sandbox.run (budget, etc.)
+function M.run_app(path, entry_key, opts)
+	opts = opts or {}
+	local context = opts.context or {}
+
+	-- Load app
+	local app, err = M.load_app(path)
+	if not app then return false, err end
+
+	-- Merge top-level and per-entry cap declarations
+	local manifest = app.manifest or {}
+	local cap_declarations = {}
+
+	-- Top-level caps
+	if manifest.caps then
+		for name, decl in pairs(manifest.caps) do
+			cap_declarations[name] = decl
+		end
+	end
+
+	-- Per-entry caps (override/merge with top-level)
+	local entry_map = manifest.entry or {}
+	local entry_def = entry_map[entry_key]
+	if type(entry_def) == "table" and entry_def.caps then
+		for name, decl in pairs(entry_def.caps) do
+			cap_declarations[name] = decl
+		end
+	end
+
+	-- Default context fields from manifest
+	if not context.app_id then
+		context.app_id = manifest.name or "unknown"
+	end
+	if not context.user_id then
+		context.user_id = "default"
+	end
+
+	-- Operator grants: auto-grant everything if not specified
+	local grants = opts.grants
+	if not grants then
+		grants = {}
+		for name in pairs(cap_declarations) do
+			grants[name] = true
+		end
+	end
+
+	-- Construct caps
+	local caps, revoke_fns
+	if next(cap_declarations) then
+		caps, revoke_fns = M.make_caps(app, cap_declarations, grants, context)
+		if not caps then return false, revoke_fns end  -- revoke_fns is err string here
+	else
+		caps = {}
+		revoke_fns = {}
+	end
+
+	-- Build sandbox env: stdlib + caps as globals
+	local cap_bundle = { globals = caps, modules = {} }
+	local env = sandbox.env(sandbox.stdlib, cap_bundle)
+
+	-- Run
+	local ok, result = M.run_entry(app, entry_key, env, opts.sandbox_opts)
+	return ok, result, revoke_fns
+end
+
 return M
