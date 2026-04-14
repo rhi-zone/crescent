@@ -2361,3 +2361,607 @@ T.describe("POST /api/connection/test", function()
 		T.ok(data.error:find("no LLM"), "error mentions missing LLM")
 	end)
 end)
+
+-- ── World info tests ──────────────────────────────────────────────────────
+
+T.describe("GET /api/world_info", function()
+	T.it("returns empty list initially", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/world_info")
+		T.eq(status, 200)
+		T.ok(data.entries, "has entries")
+		T.eq(#data.entries, 0)
+	end)
+end)
+
+T.describe("POST /api/world_info/add", function()
+	T.it("creates a new entry", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/world_info/add", {
+			keys = { "magic", "spell" },
+			content = "Magic is real in this world.",
+			order = 50,
+		})
+		T.eq(status, 200)
+		T.ok(data.uid, "has generated uid")
+		T.eq(data.keys[1], "magic")
+		T.eq(data.keys[2], "spell")
+		T.eq(data.content, "Magic is real in this world.")
+		T.eq(data.enabled, true, "defaults to enabled")
+		T.eq(data.order, 50)
+		-- Verify it appears in the list
+		local _, list = call(app, "GET", "/api/world_info")
+		T.eq(#list.entries, 1)
+	end)
+
+	T.it("returns 400 without keys or content", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/world_info/add", { keys = { "x" } })
+		T.eq(status, 400)
+		status = call(app, "POST", "/api/world_info/add", { content = "x" })
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("POST /api/world_info/update", function()
+	T.it("updates entry fields", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Add an entry first
+		local _, added = call(app, "POST", "/api/world_info/add", {
+			keys = { "dragon" },
+			content = "Dragons exist.",
+		})
+		local uid = added.uid
+		local status, data = call(app, "POST", "/api/world_info/update", {
+			uid = uid,
+			keys = { "drake" },
+			content = "Drakes are smaller dragons.",
+			enabled = false,
+			order = 200,
+		})
+		T.eq(status, 200)
+		T.eq(data.uid, uid)
+		T.eq(data.keys[1], "drake")
+		T.eq(data.content, "Drakes are smaller dragons.")
+		T.eq(data.enabled, false)
+		T.eq(data.order, 200)
+		-- Verify persisted in list
+		local _, list = call(app, "GET", "/api/world_info")
+		T.eq(list.entries[1].keys[1], "drake")
+	end)
+
+	T.it("returns 400 without uid", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/world_info/update", { content = "x" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 404 for unknown uid", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/world_info/update", { uid = "nonexistent" })
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("POST /api/world_info/delete", function()
+	T.it("removes entry by uid", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/world_info/add", { keys = { "elf" }, content = "Elves are tall." })
+		call(app, "POST", "/api/world_info/add", { keys = { "dwarf" }, content = "Dwarves are short." })
+		local _, list = call(app, "GET", "/api/world_info")
+		T.eq(#list.entries, 2)
+		local uid = list.entries[1].uid
+		local status, data = call(app, "POST", "/api/world_info/delete", { uid = uid })
+		T.eq(status, 200)
+		T.eq(data.deleted, true)
+		local _, list2 = call(app, "GET", "/api/world_info")
+		T.eq(#list2.entries, 1)
+		T.eq(list2.entries[1].keys[1], "dwarf")
+	end)
+
+	T.it("returns 400 without uid", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/world_info/delete", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 404 for unknown uid", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/world_info/delete", { uid = "nonexistent" })
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("world info context integration", function()
+	T.it("world info entries are included in LLM context", function()
+		local captured_messages
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_messages = messages
+				return "mock response"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Add a constant world info entry (always triggered)
+		call(app, "POST", "/api/world_info/add", {
+			keys = { "anything" },
+			content = "The world has magic.",
+			constant = true,
+		})
+		-- Send a message to trigger LLM call
+		call(app, "POST", "/api/message", { content = "Hello" })
+		T.ok(captured_messages, "LLM was called")
+		-- Check that world info content appears in the context
+		local found = false
+		for _, msg in ipairs(captured_messages) do
+			if msg.content and msg.content:find("The world has magic.", 1, true) then
+				found = true
+				break
+			end
+		end
+		T.ok(found, "world info entry found in context")
+	end)
+
+	T.it("merges world info with card lorebook", function()
+		local captured_messages
+		local caps = make_lorebook_caps({
+			llm_call = function(messages)
+				captured_messages = messages
+				return "mock response"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Add a constant world info entry
+		call(app, "POST", "/api/world_info/add", {
+			keys = { "anything" },
+			content = "Global lore entry.",
+			constant = true,
+		})
+		-- Send a message that triggers a card lorebook entry (mentions "cat")
+		call(app, "POST", "/api/message", { content = "I see a cat" })
+		T.ok(captured_messages, "LLM was called")
+		-- Check both card lorebook and world info are in context
+		local found_card_lore = false
+		local found_world_info = false
+		for _, msg in ipairs(captured_messages) do
+			if msg.content and msg.content:find("Cats are small furry animals.", 1, true) then
+				found_card_lore = true
+			end
+			if msg.content and msg.content:find("Global lore entry.", 1, true) then
+				found_world_info = true
+			end
+		end
+		T.ok(found_card_lore, "card lorebook entry found in context")
+		T.ok(found_world_info, "world info entry found in context")
+	end)
+end)
+
+T.describe("world info import/export", function()
+	T.it("imports entries in bulk", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/world_info/import", {
+			entries = {
+				{ keys = { "sun" }, content = "The sun is bright." },
+				{ keys = { "moon" }, content = "The moon is silver." },
+				{ keys = { "star" }, content = "Stars twinkle." },
+			},
+		})
+		T.eq(status, 200)
+		T.eq(data.imported, 3)
+		T.eq(#data.entries, 3)
+		-- Verify via GET
+		local _, list = call(app, "GET", "/api/world_info")
+		T.eq(#list.entries, 3)
+	end)
+
+	T.it("export returns all entries", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/world_info/add", { keys = { "a" }, content = "A." })
+		call(app, "POST", "/api/world_info/add", { keys = { "b" }, content = "B." })
+		local status, data = call(app, "GET", "/api/world_info/export")
+		T.eq(status, 200)
+		T.eq(#data.entries, 2)
+	end)
+
+	T.it("import/export round-trip preserves data", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Add entries
+		call(app, "POST", "/api/world_info/add", { keys = { "forest" }, content = "Dense trees.", order = 10 })
+		call(app, "POST", "/api/world_info/add", { keys = { "river" }, content = "Flowing water.", order = 20 })
+		-- Export
+		local _, exported = call(app, "GET", "/api/world_info/export")
+		T.eq(#exported.entries, 2)
+		-- Create new app and import
+		local caps2 = make_mock_caps()
+		local app2 = server.create(caps2, { no_static = true })
+		local status, imported = call(app2, "POST", "/api/world_info/import", {
+			entries = exported.entries,
+		})
+		T.eq(status, 200)
+		T.eq(imported.imported, 2)
+		-- Verify content preserved
+		local _, list = call(app2, "GET", "/api/world_info")
+		T.eq(#list.entries, 2)
+		T.eq(list.entries[1].content, "Dense trees.")
+		T.eq(list.entries[2].content, "Flowing water.")
+	end)
+
+	T.it("returns 400 for import without entries", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/world_info/import", {})
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("world info persistence", function()
+	T.it("saves to kv after mutation and loads on init", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Add an entry
+		call(app, "POST", "/api/world_info/add", {
+			keys = { "lore" },
+			content = "Persistent lore.",
+		})
+		T.ok(caps.kv.get("world_info"), "world_info saved to kv")
+		-- Verify kv contains the entry
+		local json_mod = require("lib.format.json")
+		local saved = json_mod.decode(caps.kv.get("world_info"))
+		T.eq(#saved, 1)
+
+		-- Create a new app with the same kv — should load from kv
+		local caps2 = make_mock_caps()
+		caps2.kv = caps.kv  -- share the kv store
+		local app2 = server.create(caps2, { no_static = true })
+		local _, list = call(app2, "GET", "/api/world_info")
+		T.eq(#list.entries, 1)
+		T.eq(list.entries[1].content, "Persistent lore.")
+	end)
+end)
+
+-- ── Instruct template tests ──────────────────────────────────────────────
+
+T.describe("GET /api/instruct", function()
+	T.it("returns default templates with OpenAI active", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/instruct")
+		T.eq(status, 200)
+		T.ok(data.templates, "has templates")
+		T.ok(#data.templates >= 7, "has default templates")
+		T.eq(data.active, "OpenAI (native)")
+		-- Verify some defaults exist.
+		local names = {}
+		for _, t in ipairs(data.templates) do names[t.name] = true end
+		T.ok(names["OpenAI (native)"], "has OpenAI")
+		T.ok(names["ChatML"], "has ChatML")
+		T.ok(names["Llama2"], "has Llama2")
+		T.ok(names["Alpaca"], "has Alpaca")
+		T.ok(names["Mistral"], "has Mistral")
+		T.ok(names["Vicuna"], "has Vicuna")
+		T.ok(names["Plain"], "has Plain")
+	end)
+end)
+
+T.describe("POST /api/instruct/save", function()
+	T.it("creates a new template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/save", {
+			name = "Custom",
+			mode = "instruct",
+			system_prefix = "SYS:",
+			system_suffix = "\n",
+			user_prefix = "USR:",
+			user_suffix = "\n",
+			assistant_prefix = "AST:",
+			assistant_suffix = "\n",
+			separator = "",
+			stop_strings = { "SYS:", "USR:" },
+		})
+		T.eq(status, 200)
+		T.eq(data.name, "Custom")
+		T.eq(data.mode, "instruct")
+		T.eq(data.system_prefix, "SYS:")
+		-- Verify it appears in the list.
+		local _, list = call(app, "GET", "/api/instruct")
+		T.eq(#list.templates, 8) -- 7 defaults + 1 custom
+	end)
+
+	T.it("updates an existing template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Update ChatML.
+		call(app, "POST", "/api/instruct/save", {
+			name = "ChatML",
+			mode = "instruct",
+			system_prefix = "MODIFIED:",
+			system_suffix = "\n",
+		})
+		local _, list = call(app, "GET", "/api/instruct")
+		-- Count should remain the same.
+		T.eq(#list.templates, 7)
+		-- Find ChatML and verify.
+		local found
+		for _, t in ipairs(list.templates) do
+			if t.name == "ChatML" then found = t; break end
+		end
+		T.ok(found, "ChatML still exists")
+		T.eq(found.system_prefix, "MODIFIED:")
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/save", { mode = "chat" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("defaults mode to chat when not instruct", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/save", {
+			name = "DefaultMode",
+		})
+		T.eq(status, 200)
+		T.eq(data.mode, "chat")
+	end)
+end)
+
+T.describe("POST /api/instruct/delete", function()
+	T.it("removes a template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local initial = #(select(2, call(app, "GET", "/api/instruct")).templates)
+		local status, data = call(app, "POST", "/api/instruct/delete", { name = "Plain" })
+		T.eq(status, 200)
+		T.eq(data.deleted, true)
+		local _, list = call(app, "GET", "/api/instruct")
+		T.eq(#list.templates, initial - 1)
+	end)
+
+	T.it("clears active when deleting the active template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Active is "OpenAI (native)" by default.
+		local status, data = call(app, "POST", "/api/instruct/delete", { name = "OpenAI (native)" })
+		T.eq(status, 200)
+		T.eq(data.active, "")
+	end)
+
+	T.it("returns 404 for unknown template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/delete", { name = "Nonexistent" })
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("POST /api/instruct/activate", function()
+	T.it("changes the active template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/activate", { name = "ChatML" })
+		T.eq(status, 200)
+		T.eq(data.active, "ChatML")
+		T.eq(app.state.instruct_active, "ChatML")
+	end)
+
+	T.it("clears active with empty name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/activate", { name = "" })
+		T.eq(status, 200)
+		T.eq(data.active, "")
+		T.eq(app.state.instruct_active, nil)
+	end)
+
+	T.it("returns 404 for unknown template", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/activate", { name = "Nonexistent" })
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/instruct/activate", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("format_for_instruct", function()
+	local fmt = server._format_for_instruct
+
+	T.it("passes messages through unchanged in chat mode", function()
+		local messages = {
+			{ role = "system", content = "You are helpful." },
+			{ role = "user", content = "Hello" },
+		}
+		-- nil template
+		local result = fmt(messages, nil)
+		T.eq(#result, 2)
+		T.eq(result[1].role, "system")
+		-- chat mode template
+		result = fmt(messages, { mode = "chat" })
+		T.eq(#result, 2)
+		T.eq(result[2].content, "Hello")
+	end)
+
+	T.it("formats ChatML correctly", function()
+		local chatml = server._DEFAULT_INSTRUCT_TEMPLATES[2] -- ChatML
+		T.eq(chatml.name, "ChatML")
+		local messages = {
+			{ role = "system", content = "You are helpful." },
+			{ role = "user", content = "Hello" },
+			{ role = "assistant", content = "Hi there!" },
+		}
+		local result = fmt(messages, chatml)
+		T.eq(#result, 1)
+		T.eq(result[1].role, "user")
+		local text = result[1].content
+		-- Verify structure.
+		T.ok(text:find("<|im_start|>system\nYou are helpful.<|im_end|>", 1, true), "system block")
+		T.ok(text:find("<|im_start|>user\nHello<|im_end|>", 1, true), "user block")
+		T.ok(text:find("<|im_start|>assistant\nHi there!<|im_end|>", 1, true), "assistant block")
+		-- Ends with assistant prefix to prompt response.
+		T.ok(text:sub(-#"<|im_start|>assistant\n") == "<|im_start|>assistant\n", "ends with assistant prefix")
+	end)
+
+	T.it("formats Plain correctly", function()
+		local plain
+		for _, t in ipairs(server._DEFAULT_INSTRUCT_TEMPLATES) do
+			if t.name == "Plain" then plain = t; break end
+		end
+		T.ok(plain, "found Plain template")
+		local messages = {
+			{ role = "system", content = "System prompt." },
+			{ role = "user", content = "User says." },
+		}
+		local result = fmt(messages, plain)
+		T.eq(#result, 1)
+		local text = result[1].content
+		T.ok(text:find("System: System prompt.", 1, true), "system block")
+		T.ok(text:find("User: User says.", 1, true), "user block")
+		T.ok(text:sub(-#"Assistant: ") == "Assistant: ", "ends with assistant prefix")
+	end)
+
+	T.it("handles empty messages list", function()
+		local chatml = server._DEFAULT_INSTRUCT_TEMPLATES[2]
+		local result = fmt({}, chatml)
+		T.eq(#result, 1)
+		-- Just the trailing assistant prefix.
+		T.eq(result[1].content, "<|im_start|>assistant\n")
+	end)
+end)
+
+T.describe("instruct mode LLM integration", function()
+	T.it("sends formatted prompt when instruct template is active", function()
+		local captured_messages
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_messages = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Activate ChatML.
+		call(app, "POST", "/api/instruct/activate", { name = "ChatML" })
+		-- Send a message.
+		call(app, "POST", "/api/message", { content = "test input" })
+		T.ok(captured_messages, "messages captured")
+		-- In instruct mode, should be a single message.
+		T.eq(#captured_messages, 1)
+		T.eq(captured_messages[1].role, "user")
+		-- Should contain ChatML formatting.
+		T.ok(captured_messages[1].content:find("<|im_start|>", 1, true), "has ChatML markers")
+	end)
+
+	T.it("sends raw messages when chat mode template is active", function()
+		local captured_messages
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_messages = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- OpenAI (native) is already active by default (chat mode).
+		T.eq(app.state.instruct_active, "OpenAI (native)")
+		-- Send a message.
+		call(app, "POST", "/api/message", { content = "test input" })
+		T.ok(captured_messages, "messages captured")
+		-- In chat mode, messages should be passed as-is (multiple messages).
+		T.ok(#captured_messages > 1, "multiple messages in chat mode")
+		-- Should NOT have ChatML markers.
+		local all_content = ""
+		for _, m in ipairs(captured_messages) do
+			all_content = all_content .. m.content
+		end
+		T.ok(not all_content:find("<|im_start|>", 1, true), "no ChatML markers in chat mode")
+	end)
+
+	T.it("sends raw messages when no template is active", function()
+		local captured_messages
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_messages = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Clear active template.
+		call(app, "POST", "/api/instruct/activate", { name = "" })
+		T.eq(app.state.instruct_active, nil)
+		-- Send a message.
+		call(app, "POST", "/api/message", { content = "test input" })
+		T.ok(captured_messages, "messages captured")
+		T.ok(#captured_messages > 1, "multiple messages when no template active")
+	end)
+end)
+
+T.describe("instruct template persistence", function()
+	T.it("saves and loads templates from kv", function()
+		local kv_store = {}
+		local shared_kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local caps1 = make_mock_caps()
+		caps1.kv = shared_kv
+		local app1 = server.create(caps1, { no_static = true })
+		-- Save a custom template.
+		call(app1, "POST", "/api/instruct/save", {
+			name = "MyTemplate",
+			mode = "instruct",
+			system_prefix = "SYS:",
+			system_suffix = "\n",
+		})
+		-- Activate it.
+		call(app1, "POST", "/api/instruct/activate", { name = "MyTemplate" })
+		T.ok(kv_store["instruct_templates"], "templates saved to kv")
+		T.eq(kv_store["instruct_active"], "MyTemplate")
+
+		-- Create new app with same kv — should restore templates.
+		local caps2 = make_mock_caps()
+		caps2.kv = shared_kv
+		local app2 = server.create(caps2, { no_static = true })
+		T.eq(app2.state.instruct_active, "MyTemplate")
+		local _, list = call(app2, "GET", "/api/instruct")
+		T.eq(#list.templates, 8) -- 7 defaults + 1 custom
+		T.eq(list.active, "MyTemplate")
+	end)
+
+	T.it("falls back to defaults when kv active references missing template", function()
+		local kv_store = {
+			["instruct_active"] = "Nonexistent",
+		}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		-- Should fall back to default (OpenAI native) since "Nonexistent" isn't in templates.
+		T.eq(app.state.instruct_active, "OpenAI (native)")
+	end)
+end)
