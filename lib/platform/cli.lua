@@ -537,24 +537,18 @@ else
 	grants = load_grants(data_dir, app_id) or {}
 end
 
--- Apply --grant and --deny flags.
-local grants_changed = false
+-- Apply --grant and --deny flags (ephemeral, not persisted).
 for _, name in ipairs(opts.grant_caps) do
 	if not cap_declarations[name] then
 		io.stderr:write("warning: --grant=" .. name .. " does not match any declared cap\n")
 	else
 		grants[name] = true
-		grants_changed = true
 	end
 end
 for _, name in ipairs(opts.deny_caps) do
-	if grants[name] ~= nil or cap_declarations[name] then
+	if cap_declarations[name] then
 		grants[name] = false
-		grants_changed = true
 	end
-end
-if grants_changed then
-	save_grants(data_dir, app_id, grants)
 end
 
 -- Check for ungrantable caps (not yet decided by operator).
