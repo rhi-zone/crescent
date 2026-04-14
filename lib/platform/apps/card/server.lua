@@ -488,6 +488,9 @@ local function api_post_message(state, caps, _params, body, res)
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
 
+	-- Apply user_input regex scripts.
+	text = apply_regex_scripts(state, text, "user_input")
+
 	-- Find current leaf (last node in canonical path).
 	local path, perr = get_canonical_path(state)
 	if not path then return json_err(res, 500, perr) end
@@ -505,6 +508,9 @@ local function api_post_message(state, caps, _params, body, res)
 		state.conv:delete_subtree(user_msg.id)
 		return json_err(res, 502, "LLM error: " .. tostring(err))
 	end
+
+	-- Apply ai_output regex scripts.
+	response = apply_regex_scripts(state, response, "ai_output")
 
 	-- Add assistant message as child of user message.
 	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
@@ -540,9 +546,13 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
 
+	-- Apply user_input regex scripts.
+	text = apply_regex_scripts(state, text, "user_input")
+
 	-- Check streaming support.
 	if not caps.llm.call_stream then
-		-- Fall back to non-streaming.
+		-- Fall back to non-streaming (text already transformed, pass it through).
+		body = { content = text }
 		return api_post_message(state, caps, _params, body, res)
 	end
 
@@ -582,6 +592,9 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 		return true
 	end
 
+	-- Apply ai_output regex scripts.
+	response = apply_regex_scripts(state, response, "ai_output")
+
 	-- Add assistant message.
 	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
 	if not asst_msg then
@@ -614,6 +627,9 @@ local function api_post_continue(state, caps, _params, _body, res)
 	local context = build_context(state, caps, path)
 	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
+
+	-- Apply ai_output regex scripts.
+	response = apply_regex_scripts(state, response, "ai_output")
 
 	local leaf = path[#path]
 	if leaf.role == "assistant" then
@@ -689,6 +705,9 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 
 	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
+
+	-- Apply ai_output regex scripts.
+	response = apply_regex_scripts(state, response, "ai_output")
 
 	-- Add as sibling (same parent, same role).
 	local new_msg, nerr = state.conv:add_message(
@@ -1248,6 +1267,86 @@ local function api_post_regex_test(_state, _caps, _params, body, res)
 	return json_ok(res, { output = output })
 end
 
+
+-- ── Author's Note endpoints ───────────────────────────────────────────────
+
+local function save_authors_note(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("authors_note", json.encode(state.authors_note))
+end
+
+local function api_get_authors_note(state, _caps, _params, _body, res)
+	return json_ok(res, state.authors_note)
+end
+
+local function api_post_authors_note(state, caps, _params, body, res)
+	if not body then return json_err(res, 400, "body required") end
+	local an = state.authors_note
+	if body.text ~= nil then an.text = tostring(body.text) end
+	if body.depth ~= nil then
+		local d = tonumber(body.depth)
+		if d then an.depth = d end
+	end
+	if body.position ~= nil then
+		if body.position == "before" or body.position == "after" then
+			an.position = body.position
+		end
+	end
+	save_authors_note(state, caps)
+	return json_ok(res, an)
+end
+
+-- ── Chat export endpoint ──────────────────────────────────────────────────
+
+local function api_get_export_chat(state, _caps, params, _body, res)
+	local path, err = get_canonical_path(state)
+	if not path then return json_err(res, 500, err) end
+
+	local card_name = state.card and state.card.name or "Chat"
+	local date_str = os.date("!%Y-%m-%d")
+	local format = params.format or "text"
+
+	if format == "json" then
+		local messages = {}
+		for _, msg in ipairs(path) do
+			messages[#messages + 1] = { role = msg.role, content = msg.content }
+		end
+		local data = {
+			card_name = card_name,
+			messages = messages,
+			exported_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+		}
+		res.status = 200
+		res.headers["Content-Type"] = "application/json"
+		res.headers["Content-Disposition"] = 'attachment; filename="chat_' .. card_name .. '_' .. date_str .. '.json"'
+		res.body = json.encode(data)
+		return true
+	else
+		-- Plain text format.
+		local lines = {}
+		lines[#lines + 1] = "# Conversation with " .. card_name
+		lines[#lines + 1] = "# Exported " .. date_str
+		lines[#lines + 1] = ""
+		for _, msg in ipairs(path) do
+			local sender
+			if msg.role == "assistant" then
+				sender = card_name
+			elseif msg.role == "user" then
+				sender = state.user_name or "User"
+			else
+				sender = "System"
+			end
+			lines[#lines + 1] = sender .. ": " .. msg.content
+			lines[#lines + 1] = ""
+		end
+		res.status = 200
+		res.headers["Content-Type"] = "text/plain; charset=utf-8"
+		res.headers["Content-Disposition"] = 'attachment; filename="chat_' .. card_name .. '_' .. date_str .. '.txt"'
+		res.body = table.concat(lines, "\n")
+		return true
+	end
+end
+
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
@@ -1287,6 +1386,13 @@ local routes = {
 	["POST /api/presets/activate"] = api_post_presets_activate,
 	["POST /api/presets/import"]   = api_post_presets_import,
 	["POST /api/presets/export"]   = api_post_presets_export,
+	["GET /api/regex"]             = api_get_regex,
+	["POST /api/regex/save"]       = api_post_regex_save,
+	["POST /api/regex/delete"]     = api_post_regex_delete,
+	["POST /api/regex/test"]       = api_post_regex_test,
+	["GET /api/authors_note"]       = api_get_authors_note,
+	["POST /api/authors_note"]      = api_post_authors_note,
+	["GET /api/export/chat"]        = api_get_export_chat,
 	-- Aliases for renamed endpoints.
 	["GET /api/siblings"]         = api_get_swipes,
 	["POST /api/branch/new"]      = api_post_swipe_new,
@@ -1363,6 +1469,31 @@ function M.create(caps, opts)
 			if p then
 				state.active_persona = active
 				state.user_name = p.name
+			end
+		end
+	end
+
+	-- Load regex scripts from kv.
+	if caps.kv then
+		local raw = caps.kv.get("regex_scripts")
+		if raw then
+			local ok_r, saved = pcall(json.decode, raw)
+			if ok_r and type(saved) == "table" then
+				state.regex_scripts = saved
+			end
+		end
+	end
+
+	-- Load author's note from kv or initialize defaults.
+	state.authors_note = { text = "", depth = 4, position = "after" }
+	if caps.kv then
+		local raw = caps.kv.get("authors_note")
+		if raw then
+			local ok_an, saved = pcall(json.decode, raw)
+			if ok_an and type(saved) == "table" then
+				if saved.text ~= nil then state.authors_note.text = saved.text end
+				if saved.depth ~= nil then state.authors_note.depth = saved.depth end
+				if saved.position ~= nil then state.authors_note.position = saved.position end
 			end
 		end
 	end

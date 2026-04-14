@@ -407,6 +407,112 @@ body {
   background: #f44336;
 }
 
+/* Author's Note bar */
+
+.authors-note-bar {
+  max-width: 48rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 1rem;
+  flex-shrink: 0;
+}
+
+.authors-note-bar__toggle {
+  background: var(--border);
+  border: none;
+  color: var(--text-dim);
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.authors-note-bar__toggle:hover {
+  background: var(--accent);
+  color: var(--button-text);
+}
+
+.authors-note-bar__panel {
+  margin-top: 0.375rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.authors-note-bar__panel[hidden] {
+  display: none;
+}
+
+.authors-note-bar__textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.375rem 0.5rem;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.authors-note-bar__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.authors-note-bar__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.authors-note-bar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.authors-note-bar__input {
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.8125rem;
+  width: 5rem;
+}
+
+.authors-note-bar__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.authors-note-bar__save {
+  padding: 0.25rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.authors-note-bar__save:hover {
+  opacity: 0.85;
+}
+
+/* Export button */
+
+.input-row__button--export {
+  background: #333;
+  font-size: 1.125rem;
+  padding: 0.375rem 0.625rem;
+}
+
 /* Input row */
 
 .input-row {
@@ -1384,6 +1490,354 @@ body {
 
 .settings-persona__btn--save:hover {
   opacity: 0.85;
+}
+
+/* Regex button */
+
+.input-row__button--regex {
+  background: #333;
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.625rem;
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+}
+
+/* Regex overlay */
+
+.regex-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.regex-overlay[hidden] {
+  display: none;
+}
+
+.regex-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 36rem;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.regex-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.regex-panel__title {
+  font-weight: 600;
+  font-size: 1rem;
+  flex: 1;
+}
+
+.regex-panel__add {
+  background: var(--button-bg);
+  border: none;
+  color: var(--button-text);
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.regex-panel__add:hover {
+  opacity: 0.85;
+}
+
+.regex-panel__close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+}
+
+.regex-panel__close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.regex-panel__body {
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+
+/* Regex script entries */
+
+.regex-entry {
+  background: var(--bg-message);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.regex-entry--disabled {
+  opacity: 0.5;
+}
+
+.regex-entry__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.regex-entry__header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.regex-entry__toggle {
+  width: 2.5rem;
+  height: 1.25rem;
+  border-radius: 0.625rem;
+  background: var(--border);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.regex-entry__toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.regex-entry__toggle--on {
+  background: var(--accent);
+}
+
+.regex-entry__toggle--on::after {
+  transform: translateX(1.25rem);
+  background: var(--button-text);
+}
+
+.regex-entry__name {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.regex-entry__scope {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  background: var(--border);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.regex-entry__expand {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.regex-entry__body {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.regex-entry__body[hidden] {
+  display: none;
+}
+
+.regex-entry__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.regex-entry__label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.regex-entry__input {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+
+.regex-entry__input--mono {
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+.regex-entry__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.regex-entry__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.regex-entry__row > .regex-entry__field {
+  flex: 1;
+}
+
+.regex-entry__actions {
+  display: flex;
+  gap: 0.375rem;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+
+.regex-entry__save {
+  padding: 0.25rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.regex-entry__save:hover {
+  opacity: 0.85;
+}
+
+.regex-entry__delete {
+  padding: 0.25rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.regex-entry__delete:hover {
+  background: #600;
+  color: var(--accent);
+}
+
+.regex-empty {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 2rem;
+  font-size: 0.875rem;
+}
+
+/* Regex test area */
+
+.regex-panel__test {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.regex-panel__test-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.regex-panel__test-input {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.8125rem;
+}
+
+.regex-panel__test-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.regex-panel__test-textarea {
+  width: 100%;
+  min-height: 2rem;
+  resize: vertical;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.regex-panel__test-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.regex-panel__test-btn {
+  align-self: flex-start;
+  padding: 0.25rem 0.75rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.regex-panel__test-btn:hover {
+  opacity: 0.85;
+}
+
+.regex-panel__test-output {
+  min-height: 1.5rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 /* Mobile */

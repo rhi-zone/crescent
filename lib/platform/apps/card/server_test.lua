@@ -1839,3 +1839,479 @@ T.describe("POST /api/continue — token_count in response", function()
 		T.ok(data.token_count.context_used > 0, "context_used > 0")
 	end)
 end)
+
+-- ── Author's Note tests ───────────────────────────────────────────────────
+
+T.describe("GET /api/authors_note", function()
+	T.it("returns default author's note", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/authors_note")
+		T.eq(status, 200)
+		T.eq(data.text, "")
+		T.eq(data.depth, 4)
+		T.eq(data.position, "after")
+	end)
+end)
+
+T.describe("POST /api/authors_note", function()
+	T.it("updates text", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/authors_note", { text = "Be dramatic" })
+		T.eq(status, 200)
+		T.eq(data.text, "Be dramatic")
+		T.eq(data.depth, 4) -- unchanged
+		T.eq(data.position, "after") -- unchanged
+	end)
+
+	T.it("updates depth and position", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/authors_note", {
+			text = "Note", depth = 2, position = "before",
+		})
+		T.eq(status, 200)
+		T.eq(data.text, "Note")
+		T.eq(data.depth, 2)
+		T.eq(data.position, "before")
+	end)
+
+	T.it("rejects invalid position", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/authors_note", { position = "invalid" })
+		local _, data = call(app, "GET", "/api/authors_note")
+		T.eq(data.position, "after") -- unchanged from default
+	end)
+
+	T.it("persists to kv", function()
+		local kv_store = {}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/authors_note", { text = "Persist me", depth = 3 })
+		T.ok(kv_store["authors_note"], "saved to kv")
+		local saved = json.decode(kv_store["authors_note"])
+		T.eq(saved.text, "Persist me")
+		T.eq(saved.depth, 3)
+	end)
+
+	T.it("loads persisted note on create", function()
+		local kv_store = {}
+		local shared_kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local caps1 = make_mock_caps()
+		caps1.kv = shared_kv
+		local app1 = server.create(caps1, { no_static = true })
+		call(app1, "POST", "/api/authors_note", { text = "Loaded", depth = 2, position = "before" })
+
+		local caps2 = make_mock_caps()
+		caps2.kv = shared_kv
+		local app2 = server.create(caps2, { no_static = true })
+		local status, data = call(app2, "GET", "/api/authors_note")
+		T.eq(status, 200)
+		T.eq(data.text, "Loaded")
+		T.eq(data.depth, 2)
+		T.eq(data.position, "before")
+	end)
+end)
+
+T.describe("author's note context integration", function()
+	T.it("inserts AN at correct depth in context", function()
+		local captured_context
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				call_count = call_count + 1
+				captured_context = messages
+				return "response " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Set up author's note with depth=1 (inserted 1 from end).
+		call(app, "POST", "/api/authors_note", { text = "AN_MARKER", depth = 1 })
+		-- Send several messages to build a longer context.
+		call(app, "POST", "/api/message", { content = "Hello" })
+		call(app, "POST", "/api/message", { content = "How are you?" })
+		-- Now captured_context is the context for the last LLM call.
+		T.ok(captured_context, "context was captured")
+		-- Find the AN_MARKER.
+		local an_pos
+		for i, msg in ipairs(captured_context) do
+			if msg.content == "AN_MARKER" then
+				an_pos = i
+				break
+			end
+		end
+		T.ok(an_pos, "AN_MARKER found in context")
+		-- With depth=1 and position=after, it should be 1 from the end.
+		-- So there should be 1 message after the AN.
+		local messages_after_an = #captured_context - an_pos
+		T.eq(messages_after_an, 1, "1 message after AN at depth 1")
+	end)
+
+	T.it("does not insert AN when text is empty", function()
+		local captured_context
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_context = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- AN text is empty by default.
+		call(app, "POST", "/api/message", { content = "test" })
+		T.ok(captured_context, "context was captured")
+		-- No system message with empty content should exist from AN.
+		for _, msg in ipairs(captured_context) do
+			if msg.role == "system" then
+				T.ok(#msg.content > 0, "no empty system messages from AN")
+			end
+		end
+	end)
+end)
+
+-- ── Chat export tests ─────────────────────────────────────────────────────
+
+T.describe("GET /api/export/chat", function()
+	T.it("returns valid JSON export", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "Hello there" })
+		local req = make_req("GET", "/api/export/chat?format=json")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "application/json")
+		T.ok(res.headers["Content-Disposition"], "has Content-Disposition")
+		T.ok(res.headers["Content-Disposition"]:find("chat_TestChar"), "filename includes card name")
+		T.ok(res.headers["Content-Disposition"]:find("%.json"), "filename has .json extension")
+		-- Parse the body.
+		local data = json.decode(res.body)
+		T.eq(data.card_name, "TestChar")
+		T.ok(data.exported_at, "has exported_at")
+		T.ok(data.messages, "has messages")
+		-- Should have greeting + user + assistant = 3
+		T.eq(#data.messages, 3)
+		T.eq(data.messages[1].role, "assistant")
+		T.eq(data.messages[2].role, "user")
+		T.eq(data.messages[2].content, "Hello there")
+		T.eq(data.messages[3].role, "assistant")
+		T.eq(data.messages[3].content, "reply")
+	end)
+
+	T.it("returns formatted text export (default)", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "Hello there" })
+		local req = make_req("GET", "/api/export/chat")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "text/plain; charset=utf-8")
+		T.ok(res.headers["Content-Disposition"], "has Content-Disposition")
+		T.ok(res.headers["Content-Disposition"]:find("%.txt"), "filename has .txt extension")
+		-- Check text content.
+		T.ok(res.body:find("# Conversation with TestChar"), "has header")
+		T.ok(res.body:find("# Exported"), "has export date")
+		T.ok(res.body:find("TestChar: Hello, Tester!"), "has greeting")
+		T.ok(res.body:find("Tester: Hello there"), "has user message")
+		T.ok(res.body:find("TestChar: reply"), "has assistant reply")
+	end)
+
+	T.it("includes all messages from canonical path", function()
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function()
+				call_count = call_count + 1
+				return "reply " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "First" })
+		call(app, "POST", "/api/message", { content = "Second" })
+		local req = make_req("GET", "/api/export/chat?format=json")
+		local res = make_res()
+		app.handler(req, res)
+		local data = json.decode(res.body)
+		-- greeting + user1 + asst1 + user2 + asst2 = 5
+		T.eq(#data.messages, 5)
+	end)
+
+	T.it("text format defaults when no format param", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("GET", "/api/export/chat")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "text/plain; charset=utf-8")
+	end)
+end)
+
+-- ── Regex scripts tests ──────────────────────────────────────────────────
+
+T.describe("GET /api/regex", function()
+	T.it("returns empty list initially", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/regex")
+		T.eq(status, 200)
+		T.ok(data.scripts, "has scripts")
+		T.eq(#data.scripts, 0)
+	end)
+end)
+
+T.describe("POST /api/regex/save", function()
+	T.it("creates a new script", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/regex/save", {
+			name = "Remove asterisks",
+			find = "%*([^*]+)%*",
+			replace = "%1",
+			scope = "ai_output",
+			order = 10,
+		})
+		T.eq(status, 200)
+		T.eq(data.name, "Remove asterisks")
+		T.eq(data.find, "%*([^*]+)%*")
+		T.eq(data.replace, "%1")
+		T.eq(data.enabled, true)
+		T.eq(data.scope, "ai_output")
+		T.eq(data.order, 10)
+		-- Verify it appears in the list.
+		local _, list = call(app, "GET", "/api/regex")
+		T.eq(#list.scripts, 1)
+		T.eq(list.scripts[1].name, "Remove asterisks")
+	end)
+
+	T.it("updates existing script by name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/regex/save", {
+			name = "test", find = "foo", replace = "bar",
+		})
+		local status, data = call(app, "POST", "/api/regex/save", {
+			name = "test", find = "baz", replace = "qux", scope = "user_input",
+		})
+		T.eq(status, 200)
+		T.eq(data.find, "baz")
+		T.eq(data.replace, "qux")
+		T.eq(data.scope, "user_input")
+		-- Should still be one script.
+		local _, list = call(app, "GET", "/api/regex")
+		T.eq(#list.scripts, 1)
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/regex/save", { find = "x" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 without find", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/regex/save", { name = "x" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 for invalid pattern", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/regex/save", {
+			name = "bad", find = "[invalid",
+		})
+		T.eq(status, 400)
+		T.ok(data.error:find("invalid pattern"), "error mentions invalid pattern")
+	end)
+end)
+
+T.describe("POST /api/regex/delete", function()
+	T.it("removes script by name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/regex/save", { name = "a", find = "x", replace = "y" })
+		call(app, "POST", "/api/regex/save", { name = "b", find = "z", replace = "w" })
+		local _, list = call(app, "GET", "/api/regex")
+		T.eq(#list.scripts, 2)
+		local status, data = call(app, "POST", "/api/regex/delete", { name = "a" })
+		T.eq(status, 200)
+		T.eq(data.deleted, true)
+		local _, list2 = call(app, "GET", "/api/regex")
+		T.eq(#list2.scripts, 1)
+		T.eq(list2.scripts[1].name, "b")
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/regex/delete", {})
+		T.eq(status, 400)
+	end)
+
+	T.it("returns 404 for unknown name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/regex/delete", { name = "nonexistent" })
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("POST /api/regex/test", function()
+	T.it("applies pattern correctly", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/regex/test", {
+			find = "%*([^*]+)%*",
+			replace = "%1",
+			input = "She *walked* to the *door*.",
+		})
+		T.eq(status, 200)
+		T.eq(data.output, "She walked to the door.")
+	end)
+
+	T.it("returns 400 without find or input", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/regex/test", { find = "x" })
+		T.eq(status, 400)
+		status = call(app, "POST", "/api/regex/test", { input = "x" })
+		T.eq(status, 400)
+	end)
+
+	T.it("returns 400 for invalid pattern", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/regex/test", {
+			find = "[bad", replace = "", input = "test",
+		})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("regex scripts — apply_regex_scripts integration", function()
+	T.it("transforms AI output", function()
+		local caps = make_mock_caps({
+			llm_call = function() return "*bold text* and *more*" end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Add a script that removes asterisks from AI output.
+		call(app, "POST", "/api/regex/save", {
+			name = "strip asterisks",
+			find = "%*([^*]+)%*",
+			replace = "%1",
+			scope = "ai_output",
+			enabled = true,
+		})
+		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(status, 200)
+		T.eq(data.assistant.content, "bold text and more")
+	end)
+
+	T.it("transforms user input", function()
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				-- Return the last user message so we can verify it was transformed.
+				for i = #messages, 1, -1 do
+					if messages[i].role == "user" then
+						return "echo: " .. messages[i].content
+					end
+				end
+				return "no user message"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Add a script that uppercases "hello" in user input.
+		call(app, "POST", "/api/regex/save", {
+			name = "upcase hello",
+			find = "hello",
+			replace = "HELLO",
+			scope = "user_input",
+			enabled = true,
+		})
+		local status, data = call(app, "POST", "/api/message", { content = "hello world" })
+		T.eq(status, 200)
+		-- The stored user message should have the transformed text.
+		T.eq(data.user.content, "HELLO world")
+	end)
+
+	T.it("disabled scripts are skipped", function()
+		local caps = make_mock_caps({
+			llm_call = function() return "hello world" end,
+		})
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/regex/save", {
+			name = "disabled script",
+			find = "hello",
+			replace = "HELLO",
+			scope = "ai_output",
+			enabled = false,
+		})
+		local status, data = call(app, "POST", "/api/message", { content = "test" })
+		T.eq(status, 200)
+		T.eq(data.assistant.content, "hello world")
+	end)
+
+	T.it("scripts execute in order", function()
+		local caps = make_mock_caps({
+			llm_call = function() return "abc" end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Script with order=10: a -> x
+		call(app, "POST", "/api/regex/save", {
+			name = "first", find = "a", replace = "x",
+			scope = "ai_output", order = 10,
+		})
+		-- Script with order=5: x -> z (runs first because lower order)
+		call(app, "POST", "/api/regex/save", {
+			name = "second", find = "x", replace = "z",
+			scope = "ai_output", order = 5,
+		})
+		local status, data = call(app, "POST", "/api/message", { content = "go" })
+		T.eq(status, 200)
+		-- order=5 runs first: "abc" has no "x" -> "abc"
+		-- order=10 runs second: "abc" -> "xbc"
+		-- So "second" (order=5) doesn't match, "first" (order=10) does.
+		T.eq(data.assistant.content, "xbc")
+	end)
+end)
+
+T.describe("regex scripts persistence", function()
+	T.it("saves to kv and loads on init", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/regex/save", {
+			name = "persist test",
+			find = "foo",
+			replace = "bar",
+			scope = "ai_output",
+		})
+		-- Verify kv was written.
+		local raw = caps.kv.get("regex_scripts")
+		T.ok(raw, "regex_scripts saved to kv")
+		local saved = json.decode(raw)
+		T.eq(#saved, 1)
+		T.eq(saved[1].name, "persist test")
+
+		-- Create new app with same kv — should load from kv.
+		local caps2 = make_mock_caps()
+		caps2.kv = caps.kv
+		local app2 = server.create(caps2, { no_static = true })
+		local _, list = call(app2, "GET", "/api/regex")
+		T.eq(#list.scripts, 1)
+		T.eq(list.scripts[1].name, "persist test")
+		T.eq(list.scripts[1].find, "foo")
+	end)
+end)
