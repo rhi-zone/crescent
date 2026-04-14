@@ -568,10 +568,15 @@ Export is a container format operation, not an app-specific one. The platform ca
 pack any app's tarball into any supported container:
 
 ```
-platform export myapp.tar.gz --format=png --output=myapp.png
-platform export myapp.png --format=tar.gz --output=myapp.tar.gz
-platform export myapp.png --format=dir --output=myapp/
+platform export myapp.tar.gz myapp.png          — infer png from extension
+platform export myapp.png myapp.tar.gz          — infer tar.gz from extension
+platform export myapp.png myapp/                — infer directory from trailing /
+platform export myapp.png --format=tar.gz out   — explicit format override
 ```
+
+Format is inferred from the output path's extension (`.png`, `.jpg`, `.webp`,
+`.tar.gz`, `.tar`, trailing `/` for directory). `--format` overrides when the
+extension is ambiguous or missing.
 
 The app's data (CCv2 chara chunk, etc.) is the app's concern — it serializes its own
 data. The platform handles the container wrapping/unwrapping.
