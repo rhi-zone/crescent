@@ -344,6 +344,116 @@ db_mt.swipe_to = function(self, message_id)
 	return true
 end
 
+-- update_message(id, fields) -> msg | nil, err
+-- Updates mutable fields: content, metadata, canonical_child_id.
+-- Only updates fields present in the table.
+db_mt.update_message = function(self, id, fields)
+	local db = self._db
+	-- Validate existence.
+	local existing, err = self:get_message(id)
+	if not existing then return nil, err end
+	local sets = {}
+	local vals = {}
+	if fields.content ~= nil then
+		sets[#sets + 1] = "content = ?"
+		vals[#vals + 1] = fields.content
+	end
+	if fields.metadata ~= nil then
+		local meta_s, merr = encode_metadata(fields.metadata)
+		if merr then return nil, merr end
+		sets[#sets + 1] = "metadata = ?"
+		vals[#vals + 1] = meta_s
+	end
+	if fields.canonical_child_id ~= nil then
+		sets[#sets + 1] = "canonical_child_id = ?"
+		vals[#vals + 1] = fields.canonical_child_id
+	end
+	if #sets == 0 then
+		return existing
+	end
+	vals[#vals + 1] = id
+	local ok, uerr = db:execute(
+		"UPDATE messages SET " .. table.concat(sets, ", ") .. " WHERE id = ?",
+		unpack(vals)
+	)
+	if not ok then return nil, uerr end
+	return self:get_message(id)
+end
+
+-- delete_subtree(message_id) -> {deleted=N} | nil, err
+-- Deletes a message and all its descendants via recursive CTE.
+-- Updates parent's canonical_child_id after deletion.
+db_mt.delete_subtree = function(self, message_id)
+	local db = self._db
+	-- Validate existence and get parent_id.
+	local msg, err = self:get_message(message_id)
+	if not msg then return nil, err end
+	local parent_id = msg.parent_id
+	-- Collect descendant IDs via recursive CTE.
+	local iter, qerr = db:query(
+		"WITH RECURSIVE subtree(id) AS ("
+		.. " SELECT id FROM messages WHERE id = ?"
+		.. " UNION ALL"
+		.. " SELECT m.id FROM messages m JOIN subtree s ON m.parent_id = s.id"
+		.. ") SELECT id FROM subtree",
+		message_id
+	)
+	if not iter then return nil, qerr end
+	local ids = {}
+	while true do
+		local mid, ierr = iter()
+		if iter_done(mid, ierr) then break end
+		if mid == nil then return nil, "conversation: delete_subtree query error: " .. tostring(ierr) end
+		ids[#ids + 1] = mid
+	end
+	-- Clear canonical_child_id references pointing into the subtree to avoid FK violations.
+	-- Also clear canonical_child_id on nodes within the subtree that point to each other.
+	for _, did in ipairs(ids) do
+		db_execute(db, "UPDATE messages SET canonical_child_id = NULL WHERE canonical_child_id = ?", did)
+	end
+	-- Delete all nodes in reverse order (leaves first) to avoid FK issues.
+	for i = #ids, 1, -1 do
+		local ok, derr = db_execute(db, "DELETE FROM messages WHERE id = ?", ids[i])
+		if not ok then return nil, derr end
+	end
+	-- Update parent's canonical_child_id.
+	if parent_id ~= nil then
+		local children, cerr = self:get_children(parent_id)
+		if not children then return nil, cerr end
+		if #children > 0 then
+			local ok, uerr = db_execute(db,
+				"UPDATE messages SET canonical_child_id = ? WHERE id = ?",
+				children[1].id, parent_id
+			)
+			if not ok then return nil, uerr end
+		else
+			local ok, uerr = db_execute(db,
+				"UPDATE messages SET canonical_child_id = NULL WHERE id = ?",
+				parent_id
+			)
+			if not ok then return nil, uerr end
+		end
+	end
+	return { deleted = #ids }
+end
+
+-- get_root_children(session_id) -> msgs[] | nil, err
+-- Gets children of the root message (parent_id IS NULL) in a session.
+db_mt.get_root_children = function(self, session_id)
+	local db = self._db
+	local iter, err = db:query(
+		"SELECT id FROM messages WHERE session_id = ? AND parent_id IS NULL",
+		session_id
+	)
+	if not iter then return nil, err end
+	local root_id, qerr = iter()
+	if iter_done(root_id, qerr) then
+		return nil, "conversation: no root message in session: " .. tostring(session_id)
+	end
+	if root_id == nil then return nil, "conversation: get_root_children query error: " .. tostring(qerr) end
+	return self:get_children(root_id)
+end
+
 -- ── open ──────────────────────────────────────────────────────────────────────
 
 -- open(path) -> db | nil, err

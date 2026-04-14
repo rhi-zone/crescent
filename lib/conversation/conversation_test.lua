@@ -200,6 +200,122 @@ T.describe("swipe_to", function()
 	end)
 end)
 
+T.describe("update_message", function()
+	T.it("updates content", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local msg = db:add_message(session.id, nil, "user", "original")
+		local updated, err = db:update_message(msg.id, { content = "edited" })
+		T.ok(updated, "update_message: " .. tostring(err))
+		T.eq(updated.content, "edited")
+		-- Verify persisted.
+		local got = db:get_message(msg.id)
+		T.eq(got.content, "edited")
+	end)
+
+	T.it("updates metadata", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local msg = db:add_message(session.id, nil, "user", "hi", { key = "old" })
+		local updated, err = db:update_message(msg.id, { metadata = { key = "new" } })
+		T.ok(updated, "update_message: " .. tostring(err))
+		T.eq(updated.metadata.key, "new")
+		T.eq(updated.content, "hi") -- unchanged
+	end)
+
+	T.it("returns nil, err for nonexistent message", function()
+		local db = open()
+		local result, err = db:update_message("no-such-id", { content = "x" })
+		T.ok(result == nil, "should be nil")
+		T.ok(err ~= nil, "should have error")
+	end)
+end)
+
+T.describe("delete_subtree", function()
+	T.it("deletes a node and all descendants", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local root  = db:add_message(session.id, nil,      "user",      "Root")
+		local c1    = db:add_message(session.id, root.id,  "assistant", "C1")
+		local c1a   = db:add_message(session.id, c1.id,    "user",      "C1a")
+		local c1b   = db:add_message(session.id, c1.id,    "user",      "C1b")
+		local c2    = db:add_message(session.id, root.id,  "assistant", "C2")
+
+		-- Delete c1 subtree (c1, c1a, c1b).
+		local result, err = db:delete_subtree(c1.id)
+		T.ok(result, "delete_subtree: " .. tostring(err))
+		T.eq(result.deleted, 3)
+
+		-- c1, c1a, c1b are gone.
+		T.ok(db:get_message(c1.id) == nil,  "c1 deleted")
+		T.ok(db:get_message(c1a.id) == nil, "c1a deleted")
+		T.ok(db:get_message(c1b.id) == nil, "c1b deleted")
+
+		-- c2 still exists.
+		T.ok(db:get_message(c2.id) ~= nil, "c2 survives")
+
+		-- Root's canonical_child_id should be updated to c2.
+		local root_now = db:get_message(root.id)
+		T.eq(root_now.canonical_child_id, c2.id)
+	end)
+
+	T.it("handles leaf deletion", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local root = db:add_message(session.id, nil,     "user",      "Root")
+		local c1   = db:add_message(session.id, root.id, "assistant", "C1")
+
+		local result, err = db:delete_subtree(c1.id)
+		T.ok(result, "delete leaf: " .. tostring(err))
+		T.eq(result.deleted, 1)
+
+		-- Parent's canonical_child_id should be nil (no children remain).
+		local root_now = db:get_message(root.id)
+		T.ok(root_now.canonical_child_id == nil, "canonical cleared")
+	end)
+
+	T.it("handles root deletion", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local root = db:add_message(session.id, nil,     "user",      "Root")
+		local c1   = db:add_message(session.id, root.id, "assistant", "C1")
+
+		local result, err = db:delete_subtree(root.id)
+		T.ok(result, "delete root: " .. tostring(err))
+		T.eq(result.deleted, 2)
+
+		-- All gone.
+		T.ok(db:get_message(root.id) == nil, "root deleted")
+		T.ok(db:get_message(c1.id) == nil, "c1 deleted")
+	end)
+end)
+
+T.describe("get_root_children", function()
+	T.it("returns children of root", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local root = db:add_message(session.id, nil,     "user",      "Root")
+		local c1   = db:add_message(session.id, root.id, "assistant", "C1")
+		local c2   = db:add_message(session.id, root.id, "assistant", "C2")
+
+		local children, err = db:get_root_children(session.id)
+		T.ok(children, "get_root_children: " .. tostring(err))
+		T.eq(#children, 2)
+		local ids = {}
+		for _, c in ipairs(children) do ids[c.id] = true end
+		T.ok(ids[c1.id], "c1 present")
+		T.ok(ids[c2.id], "c2 present")
+	end)
+
+	T.it("returns error when no root exists", function()
+		local db = open()
+		local session = db:create_session("app1")
+		local result, err = db:get_root_children(session.id)
+		T.ok(result == nil, "should be nil")
+		T.ok(err ~= nil, "should have error")
+	end)
+end)
+
 T.describe("delete_session", function()
 	T.it("removes session and cascades to messages", function()
 		local db = open()
