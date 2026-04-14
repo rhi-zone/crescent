@@ -1719,3 +1719,77 @@ T.describe("persona persistence", function()
 		T.eq(#list.personas, 2)
 	end)
 end)
+
+-- ── Token count tests ──────────────────────────────────────────────────────
+
+T.describe("GET /api/token_count", function()
+	T.it("returns correct structure with initial greeting", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/token_count")
+		T.eq(status, 200)
+		T.ok(data.context_used, "has context_used")
+		T.ok(data.context_max, "has context_max")
+		T.ok(data.response_budget, "has response_budget")
+		T.ok(data.available ~= nil, "has available")
+		T.ok(data.messages ~= nil, "has messages")
+		T.ok(data.lorebook_entries ~= nil, "has lorebook_entries")
+		T.eq(data.context_max, 4096)
+		T.eq(data.response_budget, 512)
+		T.eq(data.messages, 1) -- greeting only
+		T.ok(data.context_used > 0, "context_used > 0")
+		T.eq(data.available, data.context_max - data.context_used - data.response_budget)
+	end)
+
+	T.it("context_used increases after adding messages", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local _, data1 = call(app, "GET", "/api/token_count")
+		local initial_used = data1.context_used
+		local initial_messages = data1.messages
+
+		-- Add a user message + assistant response.
+		call(app, "POST", "/api/message", { content = "Hello, this is a test message with some content." })
+
+		local _, data2 = call(app, "GET", "/api/token_count")
+		T.ok(data2.context_used > initial_used, "context_used increased after message")
+		T.eq(data2.messages, initial_messages + 2) -- user + assistant
+	end)
+
+	T.it("reflects settings changes", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Change max_context.
+		call(app, "POST", "/api/settings", { max_context = 8192, max_tokens = 1024 })
+		local _, data = call(app, "GET", "/api/token_count")
+		T.eq(data.context_max, 8192)
+		T.eq(data.response_budget, 1024)
+		T.eq(data.available, 8192 - data.context_used - 1024)
+	end)
+end)
+
+T.describe("POST /api/message — token_count in response", function()
+	T.it("includes token_count in message response", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(status, 200)
+		T.ok(data.token_count, "response has token_count")
+		T.ok(data.token_count.context_used, "token_count has context_used")
+		T.eq(data.token_count.context_max, 4096)
+		T.eq(data.token_count.messages, 3) -- greeting + user + assistant
+	end)
+end)
+
+T.describe("POST /api/continue — token_count in response", function()
+	T.it("includes token_count in continue response", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Add a user message first so continue has something to continue.
+		call(app, "POST", "/api/message", { content = "Tell me more" })
+		local status, data = call(app, "POST", "/api/continue")
+		T.eq(status, 200)
+		T.ok(data.token_count, "response has token_count")
+		T.ok(data.token_count.context_used > 0, "context_used > 0")
+	end)
+end)

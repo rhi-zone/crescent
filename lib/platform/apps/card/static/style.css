@@ -311,6 +311,50 @@ body {
   50% { opacity: 1; }
 }
 
+/* Token counter */
+
+.token-counter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 1rem;
+  max-width: 48rem;
+  width: 100%;
+  margin: 0 auto;
+  flex-shrink: 0;
+}
+
+.token-counter__text {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-counter__bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.token-counter__fill {
+  height: 100%;
+  width: 0%;
+  background: #4caf50;
+  border-radius: 2px;
+  transition: width 0.3s, background 0.3s;
+}
+
+.token-counter__fill--warn {
+  background: #ff9800;
+}
+
+.token-counter__fill--danger {
+  background: #f44336;
+}
+
 /* Input row */
 
 .input-row {
@@ -1198,6 +1242,95 @@ body {
 }
 
 .card-edit-panel__save:hover {
+  opacity: 0.85;
+}
+
+/* ── Persona section ─────────────────────────────────────────────────────── */
+
+.settings-section {
+  margin-bottom: 1rem;
+}
+
+.settings-section__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #ccc;
+  display: block;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #444;
+  padding-bottom: 0.25rem;
+}
+
+.settings-persona__row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.settings-persona__select {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  background: #333;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.settings-persona__input {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  background: #333;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.settings-persona__textarea {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  background: #333;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.settings-persona__btn {
+  padding: 0.375rem 0.75rem;
+  background: #444;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-persona__btn:hover {
+  background: #555;
+}
+
+.settings-persona__btn--danger {
+  color: #f88;
+}
+
+.settings-persona__btn--danger:hover {
+  background: #633;
+}
+
+.settings-persona__btn--save {
+  background: #2a6;
+  border-color: #2a6;
+  margin-top: 0.5rem;
+}
+
+.settings-persona__btn--save:hover {
   opacity: 0.85;
 }
 
