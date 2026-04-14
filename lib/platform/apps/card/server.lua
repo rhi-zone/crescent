@@ -10,11 +10,13 @@
 -- a new sibling. The "active path" is the canonical path from root to leaf.
 --
 -- Capabilities (injected via caps table):
---   caps.llm.call(messages, opts?) -> string | nil, err
+--   caps.llm.call(messages, opts?) -> string | nil, err  (temporary — will be replaced by http_client cap + LLM library)
 --   caps.llm.count_tokens(text) -> integer (optional)
---   caps.png.text(keyword) -> string | nil
+--   caps.self.metadata(keyword) -> string | nil
+--   caps.self.entry(path) -> string | nil
+--   caps.self.entries() -> string[]
 --   caps.kv.get(key) / caps.kv.set(key, val) — persistence (optional)
---   caps.config.get(key) -> value | nil — settings (optional)
+--   caps.time.now() -> integer — Unix timestamp
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -121,8 +123,8 @@ end
 -- ── Card loading ────────────────────────────────────────────────────────────
 
 local function load_card(state, caps)
-	if not caps.png then return nil, "no png capability" end
-	local raw = caps.png.text("chara")
+	if not caps.self then return nil, "no self capability" end
+	local raw = caps.self.metadata("chara")
 	if not raw then return nil, "no chara chunk" end
 	local json_str = raw
 	if json_str:sub(1, 1) ~= "{" then
@@ -821,17 +823,17 @@ local function api_get_card(state, _caps, _params, _body, res)
 end
 
 local function api_get_avatar(_state, caps, _params, _body, res)
-	if not caps.png or not caps.png.raw then
+	if not caps.self or not caps.self.entry then
 		res.status = 404
 		res.headers["Content-Type"] = "text/plain"
 		res.body = "no avatar"
 		return true
 	end
-	local bytes, err = caps.png.raw()
+	local bytes = caps.self.entry("avatar.png")
 	if not bytes then
 		res.status = 404
 		res.headers["Content-Type"] = "text/plain"
-		res.body = err or "no avatar"
+		res.body = "no avatar"
 		return true
 	end
 	res.status = 200
@@ -927,24 +929,9 @@ local function api_post_message(state, caps, _params, body, res)
 	})
 end
 
--- ── SSE helpers ────────────────────────────────────────────────────────────
+-- ── SSE streaming (via res.send_event / res.close from http_server cap) ───
 
-local function sse_write(sock, data)
-	sock:send("data: " .. data .. "\r\n\r\n")
-end
-
-local function sse_start(sock, res)
-	res.raw = true
-	local headers = "HTTP/1.1 200 OK\r\n"
-		.. "Content-Type: text/event-stream\r\n"
-		.. "Cache-Control: no-cache\r\n"
-		.. "Connection: keep-alive\r\n"
-		.. "Access-Control-Allow-Origin: *\r\n"
-		.. "\r\n"
-	sock:send(headers)
-end
-
-local function api_post_message_stream(state, caps, _params, body, res, sock)
+local function api_post_message_stream(state, caps, _params, body, res)
 	if not body or not body.content then return json_err(res, 400, "content required") end
 	local text = body.content
 	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
@@ -971,11 +958,8 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 	-- Build context.
 	local context = build_context(state, caps)
 
-	-- Start SSE stream.
-	sse_start(sock, res)
-
 	-- Send user message event.
-	sse_write(sock, json.encode({
+	res.send_event(json.encode({
 		type = "user",
 		id = user_msg.id,
 		role = "user",
@@ -984,14 +968,14 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 
 	-- Stream LLM response.
 	local response, err = caps.llm.call_stream(apply_instruct(state, context), function(token)
-		sse_write(sock, json.encode({ type = "token", token = token }))
+		res.send_event(json.encode({ type = "token", token = token }))
 	end, llm_opts_from_settings(state.settings))
 
 	if not response then
 		-- Rollback: delete user message.
 		state.conv:delete_subtree(user_msg.id)
-		sse_write(sock, json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
-		sock:close()
+		res.send_event(json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
+		res.close()
 		return true
 	end
 
@@ -1001,8 +985,8 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 	-- Add assistant message.
 	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
 	if not asst_msg then
-		sse_write(sock, json.encode({ type = "error", error = "db error: " .. tostring(aerr) }))
-		sock:close()
+		res.send_event(json.encode({ type = "error", error = "db error: " .. tostring(aerr) }))
+		res.close()
 		return true
 	end
 
@@ -1010,7 +994,7 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 
 	-- Send done event with final message data.
 	local idx, total = sibling_info(state, asst_msg)
-	sse_write(sock, json.encode({
+	res.send_event(json.encode({
 		type = "done",
 		id = asst_msg.id,
 		role = "assistant",
@@ -1019,7 +1003,7 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 		sibling_count = total,
 	}))
 
-	sock:close()
+	res.close()
 	return true
 end
 
@@ -1881,12 +1865,13 @@ end
 
 -- ── Chat export endpoint ──────────────────────────────────────────────────
 
-local function api_get_export_chat(state, _caps, params, _body, res)
+local function api_get_export_chat(state, caps, params, _body, res)
 	local path, err = get_canonical_path(state)
 	if not path then return json_err(res, 500, err) end
 
 	local card_name = state.card and state.card.name or "Chat"
-	local date_str = os.date("!%Y-%m-%d")
+	local now = caps.time and caps.time.now() or os.time()
+	local date_str = os.date("!%Y-%m-%d", now)
 	local format = params.format or "text"
 
 	if format == "json" then
@@ -1897,7 +1882,7 @@ local function api_get_export_chat(state, _caps, params, _body, res)
 		local data = {
 			card_name = card_name,
 			messages = messages,
-			exported_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+			exported_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now),
 		}
 		res.status = 200
 		res.headers["Content-Type"] = "application/json"
@@ -2025,10 +2010,9 @@ function M.create(caps, opts)
 	opts = opts or {}
 	local state = create_state()
 
-	-- Read user name from config.
-	if caps.config and caps.config.get then
-		local name = caps.config.get("user_name")
-		if name then state.user_name = name end
+	-- Read user name from opts (previously from caps.config, now passed directly).
+	if opts.user_name then
+		state.user_name = opts.user_name
 	end
 
 	-- Initialize generation settings from defaults, then overlay persisted values.
@@ -2231,39 +2215,50 @@ function M.create(caps, opts)
 		init_greeting(state)
 	end
 
-	-- Static file serving.
-	local ok_static, static_serve = false, nil
-	if not opts.no_static then
-		local static_dir = opts.static_dir or "static"
-		ok_static, static_serve = pcall(function()
-			return require("lib.http.router.static").router(static_dir)
-		end)
-	end
+	-- Extension -> content-type map for static file serving via caps.self.
+	local MIME_TYPES = {
+		html = "text/html; charset=utf-8",
+		js = "application/javascript",
+		css = "text/css",
+		json = "application/json",
+		png = "image/png",
+		jpg = "image/jpeg",
+		jpeg = "image/jpeg",
+		gif = "image/gif",
+		svg = "image/svg+xml",
+		ico = "image/x-icon",
+		woff = "font/woff",
+		woff2 = "font/woff2",
+		ttf = "font/ttf",
+		txt = "text/plain",
+	}
 
-	local function handler(req, res, sock)
-		local req_path, params = parse_target(req.target)
+	local serve_static = not opts.no_static and caps.self and caps.self.entry
+
+	local function handler(req, res)
+		local req_path, params = parse_target(req.target or req.path or "/")
 		local key = req.method .. " " .. req_path
 		local route = routes[key]
 		if route then
 			local req_body = read_json_body(req)
-			return route(state, caps, params, req_body, res, sock)
+			return route(state, caps, params, req_body, res)
 		end
-		-- Static files.
-		if ok_static then
-			req.path = req_path
-			return static_serve(req, res)
+		-- Static files via caps.self tarball entries.
+		if serve_static then
+			local entry_path = "static" .. req_path
+			if req_path == "/" then entry_path = "static/index.html" end
+			local content = caps.self.entry(entry_path)
+			if content then
+				local ext = entry_path:match("%.([^%.]+)$")
+				res.status = 200
+				res.headers["Content-Type"] = MIME_TYPES[ext] or "application/octet-stream"
+				res.body = content
+				return true
+			end
 		end
 	end
 
 	return { handler = handler, state = state }
-end
-
-function M.start(caps, opts)
-	opts = opts or {}
-	local app = M.create(caps, opts)
-	local http_server = require("lib.http.server")
-	local port = opts.port or 7860
-	return http_server.server(app.handler, port)
 end
 
 return M
