@@ -55,7 +55,6 @@ body {
   border-radius: 8px;
   background: var(--bg-message);
   word-wrap: break-word;
-  white-space: pre-wrap;
 }
 
 .message--user {
@@ -74,6 +73,109 @@ body {
 
 .message__content {
   line-height: 1.6;
+}
+
+/* Plain-text mode during streaming */
+.message__content--streaming {
+  white-space: pre-wrap;
+}
+
+/* ── Markdown content styles ──────────────────────────────────────────────── */
+
+.message__content p {
+  margin: 0.5em 0;
+}
+
+.message__content p:first-child {
+  margin-top: 0;
+}
+
+.message__content p:last-child {
+  margin-bottom: 0;
+}
+
+.message__content .md-heading {
+  margin: 0.75em 0 0.375em;
+  line-height: 1.3;
+}
+
+.message__content .md-heading:first-child {
+  margin-top: 0;
+}
+
+.message__content h1.md-heading { font-size: 1.375em; }
+.message__content h2.md-heading { font-size: 1.2em; }
+.message__content h3.md-heading { font-size: 1.075em; }
+.message__content h4.md-heading { font-size: 1em; }
+.message__content h5.md-heading { font-size: 0.9375em; }
+.message__content h6.md-heading { font-size: 0.875em; color: var(--text-dim); }
+
+.message__content .md-inline-code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.125em 0.3125em;
+  border-radius: 3px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+  font-size: 0.875em;
+}
+
+.message__content .md-code-block {
+  background: #0d0d1a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.message__content .md-code-block code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.message__content .md-blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 0.25em 0.75em;
+  margin: 0.5em 0;
+  color: var(--text-dim);
+}
+
+.message__content .md-list {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.message__content .md-list li {
+  margin: 0.1875em 0;
+}
+
+.message__content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message__content a:hover {
+  opacity: 0.8;
+}
+
+.message__content .md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.75em 0;
+}
+
+.message__content strong {
+  font-weight: 600;
+}
+
+.message__content del {
+  opacity: 0.6;
 }
 
 /* Message actions (edit/delete) */

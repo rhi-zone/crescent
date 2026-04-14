@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Markdown Renderer Tests</title>
+  <style>
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 1rem; }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; }
+    .test-name { color: #e94560; }
+    pre.output { background: #0d0d1a; padding: 0.5rem; border: 1px solid #333; border-radius: 4px; margin: 0.25rem 0; white-space: pre-wrap; font-size: 0.8rem; }
+    h2 { color: #e94560; margin-top: 1.5rem; }
+    .summary { margin-top: 1rem; padding: 0.5rem; border-top: 1px solid #333; font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+  <h1>Markdown Renderer Tests</h1>
+  <div id="results"></div>
+  <script type="module">
+    import { renderMarkdown } from "./markdown.js";
+
+    const results = document.getElementById("results");
+    let passed = 0;
+    let failed = 0;
+
+    function assert(name, actual, expected) {
+      const ok = actual === expected;
+      if (ok) {
+        passed++;
+        results.innerHTML += '<div><span class="pass">PASS</span> <span class="test-name">' + esc(name) + '</span></div>';
+      } else {
+        failed++;
+        results.innerHTML +=
+          '<div><span class="fail">FAIL</span> <span class="test-name">' + esc(name) + '</span></div>' +
+          '<pre class="output">expected: ' + esc(expected) + '\nactual:   ' + esc(actual) + '</pre>';
+      }
+    }
+
+    function assertContains(name, actual, needle) {
+      const ok = actual.includes(needle);
+      if (ok) {
+        passed++;
+        results.innerHTML += '<div><span class="pass">PASS</span> <span class="test-name">' + esc(name) + '</span></div>';
+      } else {
+        failed++;
+        results.innerHTML +=
+          '<div><span class="fail">FAIL</span> <span class="test-name">' + esc(name) + '</span></div>' +
+          '<pre class="output">expected to contain: ' + esc(needle) + '\nactual: ' + esc(actual) + '</pre>';
+      }
+    }
+
+    function assertNotContains(name, actual, needle) {
+      const ok = !actual.includes(needle);
+      if (ok) {
+        passed++;
+        results.innerHTML += '<div><span class="pass">PASS</span> <span class="test-name">' + esc(name) + '</span></div>';
+      } else {
+        failed++;
+        results.innerHTML +=
+          '<div><span class="fail">FAIL</span> <span class="test-name">' + esc(name) + '</span></div>' +
+          '<pre class="output">expected NOT to contain: ' + esc(needle) + '\nactual: ' + esc(actual) + '</pre>';
+      }
+    }
+
+    function esc(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // ── Basic formatting ──
+
+    results.innerHTML += "<h2>Basic Formatting</h2>";
+
+    assert("bold with **",
+      renderMarkdown("**bold**"),
+      "<p><strong>bold</strong></p>");
+
+    assert("bold with __",
+      renderMarkdown("__bold__"),
+      "<p><strong>bold</strong></p>");
+
+    assert("italic with *",
+      renderMarkdown("*italic*"),
+      "<p><em>italic</em></p>");
+
+    assert("strikethrough",
+      renderMarkdown("~~deleted~~"),
+      "<p><del>deleted</del></p>");
+
+    assertContains("bold+italic ***",
+      renderMarkdown("***both***"),
+      "<strong><em>both</em></strong>");
+
+    // ── Inline code ──
+
+    results.innerHTML += "<h2>Inline Code</h2>";
+
+    assertContains("inline code",
+      renderMarkdown("use `foo()` here"),
+      '<code class="md-inline-code">foo()</code>');
+
+    // ── Code blocks ──
+
+    results.innerHTML += "<h2>Code Blocks</h2>";
+
+    assertContains("fenced code block",
+      renderMarkdown("```js\nconst x = 1;\n```"),
+      '<pre class="md-code-block" data-lang="js"><code>const x = 1;</code></pre>');
+
+    assertContains("code block without lang",
+      renderMarkdown("```\nhello\n```"),
+      '<pre class="md-code-block"><code>hello</code></pre>');
+
+    // ── Headings ──
+
+    results.innerHTML += "<h2>Headings</h2>";
+
+    assert("h1", renderMarkdown("# Hello"), '<h1 class="md-heading">Hello</h1>');
+    assert("h2", renderMarkdown("## Hello"), '<h2 class="md-heading">Hello</h2>');
+    assert("h3", renderMarkdown("### Hello"), '<h3 class="md-heading">Hello</h3>');
+
+    // ── Links ──
+
+    results.innerHTML += "<h2>Links</h2>";
+
+    assertContains("markdown link",
+      renderMarkdown("[click](https://example.com)"),
+      '<a href="https://example.com" target="_blank" rel="noopener noreferrer">click</a>');
+
+    // ── Lists ──
+
+    results.innerHTML += "<h2>Lists</h2>";
+
+    assertContains("unordered list",
+      renderMarkdown("- one\n- two\n- three"),
+      '<ul class="md-list">');
+
+    assertContains("ordered list",
+      renderMarkdown("1. one\n2. two\n3. three"),
+      '<ol class="md-list">');
+
+    // ── Blockquotes ──
+
+    results.innerHTML += "<h2>Blockquotes</h2>";
+
+    assertContains("blockquote",
+      renderMarkdown("> quoted text"),
+      '<blockquote class="md-blockquote">');
+
+    // ── Paragraphs ──
+
+    results.innerHTML += "<h2>Paragraphs</h2>";
+
+    assertContains("double newline = separate paragraphs",
+      renderMarkdown("first\n\nsecond"),
+      "</p>\n<p>");
+
+    // ── Edge cases ──
+
+    results.innerHTML += "<h2>Edge Cases</h2>";
+
+    assert("empty input", renderMarkdown(""), "");
+    assert("null input", renderMarkdown(null), "");
+
+    // ── Security ──
+
+    results.innerHTML += "<h2>Security (XSS Prevention)</h2>";
+
+    assertNotContains("script tag escaped",
+      renderMarkdown("<script>alert('xss')</script>"),
+      "<script>");
+
+    assertNotContains("img onerror escaped",
+      renderMarkdown('<img onerror="alert(1)" src=x>'),
+      "<img");
+
+    assertNotContains("event handler escaped",
+      renderMarkdown('<div onmouseover="alert(1)">hover</div>'),
+      "<div onmouseover");
+
+    assertContains("HTML entities preserved",
+      renderMarkdown("<b>not bold</b>"),
+      "&lt;b&gt;");
+
+    // ── Nested formatting ──
+
+    results.innerHTML += "<h2>Nested Formatting</h2>";
+
+    assertContains("bold containing italic",
+      renderMarkdown("**bold *italic* bold**"),
+      "<strong>bold <em>italic</em> bold</strong>");
+
+    // ── Horizontal rule ──
+
+    results.innerHTML += "<h2>Horizontal Rule</h2>";
+
+    assertContains("hr with ---",
+      renderMarkdown("---"),
+      '<hr class="md-hr">');
+
+    // ── Summary ──
+
+    const total = passed + failed;
+    const cls = failed === 0 ? "pass" : "fail";
+    results.innerHTML +=
+      '<div class="summary"><span class="' + cls + '">' +
+      passed + "/" + total + " passed" +
+      (failed > 0 ? ", " + failed + " failed" : "") +
+      "</span></div>";
+  </script>
+</body>
+</html>
