@@ -531,12 +531,50 @@ source.
 
 ```
 myapp.png
-├── chara   (tEXt — base64 JSON, CCv2 format, untouched — if this app is also a CCv2 card)
-└── lua     (iTXt — base64(gzip(tar)))
+├── chara          (tEXt — base64 JSON, CCv2 format, untouched — if also a CCv2 card)
+├── lua-manifest   (iTXt — raw JSON, the manifest only — fast access shortcut)
+└── lua            (iTXt — base64(gzip(tar)))
     ├── manifest.json
     ├── (arbitrary .lua files and assets)
     └── ...
 ```
+
+The `lua-manifest` chunk, when present, is **authoritative** — it takes priority
+over `manifest.json` inside the tarball. This is necessary: if we read it first as
+a fast path, we must trust it. Tools that update the manifest must update
+`lua-manifest` (and keep the tarball's copy in sync). `lua-manifest` is optional —
+when absent, the platform falls back to unpacking the tarball.
+
+For raw tarballs (`.tar.gz`), there is no `lua-manifest` shortcut — the manifest
+is read from inside the tarball.
+
+### App import and indexing
+
+The app file (PNG, tar.gz, etc.) is the canonical representation. There is no
+"installed form" — the platform reads directly from the source file on launch.
+
+**Import** is lightweight: copy the file into the app directory (`~/.crescent/apps/`),
+extract the manifest (from `lua-manifest` chunk if available, otherwise from the
+tarball), and upsert into an index database. No extraction or format conversion.
+
+**Index database.** The library shell maintains a SQLite index of installed apps —
+manifest fields stored for fast `json_extract` queries. This enables filtering and
+search over hundreds of apps without re-parsing every file. The index is rebuilt
+on demand if it gets out of sync.
+
+### Export
+
+Export is a container format operation, not an app-specific one. The platform can
+pack any app's tarball into any supported container:
+
+```
+platform export myapp.tar.gz --format=png --output=myapp.png
+platform export myapp.png --format=tar.gz --output=myapp.tar.gz
+platform export myapp.png --format=dir --output=myapp/
+```
+
+The app's data (CCv2 chara chunk, etc.) is the app's concern — it serializes its own
+data. The platform handles the container wrapping/unwrapping.
 
 ### Manifest
 
@@ -726,8 +764,7 @@ are first-party scripts:
 | What it feels like | What it actually is |
 |---|---|
 | App library / search UI | Library shell app (described above) |
-| CCv2 import pipeline | Script with `caps.fs` + `caps.png` |
-| Mutate-on-import logic | Script (stamps app tarball on import) |
+| Import/export between formats | Platform operation (container packing) |
 | Card editor / lorebook editor | Internal views inside each app's frontend |
 | Preset browser | Script with `caps.fs` |
 
@@ -752,13 +789,11 @@ content type: character cards, Steam games, itch games, browser bookmarks, etc.
 shows character-specific filters; a game-focused bookmark shows game metadata.
 The library app has no format knowledge; it reads open metadata from adapters.
 
-**Adapter apps** — format-specific import/export as separate apps. CCv2 import
-reads a PNG/JSON card, extracts the `chara` chunk, and produces a crescent app
-tarball (stamping the card app's script + the card's data). CCv2 export reverses
-this — extracts card data and writes a standard CCv2 PNG. Import and export are
-separate apps because their capability requirements differ (`caps.fs` + `caps.png`
-for import; `caps.png` for export). Adapters vendor `lib/formats/ccv2/` for
-format parsing.
+**Import/export** — container format conversion is a platform operation, not an app.
+The platform packs/unpacks tarballs into PNG, JPG, WebP, tar.gz, or directory form.
+CCv2-specific data (the `chara` chunk) is the card app's internal concern — it
+serializes and deserializes its own data format. The library shell can trigger
+import (copy file + index manifest) and export (repack to chosen container).
 
 ### Vendoring format libraries
 
