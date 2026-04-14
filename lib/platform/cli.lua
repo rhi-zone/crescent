@@ -7,7 +7,9 @@
 -- Platform flags (before --):
 --   --port=N            HTTP port for http_server cap (default 7860)
 --   --data-dir=PATH     Directory for persistent data (default ~/.crescent/data)
---   --reset-grants      Clear stored grants and re-prompt
+--   --grant=NAME        Grant a specific capability (repeatable)
+--   --deny=NAME         Deny a specific capability (repeatable)
+--   --reset-grants      Clear stored grants
 --
 -- Everything after -- is passed to the app's cli cap.
 -- There are no app-specific CLI flags. App config is the app's problem.
@@ -26,6 +28,8 @@ local function parse_args(args)
 		port = 7860,
 		data_dir = nil,
 		reset_grants = false,
+		grant_caps = {},
+		deny_caps = {},
 	}
 	local positional = {}
 	local app_args = {}
@@ -44,6 +48,10 @@ local function parse_args(args)
 					opts.port = tonumber(val) or opts.port
 				elseif key == "data-dir" then
 					opts.data_dir = val
+				elseif key == "grant" then
+					opts.grant_caps[#opts.grant_caps + 1] = val
+				elseif key == "deny" then
+					opts.deny_caps[#opts.deny_caps + 1] = val
 				else
 					io.stderr:write("unknown option: --" .. key .. "\n")
 					os.exit(1)
@@ -524,27 +532,48 @@ local cap_declarations = merge_cap_declarations(manifest, opts.entrypoint)
 -- Resolve grants.
 local grants
 if opts.reset_grants then
-	grants = nil  -- Force re-grant.
+	grants = {}
 else
-	grants = load_grants(data_dir, app_id)
+	grants = load_grants(data_dir, app_id) or {}
 end
 
-if not grants then
-	io.stderr:write("no grants configured for " .. app_id .. "\n")
-	io.stderr:write("this app requests the following capabilities:\n")
-	for name, decl in pairs(cap_declarations) do
+-- Apply --grant and --deny flags.
+local grants_changed = false
+for _, name in ipairs(opts.grant_caps) do
+	if not cap_declarations[name] then
+		io.stderr:write("warning: --grant=" .. name .. " does not match any declared cap\n")
+	else
+		grants[name] = true
+		grants_changed = true
+	end
+end
+for _, name in ipairs(opts.deny_caps) do
+	if grants[name] ~= nil or cap_declarations[name] then
+		grants[name] = false
+		grants_changed = true
+	end
+end
+if grants_changed then
+	save_grants(data_dir, app_id, grants)
+end
+
+-- Check for ungrantable caps (not yet decided by operator).
+local missing = {}
+for name in pairs(cap_declarations) do
+	if grants[name] == nil then
+		missing[#missing + 1] = name
+	end
+end
+
+if #missing > 0 then
+	io.stderr:write("capabilities not yet granted or denied for " .. app_id .. ":\n")
+	for _, name in ipairs(missing) do
+		local decl = cap_declarations[name]
 		local cap_type = decl.type or name
 		local req = decl.required ~= false and "required" or "optional"
 		io.stderr:write("  " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
 	end
-	local gpath = grants_path(data_dir, app_id)
-	io.stderr:write("\ngrant capabilities by creating: " .. gpath .. "\n")
-	io.stderr:write("example (grant all):\n")
-	local example_grants = {}
-	for name in pairs(cap_declarations) do
-		example_grants[name] = true
-	end
-	io.stderr:write("  " .. json.encode(example_grants) .. "\n")
+	io.stderr:write("\ngrant individually with --grant=NAME or deny with --deny=NAME\n")
 	os.exit(1)
 end
 
