@@ -1,0 +1,82 @@
+-- lib/platform/caps/kv_test.lua
+
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
+
+local T = require("lib.test.assert")
+local kv_mod = require("lib.platform.caps.kv")
+
+T.describe("caps.kv", function()
+	T.it("factory returns cap table and revoke function", function()
+		local cap, revoke = kv_mod.kv_cap()
+		T.ok(type(cap) == "table")
+		T.ok(type(cap.get) == "function")
+		T.ok(type(cap.set) == "function")
+		T.ok(type(revoke) == "function")
+	end)
+
+	T.it("get returns nil for missing key", function()
+		local cap = kv_mod.kv_cap()
+		T.eq(cap.get("missing"), nil)
+	end)
+
+	T.it("set stores and get retrieves", function()
+		local cap = kv_mod.kv_cap()
+		T.eq(cap.set("x", 42), true)
+		T.eq(cap.get("x"), 42)
+	end)
+
+	T.it("set overwrites existing key", function()
+		local cap = kv_mod.kv_cap()
+		cap.set("x", 1)
+		cap.set("x", 2)
+		T.eq(cap.get("x"), 2)
+	end)
+
+	T.it("stores various value types", function()
+		local cap = kv_mod.kv_cap()
+		cap.set("str", "hello")
+		cap.set("num", 3.14)
+		cap.set("bool", true)
+		cap.set("tbl", { a = 1 })
+		T.eq(cap.get("str"), "hello")
+		T.eq(cap.get("num"), 3.14)
+		T.eq(cap.get("bool"), true)
+		T.eq(cap.get("tbl").a, 1)
+	end)
+
+	T.it("separate caps are isolated", function()
+		local cap1 = kv_mod.kv_cap()
+		local cap2 = kv_mod.kv_cap()
+		cap1.set("x", 1)
+		T.eq(cap2.get("x"), nil)
+	end)
+
+	T.it("revocation blocks get", function()
+		local cap, revoke = kv_mod.kv_cap()
+		cap.set("x", 42)
+		revoke()
+		local val, err = cap.get("x")
+		T.eq(val, nil)
+		T.eq(err, "capability revoked")
+	end)
+
+	T.it("revocation blocks set", function()
+		local cap, revoke = kv_mod.kv_cap()
+		revoke()
+		local val, err = cap.set("x", 1)
+		T.eq(val, nil)
+		T.eq(err, "capability revoked")
+	end)
+
+	T.it("revocation of one cap does not affect another", function()
+		local cap1, revoke1 = kv_mod.kv_cap()
+		local cap2 = kv_mod.kv_cap()
+		cap1.set("x", 1)
+		cap2.set("x", 2)
+		revoke1()
+		T.eq(cap1.get("x"), nil)
+		T.eq(cap2.get("x"), 2)
+	end)
+end)
