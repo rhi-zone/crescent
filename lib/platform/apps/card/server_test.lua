@@ -2965,3 +2965,324 @@ T.describe("instruct template persistence", function()
 		T.eq(app.state.instruct_active, "OpenAI (native)")
 	end)
 end)
+
+-- ── Group chat tests ──────────────────────────────────────────────────────
+
+local SECOND_CARD_JSON = json.encode({
+	spec = "chara_card_v2",
+	data = {
+		name = "SecondChar",
+		description = "A second character.",
+		personality = "Brave.",
+		scenario = "",
+		first_mes = "I am SecondChar.",
+		mes_example = "",
+		creator_notes = "",
+		system_prompt = "You are SecondChar.",
+		post_history_instructions = "",
+		alternate_greetings = {},
+		tags = {},
+		creator = "",
+		character_version = "",
+		extensions = {},
+	},
+})
+
+T.describe("GET /api/group", function()
+	T.it("returns defaults (disabled, primary only)", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/group")
+		T.eq(status, 200)
+		T.eq(data.enabled, false)
+		T.eq(#data.members, 1)
+		T.eq(data.members[1].name, "TestChar")
+		T.eq(data.members[1].is_primary, true)
+		T.eq(data.turn_order, "round_robin")
+	end)
+end)
+
+T.describe("POST /api/group/toggle", function()
+	T.it("enables group mode", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/toggle", { enabled = true })
+		T.eq(status, 200)
+		T.eq(data.enabled, true)
+	end)
+
+	T.it("disables group mode", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/toggle", { enabled = true })
+		local status, data = call(app, "POST", "/api/group/toggle", { enabled = false })
+		T.eq(status, 200)
+		T.eq(data.enabled, false)
+	end)
+
+	T.it("returns 400 without enabled field", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/toggle", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("POST /api/group/add", function()
+	T.it("adds a character to the group", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		T.eq(status, 200)
+		T.eq(#data.members, 2)
+		T.eq(data.members[1].name, "TestChar")
+		T.eq(data.members[1].is_primary, true)
+		T.eq(data.members[2].name, "SecondChar")
+		T.eq(data.members[2].is_primary, false)
+	end)
+
+	T.it("rejects duplicate names", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		local status, data = call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		T.eq(status, 409)
+		T.ok(data.error:find("already"), "mentions already in group")
+	end)
+
+	T.it("rejects invalid card JSON", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/add", { card_json = "{bad json" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 without card_json", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/add", {})
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("POST /api/group/remove", function()
+	T.it("removes a non-primary character", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		local status, data = call(app, "POST", "/api/group/remove", { name = "SecondChar" })
+		T.eq(status, 200)
+		T.eq(#data.members, 1)
+		T.eq(data.members[1].name, "TestChar")
+	end)
+
+	T.it("cannot remove primary character", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/remove", { name = "TestChar" })
+		T.eq(status, 400)
+		T.ok(data.error:find("primary"), "mentions primary")
+	end)
+
+	T.it("returns 404 for unknown character", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/group/remove", { name = "Nobody" })
+		T.eq(status, 404)
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/group/remove", {})
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("POST /api/group/order", function()
+	T.it("sets turn order", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/order", { turn_order = "all" })
+		T.eq(status, 200)
+		T.eq(data.turn_order, "all")
+	end)
+
+	T.it("rejects invalid turn order", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/group/order", { turn_order = "invalid" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 without turn_order", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/group/order", {})
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("group message — round robin", function()
+	T.it("generates response from single character in turn", function()
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function()
+				call_count = call_count + 1
+				return "reply " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Enable group with two members.
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		call(app, "POST", "/api/group/toggle", { enabled = true })
+
+		-- First message: round_robin starts at 1 (TestChar).
+		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(status, 200)
+		T.ok(data.assistants, "has assistants array")
+		T.eq(#data.assistants, 1)
+		T.eq(data.assistants[1].speaker, "TestChar")
+		T.eq(data.assistants[1].content, "reply 1")
+
+		-- Second message: round_robin advances to 2 (SecondChar).
+		local status2, data2 = call(app, "POST", "/api/message", { content = "Hi again" })
+		T.eq(status2, 200)
+		T.eq(#data2.assistants, 1)
+		T.eq(data2.assistants[1].speaker, "SecondChar")
+		T.eq(data2.assistants[1].content, "reply 2")
+	end)
+end)
+
+T.describe("group message — all turn order", function()
+	T.it("generates responses from all characters", function()
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function()
+				call_count = call_count + 1
+				return "reply " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		call(app, "POST", "/api/group/toggle", { enabled = true })
+		call(app, "POST", "/api/group/order", { turn_order = "all" })
+
+		local status, data = call(app, "POST", "/api/message", { content = "Hello everyone" })
+		T.eq(status, 200)
+		T.ok(data.assistants, "has assistants array")
+		T.eq(#data.assistants, 2)
+		T.eq(data.assistants[1].speaker, "TestChar")
+		T.eq(data.assistants[1].content, "reply 1")
+		T.eq(data.assistants[2].speaker, "SecondChar")
+		T.eq(data.assistants[2].content, "reply 2")
+	end)
+end)
+
+T.describe("group message — non-group mode unchanged", function()
+	T.it("returns single assistant when group disabled", function()
+		local caps = make_mock_caps({ llm_call = function() return "single reply" end })
+		local app = server.create(caps, { no_static = true })
+		-- Group exists but disabled.
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(status, 200)
+		T.ok(data.assistant, "has singular assistant")
+		T.eq(data.assistant.content, "single reply")
+		T.eq(data.assistants, nil, "no assistants array")
+	end)
+end)
+
+T.describe("group message — speaker in messages", function()
+	T.it("speaker field appears in GET /api/messages", function()
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function()
+				call_count = call_count + 1
+				return "reply " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		call(app, "POST", "/api/group/toggle", { enabled = true })
+		call(app, "POST", "/api/group/order", { turn_order = "all" })
+		call(app, "POST", "/api/message", { content = "Hello" })
+
+		local status, data = call(app, "GET", "/api/messages")
+		T.eq(status, 200)
+		-- greeting, user, assistant(TestChar), assistant(SecondChar) = 4 messages
+		T.eq(#data.messages, 4)
+		T.eq(data.messages[3].speaker, "TestChar")
+		T.eq(data.messages[4].speaker, "SecondChar")
+	end)
+end)
+
+T.describe("group persistence via kv", function()
+	T.it("saves and loads group settings", function()
+		local kv_store = {}
+		local shared_kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local caps1 = make_mock_caps()
+		caps1.kv = shared_kv
+		local app1 = server.create(caps1, { no_static = true })
+		call(app1, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		call(app1, "POST", "/api/group/toggle", { enabled = true })
+		call(app1, "POST", "/api/group/order", { turn_order = "all" })
+
+		T.ok(kv_store["group"], "group saved to kv")
+
+		-- New app with same kv should load group settings.
+		local caps2 = make_mock_caps()
+		caps2.kv = shared_kv
+		local app2 = server.create(caps2, { no_static = true })
+		local status, data = call(app2, "GET", "/api/group")
+		T.eq(status, 200)
+		T.eq(data.enabled, true)
+		T.eq(data.turn_order, "all")
+		T.eq(#data.members, 2)
+		T.eq(data.members[2].name, "SecondChar")
+	end)
+end)
+
+T.describe("group message — LLM failure", function()
+	T.it("rolls back on first speaker failure", function()
+		local caps = make_mock_caps({
+			llm_call = function() return nil, "timeout" end,
+		})
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/toggle", { enabled = true })
+		local path_before = app.state.conv:get_canonical_path(app.state.session_id)
+		local initial_count = #path_before
+		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(status, 502)
+		T.ok(data.error:find("timeout"), "error mentions timeout")
+		local path_after = app.state.conv:get_canonical_path(app.state.session_id)
+		T.eq(#path_after, initial_count, "message rolled back")
+	end)
+
+	T.it("partial success if second speaker fails", function()
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function()
+				call_count = call_count + 1
+				if call_count == 2 then return nil, "timeout" end
+				return "reply " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
+		call(app, "POST", "/api/group/toggle", { enabled = true })
+		call(app, "POST", "/api/group/order", { turn_order = "all" })
+
+		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(status, 200)
+		-- First speaker succeeded, second failed — partial result.
+		T.eq(#data.assistants, 1)
+		T.eq(data.assistants[1].speaker, "TestChar")
+	end)
+end)

@@ -180,7 +180,11 @@ local function msg_response(state, msg)
 		sibling_index = idx,
 		sibling_count = total,
 	}
-	if msg.speaker then resp.speaker = msg.speaker end
+	local speaker = msg.speaker
+	if not speaker and msg.metadata and msg.metadata.speaker then
+		speaker = msg.metadata.speaker
+	end
+	if speaker then resp.speaker = speaker end
 	return resp
 end
 
@@ -599,6 +603,210 @@ local function create_new_session(state, caps)
 	local messages = format_messages(state, path or {})
 	return session, messages
 end
+
+-- ── Group chat helpers ────────────────────────────────────────────────────
+
+local function init_group(state)
+	local primary_name = state.card and state.card.name or "Character"
+	state.group = {
+		enabled = false,
+		members = { { card = state.card, name = primary_name, is_primary = true } },
+		turn_order = "round_robin",
+		next_speaker = 1,
+	}
+end
+
+local function save_group(state, caps)
+	if not caps.kv then return end
+	local serializable = {
+		enabled = state.group.enabled,
+		turn_order = state.group.turn_order,
+		next_speaker = state.group.next_speaker,
+		members = {},
+	}
+	for i, m in ipairs(state.group.members) do
+		if m.is_primary then
+			serializable.members[i] = { name = m.name, is_primary = true }
+		else
+			serializable.members[i] = {
+				name = m.name,
+				card_json = card_mod.to_json(m.card),
+			}
+		end
+	end
+	caps.kv.set("group", json.encode(serializable))
+end
+
+local function group_members_response(state)
+	local members = {}
+	for _, m in ipairs(state.group.members) do
+		members[#members + 1] = { name = m.name, is_primary = m.is_primary or false }
+	end
+	return members
+end
+
+local function group_response(state)
+	return {
+		enabled = state.group.enabled,
+		members = group_members_response(state),
+		turn_order = state.group.turn_order,
+	}
+end
+
+-- Build context for a specific group member's turn.
+local function build_group_context(state, caps, speaker_member, path)
+	local speaker_card = speaker_member.card
+	if not speaker_card then return build_context(state, caps, path) end
+
+	local count_tokens
+	if caps.llm and caps.llm.count_tokens then
+		count_tokens = caps.llm.count_tokens
+	else
+		count_tokens = function(text) return math.ceil(#text / 4) end
+	end
+
+	local max_context = state.settings and state.settings.max_context or 4096
+	local max_response = state.settings and state.settings.max_tokens or 512
+
+	-- Label history messages with speaker names for group context.
+	local labeled_history = {}
+	for _, msg in ipairs(path) do
+		local content = msg.content
+		if msg.role == "assistant" and msg.speaker then
+			content = msg.speaker .. ": " .. content
+		elseif msg.role == "user" then
+			content = state.user_name .. ": " .. content
+		end
+		labeled_history[#labeled_history + 1] = { role = msg.role, content = content }
+	end
+
+	local active_p = get_active_persona(state)
+	local result = context_mod.assemble({
+		card = speaker_card,
+		history = labeled_history,
+		count_tokens = count_tokens,
+		max_context = max_context,
+		max_response = max_response,
+		char_name = speaker_card.name,
+		user_name = state.user_name,
+		persona = active_p and active_p.description or nil,
+		lorebook_entries = state.lorebook,
+	})
+	if not result then
+		return labeled_history
+	end
+
+	-- Insert Author's Note at configured depth.
+	local an = state.authors_note
+	if an and an.text and #an.text > 0 then
+		local depth = an.depth or 4
+		local pos = an.position or "after"
+		local insert_pos = #result - depth
+		if pos == "after" then insert_pos = insert_pos + 1 end
+		if insert_pos < 1 then insert_pos = 1 end
+		if insert_pos > #result + 1 then insert_pos = #result + 1 end
+		table.insert(result, insert_pos, { role = "system", content = an.text })
+	end
+
+	return result
+end
+
+-- Pick the next speaker(s) based on turn order.
+local function pick_next_speakers(state)
+	local group = state.group
+	local members = group.members
+	if #members == 0 then return {} end
+
+	if group.turn_order == "round_robin" then
+		local idx = group.next_speaker
+		if idx < 1 or idx > #members then idx = 1 end
+		group.next_speaker = (idx % #members) + 1
+		return { members[idx] }
+	elseif group.turn_order == "random" then
+		local idx = math.random(1, #members)
+		return { members[idx] }
+	elseif group.turn_order == "all" then
+		return members
+	end
+	-- Default: round_robin behavior.
+	local idx = group.next_speaker
+	if idx < 1 or idx > #members then idx = 1 end
+	group.next_speaker = (idx % #members) + 1
+	return { members[idx] }
+end
+
+-- ── Group endpoints ──────────────────────────────────────────────────────
+
+local function api_get_group(state, _caps, _params, _body, res)
+	return json_ok(res, group_response(state))
+end
+
+local function api_post_group_toggle(state, caps, _params, body, res)
+	if not body or body.enabled == nil then
+		return json_err(res, 400, "enabled field required")
+	end
+	state.group.enabled = not not body.enabled
+	save_group(state, caps)
+	return json_ok(res, group_response(state))
+end
+
+local function api_post_group_add(state, caps, _params, body, res)
+	if not body or not body.card_json then
+		return json_err(res, 400, "card_json required")
+	end
+	local card_data, cerr = card_mod.from_json(body.card_json)
+	if not card_data then
+		return json_err(res, 400, "invalid card: " .. tostring(cerr))
+	end
+	local name = card_data.name
+	for _, m in ipairs(state.group.members) do
+		if m.name == name then
+			return json_err(res, 409, "character '" .. name .. "' already in group")
+		end
+	end
+	state.group.members[#state.group.members + 1] = {
+		card = card_data,
+		name = name,
+		is_primary = false,
+	}
+	save_group(state, caps)
+	return json_ok(res, group_response(state))
+end
+
+local function api_post_group_remove(state, caps, _params, body, res)
+	if not body or not body.name then
+		return json_err(res, 400, "name required")
+	end
+	for i, m in ipairs(state.group.members) do
+		if m.name == body.name then
+			if m.is_primary then
+				return json_err(res, 400, "cannot remove primary character")
+			end
+			table.remove(state.group.members, i)
+			if state.group.next_speaker > #state.group.members then
+				state.group.next_speaker = 1
+			end
+			save_group(state, caps)
+			return json_ok(res, group_response(state))
+		end
+	end
+	return json_err(res, 404, "character not found")
+end
+
+local function api_post_group_order(state, caps, _params, body, res)
+	if not body or not body.turn_order then
+		return json_err(res, 400, "turn_order required")
+	end
+	local order = body.turn_order
+	if order ~= "round_robin" and order ~= "random" and order ~= "all" and order ~= "manual" then
+		return json_err(res, 400, "invalid turn_order: " .. tostring(order))
+	end
+	state.group.turn_order = order
+	state.group.next_speaker = 1
+	save_group(state, caps)
+	return json_ok(res, group_response(state))
+end
+
 
 -- ── API endpoints ───────────────────────────────────────────────────────────
 
@@ -1720,209 +1928,6 @@ local function api_get_export_chat(state, _caps, params, _body, res)
 		res.body = table.concat(lines, "\n")
 		return true
 	end
-end
-
--- ── Group chat helpers ────────────────────────────────────────────────────
-
-local function init_group(state)
-	local primary_name = state.card and state.card.name or "Character"
-	state.group = {
-		enabled = false,
-		members = { { card = state.card, name = primary_name, is_primary = true } },
-		turn_order = "round_robin",
-		next_speaker = 1,
-	}
-end
-
-local function save_group(state, caps)
-	if not caps.kv then return end
-	local serializable = {
-		enabled = state.group.enabled,
-		turn_order = state.group.turn_order,
-		next_speaker = state.group.next_speaker,
-		members = {},
-	}
-	for i, m in ipairs(state.group.members) do
-		if m.is_primary then
-			serializable.members[i] = { name = m.name, is_primary = true }
-		else
-			serializable.members[i] = {
-				name = m.name,
-				card_json = card_mod.to_json(m.card),
-			}
-		end
-	end
-	caps.kv.set("group", json.encode(serializable))
-end
-
-local function group_members_response(state)
-	local members = {}
-	for _, m in ipairs(state.group.members) do
-		members[#members + 1] = { name = m.name, is_primary = m.is_primary or false }
-	end
-	return members
-end
-
-local function group_response(state)
-	return {
-		enabled = state.group.enabled,
-		members = group_members_response(state),
-		turn_order = state.group.turn_order,
-	}
-end
-
--- Build context for a specific group member's turn.
-local function build_group_context(state, caps, speaker_member, path)
-	local speaker_card = speaker_member.card
-	if not speaker_card then return build_context(state, caps, path) end
-
-	local count_tokens
-	if caps.llm and caps.llm.count_tokens then
-		count_tokens = caps.llm.count_tokens
-	else
-		count_tokens = function(text) return math.ceil(#text / 4) end
-	end
-
-	local max_context = state.settings and state.settings.max_context or 4096
-	local max_response = state.settings and state.settings.max_tokens or 512
-
-	-- Label history messages with speaker names for group context.
-	local labeled_history = {}
-	for _, msg in ipairs(path) do
-		local content = msg.content
-		if msg.role == "assistant" and msg.speaker then
-			content = msg.speaker .. ": " .. content
-		elseif msg.role == "user" then
-			content = state.user_name .. ": " .. content
-		end
-		labeled_history[#labeled_history + 1] = { role = msg.role, content = content }
-	end
-
-	local active_p = get_active_persona(state)
-	local result = context_mod.assemble({
-		card = speaker_card,
-		history = labeled_history,
-		count_tokens = count_tokens,
-		max_context = max_context,
-		max_response = max_response,
-		char_name = speaker_card.name,
-		user_name = state.user_name,
-		persona = active_p and active_p.description or nil,
-		lorebook_entries = state.lorebook,
-	})
-	if not result then
-		return labeled_history
-	end
-
-	-- Insert Author's Note at configured depth.
-	local an = state.authors_note
-	if an and an.text and #an.text > 0 then
-		local depth = an.depth or 4
-		local pos = an.position or "after"
-		local insert_pos = #result - depth
-		if pos == "after" then insert_pos = insert_pos + 1 end
-		if insert_pos < 1 then insert_pos = 1 end
-		if insert_pos > #result + 1 then insert_pos = #result + 1 end
-		table.insert(result, insert_pos, { role = "system", content = an.text })
-	end
-
-	return result
-end
-
--- Pick the next speaker(s) based on turn order.
-local function pick_next_speakers(state)
-	local group = state.group
-	local members = group.members
-	if #members == 0 then return {} end
-
-	if group.turn_order == "round_robin" then
-		local idx = group.next_speaker
-		if idx < 1 or idx > #members then idx = 1 end
-		group.next_speaker = (idx % #members) + 1
-		return { members[idx] }
-	elseif group.turn_order == "random" then
-		local idx = math.random(1, #members)
-		return { members[idx] }
-	elseif group.turn_order == "all" then
-		return members
-	end
-	-- Default: round_robin behavior.
-	local idx = group.next_speaker
-	if idx < 1 or idx > #members then idx = 1 end
-	group.next_speaker = (idx % #members) + 1
-	return { members[idx] }
-end
-
--- ── Group endpoints ──────────────────────────────────────────────────────
-
-local function api_get_group(state, _caps, _params, _body, res)
-	return json_ok(res, group_response(state))
-end
-
-local function api_post_group_toggle(state, caps, _params, body, res)
-	if not body or body.enabled == nil then
-		return json_err(res, 400, "enabled field required")
-	end
-	state.group.enabled = not not body.enabled
-	save_group(state, caps)
-	return json_ok(res, group_response(state))
-end
-
-local function api_post_group_add(state, caps, _params, body, res)
-	if not body or not body.card_json then
-		return json_err(res, 400, "card_json required")
-	end
-	local card_data, cerr = card_mod.from_json(body.card_json)
-	if not card_data then
-		return json_err(res, 400, "invalid card: " .. tostring(cerr))
-	end
-	local name = card_data.name
-	for _, m in ipairs(state.group.members) do
-		if m.name == name then
-			return json_err(res, 409, "character '" .. name .. "' already in group")
-		end
-	end
-	state.group.members[#state.group.members + 1] = {
-		card = card_data,
-		name = name,
-		is_primary = false,
-	}
-	save_group(state, caps)
-	return json_ok(res, group_response(state))
-end
-
-local function api_post_group_remove(state, caps, _params, body, res)
-	if not body or not body.name then
-		return json_err(res, 400, "name required")
-	end
-	for i, m in ipairs(state.group.members) do
-		if m.name == body.name then
-			if m.is_primary then
-				return json_err(res, 400, "cannot remove primary character")
-			end
-			table.remove(state.group.members, i)
-			if state.group.next_speaker > #state.group.members then
-				state.group.next_speaker = 1
-			end
-			save_group(state, caps)
-			return json_ok(res, group_response(state))
-		end
-	end
-	return json_err(res, 404, "character not found")
-end
-
-local function api_post_group_order(state, caps, _params, body, res)
-	if not body or not body.turn_order then
-		return json_err(res, 400, "turn_order required")
-	end
-	local order = body.turn_order
-	if order ~= "round_robin" and order ~= "random" and order ~= "all" and order ~= "manual" then
-		return json_err(res, 400, "invalid turn_order: " .. tostring(order))
-	end
-	state.group.turn_order = order
-	state.group.next_speaker = 1
-	save_group(state, caps)
-	return json_ok(res, group_response(state))
 end
 
 -- ── Connection test ─────────────────────────────────────────────────────────

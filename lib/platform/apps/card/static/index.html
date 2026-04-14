@@ -10,6 +10,7 @@
   <template id="message-template">
     <div class="message">
       <img class="message__avatar" src="/api/avatar" alt="" hidden>
+      <div class="message__speaker" hidden></div>
       <div class="message__content"></div>
       <div class="message__actions" hidden>
         <button class="message__action-button" data-action="edit">Edit</button>
@@ -87,6 +88,7 @@
     <button class="input-row__button input-row__button--world-info" id="btn-world-info" title="World Info (Ctrl+Shift+W)">&#127758;</button>
     <button class="input-row__button input-row__button--card-edit" id="btn-card-edit" title="Card Editor">&#128100;</button>
     <button class="input-row__button input-row__button--regex" id="btn-regex" title="Regex Scripts">.*</button>
+    <button class="input-row__button input-row__button--group" id="btn-group" title="Group Chat">&#128101;</button>
   </div>
 
   <div class="settings-overlay" id="settings-overlay" hidden>
@@ -264,6 +266,40 @@
         <textarea class="regex-panel__test-textarea" id="regex-test-input" rows="2" placeholder="Test input text..."></textarea>
         <button class="regex-panel__test-btn" id="regex-test-btn">Test</button>
         <div class="regex-panel__test-output" id="regex-test-output"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="group-overlay" id="group-overlay" hidden>
+    <div class="group-panel">
+      <div class="group-panel__header">
+        <span class="group-panel__title">Group Chat</span>
+        <button class="group-panel__close" id="group-close">&times;</button>
+      </div>
+      <div class="group-panel__body">
+        <div class="group-toggle-row">
+          <label class="group-toggle-label">
+            <input type="checkbox" id="group-enabled">
+            <span>Enable Group Chat</span>
+          </label>
+        </div>
+        <div class="group-order-row">
+          <label class="group-order-label">Turn Order</label>
+          <select id="group-turn-order" class="group-order-select">
+            <option value="round_robin">Round Robin</option>
+            <option value="all">All Respond</option>
+            <option value="random">Random</option>
+          </select>
+        </div>
+        <div class="group-members">
+          <span class="group-members__title">Members</span>
+          <div id="group-member-list" class="group-member-list"></div>
+        </div>
+        <div class="group-add">
+          <span class="group-add__title">Add Character</span>
+          <textarea id="group-add-json" class="group-add__textarea" rows="4" placeholder="Paste card JSON here..."></textarea>
+          <button id="group-add-btn" class="group-add__btn">Add to Group</button>
+        </div>
       </div>
     </div>
   </div>
