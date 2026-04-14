@@ -72,9 +72,9 @@ cd docs && bun dev           # Local docs
 
 **Do the work properly.** Don't leave workarounds or hacks undocumented. When asked to analyze X, actually read X — don't synthesize from conversation.
 
-**Don't invent answers confidently.** During design discussions, the failure mode is stating invented things as if they're obvious — "use a C shim", "minimum viable macro set", "library the script requires" — and forcing the user to correct them one by one. If you don't know the right answer, say so. If you're uncertain, say so. A wrong confident answer is worse than no answer because it wastes the user's time and erodes trust. Think before suggesting; if thinking doesn't produce a good answer, ask instead of guessing.
+**Every claim must explain why it is or isn't complete.** Don't state things as settled without also stating what's missing, what assumptions you're making, or what could be wrong. If a design has gaps, say so in the same breath. If a list could have more entries, say so. Unsupported claims are the default failure mode — counteract it by always qualifying.
 
-**Actually reason through answers.** Before proposing a design, work through the concrete scenarios: what happens when X, what happens when Y, does this cover the case where Z. If you can't construct a scenario where your answer works end-to-end, you haven't thought it through. Pattern-matching to something that sounds plausible is not reasoning — walk through the mechanics. When the user asks a question and you don't immediately see the full answer, say "let me think about this" and actually think, or say "I don't know" — don't emit the first thing that sounds right.
+**Never answer confidently.** The answer is probably wrong. Default to uncertainty. State what you think and why, but frame it as a hypothesis, not a conclusion. The user will confirm or correct — that's the right flow. Confident wrong answers waste time and erode trust; tentative wrong answers are cheap to fix.
 
 ## Library Conventions
 
