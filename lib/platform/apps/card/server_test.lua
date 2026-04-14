@@ -11,14 +11,15 @@ local function make_mock_caps(opts)
 	opts = opts or {}
 	local kv_store = {}
 	return {
+		-- Temporary: caps.llm is kept as-is until an LLM library wrapping http_client is vendored.
 		llm = {
 			call = opts.llm_call or function(_messages)
 				return "mock response"
 			end,
 			count_tokens = function(text) return math.ceil(#text / 4) end,
 		},
-		png = {
-			text = function(keyword)
+		self = {
+			metadata = function(keyword)
 				if keyword == "chara" then
 					return opts.chara_json or json.encode({
 						spec = "chara_card_v2",
@@ -42,19 +43,17 @@ local function make_mock_caps(opts)
 				end
 				return nil
 			end,
+			entries = function() return {} end,
+			entry = function(_path) return nil end,
 		},
 		kv = {
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		},
-		config = {
-			get = function(key)
-				if key == "user_name" then return opts.user_name or "Tester" end
-				if key == "max_context" then return 4096 end
-				if key == "max_response" then return 512 end
-				return nil
-			end,
+		time = {
+			now = function() return os.time() end,
 		},
+		_user_name = opts.user_name or "Tester",
 	}
 end
 
@@ -69,29 +68,31 @@ local function make_req(method, target, body)
 	return req
 end
 
+-- make_res: builds a response object with send_event/close for SSE testing.
 local function make_res()
-	return { headers = {} }
-end
-
-local function make_mock_sock()
-	local sent = {}
+	local sse_events = {}
 	local closed = false
-	return {
-		send = function(_, data) sent[#sent + 1] = data end,
-		close = function() closed = true end,
-		sent = sent,
-		is_closed = function() return closed end,
-	}
+	local res = { headers = {} }
+	-- SSE methods matching http_server cap's res object.
+	res.send_event = function(data)
+		if closed then return nil, "stream closed" end
+		sse_events[#sse_events + 1] = data
+		return true
+	end
+	res.close = function()
+		closed = true
+	end
+	-- Expose for test inspection.
+	res._sse_events = sse_events
+	res._is_closed = function() return closed end
+	return res
 end
 
-local function parse_sse_events(sent_parts)
-	local raw = table.concat(sent_parts)
+local function parse_sse_events(raw_events)
 	local events = {}
-	for line in raw:gmatch("[^\r\n]+") do
-		if line:sub(1, 6) == "data: " then
-			local ok, val = pcall(json.decode, line:sub(7))
-			if ok then events[#events + 1] = val end
-		end
+	for _, raw in ipairs(raw_events) do
+		local ok, val = pcall(json.decode, raw)
+		if ok then events[#events + 1] = val end
 	end
 	return events
 end
@@ -108,22 +109,31 @@ local function call(app, method, target, body)
 	return res.status, data
 end
 
-local function call_with_sock(app, method, target, body)
+-- call_stream: call handler and return res for SSE inspection (no sock).
+local function call_stream(app, method, target, body)
 	local req = make_req(method, target, body)
 	local res = make_res()
-	local sock = make_mock_sock()
-	app.handler(req, res, sock)
-	return res, sock
+	app.handler(req, res)
+	return res
 end
 
 -- ── Tests ───────────────────────────────────────────────────────────────────
 
 local server = require("lib.platform.apps.card.server")
 
+-- Helper: create app with standard test opts. Extracts user_name from caps._user_name.
+local function create_app(caps, extra_opts)
+	local app_opts = { no_static = true, user_name = caps._user_name or "Tester" }
+	if extra_opts then
+		for k, v in pairs(extra_opts) do app_opts[k] = v end
+	end
+	return server.create(caps, app_opts)
+end
+
 T.describe("server — init", function()
 	T.it("loads card and creates greeting in conversation tree", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		T.ok(app.state.card, "card loaded")
 		T.eq(app.state.card.name, "TestChar")
 		T.ok(app.state.conv, "conversation db exists")
@@ -137,7 +147,7 @@ T.describe("server — init", function()
 
 	T.it("creates alternate greetings as root siblings", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local roots = app.state.conv:get_roots(app.state.session_id)
 		T.ok(roots, "roots retrieved")
 		T.eq(#roots, 3) -- first_mes + 2 alternates
@@ -148,7 +158,7 @@ T.describe("server — init", function()
 
 	T.it("reads user_name from config", function()
 		local caps = make_mock_caps({ user_name = "Alice" })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		T.eq(app.state.user_name, "Alice")
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		T.eq(path[1].content, "Hello, Alice!")
@@ -158,7 +168,7 @@ end)
 T.describe("GET /api/card", function()
 	T.it("returns card name and greeting with sibling info", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/card")
 		T.eq(status, 200)
 		T.eq(data.name, "TestChar")
@@ -171,11 +181,14 @@ T.describe("GET /api/card", function()
 end)
 
 T.describe("GET /api/avatar", function()
-	T.it("returns PNG bytes with correct content type when raw() is available", function()
+	T.it("returns PNG bytes with correct content type when entry returns data", function()
 		local fake_png = "\137PNG\r\n\26\nfake image data"
 		local caps = make_mock_caps()
-		caps.png.raw = function() return fake_png end
-		local app = server.create(caps, { no_static = true })
+		caps.self.entry = function(path)
+			if path == "avatar.png" then return fake_png end
+			return nil
+		end
+		local app = create_app(caps)
 		local req = make_req("GET", "/api/avatar")
 		local res = make_res()
 		app.handler(req, res)
@@ -184,31 +197,31 @@ T.describe("GET /api/avatar", function()
 		T.eq(res.body, fake_png)
 	end)
 
-	T.it("returns 404 when png cap has no raw method", function()
+	T.it("returns 404 when self cap has no entry method", function()
 		local caps = make_mock_caps()
-		caps.png.raw = nil
-		local app = server.create(caps, { no_static = true })
+		caps.self.entry = nil
+		local app = create_app(caps)
 		local req = make_req("GET", "/api/avatar")
 		local res = make_res()
 		app.handler(req, res)
 		T.eq(res.status, 404)
 	end)
 
-	T.it("returns 404 when raw() returns nil", function()
+	T.it("returns 404 when entry returns nil", function()
 		local caps = make_mock_caps()
-		caps.png.raw = function() return nil, "file not found" end
-		local app = server.create(caps, { no_static = true })
+		-- Default mock entry returns nil for everything.
+		local app = create_app(caps)
 		local req = make_req("GET", "/api/avatar")
 		local res = make_res()
 		app.handler(req, res)
 		T.eq(res.status, 404)
 	end)
 
-	T.it("returns 404 when no png cap at all", function()
+	T.it("returns 404 when no self cap at all", function()
 		local caps = make_mock_caps()
-		caps.png = nil
-		-- Without png cap, card won't load — that's fine, we just test avatar endpoint.
-		local app = server.create(caps, { no_static = true })
+		caps.self = nil
+		-- Without self cap, card won't load — that's fine, we just test avatar endpoint.
+		local app = create_app(caps)
 		local req = make_req("GET", "/api/avatar")
 		local res = make_res()
 		app.handler(req, res)
@@ -219,7 +232,7 @@ end)
 T.describe("GET /api/messages", function()
 	T.it("returns canonical path with sibling info", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/messages")
 		T.eq(status, 200)
 		T.eq(#data.messages, 1)
@@ -233,7 +246,7 @@ end)
 T.describe("POST /api/message", function()
 	T.it("sends user message and returns assistant response", function()
 		local caps = make_mock_caps({ llm_call = function() return "LLM says hi" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
 		T.eq(status, 200)
 		T.ok(data.user, "has user msg")
@@ -250,7 +263,7 @@ T.describe("POST /api/message", function()
 
 	T.it("rejects empty content", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message", { content = "" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -258,7 +271,7 @@ T.describe("POST /api/message", function()
 
 	T.it("rolls back user message on LLM failure", function()
 		local caps = make_mock_caps({ llm_call = function() return nil, "timeout" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local path_before = app.state.conv:get_canonical_path(app.state.session_id)
 		local initial_count = #path_before
 		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
@@ -279,7 +292,7 @@ T.describe("POST /api/continue", function()
 				return " continued"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Send initial message to get an assistant response.
 		call(app, "POST", "/api/message", { content = "Go" })
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
@@ -295,7 +308,7 @@ T.describe("POST /api/continue", function()
 
 	T.it("adds new assistant message when last is user", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a user message as the leaf.
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		local leaf_id = path[#path].id
@@ -311,7 +324,7 @@ end)
 T.describe("GET /api/swipes", function()
 	T.it("returns all siblings for greeting message", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		local msg_id = path[1].id
 		local status, data = call(app, "GET", "/api/swipes?message_id=" .. msg_id)
@@ -325,7 +338,7 @@ T.describe("GET /api/swipes", function()
 
 	T.it("returns single-entry for message without siblings", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		-- The user message is the only child of greeting.
@@ -338,7 +351,7 @@ T.describe("GET /api/swipes", function()
 
 	T.it("returns 400 without message_id", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/swipes")
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -346,7 +359,7 @@ T.describe("GET /api/swipes", function()
 
 	T.it("returns 404 for unknown message_id", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "GET", "/api/swipes?message_id=nonexistent")
 		T.eq(status, 404)
 	end)
@@ -361,7 +374,7 @@ T.describe("POST /api/swipe/new", function()
 				return "response " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Send a message to get an assistant reply.
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
@@ -382,7 +395,7 @@ T.describe("POST /api/swipe/new", function()
 
 	T.it("generates new sibling for greeting (root)", function()
 		local caps = make_mock_caps({ llm_call = function() return "new greeting" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		local msg_id = path[1].id
 		local status, data = call(app, "POST", "/api/swipe/new", { message_id = msg_id })
@@ -393,7 +406,7 @@ T.describe("POST /api/swipe/new", function()
 
 	T.it("returns 404 for unknown message", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/swipe/new", { message_id = "nope" })
 		T.eq(status, 404)
 	end)
@@ -402,7 +415,7 @@ end)
 T.describe("POST /api/message/edit", function()
 	T.it("creates a new sibling (fork) instead of editing in place", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Send a user message.
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
@@ -426,7 +439,7 @@ T.describe("POST /api/message/edit", function()
 
 	T.it("fork has correct sibling count", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		local user_msg = path[2]
@@ -439,7 +452,7 @@ T.describe("POST /api/message/edit", function()
 
 	T.it("returns 404 for unknown message", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message/edit", {
 			message_id = "nonexistent", content = "x",
 		})
@@ -449,7 +462,7 @@ T.describe("POST /api/message/edit", function()
 
 	T.it("returns 400 for missing fields", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message/edit", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -463,7 +476,7 @@ end)
 T.describe("POST /api/message/delete", function()
 	T.it("removes message and its subtree", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- greeting(1) + user(2) + assistant(3)
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
@@ -480,7 +493,7 @@ T.describe("POST /api/message/delete", function()
 
 	T.it("returns 404 for unknown message", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message/delete", { message_id = "nope" })
 		T.eq(status, 404)
 		T.ok(data.error, "has error")
@@ -488,7 +501,7 @@ T.describe("POST /api/message/delete", function()
 
 	T.it("returns 400 for missing message_id", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message/delete", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -496,7 +509,7 @@ T.describe("POST /api/message/delete", function()
 
 	T.it("returns correct deleted count for single message", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "Hello" })
 		-- Delete only the last message (assistant leaf).
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
@@ -518,7 +531,7 @@ T.describe("POST /api/branch/navigate", function()
 				return "response " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Send a message to get an assistant reply.
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path1 = app.state.conv:get_canonical_path(app.state.session_id)
@@ -543,14 +556,14 @@ T.describe("POST /api/branch/navigate", function()
 
 	T.it("returns 404 for unknown message", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/branch/navigate", { message_id = "nope" })
 		T.eq(status, 404)
 	end)
 
 	T.it("returns 400 for missing message_id", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/branch/navigate", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -568,7 +581,7 @@ T.describe("persistence", function()
 		-- Create app — session_id should be saved to kv.
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		T.ok(kv_store["card_session_id"], "session_id was saved")
 		local session_id = app1.state.session_id
 
@@ -581,7 +594,7 @@ end)
 T.describe("routing", function()
 	T.it("returns nil for unknown API paths", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local res = make_res()
 		local result = app.handler(make_req("GET", "/api/nonexistent"), res)
 		T.eq(result, nil)
@@ -589,7 +602,7 @@ T.describe("routing", function()
 
 	T.it("returns nil for wrong method", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local res = make_res()
 		local result = app.handler(make_req("POST", "/api/card"), res)
 		T.eq(result, nil)
@@ -605,7 +618,7 @@ T.describe("context assembly", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "test" })
 		T.ok(captured_context, "context was passed to LLM")
 		-- First message should be system prompt.
@@ -625,7 +638,7 @@ end)
 T.describe("POST /api/impersonate", function()
 	T.it("returns generated content without modifying conversation", function()
 		local caps = make_mock_caps({ llm_call = function() return "impersonated text" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local path_before = app.state.conv:get_canonical_path(app.state.session_id)
 		local initial_count = #path_before
 		local status, data = call(app, "POST", "/api/impersonate")
@@ -643,7 +656,7 @@ T.describe("POST /api/impersonate", function()
 				return "response " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Send a real message first.
 		call(app, "POST", "/api/message", { content = "Hello" })
 		local path_after_send = app.state.conv:get_canonical_path(app.state.session_id)
@@ -665,7 +678,7 @@ T.describe("POST /api/impersonate", function()
 				return "with hint"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/impersonate", { prompt = "Be dramatic" })
 		T.eq(status, 200)
 		T.eq(data.content, "with hint")
@@ -679,7 +692,7 @@ T.describe("POST /api/impersonate", function()
 
 	T.it("returns 502 on LLM failure", function()
 		local caps = make_mock_caps({ llm_call = function() return nil, "timeout" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/impersonate")
 		T.eq(status, 502)
 		T.ok(data.error:find("timeout"), "error mentions timeout")
@@ -698,13 +711,12 @@ T.describe("POST /api/message/stream", function()
 			end
 			return "Hello world!"
 		end
-		local app = server.create(caps, { no_static = true })
-		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "Hi" })
+		local app = create_app(caps)
+		local res = call_stream(app, "POST", "/api/message/stream", { content = "Hi" })
 
-		T.ok(res.raw, "res.raw is set for streaming")
-		T.ok(sock.is_closed(), "socket was closed")
+		T.ok(res._is_closed(), "stream was closed")
 
-		local events = parse_sse_events(sock.sent)
+		local events = parse_sse_events(res._sse_events)
 		-- Should have: user, token*3, done
 		local types = {}
 		for _, e in ipairs(events) do types[#types + 1] = e.type end
@@ -734,11 +746,11 @@ T.describe("POST /api/message/stream", function()
 	T.it("falls back to non-streaming when call_stream is absent", function()
 		local caps = make_mock_caps({ llm_call = function() return "sync reply" end })
 		-- No call_stream on caps.llm.
-		local app = server.create(caps, { no_static = true })
-		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "Hi" })
+		local app = create_app(caps)
+		local res = call_stream(app, "POST", "/api/message/stream", { content = "Hi" })
 
 		-- Should fall back to regular JSON response (not streaming).
-		T.ok(not res.raw, "res.raw is not set")
+		T.eq(#res._sse_events, 0, "no SSE events sent")
 		T.eq(res.status, 200)
 		local data = json.decode(res.body)
 		T.eq(data.assistant.content, "sync reply")
@@ -749,13 +761,13 @@ T.describe("POST /api/message/stream", function()
 		caps.llm.call_stream = function(_messages, _on_token)
 			return nil, "timeout"
 		end
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local path_before = app.state.conv:get_canonical_path(app.state.session_id)
 		local initial_count = #path_before
-		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "Hi" })
+		local res = call_stream(app, "POST", "/api/message/stream", { content = "Hi" })
 
-		T.ok(res.raw, "res.raw is set")
-		local events = parse_sse_events(sock.sent)
+		T.ok(#res._sse_events > 0, "SSE events were sent")
+		local events = parse_sse_events(res._sse_events)
 
 		-- Should have user event then error event.
 		local found_error = false
@@ -775,10 +787,10 @@ T.describe("POST /api/message/stream", function()
 	T.it("rejects empty content", function()
 		local caps = make_mock_caps()
 		caps.llm.call_stream = function() return "ok" end
-		local app = server.create(caps, { no_static = true })
-		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "" })
+		local app = create_app(caps)
+		local res = call_stream(app, "POST", "/api/message/stream", { content = "" })
 
-		T.ok(not res.raw, "res.raw not set for error")
+		T.eq(#res._sse_events, 0, "no SSE events for error")
 		T.eq(res.status, 400)
 	end)
 
@@ -788,8 +800,8 @@ T.describe("POST /api/message/stream", function()
 			on_token("streamed")
 			return "streamed"
 		end
-		local app = server.create(caps, { no_static = true })
-		call_with_sock(app, "POST", "/api/message/stream", { content = "Test" })
+		local app = create_app(caps)
+		call_stream(app, "POST", "/api/message/stream", { content = "Test" })
 
 		local path = app.state.conv:get_canonical_path(app.state.session_id)
 		local asst_msg = path[#path]
@@ -809,7 +821,7 @@ T.describe("tree branching", function()
 				return "response " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 
 		-- Send a message: greeting -> user -> assistant
 		call(app, "POST", "/api/message", { content = "Hello" })
@@ -844,7 +856,7 @@ T.describe("tree branching", function()
 				return "response " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 
 		-- Send two rounds of messages.
 		call(app, "POST", "/api/message", { content = "First" })
@@ -871,7 +883,7 @@ end)
 T.describe("GET /api/settings", function()
 	T.it("returns default settings", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/settings")
 		T.eq(status, 200)
 		T.eq(data.temperature, 0.7)
@@ -886,7 +898,7 @@ end)
 T.describe("POST /api/settings", function()
 	T.it("merges partial update", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/settings", { temperature = 1.2 })
 		T.eq(status, 200)
 		T.eq(data.temperature, 1.2)
@@ -902,7 +914,7 @@ T.describe("POST /api/settings", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/settings", { temperature = 0.5, max_tokens = 256 })
 		T.ok(kv_store["settings"], "settings saved to kv")
 		local saved = json.decode(kv_store["settings"])
@@ -919,13 +931,13 @@ T.describe("POST /api/settings", function()
 		-- Save settings via first app.
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		call(app1, "POST", "/api/settings", { temperature = 1.5, max_context = 8192 })
 
 		-- New app with same kv should load persisted settings.
 		local caps2 = make_mock_caps()
 		caps2.kv = shared_kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local status, data = call(app2, "GET", "/api/settings")
 		T.eq(status, 200)
 		T.eq(data.temperature, 1.5)
@@ -944,7 +956,7 @@ T.describe("LLM parameter passthrough", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Update settings.
 		call(app, "POST", "/api/settings", { temperature = 1.2, max_tokens = 256 })
 		-- Send a message — LLM call should receive opts.
@@ -963,9 +975,9 @@ T.describe("LLM parameter passthrough", function()
 			on_token("hi")
 			return "hi"
 		end
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/settings", { temperature = 0.3 })
-		call_with_sock(app, "POST", "/api/message/stream", { content = "test" })
+		call_stream(app, "POST", "/api/message/stream", { content = "test" })
 		T.ok(captured_opts, "opts were passed to call_stream")
 		T.eq(captured_opts.temperature, 0.3)
 	end)
@@ -981,8 +993,8 @@ local function make_lorebook_caps(opts)
 			call = opts.llm_call or function() return "mock response" end,
 			count_tokens = function(text) return math.ceil(#text / 4) end,
 		},
-		png = {
-			text = function(keyword)
+		self = {
+			metadata = function(keyword)
 				if keyword == "chara" then
 					return json.encode({
 						spec = "chara_card_v2",
@@ -1026,26 +1038,24 @@ local function make_lorebook_caps(opts)
 				end
 				return nil
 			end,
+			entries = function() return {} end,
+			entry = function(_path) return nil end,
 		},
 		kv = {
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		},
-		config = {
-			get = function(key)
-				if key == "user_name" then return "Tester" end
-				if key == "max_context" then return 4096 end
-				if key == "max_response" then return 512 end
-				return nil
-			end,
+		time = {
+			now = function() return os.time() end,
 		},
+		_user_name = "Tester",
 	}, kv_store
 end
 
 T.describe("GET /api/lorebook", function()
 	T.it("returns entries from loaded card", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/lorebook")
 		T.eq(status, 200)
 		T.ok(data.entries, "has entries")
@@ -1062,7 +1072,7 @@ T.describe("GET /api/lorebook", function()
 	T.it("returns empty list when no lorebook", function()
 		local caps = make_mock_caps()
 		-- Default mock has no character_book
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/lorebook")
 		T.eq(status, 200)
 		T.eq(#data.entries, 0)
@@ -1072,7 +1082,7 @@ end)
 T.describe("POST /api/lorebook/update", function()
 	T.it("updates entry fields", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Get entries to find uid
 		local _, list = call(app, "GET", "/api/lorebook")
 		local uid = list.entries[1].uid
@@ -1097,7 +1107,7 @@ T.describe("POST /api/lorebook/update", function()
 
 	T.it("returns 400 without uid", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/lorebook/update", { content = "x" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -1105,7 +1115,7 @@ T.describe("POST /api/lorebook/update", function()
 
 	T.it("returns 404 for unknown uid", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/lorebook/update", { uid = "nonexistent" })
 		T.eq(status, 404)
 	end)
@@ -1114,7 +1124,7 @@ end)
 T.describe("POST /api/lorebook/add", function()
 	T.it("creates a new entry", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/lorebook/add", {
 			keys = { "bird", "avian" },
 			content = "Birds can fly.",
@@ -1134,7 +1144,7 @@ T.describe("POST /api/lorebook/add", function()
 
 	T.it("returns 400 without keys or content", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/lorebook/add", { keys = { "x" } })
 		T.eq(status, 400)
 		status = call(app, "POST", "/api/lorebook/add", { content = "x" })
@@ -1145,7 +1155,7 @@ end)
 T.describe("POST /api/lorebook/delete", function()
 	T.it("removes entry by uid", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local _, list = call(app, "GET", "/api/lorebook")
 		T.eq(#list.entries, 2)
 		local uid = list.entries[1].uid
@@ -1159,7 +1169,7 @@ T.describe("POST /api/lorebook/delete", function()
 
 	T.it("returns 400 without uid", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/lorebook/delete", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -1167,7 +1177,7 @@ T.describe("POST /api/lorebook/delete", function()
 
 	T.it("returns 404 for unknown uid", function()
 		local caps = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/lorebook/delete", { uid = "nonexistent" })
 		T.eq(status, 404)
 	end)
@@ -1176,7 +1186,7 @@ end)
 T.describe("lorebook persistence", function()
 	T.it("saves to kv after mutation and loads on init", function()
 		local caps, kv_store = make_lorebook_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Mutate: add an entry
 		call(app, "POST", "/api/lorebook/add", {
 			keys = { "fish" },
@@ -1190,7 +1200,7 @@ T.describe("lorebook persistence", function()
 		-- Create a new app with the same kv — should load from kv
 		local caps2 = make_lorebook_caps()
 		caps2.kv = caps.kv  -- share the kv store
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local _, list = call(app2, "GET", "/api/lorebook")
 		T.eq(#list.entries, 3)
 	end)
@@ -1201,7 +1211,7 @@ end)
 T.describe("GET /api/sessions", function()
 	T.it("lists sessions with previews", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/sessions")
 		T.eq(status, 200)
 		T.ok(data.sessions, "has sessions")
@@ -1214,7 +1224,7 @@ T.describe("GET /api/sessions", function()
 
 	T.it("preview uses first user message when present", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "Tell me about cats" })
 		local status, data = call(app, "GET", "/api/sessions")
 		T.eq(status, 200)
@@ -1223,7 +1233,7 @@ T.describe("GET /api/sessions", function()
 
 	T.it("truncates long previews", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local long_text = string.rep("a", 100)
 		call(app, "POST", "/api/message", { content = long_text })
 		local status, data = call(app, "GET", "/api/sessions")
@@ -1236,7 +1246,7 @@ end)
 T.describe("POST /api/session/new", function()
 	T.it("creates a new session with greeting", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local original_session = app.state.session_id
 		local status, data = call(app, "POST", "/api/session/new")
 		T.eq(status, 200)
@@ -1253,7 +1263,7 @@ T.describe("POST /api/session/new", function()
 
 	T.it("new session appears in list", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/session/new")
 		local status, data = call(app, "GET", "/api/sessions")
 		T.eq(status, 200)
@@ -1264,7 +1274,7 @@ end)
 T.describe("POST /api/session/switch", function()
 	T.it("switches to an existing session", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local first_session = app.state.session_id
 		-- Send a message in the first session.
 		call(app, "POST", "/api/message", { content = "Hello" })
@@ -1282,14 +1292,14 @@ T.describe("POST /api/session/switch", function()
 
 	T.it("returns 404 for unknown session", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/session/switch", { session_id = "nonexistent" })
 		T.eq(status, 404)
 	end)
 
 	T.it("returns 400 without session_id", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/session/switch", {})
 		T.eq(status, 400)
 	end)
@@ -1298,7 +1308,7 @@ end)
 T.describe("POST /api/session/delete", function()
 	T.it("deletes a session and switches to another", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local first_session = app.state.session_id
 		-- Create a second session (becomes current).
 		call(app, "POST", "/api/session/new")
@@ -1314,7 +1324,7 @@ T.describe("POST /api/session/delete", function()
 
 	T.it("deleting non-current session keeps current", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local first_session = app.state.session_id
 		call(app, "POST", "/api/session/new")
 		local second_session = app.state.session_id
@@ -1327,7 +1337,7 @@ T.describe("POST /api/session/delete", function()
 
 	T.it("deleting last session creates a new one", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local only_session = app.state.session_id
 		local status, data = call(app, "POST", "/api/session/delete", { session_id = only_session })
 		T.eq(status, 200)
@@ -1340,14 +1350,14 @@ T.describe("POST /api/session/delete", function()
 
 	T.it("returns 404 for unknown session", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/session/delete", { session_id = "nope" })
 		T.eq(status, 404)
 	end)
 
 	T.it("returns 400 without session_id", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/session/delete", {})
 		T.eq(status, 400)
 	end)
@@ -1361,7 +1371,7 @@ T.describe("session persistence via kv", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local original = app.state.session_id
 		call(app, "POST", "/api/session/new")
 		T.neq(kv_store["card_session_id"], original)
@@ -1375,7 +1385,7 @@ T.describe("session persistence via kv", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local first = app.state.session_id
 		call(app, "POST", "/api/session/new")
 		local second = app.state.session_id
@@ -1390,7 +1400,7 @@ end)
 T.describe("GET /api/card/edit", function()
 	T.it("returns all editable card fields", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/card/edit")
 		T.eq(status, 200)
 		T.eq(data.name, "TestChar")
@@ -1414,8 +1424,8 @@ T.describe("GET /api/card/edit", function()
 
 	T.it("returns 404 when no card loaded", function()
 		local caps = make_mock_caps()
-		caps.png = { text = function() return nil end }
-		local app = server.create(caps, { no_static = true })
+		caps.self = { metadata = function() return nil end, entries = function() return {} end, entry = function() return nil end }
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/card/edit")
 		T.eq(status, 404)
 		T.ok(data.error, "has error")
@@ -1425,7 +1435,7 @@ end)
 T.describe("POST /api/card/edit", function()
 	T.it("updates card fields", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/card/edit", {
 			name = "NewName",
 			description = "Updated description.",
@@ -1440,7 +1450,7 @@ T.describe("POST /api/card/edit", function()
 
 	T.it("updates tags and alternate_greetings", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/card/edit", {
 			tags = { "fantasy", "adventure" },
 			alternate_greetings = { "Yo!", "Sup?" },
@@ -1460,7 +1470,7 @@ T.describe("POST /api/card/edit", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/card/edit", { name = "Overridden" })
 		T.ok(kv_store["card_overrides"], "overrides saved to kv")
 		local saved = json.decode(kv_store["card_overrides"])
@@ -1469,8 +1479,8 @@ T.describe("POST /api/card/edit", function()
 
 	T.it("returns 404 when no card loaded", function()
 		local caps = make_mock_caps()
-		caps.png = { text = function() return nil end }
-		local app = server.create(caps, { no_static = true })
+		caps.self = { metadata = function() return nil end, entries = function() return {} end, entry = function() return nil end }
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/card/edit", { name = "X" })
 		T.eq(status, 404)
 	end)
@@ -1487,7 +1497,7 @@ T.describe("card overrides persist across restarts", function()
 		-- First app: edit card
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		call(app1, "POST", "/api/card/edit", {
 			name = "PersistName",
 			description = "Persisted desc.",
@@ -1496,7 +1506,7 @@ T.describe("card overrides persist across restarts", function()
 		-- Second app with same kv: overrides should be applied
 		local caps2 = make_mock_caps()
 		caps2.kv = shared_kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local status, data = call(app2, "GET", "/api/card/edit")
 		T.eq(status, 200)
 		T.eq(data.name, "PersistName")
@@ -1514,7 +1524,7 @@ T.describe("POST /api/card/reset", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Edit card
 		call(app, "POST", "/api/card/edit", {
 			name = "Edited",
@@ -1533,8 +1543,8 @@ T.describe("POST /api/card/reset", function()
 
 	T.it("returns 404 when no card loaded", function()
 		local caps = make_mock_caps()
-		caps.png = { text = function() return nil end }
-		local app = server.create(caps, { no_static = true })
+		caps.self = { metadata = function() return nil end, entries = function() return {} end, entry = function() return nil end }
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/card/reset")
 		T.eq(status, 404)
 	end)
@@ -1549,7 +1559,7 @@ T.describe("card editor affects context assembly", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Edit system prompt
 		call(app, "POST", "/api/card/edit", {
 			system_prompt = "You are a pirate named {{char}}.",
@@ -1573,7 +1583,7 @@ end)
 T.describe("GET /api/personas", function()
 	T.it("returns default persona matching user_name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/personas")
 		T.eq(status, 200)
 		T.ok(data.personas, "has personas")
@@ -1587,7 +1597,7 @@ end)
 T.describe("POST /api/personas/save", function()
 	T.it("creates a new persona", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/personas/save", {
 			name = "Alice", description = "A curious adventurer.",
 		})
@@ -1601,7 +1611,7 @@ T.describe("POST /api/personas/save", function()
 
 	T.it("updates an existing persona", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/personas/save", {
 			name = "Tester", description = "Updated description.",
 		})
@@ -1612,7 +1622,7 @@ T.describe("POST /api/personas/save", function()
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/personas/save", { description = "x" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -1622,7 +1632,7 @@ end)
 T.describe("POST /api/personas/delete", function()
 	T.it("removes persona and switches active if needed", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a second persona.
 		call(app, "POST", "/api/personas/save", { name = "Alice", description = "Adventurer." })
 		-- Activate Alice.
@@ -1638,7 +1648,7 @@ T.describe("POST /api/personas/delete", function()
 
 	T.it("creates default User persona when deleting the last one", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Delete the only persona.
 		local status, data = call(app, "POST", "/api/personas/delete", { name = "Tester" })
 		T.eq(status, 200)
@@ -1651,7 +1661,7 @@ T.describe("POST /api/personas/delete", function()
 
 	T.it("returns 404 for unknown persona", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/personas/delete", { name = "Nonexistent" })
 		T.eq(status, 404)
 		T.ok(data.error, "has error")
@@ -1661,7 +1671,7 @@ end)
 T.describe("POST /api/personas/activate", function()
 	T.it("changes user_name in state", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a second persona.
 		call(app, "POST", "/api/personas/save", { name = "Alice", description = "Adventurer." })
 		local status, data = call(app, "POST", "/api/personas/activate", { name = "Alice" })
@@ -1673,7 +1683,7 @@ T.describe("POST /api/personas/activate", function()
 
 	T.it("returns 404 for unknown persona", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/personas/activate", { name = "Nobody" })
 		T.eq(status, 404)
 		T.ok(data.error, "has error")
@@ -1681,7 +1691,7 @@ T.describe("POST /api/personas/activate", function()
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/personas/activate", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -1697,7 +1707,7 @@ T.describe("persona context integration", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Save persona with description, then activate.
 		call(app, "POST", "/api/personas/save", {
 			name = "Alice", description = "A curious adventurer who loves cats.",
@@ -1725,7 +1735,7 @@ T.describe("persona context integration", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Default persona has empty description.
 		call(app, "POST", "/api/message", { content = "test" })
 		T.ok(captured_context, "context was passed to LLM")
@@ -1747,7 +1757,7 @@ T.describe("persona persistence", function()
 		}
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		call(app1, "POST", "/api/personas/save", {
 			name = "Alice", description = "Adventurer.",
 		})
@@ -1758,7 +1768,7 @@ T.describe("persona persistence", function()
 		-- Create new app with same kv — should restore personas.
 		local caps2 = make_mock_caps()
 		caps2.kv = shared_kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		T.eq(app2.state.active_persona, "Alice")
 		T.eq(app2.state.user_name, "Alice")
 		local _, list = call(app2, "GET", "/api/personas")
@@ -1771,7 +1781,7 @@ end)
 T.describe("GET /api/token_count", function()
 	T.it("returns correct structure with initial greeting", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/token_count")
 		T.eq(status, 200)
 		T.ok(data.context_used, "has context_used")
@@ -1789,7 +1799,7 @@ T.describe("GET /api/token_count", function()
 
 	T.it("context_used increases after adding messages", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local _, data1 = call(app, "GET", "/api/token_count")
 		local initial_used = data1.context_used
 		local initial_messages = data1.messages
@@ -1804,7 +1814,7 @@ T.describe("GET /api/token_count", function()
 
 	T.it("reflects settings changes", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Change max_context.
 		call(app, "POST", "/api/settings", { max_context = 8192, max_tokens = 1024 })
 		local _, data = call(app, "GET", "/api/token_count")
@@ -1817,7 +1827,7 @@ end)
 T.describe("POST /api/message — token_count in response", function()
 	T.it("includes token_count in message response", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
 		T.eq(status, 200)
 		T.ok(data.token_count, "response has token_count")
@@ -1830,7 +1840,7 @@ end)
 T.describe("POST /api/continue — token_count in response", function()
 	T.it("includes token_count in continue response", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a user message first so continue has something to continue.
 		call(app, "POST", "/api/message", { content = "Tell me more" })
 		local status, data = call(app, "POST", "/api/continue")
@@ -1845,7 +1855,7 @@ end)
 T.describe("GET /api/authors_note", function()
 	T.it("returns default author's note", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/authors_note")
 		T.eq(status, 200)
 		T.eq(data.text, "")
@@ -1857,7 +1867,7 @@ end)
 T.describe("POST /api/authors_note", function()
 	T.it("updates text", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/authors_note", { text = "Be dramatic" })
 		T.eq(status, 200)
 		T.eq(data.text, "Be dramatic")
@@ -1867,7 +1877,7 @@ T.describe("POST /api/authors_note", function()
 
 	T.it("updates depth and position", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/authors_note", {
 			text = "Note", depth = 2, position = "before",
 		})
@@ -1879,7 +1889,7 @@ T.describe("POST /api/authors_note", function()
 
 	T.it("rejects invalid position", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/authors_note", { position = "invalid" })
 		local _, data = call(app, "GET", "/api/authors_note")
 		T.eq(data.position, "after") -- unchanged from default
@@ -1892,7 +1902,7 @@ T.describe("POST /api/authors_note", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/authors_note", { text = "Persist me", depth = 3 })
 		T.ok(kv_store["authors_note"], "saved to kv")
 		local saved = json.decode(kv_store["authors_note"])
@@ -1908,12 +1918,12 @@ T.describe("POST /api/authors_note", function()
 		}
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		call(app1, "POST", "/api/authors_note", { text = "Loaded", depth = 2, position = "before" })
 
 		local caps2 = make_mock_caps()
 		caps2.kv = shared_kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local status, data = call(app2, "GET", "/api/authors_note")
 		T.eq(status, 200)
 		T.eq(data.text, "Loaded")
@@ -1933,7 +1943,7 @@ T.describe("author's note context integration", function()
 				return "response " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Set up author's note with depth=1 (inserted 1 from end).
 		call(app, "POST", "/api/authors_note", { text = "AN_MARKER", depth = 1 })
 		-- Send several messages to build a longer context.
@@ -1964,7 +1974,7 @@ T.describe("author's note context integration", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- AN text is empty by default.
 		call(app, "POST", "/api/message", { content = "test" })
 		T.ok(captured_context, "context was captured")
@@ -1982,7 +1992,7 @@ end)
 T.describe("GET /api/export/chat", function()
 	T.it("returns valid JSON export", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "Hello there" })
 		local req = make_req("GET", "/api/export/chat?format=json")
 		local res = make_res()
@@ -2008,7 +2018,7 @@ T.describe("GET /api/export/chat", function()
 
 	T.it("returns formatted text export (default)", function()
 		local caps = make_mock_caps({ llm_call = function() return "reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "Hello there" })
 		local req = make_req("GET", "/api/export/chat")
 		local res = make_res()
@@ -2033,7 +2043,7 @@ T.describe("GET /api/export/chat", function()
 				return "reply " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/message", { content = "First" })
 		call(app, "POST", "/api/message", { content = "Second" })
 		local req = make_req("GET", "/api/export/chat?format=json")
@@ -2046,7 +2056,7 @@ T.describe("GET /api/export/chat", function()
 
 	T.it("text format defaults when no format param", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local req = make_req("GET", "/api/export/chat")
 		local res = make_res()
 		app.handler(req, res)
@@ -2060,7 +2070,7 @@ end)
 T.describe("GET /api/regex", function()
 	T.it("returns empty list initially", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/regex")
 		T.eq(status, 200)
 		T.ok(data.scripts, "has scripts")
@@ -2071,7 +2081,7 @@ end)
 T.describe("POST /api/regex/save", function()
 	T.it("creates a new script", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/regex/save", {
 			name = "Remove asterisks",
 			find = "%*([^*]+)%*",
@@ -2094,7 +2104,7 @@ T.describe("POST /api/regex/save", function()
 
 	T.it("updates existing script by name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/regex/save", {
 			name = "test", find = "foo", replace = "bar",
 		})
@@ -2112,7 +2122,7 @@ T.describe("POST /api/regex/save", function()
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/regex/save", { find = "x" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -2120,7 +2130,7 @@ T.describe("POST /api/regex/save", function()
 
 	T.it("returns 400 without find", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/regex/save", { name = "x" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -2128,7 +2138,7 @@ T.describe("POST /api/regex/save", function()
 
 	T.it("returns 400 for invalid pattern", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/regex/save", {
 			name = "bad", find = "[invalid",
 		})
@@ -2140,7 +2150,7 @@ end)
 T.describe("POST /api/regex/delete", function()
 	T.it("removes script by name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/regex/save", { name = "a", find = "x", replace = "y" })
 		call(app, "POST", "/api/regex/save", { name = "b", find = "z", replace = "w" })
 		local _, list = call(app, "GET", "/api/regex")
@@ -2155,14 +2165,14 @@ T.describe("POST /api/regex/delete", function()
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/regex/delete", {})
 		T.eq(status, 400)
 	end)
 
 	T.it("returns 404 for unknown name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/regex/delete", { name = "nonexistent" })
 		T.eq(status, 404)
 	end)
@@ -2171,7 +2181,7 @@ end)
 T.describe("POST /api/regex/test", function()
 	T.it("applies pattern correctly", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/regex/test", {
 			find = "%*([^*]+)%*",
 			replace = "%1",
@@ -2183,7 +2193,7 @@ T.describe("POST /api/regex/test", function()
 
 	T.it("returns 400 without find or input", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/regex/test", { find = "x" })
 		T.eq(status, 400)
 		status = call(app, "POST", "/api/regex/test", { input = "x" })
@@ -2192,7 +2202,7 @@ T.describe("POST /api/regex/test", function()
 
 	T.it("returns 400 for invalid pattern", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/regex/test", {
 			find = "[bad", replace = "", input = "test",
 		})
@@ -2206,7 +2216,7 @@ T.describe("regex scripts — apply_regex_scripts integration", function()
 		local caps = make_mock_caps({
 			llm_call = function() return "*bold text* and *more*" end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a script that removes asterisks from AI output.
 		call(app, "POST", "/api/regex/save", {
 			name = "strip asterisks",
@@ -2232,7 +2242,7 @@ T.describe("regex scripts — apply_regex_scripts integration", function()
 				return "no user message"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a script that uppercases "hello" in user input.
 		call(app, "POST", "/api/regex/save", {
 			name = "upcase hello",
@@ -2251,7 +2261,7 @@ T.describe("regex scripts — apply_regex_scripts integration", function()
 		local caps = make_mock_caps({
 			llm_call = function() return "hello world" end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/regex/save", {
 			name = "disabled script",
 			find = "hello",
@@ -2268,7 +2278,7 @@ T.describe("regex scripts — apply_regex_scripts integration", function()
 		local caps = make_mock_caps({
 			llm_call = function() return "abc" end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Script with order=10: a -> x
 		call(app, "POST", "/api/regex/save", {
 			name = "first", find = "a", replace = "x",
@@ -2291,7 +2301,7 @@ end)
 T.describe("regex scripts persistence", function()
 	T.it("saves to kv and loads on init", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/regex/save", {
 			name = "persist test",
 			find = "foo",
@@ -2308,7 +2318,7 @@ T.describe("regex scripts persistence", function()
 		-- Create new app with same kv — should load from kv.
 		local caps2 = make_mock_caps()
 		caps2.kv = caps.kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local _, list = call(app2, "GET", "/api/regex")
 		T.eq(#list.scripts, 1)
 		T.eq(list.scripts[1].name, "persist test")
@@ -2319,7 +2329,7 @@ end)
 T.describe("POST /api/connection/test", function()
 	T.it("returns success with mock LLM", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/connection/test")
 		T.eq(status, 200)
 		T.eq(data.success, true)
@@ -2333,7 +2343,7 @@ T.describe("POST /api/connection/test", function()
 		local caps = make_mock_caps({
 			llm_call = function() return string.rep("x", 200) end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/connection/test")
 		T.eq(status, 200)
 		T.eq(data.success, true)
@@ -2344,7 +2354,7 @@ T.describe("POST /api/connection/test", function()
 		local caps = make_mock_caps({
 			llm_call = function() return nil, "connection refused" end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/connection/test")
 		T.eq(status, 200)
 		T.eq(data.success, false)
@@ -2354,7 +2364,7 @@ T.describe("POST /api/connection/test", function()
 	T.it("returns error when no LLM capability", function()
 		local caps = make_mock_caps()
 		caps.llm = nil
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/connection/test")
 		T.eq(status, 200)
 		T.eq(data.success, false)
@@ -2367,7 +2377,7 @@ end)
 T.describe("GET /api/world_info", function()
 	T.it("returns empty list initially", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/world_info")
 		T.eq(status, 200)
 		T.ok(data.entries, "has entries")
@@ -2378,7 +2388,7 @@ end)
 T.describe("POST /api/world_info/add", function()
 	T.it("creates a new entry", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/world_info/add", {
 			keys = { "magic", "spell" },
 			content = "Magic is real in this world.",
@@ -2398,7 +2408,7 @@ T.describe("POST /api/world_info/add", function()
 
 	T.it("returns 400 without keys or content", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/world_info/add", { keys = { "x" } })
 		T.eq(status, 400)
 		status = call(app, "POST", "/api/world_info/add", { content = "x" })
@@ -2409,7 +2419,7 @@ end)
 T.describe("POST /api/world_info/update", function()
 	T.it("updates entry fields", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add an entry first
 		local _, added = call(app, "POST", "/api/world_info/add", {
 			keys = { "dragon" },
@@ -2436,7 +2446,7 @@ T.describe("POST /api/world_info/update", function()
 
 	T.it("returns 400 without uid", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/world_info/update", { content = "x" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -2444,7 +2454,7 @@ T.describe("POST /api/world_info/update", function()
 
 	T.it("returns 404 for unknown uid", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/world_info/update", { uid = "nonexistent" })
 		T.eq(status, 404)
 	end)
@@ -2453,7 +2463,7 @@ end)
 T.describe("POST /api/world_info/delete", function()
 	T.it("removes entry by uid", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/world_info/add", { keys = { "elf" }, content = "Elves are tall." })
 		call(app, "POST", "/api/world_info/add", { keys = { "dwarf" }, content = "Dwarves are short." })
 		local _, list = call(app, "GET", "/api/world_info")
@@ -2469,7 +2479,7 @@ T.describe("POST /api/world_info/delete", function()
 
 	T.it("returns 400 without uid", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/world_info/delete", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -2477,7 +2487,7 @@ T.describe("POST /api/world_info/delete", function()
 
 	T.it("returns 404 for unknown uid", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/world_info/delete", { uid = "nonexistent" })
 		T.eq(status, 404)
 	end)
@@ -2492,7 +2502,7 @@ T.describe("world info context integration", function()
 				return "mock response"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a constant world info entry (always triggered)
 		call(app, "POST", "/api/world_info/add", {
 			keys = { "anything" },
@@ -2521,7 +2531,7 @@ T.describe("world info context integration", function()
 				return "mock response"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add a constant world info entry
 		call(app, "POST", "/api/world_info/add", {
 			keys = { "anything" },
@@ -2550,7 +2560,7 @@ end)
 T.describe("world info import/export", function()
 	T.it("imports entries in bulk", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/world_info/import", {
 			entries = {
 				{ keys = { "sun" }, content = "The sun is bright." },
@@ -2568,7 +2578,7 @@ T.describe("world info import/export", function()
 
 	T.it("export returns all entries", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/world_info/add", { keys = { "a" }, content = "A." })
 		call(app, "POST", "/api/world_info/add", { keys = { "b" }, content = "B." })
 		local status, data = call(app, "GET", "/api/world_info/export")
@@ -2578,7 +2588,7 @@ T.describe("world info import/export", function()
 
 	T.it("import/export round-trip preserves data", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add entries
 		call(app, "POST", "/api/world_info/add", { keys = { "forest" }, content = "Dense trees.", order = 10 })
 		call(app, "POST", "/api/world_info/add", { keys = { "river" }, content = "Flowing water.", order = 20 })
@@ -2587,7 +2597,7 @@ T.describe("world info import/export", function()
 		T.eq(#exported.entries, 2)
 		-- Create new app and import
 		local caps2 = make_mock_caps()
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local status, imported = call(app2, "POST", "/api/world_info/import", {
 			entries = exported.entries,
 		})
@@ -2602,7 +2612,7 @@ T.describe("world info import/export", function()
 
 	T.it("returns 400 for import without entries", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/world_info/import", {})
 		T.eq(status, 400)
 	end)
@@ -2611,7 +2621,7 @@ end)
 T.describe("world info persistence", function()
 	T.it("saves to kv after mutation and loads on init", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Add an entry
 		call(app, "POST", "/api/world_info/add", {
 			keys = { "lore" },
@@ -2626,7 +2636,7 @@ T.describe("world info persistence", function()
 		-- Create a new app with the same kv — should load from kv
 		local caps2 = make_mock_caps()
 		caps2.kv = caps.kv  -- share the kv store
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local _, list = call(app2, "GET", "/api/world_info")
 		T.eq(#list.entries, 1)
 		T.eq(list.entries[1].content, "Persistent lore.")
@@ -2638,7 +2648,7 @@ end)
 T.describe("GET /api/instruct", function()
 	T.it("returns default templates with OpenAI active", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/instruct")
 		T.eq(status, 200)
 		T.ok(data.templates, "has templates")
@@ -2660,7 +2670,7 @@ end)
 T.describe("POST /api/instruct/save", function()
 	T.it("creates a new template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/save", {
 			name = "Custom",
 			mode = "instruct",
@@ -2684,7 +2694,7 @@ T.describe("POST /api/instruct/save", function()
 
 	T.it("updates an existing template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Update ChatML.
 		call(app, "POST", "/api/instruct/save", {
 			name = "ChatML",
@@ -2706,7 +2716,7 @@ T.describe("POST /api/instruct/save", function()
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/save", { mode = "chat" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -2714,7 +2724,7 @@ T.describe("POST /api/instruct/save", function()
 
 	T.it("defaults mode to chat when not instruct", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/save", {
 			name = "DefaultMode",
 		})
@@ -2726,7 +2736,7 @@ end)
 T.describe("POST /api/instruct/delete", function()
 	T.it("removes a template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local initial = #(select(2, call(app, "GET", "/api/instruct")).templates)
 		local status, data = call(app, "POST", "/api/instruct/delete", { name = "Plain" })
 		T.eq(status, 200)
@@ -2737,7 +2747,7 @@ T.describe("POST /api/instruct/delete", function()
 
 	T.it("clears active when deleting the active template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Active is "OpenAI (native)" by default.
 		local status, data = call(app, "POST", "/api/instruct/delete", { name = "OpenAI (native)" })
 		T.eq(status, 200)
@@ -2746,7 +2756,7 @@ T.describe("POST /api/instruct/delete", function()
 
 	T.it("returns 404 for unknown template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/delete", { name = "Nonexistent" })
 		T.eq(status, 404)
 		T.ok(data.error, "has error")
@@ -2756,7 +2766,7 @@ end)
 T.describe("POST /api/instruct/activate", function()
 	T.it("changes the active template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/activate", { name = "ChatML" })
 		T.eq(status, 200)
 		T.eq(data.active, "ChatML")
@@ -2765,7 +2775,7 @@ T.describe("POST /api/instruct/activate", function()
 
 	T.it("clears active with empty name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/activate", { name = "" })
 		T.eq(status, 200)
 		T.eq(data.active, "")
@@ -2774,7 +2784,7 @@ T.describe("POST /api/instruct/activate", function()
 
 	T.it("returns 404 for unknown template", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/activate", { name = "Nonexistent" })
 		T.eq(status, 404)
 		T.ok(data.error, "has error")
@@ -2782,7 +2792,7 @@ T.describe("POST /api/instruct/activate", function()
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/instruct/activate", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -2863,7 +2873,7 @@ T.describe("instruct mode LLM integration", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Activate ChatML.
 		call(app, "POST", "/api/instruct/activate", { name = "ChatML" })
 		-- Send a message.
@@ -2884,7 +2894,7 @@ T.describe("instruct mode LLM integration", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- OpenAI (native) is already active by default (chat mode).
 		T.eq(app.state.instruct_active, "OpenAI (native)")
 		-- Send a message.
@@ -2908,7 +2918,7 @@ T.describe("instruct mode LLM integration", function()
 				return "ok"
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Clear active template.
 		call(app, "POST", "/api/instruct/activate", { name = "" })
 		T.eq(app.state.instruct_active, nil)
@@ -2928,7 +2938,7 @@ T.describe("instruct template persistence", function()
 		}
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		-- Save a custom template.
 		call(app1, "POST", "/api/instruct/save", {
 			name = "MyTemplate",
@@ -2944,7 +2954,7 @@ T.describe("instruct template persistence", function()
 		-- Create new app with same kv — should restore templates.
 		local caps2 = make_mock_caps()
 		caps2.kv = shared_kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		T.eq(app2.state.instruct_active, "MyTemplate")
 		local _, list = call(app2, "GET", "/api/instruct")
 		T.eq(#list.templates, 8) -- 7 defaults + 1 custom
@@ -2960,7 +2970,7 @@ T.describe("instruct template persistence", function()
 			get = function(key) return kv_store[key] end,
 			set = function(key, val) kv_store[key] = val end,
 		}
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Should fall back to default (OpenAI native) since "Nonexistent" isn't in templates.
 		T.eq(app.state.instruct_active, "OpenAI (native)")
 	end)
@@ -2991,7 +3001,7 @@ local SECOND_CARD_JSON = json.encode({
 T.describe("GET /api/group", function()
 	T.it("returns defaults (disabled, primary only)", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "GET", "/api/group")
 		T.eq(status, 200)
 		T.eq(data.enabled, false)
@@ -3005,7 +3015,7 @@ end)
 T.describe("POST /api/group/toggle", function()
 	T.it("enables group mode", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/toggle", { enabled = true })
 		T.eq(status, 200)
 		T.eq(data.enabled, true)
@@ -3013,7 +3023,7 @@ T.describe("POST /api/group/toggle", function()
 
 	T.it("disables group mode", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/toggle", { enabled = true })
 		local status, data = call(app, "POST", "/api/group/toggle", { enabled = false })
 		T.eq(status, 200)
@@ -3022,7 +3032,7 @@ T.describe("POST /api/group/toggle", function()
 
 	T.it("returns 400 without enabled field", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/toggle", {})
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -3032,7 +3042,7 @@ end)
 T.describe("POST /api/group/add", function()
 	T.it("adds a character to the group", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		T.eq(status, 200)
 		T.eq(#data.members, 2)
@@ -3044,7 +3054,7 @@ T.describe("POST /api/group/add", function()
 
 	T.it("rejects duplicate names", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		local status, data = call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		T.eq(status, 409)
@@ -3053,7 +3063,7 @@ T.describe("POST /api/group/add", function()
 
 	T.it("rejects invalid card JSON", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/add", { card_json = "{bad json" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -3061,7 +3071,7 @@ T.describe("POST /api/group/add", function()
 
 	T.it("returns 400 without card_json", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/add", {})
 		T.eq(status, 400)
 	end)
@@ -3070,7 +3080,7 @@ end)
 T.describe("POST /api/group/remove", function()
 	T.it("removes a non-primary character", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		local status, data = call(app, "POST", "/api/group/remove", { name = "SecondChar" })
 		T.eq(status, 200)
@@ -3080,7 +3090,7 @@ T.describe("POST /api/group/remove", function()
 
 	T.it("cannot remove primary character", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/remove", { name = "TestChar" })
 		T.eq(status, 400)
 		T.ok(data.error:find("primary"), "mentions primary")
@@ -3088,14 +3098,14 @@ T.describe("POST /api/group/remove", function()
 
 	T.it("returns 404 for unknown character", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/group/remove", { name = "Nobody" })
 		T.eq(status, 404)
 	end)
 
 	T.it("returns 400 without name", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/group/remove", {})
 		T.eq(status, 400)
 	end)
@@ -3104,7 +3114,7 @@ end)
 T.describe("POST /api/group/order", function()
 	T.it("sets turn order", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/order", { turn_order = "all" })
 		T.eq(status, 200)
 		T.eq(data.turn_order, "all")
@@ -3112,7 +3122,7 @@ T.describe("POST /api/group/order", function()
 
 	T.it("rejects invalid turn order", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status, data = call(app, "POST", "/api/group/order", { turn_order = "invalid" })
 		T.eq(status, 400)
 		T.ok(data.error, "has error")
@@ -3120,7 +3130,7 @@ T.describe("POST /api/group/order", function()
 
 	T.it("returns 400 without turn_order", function()
 		local caps = make_mock_caps()
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		local status = call(app, "POST", "/api/group/order", {})
 		T.eq(status, 400)
 	end)
@@ -3135,7 +3145,7 @@ T.describe("group message — round robin", function()
 				return "reply " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Enable group with two members.
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		call(app, "POST", "/api/group/toggle", { enabled = true })
@@ -3166,7 +3176,7 @@ T.describe("group message — all turn order", function()
 				return "reply " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		call(app, "POST", "/api/group/toggle", { enabled = true })
 		call(app, "POST", "/api/group/order", { turn_order = "all" })
@@ -3185,7 +3195,7 @@ end)
 T.describe("group message — non-group mode unchanged", function()
 	T.it("returns single assistant when group disabled", function()
 		local caps = make_mock_caps({ llm_call = function() return "single reply" end })
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		-- Group exists but disabled.
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		local status, data = call(app, "POST", "/api/message", { content = "Hello" })
@@ -3205,7 +3215,7 @@ T.describe("group message — speaker in messages", function()
 				return "reply " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		call(app, "POST", "/api/group/toggle", { enabled = true })
 		call(app, "POST", "/api/group/order", { turn_order = "all" })
@@ -3229,7 +3239,7 @@ T.describe("group persistence via kv", function()
 		}
 		local caps1 = make_mock_caps()
 		caps1.kv = shared_kv
-		local app1 = server.create(caps1, { no_static = true })
+		local app1 = create_app(caps1)
 		call(app1, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		call(app1, "POST", "/api/group/toggle", { enabled = true })
 		call(app1, "POST", "/api/group/order", { turn_order = "all" })
@@ -3239,7 +3249,7 @@ T.describe("group persistence via kv", function()
 		-- New app with same kv should load group settings.
 		local caps2 = make_mock_caps()
 		caps2.kv = shared_kv
-		local app2 = server.create(caps2, { no_static = true })
+		local app2 = create_app(caps2)
 		local status, data = call(app2, "GET", "/api/group")
 		T.eq(status, 200)
 		T.eq(data.enabled, true)
@@ -3254,7 +3264,7 @@ T.describe("group message — LLM failure", function()
 		local caps = make_mock_caps({
 			llm_call = function() return nil, "timeout" end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/toggle", { enabled = true })
 		local path_before = app.state.conv:get_canonical_path(app.state.session_id)
 		local initial_count = #path_before
@@ -3274,7 +3284,7 @@ T.describe("group message — LLM failure", function()
 				return "reply " .. call_count
 			end,
 		})
-		local app = server.create(caps, { no_static = true })
+		local app = create_app(caps)
 		call(app, "POST", "/api/group/add", { card_json = SECOND_CARD_JSON })
 		call(app, "POST", "/api/group/toggle", { enabled = true })
 		call(app, "POST", "/api/group/order", { turn_order = "all" })
