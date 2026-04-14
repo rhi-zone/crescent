@@ -241,16 +241,6 @@ local function save_grants(data_dir, app_id, grants)
 	write_file(grants_path(data_dir, app_id), content)
 end
 
-local function auto_grant_all(cap_declarations)
-	-- NOTE: auto-granting everything on first run. Future: interactive prompt
-	-- where the operator reviews each cap and grants/denies individually.
-	local grants = {}
-	for name in pairs(cap_declarations) do
-		grants[name] = true
-	end
-	return grants
-end
-
 -- ── Entrypoint resolution ─────────────────────────────────────────────────
 
 -- Merge top-level and per-entrypoint cap declarations.
@@ -540,18 +530,22 @@ else
 end
 
 if not grants then
-	grants = auto_grant_all(cap_declarations)
-	-- Print what we're granting.
-	if next(grants) then
-		io.stderr:write("granting capabilities for " .. app_id .. ":\n")
-		for name in pairs(grants) do
-			local decl = cap_declarations[name]
-			local cap_type = decl and (decl.type or name) or name
-			local req = decl and decl.required ~= false and "required" or "optional"
-			io.stderr:write("  [granted] " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
-		end
+	io.stderr:write("no grants configured for " .. app_id .. "\n")
+	io.stderr:write("this app requests the following capabilities:\n")
+	for name, decl in pairs(cap_declarations) do
+		local cap_type = decl.type or name
+		local req = decl.required ~= false and "required" or "optional"
+		io.stderr:write("  " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
 	end
-	save_grants(data_dir, app_id, grants)
+	local gpath = grants_path(data_dir, app_id)
+	io.stderr:write("\ngrant capabilities by creating: " .. gpath .. "\n")
+	io.stderr:write("example (grant all):\n")
+	local example_grants = {}
+	for name in pairs(cap_declarations) do
+		example_grants[name] = true
+	end
+	io.stderr:write("  " .. json.encode(example_grants) .. "\n")
+	os.exit(1)
 end
 
 -- Construct capabilities.
