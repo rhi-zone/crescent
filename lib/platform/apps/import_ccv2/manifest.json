@@ -3,7 +3,15 @@
   "version": "0.1.0",
   "meta": { "type": "tool" },
   "caps": {
-    "self": { "type": "self", "required": true },
-    "kv":   { "type": "kv",   "required": false }
+    "self": { "type": "self", "required": true }
+  },
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "server": { "type": "http_server", "required": true },
+        "kv":     { "type": "kv",          "required": false }
+      }
+    }
   }
 }

@@ -3,8 +3,15 @@
   "version": "0.1.0",
   "meta": { "type": "shell" },
   "caps": {
-    "fs":     { "type": "fs",          "required": true, "root": "~/.crescent/cards" },
-    "server": { "type": "http_server", "required": true },
-    "config": { "type": "config",      "required": false }
+    "fs": { "type": "fs", "required": true, "root": "~/.crescent/cards" }
+  },
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "server": { "type": "http_server", "required": true },
+        "kv":     { "type": "kv",          "required": false }
+      }
+    }
   }
 }

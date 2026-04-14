@@ -4,5 +4,13 @@
   "meta": { "type": "tool" },
   "caps": {
     "self": { "type": "self", "required": true }
+  },
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "server": { "type": "http_server", "required": true }
+      }
+    }
   }
 }
