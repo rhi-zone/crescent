@@ -10,14 +10,13 @@
   <template id="message-template">
     <div class="message">
       <div class="message__content"></div>
+      <div class="message__swipe" hidden>
+        <button class="message__swipe-button" data-dir="prev">&lt;</button>
+        <span class="message__swipe-label"></span>
+        <button class="message__swipe-button" data-dir="next">&gt;</button>
+      </div>
     </div>
   </template>
-
-  <div class="greeting-bar" hidden>
-    <button class="greeting-bar__button" data-action="greeting-prev">&lt;</button>
-    <span class="greeting-bar__label"></span>
-    <button class="greeting-bar__button" data-action="greeting-next">&gt;</button>
-  </div>
 
   <div class="message-list" id="message-list"></div>
 
@@ -28,7 +27,6 @@
   <div class="input-row">
     <textarea class="input-row__textarea" id="input" rows="1" placeholder="Type a message..."></textarea>
     <button class="input-row__button input-row__button--send" id="btn-send">Send</button>
-    <button class="input-row__button input-row__button--regen" id="btn-regen">Regen</button>
     <button class="input-row__button input-row__button--continue" id="btn-continue">Continue</button>
   </div>
 
