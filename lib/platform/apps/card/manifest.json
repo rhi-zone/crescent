@@ -4,10 +4,17 @@
   "meta": { "type": "card-app" },
   "caps": {
     "self":          { "type": "self",        "required": true },
-    "server":        { "type": "http_server", "required": true },
-    "llm_api":       { "type": "http_client", "host": "api.openai.com", "required": false },
     "conversations": { "type": "db",          "required": true },
     "kv":            { "type": "kv",          "required": false },
     "time":          { "type": "time",        "required": true }
+  },
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "server":    { "type": "http_server", "required": true },
+        "llm_api":   { "type": "http_client", "required": false }
+      }
+    }
   }
 }
