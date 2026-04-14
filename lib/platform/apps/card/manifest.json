@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "meta": { "type": "card-app" },
   "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "llm": { "type": "llm", "required": true },
+        "png": { "type": "png", "required": true },
+        "conversations": { "type": "shared_db", "required": true },
+        "kv": { "type": "kv", "required": false },
+        "config": { "type": "config", "required": false }
+      }
+    },
     "dom": {
       "main": "dom.lua",
       "caps": {
