@@ -229,7 +229,9 @@ local llm_cap = llm_mod.llm_cap({
 })
 
 local kv_mod = require("lib.platform.caps.kv")
-local kv_cap = kv_mod.kv_cap()
+local app_name = opts.app_dir:gsub("/$", ""):match("[^/]+$") or "app"
+local kv_path = data_dir .. "/" .. app_name .. "_kv.db"
+local kv_cap = kv_mod.kv_cap(kv_path)
 
 local time_mod = require("lib.platform.caps.time")
 local time_cap = time_mod.time_cap()

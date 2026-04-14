@@ -297,14 +297,20 @@ local CAP_FACTORIES = {
 		end,
 	},
 	db = {
-		mod = "lib.platform.caps.kv",  -- fallback to kv until db.lua exists
+		mod = "lib.platform.caps.db",
 		build = function(decl, app, context, data_path)
-			-- Use dedicated db cap if it exists, otherwise fall back to kv
-			local ok, db_mod = pcall(require, "lib.platform.caps.db")
-			if ok and db_mod.db_cap then
-				return db_mod.db_cap(data_path)
-			end
-			return require("lib.platform.caps.kv").kv_cap(data_path)
+			return require("lib.platform.caps.db").db_cap(data_path, {
+				readonly = decl.readonly,
+			})
+		end,
+	},
+	shared_db = {
+		mod = "lib.platform.caps.shared_db",
+		build = function(decl, app, context, data_path)
+			return require("lib.platform.caps.shared_db").shared_db_cap(
+				data_path, context.app_id, decl.tables or {}, {
+					readonly = decl.readonly,
+				})
 		end,
 	},
 	time = {
@@ -373,7 +379,7 @@ function M.make_caps(app, cap_declarations, operator_grants, context)
 			else
 				-- Resolve data path for storage caps
 				local data_path
-				if cap_type == "kv" or cap_type == "db" then
+				if cap_type == "kv" or cap_type == "db" or cap_type == "shared_db" then
 					data_path = resolve_data_path(name, decl.scope, context)
 				end
 
