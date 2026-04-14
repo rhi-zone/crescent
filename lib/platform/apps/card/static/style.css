@@ -941,8 +941,22 @@ body {
   white-space: nowrap;
 }
 
-.lorebook-panel__add:hover {
+.lorebook-panel__add:hover,
+.lorebook-panel__import:hover,
+.lorebook-panel__export:hover {
   opacity: 0.85;
+}
+
+.lorebook-panel__import,
+.lorebook-panel__export {
+  background: var(--button-bg);
+  border: none;
+  color: var(--button-text);
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  white-space: nowrap;
 }
 
 .lorebook-panel__close {

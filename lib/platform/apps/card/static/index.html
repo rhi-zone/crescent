@@ -84,6 +84,7 @@
     <button class="input-row__button input-row__button--export" id="btn-export" title="Export Chat (Ctrl+Shift+E)">&#128190;</button>
     <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings (Ctrl+Shift+S)">&#9881;</button>
     <button class="input-row__button input-row__button--lorebook" id="btn-lorebook" title="Lorebook (Ctrl+Shift+L)">&#128214;</button>
+    <button class="input-row__button input-row__button--world-info" id="btn-world-info" title="World Info (Ctrl+Shift+W)">&#127758;</button>
     <button class="input-row__button input-row__button--card-edit" id="btn-card-edit" title="Card Editor">&#128100;</button>
     <button class="input-row__button input-row__button--regex" id="btn-regex" title="Regex Scripts">.*</button>
   </div>
@@ -164,6 +165,20 @@
       </div>
       <div class="lorebook-panel__body" id="lorebook-list"></div>
     </div>
+  </div>
+
+  <div class="lorebook-overlay" id="world-info-overlay" hidden>
+    <div class="lorebook-panel" id="world-info-panel">
+      <div class="lorebook-panel__header">
+        <span class="lorebook-panel__title">World Info</span>
+        <button class="lorebook-panel__add" id="world-info-add">+ Add Entry</button>
+        <button class="lorebook-panel__import" id="world-info-import">Import</button>
+        <button class="lorebook-panel__export" id="world-info-export">Export</button>
+        <button class="lorebook-panel__close" id="world-info-close">&times;</button>
+      </div>
+      <div class="lorebook-panel__body" id="world-info-list"></div>
+    </div>
+    <input type="file" id="world-info-file" accept=".json" hidden>
   </div>
 
   <div class="card-edit-overlay" id="card-edit-overlay" hidden>
