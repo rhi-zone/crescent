@@ -564,22 +564,11 @@ on demand if it gets out of sync.
 
 ### Export
 
-Export is a container format operation, not an app-specific one. The platform can
-pack any app's tarball into any supported container:
-
-```
-platform export myapp.tar.gz myapp.png          — infer png from extension
-platform export myapp.png myapp.tar.gz          — infer tar.gz from extension
-platform export myapp.png myapp/                — infer directory from trailing /
-platform export myapp.png --format=tar.gz out   — explicit format override
-```
-
-Format is inferred from the output path's extension (`.png`, `.jpg`, `.webp`,
-`.tar.gz`, `.tar`, trailing `/` for directory). `--format` overrides when the
-extension is ambiguous or missing.
-
-The app's data (CCv2 chara chunk, etc.) is the app's concern — it serializes its own
-data. The platform handles the container wrapping/unwrapping.
+Export between container formats (PNG, tar.gz, directory, etc.) is an app — not a
+platform operation. The platform is a runtime; it doesn't do anything besides run
+scripts with caps. A format conversion app reads a file via `caps.fs`, repacks it,
+and writes the output. The library shell or CLI can invoke it, but the logic lives
+in an app like anything else.
 
 ### Manifest
 
@@ -769,7 +758,7 @@ are first-party scripts:
 | What it feels like | What it actually is |
 |---|---|
 | App library / search UI | Library shell app (described above) |
-| Import/export between formats | Platform operation (container packing) |
+| Import/export between formats | App with `caps.fs` (container packing) |
 | Card editor / lorebook editor | Internal views inside each app's frontend |
 | Preset browser | Script with `caps.fs` |
 
@@ -794,11 +783,10 @@ content type: character cards, Steam games, itch games, browser bookmarks, etc.
 shows character-specific filters; a game-focused bookmark shows game metadata.
 The library app has no format knowledge; it reads open metadata from adapters.
 
-**Import/export** — container format conversion is a platform operation, not an app.
-The platform packs/unpacks tarballs into PNG, JPG, WebP, tar.gz, or directory form.
-CCv2-specific data (the `chara` chunk) is the card app's internal concern — it
-serializes and deserializes its own data format. The library shell can trigger
-import (copy file + index manifest) and export (repack to chosen container).
+**Format conversion apps** — container format conversion (PNG ↔ tar.gz ↔ directory,
+etc.) as separate apps with `caps.fs`. CCv2-specific data (the `chara` chunk) is
+the card app's internal concern. The library shell can invoke format conversion
+apps for import (copy + repack + index) and export (repack to chosen container).
 
 ### Vendoring format libraries
 
