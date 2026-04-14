@@ -10,6 +10,10 @@
   <template id="message-template">
     <div class="message">
       <div class="message__content"></div>
+      <div class="message__actions" hidden>
+        <button class="message__action-button" data-action="edit">Edit</button>
+        <button class="message__action-button" data-action="delete">Delete</button>
+      </div>
       <div class="message__swipe" hidden>
         <button class="message__swipe-button" data-dir="prev">&lt;</button>
         <span class="message__swipe-label"></span>
