@@ -19,7 +19,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 111 assertions
 - [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
 - [x] Card app static JS UI — hand-written vanilla JS frontend + Lua BFF backend (server.lua, 76 assertions). Swipe cache, greeting alternatives, all logic server-side.
-- [ ] Streaming LLM responses — SSE or WebSocket for token-by-token `llm.call` output
+- [x] Streaming LLM responses — SSE via `POST /api/message/stream`, `llm.call_stream()` in caps, `res.raw` socket takeover in http server
+- [ ] Card app: message editing and deletion (backend done, frontend done, needs conversation tree integration)
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] CCv2 adapter apps — import (PNG/JSON → crescent tarball) and export (tarball → CCv2 PNG) as separate apps
