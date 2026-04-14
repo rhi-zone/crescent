@@ -37,11 +37,11 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
 - [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution
-- [ ] Group chats — multiple characters in one conversation
-- [ ] World info / global lorebook — lorebook entries not tied to a specific card
-- [ ] Instruct mode / chat templates — configurable prompt formatting per model family
-- [ ] Connection testing — verify LLM endpoint works before chatting
-- [ ] Keyboard shortcuts — Ctrl+Enter to send, navigation hotkeys
+- [x] Group chats — multiple characters in one conversation, turn-based speaker selection
+- [x] World info / global lorebook — CRUD + import/export, merged with card lorebook in context assembly
+- [x] Instruct mode / chat templates — 7 default templates (ChatML, Llama2, Alpaca, Mistral, etc.), configurable per model
+- [x] Connection testing — verify LLM endpoint with latency measurement
+- [x] Keyboard shortcuts — Escape closes panels, Ctrl+Shift shortcuts for all panels
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
