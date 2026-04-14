@@ -414,6 +414,23 @@ local function api_post_continue(state, caps, _params, _body, res)
 	return json_ok(res, msg_response(state, last))
 end
 
+local function api_post_impersonate(state, caps, _params, body, res)
+	local context = build_context(state, caps)
+	-- Append instruction to generate as the user character
+	local hint = "Continue the conversation as {{user}}, writing their next message in character."
+	local env = make_macro_env(state)
+	hint = hint:gsub("{{user}}", env.user or "User")
+	if body and body.prompt and type(body.prompt) == "string" and #body.prompt > 0 then
+		hint = hint .. " " .. body.prompt
+	end
+	context[#context + 1] = { role = "system", content = hint }
+
+	local response, err = caps.llm.call(context)
+	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
+
+	return json_ok(res, { content = response })
+end
+
 local function api_get_swipes(state, _caps, params, _body, res)
 	local msg_id = params.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
@@ -542,6 +559,7 @@ local routes = {
 	["POST /api/message/edit"] = api_post_message_edit,
 	["POST /api/message/delete"] = api_post_message_delete,
 	["POST /api/message/stream"] = api_post_message_stream,
+	["POST /api/impersonate"] = api_post_impersonate,
 }
 
 function M.create(caps, opts)

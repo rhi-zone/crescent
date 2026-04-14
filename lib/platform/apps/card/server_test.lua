@@ -529,6 +529,68 @@ T.describe("context assembly", function()
 	end)
 end)
 
+-- ── Impersonate tests ──────────────────────────────────────────────────────
+
+T.describe("POST /api/impersonate", function()
+	T.it("returns generated content without modifying conversation", function()
+		local caps = make_mock_caps({ llm_call = function() return "impersonated text" end })
+		local app = server.create(caps, { no_static = true })
+		local initial_count = #app.state.messages
+		local status, data = call(app, "POST", "/api/impersonate")
+		T.eq(status, 200)
+		T.eq(data.content, "impersonated text")
+		T.eq(#app.state.messages, initial_count, "conversation unchanged")
+	end)
+
+	T.it("does not add messages to conversation", function()
+		local call_count = 0
+		local caps = make_mock_caps({
+			llm_call = function()
+				call_count = call_count + 1
+				return "response " .. call_count
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Send a real message first
+		call(app, "POST", "/api/message", { content = "Hello" })
+		local count_after_send = #app.state.messages
+
+		-- Impersonate should not change message count
+		local status, data = call(app, "POST", "/api/impersonate")
+		T.eq(status, 200)
+		T.ok(data.content, "has content")
+		T.eq(#app.state.messages, count_after_send, "no new messages added")
+	end)
+
+	T.it("includes optional prompt hint in context", function()
+		local captured_context
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_context = messages
+				return "with hint"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/impersonate", { prompt = "Be dramatic" })
+		T.eq(status, 200)
+		T.eq(data.content, "with hint")
+		-- Last context message should contain the hint
+		T.ok(captured_context, "context was captured")
+		local last = captured_context[#captured_context]
+		T.eq(last.role, "system")
+		T.ok(last.content:find("Be dramatic"), "hint included in context")
+		T.ok(last.content:find("Tester"), "user name substituted")
+	end)
+
+	T.it("returns 502 on LLM failure", function()
+		local caps = make_mock_caps({ llm_call = function() return nil, "timeout" end })
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/impersonate")
+		T.eq(status, 502)
+		T.ok(data.error:find("timeout"), "error mentions timeout")
+	end)
+end)
+
 -- ── Streaming tests ────────────────────────────────────────────────────────
 
 T.describe("POST /api/message/stream", function()

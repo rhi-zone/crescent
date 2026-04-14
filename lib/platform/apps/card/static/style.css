@@ -274,6 +274,10 @@ body {
   background: #333;
 }
 
+.input-row__button--impersonate {
+  background: #333;
+}
+
 /* Mobile */
 
 @media (max-width: 600px) {
