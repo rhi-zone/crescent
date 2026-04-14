@@ -570,6 +570,17 @@ scripts with caps. A format conversion app reads a file via `caps.fs`, repacks i
 and writes the output. The library shell or CLI can invoke it, but the logic lives
 in an app like anything else.
 
+```
+platform run export.app headless -- myapp.tar.gz myapp.png
+platform run export.app headless -- myapp.png myapp.tar.gz
+platform run export.app headless -- myapp.png myapp/
+platform run export.app headless -- myapp.png --format=tar.gz out
+```
+
+Format is inferred from the output path's extension (`.png`, `.jpg`, `.webp`,
+`.tar.gz`, `.tar`, trailing `/` for directory). `--format` overrides when the
+extension is ambiguous or missing.
+
 ### Manifest
 
 `manifest.json` declares the app's entrypoints, capability requirements, and metadata.
