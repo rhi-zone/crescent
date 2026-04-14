@@ -170,6 +170,52 @@ T.describe("GET /api/card", function()
 	end)
 end)
 
+T.describe("GET /api/avatar", function()
+	T.it("returns PNG bytes with correct content type when raw() is available", function()
+		local fake_png = "\137PNG\r\n\26\nfake image data"
+		local caps = make_mock_caps()
+		caps.png.raw = function() return fake_png end
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("GET", "/api/avatar")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "image/png")
+		T.eq(res.body, fake_png)
+	end)
+
+	T.it("returns 404 when png cap has no raw method", function()
+		local caps = make_mock_caps()
+		caps.png.raw = nil
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("GET", "/api/avatar")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("returns 404 when raw() returns nil", function()
+		local caps = make_mock_caps()
+		caps.png.raw = function() return nil, "file not found" end
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("GET", "/api/avatar")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("returns 404 when no png cap at all", function()
+		local caps = make_mock_caps()
+		caps.png = nil
+		-- Without png cap, card won't load — that's fine, we just test avatar endpoint.
+		local app = server.create(caps, { no_static = true })
+		local req = make_req("GET", "/api/avatar")
+		local res = make_res()
+		app.handler(req, res)
+		T.eq(res.status, 404)
+	end)
+end)
+
 T.describe("GET /api/messages", function()
 	T.it("returns canonical path with sibling info", function()
 		local caps = make_mock_caps()

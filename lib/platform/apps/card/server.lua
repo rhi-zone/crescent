@@ -93,6 +93,8 @@ local function create_state()
 		settings = nil,       -- generation settings (initialized from defaults + kv)
 		personas = nil,       -- {name, description}[] (initialized on create)
 		active_persona = nil, -- name string or nil
+		authors_note = nil,   -- {text, depth, position} (initialized on create)
+		regex_scripts = {},   -- {name, find, replace, enabled, scope, order}[]
 	}
 end
 
@@ -241,8 +243,22 @@ local function build_context(state, caps, path)
 		for i = 1, #path do
 			fallback[#fallback + 1] = { role = path[i].role, content = path[i].content }
 		end
-		return fallback
+		result = fallback
 	end
+
+	-- Insert Author's Note at configured depth.
+	local an = state.authors_note
+	if an and an.text and #an.text > 0 then
+		local depth = an.depth or 4
+		local pos = an.position or "after"
+		local insert_pos = #result - depth
+		if pos == "before" then insert_pos = insert_pos end
+		if pos == "after" then insert_pos = insert_pos + 1 end
+		if insert_pos < 1 then insert_pos = 1 end
+		if insert_pos > #result + 1 then insert_pos = #result + 1 end
+		table.insert(result, insert_pos, { role = "system", content = an.text })
+	end
+
 	return result
 end
 
@@ -311,6 +327,31 @@ local function build_context_to_parent(state, caps, parent_id)
 		path[#path + 1] = chain[i]
 	end
 	return build_context(state, caps, path)
+end
+
+-- ── Regex scripts ──────────────────────────────────────────────────────────
+
+local function apply_regex_scripts(state, text, scope)
+	local scripts = state.regex_scripts
+	if not scripts or #scripts == 0 then return text end
+	-- Collect enabled scripts matching scope, sorted by order.
+	local sorted = {}
+	for _, s in ipairs(scripts) do
+		if s.enabled and s.scope == scope then
+			sorted[#sorted + 1] = s
+		end
+	end
+	table.sort(sorted, function(a, b) return (a.order or 0) < (b.order or 0) end)
+	for _, s in ipairs(sorted) do
+		local ok, result = pcall(string.gsub, text, s.find, s.replace)
+		if ok then text = result end
+	end
+	return text
+end
+
+local function save_regex_scripts(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("regex_scripts", json.encode(state.regex_scripts))
 end
 
 -- ── Persistence ─────────────────────────────────────────────────────────────
@@ -409,6 +450,27 @@ local function api_get_card(state, _caps, _params, _body, res)
 		data.greeting = msg_response(state, path[1])
 	end
 	return json_ok(res, data)
+end
+
+local function api_get_avatar(_state, caps, _params, _body, res)
+	if not caps.png or not caps.png.raw then
+		res.status = 404
+		res.headers["Content-Type"] = "text/plain"
+		res.body = "no avatar"
+		return true
+	end
+	local bytes, err = caps.png.raw()
+	if not bytes then
+		res.status = 404
+		res.headers["Content-Type"] = "text/plain"
+		res.body = err or "no avatar"
+		return true
+	end
+	res.status = 200
+	res.headers["Content-Type"] = "image/png"
+	res.headers["Cache-Control"] = "max-age=3600"
+	res.body = bytes
+	return true
 end
 
 local function api_get_messages(state, _caps, _params, _body, res)
@@ -1096,10 +1158,101 @@ local function api_post_presets_export(_state, caps, _params, body, res)
 	return json_ok(res, { json = presets_mod.export_preset(found) })
 end
 
+-- ── Regex script endpoints ─────────────────────────────────────────────────
+
+local function regex_script_to_json(s)
+	return {
+		name = s.name,
+		find = s.find,
+		replace = s.replace,
+		enabled = s.enabled,
+		scope = s.scope,
+		order = s.order,
+	}
+end
+
+local function api_get_regex(state, _caps, _params, _body, res)
+	local result = {}
+	for _, s in ipairs(state.regex_scripts) do
+		result[#result + 1] = regex_script_to_json(s)
+	end
+	return json_ok(res, { scripts = result })
+end
+
+local function api_post_regex_save(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+		return json_err(res, 400, "name required")
+	end
+	if not body.find or type(body.find) ~= "string" then
+		return json_err(res, 400, "find required")
+	end
+	-- Validate the pattern.
+	local ok_pat, pat_err = pcall(string.find, "", body.find)
+	if not ok_pat then
+		return json_err(res, 400, "invalid pattern: " .. tostring(pat_err))
+	end
+	-- Find existing by name.
+	local found
+	for _, s in ipairs(state.regex_scripts) do
+		if s.name == body.name then found = s; break end
+	end
+	if found then
+		found.find = body.find
+		found.replace = body.replace or ""
+		if body.enabled ~= nil then found.enabled = body.enabled end
+		if body.scope ~= nil then found.scope = body.scope end
+		if body.order ~= nil then found.order = tonumber(body.order) or 0 end
+	else
+		found = {
+			name = body.name,
+			find = body.find,
+			replace = body.replace or "",
+			enabled = body.enabled ~= false,
+			scope = body.scope or "ai_output",
+			order = tonumber(body.order) or 0,
+		}
+		state.regex_scripts[#state.regex_scripts + 1] = found
+	end
+	save_regex_scripts(state, caps)
+	return json_ok(res, regex_script_to_json(found))
+end
+
+local function api_post_regex_delete(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" then
+		return json_err(res, 400, "name required")
+	end
+	local scripts = state.regex_scripts
+	for i, s in ipairs(scripts) do
+		if s.name == body.name then
+			table.remove(scripts, i)
+			save_regex_scripts(state, caps)
+			return json_ok(res, { deleted = true })
+		end
+	end
+	return json_err(res, 404, "script not found")
+end
+
+local function api_post_regex_test(_state, _caps, _params, body, res)
+	if not body or not body.find or not body.input then
+		return json_err(res, 400, "find and input required")
+	end
+	local ok_pat, pat_err = pcall(string.find, "", body.find)
+	if not ok_pat then
+		return json_err(res, 400, "invalid pattern: " .. tostring(pat_err))
+	end
+	local replace = body.replace or ""
+	local ok_gsub, output = pcall(string.gsub, body.input, body.find, replace)
+	if not ok_gsub then
+		return json_err(res, 400, "gsub error: " .. tostring(output))
+	end
+	return json_ok(res, { output = output })
+end
+
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
 	["GET /api/card"]             = api_get_card,
+	["GET /api/avatar"]           = api_get_avatar,
 	["GET /api/messages"]         = api_get_messages,
 	["POST /api/message"]         = api_post_message,
 	["POST /api/continue"]        = api_post_continue,

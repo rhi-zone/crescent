@@ -7,6 +7,7 @@
 -- Capability API (passed to sandbox as caps.png):
 --   cap.text(keyword)           -> string | nil
 --   cap.set_text(keyword, val)  -> nil  (writes back to disk)
+--   cap.raw()                   -> string | nil, err  (raw PNG file bytes)
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -57,6 +58,13 @@ function M.png_cap(path, opts)
 			if not f then error("png: cannot write " .. path .. ": " .. tostring(err), 3) end
 			f:write(bytes)
 			f:close()
+		end,
+		raw = function ()
+			local f, err = io.open(path, "rb")
+			if not f then return nil, "png: cannot open " .. path .. ": " .. tostring(err) end
+			local bytes = f:read("*a")
+			f:close()
+			return bytes
 		end,
 	}
 end

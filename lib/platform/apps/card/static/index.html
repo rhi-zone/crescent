@@ -9,6 +9,7 @@
 <body>
   <template id="message-template">
     <div class="message">
+      <img class="message__avatar" src="/api/avatar" alt="" hidden>
       <div class="message__content"></div>
       <div class="message__actions" hidden>
         <button class="message__action-button" data-action="edit">Edit</button>
@@ -33,6 +34,13 @@
     <div class="session-panel__list" id="session-list"></div>
   </div>
   <div class="session-overlay" id="session-overlay" hidden></div>
+
+  <div class="card-header" id="card-header" hidden>
+    <img class="card-header__avatar" id="card-avatar" src="/api/avatar" alt="">
+    <div class="card-header__info">
+      <div class="card-header__name" id="card-header-name"></div>
+    </div>
+  </div>
 
   <div class="message-list" id="message-list"></div>
 
