@@ -1,0 +1,8 @@
+{
+  "name": "CCv2 Export",
+  "version": "0.1.0",
+  "meta": { "type": "tool" },
+  "caps": {
+    "self": { "type": "self", "required": true }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "CCv2 Import",
+  "version": "0.1.0",
+  "meta": { "type": "tool" },
+  "caps": {
+    "self": { "type": "self", "required": true },
+    "kv":   { "type": "kv",   "required": false }
+  }
+}

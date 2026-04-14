@@ -1,0 +1,10 @@
+{
+  "name": "Shell",
+  "version": "0.1.0",
+  "meta": { "type": "shell" },
+  "caps": {
+    "fs":     { "type": "fs",          "required": true, "root": "~/.crescent/cards" },
+    "server": { "type": "http_server", "required": true },
+    "config": { "type": "config",      "required": false }
+  }
+}
