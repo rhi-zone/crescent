@@ -170,13 +170,15 @@ end
 -- Returns nil, errmsg if any required cap is absent from env.
 local function validate_caps(manifest, entry_key, env)
 	local globals = env or {}
+	-- Caps may be nested under a "caps" table (new style) or top-level (old style)
+	local cap_lookup = globals.caps or globals
 
 	-- Top-level caps: { cap_name = "required" | "optional" }
 	local top_caps = manifest and manifest.caps
 	if top_caps then
 		for cap_name, cap_spec in pairs(top_caps) do
 			local is_required = cap_spec == "required" or cap_spec == true
-			if is_required and globals[cap_name] == nil then
+			if is_required and cap_lookup[cap_name] == nil then
 				return nil, "missing required cap: " .. tostring(cap_name) .. " (type: " .. tostring(cap_name) .. ")"
 			end
 		end
@@ -190,7 +192,7 @@ local function validate_caps(manifest, entry_key, env)
 		for cap_name, cap_spec in pairs(entry_caps) do
 			local cap_type = type(cap_spec) == "table" and cap_spec.type or tostring(cap_name)
 			local is_required = type(cap_spec) == "table" and cap_spec.required ~= false or cap_spec == "required" or cap_spec == true
-			if is_required and globals[cap_name] == nil then
+			if is_required and cap_lookup[cap_name] == nil then
 				return nil, "missing required cap: " .. tostring(cap_name) .. " (type: " .. tostring(cap_type) .. ")"
 			end
 		end
@@ -473,8 +475,8 @@ function M.run_app(path, entry_key, opts)
 		revoke_fns = {}
 	end
 
-	-- Build sandbox env: stdlib + caps as globals
-	local cap_bundle = { globals = caps, modules = {} }
+	-- Build sandbox env: stdlib + caps nested under "caps" global
+	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
 
 	-- Run
