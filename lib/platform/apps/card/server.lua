@@ -95,6 +95,10 @@ local function create_state()
 		active_persona = nil, -- name string or nil
 		authors_note = nil,   -- {text, depth, position} (initialized on create)
 		regex_scripts = {},   -- {name, find, replace, enabled, scope, order}[]
+		instruct_templates = {}, -- instruct template definitions
+		instruct_active = nil,   -- name of active template (nil = chat mode)
+		world_info = {},      -- NormalizedEntry[] (global lorebook, persists across cards)
+		group = nil,          -- {enabled, members[], turn_order, next_speaker}
 	}
 end
 
@@ -168,7 +172,7 @@ end
 -- msg_response: format a message for the API response.
 local function msg_response(state, msg)
 	local idx, total = sibling_info(state, msg)
-	return {
+	local resp = {
 		id = msg.id,
 		role = msg.role,
 		content = msg.content,
@@ -176,6 +180,8 @@ local function msg_response(state, msg)
 		sibling_index = idx,
 		sibling_count = total,
 	}
+	if msg.speaker then resp.speaker = msg.speaker end
+	return resp
 end
 
 -- ── Persona helpers (forward declarations for context assembly) ────────────
@@ -236,7 +242,14 @@ local function build_context(state, caps, path)
 		char_name = card.name,
 		user_name = state.user_name,
 		persona = active_p and active_p.description or nil,
-		lorebook_entries = state.lorebook,
+		lorebook_entries = (function()
+			local all = {}
+			if state.lorebook then
+				for _, e in ipairs(state.lorebook) do all[#all + 1] = e end
+			end
+			for _, e in ipairs(state.world_info) do all[#all + 1] = e end
+			return #all > 0 and all or nil
+		end)(),
 	})
 	if not result then
 		local fallback = {}
@@ -352,6 +365,153 @@ end
 local function save_regex_scripts(state, caps)
 	if not caps.kv then return end
 	caps.kv.set("regex_scripts", json.encode(state.regex_scripts))
+end
+
+-- ── Instruct templates ─────────────────────────────────────────────────────
+
+local DEFAULT_INSTRUCT_TEMPLATES = {
+	{
+		name = "OpenAI (native)",
+		mode = "chat",
+		system_prefix = "", system_suffix = "",
+		user_prefix = "", user_suffix = "",
+		assistant_prefix = "", assistant_suffix = "",
+		separator = "",
+		stop_strings = {},
+	},
+	{
+		name = "ChatML",
+		mode = "instruct",
+		system_prefix = "<|im_start|>system\n",
+		system_suffix = "<|im_end|>\n",
+		user_prefix = "<|im_start|>user\n",
+		user_suffix = "<|im_end|>\n",
+		assistant_prefix = "<|im_start|>assistant\n",
+		assistant_suffix = "<|im_end|>\n",
+		separator = "",
+		stop_strings = { "<|im_end|>" },
+	},
+	{
+		name = "Llama2",
+		mode = "instruct",
+		system_prefix = "[INST] <<SYS>>\n",
+		system_suffix = "\n<</SYS>>\n\n",
+		user_prefix = "",
+		user_suffix = " [/INST] ",
+		assistant_prefix = "",
+		assistant_suffix = " </s><s>[INST] ",
+		separator = "",
+		stop_strings = { "</s>" },
+	},
+	{
+		name = "Alpaca",
+		mode = "instruct",
+		system_prefix = "### Instruction:\n",
+		system_suffix = "\n\n",
+		user_prefix = "### Input:\n",
+		user_suffix = "\n\n",
+		assistant_prefix = "### Response:\n",
+		assistant_suffix = "\n\n",
+		separator = "",
+		stop_strings = { "### Instruction:", "### Input:", "### Response:" },
+	},
+	{
+		name = "Mistral",
+		mode = "instruct",
+		system_prefix = "[INST] ",
+		system_suffix = "\n",
+		user_prefix = "[INST] ",
+		user_suffix = " [/INST] ",
+		assistant_prefix = "",
+		assistant_suffix = " </s> ",
+		separator = "",
+		stop_strings = { "</s>" },
+	},
+	{
+		name = "Vicuna",
+		mode = "instruct",
+		system_prefix = "",
+		system_suffix = "\n\n",
+		user_prefix = "USER: ",
+		user_suffix = "\n",
+		assistant_prefix = "ASSISTANT: ",
+		assistant_suffix = "\n",
+		separator = "",
+		stop_strings = { "USER:", "ASSISTANT:" },
+	},
+	{
+		name = "Plain",
+		mode = "instruct",
+		system_prefix = "System: ",
+		system_suffix = "\n",
+		user_prefix = "User: ",
+		user_suffix = "\n",
+		assistant_prefix = "Assistant: ",
+		assistant_suffix = "\n",
+		separator = "",
+		stop_strings = {},
+	},
+}
+
+-- format_for_instruct(messages, template) -> messages
+-- If template is nil or mode="chat", returns messages unchanged.
+-- If mode="instruct", formats into a single user message using template prefixes/suffixes.
+local function format_for_instruct(messages, template)
+	if not template or template.mode == "chat" then return messages end
+	local parts = {}
+	local sep = template.separator or ""
+	for i, msg in ipairs(messages) do
+		local prefix, suffix
+		if msg.role == "system" then
+			prefix = template.system_prefix or ""
+			suffix = template.system_suffix or ""
+		elseif msg.role == "user" then
+			prefix = template.user_prefix or ""
+			suffix = template.user_suffix or ""
+		elseif msg.role == "assistant" then
+			prefix = template.assistant_prefix or ""
+			suffix = template.assistant_suffix or ""
+		else
+			prefix = ""
+			suffix = ""
+		end
+		if i > 1 and sep ~= "" then parts[#parts + 1] = sep end
+		parts[#parts + 1] = prefix
+		parts[#parts + 1] = msg.content
+		parts[#parts + 1] = suffix
+	end
+	-- Append the assistant prefix to prompt a response.
+	parts[#parts + 1] = template.assistant_prefix or ""
+	return { { role = "user", content = table.concat(parts) } }
+end
+
+-- Expose for testing.
+M._format_for_instruct = format_for_instruct
+M._DEFAULT_INSTRUCT_TEMPLATES = DEFAULT_INSTRUCT_TEMPLATES
+
+local function find_instruct_template(templates, name)
+	for i, t in ipairs(templates) do
+		if t.name == name then return t, i end
+	end
+	return nil
+end
+
+local function save_instruct(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("instruct_templates", json.encode(state.instruct_templates))
+	caps.kv.set("instruct_active", state.instruct_active or "")
+end
+
+-- Get the active instruct template (nil if none or chat mode).
+local function get_active_instruct(state)
+	if not state.instruct_active or state.instruct_active == "" then return nil end
+	return find_instruct_template(state.instruct_templates, state.instruct_active)
+end
+
+-- Apply instruct template to messages before LLM call.
+local function apply_instruct(state, messages)
+	local template = get_active_instruct(state)
+	return format_for_instruct(messages, template)
 end
 
 -- ── Persistence ─────────────────────────────────────────────────────────────
@@ -502,7 +662,7 @@ local function api_post_message(state, caps, _params, body, res)
 
 	-- Build context (canonical path now includes user_msg).
 	local context = build_context(state, caps)
-	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
+	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
 	if not response then
 		-- Rollback: delete user message.
 		state.conv:delete_subtree(user_msg.id)
@@ -580,7 +740,7 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 	}))
 
 	-- Stream LLM response.
-	local response, err = caps.llm.call_stream(context, function(token)
+	local response, err = caps.llm.call_stream(apply_instruct(state, context), function(token)
 		sse_write(sock, json.encode({ type = "token", token = token }))
 	end, llm_opts_from_settings(state.settings))
 
@@ -625,7 +785,7 @@ local function api_post_continue(state, caps, _params, _body, res)
 	if not path or #path == 0 then return json_err(res, 400, "no messages") end
 
 	local context = build_context(state, caps, path)
-	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
+	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	-- Apply ai_output regex scripts.
@@ -667,7 +827,7 @@ local function api_post_impersonate(state, caps, _params, body, res)
 	end
 	context[#context + 1] = { role = "system", content = hint }
 
-	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
+	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	return json_ok(res, { content = response })
@@ -703,7 +863,7 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	local context, cerr = build_context_to_parent(state, caps, msg.parent_id)
 	if not context then return json_err(res, 500, cerr) end
 
-	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
+	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	-- Apply ai_output regex scripts.
@@ -933,6 +1093,101 @@ local function api_post_lorebook_delete(state, caps, _params, body, res)
 		end
 	end
 	return json_err(res, 404, "entry not found")
+end
+
+-- ── World info endpoints ───────────────────────────────────────────────────
+
+local function save_world_info(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("world_info", json.encode(state.world_info))
+end
+
+local function api_get_world_info(state, _caps, _params, _body, res)
+	local result = {}
+	for _, e in ipairs(state.world_info) do
+		result[#result + 1] = entry_to_json(e)
+	end
+	return json_ok(res, { entries = result })
+end
+
+local function api_post_world_info_update(state, caps, _params, body, res)
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	for _, e in ipairs(state.world_info) do
+		if e.uid == body.uid then
+			if body.keys ~= nil then e.key = body.keys end
+			if body.content ~= nil then e.content = body.content end
+			if body.enabled ~= nil then e.enabled = body.enabled end
+			if body.constant ~= nil then e.constant = body.constant end
+			if body.position ~= nil then e.position = body.position end
+			if body.order ~= nil then e.order = body.order end
+			if body.role ~= nil then e.role = body.role end
+			save_world_info(state, caps)
+			return json_ok(res, entry_to_json(e))
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+local function api_post_world_info_add(state, caps, _params, body, res)
+	if not body or not body.keys or not body.content then
+		return json_err(res, 400, "keys and content required")
+	end
+	local entry = lorebook_mod.normalize({
+		key = body.keys,
+		content = body.content,
+		enabled = body.enabled,
+		constant = body.constant,
+		position = body.position,
+		order = body.order,
+		role = body.role,
+	})
+	state.world_info[#state.world_info + 1] = entry
+	save_world_info(state, caps)
+	return json_ok(res, entry_to_json(entry))
+end
+
+local function api_post_world_info_delete(state, caps, _params, body, res)
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	for i, e in ipairs(state.world_info) do
+		if e.uid == body.uid then
+			table.remove(state.world_info, i)
+			save_world_info(state, caps)
+			return json_ok(res, { deleted = true })
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+local function api_post_world_info_import(state, caps, _params, body, res)
+	if not body or not body.entries or type(body.entries) ~= "table" then
+		return json_err(res, 400, "entries array required")
+	end
+	for _, raw in ipairs(body.entries) do
+		local entry = lorebook_mod.normalize({
+			key = raw.keys or raw.key,
+			content = raw.content,
+			enabled = raw.enabled,
+			constant = raw.constant,
+			position = raw.position,
+			order = raw.order,
+			role = raw.role,
+		})
+		state.world_info[#state.world_info + 1] = entry
+	end
+	save_world_info(state, caps)
+	local result = {}
+	for _, e in ipairs(state.world_info) do
+		result[#result + 1] = entry_to_json(e)
+	end
+	return json_ok(res, { entries = result, imported = #body.entries })
+end
+
+local function api_get_world_info_export(state, _caps, _params, _body, res)
+	local result = {}
+	for _, e in ipairs(state.world_info) do
+		result[#result + 1] = entry_to_json(e)
+	end
+	return json_ok(res, { entries = result })
 end
 
 -- ── Persona endpoints helpers ──────────────────────────────────────────────
@@ -1347,6 +1602,30 @@ local function api_get_export_chat(state, _caps, params, _body, res)
 	end
 end
 
+-- ── Connection test ─────────────────────────────────────────────────────────
+
+local function api_post_connection_test(state, caps, params, body, res)
+	if not caps.llm or not caps.llm.call then
+		return json_ok(res, { success = false, error = "no LLM capability configured" })
+	end
+	local test_messages = {{ role = "user", content = "Hello" }}
+	local t0 = os.clock()
+	local response, err = caps.llm.call(test_messages, { max_tokens = 10 })
+	local elapsed_ms = math.floor((os.clock() - t0) * 1000 + 0.5)
+	if response then
+		return json_ok(res, {
+			success = true,
+			response = response:sub(1, 100),
+			latency_ms = elapsed_ms,
+		})
+	else
+		return json_ok(res, {
+			success = false,
+			error = tostring(err),
+		})
+	end
+end
+
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
@@ -1366,6 +1645,12 @@ local routes = {
 	["POST /api/lorebook/update"]  = api_post_lorebook_update,
 	["POST /api/lorebook/add"]     = api_post_lorebook_add,
 	["POST /api/lorebook/delete"]  = api_post_lorebook_delete,
+	["GET /api/world_info"]          = api_get_world_info,
+	["POST /api/world_info/update"]  = api_post_world_info_update,
+	["POST /api/world_info/add"]     = api_post_world_info_add,
+	["POST /api/world_info/delete"]  = api_post_world_info_delete,
+	["POST /api/world_info/import"]  = api_post_world_info_import,
+	["GET /api/world_info/export"]   = api_get_world_info_export,
 	["GET /api/sessions"]         = api_get_sessions,
 	["POST /api/session/new"]     = api_post_session_new,
 	["POST /api/session/switch"]  = api_post_session_switch,
@@ -1393,6 +1678,7 @@ local routes = {
 	["GET /api/authors_note"]       = api_get_authors_note,
 	["POST /api/authors_note"]      = api_post_authors_note,
 	["GET /api/export/chat"]        = api_get_export_chat,
+	["POST /api/connection/test"]    = api_post_connection_test,
 	-- Aliases for renamed endpoints.
 	["GET /api/siblings"]         = api_get_swipes,
 	["POST /api/branch/new"]      = api_post_swipe_new,
@@ -1448,6 +1734,17 @@ function M.create(caps, opts)
 			local ok, saved = pcall(json.decode, raw)
 			if ok and type(saved) == "table" then
 				state.lorebook = saved
+			end
+		end
+	end
+
+	-- Load world info from kv.
+	if caps.kv then
+		local raw = caps.kv.get("world_info")
+		if raw then
+			local ok, saved = pcall(json.decode, raw)
+			if ok and type(saved) == "table" then
+				state.world_info = saved
 			end
 		end
 	end

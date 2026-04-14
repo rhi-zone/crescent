@@ -28,7 +28,7 @@
   <div class="session-panel" id="session-panel" hidden>
     <div class="session-panel__header">
       <span class="session-panel__title">Chats</span>
-      <button class="session-panel__new" id="btn-new-session">+ New Chat</button>
+      <button class="session-panel__new" id="btn-new-session" title="New Chat (Ctrl+Shift+N)">+ New Chat</button>
       <button class="session-panel__close" id="btn-close-sessions">&times;</button>
     </div>
     <div class="session-panel__list" id="session-list"></div>
@@ -78,12 +78,12 @@
 
   <div class="input-row">
     <textarea class="input-row__textarea" id="input" rows="1" placeholder="Type a message..."></textarea>
-    <button class="input-row__button input-row__button--send" id="btn-send">Send</button>
+    <button class="input-row__button input-row__button--send" id="btn-send" title="Send (Enter or Ctrl+Enter)">Send</button>
     <button class="input-row__button input-row__button--continue" id="btn-continue">Continue</button>
     <button class="input-row__button input-row__button--impersonate" id="btn-impersonate">Impersonate</button>
-    <button class="input-row__button input-row__button--export" id="btn-export" title="Export Chat">&#128190;</button>
-    <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings">&#9881;</button>
-    <button class="input-row__button input-row__button--lorebook" id="btn-lorebook" title="Lorebook">&#128214;</button>
+    <button class="input-row__button input-row__button--export" id="btn-export" title="Export Chat (Ctrl+Shift+E)">&#128190;</button>
+    <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings (Ctrl+Shift+S)">&#9881;</button>
+    <button class="input-row__button input-row__button--lorebook" id="btn-lorebook" title="Lorebook (Ctrl+Shift+L)">&#128214;</button>
     <button class="input-row__button input-row__button--card-edit" id="btn-card-edit" title="Card Editor">&#128100;</button>
     <button class="input-row__button input-row__button--regex" id="btn-regex" title="Regex Scripts">.*</button>
   </div>
@@ -95,6 +95,13 @@
         <button class="settings-panel__close" id="settings-close">&times;</button>
       </div>
       <div class="settings-panel__body">
+        <div class="settings-section">
+          <span class="settings-section__title">Connection</span>
+          <div class="settings-connection">
+            <button id="btn-test-connection" class="settings-connection__btn">Test Connection</button>
+            <span id="connection-result" class="connection-result"></span>
+          </div>
+        </div>
         <div class="settings-section">
           <span class="settings-section__title">Persona</span>
           <div class="settings-persona">
