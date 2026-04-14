@@ -10,7 +10,7 @@
 -- a new sibling. The "active path" is the canonical path from root to leaf.
 --
 -- Capabilities (injected via caps table):
---   caps.llm.call(messages) -> string | nil, err
+--   caps.llm.call(messages, opts?) -> string | nil, err
 --   caps.llm.count_tokens(text) -> integer (optional)
 --   caps.png.text(keyword) -> string | nil
 --   caps.kv.get(key) / caps.kv.set(key, val) — persistence (optional)
@@ -26,6 +26,7 @@ local context_mod = require("lib.formats.ccv2.context")
 local macro_mod = require("lib.formats.ccv2.macro")
 local lorebook_mod = require("lib.formats.ccv2.lorebook")
 local conversation = require("lib.conversation")
+local presets_mod = require("lib.platform.apps.card.presets")
 
 local M = {}
 
@@ -71,6 +72,17 @@ end
 
 -- ── State ───────────────────────────────────────────────────────────────────
 
+local DEFAULT_SETTINGS = {
+	temperature = 0.7,
+	top_p = 1.0,
+	max_tokens = 512,
+	frequency_penalty = 0.0,
+	presence_penalty = 0.0,
+	max_context = 4096,
+}
+
+local SETTINGS_KEYS = { "temperature", "top_p", "max_tokens", "frequency_penalty", "presence_penalty", "max_context" }
+
 local function create_state()
 	return {
 		card = nil,           -- CardData
@@ -78,6 +90,23 @@ local function create_state()
 		user_name = "User",
 		conv = nil,           -- lib/conversation db handle
 		session_id = nil,     -- active session id
+		settings = nil,       -- generation settings (initialized from defaults + kv)
+	}
+end
+
+local function default_settings()
+	local s = {}
+	for k, v in pairs(DEFAULT_SETTINGS) do s[k] = v end
+	return s
+end
+
+local function llm_opts_from_settings(settings)
+	return {
+		temperature = settings.temperature,
+		top_p = settings.top_p,
+		max_tokens = settings.max_tokens,
+		frequency_penalty = settings.frequency_penalty,
+		presence_penalty = settings.presence_penalty,
 	}
 end
 
@@ -176,12 +205,8 @@ local function build_context(state, caps, path)
 		count_tokens = function(text) return math.ceil(#text / 4) end
 	end
 
-	local max_context = 4096
-	local max_response = 512
-	if caps.config and caps.config.get then
-		max_context = caps.config.get("max_context") or max_context
-		max_response = caps.config.get("max_response") or max_response
-	end
+	local max_context = state.settings and state.settings.max_context or 4096
+	local max_response = state.settings and state.settings.max_tokens or 512
 
 	local result, err = context_mod.assemble({
 		card = card,
@@ -272,6 +297,47 @@ local function init_greeting(state)
 	-- The first root inserted is the primary greeting — this is correct.
 end
 
+-- ── Session helpers ─────────────────────────────────────────────────────────
+
+local function get_session_preview(state, session_id)
+	local path = state.conv:get_canonical_path(session_id)
+	if not path or #path == 0 then return "" end
+	for _, msg in ipairs(path) do
+		if msg.role == "user" then
+			local text = msg.content
+			if #text > 80 then text = text:sub(1, 77) .. "..." end
+			return text
+		end
+	end
+	local text = path[1].content
+	if #text > 80 then text = text:sub(1, 77) .. "..." end
+	return text
+end
+
+local function format_messages(state, path)
+	local result = {}
+	for _, msg in ipairs(path) do
+		result[#result + 1] = msg_response(state, msg)
+	end
+	return result
+end
+
+local function switch_to_session(state, caps, session_id)
+	state.session_id = session_id
+	save_session_id(state, caps)
+end
+
+local function create_new_session(state, caps)
+	local session, serr = state.conv:create_session("card")
+	if not session then return nil, nil, serr end
+	state.session_id = session.id
+	init_greeting(state)
+	switch_to_session(state, caps, session.id)
+	local path = get_canonical_path(state)
+	local messages = format_messages(state, path or {})
+	return session, messages
+end
+
 -- ── API endpoints ───────────────────────────────────────────────────────────
 
 local function api_get_card(state, _caps, _params, _body, res)
@@ -310,7 +376,7 @@ local function api_post_message(state, caps, _params, body, res)
 
 	-- Build context (canonical path now includes user_msg).
 	local context = build_context(state, caps)
-	local response, err = caps.llm.call(context)
+	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
 	if not response then
 		-- Rollback: delete user message.
 		state.conv:delete_subtree(user_msg.id)
@@ -382,7 +448,7 @@ local function api_post_message_stream(state, caps, _params, body, res, sock)
 	-- Stream LLM response.
 	local response, err = caps.llm.call_stream(context, function(token)
 		sse_write(sock, json.encode({ type = "token", token = token }))
-	end)
+	end, llm_opts_from_settings(state.settings))
 
 	if not response then
 		-- Rollback: delete user message.
@@ -422,7 +488,7 @@ local function api_post_continue(state, caps, _params, _body, res)
 	if not path or #path == 0 then return json_err(res, 400, "no messages") end
 
 	local context = build_context(state, caps, path)
-	local response, err = caps.llm.call(context)
+	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	local leaf = path[#path]
@@ -457,7 +523,7 @@ local function api_post_impersonate(state, caps, _params, body, res)
 	end
 	context[#context + 1] = { role = "system", content = hint }
 
-	local response, err = caps.llm.call(context)
+	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	return json_ok(res, { content = response })
@@ -493,7 +559,7 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	local context, cerr = build_context_to_parent(state, caps, msg.parent_id)
 	if not context then return json_err(res, 500, cerr) end
 
-	local response, err = caps.llm.call(context)
+	local response, err = caps.llm.call(context, llm_opts_from_settings(state.settings))
 	if not response then return json_err(res, 502, "LLM error: " .. tostring(err)) end
 
 	-- Add as sibling (same parent, same role).
@@ -568,6 +634,254 @@ local function api_post_branch_navigate(state, _caps, _params, body, res)
 	return json_ok(res, resp)
 end
 
+-- ── Session endpoints ──────────────────────────────────────────────────────
+
+local function api_get_sessions(state, _caps, _params, _body, res)
+	local sessions, err = state.conv:list_sessions("card")
+	if not sessions then return json_err(res, 500, err) end
+	local result = {}
+	for _, s in ipairs(sessions) do
+		result[#result + 1] = {
+			id = s.id,
+			created_at = s.created_at,
+			preview = get_session_preview(state, s.id),
+		}
+	end
+	return json_ok(res, { sessions = result, current = state.session_id })
+end
+
+local function api_post_session_new(state, caps, _params, _body, res)
+	local session, messages, serr = create_new_session(state, caps)
+	if not session then return json_err(res, 500, serr) end
+	return json_ok(res, {
+		session = { id = session.id, created_at = session.created_at },
+		messages = messages,
+	})
+end
+
+local function api_post_session_switch(state, caps, _params, body, res)
+	if not body or not body.session_id then
+		return json_err(res, 400, "session_id required")
+	end
+	local target_id = body.session_id
+	local session, serr = state.conv:get_session(target_id)
+	if not session then return json_err(res, 404, "session not found") end
+	switch_to_session(state, caps, target_id)
+	local path = get_canonical_path(state)
+	local messages = format_messages(state, path or {})
+	return json_ok(res, {
+		session = { id = session.id, created_at = session.created_at },
+		messages = messages,
+	})
+end
+
+local function api_post_session_delete(state, caps, _params, body, res)
+	if not body or not body.session_id then
+		return json_err(res, 400, "session_id required")
+	end
+	local target_id = body.session_id
+	local session, serr = state.conv:get_session(target_id)
+	if not session then return json_err(res, 404, "session not found") end
+	local ok, derr = state.conv:delete_session(target_id)
+	if not ok then return json_err(res, 500, derr) end
+	local current_id = state.session_id
+	local messages
+	if target_id == current_id then
+		local remaining = state.conv:list_sessions("card")
+		if remaining and #remaining > 0 then
+			switch_to_session(state, caps, remaining[1].id)
+			local path = get_canonical_path(state)
+			messages = format_messages(state, path or {})
+		else
+			local new_session, new_messages, nerr = create_new_session(state, caps)
+			if not new_session then return json_err(res, 500, nerr) end
+			messages = new_messages
+		end
+	else
+		local path = get_canonical_path(state)
+		messages = format_messages(state, path or {})
+	end
+	return json_ok(res, {
+		deleted = true,
+		current_session_id = state.session_id,
+		messages = messages,
+	})
+end
+
+-- ── Lorebook endpoints ──────────────────────────────────────────────────────
+
+local function entry_to_json(e)
+	return {
+		uid = e.uid,
+		keys = e.key or {},
+		content = e.content or "",
+		enabled = e.enabled,
+		constant = e.constant,
+		position = e.position or 0,
+		order = e.order or 0,
+		role = e.role or 0,
+	}
+end
+
+local function save_lorebook(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("lorebook", json.encode(state.lorebook or {}))
+end
+
+local function api_get_lorebook(state, _caps, _params, _body, res)
+	local entries = state.lorebook or {}
+	local result = {}
+	for _, e in ipairs(entries) do
+		result[#result + 1] = entry_to_json(e)
+	end
+	return json_ok(res, { entries = result })
+end
+
+local function api_post_lorebook_update(state, caps, _params, body, res)
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	local entries = state.lorebook or {}
+	for _, e in ipairs(entries) do
+		if e.uid == body.uid then
+			if body.keys ~= nil then e.key = body.keys end
+			if body.content ~= nil then e.content = body.content end
+			if body.enabled ~= nil then e.enabled = body.enabled end
+			if body.constant ~= nil then e.constant = body.constant end
+			if body.position ~= nil then e.position = body.position end
+			if body.order ~= nil then e.order = body.order end
+			if body.role ~= nil then e.role = body.role end
+			save_lorebook(state, caps)
+			return json_ok(res, entry_to_json(e))
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+local function api_post_lorebook_add(state, caps, _params, body, res)
+	if not body or not body.keys or not body.content then
+		return json_err(res, 400, "keys and content required")
+	end
+	local entry = lorebook_mod.normalize({
+		key = body.keys,
+		content = body.content,
+		enabled = body.enabled,
+		constant = body.constant,
+		position = body.position,
+		order = body.order,
+		role = body.role,
+	})
+	if not state.lorebook then state.lorebook = {} end
+	state.lorebook[#state.lorebook + 1] = entry
+	save_lorebook(state, caps)
+	return json_ok(res, entry_to_json(entry))
+end
+
+local function api_post_lorebook_delete(state, caps, _params, body, res)
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	local entries = state.lorebook or {}
+	for i, e in ipairs(entries) do
+		if e.uid == body.uid then
+			table.remove(entries, i)
+			save_lorebook(state, caps)
+			return json_ok(res, { deleted = true })
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+-- ── Settings endpoints ─────────────────────────────────────────────────────
+
+local function api_get_settings(state, _caps, _params, _body, res)
+	return json_ok(res, state.settings)
+end
+
+local function api_post_settings(state, caps, _params, body, res)
+	if not body then return json_err(res, 400, "body required") end
+	for _, key in ipairs(SETTINGS_KEYS) do
+		if body[key] ~= nil then
+			local val = tonumber(body[key])
+			if val then state.settings[key] = val end
+		end
+	end
+	-- Persist to kv.
+	if caps.kv then
+		caps.kv.set("settings", json.encode(state.settings))
+	end
+	return json_ok(res, state.settings)
+end
+
+-- ── Preset endpoints ───────────────────────────────────────────────────────
+
+local function api_get_presets(_state, caps, _params, _body, res)
+	if not caps.kv then return json_err(res, 500, "kv not available") end
+	local data = presets_mod.load_all(caps.kv)
+	return json_ok(res, data)
+end
+
+local function api_post_presets_save(_state, caps, _params, body, res)
+	if not caps.kv then return json_err(res, 500, "kv not available") end
+	if not body or not body.type or not body.preset then
+		return json_err(res, 400, "type and preset required")
+	end
+	local preset = body.preset
+	if not preset.name or type(preset.name) ~= "string" or #preset.name == 0 then
+		return json_err(res, 400, "preset must have a name")
+	end
+	local ok, err = presets_mod.save(caps.kv, body.type, preset.name, preset)
+	if not ok then return json_err(res, 400, err) end
+	return json_ok(res, { ok = true })
+end
+
+local function api_post_presets_delete(_state, caps, _params, body, res)
+	if not caps.kv then return json_err(res, 500, "kv not available") end
+	if not body or not body.type or not body.name then
+		return json_err(res, 400, "type and name required")
+	end
+	local ok, err = presets_mod.delete(caps.kv, body.type, body.name)
+	if not ok then return json_err(res, 400, err) end
+	return json_ok(res, { ok = true })
+end
+
+local function api_post_presets_activate(_state, caps, _params, body, res)
+	if not caps.kv then return json_err(res, 500, "kv not available") end
+	if not body or not body.type or not body.name then
+		return json_err(res, 400, "type and name required")
+	end
+	local ok, err = presets_mod.set_active(caps.kv, body.type, body.name)
+	if not ok then return json_err(res, 400, err) end
+	return json_ok(res, { ok = true })
+end
+
+local function api_post_presets_import(_state, caps, _params, body, res)
+	if not caps.kv then return json_err(res, 500, "kv not available") end
+	if not body or not body.json then
+		return json_err(res, 400, "json field required")
+	end
+	local preset, err = presets_mod.import_preset(body.json)
+	if not preset then return json_err(res, 400, err) end
+	return json_ok(res, { preset = preset })
+end
+
+local function api_post_presets_export(_state, caps, _params, body, res)
+	if not caps.kv then return json_err(res, 500, "kv not available") end
+	if not body or not body.type or not body.name then
+		return json_err(res, 400, "type and name required")
+	end
+	-- Find the preset.
+	local list = presets_mod.load_all(caps.kv)
+	local type_key = body.type .. "s"
+	local presets_list = list[type_key]
+	if not presets_list then return json_err(res, 404, "no presets for type") end
+	local found
+	for i = 1, #presets_list do
+		if presets_list[i].name == body.name then
+			found = presets_list[i]
+			break
+		end
+	end
+	if not found then return json_err(res, 404, "preset not found: " .. body.name) end
+	return json_ok(res, { json = presets_mod.export_preset(found) })
+end
+
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
@@ -582,6 +896,18 @@ local routes = {
 	["POST /api/message/stream"]  = api_post_message_stream,
 	["POST /api/impersonate"]     = api_post_impersonate,
 	["POST /api/branch/navigate"] = api_post_branch_navigate,
+	["GET /api/sessions"]         = api_get_sessions,
+	["POST /api/session/new"]     = api_post_session_new,
+	["POST /api/session/switch"]  = api_post_session_switch,
+	["POST /api/session/delete"]  = api_post_session_delete,
+	["GET /api/settings"]         = api_get_settings,
+	["POST /api/settings"]        = api_post_settings,
+	["GET /api/presets"]           = api_get_presets,
+	["POST /api/presets/save"]     = api_post_presets_save,
+	["POST /api/presets/delete"]   = api_post_presets_delete,
+	["POST /api/presets/activate"] = api_post_presets_activate,
+	["POST /api/presets/import"]   = api_post_presets_import,
+	["POST /api/presets/export"]   = api_post_presets_export,
 	-- Aliases for renamed endpoints.
 	["GET /api/siblings"]         = api_get_swipes,
 	["POST /api/branch/new"]      = api_post_swipe_new,
@@ -595,6 +921,23 @@ function M.create(caps, opts)
 	if caps.config and caps.config.get then
 		local name = caps.config.get("user_name")
 		if name then state.user_name = name end
+	end
+
+	-- Initialize generation settings from defaults, then overlay persisted values.
+	state.settings = default_settings()
+	if caps.kv then
+		local raw = caps.kv.get("settings")
+		if raw then
+			local ok, saved = pcall(json.decode, raw)
+			if ok and type(saved) == "table" then
+				for _, key in ipairs(SETTINGS_KEYS) do
+					if saved[key] ~= nil then
+						local val = tonumber(saved[key])
+						if val then state.settings[key] = val end
+					end
+				end
+			end
+		end
 	end
 
 	-- Load card.

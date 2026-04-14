@@ -278,6 +278,137 @@ body {
   background: #333;
 }
 
+/* Settings button */
+
+.input-row__button--settings {
+  background: #333;
+  font-size: 1.125rem;
+  padding: 0.375rem 0.625rem;
+}
+
+/* Settings overlay */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-overlay[hidden] {
+  display: none;
+}
+
+.settings-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 24rem;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-panel__title {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.settings-panel__close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+}
+
+.settings-panel__close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.settings-panel__body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-field__label {
+  font-size: 0.8125rem;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+}
+
+.settings-field__value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-field input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.settings-field input[type="number"] {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+
+.settings-field input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-panel__footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-panel__save {
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.settings-panel__save:hover {
+  opacity: 0.85;
+}
+
 /* Mobile */
 
 @media (max-width: 600px) {

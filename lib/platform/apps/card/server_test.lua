@@ -819,3 +819,108 @@ T.describe("tree branching", function()
 		T.eq(path2[3].content, "response 1")
 	end)
 end)
+
+-- ── Settings tests ────────────────────────────────────────────────────────
+
+T.describe("GET /api/settings", function()
+	T.it("returns default settings", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/settings")
+		T.eq(status, 200)
+		T.eq(data.temperature, 0.7)
+		T.eq(data.top_p, 1.0)
+		T.eq(data.max_tokens, 512)
+		T.eq(data.frequency_penalty, 0.0)
+		T.eq(data.presence_penalty, 0.0)
+		T.eq(data.max_context, 4096)
+	end)
+end)
+
+T.describe("POST /api/settings", function()
+	T.it("merges partial update", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/settings", { temperature = 1.2 })
+		T.eq(status, 200)
+		T.eq(data.temperature, 1.2)
+		-- Unchanged values preserved.
+		T.eq(data.top_p, 1.0)
+		T.eq(data.max_tokens, 512)
+	end)
+
+	T.it("persists settings to kv", function()
+		local kv_store = {}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/settings", { temperature = 0.5, max_tokens = 256 })
+		T.ok(kv_store["settings"], "settings saved to kv")
+		local saved = json.decode(kv_store["settings"])
+		T.eq(saved.temperature, 0.5)
+		T.eq(saved.max_tokens, 256)
+	end)
+
+	T.it("loads persisted settings on create", function()
+		local kv_store = {}
+		local shared_kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		-- Save settings via first app.
+		local caps1 = make_mock_caps()
+		caps1.kv = shared_kv
+		local app1 = server.create(caps1, { no_static = true })
+		call(app1, "POST", "/api/settings", { temperature = 1.5, max_context = 8192 })
+
+		-- New app with same kv should load persisted settings.
+		local caps2 = make_mock_caps()
+		caps2.kv = shared_kv
+		local app2 = server.create(caps2, { no_static = true })
+		local status, data = call(app2, "GET", "/api/settings")
+		T.eq(status, 200)
+		T.eq(data.temperature, 1.5)
+		T.eq(data.max_context, 8192)
+		-- Defaults for unset values.
+		T.eq(data.top_p, 1.0)
+	end)
+end)
+
+T.describe("LLM parameter passthrough", function()
+	T.it("passes generation params to llm.call", function()
+		local captured_opts
+		local caps = make_mock_caps({
+			llm_call = function(messages, opts)
+				captured_opts = opts
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Update settings.
+		call(app, "POST", "/api/settings", { temperature = 1.2, max_tokens = 256 })
+		-- Send a message — LLM call should receive opts.
+		call(app, "POST", "/api/message", { content = "test" })
+		T.ok(captured_opts, "opts were passed to llm.call")
+		T.eq(captured_opts.temperature, 1.2)
+		T.eq(captured_opts.max_tokens, 256)
+		T.eq(captured_opts.top_p, 1.0)
+	end)
+
+	T.it("passes generation params to llm.call_stream", function()
+		local captured_opts
+		local caps = make_mock_caps()
+		caps.llm.call_stream = function(messages, on_token, opts)
+			captured_opts = opts
+			on_token("hi")
+			return "hi"
+		end
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/settings", { temperature = 0.3 })
+		call_with_sock(app, "POST", "/api/message/stream", { content = "test" })
+		T.ok(captured_opts, "opts were passed to call_stream")
+		T.eq(captured_opts.temperature, 0.3)
+	end)
+end)

@@ -50,10 +50,19 @@ function M.llm_cap(config)
 	local recv_buf = ffi.new("char[65536]")
 
 	return {
-		-- call_stream(messages, on_token) -> full_content | nil, err
+		-- call_stream(messages, on_token, opts?) -> full_content | nil, err
 		-- Streams tokens via on_token(delta_text), returns full content when done.
-		call_stream = function (messages, on_token)
-			local body, berr = json.encode({ model = model, messages = messages, stream = true })
+		-- opts: optional table of generation params (temperature, top_p, max_tokens, etc.)
+		call_stream = function (messages, on_token, opts)
+			local req_body = { model = model, messages = messages, stream = true }
+			if opts then
+				if opts.temperature then req_body.temperature = opts.temperature end
+				if opts.top_p then req_body.top_p = opts.top_p end
+				if opts.max_tokens then req_body.max_tokens = opts.max_tokens end
+				if opts.frequency_penalty then req_body.frequency_penalty = opts.frequency_penalty end
+				if opts.presence_penalty then req_body.presence_penalty = opts.presence_penalty end
+			end
+			local body, berr = json.encode(req_body)
 			if not body then return nil, "llm: JSON encode failed: " .. tostring(berr) end
 
 			local headers = {
@@ -160,9 +169,18 @@ function M.llm_cap(config)
 			return full
 		end,
 
-		-- call(messages) -> content_string | nil, err
-		call = function (messages)
-			local body, berr = json.encode({ model = model, messages = messages })
+		-- call(messages, opts?) -> content_string | nil, err
+		-- opts: optional table of generation params (temperature, top_p, max_tokens, etc.)
+		call = function (messages, opts)
+			local req_body = { model = model, messages = messages }
+			if opts then
+				if opts.temperature then req_body.temperature = opts.temperature end
+				if opts.top_p then req_body.top_p = opts.top_p end
+				if opts.max_tokens then req_body.max_tokens = opts.max_tokens end
+				if opts.frequency_penalty then req_body.frequency_penalty = opts.frequency_penalty end
+				if opts.presence_penalty then req_body.presence_penalty = opts.presence_penalty end
+			end
+			local body, berr = json.encode(req_body)
 			if not body then return nil, "llm: JSON encode failed: " .. tostring(berr) end
 
 			local headers = {

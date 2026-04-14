@@ -22,6 +22,18 @@
     </div>
   </template>
 
+  <button class="session-toggle" id="btn-sessions" title="Chats">&#9776;</button>
+
+  <div class="session-panel" id="session-panel" hidden>
+    <div class="session-panel__header">
+      <span class="session-panel__title">Chats</span>
+      <button class="session-panel__new" id="btn-new-session">+ New Chat</button>
+      <button class="session-panel__close" id="btn-close-sessions">&times;</button>
+    </div>
+    <div class="session-panel__list" id="session-list"></div>
+  </div>
+  <div class="session-overlay" id="session-overlay" hidden></div>
+
   <div class="message-list" id="message-list"></div>
 
   <div class="loading-indicator" id="loading">
@@ -33,6 +45,45 @@
     <button class="input-row__button input-row__button--send" id="btn-send">Send</button>
     <button class="input-row__button input-row__button--continue" id="btn-continue">Continue</button>
     <button class="input-row__button input-row__button--impersonate" id="btn-impersonate">Impersonate</button>
+    <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings">&#9881;</button>
+  </div>
+
+  <div class="settings-overlay" id="settings-overlay" hidden>
+    <div class="settings-panel" id="settings-panel">
+      <div class="settings-panel__header">
+        <span class="settings-panel__title">Generation Settings</span>
+        <button class="settings-panel__close" id="settings-close">&times;</button>
+      </div>
+      <div class="settings-panel__body">
+        <label class="settings-field">
+          <span class="settings-field__label">Temperature <span class="settings-field__value" id="val-temperature">0.7</span></span>
+          <input type="range" id="set-temperature" min="0" max="2" step="0.05" value="0.7">
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">Top P <span class="settings-field__value" id="val-top_p">1.0</span></span>
+          <input type="range" id="set-top_p" min="0" max="1" step="0.05" value="1.0">
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">Max Response Tokens</span>
+          <input type="number" id="set-max_tokens" min="1" max="32768" value="512">
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">Frequency Penalty <span class="settings-field__value" id="val-frequency_penalty">0.0</span></span>
+          <input type="range" id="set-frequency_penalty" min="0" max="2" step="0.1" value="0.0">
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">Presence Penalty <span class="settings-field__value" id="val-presence_penalty">0.0</span></span>
+          <input type="range" id="set-presence_penalty" min="0" max="2" step="0.1" value="0.0">
+        </label>
+        <label class="settings-field">
+          <span class="settings-field__label">Max Context</span>
+          <input type="number" id="set-max_context" min="256" max="131072" value="4096">
+        </label>
+      </div>
+      <div class="settings-panel__footer">
+        <button class="settings-panel__save" id="settings-save">Save</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>
