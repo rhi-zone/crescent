@@ -301,6 +301,89 @@ local function api_post_message(state, caps, _params, body, res)
 	})
 end
 
+-- ── SSE helpers ────────────────────────────────────────────────────────────
+
+local function sse_write(sock, data)
+	sock:send("data: " .. data .. "\r\n\r\n")
+end
+
+local function sse_start(sock, res)
+	res.raw = true
+	local headers = "HTTP/1.1 200 OK\r\n"
+		.. "Content-Type: text/event-stream\r\n"
+		.. "Cache-Control: no-cache\r\n"
+		.. "Connection: keep-alive\r\n"
+		.. "Access-Control-Allow-Origin: *\r\n"
+		.. "\r\n"
+	sock:send(headers)
+end
+
+local function api_post_message_stream(state, caps, _params, body, res, sock)
+	if not body or not body.content then return json_err(res, 400, "content required") end
+	local text = body.content
+	if type(text) ~= "string" or #text == 0 then return json_err(res, 400, "empty content") end
+
+	-- Check streaming support
+	if not caps.llm.call_stream then
+		-- Fall back to non-streaming
+		return api_post_message(state, caps, _params, body, res)
+	end
+
+	-- Add user message
+	local user_id = gen_id(state)
+	local user_msg = { id = user_id, role = "user", content = text }
+	state.messages[#state.messages + 1] = user_msg
+
+	-- Prepare assistant message id
+	local asst_id = gen_id(state)
+
+	-- Build context
+	local context = build_context(state, caps)
+
+	-- Start SSE stream
+	sse_start(sock, res)
+
+	-- Send user message event
+	sse_write(sock, json.encode({
+		type = "user",
+		id = user_id,
+		role = "user",
+		content = text,
+	}))
+
+	-- Stream LLM response
+	local response, err = caps.llm.call_stream(context, function(token)
+		sse_write(sock, json.encode({ type = "token", token = token }))
+	end)
+
+	if not response then
+		-- Remove user message on LLM failure
+		state.messages[#state.messages] = nil
+		sse_write(sock, json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
+		sock:close()
+		return true
+	end
+
+	-- Add assistant message
+	local asst_msg = { id = asst_id, role = "assistant", content = response }
+	state.messages[#state.messages + 1] = asst_msg
+	state.swipes[asst_id] = { items = { { id = asst_id, content = response } }, current = 1 }
+	save_state(state, caps)
+
+	-- Send done event with final message data
+	sse_write(sock, json.encode({
+		type = "done",
+		id = asst_id,
+		role = "assistant",
+		content = response,
+		swipe_index = 0,
+		swipe_total = 1,
+	}))
+
+	sock:close()
+	return true
+end
+
 local function api_post_continue(state, caps, _params, _body, res)
 	local msgs = state.messages
 	if #msgs == 0 then return json_err(res, 400, "no messages") end
@@ -391,6 +474,62 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	})
 end
 
+local function api_post_message_edit(state, caps, _params, body, res)
+	if not body or not body.message_id or not body.content then
+		return json_err(res, 400, "message_id and content required")
+	end
+	local msg_id = body.message_id
+	local content = body.content
+
+	-- Find the message
+	local msg
+	for _, m in ipairs(state.messages) do
+		if m.id == msg_id then msg = m; break end
+	end
+	if not msg then return json_err(res, 404, "message not found") end
+
+	msg.content = content
+
+	-- Update swipe entry if one exists
+	local entry = state.swipes[msg_id]
+	if entry then
+		entry.items[entry.current].content = content
+	end
+
+	save_state(state, caps)
+	return json_ok(res, msg_response(state, msg))
+end
+
+local function api_post_message_delete(state, caps, _params, body, res)
+	if not body or not body.message_id then
+		return json_err(res, 400, "message_id required")
+	end
+	local msg_id = body.message_id
+
+	-- Find the message position
+	local pos
+	for i, m in ipairs(state.messages) do
+		if m.id == msg_id then pos = i; break end
+	end
+	if not pos then return json_err(res, 404, "message not found") end
+
+	-- Count messages to delete (from pos to end)
+	local deleted = #state.messages - pos + 1
+
+	-- Clean up swipe entries for deleted messages
+	for i = pos, #state.messages do
+		state.swipes[state.messages[i].id] = nil
+	end
+
+	-- Truncate messages from pos onward
+	for i = #state.messages, pos, -1 do
+		state.messages[i] = nil
+	end
+
+	save_state(state, caps)
+	return json_ok(res, { deleted = deleted })
+end
+
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
@@ -400,6 +539,9 @@ local routes = {
 	["POST /api/continue"] = api_post_continue,
 	["GET /api/swipes"]    = api_get_swipes,
 	["POST /api/swipe/new"] = api_post_swipe_new,
+	["POST /api/message/edit"] = api_post_message_edit,
+	["POST /api/message/delete"] = api_post_message_delete,
+	["POST /api/message/stream"] = api_post_message_stream,
 }
 
 function M.create(caps, opts)
@@ -432,13 +574,13 @@ function M.create(caps, opts)
 		end)
 	end
 
-	local function handler(req, res)
+	local function handler(req, res, sock)
 		local path, params = parse_target(req.target)
 		local key = req.method .. " " .. path
 		local route = routes[key]
 		if route then
 			local body = read_json_body(req)
-			return route(state, caps, params, body, res)
+			return route(state, caps, params, body, res, sock)
 		end
 		-- Static files
 		if ok_static then

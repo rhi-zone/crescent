@@ -53,8 +53,10 @@ mod.make_connection_handler = function (handler)
 		end
 		local res = { headers = {} } --[[@type http_response]]
 		handler(req, res, client)
-		client:send(http.serialize_response(res))
-		client:close()
+		if not res.raw then
+			client:send(http.serialize_response(res))
+			client:close()
+		end
 	end
 end
 

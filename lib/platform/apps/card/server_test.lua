@@ -73,6 +73,30 @@ local function make_res()
 	return { headers = {} }
 end
 
+local function make_mock_sock()
+	local sent = {}
+	local closed = false
+	return {
+		send = function(_, data) sent[#sent + 1] = data end,
+		close = function() closed = true end,
+		sent = sent,
+		is_closed = function() return closed end,
+	}
+end
+
+local function parse_sse_events(sent_parts)
+	local raw = table.concat(sent_parts)
+	-- Skip the HTTP headers (first part before first data:)
+	local events = {}
+	for line in raw:gmatch("[^\r\n]+") do
+		if line:sub(1, 6) == "data: " then
+			local ok, val = pcall(json.decode, line:sub(7))
+			if ok then events[#events + 1] = val end
+		end
+	end
+	return events
+end
+
 local function call(app, method, target, body)
 	local req = make_req(method, target, body)
 	local res = make_res()
@@ -83,6 +107,14 @@ local function call(app, method, target, body)
 		if ok then data = val end
 	end
 	return res.status, data
+end
+
+local function call_with_sock(app, method, target, body)
+	local req = make_req(method, target, body)
+	local res = make_res()
+	local sock = make_mock_sock()
+	app.handler(req, res, sock)
+	return res, sock
 end
 
 -- ── Tests ───────────────────────────────────────────────────────────────────
@@ -305,6 +337,120 @@ T.describe("POST /api/swipe/new", function()
 	end)
 end)
 
+T.describe("POST /api/message/edit", function()
+	T.it("updates message content", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		-- Send a user message
+		call(app, "POST", "/api/message", { content = "Hello" })
+		local user_msg = app.state.messages[2]
+		T.eq(user_msg.role, "user")
+		T.eq(user_msg.content, "Hello")
+
+		local status, data = call(app, "POST", "/api/message/edit", {
+			message_id = user_msg.id, content = "Hello edited",
+		})
+		T.eq(status, 200)
+		T.eq(data.content, "Hello edited")
+		T.eq(app.state.messages[2].content, "Hello edited")
+	end)
+
+	T.it("updates swipe entry when present", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "Go" })
+		local asst_msg = app.state.messages[#app.state.messages]
+		-- Assistant messages get a swipe entry
+		T.ok(app.state.swipes[asst_msg.id], "swipe entry exists")
+
+		local status, data = call(app, "POST", "/api/message/edit", {
+			message_id = asst_msg.id, content = "edited reply",
+		})
+		T.eq(status, 200)
+		T.eq(data.content, "edited reply")
+		local entry = app.state.swipes[asst_msg.id]
+		T.eq(entry.items[entry.current].content, "edited reply")
+	end)
+
+	T.it("returns 404 for unknown message", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/message/edit", {
+			message_id = "nonexistent", content = "x",
+		})
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 for missing fields", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/message/edit", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+
+		status, data = call(app, "POST", "/api/message/edit", { message_id = "m1" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("POST /api/message/delete", function()
+	T.it("removes message and all after it", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		-- greeting(1) + user(2) + assistant(3)
+		call(app, "POST", "/api/message", { content = "Hello" })
+		T.eq(#app.state.messages, 3)
+
+		-- Delete from user message onward
+		local user_id = app.state.messages[2].id
+		local status, data = call(app, "POST", "/api/message/delete", { message_id = user_id })
+		T.eq(status, 200)
+		T.eq(data.deleted, 2) -- user + assistant
+		T.eq(#app.state.messages, 1) -- only greeting remains
+	end)
+
+	T.it("cleans up swipe entries for deleted messages", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "Go" })
+		local asst_id = app.state.messages[3].id
+		T.ok(app.state.swipes[asst_id], "swipe entry exists before delete")
+
+		call(app, "POST", "/api/message/delete", { message_id = app.state.messages[2].id })
+		T.eq(app.state.swipes[asst_id], nil, "swipe entry cleaned up")
+	end)
+
+	T.it("returns 404 for unknown message", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/message/delete", { message_id = "nope" })
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 for missing message_id", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/message/delete", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns correct deleted count for single message", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "Hello" })
+		-- Delete only the last message (assistant)
+		local asst_id = app.state.messages[3].id
+		local status, data = call(app, "POST", "/api/message/delete", { message_id = asst_id })
+		T.eq(status, 200)
+		T.eq(data.deleted, 1)
+		T.eq(#app.state.messages, 2) -- greeting + user
+	end)
+end)
+
 T.describe("persistence", function()
 	T.it("saves and restores state via kv", function()
 		local kv_store = {}
@@ -380,5 +526,115 @@ T.describe("context assembly", function()
 			end
 		end
 		T.ok(found_system, "system prompt includes card name")
+	end)
+end)
+
+-- ── Streaming tests ────────────────────────────────────────────────────────
+
+T.describe("POST /api/message/stream", function()
+	T.it("streams tokens via SSE when call_stream is available", function()
+		local tokens_sent = { "Hello", " world", "!" }
+		local caps = make_mock_caps()
+		caps.llm.call_stream = function(messages, on_token)
+			for _, tok in ipairs(tokens_sent) do
+				on_token(tok)
+			end
+			return "Hello world!"
+		end
+		local app = server.create(caps, { no_static = true })
+		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "Hi" })
+
+		T.ok(res.raw, "res.raw is set for streaming")
+		T.ok(sock.is_closed(), "socket was closed")
+
+		local events = parse_sse_events(sock.sent)
+		-- Should have: user, token*3, done
+		local types = {}
+		for _, e in ipairs(events) do types[#types + 1] = e.type end
+
+		T.eq(types[1], "user")
+		T.eq(types[2], "token")
+		T.eq(types[3], "token")
+		T.eq(types[4], "token")
+		T.eq(types[5], "done")
+
+		-- Check token content
+		T.eq(events[2].token, "Hello")
+		T.eq(events[3].token, " world")
+		T.eq(events[4].token, "!")
+
+		-- Check done event has full content
+		T.eq(events[5].content, "Hello world!")
+		T.eq(events[5].role, "assistant")
+		T.ok(events[5].id, "done event has id")
+
+		-- State should be updated
+		T.eq(#app.state.messages, 3) -- greeting + user + assistant
+		T.eq(app.state.messages[3].content, "Hello world!")
+	end)
+
+	T.it("falls back to non-streaming when call_stream is absent", function()
+		local caps = make_mock_caps({ llm_call = function() return "sync reply" end })
+		-- No call_stream on caps.llm
+		local app = server.create(caps, { no_static = true })
+		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "Hi" })
+
+		-- Should fall back to regular JSON response (not streaming)
+		T.ok(not res.raw, "res.raw is not set")
+		T.eq(res.status, 200)
+		local data = json.decode(res.body)
+		T.eq(data.assistant.content, "sync reply")
+	end)
+
+	T.it("sends error event on LLM failure", function()
+		local caps = make_mock_caps()
+		caps.llm.call_stream = function(_messages, _on_token)
+			return nil, "timeout"
+		end
+		local app = server.create(caps, { no_static = true })
+		local initial_count = #app.state.messages
+		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "Hi" })
+
+		T.ok(res.raw, "res.raw is set")
+		local events = parse_sse_events(sock.sent)
+
+		-- Should have user event then error event
+		local found_error = false
+		for _, e in ipairs(events) do
+			if e.type == "error" then
+				found_error = true
+				T.ok(e.error:find("timeout"), "error mentions timeout")
+			end
+		end
+		T.ok(found_error, "error event was sent")
+
+		-- User message should be rolled back
+		T.eq(#app.state.messages, initial_count, "message rolled back")
+	end)
+
+	T.it("rejects empty content", function()
+		local caps = make_mock_caps()
+		caps.llm.call_stream = function() return "ok" end
+		local app = server.create(caps, { no_static = true })
+		local res, sock = call_with_sock(app, "POST", "/api/message/stream", { content = "" })
+
+		T.ok(not res.raw, "res.raw not set for error")
+		T.eq(res.status, 400)
+	end)
+
+	T.it("creates swipe entry for streamed assistant message", function()
+		local caps = make_mock_caps()
+		caps.llm.call_stream = function(_messages, on_token)
+			on_token("streamed")
+			return "streamed"
+		end
+		local app = server.create(caps, { no_static = true })
+		call_with_sock(app, "POST", "/api/message/stream", { content = "Test" })
+
+		local asst_msg = app.state.messages[#app.state.messages]
+		T.eq(asst_msg.role, "assistant")
+		T.eq(asst_msg.content, "streamed")
+		T.ok(app.state.swipes[asst_msg.id], "swipe entry created")
+		T.eq(#app.state.swipes[asst_msg.id].items, 1)
 	end)
 end)
