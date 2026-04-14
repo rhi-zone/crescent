@@ -24,6 +24,16 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Conversation tree — SQLite-backed branching via lib/conversation, canonical path, sibling navigation
 - [x] Impersonate mode — generate text as user character, placed in input for review
 - [x] CCv2 adapter apps — import (PNG/JSON) and export (JSON/PNG) as separate BFF apps, 50 assertions
+- [x] Generation settings UI — temperature, top_p, penalties, max_tokens; LLM cap passthrough
+- [x] Lorebook editor — CRUD endpoints + collapsible entry panel with keyword/position/order editing
+- [x] Session management — create, list, switch, delete conversations; session panel UI
+- [x] Preset system — connection, generation, prompt presets with save/load/import/export (71 assertions)
+- [ ] Card editor — edit card fields (name, description, personality, scenario, system prompt, etc.)
+- [ ] Markdown rendering in messages — parse and render markdown in assistant responses
+- [ ] User personas — multiple user profiles with name/description, selectable per session
+- [ ] Token counter — display token usage per message and total context size
+- [ ] Character avatar display — show card image in message list
+- [ ] Shell app — platform entry point, card browser/launcher
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
