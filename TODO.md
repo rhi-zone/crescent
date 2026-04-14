@@ -32,9 +32,16 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Markdown rendering — client-side renderer (bold, italic, code, lists, quotes, headings, links) with XSS protection
 - [x] User personas — named profiles with description injected into context, selectable per session
 - [x] Token counter — context usage progress bar with color thresholds, updated after each action
-- [ ] Character avatar display — show card image in message list and header
-- [ ] Shell app — platform entry point, card browser/launcher
+- [x] Character avatar — header + message avatars from PNG, `raw()` on png cap, 400 assertions
+- [x] Shell app — card browser with thumbnail grid, search, launch stub, 39 assertions
+- [x] Author's note — depth-based context injection with configurable position
+- [x] Chat export — JSON and text format downloads with Content-Disposition
+- [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution
 - [ ] Group chats — multiple characters in one conversation
+- [ ] World info / global lorebook — lorebook entries not tied to a specific card
+- [ ] Instruct mode / chat templates — configurable prompt formatting per model family
+- [ ] Connection testing — verify LLM endpoint works before chatting
+- [ ] Keyboard shortcuts — Ctrl+Enter to send, navigation hotkeys
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
