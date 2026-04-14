@@ -91,6 +91,8 @@ local function create_state()
 		conv = nil,           -- lib/conversation db handle
 		session_id = nil,     -- active session id
 		settings = nil,       -- generation settings (initialized from defaults + kv)
+		personas = nil,       -- {name, description}[] (initialized on create)
+		active_persona = nil, -- name string or nil
 	}
 end
 
@@ -174,6 +176,20 @@ local function msg_response(state, msg)
 	}
 end
 
+-- ── Persona helpers (forward declarations for context assembly) ────────────
+
+local function find_persona(personas, name)
+	for i, p in ipairs(personas) do
+		if p.name == name then return p, i end
+	end
+	return nil
+end
+
+local function get_active_persona(state)
+	if not state.active_persona then return nil end
+	return find_persona(state.personas, state.active_persona)
+end
+
 -- ── Context assembly ────────────────────────────────────────────────────────
 
 local function make_macro_env(state)
@@ -208,6 +224,7 @@ local function build_context(state, caps, path)
 	local max_context = state.settings and state.settings.max_context or 4096
 	local max_response = state.settings and state.settings.max_tokens or 512
 
+	local active_p = get_active_persona(state)
 	local result, err = context_mod.assemble({
 		card = card,
 		history = path,
@@ -216,6 +233,7 @@ local function build_context(state, caps, path)
 		max_response = max_response,
 		char_name = card.name,
 		user_name = state.user_name,
+		persona = active_p and active_p.description or nil,
 		lorebook_entries = state.lorebook,
 	})
 	if not result then
@@ -226,6 +244,49 @@ local function build_context(state, caps, path)
 		return fallback
 	end
 	return result
+end
+
+-- compute_token_count: build context and count tokens without calling the LLM.
+-- Returns a table suitable for JSON response.
+local function compute_token_count(state, caps)
+	local path, perr = get_canonical_path(state)
+	if not path then return nil, perr end
+
+	local context, cerr = build_context(state, caps, path)
+	if not context then return nil, cerr end
+
+	local count_tokens
+	if caps.llm and caps.llm.count_tokens then
+		count_tokens = caps.llm.count_tokens
+	else
+		count_tokens = function(text) return math.ceil(#text / 4) end
+	end
+
+	local total = 0
+	for _, msg in ipairs(context) do
+		total = total + count_tokens(msg.content)
+	end
+
+	local max_context = state.settings and state.settings.max_context or 4096
+	local max_tokens = state.settings and state.settings.max_tokens or 512
+	local available = math.max(0, max_context - total - max_tokens)
+
+	-- Count triggered lorebook entries.
+	local lorebook_count = 0
+	if state.lorebook then
+		for _, e in ipairs(state.lorebook) do
+			if e.enabled then lorebook_count = lorebook_count + 1 end
+		end
+	end
+
+	return {
+		context_used = total,
+		context_max = max_context,
+		response_budget = max_tokens,
+		available = available,
+		messages = #path,
+		lorebook_entries = lorebook_count,
+	}
 end
 
 -- build_context_to_parent: build context from root to a given parent message.
@@ -391,6 +452,7 @@ local function api_post_message(state, caps, _params, body, res)
 	return json_ok(res, {
 		user = { id = user_msg.id, role = "user", content = text },
 		assistant = msg_response(state, asst_msg),
+		token_count = compute_token_count(state, caps),
 	})
 end
 
@@ -499,7 +561,9 @@ local function api_post_continue(state, caps, _params, _body, res)
 		})
 		if not updated then return json_err(res, 500, uerr) end
 		save_session_id(state, caps)
-		return json_ok(res, msg_response(state, updated))
+		local resp = msg_response(state, updated)
+		resp.token_count = compute_token_count(state, caps)
+		return json_ok(res, resp)
 	else
 		-- Add new assistant message as child of leaf.
 		local asst_msg, aerr = state.conv:add_message(
@@ -507,7 +571,9 @@ local function api_post_continue(state, caps, _params, _body, res)
 		)
 		if not asst_msg then return json_err(res, 500, aerr) end
 		save_session_id(state, caps)
-		return json_ok(res, msg_response(state, asst_msg))
+		local resp = msg_response(state, asst_msg)
+		resp.token_count = compute_token_count(state, caps)
+		return json_ok(res, resp)
 	end
 end
 
@@ -788,6 +854,89 @@ local function api_post_lorebook_delete(state, caps, _params, body, res)
 	return json_err(res, 404, "entry not found")
 end
 
+-- ── Persona endpoints helpers ──────────────────────────────────────────────
+
+local function save_personas(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("personas", json.encode(state.personas))
+	caps.kv.set("personas:active", state.active_persona or "")
+end
+
+local function activate_persona(state, name)
+	local persona = find_persona(state.personas, name)
+	if not persona then return nil, "persona not found" end
+	state.active_persona = name
+	state.user_name = persona.name
+	return persona
+end
+
+-- ── Persona endpoints ─────────────────────────────────────────────────────
+
+local function api_get_personas(state, _caps, _params, _body, res)
+	local result = {}
+	for _, p in ipairs(state.personas) do
+		result[#result + 1] = { name = p.name, description = p.description }
+	end
+	return json_ok(res, { personas = result, active = state.active_persona })
+end
+
+local function api_post_personas_save(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+		return json_err(res, 400, "name required")
+	end
+	local name = body.name
+	local description = body.description or ""
+	local existing = find_persona(state.personas, name)
+	if existing then
+		existing.description = description
+	else
+		state.personas[#state.personas + 1] = { name = name, description = description }
+	end
+	-- If the active persona was updated, sync user_name.
+	if state.active_persona == name then
+		state.user_name = name
+	end
+	save_personas(state, caps)
+	return json_ok(res, { name = name, description = description })
+end
+
+local function api_post_personas_delete(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" then
+		return json_err(res, 400, "name required")
+	end
+	local name = body.name
+	local _, idx = find_persona(state.personas, name)
+	if not idx then return json_err(res, 404, "persona not found") end
+	table.remove(state.personas, idx)
+	-- If we deleted the active persona, switch to first remaining or create Default.
+	if state.active_persona == name then
+		if #state.personas == 0 then
+			state.personas[1] = { name = "User", description = "" }
+		end
+		activate_persona(state, state.personas[1].name)
+	end
+	save_personas(state, caps)
+	return json_ok(res, { deleted = true, active = state.active_persona })
+end
+
+local function api_post_personas_activate(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" then
+		return json_err(res, 400, "name required")
+	end
+	local persona, err = activate_persona(state, body.name)
+	if not persona then return json_err(res, 404, err) end
+	save_personas(state, caps)
+	return json_ok(res, { active = state.active_persona })
+end
+
+-- ── Token count endpoint ───────────────────────────────────────────────────
+
+local function api_get_token_count(state, caps, _params, _body, res)
+	local tc, err = compute_token_count(state, caps)
+	if not tc then return json_err(res, 500, err) end
+	return json_ok(res, tc)
+end
+
 -- ── Settings endpoints ─────────────────────────────────────────────────────
 
 local function api_get_settings(state, _caps, _params, _body, res)
@@ -807,6 +956,71 @@ local function api_post_settings(state, caps, _params, body, res)
 		caps.kv.set("settings", json.encode(state.settings))
 	end
 	return json_ok(res, state.settings)
+end
+
+-- ── Card editor endpoints ──────────────────────────────────────────────────
+
+local CARD_EDIT_FIELDS = {
+	"name", "description", "personality", "scenario", "first_mes", "mes_example",
+	"system_prompt", "post_history_instructions", "creator_notes", "creator",
+	"character_version",
+}
+
+local function card_edit_response(card)
+	local data = {}
+	for _, key in ipairs(CARD_EDIT_FIELDS) do
+		data[key] = card[key] or ""
+	end
+	data.alternate_greetings = card.alternate_greetings or {}
+	data.tags = card.tags or {}
+	return data
+end
+
+local function api_get_card_edit(state, _caps, _params, _body, res)
+	if not state.card then return json_err(res, 404, "no card loaded") end
+	return json_ok(res, card_edit_response(state.card))
+end
+
+local function api_post_card_edit(state, caps, _params, body, res)
+	if not state.card then return json_err(res, 404, "no card loaded") end
+	if not body then return json_err(res, 400, "body required") end
+
+	-- Merge provided fields into card.
+	for _, key in ipairs(CARD_EDIT_FIELDS) do
+		if body[key] ~= nil then
+			state.card[key] = body[key]
+		end
+	end
+	if body.alternate_greetings ~= nil then
+		state.card.alternate_greetings = body.alternate_greetings
+	end
+	if body.tags ~= nil then
+		state.card.tags = body.tags
+	end
+
+	-- Persist overrides to kv.
+	if caps.kv then
+		caps.kv.set("card_overrides", json.encode(card_edit_response(state.card)))
+	end
+
+	return json_ok(res, card_edit_response(state.card))
+end
+
+local function api_post_card_reset(state, caps, _params, _body, res)
+	if not state.card then return json_err(res, 404, "no card loaded") end
+
+	-- Delete overrides from kv.
+	if caps.kv then
+		caps.kv.set("card_overrides", nil)
+	end
+
+	-- Reload card from PNG data.
+	state.card = nil
+	state.lorebook = nil
+	load_card(state, caps)
+
+	if not state.card then return json_err(res, 500, "failed to reload card") end
+	return json_ok(res, card_edit_response(state.card))
 end
 
 -- ── Preset endpoints ───────────────────────────────────────────────────────
@@ -904,8 +1118,16 @@ local routes = {
 	["POST /api/session/new"]     = api_post_session_new,
 	["POST /api/session/switch"]  = api_post_session_switch,
 	["POST /api/session/delete"]  = api_post_session_delete,
+	["GET /api/personas"]           = api_get_personas,
+	["POST /api/personas/save"]     = api_post_personas_save,
+	["POST /api/personas/delete"]   = api_post_personas_delete,
+	["POST /api/personas/activate"] = api_post_personas_activate,
+	["GET /api/token_count"]      = api_get_token_count,
 	["GET /api/settings"]         = api_get_settings,
 	["POST /api/settings"]        = api_post_settings,
+	["GET /api/card/edit"]          = api_get_card_edit,
+	["POST /api/card/edit"]         = api_post_card_edit,
+	["POST /api/card/reset"]        = api_post_card_reset,
 	["GET /api/presets"]           = api_get_presets,
 	["POST /api/presets/save"]     = api_post_presets_save,
 	["POST /api/presets/delete"]   = api_post_presets_delete,
@@ -947,6 +1169,19 @@ function M.create(caps, opts)
 	-- Load card.
 	load_card(state, caps)
 
+	-- Apply card overrides from kv (user edits take precedence over PNG data).
+	if caps.kv and state.card then
+		local raw = caps.kv.get("card_overrides")
+		if raw then
+			local ok, overrides = pcall(json.decode, raw)
+			if ok and type(overrides) == "table" then
+				for k, v in pairs(overrides) do
+					state.card[k] = v
+				end
+			end
+		end
+	end
+
 	-- Load lorebook from kv (overrides card's character_book if present).
 	if caps.kv then
 		local raw = caps.kv.get("lorebook")
@@ -954,6 +1189,27 @@ function M.create(caps, opts)
 			local ok, saved = pcall(json.decode, raw)
 			if ok and type(saved) == "table" then
 				state.lorebook = saved
+			end
+		end
+	end
+
+	-- Load personas from kv or initialize defaults.
+	state.personas = { { name = state.user_name, description = "" } }
+	state.active_persona = state.user_name
+	if caps.kv then
+		local raw = caps.kv.get("personas")
+		if raw then
+			local ok_p, saved = pcall(json.decode, raw)
+			if ok_p and type(saved) == "table" and #saved > 0 then
+				state.personas = saved
+			end
+		end
+		local active = caps.kv.get("personas:active")
+		if active and active ~= "" then
+			local p = find_persona(state.personas, active)
+			if p then
+				state.active_persona = active
+				state.user_name = p.name
 			end
 		end
 	end

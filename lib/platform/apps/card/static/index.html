@@ -40,6 +40,13 @@
     <span class="loading-indicator__text">...</span>
   </div>
 
+  <div class="token-counter" id="token-counter">
+    <span class="token-counter__text" id="token-count-text">0 / 4096</span>
+    <div class="token-counter__bar">
+      <div class="token-counter__fill" id="token-count-fill"></div>
+    </div>
+  </div>
+
   <div class="input-row">
     <textarea class="input-row__textarea" id="input" rows="1" placeholder="Type a message..."></textarea>
     <button class="input-row__button input-row__button--send" id="btn-send">Send</button>
@@ -47,6 +54,7 @@
     <button class="input-row__button input-row__button--impersonate" id="btn-impersonate">Impersonate</button>
     <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings">&#9881;</button>
     <button class="input-row__button input-row__button--lorebook" id="btn-lorebook" title="Lorebook">&#128214;</button>
+    <button class="input-row__button input-row__button--card-edit" id="btn-card-edit" title="Card Editor">&#128100;</button>
   </div>
 
   <div class="settings-overlay" id="settings-overlay" hidden>
@@ -56,6 +64,28 @@
         <button class="settings-panel__close" id="settings-close">&times;</button>
       </div>
       <div class="settings-panel__body">
+        <div class="settings-section">
+          <span class="settings-section__title">Persona</span>
+          <div class="settings-persona">
+            <div class="settings-persona__row">
+              <select id="persona-select" class="settings-persona__select"></select>
+              <button id="persona-new" class="settings-persona__btn">New</button>
+              <button id="persona-delete" class="settings-persona__btn settings-persona__btn--danger">Delete</button>
+            </div>
+            <label class="settings-field">
+              <span class="settings-field__label">Name</span>
+              <input type="text" id="persona-name" class="settings-persona__input">
+            </label>
+            <label class="settings-field">
+              <span class="settings-field__label">Description</span>
+              <textarea id="persona-description" class="settings-persona__textarea" rows="3" placeholder="Describe your persona (injected into context)..."></textarea>
+            </label>
+            <button id="persona-save" class="settings-persona__btn settings-persona__btn--save">Save Persona</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <span class="settings-section__title">Generation</span>
+        </div>
         <label class="settings-field">
           <span class="settings-field__label">Temperature <span class="settings-field__value" id="val-temperature">0.7</span></span>
           <input type="range" id="set-temperature" min="0" max="2" step="0.05" value="0.7">
@@ -95,6 +125,74 @@
         <button class="lorebook-panel__close" id="lorebook-close">&times;</button>
       </div>
       <div class="lorebook-panel__body" id="lorebook-list"></div>
+    </div>
+  </div>
+
+  <div class="card-edit-overlay" id="card-edit-overlay" hidden>
+    <div class="card-edit-panel">
+      <div class="card-edit-panel__header">
+        <span class="card-edit-panel__title">Card Editor</span>
+        <button class="card-edit-panel__close" id="card-edit-close">&times;</button>
+      </div>
+      <div class="card-edit-panel__body">
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Name</span>
+          <input type="text" class="card-edit-field__input" id="card-name">
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Creator</span>
+          <input type="text" class="card-edit-field__input" id="card-creator">
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Version</span>
+          <input type="text" class="card-edit-field__input" id="card-character_version">
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Description</span>
+          <textarea class="card-edit-field__textarea" id="card-description" rows="4"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Personality</span>
+          <textarea class="card-edit-field__textarea" id="card-personality" rows="3"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Scenario</span>
+          <textarea class="card-edit-field__textarea" id="card-scenario" rows="3"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">First Message</span>
+          <textarea class="card-edit-field__textarea" id="card-first_mes" rows="3"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Example Messages</span>
+          <textarea class="card-edit-field__textarea" id="card-mes_example" rows="4"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">System Prompt</span>
+          <textarea class="card-edit-field__textarea" id="card-system_prompt" rows="4"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Post-History Instructions</span>
+          <textarea class="card-edit-field__textarea" id="card-post_history_instructions" rows="3"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Creator Notes</span>
+          <textarea class="card-edit-field__textarea" id="card-creator_notes" rows="3"></textarea>
+        </label>
+        <label class="card-edit-field">
+          <span class="card-edit-field__label">Tags (comma-separated)</span>
+          <input type="text" class="card-edit-field__input" id="card-tags">
+        </label>
+        <div class="card-edit-field">
+          <span class="card-edit-field__label">Alternate Greetings</span>
+          <div id="card-alt-greetings-list" class="card-edit-alt-list"></div>
+          <button class="card-edit-alt-add" id="card-alt-add">+ Add Greeting</button>
+        </div>
+      </div>
+      <div class="card-edit-panel__footer">
+        <button class="card-edit-panel__reset" id="card-edit-reset">Reset to Original</button>
+        <button class="card-edit-panel__save" id="card-edit-save">Save</button>
+      </div>
     </div>
   </div>
 

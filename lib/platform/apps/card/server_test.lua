@@ -1338,3 +1338,384 @@ T.describe("session persistence via kv", function()
 		T.eq(kv_store["card_session_id"], first)
 	end)
 end)
+
+-- ── Card editor tests ─────────────────────────────────────────────────────
+
+T.describe("GET /api/card/edit", function()
+	T.it("returns all editable card fields", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/card/edit")
+		T.eq(status, 200)
+		T.eq(data.name, "TestChar")
+		T.eq(data.description, "A test character.")
+		T.eq(data.personality, "Friendly.")
+		T.eq(data.system_prompt, "You are {{char}}.")
+		T.eq(type(data.alternate_greetings), "table")
+		T.eq(#data.alternate_greetings, 2)
+		T.eq(data.alternate_greetings[1], "Hi there!")
+		T.eq(data.alternate_greetings[2], "Greetings!")
+		T.eq(type(data.tags), "table")
+		-- String fields present
+		T.eq(type(data.scenario), "string")
+		T.eq(type(data.first_mes), "string")
+		T.eq(type(data.mes_example), "string")
+		T.eq(type(data.post_history_instructions), "string")
+		T.eq(type(data.creator_notes), "string")
+		T.eq(type(data.creator), "string")
+		T.eq(type(data.character_version), "string")
+	end)
+
+	T.it("returns 404 when no card loaded", function()
+		local caps = make_mock_caps()
+		caps.png = { text = function() return nil end }
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/card/edit")
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("POST /api/card/edit", function()
+	T.it("updates card fields", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/card/edit", {
+			name = "NewName",
+			description = "Updated description.",
+		})
+		T.eq(status, 200)
+		T.eq(data.name, "NewName")
+		T.eq(data.description, "Updated description.")
+		-- Unchanged fields preserved
+		T.eq(data.personality, "Friendly.")
+		T.eq(data.system_prompt, "You are {{char}}.")
+	end)
+
+	T.it("updates tags and alternate_greetings", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/card/edit", {
+			tags = { "fantasy", "adventure" },
+			alternate_greetings = { "Yo!", "Sup?" },
+		})
+		T.eq(status, 200)
+		T.eq(#data.tags, 2)
+		T.eq(data.tags[1], "fantasy")
+		T.eq(data.tags[2], "adventure")
+		T.eq(#data.alternate_greetings, 2)
+		T.eq(data.alternate_greetings[1], "Yo!")
+	end)
+
+	T.it("persists overrides to kv", function()
+		local kv_store = {}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/card/edit", { name = "Overridden" })
+		T.ok(kv_store["card_overrides"], "overrides saved to kv")
+		local saved = json.decode(kv_store["card_overrides"])
+		T.eq(saved.name, "Overridden")
+	end)
+
+	T.it("returns 404 when no card loaded", function()
+		local caps = make_mock_caps()
+		caps.png = { text = function() return nil end }
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/card/edit", { name = "X" })
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("card overrides persist across restarts", function()
+	T.it("loads overrides from kv on init", function()
+		local kv_store = {}
+		local shared_kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+
+		-- First app: edit card
+		local caps1 = make_mock_caps()
+		caps1.kv = shared_kv
+		local app1 = server.create(caps1, { no_static = true })
+		call(app1, "POST", "/api/card/edit", {
+			name = "PersistName",
+			description = "Persisted desc.",
+		})
+
+		-- Second app with same kv: overrides should be applied
+		local caps2 = make_mock_caps()
+		caps2.kv = shared_kv
+		local app2 = server.create(caps2, { no_static = true })
+		local status, data = call(app2, "GET", "/api/card/edit")
+		T.eq(status, 200)
+		T.eq(data.name, "PersistName")
+		T.eq(data.description, "Persisted desc.")
+		-- Original fields not overridden should remain
+		T.eq(data.personality, "Friendly.")
+	end)
+end)
+
+T.describe("POST /api/card/reset", function()
+	T.it("restores original card from PNG", function()
+		local kv_store = {}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		-- Edit card
+		call(app, "POST", "/api/card/edit", {
+			name = "Edited",
+			description = "Edited desc.",
+		})
+		T.eq(app.state.card.name, "Edited")
+
+		-- Reset
+		local status, data = call(app, "POST", "/api/card/reset")
+		T.eq(status, 200)
+		T.eq(data.name, "TestChar")
+		T.eq(data.description, "A test character.")
+		-- kv overrides should be cleared
+		T.eq(kv_store["card_overrides"], nil)
+	end)
+
+	T.it("returns 404 when no card loaded", function()
+		local caps = make_mock_caps()
+		caps.png = { text = function() return nil end }
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/card/reset")
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("card editor affects context assembly", function()
+	T.it("updated system_prompt is used in context", function()
+		local captured_context
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_context = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Edit system prompt
+		call(app, "POST", "/api/card/edit", {
+			system_prompt = "You are a pirate named {{char}}.",
+		})
+		-- Send a message to trigger context assembly
+		call(app, "POST", "/api/message", { content = "test" })
+		T.ok(captured_context, "context was passed to LLM")
+		local found_pirate = false
+		for _, msg in ipairs(captured_context) do
+			if msg.role == "system" and msg.content:find("pirate") then
+				found_pirate = true
+				break
+			end
+		end
+		T.ok(found_pirate, "updated system prompt used in context")
+	end)
+end)
+
+-- ── Persona tests ──────────────────────────────────────────────────────────
+
+T.describe("GET /api/personas", function()
+	T.it("returns default persona matching user_name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/personas")
+		T.eq(status, 200)
+		T.ok(data.personas, "has personas")
+		T.eq(#data.personas, 1)
+		T.eq(data.personas[1].name, "Tester")
+		T.eq(data.personas[1].description, "")
+		T.eq(data.active, "Tester")
+	end)
+end)
+
+T.describe("POST /api/personas/save", function()
+	T.it("creates a new persona", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/personas/save", {
+			name = "Alice", description = "A curious adventurer.",
+		})
+		T.eq(status, 200)
+		T.eq(data.name, "Alice")
+		T.eq(data.description, "A curious adventurer.")
+		-- Verify it appears in the list.
+		local _, list = call(app, "GET", "/api/personas")
+		T.eq(#list.personas, 2)
+	end)
+
+	T.it("updates an existing persona", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/personas/save", {
+			name = "Tester", description = "Updated description.",
+		})
+		local _, list = call(app, "GET", "/api/personas")
+		T.eq(#list.personas, 1)
+		T.eq(list.personas[1].description, "Updated description.")
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/personas/save", { description = "x" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("POST /api/personas/delete", function()
+	T.it("removes persona and switches active if needed", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Add a second persona.
+		call(app, "POST", "/api/personas/save", { name = "Alice", description = "Adventurer." })
+		-- Activate Alice.
+		call(app, "POST", "/api/personas/activate", { name = "Alice" })
+		T.eq(app.state.active_persona, "Alice")
+		-- Delete Alice — should switch to remaining persona.
+		local status, data = call(app, "POST", "/api/personas/delete", { name = "Alice" })
+		T.eq(status, 200)
+		T.eq(data.deleted, true)
+		T.eq(data.active, "Tester")
+		T.eq(app.state.user_name, "Tester")
+	end)
+
+	T.it("creates default User persona when deleting the last one", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Delete the only persona.
+		local status, data = call(app, "POST", "/api/personas/delete", { name = "Tester" })
+		T.eq(status, 200)
+		T.eq(data.deleted, true)
+		T.eq(data.active, "User")
+		local _, list = call(app, "GET", "/api/personas")
+		T.eq(#list.personas, 1)
+		T.eq(list.personas[1].name, "User")
+	end)
+
+	T.it("returns 404 for unknown persona", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/personas/delete", { name = "Nonexistent" })
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("POST /api/personas/activate", function()
+	T.it("changes user_name in state", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Add a second persona.
+		call(app, "POST", "/api/personas/save", { name = "Alice", description = "Adventurer." })
+		local status, data = call(app, "POST", "/api/personas/activate", { name = "Alice" })
+		T.eq(status, 200)
+		T.eq(data.active, "Alice")
+		T.eq(app.state.user_name, "Alice")
+		T.eq(app.state.active_persona, "Alice")
+	end)
+
+	T.it("returns 404 for unknown persona", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/personas/activate", { name = "Nobody" })
+		T.eq(status, 404)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 400 without name", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/personas/activate", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+end)
+
+T.describe("persona context integration", function()
+	T.it("passes persona description to context assembly", function()
+		local captured_context
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_context = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Save persona with description, then activate.
+		call(app, "POST", "/api/personas/save", {
+			name = "Alice", description = "A curious adventurer who loves cats.",
+		})
+		call(app, "POST", "/api/personas/activate", { name = "Alice" })
+		-- Send a message to trigger LLM call.
+		call(app, "POST", "/api/message", { content = "test" })
+		T.ok(captured_context, "context was passed to LLM")
+		-- Look for persona description in context.
+		local found_persona = false
+		for _, msg in ipairs(captured_context) do
+			if msg.content and msg.content:find("curious adventurer") then
+				found_persona = true
+				break
+			end
+		end
+		T.ok(found_persona, "persona description included in context")
+	end)
+
+	T.it("no persona block when description is empty", function()
+		local captured_context
+		local caps = make_mock_caps({
+			llm_call = function(messages)
+				captured_context = messages
+				return "ok"
+			end,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Default persona has empty description.
+		call(app, "POST", "/api/message", { content = "test" })
+		T.ok(captured_context, "context was passed to LLM")
+		-- Should not have an empty system message for persona.
+		for _, msg in ipairs(captured_context) do
+			if msg.role == "system" then
+				T.ok(#msg.content > 0, "no empty system messages")
+			end
+		end
+	end)
+end)
+
+T.describe("persona persistence", function()
+	T.it("saves and loads personas from kv", function()
+		local kv_store = {}
+		local shared_kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local caps1 = make_mock_caps()
+		caps1.kv = shared_kv
+		local app1 = server.create(caps1, { no_static = true })
+		call(app1, "POST", "/api/personas/save", {
+			name = "Alice", description = "Adventurer.",
+		})
+		call(app1, "POST", "/api/personas/activate", { name = "Alice" })
+		T.ok(kv_store["personas"], "personas saved to kv")
+		T.eq(kv_store["personas:active"], "Alice")
+
+		-- Create new app with same kv — should restore personas.
+		local caps2 = make_mock_caps()
+		caps2.kv = shared_kv
+		local app2 = server.create(caps2, { no_static = true })
+		T.eq(app2.state.active_persona, "Alice")
+		T.eq(app2.state.user_name, "Alice")
+		local _, list = call(app2, "GET", "/api/personas")
+		T.eq(#list.personas, 2)
+	end)
+end)
