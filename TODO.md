@@ -28,12 +28,13 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Lorebook editor — CRUD endpoints + collapsible entry panel with keyword/position/order editing
 - [x] Session management — create, list, switch, delete conversations; session panel UI
 - [x] Preset system — connection, generation, prompt presets with save/load/import/export (71 assertions)
-- [ ] Card editor — edit card fields (name, description, personality, scenario, system prompt, etc.)
-- [ ] Markdown rendering in messages — parse and render markdown in assistant responses
-- [ ] User personas — multiple user profiles with name/description, selectable per session
-- [ ] Token counter — display token usage per message and total context size
-- [ ] Character avatar display — show card image in message list
+- [x] Card editor — view/edit all card fields with overrides persisted to kv, reset to original
+- [x] Markdown rendering — client-side renderer (bold, italic, code, lists, quotes, headings, links) with XSS protection
+- [x] User personas — named profiles with description injected into context, selectable per session
+- [x] Token counter — context usage progress bar with color thresholds, updated after each action
+- [ ] Character avatar display — show card image in message list and header
 - [ ] Shell app — platform entry point, card browser/launcher
+- [ ] Group chats — multiple characters in one conversation
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
