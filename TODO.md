@@ -20,10 +20,12 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
 - [x] Card app static JS UI — hand-written vanilla JS frontend + Lua BFF backend (server.lua, 76 assertions). Swipe cache, greeting alternatives, all logic server-side.
 - [x] Streaming LLM responses — SSE via `POST /api/message/stream`, `llm.call_stream()` in caps, `res.raw` socket takeover in http server
-- [ ] Card app: message editing and deletion (backend done, frontend done, needs conversation tree integration)
+- [x] Card app: message editing (fork) and deletion (subtree) — integrated with conversation tree
+- [x] Conversation tree — SQLite-backed branching via lib/conversation, canonical path, sibling navigation
+- [x] Impersonate mode — generate text as user character, placed in input for review
+- [x] CCv2 adapter apps — import (PNG/JSON) and export (JSON/PNG) as separate BFF apps, 50 assertions
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
-- [ ] CCv2 adapter apps — import (PNG/JSON → crescent tarball) and export (tarball → CCv2 PNG) as separate apps
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
