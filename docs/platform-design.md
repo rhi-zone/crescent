@@ -32,8 +32,8 @@ hack.
 
 Security comes from the capability sandbox, not from restricting what code ships in
 the tarball. The app only gets the caps it's explicitly granted — a modified `json.lua`
-can't exfiltrate data because the app has no network access unless granted `caps.llm`
-or similar. The sandbox is the security boundary, not the code review of bundled deps.
+can't exfiltrate data because the app has no network access unless granted
+`caps.http_client` with an appropriate domain whitelist. The sandbox is the security boundary, not the code review of bundled deps.
 
 Because the platform resolves `require` as tarball-first then host-fallback, vendored
 deps can be stripped from the tarball without breaking the app — it falls back to the
@@ -79,64 +79,71 @@ The platform has no opinion about what the script does. The script is the progra
 
 ## Capability surface
 
-Capabilities are plain Lua tables passed to the sandbox. The platform owns the
-implementations; the script receives exactly what it's granted.
-
-**Two kinds of cap:**
-- **State caps** expose `Signal<T>` values — reactive cells the script reads and
-  subscribes to. Changes propagate instantly; no polling, no restart.
-- **Action caps** expose functions — imperative calls like `llm.call`, `fs.write`.
-
-This means live cap swapping (e.g. switching LLM backend mid-session) works without
-restart for state caps — the script holds a signal reference and the host pushes a
-new value through it.
+Capabilities are plain Lua tables passed into the sandbox. The platform owns the
+implementations; the script receives exactly what it's granted. Caps are primitives —
+they do one thing. Apps compose them into higher-level behavior.
 
 ```lua
 -- example grant
 sandbox.run(script, sandbox.env(
   sandbox.stdlib,
-  { globals = {
-    png    = png_cap({ allow = {"chara"} }),
-    llm    = llm_cap(model_config),   -- action cap: llm.call(messages)
-    config = config_cap(user_dir),    -- state cap: config.theme, config.presets, ...
-  }}
+  { globals = { caps = {
+    self        = self_cap(app),
+    http_server = http_server_cap({ port = 7860 }),
+    http_client = http_client_cap({ allow = {"api.openai.com", "localhost:11434"} }),
+    kv          = kv_cap(kv_path),
+    db          = db_cap(db_path),
+    time        = time_cap(),
+  }}}
 ))
 ```
 
-### `caps.png` — chunk access
+### `caps.self` — app package access
 
-Read and write metadata chunks in the app's image file by name.
-
-```lua
-caps.png.text(name)           -- read chunk, returns string | nil
-caps.png.set_text(name, val)  -- write chunk
-```
-
-The `png_cap` constructor accepts an optional allowlist:
+Read-only access to the app's own package contents: image metadata chunks and
+tarball entries. The app was loaded from an image file (PNG/JPEG/WebP) wrapping
+a tarball — this cap exposes both layers.
 
 ```lua
-png_cap({ allow = {"chara"} })  -- only these chunks accessible
-png_cap()                        -- unrestricted (trusted scripts only)
+caps.self.metadata(keyword)   -- read image chunk by name, returns string | nil
+caps.self.entries()           -- list tarball entry paths
+caps.self.entry(path)         -- read a tarball entry by path, returns string | nil
 ```
 
-Denied chunk access errors immediately. All format parsing (JSON, base64, etc.) is
-the script's responsibility. The platform never interprets chunk contents.
+The card data lives in `caps.self.metadata("chara")`. Static assets (HTML/CSS/JS)
+live in tarball entries. Format parsing (JSON, base64, etc.) is the app's job —
+the cap returns raw bytes.
 
-### `caps.llm` — LLM oracle (action cap)
+### `caps.http_server` — inbound HTTP
 
-A stateless function call. The LLM is not a participant; it is a tool.
+The platform binds the port and owns the socket. The app provides a request handler.
+
+The cap must support streaming responses (SSE) without giving the app raw socket
+access. The app also needs to know its own URL (e.g. to open a browser).
+
+### `caps.http_client` — outbound HTTP
+
+Makes HTTP requests to whitelisted domains. The platform controls which hosts the
+app can reach — the allowlist is set by the platform operator, not the app.
 
 ```lua
-local response = caps.llm.call(messages)  -- messages: array of {role, content}
+caps.http_client.request({
+  method  = "POST",
+  url     = "http://api.openai.com/v1/chat/completions",
+  headers = { ["Content-Type"] = "application/json" },
+  body    = json_string,
+})
 ```
 
-Model selection, API keys, and retry logic are the capability implementation's concern.
-The script assembles the messages array however it wants.
+LLM protocol libraries (OpenAI, Anthropic, Ollama, etc.) are app-vendored code
+that uses `caps.http_client` internally. The platform has no LLM knowledge — it
+just controls network access.
 
-### `caps.db` — SQLite database handle (action cap)
+### `caps.db` — SQLite database
 
-A pre-opened SQLite connection. The app writes raw SQL — no structured query
-API. Two isolation tiers:
+A pre-opened SQLite connection. The app writes raw SQL — no structured query API.
+
+Two isolation tiers:
 
 **Per-app db files** (`"type": "db"`) — the host opens a file scoped to the
 app (`~/.crescent/data/<user_id>/<app_id>/<name>.db`). Isolation is at the
@@ -181,10 +188,7 @@ app reading the platform's metadata db:
 }
 ```
 
-The same `readonly` flag applies to `caps.fs` — the host opens the scoped
-directory read-only, write attempts error immediately.
-
-### `caps.kv` — key-value store (action cap)
+### `caps.kv` — key-value store
 
 Lightweight persistent storage for small values: current position, per-app
 preferences, flags. The host allowlists which keys/prefixes the app may
@@ -200,26 +204,56 @@ position here on every navigation; the host reads it on next launch and passes
 it back as a startup argument. Apps that only need to remember where they were
 get `caps.kv`, not a full db connection.
 
-### `caps.fs` (optional) — file access (action cap)
+### `caps.time` — clock
+
+```lua
+caps.time()  -- returns Unix timestamp (integer)
+```
+
+### `caps.fs` (optional) — file access
 
 Granted only to explicitly trusted scripts. Scoped to a directory.
 
-### `caps.config` (optional) — user-level config (state cap)
+### `caps.config` (optional) — user-level config
 
-Exposes user-owned configuration as signals: UI preferences, global presets, global
+Exposes user-owned configuration: UI preferences, global presets, global
 lorebooks, theme. Scoped to a user config directory (`~/.crescent/` by default).
 
-```lua
-caps.config.theme        -- Signal<string>: current theme name
-caps.config.presets      -- Signal<Preset[]>: user's global presets
-caps.config.lorebooks    -- Signal<Lorebook[]>: user's global lorebooks
-caps.config.ui           -- Signal<table>: arbitrary UI layout/pref overrides
-```
+## Sandbox security
 
-Apps that don't declare `caps.config` never read user config and are fully
-self-contained. Apps that do declare it get live-updating user preferences with no
-extra plumbing — the signal propagates changes to every subscribed component
-automatically.
+The sandbox is the security boundary. An app runs in a restricted Lua environment
+with no access to `io`, `os`, `ffi`, `debug`, `dofile`, `loadfile`, `require`
+(replaced with a whitelist loader), or `package`. Capabilities are the only way to
+perform side effects.
+
+**Cap implementation safety.** Caps are plain tables with closure-based function
+values. The closures capture real IO primitives (sqlite handles, sockets, etc.)
+internally, but without `debug.getupvalue` (which requires the `debug` library,
+excluded from sandbox), closure upvalues are unreachable. The app cannot inspect
+a cap function's internals.
+
+**Metatable protection.** `getmetatable` is available in the sandbox (needed for
+normal Lua programming). To prevent metatable-based escape:
+
+- Cap tables must not use metatables on anything reachable by the app.
+- The string metatable (shared between host and sandbox) is locked before any
+  sandboxed code runs:
+
+  ```lua
+  local mt = getmetatable("")
+  mt.__metatable = false  -- getmetatable("") now returns false; setmetatable errors
+  ```
+
+  This prevents the app from modifying the shared string metatable to affect the
+  host. `string:method()` calls still work — `__metatable` only affects
+  `getmetatable`/`setmetatable`, not `__index` dispatch.
+
+**Bytecode loading.** `load()` is called with mode `"t"` (text only) — pre-compiled
+bytecode is rejected. This prevents bytecode-based sandbox escapes.
+
+**Instruction budget.** Optional `debug.sethook`-based instruction limit prevents
+infinite loops. The hook is set by the host before running sandboxed code and cleared
+after.
 
 ## Script / data separation
 
@@ -242,18 +276,18 @@ that reads CCv2 data does so itself:
 
 ```lua
 -- CCv2 knowledge lives here, in the script — not in the platform
-local raw      = caps.png.text("chara")          -- CCv2 stores data in "chara" chunk
+local raw      = caps.self.metadata("chara")      -- CCv2 stores data in "chara" chunk
 local ccv2     = json.decode(base64.decode(raw))
 local name     = ccv2.data.name
 local persona  = ccv2.data.description
 ```
 
 CCv2 import is therefore free: the CCv2 card editor is a script that knows how to
-read the `chara` chunk. The platform just provides chunk access.
+read the `chara` chunk. The platform just provides package access.
 
 The data capability is the abstraction layer. CCv2 fields are one implementation.
 Crescent structured data is another. The script sees one API either way — whatever
-the capability implementation returns from `caps.png.text(name)`.
+the capability implementation returns from `caps.self.metadata(name)`.
 
 ## App internal routing
 
@@ -410,21 +444,23 @@ runtime.
     "rating": "SFW"
   },
   "caps": {
-    "db": "required"
+    "db": "required",
+    "self": "required"
   },
   "entry": {
     "server": {
       "main": "server.lua",
       "caps": {
-        "llm_main":    { "type": "llm", "required": true },
-        "llm_summary": { "type": "llm", "required": false }
+        "http_server": { "type": "http_server", "required": true },
+        "http_client": { "type": "http_client", "required": true },
+        "time":        { "type": "time",        "required": true }
       }
     },
     "headless": {
       "main": "run/batch.lua",
       "caps": {
-        "llm": { "type": "llm", "required": true },
-        "fs":  { "type": "fs",  "required": false }
+        "http_client": { "type": "http_client", "required": true },
+        "fs":          { "type": "fs",          "required": false }
       }
     }
   }
@@ -536,14 +572,14 @@ is the inspector and tweaker.
 
 ## Backend for frontend (BFF)
 
-Each app's backend is its own server. It uses caps internally and exposes an HTTP API
-tailored to its frontend. The API is domain-specific — a card app exposes endpoints
-like `POST /message` and `GET /card`, not generic cap proxies. The frontend knows
-nothing about caps, LLM protocols, or database schemas — it talks to its own backend.
+Each app's backend exposes an HTTP API tailored to its frontend. The API is
+domain-specific — a card app exposes endpoints like `POST /message` and `GET /card`,
+not generic cap proxies. The frontend knows nothing about caps, LLM protocols, or
+database schemas — it talks to its own backend.
 
-`lib/platform/` provides cap factories. The app's backend wires them together and
-serves its frontend from `static/`. How the backend serves HTTP is the app's concern —
-use `lib/http`, write a raw socket handler, whatever works.
+The app provides a request handler function. The platform serves it via
+`caps.http_server` — the app never binds a port or touches a socket. Static assets
+are served from tarball entries via `caps.self`.
 
 ## UI design principles
 
