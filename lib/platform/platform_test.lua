@@ -6,8 +6,6 @@ local T        = require("lib.test.assert")
 local platform = require("lib.platform")
 local sandbox  = require("lib.sandbox")
 local png_mod  = require("lib.png")
-local png_cap  = require("lib.platform.caps.png").png_cap
-local render   = require("lib.platform.caps.render")
 local fs_cap   = require("lib.platform.caps.fs").fs_cap
 local base64   = require("lib.base64")
 local tar      = require("lib.tar")
@@ -51,82 +49,6 @@ local function write_temp(bytes)
 end
 
 -- ── caps.png ──────────────────────────────────────────────────────────────────
-
-T.describe("caps.png", function ()
-	T.it("reads tEXt chunks from a PNG file", function ()
-		local bytes = make_test_card("return 1", { chara = "hello" })
-		local path  = write_temp(bytes)
-		local cap   = png_cap(path)
-		T.eq(cap.text("chara"),  "hello")
-		T.eq(cap.text("script"), "return 1")
-		T.eq(cap.text("absent"), nil)
-		os.remove(path)
-	end)
-
-	T.it("set_text writes back to disk and updates cache", function ()
-		local bytes = make_test_card("return 1", { chara = "original" })
-		local path  = write_temp(bytes)
-		local cap   = png_cap(path)
-		cap.set_text("chara", "updated")
-		T.eq(cap.text("chara"), "updated")
-		-- Confirm persisted: create a new cap from the same file
-		local cap2 = png_cap(path)
-		T.eq(cap2.text("chara"), "updated")
-		os.remove(path)
-	end)
-
-	T.it("allowlist blocks denied chunks", function ()
-		local bytes = make_test_card("return 1", { chara = "v", secret = "s" })
-		local path  = write_temp(bytes)
-		local cap   = png_cap(path, { allow = { "chara", "script" } })
-		T.eq(cap.text("chara"), "v")
-		local ok = pcall(function () cap.text("secret") end)
-		T.ok(not ok, "denied chunk should error")
-		os.remove(path)
-	end)
-
-	T.it("allowlist blocks set_text on denied chunks", function ()
-		local bytes = make_test_card("return 1")
-		local path  = write_temp(bytes)
-		local cap   = png_cap(path, { allow = { "chara" } })
-		local ok = pcall(function () cap.set_text("secret", "v") end)
-		T.ok(not ok, "denied set_text should error")
-		os.remove(path)
-	end)
-end)
-
--- ── caps.render ───────────────────────────────────────────────────────────────
-
-T.describe("caps.render", function ()
-	T.it("collect_session buffers pushed content", function ()
-		local session, get_all = render.collect_session()
-		local cap = render.render_cap(session)
-		cap.push("hello")
-		cap.push("world")
-		local items = get_all()
-		T.eq(#items, 2)
-		T.eq(items[1], "hello")
-		T.eq(items[2], "world")
-	end)
-
-	T.it("sse_session emits data frames", function ()
-		local out = {}
-		local session = render.sse_session(function (b) out[#out + 1] = b end)
-		local cap = render.render_cap(session)
-		cap.push("ping")
-		T.eq(#out, 1)
-		T.eq(out[1], "data: ping\n\n")
-	end)
-
-	T.it("sse_session JSON-encodes table content", function ()
-		local out = {}
-		local session = render.sse_session(function (b) out[#out + 1] = b end)
-		local cap = render.render_cap(session)
-		cap.push({ type = "msg", text = "hi" })
-		T.eq(#out, 1)
-		T.ok(out[1]:find('"type"') ~= nil, "JSON encoded")
-	end)
-end)
 
 -- ── caps.fs ───────────────────────────────────────────────────────────────────
 

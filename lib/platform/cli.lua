@@ -301,6 +301,7 @@ local CAP_TYPE_MODULES = {
 	cli         = "lib.platform.caps.cli",
 	stdin       = "lib.platform.caps.stdin",
 	stdout      = "lib.platform.caps.stdout",
+	fs          = "lib.platform.caps.fs",
 }
 
 local function build_cap(cap_name, decl, app, context, platform_opts)
@@ -383,6 +384,20 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 			return mod.stdout_cap()
 		end
 		return nil, "stdout cap module not available"
+	end
+
+	-- fs: scoped filesystem access.
+	if cap_type == "fs" then
+		local root = decl.root
+		if not root then
+			return nil, "fs cap '" .. cap_name .. "' has no root"
+		end
+		root = expand_home(root)
+		mkdir_p(root)
+		local mod = require(CAP_TYPE_MODULES.fs)
+		-- fs_cap doesn't return revoke_fn yet (older code)
+		local cap = mod.fs_cap({ root = root, allow_write = not decl.readonly })
+		return cap
 	end
 
 	return nil, "unknown cap type: " .. tostring(cap_type)

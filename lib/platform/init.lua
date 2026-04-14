@@ -9,11 +9,6 @@
 --   platform.load_app(path)                           -> app | nil, err
 --   platform.run_entry(app, entry_key, env, opts?)    -> ok, result | err
 --   platform.load_and_run_entry(path, entry_key, env, opts?) -> ok, result | err
---   platform.caps.png                 -> require("lib.platform.caps.png")
---   platform.caps.llm                 -> require("lib.platform.caps.llm")
---   platform.caps.render              -> require("lib.platform.caps.render")
---   platform.caps.fs                  -> require("lib.platform.caps.fs")
---
 -- app fields:
 --   app.path     : string
 --   app.chunks   : png chunk array | nil  (nil for raw .tar.gz)
@@ -23,12 +18,10 @@
 -- Typical usage:
 --   local platform = require("lib.platform")
 --   local sandbox  = require("lib.sandbox")
---   local llm_mod  = require("lib.platform.caps.llm")
---
---   local env = sandbox.env(sandbox.stdlib, { globals = {
---     llm = llm_mod.llm_cap({ endpoint = "http://localhost:8000", model = "gemma3" }),
---   }})
---   local ok, result = platform.load_and_run_entry("myapp.png", "dom", env)
+--   local app = platform.load_app("myapp.png")
+--   -- construct caps from manifest, then:
+--   local env = sandbox.env(sandbox.stdlib, { globals = { caps = caps } })
+--   local ok, result = platform.run_entry(app, "server", env)
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path

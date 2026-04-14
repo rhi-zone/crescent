@@ -17,7 +17,7 @@
 -- opts.readonly: boolean — if true, only query is exposed (no exec).
 --
 -- Capability API (same shape as caps.db):
---   cap.exec(sql)              -> true | nil, err   (not present in readonly)
+--   cap.execute(sql)              -> true | nil, err   (not present in readonly)
 --   cap.query(sql, params?)    -> rows | nil, err
 --   cap.close()                -> nil
 
@@ -216,7 +216,7 @@ function M.setup_schema(path, schema)
 	for _, tbl in ipairs(schema) do
 		local base = "_" .. tbl.name
 		-- Create base table.
-		local ok2, err2 = cap.exec("CREATE TABLE IF NOT EXISTS [" .. base .. "] (" .. tbl.cols .. ")")
+		local ok2, err2 = cap.execute("CREATE TABLE IF NOT EXISTS [" .. base .. "] (" .. tbl.cols .. ")")
 		if not ok2 then cap.close(); return nil, err2 end
 
 		-- Parse column names from cols string for trigger generation.
@@ -233,7 +233,7 @@ function M.setup_schema(path, schema)
 		-- Create view.
 		local view_sql = "CREATE VIEW IF NOT EXISTS [" .. tbl.name ..
 			"] AS SELECT * FROM [" .. base .. "] WHERE app_id = _app_id()"
-		local ok3, err3 = cap.exec(view_sql)
+		local ok3, err3 = cap.execute(view_sql)
 		if not ok3 then cap.close(); return nil, err3 end
 
 		-- Build column lists for INSERT trigger.
@@ -253,7 +253,7 @@ function M.setup_schema(path, schema)
 			"INSTEAD OF INSERT ON [" .. tbl.name .. "] BEGIN " ..
 			"INSERT INTO [" .. base .. "] (" .. table.concat(col_list, ", ") .. ") " ..
 			"VALUES (" .. table.concat(val_list, ", ") .. "); END"
-		local ok4, err4 = cap.exec(ins_trigger)
+		local ok4, err4 = cap.execute(ins_trigger)
 		if not ok4 then cap.close(); return nil, err4 end
 
 		-- Build SET clause for UPDATE trigger (skip app_id).
@@ -270,7 +270,7 @@ function M.setup_schema(path, schema)
 			"UPDATE [" .. base .. "] SET " .. table.concat(set_parts, ", ") ..
 			" WHERE app_id = _app_id() AND " ..
 			"[" .. col_names[1] .. "] = OLD.[" .. col_names[1] .. "]; END"
-		local ok5, err5 = cap.exec(upd_trigger)
+		local ok5, err5 = cap.execute(upd_trigger)
 		if not ok5 then cap.close(); return nil, err5 end
 
 		-- INSTEAD OF DELETE trigger.
@@ -278,7 +278,7 @@ function M.setup_schema(path, schema)
 			"INSTEAD OF DELETE ON [" .. tbl.name .. "] BEGIN " ..
 			"DELETE FROM [" .. base .. "] WHERE app_id = _app_id() AND " ..
 			"[" .. col_names[1] .. "] = OLD.[" .. col_names[1] .. "]; END"
-		local ok6, err6 = cap.exec(del_trigger)
+		local ok6, err6 = cap.execute(del_trigger)
 		if not ok6 then cap.close(); return nil, err6 end
 	end
 
@@ -406,9 +406,12 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 	sqlite_ffi.sqlite3_set_authorizer(db, auth_cb, nil)
 
+	local revoked = false
+
 	-- ── exec (writes go through views + INSTEAD OF triggers) ──────────────────
 
 	local function exec(sql)
+		if revoked then return nil, "shared_db_cap: capability revoked" end
 		local c_sql = sql
 		local next_sql = ffi.new("const char *[1]")
 		local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
@@ -438,6 +441,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	-- ── query (reads go through views, filtered by _app_id()) ─────────────────
 
 	local function query(sql, params)
+		if revoked then return nil, "shared_db_cap: capability revoked" end
 		local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
 		if sqlite_ffi.sqlite3_prepare_v2(db, sql, #sql + 1, stmt_ptr, nil) ~= SQLITE_OK then
 			return nil, "shared_db_cap: prepare: " .. errmsg()
@@ -481,11 +485,13 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		sqlite_ffi.sqlite3_close_v2(db)
 	end
 
+	local function revoke() revoked = true end
+
 	if readonly then
-		return { query = query, close = close }
+		return { query = query, close = close }, revoke
 	end
 
-	return { exec = exec, query = query, close = close }
+	return { exec = exec, query = query, close = close }, revoke
 end
 
 return M
