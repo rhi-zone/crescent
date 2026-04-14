@@ -46,6 +46,7 @@
     <button class="input-row__button input-row__button--continue" id="btn-continue">Continue</button>
     <button class="input-row__button input-row__button--impersonate" id="btn-impersonate">Impersonate</button>
     <button class="input-row__button input-row__button--settings" id="btn-settings" title="Settings">&#9881;</button>
+    <button class="input-row__button input-row__button--lorebook" id="btn-lorebook" title="Lorebook">&#128214;</button>
   </div>
 
   <div class="settings-overlay" id="settings-overlay" hidden>
@@ -83,6 +84,17 @@
       <div class="settings-panel__footer">
         <button class="settings-panel__save" id="settings-save">Save</button>
       </div>
+    </div>
+  </div>
+
+  <div class="lorebook-overlay" id="lorebook-overlay" hidden>
+    <div class="lorebook-panel" id="lorebook-panel">
+      <div class="lorebook-panel__header">
+        <span class="lorebook-panel__title">Lorebook</span>
+        <button class="lorebook-panel__add" id="lorebook-add">+ Add Entry</button>
+        <button class="lorebook-panel__close" id="lorebook-close">&times;</button>
+      </div>
+      <div class="lorebook-panel__body" id="lorebook-list"></div>
     </div>
   </div>
 

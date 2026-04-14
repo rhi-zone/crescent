@@ -924,3 +924,417 @@ T.describe("LLM parameter passthrough", function()
 		T.eq(captured_opts.temperature, 0.3)
 	end)
 end)
+
+-- ── Lorebook tests ─────────────────────────────────────────────────────────
+
+local function make_lorebook_caps(opts)
+	opts = opts or {}
+	local kv_store = {}
+	return {
+		llm = {
+			call = opts.llm_call or function() return "mock response" end,
+			count_tokens = function(text) return math.ceil(#text / 4) end,
+		},
+		png = {
+			text = function(keyword)
+				if keyword == "chara" then
+					return json.encode({
+						spec = "chara_card_v2",
+						data = {
+							name = "TestChar",
+							description = "A test character.",
+							personality = "Friendly.",
+							scenario = "",
+							first_mes = "Hello!",
+							mes_example = "",
+							creator_notes = "",
+							system_prompt = "You are {{char}}.",
+							post_history_instructions = "",
+							alternate_greetings = {},
+							tags = {},
+							creator = "",
+							character_version = "",
+							extensions = {},
+							character_book = {
+								entries = {
+									{
+										keys = { "cat", "feline" },
+										content = "Cats are small furry animals.",
+										enabled = true,
+										constant = false,
+										insertion_order = 100,
+										position = "before_char",
+									},
+									{
+										keys = { "dog" },
+										content = "Dogs are loyal companions.",
+										enabled = true,
+										constant = false,
+										insertion_order = 50,
+										position = "after_char",
+									},
+								},
+							},
+						},
+					})
+				end
+				return nil
+			end,
+		},
+		kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		},
+		config = {
+			get = function(key)
+				if key == "user_name" then return "Tester" end
+				if key == "max_context" then return 4096 end
+				if key == "max_response" then return 512 end
+				return nil
+			end,
+		},
+	}, kv_store
+end
+
+T.describe("GET /api/lorebook", function()
+	T.it("returns entries from loaded card", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/lorebook")
+		T.eq(status, 200)
+		T.ok(data.entries, "has entries")
+		T.eq(#data.entries, 2)
+		T.eq(data.entries[1].keys[1], "cat")
+		T.eq(data.entries[1].keys[2], "feline")
+		T.eq(data.entries[1].content, "Cats are small furry animals.")
+		T.eq(data.entries[1].enabled, true)
+		T.eq(data.entries[1].order, 100)
+		T.eq(data.entries[2].keys[1], "dog")
+		T.eq(data.entries[2].content, "Dogs are loyal companions.")
+	end)
+
+	T.it("returns empty list when no lorebook", function()
+		local caps = make_mock_caps()
+		-- Default mock has no character_book
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/lorebook")
+		T.eq(status, 200)
+		T.eq(#data.entries, 0)
+	end)
+end)
+
+T.describe("POST /api/lorebook/update", function()
+	T.it("updates entry fields", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Get entries to find uid
+		local _, list = call(app, "GET", "/api/lorebook")
+		local uid = list.entries[1].uid
+		local status, data = call(app, "POST", "/api/lorebook/update", {
+			uid = uid,
+			keys = { "kitty" },
+			content = "Updated content.",
+			enabled = false,
+			order = 200,
+		})
+		T.eq(status, 200)
+		T.eq(data.uid, uid)
+		T.eq(data.keys[1], "kitty")
+		T.eq(data.content, "Updated content.")
+		T.eq(data.enabled, false)
+		T.eq(data.order, 200)
+		-- Verify persisted
+		local _, list2 = call(app, "GET", "/api/lorebook")
+		T.eq(list2.entries[1].keys[1], "kitty")
+		T.eq(list2.entries[1].content, "Updated content.")
+	end)
+
+	T.it("returns 400 without uid", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/lorebook/update", { content = "x" })
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 404 for unknown uid", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/lorebook/update", { uid = "nonexistent" })
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("POST /api/lorebook/add", function()
+	T.it("creates a new entry", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/lorebook/add", {
+			keys = { "bird", "avian" },
+			content = "Birds can fly.",
+			order = 75,
+		})
+		T.eq(status, 200)
+		T.ok(data.uid, "has generated uid")
+		T.eq(data.keys[1], "bird")
+		T.eq(data.keys[2], "avian")
+		T.eq(data.content, "Birds can fly.")
+		T.eq(data.enabled, true, "defaults to enabled")
+		T.eq(data.order, 75)
+		-- Verify it appears in the list
+		local _, list = call(app, "GET", "/api/lorebook")
+		T.eq(#list.entries, 3)
+	end)
+
+	T.it("returns 400 without keys or content", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/lorebook/add", { keys = { "x" } })
+		T.eq(status, 400)
+		status = call(app, "POST", "/api/lorebook/add", { content = "x" })
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("POST /api/lorebook/delete", function()
+	T.it("removes entry by uid", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local _, list = call(app, "GET", "/api/lorebook")
+		T.eq(#list.entries, 2)
+		local uid = list.entries[1].uid
+		local status, data = call(app, "POST", "/api/lorebook/delete", { uid = uid })
+		T.eq(status, 200)
+		T.eq(data.deleted, true)
+		local _, list2 = call(app, "GET", "/api/lorebook")
+		T.eq(#list2.entries, 1)
+		T.eq(list2.entries[1].keys[1], "dog")
+	end)
+
+	T.it("returns 400 without uid", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/lorebook/delete", {})
+		T.eq(status, 400)
+		T.ok(data.error, "has error")
+	end)
+
+	T.it("returns 404 for unknown uid", function()
+		local caps = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/lorebook/delete", { uid = "nonexistent" })
+		T.eq(status, 404)
+	end)
+end)
+
+T.describe("lorebook persistence", function()
+	T.it("saves to kv after mutation and loads on init", function()
+		local caps, kv_store = make_lorebook_caps()
+		local app = server.create(caps, { no_static = true })
+		-- Mutate: add an entry
+		call(app, "POST", "/api/lorebook/add", {
+			keys = { "fish" },
+			content = "Fish swim.",
+		})
+		T.ok(kv_store["lorebook"], "lorebook saved to kv")
+		-- Verify kv contains 3 entries
+		local saved = json.decode(kv_store["lorebook"])
+		T.eq(#saved, 3)
+
+		-- Create a new app with the same kv — should load from kv
+		local caps2 = make_lorebook_caps()
+		caps2.kv = caps.kv  -- share the kv store
+		local app2 = server.create(caps2, { no_static = true })
+		local _, list = call(app2, "GET", "/api/lorebook")
+		T.eq(#list.entries, 3)
+	end)
+end)
+
+-- ── Session management tests ──────────────────────────────────────────────
+
+T.describe("GET /api/sessions", function()
+	T.it("lists sessions with previews", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "GET", "/api/sessions")
+		T.eq(status, 200)
+		T.ok(data.sessions, "has sessions")
+		T.eq(#data.sessions, 1)
+		T.eq(data.current, app.state.session_id)
+		-- Preview should be the greeting (no user messages yet).
+		T.eq(data.sessions[1].preview, "Hello, Tester!")
+		T.ok(data.sessions[1].created_at, "has created_at")
+	end)
+
+	T.it("preview uses first user message when present", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/message", { content = "Tell me about cats" })
+		local status, data = call(app, "GET", "/api/sessions")
+		T.eq(status, 200)
+		T.eq(data.sessions[1].preview, "Tell me about cats")
+	end)
+
+	T.it("truncates long previews", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		local long_text = string.rep("a", 100)
+		call(app, "POST", "/api/message", { content = long_text })
+		local status, data = call(app, "GET", "/api/sessions")
+		T.eq(status, 200)
+		T.ok(#data.sessions[1].preview <= 80, "preview truncated")
+		T.ok(data.sessions[1].preview:find("%.%.%.$"), "ends with ...")
+	end)
+end)
+
+T.describe("POST /api/session/new", function()
+	T.it("creates a new session with greeting", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local original_session = app.state.session_id
+		local status, data = call(app, "POST", "/api/session/new")
+		T.eq(status, 200)
+		T.ok(data.session, "has session")
+		T.ok(data.session.id, "has session id")
+		T.neq(data.session.id, original_session)
+		T.ok(data.messages, "has messages")
+		T.eq(#data.messages, 1) -- greeting
+		T.eq(data.messages[1].role, "assistant")
+		T.eq(data.messages[1].content, "Hello, Tester!")
+		-- State should be switched.
+		T.eq(app.state.session_id, data.session.id)
+	end)
+
+	T.it("new session appears in list", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		call(app, "POST", "/api/session/new")
+		local status, data = call(app, "GET", "/api/sessions")
+		T.eq(status, 200)
+		T.eq(#data.sessions, 2)
+	end)
+end)
+
+T.describe("POST /api/session/switch", function()
+	T.it("switches to an existing session", function()
+		local caps = make_mock_caps({ llm_call = function() return "reply" end })
+		local app = server.create(caps, { no_static = true })
+		local first_session = app.state.session_id
+		-- Send a message in the first session.
+		call(app, "POST", "/api/message", { content = "Hello" })
+		-- Create a second session.
+		call(app, "POST", "/api/session/new")
+		T.neq(app.state.session_id, first_session)
+		-- Switch back.
+		local status, data = call(app, "POST", "/api/session/switch", { session_id = first_session })
+		T.eq(status, 200)
+		T.eq(app.state.session_id, first_session)
+		T.eq(data.session.id, first_session)
+		-- Should have the messages from the first session.
+		T.eq(#data.messages, 3) -- greeting + user + assistant
+	end)
+
+	T.it("returns 404 for unknown session", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/session/switch", { session_id = "nonexistent" })
+		T.eq(status, 404)
+	end)
+
+	T.it("returns 400 without session_id", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status, data = call(app, "POST", "/api/session/switch", {})
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("POST /api/session/delete", function()
+	T.it("deletes a session and switches to another", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local first_session = app.state.session_id
+		-- Create a second session (becomes current).
+		call(app, "POST", "/api/session/new")
+		local second_session = app.state.session_id
+		-- Delete the current (second) session.
+		local status, data = call(app, "POST", "/api/session/delete", { session_id = second_session })
+		T.eq(status, 200)
+		T.ok(data.deleted, "deleted flag set")
+		T.eq(data.current_session_id, first_session)
+		T.eq(app.state.session_id, first_session)
+		T.ok(data.messages, "has messages")
+	end)
+
+	T.it("deleting non-current session keeps current", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local first_session = app.state.session_id
+		call(app, "POST", "/api/session/new")
+		local second_session = app.state.session_id
+		-- Delete the first session (not current).
+		local status, data = call(app, "POST", "/api/session/delete", { session_id = first_session })
+		T.eq(status, 200)
+		T.eq(data.current_session_id, second_session)
+		T.eq(app.state.session_id, second_session)
+	end)
+
+	T.it("deleting last session creates a new one", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local only_session = app.state.session_id
+		local status, data = call(app, "POST", "/api/session/delete", { session_id = only_session })
+		T.eq(status, 200)
+		T.ok(data.deleted, "deleted flag set")
+		-- A new session should have been created.
+		T.neq(data.current_session_id, only_session)
+		T.eq(app.state.session_id, data.current_session_id)
+		T.ok(data.messages, "has messages for new session")
+	end)
+
+	T.it("returns 404 for unknown session", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/session/delete", { session_id = "nope" })
+		T.eq(status, 404)
+	end)
+
+	T.it("returns 400 without session_id", function()
+		local caps = make_mock_caps()
+		local app = server.create(caps, { no_static = true })
+		local status = call(app, "POST", "/api/session/delete", {})
+		T.eq(status, 400)
+	end)
+end)
+
+T.describe("session persistence via kv", function()
+	T.it("saves session_id to kv on session/new", function()
+		local kv_store = {}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		local original = app.state.session_id
+		call(app, "POST", "/api/session/new")
+		T.neq(kv_store["card_session_id"], original)
+		T.eq(kv_store["card_session_id"], app.state.session_id)
+	end)
+
+	T.it("saves session_id to kv on session/switch", function()
+		local kv_store = {}
+		local caps = make_mock_caps()
+		caps.kv = {
+			get = function(key) return kv_store[key] end,
+			set = function(key, val) kv_store[key] = val end,
+		}
+		local app = server.create(caps, { no_static = true })
+		local first = app.state.session_id
+		call(app, "POST", "/api/session/new")
+		local second = app.state.session_id
+		T.eq(kv_store["card_session_id"], second)
+		call(app, "POST", "/api/session/switch", { session_id = first })
+		T.eq(kv_store["card_session_id"], first)
+	end)
+end)

@@ -896,6 +896,10 @@ local routes = {
 	["POST /api/message/stream"]  = api_post_message_stream,
 	["POST /api/impersonate"]     = api_post_impersonate,
 	["POST /api/branch/navigate"] = api_post_branch_navigate,
+	["GET /api/lorebook"]          = api_get_lorebook,
+	["POST /api/lorebook/update"]  = api_post_lorebook_update,
+	["POST /api/lorebook/add"]     = api_post_lorebook_add,
+	["POST /api/lorebook/delete"]  = api_post_lorebook_delete,
 	["GET /api/sessions"]         = api_get_sessions,
 	["POST /api/session/new"]     = api_post_session_new,
 	["POST /api/session/switch"]  = api_post_session_switch,
@@ -942,6 +946,17 @@ function M.create(caps, opts)
 
 	-- Load card.
 	load_card(state, caps)
+
+	-- Load lorebook from kv (overrides card's character_book if present).
+	if caps.kv then
+		local raw = caps.kv.get("lorebook")
+		if raw then
+			local ok, saved = pcall(json.decode, raw)
+			if ok and type(saved) == "table" then
+				state.lorebook = saved
+			end
+		end
+	end
 
 	-- Open conversation database.
 	local db_path = opts.db_path or ":memory:"
