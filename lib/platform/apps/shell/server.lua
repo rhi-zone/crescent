@@ -207,12 +207,4 @@ function M.create(caps, opts)
 	return { handler = handler }
 end
 
-function M.start(caps, opts)
-	opts = opts or {}
-	local app = M.create(caps, opts)
-	local http_server = require("lib.http.server")
-	local port = opts.port or 7862
-	return http_server.server(app.handler, port)
-end
-
 return M
