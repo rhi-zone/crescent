@@ -86,6 +86,20 @@ function M.run(code, env, opts)
 	return ok, result
 end
 
+-- lock_string_metatable()
+-- Prevents sandboxed code from replacing the string metatable via
+-- getmetatable("").__index = ... or similar attacks. After calling this,
+-- getmetatable("") returns false (the __metatable guard value), blocking
+-- both getmetatable and setmetatable on strings. Existing string methods
+-- (string:upper(), etc.) continue to work — the metatable itself is not
+-- removed, just protected from introspection and replacement.
+-- Call once before running any sandboxed code.
+function M.lock_string_metatable()
+	local mt = getmetatable("")
+	if mt == false then return end  -- already locked
+	mt.__metatable = false
+end
+
 -- ── Built-in capability bundles ───────────────────────────────────────────────
 -- These are just tables. Compose, subset, or ignore them as needed.
 
