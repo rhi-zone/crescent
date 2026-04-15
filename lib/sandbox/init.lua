@@ -100,12 +100,55 @@ function M.lock_string_metatable()
 	mt.__metatable = false
 end
 
+-- ── Safe subsets of dangerous modules ─────────────────────────────────────────
+-- Read-only members that apps legitimately need for platform detection.
+-- Each is a frozen table — the real module is never exposed.
+
+local safe_jit
+do
+	local ok, jit_mod = pcall(require, "jit")
+	if ok and jit_mod then
+		safe_jit = {
+			os          = jit_mod.os,
+			arch        = jit_mod.arch,
+			version     = jit_mod.version,
+			version_num = jit_mod.version_num,
+		}
+	end
+end
+
+local safe_ffi_info
+do
+	local ok, ffi_mod = pcall(require, "ffi")
+	if ok and ffi_mod then
+		safe_ffi_info = {
+			os   = ffi_mod.os,
+			arch = ffi_mod.arch,
+			abi  = ffi_mod.abi,  -- abi() is read-only: returns bool for ABI queries
+		}
+	end
+end
+
+local safe_os = {
+	clock    = os.clock,
+	difftime = os.difftime,
+	time     = os.time,
+	date     = os.date,
+}
+
+local safe_bit
+do
+	local ok, bit_mod = pcall(require, "bit")
+	if ok and bit_mod then safe_bit = bit_mod end
+end
+
 -- ── Built-in capability bundles ───────────────────────────────────────────────
 -- These are just tables. Compose, subset, or ignore them as needed.
 
 -- stdlib: safe Lua standard library.
--- Excludes: io, os, ffi, debug, dofile, loadfile, load, loadstring, require,
+-- Excludes: io, ffi, debug, dofile, loadfile, load, loadstring, require,
 --           package (callers get require via env() instead).
+-- Exposes safe read-only subsets of: os, jit, ffi (info only), bit.
 M.stdlib = {
 	globals = {
 		assert      = assert,
@@ -131,6 +174,9 @@ M.stdlib = {
 		string      = string,
 		table       = table,
 		coroutine   = coroutine,
+		os          = safe_os,
+		jit         = safe_jit,
+		bit         = safe_bit,
 	},
 	modules = {},
 }

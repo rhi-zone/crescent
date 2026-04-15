@@ -163,8 +163,29 @@ T.describe("sandbox.stdlib bundle", function()
 		T.eq(S.stdlib.globals.io, nil)
 	end)
 
-	T.it("does not have os", function()
-		T.eq(S.stdlib.globals.os, nil)
+	T.it("has safe os subset (no execute/remove/rename)", function()
+		T.ok(S.stdlib.globals.os ~= nil)
+		T.eq(S.stdlib.globals.os.clock, os.clock)
+		T.eq(S.stdlib.globals.os.time, os.time)
+		T.eq(S.stdlib.globals.os.execute, nil)
+		T.eq(S.stdlib.globals.os.remove, nil)
+		T.eq(S.stdlib.globals.os.rename, nil)
+		T.eq(S.stdlib.globals.os.exit, nil)
+		T.eq(S.stdlib.globals.os.getenv, nil)
+	end)
+
+	T.it("has safe jit subset (no on/off/flush)", function()
+		if not S.stdlib.globals.jit then return end  -- skip on PUC-Rio
+		T.eq(S.stdlib.globals.jit.os, "Linux")
+		T.ok(S.stdlib.globals.jit.arch ~= nil)
+		T.eq(S.stdlib.globals.jit.on, nil)
+		T.eq(S.stdlib.globals.jit.off, nil)
+		T.eq(S.stdlib.globals.jit.flush, nil)
+	end)
+
+	T.it("has bit module", function()
+		if not S.stdlib.globals.bit then return end  -- skip on PUC-Rio
+		T.ok(S.stdlib.globals.bit.bor ~= nil)
 	end)
 
 	T.it("does not have ffi", function()

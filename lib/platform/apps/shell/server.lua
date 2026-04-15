@@ -9,7 +9,7 @@
 --   caps.fs.read(path)           -> string | nil, err
 --   caps.config.get(key)         -> value | nil (optional)
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 

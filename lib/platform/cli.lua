@@ -439,17 +439,78 @@ end
 
 -- ── Entrypoint execution (directory mode) ─────────────────────────────────
 
-local function run_dir_entrypoint(app, entry_path, caps)
-	-- Convert directory-relative Lua path to require path.
-	-- e.g. app_dir = "lib/platform/apps/charactercardv2", entry_path = "server.lua"
-	-- -> require path = "lib.platform.apps.charactercardv2.server"
-	local entry_file = entry_path:gsub("%.lua$", "")
-	local mod_path = app.path:gsub("/$", ""):gsub("/", ".") .. "." .. entry_file:gsub("/", ".")
-	local ok, entry_mod = pcall(require, mod_path)
-	if not ok then
-		return nil, "could not load entrypoint module: " .. tostring(entry_mod)
+-- make_dir_loader(app_dir, env) -> function(modname)
+-- Returns a package.loaders-compatible function that resolves require() against
+-- the app directory on disk. Loads files in the sandbox env (text mode only).
+-- Module cache is local to this loader — no host pollution.
+local function make_dir_loader(app_dir, env)
+	local loaded = {}
+	return function(modname)
+		if loaded[modname] then return function() return loaded[modname] end end
+		local relpath = modname:gsub("%.", "/")
+		local candidates = {
+			relpath .. ".lua",
+			relpath .. "/init.lua",
+		}
+		for _, candidate in ipairs(candidates) do
+			local full = app_dir .. "/" .. candidate
+			local src = read_file(full)
+			if src then
+				return function()
+					local fn, lerr = load(src, "@" .. candidate, "t", env)
+					if not fn then error("platform: error loading '" .. candidate .. "': " .. tostring(lerr), 2) end
+					local result = fn()
+					loaded[modname] = result or true
+					return result
+				end
+			end
+		end
+		return "\n\tno file '" .. candidates[1] .. "' or '" .. candidates[2] .. "' in app directory"
 	end
-	return entry_mod, nil
+end
+
+local function run_dir_entrypoint(app, entry_path, caps)
+	local sandbox = require("lib.sandbox")
+	local cap_bundle = { globals = { caps = caps }, modules = {} }
+	local env = sandbox.env(sandbox.stdlib, cap_bundle)
+
+	-- Build a directory-based require that tries the app dir first (sandboxed),
+	-- then falls back to host require for platform libraries.
+	-- App code (in app dir) runs sandboxed. Host libraries run unsandboxed —
+	-- they're trusted platform code that may legitimately need ffi, bit, etc.
+	local dir_loader = make_dir_loader(app.path, env)
+	-- Modules that must never escape to host require.
+	-- Safe subsets of os/jit/bit are already in env globals via sandbox.stdlib.
+	local blocked = { ffi = true, io = true, debug = true, package = true }
+	-- Modules where require() should return the sandbox's safe subset, not the host module.
+	local shadowed = { os = env.os, jit = env.jit, bit = env.bit }
+	env.require = function(modname)
+		if blocked[modname] then
+			error("sandbox: require '" .. tostring(modname) .. "' not allowed", 2)
+		end
+		if shadowed[modname] then
+			return shadowed[modname]
+		end
+		local loader_or_err = dir_loader(modname)
+		if type(loader_or_err) == "function" then
+			return loader_or_err()
+		end
+		-- Fall back to host require for platform libraries.
+		return require(modname)
+	end
+
+	-- Read and run the entrypoint file in the sandbox.
+	local full_path = app.path .. "/" .. entry_path
+	local src, rerr = read_file(full_path)
+	if not src then
+		return nil, "could not read entrypoint: " .. tostring(rerr)
+	end
+
+	local ok, result = sandbox.run(src, env, { name = "@" .. entry_path })
+	if not ok then
+		return nil, "could not load entrypoint: " .. tostring(result)
+	end
+	return result, nil
 end
 
 -- ── Main ───────────────────────────────────────────────────────────────────

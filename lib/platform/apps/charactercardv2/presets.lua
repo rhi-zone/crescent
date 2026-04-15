@@ -13,7 +13,7 @@
 --   presets:active:generation -> name of active generation preset
 --   presets:active:prompt     -> name of active prompt preset
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 

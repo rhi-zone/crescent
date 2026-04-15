@@ -5,7 +5,7 @@
 --   POST /api/import/png  — raw PNG body → parsed card + lorebook count
 --   POST /api/import/json — raw JSON body → parsed card + lorebook count
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 

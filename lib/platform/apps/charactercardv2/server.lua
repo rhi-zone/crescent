@@ -7,7 +7,7 @@
 --   local content, err = app.chat(messages)
 --   local content, err = app.chat_stream(messages, on_token)
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 

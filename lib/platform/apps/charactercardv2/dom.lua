@@ -11,7 +11,7 @@
 --   caps.kv.get(key) / caps.kv.set(key, val) — persistent state (optional)
 --   caps.config.get(key)    -> value | nil — global settings (optional)
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 

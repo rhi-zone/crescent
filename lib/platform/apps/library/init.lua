@@ -3,7 +3,7 @@
 --
 -- Re-exports the adapter and DOM modules.
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 

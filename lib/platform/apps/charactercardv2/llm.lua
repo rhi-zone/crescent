@@ -11,7 +11,7 @@
 --   local content, err = client.call(messages)
 --   local full, err = client.call_stream(messages, function(delta) io.write(delta) end)
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
