@@ -4,23 +4,23 @@
   "meta": { "type": "card-app" },
   "default_entry": "server",
   "caps": {
-    "self":          { "type": "self",        "required": true },
-    "conversations": { "type": "db",          "required": true },
+    "self":          { "type": "self" },
+    "conversations": { "type": "db" },
     "kv":            { "type": "kv",          "required": false },
-    "time":          { "type": "time",        "required": true }
+    "time":          { "type": "time" }
   },
   "entry": {
     "server": {
       "main": "server.lua",
       "caps": {
-        "server":    { "type": "http_server", "required": true },
+        "server":    { "type": "http_server" },
         "llm_api":   { "type": "http_client", "required": false }
       }
     },
     "import": {
       "main": "import.lua",
       "caps": {
-        "server":    { "type": "http_server", "required": true }
+        "server":    { "type": "http_server" }
       }
     }
   }
