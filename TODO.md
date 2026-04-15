@@ -33,7 +33,17 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] User personas — named profiles with description injected into context, selectable per session
 - [x] Token counter — context usage progress bar with color thresholds, updated after each action
 - [x] Character avatar — header + message avatars from PNG via `caps.self`, 400 assertions
-- [ ] Shell app — **needs rewrite**. Current impl is a card-specific browser (parses chara chunks, extracts character metadata). Wrong abstraction: cards are apps packaged as PNGs, not data files. Shell should discover/browse/launch app PNGs via opaque manifest metadata, not card-type-specific logic. App-type-specific display belongs in the app itself.
+- [ ] Library app — **needs work**. Shell app deleted (was a card-specific browser, wrong abstraction). Library app has the right architecture (adapter-based, open metadata). Needs: index DB integration, app discovery from `~/.crescent/apps/`, BFF server entrypoint (currently DOM-only), launch flow.
+- [ ] **App import + install pipeline** — the full flow that doesn't exist yet:
+  1. Parse card PNG → extract card data + metadata (name, description, tags, etc.)
+  2. Bundle: card data + card app runtime → app PNG (`chara` chunk untouched, add `lua` iTXt = base64(gzip(tar)), add `lua-manifest` iTXt = raw JSON manifest with card metadata in `meta.tags`, `meta.name`, etc.)
+  3. Install: copy app PNG to `~/.crescent/apps/`, upsert manifest into index DB (SQLite, json_extract queryable)
+  4. Library app discovers it on next scan via index DB
+  **Prerequisites:**
+  - [ ] `lib/png` iTXt chunk support — read/write/get/set (currently only tEXt)
+  - [ ] `lib/gzip` — gzip compress/decompress (have zstd/brotli/lz4 but not gzip, needed for `base64(gzip(tar))` app embedding)
+  - [ ] App index database schema + upsert logic (SQLite in `~/.crescent/apps/index.db` or similar)
+  - [ ] Card app runtime bundling — package card app as tarball for embedding
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
 - [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution
