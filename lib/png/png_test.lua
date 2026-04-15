@@ -292,3 +292,239 @@ T.describe("png.remove_text", function()
 		T.eq(#chunks, before)
 	end)
 end)
+
+-- ── iTXt tests ───────────────────────────────────────────────────────────────
+
+T.describe("png.parse_itxt / build_itxt", function()
+	T.it("parse_itxt extracts all fields", function()
+		-- keyword\0 flag(0) method(0) lang\0 tkey\0 text
+		local data = "Comment\0\0\0en\0Kommentar\0hello world"
+		local entry = PNG.parse_itxt(data)
+		T.ok(entry)
+		T.eq(entry.keyword, "Comment")
+		T.eq(entry.text, "hello world")
+		T.eq(entry.language_tag, "en")
+		T.eq(entry.translated_keyword, "Kommentar")
+		T.eq(entry.compressed, false)
+	end)
+
+	T.it("parse_itxt handles empty optional fields", function()
+		local data = "Key\0\0\0\0\0some text"
+		local entry = PNG.parse_itxt(data)
+		T.ok(entry)
+		T.eq(entry.keyword, "Key")
+		T.eq(entry.language_tag, "")
+		T.eq(entry.translated_keyword, "")
+		T.eq(entry.text, "some text")
+		T.eq(entry.compressed, false)
+	end)
+
+	T.it("parse_itxt handles empty text", function()
+		local data = "Key\0\0\0\0\0"
+		local entry = PNG.parse_itxt(data)
+		T.ok(entry)
+		T.eq(entry.keyword, "Key")
+		T.eq(entry.text, "")
+	end)
+
+	T.it("parse_itxt reports compressed flag", function()
+		local data = "Key\0\1\0\0\0compressed-data"
+		local entry = PNG.parse_itxt(data)
+		T.ok(entry)
+		T.eq(entry.compressed, true)
+	end)
+
+	T.it("parse_itxt returns nil+err on missing keyword NUL", function()
+		local entry, err = PNG.parse_itxt("nokeywordsep")
+		T.eq(entry, nil)
+		T.ok(err)
+	end)
+
+	T.it("parse_itxt returns nil+err on truncated data", function()
+		local entry, err = PNG.parse_itxt("K\0")
+		T.eq(entry, nil)
+		T.ok(err)
+	end)
+
+	T.it("parse_itxt returns nil+err on missing language_tag NUL", function()
+		local entry, err = PNG.parse_itxt("K\0\0\0no-null-here")
+		T.eq(entry, nil)
+		T.ok(err)
+	end)
+
+	T.it("parse_itxt returns nil+err on missing translated_keyword NUL", function()
+		local entry, err = PNG.parse_itxt("K\0\0\0\0no-null-here")
+		T.eq(entry, nil)
+		T.ok(err)
+	end)
+
+	T.it("build_itxt produces correct layout", function()
+		local data = PNG.build_itxt("Author", "Bob")
+		T.eq(data, "Author\0\0\0\0\0Bob")
+	end)
+
+	T.it("build_itxt with opts", function()
+		local data = PNG.build_itxt("Author", "Bob", {
+			language_tag = "en",
+			translated_keyword = "Autor",
+		})
+		T.eq(data, "Author\0\0\0en\0Autor\0Bob")
+	end)
+
+	T.it("parse_itxt(build_itxt(...)) roundtrips", function()
+		local data = PNG.build_itxt("Source", "camera", {
+			language_tag = "en",
+			translated_keyword = "Quelle",
+		})
+		local entry = PNG.parse_itxt(data)
+		T.eq(entry.keyword, "Source")
+		T.eq(entry.text, "camera")
+		T.eq(entry.language_tag, "en")
+		T.eq(entry.translated_keyword, "Quelle")
+		T.eq(entry.compressed, false)
+	end)
+end)
+
+T.describe("png.get_itxt", function()
+	T.it("returns nil when keyword absent", function()
+		local chunks = PNG.read(make_png())
+		T.eq(PNG.get_itxt(chunks, "Author"), nil)
+	end)
+
+	T.it("returns text when keyword present", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Author", "Alice") } }
+		local chunks = PNG.read(make_png(extra))
+		T.eq(PNG.get_itxt(chunks, "Author"), "Alice")
+	end)
+
+	T.it("returns first match when multiple entries share keyword", function()
+		local extra = {
+			{ type = "iTXt", data = PNG.build_itxt("Tag", "first") },
+			{ type = "iTXt", data = PNG.build_itxt("Tag", "second") },
+		}
+		local chunks = PNG.read(make_png(extra))
+		T.eq(PNG.get_itxt(chunks, "Tag"), "first")
+	end)
+
+	T.it("does not match different keyword", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Author", "Alice") } }
+		local chunks = PNG.read(make_png(extra))
+		T.eq(PNG.get_itxt(chunks, "Comment"), nil)
+	end)
+
+	T.it("skips compressed iTXt chunks", function()
+		-- Build a compressed iTXt manually (flag=1)
+		local data = "Author\0\1\0\0\0compressed-data"
+		local extra = { { type = "iTXt", data = data } }
+		local chunks = PNG.read(make_png(extra))
+		T.eq(PNG.get_itxt(chunks, "Author"), nil)
+	end)
+end)
+
+T.describe("png.set_itxt", function()
+	T.it("inserts new iTXt chunk before IEND when absent", function()
+		local chunks = PNG.read(make_png())
+		local out = PNG.set_itxt(chunks, "Author", "Bob")
+		T.eq(PNG.get_itxt(out, "Author"), "Bob")
+	end)
+
+	T.it("IEND remains last after insert", function()
+		local chunks = PNG.read(make_png())
+		local out = PNG.set_itxt(chunks, "Key", "val")
+		T.eq(out[#out].type, "IEND")
+	end)
+
+	T.it("replaces existing iTXt chunk in-place", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Author", "Alice") } }
+		local chunks = PNG.read(make_png(extra))
+		local out = PNG.set_itxt(chunks, "Author", "Bob")
+		T.eq(PNG.get_itxt(out, "Author"), "Bob")
+	end)
+
+	T.it("replacement does not duplicate the keyword", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Author", "Alice") } }
+		local chunks = PNG.read(make_png(extra))
+		local out = PNG.set_itxt(chunks, "Author", "Bob")
+		local count = 0
+		for _, c in ipairs(out) do
+			if c.type == "iTXt" then
+				local e = PNG.parse_itxt(c.data)
+				if e and e.keyword == "Author" then count = count + 1 end
+			end
+		end
+		T.eq(count, 1)
+	end)
+
+	T.it("does not modify original chunks", function()
+		local chunks = PNG.read(make_png())
+		local before = #chunks
+		PNG.set_itxt(chunks, "Key", "val")
+		T.eq(#chunks, before)
+	end)
+
+	T.it("preserves unrelated iTXt chunks", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Comment", "hi") } }
+		local chunks = PNG.read(make_png(extra))
+		local out = PNG.set_itxt(chunks, "Author", "Bob")
+		T.eq(PNG.get_itxt(out, "Comment"), "hi")
+		T.eq(PNG.get_itxt(out, "Author"), "Bob")
+	end)
+
+	T.it("forwards opts to build_itxt", function()
+		local chunks = PNG.read(make_png())
+		local out = PNG.set_itxt(chunks, "Author", "Bob", { language_tag = "en" })
+		-- Find the iTXt chunk and parse it
+		for _, c in ipairs(out) do
+			if c.type == "iTXt" then
+				local e = PNG.parse_itxt(c.data)
+				if e and e.keyword == "Author" then
+					T.eq(e.language_tag, "en")
+				end
+			end
+		end
+	end)
+end)
+
+T.describe("png.remove_itxt", function()
+	T.it("removes iTXt chunk with matching keyword", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Author", "Alice") } }
+		local chunks = PNG.read(make_png(extra))
+		local out = PNG.remove_itxt(chunks, "Author")
+		T.eq(PNG.get_itxt(out, "Author"), nil)
+	end)
+
+	T.it("removes all instances of keyword", function()
+		local extra = {
+			{ type = "iTXt", data = PNG.build_itxt("Tag", "a") },
+			{ type = "iTXt", data = PNG.build_itxt("Tag", "b") },
+		}
+		local chunks = PNG.read(make_png(extra))
+		local out = PNG.remove_itxt(chunks, "Tag")
+		T.eq(PNG.get_itxt(out, "Tag"), nil)
+	end)
+
+	T.it("preserves unrelated iTXt chunks", function()
+		local extra = {
+			{ type = "iTXt", data = PNG.build_itxt("Author", "Alice") },
+			{ type = "iTXt", data = PNG.build_itxt("Comment", "hi") },
+		}
+		local chunks = PNG.read(make_png(extra))
+		local out = PNG.remove_itxt(chunks, "Author")
+		T.eq(PNG.get_itxt(out, "Author"), nil)
+		T.eq(PNG.get_itxt(out, "Comment"), "hi")
+	end)
+
+	T.it("is a no-op when keyword absent", function()
+		local chunks = PNG.read(make_png())
+		local out = PNG.remove_itxt(chunks, "Missing")
+		T.eq(#out, #chunks)
+	end)
+
+	T.it("does not modify original chunks", function()
+		local extra = { { type = "iTXt", data = PNG.build_itxt("Author", "Alice") } }
+		local chunks = PNG.read(make_png(extra))
+		local before = #chunks
+		PNG.remove_itxt(chunks, "Author")
+		T.eq(#chunks, before)
+	end)
+end)

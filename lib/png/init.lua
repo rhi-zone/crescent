@@ -12,6 +12,11 @@
 --   png.remove_text(chunks, keyword)   -> new_chunks
 --   png.parse_text(data)               -> {keyword, text} | nil, err
 --   png.build_text(keyword, text)      -> data
+--   png.get_itxt(chunks, keyword)      -> string | nil
+--   png.set_itxt(chunks, keyword, val, opts) -> new_chunks
+--   png.remove_itxt(chunks, keyword)   -> new_chunks
+--   png.parse_itxt(data)               -> {keyword, text, language_tag, translated_keyword, compressed} | nil, err
+--   png.build_itxt(keyword, text, opts) -> data
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -187,6 +192,114 @@ function M.remove_text(chunks, keyword)
 	for _, chunk in ipairs(chunks) do
 		if chunk.type == "tEXt" then
 			local entry = M.parse_text(chunk.data)
+			if not (entry and entry.keyword == keyword) then
+				result[#result + 1] = chunk
+			end
+		else
+			result[#result + 1] = chunk
+		end
+	end
+	return result
+end
+
+-- ── iTXt helpers ──────────────────────────────────────────────────────────────
+-- iTXt data layout: <keyword> NUL compression_flag(1) compression_method(1)
+--                   <language_tag> NUL <translated_keyword> NUL <text>
+-- Only uncompressed (flag=0, method=0) is supported for build.
+
+-- parse_itxt(data) -> {keyword, text, language_tag, translated_keyword, compressed} | nil, err
+function M.parse_itxt(data)
+	local sep = data:find("\0", 1, true)
+	if not sep then
+		return nil, "malformed iTXt: missing keyword NUL separator"
+	end
+	if sep + 2 > #data then
+		return nil, "malformed iTXt: truncated after keyword"
+	end
+	local keyword = data:sub(1, sep - 1)
+	local compression_flag = data:byte(sep + 1)
+	-- sep+2 is compression_method, sep+3 is start of language_tag
+	local lang_start = sep + 3
+	local lang_end = data:find("\0", lang_start, true)
+	if not lang_end then
+		return nil, "malformed iTXt: missing language_tag NUL"
+	end
+	local tkey_end = data:find("\0", lang_end + 1, true)
+	if not tkey_end then
+		return nil, "malformed iTXt: missing translated_keyword NUL"
+	end
+	return {
+		keyword = keyword,
+		text = data:sub(tkey_end + 1),
+		language_tag = data:sub(lang_start, lang_end - 1),
+		translated_keyword = data:sub(lang_end + 1, tkey_end - 1),
+		compressed = compression_flag ~= 0,
+	}
+end
+
+-- build_itxt(keyword, text, opts) -> data string
+-- opts.language_tag and opts.translated_keyword default to "".
+-- Always builds uncompressed (flag=0, method=0).
+function M.build_itxt(keyword, text, opts)
+	local lang = (opts and opts.language_tag) or ""
+	local tkey = (opts and opts.translated_keyword) or ""
+	return keyword .. "\0\0\0" .. lang .. "\0" .. tkey .. "\0" .. text
+end
+
+-- get_itxt(chunks, keyword) -> string | nil
+-- Returns the text value of the first uncompressed iTXt chunk with the given keyword.
+function M.get_itxt(chunks, keyword)
+	for _, chunk in ipairs(chunks) do
+		if chunk.type == "iTXt" then
+			local entry = M.parse_itxt(chunk.data)
+			if entry and entry.keyword == keyword and not entry.compressed then
+				return entry.text
+			end
+		end
+	end
+	return nil
+end
+
+-- set_itxt(chunks, keyword, value, opts) -> new_chunks
+-- Replaces the first iTXt chunk with this keyword, or inserts one before IEND.
+-- Returns a new chunk list; original is not modified.
+function M.set_itxt(chunks, keyword, value, opts)
+	local new_chunk = { type = "iTXt", data = M.build_itxt(keyword, value, opts) }
+	local result = {}
+	local done = false
+
+	for _, chunk in ipairs(chunks) do
+		if chunk.type == "iTXt" then
+			local entry = M.parse_itxt(chunk.data)
+			if entry and entry.keyword == keyword and not done then
+				result[#result + 1] = new_chunk  -- replace
+				done = true
+			else
+				result[#result + 1] = chunk
+			end
+		elseif chunk.type == "IEND" and not done then
+			result[#result + 1] = new_chunk  -- insert before IEND
+			result[#result + 1] = chunk
+			done = true
+		else
+			result[#result + 1] = chunk
+		end
+	end
+
+	if not done then
+		result[#result + 1] = new_chunk
+	end
+
+	return result
+end
+
+-- remove_itxt(chunks, keyword) -> new_chunks
+-- Returns a new chunk list with all iTXt chunks for keyword removed.
+function M.remove_itxt(chunks, keyword)
+	local result = {}
+	for _, chunk in ipairs(chunks) do
+		if chunk.type == "iTXt" then
+			local entry = M.parse_itxt(chunk.data)
 			if not (entry and entry.keyword == keyword) then
 				result[#result + 1] = chunk
 			end
