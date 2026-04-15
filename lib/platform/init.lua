@@ -36,36 +36,8 @@ local json     = require("lib.json")
 
 local M = {}
 
--- ── iTXt helpers ─────────────────────────────────────────────────────────────
--- iTXt data layout (PNG spec section 11.3.4.3):
---   keyword\0 compression_flag(1) compression_method(1) language_tag\0 translated_keyword\0 text
--- compression_flag: 0 = uncompressed, 1 = compressed (method 0 = zlib)
--- The "lua" chunk stores base64(gzip(tar)) as uncompressed UTF-8 text.
-
--- get_itxt(chunks, keyword) -> string | nil
--- Returns the text value of the first iTXt chunk with the given keyword.
--- Only handles uncompressed iTXt (compression_flag == 0).
-local function get_itxt(chunks, keyword)
-	for _, chunk in ipairs(chunks) do
-		if chunk.type == "iTXt" then
-			local data = chunk.data
-			local sep = data:find("\0", 1, true)
-			if sep and data:sub(1, sep - 1) == keyword then
-				local compression_flag = data:byte(sep + 1)
-				if compression_flag ~= 0 then
-					return nil  -- compressed iTXt not supported here
-				end
-				local pos = sep + 3  -- start of language_tag
-				local lang_end = data:find("\0", pos, true)
-				if not lang_end then return nil end
-				local tkey_end = data:find("\0", lang_end + 1, true)
-				if not tkey_end then return nil end
-				return data:sub(tkey_end + 1)
-			end
-		end
-	end
-	return nil
-end
+-- iTXt helpers now live in lib/png. Alias for local use.
+local get_itxt = png.get_itxt
 
 -- unpack_tarball(tardata) -> entries | nil, err
 local function unpack_tarball(tardata)
