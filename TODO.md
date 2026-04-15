@@ -361,7 +361,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] **`lib/uuid/`** — UUID v4/v7 generation. v4 (random), v7 (timestamp+monotonic). FFI tiers: getrandom → arc4random_buf → /dev/urandom → pure. 250 assertions.
 - [x] **`lib/log/`** — structured logging with levels and sinks. log.new(), collect_sink, file_sink, stderr/stdout_sink, text/json/ansi formats, child loggers, set_level, add/remove sink. 80 assertions.
 - [x] **`lib/compress/`** — zlib/gzip via FFI (system tier) + pure Lua inflate (RFC 1951). Two tiers: system-zlib (full deflate+inflate) and pure-lua (inflate only). Streaming and one-shot APIs. 24 assertions.
-  - [ ] **Pure Lua inflate parity bug** — pure inflate fails on system-zlib deflate output ("invalid Huffman code"). 38 parity test failures when zlib is available. System-zlib round-trip works fine.
+  - [x] **Pure Lua inflate parity bug** — FIXED (0989bb7). decode_symbol was building Huffman codes MSB-first but build_tree stores reversed codes. Fixed to accumulate bits LSB-first. 181 assertions now passing.
 - [x] **`lib/ansi/`** — ANSI escape codes (colours, cursor movement). Foundation for `lib/tui/`.
 - [x] **`lib/tui/`** — TUI widget layer (boxes, tables, input fields).
 - [x] **`lib/reactive/`** — reactive signal primitives. Push-based, no implicit tracking scheduler.
