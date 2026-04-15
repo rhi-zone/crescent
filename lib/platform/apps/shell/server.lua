@@ -174,17 +174,20 @@ local routes = {
 	["POST /api/launch"]        = api_post_launch,
 }
 
+-- MIME type guessing (minimal, for static serving).
+local mime_types = {
+	html = "text/html", css = "text/css", js = "application/javascript",
+	json = "application/json", png = "image/png", jpg = "image/jpeg",
+	svg = "image/svg+xml", ico = "image/x-icon", txt = "text/plain",
+}
+
+local function guess_mime(path)
+	local ext = path:match("%.([^%.]+)$")
+	return ext and mime_types[ext:lower()] or "application/octet-stream"
+end
+
 function M.create(caps, opts)
 	opts = opts or {}
-
-	-- Static file serving.
-	local ok_static, static_serve = false, nil
-	if not opts.no_static then
-		local static_dir = opts.static_dir or "static"
-		ok_static, static_serve = pcall(function()
-			return require("lib.http.router.static").router(static_dir)
-		end)
-	end
 
 	local function handler(req, res)
 		local req_path = req.path or "/"
@@ -195,10 +198,17 @@ function M.create(caps, opts)
 			local body = read_json_body(req)
 			return route(caps, params, body, res)
 		end
-		-- Static files.
-		if ok_static then
-			req.path = req_path
-			return static_serve(req, res)
+		-- Static files via caps.self (no raw filesystem access).
+		if caps.self then
+			local asset_path = "static" .. req_path
+			if req_path == "/" then asset_path = "static/index.html" end
+			local content = caps.self.entry(asset_path)
+			if content then
+				res.status = 200
+				res.headers["Content-Type"] = guess_mime(asset_path)
+				res.body = content
+				return true
+			end
 		end
 	end
 

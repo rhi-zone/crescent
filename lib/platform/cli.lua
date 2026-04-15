@@ -600,11 +600,7 @@ if app._dir_mode then
 
 	if entry_mod.create then
 		-- Module exports create(caps, opts) -> app instance.
-		local create_opts = {}
-		if app._dir_mode and app.path then
-			create_opts.static_dir = app.path .. "/static"
-		end
-		local result = entry_mod.create(caps, create_opts)
+		local result = entry_mod.create(caps, {})
 		if not result then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
