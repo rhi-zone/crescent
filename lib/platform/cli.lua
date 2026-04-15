@@ -434,7 +434,21 @@ local function construct_caps(cap_declarations, grants, app, context, platform_o
 		end
 	end
 
-	return caps, revoke_fns
+	-- Wrap caps in a strict proxy: accessing an undeclared cap name errors
+	-- immediately instead of returning nil silently.
+	local declared = {}
+	for name in pairs(cap_declarations) do declared[name] = true end
+	local caps_proxy = setmetatable({}, {
+		__index = function(_, k)
+			if caps[k] ~= nil then return caps[k] end
+			if declared[k] then return nil end -- declared optional, not granted
+			error("cap '" .. tostring(k) .. "' accessed but not declared in manifest", 2)
+		end,
+		__newindex = function() error("caps table is read-only", 2) end,
+		__pairs = function() return next, caps, nil end,
+	})
+
+	return caps_proxy, revoke_fns
 end
 
 -- ── Entrypoint execution (directory mode) ─────────────────────────────────
