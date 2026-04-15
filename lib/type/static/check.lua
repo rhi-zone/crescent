@@ -182,20 +182,22 @@ function M.check_file(filename, parent_scope, explicit_pool)
     _checking[filename] = true
 
     -- Build a cri_loader for require() type resolution.
-    -- Only activated when _disk_cache_dir is set; otherwise checking would cascade
-    -- recursively into every dependency and produce many false positives.
+    -- Recursively checks dependencies and caches their export types.
     local function cri_loader(ctx, mod_name)
-        if not _disk_cache_dir then return nil end
         local dep_path = resolve_module_path(mod_name)
+        -- Try init.lua if the direct path doesn't exist:
+        -- lib/foo.lua → lib/foo/init.lua (standard Lua package convention).
+        local f = io.open(dep_path, "r")
+        if f then
+            f:close()
+        else
+            local init_path = dep_path:gsub("%.lua$", "/init.lua")
+            f = io.open(init_path, "r")
+            if f then f:close(); dep_path = init_path end
+        end
         -- Prefer a companion _types.lua declaration file when present.
         -- e.g. lib/lunajson/init_types.lua overrides lib/lunajson/init.lua for typing.
-        -- Also try the init.lua form: lib/foo.lua → lib/foo/init.lua → lib/foo/init_types.lua
         local decl = find_decl_path(dep_path)
-        if not decl then
-            local init_path = dep_path:gsub("%.lua$", "/init.lua")
-            decl = find_decl_path(init_path)
-            if decl then dep_path = init_path end
-        end
         if decl then dep_path = decl end
 
         -- Guard: skip if the dependency is currently being checked (cycle prevention).
