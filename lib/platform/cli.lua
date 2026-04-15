@@ -393,9 +393,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		root = expand_home(root)
 		mkdir_p(root)
 		local mod = require(CAP_TYPE_MODULES.fs)
-		-- fs_cap doesn't return revoke_fn yet (older code)
-		local cap = mod.fs_cap({ root = root, allow_write = not decl.readonly })
-		return cap
+		return mod.fs_cap({ root = root, allow_write = not decl.readonly })
 	end
 
 	return nil, "unknown cap type: " .. tostring(cap_type)

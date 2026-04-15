@@ -80,14 +80,16 @@ The platform has no opinion about what the script does. The script is the progra
 ## Launching apps
 
 ```
-luajit platform.lua <app> [entrypoint] [-- args...]
+luajit lib/platform/cli.lua <app> [entrypoint] [-- args...]
 ```
 
 `<app>` is a path to anything the platform can extract — directory, PNG, JPEG, WebP,
 tarball, tar.gz. The platform figures out the format and unpacks accordingly.
 
 `[entrypoint]` selects which entrypoint from the manifest to run (e.g. `server`,
-`headless`). If omitted, the platform must error — there is no default entrypoint.
+`headless`). If omitted, the platform uses the manifest's `default_entry` field.
+If `default_entry` is absent (or doesn't match a key in `entry`), the platform
+errors with a list of available entrypoints.
 
 `[-- args...]` are passed through to the app's `cli` cap (if granted). Everything
 after `--` is the app's business; the platform doesn't interpret it.
@@ -203,7 +205,7 @@ caps.llm_api, revoke_fns.llm_api        = http_client_cap({ host = "api.openai.c
 caps.conversations, revoke_fns.conversations = db_cap(db_path)
 caps.settings, revoke_fns.settings       = kv_cap(kv_path)  -- scope: [user, app]
 caps.user_prefs, revoke_fns.user_prefs   = kv_cap(user_prefs_path, { readonly = true })  -- scope: [user]
-caps.clock, revoke_fns.clock             = time_cap()
+caps.clock, revoke_fns.clock             = time_cap()  -- app accesses as caps.clock.now()
 
 sandbox.run(script, sandbox.env(sandbox.stdlib, { globals = { caps = caps } }))
 ```
@@ -304,17 +306,42 @@ overhead, no C dependency.
 
 The optional `"readonly": true` flag opens the file with `SQLITE_OPEN_READONLY`.
 
+### `caps.shared_db` — shared SQLite database
+
+A SQLite connection with per-app view isolation. Multiple apps access the same
+underlying tables, but each app sees only its own rows via `_app_id()` filtering.
+The platform registers an authorizer that blocks direct access to `_`-prefixed
+base tables, DDL, and ATTACH — the app queries clean view names instead.
+
+```lua
+-- manifest declares shared_db with table list:
+-- { "type": "shared_db", "tables": ["sessions", "messages"], "required": true }
+
+cap.execute(sql)           -- true | nil, err (not present in readonly mode)
+cap.query(sql, params?)    -- rows | nil, err
+cap.close()                -- nil
+```
+
+The host calls `setup_schema()` to create base tables (`_sessions`), views
+(`sessions`), and INSTEAD OF triggers that enforce `app_id` on every write.
+
 ### `caps.time` — clock
 
 ```lua
-caps.clock()  -- returns Unix timestamp (integer)
+caps.time.now()  -- returns Unix timestamp (integer) | nil, "capability revoked"
 ```
 
 ### `caps.fs` (optional) — file access
 
-Scoped to a directory. Per-directory read/write granularity. Scope dimensions
-apply — an fs cap scoped to `["user", "app"]` gives each app its own directory;
-scoped to `["user"]` gives a shared directory per user.
+Scoped to a directory via `root` in the manifest declaration. All paths are
+relative to `root`; path traversal (`../`, absolute paths) is blocked at the
+cap level. An `allow_write` flag (default false) controls write access.
+
+```lua
+caps.my_fs.read(path)            -- returns string | nil, err
+caps.my_fs.write(path, content)  -- returns true | nil, err (only if allow_write)
+caps.my_fs.list(path?)           -- returns string[] | nil, err (filenames)
+```
 
 ### `caps.cli` — command-line arguments
 
@@ -376,7 +403,7 @@ The script and data chunks are strictly independent:
   data — useful for multi-character scenarios or persona swaps.
 
 - **Data**: content and configuration. Owned entirely by the editor. The script
-  reads data through `caps.png.text("data")` (or whatever chunk it declares).
+  reads data through `caps.self.metadata("chara")` (or whatever chunk it declares).
 
 This means editors never do writeback into script source. Diffs stay clean.
 Users keep their edits. Tooling that modifies script text is explicitly out of scope.
@@ -632,6 +659,9 @@ the platform errors with a list of available entrypoints.
 **Capability declarations:**
 
 - Top-level `caps` declares caps shared across all entrypoints (e.g. `db` above).
+  Shorthand is supported: `"db": "required"` is equivalent to
+  `"db": { "type": "db", "required": true }`. `"db": "optional"` sets
+  `required: false`. When using shorthand, the cap name IS the type.
 - Top-level `meta` is an open key-value object — author-defined, no fixed schema.
   Any fields the author wants to expose for search/filtering go here: `hair.color`,
   `species`, `tags`, `rating`, etc. The shell's projectional search indexes whatever
@@ -784,14 +814,15 @@ other card.
 
 ### First-party apps
 
-Three distinct apps compose the first-party experience:
+First-party apps compose the initial experience:
 
-**Card app** — the conversation/interaction app. The backend (Lua) owns context
-assembly, macro substitution, lorebook triggering, LLM calls, and conversation
-persistence. The frontend (HTML/CSS/JS) is a thin UI with zero business logic — it
-renders messages, takes input, and calls backend endpoints. Vendors
-`lib/formats/ccv2/` into the tarball for CCv2 format knowledge. Internal views:
-conversation, card editor, lorebook editor, settings.
+**Character Card v2** (`charactercardv2`) — a CCv2-compatible conversation/interaction
+app. The backend (Lua) owns context assembly, macro substitution, lorebook triggering,
+LLM calls, and conversation persistence. The frontend (HTML/CSS/JS) is a thin UI with
+zero business logic — it renders messages, takes input, and calls backend endpoints.
+Vendors `lib/formats/ccv2/` into the tarball for CCv2 format knowledge. Internal views:
+conversation, card editor, lorebook editor, settings. Entrypoints: `server` (baked-in
+card, serves HTTP), `import` (stamp CCv2 data + self into distribution PNG).
 
 **Library app** — a general-purpose collection browser, configurable to show any
 content type: character cards, Steam games, itch games, browser bookmarks, etc.
@@ -799,10 +830,11 @@ content type: character cards, Steam games, itch games, browser bookmarks, etc.
 shows character-specific filters; a game-focused bookmark shows game metadata.
 The library app has no format knowledge; it reads open metadata from adapters.
 
-**Format conversion apps** — container format conversion (PNG ↔ tar.gz ↔ directory,
-etc.) as separate apps with `caps.fs`. CCv2-specific data (the `chara` chunk) is
-the card app's internal concern. The library shell can invoke format conversion
-apps for import (copy + repack + index) and export (repack to chosen container).
+**Format conversion app** — container format conversion (PNG ↔ tar.gz ↔ directory,
+etc.) as an app with `caps.fs`. CCv2-specific data (the `chara` chunk) is the
+card app's internal concern — format conversion only repacks containers, it doesn't
+interpret card data. The library shell can invoke the format conversion app for
+import (copy + repack + index) and export (repack to chosen container).
 
 ### Vendoring format libraries
 

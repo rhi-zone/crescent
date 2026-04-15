@@ -491,7 +491,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		return { query = query, close = close }, revoke
 	end
 
-	return { exec = exec, query = query, close = close }, revoke
+	return { execute = exec, query = query, close = close }, revoke
 end
 
 return M
