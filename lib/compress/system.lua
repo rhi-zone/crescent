@@ -115,7 +115,7 @@ local function deflate(input, opts)
   local buf = ffi.new("Byte[?]", CHUNK)
 
   repeat
-    strm.next_out = buf
+    strm.next_out = ffi.cast("Bytef *", buf)
     strm.avail_out = CHUNK
     ret = zlib.deflate(strm, Z_FINISH)
     if ret ~= Z_OK and ret ~= Z_STREAM_END then
@@ -156,7 +156,7 @@ local function inflate(input, opts)
   local buf = ffi.new("Byte[?]", CHUNK)
 
   repeat
-    strm.next_out = buf
+    strm.next_out = ffi.cast("Bytef *", buf)
     strm.avail_out = CHUNK
     ret = zlib.inflate(strm, Z_NO_FLUSH)
     if ret ~= Z_OK and ret ~= Z_STREAM_END then
@@ -202,7 +202,7 @@ local function deflater(opts)
       strm.next_in = src
       strm.avail_in = #chunk
       repeat
-        strm.next_out = buf
+        strm.next_out = ffi.cast("Bytef *", buf)
         strm.avail_out = CHUNK
         ret = zlib.deflate(strm, Z_NO_FLUSH)
         if ret ~= Z_OK then
@@ -223,7 +223,7 @@ local function deflater(opts)
       strm.next_in = nil
       strm.avail_in = 0
       repeat
-        strm.next_out = buf
+        strm.next_out = ffi.cast("Bytef *", buf)
         strm.avail_out = CHUNK
         ret = zlib.deflate(strm, Z_FINISH)
         if ret ~= Z_OK and ret ~= Z_STREAM_END then
@@ -267,7 +267,7 @@ local function inflater(opts)
       strm.next_in = src
       strm.avail_in = #chunk
       repeat
-        strm.next_out = buf
+        strm.next_out = ffi.cast("Bytef *", buf)
         strm.avail_out = CHUNK
         ret = zlib.inflate(strm, Z_NO_FLUSH)
         if ret == Z_STREAM_END then
