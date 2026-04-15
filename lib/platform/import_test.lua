@@ -12,6 +12,12 @@ local json = require("lib.format.json")
 local compress = require("lib.compress")
 local tar = require("lib.tar")
 
+-- import_card requires system-zlib for deflate (pure-lua has inflate only).
+local has_deflate = compress._tier == "system-zlib"
+local function skip_no_zlib()
+	if not has_deflate then T.skip("system-zlib not available (deflate required)") end
+end
+
 -- Build a minimal valid PNG with a chara tEXt chunk.
 local function make_card_png(card_data)
 	local card_json = json.encode(card_data)
@@ -115,6 +121,7 @@ T.describe("platform import", function()
 
 	T.describe("import_card", function()
 		T.it("produces a valid app PNG with lua and lua-manifest chunks", function()
+			skip_no_zlib()
 			local written = {}
 			local write_fn = function(path, data)
 				written[path] = data
@@ -185,6 +192,7 @@ T.describe("platform import", function()
 		end)
 
 		T.it("indexes the app when index is provided", function()
+			skip_no_zlib()
 			local written = {}
 			local write_fn = function(path, data) written[path] = data; return true end
 			local idx = index.open(":memory:")
@@ -212,6 +220,7 @@ T.describe("platform import", function()
 		end)
 
 		T.it("deduplicates tags from runtime and card", function()
+			skip_no_zlib()
 			local written = {}
 			local write_fn = function(path, data) written[path] = data; return true end
 
