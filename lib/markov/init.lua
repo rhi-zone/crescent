@@ -209,10 +209,11 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Create a new empty chain of the given order (default 1).
---: (integer | nil) -> table
-function M.chain(order)
+-- seed is required for deterministic random generation.
+--: (integer, integer) -> table
+function M.chain(order, seed)
+  if not seed then error("markov.chain: seed is required") end
   order = order or 1
-  local seed = os.time()
   math.randomseed(seed)
   local obj = setmetatable({
     _order = order,
@@ -224,18 +225,18 @@ function M.chain(order)
 end
 
 -- Restore a chain from a snapshot produced by chain:save().
---: (table) -> table
-function M.load(snapshot)
+-- seed is required for deterministic random generation.
+--: (table, integer) -> table
+function M.load(snapshot, seed)
+  if not seed then error("markov.load: seed is required") end
   local order = snapshot.order or 1
+  math.randomseed(seed)
   local obj = setmetatable({
     _order = order,
     _table = {},
-    _seed  = snapshot.seed,
+    _seed  = seed,
     _rand  = math.random,
   }, Chain)
-  if snapshot.seed then
-    math.randomseed(snapshot.seed)
-  end
   for ctx_key, entries in pairs(snapshot.table) do
     local trans = {}
     for _, pair in ipairs(entries) do
@@ -247,10 +248,10 @@ function M.load(snapshot)
 end
 
 -- Convenience: build a chain from text, train it, and return it.
--- order defaults to 1.
---: (string, integer | nil) -> table
-function M.from_text(text, order)
-  local c = M.chain(order or 1)
+-- order defaults to 1. seed is required.
+--: (string, integer, integer | nil) -> table
+function M.from_text(text, seed, order)
+  local c = M.chain(order or 1, seed)
   c:train(text)
   return c
 end

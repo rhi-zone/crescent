@@ -173,12 +173,13 @@ function M.iterative_deepening(game, state, opts)
   opts = opts or {}
   local max_depth  = opts.max_depth or 6
   local time_limit = opts.time_limit
+  local clock_fn   = opts.clock_fn or error("minimax.iterative_deepening: opts.clock_fn is required")
   local maximize   = opts.maximize
   if maximize == nil then maximize = true end
   local order      = opts.order
   local ttable     = opts.transposition_table or (game.hash and {} or nil)
 
-  local start = time_limit and os.clock() or nil
+  local start = time_limit and clock_fn() or nil
   local best_move, best_score
 
   for depth = 1, max_depth do
@@ -186,7 +187,7 @@ function M.iterative_deepening(game, state, opts)
     best_move = move
     best_score = score
 
-    if time_limit and (os.clock() - start) >= time_limit then
+    if time_limit and (clock_fn() - start) >= time_limit then
       break
     end
   end
@@ -198,7 +199,8 @@ end
 
 -- Simple LCG for reproducible random sequences without external deps.
 local function make_rng(seed)
-  local s = seed or os.time()
+  if not seed then error("minimax: seed is required for MCTS") end
+  local s = seed
   return {
     next = function(self)
       s = (s * 1664525 + 1013904223) % 0x100000000
@@ -300,11 +302,11 @@ end
 -- Monte Carlo Tree Search.
 -- opts: { iterations, c, seed, rollout }
 --   c          — UCB1 exploration constant (default 1.414 ≈ sqrt(2))
---   seed       — RNG seed for reproducibility
+--   seed       — RNG seed (required)
 --   rollout    — custom rollout fn(game, state, rng) -> score (optional)
 -- Returns best_move.
 function M.mcts(game, state, opts)
-  opts = opts or {}
+  if not opts or not opts.seed then error("minimax.mcts: opts.seed is required") end
   local iterations = opts.iterations or 1000
   local c          = opts.c or 1.414
   local rng        = make_rng(opts.seed)

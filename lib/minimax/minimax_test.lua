@@ -219,6 +219,7 @@ T.describe("minimax.iterative_deepening", function()
     local move_id, score_id = minimax.iterative_deepening(ttt, win_board, {
       max_depth = 6,
       maximize  = true,
+      clock_fn  = os.clock,
     })
     local move_fixed, score_fixed = minimax.search(ttt, win_board, {
       depth    = 6,
@@ -235,6 +236,7 @@ T.describe("minimax.iterative_deepening", function()
       max_depth  = 9,
       time_limit = 5.0,  -- generous; tic-tac-toe is tiny
       maximize   = true,
+      clock_fn   = os.clock,
     })
     T.ok(move ~= nil, "should return a move")
     -- From empty board, optimal play is a draw

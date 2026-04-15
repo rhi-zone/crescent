@@ -354,7 +354,8 @@ end
 
 -- Simple LCG RNG
 local function make_rng(seed)
-  local state = seed or os.time()
+  if not seed then error("tilemap: seed is required") end
+  local state = seed
   return {
     next = function(self)
       state = (state * 1664525 + 1013904223) % 4294967296
@@ -373,10 +374,10 @@ end
 -- opts.num_rooms: number of rooms to attempt (default 5)
 -- opts.min_size: minimum room dimension (default 3)
 -- opts.max_size: maximum room dimension (default 8)
--- opts.seed: RNG seed (default os.time())
+-- opts.seed: RNG seed (required)
 -- Returns tilemap: 0=wall, 1=floor
 function M.random_rooms(width, height, opts)
-  opts = opts or {}
+  if not opts or not opts.seed then error("tilemap.random_rooms: opts.seed is required") end
   local num_rooms = opts.num_rooms or 5
   local min_size = opts.min_size or 3
   local max_size = opts.max_size or 8
@@ -433,12 +434,12 @@ end
 --- Generate a map using cellular automata.
 -- opts.fill_prob: initial fill probability (default 0.45)
 -- opts.iterations: smoothing iterations (default 5)
--- opts.seed: RNG seed
+-- opts.seed: RNG seed (required)
 -- opts.birth_rule: neighbor counts that birth a live cell (default {3,4,5,6,7,8})
 -- opts.survive_rule: neighbor counts that keep a live cell (default {2,3,4,5})
 -- Returns tilemap: 0=dead, 1=alive
 function M.cellular_automata(width, height, opts)
-  opts = opts or {}
+  if not opts or not opts.seed then error("tilemap.cellular_automata: opts.seed is required") end
   local fill_prob = opts.fill_prob or 0.45
   local iterations = opts.iterations or 5
   local rng = make_rng(opts.seed)

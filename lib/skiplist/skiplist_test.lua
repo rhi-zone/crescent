@@ -9,32 +9,32 @@ T.describe("skiplist", function()
 
   T.describe("basic insert/get/has", function()
     T.it("get returns value for inserted key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5, "five")
       T.eq(sl:get(5), "five")
     end)
 
     T.it("get returns nil for missing key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5, "five")
       T.eq(sl:get(4), nil)
       T.eq(sl:get(6), nil)
     end)
 
     T.it("has returns true for present key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(3, "three")
       T.ok(sl:has(3))
     end)
 
     T.it("has returns false for absent key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(3, "three")
       T.fail(sl:has(4))
     end)
 
     T.it("insert updates value for duplicate key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5, "five")
       sl:insert(5, "FIVE")
       T.eq(sl:get(5), "FIVE")
@@ -42,14 +42,14 @@ T.describe("skiplist", function()
     end)
 
     T.it("insert without value stores nil", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(7)
       T.ok(sl:has(7))
       T.eq(sl:get(7), nil)
     end)
 
     T.it("size reflects number of distinct keys", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       T.eq(sl:size(), 0)
       sl:insert(1)
       T.eq(sl:size(), 1)
@@ -62,19 +62,19 @@ T.describe("skiplist", function()
 
   T.describe("delete", function()
     T.it("delete returns true when key exists", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(3, "three")
       T.ok(sl:delete(3))
     end)
 
     T.it("delete returns false when key absent", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(3, "three")
       T.fail(sl:delete(9))
     end)
 
     T.it("deleted key is no longer found", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(3, "three")
       sl:delete(3)
       T.fail(sl:has(3))
@@ -82,19 +82,19 @@ T.describe("skiplist", function()
     end)
 
     T.it("delete decrements size", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(1) sl:insert(2) sl:insert(3)
       sl:delete(2)
       T.eq(sl:size(), 2)
     end)
 
     T.it("delete on empty list returns false", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       T.fail(sl:delete(99))
     end)
 
     T.it("delete all elements leaves empty list", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(1) sl:insert(2) sl:insert(3)
       sl:delete(1) sl:delete(2) sl:delete(3)
       T.eq(sl:size(), 0)
@@ -105,29 +105,29 @@ T.describe("skiplist", function()
 
   T.describe("min/max", function()
     T.it("min returns nil on empty list", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       T.eq(sl:min(), nil)
     end)
 
     T.it("max returns nil on empty list", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       T.eq(sl:max(), nil)
     end)
 
     T.it("min returns smallest key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5) sl:insert(3) sl:insert(7) sl:insert(1)
       T.eq(sl:min(), 1)
     end)
 
     T.it("max returns largest key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5) sl:insert(3) sl:insert(7) sl:insert(1)
       T.eq(sl:max(), 7)
     end)
 
     T.it("min/max work with single element", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(42)
       T.eq(sl:min(), 42)
       T.eq(sl:max(), 42)
@@ -136,7 +136,7 @@ T.describe("skiplist", function()
 
   T.describe("iter / keys / values / pairs", function()
     T.it("iter yields keys in sorted order", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5, "e") sl:insert(3, "c") sl:insert(7, "g") sl:insert(1, "a")
       local got = {}
       for k, v in sl:iter() do
@@ -149,7 +149,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("iter yields values matched to keys", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(5, "e") sl:insert(3, "c") sl:insert(1, "a")
       local vals = {}
       for k, v in sl:iter() do
@@ -161,7 +161,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("keys returns sorted key array", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(4) sl:insert(2) sl:insert(6)
       local ks = sl:keys()
       T.eq(ks[1], 2)
@@ -171,7 +171,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("values returns values in key-sorted order", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(4, "d") sl:insert(2, "b") sl:insert(6, "f")
       local vs = sl:values()
       T.eq(vs[1], "b")
@@ -180,7 +180,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("pairs returns sorted {key,value} array", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(4, "d") sl:insert(2, "b") sl:insert(6, "f")
       local ps = sl:pairs()
       T.eq(ps[1].key, 2) T.eq(ps[1].value, "b")
@@ -189,7 +189,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("iter on empty list returns nothing", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       local count = 0
       for k, v in sl:iter() do count = count + 1 end
       T.eq(count, 0)
@@ -198,7 +198,7 @@ T.describe("skiplist", function()
 
   T.describe("range / range_keys", function()
     local function make_sl()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       for _, v in ipairs({1,3,5,7,9,11}) do sl:insert(v, v*10) end
       return sl
     end
@@ -264,7 +264,7 @@ T.describe("skiplist", function()
 
   T.describe("rank / at_rank", function()
     T.it("rank returns 1-based position", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(1) sl:insert(3) sl:insert(5) sl:insert(7)
       T.eq(sl:rank(1), 1)
       T.eq(sl:rank(3), 2)
@@ -273,13 +273,13 @@ T.describe("skiplist", function()
     end)
 
     T.it("rank returns nil for absent key", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(1) sl:insert(3) sl:insert(5)
       T.eq(sl:rank(4), nil)
     end)
 
     T.it("at_rank returns correct key/value", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(1, "a") sl:insert(3, "c") sl:insert(5, "e") sl:insert(7, "g")
       local r = sl:at_rank(2)
       T.eq(r.key, 3)
@@ -287,28 +287,28 @@ T.describe("skiplist", function()
     end)
 
     T.it("at_rank(1) returns minimum", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(10) sl:insert(20) sl:insert(30)
       local r = sl:at_rank(1)
       T.eq(r.key, 10)
     end)
 
     T.it("at_rank(size) returns maximum", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(10) sl:insert(20) sl:insert(30)
       local r = sl:at_rank(3)
       T.eq(r.key, 30)
     end)
 
     T.it("at_rank out of range returns nil", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       sl:insert(10)
       T.eq(sl:at_rank(0), nil)
       T.eq(sl:at_rank(2), nil)
     end)
 
     T.it("rank and at_rank are consistent", function()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       local keys = {4, 8, 15, 16, 23, 42}
       for _, k in ipairs(keys) do sl:insert(k, k) end
       for _, k in ipairs(keys) do
@@ -322,7 +322,7 @@ T.describe("skiplist", function()
 
   T.describe("pred / succ / floor / ceil", function()
     local function make_sl()
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       for _, v in ipairs({2, 4, 6, 8, 10}) do sl:insert(v, v) end
       return sl
     end
@@ -410,7 +410,7 @@ T.describe("skiplist", function()
 
   T.describe("custom comparator (reverse order)", function()
     T.it("new with reverse comparator sorts descending", function()
-      local sl = skiplist.new(function(a, b) return a > b end)
+      local sl = skiplist.new(42, function(a, b) return a > b end)
       sl:insert(5) sl:insert(3) sl:insert(7) sl:insert(1)
       local ks = sl:keys()
       T.eq(ks[1], 7)
@@ -420,19 +420,19 @@ T.describe("skiplist", function()
     end)
 
     T.it("reverse: min returns largest numeric key", function()
-      local sl = skiplist.new(function(a, b) return a > b end)
+      local sl = skiplist.new(42, function(a, b) return a > b end)
       sl:insert(5) sl:insert(3) sl:insert(7)
       T.eq(sl:min(), 7)
     end)
 
     T.it("reverse: max returns smallest numeric key", function()
-      local sl = skiplist.new(function(a, b) return a > b end)
+      local sl = skiplist.new(42, function(a, b) return a > b end)
       sl:insert(5) sl:insert(3) sl:insert(7)
       T.eq(sl:max(), 3)
     end)
 
     T.it("reverse: range works by comparator order", function()
-      local sl = skiplist.new(function(a, b) return a > b end)
+      local sl = skiplist.new(42, function(a, b) return a > b end)
       -- Stored in desc order: 9,7,5,3,1
       for _, v in ipairs({9,7,5,3,1}) do sl:insert(v) end
       -- range(lo=7, hi=3) means: 7 >= key >= 3 in comparator sense
@@ -444,7 +444,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("reverse: get still works", function()
-      local sl = skiplist.new(function(a, b) return a > b end)
+      local sl = skiplist.new(42, function(a, b) return a > b end)
       sl:insert(5, "five") sl:insert(3, "three")
       T.eq(sl:get(5), "five")
       T.eq(sl:get(3), "three")
@@ -452,7 +452,7 @@ T.describe("skiplist", function()
     end)
 
     T.it("reverse: rank is positional", function()
-      local sl = skiplist.new(function(a, b) return a > b end)
+      local sl = skiplist.new(42, function(a, b) return a > b end)
       sl:insert(5) sl:insert(3) sl:insert(7) sl:insert(1)
       -- Sorted desc: 7,5,3,1
       T.eq(sl:rank(7), 1)
@@ -465,7 +465,7 @@ T.describe("skiplist", function()
   T.describe("large random test", function()
     T.it("100 inserts: sorted iteration matches sorted table", function()
       math.randomseed(42)
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       local inserted = {}
       local seen = {}
       for i = 1, 100 do
@@ -486,7 +486,7 @@ T.describe("skiplist", function()
 
     T.it("100 inserts: range query matches brute force", function()
       math.randomseed(123)
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       local all_keys = {}
       local seen = {}
       for i = 1, 100 do
@@ -515,7 +515,7 @@ T.describe("skiplist", function()
 
     T.it("rank/at_rank consistent after 50 random inserts", function()
       math.randomseed(77)
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       local inserted = {}
       local seen = {}
       for i = 1, 50 do
@@ -538,7 +538,7 @@ T.describe("skiplist", function()
 
     T.it("delete reduces size and removes from iteration", function()
       math.randomseed(99)
-      local sl = skiplist.new()
+      local sl = skiplist.new(42)
       local keys = {}
       local seen = {}
       for i = 1, 30 do

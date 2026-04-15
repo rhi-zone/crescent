@@ -13,7 +13,7 @@
 --   M.z_score(obs_freq, exp_freq, n) -> number
 --   M.chi_squared(obs_counts, exp_probs) -> number
 --   M.chi_squared_pvalue(chi2, df) -> number
---   M.generate(n, opts)         -> array
+--   M.generate(n, seed)         -> array
 --   M.suspicious_digits(result) -> array
 --   M._tier = "pure"
 
@@ -373,20 +373,14 @@ end
 
 -- Generate n numbers approximately following Benford's Law
 -- Uses inverse transform: if U ~ Uniform(0,1), then 10^U ~ Benford
--- opts.seed: optional seed for reproducibility
-function M.generate(n, opts)
-	opts = opts or {}
-	local rng
-	if opts.seed then
-		-- Use a simple LCG for reproducibility
-		local state = opts.seed
-		rng = function()
-			state = (state * 1664525 + 1013904223) % 4294967296
-			return state / 4294967296
-		end
-	else
-		rng = math.random
-		math.randomseed(os.time())
+-- seed: required RNG seed for reproducibility
+function M.generate(n, seed)
+	if not seed then error("benford.generate: seed is required") end
+	-- Use a simple LCG for reproducibility
+	local state = seed
+	local rng = function()
+		state = (state * 1664525 + 1013904223) % 4294967296
+		return state / 4294967296
 	end
 
 	local out = {}

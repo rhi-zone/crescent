@@ -102,11 +102,11 @@ local function try_ffi_devurandom()
 end
 
 -- Tier 4: pure Lua math.random (weak, functional)
+-- Requires M.seed(n) to be called before use.
+local pure_seeded = false
 local function try_pure()
-	math.randomseed(os.time() + math.floor(os.clock() * 1000000))
-	-- Discard initial values (some implementations have weak initial state)
-	for _ = 1, 10 do math.random(255) end
 	return function(len)
+		if not pure_seeded then error("uuid: pure tier requires M.seed(n) before use") end
 		local t = {}
 		for i = 1, len do t[i] = math.random(0, 255) end
 		return t
@@ -138,6 +138,17 @@ end
 
 if not rand_bytes then
 	error("lib/uuid: no random source available")
+end
+
+-- Seed the pure-Lua fallback tier's PRNG. Only needed when _tier == "pure".
+-- On FFI tiers (getrandom, arc4random, devurandom), this is a no-op.
+--: (integer) -> nil
+M.seed = function(n)
+	if not n then error("uuid.seed: seed is required") end
+	math.randomseed(n)
+	-- Discard initial values (some implementations have weak initial state)
+	for _ = 1, 10 do math.random(255) end
+	pure_seeded = true
 end
 
 -- ── Format: 16-byte table -> UUID string ─────────────────────────────────────

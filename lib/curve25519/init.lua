@@ -6,7 +6,7 @@
 --   M.clamp(key)                  -> clamped 32-byte string
 --   M.public_key(private_key)     -> 32-byte string | nil, errmsg
 --   M.diffie_hellman(priv, pub)   -> 32-byte string | nil, errmsg
---   M.keypair(seed)               -> priv(32), pub(32)
+--   M.keypair(seed)               -> priv(32), pub(32)  seed: 32-byte string, required
 --   M._tier = "pure"
 
 if not package.path:find("./?/init.lua", 1, true) then
@@ -331,23 +331,11 @@ M.diffie_hellman = function(private_key, public_key)
 end
 
 -- Generate a keypair.
--- seed: optional 32-byte string (NOT cryptographically secure if omitted)
+-- seed: required 32-byte string
 -- Returns: private_key(32 bytes), public_key(32 bytes)
---: string? -> string, string
+--: string -> string, string
 M.keypair = function(seed)
-  if seed == nil then
-    -- Mix os.time() and os.clock() to produce 32 pseudo-random bytes.
-    -- NOT cryptographically secure — caller should supply a proper seed.
-    local t  = os.time()
-    local c  = os.clock() * 1e9
-    local bs = {}
-    for i = 1, 32 do
-      t = (t * 6364136223846793005 + 1442695040888963407) % (2^32)
-      c = (c * 1664525 + 1013904223) % (2^32)
-      bs[i] = (t + floor(c)) % 256  -- mix t and c (XOR not available for large ints in Lua)
-    end
-    seed = schar(unpack(bs))
-  end
+  if not seed then error("curve25519.keypair: seed is required (32-byte string)") end
   if type(seed) ~= "string" or #seed ~= 32 then
     error("seed must be a 32-byte string")
   end

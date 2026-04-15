@@ -45,7 +45,7 @@ T.describe("grammar_gen", function()
     end)
 
     T.it("all outputs are valid options (multiple runs)", function()
-      local g = G.new({ color = {"red", "green", "blue"} })
+      local g = G.new({ color = {"red", "green", "blue"} }, {seed=1})
       for _ = 1, 20 do
         local result = g:expand("#color#")
         T.ok(one_of(result, {"red", "green", "blue"}), "unexpected: " .. tostring(result))

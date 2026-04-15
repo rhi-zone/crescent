@@ -437,12 +437,12 @@ end)
 
 T.describe("benford.generate", function()
 	T.it("returns array of correct length", function()
-		local data = B.generate(500, {seed = 42})
+		local data = B.generate(500, 42)
 		T.eq(#data, 500)
 	end)
 
 	T.it("all values are positive integers", function()
-		local data = B.generate(100, {seed = 7})
+		local data = B.generate(100, 7)
 		for _, v in ipairs(data) do
 			T.ok(v > 0, "v=" .. tostring(v))
 			T.ok(math.floor(v) == v, "not integer: " .. tostring(v))
@@ -450,16 +450,16 @@ T.describe("benford.generate", function()
 	end)
 
 	T.it("seeded generation is reproducible", function()
-		local d1 = B.generate(20, {seed = 123})
-		local d2 = B.generate(20, {seed = 123})
+		local d1 = B.generate(20, 123)
+		local d2 = B.generate(20, 123)
 		for i = 1, 20 do
 			T.eq(d1[i], d2[i])
 		end
 	end)
 
 	T.it("different seeds produce different data", function()
-		local d1 = B.generate(20, {seed = 1})
-		local d2 = B.generate(20, {seed = 2})
+		local d1 = B.generate(20, 1)
+		local d2 = B.generate(20, 2)
 		local differ = false
 		for i = 1, 20 do
 			if d1[i] ~= d2[i] then differ = true break end
@@ -468,7 +468,7 @@ T.describe("benford.generate", function()
 	end)
 
 	T.it("generated data conforms to Benford's Law", function()
-		local data = B.generate(1000, {seed = 999})
+		local data = B.generate(1000, 999)
 		local result = B.analyze(data)
 		T.ok(result ~= nil, "analyze failed")
 		local ok = result.conformity == "close" or

@@ -24,9 +24,10 @@ local LCG_A   = 1664525
 local LCG_C   = 1013904223
 
 local function make_rng(seed)
-  local state = math.floor(seed or os.time()) % LCG_MOD
+  if not seed then error("genetic: seed is required") end
+  local state = math.floor(seed) % LCG_MOD
   if state == 0 then state = 12345 end
-  local rng = { seed = seed or os.time() }
+  local rng = { seed = seed }
   function rng:next()
     state = (state * LCG_A + LCG_C) % LCG_MOD
     return state

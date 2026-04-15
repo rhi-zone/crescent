@@ -12,7 +12,8 @@ M._tier = "pure"
 -- xorshift32 RNG using LuaJIT bit library
 local bit = require("bit")
 local function make_rng_luajit(seed)
-  local state = seed or os.time()
+  if not seed then error("grammar_gen: seed is required") end
+  local state = seed
   if state == 0 then state = 12345 end
   -- ensure unsigned 32-bit
   state = bit.band(state, 0xFFFFFFFF)
@@ -301,9 +302,10 @@ end
 --- Create a new Grammar.
 -- @param rules  table  { symbol = {option1, ...} }
 -- @param opts   table  { seed=number, max_depth=number }
+--   seed is required.
 -- @return Grammar
 function M.new(rules, opts)
-  opts = opts or {}
+  if not opts or not opts.seed then error("grammar_gen.new: opts.seed is required") end
   local g = setmetatable({}, Grammar)
   g._stack = { rules }
   g._rng = make_rng_luajit(opts.seed)

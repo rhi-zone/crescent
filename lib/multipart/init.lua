@@ -17,9 +17,10 @@ local byte, char, find, sub, format = string.byte, string.char, string.find, str
 
 local BOUNDARY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-local function gen_boundary()
+local function gen_boundary(seed)
+    if not seed then error("multipart: seed is required for boundary generation") end
+    math.randomseed(seed)
     local t = {}
-    math.randomseed(os.time())
     for i = 1, 24 do
         local r = math.random(#BOUNDARY_CHARS)
         t[i] = sub(BOUNDARY_CHARS, r, r)
@@ -77,10 +78,12 @@ local Builder = {}
 Builder.__index = Builder
 
 --- Create a new multipart builder.
---: (string | nil) -> table
-function M.new(boundary)
+-- If boundary is not provided, seed is required to generate one.
+--: (string | nil, integer | nil) -> table
+function M.new(boundary, seed)
+    if not boundary and not seed then error("multipart.new: boundary or seed is required") end
     local self = setmetatable({}, Builder)
-    self._boundary = boundary or gen_boundary()
+    self._boundary = boundary or gen_boundary(seed)
     self._parts = {}
     return self
 end
@@ -158,9 +161,9 @@ end
 --   { name="f", value="v" }                               -- plain field
 --   { name="f", filename="x.txt", data="...", type="..." } -- file part
 --   { headers={...}, body="..." }                          -- raw part
---: (table, string | nil) -> string, string
-function M.encode(parts, boundary)
-    local mp = M.new(boundary)
+--: (table, string | nil, integer | nil) -> string, string
+function M.encode(parts, boundary, seed)
+    local mp = M.new(boundary, seed)
     for _, p in ipairs(parts) do
         if p.headers then
             mp:part(p.headers, p.body or "")

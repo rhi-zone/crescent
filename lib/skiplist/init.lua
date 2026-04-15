@@ -6,8 +6,6 @@ end
 -- Implements an augmented skip list with span[] arrays for O(log n) rank queries.
 -- Max level 32 supports ~2^32 elements at p=0.5.
 
-math.randomseed(os.time())
-
 local M = {}
 --: string
 M._tier = "pure"
@@ -42,8 +40,11 @@ local SL = {}
 SL.__index = SL
 
 -- Create a new skip list.
+-- seed: required RNG seed for level generation.
 -- cmp(a, b) returns true when a should come before b (default: a < b)
-function M.new(cmp)
+function M.new(seed, cmp)
+  if not seed then error("skiplist.new: seed is required") end
+  math.randomseed(seed)
   cmp = cmp or function(a, b) return a < b end
   -- Header sentinel: key = -math.huge, forward array of MAX_LEVEL nils
   local header = new_node(-math.huge, nil, MAX_LEVEL)
