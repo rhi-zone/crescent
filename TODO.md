@@ -40,8 +40,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
   3. Install: copy app PNG to `~/.crescent/apps/`, upsert manifest into index DB (SQLite, json_extract queryable)
   4. Library app discovers it on next scan via index DB
   **Prerequisites:**
-  - [ ] `lib/png` iTXt chunk support — read/write/get/set (currently only tEXt)
-  - [ ] `lib/gzip` — gzip compress/decompress (have zstd/brotli/lz4 but not gzip, needed for `base64(gzip(tar))` app embedding)
+  - [ ] `lib/png` iTXt chunk support — move iTXt helpers from lib/platform/init.lua into lib/png (get_itxt exists as local, need set_itxt/remove_itxt + build/parse). tEXt pattern already exists to follow.
+  - [x] `lib/gzip` — already exists as `lib/compress` (deflate/inflate with `format = "gzip"`, system zlib FFI + pure Lua tiers)
   - [ ] App index database schema + upsert logic (SQLite in `~/.crescent/apps/index.db` or similar)
   - [ ] Card app runtime bundling — package card app as tarball for embedding
 - [x] Author's note — depth-based context injection with configurable position
