@@ -17,7 +17,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `shared_db` cap with SQLite authorizer + `_app_id()` custom function (per-app isolation), 51 assertions
 - [x] Context assembly engine — `lib/formats/ccv2/context`, builds messages array from card fields + lorebook + history + token budget, 60 assertions
 - [x] Card app — first-party CCv2-compatible conversation app (dom entrypoint), 111 assertions
-- [x] Library app — general-purpose collection browser with adapter interface, 71 assertions
+- [x] Library app — general-purpose collection browser with adapter interface + BFF server + index adapter, 135 assertions
 - [x] Card app static JS UI — hand-written vanilla JS frontend + Lua BFF backend (server.lua, 76 assertions). Swipe cache, greeting alternatives, all logic server-side.
 - [x] Streaming LLM responses — SSE via `POST /api/message/stream`, `llm.call_stream()` in caps, `res.raw` socket takeover in http server
 - [x] Card app: message editing (fork) and deletion (subtree) — integrated with conversation tree
@@ -33,17 +33,19 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] User personas — named profiles with description injected into context, selectable per session
 - [x] Token counter — context usage progress bar with color thresholds, updated after each action
 - [x] Character avatar — header + message avatars from PNG via `caps.self`, 400 assertions
-- [ ] Library app — **needs work**. Shell app deleted (was a card-specific browser, wrong abstraction). Library app has the right architecture (adapter-based, open metadata). Needs: index DB integration, app discovery from `~/.crescent/apps/`, BFF server entrypoint (currently DOM-only), launch flow.
-- [ ] **App import + install pipeline** — the full flow that doesn't exist yet:
+- [x] Library app — BFF server + index adapter + static frontend, 135 assertions (0e9d187). Index adapter bridges index DB into adapter interface. Server serves HTML/JS/CSS + JSON API with tag/search filtering.
+- [x] **App import + install pipeline** — complete end-to-end flow:
   1. Parse card PNG → extract card data + metadata (name, description, tags, etc.)
   2. Bundle: card data + card app runtime → app PNG (`chara` chunk untouched, add `lua` iTXt = base64(gzip(tar)), add `lua-manifest` iTXt = raw JSON manifest with card metadata in `meta.tags`, `meta.name`, etc.)
   3. Install: copy app PNG to `~/.crescent/apps/`, upsert manifest into index DB (SQLite, json_extract queryable)
   4. Library app discovers it on next scan via index DB
-  **Prerequisites:**
+  **Components:**
   - [x] `lib/png` iTXt chunk support — parse/build/get/set/remove_itxt, 99 assertions. lib/platform/init.lua now uses png.get_itxt.
   - [x] `lib/gzip` — already exists as `lib/compress` (deflate/inflate with `format = "gzip"`, system zlib FFI + pure Lua tiers)
   - [x] App index database schema + upsert logic — `lib/platform/index.lua`, 43 assertions
   - [x] Card app runtime bundling + import — `lib/platform/import.lua`, 42 assertions. CLI: `luajit lib/platform/cli.lua import card.png`
+  - [x] Library app BFF server — `lib/platform/apps/library/server.lua`, 41 assertions. Index adapter, 47 assertions.
+- [ ] Library app — **remaining work**: launch flow (clicking an app in the browser should open it), app uninstall UI, integration testing with real imported apps
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
 - [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution
