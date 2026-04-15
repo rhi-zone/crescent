@@ -49,7 +49,14 @@ end
 -- ── Request/response helpers ───────────────────────────────────────────────
 
 local function make_req(method, target, body)
-	local req = { method = method, target = target, headers = {} }
+	-- Simulate the http_server cap's request shape: path + query, not target.
+	local path, query = target, nil
+	local qpos = target:find("?", 1, true)
+	if qpos then
+		path = target:sub(1, qpos - 1)
+		query = target:sub(qpos + 1)
+	end
+	local req = { method = method, path = path, query = query, headers = {} }
 	if body then
 		req.body = json.encode(body)
 		req.headers["content-type"] = { "application/json" }

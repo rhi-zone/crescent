@@ -68,7 +68,7 @@ local routes = {
 
 function M.create(caps)
 	local function handler(req, res)
-		local key = req.method .. " " .. req.target
+		local key = req.method .. " " .. (req.path or "/")
 		local route = routes[key]
 		if route then
 			return route(caps, req, res)

@@ -10,7 +10,7 @@ local server = require("lib.platform.apps.charactercardv2.import")
 -- ── Test helpers ────────────────────────────────────────────────────────────
 
 local function make_req(method, target, body)
-	return { method = method, target = target, body = body }
+	return { method = method, path = target, body = body }
 end
 
 local function make_res()

@@ -21,12 +21,9 @@ local M = {}
 
 -- ── Helpers ─────────────────────────────────────────────────────────────────
 
-local function parse_target(target)
-	local qpos = target:find("?", 1, true)
-	if not qpos then return target, {} end
-	local path = target:sub(1, qpos - 1)
-	local qs = target:sub(qpos + 1)
+local function parse_query(qs)
 	local params = {}
+	if not qs then return params end
 	for kv in qs:gmatch("[^&]+") do
 		local eq = kv:find("=", 1, true)
 		if eq then
@@ -35,7 +32,7 @@ local function parse_target(target)
 			params[kv] = ""
 		end
 	end
-	return path, params
+	return params
 end
 
 local function json_ok(res, data)
@@ -190,7 +187,8 @@ function M.create(caps, opts)
 	end
 
 	local function handler(req, res)
-		local req_path, params = parse_target(req.target)
+		local req_path = req.path or "/"
+		local params = parse_query(req.query)
 		local key = req.method .. " " .. req_path
 		local route = routes[key]
 		if route then
