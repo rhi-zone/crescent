@@ -230,13 +230,12 @@ end
 local v7_last_ms = 0
 local v7_seq = 0
 
---: () -> string
-M.v7 = function()
-	-- Get current time in milliseconds.
-	-- os.time() gives seconds; os.clock() gives CPU time (not wall), so we use
-	-- os.time() * 1000 + a sub-second offset derived from os.clock().
-	-- On most systems this gives ~ms resolution. Not perfect, but portable.
-	local now_ms = math.floor(os.time() * 1000)
+-- v7(time_fn) -> string
+-- time_fn: () -> integer — returns unix timestamp in seconds (e.g. os.time).
+--: ((() -> integer)) -> string
+M.v7 = function(time_fn)
+	if not time_fn then error("uuid.v7: requires time_fn (function returning unix timestamp)") end
+	local now_ms = math.floor(time_fn() * 1000)
 
 	if now_ms > v7_last_ms then
 		v7_last_ms = now_ms

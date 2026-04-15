@@ -6,6 +6,8 @@ end
 local T = require("lib.test.assert")
 local uuid = require("lib.uuid")
 
+local function time_fn() return os.time() end
+
 local UUID_PAT = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
 
 T.describe("uuid", function()
@@ -54,28 +56,28 @@ T.describe("uuid", function()
 
 	T.describe("v7", function()
 		T.it("produces a string of correct length and format", function()
-			local s = uuid.v7()
+			local s = uuid.v7(time_fn)
 			T.eq(type(s), "string")
 			T.eq(#s, 36)
 			T.ok(s:match(UUID_PAT), "format: " .. s)
 		end)
 
 		T.it("version nibble is 7", function()
-			local s = uuid.v7()
+			local s = uuid.v7(time_fn)
 			T.eq(s:sub(15, 15), "7", "version nibble: " .. s)
 		end)
 
 		T.it("variant bits are 10xx", function()
-			local s = uuid.v7()
+			local s = uuid.v7(time_fn)
 			local variant_char = s:sub(20, 20)
 			local valid_variants = { ["8"] = true, ["9"] = true, ["a"] = true, ["b"] = true }
 			T.ok(valid_variants[variant_char], "variant char=" .. variant_char .. " in: " .. s)
 		end)
 
 		T.it("successive calls are monotonically increasing (string sort)", function()
-			local prev = uuid.v7()
+			local prev = uuid.v7(time_fn)
 			for _ = 1, 20 do
-				local next = uuid.v7()
+				local next = uuid.v7(time_fn)
 				T.ok(next >= prev, "not monotonic: " .. prev .. " -> " .. next)
 				prev = next
 			end
@@ -86,7 +88,7 @@ T.describe("uuid", function()
 			-- We force same-ms by calling many in a tight loop.
 			local results = {}
 			for _ = 1, 100 do
-				results[#results + 1] = uuid.v7()
+				results[#results + 1] = uuid.v7(time_fn)
 			end
 			-- Check all distinct
 			local seen = {}
@@ -126,7 +128,7 @@ T.describe("uuid", function()
 		end)
 
 		T.it("parse -> fmt round-trips v7 output", function()
-			local s = uuid.v7()
+			local s = uuid.v7(time_fn)
 			local bin = uuid.parse(s)
 			T.ok(bin ~= nil)
 			T.eq(uuid.fmt(bin), s)
@@ -137,7 +139,7 @@ T.describe("uuid", function()
 		T.it("accepts valid UUID strings", function()
 			T.ok(uuid.is_valid("f47ac10b-58cc-4372-a567-0e02b2c3d479"))
 			T.ok(uuid.is_valid(uuid.v4()))
-			T.ok(uuid.is_valid(uuid.v7()))
+			T.ok(uuid.is_valid(uuid.v7(time_fn)))
 		end)
 
 		T.it("rejects malformed strings", function()

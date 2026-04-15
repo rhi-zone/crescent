@@ -42,9 +42,43 @@ local function generate_message_id(from, time_fn)
 end
 
 -- RFC 2822 date format: "Thu, 01 Jan 2009 00:00:00 +0000"
+-- Pure-Lua UTC decomposition (no os.date dependency).
+local DAY_NAMES = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
+local MONTH_NAMES = {
+	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+}
+
+-- Howard Hinnant civil_from_days: days since epoch -> (year, month, day)
+--: (number) -> number, number, number
+local function civil_from_days(z)
+	z = z + 719468
+	local era = math.floor(z / 146097)
+	local doe = z - era * 146097
+	local yoe = math.floor((doe - math.floor(doe / 1460) + math.floor(doe / 36524) - math.floor(doe / 146096)) / 365)
+	local y = yoe + era * 400
+	local doy = doe - (365 * yoe + math.floor(yoe / 4) - math.floor(yoe / 100))
+	local mp = math.floor((5 * doy + 2) / 153)
+	local d = doy - math.floor((153 * mp + 2) / 5) + 1
+	local m = mp + (mp < 10 and 3 or -9)
+	if m <= 2 then y = y + 1 end
+	return y, m, d
+end
+
 --: (() -> number) -> string
 local function rfc2822_date(time_fn)
-	return os.date("!%a, %d %b %Y %H:%M:%S +0000", time_fn())
+	local ts = math.floor(time_fn())
+	local days = math.floor(ts / 86400)
+	local rem = ts - days * 86400
+	local hour = math.floor(rem / 3600)
+	rem = rem - hour * 3600
+	local min = math.floor(rem / 60)
+	local sec = rem - min * 60
+	local y, mo, d = civil_from_days(days)
+	-- Day of week: epoch (1970-01-01) is Thursday (4). (days+4)%7: 0=Sun..6=Sat
+	local wday = (days + 4) % 7 + 1 -- 1-indexed for DAY_NAMES
+	return string.format("%s, %02d %s %04d %02d:%02d:%02d +0000",
+		DAY_NAMES[wday], d, MONTH_NAMES[mo], y, hour, min, sec)
 end
 
 -- ── Quoted-Printable ─────────────────────────────────────────────────────

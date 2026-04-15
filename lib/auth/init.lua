@@ -214,15 +214,17 @@ local function random_bytes(n, time_fn)
 			end
 		end
 	end
-	-- Fallback: Lua io /dev/urandom.
-	local f = io.open("/dev/urandom", "rb")
-	if f then
-		local data = f:read(n)
-		f:close()
-		if data and #data == n then return data end
+	-- Fallback: Lua io /dev/urandom (host only, not available in sandbox).
+	if io and io.open then
+		local f = io.open("/dev/urandom", "rb")
+		if f then
+			local data = f:read(n)
+			f:close()
+			if data and #data == n then return data end
+		end
 	end
 	-- Last resort: math.random (NOT cryptographically secure).
-	math.randomseed(time_fn() + os.clock() * 1000000)
+	math.randomseed(time_fn())
 	local parts = {}
 	for i = 1, n do parts[i] = string.char(math.random(0, 255)) end
 	return table.concat(parts)
