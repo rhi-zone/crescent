@@ -485,14 +485,19 @@ if not entry_map or not next(entry_map) then
 end
 
 if not opts.entrypoint then
-	io.stderr:write("error: no entrypoint specified\n")
-	io.stderr:write("available entrypoints:\n")
-	for key, def in pairs(entry_map) do
-		local main = type(def) == "table" and def.main or tostring(def)
-		io.stderr:write("  " .. key .. "  (" .. main .. ")\n")
+	-- Try default_entry from manifest.
+	if manifest.default_entry and entry_map[manifest.default_entry] then
+		opts.entrypoint = manifest.default_entry
+	else
+		io.stderr:write("error: no entrypoint specified\n")
+		io.stderr:write("available entrypoints:\n")
+		for key, def in pairs(entry_map) do
+			local main = type(def) == "table" and def.main or tostring(def)
+			io.stderr:write("  " .. key .. "  (" .. main .. ")\n")
+		end
+		io.stderr:write("\nusage: luajit lib/platform/cli.lua " .. opts.app .. " <entrypoint> [-- args...]\n")
+		os.exit(1)
 	end
-	io.stderr:write("\nusage: luajit lib/platform/cli.lua " .. opts.app .. " <entrypoint> [-- args...]\n")
-	os.exit(1)
 end
 
 local entry_def = entry_map[opts.entrypoint]

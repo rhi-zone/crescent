@@ -2,6 +2,7 @@
   "name": "CCv2 Card",
   "version": "0.1.0",
   "meta": { "type": "card-app" },
+  "default_entry": "server",
   "caps": {
     "self":          { "type": "self",        "required": true },
     "conversations": { "type": "db",          "required": true },

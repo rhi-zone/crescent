@@ -2,6 +2,7 @@
   "name": "CCv2 Export",
   "version": "0.1.0",
   "meta": { "type": "tool" },
+  "default_entry": "server",
   "caps": {
     "self": { "type": "self", "required": true }
   },

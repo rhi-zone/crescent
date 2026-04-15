@@ -2,6 +2,7 @@
   "name": "Library",
   "version": "0.1.0",
   "meta": { "type": "library-app" },
+  "default_entry": "server",
   "entry": {
     "server": {
       "main": "dom.lua",

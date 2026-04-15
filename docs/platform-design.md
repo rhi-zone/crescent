@@ -598,6 +598,7 @@ runtime.
     "creator": "someone",
     "rating": "SFW"
   },
+  "default_entry": "server",
   "caps": {
     "db": "required",
     "self": "required"
@@ -623,6 +624,10 @@ runtime.
   }
 }
 ```
+
+**`default_entry`** — names the entrypoint to use when none is specified on the
+command line. Must match a key in `entry`. If absent and no entrypoint is specified,
+the platform errors with a list of available entrypoints.
 
 **Capability declarations:**
 
