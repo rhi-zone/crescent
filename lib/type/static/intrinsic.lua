@@ -580,9 +580,9 @@ local function expand_require(ctx, arg_ids)
                     ctx._last_require_aliases = aliases
                     return exports
                 end
-                -- cri_loader present but unresolvable: fall through to T_ANY for
-                -- error recovery (same behaviour as the old special case).
-                return ctx.T_ANY
+                -- cri_loader present but unresolvable: T_UNKNOWN forces narrowing
+                -- (field access/calls on the result will error).
+                return ctx.T_UNKNOWN
             end
             -- No cri_loader and no module declaration: T_UNKNOWN forces narrowing.
         end
