@@ -108,25 +108,35 @@ end
 handlers["noop"] = function() return "" end
 handlers["trim"] = function() return "" end
 
--- Time
+-- Time — requires env.time_fn: () -> {year,month,day,hour,min,sec,wday}
+-- No fallback: caller must inject a time source.
+local function get_time(env)
+	if not env.time_fn then return nil end
+	return env.time_fn()
+end
 handlers["time"] = function(env)
-	local t = env.time_fn and env.time_fn() or os.date("*t")
+	local t = get_time(env)
+	if not t then return "{{time}}" end
 	return string.format("%02d:%02d", t.hour, t.min)
 end
 handlers["date"] = function(env)
-	local t = env.time_fn and env.time_fn() or os.date("*t")
+	local t = get_time(env)
+	if not t then return "{{date}}" end
 	return string.format("%s %d, %d", MONTHS[t.month], t.day, t.year)
 end
 handlers["weekday"] = function(env)
-	local t = env.time_fn and env.time_fn() or os.date("*t")
+	local t = get_time(env)
+	if not t then return "{{weekday}}" end
 	return WEEKDAYS[t.wday]
 end
 handlers["isotime"] = function(env)
-	local t = env.time_fn and env.time_fn() or os.date("*t")
+	local t = get_time(env)
+	if not t then return "{{isotime}}" end
 	return string.format("%02d:%02d:%02d", t.hour, t.min, t.sec)
 end
 handlers["isodate"] = function(env)
-	local t = env.time_fn and env.time_fn() or os.date("*t")
+	local t = get_time(env)
+	if not t then return "{{isodate}}" end
 	return string.format("%04d-%02d-%02d", t.year, t.month, t.day)
 end
 handlers["idle_duration"] = function(env) return format_idle(env.idle_duration) end

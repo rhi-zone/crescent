@@ -10,7 +10,7 @@
 -- API:
 --   local conv = require("conversation")  -- or wherever you vendor it
 --
---   local db, err = conv.open(path)
+--   local db, err = conv.open(path, time_fn)  -- time_fn: () -> integer (unix ts)
 --
 --   local session, err = db:create_session(app_id, metadata?)
 --   local session, err = db:get_session(id)
@@ -34,8 +34,6 @@ local json   = require("lib.format.json")
 local M = {}
 
 -- ── UUID generation ───────────────────────────────────────────────────────────
-
-math.randomseed(os.time())
 
 local function uuid()
 	return string.format(
@@ -108,7 +106,7 @@ end
 -- create_session(app_id, metadata?) -> session | nil, err
 db_mt.create_session = function(self, app_id, metadata)
 	local id = uuid()
-	local now = os.time()
+	local now = self._time_fn()
 	local meta_s, merr = encode_metadata(metadata)
 	if merr then return nil, merr end
 	local ok, err = self._db:execute(
@@ -167,7 +165,7 @@ end
 -- Also updates parent's canonical_child_id to the new message id.
 db_mt.add_message = function(self, session_id, parent_id, role, content, metadata)
 	local id = uuid()
-	local now = os.time()
+	local now = self._time_fn()
 	local meta_s, merr = encode_metadata(metadata)
 	if merr then return nil, merr end
 	local ok, err = self._db:execute(
@@ -487,15 +485,20 @@ end
 
 -- ── open ──────────────────────────────────────────────────────────────────────
 
--- open(path) -> db | nil, err
+-- open(path, time_fn) -> db | nil, err
 -- Opens (or creates) a SQLite database at path. Creates tables if missing.
-M.open = function(path)
+-- time_fn: () -> integer — required, returns unix timestamp (e.g. caps.time.now).
+M.open = function(path, time_fn)
+	if not time_fn then
+		error("conversation.open: requires time_fn (function returning unix timestamp)", 2)
+	end
+	math.randomseed(time_fn())
 	local db, err = sqlite.open(path)
 	if not db then return nil, err end
 	-- Enable foreign keys and create schema.
 	local ok, serr = db:execute(SCHEMA)
 	if not ok then return nil, serr end
-	return setmetatable({ _db = db }, db_mt)
+	return setmetatable({ _db = db, _time_fn = time_fn }, db_mt)
 end
 
 return M

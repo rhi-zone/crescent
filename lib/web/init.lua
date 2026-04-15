@@ -11,14 +11,13 @@ local json = require("lib.format.json")
 
 local M = {}
 
-local clock = os.clock
+local clock_default = os and os.clock or nil
 local concat = table.concat
 local insert = table.insert
 local find = string.find
 local sub = string.sub
 local lower = string.lower
 local format = string.format
-local open = io.open
 
 -- ── Query string parsing ─────────────────────────────────────────────────────
 
@@ -299,6 +298,8 @@ end
 function M.logger(opts)
 	--: (string?) -> (string) -> ()
 	local log_fn = opts and opts.log or print
+	local clock = opts and opts.clock or clock_default
+	if not clock then error("web.logger: requires opts.clock (function returning seconds)", 2) end
 	return function(req, res, next)
 		req._start_time = clock()
 		next()
@@ -339,8 +340,12 @@ end
 
 -- ── Built-in middleware: static files ────────────────────────────────────────
 
---: (string, string) -> function
-function M.static(url_prefix, dir)
+-- static(url_prefix, dir, read_fn) -> middleware
+-- read_fn: (path: string) -> string | nil — reads a file by path.
+-- In sandbox: use caps.fs.read. Outside: wrap io.open.
+--: (string, string, (string) -> string | nil) -> function
+function M.static(url_prefix, dir, read_fn)
+	if not read_fn then error("web.static: requires read_fn (function reading file by path)", 2) end
 	-- Normalize: ensure url_prefix starts with / and has no trailing /
 	if sub(url_prefix, 1, 1) ~= "/" then url_prefix = "/" .. url_prefix end
 	if sub(url_prefix, -1) == "/" and #url_prefix > 1 then
@@ -380,13 +385,11 @@ function M.static(url_prefix, dir)
 		end
 
 		local file_path = dir .. rest
-		local f = open(file_path, "rb")
-		if not f then
+		local contents = read_fn(file_path)
+		if not contents then
 			next()
 			return
 		end
-		local contents = f:read("*a")
-		f:close()
 
 		res.status = 200
 		res.headers["Content-Type"] = content_type_for(file_path)

@@ -291,7 +291,13 @@ T.describe("static file middleware", function()
 		f:close()
 
 		local app = web.app()
-		app:use(web.static("/public", tmp_dir))
+		app:use(web.static("/public", tmp_dir, function(path)
+			local f = io.open(path, "rb")
+			if not f then return nil end
+			local contents = f:read("*a")
+			f:close()
+			return contents
+		end))
 		app:get("/fallback", function(rq, rs)
 			rs.body = "fallback"
 		end)

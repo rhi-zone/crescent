@@ -11,8 +11,11 @@ local conv = require("lib.conversation")
 -- Use an in-memory SQLite database for tests.
 local DB_PATH = ":memory:"
 
+local _test_time = 1000000
+local function test_time() _test_time = _test_time + 1; return _test_time end
+
 local function open()
-	local db, err = conv.open(DB_PATH)
+	local db, err = conv.open(DB_PATH, test_time)
 	T.ok(db, "open: " .. tostring(err))
 	return db
 end
