@@ -28,9 +28,11 @@ end
 -- Returns a new workflow definition object.
 -- opts = { steps = { [name] = { run, on_success, on_failure, retry, timeout } }, start = name }
 function M.define(opts)
+  assert(opts and opts.time_fn, "define requires opts.time_fn")
   local wf = {}
   wf._steps = opts.steps or {}
   wf._start = opts.start
+  wf._time_fn = opts.time_fn
   wf._hooks = {
     step_start  = {},
     step_done   = {},
@@ -143,7 +145,7 @@ function M.define(opts)
           result    = nil,
           error     = last_err,
           retries   = step.retry or 0,
-          timestamp = os.time(),
+          timestamp = self._time_fn(),
         }
         fire(self._hooks.step_failed, inst, name, last_err)
         if step.on_failure then
@@ -159,7 +161,7 @@ function M.define(opts)
                       and result or result,
         error     = nil,
         retries   = 0,
-        timestamp = os.time(),
+        timestamp = self._time_fn(),
       }
       fire(self._hooks.step_done, inst, name, result)
 

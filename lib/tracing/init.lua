@@ -49,8 +49,8 @@ local function _rand_hex(n, rng_state_ref)
 end
 
 -- Returns a rng_state_ref table {state} and a _rand_hex-compatible call.
-local function _make_rng(seed)
-  local s = seed or os.time()
+local function _make_rng(seed, time_fn)
+  local s = seed or time_fn()
   if s == 0 then s = 1 end
   -- Warm up: avoid poor low-seed initial values
   s = _xorshift32(s)
@@ -216,9 +216,9 @@ function Provider:tracer(name)
 end
 
 function M.provider(opts)
-  opts = opts or {}
+  assert(opts and opts.time_fn, "provider requires opts.time_fn")
   local exporter = opts.exporter or M.noop_exporter()
-  local rng = _make_rng(opts.id_seed)
+  local rng = _make_rng(opts.id_seed, opts.time_fn)
   return setmetatable({
     _exporter = exporter,
     _rng      = rng,

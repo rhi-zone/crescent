@@ -40,7 +40,7 @@ History.__index = History
 -- M.history(opts?) -> history object
 -- opts: { max_size, on_execute?, on_undo?, on_redo? }
 function M.history(opts)
-  opts = opts or {}
+  assert(opts and opts.time_fn, "history requires opts.time_fn")
   local h = setmetatable({}, History)
   h._undo    = {}   -- stack of entries, index 1 = oldest
   h._redo    = {}   -- stack of entries, index 1 = most-recent-undo (redo order)
@@ -50,6 +50,7 @@ function M.history(opts)
   h._on_redo = opts.on_redo
   h._batch   = nil  -- batch accumulator or nil
   h._recording = nil  -- macro recording list or nil
+  h._time_fn = opts.time_fn
   return h
 end
 
@@ -101,7 +102,7 @@ local function raw_undo(entry)
 end
 
 -- Re-execute an entry (for redo). Returns undo_data or (nil, err).
-local function raw_redo(entry)
+local function raw_redo(entry, time_fn)
   if entry.is_batch then
     local new_batch_entries = {}
     for i = 1, #entry.batch_entries do
@@ -118,7 +119,7 @@ local function raw_redo(entry)
         command   = sub.command,
         args_list = sub.args_list,
         undo_data = undo_data,
-        time      = os.time(),
+        time      = time_fn(),
       }
     end
     entry.batch_entries = new_batch_entries
@@ -143,7 +144,7 @@ function History:execute(command, ...)
       command   = command,
       args_list = args_list,
       undo_data = undo_data,
-      time      = os.time(),
+      time      = self._time_fn(),
     }
     self._batch[#self._batch + 1] = entry
     if self._on_exec then self._on_exec(command, ...) end
@@ -160,7 +161,7 @@ function History:execute(command, ...)
     command   = command,
     args_list = args_list,
     undo_data = undo_data,
-    time      = os.time(),
+    time      = self._time_fn(),
     name      = command.name,
   }
   push_undo(self, entry)
@@ -193,7 +194,7 @@ function History:redo(...)
   local stack = self._redo
   if #stack == 0 then return false end
   local entry = stack[#stack]
-  local _, err = raw_redo(entry)
+  local _, err = raw_redo(entry, self._time_fn)
   if err then return false, err end
   stack[#stack] = nil
   push_undo(self, entry)
@@ -254,7 +255,7 @@ function History:commit_batch(name)
     is_batch      = true,
     batch_entries = entries,
     name          = name or "batch",
-    time          = os.time(),
+    time          = self._time_fn(),
     command       = { name = name or "batch" },  -- for callbacks
   }
   push_undo(self, batch_entry)
@@ -349,7 +350,7 @@ function History:play(macro, ...)
       command   = step.command,
       args_list = args_list,
       undo_data = undo_data,
-      time      = os.time(),
+      time      = self._time_fn(),
       name      = step.command.name,
     }
     push_undo(self, entry)

@@ -311,8 +311,9 @@ function Duration:gte(other) return self._secs >= other._secs end
 -- Utilities
 -- ---------------------------------------------------------------------------
 
-function M.since(epoch_seconds)
-  return new_raw(os.time() - epoch_seconds)
+function M.since(time_fn, epoch_seconds)
+  assert(time_fn, "since requires time_fn")
+  return new_raw(time_fn() - epoch_seconds)
 end
 
 function M.between(t1, t2)

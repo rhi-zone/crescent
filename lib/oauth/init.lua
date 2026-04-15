@@ -488,12 +488,13 @@ function M.jwt_decode(token_str)
   }
 end
 
--- clock is injectable for testing: defaults to os.time()
-function M.jwt_expired(payload, clock)
+-- time_fn is required: function returning unix timestamp.
+function M.jwt_expired(payload, time_fn)
+  assert(time_fn, "jwt_expired requires time_fn")
   if type(payload) ~= "table" then return true end
   local exp = payload.exp
   if exp == nil then return false end  -- no exp claim → never expires
-  local now = clock and clock() or os.time()
+  local now = time_fn()
   return now >= exp
 end
 

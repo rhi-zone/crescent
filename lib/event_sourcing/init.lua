@@ -45,14 +45,14 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.event(event_type, data, opts)
-  opts = opts or {}
+  assert(opts and opts.time_fn, "event requires opts.time_fn")
   return {
     id             = next_id(),
     type           = event_type,
     aggregate_id   = opts.aggregate_id,
     aggregate_type = opts.aggregate_type,
     version        = opts.version or 0,
-    timestamp      = os.time(),
+    timestamp      = opts.time_fn(),
     data           = data or {},
     metadata       = opts.metadata or {},
   }
@@ -202,7 +202,9 @@ end
 -- agg.id                            (aggregate id)
 -- ---------------------------------------------------------------------------
 
-function M.aggregate(agg_type, handlers)
+function M.aggregate(agg_type, handlers, opts)
+  assert(opts and opts.time_fn, "aggregate requires opts.time_fn")
+  local agg_time_fn = opts.time_fn
   local AggClass   = {}
   AggClass.__index = AggClass
 
@@ -235,6 +237,7 @@ function M.aggregate(agg_type, handlers)
       aggregate_id   = self.id,
       aggregate_type = agg_type,
       version        = next_version,
+      time_fn        = agg_time_fn,
     })
     local handler = handlers[event_type]
     if handler then

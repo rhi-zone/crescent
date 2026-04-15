@@ -45,8 +45,10 @@ end
 -- opts.poll_interval: seconds between checks (default 1.0)
 --: ({ poll_interval: number | nil } | nil) -> watcher
 function M.watcher(opts)
-  opts = opts or {}
+  assert(opts and opts.time_fn, "watcher requires opts.time_fn")
   local w = {}
+
+  w._time_fn = opts.time_fn
 
   -- poll interval in seconds
   w._poll_interval = opts.poll_interval or 1.0
@@ -155,7 +157,7 @@ function M.watcher(opts)
   -- Returns an array of { module_name, filepath } for changed modules.
   -- Respects poll_interval: if called more frequently, may return empty table.
   function w:check()
-    local now = os.time()
+    local now = self._time_fn()
     -- Allow check() to be called freely; rate-limit only auto_reload via _last_check
     local changed = {}
     for _, module_name in ipairs(self._watch_order) do
@@ -241,7 +243,7 @@ function M.watcher(opts)
   -- Intended to be called from a main loop.
   -- Respects poll_interval to avoid excessive stat() calls.
   function w:auto_reload()
-    local now = os.time()
+    local now = self._time_fn()
     if now - self._last_check < self._poll_interval then
       return
     end

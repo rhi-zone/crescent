@@ -48,14 +48,14 @@ local no_undo_cmd = cmd.command({
 T.describe("command", function()
 
   T.it("execute mutates state", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 10 })
     T.eq(state.value, 10)
   end)
 
   T.it("undo reverts state", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 10 })
     T.eq(state.value, 10)
@@ -64,7 +64,7 @@ T.describe("command", function()
   end)
 
   T.it("redo re-applies command", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 10 })
     h:undo()
@@ -74,7 +74,7 @@ T.describe("command", function()
   end)
 
   T.it("can_undo and can_redo are correct", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     T.fail(h:can_undo())
     T.fail(h:can_redo())
@@ -87,7 +87,7 @@ T.describe("command", function()
   end)
 
   T.it("multiple undo/redo", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 10 })
     h:execute(set_value, nil, state, { value = 20 })
@@ -106,7 +106,7 @@ T.describe("command", function()
   end)
 
   T.it("new execute after undo clears redo stack", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 10 })
     h:execute(set_value, nil, state, { value = 20 })
@@ -118,7 +118,7 @@ T.describe("command", function()
   end)
 
   T.it("undo_depth and redo_depth", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     T.eq(h:undo_depth(), 0)
     T.eq(h:redo_depth(), 0)
@@ -132,7 +132,7 @@ T.describe("command", function()
   end)
 
   T.it("max_size drops oldest entries", function()
-    local h     = cmd.history({ max_size = 2 })
+    local h     = cmd.history({ max_size = 2, time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 1 })
     h:execute(set_value, nil, state, { value = 2 })
@@ -147,7 +147,7 @@ T.describe("command", function()
   end)
 
   T.it("entries returns correct count and names", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0, list = {} }
     h:execute(set_value, nil, state, { value = 5 })
     h:execute(add_item,  nil, state, { item = "a" })
@@ -163,6 +163,7 @@ T.describe("command", function()
       on_execute = function() exec_count = exec_count + 1 end,
       on_undo    = function() undo_count = undo_count + 1 end,
       on_redo    = function() redo_count = redo_count + 1 end,
+      time_fn    = os.time,
     })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 7 })
@@ -174,7 +175,7 @@ T.describe("command", function()
   end)
 
   T.it("clear empties history", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 1 })
     h:execute(set_value, nil, state, { value = 2 })
@@ -187,7 +188,7 @@ T.describe("command", function()
   end)
 
   T.it("clear_redo clears only the redo stack", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(set_value, nil, state, { value = 1 })
     h:undo()
@@ -199,7 +200,7 @@ T.describe("command", function()
   end)
 
   T.it("batch: single undo reverts all steps", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:begin_batch()
       h:execute(set_value, nil, state, { value = 5 })
@@ -213,7 +214,7 @@ T.describe("command", function()
   end)
 
   T.it("batch: redo re-applies all steps", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:begin_batch()
       h:execute(set_value, nil, state, { value = 5 })
@@ -226,7 +227,7 @@ T.describe("command", function()
   end)
 
   T.it("rollback_batch: state unchanged on error path", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:begin_batch()
       h:execute(set_value, nil, state, { value = 5 })
@@ -237,7 +238,7 @@ T.describe("command", function()
   end)
 
   T.it("transaction: commits on success", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     local ok = h:transaction("tx", function()
       h:execute(set_value, nil, state, { value = 42 })
@@ -248,7 +249,7 @@ T.describe("command", function()
   end)
 
   T.it("transaction: rollback on error", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     local ok, err = h:transaction("tx_fail", function()
       h:execute(set_value, nil, state, { value = 99 })
@@ -261,7 +262,7 @@ T.describe("command", function()
   end)
 
   T.it("command without undo: undo returns false", function()
-    local h     = cmd.history()
+    local h     = cmd.history({ time_fn = os.time })
     local state = { value = 0 }
     h:execute(no_undo_cmd, nil, state, { value = 55 })
     local result, err = h:undo()
@@ -270,7 +271,7 @@ T.describe("command", function()
   end)
 
   T.it("macro: play replays sequence", function()
-    local h      = cmd.history()
+    local h      = cmd.history({ time_fn = os.time })
     local state1 = { value = 0 }
     local state2 = { value = 0 }
 
@@ -290,13 +291,13 @@ T.describe("command", function()
   end)
 
   T.it("undo returns false when stack empty", function()
-    local h = cmd.history()
+    local h = cmd.history({ time_fn = os.time })
     local result = h:undo()
     T.fail(result)
   end)
 
   T.it("redo returns false when stack empty", function()
-    local h = cmd.history()
+    local h = cmd.history({ time_fn = os.time })
     local result = h:redo()
     T.fail(result)
   end)

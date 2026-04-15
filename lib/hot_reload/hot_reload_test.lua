@@ -83,18 +83,18 @@ end)
 
 T.describe("HR.watcher", function()
   T.it("creates a watcher with default poll_interval", function()
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     T.ok(w ~= nil)
     T.eq(w._poll_interval, 1.0)
   end)
 
   T.it("accepts custom poll_interval", function()
-    local w = HR.watcher({ poll_interval = 0.5 })
+    local w = HR.watcher({ poll_interval = 0.5, time_fn = os.time })
     T.eq(w._poll_interval, 0.5)
   end)
 
   T.it("starts with zero stats", function()
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     local s = w:stats()
     T.eq(s.watched, 0)
     T.eq(s.reloaded_total, 0)
@@ -110,7 +110,7 @@ T.describe("watcher:watch + check (no change)", function()
   T.it("watch registers a module", function()
     local path = os.tmpname()
     write_file(path, "return {}\n")
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch("test.nochange", path)
     local s = w:stats()
     T.eq(s.watched, 1)
@@ -120,7 +120,7 @@ T.describe("watcher:watch + check (no change)", function()
   T.it("check returns empty table when file unchanged", function()
     local path = os.tmpname()
     write_file(path, "return {}\n")
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch("test.nochange2", path)
     local changed = w:check()
     T.eq(#changed, 0)
@@ -136,7 +136,7 @@ T.describe("watcher:check (detects change)", function()
   T.it("returns changed entry after mtime bump", function()
     local path = os.tmpname()
     write_file(path, "return {}\n")
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch("test.change", path)
 
     -- Confirm no change initially
@@ -162,7 +162,7 @@ T.describe("watcher:check (detects change)", function()
     local p2 = os.tmpname()
     write_file(p1, "return {}\n")
     write_file(p2, "return {}\n")
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch("test.multi1", p1)
     w:watch("test.multi2", p2)
 
@@ -207,7 +207,7 @@ T.describe("watcher:reload", function()
     write_file(path, "return { value = 2 }\n")
 
     -- Reload via watcher
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     local ok, err = w:reload(mod_name)
     T.ok(ok, "reload should succeed: " .. tostring(err))
@@ -246,7 +246,7 @@ T.describe("watcher:reload", function()
     -- Break the module
     write_file(path, "this is not valid lua !@#\n")
 
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     local ok, err = w:reload(mod_name)
     T.fail(ok, "reload should fail")
@@ -285,7 +285,7 @@ T.describe("on_reload callback", function()
     require(mod_name)
 
     local calls = {}
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:on_reload(function(mname, ok, err)
       calls[#calls + 1] = { mname = mname, ok = ok, err = err }
@@ -319,7 +319,7 @@ T.describe("on_reload callback", function()
     write_file(path, "invalid !! syntax\n")
 
     local calls = {}
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:on_reload(function(mname, ok, err)
       calls[#calls + 1] = { mname = mname, ok = ok, err = err }
@@ -356,7 +356,7 @@ T.describe("on_error callback", function()
     write_file(path, "bad bad bad\n")
 
     local errs = {}
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:on_error(function(mname, err)
       errs[#errs + 1] = { mname = mname, err = err }
@@ -385,7 +385,7 @@ T.describe("on_error callback", function()
     require(mod_name)
 
     local errs = {}
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:on_error(function(mname, err)
       errs[#errs + 1] = err
@@ -420,7 +420,7 @@ T.describe("preserve_state", function()
     -- Set a hot state on the live module
     m1._hot_state = { counter = 99 }
 
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:preserve_state(mod_name, "_hot_state")
 
@@ -471,7 +471,7 @@ end
 return M
 ]])
 
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:preserve_state(mod_name, "_hot_state")
 
@@ -507,7 +507,7 @@ T.describe("auto_reload", function()
     end)
     require(mod_name)
 
-    local w = HR.watcher({ poll_interval = 0 })
+    local w = HR.watcher({ poll_interval = 0, time_fn = os.time })
     w:watch(mod_name, path)
 
     -- Write new content first, then bump mtime so check() detects change
@@ -541,7 +541,7 @@ T.describe("auto_reload", function()
     require(mod_name)
 
     -- Long poll interval so second call should skip
-    local w = HR.watcher({ poll_interval = 9999 })
+    local w = HR.watcher({ poll_interval = 9999, time_fn = os.time })
     w:watch(mod_name, path)
 
     -- First call processes
@@ -573,7 +573,7 @@ T.describe("stats", function()
     local p2 = os.tmpname()
     write_file(p1, "")
     write_file(p2, "")
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     T.eq(w:stats().watched, 0)
     w:watch("mod.a", p1)
     T.eq(w:stats().watched, 1)
@@ -598,7 +598,7 @@ T.describe("stats", function()
     end)
     require(mod_name)
 
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch(mod_name, path)
     w:reload(mod_name)
     w:reload(mod_name)
@@ -616,14 +616,14 @@ end)
 
 T.describe("dependents", function()
   T.it("returns empty list for unknown module", function()
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     local d = w:dependents("lib.nothing")
     T.eq(type(d), "table")
     T.eq(#d, 0)
   end)
 
   T.it("register_dependency and dependents", function()
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:register_dependency("lib.core", "lib.app")
     w:register_dependency("lib.core", "lib.server")
     local d = w:dependents("lib.core")
@@ -633,7 +633,7 @@ T.describe("dependents", function()
   end)
 
   T.it("no duplicate dependents", function()
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:register_dependency("lib.x", "lib.y")
     w:register_dependency("lib.x", "lib.y")
     T.eq(#w:dependents("lib.x"), 1)
@@ -651,7 +651,7 @@ T.describe("watch_dir", function()
     write_file(dir .. "/b.lua", "return {}\n")
     write_file(dir .. "/c.txt", "not lua\n")  -- should be ignored
 
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch_dir(dir, { pattern = "%.lua$" })
 
     -- Should have found 2 lua files
@@ -670,7 +670,7 @@ T.describe("watch_dir", function()
     write_file(apath, "return {}\n")
 
     local fired = {}
-    local w = HR.watcher()
+    local w = HR.watcher({ time_fn = os.time })
     w:watch_dir(dir, {
       pattern   = "%.lua$",
       on_change = function(fp) fired[#fired + 1] = fp end,

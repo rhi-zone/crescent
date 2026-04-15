@@ -465,21 +465,21 @@ end)
 T.describe("jwt_expired", function()
   T.it("returns false when exp is in the future", function()
     local payload = { exp = os.time() + 3600 }
-    T.ok(not oauth.jwt_expired(payload), "not expired")
+    T.ok(not oauth.jwt_expired(payload, os.time), "not expired")
   end)
 
   T.it("returns true when exp is in the past", function()
     local payload = { exp = os.time() - 1 }
-    T.ok(oauth.jwt_expired(payload), "expired")
+    T.ok(oauth.jwt_expired(payload, os.time), "expired")
   end)
 
   T.it("returns false when no exp claim", function()
-    T.ok(not oauth.jwt_expired({}), "no exp → not expired")
+    T.ok(not oauth.jwt_expired({}, os.time), "no exp → not expired")
   end)
 
   T.it("returns true for non-table payload", function()
-    T.ok(oauth.jwt_expired(nil), "nil payload → expired")
-    T.ok(oauth.jwt_expired("string"), "string payload → expired")
+    T.ok(oauth.jwt_expired(nil, os.time), "nil payload → expired")
+    T.ok(oauth.jwt_expired("string", os.time), "string payload → expired")
   end)
 
   T.it("uses injectable clock", function()

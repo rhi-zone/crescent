@@ -262,12 +262,14 @@ end
 local EventStore = {}
 EventStore.__index = EventStore
 
---: () -> EventStore
-function M.event_store()
+--: ({ time_fn: () -> number }) -> EventStore
+function M.event_store(opts)
+	assert(opts and opts.time_fn, "event_store requires opts.time_fn")
 	return setmetatable({
 		_streams = {},       -- stream_name -> {event, ...}
 		_global_seq = 0,
 		_on_append = {},
+		_time_fn = opts.time_fn,
 	}, EventStore)
 end
 
@@ -285,7 +287,7 @@ function EventStore:append(stream, event)
 		global_seq = self._global_seq,
 		type = event.type,
 		data = event.data,
-		timestamp = os.time(),
+		timestamp = self._time_fn(),
 	}
 	s[seq] = stored
 	local hooks = self._on_append

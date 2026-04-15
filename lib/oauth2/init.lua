@@ -363,9 +363,10 @@ end
 -- PKCE: generate code_verifier (random URL-safe string, 43-128 chars per RFC 7636)
 -- and code_challenge = BASE64URL(SHA256(verifier)).
 -- Uses LuaJIT FFI getrandom or /dev/urandom for randomness.
--- Falls back to math.random seeded with os.time() if FFI unavailable.
+-- Falls back to math.random seeded with time_fn() if FFI unavailable.
 -- Returns: verifier (string), challenge (string) or (nil, errmsg).
-function M.pkce()
+function M.pkce(opts)
+  assert(opts and opts.time_fn, "pkce requires opts.time_fn")
   -- Generate 32 random bytes → 43 base64url chars (enough entropy, spec min is 43).
   local raw
   local ok_ffi, ffi = pcall(require, "ffi")
@@ -394,7 +395,7 @@ function M.pkce()
   end
   if not raw then
     -- Pure Lua fallback: use math.random (not cryptographically secure)
-    math.randomseed(os.time())
+    math.randomseed(opts.time_fn())
     local bytes = {}
     for i = 1, 32 do bytes[i] = string.char(math.random(0, 255)) end
     raw = table.concat(bytes)
@@ -434,7 +435,7 @@ token_store_mt.__index = token_store_mt
 function token_store_mt:set(key, token, issued_at)
   self._tokens[key] = {
     token = token,
-    issued_at = issued_at or os.time(),
+    issued_at = issued_at or self._time_fn(),
   }
 end
 
@@ -447,26 +448,24 @@ end
 
 -- Returns true if the stored token has expired.
 -- Uses issued_at + expires_in to determine expiry.
--- Optional `now` argument overrides os.time() (for testing).
-function token_store_mt:is_expired(key, now)
+function token_store_mt:is_expired(key)
   local entry = self._tokens[key]
   if not entry then return true end
   local token = entry.token
   if not token.expires_in then return false end -- no expiry info → assume valid
   local expiry = entry.issued_at + token.expires_in
-  return (now or os.time()) >= expiry
+  return self._time_fn() >= expiry
 end
 
 -- Returns true if the token will expire within `margin` seconds (default 60).
--- Optional `now` argument overrides os.time().
-function token_store_mt:needs_refresh(key, margin, now)
+function token_store_mt:needs_refresh(key, margin)
   local entry = self._tokens[key]
   if not entry then return true end
   local token = entry.token
   if not token.expires_in then return false end
   margin = margin or 60
   local expiry = entry.issued_at + token.expires_in
-  return (now or os.time()) + margin >= expiry
+  return self._time_fn() + margin >= expiry
 end
 
 -- Delete a stored token.
@@ -475,8 +474,9 @@ function token_store_mt:delete(key)
 end
 
 -- Create a new in-memory token store.
-function M.token_store()
-  return setmetatable({ _tokens = {} }, token_store_mt)
+function M.token_store(opts)
+  assert(opts and opts.time_fn, "token_store requires opts.time_fn")
+  return setmetatable({ _tokens = {}, _time_fn = opts.time_fn }, token_store_mt)
 end
 
 -- ── OAuth2 Client ─────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ local WF = require("lib.workflow")
 -- ---------------------------------------------------------------------------
 
 local function linear_wf()
-  return WF.define({
+  return WF.define({ time_fn = os.time,
     start = "a",
     steps = {
       a = { run = function(ctx) ctx.a = 1 end, on_success = "b" },
@@ -120,7 +120,7 @@ end)
 
 T.describe("on_failure routing", function()
   T.it("routes to on_failure step on error", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = {
         bad     = { run = function() error("boom") end, on_failure = "recover" },
@@ -134,7 +134,7 @@ T.describe("on_failure routing", function()
   end)
 
   T.it("fails workflow when no on_failure", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = {
         bad = { run = function() error("no handler") end },
@@ -155,7 +155,7 @@ end)
 T.describe("retry", function()
   T.it("retries up to retry count before on_failure", function()
     local attempts = 0
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "flaky",
       steps = {
         flaky   = {
@@ -177,7 +177,7 @@ T.describe("retry", function()
 
   T.it("succeeds on second attempt", function()
     local attempts = 0
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "eventual",
       steps = {
         eventual = {
@@ -199,7 +199,7 @@ T.describe("retry", function()
 
   T.it("retry=0 means no retries (one attempt only)", function()
     local attempts = 0
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "once",
       steps = {
         once      = { run = function() attempts=attempts+1; error("x") end, retry=0, on_failure="end_step" },
@@ -217,7 +217,7 @@ end)
 
 T.describe("conditional branching", function()
   T.it("routes to returned step name", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "check",
       steps = {
         check     = { run = function(ctx) return ctx.value > 10 and "high" or "low" end },
@@ -236,7 +236,7 @@ T.describe("conditional branching", function()
   end)
 
   T.it("conditional ignores on_success when branch returned", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "check",
       steps = {
         check  = { run = function() return "target" end, on_success = "never" },
@@ -257,7 +257,7 @@ end)
 
 T.describe("loops", function()
   T.it("repeats step until condition changes", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "loop",
       steps = {
         loop = {
@@ -283,7 +283,7 @@ end)
 
 T.describe("parallel steps", function()
   T.it("runs all parallel steps and then on_success", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "fan_out",
       steps = {
         fan_out = {
@@ -306,7 +306,7 @@ T.describe("parallel steps", function()
   end)
 
   T.it("parallel failure fails workflow when no on_failure", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "fan",
       steps = {
         fan    = { run = function() return {"bad_step"} end, on_success = "ok" },
@@ -336,7 +336,7 @@ T.describe("history", function()
   end)
 
   T.it("records error in history for failed step", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = {
         bad     = { run = function() error("kaboom") end, on_failure = "ok" },
@@ -430,7 +430,7 @@ T.describe("validate()", function()
   end)
 
   T.it("detects missing referenced step", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "a",
       steps = {
         a = { run = function() end, on_success = "missing_step" },
@@ -447,7 +447,7 @@ T.describe("validate()", function()
   end)
 
   T.it("detects unreachable step", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "a",
       steps = {
         a       = { run = function() end },
@@ -464,7 +464,7 @@ T.describe("validate()", function()
   end)
 
   T.it("detects missing start step", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "nonexistent",
       steps = { a = { run = function() end } },
     })
@@ -495,7 +495,7 @@ T.describe("hooks", function()
   T.it("on_step_failed called on error", function()
     local failed_step = nil
     local failed_err  = nil
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = {
         bad = { run = function() error("boom") end, on_failure = "ok" },
@@ -532,7 +532,7 @@ T.describe("hooks", function()
 
   T.it("on_complete NOT called when workflow fails", function()
     local completed = false
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = { bad = { run = function() error("x") end } },
     })
@@ -560,7 +560,7 @@ T.describe("status transitions", function()
   end)
 
   T.it("becomes failed on unhandled error", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = { bad = { run = function() error("boom") end } },
     })
@@ -583,7 +583,7 @@ end)
 
 T.describe("edge cases", function()
   T.it("single-step workflow completes", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "only",
       steps = { only = { run = function(ctx) ctx.x = 42 end } },
     })
@@ -595,7 +595,7 @@ T.describe("edge cases", function()
   end)
 
   T.it("step() on failed workflow returns error", function()
-    local wf = WF.define({
+    local wf = WF.define({ time_fn = os.time,
       start = "bad",
       steps = { bad = { run = function() error("x") end } },
     })

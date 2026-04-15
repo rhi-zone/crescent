@@ -8,7 +8,7 @@ local T = require("lib.test.assert")
 
 T.describe("email.message composition", function()
 	T.it("simple text message has valid headers", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "alice@example.com",
 			to = {"bob@example.com"},
 			subject = "Hello",
@@ -23,7 +23,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("has Date, From, To, Subject, MIME-Version headers", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "alice@example.com",
 			to = {"bob@example.com"},
 			subject = "Test",
@@ -38,8 +38,8 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("Message-ID is generated and unique", function()
-		local msg1 = email.message({ from = "a@b.com", to = {"c@d.com"}, subject = "1", text = "x" })
-		local msg2 = email.message({ from = "a@b.com", to = {"c@d.com"}, subject = "2", text = "y" })
+		local msg1 = email.message({ time_fn = os.time, from = "a@b.com", to = {"c@d.com"}, subject = "1", text = "x" })
+		local msg2 = email.message({ time_fn = os.time, from = "a@b.com", to = {"c@d.com"}, subject = "2", text = "y" })
 		local raw1 = msg1:to_string()
 		local raw2 = msg2:to_string()
 		local id1 = raw1:match("Message%-ID: (<[^>]+>)")
@@ -50,7 +50,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("HTML message has text/html content type", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "HTML",
@@ -61,7 +61,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("text + html produces multipart/alternative", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Both",
@@ -75,7 +75,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("attachment produces multipart/mixed with base64", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Att",
@@ -96,7 +96,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("inline attachment with Content-ID", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Inline",
@@ -116,7 +116,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("multiple recipients in To and Cc", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"bob@b.com", "carol@c.com"},
 			cc = {"dave@d.com", "eve@e.com"},
@@ -129,7 +129,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("subject with non-ASCII uses encoded-word", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Héllo Wörld",
@@ -143,7 +143,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("custom headers included", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Custom",
@@ -156,7 +156,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("Reply-To header", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Reply",
@@ -170,7 +170,7 @@ T.describe("email.message composition", function()
 	T.it("quoted-printable encoding", function()
 		-- Test long lines and special characters
 		local long = string.rep("A", 100)
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "QP",
@@ -184,7 +184,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("empty body produces valid message", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Empty",
@@ -196,7 +196,7 @@ T.describe("email.message composition", function()
 	end)
 
 	T.it("BCC not included in headers", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"bob@b.com"},
 			bcc = {"secret@b.com"},
@@ -212,7 +212,7 @@ end)
 
 T.describe("email.parse", function()
 	T.it("round-trip: compose -> to_string -> parse recovers fields", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "alice@example.com",
 			to = {"bob@example.com"},
 			subject = "Round Trip",
@@ -228,7 +228,7 @@ T.describe("email.parse", function()
 	end)
 
 	T.it("parse multipart: recovers text and html parts", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Multi",
@@ -243,7 +243,7 @@ T.describe("email.parse", function()
 	end)
 
 	T.it("parse attachment: recovers filename and data", function()
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "a@b.com",
 			to = {"c@d.com"},
 			subject = "Att",
@@ -285,7 +285,7 @@ T.describe("SMTP client", function()
 		ok, err = smtp:auth("PLAIN", "user", "pass")
 		T.ok(ok, err)
 
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "user@example.com",
 			to = {"dest@example.com"},
 			subject = "Test",
@@ -332,7 +332,7 @@ T.describe("SMTP client", function()
 		local smtp = email.smtp_connect({ host = "h", port = 25, transport = transport })
 		smtp:ehlo("test")
 
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "alice@a.com",
 			to = {"bob@b.com", "carol@c.com"},
 			subject = "Test",
@@ -380,7 +380,7 @@ T.describe("SMTP client", function()
 		local smtp = email.smtp_connect({ host = "h", port = 25, transport = transport })
 		smtp:ehlo("test")
 
-		local msg = email.message({
+		local msg = email.message({ time_fn = os.time,
 			from = "alice@a.com",
 			to = {"bob@b.com"},
 			bcc = {"secret@s.com"},

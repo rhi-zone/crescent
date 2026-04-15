@@ -9,6 +9,13 @@ end
 local ES = require("lib.event_sourcing")
 local T  = require("lib.test.assert")
 
+-- Helper: wrap ES.event to inject time_fn = os.time into opts.
+local function ev(event_type, data, opts)
+  opts = opts or {}
+  opts.time_fn = os.time
+  return ES.event(event_type, data, opts)
+end
+
 -- ---------------------------------------------------------------------------
 -- BankAccount aggregate (used across many test groups)
 -- ---------------------------------------------------------------------------
@@ -29,7 +36,7 @@ local BankAccount = ES.aggregate("BankAccount", {
     state.open = false
     return state
   end,
-})
+}, { time_fn = os.time })
 
 -- ---------------------------------------------------------------------------
 -- M.event
@@ -37,7 +44,7 @@ local BankAccount = ES.aggregate("BankAccount", {
 
 T.describe("M.event", function()
   T.it("creates an event with required fields", function()
-    local ev = ES.event("Deposited", { amount = 50 }, {
+    local ev = ev("Deposited", { amount = 50 }, {
       aggregate_id   = "acct-1",
       aggregate_type = "BankAccount",
       version        = 3,
@@ -54,7 +61,7 @@ T.describe("M.event", function()
   end)
 
   T.it("defaults data, metadata, and version", function()
-    local ev = ES.event("Noop")
+    local ev = ev("Noop")
     T.eq(ev.type,    "Noop")
     T.eq(ev.version, 0)
     T.ok(type(ev.data)     == "table")
@@ -62,8 +69,8 @@ T.describe("M.event", function()
   end)
 
   T.it("ids are unique", function()
-    local a = ES.event("A")
-    local b = ES.event("B")
+    local a = ev("A")
+    local b = ev("B")
     T.neq(a.id, b.id)
   end)
 end)
@@ -75,8 +82,8 @@ end)
 T.describe("store:append basic", function()
   T.it("appends events and stamps version and position", function()
     local store = ES.store()
-    local ev1 = ES.event("Opened",    { owner = "Alice", initial_deposit = 100 })
-    local ev2 = ES.event("Deposited", { amount = 50 })
+    local ev1 = ev("Opened",    { owner = "Alice", initial_deposit = 100 })
+    local ev2 = ev("Deposited", { amount = 50 })
     local ok, err = store:append("acct-1", { ev1, ev2 })
     T.ok(ok)
     T.eq(err, nil)
@@ -90,8 +97,8 @@ T.describe("store:append basic", function()
 
   T.it("positions are globally unique across aggregates", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened", {}) })
-    store:append("acct-2", { ES.event("Opened", {}) })
+    store:append("acct-1", { ev("Opened", {}) })
+    store:append("acct-2", { ev("Opened", {}) })
     local e1 = store:load("acct-1")[1]
     local e2 = store:load("acct-2")[1]
     T.neq(e1.position, e2.position)
@@ -99,7 +106,7 @@ T.describe("store:append basic", function()
 
   T.it("returns error when aggregate_id is missing", function()
     local store = ES.store()
-    local ok, err = store:append(nil, { ES.event("Noop") })
+    local ok, err = store:append(nil, { ev("Noop") })
     T.eq(ok, nil)
     T.ok(err ~= nil)
   end)
@@ -119,40 +126,40 @@ end)
 T.describe("store optimistic concurrency", function()
   T.it("expected_version=0 succeeds on new stream", function()
     local store = ES.store()
-    local ok, err = store:append("acct-1", { ES.event("Opened", {}) }, 0)
+    local ok, err = store:append("acct-1", { ev("Opened", {}) }, 0)
     T.ok(ok)
     T.eq(err, nil)
   end)
 
   T.it("expected_version=0 fails on existing stream", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened", {}) })
-    local ok, err = store:append("acct-1", { ES.event("Deposited", { amount = 10 }) }, 0)
+    store:append("acct-1", { ev("Opened", {}) })
+    local ok, err = store:append("acct-1", { ev("Deposited", { amount = 10 }) }, 0)
     T.eq(ok, nil)
     T.ok(err ~= nil)
   end)
 
   T.it("expected_version=n succeeds when stream is at n", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened", {}) })
-    local ok, err = store:append("acct-1", { ES.event("Deposited", { amount = 10 }) }, 1)
+    store:append("acct-1", { ev("Opened", {}) })
+    local ok, err = store:append("acct-1", { ev("Deposited", { amount = 10 }) }, 1)
     T.ok(ok)
     T.eq(err, nil)
   end)
 
   T.it("expected_version=n fails on version mismatch", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened", {}) })
-    store:append("acct-1", { ES.event("Deposited", { amount = 10 }) })
-    local ok, err = store:append("acct-1", { ES.event("Deposited", { amount = 20 }) }, 1)
+    store:append("acct-1", { ev("Opened", {}) })
+    store:append("acct-1", { ev("Deposited", { amount = 10 }) })
+    local ok, err = store:append("acct-1", { ev("Deposited", { amount = 20 }) }, 1)
     T.eq(ok, nil)
     T.ok(err ~= nil)
   end)
 
   T.it("nil expected_version skips the check", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened", {}) })
-    local ok = store:append("acct-1", { ES.event("Deposited", { amount = 5 }) }, nil)
+    store:append("acct-1", { ev("Opened", {}) })
+    local ok = store:append("acct-1", { ev("Deposited", { amount = 5 }) }, nil)
     T.ok(ok)
   end)
 end)
@@ -165,10 +172,10 @@ T.describe("store:load opts", function()
   local function filled_store()
     local store = ES.store()
     store:append("acct-1", {
-      ES.event("Opened",    { initial_deposit = 1000 }),
-      ES.event("Deposited", { amount = 100 }),
-      ES.event("Deposited", { amount = 200 }),
-      ES.event("Withdrawn", { amount = 50 }),
+      ev("Opened",    { initial_deposit = 1000 }),
+      ev("Deposited", { amount = 100 }),
+      ev("Deposited", { amount = 200 }),
+      ev("Withdrawn", { amount = 50 }),
     })
     return store
   end
@@ -213,9 +220,9 @@ end)
 T.describe("store:load_all", function()
   T.it("returns all events ordered by position", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened",    { owner = "Alice" }) })
-    store:append("acct-2", { ES.event("Opened",    { owner = "Bob"   }) })
-    store:append("acct-1", { ES.event("Deposited", { amount = 10     }) })
+    store:append("acct-1", { ev("Opened",    { owner = "Alice" }) })
+    store:append("acct-2", { ev("Opened",    { owner = "Bob"   }) })
+    store:append("acct-1", { ev("Deposited", { amount = 10     }) })
     local all = store:load_all()
     T.eq(#all, 3)
     T.ok(all[1].position < all[2].position)
@@ -224,8 +231,8 @@ T.describe("store:load_all", function()
 
   T.it("from_position filters earlier events", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("Opened", {}) })
-    store:append("acct-1", { ES.event("Deposited", { amount = 5 }) })
+    store:append("acct-1", { ev("Opened", {}) })
+    store:append("acct-1", { ev("Deposited", { amount = 5 }) })
     local all = store:load_all({ from_position = 2 })
     T.eq(#all, 1)
     T.eq(all[1].position, 2)
@@ -234,9 +241,9 @@ T.describe("store:load_all", function()
   T.it("limit caps the result", function()
     local store = ES.store()
     store:append("acct-1", {
-      ES.event("Opened",    {}),
-      ES.event("Deposited", { amount = 1 }),
-      ES.event("Deposited", { amount = 2 }),
+      ev("Opened",    {}),
+      ev("Deposited", { amount = 1 }),
+      ev("Deposited", { amount = 2 }),
     })
     local all = store:load_all({ limit = 2 })
     T.eq(#all, 2)
@@ -244,9 +251,9 @@ T.describe("store:load_all", function()
 
   T.it("aggregate_type filter works", function()
     local store = ES.store()
-    local ev1 = ES.event("Opened", {})
+    local ev1 = ev("Opened", {})
     ev1.aggregate_type = "BankAccount"
-    local ev2 = ES.event("Created", {})
+    local ev2 = ev("Created", {})
     ev2.aggregate_type = "Order"
     store:append("acct-1",  { ev1 })
     store:append("order-1", { ev2 })
@@ -266,8 +273,8 @@ T.describe("store:subscribe", function()
     local seen = {}
     store:subscribe(function(ev) seen[#seen + 1] = ev end)
     store:append("acct-1", {
-      ES.event("Opened",    {}),
-      ES.event("Deposited", { amount = 50 }),
+      ev("Opened",    {}),
+      ev("Deposited", { amount = 50 }),
     })
     T.eq(#seen, 2)
     T.eq(seen[1].type, "Opened")
@@ -279,7 +286,7 @@ T.describe("store:subscribe", function()
     local a, b = 0, 0
     store:subscribe(function() a = a + 1 end)
     store:subscribe(function() b = b + 1 end)
-    store:append("acct-1", { ES.event("Opened", {}) })
+    store:append("acct-1", { ev("Opened", {}) })
     T.eq(a, 1)
     T.eq(b, 1)
   end)
@@ -350,10 +357,10 @@ T.describe("aggregate:apply", function()
   T.it("apply rebuilds state from stored events", function()
     local store = ES.store()
     store:append("acct-1", {
-      ES.event("Opened",    { owner = "Alice", initial_deposit = 1000 }),
-      ES.event("Deposited", { amount = 200 }),
-      ES.event("Withdrawn", { amount = 150 }),
-      ES.event("Deposited", { amount = 75  }),
+      ev("Opened",    { owner = "Alice", initial_deposit = 1000 }),
+      ev("Deposited", { amount = 200 }),
+      ev("Withdrawn", { amount = 150 }),
+      ev("Deposited", { amount = 75  }),
     })
     local evs  = store:load("acct-1")
     local acct = BankAccount.new("acct-1")
@@ -370,7 +377,7 @@ T.describe("aggregate:apply", function()
 
   T.it("unknown event types are skipped without error", function()
     local store = ES.store()
-    store:append("acct-1", { ES.event("UnknownEvent", {}) })
+    store:append("acct-1", { ev("UnknownEvent", {}) })
     local evs  = store:load("acct-1")
     local acct = BankAccount.new("acct-1")
     acct:apply(evs)
@@ -380,8 +387,8 @@ T.describe("aggregate:apply", function()
   T.it("Closed sets open = false", function()
     local store = ES.store()
     store:append("acct-1", {
-      ES.event("Opened", { owner = "Alice", initial_deposit = 100 }),
-      ES.event("Closed", {}),
+      ev("Opened", { owner = "Alice", initial_deposit = 100 }),
+      ev("Closed", {}),
     })
     local acct = BankAccount.new("acct-1")
     acct:apply(store:load("acct-1"))
@@ -418,7 +425,7 @@ T.describe("projection", function()
 
   T.it("handles a single event", function()
     local proj = total_balance_proj()
-    local ev   = ES.event("Opened", { initial_deposit = 500 }, { aggregate_id = "acct-1" })
+    local ev   = ev("Opened", { initial_deposit = 500 }, { aggregate_id = "acct-1" })
     ev.aggregate_id = "acct-1"
     proj:handle(ev)
     T.eq(proj.state.total, 500)
@@ -426,10 +433,10 @@ T.describe("projection", function()
 
   T.it("handle_all builds correct state across aggregates", function()
     local store = ES.store()
-    local ev1 = ES.event("Opened",    { initial_deposit = 500 })
-    local ev2 = ES.event("Opened",    { initial_deposit = 300 })
-    local ev3 = ES.event("Deposited", { amount = 100 })
-    local ev4 = ES.event("Withdrawn", { amount = 50  })
+    local ev1 = ev("Opened",    { initial_deposit = 500 })
+    local ev2 = ev("Opened",    { initial_deposit = 300 })
+    local ev3 = ev("Deposited", { amount = 100 })
+    local ev4 = ev("Withdrawn", { amount = 50  })
     store:append("acct-1", { ev1, ev3 })
     store:append("acct-2", { ev2, ev4 })
 
@@ -449,7 +456,7 @@ T.describe("projection", function()
 
   T.it("unknown event types are ignored", function()
     local proj = total_balance_proj()
-    proj:handle(ES.event("UnknownEvent", {}))
+    proj:handle(ev("UnknownEvent", {}))
     T.eq(proj.state.total, nil) -- no initialisation triggered
   end)
 end)
@@ -484,7 +491,7 @@ T.describe("saga", function()
 
   T.it("returns commands for a handled event", function()
     local saga = OnboardingSaga.new()
-    local ev   = ES.event("Opened", {}, { aggregate_id = "acct-1" })
+    local ev   = ev("Opened", {}, { aggregate_id = "acct-1" })
     ev.aggregate_id = "acct-1"
     local result = saga:handle(ev)
     T.eq(#result.commands, 1)
@@ -495,16 +502,16 @@ T.describe("saga", function()
 
   T.it("returns empty commands for unhandled event type", function()
     local saga   = OnboardingSaga.new()
-    local ev     = ES.event("Withdrawn", { amount = 10 })
+    local ev     = ev("Withdrawn", { amount = 10 })
     local result = saga:handle(ev)
     T.eq(#result.commands, 0)
   end)
 
   T.it("state updates accumulate across events", function()
     local saga = OnboardingSaga.new()
-    local ev1  = ES.event("Opened",    {}, { aggregate_id = "acct-1" })
+    local ev1  = ev("Opened",    {}, { aggregate_id = "acct-1" })
     ev1.aggregate_id = "acct-1"
-    local ev2  = ES.event("Deposited", { amount = 50 }, { aggregate_id = "acct-1" })
+    local ev2  = ev("Deposited", { amount = 50 }, { aggregate_id = "acct-1" })
     saga:handle(ev1)
     saga:handle(ev2)
     T.eq(saga.state.welcomed, true)
@@ -513,7 +520,7 @@ T.describe("saga", function()
   T.it("different instances are independent", function()
     local s1 = OnboardingSaga.new()
     local s2 = OnboardingSaga.new()
-    local ev = ES.event("Opened", {}, { aggregate_id = "acct-x" })
+    local ev = ev("Opened", {}, { aggregate_id = "acct-x" })
     ev.aggregate_id = "acct-x"
     s1:handle(ev)
     T.eq(s1.state.account_id, "acct-x")
@@ -529,8 +536,8 @@ T.describe("M.load_aggregate", function()
   T.it("loads from events when no snapshot exists", function()
     local store = ES.store()
     store:append("acct-1", {
-      ES.event("Opened",    { owner = "Alice", initial_deposit = 100 }),
-      ES.event("Deposited", { amount = 50 }),
+      ev("Opened",    { owner = "Alice", initial_deposit = 100 }),
+      ev("Deposited", { amount = 50 }),
     })
     local acct, err = ES.load_aggregate(store, BankAccount, "acct-1")
     T.ok(acct ~= nil)
@@ -543,15 +550,15 @@ T.describe("M.load_aggregate", function()
     local store = ES.store()
     -- Simulate three events already snapshotted.
     store:append("acct-1", {
-      ES.event("Opened",    { owner = "Alice", initial_deposit = 1000 }),
-      ES.event("Deposited", { amount = 100 }),
-      ES.event("Deposited", { amount = 200 }),
+      ev("Opened",    { owner = "Alice", initial_deposit = 1000 }),
+      ev("Deposited", { amount = 100 }),
+      ev("Deposited", { amount = 200 }),
     })
     -- Take a snapshot at version 3.
     store:snapshot("acct-1", { owner = "Alice", balance = 1300, open = true }, 3)
     -- Append more events after the snapshot.
     store:append("acct-1", {
-      ES.event("Withdrawn", { amount = 400 }),
+      ev("Withdrawn", { amount = 400 }),
     })
 
     local acct = ES.load_aggregate(store, BankAccount, "acct-1")

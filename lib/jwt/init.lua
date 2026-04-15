@@ -83,16 +83,18 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
---- Return the current Unix time.
---: () -> number
-function M.now()
-  return os.time()
+--- Return the current Unix time via the given time function.
+--: (() -> number) -> number
+function M.now(time_fn)
+  assert(time_fn, "now requires time_fn")
+  return time_fn()
 end
 
---- Return os.time() + seconds (for use as exp claim).
---: (number) -> number
-function M.exp_in(seconds)
-  return os.time() + seconds
+--- Return time_fn() + seconds (for use as exp claim).
+--: (() -> number, number) -> number
+function M.exp_in(time_fn, seconds)
+  assert(time_fn, "exp_in requires time_fn")
+  return time_fn() + seconds
 end
 
 --- Encode a JWT.
@@ -138,7 +140,8 @@ end
 -- Returns: payload_table, header_table  OR  nil, errmsg.
 -- opts.verify (default true): verify signature and time claims.
 -- opts.algorithms: list of accepted algorithm names (default {"HS256"}).
---: (string, string, { verify: boolean | nil, algorithms: unknown } | nil) -> unknown, unknown | (nil, string)
+-- opts.time_fn: required when verify ~= false — function returning unix timestamp.
+--: (string, string, { verify: boolean | nil, algorithms: unknown, time_fn: (() -> number) | nil } | nil) -> unknown, unknown | (nil, string)
 function M.decode(token, secret, opts)
   local verify = not (opts and opts.verify == false)
   local allowed_algs
@@ -190,7 +193,8 @@ function M.decode(token, secret, opts)
   end
 
   -- Time claims
-  local now = os.time()
+  assert(opts and opts.time_fn, "decode with verify requires opts.time_fn")
+  local now = opts.time_fn()
   if type(payload) == "table" then
     if payload.exp ~= nil then
       if type(payload.exp) ~= "number" then

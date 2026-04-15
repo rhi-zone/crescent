@@ -35,16 +35,16 @@ local function generate_boundary()
 	return "----=_Part_" .. random_hex(16)
 end
 
---: (string) -> string
-local function generate_message_id(from)
+--: (string, () -> number) -> string
+local function generate_message_id(from, time_fn)
 	local domain = from:match("@(.+)") or "localhost"
-	return "<" .. os.time() .. "." .. random_hex(8) .. "@" .. domain .. ">"
+	return "<" .. time_fn() .. "." .. random_hex(8) .. "@" .. domain .. ">"
 end
 
 -- RFC 2822 date format: "Thu, 01 Jan 2009 00:00:00 +0000"
---: () -> string
-local function rfc2822_date()
-	return os.date("!%a, %d %b %Y %H:%M:%S +0000")
+--: (() -> number) -> string
+local function rfc2822_date(time_fn)
+	return os.date("!%a, %d %b %Y %H:%M:%S +0000", time_fn())
 end
 
 -- ── Quoted-Printable ─────────────────────────────────────────────────────
@@ -168,6 +168,7 @@ Message.__index = Message
 
 --: ({ from: string, to: { string } | nil, cc: { string } | nil, bcc: { string } | nil, subject: string | nil, text: string | nil, html: string | nil, headers: { [string]: string } | nil, reply_to: string | nil }) -> any
 function M.message(opts)
+	assert(opts and opts.time_fn, "message requires opts.time_fn")
 	local msg = setmetatable({
 		from = opts.from,
 		to = opts.to or {},
@@ -179,6 +180,7 @@ function M.message(opts)
 		headers = opts.headers or {},
 		reply_to = opts.reply_to,
 		attachments = {},
+		_time_fn = opts.time_fn,
 	}, Message)
 	return msg
 end
@@ -340,8 +342,8 @@ function Message:to_string()
 	end
 	-- BCC intentionally omitted from headers
 	headers[#headers + 1] = "Subject: " .. encode_header_value(self.subject)
-	headers[#headers + 1] = "Date: " .. rfc2822_date()
-	headers[#headers + 1] = "Message-ID: " .. generate_message_id(self.from)
+	headers[#headers + 1] = "Date: " .. rfc2822_date(self._time_fn)
+	headers[#headers + 1] = "Message-ID: " .. generate_message_id(self.from, self._time_fn)
 	headers[#headers + 1] = "MIME-Version: 1.0"
 	if self.reply_to then
 		headers[#headers + 1] = "Reply-To: " .. self.reply_to

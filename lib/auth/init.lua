@@ -116,8 +116,10 @@ end
 
 --- Decode and verify a JWT with HS256.
 --- opts.verify_exp: set false to skip expiration check (default true).
---: (string, string, { verify_exp: boolean | nil } | nil) -> table | (nil, string)
+--- opts.time_fn: required — function returning unix timestamp.
+--: (string, string, { verify_exp: boolean | nil, time_fn: () -> number } | nil) -> table | (nil, string)
 function M.jwt_decode(token, secret, opts)
+	assert(opts and opts.time_fn, "jwt_decode requires opts.time_fn")
 	if type(token) ~= "string" then
 		return nil, "invalid token"
 	end
@@ -153,9 +155,9 @@ function M.jwt_decode(token, secret, opts)
 	end
 
 	-- Time validation.
-	local now = os.time()
+	local now = opts.time_fn()
 	local verify_exp = true
-	if opts and opts.verify_exp == false then
+	if opts.verify_exp == false then
 		verify_exp = false
 	end
 	if verify_exp and payload.exp and type(payload.exp) == "number" then
@@ -175,8 +177,8 @@ end
 -- ── Session tokens ───────────────────────────────────────────────────────────
 
 -- Read random bytes from the best available source.
---: (number) -> string
-local function random_bytes(n)
+--: (number, () -> number) -> string
+local function random_bytes(n, time_fn)
 	-- Try LuaJIT FFI getrandom / /dev/urandom.
 	local ok, ffi = pcall(require, "ffi")
 	if ok then
@@ -220,17 +222,18 @@ local function random_bytes(n)
 		if data and #data == n then return data end
 	end
 	-- Last resort: math.random (NOT cryptographically secure).
-	math.randomseed(os.time() + os.clock() * 1000000)
+	math.randomseed(time_fn() + os.clock() * 1000000)
 	local parts = {}
 	for i = 1, n do parts[i] = string.char(math.random(0, 255)) end
 	return table.concat(parts)
 end
 
 --- Generate a random token as a hex string.
---: (number | nil) -> string
-function M.generate_token(n_bytes)
-	n_bytes = n_bytes or 32
-	return bytes_to_hex(random_bytes(n_bytes))
+--: (opts: { time_fn: () -> number, n_bytes: number | nil }) -> string
+function M.generate_token(opts)
+	assert(opts and opts.time_fn, "generate_token requires opts.time_fn")
+	local n_bytes = opts.n_bytes or 32
+	return bytes_to_hex(random_bytes(n_bytes, opts.time_fn))
 end
 
 -- ── PBKDF2-SHA256 ────────────────────────────────────────────────────────────
@@ -284,10 +287,11 @@ local DK_LEN = 32
 
 --- Hash a password using PBKDF2-SHA256.
 --- Returns PHC-style string: "pbkdf2:sha256:<iterations>$<salt_hex>$<hash_hex>"
---: (string, { iterations: number | nil } | nil) -> string
+--: (string, { iterations: number | nil, time_fn: () -> number }) -> string
 function M.hash_password(password, opts)
-	local iterations = (opts and opts.iterations) or DEFAULT_ITERATIONS
-	local salt = random_bytes(SALT_BYTES)
+	assert(opts and opts.time_fn, "hash_password requires opts.time_fn")
+	local iterations = opts.iterations or DEFAULT_ITERATIONS
+	local salt = random_bytes(SALT_BYTES, opts.time_fn)
 	local salt_hex = bytes_to_hex(salt)
 	local dk = pbkdf2_sha256(password, salt, iterations, DK_LEN)
 	local hash_hex = bytes_to_hex(dk)

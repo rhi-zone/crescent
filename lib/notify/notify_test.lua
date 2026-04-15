@@ -6,7 +6,7 @@ local notify = require("lib.notify")
 T.describe("callback channel", function()
   T.it("sends message to function", function()
     local received
-    local ch = notify.callback(function(msg) received = msg end)
+    local ch = notify.callback(function(msg) received = msg end, { time_fn = os.time })
     local ok = ch:send({ text = "hello" })
     T.ok(ok)
     T.eq(received.text, "hello")
@@ -15,13 +15,13 @@ end)
 
 T.describe("console channel", function()
   T.it("sends to stderr without error", function()
-    local ch = notify.console({ format = "text" })
+    local ch = notify.console({ format = "text", time_fn = os.time })
     local ok = ch:send({ level = "info", text = "test" })
     T.ok(ok)
   end)
 
   T.it("json format sends without error", function()
-    local ch = notify.console({ format = "json" })
+    local ch = notify.console({ format = "json", time_fn = os.time })
     local ok = ch:send({ level = "error", topic = "deploy", text = "fail" })
     T.ok(ok)
   end)
@@ -32,6 +32,7 @@ T.describe("log_channel", function()
     local logged_level, logged_text
     local ch = notify.log_channel({
       logger = function(level, text) logged_level = level; logged_text = text end,
+      time_fn = os.time,
     })
     ch:send({ level = "error", topic = "deploy", text = "failed", meta = { service = "api" } })
     T.eq(logged_level, "error")
@@ -56,6 +57,7 @@ T.describe("webhook", function()
       url = "https://hooks.example.com/test",
       headers = { ["Authorization"] = "Bearer tok" },
       transport = transport,
+      time_fn = os.time,
     })
     local ok = ch:send({ text = "deploy ok" })
     T.ok(ok)
@@ -73,6 +75,7 @@ T.describe("webhook", function()
       url = "https://hooks.example.com/test",
       transport = transport,
       transform = function(msg) return { slack_text = msg.text } end,
+      time_fn = os.time,
     })
     ch:send({ text = "hello" })
     T.eq(posted_body.slack_text, "hello")
@@ -80,7 +83,7 @@ T.describe("webhook", function()
   end)
 
   T.it("returns error when no transport", function()
-    local ch = notify.webhook({ url = "https://example.com" })
+    local ch = notify.webhook({ url = "https://example.com", time_fn = os.time })
     local ok, err = ch:send({ text = "test" })
     T.fail(ok)
     T.ok(err:find("no transport"), "should report missing transport")
@@ -98,7 +101,7 @@ T.describe("router", function()
   end
 
   T.it("routes to matching channels", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local a = make_recorder("a")
     local b = make_recorder("b")
     r:add("a", a)
@@ -109,7 +112,7 @@ T.describe("router", function()
   end)
 
   T.it("level filter works", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local err_only = make_recorder("err")
     local all = make_recorder("all")
     r:add("err", err_only, { levels = { "error", "critical" } })
@@ -122,7 +125,7 @@ T.describe("router", function()
   end)
 
   T.it("topic filter works", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local deploy = make_recorder("deploy")
     r:add("deploy", deploy, { topics = { "deploy" } })
     r:send({ topic = "deploy", text = "deployed" })
@@ -132,7 +135,7 @@ T.describe("router", function()
   end)
 
   T.it("custom filter function", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local ch = make_recorder("custom")
     r:add("custom", ch, {
       filter = function(msg) return msg.meta and msg.meta.urgent end,
@@ -144,7 +147,7 @@ T.describe("router", function()
   end)
 
   T.it("unmatched message goes to unfiltered channels only", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local filtered = make_recorder("filtered")
     local unfiltered = make_recorder("unfiltered")
     r:add("filtered", filtered, { levels = { "critical" } })
@@ -155,7 +158,7 @@ T.describe("router", function()
   end)
 
   T.it("send returns per-channel results", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local good = { send = function() return true end }
     local bad = { send = function() return nil, "down" end }
     r:add("good", good)
@@ -172,7 +175,7 @@ end)
 
 T.describe("message", function()
   T.it("sets defaults", function()
-    local msg = notify.message({ text = "hi" })
+    local msg = notify.message({ text = "hi", time_fn = os.time })
     T.eq(msg.level, "info")
     T.ok(msg.timestamp, "timestamp should be set")
     T.eq(msg.text, "hi")
@@ -185,6 +188,7 @@ T.describe("message", function()
       text = "disk full",
       meta = { host = "srv1" },
       timestamp = 1000,
+      time_fn = os.time,
     })
     T.eq(msg.level, "critical")
     T.eq(msg.topic, "alerts")
@@ -198,7 +202,7 @@ T.describe("batch", function()
   T.it("buffers messages until max_size", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
-    local b = notify.batch(ch, { max_size = 3 })
+    local b = notify.batch(ch, { max_size = 3, time_fn = os.time })
     b:send({ text = "1" })
     b:send({ text = "2" })
     T.eq(#sent, 0, "should not flush before max_size")
@@ -211,7 +215,7 @@ T.describe("batch", function()
   T.it("flush sends all buffered", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
-    local b = notify.batch(ch, { max_size = 100 })
+    local b = notify.batch(ch, { max_size = 100, time_fn = os.time })
     b:send({ text = "a" })
     b:send({ text = "b" })
     T.eq(#sent, 0)
@@ -226,6 +230,7 @@ T.describe("batch", function()
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
     local b = notify.batch(ch, {
       max_size = 100,
+      time_fn = os.time,
       transform = function(msgs)
         local texts = {}
         for _, m in ipairs(msgs) do texts[#texts + 1] = m.text end
@@ -242,7 +247,7 @@ T.describe("batch", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
     -- Use max_wait = 0 so it always triggers
-    local b = notify.batch(ch, { max_size = 100, max_wait = 0 })
+    local b = notify.batch(ch, { max_size = 100, max_wait = 0, time_fn = os.time })
     b:send({ text = "tick test" })
     -- os.time() granularity is 1s; max_wait=0 means any elapsed time triggers
     -- Since last_flush is set to os.time() at creation, and tick checks >=, 0 diff >= 0 is true
@@ -253,7 +258,7 @@ T.describe("batch", function()
   T.it("tick before max_wait does not flush", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
-    local b = notify.batch(ch, { max_size = 100, max_wait = 9999 })
+    local b = notify.batch(ch, { max_size = 100, max_wait = 9999, time_fn = os.time })
     b:send({ text = "no flush" })
     b:tick()
     T.eq(#sent, 0, "should not flush before max_wait")
@@ -270,7 +275,7 @@ T.describe("rate_limit", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
     local now, _ = make_clock()
-    local rl = notify.rate_limit(ch, { max_per_minute = 5, now = now })
+    local rl = notify.rate_limit(ch, { max_per_minute = 5, time_fn = now })
     for i = 1, 5 do
       local ok = rl:send({ text = tostring(i) })
       T.ok(ok, "message " .. i .. " should be allowed")
@@ -282,7 +287,7 @@ T.describe("rate_limit", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
     local now, _ = make_clock()
-    local rl = notify.rate_limit(ch, { max_per_minute = 2, now = now })
+    local rl = notify.rate_limit(ch, { max_per_minute = 2, time_fn = now })
     rl:send({ text = "1" })
     rl:send({ text = "2" })
     local ok, err = rl:send({ text = "3" })
@@ -297,7 +302,7 @@ T.describe("rate_limit", function()
     local now, _ = make_clock()
     local rl = notify.rate_limit(ch, {
       max_per_minute = 1,
-      now = now,
+      time_fn = now,
       on_drop = function(msg) dropped[#dropped + 1] = msg end,
     })
     rl:send({ text = "ok" })
@@ -310,7 +315,7 @@ T.describe("rate_limit", function()
     local sent = {}
     local ch = { send = function(_, msg) sent[#sent + 1] = msg; return true end }
     local now, set_time = make_clock(1000)
-    local rl = notify.rate_limit(ch, { max_per_minute = 1, now = now })
+    local rl = notify.rate_limit(ch, { max_per_minute = 1, time_fn = now })
     rl:send({ text = "first" })
     local ok = rl:send({ text = "blocked" })
     T.fail(ok)
@@ -360,7 +365,7 @@ end)
 
 T.describe("integration: multiple channels via router", function()
   T.it("routes to all matching channels", function()
-    local r = notify.router()
+    local r = notify.router({ time_fn = os.time })
     local webhook_sent = {}
     local log_sent = {}
     local cb_received = {}
@@ -372,15 +377,17 @@ T.describe("integration: multiple channels via router", function()
       url = "https://hooks.example.com",
       transport = transport,
       transform = function(msg) return { text = msg.text } end,
+      time_fn = os.time,
     }), { levels = { "error", "critical" } })
 
     r:add("log", notify.log_channel({
       logger = function(level, text) log_sent[#log_sent + 1] = { level = level, text = text } end,
+      time_fn = os.time,
     }))
 
     r:add("cb", notify.callback(function(msg)
       cb_received[#cb_received + 1] = msg
-    end), { topics = { "deploy" } })
+    end, { time_fn = os.time }), { topics = { "deploy" } })
 
     r:send({ level = "error", topic = "deploy", text = "Deploy failed" })
     r:send({ level = "info", topic = "billing", text = "Invoice sent" })

@@ -119,13 +119,13 @@ end)
 
 T.describe("pkce", function()
   T.it("returns verifier and challenge", function()
-    local verifier, challenge = oauth2.pkce()
+    local verifier, challenge = oauth2.pkce({ time_fn = os.time })
     T.ok(type(verifier) == "string", "verifier is string")
     T.ok(type(challenge) == "string", "challenge is string")
   end)
 
   T.it("verifier is URL-safe base64url (no +, /, =, spaces)", function()
-    local verifier, _ = oauth2.pkce()
+    local verifier, _ = oauth2.pkce({ time_fn = os.time })
     T.ok(not verifier:find("+", 1, true), "no + in verifier")
     T.ok(not verifier:find("/", 1, true), "no / in verifier")
     T.ok(not verifier:find("=", 1, true), "no = in verifier")
@@ -133,7 +133,7 @@ T.describe("pkce", function()
   end)
 
   T.it("verifier length in [43, 128]", function()
-    local verifier, _ = oauth2.pkce()
+    local verifier, _ = oauth2.pkce({ time_fn = os.time })
     T.ok(#verifier >= 43, "verifier at least 43 chars (got " .. #verifier .. ")")
     T.ok(#verifier <= 128, "verifier at most 128 chars (got " .. #verifier .. ")")
   end)
@@ -143,7 +143,7 @@ T.describe("pkce", function()
     -- For verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" (RFC 7636 example),
     -- challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
     -- We test with a fresh pkce() call: challenge length should be 43 chars (32 bytes → 43 base64url).
-    local _, challenge = oauth2.pkce()
+    local _, challenge = oauth2.pkce({ time_fn = os.time })
     -- SHA256 produces 32 bytes; base64url of 32 bytes = 43 chars (no padding)
     T.eq(#challenge, 43, "challenge is 43 chars (base64url of 32-byte SHA256)")
     T.ok(not challenge:find("+", 1, true), "challenge no +")
@@ -152,8 +152,8 @@ T.describe("pkce", function()
   end)
 
   T.it("two pkce() calls produce different verifiers", function()
-    local v1, _ = oauth2.pkce()
-    local v2, _ = oauth2.pkce()
+    local v1, _ = oauth2.pkce({ time_fn = os.time })
+    local v2, _ = oauth2.pkce({ time_fn = os.time })
     T.neq(v1, v2, "verifiers are different across calls")
   end)
 end)
@@ -203,7 +203,7 @@ end)
 
 T.describe("token_store", function()
   T.it("set and get round-trip", function()
-    local store = oauth2.token_store()
+    local store = oauth2.token_store({ time_fn = os.time })
     local tok = { access_token = "abc", token_type = "Bearer", expires_in = 3600 }
     store:set("myapp", tok)
     local got = store:get("myapp")
@@ -212,63 +212,71 @@ T.describe("token_store", function()
   end)
 
   T.it("get returns nil for unknown key", function()
-    local store = oauth2.token_store()
+    local store = oauth2.token_store({ time_fn = os.time })
     T.eq(store:get("unknown"), nil, "nil for unknown key")
   end)
 
   T.it("is_expired: false when not expired", function()
-    local store = oauth2.token_store()
-    local now = 1000000
-    store:set("app", { access_token = "t", expires_in = 3600 }, now)
-    T.ok(not store:is_expired("app", now + 3599), "not expired 1s before")
+    local t = 1000000
+    local store = oauth2.token_store({ time_fn = function() return t end })
+    store:set("app", { access_token = "t", expires_in = 3600 }, t)
+    t = 1000000 + 3599
+    T.ok(not store:is_expired("app"), "not expired 1s before")
   end)
 
   T.it("is_expired: true when expired", function()
-    local store = oauth2.token_store()
-    local now = 1000000
-    store:set("app", { access_token = "t", expires_in = 3600 }, now)
-    T.ok(store:is_expired("app", now + 3600), "expired at exact expiry time")
-    T.ok(store:is_expired("app", now + 3601), "expired after")
+    local t = 1000000
+    local store = oauth2.token_store({ time_fn = function() return t end })
+    store:set("app", { access_token = "t", expires_in = 3600 }, t)
+    t = 1000000 + 3600
+    T.ok(store:is_expired("app"), "expired at exact expiry time")
+    t = 1000000 + 3601
+    T.ok(store:is_expired("app"), "expired after")
   end)
 
   T.it("is_expired: true for unknown key", function()
-    local store = oauth2.token_store()
+    local store = oauth2.token_store({ time_fn = os.time })
     T.ok(store:is_expired("no-such-key"), "unknown key is_expired true")
   end)
 
   T.it("is_expired: false when no expires_in", function()
-    local store = oauth2.token_store()
+    local t = 9999999
+    local store = oauth2.token_store({ time_fn = function() return t end })
     store:set("app", { access_token = "t" }, 1000000)
-    T.ok(not store:is_expired("app", 9999999), "no expires_in → not expired")
+    T.ok(not store:is_expired("app"), "no expires_in → not expired")
   end)
 
   T.it("needs_refresh: true within default margin (60s)", function()
-    local store = oauth2.token_store()
-    local now = 1000000
-    store:set("app", { access_token = "t", expires_in = 3600 }, now)
+    local t = 1000000
+    local store = oauth2.token_store({ time_fn = function() return t end })
+    store:set("app", { access_token = "t", expires_in = 3600 }, t)
     -- At now + 3541, 59s left → within margin of 60
-    T.ok(store:needs_refresh("app", nil, now + 3541), "needs refresh 59s before expiry")
+    t = 1000000 + 3541
+    T.ok(store:needs_refresh("app"), "needs refresh 59s before expiry")
   end)
 
   T.it("needs_refresh: false when well outside margin", function()
-    local store = oauth2.token_store()
-    local now = 1000000
-    store:set("app", { access_token = "t", expires_in = 3600 }, now)
+    local t = 1000000
+    local store = oauth2.token_store({ time_fn = function() return t end })
+    store:set("app", { access_token = "t", expires_in = 3600 }, t)
     -- At now + 3000, 600s left → outside default margin
-    T.ok(not store:needs_refresh("app", nil, now + 3000), "no refresh needed 600s before expiry")
+    t = 1000000 + 3000
+    T.ok(not store:needs_refresh("app"), "no refresh needed 600s before expiry")
   end)
 
   T.it("needs_refresh: respects custom margin", function()
-    local store = oauth2.token_store()
-    local now = 1000000
-    store:set("app", { access_token = "t", expires_in = 3600 }, now)
+    local t = 1000000
+    local store = oauth2.token_store({ time_fn = function() return t end })
+    store:set("app", { access_token = "t", expires_in = 3600 }, t)
     -- 300s margin: needs refresh when < 300s left
-    T.ok(store:needs_refresh("app", 300, now + 3301), "needs refresh within 300s margin")
-    T.ok(not store:needs_refresh("app", 300, now + 3000), "no refresh outside 300s margin")
+    t = 1000000 + 3301
+    T.ok(store:needs_refresh("app", 300), "needs refresh within 300s margin")
+    t = 1000000 + 3000
+    T.ok(not store:needs_refresh("app", 300), "no refresh outside 300s margin")
   end)
 
   T.it("delete removes token", function()
-    local store = oauth2.token_store()
+    local store = oauth2.token_store({ time_fn = os.time })
     store:set("app", { access_token = "t" }, 1000000)
     store:delete("app")
     T.eq(store:get("app"), nil, "deleted token is nil")
