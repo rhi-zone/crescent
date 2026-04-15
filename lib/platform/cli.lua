@@ -10,6 +10,7 @@
 --   --grant=NAME        Grant a specific capability (repeatable)
 --   --deny=NAME         Deny a specific capability (repeatable)
 --   --reset-grants      Clear stored grants
+--   --cap.NAME.KEY=VAL  Override a cap declaration field (e.g. --cap.fs.root=./cards)
 --
 -- Everything after -- is passed to the app's cli cap.
 -- There are no app-specific CLI flags. App config is the app's problem.
@@ -30,6 +31,7 @@ local function parse_args(args)
 		reset_grants = false,
 		grant_caps = {},
 		deny_caps = {},
+		cap_overrides = {},  -- cap_overrides["fs"]["root"] = "/some/path"
 	}
 	local positional = {}
 	local app_args = {}
@@ -53,8 +55,17 @@ local function parse_args(args)
 				elseif key == "deny" then
 					opts.deny_caps[#opts.deny_caps + 1] = val
 				else
-					io.stderr:write("unknown option: --" .. key .. "\n")
-					os.exit(1)
+					-- --cap.NAME.KEY=VALUE overrides a cap declaration field.
+					local cap_name, cap_key = key:match("^cap%.([^.]+)%.(.+)$")
+					if cap_name then
+						if not opts.cap_overrides[cap_name] then
+							opts.cap_overrides[cap_name] = {}
+						end
+						opts.cap_overrides[cap_name][cap_key] = val
+					else
+						io.stderr:write("unknown option: --" .. key .. "\n")
+						os.exit(1)
+					end
 				end
 			elseif a == "--reset-grants" then
 				opts.reset_grants = true
@@ -384,11 +395,11 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		return nil, "stdout cap module not available"
 	end
 
-	-- fs: scoped filesystem access.
+	-- fs: scoped filesystem access. Root is REQUIRED — unrestricted fs is never safe.
 	if cap_type == "fs" then
 		local root = decl.root
 		if not root then
-			return nil, "fs cap '" .. cap_name .. "' has no root"
+			return nil, "fs cap '" .. cap_name .. "' has no root — use --cap." .. cap_name .. ".root=PATH"
 		end
 		root = expand_home(root)
 		mkdir_p(root)
@@ -605,6 +616,17 @@ local context = {
 
 -- Merge cap declarations from manifest (top-level + per-entrypoint).
 local cap_declarations = merge_cap_declarations(manifest, opts.entrypoint)
+
+-- Apply --cap.NAME.KEY=VALUE overrides from CLI.
+for cap_name, overrides in pairs(opts.cap_overrides) do
+	if cap_declarations[cap_name] then
+		for k, v in pairs(overrides) do
+			cap_declarations[cap_name][k] = v
+		end
+	else
+		io.stderr:write("warning: --cap." .. cap_name .. ".* does not match any declared cap\n")
+	end
+end
 
 -- Resolve grants.
 local grants
