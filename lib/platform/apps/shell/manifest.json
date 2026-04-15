@@ -4,7 +4,7 @@
   "meta": { "type": "shell" },
   "default_entry": "server",
   "caps": {
-    "fs": { "type": "fs" },
+    "fs": { "type": "fs", "root": "~/.crescent/cards" },
     "self": { "type": "self" }
   },
   "entry": {
