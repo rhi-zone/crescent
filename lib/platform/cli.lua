@@ -480,10 +480,9 @@ local function run_dir_entrypoint(app, entry_path, caps)
 	-- they're trusted platform code that may legitimately need ffi, bit, etc.
 	local dir_loader = make_dir_loader(app.path, env)
 	-- Modules that must never escape to host require.
-	-- Safe subsets of os/jit/bit are already in env globals via sandbox.stdlib.
-	local blocked = { ffi = true, io = true, debug = true, package = true }
+	local blocked = { ffi = true, io = true, os = true, debug = true, package = true }
 	-- Modules where require() should return the sandbox's safe subset, not the host module.
-	local shadowed = { os = env.os, jit = env.jit, bit = env.bit }
+	local shadowed = { jit = env.jit, bit = env.bit }
 	env.require = function(modname)
 		if blocked[modname] then
 			error("sandbox: require '" .. tostring(modname) .. "' not allowed", 2)

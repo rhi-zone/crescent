@@ -117,13 +117,6 @@ do
 	end
 end
 
-local safe_os = {
-	clock    = os.clock,
-	difftime = os.difftime,
-	time     = os.time,
-	date     = os.date,
-}
-
 local safe_bit
 do
 	local ok, bit_mod = pcall(require, "bit")
@@ -134,9 +127,9 @@ end
 -- These are just tables. Compose, subset, or ignore them as needed.
 
 -- stdlib: safe Lua standard library.
--- Excludes: io, ffi, debug, dofile, loadfile, load, loadstring, require,
+-- Excludes: io, os, ffi, debug, dofile, loadfile, load, loadstring, require,
 --           package (callers get require via env() instead).
--- Exposes safe read-only subsets of: os, jit, ffi (info only), bit.
+-- Exposes safe read-only subsets of: jit (platform info only), bit (pure math).
 M.stdlib = {
 	globals = {
 		assert      = assert,
@@ -162,7 +155,6 @@ M.stdlib = {
 		string      = string,
 		table       = table,
 		coroutine   = coroutine,
-		os          = safe_os,
 		jit         = safe_jit,
 		bit         = safe_bit,
 	},
