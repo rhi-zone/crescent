@@ -117,18 +117,6 @@ do
 	end
 end
 
-local safe_ffi_info
-do
-	local ok, ffi_mod = pcall(require, "ffi")
-	if ok and ffi_mod then
-		safe_ffi_info = {
-			os   = ffi_mod.os,
-			arch = ffi_mod.arch,
-			abi  = ffi_mod.abi,  -- abi() is read-only: returns bool for ABI queries
-		}
-	end
-end
-
 local safe_os = {
 	clock    = os.clock,
 	difftime = os.difftime,
