@@ -33,7 +33,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] User personas — named profiles with description injected into context, selectable per session
 - [x] Token counter — context usage progress bar with color thresholds, updated after each action
 - [x] Character avatar — header + message avatars from PNG via `caps.self`, 400 assertions
-- [x] Shell app — card browser with thumbnail grid, search, launch stub, 39 assertions
+- [ ] Shell app — **needs rewrite**. Current impl is a card-specific browser (parses chara chunks, extracts character metadata). Wrong abstraction: cards are apps packaged as PNGs, not data files. Shell should discover/browse/launch app PNGs via opaque manifest metadata, not card-type-specific logic. App-type-specific display belongs in the app itself.
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
 - [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution
