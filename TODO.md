@@ -181,7 +181,7 @@ Items that currently lack an implementer-ready spec:
 
 - [x] **`module "name": T` syntax** — `--:: module "name": T` declares the type returned by `require("name")`. Implemented in ann.lua (ANN_MODULE), constrain.lua (module_types registry), prelude.lua (loaded from .d.lua files). Undeclared modules → `unknown`. stdlib_types.lua now declares `"ffi"` and `"bit"` properly.
 - [x] **`$Require<Path>` intrinsic** — implemented. `require` declared as `<T: string>(module: T) -> $Require<T>` in stdlib_types.lua. `expand_require` in intrinsic.lua resolves module types from `ctx.module_types` (declarations) or `ctx.cri_loader` (cross-file cache). Undeclared modules → `T_UNKNOWN` (fixed e48fd1f — was `T_ANY`, silently disabling checking on all undeclared module returns).
-- [ ] **Cross-file inference disabled by default** — `check_file`'s `cri_loader` is gated behind `_disk_cache_dir` (check.lua:188), which the CLI never sets. So `require()` of any module without a `--:: module` declaration returns `unknown`, even though the recursive checking code exists and works. TS infers module types from source by default — crescent should too. The "cascade into every dependency" concern is valid for perf but should be solved with lazy/on-demand checking, not by disabling inference entirely.
+- [x] **Cross-file inference enabled by default** — removed `_disk_cache_dir` gate on `check_file`'s `cri_loader` (ead40ae). Also fixed `init.lua` resolution for `require("lib.path")` → `lib/path/init.lua`.
 - [x] **`$FfiC` intrinsic** — implemented. `TAG_FFIC = 26`, deferred resolution in solve.lua, cdef.lua makes `T_FFI_C` closed (undeclared C symbols error), stdlib_types.lua declares `C: $FfiC`.
 
 ## stdlib_types.lua coverage gaps (audit 2026-04-01)
