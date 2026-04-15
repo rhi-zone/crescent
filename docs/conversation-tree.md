@@ -1,10 +1,10 @@
 # Conversation Tree Design
 
-How the card app migrates from a flat message list to a branching conversation tree.
+How the charactercardv2 app migrates from a flat message list to a branching conversation tree.
 
 ## Problem
 
-The card app (`lib/platform/apps/card/server.lua`) uses a flat model:
+The charactercardv2 app (`lib/platform/apps/charactercardv2/server.lua`) uses a flat model:
 
 ```lua
 state.messages = { {id, role, content}, ... }      -- ordered list
@@ -28,7 +28,7 @@ This has three problems:
    represent this.
 
 `lib/conversation/init.lua` already implements a SQLite-backed tree model matching
-the schema in `docs/platform-design.md`. The card app needs to adopt it.
+the schema in `docs/platform-design.md`. The charactercardv2 app needs to adopt it.
 
 ## Data Model
 
@@ -44,7 +44,7 @@ state = {
 
 ### Target (tree via lib/conversation)
 
-The card app stops managing messages directly and delegates to `lib/conversation`.
+The charactercardv2 app stops managing messages directly and delegates to `lib/conversation`.
 
 ```lua
 state = {
@@ -425,7 +425,7 @@ State is serialized as JSON to `caps.kv.set("card_state", ...)`:
 
 ### Target
 
-The conversation tree lives in SQLite via `lib/conversation`. The card app opens a
+The conversation tree lives in SQLite via `lib/conversation`. The charactercardv2 app opens a
 database file (path from caps or a default location):
 
 ```lua
@@ -458,7 +458,7 @@ end
 
 ### When caps.kv and SQLite are unavailable
 
-The card app must work without persistence (headless, MCP, etc.). In this case, the
+The charactercardv2 app must work without persistence (headless, MCP, etc.). In this case, the
 tree is held in memory. `lib/conversation` uses `sqlite.open(":memory:")` and the
 tree works identically but is lost on exit. This matches the current behavior where
 no `caps.kv` means no persistence.

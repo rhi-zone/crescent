@@ -1,4 +1,4 @@
--- lib/platform/apps/card/llm.lua
+-- lib/platform/apps/charactercardv2/llm.lua
 -- LLM client library -- wraps an http_client cap with OpenAI chat completions protocol.
 --
 -- The http_client cap is a table with:
@@ -6,7 +6,7 @@
 --   request_stream(req, on_chunk) -> {status, headers} | nil, err
 --
 -- Usage:
---   local llm = require("lib.platform.apps.card.llm")
+--   local llm = require("lib.platform.apps.charactercardv2.llm")
 --   local client = llm.create(http_client, { model = "gpt-4" })
 --   local content, err = client.call(messages)
 --   local full, err = client.call_stream(messages, function(delta) io.write(delta) end)

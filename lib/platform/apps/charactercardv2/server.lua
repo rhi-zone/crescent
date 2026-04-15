@@ -1,8 +1,8 @@
--- lib/platform/apps/card/server.lua
+-- lib/platform/apps/charactercardv2/server.lua
 -- Card app server -- assembles prompts and streams LLM responses.
 --
 -- Usage:
---   local card = require("lib.platform.apps.card.server")
+--   local card = require("lib.platform.apps.charactercardv2.server")
 --   local app = card.create(caps, opts)
 --   local content, err = app.chat(messages)
 --   local content, err = app.chat_stream(messages, on_token)
@@ -11,7 +11,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local llm_lib = require("lib.platform.apps.card.llm")
+local llm_lib = require("lib.platform.apps.charactercardv2.llm")
 
 local M = {}
 

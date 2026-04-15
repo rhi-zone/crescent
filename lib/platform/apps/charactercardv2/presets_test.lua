@@ -4,7 +4,7 @@ end
 
 local T = require("lib.test.assert")
 local json = require("lib.format.json")
-local presets = require("lib.platform.apps.card.presets")
+local presets = require("lib.platform.apps.charactercardv2.presets")
 
 -- ── Mock kv ────────────────────────────────────────────────────────────────
 

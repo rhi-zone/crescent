@@ -1,5 +1,5 @@
 {
-  "name": "CCv2 Card",
+  "name": "Character Card v2",
   "version": "0.1.0",
   "meta": { "type": "card-app" },
   "default_entry": "server",

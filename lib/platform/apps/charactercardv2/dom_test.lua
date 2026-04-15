@@ -1,4 +1,4 @@
--- lib/platform/apps/card/dom_test.lua
+-- lib/platform/apps/charactercardv2/dom_test.lua
 -- Tests for the CCv2 Card App conversation view.
 
 if not package.path:find("./?/init.lua", 1, true) then
@@ -86,7 +86,7 @@ mock_document.body = make_node(1, "body")
 
 document = mock_document --: any
 
-local card_dom = require("lib.platform.apps.card.dom")
+local card_dom = require("lib.platform.apps.charactercardv2.dom")
 local R = require("lib.reactive")
 local widget = require("lib.widget")
 

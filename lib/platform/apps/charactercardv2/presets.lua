@@ -1,4 +1,4 @@
--- lib/platform/apps/card/presets.lua
+-- lib/platform/apps/charactercardv2/presets.lua
 -- Preset management for the card app.
 --
 -- Manages connection, generation, and prompt presets via caps.kv.

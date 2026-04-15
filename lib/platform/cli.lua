@@ -443,8 +443,8 @@ end
 
 local function run_dir_entrypoint(app, entry_path, caps)
 	-- Convert directory-relative Lua path to require path.
-	-- e.g. app_dir = "lib/platform/apps/card", entry_path = "server.lua"
-	-- -> require path = "lib.platform.apps.card.server"
+	-- e.g. app_dir = "lib/platform/apps/charactercardv2", entry_path = "server.lua"
+	-- -> require path = "lib.platform.apps.charactercardv2.server"
 	local entry_file = entry_path:gsub("%.lua$", "")
 	local mod_path = app.path:gsub("/$", ""):gsub("/", ".") .. "." .. entry_file:gsub("/", ".")
 	local ok, entry_mod = pcall(require, mod_path)

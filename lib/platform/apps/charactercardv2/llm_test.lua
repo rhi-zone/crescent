@@ -4,7 +4,7 @@ end
 
 local T    = require("lib.test.assert")
 local json = require("lib.json")
-local llm  = require("lib.platform.apps.card.llm")
+local llm  = require("lib.platform.apps.charactercardv2.llm")
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 

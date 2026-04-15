@@ -1,4 +1,4 @@
--- lib/platform/apps/card/dom.lua
+-- lib/platform/apps/charactercardv2/dom.lua
 -- CCv2 Card App — conversation view (dom entrypoint).
 --
 -- Runs in the browser after lua2ts transpilation. Uses reactive DOM to render
