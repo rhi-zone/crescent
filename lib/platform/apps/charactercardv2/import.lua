@@ -1,17 +1,16 @@
--- lib/platform/apps/export_ccv2/server.lua
--- CCv2 export app — HTTP wrappers around lib/formats/ccv2/adapters/export.lua.
+-- lib/platform/apps/charactercardv2/import.lua
+-- CCv2 import entrypoint — HTTP wrappers around lib/formats/ccv2/adapters/import.lua.
 --
 -- Endpoints:
---   POST /api/export/json — {card, lorebook?} → CCv2 JSON envelope
---   POST /api/export/png  — {card, lorebook?, source_png?} → base64 PNG with chara chunk
+--   POST /api/import/png  — raw PNG body → parsed card + lorebook count
+--   POST /api/import/json — raw JSON body → parsed card + lorebook count
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
 local json = require("lib.format.json")
-local base64 = require("lib.encode.base64")
-local export = require("lib.formats.ccv2.adapters.export")
+local import = require("lib.formats.ccv2.adapters.import")
 
 local M = {}
 
@@ -31,54 +30,40 @@ local function json_err(res, status, msg)
 	return true
 end
 
-local function read_json_body(req)
-	if not req.body or #req.body == 0 then return nil end
-	local ok, val = pcall(json.decode, req.body)
-	if not ok then return nil end
-	return val
+local function lorebook_count(result)
+	if not result.lorebook then return 0 end
+	return #result.lorebook
 end
 
 -- ── Endpoints ───────────────────────────────────────────────────────────────
 
-local function api_export_json(_caps, req, res)
-	local body = read_json_body(req)
-	if not body or not body.card then
-		return json_err(res, 400, "card required")
+local function api_import_png(_caps, req, res)
+	if not req.body or #req.body == 0 then
+		return json_err(res, 400, "empty body")
 	end
-	local result, err = export.to_json(body.card, body.lorebook)
+	local result, err = import.from_png(req.body)
 	if not result then
 		return json_err(res, 422, err)
 	end
-	return json_ok(res, { json = result })
+	return json_ok(res, { card = result.card, lorebook_count = lorebook_count(result) })
 end
 
-local function api_export_png(_caps, req, res)
-	local body = read_json_body(req)
-	if not body or not body.card then
-		return json_err(res, 400, "card required")
+local function api_import_json(_caps, req, res)
+	if not req.body or #req.body == 0 then
+		return json_err(res, 400, "empty body")
 	end
-	-- Decode source PNG from base64 if provided
-	local source_png
-	if body.source_png then
-		local decoded, b64_err = base64.decode(body.source_png)
-		if not decoded then
-			return json_err(res, 400, "invalid source_png base64: " .. tostring(b64_err))
-		end
-		source_png = decoded
-	end
-	local result, err = export.to_png(body.card, body.lorebook, source_png)
+	local result, err = import.from_json(req.body)
 	if not result then
 		return json_err(res, 422, err)
 	end
-	-- Return the PNG as base64
-	return json_ok(res, { png = base64.encode(result) })
+	return json_ok(res, { card = result.card, lorebook_count = lorebook_count(result) })
 end
 
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
-	["POST /api/export/json"] = api_export_json,
-	["POST /api/export/png"]  = api_export_png,
+	["POST /api/import/png"]  = api_import_png,
+	["POST /api/import/json"] = api_import_json,
 }
 
 function M.create(caps)

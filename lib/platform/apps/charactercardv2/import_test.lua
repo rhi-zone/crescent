@@ -5,7 +5,7 @@ end
 local T = require("lib.test.assert")
 local json = require("lib.format.json")
 local card_mod = require("lib.formats.ccv2.card")
-local server = require("lib.platform.apps.import_ccv2.server")
+local server = require("lib.platform.apps.charactercardv2.import")
 
 -- ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ local VALID_CARD_JSON = json.encode({
 
 -- ── Import JSON tests ───────────────────────────────────────────────────────
 
-T.describe("import_ccv2: POST /api/import/json", function()
+T.describe("charactercardv2 import: POST /api/import/json", function()
 	T.it("imports a valid V2 card", function()
 		local res, body = call(app, "POST", "/api/import/json", VALID_CARD_JSON)
 		T.eq(res.status, 200)
@@ -86,9 +86,8 @@ end)
 
 -- ── Import PNG tests ────────────────────────────────────────────────────────
 
-T.describe("import_ccv2: POST /api/import/png", function()
+T.describe("charactercardv2 import: POST /api/import/png", function()
 	T.it("imports a valid PNG with chara chunk", function()
-		-- Build a PNG using card_mod.to_png
 		local card_data = { name = "PngChar", description = "From PNG", first_mes = "Hi" }
 		local png_bytes = card_mod.to_png(card_data)
 		T.ok(png_bytes)
@@ -116,7 +115,7 @@ end)
 
 -- ── Unknown route ───────────────────────────────────────────────────────────
 
-T.describe("import_ccv2: unknown routes", function()
+T.describe("charactercardv2 import: unknown routes", function()
 	T.it("returns nil for unknown routes", function()
 		local req = make_req("GET", "/api/unknown", nil)
 		local res = make_res()

@@ -16,6 +16,12 @@
         "server":    { "type": "http_server", "required": true },
         "llm_api":   { "type": "http_client", "required": false }
       }
+    },
+    "import": {
+      "main": "import.lua",
+      "caps": {
+        "server":    { "type": "http_server", "required": true }
+      }
     }
   }
 }
