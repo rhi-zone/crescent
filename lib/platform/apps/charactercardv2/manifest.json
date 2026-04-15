@@ -1,7 +1,7 @@
 {
   "name": "Character Card v2",
   "version": "0.1.0",
-  "meta": { "type": "card-app" },
+  "meta": { "tags": ["charactercardv2", "ai", "llm", "roleplay", "chat"] },
   "default_entry": "server",
   "caps": {
     "self":          { "type": "self" },

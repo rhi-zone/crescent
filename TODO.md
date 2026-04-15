@@ -42,8 +42,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
   **Prerequisites:**
   - [x] `lib/png` iTXt chunk support — parse/build/get/set/remove_itxt, 99 assertions. lib/platform/init.lua now uses png.get_itxt.
   - [x] `lib/gzip` — already exists as `lib/compress` (deflate/inflate with `format = "gzip"`, system zlib FFI + pure Lua tiers)
-  - [ ] App index database schema + upsert logic (SQLite in `~/.crescent/apps/index.db` or similar)
-  - [ ] Card app runtime bundling — package card app as tarball for embedding
+  - [x] App index database schema + upsert logic — `lib/platform/index.lua`, 43 assertions
+  - [x] Card app runtime bundling + import — `lib/platform/import.lua`, 42 assertions. CLI: `luajit lib/platform/cli.lua import card.png`
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
 - [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution

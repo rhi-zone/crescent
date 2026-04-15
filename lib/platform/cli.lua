@@ -3,6 +3,7 @@
 --
 -- Usage:
 --   luajit lib/platform/cli.lua <app> [entrypoint] [-- args...]
+--   luajit lib/platform/cli.lua import <card.png> [--runtime=path] [--apps-dir=path]
 --
 -- Platform flags (before --):
 --   --port=N            HTTP port for http_server cap (default 7860)
@@ -537,7 +538,106 @@ local function run_dir_entrypoint(app, entry_path, caps)
 	return result, nil
 end
 
+-- ── Import subcommand ──────────────────────────────────────────────────────
+
+local function cmd_import(args)
+	-- Usage: luajit lib/platform/cli.lua import <card.png> [--runtime=path] [--apps-dir=path]
+	local png_path, runtime_dir, apps_dir
+	for i = 2, #args do
+		local a = args[i]
+		local key, val = a:match("^%-%-([^=]+)=(.*)")
+		if key == "runtime" then
+			runtime_dir = val
+		elseif key == "apps-dir" then
+			apps_dir = val
+		elseif a:sub(1, 1) ~= "-" then
+			png_path = a
+		end
+	end
+
+	if not png_path then
+		io.stderr:write("usage: luajit lib/platform/cli.lua import <card.png> [--runtime=path] [--apps-dir=path]\n")
+		os.exit(1)
+	end
+
+	runtime_dir = runtime_dir or "lib/platform/apps/charactercardv2"
+	apps_dir = expand_home(apps_dir or "~/.crescent/apps")
+	mkdir_p(apps_dir)
+
+	-- Read the card PNG.
+	local png_bytes, perr = read_file(png_path)
+	if not png_bytes then
+		io.stderr:write("error: cannot read " .. png_path .. ": " .. tostring(perr) .. "\n")
+		os.exit(1)
+	end
+
+	-- Read the runtime manifest.
+	local manifest_src, merr = read_file(runtime_dir .. "/manifest.json")
+	if not manifest_src then
+		io.stderr:write("error: cannot read runtime manifest: " .. tostring(merr) .. "\n")
+		os.exit(1)
+	end
+	local runtime_manifest = json.decode(manifest_src)
+	if not runtime_manifest then
+		io.stderr:write("error: cannot parse runtime manifest\n")
+		os.exit(1)
+	end
+
+	-- Collect all runtime files (non-test, non-manifest) recursively.
+	local runtime_files = {}
+	local all_files = list_files(runtime_dir)
+	for _, relpath in ipairs(all_files) do
+		if relpath ~= "manifest.json" and not relpath:match("_test%.lua$") then
+			local content = read_file(runtime_dir .. "/" .. relpath)
+			if content then
+				runtime_files[#runtime_files + 1] = { name = relpath, data = content }
+			end
+		end
+	end
+
+	-- Open or create the index database.
+	local app_index = require("lib.platform.index")
+	local idx_path = apps_dir .. "/index.db"
+	local idx, ierr = app_index.open(idx_path)
+	if not idx then
+		io.stderr:write("error: cannot open index: " .. tostring(ierr) .. "\n")
+		os.exit(1)
+	end
+
+	-- Run import.
+	local import_mod = require("lib.platform.import")
+	local app_path, result_or_err = import_mod.import_card({
+		png_bytes = png_bytes,
+		runtime_files = runtime_files,
+		runtime_manifest = runtime_manifest,
+		apps_dir = apps_dir,
+		index = idx,
+		timestamp = os.time(),
+		write_fn = function(path, data) return write_file(path, data) end,
+	})
+
+	idx:close()
+
+	if not app_path then
+		io.stderr:write("error: " .. tostring(result_or_err) .. "\n")
+		os.exit(1)
+	end
+
+	io.stdout:write("installed: " .. app_path .. "\n")
+	io.stdout:write("name: " .. (result_or_err.name or "?") .. "\n")
+	local tags = result_or_err.meta and result_or_err.meta.tags or {}
+	if #tags > 0 then
+		io.stdout:write("tags: " .. table.concat(tags, ", ") .. "\n")
+	end
+end
+
 -- ── Main ───────────────────────────────────────────────────────────────────
+
+-- Check for subcommands before parsing args (subcommands have their own arg format).
+if arg[1] == "import" then
+	cmd_import(arg)
+	return
+end
 
 local opts = parse_args(arg)
 
