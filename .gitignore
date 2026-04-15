@@ -7,9 +7,6 @@ node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 
-# Claude Code
-.claude/worktrees/
-
 # IDE
 .idea/
 .vscode/
