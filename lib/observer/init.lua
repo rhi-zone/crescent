@@ -444,8 +444,8 @@ end
 -- timeout: error if no value arrives within ms milliseconds.
 -- clock_fn() should return current time in milliseconds; defaults to os.clock()*1000.
 function Observable:timeout(ms, clock_fn)
+  if not clock_fn then error("observer:timeout: clock_fn is required") end
   local source = self
-  clock_fn = clock_fn or function() return os.clock() * 1000 end
   return new_observable(function(s)
     local deadline = clock_fn() + ms
     return source:subscribe({

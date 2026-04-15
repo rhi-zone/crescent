@@ -34,7 +34,7 @@ end
 
 T.describe("async_queue: basic task execution", function()
   T.it("executes tasks and completes them", function()
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     local ran = {}
     q:push(function(done) ran[#ran + 1] = 1; done(nil) end)
     q:push(function(done) ran[#ran + 1] = 2; done(nil) end)
@@ -44,7 +44,7 @@ T.describe("async_queue: basic task execution", function()
   end)
 
   T.it("run_all drives until empty", function()
-    local q = Q.new({ concurrency = 2 })
+    local q = Q.new({ concurrency = 2, clock_fn = os.clock })
     local count = 0
     for i = 1, 5 do
       q:push(function(done) count = count + 1; done(nil) end)
@@ -54,7 +54,7 @@ T.describe("async_queue: basic task execution", function()
   end)
 
   T.it("stats: completed count is correct", function()
-    local q = Q.new({ concurrency = 2 })
+    local q = Q.new({ concurrency = 2, clock_fn = os.clock })
     for i = 1, 4 do
       q:push(ok_task(i))
     end
@@ -73,7 +73,7 @@ end)
 
 T.describe("async_queue: concurrency limit", function()
   T.it("runs at most concurrency tasks at once", function()
-    local q = Q.new({ concurrency = 2 })
+    local q = Q.new({ concurrency = 2, clock_fn = os.clock })
     local peak = 0
     local current = 0
     local tasks_done = 0
@@ -93,7 +93,7 @@ T.describe("async_queue: concurrency limit", function()
   end)
 
   T.it("concurrency=1 runs tasks serially", function()
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     local order = {}
     for i = 1, 3 do
       local n = i
@@ -110,7 +110,7 @@ end)
 
 T.describe("async_queue: priority ordering", function()
   T.it("lower priority number runs first", function()
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     local order = {}
     -- Push higher-priority-number tasks first, then lower
     q:push({ fn = function(done) order[#order + 1] = "c"; done(nil) end, priority = 20 })
@@ -121,7 +121,7 @@ T.describe("async_queue: priority ordering", function()
   end)
 
   T.it("same priority preserves insertion order", function()
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     local order = {}
     q:push({ fn = function(done) order[#order + 1] = 1; done(nil) end, priority = 5 })
     q:push({ fn = function(done) order[#order + 1] = 2; done(nil) end, priority = 5 })
@@ -140,6 +140,7 @@ T.describe("async_queue: on_done and on_error callbacks", function()
     local results = {}
     local q = Q.new({
       concurrency = 1,
+      clock_fn = os.clock,
       on_done = function(task, result) results[#results + 1] = result end,
     })
     q:push(ok_task(42))
@@ -153,6 +154,7 @@ T.describe("async_queue: on_done and on_error callbacks", function()
     local q = Q.new({
       concurrency = 1,
       retry = 0,
+      clock_fn = os.clock,
       on_error = function(task, err) errors[#errors + 1] = err end,
     })
     q:push(fail_task("boom"))
@@ -162,7 +164,7 @@ T.describe("async_queue: on_done and on_error callbacks", function()
 
   T.it("on_done event listener fires", function()
     local results = {}
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     q:on("done", function(task, result) results[#results + 1] = result end)
     q:push(ok_task("hello"))
     q:push(ok_task("world"))
@@ -172,7 +174,7 @@ T.describe("async_queue: on_done and on_error callbacks", function()
 
   T.it("on error event listener fires", function()
     local errs = {}
-    local q = Q.new({ concurrency = 1, retry = 0 })
+    local q = Q.new({ concurrency = 1, retry = 0, clock_fn = os.clock })
     q:on("error", function(task, err) errs[#errs + 1] = err end)
     q:push(fail_task("bad"))
     q:run_all()
@@ -192,6 +194,7 @@ T.describe("async_queue: retries", function()
       concurrency = 1,
       retry = 2,
       retry_delay = 0,
+      clock_fn = os.clock,
       on_error = function(task, err) errors[#errors + 1] = err end,
     })
     q:push(function(done)
@@ -214,6 +217,7 @@ T.describe("async_queue: retries", function()
       concurrency = 1,
       retry = 3,
       retry_delay = 0,
+      clock_fn = os.clock,
       on_done = function(task, result) done_results[#done_results + 1] = result end,
     })
     q:push(function(done)
@@ -241,7 +245,7 @@ end)
 T.describe("async_queue: pause and resume", function()
   T.it("paused queue does not process tasks", function()
     local ran = false
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     q:pause()
     q:push(function(done) ran = true; done(nil) end)
     q:tick()
@@ -252,7 +256,7 @@ T.describe("async_queue: pause and resume", function()
   end)
 
   T.it("tasks accumulate while paused and run after resume", function()
-    local q = Q.new({ concurrency = 2 })
+    local q = Q.new({ concurrency = 2, clock_fn = os.clock })
     local count = 0
     q:pause()
     for i = 1, 4 do
@@ -274,7 +278,7 @@ end)
 T.describe("async_queue: cancel", function()
   T.it("cancel by id prevents execution", function()
     local ran = {}
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     q:push({ fn = function(done) ran[#ran + 1] = "a"; done(nil) end, id = "a" })
     q:push({ fn = function(done) ran[#ran + 1] = "b"; done(nil) end, id = "b" })
     q:push({ fn = function(done) ran[#ran + 1] = "c"; done(nil) end, id = "c" })
@@ -286,7 +290,7 @@ T.describe("async_queue: cancel", function()
 
   T.it("cancel_all prevents all pending from running", function()
     local ran = 0
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     for i = 1, 5 do
       q:push(function(done) ran = ran + 1; done(nil) end)
     end
@@ -296,7 +300,7 @@ T.describe("async_queue: cancel", function()
   end)
 
   T.it("clear removes all pending", function()
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     local ran = 0
     for i = 1, 3 do
       q:push(function(done) ran = ran + 1; done(nil) end)
@@ -316,7 +320,7 @@ end)
 T.describe("async_queue: drain event", function()
   T.it("drain event fires when queue empties", function()
     local drained = 0
-    local q = Q.new({ concurrency = 2 })
+    local q = Q.new({ concurrency = 2, clock_fn = os.clock })
     q:on("drain", function() drained = drained + 1 end)
     q:push(ok_task(1))
     q:push(ok_task(2))
@@ -332,7 +336,7 @@ end)
 
 T.describe("async_queue: tick return values", function()
   T.it("tick returns (active, pending) counts", function()
-    local q = Q.new({ concurrency = 1 })
+    local q = Q.new({ concurrency = 1, clock_fn = os.clock })
     q:push(ok_task(1))
     q:push(ok_task(2))
     q:push(ok_task(3))
@@ -348,7 +352,7 @@ end)
 
 T.describe("async_queue: rate limiting", function()
   T.it("rate limits tasks per second window", function()
-    local q = Q.new({ concurrency = 10, rate = 2 })
+    local q = Q.new({ concurrency = 10, rate = 2, clock_fn = os.clock })
     local ran = 0
     for i = 1, 6 do
       q:push(function(done) ran = ran + 1; done(nil) end)
@@ -383,6 +387,7 @@ T.describe("batcher: basic grouping by key", function()
       key = function(item) return item.group end,
       batch_size = 100,
       delay = 0,
+      clock_fn = os.clock,
       process = function(batch, done)
         batches[#batches + 1] = batch
         done(nil)
@@ -412,6 +417,7 @@ T.describe("batcher: basic grouping by key", function()
     local b = Q.batcher({
       key = function(item) return "x" end,
       batch_size = 3,
+      clock_fn = os.clock,
       process = function(batch, done) flushed = flushed + 1; done(nil) end,
     })
     b:push({v=1})
@@ -425,6 +431,7 @@ T.describe("batcher: basic grouping by key", function()
     local flushed = 0
     local b = Q.batcher({
       delay = 1.0,
+      clock_fn = os.clock,
       process = function(batch, done) flushed = flushed + 1; done(nil) end,
     })
     -- Push with explicit clock=0 so first_at is tracked from t=0
@@ -442,6 +449,7 @@ T.describe("batcher: basic grouping by key", function()
     local b = Q.batcher({
       batch_size = 100,
       delay = 0,
+      clock_fn = os.clock,
       process = function(batch, done) batches[#batches + 1] = batch; done(nil) end,
     })
     b:push({v=1})

@@ -104,11 +104,11 @@ local Sched = {}
 Sched.__index = Sched
 
 -- Create a new scheduler.
--- opts.clock — injectable clock function (default: os.clock)
+-- opts.clock_fn — injectable clock function (required)
 function M.new(opts)
   opts = opts or {}
   local s = setmetatable({
-    _clock         = opts.clock or os.clock,
+    _clock         = opts.clock_fn or error("scheduler.new: opts.clock_fn is required"),
     _ready         = {},  -- array of tasks ready to run, sorted by priority desc
     _sleeping      = {},  -- min-heap of {wake_time, task}
     _all_tasks     = {},  -- all tasks ever spawned

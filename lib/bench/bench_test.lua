@@ -214,7 +214,7 @@ T.describe("bench.run", function()
       duration  = 0.01,
       warmup    = 0.0,
       min_iters = 10,
-      clock     = make_clock(1000),  -- 1µs per call
+      clock_fn  = make_clock(1000),  -- 1µs per call
     })
     T.ok(result.iters     ~= nil, "iters present")
     T.ok(result.total_ns  ~= nil, "total_ns present")
@@ -231,7 +231,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 50,
-      clock     = make_clock(100),
+      clock_fn  = make_clock(100),
     })
     T.ok(result.iters >= 50, "iters >= 50, got " .. tostring(result.iters))
   end)
@@ -242,7 +242,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 20,
-      clock     = make_clock(100),
+      clock_fn  = make_clock(100),
       batch     = 1,
     })
     -- warmup is 0 so all calls are in measurement; count should equal iters
@@ -254,7 +254,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(500),
+      clock_fn  = make_clock(500),
     })
     local s = result:format()
     T.ok(type(s) == "string" and #s > 0, "format() returns non-empty string")
@@ -265,7 +265,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(500),
+      clock_fn  = make_clock(500),
     })
     T.eq(tostring(result), result:format())
   end)
@@ -275,7 +275,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 7,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     local s = result:format()
     T.ok(s:find("iters"), "format contains 'iters': " .. s)
@@ -286,7 +286,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     local s = result:format()
     T.ok(s:find("mean="), "format contains 'mean=': " .. s)
@@ -297,7 +297,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     local s = result:format()
     T.ok(s:find("ops/sec"), "format contains 'ops/sec': " .. s)
@@ -308,7 +308,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     T.ok(result.ops_per_sec > 0, "ops_per_sec > 0")
   end)
@@ -318,7 +318,7 @@ T.describe("bench.run", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 20,
-      clock     = make_clock(500),
+      clock_fn  = make_clock(500),
     })
     T.ok(result.min_ns <= result.mean_ns, "min <= mean")
     T.ok(result.mean_ns <= result.max_ns, "mean <= max")
@@ -330,7 +330,7 @@ T.describe("bench.run", function()
       duration     = 0.0,
       warmup       = 0.0,
       min_iters    = 10,
-      clock        = make_clock(2000),
+      clock_fn     = make_clock(2000),
       overhead_ns  = 1000,
       batch        = 1,
     })
@@ -346,19 +346,19 @@ end)
 T.describe("bench.calibrate", function()
 
   T.it("returns a number", function()
-    local overhead = bench.calibrate({ iters = 50, clock = make_clock(10) })
+    local overhead = bench.calibrate({ iters = 50, clock_fn = make_clock(10) })
     T.ok(type(overhead) == "number", "calibrate returns number")
   end)
 
   T.it("returns non-negative value", function()
-    local overhead = bench.calibrate({ iters = 100, clock = make_clock(10) })
+    local overhead = bench.calibrate({ iters = 100, clock_fn = make_clock(10) })
     T.ok(overhead >= 0, "overhead >= 0, got " .. tostring(overhead))
   end)
 
   T.it("overhead with 10ns clock steps is ~10ns", function()
     -- each calibration iteration calls clock twice: t0 and t1
     -- step=10 means t1-t0 = 10
-    local overhead = bench.calibrate({ iters = 100, clock = make_clock(10) })
+    local overhead = bench.calibrate({ iters = 100, clock_fn = make_clock(10) })
     T.ok(overhead >= 5 and overhead <= 30, "overhead near 10ns: " .. tostring(overhead))
   end)
 
@@ -379,7 +379,7 @@ T.describe("bench.suite", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     T.eq(#results, 3)
     T.eq(results[1].name, "alpha")
@@ -394,7 +394,7 @@ T.describe("bench.suite", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     T.ok(results[1].result ~= nil, "result field present")
     T.ok(results[1].result.iters ~= nil, "result.iters present")
@@ -414,7 +414,7 @@ T.describe("bench.suite", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 30,
-      clock     = make_clock(100),
+      clock_fn  = make_clock(100),
     })
     T.ok(results[1].result.iters >= 30, "case a iters >= 30")
     T.ok(results[2].result.iters >= 30, "case b iters >= 30")
@@ -433,7 +433,7 @@ T.describe("bench.suite", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(500),
+      clock_fn  = make_clock(500),
     })
     s:print(results)
 
@@ -458,7 +458,7 @@ T.describe("bench.throughput", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     T.ok(result.bytes_per_sec ~= nil, "bytes_per_sec present")
     T.ok(result.mb_per_sec    ~= nil, "mb_per_sec present")
@@ -469,7 +469,7 @@ T.describe("bench.throughput", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 10,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     local expected = result.ops_per_sec * 512
     -- allow small floating-point drift
@@ -482,7 +482,7 @@ T.describe("bench.throughput", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     local s = result:format()
     T.ok(
@@ -496,7 +496,7 @@ T.describe("bench.throughput", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     T.eq(result.size_bytes, 4096)
   end)
@@ -506,7 +506,7 @@ T.describe("bench.throughput", function()
       duration  = 0.0,
       warmup    = 0.0,
       min_iters = 5,
-      clock     = make_clock(1000),
+      clock_fn  = make_clock(1000),
     })
     local expected_mb = result.bytes_per_sec / (1024 * 1024)
     local diff = math.abs(result.mb_per_sec - expected_mb)
@@ -525,13 +525,13 @@ T.describe("bench.run (real clock)", function()
     local result = bench.run(function()
       -- tiny work: string format
       local _ = tostring(42)
-    end, { duration=0.05, warmup=0.01, min_iters=10 })
+    end, { duration=0.05, warmup=0.01, min_iters=10, clock_fn=function() return os.clock() * 1e9 end })
     T.ok(result.iters >= 10, "got at least 10 iters")
     T.ok(result.mean_ns >= 0, "mean >= 0")
   end)
 
   T.it("real calibrate returns a number", function()
-    local v = bench.calibrate({ iters=50 })
+    local v = bench.calibrate({ iters=50, clock_fn=function() return os.clock() * 1e9 end })
     T.ok(type(v) == "number", "calibrate returns number")
     T.ok(v >= 0, "calibrate >= 0")
   end)

@@ -11,7 +11,7 @@ local TR = require("lib.task_runner")
 
 T.describe("single task", function()
   T.it("runs a task with no deps", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("hello", {
       run = function(ctx)
         return "world"
@@ -25,7 +25,7 @@ T.describe("single task", function()
   end)
 
   T.it("empty deps list: task runs fine", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("noop", { deps = {}, run = function() return 42 end })
     local results, err = runner:run("noop")
     T.ok(not err)
@@ -33,7 +33,7 @@ T.describe("single task", function()
   end)
 
   T.it("task with no run fn returns vacuous success", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("meta", { desc = "no run" })
     local results, err = runner:run("meta")
     T.ok(not err)
@@ -41,7 +41,7 @@ T.describe("single task", function()
   end)
 
   T.it("result includes duration_ms", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("t", { run = function() return 1 end })
     local results = runner:run("t")
     T.ok(type(results["t"].duration_ms) == "number")
@@ -53,7 +53,7 @@ end)
 T.describe("deps", function()
   T.it("deps run before the dependent task", function()
     local order = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", { run = function() order[#order+1] = "a" end })
     runner:task("b", { deps = {"a"}, run = function() order[#order+1] = "b" end })
     runner:run("b")
@@ -63,7 +63,7 @@ T.describe("deps", function()
 
   T.it("shared dep runs only once", function()
     local count = 0
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("shared", { run = function() count = count + 1 end })
     runner:task("x", { deps = {"shared"}, run = function() end })
     runner:task("y", { deps = {"shared"}, run = function() end })
@@ -72,7 +72,7 @@ T.describe("deps", function()
   end)
 
   T.it("ctx:result() accesses upstream return value", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("build", {
       run = function() return { output = "dist/app.js" } end,
     })
@@ -89,7 +89,7 @@ T.describe("deps", function()
 
   T.it("multi-level deps execute in correct order", function()
     local order = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("clean",  { run = function() order[#order+1] = "clean" end })
     runner:task("build",  { deps = {"clean"}, run = function() order[#order+1] = "build" end })
     runner:task("test",   { deps = {"build"}, run = function() order[#order+1] = "test" end })
@@ -109,7 +109,7 @@ end)
 T.describe("plan", function()
   T.it("returns topological order without running", function()
     local ran = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", { run = function() ran[#ran+1] = "a" end })
     runner:task("b", { deps = {"a"}, run = function() ran[#ran+1] = "b" end })
     local plan = runner:plan("b")
@@ -119,7 +119,7 @@ T.describe("plan", function()
   end)
 
   T.it("plan for multiple targets includes all transitive deps", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("base", {})
     runner:task("x", { deps = {"base"} })
     runner:task("y", { deps = {"base"} })
@@ -132,7 +132,7 @@ T.describe("plan", function()
   end)
 
   T.it("plan returns nil + err for unknown task", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     local plan, err = runner:plan("nonexistent")
     T.ok(plan == nil)
     T.ok(err ~= nil)
@@ -143,7 +143,7 @@ end)
 
 T.describe("validate", function()
   T.it("returns true for acyclic graph", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", {})
     runner:task("b", { deps = {"a"} })
     local ok, err = runner:validate()
@@ -152,7 +152,7 @@ T.describe("validate", function()
   end)
 
   T.it("detects a direct cycle", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", { deps = {"b"} })
     runner:task("b", { deps = {"a"} })
     local ok, err = runner:validate()
@@ -161,7 +161,7 @@ T.describe("validate", function()
   end)
 
   T.it("detects a longer cycle", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", { deps = {"c"} })
     runner:task("b", { deps = {"a"} })
     runner:task("c", { deps = {"b"} })
@@ -175,7 +175,7 @@ end)
 
 T.describe("task failure", function()
   T.it("failed task produces ok=false result with err", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("bad", {
       run = function() error("boom") end,
     })
@@ -188,7 +188,7 @@ T.describe("task failure", function()
 
   T.it("dependent task does not run when dep fails", function()
     local ran = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("fail_task", { run = function() error("fail") end })
     runner:task("after",     { deps = {"fail_task"}, run = function() ran[#ran+1] = "after" end })
     runner:run("after")
@@ -200,7 +200,7 @@ end)
 
 T.describe("run_all", function()
   T.it("runs every defined task", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("p", {})
     runner:task("q", { deps = {"p"} })
     runner:task("r", {})
@@ -216,7 +216,7 @@ end)
 T.describe("tags", function()
   T.it("run_tagged runs only tasks with the given tag", function()
     local ran = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("lint",  { tags = {"ci"}, run = function() ran[#ran+1] = "lint" end })
     runner:task("test",  { tags = {"ci"}, run = function() ran[#ran+1] = "test" end })
     runner:task("build", { tags = {"release"}, run = function() ran[#ran+1] = "build" end })
@@ -229,7 +229,7 @@ T.describe("tags", function()
   end)
 
   T.it("run_tagged returns empty results for unknown tag", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", {})
     local results, err = runner:run_tagged("nonexistent")
     T.ok(not err)
@@ -242,7 +242,7 @@ end)
 T.describe("event hooks", function()
   T.it("task:start fires before run", function()
     local started = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:on("task:start", function(name) started[#started+1] = name end)
     runner:task("x", { run = function() end })
     runner:run("x")
@@ -252,7 +252,7 @@ T.describe("event hooks", function()
 
   T.it("task:done fires after successful run with result", function()
     local done_names = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:on("task:done", function(name, result)
       done_names[#done_names+1] = {name = name, ok = result.ok}
     end)
@@ -265,7 +265,7 @@ T.describe("event hooks", function()
 
   T.it("task:error fires on failure", function()
     local errors = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:on("task:error", function(name, err) errors[#errors+1] = {name=name, err=err} end)
     runner:task("bad", { run = function() error("kaboom") end })
     runner:run("bad")
@@ -276,7 +276,7 @@ T.describe("event hooks", function()
 
   T.it("task:start and task:done both fire, in order", function()
     local events = {}
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:on("task:start", function(name) events[#events+1] = "start:" .. name end)
     runner:on("task:done",  function(name) events[#events+1] = "done:" .. name end)
     runner:task("a", {})
@@ -297,7 +297,7 @@ T.describe("once flag", function()
     -- 'once' is an explicit declaration of that intent; the runner honors it
     -- through the done_set mechanism.
     local count = 0
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("shared", { once = true, run = function() count = count + 1 end })
     runner:task("p", { deps = {"shared"} })
     runner:task("q", { deps = {"shared"} })
@@ -313,6 +313,7 @@ T.describe("ctx:log", function()
     local logs = {}
     local runner = TR.new({
       log_fn = function(name, msg) logs[#logs+1] = {name=name, msg=msg} end,
+      clock_fn = os.clock,
     })
     runner:task("logged", {
       run = function(ctx) ctx:log("hello from logged") end,
@@ -328,7 +329,7 @@ end)
 
 T.describe("run with list", function()
   T.it("runs multiple named targets", function()
-    local runner = TR.new({ log_fn = function() end })
+    local runner = TR.new({ log_fn = function() end, clock_fn = os.clock })
     runner:task("a", { run = function() return 1 end })
     runner:task("b", { run = function() return 2 end })
     local results, err = runner:run({"a", "b"})

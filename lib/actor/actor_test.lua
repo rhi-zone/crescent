@@ -39,7 +39,7 @@ end)
 
 T.describe("spawn / send / step", function()
   T.it("actor receives message via step", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local received = {}
     local pid = sys:spawn(function(ctx)
       local msg = ctx:receive()
@@ -54,7 +54,7 @@ T.describe("spawn / send / step", function()
   end)
 
   T.it("actor that loops receives multiple messages", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local log = {}
     local pid = sys:spawn(function(ctx)
       for _ = 1, 3 do
@@ -73,7 +73,7 @@ T.describe("spawn / send / step", function()
   end)
 
   T.it("actor processes message in order", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local result = {}
     local pid = sys:spawn(function(ctx)
       while true do
@@ -98,7 +98,7 @@ end)
 
 T.describe("multiple actors", function()
   T.it("each actor gets its own messages", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local got_a, got_b = {}, {}
     local pid_a = sys:spawn(function(ctx)
       while true do
@@ -128,7 +128,7 @@ T.describe("multiple actors", function()
   end)
 
   T.it("pids are unique", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pids = {}
     for i = 1, 10 do
       pids[i] = sys:spawn(function(ctx) ctx:receive() end)
@@ -147,13 +147,13 @@ end)
 
 T.describe("alive / actor_count", function()
   T.it("alive returns true for running actor", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(ctx) ctx:receive() end)
     T.eq(sys:alive(pid), true)
   end)
 
   T.it("alive returns false after actor exits", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(_ctx)
       -- exits immediately (no receive)
     end)
@@ -161,7 +161,7 @@ T.describe("alive / actor_count", function()
   end)
 
   T.it("alive returns false after stop", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(ctx) ctx:receive() end)
     T.eq(sys:alive(pid), true)
     sys:stop(pid)
@@ -169,7 +169,7 @@ T.describe("alive / actor_count", function()
   end)
 
   T.it("actor_count decreases when actor dies", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local n0 = sys:actor_count()
     T.eq(n0, 0)
     local pid = sys:spawn(function(ctx) ctx:receive() end)
@@ -179,7 +179,7 @@ T.describe("alive / actor_count", function()
   end)
 
   T.it("actor_count tracks multiple actors", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pids = {}
     for i = 1, 5 do
       pids[i] = sys:spawn(function(ctx) ctx:receive() end)
@@ -197,18 +197,18 @@ end)
 
 T.describe("whereis", function()
   T.it("finds named actor", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(ctx) ctx:receive() end, {name = "myactor"})
     T.eq(sys:whereis("myactor"), pid)
   end)
 
   T.it("returns nil for unknown name", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     T.eq(sys:whereis("nosuchactor"), nil)
   end)
 
   T.it("name unregistered after actor dies", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(_ctx) end, {name = "shortlived"})
     -- Actor exits immediately (no receive)
     T.eq(sys:alive(pid), false)
@@ -222,7 +222,7 @@ end)
 
 T.describe("ctx:self / ctx:name", function()
   T.it("ctx:self returns the actor's own pid", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local self_pid_box = {}
     local pid = sys:spawn(function(ctx)
       self_pid_box[1] = ctx:self()
@@ -231,7 +231,7 @@ T.describe("ctx:self / ctx:name", function()
   end)
 
   T.it("ctx:name returns the actor's name", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local name_box = {}
     sys:spawn(function(ctx)
       name_box[1] = ctx:name()
@@ -240,7 +240,7 @@ T.describe("ctx:self / ctx:name", function()
   end)
 
   T.it("ctx:name is nil when no name given", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local name_box = {}
     sys:spawn(function(ctx)
       name_box[1] = ctx:name()
@@ -255,7 +255,7 @@ end)
 
 T.describe("call (request-reply)", function()
   T.it("call returns the reply from target actor", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(ctx)
       while true do
         local msg = ctx:receive()
@@ -272,7 +272,7 @@ T.describe("call (request-reply)", function()
   end)
 
   T.it("call returns nil on timeout", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     -- Actor that never replies
     sys:spawn(function(ctx)
       ctx:receive()  -- just waits, doesn't reply
@@ -291,7 +291,7 @@ end)
 
 T.describe("run_until_idle", function()
   T.it("processes all pending messages", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local log = {}
     local pid = sys:spawn(function(ctx)
       while true do
@@ -316,7 +316,7 @@ end)
 
 T.describe("receive timeout", function()
   T.it("receive returns nil when timeout elapses", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local result_box = {}
     -- Use 0 ms timeout — deadline immediately in the past after first step
     local pid = sys:spawn(function(ctx)
@@ -336,7 +336,7 @@ T.describe("receive timeout", function()
   end)
 
   T.it("receive without timeout blocks until message", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local got = {}
     local pid = sys:spawn(function(ctx)
       local msg = ctx:receive()   -- no timeout
@@ -359,7 +359,7 @@ end)
 
 T.describe("link", function()
   T.it("linked actor receives exit message when other stops", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local exit_msgs = {}
 
     local pid_a
@@ -392,7 +392,7 @@ T.describe("link", function()
   end)
 
   T.it("link is bidirectional: stopping B notifies A", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local a_got_exit = {}
 
     local pid_b
@@ -429,7 +429,7 @@ end)
 
 T.describe("monitor", function()
   T.it("monitor receives :down when target exits normally", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local down_msgs = {}
 
     local pid_target = sys:spawn(function(_ctx)
@@ -451,7 +451,7 @@ T.describe("monitor", function()
   end)
 
   T.it("monitor receives :down when target is stopped", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local down_msgs = {}
 
     local pid_target = sys:spawn(function(ctx)
@@ -489,7 +489,7 @@ end)
 
 T.describe("error handling", function()
   T.it("actor crash is isolated — system keeps running", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
 
     -- Crasher
     sys:spawn(function(_ctx)
@@ -514,7 +514,7 @@ T.describe("error handling", function()
   end)
 
   T.it("crashed actor is marked dead", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local pid = sys:spawn(function(_ctx)
       error("boom")
     end)
@@ -528,7 +528,7 @@ end)
 
 T.describe("ctx:spawn (child spawn)", function()
   T.it("parent can spawn a child actor from inside ctx", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local child_log = {}
 
     sys:spawn(function(ctx)
@@ -556,7 +556,7 @@ end)
 
 T.describe("supervisor one_for_one", function()
   T.it("restarts failed permanent child", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local call_count = 0
 
     local function worker_fn(ctx)
@@ -592,7 +592,7 @@ T.describe("supervisor one_for_one", function()
   end)
 
   T.it("temporary child is NOT restarted", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local call_count = 0
 
     local function temp_fn(_ctx)
@@ -617,7 +617,7 @@ T.describe("supervisor one_for_one", function()
   end)
 
   T.it("transient child restarts on crash, not on normal exit", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local restart_count = {0}
 
     local function trans_fn(_ctx)
@@ -649,7 +649,7 @@ end)
 
 T.describe("supervisor one_for_all", function()
   T.it("restarts all children when one fails", function()
-    local sys = A.system()
+    local sys = A.system({ clock_fn = os.clock })
     local calls = {a = 0, b = 0}
 
     local function make_worker(id, should_crash)

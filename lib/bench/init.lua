@@ -19,19 +19,8 @@ local M = {}
 M._tier = "pure"
 
 -- ---------------------------------------------------------------------------
--- Clock: injectable; default is os.clock() * 1e9 (CPU nanoseconds).
--- Try luasocket for wall-clock if available; fall back to os.clock.
+-- Clock: injectable via opts.clock_fn (must return nanoseconds).
 -- ---------------------------------------------------------------------------
-
-local _default_clock
-do
-  local ok, socket = pcall(require, "socket")
-  if ok and socket.gettime then
-    _default_clock = function() return socket.gettime() * 1e9 end
-  else
-    _default_clock = function() return os.clock() * 1e9 end
-  end
-end
 
 -- ---------------------------------------------------------------------------
 -- Statistics helpers
@@ -178,7 +167,7 @@ end
 -- Runs an empty function through the measurement path and returns mean_ns.
 function M.calibrate(opts)
   opts = opts or {}
-  local clock = opts.clock or _default_clock
+  local clock = opts.clock_fn or error("bench.calibrate: opts.clock_fn is required")
   local iters = opts.iters or 1000
 
   local samples = {}
@@ -209,7 +198,7 @@ function M.run(fn, opts)
   local duration    = opts.duration  or 1.0
   local warmup      = opts.warmup    or 0.1
   local min_iters   = opts.min_iters or 100
-  local clock       = opts.clock     or _default_clock
+  local clock       = opts.clock_fn  or error("bench.run: opts.clock_fn is required")
   local overhead_ns = opts.overhead_ns or 0
 
   -- warmup phase

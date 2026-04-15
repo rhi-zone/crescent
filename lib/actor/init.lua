@@ -19,7 +19,6 @@ local co_create  = coroutine.create
 local co_resume  = coroutine.resume
 local co_status  = coroutine.status
 local co_yield   = coroutine.yield
-local os_clock   = os.clock
 
 -- ---------------------------------------------------------------------------
 -- Pid (opaque integer handle) — just a sequential integer, kept as-is
@@ -40,9 +39,10 @@ function ActorCtx:receive(timeout_ms)
   end
   -- Otherwise yield back to the scheduler, which will resume us when a message
   -- arrives (or the timeout fires).
+  local clock_fn = self._system._clock_fn
   local deadline
   if timeout_ms then
-    deadline = os_clock() + timeout_ms / 1000.0
+    deadline = clock_fn() + timeout_ms / 1000.0
   end
   while true do
     co_yield(deadline)
@@ -51,7 +51,7 @@ function ActorCtx:receive(timeout_ms)
     end
     -- If we're back here and mailbox is still empty, the scheduler woke us for
     -- timeout checking.
-    if deadline and os_clock() >= deadline then
+    if deadline and clock_fn() >= deadline then
       return nil
     end
   end
@@ -146,6 +146,7 @@ function M.system(opts)
     _next_pid    = 1,
     _next_ref_id = 1,
     _mailbox_size = opts.mailbox_size or 100,
+    _clock_fn    = opts.clock_fn or error("actor.system: opts.clock_fn is required"),
   }, System)
   return sys
 end
@@ -210,9 +211,10 @@ function System:call(pid, msg, timeout_ms)
   self:send(pid, msg)
 
   -- Drive the system until the reply actor is dead or timeout
+  local clock_fn = self._clock_fn
   local deadline
   if timeout_ms then
-    deadline = os_clock() + timeout_ms / 1000.0
+    deadline = clock_fn() + timeout_ms / 1000.0
   end
 
   local max_steps = 10000
@@ -220,7 +222,7 @@ function System:call(pid, msg, timeout_ms)
   while reply_actor._status == "running" and steps < max_steps do
     steps = steps + 1
     self:step()
-    if deadline and os_clock() >= deadline then
+    if deadline and clock_fn() >= deadline then
       break
     end
   end
@@ -312,7 +314,7 @@ end
 function System:step()
   -- Collect actors to step (snapshot — actors may die during step)
   local to_step = {}
-  local now = os_clock()
+  local now = self._clock_fn()
   for pid, actor in pairs(self._actors) do
     if actor._status == "running" then
       local has_mail  = #actor._mailbox > 0
@@ -341,7 +343,7 @@ function System:run_until_idle()
   local max = 100000
   for _ = 1, max do
     -- Check if any actor has pending messages or timed-out deadlines
-    local now = os_clock()
+    local now = self._clock_fn()
     local active = false
     for _, actor in pairs(self._actors) do
       if actor._status == "running" then
@@ -466,7 +468,7 @@ function Supervisor:_should_restart(child, reason)
 end
 
 function Supervisor:_record_failure(id)
-  local now = os_clock()
+  local now = self._system._clock_fn()
   local rec = self._failures[id]
   -- Prune old failures outside the period window
   local period = self._period

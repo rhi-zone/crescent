@@ -124,7 +124,7 @@ end
 --   max_size  number   — LRU cap
 --   ttl       number   — seconds (uses clock())
 --   key       function — custom key(...)
---   clock     function — returns current time (default os.clock; for testing)
+--   clock_fn  function — returns current time (required when ttl is set)
 --   weak      bool     — use weak values table
 
 local PRESENT = {}  -- sentinel: cached nil return values
@@ -134,7 +134,7 @@ local function wrap(fn, opts)
   local max_size = opts.max_size
   local ttl      = opts.ttl
   local key_fn   = opts.key or make_key
-  local clock    = opts.clock or os.clock
+  local clock    = opts.clock_fn or (ttl and error("memoize: opts.clock_fn is required when using TTL"))
   local use_weak = opts.weak
 
   local hits   = 0
@@ -267,7 +267,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Memoize fn with optional LRU/TTL/key options.
---: ((...) -> ..., { max_size: number | nil, ttl: number | nil, key: ((...) -> string) | nil, clock: (() -> number) | nil } | nil) -> any
+--: ((...) -> ..., { max_size: number | nil, ttl: number | nil, key: ((...) -> string) | nil, clock_fn: (() -> number) | nil } | nil) -> any
 function M.memoize(fn, opts)
   return wrap(fn, opts)
 end
@@ -314,11 +314,12 @@ end
 -- The actual fn is called on the FIRST call after the delay window expires
 -- (delay is in seconds, checked via os.clock).
 --: ((...) -> ..., number) -> (...) -> ...
-function M.debounce(fn, delay)
+function M.debounce(fn, delay, clock_fn)
+  if not clock_fn then error("memoize.debounce: clock_fn is required") end
   local last_call = nil
   local last_result = nil
   return function(...)
-    local now = os.clock()
+    local now = clock_fn()
     if last_call == nil or (now - last_call) >= delay then
       last_result = fn(...)
     end

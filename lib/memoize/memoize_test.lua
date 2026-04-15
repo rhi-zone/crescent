@@ -120,7 +120,7 @@ T.describe("memoize: TTL", function()
     local t = 0
     local f = memo.memoize(
       function(x) calls = calls + 1; return x end,
-      { ttl = 10, clock = function() return t end }
+      { ttl = 10, clock_fn = function() return t end }
     )
     f(1)
     t = 5
@@ -133,7 +133,7 @@ T.describe("memoize: TTL", function()
     local t = 0
     local f = memo.memoize(
       function(x) calls = calls + 1; return x end,
-      { ttl = 10, clock = function() return t end }
+      { ttl = 10, clock_fn = function() return t end }
     )
     f(1)
     T.eq(calls, 1)
@@ -147,7 +147,7 @@ T.describe("memoize: TTL", function()
     local t = 0
     local f = memo.memoize(
       function(x) calls = calls + 1; return x * 10 end,
-      { ttl = 5, clock = function() return t end }
+      { ttl = 5, clock_fn = function() return t end }
     )
     T.eq(f(3), 30)
     t = 6

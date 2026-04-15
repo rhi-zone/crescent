@@ -437,7 +437,7 @@ end)
 
 T.describe("bench", function()
   T.it("returns a result with expected fields", function()
-    local result = M.bench(function() end, { iterations = 10, warmup = 2, min_ms = 0 })
+    local result = M.bench(function() end, { iterations = 10, warmup = 2, min_ms = 0, clock_fn = os.clock })
     T.ok(result.iterations   >= 10)
     T.ok(result.total_ms     >= 0)
     T.ok(result.per_iter_ms  >= 0)

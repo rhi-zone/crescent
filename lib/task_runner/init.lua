@@ -67,6 +67,7 @@ function M.new(opts)
     _hooks    = {},   -- event -> list of callbacks
     _executor = opts.executor,  -- optional parallel executor
     _log_fn   = opts.log_fn or error("task_runner: opts.log_fn function is required"),
+    _clock_fn = opts.clock_fn or error("task_runner: opts.clock_fn is required"),
   }
 
   -- ── task(name, def) ──────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ function M.new(opts)
         }
 
         fire(runner_, "task:start", name)
-        local t0 = os.clock()
+        local t0 = runner_._clock_fn()
         local ok, value_or_err
 
         if def.run then
@@ -155,7 +156,7 @@ function M.new(opts)
           ok, value_or_err = true, true
         end
 
-        local duration_ms = math.floor((os.clock() - t0) * 1000 + 0.5)
+        local duration_ms = math.floor((runner_._clock_fn() - t0) * 1000 + 0.5)
 
         if ok then
           local result = { ok = true, value = value_or_err, duration_ms = duration_ms }

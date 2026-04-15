@@ -18,7 +18,6 @@ M._tier = "pure"
 local co_create  = coroutine.create
 local co_resume  = coroutine.resume
 local co_status  = coroutine.status
-local os_clock   = os.clock
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -54,6 +53,7 @@ Queue.__index = Queue
 -- opts.on_done      (fn(task, result))  — global done callback
 function M.new(opts)
   opts = opts or {}
+  local clock_fn = opts.clock_fn or error("async_queue.new: opts.clock_fn is required")
   local q = setmetatable({
     _concurrency  = opts.concurrency  or 1,
     _rate         = opts.rate,          -- tasks/sec, nil = unlimited
@@ -62,6 +62,7 @@ function M.new(opts)
     _timeout      = opts.timeout,
     _on_error     = opts.on_error,
     _on_done      = opts.on_done,
+    _clock_fn     = clock_fn,
 
     _pending      = {},  -- sorted array of task specs
     _active       = {},  -- array of running task states
@@ -182,7 +183,7 @@ end
 -- Check rate limit: returns true if we can start a new task now.
 local function rate_ok(q, clock)
   if not q._rate then return true end
-  local now = clock or os_clock()
+  local now = clock or q._clock_fn()
   if not q._rate_window or now - q._rate_window >= 1.0 then
     q._rate_window = now
     q._rate_count  = 0
@@ -226,7 +227,7 @@ end
 local function reschedule_retry(q, task, clock)
   task.retries_left = task.retries_left - 1
   q._stats.retried  = q._stats.retried + 1
-  task.retry_after  = (clock or os_clock()) + q._retry_delay
+  task.retry_after  = (clock or q._clock_fn()) + q._retry_delay
   -- Re-insert at front of its priority group (same seq = runs before new tasks)
   pq_insert(q._pending, task)
   q._stats.pending = q._stats.pending + 1
@@ -236,7 +237,7 @@ end
 local function start_task(q, task, clock)
   local state = {
     task       = task,
-    started_at = clock or os_clock(),
+    started_at = clock or q._clock_fn(),
     done       = false,
     err        = nil,
     result     = nil,
@@ -273,7 +274,7 @@ end
 -- clock: optional current time (os.clock() value). Defaults to os.clock().
 -- Returns (active_count, pending_count).
 function Queue:tick(clock)
-  clock = clock or os_clock()
+  clock = clock or self._clock_fn()
 
   -- 1. Continue any active coroutines that have not finished yet.
   local i = 1
@@ -361,7 +362,7 @@ end
 -- Uses os.clock() for time advancement. Advances clock by retry_delay
 -- as needed so retries eventually run.
 function Queue:run_all()
-  local clock = os_clock()
+  local clock = self._clock_fn()
   local max_iterations = 100000  -- safety guard
   local iter = 0
   while iter < max_iterations do
@@ -411,6 +412,7 @@ function M.batcher(opts)
     _batch_size = opts.batch_size or 100,
     _delay      = opts.delay or 0,
     _process    = opts.process,
+    _clock_fn   = opts.clock_fn or error("async_queue.batcher: opts.clock_fn is required"),
     _buckets    = {},  -- key -> {items}
     _bucket_order = {},  -- insertion-ordered keys
     _first_at   = {},  -- key -> clock when first item was added
@@ -426,7 +428,7 @@ function Batcher:push(item, clock)
   if not self._buckets[key] then
     self._buckets[key] = {}
     self._bucket_order[#self._bucket_order + 1] = key
-    self._first_at[key] = clock or os_clock()
+    self._first_at[key] = clock or self._clock_fn()
   end
   local bucket = self._buckets[key]
   bucket[#bucket + 1] = item
@@ -465,7 +467,7 @@ end
 --- Flush all pending items, respecting delay.
 -- clock: optional current time. Buckets whose delay has elapsed are flushed.
 function Batcher:flush(clock)
-  clock = clock or os_clock()
+  clock = clock or self._clock_fn()
   local keys_to_flush = {}
   for _, key in ipairs(self._bucket_order) do
     local first = self._first_at[key]

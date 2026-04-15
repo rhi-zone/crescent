@@ -11,7 +11,7 @@ local S = require("lib.scheduler")
 -- Helper: make an injected-clock scheduler
 local function make_sched(t_ref)
   -- t_ref is a table with field .t so we can mutate it
-  return S.new({ clock = function() return t_ref.t end })
+  return S.new({ clock_fn = function() return t_ref.t end })
 end
 
 -- ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ T.describe("scheduler", function()
 
   -- Basic: spawn runs to completion
   T.it("single task runs to completion", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ran = false
     local task = sched:spawn(function(ctx)
       ran = true
@@ -32,7 +32,7 @@ T.describe("scheduler", function()
 
   -- Multiple tasks: all run
   T.it("multiple tasks all run", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local count = 0
     for i = 1, 5 do
       sched:spawn(function(ctx) count = count + 1 end)
@@ -44,7 +44,7 @@ T.describe("scheduler", function()
 
   -- yield(): tasks interleave ABAB
   T.it("yield interleaves tasks", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local order = {}
     sched:spawn(function(ctx)
       order[#order + 1] = "A1"
@@ -67,7 +67,7 @@ T.describe("scheduler", function()
 
   -- Priority: higher priority tasks run first
   T.it("higher priority runs first", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local order = {}
     sched:spawn(function(ctx) order[#order + 1] = "low"  end, { priority = 1 })
     sched:spawn(function(ctx) order[#order + 1] = "high" end, { priority = 10 })
@@ -100,7 +100,7 @@ T.describe("scheduler", function()
 
   -- Channel send/await: producer unblocks consumer
   T.it("channel: send unblocks await", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ch = S.channel()
     local received = nil
     sched:spawn(function(ctx)
@@ -115,7 +115,7 @@ T.describe("scheduler", function()
 
   -- Multiple waiters on channel: all woken
   T.it("channel: multiple waiters all woken", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ch = S.channel()
     local results = {}
     for i = 1, 3 do
@@ -179,7 +179,7 @@ T.describe("scheduler", function()
 
   -- task.status transitions: pending → running → done
   T.it("status transitions: pending -> done", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local captured_status = nil
     local task = sched:spawn(function(ctx)
       -- Can't easily read status from inside (it's set to running before resume)
@@ -206,7 +206,7 @@ T.describe("scheduler", function()
 
   -- waiting status
   T.it("status is waiting while awaiting channel", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ch = S.channel()
     local task = sched:spawn(function(ctx)
       ctx.await(ch)
@@ -217,7 +217,7 @@ T.describe("scheduler", function()
 
   -- Error in task: status=failed, error captured
   T.it("error in task: status=failed, error captured", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local task = sched:spawn(function(ctx)
       error("boom")
     end)
@@ -229,7 +229,7 @@ T.describe("scheduler", function()
 
   -- on_task_done hook
   T.it("on_task_done hook is called", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local hooked = nil
     sched:on_task_done(function(task) hooked = task end)
     local task = sched:spawn(function(ctx) end)
@@ -240,7 +240,7 @@ T.describe("scheduler", function()
 
   -- on_task_failed hook
   T.it("on_task_failed hook is called", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local hooked_task = nil
     local hooked_err  = nil
     sched:on_task_failed(function(task, err)
@@ -257,7 +257,7 @@ T.describe("scheduler", function()
 
   -- cancel(): cancelled task doesn't run
   T.it("cancel prevents task from running", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ran = false
     local task = sched:spawn(function(ctx)
       ran = true
@@ -287,7 +287,7 @@ T.describe("scheduler", function()
 
   -- stats(): correct counts
   T.it("stats() returns correct counts", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     sched:spawn(function(ctx) end)
     sched:spawn(function(ctx) end)
     sched:spawn(function(ctx) error("fail") end)
@@ -302,7 +302,7 @@ T.describe("scheduler", function()
 
   -- done(): true when all tasks complete
   T.it("done() is true when all tasks complete", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     sched:spawn(function(ctx) end)
     sched:spawn(function(ctx) end)
     T.ok(not sched:done(), "not done before run")
@@ -312,7 +312,7 @@ T.describe("scheduler", function()
 
   -- task_count()
   T.it("task_count() reflects active tasks", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     sched:spawn(function(ctx) end)
     sched:spawn(function(ctx) end)
     T.eq(sched:task_count(), 2, "2 active tasks before run")
@@ -322,7 +322,7 @@ T.describe("scheduler", function()
 
   -- run_for()
   T.it("run_for() runs at most N steps", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local count = 0
     sched:spawn(function(ctx)
       while true do
@@ -338,7 +338,7 @@ T.describe("scheduler", function()
 
   -- Priority with yield: higher priority task always runs before lower in same step
   T.it("priority preserved across yields", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local order = {}
     -- Both tasks yield once; each step should run high before low
     sched:spawn(function(ctx)
@@ -360,7 +360,7 @@ T.describe("scheduler", function()
 
   -- Channel: await returns immediately if channel already has a value
   T.it("channel: await returns immediately if already set", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ch = S.channel()
     ch._value = "preloaded"
     ch._has   = true
@@ -399,7 +399,7 @@ T.describe("scheduler", function()
 
   -- Spawning a task from within a task
   T.it("task can spawn sub-tasks", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local results = {}
     sched:spawn(function(ctx)
       sched:spawn(function(ctx2)
@@ -416,7 +416,7 @@ T.describe("scheduler", function()
 
   -- stats().steps increments
   T.it("stats().steps increments each step", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     T.eq(sched:stats().steps, 0)
     sched:step()
     T.eq(sched:stats().steps, 1)
@@ -426,7 +426,7 @@ T.describe("scheduler", function()
 
   -- on_task_done and on_task_failed not called for cancelled tasks
   T.it("hooks not called for cancelled tasks", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local done_count   = 0
     local failed_count = 0
     sched:on_task_done(function() done_count = done_count + 1 end)
@@ -445,14 +445,14 @@ T.describe("scheduler", function()
 
   -- task.name is set
   T.it("task.name is set from opts", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local t1 = sched:spawn(function() end, { name = "myjob" })
     T.eq(t1.name, "myjob")
   end)
 
   -- default name is assigned
   T.it("task.name has a default", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local t1 = sched:spawn(function() end)
     T.ok(type(t1.name) == "string", "name is a string")
     T.ok(#t1.name > 0, "name is non-empty")
@@ -460,14 +460,14 @@ T.describe("scheduler", function()
 
   -- task.priority is set from opts
   T.it("task.priority reflects opts", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local t1 = sched:spawn(function() end, { priority = 7 })
     T.eq(t1.priority, 7)
   end)
 
   -- Three tasks with same priority run in spawn order (FIFO)
   T.it("same-priority tasks run in spawn order", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local order = {}
     sched:spawn(function() order[#order+1] = 1 end)
     sched:spawn(function() order[#order+1] = 2 end)
@@ -480,7 +480,7 @@ T.describe("scheduler", function()
 
   -- Channel: send wakes a single waiting task
   T.it("channel send gives correct value to waiter", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     local ch = S.channel()
     local got = nil
     sched:spawn(function(ctx) got = ctx.await(ch) end)
@@ -506,7 +506,7 @@ T.describe("scheduler", function()
 
   -- run() terminates even with no tasks
   T.it("run() with no tasks completes immediately", function()
-    local sched = S.new()
+    local sched = S.new({ clock_fn = os.clock })
     T.ok(sched:done(), "no tasks → already done")
     sched:run()
     local st = sched:stats()

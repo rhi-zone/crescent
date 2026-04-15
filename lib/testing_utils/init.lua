@@ -79,10 +79,10 @@ function M.bench(fn, opts)
   local warmup     = opts.warmup     or 100
   local iterations = opts.iterations or 1000
   local min_ms     = opts.min_ms     or 100
+  local clock      = opts.clock_fn or error("testing_utils.bench: opts.clock_fn is required")
 
   for _ = 1, warmup do fn() end
 
-  local clock = os.clock
   local t0    = clock()
   local count = 0
   repeat
