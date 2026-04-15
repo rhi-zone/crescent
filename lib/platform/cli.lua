@@ -340,8 +340,9 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 	end
 
 	-- Storage caps: resolve data path from scope dimensions.
+	-- If decl.path is set explicitly (e.g. via --cap.NAME.path=FILE), use it directly.
 	if cap_type == "kv" or cap_type == "db" or cap_type == "shared_db" then
-		local data_path = platform._resolve_data_path(cap_name, decl.scope, context)
+		local data_path = decl.path and expand_home(decl.path) or platform._resolve_data_path(cap_name, decl.scope, context)
 		-- Ensure parent directory exists for the backing store file.
 		local parent_dir = data_path:match("^(.*)/[^/]+$")
 		if parent_dir then mkdir_p(parent_dir) end

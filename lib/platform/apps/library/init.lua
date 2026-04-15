@@ -11,5 +11,6 @@ local M = {}
 
 M.adapter = require("lib.platform.apps.library.adapter")
 M.dom = require("lib.platform.apps.library.dom")
+M.server = require("lib.platform.apps.library.server")
 
 return M

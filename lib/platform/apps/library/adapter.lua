@@ -58,4 +58,48 @@ function M.composite(sources)
 	}
 end
 
+-- index(idx, opts?) -> adapter
+-- Wraps an app index (lib/platform/index.lua) as an adapter source.
+-- opts.tag: optional tag filter for list()
+-- opts.on_open: function(row) called when an item is opened
+function M.index(idx, opts)
+	opts = opts or {}
+	local tag_filter = opts.tag
+	local on_open = opts.on_open
+
+	local function row_to_item(row)
+		local meta = row.manifest and row.manifest.meta or {}
+		return {
+			id = tostring(row.id),
+			metadata = {
+				name = row.name or "Unknown",
+				description = meta.description or "",
+				tags = table.concat(row.tags or {}, ", "),
+				path = row.path or "",
+			},
+			open = on_open and function() on_open(row) end or nil,
+		}
+	end
+
+	return {
+		list = function()
+			local filter = tag_filter and { tag = tag_filter } or nil
+			local rows = idx:list(filter)
+			local items = {}
+			for i = 1, #rows do
+				items[i] = row_to_item(rows[i])
+			end
+			return items
+		end,
+		search = function(query)
+			local rows = idx:search(query)
+			local items = {}
+			for i = 1, #rows do
+				items[i] = row_to_item(rows[i])
+			end
+			return items
+		end,
+	}
+end
+
 return M

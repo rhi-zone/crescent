@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "meta": { "tags": ["launcher", "browser", "library"] },
   "default_entry": "server",
+  "caps": {
+    "self": { "type": "self" }
+  },
   "entry": {
     "server": {
-      "main": "dom.lua",
+      "main": "server.lua",
       "caps": {
-        "db": { "type": "db", "required": false, "readonly": true },
-        "kv": { "type": "kv", "required": false }
+        "server": { "type": "http_server" },
+        "index_db": { "type": "db", "required": false, "readonly": true, "path": "~/.crescent/apps/index.db" }
       }
     }
   }
