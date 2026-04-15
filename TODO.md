@@ -42,6 +42,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Instruct mode / chat templates — 7 default templates (ChatML, Llama2, Alpaca, Mistral, etc.), configurable per model
 - [x] Connection testing — verify LLM endpoint with latency measurement
 - [x] Keyboard shortcuts — Escape closes panels, Ctrl+Shift shortcuts for all panels
+- [x] Capability-based I/O migration — 77 libraries migrated from os/io globals to injected functions (time_fn, clock_fn, seed, read_fn, getenv, etc.). Directory-mode apps sandboxed. Safe subsets for jit/bit. No os/io/ffi/debug/package in sandbox.
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
