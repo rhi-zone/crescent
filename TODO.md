@@ -7,7 +7,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] `lib/png` — chunk-level PNG reader/writer, tEXt metadata helpers (6d78b94)
 - [x] `lib/sandbox` — capability-based sandbox for turn scripts (457edea)
 - [x] `lib/reactive_optics` — Rainbow port for Lua (reactive UI, optics-based)
-- [x] `lib/platform` — card loader + capability factories: `caps.png` (allowlist-gated chunk r/w), `caps.llm` (OpenAI-compatible HTTP), `caps.render` (SSE + collect sessions), `caps.fs` (scoped file I/O). 47 assertions.
+- [x] `lib/platform` — app loader + capability factories: `caps.self`, `caps.http_server`, `caps.http_client`, `caps.db`, `caps.shared_db`, `caps.kv`, `caps.time`, `caps.fs`, `caps.cli`, `caps.stdin`, `caps.stdout`. CLI launcher with explicit per-cap grant/deny.
 - [x] `lib/ecs` — SQLite-backed entity-component store, mutable world state for sandboxed scripts. 30 assertions.
 - [x] **Saved state pattern — redesign needed** — current design in `docs/platform-design.md` is a sketch (`saved_states` SQLite table, `state_ref` + `metadata` JSON columns). Needs a proper design pass: how does the platform own the schema vs. the script? How does state_ref interact with the conversation tree (`canonical_child_id`)? How does restore-on-reboot work with reactive caps? What does the save/load API look like from inside a sandboxed script? Write the redesign to `docs/platform-design.md` before implementing.
 - [x] `lib/platform/caps/kv` + `caps/db` readonly support — `opts.readonly` on kv (Lua-level block), `SQLITE_OPEN_READONLY` on db (9ca0489)
@@ -23,7 +23,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Card app: message editing (fork) and deletion (subtree) — integrated with conversation tree
 - [x] Conversation tree — SQLite-backed branching via lib/conversation, canonical path, sibling navigation
 - [x] Impersonate mode — generate text as user character, placed in input for review
-- [x] CCv2 adapter apps — import (PNG/JSON) and export (JSON/PNG) as separate BFF apps, 50 assertions
+- [x] CCv2 import — charactercardv2 `import` entrypoint (PNG/JSON → parsed card), 25 assertions
 - [x] Generation settings UI — temperature, top_p, penalties, max_tokens; LLM cap passthrough
 - [x] Lorebook editor — CRUD endpoints + collapsible entry panel with keyword/position/order editing
 - [x] Session management — create, list, switch, delete conversations; session panel UI
@@ -32,7 +32,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Markdown rendering — client-side renderer (bold, italic, code, lists, quotes, headings, links) with XSS protection
 - [x] User personas — named profiles with description injected into context, selectable per session
 - [x] Token counter — context usage progress bar with color thresholds, updated after each action
-- [x] Character avatar — header + message avatars from PNG, `raw()` on png cap, 400 assertions
+- [x] Character avatar — header + message avatars from PNG via `caps.self`, 400 assertions
 - [x] Shell app — card browser with thumbnail grid, search, launch stub, 39 assertions
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
