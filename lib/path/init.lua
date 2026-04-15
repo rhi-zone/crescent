@@ -293,6 +293,25 @@ M.commonpath = function(paths)
 	return to_native(table.concat(common, "/"))
 end
 
+---Resolve a relative path against a base directory, rejecting traversal above base.
+---Returns nil if the resolved path escapes the base (via .. or absolute path).
+--: (string, string) -> string | nil
+M.safe_resolve = function(base, rel)
+	if rel == nil or rel == "" then return nil end
+	-- Reject absolute paths.
+	if is_abs_norm(norm_seps(rel)) then return nil end
+	local joined = M.join(base, rel)
+	local resolved = M.normalize(joined)
+	local norm_base = M.normalize(base)
+	-- Ensure resolved starts with base (no traversal escape).
+	local rb = norm_seps(resolved)
+	local nb = norm_seps(norm_base)
+	if nb:sub(-1) ~= "/" then nb = nb .. "/" end
+	if rb == norm_seps(norm_base) then return resolved end
+	if rb:sub(1, #nb) ~= nb then return nil end
+	return resolved
+end
+
 ---Expand leading ~ to home directory (reads HOME or USERPROFILE env var).
 --: (string) -> string
 M.expanduser = function(p)
