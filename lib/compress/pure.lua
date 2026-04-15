@@ -159,11 +159,17 @@ local function build_tree(lengths, nsym)
 end
 
 -- Decode one symbol from the bit stream using the Huffman tree.
+-- The tree stores bit-reversed codes (see build_tree), so we accumulate bits
+-- LSB-first: each new bit goes into the next higher position.
 --: (table, table) -> number
 local function decode_symbol(r, tree)
   local code = 0
+  local mask = 1
   for len = 1, tree.maxbits do
-    code = code * 2 + read_bits(r, 1)
+    if read_bits(r, 1) == 1 then
+      code = code + mask
+    end
+    mask = mask * 2
     local sym = tree[code * 32 + len]
     if sym then return sym end
   end
