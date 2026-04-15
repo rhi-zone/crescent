@@ -215,7 +215,7 @@ Schedule.__index = Schedule
 
 -- Check whether a given Unix timestamp matches this schedule.
 function Schedule:matches(ts)
-  local t = os.date("*t", ts)
+  local t = self._date_fn("*t", ts)
   -- Check month
   local month_ok = false
   for _, v in ipairs(self.fields.month) do
@@ -269,23 +269,23 @@ end
 
 -- Advance the timestamp to the start of the next minute (or second for 6-field).
 -- Used internally in next/prev search.
-local function snap_forward(ts, has_seconds)
+local function snap_forward(ts, has_seconds, date_fn)
   if has_seconds then
     return ts + 1
   end
   -- Round up to next minute boundary
-  local t = os.date("*t", ts)
+  local t = date_fn("*t", ts)
   -- Clear seconds, advance by 1 minute
   return ts - t.sec + 60
 end
 
-local function snap_backward(ts, has_seconds)
+local function snap_backward(ts, has_seconds, date_fn)
   if has_seconds then
     return ts - 1
   end
   -- Go back to the start of the current minute; if ts is already at sec=0
   -- (i.e. t.sec == 0), we need the previous minute instead.
-  local t = os.date("*t", ts)
+  local t = date_fn("*t", ts)
   if t.sec == 0 then
     -- already at a minute boundary; step back one full minute
     return ts - 60
@@ -301,15 +301,15 @@ function Schedule:next(ts, n)
   n = n or 1
   local has_sec = self.fields.second ~= nil
   local limit = ts + 4 * 365 * 24 * 3600
-  local cur = snap_forward(ts, has_sec)
+  local cur = snap_forward(ts, has_sec, self._date_fn)
   local found = 0
   while cur <= limit do
     if self:matches(cur) then
       found = found + 1
       if found == n then return cur end
-      cur = snap_forward(cur, has_sec)
+      cur = snap_forward(cur, has_sec, self._date_fn)
     else
-      cur = snap_forward(cur, has_sec)
+      cur = snap_forward(cur, has_sec, self._date_fn)
     end
   end
   return nil
@@ -320,12 +320,12 @@ end
 function Schedule:prev(ts)
   local has_sec = self.fields.second ~= nil
   local limit = ts - 4 * 365 * 24 * 3600
-  local cur = snap_backward(ts, has_sec)
+  local cur = snap_backward(ts, has_sec, self._date_fn)
   while cur >= limit do
     if self:matches(cur) then
       return cur
     end
-    cur = snap_backward(cur, has_sec)
+    cur = snap_backward(cur, has_sec, self._date_fn)
   end
   return nil
 end
@@ -335,7 +335,7 @@ function Schedule:range(start_ts, end_ts)
   local has_sec = self.fields.second ~= nil
   local result = {}
   -- Snap start to a candidate boundary
-  local t = os.date("*t", start_ts)
+  local t = self._date_fn("*t", start_ts)
   local cur
   if has_sec then
     -- start at exact second
@@ -348,7 +348,7 @@ function Schedule:range(start_ts, end_ts)
     if cur >= start_ts and self:matches(cur) then
       result[#result + 1] = cur
     end
-    cur = snap_forward(cur, has_sec)
+    cur = snap_forward(cur, has_sec, self._date_fn)
   end
   return result
 end
@@ -547,7 +547,8 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Parse a cron expression. Returns a Schedule object or nil, errmsg.
-function M.parse(expr)
+-- opts.date_fn: function compatible with os.date (required)
+function M.parse(expr, opts)
   if type(expr) ~= "string" then
     return nil, "expression must be a string"
   end
@@ -562,7 +563,7 @@ function M.parse(expr)
     return nil, "invalid cron expression: " .. err
   end
 
-  local sched = setmetatable({ fields = fields }, Schedule)
+  local sched = setmetatable({ fields = fields, _date_fn = opts.date_fn }, Schedule)
   return sched
 end
 

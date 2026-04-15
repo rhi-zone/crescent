@@ -325,7 +325,7 @@ function M.new(opts)
     _expiry  = {},
     _on_set  = {},
     _on_del  = {},
-    _clock   = opts.clock or os.time,
+    _clock   = opts.clock,
   }, Store)
   return store
 end

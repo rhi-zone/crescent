@@ -164,7 +164,7 @@ Expr.__index = Expr
 
 --: (self: Expr, time: number) -> boolean
 function Expr:matches(time)
-  local t = os.date("*t", time)
+  local t = self._date_fn("*t", time)
   local dow = t.wday - 1  -- os.date wday: 1=Sun, we use 0=Sun
   return self.minutes[t.min]
     and self.hours[t.hour]
@@ -176,7 +176,7 @@ end
 
 --: (self: Expr) -> boolean
 function Expr:matches_now()
-  return self:matches(os.time())
+  return self:matches(self._time_fn())
 end
 
 -- Find next valid value >= val in sorted array, or nil if none
@@ -198,10 +198,10 @@ end
 --: (self: Expr, time: number) -> number | nil
 function Expr:next(time)
   -- Start from the next minute boundary
-  local t = os.date("*t", time)
+  local t = self._date_fn("*t", time)
   t.sec = 0
   -- Advance one minute
-  local base = os.time(t) + 60
+  local base = self._time_fn(t) + 60
 
   local sorted_min = sorted_keys(self.minutes)
   local sorted_hour = sorted_keys(self.hours)
@@ -211,7 +211,7 @@ function Expr:next(time)
   -- Limit: 4 years from base
   local limit = base + 4 * 366 * 86400
 
-  local t2 = os.date("*t", base)
+  local t2 = self._date_fn("*t", base)
   local year = t2.year
   local month = t2.month
   local day = t2.day
@@ -282,9 +282,9 @@ function Expr:next(time)
       min = mn
 
       -- Check day-of-week
-      local candidate = os.time({ year = year, month = month, day = day, hour = hour, min = min, sec = 0 })
+      local candidate = self._time_fn({ year = year, month = month, day = day, hour = hour, min = min, sec = 0 })
       if candidate and candidate >= base and candidate <= limit then
-        local ct = os.date("*t", candidate)
+        local ct = self._date_fn("*t", candidate)
         local dow = ct.wday - 1
         if self.dows[dow] then
           return candidate
@@ -314,9 +314,9 @@ end
 --: (self: Expr, time: number) -> number | nil
 function Expr:prev(time)
   -- Start from the previous minute boundary
-  local t = os.date("*t", time)
+  local t = self._date_fn("*t", time)
   t.sec = 0
-  local base = os.time(t) - 60
+  local base = self._time_fn(t) - 60
 
   local sorted_min = sorted_keys(self.minutes)
   local sorted_hour = sorted_keys(self.hours)
@@ -326,7 +326,7 @@ function Expr:prev(time)
   -- Limit: 4 years back
   local limit = base - 4 * 366 * 86400
 
-  local t2 = os.date("*t", base)
+  local t2 = self._date_fn("*t", base)
   local year = t2.year
   local month = t2.month
   local day = t2.day
@@ -396,9 +396,9 @@ function Expr:prev(time)
       end
       min = mn
 
-      local candidate = os.time({ year = year, month = month, day = day, hour = hour, min = min, sec = 0 })
+      local candidate = self._time_fn({ year = year, month = month, day = day, hour = hour, min = min, sec = 0 })
       if candidate and candidate <= base and candidate >= limit then
-        local ct = os.date("*t", candidate)
+        local ct = self._date_fn("*t", candidate)
         local dow = ct.wday - 1
         if self.dows[dow] then
           return candidate
@@ -569,8 +569,10 @@ function Expr:describe()
 end
 
 --- Parse a 5-field cron expression.
---: (expr: string) -> Expr | nil, string | nil
-function M.parse(expr)
+-- opts.date_fn: function compatible with os.date (required)
+-- opts.time_fn: function compatible with os.time (required)
+--: (expr: string, opts: { date_fn: (string, number?) -> unknown, time_fn: (unknown?) -> number }) -> Expr | nil, string | nil
+function M.parse(expr, opts)
   if type(expr) ~= "string" then
     return nil, "expected string, got " .. type(expr)
   end
@@ -617,6 +619,8 @@ function M.parse(expr)
     months = months,
     dows = dows,
     _expr = expr,
+    _date_fn = opts.date_fn,
+    _time_fn = opts.time_fn,
   }, Expr)
 
   return self

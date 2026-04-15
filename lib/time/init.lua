@@ -54,9 +54,9 @@ else
       return tonumber(_tv[0].tv_sec) + tonumber(_tv[0].tv_usec) / 1000000
     end
   else
-    -- Fallback: os.time() (integer seconds only)
+    -- Fallback: no gettimeofday available
     --: () -> number
-    M.time = function() return os.time() + 0.0 end
+    M.time = function() error("lib.time: gettimeofday not available and no time function injected") end
   end
 end
 

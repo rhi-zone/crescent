@@ -5,6 +5,18 @@ end
 local smtp = require("lib.smtp")
 local T = require("lib.test.assert")
 
+-- Default time_fn for tests
+local test_time_fn = function()
+  return { year = 2025, month = 1, day = 15, hour = 10, min = 30, sec = 0, wday = 4 }
+end
+
+-- Wrap build_message to inject time_fn for tests
+local _build_message = smtp.build_message
+smtp.build_message = function(msg)
+  if not msg.time_fn then msg.time_fn = test_time_fn end
+  return _build_message(msg)
+end
+
 -- ---------------------------------------------------------------------------
 -- Mock transport helper
 -- ---------------------------------------------------------------------------
@@ -288,6 +300,7 @@ T.describe("build_message", function()
 			subject = "HTML",
 			body = "Plain text",
 			html = "<p>HTML version</p>",
+			seed = 42,
 		})
 		T.ok(raw:find("multipart/alternative", 1, true) ~= nil)
 		T.ok(raw:find("boundary=", 1, true) ~= nil)

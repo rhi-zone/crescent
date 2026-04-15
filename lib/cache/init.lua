@@ -12,7 +12,7 @@ Cache.__index = Cache
 -- Create a new LRU cache with the given maximum capacity.
 -- opts.ttl: default TTL in seconds (optional)
 -- opts.on_evict: callback(key, value) on eviction (optional)
--- opts.clock: injectable clock function, default os.time (optional)
+-- opts.clock: injectable clock function (required for TTL)
 --: (number, CacheOpts | nil) -> Cache
 function M.new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
@@ -28,7 +28,7 @@ function M.new(capacity, opts)
     _tail = nil,     -- least recent
     _ttl = opts.ttl,
     _on_evict = opts.on_evict,
-    _clock = opts.clock or os.time,
+    _clock = opts.clock,
   }, Cache)
   return self
 end

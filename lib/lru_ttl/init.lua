@@ -77,7 +77,7 @@ Cache.__index = Cache
 -- Create a new LRU+TTL cache.
 -- opts.max_size:    maximum number of entries (required, positive integer)
 -- opts.default_ttl: default TTL in seconds; nil means no expiry
--- opts.clock:       injectable clock function, defaults to os.time
+-- opts.clock:       injectable clock function (required)
 --: (LruTtlOpts) -> Cache | (nil, string)
 function M.new(opts)
   if type(opts) ~= "table" then
@@ -95,7 +95,7 @@ function M.new(opts)
     _head     = nil,
     _tail     = nil,
     _ttl      = opts.default_ttl,
-    _clock    = opts.clock or os.time,
+    _clock    = opts.clock,
     _handlers = {},
     _stats    = {
       hits        = 0,

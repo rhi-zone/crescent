@@ -532,13 +532,14 @@ end
 -- opts: { style="full"|"long"|"medium"|"short", date=true, time=false }
 
 -- M.format_date(timestamp, locale, opts) -> string
---: (number | nil, string | { language: string, region: string | nil, script: string | nil }, { style: string | nil, date: boolean | nil, time: boolean | nil } | nil) -> string
+-- opts.date_fn: function compatible with os.date (required)
+--: (number | nil, string | { language: string, region: string | nil, script: string | nil }, { style: string | nil, date: boolean | nil, time: boolean | nil, date_fn: (string, number?) -> unknown }) -> string
 function M.format_date(timestamp, locale, opts)
   opts = opts or {}
   local style = opts.style or "medium"
   local show_date = opts.date ~= false  -- default true
   local show_time = opts.time == true   -- default false
-  local t = os.date("*t", timestamp)
+  local t = opts.date_fn("*t", timestamp)
   local lang = locale_lang(locale)
   local months = (MONTH_NAMES[lang] or MONTH_NAMES["en"])
   local wdays  = (WEEKDAY_NAMES[lang] or WEEKDAY_NAMES["en"])

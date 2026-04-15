@@ -38,6 +38,14 @@ local function make_clock(initial)
   }
 end
 
+-- Default clock for tests that don't care about time
+local default_clock = function() return 0 end
+local _CP_new = CP.new
+CP.new = function(opts)
+  if opts and not opts.clock then opts.clock = default_clock end
+  return _CP_new(opts)
+end
+
 -- ---------------------------------------------------------------------------
 T.describe("connection_pool", function()
 

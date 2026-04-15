@@ -5,6 +5,26 @@ end
 local T   = require("lib.test.assert")
 local log = require("lib.log")
 
+-- Default time_fn for tests
+local test_time_fn = function() return "2025-01-15T10:30:00Z" end
+
+-- Wrap log.new to inject time_fn for tests
+local _log_new = log.new
+log.new = function(name, opts)
+  opts = opts or {}
+  if not opts.time_fn then opts.time_fn = test_time_fn end
+  return _log_new(name, opts)
+end
+
+-- Helper: write_fn for file_sink that appends data to a file path.
+local function file_write_fn(path, data)
+  local fh, err = io.open(path, "a")
+  if not fh then return nil, err end
+  fh:write(data)
+  fh:close()
+  return true
+end
+
 -- ---------------------------------------------------------------------------
 -- Level constants
 -- ---------------------------------------------------------------------------
@@ -245,7 +265,7 @@ T.describe("text format", function()
 
   T.it("text line contains time, level, name, message, fields", function()
     local path = os.tmpname()
-    local fsink = log.file_sink(path, { format = "text" })
+    local fsink = log.file_sink(file_write_fn, path, { format = "text" })
     local L = log.new("webapp", { level = "trace", sinks = { fsink } })
     L:info("req", { method = "GET", path = "/api" })
     local fh = io.open(path, "r")
@@ -263,7 +283,7 @@ T.describe("text format", function()
 
   T.it("text line without fields has no trailing spaces", function()
     local path = os.tmpname()
-    local fsink = log.file_sink(path, { format = "text" })
+    local fsink = log.file_sink(file_write_fn, path, { format = "text" })
     local L = log.new("bare", { level = "trace", sinks = { fsink } })
     L:warn("simple message")
     local fh = io.open(path, "r")
@@ -284,7 +304,7 @@ end)
 T.describe("json format", function()
   T.it("json line is valid JSON with required keys", function()
     local path = os.tmpname()
-    local fsink = log.file_sink(path, { format = "json" })
+    local fsink = log.file_sink(file_write_fn, path, { format = "json" })
     local L = log.new("svc", { level = "trace", sinks = { fsink } })
     L:error("boom", { code = 500 })
     local fh = io.open(path, "r")
@@ -304,7 +324,7 @@ T.describe("json format", function()
 
   T.it("json line with no fields omits extra keys", function()
     local path = os.tmpname()
-    local fsink = log.file_sink(path, { format = "json" })
+    local fsink = log.file_sink(file_write_fn, path, { format = "json" })
     local L = log.new("min", { level = "trace", sinks = { fsink } })
     L:debug("ping")
     local fh = io.open(path, "r")
@@ -360,7 +380,7 @@ T.describe("ansi format", function()
     -- also verify via a file that escape sequences appear.
     if ansi.enabled then
       -- Write ansi-formatted line via file_sink (which supports "ansi" format).
-      local asink = log.file_sink(path, { format = "ansi" })
+      local asink = log.file_sink(file_write_fn, path, { format = "ansi" })
       asink(entry)
       fh_write:close()
       local fh_read = io.open(path, "r")
@@ -373,7 +393,7 @@ T.describe("ansi format", function()
       fh_write:close()
       os.remove(path)
       -- When ansi disabled, just verify the format doesn't error.
-      local asink = log.file_sink(path .. "2", { format = "ansi" })
+      local asink = log.file_sink(file_write_fn, path .. "2", { format = "ansi" })
       asink(entry)
       local fh_read = io.open(path .. "2", "r")
       T.ok(fh_read, "file written without error")
@@ -407,7 +427,7 @@ T.describe("default sinks", function()
   end)
 
   T.it("file_sink returns a callable", function()
-    local sink = log.file_sink("/dev/null")
+    local sink = log.file_sink(file_write_fn, "/dev/null")
     T.eq(type(sink), "function")
   end)
 end)

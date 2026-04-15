@@ -148,7 +148,7 @@ CB.__index = CB
 --: () -> string
 function CB:state()
   if self._state == "open" then
-    local clock = self.opts.clock or os.time
+    local clock = self.opts.clock
     local elapsed = clock() - self.last_failure_time
     if elapsed >= (self.opts.reset_timeout or 30) then
       self._state = "half_open"
@@ -193,7 +193,7 @@ function CB:call(fn)
   end
   -- Failure
   self.failure_count = self.failure_count + 1
-  local clock = self.opts.clock or os.time
+  local clock = self.opts.clock
   self.last_failure_time = clock()
   local threshold = self.opts.failure_threshold or 5
   if self.failure_count >= threshold then

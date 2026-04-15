@@ -11,12 +11,12 @@ M._tier = "pure"
 -- ── Registry constructor ─────────────────────────────────────────────────────
 
 --- Create a new service registry.
--- opts.clock: function returning current time (default os.time)
+-- opts.clock: function returning current time (required)
 -- opts.ttl: seconds before unrefreshed entry expires (default 30)
 function M.new(opts)
   opts = opts or {}
   local reg = {}
-  reg._clock = opts.clock or os.time
+  reg._clock = opts.clock
   reg._ttl = opts.ttl or 30
   reg._services = {}   -- [name] = { [id] = instance_table }
   reg._rr = {}         -- [name] = round-robin counter

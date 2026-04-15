@@ -123,7 +123,7 @@ end
 
 --- TOTP: Time-based One-Time Password.
 -- key: raw binary secret
--- opts: { digits = 6, period = 30, alg = "sha1", time = os.time() }
+-- opts: { digits = 6, period = 30, alg = "sha1", time = <required> }
 -- Returns: otp_string, nil  OR  nil, errmsg
 function M.totp(key, opts)
   opts = opts or {}
@@ -131,7 +131,7 @@ function M.totp(key, opts)
   if type(period) ~= "number" or period <= 0 then
     return nil, "period must be a positive number"
   end
-  local t = opts.time or os.time()
+  local t = opts.time
   local step = math.floor(t / period)
   return M.hotp(key, step, opts)
 end
@@ -157,7 +157,7 @@ end
 function M.new_secret(opts)
   opts = opts or {}
   local nbytes = opts.bytes or 20
-  math.randomseed(os.time() + math.random(0, 65535))
+  math.randomseed(opts.time + math.random(0, 65535))
   local bytes = {}
   for i = 1, nbytes do
     bytes[i] = string.char(math.random(0, 255))
@@ -170,7 +170,7 @@ end
 --- Verify a TOTP code with a time window.
 -- secret: base32 string
 -- code: string like "123456"
--- opts: { window = 1, period = 30, time = os.time() }
+-- opts: { window = 1, period = 30, time = <required> }
 -- Returns: true or false
 function M.verify(secret, code, opts)
   if type(secret) ~= "string" or type(code) ~= "string" then
@@ -182,7 +182,7 @@ function M.verify(secret, code, opts)
   opts = opts or {}
   local window = opts.window or 1
   local period = opts.period or 30
-  local t = opts.time or os.time()
+  local t = opts.time
   local step = math.floor(t / period)
 
   for delta = -window, window do

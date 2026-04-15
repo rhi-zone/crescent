@@ -26,7 +26,7 @@ end
 --   success_threshold  number   (default 1)  — successes in half_open to close
 --   timeout            number   (default 30) — seconds before half_open retry
 --   on_state_change    function(from, to)    — optional callback
---   clock              function() -> number  — injectable clock (default os.time)
+--   clock              function() -> number  — injectable clock (required)
 --   is_failure         function(result, err) -> bool — custom failure predicate
 function M.new(opts)
 	opts = opts or {}
@@ -35,7 +35,7 @@ function M.new(opts)
 		_success_threshold = opts.success_threshold or 1,
 		_timeout           = opts.timeout or 30,
 		_on_state_change   = opts.on_state_change,
-		_clock             = opts.clock or os.time,
+		_clock             = opts.clock,
 		_is_failure        = opts.is_failure or default_is_failure,
 		_state             = STATE_CLOSED,
 		_failures          = 0,

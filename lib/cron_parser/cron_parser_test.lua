@@ -5,6 +5,14 @@ end
 local T    = require("lib.test.assert")
 local cron = require("lib.cron_parser")
 
+-- Wrap cron.parse to inject os.date for tests
+local _cron_parse = cron.parse
+cron.parse = function(expr, opts)
+  opts = opts or {}
+  if not opts.date_fn then opts.date_fn = os.date end
+  return _cron_parse(expr, opts)
+end
+
 -- Deep equality for arrays/tables (T.eq only does reference equality)
 local function deep_eq(a, b)
   if type(a) ~= type(b) then return false end

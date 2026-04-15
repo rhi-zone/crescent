@@ -5,6 +5,15 @@ end
 local T = require("lib.test.assert")
 local retry = require("lib.retry")
 
+-- Default clock for tests that don't inject one
+local default_clock = function() return 0 end
+local _cb_new = retry.circuit_breaker
+retry.circuit_breaker = function(opts)
+  opts = opts or {}
+  if not opts.clock then opts.clock = default_clock end
+  return _cb_new(opts)
+end
+
 -- ── Basic retry behavior ────────────────────────────────────────────────────
 
 T.describe("retry.run: basic", function()

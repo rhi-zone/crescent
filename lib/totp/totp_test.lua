@@ -299,7 +299,7 @@ T.describe("lib.totp", function()
 
   T.describe("new_secret", function()
     T.it("returns a non-empty base32 string", function()
-      local s = totp.new_secret()
+      local s = totp.new_secret({ time = 1000000 })
       T.ok(type(s) == "string")
       T.ok(#s > 0)
       -- must be decodable
@@ -309,7 +309,7 @@ T.describe("lib.totp", function()
     end)
 
     T.it("default length decodes to 20 bytes", function()
-      local s = totp.new_secret()
+      local s = totp.new_secret({ time = 1000001 })
       local decoded = require("lib.base32").decode(s)
       -- base32 encodes groups of 5 bytes → 8 chars; 20 bytes → 32 chars (with padding)
       -- decoded binary should be 20 bytes
@@ -317,14 +317,14 @@ T.describe("lib.totp", function()
     end)
 
     T.it("respects custom bytes option", function()
-      local s = totp.new_secret({ bytes = 10 })
+      local s = totp.new_secret({ bytes = 10, time = 1000002 })
       local decoded = require("lib.base32").decode(s)
       T.eq(#decoded, 10)
     end)
 
     T.it("two secrets are different (probabilistic)", function()
-      local s1 = totp.new_secret()
-      local s2 = totp.new_secret()
+      local s1 = totp.new_secret({ time = 1000003 })
+      local s2 = totp.new_secret({ time = 1000004 })
       -- Extremely unlikely to collide
       T.neq(s1, s2)
     end)

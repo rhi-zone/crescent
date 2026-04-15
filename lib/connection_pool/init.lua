@@ -259,7 +259,7 @@ end
 -- opts.max_size    number  (default 10)
 -- opts.idle_timeout  number  (default nil = no timeout)
 -- opts.max_lifetime  number  (default nil = no limit)
--- opts.clock       function() -> number  (default os.time)
+-- opts.clock       function() -> number  (required)
 function M.new(opts)
   if not opts or not opts.create then
     return nil, "connection_pool.new: opts.create is required"
@@ -273,7 +273,7 @@ function M.new(opts)
   self._max_size     = opts.max_size or 10
   self._idle_timeout = opts.idle_timeout
   self._max_lifetime = opts.max_lifetime
-  self._clock        = opts.clock or os.time
+  self._clock        = opts.clock
 
   self._idle      = {}
   self._conn_meta = {}  -- conn -> { created_at }

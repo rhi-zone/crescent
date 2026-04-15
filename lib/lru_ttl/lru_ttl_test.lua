@@ -5,6 +5,14 @@ end
 local T   = require("lib.test.assert")
 local LRU = require("lib.lru_ttl")
 
+-- Default clock for tests that don't care about time
+local default_clock = function() return 0 end
+local _LRU_new = LRU.new
+LRU.new = function(opts)
+  if type(opts) == "table" and not opts.clock then opts.clock = default_clock end
+  return _LRU_new(opts)
+end
+
 -- ── Construction ──────────────────────────────────────────────────────────────
 
 T.describe("lru_ttl.new", function()

@@ -7,6 +7,15 @@ end
 local T  = require("lib.test.assert")
 local SR = require("lib.service_registry")
 
+-- Default clock for tests that don't inject one
+local default_clock = function() return 0 end
+local _SR_new = SR.new
+SR.new = function(opts)
+  opts = opts or {}
+  if not opts.clock then opts.clock = default_clock end
+  return _SR_new(opts)
+end
+
 -- ── Module shape ─────────────────────────────────────────────────────────────
 
 T.describe("service_registry: module shape", function()

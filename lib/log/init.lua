@@ -221,20 +221,19 @@ M.stdout_sink = function(opts)
 end
 
 -- Sink appending to a file on disk.
+-- write_fn: function(path, data) -> true|nil, string|nil (required). Opens path
+-- in append mode and writes data.
 -- opts is `any` — open options table; format field read by string key.
---: (string, any?) -> (Entry) -> nil
-M.file_sink = function(path, opts)
+--: ((string, string) -> (boolean | nil, string | nil), string, any?) -> (Entry) -> nil
+M.file_sink = function(write_fn, path, opts)
+  if type(write_fn) ~= "function" then
+    error("log.file_sink: write_fn function is required")
+  end
   opts = opts or {}
   local fmt = opts.format or "text"
   local formatter = get_formatter(fmt)
   return function(entry)
-    local fh, err = io.open(path, "a")
-    if fh then
-      fh:write(formatter(entry))
-      fh:close()
-    else
-      io.stderr:write("log: file_sink open error: " .. tostring(err) .. "\n")
-    end
+    write_fn(path, formatter(entry))
   end
 end
 
@@ -273,7 +272,7 @@ local function emit(self, level, msg, fields)
     name   = self._name,
     msg    = msg,
     fields = fields,
-    time   = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    time   = self._time_fn(),
   }
   local sinks = self._sinks
   for i = 1, #sinks do
@@ -332,9 +331,10 @@ end
 --: (LoggerObj, string) -> LoggerObj
 Logger.child = function(self, suffix)
   return setmetatable({
-    _name  = self._name .. "." .. suffix,
-    _level = self._level,
-    _sinks = self._sinks,
+    _name    = self._name .. "." .. suffix,
+    _level   = self._level,
+    _sinks   = self._sinks,
+    _time_fn = self._time_fn,
   }, Logger)
 end
 
@@ -345,7 +345,8 @@ end
 -- Create a new logger.
 -- opts.level : string or integer minimum level (default "info")
 -- opts.sinks : array of sink functions (default: {log.stderr_sink()})
--- opts is `any` — open options table; level and sinks fields read by string key.
+-- opts.time_fn : function returning timestamp string (required)
+-- opts is `any` — open options table; level, sinks, and time_fn fields read by string key.
 --: (string, any?) -> LoggerObj
 M.new = function(name, opts)
   opts = opts or {}
@@ -358,9 +359,10 @@ M.new = function(name, opts)
     sinks = { M.stderr_sink() }
   end
   return setmetatable({
-    _name  = name,
-    _level = level,
-    _sinks = sinks,
+    _name    = name,
+    _level   = level,
+    _sinks   = sinks,
+    _time_fn = opts.time_fn,
   }, Logger)
 end
 

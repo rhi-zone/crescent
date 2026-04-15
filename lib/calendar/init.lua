@@ -197,8 +197,8 @@ function M.date(year, month, day)
   return make_date(year, month, day)
 end
 
-function M.today()
-  local t = os.date("*t")
+function M.today(time_fn)
+  local t = time_fn()
   return make_date(t.year, t.month, t.day)
 end
 

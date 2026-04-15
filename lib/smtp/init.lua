@@ -121,9 +121,10 @@ end
 
 local BOUNDARY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-local function make_boundary()
+local function make_boundary(seed)
+	if not seed then error("smtp: seed is required for boundary generation") end
+	math.randomseed(seed)
 	local t = {}
-	math.randomseed(os.time())
 	for i = 1, 24 do
 		local idx = math.random(1, #BOUNDARY_CHARS)
 		t[i] = BOUNDARY_CHARS:sub(idx, idx)
@@ -145,10 +146,10 @@ local function format_addr_list(list)
 end
 
 -- RFC 2822 date format
-local function rfc2822_date()
+local function rfc2822_date(time_fn)
 	local days = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}
 	local months = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
-	local t = os.date("*t")
+	local t = time_fn()
 	return string.format("%s, %02d %s %04d %02d:%02d:%02d +0000",
 		days[t.wday], t.day, months[t.month], t.year, t.hour, t.min, t.sec)
 end
@@ -229,6 +230,8 @@ end
 --   cc (list, optional), bcc (list, optional)
 --   headers (table, optional) — additional headers
 --   html (string, optional) — triggers multipart/alternative
+--   seed (integer) — required when html is set (for boundary generation)
+--   time_fn () -> date_table — required; returns os.date("*t")-compatible table
 -- Returns the raw message string.
 M.build_message = function(msg)
 	local parts = {}
@@ -244,7 +247,7 @@ M.build_message = function(msg)
 		parts[#parts + 1] = "Cc: " .. format_addr_list(msg.cc)
 	end
 	parts[#parts + 1] = "Subject: " .. subject
-	parts[#parts + 1] = "Date: " .. rfc2822_date()
+	parts[#parts + 1] = "Date: " .. rfc2822_date(msg.time_fn)
 	parts[#parts + 1] = "MIME-Version: 1.0"
 
 	-- Extra headers
@@ -258,7 +261,7 @@ M.build_message = function(msg)
 
 	if msg.html then
 		-- multipart/alternative
-		local boundary = make_boundary()
+		local boundary = make_boundary(msg.seed)
 		parts[#parts + 1] = 'Content-Type: multipart/alternative; boundary="' .. boundary .. '"'
 		parts[#parts + 1] = ""  -- end of headers
 		parts[#parts + 1] = "--" .. boundary

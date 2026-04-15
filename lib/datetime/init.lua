@@ -45,9 +45,9 @@ end
 
 -- ── Current time ─────────────────────────────────────────────────────────────
 
---: () -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }
-function M.now()
-  local t = os.date("*t")
+--: (time_fn: () -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }
+function M.now(time_fn)
+  local t = time_fn()
   return {
     year   = t.year,
     month  = t.month,
@@ -155,10 +155,10 @@ function M.parse_iso(s)
 end
 
 -- Parse a Unix timestamp (integer or float seconds since 1970-01-01T00:00:00Z).
---: (number) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number }
-function M.from_unix(ts)
-  -- Use os.date with "!*t" to get UTC broken-down time
-  local t = os.date("!*t", math.floor(ts))
+--: (number, date_fn: (string, number) -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number }
+function M.from_unix(ts, date_fn)
+  -- Use date_fn with "!*t" to get UTC broken-down time
+  local t = date_fn("!*t", math.floor(ts))
   return {
     year   = t.year,
     month  = t.month,

@@ -10,6 +10,15 @@ local function mktime(year, month, day, hour, min, sec)
   return os.time({ year = year, month = month, day = day, hour = hour, min = min or 0, sec = sec or 0 })
 end
 
+-- Wrap cron.parse to inject os.date/os.time for tests
+local _cron_parse = cron.parse
+cron.parse = function(expr, opts)
+  opts = opts or {}
+  if not opts.date_fn then opts.date_fn = os.date end
+  if not opts.time_fn then opts.time_fn = os.time end
+  return _cron_parse(expr, opts)
+end
+
 T.describe("cron.parse", function()
   T.it("parses wildcard expression", function()
     local expr, err = cron.parse("* * * * *")

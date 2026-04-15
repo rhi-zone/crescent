@@ -5,6 +5,17 @@ end
 local T  = require("lib.test.assert")
 local dt = require("lib.datetime")
 
+-- Wrap dt.from_unix and dt.now to inject os.date for tests
+local _from_unix = dt.from_unix
+dt.from_unix = function(ts, date_fn)
+  return _from_unix(ts, date_fn or os.date)
+end
+
+local _now = dt.now
+dt.now = function(time_fn)
+  return _now(time_fn or function() return os.date("*t") end)
+end
+
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 local function parse(s) return dt.parse_iso(s) end
