@@ -66,9 +66,7 @@ function M.new(opts)
     _tasks    = {},   -- name -> task def
     _hooks    = {},   -- event -> list of callbacks
     _executor = opts.executor,  -- optional parallel executor
-    _log_fn   = opts.log_fn or function(name, msg)
-      io.write("[" .. name .. "] " .. tostring(msg) .. "\n")
-    end,
+    _log_fn   = opts.log_fn or error("task_runner: opts.log_fn function is required"),
   }
 
   -- ── task(name, def) ──────────────────────────────────────────────────────────

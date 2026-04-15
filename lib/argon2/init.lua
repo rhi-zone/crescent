@@ -144,7 +144,7 @@ if ok_ffi then
       if ok then return l end
     end
     -- Scan LD_LIBRARY_PATH
-    local ldpath = os.getenv("LD_LIBRARY_PATH") or ""
+    local ldpath = (os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or ""
     for dir in (ldpath .. ":"):gmatch("([^:]*):") do
       if dir ~= "" then
         for _, suf in ipairs({ "/libargon2.so.1", "/libargon2.so" }) do
@@ -154,7 +154,7 @@ if ok_ffi then
       end
     end
     -- Scan NIX_LDFLAGS (-L dirs)
-    local ldflags = os.getenv("NIX_LDFLAGS") or ""
+    local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
     for dir in ldflags:gmatch("-L(%S+)") do
       for _, suf in ipairs({ "/libargon2.so.1", "/libargon2.so" }) do
         local ok, l = pcall(ffi.load, dir .. suf)
@@ -162,7 +162,7 @@ if ok_ffi then
       end
     end
     -- Common profile paths
-    local home = os.getenv("HOME") or ""
+    local home = (os and os.getenv and os.getenv("HOME")) or ""
     local profiles = {
       "/run/current-system/sw/lib",
       home .. "/.nix-profile/lib",

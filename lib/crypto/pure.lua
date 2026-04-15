@@ -462,17 +462,13 @@ end
 
 -- ── Random bytes ────────────────────────────────────────────────────────────
 
---: (number) -> (string, nil) | (nil, string)
-function M.random_bytes(n)
-	if n <= 0 then return "" end
-	-- Try /dev/urandom
-	local f = io.open("/dev/urandom", "rb")
-	if f then
-		local bytes = f:read(n)
-		f:close()
-		if bytes and #bytes == n then return bytes end
+--: ((number) -> string, number) -> (string, nil) | (nil, string)
+function M.random_bytes(random_bytes_fn, n)
+	if type(random_bytes_fn) ~= "function" then
+		error("crypto.pure.random_bytes: random_bytes_fn function is required")
 	end
-	return nil, "no CSPRNG source available"
+	if n <= 0 then return "" end
+	return random_bytes_fn(n)
 end
 
 return M

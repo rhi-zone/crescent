@@ -102,7 +102,9 @@ end
 --[[@param opts? { no_trailing_newline: boolean; no_print_nil: boolean; }]]
 --[[@param seen? table<unknown,true>]]
 pretty_print_ = function(value, write, not_top_level, opts, seen)
-	write = write or io.write
+	if type(write) ~= "function" then
+		error("pretty_print: write function is required")
+	end
 	seen = seen or {}
 	if seen[value] then
 		write("<circular>"); return
@@ -127,18 +129,21 @@ mod.uneval = function(value)
 	pretty_print_(value, write, true)
 	return table.concat(parts)
 end
---: (...any) -> nil
-mod.pretty_print = function(...)
+--: ((string) -> nil, ...any) -> nil
+mod.pretty_print = function(write_fn, ...)
+	if type(write_fn) ~= "function" then
+		error("pretty_print: write_fn function is required")
+	end
 	local count = select("#", ...)
 	if count == 1 then
-		pretty_print_(select(1, ...), io.write)
+		pretty_print_(select(1, ...), write_fn)
 	else
-		if count > 1 then pretty_print_(select(1, ...), io.write, true) end
+		if count > 1 then pretty_print_(select(1, ...), write_fn, true) end
 		for i = 2, count do
-			io.write(" ")
-			pretty_print_(select(i, ...), io.write, true)
+			write_fn(" ")
+			pretty_print_(select(i, ...), write_fn, true)
 		end
-		io.write("\n")
+		write_fn("\n")
 	end
 end
 

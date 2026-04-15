@@ -16,8 +16,11 @@ local M = {}
 -- ---------------------------------------------------------------------------
 
 -- Try FFI TIOCGWINSZ, then env vars, then default 80x24.
---: () -> (integer, integer)
-M.size = function()
+--: ((string) -> string | nil) -> (integer, integer)
+M.size = function(getenv)
+  if type(getenv) ~= "function" then
+    error("tui.size: getenv function is required")
+  end
   local ffi_ok, ffi = pcall(require, "ffi")
   if ffi_ok then
     local ok, w, h = pcall(function()
@@ -38,8 +41,8 @@ M.size = function()
     if ok and w and h then return w, h end
   end
   -- Fallback: environment variables
-  local cols_s  = os.getenv("COLUMNS")
-  local lines_s = os.getenv("LINES")
+  local cols_s  = getenv("COLUMNS")
+  local lines_s = getenv("LINES")
   if cols_s ~= nil and lines_s ~= nil then
     local cols  = tonumber(cols_s)
     local lines = tonumber(lines_s)
@@ -418,11 +421,14 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Full-screen render: clears screen, renders widget to terminal size.
---: (any) -> ()
-M.render_full = function(widget)
-  local w, h = M.size()
-  io.write(ansi.clear() .. M.render(widget, 1, 1, w, h))
-  io.flush()
+--: ((string) -> nil, () -> nil, (string) -> string | nil, any) -> ()
+M.render_full = function(write_fn, flush_fn, getenv, widget)
+  if type(write_fn) ~= "function" then error("tui.render_full: write_fn is required") end
+  if type(flush_fn) ~= "function" then error("tui.render_full: flush_fn is required") end
+  if type(getenv) ~= "function" then error("tui.render_full: getenv is required") end
+  local w, h = M.size(getenv)
+  write_fn(ansi.clear() .. M.render(widget, 1, 1, w, h))
+  flush_fn()
 end
 
 return M

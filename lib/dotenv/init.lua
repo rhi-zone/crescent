@@ -29,20 +29,20 @@ local function unescape_double(s)
   end))
 end
 
--- Expand ${VAR} and $VAR references in a string, looking up vars then env.
---: (string, { [string]: string }) -> string
-local function expand_vars(s, vars)
+-- Expand ${VAR} and $VAR references in a string, looking up vars then env_fn.
+--: (string, { [string]: string }, ((string) -> string | nil) | nil) -> string
+local function expand_vars(s, vars, env_fn)
   -- ${VAR} form
   s = s:gsub("%${([A-Za-z_][A-Za-z0-9_]*)}", function(name)
     local v = vars[name]
     if v ~= nil then return v end
-    return os.getenv(name) or ""
+    return env_fn and env_fn(name) or ""
   end)
   -- $VAR form (not followed by { or alphanumeric to avoid double-expansion)
   s = s:gsub("%$([A-Za-z_][A-Za-z0-9_]*)", function(name)
     local v = vars[name]
     if v ~= nil then return v end
-    return os.getenv(name) or ""
+    return env_fn and env_fn(name) or ""
   end)
   return s
 end
@@ -54,7 +54,7 @@ end
 -- Parse .env content from a string.
 -- Returns a table of key=value pairs, or nil + error message.
 --: (string) -> { [string]: string } | nil, string | nil
-function M.parse(content)
+function M.parse(content, env_fn)
   if type(content) ~= "string" then
     return nil, "dotenv.parse: expected string, got " .. type(content)
   end
@@ -124,7 +124,7 @@ function M.parse(content)
       end
       inner = table.concat(buf)
       -- Expand variables in double-quoted values
-      value = expand_vars(inner, vars)
+      value = expand_vars(inner, vars, env_fn)
 
     elseif rest:sub(1,1) == "'" then
       -- Single-quoted value: no escapes, no expansion
@@ -143,7 +143,7 @@ function M.parse(content)
       -- Also strip trailing whitespace
       bare = bare:match("^(.-)%s*$") or bare
       -- Expand variables in bare values
-      value = expand_vars(bare, vars)
+      value = expand_vars(bare, vars, env_fn)
     end
 
     vars[key] = value
@@ -158,31 +158,22 @@ end
 -- File I/O
 -- ---------------------------------------------------------------------------
 
--- Read a file and return its contents, or nil + error.
---: (string) -> string | nil, string | nil
-local function read_file(path)
-  local f, err = io.open(path, "r")
-  if not f then
-    return nil, "dotenv.load: cannot open " .. path .. ": " .. (err or "unknown error")
+-- Load .env file from path. read_fn(path) -> string|nil, err.
+--: ((string) -> (string | nil, string | nil), string, ((string) -> string | nil) | nil) -> { [string]: string } | nil, string | nil
+function M.load(read_fn, path, env_fn)
+  if type(read_fn) ~= "function" then
+    error("dotenv.load: read_fn function is required")
   end
-  local content = f:read("*a")
-  f:close()
-  return content
-end
-
--- Load .env file from path. Returns vars table or nil + error.
---: (string) -> { [string]: string } | nil, string | nil
-function M.load(path)
-  local content, err = read_file(path)
-  if not content then return nil, err end
-  return M.parse(content)
+  local content, err = read_fn(path)
+  if not content then return nil, "dotenv.load: cannot open " .. path .. ": " .. (err or "unknown error") end
+  return M.parse(content, env_fn)
 end
 
 -- Load .env file and merge vars into an existing table t. Returns t.
 -- On error returns nil + errmsg.
---: ({ [string]: string }, string) -> { [string]: string } | nil, string | nil
-function M.load_into(t, path)
-  local vars, err = M.load(path)
+--: ({ [string]: string }, (string) -> (string | nil, string | nil), string, ((string) -> string | nil) | nil) -> { [string]: string } | nil, string | nil
+function M.load_into(t, read_fn, path, env_fn)
+  local vars, err = M.load(read_fn, path, env_fn)
   if not vars then return nil, err end
   for k, v in pairs(vars) do
     t[k] = v
@@ -192,12 +183,16 @@ end
 
 -- Load multiple .env files and merge. Later files override earlier unless
 -- opts.existing=true (first value wins).
---: ({ string }, { existing: boolean | nil } | nil) -> { [string]: string } | nil, string | nil
-function M.load_files(paths, opts)
+--: ((string) -> (string | nil, string | nil), { string }, { existing: boolean | nil, env_fn: ((string) -> string | nil) | nil } | nil) -> { [string]: string } | nil, string | nil
+function M.load_files(read_fn, paths, opts)
+  if type(read_fn) ~= "function" then
+    error("dotenv.load_files: read_fn function is required")
+  end
   opts = opts or {}
+  local env_fn = opts.env_fn
   local result = {}
   for _, path in ipairs(paths) do
-    local vars, err = M.load(path)
+    local vars, err = M.load(read_fn, path, env_fn)
     if not vars then return nil, err end
     for k, v in pairs(vars) do
       if not opts.existing or result[k] == nil then
@@ -212,20 +207,17 @@ end
 -- Resolver
 -- ---------------------------------------------------------------------------
 
--- Return a resolver function that looks up key in vars, then os.getenv.
--- Accepts either a path string (loads file) or an already-parsed vars table.
---: (string | { [string]: string }) -> ((string) -> string | nil)
-function M.resolver(path_or_vars)
-  local vars
-  if type(path_or_vars) == "string" then
-    vars = M.load(path_or_vars) or {}
-  else
-    vars = path_or_vars
+-- Return a resolver function that looks up key in vars, then env_fn.
+-- vars must be a table (already-parsed). env_fn is optional.
+--: ({ [string]: string }, ((string) -> string | nil) | nil) -> ((string) -> string | nil)
+function M.resolver(vars, env_fn)
+  if type(vars) ~= "table" then
+    error("dotenv.resolver: vars table is required")
   end
   return function(key)
     local v = vars[key]
     if v ~= nil then return v end
-    return os.getenv(key)
+    return env_fn and env_fn(key)
   end
 end
 

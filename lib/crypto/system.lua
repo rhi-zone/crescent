@@ -20,7 +20,7 @@ do
 	-- NixOS/Guix: libraries are not in standard ld paths.
 	-- Try extracting libdir from NIX_LDFLAGS or scanning NIX_PROFILES.
 	if not lib then
-		local ldflags = os.getenv("NIX_LDFLAGS") or ""
+		local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
 		for dir in ldflags:gmatch("-L(%S+)") do
 			for _, suffix in ipairs({ "/libcrypto.so.3", "/libcrypto.so" }) do
 				local ok, l = pcall(ffi.load, dir .. suffix)
@@ -33,7 +33,7 @@ do
 		-- Try common NixOS system profile paths
 		local profiles = {
 			"/run/current-system/sw/lib",
-			os.getenv("HOME") and (os.getenv("HOME") .. "/.nix-profile/lib") or nil,
+			(os and os.getenv and os.getenv("HOME")) and (os.getenv("HOME") .. "/.nix-profile/lib") or nil,
 		}
 		for _, dir in ipairs(profiles) do
 			for _, suffix in ipairs({ "/libcrypto.so.3", "/libcrypto.so" }) do

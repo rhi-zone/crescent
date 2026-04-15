@@ -12,8 +12,10 @@ local API_URL = "api.anthropic.com"
 local API_PATH = "/v1/messages"
 local API_VERSION = "2023-06-01"
 
-local function get_api_key()
-	return os.getenv("ANTHROPIC_API_KEY")
+local function get_api_key(req)
+	local key = req and req.api_key
+	if not key then return nil, "api_key is required" end
+	return key
 end
 
 --- Convert neutral ai_message list to Anthropic format.
@@ -99,7 +101,7 @@ end
 
 --: (ai_request) -> ai_response | nil, string | nil
 mod.generate = function(req)
-	local api_key = get_api_key()
+	local api_key = get_api_key(req)
 	if not api_key then return nil, "ANTHROPIC_API_KEY not set" end
 
 	local messages, system = convert_messages(req.messages)
@@ -137,7 +139,7 @@ end
 
 --: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
 mod.stream = function(req)
-	local api_key = get_api_key()
+	local api_key = get_api_key(req)
 	if not api_key then return nil, "ANTHROPIC_API_KEY not set" end
 
 	local messages, system = convert_messages(req.messages)

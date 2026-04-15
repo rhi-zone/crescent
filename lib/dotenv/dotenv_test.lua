@@ -156,6 +156,13 @@ end)
 -- ---------------------------------------------------------------------------
 
 T.describe("load_into", function()
+  local function read_fn(path)
+    local f, err = io.open(path, "r")
+    if not f then return nil, err end
+    local content = f:read("*a")
+    f:close()
+    return content
+  end
 
   T.it("merges into existing table", function()
     -- Write a temp file
@@ -165,14 +172,14 @@ T.describe("load_into", function()
     f:close()
 
     local t = { EXISTING = "kept" }
-    local result = dotenv.load_into(t, path)
+    local result = dotenv.load_into(t, read_fn, path)
     T.eq(result.EXISTING, "kept")
     T.eq(result.NEW_KEY, "newval")
     os.remove(path)
   end)
 
   T.it("returns nil + error for missing file", function()
-    local result, err = dotenv.load_into({}, "/tmp/crescent_dotenv_test_DOESNOTEXIST.env")
+    local result, err = dotenv.load_into({}, read_fn, "/tmp/crescent_dotenv_test_DOESNOTEXIST.env")
     T.eq(result, nil)
     T.ok(err ~= nil)
   end)
@@ -184,6 +191,13 @@ end)
 -- ---------------------------------------------------------------------------
 
 T.describe("load_files", function()
+  local function read_fn(path)
+    local f, err = io.open(path, "r")
+    if not f then return nil, err end
+    local content = f:read("*a")
+    f:close()
+    return content
+  end
 
   local function write_tmp(path, content)
     local f = io.open(path, "w")
@@ -196,7 +210,7 @@ T.describe("load_files", function()
     local p2 = "/tmp/crescent_dotenv_test_f2.env"
     write_tmp(p1, "FOO=first\nBAR=from1\n")
     write_tmp(p2, "FOO=second\n")
-    local vars = dotenv.load_files({ p1, p2 })
+    local vars = dotenv.load_files(read_fn, { p1, p2 })
     T.eq(vars.FOO, "second")
     T.eq(vars.BAR, "from1")
     os.remove(p1)
@@ -208,7 +222,7 @@ T.describe("load_files", function()
     local p2 = "/tmp/crescent_dotenv_test_e2.env"
     write_tmp(p1, "FOO=first\n")
     write_tmp(p2, "FOO=second\nBAR=only_in_second\n")
-    local vars = dotenv.load_files({ p1, p2 }, { existing = true })
+    local vars = dotenv.load_files(read_fn, { p1, p2 }, { existing = true })
     T.eq(vars.FOO, "first")
     T.eq(vars.BAR, "only_in_second")
     os.remove(p1)
@@ -224,18 +238,18 @@ end)
 T.describe("resolver", function()
 
   T.it("returns value from vars table", function()
-    local get = dotenv.resolver({ PORT = "4000" })
+    local get = dotenv.resolver({ PORT = "4000" }, os.getenv)
     T.eq(get("PORT"), "4000")
   end)
 
-  T.it("falls back to os.getenv for unknown key", function()
+  T.it("falls back to env_fn for unknown key", function()
     -- PATH is almost universally set
-    local get = dotenv.resolver({})
+    local get = dotenv.resolver({}, os.getenv)
     T.eq(get("PATH"), os.getenv("PATH"))
   end)
 
-  T.it("vars take precedence over os.getenv", function()
-    local get = dotenv.resolver({ PATH = "overridden" })
+  T.it("vars take precedence over env_fn", function()
+    local get = dotenv.resolver({ PATH = "overridden" }, os.getenv)
     T.eq(get("PATH"), "overridden")
   end)
 

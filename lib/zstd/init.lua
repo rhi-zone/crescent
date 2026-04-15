@@ -68,7 +68,7 @@ if ok_ffi then
     end
 
     -- 2. Scan LD_LIBRARY_PATH
-    local ldpath = os.getenv("LD_LIBRARY_PATH") or ""
+    local ldpath = (os and os.getenv and os.getenv("LD_LIBRARY_PATH")) or ""
     for dir in (ldpath .. ":"):gmatch("([^:]*):") do
       if dir ~= "" then
         for _, suf in ipairs(suffixes) do
@@ -79,7 +79,7 @@ if ok_ffi then
     end
 
     -- 3. Scan NIX_LDFLAGS (-L dirs)
-    local ldflags = os.getenv("NIX_LDFLAGS") or ""
+    local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
     for dir in ldflags:gmatch("-L(%S+)") do
       for _, suf in ipairs(suffixes) do
         local ok, lib = pcall(ffi.load, dir .. suf)
@@ -88,7 +88,7 @@ if ok_ffi then
     end
 
     -- 4. Common profile paths
-    local home = os.getenv("HOME") or ""
+    local home = (os and os.getenv and os.getenv("HOME")) or ""
     local profile_dirs = {
       "/run/current-system/sw/lib",
       home .. "/.nix-profile/lib",

@@ -333,13 +333,12 @@ function Doc:to_string()
   return table.concat(buf, "\n")
 end
 
-function Doc:to_file(path)
-  local f, err = io.open(path, "w")
-  if not f then return nil, err end
+function Doc:to_file(write_fn, path)
+  if type(write_fn) ~= "function" then
+    error("svg.Doc:to_file: write_fn function is required")
+  end
   local s = self:to_string()
-  f:write(s)
-  f:close()
-  return true
+  return write_fn(path, s)
 end
 
 -- ---------------------------------------------------------------------------

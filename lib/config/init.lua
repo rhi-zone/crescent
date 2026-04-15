@@ -77,7 +77,7 @@ function M.new(opts)
   self._layers = {}     -- list of tables, index 1 = first added (lowest among layers)
   self._env_prefix = nil
   self._args_table = nil
-  self._env_reader = opts.env_reader or os.getenv
+  self._env_reader = opts.env_reader
   return self
 end
 
@@ -98,6 +98,9 @@ end
 -- APP_DB_HOST with prefix "APP" -> key "db.host"
 -- Returns self for chaining.
 function Config:env(prefix)
+  if not self._env_reader then
+    error("config:env() requires env_reader to be set in opts")
+  end
   self._env_prefix = prefix
   return self
 end

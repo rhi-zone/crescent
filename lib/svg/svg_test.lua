@@ -415,11 +415,19 @@ end)
 
 -- ---------------------------------------------------------------------------
 T.describe("to_file", function()
+  local function write_fn(path, data)
+    local f, err = io.open(path, "w")
+    if not f then return nil, err end
+    f:write(data)
+    f:close()
+    return true
+  end
+
   T.it("writes SVG to a file", function()
     local doc = SVG.new(100, 100)
     doc:rect(0, 0, 50, 50, {fill = "green"})
     local tmp = os.tmpname()
-    local ok, err = doc:to_file(tmp)
+    local ok, err = doc:to_file(write_fn, tmp)
     T.ok(ok == true, "to_file returns true: " .. tostring(err))
     local f = io.open(tmp, "r")
     T.ok(f ~= nil, "file exists")
@@ -432,7 +440,7 @@ T.describe("to_file", function()
 
   T.it("returns nil, errmsg on bad path", function()
     local doc = SVG.new(10, 10)
-    local ok, err = doc:to_file("/nonexistent_dir/bad.svg")
+    local ok, err = doc:to_file(write_fn, "/nonexistent_dir/bad.svg")
     T.ok(ok == nil, "nil on failure")
     T.ok(err ~= nil, "error message returned")
   end)

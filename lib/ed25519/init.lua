@@ -715,7 +715,7 @@ local function make_pure()
 
 	-- ── Public functions ──────────────────────────────────────────────────────
 
-	local function keypair(seed_input)
+	local function keypair(seed_input, random_bytes_fn)
 		if seed_input and #seed_input ~= 32 then
 			return nil, "seed must be 32 bytes"
 		end
@@ -723,10 +723,10 @@ local function make_pure()
 		if seed_input then
 			seed = seed_input
 		else
-			local f = io.open("/dev/urandom", "rb")
-			if not f then return nil, "no random source available (/dev/urandom)" end
-			seed = f:read(32)
-			f:close()
+			if type(random_bytes_fn) ~= "function" then
+				return nil, "random_bytes_fn is required when seed is nil"
+			end
+			seed = random_bytes_fn(32)
 			if not seed or #seed ~= 32 then
 				return nil, "failed to read 32 random bytes"
 			end
@@ -846,7 +846,7 @@ end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
 
-function M.keypair(seed)   return keypair_fn(seed)                  end
+function M.keypair(seed, random_bytes_fn) return keypair_fn(seed, random_bytes_fn) end
 function M.sign(sk, msg)   return sign_fn(sk, msg)                  end
 function M.verify(pk, msg, sig) return verify_fn(pk, msg, sig)     end
 

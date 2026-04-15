@@ -243,15 +243,16 @@ end)
 
 T.describe("path.expanduser", function()
 	T.it("non-tilde path unchanged", function()
-		T.eq(P.expanduser("/foo/bar"), "/foo/bar")
+		local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
+		T.eq(P.expanduser("/foo/bar", home), "/foo/bar")
 	end)
 	T.it("tilde-only returns home", function()
 		local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
-		T.eq(P.expanduser("~"), home)
+		T.eq(P.expanduser("~", home), home)
 	end)
 	T.it("tilde prefix expanded", function()
 		local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
-		local result = P.expanduser("~/foo")
+		local result = P.expanduser("~/foo", home)
 		if home ~= "" then
 			T.eq(result, home .. "/foo")
 		else

@@ -620,7 +620,12 @@ DB.__index = DB
 function M.database()
   local self = setmetatable({}, DB)
   self._clauses = {}  -- predicate_key -> { {head=term, body={term,...}}, ... }
+  self._write_fn = nil
   return self
+end
+
+function DB:set_write_fn(write_fn)
+  self._write_fn = write_fn
 end
 
 -- Add a clause (parsed head + body goals)
@@ -737,14 +742,16 @@ solve = function(db, goals, env, depth)
 
   -- write/1
   if functor == "write" and arity == 1 then
-    io.write(term_to_string(env, goal.args[1]))
+    if not db._write_fn then error("prolog: write/1 requires set_write_fn()") end
+    db._write_fn(term_to_string(env, goal.args[1]))
     solve(db, rest, env, depth + 1)
     return
   end
 
   -- nl/0
   if functor == "nl" and arity == 0 then
-    io.write("\n")
+    if not db._write_fn then error("prolog: nl/0 requires set_write_fn()") end
+    db._write_fn("\n")
     solve(db, rest, env, depth + 1)
     return
   end

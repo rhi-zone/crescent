@@ -312,11 +312,13 @@ M.safe_resolve = function(base, rel)
 	return resolved
 end
 
----Expand leading ~ to home directory (reads HOME or USERPROFILE env var).
---: (string) -> string
-M.expanduser = function(p)
+---Expand leading ~ to home directory.
+--: (string, string) -> string
+M.expanduser = function(p, home)
+	if type(home) ~= "string" then
+		error("expanduser: home directory string is required")
+	end
 	if p:sub(1, 1) ~= "~" then return p end
-	local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
 	if p == "~" then return home end
 	local rest = p:sub(2):gsub("^[/\\]", "")
 	if home == "" then

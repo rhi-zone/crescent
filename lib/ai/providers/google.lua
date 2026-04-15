@@ -13,9 +13,9 @@ local mod = {}
 
 local API_HOST = "generativelanguage.googleapis.com"
 
-local function get_api_key()
-	local key = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_GENERATIVE_AI_API_KEY")
-	if not key then return nil, "GOOGLE_API_KEY not set" end
+local function get_api_key(req)
+	local key = req and req.api_key
+	if not key then return nil, "api_key is required" end
 	return key
 end
 
@@ -115,7 +115,7 @@ end
 
 --: (ai_request) -> ai_response | nil, string | nil
 mod.generate = function(req)
-	local api_key, err = get_api_key()
+	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
 
 	local contents, system_instruction = convert_messages(req.messages)
@@ -156,7 +156,7 @@ end
 
 --: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
 mod.stream = function(req)
-	local api_key, err = get_api_key()
+	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
 
 	local contents, system_instruction = convert_messages(req.messages)
@@ -261,7 +261,7 @@ end
 --- Embed a single value.
 --: (ai_embed_request) -> ai_embed_response | nil, string | nil
 mod.embed = function(req)
-	local api_key, err = get_api_key()
+	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
 
 	local body_str = json.encode({
@@ -300,7 +300,7 @@ end
 --- Embed multiple values.
 --: (ai_embed_many_request) -> ai_embed_many_response | nil, string | nil
 mod.embed_many = function(req)
-	local api_key, err = get_api_key()
+	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
 
 	local requests = {}

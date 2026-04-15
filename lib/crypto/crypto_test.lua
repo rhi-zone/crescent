@@ -260,17 +260,38 @@ end)
 -- ── Random bytes ────────────────────────────────────────────────────────────
 
 T.describe("crypto: random_bytes", function()
+	-- Pure tier: random_bytes(random_bytes_fn, n); System tier: random_bytes(n)
+	local is_pure = crypto._tier == "pure-lua"
+	local function urandom_bytes(n)
+		local f = io.open("/dev/urandom", "rb")
+		if not f then return nil end
+		local bytes = f:read(n)
+		f:close()
+		return bytes
+	end
+
 	T.it("returns correct length", function()
 		for _, n in ipairs({1, 16, 32, 64, 256}) do
-			local bytes, err = crypto.random_bytes(n)
+			local bytes, err
+			if is_pure then
+				bytes, err = crypto.random_bytes(urandom_bytes, n)
+			else
+				bytes, err = crypto.random_bytes(n)
+			end
 			T.ok(bytes, "got " .. n .. " bytes: " .. tostring(err))
 			T.eq(#bytes, n, "length is " .. n)
 		end
 	end)
 
 	T.it("consecutive calls differ", function()
-		local a = crypto.random_bytes(32)
-		local b = crypto.random_bytes(32)
+		local a, b
+		if is_pure then
+			a = crypto.random_bytes(urandom_bytes, 32)
+			b = crypto.random_bytes(urandom_bytes, 32)
+		else
+			a = crypto.random_bytes(32)
+			b = crypto.random_bytes(32)
+		end
 		T.neq(a, b, "two 32-byte random values differ")
 	end)
 end)

@@ -99,18 +99,17 @@ local function make_bearer_headers(api_key, body_str)
 end
 
 --- Create an OpenAI-compatible provider.
---: ({ name: string, host: string, chat_path?: string, embeddings_path?: string, images_path?: string, api_key_env: string, make_headers?: (api_key: string, body_str: string) -> table }) -> ai_provider
+--: ({ name: string, host: string, chat_path?: string, embeddings_path?: string, images_path?: string, make_headers?: (api_key: string, body_str: string) -> table }) -> ai_provider
 mod.create = function(config)
 	local host = config.host
 	local chat_path = config.chat_path or "/v1/chat/completions"
 	local embeddings_path = config.embeddings_path or "/v1/embeddings"
 	local images_path = config.images_path or "/v1/images/generations"
-	local api_key_env = config.api_key_env
 	local make_headers = config.make_headers or make_bearer_headers
 
-	local function get_api_key()
-		local key = os.getenv(api_key_env)
-		if not key then return nil, api_key_env .. " not set" end
+	local function get_api_key(req)
+		local key = req and req.api_key
+		if not key then return nil, "api_key is required" end
 		return key
 	end
 
@@ -118,7 +117,7 @@ mod.create = function(config)
 
 	--: (ai_request) -> ai_response | nil, string | nil
 	provider.generate = function(req)
-		local api_key, err = get_api_key()
+		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
 		local messages = convert_messages(req.messages)
@@ -150,7 +149,7 @@ mod.create = function(config)
 
 	--: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
 	provider.stream = function(req)
-		local api_key, err = get_api_key()
+		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
 		local messages = convert_messages(req.messages)
@@ -268,7 +267,7 @@ mod.create = function(config)
 	--- Embed a single value.
 	--: (ai_embed_request) -> ai_embed_response | nil, string | nil
 	provider.embed = function(req)
-		local api_key, err = get_api_key()
+		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
 		local body_str = json.encode({
@@ -308,7 +307,7 @@ mod.create = function(config)
 	--- Embed multiple values.
 	--: (ai_embed_many_request) -> ai_embed_many_response | nil, string | nil
 	provider.embed_many = function(req)
-		local api_key, err = get_api_key()
+		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
 		local body_str = json.encode({
@@ -355,7 +354,7 @@ mod.create = function(config)
 	--- Generate an image.
 	--: (ai_image_request) -> ai_image_response | nil, string | nil
 	provider.generate_image = function(req)
-		local api_key, err = get_api_key()
+		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
 
 		local body = {

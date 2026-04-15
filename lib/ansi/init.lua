@@ -11,10 +11,19 @@ end
 
 local M = {}
 
--- Detect whether color output should be enabled at load time.
-local no_color = os.getenv("NO_COLOR")
-local term     = os.getenv("TERM")
-M.enabled = not (no_color ~= nil and no_color ~= "") and term ~= "dumb"
+-- Color output is disabled by default. Call M.configure(getenv) to detect.
+M.enabled = false
+
+-- Configure color output detection from environment.
+--: ((string) -> string | nil) -> nil
+M.configure = function(getenv)
+  if type(getenv) ~= "function" then
+    error("ansi.configure: getenv function is required")
+  end
+  local no_color = getenv("NO_COLOR")
+  local term     = getenv("TERM")
+  M.enabled = not (no_color ~= nil and no_color ~= "") and term ~= "dumb"
+end
 
 -- ESC [ prefix used by all sequences.
 local ESC = "\27["

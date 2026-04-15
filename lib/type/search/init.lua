@@ -250,34 +250,37 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Serialize an index to JSON string and write to disk.
+--- write_fn: function(path, data) -> true|nil, string|nil
 --- index: array of { name, file, type } as returned by build_index.
 --- filepath: path to write JSON to.
-M.save_index = function(index, filepath)
+M.save_index = function(write_fn, index, filepath)
+    if type(write_fn) ~= "function" then
+        error("search.save_index: write_fn function is required")
+    end
     local s = json.encode(index)
-    local fh, err = io.open(filepath, "w")
-    if not fh then return nil, err end
-    fh:write(s)
-    fh:close()
-    return true
+    return write_fn(filepath, s)
 end
 
 --- Load a previously saved index from disk.
+--- read_fn: function(path) -> string|nil, string|nil
 --- Returns the index array, or nil + error string on failure.
-M.load_index = function(filepath)
-    local fh, err = io.open(filepath, "r")
-    if not fh then return nil, err end
-    local s = fh:read("*a")
-    fh:close()
+M.load_index = function(read_fn, filepath)
+    if type(read_fn) ~= "function" then
+        error("search.load_index: read_fn function is required")
+    end
+    local s, err = read_fn(filepath)
+    if not s then return nil, err end
     local ok, result = pcall(json.decode, s)
     if not ok then return nil, result end
     return result
 end
 
 --- Build index and save to disk in one step.
+--- write_fn: function(path, data) -> true|nil, string|nil
 --- Returns the index array.
-M.build_and_save = function(files, filepath)
+M.build_and_save = function(write_fn, files, filepath)
     local index = M.build_index(files)
-    M.save_index(index, filepath)
+    M.save_index(write_fn, index, filepath)
     return index
 end
 

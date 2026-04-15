@@ -11,7 +11,7 @@ local tui = require("lib.tui")
 
 T.describe("tui.size", function()
   T.it("returns two positive integers", function()
-    local w, h = tui.size()
+    local w, h = tui.size(os.getenv)
     T.ok(type(w) == "number", "width is a number")
     T.ok(type(h) == "number", "height is a number")
     T.ok(w > 0, "width > 0")

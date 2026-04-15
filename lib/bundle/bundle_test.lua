@@ -569,8 +569,16 @@ end)
 -- ── bundle — error on missing entry file ─────────────────────────────────────
 
 T.describe("bundle — file-based", function()
+	local function read_fn(path)
+		local f = io.open(path, "r")
+		if not f then return nil end
+		local content = f:read("*a")
+		f:close()
+		return content
+	end
+
 	T.it("returns error for nonexistent entry file", function()
-		local out, err = bundle.bundle("/nonexistent/path/to/entry.lua")
+		local out, err = bundle.bundle("/nonexistent/path/to/entry.lua", { read_fn = read_fn })
 		T.eq(out, nil)
 		T.ok(err:find("cannot read"), "error mentions cannot read")
 	end)
@@ -579,8 +587,16 @@ end)
 -- ── analyze — error on missing entry file ────────────────────────────────────
 
 T.describe("analyze — file-based", function()
+	local function read_fn(path)
+		local f = io.open(path, "r")
+		if not f then return nil end
+		local content = f:read("*a")
+		f:close()
+		return content
+	end
+
 	T.it("returns error for nonexistent entry file", function()
-		local deps, err = bundle.analyze("/nonexistent/path/to/entry.lua")
+		local deps, err = bundle.analyze("/nonexistent/path/to/entry.lua", { read_fn = read_fn })
 		T.eq(deps, nil)
 		T.ok(err:find("cannot read"), "error mentions cannot read")
 	end)
