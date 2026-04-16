@@ -1385,3 +1385,47 @@ not a replacement. Both use the same grant storage, cap factories, and sandbox.
 5. **Path rewriting** — strip prefix on incoming, verify relative paths work
 6. **Lifecycle API** — stop, status, revoke
 7. **Cross-app isolation** — CSRF protection, frame busting
+
+## v1 skeleton notes (post-bring-up)
+
+Decisions that settled during the v1 HTTP-skeleton implementation in
+`lib/platform/daemon/`. Future sessions reading this doc in isolation: these
+are final for the skeleton, but none of them bind downstream steps — revisit
+when that step lands.
+
+- **Host-header classification is structural, not registered.** The daemon
+  classifies the incoming `Host` header as `{ kind = "daemon"|"app"|"unknown",
+  id, loopback }` via a pure function (`M.classify_host`). The loopback-IP
+  fallback consults an injected `ip → id` table; `app-<id>.<host>`
+  subdomains pivot on the daemon's hostname part only (port ignored, since
+  cookies ignore port per RFC 6265 §8.5 — see "Per-app port is NOT a valid
+  fallback" above).
+- **Library app is mounted, not sandboxed, in v1.** The daemon calls
+  `lib/platform/apps/library/server.create({ index_db })` directly in-process
+  and dispatches `/` of the daemon origin to its handler. First-party trusted
+  code. Future: the library could graduate to the same VM-host model as
+  untrusted apps, but the seam today is just a handler pointer.
+- **Session cookie omits `Secure` on loopback.** Browsers reject `Secure`
+  cookies over plain `http://`, so `__Host-` + `Secure` would break local
+  development. The daemon exposes `secure_cookie = true` opt for routable
+  interfaces (which require TLS anyway); default is off. This is consistent
+  with "Session token confidentiality" above — the session is still
+  `HttpOnly; SameSite=Strict; Path=/`, `__Host-`-prefixed.
+- **Session cookie is set only on first mint.** If the operator presents a
+  known `__Host-session=<sid>`, no `Set-Cookie` is emitted. The server
+  updates `last_seen` and moves on. This keeps repeat traffic quiet and
+  avoids browser race conditions around concurrent Set-Cookie.
+- **App-origin responses carry no session cookie.** App origins
+  (`app-<id>.<host>` or `127.0.0.<n>:<port>`) get their own session story
+  later; the daemon session is deliberately daemon-origin-only. This is what
+  "Per-app subdomain (canonical)" already promises — the code enforces it by
+  branching host classification before any session handling.
+- **Capability-based I/O.** `daemon.make(opts)` accepts injected `time_fn`,
+  `random_bytes_fn`, `index_db`, and `app_handler`. No `os`/`io` globals are
+  reached directly from `init.lua`. The CLI at `lib/platform/daemon/cli.lua`
+  is the only place that binds to real process-level time, RNG, and sockets,
+  and it does so explicitly. This matches the project rule in CLAUDE.md and
+  keeps the daemon unit-testable without a real socket.
+- **Reserved daemon-origin routes.** `/healthz` exists. `/grant/*` and
+  `/auth/*` are mentioned in the router design but not registered — step 2+
+  of the bring-up track lands them.

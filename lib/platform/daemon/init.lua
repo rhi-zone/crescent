@@ -1,0 +1,345 @@
+-- lib/platform/daemon/init.lua
+-- Platform daemon v1 HTTP skeleton.
+--
+-- Single-port listener. Routes by Host header to one of:
+--   - daemon origin  (e.g. "localhost:7777")    → library app + future grant UI
+--   - app-<id>.host  (e.g. "app-alice.localhost:7777") → per-app handler (stub)
+--   - 127.0.0.<n>:port loopback fallback         → treated as app <n>
+--
+-- v1 scope is intentionally narrow. NOT implemented here:
+--   launch tokens, grant UI, CSRF, rate limiting, CSP emission, per-app VM
+--   host, audit log, TLS, admin policy. See docs/daemon-design.md and the
+--   "daemon v1" entries in TODO.md for the bring-up sequence.
+--
+-- Capability-based I/O: the daemon accepts injected time / random / socket /
+-- getenv functions via opts. It does not reach for globals. This matches the
+-- project-wide rule in CLAUDE.md ("Capability-based I/O") and keeps the
+-- daemon testable without a real socket.
+
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
+
+local router = require("lib.router")
+local library = require("lib.platform.apps.library.server")
+
+local M = {}
+
+--:: http_req = { method: string | nil, path: string | nil, query: string | nil, headers: { [string]: string[] } | nil, body: string | nil }
+--:: http_res = { status: integer | nil, headers: { [string]: unknown }, body: string | nil }
+--:: host_class = { kind: "daemon" | "app" | "unknown", id: string | nil, loopback: boolean | nil }
+--:: daemon_opts = {
+--::   host: string | nil,
+--::   time_fn: (() -> integer) | nil,
+--::   random_bytes_fn: ((n: integer) -> { [integer]: number }) | nil,
+--::   index_db: unknown,
+--::   app_handler: ((http_req, http_res, string) -> nil) | nil,
+--::   secure_cookie: boolean | nil,
+--:: }
+--:: session_record = { created_at: integer, last_seen: integer }
+--:: daemon = {
+--::   handle: (http_req, http_res) -> nil,
+--::   register_app: (string) -> string,
+--::   sessions: { [string]: session_record },
+--::   loopback_id_to_ip: { [string]: string },
+--::   loopback_ip_to_id: { [string]: string },
+--::   _host: string,
+--::   _library_app: unknown,
+--:: }
+
+-- ── Helpers ────────────────────────────────────────────────────────────────
+
+-- Lowercase and strip surrounding whitespace. Host header is case-insensitive
+-- per RFC 9110 §4.2.3; normalise before matching.
+--: (string | nil) -> string
+local function norm_host(h)
+	if not h then return "" end
+	return (h:lower():gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- Extract the first Cookie header value for a given cookie name, or nil.
+-- headers is { [lower_name]: string[] } (see lib/http/format.lua).
+-- Cookies are whitespace-separated "name=value; name2=value2".
+--: ({ [string]: string[] }, string) -> string | nil
+local function get_cookie(headers, name)
+	if not headers then return nil end
+	local arr = headers["cookie"]
+	if not arr then return nil end
+	for i = 1, #arr do
+		local cookie_str = arr[i]
+		-- Walk `name=val; name=val; ...`
+		for k, v in cookie_str:gmatch("([^=;%s]+)=([^;]*)") do
+			if k == name then
+				-- Trim leading/trailing whitespace from value.
+				return (v:gsub("^%s+", ""):gsub("%s+$", ""))
+			end
+		end
+	end
+	return nil
+end
+M._get_cookie = get_cookie
+
+-- Build a hex string from a sequence of byte-valued integers. Used for
+-- session IDs (16 bytes → 32 hex chars).
+--: ({ [integer]: number }) -> string
+local function bytes_to_hex(bytes)
+	local parts = {} --: { [integer]: string }
+	for i = 1, #bytes do
+		parts[i] = string.format("%02x", bytes[i] % 256)
+	end
+	return table.concat(parts)
+end
+M._bytes_to_hex = bytes_to_hex
+
+-- Classify the Host header:
+--   "127.0.0.<n>:port" → { kind = "app", id = "<n>", loopback = true }
+--   "app-<id>.<rest>"  → { kind = "app", id = "<id>" }
+--   "<daemon_host>"    → { kind = "daemon" }
+-- Unknown → { kind = "unknown" }.
+--
+-- daemon_host is the operator-configured canonical host (e.g. "localhost:7777").
+-- Matching is case-insensitive on daemon_host; port is compared exactly if
+-- present on both sides. For the loopback branch we do NOT require the daemon
+-- port to match (the daemon listens on one port but may be addressed by any of
+-- its loopback aliases — see docs/daemon-design.md "Distinct loopback
+-- addresses" fallback).
+--: (string, string, { [string]: string }) -> host_class
+function M.classify_host(host, daemon_host, loopback_ip_to_id)
+	host = norm_host(host)
+	daemon_host = norm_host(daemon_host)
+	if host == "" then return { kind = "unknown", id = nil, loopback = nil } end
+	if host == daemon_host then return { kind = "daemon", id = nil, loopback = nil } end
+
+	-- "app-<id>.<suffix>"  — <suffix> must be the daemon_host's hostname part
+	-- (we don't require the port to match because subdomain cookies ignore
+	-- port anyway; daemon_host's hostname is what we're pivoting on).
+	local daemon_name = daemon_host:match("^([^:]+)") or daemon_host
+	local id, suffix = host:match("^app%-([^.]+)%.(.+)$")
+	if id and suffix then
+		local suffix_name = suffix:match("^([^:]+)") or suffix
+		if suffix_name == daemon_name then
+			return { kind = "app", id = id, loopback = nil }
+		end
+	end
+
+	-- Loopback-IP fallback: 127.0.0.<n>[:port].
+	local ip = host:match("^(127%.0%.0%.%d+)")
+	if ip and loopback_ip_to_id then
+		local mapped = loopback_ip_to_id[ip]
+		if mapped then
+			return { kind = "app", id = mapped, loopback = true }
+		end
+	end
+
+	return { kind = "unknown", id = nil, loopback = nil }
+end
+
+-- ── Daemon construction ────────────────────────────────────────────────────
+
+-- make(opts) -> daemon
+--
+-- opts:
+--   host           : string — canonical daemon host, e.g. "localhost:7777"
+--   time_fn        : () -> integer — seconds since epoch (injected)
+--   random_bytes_fn: (integer) -> { [integer]: number } — n random bytes 0..255
+--   index_db       : unknown | nil — handle passed to the library app's `caps.index_db`
+--   app_handler    : ((req, res, app_id) -> nil) | nil — optional override for
+--                    app-origin requests. Defaults to the stub response.
+--
+-- Returned daemon:
+--   d.handle(req, res)        — top-level request handler (Host-based dispatch)
+--   d.register_app(id)        — reserve a loopback IP for app <id>, returns ip
+--   d.sessions                — in-memory session store (exposed for tests)
+--   d.loopback_id_to_ip       — exposed for tests
+--   d.loopback_ip_to_id       — exposed for tests
+--
+-- Seams left for future work (track steps 2+):
+--   - `app_handler` will be replaced by the per-app VM host (step 2).
+--   - The daemon router's `/grant/*` and `/auth/*` prefixes are reserved but
+--     unimplemented — the route tree has room but no handlers.
+--: (daemon_opts) -> daemon
+function M.make(opts)
+	local host = opts.host or "localhost:7777"
+	local time_fn = opts.time_fn or os.time --: () -> integer
+	--:: bytes_fn = (n: integer) -> { [integer]: number }
+	local random_bytes_fn --: bytes_fn
+	if opts.random_bytes_fn then
+		random_bytes_fn = opts.random_bytes_fn
+	else
+		-- Fallback: math.random. Not cryptographically secure — callers on
+		-- production interfaces MUST inject a CSPRNG. See TODO.md.
+		random_bytes_fn = function(n)
+			local out = {} --: { [integer]: number }
+			for i = 1, n do
+				out[i] = math.random(0, 255)
+			end
+			return out
+		end
+	end
+	-- `any` is a deliberate escape hatch: the library app's `caps.index_db`
+	-- is a SQLite handle, a nil, or a test stub; we don't want to bake a
+	-- schema here. Library app tolerates nil.
+	local index_db = opts.index_db --: any
+
+	-- Library app handler. The daemon mounts the library app at "/" of the
+	-- daemon origin. We call create() directly; there is no sandbox in v1
+	-- because the library is first-party trusted code running in-process.
+	-- Future: the library could move to the same VM-host model as untrusted
+	-- apps, but for v1 the seam is just the handler pointer.
+	-- library.create expects `caps.index_db` to be a SQLite-like handle (with a
+	-- :query method) or nil. We propagate whatever the caller passed — library
+	-- tolerates nil and falls back to an empty list.
+	local library_app = library.create({ index_db = index_db }) --: { handler: (http_req, http_res) -> (boolean | nil) }
+
+	-- App-origin handler. v1 stub — step 2 of the daemon track replaces this.
+	local app_handler = opts.app_handler or
+		--: (http_req, http_res, string) -> nil
+		function(req, res, app_id)
+			res.status = 200
+			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+			res.body = "app " .. tostring(app_id) .. " not yet mountable — VM host pending"
+		end
+
+	-- Daemon-origin router. Reserved prefixes: /grant/*, /auth/* (future).
+	local r = router.new()
+	r:get("/healthz",
+		--: (http_req, http_res) -> nil
+		function(req, res)
+			res.status = 200
+			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+			res.body = "ok"
+		end)
+
+	-- Session store: in-memory only for v1. { [sid] = { created_at, last_seen } }.
+	local sessions = {} --: { [string]: session_record }
+
+	-- Loopback mapping: app_id <-> 127.0.0.<n>. <n> starts at 2 (127.0.0.1 is
+	-- the daemon). Grows monotonically; v1 does not reclaim.
+	local loopback_id_to_ip = {} --: { [string]: string }
+	local loopback_ip_to_id = {} --: { [string]: string }
+	local next_loopback_n = 2
+
+	-- register_app(id) -> ip. Assigns a loopback IP for this app id (idempotent).
+	--: (string) -> string
+	local function register_app(id)
+		local existing = loopback_id_to_ip[id]
+		if existing then return existing end
+		local ip = "127.0.0." .. tostring(next_loopback_n)
+		next_loopback_n = next_loopback_n + 1
+		loopback_id_to_ip[id] = ip
+		loopback_ip_to_id[ip] = id
+		return ip
+	end
+
+	-- Mint a new session and record it. Returns the session id (hex string).
+	--: () -> string
+	local function mint_session()
+		local sid = bytes_to_hex(random_bytes_fn(16))
+		local now = time_fn()
+		sessions[sid] = { created_at = now, last_seen = now }
+		return sid
+	end
+
+	-- Build the Set-Cookie value for __Host-session=<sid>. Skip `Secure` when
+	-- the listener binds to loopback without TLS — browsers reject `Secure`
+	-- cookies sent over plain http://, so `__Host-` + `Secure` would prevent
+	-- the daemon from working at all on localhost. On routable interfaces the
+	-- daemon MUST front TLS and re-enable Secure.
+	-- See docs/daemon-design.md "Session token confidentiality: keep the
+	-- token out of JS reach" for the full rationale.
+	--: (string) -> string
+	local function build_session_cookie(sid)
+		-- RFC 6265bis — __Host- prefix forbids Domain and requires Path=/.
+		-- HttpOnly hides the value from document.cookie.
+		-- SameSite=Strict stops cross-site navigation from carrying the cookie.
+		if opts.secure_cookie then
+			return "__Host-session=" .. sid .. "; HttpOnly; Secure; SameSite=Strict; Path=/"
+		end
+		return "__Host-session=" .. sid .. "; HttpOnly; SameSite=Strict; Path=/"
+	end
+
+	-- Daemon-origin request: session middleware + path router + library fallback.
+	--: (http_req, http_res) -> nil
+	local function handle_daemon(req, res)
+		-- Session: look up existing, mint on miss. Returned cookie is set
+		-- only on mint. No CSRF token yet (grant UI not built; TODO.md).
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sid --: string
+		local minted = false
+		if presented and sessions[presented] then
+			sid = presented
+			local rec = sessions[sid]
+			if rec then rec.last_seen = time_fn() end
+		else
+			sid = mint_session()
+			minted = true
+		end
+
+		-- Router first (internal daemon endpoints like /healthz, future /grant/*).
+		local match = r:find(req.method or "GET", req.path or "/")
+		if match then
+			local h = match.handler --: (http_req, http_res) -> nil
+			h(req, res)
+		else
+			-- Mount the library app at the root of the daemon origin. The
+			-- library app's handler may itself return nil for unknown paths;
+			-- in that case we fall through to a 404.
+			library_app.handler(req, res)
+			if res.status == nil then
+				res.status = 404
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = "not found"
+			end
+		end
+
+		-- Attach the Set-Cookie on mint ONLY. If the session already existed,
+		-- we don't re-issue the cookie — the browser already has it.
+		if minted then
+			local cookie = build_session_cookie(sid)
+			local existing = res.headers["Set-Cookie"]
+			if type(existing) == "table" then
+				existing[#existing + 1] = cookie
+			else
+				res.headers["Set-Cookie"] = { cookie }
+			end
+		end
+	end
+
+	-- Top-level Host dispatch.
+	--: (http_req, http_res) -> nil
+	local function handle(req, res)
+		local headers = req.headers or {}
+		local host_arr = headers["host"]
+		local host_val = host_arr and host_arr[1] or ""
+		local classified = M.classify_host(host_val, host, loopback_ip_to_id)
+
+		if classified.kind == "daemon" then
+			handle_daemon(req, res)
+			return
+		end
+		if classified.kind == "app" then
+			-- IMPORTANT: App-origin responses do NOT set or require the
+			-- __Host-session cookie. Apps get their own session story later.
+			-- See docs/daemon-design.md "Per-app subdomain (canonical)".
+			app_handler(req, res, classified.id or "")
+			return
+		end
+		-- Unknown host.
+		res.status = 404
+		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		res.body = "unknown host"
+	end
+
+	return {
+		handle = handle,
+		register_app = register_app,
+		sessions = sessions,
+		loopback_id_to_ip = loopback_id_to_ip,
+		loopback_ip_to_id = loopback_ip_to_id,
+		_host = host,
+		_library_app = library_app,
+	}
+end
+
+return M

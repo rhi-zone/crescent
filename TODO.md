@@ -68,10 +68,29 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
 
 **v1 bring-up order** (each step testable on its own; deliberately narrow):
 
-- [ ] **HTTP skeleton** — single-port listener, path-prefix router, per-subdomain routing
+- [x] **HTTP skeleton** — single-port listener, path-prefix router, per-subdomain routing
   (`app-<id>.<daemon-host>` canonical, `127.0.0.x` loopback-IP fallback, URL-token fallback),
-  `HttpOnly __Host-session` cookie auth, mount existing library app at the root. Unblocks
-  everything downstream.
+  `HttpOnly __Host-session` cookie auth, mount existing library app at the root.
+  Implemented in `lib/platform/daemon/` (init + cli + daemon_test, 46 assertions).
+  **Carried over from v1 skeleton — address as downstream steps land:**
+  - [ ] Replace `math.random` session ID source with a real CSPRNG. Current fallback is
+    adequate for local dev only; any routable deployment must inject `random_bytes_fn`.
+  - [ ] Session store is in-memory only: reaping expired sessions, cap on session count,
+    persistence across daemon restart. All deferred until grant UI lands and sessions
+    carry real authority.
+  - [ ] Loopback IP allocator grows monotonically and never reclaims. Fine for v1 (you run
+    out at 127.255.255.254) but revisit when multi-user / long-lived deployments appear.
+  - [ ] `lib/platform/daemon/cli.lua` hand-rolls the HTTP read loop because
+    `lib/http/server.lua` does not expose `opts.host` to `lib/socket.server`. Fold the
+    host option into `lib/http/server.lua` and have the daemon CLI use it. Tracked as
+    a separate HTTP convention fix.
+  - [ ] Library app's response headers are plain strings, but
+    `lib/http/format.serialize_response` expects `{ [string]: string[] }`. The library
+    handler is mounted directly in the daemon, so its responses currently rely on the
+    daemon NOT serializing string-valued headers through format.serialize_response. Fix:
+    normalize all response headers to arrays in either the library app or a daemon-level
+    shim before serialization. Manifests as garbage on the wire once the daemon actually
+    serves library responses over TCP.
 - [ ] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
   launch token, 303-redirects to app origin. Token session-bound, 5-min expiry,
   consumed on first use.
