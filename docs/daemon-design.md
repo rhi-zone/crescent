@@ -573,13 +573,36 @@ navigating, but the operator lands nowhere useful for the attacker.
 
 #### Daemon UI XSS resistance: the real escalation path
 
+**Why the threat reduces to XSS specifically.** There are three distinct
+classes of "attacker code runs somewhere" in this architecture:
+
+1. **Backend ACE** — app escapes the Lua VM sandbox and runs arbitrary Lua
+   in the daemon process. Defended by the VM sandbox section (no `debug`,
+   no FFI, no bytecode, no `_G`, restricted `require`, per-app
+   `package.loaded`).
+2. **Frontend ACE on the daemon origin** — the app's own JS runs on the
+   daemon origin as legitimate code. No bug required; the app author just
+   writes a malicious script. This is what would happen if apps and daemon
+   shared an origin.
+3. **Frontend XSS on the daemon origin** — a bug (bad escaping, DOM sink,
+   third-party include) lets attacker-controlled data become executable
+   script on the daemon origin. Requires an exploitable flaw.
+
+Per-subdomain isolation forecloses class 2 by construction: apps live on
+`app-<id>.<daemon-host>`, their scripts execute there, nothing they ship
+runs on `<daemon-host>`. The remaining frontend threat is specifically
+class 3 — an attacker must discover and exploit a daemon UI vulnerability.
+That is a meaningful capability bar. The entire point of the per-subdomain
+architecture is this downgrade; without it, the frontend is just ACE and
+there is no defense.
+
 HttpOnly cookies hide the token value but not the ability to send
-authenticated requests. An XSS on the daemon UI can read the CSRF token from
-the DOM, submit the grant form with `form.submit()`, and complete a grant —
-all same-origin, all authenticated, potentially invisible to the operator.
-Token confidentiality narrows the post-compromise window; it does not close
-it. The load-bearing defense is preventing XSS on the daemon UI in the first
-place.
+authenticated requests. An XSS (class 3) on the daemon UI can read the CSRF
+token from the DOM, submit the grant form with `form.submit()`, and complete
+a grant — all same-origin, all authenticated, potentially invisible to the
+operator. Token confidentiality narrows the post-compromise window; it does
+not close it. The load-bearing defense is preventing XSS on the daemon UI
+in the first place.
 
 **Strict CSP on daemon pages.**
 
