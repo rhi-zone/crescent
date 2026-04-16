@@ -61,10 +61,10 @@ local function expand_home(path)
 	return path
 end
 
--- Seed random with time + something per-process so each launch differs. This
--- is NOT a CSPRNG — see TODO.md "daemon v1: replace math.random with a
--- real CSPRNG". Adequate for local development; MUST be replaced before the
--- daemon handles untrusted sessions over a routable interface.
+-- Seed math.random so the daemon's math.random fallback (only used if
+-- lib/rand's CSPRNG probe fails at startup) produces different values per
+-- process. daemon.make's default random_bytes_fn now prefers lib/rand
+-- (getrandom(2) / /dev/urandom); this seed is only a belt-and-suspenders.
 math.randomseed(os.time())
 
 local opts = parse_args(arg)
