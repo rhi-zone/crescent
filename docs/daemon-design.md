@@ -259,6 +259,71 @@ Grants already persist across launches via `grants.json`. The operator approves
 once per (app, cap) pair, and subsequent launches don't re-prompt unless the
 manifest changes (new cap added, scope widened). This is the baseline.
 
+### Admin policy: hard ceilings
+
+The mechanisms above assume a single operator who is their own admin. For
+multi-user deployments (family server, small team, shared Tailscale node), an
+**admin policy** sets hard limits that no user can override.
+
+**Direction is always restrictive.** Admin policy can forbid or narrow caps. It
+can never expand what a user can grant, and it can never grant on a user's
+behalf — consent is still the user's to give.
+
+| Admin can... | Admin cannot... |
+|--------------|-----------------|
+| Forbid a cap type entirely (`fs: denied`) | Auto-grant a cap on a user's behalf |
+| Narrow a host whitelist (`http_client: only api.openai.com`) | Widen a host whitelist beyond the app's manifest |
+| Forbid specific trust sources (`signed_apps: disabled`) | Force a user to trust a source they don't |
+| Cap storage quotas per app | Move data between users |
+| Forbid opt-in auto-grant classes (`no skip-prompt for anyone`) | Make every user's grants public |
+
+Policy storage:
+- `~/.crescent/admin/policy.json` (root-owned in multi-user setups; user-owned
+  and self-policing in single-user setups)
+- Loaded on daemon start, re-read on SIGHUP or API call
+- Not editable via the daemon's HTTP API unless the request authenticates as
+  admin (separate credential from regular user sessions)
+
+Policy structure (sketch):
+```json
+{
+  "cap_policy": {
+    "fs":          { "state": "denied" },
+    "http_client": { "state": "allowed", "hosts": ["api.openai.com", "api.anthropic.com"] },
+    "shared_db":   { "state": "denied" },
+    "kv":          { "state": "allowed", "max_size_mb": 100 }
+  },
+  "trust_sources": {
+    "first_party": "allowed",
+    "signed":      "denied",
+    "manual":      "allowed"
+  },
+  "auto_grant_classes": {
+    "inert": "user_choice",
+    "scoped": "forbidden"
+  }
+}
+```
+
+Enforcement points:
+- **Manifest load.** If the manifest declares a denied cap type, the app is
+  rejected at load time with "blocked by admin policy." The grant UI never shows.
+- **Grant construction.** When building a cap, check policy constraints. A
+  `http_client` declaration with `host: "evil.example"` is rejected even if the
+  user would otherwise grant it.
+- **Trust check.** Before applying a user's "trust this app" decision, check
+  whether the trust source is admin-allowed.
+- **Auto-grant check.** Before applying a user's auto-grant preference for a
+  class, check whether the class is admin-allowed.
+
+Visibility: the grant UI must show "blocked by admin policy" when a cap is
+denied, not silently hide it. The user deserves to know why their app didn't
+launch, and to ask the admin for an exception if needed.
+
+Single-user vs multi-user: in single-user mode, the admin policy file may not
+exist, and the daemon runs with no ceiling. The mechanism is designed so
+"single-user with no admin policy" is the default; multi-user just adds a file.
+
 ### What blanket allows must never do
 
 - **Auto-grant based on app metadata.** Tags, name, description — all
@@ -271,6 +336,58 @@ manifest changes (new cap added, scope widened). This is the baseline.
 - **Grant silently with no audit.** Every auto-granted cap should be logged and
   visible in the daemon status UI. The operator should be able to see what's been
   granted without prompts and revoke retroactively.
+
+### Cap risk disclosure
+
+The grant UI must communicate **what each cap actually enables an attacker to do**,
+not just restate the cap name. "http_client to api.openai.com" is technically
+accurate but conveys nothing to a non-technical operator. The prompt should read
+something like:
+
+> **Alice wants: Network access to api.openai.com**
+>
+> This app can send any text you give it — messages, pasted documents, uploaded
+> files — to api.openai.com. Once sent, that data is outside your control. Only
+> allow this if you trust both the app and api.openai.com with your inputs.
+
+Every cap type ships with a **risk disclosure** — a short paragraph written for
+a non-technical reader, covering:
+
+1. **What the app can do** with this cap, in concrete user-facing terms
+2. **What an attacker controlling this app could do** (the worst case)
+3. **What the cap does NOT give access to** (to calibrate — e.g., `time` doesn't
+   reveal the user's location, only the clock)
+4. **What the user can do if they regret it** (revoke, wipe app storage, etc.)
+
+Sketch per cap type:
+
+| Cap | Risk disclosure summary |
+|-----|-------------------------|
+| `time` | Reads the system clock. Cannot fingerprint the user. |
+| `self` | Reads the app's own bundled files. Cannot modify them or see other apps. |
+| `stdout` | Writes to the terminal output. Visible to the operator; no side effects on other programs. |
+| `stdin` | Reads keyboard input intended for the app. Can prompt you, so treat prompts like app UI. |
+| `kv` | Stores data in this app's isolated key-value store. Other apps cannot read it. Storage grows until you delete it. |
+| `db` | Stores data in this app's isolated SQL database. Other apps cannot read it. Can accumulate unbounded data; revoke to freeze writes. |
+| `http_server` | Binds a local port inside the daemon. Other apps on the same daemon cannot see its requests. |
+| `http_client` | Sends HTTP requests to the listed hosts. **Anything the app processes can be transmitted to those hosts.** Assume data sent this way is permanently outside your control. |
+| `fs` | Reads and writes files under the declared root path. **Data in that path is visible to the app and may be modified or deleted.** |
+| `shared_db` | Reads and writes rows in a shared database tagged with this app's id. **Other apps with shared_db can see rows tagged with their own ids — not this app's.** The schema is shared, so column presence leaks across apps. |
+| `cli` | Reads command-line arguments passed when the app was launched. Limited to what the operator typed. |
+
+These are **per-cap-type** disclosures, written once in the cap factory module,
+surfaced in the grant UI. Apps can add an **app-specific reason** in their
+manifest ("Alice uses LLM access to generate her dialogue"), which the grant UI
+shows alongside the standard disclosure. The app's reason is app-controlled
+text — the platform's disclosure is the authoritative risk description.
+
+**Scope-specific details** get rendered into the disclosure. A `fs` cap with
+`root: "~/Documents/alice/"` should show the exact path ("This app can read and
+write any file under ~/Documents/alice/"), not a generic template.
+
+The grant UI must default to the safe action. **Deny is the primary button, allow
+is secondary.** No spinner that auto-allows after a timeout. No pre-ticked
+"approve all" checkbox.
 
 ### Security considerations
 
