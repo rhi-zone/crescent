@@ -25,6 +25,11 @@ ports on mobile.
    doesn't take down other apps or the daemon.
 5. **No new dependencies.** Pure Lua + FFI, consistent with the rest of crescent.
 
+Per-app isolation — the VM sandbox controls, the tier decision, and what is
+built today vs. deferred — is distilled in
+[`docs/daemon-isolation.md`](daemon-isolation.md). Start there if your
+question is "what stops one app from reaching another."
+
 ## Architecture
 
 ```
@@ -315,6 +320,13 @@ The app's Lua code runs in the same process as the daemon. Without strict
 sandboxing it can read and mutate anything — `grants.json` in memory, other
 apps' cap closures, the daemon's router tables. The VM boundary, not the HTTP
 boundary, is the primary defense.
+
+> **This section is the *intended* control set.** What is actually built
+> today vs. deferred, and the tier decision (single-state + quota vs.
+> separate `lua_State` vs. fork) is summarized in `docs/daemon-isolation.md`
+> and fleshed out in "v3 per-app isolation notes" at the bottom of this
+> file. Read the isolation doc first if your question is "what defenses
+> run right now."
 
 **Env-based sandbox, no `_G` access.** Each app is loaded with a per-app
 environment table as its `_ENV`. The env contains exactly: the caps the app
@@ -1364,7 +1376,9 @@ not a replacement. Both use the same grant storage, cap factories, and sandbox.
    coroutine-based async (apps yield during I/O), fork per app (loses in-process
    simplicity), or accept the limitation for v1 (most apps are fast handlers +
    SSE streams). Coroutine async is the likely eventual answer — it's how the
-   HTTP server already works for SSE.
+   HTTP server already works for SSE. See also "v3 per-app isolation notes"
+   below — a coroutine-per-request model also happens to be the cleanest place
+   to hang the instruction quota that caps blocking/spinning handlers.
 
 3. **Hot reload.** Can the daemon reload an app without restarting? Lua's module
    system makes this possible (`package.loaded[mod] = nil` + re-require), but cap
@@ -1509,3 +1523,117 @@ fallback path that ships in the absence of JS on the library page.
   history / Referer / copy-paste all see the post-consume URL. Additional
   belt-and-suspenders for when grant UI lands: emit `Referrer-Policy:
   no-referrer` on any response carrying `?__launch=…`.
+
+## v3 per-app isolation notes
+
+Companion doc: `docs/daemon-isolation.md` — focused distillation of this
+section + the "VM sandbox" controls above. Update them together.
+
+The name "per-app VM host" from TODO.md's v3 bullet overstates what's built.
+What actually exists today (`lib/platform/daemon/app_loader.lua`):
+
+- Each app gets its own `sandbox.env(sandbox.stdlib, { globals = { caps = … } })`
+  — a *per-app env table*, not a separate Lua state. Namespace isolation only:
+  the app sees nothing outside `sandbox.stdlib` + its own caps.
+- Each app gets its own `platform.make_caps(app, decl, grants, ctx, {…})` cap
+  bundle. The `http_server` override captures the handler the app registers
+  via `cap.serve(h)` into a daemon-side closure.
+- Dispatch by `Host` header → cached per-app handler → direct function call.
+
+What the "VM sandbox" section above promises but is **not yet** true of
+running code:
+- **CPU quota.** A handler that hits `while true do end` blocks the daemon's
+  request thread. No `debug.sethook` budget, no coroutine yielding, no kill.
+- **Crash containment.** Per-request handler invocation is not `pcall`-wrapped
+  today; an `error()` inside a handler bubbles up past the daemon's request
+  loop.
+- **Frozen primitive metatables, verified `sandbox.stdlib` audit.** The stdlib
+  excludes `require`, `ffi`, `debug`, `io`, `os`, `package`, `load`, `loadstring`,
+  `dofile`, `string.dump` by construction — but there is no regression test
+  asserting this, and no audit of whether `setmetatable` on string/number/
+  boolean is reachable via the stdlib functions that *are* exposed.
+- **Separate Lua state.** All apps share one `lua_State`. Any FFI escape (e.g.
+  if `require`/`ffi` leak in a future sandbox edit) sees every other app's
+  memory and the daemon's.
+
+### Tier decision — where we want to end up
+
+Three tiers, increasing isolation and cost. Each is a real implementation, not
+a wrapper over the next. Cap-call throughput is the dominant perf axis
+(request → handler → several cap calls → response):
+
+1. **Status quo + pcall + instruction quota** (single-state, single-thread).
+   Wrap each handler invocation in `pcall`. Run it in a coroutine with
+   `debug.sethook("", "", N)` that checks a deadline every N bytecodes and
+   errors out on overrun. Cap calls stay free (direct function calls). Worst-
+   case overhead ~20–30% for hook-enabled traces; zero for handlers that don't
+   trip the hook. Catches: infinite loops, uncaught errors, blocking-forever
+   handlers. Misses: memory DoS, shared metatable poisoning if the audit gap
+   above isn't closed first.
+
+2. **Separate `lua_State` per app** (one process, N states). Creating a state
+   is ~1ms and amortizes over the app's lifetime. FFI escape in one state
+   cannot see another state's Lua memory (both still in the same OS process,
+   so native-code-reading-native-memory is unchanged). Cost: cap calls cross
+   the state boundary. A pure-serialization bridge is probably 5–10× slower
+   on cap-heavy workloads than direct function calls; a `CFunction` shim with
+   `lua_xmove` on tables is faster but more code. Worth measuring before
+   committing.
+
+3. **Fork-per-app** (N processes). Full OS isolation. Rejected in v2 notes as
+   inherited from a multi-process mental model the daemon explicitly does not
+   have. Keep as a "what if an app tries to steal another app's memory"
+   fallback; implementation deferred indefinitely.
+
+**Direction chosen: tier 1, plus a `sandbox.stdlib` audit before tier 1 ships.**
+Rationale: tier 1 gets 80% of the security (crash + spin containment) at 0%
+cap-call cost. Tier 2 is held in reserve for a specific threat model we don't
+have yet ("apps attempt to exfiltrate other apps' memory via Lua-level
+introspection"). Reassess when either (a) an adversarial app triggers a
+containable incident that a separate state would have caught, or (b) cap-call
+perf under tier 1 is measured and has headroom for a boundary.
+
+### What to build, in order
+
+None of these are implemented yet. Treat as the v3 bring-up plan, not a
+retrospective.
+
+1. **`sandbox.stdlib` audit + regression test.** Enumerate every symbol
+   reachable from the stdlib (recursively: `string.gmatch`, `table.concat`,
+   ...). Assert no path leads to `require`, `ffi`, `debug`, `package`,
+   `load`, `loadstring`, `dofile`, `string.dump`, or to `setmetatable` /
+   `getmetatable` on primitive-typed values. Write the assertion as a test
+   so future stdlib additions can't silently widen the surface.
+2. **`pcall` wrap on per-request handler dispatch.** `daemon/init.lua`'s
+   app-handler branch calls `handler(req, res)` directly. Wrap it in `pcall`;
+   on failure, 500 with `Content-Type: text/plain` and log the traceback to
+   the daemon's error channel (not to the client — error details are
+   operator-visible only). Zero-cost on the happy path.
+3. **Coroutine-per-request + instruction quota.** Resume the handler as a
+   coroutine with `debug.sethook(co, fn, "", N)` (count mode, every N
+   bytecodes). `fn` checks `time_fn() - start_ns > budget_ns`, errors out on
+   overrun. Budget is per-request, not per-app-lifetime. Hook is disabled
+   for first-party apps (the library app, card app) via an opt-in flag on
+   install; third-party apps get the hook by default. This also gives us
+   the concurrent-request story from Open Question 2 — blocking handlers
+   yield instead of hogging the event loop.
+4. **Frozen primitive metatables.** Either set `__metatable` sentinels on
+   `""`, `0`, `false` at daemon startup so `getmetatable` returns a bogus
+   value, or omit `getmetatable`/`setmetatable` from `sandbox.stdlib`
+   entirely. Decide during the audit in step 1.
+5. **Revisit tier 2 if-and-only-if.** Track triggering conditions listed
+   above. Do not build a state-per-app bridge speculatively.
+
+### Non-goals for v3
+
+- Memory quota per app. LuaJIT does not expose a clean way to cap GC heap
+  per env, and trying to approximate it with counters on `table.new` /
+  string concat is a rabbit hole that doesn't stop FFI-level allocation.
+  If memory DoS becomes a real concern, it lives at tier 2/3, not tier 1.
+- Blocking-I/O cap limits. A handler that `caps.http_client.get`s a slow
+  endpoint is *expected* to be slow; the instruction quota does not fire
+  on C-level blocking. Concurrent-request handling (coroutine yielding on
+  I/O, not on bytecode count) is the right answer — tracked under Open
+  Question 2, not here.
+- Preventing an app from learning its own app_id or data-dir path. Those
+  are useful to the app and don't grant authority on their own.
