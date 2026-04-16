@@ -124,27 +124,36 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     one-shot consume, clean-URL 303. Consider `Referrer-Policy: no-referrer`
     on the launch redirect as belt-and-suspenders to reduce token leak via
     referer header if an app ever embeds external resources on first paint.
-- [ ] **Per-app VM host** — per-app env built from `lib/sandbox/` + `platform.make_caps()`,
-  served by daemon's Host-based app dispatch. Design resolved 2026-04-17 after
-  mapping existing code:
-  - Isolation: env-based sandbox (same Lua state, per-app env table). Same model
-    `lib/sandbox/` already uses. Fork deferred — add only if a misbehaving app
-    wedges the daemon in practice.
+- [x] **Per-app VM host** — per-app env built from `lib/sandbox/` + `platform.make_caps()`,
+  served by daemon's Host-based app dispatch. Implemented in
+  `lib/platform/daemon/app_loader.lua` + wired via `daemon.make({ app_loader = ... })`.
+  Resolution of design questions from earlier:
+  - Isolation: env-based sandbox (same Lua state, per-app env table).
   - Cap wiring: direct in-process function calls via `platform.make_caps()`.
-    No RPC — the daemon is single-process, so the boundary doesn't exist. Earlier
-    "RPC stubs" framing was inherited from a multi-process mental model.
-  - Dedup: `daemon/cli.lua` has `construct_caps()` (~50 lines) that duplicates
-    `platform.make_caps()`. Switch the daemon to call the factory and delete
-    the duplicate on the way through.
-  - Ongoing: replace `handle_app` stub in `daemon/init.lua` with real per-app
-    dispatch — load app manifest from index DB, build caps via `make_caps`, run
-    app entrypoint in sandbox env, route HTTP request through its
-    `http_server` cap handler.
-  - Open sub-question deferred: how the app's `http_server` cap handler gets
-    registered/invoked by the daemon's request loop (the cap's current shape
-    assumes the app owns the listener). May need a small refactor of
-    `lib/platform/caps/http_server.lua` to expose "register handler" separately
-    from "bind socket". Resolve during implementation.
+  - `http_server` cap refactored — daemon mode uses `on_serve` callback to capture
+    the handler the app registers via `cap.serve(handler)`.
+
+  **Carry-overs for per-app VM host:**
+  - [ ] First-real-app smoke test. `app_loader` is unit-tested with mocked index
+    rows + fake apps; end-to-end with a real PNG-installed app has not been
+    exercised yet. The library app's "launch an installed app from the UI"
+    story depends on this.
+  - [ ] Handler cache in `daemon/init.lua` (`app_handlers`) is never evicted.
+    Fine for v1 (small N, long-lived daemon), but a long-running multi-user
+    daemon will want LRU + time-based eviction, especially once apps mutate
+    during development.
+  - [ ] Error cache (`app_load_errors`) is sticky — a transient `load_app`
+    failure becomes permanent for the daemon's lifetime. Consider clearing on
+    index-DB change notifications (once those exist) or on explicit admin
+    retry.
+  - [ ] `app_loader` currently auto-grants every declared cap
+    (`_auto_grants`). Real grant policy lives with the grant UI item below;
+    this is a placeholder until then. **Security note:** do not ship a
+    routable-interface daemon with this in place.
+  - [ ] Typechecker gap noted while wiring: optional fields (`T | nil`) in an
+    expected record must appear in the table literal even when semantically
+    absent. Existing `daemon.make({...})` callsite had the same error
+    pre-existing. Worth a small typechecker fix separately.
 - [ ] **Cap grant UI + endpoint** — grant page at daemon origin (not app origin). Zero-JS
   HTML form (no XHR on this page). CSRF token in hidden input. `Sec-Fetch-Site: same-origin`
   + `Sec-Fetch-Dest: document` check. Risk-tiered friction: inert/scoped/local caps grantable
