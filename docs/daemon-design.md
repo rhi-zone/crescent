@@ -178,6 +178,93 @@ GET  /api/daemon/status                        → { uptime, apps_running, ... }
 POST /api/daemon/revoke   { app_id, cap_name } → { ok }
 ```
 
+### Cap scoping: per-app by default
+
+Every cap is **scoped to the app that was granted it**. This is the principle of
+least privilege and it's non-negotiable — the sandbox guarantee depends on it.
+
+Concretely:
+- `kv` and `db` storage paths are resolved via `_resolve_data_path(cap_name, scope, context)`
+  where `context.app_id` makes each app's store isolated.
+- `http_client` host whitelists come from the app's manifest — alice cannot call
+  hosts that bob declared.
+- `http_server` ports are never shared between apps (each app has its own handler
+  mounted at its own prefix).
+- `shared_db` uses an authorizer keyed on `context.app_id` so apps only see their
+  own rows in shared tables.
+- Revocation is per-app — revoking `llm_api` for alice has no effect on bob.
+
+Two apps asking for "the same cap" get **two different cap instances** with
+independent state, independent revocation, and independent authorization.
+
+### Blanket allows: reducing grant fatigue
+
+Forcing the operator to approve every cap for every app becomes noise — prompted
+fifty times in a week, they start clicking "allow" reflexively. That erodes the
+security model faster than any technical bug would.
+
+The fix is **not** to grant more by default. The fix is to avoid prompting for
+caps where prompting adds nothing.
+
+Three mechanisms, in decreasing order of safety:
+
+#### 1. Cap risk classes (default-quiet for harmless caps)
+
+Some cap types have no plausible abuse vector. Granting `time` to an app lets it
+read the system clock. There is no attack surface. Prompting the operator for
+this is just noise.
+
+| Class | Caps | Default |
+|-------|------|---------|
+| **Inert** | `time`, `self`, `stdout` | Auto-grant, no prompt |
+| **Scoped** | `kv`, `db` | Prompt once per app; storage is app-scoped so no cross-app leak |
+| **Local** | `http_server`, `cli`, `stdin` | Prompt per app |
+| **Network** | `http_client` (with host) | Prompt per app + per host |
+| **Shared** | `shared_db`, `fs` | Prompt per app + show scope |
+
+Classes are **defined by the platform**, not the app. The app cannot relabel
+`http_client` as "inert." The risk class is a property of the cap type's
+implementation, encoded in the cap factory module.
+
+The operator can override classes in their config (`auto_grant: false` globally,
+or `auto_grant: ["time", "self"]` explicitly). The default should be safe for
+someone who doesn't configure anything.
+
+#### 2. Explicit trust grants (per-source allow lists)
+
+The operator can mark a trust source as "auto-grant whatever it asks for." Sources:
+
+- **First-party apps.** Apps that ship with crescent (`lib/platform/apps/*`).
+  These are code the operator already trusts by installing crescent. Still subject
+  to the manifest — a first-party app can't access caps it didn't declare.
+- **Signed apps.** If an app PNG is signed by a key in the operator's trusted
+  keyring, auto-grant its declared caps. (Requires signing infrastructure — not v1.)
+- **Manually trusted apps.** `POST /api/daemon/trust { app_id }` marks a specific
+  app as trusted for future cap requests, after the operator has reviewed it once.
+
+Trust is always **per-source**, never per-cap-type across apps. "Auto-grant
+http_client for anyone who claims to be an AI app" is exactly the attack we're
+trying to prevent — tags are app-controlled metadata.
+
+#### 3. Remembered decisions (status quo)
+
+Grants already persist across launches via `grants.json`. The operator approves
+once per (app, cap) pair, and subsequent launches don't re-prompt unless the
+manifest changes (new cap added, scope widened). This is the baseline.
+
+### What blanket allows must never do
+
+- **Auto-grant based on app metadata.** Tags, name, description — all
+  app-controlled. A malicious app claims any tag it wants.
+- **Grant caps not in the manifest.** The manifest is the cap ceiling. Trust
+  grants can auto-approve declared caps; they can never widen the declaration.
+- **Bypass per-app scoping.** Even auto-granted caps get per-app storage, per-app
+  revocation, per-app authorizer. Auto-grant means "don't prompt," not "share
+  state."
+- **Grant silently with no audit.** Every auto-granted cap should be logged and
+  visible in the daemon status UI. The operator should be able to see what's been
+  granted without prompts and revoke retroactively.
+
 ### Security considerations
 
 **The daemon is the operator.** It makes grant decisions on behalf of the human.
