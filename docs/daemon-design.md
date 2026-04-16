@@ -272,6 +272,135 @@ strips it, calls `alice.handler({ method = "GET", path = "/", ... })`. The app
 responds with its HTML, which references relative paths that the browser
 resolves under `/app/alice/`.
 
+### Threat model: silent grant vs fatigue
+
+Two failure modes are equally fatal:
+
+1. **Silent grant.** Code running in the background — another app on the same
+   daemon, a malicious tab, a compromised browser extension, a rogue dependency
+   in a trusted app — completes the grant flow without the operator seeing or
+   approving it. The attacker gains caps they were never authorized for. One
+   silent grant compromises everything that cap can reach.
+
+2. **Grant fatigue.** The operator is prompted for consent so often that they
+   stop reading and start click-throughing. The grant UI becomes noise. When a
+   real high-risk grant appears, it gets the same reflexive click as the
+   low-risk ones. Effective security collapses to zero.
+
+Uniform friction fails at both: too low and automation slips through; too high
+and humans stop paying attention. The resolution is **structural isolation + risk-tiered friction**.
+
+#### Structural isolation: the attacker cannot reach the grant channel
+
+CSRF tokens and SameSite cookies are insufficient on their own. Any app running
+on the daemon shares the origin of the grant UI (same hostname, same port) and
+can read the daemon's pages if same-origin policy doesn't apply. The daemon
+MUST enforce origin isolation so that app-originated requests cannot reach
+grant endpoints at all.
+
+**Per-app subdomain.** Each app is served from `app-<id>.<daemon-host>` (e.g.,
+`app-alice.crescent.local`, `app-alice.tsnet.ts.net`). The daemon UI and grant
+endpoints live on `<daemon-host>` directly. Browsers treat these as separate
+origins. Apps cannot read daemon cookies, cannot fetch daemon URLs (CORS
+blocks), cannot embed daemon pages (frame-ancestors blocks). Requires wildcard
+DNS — trivial on Tailscale Magic DNS, needs `dnsmasq` or `/etc/hosts` locally.
+
+**Fallback: per-app port.** If wildcard DNS is unavailable, each app binds to
+its own port (`localhost:7001`, `localhost:7002`, ...). Daemon UI stays on
+`localhost:7777`. Different ports → different origins. Ugly URLs, but the same
+isolation guarantees.
+
+**No CORS headers on daemon endpoints.** Ever. The daemon sets
+`Access-Control-Allow-Origin: <daemon-origin>` and nothing else. App-origin
+XHRs to daemon URLs fail the preflight.
+
+**Frame ancestors.** Daemon pages set `Content-Security-Policy: frame-ancestors 'none'`
+and `X-Frame-Options: DENY`. No iframing. Apps can't clickjack the grant UI
+by embedding it.
+
+**Sec-Fetch enforcement.** Grant POST endpoint rejects requests unless
+`Sec-Fetch-Site: same-origin` and `Sec-Fetch-Dest: document` (form submission
+from the grant page itself). XHR/fetch from any origin is rejected — the grant
+flow only accepts top-level form submissions.
+
+**No cap lets an app touch the grant channel.** There is no cap that exposes
+`fetch(daemon_url)` or `open_url(daemon_url)` or `trigger_launch(other_app)`.
+Apps cannot initiate launches, cannot navigate the operator's browser, cannot
+read or write `grants.json`. The grant channel is operator-exclusive by
+construction.
+
+#### Risk-tiered friction: fatigue scales with danger
+
+Not every cap deserves the same consent UI. Map friction to risk class
+(see "Cap risk disclosure" below):
+
+- **Inert** (time, self, stdout-to-app-UI): grant-on-install without a prompt,
+  IF the operator opted into "auto-grant inert caps" at setup. Otherwise
+  bundled into the install-time manifest review (one click for all inert caps).
+- **Scoped** (app-private kv, app-private db): single-click approve in the
+  grant UI, no extra confirmation. Blast radius is limited to the app itself.
+- **Local** (fs read/write in sandbox dir, spawn within whitelist): single-click
+  approve, but the grant UI emphasizes the risk class with color and an icon.
+- **Network** (http_client with host whitelist): operator must confirm the
+  specific host list. The UI shows the exact hosts from the manifest; operator
+  types/clicks a confirmation for the hostname set.
+- **Shared** (shared_db, cross-app cap access, ffi, unrestricted fs, spawn
+  without whitelist): operator must explicitly type "grant" or hold-to-confirm
+  for ~1 second. High-risk grants cannot be one-click. Plus a cooldown: submit
+  button is disabled for 500ms after page load, preventing "page loaded → auto-submit"
+  scripts from beating a human to the click even if they somehow reached the UI.
+
+The cooldown and hold-to-confirm are not about frustrating humans — they're
+about making high-risk grants impossible to complete faster than a human can
+intend to click. A script that somehow gets past origin isolation still can't
+submit instantly.
+
+#### Fatigue reducers that preserve security
+
+The grant UI is per-app, not per-cap. Operator reviews the whole manifest once
+at launch time, approves/denies the set, done. This is the existing design —
+what makes it fatigue-safe is batching, not per-cap prompting.
+
+**Install-time manifest review.** When a PNG is installed, the operator sees
+the full cap list once. Grants persist; subsequent launches of the same
+manifest don't re-prompt. Only manifest *changes* re-prompt, and only for the
+diff.
+
+**Recommend (don't default) auto-grant of inert caps.** During setup the wizard
+offers: "auto-approve low-risk caps (time, self, stdout)? This reduces prompts
+for apps that only use harmless operations." Opt-in. No ambient consent.
+
+**Session grants vs permanent grants.** For medium-risk caps (kv, db), the
+grant UI offers "just this session" as the default and "permanently" as a
+secondary option. Short-lived grants for short-lived tasks.
+
+**First-party marker.** Apps shipped as part of the platform (library, shell,
+card viewer) can be distinguished at install time by signature. First-party
+apps can carry wider default grants (still visible in the UI). Third-party
+apps get stricter defaults. The distinction is declared at install, not
+claimed by the app.
+
+**Explicit trust upgrade.** Operator can mark a specific app as "trusted" after
+using it — future manifest additions of low/medium risk caps get auto-approved
+for that app only, with notification. High-risk additions always re-prompt
+regardless of trust level. Trust is per-app, not global.
+
+#### What must never happen
+
+- **Auto-grant of network or shared caps.** Not even with "trusted" markers.
+  Every network/shared grant requires explicit current consent.
+- **Cross-app grant delegation.** App A cannot grant caps to App B, even if A
+  is itself trusted.
+- **Grant via app-served UI.** Only the daemon UI (at the daemon origin) can
+  accept grants. An app's own UI cannot present "approve this cap" and have
+  it work, even if the operator clicks.
+- **Ambient caps.** The grant check runs at cap construction time. There is no
+  global "default open" state for any cap class. Denied until explicitly
+  granted.
+- **Grant expiry without re-prompt.** If a grant expires (session ended,
+  manifest changed), the cap becomes unavailable. It cannot silently renew.
+  The operator must re-grant.
+
 ### Authentication
 
 "Session" above assumes the daemon can identify the operator. Three supported
