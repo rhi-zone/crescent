@@ -690,6 +690,90 @@ For v1: client-side risk-tiered friction (fatigue management, social-attack
 defense) plus bearer-token re-entry on high-risk grants (XSS defense). The
 two share the grant UI surface but defend against different threats.
 
+#### Non-browser clients (curl, scripts): credentials are the whole game
+
+Everything above assumes a browser is running the frontend and enforcing the
+browser-side half of each defense. A direct HTTP client (curl, scripts,
+custom tools) ignores all of that. The defense model shifts.
+
+**What curl ignores that browsers enforce:**
+
+- CORS (browser decides whether to deliver the response to JS; curl just
+  reads it)
+- CSP (browser-side)
+- SameSite cookie attributes (curl sends any cookie you pass)
+- `HttpOnly` (curl has no cookie jar model; you give it the cookie string)
+- Frame-ancestors, X-Frame-Options
+- `Sec-Fetch-Site`, `Sec-Fetch-Dest`, `Origin`, `Referer` (curl sets these
+  to whatever you tell it; they are hints about request provenance, not
+  authenticated signals)
+
+A motivated attacker wielding curl can forge any header a browser sends.
+These headers catch accidental misuse and misconfigured clients; they are
+not security boundaries.
+
+**What actually defends against curl:**
+
+1. **Network binding.** The daemon listens on loopback (`127.0.0.1`) and
+   the Tailscale interface only — never `0.0.0.0` without explicit TLS +
+   auth. Tailscale tailnet ACLs gate which devices can route to the daemon.
+   Remote curl simply can't connect in the default deployment.
+2. **Authenticate every state-changing endpoint.** No anonymous POST / PUT /
+   DELETE anywhere in the daemon API. curl without a credential gets 401
+   at the front door. This is the primary gate.
+3. **Credential confidentiality.** A curl with the right session token is
+   indistinguishable from a browser with the right session — because it
+   *is* an authenticated request. Everything earlier (HttpOnly cookies,
+   per-subdomain isolation, daemon UI XSS prevention, bearer re-entry for
+   high-risk grants) exists to keep the token out of attacker hands. curl
+   is not a separate threat class; it is the attack surface a leaked token
+   exposes.
+4. **Rate limiting on auth.** Even with 128-bit random bearer tokens,
+   rate-limit the auth endpoint: exponential backoff on failed attempts,
+   per-source lockout. Defends against online guessing and amplifies log
+   signals on probing.
+5. **Audit logging.** Every authenticated request logged with source IP,
+   session id, path, timestamp, outcome. `/settings/audit` surfaces
+   anomalies (new source IP, grants from unexpected user-agent, off-hours
+   access) to the operator. Not prevention — detection.
+6. **TLS on any non-loopback / non-Tailscale interface.** If the daemon is
+   ever configured to bind to an interface that isn't already
+   network-authenticated, TLS is mandatory. Plaintext bearer over a
+   routable network is not acceptable. The daemon should refuse such binds
+   by default.
+
+**Clean threat decomposition:**
+
+- **curl with operator credentials** = the operator (or a post-compromise
+  attacker with equivalent power). No technical defense distinguishes them.
+  Defense is credential protection, not request-shape analysis. The CLI is
+  a legitimate user of this mode — the operator should be able to script
+  their own daemon.
+- **curl without credentials** = unauthenticated request = 401. Access
+  control alone.
+- **curl with partial credentials** (e.g. launch token but not session) =
+  whatever that partial credential authorizes. The grant page view
+  requires the launch token but viewing does not change state. The grant
+  form submission requires the launch token AND the session AND the CSRF
+  token. Each credential gates its own capability; missing one = 401 or
+  403.
+
+**CSRF tokens and curl.** CSRF tokens don't defend against curl — curl can
+fetch the grant page (if it has the launch token and session), read the
+CSRF token out of the HTML, and POST it back. CSRF tokens defend against a
+different class (an authenticated browser session being tricked into
+sending a state-changing request from a malicious cross-origin page). For
+curl-class attacks the defense is credential confidentiality + rate
+limiting, not CSRF. CSRF remains because the browser class still exists;
+just don't think of it as stopping curl.
+
+**Don't server-side-enforce browser-only signals.** Rejecting requests with
+missing `Sec-Fetch-Site` would break legitimate CLI use. Rejecting on
+header mismatch is worth doing for the browser class, but an absent
+`Sec-Fetch-*` header is not evidence of malice — it's evidence of a
+non-browser client. Treat presence-plus-match as a positive signal, absence
+as neutral.
+
 #### Content-Security-Policy: the frontend's network whitelist matches the backend's
 
 Origin isolation stops the frontend from attacking the *daemon*. It does
