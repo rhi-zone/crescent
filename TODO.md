@@ -59,6 +59,51 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
+## platform daemon — implementation track
+
+Full design in `docs/daemon-design.md`. The daemon is the long-running host that serves
+installed apps over HTTP, brokers capability grants, and enforces the per-app browser-side
+sandbox. Threat model: apps (backend + frontend, one author) are the adversary; defense
+hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
+
+**v1 bring-up order** (each step testable on its own; deliberately narrow):
+
+- [ ] **HTTP skeleton** — single-port listener, path-prefix router, per-subdomain routing
+  (`app-<id>.<daemon-host>` canonical, `127.0.0.x` loopback-IP fallback, URL-token fallback),
+  `HttpOnly __Host-session` cookie auth, mount existing library app at the root. Unblocks
+  everything downstream.
+- [ ] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
+  launch token, 303-redirects to app origin. Token session-bound, 5-min expiry,
+  consumed on first use.
+- [ ] **Per-app VM host** — spawn/reuse LuaJIT state per app, env-based sandbox (no `_G`,
+  `debug`, FFI, bytecode loader, raw `require`; per-app `package.loaded`; frozen
+  metatables). Backend caps (`caps.llm`, `caps.kv`, `caps.db`, …) resolve through RPC
+  stubs to daemon-side cap implementations.
+- [ ] **Cap grant UI + endpoint** — grant page at daemon origin (not app origin). Zero-JS
+  HTML form (no XHR on this page). CSRF token in hidden input. `Sec-Fetch-Site: same-origin`
+  + `Sec-Fetch-Dest: document` check. Risk-tiered friction: inert/scoped/local caps grantable
+  with one click; network/shared caps require bearer re-entry (server-side re-auth, not
+  client-side hold).
+- [ ] **CSP emission** — daemon emits `Content-Security-Policy` per app response, derived
+  from that app's manifest `net.connect_src` (hosts declared at install). Locks
+  `default-src 'none'`, `connect-src 'self' <declared-hosts>`, `frame-ancestors 'none'`,
+  `require-trusted-types-for 'script'`, `trusted-types 'none'`. No `unsafe-inline`, no
+  `unsafe-eval`.
+- [ ] **Daemon UI XSS resistance** — grant page and operator pages ship with
+  `Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'`
+  (strictest possible; no scripts on grant page at all). Trusted Types enforced on any
+  page that does ship JS. All rendered user/app strings HTML-escaped at emission.
+- [ ] **Rate limiting** — per-session and per-IP limits on auth endpoints, grant endpoint,
+  and launch-token mint. Exponential backoff on failure.
+- [ ] **Audit log** — append-only log of every cap grant, every auth event, every
+  admin/policy change. Tamper-evident hashing (prior-entry hash chain).
+- [ ] **TLS on routable interfaces** — binding to loopback is TLS-optional; binding to
+  Tailscale or any routable interface requires TLS. Cert loading from disk (daemon does
+  not do ACME in v1 — user provides cert).
+- [ ] **Admin policy layer** — admin can set blanket allow/deny ceilings per app, per cap,
+  per cap+host tuple. Caps the grant UI against those ceilings so the operator cannot be
+  socially engineered past admin intent.
+
 ## lib/mdast Phase 2 — CommonMark gaps and GFM extensions
 
 **[x] Phase 2 fixture validation substantially complete.** CommonMark 0.31.2 spec fixture suite
