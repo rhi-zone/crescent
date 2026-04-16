@@ -62,8 +62,12 @@ end
 
 --[[@return luajitsocket sock]]
 --[[@param handler http_callback]] --[[@param port? integer]] --[[@param epoll? epoll]]
-mod.server = function (handler, port, epoll)
-	return socket.server(mod.make_connection_handler(handler), port or 80, epoll)
+--[[@param opts? { host?: string }]]
+-- opts.host (optional): interface to bind, e.g. "127.0.0.1" or "0.0.0.0".
+-- Forwarded to lib.socket.server, which defaults to "*" (all interfaces) if
+-- omitted. Prefer loopback-only binds for daemons on untrusted networks.
+mod.server = function (handler, port, epoll, opts)
+	return socket.server(mod.make_connection_handler(handler), port or 80, epoll, opts)
 end
 
 return mod

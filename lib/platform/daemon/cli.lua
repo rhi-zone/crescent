@@ -19,8 +19,7 @@ end
 
 local daemon = require("lib.platform.daemon")
 local app_loader = require("lib.platform.daemon.app_loader")
-local http_format = require("lib.http.format")
-local socket_server = require("lib.socket.server")
+local http_server = require("lib.http.server")
 local app_index = require("lib.platform.index")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
@@ -114,62 +113,15 @@ local d = daemon.make({
 })
 
 -- ── Socket listener ────────────────────────────────────────────────────────
--- Single port. The http.server module in lib/http/server.lua doesn't expose
--- the `host` opt on socket.server, so we inline the request-reading path and
--- pass opts.host explicitly. This matches the structure of the http_server
--- cap (lib/platform/caps/http_server.lua).
-
-local ffi = require("ffi")
-local buf = ffi.new("char[65536]")
-local max_header_size = 65536
-local err_res = http_format.serialize_response({
-	status = 400,
-	headers = { ["content-length"] = { "0" } },
-})
+-- http.server handles header/body framing; we wrap the handler to split
+-- raw_req.target into path+query (daemon.handle expects them separately) and
+-- delegate to d.handle. opts.host forwards all the way down to the bind call
+-- so a loopback-only daemon stays loopback-only.
 
 io.write("daemon: http://" .. daemon_host .. "/\n")
 io.flush()
 
-socket_server.server(function(client)
-	local parts = {}
-	local total = 0
-	local header_end
-	while not header_end do
-		local s = client:receive(buf)
-		if not s then return end
-		parts[#parts + 1] = s
-		total = total + #s
-		if total > max_header_size then client:send(err_res); return end
-		local combined = table.concat(parts)
-		header_end = combined:find("\r\n\r\n", 1, true)
-		if header_end then parts = { combined } end
-	end
-	local data = parts[1]
-	local raw_req, i = http_format.parse_request(data)
-	if not raw_req or not i then client:send(err_res); return end
-
-	local content_length = raw_req.headers["content-length"]
-	if content_length then
-		content_length = tonumber(content_length[1])
-		if content_length then
-			local body_start = header_end + 4
-			local body_so_far = #data - body_start + 1
-			while body_so_far < content_length do
-				local s = client:receive(buf)
-				if not s then break end
-				parts[#parts + 1] = s
-				body_so_far = body_so_far + #s
-			end
-			if #parts > 1 then
-				data = table.concat(parts)
-				raw_req = http_format.parse_request(data)
-				if not raw_req then client:send(err_res); return end
-			end
-		end
-	end
-
-	-- Split target into path + query (the daemon handler + the library app
-	-- both expect req.path / req.query, not req.target).
+http_server.server(function(raw_req, res)
 	local target = raw_req.target or "/"
 	local q = target:find("?", 1, true)
 	local path, query
@@ -179,7 +131,6 @@ socket_server.server(function(client)
 	else
 		path = target
 	end
-
 	local req = {
 		method = raw_req.method,
 		path = path,
@@ -187,10 +138,6 @@ socket_server.server(function(client)
 		headers = raw_req.headers,
 		body = raw_req.body,
 	}
-	local res = { status = 200, headers = {}, body = nil }
-
+	res.status = 200 -- http.server initialises headers={} but not status
 	d.handle(req, res)
-
-	client:send(http_format.serialize_response(res))
-	client:close()
 end, opts.port, nil, { host = opts.host })

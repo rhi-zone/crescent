@@ -89,10 +89,11 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     until grant UI lands and sessions carry real authority.
   - [ ] Loopback IP allocator grows monotonically and never reclaims. Fine for v1 (you run
     out at 127.255.255.254) but revisit when multi-user / long-lived deployments appear.
-  - [ ] `lib/platform/daemon/cli.lua` hand-rolls the HTTP read loop because
-    `lib/http/server.lua` does not expose `opts.host` to `lib/socket.server`. Fold the
-    host option into `lib/http/server.lua` and have the daemon CLI use it. Tracked as
-    a separate HTTP convention fix.
+  - [x] `lib/http/server.lua` now accepts an `opts` table (with `host`),
+    forwarded to `lib.socket.server`. `lib/platform/daemon/cli.lua` no
+    longer hand-rolls the HTTP read loop — it uses `http_server.server`
+    with a thin wrapper that splits `target` into `path` + `query` and
+    calls `d.handle`. Smoke-tested: `curl /healthz` → 200 ok.
   - [x] Library app's response headers migrated to `{ string }` arrays (server.lua +
     server_test.lua). Daemon can now round-trip library responses through
     `http.format.serialize_response` without error.
