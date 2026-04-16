@@ -134,10 +134,23 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     the handler the app registers via `cap.serve(handler)`.
 
   **Carry-overs for per-app VM host:**
-  - [ ] First-real-app smoke test. `app_loader` is unit-tested with mocked index
-    rows + fake apps; end-to-end with a real PNG-installed app has not been
-    exercised yet. The library app's "launch an installed app from the UI"
-    story depends on this.
+  - [x] First-real-app smoke test — `lib/platform/daemon/end_to_end_test.lua`
+    drives the full pipeline against a real SQLite index and a real `.tar.gz`
+    app (built on-the-fly via `tar.write` + `compress.deflate`). Covers
+    successful Host dispatch, handler caching across requests, and missing-app
+    500 caching. 8 assertions. Library "launch from UI" still needs wiring
+    but is now unblocked.
+  - [ ] `caps.self` does not expose `app_id`. The smoke test wanted to echo
+    the app identity in the response body and couldn't. Either add `app_id`
+    (and `origin`, probably) to `self_cap`, or decide an app is not supposed
+    to know its own id and document that. Came up during e2e bring-up.
+  - [ ] Tier 2/3 isolation escalation (separate `lua_State` per app, or
+    coroutine-per-request with `debug.sethook` instruction quota). Current
+    daemon is tier 1 (single state + env sandbox + pcall wrap). The full
+    build order, escalation triggers, and perf considerations are in
+    `docs/daemon-isolation.md`. Not urgent for a loopback/Tailscale-private
+    daemon; required before any routable-interface deployment alongside the
+    grant UI work.
   - [ ] Handler cache in `daemon/init.lua` (`app_handlers`) is never evicted.
     Fine for v1 (small N, long-lived daemon), but a long-running multi-user
     daemon will want LRU + time-based eviction, especially once apps mutate
