@@ -465,12 +465,28 @@ Set-Cookie: __Host-session=<sid>; HttpOnly; Secure; SameSite=Strict; Path=/
   is used (no Domain attribute → not inherited by subdomains).
 
 The browser attaches the cookie on same-origin requests automatically. JS
-never touches the value. A full XSS in the daemon UI can still forge
-requests (the browser attaches the cookie on the XSS's own fetches, since
-they're same-origin) — but that is limited same-origin CSRF inside the
-daemon UI, not raw session ID exfiltration to an external attacker. The
-blast radius of an XSS shrinks from "leak the operator's session forever" to
-"make some requests during the XSS window." That is a meaningful reduction.
+never touches the value.
+
+**What this does and does not protect against.** HttpOnly (and equivalently,
+a service worker injecting `Authorization`) hides the raw token value from
+page JS. It does NOT prevent authenticated requests from page JS — the
+browser auto-attaches the cookie on any same-origin fetch, so an XSS on the
+daemon UI can still call authenticated daemon endpoints during the XSS
+window, read responses, and submit the grant form (it can read the CSRF
+token from the DOM and POST it). What changes:
+
+- **Before (plain bearer in URL or readable cookie):** XSS reads the token,
+  sends it to an external attacker, attacker uses it indefinitely from
+  anywhere until the session expires. Permanent account takeover.
+- **After (HttpOnly cookie / SW-injected auth):** XSS cannot exfil the
+  token value. It can only act during the XSS window, from the daemon
+  origin, limited to what the current session authorizes. Session-bound
+  same-origin CSRF.
+
+That is a meaningful but bounded reduction. "Hidden token" is not "XSS-safe"
+— it only closes the exfil channel for the raw credential. The real defense
+against an XSS-completes-grant attack is preventing XSS on the daemon UI in
+the first place (next section).
 
 **Hazards of URL-based session tokens (per-port fallback only).**
 
@@ -554,6 +570,102 @@ redirect from the daemon to the app origin. An app rendering a link to
 the app has no way to mint one; the link lands on the daemon showing an
 "invalid or expired token" page. The app can trick the operator into
 navigating, but the operator lands nowhere useful for the attacker.
+
+#### Daemon UI XSS resistance: the real escalation path
+
+HttpOnly cookies hide the token value but not the ability to send
+authenticated requests. An XSS on the daemon UI can read the CSRF token from
+the DOM, submit the grant form with `form.submit()`, and complete a grant —
+all same-origin, all authenticated, potentially invisible to the operator.
+Token confidentiality narrows the post-compromise window; it does not close
+it. The load-bearing defense is preventing XSS on the daemon UI in the first
+place.
+
+**Strict CSP on daemon pages.**
+
+```
+Content-Security-Policy:
+  default-src 'none';
+  script-src 'self';
+  style-src 'self';
+  img-src 'self' data:;
+  connect-src 'self';
+  form-action 'self';
+  frame-ancestors 'none';
+  base-uri 'none';
+  require-trusted-types-for 'script';
+  trusted-types 'none';
+```
+
+- No `'unsafe-inline'` and no `'unsafe-eval'`. Inline handlers (`onclick=`)
+  and inline `<style>` must not appear in daemon HTML; scripts and styles
+  are external files served from the daemon origin.
+- `require-trusted-types-for 'script'` with `trusted-types 'none'` rejects
+  all DOM-sink assignments (`innerHTML`, `outerHTML`, `document.write`,
+  `eval`, `setTimeout(string)`, ...) at the browser level. With no allowed
+  policy, the daemon UI cannot use these sinks at all — enforced by the
+  browser, not by review.
+
+**Minimal daemon UI, server-rendered where possible.**
+
+The grant page is the single most critical page on the daemon. Build it as
+static server-rendered HTML with zero JS:
+
+```html
+<form method="POST" action="/grant/alice">
+  <input type="hidden" name="csrf" value="...">
+  <input type="hidden" name="token" value="...">
+  <fieldset>
+    <legend>Alice requests these capabilities:</legend>
+    <label><input type="radio" name="cap[kv]" value="grant"> Grant kv</label>
+    <label><input type="radio" name="cap[kv]" value="deny" checked> Deny</label>
+    ...
+  </fieldset>
+  <button type="submit">Submit grants</button>
+</form>
+```
+
+No framework, no templating DSL, no markdown renderer, no user-controlled
+content. Every interpolated value (app name, cap description) HTML-escaped
+in exactly one place. No JSON parsing in the client. No dynamic `innerHTML`.
+The grant page's XSS surface reduces to "did the escaper have a bug."
+
+Other daemon pages (library, settings) may need JS for interactivity. An
+XSS there is still serious but doesn't directly issue grants — its reach is
+bounded by what same-origin endpoints it can call.
+
+**No third-party assets on daemon pages.** No CDNs, no Google Fonts, no
+analytics, no external images. `script-src 'self'` already blocks them.
+
+**No app-authored content rendered as HTML on daemon pages.** The library
+browser displays app metadata (name, description, author) from the PNG
+manifest. These fields are adversary-controlled. Render them text-only with
+strict escaping — never as HTML, never as Markdown, never allowing even
+inline tags. Any design desire for styled app descriptions must go through
+a sanitizer treated as a known XSS risk, with explicit review.
+
+**Client-side friction is not an XSS defense.** Hold-to-confirm UIs that
+check `event.isTrusted` defend against social-engineering clicks from an
+app, not against same-origin XSS. An XSS skips the client UI entirely by
+calling `form.submit()` on a form it constructed. The server cannot
+distinguish real from synthetic submissions at the request level.
+
+**Server-side re-authentication for high-risk grants.** The one defense
+that survives XSS is requiring a credential the XSS cannot produce:
+
+1. **Bearer token re-entry.** For network and shared-class grants, the form
+   requires the operator to type their bearer token. XSS can't type it
+   without already having it (HttpOnly hides it).
+2. **WebAuthn / passkey touch.** Hardware-backed assertion, origin-bound,
+   user-gesture-bound. Synthesized clicks fail. Not v1, but the canonical
+   long-term answer.
+3. **Out-of-band confirmation.** Short code displayed on the daemon, typed
+   on a second channel (CLI on the daemon host, mobile push). Breaks the
+   single-browser compromise model.
+
+For v1: client-side risk-tiered friction (fatigue management, social-attack
+defense) plus bearer-token re-entry on high-risk grants (XSS defense). The
+two share the grant UI surface but defend against different threats.
 
 #### Content-Security-Policy: the frontend's network whitelist matches the backend's
 
