@@ -21,6 +21,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local router = require("lib.router")
+local url = require("lib.url")
 local library = require("lib.platform.apps.library.server")
 
 local M = {}
@@ -276,25 +277,7 @@ function M.make(opts)
 		return row ~= nil
 	end
 
-	-- Parse a URL query string into a flat { [key] = value } map. Last value wins
-	-- on duplicate keys. Keys and values are NOT percent-decoded here — launch
-	-- tokens are pure hex and don't need it, and decoding adds a typechecker
-	-- headache (multi-return string.gsub interacts badly with the solver). The
-	-- grant flow and future query-string consumers that need decoding should
-	-- reach for `lib.url.decode` instead.
-	--: (string | nil) -> { [string]: string }
-	local function parse_query_string(qs)
-		local out = {} --: { [string]: string }
-		if not qs or qs == "" then return out end
-		for kv in qs:gmatch("[^&]+") do
-			local k, v = kv:match("^([^=]+)=?(.*)")
-			if type(k) == "string" and type(v) == "string" then
-				out[k] = v
-			end
-		end
-		return out
-	end
-	M._parse_query_string = parse_query_string
+	local parse_query_string = url.parse_query
 
 	-- Build the Set-Cookie value for __Host-session=<sid>. Skip `Secure` when
 	-- the listener binds to loopback without TLS — browsers reject `Secure`
