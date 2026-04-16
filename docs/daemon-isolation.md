@@ -131,11 +131,11 @@ single `lua_State` and differ only by env table.
 | Per-app env table, no `_G`/`_ENV`/`package` | Implemented | `sandbox.env(sandbox.stdlib, { globals = { caps = … } })` |
 | Per-app cap bundle with `context.app_id` baked in | Implemented | `platform.make_caps(app, decl, grants, ctx, …)` |
 | `http_server` handler captured into daemon closure | Implemented | `cap.serve(h)` stored; dispatched by `Host` header |
-| Stdlib excludes `require`, `ffi`, `debug`, `io`, `os`, `package`, `load`, `loadstring`, `dofile`, `string.dump` | Implemented by construction | Audit-pending: no regression test, no audit of whether the exposed stdlib leaks these via `string.gmatch`, `table.concat`, or similar |
+| Stdlib excludes `require`, `ffi`, `debug`, `io`, `os`, `package`, `load`, `loadstring`, `dofile`, `string.dump` | Implemented + regression-tested | `lib/sandbox/sandbox_audit_test.lua` BFS-traverses `sandbox.stdlib` and asserts no reachable function `rawequal`s any blacklisted global; also verifies `_G` / `_ENV` / `getfenv` / `setfenv` / `newproxy` are invisible inside an `sandbox.env` |
 | Per-app `package.loaded` cache | N/A today | `require` is not exposed at all; if it ever is, this becomes relevant |
-| Frozen primitive metatables | Audit-pending | Undetermined whether `getmetatable`/`setmetatable` on `""`/`0`/`false` is reachable via any currently-exposed stdlib path |
+| Frozen primitive metatables | Implemented + regression-tested | `lib/sandbox/init.lua` sets `__metatable=false` on the string metatable at module load; audit test verifies `getmetatable("")` is the sentinel and `setmetatable` on a string raises — both from inside and outside a sandbox env. `getmetatable(0)`/`(true)`/`(nil)` return `nil` on LuaJIT so there is no primitive metatable to freeze |
 | Cap closures (not mutable tables) | Implemented for most caps | Per-cap review still worth doing |
-| Crash containment (`pcall` around handler) | Planned | Per-request handler invocation bubbles `error()` up past the daemon's request loop today |
+| Crash containment (`pcall` around handler) | Implemented + regression-tested | `lib/platform/daemon/init.lua`'s `invoke_app_handler` `xpcall`-wraps every app handler dispatch; failures produce a fixed 500 "internal server error" response (the error text is operator-visible only, via the optional `on_handler_error` callback). Tests in `daemon_test.lua` cover throwing handlers, the callback payload, cache retention across failures, and `assert(false)` crashes |
 | CPU quota (instruction count) | Planned | `while true do end` in a handler blocks the daemon request thread with no budget, no yielding, no kill |
 | Separate `lua_State` per app | Not built | All apps share one state; any future FFI escape sees every other app's memory |
 
