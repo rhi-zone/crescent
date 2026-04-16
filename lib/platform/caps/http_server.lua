@@ -3,13 +3,25 @@
 -- Inbound HTTP server capability for sandboxed apps.
 -- The platform owns the socket — the app provides a handler function.
 --
--- opts.port : integer (required) — port to bind
--- opts.host : string  (default "0.0.0.0") — bind address
+-- Modes:
+--   Standalone (default): the cap binds its own port. cap.serve(handler) blocks.
+--     opts.port : integer (required) — port to bind
+--     opts.host : string  (default "0.0.0.0") — bind address
 --
--- Capability API:
---   cap.serve(handler)  — start serving (blocks). handler(req, res) per request.
+--   Daemon: the cap does not bind; cap.serve(handler) records the handler and
+--   returns immediately. The daemon invokes the handler per request through
+--   its own listener. SSE streaming is not supported in daemon mode in v1.
+--     opts.daemon   : true  (enables daemon mode)
+--     opts.url      : string (optional) — advertised app URL for cap.url
+--     opts.on_serve : (handler) -> nil (required) — daemon callback that
+--                     captures the handler when the app calls cap.serve()
+--
+-- Capability API (both modes):
+--   cap.serve(handler)  — register handler. handler(req, res) per request.
+--                         Standalone: blocks, runs the socket loop.
+--                         Daemon: returns immediately after registering.
 --   cap.url             — string, e.g. "http://localhost:7860"
---   cap.port            — integer
+--   cap.port            — integer (0 in daemon mode)
 --
 -- req: { method, path, headers, body, query }
 -- res: response builder with .status, .headers, .body, .send_event(data), .close()
@@ -118,16 +130,40 @@ end
 
 -- http_server_cap(opts) -> cap_table, revoke_fn
 function M.http_server_cap(opts)
-	if not opts or not opts.port then
+	if not opts then
+		return nil, "http_server: opts required"
+	end
+
+	-- Shared revocation flag. Using a table so closures share the same reference.
+	local revoked_ref = { false }
+
+	-- Daemon mode: register handler only, no socket binding.
+	if opts.daemon then
+		if type(opts.on_serve) ~= "function" then
+			return nil, "http_server: daemon mode requires opts.on_serve callback"
+		end
+		local cap = {
+			url  = opts.url or "",
+			port = 0,
+		}
+		function cap.serve(handler)
+			if revoked_ref[1] then return nil, "http_server: revoked" end
+			if type(handler) ~= "function" then
+				return nil, "http_server: handler must be a function"
+			end
+			opts.on_serve(handler)
+			return true
+		end
+		return cap, function() revoked_ref[1] = true end
+	end
+
+	if not opts.port then
 		return nil, "http_server: opts.port is required"
 	end
 
 	local port = opts.port
 	local host = opts.host or "0.0.0.0"
 	local url  = "http://localhost:" .. tostring(port)
-
-	-- Shared revocation flag. Using a table so closures share the same reference.
-	local revoked_ref = { false }
 
 	local cap = {
 		url  = url,

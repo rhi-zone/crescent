@@ -25,7 +25,7 @@ T.describe("http_server_cap", function()
 		T.it("returns nil + error when opts is nil", function()
 			local cap, err = http_srv.http_server_cap(nil)
 			T.eq(cap, nil)
-			T.ok(err:find("port"), "error should mention port")
+			T.ok(err:find("opts"), "error should mention opts")
 		end)
 	end)
 
@@ -83,6 +83,68 @@ T.describe("http_server_cap", function()
 			local path, query = http_srv._split_target("/")
 			T.eq(path, "/")
 			T.eq(query, nil)
+		end)
+	end)
+
+	T.describe("daemon mode", function()
+		T.it("does not bind a port; cap.port is 0", function()
+			local captured
+			local cap = http_srv.http_server_cap({
+				daemon = true,
+				url = "https://app-abc.example",
+				on_serve = function(h) captured = h end,
+			})
+			T.ok(cap, "cap should not be nil")
+			T.eq(cap.port, 0)
+			T.eq(cap.url, "https://app-abc.example")
+			T.eq(captured, nil, "on_serve not called until serve() invoked")
+		end)
+
+		T.it("cap.serve registers handler via on_serve and returns true", function()
+			local captured
+			local cap = http_srv.http_server_cap({
+				daemon = true,
+				on_serve = function(h) captured = h end,
+			})
+			local h = function() end
+			local ok = cap.serve(h)
+			T.eq(ok, true)
+			T.eq(captured, h, "registered handler matches")
+		end)
+
+		T.it("rejects non-function handler", function()
+			local cap = http_srv.http_server_cap({
+				daemon = true,
+				on_serve = function() end,
+			})
+			local ok, err = cap.serve("not a function")
+			T.eq(ok, nil)
+			T.ok(err:find("function"), "error mentions function")
+		end)
+
+		T.it("rejects serve after revocation", function()
+			local cap, revoke = http_srv.http_server_cap({
+				daemon = true,
+				on_serve = function() end,
+			})
+			revoke()
+			local ok, err = cap.serve(function() end)
+			T.eq(ok, nil)
+			T.ok(err:find("revoked"), "error mentions revoked")
+		end)
+
+		T.it("requires opts.on_serve", function()
+			local cap, err = http_srv.http_server_cap({ daemon = true })
+			T.eq(cap, nil)
+			T.ok(err:find("on_serve"), "error mentions on_serve")
+		end)
+
+		T.it("url defaults to empty string when not provided", function()
+			local cap = http_srv.http_server_cap({
+				daemon = true,
+				on_serve = function() end,
+			})
+			T.eq(cap.url, "")
 		end)
 	end)
 

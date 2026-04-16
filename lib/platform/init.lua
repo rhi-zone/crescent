@@ -312,14 +312,18 @@ M._resolve_data_path = resolve_data_path  -- exposed for testing
 
 -- ── make_caps ────────────────────────────────────────────────────────────────
 
--- make_caps(app, cap_declarations, operator_grants, context)
+-- make_caps(app, cap_declarations, operator_grants, context, factory_overrides?)
 --   -> caps_table, revoke_fns_table
 --   or nil, err
 --
--- cap_declarations: { cap_name = { type=string, required=bool, ...}, ... }
--- operator_grants:  { cap_name = true, ... }
--- context:          { user_id=string, app_id=string, data_dir=string }
-function M.make_caps(app, cap_declarations, operator_grants, context)
+-- cap_declarations:  { cap_name = { type=string, required=bool, ...}, ... }
+-- operator_grants:   { cap_name = true, ... }
+-- context:           { user_id=string, app_id=string, data_dir=string }
+-- factory_overrides: { cap_type = { build = fn(decl, app, context, data_path) -> cap, revoke_or_err }, ... }
+--                    Lets callers (e.g. the daemon) supply alternate factories for
+--                    specific cap types — typically http_server in daemon mode —
+--                    without duplicating the rest of cap construction.
+function M.make_caps(app, cap_declarations, operator_grants, context, factory_overrides)
 	context = context or {}
 	operator_grants = operator_grants or {}
 	local caps = {}
@@ -335,7 +339,7 @@ function M.make_caps(app, cap_declarations, operator_grants, context)
 			end
 			-- optional and not granted: skip
 		else
-			local factory = CAP_FACTORIES[cap_type]
+			local factory = (factory_overrides and factory_overrides[cap_type]) or CAP_FACTORIES[cap_type]
 			if not factory then
 				if required then
 					return nil, "platform: unknown cap type '" .. cap_type .. "' for cap '" .. name .. "'"
