@@ -441,6 +441,43 @@ storage) but not for cookie confidentiality.
 Per-subdomain is canonical; the fallbacks are for environments where wildcard
 DNS genuinely isn't achievable. Default deployment assumes per-subdomain.
 
+**No CORS allowance for app origins.** The daemon never sends
+`Access-Control-Allow-Origin` allowing any app origin. If an app frontend
+somehow attempted a cross-origin request to the daemon (which no legitimate
+code does), the browser's CORS preflight would fail.
+
+**Frame ancestors.** Daemon pages set `Content-Security-Policy: frame-ancestors 'none'`
+and `X-Frame-Options: DENY`. No iframing. An app cannot embed the grant UI
+even if it somehow got the URL — preventing the clickjacking class where the
+operator thinks they're clicking on the app but is actually clicking on a
+hidden daemon frame.
+
+**Sec-Fetch enforcement.** Grant POST handler checks `Sec-Fetch-Site: same-origin`
+and `Sec-Fetch-Dest: document`. The only legitimate caller is a top-level
+form submission from the grant page itself — which satisfies both. A fetch
+or XHR from anywhere else fails these checks. This is a redundant check given
+origin isolation + CSRF, but it's free to add and catches implementation
+mistakes (e.g. a future accidental CORS allowance).
+
+**No cap gives an app any handle to the grant channel.** No cap exposes
+`fetch(daemon_url)`, `open_url(daemon_url)`, `trigger_launch(other_app)`,
+read/write of `grants.json`, or any daemon-internal module. The backend
+cannot reach the grant flow from Lua and the frontend cannot reach it from
+JS. There is no legitimate in-app code path to the grant endpoint.
+
+**No cap lets the app show a grant-looking UI.** Apps render inside their own
+origin. An app drawing a fake "approve these caps" dialog is a phish, not a
+grant — the real grant page lives at the daemon origin and the URL bar
+reflects that. Operator education (check the URL bar) is part of this, but
+the origin separation makes the phish observable rather than invisible.
+
+**Server-initiated navigation only.** Launching an app produces a 303
+redirect from the daemon to the app origin. An app rendering a link to
+`<daemon-host>/grant/...` cannot pre-populate it with a valid token because
+the app has no way to mint one; the link lands on the daemon showing an
+"invalid or expired token" page. The app can trick the operator into
+navigating, but the operator lands nowhere useful for the attacker.
+
 #### Session token confidentiality: keep the token out of JS reach
 
 The session identifier is a power-of-attorney. Whoever holds it can act as
@@ -533,43 +570,6 @@ reduced XSS blast-radius guarantee.
 
 For v1: per-subdomain + `HttpOnly` `__Host-` cookies. Fallbacks documented
 with their reduced guarantees.
-
-**No CORS allowance for app origins.** The daemon never sends
-`Access-Control-Allow-Origin` allowing any app origin. If an app frontend
-somehow attempted a cross-origin request to the daemon (which no legitimate
-code does), the browser's CORS preflight would fail.
-
-**Frame ancestors.** Daemon pages set `Content-Security-Policy: frame-ancestors 'none'`
-and `X-Frame-Options: DENY`. No iframing. An app cannot embed the grant UI
-even if it somehow got the URL — preventing the clickjacking class where the
-operator thinks they're clicking on the app but is actually clicking on a
-hidden daemon frame.
-
-**Sec-Fetch enforcement.** Grant POST handler checks `Sec-Fetch-Site: same-origin`
-and `Sec-Fetch-Dest: document`. The only legitimate caller is a top-level
-form submission from the grant page itself — which satisfies both. A fetch
-or XHR from anywhere else fails these checks. This is a redundant check given
-origin isolation + CSRF, but it's free to add and catches implementation
-mistakes (e.g. a future accidental CORS allowance).
-
-**No cap gives an app any handle to the grant channel.** No cap exposes
-`fetch(daemon_url)`, `open_url(daemon_url)`, `trigger_launch(other_app)`,
-read/write of `grants.json`, or any daemon-internal module. The backend
-cannot reach the grant flow from Lua and the frontend cannot reach it from
-JS. There is no legitimate in-app code path to the grant endpoint.
-
-**No cap lets the app show a grant-looking UI.** Apps render inside their own
-origin. An app drawing a fake "approve these caps" dialog is a phish, not a
-grant — the real grant page lives at the daemon origin and the URL bar
-reflects that. Operator education (check the URL bar) is part of this, but
-the origin separation makes the phish observable rather than invisible.
-
-**Server-initiated navigation only.** Launching an app produces a 303
-redirect from the daemon to the app origin. An app rendering a link to
-`<daemon-host>/grant/...` cannot pre-populate it with a valid token because
-the app has no way to mint one; the link lands on the daemon showing an
-"invalid or expired token" page. The app can trick the operator into
-navigating, but the operator lands nowhere useful for the attacker.
 
 #### Daemon UI XSS resistance: the real escalation path
 
