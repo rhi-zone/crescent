@@ -435,12 +435,88 @@ storage) but not for cookie confidentiality.
    enable loopback aliases, which is a deployment wart.
 2. **No cookie auth.** Drop cookies entirely, use capability-URL session
    tokens (`/?s=<sid>` in the daemon UI path) that never traverse to app
-   origins. Ugly URLs, vulnerable to URL-leak vectors (browser history,
-   referer if misconfigured), but port-based isolation becomes sound because
-   there's no cookie to leak.
+   origins. Port-based isolation becomes sound because there is no cookie to
+   leak — but see the URL-token hazards below.
 
 Per-subdomain is canonical; the fallbacks are for environments where wildcard
 DNS genuinely isn't achievable. Default deployment assumes per-subdomain.
+
+#### Session token confidentiality: keep the token out of JS reach
+
+The session identifier is a power-of-attorney. Whoever holds it can act as
+the operator against the daemon. The goal is to keep it out of reach of page
+JS entirely so that even a bug or XSS in the daemon UI itself cannot exfil
+it to an attacker.
+
+**Canonical: HttpOnly cookie on the daemon subdomain.**
+
+```
+Set-Cookie: __Host-session=<sid>; HttpOnly; Secure; SameSite=Strict; Path=/
+```
+
+- `HttpOnly` — `document.cookie` does not reveal the value. No JS (trusted
+  or otherwise) can read the session ID.
+- `Secure` — only sent over HTTPS (or localhost exception).
+- `SameSite=Strict` — not sent on any cross-site navigation.
+- `__Host-` prefix — must be `Path=/`, no `Domain` attribute. Pinned to exact
+  hostname, rejected if set with a Domain scope.
+- Per-subdomain isolation — cookie set on `daemon.<host>` is not sent to
+  `app-alice.<host>` because cookies scope by exact hostname when `__Host-`
+  is used (no Domain attribute → not inherited by subdomains).
+
+The browser attaches the cookie on same-origin requests automatically. JS
+never touches the value. A full XSS in the daemon UI can still forge
+requests (the browser attaches the cookie on the XSS's own fetches, since
+they're same-origin) — but that is limited same-origin CSRF inside the
+daemon UI, not raw session ID exfiltration to an external attacker. The
+blast radius of an XSS shrinks from "leak the operator's session forever" to
+"make some requests during the XSS window." That is a meaningful reduction.
+
+**Hazards of URL-based session tokens (per-port fallback only).**
+
+If the environment can't do per-subdomain and can't do distinct loopback
+addresses, and auth ends up URL-embedded (`/?s=<sid>`), the token is in
+`window.location.search`. Any JS on the daemon origin can read it. There is
+no way to hide a URL from the page that the URL addresses. Mitigations
+reduce but do not eliminate exposure:
+
+- `Referrer-Policy: no-referrer` on every daemon response, preventing the
+  token from leaking via `Referer` when the operator clicks a link to any
+  other origin (including an app).
+- `rel="noopener noreferrer"` on every external link rendered by the daemon
+  UI. Both (a) removes `window.opener` so the destination can't script back
+  into the daemon tab, and (b) strips the referer header even if the global
+  Referrer-Policy was weaker.
+- `history.replaceState(null, '', '/')` immediately after load, so the URL
+  bar and forward/back history don't carry the token. Does not erase the
+  token from server access logs or the network tab.
+- Short-lived rotating tokens (expire in minutes; refresh by re-auth) so
+  leaked tokens are useless quickly.
+- Server-side access logs filter the `s` query parameter out of the logged
+  URL.
+- No logging of `Location` redirect values at the application level.
+
+Even with all mitigations, URL-token mode is strictly weaker than HttpOnly
+cookie mode: the daemon's own trusted JS can read the token, so any XSS
+escalates to full session theft. This is why URL tokens are a fallback, not
+a default — and the documentation for per-port deployments must call out the
+reduced XSS blast-radius guarantee.
+
+**Alternatives considered (not pursued for v1):**
+
+- **Service worker as a token vault.** A registered service worker can hold
+  the token in its own context, which main-page JS cannot reach. SW
+  intercepts outgoing fetches and injects `Authorization: Bearer <token>`.
+  Real hiding from page JS. Cost: SW registration complexity, SW update
+  semantics, debugging surface. Not worth v1 implementation effort.
+- **WebCrypto non-extractable keys.** Daemon issues a per-session
+  `CryptoKey` with `extractable: false`. Page JS can sign requests with it
+  (proof of possession) but cannot read the key material. Replaces bearer
+  semantics with PoP semantics. Real hiding but demands a signing scheme on
+  every request. Overkill for v1 local deployments.
+
+For v1: per-subdomain + `HttpOnly` `__Host-` cookies. Fallbacks documented
+with their reduced guarantees.
 
 **No CORS allowance for app origins.** The daemon never sends
 `Access-Control-Allow-Origin` allowing any app origin. If an app frontend
