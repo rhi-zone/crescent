@@ -12,7 +12,7 @@ mod.router = function (routes)
 		local route = routes
 		if type(route) == "function" then
 			local input = json_to_value(req.body)
-			res.headers["Content-Type"] = "application/json"
+			res.headers["Content-Type"] = { "application/json" }
 			res.body = value_to_json(route(input))
 			return true
 		end
@@ -34,7 +34,7 @@ mod.router = function (routes)
 				--[[FIXME: apis don't have access to req.globs]]
 				if end_ < #req.path then req.globs.rest = req.path:sub(end_ + 1) end
 				local input = json_to_value(req.body)
-				res.headers["Content-Type"] = "application/json"
+				res.headers["Content-Type"] = { "application/json" }
 				res.body = value_to_json(route(input))
 				return true
 			elseif route == nil then return end
@@ -43,7 +43,7 @@ mod.router = function (routes)
 		if type(route) == "function" then
 			if end_ < #req.path then req.globs.rest = req.path:sub(end_ + 1) end
 			local input = json_to_value(req.body)
-			res.headers["Content-Type"] = "application/json"
+			res.headers["Content-Type"] = { "application/json" }
 			res.body = value_to_json(route(input))
 			return true
 		end

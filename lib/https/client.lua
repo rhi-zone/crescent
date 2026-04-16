@@ -3,8 +3,8 @@ local socket = require("lib.ljsocket")
 local tls = require("lib.tls")
 local format = require("lib.http.format")
 
---:: http_request = { method: string, host: string, port?: number, path: string, headers?: { [string]: string }, body?: string }
---:: http_response = { version: number, status: number, status_text: string, headers: { [string]: string }, body: string }
+--:: http_request = { method: string, host: string, port?: number, path: string, headers?: { [string]: { string } }, body?: string }
+--:: http_response = { version: number, status: number, status_text: string, headers: { [string]: { string } }, body: string }
 
 local M = {}
 

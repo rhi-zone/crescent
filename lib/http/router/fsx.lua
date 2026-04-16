@@ -23,11 +23,12 @@ mod.router = function (path)
 				local contents = file:read("*all")
 				file:close()
 				res.body = contents
-				res.headers["Content-Type"] = mimetype_by_name(req.path)
-				if not res.headers["Content-Type"] then
+				local ct = mimetype_by_name(req.path)
+				if not ct then
 					mimetype_by_contents = mimetype_by_contents or require("lib.mimetype.by_contents").mimetype
-					res.headers["Content-Type"] = mimetype_by_contents(res.body)
+					ct = mimetype_by_contents(res.body)
 				end
+				if ct then res.headers["Content-Type"] = { ct } end
 				return true
 			end
 		else
@@ -42,7 +43,7 @@ mod.router = function (path)
 			file:close()
 			return function (req, res)
 				res.body = contents
-				res.headers["Content-Type"] = content_type
+				if content_type then res.headers["Content-Type"] = { content_type } end
 				return true
 			end
 		end

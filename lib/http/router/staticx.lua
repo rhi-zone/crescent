@@ -80,7 +80,7 @@ mod.router = function (base)
 			--[[probably a directory]]
 			local iter, dir = dir_list(full_path)
 			if dir then
-				res.headers["Content-Type"] = "text/html"
+				res.headers["Content-Type"] = { "text/html" }
 				local parts = {}
 				parts[#parts+1] = [[<!DOCTYPE html><html><head><meta charset="utf-8"><title>Index of ]] .. html_escape(full_path) .. "</title></head><body><table><thead><tr><th>Name</th><th>Size</th><th>Created</th><th>Last modified</th></tr></thead><tbody><h1>Index of " .. html_escape(full_path) .. "</h1><a href=\"..\">[up one level]</a>"
 				for file_info in iter, dir do
@@ -96,11 +96,12 @@ mod.router = function (base)
 			else res.status = 404 end
 			return
 		end
-		res.headers["Content-Type"] = system_specific_mime_type(full_path) or mimetype_by_name(req.path)
-		if not res.headers["Content-Type"] then
+		local ct = system_specific_mime_type(full_path) or mimetype_by_name(req.path)
+		if not ct then
 			mimetype_by_contents = mimetype_by_contents or require("lib.mimetype.by_contents").mimetype
-			res.headers["Content-Type"] = mimetype_by_contents(res.body)
+			ct = mimetype_by_contents(res.body)
 		end
+		if ct then res.headers["Content-Type"] = { ct } end
 	end
 end
 

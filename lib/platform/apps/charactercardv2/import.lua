@@ -18,14 +18,14 @@ local M = {}
 
 local function json_ok(res, data)
 	res.status = 200
-	res.headers["Content-Type"] = "application/json"
+	res.headers["Content-Type"] = { "application/json" }
 	res.body = json.encode(data)
 	return true
 end
 
 local function json_err(res, status, msg)
 	res.status = status
-	res.headers["Content-Type"] = "application/json"
+	res.headers["Content-Type"] = { "application/json" }
 	res.body = json.encode({ error = msg })
 	return true
 end

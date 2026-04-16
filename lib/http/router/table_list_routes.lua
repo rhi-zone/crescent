@@ -36,7 +36,7 @@ mod.list_routes_handler = function (routes, prefix)
 	end
 	--[[@param res http_response]]
 	return function (_, res)
-		res.headers["Content-Type"] = "text/html"
+		res.headers["Content-Type"] = { "text/html" }
 		res.body = html
 	end
 end

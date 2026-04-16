@@ -545,7 +545,7 @@ function Spec:mount(app, handlers)
 							})
 							if not ok then
 								res.status = 400
-								res.headers["Content-Type"] = "application/json"
+								res.headers["Content-Type"] = { "application/json" }
 								res.body = json.encode({ errors = errs })
 								return
 							end

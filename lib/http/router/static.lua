@@ -22,11 +22,12 @@ mod.router = function (base)
 		if res.body == nil then res.status = 404; return end
 		file:close()
 		-- TODO: consider refactoring this out - it's a one liner either way anyway
-		res.headers["Content-Type"] = mimetype_by_name(req.path)
-		if not res.headers["Content-Type"] then
+		local ct = mimetype_by_name(req.path)
+		if not ct then
 			mimetype_by_contents = mimetype_by_contents or require("lib.mimetype.by_contents").mimetype
-			res.headers["Content-Type"] = mimetype_by_contents(res.body)
+			ct = mimetype_by_contents(res.body)
 		end
+		if ct then res.headers["Content-Type"] = { ct } end
 		return true
 	end
 end

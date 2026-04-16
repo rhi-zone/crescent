@@ -17,11 +17,14 @@ require("lib.http.server").server(function (req, res)
 		local _, str = pcall(dofile, path.resolve(base_path, req.path .. ".lua"), "t")
 		if str then
 			res.status = 200
-			res.headers["Content-Type"] = "text/html"
+			res.headers["Content-Type"] = { "text/html" }
 			res.body = str
 			return
 		end
 	end
-	res.headers["Content-Type"] = res.headers["Content-Type"] or ext_mimetype(req.path)
+	if not res.headers["Content-Type"] then
+		local ct = ext_mimetype(req.path)
+		if ct then res.headers["Content-Type"] = { ct } end
+	end
 	--[[@diagnostic disable-next-line: param-type-mismatch]]
 end, tonumber(arg[2] or os.getenv("port") or os.getenv("PORT")))

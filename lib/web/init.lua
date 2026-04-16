@@ -130,7 +130,7 @@ res_mt.__index = res_mt
 
 --: (table, table) -> table
 function res_mt:json(data)
-	self.headers["Content-Type"] = "application/json"
+	self.headers["Content-Type"] = { "application/json" }
 	local ok, encoded = pcall(json.encode, data)
 	if ok then
 		self.body = encoded
@@ -142,7 +142,7 @@ end
 
 --: (table, string) -> table
 function res_mt:html(s)
-	self.headers["Content-Type"] = "text/html"
+	self.headers["Content-Type"] = { "text/html" }
 	self.body = s
 	return self
 end
@@ -156,7 +156,7 @@ end
 --: (table, string, integer?) -> table
 function res_mt:redirect(url, code)
 	self.status = code or 302
-	self.headers["Location"] = url
+	self.headers["Location"] = { url }
 	return self
 end
 
@@ -234,7 +234,7 @@ function App:handle(req)
 
 	local res = setmetatable({
 		status = 200,
-		headers = { ["Content-Type"] = "text/plain" },
+		headers = { ["Content-Type"] = { "text/plain" } },
 		body = "",
 	}, res_mt)
 
@@ -323,12 +323,12 @@ function M.cors(opts)
 	local headers_str = concat(headers_allowed, ", ")
 
 	return function(req, res, next)
-		res.headers["Access-Control-Allow-Origin"] = origin_str
-		res.headers["Access-Control-Allow-Methods"] = methods_str
-		res.headers["Access-Control-Allow-Headers"] = headers_str
+		res.headers["Access-Control-Allow-Origin"] = { origin_str }
+		res.headers["Access-Control-Allow-Methods"] = { methods_str }
+		res.headers["Access-Control-Allow-Headers"] = { headers_str }
 
 		if req.method == "OPTIONS" then
-			res.headers["Access-Control-Max-Age"] = max_age
+			res.headers["Access-Control-Max-Age"] = { max_age }
 			res.status = 204
 			res.body = ""
 			return
@@ -392,7 +392,7 @@ function M.static(url_prefix, dir, read_fn)
 		end
 
 		res.status = 200
-		res.headers["Content-Type"] = content_type_for(file_path)
+		res.headers["Content-Type"] = { content_type_for(file_path) }
 		res.body = contents
 	end
 end
@@ -447,9 +447,7 @@ function M.cookies()
 
 			-- Append to Set-Cookie (can have multiple)
 			if not self.headers["Set-Cookie"] then
-				self.headers["Set-Cookie"] = cookie_str
-			elseif type(self.headers["Set-Cookie"]) == "string" then
-				self.headers["Set-Cookie"] = { self.headers["Set-Cookie"], cookie_str }
+				self.headers["Set-Cookie"] = { cookie_str }
 			else
 				self.headers["Set-Cookie"][#self.headers["Set-Cookie"] + 1] = cookie_str
 			end
