@@ -77,9 +77,13 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   **Carried over from v1 skeleton — address as downstream steps land:**
   - [ ] Replace `math.random` session ID source with a real CSPRNG. Current fallback is
     adequate for local dev only; any routable deployment must inject `random_bytes_fn`.
-  - [ ] Session store is in-memory only: reaping expired sessions, cap on session count,
-    persistence across daemon restart. All deferred until grant UI lands and sessions
-    carry real authority.
+  - [x] Session idle-TTL + sweep-on-mint (15bbee1). Daemon sessions drop after
+    24h of idleness — swept on mint and rejected inline at `/launch` and at
+    top-level dispatch. Same pattern ported to per-app sessions.
+  - [ ] Session store is still in-memory only; no cap on count, no persistence
+    across daemon restart. Idle-TTL bounds steady-state size but a burst of
+    unique operators inside the TTL window can still blow the map up. Deferred
+    until grant UI lands and sessions carry real authority.
   - [ ] Loopback IP allocator grows monotonically and never reclaims. Fine for v1 (you run
     out at 127.255.255.254) but revisit when multi-user / long-lived deployments appear.
   - [ ] `lib/platform/daemon/cli.lua` hand-rolls the HTTP read loop because
@@ -107,10 +111,12 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     tokens are evicted at the next `/launch` hit. Good enough for single-
     operator local daemon; revisit (periodic reaper) only if the map ever
     pressures GC.
-  - [ ] Garbage-collect stale per-app sessions. `app_sessions[<id>][<tok>]`
-    records accumulate forever; no LRU, no expiry. Same sweep-on-access
-    pattern as launch tokens should port cleanly once per-app sessions grow
-    a TTL.
+  - [x] Garbage-collect stale per-app sessions (15bbee1). `app_sessions`
+    buckets now sweep at consume time: entries older than 24h are dropped
+    when a new `__launch` consume mints the next token into the same bucket.
+    Remaining gap: nothing sweeps app buckets for *uninstalled* apps, so a
+    long-tail of launched-once-then-removed apps leaves empty buckets in
+    the top-level map. Trivial fix but punted.
   - [ ] Rate limiting on `/launch` is NOT yet wired. Tracked separately in
     the "Rate limiting" bullet below.
   - [x] `Referrer-Policy: no-referrer` on launch 303 (bd0f1c1) — belt-and-
