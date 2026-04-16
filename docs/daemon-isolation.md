@@ -226,6 +226,13 @@ settles.
 
 ## Non-goals
 
+The items in this section are deliberate omissions, not oversights. Each
+states what we are not doing and why — so that a future reviewer with a
+"shouldn't we also…?" instinct can see that the question was considered and
+answered.
+
+### Explicit non-mitigations within tier 1
+
 - **Memory quota per app.** LuaJIT does not expose a way to cap GC heap per
   env. Approximating it with counters on `table.new` / string concat does
   not stop FFI-level allocation and is a rabbit hole. If memory DoS becomes
@@ -235,6 +242,88 @@ settles.
   not fire on C-level blocking. Concurrent-request handling (coroutine
   yielding on I/O, not on bytecode count) is the right answer — tracked
   under [`daemon-design.md` — Open Question 2](daemon-design.md).
+- **Timing / cache / GC side channels between apps.** Tier 1 shares one Lua
+  state, one GC, one string intern table, one JIT trace cache. In
+  principle two apps can observe each other indirectly (GC pause timing,
+  string intern latency, trace compilation stalls). We accept this because
+  (a) capabilities are coarse — a request-level cap cannot sample at the
+  cycle granularity needed to reconstruct another app's data from timing
+  alone, (b) defeating side channels requires tier 2 at minimum and is
+  not a v1-v3 threat model concern. Revisit if cap surface widens to
+  include anything that returns fine-grained timings (e.g. a `caps.clock`
+  with nanosecond resolution — which we currently don't expose).
+- **FD / table-size / string-length hard limits.** A hostile app can create
+  a multi-gigabyte string or a million-entry table. This falls under
+  memory DoS above; per-object limits would shift the same attack to
+  "create many objects just under the limit," so the tier-1 answer is
+  the same as for memory quota: don't try.
+- **Coroutine hijacking defense.** Apps inside the sandbox can call
+  `coroutine.*` legitimately; nothing in tier 1 stops an app from
+  yielding inside a handler in a way that breaks the daemon's own
+  coroutine scheduling assumptions. Mitigation: the daemon uses its own
+  (step-3) quota coroutine as the outermost scheduler; an app's inner
+  coroutines are invisible to it. Confirming this interaction is part of
+  v3 step 3's benchmark work, not a separate non-goal.
+
+### Trust anchors we are not re-implementing
+
+- **LuaJIT VM and JIT bugs.** We treat LuaJIT as correct: no defense-in-depth
+  against a JIT miscompile that lets an app escape its env. If LuaJIT has a
+  bytecode-verification bug or a JIT type-assumption violation, tier 1's
+  "no `load`/`loadstring`/`string.dump`" rule is the only barrier, and it
+  does not defend against interpreter-level bugs. Mitigation is patching
+  LuaJIT, not re-verifying its output. Accepting this is explicit: tier 2
+  would narrow the blast radius (escape from one state doesn't see others'
+  Lua memory) but not eliminate it (escape still holds the native
+  process).
+- **FFI for first-party apps.** The library and card apps are allowed FFI
+  when they declare it as a cap (risk class: shared). This is not
+  oversight — operator-grantable FFI is by-design for apps we ship; the
+  sandbox is for apps installed from elsewhere. If first-party code is
+  compromised, the threat model has bigger problems than FFI scope.
+- **Operating system hardening.** Seccomp, Landlock, pledge, AppArmor,
+  unveil — none are wired. The daemon trusts the host OS. An operator
+  running the daemon inside a container / VM / user namespace is welcome
+  to add these layers externally. Bundling them inside the daemon makes
+  the vendorable-pure-Lua story fall apart.
+
+### Security properties we don't offer (and what covers them instead)
+
+- **Rate limiting on `/launch` and auth endpoints in v1.** Launch tokens
+  require a valid `__Host-session` cookie to mint, are one-shot, and
+  expire in five minutes; a brute-force path already needs the session
+  cookie, which is a much stronger authority than "can hit the endpoint."
+  Rate limiting becomes necessary when grant-endpoint POSTs land (a
+  failed grant submission is cheap for the attacker to retry), not at
+  launch-flow v2. Tracked in `TODO.md` under the platform daemon track;
+  not added to the v3 build order because it does not improve isolation,
+  only DoS resistance.
+- **ACME / automated TLS certificate management.** The daemon loads certs
+  from disk when binding to a routable interface; it does not fetch or
+  renew them. Reasons: (a) adds a runtime network dependency and a new
+  credential surface, (b) operators who bind to Tailscale or similar
+  already have TLS terminated upstream, (c) local-loopback deployments
+  don't need TLS at all. Operator-provided cert on disk is the minimum
+  that works for all three; automation is strictly additive and can be
+  layered on without changing the daemon.
+- **Per-app port instead of per-app subdomain.** Rejected — cookies ignore
+  port per RFC 6265, so `127.0.0.1:7001` and `127.0.0.1:7002` share a
+  cookie jar and the app-session cookie leaks across apps. The full
+  argument is in
+  [`daemon-design.md` — "Per-app port is NOT a valid fallback"](daemon-design.md).
+  Cross-referenced here so a reader inside the isolation doc does not
+  reinvent the idea.
+- **Fork-per-app (tier 3).** Single-process is a design commitment, not a
+  shortcut. Fork adds (a) process-lifecycle complexity (reap, restart,
+  crash telemetry), (b) an IPC boundary on every cap call (serialization
+  cost on the hottest path), (c) OS-specific fragility (Linux / macOS /
+  Windows fork semantics differ). Revisit only if both (i) tier 2's
+  separate-`lua_State` model is built and demonstrated insufficient, and
+  (ii) an incident class appears that OS-level isolation would have
+  caught. Neither condition exists today.
+
+### Out of scope for this doc
+
 - **Concealing an app's own `app_id` or data-directory path.** The app is
   allowed to know which app it is; the isolation boundary is that it
   cannot reach any other app's storage or authority, not that it is
