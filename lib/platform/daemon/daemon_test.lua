@@ -300,17 +300,20 @@ local function with_document_fetch_dest(req)
 end
 
 T.describe("/launch/:id", function()
-	T.it("returns 401 without a session cookie", function()
+	T.it("returns 401 without a session cookie AND does not mint one", function()
+		-- /launch/* opts out of auto-mint. Direct address-bar paste must fail
+		-- cleanly rather than set a cookie that makes the next retry work.
 		local idx, db = make_index_db()
 		local d = make_daemon({ index_db = db })
 		local req = with_document_fetch_dest(make_req("GET", "/launch/1", "localhost:7777"))
 		local res = make_res()
 		d.handle(req, res)
 		T.eq(res.status, 401)
+		T.eq(res.headers["Set-Cookie"], nil, "401 on /launch must not carry Set-Cookie")
 		idx:close()
 	end)
 
-	T.it("returns 401 when the presented cookie is unknown", function()
+	T.it("returns 401 when the presented cookie is unknown AND does not re-mint", function()
 		local idx, db = make_index_db()
 		local d = make_daemon({ index_db = db })
 		local req = with_document_fetch_dest(
@@ -318,6 +321,7 @@ T.describe("/launch/:id", function()
 		local res = make_res()
 		d.handle(req, res)
 		T.eq(res.status, 401)
+		T.eq(res.headers["Set-Cookie"], nil, "401 on /launch must not carry Set-Cookie")
 		idx:close()
 	end)
 

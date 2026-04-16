@@ -488,17 +488,23 @@ function M.make(opts)
 	-- Daemon-origin request: session middleware + path router + library fallback.
 	--: (http_req, http_res) -> nil
 	local function handle_daemon(req, res)
-		-- Session: look up existing, mint on miss. Returned cookie is set
-		-- only on mint. No CSRF token yet (grant UI not built; TODO.md).
+		-- Session: look up existing, mint on miss EXCEPT on /launch/* — that path
+		-- requires prior authority (came-from-library), so a missing/invalid
+		-- session must fail cleanly with 401 rather than auto-minting. The
+		-- canonical flow reaches /launch with a cookie already set by the
+		-- operator's previous visit to the library. Direct address-bar paste of
+		-- /launch/<id> is not a supported entry point.
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		local sid --: string
+		local path = req.path or "/"
+		local is_launch_path = path:sub(1, 8) == "/launch/"
+		local sid --: string | nil
 		local minted = false
 		if presented and sessions[presented] then
 			sid = presented
 			local rec = sessions[sid]
 			if rec then rec.last_seen = time_fn() end
-		else
+		elseif not is_launch_path then
 			sid = mint_session()
 			minted = true
 		end
@@ -522,7 +528,7 @@ function M.make(opts)
 
 		-- Attach the Set-Cookie on mint ONLY. If the session already existed,
 		-- we don't re-issue the cookie — the browser already has it.
-		if minted then
+		if minted and sid then
 			local cookie = build_session_cookie(sid)
 			local existing = res.headers["Set-Cookie"]
 			if type(existing) == "table" then
