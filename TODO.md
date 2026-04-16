@@ -108,22 +108,25 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   navigate to `/launch/<id>`. 15 new test assertions (83 total in daemon_test).
 
   **Carry-overs from launch flow — address as downstream steps land:**
-  - [ ] Garbage-collect stale launch tokens. Current v1 keeps expired tokens in
-    the map indefinitely; `consume_launch_if_present` rejects them on use but
-    does not sweep. Add a periodic reaper (or sweep-on-mint) once session
-    reaping lands — same deadline.
+  - [x] Launch-token reaping — sweep-on-mint implemented (bd0f1c1). Expired
+    tokens are evicted at the next `/launch` hit. Good enough for single-
+    operator local daemon; revisit (periodic reaper) only if the map ever
+    pressures GC.
   - [ ] Garbage-collect stale per-app sessions. `app_sessions[<id>][<tok>]`
-    records accumulate forever; no LRU, no expiry. Deferred with the daemon
-    session reaper.
+    records accumulate forever; no LRU, no expiry. Same sweep-on-access
+    pattern as launch tokens should port cleanly once per-app sessions grow
+    a TTL.
   - [ ] Rate limiting on `/launch` is NOT yet wired. Tracked separately in
     the "Rate limiting" bullet below.
-  - [ ] Launch tokens are URL-bearer (not session-bound on consume). The
-    daemon session cookie is scoped to daemon origin and does NOT cross to
-    the app subdomain, so the consume handler literally cannot verify the
-    caller is the session that minted the token. Mitigated by 5-min expiry,
-    one-shot consume, clean-URL 303. Consider `Referrer-Policy: no-referrer`
-    on the launch redirect as belt-and-suspenders to reduce token leak via
-    referer header if an app ever embeds external resources on first paint.
+  - [x] `Referrer-Policy: no-referrer` on launch 303 (bd0f1c1) — belt-and-
+    suspenders against token leak via Referer if an app's first paint
+    fetches third-party resources. Remaining risk note: launch tokens are
+    still URL-bearer (not session-bound on consume) — mitigated by 5-min
+    expiry + one-shot consume + clean-URL 303 but not *eliminated*. The
+    consume handler literally cannot verify the caller is the session that
+    minted the token because the daemon session cookie does not cross
+    origins; a true session-binding fix needs a different architecture
+    (signed token with session-id payload, or a daemon→app_origin bridge).
 - [x] **Per-app VM host** — per-app env built from `lib/sandbox/` + `platform.make_caps()`,
   served by daemon's Host-based app dispatch. Implemented in
   `lib/platform/daemon/app_loader.lua` + wired via `daemon.make({ app_loader = ... })`.
@@ -155,10 +158,11 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     Fine for v1 (small N, long-lived daemon), but a long-running multi-user
     daemon will want LRU + time-based eviction, especially once apps mutate
     during development.
-  - [ ] Error cache (`app_load_errors`) is sticky — a transient `load_app`
-    failure becomes permanent for the daemon's lifetime. Consider clearing on
-    index-DB change notifications (once those exist) or on explicit admin
-    retry.
+  - [x] Error cache TTL — `app_load_errors` now stores `{ err, retry_at }`
+    (bd0f1c1). 5s window; a transient `load_app` failure self-heals on the
+    next request past TTL. Not yet hooked to an explicit admin retry or
+    index-DB change notification; revisit once index mutations have a
+    callback surface.
   - [ ] `app_loader` currently auto-grants every declared cap
     (`_auto_grants`). Real grant policy lives with the grant UI item below;
     this is a placeholder until then. **Security note:** do not ship a
