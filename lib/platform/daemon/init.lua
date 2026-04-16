@@ -35,12 +35,17 @@ local M = {}
 --::   index_db: unknown,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
 --::   secure_cookie: boolean | nil,
+--::   prefer_loopback: boolean | nil,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer }
+--:: launch_token_record = { app_id: string, session_id: string, expires_at: integer }
+--:: app_session_record = { app_id: string, created_at: integer, last_seen: integer }
 --:: daemon = {
 --::   handle: (http_req, http_res) -> nil,
 --::   register_app: (string) -> string,
 --::   sessions: { [string]: session_record },
+--::   launch_tokens: { [string]: launch_token_record },
+--::   app_sessions: { [string]: { [string]: app_session_record } },
 --::   loopback_id_to_ip: { [string]: string },
 --::   loopback_ip_to_id: { [string]: string },
 --::   _host: string,
@@ -201,6 +206,8 @@ function M.make(opts)
 		end
 
 	-- Daemon-origin router. Reserved prefixes: /grant/*, /auth/* (future).
+	-- /launch/:id is registered inside `make` (below) once all closure state
+	-- is in scope.
 	local r = router.new()
 	r:get("/healthz",
 		--: (http_req, http_res) -> nil
@@ -212,6 +219,20 @@ function M.make(opts)
 
 	-- Session store: in-memory only for v1. { [sid] = { created_at, last_seen } }.
 	local sessions = {} --: { [string]: session_record }
+
+	-- Launch-token map: { [hex_token] = { app_id, session_id, expires_at } }.
+	-- One-shot: consumed (deleted) on first redemption. 5-min expiry.
+	-- v1 does not garbage-collect stale entries (next bring-up step). If/when
+	-- this starts to bloat, sweep at mint-time or add a dedicated reaper.
+	-- TODO.md: "Launch flow — token reaping".
+	local launch_tokens = {} --: { [string]: launch_token_record }
+
+	-- Per-app session store, keyed by app_id then session token.
+	-- { [app_id] = { [token] = { app_id, created_at, last_seen } } }.
+	-- Separate from `sessions` because the two cookies authorize different
+	-- surfaces and must not be interchangeable. See docs/daemon-design.md
+	-- "Per-app subdomain (canonical)".
+	local app_sessions = {} --: { [string]: { [string]: app_session_record } }
 
 	-- Loopback mapping: app_id <-> 127.0.0.<n>. <n> starts at 2 (127.0.0.1 is
 	-- the daemon). Grows monotonically; v1 does not reclaim.
@@ -240,6 +261,41 @@ function M.make(opts)
 		return sid
 	end
 
+	-- App-index lookup: does this app_id exist in the index DB?
+	-- We query the raw SQLite handle (not the wrapped index object) — the
+	-- daemon accepts an unwrapped handle per the skeleton convention.
+	-- `any` here is the same escape hatch justified at `index_db = opts.index_db`
+	-- (mixed handle/nil/stub callsite).
+	--: (string) -> boolean
+	local function app_exists(app_id)
+		if not index_db then return false end
+		local db = index_db --: any
+		local ok, iter = pcall(db.query, db, "SELECT 1 FROM apps WHERE id = ? LIMIT 1", app_id)
+		if not ok or not iter then return false end
+		local row = iter()
+		return row ~= nil
+	end
+
+	-- Parse a URL query string into a flat { [key] = value } map. Last value wins
+	-- on duplicate keys. Keys and values are NOT percent-decoded here — launch
+	-- tokens are pure hex and don't need it, and decoding adds a typechecker
+	-- headache (multi-return string.gsub interacts badly with the solver). The
+	-- grant flow and future query-string consumers that need decoding should
+	-- reach for `lib.url.decode` instead.
+	--: (string | nil) -> { [string]: string }
+	local function parse_query_string(qs)
+		local out = {} --: { [string]: string }
+		if not qs or qs == "" then return out end
+		for kv in qs:gmatch("[^&]+") do
+			local k, v = kv:match("^([^=]+)=?(.*)")
+			if type(k) == "string" and type(v) == "string" then
+				out[k] = v
+			end
+		end
+		return out
+	end
+	M._parse_query_string = parse_query_string
+
 	-- Build the Set-Cookie value for __Host-session=<sid>. Skip `Secure` when
 	-- the listener binds to loopback without TLS — browsers reject `Secure`
 	-- cookies sent over plain http://, so `__Host-` + `Secure` would prevent
@@ -256,6 +312,194 @@ function M.make(opts)
 			return "__Host-session=" .. sid .. "; HttpOnly; Secure; SameSite=Strict; Path=/"
 		end
 		return "__Host-session=" .. sid .. "; HttpOnly; SameSite=Strict; Path=/"
+	end
+
+	-- App-origin session cookie. Different name from the daemon-origin cookie
+	-- so browsers (and humans reading headers) can never confuse the two —
+	-- they authorize different surfaces (daemon admin vs the running app).
+	-- Scoped to the app origin: the cookie is set in a response from the
+	-- app origin, so the browser pins it there.
+	--: (string, string) -> string
+	local function build_app_session_cookie(app_id, token)
+		local name = "__Host-app-session-" .. app_id
+		if opts.secure_cookie then
+			return name .. "=" .. token .. "; HttpOnly; Secure; SameSite=Strict; Path=/"
+		end
+		return name .. "=" .. token .. "; HttpOnly; SameSite=Strict; Path=/"
+	end
+
+	-- Compute the launch target origin URL for app <id>. Subdomain form is
+	-- canonical (`app-<id>.<daemon-host>`); loopback-IP form (`127.0.0.<n>`)
+	-- is the fallback for environments without wildcard DNS. Caller selects
+	-- via `opts.prefer_loopback`; when true we also register the app's IP
+	-- so `classify_host` will route future requests to that app.
+	--: (string) -> string
+	local function launch_origin_url(app_id)
+		if opts.prefer_loopback then
+			local ip = register_app(app_id)
+			-- Preserve the daemon's port part (if any) when building the URL.
+			local port = host:match(":(%d+)$")
+			if port then
+				return "http://" .. ip .. ":" .. port
+			end
+			return "http://" .. ip
+		end
+		return "http://app-" .. app_id .. "." .. host
+	end
+	M._launch_origin_url = launch_origin_url
+
+	-- POST a plain-text response.
+	--: (http_res, integer, string) -> nil
+	local function plain(res, status, body)
+		res.status = status
+		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		res.body = body
+	end
+
+	-- /launch/:id — mint a one-shot launch token bound to the current session
+	-- and 303-redirect to the app origin with `?__launch=<hex>`. The browser
+	-- follows the redirect; the app-origin branch below consumes the token
+	-- and issues the per-app session cookie.
+	--
+	-- Security:
+	--   - Requires an EXISTING session cookie. Missing/unknown → 401, NO new
+	--     session minted (the skeleton would normally auto-mint here; the
+	--     launch path opts out because "can navigate to /launch" is stronger
+	--     authority than "has any cookie at all").
+	--   - Sec-Fetch-Dest must be `document` — this is a top-level navigation,
+	--     not a fetch/image/script. Anything else → 400. Cheap layered defense
+	--     on top of SameSite=Strict.
+	--   - Why GET + session cookie is sufficient (no CSRF token needed):
+	--     SameSite=Strict on the daemon session cookie means cross-site
+	--     navigations do not carry it, so a third-party page's
+	--     `<a href>`/`<img src>`/etc. arriving here will have no cookie →
+	--     401, not a redirect. See docs/daemon-design.md.
+	--   - TODO: rate limiting on /launch (tracked in TODO.md as "Rate limiting"
+	--     under the platform daemon track).
+	--
+	-- Error cases:
+	--   401 no / invalid session       400 wrong Sec-Fetch-Dest
+	--   404 app id not in index        500 shouldn't reach (empty :id slot)
+	--: (http_req, http_res) -> nil
+	r:get("/launch/:id", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		if not presented or not sessions[presented] then
+			plain(res, 401, "unauthorized")
+			return
+		end
+
+		local sfd_arr = req_headers["sec-fetch-dest"]
+		local sfd = sfd_arr and sfd_arr[1]
+		-- Accept a missing Sec-Fetch-Dest (old browsers, curl) to avoid
+		-- breaking non-browser smoke tests. When present, it must be `document`.
+		if sfd and sfd ~= "document" then
+			plain(res, 400, "launch requires top-level navigation")
+			return
+		end
+
+		local app_id = (req.path or ""):match("^/launch/(.+)$")
+		if not app_id or app_id == "" then
+			plain(res, 404, "app not found")
+			return
+		end
+
+		if not app_exists(app_id) then
+			plain(res, 404, "app not found")
+			return
+		end
+
+		-- Mint: 16 random bytes → 32 hex chars. Collisions are vanishingly
+		-- unlikely at the 5-minute expiry window, but we still guard with a
+		-- bounded retry loop in case a mock RNG (tests) produces duplicates.
+		local token --: string
+		for _ = 1, 8 do
+			local candidate = bytes_to_hex(random_bytes_fn(16))
+			if not launch_tokens[candidate] then
+				token = candidate
+				break
+			end
+		end
+		if not token then
+			plain(res, 500, "launch token mint failed")
+			return
+		end
+
+		local now = time_fn()
+		launch_tokens[token] = {
+			app_id = app_id,
+			session_id = presented,
+			expires_at = now + 300, -- 5 minutes
+		}
+
+		local origin = launch_origin_url(app_id)
+		res.status = 303
+		res.headers["Location"] = { origin .. "/?__launch=" .. token }
+		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		res.body = ""
+	end)
+
+	-- App-origin: consume a presented `?__launch=<hex>` token, issue the
+	-- per-app session cookie, and clean-URL-redirect to "/". If the request
+	-- already carries the per-app session cookie AND has no __launch, fall
+	-- through to the (stub) app handler.
+	--: (http_req, http_res, string) -> boolean
+	local function consume_launch_if_present(req, res, app_id)
+		local path = req.path or "/"
+		local qs_from_path = path:match("%?(.+)$")
+		local qs = req.query or qs_from_path
+		local params = parse_query_string(qs)
+		local token = params["__launch"]
+		if not token then return false end
+
+		local rec = launch_tokens[token]
+		-- Consume even on failure — one-shot policy. If the token existed but
+		-- was stale/wrong-app, burning it prevents a racing replay from the
+		-- same operator re-submitting after a time jump.
+		-- `rawset` sidesteps the typechecker's "cannot assign nil" on a
+		-- map-of-record; Lua's delete-via-nil-assignment is a runtime idiom
+		-- that the static type system deliberately rejects.
+		if rec then rawset(launch_tokens, token, nil) end
+
+		if not rec then
+			plain(res, 403, "launch token invalid or expired")
+			return true
+		end
+		if rec.app_id ~= app_id then
+			plain(res, 403, "launch token invalid or expired")
+			return true
+		end
+		local now = time_fn()
+		if now >= rec.expires_at then
+			plain(res, 403, "launch token invalid or expired")
+			return true
+		end
+
+		-- Mint an app-session token. Same 16-byte hex shape as the daemon
+		-- session; different store + different cookie name, different origin.
+		local app_tok = bytes_to_hex(random_bytes_fn(16))
+		local bucket = app_sessions[app_id]
+		if not bucket then
+			bucket = {} --: { [string]: app_session_record }
+			app_sessions[app_id] = bucket
+		end
+		bucket[app_tok] = { app_id = app_id, created_at = now, last_seen = now }
+
+		local cookie = build_app_session_cookie(app_id, app_tok)
+		local existing = res.headers["Set-Cookie"]
+		if type(existing) == "table" then
+			existing[#existing + 1] = cookie
+		else
+			res.headers["Set-Cookie"] = { cookie }
+		end
+
+		-- Clean URL: drop the ?__launch query param. 303 See Other sends the
+		-- browser back to the same origin at "/" with a GET, no query string.
+		res.status = 303
+		res.headers["Location"] = { "/" }
+		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		res.body = ""
+		return true
 	end
 
 	-- Daemon-origin request: session middleware + path router + library fallback.
@@ -322,7 +566,13 @@ function M.make(opts)
 			-- IMPORTANT: App-origin responses do NOT set or require the
 			-- __Host-session cookie. Apps get their own session story later.
 			-- See docs/daemon-design.md "Per-app subdomain (canonical)".
-			app_handler(req, res, classified.id or "")
+			local app_id = classified.id or ""
+			-- Launch-token redemption: presented `?__launch=<hex>` is always
+			-- handled before the stub app handler sees the request. On valid
+			-- redemption, we 303 to "/"; on any failure, we 403. The app
+			-- handler is invoked only when no `__launch` param is present.
+			if consume_launch_if_present(req, res, app_id) then return end
+			app_handler(req, res, app_id)
 			return
 		end
 		-- Unknown host.
@@ -335,6 +585,8 @@ function M.make(opts)
 		handle = handle,
 		register_app = register_app,
 		sessions = sessions,
+		launch_tokens = launch_tokens,
+		app_sessions = app_sessions,
 		loopback_id_to_ip = loopback_id_to_ip,
 		loopback_ip_to_id = loopback_ip_to_id,
 		_host = host,

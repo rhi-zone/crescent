@@ -276,6 +276,251 @@ end)
 
 -- ── Cookie parser ─────────────────────────────────────────────────────────
 
+-- ── Launch flow ────────────────────────────────────────────────────────────
+-- /launch/:id mints a one-shot token, 303-redirects to the app origin. The
+-- app origin consumes the token in its ?__launch query and sets a per-app
+-- session cookie scoped to that origin. See docs/daemon-design.md.
+
+-- Helper: do a request that primes a daemon session cookie, then return that
+-- sid so the launch-flow tests can present it.
+local function prime_session(d)
+	local req = make_req("GET", "/healthz", "localhost:7777")
+	local res = make_res()
+	d.handle(req, res)
+	local sc = res.headers["Set-Cookie"]
+	if not sc then return nil end
+	return sc[1]:match("__Host%-session=([^;]+)")
+end
+
+-- Helper: add Sec-Fetch-Dest: document to a request. Emulates real browser
+-- top-level navigation so /launch accepts it.
+local function with_document_fetch_dest(req)
+	req.headers["sec-fetch-dest"] = { "document" }
+	return req
+end
+
+T.describe("/launch/:id", function()
+	T.it("returns 401 without a session cookie", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local req = with_document_fetch_dest(make_req("GET", "/launch/1", "localhost:7777"))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+		idx:close()
+	end)
+
+	T.it("returns 401 when the presented cookie is unknown", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=deadbeef"))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+		idx:close()
+	end)
+
+	T.it("returns 404 for an unknown app id with a valid session", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/9999", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+		idx:close()
+	end)
+
+	T.it("rejects non-document Sec-Fetch-Dest with 400", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local req = make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid)
+		req.headers["sec-fetch-dest"] = { "image" }
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 400)
+		idx:close()
+	end)
+
+	T.it("303-redirects to app origin on valid session + existing app id", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 303)
+		local loc_arr = res.headers["Location"]
+		T.ok(loc_arr, "expected Location header")
+		local loc = loc_arr[1]
+		T.ok(loc:find("^http://app%-1%.localhost:7777/"), "expected subdomain origin: " .. loc)
+		local tok = loc:match("%?__launch=([%x]+)$")
+		T.ok(tok and #tok == 32, "expected 32-hex launch token in query: " .. tostring(loc))
+		-- Token is in the launch_tokens map bound to the session.
+		local rec = d.launch_tokens[tok]
+		T.ok(rec, "launch_tokens[tok] must exist")
+		T.eq(rec.app_id, "1")
+		T.eq(rec.session_id, sid)
+		idx:close()
+	end)
+
+	T.it("emits loopback origin when prefer_loopback=true", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db, prefer_loopback = true })
+		local sid = prime_session(d)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 303)
+		local loc = res.headers["Location"][1]
+		T.ok(loc:find("^http://127%.0%.0%.%d+:7777/"), "expected loopback origin: " .. loc)
+		-- register_app was called — id "1" is now in the loopback tables.
+		T.ok(d.loopback_id_to_ip["1"], "expected app id mapped to a loopback IP")
+		idx:close()
+	end)
+end)
+
+T.describe("launch-token redemption on app origin", function()
+	T.it("consumes a valid token and 303s to / with a per-app session cookie", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+
+		-- Mint a token via /launch.
+		local lreq = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local lres = make_res()
+		d.handle(lreq, lres)
+		local tok = lres.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		T.ok(tok, "expected token from redirect")
+
+		-- Follow the redirect: app origin request with ?__launch=<tok>.
+		-- Requests arrive with req.query set (see lib/http/format); our parser
+		-- also tolerates the query embedded in req.path.
+		local areq = make_req("GET", "/", "app-1.localhost:7777")
+		areq.query = "__launch=" .. tok
+		local ares = make_res()
+		d.handle(areq, ares)
+
+		T.eq(ares.status, 303)
+		T.eq(ares.headers["Location"][1], "/")
+		local sc = ares.headers["Set-Cookie"]
+		T.ok(sc, "expected Set-Cookie on consume")
+		local app_cookie = sc[1]
+		T.ok(app_cookie:find("^__Host%-app%-session%-1="), "expected per-app cookie: " .. app_cookie)
+		T.ok(app_cookie:find("HttpOnly", 1, true), "expected HttpOnly")
+		T.ok(app_cookie:find("SameSite=Strict", 1, true), "expected SameSite=Strict")
+		T.ok(app_cookie:find("Path=/", 1, true), "expected Path=/")
+
+		-- Token is consumed (deleted) after first use.
+		T.eq(d.launch_tokens[tok], nil, "token must be deleted after consume")
+
+		-- Second use of the same token must 403.
+		local areq2 = make_req("GET", "/", "app-1.localhost:7777")
+		areq2.query = "__launch=" .. tok
+		local ares2 = make_res()
+		d.handle(areq2, ares2)
+		T.eq(ares2.status, 403)
+
+		idx:close()
+	end)
+
+	T.it("returns 403 for an expired token (clock injected)", function()
+		local idx, db = make_index_db()
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({ index_db = db, time_fn = tfn })
+		local sid = prime_session(d)
+
+		-- Mint a token; note expires_at is now+300.
+		local lreq = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local lres = make_res()
+		d.handle(lreq, lres)
+		local tok = lres.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		T.ok(tok, "expected token")
+
+		-- Jump the clock past expiry. Each time_fn() call bumps +1, so bump
+		-- the baseline past the 5-minute window.
+		tref.now = tref.now + 400
+
+		local areq = make_req("GET", "/", "app-1.localhost:7777")
+		areq.query = "__launch=" .. tok
+		local ares = make_res()
+		d.handle(areq, ares)
+		T.eq(ares.status, 403)
+		-- Expired tokens are still consumed — one-shot.
+		T.eq(d.launch_tokens[tok], nil, "expired token must be consumed")
+
+		idx:close()
+	end)
+
+	T.it("falls through to the stub app handler with no __launch", function()
+		local d = make_daemon()
+		-- No __launch param, no per-app cookie — goes straight to the stub.
+		local req = make_req("GET", "/", "app-alice.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.ok(res.body:find("alice"), "expected stub to run")
+	end)
+
+	T.it("returns 403 when token is for a different app", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+
+		-- Mint for app 1.
+		local lreq = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local lres = make_res()
+		d.handle(lreq, lres)
+		local tok = lres.headers["Location"][1]:match("%?__launch=([%x]+)$")
+
+		-- Redeem against app "other" — must 403.
+		local areq = make_req("GET", "/", "app-other.localhost:7777")
+		areq.query = "__launch=" .. tok
+		local ares = make_res()
+		d.handle(areq, ares)
+		T.eq(ares.status, 403)
+		-- Even a cross-app attempt consumes the token (prevents replay).
+		T.eq(d.launch_tokens[tok], nil)
+
+		idx:close()
+	end)
+
+	T.it("mints distinct tokens across concurrent launches", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+
+		local function mint()
+			local req = with_document_fetch_dest(
+				make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+			local res = make_res()
+			d.handle(req, res)
+			return res.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		end
+
+		local t1 = mint()
+		local t2 = mint()
+		local t3 = mint()
+		T.neq(t1, t2)
+		T.neq(t2, t3)
+		T.neq(t1, t3)
+		-- All three live in the launch_tokens map until consumed.
+		T.ok(d.launch_tokens[t1])
+		T.ok(d.launch_tokens[t2])
+		T.ok(d.launch_tokens[t3])
+
+		idx:close()
+	end)
+end)
+
 T.describe("_get_cookie", function()
 	T.it("parses a single cookie", function()
 		T.eq(daemon._get_cookie({ cookie = { "a=1" } }, "a"), "1")

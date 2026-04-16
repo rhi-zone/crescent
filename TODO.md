@@ -98,9 +98,28 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   callers to arrays, or restore the `type(values) == "table"` dual-path branch in
   `serialize_response` (matching `string | string[]` typedef). Per CLAUDE.md "no gradual
   migrations" — the `f3e01b9` partial migration is itself the bug.
-- [ ] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
+- [x] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
   launch token, 303-redirects to app origin. Token session-bound, 5-min expiry,
-  consumed on first use.
+  consumed on first use. Implemented in `lib/platform/daemon/init.lua`:
+  `GET /launch/:id` on daemon origin + `?__launch=<hex>` consume on app origin,
+  per-app cookie `__Host-app-session-<id>`. Library UI updated to top-level
+  navigate to `/launch/<id>`. 15 new test assertions (83 total in daemon_test).
+
+  **Carry-overs from launch flow — address as downstream steps land:**
+  - [ ] Garbage-collect stale launch tokens. Current v1 keeps expired tokens in
+    the map indefinitely; `consume_launch_if_present` rejects them on use but
+    does not sweep. Add a periodic reaper (or sweep-on-mint) once session
+    reaping lands — same deadline.
+  - [ ] Garbage-collect stale per-app sessions. `app_sessions[<id>][<tok>]`
+    records accumulate forever; no LRU, no expiry. Deferred with the daemon
+    session reaper.
+  - [ ] `parse_query_string` in daemon/init.lua does NOT percent-decode (the
+    launch token is pure hex, so decoding was typechecker-hostile for no
+    benefit). When grant/auth flows land, swap for `lib.url.decode` or a
+    typecheck-clean equivalent that handles the full encoding. The launch
+    path is safe today precisely because the token charset is `[0-9a-f]`.
+  - [ ] Rate limiting on `/launch` is NOT yet wired. Tracked separately in
+    the "Rate limiting" bullet below.
 - [ ] **Per-app VM host** — spawn/reuse LuaJIT state per app, env-based sandbox (no `_G`,
   `debug`, FFI, bytecode loader, raw `require`; per-app `package.loaded`; frozen
   metatables). Backend caps (`caps.llm`, `caps.kv`, `caps.db`, …) resolve through RPC

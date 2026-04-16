@@ -82,7 +82,11 @@ function renderApps(apps) {
   apps.forEach(function(app) {
     const card = document.createElement("div");
     card.className = "card";
-    card.onclick = function() { if (app.path) window.open(app.path, "_blank"); };
+    // Top-level navigation to the daemon's /launch/<id>. The daemon mints a
+    // launch token bound to the operator session and 303-redirects to the
+    // app origin. window.open(app.path) is wrong in the daemon model — paths
+    // only resolve under an app origin after a launch-token handshake.
+    card.onclick = function() { if (app.id) window.location.href = "/launch/" + encodeURIComponent(app.id); };
 
     const name = document.createElement("div");
     name.className = "card-name";

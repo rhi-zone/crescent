@@ -1429,3 +1429,68 @@ when that step lands.
 - **Reserved daemon-origin routes.** `/healthz` exists. `/grant/*` and
   `/auth/*` are mentioned in the router design but not registered — step 2+
   of the bring-up track lands them.
+
+## v2 launch-flow notes
+
+Decisions settled while implementing the "Launch flow" bullet in TODO.md's
+platform daemon track. The `POST /api/daemon/launch` JSON endpoint sketched
+further up this doc ("Step 1: Launch request") is the *full* grant-flow
+entry-point — it returns either `{ url }` or `{ redirect: "/grant/…" }` based
+on whether any caps are undecided. The v2 implementation is a strict subset:
+no caps, no grant UI, no manifest merging — just token plumbing. When the
+grant UI lands, `POST /api/daemon/launch` becomes the JSON wrapper *over*
+the same mint-token-bound-to-session primitive; `GET /launch/:id` is the
+fallback path that ships in the absence of JS on the library page.
+
+- **`GET /launch/:id`, not `POST /api/daemon/launch`.** The library app
+  frontend uses top-level navigation, not fetch. Why: the redirect has to
+  change the browser's URL bar (so the operator sees the app's origin), and
+  XHR-initiated 303s do not. The endpoint still respects `Sec-Fetch-Dest`
+  (must be `document`) as layered defense — a non-document request would
+  indicate a confused caller, not a legitimate operator navigation.
+- **GET + session cookie is sufficient; no CSRF token.** `SameSite=Strict`
+  on `__Host-session` means cross-site navigations (`<a href>`, `<img src>`,
+  `<link rel=prefetch>`, top-level window.open from another origin, etc.)
+  drop the cookie. A third-party page linking to `/launch/<id>` therefore
+  arrives with no session → 401. The grant submission (step 4) will need
+  CSRF because it's a state-changing POST and because its response commits
+  caps; `/launch/:id` only mints a short-lived token bound to the session,
+  which is a narrower authority.
+- **Auto-mint is suppressed on `/launch/:id`.** The session middleware in
+  the daemon-origin pipeline normally mints a fresh session on cookie miss.
+  The launch handler explicitly requires a *pre-existing* session — it
+  inspects the Cookie header itself and returns 401 when absent/unknown,
+  without preventing the middleware's mint. The middleware still sets a
+  `Set-Cookie` on that 401, so a second attempt from the same browser would
+  succeed; but no single request ever "mints and launches in one hop".
+- **Token format.** 16 random bytes → 32 lowercase hex chars. Stored server-
+  side in a plain Lua table keyed by token. One-shot: consumed (deleted)
+  on first use, regardless of whether redemption succeeded — a stale or
+  wrong-app token burns on contact. 5-minute expiry. No persistence across
+  daemon restart (the grant UI's token map will have the same property).
+- **Two session cookies, not one.** `__Host-session` authorizes the daemon
+  admin surface; `__Host-app-session-<id>` authorizes the running app at
+  its own origin. They are different names, different stores, and scoped
+  to different origins. The daemon mints both — the daemon IS the origin
+  for both subdomains (or loopback IPs) — but a compromised app session
+  cookie cannot be replayed as a daemon session and vice versa.
+- **Loopback origin form is opt-in via `prefer_loopback`.** Default is the
+  subdomain form (`app-<id>.<daemon-host>`), which is canonical per
+  "Per-app subdomain". Environments without wildcard DNS set
+  `prefer_loopback = true`, which uses the existing `register_app(id)`
+  loopback-IP allocator and builds `http://127.0.0.<n>:<port>/` URLs. The
+  browser pins the per-app cookie to that IP — 127.0.0.1 and 127.0.0.5 are
+  distinct cookie hosts, so the isolation is real even without DNS.
+- **Clean URL on consume.** After the app origin consumes `?__launch=<tok>`,
+  it 303-redirects to `/` (same origin) and sets the per-app session
+  cookie. The browser URL bar ends up showing `http://app-<id>.…/` with
+  no query string, so the token never lands in browser history, referrers,
+  or copy-paste. The per-app cookie now carries authority for subsequent
+  requests on that origin; the token is gone.
+- **No query-string percent-decoding in `parse_query_string`.** The only
+  parameter the daemon reads today is `__launch`, whose charset is hex —
+  no encoding is needed. The current typechecker has solver-level issues
+  with chained `:gsub()` returning `(string, integer)`; adding decoding
+  only to immediately fight the checker is negative value. When the grant
+  POST lands and we start reading `csrf`, `allow[]`, etc., swap for a
+  typecheck-clean URL decoder (likely `lib.url`).
