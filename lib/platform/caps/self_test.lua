@@ -116,6 +116,18 @@ T.describe("caps.self", function()
 		T.eq(cap.entry("absent.lua"), nil)
 	end)
 
+	T.it("app_id is exposed as a field when opts.app_id is provided", function()
+		local app = { path = "x", chunks = nil, entries = {}, manifest = {} }
+		local cap = self_cap(app, { app_id = "42" })
+		T.eq(cap.app_id, "42")
+	end)
+
+	T.it("app_id is nil when opts is omitted (CLI / no-daemon case)", function()
+		local app = { path = "x", chunks = nil, entries = {}, manifest = {} }
+		local cap = self_cap(app)
+		T.eq(cap.app_id, nil)
+	end)
+
 	T.it("revoke disables all methods", function()
 		local app = {
 			path = "test.png",

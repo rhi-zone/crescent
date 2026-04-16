@@ -1,9 +1,10 @@
 -- lib/platform/caps/self.lua
 -- self_cap(app, opts?) -> cap_table, revoke_fn
 -- Gives a sandboxed app read-only access to its own package contents:
--- image metadata chunks and tarball entries.
+-- image metadata chunks and tarball entries, plus its own identity.
 --
 -- Capability API (passed to sandbox as caps.self):
+--   cap.app_id              -> string | nil (stable app identity; nil outside daemon)
 --   cap.metadata(keyword)  -> string | nil
 --   cap.entries()           -> string[]    (list of tarball entry paths)
 --   cap.entry(path)         -> string | nil (tarball entry content by path)
@@ -18,15 +19,18 @@ local tar = require("lib.tar")
 local M = {}
 
 -- self_cap(app, opts?) -> cap_table, revoke_fn
---: ({ path: string, chunks: { type: string, data: string }[] | nil, entries: { name: string, data: string }[], manifest: table }, table?) -> (table, () -> nil)
+--: ({ path: string, chunks: { type: string, data: string }[] | nil, entries: { name: string, data: string }[], manifest: table }, { app_id: string | nil } | nil) -> (table, () -> nil)
 function M.self_cap(app, opts)
 	local revoked = false
+	local app_id = opts and opts.app_id
 
 	local function check_revoked()
 		if revoked then return nil, "capability revoked" end
 	end
 
 	local cap = {
+		app_id = app_id,
+
 		metadata = function(keyword)
 			local err_nil, err_msg = check_revoked()
 			if err_msg then return err_nil, err_msg end

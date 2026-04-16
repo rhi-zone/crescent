@@ -241,7 +241,9 @@ M.caps = setmetatable({}, {
 local CAP_FACTORIES = {
 	self = {
 		mod = "lib.platform.caps.self",
-		build = function(decl, app) return require("lib.platform.caps.self").self_cap(app) end,
+		build = function(decl, app, context)
+			return require("lib.platform.caps.self").self_cap(app, { app_id = context and context.app_id })
+		end,
 	},
 	http_server = {
 		mod = "lib.platform.caps.http_server",

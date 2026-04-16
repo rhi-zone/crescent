@@ -46,15 +46,15 @@ local function build_app_targz(files)
 	return gz
 end
 
--- Minimal app: declares http_server cap, registers a handler that writes a
--- fixed body and echoes the request path so we can verify both the dispatch
--- and the request-object plumbing.
+-- Minimal app: declares http_server + self caps, registers a handler that
+-- writes a fixed body, echoes the request path, and reports the app's own
+-- identity via caps.self.app_id.
 local MINIMAL_SERVER = [[
 local caps = caps
 caps.http_server.serve(function(req, res)
 	res.status = 200
 	res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-	res.body = "hello path=" .. (req.path or "/")
+	res.body = "hello from " .. tostring(caps.self.app_id) .. " path=" .. (req.path or "/")
 end)
 ]]
 
@@ -69,6 +69,7 @@ local function install_minimal_app(apps_dir, app_slug)
 				main = "server.lua",
 				caps = {
 					http_server = "required",
+					self = "required",
 				},
 			},
 		},
@@ -94,7 +95,7 @@ T.describe("daemon end-to-end (real index + real loader)", function()
 			entry = {
 				server = {
 					main = "server.lua",
-					caps = { http_server = "required" },
+					caps = { http_server = "required", self = "required" },
 				},
 			},
 		}, os.time()))
@@ -130,9 +131,10 @@ T.describe("daemon end-to-end (real index + real loader)", function()
 		d.handle(req, res)
 
 		T.eq(res.status, 200, "status is 200")
-		T.ok(res.body and res.body:find("hello path=/greet", 1, true),
+		T.ok(res.body and res.body:find("hello from " .. app_id_str, 1, true),
+			"body echoes caps.self.app_id; got: " .. tostring(res.body))
+		T.ok(res.body and res.body:find("path=/greet", 1, true),
 			"body reflects request path; got: " .. tostring(res.body))
-		_ = app_id_str
 
 		rmrf(tmp)
 	end)
@@ -148,7 +150,7 @@ T.describe("daemon end-to-end (real index + real loader)", function()
 			entry = {
 				server = {
 					main = "server.lua",
-					caps = { http_server = "required" },
+					caps = { http_server = "required", self = "required" },
 				},
 			},
 		}, os.time()))
