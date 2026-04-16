@@ -399,20 +399,48 @@ belt-and-suspenders: it makes the "only the operator" property robust against
 implementation bugs, browser quirks, and future changes that might
 accidentally expose a path.
 
-**Per-app subdomain.** Each app is served from `app-<id>.<daemon-host>` (e.g.,
-`app-alice.crescent.local`, `app-alice.tsnet.ts.net`). The daemon UI lives on
-`<daemon-host>` directly. Browsers treat these as separate origins — app
-frontends cannot read daemon cookies, embed daemon pages, or script the
-operator's daemon session. This isolates the app frontend from the
-operator's session, which is the primary risk; the grant endpoint specifically
-is incidentally also on the daemon origin and benefits from the same
-separation. Requires wildcard DNS — trivial on Tailscale Magic DNS, needs
-`dnsmasq` or `/etc/hosts` locally.
+**Per-app subdomain (canonical).** Each app is served from
+`app-<id>.<daemon-host>` (e.g., `app-alice.crescent.local`,
+`app-alice.tsnet.ts.net`). The daemon UI lives on `<daemon-host>` directly.
+Browsers treat these as separate origins *and* as separate cookie hosts — an
+`HttpOnly; __Host-session=...` cookie set on the daemon host is NOT sent to
+app subdomains. App frontends cannot read the session cookie, cannot fetch
+daemon URLs (CORS preflight fails), cannot embed daemon pages
+(frame-ancestors), cannot access daemon origin `localStorage`/`IndexedDB`.
+Requires wildcard DNS — trivial on Tailscale Magic DNS, needs `dnsmasq` or
+`/etc/hosts` locally.
 
-**Fallback: per-app port.** If wildcard DNS is unavailable, each app binds to
-its own port (`localhost:7001`, `localhost:7002`, ...). Daemon UI stays on
-`localhost:7777`. Different ports → different origins. Ugly URLs, but the same
-isolation guarantees.
+**Per-app port is NOT a valid fallback for cookie-based auth.** Ports are part
+of the Same-Origin Policy tuple (`scheme, host, port`) — so SOP, CORS,
+`localStorage`, and `postMessage` all treat `localhost:7777` and
+`localhost:7001` as distinct origins. But cookies are scoped by
+`(host, path)` and **ignore port entirely** (RFC 6265 §8.5). `SameSite`
+attributes use registrable domain, so both ports are same-site. Even `__Host-`
+prefix only pins to exact hostname, not port. A session cookie set at
+`localhost:7777` is sent on every request to `localhost:7001` — `HttpOnly`
+hides it from frontend JS, but the app's own backend sees it in the incoming
+`Cookie:` header and learns the operator's session ID. Any exfil channel
+the app has (granted `http_client`, future leak paths) then leaks the session.
+
+**Implication:** cookie-based auth requires per-subdomain origins. Per-port
+isolation is sufficient for SOP-enforced protections (CORS, frame-ancestors,
+storage) but not for cookie confidentiality.
+
+**Fallback when wildcard DNS is unavailable (two options):**
+
+1. **Distinct loopback addresses.** Bind daemon to `127.0.0.1:7777` and apps
+   to `127.0.0.2:7001`, `127.0.0.3:7001`, ... — all of `127.0.0.0/8` is
+   loopback on Linux/macOS. Different IPs are different hostnames for cookie
+   purposes. Works without DNS. Windows requires registry configuration to
+   enable loopback aliases, which is a deployment wart.
+2. **No cookie auth.** Drop cookies entirely, use capability-URL session
+   tokens (`/?s=<sid>` in the daemon UI path) that never traverse to app
+   origins. Ugly URLs, vulnerable to URL-leak vectors (browser history,
+   referer if misconfigured), but port-based isolation becomes sound because
+   there's no cookie to leak.
+
+Per-subdomain is canonical; the fallbacks are for environments where wildcard
+DNS genuinely isn't achievable. Default deployment assumes per-subdomain.
 
 **No CORS allowance for app origins.** The daemon never sends
 `Access-Control-Allow-Origin` allowing any app origin. If an app frontend
