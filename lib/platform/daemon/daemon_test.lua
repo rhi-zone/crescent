@@ -807,6 +807,104 @@ T.describe("VM host dispatch via app_loader", function()
 	end)
 end)
 
+T.describe("per-request handler dispatch is pcall-wrapped", function()
+	-- A throwing handler must produce a clean 500 — never bubble up past the
+	-- daemon request loop, and never leak the error message to the client.
+	-- See docs/daemon-isolation.md "Crash containment".
+
+	T.it("throwing handler produces a 500 with a fixed body, not the error message", function()
+		local d = make_daemon({
+			app_handler = function(req, res, app_id) error("boom " .. app_id) end,
+		})
+		local req = make_req("GET", "/", "app-alice.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 500)
+		T.eq(res.body, "internal server error")
+		-- The error string "boom" must NOT appear in the response body —
+		-- that's operator-visible only.
+		T.fail(res.body:find("boom", 1, true), "client response must not include error text")
+	end)
+
+	T.it("on_handler_error callback fires with app_id, err, and a non-nil traceback", function()
+		local captured_id, captured_err, captured_tb
+		local d = make_daemon({
+			app_handler = function(req, res, app_id) error("ouch") end,
+			on_handler_error = function(id, err, tb)
+				captured_id = id
+				captured_err = err
+				captured_tb = tb
+			end,
+		})
+		local req = make_req("GET", "/", "app-bob.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(captured_id, "bob")
+		T.ok(captured_err and captured_err:find("ouch", 1, true), "err should contain 'ouch'")
+		T.ok(captured_tb and #captured_tb > 0, "expected non-empty traceback")
+		T.ok(captured_tb:find("stack traceback", 1, true), "expected traceback string")
+	end)
+
+	T.it("successful handler output is unchanged (no wrapping overhead on happy path)", function()
+		local d = make_daemon({
+			app_handler = function(req, res, app_id)
+				res.status = 201
+				res.headers["Content-Type"] = { "application/json" }
+				res.body = '{"app":"' .. app_id .. '"}'
+			end,
+		})
+		local req = make_req("GET", "/", "app-carol.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 201)
+		T.eq(res.body, '{"app":"carol"}')
+		T.eq(res.headers["Content-Type"][1], "application/json")
+	end)
+
+	T.it("cached app_loader handler is not evicted on error; next request is also wrapped", function()
+		local calls = 0
+		local loader_calls = 0
+		local d = make_daemon({
+			app_loader = function(app_id)
+				loader_calls = loader_calls + 1
+				return function(req, res)
+					calls = calls + 1
+					error("always throws on " .. app_id)
+				end
+			end,
+		})
+		-- First request: loader runs, handler is cached, then throws.
+		local req1 = make_req("GET", "/", "app-dave.localhost:7777")
+		local res1 = make_res()
+		d.handle(req1, res1)
+		T.eq(res1.status, 500)
+		T.eq(res1.body, "internal server error")
+		T.eq(loader_calls, 1)
+		T.eq(calls, 1)
+
+		-- Second request: loader must NOT re-invoke. Cached handler still
+		-- throws — and must still produce 500, not bubble.
+		local req2 = make_req("GET", "/other", "app-dave.localhost:7777")
+		local res2 = make_res()
+		d.handle(req2, res2)
+		T.eq(res2.status, 500)
+		T.eq(res2.body, "internal server error")
+		T.eq(loader_calls, 1, "loader must not re-invoke after a throwing handler is cached")
+		T.eq(calls, 2, "cached handler is called again on second request")
+	end)
+
+	T.it("handler that calls assert(false, ...) also produces a clean 500", function()
+		local d = make_daemon({
+			app_handler = function(req, res, app_id) assert(false, "assertion failure") end,
+		})
+		local req = make_req("GET", "/", "app-eve.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 500)
+		T.eq(res.body, "internal server error")
+	end)
+end)
+
 T.describe("_get_cookie", function()
 	T.it("parses a single cookie", function()
 		T.eq(daemon._get_cookie({ cookie = { "a=1" } }, "a"), "1")

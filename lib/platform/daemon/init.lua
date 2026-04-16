@@ -41,6 +41,7 @@ local M = {}
 --::   app_loader: app_loader_fn | nil,
 --::   secure_cookie: boolean | nil,
 --::   prefer_loopback: boolean | nil,
+--::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer }
 --:: launch_token_record = { app_id: string, session_id: string, expires_at: integer }
@@ -227,17 +228,46 @@ function M.make(opts)
 	local app_handlers = {} --: { [string]: (http_req, http_res) -> nil }
 	local app_load_errors = {} --: { [string]: string }
 
+	-- Per-request handler invocation. App handlers are untrusted code running
+	-- in the daemon process; an uncaught `error()` must not bubble past the
+	-- request loop. On failure: 500 with a fixed body (never the actual
+	-- error message — that's operator-visible only, per daemon-isolation.md).
+	-- The optional `on_handler_error` callback receives (app_id, err, tb) so
+	-- operators see the crash on stderr while clients see a clean 500.
+	--: (string, (http_req, http_res) -> nil, http_req, http_res) -> nil
+	local function invoke_app_handler(app_id, fn, req, res)
+		local tb --: string
+		local function tb_handler(err)
+			tb = debug.traceback(tostring(err), 2)
+			return err
+		end
+		local ok, err = xpcall(function() fn(req, res) end, tb_handler)
+		if not ok then
+			res.status = 500
+			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+			res.body = "internal server error"
+			if opts.on_handler_error then
+				opts.on_handler_error(app_id, tostring(err), tb or "")
+			end
+			return
+		end
+		normalize_headers(res.headers)
+	end
+
 	local app_handler --: (http_req, http_res, string) -> nil
 	if opts.app_handler then
-		app_handler = opts.app_handler
+		local override = opts.app_handler --: (http_req, http_res, string) -> nil
+		--: (http_req, http_res, string) -> nil
+		app_handler = function(req, res, app_id)
+			invoke_app_handler(app_id, function(rq, rs) override(rq, rs, app_id) end, req, res)
+		end
 	elseif opts.app_loader then
 		local loader = opts.app_loader --: app_loader_fn
 		--: (http_req, http_res, string) -> nil
 		app_handler = function(req, res, app_id)
 			local cached = app_handlers[app_id]
 			if cached then
-				cached(req, res)
-				normalize_headers(res.headers)
+				invoke_app_handler(app_id, cached, req, res)
 				return
 			end
 			if app_load_errors[app_id] then
@@ -259,9 +289,9 @@ function M.make(opts)
 			-- above, but the typechecker cannot narrow `handler` across the
 			-- tuple-return + early-return boundary, so we re-state the invariant.
 			local fn = assert(handler)
+			-- Cache BEFORE invoking: a throwing handler must not be evicted.
 			app_handlers[app_id] = fn
-			fn(req, res)
-			normalize_headers(res.headers)
+			invoke_app_handler(app_id, fn, req, res)
 		end
 	else
 		--: (http_req, http_res, string) -> nil

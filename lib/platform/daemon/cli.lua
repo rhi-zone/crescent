@@ -108,6 +108,9 @@ local d = daemon.make({
 	time_fn = os.time,
 	index_db = raw_index_db,
 	app_loader = loader_fn,
+	on_handler_error = function(app_id, err, tb)
+		io.stderr:write("daemon: app " .. app_id .. " handler error: " .. err .. "\n" .. tb .. "\n")
+	end,
 })
 
 -- ── Socket listener ────────────────────────────────────────────────────────
