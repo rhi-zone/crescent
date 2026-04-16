@@ -89,17 +89,12 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   - [x] Library app's response headers migrated to `{ string }` arrays (server.lua +
     server_test.lua). Daemon can now round-trip library responses through
     `http.format.serialize_response` without error.
-- [ ] **HTTP response-header convention migration — codebase-wide.** Commit `f3e01b9`
-  removed plain-string-header support from `serialize_response` (`{ [string]: string | string[] }`
-  → `{ [string]: string[] }`) but did not migrate callers. 13 files still assign plain
-  strings: `lib/crescent_examples/{html_lua_static,http_static}.lua`,
-  `lib/http/router/{api,fsx,static,staticx,table_list_routes}.lua`, `lib/https/client.lua`,
-  `lib/platform/caps/http_server.lua`, `lib/platform/apps/charactercardv2/import.lua`,
-  `lib/web/init.lua`, `lib/openapi/init.lua`. Any of these hitting `serialize_response`
-  will throw "attempt to concatenate a nil value" at runtime. Fix: either migrate all
-  callers to arrays, or restore the `type(values) == "table"` dual-path branch in
-  `serialize_response` (matching `string | string[]` typedef). Per CLAUDE.md "no gradual
-  migrations" — the `f3e01b9` partial migration is itself the bug.
+- [x] **HTTP response-header convention migration — codebase-wide** (37a4ce2).
+  Completed the migration started in `f3e01b9`. All first-party callers now
+  use array-form headers. `lib/platform/daemon/init.lua` and
+  `lib/platform/caps/http_server.lua` keep their defensive normalize steps
+  in place — those are at the trust boundary for untrusted app handlers.
+  Full test suite: 539/539 (67000 assertions).
 - [x] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
   launch token, 303-redirects to app origin. Token session-bound, 5-min expiry,
   consumed on first use. Implemented in `lib/platform/daemon/init.lua`:
