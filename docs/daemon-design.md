@@ -208,27 +208,34 @@ caps where prompting adds nothing.
 
 Three mechanisms, in decreasing order of safety:
 
-#### 1. Cap risk classes (default-quiet for harmless caps)
+#### 1. Cap risk classes (opt-in during setup)
 
 Some cap types have no plausible abuse vector. Granting `time` to an app lets it
 read the system clock. There is no attack surface. Prompting the operator for
-this is just noise.
+this is just noise — **but the operator should opt in to that shortcut, not
+discover it after the fact**.
 
-| Class | Caps | Default |
-|-------|------|---------|
-| **Inert** | `time`, `self`, `stdout` | Auto-grant, no prompt |
-| **Scoped** | `kv`, `db` | Prompt once per app; storage is app-scoped so no cross-app leak |
-| **Local** | `http_server`, `cli`, `stdin` | Prompt per app |
-| **Network** | `http_client` (with host) | Prompt per app + per host |
-| **Shared** | `shared_db`, `fs` | Prompt per app + show scope |
+The platform defines risk classes as metadata. **Defaults prompt for everything.**
+The setup flow (or a later settings page) can *recommend* enabling auto-grant for
+inert caps, with a checkbox the operator explicitly ticks.
+
+| Class | Caps | Recommended setup default |
+|-------|------|---------------------------|
+| **Inert** | `time`, `self`, `stdout` | Offered as "skip prompts for harmless caps" opt-in |
+| **Scoped** | `kv`, `db` | Always prompt (per app); storage is app-scoped |
+| **Local** | `http_server`, `cli`, `stdin` | Always prompt per app |
+| **Network** | `http_client` (with host) | Always prompt per app + per host |
+| **Shared** | `shared_db`, `fs` | Always prompt per app + show scope |
 
 Classes are **defined by the platform**, not the app. The app cannot relabel
 `http_client` as "inert." The risk class is a property of the cap type's
 implementation, encoded in the cap factory module.
 
-The operator can override classes in their config (`auto_grant: false` globally,
-or `auto_grant: ["time", "self"]` explicitly). The default should be safe for
-someone who doesn't configure anything.
+**Nothing auto-grants out of the box.** A freshly installed crescent prompts for
+every cap of every app on first launch. The operator can reduce that through
+explicit opt-ins (`auto_grant: ["time", "self"]` in config, or the setup wizard's
+"streamline prompts" checkbox). The decision to suppress prompts is always the
+operator's, made once and auditable in settings.
 
 #### 2. Explicit trust grants (per-source allow lists)
 
