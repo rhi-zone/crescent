@@ -327,6 +327,7 @@ function M.make(opts)
 
 	-- Session store: in-memory only for v1. { [sid] = { created_at, last_seen } }.
 	local sessions = {} --: { [string]: session_record }
+	local SESSION_IDLE_TTL = 86400 -- 24h; drops sessions that haven't been seen in this long
 
 	-- Launch-token map: { [hex_token] = { app_id, session_id, expires_at } }.
 	-- One-shot: consumed (deleted) on first redemption. 5-min expiry.
@@ -341,6 +342,7 @@ function M.make(opts)
 	-- surfaces and must not be interchangeable. See docs/daemon-design.md
 	-- "Per-app subdomain (canonical)".
 	local app_sessions = {} --: { [string]: { [string]: app_session_record } }
+	local APP_SESSION_IDLE_TTL = 86400 -- 24h; mirrors SESSION_IDLE_TTL semantics
 
 	-- Loopback mapping: app_id <-> 127.0.0.<n>. <n> starts at 2 (127.0.0.1 is
 	-- the daemon). Grows monotonically; v1 does not reclaim.
@@ -361,10 +363,19 @@ function M.make(opts)
 	end
 
 	-- Mint a new session and record it. Returns the session id (hex string).
+	-- Sweeps idle sessions before mint — same amortized pattern as launch
+	-- tokens. Session records are tiny; a 24h-idle one is almost certainly
+	-- a closed browser tab that will never reconnect, so dropping it is
+	-- both harmless and bounds the map.
 	--: () -> string
 	local function mint_session()
-		local sid = bytes_to_hex(random_bytes_fn(16))
 		local now = time_fn()
+		for s, rec in pairs(sessions) do
+			if now - rec.last_seen >= SESSION_IDLE_TTL then
+				rawset(sessions, s, nil)
+			end
+		end
+		local sid = bytes_to_hex(random_bytes_fn(16))
 		sessions[sid] = { created_at = now, last_seen = now }
 		return sid
 	end
@@ -474,7 +485,9 @@ function M.make(opts)
 	r:get("/launch/:id", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		if not presented or not sessions[presented] then
+		local sess_rec = presented and sessions[presented] or nil
+		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+			if sess_rec and presented then rawset(sessions, presented, nil) end
 			plain(res, 401, "unauthorized")
 			return
 		end
@@ -585,6 +598,14 @@ function M.make(opts)
 		if not bucket then
 			bucket = {} --: { [string]: app_session_record }
 			app_sessions[app_id] = bucket
+		else
+			-- Sweep-on-mint: bound the bucket by discarding idle tokens.
+			-- Mint frequency is per-launch (operator action), so this is rare.
+			for t, r0 in pairs(bucket) do
+				if (now - r0.last_seen) >= APP_SESSION_IDLE_TTL then
+					rawset(bucket, t, nil)
+				end
+			end
 		end
 		bucket[app_tok] = { app_id = app_id, created_at = now, last_seen = now }
 
@@ -620,10 +641,17 @@ function M.make(opts)
 		local is_launch_path = path:sub(1, 8) == "/launch/"
 		local sid --: string | nil
 		local minted = false
-		if presented and sessions[presented] then
+		local now = time_fn()
+		local sess_rec = presented and sessions[presented] or nil
+		if sess_rec and (now - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+			-- Stale cookie: drop it and treat as unauthenticated. On non-launch
+			-- paths this falls through to mint_session (which also sweeps).
+			if presented then rawset(sessions, presented, nil) end
+			sess_rec = nil
+		end
+		if sess_rec and presented then
 			sid = presented
-			local rec = sessions[sid]
-			if rec then rec.last_seen = time_fn() end
+			sess_rec.last_seen = now
 		elseif not is_launch_path then
 			sid = mint_session()
 			minted = true

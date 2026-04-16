@@ -230,6 +230,35 @@ T.describe("__Host-session cookie", function()
 		T.eq(res.headers["Set-Cookie"], nil, "app origin must not set the daemon session cookie")
 	end)
 
+	T.it("stale daemon session cookie at top-level triggers a fresh mint", function()
+		-- Mirror of /launch's stale-check, but at the non-launch dispatch: a
+		-- 24h-idle cookie is dropped and a new session minted. The new sid
+		-- must differ from the stale one, and the stale entry must be gone.
+		local idx, db = make_index_db()
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({ index_db = db, time_fn = tfn })
+		-- Prime inline (prime_session is defined later in the file).
+		local prime_req = make_req("GET", "/healthz", "localhost:7777")
+		local prime_res = make_res()
+		d.handle(prime_req, prime_res)
+		local sid = prime_res.headers["Set-Cookie"][1]:match("__Host%-session=([^;]+)")
+		T.ok(d.sessions[sid], "precondition: session minted")
+
+		tref.now = tref.now + 90000 -- > 86400s (24h)
+
+		local req = make_req("GET", "/healthz", "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		local sc = res.headers["Set-Cookie"]
+		T.ok(sc, "expected a fresh Set-Cookie for the re-minted session")
+		local new_sid = sc[1]:match("__Host%-session=([^;]+)")
+		T.ok(new_sid and new_sid ~= sid, "new sid must differ from the stale one")
+		T.eq(d.sessions[sid], nil, "stale session must be dropped")
+		T.ok(d.sessions[new_sid], "new session must be present")
+
+		idx:close()
+	end)
+
 	T.it("omits Secure on loopback by default; emits it when opted in", function()
 		-- Default (loopback-safe): no Secure.
 		local d = make_daemon()
@@ -406,6 +435,29 @@ T.describe("/launch/:id", function()
 		idx:close()
 	end)
 
+	T.it("rejects a stale daemon session at /launch with 401 and drops it", function()
+		-- A session cookie older than SESSION_IDLE_TTL (24h) must be treated
+		-- as unauthenticated at /launch — no auto-mint, no carry-over. The
+		-- stale record is also dropped from the map so it stops counting
+		-- toward memory.
+		local idx, db = make_index_db()
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({ index_db = db, time_fn = tfn })
+		local sid = prime_session(d)
+		T.ok(d.sessions[sid], "precondition: session exists after prime")
+
+		tref.now = tref.now + 90000 -- > 86400s (24h)
+
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401, "stale session must 401 at /launch")
+		T.eq(d.sessions[sid], nil, "stale session must be swept from the map")
+
+		idx:close()
+	end)
+
 	T.it("emits loopback origin when prefer_loopback=true", function()
 		local idx, db = make_index_db()
 		local d = make_daemon({ index_db = db, prefer_loopback = true })
@@ -554,6 +606,58 @@ T.describe("launch-token redemption on app origin", function()
 		T.ok(d.launch_tokens[t1])
 		T.ok(d.launch_tokens[t2])
 		T.ok(d.launch_tokens[t3])
+
+		idx:close()
+	end)
+
+	T.it("mint sweeps idle per-app session tokens from the bucket", function()
+		-- Per-app sessions have the same 24h idle-TTL as daemon sessions. The
+		-- sweep runs at consume-time (when the app bucket is about to receive
+		-- a new token). This test: consume a token → the bucket has exactly
+		-- one entry. Advance the clock > 24h. Consume another token against
+		-- the same app id. The stale entry must be evicted.
+		local idx, db = make_index_db()
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({ index_db = db, time_fn = tfn })
+		local sid = prime_session(d)
+
+		-- Mint + consume round 1.
+		local lreq1 = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local lres1 = make_res()
+		d.handle(lreq1, lres1)
+		local tok1 = lres1.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		local areq1 = make_req("GET", "/", "app-1.localhost:7777")
+		areq1.query = "__launch=" .. tok1
+		d.handle(areq1, make_res())
+		local bucket = d.app_sessions["1"]
+		T.ok(bucket, "bucket for app 1 must exist after consume")
+		local first_keys = {}
+		for k in pairs(bucket) do first_keys[#first_keys + 1] = k end
+		T.eq(#first_keys, 1, "bucket must hold exactly one entry after first consume")
+
+		tref.now = tref.now + 90000 -- > 86400s (24h)
+
+		-- Re-prime: after 24h the daemon session also expires. A new cookie
+		-- is needed to pass /launch auth. This models an operator returning
+		-- after a full day of idleness.
+		local sid2 = prime_session(d)
+		T.ok(sid2 and sid2 ~= sid, "expected a fresh sid after stale cookie")
+
+		-- Mint + consume round 2.
+		local lreq2 = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid2))
+		local lres2 = make_res()
+		d.handle(lreq2, lres2)
+		local tok2 = lres2.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		local areq2 = make_req("GET", "/", "app-1.localhost:7777")
+		areq2.query = "__launch=" .. tok2
+		d.handle(areq2, make_res())
+
+		T.eq(bucket[first_keys[1]], nil, "stale per-app entry must be swept at next consume")
+		local live = 0
+		for _ in pairs(bucket) do live = live + 1 end
+		T.eq(live, 1, "only the fresh entry remains")
 
 		idx:close()
 	end)
