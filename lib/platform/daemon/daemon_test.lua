@@ -369,6 +369,40 @@ T.describe("/launch/:id", function()
 		T.ok(rec, "launch_tokens[tok] must exist")
 		T.eq(rec.app_id, "1")
 		T.eq(rec.session_id, sid)
+		-- Referrer-Policy: no-referrer on the mint response keeps the token
+		-- out of the Referer header if the app's first paint fetches third
+		-- party resources.
+		T.eq(res.headers["Referrer-Policy"][1], "no-referrer")
+		idx:close()
+	end)
+
+	T.it("mint sweeps expired tokens from the launch_tokens map", function()
+		local idx, db = make_index_db()
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({ index_db = db, time_fn = tfn })
+		local sid = prime_session(d)
+
+		-- Mint a token, then advance the clock past its 5-minute expiry.
+		local lreq1 = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local lres1 = make_res()
+		d.handle(lreq1, lres1)
+		local tok1 = lres1.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		T.ok(d.launch_tokens[tok1], "first token must exist pre-sweep")
+
+		tref.now = tref.now + 400 -- past the 300s expiry
+
+		-- Second mint: the sweep should evict tok1 even though we never
+		-- attempted to consume it.
+		local lreq2 = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local lres2 = make_res()
+		d.handle(lreq2, lres2)
+		T.eq(d.launch_tokens[tok1], nil, "expired tok1 must be swept at next mint")
+
+		local tok2 = lres2.headers["Location"][1]:match("%?__launch=([%x]+)$")
+		T.ok(d.launch_tokens[tok2], "new token must still exist")
+
 		idx:close()
 	end)
 
@@ -750,7 +784,7 @@ T.describe("VM host dispatch via app_loader", function()
 		T.ok(res.body:find("missing manifest"), "body should mention the error")
 	end)
 
-	T.it("loader error is cached; loader NOT re-invoked for subsequent requests", function()
+	T.it("loader error is cached briefly; loader NOT re-invoked inside the TTL", function()
 		local calls = 0
 		local d = make_daemon({
 			app_loader = function(app_id)
@@ -765,7 +799,35 @@ T.describe("VM host dispatch via app_loader", function()
 		local req2, res2 = make_req("GET", "/", "app-x.localhost:7777"), make_res()
 		d.handle(req2, res2)
 		T.eq(res2.status, 500)
-		T.eq(calls, 1, "loader should not retry on cached failure")
+		T.eq(calls, 1, "loader should not retry inside the TTL window")
+	end)
+
+	T.it("load-error cache expires after TTL; loader retried on next request", function()
+		local calls = 0
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({
+			time_fn = tfn,
+			app_loader = function(app_id)
+				calls = calls + 1
+				if calls == 1 then return nil, "boom" end
+				return function(req, res)
+					res.status = 200
+					res.body = "recovered"
+				end
+			end,
+		})
+		local req1, res1 = make_req("GET", "/", "app-flaky.localhost:7777"), make_res()
+		d.handle(req1, res1)
+		T.eq(res1.status, 500)
+
+		-- Jump past the 5s TTL (plus slack for intra-handle time_fn calls).
+		tref.now = tref.now + 60
+
+		local req2, res2 = make_req("GET", "/", "app-flaky.localhost:7777"), make_res()
+		d.handle(req2, res2)
+		T.eq(res2.status, 200, "loader must be retried once TTL expires")
+		T.eq(res2.body, "recovered")
+		T.eq(calls, 2, "loader invoked exactly twice (first boom, then recovery)")
 	end)
 
 	T.it("handler setting string headers gets normalized to array form", function()

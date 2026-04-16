@@ -226,7 +226,13 @@ function M.make(opts)
 	end
 
 	local app_handlers = {} --: { [string]: (http_req, http_res) -> nil }
-	local app_load_errors = {} --: { [string]: string }
+
+	-- Negative cache for load failures. Retained across requests so a broken
+	-- app doesn't retrigger tarball parsing on every hit, but each entry has
+	-- a TTL so transient failures (e.g. a partially-written tarball during
+	-- `pkg install`) recover without operator intervention.
+	local app_load_errors = {} --: { [string]: { err: string, retry_at: integer } }
+	local LOAD_ERROR_TTL = 5 -- seconds; see docs/daemon-design.md
 
 	-- Per-request handler invocation. App handlers are untrusted code running
 	-- in the daemon process; an uncaught `error()` must not bubble past the
@@ -270,18 +276,23 @@ function M.make(opts)
 				invoke_app_handler(app_id, cached, req, res)
 				return
 			end
-			if app_load_errors[app_id] then
-				res.status = 500
-				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-				res.body = "app load failed: " .. app_load_errors[app_id]
-				return
+			local cached_err = app_load_errors[app_id]
+			if cached_err then
+				if time_fn() < cached_err.retry_at then
+					res.status = 500
+					res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+					res.body = "app load failed: " .. cached_err.err
+					return
+				end
+				rawset(app_load_errors, app_id, nil)
 			end
 			local handler, err = loader(app_id)
 			if not handler then
-				app_load_errors[app_id] = tostring(err or "unknown error")
+				local msg = tostring(err or "unknown error")
+				app_load_errors[app_id] = { err = msg, retry_at = time_fn() + LOAD_ERROR_TTL }
 				res.status = 500
 				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-				res.body = "app load failed: " .. app_load_errors[app_id]
+				res.body = "app load failed: " .. msg
 				return
 			end
 			-- `assert` is the idiomatic narrowing cast: returns its first arg if
@@ -488,6 +499,17 @@ function M.make(opts)
 			return
 		end
 
+		-- Sweep expired tokens before minting. Amortized cheap — mint is a
+		-- user-initiated action (operator clicks Launch), so N runs in the
+		-- hundreds at most for a single-operator local daemon. Revisit if
+		-- the daemon ever serves many concurrent operators.
+		local now = time_fn()
+		for t, rec in pairs(launch_tokens) do
+			if rec.expires_at <= now then
+				rawset(launch_tokens, t, nil)
+			end
+		end
+
 		-- Mint: 16 random bytes → 32 hex chars. Collisions are vanishingly
 		-- unlikely at the 5-minute expiry window, but we still guard with a
 		-- bounded retry loop in case a mock RNG (tests) produces duplicates.
@@ -504,7 +526,6 @@ function M.make(opts)
 			return
 		end
 
-		local now = time_fn()
 		launch_tokens[token] = {
 			app_id = app_id,
 			session_id = presented,
@@ -515,6 +536,9 @@ function M.make(opts)
 		res.status = 303
 		res.headers["Location"] = { origin .. "/?__launch=" .. token }
 		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		-- Keep the token out of the Referer that an app's first page might
+		-- leak if it fetches a third-party resource on first paint.
+		res.headers["Referrer-Policy"] = { "no-referrer" }
 		res.body = ""
 	end)
 
