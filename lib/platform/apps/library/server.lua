@@ -163,14 +163,14 @@ local function serve_static(res, name, ext)
 	local content = STATIC[name]
 	if not content then return false end
 	res.status = 200
-	res.headers["Content-Type"] = CONTENT_TYPES[ext] or "application/octet-stream"
+	res.headers["Content-Type"] = { CONTENT_TYPES[ext] or "application/octet-stream" }
 	res.body = content
 	return true
 end
 
 local function json_ok(res, data)
 	res.status = 200
-	res.headers["Content-Type"] = CONTENT_TYPES.json
+	res.headers["Content-Type"] = { CONTENT_TYPES.json }
 	res.body = json.encode(data)
 	return true
 end

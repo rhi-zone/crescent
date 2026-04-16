@@ -84,13 +84,20 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     `lib/http/server.lua` does not expose `opts.host` to `lib/socket.server`. Fold the
     host option into `lib/http/server.lua` and have the daemon CLI use it. Tracked as
     a separate HTTP convention fix.
-  - [ ] Library app's response headers are plain strings, but
-    `lib/http/format.serialize_response` expects `{ [string]: string[] }`. The library
-    handler is mounted directly in the daemon, so its responses currently rely on the
-    daemon NOT serializing string-valued headers through format.serialize_response. Fix:
-    normalize all response headers to arrays in either the library app or a daemon-level
-    shim before serialization. Manifests as garbage on the wire once the daemon actually
-    serves library responses over TCP.
+  - [x] Library app's response headers migrated to `{ string }` arrays (server.lua +
+    server_test.lua). Daemon can now round-trip library responses through
+    `http.format.serialize_response` without error.
+- [ ] **HTTP response-header convention migration — codebase-wide.** Commit `f3e01b9`
+  removed plain-string-header support from `serialize_response` (`{ [string]: string | string[] }`
+  → `{ [string]: string[] }`) but did not migrate callers. 13 files still assign plain
+  strings: `lib/crescent_examples/{html_lua_static,http_static}.lua`,
+  `lib/http/router/{api,fsx,static,staticx,table_list_routes}.lua`, `lib/https/client.lua`,
+  `lib/platform/caps/http_server.lua`, `lib/platform/apps/charactercardv2/import.lua`,
+  `lib/web/init.lua`, `lib/openapi/init.lua`. Any of these hitting `serialize_response`
+  will throw "attempt to concatenate a nil value" at runtime. Fix: either migrate all
+  callers to arrays, or restore the `type(values) == "table"` dual-path branch in
+  `serialize_response` (matching `string | string[]` typedef). Per CLAUDE.md "no gradual
+  migrations" — the `f3e01b9` partial migration is itself the bug.
 - [ ] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
   launch token, 303-redirects to app origin. Token session-bound, 5-min expiry,
   consumed on first use.
