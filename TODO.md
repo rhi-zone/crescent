@@ -140,10 +140,10 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     successful Host dispatch, handler caching across requests, and missing-app
     500 caching. 8 assertions. Library "launch from UI" still needs wiring
     but is now unblocked.
-  - [ ] `caps.self` does not expose `app_id`. The smoke test wanted to echo
-    the app identity in the response body and couldn't. Either add `app_id`
-    (and `origin`, probably) to `self_cap`, or decide an app is not supposed
-    to know its own id and document that. Came up during e2e bring-up.
+  - [x] `caps.self.app_id` exposed under daemon (a2fe3d3). Apps can now build
+    self-referential URLs / cookie names. Not yet added: `caps.self.origin`
+    (full scheme+host URL) — punted until a concrete caller needs it rather
+    than speculating.
   - [ ] Tier 2/3 isolation escalation (separate `lua_State` per app, or
     coroutine-per-request with `debug.sethook` instruction quota). Current
     daemon is tier 1 (single state + env sandbox + pcall wrap). The full
