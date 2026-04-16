@@ -123,13 +123,40 @@ do
 	if ok and bit_mod then safe_bit = bit_mod end
 end
 
+-- `string.dump` serialises a function to LuaJIT bytecode. Crafted bytecode
+-- bypasses VM-level type checks, so bundling the real `string` table would
+-- put a sandbox-escape primitive one `.dump` away. Shallow-copy without it;
+-- the copy is also what the string metatable's `__index` would normally
+-- dispatch through — but the metatable is frozen below, so methods like
+-- `("abc"):upper()` keep working via the original `string` (the frozen
+-- metatable still points there; we only withhold access to the table
+-- itself from sandboxed code).
+local safe_string = {}
+for k, v in pairs(string) do
+	if k ~= "dump" then safe_string[k] = v end
+end
+
+-- Freeze the shared string metatable at module load. Without this,
+-- `getmetatable("").__index = fn` would poison every string operation in
+-- every sandboxed app and in the daemon itself. After this call,
+-- `getmetatable("")` returns the `__metatable` sentinel (false) and
+-- `setmetatable` on strings raises — but real string methods still work
+-- because LuaJIT dispatches `s:upper()` through the original metatable
+-- internally, not through the user-visible `getmetatable` return.
+do
+	local mt = getmetatable("")
+	if mt and mt.__metatable == nil then mt.__metatable = false end
+end
+
 -- ── Built-in capability bundles ───────────────────────────────────────────────
 -- These are just tables. Compose, subset, or ignore them as needed.
 
 -- stdlib: safe Lua standard library.
 -- Excludes: io, os, ffi, debug, dofile, loadfile, load, loadstring, require,
---           package (callers get require via env() instead).
--- Exposes safe read-only subsets of: jit (platform info only), bit (pure math).
+--           package (callers get require via env() instead), string.dump
+--           (bytecode loader → sandbox-escape primitive).
+-- Exposes safe read-only subsets of: jit (platform info only), bit (pure math),
+-- string (omits dump).
 M.stdlib = {
 	globals = {
 		assert      = assert,
@@ -152,7 +179,7 @@ M.stdlib = {
 		unpack      = unpack,
 		xpcall      = xpcall,
 		math        = math,
-		string      = string,
+		string      = safe_string,
 		table       = table,
 		coroutine   = coroutine,
 		jit         = safe_jit,
@@ -183,7 +210,7 @@ M.pure = {
 		unpack      = unpack,
 		xpcall      = xpcall,
 		math        = math,
-		string      = string,
+		string      = safe_string,
 		table       = table,
 	},
 	modules = {},
