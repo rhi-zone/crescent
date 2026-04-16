@@ -274,12 +274,29 @@ resolves under `/app/alice/`.
 
 ### Threat model: silent grant vs fatigue
 
+**The adversary is the app itself.** Not a rogue tab, not a compromised
+extension, not a network attacker — those are lesser threats handled by
+ordinary web hygiene. The app ships both a Lua backend (running inside the
+daemon's LuaJIT VM) and frontend code (HTML/JS running inside the operator's
+browser, generated or served by the same backend). Both halves have the same
+author, collude by design, and share an attack goal: the frontend can render
+social-engineering UI while the backend exfiltrates; the backend can serve a
+different frontend on every request; anything the frontend "verifies" is
+worthless because the backend wrote it. There is no scenario where one half is
+trusted and the other is not — they are one adversary with two attack
+surfaces.
+
+Every app is treated as potentially hostile from install, because the operator
+cannot audit Lua bundles or transpiled JS any more than they can audit a
+Chrome extension. If the security model only holds when the app is
+well-behaved, the security model does not hold. Defenses must assume the app
+author is coordinating backend + frontend against the operator.
+
 Two failure modes are equally fatal:
 
-1. **Silent grant.** Code running in the background — another app on the same
-   daemon, a malicious tab, a compromised browser extension, a rogue dependency
-   in a trusted app — completes the grant flow without the operator seeing or
-   approving it. The attacker gains caps they were never authorized for. One
+1. **Silent grant.** The app — either its backend Lua in-VM or its frontend JS
+   via the operator's session — completes a grant flow without the operator
+   seeing or approving it. The app gains caps it was never authorized for. One
    silent grant compromises everything that cap can reach.
 
 2. **Grant fatigue.** The operator is prompted for consent so often that they
@@ -288,22 +305,83 @@ Two failure modes are equally fatal:
    low-risk ones. Effective security collapses to zero.
 
 Uniform friction fails at both: too low and automation slips through; too high
-and humans stop paying attention. The resolution is **structural isolation + risk-tiered friction**.
+and humans stop paying attention. The resolution is three layers of defense —
+**VM sandbox** (backend), **origin isolation** (frontend), **risk-tiered friction**
+(operator) — plus fatigue reducers that don't weaken any of them.
 
-#### Structural isolation: the attacker cannot reach the grant channel
+#### VM sandbox: the backend cannot reach the daemon's memory
 
-CSRF tokens and SameSite cookies are insufficient on their own. Any app running
-on the daemon shares the origin of the grant UI (same hostname, same port) and
-can read the daemon's pages if same-origin policy doesn't apply. The daemon
-MUST enforce origin isolation so that app-originated requests cannot reach
-grant endpoints at all.
+The app's Lua code runs in the same process as the daemon. Without strict
+sandboxing it can read and mutate anything — `grants.json` in memory, other
+apps' cap closures, the daemon's router tables. The VM boundary, not the HTTP
+boundary, is the primary defense.
+
+**Env-based sandbox, no `_G` access.** Each app is loaded with a per-app
+environment table as its `_ENV`. The env contains exactly: the caps the app
+was granted, a narrow standard-library subset (`string`, `table`, `math`,
+`pairs`, `ipairs`, `tostring`, `tonumber`, `type`, `select`, `error`,
+`pcall`, `xpcall`, `setmetatable`, `getmetatable`, `rawequal`, `rawget`,
+`rawset`, `rawlen`), and a restricted `require` that only resolves names from
+a declared whitelist in the manifest. No `_G`, no `_ENV`, no `package`.
+
+**No `debug` library.** `debug.getupvalue`, `debug.setupvalue`,
+`debug.getregistry`, `debug.getlocal`, `debug.sethook` can all escape any env
+sandbox. `debug` is never in the app env under any cap.
+
+**No `os` or `io` globals.** File I/O, time, subprocess — all mediated through
+caps (`caps.fs`, `caps.time`, `caps.spawn`). The ambient `os.getenv`,
+`os.date`, `io.open` are not reachable. This is already the project-wide rule
+(see CLAUDE.md: Capability-based I/O); the daemon enforces it.
+
+**No FFI.** `ffi = require("ffi")` is the canonical LuaJIT sandbox escape —
+with FFI an app can call any C function in the process, including `mmap`,
+`dlopen`, `system`. `ffi` is never in the restricted `require` whitelist for
+an untrusted app. First-party apps that need FFI must declare it as a cap
+(risk class: shared) and get explicit operator grant.
+
+**No bytecode loading.** `load` / `loadstring` / `loadfile` either absent or
+forced to text-only mode (`load(src, name, "t", env)`). Crafted LuaJIT
+bytecode can bypass VM-level type checks; only source loading is safe.
+
+**Frozen metatables on shared built-ins.** `getmetatable("")` in Lua gives
+access to the string metatable — mutating `__index` there affects every string
+operation in every app and in the daemon itself. Either freeze it (set
+`__metatable` to a sentinel so `getmetatable` returns that instead) or don't
+expose `getmetatable` on primitives. Same for number, boolean.
+
+**Per-app `package.loaded` cache.** If two apps share a `package.loaded` table,
+one can poison a module the other requires. Each app gets its own fresh module
+cache at construction time. The restricted `require` closes over it.
+
+**Cap closures, not cap tables.** Caps are functions, not mutable tables. The
+app gets `caps.kv.get(key)` as a closure holding a private state upvalue. The
+app cannot reach into that upvalue, cannot rebind `caps.kv.get`, cannot swap
+the `caps` table for a privileged one — because `caps` itself is a function or
+a frozen table with `__newindex` trapped.
+
+**No reference to daemon internals.** The grant store, the router, the launch
+token map, the cap factory — none of these modules are in the app's `require`
+whitelist. An app cannot `require("lib.platform.grants")` because that name is
+not in its manifest's declared deps. The restricted `require` raises an error
+on any non-whitelisted name.
+
+The VM sandbox is the primary defense. HTTP origin isolation below defends the
+other half of the app (its browser frontend) — but if the VM sandbox fails,
+origin isolation is irrelevant because the app already runs in the daemon.
+
+#### Origin isolation: the frontend cannot ride the operator's session
+
+The app's frontend JS runs in the operator's browser, same as the daemon UI.
+Without origin isolation, the frontend can read the daemon's cookies and
+submit forged forms on the operator's behalf.
 
 **Per-app subdomain.** Each app is served from `app-<id>.<daemon-host>` (e.g.,
 `app-alice.crescent.local`, `app-alice.tsnet.ts.net`). The daemon UI and grant
 endpoints live on `<daemon-host>` directly. Browsers treat these as separate
-origins. Apps cannot read daemon cookies, cannot fetch daemon URLs (CORS
-blocks), cannot embed daemon pages (frame-ancestors blocks). Requires wildcard
-DNS — trivial on Tailscale Magic DNS, needs `dnsmasq` or `/etc/hosts` locally.
+origins. App frontends cannot read daemon cookies, cannot fetch daemon URLs
+(CORS blocks), cannot embed daemon pages (frame-ancestors blocks). Requires
+wildcard DNS — trivial on Tailscale Magic DNS, needs `dnsmasq` or `/etc/hosts`
+locally.
 
 **Fallback: per-app port.** If wildcard DNS is unavailable, each app binds to
 its own port (`localhost:7001`, `localhost:7002`, ...). Daemon UI stays on
@@ -315,19 +393,33 @@ isolation guarantees.
 XHRs to daemon URLs fail the preflight.
 
 **Frame ancestors.** Daemon pages set `Content-Security-Policy: frame-ancestors 'none'`
-and `X-Frame-Options: DENY`. No iframing. Apps can't clickjack the grant UI
-by embedding it.
+and `X-Frame-Options: DENY`. No iframing. App frontends can't clickjack the
+grant UI by embedding it.
 
 **Sec-Fetch enforcement.** Grant POST endpoint rejects requests unless
 `Sec-Fetch-Site: same-origin` and `Sec-Fetch-Dest: document` (form submission
 from the grant page itself). XHR/fetch from any origin is rejected — the grant
 flow only accepts top-level form submissions.
 
-**No cap lets an app touch the grant channel.** There is no cap that exposes
+**No cap exposes the grant channel.** There is no cap that gives the backend
 `fetch(daemon_url)` or `open_url(daemon_url)` or `trigger_launch(other_app)`.
-Apps cannot initiate launches, cannot navigate the operator's browser, cannot
-read or write `grants.json`. The grant channel is operator-exclusive by
+The backend cannot initiate launches, cannot navigate the operator's browser,
+cannot read or write `grants.json`. The grant channel is operator-exclusive by
 construction.
+
+**No cap lets the app show a grant-looking UI.** Apps render inside their own
+origin. Any UI that says "approve these caps" inside an app's page is a phish
+— the grant URL bar and origin chrome must be recognizably the daemon. The
+grant UI has a visibly distinct design and always lives at the daemon origin.
+Operator education is part of this (the "check the URL bar" lesson), but the
+separation of origins makes the phish observable.
+
+**Server-initiated navigation only.** Launching an app produces a 303 redirect
+from the daemon to the app origin. The app cannot initiate a cross-origin
+navigation back to the daemon that looks legitimate — any link it renders to
+`<daemon-host>/grant/...` lands on the real grant page (new token required,
+no pre-filled caps), which refuses to grant anything the operator didn't
+start.
 
 #### Risk-tiered friction: fatigue scales with danger
 
