@@ -115,6 +115,241 @@ Grant decisions are persisted to the same `grants.json` files the CLI uses.
 A grant made in the browser works if the app is later launched from the CLI,
 and vice versa.
 
+### Browser approve flow (concrete mechanics)
+
+The grant flow is a redirect chain. Every step is stateless on the wire and
+backed by the daemon's internal grant store and a short-lived launch-token map.
+
+**Step 1: Launch request.**
+
+User clicks an app in the library. Library JS sends:
+
+```http
+POST /api/daemon/launch
+Content-Type: application/json
+X-CSRF-Token: <session-csrf>
+
+{ "app_id": "alice" }
+```
+
+Daemon loads the manifest, merges with stored grants in `~/.crescent/data/alice/grants.json`,
+checks admin policy. Three possible outcomes:
+
+1. **All required caps granted, no policy conflict:** daemon starts the app if
+   not running, returns `{ "url": "/app/alice/" }`. Library JS redirects.
+2. **Undecided caps (or manifest has new caps since last launch):** daemon
+   mints a **launch token**, returns `{ "redirect": "/grant/alice?t=<token>" }`.
+3. **Admin policy blocks a required cap:** daemon returns
+   `{ "error": "policy_denied", "cap": "fs", "reason": "..." }`. Library shows
+   an inline message; app does not start.
+
+The launch token is a 16-byte random string stored in a server-side map:
+
+```lua
+launch_tokens[token] = {
+  app_id = "alice",
+  operator = session_id,       -- who initiated; checked on submit
+  created_at = os.time(),
+  expires_at = os.time() + 300,  -- 5 min
+  undecided = { "llm_api", "conversations", "fs" },  -- snapshot at launch
+}
+```
+
+Tokens are one-shot — consumed on grant submission — and expire if unused.
+
+**Step 2: Grant UI.**
+
+Browser GETs `/grant/alice?t=<token>`. Daemon:
+
+1. Validates the token: exists, not expired, matches the session operator
+2. Loads the app's manifest
+3. Renders HTML with one form, no JavaScript needed
+
+Response headers:
+```
+Content-Type: text/html; charset=utf-8
+X-Frame-Options: DENY
+Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; form-action 'self'
+Cache-Control: no-store
+```
+
+Page content (sketch):
+
+```
+┌──────────────────────────────────────────────┐
+│  Alice wants to run                          │
+│  ─────────────────                           │
+│  Version 0.1.0                               │
+│  Tags: charactercardv2, ai, llm, roleplay    │
+│                                              │
+│  Alice says:                                 │
+│  "A friendly AI assistant for brainstorming" │
+│                                              │
+│  ─────────────────────────────────           │
+│                                              │
+│  Required capabilities                       │
+│                                              │
+│  ☐ Network access to api.openai.com          │
+│     Anything Alice processes can be sent     │
+│     to api.openai.com. Once sent, that data  │
+│     is outside your control.                 │
+│     [ Alice: "used for chat responses" ]     │
+│                                              │
+│  ☐ Private database (conversations)          │
+│     Alice stores your messages in her own    │
+│     isolated database. Other apps cannot     │
+│     read it.                                 │
+│                                              │
+│  Optional capabilities                       │
+│                                              │
+│  ☐ File system: ~/Documents/alice/           │
+│     Alice can read and write any file        │
+│     under ~/Documents/alice/.                │
+│                                              │
+│  ─────────────────────────────────           │
+│                                              │
+│  [ Deny all ]   [ Allow selected ]           │
+└──────────────────────────────────────────────┘
+```
+
+Details:
+- **Deny is the primary button** (left, default focus, larger), allow is secondary
+- Checkboxes default **unchecked**. No pre-selection.
+- Required caps — if the user denies any required cap, the submit error-outs
+  with "this app cannot run without X" and offers to go back to deny all or
+  approve the required ones
+- App's self-declared reason shown in brackets, visually marked as
+  app-controlled text so operators don't confuse it with the platform's
+  authoritative disclosure
+- Risk descriptions come from the cap factory, not the manifest
+
+Form:
+
+```html
+<form method="POST" action="/grant/alice">
+  <input type="hidden" name="t" value="<token>">
+  <input type="hidden" name="csrf" value="<session-csrf>">
+
+  <input type="checkbox" name="allow" value="llm_api" id="cap-llm_api">
+  <input type="checkbox" name="allow" value="conversations" id="cap-conv">
+  <input type="checkbox" name="allow" value="fs" id="cap-fs">
+
+  <button type="submit" name="decision" value="deny">Deny all</button>
+  <button type="submit" name="decision" value="allow">Allow selected</button>
+</form>
+```
+
+**Step 3: Grant submission.**
+
+```http
+POST /grant/alice
+Content-Type: application/x-www-form-urlencoded
+
+t=<token>&csrf=<csrf>&decision=allow&allow=llm_api&allow=conversations
+```
+
+Daemon:
+
+1. Validates CSRF token against the session
+2. Validates launch token: exists, not expired, operator matches
+3. **Consumes** the launch token (delete from map, even on failure — one-shot)
+4. If `decision=deny`: record `false` for every undecided cap, return error page
+   "Alice was not allowed to start. [Back to library]"
+5. If `decision=allow`:
+   - For each undecided cap, record `true` if in the `allow[]` list, else `false`
+   - Persist the updated `grants.json` atomically (temp file + rename)
+   - Check admin policy again (defense in depth)
+   - Construct caps, call `entry_mod.create(caps)`, mount handler
+   - 303 redirect to `/app/alice/`
+
+If any required cap ends up denied, construction fails, rollback, redirect to
+an error page explaining which required cap was missing.
+
+**Step 4: First request to the app.**
+
+Browser follows the 303 to `GET /app/alice/`. Daemon router matches the prefix,
+strips it, calls `alice.handler({ method = "GET", path = "/", ... })`. The app
+responds with its HTML, which references relative paths that the browser
+resolves under `/app/alice/`.
+
+### Authentication
+
+"Session" above assumes the daemon can identify the operator. Three supported
+modes:
+
+- **Tailscale mode (v1):** trust the connection. Tailscale handles auth at the
+  network layer; the daemon reads a synthetic session id from the client IP. No
+  login, no password.
+- **Token mode:** operator configures a bearer token at setup (stored locally,
+  required in `Authorization: Bearer <token>`). A login page sets a session
+  cookie; subsequent requests use the cookie.
+- **No-auth mode:** daemon binds to `127.0.0.1` only, trusts all local
+  connections. For single-user development on a single machine.
+
+Auth is orthogonal to the grant flow. The grant flow treats "the operator" as
+an abstract principal — whichever auth mode is active maps to a session id.
+
+### CSRF protection
+
+Every HTML form and JSON API call includes a session-bound CSRF token:
+
+- **Initial page load** sets a cookie `session=<sid>; SameSite=Strict; HttpOnly`
+  and sends the matching CSRF token via a `<meta name="csrf" content="...">` tag
+  (for JS) and a `<input type="hidden" name="csrf">` (for forms).
+- **Library JS** reads the meta tag and attaches `X-CSRF-Token` to every
+  fetch.
+- **Daemon validates** that the CSRF header/field matches the cookie's session.
+  Mismatch → 403.
+
+`SameSite=Strict` alone would cover most cases, but CSRF tokens are belt-and-suspenders
+and cost ~nothing.
+
+### Revoke flow
+
+The settings page `/settings` shows all apps with their granted caps:
+
+```
+Alice (running)
+  ✓ llm_api (api.openai.com)  [Revoke]
+  ✓ conversations (db)          [Revoke]
+  [Stop app] [Stop & revoke all]
+
+Bob (not running)
+  ✓ kv                          [Revoke]
+  [Launch] [Revoke all]
+```
+
+Revoke:
+1. `POST /api/daemon/revoke { app_id, cap_name }`
+2. Daemon calls the cap's revocation closure (sets `revoked = true`)
+3. Updates `grants.json` to mark the cap denied
+4. Next cap method call returns `nil, "capability revoked"`
+5. App decides how to handle — typically shows an error to its user
+
+Revoking a required cap effectively kills the app but the process keeps running
+until the operator stops it explicitly. Apps should handle revocation of
+required caps by surfacing an error, not crashing.
+
+### Edge cases
+
+**Launch a running app:** daemon returns `{ url: "/app/alice/" }` immediately,
+no grant flow. The app is already sandboxed with its prior caps.
+
+**Manifest changed since last launch:** detect by comparing the set of declared
+caps to the set in `grants.json`. If new caps appeared, treat them as undecided
+and go through the grant flow. Existing granted/denied decisions are preserved.
+
+**Two concurrent launch attempts for the same app:** first one starts the app,
+second gets `{ url: "/app/alice/" }` since it's already running. Token matchup
+prevents the second browser tab from completing a grant flow meant for a
+different session.
+
+**Browser back button to grant page after submission:** token is already
+consumed, page shows "this grant attempt already completed — [launch again]".
+
+**Operator closes the grant tab:** token expires after 5 minutes. No cleanup
+needed; `grants.json` is untouched.
+
 ### App lifecycle
 
 **Launch:**
