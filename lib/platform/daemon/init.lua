@@ -29,12 +29,16 @@ local M = {}
 --:: http_req = { method: string | nil, path: string | nil, query: string | nil, headers: { [string]: string[] } | nil, body: string | nil }
 --:: http_res = { status: integer | nil, headers: { [string]: unknown }, body: string | nil }
 --:: host_class = { kind: "daemon" | "app" | "unknown", id: string | nil, loopback: boolean | nil }
+--:: app_handler_fn = (http_req, http_res) -> nil
+--:: maybe_app_handler = app_handler_fn | nil
+--:: app_loader_fn = (string) -> (maybe_app_handler, string | nil)
 --:: daemon_opts = {
 --::   host: string | nil,
 --::   time_fn: (() -> integer) | nil,
 --::   random_bytes_fn: ((n: integer) -> { [integer]: number }) | nil,
 --::   index_db: unknown,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
+--::   app_loader: app_loader_fn | nil,
 --::   secure_cookie: boolean | nil,
 --::   prefer_loopback: boolean | nil,
 --:: }
@@ -149,8 +153,14 @@ end
 --   time_fn        : () -> integer — seconds since epoch (injected)
 --   random_bytes_fn: (integer) -> { [integer]: number } — n random bytes 0..255
 --   index_db       : unknown | nil — handle passed to the library app's `caps.index_db`
---   app_handler    : ((req, res, app_id) -> nil) | nil — optional override for
---                    app-origin requests. Defaults to the stub response.
+--   app_handler    : ((req, res, app_id) -> nil) | nil — direct override for
+--                    app-origin requests. Primarily for tests. If set, skips
+--                    app_loader entirely.
+--   app_loader     : (app_id) -> handler, err | nil — on-demand factory that
+--                    returns a (req, res) handler for the app. Called once per
+--                    app_id; the result is cached. Returning nil + err produces
+--                    a 500 response. If neither app_loader nor app_handler is
+--                    provided, app-origin requests return the v1 stub response.
 --
 -- Returned daemon:
 --   d.handle(req, res)        — top-level request handler (Host-based dispatch)
@@ -197,14 +207,70 @@ function M.make(opts)
 	-- tolerates nil and falls back to an empty list.
 	local library_app = library.create({ index_db = index_db }) --: { handler: (http_req, http_res) -> (boolean | nil) }
 
-	-- App-origin handler. v1 stub — step 2 of the daemon track replaces this.
-	local app_handler = opts.app_handler or
+	-- App-origin handler. Three modes, in priority order:
+	--   1. opts.app_handler — direct override (tests use this to bypass loading).
+	--   2. opts.app_loader  — on-demand factory; result is cached per app_id.
+	--   3. v1 stub — informational response for unconfigured daemons.
+	-- Normalizes string header values to { string } arrays on the way out so
+	-- downstream serialize_response (which expects array form after f3e01b9)
+	-- does not throw on handlers that set plain strings.
+	--: ({ [string]: unknown }) -> nil
+	local function normalize_headers(headers)
+		if not headers then return end
+		for k, v in pairs(headers) do
+			if type(v) == "string" then
+				headers[k] = { v }
+			end
+		end
+	end
+
+	local app_handlers = {} --: { [string]: (http_req, http_res) -> nil }
+	local app_load_errors = {} --: { [string]: string }
+
+	local app_handler --: (http_req, http_res, string) -> nil
+	if opts.app_handler then
+		app_handler = opts.app_handler
+	elseif opts.app_loader then
+		local loader = opts.app_loader --: app_loader_fn
 		--: (http_req, http_res, string) -> nil
-		function(req, res, app_id)
+		app_handler = function(req, res, app_id)
+			local cached = app_handlers[app_id]
+			if cached then
+				cached(req, res)
+				normalize_headers(res.headers)
+				return
+			end
+			if app_load_errors[app_id] then
+				res.status = 500
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = "app load failed: " .. app_load_errors[app_id]
+				return
+			end
+			local handler, err = loader(app_id)
+			if not handler then
+				app_load_errors[app_id] = tostring(err or "unknown error")
+				res.status = 500
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = "app load failed: " .. app_load_errors[app_id]
+				return
+			end
+			-- `assert` is the idiomatic narrowing cast: returns its first arg if
+			-- truthy, raises otherwise. Unreachable here because of the check
+			-- above, but the typechecker cannot narrow `handler` across the
+			-- tuple-return + early-return boundary, so we re-state the invariant.
+			local fn = assert(handler)
+			app_handlers[app_id] = fn
+			fn(req, res)
+			normalize_headers(res.headers)
+		end
+	else
+		--: (http_req, http_res, string) -> nil
+		app_handler = function(req, res, app_id)
 			res.status = 200
 			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
 			res.body = "app " .. tostring(app_id) .. " not yet mountable — VM host pending"
 		end
+	end
 
 	-- Daemon-origin router. Reserved prefixes: /grant/*, /auth/* (future).
 	-- /launch/:id is registered inside `make` (below) once all closure state

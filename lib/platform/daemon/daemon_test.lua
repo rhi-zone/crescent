@@ -691,6 +691,122 @@ T.describe("adversarial: multiple __Host-session cookies in one header", functio
 	end)
 end)
 
+T.describe("VM host dispatch via app_loader", function()
+	T.it("loader is invoked once per app_id; handler is cached", function()
+		local calls = 0
+		local d = make_daemon({
+			app_loader = function(app_id)
+				calls = calls + 1
+				return function(req, res)
+					res.status = 200
+					res.headers["Content-Type"] = { "text/plain" }
+					res.body = "hello from " .. app_id
+				end
+			end,
+		})
+		local req1 = make_req("GET", "/", "app-foo.localhost:7777")
+		local res1 = make_res()
+		d.handle(req1, res1)
+		T.eq(res1.status, 200)
+		T.eq(res1.body, "hello from foo")
+		T.eq(calls, 1)
+
+		-- Second request to same app: loader NOT re-invoked.
+		local req2 = make_req("GET", "/other", "app-foo.localhost:7777")
+		local res2 = make_res()
+		d.handle(req2, res2)
+		T.eq(res2.status, 200)
+		T.eq(res2.body, "hello from foo")
+		T.eq(calls, 1)
+	end)
+
+	T.it("different app_ids get different handlers", function()
+		local d = make_daemon({
+			app_loader = function(app_id)
+				return function(req, res)
+					res.status = 200
+					res.body = "app=" .. app_id
+				end
+			end,
+		})
+		local ra, resa = make_req("GET", "/", "app-alpha.localhost:7777"), make_res()
+		local rb, resb = make_req("GET", "/", "app-beta.localhost:7777"),  make_res()
+		d.handle(ra, resa)
+		d.handle(rb, resb)
+		T.eq(resa.body, "app=alpha")
+		T.eq(resb.body, "app=beta")
+	end)
+
+	T.it("loader failure returns 500 with the error message", function()
+		local d = make_daemon({
+			app_loader = function(app_id)
+				return nil, "missing manifest"
+			end,
+		})
+		local req = make_req("GET", "/", "app-broken.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 500)
+		T.ok(res.body:find("missing manifest"), "body should mention the error")
+	end)
+
+	T.it("loader error is cached; loader NOT re-invoked for subsequent requests", function()
+		local calls = 0
+		local d = make_daemon({
+			app_loader = function(app_id)
+				calls = calls + 1
+				return nil, "boom"
+			end,
+		})
+		local req1, res1 = make_req("GET", "/", "app-x.localhost:7777"), make_res()
+		d.handle(req1, res1)
+		T.eq(res1.status, 500)
+		T.eq(calls, 1)
+		local req2, res2 = make_req("GET", "/", "app-x.localhost:7777"), make_res()
+		d.handle(req2, res2)
+		T.eq(res2.status, 500)
+		T.eq(calls, 1, "loader should not retry on cached failure")
+	end)
+
+	T.it("handler setting string headers gets normalized to array form", function()
+		local d = make_daemon({
+			app_loader = function(app_id)
+				return function(req, res)
+					res.status = 200
+					res.headers["Content-Type"] = "text/plain; charset=utf-8"
+					res.body = "ok"
+				end
+			end,
+		})
+		local req = make_req("GET", "/", "app-y.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.eq(type(res.headers["Content-Type"]), "table")
+		T.eq(res.headers["Content-Type"][1], "text/plain; charset=utf-8")
+	end)
+
+	T.it("app_handler override takes precedence over app_loader", function()
+		local loader_calls = 0
+		local d = make_daemon({
+			app_handler = function(req, res, app_id)
+				res.status = 418
+				res.body = "override " .. app_id
+			end,
+			app_loader = function()
+				loader_calls = loader_calls + 1
+				return function() end
+			end,
+		})
+		local req = make_req("GET", "/", "app-z.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 418)
+		T.eq(res.body, "override z")
+		T.eq(loader_calls, 0, "loader not invoked when app_handler is set")
+	end)
+end)
+
 T.describe("_get_cookie", function()
 	T.it("parses a single cookie", function()
 		T.eq(daemon._get_cookie({ cookie = { "a=1" } }, "a"), "1")
