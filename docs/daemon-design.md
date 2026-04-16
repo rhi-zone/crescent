@@ -1456,13 +1456,16 @@ fallback path that ships in the absence of JS on the library page.
   CSRF because it's a state-changing POST and because its response commits
   caps; `/launch/:id` only mints a short-lived token bound to the session,
   which is a narrower authority.
-- **Auto-mint is suppressed on `/launch/:id`.** The session middleware in
-  the daemon-origin pipeline normally mints a fresh session on cookie miss.
-  The launch handler explicitly requires a *pre-existing* session — it
-  inspects the Cookie header itself and returns 401 when absent/unknown,
-  without preventing the middleware's mint. The middleware still sets a
-  `Set-Cookie` on that 401, so a second attempt from the same browser would
-  succeed; but no single request ever "mints and launches in one hop".
+- **Auto-mint is suppressed on `/launch/:id`.** The session middleware that
+  normally mints a fresh `__Host-session` on cookie-miss skips the mint when
+  the path starts with `/launch/`. A direct address-bar paste of
+  `/launch/<id>` fails cleanly with 401 (no `Set-Cookie`) rather than
+  silently minting a cookie that makes the next retry work. The canonical
+  flow reaches `/launch` with a cookie already set by the operator's prior
+  visit to the daemon root (library) — direct paste is not a supported
+  entry point. No security delta vs. the mint-on-401 alternative (cross-site
+  nav attacks fail in both cases because browsers do not auto-retry); the
+  change is pure UX hygiene.
 - **Token format.** 16 random bytes → 32 lowercase hex chars. Stored server-
   side in a plain Lua table keyed by token. One-shot: consumed (deleted)
   on first use, regardless of whether redemption succeeded — a stale or
@@ -1487,10 +1490,22 @@ fallback path that ships in the absence of JS on the library page.
   no query string, so the token never lands in browser history, referrers,
   or copy-paste. The per-app cookie now carries authority for subsequent
   requests on that origin; the token is gone.
-- **No query-string percent-decoding in `parse_query_string`.** The only
-  parameter the daemon reads today is `__launch`, whose charset is hex —
-  no encoding is needed. The current typechecker has solver-level issues
-  with chained `:gsub()` returning `(string, integer)`; adding decoding
-  only to immediately fight the checker is negative value. When the grant
-  POST lands and we start reading `csrf`, `allow[]`, etc., swap for a
-  typecheck-clean URL decoder (likely `lib.url`).
+- **Query-string parsing delegated to `lib.url.parse_query`.** Handles
+  percent-decoding, `+` for space, and `&`/`;` as separators. The daemon
+  does not maintain a local query parser.
+- **Launch tokens are URL-bearer by design; session-binding is architecturally
+  infeasible.** The token record stores `session_id` but the consume path
+  does not check it. The daemon session cookie (`__Host-session`) is scoped
+  to the daemon origin and *not* sent to the app origin, so the consume
+  handler on the app subdomain literally cannot see the caller's daemon
+  session. The only ways to enforce session-binding would be (a) bouncing
+  consume back through the daemon origin (extra hops, no real gain —
+  attacker with the URL can just as well trigger the same bounce), or
+  (b) leaking the daemon session cookie to app origins (defeats origin
+  isolation, which is the whole point). URL-bearer is the correct trade-
+  off at this layer. Mitigations already in place: 5-minute expiry;
+  one-shot (consumed on contact, including failure cases); clean-URL
+  redirect immediately strips the token from the browser URL bar, so
+  history / Referer / copy-paste all see the post-consume URL. Additional
+  belt-and-suspenders for when grant UI lands: emit `Referrer-Policy:
+  no-referrer` on any response carrying `?__launch=…`.

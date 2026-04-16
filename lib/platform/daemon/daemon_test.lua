@@ -525,6 +525,172 @@ T.describe("launch-token redemption on app origin", function()
 	end)
 end)
 
+-- ── Adversarial cases ──────────────────────────────────────────────────────
+-- These cover attack-shaped inputs, not just happy-path edge cases:
+--   (a) URL-bearer token semantic — deliberately not session-bound
+--   (b) malformed or absent __launch parameters
+--   (c) pathological app ids
+--   (d) multiple __Host-session cookies in one Cookie header
+
+T.describe("adversarial: launch-token bearer semantics", function()
+	-- Design note: launch tokens are URL-bearer by design. The daemon session
+	-- cookie is scoped to the daemon origin and not sent to the app origin,
+	-- so the consume handler literally cannot see the caller's daemon
+	-- session. See docs/daemon-design.md "v2 launch-flow notes" for the
+	-- architectural reasoning and the mitigations (5-min expiry, one-shot,
+	-- clean-URL redirect).
+	T.it("leaked token can be consumed on app origin without the daemon session cookie", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		-- Alice mints a launch token for app 1.
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		local token = res.headers["Location"][1]:match("__launch=(%x+)")
+		T.ok(token)
+		-- Bob consumes it on the app origin with NO daemon session cookie at all.
+		local breq = make_req("GET", "/?__launch=" .. token, "app-1.localhost:7777")
+		local bres = make_res()
+		d.handle(breq, bres)
+		T.eq(bres.status, 303, "URL-bearer: any holder of the token can consume")
+		T.ok(bres.headers["Set-Cookie"][1]:find("^__Host%-app%-session%-1="))
+		idx:close()
+	end)
+end)
+
+T.describe("adversarial: malformed __launch parameter", function()
+	T.it("empty __launch value falls through to stub (treated as missing)", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local req = make_req("GET", "/?__launch=", "app-1.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		-- Either stub (no consumption attempted) or 403 — but must not 303 with a new cookie.
+		T.ok(res.status ~= 303, "empty token must not consume")
+		T.eq(res.headers["Set-Cookie"], nil, "empty token must not set a per-app cookie")
+		idx:close()
+	end)
+
+	T.it("non-hex __launch → 403, one-shot consume still applies if it matched", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local req = make_req("GET", "/?__launch=not-a-real-token-zzzzz", "app-1.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 403)
+		idx:close()
+	end)
+
+	T.it("extremely long __launch (4096 chars) rejects without crashing", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local long = string.rep("a", 4096)
+		local req = make_req("GET", "/?__launch=" .. long, "app-1.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 403)
+		idx:close()
+	end)
+
+	T.it("used token is burned even when it belongs to a different app", function()
+		local idx, db = make_index_db()
+		idx:install("/apps/bob.png", { name = "Bob", meta = {} }, 1001)
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		-- Mint a token for app 1.
+		local mreq = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local mres = make_res()
+		d.handle(mreq, mres)
+		local token = mres.headers["Location"][1]:match("__launch=(%x+)")
+		-- Present it on app 2's origin — wrong app → 403.
+		local wreq = make_req("GET", "/?__launch=" .. token, "app-2.localhost:7777")
+		local wres = make_res()
+		d.handle(wreq, wres)
+		T.eq(wres.status, 403)
+		-- Replay on correct origin — token was burned.
+		local creq = make_req("GET", "/?__launch=" .. token, "app-1.localhost:7777")
+		local cres = make_res()
+		d.handle(creq, cres)
+		T.eq(cres.status, 403, "wrong-app contact burns the token")
+		idx:close()
+	end)
+end)
+
+T.describe("adversarial: pathological /launch/:id inputs", function()
+	T.it("/launch/ (empty id) with session does not 303", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.ok(res.status ~= 303, "empty id must not mint a token")
+		idx:close()
+	end)
+
+	T.it("/launch/.. with session → 404, not a traversal", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/..", "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404, "'..' is just a literal app id that doesn't exist")
+		idx:close()
+	end)
+
+	T.it("/launch/<1000-char-id> → 404 without crashing", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local huge_id = string.rep("x", 1000)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/" .. huge_id, "localhost:7777", "__Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+		idx:close()
+	end)
+end)
+
+T.describe("adversarial: multiple __Host-session cookies in one header", function()
+	T.it("when two __Host-session cookies are present, first-match wins (documented behavior)", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		-- Present the valid sid first, garbage second. First-match should succeed.
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777",
+				"__Host-session=" .. sid .. "; __Host-session=ffff"))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 303, "first-match is the valid sid")
+		idx:close()
+	end)
+
+	T.it("garbage first, valid sid second → 401 (first-match picks the wrong cookie)", function()
+		-- Documents the hazard of first-match behavior. __Host- prefix makes
+		-- this nearly unreachable in practice (browsers refuse to set __Host-
+		-- cookies from any scope that doesn't exactly match), but an abusive
+		-- non-browser client can send anything.
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777",
+				"__Host-session=ffff; __Host-session=" .. sid))
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401, "first-match selects the garbage sid")
+		idx:close()
+	end)
+end)
+
 T.describe("_get_cookie", function()
 	T.it("parses a single cookie", function()
 		T.eq(daemon._get_cookie({ cookie = { "a=1" } }, "a"), "1")
