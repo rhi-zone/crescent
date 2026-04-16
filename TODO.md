@@ -61,6 +61,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 
 ## platform daemon — implementation track
 
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
 Full design in `docs/daemon-design.md`. The daemon is the long-running host that serves
 installed apps over HTTP, brokers capability grants, and enforces the per-app browser-side
 sandbox. Threat model: apps (backend + frontend, one author) are the adversary; defense
@@ -113,17 +115,36 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   - [ ] Garbage-collect stale per-app sessions. `app_sessions[<id>][<tok>]`
     records accumulate forever; no LRU, no expiry. Deferred with the daemon
     session reaper.
-  - [ ] `parse_query_string` in daemon/init.lua does NOT percent-decode (the
-    launch token is pure hex, so decoding was typechecker-hostile for no
-    benefit). When grant/auth flows land, swap for `lib.url.decode` or a
-    typecheck-clean equivalent that handles the full encoding. The launch
-    path is safe today precisely because the token charset is `[0-9a-f]`.
   - [ ] Rate limiting on `/launch` is NOT yet wired. Tracked separately in
     the "Rate limiting" bullet below.
-- [ ] **Per-app VM host** — spawn/reuse LuaJIT state per app, env-based sandbox (no `_G`,
-  `debug`, FFI, bytecode loader, raw `require`; per-app `package.loaded`; frozen
-  metatables). Backend caps (`caps.llm`, `caps.kv`, `caps.db`, …) resolve through RPC
-  stubs to daemon-side cap implementations.
+  - [ ] Launch tokens are URL-bearer (not session-bound on consume). The
+    daemon session cookie is scoped to daemon origin and does NOT cross to
+    the app subdomain, so the consume handler literally cannot verify the
+    caller is the session that minted the token. Mitigated by 5-min expiry,
+    one-shot consume, clean-URL 303. Consider `Referrer-Policy: no-referrer`
+    on the launch redirect as belt-and-suspenders to reduce token leak via
+    referer header if an app ever embeds external resources on first paint.
+- [ ] **Per-app VM host** — per-app env built from `lib/sandbox/` + `platform.make_caps()`,
+  served by daemon's Host-based app dispatch. Design resolved 2026-04-17 after
+  mapping existing code:
+  - Isolation: env-based sandbox (same Lua state, per-app env table). Same model
+    `lib/sandbox/` already uses. Fork deferred — add only if a misbehaving app
+    wedges the daemon in practice.
+  - Cap wiring: direct in-process function calls via `platform.make_caps()`.
+    No RPC — the daemon is single-process, so the boundary doesn't exist. Earlier
+    "RPC stubs" framing was inherited from a multi-process mental model.
+  - Dedup: `daemon/cli.lua` has `construct_caps()` (~50 lines) that duplicates
+    `platform.make_caps()`. Switch the daemon to call the factory and delete
+    the duplicate on the way through.
+  - Ongoing: replace `handle_app` stub in `daemon/init.lua` with real per-app
+    dispatch — load app manifest from index DB, build caps via `make_caps`, run
+    app entrypoint in sandbox env, route HTTP request through its
+    `http_server` cap handler.
+  - Open sub-question deferred: how the app's `http_server` cap handler gets
+    registered/invoked by the daemon's request loop (the cap's current shape
+    assumes the app owns the listener). May need a small refactor of
+    `lib/platform/caps/http_server.lua` to expose "register handler" separately
+    from "bind socket". Resolve during implementation.
 - [ ] **Cap grant UI + endpoint** — grant page at daemon origin (not app origin). Zero-JS
   HTML form (no XHR on this page). CSRF token in hidden input. `Sec-Fetch-Site: same-origin`
   + `Sec-Fetch-Dest: document` check. Risk-tiered friction: inert/scoped/local caps grantable
