@@ -18,6 +18,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local daemon = require("lib.platform.daemon")
+local app_loader = require("lib.platform.daemon.app_loader")
 local http_format = require("lib.http.format")
 local socket_server = require("lib.socket.server")
 local app_index = require("lib.platform.index")
@@ -73,18 +74,40 @@ local daemon_host = opts.daemon_host or (opts.host .. ":" .. tostring(opts.port)
 
 -- Open the app index DB (read-only use from the library app is fine; the DB
 -- doesn't need to exist — the library app handles a nil/empty index).
-local index_db
+-- `raw_index_db` is the underlying SQLite handle (used by the daemon for its
+-- own SQL queries — `app_exists` + library app's `caps.index_db`).
+-- `idx` is the wrapped index (exposes `:get(id)`), used by app_loader.
+local raw_index_db
 local idx, ierr = app_index.open(apps_dir .. "/index.db")
 if idx then
-	index_db = idx._db
+	raw_index_db = idx._db
 else
 	io.stderr:write("note: index DB not available (" .. tostring(ierr) .. ") — library will show empty.\n")
+end
+
+-- Per-app URL: subdomain form `http://app-<id>.<daemon-host>/`. Matches the
+-- canonical origin set by classify_host / launch_origin_url.
+--: (string) -> string
+local function app_url(app_id)
+	return "http://app-" .. app_id .. "." .. daemon_host
+end
+
+--: unknown
+local loader_fn
+if idx then
+	loader_fn = app_loader.make({
+		index_db = idx,
+		context = { data_dir = apps_dir },
+		entry_key = "server",
+		app_url = app_url,
+	})
 end
 
 local d = daemon.make({
 	host = daemon_host,
 	time_fn = os.time,
-	index_db = index_db,
+	index_db = raw_index_db,
+	app_loader = loader_fn,
 })
 
 -- ── Socket listener ────────────────────────────────────────────────────────
