@@ -897,6 +897,46 @@ T.describe("VM host dispatch via app_loader", function()
 		T.eq(resb.body, "app=beta")
 	end)
 
+	T.it("handler cache is bounded: LRU eviction re-invokes loader", function()
+		-- Configure a cache of 2. Hit three distinct app_ids: the first is
+		-- least-recently-used when the third is minted and must be evicted.
+		-- A subsequent hit on the first app_id re-invokes the loader.
+		local calls = {} --: { [string]: integer }
+		local d = make_daemon({
+			handler_cache_size = 2,
+			app_loader = function(app_id)
+				calls[app_id] = (calls[app_id] or 0) + 1
+				return function(req, res)
+					res.status = 200
+					res.body = "app=" .. app_id
+				end
+			end,
+		})
+		local function hit(id)
+			local req = make_req("GET", "/", "app-" .. id .. ".localhost:7777")
+			local res = make_res()
+			d.handle(req, res)
+			return res
+		end
+
+		T.eq(hit("a").body, "app=a")
+		T.eq(hit("b").body, "app=b")
+		T.eq(hit("c").body, "app=c")   -- evicts "a"
+		T.eq(calls["a"], 1)
+		T.eq(calls["b"], 1)
+		T.eq(calls["c"], 1)
+
+		-- "a" was evicted: next hit re-invokes the loader.
+		T.eq(hit("a").body, "app=a")
+		T.eq(calls["a"], 2, "loader must be re-invoked after LRU eviction")
+		-- "b" promoted to MRU on its own hit; "c" still cached. Net: cap=2
+		-- holds {a,c}, evicts b on the next distinct mint — sanity-check
+		-- the eviction direction.
+		T.eq(hit("d").body, "app=d")  -- evicts "b" (LRU)
+		T.eq(hit("b").body, "app=b")
+		T.eq(calls["b"], 2, "b was evicted in favor of d; loader re-invoked")
+	end)
+
 	T.it("loader failure returns 500 with the error message", function()
 		local d = make_daemon({
 			app_loader = function(app_id)

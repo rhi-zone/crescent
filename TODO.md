@@ -158,10 +158,13 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     `docs/daemon-isolation.md`. Not urgent for a loopback/Tailscale-private
     daemon; required before any routable-interface deployment alongside the
     grant UI work.
-  - [ ] Handler cache in `daemon/init.lua` (`app_handlers`) is never evicted.
-    Fine for v1 (small N, long-lived daemon), but a long-running multi-user
-    daemon will want LRU + time-based eviction, especially once apps mutate
-    during development.
+  - [x] Handler cache is now an LRU via `lib/cache` (default cap 64,
+    override via `opts.handler_cache_size`). Evicting a handler drops its
+    closure; the next request for the same app_id re-runs the loader.
+    Time-based eviction not wired yet — the current behavior relies on
+    install-time cache-busting (new rowid on reinstall → new app_id →
+    new entry). Revisit if hot-reload needs to invalidate by app_id
+    without an index-DB write.
   - [x] Error cache TTL — `app_load_errors` now stores `{ err, retry_at }`
     (bd0f1c1). 5s window; a transient `load_app` failure self-heals on the
     next request past TTL. Not yet hooked to an explicit admin retry or

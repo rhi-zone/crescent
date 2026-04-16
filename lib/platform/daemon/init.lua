@@ -39,6 +39,7 @@ local M = {}
 --::   index_db: unknown,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
 --::   app_loader: app_loader_fn | nil,
+--::   handler_cache_size: integer | nil,
 --::   secure_cookie: boolean | nil,
 --::   prefer_loopback: boolean | nil,
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
@@ -248,7 +249,16 @@ function M.make(opts)
 		end
 	end
 
-	local app_handlers = {} --: { [string]: (http_req, http_res) -> nil }
+	-- LRU cache for loaded app handlers. Bounded size prevents unbounded
+	-- growth on a daemon that has served a large number of distinct apps
+	-- over its lifetime (e.g. during local iteration — edit, reinstall
+	-- under a new rowid, try again). Eviction drops the closure so the
+	-- next request for that app_id re-runs the loader. Default 64 is a
+	-- guess; override via `handler_cache_size` if you actually serve
+	-- many apps concurrently.
+	local cache = require("lib.cache")
+	local handler_cache_cap = opts.handler_cache_size or 64
+	local app_handlers = assert(cache.new(handler_cache_cap)) --: unknown
 
 	-- Negative cache for load failures. Retained across requests so a broken
 	-- app doesn't retrigger tarball parsing on every hit, but each entry has
@@ -294,7 +304,7 @@ function M.make(opts)
 		local loader = opts.app_loader --: app_loader_fn
 		--: (http_req, http_res, string) -> nil
 		app_handler = function(req, res, app_id)
-			local cached = app_handlers[app_id]
+			local cached = app_handlers:get(app_id) --: ((http_req, http_res) -> nil) | nil
 			if cached then
 				invoke_app_handler(app_id, cached, req, res)
 				return
@@ -324,7 +334,7 @@ function M.make(opts)
 			-- tuple-return + early-return boundary, so we re-state the invariant.
 			local fn = assert(handler)
 			-- Cache BEFORE invoking: a throwing handler must not be evicted.
-			app_handlers[app_id] = fn
+			app_handlers:set(app_id, fn)
 			invoke_app_handler(app_id, fn, req, res)
 		end
 	else
