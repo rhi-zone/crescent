@@ -193,36 +193,36 @@ problem tier 2 would be solving, reinvented badly.
 None of the following is implemented yet. Treat as the v3 bring-up plan,
 not a retrospective.
 
-1. **Stdlib audit + regression test.** Enumerate every symbol reachable from
-   `sandbox.stdlib` recursively (`string.gmatch`, `table.concat`, …). Assert
-   no path leads to `require`, `ffi`, `debug`, `package`, `load`,
-   `loadstring`, `dofile`, `string.dump`, or to `setmetatable` /
-   `getmetatable` applied to primitive-typed values. Commit the assertion
-   as a test so future stdlib additions cannot silently widen the surface.
-2. **`pcall` wrap on per-request handler dispatch.** `daemon/init.lua`'s
-   app-handler branch currently calls `handler(req, res)` directly. Wrap it
-   in `pcall`; on failure, respond 500 with `Content-Type: text/plain` and
-   log the traceback to the daemon's error channel (operator-visible only,
-   never sent to the client). Zero-cost on the happy path.
-3. **Coroutine-per-request + instruction quota.** Resume the handler as a
-   coroutine with `debug.sethook(co, fn, "", N)` (count mode, every N
-   bytecodes). `fn` checks `time_fn() - start_ns > budget_ns` and errors on
-   overrun. Budget is per-request, not per-app-lifetime. First-party apps
-   (library, card) can opt out of the hook at install; third-party apps
-   get it by default. This also answers the concurrent-request question
-   from [`daemon-design.md` — Open Question 2](daemon-design.md) — blocking
-   handlers yield instead of hogging the request loop.
-4. **Frozen primitive metatables.** Either set `__metatable` sentinels on
-   `""`, `0`, `false` at daemon startup so `getmetatable` returns a
-   non-actionable value, or omit `getmetatable`/`setmetatable` from the
-   stdlib entirely. The audit in step 1 decides which.
+1. **Stdlib audit + regression test.** Landed — `lib/sandbox/sandbox_audit_test.lua`
+   (24 assertions). Fixed two real findings in passing: `string.dump` was
+   reachable via `("x").dump` (now shadowed by a shallow-copy `string` table)
+   and `getmetatable("")` returned the mutable shared string metatable (now
+   sealed with `__metatable = false` at sandbox module load).
+2. **`pcall` wrap on per-request handler dispatch.** Landed — `daemon/init.lua`'s
+   `invoke_app_handler` uses `xpcall` with `debug.traceback`, produces a 500
+   + `"internal server error"` body on failure, and calls an optional
+   `opts.on_handler_error(app_id, err, tb)` callback for operator visibility.
+3. **Coroutine-per-request + instruction quota.** Still open — the real
+   engineering. Resume the handler as a coroutine with `debug.sethook(co,
+   fn, "", N)` (count mode, every N bytecodes). `fn` checks
+   `time_fn() - start_ns > budget_ns` and errors on overrun. Budget is
+   per-request, not per-app-lifetime. First-party apps (library, card) can
+   opt out of the hook at install; third-party apps get it by default. This
+   also answers the concurrent-request question from
+   [`daemon-design.md` — Open Question 2](daemon-design.md) — blocking
+   handlers yield instead of hogging the request loop. Interaction with
+   LuaJIT traces needs benchmarking before this lands.
+4. **Frozen primitive metatables.** Partially landed under step 1. Strings
+   now carry `__metatable = false`. Numbers, booleans, and nil return
+   `nil` from `getmetatable` on LuaJIT, so there is no metatable to freeze
+   for those — the audit test covers this explicitly. No further action
+   needed unless a future LuaJIT change exposes a primitive metatable.
 5. **Revisit tier 2 if-and-only-if.** Track the escalation triggers above.
    Do not build a state-per-app bridge on speculation.
 
-Steps 1–2 are cheap and unblock treating the sandbox as the primary defense.
-Step 3 is where the real engineering lives — the hook interaction with
-LuaJIT traces needs benchmarking. Step 4 is a line-item once the audit
-settles.
+Steps 1, 2, and 4 are landed. Step 3 is the remaining meaningful work
+before we can call tier 1 complete — it turns the in-process sandbox from
+"honest about its gaps" to "containment for a hostile installed app."
 
 ## Non-goals
 
