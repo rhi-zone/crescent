@@ -183,14 +183,37 @@ function M.make(opts)
 	if opts.random_bytes_fn then
 		random_bytes_fn = opts.random_bytes_fn
 	else
-		-- Fallback: math.random. Not cryptographically secure — callers on
-		-- production interfaces MUST inject a CSPRNG. See TODO.md.
-		random_bytes_fn = function(n)
+		-- Default: lib/rand, which uses getrandom(2) or /dev/urandom. On
+		-- platforms where neither is available (e.g. no ffi, or Windows
+		-- without the cryptography shim) we fall back to math.random —
+		-- NOT cryptographically secure, suitable only for local dev. A
+		-- routable-interface deployment MUST inject `random_bytes_fn`.
+		--: (integer) -> { [integer]: number }
+		local function insecure(n)
 			local out = {} --: { [integer]: number }
 			for i = 1, n do
 				out[i] = math.random(0, 255)
 			end
 			return out
+		end
+		local ok_rand, rand = pcall(require, "lib.rand")
+		if ok_rand then
+			-- Probe at startup so we know the CSPRNG path actually works
+			-- before a session mint first relies on it.
+			local probe = rand.bytes(1)
+			if probe then
+				random_bytes_fn = function(n)
+					local s = rand.bytes(n)
+					if not s then return insecure(n) end
+					local out = {} --: { [integer]: number }
+					for i = 1, n do out[i] = s:byte(i) end
+					return out
+				end
+			else
+				random_bytes_fn = insecure
+			end
+		else
+			random_bytes_fn = insecure
 		end
 	end
 	-- `any` is a deliberate escape hatch: the library app's `caps.index_db`

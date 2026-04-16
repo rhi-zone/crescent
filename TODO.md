@@ -75,8 +75,11 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   `HttpOnly __Host-session` cookie auth, mount existing library app at the root.
   Implemented in `lib/platform/daemon/` (init + cli + daemon_test, 46 assertions).
   **Carried over from v1 skeleton — address as downstream steps land:**
-  - [ ] Replace `math.random` session ID source with a real CSPRNG. Current fallback is
-    adequate for local dev only; any routable deployment must inject `random_bytes_fn`.
+  - [x] Default session ID source now uses `lib/rand` (getrandom(2) /
+    /dev/urandom), falling back to `math.random` only when neither CSPRNG
+    path is available. Injected `random_bytes_fn` still takes precedence.
+    Routable deployments should still inject their own fn to stay
+    independent of `lib/rand`'s probe result.
   - [x] Session idle-TTL + sweep-on-mint (15bbee1). Daemon sessions drop after
     24h of idleness — swept on mint and rejected inline at `/launch` and at
     top-level dispatch. Same pattern ported to per-app sessions.

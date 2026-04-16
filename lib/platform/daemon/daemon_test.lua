@@ -259,6 +259,28 @@ T.describe("__Host-session cookie", function()
 		idx:close()
 	end)
 
+	T.it("default random_bytes_fn mints non-trivial session ids", function()
+		-- Without an injected RNG, the daemon picks up lib/rand (getrandom(2)
+		-- or /dev/urandom) and falls back to math.random only if neither is
+		-- available. Either way, 32 hex chars must be produced and a pair of
+		-- mints must differ. The assertion is deliberately weak — we're not
+		-- testing entropy, just that the default path yields a session id at
+		-- all and that two calls don't collide.
+		local idx, db = make_index_db()
+		-- Note: NOT passing random_bytes_fn. make_daemon would supply a
+		-- deterministic one; go via daemon.make directly.
+		local d = daemon.make({ host = "localhost:7777", index_db = db, time_fn = function() return 1000 end })
+
+		local r1 = make_res(); d.handle(make_req("GET", "/healthz", "localhost:7777"), r1)
+		local r2 = make_res(); d.handle(make_req("GET", "/healthz", "localhost:7777"), r2)
+		local sid1 = r1.headers["Set-Cookie"][1]:match("__Host%-session=([^;]+)")
+		local sid2 = r2.headers["Set-Cookie"][1]:match("__Host%-session=([^;]+)")
+		T.ok(sid1 and #sid1 == 32, "sid1 must be 32 hex chars: " .. tostring(sid1))
+		T.ok(sid2 and #sid2 == 32, "sid2 must be 32 hex chars")
+		T.neq(sid1, sid2, "two mints must produce different ids")
+		idx:close()
+	end)
+
 	T.it("omits Secure on loopback by default; emits it when opted in", function()
 		-- Default (loopback-safe): no Secure.
 		local d = make_daemon()
