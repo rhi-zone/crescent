@@ -985,6 +985,35 @@ T.describe("VM host dispatch via app_loader", function()
 		T.eq(calls["b"], 2, "b was evicted in favor of d; loader re-invoked")
 	end)
 
+	T.it("handler_ttl expires entries: loader re-invoked after TTL", function()
+		local calls = 0
+		local tfn, tref = make_time_fn(1000)
+		local d = make_daemon({
+			time_fn = tfn,
+			handler_ttl = 10, -- 10 seconds
+			app_loader = function()
+				calls = calls + 1
+				return function(req, res) res.status = 200 end
+			end,
+		})
+		local function hit()
+			local req = make_req("GET", "/", "app-x.localhost:7777")
+			local res = make_res()
+			d.handle(req, res)
+			return res
+		end
+
+		T.eq(hit().status, 200)
+		T.eq(calls, 1, "first load")
+		T.eq(hit().status, 200)
+		T.eq(calls, 1, "cached — no reload")
+
+		tref.now = tref.now + 20  -- advance past TTL
+
+		T.eq(hit().status, 200)
+		T.eq(calls, 2, "TTL expired — loader re-invoked")
+	end)
+
 	T.it("loader failure returns 500 with the error message", function()
 		local d = make_daemon({
 			app_loader = function(app_id)

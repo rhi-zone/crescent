@@ -176,13 +176,11 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     routable-interface deployment, and entangled with the grant UI
     work (both move "apps are untrusted" from "documented" to
     "enforced").
-  - [ ] Handler cache has LRU eviction but no time-based invalidation.
-    Install-time cache-busting (new rowid → new app_id) covers the
-    normal reinstall path. A hot-reload workflow that wants to
-    invalidate by app_id without an index-DB write would need either
-    a TTL option on `lib/cache` entries (already supported in the
-    library — just not wired) or an explicit `d.invalidate(app_id)`
-    seam.
+  - [x] Handler cache has LRU eviction but no time-based invalidation.
+    Wired `handler_ttl` daemon opt: passes `{ttl, clock}` to
+    `cache.new`. Default nil (no expiry — install-time cache-busting
+    covers the normal reinstall path). Hot-reload workflow: pass a
+    short `handler_ttl`.
   - [ ] `app_load_errors` has a 5s retry TTL but no link to index-DB
     change notifications. A partially-written tarball during
     `pkg install` heals in 5s; an explicit operator "retry this app"

@@ -51,6 +51,7 @@ local M = {}
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
 --::   app_loader: app_loader_fn | nil,
 --::   handler_cache_size: integer | nil,
+--::   handler_ttl: number | nil,
 --::   secure_cookie: boolean | nil,
 --::   prefer_loopback: boolean | nil,
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
@@ -281,7 +282,10 @@ function M.make(opts)
 	-- many apps concurrently.
 	local cache = require("lib.cache")
 	local handler_cache_cap = opts.handler_cache_size or 64
-	local app_handlers = assert(cache.new(handler_cache_cap)) --: unknown
+	local app_handlers = assert(cache.new(handler_cache_cap, {
+		ttl   = opts.handler_ttl,
+		clock = opts.handler_ttl and time_fn or nil,
+	})) --: unknown
 
 	-- Negative cache for load failures. Retained across requests so a broken
 	-- app doesn't retrigger tarball parsing on every hit, but each entry has
