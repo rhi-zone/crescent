@@ -2961,12 +2961,19 @@ local process_type_decls
 -- Load a declaration file into ctx.scope.
 -- Translates "lib.web.js_types" → "lib/web/js_types.lua", parses it, and
 -- processes its type alias and declare bindings using process_type_decls.
+-- Also tries "lib/web/js_types/init.lua" if the .lua path does not exist
+-- (directory packages follow the ?/init.lua convention).
 --: (Ctx, string) -> nil
 local function load_decl_file(ctx, mod_name)
     local parse_mod = require("lib.type.static.parse")
     -- Resolve module name to file path: "lib.web.js_types" → "lib/web/js_types.lua"
     local rel_path = mod_name:gsub("%.", "/") .. ".lua"
     local f = io.open(rel_path, "r")
+    if not f then
+        -- Fallback: directory package — try "lib/web/js_types/init.lua"
+        rel_path = mod_name:gsub("%.", "/") .. "/init.lua"
+        f = io.open(rel_path, "r")
+    end
     if not f then return end
     local source = f:read("*a")
     f:close()

@@ -13,13 +13,7 @@
 --:: require "lib.web.js_types"
 --:: declare document = Document
 
--- Type aliases for reactive primitives (mirrors lib/reactive/init.lua declarations).
--- Note: --:: require "lib.reactive" would resolve to lib/reactive.lua (wrong path),
--- so we redeclare the types we need directly here.
---:: Lens = { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }
---:: Prism = { preview: (unknown) -> unknown, review: (unknown) -> unknown }
---:: Signal = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Signal, narrow: (Prism) -> Signal }
---:: Computed = { get: () -> unknown, subscribe: ((unknown) -> ()) -> (() -> ()), dispose: () -> (), focus: (Lens) -> Computed, narrow: (Prism) -> Computed }
+--:: require "lib.reactive"
 
 --:: EventHandler = (ev: AnyEvent) -> ()
 --:: AttrMap = { [string]: (unknown) -> string }
