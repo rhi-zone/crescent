@@ -1333,3 +1333,315 @@ T.describe("DELETE /api/apps/:id", function()
 		idx:close()
 	end)
 end)
+
+-- ── Cap grant UI ────────────────────────────────────────────────────────────
+
+T.describe("GET /apps/:id/grant", function()
+	-- Helper: make a daemon + index with one app that has caps declared.
+	-- Returns d, idx, app_id (integer).
+	local function make_grant_daemon(extra)
+		extra = extra or {}
+		local idx = index.open(":memory:")
+		local app_id = idx:install("/apps/alice.png", {
+			name = "Alice",
+			meta  = { description = "AI character", tags = {} },
+			caps  = {
+				characters = { type = "fs", required = true },
+				http_client = { type = "http_client", required = false },
+			},
+		}, 1000)
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+			index_obj       = idx,
+		})
+		return d, idx, app_id
+	end
+
+	local function prime(d)
+		local req = make_req("GET", "/healthz", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		local sc = res.headers["Set-Cookie"]
+		if not sc then return nil end
+		return sc[1]:match("__Host%-session=([^;]+)")
+	end
+
+	T.it("requires an existing session — no cookie → 401", function()
+		local d, idx, id = make_grant_daemon()
+		local req = make_req("GET", "/apps/" .. id .. "/grant", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+		idx:close()
+	end)
+
+	T.it("renders an HTML form listing the app's cap names", function()
+		local d, idx, id = make_grant_daemon()
+		local sid = prime(d)
+		local req = make_req("GET", "/apps/" .. id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		local ct = res.headers["Content-Type"] and res.headers["Content-Type"][1] or ""
+		T.ok(ct:find("text/html", 1, true), "expected HTML content type: " .. ct)
+		T.ok(res.body and res.body:find("characters",  1, true), "expected characters cap in body")
+		T.ok(res.body:find("http_client", 1, true), "expected http_client cap in body")
+		T.ok(res.body:find("Alice",       1, true), "expected app name in body")
+		T.ok(res.body:find('<input type=hidden name=csrf', 1, true), "expected CSRF hidden field")
+		idx:close()
+	end)
+
+	T.it("shows stored grant decisions as pre-selected radio buttons", function()
+		local d, idx, id = make_grant_daemon()
+		idx:set_grant(id, "characters", true)
+		idx:set_grant(id, "http_client", false)
+		local sid = prime(d)
+		local req = make_req("GET", "/apps/" .. id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		-- The form rows include checked attributes. The exact HTML has
+		-- 'value=grant checked' for granted caps and 'value=deny checked' for denied.
+		T.ok(res.body:find('value=grant checked', 1, true),
+			"expected grant radio pre-checked for characters")
+		T.ok(res.body:find('value=deny checked', 1, true),
+			"expected deny radio pre-checked for http_client")
+		idx:close()
+	end)
+
+	T.it("returns 404 for a non-existent app id", function()
+		local d, idx, id = make_grant_daemon()
+		local sid = prime(d)
+		local req = make_req("GET", "/apps/9999/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+		idx:close()
+	end)
+
+	T.it("sets strict CSP header", function()
+		local d, idx, id = make_grant_daemon()
+		local sid = prime(d)
+		local req = make_req("GET", "/apps/" .. id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		local csp = res.headers["Content-Security-Policy"]
+		T.ok(csp, "expected CSP header")
+		local csp_val = type(csp) == "table" and csp[1] or tostring(csp)
+		T.ok(csp_val:find("default-src 'none'", 1, true), "CSP must block all by default")
+		idx:close()
+	end)
+end)
+
+T.describe("POST /apps/:id/grant", function()
+	local function make_grant_daemon()
+		local idx = index.open(":memory:")
+		local app_id = idx:install("/apps/alice.png", {
+			name = "Alice",
+			meta  = { description = "AI character", tags = {} },
+			caps  = {
+				characters = { type = "fs", required = true },
+			},
+		}, 1000)
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+			index_obj       = idx,
+		})
+		return d, idx, app_id
+	end
+
+	-- Prime session, extract sid and csrf token from the GET grant page.
+	local function prime_grant(d, idx, app_id)
+		local req0 = make_req("GET", "/healthz", "localhost:7777")
+		local res0 = make_res()
+		d.handle(req0, res0)
+		local sid = res0.headers["Set-Cookie"][1]:match("__Host%-session=([^;]+)")
+
+		local req1 = make_req("GET", "/apps/" .. app_id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		local res1 = make_res()
+		d.handle(req1, res1)
+		local csrf = res1.body and res1.body:match('name=csrf value="([^"]+)"')
+		return sid, csrf
+	end
+
+	local function post_grant(d, app_id, sid, body)
+		local req = make_req("POST", "/apps/" .. app_id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		req.headers["content-type"] = { "application/x-www-form-urlencoded" }
+		req.body = body
+		local res = make_res()
+		d.handle(req, res)
+		return res
+	end
+
+	T.it("requires session — no cookie → 401", function()
+		local d, idx, id = make_grant_daemon()
+		local req = make_req("POST", "/apps/" .. id .. "/grant", "localhost:7777")
+		req.body = "csrf=x&cap_characters=grant"
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+		idx:close()
+	end)
+
+	T.it("rejects missing or wrong CSRF token → 403", function()
+		local d, idx, id = make_grant_daemon()
+		local sid, csrf = prime_grant(d, idx, id)
+		-- Missing CSRF.
+		local res1 = post_grant(d, id, sid, "cap_characters=grant")
+		T.eq(res1.status, 403)
+		-- Wrong CSRF.
+		local res2 = post_grant(d, id, sid, "csrf=badtoken&cap_characters=grant")
+		T.eq(res2.status, 403)
+		idx:close()
+	end)
+
+	T.it("stores grant decisions and redirects to app origin", function()
+		local d, idx, id = make_grant_daemon()
+		local sid, csrf = prime_grant(d, idx, id)
+		local res = post_grant(d, id, sid,
+			"csrf=" .. csrf .. "&cap_characters=grant")
+		T.eq(res.status, 303)
+		local loc = res.headers["Location"] and res.headers["Location"][1] or ""
+		T.ok(loc:find("app-" .. id .. ".localhost:7777", 1, true),
+			"expected redirect to app origin: " .. loc)
+		-- Grant decision must be persisted.
+		local grants = idx:get_grants(id)
+		T.eq(grants["characters"], true)
+		idx:close()
+	end)
+
+	T.it("stores deny decision", function()
+		local d, idx, id = make_grant_daemon()
+		local sid, csrf = prime_grant(d, idx, id)
+		post_grant(d, id, sid, "csrf=" .. csrf .. "&cap_characters=deny")
+		local grants = idx:get_grants(id)
+		T.eq(grants["characters"], false)
+		idx:close()
+	end)
+
+	T.it("invalidates handler cache so next app request re-loads with new grants", function()
+		local loader_calls = 0
+		local idx = index.open(":memory:")
+		local app_id = idx:install("/apps/alice.png", {
+			name = "Alice",
+			meta  = {},
+			caps  = { characters = { type = "fs", required = true } },
+		}, 1000)
+		-- Pre-store a grant so the grant gate won't redirect.
+		idx:set_grant(app_id, "characters", true)
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+			index_obj       = idx,
+			app_loader      = function(_id)
+				loader_calls = loader_calls + 1
+				return function(req, res) res.status = 200; res.body = "ok" end
+			end,
+		})
+		-- First app request → loader called once, handler cached.
+		local req1 = make_req("GET", "/", "app-" .. app_id .. ".localhost:7777")
+		local res1 = make_res()
+		d.handle(req1, res1)
+		T.eq(loader_calls, 1)
+
+		-- POST to grant page → must invalidate cache.
+		local req0 = make_req("GET", "/healthz", "localhost:7777")
+		local res0 = make_res()
+		d.handle(req0, res0)
+		local sid = res0.headers["Set-Cookie"][1]:match("__Host%-session=([^;]+)")
+		local greq = make_req("GET", "/apps/" .. app_id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		local gres = make_res()
+		d.handle(greq, gres)
+		local csrf = gres.body:match('name=csrf value="([^"]+)"')
+		local preq = make_req("POST", "/apps/" .. app_id .. "/grant", "localhost:7777",
+			"__Host-session=" .. sid)
+		preq.body = "csrf=" .. csrf .. "&cap_characters=grant"
+		d.handle(preq, make_res())
+
+		-- Second app request → loader must be called again (cache was invalidated).
+		local req2 = make_req("GET", "/", "app-" .. app_id .. ".localhost:7777")
+		local res2 = make_res()
+		d.handle(req2, res2)
+		T.eq(loader_calls, 2, "loader must be re-invoked after grant POST invalidates cache")
+		idx:close()
+	end)
+end)
+
+T.describe("grant dispatch gate", function()
+	local function make_grant_daemon(pre_grants)
+		local idx = index.open(":memory:")
+		local app_id = idx:install("/apps/alice.png", {
+			name = "Alice",
+			meta  = {},
+			caps  = { characters = { type = "fs", required = true } },
+		}, 1000)
+		if pre_grants then
+			for cname, decision in pairs(pre_grants) do
+				idx:set_grant(app_id, cname, decision)
+			end
+		end
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+			index_obj       = idx,
+			app_loader      = function(_id)
+				return function(req, res)
+					res.status = 200
+					res.body = "loaded"
+				end
+			end,
+		})
+		return d, idx, app_id
+	end
+
+	T.it("undecided required cap → 303 redirect to grant page", function()
+		local d, idx, id = make_grant_daemon()
+		local req = make_req("GET", "/", "app-" .. id .. ".localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 303)
+		local loc = res.headers["Location"] and res.headers["Location"][1] or ""
+		T.ok(loc:find("/apps/" .. id .. "/grant", 1, true),
+			"redirect must point to grant page: " .. loc)
+		idx:close()
+	end)
+
+	T.it("all required caps decided → app handler loads normally", function()
+		local d, idx, id = make_grant_daemon({ characters = true })
+		local req = make_req("GET", "/", "app-" .. id .. ".localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.eq(res.body, "loaded")
+		idx:close()
+	end)
+
+	T.it("denied required cap still passes gate (denial is a decision)", function()
+		-- The gate only blocks undecided caps. Denying a cap is a decision —
+		-- the app loads (with that cap absent/nil) and may fail at runtime.
+		local d, idx, id = make_grant_daemon({ characters = false })
+		local req = make_req("GET", "/", "app-" .. id .. ".localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200, "denied cap is decided — gate must not redirect")
+		idx:close()
+	end)
+end)

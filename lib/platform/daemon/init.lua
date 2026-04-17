@@ -38,6 +38,7 @@ local M = {}
 --::   time_fn: (() -> integer) | nil,
 --::   random_bytes_fn: ((n: integer) -> { [integer]: number }) | nil,
 --::   index_db: unknown,
+--::   index_obj: unknown,
 --::   remove_fn: ((path: string) -> (true | nil, string | nil)) | nil,
 --::   sources: { [integer]: source_entry } | nil,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
@@ -47,7 +48,7 @@ local M = {}
 --::   prefer_loopback: boolean | nil,
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
 --:: }
---:: session_record = { created_at: integer, last_seen: integer }
+--:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string, expires_at: integer }
 --:: app_session_record = { app_id: string, created_at: integer, last_seen: integer }
 --:: daemon = {
@@ -224,6 +225,10 @@ function M.make(opts)
 	-- is a SQLite handle, a nil, or a test stub; we don't want to bake a
 	-- schema here. Library app tolerates nil.
 	local index_db = opts.index_db --: any
+	-- Wrapped index object (lib/platform/index) for operations that require
+	-- typed methods (get_grants, set_grant, etc.). Optional — tests that pass
+	-- a raw db handle without the wrapper continue to work via index_db.
+	local index_obj = opts.index_obj --: any
 	-- Injected for testability. Defaults to os.remove.
 	--: (string) -> (true | nil, string | nil)
 	local remove_fn = opts.remove_fn or os.remove
@@ -299,6 +304,24 @@ function M.make(opts)
 		normalize_headers(res.headers)
 	end
 
+	-- Collect all cap declarations from a manifest (top-level + all entry sections).
+	--: (unknown) -> { [string]: unknown }
+	local function all_cap_decls_from_manifest(manifest)
+		local caps = {}
+		if type(manifest) ~= "table" then return caps end
+		if type(manifest.caps) == "table" then
+			for k, v in pairs(manifest.caps) do caps[k] = v end
+		end
+		if type(manifest.entry) == "table" then
+			for _, entry_def in pairs(manifest.entry) do
+				if type(entry_def) == "table" and type(entry_def.caps) == "table" then
+					for k, v in pairs(entry_def.caps) do caps[k] = v end
+				end
+			end
+		end
+		return caps
+	end
+
 	local app_handler --: (http_req, http_res, string) -> nil
 	if opts.app_handler then
 		local override = opts.app_handler --: (http_req, http_res, string) -> nil
@@ -325,6 +348,33 @@ function M.make(opts)
 				end
 				rawset(app_load_errors, app_id, nil)
 			end
+			-- Grant gate: if index_obj is available and the app has required caps
+			-- without a stored grant decision, redirect to the grant page rather
+			-- than loading with auto_grants. Only runs on first load (cache miss).
+			if index_obj and index_obj.get_grants and index_obj.get then
+				local iapp_id = tonumber(app_id)
+				local irow = iapp_id and index_obj:get(iapp_id)
+				if irow then
+					local cap_decls = all_cap_decls_from_manifest(irow.manifest or {})
+					local stored = index_obj:get_grants(iapp_id)
+					local undecided = {}
+					for cname, decl in pairs(cap_decls) do
+						local required = type(decl) ~= "table" or decl.required ~= false
+						if required and stored[cname] == nil then
+							undecided[#undecided + 1] = cname
+						end
+					end
+					if #undecided > 0 then
+						local grant_url = "http://" .. host .. "/apps/" .. app_id .. "/grant"
+						res.status = 303
+						res.headers["Location"] = { grant_url }
+						res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+						res.body = ""
+						return
+					end
+				end
+			end
+
 			local handler, err = loader(app_id)
 			if not handler then
 				local msg = tostring(err or "unknown error")
@@ -415,7 +465,8 @@ function M.make(opts)
 			end
 		end
 		local sid = bytes_to_hex(random_bytes_fn(16))
-		sessions[sid] = { created_at = now, last_seen = now }
+		local csrf = bytes_to_hex(random_bytes_fn(16))
+		sessions[sid] = { created_at = now, last_seen = now, csrf_token = csrf }
 		return sid
 	end
 
@@ -495,6 +546,176 @@ function M.make(opts)
 		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
 		res.body = body
 	end
+
+	-- HTML-escape a value for safe embedding in HTML attributes or text.
+	--: (unknown) -> string
+	local function h(v)
+		return (tostring(v)
+			:gsub("&", "&amp;")
+			:gsub("<", "&lt;")
+			:gsub(">", "&gt;")
+			:gsub('"', "&quot;")
+			:gsub("'", "&#39;"))
+	end
+
+	-- Parse application/x-www-form-urlencoded body.
+	--: (string | nil) -> { [string]: string }
+	local function parse_form(body)
+		local params = {}
+		for kv in (body or ""):gmatch("[^&]+") do
+			local k, v = kv:match("^([^=]+)=?(.*)")
+			if k then
+				k = k:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end):gsub("+", " ")
+				v = v:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end):gsub("+", " ")
+				params[k] = v
+			end
+		end
+		return params
+	end
+
+	-- ── Grant page (GET /apps/:id/grant) ──────────────────────────────────────
+	-- Zero-JS HTML form. Serves with strict CSP: no scripts, no inline styles,
+	-- form-action restricted to self. All user/app strings HTML-escaped.
+	-- Requires an existing valid session.
+
+	r:get("/apps/:id/grant", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sess_rec = presented and sessions[presented] or nil
+		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+			if sess_rec and presented then rawset(sessions, presented, nil) end
+			plain(res, 401, "unauthorized")
+			return
+		end
+		sess_rec.last_seen = time_fn()
+
+		local app_id_str = (req.path or ""):match("^/apps/(%d+)/grant$")
+		if not app_id_str or not index_obj then
+			plain(res, 404, "not found")
+			return
+		end
+		local app_id = tonumber(app_id_str)
+		local row = index_obj:get(app_id)
+		if not row then
+			plain(res, 404, "app not found")
+			return
+		end
+
+		local manifest = row.manifest or {}
+		local cap_decls = all_cap_decls_from_manifest(manifest)
+		local stored_grants = index_obj:get_grants(app_id)
+		local csrf = sess_rec.csrf_token or ""
+
+		-- Sort cap names for stable display.
+		local cap_names = {}
+		for k in pairs(cap_decls) do cap_names[#cap_names + 1] = k end
+		table.sort(cap_names)
+
+		local rows_html = {}
+		for _, cname in ipairs(cap_names) do
+			local decl = cap_decls[cname]
+			local cap_type = type(decl) == "table" and (decl.type or cname) or cname
+			local required = type(decl) ~= "table" or decl.required ~= false
+			local req_label = required and "<span class=req>required</span>" or "<span class=opt>optional</span>"
+			local stored = stored_grants[cname]  -- true / false / nil
+			local grant_checked  = stored == true  and 'checked' or ''
+			local deny_checked   = stored == false and 'checked' or ''
+			rows_html[#rows_html + 1] = '<tr><td class=cname>' .. h(cname) .. '</td>'
+				.. '<td class=ctype>' .. h(cap_type) .. '</td>'
+				.. '<td>' .. req_label .. '</td>'
+				.. '<td><label><input type=radio name="cap_' .. h(cname) .. '" value=grant ' .. grant_checked .. '> Grant</label>'
+				.. ' <label><input type=radio name="cap_' .. h(cname) .. '" value=deny '  .. deny_checked  .. '> Deny</label></td></tr>'
+		end
+
+		local app_name = h(manifest.name or row.name or ("App " .. app_id_str))
+		local body = '<!doctype html>\n<html lang=en>\n<head>\n'
+			.. '<meta charset=utf-8>\n<meta name=viewport content="width=device-width,initial-scale=1">\n'
+			.. '<title>Grant permissions — ' .. app_name .. '</title>\n'
+			.. '<style>body{font-family:system-ui,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;color:#e8e8e8;background:#1a1a2e}'
+			.. 'h1{margin:0 0 .25rem}p.sub{color:#888;margin:0 0 1.5rem}table{width:100%;border-collapse:collapse}'
+			.. 'th,td{padding:.5rem .75rem;border-bottom:1px solid #2a2a4a;text-align:left}'
+			.. 'th{background:#12122a;font-weight:600}.cname{font-family:monospace}.ctype{color:#8888aa}'
+			.. '.req{color:#e06060;font-size:.8rem}.opt{color:#6060a0;font-size:.8rem}'
+			.. '.actions{margin-top:1.5rem}button{padding:.5rem 1.25rem;background:#4a4a8a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.95rem}'
+			.. 'button:hover{background:#5a5a9a}</style>\n'
+			.. '</head>\n<body>\n'
+			.. '<h1>Grant permissions</h1>\n'
+			.. '<p class=sub>' .. app_name .. '</p>\n'
+			.. '<form method=POST>\n'
+			.. '<input type=hidden name=csrf value="' .. h(csrf) .. '">\n'
+			.. '<table><thead><tr><th>Cap</th><th>Type</th><th>Required</th><th>Decision</th></tr></thead>\n'
+			.. '<tbody>' .. table.concat(rows_html, '\n') .. '</tbody></table>\n'
+			.. '<div class=actions><button type=submit>Save and launch</button></div>\n'
+			.. '</form>\n</body>\n</html>'
+
+		res.status = 200
+		res.headers["Content-Type"] = { "text/html; charset=utf-8" }
+		res.headers["Content-Security-Policy"] = {
+			"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"
+		}
+		res.body = body
+	end)
+
+	-- ── Grant POST (POST /apps/:id/grant) ─────────────────────────────────────
+	-- Processes form submission. Validates CSRF token, stores grant decisions,
+	-- invalidates the cached handler so the next request re-loads with new caps,
+	-- then 303-redirects to the app origin.
+
+	r:post("/apps/:id/grant", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sess_rec = presented and sessions[presented] or nil
+		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+			if sess_rec and presented then rawset(sessions, presented, nil) end
+			plain(res, 401, "unauthorized")
+			return
+		end
+		sess_rec.last_seen = time_fn()
+
+		local app_id_str = (req.path or ""):match("^/apps/(%d+)/grant$")
+		if not app_id_str or not index_obj then
+			plain(res, 404, "not found")
+			return
+		end
+
+		local params = parse_form(req.body)
+
+		-- CSRF check: compare form field against session token.
+		if not sess_rec.csrf_token or params.csrf ~= sess_rec.csrf_token then
+			plain(res, 403, "invalid CSRF token")
+			return
+		end
+
+		local app_id = tonumber(app_id_str)
+		local row = index_obj:get(app_id)
+		if not row then
+			plain(res, 404, "app not found")
+			return
+		end
+
+		local cap_decls = all_cap_decls_from_manifest(row.manifest or {})
+
+		for cname in pairs(cap_decls) do
+			local val = params["cap_" .. cname]
+			if val == "grant" then
+				index_obj:set_grant(app_id, cname, true)
+			elseif val == "deny" then
+				index_obj:set_grant(app_id, cname, false)
+			end
+			-- No radio selected → leave undecided (no change to DB)
+		end
+
+		-- Invalidate the cached handler so the next request to the app origin
+		-- re-loads the app with the newly stored grant decisions.
+		app_handlers:delete(app_id_str)
+
+		-- Redirect to app origin (which will now load with correct grants).
+		local origin = launch_origin_url(app_id_str)
+		res.status = 303
+		res.headers["Location"] = { origin }
+		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		res.body = ""
+	end)
 
 	-- /launch/:id — mint a one-shot launch token bound to the current session
 	-- and 303-redirect to the app origin with `?__launch=<hex>`. The browser
