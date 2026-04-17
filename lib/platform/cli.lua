@@ -4,6 +4,8 @@
 -- Usage:
 --   luajit lib/platform/cli.lua <app> [entrypoint] [-- args...]
 --   luajit lib/platform/cli.lua import <card.png> [--runtime=path] [--apps-dir=path]
+--   luajit lib/platform/cli.lua list [--apps-dir=path] [--tag=TAG]
+--   luajit lib/platform/cli.lua caps [--apps-dir=path] <app_id> [<cap_name> [key=value...] [--reset]]
 --
 -- Platform flags (before --):
 --   --port=N            HTTP port for http_server cap (default 7860)
@@ -539,6 +541,225 @@ local function run_dir_entrypoint(app, entry_path, caps)
 	return result, nil
 end
 
+-- ── Shared index helpers ──────────────────────────────────────────────────
+
+-- Open the app index DB; writes error + exits on failure.
+local function open_index(apps_dir_arg)
+	local apps_dir = expand_home(apps_dir_arg or "~/.crescent/apps")
+	mkdir_p(apps_dir)
+	local app_index_mod = require("lib.platform.index")
+	local idx, ierr = app_index_mod.open(apps_dir .. "/index.db")
+	if not idx then
+		io.stderr:write("error: cannot open index: " .. tostring(ierr) .. "\n")
+		os.exit(1)
+	end
+	return idx
+end
+
+-- Collect all cap declarations across top-level and all entry sections.
+-- Returns { [cap_name]: decl_table }.
+local function all_cap_decls(manifest)
+	local caps = {}
+	if type(manifest.caps) == "table" then
+		for k, v in pairs(manifest.caps) do caps[k] = v end
+	end
+	if type(manifest.entry) == "table" then
+		for _, entry_def in pairs(manifest.entry) do
+			if type(entry_def) == "table" and type(entry_def.caps) == "table" then
+				for k, v in pairs(entry_def.caps) do caps[k] = v end
+			end
+		end
+	end
+	return caps
+end
+
+-- Sorted keys of a table.
+local function sorted_keys(t)
+	local keys = {}
+	for k in pairs(t) do keys[#keys + 1] = k end
+	table.sort(keys)
+	return keys
+end
+
+-- ── list subcommand ────────────────────────────────────────────────────────
+
+local function cmd_list(args)
+	-- Usage: luajit lib/platform/cli.lua list [--apps-dir=PATH] [--tag=TAG]
+	local apps_dir_arg, tag_filter
+	for i = 2, #args do
+		local a = args[i]
+		local key, val = a:match("^%-%-([^=]+)=(.*)")
+		if key == "apps-dir" then apps_dir_arg = val
+		elseif key == "tag" then tag_filter = val
+		elseif a:sub(1,1) == "-" then
+			io.stderr:write("unknown flag: " .. a .. "\n"); os.exit(1)
+		end
+	end
+
+	local idx = open_index(apps_dir_arg)
+	local rows = tag_filter and idx:list({ tag = tag_filter }) or idx:list()
+	idx:close()
+
+	if #rows == 0 then
+		io.write("(no apps installed)\n")
+		return
+	end
+	for _, row in ipairs(rows) do
+		local tags = row.tags and #row.tags > 0 and ("  [" .. table.concat(row.tags, ", ") .. "]") or ""
+		io.write(string.format("%4d  %s%s\n", row.id, row.name, tags))
+	end
+end
+
+-- ── caps subcommand ────────────────────────────────────────────────────────
+
+local function cmd_caps(args)
+	-- Usage:
+	--   luajit lib/platform/cli.lua caps [--apps-dir=PATH] <app_id>
+	--       Show all caps with manifest defaults and stored overrides.
+	--   luajit lib/platform/cli.lua caps [--apps-dir=PATH] <app_id> <cap_name> [key=value ...]
+	--       Show or set overrides for one cap.
+	--   luajit lib/platform/cli.lua caps [--apps-dir=PATH] <app_id> <cap_name> --reset
+	--       Clear all overrides for one cap.
+
+	local apps_dir_arg
+	local positional = {}
+	local do_reset = false
+	local kv_pairs = {}
+
+	for i = 2, #args do
+		local a = args[i]
+		local key, val = a:match("^%-%-([^=]+)=(.*)")
+		if key == "apps-dir" then
+			apps_dir_arg = val
+		elseif a == "--reset" then
+			do_reset = true
+		elseif a:sub(1,1) == "-" then
+			io.stderr:write("unknown flag: " .. a .. "\n"); os.exit(1)
+		elseif a:find("=", 1, true) then
+			kv_pairs[#kv_pairs + 1] = a
+		else
+			positional[#positional + 1] = a
+		end
+	end
+
+	if #positional < 1 then
+		io.stderr:write("usage: luajit lib/platform/cli.lua caps [--apps-dir=PATH] <app_id> [<cap_name> [key=value...] [--reset]]\n")
+		os.exit(1)
+	end
+
+	local idx = open_index(apps_dir_arg)
+	local app_id = tonumber(positional[1])
+	if not app_id then
+		io.stderr:write("error: app_id must be a number — run 'list' to see installed apps\n")
+		idx:close(); os.exit(1)
+	end
+
+	local row = idx:get(app_id)
+	if not row then
+		io.stderr:write("error: no app with id " .. tostring(app_id) .. "\n")
+		idx:close(); os.exit(1)
+	end
+
+	local cap_name = positional[2]
+	local decls = all_cap_decls(row.manifest or {})
+
+	-- Helper: print one cap's fields with override annotations.
+	local function print_cap(cname, decl)
+		local cap_type = type(decl) == "table" and (decl.type or cname) or cname
+		local overrides = idx:get_cap_config(app_id, cname)
+		io.write("  " .. cname .. "  (" .. cap_type .. ")\n")
+		-- Collect fields: manifest fields (minus meta-keys) + any extra override keys.
+		local skip = { type=true, required=true, configurable_fields=true, sensitive_fields=true }
+		local fields = {}
+		local seen = {}
+		if type(decl) == "table" then
+			for k in pairs(decl) do
+				if not skip[k] then fields[#fields + 1] = k; seen[k] = true end
+			end
+		end
+		for k in pairs(overrides) do
+			if not seen[k] then fields[#fields + 1] = k end
+		end
+		table.sort(fields)
+		if #fields == 0 then
+			io.write("    (no configurable fields)\n")
+		else
+			for _, fk in ipairs(fields) do
+				local mval = type(decl) == "table" and decl[fk] or nil
+				local oval = overrides[fk]
+				if oval ~= nil then
+					io.write(string.format("    %-20s %s  [override]\n", fk, tostring(oval)))
+				else
+					io.write(string.format("    %-20s %s\n", fk, tostring(mval)))
+				end
+			end
+		end
+	end
+
+	if not cap_name then
+		-- Show all caps.
+		io.write("app: " .. tostring(row.name) .. "  (id " .. tostring(app_id) .. ")\n")
+		for _, cname in ipairs(sorted_keys(decls)) do
+			print_cap(cname, decls[cname])
+		end
+		idx:close()
+		return
+	end
+
+	-- Validate cap exists in manifest.
+	if not decls[cap_name] then
+		io.stderr:write("error: cap '" .. cap_name .. "' not declared in manifest\n")
+		io.stderr:write("declared caps: " .. table.concat(sorted_keys(decls), ", ") .. "\n")
+		idx:close(); os.exit(1)
+	end
+
+	if do_reset then
+		local ok, err = idx:reset_cap_config(app_id, cap_name)
+		if not ok then
+			io.stderr:write("error: " .. tostring(err) .. "\n")
+			idx:close(); os.exit(1)
+		end
+		io.write("reset: " .. cap_name .. " overrides cleared\n")
+		idx:close()
+		return
+	end
+
+	if #kv_pairs == 0 then
+		-- Show this one cap.
+		io.write("app: " .. tostring(row.name) .. "  (id " .. tostring(app_id) .. ")\n")
+		print_cap(cap_name, decls[cap_name])
+		idx:close()
+		return
+	end
+
+	-- Set field overrides.
+	local existing = idx:get_cap_config(app_id, cap_name)
+	for _, kv in ipairs(kv_pairs) do
+		local k, v = kv:match("^([^=]+)=(.*)")
+		if not k then
+			io.stderr:write("error: invalid key=value pair: " .. kv .. "\n")
+			idx:close(); os.exit(1)
+		end
+		-- Coerce: boolean > number > string.
+		local coerced
+		if     v == "true"  then coerced = true
+		elseif v == "false" then coerced = false
+		elseif tonumber(v)  then coerced = tonumber(v)
+		else                     coerced = v
+		end
+		existing[k] = coerced
+	end
+	local ok, err = idx:set_cap_config(app_id, cap_name, existing)
+	if not ok then
+		io.stderr:write("error: " .. tostring(err) .. "\n")
+		idx:close(); os.exit(1)
+	end
+	for _, kv in ipairs(kv_pairs) do
+		io.write("set: " .. cap_name .. "." .. kv .. "\n")
+	end
+	idx:close()
+end
+
 -- ── Import subcommand ──────────────────────────────────────────────────────
 
 local function cmd_import(args)
@@ -637,6 +858,12 @@ end
 -- Check for subcommands before parsing args (subcommands have their own arg format).
 if arg[1] == "import" then
 	cmd_import(arg)
+	return
+elseif arg[1] == "list" then
+	cmd_list(arg)
+	return
+elseif arg[1] == "caps" then
+	cmd_caps(arg)
 	return
 end
 
