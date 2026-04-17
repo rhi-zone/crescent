@@ -210,6 +210,93 @@ caps.clock, revoke_fns.clock             = time_cap()  -- app accesses as caps.c
 sandbox.run(script, sandbox.env(sandbox.stdlib, { globals = { caps = caps } }))
 ```
 
+### Configurable caps
+
+Cap declarations in `manifest.json` are authored by the app developer and read-only
+after install. But some fields must vary by deployment — an `fs` root pointing to
+`~/SillyTavern/public/characters` is wrong for anyone who installed SillyTavern
+elsewhere. Configurable caps let the operator override specific fields without
+touching the manifest.
+
+**Mechanism.** The manifest marks which fields are operator-configurable:
+
+```json
+"characters": {
+  "type": "fs",
+  "root": "~/SillyTavern/public/characters",
+  "readonly": true,
+  "configurable_fields": ["root"]
+}
+```
+
+`configurable_fields` is a UI hint: these are the fields the grant UI surfaces as
+"expected to vary per deployment." Operators can also override any other known field
+for a cap type via CLI — they're not locked out of fields the author didn't list.
+What they cannot do is override fields the cap type doesn't define (validation rejects
+unknown field names).
+
+**Storage.** Overrides live in the index DB, separate from the app manifest:
+
+```sql
+CREATE TABLE app_cap_config (
+  app_id       INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  cap_name     TEXT    NOT NULL,
+  overrides_json TEXT  NOT NULL DEFAULT '{}',
+  PRIMARY KEY (app_id, cap_name)
+);
+```
+
+One row per (app, cap_name). The value is a flat JSON object of field overrides.
+No schema for the JSON — the platform's cap factory validates fields when
+constructing the cap.
+
+**Merge semantics.** At cap construction time the platform:
+1. Takes the manifest cap declaration as the base.
+2. Reads the stored `overrides_json` for this (app_id, cap_name).
+3. Shallow-merges overrides on top (override values win).
+4. Validates all resulting fields against the cap type's known schema.
+5. If validation fails, construction fails with a clear error naming the bad field
+   and expected type — no silent fallback to the manifest default.
+
+**Validation policy.** "The operator should always know what went wrong." Errors are
+surfaced at both set time (unknown field name for cap type) and construction time
+(type mismatch). Never silently ignore a bad override.
+
+**Sensitive fields.** Some cap fields are credentials or secrets (API tokens,
+passwords). The manifest can flag them:
+
+```json
+"llm_api": {
+  "type": "http_client",
+  "host": "api.openai.com",
+  "api_key": "",
+  "configurable_fields": ["api_key"],
+  "sensitive_fields": ["api_key"]
+}
+```
+
+`sensitive_fields` is currently a UI hint only — masked display in the grant UI,
+no behavioral difference in storage. Future: encrypted at rest in a separate
+`app_cap_secrets` table. Passwords stored as hashes (bcrypt/argon2) are fine in
+`overrides_json` since the hash is the credential, not the plaintext.
+
+**Grant UI relationship.** Grant decisions (allow/deny per cap) and cap config
+(field overrides) are stored in separate tables. The grant UI shows them together:
+one panel per cap, with the allow/deny toggle and any configurable fields below it.
+
+**CLI surface** (minimal, until the grant UI lands):
+
+```
+crescent caps <app_id>
+    -- list all caps with current manifest values and stored overrides
+
+crescent caps <app_id> <cap_name> <field>=<value>
+    -- set one field override; validates immediately, errors with field name + type
+
+crescent caps <app_id> <cap_name> --reset
+    -- clear all overrides for this cap (revert to manifest defaults)
+```
+
 ### `caps.self` — app package access
 
 Read-only access to the app's own package contents: image metadata chunks and

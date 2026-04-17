@@ -67,25 +67,16 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
     "load more". Daemon passes `opts.sources` through to library.
     Daemon CLI auto-loads source adapter apps from the index at startup
     (`meta.source_adapter=true`). 17 new tests.
-  - [ ] **Configurable cap roots (HIGH PRIORITY).** `manifest.json` cap
-    roots are hardcoded strings (e.g. `"root": "~/SillyTavern/public/characters"`).
-    This is wrong for any non-default install path (e.g. `/mnt/ssd/ai/SillyTavern/`).
-    Design needed: per-app user-editable cap configuration stored separately from the
-    manifest (which is read-only, authored by the app). Open questions: where does
-    config live (per-app row in index DB? separate `app_config` table? sidecar file)?
-    How does the grant UI expose it? Does the app declare "configurable" fields in the
-    manifest and the platform merges them with stored overrides? Unblock this before
-    ST adapter is usable for anyone with a non-default install.
-  - [x] **ST adapter: SQLite metadata cache.** Reads CCv2 iTXt `chara`
-    chunk from each PNG on cache miss, stores name/description/tags in
-    `card_meta` SQLite table. Lazy per-page population (page size ≤ 200).
-    Cache persists across restarts; no auto-invalidation. 77 tests. (next commit)
-  - [ ] **ST adapter: read PNG metadata.** The stub uses the filename as
-    the card name and leaves description/tags/thumb_url null. The next
-    iteration should read CCv2 iTXt chunks from each PNG for the display
-    name, `data.description`, and `data.tags`, and serve thumbnails at
-    `GET /thumb/:id`. `lib/png` already handles iTXt; `lib/formats/ccv2`
-    handles the data field.
+  - [ ] **Configurable caps (HIGH PRIORITY).** Cap fields declared in
+    `manifest.json` (paths, URLs, credentials, etc.) are hardcoded by the
+    app author and can't be overridden by the operator. Needs design — see
+    `docs/platform-design.md` "Configurable caps" once written.
+  - [x] **ST adapter: PNG metadata (name/description/tags).** Implemented
+    via SQLite cache: reads CCv2 iTXt `chara` chunk on miss, stores in
+    `card_meta`. 77 tests. (d97da4f)
+  - [ ] **ST adapter: thumbnails (`GET /thumb/:id`).** Blocked on
+    `stb_image_resize` FFI binding (see below). Serve resized PNG crop
+    from the card file; raw card PNGs are too large to use as-is.
   - [ ] **Extract `lib/ccv2-ui/` shared library.** Chat rendering,
     markdown, LLM-cap wiring currently live in
     `lib/platform/apps/charactercardv2/dom.lua`. Both canonical-CCv2 and
