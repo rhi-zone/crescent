@@ -144,6 +144,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **On typechecker topics, read `lib/type/static/CLAUDE.md` and `docs/type-system.md` in full before doing anything.** Design decisions, solver rules, fuzz suite design, and performance bar are all there. Don't improvise from first principles.
 
+**Never assume a typechecker feature is missing without checking.** The typechecker has significant generic machinery: `$Require<T>`, `$Values<T>`, `$IpairsValues<T>`, match types, intrinsics, etc. Before saying "X isn't supported" or "we'd need generics for this," search the typechecker source and docs. "It'll stay ugly until X lands" is a claim that X doesn't exist — only say it after verifying X is actually absent.
+
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
 **When verifying a newly built library, run only that library's test file — not the full suite.** Use `luajit lib/test/cli.lua lib/mylib/` or `luajit lib/test/cli.lua lib/mylib/mylib_test.lua` directly. The test runner accepts both file paths and directories. Only run the full suite (`luajit lib/test/cli.lua`) when checking global regressions.

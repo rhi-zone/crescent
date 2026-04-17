@@ -16,10 +16,10 @@ local M = {}
 --:: Maybe = { value: unknown }
 --:: Lens = { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }
 --:: Prism = { preview: (unknown) -> Maybe, review: (unknown) -> unknown }
---:: Signal = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
---:: Computed = { get: () -> unknown, subscribe: ((unknown) -> ()) -> (() -> ()), dispose: () -> (), focus: (Lens) -> Computed, narrow: (Prism) -> Computed }
---:: Focused = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
---:: Narrowed = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
+--:: Signal<T> = { get: () -> T, set: (T) -> (), update: ((T) -> T) -> (), subscribe: ((T) -> ()) -> (() -> ()), focus: (Lens) -> Focused<T>, narrow: (Prism) -> Narrowed<T> }
+--:: Computed<T> = { get: () -> T, subscribe: ((T) -> ()) -> (() -> ()), dispose: () -> (), focus: (Lens) -> Computed<T>, narrow: (Prism) -> Computed<T> }
+--:: Focused<T> = { get: () -> T, set: (T) -> (), update: ((T) -> T) -> (), subscribe: ((T) -> ()) -> (() -> ()), focus: (Lens) -> Focused<T>, narrow: (Prism) -> Narrowed<T> }
+--:: Narrowed<T> = { get: () -> T, set: (T) -> (), update: ((T) -> T) -> (), subscribe: ((T) -> ()) -> (() -> ()), focus: (Lens) -> Focused<T>, narrow: (Prism) -> Narrowed<T> }
 
 -- ── Batch ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ end
 
 -- signal(init) — mutable signal.
 -- Returns { get, set, update, subscribe, focus, narrow }
---: (init: unknown) -> Signal
+--: <T>(init: T) -> Signal<T>
 function M.signal(init)
 	local value = init
 	-- rawset(t,k,nil) deletes entries; pairs() never yields nil keys.
@@ -130,7 +130,7 @@ end
 -- Memoized: fn() only runs when a dep has changed since the last get().
 -- Notifies subscribers only when the output value changes (via is_same).
 -- Call c.dispose() when the computed is no longer needed to release dep subscriptions.
---: (fn: () -> unknown, deps: { [number]: Signal | Computed }) -> Computed
+--: (fn: () -> unknown, deps: { [number]: Signal<unknown> | Computed<unknown> }) -> Computed<unknown>
 function M.computed(fn, deps)
 	local c = {}
 	local _cache     -- last computed value
@@ -214,7 +214,7 @@ end
 -- effect(fn, deps) — run fn immediately and re-run when any dep changes.
 -- fn: () -> void; deps: array of signals or computed values.
 -- Returns unsubscribe function.
---: (fn: () -> (), deps: { [number]: Signal | Computed }) -> (() -> ())
+--: (fn: () -> (), deps: { [number]: Signal<unknown> | Computed<unknown> }) -> (() -> ())
 function M.effect(fn, deps)
 	fn()
 	local unsubs = {}
@@ -233,7 +233,7 @@ end
 -- focused(source, lens) — read/write signal through a Lens.
 -- source: Signal a; lens: Lens a b -> Signal b
 -- Lens API: { get: s->a, set: (s,a)->s }
---: (source: Signal | Focused | Narrowed, lens: Lens) -> Focused
+--: (source: Signal<unknown> | Focused<unknown> | Narrowed<unknown>, lens: Lens) -> Focused<unknown>
 function M.focused(source, lens)
 	local f = {}
 
@@ -281,7 +281,7 @@ end
 -- get() returns nil when the prism doesn't match the current value.
 -- set(b) is a no-op when b is nil.
 -- Prism API: { preview: s->Maybe a, review: a->s }
---: (source: Signal | Focused | Narrowed, prism: Prism) -> Narrowed
+--: (source: Signal<unknown> | Focused<unknown> | Narrowed<unknown>, prism: Prism) -> Narrowed<unknown>
 function M.narrowed(source, prism)
 	local function extract()
 		local m = prism.preview(source.get())

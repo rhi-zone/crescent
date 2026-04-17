@@ -18,9 +18,9 @@
 --:: EventHandler = (ev: AnyEvent) -> ()
 --:: AttrMap = { [string]: (unknown) -> string }
 --:: CleanupArray = { [integer]: () -> () }
---:: KeyEntry = { node: Node, cleanup: () -> (), sig: Signal }
+--:: KeyEntry = { node: Node, cleanup: () -> (), sig: Signal<unknown> }
 --:: KeyMap = { [string]: KeyEntry }
---:: ListSignal = { get: () -> { [integer]: unknown }, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
+--:: ListSignal = { get: () -> { [integer]: unknown }, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused<unknown>, narrow: (Prism) -> Narrowed<unknown> }
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -32,11 +32,11 @@ local Lens   = require("lib.fp.optics.lens")
 
 -- Hoist typed references to R functions to avoid unknown-indexed-module errors.
 -- Preceding-line annotations assert the type without requiring RHS to be typed.
---: (unknown) -> Signal
+--: (unknown) -> Signal<unknown>
 local R_signal   = R.signal
---: (Signal, Lens) -> Focused
+--: (Signal<unknown>, Lens) -> Focused<unknown>
 local R_focused  = R.focused
---: (() -> unknown, { [integer]: unknown }) -> Computed
+--: (() -> unknown, { [integer]: unknown }) -> Computed<unknown>
 local R_computed = R.computed
 
 local M = {}
@@ -54,7 +54,7 @@ function M.element(tag, attrs_raw, children_raw)
 	local attrs    = (attrs_raw    or {}) --: AttrMap
 	local children = (children_raw or {}) --: { [integer]: string | ((unknown) -> Node) }
 	return function(signal_raw)
-		local signal = signal_raw --: Signal
+		local signal = signal_raw --: Signal<unknown>
 		local el = document.createElement(tag) --: HTMLElement
 		-- Reactive attribute bindings
 		for attr, fn in pairs(attrs) do
@@ -89,7 +89,7 @@ end
 function M.text(f_raw)
 	local f = f_raw --: (unknown) -> string
 	return function(signal_raw)
-		local signal = signal_raw --: Signal
+		local signal = signal_raw --: Signal<unknown>
 		local tn = document.createTextNode("")
 		widget.subscribe_now(signal, function(v)
 			tn.data = f(v)
@@ -123,7 +123,7 @@ end
 -- Must be called inside a with_scope context.
 function M.bind_input(el_raw, signal_raw)
 	local el = el_raw --: HTMLInputElement
-	local sig = signal_raw --: Signal
+	local sig = signal_raw --: Signal<unknown>
 	widget.subscribe_now(signal_raw, function(v)
 		el.value = v
 	end)
@@ -141,7 +141,7 @@ end
 -- DOM → Signal: "change" event sets signal.set(el.checked).
 -- Must be called inside a with_scope context.
 function M.bind_checkbox(el_raw, signal_raw)
-	local sig = signal_raw --: Signal
+	local sig = signal_raw --: Signal<unknown>
 	-- The subscribe_now handler uses el_raw directly (untyped) to avoid
 	-- the typechecker inferring handler type from HTMLInputElement.checked: boolean.
 	widget.subscribe_now(signal_raw, function(v)
@@ -266,7 +266,7 @@ end
 -- rendered fresh; existing keys have their signal updated in-place. This
 -- preserves DOM nodes for stable keys across reorders and partial updates.
 function M.each(item_widget, get_key)
-	item_widget = item_widget --: (Signal) -> Node
+	item_widget = item_widget --: (Signal<unknown>) -> Node
 	get_key = get_key --: ((unknown) -> string) | nil
 	return function(list_signal_raw)
 		local list_signal = list_signal_raw --: ListSignal
@@ -298,19 +298,21 @@ function M.each(item_widget, get_key)
 			for i = 1, #items do
 				local idx = i
 				-- Index lens: focus list signal on element at position idx.
+				-- type(s_raw)=="table" narrows unknown→table so #s_raw and s_raw[k] work.
+				--: Lens
 				local item_lens = Lens.new(
 					function(s_raw)
-						--: { [integer]: unknown }
-						local arr = s_raw
-						return arr[idx]
+						if type(s_raw) == "table" then return s_raw[idx] end
+						return nil
 					end,
 					function(s_raw, v)
-						--: { [integer]: unknown }
-						local arr = s_raw
-						local copy = {}
-						for j = 1, #arr do copy[j] = arr[j] end
-						copy[idx] = v
-						return copy
+						if type(s_raw) == "table" then
+							local copy = {}
+							for j = 1, #s_raw do copy[j] = s_raw[j] end
+							copy[idx] = v
+							return copy
+						end
+						return s_raw
 					end
 				)
 				local item_sig = R_focused(list_signal, item_lens)
@@ -409,7 +411,7 @@ function M.each(item_widget, get_key)
 			-- Unkeyed: re-render on length change only
 			render_all(list_signal.get())
 
-			--: Computed
+			--: Computed<unknown>
 			local len_computed = R_computed(function()
 				return #list_signal.get()
 			end, { list_signal })
@@ -435,7 +437,7 @@ end
 function M.show(inner_widget, predicate_raw)
 	local predicate = predicate_raw --: (unknown) -> boolean
 	return function(signal_raw)
-		local signal = signal_raw --: Signal
+		local signal = signal_raw --: Signal<unknown>
 		local wrapper = document.createElement("div")
 		wrapper.setAttribute("data-show", "")
 
