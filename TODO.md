@@ -254,8 +254,8 @@ Remaining known gaps (acceptable, no fix planned):
 ## lib/hast and unified pipeline
 
 - [x] **`lib/hast`** — mdast-to-hast transformer + HTML serializer. Input: mdast Root node. Output: hast Root node (element/text/raw nodes following hast spec). `hast.to_html(tree)` → HTML string. Phase 1: covers all mdast Phase 1 node types. 66 assertions.
-- [ ] **`lib/unified`** — thin pipeline runner: `unified.pipeline({ parse, ...transforms, stringify })` applies a list of `(tree) -> tree` functions in sequence. No plugin system yet — just function composition. Enables `mdast.parse | mdast_to_hast | hast.stringify` as a one-liner.
-- [ ] **`lib/rehype`** (eventually) — hast plugins (slug, autolink headings, syntax highlight, sanitize). Port from rehype ecosystem once hast is stable.
+- [x] **`lib/unified`** — pipeline runner (`:use(plugin, opts)`, `:process(source)`). 23 tests.
+- [x] **`lib/rehype`** — hast plugins ported: slug, autolink-headings, sanitize, highlight, and ~20 more. See `lib/unified/STATUS.md`.
 
 ## CRITICAL: fuzz the typechecker against the full type system spec as invariants
 
