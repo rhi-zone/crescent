@@ -77,6 +77,53 @@ T.describe("platform index", function()
 			T.eq(all[1].name, "coolapp")
 			idx:close()
 		end)
+
+		T.it("preserves id on reinstall at the same path", function()
+			-- Previously INSERT OR REPLACE created a new AUTOINCREMENT id
+			-- on every reinstall, which would orphan derived rows
+			-- (app_tags, apps_fts) pointing at the old id. We now UPDATE in
+			-- place for same-path reinstalls.
+			local idx = index.open(DB_PATH)
+			local id1 = idx:install("/app.png", { name = "v1" }, 1000)
+			local id2 = idx:install("/app.png", { name = "v2" }, 2000)
+			T.eq(id1, id2, "id must be stable across reinstall")
+			idx:close()
+		end)
+
+		T.it("syncs app_tags rows with the manifest's tags", function()
+			local idx = index.open(DB_PATH)
+			local id = idx:install("/app.png", {
+				name = "A", meta = { tags = { "one", "two" } },
+			}, 1000)
+			local iter = idx._db:query(
+				"SELECT t.name FROM app_tags at JOIN tags t ON t.id = at.tag_id " ..
+				"WHERE at.app_id = ? ORDER BY t.name", id)
+			local names = {}
+			for n in iter do names[#names + 1] = n end
+			T.eq(#names, 2)
+			T.eq(names[1], "one")
+			T.eq(names[2], "two")
+			idx:close()
+		end)
+
+		T.it("reinstall replaces tag associations (no stale rows)", function()
+			local idx = index.open(DB_PATH)
+			local id = idx:install("/app.png", {
+				name = "A", meta = { tags = { "keep", "drop" } },
+			}, 1000)
+			idx:install("/app.png", {
+				name = "A", meta = { tags = { "keep", "added" } },
+			}, 2000)
+			local iter = idx._db:query(
+				"SELECT t.name FROM app_tags at JOIN tags t ON t.id = at.tag_id " ..
+				"WHERE at.app_id = ? ORDER BY t.name", id)
+			local names = {}
+			for n in iter do names[#names + 1] = n end
+			T.eq(#names, 2)
+			T.eq(names[1], "added")
+			T.eq(names[2], "keep")
+			idx:close()
+		end)
 	end)
 
 	T.describe("get", function()
@@ -114,6 +161,69 @@ T.describe("platform index", function()
 			T.ok(idx:get(id))
 			idx:uninstall(id)
 			T.ok(not idx:get(id))
+			idx:close()
+		end)
+
+		T.it("cleans up app_tags and apps_fts rows", function()
+			local idx = index.open(DB_PATH)
+			local id = idx:install("/rm.png", {
+				name = "Gone", meta = { tags = { "x", "y" } },
+			}, 1000)
+			idx:uninstall(id)
+			local at_iter = idx._db:query(
+				"SELECT COUNT(*) FROM app_tags WHERE app_id = ?", id)
+			T.eq(at_iter(), 0, "app_tags rows left behind after uninstall")
+			local fts_iter = idx._db:query(
+				"SELECT COUNT(*) FROM apps_fts WHERE rowid = ?", id)
+			T.eq(fts_iter(), 0, "apps_fts row left behind after uninstall")
+			idx:close()
+		end)
+	end)
+
+	T.describe("apps_fts search", function()
+		T.it("trigram matches on name", function()
+			local idx = index.open(DB_PATH)
+			idx:install("/alice.png", { name = "Alice" }, 1000)
+			idx:install("/bob.png",   { name = "Bob"   }, 1001)
+			local iter = idx._db:query(
+				"SELECT rowid FROM apps_fts WHERE apps_fts MATCH 'ali'")
+			local hits = {}
+			for id in iter do hits[#hits + 1] = id end
+			T.eq(#hits, 1)
+			idx:close()
+		end)
+
+		T.it("trigram matches on description", function()
+			local idx = index.open(DB_PATH)
+			idx:install("/a.png", {
+				name = "A", meta = { description = "Roleplay dungeon" },
+			}, 1000)
+			idx:install("/b.png", { name = "B" }, 1001)
+			local iter = idx._db:query(
+				"SELECT COUNT(*) FROM apps_fts WHERE apps_fts MATCH 'dung'")
+			T.eq(iter(), 1)
+			idx:close()
+		end)
+
+		T.it("is case-insensitive", function()
+			local idx = index.open(DB_PATH)
+			idx:install("/a.png", { name = "AliceInWonderland" }, 1000)
+			local iter = idx._db:query(
+				"SELECT COUNT(*) FROM apps_fts WHERE apps_fts MATCH 'WONDER'")
+			T.eq(iter(), 1)
+			idx:close()
+		end)
+
+		T.it("reinstall updates the FTS row (no stale matches)", function()
+			local idx = index.open(DB_PATH)
+			idx:install("/a.png", { name = "OldName" }, 1000)
+			idx:install("/a.png", { name = "NewName" }, 2000)
+			local iter_old = idx._db:query(
+				"SELECT COUNT(*) FROM apps_fts WHERE apps_fts MATCH 'OldN'")
+			T.eq(iter_old(), 0, "stale FTS row matches old name")
+			local iter_new = idx._db:query(
+				"SELECT COUNT(*) FROM apps_fts WHERE apps_fts MATCH 'NewN'")
+			T.eq(iter_new(), 1, "updated FTS row should match new name")
 			idx:close()
 		end)
 	end)

@@ -22,6 +22,24 @@ local json = require("lib.format.json")
 
 local M = {}
 
+-- Schema notes:
+--  * `apps` holds one row per installed app. `tags_json` is kept for
+--    round-tripping the raw manifest shape to callers; `app_tags` is the
+--    source of truth for tag-based queries (indexed both ways).
+--  * `tags` is a tag registry — one row per distinct tag name. Junk never
+--    accumulates: uninstalling the last app with a given tag leaves the row
+--    behind (cheap), but it'll be reused next time the same tag appears.
+--  * `app_tags` is the join that makes "filter by tag" and "folder view"
+--    (`GROUP BY tag_id`) trivial and fast — instead of scanning json_each
+--    over every app's tag blob (ST's tag_map failure mode).
+--  * `apps_fts` is a trigram FTS5 virtual table. Trigram gives us
+--    case-insensitive substring search ("ali" finds "Alice") at sub-1ms over
+--    tens of thousands of rows. Uses default (self-owned) content storage so
+--    that plain DELETE works — contentless FTS5 tables (`content=''`) don't
+--    support DELETE without the `contentless_delete=1` option (SQLite 3.43+),
+--    which we don't rely on for portability. Kept in sync explicitly from
+--    install/uninstall; no triggers since writes already go through one
+--    code path.
 local SCHEMA = [[
 CREATE TABLE IF NOT EXISTS apps (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +51,22 @@ CREATE TABLE IF NOT EXISTS apps (
 );
 CREATE INDEX IF NOT EXISTS idx_apps_name ON apps(name);
 CREATE INDEX IF NOT EXISTS idx_apps_path ON apps(path);
+
+CREATE TABLE IF NOT EXISTS tags (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS app_tags (
+	app_id INTEGER NOT NULL,
+	tag_id INTEGER NOT NULL,
+	PRIMARY KEY (app_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_app_tags_tag_app ON app_tags(tag_id, app_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS apps_fts USING fts5(
+	name, description, path, tokenize='trigram'
+);
 ]]
 
 local index_mt = { __index = {} }
@@ -56,8 +90,45 @@ end
 
 -- ── Install ─────────────────────────────────────────────────────────────────
 
+-- Look up an app's id by path, or nil if not installed.
+--: (string) -> number | nil
+local function id_for_path(db, app_path)
+	local iter = db:query("SELECT id FROM apps WHERE path = ?", app_path)
+	if not iter then return nil end
+	return iter()
+end
+
+-- Sync the `app_tags` rows for an app against a fresh tag list. Cheap even
+-- at large tag counts — the heavy lifting is the indexed DELETE + per-tag
+-- INSERT OR IGNORE into the registry.
+--: (unknown, number, { [integer]: string }) -> nil
+local function sync_app_tags(db, app_id, tag_names)
+	db:execute("DELETE FROM app_tags WHERE app_id = ?", app_id)
+	for i = 1, #tag_names do
+		local tname = tag_names[i]
+		if type(tname) == "string" and tname ~= "" then
+			db:execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", tname)
+			db:execute(
+				"INSERT OR IGNORE INTO app_tags (app_id, tag_id) " ..
+				"SELECT ?, id FROM tags WHERE name = ?", app_id, tname)
+		end
+	end
+end
+
+-- Sync the FTS5 row for an app. `content=''` FTS tables support DELETE by
+-- rowid, so we delete-then-insert unconditionally for simplicity.
+--: (unknown, number, string, string, string) -> nil
+local function sync_apps_fts(db, app_id, name, description, app_path)
+	db:execute("DELETE FROM apps_fts WHERE rowid = ?", app_id)
+	db:execute(
+		"INSERT INTO apps_fts (rowid, name, description, path) VALUES (?, ?, ?, ?)",
+		app_id, name, description, app_path)
+end
+
 -- Install or update an app in the index.
--- If an app with the same path exists, it is replaced.
+-- If an app with the same path exists, its row is updated in place (id
+-- preserved) so derived tables (app_tags, apps_fts) stay consistent. New
+-- apps get a fresh id via INSERT.
 --: (string, table, number) -> number | (nil, string)
 function I:install(app_path, manifest, timestamp)
 	if not app_path or app_path == "" then
@@ -74,29 +145,45 @@ function I:install(app_path, manifest, timestamp)
 	local manifest_str = json.encode(manifest)
 	local meta = manifest.meta or {}
 	local tags = meta.tags or {}
+	local description = meta.description or ""
 	local tags_str = json.encode(tags)
 
-	-- Upsert: replace on path conflict.
-	local ok, err = self._db:execute(
-		"INSERT OR REPLACE INTO apps (name, path, manifest_json, tags_json, installed_at) VALUES (?, ?, ?, ?, ?)",
-		name, app_path, manifest_str, tags_str, timestamp
-	)
-	if not ok then return nil, "index: insert failed: " .. tostring(err) end
+	local db = self._db
+	local existing_id = id_for_path(db, app_path)
+	local app_id
 
-	-- Return the id of the inserted/replaced row.
-	local iter = self._db:query("SELECT last_insert_rowid()")
-	if iter then
-		local id = iter()
-		return id
+	if existing_id then
+		local ok, err = db:execute(
+			"UPDATE apps SET name = ?, manifest_json = ?, tags_json = ?, installed_at = ? WHERE id = ?",
+			name, manifest_str, tags_str, timestamp, existing_id
+		)
+		if not ok then return nil, "index: update failed: " .. tostring(err) end
+		app_id = existing_id
+	else
+		local ok, err = db:execute(
+			"INSERT INTO apps (name, path, manifest_json, tags_json, installed_at) VALUES (?, ?, ?, ?, ?)",
+			name, app_path, manifest_str, tags_str, timestamp
+		)
+		if not ok then return nil, "index: insert failed: " .. tostring(err) end
+		local iter = db:query("SELECT last_insert_rowid()")
+		if not iter then return nil, "index: failed to get inserted id" end
+		app_id = iter()
 	end
-	return nil, "index: failed to get inserted id"
+
+	sync_app_tags(db, app_id, tags)
+	sync_apps_fts(db, app_id, name, description, app_path)
+
+	return app_id
 end
 
 -- ── Uninstall ───────────────────────────────────────────────────────────────
 
 --: (number) -> true | (nil, string)
 function I:uninstall(id)
-	local ok, err = self._db:execute("DELETE FROM apps WHERE id = ?", id)
+	local db = self._db
+	db:execute("DELETE FROM app_tags WHERE app_id = ?", id)
+	db:execute("DELETE FROM apps_fts WHERE rowid = ?", id)
+	local ok, err = db:execute("DELETE FROM apps WHERE id = ?", id)
 	if not ok then return nil, "index: delete failed: " .. tostring(err) end
 	return true
 end
