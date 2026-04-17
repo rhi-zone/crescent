@@ -147,6 +147,58 @@ the library size, that action is wrong. A library browser that works
 at 23k cards must work at 230k and 2.3M with the same architecture —
 only the dataset size changes, not the algorithms.
 
+## Pagination and latency
+
+Pagination introduces round-trips, so the instinctive worry is
+"pagination is laggier on WAN." The opposite is true — pagination is
+strictly faster on WAN, for every metric that matters.
+
+### Initial paint
+
+- Full list: 10 MB compressed over a 25 Mbps link ≈ 3 s transfer +
+  parse + render.
+- Paginated: 20 KB first page arrives in ~1 RTT (~200 ms on
+  Tailscale intercontinental).
+
+Pagination wins time-to-interactive by an order of magnitude.
+
+### Scroll
+
+Each page boundary costs 1 RTT. Mitigation: **prefetch page N+1 when
+the user enters page N's last 20%**. As long as scroll speed ×
+row_height < bandwidth, the RTT is fully hidden. Generous page size
+(200–500 rows) keeps boundaries rare.
+
+### Search (the real latency risk)
+
+Keystroke → query → 200 ms RTT feels sluggish if every character
+round-trips. Fixes:
+
+1. **Debounce 150–200 ms.** Users don't type faster than that on a
+   phrase, so one RTT per debounce-window naturally masks the latency.
+2. **Server response must be sub-5 ms** so `query_time + RTT ≈ RTT`.
+   FTS5 over 23k rows is well under 1 ms, so this holds.
+3. **Send on `keydown`, not `keyup`** — steals a few ms per keystroke.
+
+### Connection reuse
+
+HTTP/1.1 keep-alive is load-bearing here. Without it every page fetch
+pays a TLS handshake (~1 extra RTT). With it, sequential page fetches
+are one RTT each. This is the one place transport work has leverage;
+HTTP/2 multiplexing would also let prefetch and foreground fetches
+share a connection without head-of-line, but keep-alive captures
+most of the win for sequential access. See
+[`daemon-transport.md`](daemon-transport.md) for the broader
+HTTP/2/3 discussion — the conclusion there still stands.
+
+### What ST got wrong
+
+ST's failure isn't "chose not to paginate." It's that ST **faked
+pagination by slicing a fully-computed list**, paying the compute cost
+of the full set every render and none of the bandwidth savings on the
+wire. The architecture has to paginate *end-to-end* — server query,
+network payload, client render — or it doesn't help.
+
 ## How to use this doc
 
 Before adding an endpoint, UI action, or mutation to the library app,
