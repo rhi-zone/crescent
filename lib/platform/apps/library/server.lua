@@ -5,7 +5,9 @@
 --   GET /              — HTML page
 --   GET /app.js        — JavaScript
 --   GET /style.css     — Stylesheet
---   GET /api/apps      — JSON list of installed apps (optional: ?tag=X&q=SEARCH)
+--   GET /api/apps      — paginated JSON list of installed apps
+--                        query params: ?tag=X&q=SEARCH&limit=N&offset=N
+--                        response: { total, limit, offset, apps: [...] }
 --
 -- Caps:
 --   caps.index_db — readonly SQLite database (app index)
@@ -181,11 +183,36 @@ end
 
 -- ── Index DB queries ───────────────────────────────────────────────────────
 -- Uses the same schema as lib/platform/index.lua.
+--
+-- Pagination is end-to-end: the server executes one SELECT with LIMIT/OFFSET
+-- and one COUNT query, then returns only the requested page. The full list is
+-- never materialized on the server or the wire. This is the core of the
+-- anti-ST perf discipline — at 23k apps, the list view must ship ~20 KB per
+-- page, not 45 MB of everything.
+--
+-- Search uses LIKE for now. FTS5 is a follow-up: add an FTS5 virtual table in
+-- lib/platform/index.lua and swap these queries once it's in place.
 
-local SELECT_ALL = "SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps ORDER BY name ASC"
-local SELECT_BY_TAG = "SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps WHERE EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?) ORDER BY name ASC"
-local SELECT_SEARCH = "SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps WHERE name LIKE ? ORDER BY name ASC"
-local SELECT_TAG_SEARCH = "SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps WHERE name LIKE ? AND EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?) ORDER BY name ASC"
+local SELECT_COLS = "id, name, path, manifest_json, tags_json, installed_at"
+
+-- WHERE-clause fragments keyed by (has_q, has_tag). Each value is a pair of
+-- SQL + the number of bound args (so we can build the COUNT and SELECT SQL
+-- from the same shape).
+local WHERE_NONE     = ""
+local WHERE_TAG      = " WHERE EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?)"
+local WHERE_Q        = " WHERE name LIKE ?"
+local WHERE_Q_TAG    = " WHERE name LIKE ? AND EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?)"
+
+--: (string | nil, string | nil) -> (string, { [integer]: unknown })
+local function build_where(q, tag)
+	local has_q   = q   and q   ~= ""
+	local has_tag = tag and tag ~= ""
+	local args = {} --: { [integer]: unknown }
+	if has_q and has_tag then args[1] = "%" .. q .. "%"; args[2] = tag; return WHERE_Q_TAG, args end
+	if has_q            then args[1] = "%" .. q .. "%";                return WHERE_Q,     args end
+	if has_tag          then args[1] = tag;                            return WHERE_TAG,   args end
+	return WHERE_NONE, args
+end
 
 local function collect_rows(iter)
 	if not iter then return {} end
@@ -208,28 +235,40 @@ local function collect_rows(iter)
 	return results
 end
 
-local function query_apps(db, tag, q)
-	if not db then return {} end
-	if q and q ~= "" and tag and tag ~= "" then
-		local iter = db:query(SELECT_TAG_SEARCH, "%" .. q .. "%", tag)
-		return collect_rows(iter)
-	elseif tag and tag ~= "" then
-		local iter = db:query(SELECT_BY_TAG, tag)
-		return collect_rows(iter)
-	elseif q and q ~= "" then
-		local iter = db:query(SELECT_SEARCH, "%" .. q .. "%")
-		return collect_rows(iter)
-	else
-		local iter = db:query(SELECT_ALL)
-		return collect_rows(iter)
+-- query_apps(db, tag, q, limit, offset) -> rows, total
+-- Returns the page of rows plus the total matching count (used by the UI for
+-- "200 of 23,412" and for the "load more" button).
+local function query_apps(db, tag, q, limit, offset)
+	if not db then return {}, 0 end
+
+	local where, args = build_where(q, tag)
+
+	-- Total count for the merged UI indicator. Runs against the same
+	-- filter, without the LIMIT/OFFSET.
+	local count_sql = "SELECT COUNT(*) FROM apps" .. where
+	local citer = db:query(count_sql, unpack(args))
+	local total = 0
+	if citer then
+		local c = citer()
+		if c then total = c end
 	end
+
+	-- Page query. ORDER BY name ASC is the current default; a sort param
+	-- can be threaded through here later.
+	local select_sql = "SELECT " .. SELECT_COLS .. " FROM apps" .. where
+		.. " ORDER BY name ASC LIMIT ? OFFSET ?"
+	args[#args + 1] = limit
+	args[#args + 1] = offset
+	local iter = db:query(select_sql, unpack(args))
+	return collect_rows(iter), total
 end
 
 -- ── Query string parser ────────────────────────────────────────────────────
 
+--: (string | nil) -> { [string]: string }
 local function parse_query(qs)
-	if not qs or qs == "" then return {} end
-	local params = {}
+	local params = {} --: { [string]: string }
+	if not qs or qs == "" then return params end
 	for kv in qs:gmatch("[^&]+") do
 		local k, v = kv:match("^([^=]+)=?(.*)")
 		if k then
@@ -258,12 +297,23 @@ function M.create(caps)
 			if path == "/style.css" then return serve_static(res, "style.css", "css") end
 		end
 
-		-- API: list/search apps.
+		-- API: list/search apps. Paginated (server-side LIMIT/OFFSET + COUNT).
+		-- Client supplies ?limit & ?offset; server clamps limit to DEFAULT/MAX
+		-- so a bad client can't request "limit=1000000" and force a full scan.
 		if method == "GET" and path:find("^/api/apps") then
 			local qs = req.query or path:match("%?(.+)$")
 			local params = parse_query(qs)
-			local apps = query_apps(db, params.tag, params.q)
-			return json_ok(res, { apps = apps })
+			local limit_raw = tonumber(params.limit) or 200
+			local offset_raw = tonumber(params.offset) or 0
+			local limit  = math.max(1, math.min(500, limit_raw))
+			local offset = math.max(0, offset_raw)
+			local apps, total = query_apps(db, params.tag, params.q, limit, offset)
+			return json_ok(res, {
+				total = total,
+				limit = limit,
+				offset = offset,
+				apps = apps,
+			})
 		end
 	end
 
