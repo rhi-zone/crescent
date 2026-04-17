@@ -281,20 +281,38 @@ function makeSourceSection(src) {
 
   more.onclick = function() { loadPage(search.value.trim()); };
 
-  return { el: section, loadPage: loadPage };
+  function reset(q) {
+    offset = 0;
+    total = 0;
+    loading = false;
+    sgrid.innerHTML = "";
+    more.hidden = true;
+    loadPage(q);
+  }
+
+  return { el: section, loadPage: loadPage, reset: reset };
 }
+
+var sourceSections = [];
 
 function loadSources() {
   fetch("/api/sources").then(function(r) { return r.json(); }).then(function(data) {
     (data.sources || []).forEach(function(src) {
       var sec = makeSourceSection(src);
+      sourceSections.push(sec);
       appEl.appendChild(sec.el);
       sec.loadPage("");
     });
   });
 }
 
-search.addEventListener("input", refresh);
+function refreshAll() {
+  var q = search.value.trim();
+  refresh();
+  sourceSections.forEach(function(sec) { sec.reset(q); });
+}
+
+search.addEventListener("input", refreshAll);
 refresh();
 loadSources();
 ]=]
