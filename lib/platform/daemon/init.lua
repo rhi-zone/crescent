@@ -25,6 +25,7 @@ local url = require("lib.url")
 local library = require("lib.platform.apps.library.server")
 local import_mod = require("lib.platform.import")
 local json = require("lib.format.json")
+local ratelimit = require("lib.ratelimit")
 
 local M = {}
 
@@ -292,6 +293,17 @@ function M.make(opts)
 	-- Per-app CSP cache: app_id → computed CSP string. Populated at handler-load
 	-- time. Not LRU — CSP strings are tiny and recomputed on reload anyway.
 	local app_csp = {} --: { [string]: string }
+
+	-- Per-session rate limiters. Token bucket keyed by session ID.
+	-- /launch: 5 per 10 s (burst=5) — one-shot tokens; even a fast human
+	-- can only click so many apps.
+	-- POST /grant: 10 per 10 s (burst=10) — form submissions are interactive.
+	local launch_limiter = ratelimit.keyed(ratelimit.token_bucket, {
+		rate = 0.5, burst = 5, clock = time_fn,
+	})
+	local grant_limiter = ratelimit.keyed(ratelimit.token_bucket, {
+		rate = 1.0, burst = 10, clock = time_fn,
+	})
 
 	-- Per-request handler invocation. App handlers are untrusted code running
 	-- in the daemon process; an uncaught `error()` must not bubble past the
@@ -741,6 +753,12 @@ function M.make(opts)
 			plain(res, 401, "unauthorized")
 			return
 		end
+
+		if not grant_limiter:allow(presented) then
+			plain(res, 429, "rate limit exceeded")
+			return
+		end
+
 		sess_rec.last_seen = time_fn()
 
 		local app_id_str = (req.path or ""):match("^/apps/(%d+)/grant$")
@@ -937,6 +955,11 @@ function M.make(opts)
 		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then rawset(sessions, presented, nil) end
 			plain(res, 401, "unauthorized")
+			return
+		end
+
+		if not launch_limiter:allow(presented) then
+			plain(res, 429, "rate limit exceeded")
 			return
 		end
 

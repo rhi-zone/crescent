@@ -210,8 +210,11 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
 - [x] **Daemon UI XSS resistance** — grant page ships with strict CSP (`default-src 'none';
   style-src 'unsafe-inline'; form-action 'self'`), all user/app strings HTML-escaped.
   (c457175)
-- [ ] **Rate limiting** — per-session and per-IP limits on auth endpoints, grant endpoint,
-  and launch-token mint. Exponential backoff on failure.
+- [x] **Rate limiting** — per-session token bucket on `/launch` (burst=5,
+  rate=0.5/s) and `POST /apps/:id/grant` (burst=10, rate=1/s). Uses
+  `lib/ratelimit` keyed limiter. Per-IP and auth-endpoint limits deferred
+  (daemon has no direct access to remote IP; no auth endpoints beyond session
+  cookie minting, which is implicit and not rate-sensitive).
 - [ ] **Audit log** — append-only log of every cap grant, every auth event, every
   admin/policy change. Tamper-evident hashing (prior-entry hash chain).
 - [ ] **TLS on routable interfaces** — binding to loopback is TLS-optional; binding to

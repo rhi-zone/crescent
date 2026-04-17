@@ -518,6 +518,31 @@ T.describe("/launch/:id", function()
 		T.ok(d.loopback_id_to_ip["1"], "expected app id mapped to a loopback IP")
 		idx:close()
 	end)
+
+	T.it("returns 429 after burst limit is exhausted", function()
+		local idx, db = make_index_db()
+		-- Static clock: time never advances, so the token bucket never refills.
+		local tfn = function() return 1000 end
+		local d = make_daemon({ index_db = db, time_fn = tfn })
+		local sid = prime_session(d)
+
+		-- The burst for the launch limiter is 5. Fire 5 valid requests — all
+		-- must succeed. The 6th must get 429.
+		for i = 1, 5 do
+			local req = with_document_fetch_dest(
+				make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+			local res = make_res()
+			d.handle(req, res)
+			T.eq(res.status, 303, "request " .. i .. " should succeed")
+		end
+		local req6 = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		local res6 = make_res()
+		d.handle(req6, res6)
+		T.eq(res6.status, 429, "6th request must be rate-limited")
+
+		idx:close()
+	end)
 end)
 
 T.describe("launch-token redemption on app origin", function()
@@ -1643,6 +1668,41 @@ T.describe("POST /apps/:id/grant", function()
 		local res2 = make_res()
 		d.handle(req2, res2)
 		T.eq(loader_calls, 2, "loader must be re-invoked after grant POST invalidates cache")
+		idx:close()
+	end)
+
+	T.it("returns 429 after burst limit is exhausted", function()
+		-- Static clock so the token bucket (burst=10) never refills.
+		local tfn = function() return 1000 end
+		local idx = index.open(":memory:")
+		local id = idx:install("/apps/alice.png", {
+			name = "Alice",
+			meta  = { description = "AI character", tags = {} },
+			caps  = { characters = { type = "fs", required = true } },
+		}, 1000)
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = tfn,
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+			index_obj       = idx,
+		})
+		local sid, csrf = prime_grant(d, idx, id)
+
+		-- Burst is 10. Fire 10 valid grant POSTs (refreshing CSRF each time)
+		-- — all must be accepted. The 11th must get 429.
+		for i = 1, 10 do
+			local greq = make_req("GET", "/apps/" .. id .. "/grant", "localhost:7777",
+				"__Host-session=" .. sid)
+			local gres = make_res()
+			d.handle(greq, gres)
+			local fresh_csrf = gres.body and gres.body:match('name=csrf value="([^"]+)"')
+			if fresh_csrf then csrf = fresh_csrf end
+			local res = post_grant(d, id, sid, "csrf=" .. (csrf or "") .. "&cap_characters=grant")
+			T.ok(res.status ~= 429, "request " .. i .. " must not be rate-limited: " .. tostring(res.status))
+		end
+		local res11 = post_grant(d, id, sid, "csrf=" .. (csrf or "") .. "&cap_characters=grant")
+		T.eq(res11.status, 429, "11th grant POST must be rate-limited")
 		idx:close()
 	end)
 end)
