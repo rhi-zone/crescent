@@ -9,6 +9,7 @@
 --
 -- Does not depend on any DOM or TUI renderer.
 -- Depends on: lib.reactive, lib.fp.optics.lens, lib.fp.optics.prism, lib.fp.maybe
+--:: require "lib.reactive"
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -25,8 +26,12 @@ local M = {}
 -- with_scope pushes; the returned cleanup fn pops (already popped at fn exit).
 --:: CleanupFn = () -> ()
 --:: ScopeCallbacks = { [integer]: CleanupFn }
--- Typed as any to allow nil-clearing entries (array shrink pattern).
-local _scope_stack = {} --: any
+-- AnySignal: structural form of Signal<unknown> for use inside this module.
+-- The typechecker does not resolve generic struct fields when T=unknown, so we
+-- expand the subscribe/get fields explicitly here.
+--:: AnySignal = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> unknown, narrow: (Prism) -> unknown }
+--: { [integer]: ScopeCallbacks }
+local _scope_stack = {}
 
 -- with_scope(fn) -> result, cleanup_fn
 -- Run fn in a tracked cleanup context. Returns fn's result plus a single
@@ -39,7 +44,7 @@ function M.with_scope(fn)
 	local ok, result = pcall(fn)
 
 	-- Pop regardless of success/failure.
-	_scope_stack[#_scope_stack] = nil
+	table.remove(_scope_stack)
 
 	if not ok then
 		-- Still build a cleanup function for any callbacks registered before error.
@@ -81,13 +86,11 @@ end
 -- Call handler immediately with signal's current value, then subscribe for
 -- future changes. Registers the unsubscribe function in the current scope.
 -- Must be called inside a with_scope context.
--- signal: any — lib.reactive signals are structurally typed; typed as any for generality.
-function M.subscribe_now(signal, handler)
-	signal = signal --: any
-	handler = handler --: any
+function M.subscribe_now(signal_raw, handler_raw)
+	local signal = signal_raw --: AnySignal
+	local handler = handler_raw --: (unknown) -> ()
 	handler(signal.get())
-	local _subscribe = signal.subscribe --: any
-	local unsub = _subscribe(handler)
+	local unsub = signal.subscribe(handler)
 	M.register(unsub)
 end
 
@@ -141,18 +144,18 @@ end
 -- renderer decides what to do with nil. The inner widget stays mounted
 -- (subscriptions active).
 function M.show(widget, predicate)
-	return function(signal)
-		signal = signal --: any
+	return function(signal_raw)
+		local signal = signal_raw --: AnySignal
 		-- Mount the child widget unconditionally.
 		local node = widget(signal)
 
 		-- Subscribe to signal changes to track visibility.
 		-- We return a visibility-wrapped node: a table with the node and a
 		-- visible signal so the renderer can react to predicate changes.
+		--: AnySignal
 		local visible = R.signal(predicate(signal.get()))
 
-		local _subscribe = signal.subscribe --: any
-		local unsub = _subscribe(function(v)
+		local unsub = signal.subscribe(function(v)
 			visible.set(predicate(v))
 		end)
 		M.register(unsub)
