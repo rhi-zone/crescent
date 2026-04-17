@@ -152,8 +152,12 @@ Response shape (JSON):
 - `id` — source-local identifier, opaque to the library. For the ST adapter
   this is the filename. For a crescent index adapter this would be the app
   row id.
-- `thumb_url` — relative URL served by the source app (e.g. `/thumb/alice.png`).
-  Null in stubs where thumbnails are not yet implemented.
+- `thumb_url` — the library discover proxy rewrites this to a library-origin
+  path (`/api/sources/:id/thumb/:entry_id`) when the source app has a handler.
+  The library then proxies the request in-process to `GET /thumb/:entry_id` on
+  the source app handler. This keeps image loads same-origin and CSP-safe
+  (library has `default-src 'self'`). Source apps that support thumbnails must
+  handle `GET /thumb/:entry_id`. Null when the source has no handler.
 - `description` and `tags` — null/empty is acceptable. Fill in when the source
   has the data (CCv2 iTXt chunk, ST `data.description`, etc.).
 
