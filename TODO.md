@@ -192,20 +192,19 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     button or an index-DB write callback would heal instantly.
     Depends on whether the index layer grows a change-notification
     surface.
-  - [ ] `app_loader` currently auto-grants every declared cap
-    (`_auto_grants`). Placeholder until the grant UI lands. **Security
-    note:** do not ship a routable-interface daemon while this is in
-    place.
+  - [ ] `app_loader` auto-grants every declared cap when no decisions are
+    stored (`_auto_grants` fallback). Backward-compat shim while grant UI
+    rolls out — once the dispatch gate is the norm, the fallback should
+    become nil (undecided) so new apps always prompt. **Security note:**
+    do not ship a routable-interface daemon until this is tightened.
   - [ ] Typechecker gap noted during wiring: optional fields (`T | nil`)
     in an expected record must appear in the table literal even when
     semantically absent. `daemon.make({...})` callsites hit this.
     Belongs in a typechecker session, not here — but worth linking to
     when someone picks up the optional-field work.
-- [ ] **Cap grant UI + endpoint** — grant page at daemon origin (not app origin). Zero-JS
-  HTML form (no XHR on this page). CSRF token in hidden input. `Sec-Fetch-Site: same-origin`
-  + `Sec-Fetch-Dest: document` check. Risk-tiered friction: inert/scoped/local caps grantable
-  with one click; network/shared caps require bearer re-entry (server-side re-auth, not
-  client-side hold).
+- [x] **Cap grant UI + endpoint** — grant page at daemon origin. Zero-JS HTML form, CSRF
+  token in hidden input, POST stores decisions, dispatch gate redirects on undecided required
+  caps, handler cache invalidated on save. (c457175)
 - [ ] **CSP emission** — daemon emits `Content-Security-Policy` per app response, derived
   from that app's manifest `net.connect_src` (hosts declared at install). Locks
   `default-src 'none'`, `connect-src 'self' <declared-hosts>`, `frame-ancestors 'none'`,
