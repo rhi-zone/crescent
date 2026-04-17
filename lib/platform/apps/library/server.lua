@@ -250,16 +250,15 @@ function makeSourceSection(src) {
 
   var offset = 0;
   var total = 0;
-  var loading = false;
+  var generation = 0;
   var LIMIT = 200;
 
   function loadPage(q) {
-    if (loading) return;
-    loading = true;
+    var gen = generation;
     var url = "/api/sources/" + encodeURIComponent(src.id) + "/discover?limit=" + LIMIT + "&offset=" + offset;
     if (q) url += "&q=" + encodeURIComponent(q);
     fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-      loading = false;
+      if (gen !== generation) return;
       total = data.total || 0;
       var entries = data.entries || [];
       entries.forEach(function(e) {
@@ -282,9 +281,9 @@ function makeSourceSection(src) {
   more.onclick = function() { loadPage(search.value.trim()); };
 
   function reset(q) {
+    generation++;
     offset = 0;
     total = 0;
-    loading = false;
     sgrid.innerHTML = "";
     more.hidden = true;
     loadPage(q);
