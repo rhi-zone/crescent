@@ -1,7 +1,8 @@
 # Library app design — lessons from SillyTavern
 
-The crescent library app is the entry-point UI that lists chat cards and
-lets users search, filter, tag, and launch them. It replaces
+The crescent library app is the entry-point UI that lists installed
+daemon apps (which includes chat cards — see "Cards are apps" below)
+and lets users search, filter, tag, and launch them. It replaces
 SillyTavern's character browser.
 
 ST at 23k cards is unusable: multi-second freezes on every keystroke,
@@ -10,10 +11,143 @@ Investigating the root causes surfaced a clear set of rules the
 crescent library app must follow. This doc records what ST does wrong
 and the corresponding prescription. Cross-reference:
 [`daemon-transport.md`](daemon-transport.md) for transport-layer
-decisions.
+decisions and [`platform-design.md`](platform-design.md) for the
+vendoring model.
 
 All file:line pointers below refer to SillyTavern at
 `/mnt/ssd/ai/SillyTavern`.
+
+## Cards are apps
+
+In crescent, a chat card is not a file owned by one "card app." A card
+IS a daemon app — its own row in `app_index`, its own origin, its own
+caps, its own storage, its own launch token. 23k cards = 23k installed
+apps. This is load-bearing for everything below: the library is a
+browser over apps, search is FTS5 over `apps`, tags are a join on
+`app_tags`, and the launch flow already exists.
+
+### Templated install
+
+CCv2 import (`lib/platform/apps/charactercardv2/import.lua`) creates a
+*new app* per imported PNG. The new app directory vendors its own copy
+of the CCv2 chat UI code plus the card's data (parsed JSON, lorebook,
+PNG thumbnail). This follows the platform's vendoring model: the app
+directory is the unit of distribution, fully self-contained.
+
+Install cost is ~50 KB of vendored code per card. At 23k cards that's
+~1.15 GB — negligible next to the card PNGs themselves (ST
+collections are commonly tens of GB). Independent per-card install
+means:
+
+- Each card updates (or doesn't) independently when CCv2 ships a fix.
+- Users can customize one card's UI without affecting others.
+- PNG export is straightforward: re-tarball the vendored app dir.
+
+Content-addressed shared storage (hardlinks into
+`~/.crescent/store/<sha>/`) is a graceful later upgrade if disk
+becomes a complaint — install-time behavior changes, on-disk layout
+still looks like a self-contained app dir, distribution format
+unchanged. Non-breaking.
+
+## Multiple apps, shared code — not one app with pluggable storage
+
+When a foreign data layout needs to be supported (SillyTavern's
+filesystem, KoboldAI, a Steam library, loose PNG folders), the
+temptation is "add a storage adapter to the canonical app so it can
+consume anything." Resist. The correct move is **one app per data
+layout**, with shared code factored into a normal vendored library.
+
+Current plan:
+
+- `lib/platform/apps/charactercardv2/` — canonical crescent card app.
+  One storage format (crescent-native, its own app dir per card, its
+  own SQLite). No adapter interface, no configurable storage. Simple.
+- `lib/platform/apps/sillytavern/` — separate app, purpose-built for
+  `~/SillyTavern/public/`. Knows ST's directory layout, tag_map JSON,
+  JSONL chats, PNG tEXt chunks. Reads and writes ST's format
+  directly. Also no adapter interface.
+- `lib/ccv2-ui/` (or similar) — shared *library*, not an app. UI
+  components, markdown rendering, chat rendering, LLM-cap wiring.
+  Both apps vendor it like any other dep.
+
+Why this beats one-app-with-adapters:
+
+- Neither app grows a storage abstraction. Each is as simple as the
+  current charactercardv2 implementation. No interface to
+  over-engineer.
+- The canonical app can evolve its data model freely (proper chat
+  trees, typed tags) without worrying about round-tripping to ST's
+  format.
+- The ST app can break when ST changes its on-disk format, or be
+  deleted entirely when the user migrates, without touching anything
+  else. It is explicitly *legacy support*, not a first-class concern
+  of the canonical design.
+- Shared code lives in a normal library. Same pattern the platform
+  already uses everywhere.
+- User opinion is expressed by which app they install, not by a
+  settings toggle inside one app.
+
+Generalizes to other foreign layouts: a KoboldAI-formatted card store
+gets its own app. A loose-PNG-directory browser gets its own app.
+Steam, itch, RPG Maker, Ren'Py, Godot, Love2D, `.desktop` files — one
+app per source, each trivially hackable, all sharing common
+launcher-helper libs if useful. See "Apps are cheap" in
+[`platform-design.md`](platform-design.md).
+
+## Source adapters (the library layer)
+
+The library itself is *not* a single query over `app_index`. It's a
+merged view across sources. A source can be:
+
+- **The installed-apps table** — `app_index` rows. First-class,
+  launched via the existing mint-token flow. FTS5, tags, thumbnails,
+  ETags, sub-5ms queries.
+- **A filesystem-backed app** — e.g. the SillyTavern app enumerates
+  every PNG under its configured ST directory and surfaces each as a
+  library entry. Not an `app_index` row — a *virtual* entry the
+  library queries from the ST app via the same interface as
+  installed apps.
+- **A launcher-backed app** — Steam, itch, etc. Enumerates external
+  games, surfaces each as a library entry. Launch runs a shell
+  command or opens an external URL. No daemon origin, no caps.
+
+"Source" here means an installed app that exposes a discovery
+endpoint; the library calls each one with its current query
+(paginated, filtered) and merges results. The library itself stays
+dumb — it doesn't know about ST or Steam; it only knows how to ask
+each installed source for a page of entries.
+
+### Launch behavior for virtual entries
+
+A virtual entry isn't an installed app, so there's no app_id to mint
+a token against. Two dispatch paths:
+
+- **Daemon-hosted** — virtual entry resolves to "launch the source
+  app itself, scoped to this entry." E.g. clicking an ST card
+  launches the SillyTavern app with a path or query parameter
+  selecting that card. The SillyTavern app is one installed app;
+  every ST card routes into it.
+- **External** — virtual entry carries a shell command or URL. The
+  daemon just exec's or redirects. No crescent origin involved.
+
+No import-on-launch flow is required by default: the SillyTavern app
+reads ST's files in place. If the user wants to convert an ST card
+into a crescent-native installed card, that's a deliberate, explicit
+"promote" action, not an implicit side effect of clicking.
+
+### Merged pagination
+
+Pagination across heterogeneous sources is fragile: pulling `limit=N`
+from each source and merging breaks when one source dominates
+(skewed sort), and pulling full results from every source to paginate
+the merge defeats the point.
+
+Resolution: **per-source pagination in the UI**, one section per
+source, each independently paginated. The user sees "Installed
+(200/23,412)" and "SillyTavern (200/23,649)" side by side, with "load
+more" per section. This sidesteps the merge problem, makes per-source
+perf characteristics visible, and lets slow sources not block fast
+ones.
 
 ## Payload shape pathologies
 

@@ -812,6 +812,47 @@ These ship alongside the platform as first-party scripts. They are not platform 
 They are replaceable, forkable, and auditable — and distributed the same way as any
 other card.
 
+### Apps are cheap
+
+When a new data layout, format variant, or use case appears, the default answer is
+**a new app**, not a new abstraction inside an existing app. Apps in the `lib/platform/`
+sense are structurally cheap: a directory, a `manifest.json`, some Lua, optional static
+assets. They install independently, update independently, fail independently, and can
+be deleted without touching anything else. Shared code lives in vendorable libraries
+that any app requires like any other dep.
+
+The alternative — one "universal" app with pluggable backends, configurable storage,
+adapter interfaces, mode switches — is almost always wrong here. It forces the app to
+design an abstraction over things the abstraction doesn't simplify, grows a settings
+surface for choosing between modes, and entangles the core code with every supported
+variant so that none of them can evolve freely. When the variant is foreign (legacy
+format, third-party data store, external launcher) the entanglement also anchors the
+core to whatever it's being compatible with, which is exactly the "keep the legacy
+slop around" failure mode we want to avoid.
+
+Concrete examples where the answer is two apps, not one configurable app:
+
+- **Native vs legacy card storage.** `charactercardv2` (crescent-native, clean data
+  model) and a separate `sillytavern` app (reads and writes `~/SillyTavern/public/`
+  directly). Shared UI lives in a vendored lib. The canonical app evolves freely; the
+  ST app is deletable legacy support.
+- **Different launchers.** Steam, itch, RPG Maker, Ren'Py, Godot, `.desktop` files —
+  one app per source, each trivially hackable, each disposable.
+- **Different card formats.** CCv2, KoboldAI, charx, loose-PNG-folder — one app per
+  format. Users install only the ones they care about.
+
+Cost of an app, measured honestly: a directory, a manifest, a few hundred lines of Lua,
+plus vendored shared libs (~50 KB) and per-card data. The vendored code is duplicated
+on disk at install time (see "Vendoring"), and at 23k installs that's a bit over 1 GB —
+negligible next to the user's PNG corpus. There is no per-app runtime cost until it's
+actually launched.
+
+This principle is specific to `lib/platform/` apps (Lua packages with manifests + caps).
+At the wider library level ("should this crescent library split into two packages?")
+the usual composability rules apply — don't create gratuitous splits. The two domains
+are different: an `lib/` package is a unit of code reuse; a platform app is a unit of
+install, isolation, and user choice.
+
 ### First-party apps
 
 First-party apps compose the initial experience:
