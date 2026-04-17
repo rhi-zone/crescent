@@ -498,6 +498,27 @@ function M.create(caps)
 			return json_ok(res, { sources = list })
 		end
 
+		-- API: proxy thumbnail through the library origin (avoids CSP cross-origin block).
+		-- Path: /api/sources/<id>/thumb/<entry_id>
+		-- Calls src.handler with GET /thumb/<entry_id> in-process.
+		if method == "GET" then
+			local thumb_src_id, thumb_entry_id = path:match("^/api/sources/([^/]+)/thumb/(.+)$")
+			if thumb_src_id then
+				thumb_src_id   = thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16)) end)
+				thumb_entry_id = thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+				local src = source_map[thumb_src_id]
+				if not src or not src.handler then
+					res.status = 404
+					res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+					res.body = "thumb not available"
+					return true
+				end
+				local thumb_req = { method = "GET", path = "/thumb/" .. thumb_entry_id, headers = {} }
+				src.handler(thumb_req, res)
+				return true
+			end
+		end
+
 		-- API: proxy /discover to a source adapter.
 		-- Path: /api/sources/<id>/discover[?params]
 		if method == "GET" then
@@ -515,6 +536,20 @@ function M.create(caps)
 				local qs = req.query or path:match("%?(.+)$")
 				local params = parse_query(qs)
 				local resp = src.discover(params)
+				-- Rewrite thumb_url entries to route through this server's thumb proxy.
+				-- This keeps image requests same-origin and CSP-safe.
+				if src.handler and resp and resp.entries then
+					local encoded_src_id = src_id:gsub("[^%w%-_%.~]",
+						function(c) return ("%%%02X"):format(c:byte()) end)
+					for _, entry in ipairs(resp.entries) do
+						if entry.id then
+							local encoded_entry_id = tostring(entry.id):gsub("[^%w%-_%.~]",
+								function(c) return ("%%%02X"):format(c:byte()) end)
+							entry.thumb_url = "/api/sources/" .. encoded_src_id
+								.. "/thumb/" .. encoded_entry_id
+						end
+					end
+				end
 				return json_ok(res, resp)
 			end
 		end

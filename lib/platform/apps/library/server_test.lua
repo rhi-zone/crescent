@@ -360,6 +360,110 @@ T.describe("library server", function()
 			T.eq(res.status, 200)
 			T.ok(data.entries ~= nil)
 		end)
+
+		T.it("rewrites thumb_url to library proxy path when source has handler", function()
+			local entries = { { id = "Bob.png", name = "Bob" }, { id = "Alice.png", name = "Alice" } }
+			local stub_handler = function(req, res)
+				res.status = 200
+				res.headers["Content-Type"] = { "image/png" }
+				res.body = "PNG"
+			end
+			local app = server.create({
+				index_db = nil,
+				sources = {{
+					id = "st", name = "SillyTavern",
+					discover = function(_) return { entries = entries, total = 2, limit = 10, offset = 0 } end,
+					handler = stub_handler,
+				}},
+			})
+			local res, data = call(app, "GET", "/api/sources/st/discover")
+			T.eq(res.status, 200)
+			T.eq(data.entries[1].thumb_url, "/api/sources/st/thumb/Bob.png")
+			T.eq(data.entries[2].thumb_url, "/api/sources/st/thumb/Alice.png")
+		end)
+
+		T.it("does not rewrite thumb_url when source has no handler", function()
+			local entries = { { id = "x.png", name = "X", thumb_url = "http://external/x.png" } }
+			local app = server.create({
+				index_db = nil,
+				sources = {{
+					id = "ext", name = "External",
+					discover = function(_) return { entries = entries, total = 1, limit = 10, offset = 0 } end,
+				}},
+			})
+			local _, data = call(app, "GET", "/api/sources/ext/discover")
+			T.eq(data.entries[1].thumb_url, "http://external/x.png")
+		end)
+	end)
+
+	-- ── GET /api/sources/:id/thumb/:entry_id ────────────────────────────────
+	T.describe("GET /api/sources/:id/thumb/:entry_id", function()
+		local function make_source_with_thumb(id)
+			return {
+				id = id, name = id,
+				discover = function(_) return { entries = {}, total = 0, limit = 10, offset = 0 } end,
+				handler = function(req, res)
+					local filename = (req.path or ""):match("^/thumb/(.+)$")
+					if filename == "Bob.png" then
+						res.status = 200
+						res.headers["Content-Type"] = { "image/png" }
+						res.body = "PNG:" .. filename
+					else
+						res.status = 404
+						res.body = "not found"
+					end
+				end,
+			}
+		end
+
+		T.it("proxies to source handler at /thumb/:entry_id", function()
+			local app = server.create({
+				index_db = nil,
+				sources = { make_source_with_thumb("st") },
+			})
+			local res = make_res()
+			app.handler(make_req("GET", "/api/sources/st/thumb/Bob.png"), res)
+			T.eq(res.status, 200)
+			T.eq(res.body, "PNG:Bob.png")
+		end)
+
+		T.it("returns 404 when source has no handler", function()
+			local app = server.create({
+				index_db = nil,
+				sources = {{
+					id = "st", name = "st",
+					discover = function(_) return { entries = {} } end,
+				}},
+			})
+			local res = make_res()
+			app.handler(make_req("GET", "/api/sources/st/thumb/Bob.png"), res)
+			T.eq(res.status, 404)
+		end)
+
+		T.it("returns 404 for unknown source", function()
+			local app = server.create({ index_db = nil })
+			local res = make_res()
+			app.handler(make_req("GET", "/api/sources/unknown/thumb/Bob.png"), res)
+			T.eq(res.status, 404)
+		end)
+
+		T.it("percent-decodes entry_id before forwarding", function()
+			local received_path = nil
+			local app = server.create({
+				index_db = nil,
+				sources = {{
+					id = "st", name = "st",
+					discover = function(_) return { entries = {} } end,
+					handler = function(req, res)
+						received_path = req.path
+						res.status = 200
+						res.body = ""
+					end,
+				}},
+			})
+			app.handler(make_req("GET", "/api/sources/st/thumb/My%20Card.png"), make_res())
+			T.eq(received_path, "/thumb/My Card.png")
+		end)
 	end)
 
 end)

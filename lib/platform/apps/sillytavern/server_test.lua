@@ -402,6 +402,46 @@ T.describe("GET /card/:id", function()
 	end)
 end)
 
+-- ── GET /thumb/:filename ───────────────────────────────────────────────────
+
+T.describe("GET /thumb/:filename", function()
+	local card_mod = require("lib.formats.ccv2.card")
+
+	T.it("returns PNG bytes for a valid card", function()
+		local card_bytes = assert(card_mod.to_png({ name = "Alice", tags = {} }))
+		local fs = make_fs_with_png("Alice.png", card_bytes)
+		local app = server.create({ characters = fs })
+		local res = make_res()
+		app.handler(make_req("/thumb/Alice.png"), res)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"] and res.headers["Content-Type"][1], "image/png")
+		T.eq(res.body, card_bytes)
+	end)
+
+	T.it("returns 404 for unknown filename", function()
+		local app = server.create({ characters = make_fs(FAKE_FILES) })
+		local res = make_res()
+		app.handler(make_req("/thumb/missing.png"), res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("returns 400 for missing filename", function()
+		local app = server.create({ characters = make_fs(FAKE_FILES) })
+		local res = make_res()
+		app.handler(make_req("/thumb/"), res)
+		T.eq(res.status, 400)
+	end)
+
+	T.it("omits Content-Disposition", function()
+		local card_bytes = assert(card_mod.to_png({ name = "Bob", tags = {} }))
+		local fs = make_fs_with_png("Bob.png", card_bytes)
+		local app = server.create({ characters = fs })
+		local res = make_res()
+		app.handler(make_req("/thumb/Bob.png"), res)
+		T.eq(res.headers["Content-Disposition"], nil)
+	end)
+end)
+
 -- ── Other endpoints ────────────────────────────────────────────────────────
 
 T.describe("other endpoints", function()

@@ -161,10 +161,6 @@ end
 function M.create(caps)
 	local fs = caps.characters
 	local db = init_cache(caps.meta_cache)
-	-- Origin URL for building thumb_url in discover entries.
-	-- caps.server.url is set by the daemon's http_server cap override to the
-	-- app's canonical origin (e.g. "http://app-42.localhost:7777").
-	local origin = caps.server and type(caps.server) == "table" and caps.server.url or nil
 
 	-- ── GET / ?entry=<filename> — card detail page ───────────────────────────
 
@@ -270,6 +266,25 @@ a.btn:hover{background:#5a5a9a}
 			return
 		end
 
+		-- /thumb/:filename — same bytes as /card/:filename; caller controls sizing via CSS.
+		-- Served via library's same-origin proxy (/api/sources/:id/thumb/:entry_id).
+		if path:find("^/thumb/") then
+			local filename = path:match("^/thumb/(.+)$")
+			if not filename or filename == "" then
+				plain(res, 400, "missing filename")
+				return
+			end
+			local bytes, err = fs.read(filename)
+			if not bytes then
+				plain(res, 404, "thumb not found: " .. tostring(err))
+				return
+			end
+			res.status = 200
+			res.headers["Content-Type"] = { "image/png" }
+			res.body = bytes
+			return
+		end
+
 		if not path:find("^/discover") then
 			plain(res, 404, "not found")
 			return
@@ -338,7 +353,6 @@ a.btn:hover{background:#5a5a9a}
 				name        = m.name,
 				description = m.description,
 				tags        = m.tags,
-				thumb_url   = origin and (origin .. "/card/" .. f) or nil,
 			}
 		end
 
