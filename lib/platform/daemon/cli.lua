@@ -21,6 +21,7 @@ local daemon = require("lib.platform.daemon")
 local app_loader = require("lib.platform.daemon.app_loader")
 local http_server = require("lib.http.server")
 local app_index = require("lib.platform.index")
+local json = require("lib.format.json")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
@@ -102,10 +103,69 @@ if idx then
 	})
 end
 
+-- Build a discover(params) wrapper around an already-loaded app handler.
+-- The handler expects (req, res); we synthesise a request to /discover and
+-- return the parsed JSON response. Errors return an empty entries response.
+--: ((http_req, http_res) -> nil) -> (({ [string]: string }) -> unknown)
+local function make_discover_fn(handler)
+	return function(params)
+		local qs_parts = {}
+		for k, v in pairs(params) do
+			qs_parts[#qs_parts + 1] = tostring(k) .. "=" .. tostring(v)
+		end
+		local req = {
+			method = "GET",
+			path   = "/discover",
+			query  = table.concat(qs_parts, "&"),
+			headers = {},
+		}
+		local res = { status = nil, headers = {}, body = nil }
+		local ok, err = pcall(handler, req, res)
+		if not ok or not res.body then
+			return { entries = {}, total = 0, error = tostring(ok and "empty body" or err) }
+		end
+		local decoded = json.decode(res.body)
+		if not decoded then
+			return { entries = {}, total = 0, error = "json decode failed" }
+		end
+		return decoded
+	end
+end
+
+-- Discover source adapter apps in the index (meta.source_adapter = true).
+-- Uses the app_loader to initialise each one's handler. Failures are logged
+-- but don't prevent the daemon from starting.
+local sources = {}
+if idx and loader_fn and raw_index_db then
+	local ok_q, src_iter = pcall(
+		raw_index_db.query, raw_index_db,
+		"SELECT id, name FROM apps WHERE json_extract(manifest_json, '$.meta.source_adapter') = 1"
+	)
+	if ok_q and src_iter then
+		while true do
+			local src_id, src_name = src_iter()
+			if not src_id then break end
+			local id_str = tostring(src_id)
+			local handler, lerr = loader_fn(id_str)
+			if handler then
+				sources[#sources + 1] = {
+					id      = id_str,
+					name    = src_name or id_str,
+					discover = make_discover_fn(handler),
+				}
+				io.stderr:write("daemon: source adapter loaded: " .. (src_name or id_str) .. "\n")
+			else
+				io.stderr:write("daemon: source adapter " .. id_str .. " load failed: " .. tostring(lerr) .. "\n")
+			end
+		end
+	end
+end
+
 local d = daemon.make({
 	host = daemon_host,
 	time_fn = os.time,
 	index_db = raw_index_db,
+	sources = sources,
 	app_loader = loader_fn,
 	on_handler_error = function(app_id, err, tb)
 		io.stderr:write("daemon: app " .. app_id .. " handler error: " .. err .. "\n" .. tb .. "\n")

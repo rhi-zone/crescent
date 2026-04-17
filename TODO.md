@@ -65,8 +65,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
     Adds `/api/sources` (list) + `/api/sources/:id/discover` (proxy).
     Frontend renders per-source sections with independent pagination and
     "load more". Daemon passes `opts.sources` through to library.
-    17 new tests. Remaining: daemon CLI to auto-load source adapter
-    apps from the index at startup. (next commit)
+    Daemon CLI auto-loads source adapter apps from the index at startup
+    (`meta.source_adapter=true`). 17 new tests.
   - [ ] **ST adapter: read PNG metadata.** The stub uses the filename as
     the card name and leaves description/tags/thumb_url null. The next
     iteration should read CCv2 iTXt chunks from each PNG for the display
