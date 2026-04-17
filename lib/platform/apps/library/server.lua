@@ -62,8 +62,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 .tag-btn{padding:.25rem .75rem;border-radius:999px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.75rem;cursor:pointer;transition:all .15s}
 .tag-btn:hover,.tag-btn.active{background:#e94560;border-color:#e94560;color:#fff}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;padding:1.5rem}
-.card{background:#16213e;border-radius:8px;padding:1rem;border:1px solid #0f3460;cursor:pointer;transition:border-color .15s,transform .15s}
+.card{position:relative;background:#16213e;border-radius:8px;padding:1rem;border:1px solid #0f3460;cursor:pointer;transition:border-color .15s,transform .15s}
 .card:hover{border-color:#e94560;transform:translateY(-2px)}
+.card-delete{position:absolute;top:.35rem;right:.35rem;background:none;border:none;color:#606070;font-size:.9rem;cursor:pointer;padding:.15rem .3rem;border-radius:3px;line-height:1}
+.card-delete:hover{background:#e94560;color:#fff}
 .card-name{font-weight:600;font-size:.95rem;margin-bottom:.35rem}
 .card-desc{font-size:.8rem;color:#a0a0b0;margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
@@ -113,6 +115,18 @@ function renderApps(apps) {
       });
       card.appendChild(tagsEl);
     }
+
+    var del = document.createElement("button");
+    del.className = "card-delete";
+    del.title = "Uninstall";
+    del.textContent = "\xD7";
+    del.onclick = function(e) {
+      e.stopPropagation();
+      if (!confirm("Uninstall \u201c" + (app.name || "this app") + "\u201d?")) return;
+      fetch("/api/apps/" + encodeURIComponent(app.id), { method: "DELETE" })
+        .then(function(r) { if (r.ok) refresh(); else r.text().then(function(t) { alert("Uninstall failed: " + t); }); });
+    };
+    card.appendChild(del);
 
     grid.appendChild(card);
   });

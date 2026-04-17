@@ -37,6 +37,7 @@ local M = {}
 --::   time_fn: (() -> integer) | nil,
 --::   random_bytes_fn: ((n: integer) -> { [integer]: number }) | nil,
 --::   index_db: unknown,
+--::   remove_fn: ((path: string) -> (true | nil, string | nil)) | nil,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
 --::   app_loader: app_loader_fn | nil,
 --::   handler_cache_size: integer | nil,
@@ -221,6 +222,9 @@ function M.make(opts)
 	-- is a SQLite handle, a nil, or a test stub; we don't want to bake a
 	-- schema here. Library app tolerates nil.
 	local index_db = opts.index_db --: any
+	-- Injected for testability. Defaults to os.remove.
+	--: (string) -> (true | nil, string | nil)
+	local remove_fn = opts.remove_fn or os.remove
 
 	-- Library app handler. The daemon mounts the library app at "/" of the
 	-- daemon origin. We call create() directly; there is no sandbox in v1
@@ -586,6 +590,62 @@ function M.make(opts)
 		-- leak if it fetches a third-party resource on first paint.
 		res.headers["Referrer-Policy"] = { "no-referrer" }
 		res.body = ""
+	end)
+
+	-- DELETE /api/apps/:id — uninstall an app from the index and disk.
+	--
+	-- Requires an existing valid session (same policy as /launch — destructive
+	-- ops must not be reachable via auto-minted sessions from anonymous requests).
+	-- File deletion failure is non-fatal: the index row is already gone so the
+	-- app is effectively uninstalled. The operator sees the error via
+	-- on_handler_error if configured.
+	r:delete("/api/apps/:id", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sess_rec = presented and sessions[presented] or nil
+		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+			if sess_rec and presented then rawset(sessions, presented, nil) end
+			plain(res, 401, "unauthorized")
+			return
+		end
+
+		local app_id_str = (req.path or ""):match("^/api/apps/(.+)$")
+		local app_id = tonumber(app_id_str)
+		if not app_id then
+			plain(res, 400, "invalid app id")
+			return
+		end
+
+		if not index_db then
+			plain(res, 503, "index unavailable")
+			return
+		end
+
+		local db = index_db --: any
+		local ok_q, iter = pcall(db.query, db, "SELECT path FROM apps WHERE id = ? LIMIT 1", app_id)
+		if not ok_q or not iter then
+			plain(res, 404, "app not found")
+			return
+		end
+		local app_path = iter()
+		if not app_path then
+			plain(res, 404, "app not found")
+			return
+		end
+
+		db:execute("DELETE FROM app_tags WHERE app_id = ?", app_id)
+		db:execute("DELETE FROM apps_fts WHERE rowid = ?", app_id)
+		db:execute("DELETE FROM apps WHERE id = ?", app_id)
+
+		local ok_rm, rm_err = remove_fn(app_path)
+		if not ok_rm and opts.on_handler_error then
+			opts.on_handler_error("library",
+				"uninstall " .. tostring(app_path) .. ": " .. tostring(rm_err), "")
+		end
+
+		res.status = 200
+		res.headers["Content-Type"] = { "application/json" }
+		res.body = '{"ok":true}'
 	end)
 
 	-- App-origin: consume a presented `?__launch=<hex>` token, issue the

@@ -1150,3 +1150,150 @@ T.describe("_get_cookie", function()
 		T.eq(daemon._get_cookie({}, "a"), nil)
 	end)
 end)
+
+-- ── DELETE /api/apps/:id — uninstall ─────────────────────────────────────────
+
+T.describe("DELETE /api/apps/:id", function()
+	-- Build a daemon with an in-memory index + a remove_fn spy.
+	local function make_uninstall_daemon(extra)
+		local idx = index.open(":memory:")
+		local id = idx:install("/apps/alice.png", {
+			name = "Alice", meta = { description = "test", tags = { "ai" } },
+		}, 1000)
+		extra = extra or {}
+		local removed = {}
+		local remove_fn = extra.remove_fn or function(path)
+			removed[#removed + 1] = path
+			return true
+		end
+		local d = daemon.make({
+			host          = "localhost:7777",
+			time_fn       = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db      = idx._db,
+			remove_fn     = remove_fn,
+		})
+		return d, idx, id, removed
+	end
+
+	-- Prime a daemon session cookie, return the sid string.
+	local function prime(d)
+		local req = make_req("GET", "/healthz", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		local sc = res.headers["Set-Cookie"]
+		if not sc then return nil end
+		return sc[1]:match("__Host%-session=([^;]+)")
+	end
+
+	T.it("requires an existing session — no cookie → 401", function()
+		local d, idx, id = make_uninstall_daemon()
+		local req = make_req("DELETE", "/api/apps/" .. id, "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+		T.ok(idx:get(id), "app must still be in index after rejected uninstall")
+		idx:close()
+	end)
+
+	T.it("requires an existing session — unknown cookie → 401", function()
+		local d, idx, id = make_uninstall_daemon()
+		local req = make_req("DELETE", "/api/apps/" .. id, "localhost:7777", "__Host-session=deadbeef")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+		T.ok(idx:get(id), "app must still be in index")
+		idx:close()
+	end)
+
+	T.it("unknown app id → 404", function()
+		local d, idx, id = make_uninstall_daemon()
+		local sid = prime(d)
+		local req = make_req("DELETE", "/api/apps/99999", "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 404)
+		T.ok(idx:get(id), "other apps unaffected")
+		idx:close()
+	end)
+
+	T.it("non-numeric id → 400", function()
+		local d, idx = make_uninstall_daemon()
+		local sid = prime(d)
+		local req = make_req("DELETE", "/api/apps/notanumber", "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 400)
+		idx:close()
+	end)
+
+	T.it("valid session + valid id → 200, row gone, file removed", function()
+		local d, idx, id, removed = make_uninstall_daemon()
+		local sid = prime(d)
+		local req = make_req("DELETE", "/api/apps/" .. id, "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.ok(res.body and res.body:find('"ok"'), "expected ok JSON body")
+		T.eq(idx:get(id), nil, "row must be gone from index after uninstall")
+		T.eq(#removed, 1, "remove_fn must be called once")
+		T.eq(removed[1], "/apps/alice.png")
+		idx:close()
+	end)
+
+	T.it("file removal failure is non-fatal — 200, row still gone", function()
+		local errors = {}
+		local d, idx, id = make_uninstall_daemon({
+			remove_fn = function(_) return nil, "no such file" end,
+		})
+		-- Wire on_handler_error to capture the logged message.
+		-- Re-create daemon to pass on_handler_error + the failing remove_fn.
+		local idx2 = index.open(":memory:")
+		local id2 = idx2:install("/apps/gone.png", { name = "Gone" }, 1000)
+		local d2 = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx2._db,
+			remove_fn       = function(_) return nil, "no such file" end,
+			on_handler_error = function(app_id, err, _) errors[#errors + 1] = { app_id, err } end,
+		})
+		local sid = prime(d2)
+		local req = make_req("DELETE", "/api/apps/" .. id2, "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d2.handle(req, res)
+		T.eq(res.status, 200)
+		T.eq(idx2:get(id2), nil, "index row must be gone even when file removal fails")
+		T.eq(#errors, 1, "expected one error logged via on_handler_error")
+		T.ok(errors[1][2]:find("no such file", 1, true), "error message must mention the failure")
+		idx:close()
+		idx2:close()
+	end)
+
+	T.it("no index_db → 503", function()
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+		})
+		local sid = prime(d)
+		local req = make_req("DELETE", "/api/apps/1", "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 503)
+	end)
+
+	T.it("second DELETE for the same id → 404 (idempotent on the index)", function()
+		local d, idx, id = make_uninstall_daemon()
+		local sid = prime(d)
+		local del = function()
+			local req = make_req("DELETE", "/api/apps/" .. id, "localhost:7777", "__Host-session=" .. sid)
+			local res = make_res()
+			d.handle(req, res)
+			return res.status
+		end
+		T.eq(del(), 200, "first delete must succeed")
+		T.eq(del(), 404, "second delete must return 404")
+		idx:close()
+	end)
+end)
