@@ -45,7 +45,52 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
   - [x] App index database schema + upsert logic — `lib/platform/index.lua`, 43 assertions
   - [x] Card app runtime bundling + import — `lib/platform/import.lua`, 42 assertions. CLI: `luajit lib/platform/cli.lua import card.png`
   - [x] Library app BFF server — `lib/platform/apps/library/server.lua`, 41 assertions. Index adapter, 47 assertions.
-- [ ] Library app — **remaining work**: launch flow (clicking an app in the browser should open it), app uninstall UI, integration testing with real imported apps
+- [ ] Library app — **open threads** *(from a previous session — starting
+  context, not instructions; verify relevance before acting)*:
+  - [ ] **Uninstall UI + endpoint.** `index:uninstall(id)` exists but nothing
+    drives it from the browser, and the PNG under `~/.crescent/apps/` is
+    never deleted. Unresolved: do we introduce a destructive filesystem
+    cap (`caps.fs.delete` or narrower `caps.self.delete_self`) for this
+    one case, or does uninstall live on the daemon side (the daemon owns
+    the apps dir anyway)? The call shapes the first destructive cap,
+    which every future destructive cap inherits — worth deliberate design
+    rather than improvising in the library server.
+  - [ ] **Source adapters — merged-library view.** The design in
+    `docs/library-app-design.md` ("Source adapters") has the library
+    showing per-source sections (Installed + SillyTavern + Steam + …).
+    Today the library reads `caps.index_db` directly and knows nothing
+    about other sources. Forks in approach: (a) daemon provides a
+    `caps.source_adapters` cap to the library that enumerates
+    source-tagged apps and brokers a `/discover` call to each; (b) the
+    library app talks to source apps via `http_client` over daemon-local
+    origins (needs cross-origin allow). (a) keeps sources inert to each
+    other and matches the grant-model vision; (b) is simpler today but
+    couples the library to per-app auth. The protocol itself (`/discover`
+    shape, pagination across heterogeneous sources — per-source sections
+    in the UI, not a merge) is largely speculative until someone
+    reads the daemon cap wiring and picks a path. Sibling blocker for
+    the SillyTavern app below.
+  - [ ] **Second canonical app — `lib/platform/apps/sillytavern/`.**
+    Reads `~/SillyTavern/public/` in place, exposes cards via the source-
+    adapter discovery protocol. Rationale: "apps are cheap" (see
+    CLAUDE.md / `docs/platform-design.md`) says compat lives in a
+    separate app, not behind an adapter inside the canonical CCv2 app.
+    Bootstrapping this forces the shared-UI extraction below — unclear
+    which should lead. Probably the ST adapter stub comes first (no UI
+    yet), to drive the discovery protocol; UI extraction later.
+  - [ ] **Extract `lib/ccv2-ui/` shared library.** Chat rendering,
+    markdown, LLM-cap wiring currently live in
+    `lib/platform/apps/charactercardv2/dom.lua`. Both canonical-CCv2 and
+    SillyTavern apps will want them. Risk of extracting before two
+    consumers exist: wrong boundaries. Risk of deferring: the ST app
+    duplicates code and the two diverge. Lean: wait until ST's UI
+    actually needs something from dom.lua, then pull out exactly that
+    piece. Not "extract everything reusable up front."
+  - [ ] **Library index is validated at 20k apps** (see
+    `docs/perf/library_index.lua`, `docs/perf/log.md`). If a realistic
+    SillyTavern library blows past 20k, rerun the bench at 100k before
+    assuming the current plan holds — FTS index build cost scales
+    roughly linearly but SQLite query planning can degrade non-linearly.
 - [x] Author's note — depth-based context injection with configurable position
 - [x] Chat export — JSON and text format downloads with Content-Disposition
 - [x] Regex scripts — find/replace on AI output and user input, test endpoint, ordered execution
