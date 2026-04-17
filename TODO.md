@@ -47,37 +47,36 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
   - [x] Library app BFF server — `lib/platform/apps/library/server.lua`, 41 assertions. Index adapter, 47 assertions.
 - [ ] Library app — **open threads** *(from a previous session — starting
   context, not instructions; verify relevance before acting)*:
-  - [ ] **Uninstall UI + endpoint.** `index:uninstall(id)` exists but nothing
-    drives it from the browser, and the PNG under `~/.crescent/apps/` is
-    never deleted. Unresolved: do we introduce a destructive filesystem
-    cap (`caps.fs.delete` or narrower `caps.self.delete_self`) for this
-    one case, or does uninstall live on the daemon side (the daemon owns
-    the apps dir anyway)? The call shapes the first destructive cap,
-    which every future destructive cap inherits — worth deliberate design
-    rather than improvising in the library server.
-  - [ ] **Source adapters — merged-library view.** The design in
-    `docs/library-app-design.md` ("Source adapters") has the library
-    showing per-source sections (Installed + SillyTavern + Steam + …).
-    Today the library reads `caps.index_db` directly and knows nothing
-    about other sources. Forks in approach: (a) daemon provides a
-    `caps.source_adapters` cap to the library that enumerates
-    source-tagged apps and brokers a `/discover` call to each; (b) the
-    library app talks to source apps via `http_client` over daemon-local
-    origins (needs cross-origin allow). (a) keeps sources inert to each
-    other and matches the grant-model vision; (b) is simpler today but
-    couples the library to per-app auth. The protocol itself (`/discover`
-    shape, pagination across heterogeneous sources — per-source sections
-    in the UI, not a merge) is largely speculative until someone
-    reads the daemon cap wiring and picks a path. Sibling blocker for
-    the SillyTavern app below.
-  - [ ] **Second canonical app — `lib/platform/apps/sillytavern/`.**
-    Reads `~/SillyTavern/public/` in place, exposes cards via the source-
-    adapter discovery protocol. Rationale: "apps are cheap" (see
-    CLAUDE.md / `docs/platform-design.md`) says compat lives in a
-    separate app, not behind an adapter inside the canonical CCv2 app.
-    Bootstrapping this forces the shared-UI extraction below — unclear
-    which should lead. Probably the ST adapter stub comes first (no UI
-    yet), to drive the discovery protocol; UI extraction later.
+  - [x] **Uninstall UI + endpoint.** `DELETE /api/apps/:id` on daemon origin
+    (daemon owns apps dir — no new destructive cap needed). Library cards
+    get × button → confirm → DELETE → refresh. File deletion failure is
+    non-fatal. 7 tests in daemon_test.lua. (d58798d)
+  - [x] **`/discover` protocol shape defined.** See
+    `docs/library-app-design.md` "Source adapters / /discover endpoint
+    contract". Request: `?q&limit&offset`. Response: `{ source_name,
+    total, limit, offset, entries: [{id, name, description, tags,
+    thumb_url}] }`. Source adapter apps declare `meta.source_adapter=true`.
+    Launch of virtual entries: library uses `/launch/<source_app_id>?entry=<id>`.
+  - [x] **Second canonical app — `lib/platform/apps/sillytavern/`.**
+    Stub that lists `~/SillyTavern/public/characters/*.png` and exposes
+    `/discover`. Supports q/limit/offset. 58 tests. (next commit)
+  - [ ] **Wire source adapters into library UI.** The `/discover` protocol
+    is defined and the ST adapter stub is live, but the library app doesn't
+    call any source adapters yet — it only reads `caps.index_db`. Next
+    step: library queries index for `meta.source_adapter=true` apps, calls
+    each one's `/discover` in parallel, and renders per-source sections
+    below the main "Installed" section. Open fork: (a) daemon provides a
+    `caps.source_adapters` cap that enumerates and proxies; (b) library
+    calls source apps via `http_client` over daemon-local origins. (a) is
+    cleaner for the grant model; (b) is simpler today. Lean toward (b) to
+    ship faster — the library already trusts the daemon origin and the ST
+    app is first-party.
+  - [ ] **ST adapter: read PNG metadata.** The stub uses the filename as
+    the card name and leaves description/tags/thumb_url null. The next
+    iteration should read CCv2 iTXt chunks from each PNG for the display
+    name, `data.description`, and `data.tags`, and serve thumbnails at
+    `GET /thumb/:id`. `lib/png` already handles iTXt; `lib/formats/ccv2`
+    handles the data field.
   - [ ] **Extract `lib/ccv2-ui/` shared library.** Chat rendering,
     markdown, LLM-cap wiring currently live in
     `lib/platform/apps/charactercardv2/dom.lua`. Both canonical-CCv2 and

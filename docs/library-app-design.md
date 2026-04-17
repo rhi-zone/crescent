@@ -117,6 +117,57 @@ endpoint; the library calls each one with its current query
 dumb — it doesn't know about ST or Steam; it only knows how to ask
 each installed source for a page of entries.
 
+### `/discover` endpoint contract
+
+Every source adapter app exposes `GET /discover` with these query params:
+
+| Param    | Type    | Default | Description                              |
+|----------|---------|---------|------------------------------------------|
+| `q`      | string  | ""      | Case-insensitive substring search on name |
+| `limit`  | integer | 200     | Page size, clamped to [1, 500]           |
+| `offset` | integer | 0       | Zero-based page start                    |
+
+Response shape (JSON):
+
+```json
+{
+  "source_name": "SillyTavern",
+  "total":  23649,
+  "limit":  200,
+  "offset": 0,
+  "entries": [
+    {
+      "id":          "alice.png",
+      "name":        "Alice",
+      "description": null,
+      "tags":        [],
+      "thumb_url":   null
+    }
+  ]
+}
+```
+
+- `source_name` — human-readable section header in the library UI.
+- `total` — count of entries matching the current query (used for "N of M").
+- `id` — source-local identifier, opaque to the library. For the ST adapter
+  this is the filename. For a crescent index adapter this would be the app
+  row id.
+- `thumb_url` — relative URL served by the source app (e.g. `/thumb/alice.png`).
+  Null in stubs where thumbnails are not yet implemented.
+- `description` and `tags` — null/empty is acceptable. Fill in when the source
+  has the data (CCv2 iTXt chunk, ST `data.description`, etc.).
+
+**Discovery of source apps**: the library queries the index for installed apps
+where `meta.source_adapter = true`. Each such app is called in parallel (future:
+when the source-adapter dispatch path is wired in the library). The manifest
+`meta.source_adapter` flag is the single source of truth for whether an app
+participates in the merged library view.
+
+**Launch of virtual entries**: a virtual entry has no daemon `app_id`. The
+library launches the source app itself with `?entry=<id>` appended so the
+source app can route to the specific card. The source app is responsible for
+interpreting its own entry ids.
+
 ### Launch behavior for virtual entries
 
 A virtual entry isn't an installed app, so there's no app_id to mint

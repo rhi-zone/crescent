@@ -1,0 +1,19 @@
+{
+  "name": "SillyTavern",
+  "version": "0.1.0",
+  "description": "SillyTavern character card source adapter — exposes /discover for the library.",
+  "meta": {
+    "source_adapter": true,
+    "tags": ["source-adapter", "sillytavern", "character-cards"]
+  },
+  "default_entry": "server",
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "server":     { "type": "http_server" },
+        "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true }
+      }
+    }
+  }
+}
