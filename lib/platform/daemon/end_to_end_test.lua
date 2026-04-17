@@ -99,6 +99,9 @@ T.describe("daemon end-to-end (real index + real loader)", function()
 				},
 			},
 		}, os.time()))
+		-- Grant required caps so resolve_grants returns true (not undecided).
+		idx:set_grant(id, "http_server", true)
+		idx:set_grant(id, "self", true)
 
 		-- daemon.make wants string app_ids (URL-derived); the index returns
 		-- an integer rowid. We install with a known id and stringify it for
@@ -154,6 +157,9 @@ T.describe("daemon end-to-end (real index + real loader)", function()
 				},
 			},
 		}, os.time()))
+		-- Grant required caps so resolve_grants returns true (not undecided).
+		idx:set_grant(id, "http_server", true)
+		idx:set_grant(id, "self", true)
 
 		-- Wrap the loader to count invocations.
 		local inner = app_loader.make({

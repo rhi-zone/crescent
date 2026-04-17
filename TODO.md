@@ -189,11 +189,10 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     button or an index-DB write callback would heal instantly.
     Depends on whether the index layer grows a change-notification
     surface.
-  - [ ] `app_loader` auto-grants every declared cap when no decisions are
-    stored (`_auto_grants` fallback). Backward-compat shim while grant UI
-    rolls out — once the dispatch gate is the norm, the fallback should
-    become nil (undecided) so new apps always prompt. **Security note:**
-    do not ship a routable-interface daemon until this is tightened.
+  - [x] `app_loader` auto-grants every declared cap when no decisions are
+    stored (`_auto_grants` fallback). Fixed: `resolve_grants` now returns
+    nil (undecided) when `get_grants` is available but no decisions stored.
+    Raw-db test stubs (no `get_grants`) still auto-grant for compat.
   - [ ] Typechecker gap noted during wiring: optional fields (`T | nil`)
     in an expected record must appear in the table literal even when
     semantically absent. `daemon.make({...})` callsites hit this.

@@ -83,11 +83,31 @@ local function collect_entry_caps(manifest, entry_key)
 	return caps
 end
 
--- Auto-grant every declared cap. v1 policy — grant UI will replace this.
+-- Auto-grant every declared cap. Used when the index_db has no get_grants
+-- method (test stubs that pass a raw db handle). Never used in production
+-- where the full index wrapper is always passed.
 --: ({ [string]: unknown }) -> { [string]: boolean }
 local function auto_grants(cap_decls)
 	local grants = {}
 	for name in pairs(cap_decls) do grants[name] = true end
+	return grants
+end
+
+-- Resolve grants from the index DB. Returns nil for caps with no stored
+-- decision (undecided) — the daemon dispatch gate must block undecided
+-- required caps before app_loader is called. Falls back to auto_grants only
+-- when index_db lacks get_grants (test stubs with a raw db handle).
+--: (unknown, string, { [string]: unknown }) -> { [string]: boolean | nil }
+local function resolve_grants(index_db, app_id, cap_decls)
+	if not index_db or not index_db.get_grants then
+		-- Raw db handle (no grant API) — auto-grant for test-stub compat.
+		return auto_grants(cap_decls)
+	end
+	local stored = index_db:get_grants(tonumber(app_id) or 0)
+	local grants = {}
+	for name in pairs(cap_decls) do
+		grants[name] = stored[name]  -- nil = undecided; false = denied
+	end
 	return grants
 end
 
@@ -120,7 +140,7 @@ function M.make(opts)
 				for k, v in pairs(overrides) do decl[k] = v end
 			end
 		end
-		local grants    = auto_grants(cap_decls)
+		local grants = resolve_grants(index_db, app_id, cap_decls)
 		local context   = {
 			user_id  = ctx_base.user_id,
 			app_id   = app_id,
