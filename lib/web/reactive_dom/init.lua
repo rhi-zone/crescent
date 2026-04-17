@@ -10,6 +10,23 @@
 -- Depends on: lib.widget, lib.reactive, lib.fp.optics.lens
 -- Runtime requirement: `document` global (browser / mock DOM in tests)
 
+--:: require "lib.web.js_types"
+--:: declare document = Document
+
+-- Type aliases for reactive primitives (mirrors lib/reactive/init.lua declarations).
+-- Note: --:: require "lib.reactive" would resolve to lib/reactive.lua (wrong path),
+-- so we redeclare the types we need directly here.
+--:: Lens = { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }
+--:: Prism = { preview: (unknown) -> unknown, review: (unknown) -> unknown }
+--:: Signal = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Signal, narrow: (Prism) -> Signal }
+--:: Computed = { get: () -> unknown, subscribe: ((unknown) -> ()) -> (() -> ()), dispose: () -> (), focus: (Lens) -> Computed, narrow: (Prism) -> Computed }
+
+--:: EventHandler = (ev: AnyEvent) -> ()
+--:: AttrMap = { [string]: (unknown) -> string }
+--:: CleanupArray = { [integer]: () -> () }
+--:: KeyEntry = { node: Node, cleanup: () -> (), sig: Signal }
+--:: KeyMap = { [string]: KeyEntry }
+
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
@@ -17,6 +34,15 @@ end
 local widget = require("lib.widget")
 local R      = require("lib.reactive")
 local Lens   = require("lib.fp.optics.lens")
+
+-- Hoist typed references to R functions to avoid unknown-indexed-module errors.
+-- Preceding-line annotations assert the type without requiring RHS to be typed.
+--: (unknown) -> Signal
+local R_signal   = R.signal
+--: (Signal, Lens) -> Signal
+local R_focused  = R.focused
+--: (() -> unknown, { [integer]: Signal | Computed }) -> Computed
+local R_computed = R.computed
 
 local M = {}
 
@@ -29,11 +55,12 @@ local M = {}
 --           string. Subscribe to signal, call fn, set attribute on change.
 -- children: array of Widget or string (static text nodes)
 -- Returns a Widget: (signal) -> Element
-function M.element(tag, attrs, children)
-	attrs    = attrs    or {}
-	children = children or {}
-	return function(signal)
-		local el = document.createElement(tag) --: Element
+function M.element(tag, attrs_raw, children_raw)
+	local attrs    = (attrs_raw    or {}) --: AttrMap
+	local children = (children_raw or {}) --: { [integer]: unknown }
+	return function(signal_raw)
+		local signal = signal_raw --: Signal
+		local el = document.createElement(tag) --: HTMLElement
 		-- Reactive attribute bindings
 		for attr, fn in pairs(attrs) do
 			widget.subscribe_now(signal, function(v)
@@ -44,11 +71,14 @@ function M.element(tag, attrs, children)
 		for i = 1, #children do
 			local child = children[i]
 			if type(child) == "string" then
-				local tn = document.createTextNode(child)
+				local child_str = child --: string
+				local tn = document.createTextNode(child_str)
 				el.appendChild(tn)
 			else
 				-- child is a Widget: call it with the same signal
-				local child_node = child(signal)
+				--: (unknown) -> Node
+				local child_fn = child
+				local child_node = child_fn(signal)
 				el.appendChild(child_node)
 			end
 		end
@@ -62,8 +92,10 @@ end
 -- f: (value) -> string — reactive text content.
 -- Creates a Text node; subscribes to signal to keep .data current.
 -- Returns a Widget: (signal) -> Text
-function M.text(f)
-	return function(signal)
+function M.text(f_raw)
+	local f = f_raw --: (unknown) -> string
+	return function(signal_raw)
+		local signal = signal_raw --: Signal
 		local tn = document.createTextNode("")
 		widget.subscribe_now(signal, function(v)
 			tn.data = f(v)
@@ -78,7 +110,10 @@ end
 -- Attach an event listener to el; registers removeEventListener in the current
 -- widget scope so it is torn down on cleanup.
 -- Must be called inside a with_scope context (i.e. during widget construction).
-function M.on(el, event, handler)
+function M.on(el_raw, event_raw, handler_raw)
+	local el = el_raw --: Element
+	local event = event_raw --: string
+	local handler = handler_raw --: EventHandler
 	el.addEventListener(event, handler)
 	widget.register(function()
 		el.removeEventListener(event, handler)
@@ -92,14 +127,18 @@ end
 -- Signal → DOM: subscribe_now sets el.value.
 -- DOM → Signal: "input" event sets signal.set(el.value).
 -- Must be called inside a with_scope context.
-function M.bind_input(el, signal)
-	widget.subscribe_now(signal, function(v)
+function M.bind_input(el_raw, signal_raw)
+	local el = el_raw --: HTMLInputElement
+	local sig = signal_raw --: Signal
+	widget.subscribe_now(signal_raw, function(v)
 		el.value = v
 	end)
-	local function on_input()
-		signal.set(el.value)
+	local function on_input(_ev)
+		_ev = _ev --: AnyEvent
+		sig.set(el.value)
 	end
-	M.on(el, "input", on_input)
+	local el_elem = el_raw --: Element
+	M.on(el_elem, "input", on_input)
 end
 
 -- bind_checkbox(el, signal) -> void
@@ -107,14 +146,20 @@ end
 -- Signal → DOM: subscribe_now sets el.checked.
 -- DOM → Signal: "change" event sets signal.set(el.checked).
 -- Must be called inside a with_scope context.
-function M.bind_checkbox(el, signal)
-	widget.subscribe_now(signal, function(v)
-		el.checked = v
+function M.bind_checkbox(el_raw, signal_raw)
+	local sig = signal_raw --: Signal
+	-- The subscribe_now handler uses el_raw directly (untyped) to avoid
+	-- the typechecker inferring handler type from HTMLInputElement.checked: boolean.
+	widget.subscribe_now(signal_raw, function(v)
+		el_raw.checked = v
 	end)
-	local function on_change()
-		signal.set(el.checked)
+	local el = el_raw --: HTMLInputElement
+	local function on_change(_ev)
+		_ev = _ev --: AnyEvent
+		sig.set(el.checked)
 	end
-	M.on(el, "change", on_change)
+	local el_elem = el_raw --: Element
+	M.on(el_elem, "change", on_change)
 end
 
 -- ── mount ─────────────────────────────────────────────────────────────────────
@@ -122,18 +167,27 @@ end
 -- mount(widget_fn, signal, container) -> cleanup_fn
 -- Bootstrap: run widget in a scope, append produced node to container.
 -- Returns a cleanup function that removes the node and unsubscribes everything.
-function M.mount(widget_fn, signal, container)
+function M.mount(widget_fn, signal, container_raw)
+	local container = container_raw --: Element
+	-- widget_fn and signal are intentionally untyped here: calling a typed
+	-- function inside with_scope causes the checker to mistype the cleanup
+	-- return. Use raw params inside the closure.
 	local node, cleanup = widget.with_scope(function()
 		return widget_fn(signal)
 	end)
-	container.appendChild(node)
+	--: Node
+	local mount_node = node
+	--: () -> ()
+	local mount_cleanup = cleanup
+	container.appendChild(mount_node)
 	return function()
 		-- Remove node from container if possible
-		local parent = node.parentNode
+		--: Node | nil
+		local parent = mount_node.parentNode
 		if parent then
-			parent.removeChild(node)
+			parent.removeChild(mount_node)
 		end
-		cleanup()
+		mount_cleanup()
 	end
 end
 
@@ -142,14 +196,20 @@ end
 -- beside(w1, w2) -> Widget
 -- Render w1 and w2 side by side inside a div[data-beside].
 -- Both widgets receive the same signal value.
+-- beside(w1, w2): both widgets are intentionally untyped in closures;
+-- typing them causes widget.with_scope to mistype cleanup (checker bug).
 function M.beside(w1, w2)
 	return function(signal)
 		local node = document.createElement("div")
 		node.setAttribute("data-beside", "")
-		local n1, cleanup1 = widget.with_scope(function() return w1(signal) end)
-		local n2, cleanup2 = widget.with_scope(function() return w2(signal) end)
-		node.appendChild(n1)
-		node.appendChild(n2)
+		local n1, c1 = widget.with_scope(function() return w1(signal) end)
+		local n2, c2 = widget.with_scope(function() return w2(signal) end)
+		local nn1 = n1 --: Node
+		local nn2 = n2 --: Node
+		local cleanup1 = c1 --: () -> ()
+		local cleanup2 = c2 --: () -> ()
+		node.appendChild(nn1)
+		node.appendChild(nn2)
 		widget.register(cleanup1)
 		widget.register(cleanup2)
 		return node
@@ -159,14 +219,20 @@ end
 -- above(w1, w2) -> Widget
 -- Render w1 above w2 inside a div[data-above].
 -- Both widgets receive the same signal value.
+-- above(w1, w2): both widgets are intentionally untyped in closures;
+-- typing them causes widget.with_scope to mistype cleanup (checker bug).
 function M.above(w1, w2)
 	return function(signal)
 		local node = document.createElement("div")
 		node.setAttribute("data-above", "")
-		local n1, cleanup1 = widget.with_scope(function() return w1(signal) end)
-		local n2, cleanup2 = widget.with_scope(function() return w2(signal) end)
-		node.appendChild(n1)
-		node.appendChild(n2)
+		local n1, c1 = widget.with_scope(function() return w1(signal) end)
+		local n2, c2 = widget.with_scope(function() return w2(signal) end)
+		local nn1 = n1 --: Node
+		local nn2 = n2 --: Node
+		local cleanup1 = c1 --: () -> ()
+		local cleanup2 = c2 --: () -> ()
+		node.appendChild(nn1)
+		node.appendChild(nn2)
 		widget.register(cleanup1)
 		widget.register(cleanup2)
 		return node
@@ -175,13 +241,17 @@ end
 
 -- stack(widgets) -> Widget
 -- Render N widgets all receiving the same signal, appended to a div[data-stack].
+-- stack: widgets intentionally untyped in closure (typed fn in with_scope
+-- causes checker to mistype cleanup return).
 function M.stack(widgets)
 	return function(signal)
 		local node = document.createElement("div")
 		node.setAttribute("data-stack", "")
 		for i = 1, #widgets do
-			local n, cleanup = widget.with_scope(function() return widgets[i](signal) end)
-			node.appendChild(n)
+			local n, c = widget.with_scope(function() return widgets[i](signal) end)
+			local nn = n --: Node
+			local cleanup = c --: () -> ()
+			node.appendChild(nn)
 			widget.register(cleanup)
 		end
 		return node
@@ -202,18 +272,21 @@ end
 -- rendered fresh; existing keys have their signal updated in-place. This
 -- preserves DOM nodes for stable keys across reorders and partial updates.
 function M.each(item_widget, get_key)
+	item_widget = item_widget --: (Signal) -> Node
+	get_key = get_key --: ((unknown) -> string) | nil
 	return function(list_signal)
+		list_signal = list_signal --: Signal
 		local node = document.createElement("div")
 		node.setAttribute("data-each", "")
 
 		-- item_cleanups: array of cleanup fns, parallel to rendered items.
-		local item_cleanups = {}
+		local item_cleanups = {} --: CleanupArray
 
 		local function teardown_all()
 			for i = 1, #item_cleanups do
 				item_cleanups[i]()
 			end
-			item_cleanups = {}
+			item_cleanups = {} --: CleanupArray
 		end
 
 		-- Remove all DOM children from node.
@@ -223,7 +296,9 @@ function M.each(item_widget, get_key)
 			end
 		end
 
-		local function render_all(items)
+		local function render_all(items_raw)
+			--: { [integer]: unknown }
+			local items = items_raw
 			teardown_all()
 			clear_children()
 			for i = 1, #items do
@@ -238,10 +313,12 @@ function M.each(item_widget, get_key)
 						return copy
 					end
 				)
-				local item_sig = R.focused(list_signal, item_lens)
+				local item_sig = R_focused(list_signal, item_lens)
 				local child_node, cleanup = widget.with_scope(function()
 					return item_widget(item_sig)
 				end)
+				child_node = child_node --: Node
+				cleanup = cleanup --: () -> ()
 				item_cleanups[#item_cleanups + 1] = cleanup
 				node.appendChild(child_node)
 			end
@@ -251,24 +328,28 @@ function M.each(item_widget, get_key)
 			-- Keyed mode: each item has an independent R.signal so its index
 			-- never becomes stale on reorder or removal.
 			-- key_map: key -> { node, cleanup, sig } where sig is R.signal(item)
-			local key_map = {}
-			local prev_keys = {}
+			local _get_key = get_key --: (unknown) -> string
+			local key_map = {} --: KeyMap
+			local prev_keys = {} --: { [integer]: string }
 
 			local function keyed_teardown()
 				for k, entry in pairs(key_map) do
+					entry = entry --: KeyEntry
 					entry.cleanup()
 					key_map[k] = nil
 				end
-				prev_keys = {}
-				item_cleanups = {}
+				prev_keys = {} --: { [integer]: string }
+				item_cleanups = {} --: CleanupArray
 				clear_children()
 			end
 
-			local function render_keyed(items)
-				local new_keys = {}
-				local new_key_set = {}
+			local function render_keyed(items_raw)
+				--: { [integer]: unknown }
+				local items = items_raw
+				local new_keys = {} --: { [integer]: string }
+				local new_key_set = {} --: { [string]: boolean }
 				for i = 1, #items do
-					local k = get_key(items[i])
+					local k = _get_key(items[i])
 					new_keys[i] = k
 					new_key_set[k] = true
 				end
@@ -278,6 +359,7 @@ function M.each(item_widget, get_key)
 					if not new_key_set[k] then
 						local entry = key_map[k]
 						if entry then
+							entry = entry --: KeyEntry
 							entry.cleanup()
 							key_map[k] = nil
 						end
@@ -286,23 +368,26 @@ function M.each(item_widget, get_key)
 
 				-- Rebuild DOM in new order; create or update each item
 				clear_children()
-				local new_cleanups = {}
-				local new_prev = {}
+				local new_cleanups = {} --: CleanupArray
+				local new_prev = {} --: { [integer]: string }
 				for i = 1, #items do
 					local k = new_keys[i]
 					new_prev[#new_prev + 1] = k
 					local entry = key_map[k]
 					if entry then
 						-- Existing key: update its signal value, re-append node
+						entry = entry --: KeyEntry
 						entry.sig.set(items[i])
 						node.appendChild(entry.node)
 						new_cleanups[#new_cleanups + 1] = entry.cleanup
 					else
 						-- New key: create independent signal and render widget
-						local item_sig = R.signal(items[i])
+						local item_sig = R_signal(items[i])
 						local child_node, cleanup = widget.with_scope(function()
 							return item_widget(item_sig)
 						end)
+						child_node = child_node --: Node
+						cleanup = cleanup --: () -> ()
 						node.appendChild(child_node)
 						new_cleanups[#new_cleanups + 1] = cleanup
 						key_map[k] = { node = child_node, cleanup = cleanup, sig = item_sig }
@@ -313,6 +398,7 @@ function M.each(item_widget, get_key)
 			end
 
 			-- Initial render
+			--: { [integer]: unknown }
 			local init = list_signal.get()
 			render_keyed(init)
 
@@ -321,13 +407,19 @@ function M.each(item_widget, get_key)
 			widget.register(keyed_teardown)
 		else
 			-- Unkeyed: re-render on length change only
-			render_all(list_signal.get())
+			--: { [integer]: unknown }
+			local init_items = list_signal.get()
+			render_all(init_items)
 
-			local len_computed = R.computed(function()
-				return #list_signal.get()
+			local len_computed = R_computed(function()
+				--: { [integer]: unknown }
+				local cur = list_signal.get()
+				return #cur
 			end, { list_signal })
-			local unsub = len_computed.subscribe(function()
-				render_all(list_signal.get())
+			local unsub = len_computed.subscribe(function(_v)
+				--: { [integer]: unknown }
+				local cur = list_signal.get()
+				render_all(cur)
 			end)
 			widget.register(unsub)
 			widget.register(function() len_computed.dispose() end)
@@ -345,18 +437,23 @@ end
 -- Calls inner_widget once; subscribes to predicate; toggles node.style.display.
 -- The inner widget stays mounted; subscriptions remain active while hidden.
 -- Returns a Widget that produces the wrapper div.
-function M.show(inner_widget, predicate)
-	return function(signal)
+function M.show(inner_widget, predicate_raw)
+	local predicate = predicate_raw --: (unknown) -> boolean
+	return function(signal_raw)
+		local signal = signal_raw --: Signal
 		local wrapper = document.createElement("div")
 		wrapper.setAttribute("data-show", "")
 
 		local child_node, cleanup = widget.with_scope(function()
-			return inner_widget(signal)
+			return inner_widget(signal_raw)
 		end)
-		wrapper.appendChild(child_node)
-		widget.register(cleanup)
+		local show_node = child_node --: Node
+		local show_cleanup = cleanup --: () -> ()
+		wrapper.appendChild(show_node)
+		widget.register(show_cleanup)
 
 		-- Apply initial visibility
+		--: (unknown) -> ()
 		local function apply(v)
 			if predicate(v) then
 				wrapper.style.display = ""
