@@ -496,7 +496,7 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] `lib/asm/emit/x64.lua` — x86-64 machine code emitter: VEX-encoded AVX instructions,
   mmap executable memory, full vmulps/vaddps/vsubps/vdivps/vfmadd213ps + loop (27 assertions, AVX-gated)
 - [ ] `lib/asm/emit/arm64.lua` — NEON emitter (A64 encoding)
-- [ ] `lib/asm/init.lua` — convenience wrapper: `asm.compile(kernel_fn, ctype)`
+- [x] `lib/asm/init.lua` — convenience wrapper: `asm.compile({args,ret,ctype}, build_fn)`. Selects abi+emit by jit.arch; supports x64 (sysv/win64). 28 assertions in asm_test.lua.
 
 ## lib/stb — image decode/resize (vendored stb)
 
