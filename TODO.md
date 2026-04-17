@@ -367,7 +367,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **Missing stdlib functions** — FIXED (819179f). Added `io.flush`/`input`/`output` + 8 `ffi.*` functions. Remaining:
   - `os.setlocale` (low)
   - `debug.getupvalue`, `debug.setupvalue` (low)
-- [ ] **`$GlobalScope` intrinsic undocumented** — used in stdlib_types.lua but not listed as a permanent intrinsic in CLAUDE.md. Document or replace.
+- [x] **`$GlobalScope` intrinsic documented** — listed in `lib/type/static/CLAUDE.md` under permanent intrinsics with full explanation of the synthesis mechanism.
 
 ## typechecker type guards and assertions
 
