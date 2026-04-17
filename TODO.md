@@ -77,12 +77,9 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
     name/description/tags with a download link. `GET /card/:id` returns raw
     PNG bytes. daemon/cli.lua now also stores `handler` in each source entry
     for future in-process calls. 17 new tests. (09f8024→next)
-  - [ ] **ST adapter: "Open in conversation" button.** Requires a daemon
-    `POST /api/import-card?source=<id>&entry=<filename>` endpoint that
-    reads the card PNG via `source.handler(GET /card/:id)`, runs the CCv2
-    import pipeline (needs CCv2 runtime dir wired into the daemon), and
-    303-redirects to `/launch/<new_app_id>`. Needs design: how does the daemon
-    know where the CCv2 runtime lives? Option: new `runtime_dir` daemon opt.
+  - [x] **ST adapter: "Open in conversation" button.** `POST /api/import-card`
+    on daemon origin. Runtime loaded from `--runtime-dir` at startup. Library
+    "Open" button calls this endpoint and navigates to launch_url. (bd62484)
   - [ ] **ST adapter: thumbnails (`GET /thumb/:id`).** Blocked on
     `stb_image_resize` FFI binding (see below). Serve resized PNG crop
     from the card file; raw card PNGs are too large to use as-is.
