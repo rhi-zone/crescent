@@ -67,13 +67,19 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
     "load more". Daemon passes `opts.sources` through to library.
     Daemon CLI auto-loads source adapter apps from the index at startup
     (`meta.source_adapter=true`). 17 new tests.
-  - [ ] **Configurable caps (HIGH PRIORITY).** Cap fields declared in
-    `manifest.json` (paths, URLs, credentials, etc.) are hardcoded by the
-    app author and can't be overridden by the operator. Needs design — see
-    `docs/platform-design.md` "Configurable caps" once written.
+  - [x] **Configurable caps.** `app_cap_config` table in index DB; `get/set/reset_cap_config`
+    on index; app_loader merges stored overrides into cap decls before construction;
+    `crescent list` + `crescent caps` CLI subcommands. 7+2 new tests. (dbfc54e, ff63155)
   - [x] **ST adapter: PNG metadata (name/description/tags).** Implemented
     via SQLite cache: reads CCv2 iTXt `chara` chunk on miss, stores in
     `card_meta`. 77 tests. (d97da4f)
+  - [ ] **ST adapter: card view page.** When launched via
+    `/launch/<st_app_id>?entry=Alice.png`, the ST app receives `?entry=Alice.png`
+    (query params now forwarded by the daemon launch handler). It needs a
+    `GET /` handler that reads `?entry=` and renders the card metadata
+    (name, description, tags) + a "Start conversation" button. The button
+    would import the card and launch a CCv2 conversation — or at minimum
+    link to the CCv2 card app with the card embedded.
   - [ ] **ST adapter: thumbnails (`GET /thumb/:id`).** Blocked on
     `stb_image_resize` FFI binding (see below). Serve resized PNG crop
     from the card file; raw card PNGs are too large to use as-is.

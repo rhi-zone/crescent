@@ -427,6 +427,24 @@ T.describe("/launch/:id", function()
 		idx:close()
 	end)
 
+	T.it("forwards query params to the app origin redirect", function()
+		local idx, db = make_index_db()
+		local d = make_daemon({ index_db = db })
+		local sid = prime_session(d)
+		-- Source adapter launch: /launch/1?entry=Alice.png
+		local req = with_document_fetch_dest(
+			make_req("GET", "/launch/1", "localhost:7777", "__Host-session=" .. sid))
+		req.query = "entry=Alice.png"
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 303)
+		local loc = res.headers["Location"][1]
+		-- Location must contain __launch token AND entry param.
+		T.ok(loc:find("__launch=", 1, true), "Location must have __launch token")
+		T.ok(loc:find("entry=Alice.png", 1, true), "Location must forward entry= param")
+		idx:close()
+	end)
+
 	T.it("mint sweeps expired tokens from the launch_tokens map", function()
 		local idx, db = make_index_db()
 		local tfn, tref = make_time_fn(1000)

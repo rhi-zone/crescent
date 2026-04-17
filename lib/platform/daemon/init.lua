@@ -585,8 +585,11 @@ function M.make(opts)
 		}
 
 		local origin = launch_origin_url(app_id)
+		-- Forward caller-supplied query params (e.g. entry=<id> from source
+		-- adapter launches) so the app receives them alongside __launch.
+		local extra_qs = (req.query and req.query ~= "") and ("&" .. req.query) or ""
 		res.status = 303
-		res.headers["Location"] = { origin .. "/?__launch=" .. token }
+		res.headers["Location"] = { origin .. "/?__launch=" .. token .. extra_qs }
 		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
 		-- Keep the token out of the Referer that an app's first page might
 		-- leak if it fetches a third-party resource on first paint.
