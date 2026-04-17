@@ -145,12 +145,9 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   launch token, 303-redirects to app origin. Per-app cookie `__Host-app-session-<id>`.
 
   **Open threads around the launch flow:**
-  - [ ] `app_sessions` top-level map accumulates empty buckets for
-    *uninstalled* apps: once an app id disappears from the index, the
-    bucket for it is never revisited (consume is the only sweep site)
-    so sweep-on-access never runs. Trivial to add a periodic or
-    install/uninstall-triggered cleanup; punted because it's bounded
-    by total-apps-ever-launched, not request rate.
+  - [x] `app_sessions` accumulated empty buckets for uninstalled apps.
+    Fixed: DELETE /api/apps/:id now clears app_sessions[id], app_handlers[id],
+    and app_csp[id] on eviction. (8272164)
   - [x] Rate limiting on `/launch` — token bucket burst=5, rate=0.5/s per session. (e53a4d7)
   - [ ] Standing risk note (not a gap to fix — architectural): launch
     tokens are URL-bearer on consume, not session-bound. Mitigations
