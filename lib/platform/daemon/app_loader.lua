@@ -113,6 +113,13 @@ function M.make(opts)
 		end
 
 		local cap_decls = collect_entry_caps(app.manifest, entry_key)
+		-- Merge operator-supplied overrides into each cap declaration.
+		if index_db.get_cap_config then
+			for name, decl in pairs(cap_decls) do
+				local overrides = index_db:get_cap_config(app_id, name)
+				for k, v in pairs(overrides) do decl[k] = v end
+			end
+		end
 		local grants    = auto_grants(cap_decls)
 		local context   = {
 			user_id  = ctx_base.user_id,

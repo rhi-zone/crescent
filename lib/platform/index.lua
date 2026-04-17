@@ -3,13 +3,16 @@
 -- The library app queries this to discover, filter, and search installed apps.
 --
 -- API:
---   M.open(db_path)                    -> index | nil, err
---   index:install(app_path, manifest)  -> id | nil, err
---   index:uninstall(id)                -> true | nil, err
---   index:get(id)                      -> row | nil
---   index:list(filter?)                -> rows[]
---   index:search(query)                -> rows[]
---   index:close()                      -> true | nil, err
+--   M.open(db_path)                              -> index | nil, err
+--   index:install(app_path, manifest)            -> id | nil, err
+--   index:uninstall(id)                          -> true | nil, err
+--   index:get(id)                                -> row | nil
+--   index:list(filter?)                          -> rows[]
+--   index:search(query)                          -> rows[]
+--   index:get_cap_config(app_id, cap_name)       -> { [string]: unknown }
+--   index:set_cap_config(app_id, cap_name, tbl)  -> true | nil, err
+--   index:reset_cap_config(app_id, cap_name)     -> true | nil, err
+--   index:close()                                -> true | nil, err
 --
 -- Row fields: id, name, path, manifest_json, tags_json, installed_at
 
@@ -40,6 +43,11 @@ local M = {}
 --    which we don't rely on for portability. Kept in sync explicitly from
 --    install/uninstall; no triggers since writes already go through one
 --    code path.
+--  * `app_cap_config` stores operator overrides for cap fields, keyed by
+--    (app_id, cap_name). `overrides_json` is a flat JSON object merged over
+--    the manifest cap declaration at cap construction time. Deleted with the
+--    app row via explicit DELETE in uninstall (not FK cascade — SQLite FK
+--    enforcement requires PRAGMA foreign_keys = ON per connection).
 local SCHEMA = [[
 CREATE TABLE IF NOT EXISTS apps (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +74,13 @@ CREATE INDEX IF NOT EXISTS idx_app_tags_tag_app ON app_tags(tag_id, app_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS apps_fts USING fts5(
 	name, description, path, tokenize='trigram'
+);
+
+CREATE TABLE IF NOT EXISTS app_cap_config (
+	app_id       INTEGER NOT NULL,
+	cap_name     TEXT    NOT NULL,
+	overrides_json TEXT  NOT NULL DEFAULT '{}',
+	PRIMARY KEY (app_id, cap_name)
 );
 ]]
 
@@ -183,8 +198,49 @@ function I:uninstall(id)
 	local db = self._db
 	db:execute("DELETE FROM app_tags WHERE app_id = ?", id)
 	db:execute("DELETE FROM apps_fts WHERE rowid = ?", id)
+	db:execute("DELETE FROM app_cap_config WHERE app_id = ?", id)
 	local ok, err = db:execute("DELETE FROM apps WHERE id = ?", id)
 	if not ok then return nil, "index: delete failed: " .. tostring(err) end
+	return true
+end
+
+-- ── Cap config ──────────────────────────────────────────────────────────────
+
+-- Return stored overrides for (app_id, cap_name) as a Lua table.
+-- Returns an empty table if no overrides have been set.
+--: (number, string) -> { [string]: unknown }
+function I:get_cap_config(app_id, cap_name)
+	local iter = self._db:query(
+		"SELECT overrides_json FROM app_cap_config WHERE app_id = ? AND cap_name = ?",
+		app_id, cap_name)
+	if not iter then return {} end
+	local raw = iter()
+	if not raw then return {} end
+	return json.decode(raw) or {}
+end
+
+-- Persist overrides for (app_id, cap_name). `overrides` must be a table;
+-- its values are shallow-merged over manifest defaults at cap construction.
+--: (number, string, { [string]: unknown }) -> true | (nil, string)
+function I:set_cap_config(app_id, cap_name, overrides)
+	if type(overrides) ~= "table" then
+		return nil, "index: overrides must be a table"
+	end
+	local encoded = json.encode(overrides)
+	local ok, err = self._db:execute(
+		"INSERT OR REPLACE INTO app_cap_config (app_id, cap_name, overrides_json) VALUES (?, ?, ?)",
+		app_id, cap_name, encoded)
+	if not ok then return nil, "index: set_cap_config failed: " .. tostring(err) end
+	return true
+end
+
+-- Remove all overrides for (app_id, cap_name), reverting to manifest defaults.
+--: (number, string) -> true | (nil, string)
+function I:reset_cap_config(app_id, cap_name)
+	local ok, err = self._db:execute(
+		"DELETE FROM app_cap_config WHERE app_id = ? AND cap_name = ?",
+		app_id, cap_name)
+	if not ok then return nil, "index: reset_cap_config failed: " .. tostring(err) end
 	return true
 end
 

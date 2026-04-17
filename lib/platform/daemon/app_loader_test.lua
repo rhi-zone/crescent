@@ -120,3 +120,42 @@ T.describe("app_loader.make end-to-end failure modes", function()
 		T.ok(err:find("load_app failed"), "error mentions load_app")
 	end)
 end)
+
+T.describe("app_loader cap config merge", function()
+	T.it("collect_entry_caps merged with get_cap_config overrides", function()
+		-- This tests the merge logic in isolation: simulate what make() does.
+		local decls = app_loader._collect_entry_caps({
+			caps = { characters = { type = "fs", root = "~/SillyTavern/public/characters", readonly = true } }
+		}, "server")
+
+		-- Fake index_db with get_cap_config returning a root override.
+		local fake_index = {
+			get_cap_config = function(_self, _app_id, cap_name)
+				if cap_name == "characters" then
+					return { root = "/mnt/ssd/ai/SillyTavern/public/characters" }
+				end
+				return {}
+			end,
+		}
+
+		for name, decl in pairs(decls) do
+			local overrides = fake_index:get_cap_config("app1", name)
+			for k, v in pairs(overrides) do decl[k] = v end
+		end
+
+		T.eq(decls.characters.root, "/mnt/ssd/ai/SillyTavern/public/characters")
+		T.eq(decls.characters.readonly, true)  -- non-overridden field preserved
+	end)
+
+	T.it("get_cap_config absent on index_db is handled gracefully", function()
+		-- index_db without get_cap_config (old interface / raw db handle).
+		local fake_index = { get = function(_self, _id)
+			return { path = "/nonexistent/path.png" }
+		end }
+		local loader = app_loader.make({ index_db = fake_index })
+		-- Will fail at load_app, but the cap-config guard must not blow up first.
+		local h, err = loader("any")
+		T.eq(h, nil)
+		T.ok(err:find("load_app failed"), "failed at load_app, not cap config guard")
+	end)
+end)
