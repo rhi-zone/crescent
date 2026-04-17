@@ -289,12 +289,18 @@ function M.make(opts)
 	local app_load_errors = {} --: { [string]: { err: string, retry_at: integer } }
 	local LOAD_ERROR_TTL = 5 -- seconds; see docs/daemon-design.md
 
+	-- Per-app CSP cache: app_id → computed CSP string. Populated at handler-load
+	-- time. Not LRU — CSP strings are tiny and recomputed on reload anyway.
+	local app_csp = {} --: { [string]: string }
+
 	-- Per-request handler invocation. App handlers are untrusted code running
 	-- in the daemon process; an uncaught `error()` must not bubble past the
 	-- request loop. On failure: 500 with a fixed body (never the actual
 	-- error message — that's operator-visible only, per daemon-isolation.md).
 	-- The optional `on_handler_error` callback receives (app_id, err, tb) so
 	-- operators see the crash on stderr while clients see a clean 500.
+	-- After the handler runs (success or error), the daemon injects the app's
+	-- Content-Security-Policy if one is stored in app_csp.
 	--: (string, (http_req, http_res) -> nil, http_req, http_res) -> nil
 	local function invoke_app_handler(app_id, fn, req, res)
 		local tb --: string
@@ -310,9 +316,15 @@ function M.make(opts)
 			if opts.on_handler_error then
 				opts.on_handler_error(app_id, tostring(err), tb or "")
 			end
-			return
+		else
+			normalize_headers(res.headers)
 		end
-		normalize_headers(res.headers)
+		-- Inject CSP regardless of handler success/failure. The daemon enforces
+		-- it; the app cannot weaken or remove it.
+		local csp = app_csp[app_id]
+		if csp then
+			res.headers["Content-Security-Policy"] = { csp }
+		end
 	end
 
 	-- Collect all cap declarations from a manifest (top-level + all entry sections).
@@ -331,6 +343,52 @@ function M.make(opts)
 			end
 		end
 		return caps
+	end
+
+	-- Compute a Content-Security-Policy for an app based on its manifest caps.
+	-- Returns a CSP string, or nil if index data is unavailable.
+	-- Policy: default-src 'self' (allows same-origin scripts/styles/images);
+	-- connect-src expanded with operator-configured http_client hosts;
+	-- frame-ancestors 'none' (prevent clickjacking);
+	-- form-action 'self' (prevent form-based CSRF to other origins).
+	--: (string) -> string | nil
+	local function build_app_csp(app_id)
+		if not index_obj or not index_obj.get then return nil end
+		local iapp_id = tonumber(app_id)
+		if not iapp_id then return nil end
+		local row = index_obj:get(iapp_id)
+		if not row then return nil end
+		local cap_decls = all_cap_decls_from_manifest(row.manifest or {})
+		-- Collect allowed connect-src origins from http_client caps.
+		local extra_origins = {}
+		local seen = {}
+		for cname, decl in pairs(cap_decls) do
+			local cap_type = type(decl) == "table" and (decl.type or cname) or cname
+			if cap_type == "http_client" then
+				-- Prefer operator cap_config host override, fall back to manifest.
+				local h = type(decl) == "table" and decl.host
+				if index_obj.get_cap_config then
+					local cfg = index_obj:get_cap_config(iapp_id, cname)
+					if cfg and cfg.host then h = cfg.host end
+				end
+				if h and not seen[h] then
+					seen[h] = true
+					-- Emit both schemes; the actual scheme is operator-determined.
+					local bare = h:gsub("^https?://", "")
+					if not seen["http://" .. bare] then
+						extra_origins[#extra_origins + 1] = "http://" .. bare
+						extra_origins[#extra_origins + 1] = "https://" .. bare
+						seen["http://" .. bare] = true
+					end
+				end
+			end
+		end
+		local connect_src = "'self'"
+		if #extra_origins > 0 then
+			connect_src = "'self' " .. table.concat(extra_origins, " ")
+		end
+		return "default-src 'self'; connect-src " .. connect_src
+			.. "; frame-ancestors 'none'; form-action 'self'"
 	end
 
 	local app_handler --: (http_req, http_res, string) -> nil
@@ -402,6 +460,8 @@ function M.make(opts)
 			local fn = assert(handler)
 			-- Cache BEFORE invoking: a throwing handler must not be evicted.
 			app_handlers:set(app_id, fn)
+			-- Compute and cache the app's CSP alongside its handler.
+			app_csp[app_id] = build_app_csp(app_id)
 			invoke_app_handler(app_id, fn, req, res)
 		end
 	else
@@ -716,9 +776,10 @@ function M.make(opts)
 			-- No radio selected → leave undecided (no change to DB)
 		end
 
-		-- Invalidate the cached handler so the next request to the app origin
-		-- re-loads the app with the newly stored grant decisions.
+		-- Invalidate the cached handler (and CSP) so the next request to the app
+		-- origin re-loads the app with the newly stored grant decisions.
 		app_handlers:delete(app_id_str)
+		app_csp[app_id_str] = nil
 
 		-- Redirect to app origin (which will now load with correct grants).
 		local origin = launch_origin_url(app_id_str)

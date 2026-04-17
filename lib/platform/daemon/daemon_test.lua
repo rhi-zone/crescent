@@ -1056,6 +1056,65 @@ T.describe("VM host dispatch via app_loader", function()
 		T.eq(res.body, "override z")
 		T.eq(loader_calls, 0, "loader not invoked when app_handler is set")
 	end)
+
+	T.it("CSP header injected on app-origin responses when index_obj available", function()
+		-- index_obj allows build_app_csp to look up the manifest + cap_config.
+		local idx, db = make_index_db()
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = db,
+			index_obj       = idx,
+			app_loader      = function(_id)
+				return function(req, res)
+					res.status = 200
+					res.body = "ok"
+				end
+			end,
+		})
+		local req = make_req("GET", "/", "app-1.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		local csp = res.headers["Content-Security-Policy"]
+		T.ok(csp, "expected CSP header on app-origin response")
+		local csp_val = type(csp) == "table" and csp[1] or tostring(csp)
+		T.ok(csp_val:find("default-src 'self'", 1, true), "CSP must include default-src 'self'")
+		T.ok(csp_val:find("frame-ancestors 'none'", 1, true), "CSP must include frame-ancestors 'none'")
+		T.ok(csp_val:find("connect-src", 1, true), "CSP must include connect-src")
+		idx:close()
+	end)
+
+	T.it("CSP includes operator-configured http_client host in connect-src", function()
+		local idx, db = make_index_db()
+		-- Store a cap_config for an http_client cap.
+		idx:set_cap_config(1, "llm_api", { host = "api.example.com" })
+		-- Reinstall app with an http_client cap declared.
+		idx:install("/apps/alice.png", {
+			name = "Alice",
+			meta = {},
+			caps = { llm_api = { type = "http_client", required = false } },
+		}, 1001)
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = db,
+			index_obj       = idx,
+			app_loader      = function(_id)
+				return function(req, res) res.status = 200; res.body = "ok" end
+			end,
+		})
+		local req = make_req("GET", "/", "app-1.localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		local csp_val = res.headers["Content-Security-Policy"] and
+			res.headers["Content-Security-Policy"][1] or ""
+		T.ok(csp_val:find("api.example.com", 1, true),
+			"connect-src must include operator-configured host: " .. csp_val)
+		idx:close()
+	end)
 end)
 
 T.describe("per-request handler dispatch is pcall-wrapped", function()
