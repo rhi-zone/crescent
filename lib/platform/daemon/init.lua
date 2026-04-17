@@ -637,6 +637,7 @@ function M.make(opts)
 
 		db:execute("DELETE FROM app_tags WHERE app_id = ?", app_id)
 		db:execute("DELETE FROM apps_fts WHERE rowid = ?", app_id)
+		db:execute("DELETE FROM app_cap_config WHERE app_id = ?", app_id)
 		db:execute("DELETE FROM apps WHERE id = ?", app_id)
 
 		local ok_rm, rm_err = remove_fn(app_path)

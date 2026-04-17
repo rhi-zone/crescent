@@ -1270,6 +1270,24 @@ T.describe("DELETE /api/apps/:id", function()
 		idx2:close()
 	end)
 
+	T.it("uninstall clears app_cap_config rows", function()
+		local d, idx, id = make_uninstall_daemon()
+		-- Store a cap override before uninstalling.
+		idx:set_cap_config(id, "characters", { root = "/mnt/x" })
+		T.eq(idx:get_cap_config(id, "characters").root, "/mnt/x")
+
+		local sid = prime(d)
+		local req = make_req("DELETE", "/api/apps/" .. id, "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+
+		-- Cap config row must be gone.
+		local cfg = idx:get_cap_config(id, "characters")
+		T.eq(next(cfg), nil, "app_cap_config must be cleared on uninstall")
+		idx:close()
+	end)
+
 	T.it("no index_db → 503", function()
 		local d = daemon.make({
 			host            = "localhost:7777",
