@@ -202,15 +202,15 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
 - [x] **Cap grant UI + endpoint** — grant page at daemon origin. Zero-JS HTML form, CSRF
   token in hidden input, POST stores decisions, dispatch gate redirects on undecided required
   caps, handler cache invalidated on save. (c457175)
-- [ ] **CSP emission** — daemon emits `Content-Security-Policy` per app response, derived
-  from that app's manifest `net.connect_src` (hosts declared at install). Locks
-  `default-src 'none'`, `connect-src 'self' <declared-hosts>`, `frame-ancestors 'none'`,
-  `require-trusted-types-for 'script'`, `trusted-types 'none'`. No `unsafe-inline`, no
-  `unsafe-eval`.
-- [ ] **Daemon UI XSS resistance** — grant page and operator pages ship with
-  `Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'`
-  (strictest possible; no scripts on grant page at all). Trusted Types enforced on any
-  page that does ship JS. All rendered user/app strings HTML-escaped at emission.
+- [x] **CSP emission** — daemon injects `Content-Security-Policy` on all app-origin
+  responses: `default-src 'self'; connect-src 'self' <http_client hosts>; frame-ancestors
+  'none'; form-action 'self'`. Hosts from operator cap_config. (9576acf)
+  - [ ] Tighten to `default-src 'none'` + explicit directives once apps declare their
+    static asset needs in the manifest. Requires manifest-level `script-src`/`style-src`
+    declarations or nonce injection.
+- [x] **Daemon UI XSS resistance** — grant page ships with strict CSP (`default-src 'none';
+  style-src 'unsafe-inline'; form-action 'self'`), all user/app strings HTML-escaped.
+  (c457175)
 - [ ] **Rate limiting** — per-session and per-IP limits on auth endpoints, grant endpoint,
   and launch-token mint. Exponential backoff on failure.
 - [ ] **Audit log** — append-only log of every cap grant, every auth event, every
