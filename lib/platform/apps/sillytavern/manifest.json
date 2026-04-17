@@ -12,7 +12,8 @@
       "main": "server.lua",
       "caps": {
         "server":     { "type": "http_server" },
-        "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true }
+        "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true },
+        "meta_cache": { "type": "db" }
       }
     }
   }

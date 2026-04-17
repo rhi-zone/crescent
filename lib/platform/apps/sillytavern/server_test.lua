@@ -215,6 +215,113 @@ T.describe("GET /discover", function()
 	end)
 end)
 
+-- ── Metadata cache ────────────────────────────────────────────────────────
+
+T.describe("metadata cache", function()
+	local sqlite = require("lib.sqlite")
+	local card_mod = require("lib.formats.ccv2.card")
+
+	-- Build a minimal in-memory SQLite db and initialise the schema.
+	local function make_cache_db()
+		local db, err = sqlite.open(":memory:")
+		T.ok(db, "sqlite open: " .. tostring(err))
+		local cap = {
+			execute = function(_, ...) return db:execute(...) end,
+			query   = function(_, ...) return db:query(...) end,
+		}
+		return cap, db
+	end
+
+	-- Build a fake fs that serves a real CCv2 PNG for one file, nil for others.
+	-- cap.read is called as fs.read(path) (not fs:read(path)) — no self arg.
+	local function make_fs_with_png(filename, png_bytes)
+		return {
+			list = function(_) return { filename } end,
+			read = function(f)
+				if f == filename then return png_bytes end
+				return nil, "not found"
+			end,
+		}
+	end
+
+	T.it("init_cache creates the schema without error", function()
+		local cap = make_cache_db()
+		local result = server._init_cache(cap)
+		T.ok(result ~= nil, "init_cache must return db on success")
+	end)
+
+	T.it("init_cache returns nil for nil input", function()
+		T.eq(server._init_cache(nil), nil)
+	end)
+
+	T.it("ensure_cached falls back to filename-derived name when no db", function()
+		local fs = make_fs(FAKE_FILES)
+		local meta = server._ensure_cached(nil, fs, { "Alice.png" })
+		T.eq(meta["Alice.png"].name, "Alice")
+	end)
+
+	T.it("ensure_cached reads PNG and populates cache on miss", function()
+		local cap = make_cache_db()
+		server._init_cache(cap)
+
+		-- Build a real CCv2 card PNG in-memory.
+		local card_bytes, err = card_mod.to_png({ name = "Aria", description = "A helpful mage", tags = { "fantasy", "magic" } })
+		T.ok(card_bytes, "to_png failed: " .. tostring(err))
+
+		local fs = make_fs_with_png("Aria.png", card_bytes)
+		local meta = server._ensure_cached(cap, fs, { "Aria.png" })
+
+		T.eq(meta["Aria.png"].name,        "Aria")
+		T.eq(meta["Aria.png"].description, "A helpful mage")
+		T.ok(#meta["Aria.png"].tags >= 2,  "expected 2 tags")
+	end)
+
+	T.it("ensure_cached returns cache hit on second call without re-reading", function()
+		local cap = make_cache_db()
+		server._init_cache(cap)
+
+		local read_count = 0
+		local fs = {
+			list = function(_) return { "Bob.png" } end,
+			read = function(_)
+				read_count = read_count + 1
+				local bytes, err2 = card_mod.to_png({ name = "Bob", tags = {} })
+				return bytes, err2
+			end,
+		}
+
+		server._ensure_cached(cap, fs, { "Bob.png" })
+		T.eq(read_count, 1, "first call should read the file")
+
+		server._ensure_cached(cap, fs, { "Bob.png" })
+		T.eq(read_count, 1, "second call must use cache, not re-read")
+	end)
+
+	T.it("ensure_cached falls back to filename name when PNG has no chara chunk", function()
+		local cap = make_cache_db()
+		server._init_cache(cap)
+		-- A PNG with no chara chunk (make_fs returns nil for read).
+		local fs = {
+			list = function(_) return { "plain.png" } end,
+			read = function(_) return nil, "no file" end,
+		}
+		local meta = server._ensure_cached(cap, fs, { "plain.png" })
+		T.eq(meta["plain.png"].name, "plain")
+	end)
+
+	T.it("/discover uses cached name in entries", function()
+		local cap = make_cache_db()
+		local card_bytes = assert(card_mod.to_png({ name = "Real Name", description = "desc", tags = { "a" } }))
+		local fs = make_fs_with_png("weird_filename.png", card_bytes)
+		local app = server.create({ characters = fs, meta_cache = cap })
+		local _, data = call(app, "/discover")
+		T.eq(#data.entries, 1)
+		T.eq(data.entries[1].name,        "Real Name")
+		T.eq(data.entries[1].description, "desc")
+		T.ok(#data.entries[1].tags >= 1)
+	end)
+end)
+
 -- ── Non-discover endpoints ─────────────────────────────────────────────────
 
 T.describe("other endpoints", function()

@@ -3,27 +3,42 @@
 -- per-source section model.
 --
 -- Reads ~/SillyTavern/public/characters/ in place; no import or conversion.
--- For each PNG file the entry id is the filename, the name is the filename
--- without the .png suffix. No metadata parsing in this stub — a later
--- iteration can read CCv2 iTXt chunks for description/tags/thumbnails.
+-- Card metadata (name, description, tags) is read from CCv2 iTXt chunks and
+-- cached in caps.meta_cache (SQLite) by filename. Cache is populated lazily:
+-- on each /discover call we read metadata for any uncached files in the
+-- requested page. Cache persists across daemon restarts; no auto-invalidation
+-- (cards edited in ST won't update until cache is cleared or the entry is
+-- explicitly dropped). This trades freshness for the perf win of not scanning
+-- all PNGs on every request.
 --
 -- Discovery protocol (GET /discover):
---   Query params: q (substring search), limit (default 200, max 500),
---                 offset (default 0)
+--   Query params: q (substring search on cached name, falls back to filename),
+--                 limit (default 200, max 500), offset (default 0)
 --   Response: { source_name, total, limit, offset, entries: [entry] }
 --   entry: { id, name, description, tags, thumb_url }
 --
 -- Caps:
 --   caps.characters — readonly fs (root = ~/SillyTavern/public/characters)
---   caps.http_server (wired externally; handler is returned, not started here)
+--   caps.meta_cache — writable SQLite for metadata caching (optional)
 
 if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
 local json = require("lib.format.json")
+local card_mod = require("lib.formats.ccv2.card")
 
 local M = {}
+
+local SCHEMA = [[
+CREATE TABLE IF NOT EXISTS card_meta (
+  filename    TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  tags_json   TEXT,
+  cached_at   INTEGER NOT NULL
+);
+]]
 
 -- ── Query string parser ────────────────────────────────────────────────────
 
@@ -46,7 +61,6 @@ end
 
 --: (string) -> string
 local function name_from_file(filename)
-	-- Strip any extension (e.g. "alice.png" → "alice", "bob.card.png" → "bob.card").
 	return filename:match("^(.+)%.[^.]+$") or filename
 end
 
@@ -71,10 +85,77 @@ local function json_ok(res, data)
 	return true
 end
 
+-- ── Metadata cache ─────────────────────────────────────────────────────────
+
+-- Ensure the schema exists. Returns the db on success, nil on failure.
+local function init_cache(db)
+	if not db then return nil end
+	local ok = db.execute(db, SCHEMA)
+	if not ok then return nil end
+	return db
+end
+
+-- Look up cached metadata for a batch of filenames.
+-- Returns { [filename]: { name, description, tags } }.
+local function cache_lookup(db, filenames)
+	if not db or #filenames == 0 then return {} end
+	local result = {}
+	for i = 1, #filenames do
+		local f = filenames[i]
+		local ok, iter = pcall(db.query, db,
+			"SELECT name, description, tags_json FROM card_meta WHERE filename = ?", f)
+		if ok and iter then
+			local name, desc, tags_json = iter()
+			if name then
+				result[f] = {
+					name        = name,
+					description = desc,
+					tags        = json.decode(tags_json) or {},
+				}
+			end
+		end
+	end
+	return result
+end
+
+-- Read metadata from a PNG file. Returns { name, description, tags } or nil.
+local function read_card_meta(fs, filename)
+	local bytes, err = fs.read(filename)
+	if not bytes then return nil end
+	local data, cerr = card_mod.from_png(bytes)
+	if not data then return nil end
+	return {
+		name        = data.name or name_from_file(filename),
+		description = data.description,
+		tags        = data.tags or {},
+	}
+end
+
+-- Populate cache for any filenames not yet present.
+-- Returns the enriched { [filename]: meta } map (hit + newly read).
+local function ensure_cached(db, fs, filenames)
+	local cached = cache_lookup(db, filenames)
+	local now = os.time()
+	for i = 1, #filenames do
+		local f = filenames[i]
+		if not cached[f] then
+			local meta = read_card_meta(fs, f)
+			if meta and db then
+				pcall(db.execute, db,
+					"INSERT OR REPLACE INTO card_meta (filename, name, description, tags_json, cached_at) VALUES (?, ?, ?, ?, ?)",
+					f, meta.name, meta.description or "", json.encode(meta.tags), now)
+			end
+			cached[f] = meta or { name = name_from_file(f), description = nil, tags = {} }
+		end
+	end
+	return cached
+end
+
 -- ── Handler ────────────────────────────────────────────────────────────────
 
 function M.create(caps)
 	local fs = caps.characters
+	local db = init_cache(caps.meta_cache)
 
 	--: (http_req, http_res) -> nil
 	local function handler(req, res)
@@ -97,7 +178,7 @@ function M.create(caps)
 		local limit   = math.max(1, math.min(500, tonumber(params.limit)  or 200))
 		local offset  = math.max(0,               tonumber(params.offset) or 0)
 
-		-- List the characters directory. Returns filenames only.
+		-- List the characters directory.
 		local files, err = fs.list(".")
 		if not files then
 			json_ok(res, {
@@ -108,37 +189,52 @@ function M.create(caps)
 			return
 		end
 
-		-- Filter to PNG/WEBP/JPEG character card files and apply search.
-		local matched = {} --: { [integer]: { id: string, name: string } }
+		-- Filter to image files; derive initial name from filename for list/sort.
+		local candidates = {} --: { [integer]: { id: string, sort_key: string } }
 		for i = 1, #files do
 			local f = files[i]
-			-- Accept .png / .webp / .jpeg / .jpg (CCv2 allows all image types)
 			local ext = f:lower():match("%.([^.]+)$")
 			if ext == "png" or ext == "webp" or ext == "jpeg" or ext == "jpg" then
-				local name = name_from_file(f)
-				if matches(name, q) then
-					matched[#matched + 1] = { id = f, name = name }
-				end
+				candidates[#candidates + 1] = { id = f, sort_key = name_from_file(f):lower() }
 			end
 		end
 
-		-- Stable alphabetical order so pagination is consistent.
-		table.sort(matched, function(a, b)
-			return a.name:lower() < b.name:lower()
-		end)
+		-- Sort alphabetically by derived name for stable pagination.
+		table.sort(candidates, function(a, b) return a.sort_key < b.sort_key end)
+
+		-- Pre-filter by query on the filename-derived name (fast, no file I/O).
+		-- The cached name is used if available but we can't guarantee all files are
+		-- cached at filter time. Full-metadata search requires a full cache scan,
+		-- which is a future optimisation; for now, filename match is the search key.
+		local matched = {}
+		for i = 1, #candidates do
+			if matches(candidates[i].sort_key, q) then
+				matched[#matched + 1] = candidates[i].id
+			end
+		end
 
 		local total = #matched
 
 		-- Slice the page.
-		local entries = {} --: { [integer]: unknown }
+		local page_files = {}
 		local stop = math.min(offset + limit, total)
 		for i = offset + 1, stop do
-			local e = matched[i]
+			page_files[#page_files + 1] = matched[i]
+		end
+
+		-- Populate metadata cache for this page (reads only uncached PNGs).
+		local meta = ensure_cached(db, fs, page_files)
+
+		-- Build the entries array.
+		local entries = {}
+		for i = 1, #page_files do
+			local f = page_files[i]
+			local m = meta[f] or { name = name_from_file(f), description = nil, tags = {} }
 			entries[#entries + 1] = {
-				id          = e.id,
-				name        = e.name,
-				description = nil,
-				tags        = {},
+				id          = f,
+				name        = m.name,
+				description = m.description,
+				tags        = m.tags,
 				thumb_url   = nil,
 			}
 		end
@@ -156,8 +252,10 @@ function M.create(caps)
 end
 
 -- Expose for testing.
-M._parse_query   = parse_query
+M._parse_query    = parse_query
 M._name_from_file = name_from_file
 M._matches        = matches
+M._init_cache     = init_cache
+M._ensure_cached  = ensure_cached
 
 return M

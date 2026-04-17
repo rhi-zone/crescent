@@ -58,8 +58,8 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
     thumb_url}] }`. Source adapter apps declare `meta.source_adapter=true`.
     Launch of virtual entries: library uses `/launch/<source_app_id>?entry=<id>`.
   - [x] **Second canonical app — `lib/platform/apps/sillytavern/`.**
-    Stub that lists `~/SillyTavern/public/characters/*.png` and exposes
-    `/discover`. Supports q/limit/offset. 58 tests. (next commit)
+    Lists `~/SillyTavern/public/characters/*.png`, exposes `/discover`
+    with q/limit/offset, caches CCv2 metadata in SQLite. 77 tests. (next commit)
   - [x] **Wire source adapters into library UI.** Library server now
     accepts `caps.sources = [{ id, name, discover(params)->resp }]`.
     Adds `/api/sources` (list) + `/api/sources/:id/discover` (proxy).
@@ -67,6 +67,19 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
     "load more". Daemon passes `opts.sources` through to library.
     Daemon CLI auto-loads source adapter apps from the index at startup
     (`meta.source_adapter=true`). 17 new tests.
+  - [ ] **Configurable cap roots (HIGH PRIORITY).** `manifest.json` cap
+    roots are hardcoded strings (e.g. `"root": "~/SillyTavern/public/characters"`).
+    This is wrong for any non-default install path (e.g. `/mnt/ssd/ai/SillyTavern/`).
+    Design needed: per-app user-editable cap configuration stored separately from the
+    manifest (which is read-only, authored by the app). Open questions: where does
+    config live (per-app row in index DB? separate `app_config` table? sidecar file)?
+    How does the grant UI expose it? Does the app declare "configurable" fields in the
+    manifest and the platform merges them with stored overrides? Unblock this before
+    ST adapter is usable for anyone with a non-default install.
+  - [x] **ST adapter: SQLite metadata cache.** Reads CCv2 iTXt `chara`
+    chunk from each PNG on cache miss, stores name/description/tags in
+    `card_meta` SQLite table. Lazy per-page population (page size ≤ 200).
+    Cache persists across restarts; no auto-invalidation. 77 tests. (next commit)
   - [ ] **ST adapter: read PNG metadata.** The stub uses the filename as
     the card name and leaves description/tags/thumb_url null. The next
     iteration should read CCv2 iTXt chunks from each PNG for the display
