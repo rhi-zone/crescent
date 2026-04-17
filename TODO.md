@@ -151,8 +151,7 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
     so sweep-on-access never runs. Trivial to add a periodic or
     install/uninstall-triggered cleanup; punted because it's bounded
     by total-apps-ever-launched, not request rate.
-  - [ ] Rate limiting on `/launch` is not wired. See the "Rate limiting"
-    bullet below.
+  - [x] Rate limiting on `/launch` — token bucket burst=5, rate=0.5/s per session. (e53a4d7)
   - [ ] Standing risk note (not a gap to fix — architectural): launch
     tokens are URL-bearer on consume, not session-bound. Mitigations
     in place: 5-min expiry, one-shot, clean-URL 303, `Referrer-Policy:
