@@ -144,7 +144,7 @@ local SVG_NS = "http://www.w3.org/2000/svg"
 
 -- Apply attributes table to a DOM node.
 -- Skips nil/false values; true becomes empty string (boolean attribute).
---: (any, any) -> nil
+--: (HTMLElement, { [string]: unknown }) -> nil
 local function apply_attrs(node, attrs)
 	for k, v in pairs(attrs) do
 		if v ~= nil and v ~= false then
