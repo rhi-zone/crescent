@@ -1085,6 +1085,11 @@ function M.make(opts)
 				"uninstall " .. tostring(app_path) .. ": " .. tostring(rm_err), "")
 		end
 
+		-- Clean up in-memory state for the evicted app.
+		app_handlers:delete(app_id_str)
+		app_csp[app_id_str] = nil
+		rawset(app_sessions, app_id_str, nil)
+
 		res.status = 200
 		res.headers["Content-Type"] = { "application/json" }
 		res.body = '{"ok":true}'

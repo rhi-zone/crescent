@@ -1437,6 +1437,21 @@ T.describe("DELETE /api/apps/:id", function()
 		T.eq(res.status, 503)
 	end)
 
+	T.it("uninstall clears app_sessions bucket for the evicted app", function()
+		local d, idx, id = make_uninstall_daemon()
+		-- Manually plant an app_sessions bucket so we can verify it's removed.
+		d.app_sessions[tostring(id)] = { ["dummytok"] = { app_id = tostring(id), created_at = 1000, last_seen = 1000 } }
+		T.ok(d.app_sessions[tostring(id)], "precondition: bucket exists")
+
+		local sid = prime(d)
+		local req = make_req("DELETE", "/api/apps/" .. id, "localhost:7777", "__Host-session=" .. sid)
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 200)
+		T.eq(d.app_sessions[tostring(id)], nil, "app_sessions bucket must be cleared on uninstall")
+		idx:close()
+	end)
+
 	T.it("second DELETE for the same id → 404 (idempotent on the index)", function()
 		local d, idx, id = make_uninstall_daemon()
 		local sid = prime(d)
