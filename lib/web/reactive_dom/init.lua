@@ -20,6 +20,7 @@
 --:: CleanupArray = { [integer]: () -> () }
 --:: KeyEntry = { node: Node, cleanup: () -> (), sig: Signal }
 --:: KeyMap = { [string]: KeyEntry }
+--:: ListSignal = { get: () -> { [integer]: unknown }, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -33,9 +34,9 @@ local Lens   = require("lib.fp.optics.lens")
 -- Preceding-line annotations assert the type without requiring RHS to be typed.
 --: (unknown) -> Signal
 local R_signal   = R.signal
---: (Signal, Lens) -> Signal
+--: (Signal, Lens) -> Focused
 local R_focused  = R.focused
---: (() -> unknown, { [integer]: Signal | Computed }) -> Computed
+--: (() -> unknown, { [integer]: unknown }) -> Computed
 local R_computed = R.computed
 
 local M = {}
@@ -51,7 +52,7 @@ local M = {}
 -- Returns a Widget: (signal) -> Element
 function M.element(tag, attrs_raw, children_raw)
 	local attrs    = (attrs_raw    or {}) --: AttrMap
-	local children = (children_raw or {}) --: { [integer]: unknown }
+	local children = (children_raw or {}) --: { [integer]: string | ((unknown) -> Node) }
 	return function(signal_raw)
 		local signal = signal_raw --: Signal
 		local el = document.createElement(tag) --: HTMLElement
@@ -70,8 +71,7 @@ function M.element(tag, attrs_raw, children_raw)
 				el.appendChild(tn)
 			else
 				-- child is a Widget: call it with the same signal
-				--: (unknown) -> Node
-				local child_fn = child
+				local child_fn = child --: (unknown) -> Node
 				local child_node = child_fn(signal)
 				el.appendChild(child_node)
 			end
@@ -268,8 +268,8 @@ end
 function M.each(item_widget, get_key)
 	item_widget = item_widget --: (Signal) -> Node
 	get_key = get_key --: ((unknown) -> string) | nil
-	return function(list_signal)
-		list_signal = list_signal --: Signal
+	return function(list_signal_raw)
+		local list_signal = list_signal_raw --: ListSignal
 		local node = document.createElement("div")
 		node.setAttribute("data-each", "")
 
@@ -299,8 +299,14 @@ function M.each(item_widget, get_key)
 				local idx = i
 				-- Index lens: focus list signal on element at position idx.
 				local item_lens = Lens.new(
-					function(arr) return arr[idx] end,
-					function(arr, v)
+					function(s_raw)
+						--: { [integer]: unknown }
+						local arr = s_raw
+						return arr[idx]
+					end,
+					function(s_raw, v)
+						--: { [integer]: unknown }
+						local arr = s_raw
 						local copy = {}
 						for j = 1, #arr do copy[j] = arr[j] end
 						copy[idx] = v
@@ -330,7 +336,7 @@ function M.each(item_widget, get_key)
 				for k, entry in pairs(key_map) do
 					entry = entry --: KeyEntry
 					entry.cleanup()
-					key_map[k] = nil
+					rawset(key_map, k, nil)
 				end
 				prev_keys = {} --: { [integer]: string }
 				item_cleanups = {} --: CleanupArray
@@ -355,7 +361,7 @@ function M.each(item_widget, get_key)
 						if entry then
 							entry = entry --: KeyEntry
 							entry.cleanup()
-							key_map[k] = nil
+							rawset(key_map, k, nil)
 						end
 					end
 				end
@@ -392,28 +398,23 @@ function M.each(item_widget, get_key)
 			end
 
 			-- Initial render
-			--: { [integer]: unknown }
-			local init = list_signal.get()
-			render_keyed(init)
+			render_keyed(list_signal.get())
 
-			local unsub = list_signal.subscribe(render_keyed)
+			local unsub = list_signal.subscribe(function(_v)
+				render_keyed(list_signal.get())
+			end)
 			widget.register(unsub)
 			widget.register(keyed_teardown)
 		else
 			-- Unkeyed: re-render on length change only
-			--: { [integer]: unknown }
-			local init_items = list_signal.get()
-			render_all(init_items)
+			render_all(list_signal.get())
 
+			--: Computed
 			local len_computed = R_computed(function()
-				--: { [integer]: unknown }
-				local cur = list_signal.get()
-				return #cur
+				return #list_signal.get()
 			end, { list_signal })
 			local unsub = len_computed.subscribe(function(_v)
-				--: { [integer]: unknown }
-				local cur = list_signal.get()
-				render_all(cur)
+				render_all(list_signal.get())
 			end)
 			widget.register(unsub)
 			widget.register(function() len_computed.dispose() end)

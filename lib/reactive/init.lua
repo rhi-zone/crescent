@@ -332,4 +332,13 @@ function M.narrowed(source, prism)
 	return n
 end
 
+--:: module "lib.reactive": {
+--::   signal:   (unknown) -> Signal,
+--::   computed: (() -> unknown, { [integer]: unknown }) -> Computed,
+--::   effect:   (() -> (), { [integer]: unknown }) -> (() -> ()),
+--::   batch:    (() -> ()) -> (),
+--::   focused:  (Signal, Lens) -> Focused,
+--::   narrowed: (Signal, Prism) -> Narrowed,
+--:: }
+
 return M

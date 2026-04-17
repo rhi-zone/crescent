@@ -2664,3 +2664,47 @@ local c = ffi.C.make_color(1.0, 0.5, 0.0)
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- unknown in contravariant callback parameter position
+-- When a function literal with unannotated (TAG_VAR) parameters is passed
+-- as a callback where the expected parameter type is unknown, the free type
+-- variable should be bound to unknown rather than failing with "must narrow".
+---------------------------------------------------------------------------
+
+assert.describe("unknown in contravariant callback parameter position", function()
+    assert.it("unannotated callback parameter accepts unknown argument", function()
+        no_errors([[
+local function subscribe(cb) --: ((unknown) -> ()) -> ()
+    cb = cb
+end
+subscribe(function(_v)
+    -- _v is unannotated (TAG_VAR); expected type is (unknown) -> ()
+    -- Contravariant check: unknown <: TAG_VAR should bind VAR to unknown.
+end)
+]])
+    end)
+
+    assert.it("unannotated callback parameter bound to unknown allows no-op body", function()
+        no_errors([[
+local function subscribe(cb) --: ((unknown) -> ()) -> ()
+    cb = cb
+end
+local x = 0
+subscribe(function(_v)
+    x = x + 1
+end)
+]])
+    end)
+
+    assert.it("callback with wrong concrete parameter type is still rejected", function()
+        has_error([[
+local function subscribe(cb) --: ((unknown) -> ()) -> ()
+    cb = cb
+end
+--: (string) -> ()
+local function typed_cb(s) return nil end
+subscribe(typed_cb)
+]], "parameter 1")
+    end)
+end)

@@ -274,6 +274,11 @@ function M.unify(ctx, a, b, seen)
         return true
     end
     if ta.tag == TAG_UNKNOWN then
+        -- When the expected type is a free type variable, bind it to unknown (e.g. function
+        -- parameter with no annotation used as a callback argument of type unknown). This
+        -- arises in contravariant param checks: unify(actual_param=unknown, expected_param=VAR).
+        -- The free param should accept unknown values — bind it so future uses see unknown.
+        if tb.tag == TAG_VAR or tb.tag == TAG_ROWVAR then bind_var(ctx, b, a) return true end
         return false, "value of type `unknown` must be narrowed before use (got unknown, expected `" .. types_mod.display(ctx, b) .. "`)"
     end
 

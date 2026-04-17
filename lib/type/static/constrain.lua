@@ -3059,11 +3059,21 @@ process_type_decls = function(ctx)
         load_decl_file(ctx, ra.mod_name)
     end
 
-    -- Pass 0: populate ctx.module_types from --:: module declarations before any type
-    -- alias bodies are resolved.  This ensures $Require<"mod"> annotations in type
-    -- aliases (e.g. --:: R = $Require<"mod">) can look up the module type immediately.
-    for _, r in ipairs(module_decls) do
-        ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
+    -- Pass 0: preliminary module_types population (before alias bodies are resolved).
+    -- This ensures $Require<"mod"> in type alias bodies (Pass 2a) can look up modules
+    -- declared in the same file.  Module types that reference named aliases (like Signal)
+    -- may resolve to unknown here; errors are silently discarded because Pass 2mod
+    -- (after Pass 2a) re-resolves them correctly with all aliases in scope.
+    do
+        local saved_err = ctx.err
+        local pass0_err = errors_mod.new_ctx()
+        pass0_err.source_lines = saved_err.source_lines
+        ctx.err = pass0_err
+        for _, r in ipairs(module_decls) do
+            ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
+        end
+        ctx.err = saved_err
+        -- pass0_err and any "undefined type" diagnostics it collected are discarded.
     end
 
     -- Pass 1: register all type alias names (body=nil) so forward refs are visible.
@@ -3256,6 +3266,15 @@ process_type_decls = function(ctx)
                 end
             end
         end
+    end
+
+    -- Pass 2mod: populate ctx.module_types from --:: module declarations after type alias
+    -- bodies are resolved.  This ensures that module type expressions can reference named
+    -- type aliases declared in the same file (e.g. --:: module "lib.reactive": { signal: (unknown) -> Signal }).
+    -- $Require<"mod"> in type alias bodies still works: it is expanded by the solver at
+    -- call sites (after process_type_decls returns), not during resolve_annotation_type.
+    for _, r in ipairs(module_decls) do
+        ctx.module_types[r.mod_name] = resolve_annotation_type(ctx, r.type_id)
     end
 
     -- Pass 2b: bind declared variables (decl_var), which may reference aliases set above.
