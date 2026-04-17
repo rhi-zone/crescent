@@ -149,9 +149,10 @@ if idx and loader_fn and raw_index_db then
 			local handler, lerr = loader_fn(id_str)
 			if handler then
 				sources[#sources + 1] = {
-					id      = id_str,
-					name    = src_name or id_str,
+					id       = id_str,
+					name     = src_name or id_str,
 					discover = make_discover_fn(handler),
+					handler  = handler,  -- retained for future in-process calls (e.g. GET /card/:id)
 				}
 				io.stderr:write("daemon: source adapter loaded: " .. (src_name or id_str) .. "\n")
 			else

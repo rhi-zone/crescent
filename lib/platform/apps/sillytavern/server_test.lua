@@ -17,6 +17,16 @@ local function make_fs(files, err)
 	}
 end
 
+local function make_fs_with_png(filename, png_bytes)
+	return {
+		list = function(_) return { filename } end,
+		read = function(f)
+			if f == filename then return png_bytes end
+			return nil, "not found"
+		end,
+	}
+end
+
 local function make_req(path, query)
 	return { method = "GET", path = path, query = query, headers = {} }
 end
@@ -232,18 +242,6 @@ T.describe("metadata cache", function()
 		return cap, db
 	end
 
-	-- Build a fake fs that serves a real CCv2 PNG for one file, nil for others.
-	-- cap.read is called as fs.read(path) (not fs:read(path)) — no self arg.
-	local function make_fs_with_png(filename, png_bytes)
-		return {
-			list = function(_) return { filename } end,
-			read = function(f)
-				if f == filename then return png_bytes end
-				return nil, "not found"
-			end,
-		}
-	end
-
 	T.it("init_cache creates the schema without error", function()
 		local cap = make_cache_db()
 		local result = server._init_cache(cap)
@@ -322,13 +320,95 @@ T.describe("metadata cache", function()
 	end)
 end)
 
--- ── Non-discover endpoints ─────────────────────────────────────────────────
+-- ── Card detail page (GET / ?entry=) ──────────────────────────────────────
 
-T.describe("other endpoints", function()
-	T.it("GET / returns 404", function()
+T.describe("GET / card detail page", function()
+	T.it("returns 400 without ?entry=", function()
 		local app = server.create({ characters = make_fs(FAKE_FILES) })
 		local res = make_res()
 		app.handler(make_req("/"), res)
+		T.eq(res.status, 400)
+	end)
+
+	T.it("returns 200 HTML with card name in title", function()
+		local app = server.create({ characters = make_fs({ "Alice.png" }) })
+		local res = make_res()
+		app.handler(make_req("/", "entry=Alice.png"), res)
+		T.eq(res.status, 200)
+		T.ok(res.headers["Content-Type"][1]:find("text/html", 1, true))
+		T.ok(res.body:find("Alice", 1, true))
+	end)
+
+	T.it("shows cached name when available", function()
+		local card_mod = require("lib.formats.ccv2.card")
+		local card_bytes = assert(card_mod.to_png({ name = "Real Name", description = "test desc", tags = {} }))
+		local fs = make_fs_with_png("weird.png", card_bytes)
+		local app = server.create({ characters = fs })
+		local res = make_res()
+		app.handler(make_req("/", "entry=weird.png"), res)
+		T.eq(res.status, 200)
+		T.ok(res.body:find("Real Name", 1, true), "should show cached name")
+		T.ok(res.body:find("test desc", 1, true), "should show description")
+	end)
+
+	T.it("page includes download link for the card PNG", function()
+		local app = server.create({ characters = make_fs({ "Bob.png" }) })
+		local res = make_res()
+		app.handler(make_req("/", "entry=Bob.png"), res)
+		T.eq(res.status, 200)
+		T.ok(res.body:find("/card/Bob.png", 1, true), "page must link to /card/:id")
+	end)
+
+	T.it("falls back to filename-derived name for uncached entry", function()
+		local app = server.create({ characters = make_fs({ "Zara.webp" }) })
+		local res = make_res()
+		app.handler(make_req("/", "entry=Zara.webp"), res)
+		T.eq(res.status, 200)
+		T.ok(res.body:find("Zara", 1, true))
+	end)
+end)
+
+-- ── GET /card/:id — raw PNG bytes ──────────────────────────────────────────
+
+T.describe("GET /card/:id", function()
+	local card_mod = require("lib.formats.ccv2.card")
+
+	T.it("returns PNG bytes for a known file", function()
+		local card_bytes = assert(card_mod.to_png({ name = "Alice", tags = {} }))
+		local fs = make_fs_with_png("Alice.png", card_bytes)
+		local app = server.create({ characters = fs })
+		local res = make_res()
+		app.handler(make_req("/card/Alice.png"), res)
+		T.eq(res.status, 200)
+		T.ok(res.headers["Content-Type"][1]:find("image/png", 1, true))
+		T.eq(res.body, card_bytes)
+	end)
+
+	T.it("returns 404 for unknown file", function()
+		local app = server.create({ characters = make_fs(FAKE_FILES) })
+		local res = make_res()
+		app.handler(make_req("/card/NoSuch.png"), res)
+		T.eq(res.status, 404)
+	end)
+
+	T.it("returns Content-Disposition attachment header", function()
+		local card_bytes = assert(card_mod.to_png({ name = "Bob", tags = {} }))
+		local fs = make_fs_with_png("Bob.png", card_bytes)
+		local app = server.create({ characters = fs })
+		local res = make_res()
+		app.handler(make_req("/card/Bob.png"), res)
+		T.ok(res.headers["Content-Disposition"][1]:find("attachment", 1, true))
+		T.ok(res.headers["Content-Disposition"][1]:find("Bob.png", 1, true))
+	end)
+end)
+
+-- ── Other endpoints ────────────────────────────────────────────────────────
+
+T.describe("other endpoints", function()
+	T.it("GET /unknown returns 404", function()
+		local app = server.create({ characters = make_fs(FAKE_FILES) })
+		local res = make_res()
+		app.handler(make_req("/unknown"), res)
 		T.eq(res.status, 404)
 	end)
 

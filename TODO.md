@@ -73,13 +73,16 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
   - [x] **ST adapter: PNG metadata (name/description/tags).** Implemented
     via SQLite cache: reads CCv2 iTXt `chara` chunk on miss, stores in
     `card_meta`. 77 tests. (d97da4f)
-  - [ ] **ST adapter: card view page.** When launched via
-    `/launch/<st_app_id>?entry=Alice.png`, the ST app receives `?entry=Alice.png`
-    (query params now forwarded by the daemon launch handler). It needs a
-    `GET /` handler that reads `?entry=` and renders the card metadata
-    (name, description, tags) + a "Start conversation" button. The button
-    would import the card and launch a CCv2 conversation — or at minimum
-    link to the CCv2 card app with the card embedded.
+  - [x] **ST adapter: card view page.** `GET /` reads `?entry=` and renders
+    name/description/tags with a download link. `GET /card/:id` returns raw
+    PNG bytes. daemon/cli.lua now also stores `handler` in each source entry
+    for future in-process calls. 17 new tests. (09f8024→next)
+  - [ ] **ST adapter: "Open in conversation" button.** Requires a daemon
+    `POST /api/import-card?source=<id>&entry=<filename>` endpoint that
+    reads the card PNG via `source.handler(GET /card/:id)`, runs the CCv2
+    import pipeline (needs CCv2 runtime dir wired into the daemon), and
+    303-redirects to `/launch/<new_app_id>`. Needs design: how does the daemon
+    know where the CCv2 runtime lives? Option: new `runtime_dir` daemon opt.
   - [ ] **ST adapter: thumbnails (`GET /thumb/:id`).** Blocked on
     `stb_image_resize` FFI binding (see below). Serve resized PNG crop
     from the card file; raw card PNGs are too large to use as-is.
