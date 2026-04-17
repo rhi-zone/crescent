@@ -190,28 +190,33 @@ end
 -- anti-ST perf discipline — at 23k apps, the list view must ship ~20 KB per
 -- page, not 45 MB of everything.
 --
--- Search uses LIKE for now. FTS5 is a follow-up: add an FTS5 virtual table in
--- lib/platform/index.lua and swap these queries once it's in place.
+-- Tag filter uses the app_tags join; search uses apps_fts (trigram). Both
+-- are indexed — no json_each scans, no LIKE '%q%' full-table scans.
 
-local SELECT_COLS = "id, name, path, manifest_json, tags_json, installed_at"
+local SELECT_COLS = "a.id, a.name, a.path, a.manifest_json, a.tags_json, a.installed_at"
 
--- WHERE-clause fragments keyed by (has_q, has_tag). Each value is a pair of
--- SQL + the number of bound args (so we can build the COUNT and SELECT SQL
--- from the same shape).
-local WHERE_NONE     = ""
-local WHERE_TAG      = " WHERE EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?)"
-local WHERE_Q        = " WHERE name LIKE ?"
-local WHERE_Q_TAG    = " WHERE name LIKE ? AND EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?)"
+-- Double-quote an FTS5 MATCH phrase so special chars are literal trigrams.
+--: (string) -> string
+local function fts_phrase(q)
+	return '"' .. q:gsub('"', '""') .. '"'
+end
+
+-- FROM + JOIN + WHERE fragments keyed by (has_q, has_tag). Each variant
+-- keeps the same alias (`a`) for `apps` so SELECT_COLS is reusable.
+local FROM_NONE  = " FROM apps a"
+local FROM_TAG   = " FROM apps a JOIN app_tags at ON at.app_id = a.id JOIN tags t ON t.id = at.tag_id WHERE t.name = ?"
+local FROM_Q     = " FROM apps a JOIN apps_fts f ON f.rowid = a.id WHERE apps_fts MATCH ?"
+local FROM_Q_TAG = " FROM apps a JOIN app_tags at ON at.app_id = a.id JOIN tags t ON t.id = at.tag_id JOIN apps_fts f ON f.rowid = a.id WHERE t.name = ? AND apps_fts MATCH ?"
 
 --: (string | nil, string | nil) -> (string, { [integer]: unknown })
-local function build_where(q, tag)
+local function build_from(q, tag)
 	local has_q   = q   and q   ~= ""
 	local has_tag = tag and tag ~= ""
 	local args = {} --: { [integer]: unknown }
-	if has_q and has_tag then args[1] = "%" .. q .. "%"; args[2] = tag; return WHERE_Q_TAG, args end
-	if has_q            then args[1] = "%" .. q .. "%";                return WHERE_Q,     args end
-	if has_tag          then args[1] = tag;                            return WHERE_TAG,   args end
-	return WHERE_NONE, args
+	if has_q and has_tag then args[1] = tag;          args[2] = fts_phrase(q); return FROM_Q_TAG, args end
+	if has_q            then args[1] = fts_phrase(q);                         return FROM_Q,     args end
+	if has_tag          then args[1] = tag;                                   return FROM_TAG,   args end
+	return FROM_NONE, args
 end
 
 local function collect_rows(iter)
@@ -241,11 +246,11 @@ end
 local function query_apps(db, tag, q, limit, offset)
 	if not db then return {}, 0 end
 
-	local where, args = build_where(q, tag)
+	local from, args = build_from(q, tag)
 
 	-- Total count for the merged UI indicator. Runs against the same
 	-- filter, without the LIMIT/OFFSET.
-	local count_sql = "SELECT COUNT(*) FROM apps" .. where
+	local count_sql = "SELECT COUNT(*)" .. from
 	local citer = db:query(count_sql, unpack(args))
 	local total = 0
 	if citer then
@@ -255,8 +260,8 @@ local function query_apps(db, tag, q, limit, offset)
 
 	-- Page query. ORDER BY name ASC is the current default; a sort param
 	-- can be threaded through here later.
-	local select_sql = "SELECT " .. SELECT_COLS .. " FROM apps" .. where
-		.. " ORDER BY name ASC LIMIT ? OFFSET ?"
+	local select_sql = "SELECT " .. SELECT_COLS .. from
+		.. " ORDER BY a.name ASC LIMIT ? OFFSET ?"
 	args[#args + 1] = limit
 	args[#args + 1] = offset
 	local iter = db:query(select_sql, unpack(args))

@@ -217,19 +217,31 @@ function I:get(id)
 	return row_from_query(rid, rname, rpath, rmanifest, rtags, rat)
 end
 
--- List all apps, optionally filtered by tag.
+-- Double-quote an FTS5 MATCH phrase so special characters (spaces, punctuation,
+-- ranking operators) are treated as literal trigrams by the trigram tokenizer.
+-- `"` inside the phrase must be doubled per the FTS5 grammar.
+--: (string) -> string
+local function fts_phrase(q)
+	return '"' .. q:gsub('"', '""') .. '"'
+end
+
+local COLS = "a.id, a.name, a.path, a.manifest_json, a.tags_json, a.installed_at"
+
+-- List all apps, optionally filtered by tag. Tag filter uses the app_tags
+-- join, not json_each — O(matches) via idx_app_tags_tag_app.
 --: (table?) -> table[]
 function I:list(filter)
-	local sql = "SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps"
-	local args = {}
-
+	local sql, args
 	if filter and filter.tag then
-		-- json_each over tags_json to find matching tag.
-		sql = sql .. " WHERE EXISTS (SELECT 1 FROM json_each(apps.tags_json) WHERE json_each.value = ?)"
-		args[1] = filter.tag
+		sql = "SELECT " .. COLS .. " FROM apps a " ..
+			"JOIN app_tags at ON at.app_id = a.id " ..
+			"JOIN tags t ON t.id = at.tag_id " ..
+			"WHERE t.name = ? ORDER BY a.name ASC"
+		args = { filter.tag }
+	else
+		sql = "SELECT " .. COLS .. " FROM apps a ORDER BY a.name ASC"
+		args = {}
 	end
-
-	sql = sql .. " ORDER BY name ASC"
 
 	local iter, err = self._db:query(sql, unpack(args))
 	if not iter then return {} end
@@ -243,12 +255,15 @@ function I:list(filter)
 	return results
 end
 
--- Full-text search on name (LIKE match).
+-- Full-text search via apps_fts (trigram tokenizer). Case-insensitive
+-- substring match on name, description, and path.
 --: (string) -> table[]
 function I:search(query)
 	local iter, err = self._db:query(
-		"SELECT id, name, path, manifest_json, tags_json, installed_at FROM apps WHERE name LIKE ? ORDER BY name ASC",
-		"%" .. query .. "%"
+		"SELECT " .. COLS .. " FROM apps a " ..
+		"JOIN apps_fts f ON f.rowid = a.id " ..
+		"WHERE apps_fts MATCH ? ORDER BY a.name ASC",
+		fts_phrase(query)
 	)
 	if not iter then return {} end
 
