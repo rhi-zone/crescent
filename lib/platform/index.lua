@@ -259,10 +259,13 @@ end
 -- substring match on name, description, and path.
 --: (string) -> table[]
 function I:search(query)
+	-- FTS match is pushed into a subquery so SQLite evaluates it once —
+	-- joining apps_fts directly lets the planner pick a per-row MATCH,
+	-- which is ~100x slower at 20k rows (see docs/perf/library_index.lua).
 	local iter, err = self._db:query(
 		"SELECT " .. COLS .. " FROM apps a " ..
-		"JOIN apps_fts f ON f.rowid = a.id " ..
-		"WHERE apps_fts MATCH ? ORDER BY a.name ASC",
+		"WHERE a.id IN (SELECT rowid FROM apps_fts WHERE apps_fts MATCH ?) " ..
+		"ORDER BY a.name ASC",
 		fts_phrase(query)
 	)
 	if not iter then return {} end

@@ -6,6 +6,54 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-04-17: library index — FTS5 + app_tags at 20k apps
+
+**Commits:** d25e174 (schema), 98316cd (wire-up), follow-up (query shape fix)
+
+Benchmark: `luajit docs/perf/library_index.lua`
+
+Validates the claim (library-app-design.md) that tag filter + substring
+search stay sub-5ms at ~20k apps. 20,000 synthetic apps, in-memory SQLite,
+all seeded inside one transaction.
+
+### Results
+
+```
+Seeding 20000 apps... seeded in 0.67s (29720 installs/s)
+
+list() first page (no filter)           52.98 ms/op   (200 rows, full materialize)
+search('alice') FTS trigram              6.32 ms/op  (2666 rows materialized)
+search('calc-dun') phrase                0.03 ms/op     (0 rows — no trigram)
+list({tag='ai'}) tag join                4.78 ms/op  (2333 rows materialized)
+list({tag='fantasy'}) tag join           2.37 ms/op  (1143 rows materialized)
+server-style page (LIMIT 200, no filter) 0.05 ms/op    (200 rows)
+server-style count (no filter)           0.00 ms/op
+server-style FTS+tag page                1.43 ms/op    (200 rows)
+```
+
+### Notes
+
+- **FTS MATCH must go in a subquery, not a JOIN.** First attempt joined
+  `apps_fts` directly: 94ms for the FTS+tag query. SQLite picks a plan
+  that re-evaluates MATCH per outer-loop row. Putting MATCH in
+  `WHERE a.id IN (SELECT rowid FROM apps_fts WHERE apps_fts MATCH ?)`
+  evaluates it once → 0.83ms. 100x difference.
+  Fix applied to both `server.lua` (FROM_Q, FROM_Q_TAG) and
+  `index.lua` search().
+- The server-side paginated query shape (one `SELECT ... LIMIT 200` +
+  one `SELECT COUNT(*)`) is the hot path; `idx:list()` materializes all
+  rows and is not used by the library API.
+- `search('alice')` returns 2666 rows because the synthetic name
+  generator reuses a 10-word pool. A realistic card library produces
+  fewer matches; 6ms is a loose upper bound.
+
+### Verdict
+
+Tag filter + FTS search meet the ST-disaster-avoidance bar at 20k apps
+with plenty of headroom. No work to do before library-at-scale.
+
+---
+
 ## 2026-03-26: base64 — three-tier rewrite (pure + ffi)
 
 **Commit:** (see feat(base64) commit)

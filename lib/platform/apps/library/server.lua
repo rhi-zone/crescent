@@ -203,10 +203,16 @@ end
 
 -- FROM + JOIN + WHERE fragments keyed by (has_q, has_tag). Each variant
 -- keeps the same alias (`a`) for `apps` so SELECT_COLS is reusable.
+--
+-- For FTS-filtered variants the MATCH predicate MUST live in a subquery,
+-- not a JOIN. Joining apps_fts directly lets SQLite pick a plan that
+-- re-evaluates MATCH per row of the outer loop (100x slower at 20k
+-- rows — see docs/perf/library_index.lua). `a.id IN (SELECT rowid FROM
+-- apps_fts WHERE apps_fts MATCH ?)` evaluates FTS once then filters.
 local FROM_NONE  = " FROM apps a"
 local FROM_TAG   = " FROM apps a JOIN app_tags at ON at.app_id = a.id JOIN tags t ON t.id = at.tag_id WHERE t.name = ?"
-local FROM_Q     = " FROM apps a JOIN apps_fts f ON f.rowid = a.id WHERE apps_fts MATCH ?"
-local FROM_Q_TAG = " FROM apps a JOIN app_tags at ON at.app_id = a.id JOIN tags t ON t.id = at.tag_id JOIN apps_fts f ON f.rowid = a.id WHERE t.name = ? AND apps_fts MATCH ?"
+local FROM_Q     = " FROM apps a WHERE a.id IN (SELECT rowid FROM apps_fts WHERE apps_fts MATCH ?)"
+local FROM_Q_TAG = " FROM apps a JOIN app_tags at ON at.app_id = a.id JOIN tags t ON t.id = at.tag_id WHERE t.name = ? AND a.id IN (SELECT rowid FROM apps_fts WHERE apps_fts MATCH ?)"
 
 --: (string | nil, string | nil) -> (string, { [integer]: unknown })
 local function build_from(q, tag)
