@@ -32,12 +32,14 @@ local M = {}
 --:: app_handler_fn = (http_req, http_res) -> nil
 --:: maybe_app_handler = app_handler_fn | nil
 --:: app_loader_fn = (string) -> (maybe_app_handler, string | nil)
+--:: source_entry = { id: string, name: string, discover: (({ [string]: string }) -> unknown) }
 --:: daemon_opts = {
 --::   host: string | nil,
 --::   time_fn: (() -> integer) | nil,
 --::   random_bytes_fn: ((n: integer) -> { [integer]: number }) | nil,
 --::   index_db: unknown,
 --::   remove_fn: ((path: string) -> (true | nil, string | nil)) | nil,
+--::   sources: { [integer]: source_entry } | nil,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
 --::   app_loader: app_loader_fn | nil,
 --::   handler_cache_size: integer | nil,
@@ -234,7 +236,7 @@ function M.make(opts)
 	-- library.create expects `caps.index_db` to be a SQLite-like handle (with a
 	-- :query method) or nil. We propagate whatever the caller passed — library
 	-- tolerates nil and falls back to an empty list.
-	local library_app = library.create({ index_db = index_db }) --: { handler: (http_req, http_res) -> (boolean | nil) }
+	local library_app = library.create({ index_db = index_db, sources = opts.sources }) --: { handler: (http_req, http_res) -> (boolean | nil) }
 
 	-- App-origin handler. Three modes, in priority order:
 	--   1. opts.app_handler — direct override (tests use this to bypass loading).

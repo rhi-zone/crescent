@@ -270,4 +270,96 @@ T.describe("library server", function()
 		end)
 	end)
 
+	-- ── GET /api/sources ───────────────────────────────────────────────────
+
+	T.describe("GET /api/sources", function()
+		T.it("returns empty list when no sources configured", function()
+			local app = server.create({ index_db = nil })
+			local res, data = call(app, "GET", "/api/sources")
+			T.eq(res.status, 200)
+			T.ok(data.sources)
+			T.eq(#data.sources, 0)
+		end)
+
+		T.it("returns registered source ids and names", function()
+			local app = server.create({
+				index_db = nil,
+				sources = {
+					{ id = "st", name = "SillyTavern", discover = function(_) return { entries = {} } end },
+					{ id = "steam", name = "Steam",       discover = function(_) return { entries = {} } end },
+				},
+			})
+			local res, data = call(app, "GET", "/api/sources")
+			T.eq(res.status, 200)
+			T.eq(#data.sources, 2)
+			T.eq(data.sources[1].id, "st")
+			T.eq(data.sources[1].name, "SillyTavern")
+			T.eq(data.sources[2].id, "steam")
+		end)
+	end)
+
+	-- ── GET /api/sources/:id/discover ──────────────────────────────────────
+
+	T.describe("GET /api/sources/:id/discover", function()
+		local function make_source(id, entries)
+			return {
+				id = id, name = id,
+				discover = function(params)
+					local limit = tonumber(params.limit) or 10
+					local page = {}
+					for i = 1, math.min(limit, #entries) do page[i] = entries[i] end
+					return { source_name = id, total = #entries, limit = limit, offset = 0, entries = page }
+				end,
+			}
+		end
+
+		T.it("proxies to the source's discover function", function()
+			local entries = { { id = "a.png", name = "Alice", tags = {}, description = nil } }
+			local app = server.create({
+				index_db = nil,
+				sources = { make_source("st", entries) },
+			})
+			local res, data = call(app, "GET", "/api/sources/st/discover")
+			T.eq(res.status, 200)
+			T.eq(data.source_name, "st")
+			T.eq(#data.entries, 1)
+			T.eq(data.entries[1].name, "Alice")
+		end)
+
+		T.it("passes query params to discover function", function()
+			local received = {}
+			local app = server.create({
+				index_db = nil,
+				sources = {{
+					id = "st", name = "SillyTavern",
+					discover = function(params)
+						received.q = params.q
+						received.limit = params.limit
+						return { entries = {}, total = 0, limit = 10, offset = 0 }
+					end,
+				}},
+			})
+			call(app, "GET", "/api/sources/st/discover", "q=hello&limit=5")
+			T.eq(received.q, "hello")
+			T.eq(received.limit, "5")
+		end)
+
+		T.it("returns 404 for unknown source id", function()
+			local app = server.create({ index_db = nil })
+			local res = make_res()
+			app.handler(make_req("GET", "/api/sources/unknown/discover"), res)
+			T.eq(res.status, 404)
+		end)
+
+		T.it("handles percent-encoded source id in path", function()
+			local app = server.create({
+				index_db = nil,
+				sources = {{ id = "my source", name = "My Source", discover = function(_) return { entries = {} } end }},
+			})
+			local res, data = call(app, "GET", "/api/sources/my%20source/discover")
+			T.eq(res.status, 200)
+			T.ok(data.entries ~= nil)
+		end)
+	end)
+
 end)

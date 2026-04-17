@@ -60,17 +60,13 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
   - [x] **Second canonical app — `lib/platform/apps/sillytavern/`.**
     Stub that lists `~/SillyTavern/public/characters/*.png` and exposes
     `/discover`. Supports q/limit/offset. 58 tests. (next commit)
-  - [ ] **Wire source adapters into library UI.** The `/discover` protocol
-    is defined and the ST adapter stub is live, but the library app doesn't
-    call any source adapters yet — it only reads `caps.index_db`. Next
-    step: library queries index for `meta.source_adapter=true` apps, calls
-    each one's `/discover` in parallel, and renders per-source sections
-    below the main "Installed" section. Open fork: (a) daemon provides a
-    `caps.source_adapters` cap that enumerates and proxies; (b) library
-    calls source apps via `http_client` over daemon-local origins. (a) is
-    cleaner for the grant model; (b) is simpler today. Lean toward (b) to
-    ship faster — the library already trusts the daemon origin and the ST
-    app is first-party.
+  - [x] **Wire source adapters into library UI.** Library server now
+    accepts `caps.sources = [{ id, name, discover(params)->resp }]`.
+    Adds `/api/sources` (list) + `/api/sources/:id/discover` (proxy).
+    Frontend renders per-source sections with independent pagination and
+    "load more". Daemon passes `opts.sources` through to library.
+    17 new tests. Remaining: daemon CLI to auto-load source adapter
+    apps from the index at startup. (next commit)
   - [ ] **ST adapter: read PNG metadata.** The stub uses the filename as
     the card name and leaves description/tags/thumb_url null. The next
     iteration should read CCv2 iTXt chunks from each PNG for the display

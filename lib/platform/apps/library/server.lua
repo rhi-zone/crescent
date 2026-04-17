@@ -8,9 +8,16 @@
 --   GET /api/apps      — paginated JSON list of installed apps
 --                        query params: ?tag=X&q=SEARCH&limit=N&offset=N
 --                        response: { total, limit, offset, apps: [...] }
+--   GET /api/sources   — list registered source adapters
+--                        response: { sources: [{ id, name }] }
+--   GET /api/sources/:id/discover
+--                      — proxy to a source adapter's /discover endpoint
+--                        query params: same as source's GET /discover
+--                        response: source's discover response shape
 --
 -- Caps:
 --   caps.index_db — readonly SQLite database (app index)
+--   caps.sources  — optional array of { id, name, discover(params)->resp }
 --   caps.self     — app metadata (optional, for reading static files)
 
 if package and not package.path:find("./?/init.lua", 1, true) then
@@ -70,65 +77,83 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 .card-desc{font-size:.8rem;color:#a0a0b0;margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
 .tag{font-size:.65rem;padding:.125rem .4rem;border-radius:4px;background:#0f3460;color:#a0a0b0}
-.empty{text-align:center;padding:3rem;color:#a0a0b0;font-size:.9rem}]]
+.empty{text-align:center;padding:3rem;color:#a0a0b0;font-size:.9rem}
+.source-section{border-top:1px solid #0f3460;padding-top:.5rem}
+.source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:#a0a0b0;letter-spacing:.05em;text-transform:uppercase}
+.source-count{font-weight:400;color:#606070;margin-left:.5rem}
+.source-more{display:block;margin:.25rem 1.5rem 1rem;padding:.35rem .75rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#a0a0b0;font-size:.75rem;cursor:pointer}
+.source-more:hover{border-color:#e94560;color:#e94560}]]
 
 STATIC["app.js"] = [=[const grid = document.getElementById("grid");
 const search = document.getElementById("search");
 const tagBar = document.getElementById("tag-bar");
 const empty = document.getElementById("empty");
+const appEl = document.getElementById("app");
 
-let allApps = [];
 let activeTag = null;
+
+// ── Card rendering ────────────────────────────────────────────────────────
+
+// Build one card element. app/entry must have: id, name, description, tags.
+// onLaunch: function() — called when card is clicked.
+// onDelete: function() | null — if non-null, shows × button.
+function makeCard(item, onLaunch, onDelete) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.onclick = onLaunch;
+
+  const name = document.createElement("div");
+  name.className = "card-name";
+  name.textContent = item.name || "Untitled";
+  card.appendChild(name);
+
+  if (item.description) {
+    const desc = document.createElement("div");
+    desc.className = "card-desc";
+    desc.textContent = item.description;
+    card.appendChild(desc);
+  }
+
+  const tags = item.tags || [];
+  if (tags.length) {
+    const tagsEl = document.createElement("div");
+    tagsEl.className = "card-tags";
+    tags.forEach(function(t) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = t;
+      tagsEl.appendChild(tag);
+    });
+    card.appendChild(tagsEl);
+  }
+
+  if (onDelete) {
+    var del = document.createElement("button");
+    del.className = "card-delete";
+    del.title = "Uninstall";
+    del.textContent = "\xD7";
+    del.onclick = function(e) { e.stopPropagation(); onDelete(); };
+    card.appendChild(del);
+  }
+
+  return card;
+}
+
+// ── Installed section ─────────────────────────────────────────────────────
 
 function renderApps(apps) {
   grid.innerHTML = "";
   empty.hidden = apps.length > 0;
   apps.forEach(function(app) {
-    const card = document.createElement("div");
-    card.className = "card";
-    // Top-level navigation to the daemon's /launch/<id>. The daemon mints a
-    // launch token bound to the operator session and 303-redirects to the
-    // app origin. window.open(app.path) is wrong in the daemon model — paths
-    // only resolve under an app origin after a launch-token handshake.
-    card.onclick = function() { if (app.id) window.location.href = "/launch/" + encodeURIComponent(app.id); };
-
-    const name = document.createElement("div");
-    name.className = "card-name";
-    name.textContent = app.name || "Untitled";
-    card.appendChild(name);
-
-    if (app.description) {
-      const desc = document.createElement("div");
-      desc.className = "card-desc";
-      desc.textContent = app.description;
-      card.appendChild(desc);
-    }
-
-    if (app.tags && app.tags.length) {
-      const tagsEl = document.createElement("div");
-      tagsEl.className = "card-tags";
-      app.tags.forEach(function(t) {
-        const tag = document.createElement("span");
-        tag.className = "tag";
-        tag.textContent = t;
-        tagsEl.appendChild(tag);
-      });
-      card.appendChild(tagsEl);
-    }
-
-    var del = document.createElement("button");
-    del.className = "card-delete";
-    del.title = "Uninstall";
-    del.textContent = "\xD7";
-    del.onclick = function(e) {
-      e.stopPropagation();
-      if (!confirm("Uninstall \u201c" + (app.name || "this app") + "\u201d?")) return;
-      fetch("/api/apps/" + encodeURIComponent(app.id), { method: "DELETE" })
-        .then(function(r) { if (r.ok) refresh(); else r.text().then(function(t) { alert("Uninstall failed: " + t); }); });
-    };
-    card.appendChild(del);
-
-    grid.appendChild(card);
+    grid.appendChild(makeCard(
+      app,
+      function() { if (app.id) window.location.href = "/launch/" + encodeURIComponent(app.id); },
+      function() {
+        if (!confirm("Uninstall \u201c" + (app.name || "this app") + "\u201d?")) return;
+        fetch("/api/apps/" + encodeURIComponent(app.id), { method: "DELETE" })
+          .then(function(r) { if (r.ok) refresh(); else r.text().then(function(t) { alert("Uninstall failed: " + t); }); });
+      }
+    ));
   });
 }
 
@@ -166,8 +191,75 @@ function refresh() {
   });
 }
 
+// ── Source adapter sections ────────────────────────────────────────────────
+
+// Build a source section UI. Returns { el, loadPage }.
+function makeSourceSection(src) {
+  const section = document.createElement("div");
+  section.className = "source-section";
+
+  const header = document.createElement("div");
+  header.className = "source-header";
+  const label = document.createElement("span");
+  label.textContent = src.name;
+  const count = document.createElement("span");
+  count.className = "source-count";
+  header.appendChild(label);
+  header.appendChild(count);
+  section.appendChild(header);
+
+  const sgrid = document.createElement("div");
+  sgrid.className = "grid";
+  section.appendChild(sgrid);
+
+  const more = document.createElement("button");
+  more.className = "source-more";
+  more.hidden = true;
+  section.appendChild(more);
+
+  var offset = 0;
+  var total = 0;
+  var loading = false;
+  var LIMIT = 200;
+
+  function loadPage(q) {
+    if (loading) return;
+    loading = true;
+    var url = "/api/sources/" + encodeURIComponent(src.id) + "/discover?limit=" + LIMIT + "&offset=" + offset;
+    if (q) url += "&q=" + encodeURIComponent(q);
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+      loading = false;
+      total = data.total || 0;
+      var entries = data.entries || [];
+      entries.forEach(function(e) {
+        var launchUrl = "/launch/" + encodeURIComponent(src.id) + "?entry=" + encodeURIComponent(e.id);
+        sgrid.appendChild(makeCard(e, function() { window.location.href = launchUrl; }, null));
+      });
+      offset += entries.length;
+      count.textContent = "(" + offset + " of " + total + ")";
+      more.hidden = offset >= total;
+      more.textContent = "Load more \u2014 " + (total - offset) + " remaining";
+    });
+  }
+
+  more.onclick = function() { loadPage(search.value.trim()); };
+
+  return { el: section, loadPage: loadPage };
+}
+
+function loadSources() {
+  fetch("/api/sources").then(function(r) { return r.json(); }).then(function(data) {
+    (data.sources || []).forEach(function(src) {
+      var sec = makeSourceSection(src);
+      appEl.appendChild(sec.el);
+      sec.loadPage("");
+    });
+  });
+}
+
 search.addEventListener("input", refresh);
 refresh();
+loadSources();
 ]=]
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
@@ -306,10 +398,28 @@ local function parse_query(qs)
 	return params
 end
 
+-- ── Sources index ──────────────────────────────────────────────────────────
+-- Build a lookup map from id → source_entry for O(1) dispatch.
+-- caps.sources is optional (nil or empty → no source sections).
+--: ({ [integer]: unknown } | nil) -> { [string]: unknown }
+local function build_source_map(sources)
+	local map = {} --: { [string]: unknown }
+	if not sources then return map end
+	for i = 1, #sources do
+		local s = sources[i]
+		if type(s) == "table" and s.id then
+			map[s.id] = s
+		end
+	end
+	return map
+end
+
 -- ── Router ─────────────────────────────────────────────────────────────────
 
 function M.create(caps)
 	local db = caps.index_db
+	local source_map = build_source_map(caps.sources)
+	local sources_list = caps.sources or {}
 
 	local function handler(req, res)
 		local path = req.path or "/"
@@ -339,6 +449,37 @@ function M.create(caps)
 				offset = offset,
 				apps = apps,
 			})
+		end
+
+		-- API: list registered source adapters.
+		if method == "GET" and path == "/api/sources" then
+			local list = {}
+			for i = 1, #sources_list do
+				local s = sources_list[i]
+				list[i] = { id = s.id, name = s.name }
+			end
+			return json_ok(res, { sources = list })
+		end
+
+		-- API: proxy /discover to a source adapter.
+		-- Path: /api/sources/<id>/discover[?params]
+		if method == "GET" then
+			local src_id = path:match("^/api/sources/([^/]+)/discover")
+			if src_id then
+				-- Percent-decode the source id from the path.
+				src_id = src_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+				local src = source_map[src_id]
+				if not src then
+					res.status = 404
+					res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+					res.body = "source not found: " .. src_id
+					return true
+				end
+				local qs = req.query or path:match("%?(.+)$")
+				local params = parse_query(qs)
+				local resp = src.discover(params)
+				return json_ok(res, resp)
+			end
 		end
 	end
 
