@@ -243,10 +243,12 @@ end
 
 -- ── Predicates ────────────────────────────────────────────────────────────────
 
+--: (m: unknown) -> boolean
 function Maybe.is_just(m)
 	return m ~= Maybe.nothing
 end
 
+--: (m: unknown) -> boolean
 function Maybe.is_nothing(m)
 	return m == Maybe.nothing
 end

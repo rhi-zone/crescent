@@ -8,29 +8,43 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+--: { is_nothing: (m: unknown) -> boolean, is_just: (m: unknown) -> boolean, nothing: unknown, just: (unknown) -> unknown, from_just: (unknown) -> unknown, from_maybe: (unknown, unknown) -> unknown }
 local Maybe = require("lib.fp.maybe")
+local maybe_is_nothing = Maybe.is_nothing
 
 local M = {}
+
+--:: Maybe = { value: unknown }
+--:: Lens = { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }
+--:: Prism = { preview: (unknown) -> Maybe, review: (unknown) -> unknown }
+--:: Signal = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
+--:: Computed = { get: () -> unknown, subscribe: ((unknown) -> ()) -> (() -> ()), dispose: () -> (), focus: (Lens) -> Computed, narrow: (Prism) -> Computed }
+--:: Focused = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
+--:: Narrowed = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> Focused, narrow: (Prism) -> Narrowed }
 
 -- ── Batch ────────────────────────────────────────────────────────────────────
 
 local _batch_depth = 0
 -- Pending notifications: subscriber fn → thunk.
 -- Using fn as key deduplicates multiple notifications to the same subscriber.
+-- rawset(t,k,nil) deletes entries; pairs() never yields nil values.
+--: { [(unknown) -> ()]: () -> () }
 local _pending = {}
 
 -- batch(fn) — defer and dedup all signal notifications until the outermost
 -- batch returns, then flush in a loop (to handle cascading updates).
+--: (fn: () -> ()) -> ()
 function M.batch(fn)
 	_batch_depth = _batch_depth + 1
 	local ok, err = pcall(fn)
 	_batch_depth = _batch_depth - 1
 	if _batch_depth == 0 then
 		while next(_pending) do
+			--: { [number]: () -> () }
 			local thunks = {}
 			for sub, thunk in pairs(_pending) do
 				thunks[#thunks + 1] = thunk
-				_pending[sub] = nil
+				rawset(_pending, sub, nil)
 			end
 			for i = 1, #thunks do thunks[i]() end
 		end
@@ -42,6 +56,7 @@ end
 
 -- is_same(a, b): skip-no-op equality. Treats NaN as equal to itself
 -- (mirrors Object.is semantics). For tables/functions: reference equality.
+--: (a: unknown, b: unknown) -> boolean
 local function is_same(a, b)
 	if a ~= a and b ~= b then return true end  -- both NaN
 	return a == b
@@ -49,12 +64,14 @@ end
 
 -- ── Internal notification ─────────────────────────────────────────────────────
 
+--: (subscribers: { [(unknown) -> ()]: boolean }, value: unknown) -> ()
 local function fire(subscribers, value)
 	if _batch_depth > 0 then
 		for sub in pairs(subscribers) do
 			_pending[sub] = function() sub(value) end
 		end
 	else
+		--: { [number]: (unknown) -> () }
 		local snap = {}
 		for sub in pairs(subscribers) do snap[#snap + 1] = sub end
 		for i = 1, #snap do snap[i](value) end
@@ -65,8 +82,11 @@ end
 
 -- signal(init) — mutable signal.
 -- Returns { get, set, update, subscribe, focus, narrow }
+--: (init: unknown) -> Signal
 function M.signal(init)
 	local value = init
+	-- rawset(t,k,nil) deletes entries; pairs() never yields nil keys.
+	--: { [(unknown) -> ()]: boolean }
 	local subscribers = {}  -- set: fn -> true
 
 	local s = {}
@@ -88,7 +108,7 @@ function M.signal(init)
 	-- subscribe(fn) -> unsubscribe: register fn(new_value) on change.
 	function s.subscribe(fn)
 		subscribers[fn] = true
-		return function() subscribers[fn] = nil end
+		return function() rawset(subscribers, fn, nil) end
 	end
 
 	-- focus(lens) -> Signal b — read/write through a Lens.
@@ -111,10 +131,13 @@ end
 -- Memoized: fn() only runs when a dep has changed since the last get().
 -- Notifies subscribers only when the output value changes (via is_same).
 -- Call c.dispose() when the computed is no longer needed to release dep subscriptions.
+--: (fn: () -> unknown, deps: { [number]: Signal | Computed }) -> Computed
 function M.computed(fn, deps)
 	local c = {}
 	local _cache     -- last computed value
 	local _dirty = true  -- start dirty: first get() always computes
+	-- nil-assignment deletes entries; pairs() never yields nil.
+	--: { [(unknown) -> ()]: (unknown) -> () }
 	local _subs = {}     -- { handler -> wrapped_fn }: our subscribers
 
 	-- Notify all our subscribers with the current (recomputed) value.
@@ -126,7 +149,8 @@ function M.computed(fn, deps)
 	-- Single shared dep handler — shared reference enables batch deduplication:
 	-- if multiple deps change in one batch, _pending[on_dep] is overwritten to
 	-- the last thunk, so notify() fires once after all dep changes are applied.
-	local function on_dep()
+	--: (unknown) -> ()
+	local function on_dep(_v)
 		_dirty = true
 		notify()
 	end
@@ -150,6 +174,7 @@ function M.computed(fn, deps)
 	-- handler receives the new computed value whenever it changes.
 	function c.subscribe(handler)
 		local prev = c.get()
+		--: (next_val: unknown) -> ()
 		local function wrapped(next_val)
 			if not is_same(prev, next_val) then
 				prev = next_val
@@ -157,7 +182,7 @@ function M.computed(fn, deps)
 			end
 		end
 		_subs[handler] = wrapped
-		return function() _subs[handler] = nil end
+		return function() rawset(_subs, handler, nil) end
 	end
 
 	-- dispose() — unsubscribe from all deps. Call when the computed is no
@@ -177,7 +202,7 @@ function M.computed(fn, deps)
 	function c.narrow(prism)
 		return M.computed(function()
 			local m = prism.preview(c.get())
-			if Maybe.is_nothing(m) then return nil end
+			if maybe_is_nothing(m) then return nil end
 			return m.value
 		end, {c})
 	end
@@ -190,10 +215,12 @@ end
 -- effect(fn, deps) — run fn immediately and re-run when any dep changes.
 -- fn: () -> void; deps: array of signals or computed values.
 -- Returns unsubscribe function.
+--: (fn: () -> (), deps: { [number]: Signal | Computed }) -> (() -> ())
 function M.effect(fn, deps)
 	fn()
 	local unsubs = {}
-	local function rerun() fn() end
+	--: (unknown) -> ()
+	local function rerun(_v) fn() end
 	for i = 1, #deps do
 		unsubs[i] = deps[i].subscribe(rerun)
 	end
@@ -207,6 +234,7 @@ end
 -- focused(source, lens) — read/write signal through a Lens.
 -- source: Signal a; lens: Lens a b -> Signal b
 -- Lens API: { get: s->a, set: (s,a)->s }
+--: (source: Signal | Focused | Narrowed, lens: Lens) -> Focused
 function M.focused(source, lens)
 	local f = {}
 
@@ -225,13 +253,15 @@ function M.focused(source, lens)
 	-- subscribe(handler) -> unsubscribe
 	function f.subscribe(handler)
 		local prev = f.get()
-		return source.subscribe(function()
+		--: (unknown) -> ()
+		local function on_source(_v)
 			local next_val = f.get()
 			if not is_same(prev, next_val) then
 				prev = next_val
 				handler(next_val)
 			end
-		end)
+		end
+		return source.subscribe(on_source)
 	end
 
 	function f.focus(lens2)
@@ -252,10 +282,11 @@ end
 -- get() returns nil when the prism doesn't match the current value.
 -- set(b) is a no-op when b is nil.
 -- Prism API: { preview: s->Maybe a, review: a->s }
+--: (source: Signal | Focused | Narrowed, prism: Prism) -> Narrowed
 function M.narrowed(source, prism)
 	local function extract()
 		local m = prism.preview(source.get())
-		if Maybe.is_nothing(m) then return nil end
+		if maybe_is_nothing(m) then return nil end
 		return m.value
 	end
 
@@ -279,13 +310,15 @@ function M.narrowed(source, prism)
 	-- subscribe(handler) -> unsubscribe
 	function n.subscribe(handler)
 		local prev = n.get()
-		return source.subscribe(function()
+		--: (unknown) -> ()
+		local function on_source(_v)
 			local next_val = n.get()
 			if not is_same(prev, next_val) then
 				prev = next_val
 				handler(next_val)
 			end
-		end)
+		end
+		return source.subscribe(on_source)
 	end
 
 	function n.focus(lens)

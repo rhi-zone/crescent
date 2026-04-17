@@ -150,14 +150,18 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Context Management
 
-**Use subagents to protect the main context window.** For broad exploration or mechanical multi-file work, delegate to an Explore or general-purpose subagent rather than running searches inline. The subagent returns a distilled summary; raw tool output stays out of the main context.
+**Default: delegate. Inline is the exception.** Before any multi-step task — reading multiple files, exploring a question, making changes across files — spawn a subagent. The subagent returns a distilled summary; raw tool output never lands in the main context. Do not inline work and then decide afterward whether it should have been delegated — the decision must happen *before* the first tool call.
 
-Rules of thumb:
-- Research tasks (investigating a question, surveying patterns) → subagent; don't pollute main context with exploratory noise
-- Searching >5 files or running >3 rounds of grep/read → use a subagent
-- Codebase-wide analysis (architecture, patterns, cross-file survey) → always subagent
-- Mechanical work across many files (applying the same change everywhere) → parallel subagents
-- Single targeted lookup (one file, one symbol) → inline is fine
+Inline is only acceptable for:
+- A single targeted file read (one file, one specific thing you already know is there)
+- A single grep for a known symbol in a known file
+
+Everything else is a subagent:
+- Any research or exploration question → subagent (Explore for codebase questions, general-purpose for multi-step tasks)
+- Annotating a file → subagent
+- Making changes to a file based on understanding another file → subagent
+- Verifying output of a change → can be inline (one command) or subagent if it requires reading results
+- Mechanical work across many files → parallel subagents
 
 ## Commit Convention
 
