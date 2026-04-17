@@ -1279,3 +1279,100 @@ local y2 = x2
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- CRI cross-file round-trip: field ordering regression
+-- ---------------------------------------------------------------------------
+-- Bug: collect_fields_from_list in cri_write.lua ran recursive walk_tid calls
+-- inline, causing inner-table field entries to be inserted between the outer
+-- table's fields in the flat field pool.  On load, the outer table's
+-- fields_start/fields_len range pointed to the wrong (inner) entries.
+-- Fix: two-pass field collection — add all field entries first, then walk.
+
+assert.describe("CRI: cross-file require() preserves all module fields", function()
+    local cri_write  = require("lib.type.static.cri_write")
+    local cri_read   = require("lib.type.static.cri_read")
+    local types_mod  = require("lib.type.static.types")
+    local intern_mod = require("lib.type.static.intern")
+    local defs       = require("lib.type.static.defs")
+    local env_mod    = require("lib.type.static.env")
+
+    -- Source that returns a module with multiple functions whose return types
+    -- are themselves tables with multiple fields.  This stresses the two-pass
+    -- field ordering fix: the outer module table's fields must be contiguous
+    -- in the CRI field pool even after recursive walks of inner table types.
+    local src = [[
+local M = {}
+
+--: (integer) -> { x: integer, y: integer }
+function M.make_point(n)
+    return { x = n, y = n }
+end
+
+--: (string) -> { label: string, count: integer }
+function M.make_item(s)
+    return { label = s, count = 0 }
+end
+
+--: () -> boolean
+function M.flag()
+    return true
+end
+
+return M
+]]
+
+    assert.it("CRI round-trip preserves all outer-module fields", function()
+        check_mod.clear_cache()
+        local err, ctx = check_mod.check_string(src, "cri_test_module.lua")
+        assert.ok(not errors_mod.has_errors(err), "source should typecheck cleanly")
+
+        -- Extract export type
+        local rets = ctx.module_return_tids
+        assert.ok(rets and #rets > 0 and rets[1] and #rets[1] > 0,
+            "module must have a return statement")
+        local export_tid = types_mod.find(ctx, rets[1][1])
+        local et = ctx.types:get(export_tid)
+        assert.eq(et.tag, defs.TAG_TABLE, "export should be a table")
+        assert.eq(et.data[1], 3, "export table should have 3 fields")
+
+        -- Collect original field names
+        local orig_fields = {}
+        for i = et.data[0], et.data[0] + et.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe  = ctx.fields:get(fid)
+            orig_fields[#orig_fields + 1] = intern_mod.get(ctx.pool, fe.name_id)
+        end
+
+        -- Serialize
+        local exp_map = { ["__ret"] = export_tid }
+        local ok_ser, cri = pcall(cri_write.serialize, ctx, exp_map, {})
+        assert.ok(ok_ser, "serialize should succeed")
+
+        -- Load into same context (shared pool) — tests field ID stability
+        local ok_load, exports = cri_read.load(cri, ctx)
+        assert.ok(ok_load, "load should succeed")
+        local loaded_tid = exports["__ret"]
+        assert.ok(loaded_tid ~= nil, "loaded exports must have __ret")
+        local lt = ctx.types:get(types_mod.find(ctx, loaded_tid))
+        assert.eq(lt.tag, defs.TAG_TABLE, "loaded export should be a table")
+        assert.eq(lt.data[1], 3, "loaded table should have 3 fields")
+
+        -- Verify field names are the same (ordering preserved)
+        local loaded_fields = {}
+        for i = lt.data[0], lt.data[0] + lt.data[1] - 1 do
+            local fid = ctx.lists:get(i)
+            local fe  = ctx.fields:get(fid)
+            loaded_fields[#loaded_fields + 1] = intern_mod.get(ctx.pool, fe.name_id)
+        end
+        table.sort(orig_fields)
+        table.sort(loaded_fields)
+        assert.eq(#loaded_fields, #orig_fields,
+            "loaded field count must match original")
+        for i = 1, #orig_fields do
+            assert.eq(loaded_fields[i], orig_fields[i],
+                "field " .. i .. " mismatch: got " .. tostring(loaded_fields[i]) ..
+                " vs " .. tostring(orig_fields[i]))
+        end
+    end)
+end)

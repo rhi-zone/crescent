@@ -8,7 +8,6 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
---: { is_nothing: (m: unknown) -> boolean, is_just: (m: unknown) -> boolean, nothing: unknown, just: (unknown) -> unknown, from_just: (unknown) -> unknown, from_maybe: (unknown, unknown) -> unknown }
 local Maybe = require("lib.fp.maybe")
 local maybe_is_nothing = Maybe.is_nothing
 
@@ -331,14 +330,5 @@ function M.narrowed(source, prism)
 
 	return n
 end
-
---:: module "lib.reactive": {
---::   signal:   (unknown) -> Signal,
---::   computed: (() -> unknown, { [integer]: unknown }) -> Computed,
---::   effect:   (() -> (), { [integer]: unknown }) -> (() -> ()),
---::   batch:    (() -> ()) -> (),
---::   focused:  (Signal, Lens) -> Focused,
---::   narrowed: (Signal, Prism) -> Narrowed,
---:: }
 
 return M

@@ -161,12 +161,20 @@ local function collect(ctx, root_tids)
                 -- Returns the starting index (0-based) in field_entries for this range.
                 if ll == 0 then return 0 end
                 local start_idx = #field_entries  -- 0-based
+                -- Pass 1: collect all field entries into the pool BEFORE any recursive walks.
+                -- Recursive walk_tid calls can insert entries for inner tables between our
+                -- fields if done inline, breaking the contiguity assumed by fields_start/len.
+                local type_ids = {}
                 for i = ls, ls + ll - 1 do
                     local fid = ctx.lists:get(i)
                     local fe  = ctx.fields:get(fid)
                     field_entries[#field_entries + 1] = {fe.name_id, fe.type_id, fe.flags}
                     intern_str(fe.name_id)
-                    walk_tid(fe.type_id)
+                    type_ids[#type_ids + 1] = fe.type_id
+                end
+                -- Pass 2: recursive walks after all entries are in place.
+                for _, type_id in ipairs(type_ids) do
+                    walk_tid(type_id)
                 end
                 return start_idx
             end
