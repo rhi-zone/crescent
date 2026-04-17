@@ -7,6 +7,11 @@ end
 local T = require("lib.test.assert")
 local daemon = require("lib.platform.daemon")
 local index = require("lib.platform.index")
+local png = require("lib.png")
+local base64 = require("lib.base64")
+local json_mod = require("lib.format.json")
+local compress = require("lib.compress")
+local has_deflate = compress._tier == "system-zlib"
 
 -- ── Fakes ──────────────────────────────────────────────────────────────────
 -- Injected time + RNG so tests are deterministic. random_bytes_fn returns a
@@ -1642,6 +1647,169 @@ T.describe("grant dispatch gate", function()
 		local res = make_res()
 		d.handle(req, res)
 		T.eq(res.status, 200, "denied cap is decided — gate must not redirect")
+		idx:close()
+	end)
+end)
+
+-- ── POST /api/import-card ────────────────────────────────────────────────────
+
+-- Build a minimal valid PNG with a chara tEXt chunk. Same helper as in
+-- lib/platform/import_test.lua.
+local function make_card_png(card_data)
+	local card_json = json_mod.encode(card_data)
+	local chara_b64 = base64.encode(card_json)
+	local chunks = {
+		{ type = "IHDR", data = "\0\0\0\1\0\0\0\1\8\2\0\0\0" },
+		{ type = "IDAT", data = "\x78\x01\x62\x60\x60\x60\x00\x00\x00\x04\x00\x01" },
+		{ type = "tEXt", data = png.build_text("chara", chara_b64) },
+		{ type = "IEND", data = "" },
+	}
+	return png.write(chunks)
+end
+
+local RUNTIME_FILES = {
+	{ name = "server.lua", data = "return {}" },
+}
+local RUNTIME_MANIFEST = {
+	name = "Character Card v2",
+	version = "0.1.0",
+	meta = { tags = { "charactercardv2" } },
+	default_entry = "server",
+	caps  = {},
+	entry = { server = { main = "server.lua", caps = {} } },
+}
+
+T.describe("POST /api/import-card", function()
+	if not has_deflate then
+		T.it("skips: system-zlib not available", function() T.skip("system-zlib required for import") end)
+		return
+	end
+
+	local CARD_PNG = make_card_png({ data = { name = "Alice", description = "Test card", tags = { "ai" } } })
+
+	-- Build a daemon with a fake source whose handler returns CARD_PNG for GET /card/:id.
+	local function make_import_daemon(extra)
+		extra = extra or {}
+		local idx = index.open(":memory:")
+		local written = {}
+		local write_fn = extra.write_fn or function(path, data)
+			written[#written + 1] = { path = path, data = data }
+			return true
+		end
+		local source_handler = extra.source_handler or function(req, res)
+			res.status = 200
+			res.headers["Content-Type"] = { "image/png" }
+			res.body = CARD_PNG
+		end
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+			index_obj       = idx,
+			apps_dir        = "/tmp/test-apps",
+			write_fn        = write_fn,
+			runtime_files   = RUNTIME_FILES,
+			runtime_manifest = RUNTIME_MANIFEST,
+			sources         = {
+				{
+					id       = "42",
+					name     = "SillyTavern",
+					discover = function() return { entries = {}, total = 0 } end,
+					handler  = source_handler,
+				},
+			},
+		})
+		return d, idx, written
+	end
+
+	local function prime(d)
+		local req = make_req("GET", "/healthz", "localhost:7777")
+		local res = make_res()
+		d.handle(req, res)
+		return res.headers["Set-Cookie"][1]:match("__Host%-session=([^;]+)")
+	end
+
+	local function post_import(d, sid, source, entry)
+		local req = make_req("POST", "/api/import-card", "localhost:7777",
+			"__Host-session=" .. sid)
+		req.query = "source=" .. source .. "&entry=" .. entry
+		local res = make_res()
+		d.handle(req, res)
+		return res
+	end
+
+	T.it("requires session — no cookie → 401", function()
+		local d = make_import_daemon()
+		local req = make_req("POST", "/api/import-card", "localhost:7777")
+		req.query = "source=42&entry=Alice.png"
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 401)
+	end)
+
+	T.it("returns 503 when runtime not configured", function()
+		local idx = index.open(":memory:")
+		local d = daemon.make({
+			host            = "localhost:7777",
+			time_fn         = make_time_fn(1000),
+			random_bytes_fn = make_random_fn(0),
+			index_db        = idx._db,
+		})
+		local sid = prime(d)
+		local res = post_import(d, sid, "42", "Alice.png")
+		T.eq(res.status, 503)
+		idx:close()
+	end)
+
+	T.it("returns 404 for unknown source id", function()
+		local d, idx = make_import_daemon()
+		local sid = prime(d)
+		local res = post_import(d, sid, "99", "Alice.png")
+		T.eq(res.status, 404)
+		idx:close()
+	end)
+
+	T.it("returns 400 when source or entry param is missing", function()
+		local d, idx = make_import_daemon()
+		local sid = prime(d)
+		local req = make_req("POST", "/api/import-card", "localhost:7777",
+			"__Host-session=" .. sid)
+		req.query = "source=42"  -- missing entry
+		local res = make_res()
+		d.handle(req, res)
+		T.eq(res.status, 400)
+		idx:close()
+	end)
+
+	T.it("imports card: write_fn called, app indexed, returns launch_url", function()
+		local d, idx, written = make_import_daemon()
+		local sid = prime(d)
+		local res = post_import(d, sid, "42", "Alice.png")
+		T.eq(res.status, 200)
+		local body = json_mod.decode(res.body)
+		T.ok(body, "expected JSON body")
+		T.eq(body.ok, true)
+		T.ok(body.launch_url, "expected launch_url in response")
+		T.ok(body.launch_url:find("^/launch/"), "launch_url must start with /launch/")
+		T.eq(#written, 1, "write_fn must be called once")
+		-- The new app must be indexed.
+		local apps = idx:list()
+		T.eq(#apps, 1, "one app must be indexed after import")
+		T.eq(apps[1].name, "Alice")
+		idx:close()
+	end)
+
+	T.it("returns 502 when source handler returns non-200", function()
+		local d, idx = make_import_daemon({
+			source_handler = function(req, res)
+				res.status = 404
+				res.body = "not found"
+			end,
+		})
+		local sid = prime(d)
+		local res = post_import(d, sid, "42", "missing.png")
+		T.eq(res.status, 502)
 		idx:close()
 	end)
 end)

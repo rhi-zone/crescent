@@ -23,6 +23,8 @@ end
 local router = require("lib.router")
 local url = require("lib.url")
 local library = require("lib.platform.apps.library.server")
+local import_mod = require("lib.platform.import")
+local json = require("lib.format.json")
 
 local M = {}
 
@@ -40,6 +42,10 @@ local M = {}
 --::   index_db: unknown,
 --::   index_obj: unknown,
 --::   remove_fn: ((path: string) -> (true | nil, string | nil)) | nil,
+--::   write_fn: ((path: string, data: string) -> (true | nil, string | nil)) | nil,
+--::   apps_dir: string | nil,
+--::   runtime_files: { [integer]: { name: string, data: string } } | nil,
+--::   runtime_manifest: unknown,
 --::   sources: { [integer]: source_entry } | nil,
 --::   app_handler: ((http_req, http_res, string) -> nil) | nil,
 --::   app_loader: app_loader_fn | nil,
@@ -232,6 +238,11 @@ function M.make(opts)
 	-- Injected for testability. Defaults to os.remove.
 	--: (string) -> (true | nil, string | nil)
 	local remove_fn = opts.remove_fn or os.remove
+	-- Import support: injected write_fn, apps_dir, and pre-loaded runtime.
+	local write_fn = opts.write_fn --: any
+	local apps_dir = opts.apps_dir --: string | nil
+	local runtime_files = opts.runtime_files --: any
+	local runtime_manifest = opts.runtime_manifest --: any
 
 	-- Library app handler. The daemon mounts the library app at "/" of the
 	-- daemon origin. We call create() directly; there is no sandbox in v1
@@ -715,6 +726,122 @@ function M.make(opts)
 		res.headers["Location"] = { origin }
 		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
 		res.body = ""
+	end)
+
+	-- POST /api/import-card — import a source adapter entry as a new CCv2 app.
+	-- Query params: source=<source_id>&entry=<entry_id>
+	-- Requires a valid session. Reads the PNG from source.handler(GET /card/:id),
+	-- runs the import pipeline, indexes the app, and returns JSON {app_id, launch_url}.
+	r:post("/api/import-card", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sess_rec = presented and sessions[presented] or nil
+		if not sess_rec then
+			plain(res, 401, "unauthorized")
+			return
+		end
+		sess_rec.last_seen = time_fn()
+
+		if not runtime_files or not runtime_manifest then
+			plain(res, 503, "import not configured")
+			return
+		end
+		if not write_fn or not apps_dir then
+			plain(res, 503, "import not configured")
+			return
+		end
+
+		-- Parse query params (source + entry).
+		local qs = req.query or ""
+		local qparams = {}
+		for kv in qs:gmatch("[^&]+") do
+			local k, v = kv:match("^([^=]+)=?(.*)")
+			if k then
+				qparams[k:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end)]
+					= v:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end)
+			end
+		end
+		local src_id = qparams.source
+		local entry_id = qparams.entry
+		if not src_id or not entry_id then
+			plain(res, 400, "missing source or entry param")
+			return
+		end
+
+		-- Find the source by id.
+		local src
+		local sources_list = opts.sources or {}
+		for i = 1, #sources_list do
+			if tostring(sources_list[i].id) == tostring(src_id) then
+				src = sources_list[i]
+				break
+			end
+		end
+		if not src or not src.handler then
+			plain(res, 404, "source not found: " .. tostring(src_id))
+			return
+		end
+
+		-- Call source handler to get the card PNG bytes.
+		local card_req = {
+			method = "GET",
+			path   = "/card/" .. entry_id,
+			query  = "",
+			headers = {},
+		}
+		local card_res = { status = nil, headers = {}, body = nil }
+		local ok_h, herr = pcall(src.handler, card_req, card_res)
+		if not ok_h or not card_res.body then
+			plain(res, 502, "source handler error: " .. tostring(ok_h and "empty body" or herr))
+			return
+		end
+		if (card_res.status or 200) ~= 200 then
+			plain(res, 502, "source returned status " .. tostring(card_res.status))
+			return
+		end
+
+		-- Run the import pipeline.
+		local app_path, manifest_or_err = import_mod.import_card({
+			png_bytes        = card_res.body,
+			runtime_files    = runtime_files,
+			runtime_manifest = runtime_manifest,
+			apps_dir         = apps_dir,
+			index            = index_obj,
+			timestamp        = time_fn(),
+			write_fn         = write_fn,
+		})
+		if not app_path then
+			plain(res, 500, "import failed: " .. tostring(manifest_or_err))
+			return
+		end
+
+		-- Find the newly installed app id.
+		local new_app_id
+		if index_obj and index_obj.get then
+			-- The app was indexed by import_card; find by path.
+			local rows = index_obj:list()
+			for _, row in ipairs(rows) do
+				if row.path == app_path then
+					new_app_id = row.id
+					break
+				end
+			end
+		end
+		if not new_app_id then
+			-- import succeeded but we can't find the id — still a partial success
+			res.status = 200
+			res.headers["Content-Type"] = { "application/json" }
+			res.body = json.encode({ ok = true, app_path = app_path })
+			return
+		end
+
+		res.status = 200
+		res.headers["Content-Type"] = { "application/json" }
+		res.body = json.encode({
+			ok         = true,
+			app_id     = new_app_id,
+			launch_url = "/launch/" .. tostring(new_app_id),
+		})
 	end)
 
 	-- /launch/:id — mint a one-shot launch token bound to the current session

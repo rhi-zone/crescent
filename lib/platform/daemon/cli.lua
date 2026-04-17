@@ -5,10 +5,11 @@
 --   luajit lib/platform/daemon/cli.lua [--host=IFACE] [--port=N] [--apps-dir=PATH]
 --
 -- Flags:
---   --host=IFACE     Bind interface (default 127.0.0.1)
---   --port=N         Listen port (default 7777)
---   --apps-dir=PATH  Where the app index DB lives (default ~/.crescent/apps)
---   --daemon-host=H  Canonical daemon host (default "<host>:<port>")
+--   --host=IFACE          Bind interface (default 127.0.0.1)
+--   --port=N              Listen port (default 7777)
+--   --apps-dir=PATH       Where the app index DB lives (default ~/.crescent/apps)
+--   --daemon-host=H       Canonical daemon host (default "<host>:<port>")
+--   --runtime-dir=PATH    Card app runtime directory (default lib/platform/apps/charactercardv2)
 --
 -- v1: only serves the library app at the daemon origin + an app-origin stub.
 -- See docs/daemon-design.md and TODO.md for the multi-step bring-up plan.
@@ -25,13 +26,14 @@ local json = require("lib.format.json")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
---: ({ [integer]: string }) -> { host: string, port: integer, apps_dir: string | nil, daemon_host: string | nil }
+--: ({ [integer]: string }) -> { host: string, port: integer, apps_dir: string | nil, daemon_host: string | nil, runtime_dir: string | nil }
 local function parse_args(args)
 	local opts = {
 		host = "127.0.0.1",
 		port = 7777,
 		apps_dir = nil, --: string | nil
 		daemon_host = nil, --: string | nil
+		runtime_dir = nil, --: string | nil
 	}
 	for i = 1, #args do
 		local a = args[i]
@@ -45,6 +47,8 @@ local function parse_args(args)
 			opts.apps_dir = val
 		elseif key == "daemon-host" then
 			opts.daemon_host = val
+		elseif key == "runtime-dir" then
+			opts.runtime_dir = val
 		elseif a:sub(1, 1) == "-" then
 			io.stderr:write("unknown flag: " .. a .. "\n")
 			os.exit(1)
@@ -162,12 +166,61 @@ if idx and loader_fn and raw_index_db then
 	end
 end
 
+-- Load the card app runtime files for the import endpoint.
+-- Reads the manifest.json from runtime_dir, then loads each entry's main file.
+-- Falls back gracefully if the directory or files are missing.
+local runtime_dir = expand_home(opts.runtime_dir or "lib/platform/apps/charactercardv2")
+local runtime_files, runtime_manifest
+do
+	local mf = io.open(runtime_dir .. "/manifest.json", "rb")
+	if mf then
+		local raw = mf:read("*a")
+		mf:close()
+		local decoded = json.decode(raw)
+		if decoded then
+			runtime_manifest = decoded
+			runtime_files = {}
+			local entries = decoded.entry or {}
+			local seen = {}
+			for _, entry_def in pairs(entries) do
+				local main = type(entry_def) == "table" and entry_def.main
+				if main and not seen[main] then
+					seen[main] = true
+					local f = io.open(runtime_dir .. "/" .. main, "rb")
+					if f then
+						runtime_files[#runtime_files + 1] = { name = main, data = f:read("*a") }
+						f:close()
+					end
+				end
+			end
+		end
+	end
+	if runtime_manifest then
+		io.stderr:write("daemon: runtime loaded from " .. runtime_dir .. " (" .. #runtime_files .. " files)\n")
+	else
+		io.stderr:write("note: runtime dir not available (" .. runtime_dir .. ") — import endpoint disabled.\n")
+	end
+end
+
+local function write_file(path, data)
+	local f, err = io.open(path, "wb")
+	if not f then return nil, err end
+	f:write(data)
+	f:close()
+	return true
+end
+
 local d = daemon.make({
 	host = daemon_host,
 	time_fn = os.time,
 	index_db = raw_index_db,
+	index_obj = idx,
 	sources = sources,
 	app_loader = loader_fn,
+	apps_dir = apps_dir,
+	write_fn = write_file,
+	runtime_files = runtime_files,
+	runtime_manifest = runtime_manifest,
 	on_handler_error = function(app_id, err, tb)
 		io.stderr:write("daemon: app " .. app_id .. " handler error: " .. err .. "\n" .. tb .. "\n")
 	end,

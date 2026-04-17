@@ -73,6 +73,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 .card:hover{border-color:#e94560;transform:translateY(-2px)}
 .card-delete{position:absolute;top:.35rem;right:.35rem;background:none;border:none;color:#606070;font-size:.9rem;cursor:pointer;padding:.15rem .3rem;border-radius:3px;line-height:1}
 .card-delete:hover{background:#e94560;color:#fff}
+.card-import{position:absolute;bottom:.5rem;left:.5rem;padding:.2rem .5rem;border-radius:4px;border:1px solid #4a4a8a;background:transparent;color:#8888cc;font-size:.75rem;cursor:pointer;z-index:1}
+.card-import:hover{background:#4a4a8a;color:#fff}
 .card-name{font-weight:600;font-size:.95rem;margin-bottom:.35rem}
 .card-desc{font-size:.8rem;color:#a0a0b0;margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
@@ -97,7 +99,8 @@ let activeTag = null;
 // Build one card element. app/entry must have: id, name, description, tags.
 // onLaunch: function() — called when card is clicked.
 // onDelete: function() | null — if non-null, shows × button.
-function makeCard(item, onLaunch, onDelete) {
+// onImport: function() | null — if non-null, shows "Open" import button.
+function makeCard(item, onLaunch, onDelete, onImport) {
   const card = document.createElement("div");
   card.className = "card";
   card.onclick = onLaunch;
@@ -134,6 +137,24 @@ function makeCard(item, onLaunch, onDelete) {
     del.textContent = "\xD7";
     del.onclick = function(e) { e.stopPropagation(); onDelete(); };
     card.appendChild(del);
+  }
+
+  if (onImport) {
+    var imp = document.createElement("button");
+    imp.className = "card-import";
+    imp.title = "Open in conversation";
+    imp.textContent = "Open";
+    imp.onclick = function(e) {
+      e.stopPropagation();
+      imp.disabled = true;
+      imp.textContent = "…";
+      onImport(function(err) {
+        imp.disabled = false;
+        imp.textContent = err ? "!" : "Open";
+        if (err) imp.title = "Error: " + err;
+      });
+    };
+    card.appendChild(imp);
   }
 
   return card;
@@ -233,7 +254,13 @@ function makeSourceSection(src) {
       var entries = data.entries || [];
       entries.forEach(function(e) {
         var launchUrl = "/launch/" + encodeURIComponent(src.id) + "?entry=" + encodeURIComponent(e.id);
-        sgrid.appendChild(makeCard(e, function() { window.location.href = launchUrl; }, null));
+        var importUrl = "/api/import-card?source=" + encodeURIComponent(src.id) + "&entry=" + encodeURIComponent(e.id);
+        sgrid.appendChild(makeCard(e, function() { window.location.href = launchUrl; }, null, function(done) {
+          fetch(importUrl, { method: "POST" }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.launch_url) { window.location.href = data.launch_url; }
+            else { done(data.error || "unknown error"); }
+          }).catch(function(err) { done(String(err)); });
+        }));
       });
       offset += entries.length;
       count.textContent = "(" + offset + " of " + total + ")";
