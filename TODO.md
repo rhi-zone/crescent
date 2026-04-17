@@ -73,112 +73,81 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
 - [x] **HTTP skeleton** — single-port listener, path-prefix router, per-subdomain routing
   (`app-<id>.<daemon-host>` canonical, `127.0.0.x` loopback-IP fallback, URL-token fallback),
   `HttpOnly __Host-session` cookie auth, mount existing library app at the root.
-  Implemented in `lib/platform/daemon/` (init + cli + daemon_test, 46 assertions).
-  **Carried over from v1 skeleton — address as downstream steps land:**
-  - [x] Default session ID source now uses `lib/rand` (getrandom(2) /
-    /dev/urandom), falling back to `math.random` only when neither CSPRNG
-    path is available. Injected `random_bytes_fn` still takes precedence.
-    Routable deployments should still inject their own fn to stay
-    independent of `lib/rand`'s probe result.
-  - [x] Session idle-TTL + sweep-on-mint (15bbee1). Daemon sessions drop after
-    24h of idleness — swept on mint and rejected inline at `/launch` and at
-    top-level dispatch. Same pattern ported to per-app sessions.
-  - [ ] Session store is still in-memory only; no cap on count, no persistence
-    across daemon restart. Idle-TTL bounds steady-state size but a burst of
-    unique operators inside the TTL window can still blow the map up. Deferred
-    until grant UI lands and sessions carry real authority.
-  - [ ] Loopback IP allocator grows monotonically and never reclaims. Fine for v1 (you run
-    out at 127.255.255.254) but revisit when multi-user / long-lived deployments appear.
-  - [x] `lib/http/server.lua` now accepts an `opts` table (with `host`),
-    forwarded to `lib.socket.server`. `lib/platform/daemon/cli.lua` no
-    longer hand-rolls the HTTP read loop — it uses `http_server.server`
-    with a thin wrapper that splits `target` into `path` + `query` and
-    calls `d.handle`. Smoke-tested: `curl /healthz` → 200 ok.
-  - [x] Library app's response headers migrated to `{ string }` arrays (server.lua +
-    server_test.lua). Daemon can now round-trip library responses through
-    `http.format.serialize_response` without error.
-- [x] **HTTP response-header convention migration — codebase-wide** (37a4ce2).
-  Completed the migration started in `f3e01b9`. All first-party callers now
-  use array-form headers. `lib/platform/daemon/init.lua` and
-  `lib/platform/caps/http_server.lua` keep their defensive normalize steps
-  in place — those are at the trust boundary for untrusted app handlers.
-  Full test suite: 539/539 (67000 assertions).
+
+  **Open threads around the skeleton:**
+  - [ ] Session store is in-memory only. The 24h idle-TTL bounds the map
+    in steady state, but a burst of unique operators inside that window
+    still grows it unboundedly, and a daemon restart forgets everyone.
+    Open questions: (a) do sessions need to persist across restart at
+    all before grant UI lands? (b) is a hard cap with LRU eviction
+    enough, or does this need on-disk persistence? Deferred while
+    sessions carry no real authority.
+  - [ ] Loopback IP allocator grows monotonically and never reclaims.
+    Fine at v1 scale (you run out at 127.255.255.254 apps), but a
+    long-lived multi-app daemon that churns installs leaks IPs.
+    Revisit when it becomes a real bound.
+  - [ ] Routable-interface deployments should inject their own
+    `random_bytes_fn` rather than rely on the default's `lib/rand`
+    probe succeeding on the target platform. Not a code gap — an
+    operator-doc gap. Might fold into daemon-design.md "deployment"
+    section if/when that section exists.
 - [x] **Launch flow** — operator clicks app in library → daemon mints one-shot 16-byte
-  launch token, 303-redirects to app origin. Token session-bound, 5-min expiry,
-  consumed on first use. Implemented in `lib/platform/daemon/init.lua`:
-  `GET /launch/:id` on daemon origin + `?__launch=<hex>` consume on app origin,
-  per-app cookie `__Host-app-session-<id>`. Library UI updated to top-level
-  navigate to `/launch/<id>`. 15 new test assertions (83 total in daemon_test).
+  launch token, 303-redirects to app origin. Per-app cookie `__Host-app-session-<id>`.
 
-  **Carry-overs from launch flow — address as downstream steps land:**
-  - [x] Launch-token reaping — sweep-on-mint implemented (bd0f1c1). Expired
-    tokens are evicted at the next `/launch` hit. Good enough for single-
-    operator local daemon; revisit (periodic reaper) only if the map ever
-    pressures GC.
-  - [x] Garbage-collect stale per-app sessions (15bbee1). `app_sessions`
-    buckets now sweep at consume time: entries older than 24h are dropped
-    when a new `__launch` consume mints the next token into the same bucket.
-    Remaining gap: nothing sweeps app buckets for *uninstalled* apps, so a
-    long-tail of launched-once-then-removed apps leaves empty buckets in
-    the top-level map. Trivial fix but punted.
-  - [ ] Rate limiting on `/launch` is NOT yet wired. Tracked separately in
-    the "Rate limiting" bullet below.
-  - [x] `Referrer-Policy: no-referrer` on launch 303 (bd0f1c1) — belt-and-
-    suspenders against token leak via Referer if an app's first paint
-    fetches third-party resources. Remaining risk note: launch tokens are
-    still URL-bearer (not session-bound on consume) — mitigated by 5-min
-    expiry + one-shot consume + clean-URL 303 but not *eliminated*. The
-    consume handler literally cannot verify the caller is the session that
-    minted the token because the daemon session cookie does not cross
-    origins; a true session-binding fix needs a different architecture
-    (signed token with session-id payload, or a daemon→app_origin bridge).
+  **Open threads around the launch flow:**
+  - [ ] `app_sessions` top-level map accumulates empty buckets for
+    *uninstalled* apps: once an app id disappears from the index, the
+    bucket for it is never revisited (consume is the only sweep site)
+    so sweep-on-access never runs. Trivial to add a periodic or
+    install/uninstall-triggered cleanup; punted because it's bounded
+    by total-apps-ever-launched, not request rate.
+  - [ ] Rate limiting on `/launch` is not wired. See the "Rate limiting"
+    bullet below.
+  - [ ] Standing risk note (not a gap to fix — architectural): launch
+    tokens are URL-bearer on consume, not session-bound. Mitigations
+    in place: 5-min expiry, one-shot, clean-URL 303, `Referrer-Policy:
+    no-referrer` on the mint response. True session-binding would
+    need a different architecture — signed token with session-id
+    payload, or a daemon→app-origin bridge — because the daemon
+    session cookie cannot cross origins. Worth revisiting if/when
+    bearer semantics become an incident.
 - [x] **Per-app VM host** — per-app env built from `lib/sandbox/` + `platform.make_caps()`,
-  served by daemon's Host-based app dispatch. Implemented in
-  `lib/platform/daemon/app_loader.lua` + wired via `daemon.make({ app_loader = ... })`.
-  Resolution of design questions from earlier:
-  - Isolation: env-based sandbox (same Lua state, per-app env table).
-  - Cap wiring: direct in-process function calls via `platform.make_caps()`.
-  - `http_server` cap refactored — daemon mode uses `on_serve` callback to capture
-    the handler the app registers via `cap.serve(handler)`.
+  served by daemon's Host-based app dispatch. Env-based tier-1 sandbox (single state +
+  per-app env table + pcall wrap).
 
-  **Carry-overs for per-app VM host:**
-  - [x] First-real-app smoke test — `lib/platform/daemon/end_to_end_test.lua`
-    drives the full pipeline against a real SQLite index and a real `.tar.gz`
-    app (built on-the-fly via `tar.write` + `compress.deflate`). Covers
-    successful Host dispatch, handler caching across requests, and missing-app
-    500 caching. 8 assertions. Library "launch from UI" still needs wiring
-    but is now unblocked.
-  - [x] `caps.self.app_id` exposed under daemon (a2fe3d3). Apps can now build
-    self-referential URLs / cookie names. Not yet added: `caps.self.origin`
-    (full scheme+host URL) — punted until a concrete caller needs it rather
-    than speculating.
-  - [ ] Tier 2/3 isolation escalation (separate `lua_State` per app, or
-    coroutine-per-request with `debug.sethook` instruction quota). Current
-    daemon is tier 1 (single state + env sandbox + pcall wrap). The full
-    build order, escalation triggers, and perf considerations are in
-    `docs/daemon-isolation.md`. Not urgent for a loopback/Tailscale-private
-    daemon; required before any routable-interface deployment alongside the
-    grant UI work.
-  - [x] Handler cache is now an LRU via `lib/cache` (default cap 64,
-    override via `opts.handler_cache_size`). Evicting a handler drops its
-    closure; the next request for the same app_id re-runs the loader.
-    Time-based eviction not wired yet — the current behavior relies on
-    install-time cache-busting (new rowid on reinstall → new app_id →
-    new entry). Revisit if hot-reload needs to invalidate by app_id
-    without an index-DB write.
-  - [x] Error cache TTL — `app_load_errors` now stores `{ err, retry_at }`
-    (bd0f1c1). 5s window; a transient `load_app` failure self-heals on the
-    next request past TTL. Not yet hooked to an explicit admin retry or
-    index-DB change notification; revisit once index mutations have a
-    callback surface.
+  **Open threads around the VM host:**
+  - [ ] `caps.self.origin` (full scheme+host URL) is not exposed. Not
+    speculatively adding it — the first concrete caller that needs it
+    gets to shape the field.
+  - [ ] Tier 2/3 isolation escalation: coroutine-per-request with
+    `debug.sethook` instruction quota (tier 2), or separate `lua_State`
+    per app (tier 3). Design + triggers in `docs/daemon-isolation.md`.
+    Not urgent for loopback/Tailscale-private; required before any
+    routable-interface deployment, and entangled with the grant UI
+    work (both move "apps are untrusted" from "documented" to
+    "enforced").
+  - [ ] Handler cache has LRU eviction but no time-based invalidation.
+    Install-time cache-busting (new rowid → new app_id) covers the
+    normal reinstall path. A hot-reload workflow that wants to
+    invalidate by app_id without an index-DB write would need either
+    a TTL option on `lib/cache` entries (already supported in the
+    library — just not wired) or an explicit `d.invalidate(app_id)`
+    seam.
+  - [ ] `app_load_errors` has a 5s retry TTL but no link to index-DB
+    change notifications. A partially-written tarball during
+    `pkg install` heals in 5s; an explicit operator "retry this app"
+    button or an index-DB write callback would heal instantly.
+    Depends on whether the index layer grows a change-notification
+    surface.
   - [ ] `app_loader` currently auto-grants every declared cap
-    (`_auto_grants`). Real grant policy lives with the grant UI item below;
-    this is a placeholder until then. **Security note:** do not ship a
-    routable-interface daemon with this in place.
-  - [ ] Typechecker gap noted while wiring: optional fields (`T | nil`) in an
-    expected record must appear in the table literal even when semantically
-    absent. Existing `daemon.make({...})` callsite had the same error
-    pre-existing. Worth a small typechecker fix separately.
+    (`_auto_grants`). Placeholder until the grant UI lands. **Security
+    note:** do not ship a routable-interface daemon while this is in
+    place.
+  - [ ] Typechecker gap noted during wiring: optional fields (`T | nil`)
+    in an expected record must appear in the table literal even when
+    semantically absent. `daemon.make({...})` callsites hit this.
+    Belongs in a typechecker session, not here — but worth linking to
+    when someone picks up the optional-field work.
 - [ ] **Cap grant UI + endpoint** — grant page at daemon origin (not app origin). Zero-JS
   HTML form (no XHR on this page). CSRF token in hidden input. `Sec-Fetch-Site: same-origin`
   + `Sec-Fetch-Dest: document` check. Risk-tiered friction: inert/scoped/local caps grantable
