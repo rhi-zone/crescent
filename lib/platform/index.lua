@@ -12,6 +12,9 @@
 --   index:get_cap_config(app_id, cap_name)       -> { [string]: unknown }
 --   index:set_cap_config(app_id, cap_name, tbl)  -> true | nil, err
 --   index:reset_cap_config(app_id, cap_name)     -> true | nil, err
+--   index:get_grants(app_id)                     -> { [string]: boolean }
+--   index:set_grant(app_id, cap_name, granted)   -> true | nil, err
+--   index:clear_grants(app_id)                   -> true | nil, err
 --   index:close()                                -> true | nil, err
 --
 -- Row fields: id, name, path, manifest_json, tags_json, installed_at
@@ -80,6 +83,13 @@ CREATE TABLE IF NOT EXISTS app_cap_config (
 	app_id       INTEGER NOT NULL,
 	cap_name     TEXT    NOT NULL,
 	overrides_json TEXT  NOT NULL DEFAULT '{}',
+	PRIMARY KEY (app_id, cap_name)
+);
+
+CREATE TABLE IF NOT EXISTS app_grants (
+	app_id   INTEGER NOT NULL,
+	cap_name TEXT    NOT NULL,
+	granted  INTEGER NOT NULL,
 	PRIMARY KEY (app_id, cap_name)
 );
 ]]
@@ -199,6 +209,7 @@ function I:uninstall(id)
 	db:execute("DELETE FROM app_tags WHERE app_id = ?", id)
 	db:execute("DELETE FROM apps_fts WHERE rowid = ?", id)
 	db:execute("DELETE FROM app_cap_config WHERE app_id = ?", id)
+	db:execute("DELETE FROM app_grants WHERE app_id = ?", id)
 	local ok, err = db:execute("DELETE FROM apps WHERE id = ?", id)
 	if not ok then return nil, "index: delete failed: " .. tostring(err) end
 	return true
@@ -241,6 +252,43 @@ function I:reset_cap_config(app_id, cap_name)
 		"DELETE FROM app_cap_config WHERE app_id = ? AND cap_name = ?",
 		app_id, cap_name)
 	if not ok then return nil, "index: reset_cap_config failed: " .. tostring(err) end
+	return true
+end
+
+-- ── Grants ─────────────────────────────────────────────────────────────────
+
+-- Return stored grant decisions for app_id.
+-- Only caps with an explicit decision are included; undecided caps are absent.
+--: (number) -> { [string]: boolean }
+function I:get_grants(app_id)
+	local iter = self._db:query(
+		"SELECT cap_name, granted FROM app_grants WHERE app_id = ?", app_id)
+	if not iter then return {} end
+	local result = {}
+	while true do
+		local cap_name, granted = iter()
+		if not cap_name then break end
+		result[cap_name] = granted ~= 0
+	end
+	return result
+end
+
+-- Persist a grant decision for (app_id, cap_name).
+--: (number, string, boolean) -> true | (nil, string)
+function I:set_grant(app_id, cap_name, granted)
+	local ok, err = self._db:execute(
+		"INSERT OR REPLACE INTO app_grants (app_id, cap_name, granted) VALUES (?, ?, ?)",
+		app_id, cap_name, granted and 1 or 0)
+	if not ok then return nil, "index: set_grant failed: " .. tostring(err) end
+	return true
+end
+
+-- Remove all grant decisions for app_id (operator must re-grant on next launch).
+--: (number) -> true | (nil, string)
+function I:clear_grants(app_id)
+	local ok, err = self._db:execute(
+		"DELETE FROM app_grants WHERE app_id = ?", app_id)
+	if not ok then return nil, "index: clear_grants failed: " .. tostring(err) end
 	return true
 end
 

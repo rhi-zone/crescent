@@ -161,6 +161,10 @@ end
 function M.create(caps)
 	local fs = caps.characters
 	local db = init_cache(caps.meta_cache)
+	-- Origin URL for building thumb_url in discover entries.
+	-- caps.server.url is set by the daemon's http_server cap override to the
+	-- app's canonical origin (e.g. "http://app-42.localhost:7777").
+	local origin = caps.server and type(caps.server) == "table" and caps.server.url or nil
 
 	-- ── GET / ?entry=<filename> — card detail page ───────────────────────────
 
@@ -239,7 +243,8 @@ a.btn:hover{background:#5a5a9a}
 		end
 		res.status = 200
 		res.headers["Content-Type"] = { "image/png" }
-		res.headers["Content-Disposition"] = { 'attachment; filename="' .. filename .. '"' }
+		-- Content-Disposition only when explicitly requested (e.g. download link).
+		-- Omit it for direct card endpoint so <img> can load it without save dialog.
 		res.body = bytes
 	end
 
@@ -333,7 +338,7 @@ a.btn:hover{background:#5a5a9a}
 				name        = m.name,
 				description = m.description,
 				tags        = m.tags,
-				thumb_url   = nil,
+				thumb_url   = origin and (origin .. "/card/" .. f) or nil,
 			}
 		end
 

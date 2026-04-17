@@ -75,6 +75,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 .card-delete:hover{background:#e94560;color:#fff}
 .card-import{position:absolute;bottom:.5rem;left:.5rem;padding:.2rem .5rem;border-radius:4px;border:1px solid #4a4a8a;background:transparent;color:#8888cc;font-size:.75rem;cursor:pointer;z-index:1}
 .card-import:hover{background:#4a4a8a;color:#fff}
+.card-thumb{width:100%;height:120px;object-fit:cover;border-radius:4px;margin-bottom:.5rem;display:block;background:#0f1728}
 .card-name{font-weight:600;font-size:.95rem;margin-bottom:.35rem}
 .card-desc{font-size:.8rem;color:#a0a0b0;margin-bottom:.5rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
@@ -104,6 +105,15 @@ function makeCard(item, onLaunch, onDelete, onImport) {
   const card = document.createElement("div");
   card.className = "card";
   card.onclick = onLaunch;
+
+  if (item.thumb_url) {
+    var img = document.createElement("img");
+    img.className = "card-thumb";
+    img.src = item.thumb_url;
+    img.alt = item.name || "";
+    img.loading = "lazy";
+    card.appendChild(img);
+  }
 
   const name = document.createElement("div");
   name.className = "card-name";

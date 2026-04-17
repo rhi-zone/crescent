@@ -20,11 +20,7 @@ local M = {}
 
 -- ── Type declarations ─────────────────────────────────────────────────────────
 --:: require "lib.web.js_types"
--- js_types.lua uses self-parameter style (Document, string) -> HTMLElement but
--- browser DOM is always called with dot notation (no explicit self).
--- Declare document as any so implementation calls are unchecked;
--- callers still benefit from typed node fields (HTMLElement etc.) on El values.
---:: declare document = any
+--:: declare document = Document
 
 -- Base El type: nominal wrapper pairing a tag name with a DOM node.
 --:: El = { _tag: string, node: HTMLElement }
