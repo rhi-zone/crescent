@@ -341,7 +341,7 @@ Items that currently lack an implementer-ready spec:
 
 ## typechecker match semantics gaps
 
-- [ ] **`Parameters<typeof f>` captures only first param** — `Parameters<F> = match F { (...%P) -> %R => P }` gives `integer` instead of `(integer, string)` when F = `typeof f` and f: `(integer, string) -> boolean`. `(...%P)` rest capture in function patterns should bind P to a tuple of all params. Broken specifically when the function type comes from `typeof` (i.e. the concrete function type is available at match time). Tracked by fuzz_test.lua P2a/P2b (pre-existing failure).
+- [x] **`Parameters<typeof f>` captures only first param** — FIXED. `Parameters<F> = match F { (...%P) -> %R => P }` now gives `(integer, string)` for `f: (integer, string) -> boolean`. fuzz_test.lua P2a/P2b both pass.
 
 - [x] **Intersection types are opaque in match arms** — FIXED properly (521226a). DNF normalization in `M.evaluate`: `to_dnf` expands `A|(B&C)` and `A&(B|C)` into terms; each term dispatched independently. For pure-table intersections, `flatten_to_table` merges all member fields into one TAG_TABLE so structural patterns see all fields. Band-aid (0ace6b0) replaced.
 
@@ -437,9 +437,7 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] **`lib/reactive/`** — signal primitives. See entry in future libraries section.
   Start point: `signal`, `computed`, `effect`, `batch`. Rainbow is the API reference.
 - [x] **Fuzz suite gaps** — `docs/fuzz-gaps.md` fully done (all A/E/G/P tiers checked off).
-- [ ] **`Parameters<typeof f>` rest capture** — pre-existing `fuzz_test.lua` failure (P2a/P2b).
-  `(...%P) ->` in match arm binds only first param when F comes from `typeof`. Fix in match.lua
-  or env.lua rest-capture logic for concrete function types.
+- [x] **`Parameters<typeof f>` rest capture** — FIXED (see match semantics section above). fuzz_test.lua P2a/P2b pass.
 - [ ] **Spread-union distribution** — `{ ...(A | B), k: V }` keeps a placeholder instead of
   distributing. Fix in `env.lua:substitute_inner`: distribute over union members, handle in
   `solve.lua` field lookup and `unify.lua`. Needed for builder pattern + mapped-type aliases.
