@@ -9,9 +9,11 @@ local exec_graph_mod = require("lib.taskgraph.exec_graph")
 
 local M = {}
 
+--:: require "lib.taskgraph.taskgraph_types"
+
 -- Apply scaffolds (pre-execution hooks) to a task def.
 -- Returns the (possibly transformed) task def.
---: (((unknown) -> unknown)[], unknown) -> unknown
+--: ({ [integer]: Scaffold }, TaskDef) -> TaskDef
 local function apply_scaffolds(scaffolds, task_def)
 	local t = task_def
 	for i = 1, #scaffolds do
@@ -20,43 +22,39 @@ local function apply_scaffolds(scaffolds, task_def)
 	return t
 end
 
---: (unknown, any, any, string) -> nil
+--: (Graph, ExecutorRegistry, Hooks, string) -> nil
 function M.run_task(g, executors, hooks, task_id)
-	local task = graph_mod.get(g, task_id)
-	if not task then error("unknown task id: " .. tostring(task_id)) end
+	-- Annotate as TaskNode | nil so narrowing works (known typechecker gap:
+	-- locals from function call returns aren't narrowed without annotation).
+	local task = graph_mod.get(g, task_id) --: TaskNode | nil
+	if not task then error("unknown task id: " .. tostring(task_id)); return end
+
 	if task.status ~= "pending" then return end
 
-	local hooks_any = hooks --: any
-
 	-- Apply scaffolds before execution.
-	local scaffolds = hooks_any and hooks_any.scaffolds
-	if scaffolds and #scaffolds > 0 then
-		local task_def = { type = task.type, input = task.input }
-		task_def = apply_scaffolds(scaffolds, task_def)
-		local td = task_def --: any
-		task.type  = td.type  or task.type
-		task.input = td.input
+	if hooks.scaffolds and #hooks.scaffolds > 0 then
+		local task_def = apply_scaffolds(hooks.scaffolds, { type = task.type, input = task.input })
+		task.type  = task_def.type
+		task.input = task_def.input
 	end
 
-	local executor = executors[task.type] --: any
+	local executor = executors[task.type]
 	if not executor then
 		task.status = "error"
 		task.error  = "no executor for task type: " .. tostring(task.type)
 		-- tracking: mark failed in frontier and exec_graph
-		if hooks_any then
-			if hooks_any.frontier  then frontier_mod.remove(hooks_any.frontier, task_id) end
-			if hooks_any.exec_graph then exec_graph_mod.set_failed(hooks_any.exec_graph, task_id, task.error) end
+		if hooks.frontier  then frontier_mod.remove(hooks.frontier, task_id) end
+		if hooks.exec_graph and task.error then
+			exec_graph_mod.set_failed(hooks.exec_graph, task_id, task.error)
 		end
-		if hooks_any and hooks_any.on_task then hooks_any.on_task(task) end
+		if hooks.on_task then hooks.on_task(task) end
 		return
 	end
 
 	task.status = "running"
 	-- tracking: mark running
-	if hooks_any then
-		if hooks_any.frontier   then frontier_mod.set_running(hooks_any.frontier, task_id) end
-		if hooks_any.exec_graph then exec_graph_mod.set_running(hooks_any.exec_graph, task_id) end
-	end
+	if hooks.frontier   then frontier_mod.set_running(hooks.frontier, task_id) end
+	if hooks.exec_graph then exec_graph_mod.set_running(hooks.exec_graph, task_id) end
 
 	local ctx = ctx_mod.make(g, executors, hooks, task_id)
 	local ok, result = pcall(executor, task, ctx)
@@ -64,60 +62,80 @@ function M.run_task(g, executors, hooks, task_id)
 		task.status = "done"
 		task.output = result
 		-- tracking: mark completed
-		if hooks_any then
-			if hooks_any.frontier   then frontier_mod.remove(hooks_any.frontier, task_id) end
-			if hooks_any.exec_graph then exec_graph_mod.set_completed(hooks_any.exec_graph, task_id, result) end
-		end
+		if hooks.frontier   then frontier_mod.remove(hooks.frontier, task_id) end
+		if hooks.exec_graph then exec_graph_mod.set_completed(hooks.exec_graph, task_id, result) end
 	else
 		task.status = "error"
 		task.error  = tostring(result)
 		-- tracking: mark failed
-		if hooks_any then
-			if hooks_any.frontier   then frontier_mod.remove(hooks_any.frontier, task_id) end
-			if hooks_any.exec_graph then exec_graph_mod.set_failed(hooks_any.exec_graph, task_id, task.error) end
+		if hooks.frontier  then frontier_mod.remove(hooks.frontier, task_id) end
+		if hooks.exec_graph and task.error then
+			exec_graph_mod.set_failed(hooks.exec_graph, task_id, task.error)
 		end
 	end
-	if hooks_any and hooks_any.on_task then hooks_any.on_task(task) end
+	if hooks.on_task then hooks.on_task(task) end
 end
 
---: (unknown, any | nil) -> unknown, unknown
+--: (TaskDef, RunOpts | nil) -> unknown, TrackedGraph
 function M.run(task_def, opts)
-	opts = opts or {}
-	local opts_any  = opts --: any
-	local executors = opts_any.executors or {}
-	local track     = opts_any.track
-	local scaffolds = opts_any.scaffolds or {}
-
-	local frontier   = track and frontier_mod.new()   or nil
-	local exec_graph = track and exec_graph_mod.new() or nil
-
-	local hooks = {
-		on_task     = opts_any.on_task,
-		scaffolds   = scaffolds,
-		frontier    = frontier,
-		exec_graph  = exec_graph,
-	}
+	local executors = {}
+	local track     = false
+	local scaffolds = {}
+	local on_task   = nil
+	if opts then
+		if opts.executors then
+			for k, v in pairs(opts.executors) do executors[k] = v end
+		end
+		if opts.track then track = opts.track end
+		if opts.scaffolds then scaffolds = opts.scaffolds end
+		if opts.on_task then on_task = opts.on_task end
+	end
 
 	local g = graph_mod.new()
 	local root_id = graph_mod.add(g, task_def, nil)
 	g.root = root_id
 
-	-- tracking: record root task before execution and attach to graph for caller access
 	if track then
-		local td = task_def --: any
-		frontier_mod.add(frontier, root_id, td.type, td.input, nil)
-		exec_graph_mod.record(exec_graph, root_id, td.type, td.input, nil)
-		g._frontier   = frontier
-		g._exec_graph = exec_graph
+		local frontier   = frontier_mod.new()
+		local exec_graph = exec_graph_mod.new()
+		frontier_mod.add(frontier, root_id, task_def.type, task_def.input, nil)
+		exec_graph_mod.record(exec_graph, root_id, task_def.type, task_def.input, nil)
+		local hooks = {
+			on_task    = on_task,
+			scaffolds  = scaffolds,
+			frontier   = frontier,
+			exec_graph = exec_graph,
+		}
+		M.run_task(g, executors, hooks, root_id)
+		local root = graph_mod.get(g, root_id) --: TaskNode | nil
+		if root and root.status == "error" then error(root.error) end
+		local tg = {
+			tasks       = g.tasks,
+			root        = g.root,
+			_seq        = g._seq,
+			_frontier   = frontier,
+			_exec_graph = exec_graph,
+		} --: TrackedGraph
+		return root and root.output, tg
+	else
+		local hooks = {
+			on_task    = on_task,
+			scaffolds  = scaffolds,
+			frontier   = nil,
+			exec_graph = nil,
+		}
+		M.run_task(g, executors, hooks, root_id)
+		local root = graph_mod.get(g, root_id) --: TaskNode | nil
+		if root and root.status == "error" then error(root.error) end
+		local tg = {
+			tasks       = g.tasks,
+			root        = g.root,
+			_seq        = g._seq,
+			_frontier   = nil,
+			_exec_graph = nil,
+		} --: TrackedGraph
+		return root and root.output, tg
 	end
-
-	M.run_task(g, executors, hooks, root_id)
-
-	local root = graph_mod.get(g, root_id)
-	if root.status == "error" then
-		error(root.error)
-	end
-	return root.output, g
 end
 
 -- wire the circular reference so context.lua can call run_task

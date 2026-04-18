@@ -4,16 +4,14 @@ end
 
 local M = {}
 
---:: task_status = "pending" | "running" | "done" | "error"
---:: task = { id: string, type: string, input: unknown, parent_id: string | nil, status: task_status, output: unknown, error: string | nil, spawned: string[], log: string[] }
---:: graph = { tasks: { [string]: task }, root: string | nil, _seq: integer }
+--:: require "lib.taskgraph.taskgraph_types"
 
---: () -> graph
+--: () -> Graph
 function M.new()
 	return { tasks = {}, root = nil, _seq = 0 }
 end
 
---: (graph, any, string | nil) -> string
+--: (Graph, TaskDef, string | nil) -> string
 function M.add(g, task_def, parent_id)
 	g._seq = g._seq + 1
 	local id = "task_" .. g._seq
@@ -38,13 +36,13 @@ function M.add(g, task_def, parent_id)
 	return id
 end
 
---: (graph, string) -> task | nil
+--: (Graph, string) -> TaskNode | nil
 function M.get(g, id)
 	return g.tasks[id]
 end
 
 --- Iterate over all tasks in the graph (no guaranteed order).
---: (graph) -> () -> any
+--: (Graph) -> () -> TaskNode | nil
 function M.tasks(g)
 	local ids = {}
 	for id in pairs(g.tasks) do ids[#ids + 1] = id end

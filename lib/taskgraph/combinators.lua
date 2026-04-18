@@ -4,13 +4,18 @@ end
 
 local M = {}
 
+--:: require "lib.taskgraph.taskgraph_types"
+
+--:: MapInput = { tasks: { [integer]: TaskDef } }
+--:: RetryInput = { task: TaskDef, max: integer | nil }
+--:: RefineInput = { task: TaskDef, then_task: TaskDef }
+
 -- map: spawn N child tasks, collect their outputs into a list.
 -- input = { tasks = [{type, input}, ...] }
 -- output = { results = [...] }
 local function exec_map(task, ctx)
-	-- executor params are any — inputs are caller-defined, ctx is a dynamic object
-	local inp = task.input --: any
-	local c   = ctx        --: any
+	local inp = task.input --: MapInput
+	local c   = ctx        --: Context
 	local ids = {}
 	for i = 1, #inp.tasks do
 		ids[i] = c:spawn(inp.tasks[i])
@@ -26,9 +31,8 @@ end
 -- input = { task = {type, input}, max = 3 }
 -- output = whatever the inner task returns
 local function exec_retry(task, ctx)
-	-- executor params are any — inputs are caller-defined, ctx is a dynamic object
-	local inp = task.input --: any
-	local c   = ctx        --: any
+	local inp = task.input --: RetryInput
+	local c   = ctx        --: Context
 	local inner = inp.task
 	local max   = inp.max or 3
 	local last_err
@@ -45,9 +49,8 @@ end
 -- input = { task = {type, input}, then_task = {type, input} }
 -- output = whatever then_task returns
 local function exec_refine(task, ctx)
-	-- executor params are any — inputs are caller-defined, ctx is a dynamic object
-	local inp = task.input --: any
-	local c   = ctx        --: any
+	local inp = task.input --: RefineInput
+	local c   = ctx        --: Context
 	local first_id  = c:spawn(inp.task)
 	local first_out = c:result(first_id)
 	local second_def = {

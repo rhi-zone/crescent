@@ -9,17 +9,16 @@ end
 
 local M = {}
 
---:: frontier_node = { id: string, type: string, input: unknown, status: string, parent_id: string | nil }
+--:: require "lib.taskgraph.taskgraph_types"
 
---: () -> unknown
+--: () -> Frontier
 function M.new()
 	return { _nodes = {} }
 end
 
---: (unknown, string, string, unknown, string | nil) -> nil
+--: (Frontier, string, string, unknown, string | nil) -> nil
 function M.add(f, id, task_type, input, parent_id)
-	local fn = f --: any
-	fn._nodes[id] = {
+	f._nodes[id] = {
 		id        = id,
 		type      = task_type,
 		input     = input,
@@ -28,35 +27,31 @@ function M.add(f, id, task_type, input, parent_id)
 	}
 end
 
---: (unknown, string) -> nil
+--: (Frontier, string) -> nil
 function M.set_running(f, id)
-	local fn = f --: any
-	local n = fn._nodes[id]
+	local n = f._nodes[id]
 	if n then n.status = "running" end
 end
 
---: (unknown, string) -> nil
+--: (Frontier, string) -> nil
 function M.remove(f, id)
-	local fn = f --: any
-	fn._nodes[id] = nil
+	f._nodes[id] = nil
 end
 
 -- Return array of all live frontier nodes (snapshot).
---: (unknown) -> frontier_node[]
+--: (Frontier) -> { [integer]: FrontierNode }
 function M.snapshot(f)
-	local fn = f --: any
 	local out = {}
-	for _, n in pairs(fn._nodes) do
+	for _, n in pairs(f._nodes) do
 		out[#out + 1] = n
 	end
 	return out
 end
 
---: (unknown) -> integer
+--: (Frontier) -> integer
 function M.len(f)
-	local fn = f --: any
 	local c = 0
-	for _ in pairs(fn._nodes) do c = c + 1 end
+	for _ in pairs(f._nodes) do c = c + 1 end
 	return c
 end
 

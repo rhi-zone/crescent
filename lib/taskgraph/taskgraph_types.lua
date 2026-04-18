@@ -1,0 +1,19 @@
+-- Declaration-only file: shared type aliases for lib/taskgraph.
+-- No runtime code. Load via: --:: require "lib.taskgraph.taskgraph_types"
+
+--:: TaskDef = { type: string, input: unknown }
+--:: TaskNode = { id: string, type: string, input: unknown, parent_id: string | nil, status: string, output: unknown, error: string | nil, spawned: { [integer]: string }, log: { [integer]: string } }
+--:: Graph = { tasks: { [string]: TaskNode }, root: string | nil, _seq: integer }
+--:: FrontierNode = { id: string, type: string, input: unknown, status: string, parent_id: string | nil }
+--:: Frontier = { _nodes: { [string]: FrontierNode } }
+--:: ExecGraphNode = { id: string, type: string, input: unknown, output: unknown, status: string, error: string | nil, parent_id: string | nil, children: { [integer]: string } }
+--:: ExecGraph = { _nodes: { [string]: ExecGraphNode }, _order: { [integer]: string } }
+--:: TrackedGraph = { tasks: { [string]: TaskNode }, root: string | nil, _seq: integer, _frontier: Frontier | nil, _exec_graph: ExecGraph | nil }
+--:: ExecutorFn = (task: TaskNode, ctx: unknown) -> unknown
+--:: ExecutorRegistry = { [string]: ExecutorFn }
+--:: Scaffold = (task_def: TaskDef) -> TaskDef | nil
+--:: Hooks = { on_task: ((TaskNode) -> ()) | nil, scaffolds: { [integer]: Scaffold } | nil, frontier: Frontier | nil, exec_graph: ExecGraph | nil }
+--:: RunOpts = { executors: ExecutorRegistry | nil, track: boolean | nil, scaffolds: { [integer]: Scaffold } | nil, on_task: ((TaskNode) -> ()) | nil }
+-- Context methods use colon syntax, so each method's first parameter is the Context itself.
+--:: Context = { task_id: string, spawn: (Context, TaskDef) -> string, result: (Context, string) -> unknown, frontier: (Context) -> { [integer]: FrontierNode }, exec_graph: (Context) -> { [integer]: ExecGraphNode }, log: (Context, string) -> () }
+--:: RunTaskFn = (g: Graph, executors: ExecutorRegistry, hooks: Hooks, task_id: string) -> ()

@@ -8,56 +8,56 @@ local exec_graph_mod = require("lib.taskgraph.exec_graph")
 
 local M = {}
 
---:: ctx = { task_id: string }
+--:: require "lib.taskgraph.taskgraph_types"
 
--- forward declaration — exec.lua sets this to avoid a circular require
---: any
+-- forward declaration — exec.lua sets this to avoid a circular require.
+-- Always non-nil at runtime (exec.lua sets it before any task executes).
+--: RunTaskFn | nil
 M._run_task = nil
 
---: (unknown, any, any, string) -> ctx
+--: (Graph, ExecutorRegistry, Hooks, string) -> Context
 function M.make(g, executors, hooks, task_id)
 	local ctx = {}
 	ctx.task_id = task_id
-	local hooks_any = hooks --: any
 
 	function ctx:spawn(task_def)
 		local id = graph_mod.add(g, task_def, task_id)
 		-- tracking: register child in frontier and exec_graph
-		if hooks_any then
-			local td = task_def --: any
-			if hooks_any.frontier then
-				frontier_mod.add(hooks_any.frontier, id, td.type, td.input, task_id)
-			end
-			if hooks_any.exec_graph then
-				exec_graph_mod.record(hooks_any.exec_graph, id, td.type, td.input, task_id)
-			end
+		if hooks.frontier then
+			frontier_mod.add(hooks.frontier, id, task_def.type, task_def.input, task_id)
+		end
+		if hooks.exec_graph then
+			exec_graph_mod.record(hooks.exec_graph, id, task_def.type, task_def.input, task_id)
 		end
 		return id
 	end
 
 	-- Return a live snapshot of the frontier (only available when track=true).
-	--: (ctx) -> frontier_node[]
+	--: (Context) -> { [integer]: FrontierNode }
 	function ctx:frontier()
-		if hooks_any and hooks_any.frontier then
-			return frontier_mod.snapshot(hooks_any.frontier)
+		if hooks.frontier then
+			return frontier_mod.snapshot(hooks.frontier)
 		end
 		return {}
 	end
 
 	-- Return a snapshot of the exec_graph log (only available when track=true).
-	--: (ctx) -> exec_node[]
+	--: (Context) -> { [integer]: ExecGraphNode }
 	function ctx:exec_graph()
-		if hooks_any and hooks_any.exec_graph then
-			return exec_graph_mod.snapshot(hooks_any.exec_graph)
+		if hooks.exec_graph then
+			return exec_graph_mod.snapshot(hooks.exec_graph)
 		end
 		return {}
 	end
 
 	function ctx:result(id)
-		local task = graph_mod.get(g, id)
-		if not task then error("unknown task id: " .. tostring(id)) end
+		-- Annotate as TaskNode | nil so narrowing works (known typechecker gap:
+		-- locals from function call returns aren't narrowed without annotation).
+		local task = graph_mod.get(g, id) --: TaskNode | nil
+		if not task then error("unknown task id: " .. tostring(id)); return nil end
 		if task.status == "pending" then
-			M._run_task(g, executors, hooks, id)
+			-- M._run_task is always set by exec.lua before any task runs.
+			if M._run_task then M._run_task(g, executors, hooks, id) end
 		end
 		if task.status == "error" then
 			error(task.error)
@@ -66,7 +66,7 @@ function M.make(g, executors, hooks, task_id)
 	end
 
 	function ctx:log(msg)
-		local task = graph_mod.get(g, task_id)
+		local task = graph_mod.get(g, task_id) --: TaskNode | nil
 		if task then
 			task.log[#task.log + 1] = msg
 		end
