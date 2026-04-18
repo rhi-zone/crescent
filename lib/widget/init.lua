@@ -26,10 +26,6 @@ local M = {}
 -- with_scope pushes; the returned cleanup fn pops (already popped at fn exit).
 --:: CleanupFn = () -> ()
 --:: ScopeCallbacks = { [integer]: CleanupFn }
--- AnySignal: structural form of Signal<unknown> for use inside this module.
--- The typechecker does not resolve generic struct fields when T=unknown, so we
--- expand the subscribe/get fields explicitly here.
---:: AnySignal = { get: () -> unknown, set: (unknown) -> (), update: ((unknown) -> unknown) -> (), subscribe: ((unknown) -> ()) -> (() -> ()), focus: (Lens) -> unknown, narrow: (Prism) -> unknown }
 --: { [integer]: ScopeCallbacks }
 local _scope_stack = {}
 
@@ -87,7 +83,7 @@ end
 -- future changes. Registers the unsubscribe function in the current scope.
 -- Must be called inside a with_scope context.
 function M.subscribe_now(signal_raw, handler_raw)
-	local signal = signal_raw --: AnySignal
+	local signal = signal_raw --: Signal<unknown>
 	local handler = handler_raw --: (unknown) -> ()
 	handler(signal.get())
 	local unsub = signal.subscribe(handler)
@@ -145,14 +141,14 @@ end
 -- (subscriptions active).
 function M.show(widget, predicate)
 	return function(signal_raw)
-		local signal = signal_raw --: AnySignal
+		local signal = signal_raw --: Signal<unknown>
 		-- Mount the child widget unconditionally.
 		local node = widget(signal)
 
 		-- Subscribe to signal changes to track visibility.
 		-- We return a visibility-wrapped node: a table with the node and a
 		-- visible signal so the renderer can react to predicate changes.
-		--: AnySignal
+		--: Signal<unknown>
 		local visible = R.signal(predicate(signal.get()))
 
 		local unsub = signal.subscribe(function(v)

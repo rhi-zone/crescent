@@ -2708,3 +2708,53 @@ subscribe(typed_cb)
 ]], "parameter 1")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- Generic alias instantiation with `unknown` argument
+-- Signal<T> has T in field positions (get: () -> T, subscribe: ((T) -> ()) -> ...).
+-- When instantiated as Signal<unknown>, each T must be replaced by unknown —
+-- not left as a free generic var or collapsed to unknown at the alias level.
+---------------------------------------------------------------------------
+
+assert.describe("generic alias instantiation with unknown", function()
+    assert.it("Foo<unknown>.field resolves field type with unknown substituted for T", function()
+        no_errors([[
+--:: Foo<T> = { get: () -> T, set: (T) -> () }
+local function test(x) --: (Foo<unknown>) -> ()
+    local handler = function(v) end --: (unknown) -> ()
+    local _ = x.get() --: unknown
+    x.set(_ )
+end
+]])
+    end)
+
+    assert.it("Signal<unknown>.subscribe field has ((unknown) -> ()) -> (() -> ()) type", function()
+        no_errors([[
+--:: require "lib.reactive"
+local function test(sig) --: (Signal<unknown>) -> ()
+    local handler = function(v) end --: (unknown) -> ()
+    local unsub = sig.subscribe(handler)
+    unsub()
+end
+]])
+    end)
+
+    assert.it("Signal<unknown>.get returns unknown (not never or any)", function()
+        -- Accessing .get() and using the result as unknown must be valid.
+        no_errors([[
+--:: require "lib.reactive"
+local function test(sig) --: (Signal<unknown>) -> unknown
+    return sig.get()
+end
+]])
+    end)
+
+    assert.it("Signal<unknown>.set accepts unknown argument", function()
+        no_errors([[
+--:: require "lib.reactive"
+local function test(sig, v) --: (Signal<unknown>, unknown) -> ()
+    sig.set(v)
+end
+]])
+    end)
+end)
