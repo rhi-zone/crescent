@@ -37,8 +37,7 @@ local LEVEL_BY_NAME = {
 -- Entry type
 -- ---------------------------------------------------------------------------
 
--- fields is `any` because callers pass arbitrary key-value data; we iterate it with pairs() and tostring() all values.
---:: Entry = { level: integer, name: string, msg: string, fields: any, time: string }
+--:: Entry = { level: integer, name: string, msg: string, fields: { [string]: unknown }, time: string }
 
 -- ---------------------------------------------------------------------------
 -- Formatters
@@ -46,8 +45,7 @@ local LEVEL_BY_NAME = {
 
 -- Serialize a fields table into key=value pairs (text format).
 -- Returns "" when fields is nil or empty.
--- fields is `any` — arbitrary caller-supplied key-value data iterated via pairs().
---: (any) -> string
+--: ({ [string]: unknown }) -> string
 local function fields_to_text(fields)
   if fields == nil then return "" end
   local parts = {}
@@ -70,12 +68,12 @@ local function json_escape(s)
 end
 
 -- Serialize a value to a JSON fragment (string, number, boolean, or fallback string).
--- v is `any` — callers pass arbitrary field values; we branch on type() and tostring() the rest.
---: (any) -> string
+-- Accepts any Lua value; branches on type() and tostring()s the rest.
+--: (unknown) -> string
 local function json_value(v)
   local t = type(v)
   if t == "string" then
-    return '"' .. json_escape(v) .. '"'
+    return '"' .. json_escape(tostring(v)) .. '"'
   elseif t == "number" then
     return tostring(v)
   elseif t == "boolean" then
@@ -190,9 +188,10 @@ local function get_formatter(fmt)
   end
 end
 
+--:: FileHandle = { write: (FileHandle, string) -> (), close: (FileHandle) -> () }
+
 -- Create a sink that writes to a file handle.
--- handle is `any` — Lua file objects have no expressible type in this type system.
---: (any, string) -> (Entry) -> nil
+--: (FileHandle, string) -> (Entry) -> nil
 local function handle_sink(handle, fmt)
   local formatter = get_formatter(fmt)
   return function(entry)
@@ -201,8 +200,7 @@ local function handle_sink(handle, fmt)
 end
 
 -- Sink writing to stderr.
--- opts is `any` — open options table; format field read by string key.
---: (any?) -> (Entry) -> nil
+--: ({ format?: string }?) -> (Entry) -> nil
 M.stderr_sink = function(opts)
   opts = opts or {}
   local fmt = opts.format or default_format(stderr_is_tty())
@@ -210,8 +208,7 @@ M.stderr_sink = function(opts)
 end
 
 -- Sink writing to stdout.
--- opts is `any` — open options table; format field read by string key.
---: (any?) -> (Entry) -> nil
+--: ({ format?: string }?) -> (Entry) -> nil
 M.stdout_sink = function(opts)
   opts = opts or {}
   local ansi = get_ansi()
@@ -223,8 +220,7 @@ end
 -- Sink appending to a file on disk.
 -- write_fn: function(path, data) -> true|nil, string|nil (required). Opens path
 -- in append mode and writes data.
--- opts is `any` — open options table; format field read by string key.
---: ((string, string) -> (boolean | nil, string | nil), string, any?) -> (Entry) -> nil
+--: ((string, string) -> (boolean | nil, string | nil), string, { format?: string }?) -> (Entry) -> nil
 M.file_sink = function(write_fn, path, opts)
   if type(write_fn) ~= "function" then
     error("log.file_sink: write_fn function is required")
@@ -255,16 +251,15 @@ end
 -- Logger
 -- ---------------------------------------------------------------------------
 
---:: SinkList = { [integer]: any }
+--:: SinkList = { [integer]: (Entry) -> nil }
 -- LoggerObj is the logger struct type (distinct from the Logger metatable local).
---:: LoggerObj = { _name: string, _level: integer, _sinks: { [integer]: any } }
+--:: LoggerObj = { _name: string, _level: integer, _sinks: { [integer]: (Entry) -> nil }, _time_fn: () -> string }
 
 local Logger = {}
 Logger.__index = Logger
 
 -- Emit an entry at the given level (internal).
--- fields: `any` — arbitrary caller-supplied key-value data (pairs + tostring).
---: (LoggerObj, integer, string, any) -> nil
+--: (LoggerObj, integer, string, { [string]: unknown }) -> nil
 local function emit(self, level, msg, fields)
   if level < self._level then return end
   local entry = {
@@ -280,20 +275,19 @@ local function emit(self, level, msg, fields)
   end
 end
 
--- fields is `any` — arbitrary caller-supplied key-value data (tostring-ed by sinks).
---: (LoggerObj, string, any?) -> nil
+--: (LoggerObj, string, { [string]: unknown }?) -> nil
 Logger.trace = function(self, msg, fields) emit(self, M.TRACE, msg, fields) end
 
---: (LoggerObj, string, any?) -> nil
+--: (LoggerObj, string, { [string]: unknown }?) -> nil
 Logger.debug = function(self, msg, fields) emit(self, M.DEBUG, msg, fields) end
 
---: (LoggerObj, string, any?) -> nil
+--: (LoggerObj, string, { [string]: unknown }?) -> nil
 Logger.info = function(self, msg, fields) emit(self, M.INFO, msg, fields) end
 
---: (LoggerObj, string, any?) -> nil
+--: (LoggerObj, string, { [string]: unknown }?) -> nil
 Logger.warn = function(self, msg, fields) emit(self, M.WARN, msg, fields) end
 
---: (LoggerObj, string, any?) -> nil
+--: (LoggerObj, string, { [string]: unknown }?) -> nil
 Logger.error = function(self, msg, fields) emit(self, M.ERROR, msg, fields) end
 
 -- Change minimum level dynamically.
@@ -308,15 +302,13 @@ Logger.set_level = function(self, level)
 end
 
 -- Add a sink.
--- sink is `any` — sink functions have a complex callable type; stored in SinkList.
---: (LoggerObj, any) -> nil
+--: (LoggerObj, (Entry) -> nil) -> nil
 Logger.add_sink = function(self, sink)
   self._sinks[#self._sinks + 1] = sink
 end
 
 -- Remove a sink (by identity).
--- sink is `any` — matched by identity against the SinkList.
---: (LoggerObj, any) -> nil
+--: (LoggerObj, (Entry) -> nil) -> nil
 Logger.remove_sink = function(self, sink)
   local sinks = self._sinks
   for i = 1, #sinks do
@@ -346,8 +338,7 @@ end
 -- opts.level : string or integer minimum level (default "info")
 -- opts.sinks : array of sink functions (default: {log.stderr_sink()})
 -- opts.time_fn : function returning timestamp string (required)
--- opts is `any` — open options table; level, sinks, and time_fn fields read by string key.
---: (string, any?) -> LoggerObj
+--: (string, { level?: string | integer, sinks?: { [integer]: (Entry) -> nil }, time_fn?: () -> string }?) -> LoggerObj
 M.new = function(name, opts)
   opts = opts or {}
   local level = opts.level or "info"
