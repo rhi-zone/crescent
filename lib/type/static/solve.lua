@@ -1179,13 +1179,15 @@ local function solve_callable(ctx, c)
         -- Strategy: if param 0 is a free TV AND some param at i>0 is also a free TV, AND
         -- arg 0 is a function type, then:
         --   (a) process only param 0 (to bind F so C_BOUND can decompose it), then
-        --   (b) return false to defer.  The solver's final re-run will fire C_BOUND
-        --       (which binds A/B from F's concrete type), and then C_CALLABLE will
-        --       re-run with concrete A/B so wrong-typed args are detected.
+        --   (b) return false to defer.  The deferred-constraint system re-enables this
+        --       constraint when progress is made (C_BOUND fires → tag change → changed=true
+        --       → deferred constraints retry with concrete A/B so wrong-typed args are
+        --       detected).
         -- Guard: only defer when param 0 binds to a TAG_FUNCTION (a bound like (A,B)->R).
         -- Monomorphic functions (e.g. add(a,b)) have non-function-typed args at param 0
-        -- and must NOT be deferred — their free TVs are bound directly from call args.
-        -- This mirrors the vararg ...P deferral pattern exactly.
+        -- and must NOT be deferred — body constraints (C_ARITH etc.) are emitted before
+        -- C_CALLABLE in constraint order; if C_CALLABLE defers without binding all params,
+        -- those body constraints see unbound TVs on the final error pass and silently skip.
         do
             local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0])))
             -- Param 0 must itself be a free TV (F_fresh) for the deferral to apply.
@@ -1658,16 +1660,28 @@ function M.solve(ctx, constraints)
         [C_OR]        = solve_or,
     }
 
-    -- Iterate to fixpoint (max 3 passes for recursive types).
+    -- Dependency-aware fixpoint solver.
+    -- Handlers return false to mean "I'm waiting on unbound type variables — defer me."
+    -- Deferred constraints are skipped each pass; they are re-enabled when any progress
+    -- is made (any TV gets bound → tag change → changed=true → all deferred become ready).
+    -- This prevents deferred handlers from being called every pass regardless of readiness,
+    -- and eliminates the need for complex multi-condition guards inside handlers.
+    --
     -- Suppress error emission on all but the final pass to avoid duplicates.
     local real_err = ctx.err
     --: ErrCtx
     local silent_err = { errors = {}, warnings = {}, source_lines = {} }
 
-    for pass = 1, 3 do
+    -- Initialize deferred flags on all constraints.
+    for _, c in ipairs(constraints) do
+        c._deferred = false
+    end
+
+    for pass = 1, 4 do
         local changed = false
+        local n_deferred = 0
         -- Use silent error context on non-final passes
-        ctx.err = (pass < 3) and silent_err or real_err
+        ctx.err = (pass < 4) and silent_err or real_err
         silent_err.errors = {}
         silent_err.warnings = {}
 
@@ -1675,19 +1689,42 @@ function M.solve(ctx, constraints)
             local kind = c[1]
             local handler = handlers[kind]
             if handler then
-                -- Track var state before (C_ARITH has op_name at c[2]; lhs_tid is c[3])
-                local probe = kind ~= constrain.C_ARITH and c[2] or c[3]
-                local t_before = ctx.types:get(find(ctx, probe))
-                local tag_before = t_before.tag
-                handler(ctx, c)
-                local t_after = ctx.types:get(find(ctx, probe))
-                if t_after.tag ~= tag_before then changed = true end
+                if c._deferred then
+                    n_deferred = n_deferred + 1
+                else
+                    -- Track var state before for progress detection.
+                    -- C_ARITH has op_name (string) at c[2]; use lhs_tid at c[3] instead.
+                    local probe = kind ~= constrain.C_ARITH and c[2] or c[3]
+                    local t_before = ctx.types:get(find(ctx, probe))
+                    local tag_before = t_before.tag
+                    local result = handler(ctx, c)
+                    if result == false then
+                        -- Handler is waiting on unbound TVs — skip until progress is made.
+                        c._deferred = true
+                        n_deferred = n_deferred + 1
+                    end
+                    local t_after = ctx.types:get(find(ctx, probe))
+                    if t_after.tag ~= tag_before then changed = true end
+                end
             end
         end
+
+        -- If any progress was made this pass, re-enable all deferred constraints
+        -- so they get another chance to run (their blocking TVs may now be bound).
+        if changed then
+            for _, c in ipairs(constraints) do
+                c._deferred = false
+            end
+        end
+
         if not changed then
-            -- Converged before pass 3 — re-run once more with real_err to emit errors
-            if pass < 3 then
+            -- No progress: converged (or stuck on deferred that can never progress).
+            -- Run one final pass with real_err to emit errors, including any stuck deferred.
+            if pass < 4 then
                 ctx.err = real_err
+                for _, c in ipairs(constraints) do
+                    c._deferred = false  -- run everything on final error pass
+                end
                 for _, c in ipairs(constraints) do
                     local handler = handlers[c[1]]
                     if handler then handler(ctx, c) end
