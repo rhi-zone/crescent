@@ -294,6 +294,8 @@ local function contains_free_var(ctx, tid, seen)
         for i = t.data[2], t.data[2] + t.data[3] - 1 do
             if contains_free_var(ctx, ctx.lists:get(i), seen) then return true end
         end
+        -- Also check vararg_id (data[4]): TAG_SPREAD(P) or a free TV for ...P.
+        if t.data[4] >= 0 and contains_free_var(ctx, t.data[4], seen) then return true end
         return false
     end
     if tag == TAG_UNION or tag == TAG_INTERSECTION or tag == TAG_TUPLE then
@@ -517,6 +519,71 @@ local function solve_or(ctx, c)
     return true
 end
 
+-- Propagate type information from a concrete function type into a function-type bound
+-- that contains free type variables.  This is the back-inference step for generic bounds
+-- of the form <F: (...P) -> R>: once F is bound to a concrete function type, P and R must
+-- be resolved from F's param/return structure so that subsequent constraints on P and R
+-- (e.g. checking call args against ...P) can be solved.
+--
+-- Specifically:
+--   - Return slots: unify actual's return slots with bound's return slots (binding R_fresh).
+--   - Vararg TV: if bound has no regular params and its vararg slot is a free TV (P_fresh),
+--     collect actual's params as a TAG_TUPLE and bind P_fresh to it.  This covers
+--     <F: (...P) -> R> where P_fresh must absorb the concrete param list.
+--   - Named-param form: if bound has concrete regular params (e.g. <F: (A,B)->R>), unify
+--     each pair contravariantly to bind A_fresh, B_fresh from actual's params.
+--: (Ctx, integer, integer) -> ()
+local function propagate_function_bound(ctx, actual, resolved_bound)
+    local at = ctx.types:get(find(ctx, actual))
+    local bt = ctx.types:get(find(ctx, resolved_bound))
+    if at.tag ~= TAG_FUNCTION or bt.tag ~= TAG_FUNCTION then return end
+
+    -- Return slots: bind bound's free return TVs from actual's returns.
+    local arl, brl = at.data[3], bt.data[3]
+    local min_ret = arl < brl and arl or brl
+    for i = 0, min_ret - 1 do
+        local ar_id = find(ctx, ctx.lists:get(at.data[2] + i))
+        local br_id = ctx.lists:get(bt.data[2] + i)
+        local br = ctx.types:get(find(ctx, br_id))
+        if br.tag == TAG_VAR or br.tag == TAG_ROWVAR then
+            unify_mod.unify(ctx, ar_id, br_id)
+        end
+    end
+
+    -- Vararg TV: if the bound's vararg slot is a free TV, collect actual's params
+    -- as a tuple and bind the TV.  This handles <F: (...P) -> R> where P absorbs
+    -- all of F's params as a tuple type (consistent with how (...%P) -> %R in match
+    -- binds P to the full param tuple).
+    local bva_id = bt.data[4]
+    if bva_id >= 0 then
+        local bva_root = find(ctx, bva_id)
+        local bvt = ctx.types:get(bva_root)
+        if bvt.tag == TAG_VAR or bvt.tag == TAG_ROWVAR then
+            -- Collect actual's regular params as a tuple.
+            local param_types = {}
+            for i = 0, at.data[1] - 1 do
+                param_types[#param_types + 1] = find(ctx, ctx.lists:get(at.data[0] + i))
+            end
+            local tuple_id = types_mod.make_tuple(ctx, param_types)
+            unify_mod.unify(ctx, tuple_id, bva_root)
+        end
+    end
+
+    -- Named-param form: if the bound has regular params that are free TVs,
+    -- bind them contravariantly from actual's params (e.g. <F: (A, B) -> R>).
+    local apl, bpl = at.data[1], bt.data[1]
+    local min_param = apl < bpl and apl or bpl
+    for i = 0, min_param - 1 do
+        local ap_id = find(ctx, ctx.lists:get(at.data[0] + i))
+        local bp_id = ctx.lists:get(bt.data[0] + i)
+        local bp = ctx.types:get(find(ctx, bp_id))
+        -- Contravariant: bind bound's free param TV from actual's param.
+        if bp.tag == TAG_VAR or bp.tag == TAG_ROWVAR then
+            unify_mod.unify(ctx, ap_id, bp_id)
+        end
+    end
+end
+
 -- Solve a forall bound check: C_BOUND = { C_BOUND, fresh_tv_id, bound_type_id, line, col }
 -- Defers while fresh_tv is still a free TAG_VAR (not yet bound at call site).
 -- Once bound:
@@ -533,7 +600,6 @@ local function solve_bound(ctx, c)
 
     local actual = find(ctx, tv_id)
     local at = ctx.types:get(actual)
-
     -- Defer: TV not yet bound to a concrete type at the call site.
     if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then
         return false
@@ -608,18 +674,31 @@ local function solve_bound(ctx, c)
         return true
     end
 
-    -- `function` bound (<F: function>): kind-check only — actual must be a function type.
-    -- The annotation `function` keyword resolves to `(...any) -> ()` which would reject
-    -- any specific function type under structural unification.  Instead, just verify the
-    -- actual type is callable.  TAG_ANY is accepted (it opts out of type checking).
+    -- `function` bound (<F: function> or <F: (...P) -> R>).
+    -- Two sub-cases:
+    --   a) Bound has no free TVs (<F: function>): kind-check only.
+    --      The annotation `function` keyword resolves to `(...any) -> ()` which would
+    --      reject any specific function type under structural unification, so we only
+    --      verify that the actual type is callable.  TAG_ANY is accepted.
+    --   b) Bound contains free TVs (<F: (...P) -> R>): kind-check PLUS back-propagation.
+    --      After confirming the actual is a function, decompose the concrete function type
+    --      into the bound's free slots (P, R) so subsequent constraints on those TVs can
+    --      be solved.  This is the step that enables <F: (...P) -> R, P, R>(f: F, ...P) -> R
+    --      to properly bind P and R at each call site.
     if bt.tag == TAG_FUNCTION then
         local wa_tid = find(ctx, widen_deep(ctx, actual))
         local wa_tag = ctx.types:get(wa_tid).tag
         if wa_tag ~= TAG_FUNCTION and wa_tag ~= TAG_ANY and wa_tag ~= TAG_UNKNOWN then
             add_error(ctx, line, col,
                 "type argument `" .. types_mod.display_short(ctx, actual)
-                .. "` does not satisfy constraint `function`")
+                .. "` does not satisfy constraint `"
+                .. (contains_free_var(ctx, resolved_bound) and
+                    types_mod.display_short(ctx, find(ctx, bound_id)) or "function") .. "`")
             return false
+        end
+        -- Sub-case (b): back-propagate concrete param/return types into bound's free TVs.
+        if wa_tag == TAG_FUNCTION and contains_free_var(ctx, resolved_bound) then
+            propagate_function_bound(ctx, wa_tid, resolved_bound)
         end
         return true
     end
@@ -1177,6 +1256,42 @@ local function solve_callable(ctx, c)
                         .. types_mod.display_short(ctx, exp_tid) .. "`)")
                 end
             end
+        end
+        -- Handle extra args against the function's vararg slot (data[4]).
+        -- This covers calls like wrap(f, 5) where wrap is <F: (...P)->R, P, R>(f: F, ...P)->R:
+        -- after C_BOUND back-propagates P from F's concrete params, P_fresh is a TAG_TUPLE
+        -- and each extra arg must satisfy the corresponding tuple slot.
+        local va_id = callee_t.data[4]
+        if va_id >= 0 and #arg_tids > pl then
+            local va_resolved = find(ctx, va_id)
+            local vat = ctx.types:get(va_resolved)
+            -- Defer if the vararg TV is still unbound (P not yet back-propagated).
+            if vat.tag == TAG_VAR or vat.tag == TAG_ROWVAR then
+                return false  -- retry later
+            end
+            if vat.tag == TAG_TUPLE then
+                -- Extra args must match tuple slots in order.
+                for ei = pl, #arg_tids - 1 do
+                    local slot_idx = ei - pl  -- 0-based index into the tuple
+                    local exp_slot
+                    if slot_idx < vat.data[1] then
+                        exp_slot = find(ctx, ctx.lists:get(vat.data[0] + slot_idx))
+                    else
+                        exp_slot = ctx.T_NIL  -- more args than tuple slots
+                    end
+                    local act_tid = arg_tids[ei + 1]
+                    local ok, err = unify_mod.unify(ctx, widen_literal(ctx, act_tid), exp_slot)
+                    if not ok then
+                        add_error(ctx, line, col,
+                            "argument " .. (ei + 1) .. ": cannot pass `"
+                            .. types_mod.display_short(ctx, act_tid)
+                            .. "` where `"
+                            .. types_mod.display_short(ctx, exp_slot) .. "` expected"
+                            .. (err and (": " .. err) or ""))
+                    end
+                end
+            end
+            -- If vararg is TAG_ANY or other non-tuple type, extra args are accepted silently.
         end
         -- Unify return
         local rl = callee_t.data[3]

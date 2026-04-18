@@ -8965,3 +8965,117 @@ n = s.length
 ]])
     end)
 end)
+
+-------------------------------------------------------------------------------
+-- T1-T8: <F: (...P)->R, P, R> bound decomposition / back-inference
+--
+-- When a function generic has bound F: (...P)->R and F is unified with a
+-- concrete function type at the call site, the solver must unify F against
+-- the bound to propagate P (params as tuple) and R (return type) so that
+-- subsequent uses of ...P as call arguments and R as the return are correct.
+--
+-- This is the fix for the nil-in-table ann.lua bug (Lua `bounds[#bounds+1]=nil`
+-- is a no-op, so P and R appeared to have spurious bounds) + the solve_bound
+-- structural-propagation fix (was only doing a kind check, not back-inferring).
+--
+-- pcall / xpcall in stdlib_types.lua now use <F: (...P)->R, P, R> syntax.
+-------------------------------------------------------------------------------
+assert.describe("bound decomposition: <F: (...P)->R, P, R> back-inference", function()
+    -- T1: basic case — P back-inferred as (integer,), R back-inferred as string
+    assert.it("T1: F=(integer)->string — args forwarded, return usable as string", function()
+        v3_no_errors([[
+--:: declare apply = <F: (...P) -> R, P, R>(f: F, ...P) -> R
+--: (integer) -> string
+local function int_to_str(n) return tostring(n) end
+local result = apply(int_to_str, 42)
+local s --: string
+s = result
+]])
+    end)
+
+    -- T2: multi-param — P back-inferred as (integer, string), R as boolean
+    assert.it("T2: F=(integer,string)->boolean — two args forwarded", function()
+        v3_no_errors([[
+--:: declare apply2 = <F: (...P) -> R, P, R>(f: F, ...P) -> R
+--: (integer, string) -> boolean
+local function check(n, s) return n > 0 end
+local result = apply2(check, 1, "hello")
+local b --: boolean
+b = result
+]])
+    end)
+
+    -- T3: zero-param function — P=(,) empty, R=integer
+    assert.it("T3: F=()->integer — no forwarded args, return usable as integer", function()
+        v3_no_errors([[
+--:: declare thunk = <F: (...P) -> R, P, R>(f: F, ...P) -> R
+--: () -> integer
+local function get42() return 42 end
+local result = thunk(get42)
+local n = result + 1
+]])
+    end)
+
+    -- T4: pcall with argument — the stdlib pcall now uses <F: (...P)->R, P, R>
+    assert.it("T4: pcall(f, arg) — arg type checked against f's param type", function()
+        v3_no_errors([[
+--: (integer) -> string
+local function f(n) return tostring(n) end
+local ok, val = pcall(f, 42)
+if ok then
+    local s --: string
+    s = val
+end
+]])
+    end)
+
+    -- T5: pcall with wrong arg type should error (P is integer, passing string)
+    assert.it("T5: pcall(f, wrong_arg) — type error when arg violates P", function()
+        v3_has_error([[
+--: (integer) -> string
+local function f(n) return tostring(n) end
+local ok, val = pcall(f, "not_a_number")
+]], "argument")
+    end)
+
+    -- T6: xpcall with argument — same back-inference for xpcall's <F: (...P)->R, P, R>
+    assert.it("T6: xpcall(f, handler, arg) — arg type checked against f's param type", function()
+        v3_no_errors([[
+--: (integer) -> string
+local function f(n) return tostring(n) end
+local ok, val = xpcall(f, tostring, 99)
+if ok then
+    local s --: string
+    s = val
+end
+]])
+    end)
+
+    -- T7: pcall with multi-return function — R bound to tuple, spread splices correctly
+    assert.it("T7: pcall(f) where f returns (integer,string) — success arm has integer+string", function()
+        v3_no_errors([[
+--: () -> (integer, string)
+local function f() return 1, "a" end
+local ok, n, s = pcall(f)
+if ok then
+    local x = n + 1
+    local t --: string
+    t = s
+end
+]])
+    end)
+
+    -- T8: user-defined forall with <F: (...P)->R, P, R> — bound not in stdlib
+    assert.it("T8: user-defined <F: (...P)->R, P, R> wrapper — return type preserved", function()
+        v3_no_errors([[
+--:: declare wrap = <F: (...P) -> R, P, R>(f: F, ...P) -> (boolean, R)
+--: (number) -> number
+local function square(x) return x * x end
+local ok, result = wrap(square, 3.0)
+if ok then
+    local n --: number
+    n = result
+end
+]])
+    end)
+end)

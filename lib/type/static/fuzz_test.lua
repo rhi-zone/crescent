@@ -606,6 +606,56 @@ local _ok --: boolean = r
 	T.eq(#ec.errors, 0, "P2c: ReturnType<typeof h>==boolean: expected 0 errors, got " .. tostring(#ec.errors))
 end)
 
+-- ── Invariant 25: <F: (...P)->R, P, R> back-inference ────────────────────────
+-- When a generic `<F: (...P)->R, P, R>(f: F, ...P)->R` is called with a
+-- concrete typed function f: (A)->B and a correct arg of type A, no error.
+-- This catches regressions in:
+--   (a) ann.lua forall bounds parsing (Lua nil-in-table bug: bounds[i]=nil no-op)
+--   (b) solve.lua solve_bound structural propagation (kind-check only was wrong)
+-- Previously these two bugs combined to silently skip P/R back-inference so
+-- P remained unbound (absorbing any arg) and R remained unbound (absorbing
+-- any return-site type). A well-typed call should still typecheck; an
+-- ill-typed call (wrong arg type) is tested in the positive-error invariant.
+
+arb.it("bound-decomp: <F: (...P)->R, P, R> correct call always typechecks",
+	farb.arb_base_type,
+	function(A_node)
+		local A = farb.type_to_string(A_node)
+		local v = farb.canonical_value(A_node)
+		-- Skip ill-formed type annotations
+		if rejects("local _x --: " .. A) then return end
+		-- Use identity (A)->A so the body is always sound
+		local src = table.concat({
+			"--:: declare wrap = <F: (...P) -> R, P, R>(f: F, ...P) -> R",
+			("--: (%s) -> %s"):format(A, A),
+			"local function f(x) return x end",
+			("local result = wrap(f, %s)"):format(v),
+		}, "\n")
+		assert(typechecks(src),
+			"bound-decomp correct call rejected: " .. src)
+	end, { trials = 300 })
+
+arb.it("bound-decomp: <F: (...P)->R, P, R> wrong arg type always rejected",
+	farb.arb_distinct_base_types,
+	function(pair)
+		local A_node, B_node = pair[1], pair[2]
+		-- A is the param type; B is distinct (B </: A)
+		local A = farb.type_to_string(A_node)
+		local B = farb.type_to_string(B_node)
+		local v_wrong = farb.canonical_value(B_node)
+		if rejects("local _x --: " .. A) then return end
+		if rejects("local _y --: " .. B) then return end
+		local src = table.concat({
+			"--:: declare wrap = <F: (...P) -> R, P, R>(f: F, ...P) -> R",
+			("--: (%s) -> nil"):format(A),
+			"local function f(x) end",
+			-- Pass B value where A is expected: should error
+			("local result = wrap(f, %s)"):format(v_wrong),
+		}, "\n")
+		assert(rejects(src),
+			"bound-decomp wrong arg not rejected: " .. src)
+	end, { trials = 300 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()

@@ -837,26 +837,29 @@ function M.parse_annotations(annotations, pool, filename)
         if b == byte("<") then
             advance(s)  -- skip '<'
             local params = {}
-            local bounds = {}  -- parallel to params; nil means no bound
+            -- bounds_by_idx[i] = ann type_id for param i's bound, or false if no bound.
+            -- Using false (not nil) as the "no bound" sentinel because Lua table length
+            -- does not count nil entries, so `bounds[i] = nil` would silently break `#bounds`.
+            local bounds_by_idx = {}
             local has_bounds = false
             params[1] = scan_word(s)
             if not params[1] then scan_error(s, "expected type parameter") end
             -- Check for optional bound: T: Bound
             if opt_char(s, ":") then
-                bounds[1] = parse_type(s)
+                bounds_by_idx[1] = parse_type(s)
                 has_bounds = true
             else
-                bounds[1] = nil
+                bounds_by_idx[1] = false
             end
             while opt_char(s, ",") do
                 local p = scan_word(s)
                 if not p then scan_error(s, "expected type parameter") end
                 params[#params + 1] = p
                 if opt_char(s, ":") then
-                    bounds[#bounds + 1] = parse_type(s)
+                    bounds_by_idx[#params] = parse_type(s)
                     has_bounds = true
                 else
-                    bounds[#bounds + 1] = nil
+                    bounds_by_idx[#params] = false
                 end
             end
             expect_char(s, ">")
@@ -867,12 +870,12 @@ function M.parse_annotations(annotations, pool, filename)
             end
             local tps, tpl = flush_type_list(param_ids)
             -- Store bounds in data[3]/data[4] if any bound was specified.
-            -- Bounds list parallel to params: -1 sentinel for "no bound", else type_id.
+            -- Bounds list parallel to params (length = #params): -1 for "no bound".
             local bds, bdl = 0, 0
             if has_bounds then
                 local bound_ids = {}
-                for i = 1, #bounds do
-                    bound_ids[i] = bounds[i] ~= nil and bounds[i] or -1
+                for i = 1, #params do
+                    bound_ids[i] = bounds_by_idx[i] or -1
                 end
                 local _bds, _bdl = flush_type_list(bound_ids)
                 bds = _bds; bdl = _bdl
