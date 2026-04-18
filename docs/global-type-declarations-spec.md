@@ -2,93 +2,126 @@
 
 ## Problem
 
-Currently `stdlib_types.lua` is the only file whose declarations become the global type environment. Specifically, `ctx.prim_index` (used for primitive structural subtyping and method dispatch) and `ctx.prim_meta` (operator metamethods) are populated exclusively from that file's `string`, `number_meta`, `integer_meta`, and `string_meta_ops` declarations.
+The typechecker has no ambient type environment — no declarations are implicit.
+The type algebra (TAG_STRING, TAG_NUMBER, etc.) is hardcoded into the checker
+itself; everything else must be declared. Currently `stdlib_types.lua` is a
+monolith loaded unconditionally before every file, giving it special status no
+other file has. This is wrong: nothing is always present in every Lua VM, so
+nothing should be unconditionally loaded.
 
-This means:
-- A library that adds string methods (e.g. a Lua 5.1 compat shim) cannot declare those methods in its own `_types.lua` — it must patch `stdlib_types.lua`.
-- Any project that wants to override or extend primitive metatables has no mechanism to do so.
-- The typechecker has a single blessed source of truth that is invisible to the rest of the system.
+The goal: a single, uniform mechanism for contributing declarations to the
+type-checking context, usable from any file, with project-level config
+controlling what gets pre-loaded for the whole project.
 
-## Lua semantics
+## Unified mechanism: declaration files + augmentation
 
-In Lua, the string metatable is a runtime global: `debug.setmetatable("", { __index = string })`. It can be replaced by any code that runs before your code. The type system should mirror this: primitive metatables are globally declared, and any file can participate in declaring them.
-
-The same applies to `number` and `integer` (via `__add`, `__mul`, etc. in their metatables) and, in principle, `boolean` and `nil`.
-
-## TypeScript analogy
-
-TypeScript solves this with **open interface merging**: any `.d.ts` file can declare `interface String { myMethod(): void }` and it merges with the existing `String` interface. The compiler collects all such declarations from all included files in a pre-pass before checking.
-
-The Crescent equivalent: any `*_types.lua` file included in a check can contribute to the global primitive types.
-
-## Design
-
-### Syntax: `--:: declare primitive <name> = T`
-
-A new form of global declaration targeting primitive types:
+A **declaration file** is any `*_types.lua` file containing `--::` annotations.
+Declaration files may contain a new form:
 
 ```lua
---:: declare primitive string = { sub: (string, integer, integer?) -> string, byte: (string, integer?) -> integer, ... }
---:: declare primitive string_meta = { __concat: (string, string) -> string }
+--:: augment string { sub: (string, integer, integer?) -> string, byte: (string, integer?) -> integer }
+--:: augment math { floor: (number) -> integer, ceil: (number) -> integer }
 ```
 
-`declare primitive string` merges `T` into the global `string` prim_index (the `__index` table for the string primitive). `declare primitive string_meta` merges into `prim_meta[TAG_STRING]`.
+`--:: augment T { ... }` merges the listed fields into the existing binding `T`
+in the current context. If `T` is not yet bound, it is created. If a field
+already exists with an incompatible type, the checker emits an error at the
+augmentation site.
 
-**Merge semantics**: fields are unioned. If two files declare the same field with incompatible types, the checker emits an error at the declaration site of the later-loaded file.
+This is the only mechanism for contributing to the ambient type environment.
+There is no special prelude file, no hardcoded stdlib, no blessed source.
 
-### Alternative: open primitive types
+## Two entry points, one mechanism
 
-Instead of new syntax, treat the existing `--:: declare string = T` as a contribution to the global string prim_index when the name matches a primitive type name (`string`, `number`, `integer`, `boolean`). Any file that redeclares one of these contributes its fields via merge.
+**Per-file**: `--:: require "lua.string"` in a source file loads that
+declaration file into the file's checking context. Its `--:: augment`
+declarations are merged into the file's type environment.
 
-This is simpler (no new syntax) and matches how TypeScript works (open interfaces via redeclaration), but risks confusion: a local `--:: declare string = SomeOtherType` would unexpectedly affect the global primitive type.
+**Project-wide**: `pkg.lua` lists declaration files to pre-load before checking
+any file in the project:
 
-**Decision**: new `declare primitive` syntax is clearer and avoids the collision risk.
-
-### Collection: pre-pass across included files
-
-The typechecker needs to know which files contribute primitive declarations before checking any file. The mechanism:
-
-1. The checker's entry point (`check.check_string`, `cli.lua`) receives a list of files to check plus a list of **global declaration files** (`*_types.lua` files in the project root or explicitly configured).
-2. A pre-pass loads each global declaration file, collects all `declare primitive` entries, and merges them into the root context (`ctx.prim_index`, `ctx.prim_meta`).
-3. Normal checking proceeds with the merged context.
-
-For single-file checking (the current mode), the pre-pass only runs over files explicitly listed or auto-discovered (e.g. a `crescent.toml` manifest).
-
-### Discovery
-
-Global declaration files are discovered via:
-1. **Explicit**: `--:: require "lib.foo.foo_types"` in any file already loads that file's type declarations into the checking context. `declare primitive` entries in required files are promoted to the global context.
-2. **Auto-discovery** (future): a project manifest (`crescent.toml`) lists global declaration files. The checker loads them before any file.
-
-The explicit `--:: require` path is implementable now without a manifest. The auto-discovery path requires the package manager to land first.
-
-## Implementation
-
-### Phase 1: `declare primitive` in `--:: require`d files
-
-1. **`ann.lua`**: parse `--:: declare primitive <name> = T` as a new declaration kind (`DECL_PRIMITIVE`).
-2. **`constrain.lua` `load_decl_file`**: after resolving all declarations in a file, scan for `DECL_PRIMITIVE` entries and call a new `merge_primitive_decl(ctx, name, tid)` function.
-3. **`prelude.lua` `merge_primitive_decl`**: merge the declared type's fields into the existing `ctx.prim_index[tag]` or `ctx.prim_meta[tag]` entry. Create a new merged TAG_TABLE type that is the union of the existing and new fields. Error on incompatible field types.
-4. **`stdlib_types.lua`**: convert existing `declare string = ...` to `declare primitive string = ...` so it uses the same mechanism as any other file.
-
-### Phase 2: auto-discovery (post-manifest)
-
-Once `lib/pkg/` has a manifest format, add a `global_types` list that enumerates files to pre-load. The checker reads this list before any per-file check.
-
-## What changes for users
-
-Before: extending string methods requires editing `stdlib_types.lua`.
-
-After:
 ```lua
--- lib/mylib/mylib_types.lua
---:: declare primitive string = { trim: (string) -> string, split: (string, string) -> string[] }
+return {
+  name = "myproject",
+  typecheck = { globals = { "lua.string", "lua.math", "lua.table", "luajit.ffi" } }
+}
 ```
 
-Any file that `--:: require "lib.mylib.mylib_types"` now gets `string <: { trim: _ }` passing in structural checks, and `s:trim()` resolving in method dispatch.
+The CLI reads `pkg.lua` from the project root, loads each listed file in order,
+and passes the resulting scope as the `parent_scope` for all files in the
+project. Every file inherits those augmentations without any per-file boilerplate.
+
+The files listed in `pkg.lua` are ordinary declaration files — identical in
+content and processed by the same code as files loaded via `--:: require`.
+The only difference is the call site.
+
+## What replaces stdlib_types.lua
+
+`stdlib_types.lua` is split into a set of declaration files:
+
+```
+lib/type/static/stdlib/
+  lua.string.lua       -- --:: augment string { sub, byte, find, gmatch, ... }
+  lua.table.lua        -- --:: augment table { insert, remove, sort, ... }
+  lua.math.lua         -- --:: augment math { floor, ceil, sqrt, ... }
+  lua.io.lua           -- --:: augment io { open, read, write, ... }
+  lua.os.lua           -- --:: augment os { time, clock, date, ... }
+  lua.coroutine.lua    -- --:: augment coroutine { create, resume, yield, ... }
+  lua.base.lua         -- --:: augment for print, pcall, type, pairs, ipairs, ...
+  luajit.ffi.lua       -- --:: augment ffi { cdef, new, cast, ... }
+  luajit.bit.lua       -- --:: augment bit { band, bor, bxor, ... }
+  lua51.stdlib.lua     -- convenience: requires all lua.* above
+  luajit.stdlib.lua    -- convenience: requires lua51.stdlib + luajit.*
+```
+
+A crescent project targeting standard LuaJIT sets:
+```lua
+typecheck = { globals = { "luajit.stdlib" } }
+```
+
+A sandboxed script project that only has `string` and `math`:
+```lua
+typecheck = { globals = { "lua.string", "lua.math" } }
+```
+
+## Primitive metatable augmentation
+
+`--:: augment string { sub: ... }` also updates `ctx.prim_index[TAG_STRING]`,
+which drives both method dispatch (`s:sub()`) and structural subtyping
+(`string <: { sub: _ }`). The mechanism is the same for `number` and `integer`
+(operator metamethods via `ctx.prim_meta`).
+
+When a declaration file is loaded (via `--:: require` or project pre-load), its
+`--:: augment` entries for primitive type names (`string`, `number`, `integer`,
+`boolean`) are also merged into the context's `prim_index`/`prim_meta` tables
+so the structural subtyping and method dispatch machinery stays consistent.
+
+## Implementation order
+
+1. **`--:: augment` syntax** — `ann.lua`: parse `--:: augment Name { fields }`.
+   New declaration kind `DECL_AUGMENT`. Field list uses existing field parsing.
+
+2. **Merge in `load_decl_file`** — `constrain.lua`: after resolving a
+   declaration file's types, apply each `DECL_AUGMENT` by looking up the name
+   in the current scope and merging fields into its type. If the name is a
+   primitive (`string`, `number`, `integer`, `boolean`), also update
+   `ctx.prim_index`/`ctx.prim_meta`.
+
+3. **Split `stdlib_types.lua`** — move declarations into `lib/type/static/stdlib/`.
+   Update the existing `prelude.populate(ctx)` call to load `luajit.stdlib`
+   (or nothing, deferring to `pkg.lua`) instead of the monolith.
+
+4. **`pkg.lua` integration** — CLI reads `pkg.lua` from the project root if
+   present, loads listed files before checking, passes resulting scope as
+   `parent_scope` to all checked files.
 
 ## Open questions
 
-- **Ordering**: if two required files declare incompatible types for the same primitive field, which wins? Current proposal: error. Alternative: last-write-wins (less safe).
-- **Rollback on require failure**: if a `--:: require`d file fails to load, should its primitive declarations be rolled back? Yes — partial merges are worse than no merge.
-- **`boolean` and `nil`**: these have no methods in standard Lua, but the mechanism should support them for completeness. `declare primitive nil = T` would be unusual but not wrong.
+- **Merge conflict resolution**: two files augment the same field with
+  incompatible types — error at second augmentation site (conservative).
+- **Order dependence**: augmentations apply in load order. `pkg.lua` lists are
+  ordered; `--:: require` order follows the file's declaration order.
+- **Rollback on error**: if a declaration file fails mid-load, augmentations
+  already applied are NOT rolled back (partial load = partial context). Files
+  that fail to load should emit an error and leave the context unchanged —
+  requires two-pass loading (parse all, then apply).
