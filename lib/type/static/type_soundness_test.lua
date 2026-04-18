@@ -2841,33 +2841,31 @@ local result = wrap2(g, 1, "hello")
 ]])
     end)
 
-    -- Test 7: named-param variant return type propagated — result usable as boolean.
-    -- GAP: R is a free TV at assignment time (same ordering issue as Test 4).
-    -- What IS verified: result can be used as boolean with no error.
-    assert.it("named-param variant return type propagated — result usable as boolean", function()
-        no_errors([[
+    -- Test 7: named-param variant wrong first arg — A=number but "wrong" passed.
+    -- After fix: C_BOUND back-propagates A=number from g's type; the deferred
+    -- arg check then fires and rejects "wrong" (string) where number expected.
+    assert.it("named-param variant wrong first arg is rejected", function()
+        has_error([[
 --:: declare wrap2 = <F: (A, B) -> R, A, B, R>(f: F, a: A, b: B) -> R
 --: (number, string) -> boolean
 local function g(n, s)
     return true
 end
-local result = wrap2(g, 1, "hello")
-local b --: boolean
-b = result
-]])
+local result = wrap2(g, "wrong", "hello")
+]], "argument 2")
     end)
 
-    -- Test 8: named-param variant wrong second arg — GAP: not currently caught.
-    -- Named-param bound TVs (A, B) absorb any arg type at call sites; only ...P vararg
-    -- back-inference defers and re-checks. This is a known limitation; see TODO.md.
-    assert.it("named-param variant correct arg types — no spurious errors", function()
-        no_errors([[
+    -- Test 8: named-param variant wrong second arg — B=string but 999 (integer) passed.
+    -- After fix: C_BOUND back-propagates B=string from g's type; the deferred
+    -- arg check then fires and rejects 999 (integer) where string expected.
+    assert.it("named-param variant wrong second arg is rejected", function()
+        has_error([[
 --:: declare wrap2 = <F: (A, B) -> R, A, B, R>(f: F, a: A, b: B) -> R
 --: (number, string) -> boolean
 local function g(n, s)
     return true
 end
-local result = wrap2(g, 1, "hello")
-]])
+local result = wrap2(g, 1, 999)
+]], "argument 3")
     end)
 end)

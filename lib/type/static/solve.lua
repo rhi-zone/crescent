@@ -1171,6 +1171,48 @@ local function solve_callable(ctx, c)
         -- Unify arguments with parameters
         local pl = callee_t.data[1]
         local has_names = callee_t.data[6] > 0
+        -- Named-param generic bound deferral (<F: (A,B)->R, A, B, R>).
+        -- When first called, F is a free TV that gets bound by processing param 0 (f: F).
+        -- Params A and B are ALSO free TVs at this point — C_BOUND hasn't fired yet to
+        -- back-propagate their concrete values from F's bound.  If we process A/B now,
+        -- they absorb any arg type with no error.
+        -- Strategy: if param 0 is a free TV AND some param at i>0 is also a free TV, AND
+        -- arg 0 is a function type, then:
+        --   (a) process only param 0 (to bind F so C_BOUND can decompose it), then
+        --   (b) return false to defer.  The solver's final re-run will fire C_BOUND
+        --       (which binds A/B from F's concrete type), and then C_CALLABLE will
+        --       re-run with concrete A/B so wrong-typed args are detected.
+        -- Guard: only defer when param 0 binds to a TAG_FUNCTION (a bound like (A,B)->R).
+        -- Monomorphic functions (e.g. add(a,b)) have non-function-typed args at param 0
+        -- and must NOT be deferred — their free TVs are bound directly from call args.
+        -- This mirrors the vararg ...P deferral pattern exactly.
+        do
+            local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0])))
+            -- Param 0 must itself be a free TV (F_fresh) for the deferral to apply.
+            if pl > 1 and (exp0_t.tag == TAG_VAR or exp0_t.tag == TAG_ROWVAR) then
+                local has_unbound_named_param = false
+                for si = 1, pl - 1 do
+                    local st = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0] + si)))
+                    if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then
+                        has_unbound_named_param = true
+                        break
+                    end
+                end
+                if has_unbound_named_param then
+                    -- Check whether arg 0 is a function (so C_BOUND will back-propagate).
+                    -- If arg 0 is not a function (e.g. monomorphic add("hello", 2): param 0
+                    -- binds to string, not a function → no C_BOUND back-propagation needed).
+                    local act0 = arg_tids[1]
+                    local act0_resolved = act0 and find(ctx, act0)
+                    local act0_tag = act0_resolved and ctx.types:get(act0_resolved).tag
+                    if act0_tag == TAG_FUNCTION then
+                        -- Bind param 0 (F_fresh) from arg 0, then defer A/B checking.
+                        unify_mod.unify(ctx, widen_literal(ctx, act0), find(ctx, ctx.lists:get(callee_t.data[0])))
+                        return false  -- defer A/B checking until C_BOUND fires
+                    end
+                end
+            end
+        end
         for i = 0, pl - 1 do
             local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
             local act_tid = arg_tids[i + 1]
