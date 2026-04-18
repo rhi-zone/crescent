@@ -171,3 +171,32 @@ equivalence assertions.
 - Deeply-nested types beyond MAX_TYPE_DEPTH (64) now produce a diagnostic
   ("type annotation too deeply nested") instead of a stack overflow. Grammar-level
   tests pre-check and skip these by testing for any error. Fixed 2026-03-29.
+
+## Global type declarations (stdlib, pkg.lua)
+
+**`stdlib_types.lua` is loaded via `pkg.lua`, not hardcoded.** `pkg.lua` at the
+project root declares `typecheck.globals = { "lib/type/static/stdlib_types" }`.
+The CLI reads this and passes the file list as `opts.globals_files` to every
+`check_file` / `check_string` call. `constrain.generate` picks up `opts.globals_files`
+and calls `prelude.populate_from_files` instead of the hardcoded `prelude.populate`.
+
+**Type arenas are per-ctx and cannot be shared across ctxes.** `new_ctx()` creates
+fresh arenas starting at index 0. Type IDs from ctx A's arenas are meaningless in
+ctx B's arenas. The correct way to make types available in a child ctx is to
+re-run the prelude loading INTO that ctx (via `opts.globals_files`), not to pass a
+pre-built `parent_scope` whose type IDs reference a different ctx's arenas.
+The `parent_scope` approach (attempted in 3a9d25f, removed in 457b43b) was
+architecturally unsound for this reason.
+
+**`prelude.lua`'s `load_decls` handles `ANN_AUGMENT`.** stdlib_types.lua uses
+`--:: augment` for library table globals (string, math, table, io, os, coroutine,
+debug). `load_decls` has a Pass 4 that mirrors constrain.lua's Pass 2c augment
+logic. Required because `load_decls` is the code path used by the test suite
+(which calls `check_string` without `opts.globals_files`, falling through to the
+default `prelude.populate`).
+
+**Default behavior (no opts) loads stdlib_types.lua.** Tests call `check_string`
+without opts and get stdlib. The CLI with a valid pkg.lua overrides via
+`opts.globals_files`. Projects without pkg.lua still get stdlib (same fallback).
+Self-check mode (typechecker source files) gets stdlib + ctx_types.lua via the
+filename-based heuristic in `constrain.generate`.
