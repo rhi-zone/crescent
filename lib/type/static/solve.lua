@@ -1203,16 +1203,28 @@ local function solve_callable(ctx, c)
                     end
                 end
                 if has_unbound_named_param then
-                    -- Check whether arg 0 is a function (so C_BOUND will back-propagate).
-                    -- If arg 0 is not a function (e.g. monomorphic add("hello", 2): param 0
-                    -- binds to string, not a function → no C_BOUND back-propagation needed).
-                    local act0 = arg_tids[1]
-                    local act0_resolved = act0 and find(ctx, act0)
-                    local act0_tag = act0_resolved and ctx.types:get(act0_resolved).tag
-                    if act0_tag == TAG_FUNCTION then
-                        -- Bind param 0 (F_fresh) from arg 0, then defer A/B checking.
-                        unify_mod.unify(ctx, widen_literal(ctx, act0), find(ctx, ctx.lists:get(callee_t.data[0])))
-                        return false  -- defer A/B checking until C_BOUND fires
+                    -- Defer if param 0's TV has a pending C_BOUND constraint.
+                    -- C_BOUND will back-propagate concrete types from the bound once param 0
+                    -- is bound. This generalises the old TAG_FUNCTION check: any compound bound
+                    -- (function, table, etc.) will have a C_BOUND; checking the tag directly
+                    -- would miss non-function bounds like <T: { x: A, y: B }, A, B>.
+                    local param0_tv = find(ctx, ctx.lists:get(callee_t.data[0]))
+                    local has_pending_bound = false
+                    if ctx._constraints then
+                        for _, bc in ipairs(ctx._constraints) do
+                            if bc[1] == C_BOUND and find(ctx, bc[2]) == param0_tv then
+                                has_pending_bound = true
+                                break
+                            end
+                        end
+                    end
+                    if has_pending_bound then
+                        local act0 = arg_tids[1]
+                        if act0 then
+                            -- Bind param 0 from arg 0, then defer A/B checking until C_BOUND fires.
+                            unify_mod.unify(ctx, widen_literal(ctx, act0), find(ctx, ctx.lists:get(callee_t.data[0])))
+                        end
+                        return false
                     end
                 end
             end
@@ -1697,17 +1709,31 @@ local function solve_bind_generics(ctx, c)
                 end
             end
             if has_free_later_param then
-                local act0 = arg_tids[1]
-                if act0 then
-                    local act0_resolved = find(ctx, act0)
-                    local act0_tag = ctx.types:get(act0_resolved).tag
-                    if act0_tag == TAG_FUNCTION then
-                        -- Bind param 0 (F_fresh) from arg 0, then defer.
-                        -- C_BOUND fires next pass to back-propagate A, B, R from F's type.
+                -- Defer if param 0's TV has a pending C_BOUND constraint.
+                -- C_BOUND will back-propagate concrete types (A, B, R, ...) from the bound
+                -- into the free later params once param 0 is bound to a concrete type.
+                -- This generalises the old TAG_FUNCTION check: any compound bound
+                -- (function, table, etc.) will have a C_BOUND; checking the tag directly
+                -- would miss non-function bounds like <T: { x: A, y: B }, A, B>.
+                local param0_tv = find(ctx, ctx.lists:get(callee_t.data[0]))
+                local has_pending_bound = false
+                if ctx._constraints then
+                    for _, bc in ipairs(ctx._constraints) do
+                        if bc[1] == C_BOUND and find(ctx, bc[2]) == param0_tv then
+                            has_pending_bound = true
+                            break
+                        end
+                    end
+                end
+                if has_pending_bound then
+                    local act0 = arg_tids[1]
+                    if act0 then
+                        -- Bind param 0 (F_fresh / T_fresh) from arg 0, then defer.
+                        -- C_BOUND fires next pass to back-propagate A, B, R from the bound type.
                         unify_mod.unify(ctx, widen_literal(ctx, act0),
                             find(ctx, ctx.lists:get(callee_t.data[0])))
-                        return false
                     end
+                    return false
                 end
             end
         end
@@ -2062,6 +2088,9 @@ function M.solve(ctx, constraints)
     --: ErrCtx
     local silent_err = { errors = {}, warnings = {}, source_lines = {} }
 
+    -- Expose the constraint list on ctx so handlers can scan for pending C_BOUND constraints.
+    ctx._constraints = constraints
+
     -- Initialize deferred flags on all constraints.
     for _, c in ipairs(constraints) do
         c._deferred = false
@@ -2124,6 +2153,7 @@ function M.solve(ctx, constraints)
         end
     end
     ctx.err = real_err
+    ctx._constraints = nil
 end
 
 return M
