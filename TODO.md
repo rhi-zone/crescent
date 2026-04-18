@@ -1242,7 +1242,7 @@ Blocking items for cutover:
   derived into ctx fields after load_decls runs.
 - [x] ann.lua: `declare` keyword added to ANN_DECL parser for variable bindings (vs type aliases).
 - [x] ann.lua: function data[4] (vararg) fixed — trailing `...T` SPREAD now extracted correctly.
-- [x] ann.lua: table data[4] (row_var) fixed — closed by default (-1), was accidentally open (0).
+- [x] ann.lua: table data[4] (row_var) fixed — closed by default (-1), was accidentally open (0). Also fixed for `T[]` shorthand (parse_postfix) which had the same gap — triggered a false "undefined type S" when a generic type appeared at position 0 of the annotation arena due to `pairs()` iteration order.
 - [x] ann.lua: skip_ws fixed to handle newlines (B_NL, B_CR) for multi-line block annotations.
 - [x] `pcall`/`xpcall` return type narrowing — FIXED 2026-03-02: detect pcall/xpcall in ExprRule, extract wrapped fn return types, give `local ok, val = pcall(fn)` val: ret_type|nil; `if ok then`/`if not ok then return end` narrows val to ret_type via propagate_pcall_narrowing in record_narrowing.
 - [x] For-in iterator return type tracking — `for k, v in pairs(t)` always gives `any` for k/v; need iterator protocol inference (ipairs/pairs over typed tables, custom iterators)

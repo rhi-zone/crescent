@@ -1028,6 +1028,7 @@ function M.parse_annotations(annotations, pool, filename)
                     local tt = types:get(tbl)
                     tt.data[2] = is  -- indexers
                     tt.data[3] = il
+                    tt.data[4] = -1  -- no row var (closed table)
                     ty = tbl
                 else
                     -- Not an array suffix, rewind
