@@ -9,6 +9,362 @@ end
 
 local M = {}
 
+-- ── FFI for fork/pipe/waitpid ─────────────────────────────────────────────────
+
+local fork_available = false
+local ffi
+do
+    local ffi_ok, ffi_mod = pcall(require, "ffi")
+    if ffi_ok then
+        ffi = ffi_mod
+        pcall(function()
+            ffi.cdef[[
+                int fork(void);
+                int getpid(void);
+                int waitpid(int pid, int *status, int options);
+                int pipe(int pipefd[2]);
+                long read(int fd, void *buf, size_t count);
+                long write(int fd, const void *buf, size_t count);
+                int close(int fd);
+                long sysconf(int name);
+            ]]
+        end)
+        -- Access guarded: cdef may fail if already declared (safe — symbols still exist).
+        local ok = pcall(function() return ffi.C.fork end)
+        fork_available = ok
+    end
+end
+
+local function get_cpu_count()
+    if not fork_available then return 1 end
+    local n = ffi.C.sysconf(84)  -- _SC_NPROCESSORS_ONLN = 84 on Linux
+    if n <= 0 then return 1 end
+    return tonumber(n)
+end
+
+-- ── URL encoding (for pipe protocol) ─────────────────────────────────────────
+
+local function urlencode(s)
+    return (s:gsub("([%c%s%%|])", function(c)
+        return ("%%%02X"):format(c:byte())
+    end))
+end
+
+local function urldecode(s)
+    return (s:gsub("%%(%x%x)", function(h)
+        return string.char(tonumber(h, 16))
+    end))
+end
+
+-- ── Pipe protocol ────────────────────────────────────────────────────────────
+-- Newline-delimited lines written by each worker to its write-end pipe.
+--
+-- Error/warning line:
+--   KIND|filename|line|col|msg[|NOTE filename|line|col|msg ...]
+--   KIND = "E" (error) or "W" (warning)
+--   filename and msg are URL-encoded.
+--   Notes are appended as space-separated NOTE-prefixed fields (each url-encoded).
+--
+-- End-of-worker sentinel (last line from each worker):
+--   DONE|<errors>|<warnings>
+
+local function encode_note(n)
+    return "NOTE " .. urlencode(n.filename or "") .. "|"
+        .. tostring(n.line or 0) .. "|"
+        .. tostring(n.col or 0) .. "|"
+        .. urlencode(n.msg or "")
+end
+
+local function decode_note(s)
+    local fname_enc, line_s, col_s, msg_enc = s:match("^NOTE ([^|]*)|(%d+)|(%d+)|(.*)$")
+    if not fname_enc then return nil end
+    return {
+        filename = urldecode(fname_enc),
+        line     = tonumber(line_s),
+        col      = tonumber(col_s),
+        msg      = urldecode(msg_enc),
+        notes    = {},
+    }
+end
+
+local function encode_diag(d, kind)
+    -- d: DiagEntry with fields filename, line, col, msg, notes
+    local notes_parts = {}
+    for _, n in ipairs(d.notes or {}) do
+        notes_parts[#notes_parts + 1] = encode_note(n)
+    end
+    local notes_str = #notes_parts > 0 and (" " .. table.concat(notes_parts, " ")) or ""
+    return kind .. "|" .. urlencode(d.filename or "") .. "|"
+        .. tostring(d.line or 0) .. "|"
+        .. tostring(d.col or 0) .. "|"
+        .. urlencode(d.msg or "")
+        .. notes_str
+end
+
+local function decode_diag(s)
+    -- Parse: KIND|filename|line|col|msg[ NOTE fname|line|col|msg ...]*
+    local kind, fname_enc, line_s, col_s, rest = s:match("^([EW])|([^|]*)|(%d+)|(%d+)|(.*)$")
+    if not kind then return nil end
+
+    -- rest = url-encoded msg, then zero or more " NOTE ..." groups.
+    -- Split on " NOTE " delimiter.
+    local parts = {}
+    local pos = 1
+    while pos <= #rest do
+        local nxt = rest:find(" NOTE ", pos, true)
+        if nxt then
+            parts[#parts + 1] = rest:sub(pos, nxt - 1)
+            pos = nxt + 1  -- skip the space before NOTE
+        else
+            parts[#parts + 1] = rest:sub(pos)
+            break
+        end
+    end
+
+    local msg_enc = parts[1] or ""
+    local notes = {}
+    for i = 2, #parts do
+        local n = decode_note(parts[i])
+        if n then notes[#notes + 1] = n end
+    end
+
+    return {
+        kind     = kind == "E" and "error" or "warning",
+        filename = urldecode(fname_enc),
+        line     = tonumber(line_s),
+        col      = tonumber(col_s),
+        msg      = urldecode(msg_enc),
+        notes    = notes,
+    }
+end
+
+-- ── Pipe I/O helpers ──────────────────────────────────────────────────────────
+
+local function pipe_write_all(fd, s)
+    local buf   = ffi.cast("const char *", s)
+    local total = #s
+    local done  = 0
+    while done < total do
+        local n = ffi.C.write(fd, buf + done, total - done)
+        if n <= 0 then break end
+        done = done + n
+    end
+end
+
+local function pipe_read_all(fd)
+    local chunk_size = 4096
+    local buf    = ffi.new("uint8_t[4096]")
+    local chunks = {}
+    while true do
+        local n = ffi.C.read(fd, buf, chunk_size)
+        if n <= 0 then break end
+        chunks[#chunks + 1] = ffi.string(buf, n)
+    end
+    return table.concat(chunks)
+end
+
+-- ── Parallel worker ───────────────────────────────────────────────────────────
+
+local function run_worker(file_subset, write_fd, project_opts, cache_dir)
+    -- We are in a forked child. Check each file and send diagnostics over pipe.
+    local check_mod = require("lib.type.static.check")
+    check_mod.set_cache_dir(cache_dir)
+
+    local total_errors   = 0
+    local total_warnings = 0
+    local lines = {}
+
+    for _, filename in ipairs(file_subset) do
+        local err_ctx = check_mod.check_file(filename, nil, nil, project_opts)
+        for _, e in ipairs(err_ctx.errors) do
+            lines[#lines + 1] = encode_diag(e, "E") .. "\n"
+            total_errors = total_errors + 1
+        end
+        for _, w in ipairs(err_ctx.warnings) do
+            lines[#lines + 1] = encode_diag(w, "W") .. "\n"
+            total_warnings = total_warnings + 1
+        end
+    end
+
+    -- Flush the cache manifest shard before sending DONE.
+    local cache_mod = require("lib.type.static.cache")
+    local shard_path = cache_dir .. "/manifest.shard." .. tostring(ffi.C.getpid()) .. ".lua"
+    cache_mod.flush(shard_path)
+
+    lines[#lines + 1] = "DONE|" .. tostring(total_errors) .. "|" .. tostring(total_warnings) .. "\n"
+
+    pipe_write_all(write_fd, table.concat(lines))
+    ffi.C.close(write_fd)
+    os.exit(0)
+end
+
+-- ── Parallel check runner ─────────────────────────────────────────────────────
+
+local function check_parallel(files, n, project_opts, cache_dir, format, errors_mod)
+    -- Distribute files round-robin across n workers.
+    local buckets = {}
+    for i = 1, n do buckets[i] = {} end
+    for i, f in ipairs(files) do
+        local b = ((i - 1) % n) + 1
+        buckets[b][#buckets[b] + 1] = f
+    end
+
+    -- Remove empty buckets (fewer files than workers).
+    local workers = {}
+    for _, bucket in ipairs(buckets) do
+        if #bucket > 0 then
+            workers[#workers + 1] = bucket
+        end
+    end
+
+    -- Fork one worker per bucket.
+    local pids     = {}
+    local read_fds = {}
+    local pipefd   = ffi.new("int[2]")
+
+    for i, bucket in ipairs(workers) do
+        if ffi.C.pipe(pipefd) ~= 0 then
+            io.stderr:write("pipe() failed\n")
+            os.exit(2)
+        end
+        local rfd = pipefd[0]
+        local wfd = pipefd[1]
+
+        local pid = ffi.C.fork()
+        if pid < 0 then
+            io.stderr:write("fork() failed\n")
+            os.exit(2)
+        elseif pid == 0 then
+            -- Child: close read end, run, exit.
+            ffi.C.close(rfd)
+            run_worker(bucket, wfd, project_opts, cache_dir)
+            -- run_worker calls os.exit; unreachable.
+        else
+            -- Parent: close write end.
+            ffi.C.close(wfd)
+            pids[i]     = pid
+            read_fds[i] = rfd
+        end
+    end
+
+    -- Collect output from each worker pipe.
+    local all_lines = {}
+    for i = 1, #workers do
+        local text = pipe_read_all(read_fds[i])
+        ffi.C.close(read_fds[i])
+        for line in text:gmatch("[^\n]+") do
+            all_lines[#all_lines + 1] = line
+        end
+    end
+
+    -- Wait for all children.
+    local status_p = ffi.new("int[1]")
+    for i = 1, #workers do
+        ffi.C.waitpid(pids[i], status_p, 0)
+    end
+
+    -- Merge manifest shards now that all workers are done.
+    local cache_mod = require("lib.type.static.cache")
+    cache_mod.merge_shards(cache_dir)
+
+    -- Decode diagnostics into per-file err_ctx tables.
+    local file_errs = {}   -- filename -> err_ctx
+    local total_errors   = 0
+    local total_warnings = 0
+
+    for _, filename in ipairs(files) do
+        file_errs[filename] = errors_mod.new_ctx()
+    end
+
+    for _, line in ipairs(all_lines) do
+        if line:match("^DONE|") then
+            -- sentinel: counts already implicit; skip
+        elseif line:match("^[EW]|") then
+            local d = decode_diag(line)
+            if d then
+                local ec = file_errs[d.filename]
+                if not ec then
+                    -- Diagnostic for a file not in our list (shouldn't happen, but be safe).
+                    ec = errors_mod.new_ctx()
+                    file_errs[d.filename] = ec
+                end
+                if d.kind == "error" then
+                    local entry = {
+                        kind     = "error",
+                        filename = d.filename,
+                        line     = d.line,
+                        col      = d.col,
+                        msg      = d.msg,
+                        notes    = d.notes,
+                    }
+                    ec.errors[#ec.errors + 1] = entry
+                    total_errors = total_errors + 1
+                else
+                    local entry = {
+                        kind     = "warning",
+                        filename = d.filename,
+                        line     = d.line,
+                        col      = d.col,
+                        msg      = d.msg,
+                        notes    = d.notes,
+                    }
+                    ec.warnings[#ec.warnings + 1] = entry
+                    total_warnings = total_warnings + 1
+                end
+            end
+        end
+    end
+
+    -- Output results in file order (deterministic).
+    local structured_parts = {}
+
+    for _, filename in ipairs(files) do
+        local err_ctx = file_errs[filename]
+        local ne = #err_ctx.errors
+        local nw = #err_ctx.warnings
+
+        if format == "json" then
+            structured_parts[#structured_parts + 1] = errors_mod.format_json(err_ctx)
+        elseif format == "sarif" then
+            structured_parts[#structured_parts + 1] = err_ctx
+        elseif ne > 0 or nw > 0 then
+            if format == "plain" then
+                io.stderr:write(errors_mod.format_plain(err_ctx))
+            else
+                io.stderr:write(errors_mod.format_ansi(err_ctx))
+            end
+            io.stderr:write("\n")
+        end
+    end
+
+    if format == "json" then
+        io.write("[")
+        local first = true
+        for _, part in ipairs(structured_parts) do
+            local inner = part:match("^%[(.*)%]$") or ""
+            if inner ~= "" then
+                if not first then io.write(",") end
+                io.write(inner)
+                first = false
+            end
+        end
+        io.write("]\n")
+    elseif format == "sarif" then
+        local combined = errors_mod.new_ctx()
+        for _, ec in ipairs(structured_parts) do
+            for _, e in ipairs(ec.errors)   do combined.errors[#combined.errors+1]     = e end
+            for _, w in ipairs(ec.warnings) do combined.warnings[#combined.warnings+1] = w end
+        end
+        io.write(errors_mod.format_sarif(combined))
+        io.write("\n")
+    end
+
+    io.stderr:write(string.format("\nChecked %d file(s): %d error(s), %d warning(s)\n",
+        #files, total_errors, total_warnings))
+
+    os.exit(total_errors > 0 and 1 or 0)
+end
+
 local function glob_lua_files(dir)
     local files = {}
     local p = io.popen('find "' .. dir .. '" -name "*.lua" -not -name "*_test.lua" -not -path "*/dep/*" 2>/dev/null')
@@ -132,6 +488,7 @@ function M.main(argv)
     -- Each file is loaded into its own ctx's scope (correct: types allocated in
     -- the checking ctx's arenas, not a shared parent arena).
     local project_opts = nil
+    local cache_dir
     do
         -- Walk up from cwd looking for pkg.lua.
         local function find_pkg_lua()
@@ -152,6 +509,11 @@ function M.main(argv)
         end
 
         local pkg_path = find_pkg_lua()
+        -- Derive project root and enable the disk .cri cache.
+        local project_root = pkg_path and (pkg_path:match("^(.+)/[^/]+$") or ".") or "."
+        cache_dir = project_root .. "/.crescentcache"
+        check_mod.set_cache_dir(cache_dir)
+
         if pkg_path then
             local ok_load, pkg_fn = pcall(loadfile, pkg_path)
             if ok_load and pkg_fn then
@@ -223,6 +585,7 @@ function M.main(argv)
                 end
             end
         end
+        require("lib.type.static.cache").flush()
         return
     end
 
@@ -244,15 +607,45 @@ function M.main(argv)
                 end
             end
         end
+        require("lib.type.static.cache").flush()
         return
     end
 
+    -- Build input_opts: same as project_opts but with no_disk_cache=true so that
+    -- input files are always fully checked (errors re-evaluated). Dependencies
+    -- reached via cri_loader strip no_disk_cache, so they use the disk cache.
+    local input_opts
+    if project_opts then
+        input_opts = {}
+        for k, v in pairs(project_opts) do input_opts[k] = v end
+        input_opts.no_disk_cache = true
+    else
+        input_opts = { no_disk_cache = true }
+    end
+
+    -- Determine parallelism level.
+    -- Don't parallelize when --rules is active (rules_mod state lives in-process).
+    local njobs
+    if run_rules or not fork_available then
+        njobs = 1
+    else
+        njobs = math.min(get_cpu_count(), #files)
+    end
+
+    if njobs > 1 then
+        -- Parallel path: forks workers, each checks a subset, parent collects.
+        check_parallel(files, njobs, input_opts, cache_dir, format, errors_mod)
+        -- check_parallel calls os.exit(); unreachable.
+        return
+    end
+
+    -- Sequential path (--rules active, fork unavailable, or single file).
     local total_errors   = 0
     local total_warnings = 0
     local structured_parts = {}
 
     for _, filename in ipairs(files) do
-        local err_ctx, ctx = check_mod.check_file(filename, nil, nil, project_opts)
+        local err_ctx, ctx = check_mod.check_file(filename, nil, nil, input_opts)
 
         -- Run lint rule passes when --rules is active and the check succeeded.
         if run_rules and ctx then
@@ -305,6 +698,7 @@ function M.main(argv)
     io.stderr:write(string.format("\nChecked %d file(s): %d error(s), %d warning(s)\n",
         #files, total_errors, total_warnings))
 
+    require("lib.type.static.cache").flush()
     os.exit(total_errors > 0 and 1 or 0)
 end
 

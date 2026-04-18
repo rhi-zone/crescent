@@ -3588,13 +3588,15 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
         local prelude = require("lib.type.static.prelude")
         local fn = filename or ""
         local globals_files = opts and opts.globals_files
-        if globals_files then
+        if fn:find("lib/type/static/", 1, true) or fn:find("lib\\type\\static\\", 1, true) then
+            -- Self-check mode: load stdlib + typechecker-internal declarations.
+            -- Takes priority over globals_files so ctx_types.lua is always loaded
+            -- when checking typechecker sources, regardless of project config.
+            prelude.populate_checker(ctx)
+        elseif globals_files then
             -- Caller supplied an explicit list of globals files (from pkg.lua).
             -- Load each file and synthesize _G from the combined scope.
             prelude.populate_from_files(ctx, globals_files, true)
-        elseif fn:find("lib/type/static/", 1, true) or fn:find("lib\\type\\static\\", 1, true) then
-            -- Self-check mode: load stdlib + typechecker-internal declarations.
-            prelude.populate_checker(ctx)
         else
             -- Default: load stdlib_types.lua (hardcoded fallback for tools/tests
             -- that do not supply globals_files via opts).

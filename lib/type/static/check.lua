@@ -240,7 +240,14 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         end
 
         -- Check the dependency (may recursively resolve its own require()s).
-        local _, dep_ctx = M.check_file(dep_path, parent_scope, _pool, opts)
+        -- Deps use the disk cache (no_disk_cache not set); only input files skip it.
+        local dep_opts = opts
+        if opts and opts.no_disk_cache then
+            dep_opts = {}
+            for k, v in pairs(opts) do dep_opts[k] = v end
+            dep_opts.no_disk_cache = nil
+        end
+        local _, dep_ctx = M.check_file(dep_path, parent_scope, _pool, dep_opts)
         if dep_ctx then
             -- Session entry was populated by check_file; retry via session cache.
             local dep2 = _session[dep_path]
@@ -257,8 +264,10 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     end
 
     -- Try disk cache for this file.
+    -- Skipped for input files (opts.no_disk_cache) — errors must be re-checked.
+    -- Used for dep lookups (cri_loader calls) where only types matter.
     local src_hash
-    if _disk_cache_dir then
+    if _disk_cache_dir and not (opts and opts.no_disk_cache) then
         src_hash = cache_mod.hash_file(filename)
     end
 
@@ -294,6 +303,14 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     end
     local source = f:read("*a")
     f:close()
+
+    if not source then
+        err_ctx = errors_mod.new_ctx()
+        errors_mod.error(err_ctx, filename, 0, 0, "cannot read file (is a directory?): " .. filename)
+        _checking[filename] = nil
+        _session[filename] = { err_ctx = err_ctx, ctx = nil, export_tid = nil, cri_bytes = nil }
+        return err_ctx, nil
+    end
 
     err_ctx, ctx = run_v3(source, filename, parent_scope, _pool, cri_loader, opts)
 
