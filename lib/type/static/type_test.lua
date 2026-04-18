@@ -1825,21 +1825,26 @@ local function no_errors(src)
     local ec = check(src)
     if errors_mod.has_errors(ec) then
         local msg = errors_mod.format_plain(ec)
-        error("expected no errors but got:\n" .. msg, 2)
+        assert.fail("expected no errors but got:\n" .. msg)
+    else
+        assert.ok(true)
     end
 end
 
 local function has_error(src, pattern)
     local ec = check(src)
     if not errors_mod.has_errors(ec) then
-        error("expected error matching '" .. pattern .. "' but got none", 2)
+        assert.fail("expected error matching '" .. tostring(pattern) .. "' but got none")
+        return
     end
     if pattern then
         local msg = errors_mod.format_plain(ec)
         if not msg:find(pattern) then
-            error("expected error matching '" .. pattern .. "' but got:\n" .. msg, 2)
+            assert.fail("expected error matching '" .. pattern .. "' but got:\n" .. msg)
+            return
         end
     end
+    assert.ok(true)
 end
 
 local function has_warning(src, pattern)
@@ -9138,5 +9143,27 @@ local f
 --: string
 local result = apply(f, 1)
 ]])
+    end)
+
+    assert.it("PASS: iter.wrap-style <S, C, V> — closure returns f(s, c)", function()
+        no_errors([[
+--: <S, C, V>((S, C) -> V, S, C) -> () -> V
+local function wrap(f, s, c)
+    return function()
+        return f(s, c)
+    end
+end
+]])
+    end)
+
+    assert.it("FAIL: iter.wrap-style body closure returns concrete instead of V", function()
+        has_error([[
+--: <S, C, V>((S, C) -> V, S, C) -> () -> V
+local function wrap(f, s, c)
+    return function()
+        return 42
+    end
+end
+]], "skolem")
     end)
 end)
