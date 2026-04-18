@@ -17,8 +17,8 @@ local M = {}
 -- ---------------------------------------------------------------------------
 -- v3 inference core (constraint generation + solving)
 -- ---------------------------------------------------------------------------
-local function run_v3(source, filename, parent_scope, pool, cri_loader)
-    local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader)
+local function run_v3(source, filename, parent_scope, pool, cri_loader, opts)
+    local ctx, constraints = constrain_mod.generate(source, filename, parent_scope, pool, cri_loader, opts)
     solve_mod.solve(ctx, constraints)
     return ctx.err, ctx
 end
@@ -153,8 +153,11 @@ end
 -- Optional pool can be shared across calls for interning efficiency.
 -- Optional cri_loader: function(ctx, mod_name) -> type_id | nil
 -- Installed on ctx before inference so require() calls resolve.
-function M.check_string(source, filename, parent_scope, pool, cri_loader)
-    return run_v3(source, filename, parent_scope, pool, cri_loader)
+-- Optional opts table:
+--   opts.globals_files: list of file paths loaded as global declarations instead
+--     of the default stdlib_types.lua. Only used when parent_scope is nil.
+function M.check_string(source, filename, parent_scope, pool, cri_loader, opts)
+    return run_v3(source, filename, parent_scope, pool, cri_loader, opts)
 end
 
 -- ---------------------------------------------------------------------------
@@ -165,7 +168,7 @@ end
 -- If the disk cache is enabled, attempts a cache hit before checking.
 -- Records the file's export_tid in the session cache for require() resolution.
 --: (string, Scope | nil, InternPool | nil) -> (ErrCtx, Ctx | nil)
-function M.check_file(filename, parent_scope, explicit_pool)
+function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- Normalise path (basic: strip leading "./" only)
     if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
 
@@ -237,7 +240,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
         end
 
         -- Check the dependency (may recursively resolve its own require()s).
-        local _, dep_ctx = M.check_file(dep_path, parent_scope, _pool)
+        local _, dep_ctx = M.check_file(dep_path, parent_scope, _pool, opts)
         if dep_ctx then
             -- Session entry was populated by check_file; retry via session cache.
             local dep2 = _session[dep_path]
@@ -265,7 +268,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
         local cached_bytes = cache_mod.lookup(src_hash)
         if cached_bytes then
             err_ctx = errors_mod.new_ctx()
-            err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader)
+            err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
             local ok, exports = cri_read.load(cached_bytes, ctx)
             if ok and exports["__ret"] then
                 local export_tid = exports["__ret"]
@@ -292,7 +295,7 @@ function M.check_file(filename, parent_scope, explicit_pool)
     local source = f:read("*a")
     f:close()
 
-    err_ctx, ctx = run_v3(source, filename, parent_scope, _pool, cri_loader)
+    err_ctx, ctx = run_v3(source, filename, parent_scope, _pool, cri_loader, opts)
 
     local export_tid = ctx and extract_export_tid(ctx) or nil
 
@@ -328,7 +331,7 @@ end
 -- check_file so their export types are available to the caller.
 -- Unlike check_file's internal cri_loader, this does not require _disk_cache_dir.
 -- Use this in the LSP to check buffers that may differ from the on-disk file.
-function M.check_string_with_deps(source, filename, parent_scope)
+function M.check_string_with_deps(source, filename, parent_scope, opts)
     if filename:sub(1, 2) == "./" then filename = filename:sub(3) end
     _pool = _pool or intern_mod.new()
 
@@ -338,7 +341,7 @@ function M.check_string_with_deps(source, filename, parent_scope)
     local function try_dep(ctx, dep_path)
         if checking_deps[dep_path] or _checking[dep_path] then return nil end
         checking_deps[dep_path] = true
-        M.check_file(dep_path, parent_scope, _pool)
+        M.check_file(dep_path, parent_scope, _pool, opts)
         checking_deps[dep_path] = nil
         if _session[dep_path] and _session[dep_path].cri_bytes then
             local ok, exports, aliases = cri_read.load(_session[dep_path].cri_bytes, ctx)
@@ -359,7 +362,7 @@ function M.check_string_with_deps(source, filename, parent_scope)
         return try_dep(ctx, rel .. "/init.lua")
     end
 
-    return run_v3(source, filename, parent_scope, _pool, cri_loader)
+    return run_v3(source, filename, parent_scope, _pool, cri_loader, opts)
 end
 
 -- ---------------------------------------------------------------------------

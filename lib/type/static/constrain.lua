@@ -3546,7 +3546,7 @@ end
 -- Run constraint generation on a parsed source.
 -- Returns {ctx, constraints} where ctx is the fully-initialized checker context
 -- and constraints is the flat constraint array.
-function M.generate(source, filename, parent_scope, pool, cri_loader)
+function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     local parse_mod  = require("lib.type.static.parse")
     local intern_new = require("lib.type.static.intern").new
     pool = pool or intern_new()
@@ -3586,14 +3586,18 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
 
     if not parent_scope then
         local prelude = require("lib.type.static.prelude")
-        -- Use populate_checker when self-checking typechecker source files so that
-        -- ctx_types.lua declarations (report, infer_expr_multi, etc.) are in scope.
-        -- For all other files, use populate (stdlib_types.lua only) to avoid leaking
-        -- typechecker-internal names into user file scope.
         local fn = filename or ""
-        if fn:find("lib/type/static/", 1, true) or fn:find("lib\\type\\static\\", 1, true) then
+        local globals_files = opts and opts.globals_files
+        if globals_files then
+            -- Caller supplied an explicit list of globals files (from pkg.lua).
+            -- Load each file and synthesize _G from the combined scope.
+            prelude.populate_from_files(ctx, globals_files, true)
+        elseif fn:find("lib/type/static/", 1, true) or fn:find("lib\\type\\static\\", 1, true) then
+            -- Self-check mode: load stdlib + typechecker-internal declarations.
             prelude.populate_checker(ctx)
         else
+            -- Default: load stdlib_types.lua (hardcoded fallback for tools/tests
+            -- that do not supply globals_files via opts).
             prelude.populate(ctx)
         end
         require("lib.type.static.prelude_luajit").populate(ctx)

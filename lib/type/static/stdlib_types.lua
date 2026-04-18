@@ -1,7 +1,8 @@
 -- lib/type/static/stdlib_types.lua
 -- Lua 5.1 / LuaJIT standard library type declarations.
--- Loaded by prelude.populate(); no executable code here.
--- Variable bindings use --:: declare name = type.
+-- Loaded via pkg.lua typecheck.globals (not hardcoded in prelude).
+-- New globals use --:: declare name = type.
+-- Library tables use --:: augment name { ... } (merge into existing primitive).
 -- Type aliases (for primitive meta types) use --:: name = type.
 
 ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@
 -- string table
 ---------------------------------------------------------------------------
 
---:: declare string = {
+--:: augment string {
 --::     format:  (fmt: string, ...any) -> string,
 --::     len:     (s: string) -> integer,
 --::     sub:     (s: string, i: integer, j: any | nil) -> string,
@@ -109,7 +110,7 @@
 -- table table
 ---------------------------------------------------------------------------
 
---:: declare table = {
+--:: augment table {
 --::     insert:  (t: any, v: any) -> (),
 --::     remove:  (t: any, pos: any | nil) -> any | nil,
 --::     concat:  (t: any, sep: any | nil, i: any | nil, j: any | nil) -> string,
@@ -123,7 +124,7 @@
 -- math table
 ---------------------------------------------------------------------------
 
---:: declare math = {
+--:: augment math {
 --::     floor:      (x: number) -> integer,
 --::     ceil:       (x: number) -> integer,
 --::     abs:        (x: number) -> number,
@@ -157,7 +158,7 @@
 -- io table
 ---------------------------------------------------------------------------
 
---:: declare io = {
+--:: augment io {
 --::     open:    (path: string, mode: any | nil) -> (any, any | nil),
 --::     close:   (file: any | nil) -> any,
 --::     write:   (...any) -> any,
@@ -177,7 +178,7 @@
 -- os table
 ---------------------------------------------------------------------------
 
---:: declare os = {
+--:: augment os {
 --::     time:     (t: any | nil) -> integer,
 --::     clock:    () -> number,
 --::     date:     (format: any | nil, time: any | nil) -> any,
@@ -194,7 +195,7 @@
 -- coroutine table
 ---------------------------------------------------------------------------
 
---:: declare coroutine = {
+--:: augment coroutine {
 --::     create:     (fn: (...any) -> ...any) -> any,
 --::     resume:     (co: any, ...any) -> (boolean, ...any),
 --::     yield:      (...any) -> ...any,
@@ -208,7 +209,7 @@
 -- debug table (minimal)
 ---------------------------------------------------------------------------
 
---:: declare debug = {
+--:: augment debug {
 --::     getinfo:      (thread_or_f: any, what: any | nil) -> any,
 --::     traceback:    (thread_or_msg: any | nil, msg: any | nil, level: any | nil) -> string,
 --::     sethook:      (thread_or_fn: any, mask: any, count: any | nil) -> (),

@@ -95,14 +95,19 @@ local function load_decls(ctx, path)
 
     local resolve = constrain_mod.resolve_annotation_type
 
-    -- Collect all ANN_DECL and ANN_MODULE results.
+    -- Collect all ANN_DECL, ANN_MODULE, and ANN_AUGMENT results.
     local decls = {}
     local module_decls = {}
-    for _, r in pairs(ar.results) do
+    local augment_decls = {}
+    local augment_decl_lines = {}
+    for line, r in pairs(ar.results) do
         if r.kind == defs_mod.ANN_DECL then
             decls[#decls + 1] = r
         elseif r.kind == defs_mod.ANN_MODULE then
             module_decls[#module_decls + 1] = r
+        elseif r.kind == defs_mod.ANN_AUGMENT then
+            augment_decls[#augment_decls + 1] = r
+            augment_decl_lines[r] = line
         end
     end
 
@@ -174,6 +179,114 @@ local function load_decls(ctx, path)
     -- --:: module "name": T  declares the type returned by require("name").
     for _, r in ipairs(module_decls) do
         ctx.module_types[r.mod_name] = resolve(ctx, r.type_id)
+    end
+
+    -- Pass 4: apply --:: augment Name { ... } declarations.
+    -- Mirrors constrain.lua Pass 2c: merges fields into existing value bindings or type aliases.
+    -- Required because stdlib_types.lua uses --:: augment for library table globals.
+    if #augment_decls > 1 then
+        local al = augment_decl_lines
+        table.sort(augment_decls, function(a, b) return (al[a] or 0) < (al[b] or 0) end)
+    end
+    for _, r in ipairs(augment_decls) do
+        local aug_tid = resolve(ctx, r.type_id)
+        local aug_t = ctx.types:get(types_mod.find(ctx, aug_tid))
+        if aug_t.tag == defs_mod.TAG_TABLE then
+            -- Determine prim_tag for prim_index updates.
+            local name_str = intern_mod.get(ctx.pool, r.name_id) or ""
+            local prim_tag = nil
+            if name_str == "string"  then prim_tag = defs_mod.TAG_STRING
+            elseif name_str == "number"  then prim_tag = defs_mod.TAG_NUMBER
+            elseif name_str == "integer" then prim_tag = defs_mod.TAG_INTEGER
+            elseif name_str == "boolean" then prim_tag = defs_mod.TAG_BOOLEAN
+            end
+
+            -- Collect new fields and meta fields from the augment table.
+            local new_field_ids = {}
+            local new_meta_field_ids = {}
+            for i = aug_t.data[0], aug_t.data[0] + aug_t.data[1] - 1 do
+                new_field_ids[#new_field_ids + 1] = ctx.lists:get(i)
+            end
+            for i = aug_t.data[5], aug_t.data[5] + aug_t.data[6] - 1 do
+                new_meta_field_ids[#new_meta_field_ids + 1] = ctx.lists:get(i)
+            end
+
+            -- Merge new fields into an existing TAG_TABLE base.
+            local function merge_into_table(base_tid)
+                local bt = ctx.types:get(types_mod.find(ctx, base_tid))
+                if bt.tag ~= defs_mod.TAG_TABLE then
+                    return types_mod.make_table(ctx, new_field_ids, {}, -1, new_meta_field_ids)
+                end
+                local fs, fl = bt.data[0], bt.data[1]
+                local is2, il = bt.data[2], bt.data[3]
+                local rv = bt.data[4]
+                local ms, ml = bt.data[5], bt.data[6]
+                local merged = {}
+                local name_pos = {}
+                for i = fs, fs + fl - 1 do
+                    local fid = ctx.lists:get(i)
+                    local fe  = ctx.fields:get(fid)
+                    if fe.name_id >= 0 then name_pos[fe.name_id] = #merged + 1 end
+                    merged[#merged + 1] = fid
+                end
+                for _, fid in ipairs(new_field_ids) do
+                    local fe = ctx.fields:get(fid)
+                    if fe.name_id >= 0 and name_pos[fe.name_id] then
+                        merged[name_pos[fe.name_id]] = fid
+                    else
+                        if fe.name_id >= 0 then name_pos[fe.name_id] = #merged + 1 end
+                        merged[#merged + 1] = fid
+                    end
+                end
+                local merged_meta = {}
+                local meta_name_pos = {}
+                for i = ms, ms + ml - 1 do
+                    local fid = ctx.lists:get(i)
+                    local fe  = ctx.fields:get(fid)
+                    if fe.name_id >= 0 then meta_name_pos[fe.name_id] = #merged_meta + 1 end
+                    merged_meta[#merged_meta + 1] = fid
+                end
+                for _, fid in ipairs(new_meta_field_ids) do
+                    local fe = ctx.fields:get(fid)
+                    if fe.name_id >= 0 and meta_name_pos[fe.name_id] then
+                        merged_meta[meta_name_pos[fe.name_id]] = fid
+                    else
+                        if fe.name_id >= 0 then meta_name_pos[fe.name_id] = #merged_meta + 1 end
+                        merged_meta[#merged_meta + 1] = fid
+                    end
+                end
+                local indexers = {}
+                local ix = is2
+                while ix < is2 + il - 1 do
+                    indexers[#indexers + 1] = ctx.lists:get(ix)
+                    indexers[#indexers + 1] = ctx.lists:get(ix + 1)
+                    ix = ix + 2
+                end
+                return types_mod.make_table(ctx, merged, indexers, rv, merged_meta)
+            end
+
+            local existing_value_tid = env_mod.lookup(ctx.scope, r.name_id)
+            local existing_alias     = env_mod.lookup_type(ctx.scope, r.name_id)
+
+            if existing_value_tid then
+                local merged_tid = merge_into_table(existing_value_tid)
+                env_mod.bind(ctx.scope, r.name_id, merged_tid)
+                if prim_tag then ctx.prim_index[prim_tag] = merged_tid end
+            elseif existing_alias then
+                local base_body = existing_alias.body or types_mod.make_table(ctx, {}, {}, -1, {})
+                local merged_tid = merge_into_table(base_body)
+                existing_alias.body = merged_tid
+                if prim_tag then
+                    ctx.prim_index[prim_tag] = merged_tid
+                    if aug_t.data[6] > 0 then ctx.prim_meta[prim_tag] = merged_tid end
+                end
+            else
+                -- No existing binding: create fresh value binding from augment.
+                local new_tid = types_mod.make_table(ctx, new_field_ids, {}, -1, new_meta_field_ids)
+                env_mod.bind(ctx.scope, r.name_id, new_tid)
+                if prim_tag then ctx.prim_index[prim_tag] = new_tid end
+            end
+        end
     end
 
     ctx.ann = saved_ann
@@ -248,6 +361,21 @@ end
 local function prereq_G(ctx)
     local gs_name_id = intern_mod.intern(ctx.pool, "GlobalScope")
     env_mod.bind_type(ctx.scope, gs_name_id, { body = ctx.T_ANY, params = nil })
+end
+
+-- Expose load_decls for external callers (e.g. populate_from_files).
+-- path must be an absolute or relative path to a _types.lua declaration file.
+M.load_decls = load_decls
+
+-- Populate ctx.scope from a list of file paths (absolute or relative).
+-- Each file is loaded via load_decls. prereq_G and synthesize_G are handled
+-- by the caller (populate or populate_checker) if _G synthesis is needed.
+function M.populate_from_files(ctx, paths, with_G)
+    if with_G then prereq_G(ctx) end
+    for _, path in ipairs(paths) do
+        load_decls(ctx, path)
+    end
+    if with_G then synthesize_G(ctx) end
 end
 
 -- Populate ctx.scope with Lua 5.1 / LuaJIT stdlib bindings.
