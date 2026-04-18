@@ -123,32 +123,41 @@ local E = defs.E
 -- Constraint kinds
 -- ---------------------------------------------------------------------------
 
-local C_UNIFY     = 1   -- {C_UNIFY,    t1, t2, line, col}
-local C_SUB       = 2   -- {C_SUB,      actual, expected, line, col}
-local C_CALLABLE  = 4   -- {C_CALLABLE, callee_tid, arg_tids_list, ret_tid, line, col}
-local C_ARITH     = 5   -- {C_ARITH,    op_str, lhs_tid, rhs_tid, result_tid, line, col}
-local C_RETURN    = 6   -- {C_RETURN,   val_tid, expected_tid, line, col}
-local C_COMPARE   = 7   -- {C_COMPARE,  lhs_tid, rhs_tid, line, col}
-local C_INDEX     = 8   -- {C_INDEX,    obj_tid, key_tid, result_tid, line, col}
+local C_UNIFY         = 1   -- {C_UNIFY,         t1, t2, line, col}
+local C_SUB           = 2   -- {C_SUB,           actual, expected, line, col}
+local C_CALLABLE      = 4   -- {C_CALLABLE,      callee_tid, arg_tids_list, ret_tid, line, col}
+local C_ARITH         = 5   -- {C_ARITH,         op_str, lhs_tid, rhs_tid, result_tid, line, col}
+local C_RETURN        = 6   -- {C_RETURN,        val_tid, expected_tid, line, col}
+local C_COMPARE       = 7   -- {C_COMPARE,       lhs_tid, rhs_tid, line, col}
+local C_INDEX         = 8   -- {C_INDEX,         obj_tid, key_tid, result_tid, line, col}
 -- key_tid: TAG_LITERAL(LIT_STRING, name_id) for field; TAG_LITERAL(LIT_INTEGER, slot) for tuple slot
-local C_BOUND     = 9   -- {C_BOUND,    fresh_tv_id, bound_type_id, line, col}
+local C_BOUND         = 9   -- {C_BOUND,         fresh_tv_id, bound_type_id, line, col}
 -- Deferred forall bound check: defers while fresh_tv is still a free TAG_VAR,
 -- then checks try_unify(widen(fresh_tv), bound_type). Emitted at call sites.
-local C_OR        = 10  -- {C_OR,       left_tid, right_tid, result_tid, line, col}
+local C_OR            = 10  -- {C_OR,            left_tid, right_tid, result_tid, line, col}
 -- Deferred `or` expression: defers while left_tid is a free TAG_VAR,
 -- then computes subtract(left, nil) | right and unifies with result_tid.
+local C_BIND_GENERICS = 11  -- {C_BIND_GENERICS, callee_tid, arg_tids_list, ret_tid, line, col}
+-- Binds free type variables in the callee's param slots from call arguments.
+-- Runs before C_CHECK_ARGS. For <T>(x: T) -> T called with "hello", binds T=string.
+-- For non-function callees (TAG_ANY/UNKNOWN/NEVER/VAR/INTERSECTION/UNION), does nothing.
+local C_CHECK_ARGS    = 12  -- {C_CHECK_ARGS,    callee_tid, arg_tids_list, ret_tid, line, col}
+-- Checks that call arguments match the (now-concrete) param types and unifies the return type.
+-- Defers (returns false) if any param is still a free TV. No special-casing needed.
 
 local M = {}
 
-M.C_UNIFY     = C_UNIFY
-M.C_SUB       = C_SUB
-M.C_INDEX     = C_INDEX
-M.C_CALLABLE  = C_CALLABLE
-M.C_ARITH     = C_ARITH
-M.C_RETURN    = C_RETURN
-M.C_COMPARE   = C_COMPARE
-M.C_BOUND     = C_BOUND
-M.C_OR        = C_OR
+M.C_UNIFY         = C_UNIFY
+M.C_SUB           = C_SUB
+M.C_INDEX         = C_INDEX
+M.C_CALLABLE      = C_CALLABLE
+M.C_ARITH         = C_ARITH
+M.C_RETURN        = C_RETURN
+M.C_COMPARE       = C_COMPARE
+M.C_BOUND         = C_BOUND
+M.C_OR            = C_OR
+M.C_BIND_GENERICS = C_BIND_GENERICS
+M.C_CHECK_ARGS    = C_CHECK_ARGS
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -1802,7 +1811,8 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     end
 
     local ret = fresh_var(ctx)
-    emit(ctx, { C_CALLABLE, inst_callee, arg_tids, ret, n.line, n.col })
+    emit(ctx, { C_BIND_GENERICS, inst_callee, arg_tids, ret, n.line, n.col })
+    emit(ctx, { C_CHECK_ARGS,    inst_callee, arg_tids, ret, n.line, n.col })
     ctx._last_multi_return = { ret }
 
     -- Eagerly evaluate $PcallReturn<F> at constraint-gen time so that
@@ -1859,7 +1869,8 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     end
 
     local ret = fresh_var(ctx)
-    emit(ctx, { C_CALLABLE, inst_method, arg_tids, ret, n.line, n.col })
+    emit(ctx, { C_BIND_GENERICS, inst_method, arg_tids, ret, n.line, n.col })
+    emit(ctx, { C_CHECK_ARGS,    inst_method, arg_tids, ret, n.line, n.col })
     ctx._last_multi_return = { ret }
     return ret
 end
@@ -2754,7 +2765,9 @@ StmtRule[NODE_FOR_IN] = function(ctx, nid)
     -- The return type (a tuple of loop-var types) is projected slot-by-slot into
     -- individual loop variables via C_INDEX.
     local loop_ret_var = fresh_var(ctx)
-    emit(ctx, { C_CALLABLE, iter_fn_tid, { state_tid, key0_tid },
+    emit(ctx, { C_BIND_GENERICS, iter_fn_tid, { state_tid, key0_tid },
+        loop_ret_var, n.line, n.col })
+    emit(ctx, { C_CHECK_ARGS,    iter_fn_tid, { state_tid, key0_tid },
         loop_ret_var, n.line, n.col })
 
     for i = 0, nl - 1 do

@@ -43,15 +43,17 @@ local FLAG_PRIVATE    = defs.FLAG_PRIVATE
 local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
 local band            = require("bit").band
 
-local C_UNIFY     = constrain.C_UNIFY
-local C_SUB       = constrain.C_SUB
-local C_INDEX     = constrain.C_INDEX
-local C_CALLABLE  = constrain.C_CALLABLE
-local C_ARITH     = constrain.C_ARITH
-local C_RETURN    = constrain.C_RETURN
-local C_COMPARE   = constrain.C_COMPARE
-local C_BOUND     = constrain.C_BOUND
-local C_OR        = constrain.C_OR
+local C_UNIFY         = constrain.C_UNIFY
+local C_SUB           = constrain.C_SUB
+local C_INDEX         = constrain.C_INDEX
+local C_CALLABLE      = constrain.C_CALLABLE
+local C_ARITH         = constrain.C_ARITH
+local C_RETURN        = constrain.C_RETURN
+local C_COMPARE       = constrain.C_COMPARE
+local C_BOUND         = constrain.C_BOUND
+local C_OR            = constrain.C_OR
+local C_BIND_GENERICS = constrain.C_BIND_GENERICS
+local C_CHECK_ARGS    = constrain.C_CHECK_ARGS
 
 local find = types_mod.find
 
@@ -1640,6 +1642,392 @@ local function solve_return(ctx, c)
     return true
 end
 
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+-- Binds free type variables in the callee's param slots from call arguments.
+-- Runs before C_CHECK_ARGS so that C_BOUND can fire and back-propagate named-param
+-- TVs (A, B, R) before C_CHECK_ARGS checks argument types against them.
+-- For non-function callees (TAG_ANY/UNKNOWN/NEVER/VAR/INTERSECTION/UNION): no-op.
+--
+-- Deferral rule: after binding, if param 0 was a free TV that got bound to a
+-- function type AND some later param is still a free TV, return false.  This lets
+-- C_BOUND back-propagate the concrete param/return types from that function before
+-- C_CHECK_ARGS verifies argument compatibility.  Without this step, C_BIND_GENERICS
+-- would eagerly bind A/B from the raw args (possibly wrong types), blocking the
+-- back-propagation and silently hiding mismatches.
+--: (Ctx, { [integer]: any, ... }) -> boolean
+local function solve_bind_generics(ctx, c)
+    local callee_raw = c[2]
+    local callee_tid = find(ctx, callee_raw)
+    local arg_tids   = c[3]
+    local callee_t   = ctx.types:get(callee_tid)
+
+    -- Unwrap nominal to inner type.
+    if callee_t.tag == TAG_NOMINAL then
+        callee_tid = find(ctx, callee_t.data[2])
+        callee_t   = ctx.types:get(callee_tid)
+    end
+
+    -- Only act on TAG_FUNCTION. All other callee forms are handled by C_CHECK_ARGS.
+    if callee_t.tag ~= TAG_FUNCTION then return true end
+
+    -- Instantiate if callee was a free var at gen time (method calls).
+    local raw_t = ctx.types:get(callee_raw)
+    if raw_t.tag == TAG_VAR or raw_t.tag == TAG_ROWVAR then
+        callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
+        callee_t   = ctx.types:get(callee_tid)
+    end
+
+    local pl = callee_t.data[1]
+
+    -- Named-param generic deferral: when param 0 is a free TV (F) and some later param
+    -- is also a free TV (A, B, R), and the first argument is a function type:
+    -- bind ONLY param 0 from arg 0, then defer.  C_BOUND will back-propagate the
+    -- concrete A/B/R types from F's function type into those free TVs.
+    -- Without this, C_BIND_GENERICS would eagerly bind A/B from the raw args
+    -- (potentially wrong types), blocking C_BOUND and silently hiding mismatches.
+    do
+        local exp0_t = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0])))
+        if pl > 1 and (exp0_t.tag == TAG_VAR or exp0_t.tag == TAG_ROWVAR) then
+            local has_free_later_param = false
+            for si = 1, pl - 1 do
+                local st = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0] + si)))
+                if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then
+                    has_free_later_param = true
+                    break
+                end
+            end
+            if has_free_later_param then
+                local act0 = arg_tids[1]
+                if act0 then
+                    local act0_resolved = find(ctx, act0)
+                    local act0_tag = ctx.types:get(act0_resolved).tag
+                    if act0_tag == TAG_FUNCTION then
+                        -- Bind param 0 (F_fresh) from arg 0, then defer.
+                        -- C_BOUND fires next pass to back-propagate A, B, R from F's type.
+                        unify_mod.unify(ctx, widen_literal(ctx, act0),
+                            find(ctx, ctx.lists:get(callee_t.data[0])))
+                        return false
+                    end
+                end
+            end
+        end
+    end
+
+    for i = 0, pl - 1 do
+        local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
+        local et      = ctx.types:get(exp_tid)
+        -- Bind when the param slot is a free TV (top-level) OR contains nested free TVs
+        -- (e.g. Maybe<T> where T is a free TV in a union-of-tables param).
+        -- We need unify() to propagate into the structure and bind nested TVs.
+        if et.tag == TAG_VAR or et.tag == TAG_ROWVAR or contains_free_var(ctx, exp_tid) then
+            local act_tid = arg_tids[i + 1]
+            if act_tid then
+                -- Preserve literal when this TV feeds a parameterized intrinsic return
+                -- (e.g. $Require<T>: the literal module name must survive to solve time).
+                local skip_widen = (et.tag == TAG_VAR)
+                    and ret_uses_tv_in_intrinsic(ctx, callee_t, exp_tid)
+                local widened = skip_widen and find(ctx, act_tid)
+                    or (et.tag == TAG_VAR or et.tag == TAG_ROWVAR)
+                    and widen_literal(ctx, act_tid)
+                    or  widen_for_sub(ctx, act_tid)
+                unify_mod.unify(ctx, widened, exp_tid)
+            end
+        end
+    end
+
+    return true
+end
+
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+-- Checks that call arguments match the (now-concrete) param types and unifies the return type.
+-- Defers (returns false) if any param is still a free TV — C_BIND_GENERICS and C_BOUND
+-- have already had a chance to run, so deferral is always safe here.
+--: (Ctx, { [integer]: any, ... }) -> boolean
+local function solve_check_args(ctx, c)
+    local callee_raw = c[2]
+    local callee_tid = find(ctx, callee_raw)
+    local arg_tids   = c[3]
+    local ret_tid    = c[4]
+    local line, col  = c[5], c[6]
+    local callee_t   = ctx.types:get(callee_tid)
+
+    if callee_t.tag == TAG_ANY then
+        bind_to(ctx, ret_tid, ctx.T_ANY)
+        return true
+    end
+    if callee_t.tag == TAG_UNKNOWN then
+        add_error(ctx, line, col, "value of type `unknown` must be narrowed before calling")
+        bind_to(ctx, ret_tid, ctx.T_ANY)
+        return true
+    end
+
+    if callee_t.tag == TAG_NEVER then
+        bind_to(ctx, ret_tid, ctx.T_NEVER)
+        return true
+    end
+
+    if callee_t.tag == TAG_NOMINAL then
+        callee_tid = find(ctx, callee_t.data[2])
+        callee_t   = ctx.types:get(callee_tid)
+    end
+
+    if callee_t.tag == TAG_VAR or callee_t.tag == TAG_ROWVAR then
+        bind_to(ctx, ret_tid, ctx.T_ANY)
+        return true
+    end
+
+    if callee_t.tag == TAG_FUNCTION then
+        -- Instantiate if callee was a free var at gen time (method calls).
+        local raw_t = ctx.types:get(callee_raw)
+        if raw_t.tag == TAG_VAR or raw_t.tag == TAG_ROWVAR then
+            callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
+            callee_t   = ctx.types:get(callee_tid)
+        end
+        local pl = callee_t.data[1]
+        local has_names = callee_t.data[6] > 0
+        -- Simple deferral: if any param is still a free TV, wait.
+        -- C_BIND_GENERICS and C_BOUND have already had a chance to run; if a param
+        -- is still free, more solver progress is needed before we can check args.
+        for i = 0, pl - 1 do
+            local et = ctx.types:get(find(ctx, ctx.lists:get(callee_t.data[0] + i)))
+            if et.tag == TAG_VAR or et.tag == TAG_ROWVAR then
+                return false  -- defer
+            end
+        end
+        for i = 0, pl - 1 do
+            local exp_tid = find(ctx, ctx.lists:get(callee_t.data[0] + i))
+            local act_tid = arg_tids[i + 1]
+            if act_tid then
+                -- Fast path: try direct assignability (preserves literal-to-literal/union).
+                local act_r = find(ctx, act_tid)
+                local et = ctx.types:get(exp_tid)
+                local param_is_closed_table = et.tag == TAG_TABLE and et.data[4] < 0
+                if not param_is_closed_table
+                  and et.tag ~= TAG_VAR and et.tag ~= TAG_ROWVAR
+                  and not contains_free_var(ctx, exp_tid)
+                  and unify_mod.try_unify(ctx, act_r, exp_tid) then
+                    -- ok
+                else
+                local skip_widen = (et.tag == TAG_VAR)
+                    and ret_uses_tv_in_intrinsic(ctx, callee_t, exp_tid)
+                local widened = skip_widen and find(ctx, act_tid)
+                    or (et.tag == TAG_VAR or et.tag == TAG_ROWVAR)
+                    and widen_literal(ctx, act_tid)
+                    or  widen_for_sub(ctx, act_tid)
+                local ok, err = unify_mod.unify(ctx, widened, exp_tid)
+                if not ok then
+                    local act_t = ctx.types:get(find(ctx, act_tid))
+                    local union_msg = nil
+                    if act_t.tag == TAG_UNION then
+                        local failing = {}
+                        for mi = act_t.data[0], act_t.data[0] + act_t.data[1] - 1 do
+                            local mid = find(ctx, ctx.lists:get(mi))
+                            if not unify_mod.try_unify(ctx, mid, exp_tid) then
+                                failing[#failing + 1] = mid
+                            end
+                        end
+                        local total = act_t.data[1]
+                        if #failing > 0 and #failing < total then
+                            local fail_tid = #failing == 1 and failing[1]
+                                or types_mod.make_union(ctx, failing)
+                            local param_name = nil
+                            if has_names then
+                                local name_id = ctx.lists:get(callee_t.data[5] + i)
+                                param_name = intern_mod.get(ctx.pool, name_id)
+                            end
+                            local pn = param_name or ""
+                            local arg_label = param_name
+                                and ("`" .. pn .. "`")
+                                or  ("argument " .. (i + 1))
+                            union_msg = "function expects `" .. types_mod.display_short(ctx, exp_tid)
+                                .. "`, but " .. arg_label .. " might also be `"
+                                .. types_mod.display_short(ctx, fail_tid) .. "`"
+                        end
+                    end
+                    if union_msg then
+                        add_error(ctx, line, col, union_msg)
+                    else
+                        add_error(ctx, line, col,
+                            "argument " .. (i + 1) .. ": cannot pass `"
+                            .. types_mod.display_short(ctx, act_tid)
+                            .. "` where `"
+                            .. types_mod.display_short(ctx, exp_tid) .. "` expected"
+                            .. (err and (": " .. err) or ""))
+                    end
+                end
+                end  -- close fast-path else
+            else
+                -- Missing argument
+                local ok = unify_mod.unify(ctx, ctx.T_NIL, exp_tid)
+                if not ok then
+                    add_error(ctx, line, col,
+                        "missing argument " .. (i + 1) .. " (expected `"
+                        .. types_mod.display_short(ctx, exp_tid) .. "`)")
+                end
+            end
+        end
+        -- Handle extra args against the function's vararg slot (data[4]).
+        local va_id = callee_t.data[4]
+        if va_id >= 0 and #arg_tids > pl then
+            local va_resolved = find(ctx, va_id)
+            local vat = ctx.types:get(va_resolved)
+            if vat.tag == TAG_VAR or vat.tag == TAG_ROWVAR then
+                return false  -- retry later
+            end
+            if vat.tag == TAG_TUPLE then
+                for ei = pl, #arg_tids - 1 do
+                    local slot_idx = ei - pl
+                    local exp_slot
+                    if slot_idx < vat.data[1] then
+                        exp_slot = find(ctx, ctx.lists:get(vat.data[0] + slot_idx))
+                    else
+                        exp_slot = ctx.T_NIL
+                    end
+                    local act_tid = arg_tids[ei + 1]
+                    local ok, err = unify_mod.unify(ctx, widen_literal(ctx, act_tid), exp_slot)
+                    if not ok then
+                        add_error(ctx, line, col,
+                            "argument " .. (ei + 1) .. ": cannot pass `"
+                            .. types_mod.display_short(ctx, act_tid)
+                            .. "` where `"
+                            .. types_mod.display_short(ctx, exp_slot) .. "` expected"
+                            .. (err and (": " .. err) or ""))
+                    end
+                end
+            end
+        end
+        -- Unify return
+        local rl = callee_t.data[3]
+        if rl == 0 then
+            unify_mod.unify(ctx, ret_tid, ctx.T_NIL)
+        elseif rl == 1 then
+            local first_ret = find(ctx, ctx.lists:get(callee_t.data[2]))
+            first_ret = resolve_deferred_intrinsic(ctx, first_ret)
+            unify_mod.unify(ctx, ret_tid, first_ret)
+        else
+            local slots = {}
+            for ri = 0, rl - 1 do
+                slots[ri + 1] = find(ctx, ctx.lists:get(callee_t.data[2] + ri))
+            end
+            unify_mod.unify(ctx, ret_tid, types_mod.make_tuple(ctx, slots))
+        end
+        return true
+    end
+
+    -- Intersection: overload dispatch — first matching overload wins.
+    if callee_t.tag == TAG_INTERSECTION then
+        local members = {}
+        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt  = ctx.types:get(mid)
+            if mt.tag == TAG_FUNCTION then
+                members[#members + 1] = { tid = mid, t = mt }
+            end
+        end
+        if #members == 0 then
+            add_error(ctx, line, col,
+                "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
+            bind_to(ctx, ret_tid, ctx.T_ANY)
+            return false
+        end
+        for _, m in ipairs(members) do
+            local ft = m.t
+            local ok = true
+            for j = 0, ft.data[1] - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+                local act_tid = arg_tids[j + 1]
+                if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
+                    ok = false; break
+                end
+            end
+            if ok then
+                local rl = ft.data[3]
+                if rl == 0 then
+                    bind_to(ctx, ret_tid, ctx.T_NIL)
+                else
+                    bind_to(ctx, ret_tid, find(ctx, ctx.lists:get(ft.data[2])))
+                end
+                return true
+            end
+        end
+        local cands = {}
+        for ci, m in ipairs(members) do
+            local ft = m.t
+            local reasons = {}
+            for j = 0, ft.data[1] - 1 do
+                local exp_tid = find(ctx, ctx.lists:get(ft.data[0] + j))
+                local act_tid = arg_tids[j + 1]
+                if act_tid then
+                    local a = find(ctx, act_tid)
+                    if not unify_mod.try_unify(ctx, a, exp_tid) then
+                        reasons[#reasons + 1] = "cannot pass `"
+                            .. types_mod.display_short(ctx, a)
+                            .. "` where `"
+                            .. types_mod.display_short(ctx, exp_tid) .. "` expected"
+                    end
+                end
+            end
+            cands[#cands + 1] = "candidate " .. ci .. ": "
+                .. types_mod.display_short(ctx, m.tid)
+                .. (#reasons > 0 and (" — " .. reasons[1]) or "")
+        end
+        add_error(ctx, line, col,
+            "no matching overload for `"
+            .. types_mod.display_short(ctx, callee_tid) .. "`:\n  "
+            .. table.concat(cands, "\n  "))
+        bind_to(ctx, ret_tid, ctx.T_ANY)
+        return false
+    end
+
+    -- Union: ALL members must accept the argument.
+    if callee_t.tag == TAG_UNION then
+        local ret_types = {}
+        local fail_msgs = {}
+        for i = callee_t.data[0], callee_t.data[0] + callee_t.data[1] - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local mt  = ctx.types:get(mid)
+            if mt.tag ~= TAG_FUNCTION then
+                fail_msgs[#fail_msgs + 1] = "union member `"
+                    .. types_mod.display_short(ctx, mid) .. "` is not callable"
+            else
+                local member_ok = true
+                for j = 0, mt.data[1] - 1 do
+                    local exp_tid = find(ctx, ctx.lists:get(mt.data[0] + j))
+                    local act_tid = arg_tids[j + 1]
+                    if act_tid and not unify_mod.try_unify(ctx, find(ctx, act_tid), exp_tid) then
+                        member_ok = false
+                        fail_msgs[#fail_msgs + 1] = "argument rejected by union members: `"
+                            .. types_mod.display_short(ctx, mid)
+                            .. "` does not accept argument " .. (j + 1)
+                        break
+                    end
+                end
+                if member_ok then
+                    local rl = mt.data[3]
+                    ret_types[#ret_types + 1] = rl > 0
+                        and find(ctx, ctx.lists:get(mt.data[2]))
+                        or  ctx.T_NIL
+                end
+            end
+        end
+        if #fail_msgs > 0 then
+            add_error(ctx, line, col, fail_msgs[1])
+            bind_to(ctx, ret_tid, ctx.T_ANY)
+            return false
+        end
+        local ret = #ret_types == 1 and ret_types[1]
+            or types_mod.make_union(ctx, ret_types)
+        bind_to(ctx, ret_tid, ret)
+        return true
+    end
+
+    -- Non-function: error
+    add_error(ctx, line, col,
+        "cannot call value of type `" .. types_mod.display_short(ctx, callee_tid) .. "`")
+    bind_to(ctx, ret_tid, ctx.T_ANY)
+    return false
+end
+
 -- ---------------------------------------------------------------------------
 -- Solver
 -- ---------------------------------------------------------------------------
@@ -1649,15 +2037,17 @@ end
 function M.solve(ctx, constraints)
     -- Dispatch table by constraint kind
     local handlers = {
-        [C_UNIFY]     = solve_unify,
-        [C_SUB]       = solve_sub,
-        [C_INDEX]     = solve_index,
-        [C_CALLABLE]  = solve_callable,
-        [C_ARITH]     = solve_arith,
-        [C_RETURN]    = solve_return,
-        [C_COMPARE]   = solve_compare,
-        [C_BOUND]     = solve_bound,
-        [C_OR]        = solve_or,
+        [C_UNIFY]         = solve_unify,
+        [C_SUB]           = solve_sub,
+        [C_INDEX]         = solve_index,
+        [C_CALLABLE]      = solve_callable,
+        [C_ARITH]         = solve_arith,
+        [C_RETURN]        = solve_return,
+        [C_COMPARE]       = solve_compare,
+        [C_BOUND]         = solve_bound,
+        [C_OR]            = solve_or,
+        [C_BIND_GENERICS] = solve_bind_generics,
+        [C_CHECK_ARGS]    = solve_check_args,
     }
 
     -- Dependency-aware fixpoint solver.
