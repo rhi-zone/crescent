@@ -545,6 +545,43 @@ function M.unify(ctx, a, b, seen)
         end
     end
 
+    -- Primitives satisfy named-field table constraints via their declared __index (ctx.prim_index).
+    -- E.g. string <: { sub: _ } works because ctx.prim_index[TAG_STRING] is the user-declared
+    -- `string` table in stdlib_types.lua, which has a `sub` field. User-configurable: changing
+    -- the `string` declaration in stdlib_types.lua changes what fields `string` structurally exposes.
+    if ta.tag ~= TAG_TABLE and tb.tag == TAG_TABLE and tb.data[1] > 0 then
+        local ptag = ta.tag
+        if ptag == TAG_LITERAL then
+            if ta.data[0] == LIT_NUMBER   then ptag = TAG_NUMBER
+            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif ta.data[0] == LIT_STRING  then ptag = TAG_STRING
+            else ptag = nil
+            end
+        elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
+            ptag = nil
+        end
+        local idx_tid = ptag and ctx.prim_index and ctx.prim_index[ptag]
+        if idx_tid then
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                local bfid = ctx.lists:get(i)
+                local bfe  = ctx.fields:get(bfid)
+                if band(bfe.flags, FLAG_OPTIONAL) ~= 0 then goto prim_named_next end
+                local afe = types_mod.table_field(ctx, idx_tid, bfe.name_id)
+                if not afe then
+                    local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
+                    return false, types_mod.display(ctx, a) .. " has no field `" .. fname .. "`"
+                end
+                local ok, err = M.unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id))
+                if not ok then
+                    local fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
+                    return false, "field `" .. fname .. "`: " .. (err or "type mismatch")
+                end
+                ::prim_named_next::
+            end
+            return true
+        end
+    end
+
     -- Table types: structural subtyping
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
         -- Every required field in b must exist in a
@@ -992,6 +1029,34 @@ function M.try_unify(ctx, a, b, seen)
             if not M.try_unify(ctx, bp, ap, seen) then return false end
         end
         return true
+    end
+
+    -- Same prim_index check for try_unify (non-destructive — no TV binding involved for primitives).
+    if ta.tag ~= TAG_TABLE and tb.tag == TAG_TABLE and tb.data[1] > 0 then
+        local ptag = ta.tag
+        if ptag == TAG_LITERAL then
+            if ta.data[0] == LIT_NUMBER   then ptag = TAG_NUMBER
+            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
+            elseif ta.data[0] == LIT_STRING  then ptag = TAG_STRING
+            else ptag = nil
+            end
+        elseif ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER and ptag ~= TAG_STRING then
+            ptag = nil
+        end
+        local idx_tid = ptag and ctx.prim_index and ctx.prim_index[ptag]
+        if idx_tid then
+            for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+                local bfe = ctx.fields:get(ctx.lists:get(i))
+                if band(bfe.flags, FLAG_OPTIONAL) ~= 0 then goto try_prim_named_next end
+                local afe = types_mod.table_field(ctx, idx_tid, bfe.name_id)
+                if not afe then return false end
+                if not M.try_unify(ctx, find(ctx, afe.type_id), find(ctx, bfe.type_id), seen) then
+                    return false
+                end
+                ::try_prim_named_next::
+            end
+            return true
+        end
     end
 
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
