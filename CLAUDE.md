@@ -146,6 +146,10 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Never assume a typechecker feature is missing without checking.** The typechecker has significant generic machinery: `$Require<T>`, `$Values<T>`, `$IpairsValues<T>`, match types, intrinsics, etc. Before saying "X isn't supported" or "we'd need generics for this," search the typechecker source and docs. "It'll stay ugly until X lands" is a claim that X doesn't exist — only say it after verifying X is actually absent.
 
+**Generic function bodies must be checked at definition time.** Deferring all checking to call sites (`constrain.lua:1369-1376` does this today) is unsound: a generic function with a wrong body is only caught if a call manifests the error. The correct approach is **skolem variables** — abstract constants instantiated at definition time that the solver cannot bind. The body is checked against skolems; binding a skolem is a type error. This is a known gap (see TODO.md "Generic function body checking"). Do not add new generic annotations and claim they are "typechecked" without first verifying this gap is closed.
+
+**`any` is never acceptable in type annotations.** Write proper types. `unknown` is the correct type for truly dynamic data (forces callers to narrow). `any` opts out of checking entirely and is always wrong. If you find yourself reaching for `any`, the real answer is either generics, `unknown`, or a missing type definition.
+
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
 **When verifying a newly built library, run only that library's test file — not the full suite.** Use `luajit lib/test/cli.lua lib/mylib/` or `luajit lib/test/cli.lua lib/mylib/mylib_test.lua` directly. The test runner accepts both file paths and directories. Only run the full suite (`luajit lib/test/cli.lua`) when checking global regressions.
