@@ -926,6 +926,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] Integer literal inference (hex `0x36` should be integer, not number)
 - [x] Arithmetic on integers returns integer, not number
 - [x] String method resolution (`s:gsub(...)` resolves via string metatable)
+- [ ] **`string` primitive doesn't satisfy structural types containing string methods** — when a function body calls `input:sub(...)`, the checker infers `input: { sub: _ }` (structural). A `string` annotation doesn't satisfy `{ sub: _ }` even though at runtime it does (via metatable). Fix: the string prelude type needs to be structurally compatible with tables having string methods, OR the checker needs to know that `string <: { sub: _, byte: _, ... }`. This causes ~59 pre-existing errors in `lib/parse/init.lua`.
 - [x] `number` assignable to `integer` parameter (safe widening direction)
 - [x] Union-typed operands (`x and "y" or "z"` produces union — concat/arithmetic now accept)
 - [x] Reassignment of literal-typed bindings (`ret = "()"` then `ret = "..."` — fixed by T.widen)
