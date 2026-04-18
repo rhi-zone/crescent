@@ -545,58 +545,6 @@ function M.unify(ctx, a, b, seen)
         end
     end
 
-    -- Primitives satisfy structural table constraints via prim_index (method tables).
-    -- E.g. `string <: { sub: _ }` holds because string's __index table has `sub`.
-    -- This mirrors the method dispatch in solve.lua (C_FIELD via prim_index).
-    if tb.tag == TAG_TABLE and tb.data[1] > 0 then
-        local ptag = ta.tag
-        if ptag == TAG_LITERAL then
-            if     ta.data[0] == LIT_STRING  then ptag = TAG_STRING
-            elseif ta.data[0] == LIT_NUMBER  then ptag = TAG_NUMBER
-            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
-            else ptag = nil
-            end
-        elseif ptag ~= TAG_STRING and ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER then
-            ptag = nil
-        end
-        if ptag then
-            local idx_tid = ctx.prim_index and ctx.prim_index[ptag]
-            if idx_tid then
-                idx_tid = find(ctx, idx_tid)
-                if ctx.types:get(idx_tid).tag == TAG_TABLE then
-                    -- Check every required named field in tb against prim_index.
-                    -- If any required field is absent from prim_index, fall through
-                    -- to the normal TAG_TABLE vs TAG_TABLE path (which will fail).
-                    local all_found = true
-                    local fail_fname, fail_err = nil, nil
-                    for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-                        local bfe = ctx.fields:get(ctx.lists:get(i))
-                        if band(bfe.flags, FLAG_OPTIONAL) == 0 and bfe.name_id ~= -1 then
-                            local mfe = types_mod.table_field(ctx, idx_tid, bfe.name_id)
-                            if not mfe then
-                                all_found = false; break
-                            end
-                            local bft = find(ctx, bfe.type_id)
-                            local mft = find(ctx, mfe.type_id)
-                            local ok2, err2 = M.unify(ctx, mft, bft, seen)
-                            if not ok2 then
-                                fail_fname = intern_mod.get(ctx.pool, bfe.name_id) or "?"
-                                fail_err = err2
-                                all_found = false; break
-                            end
-                        end
-                    end
-                    if all_found then
-                        return true
-                    elseif fail_fname then
-                        return false, "field '" .. fail_fname .. "': " .. (fail_err or "type mismatch")
-                    end
-                    -- else: field not in prim_index — fall through to normal failure
-                end
-            end
-        end
-    end
-
     -- Table types: structural subtyping
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
         -- Every required field in b must exist in a
@@ -1044,41 +992,6 @@ function M.try_unify(ctx, a, b, seen)
             if not M.try_unify(ctx, bp, ap, seen) then return false end
         end
         return true
-    end
-
-    -- Primitives satisfy structural table constraints via prim_index (method tables).
-    if tb.tag == TAG_TABLE and tb.data[1] > 0 then
-        local ptag = ta.tag
-        if ptag == TAG_LITERAL then
-            if     ta.data[0] == LIT_STRING  then ptag = TAG_STRING
-            elseif ta.data[0] == LIT_NUMBER  then ptag = TAG_NUMBER
-            elseif ta.data[0] == LIT_INTEGER then ptag = TAG_INTEGER
-            else ptag = nil
-            end
-        elseif ptag ~= TAG_STRING and ptag ~= TAG_NUMBER and ptag ~= TAG_INTEGER then
-            ptag = nil
-        end
-        if ptag then
-            local idx_tid = ctx.prim_index and ctx.prim_index[ptag]
-            if idx_tid then
-                idx_tid = find(ctx, idx_tid)
-                if ctx.types:get(idx_tid).tag == TAG_TABLE then
-                    local all_found = true
-                    for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
-                        local bfe = ctx.fields:get(ctx.lists:get(i))
-                        if band(bfe.flags, FLAG_OPTIONAL) == 0 and bfe.name_id ~= -1 then
-                            local mfe = types_mod.table_field(ctx, idx_tid, bfe.name_id)
-                            if not mfe then all_found = false; break end
-                            if not M.try_unify(ctx, find(ctx, mfe.type_id), find(ctx, bfe.type_id), seen) then
-                                all_found = false; break
-                            end
-                        end
-                    end
-                    if all_found then return true end
-                    -- else: field not in prim_index — fall through to normal failure
-                end
-            end
-        end
     end
 
     if ta.tag == TAG_TABLE and tb.tag == TAG_TABLE then
