@@ -163,6 +163,7 @@ local function intersect_field_in_type(ctx, ty_id, name_id, seen_named, pat_seen
 end
 
 -- Merge two bindings tables, returning merged or nil on conflict.
+--: ({ [integer]: integer } | nil, { [integer]: integer } | nil) -> ({ [integer]: integer } | nil)
 local function merge_bindings(a, b)
     if not b then return a end
     local out = {}
@@ -286,7 +287,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                     if not afe then return false, nil end
                     local ok, sub_bindings = M.match_pattern(ctx, afe.type_id, pfe.type_id, seen)
                     if not ok then return false, nil end
-                    --: any
                     bindings = merge_bindings(bindings, sub_bindings)
                     if bindings == nil then return false, nil end
                     matched_name_ids[pfe.name_id] = true
@@ -307,7 +307,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 end
                 -- Build the synthetic rest table (closed, no indexers)
                 local rest_tid = types_mod.make_table(ctx, rest_field_ids, {}, -1, {})
-                --: any
                 bindings = merge_bindings(bindings, { [rest_capture_name_id] = rest_tid })
                 if bindings == nil then return false, nil end
             end
@@ -330,12 +329,10 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                     local tv_id = ctx.lists:get(tis + i * 2 + 1)
                     local ok, sub = M.match_pattern(ctx, tk_id, pk_id, seen)
                     if not ok then return false, nil end
-                    --: any
                     bindings = merge_bindings(bindings, sub)
                     if bindings == nil then return false, nil end
                     ok, sub = M.match_pattern(ctx, tv_id, pv_id, seen)
                     if not ok then return false, nil end
-                    --: any
                     bindings = merge_bindings(bindings, sub)
                     if bindings == nil then return false, nil end
                 end
@@ -365,7 +362,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                         end
                         if #syn_meta_ids == 0 then return false, nil end
                         local syn_tid = types_mod.make_table(ctx, {}, {}, -1, syn_meta_ids)
-                        --: any
                         bindings = merge_bindings(bindings, { [cap_name_id] = syn_tid })
                         if bindings == nil then return false, nil end
                     end
@@ -420,7 +416,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                         seen[cycle_key] = nil
                         return false, nil
                     end
-                    --: any
                     bindings = merge_bindings(bindings, sub_bindings)
                     if bindings == nil then
                         seen[cycle_key] = nil
@@ -460,7 +455,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                     end
                 end
                 local rest_tid = types_mod.make_table(ctx, rest_field_ids, {}, -1, {})
-                --: any
                 bindings = merge_bindings(bindings, { [rest_capture_name_id] = rest_tid })
                 if bindings == nil then
                     seen[cycle_key] = nil
@@ -555,7 +549,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 local t_param = ctx.lists:get(tt.data[0] + i)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
-                --: any
                 bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end
@@ -567,7 +560,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 local t_param = ctx.lists:get(tt.data[0] + tpl - 1 - j)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
-                --: any
                 bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end
@@ -579,7 +571,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 middle_ids[i + 1] = ctx.lists:get(tt.data[0] + prefix_len + i)
             end
             local rest_tid = types_mod.make_tuple(ctx, middle_ids)
-            --: any
             bindings = merge_bindings(bindings, { [rest_name_id] = rest_tid })
             if bindings == nil then return false, nil end
         elseif ppl > 0 then
@@ -592,7 +583,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 local t_param = ctx.lists:get(tt.data[0] + i)
                 local ok, sub = M.match_pattern(ctx, t_param, p_param, seen)
                 if not ok then return false, nil end
-                --: any
                 bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end
@@ -604,7 +594,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
             if t_va < 0 then return false, nil end
             local ok, sub = M.match_pattern(ctx, t_va, p_va, seen)
             if not ok then return false, nil end
-            --: any
             bindings = merge_bindings(bindings, sub)
             if bindings == nil then return false, nil end
         end
@@ -644,7 +633,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                     end
                     local ok, sub = M.match_pattern(ctx, bound_tid, p_ret0_canon, seen)
                     if not ok then return false, nil end
-                    --: any
                     bindings = merge_bindings(bindings, sub)
                     if bindings == nil then return false, nil end
                     return true, bindings
@@ -659,7 +647,6 @@ function M.match_pattern(ctx, ty_id, pat_id, seen)
                 local t_ret = ctx.lists:get(tt.data[2] + i)
                 local ok, sub = M.match_pattern(ctx, t_ret, p_ret, seen)
                 if not ok then return false, nil end
-                --: any
                 bindings = merge_bindings(bindings, sub)
                 if bindings == nil then return false, nil end
             end

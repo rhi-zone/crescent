@@ -82,7 +82,9 @@ local function extract_type_aliases(ctx)
     local scope = ctx.scope
     if not scope or not scope.type_bindings then return result end
     for name_id, alias in pairs(scope.type_bindings) do
-        --: any  -- pairs() returns unknown values; TypeAlias is the actual type
+        -- pairs() returns unknown values even over { [integer]: TypeAlias } tables;
+        -- `any` is required so field access on `al` compiles. TypeAlias is the actual type.
+        --: any
         local al = alias
         if al and al.body then
             local name = intern_mod.get(ctx.pool, name_id)
@@ -295,8 +297,8 @@ function M.check_file(filename, parent_scope, explicit_pool)
     local export_tid = ctx and extract_export_tid(ctx) or nil
 
     -- Serialize to .cri and store in disk cache.
-    -- any: pcall second return is unknown; typechecker cannot track pcall result types.
-    -- cri_write.serialize returns string on success; we know this from the API contract.
+    -- pcall second return is unknown; `any` is required so the value can be stored and
+    -- passed to cache_mod.store (which expects string) without a static type error.
     local cri_bytes_stored = nil --: any
     if ctx and export_tid and export_tid ~= ctx.T_ANY then
         local exp_map = { ["__ret"] = export_tid }

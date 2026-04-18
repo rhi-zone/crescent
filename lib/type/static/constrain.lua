@@ -1526,11 +1526,7 @@ local function check_body_against_intersection(ctx, ps, pl, bs, bl, has_vararg,
         -- Re-emit any errors from this overload, tagged with which overload
         if #pass_err.errors > 0 then
             local type_str = types_mod.display(ctx, member_tid)
-            --: any
-            local pass_err_any = pass_err
-            --: { [integer]: { msg: string, line: integer, col: integer, ... }, ... }
-            local err_entries = pass_err_any.errors
-            for _, e in ipairs(err_entries) do
+            for _, e in ipairs(pass_err.errors) do
                 local tagged_msg = "overload " .. oi .. ": " .. type_str .. " — " .. e.msg
                 errors_mod.error(saved_err, ctx.filename, e.line, e.col, tagged_msg)
             end
@@ -2980,6 +2976,9 @@ local function load_decl_file(ctx, mod_name)
 
     local ok_p, pr = pcall(parse_mod.parse, source, rel_path, ctx.pool)
     if not ok_p then return end
+    -- pcall erases the parse result type; ParseResult is not declared as a named type.
+    -- `any` is required: a structural annotation would need to be a supertype of the
+    -- actual return, and the typechecker validates covariance at the assignment point.
     --: any
     local pr_any = pr
     local ok_a, ar = pcall(ann_mod.parse_annotations, pr_any.lexer.annotations, ctx.pool, rel_path)
@@ -3016,12 +3015,14 @@ process_type_decls = function(ctx)
         end
     end
     local decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, ... }, ... }
-    -- decl_lines uses table-reference keys (result records as keys), which the
-    -- typechecker cannot track. Annotate as any so indexed access returns any (→ integer).
+    -- decl_lines uses table-reference keys (result records as keys). No static type can
+    -- express { [table_reference]: integer } — the key type is object identity, not a
+    -- value type. `any` (not `unknown`) is correct here: indexed access must return a
+    -- type that is directly assignable to `integer` at call sites (unknown would not be).
     --: any
     local decl_lines = {}
     local module_decls = {} --: { [integer]: { kind: integer, type_id: integer, mod_name: string, ... }, ... }
-    -- require_decl_lines: result record → source line (same pattern as decl_lines)
+    -- require_decl_lines: result record → source line (same pattern as decl_lines).
     --: any
     local require_decl_lines = {}
     local require_decls = {} --: { [integer]: { kind: integer, mod_name: string, ... }, ... }
@@ -3054,9 +3055,7 @@ process_type_decls = function(ctx)
     -- declarations are processed.  This ensures types declared in the loaded files are
     -- in scope when Pass 0–2b resolve the current file's type aliases and variables.
     for _, r in ipairs(require_decls) do
-        --: any
-        local ra = r
-        load_decl_file(ctx, ra.mod_name)
+        load_decl_file(ctx, r.mod_name)
     end
 
     -- Pass 0: preliminary module_types population (before alias bodies are resolved).
@@ -3231,6 +3230,9 @@ process_type_decls = function(ctx)
                     -- Interface constraint check: --:: Name<T>: Constraint<T> = body
                     -- Register (name_id, constraint_name_id) in ctx.declared_subtypes and
                     -- verify body <: Constraint at definition time (symbolic check with TAG_VAR params).
+                    -- constraint_type_id is an optional field accessed via the open-table row variable.
+                    -- `any` is required here: `unknown` blocks field access; `any` lets us annotate
+                    -- the extracted fields with concrete types at each use site.
                     --: any
                     local r_any = r
                     if r_any.constraint_type_id then
@@ -3381,7 +3383,10 @@ function M.generate(source, filename, parent_scope, pool, cri_loader)
         errors_mod.error(ctx.err, filename or "?", 0, 0, tostring(pr))
         return ctx, {}
     end
-    -- pcall erases the parse result type; cast via any to annotate fields.
+    -- pcall erases the parse result type; ParseResult is not declared as a named type.
+    -- `any` is required: a structural annotation would need to be covariant with the actual
+    -- return type, and the typechecker validates this at the assignment point.
+    -- Field-level types are asserted individually on the extracted locals below.
     --: any
     local pr_any = pr
     --: ListPool
