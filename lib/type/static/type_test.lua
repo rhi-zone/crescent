@@ -9079,3 +9079,64 @@ end
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Generic function body checking (skolem variables)
+-- ---------------------------------------------------------------------------
+
+assert.describe("checker: generic function body checking via skolem vars", function()
+    assert.it("PASS: identity <T>(T) -> T with return x", function()
+        no_errors([[
+--: <T>(T) -> T
+local function id(x) return x end
+]])
+    end)
+
+    assert.it("PASS: apply <A, B>((A) -> B, A) -> B with return f(x)", function()
+        no_errors([[
+--: <A, B>((A) -> B, A) -> B
+local function apply(f, x) return f(x) end
+]])
+    end)
+
+    assert.it("FAIL: <T>(T) -> T body that returns a concrete type (42)", function()
+        has_error([[
+--: <T>(T) -> T
+local function f(x) return 42 end
+]], "skolem")
+    end)
+
+    assert.it("FAIL: <T>(T) -> T body that returns a concrete string", function()
+        has_error([[
+--: <T>(T) -> T
+local function f(x) return "hello" end
+]], "skolem")
+    end)
+
+    assert.it("PASS: non-generic annotated function still checks correctly", function()
+        no_errors([[
+--: (integer) -> integer
+local function double(x) return x * 2 end
+]])
+    end)
+
+    assert.it("PASS: generic function called at call site still instantiates correctly", function()
+        no_errors([[
+--: <T>(T) -> T
+local id
+--: integer
+local x = id(42)
+]])
+    end)
+
+    assert.it("PASS: multi-param generic <A, B>((A)->B, A) -> B called correctly", function()
+        no_errors([[
+--: <A, B>((A) -> B, A) -> B
+local apply
+--: (integer) -> string
+local f
+--: string
+local result = apply(f, 1)
+]])
+    end)
+end)

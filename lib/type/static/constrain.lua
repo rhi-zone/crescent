@@ -640,7 +640,9 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         for i = at.data[0], at.data[0] + at.data[1] - 1 do
             local param_name_id = ctx.ann.lists:get(i)
             local tv = types_mod.make_var(ctx, ctx.scope.level + 1)
-            ctx.types:get(tv).flags = defs.FLAG_GENERIC
+            local tv_t = ctx.types:get(tv)
+            tv_t.flags = defs.FLAG_GENERIC
+            tv_t.data[3] = param_name_id  -- store name for skolem error messages
             env_mod.bind_type(param_scope, param_name_id, { body = tv })
             param_tvs[#param_tvs + 1] = tv
         end
@@ -1306,6 +1308,49 @@ ExprRule[NODE_TABLE_EXPR] = function(ctx, nid)
     return types_mod.make_table(ctx, field_ids, indexers, -1, {})
 end
 
+-- Build a skolemized version of ann_fn_tid for generic body checking.
+-- Returns (skolem_fn_tid, is_generic) where is_generic is true if any param
+-- was FLAG_GENERIC (i.e. the function is a generic forall function).
+-- Skolem vars have FLAG_SKOLEM set and can never be bound by the solver;
+-- this prevents the self-loop problem that would arise from pushing a generic
+-- TAG_VAR return type onto return_vars and then binding it in solve_return.
+-- Only called when ann_fn_tid is a TAG_FUNCTION.
+--: (Ctx, integer) -> (integer, boolean)
+local function skolemize_fn(ctx, ann_fn_tid)
+    local aft = ctx.types:get(ann_fn_tid)
+    -- Detect whether any param (or the return) is a FLAG_GENERIC TAG_VAR.
+    local has_generic = false
+    for i = aft.data[0], aft.data[0] + aft.data[1] - 1 do
+        local pt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(i)))
+        if pt.tag == TAG_VAR and pt.flags == defs.FLAG_GENERIC then
+            has_generic = true
+            break
+        end
+    end
+    if not has_generic then
+        for i = aft.data[2], aft.data[2] + aft.data[3] - 1 do
+            local rt = ctx.types:get(types_mod.find(ctx, ctx.lists:get(i)))
+            if rt.tag == TAG_VAR and rt.flags == defs.FLAG_GENERIC then
+                has_generic = true
+                break
+            end
+        end
+    end
+    if not has_generic then return ann_fn_tid, false end
+    -- Instantiate: replaces FLAG_GENERIC vars with fresh vars.
+    -- The mapping maps old_generic_tid -> fresh_tid.
+    local skolem_fn_tid, mapping = env_mod.instantiate(ctx, ann_fn_tid, ctx.scope.level)
+    -- Convert every fresh var in the mapping to a skolem, copying the name_id
+    -- from the original generic var (stored in data[3] by resolve_annotation_type).
+    for generic_tid, fresh_tid in pairs(mapping) do
+        local fresh_t = ctx.types:get(fresh_tid)
+        local orig_t  = ctx.types:get(generic_tid)
+        fresh_t.flags = defs.FLAG_SKOLEM
+        fresh_t.data[3] = orig_t.data[3]  -- copy name_id for error messages
+    end
+    return skolem_fn_tid, true
+end
+
 -- Generate constraints for a function body.
 -- Returns the function type_id.
 --: (Ctx, integer, integer, integer, integer, boolean, integer | nil) -> integer
@@ -1314,27 +1359,56 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local param_tids = {} --: { [integer]: integer, ... }
 
     local has_ann_fn = ann_fn_tid ~= nil
+
+    -- For generic (forall) functions: create a skolemized version of the annotation
+    -- for body checking.  Skolem vars have FLAG_SKOLEM and are never bound by the
+    -- solver, so the body check cannot create a self-loop by trying to bind the
+    -- return's generic TAG_VAR.  The original ann_fn_tid (with FLAG_GENERIC vars) is
+    -- used for the returned fn_tid so call sites still get proper generic instantiation.
+    local body_ann_fn_tid = ann_fn_tid
     if ann_fn_tid then
-        local aft = ctx.types:get(ann_fn_tid)
-        if aft and aft.tag == TAG_FUNCTION then
+        local aft_pre = ctx.types:get(ann_fn_tid)
+        if aft_pre and aft_pre.tag == TAG_FUNCTION then
+            local skolem_tid, is_generic = skolemize_fn(ctx, ann_fn_tid)
+            if is_generic then body_ann_fn_tid = skolem_tid end
+        end
+    end
+
+    if body_ann_fn_tid then
+        local aft_body = ctx.types:get(body_ann_fn_tid)
+        if aft_body and aft_body.tag == TAG_FUNCTION then
+            -- Use the original ann_fn_tid for param_tids (what goes into fn_tid,
+            -- must have FLAG_GENERIC vars so call-site instantiation works).
+            -- Use body_ann_fn_tid (skolemized) for fn_scope bindings (what the
+            -- body sees — skolem vars that cannot be bound by the solver).
+            local aft_orig = ann_fn_tid and ctx.types:get(ann_fn_tid)
             for i = 0, pl - 1 do
                 local name_id = ctx.ast_lists:get(ps + i)
-                local pt_id
-                if i < aft.data[1] then
-                    pt_id = types_mod.find(ctx, ctx.lists:get(aft.data[0] + i))
+                -- Body binding uses skolemized param (or fresh var if no annotation slot)
+                local body_pt_id
+                if i < aft_body.data[1] then
+                    body_pt_id = types_mod.find(ctx, ctx.lists:get(aft_body.data[0] + i))
                 else
-                    pt_id = types_mod.make_var(ctx, fn_scope.level)
+                    body_pt_id = types_mod.make_var(ctx, fn_scope.level)
                 end
-                env_mod.bind(fn_scope, name_id, pt_id)
-                param_tids[#param_tids + 1] = pt_id
+                env_mod.bind(fn_scope, name_id, body_pt_id)
+                -- fn_tid param uses original annotation (FLAG_GENERIC for generic fns)
+                local fn_pt_id
+                if aft_orig and aft_orig.tag == TAG_FUNCTION and i < aft_orig.data[1] then
+                    fn_pt_id = types_mod.find(ctx, ctx.lists:get(aft_orig.data[0] + i))
+                else
+                    fn_pt_id = body_pt_id
+                end
+                param_tids[#param_tids + 1] = fn_pt_id
             end
             if has_vararg then
                 local dots_id = intern_mod.intern(ctx.pool, "...")
-                local vt = aft.data[4] >= 0 and aft.data[4] or ctx.T_ANY
+                local vt = aft_body.data[4] >= 0 and aft_body.data[4] or ctx.T_ANY
                 env_mod.bind(fn_scope, dots_id, vt)
             end
         else
             has_ann_fn = false
+            body_ann_fn_tid = nil
         end
     end
 
@@ -1375,15 +1449,24 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     -- Generic / polymorphic return types are checked indirectly at call sites
     -- via C_CALLABLE, so they do not need body-level checking here.
     local push_ret_id = ret_var
-    if has_ann_fn and ann_fn_tid then
-        local aft = ctx.types:get(ann_fn_tid)
+    if has_ann_fn and body_ann_fn_tid then
+        local aft = ctx.types:get(body_ann_fn_tid)
         if aft and aft.tag == TAG_FUNCTION and aft.data[3] > 0 then
             local ann_ret = types_mod.find(ctx, ctx.lists:get(aft.data[2]))
             local ann_ret_t = ctx.types:get(ann_ret)
-            -- Only use the annotated return type if it is a concrete (non-var) type.
-            -- TAG_VAR / TAG_ROWVAR are generic placeholders; leave them to call-site
-            -- checking and fall back to ret_var accumulation for the body.
-            if ann_ret_t.tag ~= TAG_VAR and ann_ret_t.tag ~= TAG_ROWVAR then
+            -- Use the annotated return type for body checking if it is either:
+            --   (a) a concrete (non-var) type, or
+            --   (b) a FLAG_SKOLEM TAG_VAR (from a skolemized generic function).
+            -- Skolem vars are safe to push onto return_vars because they can never
+            -- be bound by the solver, so no self-loop can occur.
+            -- Plain free TAG_VAR / TAG_ROWVAR (unresolved generic placeholders) are
+            -- still skipped — they would cause self-loops if bound in solve_return.
+            local is_concrete_or_skolem = ann_ret_t.tag ~= TAG_VAR and ann_ret_t.tag ~= TAG_ROWVAR
+            if ann_ret_t.tag == TAG_VAR and
+               require("bit").band(ann_ret_t.flags, defs.FLAG_SKOLEM) ~= 0 then
+                is_concrete_or_skolem = true
+            end
+            if is_concrete_or_skolem then
                 if aft.data[3] == 1 then
                     -- Single return slot: use it directly.
                     push_ret_id = ann_ret
@@ -1395,17 +1478,22 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
                     -- expected, and scalar actual against TAG_TUPLE expected (where
                     -- only slot 0 is used — the normal `return a, b` path).
                     local slot_ids = {}
-                    local all_concrete = true
+                    local all_usable = true
                     for si = aft.data[2], aft.data[2] + aft.data[3] - 1 do
                         local slot_tid = types_mod.find(ctx, ctx.lists:get(si))
                         local slot_t = ctx.types:get(slot_tid)
-                        if slot_t.tag == TAG_VAR or slot_t.tag == TAG_ROWVAR then
-                            all_concrete = false
+                        local slot_ok = slot_t.tag ~= TAG_VAR and slot_t.tag ~= TAG_ROWVAR
+                        if slot_t.tag == TAG_VAR and
+                           require("bit").band(slot_t.flags, defs.FLAG_SKOLEM) ~= 0 then
+                            slot_ok = true
+                        end
+                        if not slot_ok then
+                            all_usable = false
                             break
                         end
                         slot_ids[#slot_ids + 1] = slot_tid
                     end
-                    if all_concrete then
+                    if all_usable then
                         push_ret_id = types_mod.make_tuple(ctx, slot_ids)
                     end
                 end

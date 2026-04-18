@@ -228,6 +228,7 @@ M.FLAG_COMPUTED         = 4
 -- Flag bits (types)
 M.FLAG_GENERIC          = 1
 M.FLAG_RECURSIVE        = 2
+M.FLAG_SKOLEM           = 4   -- type variable that must never be bound (used for generic body checking)
 
 -- Flag bits (field entries)
 M.FLAG_OPTIONAL         = 0x01  -- field may be absent; access returns T|nil

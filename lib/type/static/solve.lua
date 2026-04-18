@@ -41,6 +41,7 @@ local LIT_OPAQUE_KEY = defs.LIT_OPAQUE_KEY
 local FLAG_OPTIONAL   = defs.FLAG_OPTIONAL
 local FLAG_PRIVATE    = defs.FLAG_PRIVATE
 local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
+local FLAG_SKOLEM     = defs.FLAG_SKOLEM
 local band            = require("bit").band
 
 local C_UNIFY         = constrain.C_UNIFY
@@ -1600,8 +1601,13 @@ local function solve_return(ctx, c)
     local ret_var_id = c[3]
     local ret_var_t  = ctx.types:get(ret_var_id)
 
-    if ret_var_t.tag ~= TAG_VAR then
-        -- Annotated return type: check assignability.
+    -- A FLAG_SKOLEM TAG_VAR is a skolemized generic return type (from a generic
+    -- function body check).  Treat it as an annotated type for assignability checking:
+    -- the body must produce a value assignable to the abstract type parameter.
+    -- Skolem vars cannot be bound (bind_var rejects them), so no self-loop is possible.
+    local is_skolem_ret = ret_var_t.tag == TAG_VAR and band(ret_var_t.flags, FLAG_SKOLEM) ~= 0
+    if ret_var_t.tag ~= TAG_VAR or is_skolem_ret then
+        -- Annotated return type (or skolem): check assignability.
         -- TAG_SPREAD in return position means multi-return; unwrap to the inner type
         -- so that `return 1` is checked against `integer`, not `...integer`.
         local expected_tid = find(ctx, ret_var_id)

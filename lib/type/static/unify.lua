@@ -37,6 +37,7 @@ local LIT_INTEGER = defs.LIT_INTEGER
 local FLAG_OPTIONAL  = defs.FLAG_OPTIONAL
 local FLAG_READONLY  = defs.FLAG_READONLY
 local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
+local FLAG_SKOLEM    = defs.FLAG_SKOLEM
 local band = require("bit").band
 
 -- Meta ops supported natively by primitive types
@@ -158,6 +159,16 @@ end
 -- Returns true, or false + error message.
 --: (ctx: Ctx, var_tid: integer, target_tid: integer) -> (boolean, string | nil)
 local function bind_var(ctx, var_tid, target_tid)
+    -- Skolem variables must never be bound: they represent abstract generic type
+    -- parameters at definition time.  If binding would occur, it means the body
+    -- produced a concrete type that cannot unify with the abstract parameter.
+    local vt_check = ctx.types:get(var_tid)
+    if band(vt_check.flags, FLAG_SKOLEM) ~= 0 then
+        local intern_mod2 = require("lib.type.static.intern")
+        local var_name = intern_mod2.get(ctx.pool, vt_check.data[3]) or ("$sk" .. tostring(vt_check.data[0]))
+        local target_str = types_mod.display(ctx, target_tid)
+        return false, "type parameter `" .. var_name .. "` is abstract (skolem) — body produces `" .. target_str .. "` which cannot unify with an abstract type parameter"
+    end
     -- var_tid is already find()'d to root
     if occurs(ctx, var_tid, target_tid) then
         -- Special case: `x = x or default` → union containing var itself.
