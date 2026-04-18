@@ -10,6 +10,9 @@ local M = {}
 -- NOT by result == nil. This allows parsers like optional() to return
 -- nil as a valid result.
 
+--:: Parser<T> = (input: string, pos: integer) -> (T, integer) | (nil, integer, string)
+--:: parser = Parser<unknown>
+
 -- ── Primitives ──────────────────────────────────────────────────────────
 
 --: (s: string) -> (input: string, pos: integer) -> (string, integer) | (nil, integer, string)
@@ -146,7 +149,7 @@ function M.seq(...)
   end
 end
 
---: (...: parser) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T>(...: Parser<T>) -> Parser<T>
 function M.alt(...)
   local parsers = { ... }
   local n = #parsers
@@ -197,7 +200,7 @@ function M.many1(p)
   end
 end
 
---: (p: parser) -> (input: string, pos: integer) -> (any | nil, integer)
+--: <T>(p: Parser<T>) -> Parser<T | nil>
 function M.optional(p)
   return function(input, pos)
     local r, npos, err = p(input, pos)
@@ -260,7 +263,7 @@ function M.sep_by1(p, sep)
   end
 end
 
---: (open: parser, p: parser, close: parser) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T>(open: Parser<unknown>, p: Parser<T>, close: Parser<unknown>) -> Parser<T>
 function M.between(open, p, close)
   return function(input, pos)
     local _, npos, err = open(input, pos)
@@ -275,7 +278,7 @@ end
 
 -- ── Transformers ────────────────────────────────────────────────────────
 
---: (p: parser, fn: (result: any) -> any) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T, U>(p: Parser<T>, fn: (T) -> U) -> Parser<U>
 function M.map(p, fn)
   return function(input, pos)
     local r, npos, err = p(input, pos)
@@ -284,7 +287,7 @@ function M.map(p, fn)
   end
 end
 
---: (p: parser, fn: (result: any) -> parser) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T, U>(p: Parser<T>, fn: (T) -> Parser<U>) -> Parser<U>
 function M.flat_map(p, fn)
   return function(input, pos)
     local r, npos, err = p(input, pos)
@@ -293,7 +296,7 @@ function M.flat_map(p, fn)
   end
 end
 
---: (p: parser, value: any) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T, U>(p: Parser<T>, value: U) -> Parser<U>
 function M.const(p, value)
   return function(input, pos)
     local r, npos, err = p(input, pos)
@@ -311,7 +314,7 @@ function M.concat(p)
   end
 end
 
---: (p: parser) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T>(p: Parser<T>) -> Parser<T>
 function M.peek(p)
   return function(input, pos)
     local r, _, err = p(input, pos)
@@ -365,7 +368,7 @@ function M.ws1()
   end
 end
 
---: (p: parser) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T>(p: Parser<T>) -> Parser<T>
 function M.lexeme(p)
   local skip_ws = M.ws()
   return function(input, pos)
@@ -383,7 +386,7 @@ end
 
 -- ── Recursion ───────────────────────────────────────────────────────────
 
---: (fn: () -> parser) -> (input: string, pos: integer) -> (any, integer) | (nil, integer, string)
+--: <T>(fn: () -> Parser<T>) -> Parser<T>
 function M.lazy(fn)
   local resolved
   return function(input, pos)
@@ -415,7 +418,7 @@ local function format_error(input, err_pos, err_msg)
   return string.format("parse error at line %d, col %d: %s (near '%s')", line, col, err_msg or "unknown error", snippet)
 end
 
---: (parser: parser, input: string) -> (any, nil) | (nil, string)
+--: <T>(parser: Parser<T>, input: string) -> (T, nil) | (nil, string)
 function M.parse(parser, input)
   local r, npos, err = parser(input, 1)
   if err then
@@ -427,7 +430,7 @@ function M.parse(parser, input)
   return r, nil
 end
 
---: (parser: parser, input: string) -> (any, string) | (nil, string)
+--: <T>(parser: Parser<T>, input: string) -> (T, string) | (nil, string)
 function M.parse_partial(parser, input)
   local r, npos, err = parser(input, 1)
   if err then
