@@ -1150,6 +1150,20 @@ function M.parse_annotations(annotations, pool, filename)
                     local mod_name = scan_string(s)
                     return { kind = defs.ANN_REQUIRE, mod_name = mod_name }
                 end
+                -- augment Name { field: T, ... } — merge fields into an existing type binding
+                if word == "augment" then
+                    local aug_name = scan_word(s)
+                    if not aug_name then scan_error(s, "expected name after 'augment'") end
+                    local aug_name_id = intern_mod.intern(pool, aug_name)
+                    -- Parse the field table: reuse the '{' table parsing by backtracking to
+                    -- before '{' and calling parse_type. We peek to confirm '{', then proceed.
+                    skip_ws(s)
+                    if s.pos > s.len or byte(s.src, s.pos) ~= byte("{") then
+                        scan_error(s, "expected '{' after augment name")
+                    end
+                    local type_id = parse_type(s)
+                    return { kind = defs.ANN_AUGMENT, name_id = aug_name_id, type_id = type_id }
+                end
                 -- unseal Name — rebinds opaque variable to its inner type in current scope
                 if word == "unseal" then
                     local name = scan_word(s)

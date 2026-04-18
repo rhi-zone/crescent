@@ -9167,3 +9167,74 @@ end
 ]], "skolem")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- --:: augment
+---------------------------------------------------------------------------
+
+assert.describe("augment: --:: augment Name { ... }", function()
+    assert.it("augment on a fresh name creates a value binding", function()
+        no_errors([[
+--:: augment MyType { foo: string, bar: integer }
+]])
+    end)
+
+    assert.it("augment on an existing type alias merges fields", function()
+        -- The merged alias should have both x (from Base) and y (from augment).
+        no_errors([[
+--:: Base = { x: integer }
+--:: augment Base { y: string }
+local t --: Base
+local x = t.x
+local y = t.y
+]])
+    end)
+
+    assert.it("augment on existing type alias: original fields still present", function()
+        no_errors([[
+--:: Rec = { name: string, count: integer }
+--:: augment Rec { extra: boolean }
+local r --: Rec
+local n = r.name
+local c = r.count
+]])
+    end)
+
+    assert.it("augment string adds method callable via colon syntax", function()
+        no_errors([[
+--:: augment string { mytrim: (string) -> string }
+local s = "hello"
+local r = s:mytrim()
+]])
+    end)
+
+    assert.it("augment string: method call resolves on literal string", function()
+        no_errors([[
+--:: augment string { mylen: (string) -> integer }
+local n = ("hello"):mylen()
+]])
+    end)
+
+    assert.it("augment string: augmented method callable on annotated string param", function()
+        no_errors([[
+--:: augment string { mytrim: (string) -> string }
+local function use(s)
+    --: string
+    return s:mytrim()
+end
+]])
+    end)
+
+    assert.it("augment multiple fields at once", function()
+        no_errors([[
+--:: augment MyLib { add: (integer, integer) -> integer, mul: (integer, integer) -> integer }
+]])
+    end)
+
+    assert.it("augment can be applied twice to same name (fields accumulate)", function()
+        no_errors([[
+--:: augment Ext { a: integer }
+--:: augment Ext { b: string }
+]])
+    end)
+end)

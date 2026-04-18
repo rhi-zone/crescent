@@ -30,11 +30,11 @@ end
 
 --- Return { file, bindings, ["return"] } for filename, or nil if check fails.
 -- bindings is an array of { name, type } sorted by name.
-function M.dump_one(filename)
+function M.dump_one(filename, parent_scope)
     local check_mod  = require("lib.type.static.check")
     local intern_mod = require("lib.type.static.intern")
     local types_mod  = require("lib.type.static.types")
-    local _, ctx = check_mod.check_file(filename)
+    local _, ctx = check_mod.check_file(filename, parent_scope)
     if not ctx then return nil end
     local list = {}
     for name_id, type_id in pairs(ctx.scope.bindings) do
@@ -126,10 +126,63 @@ function M.main(argv)
         end
     end
 
+    -- Look for pkg.lua (walk up from the first file's directory or cwd).
+    -- If found and it has typecheck.globals, pre-load those declaration files
+    -- into a shared scope that is passed as parent_scope to all check_file calls.
+    local project_parent_scope = nil
+    do
+        local constrain_mod = require("lib.type.static.constrain")
+        local env_mod       = require("lib.type.static.env")
+        local intern_mod2   = require("lib.type.static.intern")
+
+        -- Walk up from cwd looking for pkg.lua.
+        local function find_pkg_lua()
+            -- Try cwd first.
+            local f = io.open("pkg.lua", "r")
+            if f then f:close(); return "pkg.lua" end
+            -- Walk up from first file's directory.
+            if #files > 0 then
+                local dir = files[1]:match("^(.+)/[^/]+$") or "."
+                while dir and dir ~= "" and dir ~= "." do
+                    local path = dir .. "/pkg.lua"
+                    f = io.open(path, "r")
+                    if f then f:close(); return path end
+                    dir = dir:match("^(.+)/[^/]+$")
+                end
+            end
+            return nil
+        end
+
+        local pkg_path = find_pkg_lua()
+        if pkg_path then
+            local ok_load, pkg_fn = pcall(loadfile, pkg_path)
+            if ok_load and pkg_fn then
+                local ok_run, manifest = pcall(pkg_fn)
+                if ok_run and type(manifest) == "table" then
+                    local tc = manifest.typecheck
+                    if tc and type(tc) == "table" and type(tc.globals) == "table" then
+                        -- Build a shared scope by running a synthetic source file that
+                        -- uses --:: require for each listed globals module.
+                        local lines = {}
+                        for _, mod_name in ipairs(tc.globals) do
+                            lines[#lines + 1] = '--:: require "' .. mod_name .. '"'
+                        end
+                        local src = table.concat(lines, "\n")
+                        local pool = intern_mod2.new()
+                        local _, glob_ctx = check_mod.check_string(src, "<pkg.lua globals>", nil, pool)
+                        if glob_ctx then
+                            project_parent_scope = glob_ctx.scope
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     -- --annotate mode: emit source with inferred type annotations inserted.
     if annotate then
         for _, filename in ipairs(files) do
-            local _, ctx = check_mod.check_file(filename)
+            local _, ctx = check_mod.check_file(filename, project_parent_scope)
             if not ctx then
                 io.stderr:write(filename .. ": failed to check\n")
             else
@@ -182,7 +235,7 @@ function M.main(argv)
             io.write(M.dump_json(files))
         else
             for _, filename in ipairs(files) do
-                local r = M.dump_one(filename)
+                local r = M.dump_one(filename, project_parent_scope)
                 if r then
                     io.write("-- " .. r.file .. "\n")
                     for _, b in ipairs(r.bindings) do
@@ -202,7 +255,7 @@ function M.main(argv)
     local structured_parts = {}
 
     for _, filename in ipairs(files) do
-        local err_ctx, ctx = check_mod.check_file(filename)
+        local err_ctx, ctx = check_mod.check_file(filename, project_parent_scope)
 
         -- Run lint rule passes when --rules is active and the check succeeded.
         if run_rules and ctx then

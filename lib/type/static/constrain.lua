@@ -93,6 +93,7 @@ local ANN_DECL   = defs.ANN_DECL
 local ANN_MODULE = defs.ANN_MODULE
 local ANN_UNSEAL  = defs.ANN_UNSEAL
 local ANN_REQUIRE = defs.ANN_REQUIRE
+local ANN_AUGMENT = defs.ANN_AUGMENT
 
 local TAG_ANY      = defs.TAG_ANY
 local TAG_UNKNOWN  = defs.TAG_UNKNOWN
@@ -3127,6 +3128,9 @@ process_type_decls = function(ctx)
     --: any
     local require_decl_lines = {}
     local require_decls = {} --: { [integer]: { kind: integer, mod_name: string, ... }, ... }
+    local augment_decls = {} --: { [integer]: { kind: integer, name_id: integer, type_id: integer, ... }, ... }
+    --: any
+    local augment_decl_lines = {}
     for line, result in pairs(ann.results) do
         --: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_start: integer, type_params_len: integer, type_bounds_start: integer, type_bounds_len: integer, type_defaults_start: integer, type_defaults_len: integer, mod_name: string, ... }
         local result = result
@@ -3138,6 +3142,9 @@ process_type_decls = function(ctx)
         elseif result.kind == ANN_REQUIRE then
             require_decls[#require_decls + 1] = result
             require_decl_lines[result] = line
+        elseif result.kind == ANN_AUGMENT then
+            augment_decls[#augment_decls + 1] = result
+            augment_decl_lines[result] = line
         end
     end
     -- Sort by source line so forward references resolve in file order.
@@ -3398,6 +3405,119 @@ process_type_decls = function(ctx)
                 warn(ctx, r_line, 1, E.UNNAMED_PARAMS, {})
             end
             env_mod.bind(ctx.scope, r.name_id, resolve_annotation_type(ctx, r.type_id))
+        end
+    end
+
+    -- Pass 2c: apply --:: augment Name { ... } declarations.
+    -- Runs after Pass 2a/2b so type aliases and declare variables are fully resolved.
+    -- Augments merge fields into existing type bindings (value or type alias).
+    -- For primitive type names (string/number/integer/boolean) the prim_index and
+    -- prim_meta tables are updated so method dispatch stays consistent.
+    if #augment_decls > 1 then
+        local al = augment_decl_lines
+        table.sort(augment_decls, function(a, b) return (al[a] or 0) < (al[b] or 0) end)
+    end
+    for _, r in ipairs(augment_decls) do
+        -- Resolve the augment table type into the checker arena.
+        local aug_tid = resolve_annotation_type(ctx, r.type_id)
+        local aug_t = ctx.types:get(types_mod.find(ctx, aug_tid))
+        if aug_t.tag == TAG_TABLE then
+            -- Determine which prim tag this name corresponds to, if any.
+            local name_str = intern_mod.get(ctx.pool, r.name_id) or ""
+            local prim_tag = nil
+            if name_str == "string"  then prim_tag = TAG_STRING
+            elseif name_str == "number"  then prim_tag = TAG_NUMBER
+            elseif name_str == "integer" then prim_tag = TAG_INTEGER
+            elseif name_str == "boolean" then prim_tag = TAG_BOOLEAN
+            end
+
+            -- Collect new fields from the augment table.
+            local new_field_ids = {}
+            local new_meta_field_ids = {}
+            for i = aug_t.data[0], aug_t.data[0] + aug_t.data[1] - 1 do
+                new_field_ids[#new_field_ids + 1] = ctx.lists:get(i)
+            end
+            for i = aug_t.data[5], aug_t.data[5] + aug_t.data[6] - 1 do
+                new_meta_field_ids[#new_meta_field_ids + 1] = ctx.lists:get(i)
+            end
+
+            -- Merge new_field_ids / new_meta_field_ids into an existing TAG_TABLE base_tid.
+            -- Returns the new merged TAG_TABLE type ID.
+            local function merge_into_table(base_tid)
+                local bt = ctx.types:get(types_mod.find(ctx, base_tid))
+                if bt.tag ~= TAG_TABLE then
+                    return types_mod.make_table(ctx, new_field_ids, {}, -1, new_meta_field_ids)
+                end
+                local fs, fl = bt.data[0], bt.data[1]
+                local is2, il = bt.data[2], bt.data[3]
+                local rv = bt.data[4]
+                local ms, ml = bt.data[5], bt.data[6]
+                local merged = {}
+                local name_pos = {}
+                for i = fs, fs + fl - 1 do
+                    local fid = ctx.lists:get(i)
+                    local fe  = ctx.fields:get(fid)
+                    if fe.name_id >= 0 then name_pos[fe.name_id] = #merged + 1 end
+                    merged[#merged + 1] = fid
+                end
+                for _, fid in ipairs(new_field_ids) do
+                    local fe = ctx.fields:get(fid)
+                    if fe.name_id >= 0 and name_pos[fe.name_id] then
+                        merged[name_pos[fe.name_id]] = fid  -- augment overrides existing field
+                    else
+                        if fe.name_id >= 0 then name_pos[fe.name_id] = #merged + 1 end
+                        merged[#merged + 1] = fid
+                    end
+                end
+                local merged_meta = {}
+                local meta_name_pos = {}
+                for i = ms, ms + ml - 1 do
+                    local fid = ctx.lists:get(i)
+                    local fe  = ctx.fields:get(fid)
+                    if fe.name_id >= 0 then meta_name_pos[fe.name_id] = #merged_meta + 1 end
+                    merged_meta[#merged_meta + 1] = fid
+                end
+                for _, fid in ipairs(new_meta_field_ids) do
+                    local fe = ctx.fields:get(fid)
+                    if fe.name_id >= 0 and meta_name_pos[fe.name_id] then
+                        merged_meta[meta_name_pos[fe.name_id]] = fid
+                    else
+                        if fe.name_id >= 0 then meta_name_pos[fe.name_id] = #merged_meta + 1 end
+                        merged_meta[#merged_meta + 1] = fid
+                    end
+                end
+                local indexers = {}
+                local ix = is2
+                while ix < is2 + il - 1 do
+                    indexers[#indexers + 1] = ctx.lists:get(ix)
+                    indexers[#indexers + 1] = ctx.lists:get(ix + 1)
+                    ix = ix + 2
+                end
+                return types_mod.make_table(ctx, merged, indexers, rv, merged_meta)
+            end
+
+            -- Look up existing binding: value (declare) takes precedence over type alias.
+            local existing_value_tid = env_mod.lookup(ctx.scope, r.name_id)
+            local existing_alias     = env_mod.lookup_type(ctx.scope, r.name_id)
+
+            if existing_value_tid then
+                local merged_tid = merge_into_table(existing_value_tid)
+                env_mod.bind(ctx.scope, r.name_id, merged_tid)
+                if prim_tag then ctx.prim_index[prim_tag] = merged_tid end
+            elseif existing_alias then
+                local base_body = existing_alias.body or types_mod.make_table(ctx, {}, {}, -1, {})
+                local merged_tid = merge_into_table(base_body)
+                existing_alias.body = merged_tid
+                if prim_tag then
+                    ctx.prim_index[prim_tag] = merged_tid
+                    if aug_t.data[6] > 0 then ctx.prim_meta[prim_tag] = merged_tid end
+                end
+            else
+                -- No existing binding: create fresh value binding from augment.
+                local new_tid = types_mod.make_table(ctx, new_field_ids, {}, -1, new_meta_field_ids)
+                env_mod.bind(ctx.scope, r.name_id, new_tid)
+                if prim_tag then ctx.prim_index[prim_tag] = new_tid end
+            end
         end
     end
 
