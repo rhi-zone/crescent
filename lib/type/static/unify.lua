@@ -477,19 +477,15 @@ function M.unify(ctx, a, b, seen)
     -- Function types: contravariant params, covariant returns
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
         local apl, bpl = ta.data[1], tb.data[1]
+        -- data[4] >= 0: function has a variadic param (...T); data[4] is the type of T.
+        local a_vararg = ta.data[4] >= 0 and find(ctx, ta.data[4]) or nil
+        local b_vararg = tb.data[4] >= 0 and find(ctx, tb.data[4]) or nil
         local max_params = apl > bpl and apl or bpl
         for i = 0, max_params - 1 do
-            local ap_id, bp_id
-            if i < apl then
-                ap_id = find(ctx, ctx.lists:get(ta.data[0] + i))
-            else
-                ap_id = ctx.T_NIL
-            end
-            if i < bpl then
-                bp_id = find(ctx, ctx.lists:get(tb.data[0] + i))
-            else
-                bp_id = ctx.T_NIL
-            end
+            local ap_id = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i))
+                       or (a_vararg or ctx.T_NIL)
+            local bp_id = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i))
+                       or (b_vararg or ctx.T_NIL)
             -- Contravariant: b's param assignable to a's param
             local ok, err = M.unify(ctx, bp_id, ap_id, seen)
             if not ok then
@@ -497,19 +493,12 @@ function M.unify(ctx, a, b, seen)
             end
         end
         local arl, brl = ta.data[3], tb.data[3]
-        local max_rets = arl > brl and arl or brl
-        for i = 0, max_rets - 1 do
-            local ar_id, br_id
-            if i < arl then
-                ar_id = find(ctx, ctx.lists:get(ta.data[2] + i))
-            else
-                ar_id = ctx.T_NIL
-            end
-            if i < brl then
-                br_id = find(ctx, ctx.lists:get(tb.data[2] + i))
-            else
-                br_id = ctx.T_NIL
-            end
+        -- For returns: actual returning MORE values than expected is fine in Lua
+        -- (callers ignore extra returns). Only check up to expected's declared count.
+        -- When actual returns FEWER than expected, the missing slots are nil.
+        for i = 0, brl - 1 do
+            local ar_id = i < arl and find(ctx, ctx.lists:get(ta.data[2] + i)) or ctx.T_NIL
+            local br_id = find(ctx, ctx.lists:get(tb.data[2] + i))
             local ok, err = M.unify(ctx, ar_id, br_id, seen)
             if not ok then
                 return false, "return " .. (i + 1) .. ": " .. (err or "type mismatch")
@@ -1022,10 +1011,12 @@ function M.try_unify(ctx, a, b, seen)
 
     if ta.tag == TAG_FUNCTION and tb.tag == TAG_FUNCTION then
         local apl, bpl = ta.data[1], tb.data[1]
+        local a_va = ta.data[4] >= 0 and find(ctx, ta.data[4]) or nil
+        local b_va = tb.data[4] >= 0 and find(ctx, tb.data[4]) or nil
         local max_p = apl > bpl and apl or bpl
         for i = 0, max_p - 1 do
-            local ap = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i)) or ctx.T_NIL
-            local bp = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i)) or ctx.T_NIL
+            local ap = i < apl and find(ctx, ctx.lists:get(ta.data[0] + i)) or (a_va or ctx.T_NIL)
+            local bp = i < bpl and find(ctx, ctx.lists:get(tb.data[0] + i)) or (b_va or ctx.T_NIL)
             if not M.try_unify(ctx, bp, ap, seen) then return false end
         end
         return true
