@@ -223,11 +223,15 @@ rt = N.runtime({ executors = { foo = function() rt:bar() end } })
 
 The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
 
-## When the user keeps saying "wrong"
+## When the user says "wrong"
 
-If the user rejects three or more of your attempts in a row at the same task,
-**stop trying syntactic variations**. The problem is conceptual: you don't
-understand what semantic property is being violated. The correct loop is:
+After the **first** "wrong" / "garbage" / "what the fuck" reaction, **stop**.
+By the third rejection the context is already poisoned with bad reasoning,
+failed variations, and noise that anchors future attempts on the same wrong
+axis. One wrong attempt is a misread; two is a pattern; three is recovery
+work for the next session.
+
+The correct loop, starting at the *first* rejection:
 
 1. Explicitly state *why* you think the current approach is wrong, in terms of
    semantics (what value doesn't compute the right thing, what invariant is
@@ -236,14 +240,14 @@ understand what semantic property is being violated. The correct loop is:
 3. Only then write the fix.
 
 When the user says "why are you trying the WRONG thing" they're correcting
-**what you're thinking about**, not the specific value you wrote. Stop
-churning the codebase — pause and re-anchor on the semantic problem.
+**what you're thinking about**, not the specific value you wrote. Pause and
+re-anchor on the semantic problem.
 
-A specific failure mode of this session: cycled through `<T: string>` →
-`unknown` → `any` → `Cdata<unknown>` → no string path → `<T: string>` again
-for `ffi.new` argument typing without ever asking which property of the type
-each option violated. ~25 wrong attempts. See `docs/ffi-types.md` for the
-postmortem.
+A failure mode to avoid: cycling through syntactic variations without ever
+asking which property each option violates. One real example burned ~25
+attempts at `ffi.new` argument typing through `<T: string>` → `unknown` →
+`any` → `Cdata<unknown>` → no string path → `<T: string>` again. See
+`docs/ffi-types.md`.
 
 ## Negative Constraints
 
