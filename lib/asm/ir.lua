@@ -32,7 +32,7 @@ end
 --::   arg_types:    { [integer]: string, ... },
 --::   ret_types:    { [integer]: string, ... },
 --::   num_labels:   integer,
--- }
+--:: }
 
 local M = {}
 

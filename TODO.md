@@ -513,6 +513,8 @@ Not libraries (do not rewrite, repurpose instead):
 - [x] `lib/asm/abi/arm64.lua` — AAPCS64 register file
 - [x] `lib/asm/emit/x64.lua` — x86-64 machine code emitter: VEX-encoded AVX instructions,
   mmap executable memory, full vmulps/vaddps/vsubps/vdivps/vfmadd213ps + loop (27 assertions, AVX-gated)
+- [ ] **`lib/asm/emit/x64.lua` — `insn.dst` nil safety** — `Insn.dst` is `VReg | nil` (nil for store/ret ops), but load/arith branches unconditionally access `insn.dst.id` and `.type`. Requires either runtime nil guard or opcode-specific Insn subtypes. Exposed by replacing `--: any` with `--: Insn`.
+- [ ] **`lib/asm/emit/x64.lua` — `ffi.copy` string-source overload** — `alloc_exec_mem` calls `ffi.copy(ptr, code_str, n)` with a Lua string as src. stdlib_types.lua only declares the `(Ptr<T>, Ptr<U>, integer)` form; missing `(Ptr<T>, string, integer)` overload (LuaJIT special-cases string src). Causes false positive type error at call site.
 - [ ] `lib/asm/emit/arm64.lua` — NEON emitter (A64 encoding)
 - [x] `lib/asm/init.lua` — convenience wrapper: `asm.compile({args,ret,ctype}, build_fn)`. Selects abi+emit by jit.arch; supports x64 (sysv/win64). 28 assertions in asm_test.lua.
 

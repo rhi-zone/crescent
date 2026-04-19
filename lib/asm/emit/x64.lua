@@ -15,6 +15,10 @@ end
 
 local ffi = require("ffi")
 
+--:: require "lib.asm.ir"
+--:: require "lib.asm.ra"
+--:: ABI = { arg_gpr: { [integer]: string, ... }, arg_simd: { [integer]: string, ... }, ret_gpr: { [integer]: string, ... }, ret_simd: { [integer]: string, ... }, ... }
+
 local M = {}
 
 -- ---------------------------------------------------------------------------
@@ -87,34 +91,28 @@ end
 -- ---------------------------------------------------------------------------
 
 -- GPR name → number (0–15).
-local GPR_NUM = {
-  rax = 0, rcx = 1, rdx = 2, rbx  = 3,
-  rsp = 4, rbp = 5, rsi = 6, rdi  = 7,
-  r8  = 8, r9  = 9, r10 = 10, r11 = 11,
-  r12 = 12, r13 = 13, r14 = 14, r15 = 15,
-}
+local GPR_NUM = {} --: { [string]: integer, ... }
+for i, name in ipairs({"rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"}) do
+  GPR_NUM[name] = i - 1
+end
 
 -- SIMD name → number (0–15).  xmm and ymm share numbers.
-local SIMD_NUM = {}
+local SIMD_NUM = {} --: { [string]: integer, ... }
 for i = 0, 15 do
   SIMD_NUM["xmm" .. i] = i
   SIMD_NUM["ymm" .. i] = i
 end
 
+--: (string) -> integer
 local function gpr_num(name)
-  --: string
-  local name = name
-  local v = GPR_NUM[name] --: any
-  local n = v or error("unknown GPR: " .. tostring(name)) --: integer
-  return n
+  local v = GPR_NUM[name]
+  return v or error("unknown GPR: " .. tostring(name))
 end
 
+--: (string) -> integer
 local function simd_num(name)
-  --: string
-  local name = name
-  local v = SIMD_NUM[name] --: any
-  local n = v or error("unknown SIMD reg: " .. tostring(name)) --: integer
-  return n
+  local v = SIMD_NUM[name]
+  return v or error("unknown SIMD reg: " .. tostring(name))
 end
 
 -- ---------------------------------------------------------------------------
@@ -426,6 +424,7 @@ local function phys_for_vreg(vreg, assignment)
 end
 
 -- Main compile function.
+--: (IRDescriptor, AllocResult, ABI, string) -> (unknown, string | nil)
 M.compile = function(desc, alloc, abi, ctype)
   -- Validate architecture.
   if jit and jit.arch ~= "x64" then
@@ -475,11 +474,7 @@ M.compile = function(desc, alloc, abi, ctype)
   end
 
   -- ── Step 2: Emit prologue ───────────────────────────────────────────────
-  -- any: AllocResult.callee_saves is declared as { [integer]: string, ... } but
-  -- arrives as unknown through the opaque alloc parameter.
-  local callee_saves = alloc.callee_saves --: any
-  --: { [integer]: string, ... }
-  local callee_saves_arr = callee_saves
+  local callee_saves_arr = alloc.callee_saves
   for i = 1, #callee_saves_arr do
     enc_push(buf, callee_saves_arr[i])
   end
@@ -514,13 +509,10 @@ M.compile = function(desc, alloc, abi, ctype)
   local instruction_byte_pos = {}
   local loop_patches = {}  -- array of {buf_start, buf_after, label_ir_pos}
 
-  -- any: IRDescriptor.instructions arrives as unknown through opaque desc parameter.
-  local instructions_raw = desc.instructions --: any
-  --: { [integer]: unknown, ... }
-  local instructions = instructions_raw
+  local instructions = desc.instructions
 
   for idx = 1, #instructions do
-    local insn = instructions[idx] --: any
+    local insn = instructions[idx] --: Insn
     instruction_byte_pos[idx] = buf_len(buf)
 
     local op = insn.op
@@ -729,7 +721,7 @@ M.compile = function(desc, alloc, abi, ctype)
   end
 
   -- Cast to the requested function type.
-  -- any: ffi.cast returns unknown cdata; caller owns the type through ctype string.
+  -- Type is dynamic: ctype is a runtime string, so fn's signature is unknowable statically.
   local fn = ffi.cast(ctype, exec_ptr) --: any
   -- Keep exec_ptr alive (don't let GC collect it) by anchoring to fn table.
   -- We return a table wrapper so the GC anchor is maintained.
@@ -739,9 +731,7 @@ M.compile = function(desc, alloc, abi, ctype)
   local wrapper = {}
   setmetatable(wrapper, {
     __call = function(_, ...)
-      --: any
-      local fn_call = fn
-      return fn_call(...)
+      return fn(...)
     end,
     __index = {
       _ptr    = fn,
