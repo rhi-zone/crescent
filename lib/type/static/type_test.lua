@@ -9076,6 +9076,18 @@ local n --: integer
 n = s.length
 ]])
     end)
+
+    assert.it("resolves ?/init.lua packages (directory package fallback)", function()
+        -- lib/reactive/init.lua is a directory package (lib/reactive.lua does not exist).
+        -- load_decl_file must fall back to lib/reactive/init.lua and find the Lens type.
+        -- Lens = { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }
+        v3_no_errors([[
+--:: require "lib.reactive"
+local lens --: Lens
+local get_fn --: (unknown) -> unknown
+get_fn = lens.get
+]])
+    end)
 end)
 
 -------------------------------------------------------------------------------
