@@ -41,9 +41,9 @@
 --:: declare collectgarbage = (opt: string | nil, arg: number | nil) -> number | boolean
 --:: declare gcinfo = () -> integer
 --:: declare dofile = (filename: string | nil) -> unknown
---:: declare loadfile = (filename: string | nil) -> (((...unknown) -> unknown) | nil, string | nil)
---:: declare loadstring = (s: string, chunkname: string | nil) -> (((...unknown) -> unknown) | nil, string | nil)
---:: declare load = (chunk: string | (() -> string | nil), chunkname: string | nil, mode: string | nil, env: { [string]: unknown, ... } | nil) -> (((...unknown) -> unknown) | nil, string | nil)
+--:: declare loadfile = (filename: string | nil) -> (((...never) -> unknown) | nil, string | nil)
+--:: declare loadstring = (s: string, chunkname: string | nil) -> (((...never) -> unknown) | nil, string | nil)
+--:: declare load = (chunk: string | (() -> string | nil), chunkname: string | nil, mode: string | nil, env: { [string]: unknown, ... } | nil) -> (((...never) -> unknown) | nil, string | nil)
 --:: declare newproxy = (mt: boolean | { [string]: unknown, ... } | nil) -> unknown
 --:: declare rawprint = (s: string) -> ()
 --:: declare _VERSION = string
@@ -118,7 +118,7 @@
 --::     upper:   (s: string) -> string,
 --::     lower:   (s: string) -> string,
 --::     reverse: (s: string) -> string,
---::     dump:    (fn: (...unknown) -> unknown, strip: boolean | nil) -> string
+--::     dump:    (fn: (...never) -> unknown, strip: boolean | nil) -> string
 --:: }
 
 ---------------------------------------------------------------------------
@@ -221,10 +221,10 @@
 
 --:: Thread = $Opaque<"Thread">
 --:: augment coroutine {
---::     create:     (fn: (...unknown) -> unknown) -> Thread,
+--::     create:     (fn: (...never) -> unknown) -> Thread,
 --::     resume:     (co: Thread, ...unknown) -> (boolean, ...unknown),
 --::     yield:      (...unknown) -> ...unknown,
---::     wrap:       (fn: (...unknown) -> unknown) -> (...unknown) -> unknown,
+--::     wrap:       (fn: (...never) -> unknown) -> (...never) -> unknown,
 --::     status:     (co: Thread) -> "running" | "suspended" | "normal" | "dead",
 --::     running:    () -> (Thread | nil, boolean),
 --::     isyieldable: () -> boolean
@@ -235,7 +235,7 @@
 ---------------------------------------------------------------------------
 
 --:: augment debug {
---::     getinfo:      (thread_or_f: integer | ((...unknown) -> unknown) | Thread, what: string | nil) -> { [string]: unknown, ... } | nil,
+--::     getinfo:      (thread_or_f: integer | ((...never) -> unknown) | Thread, what: string | nil) -> { [string]: unknown, ... } | nil,
 --::     traceback:    (thread_or_msg: Thread | string | nil, msg: string | nil, level: integer | nil) -> string,
 --::     sethook:      (thread_or_fn: Thread | ((string, integer | nil) -> ()), mask: string, count: integer | nil) -> (),
 --::     getlocal:     (level: integer, local_: integer) -> (string, unknown),
