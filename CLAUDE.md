@@ -223,6 +223,28 @@ rt = N.runtime({ executors = { foo = function() rt:bar() end } })
 
 The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
 
+## When the user keeps saying "wrong"
+
+If the user rejects three or more of your attempts in a row at the same task,
+**stop trying syntactic variations**. The problem is conceptual: you don't
+understand what semantic property is being violated. The correct loop is:
+
+1. Explicitly state *why* you think the current approach is wrong, in terms of
+   semantics (what value doesn't compute the right thing, what invariant is
+   violated, what use case fails). Not "looks bad" — what specifically is wrong.
+2. Confirm your reasoning matches the user's *before* changing code.
+3. Only then write the fix.
+
+When the user says "why are you trying the WRONG thing" they're correcting
+**what you're thinking about**, not the specific value you wrote. Stop
+churning the codebase — pause and re-anchor on the semantic problem.
+
+A specific failure mode of this session: cycled through `<T: string>` →
+`unknown` → `any` → `Cdata<unknown>` → no string path → `<T: string>` again
+for `ffi.new` argument typing without ever asking which property of the type
+each option violated. ~25 wrong attempts. See `docs/ffi-types.md` for the
+postmortem.
+
 ## Negative Constraints
 
 Do not:
