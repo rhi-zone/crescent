@@ -27,6 +27,7 @@ local import_mod = require("lib.platform.import")
 local json = require("lib.format.json")
 local ratelimit = require("lib.ratelimit")
 local session_store_mod = require("lib.platform.session_store")
+local policy_mod = require("lib.platform.policy")
 
 local M = {}
 
@@ -58,6 +59,7 @@ local M = {}
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
 --::   audit_log: unknown,
 --::   session_db_path: string | nil,
+--::   policy_path: string | nil,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
@@ -254,6 +256,21 @@ function M.make(opts)
 	-- Optional audit log (lib/platform/audit). When nil, all log:append calls
 	-- are skipped — tests and deployments without a configured db_path work fine.
 	local audit_log = opts.audit_log --: any
+
+	-- Admin policy. Loaded once at startup from policy_path (if set). A missing
+	-- file is not an error — single-user deployments run without a policy file.
+	--
+	-- SIGHUP reload is intended but not yet wired. LuaJIT signal handling requires
+	-- platform-specific FFI (signal(2) / sigaction(2)) which is not set up in this
+	-- daemon skeleton. When signal handling is added, call:
+	--   admin_policy:reload()
+	-- and append to audit_log if available. See docs/daemon-design.md
+	-- "Admin policy: hard ceilings" → "Loaded on daemon start, re-read on SIGHUP".
+	--
+	-- `any` escape: policy object is a concrete type but opaque to the checker here.
+	local admin_policy = policy_mod.load(opts.policy_path or nil, { --: any
+		read_fn = opts.read_fn,
+	})
 
 	-- Library app handler. The daemon mounts the library app at "/" of the
 	-- daemon origin. We call create() directly; there is no sandbox in v1
@@ -467,6 +484,28 @@ function M.make(opts)
 						res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
 						res.body = ""
 						return
+					end
+				end
+			end
+
+			-- Admin policy gate: check each declared cap against hard policy
+			-- ceilings before invoking the loader. A denied or out-of-bounds cap
+			-- is a hard rejection — the grant UI never shows for these caps
+			-- (per docs/daemon-design.md "Enforcement points: Manifest load").
+			if admin_policy then
+				local pol_row = irow or (index_obj and index_obj.get and tonumber(app_id) and index_obj:get(tonumber(app_id)))
+				if pol_row then
+					local pol_caps = all_cap_decls_from_manifest(pol_row.manifest or {})
+					for cname, decl in pairs(pol_caps) do
+						local pol_ok, pol_reason = admin_policy:check_cap_decl(cname, decl)
+						if not pol_ok then
+							local msg = "blocked by admin policy: " .. cname .. ": " .. tostring(pol_reason)
+							app_load_errors[app_id] = { err = msg, retry_at = time_fn() + LOAD_ERROR_TTL }
+							res.status = 500
+							res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+							res.body = "app load failed: " .. msg
+							return
+						end
 					end
 				end
 			end
@@ -793,14 +832,26 @@ function M.make(opts)
 			local cap_type = type(decl) == "table" and (decl.type or cname) or cname
 			local required = type(decl) ~= "table" or decl.required ~= false
 			local req_label = required and "<span class=req>required</span>" or "<span class=opt>optional</span>"
-			local stored = stored_grants[cname]  -- true / false / nil
-			local grant_checked  = stored == true  and 'checked' or ''
-			local deny_checked   = stored == false and 'checked' or ''
-			rows_html[#rows_html + 1] = '<tr><td class=cname>' .. h(cname) .. '</td>'
-				.. '<td class=ctype>' .. h(cap_type) .. '</td>'
-				.. '<td>' .. req_label .. '</td>'
-				.. '<td><label><input type=radio name="cap_' .. h(cname) .. '" value=grant ' .. grant_checked .. '> Grant</label>'
-				.. ' <label><input type=radio name="cap_' .. h(cname) .. '" value=deny '  .. deny_checked  .. '> Deny</label></td></tr>'
+			-- Check admin policy: blocked caps show a "Blocked by admin policy" label
+			-- instead of grant radio buttons. The user is informed of the restriction
+			-- even though they cannot override it (per docs/daemon-design.md
+			-- "Visibility: the grant UI must show 'blocked by admin policy'").
+			local pol_ok, pol_reason = admin_policy:check_cap_decl(cname, decl)
+			if not pol_ok then
+				rows_html[#rows_html + 1] = '<tr><td class=cname>' .. h(cname) .. '</td>'
+					.. '<td class=ctype>' .. h(cap_type) .. '</td>'
+					.. '<td>' .. req_label .. '</td>'
+					.. '<td><span class=blocked>&#x1F6AB; Blocked by admin policy</span></td></tr>'
+			else
+				local stored = stored_grants[cname]  -- true / false / nil
+				local grant_checked  = stored == true  and 'checked' or ''
+				local deny_checked   = stored == false and 'checked' or ''
+				rows_html[#rows_html + 1] = '<tr><td class=cname>' .. h(cname) .. '</td>'
+					.. '<td class=ctype>' .. h(cap_type) .. '</td>'
+					.. '<td>' .. req_label .. '</td>'
+					.. '<td><label><input type=radio name="cap_' .. h(cname) .. '" value=grant ' .. grant_checked .. '> Grant</label>'
+					.. ' <label><input type=radio name="cap_' .. h(cname) .. '" value=deny '  .. deny_checked  .. '> Deny</label></td></tr>'
+			end
 		end
 
 		local app_name = h(manifest.name or row.name or ("App " .. (app_id_str or "")))
@@ -811,7 +862,7 @@ function M.make(opts)
 			.. 'h1{margin:0 0 .25rem}p.sub{color:#888;margin:0 0 1.5rem}table{width:100%;border-collapse:collapse}'
 			.. 'th,td{padding:.5rem .75rem;border-bottom:1px solid #2a2a4a;text-align:left}'
 			.. 'th{background:#12122a;font-weight:600}.cname{font-family:monospace}.ctype{color:#8888aa}'
-			.. '.req{color:#e06060;font-size:.8rem}.opt{color:#6060a0;font-size:.8rem}'
+			.. '.req{color:#e06060;font-size:.8rem}.opt{color:#6060a0;font-size:.8rem}.blocked{color:#e0a030;font-size:.85rem}'
 			.. '.actions{margin-top:1.5rem}button{padding:.5rem 1.25rem;background:#4a4a8a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:.95rem}'
 			.. 'button:hover{background:#5a5a9a}</style>\n'
 			.. '</head>\n<body>\n'

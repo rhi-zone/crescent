@@ -106,7 +106,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Keyboard shortcuts — Escape closes panels, Ctrl+Shift shortcuts for all panels
 - [x] Capability-based I/O migration — 77 libraries migrated from os/io globals to injected functions (time_fn, clock_fn, seed, read_fn, getenv, etc.). Directory-mode apps sandboxed. Safe subsets for jit/bit. No os/io/ffi/debug/package in sandbox.
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
-- [ ] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
+- [x] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
 
 ## platform daemon — implementation track
@@ -217,7 +217,7 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
 - [ ] **TLS on routable interfaces** — binding to loopback is TLS-optional; binding to
   Tailscale or any routable interface requires TLS. Cert loading from disk (daemon does
   not do ACME in v1 — user provides cert).
-- [ ] **Admin policy layer** — admin can set blanket allow/deny ceilings per app, per cap,
+- [x] **Admin policy layer** — admin can set blanket allow/deny ceilings per app, per cap,
   per cap+host tuple. Caps the grant UI against those ceilings so the operator cannot be
   socially engineered past admin intent.
 
