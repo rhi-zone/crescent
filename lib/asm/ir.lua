@@ -34,6 +34,18 @@ end
 --::   num_labels:   integer,
 --:: }
 
+--:: Kernel = {
+--::   _next_id:    integer,
+--::   _insns:      { [integer]: Insn, ... },
+--::   _args:       { [integer]: { vreg_id: integer, type: string }, ... },
+--::   _rets:       { [integer]: { vreg_id: integer, type: string }, ... },
+--::   _arg_vregs:  { [integer]: VReg, ... },
+--::   _arg_types:  { [integer]: string, ... },
+--::   _ret_types:  { [integer]: string, ... },
+--::   _num_labels: integer,
+--::   ...
+--:: }
+
 local M = {}
 
 -- ---------------------------------------------------------------------------
@@ -204,8 +216,8 @@ M.kernel = function(arg_types, ret_types)
   k.label = function(self)
     self._num_labels = self._num_labels + 1
     -- position = index of the next instruction to be emitted (1-based).
-    -- any: self is a dynamic table; _insns is known to be an array of Insn.
-    local insns = self._insns --: any
+    local insns_any = self._insns --: any
+    local insns = insns_any --: { [integer]: Insn, ... }
     local n = #insns
     local lbl = { position = n + 1 }
     return lbl
@@ -237,8 +249,8 @@ M.kernel = function(arg_types, ret_types)
 
   -- kernel:finalize() -> IRDescriptor
   k.finalize = function(self)
-    -- any: self is a dynamic table; _insns is known to be an array of Insn.
-    local insns = self._insns --: any
+    local insns_any = self._insns --: any
+    local insns = insns_any --: { [integer]: Insn, ... }
     local n = #insns
 
     -- live_first[id] and live_last[id]: instruction indices.
@@ -248,8 +260,8 @@ M.kernel = function(arg_types, ret_types)
     local live_last  = {} --: { [integer]: integer, ... }
 
     -- Initialise arg intervals: first = 0.
-    -- any: self is a dynamic table; _args is known to be an array of arg entries.
-    local self_args = self._args --: any
+    local self_args_any = self._args --: any
+    local self_args = self_args_any --: { [integer]: { vreg_id: integer, type: string }, ... }
     for i = 1, #self_args do
       local entry = self_args[i] --: { vreg_id: integer, type: string }
       local id = entry.vreg_id
@@ -330,8 +342,8 @@ M.kernel = function(arg_types, ret_types)
     local vreg_types = {} --: { [integer]: string, ... }
 
     -- Collect type for each vreg from arg list.
-    -- any: self is a dynamic table; see self_args annotation above.
-    local self_args2 = self._args --: any
+    local self_args2_any = self._args --: any
+    local self_args2 = self_args2_any --: { [integer]: { vreg_id: integer, type: string }, ... }
     for i = 1, #self_args2 do
       local ae = self_args2[i] --: { vreg_id: integer, type: string }
       vreg_types[ae.vreg_id] = ae.type
