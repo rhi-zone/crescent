@@ -60,10 +60,8 @@ M.allocate = function(intervals, regfile)
   local regfile = regfile
 
   -- assignment: vreg_id → physical register name.
-  -- Typed as any so we can nil-out entries when a register is stolen back
-  -- from a victim interval (victim moves to spills instead).
-  --: any
-  local assignment      = {}
+  -- any: nil-out support (stolen entries) + pairs-loop narrowing bug in typechecker.
+  local assignment      = {} --: any
   local spills          = {} --: { [integer]: integer, ... }
   local num_spill_slots = 0
 
@@ -151,7 +149,7 @@ M.allocate = function(intervals, regfile)
 
   -- Pop a usable register from pool (skipping blocked aliases).
   -- Returns nil if none available.
-  --: any
+  --: ({ [integer]: string, ... }) -> string | nil
   local pool_pop = function(pool)
     --: { [integer]: string, ... }
     local pool = pool

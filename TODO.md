@@ -397,6 +397,8 @@ TypeScript's type guards can lie — `function isString(x): x is string { return
 
 - [x] **`assert()` as a built-in assertion** — `assert(x)` and `assert(x, msg)` both narrow `x` to non-nil/non-false in the continuation.
 
+- [ ] **`for` loop variable narrowing** — `for _, v in pairs(t)` where `t: { [integer]: string | nil }` gives `v: string | nil`. `if v then` should narrow `v` to `string` inside the body for all use contexts (calls, assignments, table indexing). Currently narrowing applies to specific-function call arguments but NOT to: generic function args (e.g. `table.insert`), table index assignments (`t[k] = v`), or local variable declarations (`local x = v`). Root cause likely in how narrow.lua applies narrowed env at use sites — the narrowed type map isn't queried for these patterns.
+
 ## typechecker warnings / quality-of-life
 
 - [x] **Redundant type assertion warning** — implemented. `NODE_CAST_EXPR` emits a warning when a `--[[: T]]` cast asserts a structurally identical type; excludes `any` on either side.
