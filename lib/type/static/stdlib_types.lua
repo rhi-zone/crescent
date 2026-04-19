@@ -48,6 +48,8 @@
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
 --:: Ctype<T> = $Opaque<T>
+--:: Ptr<T> = T & { [0]: T }
+--:: Arr<T> = { [integer]: T, ... }
 --:: CTypeMap = {
 --::   int8_t: integer,  uint8_t: integer,
 --::   int16_t: integer, uint16_t: integer,
@@ -61,19 +63,19 @@
 --:: }
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, ...any) -> T) & (<S: Keys<CTypeMap>>(ct: S, ...any) -> CTypeMap[S]),
---::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> T) & (<S: Keys<CTypeMap>>(ct: S, obj: unknown) -> CTypeMap[S]),
---::   sizeof:   (ct: unknown) -> integer,
+--::   new:      (<T>(ct: Ctype<T>, init: T | nil) -> T) & (<S: Keys<CTypeMap>>(ct: S, init: CTypeMap[S] | nil) -> CTypeMap[S]),
+--::   cast:     (<T, U>(ct: Ctype<T>, obj: U) -> T) & (<S: Keys<CTypeMap>, U>(ct: S, obj: U) -> CTypeMap[S]),
+--::   sizeof:   (ct: string | Ctype<unknown>) -> integer,
 --::   typeof:   (<T>(ct: Ctype<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
---::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
---::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
---::   string:   (ptr: unknown, len: integer | nil) -> string,
+--::   copy:     <T, U>(dst: Ptr<T>, src: Ptr<U>, n: integer) -> nil,
+--::   fill:     <T>(dst: Ptr<T>, n: integer, c: integer | nil) -> nil,
+--::   string:   (ptr: Ptr<integer>, len: integer | nil) -> string,
 --::   load:     (name: string, global: boolean | nil) -> unknown,
 --::   gc:       <T>(cdata: T, finalizer: ((T) -> ()) | nil) -> T,
 --::   metatype: <T>(ct: Ctype<T>, metatable: { [string]: unknown, ... }) -> Ctype<T>,
---::   istype:   (ct: unknown, obj: unknown) -> boolean,
---::   alignof:  (ct: unknown) -> integer,
---::   offsetof: (ct: unknown, field: string) -> integer,
+--::   istype:   (ct: string | Ctype<unknown>, obj: unknown) -> boolean,
+--::   alignof:  (ct: string | Ctype<unknown>) -> integer,
+--::   offsetof: (ct: string | Ctype<unknown>, field: string) -> integer,
 --::   abi:      (param: string) -> boolean,
 --::   errno:    (newerr: integer | nil) -> integer,
 --::   C:        $FfiC,
