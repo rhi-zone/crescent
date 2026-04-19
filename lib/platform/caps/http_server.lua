@@ -128,7 +128,9 @@ local function wrap_handler(app_handler, revoked_ref)
 	end
 end
 
+--:: http_server_opts = { port: integer | nil, host: string | nil, daemon: boolean | nil, url: string | nil, on_serve: ((unknown) -> nil) | nil }
 -- http_server_cap(opts) -> cap_table, revoke_fn
+--: (http_server_opts) -> unknown, string | nil
 function M.http_server_cap(opts)
 	if not opts then
 		return nil, "http_server: opts required"

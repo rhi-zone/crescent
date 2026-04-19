@@ -44,7 +44,10 @@ local function unpack_tarball(tardata)
 	return tar.read(tardata)
 end
 
+--:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
+--:: AppRecord = { path: string, chunks: unknown, entries: { [number]: TarEntry }, manifest: unknown }
 -- load_tarball_from_png(path, bytes) -> entries, chunks | nil, err
+--: (string, string) -> ({ [number]: TarEntry } | nil, unknown | nil)
 local function load_tarball_from_png(path, bytes)
 	local chunks, perr = png.read(bytes)
 	if not chunks then return nil, "platform: PNG parse failed: " .. tostring(perr) end
@@ -64,7 +67,8 @@ local function load_tarball_from_png(path, bytes)
 	return entries, chunks
 end
 
--- load_tarball_from_targz(path, bytes) -> entries | nil, err
+-- load_tarball_from_targz(bytes) -> entries | nil, err
+--: (string) -> ({ [number]: TarEntry } | nil, string | nil)
 local function load_tarball_from_targz(bytes)
 	local tardata, cerr = compress.inflate(bytes, { format = "gzip" })
 	if not tardata then return nil, "platform: gzip decompress failed: " .. tostring(cerr) end
@@ -73,23 +77,33 @@ end
 
 -- load_app(path) -> app | nil, err
 -- Loads an app from a .png (iTXt "lua" chunk) or .tar.gz (raw tarball).
+--: (string) -> (AppRecord | nil, string | nil)
 function M.load_app(path)
-	local f, err = io.open(path, "rb")
-	if not f then return nil, "platform: cannot open " .. tostring(path) .. ": " .. tostring(err) end
-	local bytes = f:read("*a")
+	local f_maybe, err = io.open(path, "rb")
+	if not f_maybe then
+		return nil, "platform: cannot open " .. tostring(path) .. ": " .. tostring(err)
+	end
+	local f = f_maybe or error("unreachable")
+	local bytes_m = f:read("*a")
 	f:close()
+	local bytes = bytes_m or error("platform: could not read file: " .. tostring(path))
 
-	local entries, chunks, lerr
-	if path:match("%.png$") or path:match("%.jpg$") or path:match("%.jpeg$") or path:match("%.webp$") then
-		entries, chunks = load_tarball_from_png(path, bytes)
-		if not entries then return nil, chunks end  -- chunks holds err here on failure
-	else
-		entries, lerr = load_tarball_from_targz(bytes)
-		if not entries then return nil, lerr end
+	local entries_nn, chunks
+	do
+		if path:match("%.png$") or path:match("%.jpg$") or path:match("%.jpeg$") or path:match("%.webp$") then
+			local e, c = load_tarball_from_png(path, bytes)
+			if not e then return nil, c end  -- c holds err here on failure
+			entries_nn, chunks = e or error("unreachable"), c
+		else
+			local e, lerr = load_tarball_from_targz(bytes)
+			if not e then return nil, lerr end
+			entries_nn = e or error("unreachable")
+		end
 	end
 
-	local manifest_src = tar.get(entries, "manifest.json")
-	if not manifest_src then return nil, "platform: tarball has no manifest.json" end
+	local manifest_src_m = tar.get(entries_nn, "manifest.json")
+	if not manifest_src_m then return nil, "platform: tarball has no manifest.json" end
+	local manifest_src = manifest_src_m or error("unreachable")
 
 	local manifest, jerr = json.decode(manifest_src)
 	if not manifest then return nil, "platform: manifest.json parse failed: " .. tostring(jerr) end
@@ -97,7 +111,7 @@ function M.load_app(path)
 	return {
 		path     = path,
 		chunks   = chunks,  -- nil for raw .tar.gz
-		entries  = entries,
+		entries  = entries_nn,
 		manifest = manifest,
 	}
 end
@@ -109,13 +123,14 @@ end
 local function make_tar_loader(entries)
 	return function(modname)
 		local relpath = modname:gsub("%.", "/")
-		local candidates = {
+		local candidates = { --: { [number]: string }
 			relpath .. ".lua",
 			relpath .. "/init.lua",
 		}
 		for _, candidate in ipairs(candidates) do
-			local src = tar.get(entries, candidate)
-			if src then
+			local src_m = tar.get(entries, candidate)
+			if src_m then
+				local src = src_m or error("unreachable")
 				local chunk, lerr = load(src, "@" .. candidate, "t")
 				if not chunk then
 					return nil, "platform: error loading '" .. candidate .. "': " .. tostring(lerr)
@@ -169,6 +184,7 @@ end
 -- run_entry(app, entry_key, env, opts?) -> ok, result | err
 -- Looks up entry_key in app.manifest.entry, finds the file in app.entries,
 -- injects a tar-backed require loader into env, and runs the entrypoint.
+--: (AppRecord, string, { [string]: unknown, ... }, unknown) -> unknown
 function M.run_entry(app, entry_key, env, opts)
 	local entry_map = app.manifest and app.manifest.entry
 	if not entry_map then
@@ -189,10 +205,11 @@ function M.run_entry(app, entry_key, env, opts)
 		return false, caps_err
 	end
 
-	local src = tar.get(app.entries, entry_path)
-	if not src then
+	local src_m = tar.get(app.entries, entry_path)
+	if not src_m then
 		return false, "platform: entry file '" .. tostring(entry_path) .. "' not found in tarball"
 	end
+	local src = src_m or error("unreachable")
 
 	opts = opts or {}
 	opts.name = opts.name or ("@" .. tostring(entry_path))
@@ -220,8 +237,9 @@ end
 -- load_and_run_entry(path, entry_key, env, opts?) -> ok, result | err
 -- Convenience: load_app + run_entry in one call.
 function M.load_and_run_entry(path, entry_key, env, opts)
-	local app, err = M.load_app(path)
-	if not app then return false, err end
+	local app_m, err = M.load_app(path)
+	if not app_m then return false, err end
+	local app = app_m or error("unreachable")
 	return M.run_entry(app, entry_key, env, opts)
 end
 
@@ -248,7 +266,9 @@ local CAP_FACTORIES = {
 	http_server = {
 		mod = "lib.platform.caps.http_server",
 		build = function(decl)
-			return require("lib.platform.caps.http_server").http_server_cap({ port = decl.port or 0 })
+			return require("lib.platform.caps.http_server").http_server_cap({
+					port = decl.port or 0, host = nil, daemon = nil, url = nil, on_serve = nil,
+				})
 		end,
 	},
 	http_client = {
@@ -402,22 +422,23 @@ function M.run_app(path, entry_key, opts)
 	local context = opts.context or {}
 
 	-- Load app
-	local app, err = M.load_app(path)
-	if not app then return false, err end
+	local app_m, err = M.load_app(path)
+	if not app_m then return false, err end
+	local app = app_m or error("unreachable")
 
 	-- Merge top-level and per-entry cap declarations
-	local manifest = app.manifest or {}
+	local manifest = app.manifest
 	local cap_declarations = {}
 
 	-- Top-level caps
-	if manifest.caps then
+	if manifest and manifest.caps then
 		for name, decl in pairs(manifest.caps) do
 			cap_declarations[name] = decl
 		end
 	end
 
 	-- Per-entry caps (override/merge with top-level)
-	local entry_map = manifest.entry or {}
+	local entry_map = manifest and manifest.entry or {}
 	local entry_def = entry_map[entry_key]
 	if type(entry_def) == "table" and entry_def.caps then
 		for name, decl in pairs(entry_def.caps) do
@@ -427,7 +448,7 @@ function M.run_app(path, entry_key, opts)
 
 	-- Default context fields from manifest
 	if not context.app_id then
-		context.app_id = manifest.name or "unknown"
+		context.app_id = manifest and manifest.name or "unknown"
 	end
 	if not context.user_id then
 		context.user_id = "default"

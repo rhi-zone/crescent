@@ -1781,6 +1781,24 @@ local function peek_callee_ret_union(ctx, callee_n)
                 if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
             end
         end
+    elseif callee_n.kind == defs.NODE_METHOD_CALL then
+        -- Method call recv:method(...): look up method in receiver's type eagerly.
+        -- This enables peek_callee_ret_union to work for e.g. str:match(pat)
+        -- so that multi-return bindings are eager (not deferred via C_INDEX).
+        local recv_n = ctx.nodes:get(callee_n.data[0])
+        if recv_n then
+            local recv_tid = env_mod.lookup(ctx.scope,
+                recv_n.kind == defs.NODE_IDENTIFIER and recv_n.data[0] or 0)
+            if not recv_tid and recv_n.kind == defs.NODE_IDENTIFIER then
+                recv_tid = env_mod.lookup(ctx.scope, recv_n.data[0])
+            end
+            if recv_tid then
+                recv_tid = types_mod.find(ctx, recv_tid)
+                local method_id = callee_n.data[1]
+                local fe = types_mod.table_field(ctx, recv_tid, method_id)
+                if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
+            end
+        end
     end
     if not fn_tid then return nil end
     local fn_t = ctx.types:get(fn_tid)
@@ -1829,6 +1847,11 @@ local function eager_slot(ctx, tid, slot)
             return types_mod.find(ctx, et.data[0])
         end
         return elem_id
+    end
+    -- A raw vararg spread (e.g. string.match returns ...(string | nil)):
+    -- each slot extracts the inner element type.
+    if t.tag == defs.TAG_SPREAD then
+        return types_mod.find(ctx, t.data[0])
     end
     if t.tag == defs.TAG_TUPLE then
         if slot < t.data[1] then
@@ -1990,6 +2013,41 @@ ExprRule[NODE_METHOD_CALL] = function(ctx, nid)
     emit(ctx, { C_BIND_GENERICS, inst_method, arg_tids, ret, n.line, n.col })
     emit(ctx, { C_CHECK_ARGS,    inst_method, arg_tids, ret, n.line, n.col })
     ctx._last_multi_return = { ret }
+
+    -- Eagerly peek the method's return type so LOCAL_STMT can extract slots at
+    -- constraint-gen time (enabling narrowing of e.g. `local a, b = str:match(...)`).
+    -- Look up the method directly in the receiver's concrete type (if known).
+    local recv_resolved = types_mod.find(ctx, recv_tid)
+    local fe = types_mod.table_field(ctx, recv_resolved, method_name_id)
+    if fe then
+        local mth_fn_tid = types_mod.find(ctx, fe.type_id)
+        local mth_fn_t = ctx.types:get(mth_fn_tid)
+        if mth_fn_t.tag == TAG_FUNCTION and mth_fn_t.data[3] == 1 then
+            -- Check it's not generic
+            local is_generic = false
+            for pi = mth_fn_t.data[0], mth_fn_t.data[0] + mth_fn_t.data[1] - 1 do
+                local ptid = types_mod.find(ctx, ctx.lists:get(pi))
+                if ctx.types:get(ptid).flags == defs.FLAG_GENERIC then
+                    is_generic = true; break
+                end
+            end
+            if not is_generic then
+                local ret_slot = types_mod.find(ctx, ctx.lists:get(mth_fn_t.data[2]))
+                local ret_t = ctx.types:get(ret_slot)
+                if ret_t.tag ~= TAG_VAR and ret_t.tag ~= TAG_ROWVAR
+                    and ret_t.tag ~= defs.TAG_TYPE_CALL then
+                    local override
+                    if ret_t.tag == defs.TAG_SPREAD then
+                        override = types_mod.find(ctx, ret_t.data[0])
+                    else
+                        override = types_mod.make_tuple(ctx, { ret_slot })
+                    end
+                    ctx._last_multi_return_override = override
+                end
+            end
+        end
+    end
+
     return ret
 end
 

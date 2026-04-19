@@ -57,7 +57,7 @@ local M = {}
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
---:: launch_token_record = { app_id: string, session_id: string, expires_at: integer }
+--:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
 --:: app_session_record = { app_id: string, created_at: integer, last_seen: integer }
 --:: daemon = {
 --::   handle: (http_req, http_res) -> nil,
@@ -140,7 +140,10 @@ function M.classify_host(host, daemon_host, loopback_ip_to_id)
 	local daemon_name = daemon_host:match("^([^:]+)") or daemon_host
 	local id, suffix = host:match("^app%-([^.]+)%.(.+)$")
 	if id and suffix then
-		local suffix_name = suffix:match("^([^:]+)") or suffix
+		-- Narrowing blocked: typechecker can't narrow deferred multi-return vars in
+		-- if-conditions; use `or ""` to force `string | nil` → `string`.
+		local suffix_s = suffix or ""
+		local suffix_name = suffix_s:match("^([^:]+)") or suffix_s
 		if suffix_name == daemon_name then
 			return { kind = "app", id = id, loopback = nil }
 		end
@@ -282,9 +285,11 @@ function M.make(opts)
 	-- many apps concurrently.
 	local cache = require("lib.cache")
 	local handler_cache_cap = opts.handler_cache_size or 64
+	local ttl_clock = opts.handler_ttl and time_fn or nil --: (() -> number) | nil
 	local app_handlers = assert(cache.new(handler_cache_cap, {
-		ttl   = opts.handler_ttl,
-		clock = opts.handler_ttl and time_fn or nil,
+		ttl      = opts.handler_ttl,
+		clock    = ttl_clock,
+		on_evict = nil,
 	})) --: unknown
 
 	-- Negative cache for load failures. Retained across requests so a broken
@@ -296,7 +301,7 @@ function M.make(opts)
 
 	-- Per-app CSP cache: app_id → computed CSP string. Populated at handler-load
 	-- time. Not LRU — CSP strings are tiny and recomputed on reload anyway.
-	local app_csp = {} --: { [string]: string }
+	local app_csp = {} --: { [string]: string | nil }
 
 	-- Per-session rate limiters. Token bucket keyed by session ID.
 	-- /launch: 5 per 10 s (burst=5) — one-shot tokens; even a fast human
@@ -469,11 +474,10 @@ function M.make(opts)
 				res.body = "app load failed: " .. msg
 				return
 			end
-			-- `assert` is the idiomatic narrowing cast: returns its first arg if
-			-- truthy, raises otherwise. Unreachable here because of the check
-			-- above, but the typechecker cannot narrow `handler` across the
-			-- tuple-return + early-return boundary, so we re-state the invariant.
-			local fn = assert(handler)
+			-- Unreachable: handler was checked above, but the typechecker cannot
+			-- narrow across the tuple-return + early-return boundary.
+			if not handler then return end
+			local fn = handler or error("unreachable")
 			-- Cache BEFORE invoking: a throwing handler must not be evicted.
 			app_handlers:set(app_id, fn)
 			-- Compute and cache the app's CSP alongside its handler.
@@ -618,7 +622,8 @@ function M.make(opts)
 			-- Preserve the daemon's port part (if any) when building the URL.
 			local port = host:match(":(%d+)$")
 			if port then
-				return "http://" .. ip .. ":" .. port
+				-- Narrowing blocked: typechecker can't narrow deferred multi-return vars.
+				return "http://" .. ip .. ":" .. (port or "")
 			end
 			return "http://" .. ip
 		end
@@ -665,22 +670,26 @@ function M.make(opts)
 	-- form-action restricted to self. All user/app strings HTML-escaped.
 	-- Requires an existing valid session.
 
+	--: (http_req, http_res) -> nil
 	r:get("/apps/:id/grant", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and sessions[presented] or nil
-		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_grant = time_fn() --: integer
+		if not sess_rec or (now_grant - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then rawset(sessions, presented, nil) end
 			plain(res, 401, "unauthorized")
 			return
 		end
 		sess_rec.last_seen = time_fn()
 
-		local app_id_str = (req.path or ""):match("^/apps/(%d+)/grant$")
-		if not app_id_str or not index_obj then
+		local app_id_str_m = (req.path or ""):match("^/apps/(%d+)/grant$")
+		if not app_id_str_m or not index_obj then
 			plain(res, 404, "not found")
 			return
 		end
+		-- Narrowing blocked: compound `or` guards can't narrow deferred multi-return vars.
+		local app_id_str = app_id_str_m or ""
 		local app_id = tonumber(app_id_str)
 		local row = index_obj:get(app_id)
 		if not row then
@@ -714,7 +723,7 @@ function M.make(opts)
 				.. ' <label><input type=radio name="cap_' .. h(cname) .. '" value=deny '  .. deny_checked  .. '> Deny</label></td></tr>'
 		end
 
-		local app_name = h(manifest.name or row.name or ("App " .. app_id_str))
+		local app_name = h(manifest.name or row.name or ("App " .. (app_id_str or "")))
 		local body = '<!doctype html>\n<html lang=en>\n<head>\n'
 			.. '<meta charset=utf-8>\n<meta name=viewport content="width=device-width,initial-scale=1">\n'
 			.. '<title>Grant permissions — ' .. app_name .. '</title>\n'
@@ -748,11 +757,13 @@ function M.make(opts)
 	-- invalidates the cached handler so the next request re-loads with new caps,
 	-- then 303-redirects to the app origin.
 
+	--: (http_req, http_res) -> nil
 	r:post("/apps/:id/grant", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and sessions[presented] or nil
-		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_post_grant = time_fn() --: integer
+		if not sess_rec or (now_post_grant - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then rawset(sessions, presented, nil) end
 			plain(res, 401, "unauthorized")
 			return
@@ -765,11 +776,13 @@ function M.make(opts)
 
 		sess_rec.last_seen = time_fn()
 
-		local app_id_str = (req.path or ""):match("^/apps/(%d+)/grant$")
-		if not app_id_str or not index_obj then
+		local app_id_str_m = (req.path or ""):match("^/apps/(%d+)/grant$")
+		if not app_id_str_m or not index_obj then
 			plain(res, 404, "not found")
 			return
 		end
+		-- Narrowing blocked: compound `or` guards can't narrow deferred multi-return vars.
+		local app_id_str = app_id_str_m or ""
 
 		local params = parse_form(req.body)
 
@@ -815,6 +828,7 @@ function M.make(opts)
 	-- Query params: source=<source_id>&entry=<entry_id>
 	-- Requires a valid session. Reads the PNG from source.handler(GET /card/:id),
 	-- runs the import pipeline, indexes the app, and returns JSON {app_id, launch_url}.
+	--: (http_req, http_res) -> nil
 	r:post("/api/import-card", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
@@ -836,12 +850,15 @@ function M.make(opts)
 
 		-- Parse query params (source + entry).
 		local qs = req.query or ""
-		local qparams = {}
+		local qparams = {} --: { [string]: string }
 		for kv in qs:gmatch("[^&]+") do
 			local k, v = kv:match("^([^=]+)=?(.*)")
 			if k then
-				qparams[k:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end)]
-					= v:gsub("%%(%x%x)", function(x) return string.char(tonumber(x, 16)) end)
+				-- Narrowing blocked: typechecker can't narrow deferred multi-return vars.
+				local k_s, v_s = k or "", v or ""
+				local kd = k_s:gsub("%%(%x%x)", function(x) return string.char(math.floor(tonumber(x, 16) or 0)) end) --: string
+				local vd = v_s:gsub("%%(%x%x)", function(x) return string.char(math.floor(tonumber(x, 16) or 0)) end) --: string
+				qparams[kd] = vd
 			end
 		end
 		local src_id = qparams.source
@@ -956,7 +973,8 @@ function M.make(opts)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and sessions[presented] or nil
-		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_launch = time_fn() --: integer
+		if not sess_rec or (now_launch - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then rawset(sessions, presented, nil) end
 			plain(res, 401, "unauthorized")
 			return
@@ -976,11 +994,13 @@ function M.make(opts)
 			return
 		end
 
-		local app_id = (req.path or ""):match("^/launch/(.+)$")
-		if not app_id or app_id == "" then
+		local app_id_m = (req.path or ""):match("^/launch/(.+)$")
+		if not app_id_m or app_id_m == "" then
 			plain(res, 404, "app not found")
 			return
 		end
+		-- Narrowing blocked: compound `or` guards can't narrow deferred multi-return vars.
+		local app_id = app_id_m or ""
 
 		if not app_exists(app_id) then
 			plain(res, 404, "app not found")
@@ -1040,11 +1060,13 @@ function M.make(opts)
 	-- File deletion failure is non-fatal: the index row is already gone so the
 	-- app is effectively uninstalled. The operator sees the error via
 	-- on_handler_error if configured.
+	--: (http_req, http_res) -> nil
 	r:delete("/api/apps/:id", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and sessions[presented] or nil
-		if not sess_rec or (time_fn() - sess_rec.last_seen) >= SESSION_IDLE_TTL then
+		local now_delete = time_fn() --: integer
+		if not sess_rec or (now_delete - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			if sess_rec and presented then rawset(sessions, presented, nil) end
 			plain(res, 401, "unauthorized")
 			return
@@ -1104,7 +1126,7 @@ function M.make(opts)
 		local path = req.path or "/"
 		local qs_from_path = path:match("%?(.+)$")
 		local qs = req.query or qs_from_path
-		local params = parse_query_string(qs)
+		local params = parse_query_string(qs or "")
 		local token = params["__launch"]
 		if not token then return false end
 
@@ -1181,7 +1203,7 @@ function M.make(opts)
 		local is_launch_path = path:sub(1, 8) == "/launch/"
 		local sid --: string | nil
 		local minted = false
-		local now = time_fn()
+		local now = time_fn() --: integer
 		local sess_rec = presented and sessions[presented] or nil
 		if sess_rec and (now - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			-- Stale cookie: drop it and treat as unauthenticated. On non-launch

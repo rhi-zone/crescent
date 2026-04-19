@@ -828,6 +828,13 @@ local function solve_index(ctx, c)
             bind_to(ctx, res_tid, ctx.T_NEVER)
             return true
         end
+        -- Vararg spread (e.g. ...(string|nil) from string.match): each slot is
+        -- the inner element type. This covers method calls like str:match(pat)
+        -- where the return type resolves to TAG_SPREAD before C_INDEX fires.
+        if obj_t.tag == TAG_SPREAD then
+            bind_to(ctx, res_tid, find(ctx, obj_t.data[0]))
+            return true
+        end
         -- Non-tuple: slot 0 = the value itself, others = nil
         if slot == 0 then
             unify_mod.unify(ctx, res_tid, obj_tid)
