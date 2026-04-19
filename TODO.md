@@ -309,7 +309,7 @@ Items that currently lack an implementer-ready spec:
 - [x] **Argument literal widening at typevar binding** — was already handled by `widen_for_sub` in `solve_callable`. Clarified with explicit `widen_literal` helper + comments + 10 tests confirming the behavior (ad58bc6).
 - [x] **GAP-HKT3 fix: `$Opaque` keys in lib/fp/** — applied to all 10 typeclass modules + 9 instance modules. `fa[Mappable.key]` now resolves via FLAG_OPAQUE_KEY. (2026-03-29, 839610f)
 - [x] **`$Require<T>` as parameterized intrinsic** — implemented (9d92308). `expand_require` in intrinsic.lua; `resolve_deferred_intrinsic` in solve.lua evaluates TAG_TYPE_CALL on TAG_INTRINSIC callees after arg solving. Module declaration processing moved to pass 0. constrain.lua special case preserved pending full de-specialcase.
-- [ ] **De-specialcase builtins** — `require` (f468b72), `pcall`/`xpcall` (d7950de), `pairs`/`ipairs` (d7950de) done. All stdlib tables (string/table/math/io/os/coroutine/debug + primitive meta types) now declared in stdlib_types.lua (33640d0). Remaining special-casing: `type()` narrowing in narrow.lua (justified, can stay), `require()` side effects in constrain.lua (architectural). Still too-loose: `select()` (needs overloads or literal matching), `string.match`/`gmatch`/`gsub` (need pattern introspection). `assert` and `error` are clean.
+- [ ] **De-specialcase builtins** — `require` (f468b72), `pcall`/`xpcall` (d7950de), `pairs`/`ipairs` (d7950de) done. All stdlib tables (string/table/math/io/os/coroutine/debug + primitive meta types) now declared in stdlib_types.lua (33640d0). Remaining special-casing: `type()` narrowing in narrow.lua (justified, can stay), `require()` side effects in constrain.lua (architectural). Still too-loose: `select()` (needs overloads or literal matching). `string.match` ($PatternReturn<P>), `string.gmatch` ($PatternReturn<P> via iterator), `string.find` ($FindReturn<P>) all have pattern introspection. `string.gsub` returns `(string, integer)` and needs no pattern introspection. `assert` and `error` are clean.
 - [x] **Eliminate intrinsics via `match` arm patterns** — MOSTLY DONE. Function-type arms, indexer arms, spread-in-tuple-position, all-fields pattern, and capture sigil all implemented (2026-03-29–30). `$PcallReturn`, `$PairsReturn`, `$IpairsReturn`, `$Keys`, `$Values`, `$IpairsValues` all deleted and replaced with pure match aliases in stdlib_types.lua.
   **Remaining intrinsics (permanent or blocked):**
   - `$Require<T>` — permanent; module system, needs literal type propagation through generics
@@ -368,7 +368,9 @@ Items that currently lack an implementer-ready spec:
 
 - [x] **Over-broad `any` return types** — PARTIALLY FIXED (06c6b38). Tightened 7: `coroutine.status` (literal union), `string.gmatch` (`function`), `table.remove` (`any | nil`), `coroutine.create`/`wrap`/`resume`/`yield` (function params + multi-return). Remaining:
   - `assert` → needs `typeof(val)` (type-level computation)
-  - `string.match` → needs pattern-dependent captures
+  - `string.match` → DONE ($PatternReturn<P>, 2026-04-19)
+  - `string.gmatch` → DONE ($PatternReturn<P> in iterator, 2026-04-19)
+  - `string.find` → DONE ($FindReturn<P>, 2026-04-19)
   - `os.date` → format-dependent return (`string | { [string]: integer }`)
   - `io.open` / `io.popen` → needs file handle opaque type
   - Parser limitation: function types in table field return positions break the annotation parser silently

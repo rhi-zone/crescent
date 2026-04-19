@@ -8088,6 +8088,75 @@ local x = ("hello"):match("hel(lo)")
     end)
 end)
 
+assert.describe("stdlib: string.gmatch with $PatternReturn", function()
+    assert.it("gmatch 1 capture: iterator yields string | nil", function()
+        no_errors([[
+for w in ("hello world"):gmatch("(%a+)") do
+--: string | nil
+local _w = w
+end
+]])
+    end)
+
+    assert.it("gmatch 2 captures: iterator yields two string | nil values", function()
+        no_errors([[
+for a, b in ("a1b2"):gmatch("(%a)(%d)") do
+--: string | nil
+local _a = a
+--: string | nil
+local _b = b
+end
+]])
+    end)
+
+    assert.it("gmatch 0 captures: iterator yields string | nil", function()
+        no_errors([[
+for w in ("hello world"):gmatch("%a+") do
+--: string | nil
+local _w = w
+end
+]])
+    end)
+end)
+
+assert.describe("stdlib: string.find with $FindReturn", function()
+    assert.it("find 0 captures: s and e are integer when non-nil", function()
+        no_errors([[
+local s, e = ("hello"):find("hello")
+if s then
+--: integer
+local _s = s
+--: integer
+local _e = e
+end
+]])
+    end)
+
+    assert.it("find 1 capture: s, e are integer; cap is string | nil", function()
+        no_errors([[
+local s, e, cap = ("hello"):find("e(l)")
+if s then
+--: integer
+local _s = s
+--: integer
+local _e = e
+--: string | nil
+local _cap = cap
+end
+]])
+    end)
+
+    assert.it("gsub returns string and integer", function()
+        no_errors([[
+local r, n = ("hello"):gsub("l", "r")
+--: string
+local _r = r
+--: integer
+local _n = n
+]])
+    end)
+end)
+
 assert.describe("stdlib: math table declared", function()
     assert.it("math.floor returns integer", function()
         no_errors([[

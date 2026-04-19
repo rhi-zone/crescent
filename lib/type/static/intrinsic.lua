@@ -821,6 +821,46 @@ local function expand_pattern_return(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
+-- $FindReturn<P>
+-- ---------------------------------------------------------------------------
+-- Given a Lua pattern string literal P, compute the return type of string.find:
+--   - 0 captures → (integer, integer) | nil
+--   - N captures → (integer, integer, string|nil × N) | nil
+-- Dynamic (non-literal) patterns fall back to (integer, integer) | nil.
+--
+-- "| nil" here represents "no match": when the function returns nil the caller
+-- gets nil for every slot.  We model this as a union of the success tuple and
+-- T_NIL, which the multi-return narrowing machinery already handles via the
+-- correlated-multi-return path (same as the old find annotation).
+local function expand_find_return(ctx, arg_ids)
+    local t_integer --: integer
+    t_integer = ctx.T_INTEGER
+    local t_nil --: integer
+    t_nil = ctx.T_NIL
+    local t_string --: integer
+    t_string = ctx.T_STRING
+    local str_nil = types_mod.make_union(ctx, { t_string, t_nil })
+
+    local n = 0  -- default: 0 captures
+    if #arg_ids == 1 then
+        local P_tid = types_mod.find(ctx, arg_ids[1])
+        local P_t = ctx.types:get(P_tid)
+        if P_t.tag == TAG_LITERAL and P_t.data[0] == LIT_STRING then
+            local pat = intern_mod.get(ctx.pool, P_t.data[1]) or ""
+            n = count_pattern_captures(pat)
+        end
+    end
+
+    -- Build (integer, integer, string|nil × n) success tuple.
+    local slots = { t_integer, t_integer }
+    for _ = 1, n do
+        slots[#slots + 1] = str_nil
+    end
+    local success_tid = types_mod.make_tuple(ctx, slots)
+    return types_mod.make_union(ctx, { success_tid, t_nil })
+end
+
+-- ---------------------------------------------------------------------------
 -- Public entry point
 -- ---------------------------------------------------------------------------
 
@@ -864,6 +904,10 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "PatternReturn" then
         return expand_pattern_return(ctx, arg_ids)
+    end
+
+    if name == "FindReturn" then
+        return expand_find_return(ctx, arg_ids)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative
