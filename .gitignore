@@ -12,6 +12,9 @@ docs/.vitepress/dist/
 .vscode/
 *.swp
 
+# Crescent runtime cache
+.crescentcache/
+
 # Normalize
 .normalize/*
 !.normalize/config.toml
