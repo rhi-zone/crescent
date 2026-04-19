@@ -223,78 +223,21 @@ rt = N.runtime({ executors = { foo = function() rt:bar() end } })
 
 The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
 
-## Verify state before acting on it
+## Verify state before acting on assumptions
 
-Most catastrophic actions in a session aren't first-order mistakes — they're
-second-order: acting confidently on a *wrong assumption about state*.
-Examples:
+The filesystem is ground truth, not your memory of it or an agent's narrative
+output. Before acting on "the agent must have…", "the file should still be…",
+"this failure must be from my change…": run `git status`/`git log`/re-Read
+the file/`git stash` and re-test. Cost of one check is always lower than the
+wrong action plus cleanup.
 
-- Assuming a delegated agent didn't commit because you didn't see a commit
-  hash in its output → re-delegating and producing duplicate/conflicting work
-- Assuming a file is unchanged since you last read it → editing based on a
-  stale mental model and overwriting someone else's changes
-- Assuming a test failure is from your change → reverting good work to chase
-  a pre-existing flake
-- Assuming a command failed because of error output → re-running and getting
-  half-applied state
+## Pause before guessing in unfamiliar territory
 
-The fix is mechanical: before acting on a state assumption, check the actual
-state. The cost of one verifying command is always less than the cost of a
-wrong action plus its cleanup. Concretely:
-
-- After a delegated/background agent: `git status`, `git log -1`, `git diff`
-  before deciding what state the repo is in. The agent's narrative output is
-  not the ground truth — the filesystem is.
-- Before editing a file you read more than a few tool calls ago: re-Read it.
-- Before treating a test failure as caused by your change: stash your change
-  and verify the test passes on the prior state. (`git stash` is reversible.)
-- Before claiming a command "failed": check the exit code and what actually
-  changed, not just stderr text.
-
-If you find yourself thinking "the agent must have…", "the file should still
-be…", "this must be from my change…" — that's a state assumption. Verify it.
-
-## Don't write a wrong attempt in the first place
-
-Even one rejected attempt poisons the context: the failed variation, your
-explanation of it, and the user's correction all anchor subsequent reasoning
-on the wrong axis. By the time the user says "wrong," the damage is done —
-the next attempt is reaching into a context already shaped by the failure.
-Recovery costs more tokens than getting it right.
-
-So: in any domain where you're not certain you understand the semantic
-constraints, **state your understanding before acting**, not after being
-corrected.
-
-Before making a non-trivial change in unfamiliar semantic territory:
-
-1. State, in one or two sentences, the semantic property you believe the
-   change must satisfy (what invariant is preserved, which use cases must
-   keep working, why this shape and not another).
-2. Confirm that reading with the user.
-3. Only then write code.
-
-This is cheap when you're right (one sentence the user nods at) and saves
-catastrophe when you're wrong (a sentence-level correction beats a
-file-level revert and a polluted scrollback).
-
-Heuristics for "unfamiliar semantic territory":
-- Type system / formal semantics work
-- API design where the *shape* of the type matters as much as the operations
-- Anywhere you've recently been corrected on the same surface
-- Anywhere the user uses words like "garbage," "wrong," or asks "why" about
-  your reasoning
-
-If you find yourself writing a syntactic variation of something you just
-wrote — different return type, different parameter shape, different alias
-form — that's the signal to stop and ask, not to ship. The pattern means
-you're guessing.
-
-Failure mode to avoid: cycling through syntactic variations without ever
-asking which property each option violates. One real example burned ~25
-attempts at `ffi.new` argument typing through `<T: string>` → `unknown` →
-`any` → `Cdata<unknown>` → no string path → `<T: string>` again. See
-`docs/ffi-types.md`.
+If you can't state in one sentence the semantic property your change must
+satisfy, you're guessing — say so and ask, don't ship. Especially: writing
+another syntactic variation of what you just wrote (different return type,
+different alias shape) is the loop signal. See `docs/ffi-types.md` for an
+example that burned ~25 attempts.
 
 ## Negative Constraints
 
