@@ -51,8 +51,8 @@
 --:: Ctype<T> = $Opaque<T>
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      <T: string>(ct: T, ...any) -> Cdata<T>,
---::   cast:     <T: string>(ct: T, obj: unknown) -> Cdata<T>,
+--::   new:      (<T: string>(ct: T, ...any) -> Cdata<T>) & (<T>(ct: Ctype<T>, ...any) -> Cdata<T>),
+--::   cast:     (<T: string>(ct: T, obj: unknown) -> Cdata<T>) & (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>),
 --::   sizeof:   (ct: string | unknown) -> integer,
 --::   typeof:   <T: string>(ct: T) -> Ctype<T>,
 --::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
@@ -60,7 +60,7 @@
 --::   string:   (ptr: unknown, len: integer | nil) -> string,
 --::   load:     (name: string, global: boolean | nil) -> unknown,
 --::   gc:       <T>(cdata: Cdata<T>, finalizer: ((Cdata<T>) -> ()) | nil) -> Cdata<T>,
---::   metatype: <T: string>(ct: T, metatable: { [string]: unknown, ... }) -> Ctype<T>,
+--::   metatype: <T>(ct: Ctype<T>, metatable: { [string]: unknown, ... }) -> Ctype<T>,
 --::   istype:   (ct: string | unknown, obj: unknown) -> boolean,
 --::   alignof:  (ct: string | unknown) -> integer,
 --::   offsetof: (ct: string | unknown, field: string) -> integer,
