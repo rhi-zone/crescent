@@ -223,6 +223,37 @@ rt = N.runtime({ executors = { foo = function() rt:bar() end } })
 
 The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
 
+## Verify state before acting on it
+
+Most catastrophic actions in a session aren't first-order mistakes — they're
+second-order: acting confidently on a *wrong assumption about state*.
+Examples:
+
+- Assuming a delegated agent didn't commit because you didn't see a commit
+  hash in its output → re-delegating and producing duplicate/conflicting work
+- Assuming a file is unchanged since you last read it → editing based on a
+  stale mental model and overwriting someone else's changes
+- Assuming a test failure is from your change → reverting good work to chase
+  a pre-existing flake
+- Assuming a command failed because of error output → re-running and getting
+  half-applied state
+
+The fix is mechanical: before acting on a state assumption, check the actual
+state. The cost of one verifying command is always less than the cost of a
+wrong action plus its cleanup. Concretely:
+
+- After a delegated/background agent: `git status`, `git log -1`, `git diff`
+  before deciding what state the repo is in. The agent's narrative output is
+  not the ground truth — the filesystem is.
+- Before editing a file you read more than a few tool calls ago: re-Read it.
+- Before treating a test failure as caused by your change: stash your change
+  and verify the test passes on the prior state. (`git stash` is reversible.)
+- Before claiming a command "failed": check the exit code and what actually
+  changed, not just stderr text.
+
+If you find yourself thinking "the agent must have…", "the file should still
+be…", "this must be from my change…" — that's a state assumption. Verify it.
+
 ## Don't write a wrong attempt in the first place
 
 Even one rejected attempt poisons the context: the failed variation, your
