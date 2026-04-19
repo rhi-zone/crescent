@@ -85,8 +85,50 @@ function M.has_errors(err_ctx)
     return #err_ctx.errors > 0
 end
 
+local TAB_SIZE = 4
+
+-- Expand tab characters in a string using TAB_SIZE-column tab stops.
+local function expand_tabs(s)
+    if not s:find("\t", 1, true) then return s end
+    local out = {}
+    local vcol = 0
+    for i = 1, #s do
+        local ch = s:sub(i, i)
+        if ch == "\t" then
+            local n = TAB_SIZE - (vcol % TAB_SIZE)
+            out[#out + 1] = string.rep(" ", n)
+            vcol = vcol + n
+        else
+            out[#out + 1] = ch
+            vcol = vcol + 1
+        end
+    end
+    return table.concat(out)
+end
+
+-- Visual column (0-indexed) of byte offset `boff` (0-indexed) in s, after tab expansion.
+local function visual_col(s, boff)
+    local vcol = 0
+    for i = 1, boff do
+        if s:sub(i, i) == "\t" then
+            vcol = vcol + (TAB_SIZE - (vcol % TAB_SIZE))
+        else
+            vcol = vcol + 1
+        end
+    end
+    return vcol
+end
+
+-- Width of the token starting at byte offset `boff` (0-indexed) in s.
+local function token_width(s, boff)
+    local n = 0
+    local i = boff + 1
+    while i + n <= #s and s:sub(i + n, i + n):match("[%w_]") do n = n + 1 end
+    return n > 0 and n or 1
+end
+
 -- Append source context (line + caret) to an output lines table.
--- col is 0-indexed. line_num is 1-indexed.
+-- col is 1-indexed (lexer convention). line_num is 1-indexed.
 --: ({ [integer]: string, ... }, { [string]: { [integer]: string, ... }, ... } | nil, string, integer, integer | nil) -> ()
 local function append_context(out, source_lines, filename, line_num, col)
     if not source_lines then return end
@@ -94,10 +136,13 @@ local function append_context(out, source_lines, filename, line_num, col)
     if not file_lines or not file_lines[line_num] then return end
     local src = file_lines[line_num]
     local prefix = string.format("  %d | ", line_num)
-    out[#out + 1] = prefix .. src
-    local c = col or -1
-    if c >= 0 then
-        out[#out + 1] = string.rep(" ", #prefix + c) .. "^"
+    out[#out + 1] = prefix .. expand_tabs(src)
+    local c = col or 0
+    if c > 0 then
+        local boff = c - 1
+        local vcol = visual_col(src, boff)
+        local width = token_width(src, boff)
+        out[#out + 1] = string.rep(" ", #prefix + vcol) .. string.rep("^", width)
     end
 end
 
@@ -148,11 +193,14 @@ local function append_context_ansi(out, source_lines, filename, line_num, col, c
     if not file_lines or not file_lines[line_num] then return end
     local src = file_lines[line_num]
     local prefix = string.format("  %d | ", line_num)
-    out[#out + 1] = ANSI.dim .. prefix .. src .. ANSI.reset
-    local c = col or -1
-    if c >= 0 then
+    out[#out + 1] = ANSI.dim .. prefix .. expand_tabs(src) .. ANSI.reset
+    local c = col or 0
+    if c > 0 then
         local cc = caret_color or ANSI.red
-        out[#out + 1] = string.rep(" ", #prefix + c) .. cc .. "^" .. ANSI.reset
+        local boff = c - 1
+        local vcol = visual_col(src, boff)
+        local width = token_width(src, boff)
+        out[#out + 1] = string.rep(" ", #prefix + vcol) .. cc .. string.rep("^", width) .. ANSI.reset
     end
 end
 
