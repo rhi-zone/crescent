@@ -1038,6 +1038,15 @@ function M.parse_annotations(annotations, pool, filename)
                     it.data[1] = key
                     ty = idx
                 end
+            elseif peek(s) == byte("?") then
+                advance(s)  -- skip '?'
+                -- Postfix nullable: T? → T | nil
+                local nil_type = alloc_type(defs.TAG_NIL)
+                local ms, ml = flush_type_list({ ty, nil_type })
+                local u = alloc_type(defs.TAG_UNION)
+                types:get(u).data[0] = ms
+                types:get(u).data[1] = ml
+                ty = u
             else
                 break
             end

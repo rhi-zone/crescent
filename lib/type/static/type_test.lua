@@ -9522,4 +9522,20 @@ x = 42
 x = true
 ]])
     end)
+
+    assert.it("PASS: T? postfix nullable — T? in type position expands to T | nil", function()
+        v3_no_errors([[
+--:: Inner = { x: integer }
+--:: Outer = { a: Inner?, b: string? }
+--:: declare v = Outer
+]])
+    end)
+
+    assert.it("PASS: T? alias ref — alias containing T? field is usable by other aliases", function()
+        v3_no_errors([[
+--:: Inner = { x: integer }
+--:: Outer = { a: Inner? }
+--:: declare f = (Outer) -> integer | nil
+]])
+    end)
 end)
