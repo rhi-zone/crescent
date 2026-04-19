@@ -6840,6 +6840,63 @@ local x = uid
 local x = i
 ]], "nominal")
     end)
+
+    -- Arithmetic auto-unwraps newtype to underlying type.
+    -- Result is the underlying type, not the newtype (intentional promotion).
+    assert.it("newtype + integer literal: result is underlying type", function()
+        no_errors([[
+--:: newtype Int32 = integer
+--:: declare x = Int32
+--: integer
+local y = x + 1
+]])
+    end)
+
+    assert.it("unary minus on newtype: result is underlying type", function()
+        no_errors([[
+--:: newtype Int32 = integer
+--:: declare x = Int32
+--: integer
+local y = -x
+]])
+    end)
+
+    assert.it("two newtypes over same underlying: arithmetic typechecks", function()
+        no_errors([[
+--:: newtype Int32 = integer
+--:: declare x = Int32
+--: (Int32) -> integer
+local function f(y) return x + y end
+]])
+    end)
+
+    assert.it("two newtypes over the same base unwrap to compatible underlying", function()
+        no_errors([[
+--:: newtype Int32 = integer
+--:: newtype Int16 = integer
+--:: declare x = Int32
+--:: declare y = Int16
+--: integer
+local z = x + y
+]])
+    end)
+
+    assert.it("newtype-over-string: concat produces string", function()
+        no_errors([[
+--:: newtype Foo = string
+--:: declare x = Foo
+--: string
+local y = x .. " world"
+]])
+    end)
+
+    assert.it("newtype comparison: result is boolean", function()
+        no_errors([[
+--:: newtype Int32 = integer
+--:: declare x = Int32
+local b = x < 2
+]])
+    end)
 end)
 
 ---------------------------------------------------------------------------

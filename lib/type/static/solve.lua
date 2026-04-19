@@ -1506,6 +1506,20 @@ local function solve_arith(ctx, c)
     if lhs_t.tag == TAG_VAR or lhs_t.tag == TAG_ROWVAR then return end
     if rhs_t.tag == TAG_VAR or rhs_t.tag == TAG_ROWVAR then return end
 
+    -- Auto-unwrap TAG_NOMINAL (newtype) for metamethod dispatch — mirrors the
+    -- field-access unwrap. Newtypes inherit their underlying type's operators;
+    -- the result type is the underlying type's metamethod result, which means
+    -- arithmetic "promotes" newtypes back to their underlying type. Walk down
+    -- recursively in case of nested newtypes.
+    while lhs_t.tag == TAG_NOMINAL do
+        lhs_tid = find(ctx, lhs_t.data[2])
+        lhs_t   = ctx.types:get(lhs_tid)
+    end
+    while rhs_t.tag == TAG_NOMINAL do
+        rhs_tid = find(ctx, rhs_t.data[2])
+        rhs_t   = ctx.types:get(rhs_tid)
+    end
+
     -- Dispatch via metamethod lookup: prim_meta for primitives, table meta for tables.
     -- Both operands must support the operation; result is the union of their declared
     -- return types (integer|integer→integer, integer|number→number via make_union subsumption).
@@ -1553,6 +1567,11 @@ local function solve_compare(ctx, c)
     local function is_orderable(ctx, tid)
         tid = find(ctx, tid)
         local t = ctx.types:get(tid)
+        -- Unwrap TAG_NOMINAL (newtype) — comparisons act on the underlying type.
+        while t.tag == TAG_NOMINAL do
+            tid = find(ctx, t.data[2])
+            t   = ctx.types:get(tid)
+        end
         if t.tag == TAG_ANY or t.tag == TAG_UNKNOWN or t.tag == TAG_VAR or t.tag == TAG_ROWVAR then return true end
         if t.tag == TAG_NUMBER or t.tag == TAG_INTEGER then return "number" end
         if t.tag == TAG_STRING then return "string" end
