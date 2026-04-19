@@ -23,12 +23,34 @@ local context  = require("lib.formats.ccv2.context")
 local macro    = require("lib.formats.ccv2.macro")
 local lorebook_mod = require("lib.formats.ccv2.lorebook")
 --:: require "lib.formats.ccv2.ccv2_types"
+--:: require "lib.reactive"
+--:: require "lib.web.js_types"
+--:: declare atob = (string) -> string
+
+--:: AppState = {
+--::   messages: Signal<{ [integer]: { role: string, content: string } }>,
+--::   input_text: Signal<string>,
+--::   loading: Signal<boolean>,
+--::   current_card: Signal<CardData | nil>,
+--::   lorebook: Signal<NormalizedEntry[] | nil>,
+--::   greeting_index: Signal<integer>,
+--::   session_id: Signal<string | nil>,
+--::   user_name: Signal<string>,
+--:: }
+
+--:: Caps = {
+--::   png: { text: (string) -> string | nil } | nil,
+--::   llm: { call: ({ [integer]: { role: string, content: string } }) -> (string | nil, string | nil), count_tokens: (string) -> integer | nil } | nil,
+--::   kv: { get: (string) -> string | nil, set: (string, unknown) -> () } | nil,
+--::   config: { get: (string) -> unknown } | nil,
+--::   ...
+--:: }
 
 local M = {}
 
 -- ── State model ─────────────────────────────────────────────────────────────
 
---: () -> table
+--: () -> AppState
 function M.create_state()
 	return {
 		messages       = R.signal({}),      -- {role, content}[]
@@ -44,7 +66,7 @@ end
 
 -- ── State operations ────────────────────────────────────────────────────────
 
---: (table, string, string) -> nil
+--: (AppState, string, string) -> nil
 function M.append_message(state, role, content)
 	state.messages.update(function(msgs)
 		local new = {}
@@ -55,7 +77,7 @@ function M.append_message(state, role, content)
 end
 
 -- Replace the last message (for regenerate).
---: (table, string, string) -> nil
+--: (AppState, string, string) -> nil
 function M.replace_last_message(state, role, content)
 	state.messages.update(function(msgs)
 		local new = {}
@@ -70,7 +92,7 @@ function M.replace_last_message(state, role, content)
 end
 
 -- Remove the last message if it matches the given role.
---: (table, string) -> { role: string, content: string }?
+--: (AppState, string) -> { role: string, content: string } | nil
 function M.pop_last_message(state, role)
 	local removed
 	state.messages.update(function(msgs)
@@ -83,14 +105,14 @@ function M.pop_last_message(state, role)
 	return removed
 end
 
---: (table) -> nil
+--: (AppState) -> nil
 function M.clear_input(state)
 	state.input_text.set("")
 end
 
 -- ── Macro environment ───────────────────────────────────────────────────────
 
---: (table) -> { [string]: string }
+--: (AppState) -> { [string]: string }
 function M.make_macro_env(state)
 	local card = state.current_card.get()
 	if not card then return {} end
@@ -102,7 +124,7 @@ end
 
 -- ── Card loading ────────────────────────────────────────────────────────────
 
---: (table, table) -> CardData | nil, string
+--: (AppState, Caps) -> CardData | nil, string
 function M.load_card(state, caps)
 	if not caps or not caps.png then return nil, "no png capability" end
 	local raw = caps.png.text("chara")
@@ -135,7 +157,7 @@ end
 -- ── Greeting management ─────────────────────────────────────────────────────
 
 -- Get all available greetings (first_mes + alternate_greetings).
---: (table) -> string[]
+--: (AppState) -> string[]
 function M.get_greetings(state)
 	local card = state.current_card.get()
 	if not card then return {} end
@@ -154,7 +176,7 @@ function M.get_greetings(state)
 end
 
 -- Get the current greeting with macros expanded.
---: (table) -> string?
+--: (AppState) -> string | nil
 function M.get_current_greeting(state)
 	local greetings = M.get_greetings(state)
 	if #greetings == 0 then return nil end
@@ -165,7 +187,7 @@ function M.get_current_greeting(state)
 end
 
 -- Cycle to next/previous greeting (before conversation starts).
---: (table, number) -> nil
+--: (AppState, number) -> nil
 function M.cycle_greeting(state, delta)
 	local greetings = M.get_greetings(state)
 	if #greetings <= 1 then return end
@@ -182,7 +204,7 @@ end
 -- ── Context assembly ────────────────────────────────────────────────────────
 
 -- Build context using the full context assembly engine.
---: (table, table) -> { role: string, content: string }[]
+--: (AppState, Caps) -> { role: string, content: string }[]
 function M.build_context(state, caps)
 	local card = state.current_card.get()
 	local msgs = state.messages.get()
@@ -234,7 +256,7 @@ end
 
 -- ── Send flow ───────────────────────────────────────────────────────────────
 
---: (table, table) -> string | nil, string
+--: (AppState, Caps) -> string | nil, string
 function M.send_message(state, caps)
 	local text = state.input_text.get()
 	if not text or #text == 0 then return nil, "empty input" end
@@ -259,7 +281,7 @@ function M.send_message(state, caps)
 end
 
 -- Regenerate the last assistant response.
---: (table, table) -> string | nil, string
+--: (AppState, Caps) -> string | nil, string
 function M.regenerate(state, caps)
 	if state.loading.get() then return nil, "already loading" end
 	-- Remove the last assistant message
@@ -283,7 +305,7 @@ function M.regenerate(state, caps)
 end
 
 -- Continue: ask the LLM to continue without a user message.
---: (table, table) -> string | nil, string
+--: (AppState, Caps) -> string | nil, string
 function M.continue_message(state, caps)
 	if state.loading.get() then return nil, "already loading" end
 
@@ -310,7 +332,7 @@ end
 
 -- ── Persistence ─────────────────────────────────────────────────────────────
 
---: (table, table) -> nil
+--: (AppState, Caps) -> nil
 function M.save_messages(state, caps)
 	if not caps or not caps.kv then return end
 	local msgs = state.messages.get()
@@ -322,7 +344,7 @@ function M.save_messages(state, caps)
 	caps.kv.set(key, json_mod.encode(msgs))
 end
 
---: (table, table) -> boolean
+--: (AppState, Caps) -> boolean
 function M.load_messages(state, caps)
 	if not caps or not caps.kv then return false end
 	local ok, json_mod = pcall(require, "lib.format.json")
@@ -533,7 +555,7 @@ end
 
 -- ── Entrypoint ──────────────────────────────────────────────────────────────
 
---: (table) -> { state: table, cleanup: () -> nil }
+--: (Caps) -> { state: AppState, cleanup: () -> nil }
 function M.init(caps)
 	local state = M.create_state()
 

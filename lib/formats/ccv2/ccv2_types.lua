@@ -17,17 +17,17 @@
 --::   alternate_greetings: string[],
 --::   tags: string[],
 --::   extensions: { [string]: unknown },
---::   character_book: CharacterBook?,
+--::   character_book: CharacterBook | nil,
 --:: }
 
 --:: CharacterBook = {
 --::   entries: CharacterBookEntry[],
---::   name: string?,
---::   description: string?,
---::   scan_depth: number?,
---::   token_budget: number?,
---::   recursive_scanning: boolean?,
---::   extensions: { [string]: unknown }?,
+--::   name: string | nil,
+--::   description: string | nil,
+--::   scan_depth: number | nil,
+--::   token_budget: number | nil,
+--::   recursive_scanning: boolean | nil,
+--::   extensions: { [string]: unknown } | nil,
 --:: }
 
 --:: CharacterBookEntry = {
@@ -36,15 +36,15 @@
 --::   extensions: { [string]: unknown },
 --::   enabled: boolean,
 --::   insertion_order: number,
---::   case_sensitive: boolean?,
---::   name: string?,
---::   priority: number?,
---::   id: number?,
---::   comment: string?,
---::   selective: boolean?,
---::   secondary_keys: string[]?,
---::   constant: boolean?,
---::   position: string?,
+--::   case_sensitive: boolean | nil,
+--::   name: string | nil,
+--::   priority: number | nil,
+--::   id: number | nil,
+--::   comment: string | nil,
+--::   selective: boolean | nil,
+--::   secondary_keys: string[] | nil,
+--::   constant: boolean | nil,
+--::   position: string | nil,
 --:: }
 
 --:: CardEnvelope = {
@@ -57,7 +57,7 @@
 --:: NormalizedEntry = {
 --::   uid: string,
 --::   key: string[],
---::   secondaryKey: string[]?,
+--::   secondaryKey: string[] | nil,
 --::   content: string,
 --::   comment: string,
 --::   enabled: boolean,
@@ -73,5 +73,5 @@
 
 --:: ImportResult = {
 --::   card: CardData,
---::   lorebook: NormalizedEntry[]?,
+--::   lorebook: NormalizedEntry[] | nil,
 --:: }
