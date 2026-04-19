@@ -65,14 +65,15 @@ local prim_tags = {
 
 --:: Scanner = { src: string, pos: integer, len: integer, filename: string, line: integer }
 
---: (string, string | nil, integer | nil) -> Scanner
-local function new_scanner(content, filename, line)
+--: (string, string | nil, integer | nil, integer | nil) -> Scanner
+local function new_scanner(content, filename, line, col_offset)
     return {
         src = content,
         pos = 1,
         len = #content,
         filename = filename or "?",
         line = line or 0,
+        col_offset = col_offset or 0,  -- byte offset from content col 1 to source line col
         depth = 0,        -- recursive parse_type depth; guards against stack overflow
         parse_errors = {},  -- hint errors accumulated during parse (non-fatal)
     }
@@ -92,7 +93,7 @@ end
 --: (Scanner, string) -> nil
 local function scan_hint(s, msg)
     s.parse_errors = s.parse_errors or {}
-    s.parse_errors[#s.parse_errors + 1] = { line = s.line, col = s.pos, msg = msg }
+    s.parse_errors[#s.parse_errors + 1] = { line = s.line, col = s.pos + s.col_offset, msg = msg }
 end
 
 --: (Scanner) -> nil
@@ -1139,7 +1140,15 @@ function M.parse_annotations(annotations, pool, filename)
     local results = {}
 
     for line, ann in pairs(annotations) do
-        local s = new_scanner(ann.content, filename, line)
+        -- col_offset maps content col 1 → source line col.  ann.col is the
+        -- 1-indexed column of `--`.  Prefix lengths (including trailing space):
+        --   ANN_TYPE      "--: "   = 4 bytes
+        --   ANN_DECL      "--:: "  = 5 bytes
+        --   ANN_TYPE_ARGS "--:<"   = 3 bytes (< is part of content, no space)
+        local prefix_len = ann.kind == defs.ANN_DECL and 5
+                        or ann.kind == defs.ANN_TYPE_ARGS and 3
+                        or 4
+        local s = new_scanner(ann.content, filename, line, (ann.col or 0) + prefix_len - 1)
         local ok, result = pcall(function()
             if ann.kind == defs.ANN_TYPE then
                 local type_id = parse_type(s)
