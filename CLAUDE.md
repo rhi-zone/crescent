@@ -217,7 +217,7 @@ local obj = { insns = {}, args = {}, next_id = 0 }
 setmetatable(obj, { __index = Proto })
 ```
 
-Never write `obj.field = value` after the literal to initialize a field that belongs to the object's shape. Post-construction field assignment can't be distinguished from a typo — `obj._arsg = {}` silently creates a new field instead of initializing `_args`, and nothing catches it. All shape-defining fields belong in the literal where the typechecker sees them.
+All shape-defining fields belong in the literal. Post-construction field assignment (`obj.field = value` for initialization) defeats the hidden-class optimization and puts the field outside the typechecker's view.
 
 **`local x = expr` — `x` is NOT in scope inside `expr`.**
 
