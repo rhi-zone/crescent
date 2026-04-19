@@ -572,7 +572,78 @@ function M.create(caps)
 		end
 	end
 
-	return { handler = handler }
+	-- cli(args) -> nil
+	-- CLI handler: invoked when 'cr run <app> -- [args...]' is used.
+	--
+	-- Usage:
+	--   cr run <app> -- list                   List installed apps (id, name, version).
+	--   cr run <app> -- list --json            Output as JSON array.
+	--   cr run <app> -- search <query>         Search apps by name/tag.
+	--   cr run <app> -- search --json <query>  Search output as JSON array.
+	--   cr run <app> -- --help                 Print usage.
+	local function cli(args)
+		-- Flags.
+		local want_json = false
+		local positional = {}
+		for i = 1, #args do
+			if args[i] == "--json" then
+				want_json = true
+			elseif args[i] == "--help" or args[i] == "-h" then
+				io.write("usage:\n")
+				io.write("  cr run <app> -- list                   List installed apps\n")
+				io.write("  cr run <app> -- list --json            Output as JSON array\n")
+				io.write("  cr run <app> -- search <query>         Search apps by name/tag\n")
+				io.write("  cr run <app> -- search --json <query>  Search output as JSON array\n")
+				io.write("  cr run <app> -- --help                 This help text\n")
+				return
+			else
+				positional[#positional + 1] = args[i]
+			end
+		end
+
+		local subcmd = positional[1]
+
+		if subcmd == "list" or subcmd == "search" then
+			local q = nil
+			if subcmd == "search" then
+				local parts = {}
+				for i = 2, #positional do parts[#parts + 1] = positional[i] end
+				q = table.concat(parts, " ")
+				if q == "" then
+					io.stderr:write("error: 'search' requires a query argument\n")
+					return
+				end
+			end
+
+			local rows, _ = query_apps(db, nil, q, 500, 0)
+
+			if want_json then
+				-- Encode as a JSON array using lib.format.json (already required above).
+				io.write(json.encode(rows) .. "\n")
+			else
+				if #rows == 0 then
+					io.write("(no apps found)\n")
+					return
+				end
+				for _, row in ipairs(rows) do
+					local tags = row.tags and #row.tags > 0
+						and ("  [" .. table.concat(row.tags, ", ") .. "]")
+						or ""
+					io.write(string.format("%4d  %-40s%s\n",
+						row.id, row.name, tags))
+				end
+			end
+		else
+			io.write("usage:\n")
+			io.write("  cr run <app> -- list                   List installed apps\n")
+			io.write("  cr run <app> -- list --json            Output as JSON array\n")
+			io.write("  cr run <app> -- search <query>         Search apps by name/tag\n")
+			io.write("  cr run <app> -- search --json <query>  Search output as JSON array\n")
+			io.write("  cr run <app> -- --help                 This help text\n")
+		end
+	end
+
+	return { handler = handler, cli = cli }
 end
 
 -- Expose for testing.

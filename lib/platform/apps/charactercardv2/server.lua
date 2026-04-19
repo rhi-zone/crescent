@@ -71,6 +71,73 @@ function M.create(caps, opts)
 		return llm.count_tokens(text)
 	end
 
+	-- cli(args) -> nil
+	-- CLI handler: invoked when 'cr run <app> -- [args...]' is used.
+	--
+	-- Usage:
+	--   cr run <app> -- chat <message>       Send a message; print response.
+	--   cr run <app> -- chat --json <msg>    Output as {"response":"..."} JSON.
+	--   cr run <app> -- --help               Print usage.
+	function app.cli(args)
+		-- Flags.
+		local want_json = false
+		local positional = {}
+		for i = 1, #args do
+			if args[i] == "--json" then
+				want_json = true
+			elseif args[i] == "--help" or args[i] == "-h" then
+				-- Print usage and exit cleanly.
+				io.write("usage:\n")
+				io.write("  cr run <app> -- chat <message>          Send a message; print response\n")
+				io.write("  cr run <app> -- chat --json <message>   Output as JSON\n")
+				io.write("  cr run <app> -- --help                  This help text\n")
+				return
+			else
+				positional[#positional + 1] = args[i]
+			end
+		end
+
+		local subcmd = positional[1]
+
+		if subcmd == "chat" then
+			-- Collect the message from remaining positional args.
+			local parts = {}
+			for i = 2, #positional do
+				parts[#parts + 1] = positional[i]
+			end
+			local message = table.concat(parts, " ")
+			if message == "" then
+				io.stderr:write("error: 'chat' requires a message argument\n")
+				return
+			end
+
+			local messages = { { role = "user", content = message } }
+			local content, err = app.chat(messages)
+			if not content then
+				io.stderr:write("error: " .. tostring(err) .. "\n")
+				return
+			end
+
+			if want_json then
+				-- Minimal JSON encoding: escape backslash, double-quote, and control chars.
+				local escaped = content
+					:gsub('\\', '\\\\')
+					:gsub('"',  '\\"')
+					:gsub('\n', '\\n')
+					:gsub('\r', '\\r')
+					:gsub('\t', '\\t')
+				io.write('{"response":"' .. escaped .. '"}\n')
+			else
+				io.write(content .. "\n")
+			end
+		else
+			io.write("usage:\n")
+			io.write("  cr run <app> -- chat <message>          Send a message; print response\n")
+			io.write("  cr run <app> -- chat --json <message>   Output as JSON\n")
+			io.write("  cr run <app> -- --help                  This help text\n")
+		end
+	end
+
 	return app
 end
 

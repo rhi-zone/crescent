@@ -1029,6 +1029,11 @@ if app._dir_mode then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
 		end
+		-- CLI mode: app_args after '--' → invoke CLI handler instead of HTTP server.
+		if result.cli and opts.app_args and #opts.app_args > 0 then
+			result.cli(opts.app_args)
+			return
+		end
 		-- If the result has a handler and we have an http_server cap, serve it.
 		if result.handler then
 			-- Find any http_server cap (may be named "server" or anything else).
