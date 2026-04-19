@@ -54,7 +54,7 @@
 --::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & ((ct: string, ...any) -> unknown),
 --::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & ((ct: string, obj: unknown) -> unknown),
 --::   sizeof:   (ct: string | unknown) -> integer,
---::   typeof:   (ct: string) -> unknown,
+--::   typeof:   <T: string>(ct: T) -> Ctype<T>,
 --::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
 --::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
 --::   string:   (ptr: unknown, len: integer | nil) -> string,
