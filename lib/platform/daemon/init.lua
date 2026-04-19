@@ -26,6 +26,7 @@ local library = require("lib.platform.apps.library.server")
 local import_mod = require("lib.platform.import")
 local json = require("lib.format.json")
 local ratelimit = require("lib.ratelimit")
+local session_store_mod = require("lib.platform.session_store")
 
 local M = {}
 
@@ -56,6 +57,7 @@ local M = {}
 --::   prefer_loopback: boolean | nil,
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
 --::   audit_log: unknown,
+--::   session_db_path: string | nil,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
@@ -509,9 +511,28 @@ function M.make(opts)
 			res.body = "ok"
 		end)
 
-	-- Session store: in-memory only for v1. { [sid] = { created_at, last_seen } }.
-	local sessions = {} --: { [string]: session_record }
+	-- Session TTL constant. Used for both in-memory and persistent stores.
 	local SESSION_IDLE_TTL = 86400 -- 24h; drops sessions that haven't been seen in this long
+
+	-- Session store: in-memory table (backward compat default) or SQLite-backed
+	-- when opts.session_db_path is set. The persistent store survives daemon
+	-- restarts; the in-memory table is fine for tests and single-session local use.
+	local sessions = {} --: { [string]: session_record }
+	-- `any` escape: session_store is a concrete object, but the typechecker can't
+	-- see through session_store_mod.open's return type at this call site.
+	local _session_store --: any
+	if opts.session_db_path then
+		local ss, ss_err = session_store_mod.open(opts.session_db_path, {
+			time_fn  = time_fn,
+			idle_ttl = SESSION_IDLE_TTL,
+		})
+		if not ss then
+			error("daemon: failed to open session store: " .. tostring(ss_err))
+		end
+		_session_store = ss
+		-- Purge stale sessions from any previous run on startup.
+		_session_store:purge_expired()
+	end
 
 	-- Launch-token map: { [hex_token] = { app_id, session_id, expires_at } }.
 	-- One-shot: consumed (deleted) on first redemption. 5-min expiry.
@@ -546,22 +567,74 @@ function M.make(opts)
 		return ip
 	end
 
+	-- ── Session helpers (dispatch to in-memory table or persistent store) ──────
+
+	-- session_get(sid) -> session_record | nil
+	-- Returns the record if the session exists and is not expired; nil otherwise.
+	-- In the persistent path, expiry is enforced by the store (last_seen + ttl < now).
+	-- In the in-memory path, expiry is checked inline.
+	--: (string | nil) -> session_record | nil
+	local function session_get(sid)
+		if not sid then return nil end
+		if _session_store then
+			-- `any` escape: store returns unknown; caller treats result as session_record.
+			local rec = _session_store:get(sid) --: any
+			return rec
+		end
+		return sessions[sid]
+	end
+
+	-- session_touch(sid)
+	-- Updates last_seen to now(). In-memory: mutates the record directly.
+	-- Persistent: calls store:touch() which issues an UPDATE.
+	--: (string, session_record | nil) -> nil
+	local function session_touch(sid, rec)
+		if _session_store then
+			_session_store:touch(sid)
+		elseif rec then
+			rec.last_seen = time_fn()
+		end
+	end
+
+	-- session_delete(sid)
+	-- Removes the session from whatever backing store is active.
+	--: (string) -> nil
+	local function session_delete(sid)
+		if _session_store then
+			_session_store:delete(sid)
+		else
+			rawset(sessions, sid, nil)
+		end
+	end
+
+	-- session_put(sid, rec)
+	-- Inserts or replaces the session record.
+	--: (string, session_record) -> nil
+	local function session_put(sid, rec)
+		if _session_store then
+			_session_store:put(sid, rec)
+		else
+			sessions[sid] = rec
+		end
+	end
+
 	-- Mint a new session and record it. Returns the session id (hex string).
-	-- Sweeps idle sessions before mint — same amortized pattern as launch
-	-- tokens. Session records are tiny; a 24h-idle one is almost certainly
-	-- a closed browser tab that will never reconnect, so dropping it is
-	-- both harmless and bounds the map.
+	-- Sweeps idle sessions before mint (in-memory path only; persistent path
+	-- relies on purge_expired() called at startup and on demand).
 	--: () -> string
 	local function mint_session()
 		local now = time_fn()
-		for s, rec in pairs(sessions) do
-			if now - rec.last_seen >= SESSION_IDLE_TTL then
-				rawset(sessions, s, nil)
+		if not _session_store then
+			for s, rec in pairs(sessions) do
+				if now - rec.last_seen >= SESSION_IDLE_TTL then
+					rawset(sessions, s, nil)
+				end
 			end
 		end
 		local sid = bytes_to_hex(random_bytes_fn(16))
 		local csrf = bytes_to_hex(random_bytes_fn(16))
-		sessions[sid] = { created_at = now, last_seen = now, csrf_token = csrf }
+		local rec = { created_at = now, last_seen = now, csrf_token = csrf }
+		session_put(sid, rec)
 		if audit_log then
 			audit_log:append("auth_session", { session_id_prefix = sid:sub(1, 8) })
 		end
@@ -681,14 +754,14 @@ function M.make(opts)
 	r:get("/apps/:id/grant", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		local sess_rec = presented and sessions[presented] or nil
+		local sess_rec = presented and session_get(presented) or nil
 		local now_grant = time_fn() --: integer
 		if not sess_rec or (now_grant - sess_rec.last_seen) >= SESSION_IDLE_TTL then
-			if sess_rec and presented then rawset(sessions, presented, nil) end
+			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
 		end
-		sess_rec.last_seen = time_fn()
+		session_touch(presented or "", sess_rec)
 
 		local app_id_str_m = (req.path or ""):match("^/apps/(%d+)/grant$")
 		if not app_id_str_m or not index_obj then
@@ -768,10 +841,10 @@ function M.make(opts)
 	r:post("/apps/:id/grant", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		local sess_rec = presented and sessions[presented] or nil
+		local sess_rec = presented and session_get(presented) or nil
 		local now_post_grant = time_fn() --: integer
 		if not sess_rec or (now_post_grant - sess_rec.last_seen) >= SESSION_IDLE_TTL then
-			if sess_rec and presented then rawset(sessions, presented, nil) end
+			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
 		end
@@ -781,7 +854,7 @@ function M.make(opts)
 			return
 		end
 
-		sess_rec.last_seen = time_fn()
+		session_touch(presented or "", sess_rec)
 
 		local app_id_str_m = (req.path or ""):match("^/apps/(%d+)/grant$")
 		if not app_id_str_m or not index_obj then
@@ -845,12 +918,12 @@ function M.make(opts)
 	r:post("/api/import-card", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		local sess_rec = presented and sessions[presented] or nil
+		local sess_rec = presented and session_get(presented) or nil
 		if not sess_rec then
 			plain(res, 401, "unauthorized")
 			return
 		end
-		sess_rec.last_seen = time_fn()
+		session_touch(presented or "", sess_rec)
 
 		if not runtime_files or not runtime_manifest then
 			plain(res, 503, "import not configured")
@@ -1000,13 +1073,13 @@ function M.make(opts)
 	r:get("/launch/:id", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		local sess_rec = presented and sessions[presented] or nil
+		local sess_rec = presented and session_get(presented) or nil
 		local now_launch = time_fn() --: integer
 		if not sess_rec or (now_launch - sess_rec.last_seen) >= SESSION_IDLE_TTL then
-			if sess_rec and presented then rawset(sessions, presented, nil) end
+			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
-		end
+end
 
 		if not launch_limiter:allow(presented) then
 			plain(res, 429, "rate limit exceeded")
@@ -1098,10 +1171,10 @@ function M.make(opts)
 	r:delete("/api/apps/:id", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
-		local sess_rec = presented and sessions[presented] or nil
+		local sess_rec = presented and session_get(presented) or nil
 		local now_delete = time_fn() --: integer
 		if not sess_rec or (now_delete - sess_rec.last_seen) >= SESSION_IDLE_TTL then
-			if sess_rec and presented then rawset(sessions, presented, nil) end
+			if sess_rec and presented then session_delete(presented) end
 			plain(res, 401, "unauthorized")
 			return
 		end
@@ -1252,16 +1325,16 @@ function M.make(opts)
 		local sid --: string | nil
 		local minted = false
 		local now = time_fn() --: integer
-		local sess_rec = presented and sessions[presented] or nil
+		local sess_rec = presented and session_get(presented) or nil
 		if sess_rec and (now - sess_rec.last_seen) >= SESSION_IDLE_TTL then
 			-- Stale cookie: drop it and treat as unauthenticated. On non-launch
 			-- paths this falls through to mint_session (which also sweeps).
-			if presented then rawset(sessions, presented, nil) end
+			if presented then session_delete(presented) end
 			sess_rec = nil
 		end
 		if sess_rec and presented then
 			sid = presented
-			sess_rec.last_seen = now
+			session_touch(presented, sess_rec)
 		elseif not is_launch_path then
 			sid = mint_session()
 			minted = true

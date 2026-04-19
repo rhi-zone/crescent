@@ -125,13 +125,12 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   `HttpOnly __Host-session` cookie auth, mount existing library app at the root.
 
   **Open threads around the skeleton:**
-  - [ ] Session store is in-memory only. The 24h idle-TTL bounds the map
+  - [x] Session store is in-memory only. The 24h idle-TTL bounds the map
     in steady state, but a burst of unique operators inside that window
     still grows it unboundedly, and a daemon restart forgets everyone.
-    Open questions: (a) do sessions need to persist across restart at
-    all before grant UI lands? (b) is a hard cap with LRU eviction
-    enough, or does this need on-disk persistence? Deferred while
-    sessions carry no real authority.
+    Resolved: `lib/platform/session_store/` — SQLite-backed store with
+    idle TTL. Wire in via `opts.session_db_path`; in-memory path kept
+    as backward-compat default. `purge_expired()` runs at daemon startup.
   - [ ] Loopback IP allocator grows monotonically and never reclaims.
     Fine at v1 scale (you run out at 127.255.255.254 apps), but a
     long-lived multi-app daemon that churns installs leaks IPs.
