@@ -1011,13 +1011,11 @@ function M.parse_annotations(annotations, pool, filename)
         scan_error(s, "unexpected character '" .. string.char(b) .. "'")
     end
 
-    -- Parse postfix: [] (array)
+    -- Parse postfix: [] (array sugar) and T[K] (indexed access)
     local function parse_postfix(s)
         local ty = parse_primary(s)
         while true do
             if peek(s) == byte("[") then
-                -- Check for [] (array) vs [K] (which would be indexer, handled in table)
-                local save = s.pos
                 advance(s)  -- skip '['
                 if peek(s) == byte("]") then
                     advance(s)  -- skip ']'
@@ -1031,9 +1029,14 @@ function M.parse_annotations(annotations, pool, filename)
                     tt.data[4] = -1  -- no row var (closed table)
                     ty = tbl
                 else
-                    -- Not an array suffix, rewind
-                    s.pos = save
-                    break
+                    -- Indexed access: T[K]
+                    local key = parse_type(s)
+                    expect_char(s, "]")
+                    local idx = alloc_type(defs.TAG_INDEX_TYPE)
+                    local it = types:get(idx)
+                    it.data[0] = ty
+                    it.data[1] = key
+                    ty = idx
                 end
             else
                 break

@@ -268,6 +268,12 @@ local function has_generic_var(ctx, tid, seen)
         end
         return false
     end
+    -- TAG_INDEX_TYPE: subject + key
+    if tag == defs.TAG_INDEX_TYPE then
+        if has_generic_var(ctx, t.data[0], seen) then return true end
+        if has_generic_var(ctx, t.data[1], seen) then return true end
+        return false
+    end
     return false
 end
 
@@ -487,6 +493,18 @@ local function instantiate_inner(ctx, tid, level, mapping, seen)
         ctx.types:get(id).data[0] = new_param
         ctx.types:get(id).data[1] = ms
         ctx.types:get(id).data[2] = ml
+        return id
+    end
+
+    -- TAG_INDEX_TYPE: instantiate subject and key. Eager evaluation happens in
+    -- substitute_inner once concrete types are bound.
+    if tag == defs.TAG_INDEX_TYPE then
+        local new_subj = instantiate_inner(ctx, t.data[0], level, mapping, seen)
+        local new_key  = instantiate_inner(ctx, t.data[1], level, mapping, seen)
+        local id = types_mod.alloc_type(ctx, defs.TAG_INDEX_TYPE)
+        local it = ctx.types:get(id)
+        it.data[0] = new_subj
+        it.data[1] = new_key
         return id
     end
 
@@ -858,6 +876,41 @@ local function substitute_inner(ctx, tid, mapping, seen, eval_seen)
         -- Pass eval_seen to share the cycle-detection set with the caller.
         local match_mod = require("lib.type.static.match")
         return match_mod.evaluate(ctx, new_mt, eval_seen)
+    end
+
+    -- TAG_INDEX_TYPE: deferred indexed access. Substitute subject and key, then
+    -- if both are concrete, evaluate via match.lookup_index. Otherwise rebuild a
+    -- TAG_INDEX_TYPE node so a future substitution can finish the job.
+    -- Mirrors the deferred TAG_MATCH_TYPE pattern above.
+    if tag == defs.TAG_INDEX_TYPE then
+        local new_subj = substitute_inner(ctx, t.data[0], mapping, seen, eval_seen)
+        local new_key  = substitute_inner(ctx, t.data[1], mapping, seen, eval_seen)
+        seen[tid] = nil
+        local rs = types_mod.find(ctx, new_subj)
+        local rk = types_mod.find(ctx, new_key)
+        local rst = ctx.types:get(rs)
+        local rkt = ctx.types:get(rk)
+        local function deferred(ttag) return ttag == TAG_VAR or ttag == TAG_ROWVAR or ttag == defs.TAG_NAMED end
+        if deferred(rst.tag) or deferred(rkt.tag) then
+            local id = types_mod.alloc_type(ctx, defs.TAG_INDEX_TYPE)
+            local it = ctx.types:get(id)
+            it.data[0] = new_subj
+            it.data[1] = new_key
+            return id
+        end
+        local match_mod = require("lib.type.static.match")
+        local result = match_mod.lookup_index(ctx, new_subj, new_key)
+        if result then return result end
+        -- Miss after substitution: report and return never. Suppress when the
+        -- subject is still a free var to avoid spurious errors during inference.
+        local errors_mod = require("lib.type.static.errors")
+        local defs_mod = defs
+        local msg = errors_mod.format_diag(defs_mod.E.INDEX_KEY_NOT_FOUND, {
+            t = types_mod.display_short(ctx, new_subj),
+            k = types_mod.display_short(ctx, new_key),
+        })
+        errors_mod.error(ctx.err, ctx.filename, 0, 0, msg)
+        return ctx.T_NEVER
     end
 
     -- TAG_TYPE_CALL: deferred HKT application F<A>.

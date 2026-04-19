@@ -131,6 +131,15 @@ M.TAG_PARTIAL_APP       = 31  -- partially-applied generic alias: Alias<A> with 
 -- Created by resolve_named_type when arg_ids_len >= 1 and arg_ids_len < required_count.
 -- Consumed by apply_type_fn (intrinsic.lua): appends one more arg and calls resolve_named_type.
 -- Passes through substitute_inner unchanged (partial args are already concrete at creation time).
+M.TAG_INDEX_TYPE        = 32  -- TS-style indexed access: T[K]
+-- TypeSlot layout for TAG_INDEX_TYPE:
+--   data[0] = subject tid (the indexed type T)
+--   data[1] = key tid     (the key type K)
+-- Annotation arena only — resolved away by resolve_annotation_type:
+--   - If subject is concrete, evaluated immediately via match.lookup_index.
+--   - If subject is a TAG_NAMED placeholder (deferred generic context), kept and re-evaluated
+--     via env.substitute_inner once the placeholder is replaced with a concrete type.
+-- Miss is a hard error: INDEX_KEY_NOT_FOUND. Distributes over unions; intersects over intersections.
 
 -- Token types: keywords (0-21)
 M.TK_AND                = 0
@@ -366,6 +375,7 @@ M.E.FIELD_READONLY          = 23  -- assignment to a readonly field
 M.E.NON_EXHAUSTIVE          = 24  -- if-chain over union doesn't cover all members (warning)
 M.E.FIELD_ON_PRIMITIVE      = 25  -- field access on a type that cannot have fields (nil, boolean, number literal)
 M.E.CONSTRAINT_MISMATCH     = 26  -- type alias body does not satisfy declared constraint
+M.E.INDEX_KEY_NOT_FOUND     = 27  -- T[K] where T has no member K
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
 M.keywords = {

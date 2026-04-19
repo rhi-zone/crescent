@@ -905,4 +905,95 @@ function M.evaluate(ctx, mt_id, seen)
     return ctx.T_NEVER
 end
 
+-- Indexed access: lookup `key_tid` in `subject_tid`, returning a type id or nil.
+--
+-- - String/integer literal key on a TAG_TABLE: try named-field lookup first; fall back
+--   to indexer matching (e.g. `M[string]` where M is `{ [string]: number }`).
+-- - Type-valued key on a TAG_TABLE: scan indexers, find one whose key type the
+--   query key is a subtype of, return its value.
+-- - TAG_UNION subject: distribute, union the per-member results (TS-style).
+-- - TAG_INTERSECTION subject: take any member that has the key; intersect successes.
+-- - TAG_NAMED subject: expand one level and recurse.
+--
+-- Returns nil on miss; caller is responsible for emitting INDEX_KEY_NOT_FOUND.
+--: (Ctx, integer, integer) -> integer | nil
+function M.lookup_index(ctx, subject_tid, key_tid)
+    subject_tid = types_mod.find(ctx, subject_tid)
+    key_tid = types_mod.find(ctx, key_tid)
+    local st = ctx.types:get(subject_tid)
+
+    if st.tag == TAG_UNION then
+        local results = {}
+        for i = 0, st.data[1] - 1 do
+            local mid = ctx.lists:get(st.data[0] + i)
+            local r = M.lookup_index(ctx, mid, key_tid)
+            if r == nil then return nil end  -- any member missing → fail the whole lookup
+            results[#results + 1] = r
+        end
+        if #results == 0 then return nil end
+        if #results == 1 then return results[1] end
+        return types_mod.make_union(ctx, results)
+    end
+
+    if st.tag == TAG_INTERSECTION then
+        -- Mirror match.lua's indexer unification approach: collect contributions
+        -- from members that have the key; intersect them.
+        local contribs = {}
+        for i = 0, st.data[1] - 1 do
+            local mid = ctx.lists:get(st.data[0] + i)
+            local r = M.lookup_index(ctx, mid, key_tid)
+            if r ~= nil then
+                contribs[#contribs + 1] = r
+            end
+        end
+        if #contribs == 0 then return nil end
+        if #contribs == 1 then return contribs[1] end
+        return types_mod.make_intersection(ctx, contribs)
+    end
+
+    if st.tag == TAG_NAMED then
+        local seen_named = {}
+        local expanded = expand_named(ctx, subject_tid, seen_named)
+        if not expanded then return nil end
+        return M.lookup_index(ctx, expanded, key_tid)
+    end
+
+    if st.tag == TAG_MATCH_TYPE then
+        local result = M.evaluate(ctx, subject_tid, {})
+        return M.lookup_index(ctx, result, key_tid)
+    end
+
+    if st.tag ~= TAG_TABLE then
+        return nil
+    end
+
+    local kt = ctx.types:get(key_tid)
+
+    -- String literal key: try named-field lookup first.
+    if kt.tag == TAG_LITERAL and kt.data[0] == LIT_STRING then
+        local name_id = kt.data[1]
+        local fe = types_mod.table_field(ctx, subject_tid, name_id)
+        if fe then return fe.type_id end
+        -- Fall through to indexer lookup (string literal can match `[string]: V`).
+    end
+
+    -- Indexer lookup: scan indexer pairs, find one whose key type accepts the query key.
+    local pis = st.data[2]
+    local pil = st.data[3]
+    if pil >= 2 then
+        local unify_mod = require("lib.type.static.unify")
+        local i = pis
+        while i < pis + pil - 1 do
+            local idx_k = types_mod.find(ctx, ctx.lists:get(i))
+            local idx_v = types_mod.find(ctx, ctx.lists:get(i + 1))
+            if unify_mod.try_unify(ctx, key_tid, idx_k, {}) then
+                return idx_v
+            end
+            i = i + 2
+        end
+    end
+
+    return nil
+end
+
 return M

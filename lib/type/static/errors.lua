@@ -369,6 +369,9 @@ local function build_templates()
             if a.detail then msg = msg .. ": " .. a.detail end
             return msg
         end,
+        [E.INDEX_KEY_NOT_FOUND]   = function(a)
+            return "type '" .. a.t .. "' has no member '" .. a.k .. "'"
+        end,
     }
 end
 

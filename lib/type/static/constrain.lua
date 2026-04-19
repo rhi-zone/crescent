@@ -799,6 +799,35 @@ resolve_annotation_type = function(ctx, ann_tid, seen)
         return match_mod.evaluate(ctx, id)
     end
 
+    if tag == defs.TAG_INDEX_TYPE then
+        seen[ann_tid] = true
+        local subject = resolve_annotation_type(ctx, at.data[0], seen)
+        local key     = resolve_annotation_type(ctx, at.data[1], seen)
+        seen[ann_tid] = nil
+        local pt = ctx.types:get(types_mod.find(ctx, subject))
+        local kt = ctx.types:get(types_mod.find(ctx, key))
+        -- Defer when subject is an unresolved generic placeholder (TAG_NAMED with
+        -- no args) or a free type variable; or when key is similarly unresolved.
+        -- env.substitute_inner re-evaluates once both are concrete.
+        local function deferred(ttag) return ttag == defs.TAG_NAMED or ttag == defs.TAG_VAR end
+        if deferred(pt.tag) or deferred(kt.tag) then
+            local id = types_mod.alloc_type(ctx, defs.TAG_INDEX_TYPE)
+            local it = ctx.types:get(id)
+            it.data[0] = subject
+            it.data[1] = key
+            return id
+        end
+        local match_mod = require("lib.type.static.match")
+        local result = match_mod.lookup_index(ctx, subject, key)
+        if result then return result end
+        local line = ctx._ann_warn_line or 0
+        report(ctx, line, 0, defs.E.INDEX_KEY_NOT_FOUND, {
+            t = types_mod.display_short(ctx, subject),
+            k = types_mod.display_short(ctx, key),
+        })
+        return ctx.T_NEVER
+    end
+
     if tag == defs.TAG_TYPE_CALL then
         seen[ann_tid] = true
         local callee = resolve_annotation_type(ctx, at.data[0], seen)
