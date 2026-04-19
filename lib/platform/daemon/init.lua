@@ -55,6 +55,7 @@ local M = {}
 --::   secure_cookie: boolean | nil,
 --::   prefer_loopback: boolean | nil,
 --::   on_handler_error: ((app_id: string, err: string, traceback: string) -> nil) | nil,
+--::   audit_log: unknown,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
@@ -248,6 +249,9 @@ function M.make(opts)
 	local apps_dir = opts.apps_dir --: string | nil
 	local runtime_files = opts.runtime_files
 	local runtime_manifest = opts.runtime_manifest
+	-- Optional audit log (lib/platform/audit). When nil, all log:append calls
+	-- are skipped — tests and deployments without a configured db_path work fine.
+	local audit_log = opts.audit_log --: any
 
 	-- Library app handler. The daemon mounts the library app at "/" of the
 	-- daemon origin. We call create() directly; there is no sandbox in v1
@@ -558,6 +562,9 @@ function M.make(opts)
 		local sid = bytes_to_hex(random_bytes_fn(16))
 		local csrf = bytes_to_hex(random_bytes_fn(16))
 		sessions[sid] = { created_at = now, last_seen = now, csrf_token = csrf }
+		if audit_log then
+			audit_log:append("auth_session", { session_id_prefix = sid:sub(1, 8) })
+		end
 		return sid
 	end
 
@@ -805,8 +812,14 @@ function M.make(opts)
 			local val = params["cap_" .. cname]
 			if val == "grant" then
 				index_obj:set_grant(app_id, cname, true)
+				if audit_log then
+					audit_log:append("cap_grant", { app_id = app_id_str, cap = cname, decision = true })
+				end
 			elseif val == "deny" then
 				index_obj:set_grant(app_id, cname, false)
+				if audit_log then
+					audit_log:append("cap_grant", { app_id = app_id_str, cap = cname, decision = false })
+				end
 			end
 			-- No radio selected → leave undecided (no change to DB)
 		end
@@ -929,10 +942,25 @@ function M.make(opts)
 		end
 		if not new_app_id then
 			-- import succeeded but we can't find the id — still a partial success
+			if audit_log then
+				audit_log:append("app_install", { app_id = nil, name = app_path })
+			end
 			res.status = 200
 			res.headers["Content-Type"] = { "application/json" }
 			res.body = json.encode({ ok = true, app_path = app_path })
 			return
+		end
+
+		if audit_log then
+			local install_name = app_path
+			if index_obj and index_obj.get then
+				local irow = index_obj:get(new_app_id)
+				if irow then install_name = irow.name end
+			end
+			audit_log:append("app_install", {
+				app_id = tostring(new_app_id),
+				name   = install_name,
+			})
 		end
 
 		res.status = 200
@@ -1039,6 +1067,12 @@ function M.make(opts)
 			session_id = presented,
 			expires_at = now + 300, -- 5 minutes
 		}
+		if audit_log then
+			audit_log:append("launch_token", {
+				app_id             = app_id,
+				session_id_prefix  = presented and presented:sub(1, 8) or nil,
+			})
+		end
 
 		local origin = launch_origin_url(app_id)
 		-- Forward caller-supplied query params (e.g. entry=<id> from source
@@ -1096,10 +1130,24 @@ function M.make(opts)
 			return
 		end
 
+		-- Capture app name before deleting for the audit entry.
+		local uninstall_name = app_path --: string | nil
+		if index_obj and index_obj.get then
+			local irow = index_obj:get(app_id)
+			if irow then uninstall_name = irow.name end
+		end
+
 		db:execute("DELETE FROM app_tags WHERE app_id = ?", app_id)
 		db:execute("DELETE FROM apps_fts WHERE rowid = ?", app_id)
 		db:execute("DELETE FROM app_cap_config WHERE app_id = ?", app_id)
 		db:execute("DELETE FROM apps WHERE id = ?", app_id)
+
+		if audit_log then
+			audit_log:append("app_uninstall", {
+				app_id = tostring(app_id),
+				name   = uninstall_name,
+			})
+		end
 
 		local ok_rm, rm_err = remove_fn(app_path)
 		if not ok_rm and opts.on_handler_error then

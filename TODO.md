@@ -209,8 +209,12 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   `lib/ratelimit` keyed limiter. Per-IP and auth-endpoint limits deferred
   (daemon has no direct access to remote IP; no auth endpoints beyond session
   cookie minting, which is implicit and not rate-sensitive).
-- [ ] **Audit log** — append-only log of every cap grant, every auth event, every
+- [x] **Audit log** — append-only log of every cap grant, every auth event, every
   admin/policy change. Tamper-evident hashing (prior-entry hash chain).
+  Implemented in `lib/platform/audit/`. SHA-1 hash chain; SQLite backend;
+  wired into daemon (cap_grant, auth_session, launch_token, app_install,
+  app_uninstall events). `audit_log` is optional in `daemon_opts` — nil skips
+  logging. 31 test assertions.
 - [ ] **TLS on routable interfaces** — binding to loopback is TLS-optional; binding to
   Tailscale or any routable interface requires TLS. Cert loading from disk (daemon does
   not do ACME in v1 — user provides cert).
