@@ -721,8 +721,8 @@ M.compile = function(desc, alloc, abi, ctype)
   end
 
   -- Cast to the requested function type.
-  -- Type is dynamic: ctype is a runtime string, so fn's signature is unknowable statically.
-  local fn = ffi.cast(ctype, exec_ptr) --: any
+  -- ctype is a runtime string; exact signature is unknowable, but result is callable.
+  local fn = ffi.cast(ctype, exec_ptr) --: (...unknown) -> unknown
   -- Keep exec_ptr alive (don't let GC collect it) by anchoring to fn table.
   -- We return a table wrapper so the GC anchor is maintained.
   -- Actually, ffi.cast returns a cdata that does NOT own the pointer;
