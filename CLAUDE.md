@@ -84,6 +84,7 @@ See `docs/conventions.md` for the full spec. Short version:
 - Protocols: `connect` / `send` / `recv` / `close` — transport injected via opts, never created internally
 - Tiers: system > FFI > pure Lua, selected at load time, each independent, `M._tier` for introspection
 - Annotations: `--:` / `--::` only. `unknown` = TS `unknown` (caller must narrow). `any` = TS `any` (opt-out). Prefer `unknown`; `any` only when explicitly opting out and documented why.
+- **`...` vs index signatures** — these are distinct. `...` is a structural subtyping marker: `{ name: string, ... }` accepts any table with at least `name`. It says nothing about reading arbitrary fields. `{ [string]: T }` is an index signature: any string key maps to `T`. Confusing them leads to open types on concrete data objects (wrong) or expecting arbitrary field reads to work on `...`-typed values (also wrong).
 
 ## Implementation Patterns
 
