@@ -2,6 +2,63 @@ if not package.path:find("?/init.lua", 1, true) then
   package.path = package.path .. ";./?/init.lua"
 end
 
+--:: declare register_ffi_module = ((name: string) -> nil) | nil
+
+--:: LjSocketFamily = "inet" | "inet6" | "unspec" | "unix" | "ax25" | "ipx" | "appletalk" | "netrom" | "bridge" | "aal5" | "x25"
+--:: LjSocketType = "stream" | "dgram" | "raw" | "rdm" | "seqpacket" | "dccp" | "packet" | "cloexec" | "nonblock"
+--:: LjSocketProtocol = "ip" | "hopopts" | "icmp" | "igmp" | "ipip" | "tcp" | "egp" | "pup" | "udp" | "idp" | "tp" | "dccp" | "ipv6" | "routing" | "fragment" | "rsvp" | "gre" | "esp" | "ah" | "icmpv6" | "none" | "dstopts" | "mtp" | "encap" | "pim" | "comp" | "sctp" | "udplite" | "raw"
+
+--:: LjSocketAddrInfo = {
+--::   host:          string | nil,
+--::   service:       string | integer | nil,
+--::   family:        LjSocketFamily,
+--::   socket_type:   LjSocketType,
+--::   protocol:      LjSocketProtocol,
+--::   flags:         { [string]: boolean },
+--::   ip:            string | nil,
+--::   port:          integer | nil,
+--::   canonical_name: string | nil,
+--::   get_ip:        (self: LjSocketAddrInfo) -> string | nil,
+--::   get_port:      (self: LjSocketAddrInfo) -> integer | nil,
+--:: }
+
+--:: LjSocket = {
+--::   fd:               integer,
+--::   family:           LjSocketFamily,
+--::   socket_type:      LjSocketType,
+--::   protocol:         LjSocketProtocol,
+--::   blocking:         boolean,
+--::   debug:            boolean | nil,
+--::   timeout_connected: { string | nil, string | integer | nil } | nil,
+--::   on_connect:  ((self: LjSocket, host: string, service: string | integer) -> nil) | nil,
+--::   on_receive:  ((self: LjSocket, buf: unknown, size: integer, flags: integer) -> (string | nil, string | nil)) | nil,
+--::   on_send:     ((self: LjSocket, data: string, flags: integer) -> (integer | nil, string | nil)) | nil,
+--::   on_close:    ((self: LjSocket) -> (boolean | nil, string | nil)) | nil,
+--::   close:       (self: LjSocket) -> (boolean | nil, string | nil),
+--::   set_blocking: (self: LjSocket, b: boolean) -> (boolean | nil, string | nil, integer | nil),
+--::   set_option:  (self: LjSocket, key: string, val: boolean | integer | unknown, level: string | nil) -> (boolean | nil, string | nil),
+--::   connect:     (self: LjSocket, host: string | LjSocketAddrInfo, service: string | integer | nil) -> (boolean | nil, string | nil, integer | nil),
+--::   poll_connect: (self: LjSocket) -> (boolean | nil, string | nil, integer | nil),
+--::   bind:        (self: LjSocket, host: string | LjSocketAddrInfo | nil, service: string | integer | nil) -> (boolean | nil, string | nil),
+--::   listen:      (self: LjSocket, max_connections: integer | nil) -> (boolean | nil, string | nil),
+--::   accept:      (self: LjSocket) -> (LjSocket | nil, string | nil, integer | nil),
+--::   is_connected: (self: LjSocket) -> (boolean | nil, string | nil, integer | nil),
+--::   get_peer_name: (self: LjSocket) -> (string | nil, integer | nil, integer | nil),
+--::   get_name:    (self: LjSocket) -> (string | nil, integer | nil, integer | nil),
+--::   send:        (self: LjSocket, data: string, flags: integer | nil, addr: LjSocketAddrInfo | nil) -> (integer | nil, string | nil, integer | nil),
+--::   send_to:     (self: LjSocket, addr: LjSocketAddrInfo, data: string, flags: integer | nil) -> (integer | nil, string | nil, integer | nil),
+--::   receive:     (self: LjSocket, size: integer | nil, flags: integer | nil, src_address: unknown, address_len: integer | nil) -> (string | nil, string | nil, integer | nil),
+--::   receive_from: (self: LjSocket, address: LjSocketAddrInfo | nil, size: integer | nil, flags: integer | nil) -> (string | nil, string | nil, integer | nil),
+--:: }
+
+--:: LjSocketModule = {
+--::   get_address_info:  (data: { host: string, service: string | integer | nil, family: LjSocketFamily | nil, socket_type: LjSocketType | nil, protocol: LjSocketProtocol | nil, flags: { string } | nil }) -> ({ [integer]: LjSocketAddrInfo } | nil, string | nil),
+--::   find_first_address: (host: string, service: string | integer, options: { family: LjSocketFamily | nil, socket_type: LjSocketType | nil, protocol: LjSocketProtocol | nil, flags: { string } | nil } | nil) -> (LjSocketAddrInfo | nil, string | nil),
+--::   create:   (family: LjSocketFamily, socket_type: LjSocketType, protocol: LjSocketProtocol) -> (LjSocket | nil, string | nil, integer | nil),
+--::   bind:     (host: string, service: string | integer, protocol: LjSocketProtocol | nil) -> (LjSocket | nil, string | nil, integer | nil),
+--::   poll:     (socket: LjSocket, flags: string | { string }, timeout: integer | nil) -> ({ [string]: boolean } | nil, integer | nil),
+--:: }
+
 --[[https://github.com/CapsAdmin/luajitsocket]]
 --[[
 MIT License
@@ -28,6 +85,7 @@ SOFTWARE.
 ]]
 
 local ffi = require("ffi")
+local bit = require("bit")
 local socket = {}
 local e = {}
 local errno = {}
