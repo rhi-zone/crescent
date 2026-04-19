@@ -256,6 +256,82 @@ T.describe("platform import", function()
 			local _, err = import.import_card({ runtime_files = {}, runtime_manifest = {}, apps_dir = "/x", write_fn = function() end, timestamp = 1 })
 			T.ok(err:find("png_bytes"))
 		end)
+
+		T.it("produces a 'js' iTXt chunk when dom.lua is present in runtime_files", function()
+			skip_no_zlib()
+			local written = {}
+			local write_fn = function(path, data) written[path] = data; return true end
+
+			local png_bytes = make_card_png({
+				data = { name = "Dom Card", tags = {} },
+			})
+
+			-- Minimal dom.lua that is valid Lua (no external deps so bundling can complete).
+			local dom_src = "local M = {}\nfunction M.init() return {} end\nreturn M\n"
+			local runtime_files_with_dom = {
+				{ name = "server.lua", data = "return { create = function() end }" },
+				{ name = "dom.lua",    data = dom_src },
+			}
+
+			local app_path = import.import_card({
+				png_bytes = png_bytes,
+				runtime_files = runtime_files_with_dom,
+				runtime_manifest = RUNTIME_MANIFEST,
+				apps_dir = "/tmp/apps",
+				write_fn = write_fn,
+				timestamp = 4000000,
+			})
+
+			T.ok(app_path, "app_path should not be nil")
+
+			local out_bytes = written[app_path]
+			T.ok(out_bytes, "file should have been written")
+			local out_chunks = png.read(out_bytes)
+			T.ok(out_chunks)
+
+			-- If lua2ts is available, a 'js' chunk should exist and contain the bundle preamble.
+			local ok_l2t = pcall(require, "lib.lua2ts")
+			if ok_l2t then
+				local js_chunk = png.get_itxt(out_chunks, "js")
+				T.ok(js_chunk, "js iTXt chunk should exist when lua2ts is available")
+				T.ok(js_chunk:find("__modules", 1, true), "js chunk should contain bundle preamble (__modules)")
+			end
+		end)
+
+		T.it("no 'js' chunk and no error when dom.lua is absent from runtime_files", function()
+			skip_no_zlib()
+			local written = {}
+			local write_fn = function(path, data) written[path] = data; return true end
+
+			local png_bytes = make_card_png({
+				data = { name = "No Dom Card", tags = {} },
+			})
+
+			-- runtime_files has no dom.lua
+			local runtime_files_no_dom = {
+				{ name = "server.lua", data = "return { create = function() end }" },
+			}
+
+			local app_path, manifest = import.import_card({
+				png_bytes = png_bytes,
+				runtime_files = runtime_files_no_dom,
+				runtime_manifest = RUNTIME_MANIFEST,
+				apps_dir = "/tmp/apps",
+				write_fn = write_fn,
+				timestamp = 5000000,
+			})
+
+			T.ok(app_path, "import should succeed without dom.lua")
+			T.ok(manifest, "manifest should be returned")
+
+			local out_bytes = written[app_path]
+			T.ok(out_bytes)
+			local out_chunks = png.read(out_bytes)
+			T.ok(out_chunks)
+
+			local js_chunk = png.get_itxt(out_chunks, "js")
+			T.ok(not js_chunk, "no js chunk should be present when dom.lua is absent")
+		end)
 	end)
 
 end)

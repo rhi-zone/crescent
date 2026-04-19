@@ -29,6 +29,17 @@ local compress = require("lib.compress")
 local base64 = require("lib.base64")
 local json_mod = require("lib.format.json")
 
+-- lua2ts is optional; loaded once on first use.
+local lua2ts_mod
+local lua2ts_loaded = false
+local function get_lua2ts()
+	if lua2ts_loaded then return lua2ts_mod end
+	lua2ts_loaded = true
+	local ok, mod = pcall(require, "lib.lua2ts")
+	if ok then lua2ts_mod = mod end
+	return lua2ts_mod
+end
+
 local M = {}
 
 -- ── Card metadata extraction ────────────────────────────────────────────────
@@ -142,10 +153,61 @@ function M.import_card(opts)
 	local lua_data, berr = bundle_runtime(opts.runtime_files, manifest)
 	if not lua_data then return nil, berr end
 
+	-- 3.5. JS bundle: transpile dom.lua + deps via lua2ts if available.
+	-- Detect dom entry: manifest.dom_entry filename, or look for "dom.lua" in runtime_files.
+	local dom_entry_name = opts.runtime_manifest.dom_entry or "dom.lua"
+	local dom_entry_src
+	for _, f in ipairs(opts.runtime_files) do
+		if f.name == dom_entry_name then
+			dom_entry_src = f.data
+			break
+		end
+	end
+
+	local js_bundle
+	if dom_entry_src then
+		local lua2ts = get_lua2ts()
+		if lua2ts then
+			-- Build a lookup table from runtime_files for fast resolve.
+			local rf_by_name = {}
+			for _, f in ipairs(opts.runtime_files) do
+				rf_by_name[f.name] = f.data
+			end
+			-- resolve_fn: convert dot-separated module name to filename and look up.
+			-- e.g. "lib.reactive" → "lib/reactive.lua" (not in runtime_files, returns nil).
+			-- Files in runtime_files are stored by bare name (e.g. "dom.lua").
+			local function resolve_fn(mod_name)
+				-- Try bare filename match: "lib.foo.bar" → "foo/bar.lua" (last segment path).
+				local as_file = mod_name:gsub("%.", "/") .. ".lua"
+				-- Check if any runtime file matches the full slash path or just the name.
+				if rf_by_name[as_file] then return rf_by_name[as_file] end
+				-- Try just the basename: "lib.formats.ccv2.card" → "card.lua"
+				local basename = mod_name:match("([^.]+)$") .. ".lua"
+				if rf_by_name[basename] then return rf_by_name[basename] end
+				-- Not in runtime_files — external dep, skip inlining.
+				return nil
+			end
+			-- Entry module name: strip .lua from dom_entry_name.
+			local entry_mod = dom_entry_name:gsub("%.lua$", "")
+			local bundle_ok, bundle_result = pcall(lua2ts.bundle,
+				entry_mod, dom_entry_src, resolve_fn, { filename = dom_entry_name })
+			if bundle_ok and bundle_result then
+				js_bundle = bundle_result
+			else
+				-- Non-fatal: log and continue without JS bundle.
+				-- (bundle_result is the error string when bundle_ok is false)
+				io.stderr:write("import: JS bundling warning: " .. tostring(bundle_result) .. "\n")
+			end
+		end
+	end
+
 	-- 4. Add iTXt chunks to the PNG.
 	local manifest_json = json_mod.encode(manifest)
 	chunks = png.set_itxt(chunks, "lua", lua_data)
 	chunks = png.set_itxt(chunks, "lua-manifest", manifest_json)
+	if js_bundle then
+		chunks = png.set_itxt(chunks, "js", js_bundle)
+	end
 
 	-- 5. Write the app PNG.
 	local out_bytes = png.write(chunks)
