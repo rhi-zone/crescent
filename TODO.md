@@ -108,7 +108,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [x] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
-- [ ] **CLI handler convention for apps** — apps should handle a CLI entrypoint alongside their HTTP one, using `caps.cli` (args) + `caps.stdout`. Convention: `cr run <app> [-- args...]` dispatches to the app's CLI handler if it declares `cli` cap; app writes result to stdout, `--json` for machine-readable output. Lets agents invoke app functionality without HTTP. Implement the convention in `lib/platform/cli.lua` and add CLI handlers to the canonical apps (card, library).
+- [x] **CLI handler convention for apps** — apps should handle a CLI entrypoint alongside their HTTP one, using `caps.cli` (args) + `caps.stdout`. Convention: `cr run <app> [-- args...]` dispatches to the app's CLI handler if it declares `cli` cap; app writes result to stdout, `--json` for machine-readable output. Lets agents invoke app functionality without HTTP. Implement the convention in `lib/platform/cli.lua` and add CLI handlers to the canonical apps (card, library).
 - [ ] **REPL cap** — deferred pending design. Good REPLs need readline, history, completion, multiline input, error recovery — not worth half-solving. Design question: is this a cap (app gets a line-reader), a platform primitive, or a library on top of `caps.stdin`/`caps.stdout`?
 
 ## platform daemon — implementation track
