@@ -77,7 +77,7 @@ local fn_profunctor_impl = {
 
 -- ── Metatable ──────────────────────────────────────────────────────────────────
 
---: { [any]: any }
+--: { [unknown]: unknown }
 local fn_index = {
 	[Mappable.key]   = fn_mappable_impl,
 	[Applicable.key] = fn_applicable_impl,
@@ -106,7 +106,6 @@ function Fn.new(f)
 end
 
 -- Allow Fn(f) as sugar for Fn.new(f)
---: any
 local fn_module_mt = {
 	__call = function(_self, f)
 		return Fn.new(f)
