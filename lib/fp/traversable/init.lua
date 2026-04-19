@@ -19,8 +19,8 @@ local Applicable = require("lib.fp.applicable")
 
 local Traversable = {}
 
--- The module itself is the dispatch key.
-Traversable.key = Traversable
+-- A fresh table used purely as an identity token for dispatch.
+Traversable.key = {} --: TraversableKey
 
 -- traverse :: Applicable f => (a -> f b) -> t a -> f (t b)
 -- Dispatches to ta[Traversable.key].traverse(f, ta, ctor).

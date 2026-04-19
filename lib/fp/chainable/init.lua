@@ -10,8 +10,8 @@ end
 
 local Chainable = {}
 
--- The module itself is the dispatch key.
-Chainable.key = Chainable
+-- A fresh table used purely as an identity token for dispatch.
+Chainable.key = {} --: ChainableKey
 
 -- bind: sequence a chainable action, threading the inner value into f
 function Chainable.bind(ma, f)

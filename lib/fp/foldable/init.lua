@@ -9,8 +9,8 @@ end
 
 local Foldable = {}
 
--- The module itself is the dispatch key.
-Foldable.key = Foldable
+-- A fresh table used purely as an identity token for dispatch.
+Foldable.key = {} --: FoldableKey
 
 -- foldr :: (a -> b -> b) -> b -> t a -> b
 -- right-fold over the structure

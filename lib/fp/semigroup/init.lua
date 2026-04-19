@@ -9,8 +9,8 @@ end
 
 local Semigroup = {}
 
--- The module itself is the dispatch key.
-Semigroup.key = Semigroup
+-- A fresh table used purely as an identity token for dispatch.
+Semigroup.key = {} --: SemigroupKey
 
 -- append: combine two semigroup values
 function Semigroup.append(a, b)

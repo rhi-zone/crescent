@@ -52,8 +52,8 @@ local identity_applicable_impl = {
 
 Identity_mt = {
 	__index = {
-		[Mappable]   = identity_mappable_impl,
-		[Applicable] = identity_applicable_impl,
+		[Mappable.key]   = identity_mappable_impl,
+		[Applicable.key] = identity_applicable_impl,
 	},
 }
 
@@ -98,8 +98,8 @@ local const_applicable_impl = {
 
 Const_mt = {
 	__index = {
-		[Mappable]   = const_mappable_impl,
-		[Applicable] = const_applicable_impl,
+		[Mappable.key]   = const_mappable_impl,
+		[Applicable.key] = const_applicable_impl,
 	},
 }
 

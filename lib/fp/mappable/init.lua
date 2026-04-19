@@ -9,9 +9,8 @@ end
 
 local Mappable = {}
 
--- The module itself is the dispatch key.
--- MappableKey gives it a named opaque type for the typechecker.
-Mappable.key = Mappable
+-- A fresh table used purely as an identity token for dispatch.
+Mappable.key = {} --: MappableKey
 
 -- map: apply f to the value(s) inside fa
 function Mappable.map(f, fa)

@@ -11,8 +11,8 @@ local Semigroup = require("lib.fp.semigroup")
 
 local Monoid = {}
 
--- The module itself is the dispatch key.
-Monoid.key = Monoid
+-- A fresh table used purely as an identity token for dispatch.
+Monoid.key = {} --: MonoidKey
 
 -- empty: return the identity element for the monoid instance of `a`
 function Monoid.empty(a)

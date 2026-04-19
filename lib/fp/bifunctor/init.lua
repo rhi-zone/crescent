@@ -16,8 +16,8 @@ end
 
 local Bifunctor = {}
 
--- The module itself is the dispatch key.
-Bifunctor.key = Bifunctor
+-- A fresh table used purely as an identity token for dispatch.
+Bifunctor.key = {} --: BifunctorKey
 
 local function id(x) return x end
 

@@ -16,8 +16,8 @@ end
 
 local Profunctor = {}
 
--- The module itself is the dispatch key.
-Profunctor.key = Profunctor
+-- A fresh table used purely as an identity token for dispatch.
+Profunctor.key = {} --: ProfunctorKey
 
 local function id(x) return x end
 

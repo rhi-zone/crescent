@@ -12,8 +12,8 @@ end
 
 local Applicable = {}
 
--- The module itself is the dispatch key.
-Applicable.key = Applicable
+-- A fresh table used purely as an identity token for dispatch.
+Applicable.key = {} --: ApplicableKey
 
 -- ap: apply a wrapped function to a wrapped value
 function Applicable.ap(ff, fa)
