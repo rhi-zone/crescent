@@ -214,9 +214,11 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   wired into daemon (cap_grant, auth_session, launch_token, app_install,
   app_uninstall events). `audit_log` is optional in `daemon_opts` — nil skips
   logging. 31 test assertions.
-- [ ] **TLS on routable interfaces** — binding to loopback is TLS-optional; binding to
+- [x] **TLS on routable interfaces** — binding to loopback is TLS-optional; binding to
   Tailscale or any routable interface requires TLS. Cert loading from disk (daemon does
-  not do ACME in v1 — user provides cert).
+  not do ACME in v1 — user provides cert). v1 implemented: `--tls-cert`/`--tls-key` flags
+  in daemon CLI; `lib/http/server.lua` wraps accepted sockets via libtls `tls_accept_socket`;
+  falls back to plaintext if libtls unavailable; daemon warns on non-loopback bind without TLS.
 - [x] **Admin policy layer** — admin can set blanket allow/deny ceilings per app, per cap,
   per cap+host tuple. Caps the grant UI against those ceilings so the operator cannot be
   socially engineered past admin intent.

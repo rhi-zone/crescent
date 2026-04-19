@@ -26,7 +26,7 @@ local json = require("lib.format.json")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
---: ({ [integer]: string }) -> { host: string, port: integer, apps_dir: string | nil, daemon_host: string | nil, runtime_dir: string | nil }
+--: ({ [integer]: string }) -> { host: string, port: integer, apps_dir: string | nil, daemon_host: string | nil, runtime_dir: string | nil, tls_cert: string | nil, tls_key: string | nil }
 local function parse_args(args)
 	local opts = {
 		host = "127.0.0.1",
@@ -34,6 +34,8 @@ local function parse_args(args)
 		apps_dir = nil, --: string | nil
 		daemon_host = nil, --: string | nil
 		runtime_dir = nil, --: string | nil
+		tls_cert = nil, --: string | nil
+		tls_key = nil, --: string | nil
 	}
 	for i = 1, #args do
 		local a = args[i]
@@ -49,6 +51,10 @@ local function parse_args(args)
 			opts.daemon_host = val
 		elseif key == "runtime-dir" then
 			opts.runtime_dir = val
+		elseif key == "tls-cert" then
+			opts.tls_cert = val
+		elseif key == "tls-key" then
+			opts.tls_key = val
 		elseif a:sub(1, 1) == "-" then
 			io.stderr:write("unknown flag: " .. a .. "\n")
 			os.exit(1)
@@ -232,8 +238,26 @@ local d = daemon.make({
 -- delegate to d.handle. opts.host forwards all the way down to the bind call
 -- so a loopback-only daemon stays loopback-only.
 
-io.write("daemon: http://" .. daemon_host .. "/\n")
+-- Non-loopback without TLS: warn the operator. The loopback check is a simple
+-- prefix match — 127. covers all 127.x.x.x loopback aliases. "localhost" is
+-- also considered loopback. Anything else is potentially routable.
+local is_loopback = opts.host == "localhost"
+	or opts.host:sub(1, 4) == "127."
+	or opts.host == "::1"
+if not is_loopback and not opts.tls_cert then
+	io.stderr:write("daemon: WARNING: binding to non-loopback interface ("
+		.. opts.host .. ") without TLS — not recommended for production\n")
+end
+
+local scheme = opts.tls_cert and "https" or "http"
+io.write("daemon: " .. scheme .. "://" .. daemon_host .. "/\n")
 io.flush()
+
+local server_opts = {
+	host = opts.host,
+	tls_cert = opts.tls_cert,
+	tls_key = opts.tls_key,
+}
 
 http_server.server(function(raw_req, res)
 	local target = raw_req.target or "/"
@@ -254,4 +278,4 @@ http_server.server(function(raw_req, res)
 	}
 	res.status = 200 -- http.server initialises headers={} but not status
 	d.handle(req, res)
-end, opts.port, nil, { host = opts.host })
+end, opts.port, nil, server_opts)

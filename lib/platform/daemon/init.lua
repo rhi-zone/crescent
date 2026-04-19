@@ -60,6 +60,8 @@ local M = {}
 --::   audit_log: unknown,
 --::   session_db_path: string | nil,
 --::   policy_path: string | nil,
+--::   tls_cert: string | nil,
+--::   tls_key: string | nil,
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
