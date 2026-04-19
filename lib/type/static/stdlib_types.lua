@@ -51,10 +51,10 @@
 --:: Ctype<T> = $Opaque<T>
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & ((ct: string, ...any) -> any),
---::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & ((ct: string, obj: unknown) -> any),
+--::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & ((ct: string, ...any) -> unknown),
+--::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & ((ct: string, obj: unknown) -> unknown),
 --::   sizeof:   (ct: unknown) -> integer,
---::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & ((ct: string) -> any),
+--::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & ((ct: string) -> unknown),
 --::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
 --::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
 --::   string:   (ptr: unknown, len: integer | nil) -> string,
