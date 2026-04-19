@@ -223,27 +223,43 @@ rt = N.runtime({ executors = { foo = function() rt:bar() end } })
 
 The same applies to test code that passes executors inline to a constructor. Always pre-declare the variable, then assign.
 
-## When the user says "wrong"
+## Don't write a wrong attempt in the first place
 
-After the **first** "wrong" / "garbage" / "what the fuck" reaction, **stop**.
-By the third rejection the context is already poisoned with bad reasoning,
-failed variations, and noise that anchors future attempts on the same wrong
-axis. One wrong attempt is a misread; two is a pattern; three is recovery
-work for the next session.
+Even one rejected attempt poisons the context: the failed variation, your
+explanation of it, and the user's correction all anchor subsequent reasoning
+on the wrong axis. By the time the user says "wrong," the damage is done —
+the next attempt is reaching into a context already shaped by the failure.
+Recovery costs more tokens than getting it right.
 
-The correct loop, starting at the *first* rejection:
+So: in any domain where you're not certain you understand the semantic
+constraints, **state your understanding before acting**, not after being
+corrected.
 
-1. Explicitly state *why* you think the current approach is wrong, in terms of
-   semantics (what value doesn't compute the right thing, what invariant is
-   violated, what use case fails). Not "looks bad" — what specifically is wrong.
-2. Confirm your reasoning matches the user's *before* changing code.
-3. Only then write the fix.
+Before making a non-trivial change in unfamiliar semantic territory:
 
-When the user says "why are you trying the WRONG thing" they're correcting
-**what you're thinking about**, not the specific value you wrote. Pause and
-re-anchor on the semantic problem.
+1. State, in one or two sentences, the semantic property you believe the
+   change must satisfy (what invariant is preserved, which use cases must
+   keep working, why this shape and not another).
+2. Confirm that reading with the user.
+3. Only then write code.
 
-A failure mode to avoid: cycling through syntactic variations without ever
+This is cheap when you're right (one sentence the user nods at) and saves
+catastrophe when you're wrong (a sentence-level correction beats a
+file-level revert and a polluted scrollback).
+
+Heuristics for "unfamiliar semantic territory":
+- Type system / formal semantics work
+- API design where the *shape* of the type matters as much as the operations
+- Anywhere you've recently been corrected on the same surface
+- Anywhere the user uses words like "garbage," "wrong," or asks "why" about
+  your reasoning
+
+If you find yourself writing a syntactic variation of something you just
+wrote — different return type, different parameter shape, different alias
+form — that's the signal to stop and ask, not to ship. The pattern means
+you're guessing.
+
+Failure mode to avoid: cycling through syntactic variations without ever
 asking which property each option violates. One real example burned ~25
 attempts at `ffi.new` argument typing through `<T: string>` → `unknown` →
 `any` → `Cdata<unknown>` → no string path → `<T: string>` again. See
