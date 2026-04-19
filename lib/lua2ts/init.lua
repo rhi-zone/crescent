@@ -136,6 +136,10 @@ local function new_ctx(pool, nodes, lists, source, opts)
         -- pending ESM imports: { modname → alias }
         imports = {},
         import_order = {},
+        -- bundle mode: collect required module names (dot-separated)
+        bundle_mode     = (opts or {}).bundle_mode or false,
+        bundle_requires = {},   -- ordered list of required module names
+        bundle_req_seen = {},   -- set for dedup
     }
 
     function ctx:istr()
@@ -194,6 +198,14 @@ local function new_ctx(pool, nodes, lists, source, opts)
         if not self.imports[modname] then
             self.imports[modname] = alias
             self.import_order[#self.import_order + 1] = modname
+        end
+    end
+
+    -- Record a bundle-mode require dependency (dot-separated module name).
+    function ctx:add_bundle_require(modname)
+        if not self.bundle_req_seen[modname] then
+            self.bundle_req_seen[modname] = true
+            self.bundle_requires[#self.bundle_requires + 1] = modname
         end
     end
 
@@ -350,7 +362,18 @@ emit_expr = function(ctx, nid, parent_prec)
                 end
             elseif callee_name == "require" then
                 -- require("lib.foo") → handled at call-site statement level
-                -- return as-is for now; import hoisting happens in stmt handler
+                -- return as-is for now; import hoisting happens in stmt handler.
+                -- In bundle mode, rewrite to __require("lib/foo") and record dep.
+                if ctx.bundle_mode and args_len == 1 then
+                    local arg_items = ctx:list(args_start, 1)
+                    local arg_n = ctx:node(arg_items[1])
+                    if arg_n.kind == defs.NODE_LITERAL and arg_n.d[1] == defs.LIT_STRING then
+                        local mod_name = ctx:name(arg_n.d[2])
+                        ctx:add_bundle_require(mod_name)
+                        local mod_id = mod_name:gsub("%.", "/")
+                        return '__require("' .. mod_id .. '")'
+                    end
+                end
                 local args = emit_expr_list(ctx, args_start, args_len)
                 return "require(" .. args .. ")"
             elseif callee_name == "pcall" then
@@ -570,14 +593,24 @@ emit_stmt = function(ctx, nid)
             -- Single initializer
             local exprs = ctx:list(es, el)
             local expr_id = exprs[1]
-            -- Special case: require("lib.foo") → import
+            -- Special case: require("lib.foo") → import (ESM) or __require (bundle)
             local mod_name = get_require_mod(ctx, expr_id)
-            if mod_name and ctx.opts.module ~= "cjs" then
-                local alias = name_parts[1]
-                local path = mod_to_import_path(mod_name)
-                ctx:add_import(alias, path)
-                -- Don't emit a local statement; the import will be hoisted.
-                return
+            if mod_name then
+                if ctx.bundle_mode then
+                    -- Bundle mode: emit const x = __require("lib/foo"); and record dep.
+                    local alias = name_parts[1]
+                    local mod_id = mod_name:gsub("%.", "/")
+                    ctx:add_bundle_require(mod_name)
+                    local ts_type = ann_content and (": " .. (ann_to_ts(ann_content) or "unknown")) or ""
+                    ctx:emit("const " .. alias .. ts_type .. ' = __require("' .. mod_id .. '");')
+                    return
+                elseif ctx.opts.module ~= "cjs" then
+                    local alias = name_parts[1]
+                    local path = mod_to_import_path(mod_name)
+                    ctx:add_import(alias, path)
+                    -- Don't emit a local statement; the import will be hoisted.
+                    return
+                end
             end
             local val = emit_expr(ctx, expr_id, 0)
             if #name_parts == 1 then
@@ -1281,6 +1314,146 @@ function M.transpile_file(path, opts)
     opts = opts or {}
     opts.filename = opts.filename or path
     return M.transpile(source, opts)
+end
+
+-- ---------------------------------------------------------------------------
+-- Bundle API
+-- ---------------------------------------------------------------------------
+
+-- Bundle preamble: module registry + __require helper.
+local BUNDLE_PREAMBLE = [[// --- crescent bundle ---
+const __modules = {};
+const __require = (id) => {
+  if (!__modules[id]) throw new Error("module not found: " + id);
+  if (!__modules[id].__loaded) {
+    __modules[id].__loaded = true;
+    __modules[id].exports = {};
+    __modules[id].factory(__modules[id].exports, __require);
+  }
+  return __modules[id].exports;
+};]]
+
+-- Transpile a single source in bundle mode and return { body_lines, deps }.
+-- body_lines: array of lines (the transpiled body, without preamble/imports).
+-- deps: array of dot-separated module names required by this source.
+local function transpile_bundle_module(source, opts)
+    local bundle_opts = {}
+    for k, v in pairs(opts or {}) do bundle_opts[k] = v end
+    bundle_opts.bundle_mode = true
+    bundle_opts.module = "cjs"   -- suppress ESM import hoisting
+
+    local ok, result = pcall(function()
+        local parsed = parse_mod.parse(source, bundle_opts.filename or "?")
+        local ctx = new_ctx(parsed.pool, parsed.nodes, parsed.lists, source, bundle_opts)
+
+        local root = ctx:node(parsed.root)
+        if root.kind ~= defs.NODE_CHUNK then
+            error("expected chunk root")
+        end
+        emit_chunk_with_classes(ctx, root.d[1], root.d[2])
+
+        return { lines = ctx.lines, deps = ctx.bundle_requires }
+    end)
+    if not ok then
+        return nil, tostring(result)
+    end
+    return result
+end
+
+-- Wrap transpiled body lines as a factory module entry.
+-- mod_id: slash-separated module id (e.g. "lib/foo")
+-- body_lines: array of indented body lines
+local function wrap_module_factory(mod_id, body_lines)
+    local parts = {}
+    parts[#parts + 1] = '__modules["' .. mod_id .. '"] = { factory: (exports, __require) => {'
+    for _, line in ipairs(body_lines) do
+        parts[#parts + 1] = "  " .. line
+    end
+    parts[#parts + 1] = "}};"
+    return parts
+end
+
+-- Transpile entry_path and all transitive require() deps into a single JS bundle.
+--
+-- entry_path  : module name for the entry (dot-separated, e.g. "myapp.main"), used as the registry id.
+-- entry_src   : Lua source string for the entry module.
+-- resolve_fn  : function(mod_name: string) -> string | nil
+--               Called with a dot-separated module name. Return the Lua source, or nil to skip
+--               (external/platform dep — a __require call will be emitted but the module won't
+--               be inlined).
+-- opts        : same opts as transpile (filename, strict, etc.), minus module (always bundle).
+--
+-- Returns bundle_string or (nil, errmsg).
+function M.bundle(entry_path, entry_src, resolve_fn, opts)
+    opts = opts or {}
+
+    -- Work queue: { mod_name (dot-sep), source }
+    -- visited: set of mod_names already processed (cycle guard)
+    local visited = {}
+    local order   = {}  -- ordered list of { mod_id, lines } for output
+    local errors_out = {}
+
+    local function process(mod_name, source)
+        if visited[mod_name] then return end
+        visited[mod_name] = true
+
+        local mod_id = mod_name:gsub("%.", "/")
+        local file_opts = {}
+        for k, v in pairs(opts) do file_opts[k] = v end
+        file_opts.filename = file_opts.filename or (mod_id .. ".lua")
+
+        local result, err = transpile_bundle_module(source, file_opts)
+        if not result then
+            errors_out[#errors_out + 1] = "error transpiling " .. mod_name .. ": " .. (err or "?")
+            return
+        end
+
+        -- Recurse into deps first (depth-first, topological order)
+        for _, dep_name in ipairs(result.deps) do
+            if not visited[dep_name] then
+                local dep_src = resolve_fn(dep_name)
+                if dep_src then
+                    process(dep_name, dep_src)
+                end
+                -- If resolve_fn returns nil, the dep is external — skip inlining.
+                -- The __require call will still be emitted; at runtime it will
+                -- throw "module not found" unless the host provides it.
+            end
+        end
+
+        order[#order + 1] = { mod_id = mod_id, lines = result.lines }
+    end
+
+    process(entry_path, entry_src)
+
+    if #errors_out > 0 then
+        return nil, table.concat(errors_out, "\n")
+    end
+
+    -- Assemble output
+    local out = {}
+
+    if opts.strict then
+        out[#out + 1] = "// @ts-strict-mode"
+    end
+    out[#out + 1] = BUNDLE_PREAMBLE
+    out[#out + 1] = ""
+
+    -- Emit each module as a factory (deps before entry due to depth-first order)
+    for _, mod in ipairs(order) do
+        local factory_lines = wrap_module_factory(mod.mod_id, mod.lines)
+        for _, line in ipairs(factory_lines) do
+            out[#out + 1] = line
+        end
+        out[#out + 1] = ""
+    end
+
+    -- Run the entry module
+    local entry_id = entry_path:gsub("%.", "/")
+    out[#out + 1] = "// run entry"
+    out[#out + 1] = '__require("' .. entry_id .. '");'
+
+    return table.concat(out, "\n")
 end
 
 return M

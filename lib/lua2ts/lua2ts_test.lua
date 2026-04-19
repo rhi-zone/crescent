@@ -423,3 +423,111 @@ end
     hasnt(src, "Object.setPrototypeOf", "no setPrototypeOf for self-referential __index")
     has(src, "class M {", "class emitted for self-referential pattern")
 end)
+
+-- ---------------------------------------------------------------------------
+-- Bundle API
+-- ---------------------------------------------------------------------------
+
+-- Helper: call M.bundle and assert output contains a substring.
+local function bundle_has(entry_path, entry_src, resolve_fn, expected, desc, opts)
+    local out, err = lua2ts.bundle(entry_path, entry_src, resolve_fn, opts)
+    T.ok(out ~= nil, desc .. " (no error: " .. tostring(err) .. ")")
+    if out then
+        T.ok(out:find(expected, 1, true) ~= nil,
+            desc .. ": expected " .. string.format("%q", expected) .. " in:\n" .. out)
+    end
+end
+
+local function bundle_hasnt(entry_path, entry_src, resolve_fn, unexpected, desc, opts)
+    local out, err = lua2ts.bundle(entry_path, entry_src, resolve_fn, opts)
+    T.ok(out ~= nil, desc .. " (no error: " .. tostring(err) .. ")")
+    if out then
+        T.ok(out:find(unexpected, 1, true) == nil,
+            desc .. ": did not expect " .. string.format("%q", unexpected) .. " in:\n" .. out)
+    end
+end
+
+T.describe("bundle: preamble and registry present", function()
+    local out, err = lua2ts.bundle("entry", "local x = 1", function() return nil end)
+    T.ok(out ~= nil, "bundle succeeds: " .. tostring(err))
+    if out then
+        T.ok(out:find("__modules", 1, true) ~= nil, "preamble: __modules present")
+        T.ok(out:find("__require", 1, true) ~= nil, "preamble: __require present")
+        T.ok(out:find('__require("entry")', 1, true) ~= nil, "entry runner present")
+    end
+end)
+
+T.describe("bundle: two-file — entry requires one dep", function()
+    local dep_src = [[local M = {} ; M.value = 42 ; return M]]
+    local entry_src = [[local dep = require("myapp.dep") ; local v = dep.value]]
+    local resolve = function(name)
+        if name == "myapp.dep" then return dep_src end
+        return nil
+    end
+    -- dep module appears in bundle
+    bundle_has("myapp.entry", entry_src, resolve, '__modules["myapp/dep"]', "dep module in bundle")
+    -- entry module appears in bundle
+    bundle_has("myapp.entry", entry_src, resolve, '__modules["myapp/entry"]', "entry module in bundle")
+    -- require rewritten to __require
+    bundle_has("myapp.entry", entry_src, resolve, '__require("myapp/dep")', "require rewritten to __require")
+    -- no ESM import in bundle output
+    bundle_hasnt("myapp.entry", entry_src, resolve, "import * as", "no ESM import in bundle")
+end)
+
+T.describe("bundle: dep exports accessible from entry", function()
+    local dep_src = [[exports = {} ; exports.greet = function(name) return "hi " .. name end]]
+    local entry_src = [[local dep = require("app.greet") ; dep.greet("world")]]
+    local resolve = function(name)
+        if name == "app.greet" then return dep_src end
+        return nil
+    end
+    -- dep factory wraps its body
+    bundle_has("app.main", entry_src, resolve, 'factory: (exports, __require)', "factory signature present")
+    -- entry calls __require to get dep
+    bundle_has("app.main", entry_src, resolve, '__require("app/greet")', "entry calls __require for dep")
+end)
+
+T.describe("bundle: external dep (resolve returns nil) not inlined", function()
+    local entry_src = [[local ext = require("platform.fs") ; ext.read("x.txt")]]
+    local resolve = function() return nil end  -- all external
+    -- entry module still bundled
+    bundle_has("app.main", entry_src, resolve, '__modules["app/main"]', "entry still bundled")
+    -- __require call still emitted (runtime will look it up)
+    bundle_has("app.main", entry_src, resolve, '__require("platform/fs")', "external dep call kept")
+    -- no factory for the external module
+    bundle_hasnt("app.main", entry_src, resolve, '__modules["platform/fs"]', "external dep not inlined")
+end)
+
+T.describe("bundle: cycle — A requires B, B requires A", function()
+    local a_src = [[local b = require("app.b") ; local function fa() return b end]]
+    local b_src = [[local a = require("app.a") ; local function fb() return a end]]
+    local sources = { ["app.a"] = a_src, ["app.b"] = b_src }
+    local resolve = function(name) return sources[name] end
+    -- Both modules must appear in the bundle
+    local out, err = lua2ts.bundle("app.a", a_src, resolve)
+    T.ok(out ~= nil, "cycle: bundle succeeds (no error: " .. tostring(err) .. ")")
+    if out then
+        T.ok(out:find('__modules["app/a"]', 1, true) ~= nil, "cycle: app.a in bundle")
+        T.ok(out:find('__modules["app/b"]', 1, true) ~= nil, "cycle: app.b in bundle")
+    end
+end)
+
+T.describe("bundle: deep transitive — A → B → C, all three bundled", function()
+    local c_src = [[local M = {} ; M.val = 3 ; return M]]
+    local b_src = [[local c = require("app.c") ; local M = {} ; M.val = c.val + 1 ; return M]]
+    local a_src = [[local b = require("app.b") ; local x = b.val]]
+    local sources = { ["app.b"] = b_src, ["app.c"] = c_src }
+    local resolve = function(name) return sources[name] end
+    -- All three modules appear in the output
+    bundle_has("app.a", a_src, resolve, '__modules["app/a"]', "deep: app.a bundled")
+    bundle_has("app.a", a_src, resolve, '__modules["app/b"]', "deep: app.b bundled")
+    bundle_has("app.a", a_src, resolve, '__modules["app/c"]', "deep: app.c bundled")
+    -- C appears before B (depth-first topological order)
+    local out = lua2ts.bundle("app.a", a_src, resolve)
+    if out then
+        local pos_c = out:find('__modules["app/c"]', 1, true)
+        local pos_b = out:find('__modules["app/b"]', 1, true)
+        T.ok(pos_c ~= nil and pos_b ~= nil and pos_c < pos_b,
+            "deep: C emitted before B (topological order)")
+    end
+end)
