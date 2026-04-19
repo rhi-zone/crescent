@@ -3175,6 +3175,7 @@ local function load_decl_file(ctx, mod_name)
 
     -- Temporarily swap ctx.ann and ctx.filename so process_type_decls operates
     -- on the loaded file's annotations and reports errors under the right filename.
+    -- process_type_decls will report ar.warnings and ar.parse_errors under rel_path.
     local saved_ann      = ctx.ann
     local saved_filename = ctx.filename
     ctx.ann      = ar
@@ -3721,6 +3722,7 @@ function M.generate(source, filename, parent_scope, pool, cri_loader, opts)
     if lex_annotations and next(lex_annotations) then
         local ok_ann, ar = pcall(ann_mod.parse_annotations, lex_annotations, pool, filename)
         if ok_ann then
+            -- ar.parse_errors (hint errors, e.g. T?) are reported by process_type_decls below.
             ctx.ann = ar
         else
             -- Annotation parse error (e.g. type too deeply nested): report as a diagnostic.

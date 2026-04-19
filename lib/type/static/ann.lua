@@ -73,7 +73,8 @@ local function new_scanner(content, filename, line)
         len = #content,
         filename = filename or "?",
         line = line or 0,
-        depth = 0,   -- recursive parse_type depth; guards against stack overflow
+        depth = 0,        -- recursive parse_type depth; guards against stack overflow
+        parse_errors = {},  -- hint errors accumulated during parse (non-fatal)
     }
 end
 
@@ -82,6 +83,16 @@ local MAX_TYPE_DEPTH = 64  -- parser stack limit; deeply-nested types beyond thi
 --: (Scanner, string) -> never
 local function scan_error(s, msg)
     error(format("%s:%d: annotation: %s (at col %d)", s.filename, s.line, msg, s.pos), 0)
+end
+
+-- scan_hint: record a non-fatal parse error without throwing.
+-- The error is visible as a structured diagnostic (via s.parse_errors) but does not abort
+-- the current parse frame. Use for cases where the intent is clear despite invalid syntax
+-- (e.g. postfix `?` — the type itself is still usable, just the `?` is wrong).
+--: (Scanner, string) -> nil
+local function scan_hint(s, msg)
+    s.parse_errors = s.parse_errors or {}
+    s.parse_errors[#s.parse_errors + 1] = { line = s.line, col = s.pos, msg = msg }
 end
 
 --: (Scanner) -> nil
@@ -1039,8 +1050,10 @@ function M.parse_annotations(annotations, pool, filename)
                     ty = idx
                 end
             elseif peek(s) == byte("?") then
-                s.hint_error = "postfix `?` is not valid — write `T | nil` instead"
-                scan_error(s, s.hint_error)
+                -- T? is not valid syntax — record a hint error and advance past the `?`
+                -- so the rest of the annotation can still be parsed.
+                scan_hint(s, "postfix `?` is not valid — write `T | nil` instead")
+                advance(s)  -- skip '?' and continue
             else
                 break
             end
@@ -1359,12 +1372,17 @@ function M.parse_annotations(annotations, pool, filename)
                 }
             end
         end)
+        -- Surface any hint errors (non-fatal, e.g. T?) accumulated during the parse.
+        -- These are collected regardless of whether the parse succeeded or failed.
+        for _, pe in ipairs(s.parse_errors) do
+            parse_errors[#parse_errors + 1] = pe
+        end
         if ok and result then
             results[line] = result
-        elseif not ok and (s.depth_limit_hit or s.hint_error) then
-            -- Re-throw depth-limit errors and explicit hint errors (e.g. invalid
-            -- syntax like `T?`) so the outer pcall in constrain.lua can report
-            -- them as diagnostics. Other parse errors are silently skipped.
+        elseif not ok and s.depth_limit_hit then
+            -- Re-throw depth-limit errors so the outer pcall in constrain.lua can
+            -- report them as diagnostics. Other parse errors are silently skipped
+            -- (or have already been recorded in parse_errors above).
             error(result, 0)
         end
     end

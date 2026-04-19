@@ -9528,4 +9528,15 @@ x = true
 --:: Outer = { a: string? }
 ]], "postfix")
     end)
+
+    assert.it("T? in multi-field struct: hint error reported but other fields still parse", function()
+        -- The `?` hint error should NOT abort parsing of the whole struct.
+        -- The alias `Outer` should still be registered so `b: integer` is accessible.
+        v3_has_error([[
+--:: Outer = { a: string?, b: integer }
+local x --: Outer
+local y --: integer
+y = x.b
+]], "postfix")
+    end)
 end)
