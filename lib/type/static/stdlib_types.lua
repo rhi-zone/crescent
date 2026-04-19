@@ -38,14 +38,14 @@
 --:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
 --:: declare getmetatable = <T>(t: T) -> MetaOf<T>
---:: declare collectgarbage = (opt: any | nil, arg: any | nil) -> any
+--:: declare collectgarbage = (opt: string | nil, arg: number | nil) -> number | boolean
 --:: declare gcinfo = () -> integer
---:: declare dofile = (filename: any | nil) -> any
---:: declare loadfile = (filename: any | nil) -> (any, any | nil)
---:: declare loadstring = (s: string, chunkname: any | nil) -> (any, any | nil)
---:: declare load = (chunk: any, chunkname: any | nil, mode: any | nil, env: any | nil) -> (any, any | nil)
---:: declare newproxy = (mt: any | nil) -> any
---:: declare rawprint = (s: any) -> ()
+--:: declare dofile = (filename: string | nil) -> unknown
+--:: declare loadfile = (filename: string | nil) -> (function | nil, string | nil)
+--:: declare loadstring = (s: string, chunkname: string | nil) -> (function | nil, string | nil)
+--:: declare load = (chunk: string | function, chunkname: string | nil, mode: string | nil, env: { [string]: unknown, ... } | nil) -> (function | nil, string | nil)
+--:: declare newproxy = (mt: boolean | { [string]: unknown, ... } | nil) -> unknown
+--:: declare rawprint = (s: string) -> ()
 --:: declare _VERSION = string
 --:: Ctype<T> = $Opaque<T>
 --:: Ptr<T> = T & { [0]: T }
@@ -174,8 +174,8 @@
 ---------------------------------------------------------------------------
 
 --:: File = {
---::     read:    (File, ...unknown) -> string | nil,
---::     write:   (File, ...unknown) -> (File | nil, string | nil),
+--::     read:    (File, ...string | number) -> string | nil,
+--::     write:   (File, ...string | number) -> (File | nil, string | nil),
 --::     close:   (File) -> (boolean | nil, string | nil),
 --::     lines:   (File) -> () -> string | nil,
 --::     seek:    (File, string | nil, integer | nil) -> (integer | nil, string | nil),
@@ -185,8 +185,8 @@
 --:: augment io {
 --::     open:    (path: string, mode: string | nil) -> (File | nil, string | nil),
 --::     close:   (file: File | nil) -> (boolean | nil, string | nil),
---::     write:   (...unknown) -> (File | nil, string | nil),
---::     read:    (...unknown) -> string | nil,
+--::     write:   (...string | number) -> (File | nil, string | nil),
+--::     read:    (...string | number) -> string | nil,
 --::     lines:   (filename: string | nil) -> () -> string | nil,
 --::     popen:   (cmd: string, mode: string | nil) -> (File | nil, string | nil),
 --::     tmpfile: () -> File | nil,
@@ -235,11 +235,11 @@
 ---------------------------------------------------------------------------
 
 --:: augment debug {
---::     getinfo:      (thread_or_f: unknown, what: string | nil) -> { [string]: unknown, ... } | nil,
---::     traceback:    (thread_or_msg: unknown, msg: string | nil, level: integer | nil) -> string,
---::     sethook:      (thread_or_fn: unknown, mask: string, count: integer | nil) -> (),
---::     getlocal:     (level: unknown, local_: integer) -> (string, unknown),
---::     setlocal:     (level: unknown, local_: integer, value: unknown) -> string,
+--::     getinfo:      (thread_or_f: integer | function | Thread, what: string | nil) -> { [string]: unknown, ... } | nil,
+--::     traceback:    (thread_or_msg: Thread | string | nil, msg: string | nil, level: integer | nil) -> string,
+--::     sethook:      (thread_or_fn: Thread | function, mask: string, count: integer | nil) -> (),
+--::     getlocal:     (level: integer | function, local_: integer) -> (string, unknown),
+--::     setlocal:     (level: integer, local_: integer, value: unknown) -> string,
 --::     getmetatable: (t: unknown) -> unknown,
 --::     setmetatable: (t: unknown, mt: unknown) -> unknown
 --:: }
