@@ -30,7 +30,7 @@ M.size = function(getenv)
       ]]
       local ws = ffi.new("struct winsize_tui")
       -- TIOCGWINSZ: Linux=0x5413, macOS=0x40087468
-      --: any
+      --: integer
       local TIOCGWINSZ = ffi.os == "OSX" and 0x40087468 or 0x5413
       local ret = ffi.C.ioctl(1, TIOCGWINSZ, ws)
       if ret == 0 and ws.ws_col > 0 and ws.ws_row > 0 then
@@ -108,7 +108,7 @@ end
 
 --:: BorderDef = { tl: string, tr: string, bl: string, br: string, h: string, v: string }
 
---: any
+--: { [string]: BorderDef }
 local BORDERS = {
   single  = { tl="┌", tr="┐", bl="└", br="┘", h="─", v="│" },
   double  = { tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║" },
@@ -283,7 +283,7 @@ end
 -- opts.flex = {1, 2, 1}  (proportional sizing; default equal)
 --: (any, any) -> any
 M.row = function(widgets, opts)
-  local flex = nil --: any
+  local flex = nil --: { [integer]: number, ... } | nil
   if opts ~= nil and opts.flex ~= nil then flex = opts.flex end
 
   return {
@@ -337,7 +337,7 @@ end
 -- opts.flex = {1, 2, 1}  (proportional sizing; default equal)
 --: (any, any) -> any
 M.col = function(widgets, opts)
-  local flex = nil --: any
+  local flex = nil --: { [integer]: number, ... } | nil
   if opts ~= nil and opts.flex ~= nil then flex = opts.flex end
 
   return {
@@ -421,7 +421,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Full-screen render: clears screen, renders widget to terminal size.
---: ((string) -> nil, () -> nil, (string) -> string | nil, any) -> ()
+--: ((string) -> nil, () -> nil, (string) -> string | nil, unknown) -> ()
 M.render_full = function(write_fn, flush_fn, getenv, widget)
   if type(write_fn) ~= "function" then error("tui.render_full: write_fn is required") end
   if type(flush_fn) ~= "function" then error("tui.render_full: flush_fn is required") end
