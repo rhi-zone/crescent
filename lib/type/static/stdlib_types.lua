@@ -60,13 +60,12 @@
 --::   bool: boolean,
 --::   ...
 --:: }
---:: CTypeOf<S> = match CTypeMap { { [S]: %V } => V, _ => unknown }
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & (<S: string>(ct: S, ...any) -> Cdata<CTypeOf<S>>),
---::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & (<S: string>(ct: S, obj: unknown) -> Cdata<CTypeOf<S>>),
+--::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & (<S: Keys<CTypeMap>>(ct: S, ...any) -> Cdata<CTypeMap[S]>),
+--::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & (<S: Keys<CTypeMap>>(ct: S, obj: unknown) -> Cdata<CTypeMap[S]>),
 --::   sizeof:   (ct: unknown) -> integer,
---::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & (<S: string>(ct: S) -> Ctype<CTypeOf<S>>),
+--::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
 --::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
 --::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
 --::   string:   (ptr: unknown, len: integer | nil) -> string,
