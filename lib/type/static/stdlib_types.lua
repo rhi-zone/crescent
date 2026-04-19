@@ -9,22 +9,22 @@
 -- Global functions
 ---------------------------------------------------------------------------
 
---:: declare print = (...any) -> ()
---:: declare tostring = (val: any) -> string
---:: declare tonumber = (val: any, base: any | nil) -> number | nil
---:: declare type = (val: any) -> string
---:: declare error = (msg: any, level: any | nil) -> never
---:: declare assert = (val: any, ...any) -> any
+--:: declare print = (...unknown) -> ()
+--:: declare tostring = (val: unknown) -> string
+--:: declare tonumber = (val: unknown, base: integer | nil) -> number | nil
+--:: declare type = (val: unknown) -> string
+--:: declare error = (msg: unknown, level: integer | nil) -> never
+--:: declare assert = <T>(val: T, ...unknown) -> T
 --:: PcallReturn<F> = match F { (...%P) -> %R => (true, ...R) | (false, string) }
 --:: declare pcall = <F: (...P) -> R, P, R>(f: F, ...P) -> ...(PcallReturn<F>)
 --:: declare xpcall = <F: (...P) -> R, P, R>(f: F, handler: (string) -> string, ...P) -> ...(PcallReturn<F>)
 --:: declare require = <T: string>(module: T) -> $Require<T>
 --:: declare select = (("#") -> integer) & ((integer, ...any) -> any)
---:: declare rawget = (t: any, k: any) -> any
---:: declare rawset = (t: any, k: any, v: any) -> any
---:: declare rawequal = (a: any, b: any) -> boolean
---:: declare rawlen = (t: any) -> integer
---:: declare unpack = (t: any, i: any | nil, j: any | nil) -> any
+--:: declare rawget = <T>(t: T, k: unknown) -> Values<T> | nil
+--:: declare rawset = <T>(t: T, k: unknown, v: unknown) -> T
+--:: declare rawequal = (a: unknown, b: unknown) -> boolean
+--:: declare rawlen = (t: string | { [integer]: unknown, ... }) -> integer
+--:: declare unpack = <V>(t: { [integer]: V, ... }, i: integer | nil, j: integer | nil) -> ...(V)
 --:: declare pairs = <T>(t: T) -> ...(PairsReturn<T>)
 --:: declare ipairs = <T>(t: T) -> ...(IpairsReturn<T>)
 
@@ -34,7 +34,7 @@
 --:: Values<T>       = match T { { ...[%K]: %V } => V }
 --:: Open<T>         = match T { { ...%Rest } => { ...Rest, ... } }
 --:: Closed<T>       = match T { { ...%Rest } => { ...Rest } }
---:: declare next = (t: any, k: any | nil) -> (any, any)
+--:: declare next = <T>(t: T, k: Keys<T> | nil) -> (Keys<T> | nil, Values<T> | nil)
 --:: declare setmetatable = <T, MT>(t: T, mt: MT) -> T & { #...MT }
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
 --:: declare getmetatable = <T>(t: T) -> MetaOf<T>
@@ -47,24 +47,26 @@
 --:: declare newproxy = (mt: any | nil) -> any
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
+--:: Cdata<T> = $Opaque<T>
+--:: Ctype<T> = $Opaque<T>
 --:: module "ffi": {
---::   cdef:   (string) -> nil,
---::   new:    (string, ...any) -> unknown,
---::   cast:   (string, unknown) -> unknown,
---::   sizeof: (string) -> integer,
---::   typeof: (string) -> unknown,
---::   copy:   (unknown, unknown, integer) -> nil,
---::   fill:   (unknown, integer) -> nil,
---::   string: (unknown, integer | nil) -> string,
---::   load:      (name: string, global: boolean | nil) -> any,
---::   gc:        (cdata: any, finalizer: ((...any) -> any) | nil) -> any,
---::   metatype:  (ct: any, metatable: { [string]: any }) -> any,
---::   istype:    (ct: any, obj: any) -> boolean,
---::   alignof:   (ct: any) -> integer,
---::   offsetof:  (ct: any, field: string) -> integer,
---::   abi:       (param: string) -> boolean,
---::   errno:     (newerr: integer | nil) -> integer,
---::   C:         $FfiC,
+--::   cdef:     (string) -> nil,
+--::   new:      <T: string>(ct: T, ...any) -> Cdata<T>,
+--::   cast:     <T: string>(ct: T, obj: unknown) -> Cdata<T>,
+--::   sizeof:   (ct: string | unknown) -> integer,
+--::   typeof:   <T: string>(ct: T) -> Ctype<T>,
+--::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
+--::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
+--::   string:   (ptr: unknown, len: integer | nil) -> string,
+--::   load:     (name: string, global: boolean | nil) -> unknown,
+--::   gc:       <T>(cdata: Cdata<T>, finalizer: ((Cdata<T>) -> ()) | nil) -> Cdata<T>,
+--::   metatype: <T: string>(ct: T, metatable: { [string]: unknown, ... }) -> Ctype<T>,
+--::   istype:   (ct: string | unknown, obj: unknown) -> boolean,
+--::   alignof:  (ct: string | unknown) -> integer,
+--::   offsetof: (ct: string | unknown, field: string) -> integer,
+--::   abi:      (param: string) -> boolean,
+--::   errno:    (newerr: integer | nil) -> integer,
+--::   C:        $FfiC,
 --:: }
 --:: module "bit": {
 --::   tobit:   (x: number) -> integer,
@@ -81,9 +83,9 @@
 --::   ror:     (x: integer, n: integer) -> integer
 --:: }
 --:: declare _G = $GlobalScope
---:: declare package = { path: string, cpath: string, loaded: { [string]: any, ... }, preload: { [string]: any, ... }, ... }
+--:: declare package = { path: string, cpath: string, loaded: { [string]: unknown, ... }, preload: { [string]: unknown, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
---:: declare jit = any
+--:: declare jit = { version: string, version_num: integer, os: string, arch: string, ... }
 
 ---------------------------------------------------------------------------
 -- string table
@@ -92,18 +94,18 @@
 --:: augment string {
 --::     format:  (fmt: string, ...any) -> string,
 --::     len:     (s: string) -> integer,
---::     sub:     (s: string, i: integer, j: any | nil) -> string,
---::     find:    (s: string, pattern: string, init: any | nil, plain: any | nil) -> ...((integer, integer) | (nil, nil)),
---::     match:   (s: string, pattern: string, init: any | nil) -> any,
---::     gmatch:  (s: string, pattern: string) -> function,
---::     gsub:    (s: string, pattern: string, repl: any, n: any | nil) -> (string, integer),
---::     rep:     (s: string, n: integer, sep: any | nil) -> string,
---::     byte:    (s: string, i: any | nil, j: any | nil) -> ...(integer),
+--::     sub:     (s: string, i: integer, j: integer | nil) -> string,
+--::     find:    (s: string, pattern: string, init: integer | nil, plain: boolean | nil) -> ...((integer, integer) | (nil, nil)),
+--::     match:   (s: string, pattern: string, init: integer | nil) -> ...(string | nil),
+--::     gmatch:  (s: string, pattern: string) -> () -> string | nil,
+--::     gsub:    (s: string, pattern: string, repl: string | ((string) -> (string | nil)) | { [string]: string, ... }, n: integer | nil) -> (string, integer),
+--::     rep:     (s: string, n: integer, sep: string | nil) -> string,
+--::     byte:    (s: string, i: integer | nil, j: integer | nil) -> ...(integer),
 --::     char:    (...integer) -> string,
 --::     upper:   (s: string) -> string,
 --::     lower:   (s: string) -> string,
 --::     reverse: (s: string) -> string,
---::     dump:    (fn: any, strip: any | nil) -> string
+--::     dump:    (fn: function, strip: boolean | nil) -> string
 --:: }
 
 ---------------------------------------------------------------------------
@@ -111,13 +113,13 @@
 ---------------------------------------------------------------------------
 
 --:: augment table {
---::     insert:  (t: any, v: any) -> (),
---::     remove:  (t: any, pos: any | nil) -> any | nil,
---::     concat:  (t: any, sep: any | nil, i: any | nil, j: any | nil) -> string,
---::     sort:    (t: any, comp: any | nil) -> (),
---::     unpack:  (t: any, i: any | nil, j: any | nil) -> any,
---::     move:    (a1: any, f: integer, e: integer, t: integer, a2: any | nil) -> any,
---::     maxn:    (t: any) -> integer
+--::     insert:  <V>(t: { [integer]: V, ... }, v: V) -> (),
+--::     remove:  <V>(t: { [integer]: V, ... }, pos: integer | nil) -> V | nil,
+--::     concat:  (t: { [integer]: string | number, ... }, sep: string | nil, i: integer | nil, j: integer | nil) -> string,
+--::     sort:    <V>(t: { [integer]: V, ... }, comp: ((V, V) -> boolean) | nil) -> (),
+--::     unpack:  <V>(t: { [integer]: V, ... }, i: integer | nil, j: integer | nil) -> ...(V),
+--::     move:    <V>(a1: { [integer]: V, ... }, f: integer, e: integer, t: integer, a2: { [integer]: V, ... } | nil) -> { [integer]: V, ... },
+--::     maxn:    (t: { [integer]: unknown, ... }) -> integer
 --:: }
 
 ---------------------------------------------------------------------------
@@ -131,7 +133,7 @@
 --::     sqrt:       (x: number) -> number,
 --::     max:        (x: number, ...number) -> number,
 --::     min:        (x: number, ...number) -> number,
---::     random:     (m: any | nil, n: any | nil) -> number,
+--::     random:     (m: integer | nil, n: integer | nil) -> number,
 --::     randomseed: (x: number) -> (),
 --::     sin:        (x: number) -> number,
 --::     cos:        (x: number) -> number,
@@ -141,7 +143,7 @@
 --::     atan:       (x: number) -> number,
 --::     atan2:      (y: number, x: number) -> number,
 --::     exp:        (x: number) -> number,
---::     log:        (x: number, base: any | nil) -> number,
+--::     log:        (x: number, base: number | nil) -> number,
 --::     log10:      (x: number) -> number,
 --::     pow:        (x: number, y: number) -> number,
 --::     fmod:       (x: number, y: number) -> number,
@@ -158,20 +160,29 @@
 -- io table
 ---------------------------------------------------------------------------
 
+--:: File = {
+--::     read:    (File, ...unknown) -> string | nil,
+--::     write:   (File, ...unknown) -> (File | nil, string | nil),
+--::     close:   (File) -> (boolean | nil, string | nil),
+--::     lines:   (File) -> () -> string | nil,
+--::     seek:    (File, string | nil, integer | nil) -> (integer | nil, string | nil),
+--::     flush:   (File) -> (boolean | nil, string | nil),
+--::     setvbuf: (File, string, integer | nil) -> (boolean | nil, string | nil)
+--:: }
 --:: augment io {
---::     open:    (path: string, mode: any | nil) -> (any, any | nil),
---::     close:   (file: any | nil) -> any,
---::     write:   (...any) -> any,
---::     read:    (...any) -> any,
---::     lines:   (filename: any | nil, ...any) -> any,
---::     popen:   (cmd: string, mode: any | nil) -> (any, any | nil),
---::     tmpfile: () -> any,
---::     flush:   () -> boolean | nil, string | nil,
---::     input:   (file: string | nil) -> any,
---::     output:  (file: string | nil) -> any,
---::     stdin:   any,
---::     stdout:  any,
---::     stderr:  any
+--::     open:    (path: string, mode: string | nil) -> (File | nil, string | nil),
+--::     close:   (file: File | nil) -> (boolean | nil, string | nil),
+--::     write:   (...unknown) -> (File | nil, string | nil),
+--::     read:    (...unknown) -> string | nil,
+--::     lines:   (filename: string | nil) -> () -> string | nil,
+--::     popen:   (cmd: string, mode: string | nil) -> (File | nil, string | nil),
+--::     tmpfile: () -> File | nil,
+--::     flush:   () -> (boolean | nil, string | nil),
+--::     input:   (file: string | File | nil) -> File,
+--::     output:  (file: string | File | nil) -> File,
+--::     stdin:   File,
+--::     stdout:  File,
+--::     stderr:  File
 --:: }
 
 ---------------------------------------------------------------------------
@@ -179,29 +190,30 @@
 ---------------------------------------------------------------------------
 
 --:: augment os {
---::     time:     (t: any | nil) -> integer,
+--::     time:     (t: { [string]: integer, ... } | nil) -> integer,
 --::     clock:    () -> number,
---::     date:     (format: any | nil, time: any | nil) -> any,
---::     exit:     (code: any | nil, close: any | nil) -> (),
+--::     date:     (format: string | nil, time: integer | nil) -> string | { [string]: integer, ... },
+--::     exit:     (code: integer | boolean | nil, close: boolean | nil) -> (),
 --::     getenv:   (name: string) -> string | nil,
 --::     difftime: (t2: number, t1: number) -> number,
---::     rename:   (oldname: string, newname: string) -> (boolean, any | nil),
---::     remove:   (path: string) -> (boolean, any | nil),
+--::     rename:   (oldname: string, newname: string) -> (boolean, string | nil),
+--::     remove:   (path: string) -> (boolean, string | nil),
 --::     tmpname:  () -> string,
---::     execute:  (cmd: any | nil) -> (any, any | nil, integer | nil)
+--::     execute:  (cmd: string | nil) -> (boolean | nil, string | nil, integer | nil)
 --:: }
 
 ---------------------------------------------------------------------------
 -- coroutine table
 ---------------------------------------------------------------------------
 
+--:: Thread = $Opaque<"Thread">
 --:: augment coroutine {
---::     create:     (fn: (...any) -> ...any) -> any,
---::     resume:     (co: any, ...any) -> (boolean, ...any),
---::     yield:      (...any) -> ...any,
---::     wrap:       (fn: (...any) -> ...any) -> (...any) -> ...any,
---::     status:     (co: any) -> "running" | "suspended" | "normal" | "dead",
---::     running:    () -> (any, boolean),
+--::     create:     (fn: (...unknown) -> unknown) -> Thread,
+--::     resume:     (co: Thread, ...unknown) -> (boolean, ...unknown),
+--::     yield:      (...unknown) -> ...unknown,
+--::     wrap:       (fn: (...unknown) -> unknown) -> (...unknown) -> unknown,
+--::     status:     (co: Thread) -> "running" | "suspended" | "normal" | "dead",
+--::     running:    () -> (Thread | nil, boolean),
 --::     isyieldable: () -> boolean
 --:: }
 
@@ -210,13 +222,13 @@
 ---------------------------------------------------------------------------
 
 --:: augment debug {
---::     getinfo:      (thread_or_f: any, what: any | nil) -> any,
---::     traceback:    (thread_or_msg: any | nil, msg: any | nil, level: any | nil) -> string,
---::     sethook:      (thread_or_fn: any, mask: any, count: any | nil) -> (),
---::     getlocal:     (level: any, local_: integer) -> (string, any),
---::     setlocal:     (level: any, local_: integer, value: any) -> string,
---::     getmetatable: (t: any) -> any,
---::     setmetatable: (t: any, mt: any | nil) -> any
+--::     getinfo:      (thread_or_f: unknown, what: string | nil) -> { [string]: unknown, ... } | nil,
+--::     traceback:    (thread_or_msg: unknown, msg: string | nil, level: integer | nil) -> string,
+--::     sethook:      (thread_or_fn: unknown, mask: string, count: integer | nil) -> (),
+--::     getlocal:     (level: unknown, local_: integer) -> (string, unknown),
+--::     setlocal:     (level: unknown, local_: integer, value: unknown) -> string,
+--::     getmetatable: (t: unknown) -> unknown,
+--::     setmetatable: (t: unknown, mt: unknown) -> unknown
 --:: }
 
 ---------------------------------------------------------------------------
@@ -235,7 +247,7 @@
 --::     #__unm:    (a: number) -> number,
 --::     #__lt:     (a: number, b: number) -> boolean,
 --::     #__le:     (a: number, b: number) -> boolean,
---::     #__concat: (a: any, b: any) -> string
+--::     #__concat: (a: string | number, b: string | number) -> string
 --:: }
 
 --:: integer_meta = {
@@ -248,11 +260,11 @@
 --::     #__unm:    (a: integer) -> integer,
 --::     #__lt:     (a: number, b: number) -> boolean,
 --::     #__le:     (a: number, b: number) -> boolean,
---::     #__concat: (a: any, b: any) -> string
+--::     #__concat: (a: string | number, b: string | number) -> string
 --:: }
 
 --:: string_meta_ops = {
---::     #__concat: (a: string, b: any) -> string,
+--::     #__concat: (a: string, b: string | number) -> string,
 --::     #__len:    (s: string) -> integer,
 --::     #__lt:     (a: string, b: string) -> boolean,
 --::     #__le:     (a: string, b: string) -> boolean
