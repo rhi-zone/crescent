@@ -47,14 +47,26 @@
 --:: declare newproxy = (mt: any | nil) -> any
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
---:: Cdata<T> = $Opaque<T>
+--:: Cdata<T> = $Opaque<T, T>
 --:: Ctype<T> = $Opaque<T>
+--:: CTypeMap = {
+--::   int8_t: integer,  uint8_t: integer,
+--::   int16_t: integer, uint16_t: integer,
+--::   int32_t: integer, uint32_t: integer,
+--::   int64_t: integer, uint64_t: integer,
+--::   char: integer,    short: integer,
+--::   int: integer,     long: integer,
+--::   float: number,    double: number,
+--::   bool: boolean,
+--::   ...
+--:: }
+--:: CTypeOf<S> = match CTypeMap { { [S]: %V } => V, _ => unknown }
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & ((ct: string, ...any) -> unknown),
---::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & ((ct: string, obj: unknown) -> unknown),
+--::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & (<S: string>(ct: S, ...any) -> Cdata<CTypeOf<S>>),
+--::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & (<S: string>(ct: S, obj: unknown) -> Cdata<CTypeOf<S>>),
 --::   sizeof:   (ct: unknown) -> integer,
---::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & ((ct: string) -> unknown),
+--::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & (<S: string>(ct: S) -> Ctype<CTypeOf<S>>),
 --::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
 --::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
 --::   string:   (ptr: unknown, len: integer | nil) -> string,
@@ -67,6 +79,7 @@
 --::   abi:      (param: string) -> boolean,
 --::   errno:    (newerr: integer | nil) -> integer,
 --::   C:        $FfiC,
+--::   ...
 --:: }
 --:: module "bit": {
 --::   tobit:   (x: number) -> integer,
