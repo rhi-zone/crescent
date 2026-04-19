@@ -747,6 +747,80 @@ local function expand_catch(ctx, arg_ids)
 end
 
 -- ---------------------------------------------------------------------------
+-- $PatternReturn<P>
+-- ---------------------------------------------------------------------------
+-- Given a Lua pattern string literal P, compute the return type of string.match:
+--   - 0 captures → string | nil  (whole match or nil)
+--   - N captures → (string | nil, ..., string | nil)  (N-tuple)
+-- Dynamic (non-literal) patterns fall back to string | nil.
+--
+-- Capture counting rules (Lua pattern grammar):
+--   %x    — skip 2 chars (escaped char; % followed by any char)
+--   %bxy  — skip 4 chars (balanced match with open x / close y)
+--   (     — increment capture count
+--   other — skip 1 char
+--
+-- This is a permanent intrinsic: computing it from a match-type expression
+-- over the string literal would require string indexing in the type language
+-- (not yet implemented) and would be meaningfully slower than direct Lua code.
+--: (string) -> integer
+local function count_pattern_captures(pat)
+    local n = 0
+    local i = 1
+    local len = #pat
+    while i <= len do
+        local c = pat:sub(i, i)
+        if c == "%" then
+            -- %b is a 4-char form; everything else is 2-char
+            if pat:sub(i + 1, i + 1) == "b" then
+                i = i + 4
+            else
+                i = i + 2
+            end
+        elseif c == "(" then
+            n = n + 1
+            i = i + 1
+        else
+            i = i + 1
+        end
+    end
+    return n
+end
+
+local function expand_pattern_return(ctx, arg_ids)
+    -- Extract singleton type IDs from ctx with explicit integer annotations so
+    -- the typechecker doesn't widen them to unknown (ctx fields are not yet typed).
+    local t_string --: integer
+    t_string = ctx.T_STRING
+    local t_nil --: integer
+    t_nil = ctx.T_NIL
+    local str_nil = types_mod.make_union(ctx, { t_string, t_nil })
+    if #arg_ids ~= 1 then
+        return str_nil
+    end
+    local P_tid = types_mod.find(ctx, arg_ids[1])
+    local P_t = ctx.types:get(P_tid)
+    if P_t.tag == TAG_LITERAL and P_t.data[0] == LIT_STRING then
+        local pool = ctx.pool
+        local pat = intern_mod.get(pool, P_t.data[1]) or ""
+        local n = count_pattern_captures(pat)
+        if n == 0 then
+            -- No captures: whole match returned as string | nil
+            return str_nil
+        else
+            -- N captures: return a TAG_TUPLE of N (string | nil) entries
+            local slots = {}
+            for _ = 1, n do
+                slots[#slots + 1] = str_nil
+            end
+            return types_mod.make_tuple(ctx, slots)
+        end
+    end
+    -- Dynamic pattern: fall back to string | nil
+    return str_nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Public entry point
 -- ---------------------------------------------------------------------------
 
@@ -786,6 +860,10 @@ function M.expand(ctx, name_id, arg_ids, stable_id)
 
     if name == "Catch" then
         return expand_catch(ctx, arg_ids)
+    end
+
+    if name == "PatternReturn" then
+        return expand_pattern_return(ctx, arg_ids)
     end
 
     -- Unknown intrinsic: return T_NEVER so downstream errors are informative

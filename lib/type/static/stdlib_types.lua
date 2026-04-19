@@ -109,7 +109,7 @@
 --::     len:     (s: string) -> integer,
 --::     sub:     (s: string, i: integer, j: integer | nil) -> string,
 --::     find:    (s: string, pattern: string, init: integer | nil, plain: boolean | nil) -> ...((integer, integer) | (nil, nil)),
---::     match:   (s: string, pattern: string, init: integer | nil) -> ...(string | nil),
+--::     match:   <P: string>(s: string, pattern: P, init: integer | nil) -> $PatternReturn<P>,
 --::     gmatch:  (s: string, pattern: string) -> () -> string | nil,
 --::     gsub:    (s: string, pattern: string, repl: string | ((string) -> (string | nil)) | { [string]: string, ... }, n: integer | nil) -> (string, integer),
 --::     rep:     (s: string, n: integer, sep: string | nil) -> string,

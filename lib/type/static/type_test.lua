@@ -8040,6 +8040,52 @@ local s = string.format("%d", 42)
 local s = string.sub("hello", 2, 4)
 ]])
     end)
+
+    assert.it("string.match with 0 captures returns string | nil", function()
+        no_errors([[
+--: string | nil
+local x = string.match("hello", "hello")
+]])
+    end)
+
+    assert.it("string.match with 1 capture returns string | nil", function()
+        no_errors([[
+--: string | nil
+local x = string.match("hello", "h(e)")
+]])
+    end)
+
+    assert.it("string.match with 2 captures returns 2-tuple of string | nil", function()
+        no_errors([[
+local a, b = string.match("hello", "(h)(e)")
+--: string | nil
+local _a = a
+--: string | nil
+local _b = b
+]])
+    end)
+
+    assert.it("string.match with dynamic pattern returns string | nil", function()
+        no_errors([[
+local pat --: string
+--: string | nil
+local x = string.match("hello", pat)
+]])
+    end)
+
+    assert.it("string.match with escaped percent: %(e%) counts 0 captures", function()
+        no_errors([[
+--: string | nil
+local x = string.match("(e)", "%(e%)")
+]])
+    end)
+
+    assert.it("string.match colon syntax with literal pattern", function()
+        no_errors([[
+--: string | nil
+local x = ("hello"):match("hel(lo)")
+]])
+    end)
 end)
 
 assert.describe("stdlib: math table declared", function()

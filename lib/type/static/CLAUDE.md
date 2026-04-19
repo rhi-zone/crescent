@@ -46,6 +46,7 @@ The permanent intrinsics are:
 - `$GlobalScope` — builds a closed TAG_TABLE mirroring all `--:: declare` globals; used to type `_G` in stdlib_types.lua. Synthesized in `prelude.lua` after all stdlib declarations are loaded, then patched into the pre-registered alias so `--:: declare _G = $GlobalScope` resolves correctly. Same pattern as `$FfiC` but scoped to declared globals rather than cdef symbols.
 - `$Throw<T>` / `$Catch<T, Default>` — type-level error/pcall; diagnostic side effects not expressible as pure computation
 - `$EachField<T, F>` — per-field flatMap with flag/descriptor access; complements `{ ...[%K]: %V }` but not replaceable by it (needs flag access + brace-tuple result, not just union of values)
+- `$PatternReturn<P>` — given a Lua pattern string literal P, computes the return type of `string.match`: 0 captures → `string | nil`; N captures → N-tuple of `string | nil`; dynamic pattern → `string | nil`. Permanent because computing this requires walking the pattern string character by character, counting `(` escaping `%x`/`%bxy` — string indexing in the type language is not implemented and would be slower than direct Lua code.
 
 **`{ ...[%K]: %V }` vs `$EachField` — complementary primitives, not redundant:**
 - `{ ...[%K]: %V }` — **distribution**: iterates fields, evaluates a result
