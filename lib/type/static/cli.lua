@@ -315,6 +315,29 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
         end
     end
 
+    -- Populate source_lines for each file that has diagnostics (enables caret context).
+    -- Read each unique filename once per err_ctx. Cost is negligible vs the full check.
+    for _, ec in pairs(file_errs) do
+        local needed = {}
+        for _, d in ipairs(ec.errors) do
+            needed[d.filename] = true
+            for _, n in ipairs(d.notes or {}) do needed[n.filename] = true end
+        end
+        for _, d in ipairs(ec.warnings) do
+            needed[d.filename] = true
+            for _, n in ipairs(d.notes or {}) do needed[n.filename] = true end
+        end
+        for fname in pairs(needed) do
+            if not ec.source_lines[fname] then
+                local f = io.open(fname, "r")
+                if f then
+                    errors_mod.set_source(ec, fname, f:read("*a"))
+                    f:close()
+                end
+            end
+        end
+    end
+
     -- Output results in file order (deterministic).
     local structured_parts = {}
 
