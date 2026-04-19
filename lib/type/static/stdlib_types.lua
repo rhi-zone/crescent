@@ -47,7 +47,6 @@
 --:: declare newproxy = (mt: any | nil) -> any
 --:: declare rawprint = (s: any) -> ()
 --:: declare _VERSION = string
---:: Cdata<T> = $Opaque<T, T>
 --:: Ctype<T> = $Opaque<T>
 --:: CTypeMap = {
 --::   int8_t: integer,  uint8_t: integer,
@@ -62,15 +61,15 @@
 --:: }
 --:: module "ffi": {
 --::   cdef:     (string) -> nil,
---::   new:      (<T>(ct: Ctype<T>, ...any) -> Cdata<T>) & (<S: Keys<CTypeMap>>(ct: S, ...any) -> Cdata<CTypeMap[S]>),
---::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> Cdata<T>) & (<S: Keys<CTypeMap>>(ct: S, obj: unknown) -> Cdata<CTypeMap[S]>),
+--::   new:      (<T>(ct: Ctype<T>, ...any) -> T) & (<S: Keys<CTypeMap>>(ct: S, ...any) -> CTypeMap[S]),
+--::   cast:     (<T>(ct: Ctype<T>, obj: unknown) -> T) & (<S: Keys<CTypeMap>>(ct: S, obj: unknown) -> CTypeMap[S]),
 --::   sizeof:   (ct: unknown) -> integer,
---::   typeof:   (<T>(ct: Cdata<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
+--::   typeof:   (<T>(ct: Ctype<T>) -> Ctype<T>) & (<S: Keys<CTypeMap>>(ct: S) -> Ctype<CTypeMap[S]>),
 --::   copy:     (dst: unknown, src: unknown, n: integer) -> nil,
 --::   fill:     (dst: unknown, n: integer, c: integer | nil) -> nil,
 --::   string:   (ptr: unknown, len: integer | nil) -> string,
 --::   load:     (name: string, global: boolean | nil) -> unknown,
---::   gc:       <T>(cdata: Cdata<T>, finalizer: ((Cdata<T>) -> ()) | nil) -> Cdata<T>,
+--::   gc:       <T>(cdata: T, finalizer: ((T) -> ()) | nil) -> T,
 --::   metatype: <T>(ct: Ctype<T>, metatable: { [string]: unknown, ... }) -> Ctype<T>,
 --::   istype:   (ct: unknown, obj: unknown) -> boolean,
 --::   alignof:  (ct: unknown) -> integer,
