@@ -206,6 +206,19 @@ Do not assume LuaJIT sandboxing is impossible. The common concern (FFI escape) i
 
 ## Lua Gotchas
 
+**Table construction: all data fields go in the literal, methods go on a prototype.**
+
+LuaJIT shapes tables at construction time. Fields present in the literal become part of the hidden class; adding fields afterward transitions to a new hidden class and breaks JIT monomorphic dispatch. The correct pattern:
+
+```lua
+-- data fields inline — JIT sees the full shape at construction
+local obj = { insns = {}, args = {}, next_id = 0 }
+-- methods on a shared prototype, not on the instance
+setmetatable(obj, { __index = Proto })
+```
+
+Never write `obj.field = value` after the literal to initialize a field that belongs to the object's shape. That's the anti-pattern — `obj.field` after construction is for mutation, not initialization.
+
 **`local x = expr` — `x` is NOT in scope inside `expr`.**
 
 In Lua, a local variable is not in scope within its own initializer expression. A closure created inside `expr` that references `x` will see a global (or nil), not the local being declared.
