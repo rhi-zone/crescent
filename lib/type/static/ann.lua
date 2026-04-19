@@ -1039,14 +1039,8 @@ function M.parse_annotations(annotations, pool, filename)
                     ty = idx
                 end
             elseif peek(s) == byte("?") then
-                advance(s)  -- skip '?'
-                -- Postfix nullable: T? → T | nil
-                local nil_type = alloc_type(defs.TAG_NIL)
-                local ms, ml = flush_type_list({ ty, nil_type })
-                local u = alloc_type(defs.TAG_UNION)
-                types:get(u).data[0] = ms
-                types:get(u).data[1] = ml
-                ty = u
+                s.hint_error = "postfix `?` is not valid — write `T | nil` instead"
+                scan_error(s, s.hint_error)
             else
                 break
             end
@@ -1367,10 +1361,10 @@ function M.parse_annotations(annotations, pool, filename)
         end)
         if ok and result then
             results[line] = result
-        elseif not ok and s.depth_limit_hit then
-            -- Re-throw depth-limit errors so the outer pcall in constrain.lua
-            -- can report them as diagnostics. Other parse errors (e.g. malformed
-            -- or out-of-context annotations) are silently skipped.
+        elseif not ok and (s.depth_limit_hit or s.hint_error) then
+            -- Re-throw depth-limit errors and explicit hint errors (e.g. invalid
+            -- syntax like `T?`) so the outer pcall in constrain.lua can report
+            -- them as diagnostics. Other parse errors are silently skipped.
             error(result, 0)
         end
     end
