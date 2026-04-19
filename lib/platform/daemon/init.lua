@@ -241,10 +241,10 @@ function M.make(opts)
 	--: (string) -> (true | nil, string | nil)
 	local remove_fn = opts.remove_fn or os.remove
 	-- Import support: injected write_fn, apps_dir, and pre-loaded runtime.
-	local write_fn = opts.write_fn --: any
+	local write_fn = opts.write_fn
 	local apps_dir = opts.apps_dir --: string | nil
-	local runtime_files = opts.runtime_files --: any
-	local runtime_manifest = opts.runtime_manifest --: any
+	local runtime_files = opts.runtime_files
+	local runtime_manifest = opts.runtime_manifest
 
 	-- Library app handler. The daemon mounts the library app at "/" of the
 	-- daemon origin. We call create() directly; there is no sandbox in v1
@@ -565,7 +565,7 @@ function M.make(opts)
 	--: (string) -> boolean
 	local function app_exists(app_id)
 		if not index_db then return false end
-		local db = index_db --: any
+		local db = index_db
 		local ok, iter = pcall(db.query, db, "SELECT 1 FROM apps WHERE id = ? LIMIT 1", app_id)
 		if not ok or not iter then return false end
 		local row = iter()
@@ -1062,7 +1062,7 @@ function M.make(opts)
 			return
 		end
 
-		local db = index_db --: any
+		local db = index_db
 		local ok_q, iter = pcall(db.query, db, "SELECT path FROM apps WHERE id = ? LIMIT 1", app_id)
 		if not ok_q or not iter then
 			plain(res, 404, "app not found")
