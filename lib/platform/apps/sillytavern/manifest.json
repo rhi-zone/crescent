@@ -11,9 +11,9 @@
     "server": {
       "main": "server.lua",
       "caps": {
-        "server":     { "type": "http_server" },
-        "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true },
-        "meta_cache": { "type": "db" },
+        "server":     { "type": "http_server", "reason": "Accepts HTTP requests and routes GET /, GET /card/:id, GET /thumb/:filename, and GET /discover to the SillyTavern character card handlers." },
+        "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true, "reason": "Lists PNG/WebP files in the characters directory and reads their raw bytes for card metadata extraction, raw download, and thumbnail serving." },
+        "meta_cache": { "type": "db", "reason": "SQLite cache for parsed card metadata (name, description, tags, cached_at); populated lazily per page via INSERT OR REPLACE and read back via SELECT to avoid re-parsing PNG iTXt chunks on every request." },
         "time":       { "type": "time", "required": false, "reason": "Timestamps card metadata cache entries. Without it, cached_at is recorded as 0 (epoch); caching still works but timestamps are meaningless." }
       }
     }

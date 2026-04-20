@@ -4,16 +4,16 @@
   "meta": { "tags": ["launcher", "browser", "library"] },
   "default_entry": "server",
   "caps": {
-    "self": { "type": "self" }
+    "self": { "type": "self", "reason": "Provides the app its own identity (app_id) and access to tarball entries; used by the platform runtime and reserved for future static-file serving from the app bundle." }
   },
   "entry": {
     "server": {
       "main": "server.lua",
       "caps": {
-        "server": { "type": "http_server" },
-        "index_db": { "type": "db", "required": false, "readonly": true, "path": "~/.crescent/apps/index.db" },
-        "stdout": { "type": "stdout", "required": false },
-        "stderr": { "type": "stderr", "required": false }
+        "server":   { "type": "http_server", "reason": "Serves the embedded HTML/JS/CSS frontend at GET / and handles all /api/* JSON endpoints (list, search, source discovery, thumb proxy)." },
+        "index_db": { "type": "db", "required": false, "readonly": true, "path": "~/.crescent/apps/index.db", "reason": "Runs paginated SELECT and COUNT queries against the installed-app index, with FTS5 full-text search and tag-join filtering, to back the GET /api/apps endpoint." },
+        "stdout":   { "type": "stdout", "required": false, "reason": "Injected write function for CLI subcommand output (list-apps, search); falls back to io.write when absent." },
+        "stderr":   { "type": "stderr", "required": false, "reason": "Injected write function for CLI error messages; falls back to io.stderr:write when absent." }
       }
     }
   }

@@ -4,23 +4,23 @@
   "meta": { "tags": ["charactercardv2", "ai", "llm", "roleplay", "chat"] },
   "default_entry": "server",
   "caps": {
-    "self":          { "type": "self" },
-    "conversations": { "type": "db" },
-    "kv":            { "type": "kv",          "required": false },
-    "time":          { "type": "time" }
+    "self":          { "type": "self",         "reason": "Provides the app its own identity (app_id) and access to its tarball entries and PNG metadata chunks." },
+    "conversations": { "type": "db",           "reason": "Reserved for persisting conversation history and message trees; not yet wired in server.lua." },
+    "kv":            { "type": "kv",           "required": false, "reason": "Stores and retrieves per-session chat message history (dom.lua) and connection/generation/prompt presets (presets.lua)." },
+    "time":          { "type": "time",         "reason": "Provides a wall-clock timestamp source available to all entries; used by the platform runtime for session bookkeeping." }
   },
   "entry": {
     "server": {
       "main": "server.lua",
       "caps": {
-        "server":    { "type": "http_server" },
-        "llm":       { "type": "llm" }
+        "server":    { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /chat, POST /chat-stream, and GET /count-tokens to the card's LLM methods." },
+        "llm":       { "type": "llm",          "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply." }
       }
     },
     "import": {
       "main": "import.lua",
       "caps": {
-        "server":    { "type": "http_server" }
+        "server":    { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /api/import/png and POST /api/import/json to the CCv2 card parser." }
       }
     }
   }
