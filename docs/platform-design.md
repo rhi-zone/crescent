@@ -179,8 +179,8 @@ behavior for a revoked capability.
   "caps": {
     "self":          { "type": "self",        "required": true },
     "server":        { "type": "http_server", "required": true },
-    "llm_api":       { "type": "http_client", "host": "api.openai.com", "required": true },
-    "local_llm":     { "type": "http_client", "host": "localhost:11434", "required": false },
+    "llm":           { "type": "llm",         "required": true },
+    "local_llm":     { "type": "llm",         "required": false },
     "conversations": { "type": "db",          "required": true },
     "settings":      { "type": "kv",          "required": false },
     "user_prefs":    { "type": "kv",          "scope": ["user"], "readonly": true, "required": false },
@@ -200,7 +200,7 @@ behavior for a revoked capability.
 local caps, revoke_fns = {}, {}
 caps.self, revoke_fns.self               = self_cap(app)
 caps.server, revoke_fns.server           = http_server_cap({ port = 7860 })
-caps.llm_api, revoke_fns.llm_api        = http_client_cap({ host = "api.openai.com" })
+caps.llm, revoke_fns.llm                = llm_cap({ provider = "gemini", key = "my-gemini-key" })
 -- caps.local_llm = nil (denied)
 caps.conversations, revoke_fns.conversations = db_cap(db_path)
 caps.settings, revoke_fns.settings       = kv_cap(kv_path)  -- scope: [user, app]
@@ -296,6 +296,71 @@ crescent caps <app_id> <cap_name> <field>=<value>
 crescent caps <app_id> <cap_name> --reset
     -- clear all overrides for this cap (revert to manifest defaults)
 ```
+
+### Grant presets and install UX
+
+**The problem**: approving every cap individually per-app install is decision fatigue.
+Approving a bundle once is opaque. The right answer is both: the full cap list is always
+visible, but a preset provides a named starting configuration so the operator isn't
+configuring from scratch each time.
+
+**Grant presets** are named bundles of cap configurations stored by the operator. A
+preset says "for an LLM cap, use provider X with model Y and key Z; for db, use the
+default path; etc." Installing an app = selecting a preset + one confirm click. The cap
+list is always rendered below the preset selector at reduced visual weight — never hidden,
+never demanding.
+
+**Preset selection** at install time is driven by conditional rules, not by the manifest
+alone. Rules are structured data (s-expression style), editable in the UI:
+
+```
+(and (tag "charactercardv2") (cap "llm"))  →  use preset "ccv2-default"
+(cap "llm")                                →  use preset "llm-default"
+```
+
+Rules are evaluated in order; first match wins. The operator builds and edits rules in a
+structured editor — no code required. The selected preset is a suggestion; the operator
+can change it before confirming.
+
+**Security**: auto-selection is configuration convenience, not automatic approval. The
+operator still explicitly confirms each install. The preset reduces configuration work,
+not the approval step.
+
+---
+
+### `llm` cap — language model access
+
+Apps that call language models declare `{ "type": "llm" }`. This is distinct from
+`http_client` — it carries semantic meaning (the user is granting LLM access, not
+arbitrary HTTP access) and enables provider-level abstraction.
+
+**Provider drivers** live in `lib/platform/providers/`. Each driver knows the native API
+for one provider (Gemini, Anthropic, OpenAI, etc.) and translates the standard `llm` cap
+interface to the provider's wire format. OAI-compat shims are not used for providers that
+have better native APIs.
+
+**Interface** (what the app sees — no provider details):
+```lua
+caps.llm.call(messages, opts?)           -- returns content_string | nil, err
+caps.llm.call_stream(messages, on_token, opts?)  -- streams tokens
+caps.llm.count_tokens(text)              -- returns integer
+```
+
+**Key management**: API keys are stored in the platform keyring (`lib/keyring/`) by
+user-assigned name (e.g. `"my-gemini-key"`), not by host pattern. The `llm` cap is
+configured at grant time with a provider + named key. The app never accesses the keyring
+directly — the platform reads the key and injects a pre-keyed client. Multiple keys per
+provider are supported (one per named entry).
+
+**Manifest declaration** — app declares intent only, no provider coupling:
+```json
+"llm": { "type": "llm", "required": true }
+```
+
+The operator selects provider + key when granting (typically via a preset). The app is
+fully provider-agnostic.
+
+---
 
 ### `caps.self` — app package access
 
