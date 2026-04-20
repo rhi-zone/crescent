@@ -147,7 +147,9 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Never assume a typechecker feature is missing without checking.** The typechecker has significant generic machinery: `$Require<T>`, `$Values<T>`, `$IpairsValues<T>`, match types, intrinsics, etc. Before saying "X isn't supported" or "we'd need generics for this," search the typechecker source and docs. "It'll stay ugly until X lands" is a claim that X doesn't exist — only say it after verifying X is actually absent.
 
-**Generic function bodies should be checked at definition time via skolem variables.** Currently deferred to call sites (`constrain.lua:1369-1376`). This is a QoL and performance gap (errors at definition, body checked once not per-call-site) — tracked in TODO.md "Generic function body checking." Don't claim generic annotations are fully typechecked until that gap is closed.
+**Generic function bodies ARE checked at definition time via skolem variables** (`skolemize_fn` in `constrain.lua`). Skolem vars have FLAG_SKOLEM and cannot be bound by the solver, so the body check is sound. Call sites instantiate fresh vars via `env_mod.instantiate` for let-polymorphism.
+
+**`--:: template` opts out of definition-time body checking.** Template functions (`--:: template` on the preceding line) skip the body check entirely at definition and re-check the body at each call site with the concrete argument types (`gen_function` with `concrete_param_tids`). This is the escape hatch for functions like `apply(m)` whose body is only well-typed when `m` has a specific shape known at the call site. Templates have a plain function type with free TAG_VAR params so they can be called; the re-check at each call site catches type errors against the concrete argument shape.
 
 **`any` is never acceptable in type annotations.** Write proper types. `unknown` is the correct type for truly dynamic data (forces callers to narrow). `any` opts out of checking entirely and is always wrong. If you find yourself reaching for `any`, the real answer is either generics, `unknown`, or a missing type definition.
 

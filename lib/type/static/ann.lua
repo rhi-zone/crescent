@@ -1158,6 +1158,11 @@ function M.parse_annotations(annotations, pool, filename)
                 -- Check for newtype or declare
                 local save = s.pos
                 local word = scan_word(s)
+                -- --:: template — marks the next function definition as a template.
+                -- No further tokens on this line; the annotation has no type_id.
+                if word == "template" then
+                    return { kind = defs.ANN_TEMPLATE }
+                end
                 if word == "declare" then
                     local vname = scan_word(s)
                     if not vname then scan_error(s, "expected name after 'declare'") end

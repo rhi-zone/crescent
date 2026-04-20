@@ -253,6 +253,7 @@ M.ANN_MODULE            = 3  -- --:: module "name": T  (declares require("name")
 M.ANN_UNSEAL            = 4  -- --:: unseal Name        (rebinds opaque variable to inner type)
 M.ANN_REQUIRE           = 5  -- --:: require "mod.path"  (load declaration file into scope)
 M.ANN_AUGMENT           = 6  -- --:: augment Name { field: T, ... }  (merge fields into existing binding)
+M.ANN_TEMPLATE          = 7  -- --:: template  (marks next function as template: body re-checked at each call site)
 
 -- Operator precedence table (left * 256 + right)
 M.binop_priority = {

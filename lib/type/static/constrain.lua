@@ -94,6 +94,7 @@ local ANN_MODULE = defs.ANN_MODULE
 local ANN_UNSEAL  = defs.ANN_UNSEAL
 local ANN_REQUIRE = defs.ANN_REQUIRE
 local ANN_AUGMENT = defs.ANN_AUGMENT
+local ANN_TEMPLATE = defs.ANN_TEMPLATE
 
 local TAG_ANY      = defs.TAG_ANY
 local TAG_UNKNOWN  = defs.TAG_UNKNOWN
@@ -1025,7 +1026,7 @@ end
 -- Forward declarations
 -- ---------------------------------------------------------------------------
 
-local gen_expr, gen_stmt, gen_block, gen_function, gen_prescan_block
+local gen_expr, gen_stmt, gen_block, gen_function, gen_prescan_block, gen_function_for_template
 
 -- ---------------------------------------------------------------------------
 -- Expression constraint generation
@@ -1381,6 +1382,23 @@ local function skolemize_fn(ctx, ann_fn_tid)
     return skolem_fn_tid, true
 end
 
+-- Build a function type for a template at definition time, without checking the body.
+-- Returns a function type_id with fresh TAG_VAR params and a fresh TAG_VAR return.
+-- The return type is left as a free variable; it will be unified with the actual
+-- return at each call site after the body is re-checked with concrete arg types.
+--: (Ctx, integer, integer, boolean) -> integer
+local function gen_function_skip_body(ctx, ps, pl, has_vararg)
+    local param_tids = {}
+    for i = 0, pl - 1 do
+        param_tids[#param_tids + 1] = types_mod.make_var(ctx, ctx.scope.level)
+    end
+    local ret_var = types_mod.make_var(ctx, ctx.scope.level)
+    local vararg_id = has_vararg and ctx.T_ANY or -1
+    local param_name_ids = {}
+    for i = 0, pl - 1 do param_name_ids[i + 1] = ctx.ast_lists:get(ps + i) end
+    return types_mod.make_func(ctx, param_tids, { ret_var }, vararg_id, param_name_ids)
+end
+
 -- Generate constraints for a function body.
 -- Returns the function type_id.
 --: (Ctx, integer, integer, integer, integer, boolean, integer | nil) -> integer
@@ -1389,13 +1407,16 @@ gen_function = function(ctx, ps, pl, bs, bl, has_vararg, ann_fn_tid)
     local param_tids = {} --: { [integer]: integer, ... }
 
     local has_ann_fn = ann_fn_tid ~= nil
+    -- body_ann_fn_tid: the annotation function type used for body checking.
+    -- May differ from ann_fn_tid for generic functions (skolemized copy).
+    -- Declared here so it is in scope for the return-type annotation block below.
+    local body_ann_fn_tid = ann_fn_tid
 
     -- For generic (forall) functions: create a skolemized version of the annotation
     -- for body checking.  Skolem vars have FLAG_SKOLEM and are never bound by the
     -- solver, so the body check cannot create a self-loop by trying to bind the
     -- return's generic TAG_VAR.  The original ann_fn_tid (with FLAG_GENERIC vars) is
     -- used for the returned fn_tid so call sites still get proper generic instantiation.
-    local body_ann_fn_tid = ann_fn_tid
     if ann_fn_tid then
         local aft_pre = ctx.types:get(ann_fn_tid)
         if aft_pre and aft_pre.tag == TAG_FUNCTION then
@@ -1667,6 +1688,19 @@ end
 ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     local n = ctx.nodes:get(nid)
     local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
+    -- Check for --:: template on the preceding line.
+    if ctx._template_lines and ctx._template_lines[n.line - 1] then
+        -- Template function: skip body check at definition time.
+        -- Body will be re-checked at each call site with concrete argument types.
+        -- Store ps/pl/bs/bl from NODE_FUNC_EXPR layout: data[0]=ps, [1]=pl, [2]=bs, [3]=bl.
+        local fn_tid = gen_function_skip_body(ctx, n.data[0], n.data[1], has_vararg)
+        if not ctx._template_fns then ctx._template_fns = {} end
+        ctx._template_fns[fn_tid] = {
+            ps = n.data[0], pl = n.data[1], bs = n.data[2], bl = n.data[3],
+            has_vararg = has_vararg,
+        }
+        return fn_tid
+    end
     local ann = get_ann(ctx, n.line)
     local ann_fn_tid = nil
     if ann and ann.kind == ANN_TYPE then
@@ -1930,6 +1964,38 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 return ctx.T_NIL
             end
         end
+    end
+
+    -- Template call-site re-check: if callee is a --:: template function,
+    -- re-run the body with the concrete argument types to check it and infer
+    -- the return type for this specific call site.
+    local resolved_callee = types_mod.find(ctx, callee_tid)
+    if ctx._template_fns and ctx._template_fns[resolved_callee] then
+        local tinfo = ctx._template_fns[resolved_callee]
+        local call_fn_tid = gen_function_for_template(ctx, tinfo.ps, tinfo.pl, tinfo.bs, tinfo.bl,
+            tinfo.has_vararg, arg_tids)
+        -- Extract the return type from the template instantiation and bind the call's ret.
+        local call_fn_t = ctx.types:get(call_fn_tid)
+        local ret = fresh_var(ctx)
+        if call_fn_t.tag == TAG_FUNCTION then
+            local rl = call_fn_t.data[3]
+            if rl == 0 then
+                emit(ctx, { C_UNIFY, ret, ctx.T_NIL, n.line, n.col })
+            elseif rl == 1 then
+                local first_ret = types_mod.find(ctx, ctx.lists:get(call_fn_t.data[2]))
+                emit(ctx, { C_UNIFY, ret, first_ret, n.line, n.col })
+            else
+                local slots = {}
+                for ri = 0, rl - 1 do
+                    slots[ri + 1] = types_mod.find(ctx, ctx.lists:get(call_fn_t.data[2] + ri))
+                end
+                emit(ctx, { C_UNIFY, ret, types_mod.make_tuple(ctx, slots), n.line, n.col })
+            end
+        else
+            emit(ctx, { C_UNIFY, ret, ctx.T_ANY, n.line, n.col })
+        end
+        ctx._last_multi_return = { ret }
+        return ret
     end
 
     -- Instantiate callee at this call site (let-polymorphism)
@@ -2979,6 +3045,40 @@ StmtRule[NODE_FUNC_DECL] = function(ctx, nid)
     local name_n = ctx.nodes:get(n.data[0])
     local has_vararg = (n.flags % (FLAG_VARARG * 2)) >= FLAG_VARARG
 
+    -- Check for --:: template on the preceding line.
+    if ctx._template_lines and ctx._template_lines[n.line - 1] then
+        -- NODE_FUNC_DECL layout: data[1]=ps, data[2]=pl, data[3]=bs, data[4]=bl.
+        local fn_tid = gen_function_skip_body(ctx, n.data[1], n.data[2], has_vararg)
+        if not ctx._template_fns then ctx._template_fns = {} end
+        local tinfo = {
+            ps = n.data[1], pl = n.data[2], bs = n.data[3], bl = n.data[4],
+            has_vararg = has_vararg,
+        }
+        -- Stable fn_tid: if a prescan stub exists, mutate it in-place so call sites
+        -- that already hold the stub type ID pick up the template marker.
+        local stable_tid = fn_tid
+        if name_n.kind == NODE_IDENTIFIER then
+            local name_id = name_n.data[0]
+            local existing = env_mod.lookup(ctx.scope, name_id) or 0
+            if existing ~= 0 then
+                local eid = types_mod.find(ctx, existing)
+                local stub_t = ctx.types:get(eid)
+                local real_t = ctx.types:get(fn_tid)
+                if stub_t.tag == TAG_FUNCTION and real_t.tag == TAG_FUNCTION then
+                    for k = 0, 6 do stub_t.data[k] = real_t.data[k] end
+                    stable_tid = eid
+                end
+            end
+            env_mod.bind(ctx.scope, name_id, fn_tid)
+            ctx.def_sites[name_id] = { line = n.line, col = n.col }
+        end
+        ctx._template_fns[stable_tid] = tinfo
+        if stable_tid ~= fn_tid then
+            ctx._template_fns[fn_tid] = tinfo
+        end
+        return
+    end
+
     local ann = get_ann(ctx, n.line)
     local ann_fn_tid = nil
     local ann_isect_tid = nil  -- non-nil when annotation is an intersection of functions
@@ -3130,6 +3230,35 @@ gen_prescan_block = function(ctx, bs, bl)
     end
 end
 
+-- Generate constraints for a template function body re-check at a call site.
+-- Binds params to concrete types provided by the caller, skips annotation
+-- processing, then checks the body and returns a function type_id with the
+-- inferred return type.
+--: (Ctx, integer, integer, integer, integer, boolean, { [integer]: integer, ... }) -> integer
+gen_function_for_template = function(ctx, ps, pl, bs, bl, has_vararg, concrete_param_tids)
+    local fn_scope = env_mod.child(ctx.scope)
+    local param_tids = {} --: { [integer]: integer, ... }
+    for i = 0, pl - 1 do
+        local name_id = ctx.ast_lists:get(ps + i)
+        local pt_id = concrete_param_tids[i + 1] or types_mod.make_var(ctx, fn_scope.level)
+        env_mod.bind(fn_scope, name_id, pt_id)
+        param_tids[#param_tids + 1] = pt_id
+    end
+    if has_vararg then
+        local dots_id = intern_mod.intern(ctx.pool, "...")
+        env_mod.bind(fn_scope, dots_id, ctx.T_ANY)
+    end
+    local saved = ctx.scope
+    ctx.scope = fn_scope
+    local ret_var = types_mod.make_var(ctx, saved.level)
+    ctx.return_vars[#ctx.return_vars + 1] = ret_var
+    gen_prescan_block(ctx, bs, bl)
+    gen_block(ctx, bs, bl)
+    ctx.return_vars[#ctx.return_vars] = nil
+    ctx.scope = saved
+    return types_mod.make_func(ctx, param_tids, { ret_var }, ctx.T_ANY, {})
+end
+
 -- ---------------------------------------------------------------------------
 -- Declaration file loader (for --:: require "mod.path")
 -- ---------------------------------------------------------------------------
@@ -3233,6 +3362,10 @@ process_type_decls = function(ctx)
         elseif result.kind == ANN_AUGMENT then
             augment_decls[#augment_decls + 1] = result
             augment_decl_lines[result] = line
+        elseif result.kind == ANN_TEMPLATE then
+            -- Record the line so gen_function can detect template markers.
+            if not ctx._template_lines then ctx._template_lines = {} end
+            ctx._template_lines[line] = true
         end
     end
     -- Sort by source line so forward references resolve in file order.

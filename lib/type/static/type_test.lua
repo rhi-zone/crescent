@@ -9540,3 +9540,75 @@ y = x.b
 ]], "postfix")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- --:: template
+---------------------------------------------------------------------------
+
+assert.describe("template: --:: template", function()
+    assert.it("template function body is not checked at definition time", function()
+        no_errors([[
+--:: template
+local function apply(m)
+    return m.foo(1, 2)
+end
+]])
+    end)
+
+    assert.it("template call site checks body with concrete arg types — valid call", function()
+        no_errors([[
+local m = { foo = function(a, b) return a + b end }
+--:: template
+local function apply(m)
+    return m.foo(1, 2)
+end
+local result = apply(m)
+]])
+    end)
+
+    assert.it("template call site checks body — error when body accesses missing field", function()
+        has_error([[
+local m = { bar = 1 }
+--:: template
+local function apply(m)
+    return m.foo(1, 2)
+end
+local result = apply(m)
+]], "foo")
+    end)
+
+    assert.it("template return type is inferred from body at call site", function()
+        no_errors([[
+local m = { foo = function(a, b) return a .. b end }
+--:: template
+local function apply(m)
+    return m.foo("hello", "world")
+end
+local result --: string
+result = apply(m)
+]])
+    end)
+
+    assert.it("template can be called multiple times with different arg shapes", function()
+        no_errors([[
+local m1 = { foo = function(x) return x + 1 end }
+local m2 = { foo = function(x) return x .. "!" end }
+--:: template
+local function apply(m, x)
+    return m.foo(x)
+end
+local r1 = apply(m1, 42)
+local r2 = apply(m2, "hi")
+]])
+    end)
+
+    assert.it("function keyword decl form: local function apply(...) with --:: template", function()
+        no_errors([[
+--:: template
+local function identity(x)
+    return x
+end
+local r = identity(42)
+]])
+    end)
+end)
