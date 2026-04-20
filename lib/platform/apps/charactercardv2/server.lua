@@ -48,8 +48,11 @@ function M.create(caps, opts)
 	opts = opts or {}
 
 	local llm
-	if caps.llm then
-		llm = caps.llm -- pre-built (tests, backward compat)
+	-- caps.llm is a pre-built client for tests/backward compat.
+	-- Use pcall because the strict caps proxy errors on undeclared cap names.
+	local ok_llm, llm_cap = pcall(function() return caps.llm end)
+	if ok_llm and llm_cap then
+		llm = llm_cap -- pre-built (tests, backward compat)
 	elseif caps.llm_api then
 		-- Resolve api_key in priority order:
 		--   1. opts.api_key (explicit — e.g. injected from env var at CLI launch)
@@ -64,8 +67,9 @@ function M.create(caps, opts)
 			end
 		end
 		llm = llm_lib.create(caps.llm_api, {
-			model = opts.model or "default",
-			path = opts.path,
+			-- Priority: opts > cap field (from --cap.llm_api.model=...) > default
+			model = opts.model or caps.llm_api.model or "default",
+			path = opts.path or caps.llm_api.path,
 			api_key = api_key,
 		})
 	end
@@ -86,8 +90,13 @@ function M.create(caps, opts)
 
 	-- chat(caps, messages, gen_opts?) -> content | nil, err
 	-- Prepends system prompt if configured, then calls llm.call.
+	-- messages may be a string (CLI usage: treated as user message) or
+	-- a table of {role, content} pairs (HTTP usage).
 	local function chat(_caps, messages, gen_opts)
 		if not llm then return nil, "card: no LLM capability available" end
+		if type(messages) == "string" then
+			messages = { { role = "user", content = messages } }
+		end
 		return llm.call(prepend_system(messages), gen_opts)
 	end
 

@@ -346,10 +346,14 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		return mod.http_server_cap({ port = platform_opts.port or 0 })
 	end
 
-	-- http_client: pass through host from declaration.
+	-- http_client: pass through host and any extra fields from declaration.
 	if cap_type == "http_client" then
 		local mod = require(CAP_TYPE_MODULES.http_client)
-		return mod.http_client_cap({ host = decl.host })
+		return mod.http_client_cap({
+			host  = decl.host,
+			model = decl.model,
+			path  = decl.path,
+		})
 	end
 
 	-- Storage caps: resolve data path from scope dimensions.
