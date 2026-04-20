@@ -14,6 +14,8 @@
 --                      — proxy to a source adapter's /discover endpoint
 --                        query params: same as source's GET /discover
 --                        response: source's discover response shape
+--   GET /api/sources/:id/thumb/:entry_id
+--                      — proxy thumbnail request to source handler (binary)
 --
 -- Caps:
 --   caps.index_db — readonly SQLite database (app index)
@@ -24,7 +26,8 @@ if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json")
+local json    = require("lib.format.json")
+local service = require("lib.platform.service")
 
 local M = {}
 
@@ -325,19 +328,23 @@ local CONTENT_TYPES = {
 	json = "application/json",
 }
 
-local function serve_static(res, name, ext)
+local function serve_static(req, res)
+	local path = req.path or "/"
+	local name, ext
+	if path == "/" then
+		name, ext = "index.html", "html"
+	elseif path == "/app.js" then
+		name, ext = "app.js", "js"
+	elseif path == "/style.css" then
+		name, ext = "style.css", "css"
+	else
+		return nil
+	end
 	local content = STATIC[name]
-	if not content then return false end
+	if not content then return nil end
 	res.status = 200
 	res.headers["Content-Type"] = { CONTENT_TYPES[ext] or "application/octet-stream" }
 	res.body = content
-	return true
-end
-
-local function json_ok(res, data)
-	res.status = 200
-	res.headers["Content-Type"] = { CONTENT_TYPES.json }
-	res.body = json.encode(data)
 	return true
 end
 
@@ -468,127 +475,200 @@ local function build_source_map(sources)
 	return map
 end
 
+-- ── Service methods ────────────────────────────────────────────────────────
+-- Each method takes caps as first arg followed by named parameters.
+-- These are pure business-logic functions; routing/dispatch is handled by
+-- lib.platform.service.
+
+-- list_apps: GET /api/apps?tag=X&q=X&limit=N&offset=N
+local function list_apps(caps, tag, q, limit, offset)
+	local db = caps.index_db
+	local limit_raw  = tonumber(limit)  or 200
+	local offset_raw = tonumber(offset) or 0
+	local lim = math.max(1, math.min(500, limit_raw))
+	local off = math.max(0, offset_raw)
+	local apps, total = query_apps(db, tag, q, lim, off)
+	return {
+		total  = total,
+		limit  = lim,
+		offset = off,
+		apps   = apps,
+	}
+end
+
+-- list_sources: GET /api/sources
+local function list_sources(caps)
+	local sources_list = caps.sources or {}
+	local list = {}
+	for i = 1, #sources_list do
+		local s = sources_list[i]
+		list[i] = { id = s.id, name = s.name }
+	end
+	return { sources = list }
+end
+
+-- get_source_discover: GET /api/sources/:source_id/discover?q=X&limit=N&offset=N
+-- Proxies to a source adapter's discover function, then rewrites thumb_url
+-- entries to route through this server's thumb proxy (same-origin, CSP-safe).
+local function get_source_discover(caps, source_id, q, limit, offset)
+	local source_map = caps._source_map
+	-- Percent-decode the source id from the path segment.
+	local decoded_id = source_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+	local src = source_map[decoded_id]
+	if not src then
+		return nil, { status = 404, message = "source not found: " .. decoded_id }
+	end
+	local params = { q = q, limit = limit, offset = offset }
+	local resp = src.discover(params)
+	-- Rewrite thumb_url entries to route through this server's thumb proxy.
+	if src.handler and resp and resp.entries then
+		local encoded_src_id = decoded_id:gsub("[^%w%-_%.~]",
+			function(c) return ("%%%02X"):format(c:byte()) end)
+		for _, entry in ipairs(resp.entries) do
+			if entry.id then
+				local encoded_entry_id = tostring(entry.id):gsub("[^%w%-_%.~]",
+					function(c) return ("%%%02X"):format(c:byte()) end)
+				entry.thumb_url = "/api/sources/" .. encoded_src_id
+					.. "/thumb/" .. encoded_entry_id
+			end
+		end
+	end
+	return resp
+end
+
 -- ── Router ─────────────────────────────────────────────────────────────────
 
 function M.create(caps)
-	local db = caps.index_db
 	local source_map = build_source_map(caps.sources)
-	local sources_list = caps.sources or {}
 
+	-- Augment caps with derived lookup so service methods can access it.
+	-- A shallow copy is used to avoid mutating the caller's caps table.
+	local caps_ext = {}
+	for k, v in pairs(caps) do caps_ext[k] = v end
+	caps_ext._source_map = source_map
+
+	local methods = {
+		list_apps             = list_apps,
+		list_sources          = list_sources,
+		get_source_discover   = get_source_discover,
+	}
+
+	local descriptors = {
+		list_apps = {
+			method = "GET",
+			path   = "/api/apps",
+			help   = "List/search installed apps (tag=, q=, limit=, offset=)",
+		},
+		list_sources = {
+			method = "GET",
+			path   = "/api/sources",
+			help   = "List registered source adapters",
+		},
+		get_source_discover = {
+			method = "GET",
+			path   = "/api/sources/:source_id/discover",
+			help   = "Proxy discover to a source adapter (q=, limit=, offset=)",
+		},
+	}
+
+	local svc = service.create(caps_ext, methods, descriptors)
+
+	-- ── Thumb proxy ────────────────────────────────────────────────────────
+	-- Binary passthrough — cannot use the service JSON layer.
+	-- Path: GET /api/sources/:source_id/thumb/:entry_id
+	local function handle_thumb(req, res)
+		local path = req.path or ""
+		local thumb_src_id, thumb_entry_id = path:match("^/api/sources/([^/]+)/thumb/(.+)$")
+		if not thumb_src_id then return nil end
+		thumb_src_id   = thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16)) end)
+		thumb_entry_id = thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+		local src = source_map[thumb_src_id]
+		if not src or not src.handler then
+			res.status = 404
+			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+			res.body = "thumb not available"
+			return true
+		end
+		local thumb_req = { method = "GET", path = "/thumb/" .. thumb_entry_id, headers = {} }
+		src.handler(thumb_req, res)
+		return true
+	end
+
+	-- ── Composed handler ───────────────────────────────────────────────────
+	-- Priority: static files → thumb proxy (binary) → service API routes.
+	-- Static files are checked first so "/" doesn't fall into the 404 path.
+	-- Thumb proxy is before service because service has no binary response support.
+	-- service.handler returns nil on no-match, enabling clean fallthrough.
 	local function handler(req, res)
-		local path = req.path or "/"
-		local method = req.method or "GET"
-
-		-- Static files.
+		local method = (req.method or "GET"):upper()
 		if method == "GET" then
-			if path == "/" then return serve_static(res, "index.html", "html") end
-			if path == "/app.js" then return serve_static(res, "app.js", "js") end
-			if path == "/style.css" then return serve_static(res, "style.css", "css") end
+			if serve_static(req, res) then return true end
+			if handle_thumb(req, res) then return true end
 		end
-
-		-- API: list/search apps. Paginated (server-side LIMIT/OFFSET + COUNT).
-		-- Client supplies ?limit & ?offset; server clamps limit to DEFAULT/MAX
-		-- so a bad client can't request "limit=1000000" and force a full scan.
-		if method == "GET" and path:find("^/api/apps") then
-			local qs = req.query or path:match("%?(.+)$")
-			local params = parse_query(qs)
-			local limit_raw = tonumber(params.limit) or 200
-			local offset_raw = tonumber(params.offset) or 0
-			local limit  = math.max(1, math.min(500, limit_raw))
-			local offset = math.max(0, offset_raw)
-			local apps, total = query_apps(db, params.tag, params.q, limit, offset)
-			return json_ok(res, {
-				total = total,
-				limit = limit,
-				offset = offset,
-				apps = apps,
-			})
-		end
-
-		-- API: list registered source adapters.
-		if method == "GET" and path == "/api/sources" then
-			local list = {}
-			for i = 1, #sources_list do
-				local s = sources_list[i]
-				list[i] = { id = s.id, name = s.name }
-			end
-			return json_ok(res, { sources = list })
-		end
-
-		-- API: proxy thumbnail through the library origin (avoids CSP cross-origin block).
-		-- Path: /api/sources/<id>/thumb/<entry_id>
-		-- Calls src.handler with GET /thumb/<entry_id> in-process.
-		if method == "GET" then
-			local thumb_src_id, thumb_entry_id = path:match("^/api/sources/([^/]+)/thumb/(.+)$")
-			if thumb_src_id then
-				thumb_src_id   = thumb_src_id:gsub("%%(%x%x)",   function(h) return string.char(tonumber(h, 16)) end)
-				thumb_entry_id = thumb_entry_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-				local src = source_map[thumb_src_id]
-				if not src or not src.handler then
-					res.status = 404
-					res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-					res.body = "thumb not available"
-					return true
-				end
-				local thumb_req = { method = "GET", path = "/thumb/" .. thumb_entry_id, headers = {} }
-				src.handler(thumb_req, res)
-				return true
-			end
-		end
-
-		-- API: proxy /discover to a source adapter.
-		-- Path: /api/sources/<id>/discover[?params]
-		if method == "GET" then
-			local src_id = path:match("^/api/sources/([^/]+)/discover")
-			if src_id then
-				-- Percent-decode the source id from the path.
-				src_id = src_id:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-				local src = source_map[src_id]
-				if not src then
-					res.status = 404
-					res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-					res.body = "source not found: " .. src_id
-					return true
-				end
-				local qs = req.query or path:match("%?(.+)$")
-				local params = parse_query(qs)
-				local resp = src.discover(params)
-				-- Rewrite thumb_url entries to route through this server's thumb proxy.
-				-- This keeps image requests same-origin and CSP-safe.
-				if src.handler and resp and resp.entries then
-					local encoded_src_id = src_id:gsub("[^%w%-_%.~]",
-						function(c) return ("%%%02X"):format(c:byte()) end)
-					for _, entry in ipairs(resp.entries) do
-						if entry.id then
-							local encoded_entry_id = tostring(entry.id):gsub("[^%w%-_%.~]",
-								function(c) return ("%%%02X"):format(c:byte()) end)
-							entry.thumb_url = "/api/sources/" .. encoded_src_id
-								.. "/thumb/" .. encoded_entry_id
-						end
-					end
-				end
-				return json_ok(res, resp)
-			end
-		end
+		return svc.handler(req, res)
 	end
 
 	-- cli(args) -> nil
 	-- CLI handler: invoked when 'cr run <app> -- [args...]' is used.
-	--
-	-- Usage:
-	--   cr run <app> -- list                   List installed apps (id, name, version).
-	--   cr run <app> -- list --json            Output as JSON array.
-	--   cr run <app> -- search <query>         Search apps by name/tag.
-	--   cr run <app> -- search --json <query>  Search output as JSON array.
-	--   cr run <app> -- --help                 Print usage.
+	-- Subcommands: list, list --json, search <query>, search --json <query>
+	-- Implemented via service CLI projection (subcommand: list-apps, list-sources).
+	-- The original 'list'/'search' aliases are preserved as wrappers so existing
+	-- usage isn't broken.
+	local svc_cli = svc.cli
+
 	local function cli(args)
-		-- Flags.
-		local want_json = false
-		local positional = {}
-		for i = 1, #args do
-			if args[i] == "--json" then
-				want_json = true
-			elseif args[i] == "--help" or args[i] == "-h" then
+		-- Translate legacy 'list' and 'search' subcommands to service form.
+		-- 'list'          → 'list-apps'
+		-- 'search <q>'    → 'list-apps <q>'  (q positional, not named param)
+		-- 'list --json'   → 'list-apps --json'
+		-- 'search --json' → 'list-apps --json'
+		-- All other args are forwarded as-is to the service CLI dispatcher.
+		local translated = {}
+		local first = nil
+		for _, a in ipairs(args) do
+			if first == nil and a:sub(1, 1) ~= "-" then
+				first = a
+			end
+		end
+
+		if first == "list" or first == "search" then
+			-- Build translated args: replace first positional with 'list-apps'.
+			-- For 'search', the remaining positionals become the 'q' value but
+			-- the service CLI passes positionals by position, so we join them.
+			local want_json = false
+			local positional = {}
+			for _, a in ipairs(args) do
+				if a == "--json" then
+					want_json = true
+				elseif a ~= "--help" and a ~= "-h" then
+					positional[#positional + 1] = a
+				end
+			end
+			-- positional[1] is "list" or "search"; skip it.
+			if first == "search" and #positional < 2 then
+				io.stderr:write("error: 'search' requires a query argument\n")
+				return
+			end
+			-- The list_apps method signature: (caps, tag, q, limit, offset).
+			-- CLI positional args map left-to-right after caps.
+			-- For 'search', pass q as third positional (tag slot = nil).
+			-- We use the raw svc.cli with constructed arg list.
+			local new_args = { "list-apps" }
+			if want_json then new_args[#new_args + 1] = "--json" end
+			if first == "search" then
+				-- q is positional #3 after tag (#2). Pass empty string for tag,
+				-- then join remaining positionals as q.
+				local parts = {}
+				for i = 2, #positional do parts[#parts + 1] = positional[i] end
+				new_args[#new_args + 1] = ""  -- tag (empty = no filter)
+				new_args[#new_args + 1] = table.concat(parts, " ")  -- q
+			end
+			return svc_cli(new_args)
+		end
+
+		-- Not a legacy alias — check for --help or pass directly.
+		for _, a in ipairs(args) do
+			if a == "--help" or a == "-h" then
 				io.write("usage:\n")
 				io.write("  cr run <app> -- list                   List installed apps\n")
 				io.write("  cr run <app> -- list --json            Output as JSON array\n")
@@ -596,51 +676,10 @@ function M.create(caps)
 				io.write("  cr run <app> -- search --json <query>  Search output as JSON array\n")
 				io.write("  cr run <app> -- --help                 This help text\n")
 				return
-			else
-				positional[#positional + 1] = args[i]
 			end
 		end
 
-		local subcmd = positional[1]
-
-		if subcmd == "list" or subcmd == "search" then
-			local q = nil
-			if subcmd == "search" then
-				local parts = {}
-				for i = 2, #positional do parts[#parts + 1] = positional[i] end
-				q = table.concat(parts, " ")
-				if q == "" then
-					io.stderr:write("error: 'search' requires a query argument\n")
-					return
-				end
-			end
-
-			local rows, _ = query_apps(db, nil, q, 500, 0)
-
-			if want_json then
-				-- Encode as a JSON array using lib.format.json (already required above).
-				io.write(json.encode(rows) .. "\n")
-			else
-				if #rows == 0 then
-					io.write("(no apps found)\n")
-					return
-				end
-				for _, row in ipairs(rows) do
-					local tags = row.tags and #row.tags > 0
-						and ("  [" .. table.concat(row.tags, ", ") .. "]")
-						or ""
-					io.write(string.format("%4d  %-40s%s\n",
-						row.id, row.name, tags))
-				end
-			end
-		else
-			io.write("usage:\n")
-			io.write("  cr run <app> -- list                   List installed apps\n")
-			io.write("  cr run <app> -- list --json            Output as JSON array\n")
-			io.write("  cr run <app> -- search <query>         Search apps by name/tag\n")
-			io.write("  cr run <app> -- search --json <query>  Search output as JSON array\n")
-			io.write("  cr run <app> -- --help                 This help text\n")
-		end
+		return svc_cli(args)
 	end
 
 	return { handler = handler, cli = cli }

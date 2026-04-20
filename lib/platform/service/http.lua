@@ -302,17 +302,25 @@ function M.create(caps, methods, descriptors)
 						end
 					end
 
+					-- Build args with explicit indices to preserve nil slots.
+					-- t[#t+1] = nil is a no-op in Lua (nil is not stored), which
+					-- would shift later values into the wrong parameter positions.
 					local call_args = { caps }
-					for _, pname in ipairs(route.param_names) do
+					for i, pname in ipairs(route.param_names) do
+						local val
 						if path_caps[pname] then
-							call_args[#call_args + 1] = path_caps[pname]
+							val = path_caps[pname]
 						else
-							call_args[#call_args + 1] = body_params[pname]
+							val = body_params[pname]
 						end
+						call_args[i + 1] = val
 					end
 
 					local ok, result, err = pcall(function()
-						return route.fn(unpack(call_args))
+						-- Use explicit end index: call_args may have nil holes
+						-- (params absent from query/path) and #call_args would
+						-- stop at the first nil, dropping later args entirely.
+						return route.fn(unpack(call_args, 1, #route.param_names + 1))
 					end)
 
 					if not ok then
@@ -322,8 +330,14 @@ function M.create(caps, methods, descriptors)
 					end
 
 					if result == nil and err ~= nil then
-						-- (nil, errmsg) convention
-						json_err(res, 400, tostring(err))
+						-- (nil, errmsg) convention.
+						-- err may be a string (→ 400) or a table { status, message }
+						-- for explicit HTTP status control (e.g. 404 not found).
+						if type(err) == "table" and err.status then
+							json_err(res, err.status, tostring(err.message or "error"))
+						else
+							json_err(res, 400, tostring(err))
+						end
 						return true
 					end
 
@@ -333,9 +347,8 @@ function M.create(caps, methods, descriptors)
 			end
 		end
 
-		-- No route matched.
-		json_err(res, 404, "not found: " .. req_method .. " " .. req_path)
-		return true
+		-- No route matched — return nil so callers can compose with fallbacks.
+		return nil
 	end
 
 	return { handler = handler, _routes = routes }
