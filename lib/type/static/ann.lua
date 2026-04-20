@@ -1212,6 +1212,15 @@ function M.parse_annotations(annotations, pool, filename)
                     nt.data[2] = underlying
                     return { kind = defs.ANN_DECL, type_id = nom, name_id = name_id, newtype = true }
                 end
+                -- template Name = <T> type — skip definition-time body checking for this function
+                if word == "template" then
+                    local tname = scan_word(s)
+                    if not tname then scan_error(s, "expected name after 'template'") end
+                    local tname_id = intern_mod.intern(pool, tname)
+                    expect_char(s, "=")
+                    local type_id = parse_type(s)
+                    return { kind = defs.ANN_DECL, type_id = type_id, name_id = tname_id, is_template = true }
+                end
                 -- Regular: Name<T...> = type  or  Name<T: Bound, ...> = type
                 local name = word
                 if not name then scan_error(s, "expected declaration name") end

@@ -2087,6 +2087,41 @@ assert.describe("checker: parse errors", function()
     end)
 end)
 
+assert.describe("checker: template annotation", function()
+    assert.it("template function with m.foo call passes at definition", function()
+        -- Without `template`, accessing m.foo would either fail or succeed with unknown --
+        -- the key is that the body uses m with an open generic type, which with skolem
+        -- checking would error if m.foo is not present on any concrete type.
+        -- With `template`, definition-time body checking is skipped entirely.
+        no_errors([[
+--:: template apply = <M>(M) -> unknown
+local apply = function(m)
+    return m.foo(1, 2)
+end
+]])
+    end)
+    assert.it("template function with complex m usage passes at definition", function()
+        no_errors([[
+--:: template schema = <M>(M) -> unknown
+local schema = function(m)
+    return m.table({ "foo", m.string }, { "bar", m.number })
+end
+]])
+    end)
+    assert.it("template function with two sequential calls on m passes", function()
+        -- A non-template unannotated function would fail on the second m.*() call
+        -- because after the first field access the solver closes m's inferred type.
+        -- With template, the body is skipped entirely — no solver errors at definition.
+        no_errors([[
+--:: template build = <M>(M) -> unknown
+local build = function(m)
+    m.setup()
+    return m.run()
+end
+]])
+    end)
+end)
+
 assert.describe("checker: self-check (parses own source)", function()
     assert.it("checks types.lua without crashing", function()
         local f = io.open("lib/type/static/v2/types.lua", "r")
