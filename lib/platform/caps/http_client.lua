@@ -5,6 +5,9 @@
 -- opts.host  : required string (e.g. "api.openai.com:443", "localhost:11434")
 -- opts.model : optional string (exposed as cap.model for LLM client config)
 -- opts.path  : optional string (exposed as cap.path for LLM completions path)
+-- opts.paths : optional array of strings — path whitelist. Absent/empty = all
+--              paths allowed. Each entry matches exactly OR as a prefix when it
+--              ends with "/". E.g. "/v1/" allows "/v1/chat/completions".
 --
 -- TLS: automatic when port is 443 (or when opts.tls = true), using libtls.
 -- Falls back to plaintext when libtls is unavailable.
@@ -289,6 +292,24 @@ local function post_process_response(parsed)
 	return parsed
 end
 
+-- ── Path whitelist ────────────────────────────────────────────────────────────
+
+-- path_allowed(paths, req_path) -> boolean
+-- Returns true when req_path is permitted by the whitelist.
+-- paths: nil/empty = allow all; otherwise exact match OR prefix match when
+-- the whitelist entry ends with "/".
+--: (table | nil, string) -> boolean
+local function path_allowed(paths, req_path)
+	if not paths or #paths == 0 then return true end
+	for i = 1, #paths do
+		local p = paths[i]
+		if req_path == p then return true end
+		-- prefix match: whitelist entry must end with "/"
+		if p:sub(-1) == "/" and req_path:sub(1, #p) == p then return true end
+	end
+	return false
+end
+
 -- ── Cap factory ───────────────────────────────────────────────────────────────
 
 -- http_client_cap(opts) -> cap_table, revoke_fn
@@ -300,6 +321,7 @@ function M.http_client_cap(opts)
 	local allowed_host = opts.host
 	local host, port = parse_host_port(allowed_host)
 	local use_tls = (port == "443") or (opts.tls == true)
+	local allowed_paths = opts.paths  -- nil or array of strings
 	local revoked = false
 
 	local cap = {}
@@ -318,6 +340,9 @@ function M.http_client_cap(opts)
 		if not req then return nil, "http_client: missing request" end
 		if not req.method then return nil, "http_client: missing method" end
 		if not req.path then return nil, "http_client: missing path" end
+		if not path_allowed(allowed_paths, req.path) then
+			return nil, "path not allowed: " .. req.path
+		end
 
 		local headers = normalize_headers(req.headers, allowed_host, req.body)
 
@@ -373,6 +398,9 @@ function M.http_client_cap(opts)
 		if not req.method then return nil, "http_client: missing method" end
 		if not req.path then return nil, "http_client: missing path" end
 		if not on_chunk then return nil, "http_client: missing on_chunk callback" end
+		if not path_allowed(allowed_paths, req.path) then
+			return nil, "path not allowed: " .. req.path
+		end
 
 		local headers = normalize_headers(req.headers, allowed_host, req.body)
 

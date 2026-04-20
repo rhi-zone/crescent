@@ -353,6 +353,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 			host  = decl.host,
 			model = decl.model,
 			path  = decl.path,
+			paths = decl.paths,
 		})
 	end
 

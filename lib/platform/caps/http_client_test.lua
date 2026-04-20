@@ -84,4 +84,83 @@ T.describe("caps.http_client", function()
 		local cap2 = http_client.http_client_cap({ host = "api.openai.com" })
 		T.ok(cap2, "cap with host-only created")
 	end)
+
+	T.describe("path whitelist", function()
+		T.it("paths=nil allows all paths", function()
+			local cap = http_client.http_client_cap({ host = "example.com" })
+			-- Should not be blocked by path check (will fail later at network).
+			-- We verify the error is NOT "path not allowed".
+			local _, err = cap.request({ method = "GET", path = "/v2/models" })
+			T.ok(not err or not err:find("path not allowed"), "nil paths allows any path")
+		end)
+
+		T.it("paths=empty table allows all paths", function()
+			local cap = http_client.http_client_cap({ host = "example.com", paths = {} })
+			local _, err = cap.request({ method = "GET", path = "/v2/models" })
+			T.ok(not err or not err:find("path not allowed"), "empty paths allows any path")
+		end)
+
+		T.it("blocks path not in whitelist", function()
+			local cap = http_client.http_client_cap({
+				host  = "example.com",
+				paths = { "/v1/chat/completions" },
+			})
+			local res, err = cap.request({ method = "GET", path = "/v2/models" })
+			T.eq(res, nil)
+			T.ok(err:find("path not allowed"), "error mentions path not allowed")
+			T.ok(err:find("/v2/models"), "error includes the rejected path")
+		end)
+
+		T.it("allows exact path match", function()
+			local cap = http_client.http_client_cap({
+				host  = "example.com",
+				paths = { "/v1/chat/completions", "/v1/models" },
+			})
+			local _, err = cap.request({ method = "GET", path = "/v1/models" })
+			T.ok(not err or not err:find("path not allowed"), "exact path is allowed")
+		end)
+
+		T.it("prefix match: /v1/ allows /v1/chat/completions", function()
+			local cap = http_client.http_client_cap({
+				host  = "example.com",
+				paths = { "/v1/" },
+			})
+			local _, err = cap.request({ method = "GET", path = "/v1/chat/completions" })
+			T.ok(not err or not err:find("path not allowed"), "prefix match allows subpath")
+		end)
+
+		T.it("prefix match: /v1/ blocks /v2/models", function()
+			local cap = http_client.http_client_cap({
+				host  = "example.com",
+				paths = { "/v1/" },
+			})
+			local res, err = cap.request({ method = "GET", path = "/v2/models" })
+			T.eq(res, nil)
+			T.ok(err:find("path not allowed"), "prefix does not match different root")
+		end)
+
+		T.it("entry without trailing slash does not prefix-match", function()
+			-- /v1 (no slash) should not match /v1/chat; only exact /v1 is allowed
+			local cap = http_client.http_client_cap({
+				host  = "example.com",
+				paths = { "/v1" },
+			})
+			local res, err = cap.request({ method = "GET", path = "/v1/chat" })
+			T.eq(res, nil)
+			T.ok(err:find("path not allowed"), "no-slash entry does not prefix-match")
+		end)
+
+		T.it("request_stream also enforces path whitelist", function()
+			local cap = http_client.http_client_cap({
+				host  = "example.com",
+				paths = { "/v1/chat/completions" },
+			})
+			local res, err = cap.request_stream(
+				{ method = "POST", path = "/v2/bad" },
+				function() end
+			)
+			T.eq(res, nil)
+			T.ok(err:find("path not allowed"), "request_stream blocks disallowed path")
+		end)
+	end)
 end)
