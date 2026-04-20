@@ -140,7 +140,7 @@ end
 -- Returns the enriched { [filename]: meta } map (hit + newly read).
 local function ensure_cached(db, fs, filenames, time_fn)
 	local cached = cache_lookup(db, filenames)
-	local now = (time_fn or os.time)()
+	local now = time_fn and time_fn() or 0
 	for i = 1, #filenames do
 		local f = filenames[i]
 		if not cached[f] then
