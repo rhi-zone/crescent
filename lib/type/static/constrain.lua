@@ -2301,21 +2301,7 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     ctx._last_require_mod = nil
     ctx._last_require_aliases = nil
     ctx._last_multi_return_override = nil  -- clear before gen so stale values don't persist
-    -- For template-annotated names: skip RHS body checking entirely.
-    -- Template functions cannot be checked at definition time because the interpreter
-    -- object M is only concrete at call sites.  The body is skipped; the pre-declared
-    -- type from --:: template is used directly.
-    local is_template_stmt = false
-    if ctx._template_names then
-        for i = 0, nl - 1 do
-            local check_name_id = ctx.ast_lists:get(ns + i)
-            if ctx._template_names[check_name_id] then
-                is_template_stmt = true
-                break
-            end
-        end
-    end
-    local rhs_types = (el > 0 and not is_template_stmt) and gen_expr_list(ctx, es, el) or {}
+    local rhs_types = el > 0 and gen_expr_list(ctx, es, el) or {}
     local stmt_require_mod = ctx._last_require_mod
     local stmt_require_aliases = ctx._last_require_aliases
     ctx._last_require_mod = nil
@@ -3383,19 +3369,6 @@ process_type_decls = function(ctx)
                         alias.body = types_mod.make_nominal(ctx, r.name_id, nominal_id, underlying)
                     else
                         alias.body = resolve_annotation_type(ctx, r.type_id)
-                        -- For --:: template decls:
-                        --   1. Pre-bind the variable so NODE_LOCAL_STMT can detect it.
-                        --   2. Record the name_id in ctx._template_names so gen_function
-                        --      can skip the body when evaluating the RHS.
-                        --: any
-                        local r_any = r
-                        if r_any.is_template and alias.body then
-                            -- Pre-bind the value so LOCAL_STMT finds it in prescanned.
-                            env_mod.bind(ctx.scope, r.name_id, alias.body)
-                            -- Track template name_ids for LOCAL_STMT body-skip logic.
-                            if not ctx._template_names then ctx._template_names = {} end
-                            ctx._template_names[r.name_id] = true
-                        end
                     end
 
                     -- Resolve raw_bounds (annotation-arena IDs) into checker-context type IDs.

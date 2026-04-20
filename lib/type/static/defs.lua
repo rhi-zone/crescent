@@ -238,7 +238,6 @@ M.FLAG_COMPUTED         = 4
 M.FLAG_GENERIC          = 1
 M.FLAG_RECURSIVE        = 2
 M.FLAG_SKOLEM           = 4   -- type variable that must never be bound (used for generic body checking)
-M.FLAG_TEMPLATE         = 8   -- function type: skip definition-time skolem body checking; check at call sites only
 
 -- Flag bits (field entries)
 M.FLAG_OPTIONAL         = 0x01  -- field may be absent; access returns T|nil
