@@ -32,6 +32,7 @@ function M.create(caps, opts)
 		llm = llm_lib.create(caps.llm_api, {
 			model = opts.model or "default",
 			path = opts.path,
+			api_key = opts.api_key,
 		})
 	end
 

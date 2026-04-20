@@ -28,6 +28,7 @@ function M.create(http_client, opts)
 	opts = opts or {}
 	local model = opts.model or "default"
 	local path = opts.path or "/v1/chat/completions"
+	local api_key = opts.api_key
 
 	local llm = {}
 
@@ -50,6 +51,7 @@ function M.create(http_client, opts)
 			path = path,
 			headers = {
 				["Content-Type"] = "application/json",
+				["Authorization"] = api_key and ("Bearer " .. api_key) or nil,
 			},
 			body = body,
 		})
@@ -126,6 +128,7 @@ function M.create(http_client, opts)
 				path = path,
 				headers = {
 					["Content-Type"] = "application/json",
+					["Authorization"] = api_key and ("Bearer " .. api_key) or nil,
 				},
 				body = body,
 			}, on_chunk)
