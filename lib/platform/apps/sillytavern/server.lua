@@ -25,7 +25,7 @@
 -- Caps:
 --   caps.characters — readonly fs (root = ~/SillyTavern/public/characters)
 --   caps.meta_cache — writable SQLite for metadata caching (optional)
---   caps.time       — required; timestamps cache entries (cached_at column)
+--   caps.time       — optional; timestamps cache entries (cached_at NULL when absent)
 
 if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS card_meta (
   name        TEXT NOT NULL,
   description TEXT,
   tags_json   TEXT,
-  cached_at   INTEGER NOT NULL
+  cached_at   INTEGER
 );
 ]]
 
