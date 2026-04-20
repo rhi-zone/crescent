@@ -117,9 +117,9 @@ function M.load_app(path)
 end
 
 -- make_tar_loader(entries) -> function
--- Returns a package.loaders-compatible function that resolves require() against
--- the tarball entries. Returns a loader function on success, or an error string
--- (Lua loader convention) on miss.
+-- Returns a function that resolves a module name to { source, chunkname } when
+-- the module exists in the tarball entries, or nil + error string on miss.
+-- Callers are responsible for compiling the source with the correct env via load().
 local function make_tar_loader(entries)
 	return function(modname)
 		local relpath = modname:gsub("%.", "/")
@@ -130,15 +130,10 @@ local function make_tar_loader(entries)
 		for _, candidate in ipairs(candidates) do
 			local src_m = tar.get(entries, candidate)
 			if src_m then
-				local src = src_m or error("unreachable")
-				local chunk, lerr = load(src, "@" .. candidate, "t")
-				if not chunk then
-					return nil, "platform: error loading '" .. candidate .. "': " .. tostring(lerr)
-				end
-				return chunk
+				return src_m or error("unreachable"), "@" .. candidate
 			end
 		end
-		return "\n\tno entry '" .. candidates[1] .. "' or '" .. candidates[2] .. "' in app tarball"
+		return nil, "\n\tno entry '" .. candidates[1] .. "' or '" .. candidates[2] .. "' in app tarball"
 	end
 end
 
@@ -216,20 +211,46 @@ function M.run_entry(app, entry_key, env, opts)
 
 	local tar_loader = make_tar_loader(app.entries)
 	local base_require = env.require
+
+	-- module_env: sandbox env without caps — modules loaded via require must not
+	-- see caps; only the entrypoint receives them (passed explicitly as args).
+	local module_env = {}
+	for k, v in pairs(env) do module_env[k] = v end
+	module_env.caps = nil
+
+	-- sandbox-local package.loaded cache: require("foo") called twice returns
+	-- the same object without re-executing the module.
+	local package_loaded = {} --: { [string]: unknown }
+
 	local function app_require(modname)
-		local loader_or_err, detail = tar_loader(modname)
-		if type(loader_or_err) == "function" then
-			return loader_or_err()
+		local cached = package_loaded[modname]
+		if cached ~= nil then return cached end
+
+		local src_m, chunkname_or_err = tar_loader(modname)
+		if src_m then
+			-- Compile in module_env (sandbox without caps).
+			local chunk, lerr = load(src_m, chunkname_or_err, "t", module_env)
+			if not chunk then
+				error("platform: error loading '" .. tostring(modname) .. "': " .. tostring(lerr), 2)
+			end
+			local result = chunk()
+			-- Cache true (not nil/false) so absent-return modules don't re-run.
+			package_loaded[modname] = (result ~= nil) and result or true
+			return result
 		end
 		if base_require then
 			return base_require(modname)
 		end
-		error("platform: module '" .. tostring(modname) .. "' not found in app tarball", 2)
+		error("platform: module '" .. tostring(modname) .. "' not found in app tarball" .. tostring(chunkname_or_err), 2)
 	end
 
+	-- entrypoint env: full env (including caps) with our app_require injected.
 	local app_env = {}
 	for k, v in pairs(env) do app_env[k] = v end
 	app_env.require = app_require
+	-- also update module_env's require so modules loaded via require get the
+	-- same app_require (allowing transitive tarball-internal requires).
+	module_env.require = app_require
 
 	return sandbox.run(src, app_env, opts)
 end

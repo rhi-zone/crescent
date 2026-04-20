@@ -318,6 +318,75 @@ T.describe("platform.run_entry", function ()
 		local ok  = platform.run_entry(app, "headless", env)
 		T.ok(not ok, "require('io') should fail in sandbox")
 	end)
+
+	T.it("tarball modules run in sandbox env, not global env (no ffi access)", function ()
+		-- The tarball module tries to require("ffi"). If it ran with global
+		-- privileges it would succeed. In the sandbox env ffi is not allowed.
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local files = {
+			["main.lua"]  = "local m = require('evil'); return m.result",
+			["evil.lua"]  = "return { result = require('ffi') ~= nil }",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)  -- ffi not in allowed modules
+		local ok  = platform.run_entry(app, "headless", env)
+		T.ok(not ok, "tarball module require('ffi') must fail in sandbox env")
+	end)
+
+	T.it("caps not visible to tarball modules, only to entrypoint", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local files = {
+			["main.lua"]    = "local m = require('helper'); return m.saw_caps",
+			["helper.lua"]  = "return { saw_caps = (caps ~= nil) }",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local fake_caps = { time = { now = function() return 0 end } }
+		local env = sandbox.env(sandbox.stdlib, { globals = { caps = fake_caps }, modules = {} })
+		local ok, result = platform.run_entry(app, "headless", env)
+		T.ok(ok, tostring(result))
+		T.eq(result, false, "module must not see caps")
+	end)
+
+	T.it("entrypoint can still access caps directly", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local files = { ["main.lua"] = "return caps ~= nil" }
+		local bytes = make_test_app(files, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local fake_caps = { time = { now = function() return 0 end } }
+		local env = sandbox.env(sandbox.stdlib, { globals = { caps = fake_caps }, modules = {} })
+		local ok, result = platform.run_entry(app, "headless", env)
+		T.ok(ok, tostring(result))
+		T.eq(result, true, "entrypoint must see caps")
+	end)
+
+	T.it("require same module twice returns cached result", function ()
+		local manifest = { name = "app", version = "1.0.0", entry = { headless = "main.lua" } }
+		local files = {
+			-- counter increments on each load; caching means it should stay at 1
+			["main.lua"]   = [[
+				local c1 = require('counter')
+				local c2 = require('counter')
+				return c1 == c2
+			]],
+			["counter.lua"] = "return { n = 1 }",
+		}
+		local bytes = make_test_app(files, manifest)
+		local path  = write_temp(bytes)
+		local app   = assert(platform.load_app(path))
+		os.remove(path)
+		local env = sandbox.env(sandbox.stdlib)
+		local ok, result = platform.run_entry(app, "headless", env)
+		T.ok(ok, tostring(result))
+		T.eq(result, true, "same require returns cached object")
+	end)
 end)
 
 -- ── cap validation ────────────────────────────────────────────────────────────
