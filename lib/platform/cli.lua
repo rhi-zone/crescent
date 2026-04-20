@@ -325,6 +325,7 @@ local CAP_TYPE_MODULES = {
 	stdin       = "lib.platform.caps.stdin",
 	stdout      = "lib.platform.caps.stdout",
 	fs          = "lib.platform.caps.fs",
+	llm         = "lib.platform.caps.llm",
 }
 
 local function build_cap(cap_name, decl, app, context, platform_opts)
@@ -427,6 +428,41 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		return mod.fs_cap({ root = root, allow_write = not decl.readonly })
 	end
 
+	-- llm: provider-agnostic LLM access.
+	-- The manifest declares provider + key_name; the platform resolves the key
+	-- from the keyring. The app never sees the raw key.
+	if cap_type == "llm" then
+		local provider = decl.provider
+		local key_name = decl.key_name
+		local api_key
+
+		if key_name then
+			-- Attempt keyring lookup; proceed with nil key if keyring unavailable.
+			local ok_kr, keyring = pcall(require, "lib.keyring")
+			if ok_kr and keyring then
+				local kr_key, _kr_err = keyring.get("crescent/llm/" .. key_name)
+				api_key = kr_key  -- nil if not found; provider will reject on live calls
+			end
+		end
+
+		-- Fall back to the well-known env vars if keyring didn't yield a key.
+		if not api_key then
+			api_key = resolve_llm_api_key_from_env()
+		end
+
+		-- Provider may be nil for manifest declarations that leave it to the
+		-- operator; default to "openai" as the most common case.
+		provider = provider or decl.provider_default or "openai"
+
+		local mod = require(CAP_TYPE_MODULES.llm)
+		return mod.llm_cap({
+			provider = provider,
+			key      = api_key,
+			model    = decl.model,
+			base_url = decl.base_url,
+		})
+	end
+
 	return nil, "unknown cap type: " .. tostring(cap_type)
 end
 
@@ -519,28 +555,19 @@ local function run_dir_entrypoint(app, entry_path, caps)
 	local cap_bundle = { globals = { caps = caps }, modules = {} }
 	local env = sandbox.env(sandbox.stdlib, cap_bundle)
 
-	-- Build a directory-based require that tries the app dir first (sandboxed),
-	-- then falls back to host require for platform libraries.
-	-- App code (in app dir) runs sandboxed. Host libraries run unsandboxed —
-	-- they're trusted platform code that may legitimately need ffi, bit, etc.
+	-- Mirror daemon mode: dir_loader serves the app's own files first; the
+	-- whitelist require (modules={}) is the fallback — nothing from the host
+	-- is reachable unless explicitly added to modules. This matches what
+	-- platform.run_entry does for archive apps (tar_loader + whitelist fallback).
 	local dir_loader = make_dir_loader(app.path, env)
-	-- Modules that must never escape to host require.
-	local blocked = { ffi = true, io = true, os = true, debug = true, package = true }
-	-- Modules where require() should return the sandbox's safe subset, not the host module.
-	local shadowed = { jit = env.jit, bit = env.bit }
+	local whitelist_require = env.require  -- whitelist built by sandbox.env
 	env.require = function(modname)
-		if blocked[modname] then
-			error("sandbox: require '" .. tostring(modname) .. "' not allowed", 2)
-		end
-		if shadowed[modname] then
-			return shadowed[modname]
-		end
 		local loader_or_err = dir_loader(modname)
 		if type(loader_or_err) == "function" then
 			return loader_or_err()
 		end
-		-- Fall back to host require for platform libraries.
-		return require(modname)
+		-- Fall back to whitelist require; rejects anything not in modules.
+		return whitelist_require(modname)
 	end
 
 	-- Read and run the entrypoint file in the sandbox.
