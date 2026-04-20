@@ -14,7 +14,7 @@
         "server":     { "type": "http_server" },
         "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true },
         "meta_cache": { "type": "db" },
-        "time":       { "type": "time" }
+        "time":       { "type": "time", "required": false, "reason": "Timestamps card metadata cache entries. Without it, cached_at is recorded as 0 (epoch); caching still works but timestamps are meaningless." }
       }
     }
   }

@@ -25,6 +25,7 @@
 -- Caps:
 --   caps.characters — readonly fs (root = ~/SillyTavern/public/characters)
 --   caps.meta_cache — writable SQLite for metadata caching (optional)
+--   caps.time       — required; timestamps cache entries (cached_at column)
 
 if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -162,7 +163,7 @@ function M.create(caps)
 	local fs = caps.characters
 	local db = init_cache(caps.meta_cache)
 	local time_cap = caps.time
-	local time_fn = (time_cap and time_cap.now) or os.time
+	local time_fn = time_cap and time_cap.now
 
 	-- ── GET / ?entry=<filename> — card detail page ───────────────────────────
 
