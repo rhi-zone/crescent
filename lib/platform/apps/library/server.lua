@@ -541,6 +541,13 @@ end
 function M.create(caps)
 	local source_map = build_source_map(caps.sources)
 
+	-- Injected I/O for the CLI handler — use caps when present, fall back to
+	-- globals only when the caller has not provided them (e.g. in tests).
+	local stdout_cap = caps.stdout
+	local stderr_cap = caps.stderr
+	local stdout_write = stdout_cap and stdout_cap.write or function(s) io.write(s) end
+	local stderr_write = stderr_cap and stderr_cap.write or function(s) io.stderr:write(s) end
+
 	-- Augment caps with derived lookup so service methods can access it.
 	-- A shallow copy is used to avoid mutating the caller's caps table.
 	local caps_ext = {}
@@ -646,7 +653,7 @@ function M.create(caps)
 			end
 			-- positional[1] is "list" or "search"; skip it.
 			if first == "search" and #positional < 2 then
-				io.stderr:write("error: 'search' requires a query argument\n")
+				stderr_write("error: 'search' requires a query argument\n")
 				return
 			end
 			-- The list_apps method signature: (caps, tag, q, limit, offset).
@@ -669,12 +676,12 @@ function M.create(caps)
 		-- Not a legacy alias — check for --help or pass directly.
 		for _, a in ipairs(args) do
 			if a == "--help" or a == "-h" then
-				io.write("usage:\n")
-				io.write("  cr run <app> -- list                   List installed apps\n")
-				io.write("  cr run <app> -- list --json            Output as JSON array\n")
-				io.write("  cr run <app> -- search <query>         Search apps by name/tag\n")
-				io.write("  cr run <app> -- search --json <query>  Search output as JSON array\n")
-				io.write("  cr run <app> -- --help                 This help text\n")
+				stdout_write("usage:\n")
+				stdout_write("  cr run <app> -- list                   List installed apps\n")
+				stdout_write("  cr run <app> -- list --json            Output as JSON array\n")
+				stdout_write("  cr run <app> -- search <query>         Search apps by name/tag\n")
+				stdout_write("  cr run <app> -- search --json <query>  Search output as JSON array\n")
+				stdout_write("  cr run <app> -- --help                 This help text\n")
 				return
 			end
 		end

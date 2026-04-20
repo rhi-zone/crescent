@@ -852,6 +852,12 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] http/server: reads one packet, not until headers complete — loop until `\r\n\r\n`, then read body by Content-Length
 - [x] http/router/staticx: pattern `.gz$` should be `%.gz$` (Lua pattern, `.` matches any char)
 - [x] http/router/staticx: opens files in `"r"` mode — should be `"rb"` to avoid newline mangling
+- [x] charactercardv2/server.lua: `require("lib.keyring")` inside app — sandbox violation, app could read any key. Fixed: key resolved at platform level, injected as pre-keyed llm cap.
+- [x] sillytavern/server.lua line 143: `os.time()` called directly — must accept injected `time_fn` cap instead
+- [x] library/server.lua: `io.write()` / `io.stderr:write()` in CLI handler — must accept injected `stdout`/`stderr` write fns
+- [ ] **Sandbox: all required modules run with full host privileges** — both tarball and whitelisted platform modules run in global env. Fix: (1) tarball modules → `load(source, "t", env)`; (2) whitelisted pure-Lua platform modules → source-load from disk via `load(source, "t", env)`; (3) FFI-backed functionality → cap system only: declared in manifest, explicitly granted by platform, injected as `caps.*` globals. Apps use `caps.compress(data)` not `require("lib.compress")`. `ffi` is never on any whitelist; FFI modules are not requireable inside the sandbox. Maintain sandbox-local `package.loaded`.
+- [ ] **`caps` leaks into all module envs** — currently `caps` is a global in the sandbox env shared by all modules. Required modules must receive an env without `caps`; only the entrypoint gets it. App passes caps to internal modules explicitly as arguments.
+- [ ] **Dev/prod sandbox inconsistency** — CLI dev mode uses a blocklist (`ffi`, `io`, `os`, `debug`, `package`); daemon mode uses a whitelist. A violation present in dev may be invisible in prod and vice versa. Fix: CLI dev mode must use the same whitelist-only sandbox as daemon mode.
 - [ ] Full security audit of all imported libraries
 
 ## correctness

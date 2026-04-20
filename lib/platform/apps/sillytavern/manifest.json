@@ -13,7 +13,8 @@
       "caps": {
         "server":     { "type": "http_server" },
         "characters": { "type": "fs", "root": "~/SillyTavern/public/characters", "readonly": true },
-        "meta_cache": { "type": "db" }
+        "meta_cache": { "type": "db" },
+        "time":       { "type": "time" }
       }
     }
   }

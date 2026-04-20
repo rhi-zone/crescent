@@ -138,9 +138,9 @@ end
 
 -- Populate cache for any filenames not yet present.
 -- Returns the enriched { [filename]: meta } map (hit + newly read).
-local function ensure_cached(db, fs, filenames)
+local function ensure_cached(db, fs, filenames, time_fn)
 	local cached = cache_lookup(db, filenames)
-	local now = os.time()
+	local now = (time_fn or os.time)()
 	for i = 1, #filenames do
 		local f = filenames[i]
 		if not cached[f] then
@@ -161,6 +161,8 @@ end
 function M.create(caps)
 	local fs = caps.characters
 	local db = init_cache(caps.meta_cache)
+	local time_cap = caps.time
+	local time_fn = (time_cap and time_cap.now) or os.time
 
 	-- ── GET / ?entry=<filename> — card detail page ───────────────────────────
 
@@ -173,7 +175,7 @@ function M.create(caps)
 			return
 		end
 
-		local meta = ensure_cached(db, fs, { filename })
+		local meta = ensure_cached(db, fs, { filename }, time_fn)
 		local m = meta[filename] or { name = name_from_file(filename), description = nil, tags = {} }
 
 		local tags_html = ""
@@ -341,7 +343,7 @@ a.btn:hover{background:#5a5a9a}
 		end
 
 		-- Populate metadata cache for this page (reads only uncached PNGs).
-		local meta = ensure_cached(db, fs, page_files)
+		local meta = ensure_cached(db, fs, page_files, time_fn)
 
 		-- Build the entries array.
 		local entries = {}

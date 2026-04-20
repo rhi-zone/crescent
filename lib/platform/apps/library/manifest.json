@@ -11,7 +11,9 @@
       "main": "server.lua",
       "caps": {
         "server": { "type": "http_server" },
-        "index_db": { "type": "db", "required": false, "readonly": true, "path": "~/.crescent/apps/index.db" }
+        "index_db": { "type": "db", "required": false, "readonly": true, "path": "~/.crescent/apps/index.db" },
+        "stdout": { "type": "stdout", "required": false },
+        "stderr": { "type": "stderr", "required": false }
       }
     }
   }
