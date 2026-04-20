@@ -3,7 +3,6 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local T      = require("lib.test.assert")
-local json   = require("lib.json")
 local server = require("lib.platform.apps.charactercardv2.server")
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,37 +39,6 @@ T.describe("server.create", function()
 		T.ok(type(app.chat) == "function")
 		T.ok(type(app.chat_stream) == "function")
 		T.ok(type(app.count_tokens) == "function")
-	end)
-
-	T.it("creates app from http_client cap (caps.llm_api)", function()
-		local mock_http = {
-			request = function(req)
-				return {
-					status = 200,
-					headers = {},
-					body = json.encode({ choices = { { message = { content = "from api" } } } }),
-				}
-			end,
-			request_stream = function(req, on_chunk)
-				on_chunk("data: " .. json.encode({ choices = { { delta = { content = "streamed" } } } }) .. "\n\n")
-				on_chunk("data: [DONE]\n\n")
-				return { status = 200, headers = {} }
-			end,
-		}
-		local app = server.create({ llm_api = mock_http }, { model = "test" })
-		local content, err = app.chat({ { role = "user", content = "hi" } })
-		T.ok(content ~= nil, tostring(err))
-		T.eq(content, "from api")
-	end)
-
-	T.it("prefers caps.llm over caps.llm_api", function()
-		local mock_llm = make_mock_llm("from llm")
-		local mock_http = {
-			request = function() return { status = 200, headers = {}, body = json.encode({ choices = { { message = { content = "from api" } } } }) } end,
-		}
-		local app = server.create({ llm = mock_llm, llm_api = mock_http })
-		local content = app.chat({ { role = "user", content = "hi" } })
-		T.eq(content, "from llm")
 	end)
 
 	T.it("returns error when no llm cap provided", function()

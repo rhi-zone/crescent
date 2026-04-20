@@ -14,7 +14,7 @@
       "main": "server.lua",
       "caps": {
         "server":    { "type": "http_server" },
-        "llm_api":   { "type": "http_client", "required": false }
+        "llm":       { "type": "llm" }
       }
     },
     "import": {
