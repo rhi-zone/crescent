@@ -42,6 +42,8 @@ cd docs && bun dev           # Local docs
 
 ## Core Rules
 
+**Do the right thing, don't hedge.** When the correct approach is clear, implement it. Never present "X is a lot of work" as a reason to do something worse — amount of work is not a factor. If you find yourself asking "should I stub this or do it properly?", the answer is always: do it properly and delegate if needed.
+
 **Note things down immediately — no deferral:**
 - Problems, tech debt, issues → TODO.md now, in the same response
 - Design decisions, key insights → docs/ or CLAUDE.md
