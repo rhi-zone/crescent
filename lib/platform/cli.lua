@@ -25,6 +25,17 @@ end
 local json = require("lib.json")
 local platform = require("lib.platform")
 
+-- ── LLM env-var key resolution ────────────────────────────────────────────────
+-- At cap construction time, check well-known env vars in priority order and
+-- inject into opts so app code can pick them up via opts.api_key.
+-- The server layer then tries keyring before falling back to nil (local model).
+local function resolve_llm_api_key_from_env()
+	return os.getenv("OPENAI_API_KEY")
+		or os.getenv("ANTHROPIC_API_KEY")
+		or os.getenv("LLM_API_KEY")
+		or nil
+end
+
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
 local function parse_args(args)
@@ -1024,7 +1035,12 @@ if app._dir_mode then
 
 	if entry_mod.create then
 		-- Module exports create(caps, opts) -> app instance.
-		local result = entry_mod.create(caps, {})
+		-- Inject any LLM API key found in the environment so the app can use it
+		-- without the operator having to pre-load it into the keyring.
+		local app_opts = {}
+		local env_api_key = resolve_llm_api_key_from_env()
+		if env_api_key then app_opts.api_key = env_api_key end
+		local result = entry_mod.create(caps, app_opts)
 		if not result then
 			io.stderr:write("error: create() returned nil\n")
 			os.exit(1)
