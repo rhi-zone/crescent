@@ -501,4 +501,20 @@ M.open = function(path, time_fn)
 	return setmetatable({ _db = db, _time_fn = time_fn }, db_mt)
 end
 
+-- from_db(db_handle, time_fn) -> db | nil, err
+-- Creates a conversation handle from a pre-opened db cap (e.g. caps.conversations).
+-- The db_handle must support .execute(sql,...) and .query(sql,...).
+-- Applies the schema and returns the handle.
+-- time_fn: () -> integer — required, returns unix timestamp.
+M.from_db = function(db_handle, time_fn)
+	if not db_handle then return nil, "conversation.from_db: db_handle required" end
+	if not time_fn then
+		error("conversation.from_db: requires time_fn (function returning unix timestamp)", 2)
+	end
+	math.randomseed(time_fn())
+	local ok, serr = db_handle:execute(SCHEMA)
+	if not ok then return nil, serr end
+	return setmetatable({ _db = db_handle, _time_fn = time_fn }, db_mt)
+end
+
 return M

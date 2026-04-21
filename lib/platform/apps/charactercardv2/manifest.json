@@ -5,15 +5,16 @@
   "default_entry": "server",
   "caps": {
     "self":          { "type": "self",         "reason": "Provides the app its own identity (app_id) and access to its tarball entries and PNG metadata chunks." },
-    "kv":            { "type": "kv",           "required": false, "reason": "Stores and retrieves connection, generation, and prompt presets via presets.lua (list keys + active-preset keys per type)." },
+    "kv":            { "type": "kv",           "required": false, "reason": "Stores and retrieves connection, generation, and prompt presets via presets.lua (list keys + active-preset keys per type). Also persists the active session ID across restarts." },
     "time":          { "type": "time",         "reason": "Provides a wall-clock timestamp source available to all entries; used by the platform runtime for session bookkeeping." }
   },
   "entry": {
     "server": {
       "main": "server.lua",
       "caps": {
-        "server":    { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /chat, POST /chat-stream, and GET /count-tokens to the card's LLM methods." },
-        "llm":       { "type": "llm",          "key_name": "anthropic", "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply. key_name identifies the keyring entry (crescent/anthropic) used to resolve the API key." }
+        "server":         { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /chat, POST /chat-stream, GET /count-tokens, and all conversation management endpoints." },
+        "llm":            { "type": "llm",           "key_name": "anthropic", "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply. key_name identifies the keyring entry (crescent/anthropic) used to resolve the API key." },
+        "conversations":  { "type": "db",            "required": false, "reason": "SQLite-backed conversation tree (lib/conversation): stores sessions and branching message trees. Enables session management, message editing/forking, and swipe alternatives. Falls back to an in-memory database when absent." }
       }
     },
     "import": {
