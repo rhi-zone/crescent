@@ -14,7 +14,7 @@
       "caps": {
         "server":         { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /chat, POST /chat-stream, GET /count-tokens, and all conversation management endpoints." },
         "llm":            { "type": "llm",           "key_name": "anthropic", "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply. key_name identifies the keyring entry (crescent/anthropic) used to resolve the API key." },
-        "conversations":  { "type": "db",            "required": false, "reason": "SQLite-backed conversation tree (lib/conversation): stores sessions and branching message trees. Enables session management, message editing/forking, and swipe alternatives. Falls back to an in-memory database when absent." }
+        "conversations":  { "type": "conversation",   "required": false, "reason": "Conversation cap (lib/platform/caps/conversation): provides the full lib/conversation API (create_session, add_message, get_canonical_path, etc.) backed by a SQLite file. Falls back to an in-memory database when absent." }
       }
     },
     "import": {

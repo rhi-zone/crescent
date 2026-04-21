@@ -51,6 +51,18 @@ function M.env(...)
 		return require(name)
 	end
 
+	-- Sandbox-local package mock: lets vendored app code use the standard
+	-- `if not package.path:find(...)` boilerplate without erroring, and
+	-- lets require("bit") / require("jit") resolve to the safe globals.
+	-- The real package.path and loaders are never exposed.
+	if not merged.package then
+		merged.package = {
+			path    = "./?/init.lua;./?.lua",
+			loaded  = { bit = merged.bit, jit = merged.jit },
+			preload = {},
+		}
+	end
+
 	return merged
 end
 
@@ -185,7 +197,10 @@ M.stdlib = {
 		jit         = safe_jit,
 		bit         = safe_bit,
 	},
-	modules = {},
+	-- Vendored app code often does require("bit") / require("jit") rather
+	-- than using the globals directly. Allow these safe built-ins so that
+	-- pattern works without individual apps having to declare them.
+	modules = { "bit", "jit" },
 }
 
 -- pure: no I/O, no print, no coroutines — computation only.

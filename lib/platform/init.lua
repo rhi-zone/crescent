@@ -404,6 +404,14 @@ local CAP_FACTORIES = {
 			return require("lib.platform.caps.cli").cli_cap(context and context.app_args or {})
 		end,
 	},
+	conversation = {
+		mod = "lib.platform.caps.conversation",
+		build = function(decl, app, context, data_path)
+			return require("lib.platform.caps.conversation").conversation_cap({
+				path = data_path,
+			})
+		end,
+	},
 }
 
 -- ── Scope resolution ─────────────────────────────────────────────────────────
@@ -470,7 +478,7 @@ function M.make_caps(app, cap_declarations, operator_grants, context, factory_ov
 			else
 				-- Resolve data path for storage caps
 				local data_path
-				if cap_type == "kv" or cap_type == "db" or cap_type == "shared_db" then
+				if cap_type == "kv" or cap_type == "db" or cap_type == "shared_db" or cap_type == "conversation" then
 					data_path = resolve_data_path(name, decl.scope, context)
 				end
 

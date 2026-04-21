@@ -2,8 +2,9 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local T      = require("lib.test.assert")
-local server = require("lib.platform.apps.charactercardv2.server")
+local T            = require("lib.test.assert")
+local server       = require("lib.platform.apps.charactercardv2.server")
+local conv_cap_mod = require("lib.platform.caps.conversation")
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,12 +49,18 @@ local function make_mock_time(t)
 	}
 end
 
--- Make a minimal caps table with an in-memory conversation db.
+-- Make a minimal caps table with an in-memory conversation cap.
 local function make_caps(llm_response, llm_opts, extra_caps)
+	local mock_time = make_mock_time()
+	local conv_cap = assert(conv_cap_mod.conversation_cap({
+		path    = ":memory:",
+		time_fn = mock_time.now,
+	}))
 	local caps = {
-		llm  = make_mock_llm(llm_response or "assistant reply", llm_opts),
-		kv   = make_mock_kv(),
-		time = make_mock_time(),
+		llm           = make_mock_llm(llm_response or "assistant reply", llm_opts),
+		kv            = make_mock_kv(),
+		time          = mock_time,
+		conversations = conv_cap,
 	}
 	if extra_caps then
 		for k, v in pairs(extra_caps) do

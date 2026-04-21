@@ -18,7 +18,7 @@
 --   caps.kv.get(key) / caps.kv.set(key, val) — persistence (optional)
 --   caps.time.now() -> integer — Unix timestamp
 
-if not package.path:find("./?/init.lua", 1, true) then
+if package and not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
@@ -27,7 +27,6 @@ local card_mod = require("lib.formats.ccv2.card")
 local context_mod = require("lib.formats.ccv2.context")
 local macro_mod = require("lib.formats.ccv2.macro")
 local lorebook_mod = require("lib.formats.ccv2.lorebook")
-local conversation = require("lib.conversation")
 local presets_mod = require("lib.platform.apps.charactercardv2.presets")
 
 local M = {}
@@ -2155,11 +2154,21 @@ function M.create(caps, opts)
 	end
 
 	-- Open conversation database.
-	local db_path = opts.db_path or ":memory:"
 	local time_fn = caps.time and caps.time.now or os.time
-	local conv_db, db_err = conversation.open(db_path, time_fn)
-	if not conv_db then
-		error("card server: failed to open conversation db: " .. tostring(db_err))
+	local conv_db
+	if caps.conversations then
+		conv_db = caps.conversations
+	elseif opts.conv_db then
+		conv_db = opts.conv_db  -- for tests: pass a pre-built conversation handle
+	else
+		-- Fallback for tests without caps: use lib.conversation with in-memory db.
+		local conv_mod = require("lib.conversation")
+		local db_path = opts.db_path or ":memory:"
+		local db_err
+		conv_db, db_err = conv_mod.open(db_path, time_fn)
+		if not conv_db then
+			error("card server: failed to open conversation db: " .. tostring(db_err))
+		end
 	end
 	state.conv = conv_db
 

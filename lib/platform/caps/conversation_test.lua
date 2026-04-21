@@ -1,0 +1,77 @@
+if not package.path:find("./?/init.lua", 1, true) then
+	package.path = "./?/init.lua;" .. package.path
+end
+
+local T    = require("lib.test.assert")
+local M    = require("lib.platform.caps.conversation")
+
+T.describe("conversation_cap", function()
+	T.it("returns a cap with the conversation API", function()
+		local cap, revoke = M.conversation_cap({ path = ":memory:", time_fn = os.time })
+		T.ok(cap ~= nil)
+		T.ok(type(revoke) == "function")
+		T.ok(type(cap.create_session) == "function")
+		T.ok(type(cap.get_session) == "function")
+		T.ok(type(cap.list_sessions) == "function")
+		T.ok(type(cap.add_message) == "function")
+		T.ok(type(cap.get_message) == "function")
+		T.ok(type(cap.get_children) == "function")
+		T.ok(type(cap.get_canonical_path) == "function")
+		T.ok(type(cap.swipe_to) == "function")
+		T.ok(type(cap.delete_session) == "function")
+	end)
+
+	T.it("create_session and get_session roundtrip", function()
+		local cap = assert(M.conversation_cap({ path = ":memory:", time_fn = os.time }))
+		local session, err = cap:create_session("test_app")
+		T.ok(session ~= nil, "create_session failed: " .. tostring(err))
+		T.eq(session.app_id, "test_app")
+		T.ok(type(session.id) == "string")
+
+		local got, gerr = cap:get_session(session.id)
+		T.ok(got ~= nil, "get_session failed: " .. tostring(gerr))
+		T.eq(got.id, session.id)
+		T.eq(got.app_id, "test_app")
+	end)
+
+	T.it("list_sessions returns created sessions", function()
+		local cap = assert(M.conversation_cap({ path = ":memory:", time_fn = os.time }))
+		cap:create_session("myapp")
+		cap:create_session("myapp")
+		local sessions, err = cap:list_sessions("myapp")
+		T.ok(sessions ~= nil, "list_sessions failed: " .. tostring(err))
+		T.eq(#sessions, 2)
+	end)
+
+	T.it("add_message and get_canonical_path roundtrip", function()
+		local tick = 1000
+		local time_fn = function() tick = tick + 1; return tick end
+		local cap = assert(M.conversation_cap({ path = ":memory:", time_fn = time_fn }))
+		local session = assert(cap:create_session("app"))
+		local msg, err = cap:add_message(session.id, nil, "user", "hello")
+		T.ok(msg ~= nil, "add_message failed: " .. tostring(err))
+		T.eq(msg.role, "user")
+		T.eq(msg.content, "hello")
+
+		local path, perr = cap:get_canonical_path(session.id)
+		T.ok(path ~= nil, "get_canonical_path failed: " .. tostring(perr))
+		T.eq(#path, 1)
+		T.eq(path[1].content, "hello")
+	end)
+
+	T.it("revoke prevents further use", function()
+		local cap, revoke = M.conversation_cap({ path = ":memory:", time_fn = os.time })
+		assert(cap ~= nil)
+		revoke()
+		local ok, err = pcall(function() cap:create_session("app") end)
+		T.ok(not ok, "expected error after revoke")
+		T.ok(tostring(err):find("revoked") ~= nil, "error should mention revoked: " .. tostring(err))
+	end)
+
+	T.it("defaults to os.time when time_fn not provided", function()
+		local cap, err = M.conversation_cap({ path = ":memory:" })
+		T.ok(cap ~= nil, "expected cap: " .. tostring(err))
+		local session = assert(cap:create_session("app"))
+		T.ok(type(session.id) == "string")
+	end)
+end)

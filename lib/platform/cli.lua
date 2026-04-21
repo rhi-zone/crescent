@@ -325,7 +325,8 @@ local CAP_TYPE_MODULES = {
 	stdin       = "lib.platform.caps.stdin",
 	stdout      = "lib.platform.caps.stdout",
 	fs          = "lib.platform.caps.fs",
-	llm         = "lib.platform.caps.llm",
+	llm          = "lib.platform.caps.llm",
+	conversation = "lib.platform.caps.conversation",
 }
 
 local function build_cap(cap_name, decl, app, context, platform_opts)
@@ -471,6 +472,15 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		})
 	end
 
+	-- conversation: full lib.conversation API backed by a SQLite file.
+	if cap_type == "conversation" then
+		local data_path = decl.path and expand_home(decl.path) or platform._resolve_data_path(cap_name, decl.scope, context)
+		local parent_dir = data_path:match("^(.*)/[^/]+$")
+		if parent_dir then mkdir_p(parent_dir) end
+		local mod = require(CAP_TYPE_MODULES.conversation)
+		return mod.conversation_cap({ path = data_path })
+	end
+
 	return nil, "unknown cap type: " .. tostring(cap_type)
 end
 
@@ -534,9 +544,17 @@ end
 -- Module cache is local to this loader — no host pollution.
 local function make_dir_loader(app_dir, env)
 	local loaded = {}
+	-- Build the module prefix that corresponds to app_dir so that fully-qualified
+	-- sibling requires like require("lib.platform.apps.charactercardv2.presets")
+	-- resolve to "presets.lua" inside the app dir instead of a double path.
+	local dir_prefix = app_dir:gsub("^%./", ""):gsub("/", ".") .. "."
 	return function(modname)
 		if loaded[modname] then return function() return loaded[modname] end end
-		local relpath = modname:gsub("%.", "/")
+		local relname = modname
+		if relname:sub(1, #dir_prefix) == dir_prefix then
+			relname = relname:sub(#dir_prefix + 1)
+		end
+		local relpath = relname:gsub("%.", "/")
 		local candidates = {
 			relpath .. ".lua",
 			relpath .. "/init.lua",
@@ -1139,8 +1157,11 @@ if app._dir_mode then
 		-- If the result has a handler and we have an http_server cap, serve it.
 		if result.handler then
 			-- Find any http_server cap (may be named "server" or anything else).
+			-- LuaJIT (Lua 5.1) does not call __pairs, so iterate cap_declarations
+			-- and index through the proxy to find caps with a .serve method.
 			local serve_cap
-			for _, cap in pairs(caps) do
+			for name in pairs(cap_declarations) do
+				local cap = caps[name]
 				if type(cap) == "table" and cap.serve then
 					serve_cap = cap
 					break
