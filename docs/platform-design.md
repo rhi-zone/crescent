@@ -1066,6 +1066,21 @@ card app's internal concern — format conversion only repacks containers, it do
 interpret card data. The library shell can invoke the format conversion app for
 import (copy + repack + index) and export (repack to chosen container).
 
+**Admin app** — manages the daemon: key storage, app installs, and presenting cap
+grants to the operator. A single app with multiple entrypoints (`server` for the
+HTTP admin UI, `headless` for scripted/agent use). Uses regular caps with write
+access explicitly enabled — no special cap type:
+
+- `keyring` cap (write) — store and delete named secrets under `crescent/<name>`
+- `fs` cap pointing to the apps dir (write) — install and uninstall app bundles
+
+Grant management (modifying what caps other apps receive) stays in the daemon
+itself. An app that can modify other apps' grants could silently escalate its own
+privileges — there is no principled constraint that prevents this without the daemon
+retaining final authority. The admin app can surface grant options in its UI, but
+the daemon approves and executes every grant change. The admin app is the frontend;
+the daemon is the decision-maker.
+
 ### Vendoring format libraries
 
 Format knowledge (`lib/formats/ccv2/`) is vendored into app tarballs — not loaded

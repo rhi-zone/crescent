@@ -114,6 +114,10 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [ ] **`caps.llm` backward-compat path in server.lua** — uses `pcall(function() return caps.llm end)` to guard against the strict caps proxy. This is a smell: the pre-built-llm-cap pattern is only for tests. Consider removing the `caps.llm` path entirely and making tests use `caps.llm_api` with a mock http_client cap instead.
 - [ ] **http_client TLS — add to `lib/http/server_tls_test.lua`** — TLS client path added in `lib/platform/caps/http_client.lua` is not yet tested. Add integration test: start a TLS server, make a TLS client request, verify round-trip. The existing `server_tls_test.lua` tests the server side; extend it to also test the client path.
 
+## admin app
+
+- [ ] **Admin app** — single app (`lib/platform/apps/admin/`) with `server` (HTTP UI) and `headless` (agent/script) entrypoints. Caps: `keyring` (write) for secret management, `fs` (write, apps dir) for install/uninstall. Grant management stays in the daemon (an app that can modify other apps' grants could silently escalate its own privileges). Design in `docs/platform-design.md` under "First-party apps".
+
 ## platform daemon — implementation track
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
