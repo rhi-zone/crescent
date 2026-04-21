@@ -437,15 +437,23 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		local api_key
 
 		if key_name then
-			-- Attempt keyring lookup; proceed with nil key if keyring unavailable.
 			local ok_kr, keyring = pcall(require, "lib.keyring")
 			if ok_kr and keyring then
-				local kr_key, _kr_err = keyring.get("crescent/" .. key_name)
-				api_key = kr_key  -- nil if not found; provider will reject on live calls
+				local kr_key = keyring.get("crescent/" .. key_name)
+				if kr_key then
+					api_key = kr_key
+				else
+					-- Key not in keyring yet; try env var and auto-enroll it.
+					local env_key = resolve_llm_api_key_from_env()
+					if env_key then
+						keyring.set("crescent/" .. key_name, env_key)
+						api_key = env_key
+					end
+				end
 			end
 		end
 
-		-- Fall back to the well-known env vars if keyring didn't yield a key.
+		-- Final fallback: env var (when keyring is unavailable, e.g. no libsecret).
 		if not api_key then
 			api_key = resolve_llm_api_key_from_env()
 		end
@@ -803,6 +811,32 @@ local function cmd_caps(args)
 	idx:close()
 end
 
+-- ── set-key subcommand ────────────────────────────────────────────────────
+-- Usage: luajit lib/platform/cli.lua set-key <name> <value>
+-- Stores an API key in the keyring as "crescent/<name>".
+-- Example: luajit lib/platform/cli.lua set-key anthropic sk-ant-...
+
+local function cmd_set_key(args)
+	local key_name  = args[2]
+	local key_value = args[3]
+	if not key_name or not key_value then
+		io.stderr:write("usage: luajit lib/platform/cli.lua set-key <name> <value>\n")
+		io.stderr:write("example: luajit lib/platform/cli.lua set-key anthropic sk-ant-...\n")
+		os.exit(1)
+	end
+	local ok_kr, keyring = pcall(require, "lib.keyring")
+	if not ok_kr then
+		io.stderr:write("error: keyring unavailable: " .. tostring(keyring) .. "\n")
+		os.exit(1)
+	end
+	local ok, err = keyring.set("crescent/" .. key_name, key_value)
+	if not ok then
+		io.stderr:write("error storing key: " .. tostring(err) .. "\n")
+		os.exit(1)
+	end
+	io.write("stored: crescent/" .. key_name .. "\n")
+end
+
 -- ── Import subcommand ──────────────────────────────────────────────────────
 
 local function cmd_import(args)
@@ -908,6 +942,9 @@ elseif arg[1] == "list" then
 elseif arg[1] == "caps" then
 	cmd_caps(arg)
 	return
+elseif arg[1] == "set-key" then
+	cmd_set_key(arg)
+	return
 end
 
 local opts = parse_args(arg)
@@ -1001,13 +1038,17 @@ end
 
 -- Resolve grants.
 local grants
+local has_saved_grants
 if opts.reset_grants then
 	grants = {}
+	has_saved_grants = false
 else
-	grants = load_grants(data_dir, app_id) or {}
+	local saved = load_grants(data_dir, app_id)
+	has_saved_grants = saved ~= nil
+	grants = saved or {}
 end
 
--- Apply --grant and --deny flags (ephemeral, not persisted).
+-- Apply --grant and --deny flags.
 for _, name in ipairs(opts.grant_caps) do
 	if not cap_declarations[name] then
 		io.stderr:write("warning: --grant=" .. name .. " does not match any declared cap\n")
@@ -1021,7 +1062,7 @@ for _, name in ipairs(opts.deny_caps) do
 	end
 end
 
--- Check for ungrantable caps (not yet decided by operator).
+-- Check for caps with no grant decision yet.
 local missing = {}
 for name in pairs(cap_declarations) do
 	if grants[name] == nil then
@@ -1030,15 +1071,25 @@ for name in pairs(cap_declarations) do
 end
 
 if #missing > 0 then
-	io.stderr:write("capabilities not yet granted or denied for " .. app_id .. ":\n")
-	for _, name in ipairs(missing) do
-		local decl = cap_declarations[name]
-		local cap_type = decl.type or name
-		local req = decl.required ~= false and "required" or "optional"
-		io.stderr:write("  " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
+	-- First run (no saved grants, no --grant flags): auto-grant all declared caps
+	-- so the developer doesn't have to enumerate every cap manually.
+	if not has_saved_grants and #opts.grant_caps == 0 then
+		io.stderr:write("no grants on record for " .. app_id
+			.. "; auto-granting all declared caps (first run)\n")
+		for _, name in ipairs(missing) do
+			grants[name] = true
+		end
+	else
+		io.stderr:write("capabilities not yet granted or denied for " .. app_id .. ":\n")
+		for _, name in ipairs(missing) do
+			local decl = cap_declarations[name]
+			local cap_type = decl.type or name
+			local req = decl.required ~= false and "required" or "optional"
+			io.stderr:write("  " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
+		end
+		io.stderr:write("\ngrant individually with --grant=NAME or deny with --deny=NAME\n")
+		os.exit(1)
 	end
-	io.stderr:write("\ngrant individually with --grant=NAME or deny with --deny=NAME\n")
-	os.exit(1)
 end
 
 -- Construct capabilities.
@@ -1055,6 +1106,9 @@ if not caps then
 	os.exit(1)
 end
 local revoke_fns = revoke_fns_or_err
+
+-- Persist grant decisions so future runs don't need --grant flags.
+save_grants(data_dir, app_id, grants)
 
 -- Run the entrypoint.
 if app._dir_mode then
