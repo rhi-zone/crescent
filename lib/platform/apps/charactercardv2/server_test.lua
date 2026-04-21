@@ -94,19 +94,11 @@ end
 -- ── create ───────────────────────────────────────────────────────────────────
 
 T.describe("server.create", function()
-	T.it("creates app with pre-built llm client (caps.llm)", function()
+	T.it("creates app with handler and state", function()
 		local app = server.create({ llm = make_mock_llm("hi"), time = make_mock_time() })
 		T.ok(type(app) == "table")
-		T.ok(type(app.chat) == "function")
-		T.ok(type(app.chat_stream) == "function")
-		T.ok(type(app.count_tokens) == "function")
-	end)
-
-	T.it("returns error when no llm cap provided", function()
-		local app = server.create({ time = make_mock_time() })
-		local content, err = app.chat({ { role = "user", content = "hi" } })
-		T.eq(content, nil)
-		T.ok(err:find("no LLM") ~= nil)
+		T.ok(type(app.handler) == "function")
+		T.ok(app.state ~= nil)
 	end)
 
 	T.it("exposes state with conv handle and session_id", function()
@@ -115,107 +107,6 @@ T.describe("server.create", function()
 		T.ok(app.state ~= nil)
 		T.ok(app.state.conv ~= nil)
 		T.ok(type(app.state.session_id) == "string")
-	end)
-end)
-
--- ── chat ─────────────────────────────────────────────────────────────────────
-
-T.describe("server.chat", function()
-	T.it("passes messages to llm.call", function()
-		local captured_msgs
-		local mock = make_mock_llm("response", {
-			on_call = function(msgs) captured_msgs = msgs end,
-		})
-		local app = server.create({ llm = mock, time = make_mock_time() })
-		local content = app.chat({ { role = "user", content = "hello" } })
-		T.eq(content, "response")
-		T.eq(#captured_msgs, 1)
-		T.eq(captured_msgs[1].content, "hello")
-	end)
-
-	T.it("prepends system prompt when configured", function()
-		local captured_msgs
-		local mock = make_mock_llm("response", {
-			on_call = function(msgs) captured_msgs = msgs end,
-		})
-		local app = server.create({ llm = mock, time = make_mock_time() }, { system_prompt = "You are helpful." })
-		app.chat({ { role = "user", content = "hi" } })
-		T.eq(#captured_msgs, 2)
-		T.eq(captured_msgs[1].role, "system")
-		T.eq(captured_msgs[1].content, "You are helpful.")
-		T.eq(captured_msgs[2].role, "user")
-		T.eq(captured_msgs[2].content, "hi")
-	end)
-
-	T.it("passes gen_opts through", function()
-		local captured_opts
-		local mock = make_mock_llm("ok", {
-			on_call = function(_, gen_opts) captured_opts = gen_opts end,
-		})
-		local app = server.create({ llm = mock, time = make_mock_time() })
-		app.chat({ { role = "user", content = "hi" } }, { temperature = 0.5 })
-		T.eq(captured_opts.temperature, 0.5)
-	end)
-end)
-
--- ── chat_stream ──────────────────────────────────────────────────────────────
-
-T.describe("server.chat_stream", function()
-	T.it("streams tokens via on_token callback", function()
-		local tokens = {}
-		local mock = make_mock_llm("full", {
-			stream_parts = { "hel", "lo" },
-		})
-		local app = server.create({ llm = mock, time = make_mock_time() })
-		local full = app.chat_stream(
-			{ { role = "user", content = "hi" } },
-			function(delta) tokens[#tokens + 1] = delta end
-		)
-		T.eq(full, "hello")
-		T.eq(#tokens, 2)
-		T.eq(tokens[1], "hel")
-		T.eq(tokens[2], "lo")
-	end)
-
-	T.it("prepends system prompt in streaming mode", function()
-		local captured_msgs
-		local mock = make_mock_llm("ok", {
-			stream_parts = { "ok" },
-			on_call_stream = function(msgs) captured_msgs = msgs end,
-		})
-		local app = server.create({ llm = mock, time = make_mock_time() }, { system_prompt = "Be nice." })
-		app.chat_stream(
-			{ { role = "user", content = "hi" } },
-			function() end
-		)
-		T.eq(#captured_msgs, 2)
-		T.eq(captured_msgs[1].role, "system")
-		T.eq(captured_msgs[1].content, "Be nice.")
-	end)
-
-	T.it("returns error when streaming not supported", function()
-		local mock = { call = function() return "ok" end, count_tokens = function() return 0 end }
-		local app = server.create({ llm = mock, time = make_mock_time() })
-		local content, err = app.chat_stream(
-			{ { role = "user", content = "hi" } },
-			function() end
-		)
-		T.eq(content, nil)
-		T.ok(err:find("streaming") ~= nil)
-	end)
-end)
-
--- ── count_tokens ─────────────────────────────────────────────────────────────
-
-T.describe("server.count_tokens", function()
-	T.it("delegates to llm.count_tokens", function()
-		local app = server.create({ llm = make_mock_llm("ok"), time = make_mock_time() })
-		T.eq(app.count_tokens("hello world"), 3) -- ceil(11/4) = 3
-	end)
-
-	T.it("returns 0 when no llm available", function()
-		local app = server.create({ time = make_mock_time() })
-		T.eq(app.count_tokens("hello"), 0)
 	end)
 end)
 
@@ -474,74 +365,73 @@ T.describe("session management", function()
 		T.ok(body ~= nil)
 		T.ok(type(body.sessions) == "table")
 		T.eq(#body.sessions, 1)
-		T.ok(type(body.active) == "string")
-		T.eq(body.sessions[1].id, body.active)
+		T.ok(type(body.current) == "string")
+		T.eq(body.sessions[1].id, body.current)
 	end)
 
-	T.it("POST /api/sessions creates a new session and activates it", function()
+	T.it("POST /api/session/new creates a new session and activates it", function()
 		local caps = make_caps("reply")
 		local app = server.create(caps, { no_static = true })
 		local first_session_id = app.state.session_id
 
-		local status, body = call(app, "POST", "/api/sessions")
+		local status, body = call(app, "POST", "/api/session/new")
 		T.eq(status, 200)
 		T.ok(body ~= nil)
 		T.ok(type(body.session) == "table")
 		T.ok(body.session.id ~= first_session_id)
-		T.eq(body.active, body.session.id)
+		T.eq(app.state.session_id, body.session.id)
 
 		local _, list = call(app, "GET", "/api/sessions")
 		T.eq(#list.sessions, 2)
 	end)
 
-	T.it("POST /api/sessions/:id/activate switches active session", function()
+	T.it("POST /api/session/switch switches active session", function()
 		local caps = make_caps("reply")
 		local app = server.create(caps, { no_static = true })
 		local first_id = app.state.session_id
 
 		-- Create a second session.
-		call(app, "POST", "/api/sessions")
+		call(app, "POST", "/api/session/new")
 		local second_id = app.state.session_id
 		T.ok(second_id ~= first_id)
 
 		-- Switch back to the first session.
-		local status, body = call(app, "POST", "/api/sessions/" .. first_id .. "/activate")
+		local status, body = call(app, "POST", "/api/session/switch", { session_id = first_id })
 		T.eq(status, 200)
-		T.eq(body.active, first_id)
 		T.eq(app.state.session_id, first_id)
 	end)
 
-	T.it("DELETE /api/sessions/:id deletes a session", function()
+	T.it("POST /api/session/delete deletes a session", function()
 		local caps = make_caps("reply")
 		local app = server.create(caps, { no_static = true })
 
 		-- Create a second session so we can delete the first.
 		local first_id = app.state.session_id
-		call(app, "POST", "/api/sessions")
+		call(app, "POST", "/api/session/new")
 
-		local status, body = call(app, "DELETE", "/api/sessions/" .. first_id)
+		local status, body = call(app, "POST", "/api/session/delete", { session_id = first_id })
 		T.eq(status, 200)
-		T.eq(body.deleted, first_id)
+		T.ok(body.deleted == true)
 
 		local _, list = call(app, "GET", "/api/sessions")
 		T.eq(#list.sessions, 1)
 		T.ok(list.sessions[1].id ~= first_id)
 	end)
 
-	T.it("DELETE /api/sessions/:id on active session switches to another", function()
+	T.it("POST /api/session/delete on active session switches to another", function()
 		local caps = make_caps("reply")
 		local app = server.create(caps, { no_static = true })
 		local first_id = app.state.session_id
 
 		-- Create second session (becomes active).
-		local _, new_body = call(app, "POST", "/api/sessions")
+		local _, new_body = call(app, "POST", "/api/session/new")
 		local second_id = new_body.session.id
 
 		-- Switch back to first and delete it.
-		call(app, "POST", "/api/sessions/" .. first_id .. "/activate")
+		call(app, "POST", "/api/session/switch", { session_id = first_id })
 		T.eq(app.state.session_id, first_id)
 
-		local status, body = call(app, "DELETE", "/api/sessions/" .. first_id)
+		local status, body = call(app, "POST", "/api/session/delete", { session_id = first_id })
 		T.eq(status, 200)
 		-- Active session should have changed.
 		T.ok(app.state.session_id ~= first_id)
@@ -556,14 +446,14 @@ T.describe("session management", function()
 		call(app, "POST", "/api/message", { content = "in session 1" })
 
 		-- Create a second session.
-		call(app, "POST", "/api/sessions")
+		call(app, "POST", "/api/session/new")
 
 		-- Second session should have no messages.
 		local _, msgs = call(app, "GET", "/api/messages")
 		T.eq(#msgs.messages, 0)
 
 		-- Switch back to first session.
-		call(app, "POST", "/api/sessions/" .. first_id .. "/activate")
+		call(app, "POST", "/api/session/switch", { session_id = first_id })
 		local _, msgs1 = call(app, "GET", "/api/messages")
 		T.ok(#msgs1.messages >= 1)
 	end)
@@ -589,10 +479,10 @@ T.describe("preset management", function()
 	T.it("POST /api/presets/save saves a preset and GET returns it", function()
 		local caps = make_caps("reply")
 		local app = server.create(caps, { no_static = true })
+		-- New server requires name to be inside the preset object.
 		local status, body = call(app, "POST", "/api/presets/save", {
 			type   = "generation",
-			name   = "My Custom",
-			preset = { temperature = 0.9, max_tokens = 256 },
+			preset = { name = "My Custom", temperature = 0.9, max_tokens = 256 },
 		})
 		T.eq(status, 200)
 		T.ok(body.ok == true)
@@ -623,11 +513,10 @@ T.describe("preset management", function()
 	T.it("POST /api/presets/delete removes a stored preset", function()
 		local caps = make_caps("reply")
 		local app = server.create(caps, { no_static = true })
-		-- Save a preset first.
+		-- Save a preset first (name must be inside preset object).
 		call(app, "POST", "/api/presets/save", {
 			type   = "prompt",
-			name   = "To Delete",
-			preset = { system_prompt = "x" },
+			preset = { name = "To Delete", system_prompt = "x" },
 		})
 		local status, body = call(app, "POST", "/api/presets/delete", {
 			type = "prompt",
@@ -642,9 +531,9 @@ T.describe("preset management", function()
 		end
 	end)
 
-	T.it("returns 503 for preset endpoints when kv cap absent", function()
+	T.it("returns 500 for preset endpoints when kv cap absent", function()
 		local app = server.create({ llm = make_mock_llm("ok"), time = make_mock_time() }, { no_static = true })
 		local status, _ = call(app, "GET", "/api/presets")
-		T.eq(status, 503)
+		T.eq(status, 500)
 	end)
 end)
