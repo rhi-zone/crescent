@@ -1,3 +1,5 @@
+Read `docs/typechecker-v2.md` and `docs/type-system.md` before making any changes here.
+
 # lib/type/static — Typechecker
 
 Rules specific to working on the static typechecker. The project-wide rules in
