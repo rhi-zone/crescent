@@ -440,7 +440,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 			-- Attempt keyring lookup; proceed with nil key if keyring unavailable.
 			local ok_kr, keyring = pcall(require, "lib.keyring")
 			if ok_kr and keyring then
-				local kr_key, _kr_err = keyring.get("crescent/llm/" .. key_name)
+				local kr_key, _kr_err = keyring.get("crescent/" .. key_name)
 				api_key = kr_key  -- nil if not found; provider will reject on live calls
 			end
 		end

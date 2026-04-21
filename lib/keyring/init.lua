@@ -12,7 +12,7 @@
 --   keyring.get(service)       -> value | nil, err
 --   keyring.delete(service)    -> true | nil, err
 --
--- Service name convention: "crescent/llm/<provider>"
+-- Service name convention: "crescent/<name>"
 -- M._tier: "libsecret" | "keychain" | "file" | nil (no tier loaded)
 
 if package and not package.path:find("./?/init.lua", 1, true) then

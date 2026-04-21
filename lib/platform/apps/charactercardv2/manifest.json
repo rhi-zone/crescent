@@ -13,7 +13,7 @@
       "main": "server.lua",
       "caps": {
         "server":    { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /chat, POST /chat-stream, and GET /count-tokens to the card's LLM methods." },
-        "llm":       { "type": "llm",          "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply." }
+        "llm":       { "type": "llm",          "key_name": "anthropic", "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply. key_name identifies the keyring entry (crescent/anthropic) used to resolve the API key." }
       }
     },
     "import": {
