@@ -24,10 +24,8 @@ local M = {}
 function M.create(caps, opts)
 	opts = opts or {}
 
-	-- Use pcall because the strict caps proxy errors on undeclared cap names.
-	local ok_llm, llm_cap = pcall(function() return caps.llm end)
 	--: LlmCap | nil
-	local llm = (ok_llm and llm_cap) or nil
+	local llm = caps.llm
 
 	-- ── Helpers ──────────────────────────────────────────────────────────────
 
