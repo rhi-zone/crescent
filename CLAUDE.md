@@ -103,7 +103,6 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Abstraction has a cost.** Wrappers, layers, and indirection reduce hackability and readability. Every abstraction needs justification beyond "it seems cleaner." A direct implementation that is longer is often better than an indirect one that is shorter.
 
-**Platform apps are cheap — prefer a new app over a new abstraction.** Specifically for `lib/platform/` apps (Lua packages with `manifest.json` + caps): when a new data layout, format variant, legacy compat target, or use case appears, the default answer is a new app, not a pluggable-backend interface inside an existing app. Apps install, update, fail, and delete independently; shared code goes in normal vendored libs. "One universal app with adapters" forces the core to design around every supported variant and anchors canonical apps to whatever legacy they compat-with. Canonical apps should evolve freely; legacy/compat apps should be deletable. Full rationale in `docs/platform-design.md` under "Apps are cheap." This rule applies to platform apps specifically — at the `lib/` package level the usual composability rules apply, so don't create gratuitous package splits there.
 
 **No gradual migrations.** When a design decision changes the convention (e.g. "libraries must not use `os`/`io` globals, accept injected functions instead"), apply it to the entire codebase in one pass. A half-migrated codebase is context poisoning: every future session encounters both the old and new pattern, wastes time figuring out which is canonical, and risks propagating the wrong one. If the migration is too large to do at once, that's a signal to reconsider the design, not to spread the migration across sessions.
 
@@ -111,7 +110,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Capability-based I/O.** Libraries must not reach for `os`, `io`, or other global side-effect modules directly. Instead, accept I/O functions as parameters (constructor opts, function args). This is the foundation of sandbox safety: if a library grabs `os.time()` from a global, it can't run in a capability sandbox. If it accepts a `time_fn` parameter, the caller decides what time source to provide — or whether to provide one at all. This applies to ALL libraries, not just platform app code.
 
-**Caps-first, everywhere.** Every library that performs I/O — HTTP, filesystem, crypto, time, randomness — must accept its dependencies as injected caps, not import them from globals. "This runs outside the sandbox so it's fine" is never a justification for skipping injection. A library that hardcodes `require("lib.https.client")` can't be tested in isolation, can't be sandboxed, and violates the crescent model. The `lib/ai/` providers using `lib.https.client` directly is a known gap to fix, not a pattern to follow. When building new libraries, inject; when touching existing ones, migrate.
+**Caps-first, everywhere.** Every library that performs I/O must accept its dependencies as injected caps, not import them from globals. "This runs outside the sandbox so it's fine" is never a justification for skipping injection.
 
 ## Design Principles
 
@@ -123,7 +122,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Fast.** Performance at all costs. LuaJIT is fast — don't waste it. Avoid allocations in hot paths, prefer tables over closures, measure before and after.
 
-**Tooling performance bar: bun (general), tsgo for the typechecker.** The test runner, package manager, and CLI tooling must be competitive with bun in wall-clock time. The typechecker specifically must be competitive with `@typescript/native-preview` (tsgo / ts7 — the Go rewrite of tsc). See `lib/type/static/CLAUDE.md` for benchmark methodology.
+**Tooling performance bar: bun (general), tsgo for the typechecker.**
 
 **LuaJIT-first, not LuaJIT-only.** Target LuaJIT but don't gratuitously break Lua 5.2+ compatibility. Pure Lua code shouldn't depend on LuaJIT quirks. FFI and `bit.*` are inherently LuaJIT-only, but everything else should work on standard Lua if it doesn't sacrifice performance.
 
@@ -135,9 +134,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Workflow
 
-**Run the typechecker on files you write or modify.** `luajit lib/type/static/cli.lua <file>...` — do this before committing. Annotations use `--:` (type on preceding line) and `--::` (type declarations), never EmmyLua (`---@param`, `---@return`, `--[[@param]]`, `fun()`). Function types use `() -> T` syntax, not `fun(): T`. Use `{ [K]: V }` for map types, not `table<K, V>`. Use `unknown` for dynamic/untyped data (forces narrowing), never `any` (silently bypasses checking).
-
-**Declaration-only files use the `_types.lua` suffix** (e.g. `lib/web/js_types.lua`). These contain only `--::` type annotations — no runtime code — and exist as companions to large modules where inlining thousands of lines of annotations would slow down LuaJIT's lexer. Use `--:: require "lib.web.js_types"` to load them in the typechecker; the runtime ignores it. Do not use `.d.lua` suffix — the dot is incompatible with Lua's dot-to-slash require path convention.
+**Run the typechecker on files you write or modify.** `luajit lib/type/static/cli.lua <file>...` — do this before committing. See `lib/type/static/CLAUDE.md` for annotation syntax and type system rules.
 
 **Minimize file churn.** When editing a file, read it once, plan all changes, and apply them in one pass.
 
@@ -183,7 +180,7 @@ Scope is the library or component name (e.g., `feat(http): add chunked transfer 
 ## Performance Work
 
 When doing performance optimization:
-- **Benchmark before and after.** Use `docs/perf/v2_parse.lua` for parser/lexer throughput.
+- **Benchmark before and after.**
 - **Commit experiments before discarding.** Even rejected optimizations need a commit hash so results are reproducible. Use a branch or revert if needed — never throw away measured code.
 - **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Include raw benchmark output. Most recent entries first.
 - **Include**: file sizes, times, throughput (MB/s), allocation (KB/parse), and speedup ratios.
@@ -233,10 +230,8 @@ wrong action plus cleanup.
 ## Pause before guessing in unfamiliar territory
 
 If you can't state in one sentence the semantic property your change must
-satisfy, you're guessing — say so and ask, don't ship. Especially: writing
-another syntactic variation of what you just wrote (different return type,
-different alias shape) is the loop signal. See `docs/ffi-types.md` for an
-example that burned ~25 attempts.
+satisfy, you're guessing — say so and ask, don't ship. Writing another
+syntactic variation of what you just wrote is the loop signal.
 
 ## Negative Constraints
 

@@ -914,6 +914,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [ ] `lib/https/serverx.lua`: non-functional (FIXME placeholders, wrong imports) — needs full rewrite
 
 #### ai (`lib/ai/`)
+- [ ] `lib/ai/` providers hardcode `require("lib.https.client")` — violates caps-first; should accept an http client as a parameter
 - [ ] `lib/ai/init.lua`: no retry/backoff on transient errors (429, 5xx)
 - [ ] `lib/ai/providers/anthropic.lua`: tool call streaming only emits on content_block_stop — no partial tool call deltas
 - [ ] `lib/ai/providers/openai.lua`: only flushes first accumulated tool call on finish — multi-tool-call streaming incomplete
