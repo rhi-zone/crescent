@@ -325,6 +325,85 @@ local CAP_FACTORIES = {
 		mod = "lib.platform.caps.time",
 		build = function() return require("lib.platform.caps.time").time_cap() end,
 	},
+	llm = {
+		mod = "lib.platform.caps.llm",
+		build = function(decl)
+			local api_key
+			local key_name = decl.key_name
+			if key_name then
+				local ok_kr, keyring = pcall(require, "lib.keyring")
+				if ok_kr and keyring then
+					local kr_key = keyring.get("crescent/" .. key_name)
+					if kr_key then
+						api_key = kr_key
+					else
+						-- Auto-enroll: store env var to keyring on first use.
+						local env_key = os.getenv("LLM_API_KEY")
+							or os.getenv("ANTHROPIC_API_KEY")
+							or os.getenv("OPENAI_API_KEY")
+						if env_key then
+							keyring.set("crescent/" .. key_name, env_key)
+							api_key = env_key
+						end
+					end
+				end
+			end
+			if not api_key then
+				api_key = os.getenv("LLM_API_KEY")
+					or os.getenv("ANTHROPIC_API_KEY")
+					or os.getenv("OPENAI_API_KEY")
+			end
+			return require("lib.platform.caps.llm").llm_cap({
+				provider = decl.provider or "openai",
+				key      = api_key,
+				model    = decl.model,
+				base_url = decl.base_url,
+			})
+		end,
+	},
+	fs = {
+		mod = "lib.platform.caps.fs",
+		build = function(decl)
+			local root = decl.root or error("platform: fs cap requires 'root' in declaration")
+			local expand_home_local = function(p)
+				if p:sub(1, 1) == "~" then
+					return (os.getenv("HOME") or "") .. p:sub(2)
+				end
+				return p
+			end
+			return require("lib.platform.caps.fs").fs_cap({
+				root     = expand_home_local(root),
+				readonly = decl.readonly,
+			})
+		end,
+	},
+	stdin = {
+		mod = "lib.platform.caps.stdin",
+		build = function() return require("lib.platform.caps.stdin").stdin_cap() end,
+	},
+	stdout = {
+		mod = "lib.platform.caps.stdout",
+		build = function() return require("lib.platform.caps.stdout").stdout_cap() end,
+	},
+	stderr = {
+		build = function()
+			local revoked = false
+			local cap = {
+				write = function(s)
+					if revoked then return nil, "capability revoked" end
+					io.stderr:write(s)
+					return true
+				end,
+			}
+			return cap, function() revoked = true end
+		end,
+	},
+	cli = {
+		mod = "lib.platform.caps.cli",
+		build = function(decl, _, context)
+			return require("lib.platform.caps.cli").cli_cap(context and context.app_args or {})
+		end,
+	},
 }
 
 -- ── Scope resolution ─────────────────────────────────────────────────────────
