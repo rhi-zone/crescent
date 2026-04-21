@@ -74,9 +74,7 @@ cd docs && bun dev           # Local docs
 
 **Do the work properly.** Don't leave workarounds or hacks undocumented. When asked to analyze X, actually read X — don't synthesize from conversation.
 
-**Every claim must explain why it is or isn't complete.** Don't state things as settled without also stating what's missing, what assumptions you're making, or what could be wrong. If a design has gaps, say so in the same breath. If a list could have more entries, say so. Unsupported claims are the default failure mode — counteract it by always qualifying.
-
-**Never answer confidently.** The answer is probably wrong. Default to uncertainty. State what you think and why, but frame it as a hypothesis, not a conclusion. The user will confirm or correct — that's the right flow. Confident wrong answers waste time and erode trust; tentative wrong answers are cheap to fix.
+**Default to uncertainty.** State what you think and why, but frame it as a hypothesis. Confident wrong answers waste time; tentative wrong answers are cheap to fix. If a design has gaps, say so in the same breath — unsupported claims are the default failure mode.
 
 ## Library Conventions
 
@@ -149,16 +147,6 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 ~/git/rhizone/normalize/target/debug/normalize view <dir>     # directory structure
 ```
 
-**On typechecker topics, read `lib/type/static/CLAUDE.md` and `docs/type-system.md` in full before doing anything.** Design decisions, solver rules, fuzz suite design, and performance bar are all there. Don't improvise from first principles.
-
-**Never assume a typechecker feature is missing without checking.** The typechecker has significant generic machinery: `$Require<T>`, `$Values<T>`, `$IpairsValues<T>`, match types, intrinsics, etc. Before saying "X isn't supported" or "we'd need generics for this," search the typechecker source and docs. "It'll stay ugly until X lands" is a claim that X doesn't exist — only say it after verifying X is actually absent.
-
-**Generic function bodies ARE checked at definition time via skolem variables** (`skolemize_fn` in `constrain.lua`). Skolem vars have FLAG_SKOLEM and cannot be bound by the solver, so the body check is sound. Call sites instantiate fresh vars via `env_mod.instantiate` for let-polymorphism.
-
-**`--:: template` opts out of definition-time body checking.** Template functions (`--:: template` on the preceding line) skip the body check entirely at definition and re-check the body at each call site with the concrete argument types (`gen_function` with `concrete_param_tids`). This is the escape hatch for functions like `apply(m)` whose body is only well-typed when `m` has a specific shape known at the call site. Templates have a plain function type with free TAG_VAR params so they can be called; the re-check at each call site catches type errors against the concrete argument shape.
-
-**`any` is never acceptable in type annotations.** Write proper types. `unknown` is the correct type for truly dynamic data (forces callers to narrow). `any` opts out of checking entirely and is always wrong. If you find yourself reaching for `any`, the real answer is either generics, `unknown`, or a missing type definition.
-
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
 **When verifying a newly built library, run only that library's test file — not the full suite.** Use `luajit lib/test/cli.lua lib/mylib/` or `luajit lib/test/cli.lua lib/mylib/mylib_test.lua` directly. The test runner accepts both file paths and directories. Only run the full suite (`luajit lib/test/cli.lua`) when checking global regressions.
@@ -200,24 +188,7 @@ When doing performance optimization:
 - **Record results in `docs/perf/log.md`** with the commit hash of both baseline and optimization. Include raw benchmark output. Most recent entries first.
 - **Include**: file sizes, times, throughput (MB/s), allocation (KB/parse), and speedup ratios.
 
-**LuaJIT benchmark traps:**
-- **Closure identity:** LuaJIT compiles fold/map/filter inner loops as traces guarded on a specific closure *object*. Two syntactically identical `function(x) ... end` expressions at different source locations are different prototypes → different objects → the second misses the guard every iteration → interpreter fallback → fake 8–11x overhead. Always hoist closures to module-level variables and reuse them across bench cases.
-- **Constant folding:** benchmarks that pass the same literal arguments every iteration let JIT fold the entire loop away. Verify results are non-trivial (use a sink that accumulates into an upvalue).
-- **JIT speedup ratio:** if JIT is only 1.0–1.4x faster than interpreter on a hot loop, the bottleneck is C function calls (str_byte, table ops), not Lua bytecode. Further Lua-level optimisation won't help — consider FFI or algorithmic change.
 
-## Sandboxing
-
-Crescent can safely host untrusted user scripts via standard Lua env-based sandboxing. The key insight: **`ffi` is `require("ffi")` — it's a module, not a global.** If the sandbox environment omits `require` (or uses a whitelist-based `require`), untrusted code cannot reach `ffi` and cannot escape the sandbox.
-
-This means multi-user worlds with player-authored scripts are viable in pure crescent — no modified VM needed. The sandbox granularity is just a matter of what environment you hand each script.
-
-Do not assume LuaJIT sandboxing is impossible. The common concern (FFI escape) is addressed by controlling `require`.
-
-**`ffi` is never a grantable capability.** It is not a capability — it is the absence of a sandbox. Granting `ffi` to any untrusted app code is a full sandbox escape (arbitrary memory access, arbitrary C calls). No whitelist entry, no cap declaration, no opt-in should ever expose `ffi` to sandboxed code.
-
-**All modules loaded inside the sandbox must run in the sandbox env.** Tarball modules and whitelisted pure-Lua platform modules must be loaded via `load(source, "t", env)` — the sandbox require finds source from the tarball or disk (`package.searchpath`) and never calls the host `require`. `ffi` is never on any whitelist. FFI-backed functionality is not requireable inside the sandbox at all — it must go through the cap system: declared in the app manifest, explicitly granted by the platform, injected as `caps.*` globals. An app uses `caps.compress(data)`, not `require("lib.compress")`. FFI capability grants are visible security decisions, not silent module access.
-
-**Platform caps are system resources, not application-domain logic.** When a sandboxed app can't `require` a library because that library uses FFI, the answer is not to wrap that library as a platform cap. Ask what system resource the app actually needs — usually an existing cap like `db` — and implement the domain logic in pure Lua within the app. Example: an app that needs conversation management should use `caps.db` (raw SQLite cap) and bundle a pure-Lua conversation layer, not get a `conversation` cap that lifts application logic into the platform. Caps that wrap application logic are a sign you're solving the wrong problem.
 
 ## Lua Gotchas
 
