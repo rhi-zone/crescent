@@ -53,9 +53,34 @@ local function param_names_of(fn)
 	return params
 end
 
+-- serialize_value(value) -> string
+-- Recursively serializes a value to a human-readable string.
+-- Tables: [v1, v2, ...] for arrays, {k=v, ...} for maps.
+-- Other: tostring.
+--: (unknown) -> string
+local function serialize_value(value)
+	if type(value) ~= "table" then
+		return tostring(value)
+	end
+	local n = #value
+	if n > 0 then
+		local parts = {}
+		for i = 1, n do
+			parts[i] = serialize_value(value[i])
+		end
+		return "[" .. table.concat(parts, ", ") .. "]"
+	else
+		local parts = {}
+		for k, v in pairs(value) do
+			parts[#parts + 1] = tostring(k) .. "=" .. serialize_value(v)
+		end
+		return "{" .. table.concat(parts, ", ") .. "}"
+	end
+end
+
 -- pretty_print(value, io_out)
 -- Prints a value to io_out in a human-readable form.
--- Tables: key=value pairs, one per line.
+-- Tables: key=value pairs, one per line (nested tables serialized inline).
 -- Arrays: one value per line.
 -- Other: tostring.
 --: (unknown, unknown) -> nil
@@ -67,20 +92,11 @@ local function pretty_print(value, io_out)
 		local is_array = n > 0
 		if is_array then
 			for i = 1, n do
-				local v = value[i]
-				if type(v) == "table" then
-					local parts = {}
-					for k2, v2 in pairs(v) do
-						parts[#parts + 1] = tostring(k2) .. "=" .. tostring(v2)
-					end
-					io_out:write(table.concat(parts, "  ") .. "\n")
-				else
-					io_out:write(tostring(v) .. "\n")
-				end
+				io_out:write(serialize_value(value[i]) .. "\n")
 			end
 		else
 			for k, v in pairs(value) do
-				io_out:write(tostring(k) .. "=" .. tostring(v) .. "\n")
+				io_out:write(tostring(k) .. "=" .. serialize_value(v) .. "\n")
 			end
 		end
 	elseif value == nil then
@@ -232,8 +248,9 @@ function M.create(caps, methods, descriptors)
 end
 
 -- Exposed for testing.
-M._subcommand_name = subcommand_name
-M._param_names_of  = param_names_of
-M._pretty_print    = pretty_print
+M._subcommand_name  = subcommand_name
+M._param_names_of   = param_names_of
+M._pretty_print     = pretty_print
+M._serialize_value  = serialize_value
 
 return M

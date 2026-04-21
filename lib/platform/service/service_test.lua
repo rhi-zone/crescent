@@ -302,6 +302,48 @@ T.describe("cli.create — subcommand dispatch", function()
 	end)
 end)
 
+T.describe("cli._pretty_print — nested tables", function()
+	local function capture_pretty(value)
+		local lines = {}
+		local mock = { write = function(self, s) lines[#lines + 1] = s end }
+		cli._pretty_print(value, mock)
+		return table.concat(lines)
+	end
+
+	T.it("map with array value serializes inline", function()
+		local out = capture_pretty({ providers = { "github", "gitlab" } })
+		T.ok(out:find("providers=") ~= nil, "output should have providers key")
+		T.ok(out:find("github") ~= nil, "output should contain github")
+		T.ok(out:find("gitlab") ~= nil, "output should contain gitlab")
+		T.ok(not out:find("table: "), "output should not contain raw table address")
+	end)
+
+	T.it("array of maps serializes each row inline", function()
+		local out = capture_pretty({ { name = "Alice" }, { name = "Bob" } })
+		T.ok(out:find("Alice") ~= nil)
+		T.ok(out:find("Bob") ~= nil)
+		T.ok(not out:find("table: "), "output should not contain raw table address")
+	end)
+
+	T.it("map with nested map serializes inline", function()
+		local out = capture_pretty({ meta = { version = "1" } })
+		T.ok(out:find("meta=") ~= nil)
+		T.ok(out:find("version") ~= nil)
+		T.ok(not out:find("table: "), "output should not contain raw table address")
+	end)
+
+	T.it("serialize_value: array -> bracket notation", function()
+		T.eq(cli._serialize_value({ "a", "b" }), "[a, b]")
+	end)
+
+	T.it("serialize_value: nested map", function()
+		-- key order is not deterministic, so just check no raw address
+		local s = cli._serialize_value({ x = 1 })
+		T.ok(s:find("x=1") ~= nil)
+		T.ok(not s:find("table: "))
+	end)
+end)
+
 T.describe("cli.create — error handling", function()
 	local err_methods = {
 		get_thing = function(c, thing_id)
