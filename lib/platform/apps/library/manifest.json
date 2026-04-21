@@ -12,8 +12,8 @@
       "caps": {
         "server":   { "type": "http_server", "reason": "Serves the embedded HTML/JS/CSS frontend at GET / and handles all /api/* JSON endpoints (list, search, source discovery, thumb proxy)." },
         "index_db": { "type": "db", "required": false, "readonly": true, "path": "~/.crescent/apps/index.db", "reason": "Runs paginated SELECT and COUNT queries against the installed-app index, with FTS5 full-text search and tag-join filtering, to back the GET /api/apps endpoint." },
-        "stdout":   { "type": "stdout", "required": false, "reason": "Injected write function for CLI subcommand output (list-apps, search); falls back to io.write when absent." },
-        "stderr":   { "type": "stderr", "required": false, "reason": "Injected write function for CLI error messages; falls back to io.stderr:write when absent." }
+        "stdout":   { "type": "stdout", "required": false, "reason": "Write function for CLI subcommand output (list-apps, search); CLI output is suppressed when absent." },
+        "stderr":   { "type": "stderr", "required": false, "reason": "Write function for CLI error messages; errors are suppressed when absent." }
       }
     }
   }

@@ -5,8 +5,7 @@
   "default_entry": "server",
   "caps": {
     "self":          { "type": "self",         "reason": "Provides the app its own identity (app_id) and access to its tarball entries and PNG metadata chunks." },
-    "conversations": { "type": "db",           "reason": "Reserved for persisting conversation history and message trees; not yet wired in server.lua." },
-    "kv":            { "type": "kv",           "required": false, "reason": "Stores and retrieves per-session chat message history (dom.lua) and connection/generation/prompt presets (presets.lua)." },
+    "kv":            { "type": "kv",           "required": false, "reason": "Stores and retrieves connection, generation, and prompt presets via presets.lua (list keys + active-preset keys per type)." },
     "time":          { "type": "time",         "reason": "Provides a wall-clock timestamp source available to all entries; used by the platform runtime for session bookkeeping." }
   },
   "entry": {

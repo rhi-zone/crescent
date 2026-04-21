@@ -111,6 +111,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Capability-based I/O.** Libraries must not reach for `os`, `io`, or other global side-effect modules directly. Instead, accept I/O functions as parameters (constructor opts, function args). This is the foundation of sandbox safety: if a library grabs `os.time()` from a global, it can't run in a capability sandbox. If it accepts a `time_fn` parameter, the caller decides what time source to provide — or whether to provide one at all. This applies to ALL libraries, not just platform app code.
 
+**Caps-first, everywhere.** Every library that performs I/O — HTTP, filesystem, crypto, time, randomness — must accept its dependencies as injected caps, not import them from globals. "This runs outside the sandbox so it's fine" is never a justification for skipping injection. A library that hardcodes `require("lib.https.client")` can't be tested in isolation, can't be sandboxed, and violates the crescent model. The `lib/ai/` providers using `lib.https.client` directly is a known gap to fix, not a pattern to follow. When building new libraries, inject; when touching existing ones, migrate.
+
 ## Design Principles
 
 **Vendorable.** Every library is a set of `.lua` files you can copy into your project. No build step, no native bindings to manage. You own the code.
@@ -208,6 +210,10 @@ Crescent can safely host untrusted user scripts via standard Lua env-based sandb
 This means multi-user worlds with player-authored scripts are viable in pure crescent — no modified VM needed. The sandbox granularity is just a matter of what environment you hand each script.
 
 Do not assume LuaJIT sandboxing is impossible. The common concern (FFI escape) is addressed by controlling `require`.
+
+**`ffi` is never a grantable capability.** It is not a capability — it is the absence of a sandbox. Granting `ffi` to any untrusted app code is a full sandbox escape (arbitrary memory access, arbitrary C calls). No whitelist entry, no cap declaration, no opt-in should ever expose `ffi` to sandboxed code.
+
+**All modules loaded inside the sandbox must run in the sandbox env.** Tarball modules and whitelisted pure-Lua platform modules must be loaded via `load(source, "t", env)` — the sandbox require finds source from the tarball or disk (`package.searchpath`) and never calls the host `require`. `ffi` is never on any whitelist. FFI-backed functionality is not requireable inside the sandbox at all — it must go through the cap system: declared in the app manifest, explicitly granted by the platform, injected as `caps.*` globals. An app uses `caps.compress(data)`, not `require("lib.compress")`. FFI capability grants are visible security decisions, not silent module access.
 
 ## Lua Gotchas
 

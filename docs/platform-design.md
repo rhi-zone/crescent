@@ -517,6 +517,43 @@ with no access to `io`, `os`, `ffi`, `debug`, `dofile`, `loadfile`, `require`
 (replaced with a whitelist loader), or `package`. Capabilities are the only way to
 perform side effects.
 
+**Module loading inside the sandbox.** The sandbox `require` never calls the host
+`require`. For every module name:
+
+1. Check sandbox-local `package.loaded` cache.
+2. Tarball lookup → if found, load source with `load(source, "t", env)`.
+3. Whitelist check → `package.searchpath` → read source → `load(source, "t", env)`.
+4. Error if not found or not whitelisted.
+
+All module code runs inside the sandbox env — their `require` calls also go through
+the whitelist. "Vetted platform code" is not a security property; any module running
+with host privileges is a potential sandbox escape.
+
+**`caps` is entrypoint-only.** The `caps` global is present only in the entrypoint's
+env. Modules loaded via `require` inside the sandbox receive an env without `caps`.
+The entrypoint passes specific capabilities to internal modules explicitly as
+constructor arguments or function parameters — the same caps-first discipline that
+applies at the platform boundary applies within the app. This prevents caps from
+leaking into arbitrary module scope.
+
+**FFI is never grantable.** `ffi` is not a capability — it is the absence of a
+sandbox. It must never appear on any whitelist. FFI-backed functionality is exposed
+through the cap system only: declared in the app manifest, explicitly granted by the
+platform, injected as `caps.*` globals in the entrypoint. The app calls
+`caps.ffi_compress(data)`, not `require("lib.compress")`.
+
+**Cap taxonomy.** Caps fall into two categories:
+
+- **Primitive caps** — external read/write surfaces: `http_client`, `db`, `llm`, `fs`,
+  `time`, etc. These carry the primary security weight: network access, disk access,
+  LLM calls. Always require explicit grants.
+- **FFI caps** — computational libraries that require native code and cannot run as
+  sandboxed pure Lua source. Named with the `ffi_` prefix: `ffi_compress`, `ffi_regex`,
+  etc. Pure Lua libraries do not need to be caps — vendor them into the tarball instead.
+
+The cap system is not a general module injection mechanism. It exists for things that
+cannot be expressed as sandboxable pure Lua source.
+
 **Cap implementation safety.** Caps are plain tables with closure-based function
 values. The closures capture real IO primitives (sqlite handles, sockets, etc.)
 internally, but without `debug.getupvalue` (which requires the `debug` library,

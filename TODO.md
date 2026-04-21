@@ -172,6 +172,7 @@ hinges on per-subdomain origin isolation + VM sandbox + strict CSP.
   - [ ] Tier 2/3 isolation escalation: coroutine-per-request with
     `debug.sethook` instruction quota (tier 2), or separate `lua_State`
     per app (tier 3). Design + triggers in `docs/daemon-isolation.md`.
+  - [ ] **Grant UI: surface cap `reason` fields** — manifest cap declarations support a `"reason"` string (e.g. `"reason": "Timestamps cache entries..."`). The grant/install UI should display this alongside the cap name so operators know why the app needs each capability. Currently ignored at runtime.
     Not urgent for loopback/Tailscale-private; required before any
     routable-interface deployment, and entangled with the grant UI
     work (both move "apps are untrusted" from "documented" to
