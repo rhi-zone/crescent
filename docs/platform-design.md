@@ -500,6 +500,36 @@ definitions, schema files, and type-safe builders all compile down to SQL anyway
 structured definition layer is optional and app-level; the primitive the platform
 accepts is always the string.
 
+#### `setup()` method
+
+The cap exposes a `setup(tables)` method the app calls once on first run to
+initialize its schema:
+
+```lua
+caps.conversations.setup({
+  { name = "sessions",  cols = "id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, metadata TEXT" },
+  { name = "messages",  cols = "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, content TEXT NOT NULL" },
+})
+```
+
+`tables` is an array of `{name, cols}`. `cols` is raw SQL column definitions —
+the same primitive accepted by `setup_schema()`. Type-safe schema builders are
+an app-level concern and compile down to this string.
+
+`setup()` is one-shot: calling it more than once on the same cap instance errors
+immediately. A `boolean` upvalue in the cap closure tracks whether it has fired;
+once set, all subsequent calls return `nil, "setup() already called"`. This
+prevents accidental re-initialization without adding any external state.
+
+Platform-installed (operator-trusted) apps are implicitly trusted to call
+`setup()` correctly. The authorizer still enforces row-level isolation on every
+query regardless — trust in schema setup does not widen data access.
+
+Schema conflict detection (string compare against `sqlite_master`) runs as part
+of `setup()`. If the existing DDL for a table doesn't match what the app would
+create, `setup()` errors loudly before touching any data. This is the same
+check described above; `setup()` is the call site where it fires.
+
 ### `caps.time` — clock
 
 ```lua
