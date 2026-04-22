@@ -487,11 +487,16 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 	local function revoke() revoked = true end
 
-	if readonly then
-		return { query = query, close = close }, revoke
+	local function setup(tables)
+		if revoked then error("shared_db_cap: capability revoked", 2) end
+		return M.setup_schema(path, tables)
 	end
 
-	return { execute = exec, query = query, close = close }, revoke
+	if readonly then
+		return { query = query, close = close, setup = setup }, revoke
+	end
+
+	return { execute = exec, query = query, close = close, setup = setup }, revoke
 end
 
 return M

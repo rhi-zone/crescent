@@ -325,8 +325,7 @@ local CAP_TYPE_MODULES = {
 	stdin       = "lib.platform.caps.stdin",
 	stdout      = "lib.platform.caps.stdout",
 	fs          = "lib.platform.caps.fs",
-	llm          = "lib.platform.caps.llm",
-	conversation = "lib.platform.caps.conversation",
+	llm = "lib.platform.caps.llm",
 }
 
 local function build_cap(cap_name, decl, app, context, platform_opts)
@@ -470,15 +469,6 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 			model    = decl.model,
 			base_url = decl.base_url,
 		})
-	end
-
-	-- conversation: full lib.conversation API backed by a SQLite file.
-	if cap_type == "conversation" then
-		local data_path = decl.path and expand_home(decl.path) or platform._resolve_data_path(cap_name, decl.scope, context)
-		local parent_dir = data_path:match("^(.*)/[^/]+$")
-		if parent_dir then mkdir_p(parent_dir) end
-		local mod = require(CAP_TYPE_MODULES.conversation)
-		return mod.conversation_cap({ path = data_path })
 	end
 
 	return nil, "unknown cap type: " .. tostring(cap_type)

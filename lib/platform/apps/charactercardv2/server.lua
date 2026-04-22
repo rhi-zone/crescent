@@ -31,6 +31,265 @@ local presets_mod = require("lib.platform.apps.charactercardv2.presets")
 
 local M = {}
 
+-- ── Conversation DB helpers ──────────────────────────────────────────────────
+--
+-- When caps.conversations is a shared_db cap, state.conv is that cap and these
+-- helpers call raw SQL via db.query(sql, params_array) → rows_array.
+--
+-- When the fallback path is used (lib.conversation handle), state.conv has a
+-- :create_session() etc. API. The helpers detect which type is present via
+-- is_lib_conv() and dispatch accordingly.
+
+local function is_lib_conv(db)
+	return type(db.create_session) == "function"
+end
+
+local CONV_SCHEMA = {
+	{ name = "sessions", cols = [[
+    id         TEXT PRIMARY KEY,
+    app_id     TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    metadata   TEXT
+  ]] },
+	{ name = "messages", cols = [[
+    id                 TEXT PRIMARY KEY,
+    session_id         TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    parent_id          TEXT REFERENCES messages(id),
+    role               TEXT NOT NULL,
+    content            TEXT NOT NULL,
+    created_at         INTEGER NOT NULL,
+    canonical_child_id TEXT REFERENCES messages(id),
+    metadata           TEXT
+  ]] },
+}
+
+local function conv_uuid()
+	return string.format(
+		"%08x-%04x-4%03x-%04x-%012x",
+		math.random(0, 0xffffffff),
+		math.random(0, 0xffff),
+		math.random(0, 0xfff),
+		math.random(0x8000, 0xbfff),
+		math.random(0, 0xffffffffffff)
+	)
+end
+
+-- conv_query: runs sql with params_array on a shared_db cap (dot-call API).
+-- Works for both SELECT (returns rows) and DML (returns {}).
+-- Returns rows_array, nil on success; nil, err on failure.
+local function conv_query(db, sql, params)
+	return db.query(sql, params)
+end
+
+local function conv_create_session(db, time_fn)
+	if is_lib_conv(db) then return db:create_session("card") end
+	local id = conv_uuid()
+	local now = time_fn()
+	local _, err = conv_query(db,
+		"INSERT INTO sessions (id, app_id, created_at) VALUES (?, ?, ?)",
+		{ id, "card", now }
+	)
+	if err then return nil, err end
+	return { id = id, app_id = "card", created_at = now }
+end
+
+local function conv_get_session(db, id)
+	if is_lib_conv(db) then return db:get_session(id) end
+	local rows, err = conv_query(db,
+		"SELECT id, app_id, created_at, metadata FROM sessions WHERE id = ?",
+		{ id }
+	)
+	if not rows then return nil, err end
+	if #rows == 0 then return nil, "conversation: session not found: " .. tostring(id) end
+	return rows[1]
+end
+
+local function conv_list_sessions(db)
+	if is_lib_conv(db) then return db:list_sessions("card") end
+	local rows, err = conv_query(db,
+		"SELECT id, app_id, created_at, metadata FROM sessions WHERE app_id = 'card' ORDER BY created_at DESC",
+		{}
+	)
+	if not rows then return nil, err end
+	return rows
+end
+
+local function conv_delete_session(db, id)
+	if is_lib_conv(db) then return db:delete_session(id) end
+	local _, err = conv_query(db, "DELETE FROM sessions WHERE id = ?", { id })
+	if err then return nil, err end
+	return true
+end
+
+local function conv_add_message(db, session_id, parent_id, role, content, time_fn, metadata)
+	if is_lib_conv(db) then return db:add_message(session_id, parent_id, role, content, metadata) end
+	local id = conv_uuid()
+	local now = time_fn()
+	local meta_s = nil
+	if metadata ~= nil then
+		local json_mod = require("lib.format.json")
+		local s, jerr = json_mod.encode(metadata)
+		if not s then return nil, "conv_add_message: json encode: " .. tostring(jerr) end
+		meta_s = s
+	end
+	local _, err = conv_query(db,
+		"INSERT INTO messages (id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+		{ id, session_id, parent_id, role, content, now, meta_s }
+	)
+	if err then return nil, err end
+	if parent_id ~= nil then
+		conv_query(db,
+			"UPDATE messages SET canonical_child_id = ? WHERE id = ?",
+			{ id, parent_id }
+		)
+	end
+	return {
+		id = id, session_id = session_id, parent_id = parent_id,
+		role = role, content = content, created_at = now,
+		canonical_child_id = nil, metadata = metadata,
+	}
+end
+
+local function conv_decode_metadata(r)
+	if r and r.metadata and type(r.metadata) == "string" then
+		local json_mod = require("lib.format.json")
+		local v = json_mod.decode(r.metadata)
+		if v then r.metadata = v end
+	end
+	return r
+end
+
+local function conv_get_message(db, id)
+	if is_lib_conv(db) then return db:get_message(id) end
+	local rows, err = conv_query(db,
+		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata FROM messages WHERE id = ?",
+		{ id }
+	)
+	if not rows then return nil, err end
+	if #rows == 0 then return nil, "conversation: message not found: " .. tostring(id) end
+	return conv_decode_metadata(rows[1])
+end
+
+local function conv_get_children(db, parent_id)
+	if is_lib_conv(db) then return db:get_children(parent_id) end
+	local rows, err = conv_query(db,
+		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata FROM messages WHERE parent_id = ?",
+		{ parent_id }
+	)
+	if not rows then return nil, err end
+	for i = 1, #rows do conv_decode_metadata(rows[i]) end
+	return rows
+end
+
+local function conv_get_roots(db, session_id)
+	if is_lib_conv(db) then return db:get_roots(session_id) end
+	local rows, err = conv_query(db,
+		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata FROM messages WHERE session_id = ? AND parent_id IS NULL ORDER BY created_at ASC",
+		{ session_id }
+	)
+	if not rows then return nil, err end
+	for i = 1, #rows do conv_decode_metadata(rows[i]) end
+	return rows
+end
+
+local function conv_get_canonical_path(db, session_id)
+	if is_lib_conv(db) then return db:get_canonical_path(session_id) end
+	local rows, err = conv_query(db,
+		"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata FROM messages WHERE session_id = ? AND parent_id IS NULL",
+		{ session_id }
+	)
+	if not rows then return nil, err end
+	if #rows == 0 then return {} end
+	local path = {}
+	local cur = conv_decode_metadata(rows[1])
+	while cur ~= nil do
+		path[#path + 1] = cur
+		if not cur.canonical_child_id then break end
+		local next_rows, nerr = conv_query(db,
+			"SELECT id, session_id, parent_id, role, content, created_at, canonical_child_id, metadata FROM messages WHERE id = ?",
+			{ cur.canonical_child_id }
+		)
+		if not next_rows or #next_rows == 0 then
+			return nil, "conversation: broken canonical link from " .. tostring(cur.id)
+		end
+		cur = conv_decode_metadata(next_rows[1])
+	end
+	return path
+end
+
+local function conv_swipe_to(db, message_id)
+	if is_lib_conv(db) then return db:swipe_to(message_id) end
+	local rows, err = conv_query(db,
+		"SELECT parent_id FROM messages WHERE id = ?",
+		{ message_id }
+	)
+	if not rows then return nil, err end
+	if #rows == 0 then return nil, "conversation: message not found: " .. tostring(message_id) end
+	local parent_id = rows[1].parent_id
+	if parent_id == nil then return nil, "conversation: swipe_to: message has no parent (it is a root)" end
+	conv_query(db, "UPDATE messages SET canonical_child_id = ? WHERE id = ?", { message_id, parent_id })
+	return true
+end
+
+local function conv_update_message(db, id, fields)
+	if is_lib_conv(db) then return db:update_message(id, fields) end
+	local sets = {}
+	local params = {}
+	if fields.content ~= nil then
+		sets[#sets + 1] = "content = ?"
+		params[#params + 1] = fields.content
+	end
+	if fields.metadata ~= nil then
+		local json_mod = require("lib.format.json")
+		local meta_s, jerr = json_mod.encode(fields.metadata)
+		if not meta_s then return nil, "conv_update_message: json encode: " .. tostring(jerr) end
+		sets[#sets + 1] = "metadata = ?"
+		params[#params + 1] = meta_s
+	end
+	if fields.canonical_child_id ~= nil then
+		sets[#sets + 1] = "canonical_child_id = ?"
+		params[#params + 1] = fields.canonical_child_id
+	end
+	if #sets == 0 then return conv_get_message(db, id) end
+	params[#params + 1] = id
+	conv_query(db, "UPDATE messages SET " .. table.concat(sets, ", ") .. " WHERE id = ?", params)
+	return conv_get_message(db, id)
+end
+
+local function conv_delete_subtree(db, message_id)
+	if is_lib_conv(db) then return db:delete_subtree(message_id) end
+	local rows, err = conv_query(db,
+		"SELECT parent_id FROM messages WHERE id = ?",
+		{ message_id }
+	)
+	if not rows then return nil, err end
+	if #rows == 0 then return nil, "conversation: message not found: " .. tostring(message_id) end
+	local parent_id = rows[1].parent_id
+	local id_rows, ierr = conv_query(db,
+		"WITH RECURSIVE subtree(id) AS (SELECT id FROM messages WHERE id = ? UNION ALL SELECT m.id FROM messages m JOIN subtree s ON m.parent_id = s.id) SELECT id FROM subtree",
+		{ message_id }
+	)
+	if not id_rows then return nil, ierr end
+	local ids = {}
+	for _, r in ipairs(id_rows) do ids[#ids + 1] = r.id end
+	for _, did in ipairs(ids) do
+		conv_query(db, "UPDATE messages SET canonical_child_id = NULL WHERE canonical_child_id = ?", { did })
+	end
+	for i = #ids, 1, -1 do
+		conv_query(db, "DELETE FROM messages WHERE id = ?", { ids[i] })
+	end
+	if parent_id ~= nil then
+		local children, cerr = conv_get_children(db, parent_id)
+		if not children then return nil, cerr end
+		if #children > 0 then
+			conv_query(db, "UPDATE messages SET canonical_child_id = ? WHERE id = ?", { children[1].id, parent_id })
+		else
+			conv_query(db, "UPDATE messages SET canonical_child_id = NULL WHERE id = ?", { parent_id })
+		end
+	end
+	return { deleted = #ids }
+end
+
 -- ── Helpers ─────────────────────────────────────────────────────────────────
 
 local function parse_target(target)
@@ -89,7 +348,8 @@ local function create_state()
 		card = nil,           -- CardData
 		lorebook = nil,       -- NormalizedEntry[]
 		user_name = "User",
-		conv = nil,           -- lib/conversation db handle
+		conv = nil,           -- conversation db handle (shared_db cap or lib.conversation handle)
+		_time_fn = nil,       -- () -> integer, set in create() before first use
 		session_id = nil,     -- active session id
 		settings = nil,       -- generation settings (initialized from defaults + kv)
 		personas = nil,       -- {name, description}[] (initialized on create)
@@ -145,18 +405,18 @@ end
 -- ── Tree helpers ────────────────────────────────────────────────────────────
 
 -- get_canonical_path: returns the active path for the session.
--- Wraps conv:get_canonical_path().
+-- Wraps conv_get_canonical_path().
 local function get_canonical_path(state)
-	return state.conv:get_canonical_path(state.session_id)
+	return conv_get_canonical_path(state.conv, state.session_id)
 end
 
 -- get_siblings: returns all siblings of a message (children of its parent).
 -- For root messages (parent_id is nil), returns all roots in the session.
 local function get_siblings(state, msg)
 	if msg.parent_id == nil then
-		return state.conv:get_roots(state.session_id)
+		return conv_get_roots(state.conv, state.session_id)
 	end
-	return state.conv:get_children(msg.parent_id)
+	return conv_get_children(state.conv, msg.parent_id)
 end
 
 -- sibling_info: compute sibling_index (0-based) and sibling_count for a message.
@@ -334,7 +594,7 @@ local function build_context_to_parent(state, caps, parent_id)
 	local chain = {}
 	local current_id = parent_id
 	while current_id do
-		local msg, err = state.conv:get_message(current_id)
+		local msg, err = conv_get_message(state.conv, current_id)
 		if not msg then return nil, err end
 		chain[#chain + 1] = msg
 		current_id = msg.parent_id
@@ -541,7 +801,7 @@ local function init_greeting(state)
 	local content = macro_mod.substitute(card.first_mes, env)
 
 	-- Create primary greeting as root message.
-	local msg, err = state.conv:add_message(state.session_id, nil, "assistant", content)
+	local msg, err = conv_add_message(state.conv, state.session_id, nil, "assistant", content, state._time_fn)
 	if not msg then return end
 
 	-- Create alternate greetings as root siblings (also parent_id = nil).
@@ -549,7 +809,7 @@ local function init_greeting(state)
 		for _, g in ipairs(card.alternate_greetings) do
 			if g and #g > 0 then
 				local alt_content = macro_mod.substitute(g, env)
-				state.conv:add_message(state.session_id, nil, "assistant", alt_content)
+				conv_add_message(state.conv, state.session_id, nil, "assistant", alt_content, state._time_fn)
 			end
 		end
 	end
@@ -567,7 +827,7 @@ end
 -- ── Session helpers ─────────────────────────────────────────────────────────
 
 local function get_session_preview(state, session_id)
-	local path = state.conv:get_canonical_path(session_id)
+	local path = conv_get_canonical_path(state.conv, session_id)
 	if not path or #path == 0 then return "" end
 	for _, msg in ipairs(path) do
 		if msg.role == "user" then
@@ -595,7 +855,7 @@ local function switch_to_session(state, caps, session_id)
 end
 
 local function create_new_session(state, caps)
-	local session, serr = state.conv:create_session("card")
+	local session, serr = conv_create_session(state.conv, state._time_fn)
 	if not session then return nil, nil, serr end
 	state.session_id = session.id
 	init_greeting(state)
@@ -866,7 +1126,7 @@ local function api_post_message(state, caps, _params, body, res)
 	local leaf_id = path[#path] and path[#path].id or nil
 
 	-- Add user message as child of leaf.
-	local user_msg, uerr = state.conv:add_message(state.session_id, leaf_id, "user", text)
+	local user_msg, uerr = conv_add_message(state.conv, state.session_id, leaf_id, "user", text, state._time_fn)
 	if not user_msg then return json_err(res, 500, uerr) end
 
 	-- Group mode: generate responses from multiple characters.
@@ -880,14 +1140,14 @@ local function api_post_message(state, caps, _params, body, res)
 			local resp, gerr = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
 			if not resp then
 				if #responses == 0 then
-					state.conv:delete_subtree(user_msg.id)
+					conv_delete_subtree(state.conv, user_msg.id)
 					return json_err(res, 502, "LLM error: " .. tostring(gerr))
 				end
 				break
 			end
 			resp = apply_regex_scripts(state, resp, "ai_output")
 			local meta = { speaker = speaker.name }
-			local asst_msg, aerr = state.conv:add_message(state.session_id, parent_id, "assistant", resp, meta)
+			local asst_msg, aerr = conv_add_message(state.conv, state.session_id, parent_id, "assistant", resp, state._time_fn, meta)
 			if not asst_msg then return json_err(res, 500, aerr) end
 			asst_msg.speaker = speaker.name
 			parent_id = asst_msg.id
@@ -909,7 +1169,7 @@ local function api_post_message(state, caps, _params, body, res)
 	local response, err = caps.llm.call(apply_instruct(state, context), llm_opts_from_settings(state.settings))
 	if not response then
 		-- Rollback: delete user message.
-		state.conv:delete_subtree(user_msg.id)
+		conv_delete_subtree(state.conv, user_msg.id)
 		return json_err(res, 502, "LLM error: " .. tostring(err))
 	end
 
@@ -917,7 +1177,7 @@ local function api_post_message(state, caps, _params, body, res)
 	response = apply_regex_scripts(state, response, "ai_output")
 
 	-- Add assistant message as child of user message.
-	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
+	local asst_msg, aerr = conv_add_message(state.conv, state.session_id, user_msg.id, "assistant", response, state._time_fn)
 	if not asst_msg then return json_err(res, 500, aerr) end
 
 	save_session_id(state, caps)
@@ -951,7 +1211,7 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	local leaf_id = path[#path] and path[#path].id or nil
 
 	-- Add user message.
-	local user_msg, uerr = state.conv:add_message(state.session_id, leaf_id, "user", text)
+	local user_msg, uerr = conv_add_message(state.conv, state.session_id, leaf_id, "user", text, state._time_fn)
 	if not user_msg then return json_err(res, 500, uerr) end
 
 	-- Build context.
@@ -972,7 +1232,7 @@ local function api_post_message_stream(state, caps, _params, body, res)
 
 	if not response then
 		-- Rollback: delete user message.
-		state.conv:delete_subtree(user_msg.id)
+		conv_delete_subtree(state.conv, user_msg.id)
 		res.send_event(json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
 		res.close()
 		return true
@@ -982,7 +1242,7 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	response = apply_regex_scripts(state, response, "ai_output")
 
 	-- Add assistant message.
-	local asst_msg, aerr = state.conv:add_message(state.session_id, user_msg.id, "assistant", response)
+	local asst_msg, aerr = conv_add_message(state.conv, state.session_id, user_msg.id, "assistant", response, state._time_fn)
 	if not asst_msg then
 		res.send_event(json.encode({ type = "error", error = "db error: " .. tostring(aerr) }))
 		res.close()
@@ -1020,7 +1280,7 @@ local function api_post_continue(state, caps, _params, _body, res)
 	local leaf = path[#path]
 	if leaf.role == "assistant" then
 		-- Append to existing assistant message (in-place update).
-		local updated, uerr = state.conv:update_message(leaf.id, {
+		local updated, uerr = conv_update_message(state.conv, leaf.id, {
 			content = leaf.content .. response,
 		})
 		if not updated then return json_err(res, 500, uerr) end
@@ -1030,9 +1290,7 @@ local function api_post_continue(state, caps, _params, _body, res)
 		return json_ok(res, resp)
 	else
 		-- Add new assistant message as child of leaf.
-		local asst_msg, aerr = state.conv:add_message(
-			state.session_id, leaf.id, "assistant", response
-		)
+		local asst_msg, aerr = conv_add_message(state.conv, state.session_id, leaf.id, "assistant", response, state._time_fn)
 		if not asst_msg then return json_err(res, 500, aerr) end
 		save_session_id(state, caps)
 		local resp = msg_response(state, asst_msg)
@@ -1063,7 +1321,7 @@ local function api_get_swipes(state, _caps, params, _body, res)
 	local msg_id = params.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
 
-	local msg, merr = state.conv:get_message(msg_id)
+	local msg, merr = conv_get_message(state.conv, msg_id)
 	if not msg then return json_err(res, 404, "message not found") end
 
 	local siblings, serr = get_siblings(state, msg)
@@ -1082,7 +1340,7 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	local msg_id = body and body.message_id
 	if not msg_id then return json_err(res, 400, "message_id required") end
 
-	local msg, merr = state.conv:get_message(msg_id)
+	local msg, merr = conv_get_message(state.conv, msg_id)
 	if not msg then return json_err(res, 404, "message not found") end
 
 	-- Build context up to (but not including) this message.
@@ -1096,9 +1354,7 @@ local function api_post_swipe_new(state, caps, _params, body, res)
 	response = apply_regex_scripts(state, response, "ai_output")
 
 	-- Add as sibling (same parent, same role).
-	local new_msg, nerr = state.conv:add_message(
-		state.session_id, msg.parent_id, msg.role, response
-	)
+	local new_msg, nerr = conv_add_message(state.conv, state.session_id, msg.parent_id, msg.role, response, state._time_fn)
 	if not new_msg then return json_err(res, 500, nerr) end
 
 	-- For root siblings, add_message doesn't update any parent canonical_child_id.
@@ -1117,14 +1373,12 @@ local function api_post_message_edit(state, caps, _params, body, res)
 	local msg_id = body.message_id
 	local new_content = body.content
 
-	local msg, merr = state.conv:get_message(msg_id)
+	local msg, merr = conv_get_message(state.conv, msg_id)
 	if not msg then return json_err(res, 404, "message not found") end
 
 	-- Create a new sibling with the edited content (fork).
 	-- The old message and its subtree remain accessible by swiping back.
-	local edited, eerr = state.conv:add_message(
-		state.session_id, msg.parent_id, msg.role, new_content
-	)
+	local edited, eerr = conv_add_message(state.conv, state.session_id, msg.parent_id, msg.role, new_content, state._time_fn)
 	if not edited then return json_err(res, 500, eerr) end
 
 	save_session_id(state, caps)
@@ -1139,7 +1393,7 @@ local function api_post_message_delete(state, _caps, _params, body, res)
 	end
 	local msg_id = body.message_id
 
-	local result, err = state.conv:delete_subtree(msg_id)
+	local result, err = conv_delete_subtree(state.conv, msg_id)
 	if not result then return json_err(res, 404, "message not found") end
 
 	return json_ok(res, { deleted = result.deleted })
@@ -1150,12 +1404,12 @@ local function api_post_branch_navigate(state, _caps, _params, body, res)
 		return json_err(res, 400, "message_id required")
 	end
 
-	local msg, merr = state.conv:get_message(body.message_id)
+	local msg, merr = conv_get_message(state.conv, body.message_id)
 	if not msg then return json_err(res, 404, "message not found") end
 
 	if msg.parent_id ~= nil then
 		-- Non-root: use swipe_to to update parent's canonical_child_id.
-		local ok, err = state.conv:swipe_to(body.message_id)
+		local ok, err = conv_swipe_to(state.conv, body.message_id)
 		if not ok then return json_err(res, 400, err) end
 	end
 	-- For root messages, get_canonical_path picks the first root by insertion order.
@@ -1170,7 +1424,7 @@ end
 -- ── Session endpoints ──────────────────────────────────────────────────────
 
 local function api_get_sessions(state, _caps, _params, _body, res)
-	local sessions, err = state.conv:list_sessions("card")
+	local sessions, err = conv_list_sessions(state.conv)
 	if not sessions then return json_err(res, 500, err) end
 	local result = {}
 	for _, s in ipairs(sessions) do
@@ -1197,7 +1451,7 @@ local function api_post_session_switch(state, caps, _params, body, res)
 		return json_err(res, 400, "session_id required")
 	end
 	local target_id = body.session_id
-	local session, serr = state.conv:get_session(target_id)
+	local session, serr = conv_get_session(state.conv, target_id)
 	if not session then return json_err(res, 404, "session not found") end
 	switch_to_session(state, caps, target_id)
 	local path = get_canonical_path(state)
@@ -1213,14 +1467,14 @@ local function api_post_session_delete(state, caps, _params, body, res)
 		return json_err(res, 400, "session_id required")
 	end
 	local target_id = body.session_id
-	local session, serr = state.conv:get_session(target_id)
+	local session, serr = conv_get_session(state.conv, target_id)
 	if not session then return json_err(res, 404, "session not found") end
-	local ok, derr = state.conv:delete_session(target_id)
+	local ok, derr = conv_delete_session(state.conv, target_id)
 	if not ok then return json_err(res, 500, derr) end
 	local current_id = state.session_id
 	local messages
 	if target_id == current_id then
-		local remaining = state.conv:list_sessions("card")
+		local remaining = conv_list_sessions(state.conv)
 		if remaining and #remaining > 0 then
 			switch_to_session(state, caps, remaining[1].id)
 			local path = get_canonical_path(state)
@@ -2155,13 +2409,16 @@ function M.create(caps, opts)
 
 	-- Open conversation database.
 	local time_fn = caps.time and caps.time.now or os.time
+	state._time_fn = time_fn
 	local conv_db
 	if caps.conversations then
+		-- shared_db cap: set up schema (idempotent) and use raw SQL helpers.
+		caps.conversations.setup(CONV_SCHEMA)
 		conv_db = caps.conversations
 	elseif opts.conv_db then
 		conv_db = opts.conv_db  -- for tests: pass a pre-built conversation handle
 	else
-		-- Fallback for tests without caps: use lib.conversation with in-memory db.
+		-- Fallback: use lib.conversation with in-memory db.
 		local conv_mod = require("lib.conversation")
 		local db_path = opts.db_path or ":memory:"
 		local db_err
@@ -2175,13 +2432,13 @@ function M.create(caps, opts)
 	-- Restore or create session.
 	local session_id = load_session_id(caps)
 	if session_id then
-		local session = conv_db:get_session(session_id)
+		local session = conv_get_session(conv_db, session_id)
 		if session then
 			state.session_id = session_id
 		end
 	end
 	if not state.session_id then
-		local session, serr = conv_db:create_session("card")
+		local session, serr = conv_create_session(conv_db, time_fn)
 		if not session then
 			error("card server: failed to create session: " .. tostring(serr))
 		end
