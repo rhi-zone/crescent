@@ -477,6 +477,22 @@ cap.close()                -- nil
 The host calls `setup_schema()` to create base tables (`_sessions`), views
 (`sessions`), and INSTEAD OF triggers that enforce `app_id` on every write.
 
+#### Schema conflict detection
+
+Apps vendor their own schema (e.g. `lib/conversation` vendored into the tarball) and
+call `setup_schema()` on first run. Multiple apps can share the same `shared_db` tables
+by convention — all ccv2 cards vendor the same `lib/conversation` and produce identical
+DDL.
+
+On launch, before running the entrypoint, the platform reads the existing DDL from
+`sqlite_master` for each table the app declares and string-compares it against the DDL
+the app would create. If they differ, the platform errors loudly rather than silently
+corrupting data.
+
+No version numbers, no parsing. `sqlite_master` gives the canonical DDL string; a string
+compare is sufficient because DDL is generated from the same source. Matching DDL → safe
+to share. Differing DDL → incompatible apps, operator must resolve before launch.
+
 ### `caps.time` — clock
 
 ```lua
