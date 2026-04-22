@@ -487,9 +487,13 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 	local function revoke() revoked = true end
 
+	local setup_done = false
 	local function setup(tables)
 		if revoked then error("shared_db_cap: capability revoked", 2) end
-		return M.setup_schema(path, tables)
+		if setup_done then error("shared_db_cap: setup() already called", 2) end
+		local ok, err = M.setup_schema(path, tables)
+		if ok then setup_done = true end
+		return ok, err
 	end
 
 	if readonly then
