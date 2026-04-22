@@ -42,39 +42,17 @@ cd docs && bun dev           # Local docs
 
 ## Core Rules
 
-**Do the right thing, don't hedge.** When the correct approach is clear, implement it. Never present "X is a lot of work" as a reason to do something worse — amount of work is not a factor. If you find yourself asking "should I stub this or do it properly?", the answer is always: do it properly and delegate if needed.
+**Do the right thing, don't hedge.** When the correct approach is clear, implement it. Amount of work is never a reason to do something worse.
 
-**Note things down immediately — no deferral:**
-- Problems, tech debt, issues → TODO.md now, in the same response
-- Design decisions, key insights → docs/ or CLAUDE.md
-- Future/deferred scope → TODO.md **before** writing any code, not after
-- **Every observed problem → TODO.md. No exceptions.** Code comments and conversation mentions are not tracked items. If you write a TODO comment in source, the next action is to open TODO.md and write the entry.
-- **Bugs and gaps found during testing → TODO.md in the same commit, not just the commit message.** A gap mentioned only in a commit message is invisible to future sessions.
-- **Completed items → mark `[x]` in TODO.md in the same commit that completes them.** Stale `[ ]` entries for done work are false debt.
-- **Never delete unchecked TODO items.** When editing TODO.md, read the surrounding lines and verify every existing `[ ]` item is preserved in the result. Replacing a block of text that contains TODO items with a shorter block that omits some of them is silent data loss — the same as deleting a file without reading it first.
-- **Every design decision with API/syntax implications → CLAUDE.md or docs/ immediately.** If it would matter to a future session that has never seen this conversation, write it now.
-- **Ad-hoc design conclusions must be written to docs/ in the same response that resolves them.** The signal: if 3+ messages were spent figuring something out, the answer must be committed to docs/ before the conversation moves on. Not as a TODO — as the actual doc edit. The failure mode is "noted" without writing, which evaporates. This applies especially to semantic questions (what does X mean, how does Y work, what is the identity source of Z) — these have no obvious syntax/API implication but are exactly what gets re-debated from scratch in future sessions.
+**Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/ or CLAUDE.md. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items.
 
-**Conversation is not memory.** Anything said in chat evaporates at session end — including within long sessions due to context compaction. If it implies future behavior change, write it to CLAUDE.md immediately — or it will not happen.
+**`docs/batteries.md` is the definitive ecosystem scope document.** Read it before discussing future libraries or roadmap.
 
-**`docs/batteries.md` is the definitive ecosystem scope document.** Before discussing future libraries or the project roadmap, read it. It tracks what's planned, what's done, and the full vertical stack. If a new library is decided on, add it to batteries.md AND TODO.md.
+**Corrections mean a rule is missing or wrong.** When the user corrects you, ask what rule would have prevented it and write it before proceeding. "The rule exists, I just didn't follow it" is never the diagnosis.
 
-**Warning — these phrases mean something needs to be written down right now:**
-- "I won't do X again" / "I'll remember to..." / "I've learned that..."
-- "Next time I'll..." / "From now on I'll..."
-- Any acknowledgement of a recurring error without a corresponding CLAUDE.md edit
+**Something unexpected is a signal, not noise.** Stop and ask why before continuing.
 
-**Triggers:** User corrects you, 2+ failed attempts, "aha" moment, framework quirk discovered → document before proceeding.
-
-**When the user corrects you:** Ask what rule would have prevented this, and write it before proceeding. **"The rule exists, I just didn't follow it" is never the diagnosis** — a rule that doesn't prevent the failure it describes is incomplete; fix the rule, not your behavior.
-
-**Corrections are documentation lag, not model failure.** When the same mistake recurs, the fix is writing the invariant down — not repeating the correction. Every correction that doesn't produce a CLAUDE.md edit will happen again. Exception: during active design, corrections are the work itself — don't prematurely document a design that hasn't settled yet.
-
-**Something unexpected is a signal, not noise.** Surprising output, anomalous numbers, files containing what they shouldn't — stop and ask why before continuing. Don't accept anomalies and move on.
-
-**Do the work properly.** Don't leave workarounds or hacks undocumented. When asked to analyze X, actually read X — don't synthesize from conversation.
-
-**Default to uncertainty.** State what you think and why, but frame it as a hypothesis. Confident wrong answers waste time; tentative wrong answers are cheap to fix. If a design has gaps, say so in the same breath — unsupported claims are the default failure mode.
+**Default to uncertainty.** State what you think and why, but frame it as a hypothesis. If a design has gaps, say so in the same breath.
 
 ## Library Conventions
 
@@ -117,7 +95,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 **Pure Lua is the baseline and must always work standalone.** No library may hard-depend on a system lib or vendored C lib being present. Ubiquitous system libs (libc, etc.) are an optional performance tier. Non-ubiquitous system libs require a pure Lua fallback. Vendored C libs are a last resort when pure Lua is genuinely nonviable for performance reasons. Nothing requires an external install step — must work on a barebones system.
 
 
-**Don't waste LuaJIT.** Avoid allocations in hot paths, prefer tables over closures, measure before and after.
+**Target LuaJIT, don't require it.** Optimise for LuaJIT performance (avoid allocations in hot paths, prefer tables over closures, measure before and after) but pure Lua code must not depend on LuaJIT quirks — it should work on standard Lua if it doesn't sacrifice performance.
 
 **Tooling performance bar: bun (general), tsgo for the typechecker.**
 
