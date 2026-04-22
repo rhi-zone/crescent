@@ -116,19 +116,17 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Pure Lua is the baseline and must always work standalone.** No library may hard-depend on a system lib or vendored C lib being present. Ubiquitous system libs (libc, etc.) are an optional performance tier. Non-ubiquitous system libs require a pure Lua fallback. Vendored C libs are a last resort when pure Lua is genuinely nonviable for performance reasons. Nothing requires an external install step — must work on a barebones system.
 
-**Hackable.** The user should be able to read, understand, and modify any library. Prefer clarity over abstraction.
 
-**Fast.** Performance at all costs. LuaJIT is fast — don't waste it. Avoid allocations in hot paths, prefer tables over closures, measure before and after.
+**Don't waste LuaJIT.** Avoid allocations in hot paths, prefer tables over closures, measure before and after.
 
 **Tooling performance bar: bun (general), tsgo for the typechecker.**
 
-**LuaJIT-first, not LuaJIT-only.** Target LuaJIT but don't gratuitously break Lua 5.2+ compatibility. Pure Lua code shouldn't depend on LuaJIT quirks. FFI and `bit.*` are inherently LuaJIT-only, but everything else should work on standard Lua if it doesn't sacrifice performance.
 
-**Cross-platform.** Vendorable means portable — libraries must work on Linux, macOS, and Windows unless they explicitly wrap a platform-specific API (like epoll). Don't assume any single OS.
+**Libraries must work on Linux, macOS, and Windows** unless they explicitly wrap a platform-specific API. Don't assume a single OS.
 
-**Composable.** Libraries depend on each other minimally. Pick what you need, ignore the rest.
+**Keep coupling low.** A change should require understanding only the local module to reason about correctly. If making a change requires understanding five other modules, that's an architectural smell. Low coupling also means local LLM context is sufficient — high coupling makes correct edits structurally impossible regardless of context window size.
 
-**Single source of truth.** The typechecker reads FFI cdefs directly — no duplicate type definitions.
+**Never duplicate type definitions.** The typechecker reads FFI cdefs directly. Don't define types separately from cdefs.
 
 ## Workflow
 
