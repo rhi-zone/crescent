@@ -493,6 +493,13 @@ No version numbers, no parsing. `sqlite_master` gives the canonical DDL string; 
 compare is sufficient because DDL is generated from the same source. Matching DDL → safe
 to share. Differing DDL → incompatible apps, operator must resolve before launch.
 
+#### Schema input to `setup_schema()`
+
+Apps pass DDL as raw SQL strings. SQL strings are the ground truth — structured
+definitions, schema files, and type-safe builders all compile down to SQL anyway. A
+structured definition layer is optional and app-level; the primitive the platform
+accepts is always the string.
+
 ### `caps.time` — clock
 
 ```lua
