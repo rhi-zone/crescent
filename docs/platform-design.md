@@ -112,6 +112,42 @@ When someone says "a crescent card" they are talking about a CCv2 card
 that happens to be played by the ccv2 app. The crescent platform does
 not endorse or require that specific pairing.
 
+### Misframings to avoid
+
+Past sessions have repeatedly reached for these wrong patterns. The answer
+to each is "no, that's not what's happening":
+
+- **"Crescent-format card."** Does not exist. There are crescent *apps*.
+  A CCv2 card PNG with a crescent app embedded is a crescent app (which
+  happens to contain CCv2 data). There is no separate "crescent format"
+  to convert to or validate against. Stop reaching for this term.
+
+- **"Tarball apps vs image-carried apps."** Not two schemes. A crescent
+  app *is* a tarball; the `lua` iTXt chunk of a PNG-carried app *is*
+  that tarball (base64'd). The image is an optional wrapper around the
+  same bytes. Whatever is true of "tarball apps" is true of
+  "image-carried apps" too, because they are the same object.
+
+- **"The host's canonical version of the app vs the card's embedded
+  copy."** No such canonical relationship. Each PNG's embedded runtime
+  IS the app when that PNG is launched. The host's installed apps are
+  peers. There is no "stale embedded vs fresh host" to arbitrate; the
+  embedded tarball is the source of truth for its own PNG, period. Any
+  version upgrade would have to be applied per-PNG (e.g. re-import).
+
+- **"Pure CCv2 export" / "strip crescent extensions before sharing."**
+  Pointless. The embedded app and `chara.extensions.*` are additive;
+  the underlying `chara` CCv2 data is never altered. Plain CCv2 tools
+  already read the card correctly. Nothing to strip.
+
+- **"The app is a fallback if the host doesn't have one."** Inverted.
+  The embedded app is the *primary* runtime for that PNG. The host's
+  installed apps are for hosts that are also running *other* PNGs.
+
+- **"Self-containment is a size tradeoff."** No. Self-containment is
+  non-negotiable. Size is not a constraint that can override it; hosts
+  (Chub 25MB+, catbox, etc.) are well above any reasonable app tarball.
+
 ## Launching apps
 
 ```

@@ -324,13 +324,47 @@ conversation view when a message has many branches.
 A card file is a single, complete, portable artifact. **Everything the card
 needs to function as authored must be embedded in the file.** If you copy the
 PNG to another machine, the card works there — same lore, same field edits,
-same linked lorebooks, same author's note. No sidecar files, no external
-fetches, no implicit dependencies on the sender's environment.
+same linked lorebooks, same author's note, *and the runtime that plays it*.
+No sidecar files, no external fetches, no implicit dependencies on the
+sender's environment, no "install the ccv2 app first."
 
 This rules out any "shared asset referenced by URL at runtime" pattern. Shared
 assets must be **vendored** into the card at link time (snapshot embedded in
 the PNG). The reference URL can travel alongside the snapshot for "update
 available" checks, but the card does not *depend* on it being reachable.
+
+### Import is embedding
+
+The ccv2 app's import pipeline's job is simple:
+
+1. **Embed the ccv2 app tarball into the incoming PNG** as the `lua` iTXt
+   chunk (base64(gzip(tar))), plus `lua-manifest` iTXt. The PNG is now a
+   crescent app in addition to being a CCv2 card.
+2. **Write the PNG to the library** (`~/.crescent/apps/`) and index it.
+   The user can now launch it from the library like any other app.
+
+That's the entire operation. There is no "conversion to crescent format"
+because there is no crescent format
+(see `docs/platform-design.md` → "No 'crescent format'").
+
+Implications:
+
+- The `chara` iTXt (CCv2 card data) is never altered by import. Plain CCv2
+  tools (ST, Chub) continue to read the card exactly as before. The
+  embedded app is additive.
+- `chara.extensions.*` fields that the ccv2 app uses (linked_lorebooks,
+  regex_scripts, depth_prompt*, etc.) can be initialized as empty stubs
+  during import or on first use; not material.
+- The PNG's original source (e.g. the file the user dragged in) is *not*
+  rewritten. The library copy is the working copy. The source file is
+  the user's; don't touch it.
+- No "pure CCv2 export" mode. The card is already CCv2-readable as it
+  sits; nothing to strip. An "export" in the sense of sharing the card
+  is just copying the PNG.
+- Each PNG's embedded ccv2 app is *the* app for that PNG. The host's
+  installed ccv2 (if any) is a peer, not a canonical version. Updates to
+  the ccv2 app do not automatically propagate to previously-imported
+  cards; re-importing is the only upgrade path, and it is not automatic.
 
 ### What is card state vs user state
 
