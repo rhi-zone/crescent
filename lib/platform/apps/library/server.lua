@@ -52,7 +52,10 @@ STATIC["index.html"] = [[<!DOCTYPE html>
     <div class="search-bar">
       <input type="text" id="search" placeholder="Search apps..." autocomplete="off">
     </div>
+    <button class="import-btn" id="import-btn">Import Card</button>
+    <input type="file" id="import-file" accept="image/png,.png" hidden>
   </header>
+  <div class="import-error" id="import-error" hidden></div>
   <div class="tag-bar" id="tag-bar"></div>
   <main class="grid" id="grid"></main>
   <div class="empty" id="empty" hidden>No apps found.</div>
@@ -84,6 +87,9 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0
 .card-tags{display:flex;flex-wrap:wrap;gap:.25rem}
 .tag{font-size:.65rem;padding:.125rem .4rem;border-radius:4px;background:#0f3460;color:#a0a0b0}
 .empty{text-align:center;padding:3rem;color:#a0a0b0;font-size:.9rem}
+.import-btn{padding:.4rem .85rem;border-radius:6px;border:1px solid #0f3460;background:transparent;color:#e0e0e0;font-size:.875rem;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.import-btn:hover{border-color:#e94560;color:#e94560}
+.import-error{padding:.5rem 1.5rem;background:#3a1020;color:#ff8099;font-size:.85rem;word-break:break-word;border-bottom:1px solid #6a2040}
 .source-section{border-top:1px solid #0f3460;padding-top:.5rem}
 .source-header{padding:.5rem 1.5rem;font-size:.8rem;font-weight:600;color:#a0a0b0;letter-spacing:.05em;text-transform:uppercase}
 .source-count{font-weight:400;color:#606070;margin-left:.5rem}
@@ -313,6 +319,88 @@ function refreshAll() {
   refresh();
   sourceSections.forEach(function(sec) { sec.reset(q); });
 }
+
+// ── File import (button + drag-drop) ──────────────────────────────────────
+
+const importBtn  = document.getElementById("import-btn");
+const importFile = document.getElementById("import-file");
+const importErr  = document.getElementById("import-error");
+
+function showImportError(msg) {
+  importErr.textContent = msg;
+  importErr.hidden = false;
+}
+
+function clearImportError() {
+  importErr.hidden = true;
+  importErr.textContent = "";
+}
+
+function uploadPng(file, onDone) {
+  file.arrayBuffer().then(function(buf) {
+    return fetch("/api/import-card/upload", {
+      method: "POST",
+      headers: { "Content-Type": "image/png" },
+      body: buf,
+    });
+  }).then(function(r) {
+    return r.json().then(function(data) { return { ok: r.ok, data: data }; });
+  }).then(function(result) {
+    if (result.ok && result.data.launch_url) {
+      clearImportError();
+      onDone(null);
+      refresh();
+    } else {
+      onDone(result.data.error || "Import failed");
+    }
+  }).catch(function(err) {
+    onDone(String(err));
+  });
+}
+
+function importFiles(files) {
+  clearImportError();
+  var pngs = [];
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    if (f.type === "image/png" || f.name.slice(-4).toLowerCase() === ".png") {
+      pngs.push(f);
+    }
+  }
+  if (!pngs.length) { showImportError("No PNG files found in the dropped items."); return; }
+  var errors = [];
+  var remaining = pngs.length;
+  pngs.forEach(function(f) {
+    uploadPng(f, function(err) {
+      if (err) errors.push(f.name + ": " + err);
+      remaining--;
+      if (remaining === 0 && errors.length) {
+        showImportError(errors.join(" | "));
+      }
+    });
+  });
+}
+
+importBtn.addEventListener("click", function() {
+  clearImportError();
+  importFile.value = "";
+  importFile.click();
+});
+
+importFile.addEventListener("change", function() {
+  if (importFile.files && importFile.files.length) {
+    importFiles(importFile.files);
+  }
+});
+
+document.addEventListener("dragover", function(e) { e.preventDefault(); });
+
+document.addEventListener("drop", function(e) {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+    importFiles(e.dataTransfer.files);
+  }
+});
 
 search.addEventListener("input", refreshAll);
 refresh();
