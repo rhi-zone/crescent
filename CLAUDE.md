@@ -52,7 +52,9 @@ cd docs && bun dev           # Local docs
 
 **Something unexpected is a signal, not noise.** Stop and ask why before continuing.
 
-**Default to uncertainty.** State what you think and why, but frame it as a hypothesis. If a design has gaps, say so in the same breath.
+**Confident assertions require proof of work.** Assert confidently only after (1) adversarially reasoning through every plausible alternative and showing each is inferior, AND (2) verifying no downsides to the assertion. If either step is incomplete, say "I don't know" or state an explicitly-flagged hypothesis — then the immediate next step is to verify, not to hedge-word a guess into sounding like knowledge.
+
+Context is poisoned the moment you confidently state something wrong. Retraction does not fully undo it; downstream reasoning is already shaped by the bad claim. Prevention is the only real mitigation — rules that fire after the assertion cannot recover it.
 
 ## Library Conventions
 
@@ -201,11 +203,13 @@ output. Before acting on "the agent must have…", "the file should still be…"
 the file/`git stash` and re-test. Cost of one check is always lower than the
 wrong action plus cleanup.
 
-## Pause before guessing in unfamiliar territory
+## Pause before guessing
 
-If you can't state in one sentence the semantic property your change must
-satisfy, you're guessing — say so and ask, don't ship. Writing another
-syntactic variation of what you just wrote is the loop signal.
+If you can't state in one sentence the property your answer must satisfy,
+you're guessing. Say so and ask, don't answer. Writing another variation of
+what you just said — another interpretation, another proposal, another
+framing — is the loop signal. Applies to any response: code, prose, design
+answers, conversation.
 
 ## Negative Constraints
 
