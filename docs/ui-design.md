@@ -54,7 +54,8 @@ CSS class-based approach: `.toggle--active { background: var(--accent); }`.
 
 ## Lorebook and World Info UX
 
-Both inject keyword-matched context. Lorebook is per-card; World Info is global.
-Mechanically identical, different scope. Long term: consider merging into one panel
-with a scope selector rather than two separate UI surfaces. The cognitive overhead of
-two separate concepts with identical mechanics is not justified.
+Both inject keyword-matched context. Lorebook is per-card (self-contained). World Info
+is global — shared across cards, which breaks card self-containment. This is an
+architectural concern, not just a UI one. See TODO for the design question around app
+and asset versioning/forking. The UI question of whether they should be one panel is
+secondary to first resolving what the data model should be.

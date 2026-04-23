@@ -106,7 +106,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 - [x] Keyboard shortcuts — Escape closes panels, Ctrl+Shift shortcuts for all panels
 - [x] Capability-based I/O migration — 77 libraries migrated from os/io globals to injected functions (time_fn, clock_fn, seed, read_fn, getenv, etc.). Directory-mode apps sandboxed. Safe subsets for jit/bit. No os/io/ffi/debug/package in sandbox.
 - [ ] **ccv2 input toolbar redesign** — currently ~10 buttons (Send, Continue, Impersonate, Export, Settings, Lorebook, World Info, Card Edit, Regex, Group) which is too many. Design: primary actions prominent, secondary actions nearby, everything else behind a toolbar row or overflow menu. See `docs/ui-design.md`.
-- [ ] **ccv2 lorebook/world-info UX** — mechanically identical, different scope. Consider merging into one panel with a scope selector. See `docs/ui-design.md`.
+- [ ] **App/asset versioning and forking** — World Info (global lorebook) exposes a general problem: shared assets (lorebooks, presets, templates) break self-containment for anything that references them. Broader question: how do apps and shared assets version, fork, and update? What is the update/sync story when a shared asset changes? How does import/export work with external dependencies? This is a platform-level design question, not just a card concern — needs a design doc before any implementation.
 - [ ] lua2ts async support (low priority, needs design) — transpile cap calls as `await`, propagate `async` up through callers.
 - [x] lua2ts dep bundling — follow `require()` calls within the tarball and bundle all in-app deps into the JS output.
 - [ ] stb_image_resize FFI binding — thumbnail generation, compiled into binary, zero runtime dep
