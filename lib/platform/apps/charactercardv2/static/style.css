@@ -1460,6 +1460,21 @@ body {
   color: var(--text);
 }
 
+.card-edit-panel__notice {
+  margin: 0.5rem 1rem 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 170, 60, 0.08);
+  color: var(--text);
+  font-size: 0.8125rem;
+  word-break: break-word;
+}
+
+.card-edit-panel__notice[hidden] {
+  display: none;
+}
+
 .card-edit-panel__body {
   padding: 1rem;
   display: flex;
