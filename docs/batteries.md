@@ -108,6 +108,21 @@ frontend. Thumbnail generation via stb_image_resize via FFI.
 | User config (signals) | `lib/platform/caps/config` |
 | Thumbnail generation | stb_image_resize via FFI (compiled in) |
 
+### Group chat app
+
+ST-style group chats: multiple characters active in a single conversation, each driven
+by a separate card. The turn order, speaker selection, and context assembly are all user
+code — not a platform primitive.
+
+This is one approach to multi-character interaction, not the canonical one. The platform
+has no opinion about how multiple characters interact; a group chat app is just a program
+that calls multiple cards in sequence. Other approaches (separate conversations with
+shared worldstate, a taskgraph-orchestrated round-robin, a director LLM picking speakers)
+are equally valid and would be separate apps.
+
+The card app is explicitly out of scope here — it is single-character by design. See
+`docs/card-app-design.md`.
+
 ### Full-stack dashboard
 
 A production admin dashboard/control plane: web backend, auth, database with

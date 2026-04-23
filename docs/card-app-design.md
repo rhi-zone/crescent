@@ -7,6 +7,11 @@ handles all internal navigation.
 > **Status: active design session.** Conversation view is roughed out below.
 > Editor and settings views need their own design pass.
 
+**Scope: single character.** The card app manages one character per conversation.
+Group chat (multiple characters in one conversation) is a different interaction model
+and warrants its own app — the platform doesn't dictate how multi-character
+interactions work. See `docs/batteries.md` for the group chat app entry.
+
 ## Conversation view
 
 The primary view. Minimal — the right things visible, nothing extra.
