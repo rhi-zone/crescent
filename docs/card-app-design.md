@@ -317,6 +317,117 @@ with a **search/filter bar** — type a word to filter previews to matching gree
 tap any preview to jump directly. Same pattern applies to navigating swipes in the
 conversation view when a message has many branches.
 
+## State storage and self-containment
+
+### Self-containment is non-negotiable
+
+A card file is a single, complete, portable artifact. **Everything the card
+needs to function as authored must be embedded in the file.** If you copy the
+PNG to another machine, the card works there — same lore, same field edits,
+same linked lorebooks, same author's note. No sidecar files, no external
+fetches, no implicit dependencies on the sender's environment.
+
+This rules out any "shared asset referenced by URL at runtime" pattern. Shared
+assets must be **vendored** into the card at link time (snapshot embedded in
+the PNG). The reference URL can travel alongside the snapshot for "update
+available" checks, but the card does not *depend* on it being reachable.
+
+### What is card state vs user state
+
+Not everything in the ccv2 app is card state. Card state is "facts about this
+character and its lore"; user state is "my preferences and my context across
+all cards". Two different things, two different stores.
+
+| Bucket                             | Scope | Storage                                  |
+|------------------------------------|-------|------------------------------------------|
+| Card fields (name/description/greeting/etc.) | card  | PNG `chara` JSON, top-level      |
+| Card lorebook                      | card  | PNG `chara.character_book`               |
+| Linked lorebooks (vendored)        | card  | PNG `chara.extensions.linked_lorebooks`  |
+| Author's note                      | card  | PNG `chara.extensions.depth_prompt*`     |
+| Card-embedded regex scripts        | card  | PNG `chara.extensions.regex_scripts`     |
+| LLM connection/generation settings | user  | `caps.kv`                                |
+| Personas                           | user  | `caps.kv`                                |
+| Instruct templates                 | user  | `caps.kv`                                |
+| User lorebooks (see below)         | user  | `caps.kv`                                |
+| Group chat definitions             | session | `caps.kv` (conversation-level, not card) |
+| Active session id                  | session | `caps.kv`                              |
+
+Card-state writes require the `self_write` cap. The app declares `self` (read)
+and `self_write` (write) as separate caps so the operator can grant read-only.
+
+### Migration
+
+One-pass migration on startup. If kv has card-state keys (`lorebook`,
+`card_overrides`, `authors_note`, `regex_scripts`, old `world_info`), bake them
+into the PNG via `caps.self_write.write_metadata("chara", ...)`, then delete
+those keys from kv. Subsequent saves go only to the PNG.
+
+`world_info` migrates specifically into a single entry of the new
+`user_lorebooks` array (see below), named e.g. "Imported" with `active: true`
+— preserves the user's existing entries.
+
+### Write strategy
+
+Card-state writes are **debounced** (100ms). A single lorebook keystroke does
+not trigger a full PNG rewrite; a burst of edits coalesces into one write.
+PNG writes are atomic via `self_write.write_metadata`, so a crash between
+debounce and flush loses at most 100ms of edits.
+
+## Lorebook scope model
+
+Two distinct scopes, both legitimate, both backed by the same data structure:
+
+**Card lorebook(s)** — scope: this card. Card-creator-defined, travels with
+the card. Always active when the card is loaded (no user toggle; the card
+creator decided).
+
+- **Primary**: `character_book` per CCv2 spec. Every card has exactly one.
+- **Linked**: `extensions.linked_lorebooks: [{ source?, name, entries[] }, ...]`.
+  Vendored snapshot + optional source reference. The source is informational
+  (lets the editor prompt "v2 available, re-vendor?") — the card never fetches
+  from the source at runtime.
+
+**User lorebooks** — scope: this user, all conversations. User-maintained
+library of lorebooks; each has an `active` toggle. Active lorebooks merge into
+context for every conversation, regardless of which card.
+
+- `user_lorebooks: [{ id, name, entries[], active }, ...]` in `caps.kv`.
+- Users can add, rename, edit, delete, toggle active.
+- Import UX: paste JSON, upload file, later: paste Chub/ST URL and vendor a
+  snapshot.
+
+### Context assembly
+
+At context-assembly time, merge all of:
+
+1. `card.character_book.entries`
+2. `card.extensions.linked_lorebooks[*].entries` (all, no toggle)
+3. `user_lorebooks[active=true][*].entries`
+
+Run the existing keyword/constant matching over the merged set. Ordering,
+trimming, budget: unchanged.
+
+### UI layout
+
+One "Lorebooks" panel, two sections:
+
+- **Card Lorebooks** — read-only unless `self_write` is granted. Shows
+  `character_book` + each linked lorebook. Each item has CRUD on its entries.
+- **My Lorebooks** — full CRUD. Each book has name + active toggle + entries.
+
+Rationale: scope is the user-visible distinction, so the UI groups by scope.
+Naming is explicit ("Card Lorebooks" / "My Lorebooks") so a new user isn't
+guessing what "World Info" means.
+
+### Deferred
+
+- **Per-card user-toggle overrides** — "sci-fi lorebook active only on cyberpunk
+  cards". Additive on top of the current model (a per-card activation override
+  map). Not first pass.
+- **Chub/ST URL import with re-vendoring** — import UI paste URL, fetch, vendor
+  snapshot in. Data model already supports via `source` field. Fetch mechanism
+  is follow-up.
+
 ## Settings
 
 ### Storage

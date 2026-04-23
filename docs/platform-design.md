@@ -378,6 +378,33 @@ The card data lives in `caps.self.metadata("chara")`. Static assets (HTML/CSS/JS
 live in tarball entries. Format parsing (JSON, base64, etc.) is the app's job —
 the cap returns raw bytes.
 
+### `caps.self_write` — writable app metadata
+
+Read/write variant. Declared as a **separate named cap** (type `self`,
+`writable: true`), not a flag on the read cap. This follows the cap-taxonomy rule
+that each named cap is grant-or-deny with no partial grants — splitting read and
+write into two caps lets the operator grant read while denying write.
+
+```lua
+caps.self_write.metadata(keyword)              -- same as caps.self.metadata
+caps.self_write.entries()                      -- same as caps.self.entries
+caps.self_write.entry(path)                    -- same as caps.self.entry
+caps.self_write.write_metadata(keyword, bytes) -- write/replace image chunk
+```
+
+`write_metadata` is **atomic**: write to a temp file in the same directory, fsync,
+rename. Partial writes cannot corrupt the app file. Errors if the app is
+tar-only (no image container) — `write_metadata` is image-container-only. If the
+format requires auxiliary chunks to stay in sync (e.g. the `lua-manifest` chunk
+is authoritative when present), the cap updates those atomically alongside.
+
+Use case: apps that want to persist state **inside the app file itself** so
+sharing the file shares the state. See the `card-app-design.md` self-containment
+rule for when this matters.
+
+Convention: name the read cap `self` and the write cap `self_write`. Apps that
+need write declare both; apps that only read declare just `self`.
+
 ### `caps.http_server` — inbound HTTP
 
 The platform binds the port and owns the socket. The app provides a request handler.
