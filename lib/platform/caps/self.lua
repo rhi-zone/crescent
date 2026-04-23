@@ -30,6 +30,23 @@ local tar = require("lib.tar")
 
 local M = {}
 
+-- ── Shared helpers ───────────────────────────────────────────────────────────
+
+-- read_app_file(app, check_revoked) -> string | nil, err
+-- Opens app.path, reads all bytes, closes, returns bytes or nil+err.
+--: ({ path: string, ... }, () -> (nil, string) | nil) -> (string | nil, string | nil)
+local function read_app_file(app, check_revoked)
+	local err_nil, err_msg = check_revoked()
+	if err_msg then return err_nil, err_msg end
+	if not app.path then return nil, "app has no file path" end
+	local f0, ferr = io.open(app.path, "rb")
+	if not f0 then return nil, "self.read: " .. tostring(ferr) end
+	local f = assert(f0)
+	local bytes = f:read("*a")
+	f:close()
+	return bytes
+end
+
 -- ── Atomic file write ────────────────────────────────────────────────────────
 -- Write `bytes` to `path` atomically: write to a sibling temp file, close
 -- (flushing stdio buffers to the kernel), then rename over `path`. rename(2)
@@ -112,17 +129,7 @@ function M.self_cap(app, opts)
 		-- read() -> string | nil, err
 		-- Returns the raw bytes of the app file (PNG/tar.gz) from disk.
 		-- Useful for exporting the card as a self-contained file.
-		read = function()
-			local err_nil, err_msg = check_revoked()
-			if err_msg then return err_nil, err_msg end
-			if not app.path then return nil, "app has no file path" end
-			local f0, ferr = io.open(app.path, "rb")
-			if not f0 then return nil, "self.read: " .. tostring(ferr) end
-			local f = assert(f0)
-			local bytes = f:read("*a")
-			f:close()
-			return bytes
-		end,
+		read = function() return read_app_file(app, check_revoked) end,
 	}
 
 	local function revoke()
@@ -173,17 +180,7 @@ function M.self_write_cap(app, opts)
 
 		-- read() -> string | nil, err
 		-- Returns the raw bytes of the app file (PNG/tar.gz) from disk.
-		read = function()
-			local err_nil, err_msg = check_revoked()
-			if err_msg then return err_nil, err_msg end
-			if not app.path then return nil, "app has no file path" end
-			local f0, ferr = io.open(app.path, "rb")
-			if not f0 then return nil, "self.read: " .. tostring(ferr) end
-			local f = assert(f0)
-			local bytes = f:read("*a")
-			f:close()
-			return bytes
-		end,
+		read = function() return read_app_file(app, check_revoked) end,
 
 		-- write_metadata(keyword, bytes) -> true | nil, err
 		-- Replaces (or inserts) the iTXt chunk named `keyword` in the app's
