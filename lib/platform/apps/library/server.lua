@@ -52,6 +52,7 @@ STATIC["index.html"] = [[<!DOCTYPE html>
     <div class="search-bar">
       <input type="text" id="search" placeholder="Search apps..." autocomplete="off">
     </div>
+    <button class="import-btn" id="new-card-btn">New Card</button>
     <button class="import-btn" id="import-btn">Import Card</button>
     <input type="file" id="import-file" accept="image/png,.png" hidden>
   </header>
@@ -322,6 +323,7 @@ function refreshAll() {
 
 // ── File import (button + drag-drop) ──────────────────────────────────────
 
+const newCardBtn = document.getElementById("new-card-btn");
 const importBtn  = document.getElementById("import-btn");
 const importFile = document.getElementById("import-file");
 const importErr  = document.getElementById("import-error");
@@ -380,6 +382,28 @@ function importFiles(files) {
     });
   });
 }
+
+newCardBtn.addEventListener("click", function() {
+  clearImportError();
+  newCardBtn.disabled = true;
+  newCardBtn.textContent = "Creating…";
+  fetch("/api/new-card", { method: "POST" })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(result) {
+      newCardBtn.disabled = false;
+      newCardBtn.textContent = "New Card";
+      if (result.ok && result.data.launch_url) {
+        window.location.href = result.data.launch_url;
+      } else {
+        showImportError(result.data.error || "Failed to create card");
+      }
+    })
+    .catch(function(err) {
+      newCardBtn.disabled = false;
+      newCardBtn.textContent = "New Card";
+      showImportError(String(err));
+    });
+});
 
 importBtn.addEventListener("click", function() {
   clearImportError();

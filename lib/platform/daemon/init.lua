@@ -28,6 +28,8 @@ local json = require("lib.format.json")
 local ratelimit = require("lib.ratelimit")
 local session_store_mod = require("lib.platform.session_store")
 local policy_mod = require("lib.platform.policy")
+local png_mod = require("lib.png")
+local base64_mod = require("lib.base64")
 
 local M = {}
 
@@ -167,6 +169,26 @@ function M.classify_host(host, daemon_host, loopback_ip_to_id)
 
 	return { kind = "unknown", id = nil, loopback = nil }
 end
+
+-- ── Blank card constants ───────────────────────────────────────────────────
+
+-- Minimal 1×1 white PNG (RGB, no alpha). 67 bytes.
+-- Same constant as in lib/platform/apps/charactercardv2/server.lua.
+local BLANK_PNG_1X1 = (
+	"\137PNG\r\n\26\n"
+	.. "\0\0\0\13IHDR"
+	.. "\0\0\0\1\0\0\0\1\8\2\0\0\0"
+	.. "\144\119\83\222"
+	.. "\0\0\0\12IDAT"
+	.. "\8\215c\248\207\192\0\0\0\2\0\1"
+	.. "\226\33\188\51"
+	.. "\0\0\0\0IEND"
+	.. "\174\66\96\130"
+)
+
+-- Minimal CCv2 card JSON for a new blank character.
+--: string
+local BLANK_CHARA_JSON = '{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"New Character","description":"","personality":"","scenario":"","first_mes":"","mes_example":"","creator_notes":"","system_prompt":"","post_history_instructions":"","tags":[],"creator":"","character_version":"","alternate_greetings":[],"extensions":{},"character_book":{"name":"","description":"","scan_depth":50,"token_budget":500,"recursive_scanning":false,"extensions":{},"entries":[]}}}'
 
 -- ── Daemon construction ────────────────────────────────────────────────────
 
@@ -1184,6 +1206,99 @@ function M.make(opts)
 			ok         = true,
 			app_id     = new_app_id,
 			launch_url = "/app/" .. tostring(new_app_id) .. "/",
+		})
+	end)
+
+	-- POST /api/new-card — create a blank CCv2 card, import it, and return {app_id, launch_url}.
+	-- Requires a valid session. No body required.
+	--: (http_req, http_res) -> nil
+	r:post("/api/new-card", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sess_rec = presented and session_get(presented) or nil
+		if not sess_rec then
+			plain(res, 401, "unauthorized")
+			return
+		end
+		session_touch(presented or "", sess_rec)
+
+		if not runtime_files or not runtime_manifest then
+			plain(res, 503, "import not configured")
+			return
+		end
+		if not write_fn or not apps_dir then
+			plain(res, 503, "import not configured")
+			return
+		end
+
+		-- Build blank CCv2 PNG: parse 1×1 white PNG, embed chara iTXt chunk.
+		local chunks, cerr = png_mod.read(BLANK_PNG_1X1)
+		if not chunks then
+			plain(res, 500, "new-card: PNG parse failed: " .. tostring(cerr))
+			return
+		end
+		local chara_b64 = tostring(base64_mod.encode(BLANK_CHARA_JSON))
+		chunks = png_mod.set_itxt(chunks, "chara", chara_b64, { language_tag = "" })
+		local png_bytes, werr = png_mod.write(chunks)
+		if not png_bytes then
+			plain(res, 500, "new-card: PNG write failed: " .. tostring(werr))
+			return
+		end
+
+		-- Run the import pipeline.
+		local app_path, manifest_or_err = import_mod.import_card({
+			png_bytes        = png_bytes,
+			runtime_files    = runtime_files,
+			runtime_manifest = runtime_manifest,
+			apps_dir         = apps_dir,
+			index            = index_obj,
+			timestamp        = time_fn(),
+			write_fn         = write_fn,
+		})
+		if not app_path then
+			plain(res, 500, "import failed: " .. tostring(manifest_or_err))
+			return
+		end
+
+		-- Find the newly installed app id.
+		local new_app_id
+		if index_obj and index_obj.get then
+			local rows = index_obj:list()
+			for _, row in ipairs(rows) do
+				if row.path == app_path then
+					new_app_id = row.id
+					break
+				end
+			end
+		end
+		if not new_app_id then
+			if audit_log then
+				audit_log:append("app_install", { app_id = nil, name = app_path })
+			end
+			res.status = 200
+			res.headers["Content-Type"] = { "application/json" }
+			res.body = json.encode({ ok = true, app_path = app_path })
+			return
+		end
+
+		if audit_log then
+			local install_name = app_path
+			if index_obj and index_obj.get then
+				local irow = index_obj:get(new_app_id)
+				if irow then install_name = irow.name end
+			end
+			audit_log:append("app_install", {
+				app_id = tostring(new_app_id),
+				name   = install_name,
+			})
+		end
+
+		res.status = 200
+		res.headers["Content-Type"] = { "application/json" }
+		res.body = json.encode({
+			ok         = true,
+			app_id     = new_app_id,
+			launch_url = "/launch/" .. tostring(new_app_id),
 		})
 	end)
 
