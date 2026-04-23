@@ -116,7 +116,7 @@ function makeCard(item, onLaunch, onDelete, onImport) {
   card.onclick = onLaunch;
 
   if (item.thumb_url) {
-    var img = document.createElement("img");
+    const img = document.createElement("img");
     img.className = "card-thumb";
     img.src = item.thumb_url;
     img.alt = item.name || "";
@@ -140,7 +140,7 @@ function makeCard(item, onLaunch, onDelete, onImport) {
   if (tags.length) {
     const tagsEl = document.createElement("div");
     tagsEl.className = "card-tags";
-    tags.forEach(function(t) {
+    tags.forEach(t => {
       const tag = document.createElement("span");
       tag.className = "tag";
       tag.textContent = t;
@@ -150,27 +150,27 @@ function makeCard(item, onLaunch, onDelete, onImport) {
   }
 
   if (onDelete) {
-    var del = document.createElement("button");
+    const del = document.createElement("button");
     del.className = "card-delete";
     del.title = "Uninstall";
     del.textContent = "\xD7";
-    del.onclick = function(e) { e.stopPropagation(); onDelete(); };
+    del.onclick = e => { e.stopPropagation(); onDelete(); };
     card.appendChild(del);
   }
 
   if (onImport) {
-    var imp = document.createElement("button");
+    const imp = document.createElement("button");
     imp.className = "card-import";
     imp.title = "Open in conversation";
     imp.textContent = "Open";
-    imp.onclick = function(e) {
+    imp.onclick = e => {
       e.stopPropagation();
       imp.disabled = true;
       imp.textContent = "…";
-      onImport(function(err) {
+      onImport(err => {
         imp.disabled = false;
         imp.textContent = err ? "!" : "Open";
-        if (err) imp.title = "Error: " + err;
+        if (err) imp.title = `Error: ${err}`;
       });
     };
     card.appendChild(imp);
@@ -184,14 +184,14 @@ function makeCard(item, onLaunch, onDelete, onImport) {
 function renderApps(apps) {
   grid.innerHTML = "";
   empty.hidden = apps.length > 0;
-  apps.forEach(function(app) {
+  apps.forEach(app => {
     grid.appendChild(makeCard(
       app,
-      function() { if (app.id) window.location.href = "/launch/" + encodeURIComponent(app.id); },
-      function() {
-        if (!confirm("Uninstall \u201c" + (app.name || "this app") + "\u201d?")) return;
-        fetch("/api/apps/" + encodeURIComponent(app.id), { method: "DELETE" })
-          .then(function(r) { if (r.ok) refresh(); else r.text().then(function(t) { alert("Uninstall failed: " + t); }); });
+      () => { if (app.id) window.location.href = `/launch/${encodeURIComponent(app.id)}`; },
+      async () => {
+        if (!confirm(`Uninstall \u201c${app.name || "this app"}\u201d?`)) return;
+        const r = await fetch(`/api/apps/${encodeURIComponent(app.id)}`, { method: "DELETE" });
+        if (r.ok) { refresh(); } else { alert(`Uninstall failed: ${await r.text()}`); }
       }
     ));
   });
@@ -199,36 +199,35 @@ function renderApps(apps) {
 
 function renderTagBar(apps) {
   const tags = {};
-  apps.forEach(function(app) {
-    (app.tags || []).forEach(function(t) { tags[t] = (tags[t] || 0) + 1; });
+  apps.forEach(app => {
+    (app.tags || []).forEach(t => { tags[t] = (tags[t] || 0) + 1; });
   });
   tagBar.innerHTML = "";
-  var btn = document.createElement("button");
-  btn.className = "tag-btn" + (activeTag === null ? " active" : "");
+  const btn = document.createElement("button");
+  btn.className = `tag-btn${activeTag === null ? " active" : ""}`;
   btn.textContent = "All";
-  btn.onclick = function() { activeTag = null; refresh(); };
+  btn.onclick = () => { activeTag = null; refresh(); };
   tagBar.appendChild(btn);
-  Object.keys(tags).sort().forEach(function(t) {
-    var b = document.createElement("button");
-    b.className = "tag-btn" + (activeTag === t ? " active" : "");
-    b.textContent = t + " (" + tags[t] + ")";
-    b.onclick = function() { activeTag = (activeTag === t) ? null : t; refresh(); };
+  Object.keys(tags).sort().forEach(t => {
+    const b = document.createElement("button");
+    b.className = `tag-btn${activeTag === t ? " active" : ""}`;
+    b.textContent = `${t} (${tags[t]})`;
+    b.onclick = () => { activeTag = (activeTag === t) ? null : t; refresh(); };
     tagBar.appendChild(b);
   });
 }
 
-function refresh() {
-  var q = search.value.trim();
-  var url = "/api/apps";
-  var params = [];
-  if (activeTag) params.push("tag=" + encodeURIComponent(activeTag));
-  if (q) params.push("q=" + encodeURIComponent(q));
-  if (params.length) url += "?" + params.join("&");
+async function refresh() {
+  const q = search.value.trim();
+  let url = "/api/apps";
+  const params = [];
+  if (activeTag) params.push(`tag=${encodeURIComponent(activeTag)}`);
+  if (q) params.push(`q=${encodeURIComponent(q)}`);
+  if (params.length) url += `?${params.join("&")}`;
 
-  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-    renderApps(data.apps || []);
-    if (!q && !activeTag) renderTagBar(data.apps || []);
-  });
+  const data = await fetch(url).then(r => r.json());
+  renderApps(data.apps || []);
+  if (!q && !activeTag) renderTagBar(data.apps || []);
 }
 
 // ── Source adapter sections ────────────────────────────────────────────────
@@ -257,37 +256,38 @@ function makeSourceSection(src) {
   more.hidden = true;
   section.appendChild(more);
 
-  var offset = 0;
-  var total = 0;
-  var generation = 0;
-  var LIMIT = 200;
+  let offset = 0;
+  let total = 0;
+  let generation = 0;
+  const LIMIT = 200;
 
-  function loadPage(q) {
-    var gen = generation;
-    var url = "/api/sources/" + encodeURIComponent(src.id) + "/discover?limit=" + LIMIT + "&offset=" + offset;
-    if (q) url += "&q=" + encodeURIComponent(q);
-    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-      if (gen !== generation) return;
-      total = data.total || 0;
-      var entries = data.entries || [];
-      entries.forEach(function(e) {
-        var launchUrl = "/launch/" + encodeURIComponent(src.id) + "?entry=" + encodeURIComponent(e.id);
-        var importUrl = "/api/import-card?source=" + encodeURIComponent(src.id) + "&entry=" + encodeURIComponent(e.id);
-        sgrid.appendChild(makeCard(e, function() { window.location.href = launchUrl; }, null, function(done) {
-          fetch(importUrl, { method: "POST" }).then(function(r) { return r.json(); }).then(function(data) {
-            if (data.launch_url) { window.location.href = data.launch_url; }
-            else { done(data.error || "unknown error"); }
-          }).catch(function(err) { done(String(err)); });
-        }));
-      });
-      offset += entries.length;
-      count.textContent = "(" + offset + " of " + total + ")";
-      more.hidden = offset >= total;
-      more.textContent = "Load more \u2014 " + (total - offset) + " remaining";
+  async function loadPage(q) {
+    const gen = generation;
+    let url = `/api/sources/${encodeURIComponent(src.id)}/discover?limit=${LIMIT}&offset=${offset}`;
+    if (q) url += `&q=${encodeURIComponent(q)}`;
+    const data = await fetch(url).then(r => r.json());
+    if (gen !== generation) return;
+    total = data.total || 0;
+    const entries = data.entries || [];
+    entries.forEach(e => {
+      const launchUrl = `/launch/${encodeURIComponent(src.id)}?entry=${encodeURIComponent(e.id)}`;
+      const importUrl = `/api/import-card?source=${encodeURIComponent(src.id)}&entry=${encodeURIComponent(e.id)}`;
+      sgrid.appendChild(makeCard(e, () => { window.location.href = launchUrl; }, null, async done => {
+        try {
+          const r = await fetch(importUrl, { method: "POST" });
+          const data = await r.json();
+          if (data.launch_url) { window.location.href = data.launch_url; }
+          else { done(data.error || "unknown error"); }
+        } catch (err) { done(String(err)); }
+      }));
     });
+    offset += entries.length;
+    count.textContent = `(${offset} of ${total})`;
+    more.hidden = offset >= total;
+    more.textContent = `Load more \u2014 ${total - offset} remaining`;
   }
 
-  more.onclick = function() { loadPage(search.value.trim()); };
+  more.onclick = () => { loadPage(search.value.trim()); };
 
   function reset(q) {
     generation++;
@@ -301,23 +301,22 @@ function makeSourceSection(src) {
   return { el: section, loadPage: loadPage, reset: reset };
 }
 
-var sourceSections = [];
+const sourceSections = [];
 
-function loadSources() {
-  fetch("/api/sources").then(function(r) { return r.json(); }).then(function(data) {
-    (data.sources || []).forEach(function(src) {
-      var sec = makeSourceSection(src);
-      sourceSections.push(sec);
-      appEl.appendChild(sec.el);
-      sec.loadPage("");
-    });
+async function loadSources() {
+  const data = await fetch("/api/sources").then(r => r.json());
+  (data.sources || []).forEach(src => {
+    const sec = makeSourceSection(src);
+    sourceSections.push(sec);
+    appEl.appendChild(sec.el);
+    sec.loadPage("");
   });
 }
 
 function refreshAll() {
-  var q = search.value.trim();
+  const q = search.value.trim();
   refresh();
-  sourceSections.forEach(function(sec) { sec.reset(q); });
+  sourceSections.forEach(sec => { sec.reset(q); });
 }
 
 // ── File import (button + drag-drop) ──────────────────────────────────────
@@ -336,47 +335,46 @@ function clearImportError() {
   importErr.textContent = "";
 }
 
-function uploadApp(file, onDone) {
-  file.arrayBuffer().then(function(buf) {
-    return fetch("/api/import-card/upload", {
+async function uploadApp(file, onDone) {
+  try {
+    const buf = await file.arrayBuffer();
+    const r = await fetch("/api/import-card/upload", {
       method: "POST",
       headers: { "Content-Type": file.type || "application/octet-stream" },
       body: buf,
     });
-  }).then(function(r) {
-    return r.json().then(function(data) { return { ok: r.ok, data: data }; });
-  }).then(function(result) {
-    if (result.ok && result.data.launch_url) {
+    const data = await r.json();
+    if (r.ok && data.launch_url) {
       clearImportError();
       onDone(null);
       refresh();
     } else {
-      onDone(result.data.error || "Import failed");
+      onDone(data.error || "Import failed");
     }
-  }).catch(function(err) {
+  } catch (err) {
     onDone(String(err));
-  });
+  }
 }
 
-function isImportable(f) {
+const isImportable = f => {
   if (f.type === "image/png" || f.name.slice(-4).toLowerCase() === ".png") return true;
-  var name = f.name.toLowerCase();
+  const name = f.name.toLowerCase();
   if (name.slice(-7) === ".tar.gz" || name.slice(-4) === ".tgz") return true;
   return false;
-}
+};
 
 function importFiles(files) {
   clearImportError();
-  var apps = [];
-  for (var i = 0; i < files.length; i++) {
+  const apps = [];
+  for (let i = 0; i < files.length; i++) {
     if (isImportable(files[i])) apps.push(files[i]);
   }
   if (!apps.length) { showImportError("No importable files found. Supported: .png, .tar.gz, .tgz"); return; }
-  var errors = [];
-  var remaining = apps.length;
-  apps.forEach(function(f) {
-    uploadApp(f, function(err) {
-      if (err) errors.push(f.name + ": " + err);
+  const errors = [];
+  let remaining = apps.length;
+  apps.forEach(f => {
+    uploadApp(f, err => {
+      if (err) errors.push(`${f.name}: ${err}`);
       remaining--;
       if (remaining === 0 && errors.length) {
         showImportError(errors.join(" | "));
@@ -385,21 +383,21 @@ function importFiles(files) {
   });
 }
 
-importBtn.addEventListener("click", function() {
+importBtn.addEventListener("click", () => {
   clearImportError();
   importFile.value = "";
   importFile.click();
 });
 
-importFile.addEventListener("change", function() {
+importFile.addEventListener("change", () => {
   if (importFile.files && importFile.files.length) {
     importFiles(importFile.files);
   }
 });
 
-document.addEventListener("dragover", function(e) { e.preventDefault(); });
+document.addEventListener("dragover", e => { e.preventDefault(); });
 
-document.addEventListener("drop", function(e) {
+document.addEventListener("drop", e => {
   e.preventDefault();
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
     importFiles(e.dataTransfer.files);
