@@ -1249,13 +1249,20 @@ end
 
 -- ── API endpoints ───────────────────────────────────────────────────────────
 
-local function api_get_card(state, _caps, _params, _body, res)
+local function api_get_card(state, caps, _params, _body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
 	local path = get_canonical_path(state)
 	local data = { name = state.card.name }
 	if path and #path > 0 and path[1].role == "assistant" then
 		data.greeting = msg_response(state, path[1])
 	end
+	-- writable: true iff self_write is granted AND we have a chara chunk to
+	-- write back to. Frontend uses this to gate the "read-only" notice on the
+	-- Card Lorebook panel — edits still persist via kv fallback, but they
+	-- won't ride with the card PNG.
+	data.writable = caps.self_write ~= nil
+		and caps.self_write.write_metadata ~= nil
+		and state.card ~= nil
 	return json_ok(res, data)
 end
 
@@ -1899,125 +1906,6 @@ local function api_post_user_lorebook_entry_delete(state, caps, params, body, re
 	return json_err(res, 404, "entry not found")
 end
 
--- ── DEPRECATED: /api/world_info/* adapters ──────────────────────────────────
---
--- Shims that map the old per-entry world_info endpoints onto the first
--- user lorebook (creating an "Imported" book on demand). Remove once the UI
--- is migrated to the /api/user_lorebooks/* endpoints.
-
-local function ensure_default_user_book(state, caps)
-	if #state.user_lorebooks == 0 then
-		local book = {
-			id = gen_book_id(caps.time and caps.time.now),
-			name = "Default",
-			entries = {},
-			active = true,
-		}
-		state.user_lorebooks[1] = book
-		save_user_lorebooks(state, caps)
-	end
-	return state.user_lorebooks[1]
-end
-
-local function api_get_world_info(state, _caps, _params, _body, res)
-	-- Merged view over all books (UI sees a flat list during migration window).
-	local result = {}
-	for _, b in ipairs(state.user_lorebooks) do
-		for _, e in ipairs(b.entries or {}) do
-			result[#result + 1] = entry_to_json(e)
-		end
-	end
-	return json_ok(res, { entries = result })
-end
-
-local function api_post_world_info_update(state, caps, _params, body, res)
-	if not body or not body.uid then return json_err(res, 400, "uid required") end
-	for _, b in ipairs(state.user_lorebooks) do
-		for _, e in ipairs(b.entries or {}) do
-			if e.uid == body.uid then
-				if body.keys ~= nil then e.key = body.keys end
-				if body.content ~= nil then e.content = body.content end
-				if body.enabled ~= nil then e.enabled = body.enabled end
-				if body.constant ~= nil then e.constant = body.constant end
-				if body.position ~= nil then e.position = body.position end
-				if body.order ~= nil then e.order = body.order end
-				if body.role ~= nil then e.role = body.role end
-				save_user_lorebooks(state, caps)
-				return json_ok(res, entry_to_json(e))
-			end
-		end
-	end
-	return json_err(res, 404, "entry not found")
-end
-
-local function api_post_world_info_add(state, caps, _params, body, res)
-	if not body or not body.keys or not body.content then
-		return json_err(res, 400, "keys and content required")
-	end
-	local book = ensure_default_user_book(state, caps)
-	local entry = lorebook_mod.normalize({
-		key = body.keys,
-		content = body.content,
-		enabled = body.enabled,
-		constant = body.constant,
-		position = body.position,
-		order = body.order,
-		role = body.role,
-	})
-	book.entries[#book.entries + 1] = entry
-	save_user_lorebooks(state, caps)
-	return json_ok(res, entry_to_json(entry))
-end
-
-local function api_post_world_info_delete(state, caps, _params, body, res)
-	if not body or not body.uid then return json_err(res, 400, "uid required") end
-	for _, b in ipairs(state.user_lorebooks) do
-		for i, e in ipairs(b.entries or {}) do
-			if e.uid == body.uid then
-				table.remove(b.entries, i)
-				save_user_lorebooks(state, caps)
-				return json_ok(res, { deleted = true })
-			end
-		end
-	end
-	return json_err(res, 404, "entry not found")
-end
-
-local function api_post_world_info_import(state, caps, _params, body, res)
-	if not body or not body.entries or type(body.entries) ~= "table" then
-		return json_err(res, 400, "entries array required")
-	end
-	local book = ensure_default_user_book(state, caps)
-	for _, raw in ipairs(body.entries) do
-		local entry = lorebook_mod.normalize({
-			key = raw.keys or raw.key,
-			content = raw.content,
-			enabled = raw.enabled,
-			constant = raw.constant,
-			position = raw.position,
-			order = raw.order,
-			role = raw.role,
-		})
-		book.entries[#book.entries + 1] = entry
-	end
-	save_user_lorebooks(state, caps)
-	local result = {}
-	for _, e in ipairs(book.entries) do
-		result[#result + 1] = entry_to_json(e)
-	end
-	return json_ok(res, { entries = result, imported = #body.entries })
-end
-
-local function api_get_world_info_export(state, _caps, _params, _body, res)
-	local result = {}
-	for _, b in ipairs(state.user_lorebooks) do
-		for _, e in ipairs(b.entries or {}) do
-			result[#result + 1] = entry_to_json(e)
-		end
-	end
-	return json_ok(res, { entries = result })
-end
-
 -- ── Persona endpoints helpers ──────────────────────────────────────────────
 
 local function save_personas(state, caps)
@@ -2568,14 +2456,6 @@ local routes = {
 	["POST /api/user_lorebooks/entry/add"]     = api_post_user_lorebook_entry_add,
 	["POST /api/user_lorebooks/entry/update"]  = api_post_user_lorebook_entry_update,
 	["POST /api/user_lorebooks/entry/delete"]  = api_post_user_lorebook_entry_delete,
-	-- DEPRECATED: /api/world_info/* adapters over user_lorebooks. Remove once
-	-- the UI migrates to /api/user_lorebooks/*. Operates on a merged view.
-	["GET /api/world_info"]          = api_get_world_info,
-	["POST /api/world_info/update"]  = api_post_world_info_update,
-	["POST /api/world_info/add"]     = api_post_world_info_add,
-	["POST /api/world_info/delete"]  = api_post_world_info_delete,
-	["POST /api/world_info/import"]  = api_post_world_info_import,
-	["GET /api/world_info/export"]   = api_get_world_info_export,
 	["GET /api/sessions"]         = api_get_sessions,
 	["POST /api/session/new"]     = api_post_session_new,
 	["POST /api/session/switch"]  = api_post_session_switch,
