@@ -52,7 +52,7 @@ STATIC["index.html"] = [[<!DOCTYPE html>
     <div class="search-bar">
       <input type="text" id="search" placeholder="Search apps..." autocomplete="off">
     </div>
-    <button class="import-btn" id="import-btn">Import Card</button>
+    <button class="import-btn" id="import-btn">Import</button>
     <input type="file" id="import-file" accept="image/png,.png" hidden>
   </header>
   <div class="import-error" id="import-error" hidden></div>
