@@ -12,14 +12,16 @@
       <img class="message__avatar" src="/api/avatar" alt="" hidden>
       <div class="message__speaker" hidden></div>
       <div class="message__content"></div>
-      <div class="message__actions" hidden>
-        <button class="message__action-button" data-action="edit">Edit</button>
-        <button class="message__action-button" data-action="delete">Delete</button>
-      </div>
-      <div class="message__swipe" hidden>
-        <button class="message__swipe-button" data-dir="prev">&lt;</button>
-        <span class="message__swipe-label"></span>
-        <button class="message__swipe-button" data-dir="next">&gt;</button>
+      <div class="message__footer">
+        <div class="message__swipe" hidden>
+          <button class="message__swipe-button" data-dir="prev">&lt;</button>
+          <span class="message__swipe-label"></span>
+          <button class="message__swipe-button" data-dir="next">&gt;</button>
+        </div>
+        <div class="message__actions">
+          <button class="message__action-button" data-action="edit">Edit</button>
+          <button class="message__action-button message__action-button--delete" data-action="delete">Delete</button>
+        </div>
       </div>
     </div>
   </template>
@@ -58,7 +60,7 @@
 
   <div class="authors-note-bar" id="authors-note-bar">
     <button class="authors-note-bar__toggle" id="an-toggle" title="Author's Note">AN</button>
-    <div class="authors-note-bar__panel" id="an-panel" hidden>
+    <div class="authors-note-bar__panel" id="an-panel">
       <textarea class="authors-note-bar__textarea" id="an-text" rows="2" placeholder="Author's Note (injected into context at depth)..."></textarea>
       <div class="authors-note-bar__controls">
         <label class="authors-note-bar__field">

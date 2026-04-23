@@ -48,7 +48,13 @@ mod.make_connection_handler = function (handler, epoll)
 				handler.ws_open(client, send, close)
 			end
 		else
-			handler.http(req, res, client)
+			local ok, err = pcall(handler.http, req, res, client)
+			if not ok then
+				local msg = tostring(err):gsub('"', '\\"')
+				res.status = 500
+				res.headers["Content-Type"] = "application/json"
+				res.body = '{"error":"' .. msg .. '"}'
+			end
 			client:send(http.serialize_response(res))
 			client:close()
 		end

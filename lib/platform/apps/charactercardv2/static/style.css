@@ -271,14 +271,29 @@ body {
   opacity: 0.6;
 }
 
+/* Message footer (swipe + actions row) */
+
+.message__footer {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.message:hover:not(.message--editing) .message__footer {
+  display: flex;
+}
+
 /* Message actions (edit/delete) */
 
 .message__actions {
-  position: absolute;
-  top: 0.375rem;
-  right: 0.375rem;
   display: flex;
   gap: 0.25rem;
+  margin-left: auto;
+}
+
+.message__action-button--delete {
+  color: #f44336;
 }
 
 .message__action-button {
@@ -362,9 +377,10 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--glass-border);
+}
+
+.message__swipe[hidden] {
+  display: none;
 }
 
 .message__swipe-label {
@@ -488,15 +504,24 @@ body {
   color: var(--button-text);
 }
 
+.authors-note-bar__toggle--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--button-text);
+}
+
 .authors-note-bar__panel {
   margin-top: 0.375rem;
   display: flex;
   flex-direction: column;
   gap: 0.375rem;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
 }
 
-.authors-note-bar__panel[hidden] {
-  display: none;
+.authors-note-bar__panel--open {
+  max-height: 200px;
 }
 
 .authors-note-bar__textarea {
