@@ -1133,10 +1133,12 @@ function M.make(opts)
 			return
 		end
 
-		-- Validate raw PNG body.
+		-- Validate body: accept PNG (\x89PNG) or gzip/tar.gz (\x1f\x8b).
 		local png_bytes = req.body or ""
-		if #png_bytes < 4 or png_bytes:sub(1, 4) ~= "\x89PNG" then
-			plain(res, 400, "body must be a PNG file")
+		local magic2 = png_bytes:sub(1, 2)
+		local magic4 = png_bytes:sub(1, 4)
+		if #png_bytes < 4 or (magic4 ~= "\x89PNG" and magic2 ~= "\x1f\x8b") then
+			plain(res, 400, "body must be a PNG or gzip/tar.gz app file")
 			return
 		end
 

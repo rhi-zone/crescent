@@ -53,7 +53,7 @@ STATIC["index.html"] = [[<!DOCTYPE html>
       <input type="text" id="search" placeholder="Search apps..." autocomplete="off">
     </div>
     <button class="import-btn" id="import-btn">Import</button>
-    <input type="file" id="import-file" accept="image/png,.png" hidden>
+    <input type="file" id="import-file" accept="image/png,.png,.tar.gz,.tgz,application/gzip,application/x-tar" multiple hidden>
   </header>
   <div class="import-error" id="import-error" hidden></div>
   <div class="tag-bar" id="tag-bar"></div>
@@ -336,11 +336,11 @@ function clearImportError() {
   importErr.textContent = "";
 }
 
-function uploadPng(file, onDone) {
+function uploadApp(file, onDone) {
   file.arrayBuffer().then(function(buf) {
     return fetch("/api/import-card/upload", {
       method: "POST",
-      headers: { "Content-Type": "image/png" },
+      headers: { "Content-Type": file.type || "application/octet-stream" },
       body: buf,
     });
   }).then(function(r) {
@@ -358,20 +358,24 @@ function uploadPng(file, onDone) {
   });
 }
 
+function isImportable(f) {
+  if (f.type === "image/png" || f.name.slice(-4).toLowerCase() === ".png") return true;
+  var name = f.name.toLowerCase();
+  if (name.slice(-7) === ".tar.gz" || name.slice(-4) === ".tgz") return true;
+  return false;
+}
+
 function importFiles(files) {
   clearImportError();
-  var pngs = [];
+  var apps = [];
   for (var i = 0; i < files.length; i++) {
-    var f = files[i];
-    if (f.type === "image/png" || f.name.slice(-4).toLowerCase() === ".png") {
-      pngs.push(f);
-    }
+    if (isImportable(files[i])) apps.push(files[i]);
   }
-  if (!pngs.length) { showImportError("No PNG files found in the dropped items."); return; }
+  if (!apps.length) { showImportError("No importable files found. Supported: .png, .tar.gz, .tgz"); return; }
   var errors = [];
-  var remaining = pngs.length;
-  pngs.forEach(function(f) {
-    uploadPng(f, function(err) {
+  var remaining = apps.length;
+  apps.forEach(function(f) {
+    uploadApp(f, function(err) {
       if (err) errors.push(f.name + ": " + err);
       remaining--;
       if (remaining === 0 && errors.length) {
