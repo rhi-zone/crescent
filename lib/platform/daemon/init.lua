@@ -1098,6 +1098,95 @@ function M.make(opts)
 		})
 	end)
 
+	-- POST /api/import-card/upload — import a directly-uploaded PNG as a new CCv2 app.
+	-- Body: raw PNG bytes. Requires a valid session.
+	-- Returns JSON {app_id, launch_url} same as /api/import-card.
+	--: (http_req, http_res) -> nil
+	r:post("/api/import-card/upload", function(req, res)
+		local req_headers = req.headers or {}
+		local presented = get_cookie(req_headers, "__Host-session")
+		local sess_rec = presented and session_get(presented) or nil
+		if not sess_rec then
+			plain(res, 401, "unauthorized")
+			return
+		end
+		session_touch(presented or "", sess_rec)
+
+		if not runtime_files or not runtime_manifest then
+			plain(res, 503, "import not configured")
+			return
+		end
+		if not write_fn or not apps_dir then
+			plain(res, 503, "import not configured")
+			return
+		end
+
+		-- Validate raw PNG body.
+		local png_bytes = req.body or ""
+		if #png_bytes < 4 or png_bytes:sub(1, 4) ~= "\x89PNG" then
+			plain(res, 400, "body must be a PNG file")
+			return
+		end
+
+		-- Run the import pipeline.
+		local app_path, manifest_or_err = import_mod.import_card({
+			png_bytes        = png_bytes,
+			runtime_files    = runtime_files,
+			runtime_manifest = runtime_manifest,
+			apps_dir         = apps_dir,
+			index            = index_obj,
+			timestamp        = time_fn(),
+			write_fn         = write_fn,
+		})
+		if not app_path then
+			plain(res, 500, "import failed: " .. tostring(manifest_or_err))
+			return
+		end
+
+		-- Find the newly installed app id.
+		local new_app_id
+		if index_obj and index_obj.get then
+			-- The app was indexed by import_card; find by path.
+			local rows = index_obj:list()
+			for _, row in ipairs(rows) do
+				if row.path == app_path then
+					new_app_id = row.id
+					break
+				end
+			end
+		end
+		if not new_app_id then
+			-- import succeeded but we can't find the id — still a partial success
+			if audit_log then
+				audit_log:append("app_install", { app_id = nil, name = app_path })
+			end
+			res.status = 200
+			res.headers["Content-Type"] = { "application/json" }
+			res.body = json.encode({ ok = true, app_path = app_path })
+			return
+		end
+
+		if audit_log then
+			local install_name = app_path
+			if index_obj and index_obj.get then
+				local irow = index_obj:get(new_app_id)
+				if irow then install_name = irow.name end
+			end
+			audit_log:append("app_install", {
+				app_id = tostring(new_app_id),
+				name   = install_name,
+			})
+		end
+
+		res.status = 200
+		res.headers["Content-Type"] = { "application/json" }
+		res.body = json.encode({
+			ok         = true,
+			app_id     = new_app_id,
+			launch_url = "/app/" .. tostring(new_app_id) .. "/",
+		})
+	end)
+
 	-- /launch/:id — mint a one-shot launch token bound to the current session
 	-- and 303-redirect to the app origin with `?__launch=<hex>`. The browser
 	-- follows the redirect; the app-origin branch below consumes the token

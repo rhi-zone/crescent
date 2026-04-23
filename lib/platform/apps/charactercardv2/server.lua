@@ -29,6 +29,7 @@ local macro_mod = require("lib.formats.ccv2.macro")
 local lorebook_mod = require("lib.formats.ccv2.lorebook")
 local presets_mod = require("lib.platform.apps.charactercardv2.presets")
 local base64_mod = require("lib.encode.base64")
+local png_mod = require("lib.png")
 
 local M = {}
 
@@ -1264,6 +1265,25 @@ local function api_get_card(state, caps, _params, _body, res)
 		and caps.self_write.write_metadata ~= nil
 		and state.card ~= nil
 	return json_ok(res, data)
+end
+
+-- api_get_card_export: stream the card PNG as a file download.
+-- Requires caps.self.read (read-only self cap is sufficient).
+local function api_get_card_export(state, caps, _params, _body, res)
+	if not caps.self or not caps.self.read then
+		return json_err(res, 503, "self cap not available")
+	end
+	local bytes, rerr = caps.self.read()
+	if not bytes then
+		return json_err(res, 500, "export: " .. tostring(rerr))
+	end
+	local card_name = (state.card and state.card.name) or "card"
+	local safe_name = card_name:gsub('[/\\:*?"<>|]', "_")
+	res.status = 200
+	res.headers["Content-Type"] = "image/png"
+	res.headers["Content-Disposition"] = 'attachment; filename="' .. safe_name .. '.png"'
+	res.body = bytes
+	return true
 end
 
 local function api_get_avatar(_state, caps, _params, _body, res)
@@ -2511,10 +2531,52 @@ local function api_post_connection_test(state, caps, params, body, res)
 	end
 end
 
+-- ── New Card ────────────────────────────────────────────────────────────────
+
+-- Minimal 1×1 white PNG (RGB, no alpha). 67 bytes.
+-- PNG sig + IHDR + IDAT (zlib-compressed single white pixel) + IEND.
+local BLANK_PNG_1X1 = (
+	"\137PNG\r\n\26\n"                                -- PNG signature
+	.. "\0\0\0\13IHDR"                               -- IHDR length + type
+	.. "\0\0\0\1\0\0\0\1\8\2\0\0\0"                  -- 1×1, 8-bit RGB
+	.. "\144\119\83\222"                              -- IHDR CRC
+	.. "\0\0\0\12IDAT"                               -- IDAT length + type
+	.. "\8\215c\248\207\192\0\0\0\2\0\1"             -- zlib(filter=0, 255,255,255)
+	.. "\226\33\188\51"                              -- IDAT CRC
+	.. "\0\0\0\0IEND"                                -- IEND length + type
+	.. "\174\66\96\130"                              -- IEND CRC
+)
+
+-- Minimal CCv2 card JSON for a new blank character.
+--: string
+local BLANK_CHARA_JSON = '{"spec":"chara_card_v2","spec_version":"2.0","data":{"name":"New Character","description":"","personality":"","scenario":"","first_mes":"","mes_example":"","creator_notes":"","system_prompt":"","post_history_instructions":"","tags":[],"creator":"","character_version":"","alternate_greetings":[],"extensions":{},"character_book":{"name":"","description":"","scan_depth":50,"token_budget":500,"recursive_scanning":false,"extensions":{},"entries":[]}}}'
+
+-- api_post_new_card: build a blank CCv2 PNG and return it as a file download.
+-- The client receives a PNG the user can import to create a new card.
+local function api_post_new_card(_state, _caps, _params, _body, res)
+	local chunks, cerr = png_mod.read(BLANK_PNG_1X1)
+	if not chunks then
+		return json_err(res, 500, "new-card: PNG parse failed: " .. tostring(cerr))
+	end
+	--: string
+	local chara_b64 = tostring(base64_mod.encode(BLANK_CHARA_JSON))
+	chunks = png_mod.set_itxt(chunks, "chara", chara_b64, { language_tag = "" })
+	local png_bytes, werr = png_mod.write(chunks)
+	if not png_bytes then
+		return json_err(res, 500, "new-card: PNG write failed: " .. tostring(werr))
+	end
+	res.status = 200
+	res.headers["Content-Type"] = "image/png"
+	res.headers["Content-Disposition"] = 'attachment; filename="new-character.png"'
+	res.body = png_bytes
+	return true
+end
+
 -- ── Router ──────────────────────────────────────────────────────────────────
 
 local routes = {
 	["GET /api/card"]             = api_get_card,
+	["GET /api/card/export"]      = api_get_card_export,
 	["GET /api/avatar"]           = api_get_avatar,
 	["GET /api/messages"]         = api_get_messages,
 	["POST /api/message"]         = api_post_message,
@@ -2570,6 +2632,7 @@ local routes = {
 	["POST /api/authors_note"]      = api_post_authors_note,
 	["GET /api/export/chat"]        = api_get_export_chat,
 	["POST /api/connection/test"]    = api_post_connection_test,
+	["POST /api/new-card"]           = api_post_new_card,
 	["GET /api/instruct"]             = api_get_instruct,
 	["POST /api/instruct/save"]       = api_post_instruct_save,
 	["POST /api/instruct/delete"]     = api_post_instruct_delete,

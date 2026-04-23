@@ -108,6 +108,21 @@ function M.self_cap(app, opts)
 			if err_msg then return err_nil, err_msg end
 			return tar.get(app.entries, path)
 		end,
+
+		-- read() -> string | nil, err
+		-- Returns the raw bytes of the app file (PNG/tar.gz) from disk.
+		-- Useful for exporting the card as a self-contained file.
+		read = function()
+			local err_nil, err_msg = check_revoked()
+			if err_msg then return err_nil, err_msg end
+			if not app.path then return nil, "app has no file path" end
+			local f0, ferr = io.open(app.path, "rb")
+			if not f0 then return nil, "self.read: " .. tostring(ferr) end
+			local f = assert(f0)
+			local bytes = f:read("*a")
+			f:close()
+			return bytes
+		end,
 	}
 
 	local function revoke()
@@ -154,6 +169,20 @@ function M.self_write_cap(app, opts)
 			local err_nil, err_msg = check_revoked()
 			if err_msg then return err_nil, err_msg end
 			return tar.get(app.entries, path)
+		end,
+
+		-- read() -> string | nil, err
+		-- Returns the raw bytes of the app file (PNG/tar.gz) from disk.
+		read = function()
+			local err_nil, err_msg = check_revoked()
+			if err_msg then return err_nil, err_msg end
+			if not app.path then return nil, "app has no file path" end
+			local f0, ferr = io.open(app.path, "rb")
+			if not f0 then return nil, "self.read: " .. tostring(ferr) end
+			local f = assert(f0)
+			local bytes = f:read("*a")
+			f:close()
+			return bytes
 		end,
 
 		-- write_metadata(keyword, bytes) -> true | nil, err
