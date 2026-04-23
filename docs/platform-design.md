@@ -77,6 +77,41 @@ The platform:
 
 The platform has no opinion about what the script does. The script is the program.
 
+### Layering: platform carriers vs app data
+
+When an app is distributed as an image (PNG/JPEG/WebP), the image's metadata
+chunks are divided across two distinct layers:
+
+- **Platform layer** — `lua` iTXt chunk (base64(gzip(tarball))), `lua-manifest`
+  iTXt chunk (raw manifest JSON as a fast-path read). These belong to the
+  platform. Their presence and semantics are platform concerns. Every app
+  distributed as an image uses these chunks regardless of what domain it
+  operates in.
+- **App layer** — chunks whose names and contents are defined by whatever
+  format the app operates on (e.g. `chara` for a CCv2-aware app, `exif` for
+  an image-metadata app). The platform treats these as opaque passthrough
+  data.
+
+**Platform payload never goes inside an app-format chunk.** Embedding the
+platform tarball inside `chara.extensions.*` or any other app-layer namespace
+inverts the layering — it makes the platform an extension of that one app
+format instead of the other way around. The `lua` / `lua-manifest` chunks
+are the right carrier: platform-scoped, app-format-agnostic, compatible
+with any image app regardless of what else lives in the file.
+
+### No "crescent format"
+
+Crescent has no card format, no document format, no format at all. The
+platform carries whatever formats the apps bring. The ccv2 app extends
+CCv2 via `chara.extensions.*`, but those extensions are ccv2-app-scoped —
+they're not a "crescent card format". A different image-handling app
+could use entirely different chunks and formats. Apps innovate on format;
+the platform does not.
+
+When someone says "a crescent card" they are talking about a CCv2 card
+that happens to be played by the ccv2 app. The crescent platform does
+not endorse or require that specific pairing.
+
 ## Launching apps
 
 ```
