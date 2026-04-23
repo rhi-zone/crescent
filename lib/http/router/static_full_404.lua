@@ -1,4 +1,4 @@
-local static_router = require("lib.http.router.staticx").router
+local static_router = require("lib.http.router.static_full").router
 
 local mod = {}
 
