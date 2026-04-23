@@ -96,9 +96,10 @@ describe("ai", function()
 					model = "llama-3-70b",
 					messages = { { role = "user", content = "hi" } },
 				})
-				-- Should fail with "GROQ_API_KEY not set", NOT "unknown provider"
+				-- Should fail with "api_key is required", NOT "unknown provider"
+				-- (resolution succeeded but the provider rejected the missing key).
 				T.eq(res, nil)
-				T.ok(err:find("GROQ_API_KEY"), "groq resolved from compat registry")
+				T.ok(err:find("api_key"), "groq resolved from compat registry")
 			end
 		end)
 	end)
@@ -263,7 +264,7 @@ describe("ai/providers/openai_compat", function()
 		})
 		local res, err = p.generate({ model = "m1", messages = { { role = "user", content = "hi" } } })
 		T.eq(res, nil)
-		T.eq(err, "TEST_NONEXISTENT_KEY not set")
+		T.eq(err, "api_key is required")
 	end)
 
 	it("created provider should have embed and generate_image methods", function()
@@ -316,15 +317,14 @@ local has_tls_oai, openai = pcall(require, "lib.ai.providers.openai")
 
 if has_tls_oai then
 	describe("ai/providers/openai", function()
-		it("should require OPENAI_API_KEY", function()
-			if not os.getenv("OPENAI_API_KEY") then
-				local res, err = openai.generate({
-					model = "gpt-4o",
-					messages = { { role = "user", content = "hi" } },
-				})
-				T.eq(res, nil)
-				T.eq(err, "OPENAI_API_KEY not set")
-			end
+		it("openai.create returns a provider that requires api_key", function()
+			local p = openai.create()
+			local res, err = p.generate({
+				model = "gpt-4o",
+				messages = { { role = "user", content = "hi" } },
+			})
+			T.eq(res, nil)
+			T.eq(err, "api_key is required")
 		end)
 	end)
 end
@@ -335,26 +335,22 @@ local has_tls_google, google = pcall(require, "lib.ai.providers.google")
 
 if has_tls_google then
 	describe("ai/providers/google", function()
-		it("should require GOOGLE_API_KEY", function()
-			if not os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENERATIVE_AI_API_KEY") then
-				local res, err = google.generate({
-					model = "gemini-2.0-flash",
-					messages = { { role = "user", content = "hi" } },
-				})
-				T.eq(res, nil)
-				T.eq(err, "GOOGLE_API_KEY not set")
-			end
+		it("should require api_key", function()
+			local res, err = google.generate({
+				model = "gemini-2.0-flash",
+				messages = { { role = "user", content = "hi" } },
+			})
+			T.eq(res, nil)
+			T.eq(err, "api_key is required")
 		end)
 
-		it("embed should require GOOGLE_API_KEY", function()
-			if not os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENERATIVE_AI_API_KEY") then
-				local res, err = google.embed({
-					model = "text-embedding-004",
-					value = "hello",
-				})
-				T.eq(res, nil)
-				T.eq(err, "GOOGLE_API_KEY not set")
-			end
+		it("embed should require api_key", function()
+			local res, err = google.embed({
+				model = "text-embedding-004",
+				value = "hello",
+			})
+			T.eq(res, nil)
+			T.eq(err, "api_key is required")
 		end)
 	end)
 end
@@ -494,12 +490,14 @@ end)
 if has_tls and os.getenv("ANTHROPIC_API_KEY") then
 	describe("ai/live/anthropic", function()
 		local ai = require("lib.ai")
+		local https = require("lib.https.client")
 
 		it("should generate a response", function()
 			local res, err = ai.generate({
 				provider = "anthropic", model = "claude-sonnet-4-20250514",
 				messages = { { role = "user", content = "Say exactly: hello" } },
 				max_tokens = 32,
+				http_client = https,
 			})
 			T.ok(res, "response: " .. tostring(err))
 			T.ok(res.text, "has text")
@@ -512,6 +510,7 @@ if has_tls and os.getenv("ANTHROPIC_API_KEY") then
 				provider = "anthropic", model = "claude-sonnet-4-20250514",
 				messages = { { role = "user", content = "Say exactly: hi" } },
 				max_tokens = 32,
+				http_client = https,
 			}) do
 				if delta.text then parts[#parts + 1] = delta.text end
 			end

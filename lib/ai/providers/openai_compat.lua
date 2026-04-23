@@ -7,7 +7,6 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local json = require("lib.format.json")
-local https = require("lib.https.client")
 local stream_mod = require("lib.http.stream")
 
 local mod = {}
@@ -131,8 +130,12 @@ mod.create = function(config)
 		if tools then body.tools = tools end
 
 		local body_str = json.encode(body)
+
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
+
 		local res
-		res, err = https.request({
+		res, err = http_client.request({
 			host = host,
 			method = "POST",
 			path = chat_path,
@@ -165,7 +168,10 @@ mod.create = function(config)
 
 		local body_str = json.encode(body)
 
-		local recv_fn, close_fn = https.stream({
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
+
+		local recv_fn, close_fn = http_client.stream({
 			host = host,
 			method = "POST",
 			path = chat_path,
@@ -275,8 +281,11 @@ mod.create = function(config)
 			input = req.value,
 		})
 
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
+
 		local res
-		res, err = https.request({
+		res, err = http_client.request({
 			host = host,
 			method = "POST",
 			path = embeddings_path,
@@ -315,8 +324,11 @@ mod.create = function(config)
 			input = req.values,
 		})
 
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
+
 		local res
-		res, err = https.request({
+		res, err = http_client.request({
 			host = host,
 			method = "POST",
 			path = embeddings_path,
@@ -367,8 +379,11 @@ mod.create = function(config)
 
 		local body_str = json.encode(body)
 
+		local http_client = req.http_client
+		if not http_client then return nil, "http_client is required" end
+
 		local res
-		res, err = https.request({
+		res, err = http_client.request({
 			host = host,
 			method = "POST",
 			path = images_path,

@@ -10,6 +10,12 @@
 
 --:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
 
+--- HTTP client capability — caller-injected, matches lib.https.client shape.
+--:: ai_http_client = {
+--::   request: (req: unknown) -> (unknown, string | nil),
+--::   stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil),
+--:: }
+
 --:: ai_request = {
 --::   model: string,
 --::   messages: ai_message[],
@@ -18,6 +24,8 @@
 --::   tools?: ai_tool[],
 --::   stream?: boolean,
 --::   provider?: ai_provider,
+--::   http_client?: ai_http_client,
+--::   api_key?: string,
 --:: }
 
 --:: ai_response = {
@@ -36,9 +44,9 @@
 
 -- ── Embeddings ──────────────────────────────────────────────────────────────────
 
---:: ai_embed_request = { model: string, value: string, provider?: ai_provider }
+--:: ai_embed_request = { model: string, value: string, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 
---:: ai_embed_many_request = { model: string, values: string[], provider?: ai_provider }
+--:: ai_embed_many_request = { model: string, values: string[], provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 
 --:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer } | nil }
 
@@ -46,7 +54,7 @@
 
 -- ── Image generation ────────────────────────────────────────────────────────────
 
---:: ai_image_request = { model: string, prompt: string, n?: integer, size?: string, provider?: ai_provider }
+--:: ai_image_request = { model: string, prompt: string, n?: integer, size?: string, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
 
 --:: ai_image = { url?: string, b64_json?: string }
 

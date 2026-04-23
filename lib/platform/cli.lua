@@ -476,10 +476,11 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 
 		local mod = require(CAP_TYPE_MODULES.llm)
 		return mod.llm_cap({
-			provider = provider,
-			key      = api_key,
-			model    = decl.model,
-			base_url = decl.base_url,
+			provider    = provider,
+			key         = api_key,
+			model       = decl.model,
+			base_url    = decl.base_url,
+			http_client = require("lib.https.client"),
 		})
 	end
 

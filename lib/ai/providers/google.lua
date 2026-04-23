@@ -6,7 +6,6 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local json = require("lib.format.json")
-local https = require("lib.https.client")
 local stream_mod = require("lib.http.stream")
 
 local mod = {}
@@ -135,8 +134,11 @@ mod.generate = function(req)
 	local body_str = json.encode(body)
 	local path = "/v1beta/models/" .. req.model .. ":generateContent?key=" .. api_key
 
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
+
 	local res
-	res, err = https.request({
+	res, err = http_client.request({
 		host = API_HOST,
 		method = "POST",
 		path = path,
@@ -176,7 +178,10 @@ mod.stream = function(req)
 	local body_str = json.encode(body)
 	local path = "/v1beta/models/" .. req.model .. ":streamGenerateContent?key=" .. api_key .. "&alt=sse"
 
-	local recv_fn, close_fn = https.stream({
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
+
+	local recv_fn, close_fn = http_client.stream({
 		host = API_HOST,
 		method = "POST",
 		path = path,
@@ -270,8 +275,11 @@ mod.embed = function(req)
 	})
 	local path = "/v1beta/models/" .. req.model .. ":embedContent?key=" .. api_key
 
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
+
 	local res
-	res, err = https.request({
+	res, err = http_client.request({
 		host = API_HOST,
 		method = "POST",
 		path = path,
@@ -314,8 +322,11 @@ mod.embed_many = function(req)
 	local body_str = json.encode({ requests = requests })
 	local path = "/v1beta/models/" .. req.model .. ":batchEmbedContents?key=" .. api_key
 
+	local http_client = req.http_client
+	if not http_client then return nil, "http_client is required" end
+
 	local res
-	res, err = https.request({
+	res, err = http_client.request({
 		host = API_HOST,
 		method = "POST",
 		path = path,

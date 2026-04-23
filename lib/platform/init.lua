@@ -360,10 +360,11 @@ local CAP_FACTORIES = {
 					or os.getenv("OPENAI_API_KEY")
 			end
 			return require("lib.platform.caps.llm").llm_cap({
-				provider = decl.provider or "openai",
-				key      = api_key,
-				model    = decl.model,
-				base_url = decl.base_url,
+				provider    = decl.provider or "openai",
+				key         = api_key,
+				model       = decl.model,
+				base_url    = decl.base_url,
+				http_client = require("lib.https.client"),
 			})
 		end,
 	},

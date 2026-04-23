@@ -28,6 +28,8 @@ local function exec_complete(task, _ctx)
 		temperature = inp.temperature,
 		max_tokens  = inp.max_tokens,
 		provider    = inp.provider,
+		http_client = inp.http_client,
+		api_key     = inp.api_key,
 	})
 	if not res then error(err or "llm.complete failed") end
 	return { text = res.text, usage = res.usage }
@@ -78,6 +80,8 @@ local function exec_tool_loop(task, ctx)
 			temperature = inp.temperature,
 			max_tokens  = inp.max_tokens,
 			provider    = inp.provider,
+			http_client = inp.http_client,
+			api_key     = inp.api_key,
 		})
 		if not res then error(err or "llm.tool_loop generation failed") end
 

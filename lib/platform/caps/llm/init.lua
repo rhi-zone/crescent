@@ -2,11 +2,15 @@
 -- llm_cap(opts) -> cap_table, revoke_fn
 -- Provider-agnostic LLM capability backed by lib/ai/.
 --
--- opts.provider  : provider name string — anything lib/ai/ supports
---                  (e.g. "anthropic", "openai", "groq", "gemini", ...)
--- opts.key       : API key string (already resolved from keyring by the platform)
--- opts.model     : default model name (optional, provider defaults apply)
--- opts.base_url  : for openai-compatible providers — local model host:port
+-- opts.provider    : provider name string — anything lib/ai/ supports
+--                    (e.g. "anthropic", "openai", "groq", "gemini", ...)
+-- opts.key         : API key string (already resolved from keyring by the platform)
+-- opts.model       : default model name (optional, provider defaults apply)
+-- opts.base_url    : for openai-compatible providers — local model host:port
+-- opts.http_client : required HTTP client capability, shape:
+--                    { request(req) -> (resp|nil, err), stream(req) -> (recv_fn, close_fn) | (nil, err) }
+--                    Must be injected by the caller — lib/ai providers will
+--                    not fall back to a global HTTP client.
 -- Any extra opts are passed through to generate/stream calls.
 --
 -- Capability API (what the app sees):
@@ -34,6 +38,11 @@ function M.llm_cap(opts)
 		return nil, "llm_cap: opts.provider is required"
 	end
 
+	local http_client = opts.http_client
+	if not http_client then
+		return nil, "llm_cap: opts.http_client is required"
+	end
+
 	local revoked = false
 
 	local cap = {}
@@ -47,9 +56,10 @@ function M.llm_cap(opts)
 		if call_opts then
 			for k, v in pairs(call_opts) do req[k] = v end
 		end
-		req.provider = provider_name
-		req.api_key  = opts.key
-		req.messages = messages
+		req.provider    = provider_name
+		req.api_key     = opts.key
+		req.http_client = http_client
+		req.messages    = messages
 		if req.model == nil and opts.model then
 			req.model = opts.model
 		end

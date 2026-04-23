@@ -10,6 +10,14 @@ local T   = require("lib.test.assert")
 local llm = require("lib.platform.caps.llm")
 local ai  = require("lib.ai")
 
+-- Stub http_client — the llm cap validates its presence, but mock providers
+-- never actually invoke request/stream, so a table with the right shape is
+-- sufficient for these tests.
+local stub_http_client = {
+	request = function(_req) return nil, "stub http_client: not implemented" end,
+	stream  = function(_req) return nil, "stub http_client: not implemented" end,
+}
+
 -- ── Mock provider helpers ─────────────────────────────────────────────────────
 
 -- make_mock_provider returns a provider table compatible with lib/ai/'s provider
@@ -60,10 +68,17 @@ T.describe("llm_cap factory", function()
 		     "expected error mentioning provider, got: " .. tostring(err))
 	end)
 
+	T.it("returns nil,err for missing http_client", function()
+		local cap, err = llm.llm_cap({ provider = "somep", key = "k" })
+		T.eq(cap, nil)
+		T.ok(type(err) == "string" and err:find("http_client") ~= nil,
+		     "expected error mentioning http_client, got: " .. tostring(err))
+	end)
+
 	T.it("returns cap and revoke function when provider is valid", function()
 		local mock = make_mock_provider("ok")
 		with_mock_provider("mock_valid", mock, function()
-			local cap, revoke = llm.llm_cap({ provider = "mock_valid", key = "k" })
+			local cap, revoke = llm.llm_cap({ provider = "mock_valid", key = "k", http_client = stub_http_client })
 			T.ok(cap ~= nil, "cap should not be nil")
 			T.ok(type(revoke) == "function", "revoke should be a function")
 		end)
@@ -76,7 +91,7 @@ T.describe("cap.call", function()
 	T.it("returns content string on success", function()
 		local mock = make_mock_provider("The answer is 42.")
 		with_mock_provider("mock_call", mock, function()
-			local cap, _ = llm.llm_cap({ provider = "mock_call", key = "k", model = "m" })
+			local cap, _ = llm.llm_cap({ provider = "mock_call", key = "k", model = "m", http_client = stub_http_client })
 			local msgs = { { role = "user", content = "What is the answer?" } }
 			local content, err = cap.call(msgs)
 			T.eq(err, nil)
@@ -87,7 +102,7 @@ T.describe("cap.call", function()
 	T.it("propagates error from provider", function()
 		local mock = make_mock_provider(nil)  -- nil triggers error path
 		with_mock_provider("mock_call_err", mock, function()
-			local cap, _ = llm.llm_cap({ provider = "mock_call_err", key = "k" })
+			local cap, _ = llm.llm_cap({ provider = "mock_call_err", key = "k", http_client = stub_http_client })
 			local content, err = cap.call({ { role = "user", content = "hi" } })
 			T.eq(content, nil)
 			T.ok(err ~= nil, "expected error from mock provider")
@@ -101,7 +116,7 @@ T.describe("cap.call", function()
 		function p.stream(_req) return function() return nil end end
 		ai.register("mock_model_check", p)
 
-		local cap, _ = llm.llm_cap({ provider = "mock_model_check", key = "k", model = "gpt-4o" })
+		local cap, _ = llm.llm_cap({ provider = "mock_model_check", key = "k", model = "gpt-4o", http_client = stub_http_client })
 		cap.call({ { role = "user", content = "hi" } })
 		T.eq(received_model, "gpt-4o")
 	end)
@@ -113,7 +128,7 @@ T.describe("cap.call", function()
 		function p.stream(_req) return function() return nil end end
 		ai.register("mock_model_override", p)
 
-		local cap, _ = llm.llm_cap({ provider = "mock_model_override", key = "k", model = "default" })
+		local cap, _ = llm.llm_cap({ provider = "mock_model_override", key = "k", model = "default", http_client = stub_http_client })
 		cap.call({ { role = "user", content = "hi" } }, { model = "override" })
 		T.eq(received_model, "override")
 	end)
@@ -125,7 +140,7 @@ T.describe("cap.call_stream", function()
 	T.it("calls on_token for each delta and returns full content", function()
 		local mock = make_mock_provider("_", { "foo", "bar", "baz" })
 		with_mock_provider("mock_stream", mock, function()
-			local cap, _ = llm.llm_cap({ provider = "mock_stream", key = "k" })
+			local cap, _ = llm.llm_cap({ provider = "mock_stream", key = "k", http_client = stub_http_client })
 			local received = {}
 			local msgs = { { role = "user", content = "stream test" } }
 			local full, err = cap.call_stream(msgs, function(tok)
@@ -153,7 +168,7 @@ T.describe("cap.call_stream", function()
 		end
 		ai.register("mock_empty_delta", p)
 
-		local cap, _ = llm.llm_cap({ provider = "mock_empty_delta", key = "k" })
+		local cap, _ = llm.llm_cap({ provider = "mock_empty_delta", key = "k", http_client = stub_http_client })
 		local calls = 0
 		local full, err = cap.call_stream(
 			{ { role = "user", content = "x" } },
@@ -171,7 +186,7 @@ T.describe("cap.count_tokens", function()
 	T.it("returns positive integer estimate", function()
 		local mock = make_mock_provider("_")
 		with_mock_provider("mock_tokens", mock, function()
-			local cap, _ = llm.llm_cap({ provider = "mock_tokens", key = "k" })
+			local cap, _ = llm.llm_cap({ provider = "mock_tokens", key = "k", http_client = stub_http_client })
 			local n = cap.count_tokens("hello world")
 			T.ok(type(n) == "number" and n > 0,
 			     "expected positive integer, got: " .. tostring(n))
@@ -181,7 +196,7 @@ T.describe("cap.count_tokens", function()
 	T.it("empty string returns 0", function()
 		local mock = make_mock_provider("_")
 		with_mock_provider("mock_tokens_empty", mock, function()
-			local cap, _ = llm.llm_cap({ provider = "mock_tokens_empty", key = "k" })
+			local cap, _ = llm.llm_cap({ provider = "mock_tokens_empty", key = "k", http_client = stub_http_client })
 			local n = cap.count_tokens("")
 			T.eq(n, 0)
 		end)
@@ -194,7 +209,7 @@ T.describe("revocation", function()
 	T.it("all calls return nil,'capability revoked' after revoke()", function()
 		local mock = make_mock_provider("should not be seen")
 		with_mock_provider("mock_revoke", mock, function()
-			local cap, revoke = llm.llm_cap({ provider = "mock_revoke", key = "k" })
+			local cap, revoke = llm.llm_cap({ provider = "mock_revoke", key = "k", http_client = stub_http_client })
 			T.ok(cap ~= nil)
 			T.ok(type(revoke) == "function")
 
