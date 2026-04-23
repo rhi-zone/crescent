@@ -315,6 +315,7 @@ end
 
 local CAP_TYPE_MODULES = {
 	self        = "lib.platform.caps.self",
+	self_write  = "lib.platform.caps.self",
 	http_server = "lib.platform.caps.http_server",
 	http_client = "lib.platform.caps.http_client",
 	kv          = "lib.platform.caps.kv",
@@ -339,6 +340,17 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 			local mod = require(CAP_TYPE_MODULES.self)
 			return mod.self_cap(app)
 		end
+	end
+
+	-- self_write cap: archive mode only — directory-mode apps don't have a real
+	-- image file to atomically rewrite. Dev/dir workflow should re-export the
+	-- tarball+PNG before granting self_write.
+	if cap_type == "self_write" then
+		if app._dir_mode then
+			return nil, "self_write not supported in directory mode"
+		end
+		local mod = require(CAP_TYPE_MODULES.self_write)
+		return mod.self_write_cap(app)
 	end
 
 	-- http_server: inject port from platform flags.

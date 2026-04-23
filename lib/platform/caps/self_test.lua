@@ -4,7 +4,9 @@ end
 
 local T       = require("lib.test.assert")
 local png_mod = require("lib.png")
-local self_cap = require("lib.platform.caps.self").self_cap
+local self_mod = require("lib.platform.caps.self")
+local self_cap = self_mod.self_cap
+local self_write_cap = self_mod.self_write_cap
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -155,5 +157,180 @@ T.describe("caps.self", function()
 		val, err = cap.entry("main.lua")
 		T.eq(val, nil)
 		T.eq(err, "capability revoked")
+	end)
+end)
+
+-- ── self_write tests ─────────────────────────────────────────────────────────
+-- Write to a real temp file so round-trip via re-reading disk is exercised.
+
+local function tmp_png_path()
+	return os.tmpname() .. ".png"
+end
+
+local function write_test_png(path, chunks)
+	local bytes = png_mod.write(chunks)
+	local f = assert(io.open(path, "wb"))
+	f:write(bytes)
+	f:close()
+end
+
+local function read_png_chunks(path)
+	local f = assert(io.open(path, "rb"))
+	local bytes = f:read("*a")
+	f:close()
+	return assert(png_mod.read(bytes))
+end
+
+local function list_tmp_siblings(path)
+	local dir, base = path:match("^(.*)/([^/]+)$")
+	if not dir then dir, base = ".", path end
+	local p = assert(io.popen('ls -1 "' .. dir .. '" 2>/dev/null'))
+	local matches = {}
+	local prefix = base .. ".tmp."
+	for name in p:lines() do
+		if name:sub(1, #prefix) == prefix then
+			matches[#matches + 1] = name
+		end
+	end
+	p:close()
+	return matches
+end
+
+T.describe("caps.self_write", function()
+	T.it("write_metadata writes an iTXt chunk visible via metadata()", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks())
+		local app = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap = self_write_cap(app)
+		local ok, err = cap.write_metadata("chara", "hello")
+		T.eq(ok, true)
+		T.eq(err, nil)
+		T.eq(cap.metadata("chara"), "hello")
+		os.remove(path)
+	end)
+
+	T.it("round-trip: write, re-open file, new cap sees new value", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks())
+		local app1 = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap1, revoke1 = self_write_cap(app1)
+		T.eq(cap1.write_metadata("chara", "persisted"), true)
+		revoke1()
+		-- Fresh read of the file on disk.
+		local app2 = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap2 = self_write_cap(app2)
+		T.eq(cap2.metadata("chara"), "persisted")
+		os.remove(path)
+	end)
+
+	T.it("write_metadata returns (nil, revoked) after revoke", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks())
+		local app = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap, revoke = self_write_cap(app)
+		revoke()
+		local val, err = cap.write_metadata("chara", "x")
+		T.eq(val, nil)
+		T.eq(err, "capability revoked")
+		os.remove(path)
+	end)
+
+	T.it("write_metadata errors on tar-only app (no image container)", function()
+		local app = {
+			path = "unused.tar.gz",
+			chunks = nil,
+			entries = {},
+			manifest = {},
+		}
+		local cap = self_write_cap(app)
+		local val, err = cap.write_metadata("chara", "x")
+		T.eq(val, nil)
+		T.eq(err, "app has no image container")
+	end)
+
+	T.it("unknown keyword creates a new chunk readable via metadata()", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks())
+		local app = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap = self_write_cap(app)
+		T.eq(cap.metadata("newkey"), nil)
+		T.eq(cap.write_metadata("newkey", "v"), true)
+		T.eq(cap.metadata("newkey"), "v")
+		os.remove(path)
+	end)
+
+	T.it("overwriting an existing keyword replaces its value", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks())
+		local app = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap = self_write_cap(app)
+		T.eq(cap.write_metadata("chara", "v1"), true)
+		T.eq(cap.metadata("chara"), "v1")
+		T.eq(cap.write_metadata("chara", "v2"), true)
+		T.eq(cap.metadata("chara"), "v2")
+		os.remove(path)
+	end)
+
+	T.it("successful write leaves no temp file behind", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks())
+		local app = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = {},
+			manifest = {},
+		}
+		local cap = self_write_cap(app)
+		T.eq(cap.write_metadata("chara", "v"), true)
+		local leftovers = list_tmp_siblings(path)
+		T.eq(#leftovers, 0)
+		os.remove(path)
+	end)
+
+	T.it("self_write exposes the same read methods as self", function()
+		local path = tmp_png_path()
+		write_test_png(path, make_chunks({ title = "T" }))
+		local app = {
+			path = path,
+			chunks = read_png_chunks(path),
+			entries = make_entries({ { "main.lua", "body" } }),
+			manifest = {},
+		}
+		local cap = self_write_cap(app, { app_id = "abc" })
+		T.eq(cap.app_id, "abc")
+		T.eq(cap.metadata("title"), "T")
+		T.eq(cap.entries()[1], "main.lua")
+		T.eq(cap.entry("main.lua"), "body")
+		os.remove(path)
 	end)
 end)

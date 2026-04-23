@@ -284,6 +284,12 @@ local CAP_FACTORIES = {
 			return require("lib.platform.caps.self").self_cap(app, { app_id = context and context.app_id })
 		end,
 	},
+	self_write = {
+		mod = "lib.platform.caps.self",
+		build = function(decl, app, context)
+			return require("lib.platform.caps.self").self_write_cap(app, { app_id = context and context.app_id })
+		end,
+	},
 	http_server = {
 		mod = "lib.platform.caps.http_server",
 		build = function(decl)
