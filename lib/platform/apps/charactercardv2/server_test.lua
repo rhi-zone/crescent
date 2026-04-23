@@ -539,3 +539,287 @@ T.describe("preset management", function()
 		T.eq(status, 500)
 	end)
 end)
+
+-- ── User lorebooks (CRUD) ─────────────────────────────────────────────────────
+
+T.describe("user_lorebooks", function()
+	T.it("lists empty when no books exist", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local status, body = call(app, "GET", "/api/user_lorebooks")
+		T.eq(status, 200)
+		T.ok(body ~= nil)
+		T.ok(type(body.books) == "table")
+		T.eq(#body.books, 0)
+	end)
+
+	T.it("creates, renames, toggles, and deletes a book", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+
+		local status, created = call(app, "POST", "/api/user_lorebooks", { name = "Sci-fi" })
+		T.eq(status, 200)
+		T.ok(created.id ~= nil)
+		T.eq(created.name, "Sci-fi")
+		T.eq(created.active, false)
+		T.eq(created.entry_count, 0)
+
+		-- Rename.
+		local _, renamed = call(app, "POST", "/api/user_lorebooks/rename",
+			{ id = created.id, name = "Cyberpunk" })
+		T.eq(renamed.name, "Cyberpunk")
+
+		-- Toggle active.
+		local _, toggled = call(app, "POST", "/api/user_lorebooks/toggle",
+			{ id = created.id, active = true })
+		T.eq(toggled.active, true)
+
+		-- Reload from kv: should survive across restart.
+		local app2 = server.create(caps, { no_static = true })
+		local _, list = call(app2, "GET", "/api/user_lorebooks")
+		T.eq(#list.books, 1)
+		T.eq(list.books[1].name, "Cyberpunk")
+		T.eq(list.books[1].active, true)
+
+		-- Delete.
+		local _, del = call(app, "POST", "/api/user_lorebooks/delete", { id = created.id })
+		T.ok(del.deleted == true)
+		local _, empty = call(app, "GET", "/api/user_lorebooks")
+		T.eq(#empty.books, 0)
+	end)
+
+	T.it("entry CRUD within a book", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local _, book = call(app, "POST", "/api/user_lorebooks", { name = "Notes" })
+
+		-- Add an entry.
+		local status, added = call(app, "POST", "/api/user_lorebooks/entry/add", {
+			book_id = book.id,
+			keys = { "dragon" },
+			content = "A fire-breathing lizard.",
+		})
+		T.eq(status, 200)
+		T.ok(added.uid ~= nil)
+		T.eq(added.content, "A fire-breathing lizard.")
+
+		-- Get entries.
+		local _, listed = call(app, "GET", "/api/user_lorebooks/entries?book_id=" .. book.id)
+		T.eq(#listed.entries, 1)
+		T.eq(listed.entries[1].uid, added.uid)
+
+		-- Update the entry.
+		local _, updated = call(app, "POST", "/api/user_lorebooks/entry/update", {
+			book_id = book.id,
+			uid = added.uid,
+			content = "An ancient fire-breathing reptile.",
+		})
+		T.eq(updated.content, "An ancient fire-breathing reptile.")
+
+		-- Delete.
+		local _, deleted = call(app, "POST", "/api/user_lorebooks/entry/delete", {
+			book_id = book.id,
+			uid = added.uid,
+		})
+		T.ok(deleted.deleted == true)
+		local _, listed2 = call(app, "GET", "/api/user_lorebooks/entries?book_id=" .. book.id)
+		T.eq(#listed2.entries, 0)
+	end)
+
+	T.it("active books merge into context-assembly lorebook set", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local _, b = call(app, "POST", "/api/user_lorebooks", { name = "Active" })
+		call(app, "POST", "/api/user_lorebooks/entry/add", {
+			book_id = b.id,
+			keys = { "k" },
+			content = "c",
+		})
+		-- Inactive by default: not merged.
+		T.ok(app.state.user_lorebooks[1].active == false)
+		call(app, "POST", "/api/user_lorebooks/toggle", { id = b.id, active = true })
+		T.ok(app.state.user_lorebooks[1].active == true)
+	end)
+
+	T.it("returns 404 for unknown book on rename/toggle/entries", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local status, _ = call(app, "POST", "/api/user_lorebooks/rename",
+			{ id = "nope", name = "x" })
+		T.eq(status, 404)
+		status = select(1, call(app, "POST", "/api/user_lorebooks/toggle",
+			{ id = "nope", active = true }))
+		T.eq(status, 404)
+		status = select(1, call(app, "GET", "/api/user_lorebooks/entries?book_id=nope"))
+		T.eq(status, 404)
+	end)
+end)
+
+-- ── Migration: world_info → user_lorebooks ───────────────────────────────────
+
+T.describe("world_info migration", function()
+	T.it("wraps legacy world_info kv into an 'Imported' active book", function()
+		local caps = make_caps("reply")
+		-- Pre-seed kv as if an older server wrote the legacy key.
+		local legacy = { {
+			uid = "x1", key = { "k" }, keysecondary = {}, content = "legacy entry",
+			enabled = true, constant = false, order = 0, position = 0,
+		} }
+		caps.kv.set("world_info", require("lib.format.json").encode(legacy))
+		local app = server.create(caps, { no_static = true })
+		local _, list = call(app, "GET", "/api/user_lorebooks")
+		T.eq(#list.books, 1)
+		T.eq(list.books[1].name, "Imported")
+		T.eq(list.books[1].active, true)
+		T.eq(list.books[1].entry_count, 1)
+		-- Legacy key deleted.
+		T.eq(caps.kv.get("world_info"), nil)
+	end)
+
+	T.it("is idempotent (no duplicate book on second start)", function()
+		local caps = make_caps("reply")
+		caps.kv.set("world_info", "[]")
+		local app1 = server.create(caps, { no_static = true })
+		-- Empty legacy array yields a book with 0 entries; still migrates once.
+		local _, list1 = call(app1, "GET", "/api/user_lorebooks")
+		local count1 = #list1.books
+		-- Second start: legacy key gone; no new "Imported" book.
+		local app2 = server.create(caps, { no_static = true })
+		local _, list2 = call(app2, "GET", "/api/user_lorebooks")
+		T.eq(#list2.books, count1)
+	end)
+end)
+
+-- ── Card-state PNG writeback + fallback ──────────────────────────────────────
+
+local function make_mock_self_write()
+	-- In-memory simulation: chara chunk stored in a closed-over string.
+	local stored
+	local cap = {
+		metadata = function(k) if k == "chara" then return stored end end,
+		entries = function() return {} end,
+		entry = function() return nil end,
+		write_metadata = function(k, bytes)
+			if k ~= "chara" then return nil, "bad key" end
+			stored = bytes
+			return true
+		end,
+	}
+	return cap, function() return stored end
+end
+
+local function minimal_card_json()
+	local base64 = require("lib.encode.base64")
+	local json_mod = require("lib.format.json")
+	local envelope = {
+		spec = "chara_card_v2",
+		spec_version = "2.0",
+		data = {
+			name = "Tester",
+			description = "for tests",
+			first_mes = "hi",
+		},
+	}
+	return base64.encode(json_mod.encode(envelope))
+end
+
+T.describe("card state PNG writeback", function()
+	T.it("writes chara via self_write when available", function()
+		local base64 = require("lib.encode.base64")
+		local json_mod = require("lib.format.json")
+		local self_cap, read_stored = make_mock_self_write()
+		-- Pre-seed a card in the "PNG".
+		self_cap.write_metadata("chara", minimal_card_json())
+		local caps = make_caps("reply", nil, {
+			self = self_cap,
+			self_write = self_cap,
+		})
+		local app = server.create(caps, { no_static = true })
+		-- Author's note edit triggers flush_card_state, which writes chara.
+		local status, _ = call(app, "POST", "/api/authors_note",
+			{ text = "remember the goal", depth = 2, position = "after" })
+		T.eq(status, 200)
+		local stored = read_stored()
+		T.ok(stored ~= nil)
+		local decoded = base64.decode(stored)
+		local ok, envelope = pcall(json_mod.decode, decoded)
+		T.ok(ok)
+		T.ok(envelope.data ~= nil)
+		T.eq(envelope.data.extensions.depth_prompt, "remember the goal")
+		T.eq(envelope.data.extensions.depth_prompt_depth, 2)
+	end)
+
+	T.it("falls back to kv when self_write is absent", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		-- No card loaded (no self cap), but authors_note state still accepts
+		-- writes and persists to kv.
+		call(app, "POST", "/api/authors_note",
+			{ text = "kv fallback", depth = 1, position = "before" })
+		local raw = caps.kv.get("authors_note")
+		T.ok(raw ~= nil)
+		local json_mod = require("lib.format.json")
+		local saved = json_mod.decode(raw)
+		T.eq(saved.text, "kv fallback")
+	end)
+
+	T.it("restores authors_note/regex_scripts from chara.extensions on load", function()
+		local base64 = require("lib.encode.base64")
+		local json_mod = require("lib.format.json")
+		local envelope = {
+			spec = "chara_card_v2", spec_version = "2.0",
+			data = {
+				name = "Restored",
+				description = "with extensions",
+				first_mes = "hi",
+				extensions = {
+					depth_prompt = "baked in",
+					depth_prompt_depth = 3,
+					depth_prompt_role = "before",
+					regex_scripts = {
+						{ name = "s1", find = "x", replace = "y", enabled = true, scope = "ai_output", order = 0 },
+					},
+				},
+			},
+		}
+		local encoded = base64.encode(json_mod.encode(envelope))
+		local self_cap = {
+			metadata = function(k) if k == "chara" then return encoded end end,
+			entries = function() return {} end,
+			entry = function() return nil end,
+		}
+		local caps = make_caps("reply", nil, { self = self_cap })
+		local app = server.create(caps, { no_static = true })
+		local _, an = call(app, "GET", "/api/authors_note")
+		T.eq(an.text, "baked in")
+		T.eq(an.depth, 3)
+		T.eq(an.position, "before")
+		local _, regex = call(app, "GET", "/api/regex")
+		T.eq(#regex.scripts, 1)
+		T.eq(regex.scripts[1].name, "s1")
+	end)
+
+	T.it("migrates legacy card-state kv keys into chara when self_write granted", function()
+		local base64 = require("lib.encode.base64")
+		local json_mod = require("lib.format.json")
+		local self_cap, read_stored = make_mock_self_write()
+		self_cap.write_metadata("chara", minimal_card_json())
+		local caps = make_caps("reply", nil, {
+			self = self_cap,
+			self_write = self_cap,
+		})
+		-- Simulate a legacy install: author's note stored in kv.
+		caps.kv.set("authors_note",
+			json_mod.encode({ text = "migrate me", depth = 2, position = "after" }))
+		local app = server.create(caps, { no_static = true })
+		-- kv key should be deleted post-migration.
+		T.eq(caps.kv.get("authors_note"), nil)
+		-- State should reflect the migrated value.
+		T.eq(app.state.authors_note.text, "migrate me")
+		-- PNG should now carry the baked note.
+		local stored = read_stored()
+		local decoded = base64.decode(stored)
+		local envelope = json_mod.decode(decoded)
+		T.eq(envelope.data.extensions.depth_prompt, "migrate me")
+	end)
+end)

@@ -28,6 +28,7 @@ local context_mod = require("lib.formats.ccv2.context")
 local macro_mod = require("lib.formats.ccv2.macro")
 local lorebook_mod = require("lib.formats.ccv2.lorebook")
 local presets_mod = require("lib.platform.apps.charactercardv2.presets")
+local base64_mod = require("lib.encode.base64")
 
 local M = {}
 
@@ -358,9 +359,162 @@ local function create_state()
 		regex_scripts = {},   -- {name, find, replace, enabled, scope, order}[]
 		instruct_templates = {}, -- instruct template definitions
 		instruct_active = nil,   -- name of active template (nil = chat mode)
-		world_info = {},      -- NormalizedEntry[] (global lorebook, persists across cards)
+		user_lorebooks = {},  -- { id, name, entries[], active }[] (user-scope lorebooks, persists across cards)
+		_card_state_warned = false, -- whether we've logged the "no self_write" fallback warning
 		group = nil,          -- {enabled, members[], turn_order, next_speaker}
 	}
+end
+
+-- gen_book_id: stable identifier for a user lorebook. Not a UUID; just a
+-- time+random composite sufficient for uniqueness within a single user's
+-- kv store.
+local function gen_book_id(time_fn)
+	local now = (time_fn and time_fn()) or 0
+	return string.format("book-%d-%d", now, math.random(1, 1000000))
+end
+
+-- ── Card-state persistence (PNG via self_write, kv fallback) ───────────────
+--
+-- Card state (character_book, top-level fields, authors_note extension, regex
+-- scripts extension) lives in the card's PNG `chara` iTXt chunk. Writes go
+-- through caps.self_write.write_metadata so sharing the PNG shares everything.
+-- When self_write is not granted, we fall back to the legacy per-bucket kv
+-- keys ("lorebook", "card_overrides", "authors_note", "regex_scripts") so the
+-- app still functions without write access to the card file.
+--
+-- Debouncing: the design spec calls for a 100ms coalesce window. This server
+-- has no timer infrastructure, so we take the simpler correct path and flush
+-- synchronously on every mutation. This is more PNG rewrites than the spec's
+-- ideal (one per burst of edits), but correctness-equivalent. Adding a timer
+-- later would replace the inline flush calls with schedule() calls.
+
+local AUTHORS_NOTE_EXT_KEY = "depth_prompt"
+
+-- build_chara_for_write: construct the chara JSON object representing the
+-- current card state. Preserves unrelated fields already present on
+-- state.card (e.g. creator_notes, alternate_greetings). Bakes the lorebook
+-- into character_book (ST <-> CCv2 conversion), the author's note into
+-- extensions.depth_prompt/depth_prompt_depth/depth_prompt_role, and the
+-- regex scripts into extensions.regex_scripts.
+local function build_chara_for_write(state)
+	local card = state.card
+	if not card then return nil end
+	local envelope = { spec = "chara_card_v2", spec_version = "2.0", data = {} }
+	local data = envelope.data
+	-- Copy all current card fields (name, description, personality, ...).
+	for k, v in pairs(card) do data[k] = v end
+	-- Bake the in-memory lorebook back into character_book.
+	if state.lorebook and #state.lorebook > 0 then
+		data.character_book = lorebook_mod.to_ccv2(state.lorebook)
+	else
+		-- Preserve existing character_book if we have no in-memory entries but
+		-- the card did have one on disk (edge case: load then clear).
+		data.character_book = card.character_book or nil
+	end
+	local ext = {}
+	if type(data.extensions) == "table" then
+		for k, v in pairs(data.extensions) do ext[k] = v end
+	end
+	local an = state.authors_note
+	if an and an.text and #an.text > 0 then
+		ext[AUTHORS_NOTE_EXT_KEY] = an.text
+		ext.depth_prompt_depth = an.depth
+		ext.depth_prompt_role = an.position  -- "before"/"after" (ST uses "role" loosely)
+	else
+		ext[AUTHORS_NOTE_EXT_KEY] = nil
+		ext.depth_prompt_depth = nil
+		ext.depth_prompt_role = nil
+	end
+	if state.regex_scripts and #state.regex_scripts > 0 then
+		ext.regex_scripts = state.regex_scripts
+	else
+		ext.regex_scripts = nil
+	end
+	data.extensions = ext
+	return envelope
+end
+
+-- write_chara_to_png: serialize + base64 + write via caps.self_write.
+-- Returns (true | nil, err).
+local function write_chara_to_png(state, caps)
+	if not caps.self_write or not caps.self_write.write_metadata then
+		return nil, "no self_write capability"
+	end
+	local envelope = build_chara_for_write(state)
+	if not envelope then return nil, "no card loaded" end
+	local encoded_json, jerr = json.encode(envelope)
+	if not encoded_json then return nil, "json encode: " .. tostring(jerr) end
+	local encoded_b64 = base64_mod.encode(encoded_json)
+	return caps.self_write.write_metadata("chara", encoded_b64)
+end
+
+-- Legacy kv writers (fallback when self_write absent). Declared up-front so
+-- flush_card_state can call them; individual save_* functions below also
+-- remain available for tests / introspection.
+local function kv_save_lorebook(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("lorebook", json.encode(state.lorebook or {}))
+end
+
+local function kv_save_card_overrides(state, caps)
+	if not caps.kv or not state.card then return end
+	-- Same schema card_edit_response uses; we inline a minimal set to avoid
+	-- forward reference to card_edit_response.
+	local data = {}
+	for k, v in pairs(state.card) do data[k] = v end
+	-- character_book is card-state; we store it in lorebook kv instead.
+	data.character_book = nil
+	caps.kv.set("card_overrides", json.encode(data))
+end
+
+local function kv_save_authors_note(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("authors_note", json.encode(state.authors_note))
+end
+
+local function kv_save_regex_scripts(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("regex_scripts", json.encode(state.regex_scripts))
+end
+
+-- flush_card_state: persist all card-state buckets. Uses self_write when
+-- available; otherwise falls back to per-bucket kv writes. Logs a single
+-- warning per session on first fallback.
+local function flush_card_state(state, caps)
+	if caps.self_write and state.card then
+		local ok, werr = write_chara_to_png(state, caps)
+		if ok then return true end
+		-- Fall through to kv on error (graceful degradation).
+		if not state._card_state_warned then
+			state._card_state_warned = true
+			print("[ccv2] self_write.write_metadata failed, falling back to kv: " .. tostring(werr))
+		end
+	elseif not caps.self_write and not state._card_state_warned and state.card then
+		-- Warn only when there's an actual card that we can't persist back to.
+		-- No card means we're running without a self cap at all (e.g. headless
+		-- tests); no warning needed.
+		state._card_state_warned = true
+		print("[ccv2] self_write cap not granted; card state will be stored in kv (legacy fallback). The card file will not be self-contained.")
+	end
+	kv_save_lorebook(state, caps)
+	kv_save_card_overrides(state, caps)
+	kv_save_authors_note(state, caps)
+	kv_save_regex_scripts(state, caps)
+	return true
+end
+
+-- ── User lorebook persistence (always kv) ──────────────────────────────────
+
+local function save_user_lorebooks(state, caps)
+	if not caps.kv then return end
+	caps.kv.set("user_lorebooks", json.encode(state.user_lorebooks or {}))
+end
+
+local function find_user_book(state, id)
+	for i, b in ipairs(state.user_lorebooks) do
+		if b.id == id then return b, i end
+	end
+	return nil
 end
 
 local function default_settings()
@@ -398,6 +552,24 @@ local function load_card(state, caps)
 	state.card = card_data
 	if card_data.character_book then
 		state.lorebook = lorebook_mod.from_ccv2(card_data.character_book)
+	end
+	-- Pull author's note and regex scripts from extensions when present so
+	-- the card is self-contained (they round-trip through flush_card_state).
+	local ext = card_data.extensions
+	if type(ext) == "table" then
+		if ext.depth_prompt and type(ext.depth_prompt) == "string" and #ext.depth_prompt > 0 then
+			state.authors_note = state.authors_note or { text = "", depth = 4, position = "after" }
+			state.authors_note.text = ext.depth_prompt
+			if type(ext.depth_prompt_depth) == "number" then
+				state.authors_note.depth = ext.depth_prompt_depth
+			end
+			if ext.depth_prompt_role == "before" or ext.depth_prompt_role == "after" then
+				state.authors_note.position = ext.depth_prompt_role
+			end
+		end
+		if type(ext.regex_scripts) == "table" then
+			state.regex_scripts = ext.regex_scripts
+		end
 	end
 	return card_data
 end
@@ -512,7 +684,14 @@ local function build_context(state, caps, path)
 			if state.lorebook then
 				for _, e in ipairs(state.lorebook) do all[#all + 1] = e end
 			end
-			for _, e in ipairs(state.world_info) do all[#all + 1] = e end
+			-- TODO: merge in card.extensions.linked_lorebooks[*].entries once
+			-- that field is populated (vendored linked lorebooks). No data
+			-- today — stub.
+			for _, book in ipairs(state.user_lorebooks or {}) do
+				if book.active and book.entries then
+					for _, e in ipairs(book.entries) do all[#all + 1] = e end
+				end
+			end
 			return #all > 0 and all or nil
 		end)(),
 	})
@@ -628,8 +807,7 @@ local function apply_regex_scripts(state, text, scope)
 end
 
 local function save_regex_scripts(state, caps)
-	if not caps.kv then return end
-	caps.kv.set("regex_scripts", json.encode(state.regex_scripts))
+	flush_card_state(state, caps)
 end
 
 -- ── Instruct templates ─────────────────────────────────────────────────────
@@ -1511,8 +1689,7 @@ local function entry_to_json(e)
 end
 
 local function save_lorebook(state, caps)
-	if not caps.kv then return end
-	caps.kv.set("lorebook", json.encode(state.lorebook or {}))
+	flush_card_state(state, caps)
 end
 
 local function api_get_lorebook(state, _caps, _params, _body, res)
@@ -1577,38 +1754,99 @@ end
 
 -- ── World info endpoints ───────────────────────────────────────────────────
 
-local function save_world_info(state, caps)
-	if not caps.kv then return end
-	caps.kv.set("world_info", json.encode(state.world_info))
+-- ── User lorebook endpoints ──────────────────────────────────────────────
+--
+-- User-scope lorebooks (scope: this user, across all cards). State lives in
+-- state.user_lorebooks[] and persists to kv under "user_lorebooks". Each
+-- book carries { id, name, entries[], active }; active books merge into the
+-- prompt at context-assembly time.
+
+local function book_summary(b)
+	return {
+		id = b.id,
+		name = b.name,
+		active = b.active == true,
+		entry_count = b.entries and #b.entries or 0,
+	}
 end
 
-local function api_get_world_info(state, _caps, _params, _body, res)
-	local result = {}
-	for _, e in ipairs(state.world_info) do
-		result[#result + 1] = entry_to_json(e)
+local function api_get_user_lorebooks(state, _caps, _params, _body, res)
+	local books = {}
+	for _, b in ipairs(state.user_lorebooks) do
+		books[#books + 1] = book_summary(b)
 	end
-	return json_ok(res, { entries = result })
+	return json_ok(res, { books = books })
 end
 
-local function api_post_world_info_update(state, caps, _params, body, res)
-	if not body or not body.uid then return json_err(res, 400, "uid required") end
-	for _, e in ipairs(state.world_info) do
-		if e.uid == body.uid then
-			if body.keys ~= nil then e.key = body.keys end
-			if body.content ~= nil then e.content = body.content end
-			if body.enabled ~= nil then e.enabled = body.enabled end
-			if body.constant ~= nil then e.constant = body.constant end
-			if body.position ~= nil then e.position = body.position end
-			if body.order ~= nil then e.order = body.order end
-			if body.role ~= nil then e.role = body.role end
-			save_world_info(state, caps)
-			return json_ok(res, entry_to_json(e))
-		end
+local function api_post_user_lorebooks_create(state, caps, _params, body, res)
+	if not body or not body.name or type(body.name) ~= "string" or #body.name == 0 then
+		return json_err(res, 400, "name required")
 	end
-	return json_err(res, 404, "entry not found")
+	local book = {
+		id = gen_book_id(caps.time and caps.time.now),
+		name = body.name,
+		entries = {},
+		active = false,
+	}
+	state.user_lorebooks[#state.user_lorebooks + 1] = book
+	save_user_lorebooks(state, caps)
+	return json_ok(res, book_summary(book))
 end
 
-local function api_post_world_info_add(state, caps, _params, body, res)
+local function api_post_user_lorebooks_rename(state, caps, _params, body, res)
+	if not body or not body.id or not body.name then
+		return json_err(res, 400, "id and name required")
+	end
+	local book = find_user_book(state, body.id)
+	if not book then return json_err(res, 404, "book not found") end
+	book.name = body.name
+	save_user_lorebooks(state, caps)
+	return json_ok(res, book_summary(book))
+end
+
+local function api_post_user_lorebooks_delete(state, caps, _params, body, res)
+	if not body or not body.id then return json_err(res, 400, "id required") end
+	local _, idx = find_user_book(state, body.id)
+	if not idx then return json_err(res, 404, "book not found") end
+	table.remove(state.user_lorebooks, idx)
+	save_user_lorebooks(state, caps)
+	return json_ok(res, { deleted = true })
+end
+
+local function api_post_user_lorebooks_toggle(state, caps, _params, body, res)
+	if not body or not body.id or body.active == nil then
+		return json_err(res, 400, "id and active required")
+	end
+	local book = find_user_book(state, body.id)
+	if not book then return json_err(res, 404, "book not found") end
+	book.active = not not body.active
+	save_user_lorebooks(state, caps)
+	return json_ok(res, book_summary(book))
+end
+
+-- Entry CRUD. Book id can arrive as a path param (/api/user_lorebooks/:id/...)
+-- or as a body/query "book_id" — we accept both; path param wins if routed.
+local function resolve_book(state, params, body)
+	local id = (params and params.book_id) or (body and body.book_id)
+	if not id then return nil, "book_id required" end
+	local book = find_user_book(state, id)
+	if not book then return nil, "book not found" end
+	return book
+end
+
+local function api_get_user_lorebook_entries(state, _caps, params, body, res)
+	local book, err = resolve_book(state, params, body)
+	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
+	local entries = {}
+	for _, e in ipairs(book.entries or {}) do
+		entries[#entries + 1] = entry_to_json(e)
+	end
+	return json_ok(res, { id = book.id, name = book.name, active = book.active, entries = entries })
+end
+
+local function api_post_user_lorebook_entry_add(state, caps, params, body, res)
+	local book, err = resolve_book(state, params, body)
+	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
 	if not body or not body.keys or not body.content then
 		return json_err(res, 400, "keys and content required")
 	end
@@ -1621,18 +1859,125 @@ local function api_post_world_info_add(state, caps, _params, body, res)
 		order = body.order,
 		role = body.role,
 	})
-	state.world_info[#state.world_info + 1] = entry
-	save_world_info(state, caps)
+	book.entries = book.entries or {}
+	book.entries[#book.entries + 1] = entry
+	save_user_lorebooks(state, caps)
+	return json_ok(res, entry_to_json(entry))
+end
+
+local function api_post_user_lorebook_entry_update(state, caps, params, body, res)
+	local book, err = resolve_book(state, params, body)
+	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	for _, e in ipairs(book.entries or {}) do
+		if e.uid == body.uid then
+			if body.keys ~= nil then e.key = body.keys end
+			if body.content ~= nil then e.content = body.content end
+			if body.enabled ~= nil then e.enabled = body.enabled end
+			if body.constant ~= nil then e.constant = body.constant end
+			if body.position ~= nil then e.position = body.position end
+			if body.order ~= nil then e.order = body.order end
+			if body.role ~= nil then e.role = body.role end
+			save_user_lorebooks(state, caps)
+			return json_ok(res, entry_to_json(e))
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+local function api_post_user_lorebook_entry_delete(state, caps, params, body, res)
+	local book, err = resolve_book(state, params, body)
+	if not book then return json_err(res, err == "book not found" and 404 or 400, err) end
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	for i, e in ipairs(book.entries or {}) do
+		if e.uid == body.uid then
+			table.remove(book.entries, i)
+			save_user_lorebooks(state, caps)
+			return json_ok(res, { deleted = true })
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+-- ── DEPRECATED: /api/world_info/* adapters ──────────────────────────────────
+--
+-- Shims that map the old per-entry world_info endpoints onto the first
+-- user lorebook (creating an "Imported" book on demand). Remove once the UI
+-- is migrated to the /api/user_lorebooks/* endpoints.
+
+local function ensure_default_user_book(state, caps)
+	if #state.user_lorebooks == 0 then
+		local book = {
+			id = gen_book_id(caps.time and caps.time.now),
+			name = "Default",
+			entries = {},
+			active = true,
+		}
+		state.user_lorebooks[1] = book
+		save_user_lorebooks(state, caps)
+	end
+	return state.user_lorebooks[1]
+end
+
+local function api_get_world_info(state, _caps, _params, _body, res)
+	-- Merged view over all books (UI sees a flat list during migration window).
+	local result = {}
+	for _, b in ipairs(state.user_lorebooks) do
+		for _, e in ipairs(b.entries or {}) do
+			result[#result + 1] = entry_to_json(e)
+		end
+	end
+	return json_ok(res, { entries = result })
+end
+
+local function api_post_world_info_update(state, caps, _params, body, res)
+	if not body or not body.uid then return json_err(res, 400, "uid required") end
+	for _, b in ipairs(state.user_lorebooks) do
+		for _, e in ipairs(b.entries or {}) do
+			if e.uid == body.uid then
+				if body.keys ~= nil then e.key = body.keys end
+				if body.content ~= nil then e.content = body.content end
+				if body.enabled ~= nil then e.enabled = body.enabled end
+				if body.constant ~= nil then e.constant = body.constant end
+				if body.position ~= nil then e.position = body.position end
+				if body.order ~= nil then e.order = body.order end
+				if body.role ~= nil then e.role = body.role end
+				save_user_lorebooks(state, caps)
+				return json_ok(res, entry_to_json(e))
+			end
+		end
+	end
+	return json_err(res, 404, "entry not found")
+end
+
+local function api_post_world_info_add(state, caps, _params, body, res)
+	if not body or not body.keys or not body.content then
+		return json_err(res, 400, "keys and content required")
+	end
+	local book = ensure_default_user_book(state, caps)
+	local entry = lorebook_mod.normalize({
+		key = body.keys,
+		content = body.content,
+		enabled = body.enabled,
+		constant = body.constant,
+		position = body.position,
+		order = body.order,
+		role = body.role,
+	})
+	book.entries[#book.entries + 1] = entry
+	save_user_lorebooks(state, caps)
 	return json_ok(res, entry_to_json(entry))
 end
 
 local function api_post_world_info_delete(state, caps, _params, body, res)
 	if not body or not body.uid then return json_err(res, 400, "uid required") end
-	for i, e in ipairs(state.world_info) do
-		if e.uid == body.uid then
-			table.remove(state.world_info, i)
-			save_world_info(state, caps)
-			return json_ok(res, { deleted = true })
+	for _, b in ipairs(state.user_lorebooks) do
+		for i, e in ipairs(b.entries or {}) do
+			if e.uid == body.uid then
+				table.remove(b.entries, i)
+				save_user_lorebooks(state, caps)
+				return json_ok(res, { deleted = true })
+			end
 		end
 	end
 	return json_err(res, 404, "entry not found")
@@ -1642,6 +1987,7 @@ local function api_post_world_info_import(state, caps, _params, body, res)
 	if not body or not body.entries or type(body.entries) ~= "table" then
 		return json_err(res, 400, "entries array required")
 	end
+	local book = ensure_default_user_book(state, caps)
 	for _, raw in ipairs(body.entries) do
 		local entry = lorebook_mod.normalize({
 			key = raw.keys or raw.key,
@@ -1652,11 +1998,11 @@ local function api_post_world_info_import(state, caps, _params, body, res)
 			order = raw.order,
 			role = raw.role,
 		})
-		state.world_info[#state.world_info + 1] = entry
+		book.entries[#book.entries + 1] = entry
 	end
-	save_world_info(state, caps)
+	save_user_lorebooks(state, caps)
 	local result = {}
-	for _, e in ipairs(state.world_info) do
+	for _, e in ipairs(book.entries) do
 		result[#result + 1] = entry_to_json(e)
 	end
 	return json_ok(res, { entries = result, imported = #body.entries })
@@ -1664,8 +2010,10 @@ end
 
 local function api_get_world_info_export(state, _caps, _params, _body, res)
 	local result = {}
-	for _, e in ipairs(state.world_info) do
-		result[#result + 1] = entry_to_json(e)
+	for _, b in ipairs(state.user_lorebooks) do
+		for _, e in ipairs(b.entries or {}) do
+			result[#result + 1] = entry_to_json(e)
+		end
 	end
 	return json_ok(res, { entries = result })
 end
@@ -1814,10 +2162,9 @@ local function api_post_card_edit(state, caps, _params, body, res)
 		state.card.tags = body.tags
 	end
 
-	-- Persist overrides to kv.
-	if caps.kv then
-		caps.kv.set("card_overrides", json.encode(card_edit_response(state.card)))
-	end
+	-- Persist: writes chara back to the PNG if self_write is available,
+	-- else falls back to per-bucket kv writes (card_overrides).
+	flush_card_state(state, caps)
 
 	return json_ok(res, card_edit_response(state.card))
 end
@@ -1825,7 +2172,8 @@ end
 local function api_post_card_reset(state, caps, _params, _body, res)
 	if not state.card then return json_err(res, 404, "no card loaded") end
 
-	-- Delete overrides from kv.
+	-- Delete legacy kv overrides (post-migration we only need the PNG state,
+	-- but older installs may still carry these keys).
 	if caps.kv then
 		caps.kv.set("card_overrides", nil)
 	end
@@ -2006,8 +2354,7 @@ end
 -- ── Author's Note endpoints ───────────────────────────────────────────────
 
 local function save_authors_note(state, caps)
-	if not caps.kv then return end
-	caps.kv.set("authors_note", json.encode(state.authors_note))
+	flush_card_state(state, caps)
 end
 
 local function api_get_authors_note(state, _caps, _params, _body, res)
@@ -2211,6 +2558,18 @@ local routes = {
 	["POST /api/lorebook/update"]  = api_post_lorebook_update,
 	["POST /api/lorebook/add"]     = api_post_lorebook_add,
 	["POST /api/lorebook/delete"]  = api_post_lorebook_delete,
+	-- User-scope lorebooks (new primary interface).
+	["GET /api/user_lorebooks"]                = api_get_user_lorebooks,
+	["POST /api/user_lorebooks"]               = api_post_user_lorebooks_create,
+	["POST /api/user_lorebooks/rename"]        = api_post_user_lorebooks_rename,
+	["POST /api/user_lorebooks/delete"]        = api_post_user_lorebooks_delete,
+	["POST /api/user_lorebooks/toggle"]        = api_post_user_lorebooks_toggle,
+	["GET /api/user_lorebooks/entries"]        = api_get_user_lorebook_entries,
+	["POST /api/user_lorebooks/entry/add"]     = api_post_user_lorebook_entry_add,
+	["POST /api/user_lorebooks/entry/update"]  = api_post_user_lorebook_entry_update,
+	["POST /api/user_lorebooks/entry/delete"]  = api_post_user_lorebook_entry_delete,
+	-- DEPRECATED: /api/world_info/* adapters over user_lorebooks. Remove once
+	-- the UI migrates to /api/user_lorebooks/*. Operates on a merged view.
 	["GET /api/world_info"]          = api_get_world_info,
 	["POST /api/world_info/update"]  = api_post_world_info_update,
 	["POST /api/world_info/add"]     = api_post_world_info_add,
@@ -2315,14 +2674,38 @@ function M.create(caps, opts)
 		end
 	end
 
-	-- Load world info from kv.
+	-- Load user_lorebooks from kv.
 	if caps.kv then
-		local raw = caps.kv.get("world_info")
+		local raw = caps.kv.get("user_lorebooks")
 		if raw then
 			local ok, saved = pcall(json.decode, raw)
 			if ok and type(saved) == "table" then
-				state.world_info = saved
+				state.user_lorebooks = saved
 			end
+		end
+
+		-- One-pass migration: legacy "world_info" kv key → a single
+		-- user lorebook named "Imported", active by default. Idempotent:
+		-- runs only if user_lorebooks is empty and the legacy key exists.
+		if #state.user_lorebooks == 0 then
+			local legacy = caps.kv.get("world_info")
+			if legacy then
+				local ok_l, parsed = pcall(json.decode, legacy)
+				if ok_l and type(parsed) == "table" then
+					state.user_lorebooks[1] = {
+						id = gen_book_id(caps.time and caps.time.now),
+						name = "Imported",
+						entries = parsed,
+						active = true,
+					}
+					save_user_lorebooks(state, caps)
+				end
+			end
+		end
+		-- Always clear the legacy key on successful migration (also clears if
+		-- it was bogus JSON, which is fine — nothing to preserve).
+		if caps.kv.get("world_info") ~= nil and #state.user_lorebooks > 0 then
+			caps.kv.set("world_info", nil)
 		end
 	end
 
@@ -2396,9 +2779,13 @@ function M.create(caps, opts)
 		end
 	end
 
-	-- Load author's note from kv or initialize defaults.
-	state.authors_note = { text = "", depth = 4, position = "after" }
-	if caps.kv then
+	-- Load author's note from kv or initialize defaults. PNG-resident values
+	-- (loaded by load_card from chara.extensions.depth_prompt) take
+	-- precedence because kv is a legacy fallback.
+	if not state.authors_note then
+		state.authors_note = { text = "", depth = 4, position = "after" }
+	end
+	if caps.kv and (state.authors_note.text == nil or state.authors_note.text == "") then
 		local raw = caps.kv.get("authors_note")
 		if raw then
 			local ok_an, saved = pcall(json.decode, raw)
@@ -2406,6 +2793,26 @@ function M.create(caps, opts)
 				if saved.text ~= nil then state.authors_note.text = saved.text end
 				if saved.depth ~= nil then state.authors_note.depth = saved.depth end
 				if saved.position ~= nil then state.authors_note.position = saved.position end
+			end
+		end
+	end
+
+	-- One-pass card-state migration: when self_write is available and legacy
+	-- kv keys exist (lorebook/card_overrides/authors_note/regex_scripts),
+	-- bake the merged state into the PNG and delete the legacy keys.
+	-- Idempotent: after the first run the legacy keys are gone so this is a
+	-- no-op on subsequent starts.
+	if caps.self_write and caps.kv and state.card then
+		local had_any = false
+		for _, k in ipairs({ "lorebook", "card_overrides", "authors_note", "regex_scripts" }) do
+			if caps.kv.get(k) ~= nil then had_any = true; break end
+		end
+		if had_any then
+			local ok = write_chara_to_png(state, caps)
+			if ok then
+				for _, k in ipairs({ "lorebook", "card_overrides", "authors_note", "regex_scripts" }) do
+					caps.kv.set(k, nil)
+				end
 			end
 		end
 	end
