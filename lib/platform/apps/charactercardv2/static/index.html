@@ -66,27 +66,6 @@
     </div>
   </div>
 
-  <div class="authors-note-bar" id="authors-note-bar">
-    <button class="authors-note-bar__toggle" id="an-toggle" title="Author's Note">AN</button>
-    <div class="authors-note-bar__panel" id="an-panel">
-      <textarea class="authors-note-bar__textarea" id="an-text" rows="2" placeholder="Author's Note (injected into context at depth)..."></textarea>
-      <div class="authors-note-bar__controls">
-        <label class="authors-note-bar__field">
-          <span>Depth</span>
-          <input type="number" id="an-depth" min="0" max="999" value="4" class="authors-note-bar__input">
-        </label>
-        <label class="authors-note-bar__field">
-          <span>Position</span>
-          <select id="an-position" class="authors-note-bar__input">
-            <option value="after">After</option>
-            <option value="before">Before</option>
-          </select>
-        </label>
-        <button class="authors-note-bar__save" id="an-save">Save</button>
-      </div>
-    </div>
-  </div>
-
   <div class="input-row">
     <textarea class="input-row__textarea" id="input" rows="3" placeholder="Type a message..."></textarea>
     <div class="input-row__actions">
@@ -170,18 +149,6 @@
     </div>
   </div>
 
-  <div class="lorebook-overlay" id="lorebook-overlay" hidden>
-    <div class="lorebook-panel" id="lorebook-panel">
-      <div class="lorebook-panel__header">
-        <span class="lorebook-panel__title">Card Lorebook</span>
-        <button class="lorebook-panel__add" id="lorebook-add">+ Add Entry</button>
-        <button class="lorebook-panel__close" id="lorebook-close">&times;</button>
-      </div>
-      <div class="lorebook-panel__notice" id="lorebook-notice" hidden></div>
-      <div class="lorebook-panel__body" id="lorebook-list"></div>
-    </div>
-  </div>
-
   <div class="lorebook-overlay" id="my-lorebooks-overlay" hidden>
     <div class="lorebook-panel lorebook-panel--wide" id="my-lorebooks-panel">
       <div class="lorebook-panel__header">
@@ -211,87 +178,128 @@
   <div class="card-edit-overlay" id="card-edit-overlay" hidden>
     <div class="card-edit-panel">
       <div class="card-edit-panel__header">
-        <span class="card-edit-panel__title">Card Editor</span>
+        <span class="card-edit-panel__title" id="card-edit-panel-title"></span>
+        <div class="card-edit-tabs" role="tablist">
+          <button class="card-edit-tab" id="tab-btn-identity" role="tab" aria-controls="tab-identity" aria-selected="true">Identity</button>
+          <button class="card-edit-tab" id="tab-btn-greetings" role="tab" aria-controls="tab-greetings" aria-selected="false">Greetings</button>
+          <button class="card-edit-tab" id="tab-btn-lorebook" role="tab" aria-controls="tab-lorebook" aria-selected="false">Lorebook</button>
+          <button class="card-edit-tab" id="tab-btn-regex" role="tab" aria-controls="tab-regex" aria-selected="false">Regex</button>
+        </div>
         <button class="card-edit-panel__close" id="card-edit-close">&times;</button>
       </div>
       <div class="card-edit-panel__notice" id="card-edit-notice" hidden></div>
-      <div class="card-edit-panel__body">
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Name</span>
-          <input type="text" class="card-edit-field__input" id="card-name">
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Creator</span>
-          <input type="text" class="card-edit-field__input" id="card-creator">
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Version</span>
-          <input type="text" class="card-edit-field__input" id="card-character_version">
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Description</span>
-          <textarea class="card-edit-field__textarea" id="card-description" rows="4"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Personality</span>
-          <textarea class="card-edit-field__textarea" id="card-personality" rows="3"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Scenario</span>
-          <textarea class="card-edit-field__textarea" id="card-scenario" rows="3"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">First Message</span>
-          <textarea class="card-edit-field__textarea" id="card-first_mes" rows="3"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Example Messages</span>
-          <textarea class="card-edit-field__textarea" id="card-mes_example" rows="4"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">System Prompt</span>
-          <textarea class="card-edit-field__textarea" id="card-system_prompt" rows="4"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Post-History Instructions</span>
-          <textarea class="card-edit-field__textarea" id="card-post_history_instructions" rows="3"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Creator Notes</span>
-          <textarea class="card-edit-field__textarea" id="card-creator_notes" rows="3"></textarea>
-        </label>
-        <label class="card-edit-field">
-          <span class="card-edit-field__label">Tags (comma-separated)</span>
-          <input type="text" class="card-edit-field__input" id="card-tags">
-        </label>
-        <div class="card-edit-field">
-          <span class="card-edit-field__label">Alternate Greetings</span>
-          <div id="card-alt-greetings-list" class="card-edit-alt-list"></div>
-          <button class="card-edit-alt-add" id="card-alt-add">+ Add Greeting</button>
+
+      <!-- Identity tab -->
+      <div class="card-edit-tab-pane" id="tab-identity" role="tabpanel">
+        <div class="card-edit-panel__body">
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Name</span>
+            <input type="text" class="card-edit-field__input" id="card-name">
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Creator</span>
+            <input type="text" class="card-edit-field__input" id="card-creator">
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Version</span>
+            <input type="text" class="card-edit-field__input" id="card-character_version">
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Description</span>
+            <textarea class="card-edit-field__textarea" id="card-description" rows="4"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Personality</span>
+            <textarea class="card-edit-field__textarea" id="card-personality" rows="3"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Scenario</span>
+            <textarea class="card-edit-field__textarea" id="card-scenario" rows="3"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">System Prompt</span>
+            <textarea class="card-edit-field__textarea" id="card-system_prompt" rows="4"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Post-History Instructions</span>
+            <textarea class="card-edit-field__textarea" id="card-post_history_instructions" rows="3"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Creator Notes</span>
+            <textarea class="card-edit-field__textarea" id="card-creator_notes" rows="3"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Tags (comma-separated)</span>
+            <input type="text" class="card-edit-field__input" id="card-tags">
+          </label>
+          <div class="card-edit-field">
+            <span class="card-edit-field__label">Author's Note</span>
+            <textarea class="card-edit-field__textarea" id="an-text" rows="2" placeholder="Injected into context at the specified depth..."></textarea>
+            <div class="card-edit-an-controls">
+              <label class="card-edit-an-field">
+                <span>Depth</span>
+                <input type="number" id="an-depth" min="0" max="999" value="4" class="card-edit-an-input">
+              </label>
+              <label class="card-edit-an-field">
+                <span>Position</span>
+                <select id="an-position" class="card-edit-an-input">
+                  <option value="after">After</option>
+                  <option value="before">Before</option>
+                </select>
+              </label>
+              <button class="card-edit-an-save" id="an-save">Save AN</button>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="card-edit-panel__footer">
+
+      <!-- Greetings tab -->
+      <div class="card-edit-tab-pane" id="tab-greetings" role="tabpanel" hidden>
+        <div class="card-edit-panel__body">
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">First Message</span>
+            <textarea class="card-edit-field__textarea" id="card-first_mes" rows="4"></textarea>
+          </label>
+          <label class="card-edit-field">
+            <span class="card-edit-field__label">Example Messages</span>
+            <textarea class="card-edit-field__textarea" id="card-mes_example" rows="4"></textarea>
+          </label>
+          <div class="card-edit-field">
+            <span class="card-edit-field__label">Alternate Greetings</span>
+            <div id="card-alt-greetings-list" class="card-edit-alt-list"></div>
+            <button class="card-edit-alt-add" id="card-alt-add">+ Add Greeting</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lorebook tab -->
+      <div class="card-edit-tab-pane" id="tab-lorebook" role="tabpanel" hidden>
+        <div class="card-edit-panel__header-action">
+          <button class="lorebook-panel__add" id="lorebook-add">+ Add Entry</button>
+        </div>
+        <div class="lorebook-panel__notice" id="lorebook-notice" hidden></div>
+        <div class="lorebook-panel__body" id="lorebook-list"></div>
+      </div>
+
+      <!-- Regex tab -->
+      <div class="card-edit-tab-pane" id="tab-regex" role="tabpanel" hidden>
+        <div class="card-edit-panel__header-action">
+          <button class="regex-panel__add" id="regex-add">+ Add Script</button>
+        </div>
+        <div class="regex-panel__body" id="regex-list"></div>
+        <div class="regex-panel__test">
+          <span class="regex-panel__test-title">Test</span>
+          <input class="regex-panel__test-input" id="regex-test-find" placeholder="Pattern (find)">
+          <input class="regex-panel__test-input" id="regex-test-replace" placeholder="Replacement">
+          <textarea class="regex-panel__test-textarea" id="regex-test-input" rows="2" placeholder="Test input text..."></textarea>
+          <button class="regex-panel__test-btn" id="regex-test-btn">Test</button>
+          <div class="regex-panel__test-output" id="regex-test-output"></div>
+        </div>
+      </div>
+
+      <div class="card-edit-panel__footer" id="card-edit-footer">
         <button class="card-edit-panel__reset" id="card-edit-reset">Reset to Original</button>
         <button class="card-edit-panel__save" id="card-edit-save">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="regex-overlay" id="regex-overlay" hidden>
-    <div class="regex-panel">
-      <div class="regex-panel__header">
-        <span class="regex-panel__title">Regex Scripts</span>
-        <button class="regex-panel__add" id="regex-add">+ Add Script</button>
-        <button class="regex-panel__close" id="regex-close">&times;</button>
-      </div>
-      <div class="regex-panel__body" id="regex-list"></div>
-      <div class="regex-panel__test">
-        <span class="regex-panel__test-title">Test</span>
-        <input class="regex-panel__test-input" id="regex-test-find" placeholder="Pattern (find)">
-        <input class="regex-panel__test-input" id="regex-test-replace" placeholder="Replacement">
-        <textarea class="regex-panel__test-textarea" id="regex-test-input" rows="2" placeholder="Test input text..."></textarea>
-        <button class="regex-panel__test-btn" id="regex-test-btn">Test</button>
-        <div class="regex-panel__test-output" id="regex-test-output"></div>
       </div>
     </div>
   </div>
