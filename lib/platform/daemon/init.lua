@@ -966,6 +966,56 @@ function M.make(opts)
 		res.body = ""
 	end)
 
+	-- Shared helper: given app_path and manifest_or_err (second return from
+	-- import_card), find the newly installed app in the index, write the audit
+	-- entry, and populate res with the JSON response.
+	-- Called by both /api/import-card and /api/import-card/upload.
+	--: (http_res, string, unknown) -> nil
+	local function respond_import_result(res, app_path, manifest_or_err)
+		-- Find the newly installed app id.
+		local new_app_id
+		if index_obj and index_obj.get then
+			-- The app was indexed by import_card; find by path.
+			local rows = index_obj:list()
+			for _, row in ipairs(rows) do
+				if row.path == app_path then
+					new_app_id = row.id
+					break
+				end
+			end
+		end
+		if not new_app_id then
+			-- import succeeded but we can't find the id — still a partial success
+			if audit_log then
+				audit_log:append("app_install", { app_id = nil, name = app_path })
+			end
+			res.status = 200
+			res.headers["Content-Type"] = { "application/json" }
+			res.body = json.encode({ ok = true, app_path = app_path })
+			return
+		end
+
+		if audit_log then
+			local install_name = app_path
+			if index_obj and index_obj.get then
+				local irow = index_obj:get(new_app_id)
+				if irow then install_name = irow.name end
+			end
+			audit_log:append("app_install", {
+				app_id = tostring(new_app_id),
+				name   = install_name,
+			})
+		end
+
+		res.status = 200
+		res.headers["Content-Type"] = { "application/json" }
+		res.body = json.encode({
+			ok         = true,
+			app_id     = new_app_id,
+			launch_url = "/launch/" .. tostring(new_app_id),
+		})
+	end
+
 	-- POST /api/import-card — import a source adapter entry as a new CCv2 app.
 	-- Query params: source=<source_id>&entry=<entry_id>
 	-- Requires a valid session. Reads the PNG from source.handler(GET /card/:id),
@@ -1057,48 +1107,7 @@ function M.make(opts)
 			return
 		end
 
-		-- Find the newly installed app id.
-		local new_app_id
-		if index_obj and index_obj.get then
-			-- The app was indexed by import_card; find by path.
-			local rows = index_obj:list()
-			for _, row in ipairs(rows) do
-				if row.path == app_path then
-					new_app_id = row.id
-					break
-				end
-			end
-		end
-		if not new_app_id then
-			-- import succeeded but we can't find the id — still a partial success
-			if audit_log then
-				audit_log:append("app_install", { app_id = nil, name = app_path })
-			end
-			res.status = 200
-			res.headers["Content-Type"] = { "application/json" }
-			res.body = json.encode({ ok = true, app_path = app_path })
-			return
-		end
-
-		if audit_log then
-			local install_name = app_path
-			if index_obj and index_obj.get then
-				local irow = index_obj:get(new_app_id)
-				if irow then install_name = irow.name end
-			end
-			audit_log:append("app_install", {
-				app_id = tostring(new_app_id),
-				name   = install_name,
-			})
-		end
-
-		res.status = 200
-		res.headers["Content-Type"] = { "application/json" }
-		res.body = json.encode({
-			ok         = true,
-			app_id     = new_app_id,
-			launch_url = "/launch/" .. tostring(new_app_id),
-		})
+		respond_import_result(res, app_path, manifest_or_err)
 	end)
 
 	-- POST /api/import-card/upload — import a directly-uploaded PNG as a new CCv2 app.
@@ -1146,48 +1155,7 @@ function M.make(opts)
 			return
 		end
 
-		-- Find the newly installed app id.
-		local new_app_id
-		if index_obj and index_obj.get then
-			-- The app was indexed by import_card; find by path.
-			local rows = index_obj:list()
-			for _, row in ipairs(rows) do
-				if row.path == app_path then
-					new_app_id = row.id
-					break
-				end
-			end
-		end
-		if not new_app_id then
-			-- import succeeded but we can't find the id — still a partial success
-			if audit_log then
-				audit_log:append("app_install", { app_id = nil, name = app_path })
-			end
-			res.status = 200
-			res.headers["Content-Type"] = { "application/json" }
-			res.body = json.encode({ ok = true, app_path = app_path })
-			return
-		end
-
-		if audit_log then
-			local install_name = app_path
-			if index_obj and index_obj.get then
-				local irow = index_obj:get(new_app_id)
-				if irow then install_name = irow.name end
-			end
-			audit_log:append("app_install", {
-				app_id = tostring(new_app_id),
-				name   = install_name,
-			})
-		end
-
-		res.status = 200
-		res.headers["Content-Type"] = { "application/json" }
-		res.body = json.encode({
-			ok         = true,
-			app_id     = new_app_id,
-			launch_url = "/app/" .. tostring(new_app_id) .. "/",
-		})
+		respond_import_result(res, app_path, manifest_or_err)
 	end)
 
 	-- /launch/:id — mint a one-shot launch token bound to the current session
