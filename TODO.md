@@ -128,6 +128,7 @@ See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitive
 ## admin app
 
 - [ ] **Admin app** — single app (`lib/platform/apps/admin/`) with `server` (HTTP UI) and `headless` (agent/script) entrypoints. Caps: `keyring` (write) for secret management, `fs` (write, apps dir) for install/uninstall. Grant management stays in the daemon (an app that can modify other apps' grants could silently escalate its own privileges). Design in `docs/platform-design.md` under "First-party apps".
+- [ ] **Daemon `POST /api/new-card` violates platform invariant** — `lib/platform/CLAUDE.md` says "no format knowledge in the platform", but the daemon's new-card endpoint contains `BLANK_CHARA_JSON` (CCv2-specific) and implicitly assumes `runtime_files` = ccv2 app. Correct architecture: apps declare a blank-instance template (e.g. a `blank.png` entry in their tarball, or a manifest field `new_instance_template`). Daemon's new-card endpoint reads the template from the app's own tarball rather than hardcoding format. Also: apps run on their own subdomains so library (daemon origin) can't call app endpoints cross-origin — new-card must be daemon-level for now, but the format knowledge should move to the app.
 
 ## platform daemon — implementation track
 
