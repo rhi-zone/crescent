@@ -581,7 +581,7 @@ body {
 
 .input-row {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--glass-border);
@@ -594,8 +594,15 @@ body {
   margin: 0 auto;
 }
 
+.input-row__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .input-row__textarea {
-  flex: 1;
+  width: 100%;
   resize: none;
   border: 1px solid var(--glass-border);
   border-top-color: var(--glass-border-light);
@@ -1639,9 +1646,7 @@ body {
 
 .connection-result {
   font-size: 0.8125rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .connection-result--success {
