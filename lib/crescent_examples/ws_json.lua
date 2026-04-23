@@ -9,7 +9,7 @@ local json = require("lib.format.json")
 --[[@type (fun(msg: websocket_message))?]]
 local send
 
-require("lib.http.serverx").server({
+require("lib.http.server_ws").server({
 	ws = function (_, msg) print(json.value_to_json(msg)) end,
 	ws_open = function (_, send_) io.stderr:write("[info] socket connected\n"); send = send_ end,
 	ws_close = function () io.stderr:write("[info] socket disconnected\n"); send = nil end,

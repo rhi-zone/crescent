@@ -1,6 +1,6 @@
 -- ideally: path based but with $seg -> param.seg
 -- currently: path based copy of staticx_router
-local table_router = require("lib.http.router.tablex").router
+local table_router = require("lib.http.router.table_glob").router
 local dir_list = require("lib.fs.dir_list").dir_list
 local mimetype_by_name = require("lib.mimetype.by_name").mimetype
 local mimetype_by_contents
