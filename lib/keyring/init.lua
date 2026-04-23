@@ -8,9 +8,10 @@
 --               Requires lib.hash.sha256 (ships with crescent).
 --
 -- API:
---   keyring.set(service, key)  -> true | nil, err
---   keyring.get(service)       -> value | nil, err
---   keyring.delete(service)    -> true | nil, err
+--   keyring.set(service, key)     -> true | nil, err
+--   keyring.get(service)          -> value | nil, err
+--   keyring.delete(service)       -> true | nil, err
+--   keyring.list(prefix?)         -> { service, ... } | nil, err
 --
 -- Service name convention: "crescent/<name>"
 -- M._tier: "libsecret" | "keychain" | "file" | nil (no tier loaded)
@@ -145,6 +146,13 @@ local function try_libsecret()
 		return true
 	end
 
+	function tier.list(_prefix)
+		-- secret_password_search_sync requires a GMainLoop / GLib event loop
+		-- which is not available in a plain LuaJIT process.  Listing is not
+		-- supported on this tier.
+		return nil, "not supported"
+	end
+
 	return tier
 end
 
@@ -165,7 +173,7 @@ local function try_keychain()
 			UInt32          serviceNameLength,
 			const char     *serviceName,
 			UInt32          accountNameLength,
-			const char     *accountName,
+			const char      *accountName,
 			UInt32          passwordLength,
 			const void     *passwordData,
 			SecKeychainItemRef *itemRef
@@ -248,6 +256,16 @@ local function try_keychain()
 		lib.CFRelease(iref[0])
 		if dst ~= 0 then return nil, "keychain: delete failed: " .. dst end
 		return true
+	end
+
+	function tier.list(_prefix)
+		-- Enumerating all Keychain items with the old SecKeychain* API requires
+		-- SecKeychainSearchCreateFromAttributes + iteration, which needs a full
+		-- CSSM attribute setup.  The modern SecItemCopyMatching path requires
+		-- CFDictionary construction from extern CF constants that are not trivially
+		-- accessible via plain FFI symbol lookup.  Return not-supported rather than
+		-- risk incorrect behaviour.
+		return nil, "not supported"
 	end
 
 	return tier
@@ -536,6 +554,18 @@ local function try_file_tier()
 		return save_entries(entries)
 	end
 
+	function tier.list(prefix)
+		local entries = load_entries()
+		local names = {}
+		for service in pairs(entries) do
+			if prefix == nil or service:sub(1, #prefix) == prefix then
+				names[#names + 1] = service
+			end
+		end
+		table.sort(names)
+		return names
+	end
+
 	return tier
 end
 
@@ -576,6 +606,13 @@ function M.delete(service)
 	local b = load_backend()
 	if not b then return nil, "keyring: no backend available" end
 	return b.delete(service)
+end
+
+function M.list(prefix)
+	local b = load_backend()
+	if not b then return nil, "keyring: no backend available" end
+	if not b.list then return nil, "not supported" end
+	return b.list(prefix)
 end
 
 return M

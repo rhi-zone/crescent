@@ -832,12 +832,25 @@ local function cmd_set_key(args)
 		io.stderr:write("error: keyring unavailable: " .. tostring(keyring) .. "\n")
 		os.exit(1)
 	end
-	-- No args: usage (keyring has no list API yet).
+	-- No args: list all crescent/* keys.
 	if not key_name then
-		io.write("usage: luajit lib/platform/cli.lua set-key <name> [value]\n")
-		io.write("  set-key <name> <value>  -- store key\n")
-		io.write("  set-key <name>          -- show current value\n")
-		io.write("example: luajit lib/platform/cli.lua set-key anthropic sk-ant-...\n")
+		local keys, err = keyring.list("crescent/")
+		if not keys then
+			io.write("usage: luajit lib/platform/cli.lua set-key <name> [value]\n")
+			io.write("  set-key <name> <value>  -- store key\n")
+			io.write("  set-key <name>          -- show current value\n")
+			if err ~= "not supported" then
+				io.stderr:write("(list unavailable: " .. tostring(err) .. ")\n")
+			end
+			return
+		end
+		if #keys == 0 then
+			io.write("(no keys stored)\n")
+		else
+			for _, k in ipairs(keys) do
+				io.write(k:gsub("^crescent/", "") .. "\n")
+			end
+		end
 		return
 	end
 	-- One arg: show current value.

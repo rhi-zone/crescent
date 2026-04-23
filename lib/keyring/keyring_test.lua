@@ -76,8 +76,10 @@ local function make_isolated_file_tier()
 		return sha256_bin("test-iv-" .. ctr):sub(1, IV_LEN)
 	end
 
+	local _tier_counter = (_G._keyring_tier_counter or 0) + 1
+	_G._keyring_tier_counter = _tier_counter
 	local tmp_path = (os.getenv("TMPDIR") or "/tmp")
-		.. "/crescent_keyring_test_" .. tostring(os.time()) .. ".enc"
+		.. "/crescent_keyring_test_" .. tostring(os.time()) .. "_" .. _tier_counter .. ".enc"
 
 	-- Constant test key (32 bytes).
 	local TEST_KEY = sha256_bin("crescent-test-key")
@@ -184,6 +186,18 @@ local function make_isolated_file_tier()
 		return save_entries(entries)
 	end
 
+	function tier.list(prefix)
+		local entries = load_entries()
+		local names = {}
+		for service in pairs(entries) do
+			if prefix == nil or service:sub(1, #prefix) == prefix then
+				names[#names + 1] = service
+			end
+		end
+		table.sort(names)
+		return names
+	end
+
 	function tier.cleanup() os.remove(tmp_path) end
 
 	return tier
@@ -241,6 +255,49 @@ T.describe("keyring file tier", function()
 		T.eq(tier.get("crescent/persist-test"), "persistent-value")
 	end)
 
+	T.it("list returns all keys when no prefix", function()
+		-- Use a fresh tier so the key set is known.
+		local t2 = make_isolated_file_tier()
+		t2.set("crescent/a", "va")
+		t2.set("crescent/b", "vb")
+		t2.set("other/c",    "vc")
+		local names = t2.list()
+		table.sort(names)
+		T.eq(#names, 3)
+		T.eq(names[1], "crescent/a")
+		T.eq(names[2], "crescent/b")
+		T.eq(names[3], "other/c")
+		t2.cleanup()
+	end)
+
+	T.it("list filters by prefix", function()
+		local t2 = make_isolated_file_tier()
+		t2.set("crescent/x", "vx")
+		t2.set("crescent/y", "vy")
+		t2.set("other/z",    "vz")
+		local names = t2.list("crescent/")
+		table.sort(names)
+		T.eq(#names, 2)
+		T.eq(names[1], "crescent/x")
+		T.eq(names[2], "crescent/y")
+		t2.cleanup()
+	end)
+
+	T.it("list returns empty table when file does not exist", function()
+		local t2 = make_isolated_file_tier()
+		local names = t2.list()
+		T.eq(#names, 0)
+		t2.cleanup()
+	end)
+
+	T.it("list returns empty table when prefix matches nothing", function()
+		local t2 = make_isolated_file_tier()
+		t2.set("crescent/q", "vq")
+		local names = t2.list("nomatch/")
+		T.eq(#names, 0)
+		t2.cleanup()
+	end)
+
 	tier.cleanup()
 end)
 
@@ -258,5 +315,17 @@ T.describe("keyring module API", function()
 		local dok, derr = keyring.delete(svc)
 		T.ok(dok, tostring(derr))
 		T.eq(keyring.get(svc), nil)
+	end)
+
+	T.it("list returns table or 'not supported'", function()
+		if not keyring._tier then T.ok(true); return end
+		local result, err = keyring.list("crescent/")
+		if result ~= nil then
+			-- File tier: result must be a table.
+			T.ok(type(result) == "table", "expected table from list()")
+		else
+			-- libsecret / keychain tier: must say "not supported".
+			T.eq(err, "not supported")
+		end
 	end)
 end)
