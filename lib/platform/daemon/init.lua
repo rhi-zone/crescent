@@ -169,8 +169,6 @@ function M.classify_host(host, daemon_host, loopback_ip_to_id)
 	return { kind = "unknown", id = nil, loopback = nil }
 end
 
--- ── Blank card constants ───────────────────────────────────────────────────
-
 -- ── Daemon construction ────────────────────────────────────────────────────
 
 -- make(opts) -> daemon
