@@ -219,7 +219,15 @@ mod.wait = epoll.wait
 
 --: (epoll) -> nil
 --[[loops forever]]
-epoll.loop = function (self) while self.count > 0 do self:wait() end end
+epoll.loop = function (self)
+	while self.count > 0 do
+		local ok, err = pcall(self.wait, self)
+		if not ok then
+			if type(err) == "string" and err:find("interrupted!", 1, true) then return end
+			error(err, 0)
+		end
+	end
+end
 mod.loop = epoll.loop
 
 return mod
