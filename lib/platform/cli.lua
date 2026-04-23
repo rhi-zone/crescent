@@ -853,11 +853,13 @@ local function cmd_set_key(args)
 		end
 		return
 	end
-	-- One arg: show current value.
+	-- One arg: show masked value.
 	if not key_value then
 		local val, err = keyring.get("crescent/" .. key_name)
 		if val then
-			io.write(key_name .. " = " .. val .. "\n")
+			local visible = val:sub(1, 8)
+			local masked = visible .. string.rep("*", math.max(0, #val - 8))
+			io.write(key_name .. " = " .. masked .. "\n")
 		else
 			io.write(key_name .. ": not set\n")
 		end
