@@ -2488,8 +2488,8 @@ function M.create(caps, opts)
 	-- Extension -> content-type map for static file serving via caps.self.
 	local MIME_TYPES = {
 		html = "text/html; charset=utf-8",
-		js = "application/javascript",
-		css = "text/css",
+		js = "application/javascript; charset=utf-8",
+		css = "text/css; charset=utf-8",
 		json = "application/json",
 		png = "image/png",
 		jpg = "image/jpeg",

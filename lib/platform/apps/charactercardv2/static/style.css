@@ -1931,6 +1931,10 @@ body {
   z-index: 100;
 }
 
+.group-overlay[hidden] {
+  display: none;
+}
+
 .group-panel {
   background: var(--bg);
   border: 1px solid var(--border);
