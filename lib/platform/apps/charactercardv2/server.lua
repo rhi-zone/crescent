@@ -2261,6 +2261,9 @@ local routes = {
 
 function M.create(caps, opts)
 	opts = opts or {}
+	-- Seed RNG for UUID generation. Use time cap if available.
+	local time_fn = caps.time and caps.time.now or nil
+	math.randomseed(time_fn and (time_fn() * 1000 + math.random(999)) or math.random(2^31))
 	local state = create_state()
 
 	-- Read user name from opts (previously from caps.config, now passed directly).
