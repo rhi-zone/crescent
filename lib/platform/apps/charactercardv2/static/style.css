@@ -2498,6 +2498,23 @@ body {
   color: var(--accent);
 }
 
+.book-row__export {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.book-row__export:hover {
+  background: var(--glass-hover);
+  color: var(--text);
+}
+
 .book-detail {
   flex: 1;
   display: flex;

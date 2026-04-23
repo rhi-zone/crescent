@@ -1906,6 +1906,90 @@ local function api_post_user_lorebook_entry_delete(state, caps, params, body, re
 	return json_err(res, 404, "entry not found")
 end
 
+-- Per-book export / import. Export returns the book's {name, entries} with a
+-- Content-Disposition attachment header so the browser triggers a download.
+-- Import accepts a {name?, entries} payload and creates a new book by routing
+-- each entry through lorebook_mod.normalize (so partial/malformed entries get
+-- their required fields filled in with defaults).
+
+-- Replace filesystem-unfriendly characters with underscore. Keeps letters,
+-- digits, dot, dash, space, underscore; everything else -> "_". Trims to a
+-- reasonable length.
+local function sanitize_filename(name)
+	if type(name) ~= "string" or #name == 0 then return "lorebook" end
+	local out = name:gsub("[^%w%.%-_ ]", "_")
+	if #out > 80 then out = out:sub(1, 80) end
+	if #out == 0 then return "lorebook" end
+	return out
+end
+
+local function api_get_user_lorebooks_export(state, _caps, params, _body, res)
+	local id = params and params.book_id
+	if not id then return json_err(res, 400, "book_id required") end
+	local book = find_user_book(state, id)
+	if not book then return json_err(res, 404, "book not found") end
+	local entries = {}
+	for _, e in ipairs(book.entries or {}) do
+		entries[#entries + 1] = entry_to_json(e)
+	end
+	local payload = { name = book.name, entries = entries }
+	res.status = 200
+	res.headers["Content-Type"] = "application/json"
+	res.headers["Content-Disposition"] =
+		'attachment; filename="' .. sanitize_filename(book.name) .. '.lorebook.json"'
+	res.body = json.encode(payload)
+	return true
+end
+
+local function api_post_user_lorebooks_import(state, caps, _params, body, res)
+	if not body or type(body.entries) ~= "table" then
+		return json_err(res, 400, "entries required")
+	end
+	local name = (type(body.name) == "string" and #body.name > 0) and body.name or "Imported"
+	local normalized = {}
+	for _, raw in ipairs(body.entries) do
+		if type(raw) == "table" then
+			-- Accept either {keys=...} (our export shape) or {key=...} (raw storage shape).
+			local entry_in = {
+				uid             = raw.uid,
+				comment         = raw.comment,
+				key             = raw.key or raw.keys,
+				keysecondary    = raw.keysecondary,
+				selectiveLogic  = raw.selectiveLogic,
+				content         = raw.content,
+				enabled         = raw.enabled,
+				constant        = raw.constant,
+				order           = raw.order,
+				position        = raw.position,
+				depth           = raw.depth,
+				role            = raw.role,
+				caseSensitive   = raw.caseSensitive,
+				matchWholeWords = raw.matchWholeWords,
+				probability     = raw.probability,
+				sticky          = raw.sticky,
+				cooldown        = raw.cooldown,
+				delay           = raw.delay,
+				ignoreBudget    = raw.ignoreBudget,
+				excludeRecursion = raw.excludeRecursion,
+				preventRecursion = raw.preventRecursion,
+				group           = raw.group,
+				groupWeight     = raw.groupWeight,
+				displayIndex    = raw.displayIndex,
+			}
+			normalized[#normalized + 1] = lorebook_mod.normalize(entry_in)
+		end
+	end
+	local book = {
+		id = gen_book_id(caps.time and caps.time.now),
+		name = name,
+		entries = normalized,
+		active = false,
+	}
+	state.user_lorebooks[#state.user_lorebooks + 1] = book
+	save_user_lorebooks(state, caps)
+	return json_ok(res, book_summary(book))
+end
+
 -- ── Persona endpoints helpers ──────────────────────────────────────────────
 
 local function save_personas(state, caps)
@@ -2456,6 +2540,8 @@ local routes = {
 	["POST /api/user_lorebooks/entry/add"]     = api_post_user_lorebook_entry_add,
 	["POST /api/user_lorebooks/entry/update"]  = api_post_user_lorebook_entry_update,
 	["POST /api/user_lorebooks/entry/delete"]  = api_post_user_lorebook_entry_delete,
+	["GET /api/user_lorebooks/export"]         = api_get_user_lorebooks_export,
+	["POST /api/user_lorebooks/import"]        = api_post_user_lorebooks_import,
 	["GET /api/sessions"]         = api_get_sessions,
 	["POST /api/session/new"]     = api_post_session_new,
 	["POST /api/session/switch"]  = api_post_session_switch,

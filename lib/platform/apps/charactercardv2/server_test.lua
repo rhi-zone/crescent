@@ -655,6 +655,113 @@ T.describe("user_lorebooks", function()
 	end)
 end)
 
+-- ── user_lorebooks import / export ───────────────────────────────────────────
+
+-- Export requires raw header access; call() drops headers, so use a local
+-- variant that preserves the response object.
+local function call_raw(app, method, target, body)
+	local req = make_req(method, target, body)
+	local res = make_res()
+	app.handler(req, res, nil)
+	return res
+end
+
+T.describe("user_lorebooks import/export", function()
+	T.it("export returns the book as JSON with a download header", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local _, book = call(app, "POST", "/api/user_lorebooks", { name = "Travel" })
+		call(app, "POST", "/api/user_lorebooks/entry/add", {
+			book_id = book.id,
+			keys = { "paris" },
+			content = "City of light.",
+		})
+		local res = call_raw(app, "GET", "/api/user_lorebooks/export?book_id=" .. book.id)
+		T.eq(res.status, 200)
+		T.eq(res.headers["Content-Type"], "application/json")
+		T.ok(res.headers["Content-Disposition"]:find('attachment; filename="Travel.lorebook.json"', 1, true) ~= nil)
+		local payload = require("lib.format.json").decode(res.body)
+		T.eq(payload.name, "Travel")
+		T.eq(#payload.entries, 1)
+		T.eq(payload.entries[1].content, "City of light.")
+	end)
+
+	T.it("export returns 400 without book_id and 404 for unknown id", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local status = select(1, call(app, "GET", "/api/user_lorebooks/export"))
+		T.eq(status, 400)
+		status = select(1, call(app, "GET", "/api/user_lorebooks/export?book_id=nope"))
+		T.eq(status, 404)
+	end)
+
+	T.it("import creates a new book and normalizes entries", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local status, created = call(app, "POST", "/api/user_lorebooks/import", {
+			name = "Imported Book",
+			entries = {
+				{ keys = { "k1" }, content = "c1" },
+				{ keys = { "k2" }, content = "c2", enabled = false },
+			},
+		})
+		T.eq(status, 200)
+		T.eq(created.name, "Imported Book")
+		T.eq(created.active, false)
+		T.eq(created.entry_count, 2)
+		local _, listed = call(app, "GET", "/api/user_lorebooks/entries?book_id=" .. created.id)
+		T.eq(#listed.entries, 2)
+		T.eq(listed.entries[1].content, "c1")
+		T.eq(listed.entries[2].enabled, false)
+	end)
+
+	T.it("import defaults name to 'Imported' when missing", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local status, created = call(app, "POST", "/api/user_lorebooks/import", {
+			entries = {},
+		})
+		T.eq(status, 200)
+		T.eq(created.name, "Imported")
+		T.eq(created.entry_count, 0)
+	end)
+
+	T.it("import rejects missing entries field", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local status = select(1, call(app, "POST", "/api/user_lorebooks/import", { name = "x" }))
+		T.eq(status, 400)
+		status = select(1, call(app, "POST", "/api/user_lorebooks/import", {}))
+		T.eq(status, 400)
+	end)
+
+	T.it("export -> import round-trips cleanly", function()
+		local caps = make_caps("reply")
+		local app = server.create(caps, { no_static = true })
+		local _, book = call(app, "POST", "/api/user_lorebooks", { name = "Round Trip" })
+		call(app, "POST", "/api/user_lorebooks/entry/add", {
+			book_id = book.id, keys = { "alpha", "beta" }, content = "first",
+		})
+		call(app, "POST", "/api/user_lorebooks/entry/add", {
+			book_id = book.id, keys = { "gamma" }, content = "second",
+		})
+		local res = call_raw(app, "GET", "/api/user_lorebooks/export?book_id=" .. book.id)
+		T.eq(res.status, 200)
+		local payload = require("lib.format.json").decode(res.body)
+		-- Re-import into the same app.
+		local status, imported = call(app, "POST", "/api/user_lorebooks/import", payload)
+		T.eq(status, 200)
+		T.eq(imported.name, "Round Trip")
+		T.eq(imported.entry_count, 2)
+		local _, listed = call(app, "GET", "/api/user_lorebooks/entries?book_id=" .. imported.id)
+		T.eq(#listed.entries, 2)
+		T.eq(listed.entries[1].content, "first")
+		T.eq(listed.entries[2].content, "second")
+		T.eq(listed.entries[1].keys[1], "alpha")
+		T.eq(listed.entries[1].keys[2], "beta")
+	end)
+end)
+
 -- ── Migration: world_info → user_lorebooks ───────────────────────────────────
 
 T.describe("world_info migration", function()
