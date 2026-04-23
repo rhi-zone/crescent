@@ -827,16 +827,30 @@ end
 local function cmd_set_key(args)
 	local key_name  = args[2]
 	local key_value = args[3]
-	if not key_name or not key_value then
-		io.stderr:write("usage: luajit lib/platform/cli.lua set-key <name> <value>\n")
-		io.stderr:write("example: luajit lib/platform/cli.lua set-key anthropic sk-ant-...\n")
-		os.exit(1)
-	end
 	local ok_kr, keyring = pcall(require, "lib.keyring")
 	if not ok_kr then
 		io.stderr:write("error: keyring unavailable: " .. tostring(keyring) .. "\n")
 		os.exit(1)
 	end
+	-- No args: usage (keyring has no list API yet).
+	if not key_name then
+		io.write("usage: luajit lib/platform/cli.lua set-key <name> [value]\n")
+		io.write("  set-key <name> <value>  -- store key\n")
+		io.write("  set-key <name>          -- show current value\n")
+		io.write("example: luajit lib/platform/cli.lua set-key anthropic sk-ant-...\n")
+		return
+	end
+	-- One arg: show current value.
+	if not key_value then
+		local val, err = keyring.get("crescent/" .. key_name)
+		if val then
+			io.write(key_name .. " = " .. val .. "\n")
+		else
+			io.write(key_name .. ": not set\n")
+		end
+		return
+	end
+	-- Two args: set key.
 	local ok, err = keyring.set("crescent/" .. key_name, key_value)
 	if not ok then
 		io.stderr:write("error storing key: " .. tostring(err) .. "\n")
