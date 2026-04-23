@@ -45,6 +45,16 @@ local function try_libsecret()
 	local ok, lib = pcall(ffi.load, "secret-1")
 	if not ok then return nil end
 
+	-- glib is a separate shared object; try a few names.  libsecret links glib,
+	-- but LuaJIT's ffi.load uses RTLD_LOCAL so glib symbols are not visible via
+	-- the libsecret handle.
+	local glib
+	for _, name in ipairs({ "glib-2.0", "libglib-2.0.so.0", "libglib-2.0.so" }) do
+		local gok, g = pcall(ffi.load, name)
+		if gok then glib = g; break end
+	end
+	-- glib is only needed for list(); set/get/delete work without it.
+
 	local ok2 = pcall(ffi.cdef, [[
 		typedef int            GError;
 		typedef int            gboolean;
@@ -57,6 +67,15 @@ local function try_libsecret()
 			const char *label;
 			guint32     flags;
 		} SecretSchema;
+
+		typedef struct _GList {
+			gpointer        data;
+			struct _GList  *next;
+			struct _GList  *prev;
+		} GList;
+
+		typedef struct _GHashTable GHashTable;
+		typedef void (*GDestroyNotify)(gpointer data);
 
 		gboolean secret_password_store_sync(
 			const SecretSchema *schema,
@@ -89,6 +108,23 @@ local function try_libsecret()
 		);
 
 		void secret_password_free(char *password);
+
+		/* Search / enumeration */
+		GList *secret_password_search_sync(
+			const SecretSchema *schema,
+			int                 flags,
+			gpointer            cancellable,
+			GError            **error,
+			...
+		);
+
+		GHashTable *secret_retrievable_get_attributes(gpointer retrievable);
+
+		/* glib */
+		gpointer g_hash_table_lookup(GHashTable *ht, const void *key);
+		void     g_hash_table_unref(GHashTable *ht);
+		void     g_list_free_full(GList *list, GDestroyNotify free_func);
+		void     g_object_unref(gpointer object);
 	]])
 	if not ok2 then return nil end
 
@@ -146,11 +182,44 @@ local function try_libsecret()
 		return true
 	end
 
-	function tier.list(_prefix)
-		-- secret_password_search_sync requires a GMainLoop / GLib event loop
-		-- which is not available in a plain LuaJIT process.  Listing is not
-		-- supported on this tier.
-		return nil, "not supported"
+	function tier.list(prefix)
+		if not glib then
+			return nil, "libsecret: glib-2.0 not loadable (required for list)"
+		end
+		-- Use secret_password_search_sync with no attributes and SECRET_SEARCH_ALL
+		-- (bit 1) to enumerate every item matching this schema.  Each GList node's
+		-- data is a SecretRetrievable*; we read its attributes hash table and
+		-- extract the "service" value.  Chosen over secret_service_search_sync to
+		-- keep FFI surface small (no SecretItem methods, no SecretService object).
+		local errp = err_ptr()
+		local glist = lib.secret_password_search_sync(
+			schema, 2, nil, errp, nil
+		)
+		if glist == nil then
+			return nil, "libsecret: search failed"
+		end
+		local names = {}
+		local node = glist
+		while node ~= nil do
+			local retrievable = node.data
+			if retrievable ~= nil then
+				local ht = lib.secret_retrievable_get_attributes(retrievable)
+				if ht ~= nil then
+					local v = glib.g_hash_table_lookup(ht, "service")
+					if v ~= nil then
+						local s = ffi.string(ffi.cast("const char*", v))
+						if prefix == nil or s:sub(1, #prefix) == prefix then
+							names[#names + 1] = s
+						end
+					end
+					glib.g_hash_table_unref(ht)
+				end
+			end
+			node = node.next
+		end
+		glib.g_list_free_full(glist, glib.g_object_unref)
+		table.sort(names)
+		return names
 	end
 
 	return tier
@@ -165,8 +234,30 @@ local function try_keychain()
 	local ok2 = pcall(ffi.cdef, [[
 		typedef int            OSStatus;
 		typedef unsigned int   UInt32;
+		typedef int            SInt32;
+		typedef unsigned int   FourCharCode;
+		typedef FourCharCode   SecItemClass;
+		typedef FourCharCode   SecKeychainAttrType;
 		typedef void*          SecKeychainRef;
 		typedef void*          SecKeychainItemRef;
+		typedef void*          SecKeychainSearchRef;
+
+		typedef struct SecKeychainAttribute {
+			SecKeychainAttrType tag;
+			UInt32              length;
+			void               *data;
+		} SecKeychainAttribute;
+
+		typedef struct SecKeychainAttributeList {
+			UInt32                 count;
+			SecKeychainAttribute  *attr;
+		} SecKeychainAttributeList;
+
+		typedef struct SecKeychainAttributeInfo {
+			UInt32  count;
+			UInt32 *tag;
+			UInt32 *format;
+		} SecKeychainAttributeInfo;
 
 		OSStatus SecKeychainAddGenericPassword(
 			SecKeychainRef  keychain,
@@ -193,6 +284,32 @@ local function try_keychain()
 		OSStatus SecKeychainItemDelete(SecKeychainItemRef itemRef);
 
 		void SecKeychainItemFreeContent(void *attrList, void *data);
+
+		OSStatus SecKeychainSearchCreateFromAttributes(
+			void                            *keychainOrArray,
+			SecItemClass                     itemClass,
+			const SecKeychainAttributeList  *attrList,
+			SecKeychainSearchRef            *searchRef
+		);
+
+		OSStatus SecKeychainSearchCopyNext(
+			SecKeychainSearchRef  searchRef,
+			SecKeychainItemRef   *itemRef
+		);
+
+		OSStatus SecKeychainItemCopyAttributesAndData(
+			SecKeychainItemRef          itemRef,
+			SecKeychainAttributeInfo   *info,
+			SecItemClass               *itemClass,
+			SecKeychainAttributeList  **attrList,
+			UInt32                     *length,
+			void                      **outData
+		);
+
+		OSStatus SecKeychainItemFreeAttributesAndData(
+			SecKeychainAttributeList *attrList,
+			void                     *data
+		);
 
 		void CFRelease(void *cf);
 	]])
@@ -258,14 +375,52 @@ local function try_keychain()
 		return true
 	end
 
-	function tier.list(_prefix)
-		-- Enumerating all Keychain items with the old SecKeychain* API requires
-		-- SecKeychainSearchCreateFromAttributes + iteration, which needs a full
-		-- CSSM attribute setup.  The modern SecItemCopyMatching path requires
-		-- CFDictionary construction from extern CF constants that are not trivially
-		-- accessible via plain FFI symbol lookup.  Return not-supported rather than
-		-- risk incorrect behaviour.
-		return nil, "not supported"
+	function tier.list(prefix)
+		-- Enumerate items of class kSecGenericPasswordItemClass ('genp') using
+		-- the pre-CFDictionary SecKeychainSearch API.  This avoids needing extern
+		-- CFStringRef constants (kSecClass, kSecAttrService, ...) which are not
+		-- trivial to resolve via plain dlsym.  For each item, request the
+		-- 'svce' (kSecServiceItemAttr) attribute and decode its bytes.
+		local kSecGenericPasswordItemClass = 0x67656E70 -- 'genp'
+		local kSecServiceItemAttr          = 0x73766365 -- 'svce'
+
+		local search = ffi.new("SecKeychainSearchRef[1]")
+		local st = lib.SecKeychainSearchCreateFromAttributes(
+			nil, kSecGenericPasswordItemClass, nil, search
+		)
+		if st ~= 0 then return nil, "keychain: search create failed: " .. st end
+
+		-- Ask for just the service attribute.  format=0 (kSecFormatUnknown)
+		-- which returns raw bytes — good enough for a UTF-8 service name.
+		local info_tags   = ffi.new("UInt32[1]", kSecServiceItemAttr)
+		local info_fmts   = ffi.new("UInt32[1]", 0)
+		local info        = ffi.new("SecKeychainAttributeInfo", { 1, info_tags, info_fmts })
+
+		local names = {}
+		while true do
+			local iref = ffi.new("SecKeychainItemRef[1]")
+			local nst  = lib.SecKeychainSearchCopyNext(search[0], iref)
+			if nst ~= 0 then break end
+
+			local attr_list = ffi.new("SecKeychainAttributeList*[1]")
+			local ast = lib.SecKeychainItemCopyAttributesAndData(
+				iref[0], info, nil, attr_list, nil, nil
+			)
+			if ast == 0 and attr_list[0] ~= nil and attr_list[0].count >= 1 then
+				local a = attr_list[0].attr[0]
+				if a.data ~= nil and a.length > 0 then
+					local s = ffi.string(ffi.cast("const char*", a.data), a.length)
+					if prefix == nil or s:sub(1, #prefix) == prefix then
+						names[#names + 1] = s
+					end
+				end
+				lib.SecKeychainItemFreeAttributesAndData(attr_list[0], nil)
+			end
+			lib.CFRelease(iref[0])
+		end
+		lib.CFRelease(search[0])
+		table.sort(names)
+		return names
 	end
 
 	return tier

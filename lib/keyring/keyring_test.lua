@@ -321,11 +321,74 @@ T.describe("keyring module API", function()
 		if not keyring._tier then T.ok(true); return end
 		local result, err = keyring.list("crescent/")
 		if result ~= nil then
-			-- File tier: result must be a table.
+			-- File / libsecret / keychain tier: must be a table.
 			T.ok(type(result) == "table", "expected table from list()")
 		else
-			-- libsecret / keychain tier: must say "not supported".
-			T.eq(err, "not supported")
+			-- A tier may legitimately return "not supported" if a dependency
+			-- (e.g. glib-2.0 for libsecret) can't be loaded.
+			T.ok(err ~= nil, "expected error string when list returns nil")
 		end
+	end)
+
+	-- Tier-aware list() round-trip.  Uses a unique per-run prefix so the real
+	-- keyring isn't polluted if we're running against libsecret or keychain.
+	T.it("list round-trip: set, list, filter by prefix, delete", function()
+		if not keyring._tier then T.ok(true); return end
+
+		-- Probe: does list() work on this tier?
+		local probe, perr = keyring.list()
+		if probe == nil then
+			-- list is not implemented on this tier (e.g. missing glib).
+			T.ok(perr ~= nil)
+			return
+		end
+
+		local rand_tag = tostring(os.time()) .. "-" .. tostring(math.random(1, 1e9))
+		local prefix_a = "crescent-test-" .. rand_tag .. "/a/"
+		local prefix_b = "crescent-test-" .. rand_tag .. "/b/"
+		local svc_a1   = prefix_a .. "one"
+		local svc_a2   = prefix_a .. "two"
+		local svc_b1   = prefix_b .. "one"
+
+		-- Always try to clean up, even on failure.
+		local function cleanup()
+			keyring.delete(svc_a1)
+			keyring.delete(svc_a2)
+			keyring.delete(svc_b1)
+		end
+
+		local function contains(tbl, v)
+			for i = 1, #tbl do if tbl[i] == v then return true end end
+			return false
+		end
+
+		local sok, serr = pcall(function()
+			T.ok(keyring.set(svc_a1, "va1"), "set svc_a1")
+			T.ok(keyring.set(svc_a2, "va2"), "set svc_a2")
+			T.ok(keyring.set(svc_b1, "vb1"), "set svc_b1")
+
+			-- list() with no prefix returns all keys (including ours).
+			local all = keyring.list()
+			T.ok(type(all) == "table", tostring(serr))
+			T.ok(contains(all, svc_a1), "svc_a1 present")
+			T.ok(contains(all, svc_a2), "svc_a2 present")
+			T.ok(contains(all, svc_b1), "svc_b1 present")
+
+			-- list(prefix_a) returns only a/* keys.
+			local only_a = keyring.list(prefix_a)
+			T.ok(type(only_a) == "table")
+			T.ok(contains(only_a, svc_a1), "a filter includes svc_a1")
+			T.ok(contains(only_a, svc_a2), "a filter includes svc_a2")
+			T.ok(not contains(only_a, svc_b1), "a filter excludes svc_b1")
+
+			-- list(prefix_b) returns only b/* keys.
+			local only_b = keyring.list(prefix_b)
+			T.ok(type(only_b) == "table")
+			T.ok(contains(only_b, svc_b1), "b filter includes svc_b1")
+			T.ok(not contains(only_b, svc_a1), "b filter excludes svc_a1")
+		end)
+
+		cleanup()
+		T.ok(sok, tostring(serr))
 	end)
 end)
