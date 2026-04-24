@@ -967,7 +967,7 @@ function M.make(opts)
 	-- Shared helper: given app_path and manifest_or_err (second return from
 	-- import_card), find the newly installed app in the index, write the audit
 	-- entry, and populate res with the JSON response.
-	-- Called by both /api/import-card and /api/import-card/upload.
+	-- Called by both /api/apps/install and /api/apps/install/upload.
 	--: (http_res, string, unknown) -> nil
 	local function respond_import_result(res, app_path, manifest_or_err)
 		-- Find the newly installed app id.
@@ -1014,12 +1014,12 @@ function M.make(opts)
 		})
 	end
 
-	-- POST /api/import-card — import a source adapter entry as a new CCv2 app.
+	-- POST /api/apps/install — install an app from a source adapter entry.
 	-- Query params: source=<source_id>&entry=<entry_id>
 	-- Requires a valid session. Reads the PNG from source.handler(GET /card/:id),
 	-- runs the import pipeline, indexes the app, and returns JSON {app_id, launch_url}.
 	--: (http_req, http_res) -> nil
-	r:post("/api/import-card", function(req, res)
+	r:post("/api/apps/install", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil
@@ -1108,11 +1108,11 @@ function M.make(opts)
 		respond_import_result(res, app_path, manifest_or_err)
 	end)
 
-	-- POST /api/import-card/upload — import a directly-uploaded PNG as a new CCv2 app.
+	-- POST /api/apps/install/upload — install an app from a directly-uploaded PNG.
 	-- Body: raw PNG bytes. Requires a valid session.
-	-- Returns JSON {app_id, launch_url} same as /api/import-card.
+	-- Returns JSON {app_id, launch_url} same as /api/apps/install.
 	--: (http_req, http_res) -> nil
-	r:post("/api/import-card/upload", function(req, res)
+	r:post("/api/apps/install/upload", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil

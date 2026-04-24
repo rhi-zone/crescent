@@ -1814,7 +1814,7 @@ T.describe("grant dispatch gate", function()
 	end)
 end)
 
--- ── POST /api/import-card ────────────────────────────────────────────────────
+-- ── POST /api/apps/install ───────────────────────────────────────────────────
 
 -- Build a minimal valid PNG with a chara tEXt chunk. Same helper as in
 -- lib/platform/import_test.lua.
@@ -1842,7 +1842,7 @@ local RUNTIME_MANIFEST = {
 	entry = { server = { main = "server.lua", caps = {} } },
 }
 
-T.describe("POST /api/import-card", function()
+T.describe("POST /api/apps/install", function()
 	if not has_deflate then
 		T.it("skips: system-zlib not available", function() T.skip("system-zlib required for import") end)
 		return
@@ -1894,7 +1894,7 @@ T.describe("POST /api/import-card", function()
 	end
 
 	local function post_import(d, sid, source, entry)
-		local req = make_req("POST", "/api/import-card", "localhost:7777",
+		local req = make_req("POST", "/api/apps/install", "localhost:7777",
 			"__Host-session=" .. sid)
 		req.query = "source=" .. source .. "&entry=" .. entry
 		local res = make_res()
@@ -1904,7 +1904,7 @@ T.describe("POST /api/import-card", function()
 
 	T.it("requires session — no cookie → 401", function()
 		local d = make_import_daemon()
-		local req = make_req("POST", "/api/import-card", "localhost:7777")
+		local req = make_req("POST", "/api/apps/install", "localhost:7777")
 		req.query = "source=42&entry=Alice.png"
 		local res = make_res()
 		d.handle(req, res)
@@ -1936,7 +1936,7 @@ T.describe("POST /api/import-card", function()
 	T.it("returns 400 when source or entry param is missing", function()
 		local d, idx = make_import_daemon()
 		local sid = prime(d)
-		local req = make_req("POST", "/api/import-card", "localhost:7777",
+		local req = make_req("POST", "/api/apps/install", "localhost:7777",
 			"__Host-session=" .. sid)
 		req.query = "source=42"  -- missing entry
 		local res = make_res()
