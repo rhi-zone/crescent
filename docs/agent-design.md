@@ -1,218 +1,124 @@
 # Agent Design
 
-Status: draft. Not yet implemented. Pulls from `nanites/`, `normalize/docs/archive/agent-*.md`, and `lib/taskgraph/`.
+Status: draft. Not implemented.
 
-## Thesis
+## The thesis
 
-Conversational agents are the wrong primitive. Text-based tool calling is the wrong interface. The evidence:
+Two claims at different commitment levels.
 
-- **Context poisoning.** A conversation accumulates state that shapes every subsequent token. Claude Code's auto-compaction already loses in-progress work. A single confidently-wrong assertion biases everything downstream; retraction doesn't undo it.
-- **Pre-answering.** LLMs given tool-use syntax routinely emit the command *and* the conclusion in the same turn, short-circuiting the tool loop.
-- **View loops.** Agents re-read the same file 7× over 15 turns when tool output isn't directly the answer. From `normalize/docs/archive/agent-dogfooding.md`: *"succeeds when tool output = answer, struggles when output requires interpretation."*
-- **Text-as-interface tax.** Every node that emits prose invites the next node to parse prose. The LLM is fluent in prose and brittle in structure; the fix is to force structure at every seam we control.
+**Load-bearing (semantic, durable):** context is an atemporal set of facts, not a sequence of turns. Every LLM call receives a constructed set; every LLM output contributes to the next call's set via field operations (add, remove, replace). Chronology exists in the audit graph — never in a prompt.
 
-The replacement primitive is a **task graph**: each node is a pure function from typed input to typed output, spawning children dynamically. No conversation, no shared history, no accumulated context. An LLM appears only at leaves that genuinely need world knowledge, and only with grammar-constrained output. This is `nanites/` ported to LuaJIT and already present as `lib/taskgraph/`.
+**Pragmatic (operational, swappable):** the set is rendered as conversation turns at inference time, because current instruct-tuned models perform best on that format. The render is a pure function `render(set) -> prompt`, confined to the LLM cap boundary. If a future model ships trained on structured records, we swap renderers and nothing else changes. Benchmarking `render` across formats is a real tunable per-model, not an assumption.
+
+The single anti-pattern this design is built against: **conversational accumulation** — raw tool output piled up in a chronologically-ordered transcript that's persisted and re-fed across LLM calls. The chronology is the bug, not the tool use. Every failure mode people identify in current agents (context poisoning, pre-answering, view loops, the necessity of handoff rituals, "new session per task" folk wisdom, the advice to rewind when things go wrong) is downstream of accumulation. Drop accumulation, the pathologies stop being pathologies.
 
 ## Non-goals
 
-- **A chat interface.** Not shipping one. If someone wants a chat UI they can write an app that drives the graph, but the graph is the substrate, not the wrapper.
-- **A general AI assistant.** Agents are narrow, specialized, auditable. "Agent that adds docstrings to exported functions" is the target shape, not "agent that understands your intent."
-- **A new language or DSL.** Task graphs are plain Lua tables. No syntax, no transpiler (CLAUDE.md invariant).
-- **Frameworks before primitives.** Ship composable libs + caps. Patterns that recur twice become vendored libs. No preemptive abstraction.
+- **Chat UI.** An app could drive the graph from a chat surface, but the graph is the substrate, not the wrapper.
+- **General AI assistant.** Agents are narrow, auditable.
+- **New language or DSL.** Plain Lua tables; no transpiler. (Crescent invariant.)
+- **Frameworks before primitives.** Ship composable libs. Patterns that recur twice become vendored libs.
 
-## Architecture: agents are platform apps
+## What the thesis implies directly
 
-Agents fit `lib/platform/` exactly. The platform's invariants are the invariants we want:
+- **The set is canonical, the render is derived.** Anything the model "knows" about the task must live in the set. Information that exists only in the rendered turns is lost at the next render and may as well not exist. Render is lossless-to-set by construction.
+- **Notes are field slots, not log entries.** A note is a typed value in a named, per-preset-declared slot — written by `note(key, value)` in the LLM's output, merged into the set for downstream calls.
+- **`drop(note_id)` is a field unset, not a retraction.** Next render doesn't include that note. The model has no idea it ever "existed." Conversation structurally cannot do this — you can append "ignore what I said" but the tokens remain.
+- **"Current tool result" is one slot, not a growing list.** Populated for exactly the decision that immediately follows a call; cleared otherwise. The model never sees "the history of tool results."
+- **Retries are field edits, not reruns-with-history.** A retry is a call with a set whose `typecheck_error` field (or whatever) is now populated. No "previous attempts" sequence.
+- **System prompt is a field, too.** Rendered into the system turn each call. Policy changes take effect on the next render. Not "baked in."
 
-| Platform invariant                             | Why it's right for agents                                           |
-| ---------------------------------------------- | ------------------------------------------------------------------- |
-| Caps are the only side-effect surface          | Tools = caps. No implicit access to the world.                      |
-| Operator grants caps per-app                   | Human-in-the-loop permission dialog, already built.                 |
-| Tarball is the canonical form                  | Agents are diffable, reproducible, shippable artifacts.             |
-| "Apps are cheap — prefer new app over new abstraction" | One narrow specialized agent per task class, not one mega-agent.    |
-| Sandbox is the security boundary               | Wedged agent can't trash the host.                                  |
-| `load()` mode is `"t"` only; FFI never a cap   | A malicious or confused agent can't escape via generated bytecode.  |
+## What this enables
 
-This means: **an agent is a platform app whose script drives a task graph.** Nothing more mystical than that.
+With set-not-chronology in place, the things an agent intuitively ought to do are all fine:
 
-## Primitives
+- **Retrieval decisions.** LLM says "view `foo`" → graph fetches → result occupies the current-tool-result slot for the immediately-following decision → LLM may write any notes it wants → result evaporates from the set. Repeat freely. No poisoning because nothing accumulates.
+- **Iteration within a leaf.** Multiple tool calls in sequence, each ephemeral in the set. The "conversation with the graph" shape works.
+- **Computation via eval.** `eval("#results")` is a computation cap for things LLMs hallucinate on at the token level — counting, arithmetic, filter/map, string transforms. Ephemeral like any other tool call.
+- **Picking and parameterizing presets.** Just another decision.
 
-Per the cap taxonomy (`lib/platform/CLAUDE.md`): pure-Lua libs are vendored into the tarball, never caps. Caps exist only for side-effect surfaces that can't be pure Lua.
+Retrieval and computation are both allowed because neither is the bug. The bug is chronological accumulation of raw results. A retrieval that drops its raw result back into the set-slot for the next decision and then evaporates is fine.
 
-### Vendored libs (pure Lua, no caps)
+## Presets are the primary surface
 
-- **`lib/taskgraph/`** — already exists. Executor registry, frontier, exec_graph, scaffolds, combinators. This is the substrate.
-- **`lib/agent/executors/`** — standard executors that agent apps vendor. Each executor is a pure function `(task_def, ctx) -> output`. Caps are passed via `ctx` (not via module-level captures — caps-first discipline applies inside the app).
-  - `llm_decide` — calls `caps.llm` with a schema; returns a typed record. No free-text output.
-  - `llm_synthesize` — calls `caps.llm` with a code-emission schema; returns a code fragment bound for `normalize edit`.
-  - `llm_decompose` — schema *is* a `TaskDef` fragment. Output is `ctx.spawn`ed.
-  - `normalize_op` — shells out via `caps.normalize` (see below). Returns parsed structured output, never raw text.
-- **`lib/agent/decompose.lua`** — the recursive loop: decompose → spawn leaves → drain frontier → collect. Vendor once two apps want it.
-- **`lib/agent/author/`** — emit a new app tarball: `build_manifest(schema)`, `emit_tarball(files, manifest)`. Pure Lua. Used by meta-agents.
+A preset is a battle-tested task type: declared input schema, output schema, cap manifest, note-slot schema, and implementation (pure code, a single curated LLM leaf, or a small task graph of both). Agent apps are mostly built by selecting, parameterizing, and composing presets.
 
-### New caps
+Why presets over per-run LLM-authored code:
 
-- **`caps.llm`** (already planned in platform design) — `generate({messages, schema})`, `stream(...)`. Grammar-constrained output is non-negotiable at the cap level; the cap refuses unconstrained generation when a schema field is present.
-- **`caps.normalize`** — typed dispatch to the `normalize` binary. Not a generic `exec`. Shape:
-  ```lua
-  caps.normalize.view(path, opts)       -- returns structured symbol/tree output
-  caps.normalize.grep(pattern, opts)    -- returns match records
-  caps.normalize.query(sql)             -- SQL over symbol index, returns rows
-  caps.normalize.edit(symbol, action)   -- semantic edit, returns new AST state
-  caps.normalize.analyze(what, opts)    -- health/complexity/security metrics
-  ```
-  Why not generic `caps.exec`: grant prompts can be precise ("may `view` and `grep`, may not `edit`"), and every op's return type is structured, not `string`.
-- **`caps.app_author`** — for meta-agents only. Two operations:
-  ```lua
-  caps.app_author.emit(tarball_bytes, manifest)
-  caps.app_author.request_install(tarball_path)
-  ```
-  Daemon arbitrates install. Operator confirms. Open question below on whether auto-install is ever allowed.
+- **Correctness.** Presets have parity tests, known failure modes, fixes committed and durable. LLM-generated per-task code has none of that.
+- **Audit.** "Ran preset P with inputs I" is a tight audit line. "Ran these 40 lines of LLM-generated Lua" is opaque.
+- **Cost.** Picking and parameterizing a preset costs far fewer tokens than generating a working program.
+- **Composability.** Typed I/O makes presets first-class building blocks.
 
-### No agent-local state between runs beyond what the platform provides
+Eval exists for cases where a full preset would be overkill — quick in-line computation that's more reliable than token-level reasoning. Not a replacement for preset design.
 
-Agent apps use the existing `caps.kv` / `caps.db` for persistence. No "agent memory" primitive. If a recurring agent needs working notes, that's a `kv` scope.
+Preset authors should pursue aggressive context minimization. A 200-line context containing only the target function and its local helpers produces better output than a 2000-line file dump. Noise causes hallucination; minimization is a model-quality lever, not just a speed lever.
 
-## Executor contract
+## The graph holds inter-task state
 
-```lua
--- All executors conform to:
---: (TaskDef, ExecCtx) -> output, error_or_nil
-```
+`lib/taskgraph/` already provides the substrate: frontier, exec_graph, `ctx.spawn`, executor registry. This design doesn't add task-graph mechanism; it specifies what runs at leaves and what crosses leaf boundaries.
 
-- `task_def` is a plain table, serializable. `{ type = "llm_decide", schema = {...}, inputs = {...} }`.
-- `ctx` carries `spawn(child_def) -> task_id`, `await(task_id) -> output`, and the caps subset this executor needs. Caps are passed explicitly at registration; an executor never reaches for them from module scope.
-- Output is whatever the schema says. Errors are `nil, errmsg` (library convention).
-- **Inputs are explicit**. A child task receives only the fields its parent included. No ambient conversation, no "recent context" — the parent must pass what the child needs.
+- **exec_graph** — audit trail. Every tool call, LLM decision, and curated note, recorded as data. Never pushed back into any subsequent LLM's prompt.
+- **Notes** — per-task set state, visible only within that task's leaves. Not shared across tasks.
+- **Task outputs** — inter-task state, passed explicitly as inputs to downstream tasks.
 
-### Why grammar-constrained output is load-bearing
+Nothing mutable crosses a leaf boundary. Decomposed tasks are independent. Retries re-run from inputs.
 
-llama.cpp supports GBNF grammars via the `grammar` field in completion requests. Enforcing a schema at the cap level means:
+## Agents are platform apps
 
-- Parse errors become task errors, not silent garbage downstream.
-- Small local models (the target — llama.cpp at `127.0.0.1:8081`) produce usable structured output when given grammar; they produce slop when given prose prompts.
-- The "decompose" node emits a `TaskDef`, full stop. It cannot emit an apology, a preamble, or a markdown explanation. There is no prose channel.
+Platform invariants (`lib/platform/CLAUDE.md`) align with what agents need:
 
-Tradeoff: strict grammars can make small models loop or produce empty output on hard schemas. Starting strict; loosen per-node with evidence.
+- Caps are the only side-effect surface → tools are caps.
+- Operator grants caps per-app → permission dialog for free.
+- Tarball is canonical form → agents are diffable, reproducible artifacts.
+- "Apps are cheap" → one narrow agent per task class, not one mega-agent.
+- Sandbox + `load("t")`-only → eval expressions and any LLM-authored artifacts are safe by construction.
+
+Concrete division:
+
+- **Vendored pure Lua** (no caps): `lib/taskgraph/` (exists), `lib/agent/presets/`, `lib/agent/curate/` (note primitives, render function), `lib/agent/author/` (emit new-app tarball).
+- **New caps**: `llm` (grammar-constrained generation; takes a set, returns structured output), `normalize` (typed subcommand dispatch to the binary — not generic exec), `eval` (sandboxed Lua computation; bound-name-only arguments to any read caps it can see), `app_author` (meta-agents only).
 
 ## Meta: agents authoring agents
 
-The platform CLAUDE.md forbids in-place script mutation: *"Editors never writeback into script source. Tooling that modifies script text is out of scope."*
+An agent app holding `caps.app_author` + `caps.llm` can produce a new agent tarball and submit it to the daemon for install. The daemon shows the operator: *agent wants to install `foo` requesting caps `[llm, fs(~/project)]` — allow?* The child's cap grants go through the same prompt; meta-agents cannot privilege-escalate their children.
 
-The non-evil version preserves every invariant: **agents emit new app tarballs.** A meta-agent app holds `caps.app_author` and `caps.llm`; given a task description, it:
+Platform invariants survive: installed apps stay immutable, every spawned agent is a diffable `.tar.gz`, audit trail is literal files. Object-level and meta-level are the same level; no runtime script mutation.
 
-1. Calls `llm_synthesize` with a schema targeting a manifest + one or more Lua modules.
-2. Bundles the result via `lib/agent/author/emit_tarball`.
-3. Calls `caps.app_author.request_install(tarball)`.
-4. Daemon shows the operator: "meta-agent wants to install new app `foo-agent` requesting caps `[llm, fs(~/project)]`. Allow?"
+## Conversational anti-patterns, as evidence
 
-This means:
+These aren't practices to import; they're workarounds people discovered for the accumulation bug, offered here as evidence that accumulation is the thing to design against:
 
-- Installed apps stay immutable (invariant preserved).
-- The child's cap grants go through the normal prompt — a meta-agent cannot privilege-escalate its children.
-- Audit trail is literal `.tar.gz` files in `~/.crescent/apps/`, each diffable.
-- "Agent writing agent" collapses to "app producing app" — first-class artifacts, not runtime mutation.
+- **`/handoff`.** Transfers state because conversations die at session end with poisoned context. In a set-based design there is nothing to hand off — state is always explicit artifacts, and "the next session" is the next graph run reading the same artifacts.
+- **Rewind advice.** Exists because one bad assertion biases all subsequent reasoning in a chronological context. A set-based context supports `drop`, which is strictly stronger.
+- **New session per task.** Users independently converged on "each task should be fresh" and hacked session boundaries to get there. Tasks as the primitive resolves it cleanly.
+- **System prompt inflation.** Conversational agents patch every turn forever. Per-preset narrow prompts have no cross-contamination; each is a field in that preset's set.
+- **Pre-answering.** Model emits command plus conclusion because the prose channel is always open. Grammar-constrained structured output closes it.
 
-The natural split:
-
-- **Narrow agent apps** — each encodes one specialized workflow. Static (or near-static) task graph. Cheap to write, easy to audit. Most agents are this.
-- **One generalist-decomposer app** — the escape valve. Its task graph is "ask LLM to emit subgraph, spawn, drain." Holds `caps.app_author` when it needs to produce a specialized child for a recurring task class.
-
-## Context model
-
-The hardest unsolved problem. Conversational context accumulates message history; when that goes away, how does a task get what it needs to do its job? Two distinct roles get conflated in the conversational version:
-
-1. **Grounding / memory** — what was decided, tried, preferred (between turns).
-2. **Situational awareness** — what code is relevant right now, what "this" refers to, what's adjacent (per turn).
-
-Conversational context only "works" because a human continuously corrects it. The context isn't accurate; it's jointly maintained by the model and the human. Remove either party and it collapses.
-
-### Load-bearing rule: extraction is deterministic, not LLM-driven
-
-Context is constructed once, by the graph, before the LLM runs. The LLM **never** makes retrieval decisions. No iterative expansion, no `need_context` queries, no "model asks, graph fetches." Any design where the model decides what to pull in is conversation with narrower grammar — still the same bug.
-
-Parameterization by task *inputs* is fine and expected (a "fix this stack trace" task extracts from the files the trace names). Parameterization by LLM *judgment* is not. Data-driven, not judgment-driven.
-
-### Context is a set, not a sequence
-
-A task's context is a flat **set**, constructed deterministically, never a sequence of attempts. There are no retries with augmented context — if the recipe produced insufficient context, that's a recipe bug, fixed at design time. "I tried X and it failed" reasoning, to the extent it exists, lives in the `exec_graph` as audit data, never in an LLM prompt.
-
-### Context recipes
-
-Per task type, a pure function `(task_inputs) -> context_set`. The task author writes the recipe. It composes structural extractors (`normalize view`, `grep`, `structure query`) with file reads and artifact lookups. It runs to completion before any LLM call. Output shape is fixed per task type.
-
-Concrete recipes, illustrative:
-
-- **docstring**: target function + its locally-reachable helpers (same-file callees only) + 3 sibling docstrings from the same file as style exemplars. Nothing else. No unrelated functions, no magic constants, no full-file dump.
-- **refactor-to-pattern**: target function body + caller *signatures* (not bodies) + one canonical pattern exemplar + directly-referenced type defs.
-- **audit-lens**: file under review + lens definition + one prior finding exemplar for that lens. Not the surrounding codebase.
-
-The available extractors:
-
-- `normalize view <sym> --with-local-helpers` — function + its intra-file callees.
-- `normalize view <sym> --caller-signatures` — callers' signatures, not bodies.
-- `normalize structure query ...` — SQL over the symbol index.
-- File reads constrained to the granted `fs` cap root.
-- Prior task outputs retrievable by structured key (POLISH.md-style artifacts).
-- CLAUDE.md + annotation files passed by reference to every task.
-
-### Why deterministic extraction wins twice
-
-1. **Quality.** A tight 200-line context with only the target and its helpers produces better LLM output than a 2000-line full-file dump. Noise causes hallucination and focus drift. Aggressive minimization is a model-quality tool, not just a speed tool.
-2. **Correction durability.** When a recipe proves insufficient, the fix is a code change to the recipe, committed once, benefiting every future run. Conversational "I'll ask for more context next time" dies with the session.
-
-### Unknown-unknowns
-
-The LLM cannot request context it doesn't know it's missing. The replacement for "ask for help when unsure" is:
-
-- Parity / property tests against known-good outputs per task type. Recipe regressions get caught before deploy.
-- When outputs are wrong in production, the recipe gets updated, tested, committed. One fix, durable.
-- User-as-node for genuinely ambiguous *intent* (not ambiguous context): a `clarify` leaf with a structured question schema.
-
-The empirical question is whether recipes can be written tight enough for small local models to succeed on, without becoming brittle. This is tested by shipping one concrete recipe for one concrete task and measuring.
-
-## Lessons from conversational anti-patterns
-
-Patterns that exist in the conversational world are evidence of what's broken there, not doctrine to import. Preserving them as warnings:
-
-- **`/handoff`.** Hand off to a new session via TODO.md + a plan because conversation dies at session end and carries poisoned context into the next one. In a non-conversational architecture there is nothing to hand off: state is always explicit structured artifacts, and "the next session" is just "the next graph run, which reads the same artifacts." Handoff's existence is evidence that conversational sessions are a resource leak.
-- **"Rewind context when the agent goes wrong."** Advice given because one bad assertion biases all subsequent reasoning. The fix is not better rewinding; it's removing the accumulation that makes rewinding necessary. A task graph where each node sees only its declared inputs has no biased history to rewind.
-- **"Start a new session for each new task."** Same root cause: accumulated context is the liability, not an asset, so the "best practice" is to throw it away. This is non-conversational architecture sneaking in through the back door — the users who discovered this rule were independently arriving at "each task should be isolated with fresh inputs" and hacking session boundaries to get there. Making tasks the primitive (not sessions) resolves it cleanly.
-- **Per-turn system prompt inflation.** Conversational agents grow ever-larger system prompts as failure modes are patched. Each patch applies to every turn forever. In a task graph, each executor has its own narrow prompt, patched independently; no cross-contamination.
-- **Pre-answering.** Conversational models emit command *and* conclusion in one turn because the prose channel is always open. Grammar-constrained leaf output closes the prose channel: there is no token budget for a conclusion before the tool result exists.
-
-When someone argues for a conversational feature here, the default answer is: "what anti-pattern of conversation is that a workaround for?" If it turns out the feature is a workaround, it's not needed in this system.
-
-## What the agent does NOT have
-
-- No message history. Each task sees only its inputs.
-- No "system prompt" carried across nodes. Each `llm_decide` call constructs its own prompt from its inputs.
-- No `io`, `os`, `ffi`, `debug`, `package` — sandbox invariant.
-- No way to write files outside granted `fs` roots.
-- No way to run arbitrary shell commands. `caps.normalize` is typed.
-- No "agent identity" across runs. An agent app is a script; identity is the app, not the run.
+Default test for any proposed feature: *what conversational anti-pattern is this a workaround for?* If it's a workaround, it's unneeded here.
 
 ## Open questions
 
-1. **`caps.normalize` vs `caps.exec(whitelist)`.** Typed dispatch is more structured but more to build and more to maintain per new `normalize` subcommand. Generic exec with a whitelist is v1-fast but collapses every agent's permissions to "can run shell commands." Current lean: typed. Revisit if `normalize` surface grows unstable.
-2. **First concrete app.** Generalist decomposer (proves the thesis, high-risk) or narrow "health-report agent" (boring, shakes out the substrate). Current lean: narrow first.
-3. **`caps.app_author` auto-install policy.** Always require operator confirm (safe, no full autonomy) vs. allow auto-install within the meta-agent's own cap subset (autonomous but cap-bounded). Current lean: always confirm for v1; revisit if confirmation becomes the bottleneck.
-4. **Structured docs retrieval.** Is this a `normalize docs query` subcommand that indexes `lib/*/docs/` + cdefs + `--::` annotations, or a `lib/doc/` index that `normalize` queries? Unresolved. `lib/doc/` is already on the crescent roadmap (per typechecker notes).
-5. **`llm_decompose` output surface.** Arbitrary task types (maximum flexibility, model can wedge the graph) or a whitelisted DSL subset per-app (predictable, narrower). Current lean: per-app whitelist, declared in the app's manifest.
-6. **Parallelism.** `lib/taskgraph` supports fork-based parallelism (per test-runner precedent). Agent leaves are often I/O-bound (LLM calls, normalize shell-out). Worth a dedicated scheduler, or does the existing frontier drain work? Deferred until we have measurements.
-7. **Failure semantics.** A failed leaf — retry, abandon-subtree, escalate-to-parent-decompose? Probably per-executor via task def (`on_error = "retry" | "escalate" | "abandon"`), but specifics deferred until the first real agent hits it.
+1. **Note-slot schema.** Per-preset typed slots. Freeform strings risk sliding back toward prose-in-prose. Overly rigid schemas may be unusable by small models. The bounding work is real empirical work.
+2. **Scale.** The only empirical evidence for set-rendered-as-turns in practice (`normalize/docs/archive/agent-dogfooding.md`) is small-task. Whether the shape holds on a 20-file refactor — where note-set size grows and cross-view correlation matters — is unproven.
+3. **Small-model feasibility.** Grammar-constrained output, note-schema discipline, and atemporal rendering all ask more than free prose. llama.cpp at `127.0.0.1:8081` is the test bed. Skeleton-with-slots (pre-written structure, LLM fills gaps) is a plausible middle ground.
+4. **Render benchmarking per model.** `render(set)` is a pure function at the cap boundary; different models may prefer different formats (turns today; maybe structured records later). Pick measured not assumed.
+5. **`caps.normalize` surface.** Typed dispatch per subcommand (precise grants, maintenance-per-subcommand) vs generic exec with a whitelist (v1-fast, loses precision). Current lean: typed.
+6. **Structured docs retrieval.** `normalize docs query` subcommand, or a `lib/doc/` index that normalize queries? Unresolved.
+7. **Failure semantics.** Retry / abandon-subtree / escalate-to-parent as a per-preset knob. Deferred until a real preset hits real failure.
+8. **First concrete app.** Narrow preset-only agent (shakes out substrate) or small generalist with curated leaves (proves the thesis end-to-end). Current lean: narrow first.
+
+## Out of scope for v1
+
+- Distributed execution across machines.
+- Persistent daemon agents — use existing scheduler driving an agent app.
+- Cross-agent messaging beyond parent-child.
+- Streaming output from leaves — grammar-constrained outputs come out whole.
+- Vector / embedding retrieval — structured queries via normalize first; revisit with evidence if insufficient.
 
 ## Success criteria
 
-- A new agent app can be written in under 200 lines of Lua (vendoring taskgraph + executors).
-- The generalist decomposer, given a small task, produces a task graph whose leaves all return structured answers — no intermediate free-text interpretation step.
-- The full audit trail for a run is: the exec_graph snapshot + the tarball hash. Reproducible modulo LLM nondeterminism.
-- Meta: a meta-agent can produce a runnable narrow-agent tarball whose manifest and caps survive operator approval without hand-editing.
-
-## Not in scope for v1
-
-- Distributed execution across machines.
-- Persistent long-running agents (cron-like). If wanted, an existing scheduler drives the agent app; agent-qua-daemon is not a primitive.
-- Cross-agent communication beyond "parent spawns child." No message bus.
-- Streaming output from `llm_decide` nodes. Grammar-constrained JSON comes out whole.
-- Vector stores / embedding retrieval. Structured queries via `normalize` first; if that's genuinely insufficient, revisit with evidence.
+- A narrow agent app under 200 lines of Lua, vendoring taskgraph + presets + curate.
+- A curated leaf on a small local model produces useful output with set-not-chronology context.
+- A meta-agent produces a runnable narrow-agent tarball that survives operator approval without hand-editing.
+- Audit trail for a run is `exec_graph` snapshot + tarball hash. Reproducible modulo LLM nondeterminism.
