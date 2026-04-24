@@ -43,7 +43,7 @@ Paths we explicitly do not rely on:
 | ~~7~~ | ~~**Author's Note bar is permanently present.**~~ Removed from main layout; Author's Note fields now live inline in the Identity tab. | S1, T4 | ~~Moved into Identity tab. bdf83a6.~~ |
 | ~~8~~ | ~~**Regex Scripts as top-level sibling to card.**~~ Regex now lives inside the card surface (Regex tab). | S1, G3 | ~~Regex tab in card surface. bdf83a6.~~ |
 | ~~9~~  | ~~**Reset-to-Original has no confirmation.**~~ Destructive affordance with no guardrail. | G5 | ~~`window.confirm()` guard before reset fetch call. In flight.~~ |
-| 10 | **Import accepts PNG/JSON but has no "Start from blank" option.** Import is the only card-introduction path and it assumes pre-existing data. | O1, G4 | Partially addressed: "New Card" button exists (downloads blank PNG). Still missing: "Blank card" option *on the import surface* itself (library app + ccv2 app import panel). |
+| ~~10~~ | ~~**Import has no "Start from blank" option."**~~ "New Card" button in ccv2 card header addresses the creation path. Library import surface intentionally has no card-specific affordances (it's app-agnostic). Bootstrap from zero: import any existing PNG, or use ccv2 New Card → download blank → import. | O1, G4 | ~~New Card button in card header (always visible). 0adf4cf.~~ |
 
 ## The import path is the dominant reproduction vector
 

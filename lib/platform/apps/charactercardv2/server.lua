@@ -571,6 +571,9 @@ local function load_card(state, caps)
 		if type(ext.regex_scripts) == "table" then
 			state.regex_scripts = ext.regex_scripts
 		end
+		if type(ext.linked_lorebooks) == "table" then
+			state.linked_lorebooks = ext.linked_lorebooks
+		end
 	end
 	return card_data
 end
@@ -685,9 +688,11 @@ local function build_context(state, caps, path)
 			if state.lorebook then
 				for _, e in ipairs(state.lorebook) do all[#all + 1] = e end
 			end
-			-- TODO: merge in card.extensions.linked_lorebooks[*].entries once
-			-- that field is populated (vendored linked lorebooks). No data
-			-- today — stub.
+			for _, book in ipairs(state.linked_lorebooks or {}) do
+				if type(book.entries) == "table" then
+					for _, e in ipairs(book.entries) do all[#all + 1] = e end
+				end
+			end
 			for _, book in ipairs(state.user_lorebooks or {}) do
 				if book.active and book.entries then
 					for _, e in ipairs(book.entries) do all[#all + 1] = e end
