@@ -271,7 +271,7 @@ function makeSourceSection(src) {
     const entries = data.entries || [];
     entries.forEach(e => {
       const launchUrl = `/launch/${encodeURIComponent(src.id)}?entry=${encodeURIComponent(e.id)}`;
-      const importUrl = `/api/apps/install?source=${encodeURIComponent(src.id)}&entry=${encodeURIComponent(e.id)}`;
+      const importUrl = `/api/apps?source=${encodeURIComponent(src.id)}&entry=${encodeURIComponent(e.id)}`;
       sgrid.appendChild(makeCard(e, () => { window.location.href = launchUrl; }, null, async done => {
         try {
           const r = await fetch(importUrl, { method: "POST" });
@@ -338,7 +338,7 @@ function clearImportError() {
 async function uploadApp(file, onDone) {
   try {
     const buf = await file.arrayBuffer();
-    const r = await fetch("/api/apps/install/upload", {
+    const r = await fetch("/api/apps", {
       method: "POST",
       headers: { "Content-Type": file.type || "application/octet-stream" },
       body: buf,

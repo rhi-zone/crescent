@@ -967,9 +967,9 @@ function M.make(opts)
 	-- Shared helper: given app_path and manifest_or_err (second return from
 	-- import_card), find the newly installed app in the index, write the audit
 	-- entry, and populate res with the JSON response.
-	-- Called by both /api/apps/install and /api/apps/install/upload.
+	-- Called by POST /api/apps for both source-adapter and direct-upload paths.
 	--: (http_res, string, unknown) -> nil
-	local function respond_import_result(res, app_path, manifest_or_err)
+	local function respond_install_result(res, app_path, manifest_or_err)
 		-- Find the newly installed app id.
 		local new_app_id
 		if index_obj and index_obj.get then
@@ -1014,12 +1014,12 @@ function M.make(opts)
 		})
 	end
 
-	-- POST /api/apps/install — install an app from a source adapter entry.
-	-- Query params: source=<source_id>&entry=<entry_id>
-	-- Requires a valid session. Reads the PNG from source.handler(GET /card/:id),
-	-- runs the import pipeline, indexes the app, and returns JSON {app_id, launch_url}.
+	-- POST /api/apps — install an app. Two paths based on query params:
+	--   source + entry present → fetch PNG from source adapter and import.
+	--   source absent          → body is raw PNG or gzip/tar.gz bytes; import directly.
+	-- Requires a valid session. Returns JSON {app_id, launch_url}.
 	--: (http_req, http_res) -> nil
-	r:post("/api/apps/install", function(req, res)
+	r:post("/api/apps", function(req, res)
 		local req_headers = req.headers or {}
 		local presented = get_cookie(req_headers, "__Host-session")
 		local sess_rec = presented and session_get(presented) or nil
@@ -1038,7 +1038,7 @@ function M.make(opts)
 			return
 		end
 
-		-- Parse query params (source + entry).
+		-- Parse query params.
 		local qs = req.query or ""
 		local qparams = {} --: { [string]: string }
 		for kv in qs:gmatch("[^&]+") do
@@ -1051,93 +1051,58 @@ function M.make(opts)
 				qparams[kd] = vd
 			end
 		end
-		local src_id = qparams.source
-		local entry_id = qparams.entry
-		if not src_id or not entry_id then
-			plain(res, 400, "missing source or entry param")
-			return
-		end
 
-		-- Find the source by id.
-		local src
-		local sources_list = opts.sources or {}
-		for i = 1, #sources_list do
-			if tostring(sources_list[i].id) == tostring(src_id) then
-				src = sources_list[i]
-				break
+		local png_bytes
+		if qparams.source then
+			-- Source-adapter path: fetch PNG from source handler.
+			local src_id = qparams.source
+			local entry_id = qparams.entry
+			if not entry_id then
+				plain(res, 400, "missing entry param")
+				return
 			end
-		end
-		if not src or not src.handler then
-			plain(res, 404, "source not found: " .. tostring(src_id))
-			return
-		end
 
-		-- Call source handler to get the card PNG bytes.
-		local card_req = {
-			method = "GET",
-			path   = "/card/" .. entry_id,
-			query  = "",
-			headers = {},
-		}
-		local card_res = { status = nil, headers = {}, body = nil }
-		local ok_h, herr = pcall(src.handler, card_req, card_res)
-		if not ok_h or not card_res.body then
-			plain(res, 502, "source handler error: " .. tostring(ok_h and "empty body" or herr))
-			return
-		end
-		if (card_res.status or 200) ~= 200 then
-			plain(res, 502, "source returned status " .. tostring(card_res.status))
-			return
-		end
+			-- Find the source by id.
+			local src
+			local sources_list = opts.sources or {}
+			for i = 1, #sources_list do
+				if tostring(sources_list[i].id) == tostring(src_id) then
+					src = sources_list[i]
+					break
+				end
+			end
+			if not src or not src.handler then
+				plain(res, 404, "source not found: " .. tostring(src_id))
+				return
+			end
 
-		-- Run the import pipeline.
-		local app_path, manifest_or_err = import_mod.import_card({
-			png_bytes        = card_res.body,
-			runtime_files    = runtime_files,
-			runtime_manifest = runtime_manifest,
-			apps_dir         = apps_dir,
-			index            = index_obj,
-			timestamp        = time_fn(),
-			write_fn         = write_fn,
-		})
-		if not app_path then
-			plain(res, 500, "import failed: " .. tostring(manifest_or_err))
-			return
-		end
-
-		respond_import_result(res, app_path, manifest_or_err)
-	end)
-
-	-- POST /api/apps/install/upload — install an app from a directly-uploaded PNG.
-	-- Body: raw PNG bytes. Requires a valid session.
-	-- Returns JSON {app_id, launch_url} same as /api/apps/install.
-	--: (http_req, http_res) -> nil
-	r:post("/api/apps/install/upload", function(req, res)
-		local req_headers = req.headers or {}
-		local presented = get_cookie(req_headers, "__Host-session")
-		local sess_rec = presented and session_get(presented) or nil
-		if not sess_rec then
-			plain(res, 401, "unauthorized")
-			return
-		end
-		session_touch(presented or "", sess_rec)
-
-		if not runtime_files or not runtime_manifest then
-			plain(res, 503, "import not configured")
-			return
-		end
-		if not write_fn or not apps_dir then
-			plain(res, 503, "import not configured")
-			return
-		end
-
-		-- Validate body: accept PNG (\x89PNG) or gzip/tar.gz (\x1f\x8b).
-		local png_bytes = req.body or ""
-		local magic2 = png_bytes:sub(1, 2)
-		local magic4 = png_bytes:sub(1, 4)
-		if #png_bytes < 4 or (magic4 ~= "\x89PNG" and magic2 ~= "\x1f\x8b") then
-			plain(res, 400, "body must be a PNG or gzip/tar.gz app file")
-			return
+			-- Call source handler to get the card PNG bytes.
+			local card_req = {
+				method = "GET",
+				path   = "/card/" .. entry_id,
+				query  = "",
+				headers = {},
+			}
+			local card_res = { status = nil, headers = {}, body = nil }
+			local ok_h, herr = pcall(src.handler, card_req, card_res)
+			if not ok_h or not card_res.body then
+				plain(res, 502, "source handler error: " .. tostring(ok_h and "empty body" or herr))
+				return
+			end
+			if (card_res.status or 200) ~= 200 then
+				plain(res, 502, "source returned status " .. tostring(card_res.status))
+				return
+			end
+			png_bytes = card_res.body
+		else
+			-- Direct-upload path: body is raw PNG or gzip/tar.gz bytes.
+			png_bytes = req.body or ""
+			local magic2 = png_bytes:sub(1, 2)
+			local magic4 = png_bytes:sub(1, 4)
+			if #png_bytes < 4 or (magic4 ~= "\x89PNG" and magic2 ~= "\x1f\x8b") then
+				plain(res, 400, "body must be a PNG or gzip/tar.gz app file")
+				return
+			end
 		end
 
 		-- Run the import pipeline.
@@ -1155,7 +1120,7 @@ function M.make(opts)
 			return
 		end
 
-		respond_import_result(res, app_path, manifest_or_err)
+		respond_install_result(res, app_path, manifest_or_err)
 	end)
 
 	-- /launch/:id — mint a one-shot launch token bound to the current session
