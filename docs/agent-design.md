@@ -22,7 +22,7 @@ The single anti-pattern this design is built against: **conversational accumulat
 ## What the thesis implies directly
 
 - **The set is canonical, the render is derived.** Anything the model "knows" about the task must live in the set. Information that exists only in the rendered turns is lost at the next render and may as well not exist. Render is lossless-to-set by construction.
-- **Notes are field slots, not log entries.** A note is a typed value in a named, per-preset-declared slot — written by `note(key, value)` in the LLM's output, merged into the set for downstream calls.
+- **Notes are `(key, value)` pairs with replace semantics, not log entries.** Written by `note(key, value)` in the LLM's output, merged into the set for downstream calls. The key makes a note addressable and replaceable — a second `note("hypothesis", ...)` replaces the first, it doesn't append. Value is whatever the LLM decides is useful; content type is not prescribed. Notes exist for the unexpected: if the preset author knew upfront what to record, it would be a task input. Constraining note schemas per-preset would predetermine what the LLM can observe and remember, defeating the point.
 - **`drop(note_id)` is a field unset, not a retraction.** Next render doesn't include that note. The model has no idea it ever "existed." Conversation structurally cannot do this — you can append "ignore what I said" but the tokens remain.
 - **"Current tool result" is one slot, not a growing list.** Populated for exactly the decision that immediately follows a call; cleared otherwise. The model never sees "the history of tool results."
 - **Retries are field edits, not reruns-with-history.** A retry is a call with a set whose `typecheck_error` field (or whatever) is now populated. No "previous attempts" sequence.
@@ -99,7 +99,7 @@ Default test for any proposed feature: *what conversational anti-pattern is this
 
 ## Open questions
 
-1. **Note-slot schema.** Per-preset typed slots. Freeform strings risk sliding back toward prose-in-prose. Overly rigid schemas may be unusable by small models. The bounding work is real empirical work.
+1. **Note value encoding.** Content type is not prescribed — values can be strings, tables, whatever. Open question is whether there's a useful convention (e.g. short strings only, or structured tables for machine-readable notes) that emerges from the first real preset, not something to decide upfront.
 2. **Scale.** The only empirical evidence for set-rendered-as-turns in practice (`normalize/docs/archive/agent-dogfooding.md`) is small-task. Whether the shape holds on a 20-file refactor — where note-set size grows and cross-view correlation matters — is unproven.
 3. **Small-model feasibility.** Grammar-constrained output, note-schema discipline, and atemporal rendering all ask more than free prose. llama.cpp at `127.0.0.1:8081` is the test bed. Skeleton-with-slots (pre-written structure, LLM fills gaps) is a plausible middle ground.
 4. **Render benchmarking per model.** `render(set)` is a pure function at the cap boundary; different models may prefer different formats (turns today; maybe structured records later). Pick measured not assumed.
