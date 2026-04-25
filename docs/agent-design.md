@@ -77,7 +77,7 @@ Platform invariants (`lib/platform/CLAUDE.md`) align with what agents need:
 Concrete division:
 
 - **Vendored pure Lua** (no caps): `lib/taskgraph/` (exists), `lib/agent/presets/`, `lib/agent/curate/` (note primitives, render function), `lib/agent/author/` (emit new-app tarball).
-- **New caps**: `llm` (grammar-constrained generation; takes a set, returns structured output), `normalize` (MCP client to a persistent `normalize serve mcp` subprocess — structured JSON-RPC tool calls, not shell-out-per-call; all normalize commands available as typed MCP tools), `eval` (sandboxed Lua computation; bound-name-only arguments to any read caps it can see), `app_author` (meta-agents only).
+- **New caps**: `llm` (grammar-constrained generation; takes a set, returns structured output), `normalize` (subprocess wrapper — `normalize <cmd> --json`, parse stdout into a Lua table; typed Lua API on top, e.g. `caps.normalize.view(path, opts)`; LLM never sees JSON schemas or protocol), `eval` (sandboxed Lua computation; bound-name-only arguments to any read caps it can see), `app_author` (meta-agents only).
 
 ## Meta: agents authoring agents
 
