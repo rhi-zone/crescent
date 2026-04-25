@@ -5,9 +5,8 @@ end
 local M = {}
 
 -- opts.popen, opts.open, opts.remove, opts.tmpname are caller-injected I/O functions.
--- `any` is intentional — the typechecker cannot know the concrete signatures at call sites.
---:: RunOpts   = { popen: any, stderr: string | nil }
---:: RunExOpts = { popen: any, open: any, remove: any, tmpname: any }
+--:: RunOpts   = { popen: (string, string) -> (File | nil, string | nil), stderr: string | nil }
+--:: RunExOpts = { popen: (string, string) -> (File | nil, string | nil), open: (string, string | nil) -> (File | nil, string | nil), remove: (string) -> (boolean | nil, string | nil), tmpname: () -> string }
 
 local SENTINEL = "__EXEC_EXIT__"
 
@@ -49,7 +48,6 @@ end
 -- Returns stdout on success, or nil + errmsg on non-zero exit or popen failure.
 --: (string, string[], RunOpts) -> string | nil, string | nil
 function M.run(cmd, args, opts)
-	--: any
 	local popen = opts.popen
 	local cmdstr = build_cmdstr(cmd, args)
 
@@ -86,13 +84,9 @@ end
 -- Returns stdout, stderr, code on success, or nil + errmsg on popen failure.
 --: (string, string[], RunExOpts) -> string | nil, string | nil, number | nil
 function M.run_ex(cmd, args, opts)
-	--: any
 	local popen   = opts.popen
-	--: any
 	local open    = opts.open
-	--: any
 	local remove  = opts.remove
-	--: any
 	local tmpname = opts.tmpname
 
 	local stderr_path = tmpname() .. ".stderr"
