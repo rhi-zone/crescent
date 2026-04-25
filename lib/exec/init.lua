@@ -4,9 +4,11 @@ end
 
 local M = {}
 
+--:: require "lib.caps.types"
+
 -- opts.popen, opts.open, opts.remove, opts.tmpname are caller-injected I/O functions.
---:: RunOpts   = { popen: (string, string) -> (File | nil, string | nil), stderr: string | nil }
---:: RunExOpts = { popen: (string, string) -> (File | nil, string | nil), open: (string, string | nil) -> (File | nil, string | nil), remove: (string) -> (boolean | nil, string | nil), tmpname: () -> string }
+--:: RunOpts   = { popen: POpenFn, stderr: string | nil }
+--:: RunExOpts = { popen: POpenFn, open: OpenFn, remove: RemoveFn, tmpname: TmpnamFn }
 
 local SENTINEL = "__EXEC_EXIT__"
 
