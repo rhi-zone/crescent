@@ -2,6 +2,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local ident = require("lib.exec.ident")
+
 local M = {}
 
 -- Strip leading nix noise lines (download progress, warnings, etc.)
@@ -168,10 +170,10 @@ local function try_command_line(line)
 end
 
 -- Parse raw --help text into a schema table.
---:: HelpFlag       = { short: string | nil, long: string | nil, arg: string | nil, description: string }
---:: HelpPositional = { name: string, required: boolean }
---:: HelpSubcommand = { name: string, description: string, flags: HelpFlag[], positional: HelpPositional[], subcommands: { [string]: HelpSubcommand } }
---:: HelpSchema     = { name: string | nil, description: string | nil, usage: string | nil, subcommands: { [string]: HelpSubcommand }, flags: HelpFlag[], positional: HelpPositional[] }
+--:: HelpFlag       = { short: string | nil, long: string | nil, arg: string | nil, description: string, ident: string }
+--:: HelpPositional = { name: string, required: boolean, ident: string }
+--:: HelpSubcommand = { name: string, description: string, ident: string, flags: HelpFlag[], positional: HelpPositional[], subcommands: { [string]: HelpSubcommand } }
+--:: HelpSchema     = { name: string | nil, description: string | nil, usage: string | nil, subcommands: { [string]: HelpSubcommand }, subcommand_idents: { [string]: string }, flags: HelpFlag[], flag_idents: { [string]: integer }, positional: HelpPositional[] }
 --: (string) -> HelpSchema
 function M.parse(text)
 	--: HelpSchema
@@ -180,7 +182,9 @@ function M.parse(text)
 		description = nil,
 		usage = nil,
 		subcommands = {},
+		subcommand_idents = {},
 		flags = {},
+		flag_idents = {},
 		positional = {},
 	}
 
@@ -354,6 +358,106 @@ function M.parse(text)
 		end
 
 		::continue::
+	end
+
+	-- Post-processing: collapse --no-X / --X flag pairs, then normalize identifiers.
+
+	-- Step 1: collapse --no-X / --X pairs.
+	-- Build an index: long name (without --) -> flag index.
+	local long_index = {}  -- "foo" -> index in schema.flags
+	for i, f in ipairs(schema.flags) do
+		--: string | nil
+		local flong = f.long
+		if flong then
+			local bare = flong:match("^%-%-(.+)$")
+			if bare then
+				long_index[bare] = i
+			end
+		end
+	end
+
+	-- Find --no-X flags that have a corresponding --X flag.
+	local collapsed = {}  -- set of indices to remove (the --no-X entry)
+	for i, f in ipairs(schema.flags) do
+		--: string | nil
+		local flong = f.long
+		if flong then
+			local bare = flong:match("^%-%-no%-(.+)$")
+			if bare and long_index[bare] then
+				local pos_idx = long_index[bare]
+				local pos_flag = schema.flags[pos_idx]
+				-- Merge: mark --no-X entry for removal, update positive flag.
+				pos_flag.arg = "boolean"
+				-- Use the longer description.
+				local neg_desc = f.description or ""
+				local pos_desc = pos_flag.description or ""
+				if #neg_desc > #pos_desc then
+					pos_flag.description = neg_desc
+				end
+				collapsed[i] = true
+			end
+		end
+	end
+
+	-- Remove collapsed entries (iterate in reverse to preserve indices).
+	if next(collapsed) then
+		local new_flags = {}
+		for i, f in ipairs(schema.flags) do
+			if not collapsed[i] then
+				new_flags[#new_flags + 1] = f
+			end
+		end
+		schema.flags = new_flags
+	end
+
+	-- Step 2: normalize identifiers for flags.
+	local flag_raw_names = {}
+	for _, f in ipairs(schema.flags) do
+		-- Canonical name: long form if present, else short form (strip leading -)
+		local raw
+		--: string | nil
+		local flong = f.long
+		--: string | nil
+		local fshort = f.short
+		if flong then
+			raw = flong
+		elseif fshort then
+			raw = fshort:match("^%-(.+)$") or fshort
+		else
+			raw = ""
+		end
+		flag_raw_names[#flag_raw_names + 1] = raw
+	end
+	local flag_norm = ident.normalize(flag_raw_names)
+	schema.flag_idents = {}
+	for i, f in ipairs(schema.flags) do
+		-- flag_raw_names[i] is always a string: built from schema.flags with same length.
+		local raw = tostring(flag_raw_names[i])
+		f.ident = flag_norm[raw] or ident.normalize_one(raw, i)
+		schema.flag_idents[f.ident] = i
+	end
+
+	-- Step 3: normalize identifiers for subcommands.
+	local sub_raw_names = {}
+	for name in pairs(schema.subcommands) do
+		sub_raw_names[#sub_raw_names + 1] = name
+	end
+	local sub_norm = ident.normalize(sub_raw_names)
+	schema.subcommand_idents = {}
+	for name, sub in pairs(schema.subcommands) do
+		local id = sub_norm[name] or ident.normalize_one(name, 1)
+		sub.ident = id
+		schema.subcommand_idents[id] = name
+	end
+
+	-- Step 4: normalize identifiers for positional args.
+	local pos_raw_names = {}
+	for _, p in ipairs(schema.positional) do
+		pos_raw_names[#pos_raw_names + 1] = p.name
+	end
+	local pos_norm = ident.normalize(pos_raw_names)
+	for i, p in ipairs(schema.positional) do
+		p.ident = pos_norm[p.name] or ident.normalize_one(p.name, i)
 	end
 
 	return schema

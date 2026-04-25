@@ -602,6 +602,128 @@ T.describe("help.parse", function()
 		end)
 	end)
 
+	T.describe("ident fields on parsed schema", function()
+		T.it("each flag has a valid Lua identifier ident", function()
+			local schema = help.parse(NORMALIZE_HELP)
+			local ident_mod = require("lib.exec.ident")
+			for _, f in ipairs(schema.flags) do
+				T.ok(f.ident ~= nil, "flag missing ident field")
+				T.ok(ident_mod.is_valid_ident(f.ident), "flag ident is not valid: " .. tostring(f.ident))
+			end
+		end)
+
+		T.it("each subcommand entry has an ident field", function()
+			local schema = help.parse(NORMALIZE_HELP)
+			for _, sub in pairs(schema.subcommands) do
+				T.ok(sub.ident ~= nil, "subcommand missing ident")
+			end
+		end)
+
+		T.it("each positional has an ident field", function()
+			local schema = help.parse(SUBCOMMAND_HELP)
+			for _, p in ipairs(schema.positional) do
+				T.ok(p.ident ~= nil, "positional missing ident")
+			end
+		end)
+
+		T.it("--json flag gets ident 'json'", function()
+			local schema = help.parse(NORMALIZE_HELP)
+			local found
+			for _, f in ipairs(schema.flags) do
+				if f.long == "--json" then found = f; break end
+			end
+			T.ok(found ~= nil, "--json flag not found")
+			T.eq(found.ident, "json")
+		end)
+
+		T.it("'view' subcommand gets ident 'view'", function()
+			local schema = help.parse(NORMALIZE_HELP)
+			T.ok(schema.subcommands["view"] ~= nil, "view subcommand not found")
+			T.eq(schema.subcommands["view"].ident, "view")
+		end)
+
+		T.it("schema.subcommand_idents reverse map is populated", function()
+			local schema = help.parse(NORMALIZE_HELP)
+			T.eq(schema.subcommand_idents["view"], "view")
+			T.eq(schema.subcommand_idents["grep"], "grep")
+			T.eq(schema.subcommand_idents["edit"], "edit")
+		end)
+
+		T.it("schema.flag_idents maps ident to index in flags", function()
+			local schema = help.parse(NORMALIZE_HELP)
+			local json_ident = nil
+			for i, f in ipairs(schema.flags) do
+				if f.long == "--json" then json_ident = i; break end
+			end
+			T.ok(json_ident ~= nil, "--json not in flags")
+			T.eq(schema.flag_idents["json"], json_ident)
+		end)
+
+		T.it("positional ident is normalized from name", function()
+			local schema = help.parse(SUBCOMMAND_HELP)
+			T.eq(schema.positional[1].ident, "target")
+		end)
+	end)
+
+	T.describe("--no-foo / --foo collapsing", function()
+		local NO_FOO_HELP = [[
+My Tool
+
+Usage: mytool [OPTIONS]
+
+Options:
+  --foo      Enable foo
+  --no-foo   Disable foo
+  --bar      Enable bar
+  -h, --help  Print help
+]]
+
+		T.it("collapses --no-foo + --foo into one entry with arg=boolean", function()
+			local schema = help.parse(NO_FOO_HELP)
+			local foo_count = 0
+			local foo_flag = nil
+			for _, f in ipairs(schema.flags) do
+				if f.long == "--foo" then
+					foo_count = foo_count + 1
+					foo_flag = f
+				elseif f.long == "--no-foo" then
+					foo_count = foo_count + 1
+				end
+			end
+			T.eq(foo_count, 1, "expected one merged foo entry, got " .. tostring(foo_count))
+			T.ok(foo_flag ~= nil, "--foo entry not found after collapse")
+			T.eq(foo_flag.arg, "boolean")
+		end)
+
+		T.it("--bar (no --no-bar pair) is unaffected", function()
+			local schema = help.parse(NO_FOO_HELP)
+			local bar_flag = nil
+			for _, f in ipairs(schema.flags) do
+				if f.long == "--bar" then bar_flag = f; break end
+			end
+			T.ok(bar_flag ~= nil, "--bar missing after collapse pass")
+			T.eq(bar_flag.arg, nil)
+		end)
+
+		T.it("collapsed flag gets a valid ident", function()
+			local ident_mod = require("lib.exec.ident")
+			local schema = help.parse(NO_FOO_HELP)
+			local foo_flag = nil
+			for _, f in ipairs(schema.flags) do
+				if f.long == "--foo" then foo_flag = f; break end
+			end
+			T.ok(foo_flag ~= nil)
+			T.ok(ident_mod.is_valid_ident(foo_flag.ident), "collapsed flag ident invalid: " .. tostring(foo_flag and foo_flag.ident))
+			T.eq(foo_flag.ident, "foo")
+		end)
+
+		T.it("total flag count is reduced by one after collapse", function()
+			local schema = help.parse(NO_FOO_HELP)
+			-- foo, bar, help = 3 (--no-foo removed)
+			T.eq(#schema.flags, 3)
+		end)
+	end)
+
 	T.describe("help.fetch uses injected popen", function()
 		T.it("calls popen with --help and returns schema", function()
 			local called_cmd
