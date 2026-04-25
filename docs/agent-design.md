@@ -77,7 +77,7 @@ Platform invariants (`lib/platform/CLAUDE.md`) align with what agents need:
 Concrete division:
 
 - **Vendored pure Lua** (no caps): `lib/taskgraph/` (exists), `lib/agent/presets/`, `lib/agent/curate/` (note primitives, render function), `lib/agent/author/` (emit new-app tarball).
-- **New caps**: `llm` (grammar-constrained generation; takes a set, returns structured output), `normalize` (typed subcommand dispatch to the binary — not generic exec), `eval` (sandboxed Lua computation; bound-name-only arguments to any read caps it can see), `app_author` (meta-agents only).
+- **New caps**: `llm` (grammar-constrained generation; takes a set, returns structured output), `normalize` (MCP client to a persistent `normalize serve mcp` subprocess — structured JSON-RPC tool calls, not shell-out-per-call; all normalize commands available as typed MCP tools), `eval` (sandboxed Lua computation; bound-name-only arguments to any read caps it can see), `app_author` (meta-agents only).
 
 ## Meta: agents authoring agents
 
@@ -103,8 +103,7 @@ Default test for any proposed feature: *what conversational anti-pattern is this
 2. **Scale.** The only empirical evidence for set-rendered-as-turns in practice (`normalize/docs/archive/agent-dogfooding.md`) is small-task. Whether the shape holds on a 20-file refactor — where note-set size grows and cross-view correlation matters — is unproven.
 3. **Small-model feasibility.** Grammar-constrained output, note-schema discipline, and atemporal rendering all ask more than free prose. llama.cpp at `127.0.0.1:8081` is the test bed. Skeleton-with-slots (pre-written structure, LLM fills gaps) is a plausible middle ground.
 4. **Render benchmarking per model.** `render(set)` is a pure function at the cap boundary; different models may prefer different formats (turns today; maybe structured records later). Pick measured not assumed.
-5. **`caps.normalize` surface.** Typed dispatch per subcommand (precise grants, maintenance-per-subcommand) vs generic exec with a whitelist (v1-fast, loses precision). Current lean: typed.
-6. **Structured docs retrieval.** `normalize docs query` subcommand, or a `lib/doc/` index that normalize queries? Unresolved.
+5. **Structured docs retrieval.** `lib/doc/` index that normalize queries, or something else? No `normalize docs` subcommand exists. Unresolved.
 7. **Failure semantics.** Retry / abandon-subtree / escalate-to-parent as a per-preset knob. Deferred until a real preset hits real failure.
 8. **First concrete app.** Narrow preset-only agent (shakes out substrate) or small generalist with curated leaves (proves the thesis end-to-end). Current lean: narrow first.
 
