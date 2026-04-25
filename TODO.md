@@ -793,13 +793,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   multi-return separator). Workaround: parenthesize returns `-> (R?, string?)`.
   Could fix by parsing return types greedily until `,` followed by an identifier + `:`.
 
-- [ ] **Typechecker: type-level imports** — `--:: import "lib.ai.types"` or similar,
-  analogous to TypeScript's `import type`. The checker already resolves `require()` for
-  cross-module types; this would be the annotation-only equivalent for files that only
-  need the types, not the runtime module.
-  Note: `--:: require "path"` (ANN_REQUIRE) already exists and loads a declaration file
-  into scope; investigate whether it fully covers the import-type use case or if a
-  separate `--:: import` is still needed.
+- [x] **Typechecker: type-level imports** — `--:: require "path"` (ANN_REQUIRE) is the
+  mechanism: it loads all `--::` declarations from the referenced file into the current
+  file's scope. Already implemented and in active use by lib/taskgraph/, lib/asm/,
+  lib/web/, and others. No separate `--:: import` syntax is needed.
 
 - [ ] **Shared cap function types library** — common injected-function signatures repeated
   across libs (`POpenFn`, `IOOpenFn`, `RemoveFn`, `TmpnameFn`, `ReadFn`, etc.) should
