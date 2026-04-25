@@ -717,8 +717,10 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
     - [x] Arity pre-filtering before check_string
     - [x] Persistent index — save_index/load_index JSON, CLI --save-index/--load-index
   - [x] Stabilise `--dump` output as machine-readable JSON (exported bindings + type sigs) — `--dump --format json` emits `[{file, bindings:[{name,type}], return}]`; M.dump_one/dump_json testable exports (edaaf6f)
-  - [ ] Static docs site (bun) — renders docgen JSON; search calls type-search endpoint or
-    runs unification client-side via WASM build of the typechecker.
+  - [ ] Static docs site — renders docgen JSON; search calls type-search endpoint or
+    runs unification client-side. **Medium priority: replace bun with crescent-native
+    markdown renderer** (`lib/markdown/` once complete) so the docs toolchain is
+    self-hosted. bun is the current placeholder; it should not be a permanent dep.
   - [ ] GitHub Action — on release tag: run typechecker + docgen, publish JSON to index.
   - [ ] `cr add <name>` — resolve short name via index.json, fetch GitHub release tarball,
     extract to `dep/<name>/`, resolve transitive deps.
@@ -795,6 +797,25 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   analogous to TypeScript's `import type`. The checker already resolves `require()` for
   cross-module types; this would be the annotation-only equivalent for files that only
   need the types, not the runtime module.
+  Note: `--:: require "path"` (ANN_REQUIRE) already exists and loads a declaration file
+  into scope; investigate whether it fully covers the import-type use case or if a
+  separate `--:: import` is still needed.
+
+- [ ] **Shared cap function types library** — common injected-function signatures repeated
+  across libs (`POpenFn`, `IOOpenFn`, `RemoveFn`, `TmpnameFn`, `ReadFn`, etc.) should
+  live in one place (e.g. `lib/caps/types.lua`) declared with `--::`, imported via
+  `--:: require "lib.caps.types"`. Eliminates per-file repetition and keeps cap
+  signatures consistent across the codebase.
+
+- [ ] **Type annotation syntax docs** — no public-facing `docs/type-syntax.md` exists.
+  `docs/conventions.md` mentions `--:` / `--::` exist but doesn't document them.
+  Need: complete syntax reference (primitives, unions, intersections, generics, tuples,
+  function types, `--:: require`, `--:: declare`, intrinsics like `$Opaque`/`$Values`).
+  Include: known limitations, examples.
+
+- [ ] **Type docs staleness detection** — script that compares `git log` date of
+  `docs/type-syntax.md` (once it exists) against latest commit touching
+  `lib/type/static/`. Run in CI or as a pre-commit hook to catch silent doc drift.
 
 - [ ] **Typechecker: nested generic alias application** — `Partial<Partial<T>>`
   produces `never` even though `Partial<{a: string|nil}>` (the inner result)
