@@ -90,7 +90,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Capability-based I/O.** Libraries must not reach for `os`, `io`, or other global side-effect modules directly. Instead, accept I/O functions as parameters (constructor opts, function args). This is the foundation of sandbox safety: if a library grabs `os.time()` from a global, it can't run in a capability sandbox. If it accepts a `time_fn` parameter, the caller decides what time source to provide — or whether to provide one at all. This applies to ALL libraries, not just platform app code.
 
-**Caps-first, everywhere.** Every library that performs I/O must accept its dependencies as injected caps, not import them from globals. "This runs outside the sandbox so it's fine" is never a justification for skipping injection.
+**Caps-first, everywhere.** Every library that performs I/O must accept its dependencies as injected caps, not import them from globals. "This runs outside the sandbox so it's fine" is never a justification for skipping injection. **Defaulting to globals is also a violation** — `opts.popen or io.popen` reaches for `io` just as directly as `io.popen` alone. If a cap is not injected, error; do not silently fall back to the global.
 
 ## Design Principles
 

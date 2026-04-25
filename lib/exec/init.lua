@@ -4,17 +4,16 @@ end
 
 local M = {}
 
--- opts.popen and opts.tmpfile are caller-injected functions; `any` is intentional —
--- the typechecker cannot know the concrete signature at the call site.
+-- opts.popen, opts.open, opts.remove, opts.tmpname are caller-injected I/O functions.
+-- `any` is intentional — the typechecker cannot know the concrete signatures at call sites.
 --:: RunOpts   = { popen: any, stderr: string | nil }
---:: RunExOpts = { popen: any, tmpfile: any }
+--:: RunExOpts = { popen: any, open: any, remove: any, tmpname: any }
 
 local SENTINEL = "__EXEC_EXIT__"
 
 -- Single-quote a string for POSIX shell.
 --: (string) -> string
 local function shell_quote(s)
-	-- Local assignment adjusts gsub's two returns to one.
 	local escaped = s:gsub("'", "'\\''")
 	return "'" .. escaped .. "'"
 end
@@ -44,19 +43,19 @@ end
 
 -- Run a subprocess and capture stdout.
 --
--- opts.popen   fn   injected io.popen (required in sandboxes; defaults to io.popen outside)
+-- opts.popen   fn   io.popen-compatible function (required)
 -- opts.stderr  str  "merge" (2>&1) | "discard" (2>/dev/null) | nil (pass through to tty)
 --
 -- Returns stdout on success, or nil + errmsg on non-zero exit or popen failure.
---: (string, string[], RunOpts | nil) -> string | nil, string | nil
+--: (string, string[], RunOpts) -> string | nil, string | nil
 function M.run(cmd, args, opts)
 	--: any
-	local popen = opts and opts.popen or io.popen
+	local popen = opts.popen
 	local cmdstr = build_cmdstr(cmd, args)
 
-	if opts and opts.stderr == "merge" then
+	if opts.stderr == "merge" then
 		cmdstr = cmdstr .. " 2>&1"
-	elseif opts and opts.stderr == "discard" then
+	elseif opts.stderr == "discard" then
 		cmdstr = cmdstr .. " 2>/dev/null"
 	end
 
@@ -79,24 +78,30 @@ end
 -- Run a subprocess and return stdout, stderr, and exit code separately.
 -- Uses a temp file for stderr; simpler callers should prefer run().
 --
--- opts.popen    fn  injected io.popen
--- opts.tmpfile  fn  injected temp path factory (suffix) -> path; defaults to os.tmpname
+-- opts.popen    fn  io.popen-compatible function (required)
+-- opts.open     fn  io.open-compatible function (required)
+-- opts.remove   fn  os.remove-compatible function (required)
+-- opts.tmpname  fn  os.tmpname-compatible function (required)
 --
 -- Returns stdout, stderr, code on success, or nil + errmsg on popen failure.
---: (string, string[], RunExOpts | nil) -> string | nil, string | nil, number | nil
+--: (string, string[], RunExOpts) -> string | nil, string | nil, number | nil
 function M.run_ex(cmd, args, opts)
 	--: any
-	local popen   = opts and opts.popen   or io.popen
+	local popen   = opts.popen
 	--: any
-	local tmpfile = opts and opts.tmpfile or function(s) return os.tmpname() .. (s or "") end
+	local open    = opts.open
+	--: any
+	local remove  = opts.remove
+	--: any
+	local tmpname = opts.tmpname
 
-	local stderr_path = tmpfile(".stderr")
+	local stderr_path = tmpname() .. ".stderr"
 	local cmdstr    = build_cmdstr(cmd, args) .. " 2>" .. shell_quote(stderr_path)
 	local augmented = cmdstr .. "; printf '\\n" .. SENTINEL .. "%d' $?"
 
 	local fh, err = popen(augmented, "r")
 	if not fh then
-		os.remove(stderr_path)
+		remove(stderr_path)
 		return nil, "popen: " .. tostring(err)
 	end
 
@@ -104,14 +109,14 @@ function M.run_ex(cmd, args, opts)
 	fh:close()
 
 	local stderr = ""
-	local ef = io.open(stderr_path, "r")
+	local ef = open(stderr_path, "r")
 	if ef ~= nil then
 		--: any  -- narrowing file*|nil to file* not yet supported by typechecker
 		local fef = ef
 		stderr = fef:read("*a") or ""
 		fef:close()
 	end
-	os.remove(stderr_path)
+	remove(stderr_path)
 
 	local stdout, code = parse_sentinel(raw)
 	if code ~= 0 then
