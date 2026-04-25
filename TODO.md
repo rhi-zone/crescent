@@ -609,6 +609,39 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] **`lib/queue/`** — SQLite-backed task queue with priority, delay, retry, scheduling, dead-letter. 69 assertions.
 - [x] **`lib/taskgraph` frontier/exec_graph/scaffolds** — absorbed from nanites design. Dynamic graph growth, frontier (live pending set, opt-in via `track=true`), exec_graph (monotonic audit log), scaffolds (pre-execution hooks). 53 assertions. Parallel LLM dispatch still needs epoll-backed HTTP (see entry above); vLLM integration (`caps.llm` → local vLLM OpenAI-compatible API) is a follow-on. Reference: `~/git/rhizone/nanites/`.
 
+## Agent infrastructure
+
+- [x] **`lib/exec/`** — subprocess runner (`exec.run`/`exec.run_ex`), `--help` parser
+  (`lib/exec/help.lua`), identifier normalizer (`lib/exec/ident.lua`). HelpSchema produced
+  by `help.fetch` or `help.parse`. Done.
+
+- [ ] **`lib/exec/make_api`** — fluent typed API generator from HelpSchema. See `docs/exec-api-design.md`.
+  Inputs: HelpSchema + cmd name + opts (`popen` injected). Outputs: `api_table` + `--::` decls string.
+  Node shapes via bitflags (`CALLABLE=0x1`, `HAS_SUBCOMMANDS=0x2`). "Both" nodes use `#__call` metamethod.
+  Flag expansion: named table `{json=true, limit=5}` → CLI arg strings. Depends on: `lib/exec/help`,
+  `lib/exec/ident` (done). File: `lib/exec/make_api.lua`.
+
+- [ ] **`lib/agent/` substrate** — context set, render, curated leaf executor, preset registry.
+  See `docs/agent-impl.md` Section 1. Depends on: `lib/taskgraph` (done).
+  Key invariant: set is re-rendered fresh each LLM call; raw tool output never accumulates.
+  Files: `lib/agent/set.lua`, `lib/agent/render.lua`, `lib/agent/leaf.lua`, `lib/agent/preset.lua`.
+
+- [ ] **`caps.exec`** — platform cap wrapping `lib/exec` with manifest whitelist + subcommand grants.
+  See `docs/agent-impl.md` Section 2. Depends on: `lib/exec/make_api`, `lib/platform/caps/` pattern.
+  File: `lib/platform/caps/exec.lua`. Construction auto-fetches `--help` per binary; grant precision
+  via `allow` list restricts to specific subcommand paths.
+
+- [ ] **`caps.llm`** — platform cap for grammar-constrained LLM generation via llama.cpp.
+  See `docs/agent-impl.md` Section 3. Depends on: `lib/ai/providers/openai_compat` (done).
+  File: `lib/platform/caps/llm.lua`. Endpoint: `http://127.0.0.1:8081` default. `response_format`
+  JSON schema mode for structured output; response validated before returning.
+
+- [ ] **First narrow agent app** — blocked on `caps.llm` + `lib/agent/` substrate.
+  Candidate: polish-agent (parallel audit lenses, structured findings, POLISH.md artifact,
+  human-as-decision-node). See `docs/agent-design.md` for thesis and design constraints.
+  Success criteria from design doc: narrow app under 200 lines of Lua, useful output on small
+  local model, audit trail = `exec_graph` snapshot + tarball hash.
+
 - [ ] **`lib/protocol/capnp`** — zero-copy binary serialization via Cap'n Proto. Wire format reader + writer using LuaJIT FFI (fixed-width fields + typed pointers → direct buffer casting, near-zero allocation). Pure reader first; `.capnp` schema parser deferred (hand-write schemas as Lua tables initially). RPC layer (`lib/capnprpc`) separate. Moderately high priority — genuine capability gap over JSON/CBOR for high-throughput IPC.
 - [x] **`lib/ukanren/`** — microKanren port. Goals, unification, streams, fair interleaving. 52 assertions.
 - [x] **`lib/datalog/`** — pure Lua Datalog engine, naive bottom-up evaluation, recursive rules, guards. 87 assertions.
