@@ -192,7 +192,8 @@ local function extract_narrowing(ctx, nid)
             if obj and obj.kind == NODE_IDENTIFIER then
                 if rhs and rhs.kind == defs.NODE_LITERAL then
                     local rlit_kind = rhs.data[0]
-                    if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN then
+                    if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN
+                    or rlit_kind == LIT_INTEGER or rlit_kind == LIT_NUMBER then
                         local positive = (op == OP_EQ)
                         return {
                             kind          = "field_disc",
