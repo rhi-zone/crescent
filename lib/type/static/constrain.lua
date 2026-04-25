@@ -1836,7 +1836,7 @@ local function peek_callee_ret_union(ctx, callee_n)
     end
     if not fn_tid then return nil end
     local fn_t = ctx.types:get(fn_tid)
-    if fn_t.tag ~= TAG_FUNCTION or fn_t.data[3] ~= 1 then return nil end
+    if fn_t.tag ~= TAG_FUNCTION then return nil end
     -- Skip generic functions: their return type contains FLAG_GENERIC vars that won't be
     -- bound in the solver (only the instantiated fresh vars get bound at call sites).
     -- Peeking at the generic template would bind the local to the wrong (generic) type.
@@ -1844,23 +1844,40 @@ local function peek_callee_ret_union(ctx, callee_n)
         local ptid = types_mod.find(ctx, ctx.lists:get(pi))
         if ctx.types:get(ptid).flags == defs.FLAG_GENERIC then return nil end
     end
-    local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
-    local ret_t = ctx.types:get(ret_slot)
-    -- Reject unresolved types; accept anything concrete.
-    -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
-    -- and fall back to direct binding for scalars/plain unions (single return).
-    if ret_t.tag == TAG_VAR or ret_t.tag == TAG_ROWVAR then return nil end
-    -- Deferred parameterized intrinsic: TAG_TYPE_CALL(TAG_INTRINSIC,...) in return position.
-    -- The return type is not concrete yet — the solver resolves it after argument binding
-    -- (via resolve_deferred_intrinsic).  Do not peek; let the C_INDEX/slot path handle it.
-    if ret_t.tag == defs.TAG_TYPE_CALL then return nil end
-    -- Explicit multi-return: TAG_SPREAD in return position wraps the tuple/union-of-tuples.
-    -- Unwrap and return the inner type directly — eager_slot handles it.
-    if ret_t.tag == defs.TAG_SPREAD then
-        return types_mod.find(ctx, ret_t.data[0])
+    local returns_len = fn_t.data[3]
+    if returns_len == 1 then
+        local ret_slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2]))
+        local ret_t = ctx.types:get(ret_slot)
+        -- Reject unresolved types; accept anything concrete.
+        -- Callers use eager_slot for TAG_TUPLE/union-of-tuples (multi-return)
+        -- and fall back to direct binding for scalars/plain unions (single return).
+        if ret_t.tag == TAG_VAR or ret_t.tag == TAG_ROWVAR then return nil end
+        -- Deferred parameterized intrinsic: TAG_TYPE_CALL(TAG_INTRINSIC,...) in return position.
+        -- The return type is not concrete yet — the solver resolves it after argument binding
+        -- (via resolve_deferred_intrinsic).  Do not peek; let the C_INDEX/slot path handle it.
+        if ret_t.tag == defs.TAG_TYPE_CALL then return nil end
+        -- Explicit multi-return: TAG_SPREAD in return position wraps the tuple/union-of-tuples.
+        -- Unwrap and return the inner type directly — eager_slot handles it.
+        if ret_t.tag == defs.TAG_SPREAD then
+            return types_mod.find(ctx, ret_t.data[0])
+        end
+        -- Single-value return (no spread): always wrap in a 1-tuple.
+        return types_mod.make_tuple(ctx, { ret_slot })
+    elseif returns_len > 1 then
+        -- Multi-return function: collect all return slots and wrap into a TAG_TUPLE.
+        local slots = {}
+        for i = 0, returns_len - 1 do
+            local slot = types_mod.find(ctx, ctx.lists:get(fn_t.data[2] + i))
+            local st = ctx.types:get(slot)
+            -- Bail if any slot is unresolved or deferred.
+            if st.tag == TAG_VAR or st.tag == TAG_ROWVAR then return nil end
+            if st.tag == defs.TAG_TYPE_CALL then return nil end
+            slots[#slots + 1] = slot
+        end
+        return types_mod.make_tuple(ctx, slots)
+    else
+        return nil
     end
-    -- Single-value return (no spread): always wrap in a 1-tuple.
-    return types_mod.make_tuple(ctx, { ret_slot })
 end
 
 -- Extract the type at slot N from a TAG_TUPLE or union-of-TAG_TUPLEs at constraint-gen time.
