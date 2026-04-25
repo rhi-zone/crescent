@@ -109,12 +109,11 @@ function M.run_ex(cmd, args, opts)
 	fh:close()
 
 	local stderr = ""
+	--: File | nil
 	local ef = open(stderr_path, "r")
 	if ef ~= nil then
-		--: any  -- narrowing file*|nil to file* not yet supported by typechecker
-		local fef = ef
-		stderr = fef:read("*a") or ""
-		fef:close()
+		stderr = ef:read("*a") or ""
+		ef:close()
 	end
 	remove(stderr_path)
 
