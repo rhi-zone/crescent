@@ -1,0 +1,49 @@
+View a node in the codebase tree, or navigate symbol relationships
+
+Usage: normalize view [OPTIONS] [target] [COMMAND]
+
+Commands:
+  view           View a node in the codebase tree (directory, file, or symbol)
+  referenced-by  Show what references this symbol (callers in the call graph; requires facts index)
+  list           List code entities matching filters in a scope
+  references     Show what this symbol references (callees in the call graph; requires facts index)
+  history        Show git history for a symbol or file
+  dependents     Reverse-dependency closure: who imports this file or module? (requires facts index)
+  trace          Trace value provenance for a symbol
+  graph          Graph-theoretic properties of the dependency graph (requires facts index)
+  blame          Git blame with session attribution and code relations
+  help           Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [target]  Target: path, path/Symbol, Parent/method, file:line, or SymbolName
+
+Options:
+      --pretty                     Human-friendly output with colors and formatting
+      --compact                    Compact output without colors (overrides TTY detection)
+      --jsonl                      Output one JSON object per line (for arrays)
+      --json                       Output machine-readable JSON
+      --jq <jq>                    Filter output through jq expression
+      --input-schema               Print JSON Schema of the subcommand's input parameters and exit
+      --output-schema              Print JSON Schema of the subcommand's return type and exit
+      --params-json <params-json>  Provide all parameters as a JSON object instead of individual flags
+  -r, --root <root>                Root directory (defaults to current directory)
+  -d, --depth <depth>              Depth of expansion (0=names only, 1=signatures, 2=with children, -1=all)
+  -n, --line-numbers               Show line numbers
+      --deps                       Show dependencies (imports/exports)
+  -k, --kind <kind>                Filter by symbol kind: class, function, method
+      --types-only                 Show only type definitions
+      --tests                      Include test functions and test modules
+      --raw                        Disable smart display (no collapsing single-child dirs)
+      --focus <focus>              Focus view on module
+      --resolve-imports            Inline signatures of specific imported symbols
+      --full                       Show full source code
+      --docs                       Show full docstrings
+      --no-docs                    Hide all docstrings
+      --no-parent                  Hide parent/ancestor context
+      --context                    Context view: skeleton + imports combined
+      --dir-context                Prepend directory context (.context.md files)
+      --exclude <exclude>          Exclude paths matching pattern
+      --only <only>                Include only paths matching pattern
+  -i, --case-insensitive           Case-insensitive symbol matching
+  -h, --help                       Print help
+  -V, --version                    Print version

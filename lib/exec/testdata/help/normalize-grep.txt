@@ -1,0 +1,31 @@
+Search for text patterns across the codebase using ripgrep regex syntax.
+
+Usage: normalize grep [OPTIONS] [pattern]
+
+Arguments:
+  [pattern]  Regex pattern to search for
+
+Options:
+      --pretty                     Human-friendly output with colors and formatting
+  -r, --root <root>                Root directory (defaults to current directory)
+      --compact                    Compact output without colors (overrides TTY detection)
+  -l, --limit <limit>              Maximum number of matches to return
+  -i, --ignore-case                Case-insensitive search
+      --jsonl                      Output one JSON object per line (for arrays)
+      --exclude <exclude>          Exclude files matching patterns or aliases
+      --json                       Output machine-readable JSON
+      --jq <jq>                    Filter output through jq expression
+      --only <only>                Only include files matching patterns or aliases
+      --input-schema               Print JSON Schema of the subcommand's input parameters and exit
+      --output-schema              Print JSON Schema of the subcommand's return type and exit
+      --params-json <params-json>  Provide all parameters as a JSON object instead of individual flags
+  -h, --help                       Print help
+
+Accepts a regex `pattern`, optional `root`, `only` (include glob), `exclude` (exclude
+glob), and `limit` flags. Returns a `GrepReport` with file paths, line numbers, and
+matched text. Uses ripgrep regex: `|` for alternation, not BRE/ERE.
+
+Examples:
+normalize grep "TODO" --only "*.rs"    # search Rust files for TODO
+normalize grep "fn main" src/          # search in specific directory
+normalize grep "class \w+" --only "*.py" --json   # JSON output

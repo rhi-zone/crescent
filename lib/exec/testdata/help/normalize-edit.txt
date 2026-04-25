@@ -1,0 +1,28 @@
+Structural editing of code symbols
+
+Usage: normalize edit [OPTIONS] [COMMAND]
+
+Commands:
+  delete   Delete a symbol.
+  replace  Replace a symbol with new content.
+  swap     Swap two symbols
+  insert   Insert content relative to a symbol.
+  rename   Rename a symbol across its definition, call sites, and import statements.
+  undo     Undo the last N edits
+  redo     Redo the last undone edit
+  goto     Jump to a specific shadow commit
+  batch    Apply batch edits from JSON file
+  history  View shadow git edit history
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --jsonl                      Output one JSON object per line (for arrays)
+      --pretty                     Human-friendly output with colors and formatting
+      --compact                    Compact output without colors (overrides TTY detection)
+      --json                       Output machine-readable JSON
+      --jq <jq>                    Filter output through jq expression
+      --input-schema               Print JSON Schema of the subcommand's input parameters and exit
+      --output-schema              Print JSON Schema of the subcommand's return type and exit
+      --params-json <params-json>  Provide all parameters as a JSON object instead of individual flags
+  -h, --help                       Print help
+  -V, --version                    Print version

@@ -1,0 +1,80 @@
+GIT-LOG(1)                         Git Manual                        GIT-LOG(1)
+
+NAME
+       git-log - Show commit logs
+
+SYNOPSIS
+       git log [<options>] [<revision-range>] [[--] <path>...]
+
+DESCRIPTION
+       Shows the commit logs.
+
+       List commits that are reachable by following the parent links from the
+       given commit(s), but exclude commits that are reachable from the one(s)
+       given with a ^ in front of them. The output is given in reverse
+       chronological order by default.
+
+       You can think of this as a set operation. Commits reachable from any of
+       the commits given on the command line form a set, and then commits
+       reachable from any of the ones given with ^ in front are subtracted from
+       that set. The remaining commits are what comes out in the command’s
+       output. Various other options and paths parameters can be used to
+       further limit the result.
+
+       Thus, the following command:
+
+           $ git log foo bar ^baz
+
+       means "list all the commits which are reachable from foo or bar, but not
+       from baz".
+
+       A special notation "<commit1>..<commit2>" can be used as a short-hand
+       for "^<commit1> <commit2>". For example, either of the following may be
+       used interchangeably:
+
+           $ git log origin..HEAD
+           $ git log HEAD ^origin
+
+       Another special notation is "<commit1>...<commit2>" which is useful for
+       merges. The resulting set of commits is the symmetric difference between
+       the two operands. The following two commands are equivalent:
+
+           $ git log A B --not $(git merge-base --all A B)
+           $ git log A...B
+
+       The command takes options applicable to the git-rev-list(1) command to
+       control what is shown and how, and options applicable to the git-diff(1)
+       command to control how the changes each commit introduces are shown.
+
+OPTIONS
+       --follow
+           Continue listing the history of a file beyond renames (works only
+           for a single file).
+
+       --no-decorate, --decorate[=(short|full|auto|no)]
+           Print out the ref names of any commits that are shown. Possible
+           values are:
+
+               `short`;; the ref name prefixes `refs/heads/`, `refs/tags/` and
+                       `refs/remotes/` are not printed.
+               `full`;; the full ref name (including prefix) is printed.
+               `auto`:: if the output is going to a terminal, the ref names
+                       are shown as if `short` were given, otherwise no ref names are
+                       shown.
+
+           The option --decorate is short-hand for --decorate=short. Default to
+           configuration value of log.decorate if configured, otherwise, auto.
+
+       --decorate-refs=<pattern>, --decorate-refs-exclude=<pattern>
+           For each candidate reference, do not use it for decoration if it
+           matches any of the <pattern> parameters given to
+           --decorate-refs-exclude or if it doesn’t match any of the <pattern>
+           parameters given to --decorate-refs. The log.excludeDecoration
+           config option allows excluding refs from the decorations, but an
+           explicit --decorate-refs pattern will override a match in
+           log.excludeDecoration.
+
+           If none of these options or config settings are given, then
+           references are used as decoration if they match HEAD, refs/heads/,
+           refs/remotes/, refs/stash/, or refs/tags/.
+

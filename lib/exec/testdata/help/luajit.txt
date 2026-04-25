@@ -1,0 +1,12 @@
+usage: luajit [options]... [script [args]...].
+Available options are:
+  -e chunk  Execute string 'chunk'.
+  -l name   Require library 'name'.
+  -b ...    Save or list bytecode.
+  -j cmd    Perform LuaJIT control command.
+  -O[opt]   Control LuaJIT optimizations.
+  -i        Enter interactive mode after executing 'script'.
+  -v        Show version information.
+  -E        Ignore environment variables.
+  --        Stop handling options.
+  -         Execute stdin and stop handling options.
