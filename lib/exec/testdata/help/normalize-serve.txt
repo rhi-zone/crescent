@@ -1,0 +1,21 @@
+Start a normalize server (MCP, HTTP, LSP)
+
+Usage: normalize serve [OPTIONS] [COMMAND]
+
+Commands:
+  mcp   Start MCP server for LLM integration (stdio transport)
+  http  Start HTTP server (REST API)
+  lsp   Start LSP server for IDE integration
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --jsonl                      Output one JSON object per line (for arrays)
+      --pretty                     Human-friendly output with colors and formatting
+      --compact                    Compact output without colors (overrides TTY detection)
+      --json                       Output machine-readable JSON
+      --jq <jq>                    Filter output through jq expression
+      --input-schema               Print JSON Schema of the subcommand's input parameters and exit
+      --output-schema              Print JSON Schema of the subcommand's return type and exit
+      --params-json <params-json>  Provide all parameters as a JSON object instead of individual flags
+  -h, --help                       Print help
+  -V, --version                    Print version

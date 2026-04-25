@@ -170,8 +170,8 @@ end
 -- Parse raw --help text into a schema table.
 --:: HelpFlag       = { short: string | nil, long: string | nil, arg: string | nil, description: string }
 --:: HelpPositional = { name: string, required: boolean }
---:: HelpSubcommand = { name: string, description: string }
---:: HelpSchema     = { name: string | nil, description: string | nil, usage: string | nil, subcommands: HelpSubcommand[], flags: HelpFlag[], positional: HelpPositional[] }
+--:: HelpSubcommand = { name: string, description: string, flags: HelpFlag[], positional: HelpPositional[], subcommands: { [string]: HelpSubcommand } }
+--:: HelpSchema     = { name: string | nil, description: string | nil, usage: string | nil, subcommands: { [string]: HelpSubcommand }, flags: HelpFlag[], positional: HelpPositional[] }
 --: (string) -> HelpSchema
 function M.parse(text)
 	--: HelpSchema
@@ -284,9 +284,12 @@ function M.parse(text)
 		elseif section == "commands" then
 			local name, desc = try_command_line(line)
 			if name and name ~= "help" and not name:match("^%-") then
-				schema.subcommands[#schema.subcommands + 1] = {
+				schema.subcommands[name] = {
 					name = name,
 					description = desc:match("^%s*(.-)%s*$"),
+					flags = {},
+					positional = {},
+					subcommands = {},
 				}
 			elseif line:match("^%s*$") then
 				-- Blank line ends commands section.
@@ -357,18 +360,53 @@ function M.parse(text)
 end
 
 -- Run cmd --help (merging stderr) via opts.popen and parse the output.
--- opts.popen  fn  io.popen-compatible injected function (required)
---: (string, { popen: (string, string) -> (File | nil, string | nil) }) -> HelpSchema | nil, string | nil
+-- opts.popen     fn   io.popen-compatible injected function (required)
+-- opts.max_depth num  maximum subcommand recursion depth (default 4)
+--: (string, { popen: (string, string) -> (File | nil, string | nil), max_depth: number | nil }) -> HelpSchema | nil, string | nil
 function M.fetch(cmd, opts)
 	local exec = require("lib.exec")
-	local out, err = exec.run(cmd, { "--help" }, {
-		popen = opts.popen,
-		stderr = "merge",
-	})
-	if not out then
-		return nil, err
+	local max_depth = opts.max_depth or 4
+
+	-- Recursive helper: prefix_args is a list of strings e.g. {"normalize","edit"}
+	--: (string[], number) -> HelpSchema | nil, string | nil
+	local function fetch_recursive(prefix_args, depth)
+		local args = {}
+		for j = 2, #prefix_args do args[#args + 1] = prefix_args[j] end
+		args[#args + 1] = "--help"
+
+		local out, err = exec.run(prefix_args[1], args, {
+			popen = opts.popen,
+			stderr = "merge",
+		})
+		if not out then
+			return nil, err
+		end
+
+		local schema = M.parse(out or "")
+
+		if depth < max_depth then
+			for name, sub in pairs(schema.subcommands) do
+				local sub_prefix = {}
+				for _, v in ipairs(prefix_args) do sub_prefix[#sub_prefix + 1] = v end
+				sub_prefix[#sub_prefix + 1] = name
+
+				local sub_schema, sub_err = fetch_recursive(sub_prefix, depth + 1)
+				if sub_schema then
+					-- Merge fetched schema into stub, preserving name+description from parent.
+					sub.flags      = sub_schema.flags
+					sub.positional = sub_schema.positional
+					sub.subcommands = sub_schema.subcommands
+				else
+					-- Keep stub on failure; warn is intentionally suppressed per spec.
+					_ = sub_err
+				end
+			end
+		end
+
+		return schema
 	end
-	return M.parse(out or "")
+
+	return fetch_recursive({ cmd }, 0)
 end
 
 return M

@@ -85,18 +85,20 @@ T.describe("help.parse", function()
 		end)
 
 		T.it("extracts subcommands (excluding 'help')", function()
-			T.eq(#schema.subcommands, 3)
+			local count = 0
+			for _ in pairs(schema.subcommands) do count = count + 1 end
+			T.eq(count, 3)
 		end)
 
 		T.it("subcommand names are correct", function()
-			T.eq(schema.subcommands[1].name, "grep")
-			T.eq(schema.subcommands[2].name, "view")
-			T.eq(schema.subcommands[3].name, "edit")
+			T.ok(schema.subcommands["grep"] ~= nil, "grep subcommand present")
+			T.ok(schema.subcommands["view"] ~= nil, "view subcommand present")
+			T.ok(schema.subcommands["edit"] ~= nil, "edit subcommand present")
 		end)
 
 		T.it("subcommand descriptions are non-empty", function()
-			T.ok(schema.subcommands[1].description ~= "")
-			T.ok(schema.subcommands[2].description ~= "")
+			T.ok(schema.subcommands["grep"].description ~= "")
+			T.ok(schema.subcommands["view"].description ~= "")
 		end)
 
 		T.it("extracts flags", function()
@@ -148,7 +150,7 @@ T.describe("help.parse", function()
 		end)
 
 		T.it("no subcommands", function()
-			T.eq(#schema.subcommands, 0)
+			T.eq(next(schema.subcommands), nil)
 		end)
 
 		T.it("extracts -r/--root flag with arg", function()
@@ -180,7 +182,7 @@ T.describe("help.parse", function()
 		end)
 
 		T.it("subcommands is empty", function()
-			T.eq(#schema.subcommands, 0)
+			T.eq(next(schema.subcommands), nil)
 		end)
 
 		T.it("extracts positional", function()
@@ -211,7 +213,7 @@ T.describe("help.parse", function()
 	T.describe("empty / minimal input", function()
 		T.it("empty string returns empty schema", function()
 			local schema = help.parse("")
-			T.eq(#schema.subcommands, 0)
+			T.eq(next(schema.subcommands), nil)
 			T.eq(#schema.flags, 0)
 			T.eq(#schema.positional, 0)
 		end)
@@ -241,11 +243,9 @@ T.describe("help.parse", function()
 		end
 	end
 
-	-- Helper: find a subcommand by name.
+	-- Helper: find a subcommand by name (map lookup).
 	local function find_sub(schema, name)
-		for _, s in ipairs(schema.subcommands) do
-			if s.name == name then return s end
-		end
+		return schema.subcommands[name]
 	end
 
 	T.describe("help.parse — real fixtures", function()
@@ -262,7 +262,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("has subcommands", function()
-				T.ok(#schema.subcommands > 0, "expected subcommands, got 0")
+				T.ok(next(schema.subcommands) ~= nil, "expected subcommands, got 0")
 			end)
 
 			T.it("has 'view' subcommand", function()
@@ -315,7 +315,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("has subcommands (nested view commands)", function()
-				T.ok(#schema.subcommands > 0, "expected nested subcommands")
+				T.ok(next(schema.subcommands) ~= nil, "expected nested subcommands")
 			end)
 
 			T.it("has positional 'target' argument", function()
@@ -354,7 +354,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("no subcommands", function()
-				T.eq(#schema.subcommands, 0)
+				T.eq(next(schema.subcommands), nil)
 			end)
 
 			T.it("positional 'pattern' argument (optional)", function()
@@ -396,7 +396,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("has subcommands", function()
-				T.ok(#schema.subcommands > 0)
+				T.ok(next(schema.subcommands) ~= nil)
 			end)
 
 			T.it("has 'delete' subcommand", function()
@@ -432,7 +432,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("subcommands is empty (no Commands section)", function()
-				T.eq(#schema.subcommands, 0)
+				T.eq(next(schema.subcommands), nil)
 			end)
 
 			T.it("finds flags (inline, no Options: header)", function()
@@ -467,7 +467,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("finds subcommands (unlabeled group headers parsed via heuristic)", function()
-				T.ok(#schema.subcommands > 0, "expected subcommands, got 0")
+				T.ok(next(schema.subcommands) ~= nil, "expected subcommands, got 0")
 			end)
 
 			T.it("has 'clone' subcommand", function()
@@ -502,7 +502,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("no subcommands (man page has no Commands section)", function()
-				T.eq(#schema.subcommands, 0)
+				T.eq(next(schema.subcommands), nil)
 			end)
 		end)
 
@@ -515,7 +515,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("no subcommands", function()
-				T.eq(#schema.subcommands, 0)
+				T.eq(next(schema.subcommands), nil)
 			end)
 
 			T.it("name extracted (case-insensitive 'usage:')", function()
@@ -558,7 +558,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("no subcommands (rg has no subcommands section)", function()
-				T.eq(#schema.subcommands, 0)
+				T.eq(next(schema.subcommands), nil)
 			end)
 
 			T.it("finds flags from ALLCAPS section headers", function()
@@ -581,7 +581,7 @@ T.describe("help.parse", function()
 			end)
 
 			T.it("no subcommands", function()
-				T.eq(#schema.subcommands, 0)
+				T.eq(next(schema.subcommands), nil)
 			end)
 
 			T.it("finds flags from 'Command options:' section", function()
@@ -641,6 +641,161 @@ T.describe("help.parse", function()
 			local schema, err = help.fetch("badcmd", { popen = fake_popen })
 			T.eq(schema, nil)
 			T.ok(err ~= nil)
+		end)
+
+		T.it("recursively fetches subcommand help", function()
+			-- Responses keyed by command string (space-joined args without --help).
+			local responses = {
+				["mytool"] = table.concat({
+					"My Tool\n",
+					"Usage: mytool [OPTIONS] [COMMAND]\n",
+					"\nCommands:\n",
+					"  sub1  First subcommand\n",
+					"  sub2  Second subcommand\n",
+					"\nOptions:\n",
+					"  -h, --help  Print help\n",
+				}),
+				["mytool sub1"] = table.concat({
+					"Sub1 help\n",
+					"Usage: mytool sub1 [OPTIONS]\n",
+					"\nOptions:\n",
+					"  -x, --extra  Extra flag\n",
+					"  -h, --help   Print help\n",
+				}),
+				["mytool sub2"] = table.concat({
+					"Sub2 help\n",
+					"Usage: mytool sub2 [OPTIONS] [COMMAND]\n",
+					"\nCommands:\n",
+					"  leaf  A leaf subcommand\n",
+					"\nOptions:\n",
+					"  -h, --help  Print help\n",
+				}),
+				["mytool sub2 leaf"] = table.concat({
+					"Leaf help\n",
+					"Usage: mytool sub2 leaf [OPTIONS]\n",
+					"\nOptions:\n",
+					"  -z, --zzz  Zzz flag\n",
+					"  -h, --help  Print help\n",
+				}),
+			}
+
+			local function fake_popen(cmd, _mode)
+				-- cmd is shell-quoted: "'mytool' 'sub1' '--help' 2>&1; printf ..."
+				-- Extract unquoted tokens up to (but not including) '--help'.
+				local tokens = {}
+				for tok in cmd:gmatch("'([^']*)'") do
+					if tok == "--help" then break end
+					tokens[#tokens + 1] = tok
+				end
+				local key = table.concat(tokens, " ")
+				local body = responses[key] or ""
+				return {
+					read  = function(_, fmt)
+						if fmt == "*a" then return body .. "\n__EXEC_EXIT__0\n" end
+					end,
+					close = function() end,
+				}
+			end
+
+			local schema, err = help.fetch("mytool", { popen = fake_popen })
+			T.eq(err, nil)
+			T.ok(schema ~= nil)
+
+			-- Top level has sub1 and sub2.
+			T.ok(schema.subcommands["sub1"] ~= nil, "sub1 present")
+			T.ok(schema.subcommands["sub2"] ~= nil, "sub2 present")
+
+			-- sub1: leaf, has -x/--extra flag filled in by recursive fetch.
+			local sub1 = schema.subcommands["sub1"]
+			T.ok(sub1 ~= nil)
+			T.eq(next(sub1.subcommands), nil)  -- no subcommands
+			local extra_flag
+			for _, f in ipairs(sub1.flags) do
+				if f.long == "--extra" then extra_flag = f; break end
+			end
+			T.ok(extra_flag ~= nil, "--extra flag found on sub1")
+			T.eq(extra_flag.short, "-x")
+
+			-- sub2: has leaf subcommand.
+			local sub2 = schema.subcommands["sub2"]
+			T.ok(sub2 ~= nil)
+			T.ok(sub2.subcommands["leaf"] ~= nil, "leaf subcommand present under sub2")
+
+			-- sub2.leaf: has -z/--zzz flag.
+			local leaf = sub2.subcommands["leaf"]
+			T.ok(leaf ~= nil)
+			local zzz_flag
+			for _, f in ipairs(leaf.flags) do
+				if f.long == "--zzz" then zzz_flag = f; break end
+			end
+			T.ok(zzz_flag ~= nil, "--zzz flag found on leaf")
+		end)
+
+		T.it("keeps stub when subcommand fetch fails", function()
+			local call_count = 0
+			local function fake_popen(cmd, _mode)
+				call_count = call_count + 1
+				local body
+				if cmd:find("mysub") then
+					-- Fail with exit code 1.
+					body = "\n__EXEC_EXIT__1\n"
+				else
+					body = table.concat({
+						"My Tool\n",
+						"Usage: mytool [OPTIONS] [COMMAND]\n",
+						"\nCommands:\n",
+						"  mysub  A subcommand\n",
+						"\nOptions:\n",
+						"  -h, --help  Print help\n",
+					}) .. "\n__EXEC_EXIT__0\n"
+				end
+				return {
+					read  = function(_, fmt)
+						if fmt == "*a" then return body end
+					end,
+					close = function() end,
+				}
+			end
+
+			local schema, err = help.fetch("mytool", { popen = fake_popen })
+			T.eq(err, nil)  -- top-level success
+			T.ok(schema ~= nil)
+			-- Stub preserved: name + description from parent, empty flags/positional/subcommands.
+			local sub = schema.subcommands["mysub"]
+			T.ok(sub ~= nil, "stub preserved after failed fetch")
+			T.eq(sub.name, "mysub")
+			T.eq(sub.description, "A subcommand")
+			T.ok(call_count >= 2, "attempted recursive fetch")
+		end)
+
+		T.it("respects max_depth limit", function()
+			-- All help output looks the same: one subcommand "child".
+			-- Without max_depth this would loop forever.
+			local call_count = 0
+			local function fake_popen(_, _mode)
+				call_count = call_count + 1
+				local body = table.concat({
+					"Tool\n",
+					"Usage: tool [OPTIONS] [COMMAND]\n",
+					"\nCommands:\n",
+					"  child  Nested\n",
+					"\nOptions:\n",
+					"  -h, --help  Print help\n",
+				}) .. "\n__EXEC_EXIT__0\n"
+				return {
+					read  = function(_, fmt)
+						if fmt == "*a" then return body end
+					end,
+					close = function() end,
+				}
+			end
+
+			local schema, err = help.fetch("tool", { popen = fake_popen, max_depth = 2 })
+			T.eq(err, nil)
+			T.ok(schema ~= nil)
+			-- max_depth=2: depth 0 (top) → depth 1 (child) → depth 2 (child.child) → stop.
+			-- That's 3 fetches total (0, 1, 2); depth 2 is fetched but its children are not.
+			T.eq(call_count, 3)
 		end)
 	end)
 end)

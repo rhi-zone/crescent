@@ -1,0 +1,33 @@
+Rename a symbol across its definition, call sites, and import statements.
+
+Usage: normalize edit rename [OPTIONS] [target] [new-name]
+
+Arguments:
+  [target]    Target symbol (path/Symbol)
+  [new-name]  New name for the symbol
+
+Options:
+      --dry-run                    Dry run - show what would change
+      --jsonl                      Output one JSON object per line (for arrays)
+      --pretty                     Human-friendly output with colors and formatting
+      --compact                    Compact output without colors (overrides TTY detection)
+      --force                      Proceed even when name conflicts are detected
+      --json                       Output machine-readable JSON
+      --jq <jq>                    Filter output through jq expression
+  -m, --message <message>          Message for shadow history
+      --input-schema               Print JSON Schema of the subcommand's input parameters and exit
+  -r, --root <root>                Root directory
+      --output-schema              Print JSON Schema of the subcommand's return type and exit
+      --params-json <params-json>  Provide all parameters as a JSON object instead of individual flags
+  -h, --help                       Print help
+
+Uses the facts index to find cross-file references. If the index is unavailable,
+falls back to renaming only the definition.
+
+Aborts if the new name already exists as a symbol in the definition file or as
+an import in any affected file. Use `--force` to override conflict checks.
+
+Examples:
+normalize edit rename src/lib.rs/old_name new_name             # rename across all references
+normalize edit rename src/lib.rs/old_name new_name --dry-run   # preview rename changes
+normalize edit rename src/lib.rs/old_name new_name --force     # ignore name conflicts

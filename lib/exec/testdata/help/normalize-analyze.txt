@@ -1,0 +1,58 @@
+Analyze codebase (health, complexity, security, duplicates, docs)
+
+Usage: normalize analyze [OPTIONS] [target]
+
+Arguments:
+  [target]  Target file or directory
+
+Options:
+      --pretty                     Human-friendly output with colors and formatting
+      --compact                    Compact output without colors (overrides TTY detection)
+      --jsonl                      Output one JSON object per line (for arrays)
+      --json                       Output machine-readable JSON
+      --jq <jq>                    Filter output through jq expression
+      --input-schema               Print JSON Schema of the subcommand's input parameters and exit
+      --output-schema              Print JSON Schema of the subcommand's return type and exit
+      --params-json <params-json>  Provide all parameters as a JSON object instead of individual flags
+  -r, --root <root>                Root directory (defaults to current directory)
+      --exclude <exclude>          Exclude paths matching pattern
+      --only <only>                Include only paths matching pattern
+  -h, --help                       Print help
+  -V, --version                    Print version
+
+Commands:
+  health             Run health analysis (file counts, complexity stats, large file warnings)
+  all                Run all analysis passes
+  summary            Auto-generated single-page codebase overview
+
+Code quality:
+  complexity-trend   Show how average cyclomatic complexity has changed over git history.
+  length             Find the longest functions in the codebase, ranked by line count.
+  length-trend       Show how average function length has changed over git history.
+  node-types         List all node types and field names for a tree-sitter grammar.
+
+Module structure:
+  density-trend      Show how information density has changed over git history.
+
+Repository:
+  docs               Measure documentation coverage: which public symbols lack doc comments.
+
+Graph analysis:
+  architecture       Analyze architectural structure: coupling, dependency cycles, and hub modules.
+
+Git history:
+  coupling-clusters  Find clusters of files that change together in git history (connected components).
+  activity           Show commit activity across multiple repositories over time windows.
+  repo-coupling      Detect temporal coupling between repositories: pairs that receive commits together.
+  cross-repo-health  Rank repositories by composite tech-debt score (churn × complexity × coupling).
+  trend              Track multiple health metrics (complexity, length, test ratio, density) over git history.
+
+Testing:
+  test-gaps          Identify public functions that lack test coverage, ranked by risk score.
+  test-ratio-trend   Show how the test-to-code ratio has changed over git history.
+
+Security:
+  security           Scan the codebase for security issues (hardcoded secrets, unsafe patterns).
+
+Diff:
+  skeleton-diff      Show structural (skeleton) changes between a base ref and HEAD.
