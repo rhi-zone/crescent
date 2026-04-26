@@ -982,22 +982,25 @@ end
 
 -- ── Main ───────────────────────────────────────────────────────────────────
 
+local M = {}
+
+function M.main(argv)
 -- Check for subcommands before parsing args (subcommands have their own arg format).
-if arg[1] == "import" then
-	cmd_import(arg)
+if argv[1] == "import" then
+	cmd_import(argv)
 	return
-elseif arg[1] == "list" then
-	cmd_list(arg)
+elseif argv[1] == "list" then
+	cmd_list(argv)
 	return
-elseif arg[1] == "caps" then
-	cmd_caps(arg)
+elseif argv[1] == "caps" then
+	cmd_caps(argv)
 	return
-elseif arg[1] == "set-key" then
-	cmd_set_key(arg)
+elseif argv[1] == "set-key" then
+	cmd_set_key(argv)
 	return
 end
 
-local opts = parse_args(arg)
+local opts = parse_args(argv)
 
 -- Load the app. Currently supports directory mode; future: PNG, tar.gz, etc.
 local app, err
@@ -1233,3 +1236,8 @@ else
 		os.exit(1)
 	end
 end
+end
+
+if arg then M.main(arg) end
+
+return M

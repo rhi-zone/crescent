@@ -4,29 +4,15 @@
 -- Dispatch order for `cr <cmd>`:
 --   1. <cmd>.lua exists as a file → run it via dofile
 --   2. <cmd> matches a key in pkg.lua scripts table → os.execute the script
---   3. <cmd> is a built-in command → lazy-load and dispatch
+--   3. cr-<cmd>.lua exists in bin_dir → load file, call .main(argv)
+--   4. cr-<cmd>.lua found in a PATH directory → load file, call .main(argv)
+--   5. Error
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
 local M = {}
-
--- ── built-in command registry (lazy loaders) ──────────────────────────────────
-
-local COMMANDS = {
-	-- pkg
-	install = function() return require("lib.pkg.cli") end,
-	add     = function() return require("lib.pkg.cli") end,
-	remove  = function() return require("lib.pkg.cli") end,
-	update  = function() return require("lib.pkg.cli") end,
-	info    = function() return require("lib.pkg.cli") end,
-	publish = function() return require("lib.pkg.cli") end,
-	-- tooling
-	test    = function() return require("lib.test.cli") end,
-	check   = function() return require("lib.type.static.cli") end,
-	run     = function() return require("lib.cr.run") end,
-}
 
 -- ── global flags ──────────────────────────────────────────────────────────────
 
@@ -100,6 +86,41 @@ local function inject_global_opts(opts, args)
 	return injected
 end
 
+-- Split PATH env var into a list of directory strings.
+local function path_dirs()
+	local path_env = os.getenv("PATH") or ""
+	local sep = package.config:sub(1, 1) == "\\" and ";" or ":"
+	local dirs = {}
+	for dir in (path_env .. sep):gmatch("([^" .. sep .. "]*)" .. sep) do
+		if dir ~= "" then dirs[#dirs + 1] = dir end
+	end
+	return dirs
+end
+
+-- Try to load and return a cr-<cmd>.lua module from a directory.
+-- Returns the module table, or nil if not found or no .main export.
+local function try_load_cr_cmd(dir, cmd)
+	-- Normalise trailing slash.
+	local slash = dir:sub(-1) == "/" and "" or "/"
+	local path = dir .. slash .. "cr-" .. cmd .. ".lua"
+	if not file_exists(path) then return nil end
+	local chunk, err = loadfile(path)
+	if not chunk then
+		io.stderr:write(("cr: error loading %q: %s\n"):format(path, tostring(err)))
+		return nil
+	end
+	local ok, mod = pcall(chunk)
+	if not ok then
+		io.stderr:write(("cr: error in %q: %s\n"):format(path, tostring(mod)))
+		return nil
+	end
+	if type(mod) ~= "table" or type(mod.main) ~= "function" then
+		io.stderr:write(("cr: %q has no main() export\n"):format(path))
+		return nil
+	end
+	return mod
+end
+
 -- ── usage ─────────────────────────────────────────────────────────────────────
 
 local USAGE = [[
@@ -115,9 +136,14 @@ commands:
   test [files...]           run test suite
   check [files...]          typecheck files
   run <file>                run a Lua file with lib/ on package.path
+  platform <app> [entry]    run a platform app
+  daemon                    run the platform daemon
+  doc [files...]            generate documentation
 
   <file>.lua                run a Lua file directly
   <script>                  run a script defined in pkg.lua scripts table
+
+  (Additional commands are resolved as cr-<cmd>.lua files in bin/ or PATH.)
 
 global flags:
   --verbose / -v            verbose output
@@ -128,8 +154,10 @@ global flags:
 
 -- ── main ──────────────────────────────────────────────────────────────────────
 
---- Main entry point. argv is a 1-indexed list of arguments (e.g. the global arg).
-function M.main(argv)
+--- Main entry point.
+-- argv is a 1-indexed list of arguments (e.g. the global arg).
+-- bin_dir is the directory containing the cr-*.lua files (e.g. bin/).
+function M.main(argv, bin_dir)
 	local opts, rest = M.parse_global_flags(argv)
 	local cmd = rest[1]
 
@@ -144,15 +172,15 @@ function M.main(argv)
 		sub_args[#sub_args + 1] = rest[i]
 	end
 
+	-- Pass sub_args with global opts injected (verbose, jobs, registry).
+	local full_args = inject_global_opts(opts, sub_args)
+
 	-- ── dispatch order 1: file dispatch ───────────────────────────────────────
 
 	-- If cmd looks like a .lua file or a bare name that maps to an existing file.
 	local file_target
 	if cmd:match("%.lua$") then
 		file_target = cmd
-	else
-		-- Also try cmd .. ".lua" for convenience (bun-style).
-		-- Only do this if no built-in matches, so check later. Skip here.
 	end
 
 	if file_target and file_exists(file_target) then
@@ -169,53 +197,50 @@ function M.main(argv)
 
 	-- ── dispatch order 2: pkg.lua scripts ────────────────────────────────────
 
-	-- Only attempt if cmd is not a built-in, to avoid shadowing cr test etc.
-	if not COMMANDS[cmd] then
-		local pkg = load_pkg_lua()
-		if pkg and pkg.scripts and pkg.scripts[cmd] then
-			local script = pkg.scripts[cmd]
-			local exit_code = os.execute(script)
-			-- os.execute returns true/0 on success in LuaJIT.
-			if exit_code == true or exit_code == 0 then
-				return true
+	local pkg = load_pkg_lua()
+	if pkg and pkg.scripts and pkg.scripts[cmd] then
+		local script = pkg.scripts[cmd]
+		local exit_code = os.execute(script)
+		-- os.execute returns true/0 on success in LuaJIT.
+		if exit_code == true or exit_code == 0 then
+			return true
+		end
+		os.exit(1)
+	end
+
+	-- ── dispatch order 3: bin_dir cr-<cmd>.lua ────────────────────────────────
+
+	if bin_dir then
+		local mod = try_load_cr_cmd(bin_dir, cmd)
+		if mod then
+			local ok, err = pcall(mod.main, full_args)
+			if not ok then
+				io.stderr:write(("cr: internal error in %q: %s\n"):format(cmd, tostring(err)))
+				os.exit(1)
 			end
-			os.exit(1)
+			return true
 		end
 	end
 
-	-- ── dispatch order 3: built-in commands ──────────────────────────────────
+	-- ── dispatch order 4: PATH cr-<cmd>.lua ───────────────────────────────────
 
-	local loader = COMMANDS[cmd]
-	if not loader then
-		io.stderr:write(("cr: unknown command %q\n"):format(cmd))
-		io.stderr:write(USAGE)
-		os.exit(1)
+	for _, dir in ipairs(path_dirs()) do
+		local mod = try_load_cr_cmd(dir, cmd)
+		if mod then
+			local ok, err = pcall(mod.main, full_args)
+			if not ok then
+				io.stderr:write(("cr: internal error in %q: %s\n"):format(cmd, tostring(err)))
+				os.exit(1)
+			end
+			return true
+		end
 	end
 
-	local mod = loader()
-	if not mod or not mod.main then
-		io.stderr:write(("cr: command %q has no main() export\n"):format(cmd))
-		os.exit(1)
-	end
+	-- ── dispatch order 5: error ───────────────────────────────────────────────
 
-	-- Pass sub_args with global opts injected (verbose, jobs, registry).
-	local full_args = inject_global_opts(opts, sub_args)
-	-- For pkg commands the first positional is the subcommand name itself.
-	-- pkg/cli.lua.parse_args expects command as the first positional arg.
-	-- For test and check, args are flags/filenames directly.
-	-- Prepend the command name for pkg commands so pkg/cli.lua can route.
-	local pkg_commands = { install=true, add=true, remove=true, update=true, info=true, publish=true }
-	if pkg_commands[cmd] then
-		table.insert(full_args, 1, cmd)
-	end
-
-	local ok, err = pcall(mod.main, full_args)
-	if not ok then
-		io.stderr:write(("cr: internal error in %q: %s\n"):format(cmd, tostring(err)))
-		os.exit(1)
-	end
-
-	return true
+	io.stderr:write(("cr: unknown command %q\n"):format(cmd))
+	io.stderr:write(USAGE)
+	os.exit(1)
 end
 
 return M

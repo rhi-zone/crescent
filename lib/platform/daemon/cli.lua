@@ -72,13 +72,19 @@ local function expand_home(path)
 	return path
 end
 
+-- ── Module export ─────────────────────────────────────────────────────────
+
+local M = {}
+
+function M.main(argv)
+
 -- Seed math.random so the daemon's math.random fallback (only used if
 -- lib/rand's CSPRNG probe fails at startup) produces different values per
 -- process. daemon.make's default random_bytes_fn now prefers lib/rand
 -- (getrandom(2) / /dev/urandom); this seed is only a belt-and-suspenders.
 math.randomseed(os.time())
 
-local opts = parse_args(arg)
+local opts = parse_args(argv)
 local apps_dir = expand_home(opts.apps_dir or "~/.crescent/apps")
 local daemon_host = opts.daemon_host or (opts.host .. ":" .. tostring(opts.port))
 
@@ -279,3 +285,9 @@ http_server.server(function(raw_req, res)
 	res.status = 200 -- http.server initialises headers={} but not status
 	d.handle(req, res)
 end, opts.port, nil, server_opts)
+
+end
+
+if arg then M.main(arg) end
+
+return M
