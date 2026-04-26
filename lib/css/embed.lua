@@ -4,7 +4,7 @@ end
 
 local M = {}
 
--- scoped(sheet, css_mod) — takes a stylesheet (from css.stylesheet(...)) and
+-- embed(sheet, css_mod) — takes a stylesheet (from css.stylesheet(...)) and
 -- the css module itself (passed in to avoid circular require), then:
 --   1. Renders the stylesheet to a CSS string
 --   2. Wraps it in a <style> block
@@ -17,7 +17,7 @@ local M = {}
 -- regardless).
 --
 --: (sheet: table, css_mod: table) -> (string, table)
-function M.scoped(sheet, css_mod)
+function M.embed(sheet, css_mod)
   local css_text = css_mod.render(sheet)
   local style_block = "<style>\n" .. css_text .. "\n</style>"
 

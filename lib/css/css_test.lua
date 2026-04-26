@@ -304,12 +304,12 @@ T.describe("@property rules", function()
   end)
 end)
 
-T.describe("scoped stylesheet", function()
+T.describe("embed stylesheet", function()
   T.it("returns a style block string", function()
     local sheet = css.stylesheet({
       css.rule(css.sel.class("btn"), { color = "white", background_color = "blue" }),
     })
-    local style_block, _ = css.scoped(sheet)
+    local style_block, _ = css.embed(sheet)
     T.ok(style_block:find("<style>"), "has <style> open")
     T.ok(style_block:find("</style>"), "has </style> close")
     T.ok(style_block:find("%.btn {"), "has .btn rule")
@@ -319,7 +319,7 @@ T.describe("scoped stylesheet", function()
       css.rule(css.sel.class("btn"), { color = "white" }),
       css.rule(css.sel.class("card"), { padding = "1rem" }),
     })
-    local _, classes = css.scoped(sheet)
+    local _, classes = css.embed(sheet)
     T.eq(classes.btn,  "btn",  "btn class value")
     T.eq(classes.card, "card", "card class value")
   end)
@@ -328,7 +328,7 @@ T.describe("scoped stylesheet", function()
       css.rule(css.sel.class("btn"):pseudo("hover"), { opacity = "0.9" }),
       css.rule(css.sel.class("btn"):child(css.sel.tag("span")), { color = "red" }),
     })
-    local _, classes = css.scoped(sheet)
+    local _, classes = css.embed(sheet)
     T.eq(classes.btn, nil, "complex selectors not exposed")
   end)
   T.it("media-nested rules appear in style block but not classes", function()
@@ -338,7 +338,7 @@ T.describe("scoped stylesheet", function()
         css.rule(css.sel.class("hero"), { font_size = "3rem" }),
       }),
     })
-    local style_block, classes = css.scoped(sheet)
+    local style_block, classes = css.embed(sheet)
     T.ok(style_block:find("@media screen"), "media appears in style block")
     T.eq(classes.hero, "hero", "top-level class still exposed")
   end)
@@ -346,7 +346,7 @@ T.describe("scoped stylesheet", function()
     local sheet = css.stylesheet({
       css.rule(css.sel.class("container"), { max_width = "1200px" }),
     })
-    local _, classes = css.scoped(sheet)
+    local _, classes = css.embed(sheet)
     -- At runtime, ClassName is just a string — usable directly as class=""
     T.eq(type(classes.container), "string")
     T.eq(classes.container, "container")
