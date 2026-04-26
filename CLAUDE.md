@@ -141,6 +141,8 @@ Inline is only acceptable for:
 - A single targeted file read (one file, one specific thing you already know is there)
 - A single grep for a known symbol in a known file
 
+**Edits are never inline.** Even a single-file change goes to a subagent. "Inline" means read-only operations only.
+
 Everything else is a subagent:
 - Any research or exploration question → subagent (Explore for codebase questions, general-purpose for multi-step tasks)
 - Annotating a file → subagent
