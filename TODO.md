@@ -21,14 +21,12 @@
 
 ## Binary distribution
 
-(note: pterror/LuaJIT CI is now producing static musl binaries for Linux x86-64 and arm64. The items below may be resolved — verify against pterror/LuaJIT releases before acting on them.)
-
-- [ ] Build statically linked LuaJIT for Linux x86-64 (required for NixOS, Alpine/musl, and any non-glibc Linux — current dynamic binary is glibc-only)
-- [ ] Build LuaJIT for Linux arm64 (static)
+- [x] Build statically linked LuaJIT for Linux x86-64 (required for NixOS, Alpine/musl, and any non-glibc Linux — current dynamic binary is glibc-only)
+- [x] Build LuaJIT for Linux arm64 (static)
 - [ ] Build LuaJIT for macOS x86-64 (missing entirely)
-- [ ] Build LuaJIT for macOS arm64 / Apple Silicon (missing entirely)
+- [x] Build LuaJIT for macOS arm64 / Apple Silicon (missing entirely) — bin/luajit-macos-aarch64 exists (dynamic Mach-O)
 - [ ] Establish a reliable, reproducible build process for all platforms (CI via GitHub Actions or equivalent) — current binaries sourced ad-hoc from ~/git/lua/dep/
-- [ ] Replace current dynamic Linux binary with static build once available
+- [x] Replace current dynamic Linux binary with static build once available
 
 ## RP / LLM interaction platform — primitives needed
 
