@@ -201,13 +201,7 @@ function M.registry_cap(opts)
 	opts = opts or {}
 
 	if not IS_WINDOWS then
-		local stub = {
-			get         = function() return nil, "registry cap: Windows only" end,
-			set         = function() return nil, "registry cap: Windows only" end,
-			list_keys   = function() return nil, "registry cap: Windows only" end,
-			list_values = function() return nil, "registry cap: Windows only" end,
-		}
-		return stub, function() end
+		error("registry_cap: Windows only")
 	end
 
 	if not ffi_ready or advapi32 == nil then

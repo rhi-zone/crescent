@@ -411,6 +411,19 @@ local CAP_FACTORIES = {
 			return require("lib.platform.caps.cli").cli_cap(context and context.app_args or {})
 		end,
 	},
+	registry = {
+		mod = "lib.platform.caps.registry",
+		build = function(decl)
+			local ffi = require("ffi")
+			if ffi.os ~= "Windows" then
+				error("platform: registry cap is Windows only")
+			end
+			return require("lib.platform.caps.registry").registry_cap({
+				root        = decl.root or error("platform: registry cap requires 'root' in declaration"),
+				allow_write = decl.allow_write,
+			})
+		end,
+	},
 }
 
 -- ── Scope resolution ─────────────────────────────────────────────────────────
