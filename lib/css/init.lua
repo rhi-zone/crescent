@@ -4,6 +4,8 @@ end
 
 local M = {}
 
+local keyframes_mod = require("lib.css.keyframes")
+
 -- Type declarations (nominal newtypes — all wrap string at runtime)
 --:: newtype ClassName      = string
 --:: newtype IdName         = string
@@ -36,6 +38,8 @@ M.anim = function(name) return name end
 
 --: (name: string) -> string
 M.keyframe = function(name) return name end
+
+M.keyframes = keyframes_mod.keyframes
 
 --: (v: string) -> string
 M.varref = function(v) return "var(" .. v .. ")" end
@@ -157,12 +161,44 @@ M.render_rule = function(rule)
   return sel .. " {\n" .. decls .. "\n}"
 end
 
+-- Renders a @keyframes block.
+--: (kf: { _type: string, name: string, stops: { [string]: { [string]: string } } }) -> string
+M.render_keyframes = function(kf)
+  local parts = { "@keyframes " .. kf.name .. " {" }
+  -- Sort stops for determinism: "from" < "to" < percentages numerically
+  local stop_keys = {}
+  for k in pairs(kf.stops) do stop_keys[#stop_keys + 1] = k end
+  table.sort(stop_keys, function(a, b)
+    local function pct(s)
+      if s == "from" then return 0
+      elseif s == "to" then return 100
+      else return tonumber(s:match("^(%d+)%%$")) or 0
+      end
+    end
+    return pct(a) < pct(b)
+  end)
+  for _, stop in ipairs(stop_keys) do
+    parts[#parts + 1] = "  " .. stop .. " {"
+    local decl_str = M.render_decls(kf.stops[stop])
+    for line in (decl_str .. "\n"):gmatch("([^\n]*)\n") do
+      if line ~= "" then
+        parts[#parts + 1] = "  " .. line
+      end
+    end
+    parts[#parts + 1] = "  }"
+  end
+  parts[#parts + 1] = "}"
+  return table.concat(parts, "\n")
+end
+
 --: (sheet: { _type: string, items: { [number]: { _type: string, selector: { _str: string, ... } | string, decls: { [string]: CssValue }, ... } } }) -> string
 M.render = function(sheet)
   local parts = {}
   for _, item in ipairs(sheet.items) do
     if item._type == "rule" then
       parts[#parts + 1] = M.render_rule(item)
+    elseif item._type == "keyframes" then
+      parts[#parts + 1] = M.render_keyframes(item)
     end
   end
   return table.concat(parts, "\n\n")

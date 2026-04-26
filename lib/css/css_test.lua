@@ -141,3 +141,51 @@ T.describe("render", function()
     T.ok(out:find("border%-radius: var%(%-%-radius%);"), "border-radius kebab")
   end)
 end)
+
+T.describe("keyframes", function()
+  T.it("constructs keyframe rule with _type", function()
+    local kf = css.keyframes(css.anim("slide-in"), {
+      from = { transform = "translateX(-100%)" },
+      to   = { transform = "translateX(0)" },
+    })
+    T.eq(kf._type, "keyframes")
+    T.eq(kf.name, "slide-in")
+  end)
+  T.it("render_keyframes produces correct output", function()
+    local kf = css.keyframes("slide-in", {
+      from = { transform = "translateX(-100%)" },
+      to   = { transform = "translateX(0)" },
+    })
+    local out = css.render_keyframes(kf)
+    T.ok(out:find("@keyframes slide%-in {"), "has @keyframes header")
+    T.ok(out:find("from {"), "has from stop")
+    T.ok(out:find("to {"), "has to stop")
+    T.ok(out:find("transform: translateX(-100%);", 1, true), "has from transform")
+    T.ok(out:find("transform: translateX(0);", 1, true), "has to transform")
+  end)
+  T.it("keyframes in stylesheet renders via css.render", function()
+    local sheet = css.stylesheet({
+      css.keyframes("fade", {
+        ["0%"]   = { opacity = "0" },
+        ["100%"] = { opacity = "1" },
+      }),
+    })
+    local out = css.render(sheet)
+    T.ok(out:find("@keyframes fade"), "has keyframes block")
+    T.ok(out:find("0%% {"), "has 0%% stop")
+    T.ok(out:find("100%% {"), "has 100%% stop")
+  end)
+  T.it("stops sorted from/to/percentages deterministically", function()
+    local kf = css.keyframes("bounce", {
+      to   = { transform = "scale(1)" },
+      ["50%"] = { transform = "scale(1.1)" },
+      from = { transform = "scale(0.9)" },
+    })
+    local out = css.render_keyframes(kf)
+    local from_pos = out:find("from {")
+    local mid_pos  = out:find("50%% {")
+    local to_pos   = out:find("to {")
+    T.ok(from_pos < mid_pos, "from before 50%")
+    T.ok(mid_pos  < to_pos,  "50% before to")
+  end)
+end)

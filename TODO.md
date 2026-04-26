@@ -1524,7 +1524,7 @@ Type-safe CSS builder library. Lua table → CSS string. Pairs with `lib/html/ht
 
 - [x] **Phase 1 — Core type machinery, selector DSL, stylesheet builder, renderer.** Nominal newtype constructors (`css.class`, `css.id`, `css.var`, `css.anim`, `css.varref`), batch `css.declare`, composable selector DSL (`css.sel.*` + combinator methods), `css.rule`/`css.stylesheet`/`css.render`. Snake_case → kebab-case property normalization. CSS var keys (`--*`) left as-is. Deterministic output via sorted declarations. Files: `lib/css/init.lua`, `lib/css/css_test.lua`. 35 assertions.
 
-- [ ] **Phase 2 — Keyframe animations.** `css.keyframe_rule(name, stops)` where stops maps `"from"/"to"/percentage` keys to declaration tables. `css.render_keyframes(kf)` renders `@keyframes name { ... }`. The `AnimationName` nominal type from Phase 1 types `animation-name` property values so mismatched names are caught. Files: `lib/css/keyframes.lua`, extended `lib/css/init.lua`.
+- [x] **Phase 2 — Keyframe animations.** `css.keyframe_rule(name, stops)` where stops maps `"from"/"to"/percentage` keys to declaration tables. `css.render_keyframes(kf)` renders `@keyframes name { ... }`. The `AnimationName` nominal type from Phase 1 types `animation-name` property values so mismatched names are caught. Files: `lib/css/keyframes.lua`, extended `lib/css/init.lua`.
 
 - [ ] **Phase 3 — Media queries.** `css.media(query, items)` constructs `@media` rules. Query DSL covers `min-width`/`max-width`, `prefers-color-scheme`, `orientation`, and logical operators (`and_`, `or_`, `not_`). `css.render` extended to handle `_type = "media"` items. Files: `lib/css/media.lua`, extended `lib/css/init.lua`.
 
