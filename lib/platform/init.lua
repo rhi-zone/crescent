@@ -425,25 +425,9 @@ local CAP_FACTORIES = {
 		end,
 	},
 	shell = {
+		mod = "lib.platform.caps.shell",
 		build = function(_decl)
-			local revoked = false
-			local cap = {
-				-- run(cmd_str) -> output: string | nil, errmsg: string
-				-- Runs cmd_str via sh -c, merging stderr into stdout.
-				-- Returns the combined output, or nil + error message.
-				run = function(cmd_str)
-					if revoked then return nil, "capability revoked" end
-					if type(cmd_str) ~= "string" then
-						return nil, "command must be a string"
-					end
-					local fh, err = io.popen(cmd_str .. " 2>&1", "r")
-					if not fh then return nil, err or "popen failed" end
-					local out = fh:read("*a")
-					fh:close()
-					return out or ""
-				end,
-			}
-			return cap, function() revoked = true end
+			return require("lib.platform.caps.shell").shell_cap({ popen = io.popen })
 		end,
 	},
 }
