@@ -18,7 +18,12 @@
           "reason": "Load user-installed alias packs"
         },
         "stdout": { "type": "stdout", "required": false, "reason": "Startup logging" },
-        "stderr": { "type": "stderr", "required": false, "reason": "Error logging" }
+        "stderr": { "type": "stderr", "required": false, "reason": "Error logging" },
+        "exec": {
+          "type": "shell",
+          "required": false,
+          "reason": "Execute shell commands from alias actions"
+        }
       }
     }
   }

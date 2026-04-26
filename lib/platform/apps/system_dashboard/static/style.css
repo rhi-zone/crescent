@@ -145,6 +145,52 @@ body {
   text-align: center;
 }
 
+#output-panel {
+  border-top: 1px solid #333;
+  background: #1a1a1a;
+  padding: 10px 20px 14px;
+}
+
+.output-label {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
+.output-label.output-error {
+  color: #a05050;
+}
+
+.output-body {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 10px 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}
+
+.output-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.output-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.output-body::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
 #footer {
   text-align: center;
   margin-top: 16px;
