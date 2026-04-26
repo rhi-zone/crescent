@@ -636,7 +636,9 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   File: `lib/platform/caps/llm.lua`. Endpoint: `http://127.0.0.1:8081` default. `response_format`
   JSON schema mode for structured output; response validated before returning.
 
-- [ ] **First narrow agent app** — blocked on `caps.llm` + `lib/agent/` substrate.
+- [ ] **First narrow agent app** — **priority: medium-high**. Full infrastructure stack is
+  now in place (`lib/exec/`, `lib/agent/`, `caps.exec`, `caps.llm` all done) — this is a
+  pure implementation task, no blockers.
   Candidate: polish-agent (parallel audit lenses, structured findings, POLISH.md artifact,
   human-as-decision-node). See `docs/agent-design.md` for thesis and design constraints.
   Success criteria from design doc: narrow app under 200 lines of Lua, useful output on small
