@@ -1,0 +1,25 @@
+{
+  "name": "System Dashboard",
+  "version": "0.1.0",
+  "meta": { "tags": ["system", "configuration", "command-palette"] },
+  "default_entry": "server",
+  "caps": {
+    "self": { "type": "self", "reason": "Read embedded alias packs and static assets" }
+  },
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "server": { "type": "http_server", "reason": "Serve command palette UI and API" },
+        "user_packs": {
+          "type": "fs",
+          "root": "~/.crescent/alias-packs",
+          "required": false,
+          "reason": "Load user-installed alias packs"
+        },
+        "stdout": { "type": "stdout", "required": false, "reason": "Startup logging" },
+        "stderr": { "type": "stderr", "required": false, "reason": "Error logging" }
+      }
+    }
+  }
+}
