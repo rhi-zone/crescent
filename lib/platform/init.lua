@@ -301,7 +301,11 @@ local CAP_FACTORIES = {
 	http_client = {
 		mod = "lib.platform.caps.http_client",
 		build = function(decl)
-			return require("lib.platform.caps.http_client").http_client_cap({ host = decl.host })
+			return require("lib.platform.caps.http_client").http_client_cap({
+				host    = decl.host,
+				methods = decl.methods,
+				paths   = decl.paths,
+			})
 		end,
 	},
 	kv = {
@@ -428,6 +432,15 @@ local CAP_FACTORIES = {
 		mod = "lib.platform.caps.shell",
 		build = function(_decl)
 			return require("lib.platform.caps.shell").shell_cap()
+		end,
+	},
+	exec = {
+		mod = "lib.platform.caps.exec",
+		build = function(decl)
+			return require("lib.platform.caps.exec").new({
+				binaries = decl.binaries or {},
+				stderr   = decl.stderr,
+			})
 		end,
 	},
 }
