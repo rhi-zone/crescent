@@ -1526,7 +1526,7 @@ Type-safe CSS builder library. Lua table → CSS string. Pairs with `lib/html/ht
 
 - [x] **Phase 2 — Keyframe animations.** `css.keyframe_rule(name, stops)` where stops maps `"from"/"to"/percentage` keys to declaration tables. `css.render_keyframes(kf)` renders `@keyframes name { ... }`. The `AnimationName` nominal type from Phase 1 types `animation-name` property values so mismatched names are caught. Files: `lib/css/keyframes.lua`, extended `lib/css/init.lua`.
 
-- [ ] **Phase 3 — Media queries.** `css.media(query, items)` constructs `@media` rules. Query DSL covers `min-width`/`max-width`, `prefers-color-scheme`, `orientation`, and logical operators (`and_`, `or_`, `not_`). `css.render` extended to handle `_type = "media"` items. Files: `lib/css/media.lua`, extended `lib/css/init.lua`.
+- [x] **Phase 3 — Media queries.** `css.media(query, items)` constructs `@media` rules. Query DSL covers `min-width`/`max-width`, `prefers-color-scheme`, `orientation`, and logical operators (`and_`, `or_`, `not_`). `css.render` extended to handle `_type = "media"` items. Files: `lib/css/media.lua`, extended `lib/css/init.lua`.
 
 - [ ] **Phase 4 — CSS custom property tooling.** `css.property(name, opts)` renders `@property` declarations (syntax, inherits, initial-value). Scope analysis: given a stylesheet and a set of `CssVar` names, report which rules declare vs. reference each variable. Useful for detecting undefined or unused variables at build time. Files: `lib/css/property.lua`.
 

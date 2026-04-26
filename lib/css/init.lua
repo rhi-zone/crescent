@@ -5,6 +5,7 @@ end
 local M = {}
 
 local keyframes_mod = require("lib.css.keyframes")
+local media_mod     = require("lib.css.media")
 
 -- Type declarations (nominal newtypes — all wrap string at runtime)
 --:: newtype ClassName      = string
@@ -40,6 +41,8 @@ M.anim = function(name) return name end
 M.keyframe = function(name) return name end
 
 M.keyframes = keyframes_mod.keyframes
+M.media     = media_mod.media
+M.mq        = media_mod  -- expose query builders as css.mq.min_width(...) etc.
 
 --: (v: string) -> string
 M.varref = function(v) return "var(" .. v .. ")" end
@@ -191,6 +194,30 @@ M.render_keyframes = function(kf)
   return table.concat(parts, "\n")
 end
 
+-- Renders a @media block, with optional indent prefix for nested media.
+--: (block: { _type: string, query: string, items: table }, indent: string?) -> string
+M.render_media = function(block, indent)
+  indent = indent or ""
+  local parts = { indent .. "@media " .. block.query .. " {" }
+  for _, item in ipairs(block.items) do
+    if item._type == "rule" then
+      local rule_str = M.render_rule(item)
+      for line in (rule_str .. "\n"):gmatch("([^\n]*)\n") do
+        parts[#parts + 1] = indent .. "  " .. line
+      end
+    elseif item._type == "media" then
+      parts[#parts + 1] = M.render_media(item, indent .. "  ")
+    elseif item._type == "keyframes" then
+      local kf_str = M.render_keyframes(item)
+      for line in (kf_str .. "\n"):gmatch("([^\n]*)\n") do
+        parts[#parts + 1] = indent .. "  " .. line
+      end
+    end
+  end
+  parts[#parts + 1] = indent .. "}"
+  return table.concat(parts, "\n")
+end
+
 --: (sheet: { _type: string, items: { [number]: { _type: string, selector: { _str: string, ... } | string, decls: { [string]: CssValue }, ... } } }) -> string
 M.render = function(sheet)
   local parts = {}
@@ -199,6 +226,8 @@ M.render = function(sheet)
       parts[#parts + 1] = M.render_rule(item)
     elseif item._type == "keyframes" then
       parts[#parts + 1] = M.render_keyframes(item)
+    elseif item._type == "media" then
+      parts[#parts + 1] = M.render_media(item)
     end
   end
   return table.concat(parts, "\n\n")
