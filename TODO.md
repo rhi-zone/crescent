@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] **replace VitePress with a pure Lua doc server** — `bin/cr run docs/server.lua`, serves markdown as HTML using crescent's own HTTP server. Removes bun as a dependency entirely. Needs `lib/markdown` (CommonMark renderer). Dogfood priority.
+- [ ] **replace VitePress with a pure Lua doc toolchain** — `bin/cr run docs/build.lua` for SSG (CI deployment), `bin/cr run docs/server.lua` for local dev preview. Removes bun entirely — no JS toolchain in CI or locally. Needs `lib/markdown` (CommonMark renderer). Dogfood priority.
 
 - [ ] design: http_client attenuation — query param filtering (wildcard syntax? exact key match? key+value match?)
 - [ ] design: http_client attenuation — request header filtering (which headers are meaningful to restrict? security implications of allowing Content-Type vs Authorization override?)
