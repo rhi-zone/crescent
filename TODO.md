@@ -1520,10 +1520,27 @@ See `docs/pkg-design.md` for full design.
 
 ## stretch goals (low priority, high reward)
 
+*Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+- [ ] **`lib/css`** — type-safe CSS builder. Lua table → CSS string. Pairs with `lib/html/html_builder`
+  so web frontends write HTML + CSS in Lua, generated at server startup or request time.
+  No build step. Properties typed (not raw strings); `css.media`, `css.keyframes`,
+  `css.var`, `css.calc`. Needed by game web frontends and any Lua HTTP server app.
+
 - [ ] **Backend framework** (`lib/web/`) — high-quality, typed, idiomatic Lua web framework.
   HTTP server + router (lib/http already exists) + middleware pipeline + request/response types +
   SQLite ORM layer + templating. API inspired by Lapis/Sinatra but first-class crescent types
   throughout. Goal: write a web app in Lua that a Rails/Express developer finds familiar.
+
+- [ ] **Games** — headless pure Lua game engines, each with CLI/TUI/web frontends.
+  Pattern: library (rules + state + move gen) + `lib/minimax` AI + three frontends.
+  Web frontend is a Lua HTTP server app (same pattern as card app — no build step).
+  Type-safe builder APIs for constructing initial game state.
+  - [ ] `lib/chess` — FEN/PGN, legal move generation, check/checkmate/draw detection
+  - [ ] `lib/mahjong` — Riichi Mahjong, yaku/fu/han scoring, multi-player state
+  - [ ] `lib/solitaire` — Klondike: tableau/foundation/stock/waste, auto-complete
+  - [ ] `lib/spider` — Spider Solitaire: 1/2/4-suit, sequence completion, undo
+  - [ ] `lib/freecell` — FreeCell: freecell/cascade/home rules, supermove, deal number
 
 - [ ] **Reactive frontend** — Lua implementation + optional TS deployment:
   1. `lib/reactive/` + `lib/reactive_optics/` are self-contained Lua libraries
