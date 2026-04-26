@@ -427,7 +427,7 @@ local CAP_FACTORIES = {
 	shell = {
 		mod = "lib.platform.caps.shell",
 		build = function(_decl)
-			return require("lib.platform.caps.shell").shell_cap({ popen = io.popen })
+			return require("lib.platform.caps.shell").shell_cap()
 		end,
 	},
 }
