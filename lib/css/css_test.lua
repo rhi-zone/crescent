@@ -248,3 +248,110 @@ T.describe("media queries", function()
     T.ok(out:find("@media %(orientation: landscape%) {"), "inner media")
   end)
 end)
+
+T.describe("@property rules", function()
+  T.it("constructs @property rule", function()
+    local p = css.property_rule("--brand", {
+      syntax = "<color>",
+      inherits = false,
+      initial_value = "#000",
+    })
+    T.eq(p._type, "property")
+    T.eq(p.name, "--brand")
+    T.eq(p.syntax, "<color>")
+    T.eq(p.inherits, false)
+    T.eq(p.initial_value, "#000")
+  end)
+  T.it("errors on non-double-dash name", function()
+    T.throws(function()
+      css.property_rule("brand", { syntax = "<color>", inherits = false })
+    end)
+  end)
+  T.it("errors when syntax missing", function()
+    T.throws(function()
+      css.property_rule("--brand", { inherits = false })
+    end)
+  end)
+  T.it("render_property output", function()
+    local p = css.property_rule("--radius", {
+      syntax = "<length>",
+      inherits = false,
+      initial_value = "0px",
+    })
+    local out = css.render_property(p)
+    T.ok(out:find("@property %-%-radius {"), "has @property header")
+    T.ok(out:find('syntax: "<length>";'), "has syntax")
+    T.ok(out:find("inherits: false;"), "has inherits")
+    T.ok(out:find("initial%-value: 0px;"), "has initial-value")
+  end)
+  T.it("render_property without initial_value", function()
+    local p = css.property_rule("--color", {
+      syntax = "<color>",
+      inherits = true,
+    })
+    local out = css.render_property(p)
+    T.ok(not out:find("initial%-value"), "no initial-value line")
+    T.ok(out:find("inherits: true;"), "has inherits true")
+  end)
+  T.it("@property in stylesheet renders via css.render", function()
+    local sheet = css.stylesheet({
+      css.property_rule("--brand", { syntax = "<color>", inherits = false, initial_value = "#fff" }),
+      css.rule(css.sel.tag("body"), { color = css.varref("--brand") }),
+    })
+    local out = css.render(sheet)
+    T.ok(out:find("@property %-%-brand"), "has @property")
+    T.ok(out:find("body {"), "has body rule")
+  end)
+end)
+
+T.describe("scope analysis", function()
+  T.it("detects declared vars", function()
+    local sheet = css.stylesheet({
+      css.rule(css.sel.tag(":root"), {
+        ["--brand"] = "#3366ff",
+        ["--radius"] = "8px",
+      }),
+    })
+    local report = css.analyze(sheet, { "--brand", "--radius" })
+    T.eq(#report["--brand"].declared, 1)
+    T.eq(report["--brand"].declared[1], ":root")
+    T.eq(#report["--radius"].declared, 1)
+  end)
+  T.it("detects referenced vars", function()
+    local sheet = css.stylesheet({
+      css.rule(css.sel.class("btn"), {
+        color = css.varref("--brand"),
+        border_radius = css.varref("--radius"),
+      }),
+    })
+    local report = css.analyze(sheet, { "--brand", "--radius" })
+    T.eq(#report["--brand"].referenced, 1)
+    T.eq(report["--brand"].referenced[1], ".btn")
+    T.eq(#report["--radius"].referenced, 1)
+  end)
+  T.it("detects @property registrations", function()
+    local sheet = css.stylesheet({
+      css.property_rule("--brand", { syntax = "<color>", inherits = false }),
+    })
+    local report = css.analyze(sheet, { "--brand" })
+    T.eq(report["--brand"].registered, true)
+  end)
+  T.it("unmentioned var has empty declared/referenced", function()
+    local sheet = css.stylesheet({
+      css.rule(css.sel.tag("body"), { color = "red" }),
+    })
+    local report = css.analyze(sheet, { "--brand" })
+    T.eq(#report["--brand"].declared, 0)
+    T.eq(#report["--brand"].referenced, 0)
+    T.eq(report["--brand"].registered, false)
+  end)
+  T.it("vars inside @media are detected", function()
+    local sheet = css.stylesheet({
+      css.media("screen", {
+        css.rule(css.sel.tag(":root"), { ["--brand"] = "blue" }),
+      }),
+    })
+    local report = css.analyze(sheet, { "--brand" })
+    T.eq(#report["--brand"].declared, 1)
+  end)
+end)

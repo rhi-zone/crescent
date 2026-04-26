@@ -6,6 +6,7 @@ local M = {}
 
 local keyframes_mod = require("lib.css.keyframes")
 local media_mod     = require("lib.css.media")
+local property_mod  = require("lib.css.property")
 
 -- Type declarations (nominal newtypes — all wrap string at runtime)
 --:: newtype ClassName      = string
@@ -40,9 +41,12 @@ M.anim = function(name) return name end
 --: (name: string) -> string
 M.keyframe = function(name) return name end
 
-M.keyframes = keyframes_mod.keyframes
-M.media     = media_mod.media
-M.mq        = media_mod  -- expose query builders as css.mq.min_width(...) etc.
+M.keyframes       = keyframes_mod.keyframes
+M.media           = media_mod.media
+M.mq              = media_mod  -- expose query builders as css.mq.min_width(...) etc.
+M.property_rule   = property_mod.property_rule
+M.render_property = property_mod.render_property
+M.analyze         = property_mod.analyze
 
 --: (v: string) -> string
 M.varref = function(v) return "var(" .. v .. ")" end
@@ -228,6 +232,8 @@ M.render = function(sheet)
       parts[#parts + 1] = M.render_keyframes(item)
     elseif item._type == "media" then
       parts[#parts + 1] = M.render_media(item)
+    elseif item._type == "property" then
+      parts[#parts + 1] = M.render_property(item)
     end
   end
   return table.concat(parts, "\n\n")
