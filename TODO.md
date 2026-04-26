@@ -1518,14 +1518,23 @@ See `docs/pkg-design.md` for full design.
 - [ ] **Codebase directory files** — `OVERVIEW.md` or `index` files at key directories explaining the shape: what lives where, how pieces relate, what to read first. Not API docs — orientation docs. `lib/OVERVIEW.md`, `lib/platform/OVERVIEW.md`, etc.
 - [ ] **Lua tutorial for beginners** — a crescent-flavored intro to Lua targeting people who know at least one other language. Covers the gotchas (no `++`, `1`-indexed, `local` scoping, metatables), the LuaJIT-specific bits (FFI, `bit.*`), and the crescent conventions. Lives at `docs/lua-primer.md`.
 
+## lib/css
+
+Type-safe CSS builder library. Lua table → CSS string. Pairs with `lib/html/html_builder` so web frontends write HTML + CSS in Lua, generated at server startup or request time. No build step. Design doc: `docs/css-design.md`.
+
+- [x] **Phase 1 — Core type machinery, selector DSL, stylesheet builder, renderer.** Nominal newtype constructors (`css.class`, `css.id`, `css.var`, `css.anim`, `css.varref`), batch `css.declare`, composable selector DSL (`css.sel.*` + combinator methods), `css.rule`/`css.stylesheet`/`css.render`. Snake_case → kebab-case property normalization. CSS var keys (`--*`) left as-is. Deterministic output via sorted declarations. Files: `lib/css/init.lua`, `lib/css/css_test.lua`. 35 assertions.
+
+- [ ] **Phase 2 — Keyframe animations.** `css.keyframe_rule(name, stops)` where stops maps `"from"/"to"/percentage` keys to declaration tables. `css.render_keyframes(kf)` renders `@keyframes name { ... }`. The `AnimationName` nominal type from Phase 1 types `animation-name` property values so mismatched names are caught. Files: `lib/css/keyframes.lua`, extended `lib/css/init.lua`.
+
+- [ ] **Phase 3 — Media queries.** `css.media(query, items)` constructs `@media` rules. Query DSL covers `min-width`/`max-width`, `prefers-color-scheme`, `orientation`, and logical operators (`and_`, `or_`, `not_`). `css.render` extended to handle `_type = "media"` items. Files: `lib/css/media.lua`, extended `lib/css/init.lua`.
+
+- [ ] **Phase 4 — CSS custom property tooling.** `css.property(name, opts)` renders `@property` declarations (syntax, inherits, initial-value). Scope analysis: given a stylesheet and a set of `CssVar` names, report which rules declare vs. reference each variable. Useful for detecting undefined or unused variables at build time. Files: `lib/css/property.lua`.
+
+- [ ] **Phase 5 — lib/html integration.** Typed style injection into `lib/html` elements. Scoped class generation: given a stylesheet, emit a `<style>` block and return a record of typed `ClassName` values for use with `lib/html` element builders. Eliminates class-name string scatter from `lib/html/html_builder.lua`'s `mod.style`. Files: `lib/css/scoped.lua`.
+
 ## stretch goals (low priority, high reward)
 
 *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
-
-- [ ] **`lib/css`** — type-safe CSS builder. Lua table → CSS string. Pairs with `lib/html/html_builder`
-  so web frontends write HTML + CSS in Lua, generated at server startup or request time.
-  No build step. Properties typed (not raw strings); `css.media`, `css.keyframes`,
-  `css.var`, `css.calc`. Needed by game web frontends and any Lua HTTP server app.
 
 - [ ] **Backend framework** (`lib/web/`) — high-quality, typed, idiomatic Lua web framework.
   HTTP server + router (lib/http already exists) + middleware pipeline + request/response types +
