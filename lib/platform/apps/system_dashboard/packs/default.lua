@@ -12,7 +12,7 @@ return {
 			tags        = { "network", "hosts", "dns" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Open in editor", type = "shell", command = "sudoedit /etc/hosts" },
+				{ label = "Open in editor", type = "shell", command = "sudoedit /etc/hosts", caps = { "shell" } },
 			},
 		},
 
@@ -23,7 +23,7 @@ return {
 			tags        = { "network", "dns", "cache" },
 			platform    = { "macos" },
 			actions     = {
-				{ label = "Flush DNS", type = "shell", command = "sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder" },
+				{ label = "Flush DNS", type = "shell", command = "sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder", caps = { "shell" } },
 			},
 		},
 
@@ -34,7 +34,7 @@ return {
 			tags        = { "network", "dns", "cache" },
 			platform    = { "linux" },
 			actions     = {
-				{ label = "Flush DNS", type = "shell", command = "sudo systemd-resolve --flush-caches" },
+				{ label = "Flush DNS", type = "shell", command = "sudo systemd-resolve --flush-caches", caps = { "shell" } },
 			},
 		},
 
@@ -45,7 +45,7 @@ return {
 			tags        = { "network", "ports", "security" },
 			platform    = { "linux" },
 			actions     = {
-				{ label = "Show ports", type = "shell", command = "ss -tlnp" },
+				{ label = "Show ports", type = "shell", command = "ss -tlnp", caps = { "shell" } },
 			},
 		},
 
@@ -56,7 +56,7 @@ return {
 			tags        = { "network", "ports", "security" },
 			platform    = { "macos" },
 			actions     = {
-				{ label = "Show ports", type = "shell", command = 'lsof -i -P -n | grep LISTEN' },
+				{ label = "Show ports", type = "shell", command = 'lsof -i -P -n | grep LISTEN', caps = { "shell" } },
 			},
 		},
 
@@ -67,7 +67,7 @@ return {
 			tags        = { "disk", "storage", "system" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Show disk usage", type = "shell", command = "df -h" },
+				{ label = "Show disk usage", type = "shell", command = "df -h", caps = { "shell" } },
 			},
 		},
 
@@ -78,7 +78,7 @@ return {
 			tags        = { "disk", "storage", "files" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Find large files", type = "shell", command = "du -sh * | sort -rh | head -20" },
+				{ label = "Find large files", type = "shell", command = "du -sh * | sort -rh | head -20", caps = { "shell" } },
 			},
 		},
 
@@ -89,7 +89,7 @@ return {
 			tags        = { "environment", "shell", "system" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Show env vars", type = "shell", command = "printenv | sort | less" },
+				{ label = "Show env vars", type = "shell", command = "printenv | sort | less", caps = { "shell" } },
 			},
 		},
 
@@ -100,7 +100,7 @@ return {
 			tags        = { "cron", "scheduler", "automation" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Edit crontab", type = "shell", command = "crontab -e" },
+				{ label = "Edit crontab", type = "shell", command = "crontab -e", caps = { "shell" } },
 			},
 		},
 
@@ -111,7 +111,7 @@ return {
 			tags        = { "ssh", "network", "config" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Edit SSH config", type = "shell", command = "${EDITOR:-nano} ~/.ssh/config" },
+				{ label = "Edit SSH config", type = "shell", command = "${EDITOR:-nano} ~/.ssh/config", caps = { "shell" } },
 			},
 		},
 
@@ -122,7 +122,7 @@ return {
 			tags        = { "ssh", "security", "keys" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Generate key", type = "shell", command = "ssh-keygen -t ed25519" },
+				{ label = "Generate key", type = "shell", command = "ssh-keygen -t ed25519", caps = { "shell" } },
 			},
 		},
 
@@ -133,7 +133,7 @@ return {
 			tags        = { "system", "info", "kernel" },
 			platform    = { "linux" },
 			actions     = {
-				{ label = "Show system info", type = "shell", command = "uname -a && lsb_release -a" },
+				{ label = "Show system info", type = "shell", command = "uname -a && lsb_release -a", caps = { "shell" } },
 			},
 		},
 
@@ -144,7 +144,7 @@ return {
 			tags        = { "system", "info", "kernel" },
 			platform    = { "macos" },
 			actions     = {
-				{ label = "Show system info", type = "shell", command = "uname -a && sw_vers" },
+				{ label = "Show system info", type = "shell", command = "uname -a && sw_vers", caps = { "shell" } },
 			},
 		},
 
@@ -155,7 +155,7 @@ return {
 			tags        = { "memory", "system", "ram" },
 			platform    = { "linux" },
 			actions     = {
-				{ label = "Show memory", type = "shell", command = "free -h" },
+				{ label = "Show memory", type = "shell", command = "free -h", caps = { "shell" } },
 			},
 		},
 
@@ -166,7 +166,7 @@ return {
 			tags        = { "memory", "system", "ram" },
 			platform    = { "macos" },
 			actions     = {
-				{ label = "Show memory", type = "shell", command = "vm_stat" },
+				{ label = "Show memory", type = "shell", command = "vm_stat", caps = { "shell" } },
 			},
 		},
 
@@ -177,7 +177,7 @@ return {
 			tags        = { "sudo", "security", "permissions" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Edit sudoers", type = "shell", command = "sudo visudo" },
+				{ label = "Edit sudoers", type = "shell", command = "sudo visudo", caps = { "shell" } },
 			},
 		},
 
@@ -188,7 +188,7 @@ return {
 			tags        = { "services", "systemd", "system" },
 			platform    = { "linux" },
 			actions     = {
-				{ label = "List services", type = "shell", command = "systemctl list-units --type=service --state=running" },
+				{ label = "List services", type = "shell", command = "systemctl list-units --type=service --state=running", caps = { "shell" } },
 			},
 		},
 
@@ -199,7 +199,7 @@ return {
 			tags        = { "services", "launchd", "system" },
 			platform    = { "macos" },
 			actions     = {
-				{ label = "List services", type = "shell", command = 'launchctl list | grep -v "com.apple"' },
+				{ label = "List services", type = "shell", command = 'launchctl list | grep -v "com.apple"', caps = { "shell" } },
 			},
 		},
 
@@ -210,7 +210,7 @@ return {
 			tags        = { "network", "networking", "restart" },
 			platform    = { "linux" },
 			actions     = {
-				{ label = "Restart network", type = "shell", command = "sudo systemctl restart NetworkManager" },
+				{ label = "Restart network", type = "shell", command = "sudo systemctl restart NetworkManager", caps = { "shell" } },
 			},
 		},
 
@@ -221,7 +221,7 @@ return {
 			tags        = { "network", "networking", "restart" },
 			platform    = { "macos" },
 			actions     = {
-				{ label = "Restart network", type = "shell", command = "sudo ifconfig en0 down && sudo ifconfig en0 up" },
+				{ label = "Restart network", type = "shell", command = "sudo ifconfig en0 down && sudo ifconfig en0 up", caps = { "shell" } },
 			},
 		},
 
@@ -232,8 +232,8 @@ return {
 			tags        = { "environment", "path", "shell" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Edit .bashrc", type = "shell", command = "${EDITOR:-nano} ~/.bashrc" },
-				{ label = "Edit .zshrc",  type = "shell", command = "${EDITOR:-nano} ~/.zshrc" },
+				{ label = "Edit .bashrc", type = "shell", command = "${EDITOR:-nano} ~/.bashrc", caps = { "shell" } },
+				{ label = "Edit .zshrc",  type = "shell", command = "${EDITOR:-nano} ~/.zshrc",  caps = { "shell" } },
 			},
 		},
 
@@ -244,8 +244,8 @@ return {
 			tags        = { "shell", "profile", "config" },
 			platform    = { "linux", "macos" },
 			actions     = {
-				{ label = "Edit .bashrc", type = "shell", command = "${EDITOR:-nano} ~/.bashrc" },
-				{ label = "Edit .zshrc",  type = "shell", command = "${EDITOR:-nano} ~/.zshrc" },
+				{ label = "Edit .bashrc", type = "shell", command = "${EDITOR:-nano} ~/.bashrc", caps = { "shell" } },
+				{ label = "Edit .zshrc",  type = "shell", command = "${EDITOR:-nano} ~/.zshrc",  caps = { "shell" } },
 			},
 		},
 
@@ -258,7 +258,7 @@ return {
 			tags        = { "network", "hosts", "dns" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open in Notepad", type = "shell", command = [[notepad C:\Windows\System32\drivers\etc\hosts]] },
+				{ label = "Open in Notepad", type = "shell", command = [[notepad C:\Windows\System32\drivers\etc\hosts]], caps = { "shell" } },
 			},
 		},
 
@@ -269,7 +269,7 @@ return {
 			tags        = { "network", "dns", "cache" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Flush DNS", type = "shell", command = "ipconfig /flushdns" },
+				{ label = "Flush DNS", type = "shell", command = "ipconfig /flushdns", caps = { "shell" } },
 			},
 		},
 
@@ -280,7 +280,7 @@ return {
 			tags        = { "network", "ip", "config" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Show network config", type = "shell", command = "ipconfig /all" },
+				{ label = "Show network config", type = "shell", command = "ipconfig /all", caps = { "shell" } },
 			},
 		},
 
@@ -291,7 +291,7 @@ return {
 			tags        = { "environment", "path", "system" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open env vars dialog", type = "shell", command = "rundll32 sysdm.cpl,EditEnvironmentVariables" },
+				{ label = "Open env vars dialog", type = "shell", command = "rundll32 sysdm.cpl,EditEnvironmentVariables", caps = { "shell" } },
 			},
 		},
 
@@ -302,7 +302,7 @@ return {
 			tags        = { "hardware", "drivers", "devices" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Device Manager", type = "shell", command = "devmgmt.msc" },
+				{ label = "Open Device Manager", type = "shell", command = "devmgmt.msc", caps = { "shell" } },
 			},
 		},
 
@@ -313,7 +313,7 @@ return {
 			tags        = { "services", "system", "startup" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Services", type = "shell", command = "services.msc" },
+				{ label = "Open Services", type = "shell", command = "services.msc", caps = { "shell" } },
 			},
 		},
 
@@ -324,7 +324,7 @@ return {
 			tags        = { "scheduler", "automation", "tasks" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Task Scheduler", type = "shell", command = "taskschd.msc" },
+				{ label = "Open Task Scheduler", type = "shell", command = "taskschd.msc", caps = { "shell" } },
 			},
 		},
 
@@ -335,7 +335,7 @@ return {
 			tags        = { "logs", "events", "diagnostics" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Event Viewer", type = "shell", command = "eventvwr.msc" },
+				{ label = "Open Event Viewer", type = "shell", command = "eventvwr.msc", caps = { "shell" } },
 			},
 		},
 
@@ -346,8 +346,8 @@ return {
 			tags        = { "startup", "performance", "programs" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Task Manager (Startup tab)", type = "shell", command = "taskmgr" },
-				{ label = "Open msconfig",                   type = "shell", command = "msconfig" },
+				{ label = "Open Task Manager (Startup tab)", type = "shell", command = "taskmgr",  caps = { "shell" } },
+				{ label = "Open msconfig",                   type = "shell", command = "msconfig", caps = { "shell" } },
 			},
 		},
 
@@ -358,7 +358,7 @@ return {
 			tags        = { "window-management", "focus", "registry", "accessibility" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Registry Editor", type = "shell", command = "regedit" },
+				{ label = "Open Registry Editor", type = "shell", command = "regedit", caps = { "shell" } },
 			},
 		},
 
@@ -369,7 +369,7 @@ return {
 			tags        = { "firewall", "security", "network" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Firewall", type = "shell", command = "wf.msc" },
+				{ label = "Open Firewall", type = "shell", command = "wf.msc", caps = { "shell" } },
 			},
 		},
 
@@ -380,7 +380,7 @@ return {
 			tags        = { "policy", "security", "enterprise" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Group Policy Editor", type = "shell", command = "gpedit.msc" },
+				{ label = "Open Group Policy Editor", type = "shell", command = "gpedit.msc", caps = { "shell" } },
 			},
 		},
 
@@ -391,7 +391,7 @@ return {
 			tags        = { "disk", "storage", "partitions" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Disk Management", type = "shell", command = "diskmgmt.msc" },
+				{ label = "Open Disk Management", type = "shell", command = "diskmgmt.msc", caps = { "shell" } },
 			},
 		},
 
@@ -402,7 +402,7 @@ return {
 			tags        = { "system", "info", "version" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Show Windows version", type = "shell", command = "winver" },
+				{ label = "Show Windows version", type = "shell", command = "winver", caps = { "shell" } },
 			},
 		},
 
@@ -413,8 +413,8 @@ return {
 			tags        = { "virtualization", "hyper-v", "features" },
 			platform    = { "windows" },
 			actions     = {
-				{ label = "Open Windows Features",   type = "shell", command = "optionalfeatures" },
-				{ label = "Enable via DISM (admin)", type = "shell", command = "dism /online /enable-feature /featurename:Microsoft-Hyper-V-All /NoRestart" },
+				{ label = "Open Windows Features",   type = "shell", command = "optionalfeatures",                                                          caps = { "shell" } },
+				{ label = "Enable via DISM (admin)", type = "shell", command = "dism /online /enable-feature /featurename:Microsoft-Hyper-V-All /NoRestart", caps = { "shell" } },
 			},
 		},
 	},

@@ -145,6 +145,57 @@ body {
   text-align: center;
 }
 
+#exec-panel {
+  border-top: 1px solid #3a3a3a;
+  background: #1e2a1e;
+  padding: 14px 20px 16px;
+}
+
+.exec-label {
+  font-size: 11px;
+  color: #7a9a7a;
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.exec-command {
+  font-family: monospace;
+  font-size: 13px;
+  color: #c8e6c8;
+  background: #161e16;
+  border: 1px solid #2d4a2d;
+  border-radius: 4px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  cursor: text;
+  margin-bottom: 10px;
+}
+
+.exec-copy {
+  font-size: 12px;
+  padding: 6px 16px;
+  background: #2d5a27;
+  border: none;
+  border-radius: 4px;
+  color: #c8e6c8;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.exec-copy:hover {
+  background: #3a7a32;
+  color: #fff;
+}
+
+.exec-copy.copied {
+  background: #1a3a17;
+  color: #90ee90;
+}
+
 #footer {
   text-align: center;
   margin-top: 16px;
