@@ -7,11 +7,9 @@ on:
     branches: [master]
 
 jobs:
-  check:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install LuaJIT
-        run: sudo apt-get install -y luajit
       - name: Test
-        run: luajit cli/test.lua
+        run: bin/cr test

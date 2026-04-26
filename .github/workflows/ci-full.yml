@@ -1,0 +1,23 @@
+name: CI (full)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            run: bin/cr test
+          - os: ubuntu-24.04-arm
+            run: bin/cr test
+          - os: macos-14
+            run: bin/cr test
+          - os: windows-latest
+            run: bin\cr.bat test
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: ${{ matrix.run }}
