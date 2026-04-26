@@ -81,6 +81,30 @@ function M.fs_cap(opts)
 			p:close()
 			return result
 		end,
+
+		attenuate = function(sub_opts)
+			if revoked then return nil, "fs: capability revoked" end
+			sub_opts = sub_opts or {}
+			local new_root = sub_opts.root
+			if not new_root then return nil, "fs.attenuate: root required" end
+			new_root = new_root:gsub("/$", "")
+			-- new_root must be current root, or start with root .. "/"
+			local cur_root = root --: string
+			if new_root ~= cur_root and new_root:sub(1, #cur_root + 1) ~= cur_root .. "/" then
+				return nil, "fs.attenuate: root escapes current scope"
+			end
+			-- allow_write can only go true→false, never false→true
+			local new_allow_write
+			if sub_opts.allow_write == nil then
+				new_allow_write = allow_write
+			elseif sub_opts.allow_write and not allow_write then
+				return nil, "fs.attenuate: cannot grant write not held"
+			else
+				new_allow_write = sub_opts.allow_write
+			end
+			local fs_mod = require("lib.platform.caps.fs") --: any
+			return fs_mod.fs_cap({ root = new_root, allow_write = new_allow_write })
+		end,
 	}
 
 	local function revoke() revoked = true end

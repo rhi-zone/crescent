@@ -292,7 +292,7 @@ local function post_process_response(parsed)
 	return parsed
 end
 
--- ── Path whitelist ────────────────────────────────────────────────────────────
+-- ── Path and method whitelists ────────────────────────────────────────────────
 
 -- path_allowed(paths, req_path) -> boolean
 -- Returns true when req_path is permitted by the whitelist.
@@ -310,6 +310,45 @@ local function path_allowed(paths, req_path)
 	return false
 end
 
+-- method_allowed(methods, req_method) -> boolean
+-- Returns true when req_method is permitted by the whitelist.
+-- methods: nil/empty = allow all; otherwise exact case-insensitive match.
+--: (any | nil, string) -> boolean
+local function method_allowed(methods, req_method)
+	if not methods or #methods == 0 then return true end
+	local m = req_method:upper()
+	for i = 1, #methods do
+		if tostring(methods[i]):upper() == m then return true end
+	end
+	return false
+end
+
+-- paths_subset(new_paths, old_paths) -> boolean
+-- Returns true when every path in new_paths is allowed by old_paths.
+-- old_paths nil/empty = unrestricted, any new_paths is valid.
+--: (any | nil, any | nil) -> boolean
+local function paths_subset(new_paths, old_paths)
+	if not old_paths or #old_paths == 0 then return true end
+	if not new_paths or #new_paths == 0 then return false end
+	for i = 1, #new_paths do
+		if not path_allowed(old_paths, new_paths[i]) then return false end
+	end
+	return true
+end
+
+-- methods_subset(new_methods, old_methods) -> boolean
+-- Returns true when every method in new_methods is allowed by old_methods.
+-- old_methods nil/empty = unrestricted, any new_methods is valid.
+--: (any | nil, any | nil) -> boolean
+local function methods_subset(new_methods, old_methods)
+	if not old_methods or #old_methods == 0 then return true end
+	if not new_methods or #new_methods == 0 then return false end
+	for i = 1, #new_methods do
+		if not method_allowed(old_methods, new_methods[i]) then return false end
+	end
+	return true
+end
+
 -- ── Cap factory ───────────────────────────────────────────────────────────────
 
 -- http_client_cap(opts) -> cap_table, revoke_fn
@@ -321,7 +360,8 @@ function M.http_client_cap(opts)
 	local allowed_host = opts.host
 	local host, port = parse_host_port(allowed_host)
 	local use_tls = (port == "443") or (opts.tls == true)
-	local allowed_paths = opts.paths  -- nil or array of strings
+	local allowed_paths   = opts.paths    -- nil or array of strings
+	local allowed_methods = opts.methods  -- nil or array of uppercase method strings
 	local revoked = false
 
 	local cap = {}
@@ -329,9 +369,10 @@ function M.http_client_cap(opts)
 	-- Expose host and any extra opts fields for introspection.
 	-- Server code (e.g. server.lua) may read cap.host for provider inference,
 	-- and cap.model / cap.path for LLM client configuration.
-	cap.host  = allowed_host
-	cap.model = opts.model
-	cap.path  = opts.path
+	cap.host    = allowed_host
+	cap.model   = opts.model
+	cap.path    = opts.path
+	cap.methods = allowed_methods
 
 	-- Non-streaming request.
 	--: (table) -> table | nil, string
@@ -342,6 +383,9 @@ function M.http_client_cap(opts)
 		if not req.path then return nil, "http_client: missing path" end
 		if not path_allowed(allowed_paths, req.path) then
 			return nil, "path not allowed: " .. req.path
+		end
+		if not method_allowed(allowed_methods, req.method) then
+			return nil, "method not allowed: " .. req.method
 		end
 
 		local headers = normalize_headers(req.headers, allowed_host, req.body)
@@ -400,6 +444,9 @@ function M.http_client_cap(opts)
 		if not on_chunk then return nil, "http_client: missing on_chunk callback" end
 		if not path_allowed(allowed_paths, req.path) then
 			return nil, "path not allowed: " .. req.path
+		end
+		if not method_allowed(allowed_methods, req.method) then
+			return nil, "method not allowed: " .. req.method
 		end
 
 		local headers = normalize_headers(req.headers, allowed_host, req.body)
@@ -554,6 +601,33 @@ function M.http_client_cap(opts)
 				end
 			end
 		end
+	end
+
+	function cap.attenuate(sub_opts)
+		if revoked then return nil, "http_client: capability revoked" end
+		sub_opts = sub_opts or {}
+		-- Host cannot change.
+		if sub_opts.host and sub_opts.host ~= allowed_host then
+			return nil, "http_client.attenuate: cannot change host"
+		end
+		-- Paths must be a subset of the current whitelist.
+		local new_paths = sub_opts.paths
+		if not paths_subset(new_paths, allowed_paths) then
+			return nil, "http_client.attenuate: paths escape current scope"
+		end
+		-- Methods must be a subset of the current whitelist.
+		local new_methods = sub_opts.methods
+		if not methods_subset(new_methods, allowed_methods) then
+			return nil, "http_client.attenuate: methods escape current scope"
+		end
+		return M.http_client_cap({
+			host    = allowed_host,
+			paths   = new_paths,
+			methods = new_methods,
+			model   = opts.model,
+			path    = opts.path,
+			tls     = opts.tls,
+		})
 	end
 
 	local function revoke()

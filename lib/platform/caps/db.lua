@@ -49,7 +49,7 @@ end
 function M.db_cap(path, opts)
 	opts = opts or {}
 
-	local db, err = sqlite.open(path)
+	local db, err = sqlite.open(path) --: any
 	if not db then return nil, err end
 
 	if opts.readonly then
@@ -96,6 +96,52 @@ function M.db_cap(path, opts)
 		if not revoked then
 			db:close()
 		end
+	end
+
+	function cap.attenuate(sub_opts)
+		if revoked then return nil, "db: capability revoked" end
+		sub_opts = sub_opts or {}
+		local sub_readonly = sub_opts.readonly
+		if sub_readonly == false and opts.readonly then
+			return nil, "db.attenuate: cannot grant write not held"
+		end
+		local sub_revoked = false
+		local sub = {
+			query = function(sql, ...)
+				if revoked or sub_revoked then return nil, "db: capability revoked" end
+				return db:query(sql, ...)
+			end,
+			prepare = function(sql)
+				if revoked or sub_revoked then return nil, "db: capability revoked" end
+				local stmt, serr = db:prepare(sql)
+				if not stmt then return nil, serr end
+				return wrap_stmt(stmt, function() return revoked or sub_revoked end)
+			end,
+			last_insert_rowid = function()
+				if revoked or sub_revoked then return nil, "db: capability revoked" end
+				return db:last_insert_rowid()
+			end,
+			changes = function()
+				if revoked or sub_revoked then return nil, "db: capability revoked" end
+				return db:changes()
+			end,
+			close = function() end,  -- sub-cap doesn't own the connection
+		}
+		if not sub_readonly then
+			sub.execute = function(sql, ...)
+				if revoked or sub_revoked then return nil, "db: capability revoked" end
+				return db:execute(sql, ...)
+			end
+		end
+		sub.attenuate = function(deeper_opts)
+			if revoked or sub_revoked then return nil, "db: capability revoked" end
+			deeper_opts = deeper_opts or {}
+			if deeper_opts.readonly == false and sub_readonly then
+				return nil, "db.attenuate: cannot grant write not held"
+			end
+			return cap.attenuate({ readonly = deeper_opts.readonly or sub_readonly })
+		end
+		return sub, function() sub_revoked = true end
 	end
 
 	local function revoke()

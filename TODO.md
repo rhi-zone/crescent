@@ -1,5 +1,8 @@
 # TODO
 
+- [ ] design: http_client attenuation — query param filtering (wildcard syntax? exact key match? key+value match?)
+- [ ] design: http_client attenuation — request header filtering (which headers are meaningful to restrict? security implications of allowing Content-Type vs Authorization override?)
+
 ## RP / LLM interaction platform — primitives needed
 
 See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitives the platform needs that don't exist yet:

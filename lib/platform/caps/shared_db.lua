@@ -496,11 +496,47 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		return ok, err
 	end
 
-	if readonly then
-		return { query = query, close = close, setup = setup }, revoke
+	-- make_attenuate(is_sub_readonly) builds an attenuate function for a cap
+	-- at the given readonly level. sub-caps share the same connection.
+	local function make_attenuate(is_sub_readonly)
+		return function(sub_opts)
+			if revoked then return nil, "shared_db: capability revoked" end
+			sub_opts = sub_opts or {}
+			local new_readonly = sub_opts.readonly
+			if new_readonly == false and is_sub_readonly then
+				return nil, "shared_db.attenuate: cannot grant write not held"
+			end
+			-- If sub_opts.readonly is nil, inherit current level.
+			if new_readonly == nil then new_readonly = is_sub_readonly end
+			local sub_revoked = false
+			local sub = {
+				query = function(sql, params)
+					if revoked or sub_revoked then return nil, "shared_db: capability revoked" end
+					return query(sql, params)
+				end,
+				close = function() end,  -- sub-cap doesn't own the connection
+				setup = setup,
+			}
+			if not new_readonly then
+				sub.execute = function(sql)
+					if revoked or sub_revoked then return nil, "shared_db: capability revoked" end
+					return exec(sql)
+				end
+			end
+			sub.attenuate = make_attenuate(new_readonly)
+			return sub, function() sub_revoked = true end
+		end
 	end
 
-	return { execute = exec, query = query, close = close, setup = setup }, revoke
+	if readonly then
+		local cap = { query = query, close = close, setup = setup }
+		cap.attenuate = make_attenuate(true)
+		return cap, revoke
+	end
+
+	local cap = { execute = exec, query = query, close = close, setup = setup }
+	cap.attenuate = make_attenuate(false)
+	return cap, revoke
 end
 
 return M

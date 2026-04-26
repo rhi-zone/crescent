@@ -210,6 +210,7 @@ function M.registry_cap(opts)
 
 	local root = opts.root
 	if not root then error("registry_cap: opts.root is required") end
+	local root_path = root  -- preserve original string for attenuate comparisons
 	local allow_write = opts.allow_write or false
 
 	local hive_int, maybe_base = parse_root(root)
@@ -379,6 +380,29 @@ function M.registry_cap(opts)
 			end
 			close_key(hkey)
 			return result
+		end,
+
+		attenuate = function(sub_opts)
+			if revoked then return nil, "registry: capability revoked" end
+			sub_opts = sub_opts or {}
+			local new_root = sub_opts.root
+			if not new_root then return nil, "registry.attenuate: root required" end
+			-- Compare case-insensitively (registry paths are case-insensitive)
+			local cur_lower = root_path:lower()
+			local new_lower = new_root:lower()
+			if new_lower ~= cur_lower and new_lower:sub(1, #cur_lower + 1) ~= cur_lower .. "\\" then
+				return nil, "registry.attenuate: root escapes current scope"
+			end
+			local new_allow_write
+			if sub_opts.allow_write == nil then
+				new_allow_write = allow_write
+			elseif sub_opts.allow_write and not allow_write then
+				return nil, "registry.attenuate: cannot grant write not held"
+			else
+				new_allow_write = sub_opts.allow_write
+			end
+			local reg_mod = require("lib.platform.caps.registry") --: any
+			return reg_mod.registry_cap({ root = new_root, allow_write = new_allow_write })
 		end,
 	}
 
