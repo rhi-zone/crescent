@@ -4,7 +4,6 @@
 --
 -- manifest_entry fields:
 --   binaries : { [string]: { schema: "auto" | HelpSchema | nil, allow: string[] | nil } }
---   popen    : POpenFn  (required)
 --   stderr   : string | nil  ("merge" | "discard" | nil)
 --
 -- Construction:
@@ -153,7 +152,6 @@ end
 
 --:: ExecManifestEntry = {
 --::   binaries: { [string]: { schema: "auto" | unknown | nil, allow: string[] | nil } },
---::   popen: unknown,
 --::   stderr: string | nil,
 --:: }
 
@@ -164,7 +162,6 @@ function M.new(manifest_entry)
 	local entry = manifest_entry or {}
 	--: any
 	local binaries_spec = entry.binaries or {}
-	local popen  = entry.popen
 	local stderr = entry.stderr
 
 	local revoked = false
@@ -184,7 +181,7 @@ function M.new(manifest_entry)
 		local schema_val = s.schema
 		if schema_val == "auto" then
 			--: any
-			local fetch_opts = { popen = popen, max_depth = 4 }
+			local fetch_opts = { popen = io.popen, max_depth = 4 }
 			local fetched, _ = help.fetch(sname, fetch_opts)
 			schemas[sname] = fetched  -- nil if binary absent; raw mode fallback
 		elseif type(schema_val) == "table" then
@@ -204,7 +201,7 @@ function M.new(manifest_entry)
 			-- propagates "popen: capability revoked".
 			return nil, "capability revoked"
 		end
-		return popen(cmd_str, mode)
+		return io.popen(cmd_str, mode)
 	end
 
 	-- Build fluent API nodes using the revoke-checked popen.
@@ -259,7 +256,7 @@ function M.new(manifest_entry)
 			end
 		end
 
-		return exec.run(binary_name, flat_args, { popen = popen, stderr = stderr })
+		return exec.run(binary_name, flat_args, { popen = io.popen, stderr = stderr })
 	end
 
 	-- Assemble the cap table.
