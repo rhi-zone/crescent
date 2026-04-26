@@ -35,9 +35,10 @@ doc/          — documentation
 ## Development
 
 ```bash
-nix develop                  # Enter dev shell
-luajit lib/test/cli.lua      # Run tests
-cd docs && bun dev           # Local docs
+bin/cr test                  # Run tests
+bin/cr check <file>          # Typecheck a file
+cd docs && bun dev           # Local docs (requires bun)
+nix develop                  # Dev shell for contributors (bun, etc.)
 ```
 
 ## Core Rules
@@ -116,7 +117,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Workflow
 
-**Run the typechecker on files you write or modify.** `luajit lib/type/static/cli.lua <file>...` — do this before committing. See `lib/type/static/CLAUDE.md` for annotation syntax and type system rules.
+**Run the typechecker on files you write or modify.** `bin/cr check <file>...` — do this before committing. See `lib/type/static/CLAUDE.md` for annotation syntax and type system rules.
 
 **Minimize file churn.** When editing a file, read it once, plan all changes, and apply them in one pass.
 
@@ -128,7 +129,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Always commit completed work.** After tests pass, commit immediately — don't wait to be asked. When a plan has multiple phases, commit after each phase passes. Do not accumulate changes across phases. Uncommitted work is lost work.
 
-**When verifying a newly built library, run only that library's test file — not the full suite.** Use `luajit lib/test/cli.lua lib/mylib/` or `luajit lib/test/cli.lua lib/mylib/mylib_test.lua` directly. The test runner accepts both file paths and directories. Only run the full suite (`luajit lib/test/cli.lua`) when checking global regressions.
+**When verifying a newly built library, run only that library's test file — not the full suite.** Use `bin/cr test lib/mylib/` or `bin/cr test lib/mylib/mylib_test.lua` directly. Only run the full suite (`bin/cr test`) when checking global regressions.
 
 ## Context Management
 
