@@ -23,8 +23,8 @@ if ffi_ok then
 			long sysconf(int name);
 		]]
 	end)
-	-- cdef errors if already declared (re-require); either way symbols are present
-	fork_available = (ffi_ok and ffi.C.fork ~= nil)
+	local sym_ok = pcall(function() return ffi.C.fork ~= nil end)
+	fork_available = ffi_ok and sym_ok
 end
 
 local function get_cpu_count()
