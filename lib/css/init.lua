@@ -7,6 +7,7 @@ local M = {}
 local keyframes_mod = require("lib.css.keyframes")
 local media_mod     = require("lib.css.media")
 local property_mod  = require("lib.css.property")
+local scoped_mod    = require("lib.css.scoped")
 
 -- Type declarations (nominal newtypes — all wrap string at runtime)
 --:: newtype ClassName      = string
@@ -238,5 +239,10 @@ M.render = function(sheet)
   end
   return table.concat(parts, "\n\n")
 end
+
+-- M.scoped(sheet) — renders sheet to a <style> block and returns class name map.
+-- Convenience wrapper: passes M itself as css_mod to avoid circular require.
+--: (sheet: table) -> (string, table)
+M.scoped = function(sheet) return scoped_mod.scoped(sheet, M) end
 
 return M

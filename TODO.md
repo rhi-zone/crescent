@@ -1530,7 +1530,7 @@ Type-safe CSS builder library. Lua table → CSS string. Pairs with `lib/html/ht
 
 - [x] **Phase 4 — CSS custom property tooling.** `css.property(name, opts)` renders `@property` declarations (syntax, inherits, initial-value). Scope analysis: given a stylesheet and a set of `CssVar` names, report which rules declare vs. reference each variable. Useful for detecting undefined or unused variables at build time. Files: `lib/css/property.lua`.
 
-- [ ] **Phase 5 — lib/html integration.** Typed style injection into `lib/html` elements. Scoped class generation: given a stylesheet, emit a `<style>` block and return a record of typed `ClassName` values for use with `lib/html` element builders. Eliminates class-name string scatter from `lib/html/html_builder.lua`'s `mod.style`. Files: `lib/css/scoped.lua`.
+- [x] **Phase 5 — lib/html integration.** Typed style injection into `lib/html` elements. Scoped class generation: given a stylesheet, emit a `<style>` block and return a record of typed `ClassName` values for use with `lib/html` element builders. Eliminates class-name string scatter from `lib/html/html_builder.lua`'s `mod.style`. Files: `lib/css/scoped.lua`.
 
 ## stretch goals (low priority, high reward)
 
