@@ -44,6 +44,10 @@ cd docs && bun dev           # Local docs
 
 **Do the right thing, don't hedge.** When the correct approach is clear, implement it. Amount of work is never a reason to do something worse.
 
+**No half-measures.** A design that requires X to be safe must ship with X. Implementing the unsafe version "for now" and deferring X is not a step toward the right design — it's a lie that accumulates. If X is hard, do X. If X is genuinely separable (the current code is correct without it, not just less capable), say so explicitly and put it in TODO.md. "We'll add it later" with no TODO entry means it never happens.
+
+**"Out of scope" is not a reason to omit.** Scope is not a budget for correctness. If a security property, invariant, or design constraint applies to the thing being built, it is in scope by definition. Deferring it because it's inconvenient is not scoping — it's avoidance. The only legitimate reason to omit something is that it genuinely does not apply yet (no caller, no user, no data). That reason must survive scrutiny: if challenged, justify it, don't just re-assert it.
+
 **Write things down immediately.** Problems and tech debt → TODO.md. Design decisions → docs/ or CLAUDE.md. Completed items → mark `[x]` in TODO.md in the same commit. Conversation evaporates — if it matters to a future session, write it now. Never delete unchecked TODO items.
 
 **`docs/batteries.md` is the definitive ecosystem scope document.** Read it before discussing future libraries or roadmap.
