@@ -20,12 +20,28 @@
 --
 -- messages: array of { role = "user"|"assistant"|"system", content = string }
 -- call_opts may include: model, temperature, max_tokens, top_p, stop
+--
+-- ── Structured-output cap (M.new) ────────────────────────────────────────────
+-- M.new(manifest_entry) -> cap_table, revoke_fn
+-- Grammar-constrained LLM generation cap backed by lib/ai/providers/openai_compat.
+--
+-- manifest_entry.endpoint    : full URL e.g. "http://127.0.0.1:8081"
+--                              (default "http://127.0.0.1:8081")
+-- manifest_entry.model       : model name string (default "local")
+-- manifest_entry.api_key     : passed through to openai_compat (default "")
+-- manifest_entry.http_client : required HTTP client capability
+--
+-- cap.generate({messages, schema?, max_tokens?, temperature?})
+--   -> decoded_table | nil, string | nil
+-- If schema is provided, response_format (json_schema) is added to the request,
+-- the JSON response is decoded, and required top-level keys are validated.
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
 local ai = require("lib.ai")
+local json = require("lib.format.json")
 
 local M = {}
 
@@ -98,6 +114,166 @@ function M.llm_cap(opts)
 	function cap.count_tokens(text)
 		if revoked then return nil, "capability revoked" end
 		return math.ceil(#text / 4)
+	end
+
+	local function revoke()
+		revoked = true
+	end
+
+	return cap, revoke
+end
+
+-- ── M.new: structured-output cap ─────────────────────────────────────────────
+
+--:: LlmManifestEntry = {
+--::   endpoint: string | nil,
+--::   model: string | nil,
+--::   api_key: string | nil,
+--::   http_client: unknown | nil,
+--:: }
+
+--:: LlmGenerateRequest = {
+--::   messages: unknown,
+--::   schema: unknown | nil,
+--::   max_tokens: integer | nil,
+--::   temperature: number | nil,
+--:: }
+
+-- Strip scheme from a URL and return the bare host:port string.
+-- "http://127.0.0.1:8081"  -> "127.0.0.1:8081"
+-- "https://api.example.com" -> "api.example.com"
+--: (string) -> string
+local function strip_scheme(url)
+	return url:match("^https?://(.+)$") or url
+end
+
+-- Validate that all keys in schema.required are present in decoded_table.
+-- Returns true, nil on success; nil, errmsg on failure.
+local function validate_required(decoded, schema)
+	if type(schema) ~= "table" then return true end
+	--: any
+	local s = schema
+	local required = s["required"]
+	if type(required) ~= "table" then return true end
+	--: any
+	local d = decoded
+	for i = 1, #required do
+		local key = required[i]
+		if d[key] == nil then
+			return nil, "response failed schema validation: missing required field '" .. tostring(key) .. "'"
+		end
+	end
+	return true
+end
+
+-- M.new(manifest_entry) -> cap, revoke_fn
+function M.new(manifest_entry)
+	--: any
+	local entry = manifest_entry or {}
+
+	local endpoint    = entry.endpoint   or "http://127.0.0.1:8081"
+	local model       = entry.model      or "local"
+	local api_key     = entry.api_key    or ""
+	--: any
+	local http_client = entry.http_client
+
+	local host = strip_scheme(endpoint)
+
+	local revoked = false
+
+	local cap = {}
+
+	-- cap.generate(req) -> decoded_table | nil, string | nil
+	function cap.generate(req)
+		if revoked then return nil, "capability revoked" end
+		--: any
+		local r = req or {}
+
+		-- Build the request body. openai_compat does not forward arbitrary fields
+		-- like response_format, so we build the body and POST via http_client directly.
+		--: any
+		local msgs = r.messages or {}
+		local messages_converted = {}
+		for i = 1, #msgs do
+			messages_converted[i] = { role = msgs[i].role, content = msgs[i].content }
+		end
+
+		--: any
+		local body = {
+			model    = model,
+			messages = messages_converted,
+		}
+		if r.max_tokens  then body.max_tokens  = r.max_tokens  end
+		if r.temperature then body.temperature = r.temperature end
+		if r.schema then
+			body.response_format = {
+				type        = "json_schema",
+				json_schema = { schema = r.schema },
+			}
+		end
+
+		--: any
+		local json_mod = json
+		local body_str, enc_err = json_mod.encode(body)
+		if not body_str then return nil, "llm.generate: json encode: " .. tostring(enc_err) end
+
+		if not http_client then return nil, "llm.generate: http_client is required" end
+
+		local res, req_err = http_client.request({
+			host    = host,
+			method  = "POST",
+			path    = "/v1/chat/completions",
+			headers = {
+				["Content-Type"]   = { "application/json" },
+				["Authorization"]  = { "Bearer " .. api_key },
+				["Content-Length"] = { tostring(#body_str) },
+			},
+			body = body_str,
+		})
+		if not res then return nil, "llm.generate: http error: " .. tostring(req_err) end
+		--: any
+		local res_any = res
+		if res_any.status ~= 200 then
+			return nil, "llm.generate: HTTP " .. tostring(res_any.status) .. ": " .. tostring(res_any.body or "")
+		end
+
+		-- Parse the OpenAI completion response.
+		local resp_data, dec_err = json_mod.decode(res_any.body)
+		if not resp_data then
+			return nil, "llm.generate: json decode response: " .. tostring(dec_err)
+		end
+		--: any
+		local rd = resp_data
+
+		if rd.error then
+			return nil, "llm.generate: API error: " .. tostring(rd.error.message or json_mod.encode(rd.error))
+		end
+
+		local choices = rd.choices
+		if not choices or #choices == 0 then
+			return nil, "llm.generate: no choices in response"
+		end
+
+		local content = choices[1].message and choices[1].message.content
+		if content == nil then
+			return nil, "llm.generate: missing content in response"
+		end
+
+		-- Without schema: return the raw text wrapped in a table.
+		if not r.schema then
+			return { text = content }
+		end
+
+		-- With schema: decode content as JSON and validate required fields.
+		local decoded, json_err = json_mod.decode(content)
+		if not decoded then
+			return nil, "llm.generate: content is not valid JSON: " .. tostring(json_err)
+		end
+
+		local ok, val_err = validate_required(decoded, r.schema)
+		if not ok then return nil, val_err end
+
+		return decoded
 	end
 
 	local function revoke()

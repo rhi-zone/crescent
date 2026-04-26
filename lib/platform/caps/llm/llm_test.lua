@@ -232,3 +232,123 @@ T.describe("revocation", function()
 		end)
 	end)
 end)
+
+-- ── M.new (structured-output cap) tests ───────────────────────────────────────
+
+-- Build a mock http_client.request function that returns a canned OpenAI
+-- completion response. content is the string placed in choices[1].message.content.
+local json = require("lib.format.json")
+
+local function make_mock_http_client(content_str, status)
+	status = status or 200
+	local body = json.encode({
+		choices = {
+			{
+				message = { role = "assistant", content = content_str },
+				finish_reason = "stop",
+			},
+		},
+		usage = { prompt_tokens = 10, completion_tokens = 5 },
+	})
+	return {
+		request = function(_req)
+			if status ~= 200 then
+				return { status = status, headers = {}, body = "error" }
+			end
+			return { status = 200, headers = {}, body = body }
+		end,
+	}
+end
+
+T.describe("M.new — basic generate (no schema)", function()
+	T.it("returns {text=content} on success", function()
+		local http_client = make_mock_http_client("hello world")
+		local cap, _ = llm.new({ http_client = http_client })
+		local result, err = cap.generate({ messages = { { role = "user", content = "hi" } } })
+		T.eq(err, nil)
+		T.ok(type(result) == "table", "result should be a table")
+		T.eq(result.text, "hello world")
+	end)
+
+	T.it("propagates HTTP errors", function()
+		local http_client = make_mock_http_client("internal server error", 500)
+		local cap, _ = llm.new({ http_client = http_client })
+		local result, err = cap.generate({ messages = { { role = "user", content = "hi" } } })
+		T.eq(result, nil)
+		T.ok(type(err) == "string" and err:find("500") ~= nil,
+		     "expected HTTP 500 error, got: " .. tostring(err))
+	end)
+
+	T.it("returns nil,err when http_client is missing", function()
+		local cap, _ = llm.new({})
+		local result, err = cap.generate({ messages = { { role = "user", content = "hi" } } })
+		T.eq(result, nil)
+		T.ok(type(err) == "string" and err:find("http_client") ~= nil,
+		     "expected http_client error, got: " .. tostring(err))
+	end)
+end)
+
+T.describe("M.new — generate with schema", function()
+	T.it("returns decoded JSON table when content matches schema", function()
+		local payload = json.encode({ name = "Alice", age = 30 })
+		local http_client = make_mock_http_client(payload)
+		local schema = {
+			type = "object",
+			properties = {
+				name = { type = "string" },
+				age  = { type = "integer" },
+			},
+			required = { "name", "age" },
+		}
+		local cap, _ = llm.new({ http_client = http_client })
+		local result, err = cap.generate({
+			messages = { { role = "user", content = "generate person" } },
+			schema   = schema,
+		})
+		T.eq(err, nil)
+		T.ok(type(result) == "table", "result should be a table")
+		T.eq(result.name, "Alice")
+		T.eq(result.age, 30)
+	end)
+
+	T.it("returns nil,err when required field is missing", function()
+		-- Response is missing the required 'age' field.
+		local payload = json.encode({ name = "Bob" })
+		local http_client = make_mock_http_client(payload)
+		local schema = {
+			type     = "object",
+			required = { "name", "age" },
+		}
+		local cap, _ = llm.new({ http_client = http_client })
+		local result, err = cap.generate({
+			messages = { { role = "user", content = "generate person" } },
+			schema   = schema,
+		})
+		T.eq(result, nil)
+		T.ok(type(err) == "string" and err:find("age") ~= nil,
+		     "expected validation error mentioning 'age', got: " .. tostring(err))
+	end)
+
+	T.it("returns nil,err when content is not valid JSON", function()
+		local http_client = make_mock_http_client("this is not json")
+		local schema = { type = "object", required = { "foo" } }
+		local cap, _ = llm.new({ http_client = http_client })
+		local result, err = cap.generate({
+			messages = { { role = "user", content = "hi" } },
+			schema   = schema,
+		})
+		T.eq(result, nil)
+		T.ok(type(err) == "string", "expected error string, got: " .. tostring(err))
+	end)
+end)
+
+T.describe("M.new — revocation", function()
+	T.it("generate returns nil,'capability revoked' after revoke()", function()
+		local http_client = make_mock_http_client("hello")
+		local cap, revoke = llm.new({ http_client = http_client })
+		revoke()
+		local result, err = cap.generate({ messages = { { role = "user", content = "hi" } } })
+		T.eq(result, nil)
+		T.eq(err, "capability revoked")
+	end)
+end)
