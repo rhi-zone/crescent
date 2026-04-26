@@ -1997,6 +1997,13 @@ mechanism. Prior art: `~/git/rhizone/rainbow/` (TypeScript prototype).
 Paired with `lib/lua2ts`: write reactive UI logic in Lua, emit typed TypeScript, run in
 the browser. Same optic algebra server-side and client-side, no impedance mismatch.
 
+**`lib/css`** — type-safe CSS builder. Lua table → CSS string. Properties are typed
+fields (not raw strings), invalid values are type errors, not runtime surprises.
+`css.rule(selector, { color = "red", font_size = 16 })` → `selector { color: red;
+font-size: 16px }`. Composable: `css.media`, `css.keyframes`, `css.var`, `css.calc`.
+Pairs with `lib/html/html_builder` for fully Lua web frontends — HTML + CSS both written in Lua,
+generated server-side (or at server startup), no build step.
+
 ### World state
 
 **`lib/ecs`** — SQLite-backed entity-component store. Entities have integer IDs;
@@ -2105,6 +2112,29 @@ many1, opt, map, sep_by, between, lazy, whitespace, number, string, identifier.
 Composable grammar construction. 92 assertions. Also: `lib/asm` (assembler utilities,
 implemented) and `lib/ir` (intermediate representation, **implemented**) as stretch
 goals for the language tooling niche.
+
+**Games** *(headless state models + multi-frontend)* — pure Lua game engines, each
+following the same pattern: headless library (rules, state, move generation/validation),
+Lua CLI frontend (text I/O), TUI frontend (`lib/tui`), web frontend (Lua HTTP server
+app). The web frontend writes HTML via `lib/html/html_builder`, CSS via `lib/css` (type-safe CSS
+builder, see below), and JS either inline-minimal or via `lib/lua2ts` run at server
+startup — all buildless, the server process is the build. `lib/minimax` provides the AI
+layer. Type-safe builder APIs for constructing game state.
+
+- **`lib/chess`** — complete chess rules: FEN/PGN import/export, legal move generation
+  (including castling, en passant, promotion), check/checkmate/stalemate detection,
+  draw conditions (50-move, threefold repetition, insufficient material). Minimax/MCTS
+  AI via `lib/minimax`. Multi-frontend: CLI, TUI, web.
+- **`lib/mahjong`** — Riichi Mahjong (and variants): tile set, hand evaluation (yaku scoring,
+  fu/han counting), wall deal, discard/draw/win/draw detection, seat wind rotation.
+  Multi-frontend: CLI, TUI, web.
+- **`lib/solitaire`** — Klondike solitaire: deck, tableau/foundation/stock/waste piles,
+  legal move enumeration, auto-complete detection. Multi-frontend: CLI, TUI, web.
+- **`lib/spider`** — Spider Solitaire: 1/2/4-suit variants, column rules, sequence completion
+  detection, undo stack. Multi-frontend: CLI, TUI, web.
+- **`lib/freecell`** — FreeCell: freecell/cascade/home rules, legal move enumeration (including
+  supermove shortcut), solvability (all standard deals are solvable; library tracks deal number).
+  Multi-frontend: CLI, TUI, web.
 
 ### Missing — typechecker features (load-bearing for the ecosystem)
 

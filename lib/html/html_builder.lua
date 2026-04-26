@@ -152,7 +152,7 @@ mod.svg = mod.element("svg")
 -- local dl_div = mod.element("div")
 
 mod._unload = function()
-	package.loaded["lib.htmlxx"] = nil
+	package.loaded["lib.html.html_builder"] = nil
 	package.loaded["dep.ljltk.reader"] = nil
 	package.loaded["dep.ljltk.lexer"] = nil
 	package.loaded["dep.ljltk.lua_ast"] = nil

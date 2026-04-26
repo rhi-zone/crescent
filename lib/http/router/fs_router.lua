@@ -13,7 +13,7 @@ mod.router = function (path)
 	local handle_file = function (path2) --[[@param path2 string]]
 		if path2:find("%.lua$") then
 			local success, cb = pcall(dofile, path2)
-			if not success then io.stderr:write("fsx: caught error when rendering page: ", cb, "\n") end
+			if not success then io.stderr:write("fs_router: caught error when rendering page: ", cb, "\n") end
 			return success and cb or nil
 		--[[@diagnostic disable-next-line: undefined-global]]
 		elseif DEV then

@@ -148,7 +148,7 @@ lazy_load_table = {
 			end)
 		end
 	end },
-	find = { "cli.findx", wrap_in_iter },
+	find = { "cli.find_cli", wrap_in_iter },
 	to_base = { "lib.base", "integer_to_base" },
 	from_base = { "lib.base", "base_to_integer" },
 	to_json = { "dep.lunajson", "value_to_json", function (to_json)

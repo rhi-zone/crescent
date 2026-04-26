@@ -6,7 +6,7 @@ else
 	package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.path
 end
 
-local h = require("lib.htmlxx")
+local h = require("lib.html.html_builder")
 
 --[[@generic t]]
 --[[@type fun(x: t): t]]
