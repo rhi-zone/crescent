@@ -1,11 +1,27 @@
 # TODO
 
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
 - [ ] **replace VitePress with a pure Lua doc toolchain** — `bin/cr run docs/build.lua` for SSG (CI deployment), `bin/cr run docs/server.lua` for local dev preview. Removes bun entirely — no JS toolchain in CI or locally. Needs `lib/markdown` (CommonMark renderer). Dogfood priority.
 
 - [ ] design: http_client attenuation — query param filtering (wildcard syntax? exact key match? key+value match?)
 - [ ] design: http_client attenuation — request header filtering (which headers are meaningful to restrict? security implications of allowing Content-Type vs Authorization override?)
 
+## system_dashboard
+
+- [ ] **Pack execution is real but shell-only** — `POST /api/execute` wired to `caps.shell.run(cmd)`. Works for `type = "shell"` actions. Registry actions (`type = "registry"`) stub-return "not implemented." The registry cap exists and has `attenuate()` — wiring it up for Windows registry actions is the next step.
+- [ ] **Pack cap declarations** — alias actions don't yet declare `caps` in the pack format. Planned: `caps = { "shell" }` per action. Relevant for the user-approval UX (show user what caps an action needs before running).
+- [ ] **User approval flow** — no approval step before execution currently. User clicks action, it runs. Sufficient for a trusted default pack; needed before arbitrary user-installed packs can execute.
+- [ ] **User-installed packs** — `user_packs` fs cap is declared in manifest but third-party pack execution needs attenuation + approval flow first.
+
+## Platform caps
+
+- [ ] **`db`/`shared_db` naming inconsistency** — `opts.readonly` (inverted) vs `fs`/`registry` `opts.allow_write`. Design doc flagged this; not yet fixed. Low risk but causes confusion.
+- [ ] **`http_client` methods in CAP_FACTORIES** — `http_client_cap` now accepts `opts.methods` whitelist, but `lib/platform/init.lua` CAP_FACTORIES doesn't pass `methods` from manifest declarations. Small gap.
+
 ## Binary distribution
+
+(note: pterror/LuaJIT CI is now producing static musl binaries for Linux x86-64 and arm64. The items below may be resolved — verify against pterror/LuaJIT releases before acting on them.)
 
 - [ ] Build statically linked LuaJIT for Linux x86-64 (required for NixOS, Alpine/musl, and any non-glibc Linux — current dynamic binary is glibc-only)
 - [ ] Build LuaJIT for Linux arm64 (static)
@@ -640,10 +656,9 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
   Key invariant: set is re-rendered fresh each LLM call; raw tool output never accumulates.
   Files: `lib/agent/set.lua`, `lib/agent/render.lua`, `lib/agent/leaf.lua`, `lib/agent/preset.lua`.
 
-- [ ] **`caps.exec`** — platform cap wrapping `lib/exec` with manifest whitelist + subcommand grants.
+- [ ] **`caps.exec`** — `lib/platform/caps/exec.lua` exists (popen injection removed this session) but is NOT wired into CAP_FACTORIES in `lib/platform/init.lua`. Adding it to CAP_FACTORIES is the remaining step.
   See `docs/agent-impl.md` Section 2. Depends on: `lib/exec/make_api`, `lib/platform/caps/` pattern.
-  File: `lib/platform/caps/exec.lua`. Construction auto-fetches `--help` per binary; grant precision
-  via `allow` list restricts to specific subcommand paths.
+  Construction auto-fetches `--help` per binary; grant precision via `allow` list restricts to specific subcommand paths.
 
 - [ ] **`caps.llm`** — platform cap for grammar-constrained LLM generation via llama.cpp.
   See `docs/agent-impl.md` Section 3. Depends on: `lib/ai/providers/openai_compat` (done).
