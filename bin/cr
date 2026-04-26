@@ -1,4 +1,3 @@
-#!/usr/bin/env luajit
-local script_dir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.+/)")
-package.path = script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua;" .. package.path
-require("lib.cr").main(arg)
+#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/luajit" "$DIR/cr.lua" "$@"

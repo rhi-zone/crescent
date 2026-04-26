@@ -98,6 +98,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Design Principles
 
+**This repository is zero-dependency.** A user must be able to `git clone` and run immediately with no external installs — no package manager, no compiler, no runtime. LuaJIT binaries for all supported platforms are vendored in `bin/`. "Use Nix" or "install LuaJIT" are not acceptable answers. NixOS, musl, Alpine, and every other Linux variant are first-class targets — the vendored binaries must be statically linked so the ELF interpreter is not a constraint.
+
 **Pure Lua is the baseline and must always work standalone.** No library may hard-depend on a system lib or vendored C lib being present. Ubiquitous system libs (libc, etc.) are an optional performance tier. Non-ubiquitous system libs require a pure Lua fallback. Vendored C libs are a last resort when pure Lua is genuinely nonviable for performance reasons. Nothing requires an external install step — must work on a barebones system.
 
 
@@ -129,6 +131,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 **When verifying a newly built library, run only that library's test file — not the full suite.** Use `luajit lib/test/cli.lua lib/mylib/` or `luajit lib/test/cli.lua lib/mylib/mylib_test.lua` directly. The test runner accepts both file paths and directories. Only run the full suite (`luajit lib/test/cli.lua`) when checking global regressions.
 
 ## Context Management
+
+**Subagent prompts for git work must include: clone the repo locally, verify `git config user.name` and `git config user.email` match the target account before committing, commit with git directly, push with git. Never instruct subagents to use `gh api` to create commits — it bypasses git config and produces wrong authorship.**
 
 **Default: delegate. Inline is the exception.** Before any multi-step task — reading multiple files, exploring a question, making changes across files — spawn a subagent. The subagent returns a distilled summary; raw tool output never lands in the main context. Do not inline work and then decide afterward whether it should have been delegated — the decision must happen *before* the first tool call.
 

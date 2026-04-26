@@ -3,6 +3,15 @@
 - [ ] design: http_client attenuation — query param filtering (wildcard syntax? exact key match? key+value match?)
 - [ ] design: http_client attenuation — request header filtering (which headers are meaningful to restrict? security implications of allowing Content-Type vs Authorization override?)
 
+## Binary distribution
+
+- [ ] Build statically linked LuaJIT for Linux x86-64 (required for NixOS, Alpine/musl, and any non-glibc Linux — current dynamic binary is glibc-only)
+- [ ] Build LuaJIT for Linux arm64 (static)
+- [ ] Build LuaJIT for macOS x86-64 (missing entirely)
+- [ ] Build LuaJIT for macOS arm64 / Apple Silicon (missing entirely)
+- [ ] Establish a reliable, reproducible build process for all platforms (CI via GitHub Actions or equivalent) — current binaries sourced ad-hoc from ~/git/lua/dep/
+- [ ] Replace current dynamic Linux binary with static build once available
+
 ## RP / LLM interaction platform — primitives needed
 
 See `docs/batteries.md` and `docs/platform-design.md` for full design. Primitives the platform needs that don't exist yet:

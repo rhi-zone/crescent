@@ -1,0 +1,35 @@
+#!/bin/sh
+# Downloads the LuaJIT binary for the current platform from pterror/LuaJIT releases.
+set -e
+
+RELEASE_URL="https://github.com/pterror/LuaJIT/releases/latest/download"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  Linux)
+    case "$ARCH" in
+      x86_64)  FILE="luajit-linux-x86_64-static" ;;
+      aarch64) FILE="luajit-linux-aarch64-static" ;;
+      *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+    esac
+    ;;
+  Darwin)
+    case "$ARCH" in
+      arm64)  FILE="luajit-macos-aarch64" ;;
+      x86_64) echo "macOS x86_64 not supported" >&2; exit 1 ;;
+      *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+    esac
+    ;;
+  *)
+    echo "Unsupported OS: $OS (on Windows use install.ps1)" >&2
+    exit 1
+    ;;
+esac
+
+echo "Downloading $FILE..."
+curl -fL "$RELEASE_URL/$FILE" -o "$DIR/luajit"
+chmod +x "$DIR/luajit"
+echo "Done. Run bin/cr to use crescent."
