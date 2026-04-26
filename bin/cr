@@ -1,3 +1,13 @@
 #!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$DIR/luajit" "$DIR/cr.lua" "$@"
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "$OS-$ARCH" in
+  Linux-x86_64)  BIN="$DIR/luajit" ;;
+  Linux-aarch64) BIN="$DIR/luajit-aarch64" ;;
+  Darwin-arm64)  BIN="$DIR/luajit-macos-aarch64" ;;
+  *) echo "No bundled LuaJIT for $OS-$ARCH. Run bin/install." >&2; exit 1 ;;
+esac
+
+exec "$BIN" "$DIR/cr.lua" "$@"
