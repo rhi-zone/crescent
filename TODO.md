@@ -19,7 +19,7 @@
 ## Platform caps
 
 - [ ] **`db`/`shared_db` naming inconsistency** — `opts.readonly` (inverted) vs `fs`/`registry` `opts.allow_write`. Design doc flagged this; not yet fixed. Low risk but causes confusion.
-- [ ] **`http_client` methods in CAP_FACTORIES** — `http_client_cap` now accepts `opts.methods` whitelist, but `lib/platform/init.lua` CAP_FACTORIES doesn't pass `methods` from manifest declarations. Small gap.
+- [x] **`http_client` methods in CAP_FACTORIES** — `http_client_cap` now accepts `opts.methods` whitelist, but `lib/platform/init.lua` CAP_FACTORIES doesn't pass `methods` from manifest declarations. Small gap.
 
 ## Binary distribution
 
