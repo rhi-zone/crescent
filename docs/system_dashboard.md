@@ -13,7 +13,13 @@ The dashboard has no fixed identity — packs give it one. Install no packs: it'
 - **nushell** — system as structured queryable data. Search returns structured results; actions return structured output.
 - **Local service dashboards** — Tailscale admin, Ollama, Grafana, anything with a local HTTP API. Pack declares `http_client` cap; dashboard becomes that service's admin console.
 
-One surface. What it is depends entirely on what packs are installed.
+One surface. What it is depends entirely on what packs are installed. The quality and coverage match the installed packs — a blank dashboard is a blank slate. Parity with the prior art tools means fully bidirectional packs: not just reading Tailscale status but toggling exit nodes; not just listing registry values but writing them. Read-only is a floor, not a ceiling.
+
+## Pack Format
+
+A pack is a section of the app manifest — a list of named aliases, each with a human-readable description, cap declarations, and an action. The manifest ships inside the app's tarball alongside the Lua source. Packs are vendorable: install one, it's source you own and can modify.
+
+Packs are currently declared inline in the app manifest; user-installable packs from external sources are an open thread.
 
 ## Pack Directions
 
@@ -22,6 +28,17 @@ One surface. What it is depends entirely on what packs are installed.
 Decades of accumulated Windows system tweaks have no official UI. The canonical source is community knowledge: NTDev, tenforums, winaero, archived TweakUI documentation. Each alias maps a human-readable description to its exact registry key path and operation (read or write). This is high-value and has essentially zero legitimate competition — the knowledge exists but is scattered across blog posts, forum threads, and unmaintained tools. Packs can consolidate it.
 
 Example territory: `HKCU\Control Panel\Desktop` for focus behavior, `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` for startup programs, `HKLM\SYSTEM\CurrentControlSet\Services` for driver settings. Each alias should cite its key path and ideally a source link in the description.
+
+### Platform configuration (cross-platform)
+
+Concepts that exist on every OS with completely different mechanisms are prime candidates for unified packs:
+
+- **File associations**: `xdg-mime` / `~/.config/mimeapps.list` (Linux), Launch Services / `duti` (macOS), registry file associations (Windows). One "set default app for .pdf" action that does the right thing per platform.
+- **Startup programs**: systemd user units (Linux), launchd plists in `~/Library/LaunchAgents` (macOS), `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (Windows).
+- **Default browser / default apps**: corollary to file associations.
+- **Network/DNS config**: resolv.conf / systemd-resolved (Linux), `/etc/hosts` equivalents, DNS-over-HTTPS settings.
+
+The pack declares platform-specific cap implementations behind a unified alias description. The user sees "Set default PDF viewer" — the pack handles which OS it's running on. Packs that unify cross-platform concepts behind a single alias description are especially valuable: the user gets a stable description; the pack absorbs the OS-specific complexity.
 
 ### NixOS options as daemon catalogue
 
