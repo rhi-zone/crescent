@@ -28,7 +28,7 @@ jobs:
         run: |
           make -C /tmp/luajit/src \
             XCFLAGS="-DLUAJIT_ENABLE_GC64" \
-            LDFLAGS="-Wl,-E"
+            LDFLAGS="-Wl,-E -static-libgcc"
           strip --strip-debug /tmp/luajit/src/luajit
           mkdir -p out
           cp /tmp/luajit/src/luajit out/luajit
@@ -47,7 +47,7 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
             apk add --no-cache build-base git &&
             git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit &&
-            make -C /tmp/luajit/src XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-Wl,-E' &&
+            make -C /tmp/luajit/src XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-Wl,-E -static-libgcc' &&
             strip --strip-debug /tmp/luajit/src/luajit &&
             mkdir -p /work/out &&
             cp /tmp/luajit/src/luajit /work/out/luajit-aarch64 &&
