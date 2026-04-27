@@ -247,7 +247,7 @@ jobs:
       - name: Build
         run: |
           mkdir -p out
-          clang -shared -fPIC -O2 dep/zlib/*.c -o out/libz-macos-arm64.dylib
+          clang -shared -fPIC -O2 -include unistd.h dep/zlib/*.c -o out/libz-macos-arm64.dylib
       - uses: actions/upload-artifact@v4
         with:
           name: zlib-macos-arm64
