@@ -90,7 +90,21 @@ return {
 				{
 					label = "Show disk usage",
 					caps  = { shell = { type = "shell", reason = "Display free and used space on all mounted filesystems" } },
-					exec  = { cap = "shell", args = "df -h" },
+					exec  = {
+						cap = "shell", args = "df -h",
+						output = {
+							type        = "table",
+							skip_header = true,
+							columns = {
+								{ key = "filesystem", label = "Filesystem", type = "string" },
+								{ key = "size",       label = "Size",       type = "bytes"  },
+								{ key = "used",       label = "Used",       type = "bytes"  },
+								{ key = "avail",      label = "Avail",      type = "bytes"  },
+								{ key = "use_pct",    label = "Use%",       type = "string" },
+								{ key = "mounted_on", label = "Mounted",    type = "string" },
+							},
+						},
+					},
 				},
 			},
 		},
@@ -180,7 +194,7 @@ return {
 				{
 					label = "Show system info",
 					caps  = { shell = { type = "shell", reason = "Print kernel version and Linux distribution release details" } },
-					exec  = { cap = "shell", args = "uname -a && lsb_release -a" },
+					exec  = { cap = "shell", args = "uname -a && lsb_release -a", output = { type = "code", lang = "shell" } },
 				},
 			},
 		},
@@ -195,7 +209,7 @@ return {
 				{
 					label = "Show system info",
 					caps  = { shell = { type = "shell", reason = "Print kernel version and macOS release details" } },
-					exec  = { cap = "shell", args = "uname -a && sw_vers" },
+					exec  = { cap = "shell", args = "uname -a && sw_vers", output = { type = "code", lang = "shell" } },
 				},
 			},
 		},
@@ -241,6 +255,28 @@ return {
 					label = "Edit sudoers",
 					caps  = { shell = { type = "shell", reason = "Open /etc/sudoers safely via visudo with syntax validation" } },
 					exec  = { cap = "shell", args = "sudo visudo" },
+				},
+			},
+		},
+
+		{
+			id          = "service-status-linux",
+			title       = "SSH service status (Linux)",
+			description = "Check whether sshd is currently active under systemd.",
+			tags        = { "service", "ssh", "systemd", "status" },
+			platform    = { "linux" },
+			actions     = {
+				{
+					label = "Check sshd",
+					caps  = { shell = { type = "shell", reason = "Query systemd for the active state of sshd" } },
+					exec  = {
+						cap = "shell", args = "systemctl is-active sshd",
+						output = {
+							type     = "status_badge",
+							on_match = { pattern = "^active",   label = "sshd: active",   state = "ok"   },
+							default  = {                         label = "sshd: inactive", state = "warn" },
+						},
+					},
 				},
 			},
 		},
@@ -401,7 +437,7 @@ return {
 							allow_write = false,
 						},
 					},
-					exec  = { cap = "reg", op = "list_values" },
+					exec  = { cap = "reg", op = "list_values", output = "key_value" },
 				},
 			},
 		},

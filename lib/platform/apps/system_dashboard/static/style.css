@@ -163,19 +163,167 @@ body {
 }
 
 .output-body {
-  font-family: monospace;
   font-size: 12px;
   color: #ccc;
   background: #111;
   border: 1px solid #2a2a2a;
   border-radius: 4px;
   padding: 10px 12px;
-  max-height: 200px;
+  max-height: 320px;
   overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
   scrollbar-width: thin;
   scrollbar-color: #333 transparent;
+}
+
+/* --- Primitives --- */
+
+.prim-text {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.prim-text pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+}
+
+.prim-text .style-muted   { color: #777; }
+.prim-text .style-strong  { color: #fff; font-weight: 600; }
+.prim-text .style-error   { color: #ff8080; }
+.prim-text .style-success { color: #80d080; }
+
+.prim-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+  background: #0c0c0c;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  position: relative;
+}
+
+.prim-code[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 9px;
+  color: #555;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prim-kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.prim-kv dt {
+  color: #888;
+  font-family: monospace;
+  align-self: center;
+}
+
+.prim-kv dd {
+  color: #ddd;
+  word-break: break-word;
+  margin: 0;
+}
+
+.prim-kv dd .prim-text {
+  font-family: monospace;
+}
+
+.prim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.prim-table th,
+.prim-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.prim-table th {
+  color: #888;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #1a1a1a;
+}
+
+.prim-table td {
+  color: #ccc;
+  word-break: break-word;
+}
+
+.prim-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.prim-badge.state-ok      { background: #0a2a14; color: #80d080; border-color: #1a5a28; }
+.prim-badge.state-warn    { background: #2a1f08; color: #ffd070; border-color: #6a5a10; }
+.prim-badge.state-error   { background: #2a0e0e; color: #ff8080; border-color: #7a2020; }
+.prim-badge.state-unknown { background: #1a1a1a; color: #888;    border-color: #333;    }
+.prim-badge.state-info    { background: #0e1a2a; color: #80a8d0; border-color: #20407a; }
+
+.prim-unknown {
+  font-family: monospace;
+  font-size: 11px;
+  color: #888;
+  white-space: pre-wrap;
+  background: #0c0c0c;
+  padding: 8px 10px;
+  border-radius: 3px;
+}
+
+.output-cite {
+  margin-top: 8px;
+}
+
+.cite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 10px;
+  color: #666;
+  font-family: monospace;
+}
+
+.cite-list li {
+  padding: 1px 0;
+}
+
+.cite-kind {
+  display: inline-block;
+  padding: 1px 5px;
+  background: #222;
+  border-radius: 2px;
+  color: #888;
+  margin-right: 4px;
+}
+
+.cite-detail {
+  color: #777;
+  word-break: break-all;
 }
 
 .output-body::-webkit-scrollbar {
