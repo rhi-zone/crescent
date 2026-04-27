@@ -19,6 +19,7 @@ local json       = require("lib.format.json") --: any
 local search     = require("lib.platform.apps.system_dashboard.search")
 local packs      = require("lib.platform.apps.system_dashboard.packs")
 local cap_dispatch = require("lib.platform.cap_dispatch")
+local output_mod = require("lib.platform.apps.system_dashboard.output") --: any
 
 local M = {}
 
@@ -101,6 +102,240 @@ local function find_cap_by_type(caps, cap_type)
 	return nil
 end
 
+-- Strip trailing newline for text-shaped output adapters.
+--: (string) -> string
+local function rstrip_newline(s)
+	local out, _ = s:gsub("\n+$", "")
+	return out
+end
+
+-- Split a string into lines (no trailing empty line).
+--: (string) -> string[]
+local function split_lines(s)
+	local lines = {} --: string[]
+	for line in s:gmatch("[^\n]+") do
+		lines[#lines + 1] = line
+	end
+	return lines
+end
+
+-- Tokenise a line by whitespace runs.
+--: (string) -> string[]
+local function split_ws(line)
+	local toks = {} --: string[]
+	for tok in line:gmatch("%S+") do
+		toks[#toks + 1] = tok
+	end
+	return toks
+end
+
+-- Determine output shape spec from action.exec.output. Accepts:
+--   nil / "text" / "code" / "key_value" / table with .type
+--: (any) -> { [string]: any }
+local function output_spec_of(exec_info)
+	local exec = exec_info --: any
+	local o = exec and exec.output
+	if o == nil then return { type = "text" } end
+	if type(o) == "string" then return { type = o } end
+	if type(o) == "table" then
+		local ot = o --: any
+		if type(ot.type) ~= "string" then
+			return { type = "text" }
+		end
+		return ot
+	end
+	return { type = "text" }
+end
+
+-- Build a default cite list from exec_info + cap type. Best-effort: caps don't
+-- expose root paths, so use what we can read off the action declaration.
+--: (any, string) -> any[]
+local function make_cite(exec_info, cap_type)
+	local exec = exec_info --: any
+	if cap_type == "shell" then
+		return { output_mod.cite_command({ tostring(exec.args or "") }) }
+	end
+	if cap_type == "exec" then
+		local argv = {} --: any
+		argv[1] = tostring(exec.binary or "")
+		local args = exec.args
+		if type(args) == "table" then
+			local args_t = args --: any[]
+			for i, a in ipairs(args_t) do argv[i + 1] = tostring(a) end
+		end
+		return { output_mod.cite_exec(argv) }
+	end
+	if cap_type == "registry" then
+		local op = exec.op
+		local subkey = tostring(exec.subkey or "")
+		local name_raw = exec.name
+		local name = type(name_raw) == "string" and name_raw or ""
+		if op == "get" or op == "set" then
+			local path = subkey
+			if name ~= "" then
+				if subkey ~= "" then
+					path = subkey .. "\\" .. name
+				else
+					path = name
+				end
+			end
+			local val = nil --: any
+			if op == "set" then val = tostring(exec.value or "") end
+			return { output_mod.cite_registry(path, val) }
+		end
+		return { output_mod.cite_registry_key(subkey) }
+	end
+	return {}
+end
+
+-- Adapt a raw cap result into a primitive body.
+-- raw is the value returned by the cap (string for shell/exec/registry get,
+-- list of records for list_values/list_keys, etc.).
+--: (any, any) -> any | nil, string | nil
+local function adapt_body(spec, raw)
+	local s = spec --: any
+	local ty = s.type
+	if ty == "text" then
+		local txt
+		if type(raw) == "string" then
+			txt = rstrip_newline(raw)
+		elseif type(raw) == "table" then
+			-- list_keys returns string[]; render as joined lines.
+			local r = raw --: any[]
+			local parts = {} --: any
+			for i, v in ipairs(r) do parts[i] = tostring(v) end
+			txt = table.concat(parts, "\n")
+		else
+			txt = tostring(raw)
+		end
+		return { type = "text", text = txt }
+	end
+	if ty == "code" then
+		local txt = type(raw) == "string" and rstrip_newline(raw) or tostring(raw)
+		return { type = "code", text = txt, lang = s.lang }
+	end
+	if ty == "key_value" then
+		if type(raw) ~= "table" then
+			return nil, "key_value: cap result must be a list of records, got " .. type(raw)
+		end
+		local list = raw --: any[]
+		local pairs_ = {} --: any[]
+		for i, rec in ipairs(list) do
+			if type(rec) ~= "table" then
+				return nil, "key_value: list[" .. tostring(i) .. "] must be a record"
+			end
+			local r = rec --: any
+			local k = r.name or r.key
+			local v = r.value
+			if v == nil then v = r.type end
+			pairs_[#pairs_ + 1] = {
+				key   = tostring(k or ("item_" .. tostring(i))),
+				value = { type = "text", text = tostring(v == nil and "" or v) },
+			}
+		end
+		return { type = "key_value", pairs = pairs_ }
+	end
+	if ty == "table" then
+		local cols = s.columns
+		if type(cols) ~= "table" then
+			return nil, "table: spec.columns missing"
+		end
+		local cols_t = cols --: any[]
+		local rows = {} --: any[]
+		if type(raw) == "string" then
+			local lines = split_lines(raw)
+			local start = 1
+			if s.skip_header then start = 2 end
+			for i = start, #lines do
+				local line = lines[i]
+				if line ~= "" then
+					local toks = split_ws(line)
+					local row = {} --: { [string]: any }
+					for ci, col in ipairs(cols_t) do
+						local c = col --: any
+						local key = tostring(c.key)
+						-- Last column captures the remainder (mountpoints with spaces, etc.).
+						if ci == #cols_t and #toks > #cols_t then
+							local extra = {} --: any
+							local n = 0
+							for j = ci, #toks do n = n + 1; extra[n] = toks[j] end
+							row[key] = table.concat(extra, " ")
+						else
+							row[key] = toks[ci] or ""
+						end
+					end
+					rows[#rows + 1] = row
+				end
+			end
+		elseif type(raw) == "table" then
+			local r = raw --: any[]
+			for _, item in ipairs(r) do
+				if type(item) ~= "table" then
+					return nil, "table: row must be a record"
+				end
+				rows[#rows + 1] = item
+			end
+		else
+			return nil, "table: cap result must be a string or list, got " .. type(raw)
+		end
+		-- Normalise columns to satisfy validator: every entry must have key/label/type.
+		local norm_cols = {} --: any[]
+		for _, col in ipairs(cols_t) do
+			local c = col --: any
+			norm_cols[#norm_cols + 1] = {
+				key      = tostring(c.key or ""),
+				label    = tostring(c.label or c.key or ""),
+				type     = tostring(c.type or "string"),
+				sortable = c.sortable,
+				align    = c.align,
+			}
+		end
+		return { type = "table", columns = norm_cols, rows = rows }
+	end
+	if ty == "status_badge" then
+		local raw_str = type(raw) == "string" and raw or tostring(raw)
+		local on_match = s.on_match --: any
+		local default  = s.default  --: any
+		if on_match and type(on_match.pattern) == "string" then
+			if raw_str:find(on_match.pattern) then
+				return { type = "status_badge",
+					label = tostring(on_match.label or ""),
+					state = tostring(on_match.state or "info") }
+			end
+		end
+		if default then
+			return { type = "status_badge",
+				label = tostring(default.label or ""),
+				state = tostring(default.state or "unknown") }
+		end
+		return { type = "status_badge", label = raw_str, state = "unknown" }
+	end
+	return nil, "unknown output spec type: " .. tostring(ty)
+end
+
+-- Build an envelope for a successful cap result. Returns the envelope table.
+--: (any, any, string) -> any
+local function adapt_envelope(exec_info, raw, cap_type)
+	local spec = output_spec_of(exec_info)
+	local body, err = adapt_body(spec, raw)
+	if not body then
+		return output_mod.err(tostring(err))
+	end
+	local cite = make_cite(exec_info, cap_type)
+	return output_mod.ok(body, { cite = cite })
+end
+
+-- Encode an envelope as JSON, validating first; on validation failure replace
+-- with an err envelope so the client always sees a valid shape.
+--: (any) -> string
+local function encode_envelope(env)
+	local ok_v, err_v = output_mod.validate(env)
+	if not ok_v then
+		env = output_mod.err("invalid envelope: " .. tostring(err_v))
+	end
+	return json.encode(env)
+end
+
 -- Handle API routes.
 --: (any, any, any) -> boolean | nil
 local function handle_api(state, req, res)
@@ -114,7 +349,7 @@ local function handle_api(state, req, res)
 		if not ok or type(body) ~= "table" then
 			res.status = 400
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "invalid JSON body" })
+			res.body = encode_envelope(output_mod.err("invalid JSON body"))
 			return true
 		end
 		local alias_id     = body.alias_id
@@ -122,14 +357,14 @@ local function handle_api(state, req, res)
 		if type(alias_id) ~= "string" or type(action_index) ~= "number" then
 			res.status = 400
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "alias_id (string) and action_index (number) required" })
+			res.body = encode_envelope(output_mod.err("alias_id (string) and action_index (number) required"))
 			return true
 		end
 		local alias = state.alias_index[alias_id]
 		if not alias then
 			res.status = 404
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "unknown alias_id" })
+			res.body = encode_envelope(output_mod.err("unknown alias_id"))
 			return true
 		end
 		-- action_index is 0-based from the frontend
@@ -138,7 +373,7 @@ local function handle_api(state, req, res)
 		if type(actions) ~= "table" or not actions[idx] then
 			res.status = 404
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "action_index out of range" })
+			res.body = encode_envelope(output_mod.err("action_index out of range"))
 			return true
 		end
 		local action = actions[idx]
@@ -150,14 +385,14 @@ local function handle_api(state, req, res)
 			if not parent then
 				res.status = 200
 				res.headers["Content-Type"] = MIME.json
-				res.body = json.encode({ ok = false, error = "no parent cap of type " .. tostring(decl.type) })
+				res.body = encode_envelope(output_mod.err("no parent cap of type " .. tostring(decl.type)))
 				return true
 			end
 			local sub, err = parent.attenuate(decl)
 			if not sub then
 				res.status = 200
 				res.headers["Content-Type"] = MIME.json
-				res.body = json.encode({ ok = false, error = err or "attenuate failed for cap " .. name })
+				res.body = encode_envelope(output_mod.err(err or "attenuate failed for cap " .. name))
 				return true
 			end
 			attenuated[name] = sub
@@ -167,61 +402,63 @@ local function handle_api(state, req, res)
 		if type(exec_info) ~= "table" then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "action.exec missing or not a table" })
+			res.body = encode_envelope(output_mod.err("action.exec missing or not a table"))
 			return true
 		end
 		local sub_cap = attenuated[exec_info.cap]
 		if not sub_cap then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "action.exec references unknown cap name: " .. tostring(exec_info.cap) })
+			res.body = encode_envelope(output_mod.err("action.exec references unknown cap name: " .. tostring(exec_info.cap)))
 			return true
 		end
 		local VTYPE_MAP = { REG_SZ = 1, REG_EXPAND_SZ = 2, REG_DWORD = 4, REG_MULTI_SZ = 7 }
-		local output, err
-		if sub_cap._type == "shell" then
-			output, err = sub_cap.run(exec_info.args)
-		elseif sub_cap._type == "exec" then
-			output, err = sub_cap.exec(exec_info.binary, exec_info.args)
-		elseif sub_cap._type == "registry" then
+		local raw, err
+		local cap_type = tostring(sub_cap._type)
+		if cap_type == "shell" then
+			raw, err = sub_cap.run(exec_info.args)
+		elseif cap_type == "exec" then
+			raw, err = sub_cap.exec(exec_info.binary, exec_info.args)
+		elseif cap_type == "registry" then
 			local op = exec_info.op
 			if op == "get" then
-				output, err = sub_cap.get(exec_info.subkey or "", exec_info.name)
+				raw, err = sub_cap.get(exec_info.subkey or "", exec_info.name)
 			elseif op == "set" then
 				local vtype_str = exec_info.vtype or "REG_SZ"
 				local vtype_int = VTYPE_MAP[vtype_str]
 				if not vtype_int then
 					res.status = 200
 					res.headers["Content-Type"] = MIME.json
-					res.body = json.encode({ ok = false, error = "unknown vtype: " .. tostring(vtype_str) })
+					res.body = encode_envelope(output_mod.err("unknown vtype: " .. tostring(vtype_str)))
 					return true
 				end
-				output, err = sub_cap.set(exec_info.subkey or "", exec_info.name, exec_info.value, vtype_int)
+				raw, err = sub_cap.set(exec_info.subkey or "", exec_info.name, exec_info.value, vtype_int)
 			elseif op == "list_keys" then
-				output, err = sub_cap.list_keys(exec_info.subkey or "")
+				raw, err = sub_cap.list_keys(exec_info.subkey or "")
 			elseif op == "list_values" then
-				output, err = sub_cap.list_values(exec_info.subkey or "")
+				raw, err = sub_cap.list_values(exec_info.subkey or "")
 			else
 				res.status = 200
 				res.headers["Content-Type"] = MIME.json
-				res.body = json.encode({ ok = false, error = "unknown registry op: " .. tostring(op) })
+				res.body = encode_envelope(output_mod.err("unknown registry op: " .. tostring(op)))
 				return true
 			end
 		else
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "unsupported cap type: " .. tostring(sub_cap._type) })
+			res.body = encode_envelope(output_mod.err("unsupported cap type: " .. cap_type))
 			return true
 		end
-		if not output then
+		if raw == nil then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = err or "exec failed" })
+			res.body = encode_envelope(output_mod.err(err or "exec failed"))
 			return true
 		end
+		local env = adapt_envelope(exec_info, raw, cap_type)
 		res.status = 200
 		res.headers["Content-Type"] = MIME.json
-		res.body = json.encode({ ok = true, output = output })
+		res.body = encode_envelope(env)
 		return true
 	end
 

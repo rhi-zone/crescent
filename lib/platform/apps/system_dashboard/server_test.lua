@@ -148,22 +148,43 @@ T.describe("system_dashboard registry dispatch", function()
 		local resp = post_execute(srv.handler, "test-reg-get", 0)
 		T.ok(resp ~= nil, "response is nil")
 		T.ok(resp.ok == true, "expected ok=true, got error: " .. tostring(resp and resp.error))
-		T.eq(resp.output, "Windows 11 Pro")
+		T.eq(resp.body.type, "text")
+		T.eq(resp.body.text, "Windows 11 Pro")
 	end)
 
 	T.describe("list_values op returns array", function()
-		local pack_src = make_pack_src("test-reg-lv",
-			{ cap = "reg", op = "list_values" }, false)
+		-- Default output adapter for list_values cap result is "text" (newline-joined),
+		-- but list_values returns a list of records — text adapter will tostring them.
+		-- Set output explicitly to key_value to exercise the structured shape.
+		local pack_src = string.format([[
+return {
+  name    = "test-pack",
+  aliases = {
+    {
+      id      = %q,
+      title   = "Test alias",
+      actions = {
+        {
+          label = "Test action",
+          caps  = { reg = { type = "registry", reason = "test", root = "HKCU\\test", allow_write = false } },
+          exec  = { cap = "reg", op = "list_values", output = "key_value" },
+        },
+      },
+    },
+  },
+}
+]], "test-reg-lv")
 		local srv = make_server_with_pack(pack_src, {
 			list_values_fn = function(_sk)
-				return { { name = "App1", type = "REG_SZ" }, { name = "App2", type = "REG_SZ" } }
+				return { { name = "App1", value = "C:\\one.exe" }, { name = "App2", value = "C:\\two.exe" } }
 			end,
 		})
 		local resp = post_execute(srv.handler, "test-reg-lv", 0)
 		T.ok(resp ~= nil, "response is nil")
 		T.ok(resp.ok == true, "expected ok=true, got error: " .. tostring(resp and resp.error))
-		T.ok(type(resp.output) == "table", "output should be a table/array")
-		T.eq(#resp.output, 2)
+		T.eq(resp.body.type, "key_value")
+		T.eq(#resp.body.pairs, 2)
+		T.eq(resp.body.pairs[1].key, "App1")
 	end)
 
 	T.describe("list_keys op returns array", function()
@@ -175,7 +196,9 @@ T.describe("system_dashboard registry dispatch", function()
 		local resp = post_execute(srv.handler, "test-reg-lk", 0)
 		T.ok(resp ~= nil, "response is nil")
 		T.ok(resp.ok == true, "expected ok=true, got error: " .. tostring(resp and resp.error))
-		T.eq(#resp.output, 3)
+		-- Default output is "text" — list_keys joins items by newline.
+		T.eq(resp.body.type, "text")
+		T.eq(resp.body.text, "KeyA\nKeyB\nKeyC")
 	end)
 
 	T.describe("set rejected when allow_write=false", function()
@@ -233,7 +256,8 @@ return {
 		local resp = post_execute(srv.handler, "test-pack-cap", 0)
 		T.ok(resp ~= nil, "response is nil")
 		T.ok(resp.ok == true, "expected ok=true, got error: " .. tostring(resp and resp.error))
-		T.eq(resp.output, "PackLevelValue")
+		T.eq(resp.body.type, "text")
+		T.eq(resp.body.text, "PackLevelValue")
 	end)
 
 	T.describe("action-level cap overrides pack-level cap", function()
