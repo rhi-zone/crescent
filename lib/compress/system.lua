@@ -49,9 +49,29 @@ ffi.cdef [[
   int inflateEnd(z_stream *strm);
 ]]
 
--- Try known library names
-local ok, zlib
+-- Try vendored path first, then known system library names.
+local function vendored_name()
+  local os, arch = ffi.os, ffi.arch
+  if os == "Linux" then
+    return arch == "arm64" and "dep/libz-linux-aarch64.so"
+                           or  "dep/libz-linux-x86_64.so"
+  elseif os == "OSX" then
+    return arch == "arm64" and "dep/libz-macos-arm64.dylib" or nil
+  elseif os == "Windows" then
+    return arch == "x86" and "dep/zlib-x86.dll" or "dep/zlib.dll"
+  end
+  return nil
+end
+
+local names = {}
+local v = vendored_name()
+if v then names[#names + 1] = v end
 for _, name in ipairs({ "z", "zlib", "zlib1", "libz" }) do
+  names[#names + 1] = name
+end
+
+local ok, zlib
+for _, name in ipairs(names) do
   ok, zlib = pcall(ffi.load, name)
   if ok then break end
 end

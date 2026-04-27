@@ -10,6 +10,7 @@ on:
   push:
     paths:
       - "dep/sqlite3/**"
+      - "dep/zlib/**"
 
 jobs:
   # ── LuaJIT ────────────────────────────────────────────────────────────────
@@ -204,6 +205,84 @@ jobs:
           name: sqlite3-windows-x86
           path: out/
 
+  # ── zlib ──────────────────────────────────────────────────────────────────
+
+  zlib-linux-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: apk add --no-cache build-base
+      - name: Build
+        run: |
+          mkdir -p out
+          gcc -shared -fPIC -O2 -include unistd.h dep/zlib/*.c -o out/libz-linux-x86_64.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zlib-linux-x86_64
+          path: out/
+
+  zlib-linux-aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (via Alpine Docker)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
+            apk add --no-cache build-base &&
+            mkdir -p /work/out &&
+            gcc -shared -fPIC -O2 -include unistd.h dep/zlib/*.c -o /work/out/libz-linux-aarch64.so
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zlib-linux-aarch64
+          path: out/
+
+  zlib-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          mkdir -p out
+          clang -shared -fPIC -O2 dep/zlib/*.c -o out/libz-macos-arm64.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zlib-macos-arm64
+          path: out/
+
+  zlib-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (x64)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          mkdir out
+          cl /O2 /LD dep\zlib\adler32.c dep\zlib\compress.c dep\zlib\crc32.c dep\zlib\deflate.c dep\zlib\gzclose.c dep\zlib\gzlib.c dep\zlib\gzread.c dep\zlib\gzwrite.c dep\zlib\infback.c dep\zlib\inffast.c dep\zlib\inflate.c dep\zlib\inftrees.c dep\zlib\trees.c dep\zlib\uncompr.c dep\zlib\zutil.c /Fe:out\zlib.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zlib-windows-x86_64
+          path: out/
+
+  zlib-windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (x86)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          mkdir out
+          cl /O2 /LD dep\zlib\adler32.c dep\zlib\compress.c dep\zlib\crc32.c dep\zlib\deflate.c dep\zlib\gzclose.c dep\zlib\gzlib.c dep\zlib\gzread.c dep\zlib\gzwrite.c dep\zlib\infback.c dep\zlib\inffast.c dep\zlib\inflate.c dep\zlib\inftrees.c dep\zlib\trees.c dep\zlib\uncompr.c dep\zlib\zutil.c /Fe:out\zlib-x86.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zlib-windows-x86
+          path: out/
+
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 
   commit:
@@ -218,6 +297,11 @@ jobs:
       - sqlite3-macos-arm64
       - sqlite3-windows-x86_64
       - sqlite3-windows-x86
+      - zlib-linux-x86_64
+      - zlib-linux-aarch64
+      - zlib-macos-arm64
+      - zlib-windows-x86_64
+      - zlib-windows-x86
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -242,6 +326,11 @@ jobs:
           cp artifacts/libsqlite3-macos-arm64.dylib    dep/
           cp artifacts/sqlite.dll                      dep/
           cp artifacts/sqlite-x86.dll                  dep/
+          cp artifacts/libz-linux-x86_64.so           dep/
+          cp artifacts/libz-linux-aarch64.so          dep/
+          cp artifacts/libz-macos-arm64.dylib         dep/
+          cp artifacts/zlib.dll                       dep/
+          cp artifacts/zlib-x86.dll                   dep/
           chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
                    bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1
@@ -249,5 +338,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bin/ dep/
           git diff --cached --quiet || \
-            git commit -m "chore(bin): update vendored LuaJIT and sqlite3 binaries"
+            git commit -m "chore(bin): update vendored LuaJIT, sqlite3, and zlib binaries"
           git push
