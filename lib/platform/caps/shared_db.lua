@@ -25,76 +25,87 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local ffi = require("ffi")
-
 local M = {}
 
--- ── FFI declarations ──────────────────────────────────────────────────────────
+-- ── lazy FFI init ─────────────────────────────────────────────────────────────
+-- sqlite_ffi is populated on first use so that loading this module does not
+-- attempt ffi.load (which fails when sqlite3 is absent). M.risk and the module
+-- table itself load without any FFI side effects.
 
-pcall(ffi.cdef, [[
-	typedef struct sqlite3      sqlite3;
-	typedef struct sqlite3_stmt sqlite3_stmt;
-	typedef int64_t             sqlite3_int64;
-	typedef struct sqlite3_context sqlite3_context;
-	typedef struct sqlite3_value  sqlite3_value;
+local _sqlite_ffi
 
-	int         sqlite3_open_v2(const char *filename, sqlite3 **ppDb, int flags, const char *zVfs);
-	int         sqlite3_prepare_v2(sqlite3 *db, const char *zSql, int nByte,
-	                               sqlite3_stmt **ppStmt, const char **pzTail);
-	int         sqlite3_step(sqlite3_stmt *);
-	int         sqlite3_finalize(sqlite3_stmt *);
-	int         sqlite3_close_v2(sqlite3 *);
-	const char *sqlite3_errmsg(sqlite3 *);
+local function get_sqlite_ffi()
+	if _sqlite_ffi then return _sqlite_ffi end
 
-	int         sqlite3_column_count(sqlite3_stmt *);
-	int         sqlite3_column_type(sqlite3_stmt *, int iCol);
-	int         sqlite3_column_bytes(sqlite3_stmt *, int iCol);
-	const void *sqlite3_column_blob(sqlite3_stmt *, int iCol);
-	double      sqlite3_column_double(sqlite3_stmt *, int iCol);
-	const char *sqlite3_column_name(sqlite3_stmt *, int iCol);
+	local ffi = require("ffi")
 
-	int sqlite3_bind_null(sqlite3_stmt *, int);
-	int sqlite3_bind_int(sqlite3_stmt *, int, int);
-	int sqlite3_bind_int64(sqlite3_stmt *, int, sqlite3_int64);
-	int sqlite3_bind_double(sqlite3_stmt *, int, double);
-	int sqlite3_bind_text(sqlite3_stmt *, int, const char *, int, void(*)(void *));
+	pcall(ffi.cdef, [[
+		typedef struct sqlite3      sqlite3;
+		typedef struct sqlite3_stmt sqlite3_stmt;
+		typedef int64_t             sqlite3_int64;
+		typedef struct sqlite3_context sqlite3_context;
+		typedef struct sqlite3_value  sqlite3_value;
 
-	int sqlite3_set_authorizer(sqlite3 *, int (*)(void *, int, const char *, const char *, const char *, const char *), void *);
+		int         sqlite3_open_v2(const char *filename, sqlite3 **ppDb, int flags, const char *zVfs);
+		int         sqlite3_prepare_v2(sqlite3 *db, const char *zSql, int nByte,
+		                               sqlite3_stmt **ppStmt, const char **pzTail);
+		int         sqlite3_step(sqlite3_stmt *);
+		int         sqlite3_finalize(sqlite3_stmt *);
+		int         sqlite3_close_v2(sqlite3 *);
+		const char *sqlite3_errmsg(sqlite3 *);
 
-	int sqlite3_exec(sqlite3 *, const char *sql, void *, void *, char **errmsg);
-	void sqlite3_free(void *);
+		int         sqlite3_column_count(sqlite3_stmt *);
+		int         sqlite3_column_type(sqlite3_stmt *, int iCol);
+		int         sqlite3_column_bytes(sqlite3_stmt *, int iCol);
+		const void *sqlite3_column_blob(sqlite3_stmt *, int iCol);
+		double      sqlite3_column_double(sqlite3_stmt *, int iCol);
+		const char *sqlite3_column_name(sqlite3_stmt *, int iCol);
 
-	int sqlite3_create_function_v2(
-		sqlite3 *db, const char *zFunctionName, int nArg, int eTextRep,
-		void *pApp,
-		void (*xFunc)(sqlite3_context *, int, sqlite3_value **),
-		void (*xStep)(sqlite3_context *, int, sqlite3_value **),
-		void (*xFinal)(sqlite3_context *),
-		void (*xDestroy)(void *)
-	);
+		int sqlite3_bind_null(sqlite3_stmt *, int);
+		int sqlite3_bind_int(sqlite3_stmt *, int, int);
+		int sqlite3_bind_int64(sqlite3_stmt *, int, sqlite3_int64);
+		int sqlite3_bind_double(sqlite3_stmt *, int, double);
+		int sqlite3_bind_text(sqlite3_stmt *, int, const char *, int, void(*)(void *));
 
-	void sqlite3_result_text(sqlite3_context *, const char *, int, void(*)(void *));
-]])
+		int sqlite3_set_authorizer(sqlite3 *, int (*)(void *, int, const char *, const char *, const char *, const char *), void *);
 
--- ── load shared library ───────────────────────────────────────────────────────
+		int sqlite3_exec(sqlite3 *, const char *sql, void *, void *, char **errmsg);
+		void sqlite3_free(void *);
 
-local sqlite_ffi
-if ffi.os == "Windows" then
-	if ffi.arch == "x64" then sqlite_ffi = ffi.load("dep/sqlite.dll")
-	else sqlite_ffi = ffi.load("dep/sqlite-x86.dll") end
-else
-	local names = {
-		"sqlite3",
-		"libsqlite3.so", "libsqlite3.so.0",
-		"libsqlite3.dylib", "/usr/lib/libsqlite3.dylib",
-	}
-	for _, name in ipairs(names) do
-		local ok, lib = pcall(ffi.load, name)
-		if ok then sqlite_ffi = lib; break end
+		int sqlite3_create_function_v2(
+			sqlite3 *db, const char *zFunctionName, int nArg, int eTextRep,
+			void *pApp,
+			void (*xFunc)(sqlite3_context *, int, sqlite3_value **),
+			void (*xStep)(sqlite3_context *, int, sqlite3_value **),
+			void (*xFinal)(sqlite3_context *),
+			void (*xDestroy)(void *)
+		);
+
+		void sqlite3_result_text(sqlite3_context *, const char *, int, void(*)(void *));
+	]])
+
+	local lib
+	if ffi.os == "Windows" then
+		if ffi.arch == "x64" then lib = ffi.load("dep/sqlite.dll")
+		else lib = ffi.load("dep/sqlite-x86.dll") end
+	else
+		local names = {
+			"sqlite3",
+			"libsqlite3.so", "libsqlite3.so.0",
+			"libsqlite3.dylib", "/usr/lib/libsqlite3.dylib",
+		}
+		for _, name in ipairs(names) do
+			local ok, loaded = pcall(ffi.load, name)
+			if ok then lib = loaded; break end
+		end
+		if not lib then
+			error("shared_db_cap: sqlite3 shared library not found")
+		end
 	end
-	if not sqlite_ffi then
-		error("shared_db_cap: sqlite3 shared library not found")
-	end
+
+	_sqlite_ffi = lib
+	_SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1)
+	return _sqlite_ffi
 end
 
 -- ── constants ─────────────────────────────────────────────────────────────────
@@ -144,20 +155,24 @@ local SQLITE_ATTACH              = 24
 local SQLITE_DETACH              = 25
 local SQLITE_FUNCTION            = 31
 
-local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1)
+local _SQLITE_TRANSIENT  -- lazily set alongside _sqlite_ffi
 
 -- ── column reading ────────────────────────────────────────────────────────────
 
 local col_read = {
-	[SQLITE_INTEGER] = function(stmt, i) return sqlite_ffi.sqlite3_column_double(stmt, i) end,
-	[SQLITE_FLOAT]   = function(stmt, i) return sqlite_ffi.sqlite3_column_double(stmt, i) end,
+	[SQLITE_INTEGER] = function(stmt, i) return get_sqlite_ffi().sqlite3_column_double(stmt, i) end,
+	[SQLITE_FLOAT]   = function(stmt, i) return get_sqlite_ffi().sqlite3_column_double(stmt, i) end,
 	[SQLITE_TEXT]    = function(stmt, i)
-		local n = sqlite_ffi.sqlite3_column_bytes(stmt, i)
-		return ffi.string(sqlite_ffi.sqlite3_column_blob(stmt, i), n)
+		local lib = get_sqlite_ffi()
+		local ffi = require("ffi")
+		local n = lib.sqlite3_column_bytes(stmt, i)
+		return ffi.string(lib.sqlite3_column_blob(stmt, i), n)
 	end,
 	[SQLITE_BLOB]    = function(stmt, i)
-		local n = sqlite_ffi.sqlite3_column_bytes(stmt, i)
-		return ffi.string(sqlite_ffi.sqlite3_column_blob(stmt, i), n)
+		local lib = get_sqlite_ffi()
+		local ffi = require("ffi")
+		local n = lib.sqlite3_column_bytes(stmt, i)
+		return ffi.string(lib.sqlite3_column_blob(stmt, i), n)
 	end,
 	[SQLITE_NULL]    = function() return nil end,
 }
@@ -166,21 +181,22 @@ local col_read = {
 
 local function bind_params(stmt, params)
 	if not params then return end
+	local lib = get_sqlite_ffi()
 	for i = 1, #params do
 		local x = params[i]
 		local t = type(x)
 		if t == "number" then
 			if x % 1 == 0 and x >= -2147483648 and x <= 2147483647 then
-				sqlite_ffi.sqlite3_bind_int(stmt, i, x)
+				lib.sqlite3_bind_int(stmt, i, x)
 			else
-				sqlite_ffi.sqlite3_bind_double(stmt, i, x)
+				lib.sqlite3_bind_double(stmt, i, x)
 			end
 		elseif t == "string" then
-			sqlite_ffi.sqlite3_bind_text(stmt, i, x, #x, SQLITE_TRANSIENT)
+			lib.sqlite3_bind_text(stmt, i, x, #x, _SQLITE_TRANSIENT)
 		elseif t == "boolean" then
-			sqlite_ffi.sqlite3_bind_int(stmt, i, x and 1 or 0)
+			lib.sqlite3_bind_int(stmt, i, x and 1 or 0)
 		elseif x == nil then
-			sqlite_ffi.sqlite3_bind_null(stmt, i)
+			lib.sqlite3_bind_null(stmt, i)
 		else
 			error("shared_db_cap: cannot bind param " .. i .. " of type " .. t, 2)
 		end
@@ -190,11 +206,13 @@ end
 -- ── helper: exec raw SQL ──────────────────────────────────────────────────────
 
 local function raw_exec(db, sql)
+	local lib = get_sqlite_ffi()
+	local ffi = require("ffi")
 	local errmsg_ptr = ffi.new("char *[1]")
-	local rc = sqlite_ffi.sqlite3_exec(db, sql, nil, nil, errmsg_ptr)
+	local rc = lib.sqlite3_exec(db, sql, nil, nil, errmsg_ptr)
 	if rc ~= SQLITE_OK then
 		local msg = ffi.string(errmsg_ptr[0])
-		sqlite_ffi.sqlite3_free(errmsg_ptr[0])
+		lib.sqlite3_free(errmsg_ptr[0])
 		return nil, "shared_db_cap: " .. msg
 	end
 	return true
@@ -295,6 +313,10 @@ end
 function M.shared_db_cap(path, app_id, tables, opts)
 	opts = opts or {}
 	local readonly = opts.readonly
+
+	local ffi = require("ffi")
+	local sqlite_ffi = get_sqlite_ffi()
+	local SQLITE_TRANSIENT = _SQLITE_TRANSIENT
 
 	local db_ptr = ffi.new("sqlite3 *[1]")
 	local flags = readonly and SQLITE_OPEN_READONLY or SQLITE_OPEN_READWRITE
