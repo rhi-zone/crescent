@@ -7,6 +7,9 @@ on:
         description: "LuaJIT git ref (branch/tag/SHA)"
         default: "v2.1"
         required: false
+  push:
+    paths:
+      - "dep/sqlite3/**"
 
 jobs:
   # ── LuaJIT ────────────────────────────────────────────────────────────────
