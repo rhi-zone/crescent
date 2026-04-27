@@ -5,9 +5,12 @@
 -- manifest_entry fields:
 --   binaries : { [string]: { schema: "auto" | HelpSchema | nil, allow: string[] | nil } }
 --   stderr   : string | nil  ("merge" | "discard" | nil)
+--   popen    : function | nil  (io.popen override for testability; required if no global io)
 --
 -- Construction:
 --   M.new(manifest_entry) -> cap, revoke_fn
+--   M.new(manifest_entry, opts) -> cap, revoke_fn
+--     opts.parent_revoked_fn : (() -> boolean) | nil
 --
 -- Cap invocation — two forms:
 --   1. Fluent (typed):  cap[binary_name].subcommand(pos, {flags})
@@ -153,16 +156,22 @@ end
 --:: ExecManifestEntry = {
 --::   binaries: { [string]: { schema: "auto" | unknown | nil, allow: string[] | nil } },
 --::   stderr: string | nil,
+--::   popen: unknown | nil,
 --:: }
 
--- M.new(manifest_entry) -> cap, revoke_fn
---: (ExecManifestEntry) -> any, () -> nil
-function M.new(manifest_entry)
+-- M.new(manifest_entry, opts) -> cap, revoke_fn
+--: (ExecManifestEntry, { parent_revoked_fn: (() -> boolean) | nil } | nil) -> any, () -> nil
+function M.new(manifest_entry, opts)
 	--: any
 	local entry = manifest_entry or {}
 	--: any
 	local binaries_spec = entry.binaries or {}
 	local stderr = entry.stderr
+	local injected_popen = entry.popen
+
+	local options = opts or {}
+	--: (() -> boolean) | nil
+	local parent_revoked_fn = options.parent_revoked_fn
 
 	local revoked = false
 
@@ -181,7 +190,7 @@ function M.new(manifest_entry)
 		local schema_val = s.schema
 		if schema_val == "auto" then
 			--: any
-			local fetch_opts = { popen = io.popen, max_depth = 4 }
+			local fetch_opts = { popen = injected_popen, max_depth = 4 }
 			local fetched, _ = help.fetch(sname, fetch_opts)
 			schemas[sname] = fetched  -- nil if binary absent; raw mode fallback
 		elseif type(schema_val) == "table" then
@@ -201,7 +210,10 @@ function M.new(manifest_entry)
 			-- propagates "popen: capability revoked".
 			return nil, "capability revoked"
 		end
-		return io.popen(cmd_str, mode)
+		if parent_revoked_fn and parent_revoked_fn() then
+			return nil, "capability revoked"
+		end
+		return injected_popen(cmd_str, mode)
 	end
 
 	-- Build fluent API nodes using the revoke-checked popen.
@@ -224,6 +236,7 @@ function M.new(manifest_entry)
 	-- Validates binary whitelist and allow list, then calls exec.run.
 	local function raw_call(binary_name, args)
 		if revoked then return nil, "capability revoked" end
+		if parent_revoked_fn and parent_revoked_fn() then return nil, "capability revoked" end
 
 		if type(binary_name) ~= "string" then
 			return nil, "binary name must be a string"
@@ -256,13 +269,85 @@ function M.new(manifest_entry)
 			end
 		end
 
-		return exec.run(binary_name, flat_args, { popen = io.popen, stderr = stderr })
+		return exec.run(binary_name, flat_args, { popen = injected_popen, stderr = stderr })
+	end
+
+	-- cap.attenuate: create a narrowed sub-cap.
+	-- sub_decl fields:
+	--   binaries : subset of parent binaries, with optional further-restricted allow lists
+	--   stderr   : string | nil (defaults to parent stderr)
+	local function attenuate(sub_decl)
+		if revoked then return nil, "capability revoked" end
+		if parent_revoked_fn and parent_revoked_fn() then return nil, "capability revoked" end
+
+		--: any
+		local sd = sub_decl or {}
+		--: any
+		local sub_binaries_decl = sd.binaries or {}
+
+		-- Validate: sub may not request binaries not in parent.
+		for bin_name, _ in pairs(sub_binaries_decl) do
+			if binaries_spec[bin_name] == nil then
+				return nil, "attenuate: binary not in parent cap: " .. tostring(bin_name)
+			end
+		end
+
+		-- Build narrowed_binaries: for each requested binary, intersect allow lists.
+		local narrowed_binaries = {}
+		for bin_name, sub_spec in pairs(sub_binaries_decl) do
+			--: any
+			local parent_spec = binaries_spec[bin_name]
+			--: string[] | nil
+			local parent_allow = parent_spec.allow
+			--: string[] | nil
+			local sub_allow = sub_spec.allow
+
+			local final_allow
+			if sub_allow == nil then
+				-- Inherit parent restriction (or nil = unrestricted if parent unrestricted).
+				final_allow = parent_allow
+			elseif parent_allow == nil then
+				-- Parent unrestricted: sub may restrict to any subset.
+				final_allow = sub_allow
+			else
+				-- Both specify allow lists: sub must be a subset of parent.
+				local parent_set = build_allow_set(parent_allow)
+				for i = 1, #sub_allow do
+					if not parent_set[sub_allow[i]] then
+						return nil, "attenuate: sub allow '" .. sub_allow[i] ..
+							"' not in parent allow for binary: " .. bin_name
+					end
+				end
+				final_allow = sub_allow
+			end
+
+			narrowed_binaries[bin_name] = {
+				schema = parent_spec.schema,
+				allow  = final_allow,
+			}
+		end
+
+		-- The sub-cap's parent_revoked_fn checks this cap's revocation state.
+		local function sub_parent_revoked()
+			return revoked or (parent_revoked_fn and parent_revoked_fn()) or false
+		end
+
+		return M.new(
+			{
+				binaries = narrowed_binaries,
+				stderr   = sd.stderr or stderr,
+				popen    = injected_popen,
+			},
+			{ parent_revoked_fn = sub_parent_revoked }
+		)
 	end
 
 	-- Assemble the cap table.
-	-- cap.exec   = raw call function
-	-- cap[name]  = fluent API node for each binary with a schema
-	local cap = { exec = raw_call }
+	-- cap.exec      = raw call function
+	-- cap.attenuate = attenuation function
+	-- cap._type     = "exec"
+	-- cap[name]     = fluent API node for each binary with a schema
+	local cap = { exec = raw_call, attenuate = attenuate, _type = "exec" }
 	for name, api in pairs(apis) do
 		cap[name] = api
 	end

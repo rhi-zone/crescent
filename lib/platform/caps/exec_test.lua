@@ -378,3 +378,267 @@ T.describe("caps.exec", function()
 	end)
 
 end)
+
+-- ---------------------------------------------------------------------------
+-- Attenuation tests
+-- ---------------------------------------------------------------------------
+
+T.describe("caps.exec attenuation", function()
+
+	T.it("attenuate: subset binaries succeeds", function()
+		local cap, _ = exec_cap.new({
+			binaries = {
+				mytool  = { schema = nil },
+				anytool = { schema = nil },
+			},
+			popen = mock_popen,
+		})
+		local sub, sub_revoke = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		T.ok(sub ~= nil, "sub-cap returned")
+		T.ok(type(sub_revoke) == "function", "sub revoke function returned")
+		T.ok(type(sub.exec) == "function", "sub-cap has exec")
+		-- mytool present in sub
+		local out, err = sub.exec("mytool", {"view"})
+		T.ok(err == nil, "mytool works in sub-cap: " .. tostring(err))
+		T.ok(type(out) == "string")
+	end)
+
+	T.it("attenuate: superset binaries (unknown binary) fails", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		local sub, err = cap.attenuate({
+			binaries = { mytool = { schema = nil }, othertool = { schema = nil } },
+		})
+		T.ok(sub == nil, "nil when requesting binary not in parent")
+		T.ok(err ~= nil and err:find("not in parent cap"), "error mentions not in parent cap: " .. tostring(err))
+	end)
+
+	T.it("attenuate: sub allow list as subset of parent succeeds", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil, allow = {"view", "grep", "edit"} } },
+			popen    = mock_popen,
+		})
+		local sub, _ = cap.attenuate({
+			binaries = { mytool = { schema = nil, allow = {"view", "grep"} } },
+		})
+		T.ok(sub ~= nil, "sub-cap returned")
+		-- view is allowed
+		local out1, err1 = sub.exec("mytool", {"view"})
+		T.ok(err1 == nil, "view allowed in sub: " .. tostring(err1))
+		-- edit is blocked (not in sub allow)
+		local out2, err2 = sub.exec("mytool", {"edit"})
+		T.ok(out2 == nil, "edit blocked in sub")
+		T.ok(err2 ~= nil and err2:find("subcommand not allowed"), "error: " .. tostring(err2))
+	end)
+
+	T.it("attenuate: sub allow list wider than parent fails", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil, allow = {"view"} } },
+			popen    = mock_popen,
+		})
+		local sub, err = cap.attenuate({
+			binaries = { mytool = { schema = nil, allow = {"view", "edit"} } },
+		})
+		T.ok(sub == nil, "nil when sub allow wider than parent")
+		T.ok(err ~= nil and err:find("not in parent allow"), "error mentions not in parent allow: " .. tostring(err))
+	end)
+
+	T.it("attenuate: sub allow nil inherits parent allow", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil, allow = {"view"} } },
+			popen    = mock_popen,
+		})
+		-- sub requests mytool with no allow specified -> inherits parent's {"view"}
+		local sub, _ = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		T.ok(sub ~= nil, "sub-cap returned")
+		-- view is allowed (inherited)
+		local _, err1 = sub.exec("mytool", {"view"})
+		T.ok(err1 == nil, "view allowed via inherited allow: " .. tostring(err1))
+		-- grep is not in parent allow, so blocked
+		local out2, err2 = sub.exec("mytool", {"grep"})
+		T.ok(out2 == nil, "grep blocked via inherited allow")
+		T.ok(err2 ~= nil and err2:find("subcommand not allowed"), "error: " .. tostring(err2))
+	end)
+
+	T.it("attenuate: parent revocation propagates to sub-cap", function()
+		local cap, revoke = exec_cap.new({
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		local sub, _ = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		T.ok(sub ~= nil, "sub-cap created")
+		-- Works before revocation.
+		local _, err_before = sub.exec("mytool", {"view"})
+		T.ok(err_before == nil, "sub works before parent revoke: " .. tostring(err_before))
+		-- Revoke parent.
+		revoke()
+		local out, err = sub.exec("mytool", {"view"})
+		T.ok(out == nil, "sub nil after parent revoke")
+		T.ok(err ~= nil and err:find("capability revoked"), "error after parent revoke: " .. tostring(err))
+	end)
+
+	T.it("attenuate: sub-cap revocation does not affect parent", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		local sub, sub_revoke = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		sub_revoke()
+		-- Sub is dead.
+		local out_sub, err_sub = sub.exec("mytool", {"view"})
+		T.ok(out_sub == nil, "sub dead after sub_revoke")
+		T.ok(err_sub ~= nil and err_sub:find("capability revoked"), "sub error: " .. tostring(err_sub))
+		-- Parent still works.
+		local out_par, err_par = cap.exec("mytool", {"view"})
+		T.ok(err_par == nil, "parent unaffected by sub revoke: " .. tostring(err_par))
+		T.ok(type(out_par) == "string")
+	end)
+
+	T.it("attenuate: revoked parent cannot attenuate", function()
+		local cap, revoke = exec_cap.new({
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		revoke()
+		local sub, err = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		T.ok(sub == nil, "cannot attenuate a revoked cap")
+		T.ok(err ~= nil and err:find("capability revoked"), "error: " .. tostring(err))
+	end)
+
+	T.it("attenuate: sub-cap also has attenuate method", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		local sub, _ = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		T.ok(sub ~= nil, "sub-cap returned")
+		T.ok(type(sub.attenuate) == "function", "sub-cap has attenuate method")
+	end)
+
+	T.it("attenuate: _type field is 'exec'", function()
+		local cap, _ = exec_cap.new({
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		T.eq(cap._type, "exec")
+		local sub, _ = cap.attenuate({
+			binaries = { mytool = { schema = nil } },
+		})
+		T.ok(sub ~= nil, "sub-cap returned")
+		T.eq(sub._type, "exec")
+	end)
+
+end)
+
+-- ---------------------------------------------------------------------------
+-- Shell attenuation tests
+-- ---------------------------------------------------------------------------
+
+T.describe("caps.shell attenuation", function()
+	local shell_caps = require("lib.platform.caps.shell")
+
+	T.it("_type field is 'shell'", function()
+		local cap, _ = shell_caps.shell_cap()
+		T.eq(cap._type, "shell")
+	end)
+
+	T.it("attenuate to shell sub-cap works", function()
+		local cap, _ = shell_caps.shell_cap()
+		local sub, sub_revoke = cap.attenuate({ type = "shell" })
+		T.ok(sub ~= nil, "shell sub-cap returned")
+		T.ok(type(sub_revoke) == "function", "sub revoke returned")
+		T.eq(sub._type, "shell")
+		T.ok(type(sub.run) == "function", "sub has run")
+		T.ok(type(sub.attenuate) == "function", "sub has attenuate")
+	end)
+
+	T.it("attenuate default type is shell", function()
+		local cap, _ = shell_caps.shell_cap()
+		local sub, _ = cap.attenuate({})
+		T.ok(sub ~= nil, "shell sub-cap returned with empty sub_decl")
+		T.eq(sub._type, "shell")
+	end)
+
+	T.it("attenuate to exec sub-cap works", function()
+		local cap, _ = shell_caps.shell_cap()
+		local sub, sub_revoke = cap.attenuate({
+			type     = "exec",
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		T.ok(sub ~= nil, "exec sub-cap returned")
+		T.ok(type(sub_revoke) == "function", "sub revoke returned")
+		T.eq(sub._type, "exec")
+		T.ok(type(sub.exec) == "function", "exec sub-cap has exec fn")
+		local out, err = sub.exec("mytool", {"view"})
+		T.ok(err == nil, "exec sub-cap can run: " .. tostring(err))
+		T.ok(type(out) == "string")
+	end)
+
+	T.it("attenuate unknown type returns error", function()
+		local cap, _ = shell_caps.shell_cap()
+		local sub, err = cap.attenuate({ type = "frobnicator" })
+		T.ok(sub == nil, "nil for unknown type")
+		T.ok(err ~= nil and err:find("unknown attenuation type"), "error: " .. tostring(err))
+	end)
+
+	T.it("shell parent revocation propagates to shell sub-cap", function()
+		local cap, revoke = shell_caps.shell_cap()
+		local sub, _ = cap.attenuate({ type = "shell" })
+		T.ok(sub ~= nil)
+		revoke()
+		local out, err = sub.run("echo hello")
+		T.ok(out == nil, "sub nil after parent revoke")
+		T.ok(err ~= nil and err:find("capability revoked"), "error: " .. tostring(err))
+	end)
+
+	T.it("shell sub-cap revocation does not affect parent", function()
+		local cap, _ = shell_caps.shell_cap()
+		local sub, sub_revoke = cap.attenuate({ type = "shell" })
+		T.ok(sub ~= nil)
+		sub_revoke()
+		local out_sub, err_sub = sub.run("echo hello")
+		T.ok(out_sub == nil, "sub dead")
+		T.ok(err_sub ~= nil and err_sub:find("capability revoked"), "sub error: " .. tostring(err_sub))
+		-- Parent run touches io.popen which works in this environment.
+		-- We only check the cap itself isn't broken (it won't be revoked).
+		T.ok(type(cap.run) == "function", "parent run still a function")
+	end)
+
+	T.it("shell parent revocation propagates to exec sub-cap", function()
+		local cap, revoke = shell_caps.shell_cap()
+		local sub, _ = cap.attenuate({
+			type     = "exec",
+			binaries = { mytool = { schema = nil } },
+			popen    = mock_popen,
+		})
+		T.ok(sub ~= nil)
+		revoke()
+		local out, err = sub.exec("mytool", {"view"})
+		T.ok(out == nil, "exec sub nil after shell parent revoke")
+		T.ok(err ~= nil and err:find("capability revoked"), "error: " .. tostring(err))
+	end)
+
+	T.it("revoked shell parent cannot attenuate", function()
+		local cap, revoke = shell_caps.shell_cap()
+		revoke()
+		local sub, err = cap.attenuate({ type = "shell" })
+		T.ok(sub == nil, "cannot attenuate revoked shell cap")
+		T.ok(err ~= nil and err:find("capability revoked"), "error: " .. tostring(err))
+	end)
+
+end)
