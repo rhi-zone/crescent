@@ -30,14 +30,13 @@ jobs:
             XCFLAGS="-DLUAJIT_ENABLE_GC64" \
             LDFLAGS="-Wl,-E"
           strip --strip-debug /tmp/luajit/src/luajit
-          cp /tmp/luajit/src/luajit bin/luajit
-          cp /lib/ld-musl-x86_64.so.1 ld-musl-x86_64.so.1
+          mkdir -p out
+          cp /tmp/luajit/src/luajit out/luajit
+          cp /lib/ld-musl-x86_64.so.1 out/ld-musl-x86_64.so.1
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-linux-x86_64
-          path: |
-            bin/luajit
-            ld-musl-x86_64.so.1
+          path: out/
 
   luajit-linux-aarch64:
     runs-on: ubuntu-24.04-arm
@@ -50,15 +49,14 @@ jobs:
             git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit &&
             make -C /tmp/luajit/src XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-Wl,-E' &&
             strip --strip-debug /tmp/luajit/src/luajit &&
-            cp /tmp/luajit/src/luajit /work/bin/luajit-aarch64 &&
-            cp /lib/ld-musl-aarch64.so.1 /work/ld-musl-aarch64.so.1
+            mkdir -p /work/out &&
+            cp /tmp/luajit/src/luajit /work/out/luajit-aarch64 &&
+            cp /lib/ld-musl-aarch64.so.1 /work/out/ld-musl-aarch64.so.1
           "
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-linux-aarch64
-          path: |
-            bin/luajit-aarch64
-            ld-musl-aarch64.so.1
+          path: out/
 
   luajit-macos-arm64:
     runs-on: macos-14
@@ -73,11 +71,12 @@ jobs:
             XCFLAGS="-DLUAJIT_ENABLE_GC64" \
             LDFLAGS="-Wl,-export_dynamic"
           strip /tmp/luajit/src/luajit
-          cp /tmp/luajit/src/luajit bin/luajit-macos-aarch64
+          mkdir -p out
+          cp /tmp/luajit/src/luajit out/luajit-macos-aarch64
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-macos-arm64
-          path: bin/luajit-macos-aarch64
+          path: out/
 
   luajit-windows-x86_64:
     runs-on: windows-latest
@@ -95,11 +94,13 @@ jobs:
           msvcbuild.bat
       - name: Copy artifact
         shell: pwsh
-        run: Copy-Item "src\luajit.exe" "luajit.exe"
+        run: |
+          New-Item -ItemType Directory -Force out
+          Copy-Item "src\luajit.exe" "out\luajit.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-windows-x86_64
-          path: luajit.exe
+          path: out/
 
   luajit-windows-x86:
     runs-on: windows-latest
@@ -117,11 +118,13 @@ jobs:
           msvcbuild.bat
       - name: Copy artifact
         shell: pwsh
-        run: Copy-Item "src\luajit.exe" "luajit32.exe"
+        run: |
+          New-Item -ItemType Directory -Force out
+          Copy-Item "src\luajit.exe" "out\luajit32.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-windows-x86
-          path: luajit32.exe
+          path: out/
 
   # ── sqlite3 ───────────────────────────────────────────────────────────────
 
@@ -134,11 +137,13 @@ jobs:
       - name: Install build tools
         run: apk add --no-cache build-base
       - name: Build
-        run: gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-linux-x86_64.so
+        run: |
+          mkdir -p out
+          gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o out/libsqlite3-linux-x86_64.so
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-linux-x86_64
-          path: dep/libsqlite3-linux-x86_64.so
+          path: out/
 
   sqlite3-linux-aarch64:
     runs-on: ubuntu-24.04-arm
@@ -148,23 +153,26 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
             apk add --no-cache build-base &&
-            gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-linux-aarch64.so
+            mkdir -p /work/out &&
+            gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o /work/out/libsqlite3-linux-aarch64.so
           "
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-linux-aarch64
-          path: dep/libsqlite3-linux-aarch64.so
+          path: out/
 
   sqlite3-macos-arm64:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: clang -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-macos-arm64.dylib
+        run: |
+          mkdir -p out
+          clang -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o out/libsqlite3-macos-arm64.dylib
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-macos-arm64
-          path: dep/libsqlite3-macos-arm64.dylib
+          path: out/
 
   sqlite3-windows-x86_64:
     runs-on: windows-latest
@@ -174,11 +182,12 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:dep\sqlite.dll
+          mkdir out
+          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:out\sqlite.dll
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-windows-x86_64
-          path: dep/sqlite.dll
+          path: out/
 
   sqlite3-windows-x86:
     runs-on: windows-latest
@@ -188,11 +197,12 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
-          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:dep\sqlite-x86.dll
+          mkdir out
+          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:out\sqlite-x86.dll
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-windows-x86
-          path: dep/sqlite-x86.dll
+          path: out/
 
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 
@@ -220,18 +230,18 @@ jobs:
       - name: Copy artifacts and commit
         run: |
           mkdir -p bin dep
-          cp artifacts/bin/luajit               bin/luajit
-          cp artifacts/bin/luajit-aarch64       bin/luajit-aarch64
-          cp artifacts/bin/luajit-macos-aarch64 bin/luajit-macos-aarch64
-          cp artifacts/luajit.exe               bin/luajit.exe
-          cp artifacts/luajit32.exe             bin/luajit32.exe
-          cp artifacts/ld-musl-x86_64.so.1      bin/
-          cp artifacts/ld-musl-aarch64.so.1     bin/
-          cp artifacts/dep/libsqlite3-linux-x86_64.so  dep/
-          cp artifacts/dep/libsqlite3-linux-aarch64.so dep/
-          cp artifacts/dep/libsqlite3-macos-arm64.dylib  dep/
-          cp artifacts/dep/sqlite.dll     dep/
-          cp artifacts/dep/sqlite-x86.dll dep/
+          cp artifacts/luajit                          bin/luajit
+          cp artifacts/luajit-aarch64                  bin/luajit-aarch64
+          cp artifacts/luajit-macos-aarch64            bin/luajit-macos-aarch64
+          cp artifacts/luajit.exe                      bin/luajit.exe
+          cp artifacts/luajit32.exe                    bin/luajit32.exe
+          cp artifacts/ld-musl-x86_64.so.1             bin/
+          cp artifacts/ld-musl-aarch64.so.1            bin/
+          cp artifacts/libsqlite3-linux-x86_64.so      dep/
+          cp artifacts/libsqlite3-linux-aarch64.so     dep/
+          cp artifacts/libsqlite3-macos-arm64.dylib    dep/
+          cp artifacts/sqlite.dll                      dep/
+          cp artifacts/sqlite-x86.dll                  dep/
           chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
                    bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1
