@@ -106,13 +106,8 @@ end
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 
-local function expand_home(path)
-	if path:sub(1, 1) == "~" then
-		local home = os.getenv("HOME") or ""
-		return home .. path:sub(2)
-	end
-	return path
-end
+local path_util = require("lib.platform.path_util")
+local expand_home = path_util.expand_home
 
 local function is_dir(path)
 	local f = io.open(path .. "/.", "r")

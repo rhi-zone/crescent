@@ -33,6 +33,7 @@ local base64   = require("lib.base64")
 local compress = require("lib.compress")
 local tar      = require("lib.tar")
 local json     = require("lib.json")
+local path_util = require("lib.platform.path_util")
 
 local M = {}
 
@@ -376,14 +377,8 @@ local CAP_FACTORIES = {
 		mod = "lib.platform.caps.fs",
 		build = function(decl)
 			local root = decl.root or error("platform: fs cap requires 'root' in declaration")
-			local expand_home_local = function(p)
-				if p:sub(1, 1) == "~" then
-					return (os.getenv("HOME") or "") .. p:sub(2)
-				end
-				return p
-			end
 			return require("lib.platform.caps.fs").fs_cap({
-				root     = expand_home_local(root),
+				root     = path_util.expand_home(root),
 				readonly = decl.readonly,
 			})
 		end,
