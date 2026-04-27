@@ -54,15 +54,10 @@ T.describe("cap_dispatch", function()
 
 		for t, decl in pairs(all_types) do
 			T.describe("type=" .. t, function()
-				-- pcall: cap modules with FFI deps (sqlite, ljsocket) may be
-				-- unavailable in test environments; risk() returns nil in that case.
 				local result = cap_dispatch.risk(decl)
-				if result ~= nil then
-					T.ok(result.severity ~= nil, "missing severity for type=" .. t)
-					T.ok(result.text ~= nil, "missing text for type=" .. t)
-				end
-				-- Verify the type IS registered (path known), even if module won't load
-				T.ok(cap_dispatch.is_registered(t), "type=" .. t .. " not in CAP_MODULES")
+				T.ok(result ~= nil, "risk returned nil for type=" .. t)
+				T.ok(result.severity ~= nil, "missing severity for type=" .. t)
+				T.ok(result.text ~= nil, "missing text for type=" .. t)
 			end)
 		end
 	end)

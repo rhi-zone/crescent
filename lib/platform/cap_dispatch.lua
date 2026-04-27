@@ -22,15 +22,11 @@ local CAP_MODULES = {
 	time        = "lib.platform.caps.time",
 }
 
-function M.is_registered(cap_type)
-	return CAP_MODULES[cap_type] ~= nil
-end
-
 function M.risk(decl)
 	local path = CAP_MODULES[decl.type]
 	if not path then return nil end
-	local ok, mod = pcall(require, path)
-	if not ok or not mod.risk then return nil end
+	local mod = require(path)
+	if not mod.risk then return nil end
 	return mod.risk(decl)
 end
 
