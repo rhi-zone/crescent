@@ -504,6 +504,290 @@ body {
   color: #888;
 }
 
+/* --- Composite primitives --- */
+
+.prim-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.grid-cell {
+  min-width: 0;
+}
+
+.prim-panel {
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  background: #161616;
+  padding: 8px 12px;
+}
+
+.prim-panel .panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 6px;
+}
+
+.prim-panel .panel-body {
+  font-size: 12px;
+  color: #ccc;
+}
+
+.prim-panel .panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.prim-tabs {
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.prim-tabs .tabs-header {
+  display: flex;
+  background: #161616;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.prim-tabs .tab-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 11px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  border-right: 1px solid #2a2a2a;
+}
+
+.prim-tabs .tab-btn:hover { color: #ccc; }
+.prim-tabs .tab-btn.active {
+  color: #fff;
+  background: #1f1f1f;
+}
+
+.prim-tabs .tabs-body {
+  padding: 8px 10px;
+}
+
+.prim-split {
+  display: flex;
+  gap: 8px;
+}
+
+.prim-split.split-row { flex-direction: row; }
+.prim-split.split-col { flex-direction: column; }
+
+.prim-split .split-part {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* --- Charts --- */
+
+.prim-chart {
+  color: #80a8d0;
+  display: block;
+  max-width: 100%;
+}
+
+.prim-chart .chart-unit {
+  font-family: monospace;
+  font-size: 9px;
+  fill: #777;
+}
+
+.prim-heatmap {
+  color: #80a8d0;
+  display: block;
+}
+
+.prim-toplist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.prim-toplist li {
+  display: grid;
+  grid-template-columns: minmax(80px, max-content) 1fr max-content;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.prim-toplist .toplist-label {
+  color: #ddd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prim-toplist .toplist-track {
+  height: 8px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 2px;
+  overflow: hidden;
+  display: block;
+}
+
+.prim-toplist .toplist-fill {
+  display: block;
+  height: 100%;
+  background: #2d5a8a;
+}
+
+.prim-toplist .toplist-value {
+  color: #888;
+  text-align: right;
+}
+
+/* --- Tree / JSON --- */
+
+.prim-tree,
+.prim-jsonview {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.prim-tree details,
+.prim-jsonview details {
+  margin-left: 12px;
+}
+
+.prim-tree > details,
+.prim-jsonview > details {
+  margin-left: 0;
+}
+
+.prim-tree summary,
+.prim-jsonview summary {
+  cursor: pointer;
+  color: #ddd;
+  list-style: revert;
+}
+
+.prim-tree .tree-leaf {
+  margin-left: 24px;
+  color: #bbb;
+}
+
+.prim-tree .tree-icon,
+.prim-jsonview .json-summary {
+  color: #80a8d0;
+}
+
+.prim-jsonview .json-row {
+  margin-left: 16px;
+  white-space: pre-wrap;
+}
+
+.prim-jsonview .json-key      { color: #888; }
+.prim-jsonview .json-string   { color: #80d080; }
+.prim-jsonview .json-number   { color: #ffd070; }
+.prim-jsonview .json-boolean  { color: #c080d0; }
+.prim-jsonview .json-null     { color: #777; font-style: italic; }
+
+/* --- Diff --- */
+
+.prim-diff {
+  font-family: monospace;
+  font-size: 12px;
+  background: #0c0c0c;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prim-diff .diff-add { color: #80d080; background: #0a2a14; display: block; }
+.prim-diff .diff-del { color: #ff8080; background: #2a0e0e; display: block; }
+.prim-diff .diff-eq  { color: #888; display: block; }
+
+/* --- Action primitives --- */
+
+.prim-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  background: #3a3a3a;
+  border: none;
+  border-radius: 4px;
+  color: #ddd;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.prim-btn:hover { background: #4a4a4a; color: #fff; }
+
+.prim-btn.style-primary {
+  background: #2d5a8a;
+  color: #fff;
+}
+
+.prim-btn.style-primary:hover { background: #3a70a8; }
+
+.prim-btn.style-danger {
+  background: #7a2020;
+  color: #fff;
+}
+
+.prim-btn.style-danger:hover { background: #993030; }
+
+.btn-result {
+  margin-top: 6px;
+  padding: 6px 0;
+}
+
+.prim-confirm {
+  border: 1px solid #2a2a2a;
+  background: #161616;
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.prim-confirm.danger {
+  border-color: #7a2020;
+  background: #1f1010;
+}
+
+.prim-confirm .confirm-prompt {
+  font-size: 12px;
+  color: #ddd;
+  margin-bottom: 8px;
+}
+
+.prim-confirm .confirm-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.prim-action-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prim-form-placeholder,
+.prim-stream-placeholder {
+  font-family: monospace;
+  font-size: 11px;
+  color: #888;
+  background: #0c0c0c;
+  border: 1px dashed #333;
+  border-radius: 3px;
+  padding: 8px 10px;
+}
+
 .prim-unknown {
   font-family: monospace;
   font-size: 11px;

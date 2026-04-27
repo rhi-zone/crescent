@@ -279,6 +279,86 @@ T.describe("output: list primitive", function()
 	end)
 end)
 
+T.describe("output: time-series primitives", function()
+	T.it("top_list", function()
+		local p = O.top_list({
+			items = {
+				{ label = "ads.example",  value = 1234, unit = "" },
+				{ label = "tracking.com", value = 567 },
+			},
+			max = 2000,
+		})
+		T.eq(p.type, "top_list")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("line_chart", function()
+		local p = O.line_chart({
+			series = {
+				{ name = "cpu", points = { { t = 0, v = 10 }, { t = 1, v = 25 } } },
+			},
+			unit = "%",
+		})
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("heatmap", function()
+		local p = O.heatmap({ x_bins = 2, y_bins = 2, values = { { 0.1, 0.5 }, { 0.7, 1.0 } } })
+		T.ok(O.validate(O.ok(p)))
+	end)
+end)
+
+T.describe("output: hierarchical primitives", function()
+	T.it("tree", function()
+		local p = O.tree({
+			label = "/", children = {
+				{ label = "etc", children = { { label = "hosts", value = "127.0.0.1" } } },
+				{ label = "tmp" },
+			},
+		})
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("json_view", function()
+		local p = O.json_view({ a = 1, b = { 2, 3 } }, 2)
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("diff", function()
+		local p = O.diff("foo\nbar", "foo\nbaz")
+		T.ok(O.validate(O.ok(p)))
+	end)
+end)
+
+T.describe("output: composite/action stubs", function()
+	T.it("panel", function()
+		local p = O.panel({
+			title = "Status",
+			body  = O.text("ok"),
+			actions = { "do.thing" },
+		})
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("split", function()
+		local p = O.split("row", { O.text("L"), O.text("R") })
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("confirm", function()
+		local p = O.confirm({ prompt = "Sure?", alias = "do.it", danger = true })
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("action_menu", function()
+		local p = O.action_menu({
+			{ label = "Kill", alias = "proc.kill" },
+			{ label = "Stop", alias = "proc.stop" },
+		})
+		T.ok(O.validate(O.ok(p)))
+	end)
+end)
+
 T.describe("output: form / action_menu", function()
 	T.it("form validates field types", function()
 		local p = O.form({
