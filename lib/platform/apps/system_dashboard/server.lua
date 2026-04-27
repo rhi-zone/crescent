@@ -378,7 +378,9 @@ local function handle_api(state, req, res)
 		-- Attenuate each declared cap to produce sub-caps keyed by local name.
 		local attenuated = {} --: { [string]: any }
 		local action_caps = type(action.caps) == "table" and action.caps or {}
-		for name, decl in pairs(action_caps) do
+		for name_k, decl_v in pairs(action_caps) do
+			local name = tostring(name_k)
+			local decl = decl_v --: any
 			local parent = find_cap_by_type(state.caps, decl.type)
 			if not parent then
 				res.status = 200
@@ -390,7 +392,7 @@ local function handle_api(state, req, res)
 			if not sub then
 				res.status = 200
 				res.headers["Content-Type"] = MIME.json
-				res.body = encode_envelope(output_mod.err(err or "attenuate failed for cap " .. name))
+				res.body = encode_envelope(output_mod.err(tostring(err or ("attenuate failed for cap " .. name))))
 				return true
 			end
 			attenuated[name] = sub
@@ -506,9 +508,10 @@ local function handle_api(state, req, res)
 		local action = actions[idx]
 		local cap_entries = {} --: any
 		local action_caps = type(action.caps) == "table" and action.caps or {}
-		for name, decl in pairs(action_caps) do
+		for name_k, decl_v in pairs(action_caps) do
+			local decl = decl_v --: any
 			cap_entries[#cap_entries + 1] = {
-				name   = name,
+				name   = name_k,
 				type   = decl.type,
 				reason = decl.reason,
 				risk   = cap_dispatch.risk(decl),
