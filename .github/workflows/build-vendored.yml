@@ -77,39 +77,45 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone LuaJIT
-        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT C:\luajit
-        shell: cmd
+        with:
+          repository: LuaJIT/LuaJIT
+          ref: ${{ inputs.luajit_ref || 'v2.1' }}
+      - uses: microsoft/setup-msbuild@v2
       - name: Build (x64)
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          cd C:\luajit\src
+          cd /d "%GITHUB_WORKSPACE%\src"
           msvcbuild.bat
-          copy luajit.exe %GITHUB_WORKSPACE%\bin\luajit.exe
+      - name: Copy artifact
+        shell: pwsh
+        run: Copy-Item "src\luajit.exe" "luajit.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-windows-x86_64
-          path: bin/luajit.exe
+          path: luajit.exe
 
   luajit-windows-x86:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Clone LuaJIT
-        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT C:\luajit
-        shell: cmd
+        with:
+          repository: LuaJIT/LuaJIT
+          ref: ${{ inputs.luajit_ref || 'v2.1' }}
+      - uses: microsoft/setup-msbuild@v2
       - name: Build (x86)
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
-          cd C:\luajit\src
+          cd /d "%GITHUB_WORKSPACE%\src"
           msvcbuild.bat
-          copy luajit.exe %GITHUB_WORKSPACE%\bin\luajit32.exe
+      - name: Copy artifact
+        shell: pwsh
+        run: Copy-Item "src\luajit.exe" "luajit32.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-windows-x86
-          path: bin/luajit32.exe
+          path: luajit32.exe
 
   # ── sqlite3 ───────────────────────────────────────────────────────────────
 
