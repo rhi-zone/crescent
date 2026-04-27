@@ -28,13 +28,16 @@ jobs:
         run: |
           make -C /tmp/luajit/src BUILDMODE=static \
             XCFLAGS="-DLUAJIT_ENABLE_GC64" \
-            LDFLAGS="-static -Wl,-E"
+            LDFLAGS="-Wl,-E"
           strip --strip-debug /tmp/luajit/src/luajit
           cp /tmp/luajit/src/luajit bin/luajit
+          cp /lib/ld-musl-x86_64.so.1 ld-musl-x86_64.so.1
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-linux-x86_64
-          path: bin/luajit
+          path: |
+            bin/luajit
+            ld-musl-x86_64.so.1
 
   luajit-linux-aarch64:
     runs-on: ubuntu-24.04-arm
@@ -45,14 +48,17 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
             apk add --no-cache build-base git &&
             git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit &&
-            make -C /tmp/luajit/src BUILDMODE=static XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-static -Wl,-E' &&
+            make -C /tmp/luajit/src BUILDMODE=static XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-Wl,-E' &&
             strip --strip-debug /tmp/luajit/src/luajit &&
-            cp /tmp/luajit/src/luajit /work/bin/luajit-aarch64
+            cp /tmp/luajit/src/luajit /work/bin/luajit-aarch64 &&
+            cp /lib/ld-musl-aarch64.so.1 /work/ld-musl-aarch64.so.1
           "
       - uses: actions/upload-artifact@v4
         with:
           name: luajit-linux-aarch64
-          path: bin/luajit-aarch64
+          path: |
+            bin/luajit-aarch64
+            ld-musl-aarch64.so.1
 
   luajit-macos-arm64:
     runs-on: macos-14
@@ -219,13 +225,16 @@ jobs:
           cp artifacts/luajit-macos-aarch64 bin/luajit-macos-aarch64
           cp artifacts/luajit.exe           bin/luajit.exe
           cp artifacts/luajit32.exe         bin/luajit32.exe
+          cp artifacts/ld-musl-x86_64.so.1  bin/
+          cp artifacts/ld-musl-aarch64.so.1 bin/
           cp artifacts/libsqlite3-linux-x86_64.so  dep/
           cp artifacts/libsqlite3-linux-aarch64.so dep/
           cp artifacts/libsqlite3-macos-arm64.dylib  dep/
           cp artifacts/sqlite.dll     dep/
           cp artifacts/sqlite-x86.dll dep/
           chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \
-                   bin/luajit.exe bin/luajit32.exe
+                   bin/luajit.exe bin/luajit32.exe \
+                   bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bin/ dep/
