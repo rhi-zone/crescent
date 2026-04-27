@@ -9,10 +9,12 @@
 
 ## system_dashboard
 
-- [ ] **Pack execution is real but shell-only** — `POST /api/execute` wired to `caps.shell.run(cmd)`. Works for `type = "shell"` actions. Registry actions (`type = "registry"`) stub-return "not implemented." The registry cap exists and has `attenuate()` — wiring it up for Windows registry actions is the next step.
-- [ ] **Pack cap declarations** — alias actions don't yet declare `caps` in the pack format. Planned: `caps = { "shell" }` per action. Relevant for the user-approval UX (show user what caps an action needs before running).
-- [ ] **User approval flow** — no approval step before execution currently. User clicks action, it runs. Sufficient for a trusted default pack; needed before arbitrary user-installed packs can execute.
-- [ ] **User-installed packs** — `user_packs` fs cap is declared in manifest but third-party pack execution needs attenuation + approval flow first.
+- [x] **Pack cap declarations** — action `caps = { name = { type, binaries/etc, reason } }` shape mirrors manifest cap decls; validated in packs.lua; attenuated at execute time.
+- [x] **User approval flow** — per-action cap_info modal fetched before execution; shows command, per-cap cards with author reason + platform risk (severity-coloured); Cancel has default focus.
+- [x] **Attenuate-then-invoke** — `POST /api/execute` finds parent cap by `_type`, calls `parent.attenuate(action_decl)`, invokes sub-cap. Shell and exec dispatch both wired.
+- [ ] **Registry actions (Windows)** — `type = "registry"` actions not yet wired; registry cap has `attenuate()`. Next step: add registry dispatch branch in server.lua execute path.
+- [ ] **User-installed packs** — `user_packs` fs cap declared in manifest; third-party pack execution needs scrutiny before enabling (attenuation + approval flow now exist).
+- [ ] **Pack-level cap declarations** — convenience shorthand: declare a cap once at pack scope, reference it by name from multiple actions. Action-level declarations are the finer-grained primitive and are sufficient; pack-level is syntactic sugar for the case where many actions share the same attenuated cap. Add when the repetition becomes a real authoring burden.
 
 ## Platform caps
 
