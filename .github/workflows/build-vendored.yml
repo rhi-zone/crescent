@@ -1,0 +1,238 @@
+name: Build vendored binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      luajit_ref:
+        description: "LuaJIT git ref (branch/tag/SHA)"
+        default: "v2.1"
+        required: false
+
+jobs:
+  # ── LuaJIT ────────────────────────────────────────────────────────────────
+
+  luajit-linux-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: apk add --no-cache build-base git
+      - name: Clone LuaJIT
+        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit
+      - name: Build
+        run: |
+          make -C /tmp/luajit/src BUILDMODE=static \
+            XCFLAGS="-DLUAJIT_ENABLE_GC64" \
+            LDFLAGS="-static -Wl,-E"
+          strip --strip-debug /tmp/luajit/src/luajit
+          cp /tmp/luajit/src/luajit bin/luajit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luajit-linux-x86_64
+          path: bin/luajit
+
+  luajit-linux-aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (via Alpine Docker)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
+            apk add --no-cache build-base git &&
+            git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit &&
+            make -C /tmp/luajit/src BUILDMODE=static XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-static -Wl,-E' &&
+            strip --strip-debug /tmp/luajit/src/luajit &&
+            cp /tmp/luajit/src/luajit /work/bin/luajit-aarch64
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luajit-linux-aarch64
+          path: bin/luajit-aarch64
+
+  luajit-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone LuaJIT
+        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit
+      - name: Build
+        run: |
+          make -C /tmp/luajit/src \
+            MACOSX_DEPLOYMENT_TARGET=11.0 \
+            XCFLAGS="-DLUAJIT_ENABLE_GC64" \
+            LDFLAGS="-Wl,-export_dynamic"
+          strip /tmp/luajit/src/luajit
+          cp /tmp/luajit/src/luajit bin/luajit-macos-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luajit-macos-arm64
+          path: bin/luajit-macos-aarch64
+
+  luajit-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone LuaJIT
+        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT C:\luajit
+        shell: cmd
+      - name: Build (x64)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cd C:\luajit\src
+          msvcbuild.bat
+          copy luajit.exe %GITHUB_WORKSPACE%\bin\luajit.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luajit-windows-x86_64
+          path: bin/luajit.exe
+
+  luajit-windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone LuaJIT
+        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT C:\luajit
+        shell: cmd
+      - name: Build (x86)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          cd C:\luajit\src
+          msvcbuild.bat
+          copy luajit.exe %GITHUB_WORKSPACE%\bin\luajit32.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luajit-windows-x86
+          path: bin/luajit32.exe
+
+  # ── sqlite3 ───────────────────────────────────────────────────────────────
+
+  sqlite3-linux-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: apk add --no-cache build-base
+      - name: Build
+        run: gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-linux-x86_64.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-linux-x86_64
+          path: dep/libsqlite3-linux-x86_64.so
+
+  sqlite3-linux-aarch64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (via Alpine Docker)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
+            apk add --no-cache build-base &&
+            gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-linux-aarch64.so
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-linux-aarch64
+          path: dep/libsqlite3-linux-aarch64.so
+
+  sqlite3-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: clang -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-macos-arm64.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-macos-arm64
+          path: dep/libsqlite3-macos-arm64.dylib
+
+  sqlite3-macos-x86_64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: clang -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-macos-x86_64.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-macos-x86_64
+          path: dep/libsqlite3-macos-x86_64.dylib
+
+  sqlite3-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (x64)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:dep\sqlite.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-windows-x86_64
+          path: dep/sqlite.dll
+
+  sqlite3-windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (x86)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:dep\sqlite-x86.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite3-windows-x86
+          path: dep/sqlite-x86.dll
+
+  # ── Commit all artifacts back to the repo ─────────────────────────────────
+
+  commit:
+    needs:
+      - luajit-linux-x86_64
+      - luajit-linux-aarch64
+      - luajit-macos-arm64
+      - luajit-windows-x86_64
+      - luajit-windows-x86
+      - sqlite3-linux-x86_64
+      - sqlite3-linux-aarch64
+      - sqlite3-macos-arm64
+      - sqlite3-macos-x86_64
+      - sqlite3-windows-x86_64
+      - sqlite3-windows-x86
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Copy artifacts and commit
+        run: |
+          mkdir -p bin dep
+          cp artifacts/luajit               bin/luajit
+          cp artifacts/luajit-aarch64       bin/luajit-aarch64
+          cp artifacts/luajit-macos-aarch64 bin/luajit-macos-aarch64
+          cp artifacts/luajit.exe           bin/luajit.exe
+          cp artifacts/luajit32.exe         bin/luajit32.exe
+          cp artifacts/libsqlite3-linux-x86_64.so  dep/
+          cp artifacts/libsqlite3-linux-aarch64.so dep/
+          cp artifacts/libsqlite3-macos-arm64.dylib  dep/
+          cp artifacts/libsqlite3-macos-x86_64.dylib dep/
+          cp artifacts/sqlite.dll     dep/
+          cp artifacts/sqlite-x86.dll dep/
+          chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \
+                   bin/luajit.exe bin/luajit32.exe
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/ dep/
+          git diff --cached --quiet || \
+            git commit -m "chore(bin): update vendored LuaJIT and sqlite3 binaries"
+          git push
