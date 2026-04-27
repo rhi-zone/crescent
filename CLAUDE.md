@@ -4,9 +4,13 @@ Behavioral rules for Claude Code in the crescent repository.
 
 ## Project Overview
 
-Comprehensive LuaJIT ecosystem — stdlib, typechecker, package manager.
+Crescent is an operating system in Lua — a zero-dependency, vendoring-first ecosystem that covers the entire surface area of software. Not just stdlib basics: connection protocols, parsers, codecs, game primitives, package management, typechecking, all of it, as pure Lua libraries you own outright.
 
-Monorepo inspired by [thi.ng/umbrella](https://thi.ng/umbrella): one repo, one vision, composable pieces. All libraries are vendorable — designed to be copied into your project and owned.
+`git clone` and run. No installs, no build steps. LuaJIT binaries for all supported platforms are vendored in `bin/`. Dependencies are committed, not fetched.
+
+The design is deliberately infectious: every library is copy-paste-ownable. Vendor it into your project, and it's yours — no upstream to break you, no version negotiation, no hidden coupling. This is what vendoring-first means: the unit of reuse is source you control, not a package you depend on.
+
+Monorepo inspired by [thi.ng/umbrella](https://thi.ng/umbrella): one repo, one vision, composable pieces. Libraries are independent by design — each a directory under `lib/` with its own tests, types, and docs alongside the code.
 
 Part of the [rhi ecosystem](https://rhi.zone).
 
