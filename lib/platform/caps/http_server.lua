@@ -30,6 +30,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local http_server = require("lib.http.server")
 local http_format = require("lib.http.format")
 
 local M = {}
