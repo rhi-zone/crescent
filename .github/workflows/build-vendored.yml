@@ -160,17 +160,6 @@ jobs:
           name: sqlite3-macos-arm64
           path: dep/libsqlite3-macos-arm64.dylib
 
-  sqlite3-macos-x86_64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: clang -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o dep/libsqlite3-macos-x86_64.dylib
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sqlite3-macos-x86_64
-          path: dep/libsqlite3-macos-x86_64.dylib
-
   sqlite3-windows-x86_64:
     runs-on: windows-latest
     steps:
@@ -211,7 +200,6 @@ jobs:
       - sqlite3-linux-x86_64
       - sqlite3-linux-aarch64
       - sqlite3-macos-arm64
-      - sqlite3-macos-x86_64
       - sqlite3-windows-x86_64
       - sqlite3-windows-x86
     runs-on: ubuntu-latest
@@ -234,7 +222,6 @@ jobs:
           cp artifacts/libsqlite3-linux-x86_64.so  dep/
           cp artifacts/libsqlite3-linux-aarch64.so dep/
           cp artifacts/libsqlite3-macos-arm64.dylib  dep/
-          cp artifacts/libsqlite3-macos-x86_64.dylib dep/
           cp artifacts/sqlite.dll     dep/
           cp artifacts/sqlite-x86.dll dep/
           chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \

@@ -72,8 +72,7 @@ else
 			return arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
 			                       or  "dep/libsqlite3-linux-x86_64.so"
 		elseif os == "OSX" then
-			return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib"
-			                       or  "dep/libsqlite3-macos-x86_64.dylib"
+			return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib" or nil
 		end
 		return nil
 	end
