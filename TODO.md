@@ -12,7 +12,7 @@
 - [x] **Pack cap declarations** — action `caps = { name = { type, binaries/etc, reason } }` shape mirrors manifest cap decls; validated in packs.lua; attenuated at execute time.
 - [x] **User approval flow** — per-action cap_info modal fetched before execution; shows command, per-cap cards with author reason + platform risk (severity-coloured); Cancel has default focus.
 - [x] **Attenuate-then-invoke** — `POST /api/execute` finds parent cap by `_type`, calls `parent.attenuate(action_decl)`, invokes sub-cap. Shell and exec dispatch both wired.
-- [ ] **Registry actions (Windows)** — `type = "registry"` actions not yet wired; registry cap has `attenuate()`. Next step: add registry dispatch branch in server.lua execute path.
+- [x] **Registry actions (Windows)** — `type = "registry"` actions wired in server.lua; demo actions added to default.lua (`win-reg-product-name`, `win-reg-list-startup`); dispatch tests in server_test.lua.
 - [ ] **User-installed packs** — `user_packs` fs cap declared in manifest; third-party pack execution needs scrutiny before enabling (attenuation + approval flow now exist).
 - [ ] **Pack-level cap declarations** — convenience shorthand: declare a cap once at pack scope, reference it by name from multiple actions. Action-level declarations are the finer-grained primitive and are sufficient; pack-level is syntactic sugar for the case where many actions share the same attenuated cap. Add when the repetition becomes a real authoring burden.
 

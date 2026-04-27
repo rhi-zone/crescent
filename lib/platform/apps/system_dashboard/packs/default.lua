@@ -363,6 +363,50 @@ return {
 		},
 
 		{
+			id          = "win-reg-product-name",
+			title       = "Windows product name (registry)",
+			description = "Read the Windows product name from HKLM\\Software\\Microsoft\\Windows NT\\CurrentVersion.",
+			tags        = { "system", "info", "registry" },
+			platform    = { "windows" },
+			actions     = {
+				{
+					label = "Read product name",
+					caps  = {
+						reg = {
+							type        = "registry",
+							reason      = "Read the Windows product edition name from the OS version registry key",
+							root        = [[HKLM\Software\Microsoft\Windows NT\CurrentVersion]],
+							allow_write = false,
+						},
+					},
+					exec  = { cap = "reg", op = "get", name = "ProductName" },
+				},
+			},
+		},
+
+		{
+			id          = "win-reg-list-startup",
+			title       = "Startup programs (registry)",
+			description = "List user-level startup programs registered under HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run.",
+			tags        = { "startup", "autorun", "registry" },
+			platform    = { "windows" },
+			actions     = {
+				{
+					label = "List startup entries",
+					caps  = {
+						reg = {
+							type        = "registry",
+							reason      = "List the value names under the current-user Run key to show startup programs",
+							root        = [[HKCU\Software\Microsoft\Windows\CurrentVersion\Run]],
+							allow_write = false,
+						},
+					},
+					exec  = { cap = "reg", op = "list_values" },
+				},
+			},
+		},
+
+		{
 			id          = "win-dns-flush",
 			title       = "Flush DNS cache (Windows)",
 			description = "Clear the Windows DNS resolver cache. Run in Command Prompt or PowerShell as Administrator.",

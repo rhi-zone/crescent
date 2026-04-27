@@ -177,11 +177,36 @@ local function handle_api(state, req, res)
 			res.body = json.encode({ ok = false, error = "action.exec references unknown cap name: " .. tostring(exec_info.cap) })
 			return true
 		end
+		local VTYPE_MAP = { REG_SZ = 1, REG_EXPAND_SZ = 2, REG_DWORD = 4, REG_MULTI_SZ = 7 }
 		local output, err
 		if sub_cap._type == "shell" then
 			output, err = sub_cap.run(exec_info.args)
 		elseif sub_cap._type == "exec" then
 			output, err = sub_cap.exec(exec_info.binary, exec_info.args)
+		elseif sub_cap._type == "registry" then
+			local op = exec_info.op
+			if op == "get" then
+				output, err = sub_cap.get(exec_info.subkey or "", exec_info.name)
+			elseif op == "set" then
+				local vtype_str = exec_info.vtype or "REG_SZ"
+				local vtype_int = VTYPE_MAP[vtype_str]
+				if not vtype_int then
+					res.status = 200
+					res.headers["Content-Type"] = MIME.json
+					res.body = json.encode({ ok = false, error = "unknown vtype: " .. tostring(vtype_str) })
+					return true
+				end
+				output, err = sub_cap.set(exec_info.subkey or "", exec_info.name, exec_info.value, vtype_int)
+			elseif op == "list_keys" then
+				output, err = sub_cap.list_keys(exec_info.subkey or "")
+			elseif op == "list_values" then
+				output, err = sub_cap.list_values(exec_info.subkey or "")
+			else
+				res.status = 200
+				res.headers["Content-Type"] = MIME.json
+				res.body = json.encode({ ok = false, error = "unknown registry op: " .. tostring(op) })
+				return true
+			end
 		else
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
