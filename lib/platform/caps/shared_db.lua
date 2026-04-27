@@ -83,11 +83,25 @@ if ffi.os == "Windows" then
 	if ffi.arch == "x64" then sqlite_ffi = ffi.load("dep/sqlite.dll")
 	else sqlite_ffi = ffi.load("dep/sqlite-x86.dll") end
 else
-	local names = {
-		"sqlite3",
-		"libsqlite3.so", "libsqlite3.so.0",
-		"libsqlite3.dylib", "/usr/lib/libsqlite3.dylib",
-	}
+	local function vendored_name()
+		local os, arch = ffi.os, ffi.arch
+		if os == "Linux" then
+			return arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
+			                       or  "dep/libsqlite3-linux-x86_64.so"
+		elseif os == "OSX" then
+			return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib"
+			                       or  "dep/libsqlite3-macos-x86_64.dylib"
+		end
+		return nil
+	end
+	local names = {}
+	local v = vendored_name()
+	if v then names[#names + 1] = v end
+	names[#names + 1] = "sqlite3"
+	names[#names + 1] = "libsqlite3.so"
+	names[#names + 1] = "libsqlite3.so.0"          -- Linux system
+	names[#names + 1] = "libsqlite3.dylib"
+	names[#names + 1] = "/usr/lib/libsqlite3.dylib" -- macOS system
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
 		if ok then sqlite_ffi = lib; break end

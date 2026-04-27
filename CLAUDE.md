@@ -101,6 +101,8 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **This repository is zero-dependency.** A user must be able to `git clone` and run immediately with no external installs — no package manager, no compiler, no runtime. LuaJIT binaries for all supported platforms are vendored in `bin/`. "Use Nix" or "install LuaJIT" are not acceptable answers. NixOS, musl, Alpine, and every other Linux variant are first-class targets — the vendored binaries must be statically linked so the ELF interpreter is not a constraint.
 
+**Non-ubiquitous FFI dependencies must be vendored as compiled binaries in `dep/`.** `bin/cr test` must pass on a bare clone with no system libraries installed. If FFI code requires a library that isn't part of libc (sqlite3, etc.), compile it from its official source and commit the result to `dep/` for each supported platform — the sqlite3 amalgamation (`sqlite3.c`) is the model: one C file, compiles anywhere, no exotic deps. The nix dev shell (`buildInputs`) is for contributor tooling (bun, docs), not runtime dependencies — it is not a substitute for vendoring.
+
 **Pure Lua is the baseline and must always work standalone.** No library may hard-depend on a system lib or vendored C lib being present. Ubiquitous system libs (libc, etc.) are an optional performance tier. Non-ubiquitous system libs require a pure Lua fallback. Vendored C libs are a last resort when pure Lua is genuinely nonviable for performance reasons. Nothing requires an external install step — must work on a barebones system.
 
 

@@ -13,9 +13,30 @@ pcall(ffi.cdef, "const char *sqlite3_column_name(sqlite3_stmt*, int N);")
 
 local sqlite_lib
 do
-	local names = ffi.os == "Windows"
-		and (ffi.arch == "x64" and { "dep/sqlite.dll" } or { "dep/sqlite-x86.dll" })
-		or { "sqlite3", "libsqlite3.so", "libsqlite3.so.0", "libsqlite3.dylib", "/usr/lib/libsqlite3.dylib" }
+	local names
+	if ffi.os == "Windows" then
+		names = ffi.arch == "x64" and { "dep/sqlite.dll" } or { "dep/sqlite-x86.dll" }
+	else
+		local function vendored_name()
+			local os, arch = ffi.os, ffi.arch
+			if os == "Linux" then
+				return arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
+				                       or  "dep/libsqlite3-linux-x86_64.so"
+			elseif os == "OSX" then
+				return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib"
+				                       or  "dep/libsqlite3-macos-x86_64.dylib"
+			end
+			return nil
+		end
+		names = {}
+		local v = vendored_name()
+		if v then names[#names + 1] = v end
+		names[#names + 1] = "sqlite3"
+		names[#names + 1] = "libsqlite3.so"
+		names[#names + 1] = "libsqlite3.so.0"
+		names[#names + 1] = "libsqlite3.dylib"
+		names[#names + 1] = "/usr/lib/libsqlite3.dylib"
+	end
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
 		if ok then sqlite_lib = lib; break end
