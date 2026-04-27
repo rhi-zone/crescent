@@ -221,8 +221,11 @@ function M:search(query, opts)
     end
   end
 
-  -- Sort descending by score
-  table.sort(scores, function(a, b) return a.score > b.score end)
+  -- Sort descending by score, with doc id as tiebreaker for stability
+  table.sort(scores, function(a, b)
+    if a.score ~= b.score then return a.score > b.score end
+    return a.id < b.id
+  end)
 
   if limit and #scores > limit then
     local trimmed = {}
@@ -286,7 +289,10 @@ function M:phrase_search(query)
     end
   end
 
-  table.sort(scores, function(a, b) return a.score > b.score end)
+  table.sort(scores, function(a, b)
+    if a.score ~= b.score then return a.score > b.score end
+    return a.id < b.id
+  end)
   return scores
 end
 
