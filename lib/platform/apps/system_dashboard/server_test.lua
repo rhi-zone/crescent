@@ -202,6 +202,83 @@ T.describe("system_dashboard registry dispatch", function()
 		T.ok(resp.error:find("op") ~= nil, "error should mention op: " .. tostring(resp.error))
 	end)
 
+	T.describe("pack-level caps inherited by action without caps", function()
+		-- Pack declares `caps` at top level; action has no `caps` field but
+		-- references the pack-level cap by name in `exec.cap`.
+		local pack_src = [[
+return {
+  name = "test-pack",
+  caps = {
+    reg = {
+      type        = "registry",
+      reason      = "pack-level",
+      root        = "HKCU\\test",
+      allow_write = false,
+    },
+  },
+  aliases = {
+    {
+      id      = "test-pack-cap",
+      title   = "Test pack-level cap",
+      actions = {
+        { label = "Get", exec = { cap = "reg", op = "get", name = "Foo" } },
+      },
+    },
+  },
+}
+]]
+		local srv = make_server_with_pack(pack_src, {
+			get_fn = function(_sk, _name) return "PackLevelValue", "REG_SZ" end,
+		})
+		local resp = post_execute(srv.handler, "test-pack-cap", 0)
+		T.ok(resp ~= nil, "response is nil")
+		T.ok(resp.ok == true, "expected ok=true, got error: " .. tostring(resp and resp.error))
+		T.eq(resp.output, "PackLevelValue")
+	end)
+
+	T.describe("action-level cap overrides pack-level cap", function()
+		-- Pack declares `reg` with allow_write=false; action overrides with
+		-- allow_write=true (which the parent cap does grant).
+		local pack_src = [[
+return {
+  name = "test-pack",
+  caps = {
+    reg = {
+      type        = "registry",
+      reason      = "pack-level read-only",
+      root        = "HKCU\\test",
+      allow_write = false,
+    },
+  },
+  aliases = {
+    {
+      id      = "test-pack-override",
+      title   = "Test override",
+      actions = {
+        {
+          label = "Set",
+          caps  = {
+            reg = {
+              type        = "registry",
+              reason      = "action-level write",
+              root        = "HKCU\\test",
+              allow_write = true,
+            },
+          },
+          exec = { cap = "reg", op = "set", name = "Foo", value = "Bar", vtype = "REG_SZ" },
+        },
+      },
+    },
+  },
+}
+]]
+		local srv = make_server_with_pack(pack_src, { allow_write = true })
+		local resp = post_execute(srv.handler, "test-pack-override", 0)
+		T.ok(resp ~= nil, "response is nil")
+		T.ok(resp.ok == true, "expected action-level override to enable write, got error: "
+			.. tostring(resp and resp.error))
+	end)
+
 	T.describe("unknown vtype returns error", function()
 		-- Cap with allow_write=true so set() itself wouldn't be blocked by write check.
 		local pack_src = make_pack_src("test-reg-badvtype",

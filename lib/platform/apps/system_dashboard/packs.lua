@@ -17,26 +17,69 @@ end
 
 local M = {}
 
--- Validate cap declarations and exec field on an action.
+-- Validate a single cap decl table.
 -- Returns true on success, or nil, errmsg on failure.
---: (unknown, string, integer) -> true | nil, string | nil
-local function validate_action_caps(action, alias_id, action_idx)
-	local action_t = action --: any
-	if type(action_t.caps) ~= "table" then return true end  -- no caps = fine
-	for name, decl in pairs(action_t.caps) do
-		local name_s = tostring(name)
-		if type(decl) ~= "table" then
-			return nil, string.format(
-				"alias %s action %d: cap %q: decl must be a table",
-				alias_id, action_idx, name_s)
-		end
-		local decl_t = decl --: any
-		if type(decl_t.type) ~= "string" then
-			return nil, string.format(
-				"alias %s action %d: cap %q: decl.type must be a string",
-				alias_id, action_idx, name_s)
-		end
+--: (unknown, string) -> true | nil, string | nil
+local function validate_cap_decl(decl, ctx)
+	if type(decl) ~= "table" then
+		return nil, ctx .. ": decl must be a table"
 	end
+	local decl_t = decl --: any
+	if type(decl_t.type) ~= "string" then
+		return nil, ctx .. ": decl.type must be a string"
+	end
+	return true
+end
+
+-- Validate pack-level caps table.
+-- Returns true on success, or nil, errmsg on failure.
+--: (unknown, string) -> true | nil, string | nil
+local function validate_pack_caps(pack_caps, pack_name)
+	if pack_caps == nil then return true end
+	if type(pack_caps) ~= "table" then
+		return nil, string.format("pack %s: caps must be a table", pack_name)
+	end
+	for name, decl in pairs(pack_caps) do
+		local ctx = string.format("pack %s: cap %q", pack_name, tostring(name))
+		local ok, err = validate_cap_decl(decl, ctx)
+		if not ok then return nil, err end
+	end
+	return true
+end
+
+-- Resolve effective caps for an action by merging pack-level caps with
+-- action-level caps. Action-level wins on name collision.
+-- Returns the merged caps table (always a table, never nil).
+--: (any, any) -> { [string]: any }
+local function resolve_action_caps(action_caps, pack_caps)
+	local out = {} --: { [string]: any }
+	if type(pack_caps) == "table" then
+		for k, v in pairs(pack_caps) do out[k] = v end
+	end
+	if type(action_caps) == "table" then
+		for k, v in pairs(action_caps) do out[k] = v end
+	end
+	return out
+end
+
+-- Validate cap declarations and exec field on an action, after pack-level
+-- caps have been merged in. Returns true on success, or nil, errmsg.
+--: (unknown, { [string]: any }, string, integer) -> true | nil, string | nil
+local function validate_action(action, effective_caps, alias_id, action_idx)
+	local action_t = action --: any
+	-- An action may declare no caps inline; effective_caps may still be empty
+	-- if the pack also declared none. In that case there's nothing to dispatch
+	-- and the action is treated as a no-op container (matches prior behavior:
+	-- no caps = nothing to validate).
+	local has_any = false
+	for name, decl in pairs(effective_caps) do
+		has_any = true
+		local ctx = string.format("alias %s action %d: cap %q",
+			alias_id, action_idx, tostring(name))
+		local ok, err = validate_cap_decl(decl, ctx)
+		if not ok then return nil, err end
+	end
+	if not has_any then return true end
 	if type(action_t.exec) ~= "table" then
 		return nil, string.format(
 			"alias %s action %d: caps present but exec is not a table",
@@ -47,6 +90,11 @@ local function validate_action_caps(action, alias_id, action_idx)
 		return nil, string.format(
 			"alias %s action %d: exec.cap must be a string",
 			alias_id, action_idx)
+	end
+	if not effective_caps[exec_t.cap] then
+		return nil, string.format(
+			"alias %s action %d: exec.cap %q references undeclared cap (not in action.caps or pack.caps)",
+			alias_id, action_idx, tostring(exec_t.cap))
 	end
 	return true
 end
@@ -76,17 +124,32 @@ local function flatten_pack(pack, pack_name, warn_fn)
 		version     = tostring(pack_t.version or "0.0.0"),
 		author      = tostring(pack_t.author or ""),
 	}
+	-- Validate pack-level caps shorthand. If invalid, skip the entire pack —
+	-- the actions referencing it would all be broken.
+	local pack_caps = pack_t.caps
+	local pack_ok, pack_err = validate_pack_caps(pack_caps, name)
+	if not pack_ok then
+		if warn_fn then
+			warn_fn("system_dashboard: skipping pack " .. name
+				.. ": " .. tostring(pack_err) .. "\n")
+		end
+		return {}, meta
+	end
 	local aliases = pack_t.aliases or {}
 	local result  = {}
 	for idx, alias in ipairs(aliases) do
 		local alias_t = alias --: any
 		local alias_id = tostring(alias_t.id or idx)
-		-- Validate each action in this alias.
+		-- Resolve and validate each action: merge pack-level caps with
+		-- action-level caps (action wins), then validate. Mutate the action
+		-- in place so server.lua sees the resolved caps directly.
 		local actions = alias_t.actions
 		local valid = true
 		if type(actions) == "table" then
 			for action_idx, action in ipairs(actions) do
-				local ok, err = validate_action_caps(action, alias_id, action_idx)
+				local action_t = action --: any
+				local effective = resolve_action_caps(action_t.caps, pack_caps)
+				local ok, err = validate_action(action, effective, alias_id, action_idx)
 				if not ok then
 					if warn_fn then
 						warn_fn("system_dashboard: skipping alias " .. alias_id
@@ -95,6 +158,8 @@ local function flatten_pack(pack, pack_name, warn_fn)
 					valid = false
 					break
 				end
+				-- Stash resolved caps onto the action; server.lua reads .caps.
+				action_t.caps = effective
 			end
 		end
 		if valid then

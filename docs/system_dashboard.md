@@ -21,6 +21,33 @@ A pack is a section of the app manifest — a list of named aliases, each with a
 
 Packs are currently declared inline in the app manifest; user-installable packs from external sources are an open thread.
 
+### Pack-level cap declarations (shorthand)
+
+A pack may declare caps once at pack scope; every action in that pack inherits those caps by default. Action-level caps still take precedence — if an action declares a cap with the same name, the action-level decl fully replaces the pack-level decl for that name (no field merging).
+
+```lua
+return {
+  name = "git",
+  caps = {
+    -- inherited by every action below
+    shell = { type = "shell", reason = "Run git commands" },
+  },
+  aliases = {
+    {
+      id = "git-status", title = "Git status",
+      actions = {
+        -- no caps field: uses pack-level shell cap
+        { label = "Show", exec = { cap = "shell", args = "git status" } },
+      },
+    },
+  },
+}
+```
+
+Both styles coexist. Use action-level caps when actions need different scopes (e.g. registry cap with different `root` per action). Use pack-level caps when many actions share an identical cap declaration.
+
+The merged caps are resolved at pack-load time and validated as a single set. `exec.cap` must reference a name present in the merged result; an action that references an undeclared cap is skipped with a warning.
+
 ## Pack Directions
 
 ### Regedit hacks
@@ -74,11 +101,10 @@ The existing cap taxonomy maps cleanly to pack use cases:
 
 Each pack declares exactly what it touches. No ambient authority. A pack that reads a registry key cannot write it unless `allow_write = true` is declared. A pack that talks to Ollama cannot talk to GitHub unless it declares a separate `http_client` cap for that host. Granularity comes from declaring multiple named caps, not from a single broad permission.
 
-Pack-level cap declarations (a shorthand when many actions in a pack share the same caps) are not yet implemented — each action currently declares its caps individually.
+Pack-level cap declarations (see Pack Format above) are a shorthand for the common case where many actions share an identical cap; they don't change the security model — every cap is still declared, scoped, and granted by the operator.
 
 ## Open Threads
 
 - **User-installed packs**: currently only built-in packs ship with the app. The `packs.load_user(fs_cap)` API is implemented and ready — the missing piece is a UI for installing packs and a `fs` cap scoped to the user packs directory. `crescent run github:user/my-pack` is the intended install gesture.
-- **Pack-level cap declarations**: a shorthand for packs where all (or most) actions share the same caps. Currently each action declares its caps individually, which is verbose but correct.
 - **RAG retrieval**: for queries that don't match any known alias, a local index of documentation and community knowledge would cover the long tail. Fuzzy search over curated aliases covers the known surface; RAG covers the unknown.
 - **Read/write naming consistency**: `fs` uses `allow_write: boolean`; `db` uses `readonly: boolean` (inverted). Should normalize to `allow_write` across all caps.
