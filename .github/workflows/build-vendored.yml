@@ -139,7 +139,7 @@ jobs:
       - name: Build
         run: |
           mkdir -p out
-          gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o out/libsqlite3-linux-x86_64.so
+          gcc -shared -fPIC -O2 -DSQLITE_ENABLE_FTS5 dep/sqlite3/sqlite3.c -o out/libsqlite3-linux-x86_64.so
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-linux-x86_64
@@ -154,7 +154,7 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
             apk add --no-cache build-base &&
             mkdir -p /work/out &&
-            gcc -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o /work/out/libsqlite3-linux-aarch64.so
+            gcc -shared -fPIC -O2 -DSQLITE_ENABLE_FTS5 dep/sqlite3/sqlite3.c -o /work/out/libsqlite3-linux-aarch64.so
           "
       - uses: actions/upload-artifact@v4
         with:
@@ -168,7 +168,7 @@ jobs:
       - name: Build
         run: |
           mkdir -p out
-          clang -shared -fPIC -O2 dep/sqlite3/sqlite3.c -o out/libsqlite3-macos-arm64.dylib
+          clang -shared -fPIC -O2 -DSQLITE_ENABLE_FTS5 dep/sqlite3/sqlite3.c -o out/libsqlite3-macos-arm64.dylib
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-macos-arm64
@@ -183,7 +183,7 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           mkdir out
-          cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:out\sqlite.dll
+          cl /O2 /LD /DSQLITE_ENABLE_FTS5 dep\sqlite3\sqlite3.c /Fe:out\sqlite.dll
       - uses: actions/upload-artifact@v4
         with:
           name: sqlite3-windows-x86_64
