@@ -3,7 +3,7 @@
 -- Sandboxed SQLite database access. Wraps a sqlite connection with revocation
 -- checking on every method call.
 --
--- opts.readonly : boolean, if true the database rejects writes (via PRAGMA query_only)
+-- opts.allow_write : boolean, default false. When false the database rejects writes (via PRAGMA query_only)
 --
 -- Capability API (passed to sandbox as caps.db):
 --   cap.execute(sql, ...)      -> true | nil, err
@@ -52,7 +52,7 @@ function M.db_cap(path, opts)
 	local db, err = sqlite.open(path) --: any
 	if not db then return nil, err end
 
-	if opts.readonly then
+	if not opts.allow_write then
 		local ok, rerr = db:execute("PRAGMA query_only = ON")
 		if not ok then
 			db:close()
@@ -101,8 +101,9 @@ function M.db_cap(path, opts)
 	function cap.attenuate(sub_opts)
 		if revoked then return nil, "db: capability revoked" end
 		sub_opts = sub_opts or {}
-		local sub_readonly = sub_opts.readonly
-		if sub_readonly == false and opts.readonly then
+		local sub_allow_write = sub_opts.allow_write
+		if sub_allow_write == nil then sub_allow_write = opts.allow_write end
+		if sub_allow_write and not opts.allow_write then
 			return nil, "db.attenuate: cannot grant write not held"
 		end
 		local sub_revoked = false
@@ -128,7 +129,7 @@ function M.db_cap(path, opts)
 			end,
 			close = function() end,  -- sub-cap doesn't own the connection
 		}
-		if not sub_readonly then
+		if sub_allow_write then
 			sub.execute = function(sql, ...)
 				if revoked or sub_revoked then return nil, "db: capability revoked" end
 				return db:execute(sql, ...)
@@ -137,10 +138,12 @@ function M.db_cap(path, opts)
 		sub.attenuate = function(deeper_opts)
 			if revoked or sub_revoked then return nil, "db: capability revoked" end
 			deeper_opts = deeper_opts or {}
-			if deeper_opts.readonly == false and sub_readonly then
+			local deeper_allow_write = deeper_opts.allow_write
+			if deeper_allow_write == nil then deeper_allow_write = sub_allow_write end
+			if deeper_allow_write and not sub_allow_write then
 				return nil, "db.attenuate: cannot grant write not held"
 			end
-			return cap.attenuate({ readonly = deeper_opts.readonly or sub_readonly })
+			return cap.attenuate({ allow_write = deeper_allow_write })
 		end
 		return sub, function() sub_revoked = true end
 	end
@@ -156,7 +159,7 @@ function M.db_cap(path, opts)
 end
 
 function M.risk(decl)
-	if decl.readonly then
+	if not decl.allow_write then
 		return { severity = "low", text = "Reads a private SQLite database. No writes." }
 	end
 	return { severity = "low", text = "Reads and writes a private SQLite database. Data is isolated to this app." }

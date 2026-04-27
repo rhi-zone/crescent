@@ -15,6 +15,7 @@
           "type": "fs",
           "root": "~/.crescent/alias-packs",
           "required": false,
+          "allow_write": true,
           "reason": "Load user-installed alias packs"
         },
         "stdout": { "type": "stdout", "required": false, "reason": "Startup logging" },

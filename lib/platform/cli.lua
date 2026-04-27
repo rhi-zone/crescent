@@ -378,11 +378,11 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 			return mod.kv_cap(data_path)
 		elseif cap_type == "db" then
 			local mod = require(CAP_TYPE_MODULES.db)
-			return mod.db_cap(data_path, { readonly = decl.readonly })
+			return mod.db_cap(data_path, { allow_write = decl.allow_write })
 		elseif cap_type == "shared_db" then
 			local mod = require(CAP_TYPE_MODULES.shared_db)
 			return mod.shared_db_cap(data_path, context.app_id, decl.tables or {}, {
-				readonly = decl.readonly,
+				allow_write = decl.allow_write,
 			})
 		end
 	end
@@ -433,7 +433,7 @@ local function build_cap(cap_name, decl, app, context, platform_opts)
 		root = expand_home(root)
 		mkdir_p(root)
 		local mod = require(CAP_TYPE_MODULES.fs)
-		return mod.fs_cap({ root = root, allow_write = not decl.readonly })
+		return mod.fs_cap({ root = root, allow_write = decl.allow_write })
 	end
 
 	-- llm: provider-agnostic LLM access.

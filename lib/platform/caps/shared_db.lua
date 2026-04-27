@@ -14,10 +14,10 @@
 -- Use setup_schema() to create the base tables, views, and triggers for a
 -- new shared database.
 --
--- opts.readonly: boolean — if true, only query is exposed (no exec).
+-- opts.allow_write: boolean, default false — when false, only query is exposed (no exec).
 --
 -- Capability API (same shape as caps.db):
---   cap.execute(sql)              -> true | nil, err   (not present in readonly)
+--   cap.execute(sql)              -> true | nil, err   (only present when allow_write)
 --   cap.query(sql, params?)    -> rows | nil, err
 --   cap.close()                -> nil
 
@@ -224,7 +224,7 @@ end
 -- Each table MUST have an `app_id TEXT` column.
 function M.setup_schema(path, schema)
 	local db_mod = require("lib.platform.caps.db")
-	local cap, err = db_mod.db_cap(path)
+	local cap, err = db_mod.db_cap(path, { allow_write = true })
 	if not cap then return nil, err end
 
 	for _, tbl in ipairs(schema) do
@@ -308,10 +308,10 @@ end
 -- exist (via setup_schema).
 function M.shared_db_cap(path, app_id, tables, opts)
 	opts = opts or {}
-	local readonly = opts.readonly
+	local allow_write = opts.allow_write and true or false
 
 	local db_ptr = ffi.new("sqlite3 *[1]")
-	local flags = readonly and SQLITE_OPEN_READONLY or SQLITE_OPEN_READWRITE
+	local flags = allow_write and SQLITE_OPEN_READWRITE or SQLITE_OPEN_READONLY
 	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, nil)
 	if rc ~= SQLITE_OK then
 		local msg = ffi.string(sqlite_ffi.sqlite3_errmsg(db_ptr[0]))
@@ -510,18 +510,18 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		return ok, err
 	end
 
-	-- make_attenuate(is_sub_readonly) builds an attenuate function for a cap
-	-- at the given readonly level. sub-caps share the same connection.
-	local function make_attenuate(is_sub_readonly)
+	-- make_attenuate(sub_allow_write) builds an attenuate function for a cap
+	-- at the given allow_write level. sub-caps share the same connection.
+	local function make_attenuate(sub_allow_write)
 		return function(sub_opts)
 			if revoked then return nil, "shared_db: capability revoked" end
 			sub_opts = sub_opts or {}
-			local new_readonly = sub_opts.readonly
-			if new_readonly == false and is_sub_readonly then
+			local new_allow_write = sub_opts.allow_write
+			-- If sub_opts.allow_write is nil, inherit current level.
+			if new_allow_write == nil then new_allow_write = sub_allow_write end
+			if new_allow_write and not sub_allow_write then
 				return nil, "shared_db.attenuate: cannot grant write not held"
 			end
-			-- If sub_opts.readonly is nil, inherit current level.
-			if new_readonly == nil then new_readonly = is_sub_readonly end
 			local sub_revoked = false
 			local sub = {
 				_type = "shared_db",
@@ -532,30 +532,30 @@ function M.shared_db_cap(path, app_id, tables, opts)
 				close = function() end,  -- sub-cap doesn't own the connection
 				setup = setup,
 			}
-			if not new_readonly then
+			if new_allow_write then
 				sub.execute = function(sql)
 					if revoked or sub_revoked then return nil, "shared_db: capability revoked" end
 					return exec(sql)
 				end
 			end
-			sub.attenuate = make_attenuate(new_readonly)
+			sub.attenuate = make_attenuate(new_allow_write)
 			return sub, function() sub_revoked = true end
 		end
 	end
 
-	if readonly then
+	if not allow_write then
 		local cap = { _type = "shared_db", query = query, close = close, setup = setup }
-		cap.attenuate = make_attenuate(true)
+		cap.attenuate = make_attenuate(false)
 		return cap, revoke
 	end
 
 	local cap = { _type = "shared_db", execute = exec, query = query, close = close, setup = setup }
-	cap.attenuate = make_attenuate(false)
+	cap.attenuate = make_attenuate(true)
 	return cap, revoke
 end
 
 function M.risk(decl)
-	if decl.readonly then
+	if not decl.allow_write then
 		return { severity = "low", text = "Reads a shared SQLite database." }
 	end
 	return { severity = "medium", text = "Reads and writes a shared SQLite database accessible to multiple apps." }

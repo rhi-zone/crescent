@@ -23,14 +23,14 @@ T.describe("app_loader._collect_entry_caps", function()
 
 	T.it("entry-level caps override top-level for same name", function()
 		local caps = app_loader._collect_entry_caps({
-			caps = { db = { type = "db", readonly = false } },
+			caps = { db = { type = "db", allow_write = true } },
 			entry = {
 				server = {
-					caps = { db = { type = "db", readonly = true } },
+					caps = { db = { type = "db", allow_write = false } },
 				},
 			},
 		}, "server")
-		T.eq(caps.db.readonly, true)
+		T.eq(caps.db.allow_write, false)
 	end)
 
 	T.it("adds missing type field from key", function()
@@ -125,7 +125,7 @@ T.describe("app_loader cap config merge", function()
 	T.it("collect_entry_caps merged with get_cap_config overrides", function()
 		-- This tests the merge logic in isolation: simulate what make() does.
 		local decls = app_loader._collect_entry_caps({
-			caps = { characters = { type = "fs", root = "~/SillyTavern/public/characters", readonly = true } }
+			caps = { characters = { type = "fs", root = "~/SillyTavern/public/characters", allow_write = false } }
 		}, "server")
 
 		-- Fake index_db with get_cap_config returning a root override.
@@ -144,7 +144,7 @@ T.describe("app_loader cap config merge", function()
 		end
 
 		T.eq(decls.characters.root, "/mnt/ssd/ai/SillyTavern/public/characters")
-		T.eq(decls.characters.readonly, true)  -- non-overridden field preserved
+		T.eq(decls.characters.allow_write, false)  -- non-overridden field preserved
 	end)
 
 	T.it("get_cap_config absent on index_db is handled gracefully", function()

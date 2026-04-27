@@ -271,11 +271,11 @@ end
 
 function M.risk(decl)
 	local raw_root = decl.root or ""
-	local readonly = decl.readonly
-	local read_or_write = readonly and "Reads" or "Reads and writes"
+	local allow_write = decl.allow_write and true or false
+	local read_or_write = allow_write and "Reads and writes" or "Reads"
 
 	if raw_root == "" then
-		if readonly then
+		if not allow_write then
 			return { severity = "medium", text = "Reads files under a configured directory." }
 		end
 		return { severity = "high", text = "Reads and writes files under a configured directory. Can modify or delete anything in that directory tree." }
@@ -283,7 +283,7 @@ function M.risk(decl)
 
 	local class, matched_label, ancestor_labels = M._classify_root(raw_root, os.getenv)
 	local sev_entry = SEVERITY_TABLE[class] or SEVERITY_TABLE.specific
-	local severity = readonly and sev_entry.read or sev_entry.write
+	local severity = allow_write and sev_entry.write or sev_entry.read
 
 	local label
 	if class == "specific" then
@@ -297,7 +297,7 @@ function M.risk(decl)
 		text = read_or_write .. " " .. label .. " (encompasses " .. table.concat(ancestor_labels, ", ") .. ")."
 	else
 		text = read_or_write .. " " .. label .. "."
-		if not readonly and class == "specific" then
+		if allow_write and class == "specific" then
 			text = text .. " Can modify or delete anything in that directory tree."
 		end
 	end

@@ -319,7 +319,7 @@ local CAP_FACTORIES = {
 		mod = "lib.platform.caps.db",
 		build = function(decl, app, context, data_path)
 			return require("lib.platform.caps.db").db_cap(data_path, {
-				readonly = decl.readonly,
+				allow_write = decl.allow_write,
 			})
 		end,
 	},
@@ -328,7 +328,7 @@ local CAP_FACTORIES = {
 		build = function(decl, app, context, data_path)
 			return require("lib.platform.caps.shared_db").shared_db_cap(
 				data_path, context.app_id, decl.tables or {}, {
-					readonly = decl.readonly,
+					allow_write = decl.allow_write,
 				})
 		end,
 	},
@@ -378,8 +378,8 @@ local CAP_FACTORIES = {
 		build = function(decl)
 			local root = decl.root or error("platform: fs cap requires 'root' in declaration")
 			return require("lib.platform.caps.fs").fs_cap({
-				root     = path_util.expand_home(root),
-				readonly = decl.readonly,
+				root        = path_util.expand_home(root),
+				allow_write = decl.allow_write,
 			})
 		end,
 	},

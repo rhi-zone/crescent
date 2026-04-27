@@ -49,12 +49,13 @@ This is consistent with `fs`: scoped to a root, read-only by default, write opt-
 All caps should follow the same pattern for read/write access. Current state:
 
 - `fs` — `opts.allow_write: boolean` ✓
-- `db` — `opts.readonly: boolean` (inverted naming vs `fs` — worth normalizing to `allow_write`)
-- `registry` (new) — `opts.allow_write: boolean` (follow `fs` convention)
+- `db` — `opts.allow_write: boolean` ✓
+- `shared_db` — `opts.allow_write: boolean` ✓
+- `registry` — `opts.allow_write: boolean` ✓
 - `http_client` — read/write not applicable (requests are always both)
 - `kv` — no read/write distinction currently
 
-Naming convention to standardize: `allow_write: boolean, default false`. Opt-in to write, never opt-in to read. `db.readonly` should be aliased or migrated to `allow_write` for consistency.
+Naming convention: `allow_write: boolean, default false`. Opt-in to write, never opt-in to read.
 
 ## Scope
 
