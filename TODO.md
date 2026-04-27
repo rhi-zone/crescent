@@ -15,20 +15,24 @@
 - [x] **Registry actions (Windows)** — `type = "registry"` actions wired in server.lua; demo actions added to default.lua (`win-reg-product-name`, `win-reg-list-startup`); dispatch tests in server_test.lua.
 - [ ] **User-installed packs** — `user_packs` fs cap declared in manifest; third-party pack execution needs scrutiny before enabling (attenuation + approval flow now exist).
 - [x] **Pack-level cap declarations** — pack may declare `caps = {...}` once at pack scope; every action inherits those caps by default. Action-level caps fully override on name collision. Resolved at pack-load time in `flatten_pack`; server.lua sees the merged result. Demo: `packs/git.lua`.
+- [x] **Output envelope schema** — `lib/platform/apps/system_dashboard/output.lua` declares all 30 primitives from `docs/system_dashboard_primitives.md` with constructors, validators, and `cite` channel. Pure data contract; no rendering wired yet.
+- [ ] **Primitives renderers — first 5 end-to-end** — implement backend dispatch (server.lua serializes envelopes from `/api/execute`) and frontend renderers for `text`, `code`, `key_value`, `table`, `status_badge`. Unblocks every other primitive once the architecture is proven. Open question: how does the dispatcher know an action returned an envelope vs a string (sniff `result.type`?)? Serialization format (already JSON-compatible)? Where does the renderer live in the static frontend?
+- [ ] **Streaming primitives transport** — `log_stream`, `live_table`, `event_stream` need a transport (SSE? WebSocket? polling?). The cap system supports SSE already (used in card app). Decide before implementing the streaming primitives.
+- [ ] **Vision: dashboard becomes every system tool** — `docs/system_dashboard.md` lays out the framing. Packs decide what the surface is: Raycast, Home Assistant, Control Panel, Tailscale admin, regedit hacks, all simultaneously. High-leverage pack directions: curated regedit hacks (Windows, no legitimate competition), cross-platform unification (file associations, startup programs, etc.), local HTTP services (Tailscale/Ollama/Grafana), web service APIs. Bidirectionality and rich display (NAS-software bar) are the parity standards.
 
 ## Platform caps
 
-- [ ] **`db`/`shared_db` naming inconsistency** — `opts.readonly` (inverted) vs `fs`/`registry` `opts.allow_write`. Design doc flagged this; not yet fixed. Low risk but causes confusion.
+- [x] **`db`/`shared_db` naming inconsistency** — every cap that takes a read/write boolean now uses `opts.allow_write` (default false). Latent fs builder bug fixed (was passing ignored `readonly` field).
 - [x] **`http_client` methods in CAP_FACTORIES** — `http_client_cap` now accepts `opts.methods` whitelist, but `lib/platform/init.lua` CAP_FACTORIES doesn't pass `methods` from manifest declarations. Small gap.
 
 ## Binary distribution
 
-- [x] Build statically linked LuaJIT for Linux x86-64 (required for NixOS, Alpine/musl, and any non-glibc Linux — current dynamic binary is glibc-only)
-- [x] Build LuaJIT for Linux arm64 (static)
-- [ ] Build LuaJIT for macOS x86-64 (missing entirely)
-- [x] Build LuaJIT for macOS arm64 / Apple Silicon (missing entirely) — bin/luajit-macos-aarch64 exists (dynamic Mach-O)
-- [ ] Establish a reliable, reproducible build process for all platforms (CI via GitHub Actions or equivalent) — current binaries sourced ad-hoc from ~/git/lua/dep/
-- [x] Replace current dynamic Linux binary with static build once available
+- [x] Build LuaJIT for Linux x86-64 — dynamic binary + bundled musl linker in `bin/ld-musl-x86_64.so.1` (`bin/cr` invokes the linker directly). Works on NixOS, Alpine/musl, glibc.
+- [x] Build LuaJIT for Linux arm64 — same approach, with `bin/ld-musl-aarch64.so.1`.
+- [x] Build LuaJIT for macOS arm64 / Apple Silicon — `bin/luajit-macos-aarch64` (dynamic Mach-O).
+- [ ] Build LuaJIT for macOS x86-64 — GitHub deprecated `macos-13` Intel runners; deferred until a build path exists. Intel Mac users currently fall through to "no bundled LuaJIT" error in `bin/cr`.
+- [x] Reproducible build process via CI — `.github/workflows/build-vendored.yml` builds LuaJIT + sqlite3 + zlib for all platforms, auto-commits to `bin/`/`dep/`. Triggered on `dep/sqlite3/**` or `dep/zlib/**` push, or `workflow_dispatch`.
+- [ ] Audit any other unvendored FFI deps — sqlite3, zlib are vendored. ljsocket uses `ffi.C` (POSIX, no extra dep). Other libraries that pull in non-libc shared objects would violate zero-dependency.
 
 ## RP / LLM interaction platform — primitives needed
 
