@@ -24,10 +24,14 @@
     <div id="modal-dialog">
       <div id="modal-title" class="modal-title"></div>
       <p class="modal-warning">This will run a shell command.</p>
-      <pre id="modal-command" class="modal-command"></pre>
-      <div id="modal-caps" class="modal-caps" style="display:none"></div>
+      <div class="modal-section-label">Command</div>
+      <pre id="modal-command" class="cmd-preview"></pre>
+      <div id="modal-caps" class="modal-caps-section" style="display:none">
+        <div class="modal-section-label">Required capabilities</div>
+        <div id="modal-caps-list"></div>
+      </div>
       <div class="modal-buttons">
-        <button id="modal-cancel" class="modal-btn modal-btn-cancel">Cancel</button>
+        <button id="modal-cancel" class="modal-btn modal-btn-cancel" autofocus>Cancel</button>
         <button id="modal-execute" class="modal-btn modal-btn-execute">Execute</button>
       </div>
     </div>

@@ -234,7 +234,16 @@ body {
   margin-bottom: 12px;
 }
 
-.modal-command {
+.modal-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.cmd-preview {
   font-family: monospace;
   font-size: 12px;
   color: #ccc;
@@ -246,13 +255,89 @@ body {
   word-break: break-all;
   max-height: 160px;
   overflow-y: auto;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
 }
 
-.modal-caps {
-  font-size: 11px;
-  color: #888;
+.modal-caps-section {
   margin-bottom: 14px;
+}
+
+.cap-card {
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.cap-card:last-child {
+  margin-bottom: 0;
+}
+
+.cap-card-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ddd;
+  margin-bottom: 6px;
+}
+
+.cap-card-type {
+  font-size: 10px;
+  color: #666;
+  font-family: monospace;
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.cap-reason {
+  font-size: 11px;
+  font-style: italic;
+  color: #888;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.cap-risk {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* Severity color classes */
+.severity-critical {
+  color: #ff6b6b;
+}
+
+.severity-high {
+  color: #ffa94d;
+}
+
+.severity-medium {
+  color: #ffd43b;
+}
+
+.severity-low {
+  color: #69db7c;
+}
+
+.cap-card.severity-critical {
+  border-color: #7a2020;
+  background: #1f1010;
+}
+
+.cap-card.severity-high {
+  border-color: #7a4a10;
+  background: #1f1508;
+}
+
+.cap-card.severity-medium {
+  border-color: #6a5a10;
+  background: #1c1a08;
+}
+
+.cap-card.severity-low {
+  border-color: #1a5a28;
+  background: #0a1c0e;
 }
 
 .modal-buttons {
