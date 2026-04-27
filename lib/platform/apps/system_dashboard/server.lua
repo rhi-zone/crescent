@@ -129,11 +129,12 @@ local function handle_api(state, req, res)
 			return true
 		end
 		local action = actions[idx]
-		local exec_cap = state.exec_cap
-		if not exec_cap then
+		local cap_name = action.cap
+		local cap = state.caps and cap_name and state.caps[cap_name]
+		if not cap then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "exec cap not available" })
+			res.body = json.encode({ ok = false, error = "cap not available: " .. tostring(cap_name) })
 			return true
 		end
 		if action.type ~= "shell" then
@@ -142,7 +143,7 @@ local function handle_api(state, req, res)
 			res.body = json.encode({ ok = false, error = "action type not supported: " .. tostring(action.type) })
 			return true
 		end
-		local output, err = exec_cap.run(tostring(action.command or ""))
+		local output, err = cap.run(tostring(action.command or ""))
 		if not output then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
@@ -202,7 +203,6 @@ function M.create(caps, opts)
 	local self_cap   = caps_t and caps_t.self
 	local user_packs = caps_t and caps_t.user_packs
 	local stdout_cap = caps_t and caps_t.stdout
-	local exec_cap   = caps_t and caps_t.exec
 
 	local no_self = {
 		entries = function() return {} end,
@@ -227,7 +227,7 @@ function M.create(caps, opts)
 		aliases      = merged,
 		alias_index  = build_alias_index(merged),
 		pack_meta    = all_meta,
-		exec_cap     = exec_cap,
+		caps         = caps_t,
 	}
 
 	local function handler(req, res)
