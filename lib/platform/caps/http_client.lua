@@ -20,9 +20,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local http   = require("lib.http.client")
 local hfmt   = require("lib.http.format")
-local socket = require("lib.ljsocket")
 local ffi    = require("ffi")
 
 local M = {}
@@ -418,6 +416,7 @@ function M.http_client_cap(opts)
 			return { status = parsed.status, headers = parsed.headers, body = parsed.body }
 		else
 			-- Plain TCP path.
+			local http = require("lib.http.client")
 			local resp, err = http.send({
 				host    = host,
 				port    = port,
@@ -523,6 +522,7 @@ function M.http_client_cap(opts)
 			return { status = status, headers = resp_headers }
 		else
 			-- Plain TCP streaming path (original implementation).
+			local socket = require("lib.ljsocket")
 			local client, err = socket.create("inet", "stream", "tcp")
 			if not client then return nil, "http_client: socket failed: " .. tostring(err) end
 
