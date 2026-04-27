@@ -210,6 +210,75 @@ T.describe("output: streaming primitives", function()
 	end)
 end)
 
+T.describe("output: additional atomic primitives", function()
+	T.it("markdown", function()
+		local p = O.markdown("# hello\n\ntext")
+		T.eq(p.type, "markdown")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("link", function()
+		local p = O.link("https://example/", "Example")
+		T.eq(p.type, "link")
+		T.eq(p.href, "https://example/")
+		T.eq(p.label, "Example")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("icon", function()
+		local p = O.icon("check", "ok")
+		T.eq(p.type, "icon")
+		T.eq(p.name, "check")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("kbd", function()
+		local p = O.kbd({ "Ctrl", "C" })
+		T.eq(p.type, "kbd")
+		T.ok(O.validate(O.ok(p)))
+	end)
+end)
+
+T.describe("output: numeric/scalar primitives", function()
+	T.it("single_stat", function()
+		local p = O.single_stat({ value = 47, unit = "%", label = "CPU", delta = "+2", state = "warn" })
+		T.eq(p.type, "single_stat")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("gauge", function()
+		local p = O.gauge({
+			value = 75, min = 0, max = 100, unit = "%",
+			thresholds = { { at = 80, state = "warn" }, { at = 95, state = "error" } },
+		})
+		T.eq(p.type, "gauge")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("progress_bar", function()
+		local p = O.progress_bar({ value = 30, max = 100, label = "Working" })
+		T.eq(p.type, "progress_bar")
+		T.ok(O.validate(O.ok(p)))
+	end)
+
+	T.it("sparkline", function()
+		local p = O.sparkline({ 1, 2, 3, 4, 3, 2, 5 }, "ms")
+		T.eq(p.type, "sparkline")
+		T.ok(O.validate(O.ok(p)))
+	end)
+end)
+
+T.describe("output: list primitive", function()
+	T.it("list", function()
+		local p = O.list({
+			{ title = "First",  subtitle = "one",   trailing = "1" },
+			{ title = "Second", subtitle = "two",   trailing = "2" },
+		})
+		T.eq(p.type, "list")
+		T.ok(O.validate(O.ok(p)))
+	end)
+end)
+
 T.describe("output: form / action_menu", function()
 	T.it("form validates field types", function()
 		local p = O.form({

@@ -285,6 +285,225 @@ body {
 .prim-badge.state-unknown { background: #1a1a1a; color: #888;    border-color: #333;    }
 .prim-badge.state-info    { background: #0e1a2a; color: #80a8d0; border-color: #20407a; }
 
+.prim-markdown {
+  font-family: monospace;
+  font-size: 12px;
+  color: #ccc;
+  background: #0c0c0c;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prim-link {
+  color: #80a8d0;
+  text-decoration: underline;
+}
+
+.prim-link:hover {
+  color: #a0c0e0;
+}
+
+.prim-icon {
+  font-family: monospace;
+  font-size: 12px;
+  color: #888;
+  display: inline-block;
+  padding: 0 2px;
+}
+
+.prim-icon[data-tone="ok"]    { color: #80d080; }
+.prim-icon[data-tone="warn"]  { color: #ffd070; }
+.prim-icon[data-tone="error"] { color: #ff8080; }
+.prim-icon[data-tone="info"]  { color: #80a8d0; }
+
+.prim-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.prim-kbd kbd {
+  font-family: monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #ddd;
+}
+
+.prim-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.prim-stat .stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  font-family: monospace;
+  line-height: 1.1;
+}
+
+.prim-stat .stat-label {
+  font-size: 11px;
+  color: #888;
+  letter-spacing: 0.02em;
+}
+
+.prim-stat .stat-delta {
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+}
+
+.prim-stat .stat-delta.state-ok      { color: #80d080; }
+.prim-stat .stat-delta.state-warn    { color: #ffd070; }
+.prim-stat .stat-delta.state-error   { color: #ff8080; }
+.prim-stat .stat-delta.state-info    { color: #80a8d0; }
+.prim-stat .stat-delta.state-unknown { color: #888;    }
+
+.prim-gauge {
+  position: relative;
+  height: 14px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.prim-gauge .gauge-fill {
+  height: 100%;
+  background: #2d5a8a;
+  transition: width 120ms ease;
+}
+
+.prim-gauge .gauge-fill.state-ok      { background: #1a5a28; }
+.prim-gauge .gauge-fill.state-warn    { background: #6a5a10; }
+.prim-gauge .gauge-fill.state-error   { background: #7a2020; }
+.prim-gauge .gauge-fill.state-info    { background: #20407a; }
+.prim-gauge .gauge-fill.state-unknown { background: #333;    }
+
+.prim-gauge .gauge-fill.indeterminate {
+  width: 30%;
+  animation: gauge-indeterminate 1.4s linear infinite;
+}
+
+@keyframes gauge-indeterminate {
+  0%   { margin-left: -30%; }
+  100% { margin-left: 100%;  }
+}
+
+.prim-gauge .gauge-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: monospace;
+  font-size: 10px;
+  color: #ddd;
+  text-shadow: 0 0 2px #000;
+}
+
+.prim-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prim-progress .progress-label {
+  font-size: 11px;
+  color: #888;
+}
+
+.prim-sparkline {
+  color: #80a8d0;
+  vertical-align: middle;
+}
+
+.prim-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.prim-list li {
+  position: relative;
+  padding: 6px 8px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.prim-list li:last-child {
+  border-bottom: none;
+}
+
+.prim-list .list-title {
+  font-size: 12px;
+  color: #ddd;
+}
+
+.prim-list .list-subtitle {
+  font-size: 11px;
+  color: #777;
+  margin-top: 1px;
+}
+
+.prim-list .list-trailing {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  font-size: 11px;
+  color: #888;
+  font-family: monospace;
+}
+
+.prim-card {
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  background: #161616;
+}
+
+.prim-card .card-title {
+  padding: 8px 12px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.prim-card .card-subtitle {
+  padding: 0 12px 6px;
+  font-size: 11px;
+  color: #888;
+}
+
+.prim-card .card-body {
+  padding: 10px 12px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.prim-card .card-title + .card-body,
+.prim-card .card-subtitle + .card-body {
+  /* keep the divider */
+}
+
+.prim-card > .card-body:first-child {
+  border-top: none;
+}
+
+.prim-card .card-footer {
+  padding: 6px 12px;
+  border-top: 1px solid #2a2a2a;
+  font-size: 11px;
+  color: #888;
+}
+
 .prim-unknown {
   font-family: monospace;
   font-size: 11px;
