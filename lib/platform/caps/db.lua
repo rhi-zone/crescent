@@ -63,7 +63,7 @@ function M.db_cap(path, opts)
 	local revoked = false
 	local function is_revoked() return revoked end
 
-	local cap = {}
+	local cap = { _type = "db" }
 
 	function cap.execute(sql, ...)
 		if revoked then return nil, "db: capability revoked" end
@@ -107,6 +107,7 @@ function M.db_cap(path, opts)
 		end
 		local sub_revoked = false
 		local sub = {
+			_type = "db",
 			query = function(sql, ...)
 				if revoked or sub_revoked then return nil, "db: capability revoked" end
 				return db:query(sql, ...)

@@ -400,6 +400,7 @@ local CAP_FACTORIES = {
 		build = function()
 			local revoked = false
 			local cap = {
+				_type = "stderr",
 				write = function(s)
 					if revoked then return nil, "capability revoked" end
 					io.stderr:write(s)

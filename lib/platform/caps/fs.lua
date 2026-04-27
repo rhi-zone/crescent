@@ -43,6 +43,7 @@ function M.fs_cap(opts)
 	local revoked = false
 
 	local cap = {
+		_type = "fs",
 		read = function(path)
 			if revoked then return nil, "fs: capability revoked" end
 			local full, err = resolve(root, path)

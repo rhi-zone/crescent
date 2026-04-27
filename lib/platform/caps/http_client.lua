@@ -369,6 +369,7 @@ function M.http_client_cap(opts)
 	-- Expose host and any extra opts fields for introspection.
 	-- Server code (e.g. server.lua) may read cap.host for provider inference,
 	-- and cap.model / cap.path for LLM client configuration.
+	cap._type   = "http_client"
 	cap.host    = allowed_host
 	cap.model   = opts.model
 	cap.path    = opts.path

@@ -17,6 +17,7 @@ function M.cli_cap(args)
 	local revoked = false
 
 	local cap = {
+		_type = "cli",
 		args = function()
 			if revoked then return nil, "capability revoked" end
 			local copy = {}

@@ -96,6 +96,7 @@ function M.self_cap(app, opts)
 	end
 
 	local cap = {
+		_type  = "self",
 		app_id = app_id,
 
 		metadata = function(keyword)
@@ -151,6 +152,7 @@ function M.self_write_cap(app, opts)
 	end
 
 	local cap = {
+		_type  = "self_write",
 		app_id = app_id,
 
 		metadata = function(keyword)

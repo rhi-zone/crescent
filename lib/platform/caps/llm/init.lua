@@ -61,7 +61,7 @@ function M.llm_cap(opts)
 
 	local revoked = false
 
-	local cap = {}
+	local cap = { _type = "llm" }
 
 	-- Build the base request table from opts, merging call_opts on top.
 	local function make_req(messages, call_opts)
@@ -181,7 +181,7 @@ function M.new(manifest_entry)
 
 	local revoked = false
 
-	local cap = {}
+	local cap = { _type = "llm" }
 
 	-- cap.generate(req) -> decoded_table | nil, string | nil
 	function cap.generate(req)

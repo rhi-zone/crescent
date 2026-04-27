@@ -17,6 +17,7 @@ function M.stdin_cap(opts)
 	local revoked = false
 
 	local cap = {
+		_type = "stdin",
 		read = function(n)
 			if revoked then return nil, "capability revoked" end
 			if n then

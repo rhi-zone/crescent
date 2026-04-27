@@ -16,6 +16,7 @@ function M.time_cap()
 	local revoked = false
 
 	local cap = {
+		_type = "time",
 		now = function()
 			if revoked then return nil, "capability revoked" end
 			return os.time()

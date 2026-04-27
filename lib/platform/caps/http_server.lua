@@ -145,8 +145,9 @@ function M.http_server_cap(opts)
 			return nil, "http_server: daemon mode requires opts.on_serve callback"
 		end
 		local cap = {
-			url  = opts.url or "",
-			port = 0,
+			_type = "http_server",
+			url   = opts.url or "",
+			port  = 0,
 		}
 		function cap.serve(handler)
 			if revoked_ref[1] then return nil, "http_server: revoked" end
@@ -168,8 +169,9 @@ function M.http_server_cap(opts)
 	local url  = "http://localhost:" .. tostring(port)
 
 	local cap = {
-		url  = url,
-		port = port,
+		_type = "http_server",
+		url   = url,
+		port  = port,
 	}
 
 	function cap.serve(handler)

@@ -510,6 +510,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 			if new_readonly == nil then new_readonly = is_sub_readonly end
 			local sub_revoked = false
 			local sub = {
+				_type = "shared_db",
 				query = function(sql, params)
 					if revoked or sub_revoked then return nil, "shared_db: capability revoked" end
 					return query(sql, params)
@@ -529,12 +530,12 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	end
 
 	if readonly then
-		local cap = { query = query, close = close, setup = setup }
+		local cap = { _type = "shared_db", query = query, close = close, setup = setup }
 		cap.attenuate = make_attenuate(true)
 		return cap, revoke
 	end
 
-	local cap = { execute = exec, query = query, close = close, setup = setup }
+	local cap = { _type = "shared_db", execute = exec, query = query, close = close, setup = setup }
 	cap.attenuate = make_attenuate(false)
 	return cap, revoke
 end

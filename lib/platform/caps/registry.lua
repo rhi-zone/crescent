@@ -268,6 +268,7 @@ function M.registry_cap(opts)
 	end
 
 	local cap = {
+		_type = "registry",
 		get = function(subkey, name)
 			if revoked then return nil, "registry: capability revoked" end
 			if subkey and has_traversal(subkey) then

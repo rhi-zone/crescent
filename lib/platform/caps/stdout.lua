@@ -17,6 +17,7 @@ function M.stdout_cap(opts)
 	local revoked = false
 
 	local cap = {
+		_type = "stdout",
 		write = function(str)
 			if revoked then return nil, "capability revoked" end
 			io.stdout:write(str)

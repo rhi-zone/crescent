@@ -18,6 +18,7 @@ function M.kv_cap()
 	local revoked = false
 
 	local cap = {
+		_type = "kv",
 		get = function(key)
 			if revoked then return nil, "capability revoked" end
 			return store[key]
