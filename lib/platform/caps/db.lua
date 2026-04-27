@@ -22,8 +22,6 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local sqlite = require("lib.sqlite")
-
 local M = {}
 
 -- wrap_stmt(raw_stmt, is_revoked) -> wrapped_stmt
@@ -49,6 +47,7 @@ end
 function M.db_cap(path, opts)
 	opts = opts or {}
 
+	local sqlite = require("lib.sqlite")
 	local db, err = sqlite.open(path) --: any
 	if not db then return nil, err end
 
