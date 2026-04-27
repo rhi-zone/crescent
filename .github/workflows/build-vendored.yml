@@ -220,18 +220,18 @@ jobs:
       - name: Copy artifacts and commit
         run: |
           mkdir -p bin dep
-          cp artifacts/luajit               bin/luajit
-          cp artifacts/luajit-aarch64       bin/luajit-aarch64
-          cp artifacts/luajit-macos-aarch64 bin/luajit-macos-aarch64
-          cp artifacts/luajit.exe           bin/luajit.exe
-          cp artifacts/luajit32.exe         bin/luajit32.exe
-          cp artifacts/ld-musl-x86_64.so.1  bin/
-          cp artifacts/ld-musl-aarch64.so.1 bin/
-          cp artifacts/libsqlite3-linux-x86_64.so  dep/
-          cp artifacts/libsqlite3-linux-aarch64.so dep/
-          cp artifacts/libsqlite3-macos-arm64.dylib  dep/
-          cp artifacts/sqlite.dll     dep/
-          cp artifacts/sqlite-x86.dll dep/
+          cp artifacts/bin/luajit               bin/luajit
+          cp artifacts/bin/luajit-aarch64       bin/luajit-aarch64
+          cp artifacts/bin/luajit-macos-aarch64 bin/luajit-macos-aarch64
+          cp artifacts/luajit.exe               bin/luajit.exe
+          cp artifacts/luajit32.exe             bin/luajit32.exe
+          cp artifacts/ld-musl-x86_64.so.1      bin/
+          cp artifacts/ld-musl-aarch64.so.1     bin/
+          cp artifacts/dep/libsqlite3-linux-x86_64.so  dep/
+          cp artifacts/dep/libsqlite3-linux-aarch64.so dep/
+          cp artifacts/dep/libsqlite3-macos-arm64.dylib  dep/
+          cp artifacts/dep/sqlite.dll     dep/
+          cp artifacts/dep/sqlite-x86.dll dep/
           chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
                    bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1
