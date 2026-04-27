@@ -248,24 +248,22 @@ local function adapt_body(spec, raw)
 			if s.skip_header then start = 2 end
 			for i = start, #lines do
 				local line = lines[i]
-				if line ~= "" then
-					local toks = split_ws(line)
-					local row = {} --: { [string]: any }
-					for ci, col in ipairs(cols_t) do
-						local c = col --: any
-						local key = tostring(c.key)
-						-- Last column captures the remainder (mountpoints with spaces, etc.).
-						if ci == #cols_t and #toks > #cols_t then
-							local extra = {} --: any
-							local n = 0
-							for j = ci, #toks do n = n + 1; extra[n] = toks[j] end
-							row[key] = table.concat(extra, " ")
-						else
-							row[key] = toks[ci] or ""
-						end
+				local toks = split_ws(line)
+				local row = {} --: { [string]: any }
+				for ci, col in ipairs(cols_t) do
+					local c = col --: any
+					local key = tostring(c.key)
+					-- Last column captures the remainder (mountpoints with spaces, etc.).
+					if ci == #cols_t and #toks > #cols_t then
+						local extra = {} --: any
+						local n = 0
+						for j = ci, #toks do n = n + 1; extra[n] = toks[j] end
+						row[key] = table.concat(extra, " ")
+					else
+						row[key] = toks[ci] or ""
 					end
-					rows[#rows + 1] = row
 				end
+				rows[#rows + 1] = row
 			end
 		elseif type(raw) == "table" then
 			local r = raw --: any[]
