@@ -4,19 +4,21 @@
 -- M.create(caps, opts) -> { handler }
 --
 -- Routes:
---   GET  /                 -> static/index.html
---   GET  /static/<path>    -> tarball static file
---   GET  /api/search?q=<q> -> JSON alias results (limit 20)
---   GET  /api/packs        -> JSON pack metadata
---   POST /api/execute      -> run alias action via exec cap
+--   GET  /                        -> static/index.html
+--   GET  /static/<path>           -> tarball static file
+--   GET  /api/search?q=<q>        -> JSON alias results (limit 20)
+--   GET  /api/packs               -> JSON pack metadata
+--   GET  /api/cap_info?alias=&action= -> cap declarations for an action
+--   POST /api/execute             -> attenuate caps then invoke action
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json   = require("lib.format.json") --: any
-local search = require("lib.platform.apps.system_dashboard.search")
-local packs  = require("lib.platform.apps.system_dashboard.packs")
+local json       = require("lib.format.json") --: any
+local search     = require("lib.platform.apps.system_dashboard.search")
+local packs      = require("lib.platform.apps.system_dashboard.packs")
+local cap_risks  = require("lib.platform.cap_risks")
 
 local M = {}
 
@@ -88,6 +90,17 @@ local function build_alias_index(aliases)
 	return idx
 end
 
+-- Find the first cap in the caps table whose _type matches cap_type.
+--: (any, string) -> any | nil
+local function find_cap_by_type(caps, cap_type)
+	for _, c in pairs(caps) do
+		if type(c) == "table" and c._type == cap_type then
+			return c
+		end
+	end
+	return nil
+end
+
 -- Handle API routes.
 --: (any, any, any) -> boolean | nil
 local function handle_api(state, req, res)
@@ -129,21 +142,52 @@ local function handle_api(state, req, res)
 			return true
 		end
 		local action = actions[idx]
-		local cap_name = action.cap
-		local cap = state.caps and cap_name and state.caps[cap_name]
-		if not cap then
+		-- Attenuate each declared cap to produce sub-caps keyed by local name.
+		local attenuated = {} --: { [string]: any }
+		local action_caps = type(action.caps) == "table" and action.caps or {}
+		for name, decl in pairs(action_caps) do
+			local parent = find_cap_by_type(state.caps, decl.type)
+			if not parent then
+				res.status = 200
+				res.headers["Content-Type"] = MIME.json
+				res.body = json.encode({ ok = false, error = "no parent cap of type " .. tostring(decl.type) })
+				return true
+			end
+			local sub, err = parent.attenuate(decl)
+			if not sub then
+				res.status = 200
+				res.headers["Content-Type"] = MIME.json
+				res.body = json.encode({ ok = false, error = err or "attenuate failed for cap " .. name })
+				return true
+			end
+			attenuated[name] = sub
+		end
+		-- Invoke via action.exec
+		local exec_info = action.exec
+		if type(exec_info) ~= "table" then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "cap not available: " .. tostring(cap_name) })
+			res.body = json.encode({ ok = false, error = "action.exec missing or not a table" })
 			return true
 		end
-		if action.type ~= "shell" then
+		local sub_cap = attenuated[exec_info.cap]
+		if not sub_cap then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
-			res.body = json.encode({ ok = false, error = "action type not supported: " .. tostring(action.type) })
+			res.body = json.encode({ ok = false, error = "action.exec references unknown cap name: " .. tostring(exec_info.cap) })
 			return true
 		end
-		local output, err = cap.run(tostring(action.command or ""))
+		local output, err
+		if sub_cap._type == "shell" then
+			output, err = sub_cap.run(exec_info.args)
+		elseif sub_cap._type == "exec" then
+			output, err = sub_cap.exec(exec_info.binary, exec_info.args)
+		else
+			res.status = 200
+			res.headers["Content-Type"] = MIME.json
+			res.body = json.encode({ ok = false, error = "unsupported cap type: " .. tostring(sub_cap._type) })
+			return true
+		end
 		if not output then
 			res.status = 200
 			res.headers["Content-Type"] = MIME.json
@@ -157,6 +201,72 @@ local function handle_api(state, req, res)
 	end
 
 	if method ~= "GET" then return nil end
+
+	-- GET /api/cap_info?alias=<alias_id>&action=<action_index>
+	if path == "/api/cap_info" or path:sub(1, 14) == "/api/cap_info?" then
+		local raw_qs = req.query
+		local qs --: { [string]: string }
+		if type(raw_qs) == "table" then
+			qs = raw_qs
+		else
+			local qpart = path:match("^[^?]*%??(.*)")
+			qs = parse_qs(qpart or "")
+		end
+		local alias_id     = qs.alias
+		local action_str   = qs.action
+		if type(alias_id) ~= "string" or alias_id == "" or type(action_str) ~= "string" then
+			res.status = 400
+			res.headers["Content-Type"] = MIME.json
+			res.body = json.encode({ ok = false, error = "alias (string) and action (number) query params required" })
+			return true
+		end
+		local action_index = tonumber(action_str)
+		if not action_index then
+			res.status = 400
+			res.headers["Content-Type"] = MIME.json
+			res.body = json.encode({ ok = false, error = "action must be a number" })
+			return true
+		end
+		local alias = state.alias_index[alias_id]
+		if not alias then
+			res.status = 404
+			res.headers["Content-Type"] = MIME.json
+			res.body = json.encode({ ok = false, error = "unknown alias" })
+			return true
+		end
+		-- action_index is 0-based from the frontend
+		local idx = math.floor(action_index) + 1
+		local actions = alias.actions
+		if type(actions) ~= "table" or not actions[idx] then
+			res.status = 404
+			res.headers["Content-Type"] = MIME.json
+			res.body = json.encode({ ok = false, error = "action_index out of range" })
+			return true
+		end
+		local action = actions[idx]
+		local cap_entries = {} --: any
+		local action_caps = type(action.caps) == "table" and action.caps or {}
+		for name, decl in pairs(action_caps) do
+			cap_entries[#cap_entries + 1] = {
+				name   = name,
+				type   = decl.type,
+				reason = decl.reason,
+				risk   = cap_risks.describe(decl),
+			}
+		end
+		local exec_args --: any
+		if type(action.exec) == "table" then
+			exec_args = action.exec.args
+		end
+		res.status = 200
+		res.headers["Content-Type"] = MIME.json
+		res.body = json.encode({
+			label     = action.label,
+			exec_args = exec_args,
+			caps      = cap_entries,
+		})
+		return true
+	end
 
 	if path == "/api/packs" or path:sub(1, 11) == "/api/packs?" then
 		res.status = 200
