@@ -17,6 +17,40 @@ end
 
 local M = {}
 
+-- Validate cap declarations and exec field on an action.
+-- Returns true on success, or nil, errmsg on failure.
+--: (unknown, string, integer) -> true | nil, string | nil
+local function validate_action_caps(action, alias_id, action_idx)
+	local action_t = action --: any
+	if type(action_t.caps) ~= "table" then return true end  -- no caps = fine
+	for name, decl in pairs(action_t.caps) do
+		local name_s = tostring(name)
+		if type(decl) ~= "table" then
+			return nil, string.format(
+				"alias %s action %d: cap %q: decl must be a table",
+				alias_id, action_idx, name_s)
+		end
+		local decl_t = decl --: any
+		if type(decl_t.type) ~= "string" then
+			return nil, string.format(
+				"alias %s action %d: cap %q: decl.type must be a string",
+				alias_id, action_idx, name_s)
+		end
+	end
+	if type(action_t.exec) ~= "table" then
+		return nil, string.format(
+			"alias %s action %d: caps present but exec is not a table",
+			alias_id, action_idx)
+	end
+	local exec_t = action_t.exec --: any
+	if type(exec_t.cap) ~= "string" then
+		return nil, string.format(
+			"alias %s action %d: exec.cap must be a string",
+			alias_id, action_idx)
+	end
+	return true
+end
+
 -- Execute a pack source string and return the pack table, or nil, err.
 --: (string, string) -> { [string]: unknown } | nil, string | nil
 local function exec_pack(src, chunkname)
@@ -32,7 +66,8 @@ end
 
 -- Flatten a pack table into (aliases[], pack_meta).
 -- Each alias gets .pack_name set to the pack's name field.
-local function flatten_pack(pack, pack_name)
+-- warn_fn(msg), if provided, is called for each skipped invalid action.
+local function flatten_pack(pack, pack_name, warn_fn)
 	local pack_t = pack --: any
 	local name = tostring(pack_t.name or pack_name)
 	local meta = {
@@ -43,20 +78,43 @@ local function flatten_pack(pack, pack_name)
 	}
 	local aliases = pack_t.aliases or {}
 	local result  = {}
-	for _, alias in ipairs(aliases) do
-		local a = {}
-		for k, v in pairs(alias) do a[k] = v end
-		a.pack_name = name
-		result[#result + 1] = a
+	for idx, alias in ipairs(aliases) do
+		local alias_t = alias --: any
+		local alias_id = tostring(alias_t.id or idx)
+		-- Validate each action in this alias.
+		local actions = alias_t.actions
+		local valid = true
+		if type(actions) == "table" then
+			for action_idx, action in ipairs(actions) do
+				local ok, err = validate_action_caps(action, alias_id, action_idx)
+				if not ok then
+					if warn_fn then
+						warn_fn("system_dashboard: skipping alias " .. alias_id
+							.. " in pack " .. name .. ": " .. tostring(err) .. "\n")
+					end
+					valid = false
+					break
+				end
+			end
+		end
+		if valid then
+			local a = {}
+			for k, v in pairs(alias) do a[k] = v end
+			a.pack_name = name
+			result[#result + 1] = a
+		end
 	end
 	return result, meta
 end
 
--- load_builtin(self_cap) -> alias[], pack_meta[]
-function M.load_builtin(self_cap)
+-- load_builtin(self_cap, stdout_cap) -> alias[], pack_meta[]
+function M.load_builtin(self_cap, stdout_cap)
 	local cap = self_cap --: any
 	local all_aliases = {}
 	local all_meta    = {}
+
+	local stdout_t = stdout_cap --: any
+	local warn_fn = stdout_t and function(msg) stdout_t.write(msg) end or nil
 
 	local entries = cap.entries()
 	if not entries then return all_aliases, all_meta end
@@ -69,7 +127,7 @@ function M.load_builtin(self_cap)
 				local pack_name = entry_s:match("^packs/(.-)%.lua$") or entry_s
 				local pack = exec_pack(tostring(src), "@" .. entry_s)
 				if pack then
-					local aliases, meta = flatten_pack(pack, pack_name)
+					local aliases, meta = flatten_pack(pack, pack_name, warn_fn)
 					for _, a in ipairs(aliases) do all_aliases[#all_aliases + 1] = a end
 					all_meta[#all_meta + 1] = meta
 				end
@@ -80,14 +138,16 @@ function M.load_builtin(self_cap)
 	return all_aliases, all_meta
 end
 
--- load_user(fs_cap) -> alias[], pack_meta[]
-function M.load_user(fs_cap)
+-- load_user(fs_cap, stdout_cap) -> alias[], pack_meta[]
+function M.load_user(fs_cap, stdout_cap)
 	local all_aliases = {}
 	local all_meta    = {}
 
 	if not fs_cap then return all_aliases, all_meta end
 
 	local cap = fs_cap --: any
+	local stdout_t = stdout_cap --: any
+	local warn_fn = stdout_t and function(msg) stdout_t.write(msg) end or nil
 	local files = cap.list()
 	if not files then return all_aliases, all_meta end
 
@@ -99,7 +159,7 @@ function M.load_user(fs_cap)
 				local pack_name = fname_s:match("^(.-)%.lua$") or fname_s
 				local pack = exec_pack(tostring(src), "@user:" .. fname_s)
 				if pack then
-					local aliases, meta = flatten_pack(pack, pack_name)
+					local aliases, meta = flatten_pack(pack, pack_name, warn_fn)
 					for _, a in ipairs(aliases) do all_aliases[#all_aliases + 1] = a end
 					all_meta[#all_meta + 1] = meta
 				end

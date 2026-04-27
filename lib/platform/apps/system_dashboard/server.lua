@@ -320,8 +320,8 @@ function M.create(caps, opts)
 	}
 	local effective_self = self_cap or no_self
 
-	local builtin_aliases, builtin_meta = packs.load_builtin(effective_self)
-	local user_aliases,    user_meta    = packs.load_user(user_packs)
+	local builtin_aliases, builtin_meta = packs.load_builtin(effective_self, stdout_cap)
+	local user_aliases,    user_meta    = packs.load_user(user_packs, stdout_cap)
 	local merged = packs.merge(builtin_aliases, user_aliases)
 
 	local all_meta = {}
