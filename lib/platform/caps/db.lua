@@ -155,4 +155,11 @@ function M.db_cap(path, opts)
 	return cap, revoke
 end
 
+function M.risk(decl)
+	if decl.readonly then
+		return { severity = "low", text = "Reads a private SQLite database. No writes." }
+	end
+	return { severity = "low", text = "Reads and writes a private SQLite database. Data is isolated to this app." }
+end
+
 return M

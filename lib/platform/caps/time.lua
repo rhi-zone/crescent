@@ -30,4 +30,8 @@ function M.time_cap()
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "low", text = "Provides the current wall-clock time. No side effects." }
+end
+
 return M

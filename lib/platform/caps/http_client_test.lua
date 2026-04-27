@@ -166,6 +166,26 @@ T.describe("caps.http_client", function()
 	end)
 end)
 
+T.describe("caps.http_client risk", function()
+	T.it("no paths has high severity", function()
+		local result = http_client.risk({ type = "http_client", host = "api.example.com" })
+		T.eq(result.severity, "high")
+		T.ok(result.text:find("api.example.com"), "text includes host")
+	end)
+
+	T.it("with paths has medium severity", function()
+		local result = http_client.risk({ type = "http_client", host = "api.example.com", paths = {"/v1"} })
+		T.eq(result.severity, "medium")
+		T.ok(result.text:find("api.example.com"), "text includes host")
+	end)
+
+	T.it("missing host uses fallback text", function()
+		local result = http_client.risk({ type = "http_client" })
+		T.ok(result ~= nil)
+		T.ok(result.text:find("a configured host"), "text mentions configured host")
+	end)
+end)
+
 -- ── TLS integration ───────────────────────────────────────────────────────────
 -- Forks a minimal TLS HTTP server, then exercises the full TLS client path in
 -- http_client_cap (tls_make_client → tls_write_all → tls_read_response).

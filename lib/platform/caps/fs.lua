@@ -113,4 +113,12 @@ function M.fs_cap(opts)
 	return cap, revoke
 end
 
+function M.risk(decl)
+	local root = decl.root or "a configured directory"
+	if decl.readonly then
+		return { severity = "medium", text = "Reads files under " .. root .. "." }
+	end
+	return { severity = "high", text = "Reads and writes files under " .. root .. ". Can modify or delete anything in that directory tree." }
+end
+
 return M

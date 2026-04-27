@@ -283,4 +283,8 @@ function M.new(manifest_entry)
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "medium", text = "Sends prompts and receives responses from a language model API. Prompt content may leave your machine." }
+end
+
 return M

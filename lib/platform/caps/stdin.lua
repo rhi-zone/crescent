@@ -40,4 +40,8 @@ function M.stdin_cap(opts)
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "low", text = "Reads from standard input." }
+end
+
 return M

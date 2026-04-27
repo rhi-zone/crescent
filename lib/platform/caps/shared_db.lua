@@ -540,4 +540,11 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	return cap, revoke
 end
 
+function M.risk(decl)
+	if decl.readonly then
+		return { severity = "low", text = "Reads a shared SQLite database." }
+	end
+	return { severity = "medium", text = "Reads and writes a shared SQLite database accessible to multiple apps." }
+end
+
 return M

@@ -1,10 +1,10 @@
--- lib/platform/caps/stdout.lua
--- stdout_cap(opts?) -> cap_table, revoke_fn
--- Standard output capability for sandboxed apps.
+-- lib/platform/caps/stderr.lua
+-- stderr_cap() -> cap_table, revoke_fn
+-- Standard error capability for sandboxed apps.
 --
 -- Capability API:
---   cap.write(str) -> true | nil, string   (writes string to stdout)
---   cap.flush()    -> true | nil, string   (flushes stdout)
+--   cap.write(str) -> true | nil, string   (writes string to stderr)
+--   cap.flush()    -> true | nil, string   (flushes stderr)
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -12,21 +12,23 @@ end
 
 local M = {}
 
--- stdout_cap(opts?) -> cap_table, revoke_fn
-function M.stdout_cap(opts)
+M._type = "stderr"
+
+-- stderr_cap() -> cap_table, revoke_fn
+function M.stderr_cap()
 	local revoked = false
 
 	local cap = {
-		_type = "stdout",
+		_type = "stderr",
 		write = function(str)
 			if revoked then return nil, "capability revoked" end
-			io.stdout:write(str)
+			io.stderr:write(str)
 			return true
 		end,
 
 		flush = function()
 			if revoked then return nil, "capability revoked" end
-			io.stdout:flush()
+			io.stderr:flush()
 			return true
 		end,
 	}
@@ -39,7 +41,7 @@ function M.stdout_cap(opts)
 end
 
 function M.risk(_)
-	return { severity = "low", text = "Writes to standard output." }
+	return { severity = "low", text = "Writes to standard error." }
 end
 
 return M

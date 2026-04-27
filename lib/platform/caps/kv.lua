@@ -38,4 +38,8 @@ function M.kv_cap()
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "low", text = "Reads and writes a private key-value store. Data is isolated to this app." }
+end
+
 return M

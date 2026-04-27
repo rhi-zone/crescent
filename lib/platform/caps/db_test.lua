@@ -178,3 +178,17 @@ T.describe("db_cap", function()
 	end)
 
 end)
+
+T.describe("caps.db risk", function()
+	T.it("writable db has low severity", function()
+		local result = db_mod.risk({ type = "db" })
+		T.eq(result.severity, "low")
+		T.ok(result.text:find("Reads and writes"), "text mentions reads and writes")
+	end)
+
+	T.it("readonly db has low severity", function()
+		local result = db_mod.risk({ type = "db", readonly = true })
+		T.eq(result.severity, "low")
+		T.ok(result.text:find("No writes"), "text mentions no writes")
+	end)
+end)

@@ -18,7 +18,7 @@ end
 local json       = require("lib.format.json") --: any
 local search     = require("lib.platform.apps.system_dashboard.search")
 local packs      = require("lib.platform.apps.system_dashboard.packs")
-local cap_risks  = require("lib.platform.cap_risks")
+local cap_dispatch = require("lib.platform.cap_dispatch")
 
 local M = {}
 
@@ -276,7 +276,7 @@ local function handle_api(state, req, res)
 				name   = name,
 				type   = decl.type,
 				reason = decl.reason,
-				risk   = cap_risks.describe(decl),
+				risk   = cap_dispatch.risk(decl),
 			}
 		end
 		local exec_args --: any

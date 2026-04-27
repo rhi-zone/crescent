@@ -638,4 +638,12 @@ function M.http_client_cap(opts)
 	return cap, revoke
 end
 
+function M.risk(decl)
+	local host = decl.host or "a configured host"
+	if decl.paths then
+		return { severity = "medium", text = "Sends HTTP requests to " .. host .. " restricted to configured paths and methods." }
+	end
+	return { severity = "high", text = "Sends arbitrary HTTP requests to " .. host .. ". Can leak data or trigger side effects on that host." }
+end
+
 return M

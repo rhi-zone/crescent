@@ -118,4 +118,8 @@ function M.shell_cap()
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "critical", text = "Runs arbitrary shell commands as your user. Can exfiltrate data, install malware, modify any file you own, or pivot to other systems." }
+end
+
 return M

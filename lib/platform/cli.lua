@@ -24,7 +24,7 @@ end
 
 local json = require("lib.json")
 local platform = require("lib.platform")
-local cap_risks = require("lib.platform.cap_risks")
+local cap_dispatch = require("lib.platform.cap_dispatch")
 
 -- ── LLM env-var key resolution ────────────────────────────────────────────────
 -- At cap construction time, check well-known env vars in priority order and
@@ -1140,7 +1140,7 @@ if #missing > 0 then
 			local cap_type = decl.type or name
 			local req = decl.required ~= false and "required" or "optional"
 			io.stderr:write("  " .. name .. " (" .. cap_type .. ", " .. req .. ")\n")
-			local risk = cap_risks.describe(decl)
+			local risk = cap_dispatch.risk(decl)
 			if risk then
 				io.stderr:write("    [" .. risk.severity:upper() .. "] " .. risk.text .. "\n")
 			end

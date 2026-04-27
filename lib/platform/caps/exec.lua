@@ -359,4 +359,8 @@ function M.new(manifest_entry, opts)
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "high", text = "Runs whitelisted binaries with controlled arguments. Severity depends on which binaries are whitelisted; network-capable tools (git, npm, curl) can fetch and execute arbitrary code." }
+end
+
 return M

@@ -412,4 +412,11 @@ function M.registry_cap(opts)
 	return cap, revoke
 end
 
+function M.risk(decl)
+	if decl.allow_write == false or decl.allow_write == nil then
+		return { severity = "medium", text = "Reads Windows Registry keys under a configured root." }
+	end
+	return { severity = "high", text = "Reads and writes Windows Registry keys under a configured root. Registry writes can affect system behavior." }
+end
+
 return M

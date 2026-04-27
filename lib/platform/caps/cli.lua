@@ -35,4 +35,8 @@ function M.cli_cap(args)
 	return cap, revoke
 end
 
+function M.risk(_)
+	return { severity = "low", text = "Reads the command-line arguments passed to the app." }
+end
+
 return M

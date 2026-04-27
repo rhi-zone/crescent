@@ -265,4 +265,8 @@ end
 M._wrap_handler = wrap_handler
 M._split_target = split_target
 
+function M.risk(_)
+	return { severity = "low", text = "Accepts inbound HTTP connections on a local port. Exposes an HTTP endpoint." }
+end
+
 return M
