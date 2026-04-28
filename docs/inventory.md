@@ -4,6 +4,8 @@ This is the definitive index of what currently exists under `lib/`. Grep this fi
 
 This file is hand-maintained. **When you add a new library or `_types.lua` file, add a line here in the same commit.** If the index lags behind reality, spot-check `lib/` directly before assuming something doesn't exist.
 
+**Duplicate clusters triage:** see `docs/duplicate_clusters.md` for canonical-pick analysis of the ~25 duplicate library pairs/triplets noted inline below (`**Parallel to ...**`, `**Two parallel impls**`, etc.).
+
 Status legend:
 - **stable** — substantive code with real tests
 - **wip** — partial, may be missing features or polish
