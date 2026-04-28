@@ -149,14 +149,22 @@ Inline is only acceptable for:
 - A single targeted file read (one file, one specific thing you already know is there)
 - A single grep for a known symbol in a known file
 
-**Edits are never inline.** Even a single-file change goes to a subagent. "Inline" means read-only operations only.
+**Edits: delegate implementation, inline surgical fixes.** Implementation work goes to a subagent — anything that needs reading surrounding code first, writing nontrivial new code, or is likely to iterate. The subagent's summary back is shorter than the raw tool output and exploration would be in main context. Surgical edits stay inline: a 1–5 line change in a location you already know, no exploration, no iteration expected.
 
-Everything else is a subagent:
+The axis is steps + exploration + iteration risk, NOT lines changed. A 3-line edit that requires reading three files first is delegation work. A 50-line mechanical rename in a file you've already fully read is not.
+
+Subagent cases (non-exhaustive):
 - Any research or exploration question → subagent (Explore for codebase questions, general-purpose for multi-step tasks)
-- Annotating a file → subagent
-- Making changes to a file based on understanding another file → subagent
-- Verifying output of a change → can be inline (one command) or subagent if it requires reading results
+- Writing a new file or new function from scratch → subagent
+- Adding a feature that needs reading other files to understand → subagent
 - Mechanical work across many files → parallel subagents
+- Any edit that's likely to iterate (typecheck might fail, tests might fail) → subagent
+
+Inline cases:
+- A single targeted file read (one file, one specific thing you already know is there)
+- A single grep for a known symbol in a known file
+- A surgical 1–5 line edit in a file you already understand, with no expected iteration
+- Verifying output of a change with one command
 
 ## Commit Convention
 
@@ -238,5 +246,6 @@ Do not:
 - Leave work uncommitted
 - Use interactive git commands (`git add -p`, `git add -i`, `git rebase -i`) — these block on stdin and hang in non-interactive shells; stage files by name instead
 - Use `--no-verify` - fix the issue or fix the hook
+- Edit files inline because the change "seems small" or is "just one function" — size in lines is the wrong axis. If the edit needs exploration or might iterate, delegate.
 - Assume tools are missing - check if `nix develop` is available for the right environment
 - Add dependencies that require a build step — pure Lua + FFI only
