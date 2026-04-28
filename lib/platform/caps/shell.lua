@@ -4,6 +4,13 @@
 --
 -- Capability API:
 --   cap.run(cmd) -> output: string | nil, err: string
+--   cap.run_stream(cmd) -> iter | nil, err
+--     iter() returns:
+--       (line, nil)  — one stdout line (trailing newline stripped) per call
+--       (nil, nil)   — end of stream
+--       (nil, err)   — read error
+--     iter:close() terminates the underlying process. Idempotent. Safe to
+--     call after EOF.
 --   cap.attenuate(sub_decl) -> sub_cap, sub_revoke_fn | nil, errmsg
 --     sub_decl.type = "shell" (default) | "exec"
 --     When type="exec", sub_decl is forwarded to exec_caps.new as manifest_entry.
@@ -13,6 +20,38 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local M = {}
+
+-- Build a streaming iterator wrapping a popen file handle.
+-- Returns a callable table with a :close method (idempotent).
+--: (unknown) -> unknown
+local function make_line_iter(fh_in)
+	local fh = fh_in --: any
+	local closed = false
+	local iter = {} --: any
+	setmetatable(iter, { __call = function(_self) --: (any) -> string | nil, string | nil
+		if closed then return nil, nil end
+		local line = fh:read("*l")
+		if line == nil then
+			closed = true
+			pcall(fh.close, fh)
+			return nil, nil
+		end
+		return line, nil
+	end })
+	function iter:close()
+		if closed then return end
+		closed = true
+		pcall(fh.close, fh)
+	end
+	return iter
+end
+
+local function open_stream(cmd)
+	if type(cmd) ~= "string" then return nil, "shell: command must be a string" end
+	local fh, err = io.popen(cmd .. " 2>&1", "r")
+	if not fh then return nil, "shell: popen failed: " .. tostring(err) end
+	return make_line_iter(fh)
+end
 
 function M.shell_cap()
 	local revoked = false
@@ -38,6 +77,11 @@ function M.shell_cap()
 					local out = fh:read("*a")
 					fh:close()
 					return out or ""
+				end,
+				run_stream = function(cmd)
+					if sub_revoked then return nil, "shell: capability revoked" end
+					if revoked then return nil, "shell: capability revoked" end
+					return open_stream(cmd)
 				end,
 			}
 
@@ -65,6 +109,12 @@ function M.shell_cap()
 							local out = fh:read("*a")
 							fh:close()
 							return out or ""
+						end,
+						run_stream = function(cmd)
+							if inner_revoked then return nil, "shell: capability revoked" end
+							if sub_revoked   then return nil, "shell: capability revoked" end
+							if revoked       then return nil, "shell: capability revoked" end
+							return open_stream(cmd)
 						end,
 					}
 					-- Further attenuation not implemented at this depth; add if needed.
@@ -109,6 +159,10 @@ function M.shell_cap()
 			local out = fh:read("*a")
 			fh:close()
 			return out or ""
+		end,
+		run_stream = function(cmd)
+			if revoked then return nil, "shell: capability revoked" end
+			return open_stream(cmd)
 		end,
 		attenuate = attenuate,
 	}
