@@ -61,9 +61,14 @@ local SQLITE_NULL    = 5
 
 --[[@type sqlite_ffi]]
 local sqlite_ffi
+local sqlite_loaded_from
 if ffi.os == "Windows" then
-	if ffi.arch == "x64" then sqlite_ffi = ffi.load("dep/sqlite.dll")
-	else sqlite_ffi = ffi.load("dep/sqlite-x86.dll") end
+	if ffi.arch == "x64" then
+		sqlite_loaded_from = "dep/sqlite.dll"
+	else
+		sqlite_loaded_from = "dep/sqlite-x86.dll"
+	end
+	sqlite_ffi = ffi.load(sqlite_loaded_from)
 else
 	-- Build vendored name first (platform-specific compiled libraries).
 	local function vendored_name()
@@ -86,12 +91,15 @@ else
 	names[#names + 1] = "/usr/lib/libsqlite3.dylib" -- macOS system
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
-		if ok then sqlite_ffi = lib; break end
+		if ok then sqlite_ffi = lib; sqlite_loaded_from = name; break end
 	end
 	if not sqlite_ffi then
 		error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
 	end
 end
+
+mod._tier = "system-sqlite"
+mod._loaded_from = sqlite_loaded_from
 
 -- ── column reading (module-level, no per-row allocation) ─────────────────────
 

@@ -14,16 +14,15 @@
         # All others fall back to nixpkgs luajit.
         vendoredPlatforms = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
         hasVendored = builtins.elem system vendoredPlatforms;
-        extraInputs = if hasVendored then [] else [ pkgs.luajit ];
+        # On vendoredPlatforms, dep/libsqlite3-* and dep/libz-* are also
+        # shipped, so system sqlite/zlib follow the same conditional as luajit.
+        extraInputs = if hasVendored then [] else [ pkgs.luajit pkgs.sqlite pkgs.zlib ];
       in
       {
         devShells.default = pkgs.mkShell rec {
           buildInputs = with pkgs; [
             # JS tooling for docs (until lib/markdown exists and we can self-host)
             bun
-            # Native libraries (lib/sqlite, lib/compress, etc.)
-            sqlite
-            zlib
           ] ++ extraInputs;
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
           shellHook = ''

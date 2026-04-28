@@ -97,6 +97,8 @@ See `docs/conventions.md` for the full spec. Short version:
 
 In both cases: never wrap one implementation around another. Each is a real, independent implementation. Abstraction between tiers or variants destroys hackability.
 
+**Don't degrade runtime to surface CI gaps.** If a graceful fallback could mask a regression in the preferred tier, the fix is a CI assertion that the preferred tier took effect (`M._tier == "vendored"`, etc.) — not removing the fallback. Fallbacks exist for users on configurations you don't test; removing them shifts the cost from CI (fixable, observable) to user laptops (invisible, permanent). "We'll notice when it breaks" is not a reason to take away graceful behavior.
+
 **Multiple implementations of the same spec require parity tests, parity fuzzing, and benchmarks.** This applies any time two implementations claim to satisfy the same spec — performance tiers, a reference impl and an optimized one, a pure-Lua and an FFI version, a stub and the real thing. Parity tests assert byte-for-byte identical output. Parity fuzzing generates random inputs and runs all implementations, catching edge cases unit tests miss. Benchmarks measure each implementation on representative inputs and results are committed to `docs/perf/log.md`. None of this is optional polish — the implementation is not done until all three exist.
 
 **Fix the specific problem, don't abandon the approach.** When an objection applies to one aspect of a design, fix that aspect. Platform-specific library names → try each known name. Library missing → fall back to next tier. These are implementation details, not architectural blockers. Discarding a whole approach because of a fixable problem is a cop-out.

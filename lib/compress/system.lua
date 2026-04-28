@@ -71,9 +71,10 @@ for _, name in ipairs({ "z", "zlib", "zlib1", "libz" }) do
 end
 
 local ok, zlib
+local zlib_loaded_from
 for _, name in ipairs(names) do
   ok, zlib = pcall(ffi.load, name)
-  if ok then break end
+  if ok then zlib_loaded_from = name; break end
 end
 if not ok then
   error("zlib not found: " .. tostring(zlib))
@@ -330,4 +331,5 @@ M.decode = inflate
 M.deflater = deflater
 M.inflater = inflater
 M._tier = "system-zlib"
+M._loaded_from = zlib_loaded_from
 return M
