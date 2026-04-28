@@ -20,7 +20,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/http/format_types.lua` — `http_request` / `http_response` shape aliases. Status: stable.
 - `lib/imap/format_types.lua` — IMAP (RFC 9051) flags and capability aliases. Status: stable.
 - `lib/platform/apps/system_dashboard/primitive_types.lua` — system_dashboard pack output schema. Status: stable.
-- `lib/platform/apps/system_dashboard/projections/projection_types.lua` — typed environment for projection authors. Status: stable. **Note: contains a Lua-side `Element` declaration that duplicates `lib/web/js_types.lua` — kept here as a flag for future consolidation.**
+- `lib/platform/apps/system_dashboard/projections/projection_types.lua` — typed environment for projection authors (Children, Style, Props, sealed `dom` tag table, `text`, `Ctx`, `Projection`). Imports `Element`, `Text`, `Event` etc. from `lib/web/js_types.lua` rather than redeclaring them. Status: stable.
 - `lib/taskgraph/taskgraph_types.lua` — taskgraph aliases. Status: stable.
 - `lib/type/static/ctx_types.lua` — typechecker context (ctx) struct, used in self-check. Status: stable.
 - `lib/type/static/stdlib_types.lua` — Lua 5.1 / LuaJIT stdlib type declarations. Status: stable.

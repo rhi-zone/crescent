@@ -18,6 +18,11 @@
 -- file. Aliases defined here may reference `Primitive` because primitive_types
 -- is loaded earlier.
 --
+-- DOM and event types come from the canonical browser prelude in
+-- lib/web/js_types.lua via the `require` annotation below — Element, Text,
+-- Event, MouseEvent, KeyboardEvent, InputEvent, etc. are all imported, not
+-- redeclared here.
+--
 -- Type-system gaps approximated below (each could be tightened later, none of
 -- them block v1):
 --   * Per-tag prop allowlists: dom.js distinguishes universal props, aria-*,
@@ -28,32 +33,15 @@
 --   * Style values: STYLE_PROPS is enumerated in dom.js (~60 properties). We
 --     type style as { [string]: string | number | nil, ... } rather than a
 --     closed record per property. Untyped property names typecheck.
---   * Event handler arg type: Event is declared minimally below; the full
---     browser Event surface (currentTarget chain, key codes, etc.) lives in
---     lib/web/js_types.lua and is not pulled in.
 
--- ── Element (opaque) ────────────────────────────────────────────────────────
--- Authors do not construct or inspect Element values directly — they only
--- pass them around (return from a projection, place in a children array,
--- recurse via ctx:project). $Opaque<"Element"> gives nominal identity so
--- random tables don't satisfy the Element contract structurally.
-
---:: Element  = $Opaque<"Element">
---:: TextNode = $Opaque<"TextNode">
-
--- ── Event (minimal) ─────────────────────────────────────────────────────────
--- Just enough for the four event handler props (onClick/onSubmit/onInput/
--- onChange). The full Event surface lives in lib/web/js_types.lua; pull that
--- in via globals_files if a projection needs more than `target.value`.
-
---:: EventTarget = { value?: string, checked?: boolean, name?: string, ... }
---:: Event       = { type: string, target?: EventTarget, currentTarget?: EventTarget, ... }
+--:: require "lib.web.js_types"
 
 -- ── Children ────────────────────────────────────────────────────────────────
--- An array of: Element, TextNode, string, number, nil, false.
--- Matches the appendChildren contract in dom.js.
+-- An array of: Element, Text, string, number, nil, false.
+-- Matches the appendChildren contract in dom.js. `Element` and `Text` come
+-- from lib/web/js_types.lua.
 
---:: Child    = Element | TextNode | string | number | nil | false
+--:: Child    = Element | Text | string | number | nil | false
 --:: Children = Child[]
 
 -- ── Style ───────────────────────────────────────────────────────────────────
@@ -71,13 +59,19 @@
 -- aren't enumerable as type fields can be passed through structural-subtyping
 -- without breaking checking. data-/aria- attributes typecheck loosely; the
 -- runtime checks they are strings.
-
+--
 -- Many real DOM attributes — `for`, `stroke-width`, `text-anchor`, etc. — are
 -- not valid Lua identifiers and the typechecker's record syntax does not
 -- accept bracketed-string field names. We keep the strongly-typed entries
 -- here for the props that DO have legal Lua names, and rely on the open
 -- `...` (string-keyed indexer fallthrough) for the rest. Runtime allowlists
 -- in dom.js still reject anything not on its per-tag list.
+--
+-- Event handler argument types come from lib/web/js_types.lua. We keep the
+-- four projection-relevant handlers typed minimally (Event for click/submit,
+-- InputEvent for input/change targeting form fields). Authors who need
+-- specific shapes (MouseEvent.clientX, KeyboardEvent.key, etc.) can read
+-- those fields off the imported types directly.
 
 --:: Props = {
 --::   class?:        string,
@@ -140,7 +134,10 @@
 
 -- ── DOM constructor table ───────────────────────────────────────────────────
 -- One method per tag in dom.js's HTML and SVG allowlists. All share the same
--- (props?, children?) -> Element shape.
+-- (props?, children?) -> Element shape. The returned `Element` is the canonical
+-- browser type from lib/web/js_types.lua (a real DOM element produced by
+-- document.createElement). The sealed `dom` table is the project-specific
+-- allowlist of tags — separate concern from the native DOM API surface.
 
 --:: DomCtor = (props: Props | nil, children: Children | nil) -> Element
 
@@ -212,14 +209,13 @@
 --:: }
 
 -- ── text(s) ─────────────────────────────────────────────────────────────────
--- Free-standing helper from dom.js. Builds a TextNode (a real DOM node, not a
--- raw string). Children arrays accept TextNode directly via the Child union,
--- so `dom.span({}, { text("hello") })` is well-typed.
--- Authors can also pass bare strings — the runtime promotes them via
--- document.createTextNode — so `text(s)` is only needed if you want to keep a
--- handle to the node.
+-- Free-standing helper from dom.js. Builds a Text node (a real DOM node, not
+-- a raw string). Children arrays accept Text directly via the Child union, so
+-- `dom.span({}, { text("hello") })` is well-typed. Authors can also pass bare
+-- strings — the runtime promotes them via document.createTextNode — so
+-- `text(s)` is only needed if you want to keep a handle to the node.
 
---:: declare text = (s: string) -> TextNode
+--:: declare text = (s: string) -> Text
 
 -- ── Ctx ─────────────────────────────────────────────────────────────────────
 -- The second argument every projection receives. Methods mirror the contract
