@@ -84,8 +84,7 @@ local function load_zlib() --: () -> ZlibLib, string
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
-      local lib_typed = lib --: ZlibLib
-      return lib_typed, name
+      return lib --[[as ZlibLib]], name
     end
   end
   error("zlib not found")
