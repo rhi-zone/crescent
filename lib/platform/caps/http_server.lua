@@ -5,16 +5,33 @@
 --
 -- Modes:
 --   Standalone (default): the cap binds its own port. cap.serve(handler) blocks.
---     opts.port : integer (required) — port to bind
---     opts.host : string  (default "0.0.0.0") — bind address
+--     opts.port         : integer (required) — port to bind
+--     opts.host         : string  (default "0.0.0.0") — bind address
+--     opts.tcp_nodelay  : boolean (default true) — disable Nagle's algorithm
+--                         on SSE streams. Set false for benchmarks/special cases.
 --
 --   Daemon: the cap does not bind; cap.serve(handler) records the handler and
 --   returns immediately. The daemon invokes the handler per request through
---   its own listener. SSE streaming is not supported in daemon mode in v1.
+--   its own listener.
 --     opts.daemon   : true  (enables daemon mode)
 --     opts.url      : string (optional) — advertised app URL for cap.url
 --     opts.on_serve : (handler) -> nil (required) — daemon callback that
 --                     captures the handler when the app calls cap.serve()
+--
+--   SSE wire format contract (any future daemon HTTP server MUST honour):
+--     1. First send_event call writes the response preamble (200 + SSE headers)
+--        then flushes; subsequent calls write SSE frames incrementally.
+--     2. Each frame is `id: <id>\nevent: <event>\ndata: <data>\n\n`. Both
+--        `id:` and `event:` lines are omitted if the corresponding opts field
+--        was not set. `data:` is mandatory.
+--     3. send_event returns (ok, err). On client-closed / write error it MUST
+--        return `nil, err` so callers can stop the stream cleanly.
+--     4. On the first send_event call the server MUST set TCP_NODELAY (if
+--        opts.tcp_nodelay is not false) and SO_KEEPALIVE (always) with
+--        TCP_KEEPIDLE=15, TCP_KEEPINTVL=15, TCP_KEEPCNT=3.
+--     5. The cap MUST parse the request `Last-Event-ID` header and surface it
+--        as `req.last_event_id` (string or nil). The handler decides resume
+--        semantics; the cap is transport-only.
 --
 -- Capability API (both modes):
 --   cap.serve(handler)  — register handler. handler(req, res) per request.
@@ -23,8 +40,11 @@
 --   cap.url             — string, e.g. "http://localhost:7860"
 --   cap.port            — integer (0 in daemon mode)
 --
--- req: { method, path, headers, body, query }
--- res: response builder with .status, .headers, .body, .send_event(data), .close()
+-- req: { method, path, headers, body, query, last_event_id }
+-- res: response builder with .status, .headers, .body, .send_event(data, opts?), .close()
+--   res.send_event(data, opts?) -> ok | nil, err
+--     opts.id    : string | number | nil — SSE event id
+--     opts.event : string | nil          — SSE event name (default "message")
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -61,10 +81,51 @@ local function sse_preamble(status)
 	})
 end
 
+-- Extract a single header value (lib/http/format stores headers as { string, ... }).
+--: (unknown, string) -> string | nil
+local function header_first(headers, name)
+	if type(headers) ~= "table" then return nil end
+	local v = headers[name]
+	if type(v) == "table" and v[1] ~= nil then return tostring(v[1]) end
+	if type(v) == "string" then return v end
+	return nil
+end
+
+-- Set TCP-level socket options for an SSE stream.
+-- We do this on the first send_event call so that buffered short-lived
+-- responses don't pay the syscall cost.
+--: (unknown, boolean) -> nil
+local function set_sse_socket_options(sock, want_nodelay)
+	if not sock then return end
+	local set = sock.set_option
+	if type(set) ~= "function" then return end
+	if want_nodelay then
+		pcall(set, sock, "tcp_nodelay", 1, "tcp")
+	end
+	pcall(set, sock, "so_keepalive", 1, "socket")
+	-- Linux TCP keepalive tuning. macOS uses TCP_KEEPALIVE (different name);
+	-- ljsocket only declares the Linux constants — failures here are silent
+	-- via pcall so non-Linux platforms don't error.
+	pcall(set, sock, "tcp_keepidle",  15, "tcp")
+	pcall(set, sock, "tcp_keepintvl", 15, "tcp")
+	pcall(set, sock, "tcp_keepcnt",    3, "tcp")
+end
+
+-- Format an SSE frame body (no preamble).
+-- Each non-data line is omitted when the corresponding field is nil.
+--: (string, unknown, unknown) -> string
+local function format_sse_frame(data, id, event)
+	local parts = {}
+	if id ~= nil then parts[#parts + 1] = "id: " .. tostring(id) .. "\n" end
+	if event ~= nil then parts[#parts + 1] = "event: " .. tostring(event) .. "\n" end
+	parts[#parts + 1] = "data: " .. tostring(data) .. "\n\n"
+	return table.concat(parts)
+end
+
 -- Wrap the raw HTTP handler to hide the socket from the app.
 -- Returns a handler compatible with lib/http/server.make_connection_handler.
---: (((req: unknown, res: unknown) -> nil), boolean) -> (req: unknown, res: unknown, sock: unknown) -> boolean | nil
-local function wrap_handler(app_handler, revoked_ref)
+--: (((req: unknown, res: unknown) -> nil), unknown, boolean) -> (req: unknown, res: unknown, sock: unknown) -> boolean | nil
+local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 	--: (unknown, unknown, unknown) -> boolean | nil
 	return function(raw_req, raw_res, sock)
 		if revoked_ref[1] then return end
@@ -73,11 +134,12 @@ local function wrap_handler(app_handler, revoked_ref)
 
 		-- Build the sanitized request (no socket access).
 		local req = {
-			method  = raw_req.method,
-			path    = path,
-			query   = query,
-			headers = raw_req.headers,
-			body    = raw_req.body,
+			method        = raw_req.method,
+			path          = path,
+			query         = query,
+			headers       = raw_req.headers,
+			body          = raw_req.body,
+			last_event_id = header_first(raw_req.headers, "last-event-id"),
 		}
 
 		-- Build the response builder object.
@@ -89,16 +151,36 @@ local function wrap_handler(app_handler, revoked_ref)
 			body    = nil,
 		}
 
-		-- send_event(data) — SSE streaming. First call writes headers + flushes.
-		-- Subsequent calls write "data: <data>\n\n" frames.
-		function res.send_event(data)
+		-- send_event(data, opts?) — SSE streaming. First call writes headers,
+		-- flushes, and configures the socket (TCP_NODELAY + keepalive).
+		-- opts = { id?, event? }. Returns (true) on success, (nil, err) on
+		-- client-closed / write error.
+		function res.send_event(data, opts)
 			if revoked_ref[1] then return nil, "http_server: revoked" end
 			if closed then return nil, "http_server: stream closed" end
+			local id, event
+			if type(opts) == "table" then
+				local o = opts --: any
+				id    = o.id
+				event = o.event
+			end
 			if not streaming then
 				streaming = true
-				sock:send(sse_preamble(res.status))
+				set_sse_socket_options(sock, tcp_nodelay)
+				local ok_p, err_p = sock:send(sse_preamble(res.status))
+				if not ok_p then
+					closed = true
+					return nil, "client closed"
+				end
+				-- some sockets return (nil, err) — defensive
+				if ok_p == nil then return nil, tostring(err_p or "client closed") end
 			end
-			sock:send("data: " .. tostring(data) .. "\n\n")
+			local frame = format_sse_frame(data, id, event)
+			local ok_s, err_s = sock:send(frame)
+			if not ok_s then
+				closed = true
+				return nil, tostring(err_s or "client closed")
+			end
 			return true
 		end
 
@@ -128,7 +210,7 @@ local function wrap_handler(app_handler, revoked_ref)
 	end
 end
 
---:: http_server_opts = { port: integer | nil, host: string | nil, daemon: boolean | nil, url: string | nil, on_serve: ((unknown) -> nil) | nil }
+--:: http_server_opts = { port: integer | nil, host: string | nil, daemon: boolean | nil, url: string | nil, on_serve: ((unknown) -> nil) | nil, tcp_nodelay: boolean | nil }
 -- http_server_cap(opts) -> cap_table, revoke_fn
 --: (http_server_opts) -> unknown, string | nil
 function M.http_server_cap(opts)
@@ -167,6 +249,9 @@ function M.http_server_cap(opts)
 	local port = opts.port
 	local host = opts.host or "0.0.0.0"
 	local url  = "http://localhost:" .. tostring(port)
+	-- TCP_NODELAY default: true. Explicit `false` disables.
+	local tcp_nodelay = true
+	if opts.tcp_nodelay == false then tcp_nodelay = false end
 
 	local cap = {
 		_type = "http_server",
@@ -190,7 +275,7 @@ function M.http_server_cap(opts)
 		local max_header_size = 65536
 		local err_res = http_format.serialize_response({ status = 400, headers = {} })
 
-		local wrapped = wrap_handler(handler, revoked_ref)
+		local wrapped = wrap_handler(handler, revoked_ref, tcp_nodelay)
 
 		local socket_server = require("lib.socket.server")
 		socket_server.server(function(client)

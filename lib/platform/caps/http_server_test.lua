@@ -157,10 +157,12 @@ T.describe("http_server_cap", function()
 			}
 			function sock:send(data)
 				self.sent[#self.sent + 1] = data
+				return #data
 			end
 			function sock:close()
 				self.closed = true
 			end
+			function sock:set_option() return true end
 			return sock
 		end
 
@@ -333,6 +335,120 @@ T.describe("http_server_cap", function()
 
 			T.eq(captured_req.body, '{"key":"value"}')
 			T.eq(captured_req.method, "POST")
+		end)
+
+		T.it("SSE: send_event(data, {id, event}) emits id/event lines", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.send_event("hello", { id = 1, event = "schema" })
+				res.send_event("world", { id = 2 })
+				res.send_event("done", { event = "end" })
+				res.close()
+			end, revoked_ref)
+			local sock = mock_socket()
+			wrapped({ method = "GET", target = "/events", headers = {} }, { headers = {} }, sock)
+			T.eq(sock.sent[2], "id: 1\nevent: schema\ndata: hello\n\n")
+			T.eq(sock.sent[3], "id: 2\ndata: world\n\n")
+			T.eq(sock.sent[4], "event: end\ndata: done\n\n")
+		end)
+
+		T.it("SSE: req.last_event_id parsed from header", function()
+			local revoked_ref = { false }
+			local captured_req
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				captured_req = req
+			end, revoked_ref)
+			local raw_req = {
+				method  = "GET",
+				target  = "/events",
+				headers = { ["last-event-id"] = { "42" } },
+			}
+			wrapped(raw_req, { headers = {} }, mock_socket())
+			T.eq(captured_req.last_event_id, "42")
+		end)
+
+		T.it("SSE: send_event returns nil, err on socket send failure", function()
+			local revoked_ref = { false }
+			local results
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				local r1 = { res.send_event("first") }
+				-- next sock:send returns failure
+				results = { r1 = r1 }
+				local r2 = { res.send_event("second") }
+				results.r2 = r2
+			end, revoked_ref)
+			local sent_count = 0
+			local sock = {
+				sent = {}, closed = false,
+			}
+			function sock:send(data)
+				sent_count = sent_count + 1
+				if sent_count >= 3 then return nil, "broken pipe" end
+				self.sent[#self.sent + 1] = data
+				return #data
+			end
+			function sock:close() self.closed = true end
+			function sock:set_option() return true end
+			wrapped({ method = "GET", target = "/events", headers = {} }, { headers = {} }, sock)
+			T.eq(results.r1[1], true)
+			T.eq(results.r2[1], nil)
+			T.ok(tostring(results.r2[2]):find("broken pipe") ~= nil
+				or tostring(results.r2[2]):find("client closed") ~= nil,
+				"err should mention broken pipe or client closed")
+		end)
+
+		T.it("SSE: TCP_NODELAY set_option called when tcp_nodelay=true", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.send_event("x")
+				res.close()
+			end, revoked_ref, true)
+			local opts_calls = {}
+			local sock = {
+				sent = {}, closed = false,
+			}
+			function sock:send(data) self.sent[#self.sent + 1] = data; return #data end
+			function sock:close() self.closed = true end
+			function sock:set_option(key, val, level)
+				opts_calls[#opts_calls + 1] = { key = key, val = val, level = level }
+				return true
+			end
+			wrapped({ method = "GET", target = "/events", headers = {} }, { headers = {} }, sock)
+			local saw_nodelay = false
+			local saw_keepalive = false
+			for _, c in ipairs(opts_calls) do
+				if c.key == "tcp_nodelay" then saw_nodelay = true end
+				if c.key == "so_keepalive" then saw_keepalive = true end
+			end
+			T.ok(saw_nodelay, "tcp_nodelay should be set")
+			T.ok(saw_keepalive, "so_keepalive should be set")
+		end)
+
+		T.it("SSE: TCP_NODELAY skipped when tcp_nodelay=false; keepalive still on", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.send_event("x")
+				res.close()
+			end, revoked_ref, false)
+			local opts_calls = {}
+			local sock = {
+				sent = {}, closed = false,
+			}
+			function sock:send(data) self.sent[#self.sent + 1] = data; return #data end
+			function sock:close() self.closed = true end
+			function sock:set_option(key)
+				opts_calls[#opts_calls + 1] = key
+				return true
+			end
+			wrapped({ method = "GET", target = "/events", headers = {} }, { headers = {} }, sock)
+			local saw_nodelay = false
+			local saw_keepalive = false
+			for _, k in ipairs(opts_calls) do
+				if k == "tcp_nodelay"  then saw_nodelay   = true end
+				if k == "so_keepalive" then saw_keepalive = true end
+			end
+			T.ok(not saw_nodelay,  "tcp_nodelay should be skipped")
+			T.ok(saw_keepalive, "so_keepalive should still be set")
 		end)
 	end)
 
