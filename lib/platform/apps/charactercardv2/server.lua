@@ -1427,23 +1427,38 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	-- Build context.
 	local context = build_context(state, caps)
 
+	-- Track client connection state. Once a send_event fails (client disconnect
+	-- or revocation), further sends are skipped. The LLM stream cannot be
+	-- cancelled mid-flight, but we stop forwarding tokens to a dead socket.
+	local client_gone = false
+
 	-- Send user message event.
-	res.send_event(json.encode({
+	local ok = res.send_event(json.encode({
 		type = "user",
 		id = user_msg.id,
 		role = "user",
 		content = text,
 	}))
+	if not ok then
+		client_gone = true
+		res.close()
+		return true
+	end
 
 	-- Stream LLM response.
 	local response, err = caps.llm.call_stream(apply_instruct(state, context), function(token)
-		res.send_event(json.encode({ type = "token", token = token }))
+		if client_gone then return end
+		local sok = res.send_event(json.encode({ type = "token", token = token }))
+		if not sok then client_gone = true end
 	end, llm_opts_from_settings(state.settings))
 
 	if not response then
 		-- Rollback: delete user message.
 		conv_delete_subtree(state.conv, user_msg.id)
-		res.send_event(json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
+		if not client_gone then
+			-- Best-effort error notify; ignore failure since we're closing anyway.
+			res.send_event(json.encode({ type = "error", error = "LLM error: " .. tostring(err) }))
+		end
 		res.close()
 		return true
 	end
@@ -1454,15 +1469,25 @@ local function api_post_message_stream(state, caps, _params, body, res)
 	-- Add assistant message.
 	local asst_msg, aerr = conv_add_message(state.conv, state.session_id, user_msg.id, "assistant", response, state._time_fn)
 	if not asst_msg then
-		res.send_event(json.encode({ type = "error", error = "db error: " .. tostring(aerr) }))
+		if not client_gone then
+			-- Best-effort error notify; ignore failure since we're closing anyway.
+			res.send_event(json.encode({ type = "error", error = "db error: " .. tostring(aerr) }))
+		end
 		res.close()
 		return true
 	end
 
 	save_session_id(state, caps)
 
+	if client_gone then
+		res.close()
+		return true
+	end
+
 	-- Send done event with final message data.
 	local idx, total = sibling_info(state, asst_msg)
+	-- Best-effort terminal send; failure here just means client disconnected
+	-- between tokens and the final event. Conversation state is already saved.
 	res.send_event(json.encode({
 		type = "done",
 		id = asst_msg.id,
