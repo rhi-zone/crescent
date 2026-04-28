@@ -338,6 +338,20 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 		end
 	end
 
+	-- Frame format: "jsonl" decodes each line as JSON and forwards the parsed
+	-- object as the frame body. Required for live_table / event_stream demos
+	-- (their frame shapes are structured, not flat strings). Default (nil)
+	-- preserves the legacy log_stream message-wrapping behaviour.
+	local frame_format = s.frame_format
+	if frame_format ~= nil and frame_format ~= "jsonl" then
+		res.send_event(json.encode(output_mod.err(
+			"unknown frame_format: " .. tostring(frame_format))),
+			{ event = "error" })
+		iter:close()
+		res.close()
+		return
+	end
+
 	-- 7. Live pump.
 	while true do
 		local line, lerr = iter()
@@ -350,7 +364,27 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 		if line == nil then break end -- EOF
 
 		local frame_payload --: any
-		if s.type == "log_stream" then
+		local skip = false
+		if frame_format == "jsonl" then
+			-- json.decode returns (nil, errmsg) on parse failure, but may also
+			-- raise on FFI corner cases; pcall guards both paths.
+			local ok_dec, decoded, derr = pcall(json.decode, tostring(line))
+			local fail_msg --: string | nil
+			if not ok_dec then
+				fail_msg = tostring(decoded)
+			elseif decoded == nil then
+				fail_msg = tostring(derr or "decode returned nil")
+			end
+			if fail_msg ~= nil then
+				local err_ok = res.send_event(json.encode(output_mod.err(
+					"frame decode failed: " .. fail_msg)),
+					{ event = "error" })
+				if not err_ok then iter:close(); res.close(); return end
+				skip = true
+			else
+				frame_payload = decoded
+			end
+		elseif s.type == "log_stream" then
 			local now
 			if time_cap then now = time_cap.now() end
 			frame_payload = {
@@ -359,18 +393,21 @@ local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, re
 				message = tostring(line),
 			}
 		else
-			-- live_table / event_stream: pass raw line through; pack-specific
-			-- parsers will land in a follow-up phase.
+			-- live_table / event_stream without frame_format: raw line passthrough
+			-- as a placeholder. Authors should set frame_format = "jsonl" and
+			-- emit structured frames.
 			frame_payload = { message = tostring(line) }
 		end
-		last_id = last_id + 1
-		local payload = json.encode({ type = "frame", frame = frame_payload })
-		ring_push(last_id, payload)
-		local ok_f, _ = res.send_event(payload, { id = last_id })
-		if not ok_f then
-			iter:close()
-			res.close()
-			return
+		if not skip then
+			last_id = last_id + 1
+			local payload = json.encode({ type = "frame", frame = frame_payload })
+			ring_push(last_id, payload)
+			local ok_f, _ = res.send_event(payload, { id = last_id })
+			if not ok_f then
+				iter:close()
+				res.close()
+				return
+			end
 		end
 	end
 

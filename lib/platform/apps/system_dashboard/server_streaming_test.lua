@@ -174,6 +174,115 @@ T.describe("system_dashboard SSE streaming envelope", function()
 		T.eq(res.events[#res.events].event, "end")
 	end)
 
+	T.describe("live_table frame_format=jsonl decodes each line as JSON frame", function()
+		local LIVE_PACK = [[
+return {
+  name = "stream_test",
+  aliases = {
+    { id = "s-live", actions = { {
+      caps = { sh = { type = "shell", reason = "test" } },
+      exec = {
+        cap = "sh", args = "ignored",
+        output = {
+          type = "live_table",
+          frame_format = "jsonl",
+          key = "id",
+          columns = {
+            { key = "id",    label = "ID",    type = "string" },
+            { key = "value", label = "Value", type = "string" },
+          },
+        },
+      },
+    } } },
+  },
+}
+]]
+		local lines = {
+			'{"op":"upsert","row":{"id":"a","value":"1"}}',
+			'{"op":"upsert","row":{"id":"b","value":"2"}}',
+			'{"op":"delete","key":"a"}',
+		}
+		local sh = make_streaming_shell(lines)
+		local srv = build(LIVE_PACK, { shell = sh, time = make_time_cap(0) })
+		local res = post_streaming(srv.handler, "s-live")
+		T.eq(#res.events, 5, "schema + 3 frames + end")
+		T.eq(res.events[1].event, "schema")
+		T.eq(json.decode(res.events[1].data).body.type, "live_table")
+		local f1 = json.decode(res.events[2].data).frame
+		T.eq(f1.op, "upsert")
+		T.eq(f1.row.id, "a")
+		T.eq(f1.row.value, "1")
+		local f2 = json.decode(res.events[3].data).frame
+		T.eq(f2.op, "upsert")
+		T.eq(f2.row.id, "b")
+		local f3 = json.decode(res.events[4].data).frame
+		T.eq(f3.op, "delete")
+		T.eq(f3.key, "a")
+		T.eq(res.events[5].event, "end")
+	end)
+
+	T.describe("frame_format=jsonl emits error event on parse failure and continues", function()
+		local LIVE_PACK = [[
+return {
+  name = "stream_test",
+  aliases = {
+    { id = "s-live", actions = { {
+      caps = { sh = { type = "shell", reason = "test" } },
+      exec = {
+        cap = "sh", args = "ignored",
+        output = {
+          type = "event_stream",
+          frame_format = "jsonl",
+        },
+      },
+    } } },
+  },
+}
+]]
+		local lines = {
+			'{"time":1,"kind":"info","body":{"type":"text","value":"hi"}}',
+			'not json at all',
+			'{"time":2,"kind":"info","body":{"type":"text","value":"ok"}}',
+		}
+		local sh = make_streaming_shell(lines)
+		local srv = build(LIVE_PACK, { shell = sh, time = make_time_cap(0) })
+		local res = post_streaming(srv.handler, "s-live")
+		-- schema + frame + error + frame + end = 5
+		T.eq(#res.events, 5)
+		T.eq(res.events[1].event, "schema")
+		T.eq(json.decode(res.events[2].data).frame.time, 1)
+		T.eq(res.events[3].event, "error")
+		T.ok(json.decode(res.events[3].data).error:find("frame decode failed"),
+			"error message should mention frame decode")
+		T.eq(json.decode(res.events[4].data).frame.time, 2)
+		T.eq(res.events[5].event, "end")
+	end)
+
+	T.describe("unknown frame_format produces error event and closes", function()
+		local BAD_PACK = [[
+return {
+  name = "stream_test",
+  aliases = {
+    { id = "s-bad", actions = { {
+      caps = { sh = { type = "shell", reason = "test" } },
+      exec = {
+        cap = "sh", args = "ignored",
+        output = { type = "live_table", frame_format = "csv", key = "id",
+          columns = { { key = "id", label = "ID", type = "string" } } },
+      },
+    } } },
+  },
+}
+]]
+		local sh = make_streaming_shell({ "anything" })
+		local srv = build(BAD_PACK, { shell = sh, time = make_time_cap(0) })
+		local res = post_streaming(srv.handler, "s-bad")
+		T.eq(res.events[1].event, "schema")
+		T.eq(res.events[2].event, "error")
+		T.ok(json.decode(res.events[2].data).error:find("unknown frame_format"))
+		T.ok(res.closed)
+	end)
+
 	T.describe("error envelope when run_stream returns nil, err", function()
 		local sh = make_streaming_shell({}, "boom")
 		local srv = build(LOG_PACK, { shell = sh, time = make_time_cap(0) })
