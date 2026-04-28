@@ -36,6 +36,17 @@ doc/          — documentation
 
 **Every package is a directory** under `lib/` with an `init.lua` entry point. This gives each package room for LICENSE, tests, type definitions, and docs alongside the code. LuaJIT doesn't include `?/init.lua` in the default `package.path` (that's a Lua 5.2+ default), so entry points must conditionally add `./?/init.lua` to `package.path` (check before adding — Lua 5.2+ already includes it, and multiple entry points may be composed).
 
+## References
+
+Pointers to conditional context — read on demand, not loaded by default.
+
+- `.github/workflows/build-vendored.yml` — produces `bin/luajit*`, `bin/ld-musl-*`, `dep/libsqlite3*`, `dep/libz*`. Triggered via `workflow_dispatch`; commits artifacts back to the repo.
+- `.github/workflows/ci.yml`, `.github/workflows/ci-full.yml` — test CI.
+- `.github/workflows/deploy-docs.yml` — docs site deploy.
+- `bin/cr` — platform dispatch into vendored LuaJIT (Linux: loader + `luajit-bin`; macOS: native binary; Windows: `cr.bat`/`cr.ps1`).
+- `flake.nix` — contributor dev shell only (bun for docs); not a runtime dependency.
+- `docs/conventions.md`, `docs/batteries.md`, `docs/inventory.md`, `docs/inventory_summary.md` — already referenced elsewhere in this file.
+
 ## Development
 
 ```bash
@@ -105,7 +116,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Design Principles
 
-**This repository is zero-dependency.** A user must be able to `git clone` and run immediately with no external installs — no package manager, no compiler, no runtime. LuaJIT binaries for all supported platforms are vendored in `bin/`. "Use Nix" or "install LuaJIT" are not acceptable answers. NixOS, musl, Alpine, and every other Linux variant are first-class targets — the vendored binaries must be statically linked so the ELF interpreter is not a constraint.
+**This repository is zero-dependency.** A user must be able to `git clone` and run immediately with no external installs — no package manager, no compiler, no runtime. LuaJIT binaries for all supported platforms are vendored in `bin/`. "Use Nix" or "install LuaJIT" are not acceptable answers. NixOS, musl, Alpine, and every other Linux variant are first-class targets. LuaJIT can't be statically linked (FFI needs `dlopen`), so the approach is: build against musl, vendor the matching loader alongside (`bin/ld-musl-*.so.1`), and invoke via the loader explicitly so the host's `/lib/ld-*` is irrelevant. `bin/cr` is the canonical entry point. `bin/luajit` and `bin/luajit-aarch64` are shell shims that exec the real ELFs (`bin/luajit-bin`, `bin/luajit-aarch64-bin`) through the vendored loader; the shims exist so anything that resolves bare `luajit` from PATH (the dev shell adds `$PWD/bin` to PATH) still works.
 
 **Non-ubiquitous FFI dependencies must be vendored as compiled binaries in `dep/`.** `bin/cr test` must pass on a bare clone with no system libraries installed. If FFI code requires a library that isn't part of libc (sqlite3, etc.), compile it from its official source and commit the result to `dep/` for each supported platform — the sqlite3 amalgamation (`sqlite3.c`) is the model: one C file, compiles anywhere, no exotic deps. The nix dev shell (`buildInputs`) is for contributor tooling (bun, docs), not runtime dependencies — it is not a substitute for vendoring.
 

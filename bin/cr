@@ -4,8 +4,8 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 
 case "$OS-$ARCH" in
-  Linux-x86_64)  exec "$DIR/ld-musl-x86_64.so.1" "$DIR/luajit" "$DIR/cr.lua" "$@" ;;
-  Linux-aarch64) exec "$DIR/ld-musl-aarch64.so.1" "$DIR/luajit-aarch64" "$DIR/cr.lua" "$@" ;;
+  Linux-x86_64)  exec "$DIR/ld-musl-x86_64.so.1" "$DIR/luajit-bin" "$DIR/cr.lua" "$@" ;;
+  Linux-aarch64) exec "$DIR/ld-musl-aarch64.so.1" "$DIR/luajit-aarch64-bin" "$DIR/cr.lua" "$@" ;;
   Darwin-arm64)  exec "$DIR/luajit-macos-aarch64" "$DIR/cr.lua" "$@" ;;
   *) echo "No bundled LuaJIT for $OS-$ARCH. Run bin/install." >&2; exit 1 ;;
 esac

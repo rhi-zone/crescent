@@ -314,8 +314,8 @@ jobs:
       - name: Copy artifacts and commit
         run: |
           mkdir -p bin dep
-          cp artifacts/luajit                          bin/luajit
-          cp artifacts/luajit-aarch64                  bin/luajit-aarch64
+          cp artifacts/luajit                          bin/luajit-bin
+          cp artifacts/luajit-aarch64                  bin/luajit-aarch64-bin
           cp artifacts/luajit-macos-aarch64            bin/luajit-macos-aarch64
           cp artifacts/luajit.exe                      bin/luajit.exe
           cp artifacts/luajit32.exe                    bin/luajit32.exe
@@ -331,7 +331,8 @@ jobs:
           cp artifacts/libz-macos-arm64.dylib         dep/
           cp artifacts/zlib.dll                       dep/
           cp artifacts/zlib-x86.dll                   dep/
-          chmod +x bin/luajit bin/luajit-aarch64 bin/luajit-macos-aarch64 \
+          chmod +x bin/luajit bin/luajit-aarch64 \
+                   bin/luajit-bin bin/luajit-aarch64-bin bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
                    bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1
           git config user.name "github-actions[bot]"
