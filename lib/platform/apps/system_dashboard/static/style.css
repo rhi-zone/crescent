@@ -777,6 +777,36 @@ body {
   gap: 6px;
 }
 
+.prim-log-stream-wrap {
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid #222;
+  border-radius: 3px;
+  background: #0c0c0c;
+}
+.prim-log-stream {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: monospace;
+  font-size: 11px;
+}
+.prim-log-stream th,
+.prim-log-stream td {
+  padding: 3px 8px;
+  text-align: left;
+  border-bottom: 1px solid #1a1a1a;
+  color: #ccc;
+}
+.prim-log-stream th {
+  background: #161616;
+  position: sticky;
+  top: 0;
+  color: #aaa;
+}
+.stream-stop {
+  margin-left: 12px;
+}
+
 .prim-form-placeholder,
 .prim-stream-placeholder {
   font-family: monospace;
