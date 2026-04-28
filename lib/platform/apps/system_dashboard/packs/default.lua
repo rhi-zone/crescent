@@ -661,5 +661,35 @@ return {
 				},
 			},
 		},
+
+		{
+			id          = "ping-stream-localhost",
+			title       = "Ping localhost (streaming)",
+			description = "Live ping output. Demo for streaming primitives.",
+			tags        = { "network", "stream", "demo" },
+			platform    = { "linux", "macos" },
+			actions = {
+				{
+					label = "Stream pings",
+					caps  = { shell = { type = "shell", reason = "Run continuous ping for streaming demo" } },
+					exec  = {
+						cap    = "shell",
+						-- `ping localhost` is the portable form; Ctrl-C / iter:close()
+						-- terminates the process. Linux's `-c 0` "unbounded" syntax
+						-- is incompatible with macOS so we omit it.
+						args   = "ping localhost",
+						output = {
+							type = "log_stream",
+							columns = {
+								{ key = "time",    label = "Time",    type = "timestamp" },
+								{ key = "level",   label = "Level",   type = "string" },
+								{ key = "message", label = "Message", type = "string" },
+							},
+							replay_buffer = 256,
+						},
+					},
+				},
+			},
+		},
 	},
 }

@@ -24,6 +24,11 @@
           "type": "shell",
           "required": false,
           "reason": "Execute shell commands from alias actions"
+        },
+        "time": {
+          "type": "time",
+          "required": false,
+          "reason": "Timestamp streaming log frames"
         }
       }
     }

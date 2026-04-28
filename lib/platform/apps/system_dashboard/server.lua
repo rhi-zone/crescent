@@ -21,6 +21,17 @@ local packs      = require("lib.platform.apps.system_dashboard.packs")
 local cap_dispatch = require("lib.platform.cap_dispatch")
 local output_mod = require("lib.platform.apps.system_dashboard.output") --: any
 
+-- Streaming primitive set. When `exec.output.type` is one of these the
+-- dispatcher takes the SSE path instead of returning a JSON envelope.
+local STREAMING_TYPES = { log_stream = true, live_table = true, event_stream = true }
+
+-- Default columns for log_stream when the action does not specify them.
+local DEFAULT_LOG_STREAM_COLUMNS = {
+	{ key = "time",    label = "Time",    type = "timestamp" },
+	{ key = "level",   label = "Level",   type = "string" },
+	{ key = "message", label = "Message", type = "string" },
+}
+
 local M = {}
 
 local MIME = {
@@ -186,6 +197,186 @@ local function make_cite(exec_info, cap_type)
 		return { output_mod.cite_registry_key(subkey) }
 	end
 	return {}
+end
+
+-- Build the *empty* schema body for a streaming primitive. The streamer sends
+-- this as the first SSE event so the frontend can render the table/log frame
+-- skeleton immediately. Frame data arrives in subsequent events.
+--: (any) -> any
+local function build_stream_schema(spec)
+	local s = spec --: any
+	local ty = s.type
+	if ty == "log_stream" then
+		return {
+			type = "log_stream",
+			frame_type = "log",
+			columns = s.columns or DEFAULT_LOG_STREAM_COLUMNS,
+		}
+	end
+	if ty == "live_table" then
+		return {
+			type = "live_table",
+			frame_type = "table",
+			columns = s.columns,
+			key = s.key,
+			row_actions = s.row_actions,
+		}
+	end
+	if ty == "event_stream" then
+		return { type = "event_stream", frame_type = "event" }
+	end
+	return nil
+end
+
+-- Pump a streaming sub_cap iterator into the SSE response.
+--   sub_cap.run_stream(args) -> iter | nil, err
+-- Frames are JSON-encoded as { type="frame", frame=<payload> } and assigned
+-- monotonic ids starting at 1. A ring buffer of `replay_buffer` size is kept
+-- for Last-Event-ID resume.
+--: (any, any, any, any, string, any, any) -> nil
+local function pump_stream(spec, sub_cap, exec_info, time_cap, cap_type, req, res)
+	local s = spec --: any
+	local cite = make_cite(exec_info, cap_type)
+
+	-- 1. Set headers first; http_server cap writes them on first send_event.
+	res.status = 200
+	res.headers["Content-Type"]  = "text/event-stream"
+	res.headers["Cache-Control"] = "no-cache"
+	res.headers["Connection"]    = "keep-alive"
+
+	-- 2. Build & validate the schema envelope.
+	local schema_body = build_stream_schema(spec)
+	if not schema_body then
+		local env_err = output_mod.err("unknown streaming output type: " .. tostring(s.type))
+		res.send_event(json.encode(env_err), { event = "error" })
+		res.close()
+		return
+	end
+	local schema_env = output_mod.ok(schema_body, { cite = cite })
+	local sok, serr = output_mod.validate(schema_env)
+	if not sok then
+		local env_err = output_mod.err("invalid stream schema: " .. tostring(serr))
+		res.send_event(json.encode(env_err), { event = "error" })
+		res.close()
+		return
+	end
+
+	-- 3. Emit schema as id=0. ALWAYS sent regardless of Last-Event-ID — the
+	--    frontend uses it to construct the renderer skeleton.
+	local ok_send = res.send_event(json.encode(schema_env), { id = 0, event = "schema" })
+	if not ok_send then res.close(); return end
+
+	-- 4. Open the stream. shell is the only cap with run_stream in this phase.
+	if cap_type ~= "shell" then
+		res.send_event(json.encode(output_mod.err(
+			"streaming not implemented for cap type: " .. cap_type)),
+			{ event = "error" })
+		res.close()
+		return
+	end
+	local iter, ierr = sub_cap.run_stream(exec_info.args)
+	if not iter then
+		res.send_event(json.encode(output_mod.err(tostring(ierr or "run_stream failed"))),
+			{ event = "error" })
+		res.close()
+		return
+	end
+
+	-- 5. Ring buffer for Last-Event-ID resume.
+	local replay_size = 256 --: integer
+	local rb = s.replay_buffer
+	if type(rb) == "number" then
+		local rb_n = rb --: number
+		if rb_n > 0 then replay_size = math.floor(rb_n) end
+	end
+	local ring = {} --: any
+	local ring_count = 0
+	local last_id = 0
+	--: (integer, string) -> nil
+	local function ring_push(id, payload)
+		ring_count = ring_count + 1
+		ring[((ring_count - 1) % replay_size) + 1] = { id = id, payload = payload }
+	end
+	--: () -> integer
+	local function ring_oldest_id()
+		local count = ring_count --: integer
+		if count == 0 then return 0 end
+		local r = ring --: any
+		if count <= replay_size then return r[1].id end
+		-- Oldest is at slot (count % replay_size) + 1.
+		local idx = (count % replay_size) + 1
+		return r[idx].id
+	end
+
+	-- 6. Last-Event-ID handling. Replay buffered frames newer than the client's
+	--    last id. If the requested id is older than what the buffer holds we
+	--    cannot replay everything missed: emit a `gap` event to tell the
+	--    client to drop state, then resume live.
+	local resume_from
+	local lei_str = req.last_event_id
+	if type(lei_str) == "string" then
+		local n = tonumber(lei_str)
+		if n then resume_from = math.floor(n) end
+	end
+	if resume_from ~= nil then
+		local rfrom = resume_from --: integer
+		-- Pull replayable entries.
+		local oldest = ring_oldest_id()
+		if rfrom < oldest and ring_count > 0 then
+			-- Buffer doesn't cover the gap.
+			local gap_ok = res.send_event("{}", { event = "gap" })
+			if not gap_ok then iter:close(); res.close(); return end
+		else
+			local r = ring --: any
+			for i = 1, math.min(ring_count, replay_size) do
+				local entry = r[i]
+				if entry and entry.id > rfrom then
+					local rok = res.send_event(entry.payload, { id = entry.id })
+					if not rok then iter:close(); res.close(); return end
+				end
+			end
+		end
+	end
+
+	-- 7. Live pump.
+	while true do
+		local line, lerr = iter()
+		if lerr then
+			res.send_event(json.encode(output_mod.err(tostring(lerr))), { event = "error" })
+			iter:close()
+			res.close()
+			return
+		end
+		if line == nil then break end -- EOF
+
+		local frame_payload --: any
+		if s.type == "log_stream" then
+			local now
+			if time_cap then now = time_cap.now() end
+			frame_payload = {
+				time    = now,
+				level   = "info",
+				message = tostring(line),
+			}
+		else
+			-- live_table / event_stream: pass raw line through; pack-specific
+			-- parsers will land in a follow-up phase.
+			frame_payload = { message = tostring(line) }
+		end
+		last_id = last_id + 1
+		local payload = json.encode({ type = "frame", frame = frame_payload })
+		ring_push(last_id, payload)
+		local ok_f, _ = res.send_event(payload, { id = last_id })
+		if not ok_f then
+			iter:close()
+			res.close()
+			return
+		end
+	end
+
+	-- 8. Stream end.
+	res.send_event("{}", { event = "end" })
+	res.close()
 end
 
 -- Adapt a raw cap result into a primitive body.
@@ -412,9 +603,17 @@ local function handle_api(state, req, res)
 			res.body = encode_envelope(output_mod.err("action.exec references unknown cap name: " .. tostring(exec_info.cap)))
 			return true
 		end
+		local cap_type = tostring(sub_cap._type)
+		-- Streaming branch: when the action's output type is a streaming
+		-- primitive, switch to SSE. Pump runs synchronously inside the
+		-- handler — the http_server cap streams frames as they're produced.
+		local stream_spec = output_spec_of(exec_info)
+		if STREAMING_TYPES[stream_spec.type] then
+			pump_stream(stream_spec, sub_cap, exec_info, state.time_cap, cap_type, req, res)
+			return true
+		end
 		local VTYPE_MAP = { REG_SZ = 1, REG_EXPAND_SZ = 2, REG_DWORD = 4, REG_MULTI_SZ = 7 }
 		local raw, err
-		local cap_type = tostring(sub_cap._type)
 		if cap_type == "shell" then
 			raw, err = sub_cap.run(exec_info.args)
 		elseif cap_type == "exec" then
@@ -601,6 +800,7 @@ function M.create(caps, opts)
 		alias_index  = build_alias_index(merged),
 		pack_meta    = all_meta,
 		caps         = caps_t,
+		time_cap     = caps_t and caps_t.time,
 	}
 
 	local function handler(req, res)
