@@ -1,8 +1,6 @@
 local ffi = require("ffi")
 
---[[TODO: better typings]]
---[[@type table<string, function>]]
-local tls_c = assert(ffi.load("tls"))
+local tls_c = --[[:$FfiC]] ffi.load("tls")
 ffi.cdef [[
 	struct tls {};
 	struct tls_config {};
@@ -129,7 +127,6 @@ local library = {
 	config_error = tls_c.tls_config_error,
 	config_set_ocsp_staple_file = tls_c.tls_config_set_ocsp_staple_file,
 	peer_ocsp_result = tls_c.tls_peer_ocsp_result,
-	__debugbreak = tls_c.__debugbreak,
 	config_verify_client = tls_c.tls_config_verify_client,
 	config_add_keypair_ocsp_mem = tls_c.tls_config_add_keypair_ocsp_mem,
 	connect_cbs = tls_c.tls_connect_cbs,
@@ -158,7 +155,6 @@ local library = {
 	free = tls_c.tls_free,
 	config_set_verify_depth = tls_c.tls_config_set_verify_depth,
 	config_set_ecdhecurve = tls_c.tls_config_set_ecdhecurve,
-	_errno = tls_c._errno,
 	peer_ocsp_this_update = tls_c.tls_peer_ocsp_this_update,
 	peer_ocsp_revocation_time = tls_c.tls_peer_ocsp_revocation_time,
 	conn_cipher = tls_c.tls_conn_cipher,
@@ -168,7 +164,6 @@ local library = {
 	peer_ocsp_crl_reason = tls_c.tls_peer_ocsp_crl_reason,
 	load_file = tls_c.tls_load_file,
 	default_ca_cert_file = tls_c.tls_default_ca_cert_file,
-	__threadhandle = tls_c.__threadhandle,
 	conn_alpn_selected = tls_c.tls_conn_alpn_selected,
 	peer_cert_hash = tls_c.tls_peer_cert_hash,
 	config_add_ticket_key = tls_c.tls_config_add_ticket_key,
@@ -202,9 +197,7 @@ local library = {
 	client = tls_c.tls_client,
 	--[[@type fun(tls: tls_c, config: tls_config_c): error_c]]
 	configure = tls_c.tls_configure,
-	_set_errno = tls_c._set_errno,
 	config_set_keypair_mem = tls_c.tls_config_set_keypair_mem,
-	_get_errno = tls_c._get_errno,
 	config_set_ca_path = tls_c.tls_config_set_ca_path,
 	config_insecure_noverifyname = tls_c.tls_config_insecure_noverifyname,
 	conn_servername = tls_c.tls_conn_servername,
@@ -217,9 +210,7 @@ local library = {
 	peer_cert_chain_pem = tls_c.tls_peer_cert_chain_pem,
 	config_set_session_lifetime = tls_c.tls_config_set_session_lifetime,
 	config_set_keypair_ocsp_file = tls_c.tls_config_set_keypair_ocsp_file,
-	__mingw_get_crt_info = tls_c.__mingw_get_crt_info,
 	config_prefer_ciphers_server = tls_c.tls_config_prefer_ciphers_server,
-	__threadid = tls_c.__threadid,
 	config_set_ca_mem = tls_c.tls_config_set_ca_mem,
 	config_set_session_id = tls_c.tls_config_set_session_id,
 	config_set_session_fd = tls_c.tls_config_set_session_fd,
