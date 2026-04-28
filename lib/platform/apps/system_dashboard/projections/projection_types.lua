@@ -1,0 +1,245 @@
+-- lib/platform/apps/system_dashboard/projections/projection_types.lua
+-- Typed environment for projection authors.
+--
+-- This file is declarations only (no runtime code). It is loaded as a
+-- typechecker globals file (`opts.globals_files`) when checking projection
+-- source code that will be transpiled to JS via lib/lua2ts and run in the
+-- browser against `static/dom.js` + `static/projections/registry.js`.
+--
+-- Caller must also include:
+--   - lib/type/static/stdlib_types.lua (so string, table, pairs, etc. are
+--     available; LuaJIT-only globals like `os`/`io` exist at typecheck time
+--     but are runtime-undefined in the browser; harden mode in lua2ts blocks
+--     true JS hazards like globalThis/window/document/fetch).
+--   - lib/platform/apps/system_dashboard/primitive_types.lua (the Primitive
+--     discriminated union and its variants; we reference it by name here).
+--
+-- The ordering matters: stdlib_types first, then primitive_types, then this
+-- file. Aliases defined here may reference `Primitive` because primitive_types
+-- is loaded earlier.
+--
+-- Type-system gaps approximated below (each could be tightened later, none of
+-- them block v1):
+--   * Per-tag prop allowlists: dom.js distinguishes universal props, aria-*,
+--     data-*, and per-tag attributes. We type props as a single open record
+--     with every legal attribute optional; the runtime constructor still
+--     enforces the real allowlist. Mistyping a prop name typechecks but
+--     throws at runtime.
+--   * Style values: STYLE_PROPS is enumerated in dom.js (~60 properties). We
+--     type style as { [string]: string | number | nil, ... } rather than a
+--     closed record per property. Untyped property names typecheck.
+--   * Event handler arg type: Event is declared minimally below; the full
+--     browser Event surface (currentTarget chain, key codes, etc.) lives in
+--     lib/web/js_types.lua and is not pulled in.
+
+-- ── Element (opaque) ────────────────────────────────────────────────────────
+-- Authors do not construct or inspect Element values directly — they only
+-- pass them around (return from a projection, place in a children array,
+-- recurse via ctx:project). $Opaque<"Element"> gives nominal identity so
+-- random tables don't satisfy the Element contract structurally.
+
+--:: Element  = $Opaque<"Element">
+--:: TextNode = $Opaque<"TextNode">
+
+-- ── Event (minimal) ─────────────────────────────────────────────────────────
+-- Just enough for the four event handler props (onClick/onSubmit/onInput/
+-- onChange). The full Event surface lives in lib/web/js_types.lua; pull that
+-- in via globals_files if a projection needs more than `target.value`.
+
+--:: EventTarget = { value?: string, checked?: boolean, name?: string, ... }
+--:: Event       = { type: string, target?: EventTarget, currentTarget?: EventTarget, ... }
+
+-- ── Children ────────────────────────────────────────────────────────────────
+-- An array of: Element, TextNode, string, number, nil, false.
+-- Matches the appendChildren contract in dom.js.
+
+--:: Child    = Element | TextNode | string | number | nil | false
+--:: Children = Child[]
+
+-- ── Style ───────────────────────────────────────────────────────────────────
+-- Open record over the property allowlist in dom.js. Approximation: any
+-- string-keyed entry mapping to string | number | nil. CSS injection patterns
+-- are rejected at runtime by setStyle; from the type system's point of view
+-- "color" and "borderRadius" and "marginTop" are all string|number values.
+
+--:: Style = { [string]: string | number | nil, ... }
+
+-- ── Props (open over per-tag allowlists) ────────────────────────────────────
+-- Approximation: a single open record with every prop the dom.js allowlist
+-- accepts on at least one tag. Per-tag enforcement happens at runtime in the
+-- constructor. Marked open with `...` so aria-*/data-* attribute names that
+-- aren't enumerable as type fields can be passed through structural-subtyping
+-- without breaking checking. data-/aria- attributes typecheck loosely; the
+-- runtime checks they are strings.
+
+-- Many real DOM attributes — `for`, `stroke-width`, `text-anchor`, etc. — are
+-- not valid Lua identifiers and the typechecker's record syntax does not
+-- accept bracketed-string field names. We keep the strongly-typed entries
+-- here for the props that DO have legal Lua names, and rely on the open
+-- `...` (string-keyed indexer fallthrough) for the rest. Runtime allowlists
+-- in dom.js still reject anything not on its per-tag list.
+
+--:: Props = {
+--::   class?:        string,
+--::   id?:           string,
+--::   title?:        string,
+--::   role?:         string,
+--::   tabindex?:     number,
+--::   style?:        Style,
+--::   onClick?:      (Event) -> (),
+--::   onSubmit?:     (Event) -> (),
+--::   onInput?:      (Event) -> (),
+--::   onChange?:     (Event) -> (),
+--::   href?:         string,
+--::   target?:       "_blank",
+--::   src?:          string,
+--::   alt?:          string,
+--::   width?:        number | string,
+--::   height?:       number | string,
+--::   type?:         string,
+--::   name?:         string,
+--::   placeholder?:  string,
+--::   value?:        string | number | boolean,
+--::   checked?:      boolean,
+--::   selected?:     boolean,
+--::   disabled?:     boolean,
+--::   readonly?:     boolean,
+--::   required?:     boolean,
+--::   multiple?:     boolean,
+--::   open?:         boolean,
+--::   autocomplete?: string,
+--::   pattern?:      string,
+--::   min?:          number | string,
+--::   max?:          number | string,
+--::   step?:         number | string,
+--::   datetime?:     string,
+--::   viewBox?:      string,
+--::   xmlns?:        string,
+--::   d?:            string,
+--::   fill?:         string,
+--::   stroke?:       string,
+--::   transform?:    string,
+--::   x?:            number | string,
+--::   y?:            number | string,
+--::   x1?:           number | string,
+--::   y1?:           number | string,
+--::   x2?:           number | string,
+--::   y2?:           number | string,
+--::   cx?:           number | string,
+--::   cy?:           number | string,
+--::   r?:            number | string,
+--::   rx?:           number | string,
+--::   ry?:           number | string,
+--::   dx?:           number | string,
+--::   dy?:           number | string,
+--::   points?:       string,
+--::   opacity?:      number | string,
+--::   [string]:      string | number | boolean | nil,
+--::   ...
+--:: }
+
+-- ── DOM constructor table ───────────────────────────────────────────────────
+-- One method per tag in dom.js's HTML and SVG allowlists. All share the same
+-- (props?, children?) -> Element shape.
+
+--:: DomCtor = (props: Props | nil, children: Children | nil) -> Element
+
+--:: declare dom = {
+--::   div:        DomCtor,
+--::   span:       DomCtor,
+--::   p:          DomCtor,
+--::   h1:         DomCtor,
+--::   h2:         DomCtor,
+--::   h3:         DomCtor,
+--::   h4:         DomCtor,
+--::   h5:         DomCtor,
+--::   h6:         DomCtor,
+--::   pre:        DomCtor,
+--::   code:       DomCtor,
+--::   ul:         DomCtor,
+--::   ol:         DomCtor,
+--::   li:         DomCtor,
+--::   dl:         DomCtor,
+--::   dt:         DomCtor,
+--::   dd:         DomCtor,
+--::   table:      DomCtor,
+--::   thead:      DomCtor,
+--::   tbody:      DomCtor,
+--::   tr:         DomCtor,
+--::   th:         DomCtor,
+--::   td:         DomCtor,
+--::   caption:    DomCtor,
+--::   details:    DomCtor,
+--::   summary:    DomCtor,
+--::   a:          DomCtor,
+--::   kbd:        DomCtor,
+--::   time:       DomCtor,
+--::   button:     DomCtor,
+--::   input:      DomCtor,
+--::   label:      DomCtor,
+--::   select:     DomCtor,
+--::   option:     DomCtor,
+--::   form:       DomCtor,
+--::   fieldset:   DomCtor,
+--::   legend:     DomCtor,
+--::   nav:        DomCtor,
+--::   section:    DomCtor,
+--::   article:    DomCtor,
+--::   header:     DomCtor,
+--::   footer:     DomCtor,
+--::   main:       DomCtor,
+--::   aside:      DomCtor,
+--::   figure:     DomCtor,
+--::   figcaption: DomCtor,
+--::   img:        DomCtor,
+--::   hr:         DomCtor,
+--::   br:         DomCtor,
+--::   strong:     DomCtor,
+--::   em:         DomCtor,
+--::   svg:        DomCtor,
+--::   g:          DomCtor,
+--::   path:       DomCtor,
+--::   rect:       DomCtor,
+--::   circle:     DomCtor,
+--::   line:       DomCtor,
+--::   polyline:   DomCtor,
+--::   polygon:    DomCtor,
+--::   text:       DomCtor,
+--::   title:      DomCtor,
+--::   defs:       DomCtor,
+--::   clipPath:   DomCtor,
+--::   use:        DomCtor
+--:: }
+
+-- ── text(s) ─────────────────────────────────────────────────────────────────
+-- Free-standing helper from dom.js. Builds a TextNode (a real DOM node, not a
+-- raw string). Children arrays accept TextNode directly via the Child union,
+-- so `dom.span({}, { text("hello") })` is well-typed.
+-- Authors can also pass bare strings — the runtime promotes them via
+-- document.createTextNode — so `text(s)` is only needed if you want to keep a
+-- handle to the node.
+
+--:: declare text = (s: string) -> TextNode
+
+-- ── Ctx ─────────────────────────────────────────────────────────────────────
+-- The second argument every projection receives. Methods mirror the contract
+-- documented at the top of static/projections/registry.js.
+--
+-- `project` recurses through the registry. v1: only Element returns are
+-- supported (stream-emitting projections stay built-in), so the return type
+-- here is Element rather than Element | StreamConsumer.
+--
+-- `action` binds an alias (a server-side action handler id) into a click
+-- handler. The optional `args` table is passed to the server; the optional
+-- callback receives the server's reply body. Returns an event handler suitable
+-- for `dom.button({ onClick = ctx:action(...) })`.
+
+--:: Ctx = {
+--::   project: (self: Ctx, value: Primitive) -> Element,
+--::   action:  (self: Ctx, alias: string, args: { [string]: unknown } | nil, on_result: ((unknown) -> ()) | nil) -> ((Event) -> ())
+--:: }
+
+-- ── Projection ──────────────────────────────────────────────────────────────
+-- The shape every user-authored projection must conform to.
+
+--:: Projection = (value: Primitive, ctx: Ctx) -> Element
