@@ -60,6 +60,8 @@ local HARDEN_METHOD_REWRITE = {
 local HARDEN_HELPERS_ORDER = {
     "__rec",
     "__MAX_OUTPUT",
+    "__PROTO_KEYS",
+    "__safeGet",
     "__safe_repeat",
     "__safe_pad_start",
     "__safe_pad_end",
@@ -69,6 +71,11 @@ local HARDEN_HELPERS_ORDER = {
 local HARDEN_HELPERS = {
     __rec = "const __rec = (o) => Object.assign(Object.create(null), o);",
     __MAX_OUTPUT = "const __MAX_OUTPUT = 100000;",
+    __PROTO_KEYS = [[const __PROTO_KEYS = new Set(["__proto__", "constructor", "prototype", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__"]);]],
+    __safeGet = [[const __safeGet = (t, k) => {
+  if (typeof k === "string" && __PROTO_KEYS.has(k)) throw new Error("__safeGet: forbidden key " + k);
+  return t[k];
+};]],
     __safe_repeat = [[const __safe_repeat = (s, n) => {
   if (typeof s !== "string" || typeof n !== "number" || n < 0 || !Number.isFinite(n)) throw new TypeError("__safe_repeat: invalid args");
   if (s.length * n > __MAX_OUTPUT) throw new Error("__safe_repeat: output too large");
@@ -242,6 +249,10 @@ local function new_ctx(pool, nodes, lists, source, opts)
         -- __safe_* helpers depend on __MAX_OUTPUT
         if name:sub(1, 7) == "__safe_" then
             self.harden_used.__MAX_OUTPUT = true
+        end
+        -- __safeGet depends on __PROTO_KEYS
+        if name == "__safeGet" then
+            self.harden_used.__PROTO_KEYS = true
         end
     end
 
@@ -426,6 +437,33 @@ emit_expr = function(ctx, nid, parent_prec)
         local idx_id = d[2]
         local obj = emit_expr(ctx, obj_id, 100)
         local idx = emit_expr(ctx, idx_id, 0)
+        -- Harden mode: wrap bracket access in __safeGet to block prototype-key
+        -- access (e.g. t["__proto__"]). Numeric literal indices skip the wrap
+        -- since they can never collide with a string prototype key. Field
+        -- access (NODE_FIELD_EXPR) is unaffected — `foo` is a static
+        -- identifier, not a runtime value.
+        if ctx.harden then
+            local idx_n = ctx:node(idx_id)
+            local is_num_lit = false
+            if idx_n.kind == defs.NODE_LITERAL then
+                local lk = idx_n.d[1]
+                if lk == defs.LIT_NUMBER or lk == defs.LIT_INTEGER then
+                    is_num_lit = true
+                end
+            elseif idx_n.kind == defs.NODE_UNARY_EXPR and idx_n.d[1] == defs.OP_UNM then
+                local inner_n = ctx:node(idx_n.d[2])
+                if inner_n.kind == defs.NODE_LITERAL then
+                    local lk = inner_n.d[1]
+                    if lk == defs.LIT_NUMBER or lk == defs.LIT_INTEGER then
+                        is_num_lit = true
+                    end
+                end
+            end
+            if not is_num_lit then
+                ctx:use_harden("__safeGet")
+                return "__safeGet(" .. obj .. ", " .. idx .. ")"
+            end
+        end
         return obj .. "[" .. idx .. "]"
 
     elseif kind == defs.NODE_METHOD_CALL then

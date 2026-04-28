@@ -220,6 +220,65 @@ T.describe("harden: no helpers emitted when none triggered", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Prototype-key-safe bracket access (__safeGet)
+-- ---------------------------------------------------------------------------
+
+T.describe("harden: t[k] (identifier index) → __safeGet(t, k)", function()
+    local ts = transpile_h("local v = t[k]")
+    has(ts, "__safeGet(t, k)", "identifier-indexed bracket access wrapped")
+    has(ts, "const __safeGet = ", "helper emitted")
+    has(ts, "const __PROTO_KEYS = ", "PROTO_KEYS dep emitted")
+end)
+
+T.describe("harden: t[\"foo\"] (string literal) → __safeGet(t, \"foo\")", function()
+    -- String literals can be "__proto__" so they MUST be wrapped.
+    local ts = transpile_h('local v = t["foo"]')
+    has(ts, '__safeGet(t, "foo")', "string-literal index wrapped")
+end)
+
+T.describe("harden: t[5] (number literal) unchanged", function()
+    local ts = transpile_h("local v = t[5]")
+    has(ts, "t[5]", "numeric literal index preserved")
+    hasnt(ts, "__safeGet", "no wrap for number literal")
+end)
+
+T.describe("harden: t[-3] (negative number literal) unchanged", function()
+    local ts = transpile_h("local v = t[-3]")
+    has(ts, "t[-3]", "negative numeric literal index preserved")
+    hasnt(ts, "__safeGet", "no wrap for negative number literal")
+end)
+
+T.describe("harden: t[1.5] (float literal) unchanged", function()
+    local ts = transpile_h("local v = t[1.5]")
+    has(ts, "t[1.5]", "float literal index preserved")
+    hasnt(ts, "__safeGet", "no wrap for float literal")
+end)
+
+T.describe("harden: t.foo (field access) unchanged", function()
+    local ts = transpile_h([[local v = t.foo]])
+    has(ts, "t.foo", "field access preserved")
+    hasnt(ts, "__safeGet", "no wrap for field access")
+end)
+
+T.describe("harden: t:m(x) (method call) unchanged", function()
+    local ts = transpile_h([[local v = t:m(x)]])
+    has(ts, "t.m(x)", "method call preserved")
+    hasnt(ts, "__safeGet", "no wrap for method call")
+end)
+
+T.describe("harden: __safeGet helper emitted only when used", function()
+    local ts = transpile_h([[local x = 1 + 2]])
+    hasnt(ts, "__safeGet", "no helper when no bracket access")
+    hasnt(ts, "__PROTO_KEYS", "no PROTO_KEYS when no bracket access")
+end)
+
+T.describe("plain mode: bracket access unchanged", function()
+    local ts = transpile_plain("local v = t[k]")
+    has(ts, "t[k]", "plain mode keeps direct bracket access")
+    hasnt(ts, "__safeGet", "plain mode does not emit helper")
+end)
+
+-- ---------------------------------------------------------------------------
 -- Blocklist export
 -- ---------------------------------------------------------------------------
 
