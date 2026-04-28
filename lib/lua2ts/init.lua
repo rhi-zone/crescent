@@ -11,6 +11,8 @@
 --   filename : string           (for error messages, default "?")
 --   module   : "esm" | "cjs"   (default "esm")
 --   strict   : boolean          (emit // @ts-strict-mode, default false)
+--   harden   : boolean          (sandboxed JS output: null-proto records,
+--                                bounded methods, JS-hazard ident blocklist)
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -22,6 +24,85 @@ local defs       = require("lib.type.static.defs")
 local i32x2_to_double = defs.i32x2_to_double
 
 local M = {}
+
+-- ---------------------------------------------------------------------------
+-- Harden mode: JS-runtime hazards the typechecker can't see.
+-- ---------------------------------------------------------------------------
+
+-- Real JS globals that should never be reachable from sandboxed projection
+-- code. Lua names like _G/os/io/debug are NOT in this list — they're harmless
+-- undefined-identifier ReferenceErrors at runtime.
+M.JS_HAZARDS = {
+    "globalThis", "window", "document", "self", "Function", "eval",
+    "setTimeout", "setInterval", "setImmediate",
+    "clearTimeout", "clearInterval", "clearImmediate",
+    "requestAnimationFrame", "cancelAnimationFrame",
+    "requestIdleCallback", "cancelIdleCallback",
+    "fetch", "XMLHttpRequest", "WebSocket", "EventSource",
+    "Worker", "SharedWorker", "importScripts", "import",
+}
+
+local JS_HAZARDS_SET = {}
+for _, n in ipairs(M.JS_HAZARDS) do JS_HAZARDS_SET[n] = true end
+
+-- Method-name → harden-helper rewrite table. Purely syntactic on method name;
+-- false positives on user methods are validated/rejected at JS runtime by the
+-- helper itself.
+local HARDEN_METHOD_REWRITE = {
+    ["repeat"]   = "__safe_repeat",
+    padStart     = "__safe_pad_start",
+    padEnd       = "__safe_pad_end",
+    join         = "__safe_join",
+}
+
+-- Helpers prepended to harden-mode output. Comma-keyed string per helper so
+-- emission can dedupe. The order matches the order in HARDEN_HELPERS_ORDER.
+local HARDEN_HELPERS_ORDER = {
+    "__rec",
+    "__MAX_OUTPUT",
+    "__safe_repeat",
+    "__safe_pad_start",
+    "__safe_pad_end",
+    "__safe_join",
+}
+
+local HARDEN_HELPERS = {
+    __rec = "const __rec = (o) => Object.assign(Object.create(null), o);",
+    __MAX_OUTPUT = "const __MAX_OUTPUT = 100000;",
+    __safe_repeat = [[const __safe_repeat = (s, n) => {
+  if (typeof s !== "string" || typeof n !== "number" || n < 0 || !Number.isFinite(n)) throw new TypeError("__safe_repeat: invalid args");
+  if (s.length * n > __MAX_OUTPUT) throw new Error("__safe_repeat: output too large");
+  return s.repeat(n);
+};]],
+    __safe_pad_start = [[const __safe_pad_start = (s, n, fill) => {
+  if (typeof s !== "string" || typeof n !== "number" || n < 0 || !Number.isFinite(n)) throw new TypeError("__safe_pad_start: invalid args");
+  if (n > __MAX_OUTPUT) throw new Error("__safe_pad_start: output too large");
+  return s.padStart(n, fill);
+};]],
+    __safe_pad_end = [[const __safe_pad_end = (s, n, fill) => {
+  if (typeof s !== "string" || typeof n !== "number" || n < 0 || !Number.isFinite(n)) throw new TypeError("__safe_pad_end: invalid args");
+  if (n > __MAX_OUTPUT) throw new Error("__safe_pad_end: output too large");
+  return s.padEnd(n, fill);
+};]],
+    __safe_join = [[const __safe_join = (arr, sep) => {
+  if (!Array.isArray(arr)) throw new TypeError("__safe_join: invalid args");
+  const s = (sep === undefined || sep === null) ? "," : String(sep);
+  let total = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const part = arr[i] === undefined || arr[i] === null ? "" : String(arr[i]);
+    total += part.length;
+    if (i > 0) total += s.length;
+    if (total > __MAX_OUTPUT) throw new Error("__safe_join: output too large");
+  }
+  return arr.join(sep);
+};]],
+}
+
+-- Throw a transpile-time harden error. Caught by pcall in M.transpile.
+local function harden_error(name)
+    error("E_HARDEN_BLOCKED_IDENT: identifier '" .. name ..
+          "' is on the JS-hazard blocklist and cannot be used in harden mode")
+end
 
 -- ---------------------------------------------------------------------------
 -- Operator tables
@@ -140,7 +221,29 @@ local function new_ctx(pool, nodes, lists, source, opts)
         bundle_mode     = (opts or {}).bundle_mode or false,
         bundle_requires = {},   -- ordered list of required module names
         bundle_req_seen = {},   -- set for dedup
+        harden          = (opts or {}).harden or false,
+        -- Set of helper names that have been triggered by harden emission;
+        -- emitted at the top of output (alongside imports) once each.
+        harden_used     = {},
     }
+
+    -- Reject use of a JS-hazard identifier in harden mode. Any reference
+    -- (binding, parameter, free read, assignment target) errors. See
+    -- M.JS_HAZARDS for the list.
+    function ctx:check_ident(name)
+        if self.harden and JS_HAZARDS_SET[name] then
+            harden_error(name)
+        end
+    end
+
+    -- Mark a harden helper as used so it gets emitted at the top.
+    function ctx:use_harden(name)
+        self.harden_used[name] = true
+        -- __safe_* helpers depend on __MAX_OUTPUT
+        if name:sub(1, 7) == "__safe_" then
+            self.harden_used.__MAX_OUTPUT = true
+        end
+    end
 
     function ctx:istr()
         return string.rep("  ", self.indent)
@@ -243,6 +346,7 @@ end
 -- Emit a single parameter name from an intern ID.
 local function param_name(ctx, id)
     local s = ctx:name(id)
+    if s ~= "..." then ctx:check_ident(s) end
     return s == "..." and "...args" or s
 end
 
@@ -271,6 +375,7 @@ emit_expr = function(ctx, nid, parent_prec)
 
     elseif kind == defs.NODE_IDENTIFIER then
         local name = ctx:name(d[1])
+        ctx:check_ident(name)
         return name
 
     elseif kind == defs.NODE_VARARG_EXPR then
@@ -331,6 +436,14 @@ emit_expr = function(ctx, nid, parent_prec)
         local args_len = d[4]
         local obj = emit_expr(ctx, obj_id, 100)
         local method = ctx:name(method_id)
+        -- Harden mode: rewrite memory-dangerous methods to bounded helpers.
+        if ctx.harden and HARDEN_METHOD_REWRITE[method] then
+            local helper = HARDEN_METHOD_REWRITE[method]
+            ctx:use_harden(helper)
+            local args = emit_expr_list(ctx, args_start, args_len)
+            local sep = (args == "") and "" or ", "
+            return helper .. "(" .. obj .. sep .. args .. ")"
+        end
         local args = emit_expr_list(ctx, args_start, args_len)
         return obj .. "." .. method .. "(" .. args .. ")"
 
@@ -479,7 +592,12 @@ emit_expr = function(ctx, nid, parent_prec)
                     end
                 end
             end
-            return "{" .. table.concat(parts, ", ") .. "}"
+            local obj_lit = "{" .. table.concat(parts, ", ") .. "}"
+            if ctx.harden then
+                ctx:use_harden("__rec")
+                return "__rec(" .. obj_lit .. ")"
+            end
+            return obj_lit
         end
 
     elseif kind == defs.NODE_CAST_EXPR then
@@ -575,7 +693,9 @@ emit_stmt = function(ctx, nid)
         -- Build name strings
         local name_parts = {}
         for i, nid2 in ipairs(names) do
-            name_parts[i] = ctx:name(nid2)
+            local nm = ctx:name(nid2)
+            ctx:check_ident(nm)
+            name_parts[i] = nm
         end
         -- Check for annotation on preceding line
         local ann = ctx:ann_for(n.line)
@@ -659,6 +779,7 @@ emit_stmt = function(ctx, nid)
             ctx:emit(name_s .. " = function(" .. param_str .. ")" .. ret_type .. " {")
         else
             local fname = ctx:name(name_n.d[1])
+            ctx:check_ident(fname)
             if is_local then
                 ctx:emit("function " .. fname .. "(" .. param_str .. ")" .. ret_type .. " {")
             else
@@ -789,6 +910,7 @@ emit_stmt = function(ctx, nid)
         local bs = d[5]
         local bl = d[6]
         local vname = ctx:name(var_id)
+        ctx:check_ident(vname)
         local init_s = emit_expr(ctx, init_id, 0)
         local limit_s = emit_expr(ctx, limit_id, 0)
         -- Adjust init for 0-indexing (subtract 1 from numeric literals)
@@ -838,7 +960,9 @@ emit_stmt = function(ctx, nid)
         local exprs = ctx:list(es, el)
         local name_parts = {}
         for i, nid2 in ipairs(names) do
-            name_parts[i] = ctx:name(nid2)
+            local nm = ctx:name(nid2)
+            ctx:check_ident(nm)
+            name_parts[i] = nm
         end
         local var_str = #name_parts > 1
             and "[" .. table.concat(name_parts, ", ") .. "]"
@@ -1249,7 +1373,7 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---: (string, { filename: string?, module: string?, strict: boolean? }?) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile(source, opts)
     opts = opts or {}
     local filename = opts.filename or "?"
@@ -1273,6 +1397,18 @@ function M.transpile(source, opts)
         -- Header
         if opts.strict then
             out[#out + 1] = "// @ts-strict-mode"
+        end
+
+        -- Harden helpers (emitted exactly once at the top, in fixed order).
+        if ctx.harden then
+            local emitted_any = false
+            for _, hname in ipairs(HARDEN_HELPERS_ORDER) do
+                if ctx.harden_used[hname] then
+                    out[#out + 1] = HARDEN_HELPERS[hname]
+                    emitted_any = true
+                end
+            end
+            if emitted_any then out[#out + 1] = "" end
         end
 
         -- ESM imports (hoisted)
@@ -1305,7 +1441,7 @@ function M.transpile(source, opts)
     return result
 end
 
---: (string, { filename: string?, module: string?, strict: boolean? }?) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile_file(path, opts)
     local f, err = io.open(path, "r")
     if not f then return nil, "cannot open " .. path .. ": " .. (err or "?") end
