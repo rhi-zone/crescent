@@ -57,7 +57,7 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 **`docs/batteries.md` is the definitive ecosystem scope document.** Read it before discussing future libraries or roadmap.
 
-**`docs/inventory.md` is the definitive index of what currently exists.** Read it (or grep it) before designing or implementing anything reusable — a library, a prelude, a parser, a codec, a type declaration, a util. If `inventory.md` doesn't list what you're looking for, spot-check `lib/` directly before assuming it doesn't exist; the index can lag by a commit. **When you add a new library or `_types.lua` file, add a line to `docs/inventory.md` in the same commit.**
+**`docs/inventory_summary.md` is loaded at session start** — it lists what categories of library exist in crescent and roughly what's in each. Read it. **`docs/inventory.md` is the full per-library index** — grep it before designing or implementing anything reusable. If `inventory.md` doesn't list what you're looking for, spot-check `lib/` directly; the index can lag by a commit. **When adding a new library or `_types.lua` file, add a line to `docs/inventory.md` in the same commit. Add a line to `docs/inventory_summary.md` only if the new library belongs to a category not already there.**
 
 **Corrections mean a rule is missing or wrong.** When the user corrects you, ask what rule would have prevented it and write it before proceeding. "The rule exists, I just didn't follow it" is never the diagnosis.
 
