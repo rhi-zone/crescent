@@ -50,6 +50,7 @@ ffi.cdef [[
 ]]
 
 -- Try vendored path first, then known system library names.
+--: () -> string | nil
 local function vendored_name()
   local os, arch = ffi.os, ffi.arch
   if os == "Linux" then
@@ -63,22 +64,33 @@ local function vendored_name()
   return nil
 end
 
-local names = {}
+local names = {} --: { [integer]: string }
 local v = vendored_name()
 if v then names[#names + 1] = v end
 for _, name in ipairs({ "z", "zlib", "zlib1", "libz" }) do
   names[#names + 1] = name
 end
 
-local ok, zlib
-local zlib_loaded_from
-for _, name in ipairs(names) do
-  ok, zlib = pcall(ffi.load, name)
-  if ok then zlib_loaded_from = name; break end
+--:: ZlibLib = {
+--::   zlibVersion: () -> string,
+--::   deflateInit2_: (unknown, number, number, number, number, number, string, integer) -> integer,
+--::   deflate: (unknown, number) -> integer,
+--::   deflateEnd: (unknown) -> integer,
+--::   inflateInit2_: (unknown, number, string, integer) -> integer,
+--::   inflate: (unknown, number) -> integer,
+--::   inflateEnd: (unknown) -> integer,
+--:: }
+local function load_zlib() --: () -> ZlibLib, string
+  for _, name in ipairs(names) do
+    local ok, lib = pcall(ffi.load, name)
+    if ok then
+      local lib_typed = lib --: ZlibLib
+      return lib_typed, name
+    end
+  end
+  error("zlib not found")
 end
-if not ok then
-  error("zlib not found: " .. tostring(zlib))
-end
+local zlib, zlib_loaded_from = load_zlib()
 
 local Z_OK            = 0
 local Z_STREAM_END    = 1
@@ -111,11 +123,17 @@ local dest_len_buf = ffi.new("uLongf[1]")
 
 -- ── One-shot deflate ─────────────────────────────────────────────────────────
 
---: (string, table?) -> string?, string?
+--: (string, { level: number | nil, format: string | nil } | nil) -> string | nil, string | nil
 local function deflate(input, opts)
-  opts = opts or {}
-  local level = opts.level or 6
-  local format = opts.format or "zlib"
+  local level --: number
+  local format --: string
+  if opts then
+    level = opts.level or 6
+    format = opts.format or "zlib"
+  else
+    level = 6
+    format = "zlib"
+  end
 
   local src = ffi.cast("const Bytef *", input)
   local src_len = #input
@@ -155,10 +173,10 @@ end
 
 -- ── One-shot inflate ─────────────────────────────────────────────────────────
 
---: (string, table?) -> string?, string?
+--: (string, { format: string | nil } | nil) -> string | nil, string | nil
 local function inflate(input, opts)
-  opts = opts or {}
-  local format = opts.format or "zlib"
+  local format --: string
+  if opts then format = opts.format or "zlib" else format = "zlib" end
 
   local src = ffi.cast("const Bytef *", input)
   local src_len = #input
@@ -197,11 +215,17 @@ end
 
 -- ── Streaming deflater ───────────────────────────────────────────────────────
 
---: (table?) -> table
+--: ({ level: number | nil, format: string | nil } | nil) -> unknown
 local function deflater(opts)
-  opts = opts or {}
-  local level = opts.level or 6
-  local format = opts.format or "zlib"
+  local level --: number
+  local format --: string
+  if opts then
+    level = opts.level or 6
+    format = opts.format or "zlib"
+  else
+    level = 6
+    format = "zlib"
+  end
 
   local strm = ffi.new("z_stream")
   local wb = window_bits_deflate(format)
@@ -216,7 +240,7 @@ local function deflater(opts)
   local finished = false
 
   return {
-    --: (string) -> boolean?, string?
+    --: (string) -> boolean | nil, string | nil
     push = function(chunk)
       if finished then return nil, "deflater already finished" end
       local src = ffi.cast("const Bytef *", chunk)
@@ -237,7 +261,7 @@ local function deflater(opts)
       until strm.avail_out ~= 0
       return true
     end,
-    --: () -> string?, string?
+    --: () -> string | nil, string | nil
     finish = function()
       if finished then return nil, "deflater already finished" end
       finished = true
@@ -264,10 +288,10 @@ end
 
 -- ── Streaming inflater ───────────────────────────────────────────────────────
 
---: (table?) -> table
+--: ({ format: string | nil } | nil) -> unknown
 local function inflater(opts)
-  opts = opts or {}
-  local format = opts.format or "zlib"
+  local format --: string
+  if opts then format = opts.format or "zlib" else format = "zlib" end
 
   local strm = ffi.new("z_stream")
   local wb = window_bits_inflate(format)
@@ -281,7 +305,7 @@ local function inflater(opts)
   local finished = false
 
   return {
-    --: (string) -> boolean?, string?
+    --: (string) -> boolean | nil, string | nil
     push = function(chunk)
       if finished then return nil, "inflater already finished" end
       local src = ffi.cast("const Bytef *", chunk)
@@ -312,7 +336,7 @@ local function inflater(opts)
       until strm.avail_out ~= 0
       return true
     end,
-    --: () -> string?, string?
+    --: () -> string | nil, string | nil
     finish = function()
       if not finished then
         finished = true
