@@ -31,7 +31,7 @@ local M = {}
 
 -- ── FFI declarations ──────────────────────────────────────────────────────────
 
-pcall(ffi.cdef, [[
+ffi.cdef[[
 	typedef struct sqlite3      sqlite3;
 	typedef struct sqlite3_stmt sqlite3_stmt;
 	typedef int64_t             sqlite3_int64;
@@ -74,42 +74,37 @@ pcall(ffi.cdef, [[
 	);
 
 	void sqlite3_result_text(sqlite3_context *, const char *, int, void(*)(void *));
-]])
+]]
 
 -- ── load shared library ───────────────────────────────────────────────────────
 
-local sqlite_ffi
-if ffi.os == "Windows" then
-	if ffi.arch == "x64" then sqlite_ffi = ffi.load("dep/sqlite.dll")
-	else sqlite_ffi = ffi.load("dep/sqlite-x86.dll") end
-else
-	local function vendored_name()
+local function load_sqlite() --: () -> $FfiC
+	local names = {} --: { [integer]: string }
+	if ffi.os == "Windows" then
+		if ffi.arch == "x64" then names[#names + 1] = "dep/sqlite.dll"
+		else names[#names + 1] = "dep/sqlite-x86.dll" end
+	else
 		local os, arch = ffi.os, ffi.arch
 		if os == "Linux" then
-			return arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
-			                       or  "dep/libsqlite3-linux-x86_64.so"
+			names[#names + 1] = arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
+			                                    or  "dep/libsqlite3-linux-x86_64.so"
 		elseif os == "OSX" then
-			return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib"
-			                       or  "dep/libsqlite3-macos-x86_64.dylib"
+			names[#names + 1] = arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib"
+			                                    or  "dep/libsqlite3-macos-x86_64.dylib"
 		end
-		return nil
+		names[#names + 1] = "sqlite3"
+		names[#names + 1] = "libsqlite3.so"
+		names[#names + 1] = "libsqlite3.so.0"          -- Linux system
+		names[#names + 1] = "libsqlite3.dylib"
+		names[#names + 1] = "/usr/lib/libsqlite3.dylib" -- macOS system
 	end
-	local names = {}
-	local v = vendored_name()
-	if v then names[#names + 1] = v end
-	names[#names + 1] = "sqlite3"
-	names[#names + 1] = "libsqlite3.so"
-	names[#names + 1] = "libsqlite3.so.0"          -- Linux system
-	names[#names + 1] = "libsqlite3.dylib"
-	names[#names + 1] = "/usr/lib/libsqlite3.dylib" -- macOS system
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
-		if ok then sqlite_ffi = lib; break end
+		if ok then return lib --[[as $FfiC]] end
 	end
-	if not sqlite_ffi then
-		error("shared_db_cap: sqlite3 shared library not found")
-	end
+	error("shared_db_cap: sqlite3 shared library not found")
 end
+local sqlite_ffi = load_sqlite()
 
 -- ── constants ─────────────────────────────────────────────────────────────────
 
@@ -158,7 +153,7 @@ local SQLITE_ATTACH              = 24
 local SQLITE_DETACH              = 25
 local SQLITE_FUNCTION            = 31
 
-local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1)
+local SQLITE_TRANSIENT = ffi.cast("void(*)(void*)", -1) --: any
 
 -- ── column reading ────────────────────────────────────────────────────────────
 
@@ -224,7 +219,8 @@ end
 -- Each table MUST have an `app_id TEXT` column.
 function M.setup_schema(path, schema)
 	local db_mod = require("lib.platform.caps.db")
-	local cap, err = db_mod.db_cap(path, { allow_write = true })
+	--:: DbCap = { execute: (string) -> (boolean | nil, string | nil), close: () -> (), ... }
+	local cap, err = db_mod.db_cap(path, { allow_write = true }) --: DbCap | nil, string | nil
 	if not cap then return nil, err end
 
 	for _, tbl in ipairs(schema) do
@@ -234,7 +230,7 @@ function M.setup_schema(path, schema)
 		if not ok2 then cap.close(); return nil, err2 end
 
 		-- Parse column names from cols string for trigger generation.
-		local col_names = {}
+		local col_names = {} --: { [integer]: string }
 		for col_def in tbl.cols:gmatch("[^,]+") do
 			local name = col_def:match("^%s*(%S+)")
 			if name then
@@ -251,8 +247,8 @@ function M.setup_schema(path, schema)
 		if not ok3 then cap.close(); return nil, err3 end
 
 		-- Build column lists for INSERT trigger.
-		local col_list = {}
-		local val_list = {}
+		local col_list = {} --: { [integer]: string }
+		local val_list = {} --: { [integer]: string }
 		for _, c in ipairs(col_names) do
 			col_list[#col_list + 1] = "[" .. c .. "]"
 			if c == "app_id" then
@@ -271,7 +267,7 @@ function M.setup_schema(path, schema)
 		if not ok4 then cap.close(); return nil, err4 end
 
 		-- Build SET clause for UPDATE trigger (skip app_id).
-		local set_parts = {}
+		local set_parts = {} --: { [integer]: string }
 		for _, c in ipairs(col_names) do
 			if c ~= "app_id" then
 				set_parts[#set_parts + 1] = "[" .. c .. "] = NEW.[" .. c .. "]"
@@ -312,32 +308,40 @@ function M.shared_db_cap(path, app_id, tables, opts)
 
 	local db_ptr = ffi.new("sqlite3 *[1]")
 	local flags = allow_write and SQLITE_OPEN_READWRITE or SQLITE_OPEN_READONLY
-	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, nil)
+	local null_str --: string
+	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, null_str)
 	if rc ~= SQLITE_OK then
-		local msg = ffi.string(sqlite_ffi.sqlite3_errmsg(db_ptr[0]))
+		local err_cdata = sqlite_ffi.sqlite3_errmsg(db_ptr[0]) --: any
+		local msg = ffi.string(err_cdata)
 		sqlite_ffi.sqlite3_close_v2(db_ptr[0])
 		return nil, "shared_db_cap: open failed: " .. msg
 	end
 	local db = db_ptr[0]
 
 	local function errmsg()
-		return ffi.string(sqlite_ffi.sqlite3_errmsg(db))
+		local p = sqlite_ffi.sqlite3_errmsg(db) --: any
+		return ffi.string(p)
 	end
 
 	-- Register _app_id() custom function that returns this connection's app_id.
-	local app_id_c = ffi.new("const char[?]", #app_id + 1, app_id)
+	local ffi_new = ffi.new --: any
+	local app_id_c = ffi_new("const char[?]", #app_id + 1, app_id)
 	local app_id_len = #app_id
 
-	local app_id_func = ffi.cast(
+	local app_id_func = --[[: any]] ffi.cast(
 		"void (*)(sqlite3_context *, int, sqlite3_value **)",
 		function(ctx, _nargs, _args)
 			sqlite_ffi.sqlite3_result_text(ctx, app_id_c, app_id_len, SQLITE_TRANSIENT)
 		end
 	)
 
+	local null_step --: (cdata, integer, cdata) -> ()
+	local null_final --: (cdata) -> ()
+	local null_destroy --: (any) -> ()
 	rc = sqlite_ffi.sqlite3_create_function_v2(
 		db, "_app_id", 0, SQLITE_UTF8, nil,
-		app_id_func, nil, nil, nil
+		app_id_func,
+		null_step, null_final, null_destroy
 	)
 	if rc ~= SQLITE_OK then
 		local msg = errmsg()
@@ -356,7 +360,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	-- The 5th callback arg (arg4) is the innermost trigger or view name that
 	-- caused the access, or NULL for direct top-level statements. We allow
 	-- base table access from views/triggers (non-NULL) but block direct access.
-	local auth_cb = ffi.cast(
+	local auth_cb = --[[: any]] ffi.cast(
 		"int (*)(void *, int, const char *, const char *, const char *, const char *)",
 		function(_, action, arg1, _arg2, _arg3, arg4)
 			-- Always allow: SELECT, TRANSACTION, FUNCTION, PRAGMA.
@@ -429,7 +433,8 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		local c_sql = sql
 		local next_sql = ffi.new("const char *[1]")
 		local stmt_ptr = ffi.new("sqlite3_stmt *[1]")
-		local result, result_err = true, nil
+		local result = true --: boolean | nil
+		local result_err --: string | nil
 		while true do
 			if sqlite_ffi.sqlite3_prepare_v2(db, c_sql, -1, stmt_ptr, next_sql) ~= SQLITE_OK then
 				result, result_err = nil, "shared_db_cap: prepare: " .. errmsg()
@@ -469,7 +474,8 @@ function M.shared_db_cap(path, app_id, tables, opts)
 		local col_count = sqlite_ffi.sqlite3_column_count(stmt)
 		local col_names = {}
 		for i = 0, col_count - 1 do
-			col_names[i + 1] = ffi.string(sqlite_ffi.sqlite3_column_name(stmt, i))
+			local cn = sqlite_ffi.sqlite3_column_name(stmt, i) --: any
+			col_names[i + 1] = ffi.string(cn)
 		end
 		local rows = {}
 		while true do
@@ -493,7 +499,8 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	end
 
 	local function close()
-		sqlite_ffi.sqlite3_set_authorizer(db, nil, nil)
+		local null_authcb --: (any, integer, string, string, string, string) -> integer
+		sqlite_ffi.sqlite3_set_authorizer(db, null_authcb, nil)
 		auth_cb:free()
 		app_id_func:free()
 		sqlite_ffi.sqlite3_close_v2(db)
