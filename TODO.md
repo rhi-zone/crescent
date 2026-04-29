@@ -441,6 +441,31 @@ Items that currently lack an implementer-ready spec:
 - [x] **Literal table not assignable to indexer type** — fixed 0b40861
 - [x] **Missing return detection** — fixed; `is_definitely_returning` analysis in constrain.lua emits implicit nil C_RETURN for non-definitely-returning annotated functions.
 
+- [ ] **Soundness gap 8: `local x --: T = expr` does not enforce the subtype check.** Broad gap, not just `unknown`:
+  ```lua
+  local x --: integer = "hello"      -- accepted; should error
+  local s --: string = "hi"
+  local y --: integer = s            -- accepted; should error
+  ```
+  The cast form `local y = --[[: integer]] s` is correctly rejected. The
+  annotated-local path at `constrain.lua:2440` emits the same `C_SUB(rhs_tid,
+  ann_tid)` constraint but the check silently passes. Function return
+  annotations (`local function f() --: () -> T`) also enforce correctly. Find
+  the divergence between the cast `C_SUB` and the local-init `C_SUB` and
+  close the bypass. See `docs/soundness-audit.md` Gap 8 for four repros. The
+  "annotation enforcement gotcha" note in `lib/type/static/CLAUDE.md` is a
+  symptom of this same gap.
+
+- [ ] **Add fuzz invariant for `local x --: T = expr` annotation enforcement.** Existing annotation-soundness invariants use function returns as the harness, missing the local-init path entirely (which is why Gap 8 survived). Add: for `expr` of type `U` and annotation `T`, expect an error iff `U </: T`. Combine with `unknown` in the type generator (see next item) for full coverage.
+
+- [ ] **Add `unknown` to `fuzz_arb.lua` type generator.** Currently absent (see `lib/type/static/CLAUDE.md` "Generator coverage"). Adding it will let the new annotation invariant cover the `unknown <: T` case, plus narrow / type-guard / call-result invariants currently blind to the unknown boundary.
+
+## typechecker cast / annotation syntax
+
+- [ ] **Decide: implement `--[[as T]]` semi-sound cast (overlap-required)?** Previously documented in `docs/type-system.md` as if real, but never implemented. The doc has been corrected to remove the false claim. If we want this, design and implement: an "overlap" check (target type must share *some* value with the source), then accept the cast even if neither direction is a subtype. Otherwise leave as-is — the current `--[[: T]] expr` is a sound checked cast and may be all we need.
+
+- [ ] **Decide: implement `--[[as! T]] expr` force / unsafe cast?** Previously documented as if real (see above). If we want a way to escape the type system inline (vs. routing through an `any`-typed intermediary), pick a syntax — `--[[as! T]]`, `--[[unsafe T]]`, `--[[: T !]]`, etc. — and wire it through `lex.lua`/`parse.lua`/`constrain.lua` as a `NODE_CAST_EXPR` variant that emits no constraint and just rebinds the type. Keep it grep-able. Otherwise close this with "use `any` instead."
+
 ## typechecker match semantics gaps
 
 - [x] **`Parameters<typeof f>` captures only first param** — FIXED. `Parameters<F> = match F { (...%P) -> %R => P }` now gives `(integer, string)` for `f: (integer, string) -> boolean`. fuzz_test.lua P2a/P2b both pass.

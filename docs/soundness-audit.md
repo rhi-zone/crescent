@@ -212,6 +212,67 @@ until `.cri` format fully supports literal type serialization.
 
 ---
 
+## Gap 8 — `local x --: T = expr` does not enforce the subtype check
+
+**File:** `constrain.lua:2440` (the `C_SUB(rhs_tid, ann_tid)` emission for
+annotated locals).
+**Severity:** High (false negative; broad)
+
+**Repro 1 (literal mismatch):**
+
+```lua
+local x --: integer = "hello"   -- accepted; should error
+```
+
+**Repro 2 (variable mismatch):**
+
+```lua
+local s --: string = "hi"
+local x --: integer = s         -- accepted; should error
+```
+
+**Repro 3 (function call mismatch):**
+
+```lua
+local function f() --: () -> string return "hi" end
+local x --: integer = f()       -- accepted; should error
+```
+
+**Repro 4 (`unknown`):**
+
+```lua
+--:: declare get_unk = () -> unknown
+local y --: integer = get_unk() -- accepted; should error
+```
+
+The cast form catches all four — `local x = --[[: integer]] "hello"`,
+`--[[: integer]] s`, `--[[: integer]] f()`, `--[[: integer]] get_unk()`
+each correctly produce a type error. Both code paths emit
+`C_SUB(typeof(expr), T)` in `constrain.lua`, but the local-annotated form
+silently passes. Function return annotations (`local function f() --: () -> T`)
+also enforce correctly. So the bug is specific to the `local x --: T = ...`
+constraint emission or its solving path.
+
+**Already noted as a gotcha** in `lib/type/static/CLAUDE.md` ("annotation
+enforcement gotcha"): the workaround for tests is to use a function-return
+annotation. But it's not just a testing inconvenience — it's a real soundness
+hole and should be fixed, not worked around.
+
+**Why fuzzers missed it:** the annotation-soundness invariants in
+`fuzz_test.lua` use function return annotations as the harness for structural
+equivalence assertions. The local-init path is not exercised. Add an
+invariant that uses `local x --: T = expr_of_type_U` and asserts the
+expected error iff `U </: T`. Also, `fuzz_arb.lua`'s type generator does not
+produce `unknown` (see `lib/type/static/CLAUDE.md` "Generator coverage") —
+adding it would extend coverage to the unknown-specific case (Repro 4).
+
+**Status:** Open. Three follow-ups:
+1. Find and close the bypass path in the local-init `C_SUB` so all four repros error.
+2. Add a fuzz invariant exercising `local x --: T = expr` annotation enforcement.
+3. Add `unknown` to `fuzz_arb.lua`'s type generator.
+
+---
+
 ## Not-a-gap: TAG_NAMED permissiveness in try_unify
 
 `unify.lua:603` returns `true` for `TAG_NAMED` on either side. Named types
@@ -233,6 +294,7 @@ replaced by full structural checking once resolution completes.
 | 5 | Intersection dedup | Low | Arena bloat, no soundness impact |
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
 | 7 | LIT_INTEGER cross-file | Low | Edge case, deferred |
+| 8 | `local x --: T = expr_of_unknown` | High | `unknown` silently passes annotated local-init |
 
 **Recommended fix order:**
 1. Gap 5 (trivial: add `seen` table to `make_intersection`)

@@ -84,21 +84,24 @@ The philosophy: `any` is for FFI boundaries, legacy interop, and genuinely dynam
 
 ### 4. Annotations are checked, not trusted
 
-Annotations are constraints, not assertions. The checker verifies the annotation against the implementation. Casts (`--[[as T]]`) exist for when you know better, but they require overlap. Force casts (`--[[as! T]]`) exist for when you *really* know better, and they're grep-able.
+Annotations are constraints, not assertions. The checker verifies the annotation against the implementation. The cast form `--[[: T]] expr` (placed *before* the expression) emits a subtype check — it does not bypass the type system, it just gives you a place to attach a target type. A redundant cast (where `expr` already has type `T`) is warned about.
+
+**Annotations vs. casts.** A `--: T` annotation on `local x --: T = expr` is *not* a cast — it requires `expr` to already typecheck against `T`. The same applies to `--[[: T]]`: it emits `C_SUB(typeof(expr), T)`. There is no force-cast / unsafe-cast variant in the current checker. (Soundness gap: for `unknown` actuals, the local-init path silently accepts assignment to any annotated type — see [soundness-audit.md, Gap 8](soundness-audit.md).)
 
 ### 5. Sound by default, escape hatches by choice
 
-Soundness means: if the checker says "no errors," there are no type errors at runtime (modulo FFI and force casts).
+Soundness means: if the checker says "no errors," there are no type errors at runtime (modulo `any` and FFI boundaries).
 
 | Mechanism | Soundness | Use case |
 |-----------|-----------|----------|
 | Normal code | Sound | Application logic |
 | `--:` annotation | Sound (checked) | Documentation + constraint |
-| `--[[as T]]` | Semi-sound (overlap) | Narrowing, downcasting |
-| `--[[as! T]]` | Unsound (explicit) | FFI, serialization |
+| `--[[: T]] expr` cast | Sound (checked subtyping) | Annotating an expression in place |
 | `any` | Unsound (bilateral) | Dynamic boundaries |
 
-The unsound mechanisms are *visible*. You can grep for `as!` and `any` to find every place where the type system is bypassed.
+The unsound mechanism is *visible*. You can grep for `any` to find every place where the type system is bypassed.
+
+**Planned, not implemented.** A semi-sound cast (overlap-required, e.g. `--[[as T]]`) and a force cast (e.g. `--[[as! T]]`) have been discussed but neither is implemented. The current `--[[: T]]` is strictly a checked subtype assertion. See TODO.md.
 
 ### 6. Follow the language, don't fight it
 

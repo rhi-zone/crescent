@@ -526,6 +526,76 @@ Point = {
 
 ---
 
+## Cast syntax: `--[[: T]] expr`
+
+A cast is written as a `--[[: T]]` block annotation placed **immediately
+before** the expression it applies to. The parser sees the pending cast and
+wraps the next expression in a `NODE_CAST_EXPR` whose target type is `T`.
+
+```lua
+local x = --[[: integer | nil]] maybe_value()
+local greeting = --[[: string]] tostring(42)
+```
+
+The cast binds to the next *simple expression* (atom or
+prefix-with-suffixes — variable, call, table constructor, literal, function
+expression), not to a surrounding unary or binary operator. To cast the
+result of a unary or binary expression, parenthesise:
+
+```lua
+local len = --[[: integer]] (#s)
+```
+
+### Semantics
+
+A cast emits a `C_SUB(typeof(expr), T)` constraint
+(`lib/type/static/constrain.lua:2138-2147`, with `is_cast=true`). This is the
+same subtype check the checker uses for any annotated assignment — the cast
+does **not** bypass the type system, it just attaches a target type to a
+position that has no binding to annotate. A cast that fails subtyping is a
+type error. A cast that asserts a type the expression already has is a
+warning ("redundant type assertion").
+
+### `unknown` cannot be cast away
+
+Because the cast is a checked subtype assertion, it cannot rescue a value of
+type `unknown`. `unknown <: T` is rejected by `unify` (`unify.lua:287-294`)
+and by `try_unify` (`unify.lua:862`) for any concrete `T`. The only way to
+use an `unknown` is to narrow it via a runtime test (`type(x) == "string"`,
+`x is T` predicate, etc.).
+
+```lua
+local v --: unknown = receive()
+local s = --[[: string]] v       -- ERROR: unknown is not assignable to string
+if type(v) == "string" then
+    -- v: string here, no cast needed
+end
+```
+
+### No force cast / unsafe cast
+
+There is no `--[[as! T]]`, `--[[unsafe T]]`, or other "force" cast variant
+in the current checker. If you need to escape the type system, use `any`
+explicitly — that is the documented escape hatch.
+
+### Annotations vs. casts
+
+`--: T` on a `local` declaration is **not** a cast. The intent is that the
+annotation declares the variable's permanent type and the initializer is
+checked against it. **In the current implementation, the local-init
+subtype check is unsound** — see the "Known limitations" entry below and
+[soundness-audit.md, Gap 8](soundness-audit.md). To force a real subtype
+check today, prefer the cast form or a function-return annotation:
+
+```lua
+local x = --[[: integer]] "hello"           -- ERROR: string </: integer (correct)
+local function f() --: () -> integer
+    return "hello"                          -- ERROR: string </: integer (correct)
+end
+```
+
+---
+
 ## Examples
 
 ### Annotated function
