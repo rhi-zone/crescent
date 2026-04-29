@@ -572,11 +572,24 @@ if type(v) == "string" then
 end
 ```
 
-### No force cast / unsafe cast
+### Force cast: `--[[:! T]]`
 
-There is no `--[[as! T]]`, `--[[unsafe T]]`, or other "force" cast variant
-in the current checker. If you need to escape the type system, use `any`
-explicitly — that is the documented escape hatch.
+`--[[:! T]] expr` is an overlap-checked force cast. It succeeds when `actual`
+and `T` have any value in common (the intersection is inhabitable), and
+fails for disjoint pairs (e.g. `string → integer`). This is the documented
+escape hatch from `unknown` and from one-sided union narrowing where the
+checker cannot narrow automatically.
+
+```lua
+local v --: unknown = receive()
+local s = --[[:! string]] v      -- accepted (overlap: unknown & string nonempty)
+                                 -- runtime: still your responsibility
+```
+
+Casting `unknown` to `any` via the regular `--[[: any]]` form is **rejected**
+— `any` is an opt-out the user must declare on the *binding* (e.g.
+`local x --: any`), not a back-channel that silently launders an `unknown`
+source. Use `--[[:! any]]` if you really want to force-cast unknown to any.
 
 ### Annotations vs. casts
 

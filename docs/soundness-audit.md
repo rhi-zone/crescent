@@ -488,7 +488,24 @@ not Gap 11 (which is about the prefix cast's behaviour when target is
 The current type-syntax doc correctly shows only the prefix form, so users
 following the documentation will not hit the trailing-form trap.
 
-**Status:** Open.
+**Status:** **FIXED** (2026-04-30, Phase D3 of typechecker hygiene plan).
+
+`unify.lua:M.unify` and `M.try_unify` now reject `unknown <: any` explicitly,
+ahead of the bilateral `TAG_ANY` rules. The check applies regardless of the
+constraint's origin (cast, parameter pass, return, local-init annotation,
+field/index assignment), so every reachable path is closed in one place. The
+asymmetric rule is: `any <: unknown` still passes (any is bilaterally
+assignable to anything, unknown is the top type), but `unknown <: any` fails
+with a "must be narrowed before use" diagnostic that mentions `--[[:! T]]`
+as the documented escape hatch.
+
+Regression tests live in `lib/type/static/type_soundness_test.lua` under
+`describe("Gap 11: unknown cannot be laundered through any", ...)` and cover
+all five reachable paths (cast, callee param, function return, local
+annotation, force-cast escape hatch).
+
+Tests at `lib/type/static/type_test.lua:3643` and `:3678` previously asserted
+the broken behaviour and have been rewritten to assert rejection.
 
 ---
 
@@ -516,7 +533,7 @@ replaced by full structural checking once resolution completes.
 | 8 | `local x --: T = expr_of_unknown` | ~~High~~ **FIXED** | Resolved as side-effect of Gap 10 parser totality (commit `4d711af`); regression tests in `type_soundness_test.lua` |
 | 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T`; compounded by the Gap 10 parser bug |
 | 10 | Parser accepts invalid `--:` syntax | High | `--: integer = x` is not a valid type but parser silently accepts the `integer` prefix and drops the rest; enables the Gap 9 footgun |
-| 11 | `--[[: any]] expr` launders `unknown` | High | Cast to `any` accepts every source type including `unknown`, defeating the documented "unknown cannot be cast away" guarantee |
+| 11 | `--[[: any]] expr` launders `unknown` | ~~High~~ **FIXED** | Closed by Phase D3 (2026-04-30): `unify.lua` rejects `unknown <: any` in both `M.unify` and `M.try_unify`; covers cast, param, return, and annotation paths. Force cast `--[[:! T]]` is the documented escape. |
 
 **Recommended fix order:**
 1. Gap 5 (trivial: add `seen` table to `make_intersection`)

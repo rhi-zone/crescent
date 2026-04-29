@@ -1714,6 +1714,68 @@ end
     end)
 end)
 
+-- Gap 11 regression: `--[[: any]] expr` must not launder `unknown`.
+-- Before fix: cast emits C_SUB(unknown, any), unify accepts (TAG_ANY bilateral),
+-- expression takes type `any`, then flows freely into any concrete T downstream.
+-- After fix: unify rejects unknown <: any. The legitimate escape from `unknown`
+-- is `--[[:! T]]` (overlap-checked force cast).
+assert.describe("Gap 11: unknown cannot be laundered through any", function()
+    assert.it("cast unknown -> any -> integer is rejected at the cast", function()
+        has_error([==[
+local x --: unknown
+local n = --[[: any]] x
+local r = n + 1
+]==], "must be narrowed")
+    end)
+
+    assert.it("cast unknown -> any directly is rejected", function()
+        has_error([==[
+local x --: unknown
+local n = --[[: any]] x
+]==], "must be narrowed")
+    end)
+
+    assert.it("unknown passed to (any) -> ... param is rejected", function()
+        has_error([[
+--: (any) -> nil
+local function f(x) end
+local v --: unknown
+f(v)
+]], "must be narrowed")
+    end)
+
+    assert.it("unknown returned from () -> any is rejected", function()
+        has_error([[
+local v --: unknown
+--: () -> any
+local function f() return v end
+]], "must be narrowed")
+    end)
+
+    assert.it("local --: any = unknown_expr is rejected", function()
+        has_error([[
+local v --: unknown
+--: any
+local x = v
+]], "must be narrowed")
+    end)
+
+    assert.it("force cast unknown -> any IS the documented escape hatch", function()
+        no_errors([==[
+local x --: unknown
+local n = --[[:! any]] x
+local r = n + 1
+]==])
+    end)
+
+    assert.it("any -> unknown still works (unknown is the top type)", function()
+        no_errors([==[
+local x --: any
+local u = --[[: unknown]] x
+]==])
+    end)
+end)
+
 assert.describe("soundness: explicit any annotation", function()
     assert.it("any annotation emits warning", function()
         local ec = check([[

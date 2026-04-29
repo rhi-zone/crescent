@@ -3640,10 +3640,14 @@ assert.describe("unify: TAG_UNKNOWN", function()
         assert.ok(not unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_INTEGER))
         assert.ok(not unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_NIL))
     end)
-    assert.it("unknown is assignable to any (escape hatch)", function()
+    assert.it("unknown is NOT assignable to any (Gap 11 fix)", function()
         local ctx = make_unify_ctx()
-        assert.ok(unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_ANY))
+        -- unknown <: any is rejected: `any` is not a back-channel for laundering unknown.
+        -- Use `--[[:! T]]` (force cast) to escape unknown without narrowing.
+        assert.ok(not unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_ANY))
+        -- But unknown <: unknown (reflexivity) and any <: unknown still hold.
         assert.ok(unify_mod.try_unify(ctx, ctx.T_UNKNOWN, ctx.T_UNKNOWN))
+        assert.ok(unify_mod.try_unify(ctx, ctx.T_ANY, ctx.T_UNKNOWN))
     end)
     assert.it("unify: unknown as RHS succeeds", function()
         local ctx = make_unify_ctx()
@@ -3675,7 +3679,10 @@ f(v)
 ]], "test")
         assert.ok(errs and #errs.errors > 0, "should error: unknown passed to string param")
     end)
-    assert.it("passing unknown to any param is ok", function()
+    assert.it("passing unknown to any param is rejected (Gap 11 fix)", function()
+        -- Gap 11: unknown <: any is rejected. `any` is an opt-out the user must declare
+        -- on the binding, not a sink that silently accepts unknown sources. Caller must
+        -- narrow first or use `--[[:! T]]` to force-cast.
         local errs = check_mod.check_string([[
 --: (any) -> nil
 local function f(x) end
@@ -3684,7 +3691,7 @@ local t = {}
 local v = t.x
 f(v)
 ]], "test")
-        assert.eq(errs and #errs.errors or 0, 0, "unknown is assignable to any")
+        assert.ok(errs and #errs.errors > 0, "unknown should not silently flow into any param")
     end)
     assert.it("explicit unknown annotation blocks use without narrowing", function()
         local errs = check_mod.check_string([[

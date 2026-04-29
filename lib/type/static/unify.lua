@@ -261,6 +261,14 @@ function M.unify(ctx, a, b, seen)
     local ta = ctx.types:get(a)
     local tb = ctx.types:get(b)
 
+    -- unknown <: any is rejected (Gap 11). `any` is an opt-out the user must declare on
+    -- the binding, not a back-channel for laundering an `unknown` source. Use `--[[:! T]]`
+    -- (force cast) to escape `unknown` without narrowing. Must precede the bilateral TAG_ANY
+    -- rules below, which would otherwise accept this case.
+    if ta.tag == TAG_UNKNOWN and tb.tag == TAG_ANY then
+        return false, "value of type `unknown` must be narrowed before use (got unknown, expected `any`); use `--[[:! T]]` to force-cast without narrowing"
+    end
+
     -- any is bilateral.
     -- When one side is TAG_ANY and the other is a free type variable (TAG_VAR/TAG_ROWVAR),
     -- bind the var to TAG_ANY so all future unifications with that var also see TAG_ANY.
@@ -857,6 +865,9 @@ function M.try_unify(ctx, a, b, seen)
     -- Same type ID: trivially reflexive.
     if a == b then return true end
 
+    -- Gap 11: unknown <: any is rejected (mirrors M.unify). Other any-on-either-side
+    -- combinations remain bilateral.
+    if ta.tag == TAG_UNKNOWN and tb.tag == TAG_ANY then return false end
     if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
     if tb.tag == TAG_UNKNOWN then return true end
     if ta.tag == TAG_UNKNOWN then return false end

@@ -858,14 +858,17 @@ f("c")
     end)
 
     assert.it("PASS: $Keys used as index type", function()
-        no_error([[
+        -- Indexing with K = Keys<Row> currently produces `unknown` (the open-table
+        -- index type). Per Gap 11 fix, `unknown` cannot silently flow into `any` —
+        -- use `--[[:! T]]` (force cast) to escape the unknown without narrowing.
+        no_error([==[
 --:: Row = { name: string, age: number }
 --:: K = Keys<Row>
 --: (Row, K) -> any
 local function get(row, key)
-    return row[key]
+    return --[[:! any]] row[key]
 end
-]])
+]==])
     end)
 
     assert.it("PASS: $Keys of empty table produces never — function is untouchable", function()
