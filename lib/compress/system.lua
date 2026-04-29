@@ -80,11 +80,13 @@ end
 --::   inflate: (unknown, number) -> integer,
 --::   inflateEnd: (unknown) -> integer,
 --:: }
-local function load_zlib() --: () -> (ZlibLib, string)
+local function load_zlib()
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
-      return lib --[[as ZlibLib]], name
+      local raw = lib --: unknown
+      local typed = raw --[[:! ZlibLib]]
+      return typed, name
     end
   end
   error("zlib not found")
