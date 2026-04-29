@@ -1085,6 +1085,83 @@ local n = from_maybe({
 end)
 
 -- ---------------------------------------------------------------------------
+-- 9. Overlap-checked force cast: --[[:! T]]
+-- ---------------------------------------------------------------------------
+
+assert.describe("force cast: --[[:! T]] requires overlap, not subtyping", function()
+    assert.it("PASS: unknown -> T (narrow unknown via force cast)", function()
+        -- Without --[[:! ]], unknown cannot flow into a string param.
+        -- The force cast asserts the value's shape; overlap(unknown, string) holds
+        -- because unknown is a top type.
+        no_error([==[
+--: (string) -> nil
+local function f(s) return nil end
+local x --: unknown
+x = "hello"
+f(--[[:! string]] x)
+]==])
+    end)
+
+    assert.it("PASS: (A | B) -> A (project a union member)", function()
+        -- A regular cast `--[[: string]]` from `string | integer` would fail
+        -- (the union is not <: string). The force cast succeeds because
+        -- string overlaps with string|integer.
+        no_error([==[
+--: (string) -> nil
+local function f(s) return nil end
+local x --: string | integer
+x = "hello"
+f(--[[:! string]] x)
+]==])
+    end)
+
+    assert.it("ERROR: string -> integer (no overlap)", function()
+        -- Disjoint atomic types must error even with the force cast — the
+        -- force cast is overlap-checked, not unchecked.
+        has_error([==[
+--: (integer) -> nil
+local function f(n) return nil end
+local s --: string
+s = "hello"
+f(--[[:! integer]] s)
+]==], "no overlap")
+    end)
+
+    assert.it("ERROR: number -> string (no overlap)", function()
+        has_error([==[
+local n --: number
+n = 1
+local s --: string
+s = --[[:! string]] n
+]==], "no overlap")
+    end)
+
+    assert.it("PASS: result type is the asserted type", function()
+        -- After `--[[:! T]] x`, the expression has type T, not the original
+        -- (possibly wider) type.  Demonstrated by passing the result through
+        -- a function that expects T exactly.
+        no_error([==[
+--: (string) -> string
+local function id(s) return s end
+local x --: string | integer
+x = "ok"
+local y = id(--[[:! string]] x)
+]==])
+    end)
+
+    assert.it("PASS: regular --[[: T]] cast still warns on redundant assertion", function()
+        -- The redundant-cast warning is preserved for the checked form.
+        -- The force form does not produce this warning (it's a different
+        -- constraint), and that's fine — the user opted into a stricter check.
+        no_error([==[
+local x --: string
+x = "hi"
+local y = --[[:! string]] x
+]==])
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- 10. Complex interactions
 -- ---------------------------------------------------------------------------
 

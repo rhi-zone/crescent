@@ -1169,7 +1169,7 @@ function M.parse_annotations(annotations, pool, filename)
             if ann.kind == defs.ANN_TYPE then
                 local type_id = parse_type(s)
                 assert_eof(s, "a type annotation")
-                return { kind = defs.ANN_TYPE, type_id = type_id }
+                return { kind = defs.ANN_TYPE, type_id = type_id, force_cast = ann.force_cast }
             elseif ann.kind == defs.ANN_DECL then
                 -- Parse "Name = type" or "Name<T, U> = type" or "newtype Name = type"
                 -- Check for newtype or declare

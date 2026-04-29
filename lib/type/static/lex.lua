@@ -676,12 +676,16 @@ function Lexer:_capture_block_annotation(sep, ann_line, ann_col)
     -- Check if content starts with ':'
     if self.b ~= B_COLON then return false end
     local kind = defs.ANN_TYPE
+    local force_cast = false
     self:_nextbyte()
     if self.b == B_COLON then
         kind = defs.ANN_DECL
         self:_nextbyte()
     elseif self.b == B_LT then
         kind = defs.ANN_TYPE_ARGS
+    elseif self.b == 33 then  -- '!' — overlap-checked force cast: --[[:! T]]
+        force_cast = true
+        self:_nextbyte()
     end
     -- Read content until closing ]=]
     local parts = {}
@@ -718,6 +722,7 @@ function Lexer:_capture_block_annotation(sep, ann_line, ann_col)
         kind = kind,
         content = content,
         col = ann_col,
+        force_cast = force_cast,
     }
     return true
 end

@@ -146,6 +146,11 @@ local C_BIND_GENERICS = 11  -- {C_BIND_GENERICS, callee_tid, arg_tids_list, ret_
 local C_CHECK_ARGS    = 12  -- {C_CHECK_ARGS,    callee_tid, arg_tids_list, ret_tid, line, col}
 -- Checks that call arguments match the (now-concrete) param types and unifies the return type.
 -- Defers (returns false) if any param is still a free TV. No special-casing needed.
+local C_OVERLAP       = 13  -- {C_OVERLAP,       actual, expected, line, col}
+-- Overlap-checked force cast (`--[[:! T]] expr`). Succeeds iff the value sets
+-- of `actual` and `expected` overlap (intersection ≠ never). Used to assert a
+-- specific shape from `unknown` or to project a union member, without the full
+-- subtyping check that a regular cast (C_SUB with is_cast) requires.
 
 local M = {}
 
@@ -160,6 +165,7 @@ M.C_BOUND         = C_BOUND
 M.C_OR            = C_OR
 M.C_BIND_GENERICS = C_BIND_GENERICS
 M.C_CHECK_ARGS    = C_CHECK_ARGS
+M.C_OVERLAP       = C_OVERLAP
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -2142,7 +2148,14 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     local ann = ctx.ann.results[n.data[1]]  -- n.data[1] is the negative cast_id
     if not ann or ann.kind ~= ANN_TYPE then return inner_tid end
     local cast_tid = resolve_annotation_type(ctx, ann.type_id)
-    emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col, true })  -- true = is_cast
+    if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
+        -- --[[:! T]] expr: overlap-checked force cast. Succeeds when actual and
+        -- expected have any value in common. Permits unknown→T and (A|B)→A,
+        -- but rejects disjoint pairs (e.g. string→integer).
+        emit(ctx, { C_OVERLAP, inner_tid, cast_tid, n.line, n.col })
+    else
+        emit(ctx, { C_SUB, inner_tid, cast_tid, n.line, n.col, true })  -- true = is_cast
+    end
     return cast_tid
 end
 

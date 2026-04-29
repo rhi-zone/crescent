@@ -334,6 +334,10 @@ function M.parse(source, filename, pool)
             local nd = nodes:get(cn)
             nd.data[0] = inner
             nd.data[1] = cast_id
+            local ann = L.annotations[cast_id]
+            if ann and ann.force_cast then
+                nd.flags = defs.FLAG_FORCE_CAST
+            end
             return cn
         end
         return inner

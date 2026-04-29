@@ -1097,4 +1097,48 @@ function M.is_primitive_tag(tag)
         or tag == TAG_INTEGER or tag == TAG_STRING
 end
 
+-- Overlap (read-only): does there exist any value v with v : a AND v : b?
+-- Used by C_OVERLAP (--[[:! T]] force casts). Returns boolean.
+--
+-- Definition:
+--   - any/unknown overlap with everything (top types).
+--   - never overlaps with nothing (bottom).
+--   - If try_unify(a, b) or try_unify(b, a), overlap is true (either set
+--     contains the other's witness).
+--   - If a is a union, overlap iff some member of a overlaps with b
+--     (and symmetrically for b).
+--   - Otherwise no overlap (atomic mismatch like string vs integer).
+--
+-- This is intentionally weaker than full intersection nonemptiness — it does
+-- not solve open-world structural overlap problems. It is sufficient for the
+-- two cases the force cast targets: unknown→T and (A|B)→A.
+--: (Ctx, integer, integer) -> boolean
+function M.types_overlap(ctx, a, b)
+    a = find(ctx, a)
+    b = find(ctx, b)
+    if a == b then return true end
+    local ta = ctx.types:get(a)
+    local tb = ctx.types:get(b)
+    if ta.tag == TAG_NEVER or tb.tag == TAG_NEVER then return false end
+    if ta.tag == TAG_ANY or tb.tag == TAG_ANY then return true end
+    if ta.tag == TAG_UNKNOWN or tb.tag == TAG_UNKNOWN then return true end
+    -- Subtyping in either direction implies overlap.
+    if M.try_unify(ctx, a, b) then return true end
+    if M.try_unify(ctx, b, a) then return true end
+    -- Union: any member overlapping suffices.
+    if ta.tag == TAG_UNION then
+        for i = ta.data[0], ta.data[0] + ta.data[1] - 1 do
+            if M.types_overlap(ctx, ctx.lists:get(i), b) then return true end
+        end
+        return false
+    end
+    if tb.tag == TAG_UNION then
+        for i = tb.data[0], tb.data[0] + tb.data[1] - 1 do
+            if M.types_overlap(ctx, a, ctx.lists:get(i)) then return true end
+        end
+        return false
+    end
+    return false
+end
+
 return M

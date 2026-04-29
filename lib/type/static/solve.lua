@@ -55,6 +55,7 @@ local C_BOUND         = constrain.C_BOUND
 local C_OR            = constrain.C_OR
 local C_BIND_GENERICS = constrain.C_BIND_GENERICS
 local C_CHECK_ARGS    = constrain.C_CHECK_ARGS
+local C_OVERLAP       = constrain.C_OVERLAP
 
 local find = types_mod.find
 
@@ -2086,6 +2087,31 @@ local function solve_check_args(ctx, c)
     return false
 end
 
+-- Overlap-checked force cast: `--[[:! T]] expr`. Succeeds iff actual and
+-- expected have any value in common. Defers while either side is still a free
+-- TAG_VAR so we don't make a soundness call against an unbound type.
+--: (Ctx, { [integer]: any, ... }) -> boolean
+local function solve_overlap(ctx, c)
+    local actual   = find(ctx, c[2])
+    local expected = find(ctx, c[3])
+    local line, col = c[4], c[5]
+    -- Defer if either side is still a free type variable: the answer would be
+    -- determined by whatever the var binds to next, not by the user's program.
+    do
+        local at = ctx.types:get(actual)
+        local bt = ctx.types:get(expected)
+        if at.tag == TAG_VAR or at.tag == TAG_ROWVAR then return false end
+        if bt.tag == TAG_VAR or bt.tag == TAG_ROWVAR then return false end
+    end
+    if unify_mod.types_overlap(ctx, actual, expected) then return true end
+    add_error(ctx, line, col,
+        "force cast has no overlap: `"
+        .. types_mod.display_short(ctx, actual)
+        .. "` and `" .. types_mod.display_short(ctx, expected)
+        .. "` are disjoint")
+    return true  -- error reported; don't defer further
+end
+
 -- ---------------------------------------------------------------------------
 -- Solver
 -- ---------------------------------------------------------------------------
@@ -2106,6 +2132,7 @@ function M.solve(ctx, constraints)
         [C_OR]            = solve_or,
         [C_BIND_GENERICS] = solve_bind_generics,
         [C_CHECK_ARGS]    = solve_check_args,
+        [C_OVERLAP]       = solve_overlap,
     }
 
     -- Dependency-aware fixpoint solver.
