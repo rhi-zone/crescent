@@ -338,7 +338,24 @@ function M.parse(source, filename, pool)
             if ann and ann.force_cast then
                 nd.flags = defs.FLAG_FORCE_CAST
             end
-            return cn
+            inner = cn
+        end
+        -- Trailing-form cast: `expr --[[: T]]`. The lexer set _pending_cast_id
+        -- while skipping the comment after the last token of `inner`. Attach
+        -- the cast to the just-parsed expression rather than letting it leak
+        -- forward (where parse_stmt would clear it, silently dropping it).
+        local trailing_id = L._pending_cast_id
+        if trailing_id then
+            L._pending_cast_id = nil
+            local cn = mknode(defs.NODE_CAST_EXPR, line, col)
+            local nd = nodes:get(cn)
+            nd.data[0] = inner
+            nd.data[1] = trailing_id
+            local ann = L.annotations[trailing_id]
+            if ann and ann.force_cast then
+                nd.flags = defs.FLAG_FORCE_CAST
+            end
+            inner = cn
         end
         return inner
     end

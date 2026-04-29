@@ -1162,6 +1162,53 @@ local y = --[[:! string]] x
 end)
 
 -- ---------------------------------------------------------------------------
+-- Trailing-form casts: `expr --[[: T]]` and `expr --[[:! T]]`
+-- ---------------------------------------------------------------------------
+
+assert.describe("trailing cast: applies to preceding expression", function()
+    assert.it("ERROR: trailing --[[: T]] enforces subtype check", function()
+        -- Regression test: previously a no-op because the lexer attached
+        -- pending casts to the *next* expression; trailing comments were
+        -- silently dropped at the next statement boundary.
+        has_error([==[
+local n = "hello" --[[: integer]]
+]==], "integer")
+    end)
+
+    assert.it("PASS: prefix --[[: T]] still works", function()
+        has_error([==[
+local n = --[[: integer]] "hello"
+]==], "integer")
+    end)
+
+    assert.it("PASS: trailing --[[:! T]] (force cast) parses and overlap-checks", function()
+        -- `unknown` overlaps with `integer`, so the force cast succeeds and
+        -- the result has type `integer`.
+        no_error([==[
+local x --: unknown
+x = 1
+local n --: integer
+n = x --[[:! integer]]
+]==])
+    end)
+
+    assert.it("ERROR: trailing --[[:! T]] still requires overlap", function()
+        has_error([==[
+local s --: string
+s = "hi"
+local n --: integer
+n = s --[[:! integer]]
+]==], "no overlap")
+    end)
+
+    assert.it("PASS: trailing cast on parenthesized expression", function()
+        has_error([==[
+local n = (1 + 1) --[[: string]]
+]==], "string")
+    end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- 10. Complex interactions
 -- ---------------------------------------------------------------------------
 
