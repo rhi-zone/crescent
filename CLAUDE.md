@@ -179,6 +179,10 @@ Inline cases:
 - A surgical 1–5 line edit in a file you already understand, with no expected iteration
 - Verifying output of a change with one command
 
+**Never pre-load the answer in a delegation prompt.** Don't write "verify that X works" or "claim to verify: X" — write "what does X do?" or "find out whether X works". Pre-baked hypotheses in the prompt teach the agent to confirm, not investigate. If you have a hypothesis, name it as a hypothesis the agent should *attempt to falsify*, not as a thing to verify.
+
+**"X works" and "X doesn't work" are claims of equal weight. Both require runnable evidence.** A claim grounded in code-tracing without a paste-able command and its output is a hypothesis, not a finding. If your investigation concluded "Y doesn't work" and you didn't actually run Y, your conclusion may be wrong — say so explicitly. The cost of running a 5-line `bin/cr check` repro is always lower than the cost of a wrong report.
+
 ## Commit Convention
 
 Use conventional commits: `type(scope): message`
