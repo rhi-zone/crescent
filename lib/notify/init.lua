@@ -36,7 +36,7 @@ function M.webhook(opts)
   local transport = opts.transport
   local wh_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, wh_time_fn)
     local body = msg
@@ -59,7 +59,7 @@ function M.log_channel(opts)
   local default_level = opts.level or "info"
   local lc_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, lc_time_fn)
     local level = msg.level or default_level
@@ -89,7 +89,7 @@ function M.callback(fn, opts)
   assert(opts and opts.time_fn, "callback requires opts.time_fn")
   local cb_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, cb_time_fn)
     local ok, err = pcall(fn, msg)
@@ -106,7 +106,7 @@ function M.console(opts)
   local format = opts.format or "text"
   local con_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, con_time_fn)
     if format == "json" then
@@ -139,7 +139,7 @@ function M.router(opts)
   local r = {}
 
   --- Add a channel with optional routing rules.
-  --: (name: string, channel: channel, opts?: table) -> nil
+  --: (name: string, channel: channel, opts: (table | nil)) -> nil
   function r:add(name, channel, add_opts)
     local route = { name = name, channel = channel }
     if add_opts then
@@ -195,7 +195,7 @@ function M.batch(channel, opts)
   local b = {}
 
   --- Flush all buffered messages to the underlying channel.
-  --: () -> true | nil, string
+  --: () -> (true | nil, string)
   function b:flush()
     if #buffer == 0 then
       last_flush = bat_time_fn()
@@ -214,7 +214,7 @@ function M.batch(channel, opts)
   end
 
   --- Buffer a message. Flushes automatically at max_size.
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function b:send(msg)
     msg = normalize(msg, bat_time_fn)
     buffer[#buffer + 1] = msg
@@ -225,7 +225,7 @@ function M.batch(channel, opts)
   end
 
   --- Check max_wait timer and flush if expired.
-  --: () -> true | nil, string
+  --: () -> (true | nil, string)
   function b:tick()
     if max_wait and (bat_time_fn() - last_flush) >= max_wait then
       return self:flush()
@@ -252,7 +252,7 @@ function M.rate_limit(channel, opts)
   local timestamps = {}
   local rl = {}
 
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function rl:send(msg)
     local now = now_fn()
     -- Prune timestamps older than 60 seconds
@@ -282,7 +282,7 @@ function M.retry(channel, opts)
   local max_attempts = opts.max_attempts or 3
   local rt = {}
 
-  --: (msg: table) -> true | nil, string
+  --: (msg: table) -> (true | nil, string)
   function rt:send(msg)
     local ok, err
     for _ = 1, max_attempts do

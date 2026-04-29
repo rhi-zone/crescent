@@ -39,7 +39,7 @@ end
 -- We flatten everything at build time using standard SQL precedence.
 
 -- Build the WHERE string and collect params from a _wheres list.
---: (table) -> string, table
+--: (table) -> (string, table)
 local function build_where(wheres)
 	if #wheres == 0 then return nil, {} end
 	local parts = {}
@@ -85,7 +85,7 @@ local function new_select(table_name)
 end
 
 -- Clone self, applying fn(copy) -> copy.
---: (Select, fun(table):table) -> Select
+--: (Select, (table) -> table) -> Select
 local function sel_clone(self, fn)
 	local q = shallow_copy(self)
 	q._joins   = copy_array(self._joins)
@@ -96,7 +96,7 @@ local function sel_clone(self, fn)
 	return setmetatable(fn(q), Select)
 end
 
---: (Select, ...) -> Select
+--: (Select, ...unknown) -> Select
 function Select:columns(...)
 	local cols = { ... }
 	return sel_clone(self, function(q)
@@ -279,7 +279,7 @@ function Select:where_raw(clause, ...)
 end
 
 -- ORDER BY columns (comma-separated string or variadic column names).
---: (Select, ...) -> Select
+--: (Select, ...unknown) -> Select
 function Select:order_by(...)
 	local cols = { ... }
 	return sel_clone(self, function(q)
@@ -289,7 +289,7 @@ function Select:order_by(...)
 end
 
 -- GROUP BY columns.
---: (Select, ...) -> Select
+--: (Select, ...unknown) -> Select
 function Select:group_by(...)
 	local cols = { ... }
 	return sel_clone(self, function(q)
@@ -319,7 +319,7 @@ function Select:offset(val)
 end
 
 -- Build the inner SELECT (without EXISTS wrapper).
---: (Select) -> string, table
+--: (Select) -> (string, table)
 local function build_select_inner(self)
 	local col_fragment
 	if self._count then
@@ -371,7 +371,7 @@ local function build_select_inner(self)
 	return sql, params
 end
 
---: (Select) -> string, table
+--: (Select) -> (string, table)
 function Select:build()
 	local sql, params = build_select_inner(self)
 	if self._exists then
@@ -413,7 +413,7 @@ function Insert:rows(row_list)
 	return setmetatable(q, Insert)
 end
 
---: (Insert) -> string, table
+--: (Insert) -> (string, table)
 function Insert:build()
 	local rows
 	if self._rows then
@@ -486,7 +486,7 @@ function Update:where(clause, ...)
 	end)
 end
 
---: (Update) -> string, table
+--: (Update) -> (string, table)
 function Update:build()
 	if not self._set then return nil, "update: no set() called" end
 
@@ -525,7 +525,7 @@ local function new_delete(table_name)
 	}, Delete)
 end
 
---: (Delete, fun(table):table) -> Delete
+--: (Delete, (table) -> table) -> Delete
 local function del_clone(self, fn)
 	local q = shallow_copy(self)
 	q._wheres = copy_array(self._wheres)
@@ -541,7 +541,7 @@ function Delete:where(clause, ...)
 	end)
 end
 
---: (Delete) -> string, table
+--: (Delete) -> (string, table)
 function Delete:build()
 	local sql = "DELETE FROM " .. self._table
 	local where_sql, where_params = build_where(self._wheres)
@@ -570,7 +570,7 @@ function Union:all()
 	return setmetatable(q, Union)
 end
 
---: (Union) -> string, table
+--: (Union) -> (string, table)
 function Union:build()
 	local parts  = {}
 	local params = {}

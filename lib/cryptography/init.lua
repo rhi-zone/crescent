@@ -284,7 +284,7 @@ local SHA512_H0 = {
 }
 
 -- 64-bit add: (hi1,lo1) + (hi2,lo2) -> (hi, lo), all 32-bit unsigned.
---: (number, number, number, number) -> number, number
+--: (number, number, number, number) -> (number, number)
 local function add64(ah, al, bh, bl)
 	local lo = al + bl
 	local carry = math.floor(lo / 0x100000000)
@@ -294,13 +294,13 @@ local function add64(ah, al, bh, bl)
 end
 
 -- 64-bit XOR.
---: (number, number, number, number) -> number, number
+--: (number, number, number, number) -> (number, number)
 local function xor64(ah, al, bh, bl)
 	return unsigned(bxor(tobit(ah), tobit(bh))), unsigned(bxor(tobit(al), tobit(bl)))
 end
 
 -- 64-bit right-rotate by n bits (n < 32 or n >= 32 handled).
---: (number, number, number) -> number, number
+--: (number, number, number) -> (number, number)
 local function ror64(hi, lo, n)
 	if n == 0 then return hi, lo end
 	if n >= 32 then
@@ -315,7 +315,7 @@ local function ror64(hi, lo, n)
 end
 
 -- 64-bit right-shift by n bits.
---: (number, number, number) -> number, number
+--: (number, number, number) -> (number, number)
 local function shr64(hi, lo, n)
 	if n == 0 then return hi, lo end
 	if n >= 32 then
@@ -546,7 +546,7 @@ end
 -- password: string, salt: string, iterations: integer, key_len: integer.
 -- hash: "sha256" (default) or "sha512".
 -- Returns key_len raw bytes, or (nil, errmsg) on error.
---: (string, string, number, number, string?) -> string | (nil, string)
+--: (string, string, number, number, (string | nil)) -> string | (nil, string)
 function M.pbkdf2(password, salt, iterations, key_len, hash)
 	hash = hash or "sha256"
 	if iterations < 1 then return nil, "iterations must be >= 1" end
@@ -878,7 +878,7 @@ end
 -- ChaCha20-Poly1305 encrypt (RFC 8439 section 2.8).
 -- key: 32 bytes, nonce: 12 bytes, plaintext: string, aad: optional string.
 -- Returns ciphertext || 16-byte tag, or (nil, errmsg).
---: (string, string, string, string?) -> string | (nil, string)
+--: (string, string, string, (string | nil)) -> string | (nil, string)
 function M.chacha20_poly1305_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32   then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -902,7 +902,7 @@ end
 
 -- ChaCha20-Poly1305 decrypt (RFC 8439 section 2.8).
 -- Returns plaintext or (nil, errmsg).
---: (string, string, string, string?) -> string | (nil, string)
+--: (string, string, string, (string | nil)) -> string | (nil, string)
 function M.chacha20_poly1305_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32   then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end

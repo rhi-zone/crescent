@@ -114,7 +114,7 @@ function Builder:part(headers, body)
 end
 
 --- Finalize and return the multipart body and boundary.
---: () -> string, string
+--: () -> (string, string)
 function Builder:body()
     local t = {}
     local k = 1
@@ -161,7 +161,7 @@ end
 --   { name="f", value="v" }                               -- plain field
 --   { name="f", filename="x.txt", data="...", type="..." } -- file part
 --   { headers={...}, body="..." }                          -- raw part
---: (table, string | nil, integer | nil) -> string, string
+--: (table, string | nil, integer | nil) -> (string, string)
 function M.encode(parts, boundary, seed)
     local mp = M.new(boundary, seed)
     for _, p in ipairs(parts) do

@@ -337,7 +337,7 @@ end
 
 -- Nearest neighbor.
 -- Returns x, y, data, dist  or nil if the tree is empty.
---: (number, number) -> number, number, any, number
+--: (number, number) -> (number, number, any, number)
 function QT:nearest(cx, cy)
   if node_count(self._root) == 0 then return nil end
   local best = { huge, nil, nil, nil }
@@ -389,7 +389,7 @@ end
 
 -- Axis-aligned bounding box of all inserted points.
 -- Returns x_min, y_min, x_max, y_max, or nil if empty.
---: () -> number, number, number, number
+--: () -> (number, number, number, number)
 function QT:bbox()
   local all = {}
   node_each(self._root, all)
@@ -454,7 +454,7 @@ end
 -- Create a new quadtree.
 -- bounds: {x, y, w, h}  — top-left corner + dimensions
 -- capacity: max points per leaf node before subdivision (default 4)
---: ({x:number,y:number,w:number,h:number}, integer?) -> table
+--: ({x:number,y:number,w:number,h:number}, (integer | nil)) -> table
 function M.new(bounds, capacity)
   capacity = capacity or 4
   local root = {

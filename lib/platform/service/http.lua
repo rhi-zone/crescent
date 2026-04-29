@@ -107,7 +107,7 @@ end
 --   -> path_pattern, id_params_in_path
 -- path_pattern uses :name for path params.
 -- id_params_in_path is { string, ... } — param names embedded in the path.
---: (string, string, { [integer]: string }) -> string, { [integer]: string }
+--: (string, string, { [integer]: string }) -> (string, { [integer]: string })
 local function infer_path(method_name, http_method, param_names)
 	local resource = strip_verb(method_name)
 	-- Replace underscores → hyphens in the resource segment.

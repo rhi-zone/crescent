@@ -21,7 +21,7 @@ end
 local M = {}
 
 -- Resolve path relative to root; reject traversal and absolute paths.
---: (string, string | nil) -> string | nil, string | nil
+--: (string, string | nil) -> (string | nil, string | nil)
 local function resolve(root, path)
 	if not path then return nil, "fs: nil path" end
 	if path:find("^/") then return nil, "fs: absolute path not allowed" end

@@ -200,7 +200,7 @@ local function handle_sink(handle, fmt)
 end
 
 -- Sink writing to stderr.
---: ({ format?: string }?) -> (Entry) -> nil
+--: (({ format: (string  | nil)} | nil)) -> (Entry) -> nil
 M.stderr_sink = function(opts)
   opts = opts or {}
   local fmt = opts.format or default_format(stderr_is_tty())
@@ -208,7 +208,7 @@ M.stderr_sink = function(opts)
 end
 
 -- Sink writing to stdout.
---: ({ format?: string }?) -> (Entry) -> nil
+--: (({ format: (string  | nil)} | nil)) -> (Entry) -> nil
 M.stdout_sink = function(opts)
   opts = opts or {}
   local ansi = get_ansi()
@@ -220,7 +220,7 @@ end
 -- Sink appending to a file on disk.
 -- write_fn: function(path, data) -> true|nil, string|nil (required). Opens path
 -- in append mode and writes data.
---: ((string, string) -> (boolean | nil, string | nil), string, { format?: string }?) -> (Entry) -> nil
+--: ((string, string) -> (boolean | nil, string | nil), string, ({ format: (string  | nil)} | nil)) -> (Entry) -> nil
 M.file_sink = function(write_fn, path, opts)
   if type(write_fn) ~= "function" then
     error("log.file_sink: write_fn function is required")
@@ -275,19 +275,19 @@ local function emit(self, level, msg, fields)
   end
 end
 
---: (LoggerObj, string, { [string]: unknown }?) -> nil
+--: (LoggerObj, string, ({ [string]: unknown } | nil)) -> nil
 Logger.trace = function(self, msg, fields) emit(self, M.TRACE, msg, fields) end
 
---: (LoggerObj, string, { [string]: unknown }?) -> nil
+--: (LoggerObj, string, ({ [string]: unknown } | nil)) -> nil
 Logger.debug = function(self, msg, fields) emit(self, M.DEBUG, msg, fields) end
 
---: (LoggerObj, string, { [string]: unknown }?) -> nil
+--: (LoggerObj, string, ({ [string]: unknown } | nil)) -> nil
 Logger.info = function(self, msg, fields) emit(self, M.INFO, msg, fields) end
 
---: (LoggerObj, string, { [string]: unknown }?) -> nil
+--: (LoggerObj, string, ({ [string]: unknown } | nil)) -> nil
 Logger.warn = function(self, msg, fields) emit(self, M.WARN, msg, fields) end
 
---: (LoggerObj, string, { [string]: unknown }?) -> nil
+--: (LoggerObj, string, ({ [string]: unknown } | nil)) -> nil
 Logger.error = function(self, msg, fields) emit(self, M.ERROR, msg, fields) end
 
 -- Change minimum level dynamically.
@@ -338,7 +338,7 @@ end
 -- opts.level : string or integer minimum level (default "info")
 -- opts.sinks : array of sink functions (default: {log.stderr_sink()})
 -- opts.time_fn : function returning timestamp string (required)
---: (string, { level?: string | integer, sinks?: { [integer]: (Entry) -> nil }, time_fn?: () -> string }?) -> LoggerObj
+--: (string, { level: (string | integer) | nil, sinks: ({ [integer]: (Entry) -> nil }) | nil, time_fn: () -> string } | nil) -> LoggerObj
 M.new = function(name, opts)
   opts = opts or {}
   local level = opts.level or "info"

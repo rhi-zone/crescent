@@ -257,7 +257,7 @@ end
 -- ── Event Store ─────────────────────────────────────────────────────────
 
 --:: Event = { seq: number, global_seq: number, type: string, data: table, timestamp: number }
---:: EventStore = { append: (string, table) -> (), read: (string, table?) -> {Event}, read_all: (table?) -> {Event}, on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> {string}, stream_length: (string) -> number }
+--:: EventStore = { append: (string, table) -> (), read: (string, (table | nil)) -> {Event}, read_all: ((table | nil)) -> {Event}, on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> {string}, stream_length: (string) -> number }
 
 local EventStore = {}
 EventStore.__index = EventStore
@@ -296,7 +296,7 @@ function EventStore:append(stream, event)
 	end
 end
 
---: (string, table?) -> {Event}
+--: (string, (table | nil)) -> {Event}
 function EventStore:read(stream, opts)
 	local s = self._streams[stream]
 	if not s then return {} end
@@ -314,7 +314,7 @@ function EventStore:read(stream, opts)
 	return result
 end
 
---: (table?) -> {Event}
+--: ((table | nil)) -> {Event}
 function EventStore:read_all(opts)
 	opts = opts or {}
 	local after = opts.after or 0

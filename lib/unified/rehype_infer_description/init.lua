@@ -90,7 +90,7 @@ end
 -- Flat linear walk of root children to find first heading then first p.
 -- Returns (heading_index, p_index) where heading_index may be nil if no
 -- heading found. Indices are into node.children of the provided list.
---: (any) -> any, any
+--: (any) -> (any, any)
 local function find_heading_and_para(children)
   local heading_idx = nil
   local para_idx = nil

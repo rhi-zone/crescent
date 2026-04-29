@@ -68,7 +68,7 @@ function M.stem(word)
 end
 
 -- Highlight: wrap matched terms in tags
---: (text: string, terms: {string}, opts: { open: string?, close: string? }?) -> string
+--: (text: string, terms: {string}, opts: ({ open: (string | nil), close: (string | nil) } | nil)) -> string
 function M.highlight(text, terms, opts)
   opts = opts or {}
   local open_tag = opts.open or "<mark>"
@@ -190,7 +190,7 @@ local function wildcard_to_lua_pattern(pattern)
 end
 
 -- Create a new search index
---: (opts: { tokenize: fn?, normalize: fn?, stop_words: table?, bm25_k1: number?, bm25_b: number? }?) -> index
+--: (opts: ({ tokenize: (fn | nil), normalize: (fn | nil), stop_words: (table | nil), bm25_k1: (number | nil), bm25_b: (number | nil) } | nil)) -> index
 function M.index(opts)
   opts = opts or {}
   local stop_words = opts.stop_words or DEFAULT_STOP_WORDS
@@ -223,7 +223,7 @@ function M.index(opts)
   local idx = {}
 
   -- Add a document
-  --: (id: any, text: string, opts: { fields: table? }?) -> index
+  --: (id: any, text: string, opts: ({ fields: (table | nil) } | nil)) -> index
   function idx:add(id, text, add_opts)
     if docs[id] then
       return self:update(id, text)
@@ -525,7 +525,7 @@ function M.index(opts)
   end
 
   -- Search
-  --: (query: query, opts: { limit: number?, offset: number?, scorer: string?, explain: boolean? }?) -> { results: {result}, total: number }
+  --: (query: query, opts: ({ limit: (number | nil), offset: (number | nil), scorer: (string | nil), explain: (boolean | nil) } | nil)) -> { results: {result}, total: number }
   function idx:search(query, opts)
     opts = opts or {}
     local limit  = opts.limit  or 10

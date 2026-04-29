@@ -265,7 +265,7 @@ function Canvas:set(x, y, r, g, b, a)
   px[base + 4] = a or 255
 end
 
---: (integer, integer) -> integer, integer, integer, integer
+--: (integer, integer) -> (integer, integer, integer, integer)
 function Canvas:get(x, y)
   if x < 0 or x >= self.width or y < 0 or y >= self.height then
     return 0, 0, 0, 0

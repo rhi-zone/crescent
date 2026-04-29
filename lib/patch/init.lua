@@ -54,7 +54,7 @@ end
 
 --- Parse a JSON Pointer string into an array of string keys.
 --- Returns empty table for the root pointer "".
---: (string) -> { [number]: string }, nil | nil, string
+--: (string) -> ({ [number]: string }, nil | nil, string)
 M.pointer_parse = function(ptr)
   if ptr == "" then return {} end
   if ptr:sub(1, 1) ~= "/" then
@@ -80,7 +80,7 @@ end
 
 --- Resolve the parent table and final key for a pointer path.
 --- Returns (parent_table, key, nil) or (nil, nil, errmsg).
---: (unknown, { [number]: string }) -> unknown, string | nil, nil, string
+--: (unknown, { [number]: string }) -> (unknown, string | nil, nil, string)
 local function resolve_parent(doc, keys)
   if #keys == 0 then
     return nil, nil, "cannot get parent of root pointer"
@@ -109,7 +109,7 @@ local function resolve_parent(doc, keys)
 end
 
 --- Get the value at a JSON Pointer path within doc.
---: (unknown, string) -> unknown, nil | nil, string
+--: (unknown, string) -> (unknown, nil | nil, string)
 M.get = function(doc, ptr)
   local keys, err = M.pointer_parse(ptr)
   if not keys then return nil, err end
@@ -134,7 +134,7 @@ end
 
 --- Set the value at a JSON Pointer path. Returns a deep copy with the value set.
 --- Pass opts.inplace = true to mutate doc directly (no copy).
---: (unknown, string, unknown) -> unknown, nil | nil, string
+--: (unknown, string, unknown) -> (unknown, nil | nil, string)
 M.set = function(doc, ptr, value, opts)
   local keys, err = M.pointer_parse(ptr)
   if not keys then return nil, err end
@@ -155,7 +155,7 @@ M.set = function(doc, ptr, value, opts)
 end
 
 --- Remove the value at a JSON Pointer path. Returns a deep copy with value removed.
---: (unknown, string) -> unknown, nil | nil, string
+--: (unknown, string) -> (unknown, nil | nil, string)
 M.remove = function(doc, ptr)
   local keys, err = M.pointer_parse(ptr)
   if not keys then return nil, err end
@@ -187,7 +187,7 @@ end
 
 --- Add a value at path in a mutable document.
 --- "-" as final token appends to array.
---: (unknown, { [number]: string }, unknown) -> boolean, nil | nil, string
+--: (unknown, { [number]: string }, unknown) -> (boolean, nil | nil, string)
 local function patch_add(doc, keys, value)
   if #keys == 0 then
     return nil, "cannot add at root (use replace)"
@@ -210,7 +210,7 @@ local function patch_add(doc, keys, value)
 end
 
 --- Remove a value at path in a mutable document.
---: (unknown, { [number]: string }) -> boolean, nil | nil, string
+--: (unknown, { [number]: string }) -> (boolean, nil | nil, string)
 local function patch_remove(doc, keys)
   if #keys == 0 then
     return nil, "cannot remove root"
@@ -234,7 +234,7 @@ local function patch_remove(doc, keys)
 end
 
 --- Get a value at path in a mutable document (no copy).
---: (unknown, { [number]: string }) -> unknown, nil | nil, string
+--: (unknown, { [number]: string }) -> (unknown, nil | nil, string)
 local function patch_get(doc, keys)
   if #keys == 0 then return doc end
   local node = doc
@@ -261,7 +261,7 @@ end
 
 --- Apply a sequence of patch operations to doc.
 --- Returns (new_doc, nil) on success or (nil, errmsg) on failure.
---: (unknown, { [number]: { [string]: unknown } }) -> unknown, nil | nil, string
+--: (unknown, { [number]: { [string]: unknown } }) -> (unknown, nil | nil, string)
 M.apply = function(doc, ops)
   local target = M.deep_copy(doc)
   for i, op_entry in ipairs(ops) do

@@ -2,7 +2,7 @@ if not package.path:find("?/init.lua", 1, true) then
   package.path = package.path .. ";./?/init.lua"
 end
 
---: { backoff_none: (attempt: number, opts: RetryOpts) -> number, backoff_linear: (attempt: number, opts: RetryOpts) -> number, backoff_exponential: (attempt: number, opts: RetryOpts) -> number, backoff_fibonacci: (attempt: number, opts: RetryOpts) -> number, run: (fn: () -> unknown, opts: RetryOpts?) -> unknown, policy: (defaults: RetryOpts) -> RetryPolicy, circuit_breaker: (opts: CircuitBreakerOpts) -> CircuitBreaker }
+--: { backoff_none: (attempt: number, opts: RetryOpts) -> number, backoff_linear: (attempt: number, opts: RetryOpts) -> number, backoff_exponential: (attempt: number, opts: RetryOpts) -> number, backoff_fibonacci: (attempt: number, opts: RetryOpts) -> number, run: (fn: () -> unknown, opts: (RetryOpts | nil)) -> unknown, policy: (defaults: RetryOpts) -> RetryPolicy, circuit_breaker: (opts: CircuitBreakerOpts) -> CircuitBreaker }
 local M = {}
 
 -- ── Backoff strategies ──────────────────────────────────────────────────────
@@ -65,9 +65,9 @@ end
 
 -- ── Core retry loop ─────────────────────────────────────────────────────────
 
---:: RetryOpts = { max_attempts: number?, backoff: string | ((attempt: number, opts: RetryOpts) -> number)?, initial_delay: number?, max_delay: number?, multiplier: number?, jitter: number?, retry_on: ((err: string, attempt: number) -> boolean)?, on_retry: ((err: string, attempt: number, delay: number) -> nil)?, sleep: ((seconds: number) -> nil)? }
+--:: RetryOpts = { max_attempts: (number | nil), backoff: string | (((attempt: number, opts: RetryOpts) -> number) | nil), initial_delay: (number | nil), max_delay: (number | nil), multiplier: (number | nil), jitter: (number | nil), retry_on: (((err: string, attempt: number) -> boolean) | nil), on_retry: (((err: string, attempt: number, delay: number) -> nil) | nil), sleep: (((seconds: number) -> nil) | nil) }
 
---: (fn: () -> unknown, opts: RetryOpts?) -> unknown
+--: (fn: () -> unknown, opts: (RetryOpts | nil)) -> unknown
 function M.run(fn, opts)
   local max_attempts = opts and opts.max_attempts or 3
   local jitter = opts and opts.jitter or 0
@@ -116,11 +116,11 @@ end
 
 -- ── Reusable policy ─────────────────────────────────────────────────────────
 
---:: RetryPolicy = { defaults: RetryOpts, run: (self: RetryPolicy, fn: () -> unknown, overrides: RetryOpts?) -> unknown }
+--:: RetryPolicy = { defaults: RetryOpts, run: (self: RetryPolicy, fn: () -> unknown, overrides: (RetryOpts | nil)) -> unknown }
 local Policy = {}
 Policy.__index = Policy
 
---: (fn: () -> unknown, overrides: RetryOpts?) -> unknown
+--: (fn: () -> unknown, overrides: (RetryOpts | nil)) -> unknown
 function Policy:run(fn, overrides)
   if not overrides then
     return M.run(fn, self.defaults)
@@ -139,7 +139,7 @@ end
 
 -- ── Circuit breaker ─────────────────────────────────────────────────────────
 
---:: CircuitBreakerOpts = { failure_threshold: number?, reset_timeout: number?, half_open_max: number?, clock: (() -> number)? }
+--:: CircuitBreakerOpts = { failure_threshold: (number | nil), reset_timeout: (number | nil), half_open_max: (number | nil), clock: ((() -> number) | nil) }
 --:: CircuitBreaker = { failure_count: number, success_count: number, _state: string, last_failure_time: number, opts: CircuitBreakerOpts, call: (self: CircuitBreaker, fn: () -> unknown) -> unknown, state: (self: CircuitBreaker) -> string, reset: (self: CircuitBreaker) -> nil }
 
 local CB = {}
@@ -202,7 +202,7 @@ function CB:call(fn)
   return nil, result
 end
 
---: (opts: CircuitBreakerOpts?) -> CircuitBreaker
+--: (opts: (CircuitBreakerOpts | nil)) -> CircuitBreaker
 function M.circuit_breaker(opts)
   return setmetatable({
     opts = opts or {},

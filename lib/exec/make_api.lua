@@ -40,7 +40,7 @@ end
 -- Returns a list of strings, or nil + errmsg on unknown key.
 -- flag_idents: { [string]: integer }
 -- flags_list:  HelpFlag[]
---: (any, { [string]: integer }, HelpFlag[]) -> string[] | nil, string | nil
+--: (any, { [string]: integer }, HelpFlag[]) -> (string[] | nil, string | nil)
 local function expand_flags(flags_tbl, flag_idents, flags_list)
 	local args = {}
 	for key, val in pairs(flags_tbl) do
@@ -332,7 +332,7 @@ end
 --
 -- Returns api_table, decls_string.
 --:: MakeApiOpts = { popen: POpenFn, stderr: string | nil }
---: (HelpSchema, string, MakeApiOpts) -> any, string
+--: (HelpSchema, string, MakeApiOpts) -> (any, string)
 function M.make(schema, cmd, opts)
 	-- Ensure field_idents are present (root schema always has them; be defensive).
 	if not schema.flag_idents then

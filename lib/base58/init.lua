@@ -90,7 +90,7 @@ end
 
 --- Decode a Base58 string to binary.
 --- Returns (nil, errmsg) on invalid characters.
---: (string) -> string | nil, string | nil
+--: (string) -> (string | nil, string | nil)
 function M.decode(str)
 	local n = #str
 	if n == 0 then return "" end
@@ -185,7 +185,7 @@ end
 
 --- Base58Check decode: Base58-decode, verify 4-byte checksum, return payload.
 --- Returns (nil, errmsg) on decode failure or checksum mismatch.
---: (string) -> string | nil, string | nil
+--: (string) -> (string | nil, string | nil)
 function M.decode_check(str)
 	local raw, err = M.decode(str)
 	if not raw then

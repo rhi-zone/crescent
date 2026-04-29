@@ -444,7 +444,7 @@ function Regex:gmatch(subject)
 	end
 end
 
---: (self: Regex, subject: string, replacement: string | (match: string, ...captures: string) -> string, n?: number) -> string, number
+--: (self: Regex, subject: string, replacement: string | ((match: string, ...string) -> string), n: number | nil) -> (string, number)
 function Regex:gsub(subject, replacement, n)
 	local parts = {}
 	local count = 0

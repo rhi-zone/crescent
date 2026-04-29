@@ -84,7 +84,7 @@ local outl_buf = ffi.new("int[1]")
 
 -- ── Internal helpers ────────────────────────────────────────────────────────
 
---: (cdata, string, string, string, string?) -> (string, nil) | (nil, string)
+--: (cdata, string, string, string, (string | nil)) -> (string, nil) | (nil, string)
 local function aead_encrypt(cipher, key, nonce, plaintext, aad)
 	local ctx = lib.EVP_CIPHER_CTX_new()
 	if ctx == nil then return nil, "failed to create cipher context" end
@@ -141,7 +141,7 @@ local function aead_encrypt(cipher, key, nonce, plaintext, aad)
 	return ffi.string(ct_buf, ct_len) .. ffi.string(tag_buf, TAG_LEN)
 end
 
---: (cdata, string, string, string, string?) -> (string, nil) | (nil, string)
+--: (cdata, string, string, string, (string | nil)) -> (string, nil) | (nil, string)
 local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	if #ciphertext_with_tag < TAG_LEN then
 		return nil, "ciphertext too short"
@@ -211,14 +211,14 @@ end
 
 local aes_gcm_cipher = lib.EVP_aes_256_gcm()
 
---: (string, string, string, string?) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
 function M.aes_gcm_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
 	return aead_encrypt(aes_gcm_cipher, key, nonce, plaintext, aad)
 end
 
---: (string, string, string, string?) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
 function M.aes_gcm_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -229,14 +229,14 @@ end
 
 local chacha_cipher = lib.EVP_chacha20_poly1305()
 
---: (string, string, string, string?) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
 function M.chacha20_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
 	return aead_encrypt(chacha_cipher, key, nonce, plaintext, aad)
 end
 
---: (string, string, string, string?) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
 function M.chacha20_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -263,7 +263,7 @@ local function hmac_sha256_bin(key, msg)
 	return hmac.sha256_binary(key, msg)
 end
 
---: (string, string?, string?, number?) -> (string, nil) | (nil, string)
+--: (string, (string | nil), (string | nil), (number | nil)) -> (string, nil) | (nil, string)
 function M.hkdf(ikm, salt, info, length)
 	length = length or 32
 	info = info or ""

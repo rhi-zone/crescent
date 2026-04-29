@@ -333,7 +333,7 @@ local COLS = "a.id, a.name, a.path, a.manifest_json, a.tags_json, a.installed_at
 
 -- List all apps, optionally filtered by tag. Tag filter uses the app_tags
 -- join, not json_each — O(matches) via idx_app_tags_tag_app.
---: (table?) -> table[]
+--: ((table | nil)) -> table[]
 function I:list(filter)
 	local sql, args
 	if filter and filter.tag then

@@ -47,7 +47,7 @@ end
 
 --- Split a prefixed name into (prefix, localname).
 --- Returns ("", name) when no prefix is present.
---: (string) -> string, string
+--: (string) -> (string, string)
 function M.ns_split(name)
   local prefix, local_name = name:match("^([^:]+):(.+)$")
   if prefix then return prefix, local_name end
@@ -119,7 +119,7 @@ end
 ---   processing_instruction(target, data)
 ---
 --- Returns true on success, or (nil, errmsg).
---: (string, table) -> true | nil, string
+--: (string, table) -> (true | nil, string)
 function M.sax(xml, handlers)
   handlers = handlers or {}
   local function fire(name, ...)
@@ -255,7 +255,7 @@ end
 
 --- Parse XML into a DOM tree.
 --- Returns root document node, or (nil, errmsg).
---: (string) -> table | nil, string
+--: (string) -> (table | nil, string)
 function M.parse(xml)
   local doc = {
     type = "document",

@@ -50,7 +50,7 @@ end
 
 -- ── Tree building ───────────────────────────────────────────────────────────
 
---: { feature: number?, threshold: number?, left: any?, right: any?, value: number?, gain: number? }
+--: { feature: (number | nil), threshold: (number | nil), left: (any | nil), right: (any | nil), value: (number | nil), gain: (number | nil) }
 
 local function make_leaf(indices, grads, hessians, lambda)
   local G, H = 0, 0
@@ -273,7 +273,7 @@ end
 
 -- ── Training ────────────────────────────────────────────────────────────────
 
---: (X: number[][], y: number[], opts: table?) -> Model
+--: (X: number[][], y: number[], opts: (table | nil)) -> Model
 function M.train(X, y, opts)
   opts = opts or {}
   local n_estimators = opts.n_estimators or 100

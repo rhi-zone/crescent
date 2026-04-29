@@ -59,7 +59,7 @@ end
 -- Detects V1 (flat, no "spec" field) vs V2 (has "spec" and "data").
 -- ---------------------------------------------------------------------------
 
---: (string) -> CardData | nil, string
+--: (string) -> (CardData | nil, string)
 function M.from_json(json_str)
   local obj, err = json.decode(json_str)
   if not obj then
@@ -89,7 +89,7 @@ end
 -- Serialize card data to JSON string wrapped in V2 envelope.
 -- ---------------------------------------------------------------------------
 
---: (CardData) -> string | nil, string
+--: (CardData) -> (string | nil, string)
 function M.to_json(data)
   local envelope = {
     spec = "chara_card_v2",
@@ -104,7 +104,7 @@ end
 -- Parse a CCv2 card from PNG bytes.
 -- ---------------------------------------------------------------------------
 
---: (string) -> CardData | nil, string
+--: (string) -> (CardData | nil, string)
 function M.from_png(png_bytes)
   local chunks, err = png.read(png_bytes)
   if not chunks then
@@ -159,7 +159,7 @@ end
 -- Write a card data table to PNG bytes.
 -- ---------------------------------------------------------------------------
 
---: (CardData, string?) -> string | nil, string
+--: (CardData, (string | nil)) -> (string | nil, string)
 function M.to_png(data, png_bytes)
   local json_str, j_err = M.to_json(data)
   if not json_str then

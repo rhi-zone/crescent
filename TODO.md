@@ -4,6 +4,8 @@
 
 - [ ] **replace VitePress with a pure Lua doc toolchain** — `bin/cr run docs/build.lua` for SSG (CI deployment), `bin/cr run docs/server.lua` for local dev preview. Removes bun entirely — no JS toolchain in CI or locally. Needs `lib/markdown` (CommonMark renderer). Dogfood priority.
 
+- [ ] **type/static: type-id → annotation string renderer** — needed for round-trip parse(render(parse(s))) regression tests over fuzz_arb generators. Currently `fuzz_arb.type_to_string` only renders arb tree nodes (input shape), not parsed type IDs. A real renderer would walk the FFI TypeSlot arena and emit precedence-correct annotation syntax. Planned use: extend `lib/type/static/annotation_totality_test.lua` with a round-trip invariant.
+
 - [ ] design: http_client attenuation — query param filtering (wildcard syntax? exact key match? key+value match?)
 - [ ] design: http_client attenuation — request header filtering (which headers are meaningful to restrict? security implications of allowing Content-Type vs Authorization override?)
 

@@ -188,7 +188,7 @@ end
 -- Get value and metadata for a key, promoting it to MRU.
 -- Returns nil, nil if missing or expired.
 -- meta: {expires_at, created_at, last_accessed, hit_count}
---: (unknown) -> unknown | nil, { expires_at: number | nil, created_at: number, last_accessed: number, hit_count: number } | nil
+--: (unknown) -> (unknown | nil, { expires_at: number | nil, created_at: number, last_accessed: number, hit_count: number } | nil)
 function Cache:get_with_meta(key)
   local node = self._map[key]
   if not node then

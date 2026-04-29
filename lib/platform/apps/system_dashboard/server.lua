@@ -419,7 +419,7 @@ end
 -- Adapt a raw cap result into a primitive body.
 -- raw is the value returned by the cap (string for shell/exec/registry get,
 -- list of records for list_values/list_keys, etc.).
---: (any, any) -> any | nil, string | nil
+--: (any, any) -> (any | nil, string | nil)
 local function adapt_body(spec, raw)
 	local s = spec --: any
 	local ty = s.type

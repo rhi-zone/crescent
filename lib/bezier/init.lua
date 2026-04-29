@@ -165,7 +165,7 @@ Quadratic.normal = function(self, t)
   return { x = -tg.y, y = tg.x }
 end
 
---: (number?) -> number
+--: ((number | nil)) -> number
 Quadratic.length = function(self, n)
   n = n or 100
   local total = 0
@@ -178,14 +178,14 @@ Quadratic.length = function(self, n)
   return total
 end
 
---: (number) -> table, table
+--: (number) -> (table, table)
 Quadratic.split = function(self, t)
   local left, right = de_casteljau_split({ self.p0, self.p1, self.p2 }, t)
   return M.quadratic(left[1], left[2], left[3]),
          M.quadratic(right[1], right[2], right[3])
 end
 
---: (number?) -> {table}
+--: ((number | nil)) -> {table}
 Quadratic.to_points = function(self, n)
   n = n or 10
   local pts = {}
@@ -274,7 +274,7 @@ Cubic.normal = function(self, t)
   return { x = -tg.y, y = tg.x }
 end
 
---: (number?) -> number
+--: ((number | nil)) -> number
 Cubic.length = function(self, n)
   n = n or 100
   local total = 0
@@ -287,7 +287,7 @@ Cubic.length = function(self, n)
   return total
 end
 
---: (number) -> table, table
+--: (number) -> (table, table)
 Cubic.split = function(self, t)
   local left, right = de_casteljau_split(
     { self.p0, self.p1, self.p2, self.p3 }, t)
@@ -295,7 +295,7 @@ Cubic.split = function(self, t)
          M.cubic(right[1], right[2], right[3], right[4])
 end
 
---: (number?) -> {table}
+--: ((number | nil)) -> {table}
 Cubic.to_points = function(self, n)
   n = n or 10
   local pts = {}
@@ -395,7 +395,7 @@ Curve.point = function(self, t)
   return de_casteljau(self.points, t)
 end
 
---: (number?) -> {table}
+--: ((number | nil)) -> {table}
 Curve.to_points = function(self, n)
   n = n or 10
   local pts = {}
@@ -441,7 +441,7 @@ end
 local Spline = {}
 Spline.__index = Spline
 
---: ({table}, table?) -> table
+--: ({table}, (table | nil)) -> table
 M.spline = function(points, opts)
   opts = opts or {}
   local tension = opts.tension or 0
@@ -501,7 +501,7 @@ Spline.segment = function(self, i)
   return self.segments[i]
 end
 
---: (number?) -> {table}
+--: ((number | nil)) -> {table}
 Spline.to_points = function(self, n)
   n = n or 100
   local pts = {}

@@ -30,7 +30,7 @@ function M.gcounter(replica_id)
   return setmetatable({ _id = replica_id, _counts = {} }, GCounter)
 end
 
---: (number?) -> nil
+--: ((number | nil)) -> nil
 function GCounter:increment(n)
   local id = self._id
   self._counts[id] = (self._counts[id] or 0) + (n or 1)
@@ -83,12 +83,12 @@ function M.pncounter(replica_id)
   }, PNCounter)
 end
 
---: (number?) -> nil
+--: ((number | nil)) -> nil
 function PNCounter:increment(n)
   self._pos:increment(n)
 end
 
---: (number?) -> nil
+--: ((number | nil)) -> nil
 function PNCounter:decrement(n)
   self._neg:increment(n)
 end
@@ -136,7 +136,7 @@ function LWWRegister:set(value, ts)
   end
 end
 
---: () -> unknown, number
+--: () -> (unknown, number)
 function LWWRegister:get()
   return self._value, self._ts
 end
@@ -335,7 +335,7 @@ function LWWMap:set(key, value, ts)
   end
 end
 
---: (unknown) -> unknown, number
+--: (unknown) -> (unknown, number)
 function LWWMap:get(key)
   local entry = self._entries[key]
   if not entry or entry.deleted then return nil end

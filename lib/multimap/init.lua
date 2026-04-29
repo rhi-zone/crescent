@@ -47,7 +47,7 @@ local function bucket_remove_one(bucket, v)
   return false
 end
 
---: (string?) -> multimap
+--: ((string | nil)) -> multimap
 function M.new(mode)
   mode = mode or "list"
   return setmetatable({
@@ -162,7 +162,7 @@ function MM:size(k)
   return #bucket
 end
 
---: () -> () -> unknown, unknown | nil
+--: () -> () -> (unknown, unknown | nil)
 function MM:each()
   local keys = self:keys()
   local ki = 1
@@ -182,7 +182,7 @@ function MM:each()
   end
 end
 
---: () -> () -> unknown, unknown[] | nil
+--: () -> () -> (unknown, unknown[] | nil)
 function MM:each_key()
   local keys = self:keys()
   local ki = 0

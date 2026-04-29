@@ -58,7 +58,7 @@ local M = {}
 -- Split a request target into path and query components.
 -- "/foo?bar=1" -> "/foo", "bar=1"
 -- "/foo"       -> "/foo", nil
---: (string) -> string, string | nil
+--: (string) -> (string, string | nil)
 local function split_target(target)
 	local q = target:find("?", 1, true)
 	if q then
@@ -212,7 +212,7 @@ end
 
 --:: http_server_opts = { port: integer | nil, host: string | nil, daemon: boolean | nil, url: string | nil, on_serve: ((unknown) -> nil) | nil, tcp_nodelay: boolean | nil }
 -- http_server_cap(opts) -> cap_table, revoke_fn
---: (http_server_opts) -> unknown, string | nil
+--: (http_server_opts) -> (unknown, string | nil)
 function M.http_server_cap(opts)
 	if not opts then
 		return nil, "http_server: opts required"

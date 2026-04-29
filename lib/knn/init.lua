@@ -28,7 +28,7 @@ local builtin_distances = {
   manhattan = dist_manhattan,
 }
 
---: (opts: { k: number?, distance: string | (Vec, Vec) -> number? }?) -> KnnIndex
+--: (opts: ({ k: (number | nil), distance: string | (Vec, Vec) -> (number | nil) } | nil)) -> KnnIndex
 function M.new(opts)
   opts = opts or {}
   local k = opts.k or 5
@@ -101,12 +101,12 @@ function index_mt:labels()
   return result
 end
 
---: (self: KnnIndex) -> number?
+--: (self: KnnIndex) -> (number | nil)
 function index_mt:dimensions()
   return self._dims
 end
 
---: (self: KnnIndex, target: {[number]: number}, opts: { k: number? }?) -> {{label: unknown, distance: number}}
+--: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil) } | nil)) -> {{label: unknown, distance: number}}
 function index_mt:query(target, opts)
   local k = (opts and opts.k) or self._k
   local tv = vec.new(target)
@@ -157,7 +157,7 @@ function index_mt:query(target, opts)
   return result
 end
 
---: (self: KnnIndex, target: {[number]: number}, opts: { k: number?, weighted: boolean? }?) -> unknown, {[unknown]: number}
+--: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil), weighted: (boolean | nil) } | nil)) -> (unknown, {[unknown]: number})
 function index_mt:classify(target, opts)
   local weighted = opts and opts.weighted
   local neighbors = self:query(target, opts)
@@ -190,7 +190,7 @@ function index_mt:classify(target, opts)
   return best_label, scores
 end
 
---: (self: KnnIndex, target: {[number]: number}, opts: { k: number?, weighted: boolean? }?) -> number
+--: (self: KnnIndex, target: {[number]: number}, opts: ({ k: (number | nil), weighted: (boolean | nil) } | nil)) -> number
 function index_mt:regress(target, opts)
   local weighted = opts and opts.weighted
   local neighbors = self:query(target, opts)

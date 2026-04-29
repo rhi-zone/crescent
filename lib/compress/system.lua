@@ -72,13 +72,13 @@ for _, name in ipairs({ "z", "zlib", "zlib1", "libz" }) do
 end
 
 --:: ZlibLib = {
---::   zlibVersion: () -> (string,)
---::   deflateInit2_: (unknown, number, number, number, number, number, string, integer) -> (integer,)
---::   deflate: (unknown, number) -> (integer,)
---::   deflateEnd: (unknown) -> (integer,)
---::   inflateInit2_: (unknown, number, string, integer) -> (integer,)
---::   inflate: (unknown, number) -> (integer,)
---::   inflateEnd: (unknown) -> (integer,)
+--::   zlibVersion: () -> string,
+--::   deflateInit2_: (unknown, number, number, number, number, number, string, integer) -> integer,
+--::   deflate: (unknown, number) -> integer,
+--::   deflateEnd: (unknown) -> integer,
+--::   inflateInit2_: (unknown, number, string, integer) -> integer,
+--::   inflate: (unknown, number) -> integer,
+--::   inflateEnd: (unknown) -> integer,
 --:: }
 local function load_zlib() --: () -> (ZlibLib, string)
   for _, name in ipairs(names) do

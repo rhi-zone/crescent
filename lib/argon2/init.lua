@@ -70,7 +70,7 @@ end
 
 -- Parse a PHC-format Argon2 string:
 -- $argon2id$v=19$m=65536,t=3,p=4$<base64salt>$<base64hash>
---: (string) -> { variant: string, v: number, m: number, t: number, p: number, salt: string, hash: string } | nil, string
+--: (string) -> ({ variant: string, v: number, m: number, t: number, p: number, salt: string, hash: string } | nil, string)
 local function parse_phc(encoded)
   local s = encoded
   if s:sub(1, 1) ~= "$" then
@@ -707,7 +707,7 @@ local function index_alpha(pass, slice, j, seg_len, lane_len, pseudo_rand)
 end
 
 -- Pure Lua Argon2i (variant="i"), t=1, m=8, p=1 only.
---: (string, string, number, number, number, number) -> string | nil, string
+--: (string, string, number, number, number, number) -> (string | nil, string)
 local function argon2i_pure(password, salt, t, m, p, hash_len)
   if t ~= 1 then
     return nil, "pure tier: time cost must be 1, got " .. t

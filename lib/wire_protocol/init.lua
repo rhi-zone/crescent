@@ -81,7 +81,7 @@ end
 
 --- Decode a LEB128 varint from string s at position pos (default 1).
 -- Returns value, bytes_consumed or nil, errmsg.
---: (string, integer | nil) -> integer | nil, integer | string
+--: (string, integer | nil) -> (integer | nil, integer | string)
 function M.decode_varint(s, pos)
   pos = pos or 1
   local v = 0
@@ -114,7 +114,7 @@ end
 -- s=string (consumes remaining bytes on unpack; packs as-is)
 
 --- Pack values into a binary string.
---: (string, ...) -> string
+--: (string, ...unknown) -> string
 function M.pack(fmt, ...)
   local endian = "big"
   local i = 1
@@ -185,7 +185,7 @@ end
 
 --- Unpack values from a binary string.
 -- Returns multiple values (one per format specifier).
---: (string, string) -> ...
+--: (string, string) -> (...unknown)
 function M.unpack(fmt, s)
   local endian = "big"
   local fi = 1
@@ -280,7 +280,7 @@ function M.length_prefixed(opts)
   local codec = {}
 
   --- Encode a payload string into a length-prefixed frame.
-  --: (string) -> string | nil, string
+  --: (string) -> (string | nil, string)
   function codec:encode(payload)
     local plen = #payload
     if plen > max_size then
@@ -297,7 +297,7 @@ function M.length_prefixed(opts)
   end
 
   --- Decode a single complete frame. Returns payload, rest.
-  --: (string) -> string | nil, string
+  --: (string) -> (string | nil, string)
   function codec:decode(s)
     if #s < lsz then
       return nil, "decode: not enough data for length header"
@@ -385,7 +385,7 @@ function M.delimited(opts)
   local codec = {}
 
   --- Encode a payload by appending the delimiter.
-  --: (string) -> string | nil, string
+  --: (string) -> (string | nil, string)
   function codec:encode(payload)
     if #payload > max_size then
       return nil, "encode: payload exceeds max_frame_size"
@@ -394,7 +394,7 @@ function M.delimited(opts)
   end
 
   --- Decode a single complete frame. Returns payload, rest.
-  --: (string) -> string | nil, string
+  --: (string) -> (string | nil, string)
   function codec:decode(s)
     local dstart, dend = find(s, delim, 1, true)
     if not dstart then
@@ -474,7 +474,7 @@ function M.fixed(opts)
   end
 
   --- Decode a single complete fixed-size frame. Returns payload, rest.
-  --: (string) -> string | nil, string
+  --: (string) -> (string | nil, string)
   function codec:decode(s)
     if #s < sz then
       return nil, "decode: not enough data (need " .. sz .. ", have " .. #s .. ")"
@@ -545,7 +545,7 @@ function M.tlv(opts)
   local codec = {}
 
   --- Encode a TLV frame.
-  --: (integer, string) -> string | nil, string
+  --: (integer, string) -> (string | nil, string)
   function codec:encode(type_id, value)
     local vlen = #value
     if vlen > max_size then
@@ -563,7 +563,7 @@ function M.tlv(opts)
   end
 
   --- Decode a TLV frame. Returns type_id, value or nil, errmsg.
-  --: (string) -> integer | nil, string
+  --: (string) -> (integer | nil, string)
   function codec:decode(s)
     local header_size = tsz + lsz
     if #s < header_size then

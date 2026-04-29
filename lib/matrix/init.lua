@@ -14,7 +14,7 @@ local abs = math.abs
 local floor = math.floor
 
 --- Create a new matrix.
---: (rows: number, cols: number, data: { [number]: number }?) -> table
+--: (rows: number, cols: number, data: ({ [number]: number } | nil)) -> table
 function M.new(rows, cols, data)
   if rows < 1 or cols < 1 then
     return nil, "matrix dimensions must be positive"
@@ -186,7 +186,7 @@ function M:rows() return self._rows end
 --: () -> number
 function M:cols() return self._cols end
 
---: () -> number, number
+--: () -> (number, number)
 function M:size() return self._rows, self._cols end
 
 --: (r: number, c: number) -> number
@@ -442,7 +442,7 @@ function M:inverse()
 end
 
 --- Element-wise equality with optional epsilon.
---: (other: table, eps: number?) -> boolean
+--: (other: table, eps: (number | nil)) -> boolean
 function M:eq(other, eps)
   if self._rows ~= other._rows or self._cols ~= other._cols then
     return false
@@ -631,7 +631,7 @@ end
 -- Returns L (lower triangular, unit diagonal) and U (upper triangular).
 -- Pivoting is absorbed into U; the decomposition satisfies P*A = L*U for some
 -- permutation P, and L*U approximates A up to row swaps.
---: () -> table, table | (nil, string)
+--: () -> (table, table | (nil, string))
 function M:lu()
   if self._rows ~= self._cols then
     return nil, "LU decomposition requires square matrix"
@@ -708,7 +708,7 @@ function M:slice(r1, c1, r2, c2)
 end
 
 --- Approximate element-wise equality with tolerance.
---: (other: table, tol: number?) -> boolean
+--: (other: table, tol: (number | nil)) -> boolean
 function M:approx_eq(other, tol)
   return self:eq(other, tol or 1e-9)
 end

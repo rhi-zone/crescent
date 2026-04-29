@@ -9,7 +9,7 @@ end
 local M = {}
 
 -- opts.compressed: if true, logically a radix/Patricia trie (no-op at this tier; same interface)
---: (opts?: { compressed: boolean | nil }) -> Trie
+--: (opts: ({ compressed: boolean | nil } | nil)) -> Trie
 function M.new(opts)
   local self = {
     _root = { children = {} },
@@ -32,7 +32,7 @@ local function walk(root, str)
 end
 
 -- Insert a key with an associated value (default true).
---: (key: string, value?: unknown) -> ()
+--: (key: string, value: (unknown | nil)) -> ()
 function M:insert(key, value)
   if type(key) ~= "string" then return nil, "key must be a string" end
   if value == nil then value = true end
@@ -52,7 +52,7 @@ function M:insert(key, value)
 end
 
 -- Exact match lookup. Returns value or nil.
---: (key: string) -> unknown?
+--: (key: string) -> (unknown | nil)
 function M:get(key)
   if type(key) ~= "string" then return nil, "key must be a string" end
   local node = walk(self._root, key)
@@ -69,7 +69,7 @@ function M:has(key)
 end
 
 -- Remove a key. Returns old value or nil.
---: (key: string) -> unknown?
+--: (key: string) -> (unknown | nil)
 function M:remove(key)
   if type(key) ~= "string" then return nil, "key must be a string" end
   local node = walk(self._root, key)
@@ -198,7 +198,7 @@ end
 
 -- Longest stored key that is a prefix of str.
 -- Returns (key, value) or nil.
---: (str: string) -> string?, unknown?
+--: (str: string) -> ((string | nil), (unknown | nil))
 function M:longest_prefix(str)
   if type(str) ~= "string" then return nil end
   local node = self._root
@@ -220,7 +220,7 @@ function M:longest_prefix(str)
 end
 
 -- Up to limit keys starting with prefix (sorted). Default limit: all.
---: (prefix: string, limit?: number) -> {string}
+--: (prefix: string, limit: (number | nil)) -> {string}
 function M:autocomplete(prefix, limit)
   if type(prefix) ~= "string" then return {} end
   local node = walk(self._root, prefix)
@@ -257,7 +257,7 @@ function M:values()
 end
 
 -- Iterator: key, value (sorted order).
---: () -> () -> string?, unknown?
+--: () -> () -> ((string | nil), (unknown | nil))
 function M:pairs()
   local results = {}
   collect(self._root, {}, results)
@@ -286,7 +286,7 @@ function M:delete(key)
 end
 
 -- completions: alias for autocomplete. Returns sorted key list with given prefix.
---: (prefix: string, limit?: number) -> {string}
+--: (prefix: string, limit: (number | nil)) -> {string}
 M.completions = M.autocomplete
 
 -- all: alias for keys. Returns all keys sorted.
@@ -294,7 +294,7 @@ M.completions = M.autocomplete
 M.all = M.keys
 
 -- iter: alias for pairs. Iterator over (key, value) in sorted order.
---: () -> () -> string?, unknown?
+--: () -> () -> ((string | nil), (unknown | nil))
 M.iter = M.pairs
 
 M._tier = "pure"

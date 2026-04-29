@@ -19,7 +19,7 @@ local M = {}
 
 -- Validate a single cap decl table.
 -- Returns true on success, or nil, errmsg on failure.
---: (unknown, string) -> true | nil, string | nil
+--: (unknown, string) -> (true | nil, string | nil)
 local function validate_cap_decl(decl, ctx)
 	if type(decl) ~= "table" then
 		return nil, ctx .. ": decl must be a table"
@@ -33,7 +33,7 @@ end
 
 -- Validate pack-level caps table.
 -- Returns true on success, or nil, errmsg on failure.
---: (unknown, string) -> true | nil, string | nil
+--: (unknown, string) -> (true | nil, string | nil)
 local function validate_pack_caps(pack_caps, pack_name)
 	if pack_caps == nil then return true end
 	if type(pack_caps) ~= "table" then
@@ -64,7 +64,7 @@ end
 
 -- Validate cap declarations and exec field on an action, after pack-level
 -- caps have been merged in. Returns true on success, or nil, errmsg.
---: (unknown, { [string]: any }, string, integer) -> true | nil, string | nil
+--: (unknown, { [string]: any }, string, integer) -> (true | nil, string | nil)
 local function validate_action(action, effective_caps, alias_id, action_idx)
 	local action_t = action --: any
 	-- An action may declare no caps inline; effective_caps may still be empty
@@ -100,7 +100,7 @@ local function validate_action(action, effective_caps, alias_id, action_idx)
 end
 
 -- Execute a pack source string and return the pack table, or nil, err.
---: (string, string) -> { [string]: unknown } | nil, string | nil
+--: (string, string) -> ({ [string]: unknown } | nil, string | nil)
 local function exec_pack(src, chunkname)
 	local fn, err = load(src, chunkname, "t")
 	if not fn then return nil, "packs: load error in " .. chunkname .. ": " .. tostring(err) end

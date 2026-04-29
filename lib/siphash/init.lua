@@ -53,7 +53,7 @@ local function read_u64_le(s, i)
 end
 
 -- Read 16-byte key string into two uint64_t (k0, k1) little-endian.
---: (string) -> uint64_t, uint64_t
+--: (string) -> (uint64_t, uint64_t)
 local function read_key(key)
   return read_u64_le(key, 1), read_u64_le(key, 9)
 end
@@ -78,7 +78,7 @@ end
 
 -- Four state words are passed by value (uint64_t); the updated four are returned.
 -- LuaJIT FFI cdata returned from a function is cheap (8 bytes each).
---: (uint64_t, uint64_t, uint64_t, uint64_t) -> uint64_t, uint64_t, uint64_t, uint64_t
+--: (uint64_t, uint64_t, uint64_t, uint64_t) -> (uint64_t, uint64_t, uint64_t, uint64_t)
 local function sip_round(v0, v1, v2, v3)
   v0 = v0 + v1
   v1 = rotl64(v1, 13)
@@ -107,7 +107,7 @@ end
 
 -- Compute SipHash-c-d for the given key and message.
 -- c: compression rounds, d: finalization rounds.
---: (string, string, number, number) -> uint64_t | nil, string
+--: (string, string, number, number) -> (uint64_t | nil, string)
 local function siphash(key, msg, c, d)
   if type(key) ~= "string" or #key ~= 16 then
     return nil, "siphash: key must be a 16-byte string"
@@ -175,19 +175,19 @@ end
 -- Public API — SipHash-2-4
 -- ---------------------------------------------------------------------------
 
---: (string, string) -> uint64_t | nil, string
+--: (string, string) -> (uint64_t | nil, string)
 function M.hash(key, msg)
   return siphash(key, msg, 2, 4)
 end
 
---: (string, string) -> string | nil, string
+--: (string, string) -> (string | nil, string)
 function M.hash_hex(key, msg)
   local h, err = siphash(key, msg, 2, 4)
   if not h then return nil, err end
   return u64_to_hex_le(h)
 end
 
---: (string, string) -> table | nil, string
+--: (string, string) -> (table | nil, string)
 function M.hash_pair(key, msg)
   local h, err = siphash(key, msg, 2, 4)
   if not h then return nil, err end
@@ -200,12 +200,12 @@ end
 -- Public API — SipHash-1-3 (faster variant)
 -- ---------------------------------------------------------------------------
 
---: (string, string) -> uint64_t | nil, string
+--: (string, string) -> (uint64_t | nil, string)
 function M.hash13(key, msg)
   return siphash(key, msg, 1, 3)
 end
 
---: (string, string) -> string | nil, string
+--: (string, string) -> (string | nil, string)
 function M.hash13_hex(key, msg)
   local h, err = siphash(key, msg, 1, 3)
   if not h then return nil, err end

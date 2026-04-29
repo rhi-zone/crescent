@@ -223,8 +223,8 @@
 --:: augment coroutine {
 --::     create:     (fn: (...never) -> unknown) -> Thread,
 --::     resume:     (co: Thread, ...unknown) -> (boolean, ...unknown),
---::     yield:      (...unknown) -> ...unknown,
---::     wrap:       (fn: (...never) -> unknown) -> (...never) -> unknown,
+--::     yield:      (...unknown) -> (...unknown),
+--::     wrap:       (fn: (...never) -> unknown) -> ((...never) -> unknown),
 --::     status:     (co: Thread) -> "running" | "suspended" | "normal" | "dead",
 --::     running:    () -> (Thread | nil, boolean),
 --::     isyieldable: () -> boolean

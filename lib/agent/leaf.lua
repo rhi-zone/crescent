@@ -18,7 +18,7 @@ local M = {}
 --:: LeafCaps = { llm: LlmCap, exec: ExecCap | nil }
 
 -- Run a single leaf task. Returns task output or nil+errmsg.
---: (LeafTaskDef, AgentSet, LeafCaps, { [string]: unknown } | nil) -> unknown, string | nil
+--: (LeafTaskDef, AgentSet, LeafCaps, { [string]: unknown } | nil) -> (unknown, string | nil)
 function M.run(task_def, initial_set, caps, preset_spec)
 	local s         = initial_set
 	local max_iter  = task_def.max_iterations or 10

@@ -163,7 +163,7 @@ end
 
 -- Check whether a line looks like a command entry: indented, followed by name + description.
 -- Returns name, description or nil.
---: (string) -> string | nil, string | nil
+--: (string) -> (string | nil, string | nil)
 local function try_command_line(line)
 	local name, desc = line:match("^%s%s+(%S+)%s%s+(.+)$")
 	return name, desc
@@ -466,13 +466,13 @@ end
 -- Run cmd --help (merging stderr) via opts.popen and parse the output.
 -- opts.popen     fn   io.popen-compatible injected function (required)
 -- opts.max_depth num  maximum subcommand recursion depth (default 4)
---: (string, { popen: (string, string) -> (File | nil, string | nil), max_depth: number | nil }) -> HelpSchema | nil, string | nil
+--: (string, { popen: (string, string) -> (File | nil, string | nil), max_depth: number | nil }) -> (HelpSchema | nil, string | nil)
 function M.fetch(cmd, opts)
 	local exec = require("lib.exec")
 	local max_depth = opts.max_depth or 4
 
 	-- Recursive helper: prefix_args is a list of strings e.g. {"normalize","edit"}
-	--: (string[], number) -> HelpSchema | nil, string | nil
+	--: (string[], number) -> (HelpSchema | nil, string | nil)
 	local function fetch_recursive(prefix_args, depth)
 		local args = {}
 		for j = 2, #prefix_args do args[#args + 1] = prefix_args[j] end

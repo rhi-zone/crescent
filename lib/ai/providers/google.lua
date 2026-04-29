@@ -112,7 +112,7 @@ local function parse_response(body)
 	}
 end
 
---: (ai_request) -> ai_response | nil, string | nil
+--: (ai_request) -> (ai_response | nil, string | nil)
 mod.generate = function(req)
 	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
@@ -156,7 +156,7 @@ mod.generate = function(req)
 	return parse_response(res.body)
 end
 
---: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
+--: (ai_request) -> ((() -> ai_delta | nil) | nil, string | nil)
 mod.stream = function(req)
 	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
@@ -264,7 +264,7 @@ mod.stream = function(req)
 end
 
 --- Embed a single value.
---: (ai_embed_request) -> ai_embed_response | nil, string | nil
+--: (ai_embed_request) -> (ai_embed_response | nil, string | nil)
 mod.embed = function(req)
 	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end
@@ -306,7 +306,7 @@ mod.embed = function(req)
 end
 
 --- Embed multiple values.
---: (ai_embed_many_request) -> ai_embed_many_response | nil, string | nil
+--: (ai_embed_many_request) -> (ai_embed_many_response | nil, string | nil)
 mod.embed_many = function(req)
 	local api_key, err = get_api_key(req)
 	if not api_key then return nil, err end

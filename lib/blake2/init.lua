@@ -197,7 +197,7 @@ end
 
 -- Core BLAKE2b hash function.
 -- Returns raw binary string on success, or nil + errmsg on error.
---: (string, number, string) -> string | nil, string
+--: (string, number, string) -> (string | nil, string)
 local function blake2b_raw(input, hash_len, key)
   key = key or ""
   hash_len = hash_len or 64
@@ -401,7 +401,7 @@ local function s_compress(h, block, t_lo, t_hi, last)
 end
 
 -- Core BLAKE2s hash function.
---: (string, number, string) -> string | nil, string
+--: (string, number, string) -> (string | nil, string)
 local function blake2s_raw(input, hash_len, key)
   key = key or ""
   hash_len = hash_len or 32
@@ -492,26 +492,26 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---: (string, table | nil) -> string | nil, string
+--: (string, table | nil) -> (string | nil, string)
 function M.b_binary(input, opts)
   opts = opts or {}
   return blake2b_raw(input, opts.hash_len or 64, opts.key or "")
 end
 
---: (string, table | nil) -> string | nil, string
+--: (string, table | nil) -> (string | nil, string)
 function M.b(input, opts)
   local raw, err = M.b_binary(input, opts)
   if not raw then return nil, err end
   return to_hex(raw)
 end
 
---: (string, table | nil) -> string | nil, string
+--: (string, table | nil) -> (string | nil, string)
 function M.s_binary(input, opts)
   opts = opts or {}
   return blake2s_raw(input, opts.hash_len or 32, opts.key or "")
 end
 
---: (string, table | nil) -> string | nil, string
+--: (string, table | nil) -> (string | nil, string)
 function M.s(input, opts)
   local raw, err = M.s_binary(input, opts)
   if not raw then return nil, err end

@@ -249,7 +249,7 @@ end
 -- Public scan API
 -- ---------------------------------------------------------------------------
 
---: (table, string, table?) -> table
+--: (table, string, (table | nil)) -> table
 function M.scan(entries, text, opts)
   opts = opts or {}
   local rng = opts.rng or math.random
@@ -368,7 +368,7 @@ function M.scan(entries, text, opts)
   return triggered
 end
 
---: (table, string, table?) -> table
+--: (table, string, (table | nil)) -> table
 function M.get_triggered(entries, text, opts)
   local indices = M.scan(entries, text, opts)
   local out = {}

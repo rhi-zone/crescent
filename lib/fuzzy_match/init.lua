@@ -33,7 +33,7 @@ end
 
 -- Check if all characters in pattern appear in order in str.
 -- case_sensitive default: false
---: (string, string, {case_sensitive: boolean?}?) -> boolean
+--: (string, string, ({case_sensitive: (boolean | nil)} | nil)) -> boolean
 function M.match(str, pattern, opts)
   if #pattern == 0 then return true end
   if #str == 0 then return false end
@@ -63,7 +63,7 @@ end
 
 -- Score a match. Returns score (number >= 0) or nil if no match.
 -- Higher score = better match.
---: (string, string, {case_sensitive: boolean?}?) -> number?
+--: (string, string, ({case_sensitive: (boolean | nil)} | nil)) -> (number | nil)
 function M.score(str, pattern, opts)
   local _, sc = M.positions(str, pattern, opts)
   return sc
@@ -71,7 +71,7 @@ end
 
 -- Find matching positions and score.
 -- Returns positions (array of 1-based indices), score; or nil, nil on no match.
---: (string, string, {case_sensitive: boolean?}?) -> (integer[]?, number?)
+--: (string, string, ({case_sensitive: (boolean | nil)} | nil)) -> (integer[] | nil, number | nil)
 function M.positions(str, pattern, opts)
   if #pattern == 0 then
     -- Empty pattern matches with score 0, no positions
@@ -326,7 +326,7 @@ end
 -- Returns array of {item, score, positions} sorted by score descending.
 -- opts.key: function(item) -> string  (default: item itself)
 -- opts.case_sensitive: boolean (default: false)
---: (string, string[]|table[], {key: ((unknown) -> string)?, case_sensitive: boolean?}?) -> {item: unknown, score: number, positions: integer[]}[]
+--: (string, string[]|table[], ({key: (((unknown) -> string) | nil), case_sensitive: (boolean | nil)} | nil)) -> {item: unknown, score: number, positions: integer[]}[]
 function M.search(pattern, candidates, opts)
   local key_fn = opts and opts.key or nil
   local results = {}

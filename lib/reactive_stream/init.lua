@@ -50,7 +50,7 @@ function M.from_iter(iter_fn, state, init)
   end)
 end
 
---: (number, number, number?) -> Stream
+--: (number, number, (number | nil)) -> Stream
 function M.range(start, stop, step)
   step = step or 1
   local i = start - step
@@ -84,7 +84,7 @@ function M.empty()
 end
 
 -- Repeat val n times. n=nil means infinite.
---: (unknown, number?) -> Stream
+--: (unknown, (number | nil)) -> Stream
 function M.repeat_(val, n)
   if n == nil then
     return make_stream(function() return val end)
@@ -384,7 +384,7 @@ function Stream:unique()
 end
 
 -- Collect, sort, re-stream. cmp is optional comparator.
---: (((unknown, unknown) -> boolean)?) -> Stream
+--: ((((unknown, unknown) -> boolean) | nil)) -> Stream
 function Stream:sort(cmp)
   local arr = self:to_array()
   table.sort(arr, cmp)
@@ -441,7 +441,7 @@ function Stream:to_set()
 end
 
 -- key_fn(val) -> key, val_fn(val) -> mapped_value (defaults to identity).
---: (((unknown) -> unknown), ((unknown) -> unknown)?) -> { [unknown]: unknown }
+--: (((unknown) -> unknown), (((unknown) -> unknown) | nil)) -> { [unknown]: unknown }
 function Stream:to_map(key_fn, val_fn)
   local result = {}
   while true do
@@ -518,7 +518,7 @@ function Stream:last()
   end
 end
 
---: (((unknown, unknown) -> boolean)?) -> unknown | nil
+--: ((((unknown, unknown) -> boolean) | nil)) -> unknown | nil
 function Stream:min(cmp)
   local m = nil
   while true do
@@ -534,7 +534,7 @@ function Stream:min(cmp)
   end
 end
 
---: (((unknown, unknown) -> boolean)?) -> unknown | nil
+--: ((((unknown, unknown) -> boolean) | nil)) -> unknown | nil
 function Stream:max(cmp)
   local m = nil
   while true do
@@ -577,7 +577,7 @@ function Stream:find(pred)
   end
 end
 
---: (string?) -> string
+--: ((string | nil)) -> string
 function Stream:join(sep)
   sep = sep or ""
   local parts = self:to_array()
@@ -585,7 +585,7 @@ function Stream:join(sep)
 end
 
 -- Eager: returns two arrays (truthy, falsy).
---: (((unknown) -> boolean)) -> unknown[], unknown[]
+--: (((unknown) -> boolean)) -> (unknown[], unknown[])
 function Stream:partition(pred)
   local t, f = {}, {}
   local nt, nf = 0, 0

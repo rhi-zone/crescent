@@ -46,7 +46,7 @@ end
 
 -- Walk the spec tree and resolve all $ref references in-place.
 -- Uses a visited set to handle circular references.
---: (table, table, table?) -> ()
+--: (table, table, (table | nil)) -> ()
 local function resolve_refs(root, node, visited)
 	if type_of(node) ~= "table" then return end
 	if not visited then visited = {} end
@@ -73,7 +73,7 @@ end
 
 -- ── JSON Schema validation ──────────────────────────────────────────────────
 
---: (unknown, table, string?) -> (true, nil) | (nil, table)
+--: (unknown, table, (string | nil)) -> (true, nil) | (nil, table)
 function M.validate_schema(value, schema, path)
 	path = path or ""
 	local errors = {}
@@ -242,7 +242,7 @@ Spec.__index = Spec
 
 -- Convert OpenAPI path template to a Lua pattern and extract param names.
 -- /users/{id}/posts -> "^/users/([^/]+)/posts$", {"id"}
---: (string) -> string, string[]
+--: (string) -> (string, string[])
 local function path_to_pattern(path)
 	local parts = {}
 	local params = {}

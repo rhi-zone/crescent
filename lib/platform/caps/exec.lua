@@ -46,7 +46,7 @@ end
 -- remaining string keys are flag fields) into a flat CLI arg list,
 -- optionally validated against a HelpSchema.
 -- Returns expanded args or nil + errmsg.
---: (any, any | nil) -> string[] | nil, string | nil
+--: (any, any | nil) -> (string[] | nil, string | nil)
 local function expand_args_table(args_tbl, schema)
 	--: any
 	local path = args_tbl[1]
@@ -160,7 +160,7 @@ end
 --:: }
 
 -- M.new(manifest_entry, opts) -> cap, revoke_fn
---: (ExecManifestEntry, { parent_revoked_fn: (() -> boolean) | nil } | nil) -> any, () -> nil
+--: (ExecManifestEntry, { parent_revoked_fn: (() -> boolean) | nil } | nil) -> (any, () -> nil)
 function M.new(manifest_entry, opts)
 	--: any
 	local entry = manifest_entry or {}

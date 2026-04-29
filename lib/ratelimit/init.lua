@@ -31,7 +31,7 @@ function M.token_bucket(opts)
     end
   end
 
-  --: (n: number?) -> boolean
+  --: (n: (number | nil)) -> boolean
   function self:allow(n)
     n = n or 1
     refill()
@@ -217,7 +217,7 @@ function M.leaky_bucket(opts)
     end
   end
 
-  --: (n: number?) -> boolean
+  --: (n: (number | nil)) -> boolean
   function self:allow(n)
     n = n or 1
     leak()
@@ -272,7 +272,7 @@ function M.keyed(factory, opts)
     return l
   end
 
-  --: (key: string, n: number?) -> boolean
+  --: (key: string, n: (number | nil)) -> boolean
   function self:allow(key, n)
     return get(key):allow(n)
   end

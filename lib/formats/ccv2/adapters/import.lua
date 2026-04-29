@@ -23,7 +23,7 @@ local function extract_lorebook(data)
 	return lorebook.from_ccv2(book)
 end
 
---: (string) -> { card: table, lorebook: table? } | nil, string
+--: (string) -> ({ card: table, lorebook: (table | nil) } | nil, string)
 function M.from_png(bytes)
 	local data, err = card_mod.from_png(bytes)
 	if not data then return nil, err end
@@ -31,7 +31,7 @@ function M.from_png(bytes)
 	return { card = data, lorebook = entries }
 end
 
---: (string) -> { card: table, lorebook: table? } | nil, string
+--: (string) -> ({ card: table, lorebook: (table | nil) } | nil, string)
 function M.from_json(str)
 	local data, err = card_mod.from_json(str)
 	if not data then return nil, err end

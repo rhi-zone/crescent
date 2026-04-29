@@ -85,7 +85,7 @@ end
 
 -- ── Help text generation ──────────────────────────────────────────────────
 
---: ({ [string]: unknown }, string?) -> string
+--: ({ [string]: unknown }, (string | nil)) -> string
 local function generate_help(spec, program_name)
 	local parts = {}
 	local pname = program_name or spec.name
@@ -190,7 +190,7 @@ end
 
 -- ── Coerce value by type ──────────────────────────────────────────────────
 
---: (string, string?) -> (unknown, string?)
+--: (string, (string | nil)) -> (unknown, (string | nil))
 local function coerce(value, typ)
 	if typ == "number" then
 		local n = tonumber(value)
@@ -204,7 +204,7 @@ end
 
 -- ── Parse argv against a spec ─────────────────────────────────────────────
 
---: ({ [string]: unknown }, string[], string?) -> (table?, string?)
+--: ({ [string]: unknown }, string[], (string | nil)) -> ((table | nil), (string | nil))
 local function parse_spec(spec, argv, program_name)
 	local args = {}
 	local pos_index = 1
@@ -454,7 +454,7 @@ end
 
 -- Parse argv against a declarative spec.
 -- Returns (args_table, nil) on success, (nil, errmsg_or_help) on failure/help/version.
---: (string[], { [string]: unknown }) -> (table?, string?)
+--: (string[], { [string]: unknown }) -> ((table | nil), (string | nil))
 function M.parse(argv, spec)
 	spec = spec or {}
 	normalize(spec)
@@ -463,7 +463,7 @@ end
 
 -- Parse + invoke action. If the matched (sub)command has an action field,
 -- call it with the parsed args. Returns action result or (nil, errmsg).
---: (string[], { [string]: unknown }) -> (unknown, string?)
+--: (string[], { [string]: unknown }) -> (unknown, (string | nil))
 function M.run(argv, spec)
 	spec = spec or {}
 	normalize(spec)

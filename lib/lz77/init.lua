@@ -81,7 +81,7 @@ local function hash3(s, pos, window_size)
   return (b1 * 65536 + b2 * 256 + b3) % window_size
 end
 
---: (string, { window_bits: number?, min_match: number?, max_match: number? }?) -> string?, string?
+--: (string, ({ window_bits: (number | nil), min_match: (number | nil), max_match: (number | nil) } | nil)) -> ((string | nil), (string | nil))
 local function compress(input, opts)
   opts = opts or {}
   local window_bits = opts.window_bits or DEFAULT_WINDOW_BITS
@@ -194,7 +194,7 @@ end
 
 -- ── Decompression ────────────────────────────────────────────────────────────
 
---: (string) -> string?, string?
+--: (string) -> ((string | nil), (string | nil))
 local function decompress(compressed)
   if type(compressed) ~= "string" then
     return nil, "input must be a string"
@@ -279,7 +279,7 @@ end
 
 -- ── Streaming compressor ──────────────────────────────────────────────────────
 
---: ({ window_bits: number?, min_match: number?, max_match: number? }?) -> { write: (string) -> nil, finish: () -> string? }
+--: (({ window_bits: (number | nil), min_match: (number | nil), max_match: (number | nil) } | nil)) -> { write: (string) -> nil, finish: () -> (string | nil) }
 local function compressor(opts)
   local buf = {}
   return {
@@ -296,7 +296,7 @@ end
 
 -- ── Streaming decompressor ────────────────────────────────────────────────────
 
---: () -> { write: (string) -> nil, finish: () -> string? }
+--: () -> { write: (string) -> nil, finish: () -> (string | nil) }
 local function decompressor()
   local buf = {}
   return {

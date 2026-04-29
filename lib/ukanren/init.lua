@@ -8,7 +8,7 @@ local M = {}
 local _next_id = 0
 
 -- Logic variables: {__var=true, id=n, name=s}
---: (name: string?) -> Var
+--: (name: (string | nil)) -> Var
 function M.var(name)
   _next_id = _next_id + 1
   return { __var = true, id = _next_id, name = name }
@@ -37,7 +37,7 @@ function M.car(p) return p.car end
 function M.cdr(p) return p.cdr end
 
 -- Build a linked list from values
---: (...) -> Pair | nil
+--: (...unknown) -> (Pair | nil)
 function M.list(...)
   local args = { ... }
   local n = select("#", ...)
@@ -236,14 +236,14 @@ function M.conde(...)
 end
 
 -- run: execute a goal, collect up to n results
---: (goal: Goal, n: number?) -> {table}
+--: (goal: Goal, n: (number | nil)) -> {table}
 function M.run(goal, n)
   local stream = goal({})
   return take(n, stream)
 end
 
 -- run_fresh: create fresh variables, run, extract named bindings
---: (n: number?, fn: (...Var) -> Goal) -> {table}
+--: (n: (number | nil), fn: (...Var) -> Goal) -> {table}
 function M.run_fresh(n, fn)
   local info = debug.getinfo(fn, "u")
   local nparams = info.nparams

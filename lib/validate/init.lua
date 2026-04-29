@@ -155,7 +155,7 @@ function M.optional(validator)
   end
 end
 
---: (...validators: (value: unknown) -> true | (nil, string)) -> (value: unknown) -> true | (nil, string)
+--: (...((value: unknown) -> true | (nil, string))) -> ((value: unknown) -> true | (nil, string))
 function M.one_of(...)
   local validators = { ... }
   return function(value)
@@ -169,7 +169,7 @@ function M.one_of(...)
   end
 end
 
---: (...validators: (value: unknown) -> true | (nil, string)) -> (value: unknown) -> true | (nil, string)
+--: (...((value: unknown) -> true | (nil, string))) -> ((value: unknown) -> true | (nil, string))
 function M.all_of(...)
   local validators = { ... }
   return function(value)

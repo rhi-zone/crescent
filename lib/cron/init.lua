@@ -571,7 +571,7 @@ end
 --- Parse a 5-field cron expression.
 -- opts.date_fn: function compatible with os.date (required)
 -- opts.time_fn: function compatible with os.time (required)
---: (expr: string, opts: { date_fn: (string, number?) -> unknown, time_fn: (unknown?) -> number }) -> Expr | nil, string | nil
+--: (expr: string, opts: { date_fn: (string, (number | nil)) -> unknown, time_fn: ((unknown | nil)) -> number }) -> (Expr | nil, string | nil)
 function M.parse(expr, opts)
   if type(expr) ~= "string" then
     return nil, "expected string, got " .. type(expr)

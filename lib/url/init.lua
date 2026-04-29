@@ -154,7 +154,7 @@ end
 --- Parse a URL string into components (RFC 3986).
 -- Returns a table with: scheme, userinfo, host, port, path, query, fragment.
 -- Returns (nil, errmsg) on invalid input.
---: (string) -> { scheme: string?, userinfo: string?, host: string?, port: number?, path: string, query: string?, fragment: string? } | (nil, string)
+--: (string) -> { scheme: (string | nil), userinfo: (string | nil), host: (string | nil), port: (number | nil), path: string, query: (string | nil), fragment: (string | nil) } | (nil, string)
 function M.parse(s)
   if type(s) ~= "string" then
     return nil, "url.parse: expected string, got " .. type(s)
@@ -250,7 +250,7 @@ function M.parse(s)
 end
 
 --- Build a URL string from components.
---: ({ scheme: string?, userinfo: string?, host: string?, port: number?, path: string?, query: string?, fragment: string? }) -> string
+--: ({ scheme: (string | nil), userinfo: (string | nil), host: (string | nil), port: (number | nil), path: (string | nil), query: (string | nil), fragment: (string | nil) }) -> string
 function M.build(u)
   local parts = {}
   local n = 0

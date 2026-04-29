@@ -67,7 +67,7 @@ end
 
 -- Split a JWT token string into its three parts.
 -- Returns header_b64, payload_b64, sig_b64  OR  nil, nil, nil, errmsg.
---: (string) -> string, string, string | (nil, nil, nil, string)
+--: (string) -> (string, string, string | (nil, nil, nil, string))
 local function split_token(token)
   local parts = {}
   local n = 0
@@ -141,7 +141,7 @@ end
 -- opts.verify (default true): verify signature and time claims.
 -- opts.algorithms: list of accepted algorithm names (default {"HS256"}).
 -- opts.time_fn: required when verify ~= false — function returning unix timestamp.
---: (string, string, { verify: boolean | nil, algorithms: unknown, time_fn: (() -> number) | nil } | nil) -> unknown, unknown | (nil, string)
+--: (string, string, { verify: boolean | nil, algorithms: unknown, time_fn: (() -> number) | nil } | nil) -> (unknown, unknown | (nil, string))
 function M.decode(token, secret, opts)
   local verify = not (opts and opts.verify == false)
   local allowed_algs
@@ -219,7 +219,7 @@ end
 
 --- Decode a JWT without verifying the signature or time claims.
 -- Useful for inspection. Returns: payload_table, header_table  OR  nil, errmsg.
---: (string) -> unknown, unknown | (nil, string)
+--: (string) -> (unknown, unknown | (nil, string))
 function M.decode_unverified(token)
   local header_b64, payload_b64, _, split_err = split_token(token)
   if split_err then return nil, split_err end

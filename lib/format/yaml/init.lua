@@ -1064,7 +1064,7 @@ local function parse_document(p)
   return val
 end
 
---: (s: string) -> unknown, string?
+--: (s: string) -> (unknown, (string | nil))
 function M.decode(s)
   if type(s) ~= "string" then
     return nil, "expected string"
@@ -1076,7 +1076,7 @@ function M.decode(s)
   return val
 end
 
---: (s: string) -> { [number]: unknown }, string?
+--: (s: string) -> ({ [number]: unknown }, (string | nil))
 function M.decode_all(s)
   if type(s) ~= "string" then
     return nil, "expected string"
@@ -1293,7 +1293,7 @@ encode_value = function(val, indent_str, depth, opts)
   return tostring(val)
 end
 
---: (val: unknown, opts: { indent: number?, flow_level: number? }?) -> string
+--: (val: unknown, opts: ({ indent: (number | nil), flow_level: (number | nil) } | nil)) -> string
 function M.encode(val, opts)
   return encode_value(val, "", 0, opts) .. "\n"
 end

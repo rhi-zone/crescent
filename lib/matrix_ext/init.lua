@@ -54,7 +54,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Create a new rows×cols matrix filled with init (default 0).
---: (rows: number, cols: number, init: number?) -> table
+--: (rows: number, cols: number, init: (number | nil)) -> table
 function M.new(rows, cols, init)
   if init and init ~= 0 then
     local d = {}
@@ -128,7 +128,7 @@ end
 --- Returns L, U, P, sign  where P is a permutation vector (P[i] = original row),
 --- sign is +1 or -1 (number of swaps parity), and PA = LU.
 --- Returns (nil, nil, nil, nil, errmsg) if A is singular.
---: (A: table) -> table, table, { [number]: number }, number | (nil, nil, nil, nil, string)
+--: (A: table) -> (table, table, { [number]: number }, number | (nil, nil, nil, nil, string))
 function M.lu(A)
   local n = A._rows
   if n ~= A._cols then
@@ -339,7 +339,7 @@ end
 --- QR decomposition of A (m×n, m >= n) via modified Gram-Schmidt.
 --- Returns Q (m×n orthonormal columns), R (n×n upper triangular).
 --- Returns (nil, nil, errmsg) on failure.
---: (A: table) -> table, table | (nil, nil, string)
+--: (A: table) -> (table, table | (nil, nil, string))
 function M.qr(A)
   local m, n = A._rows, A._cols
   if m < n then
@@ -432,7 +432,7 @@ end
 --- Eigenvalues and eigenvectors of real symmetric matrix A via Jacobi iteration.
 --- Returns eigenvalues (sorted ascending) and eigenvectors (columns of V).
 --- max_iter defaults to 1000.
---: (A: table, max_iter: number?) -> { [number]: number }, table | (nil, nil, string)
+--: (A: table, max_iter: (number | nil)) -> ({ [number]: number }, table | (nil, nil, string))
 function M.eigen_symmetric(A, max_iter)
   local n = A._rows
   if n ~= A._cols then
@@ -547,7 +547,7 @@ end
 --- Power iteration to find the dominant (largest absolute) eigenvalue and
 --- corresponding eigenvector of A.
 --- Returns eigenvalue, eigenvector (1-D table), or (nil, nil, errmsg).
---: (A: table, max_iter: number?, tol: number?) -> number, { [number]: number } | (nil, nil, string)
+--: (A: table, max_iter: (number | nil), tol: (number | nil)) -> (number, { [number]: number } | (nil, nil, string))
 function M.power_iter(A, max_iter, tol)
   local n = A._rows
   if n ~= A._cols then return nil, nil, "power_iter requires square matrix" end
@@ -600,7 +600,7 @@ end
 
 --- Thin SVD of A (m×n) via one-sided Jacobi.
 --- Returns U (m×n), S (1-D array of n singular values descending), V (n×n).
---: (A: table, max_iter: number?) -> table, { [number]: number }, table | (nil, nil, nil, string)
+--: (A: table, max_iter: (number | nil)) -> (table, { [number]: number }, table | (nil, nil, nil, string))
 function M.svd(A, max_iter)
   local m, n = A._rows, A._cols
   -- Handle wide matrices by transposing
@@ -722,7 +722,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Matrix rank via SVD (threshold-based).
---: (A: table, tol: number?) -> number
+--: (A: table, tol: (number | nil)) -> number
 function M.rank(A, tol)
   local _, S, _, err = M.svd(A)
   if err or not S then return 0 end

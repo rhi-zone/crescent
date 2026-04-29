@@ -192,39 +192,39 @@ M.void        = void
 --
 -- Per-element attribute types:
 --
---:: GlobalAttrs = { id?: string, class?: string, style?: string, title?: string, hidden?: boolean, tabindex?: integer }
---:: AAttrs      = { href?: string, target?: string, rel?: string, download?: string, id?: string, class?: string, style?: string }
---:: ButtonAttrs = { type?: string, name?: string, value?: string, disabled?: boolean, form?: string, id?: string, class?: string, style?: string }
---:: FormAttrs   = { action?: string, method?: string, enctype?: string, id?: string, class?: string, style?: string }
---:: ImgAttrs    = { src: string, alt: string, width?: string, height?: string, loading?: string, id?: string, class?: string, style?: string }
---:: InputAttrs  = { type?: string, name?: string, value?: string, placeholder?: string, required?: boolean, disabled?: boolean, checked?: boolean, id?: string, class?: string, style?: string }
---:: LabelAttrs  = { for?: string, id?: string, class?: string, style?: string }
---:: LinkAttrs   = { rel: string, href?: string, type?: string, media?: string, id?: string, class?: string }
---:: MetaAttrs   = { name?: string, content?: string, charset?: string, ["http-equiv"]?: string }
---:: OptionAttrs = { value?: string, selected?: boolean, disabled?: boolean, id?: string, class?: string }
---:: ScriptAttrs = { src?: string, type?: string, async?: boolean, defer?: boolean, id?: string }
---:: SelectAttrs = { name?: string, multiple?: boolean, required?: boolean, disabled?: boolean, id?: string, class?: string, style?: string }
---:: TextareaAttrs = { name?: string, rows?: integer, cols?: integer, placeholder?: string, required?: boolean, disabled?: boolean, readonly?: boolean, id?: string, class?: string, style?: string }
---:: VideoAttrs  = { src?: string, controls?: boolean, autoplay?: boolean, loop?: boolean, muted?: boolean, width?: string, height?: string, id?: string, class?: string, style?: string }
---:: AudioAttrs  = { src?: string, controls?: boolean, autoplay?: boolean, loop?: boolean, muted?: boolean, id?: string, class?: string }
---:: SourceAttrs = { src?: string, type?: string, srcset?: string, media?: string }
---:: ContainerAttrs = { id?: string, class?: string, style?: string }
---:: ThAttrs     = { colspan?: integer, rowspan?: integer, scope?: string, id?: string, class?: string, style?: string }
---:: TdAttrs     = { colspan?: integer, rowspan?: integer, id?: string, class?: string, style?: string }
---:: TrAttrs     = { id?: string, class?: string, style?: string }
---:: TableAttrs  = { id?: string, class?: string, style?: string }
---:: OlAttrs     = { id?: string, class?: string, style?: string, start?: integer }
+--:: GlobalAttrs = { id: (string | nil), class: (string | nil), style: (string | nil), title: (string | nil), hidden: (boolean | nil), tabindex: (integer  | nil)}
+--:: AAttrs      = { href: (string | nil), target: (string | nil), rel: (string | nil), download: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: ButtonAttrs = { type: (string | nil), name: (string | nil), value: (string | nil), disabled: (boolean | nil), form: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: FormAttrs   = { action: (string | nil), method: (string | nil), enctype: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: ImgAttrs    = { src: string, alt: string, width: (string | nil), height: (string | nil), loading: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: InputAttrs  = { type: (string | nil), name: (string | nil), value: (string | nil), placeholder: (string | nil), required: (boolean | nil), disabled: (boolean | nil), checked: (boolean | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: LabelAttrs  = { for: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: LinkAttrs   = { rel: string, href: (string | nil), type: (string | nil), media: (string | nil), id: (string | nil), class: (string  | nil)}
+--:: MetaAttrs   = { name: (string | nil), content: (string | nil), charset: (string | nil), ["http-equiv"]: (string | nil) }
+--:: OptionAttrs = { value: (string | nil), selected: (boolean | nil), disabled: (boolean | nil), id: (string | nil), class: (string  | nil)}
+--:: ScriptAttrs = { src: (string | nil), type: (string | nil), async: (boolean | nil), defer: (boolean | nil), id: (string  | nil)}
+--:: SelectAttrs = { name: (string | nil), multiple: (boolean | nil), required: (boolean | nil), disabled: (boolean | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: TextareaAttrs = { name: (string | nil), rows: (integer | nil), cols: (integer | nil), placeholder: (string | nil), required: (boolean | nil), disabled: (boolean | nil), readonly: (boolean | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: VideoAttrs  = { src: (string | nil), controls: (boolean | nil), autoplay: (boolean | nil), loop: (boolean | nil), muted: (boolean | nil), width: (string | nil), height: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: AudioAttrs  = { src: (string | nil), controls: (boolean | nil), autoplay: (boolean | nil), loop: (boolean | nil), muted: (boolean | nil), id: (string | nil), class: (string  | nil)}
+--:: SourceAttrs = { src: (string | nil), type: (string | nil), srcset: (string | nil), media: (string  | nil)}
+--:: ContainerAttrs = { id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: ThAttrs     = { colspan: (integer | nil), rowspan: (integer | nil), scope: (string | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: TdAttrs     = { colspan: (integer | nil), rowspan: (integer | nil), id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: TrAttrs     = { id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: TableAttrs  = { id: (string | nil), class: (string | nil), style: (string  | nil)}
+--:: OlAttrs     = { id: (string | nil), class: (string | nil), style: (string | nil), start: (integer  | nil)}
 
 -- Document structure ----------------------------------------------------
 
 local _html = element("html")
---: Element<HtmlElement, { lang?: string, [integer]: HeadElement | BodyElement }>
+--: Element<HtmlElement, { lang: (string | nil), [integer]: HeadElement | BodyElement }>
 M.html = function(xs) return "<!DOCTYPE html>" .. _html(xs) end
 
 --: Element<HeadElement, { [integer]: HeadContent }>
 M.head = element("head")
 
---: Element<BodyElement, { [integer]: FlowContent, class?: string, id?: string, style?: string }>
+--: Element<BodyElement, { [integer]: FlowContent, class: (string | nil), id: (string | nil), style: (string  | nil)}>
 M.body = element("body")
 
 -- Metadata elements (void) ---------------------------------------------
@@ -408,7 +408,7 @@ M.button = element("button")
 
 -- Media -----------------------------------------------------------------
 
---: Element<IframeElement, { id?: string, class?: string, style?: string, width?: string, height?: string, name?: string, src?: string, [integer]: string }>
+--: Element<IframeElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string | nil), name: (string | nil), src: (string | nil), [integer]: string }>
 M.iframe = element("iframe")
 
 --: Element<VideoElement, VideoAttrs | { [integer]: SourceElement | string }>
@@ -422,10 +422,10 @@ M.source = void("source")
 
 -- Graphics --------------------------------------------------------------
 
---: Element<CanvasElement, { id?: string, class?: string, style?: string, width?: string, height?: string }>
+--: Element<CanvasElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string  | nil)}>
 M.canvas = element("canvas")
 
---: Element<SvgElement, { id?: string, class?: string, style?: string, width?: string, height?: string, viewBox?: string, xmlns?: string, [integer]: string }>
+--: Element<SvgElement, { id: (string | nil), class: (string | nil), style: (string | nil), width: (string | nil), height: (string | nil), viewBox: (string | nil), xmlns: (string | nil), [integer]: string }>
 M.svg = element("svg")
 
 -- Utility ---------------------------------------------------------------

@@ -33,7 +33,7 @@ end
 -- Returns stdout (without sentinel line) and exit code.
 -- LuaJIT popen close() does not return exit code (Lua 5.1 behaviour),
 -- so we embed it as a trailing sentinel line instead.
---: (string) -> string, number
+--: (string) -> (string, number)
 local function parse_sentinel(raw)
 	local out, code_str = raw:match("^(.*)\n" .. SENTINEL .. "(%d+)\n?$")
 	if out and code_str then
@@ -48,7 +48,7 @@ end
 -- opts.stderr  str  "merge" (2>&1) | "discard" (2>/dev/null) | nil (pass through to tty)
 --
 -- Returns stdout on success, or nil + errmsg on non-zero exit or popen failure.
---: (string, string[], RunOpts) -> string | nil, string | nil
+--: (string, string[], RunOpts) -> (string | nil, string | nil)
 function M.run(cmd, args, opts)
 	local popen = opts.popen
 	local cmdstr = build_cmdstr(cmd, args)
@@ -84,7 +84,7 @@ end
 -- opts.tmpname  fn  os.tmpname-compatible function (required)
 --
 -- Returns stdout, stderr, code on success, or nil + errmsg on popen failure.
---: (string, string[], RunExOpts) -> string | nil, string | nil, number | nil
+--: (string, string[], RunExOpts) -> (string | nil, string | nil, number | nil)
 function M.run_ex(cmd, args, opts)
 	local popen   = opts.popen
 	local open    = opts.open

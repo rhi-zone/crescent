@@ -58,7 +58,7 @@ caps.http_server.serve(function(req, res)
 end)
 ]]
 
---: (string, string) -> string, string
+--: (string, string) -> (string, string)
 local function install_minimal_app(apps_dir, app_slug)
 	os.execute("mkdir -p " .. apps_dir)
 	local manifest = {

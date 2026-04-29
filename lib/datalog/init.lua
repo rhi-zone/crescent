@@ -33,7 +33,7 @@ function M.new()
 end
 
 --- Assert a single fact.
---: (self: Database, predicate: string, ...: string) -> ()
+--: (self: Database, predicate: string, ...string) -> ()
 function DB:assert(predicate, ...)
   local tuple = { ... }
   local facts = self._facts[predicate]
@@ -58,7 +58,7 @@ function DB:assert_all(fact_list)
 end
 
 --- Retract a single fact.
---: (self: Database, predicate: string, ...: string) -> ()
+--: (self: Database, predicate: string, ...string) -> ()
 function DB:retract(predicate, ...)
   local facts = self._facts[predicate]
   if not facts then return end
@@ -70,7 +70,7 @@ function DB:retract(predicate, ...)
 end
 
 --- Define a rule: head(head_vars) :- body_goals [, guard].
---: (self: Database, predicate: string, head_vars: {string}, body: {{string}}, guard: ((bindings: {[string]: string}) -> boolean)?) -> ()
+--: (self: Database, predicate: string, head_vars: {string}, body: {{string}}, guard: (((bindings: {[string]: string}) -> boolean) | nil)) -> ()
 function DB:rule(predicate, head_vars, body, guard)
   local rules = self._rules[predicate]
   if not rules then
@@ -97,7 +97,7 @@ end
 
 --- Match a single goal against a fact, extending bindings.
 --- Returns new bindings table if match, nil otherwise.
---: (goal: {string}, fact: {string}, bindings: {[string]: string}, rule_vars: {[string]: true}) -> {[string]: string}?
+--: (goal: {string}, fact: {string}, bindings: {[string]: string}, rule_vars: {[string]: true}) -> ({[string]: string} | nil)
 local function match_goal(goal, fact, bindings, rule_vars)
   -- goal[1] is predicate, already matched by caller
   if #goal - 1 ~= #fact then return nil end
@@ -232,7 +232,7 @@ local function evaluate(self)
 end
 
 --- Query with positional arguments. "?" is wildcard.
---: (self: Database, predicate: string, ...: string) -> {{string}}
+--: (self: Database, predicate: string, ...string) -> {{string}}
 function DB:query(predicate, ...)
   evaluate(self)
   local args = { ... }
@@ -256,7 +256,7 @@ function DB:query(predicate, ...)
 end
 
 --- Query with named variables, returns binding maps.
---: (self: Database, predicate: string, vars: {string}, fixed: {[string]: string}?) -> {{[string]: string}}
+--: (self: Database, predicate: string, vars: {string}, fixed: ({[string]: string} | nil)) -> {{[string]: string}}
 function DB:query_bindings(predicate, vars, fixed)
   evaluate(self)
   local facts = all_facts(self, predicate)

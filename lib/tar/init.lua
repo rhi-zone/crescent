@@ -125,7 +125,7 @@ end
 
 --- Read a tar archive from a byte string.
 --- Returns an array of entry tables, or nil + errmsg on failure.
---: (string) -> TarEntry[] | nil, string | nil
+--: (string) -> (TarEntry[] | nil, string | nil)
 function M.read(bytes)
     local entries = {}
     local pos = 1
@@ -219,7 +219,7 @@ end
 --- Each entry needs at minimum: name (string) and data (string).
 --- mode defaults to 0644, mtime defaults to 0.
 --- Returns the archive as a byte string, or nil + errmsg on failure.
---: (TarWriteEntry[]) -> string | nil, string | nil
+--: (TarWriteEntry[]) -> (string | nil, string | nil)
 function M.write(entries)
     local blocks = {}
 

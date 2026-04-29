@@ -12,7 +12,7 @@ Machine.__index = Machine
 local Instance = {}
 Instance.__index = Instance
 
---: (config: { initial: string, states: { [string]: { on_enter: ((ctx: { [string]: unknown }) -> nil)?, on_exit: ((ctx: { [string]: unknown }) -> nil)? } }, transitions: { from: string | { [number]: string }, to: string, event: string }[], guards: { [string]: (ctx: { [string]: unknown }, event_data: unknown) -> boolean }?, actions: { [string]: (ctx: { [string]: unknown }, event_data: unknown) -> nil }? }) -> Machine | (nil, string)
+--: (config: { initial: string, states: { [string]: { on_enter: (((ctx: { [string]: unknown }) -> nil) | nil), on_exit: (((ctx: { [string]: unknown }) -> nil) | nil) } }, transitions: { from: string | { [number]: string }, to: string, event: string }[], guards: ({ [string]: (ctx: { [string]: unknown }, event_data: unknown) -> boolean } | nil), actions: ({ [string]: (ctx: { [string]: unknown }, event_data: unknown) -> nil } | nil) }) -> Machine | (nil, string)
 function M.new(config)
   if not config then return nil, "config is required" end
   if not config.initial then return nil, "initial state is required" end
@@ -120,7 +120,7 @@ function Machine:on_transition(fn)
   self._listeners[#self._listeners + 1] = fn
 end
 
---: (ctx: { [string]: unknown }?) -> Instance
+--: (ctx: ({ [string]: unknown } | nil)) -> Instance
 function Machine:start(ctx)
   local instance = setmetatable({
     _machine = self,
@@ -188,7 +188,7 @@ function Instance:can(event)
   return true
 end
 
---: (event: string, data: unknown?) -> true | (nil, string)
+--: (event: string, data: (unknown | nil)) -> true | (nil, string)
 function Instance:send(event, data)
   local t = find_transition(self._machine, self._state, event)
   if not t then

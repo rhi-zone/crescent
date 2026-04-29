@@ -53,7 +53,7 @@ end
 
 -- Parse .env content from a string.
 -- Returns a table of key=value pairs, or nil + error message.
---: (string) -> { [string]: string } | nil, string | nil
+--: (string) -> ({ [string]: string } | nil, string | nil)
 function M.parse(content, env_fn)
   if type(content) ~= "string" then
     return nil, "dotenv.parse: expected string, got " .. type(content)
@@ -159,7 +159,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Load .env file from path. read_fn(path) -> string|nil, err.
---: ((string) -> (string | nil, string | nil), string, ((string) -> string | nil) | nil) -> { [string]: string } | nil, string | nil
+--: ((string) -> (string | nil, string | nil), string, ((string) -> string | nil) | nil) -> ({ [string]: string } | nil, string | nil)
 function M.load(read_fn, path, env_fn)
   if type(read_fn) ~= "function" then
     error("dotenv.load: read_fn function is required")
@@ -171,7 +171,7 @@ end
 
 -- Load .env file and merge vars into an existing table t. Returns t.
 -- On error returns nil + errmsg.
---: ({ [string]: string }, (string) -> (string | nil, string | nil), string, ((string) -> string | nil) | nil) -> { [string]: string } | nil, string | nil
+--: ({ [string]: string }, (string) -> (string | nil, string | nil), string, ((string) -> string | nil) | nil) -> ({ [string]: string } | nil, string | nil)
 function M.load_into(t, read_fn, path, env_fn)
   local vars, err = M.load(read_fn, path, env_fn)
   if not vars then return nil, err end
@@ -183,7 +183,7 @@ end
 
 -- Load multiple .env files and merge. Later files override earlier unless
 -- opts.existing=true (first value wins).
---: ((string) -> (string | nil, string | nil), { string }, { existing: boolean | nil, env_fn: ((string) -> string | nil) | nil } | nil) -> { [string]: string } | nil, string | nil
+--: ((string) -> (string | nil, string | nil), { string }, { existing: boolean | nil, env_fn: ((string) -> string | nil) | nil } | nil) -> ({ [string]: string } | nil, string | nil)
 function M.load_files(read_fn, paths, opts)
   if type(read_fn) ~= "function" then
     error("dotenv.load_files: read_fn function is required")

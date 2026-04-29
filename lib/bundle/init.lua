@@ -29,7 +29,7 @@ end
 --- Resolve a dotted module name to a file path using search_paths.
 --- Tries: <search_path>/<mod_path>/init.lua, then <search_path>/<mod_path>.lua,
 --- then top-level <mod_path>/init.lua and <mod_path>.lua.
---: (mod_name: string, read_fn: (string) -> string | nil, search_paths: { string } | nil) -> string | nil, string | nil
+--: (mod_name: string, read_fn: (string) -> string | nil, search_paths: { string } | nil) -> (string | nil, string | nil)
 local function resolve_module(mod_name, read_fn, search_paths)
 	local mod_path = mod_name:gsub("%.", "/")
 	-- Candidate suffixes to try for each base directory
@@ -58,7 +58,7 @@ end
 --- Recursively collect all dependencies starting from a source string.
 --- Returns an ordered list of { name = mod_name, source = source_string }
 --- in dependency order (leaves first), plus a set of module names.
---: (entry_source: string, resolve_fn: (name: string) -> string | nil, visited: { [string]: boolean } | nil, order: { { name: string, source: string } } | nil) -> { { name: string, source: string } }, { [string]: boolean }
+--: (entry_source: string, resolve_fn: (name: string) -> string | nil, visited: { [string]: boolean } | nil, order: { { name: string, source: string } } | nil) -> ({ { name: string, source: string } }, { [string]: boolean })
 local function collect_deps(entry_source, resolve_fn, visited, order)
 	visited = visited or {}
 	order = order or {}
@@ -135,7 +135,7 @@ local function emit_bundle(modules, entry_source, opts)
 end
 
 --- Bundle a file and all its static require() dependencies into a single Lua string.
---: (entry_path: string, opts: { read_fn: (string) -> string | nil, search_paths: { string } | nil, shebang: string | nil }) -> string | nil, string | nil
+--: (entry_path: string, opts: { read_fn: (string) -> string | nil, search_paths: { string } | nil, shebang: string | nil }) -> (string | nil, string | nil)
 function M.bundle(entry_path, opts)
 	opts = opts or {}
 	local read_fn = opts.read_fn
@@ -156,7 +156,7 @@ function M.bundle(entry_path, opts)
 end
 
 --- Bundle from a source string with a custom resolver function.
---: (source: string, opts: { resolve: (name: string) -> string | nil, shebang: string | nil } | nil) -> string | nil, string | nil
+--: (source: string, opts: { resolve: (name: string) -> string | nil, shebang: string | nil } | nil) -> (string | nil, string | nil)
 function M.bundle_string(source, opts)
 	if type(source) ~= "string" then
 		return nil, "source must be a string"
@@ -168,7 +168,7 @@ function M.bundle_string(source, opts)
 end
 
 --- Analyze an entry file and return an ordered list of its transitive dependencies.
---: (entry_path: string, opts: { read_fn: (string) -> string | nil, search_paths: { string } | nil }) -> { string } | nil, string | nil
+--: (entry_path: string, opts: { read_fn: (string) -> string | nil, search_paths: { string } | nil }) -> ({ string } | nil, string | nil)
 function M.analyze(entry_path, opts)
 	opts = opts or {}
 	local read_fn = opts.read_fn

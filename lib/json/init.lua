@@ -286,7 +286,7 @@ end
 --- Decode a JSON string into a Lua value.
 -- Returns value, nil on success; nil, errmsg on error.
 -- JSON null decodes to json.null sentinel.
---: (string) -> unknown, string | nil
+--: (string) -> (unknown, string | nil)
 M.decode = function(s)
 	if type(s) ~= "string" then
 		return nil, "json.decode: expected string, got " .. type(s)
@@ -445,7 +445,7 @@ end
 -- Returns string, nil on success; nil, errmsg on error.
 -- Options: { indent: number|nil, sort_keys: boolean|nil }
 -- Use json.null to encode explicit null. Lua nil encodes as null.
---: (unknown, { indent: number | nil, sort_keys: boolean | nil } | nil) -> string | nil, string | nil
+--: (unknown, { indent: number | nil, sort_keys: boolean | nil } | nil) -> (string | nil, string | nil)
 M.encode = function(val, opts)
 	return encode_value(val, opts, 0)
 end

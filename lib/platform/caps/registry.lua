@@ -59,7 +59,7 @@ local TYPE_NAMES = {
 
 -- Parse "HKCU\Control Panel\Desktop" -> hive integer + base subkey string.
 -- Returns nil, err on unknown hive.
---: (string) -> number | nil, string | nil
+--: (string) -> (number | nil, string | nil)
 local function parse_root(root)
 	local root_s = tostring(root)
 	local hive_name, rest = root_s:match("^([^\\]+)\\?(.*)")

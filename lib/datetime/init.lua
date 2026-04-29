@@ -30,7 +30,7 @@ M.days_in_month = days_in_month
 
 -- ── Construction ─────────────────────────────────────────────────────────────
 
---: (number, number, number, number?, number?, number?, number?) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }
+--: (number, number, number, (number | nil), (number | nil), (number | nil), (number | nil)) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }
 function M.new(year, month, day, hour, min, sec, offset)
   return {
     year   = year   or 1970,
@@ -45,7 +45,7 @@ end
 
 -- ── Current time ─────────────────────────────────────────────────────────────
 
---: (time_fn: () -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }
+--: (time_fn: () -> { year: number, month: number, day: number, hour: number, min: number, sec: number }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }
 function M.now(time_fn)
   local t = time_fn()
   return {
@@ -61,7 +61,7 @@ end
 
 -- ── Validation ───────────────────────────────────────────────────────────────
 
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }) -> boolean
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }) -> boolean
 function M.is_valid(dt)
   if type(dt) ~= "table" then return false end
   local y, mo, d = dt.year, dt.month, dt.day
@@ -85,7 +85,7 @@ end
 
 -- Parse a UTC offset string like "+05:30", "-07:00", "Z"
 -- Returns offset in seconds, or nil, errmsg on failure
---: (string) -> (number?, string?)
+--: (string) -> ((number | nil), (string | nil))
 local function parse_offset(s)
   if s == "Z" or s == "z" then return 0 end
   local sign, h, m = s:match("^([+-])(%d%d):?(%d%d)$")
@@ -102,7 +102,7 @@ end
 --   2024-01-15T10:30:00Z
 --   2024-01-15T10:30:00+05:30
 --   2024-01-15 10:30:00  (space separator)
---: (string) -> ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }?, string?)
+--: (string) -> (({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) } | nil), (string | nil))
 function M.parse_iso(s)
   if type(s) ~= "string" then return nil, "expected string" end
 
@@ -188,7 +188,7 @@ end
 
 -- Convert datetime table to Unix timestamp (UTC seconds since epoch).
 -- If offset is nil (local time), uses the dt fields as-is interpreted as UTC.
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }) -> number
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }) -> number
 function M.to_unix(dt)
   local days = ymd_to_days(dt.year, dt.month, dt.day)
   local secs = days * 86400 + dt.hour * 3600 + dt.min * 60 + dt.sec
@@ -207,7 +207,7 @@ local function pad2(n) return string.format("%02d", n) end
 local function pad4(n) return string.format("%04d", n) end
 
 -- Format offset as "+HH:MM", "-HH:MM", or "Z"
---: (number?) -> string
+--: ((number | nil)) -> string
 local function fmt_offset(offset)
   if offset == nil then return "" end
   if offset == 0 then return "Z" end
@@ -219,7 +219,7 @@ local function fmt_offset(offset)
 end
 
 -- ISO 8601 output.
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }) -> string
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }) -> string
 function M.to_iso(dt)
   local date = pad4(dt.year) .. "-" .. pad2(dt.month) .. "-" .. pad2(dt.day)
   local time = pad2(dt.hour) .. ":" .. pad2(dt.min) .. ":" .. pad2(dt.sec)
@@ -229,7 +229,7 @@ end
 -- strftime-style formatting.
 -- Supported: %Y %m %d %H %M %S %Z
 -- %Z: "+HH:MM" / "-HH:MM" / "Z" / "" (unspecified)
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }, string) -> string
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }, string) -> string
 function M.format(dt, fmt)
   return (fmt:gsub("%%(.)", function(c)
     if c == "Y" then return pad4(dt.year)
@@ -249,7 +249,7 @@ end
 
 -- Normalize a datetime: carry seconds/minutes/hours/days across field boundaries.
 -- Operates on a mutable copy of dt (table).
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }
 local function normalize(dt)
   -- Normalize seconds -> minutes
   local carry = math.floor(dt.sec / 60)
@@ -291,7 +291,7 @@ end
 
 -- Add a duration to a datetime. Returns a new datetime.
 -- Duration fields: years, months, days, hours, minutes, seconds (all optional, can be negative)
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }, { years: number?, months: number?, days: number?, hours: number?, minutes: number?, seconds: number? }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }, { years: (number | nil), months: (number | nil), days: (number | nil), hours: (number | nil), minutes: (number | nil), seconds: (number | nil) }) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }
 function M.add(dt, dur)
   local result = {
     year   = dt.year   + (dur.years   or 0),
@@ -308,13 +308,13 @@ end
 -- Difference in seconds: dt1 - dt2.
 -- If offsets are present, converts both to UTC before subtracting.
 -- If offsets are absent (nil), treats both as being in the same timezone.
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }, { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }) -> number
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }, { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }) -> number
 function M.diff(dt1, dt2)
   return M.to_unix(dt1) - M.to_unix(dt2)
 end
 
 -- Compare two datetimes. Returns -1, 0, or 1.
---: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }, { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }) -> number
+--: ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }, { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: (number | nil) }) -> number
 function M.compare(dt1, dt2)
   local d = M.diff(dt1, dt2)
   if d < 0 then return -1

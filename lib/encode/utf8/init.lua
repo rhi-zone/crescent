@@ -59,7 +59,7 @@ mod.is_valid = function (bytes)
 	return remain == 0
 end
 
---: (string, number | nil, number | nil) -> number | nil, number | nil
+--: (string, number | nil, number | nil) -> (number | nil, number | nil)
 --[[@param s string]] --[[@param i? integer]] --[[@param j? integer]]
 mod.len = function (s, i, j)
 	i = i or 1
@@ -88,7 +88,7 @@ mod.len = function (s, i, j)
 	return len
 end
 
---: (string, number | nil, number | nil) -> ...number
+--: (string, number | nil, number | nil) -> (...number)
 --[[@param s string]] --[[@param i? integer]] --[[@param j? integer]]
 mod.codepoint = function (s, i, j)
 	i = i or 1
@@ -153,7 +153,7 @@ local codes_iter = function (s, p)
 	return p, c
 end
 
---: (string) -> (fun(s: string, p: number | nil): number | nil, number | nil), string
+--: (string) -> ((s: string, p: number | nil) -> (number | nil, number | nil), string)
 --[[returns an iterator that returns `p` (the start index of the current character)]]
 --[[and `c` (the codepoint of the current character)]]
 --[[@param s string]]

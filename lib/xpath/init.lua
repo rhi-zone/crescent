@@ -1191,7 +1191,7 @@ end
 
 --- Evaluate an XPath expression against a context node.
 --- Returns XPath value (node-set table, string, number, or boolean), or (nil, errmsg).
---: (table, string) -> unknown | nil, string
+--: (table, string) -> (unknown | nil, string)
 function M.eval(node, expr)
   local ast, err = parse(expr)
   if not ast then return nil, err end
@@ -1203,7 +1203,7 @@ function M.eval(node, expr)
 end
 
 --- Alias for eval — returns a node-set.
---: (table, string) -> table | nil, string
+--: (table, string) -> (table | nil, string)
 function M.select(node, expr)
   local result, err = M.eval(node, expr)
   if result == nil then return nil, err end
@@ -1242,7 +1242,7 @@ end
 
 --- Compile an XPath expression for reuse.
 --- Returns compiled object with :eval(node) method, or (nil, errmsg).
---: (string) -> table | nil, string
+--: (string) -> (table | nil, string)
 function M.compile(expr)
   local ast, err = parse(expr)
   if not ast then return nil, err end

@@ -28,7 +28,7 @@ local function make_line_iter(fh_in)
 	local fh = fh_in --: any
 	local closed = false
 	local iter = {} --: any
-	setmetatable(iter, { __call = function(_self) --: (any) -> string | nil, string | nil
+	setmetatable(iter, { __call = function(_self) --: (any) -> (string | nil, string | nil)
 		if closed then return nil, nil end
 		local line = fh:read("*l")
 		if line == nil then

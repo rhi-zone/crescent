@@ -98,7 +98,7 @@ local function make_bearer_headers(api_key, body_str)
 end
 
 --- Create an OpenAI-compatible provider.
---: ({ name: string, host: string, chat_path?: string, embeddings_path?: string, images_path?: string, make_headers?: (api_key: string, body_str: string) -> table }) -> ai_provider
+--: ({ name: string, host: string, chat_path: (string | nil), embeddings_path: (string | nil), images_path: (string | nil), make_headers: ((api_key: string, body_str: string) -> table  | nil)}) -> ai_provider
 mod.create = function(config)
 	local host = config.host
 	local chat_path = config.chat_path or "/v1/chat/completions"
@@ -114,7 +114,7 @@ mod.create = function(config)
 
 	local provider = {}
 
-	--: (ai_request) -> ai_response | nil, string | nil
+	--: (ai_request) -> (ai_response | nil, string | nil)
 	provider.generate = function(req)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
@@ -150,7 +150,7 @@ mod.create = function(config)
 		return parse_chat_response(res.body)
 	end
 
-	--: (ai_request) -> (() -> ai_delta | nil) | nil, string | nil
+	--: (ai_request) -> ((() -> ai_delta | nil) | nil, string | nil)
 	provider.stream = function(req)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
@@ -271,7 +271,7 @@ mod.create = function(config)
 	end
 
 	--- Embed a single value.
-	--: (ai_embed_request) -> ai_embed_response | nil, string | nil
+	--: (ai_embed_request) -> (ai_embed_response | nil, string | nil)
 	provider.embed = function(req)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
@@ -314,7 +314,7 @@ mod.create = function(config)
 	end
 
 	--- Embed multiple values.
-	--: (ai_embed_many_request) -> ai_embed_many_response | nil, string | nil
+	--: (ai_embed_many_request) -> (ai_embed_many_response | nil, string | nil)
 	provider.embed_many = function(req)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end
@@ -364,7 +364,7 @@ mod.create = function(config)
 	end
 
 	--- Generate an image.
-	--: (ai_image_request) -> ai_image_response | nil, string | nil
+	--: (ai_image_request) -> (ai_image_response | nil, string | nil)
 	provider.generate_image = function(req)
 		local api_key, err = get_api_key(req)
 		if not api_key then return nil, err end

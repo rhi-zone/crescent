@@ -56,7 +56,7 @@ end
 
 --- Register a listener for an event name (or wildcard pattern).
 -- Returns a unique listener id for later removal via off_by_id.
---: (string, (...unknown) -> unknown, { priority: number }?) -> number
+--: (string, (...unknown) -> unknown, ({ priority: number } | nil)) -> number
 function Emitter:on(name, fn, opts)
   if type(name) ~= "string" then return nil, "event name must be a string" end
   if type(fn) ~= "function" then return nil, "listener must be a function" end
@@ -75,7 +75,7 @@ function Emitter:on(name, fn, opts)
 end
 
 --- Register a listener that fires only once.
---: (string, (...unknown) -> unknown, { priority: number }?) -> number
+--: (string, (...unknown) -> unknown, ({ priority: number } | nil)) -> number
 function Emitter:once(name, fn, opts)
   local o = { once = true }
   if opts then o.priority = opts.priority end
@@ -85,7 +85,7 @@ end
 --- Remove listener(s).
 -- off(name, fn) removes a specific listener.
 -- off(name) removes all listeners for that event.
---: (string, ((...unknown) -> unknown)?) -> ()
+--: (string, (((...unknown) -> unknown) | nil)) -> ()
 function Emitter:off(name, fn)
   if type(name) ~= "string" then return nil, "event name must be a string" end
   if not fn then

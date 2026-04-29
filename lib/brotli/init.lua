@@ -121,7 +121,7 @@ if ok_ffi then
 
     -- ── decompress ────────────────────────────────────────────────────────────
 
-    --: (string) -> string?, string?
+    --: (string) -> ((string | nil), (string | nil))
     function M.decompress(compressed)
       if not dec_lib then
         return nil, "brotli: libbrotlidec not available"
@@ -153,7 +153,7 @@ if ok_ffi then
 
     -- ── compress ──────────────────────────────────────────────────────────────
 
-    --: (string, table?) -> string?, string?
+    --: (string, (table | nil)) -> ((string | nil), (string | nil))
     function M.compress(input, opts)
       if not enc_lib then
         return nil, "brotli: libbrotlienc not available"
@@ -190,12 +190,12 @@ end
 if not M._tier then
   M._tier = "stub"
 
-  --: (string) -> nil, string
+  --: (string) -> (nil, string)
   function M.decompress(_)
     return nil, "brotli: libbrotlidec not available"
   end
 
-  --: (string, table?) -> nil, string
+  --: (string, (table | nil)) -> (nil, string)
   function M.compress(_, _)
     return nil, "brotli: libbrotlienc not available"
   end

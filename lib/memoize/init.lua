@@ -267,13 +267,13 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Memoize fn with optional LRU/TTL/key options.
---: ((...) -> ..., { max_size: number | nil, ttl: number | nil, key: ((...) -> string) | nil, clock_fn: (() -> number) | nil } | nil) -> any
+--: ((...unknown) -> (...unknown), { max_size: number | nil, ttl: number | nil, key: ((...unknown) -> string) | nil, clock_fn: (() -> number) | nil } | nil) -> any
 function M.memoize(fn, opts)
   return wrap(fn, opts)
 end
 
 --- Memoize a zero-argument function (lazy singleton).
---: ((() -> ...) ) -> (() -> ...)
+--: ((() -> (...unknown))) -> (() -> (...unknown))
 function M.thunk(fn)
   local computed = false
   local cached
@@ -287,7 +287,7 @@ function M.thunk(fn)
 end
 
 --- Memoize with weak values (GC-friendly for large values).
---: ((...) -> ..., any) -> any
+--: ((...unknown) -> (...unknown), any) -> any
 function M.weak(fn, opts)
   opts = opts or {}
   opts.weak = true
@@ -295,7 +295,7 @@ function M.weak(fn, opts)
 end
 
 --- Run fn exactly once; subsequent calls return the same value without calling fn.
---: ((() -> ...)) -> (() -> ...)
+--: ((() -> (...unknown))) -> (() -> (...unknown))
 function M.once(fn)
   local ran = false
   local cached
@@ -313,7 +313,7 @@ end
 -- the returned function records the most recent call and returns the last result.
 -- The actual fn is called on the FIRST call after the delay window expires
 -- (delay is in seconds, checked via os.clock).
---: ((...) -> ..., number) -> (...) -> ...
+--: ((...unknown) -> (...unknown), number) -> ((...unknown) -> (...unknown))
 function M.debounce(fn, delay, clock_fn)
   if not clock_fn then error("memoize.debounce: clock_fn is required") end
   local last_call = nil

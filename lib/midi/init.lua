@@ -330,7 +330,7 @@ end
 --- Parse a Standard MIDI File binary string.
 -- Returns midi_file or nil, errmsg.
 -- midi_file: { format, ticks_per_beat, tracks }
---: (string) -> { format: number, ticks_per_beat: number, tracks: unknown[] } | nil, string
+--: (string) -> ({ format: number, ticks_per_beat: number, tracks: unknown[] } | nil, string)
 function M.parse(data)
     if #data < 14 then
         return nil, "data too short to be a MIDI file"
@@ -538,7 +538,7 @@ end
 
 --- Encode a midi_file table back to a binary MIDI string.
 -- Returns data string or nil, errmsg.
---: ({ format: number, ticks_per_beat: number, tracks: unknown[] }) -> string | nil, string
+--: ({ format: number, ticks_per_beat: number, tracks: unknown[] }) -> (string | nil, string)
 function M.encode(midi_file)
     if type(midi_file) ~= "table" then
         return nil, "midi_file must be a table"

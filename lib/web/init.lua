@@ -153,7 +153,7 @@ function res_mt:set_status(code)
 	return self
 end
 
---: (table, string, integer?) -> table
+--: (table, string, (integer | nil)) -> table
 function res_mt:redirect(url, code)
 	self.status = code or 302
 	self.headers["Location"] = { url }
@@ -294,9 +294,9 @@ end
 
 -- ── Built-in middleware: logger ───────────────────────────────────────────────
 
---: (table?) -> function
+--: ((table | nil)) -> function
 function M.logger(opts)
-	--: (string?) -> (string) -> ()
+	--: ((string | nil)) -> (string) -> ()
 	local log_fn = opts and opts.log or print
 	local clock = opts and opts.clock or clock_default
 	if not clock then error("web.logger: requires opts.clock (function returning seconds)", 2) end
@@ -310,7 +310,7 @@ end
 
 -- ── Built-in middleware: CORS ────────────────────────────────────────────────
 
---: (table?) -> function
+--: ((table | nil)) -> function
 function M.cors(opts)
 	opts = opts or {}
 	local origins = opts.origins or { "*" }
@@ -433,7 +433,7 @@ function M.cookies()
 		req.cookies = cookies
 
 		-- Add set_cookie method to response
-		--: (table, string, string, table?) -> table
+		--: (table, string, string, (table | nil)) -> table
 		function res:set_cookie(name, value, opts)
 			opts = opts or {}
 			local parts = { name .. "=" .. value }

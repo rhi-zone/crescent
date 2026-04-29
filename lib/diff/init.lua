@@ -273,7 +273,7 @@ end
 -- str_a, str_b: strings to diff (line-by-line).
 -- opts: { context=3, a_name="a", b_name="b" }
 -- Returns a unified diff string.
---: (string, string, { context: number?, a_name: string?, b_name: string? }?) -> string
+--: (string, string, ({ context: (number | nil), a_name: (string | nil), b_name: (string | nil) } | nil)) -> string
 M.unified = function(str_a, str_b, opts)
   opts = opts or {}
   local ctx = opts.context

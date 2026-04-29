@@ -39,7 +39,7 @@ function M.from_iter(iter_fn, state, init)
   end)
 end
 
---: (number, number, number?) -> Stream
+--: (number, number, (number | nil)) -> Stream
 function M.range(start, stop, step)
   step = step or 1
   local i = start - step
@@ -520,7 +520,7 @@ function Stream:nth(n)
   return self.next()
 end
 
---: (string?) -> string
+--: ((string | nil)) -> string
 function Stream:join(sep)
   sep = sep or ""
   local parts = self:to_array()
@@ -537,7 +537,7 @@ function Stream:to_map(key_fn)
   end
 end
 
---: (((unknown) -> boolean)) -> unknown[], unknown[]
+--: (((unknown) -> boolean)) -> (unknown[], unknown[])
 function Stream:partition(fn)
   local pass, fail = {}, {}
   local np, nf = 0, 0

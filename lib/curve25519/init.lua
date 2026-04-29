@@ -301,7 +301,7 @@ end
 
 -- Generate a 32-byte public key from a 32-byte private key.
 -- The private key will be clamped internally.
---: string -> string | nil, string
+--: string -> (string | nil, string)
 M.public_key = function(private_key)
   if type(private_key) ~= "string" or #private_key ~= 32 then
     return nil, "private_key must be a 32-byte string"
@@ -314,7 +314,7 @@ end
 -- private_key: 32-byte scalar (will be clamped)
 -- public_key:  32-byte u-coordinate of the remote party's public key
 -- Returns: 32-byte shared secret, or nil + errmsg on failure.
---: string, string -> string | nil, string
+--: (string, string) -> (string | nil, string)
 M.diffie_hellman = function(private_key, public_key)
   if type(private_key) ~= "string" or #private_key ~= 32 then
     return nil, "private_key must be a 32-byte string"
@@ -333,7 +333,7 @@ end
 -- Generate a keypair.
 -- seed: required 32-byte string
 -- Returns: private_key(32 bytes), public_key(32 bytes)
---: string -> string, string
+--: string -> (string, string)
 M.keypair = function(seed)
   if not seed then error("curve25519.keypair: seed is required (32-byte string)") end
   if type(seed) ~= "string" or #seed ~= 32 then

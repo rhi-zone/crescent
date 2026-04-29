@@ -131,7 +131,7 @@ end
 
 -- ── Combinators ─────────────────────────────────────────────────────────
 
---: (...: parser) -> (input: string, pos: integer) -> (table, integer) | (nil, integer, string)
+--: (...parser) -> ((input: string, pos: integer) -> (table, integer) | (nil, integer, string))
 function M.seq(...)
   local parsers = { ... }
   local n = #parsers
@@ -149,7 +149,7 @@ function M.seq(...)
   end
 end
 
---: <T>(...: Parser<T>) -> Parser<T>
+--: <T>(...Parser<T>) -> Parser<T>
 function M.alt(...)
   local parsers = { ... }
   local n = #parsers

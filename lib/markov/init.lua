@@ -41,7 +41,7 @@ end
 
 -- Weighted random pick from a transitions map { token -> count }.
 -- Returns chosen token and its probability.
---: ({ [string]: integer }, () -> number) -> string, number
+--: ({ [string]: integer }, () -> number) -> (string, number)
 local function weighted_pick(trans, rand)
   local total = 0
   for _, count in pairs(trans) do
@@ -128,7 +128,7 @@ end
 
 -- Predict the next token given a context array (length == order).
 -- Returns next_token, probability, or nil, 0 if unknown context.
---: ({ [integer]: string }) -> string | nil, number
+--: ({ [integer]: string }) -> (string | nil, number)
 function Chain:next(context)
   local key
   if type(context) == "string" then

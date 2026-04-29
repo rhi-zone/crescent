@@ -200,7 +200,7 @@ end
 
 --- Synchronous await. Returns (value, nil) on fulfillment or (nil, reason) on rejection.
 --- In synchronous mode all promises settle immediately so this never actually blocks.
---: (self: Promise) -> unknown, string | nil
+--: (self: Promise) -> (unknown, string | nil)
 function Promise:await()
 	if self._state == STATE_FULFILLED then
 		return self._value, nil

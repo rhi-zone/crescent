@@ -61,7 +61,7 @@ end
 
 -- Walk an mdast tree depth-first, calling fn(node, parent, index).
 -- fn may return a replacement node, nil to remove, or nothing to keep.
---: (any, (any, any, integer?) -> any) -> any
+--: (any, (any, any, (integer | nil)) -> any) -> any
 local function walk(node, fn)
   if not node then return node end
   if node.children then
@@ -220,7 +220,7 @@ end
 local MarkdownIt = {}
 MarkdownIt.__index = MarkdownIt
 
---: (any?) -> any
+--: ((any | nil)) -> any
 function M.new(opts)
   opts = opts or {}
   local self = setmetatable({}, MarkdownIt)
@@ -241,7 +241,7 @@ end
 
 -- Use a plugin.  plugin(md_instance, plugin_opts) is called immediately.
 -- Returns self for chaining.
---: (any, any?) -> any
+--: (any, (any | nil)) -> any
 function MarkdownIt:use(plugin, plugin_opts)
   plugin(self, plugin_opts)
   return self
@@ -295,7 +295,7 @@ end
 -- ── One-shot convenience ──────────────────────────────────────────────────────
 
 -- mdit.render(src) / mdit.render(src, opts) → html string
---: (string, any?) -> string
+--: (string, (any | nil)) -> string
 function M.render(src, opts)
   return M.new(opts):render(src)
 end

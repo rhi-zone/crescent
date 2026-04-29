@@ -697,7 +697,7 @@ end
 -- Build a 2D parameterized curve through the given points.
 -- opts.type: "catmull_rom" (default) | "cubic_spline" | "b_spline" | "linear"
 -- Returns curve object with :eval(t), :sample(n), :length().
---: ({{number,number}}, table?) -> table
+--: ({{number,number}}, (table | nil)) -> table
 M.curve_2d = function(points, opts)
   local n = #points
   if n < 2 then return nil, "curve_2d: need at least 2 points" end

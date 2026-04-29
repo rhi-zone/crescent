@@ -268,7 +268,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- M.locale(locale_string) -> locale_obj | (nil, errmsg)
---: (string) -> { language: string, region: string | nil, script: string | nil } | nil, string
+--: (string) -> ({ language: string, region: string | nil, script: string | nil } | nil, string)
 function M.locale(s)
   local lang, region, script = parse_locale_string(s)
   if not lang then return nil, region end -- region carries errmsg here
@@ -430,7 +430,7 @@ end
 
 -- M.format_number(n, locale, opts) -> string | (nil, errmsg)
 -- opts: { decimals, min_decimals, max_decimals, group_sep }
---: (number, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil } | nil) -> string | nil, string
+--: (number, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil } | nil) -> (string | nil, string)
 function M.format_number(n, locale, opts)
   if type(n) ~= "number" then return nil, "n must be a number" end
   opts = opts or {}
@@ -493,7 +493,7 @@ function M.parse_number(str, locale)
 end
 
 -- M.format_currency(n, currency, locale, opts) -> string | (nil, errmsg)
---: (number, string, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, group_sep: boolean | nil } | nil) -> string | nil, string
+--: (number, string, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, group_sep: boolean | nil } | nil) -> (string | nil, string)
 function M.format_currency(n, currency, locale, opts)
   currency = currency:upper()
   local cd = CURRENCY_DATA[currency]
@@ -533,7 +533,7 @@ end
 
 -- M.format_date(timestamp, locale, opts) -> string
 -- opts.date_fn: function compatible with os.date (required)
---: (number | nil, string | { language: string, region: string | nil, script: string | nil }, { style: string | nil, date: boolean | nil, time: boolean | nil, date_fn: (string, number?) -> unknown }) -> string
+--: (number | nil, string | { language: string, region: string | nil, script: string | nil }, { style: string | nil, date: boolean | nil, time: boolean | nil, date_fn: (string, (number | nil)) -> unknown }) -> string
 function M.format_date(timestamp, locale, opts)
   opts = opts or {}
   local style = opts.style or "medium"

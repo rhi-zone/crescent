@@ -188,7 +188,7 @@ function M.new()
 end
 
 -- Insert a key with an associated value (default true).
---: (key: string, value?: unknown) -> ()
+--: (key: string, value: (unknown | nil)) -> ()
 function M:insert(key, value)
   if type(key) ~= "string" then return nil, "key must be a string" end
   if value == nil then value = true end
@@ -208,7 +208,7 @@ function M:insert(key, value)
 end
 
 -- Exact match lookup. Returns value or nil.
---: (key: string) -> unknown?
+--: (key: string) -> (unknown | nil)
 function M:get(key)
   if type(key) ~= "string" then return nil end
   if key == "" then
@@ -328,7 +328,7 @@ end
 
 -- Longest prefix match: the longest key that is a prefix of query.
 -- Returns key, value (or nil if none).
---: (query: string) -> string?, unknown?
+--: (query: string) -> ((string | nil), (unknown | nil))
 function M:longest_prefix(query)
   if type(query) ~= "string" then return nil end
 

@@ -33,7 +33,7 @@ function M.token_bucket(opts)
     end
   end
 
-  --: (n: number?) -> (boolean, number?)
+  --: (n: (number | nil)) -> (boolean, (number | nil))
   function self:allow(n)
     n = n or 1
     do_refill()
@@ -95,7 +95,7 @@ function M.leaky_bucket(opts)
     end
   end
 
-  --: (n: number?) -> (boolean, number?)
+  --: (n: (number | nil)) -> (boolean, (number | nil))
   function self:allow(n)
     n = n or 1
     do_leak()
@@ -159,7 +159,7 @@ function M.fixed_window(opts)
     end
   end
 
-  --: (key: string?) -> (boolean, number?)
+  --: (key: (string | nil)) -> (boolean, (number | nil))
   function self:allow(key)
     local k = key or "_default"
     local entry = get_entry(k)
@@ -175,7 +175,7 @@ function M.fixed_window(opts)
     return false, wait
   end
 
-  --: (key: string?) -> number
+  --: (key: (string | nil)) -> number
   function self:count(key)
     local k = key or "_default"
     local entry = get_entry(k)
@@ -183,7 +183,7 @@ function M.fixed_window(opts)
     return entry.count
   end
 
-  --: (key: string?) -> nil
+  --: (key: (string | nil)) -> nil
   function self:reset(key)
     local k = key or "_default"
     store[k] = { count = 0, window_start = clock() }
@@ -242,7 +242,7 @@ function M.sliding_window_log(opts)
     end
   end
 
-  --: (key: string?) -> (boolean, number?)
+  --: (key: (string | nil)) -> (boolean, (number | nil))
   function self:allow(key)
     local k = key or "_default"
     local log = get_log(k)
@@ -318,7 +318,7 @@ function M.sliding_window_counter(opts)
     return entry.curr + entry.prev * (1 - fraction)
   end
 
-  --: (key: string?) -> (boolean, number?)
+  --: (key: (string | nil)) -> (boolean, (number | nil))
   function self:allow(key)
     local k = key or "_default"
     local entry = get_entry(k)
@@ -364,7 +364,7 @@ function M.concurrent(opts)
   local allowed = 0
   local denied = 0
 
-  --: () -> (() -> nil)?
+  --: () -> ((() -> nil) | nil)
   function self:acquire()
     if current >= limit then
       denied = denied + 1
@@ -404,7 +404,7 @@ function M.multi(...)
 
   local self = {}
 
-  --: (key: string?) -> (boolean, number?)
+  --: (key: (string | nil)) -> (boolean, (number | nil))
   function self:allow(key)
     local max_wait = 0
     for i = 1, #limiters do

@@ -7,7 +7,7 @@ local M = {}
 local idx_mt = {}
 idx_mt.__index = idx_mt
 
---: (opts: { dims: number, metric: string? }) -> Index
+--: (opts: { dims: number, metric: (string | nil) }) -> Index
 function M.index(opts)
   local dims = opts.dims
   if not dims or dims < 1 then
@@ -26,7 +26,7 @@ function M.index(opts)
   }, idx_mt)
 end
 
---: (self: Index, id: string, vector: Vec, metadata: table?) -> (true) | (nil, string)
+--: (self: Index, id: string, vector: Vec, metadata: (table | nil)) -> (true) | (nil, string)
 function idx_mt:add(id, vector, metadata)
   if vec.len(vector) ~= self._dims then
     return nil, "vector dimension mismatch: expected " .. self._dims .. ", got " .. vec.len(vector)
@@ -44,7 +44,7 @@ function idx_mt:add(id, vector, metadata)
   return true
 end
 
---: (self: Index, items: { { id: string, vector: Vec, metadata: table? } }) -> (true) | (nil, string)
+--: (self: Index, items: { { id: string, vector: Vec, metadata: (table | nil) } }) -> (true) | (nil, string)
 function idx_mt:add_batch(items)
   for i = 1, #items do
     local item = items[i]
@@ -56,7 +56,7 @@ function idx_mt:add_batch(items)
   return true
 end
 
---: (self: Index, query: Vec, k: number, opts: { filter: ((meta: table?) -> boolean)? }?) -> { { id: string, score: number, metadata: table? } } | (nil, string)
+--: (self: Index, query: Vec, k: number, opts: ({ filter: (((meta: (table | nil)) -> boolean) | nil) } | nil)) -> { { id: string, score: number, metadata: (table | nil) } } | (nil, string)
 function idx_mt:search(query, k, opts)
   if vec.len(query) ~= self._dims then
     return nil, "query dimension mismatch: expected " .. self._dims .. ", got " .. vec.len(query)
@@ -99,7 +99,7 @@ function idx_mt:search(query, k, opts)
   return results
 end
 
---: (self: Index, id: string) -> { id: string, vector: Vec, metadata: table? }?
+--: (self: Index, id: string) -> ({ id: string, vector: Vec, metadata: (table | nil) } | nil)
 function idx_mt:get(id)
   local entry = self._entries[id]
   if not entry then return nil end

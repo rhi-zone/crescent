@@ -56,7 +56,7 @@ end
 
 -- Present value of a future sum.
 -- PV = FV / (1 + r)^n
---: (number, number, number) -> number | nil, string
+--: (number, number, number) -> (number | nil, string)
 M.pv = function(fv, rate, periods)
   if periods < 0 then return nil, "periods must be non-negative" end
   return fv / (1 + rate) ^ periods
@@ -64,7 +64,7 @@ end
 
 -- Future value of a present sum.
 -- FV = PV * (1 + r)^n
---: (number, number, number) -> number | nil, string
+--: (number, number, number) -> (number | nil, string)
 M.fv = function(pv, rate, periods)
   if periods < 0 then return nil, "periods must be non-negative" end
   return pv * (1 + rate) ^ periods
@@ -115,7 +115,7 @@ end
 
 -- Present value of an annuity (series of equal periodic payments).
 -- annuity_type: 0 = ordinary (end of period), 1 = due (beginning of period).
---: (number, number, number, number | nil) -> number | nil, string
+--: (number, number, number, number | nil) -> (number | nil, string)
 M.pv_annuity = function(pmt, rate, n, annuity_type)
   if n < 0 then return nil, "periods must be non-negative" end
   annuity_type = annuity_type or 0
@@ -129,7 +129,7 @@ M.pv_annuity = function(pmt, rate, n, annuity_type)
 end
 
 -- Future value of an annuity.
---: (number, number, number, number | nil) -> number | nil, string
+--: (number, number, number, number | nil) -> (number | nil, string)
 M.fv_annuity = function(pmt, rate, n, annuity_type)
   if n < 0 then return nil, "periods must be non-negative" end
   annuity_type = annuity_type or 0
@@ -143,7 +143,7 @@ end
 
 -- Periodic payment for a loan (ordinary annuity payment).
 -- pv: loan amount; rate: periodic rate; n: number of periods.
---: (number, number, number) -> number | nil, string
+--: (number, number, number) -> (number | nil, string)
 M.pmt = function(pv, rate, n)
   if n <= 0 then return nil, "periods must be positive" end
   if rate == 0 then return pv / n end
@@ -153,7 +153,7 @@ end
 -- Number of periods needed to reach a target future value.
 -- nper(pv, rate, pmt, fv): solve for n in fv = pv*(1+r)^n + pmt*((1+r)^n - 1)/r
 -- Assumes ordinary annuity (payments at end of period).
---: (number, number, number, number) -> number | nil, string
+--: (number, number, number, number) -> (number | nil, string)
 M.nper = function(pv, rate, pmt, fv)
   if rate == 0 then
     if pmt == 0 then return nil, "cannot solve: rate=0 and pmt=0" end
@@ -174,7 +174,7 @@ end
 
 -- Effective annual rate from nominal rate.
 -- nominal: annual nominal rate; n: compounding periods per year.
---: (number, number) -> number | nil, string
+--: (number, number) -> (number | nil, string)
 M.ear = function(nominal, n)
   if n <= 0 then return nil, "compounding periods must be positive" end
   return (1 + nominal / n) ^ n - 1
@@ -194,13 +194,13 @@ end
 
 -- APR to APY conversion (APY = EAR).
 -- apr: annual percentage rate; n: compounding periods per year.
---: (number, number) -> number | nil, string
+--: (number, number) -> (number | nil, string)
 M.apr_to_apy = function(apr, n)
   return M.ear(apr, n)
 end
 
 -- APY to APR conversion.
---: (number, number) -> number | nil, string
+--: (number, number) -> (number | nil, string)
 M.apy_to_apr = function(apy, n)
   if n <= 0 then return nil, "compounding periods must be positive" end
   return n * ((1 + apy) ^ (1 / n) - 1)
@@ -213,7 +213,7 @@ end
 -- Generate full amortization schedule for a loan.
 -- Returns array of {period, payment, principal, interest, balance}.
 -- rate: periodic rate (e.g. monthly_rate = annual_rate / 12).
---: (number, number, number) -> { [number]: { period: number, payment: number, principal: number, interest: number, balance: number } } | nil, string
+--: (number, number, number) -> ({ [number]: { period: number, payment: number, principal: number, interest: number, balance: number } } | nil, string)
 M.amortize = function(principal, rate, periods)
   if periods <= 0 then return nil, "periods must be positive" end
   if principal <= 0 then return nil, "principal must be positive" end
@@ -245,7 +245,7 @@ M.amortize = function(principal, rate, periods)
 end
 
 -- Total interest paid over the life of a loan.
---: (number, number, number) -> number | nil, string
+--: (number, number, number) -> (number | nil, string)
 M.total_interest = function(principal, rate, periods)
   local payment, err = M.pmt(principal, rate, periods)
   if not payment then return nil, err end
@@ -258,7 +258,7 @@ end
 
 -- Compute per-period simple returns from a price series.
 -- returns[i] = (prices[i+1] - prices[i]) / prices[i]
---: ({ [number]: number }) -> { [number]: number } | nil, string
+--: ({ [number]: number }) -> ({ [number]: number } | nil, string)
 M.returns = function(prices)
   if #prices < 2 then return nil, "need at least 2 prices" end
   local rets = {}
@@ -269,7 +269,7 @@ M.returns = function(prices)
 end
 
 -- Arithmetic mean of simple returns.
---: ({ [number]: number }) -> number | nil, string
+--: ({ [number]: number }) -> (number | nil, string)
 M.mean_return = function(prices)
   local rets, err = M.returns(prices)
   if not rets then return nil, err end
@@ -280,7 +280,7 @@ M.mean_return = function(prices)
 end
 
 -- Population standard deviation of log returns (volatility).
---: ({ [number]: number }) -> number | nil, string
+--: ({ [number]: number }) -> (number | nil, string)
 M.volatility = function(prices)
   if #prices < 2 then return nil, "need at least 2 prices" end
   -- log returns
@@ -300,7 +300,7 @@ M.volatility = function(prices)
 end
 
 -- Sharpe ratio: (mean_return - risk_free) / std_dev_of_log_returns.
---: ({ [number]: number }, number) -> number | nil, string
+--: ({ [number]: number }, number) -> (number | nil, string)
 M.sharpe = function(prices, risk_free_rate)
   local mean, err = M.mean_return(prices)
   if not mean then return nil, err end
@@ -313,7 +313,7 @@ end
 -- Maximum drawdown: largest peak-to-trough percentage decline.
 -- Returns {drawdown, peak_idx, trough_idx}.
 -- drawdown is a non-negative number (e.g. 0.2 = 20% decline).
---: ({ [number]: number }) -> { drawdown: number, peak_idx: number, trough_idx: number } | nil, string
+--: ({ [number]: number }) -> ({ drawdown: number, peak_idx: number, trough_idx: number } | nil, string)
 M.max_drawdown = function(prices)
   if #prices < 2 then return nil, "need at least 2 prices" end
   local max_dd --: number
@@ -341,7 +341,7 @@ end
 
 -- Compound Annual Growth Rate.
 -- CAGR = (end_value / start_value)^(1/years) - 1
---: (number, number, number) -> number | nil, string
+--: (number, number, number) -> (number | nil, string)
 M.cagr = function(start_value, end_value, years)
   if start_value <= 0 then return nil, "start_value must be positive" end
   if end_value <= 0 then return nil, "end_value must be positive" end
@@ -381,7 +381,7 @@ end
 -- Black-Scholes European call price.
 -- S: spot price, K: strike, T: time to expiry (years),
 -- r: risk-free rate, sigma: volatility.
---: (number, number, number, number, number) -> number | nil, string
+--: (number, number, number, number, number) -> (number | nil, string)
 M.bs_call = function(S, K, T, r, sigma)
   if T <= 0   then return nil, "T must be positive" end
   if sigma <= 0 then return nil, "sigma must be positive" end
@@ -392,7 +392,7 @@ M.bs_call = function(S, K, T, r, sigma)
 end
 
 -- Black-Scholes European put price.
---: (number, number, number, number, number) -> number | nil, string
+--: (number, number, number, number, number) -> (number | nil, string)
 M.bs_put = function(S, K, T, r, sigma)
   if T <= 0   then return nil, "T must be positive" end
   if sigma <= 0 then return nil, "sigma must be positive" end
@@ -403,7 +403,7 @@ M.bs_put = function(S, K, T, r, sigma)
 end
 
 -- Delta of a call option: ∂C/∂S = N(d1).
---: (number, number, number, number, number) -> number | nil, string
+--: (number, number, number, number, number) -> (number | nil, string)
 M.bs_delta_call = function(S, K, T, r, sigma)
   if T <= 0   then return nil, "T must be positive" end
   if sigma <= 0 then return nil, "sigma must be positive" end
@@ -414,7 +414,7 @@ M.bs_delta_call = function(S, K, T, r, sigma)
 end
 
 -- Delta of a put option: ∂P/∂S = N(d1) - 1.
---: (number, number, number, number, number) -> number | nil, string
+--: (number, number, number, number, number) -> (number | nil, string)
 M.bs_delta_put = function(S, K, T, r, sigma)
   if T <= 0   then return nil, "T must be positive" end
   if sigma <= 0 then return nil, "sigma must be positive" end

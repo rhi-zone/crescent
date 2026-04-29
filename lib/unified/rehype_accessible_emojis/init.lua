@@ -110,7 +110,7 @@ end
 
 -- Find the first emoji in s starting at byte offset `from`.
 -- Returns: start_byte, end_byte (inclusive), label  or nil if none found.
---: (string, number) -> any, any, any
+--: (string, number) -> (any, any, any)
 local function find_emoji(s, from)
   local i = from
   local len = #s

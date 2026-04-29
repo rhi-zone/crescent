@@ -52,7 +52,7 @@ M.analyze         = property_mod.analyze
 --: (v: string) -> string
 M.varref = function(v) return "var(" .. v .. ")" end
 
---: (spec: { classes?: { [string]: string }, ids?: { [string]: string }, vars?: { [string]: string }, anims?: { [string]: string } }) -> { classes: { [string]: string }, ids: { [string]: string }, vars: { [string]: string }, anims: { [string]: string } }
+--: (spec: { classes: ({ [string]: string } | nil), ids: ({ [string]: string } | nil), vars: ({ [string]: string } | nil), anims: ({ [string]: string }  | nil)}) -> { classes: { [string]: string }, ids: { [string]: string }, vars: { [string]: string }, anims: { [string]: string } }
 M.declare = function(spec)
   local result = {}
   if spec.classes then
@@ -200,7 +200,7 @@ M.render_keyframes = function(kf)
 end
 
 -- Renders a @media block, with optional indent prefix for nested media.
---: (block: { _type: string, query: string, items: table }, indent: string?) -> string
+--: (block: { _type: string, query: string, items: table }, indent: (string | nil)) -> string
 M.render_media = function(block, indent)
   indent = indent or ""
   local parts = { indent .. "@media " .. block.query .. " {" }

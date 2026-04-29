@@ -26,13 +26,13 @@ local function with_lorebook(data, entries)
 	return out
 end
 
---: (table, table?, string?) -> string | nil, string
+--: (table, (table | nil), (string | nil)) -> (string | nil, string)
 function M.to_png(data, entries, png_bytes)
 	local out = with_lorebook(data, entries)
 	return card_mod.to_png(out, png_bytes)
 end
 
---: (table, table?) -> string | nil, string
+--: (table, (table | nil)) -> (string | nil, string)
 function M.to_json(data, entries)
 	local out = with_lorebook(data, entries)
 	return card_mod.to_json(out)

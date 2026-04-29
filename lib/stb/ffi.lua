@@ -29,7 +29,7 @@ pcall(ffi.cdef, [[
 local function bind(lib)
   local M = {}
 
-  --: (data: string, channels?: int) -> (string, int, int, int) | (nil, string)
+  --: (data: string, channels: (int | nil)) -> (string, int, int, int) | (nil, string)
   function M.decode(data, channels)
     channels = channels or 0
     local x = ffi.new("int[1]")

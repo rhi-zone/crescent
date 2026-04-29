@@ -29,7 +29,7 @@ end
 
 -- Run a named preset with given inputs and caps.
 -- Returns preset output or nil+errmsg.
---: (string, unknown, AgentCaps) -> unknown, string | nil
+--: (string, unknown, AgentCaps) -> (unknown, string | nil)
 function M.run(name, inputs, caps)
 	local spec = registry[name]
 	if not spec then

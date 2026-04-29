@@ -222,7 +222,7 @@ end
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- Parse "host:port" -> host, port_string. Default port 80.
---: (string) -> string, string
+--: (string) -> (string, string)
 local function parse_host_port(s)
 	local h, p = s:match("^(.+):(%d+)$")
 	if h then return h, p end
@@ -253,7 +253,7 @@ end
 -- decode_chunked(data) -> decoded_body | nil, err
 -- Decodes HTTP/1.1 chunked transfer encoding.
 -- Input: raw body bytes with chunk-size\r\nchunk-data\r\n... terminating with 0\r\n\r\n
---: (string) -> string | nil, string | nil
+--: (string) -> (string | nil, string | nil)
 local function decode_chunked(data)
 	local parts = {}
 	local pos = 1
@@ -376,7 +376,7 @@ function M.http_client_cap(opts)
 	cap.methods = allowed_methods
 
 	-- Non-streaming request.
-	--: (table) -> table | nil, string
+	--: (table) -> (table | nil, string)
 	function cap.request(req)
 		if revoked then return nil, "capability revoked" end
 		if not req then return nil, "http_client: missing request" end
@@ -436,7 +436,7 @@ function M.http_client_cap(opts)
 
 	-- Streaming request. Calls on_chunk(data) for each received chunk.
 	-- Returns { status, headers } on success (body delivered via callbacks).
-	--: (table, (string) -> nil) -> table | nil, string
+	--: (table, (string) -> nil) -> (table | nil, string)
 	function cap.request_stream(req, on_chunk)
 		if revoked then return nil, "capability revoked" end
 		if not req then return nil, "http_client: missing request" end

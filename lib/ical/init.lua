@@ -24,7 +24,7 @@ local floor = math.floor
 --   20260101T100000Z  → utc=true
 --   20260101T100000   → utc=false (floating)
 --   20260101          → date-only (hour/min/sec nil)
---: (string) -> { year: integer, month: integer, day: integer, hour: integer | nil, min: integer | nil, sec: integer | nil, utc: boolean | nil } | nil, string | nil
+--: (string) -> ({ year: integer, month: integer, day: integer, hour: integer | nil, min: integer | nil, sec: integer | nil, utc: boolean | nil } | nil, string | nil)
 function M.parse_datetime(s)
   if not s then return nil, "nil input" end
   -- DATE-TIME: YYYYMMDDTHHmmss[Z]
@@ -54,7 +54,7 @@ function M.parse_datetime(s)
 end
 
 --- Parse an iCalendar DATE value.
---: (string) -> { year: integer, month: integer, day: integer } | nil, string | nil
+--: (string) -> ({ year: integer, month: integer, day: integer } | nil, string | nil)
 function M.parse_date(s)
   if not s then return nil, "nil input" end
   local year, month, day = match(s, "^(%d%d%d%d)(%d%d)(%d%d)$")
@@ -83,7 +83,7 @@ end
 
 --- Parse an RRULE value string into a table.
 -- Example: "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR"
---: (string) -> { freq: string | nil, interval: integer | nil, count: integer | nil, until: unknown | nil, byday: [string] | nil, bymonthday: [integer] | nil, bymonth: [integer] | nil, wkst: string | nil }
+--: (string) -> { freq: string | nil, interval: integer | nil, count: integer | nil, until: unknown | nil, byday: string[] | nil, bymonthday: integer[] | nil, bymonth: integer[] | nil, wkst: string | nil }
 function M.parse_rrule(s)
   local r = {}
   for part in gmatch(s, "[^;]+") do
@@ -169,7 +169,7 @@ end
 
 --- Parse a single iCalendar content line (after unfolding).
 -- Returns { name, params, value } or nil, errmsg.
---: (string) -> { name: string, params: { [string]: string }, value: string } | nil, string | nil
+--: (string) -> ({ name: string, params: { [string]: string }, value: string } | nil, string | nil)
 function M.parse_property(line)
   if not line or line == "" then return nil, "empty line" end
 
@@ -238,7 +238,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Unfold RFC 5545 content lines (CRLF + whitespace continuation).
---: (string) -> [string]
+--: (string) -> string[]
 local function unfold_lines(s)
   -- Normalize line endings to \n
   s = gsub(s, "\r\n", "\n")
@@ -390,7 +390,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Parse an iCalendar string into a calendar table.
---: (string) -> { version: string | nil, prodid: string | nil, calscale: string | nil, method: string | nil, events: unknown, todos: unknown, journals: unknown, freebusys: unknown, timezones: unknown } | nil, string | nil
+--: (string) -> ({ version: string | nil, prodid: string | nil, calscale: string | nil, method: string | nil, events: unknown, todos: unknown, journals: unknown, freebusys: unknown, timezones: unknown } | nil, string | nil)
 function M.parse(s)
   if not s then return nil, "nil input" end
 

@@ -6,9 +6,9 @@ end
 --- Synchronous execution — no scheduler needed.
 local M = {}
 
---:: Observer = { next: (unknown) -> (), error: ((string) -> ())?, complete: (() -> ())? }
+--:: Observer = { next: (unknown) -> (), error: (((string) -> ()) | nil), complete: ((() -> ()) | nil) }
 --:: Teardown = () -> ()
---:: SubscribeFn = (Observer) -> Teardown?
+--:: SubscribeFn = (Observer) -> (Teardown | nil)
 
 --- Observable object. Created via M.create, M.of, M.from_array, etc.
 local Observable = {}
@@ -94,7 +94,7 @@ end
 --- Subscribe to this observable.
 --- observer is a table with optional next, error, complete functions.
 --- Returns a teardown function (or nil).
---: (Observer) -> Teardown?
+--: (Observer) -> (Teardown | nil)
 function Observable:subscribe(observer)
   local safe = safe_observer(observer)
   local ok, teardown = pcall(self._subscribe, safe)

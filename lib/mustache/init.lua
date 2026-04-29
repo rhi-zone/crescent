@@ -1,6 +1,6 @@
 if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
 
---: { render: (string, table, table?) -> (string?, string?), compile: (string) -> (table?, string?) }
+--: { render: (string, table, (table | nil)) -> ((string | nil), (string | nil)), compile: (string) -> ((table | nil), (string | nil)) }
 local M = {}
 
 -- HTML escape map
@@ -83,7 +83,7 @@ end
 -- non-text tokens between that text and the current tag on the same line.
 -- Returns: is_standalone, pre_text_idx (index of preceding text token to trim, or 0 for start),
 -- and the newline string to skip after the tag (or "" at end of template).
---: (string, number, number, table[], number) -> (boolean, number?, string?)
+--: (string, number, number, table[], number) -> (boolean, (number | nil), (string | nil))
 local function check_standalone(template, tag_start, tag_end, tokens, len)
   -- Check preceding: either start of template or only whitespace since last newline
   local pre_text_idx = nil
@@ -164,7 +164,7 @@ end
 -- Forward declaration
 local render_tokens
 
---: (string, string, string) -> (table[]?, string?)
+--: (string, string, string) -> (table[] | nil, string | nil)
 local function compile_tokens(template, otag, ctag)
   local tokens = {}
   local i = 1
@@ -355,7 +355,7 @@ local function compile_tokens(template, otag, ctag)
   return tokens, nil
 end
 
---: (table[], table[], table?, string, string) -> string
+--: (table[], table[], (table | nil), string, string) -> string
 render_tokens = function(tokens, stack, partials, otag, ctag)
   local buf = {}
   for _, tok in ipairs(tokens) do
@@ -433,14 +433,14 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
   return table.concat(buf)
 end
 
---: (string) -> (table?, string?)
+--: (string) -> ((table | nil), (string | nil))
 function M.compile(template)
   local tokens, err = compile_tokens(template, "{{", "}}")
   if not tokens then return nil, err end
   local compiled = {
     _tokens = tokens,
   }
-  --: (table, table?) -> (string?, string?)
+  --: (table, (table | nil)) -> ((string | nil), (string | nil))
   function compiled:render(data, partials)
     local stack = { data }
     local ok2, result = pcall(render_tokens, self._tokens, stack, partials, "{{", "}}")
@@ -450,7 +450,7 @@ function M.compile(template)
   return compiled, nil
 end
 
---: (string, table, table?) -> (string?, string?)
+--: (string, table, (table | nil)) -> ((string | nil), (string | nil))
 function M.render(template, data, partials)
   local compiled, err = M.compile(template)
   if not compiled then return nil, err end

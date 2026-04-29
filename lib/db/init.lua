@@ -93,7 +93,7 @@ local function query_column_names(db, sql)
 	return names
 end
 
---: (fun():...unknown, string[]) -> table[]
+--: (() -> (...unknown), string[]) -> table[]
 local function collect_rows(iter, col_names)
 	local rows = {}
 	while true do
@@ -113,7 +113,7 @@ end
 local Select = {}
 Select.__index = Select
 
---: (Select, ...) -> Select
+--: (Select, ...unknown) -> Select
 function Select:columns(...)
 	local q = shallow_copy(self)
 	q._columns = { ... }
@@ -168,7 +168,7 @@ function Select:_build()
 	return sql, params
 end
 
---: (Select) -> (string[]?, string?)
+--: (Select) -> (string[] | nil, string | nil)
 function Select:_resolve_col_names()
 	if self._columns and #self._columns > 0 then
 		return self._columns
@@ -176,7 +176,7 @@ function Select:_resolve_col_names()
 	return get_column_names(self._db, self._table)
 end
 
---: (Select) -> (table[]?, string?)
+--: (Select) -> (table[] | nil, string | nil)
 function Select:all()
 	local sql, params = self:_build()
 	local iter, err = self._db:query(sql, unpack(params))
@@ -186,7 +186,7 @@ function Select:all()
 	return collect_rows(iter, col_names)
 end
 
---: (Select) -> (table?, string?)
+--: (Select) -> ((table | nil), (string | nil))
 function Select:first()
 	local q = self:limit(1)
 	local rows, err = q:all()
@@ -194,7 +194,7 @@ function Select:first()
 	return rows[1]
 end
 
---: (Select) -> (number?, string?)
+--: (Select) -> ((number | nil), (string | nil))
 function Select:count()
 	local sql, params = self:_build()
 	local count_sql = "SELECT COUNT(*) FROM (" .. sql .. ")"
@@ -216,7 +216,7 @@ function Insert:values(vals)
 	return setmetatable(q, Insert)
 end
 
---: (Insert, ...) -> Insert
+--: (Insert, ...unknown) -> Insert
 function Insert:returning(...)
 	local q = shallow_copy(self)
 	q._returning = { ... }
@@ -242,13 +242,13 @@ function Insert:_build()
 	return sql, params
 end
 
---: (Insert) -> (true?, string?)
+--: (Insert) -> ((true | nil), (string | nil))
 function Insert:exec()
 	local sql, params = self:_build()
 	return self._db:execute(sql, unpack(params))
 end
 
---: (Insert) -> (table?, string?)
+--: (Insert) -> ((table | nil), (string | nil))
 function Insert:first()
 	local sql, params = self:_build()
 	local iter, err = self._db:query(sql, unpack(params))
@@ -303,7 +303,7 @@ function Update:_build()
 	return sql, params
 end
 
---: (Update) -> (true?, string?)
+--: (Update) -> ((true | nil), (string | nil))
 function Update:exec()
 	local sql, params = self:_build()
 	return self._db:execute(sql, unpack(params))
@@ -337,7 +337,7 @@ function Delete:_build()
 	return sql, params
 end
 
---: (Delete) -> (true?, string?)
+--: (Delete) -> ((true | nil), (string | nil))
 function Delete:exec()
 	local sql, params = self:_build()
 	return self._db:execute(sql, unpack(params))
@@ -393,12 +393,12 @@ function Conn:delete(table_name)
 	}, Delete)
 end
 
---: (Conn, string, ...unknown) -> (true?, string?)
+--: (Conn, string, ...unknown) -> ((true | nil), (string | nil))
 function Conn:exec(sql, ...)
 	return self._db:execute(sql, ...)
 end
 
---: (Conn, string, ...unknown) -> (table[]?, string?)
+--: (Conn, string, ...unknown) -> (table[] | nil, string | nil)
 function Conn:query(sql, ...)
 	local iter, err = self._db:query(sql, ...)
 	if not iter then return nil, err end
@@ -406,14 +406,14 @@ function Conn:query(sql, ...)
 	return collect_rows(iter, col_names)
 end
 
---: (Conn, string, ...unknown) -> (table?, string?)
+--: (Conn, string, ...unknown) -> ((table | nil), (string | nil))
 function Conn:query_one(sql, ...)
 	local rows, err = self:query(sql, ...)
 	if not rows then return nil, err end
 	return rows[1]
 end
 
---: (Conn, fun(Conn):...unknown) -> ...unknown
+--: (Conn, (Conn) -> (...unknown)) -> (...unknown)
 function Conn:transaction(fn)
 	local ok, err = self._db:execute("BEGIN")
 	if not ok then return nil, err end
@@ -445,7 +445,7 @@ function Conn:migration_version()
 	return ver
 end
 
---: (Conn, table[]) -> (true?, string?)
+--: (Conn, table[]) -> ((true | nil), (string | nil))
 function Conn:migrate(migrations)
 	local ok, err = self._db:execute(
 		"CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
@@ -494,7 +494,7 @@ end
 
 -- ── Public API ──────────────────────────────────────────────────────────────
 
---: (string) -> (Conn?, string?)
+--: (string) -> ((Conn | nil), (string | nil))
 function M.connect(path)
 	local db, err = sqlite.open(path)
 	if not db then return nil, err end

@@ -97,7 +97,7 @@ function Heap:insert(key, value)
 end
 
 --- Get minimum key and value without removing. Returns nil, nil if empty.
---: (self: Heap) -> unknown, unknown
+--: (self: Heap) -> (unknown, unknown)
 function Heap:peek()
   normalize(self)
   if self._root == nil then return nil, nil end
@@ -105,7 +105,7 @@ function Heap:peek()
 end
 
 --- Remove and return minimum key and value. Returns nil, nil if empty.
---: (self: Heap) -> unknown, unknown
+--: (self: Heap) -> (unknown, unknown)
 function Heap:pop()
   normalize(self)
   if self._root == nil then return nil, nil end
@@ -123,7 +123,7 @@ end
 --- Decrease key of a handle (lazy: mark old node removed, insert new node).
 -- new_key must have higher priority than old_key (i.e. cmp(new_key, old_key) == true
 -- or new_key == old_key). Returns new handle on success, nil + err on failure.
---: (self: Heap, handle: handle, new_key: unknown) -> handle | nil, string | nil
+--: (self: Heap, handle: handle, new_key: unknown) -> (handle | nil, string | nil)
 function Heap:decrease_key(handle, new_key)
   if handle.removed then
     return nil, "handle is already removed"

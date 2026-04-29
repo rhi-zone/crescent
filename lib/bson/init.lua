@@ -510,7 +510,7 @@ end
 --- Decode a BSON document from bytes.
 -- pos defaults to 1.
 -- Returns: table, pos_after, nil on success; nil, nil, errmsg on error.
---: (bytes: string, pos: number) -> unknown, number, nil | (nil, nil, string)
+--: (bytes: string, pos: number) -> (unknown, number, nil | (nil, nil, string))
 function M.decode(bytes, pos)
 	if type(bytes) ~= "string" then
 		return nil, nil, "expected string"

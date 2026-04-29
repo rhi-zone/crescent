@@ -190,7 +190,7 @@ end
 --- Convert back to Lua (value, errmsg) convention.
 --- Ok(val) -> val, nil
 --- Err(e)  -> nil, e
---: () -> unknown, unknown
+--: () -> (unknown, unknown)
 function Result:to_pair()
   if self._tag == OK then
     return self._val, nil
