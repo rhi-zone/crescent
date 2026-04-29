@@ -1,6 +1,6 @@
 local ffi = require("ffi")
 
-local tls_c = --[[:$FfiC]] ffi.load("tls")
+local tls_c = ffi.load("tls") --[[:! $FfiC]]
 ffi.cdef [[
 	struct tls {};
 	struct tls_config {};
