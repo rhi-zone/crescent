@@ -273,6 +273,33 @@ adding it would extend coverage to the unknown-specific case (Repro 4).
 
 ---
 
+## Gap 9 — `local x --: T` (no initializer) silently accepted
+
+**File:** `constrain.lua` around line 2440 (same code path as Gap 8: annotated local binding).
+**Severity:** High (false negative; same family as Gap 8)
+
+**Repro:**
+
+```lua
+local y --: integer
+print(y + 1)   -- typechecks; runtime: attempt to perform arithmetic on local 'y' (a nil value)
+```
+
+The annotation declares `y: integer`, but with no initializer the runtime
+value is `nil`. The checker accepts every subsequent read of `y` as if it were
+an `integer`. This is the same family as Gap 8 — an annotated local binding
+whose declared type is not enforced against the actual binding — and likely
+shares the same code path in `constrain.lua` near line 2440.
+
+**Expected behaviour:** either reject the declaration (require an initializer
+when the annotation is present and `nil` is not in the type), or widen the
+annotated type to `T | nil` so subsequent reads must narrow before use. The
+former is stricter; the latter matches Lua's runtime semantics.
+
+**Status:** Open. Fix together with Gap 8.
+
+---
+
 ## Not-a-gap: TAG_NAMED permissiveness in try_unify
 
 `unify.lua:603` returns `true` for `TAG_NAMED` on either side. Named types
@@ -295,6 +322,7 @@ replaced by full structural checking once resolution completes.
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
 | 7 | LIT_INTEGER cross-file | Low | Edge case, deferred |
 | 8 | `local x --: T = expr_of_unknown` | High | `unknown` silently passes annotated local-init |
+| 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T` |
 
 **Recommended fix order:**
 1. Gap 5 (trivial: add `seen` table to `make_intersection`)

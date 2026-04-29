@@ -456,6 +456,13 @@ Items that currently lack an implementer-ready spec:
   "annotation enforcement gotcha" note in `lib/type/static/CLAUDE.md` is a
   symptom of this same gap.
 
+- [ ] **Soundness gap 9: `local x --: T` (no initializer) silently accepted.** Same family as Gap 8 — annotated local whose declared type is not enforced against the actual binding. Runtime value is `nil` but type says `T`:
+  ```lua
+  local y --: integer
+  print(y + 1)   -- typechecks; runtime: nil + 1 errors
+  ```
+  Likely the same code path in `constrain.lua` near line 2440. Fix: either reject the declaration (require an initializer when `nil` is not in the type), or widen to `T | nil` so reads must narrow before use. See `docs/soundness-audit.md` Gap 9.
+
 - [ ] **Add fuzz invariant for `local x --: T = expr` annotation enforcement.** Existing annotation-soundness invariants use function returns as the harness, missing the local-init path entirely (which is why Gap 8 survived). Add: for `expr` of type `U` and annotation `T`, expect an error iff `U </: T`. Combine with `unknown` in the type generator (see next item) for full coverage.
 
 - [ ] **Add `unknown` to `fuzz_arb.lua` type generator.** Currently absent (see `lib/type/static/CLAUDE.md` "Generator coverage"). Adding it will let the new annotation invariant cover the `unknown <: T` case, plus narrow / type-guard / call-result invariants currently blind to the unknown boundary.
