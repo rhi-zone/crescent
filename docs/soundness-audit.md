@@ -379,6 +379,97 @@ still leaves the silent-mis-parse path in place.
 
 ---
 
+## Gap 11 — `--[[: any]] expr` launders any type, including `unknown`
+
+**File:** `constrain.lua:2138-2147` (cast emits `C_SUB(inner, cast_tid)` and
+returns `cast_tid`); `unify.lua:269-276` (`TAG_ANY` is bilateral — `unify`
+returns `true` whenever either side is `any`).
+**Severity:** High (false negative; contradicts a documented guarantee)
+
+**Repro:**
+
+```lua
+local x --: unknown
+x = nil
+local n = --[[: any]] x          -- accepted; n: any
+local r = n + 1                  -- accepted; runtime: arithmetic on nil
+```
+
+The cast `--[[: any]] x` emits `C_SUB(unknown, any)`. In `unify.lua:273-276`
+`tb.tag == TAG_ANY` returns `true` unconditionally, so the constraint passes
+and the cast expression's surface type becomes `any`. Every subsequent use
+treats the value as `any`, which is bilaterally assignable to anything —
+including `integer` for the arithmetic check.
+
+This contradicts the documented invariant in `docs/type-syntax.md`:
+
+> `unknown` cannot be cast away ... Because the cast is a checked subtype
+> assertion, it cannot rescue a value of type `unknown`.
+
+The guarantee holds only for *concrete* target types — `--[[: string]] v`
+where `v: unknown` is correctly rejected (`unify.lua:287-294`). It does not
+hold when the target is `any`, which is the *one* type the user can write to
+opt out. The type system treats `any` as a deliberate escape hatch, but the
+cast form makes the escape pointwise and silent: a single `--[[: any]]`
+launders one expression with no annotation on the surrounding binding to flag
+the opt-out.
+
+**Distinct from Gap 8.** Gap 8 is about `local x --: T = expr` not enforcing
+the subtype check at all (the constraint emission path is broken). Gap 11 is
+about the constraint emitting correctly and `unify` accepting it because
+`TAG_ANY` short-circuits. Fixing Gap 8 does not affect Gap 11; fixing Gap 11
+does not affect Gap 8.
+
+**Generalisation.** The repro uses `unknown` because it is the most
+load-bearing case — the type system's "must narrow" boundary. The same
+laundering applies for any source type:
+
+```lua
+local s = "hello"
+local n = --[[: any]] s          -- n: any
+local r = n + 1                  -- accepted; runtime: arith on string
+```
+
+Here the user is explicit: they wrote `--[[: any]]`, opting out. That is
+defensible. The unknown case is not — `unknown` is the one type whose whole
+purpose is to force narrowing, and `--[[: any]]` defeats it without any
+warning that the source type was `unknown`.
+
+**Fix direction:** Reject `unknown <: any` in the cast path. Two shapes:
+
+1. *Conservative:* in the cast solver path (`solve.lua:436-450` already
+   distinguishes `c[6] == is_cast`), additionally reject when the actual
+   widened type is `unknown` and the expected is `any` — emit "cannot cast
+   `unknown` to `any`; narrow first". Other paths that emit `C_SUB` to `any`
+   (e.g. assignment to an `any`-typed binding) are not the same problem and
+   should remain bilateral.
+2. *Stricter (recommended):* make `unknown <: any` always fail in `unify`
+   regardless of context. `any` is an opt-out the user must declare on the
+   *binding* (e.g. `local x --: any`), not on a single use site. This
+   matches the spirit of "unknown must be narrowed before use" — `any` is a
+   form of "use" and should not be an exit valve.
+
+The stricter fix is consistent with the existing rule in `unify.lua:287-294`
+that `unknown <: T` for any concrete `T` is rejected. Treating `any` like
+any other concrete `T` for this one check closes the laundering path
+without weakening `any`'s general bilateral semantics elsewhere.
+
+**Cross-reference.** Trailing-form casts (`expr --[[: T]]`) do not actually
+attach to `expr` — the parser treats the block annotation as a *prefix* cast
+on the next simple expression (`parse.lua:282-339`). When a statement
+boundary follows, the trailing cast is silently dropped (`parse.lua:689`
+clears `_pending_cast_id` before a statement keyword). This is a separate
+parser-level footgun: code like `local n = "hello" --[[: integer]]` looks
+like a cast on `"hello"` but is a no-op, and `n` binds to `"hello"`. It is
+not Gap 11 (which is about the prefix cast's behaviour when target is
+`any`); it belongs in a future gap or a `docs/type-syntax.md` clarification.
+The current type-syntax doc correctly shows only the prefix form, so users
+following the documentation will not hit the trailing-form trap.
+
+**Status:** Open.
+
+---
+
 ## Not-a-gap: TAG_NAMED permissiveness in try_unify
 
 `unify.lua:603` returns `true` for `TAG_NAMED` on either side. Named types
@@ -403,11 +494,13 @@ replaced by full structural checking once resolution completes.
 | 8 | `local x --: T = expr_of_unknown` | High | `unknown` silently passes annotated local-init |
 | 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T`; compounded by the Gap 10 parser bug |
 | 10 | Parser accepts invalid `--:` syntax | High | `--: integer = x` is not a valid type but parser silently accepts the `integer` prefix and drops the rest; enables the Gap 9 footgun |
+| 11 | `--[[: any]] expr` launders `unknown` | High | Cast to `any` accepts every source type including `unknown`, defeating the documented "unknown cannot be cast away" guarantee |
 
 **Recommended fix order:**
 1. Gap 5 (trivial: add `seen` table to `make_intersection`)
 2. Gap 10 (small, ann.lua: reject when scanner has unconsumed content after parse_type) — must precede or accompany Gap 9
 3. Gap 9 (TS-style "no initializer + nil ∉ T → reject" rule in constrain.lua)
-4. Gap 1 (requires distinguishing constrained vs. unconstrained TAG_VAR in try_unify)
-5. Gap 4 (occurs check in bind_var)
-6. Gap 3 (variance annotations — design required before implementation)
+4. Gap 11 (small, unify.lua: reject `unknown <: any`)
+5. Gap 1 (requires distinguishing constrained vs. unconstrained TAG_VAR in try_unify)
+6. Gap 4 (occurs check in bind_var)
+7. Gap 3 (variance annotations — design required before implementation)
