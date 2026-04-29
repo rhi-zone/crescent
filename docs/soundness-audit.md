@@ -291,12 +291,92 @@ an `integer`. This is the same family as Gap 8 — an annotated local binding
 whose declared type is not enforced against the actual binding — and likely
 shares the same code path in `constrain.lua` near line 2440.
 
-**Expected behaviour:** either reject the declaration (require an initializer
-when the annotation is present and `nil` is not in the type), or widen the
-annotated type to `T | nil` so subsequent reads must narrow before use. The
-former is stricter; the latter matches Lua's runtime semantics.
+### Syntax trap (exacerbating factor)
 
-**Status:** Open. Fix together with Gap 8.
+The line *looks like* an annotated assignment but isn't. Lua `--` runs to
+end-of-line, so:
+
+```lua
+local y --: integer = x       -- looks like: local y of type integer, initialised from x
+```
+
+actually parses as:
+
+- `local y` — declaration with **no initializer**
+- `--: integer = x` — line comment; the annotation parser reads the content
+  as `integer = x`, the type-parser consumes `integer`, and the trailing `= x`
+  is silently dropped (see Gap 10).
+
+So a programmer writing what they think is "annotated assignment" silently
+gets the no-initializer form, hits this gap, and `y` is `nil` at runtime
+while typed as `integer`. Verified 2026-04-29: even
+`local y --: integer = "string literal"` and `local y --: integer ! ! ! garbage`
+typecheck with 0 diagnostics.
+
+The correct annotated-assignment forms are:
+
+```lua
+local y = --[[: integer]] x         -- block-comment cast
+local y --:: ann_decl_local         -- not yet implemented
+```
+
+…neither of which most authors will reach for first. The `local y --: T = x`
+form is the obvious thing to type, parses without complaint, and silently
+breaks. Until Gap 10 is fixed, this is a footgun *that looks like correct
+code*.
+
+**Expected behaviour:** match TypeScript's definite-assignment analysis —
+reject reads of `local y --: T` (no initializer) before assignment. The
+practical first step is the strictly-weaker rule "reject the declaration when
+`nil` is not in `T` and there is no initializer". Full TS-style flow analysis
+(allowing the declaration but tracking definite assignment along each path)
+is out of scope for an immediate fix.
+
+A weaker fallback would be to widen the declared type to `T | nil` so reads
+must narrow before use. This matches Lua's runtime semantics but loses the
+intent the annotation expressed; prefer rejection.
+
+**Status:** Open. Fix together with Gap 8 and Gap 10 (the syntax trap is
+load-bearing — fixing Gap 9 alone still leaves silent-mis-parse cases
+because Gap 10 means the trailing `= x` is dropped before Gap 9's check ever
+runs).
+
+---
+
+## Gap 10 — Annotation parser silently drops trailing tokens
+
+**File:** `ann.lua:1153–1155` (the `ANN_TYPE` branch returns immediately after
+`parse_type(s)` without checking for end-of-input).
+**Severity:** High (false negative; enables the Gap 9 syntax trap)
+
+**Repro:**
+
+```lua
+local y --: integer = "string literal"     -- 0 errors
+local y --: integer ! ! ! garbage          -- 0 errors
+local y --: integer = totally_undefined    -- 0 errors (identifier never resolved)
+```
+
+After `parse_type` consumes the `integer` token, the scanner still has
+content (`= "string literal"`, `! ! ! garbage`, `= totally_undefined`)
+that is silently discarded. `lex.lua:586–595` captures the entire rest of
+the source line as `ann.content`, then `ann.lua` parses one type and returns.
+There is no "expected end of annotation" check.
+
+This is what makes Gap 9 dangerous: the user's `= x` initializer is consumed
+by the comment, the annotation parser silently accepts it, and the result is
+a no-initializer declaration that nothing flags. Without Gap 10 the user
+would at least see "unexpected `=` after type annotation" and realise the
+syntax doesn't do what they thought.
+
+**Fix:** in `ann.lua` after `parse_type(s)` for `ANN_TYPE` (and analogously
+for `ANN_TYPE_ARGS` / the type tail of `ANN_DECL`), assert the scanner has
+consumed all non-whitespace content and emit a diagnostic otherwise.
+Comparable check should cover `ANN_DECL` after the trailing type and
+`--:: declare` / `--:: newtype` forms.
+
+**Status:** Open. Fix before or together with Gap 9 — fixing Gap 9 alone
+still leaves the silent-mis-parse path in place.
 
 ---
 
@@ -322,10 +402,13 @@ replaced by full structural checking once resolution completes.
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
 | 7 | LIT_INTEGER cross-file | Low | Edge case, deferred |
 | 8 | `local x --: T = expr_of_unknown` | High | `unknown` silently passes annotated local-init |
-| 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T` |
+| 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T`; compounded by Gap 10's syntax trap |
+| 10 | Annotation parser drops trailing tokens | High | `local y --: T = x` silently parses as no-initializer + dropped `= x`; enables the Gap 9 footgun |
 
 **Recommended fix order:**
 1. Gap 5 (trivial: add `seen` table to `make_intersection`)
-2. Gap 1 (requires distinguishing constrained vs. unconstrained TAG_VAR in try_unify)
-3. Gap 4 (occurs check in bind_var)
-4. Gap 3 (variance annotations — design required before implementation)
+2. Gap 10 (small, ann.lua: assert scanner end-of-content after parse_type) — must precede or accompany Gap 9
+3. Gap 9 (TS-style "no initializer + nil ∉ T → reject" rule in constrain.lua)
+4. Gap 1 (requires distinguishing constrained vs. unconstrained TAG_VAR in try_unify)
+5. Gap 4 (occurs check in bind_var)
+6. Gap 3 (variance annotations — design required before implementation)
