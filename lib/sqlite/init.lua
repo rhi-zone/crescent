@@ -59,17 +59,12 @@ local SQLITE_TEXT    = 3
 local SQLITE_BLOB    = 4
 local SQLITE_NULL    = 5
 
---[[@type sqlite_ffi]]
-local sqlite_ffi
-local sqlite_loaded_from
-if ffi.os == "Windows" then
-	if ffi.arch == "x64" then
-		sqlite_loaded_from = "dep/sqlite.dll"
-	else
-		sqlite_loaded_from = "dep/sqlite-x86.dll"
+local function load_sqlite()
+	if ffi.os == "Windows" then
+		local name = ffi.arch == "x64" and "dep/sqlite.dll" or "dep/sqlite-x86.dll"
+		local lib = ffi.load(name) --[[:! $FfiC]]
+		return lib, name
 	end
-	sqlite_ffi = ffi.load(sqlite_loaded_from)
-else
 	-- Build vendored name first (platform-specific compiled libraries).
 	local function vendored_name()
 		local os, arch = ffi.os, ffi.arch
@@ -83,7 +78,7 @@ else
 	end
 	local names = {}
 	local v = vendored_name()
-	if v then names[#names + 1] = v end
+	if v ~= nil then names[#names + 1] = v end
 	names[#names + 1] = "sqlite3"
 	names[#names + 1] = "libsqlite3.so"
 	names[#names + 1] = "libsqlite3.so.0"          -- Linux system
@@ -91,12 +86,15 @@ else
 	names[#names + 1] = "/usr/lib/libsqlite3.dylib" -- macOS system
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
-		if ok then sqlite_ffi = lib; sqlite_loaded_from = name; break end
+		if ok then
+			local raw = lib --: unknown
+			local typed = raw --[[:! $FfiC]]
+			return typed, name
+		end
 	end
-	if not sqlite_ffi then
-		error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
-	end
+	error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
 end
+local sqlite_ffi, sqlite_loaded_from = load_sqlite()
 
 mod._tier = "system-sqlite"
 mod._loaded_from = sqlite_loaded_from
