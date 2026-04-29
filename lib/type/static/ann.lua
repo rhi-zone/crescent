@@ -203,6 +203,22 @@ local function at_end(s)
     return s.pos > s.len
 end
 
+-- assert_eof: enforces that an annotation handler consumed all of its content.
+-- Annotations have grammar `<thing>` — full stop. Trailing tokens are not part
+-- of any production; they indicate that the content was not actually a valid
+-- annotation. `--: integer = x` is invalid because `integer = x` is not a
+-- type, not because there's something "after" a type.
+--: (Scanner, string) -> nil
+local function assert_eof(s, what)
+    skip_ws(s)
+    if s.pos <= s.len then
+        local rest = sub(s.src, s.pos)
+        -- Trim to ~32 bytes for the diagnostic.
+        if #rest > 32 then rest = sub(rest, 1, 32) .. "..." end
+        scan_error(s, "`" .. rest .. "` is not part of " .. what)
+    end
+end
+
 ---------------------------------------------------------------------------
 -- Type expression parser
 ---------------------------------------------------------------------------
@@ -1152,6 +1168,7 @@ function M.parse_annotations(annotations, pool, filename)
         local ok, result = pcall(function()
             if ann.kind == defs.ANN_TYPE then
                 local type_id = parse_type(s)
+                assert_eof(s, "a type annotation")
                 return { kind = defs.ANN_TYPE, type_id = type_id }
             elseif ann.kind == defs.ANN_DECL then
                 -- Parse "Name = type" or "Name<T, U> = type" or "newtype Name = type"
@@ -1161,6 +1178,7 @@ function M.parse_annotations(annotations, pool, filename)
                 -- --:: template — marks the next function definition as a template.
                 -- No further tokens on this line; the annotation has no type_id.
                 if word == "template" then
+                    assert_eof(s, "a `--:: template` annotation")
                     return { kind = defs.ANN_TEMPLATE }
                 end
                 if word == "declare" then
@@ -1169,6 +1187,7 @@ function M.parse_annotations(annotations, pool, filename)
                     local vname_id = intern_mod.intern(pool, vname)
                     expect_char(s, "=")
                     local type_id = parse_type(s)
+                    assert_eof(s, "a `--:: declare` annotation")
                     return { kind = defs.ANN_DECL, type_id = type_id, name_id = vname_id, decl_var = true }
                 end
                 -- module "name": T  — declares the type returned by require("name")
@@ -1176,11 +1195,13 @@ function M.parse_annotations(annotations, pool, filename)
                     local mod_name = scan_string(s)
                     expect_char(s, ":")
                     local type_id = parse_type(s)
+                    assert_eof(s, "a `--:: module` annotation")
                     return { kind = defs.ANN_MODULE, mod_name = mod_name, type_id = type_id }
                 end
                 -- require "mod.path" — load a declaration file into scope
                 if word == "require" then
                     local mod_name = scan_string(s)
+                    assert_eof(s, "a `--:: require` annotation")
                     return { kind = defs.ANN_REQUIRE, mod_name = mod_name }
                 end
                 -- augment Name { field: T, ... } — merge fields into an existing type binding
@@ -1195,6 +1216,7 @@ function M.parse_annotations(annotations, pool, filename)
                         scan_error(s, "expected '{' after augment name")
                     end
                     local type_id = parse_type(s)
+                    assert_eof(s, "a `--:: augment` annotation")
                     return { kind = defs.ANN_AUGMENT, name_id = aug_name_id, type_id = type_id }
                 end
                 -- unseal Name — rebinds opaque variable to its inner type in current scope
@@ -1202,6 +1224,7 @@ function M.parse_annotations(annotations, pool, filename)
                     local name = scan_word(s)
                     if not name then scan_error(s, "expected identifier after 'unseal'") end
                     local name_id = intern_mod.intern(pool, name)
+                    assert_eof(s, "a `--:: unseal` annotation")
                     return { kind = defs.ANN_UNSEAL, name_id = name_id }
                 end
                 if word == "newtype" then
@@ -1215,6 +1238,7 @@ function M.parse_annotations(annotations, pool, filename)
                     nt.data[0] = name_id
                     nt.data[1] = 0
                     nt.data[2] = underlying
+                    assert_eof(s, "a `--:: newtype` annotation")
                     return { kind = defs.ANN_DECL, type_id = nom, name_id = name_id, newtype = true }
                 end
                 -- Regular: Name<T...> = type  or  Name<T: Bound, ...> = type
@@ -1313,6 +1337,7 @@ function M.parse_annotations(annotations, pool, filename)
                 end
                 expect_char(s, "=")
                 local type_id = parse_type(s)
+                assert_eof(s, "a `--::` declaration")
                 local tps, tpl = 0, 0
                 if type_params then
                     local _tps, _tpl = flush_type_list(type_params)
@@ -1378,6 +1403,7 @@ function M.parse_annotations(annotations, pool, filename)
                     if not opt_char(s, ",") then break end
                 end
                 expect_char(s, ">")
+                assert_eof(s, "a `--:<...>` type-args annotation")
                 local as, al = flush_type_list(args)
                 return {
                     kind = defs.ANN_TYPE_ARGS,
@@ -1395,9 +1421,20 @@ function M.parse_annotations(annotations, pool, filename)
             results[line] = result
         elseif not ok and s.depth_limit_hit then
             -- Re-throw depth-limit errors so the outer pcall in constrain.lua can
-            -- report them as diagnostics. Other parse errors are silently skipped
-            -- (or have already been recorded in parse_errors above).
+            -- report them as diagnostics.
             error(result, 0)
+        elseif not ok then
+            -- Surface the parse error as a diagnostic. The error message produced
+            -- by scan_error has the form "<file>:<line>: annotation: <msg> (at col <c>)".
+            -- Strip the prefix so the diagnostic carries just the message; the
+            -- error reporter will add the file/line context back.
+            local msg = tostring(result)
+            local stripped = msg:match("^[^:]*:%d+:%s*annotation:%s*(.+)$") or msg
+            parse_errors[#parse_errors + 1] = {
+                line = line,
+                col = (ann.col or 0),
+                msg = stripped,
+            }
         end
     end
 

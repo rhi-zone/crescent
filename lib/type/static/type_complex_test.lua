@@ -1159,8 +1159,8 @@ local x --: ValueOf<{ name: string }>
         no_error([[
 --:: DescribeMap<T> = match T { { len: %L, [string]: %V } => { value: V, len: L } }
 local x --: DescribeMap<{ len: integer, [string]: number }>
-local v --: number  = x.value
-local l --: integer = x.len
+local v = x.value --: number
+local l = x.len --: integer
 ]])
     end)
 end)

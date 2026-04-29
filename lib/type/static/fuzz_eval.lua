@@ -57,7 +57,7 @@ end
 local function check_sub(a_str, b_str)
 	local src = FIXED_SCOPE
 		.. "local _fuzz_a --: " .. a_str .. "\n"
-		.. "local _fuzz_b --: " .. b_str .. " = _fuzz_a\n"
+		.. "local _fuzz_b = _fuzz_a --: " .. b_str .. "\n"
 	return typechecks(src)
 end
 
@@ -71,7 +71,7 @@ end
 local function check_sub_ext(a_str, b_str, extra_scope)
 	local src = extra_scope .. FIXED_SCOPE
 		.. "local _fuzz_a --: " .. a_str .. "\n"
-		.. "local _fuzz_b --: " .. b_str .. " = _fuzz_a\n"
+		.. "local _fuzz_b = _fuzz_a --: " .. b_str .. "\n"
 	return typechecks(src)
 end
 

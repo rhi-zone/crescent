@@ -445,6 +445,57 @@ assert.describe("lex: annotations", function()
     end)
 end)
 
+assert.describe("ann: invalid annotation rejected", function()
+    -- Verifies that annotation parsing is total: a `--:` annotation must
+    -- consume its entire content as a type expression, not just a prefix.
+    -- Trailing junk does not silently disappear; it produces a diagnostic.
+    --
+    -- Direct ann.parse_annotations() use, because the lex captures the full
+    -- rest-of-line as content; here we hand-build the annotation table to
+    -- exercise just the parser.
+    local function parse_one(content, kind)
+        local pool = intern.new()
+        local annotations = {
+            [1] = { kind = kind or defs.ANN_TYPE, content = content, col = 1 },
+        }
+        local ar = ann.parse_annotations(annotations, pool, "test")
+        return ar
+    end
+
+    assert.it("--: integer = x — trailing tokens after type rejected", function()
+        local ar = parse_one("integer = x")
+        assert.ok(#ar.parse_errors > 0, "expected a parse error")
+        assert.ok(ar.parse_errors[1].msg:find("is not part of"),
+            "diagnostic: " .. tostring(ar.parse_errors[1].msg))
+    end)
+
+    assert.it("--:: Foo = integer = x — trailing tokens after decl body rejected", function()
+        local ar = parse_one("Foo = integer = x", defs.ANN_DECL)
+        assert.ok(#ar.parse_errors > 0, "expected a parse error")
+        assert.ok(ar.parse_errors[1].msg:find("is not part of"),
+            "diagnostic: " .. tostring(ar.parse_errors[1].msg))
+    end)
+
+    assert.it("--:<integer> garbage — trailing tokens in type-args rejected", function()
+        local ar = parse_one("<integer> garbage", defs.ANN_TYPE_ARGS)
+        assert.ok(#ar.parse_errors > 0, "expected a parse error")
+        assert.ok(ar.parse_errors[1].msg:find("is not part of"),
+            "diagnostic: " .. tostring(ar.parse_errors[1].msg))
+    end)
+
+    assert.it("--: integer | [[[ — malformed type body surfaces as diagnostic", function()
+        -- Previously the inner pcall swallowed all non-depth-limit parse errors.
+        local ar = parse_one("integer | [[[")
+        assert.ok(#ar.parse_errors > 0, "expected a parse error")
+    end)
+
+    assert.it("--: integer — valid type still parses cleanly", function()
+        local ar = parse_one("integer")
+        assert.eq(#ar.parse_errors, 0, "no errors for valid annotation")
+        assert.ok(ar.results[1], "result recorded")
+    end)
+end)
+
 assert.describe("lex: line and column tracking", function()
     assert.it("tracks line numbers across newlines", function()
         local L = lex.new("a\nb\nc", "test")
@@ -2488,7 +2539,6 @@ local x = n + 1
     assert.it("pcall result without narrowing is nil-unioned (no false positives on use)", function()
         no_errors([[
 local function get()
-    --: -> string
     return "hello"
 end
 local ok, s = pcall(get)
@@ -2634,7 +2684,7 @@ local z = x + y
         no_errors([[
 --:: Vec = { x: number, #__add: (Vec, Vec) -> Vec }
 local function vec_add(a, b)
-    --: Vec, Vec -> Vec
+    --: (Vec, Vec) -> Vec
     return a + b
 end
 ]])
@@ -2668,7 +2718,7 @@ assert.describe("checker: concat type checking via prim_meta", function()
         no_errors([[
 --:: S = { v: string, #__concat: (S, S) -> S }
 local function cat(a, b)
-    --: S, S -> S
+    --: (S, S) -> S
     return a .. b
 end
 ]])
@@ -8181,7 +8231,7 @@ local n = math.abs(-5)
 
     assert.it("math.floor assigned to integer: ok", function()
         no_errors([[
-local n --: integer = math.floor(3.7)
+local n = math.floor(3.7) --: integer
 ]])
     end)
 end)
@@ -8477,7 +8527,7 @@ assert.describe("checker: user-defined type guards", function()
 local function is_str(x) return type(x) == "string" end
 local v --: unknown
 if is_str(v) then
-    local s --: string = v
+    local s = v --: string
 end
 ]])
     end)
@@ -8488,7 +8538,7 @@ end
 local function is_int(x) return type(x) == "number" end
 local v --: string | integer
 if is_int(v) then
-    local n --: integer = v
+    local n = v --: integer
 end
 ]])
     end)
@@ -8499,7 +8549,7 @@ end
 local function is_str(x) return type(x) == "string" end
 local v --: string | integer
 if not is_str(v) then
-    local n --: integer = v
+    local n = v --: integer
 end
 ]])
     end)
@@ -8548,7 +8598,7 @@ local function assert_int(x)
 end
 local v --: unknown
 assert_int(v)
-local n --: integer = v
+local n = v --: integer
 ]])
     end)
 
@@ -8661,7 +8711,8 @@ assert.describe("generic parameter defaults: <T = Default>", function()
         v3_no_errors([[
 --:: Nullable<T = unknown> = T | nil
 local x --: Nullable
-local y --: string | nil = x
+local y --: unknown | nil
+y = x
 ]])
     end)
 
@@ -8669,7 +8720,8 @@ local y --: string | nil = x
         v3_no_errors([[
 --:: Nullable<T = unknown> = T | nil
 local x --: Nullable<integer>
-local y --: integer | nil = x
+local y --: integer | nil
+y = x
 ]])
     end)
 
