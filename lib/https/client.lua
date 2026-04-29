@@ -59,7 +59,7 @@ end
 
 -- Send an HTTPS request and return the full response.
 -- Returns (nil, errmsg) on any failure.
---: (http_request) -> http_response | nil, string | nil
+--: (http_request) -> (http_response | nil, string | nil)
 M.request = function(req)
 	req.body = req.body or ""
 	local client, err = socket.create("inet", "stream", "tcp")

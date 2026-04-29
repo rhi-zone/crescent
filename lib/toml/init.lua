@@ -155,7 +155,7 @@ local function skip_newline(st)
 end
 
 -- unicode codepoint to UTF-8
---: (number) -> string | nil, string
+--: (number) -> (string | nil, string)
 local function utf8_char(cp)
   if cp < 0 then return nil, "invalid codepoint" end
   if cp < 0x80 then
@@ -197,7 +197,7 @@ local escape_map = {
 local parse_value
 
 -- Parse a basic (double-quoted) string
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function parse_basic_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 1  -- skip opening "
@@ -252,7 +252,7 @@ local function parse_basic_string(st)
 end
 
 -- Parse a multiline basic string (""")
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function parse_ml_basic_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 3  -- skip """
@@ -367,7 +367,7 @@ local function parse_ml_basic_string(st)
 end
 
 -- Parse a literal (single-quoted) string
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function parse_literal_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 1  -- skip '
@@ -386,7 +386,7 @@ local function parse_literal_string(st)
 end
 
 -- Parse a multiline literal string (''')
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function parse_ml_literal_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 3  -- skip '''
@@ -442,7 +442,7 @@ local function parse_ml_literal_string(st)
 end
 
 -- Parse a string value (dispatches on quote type)
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function parse_string(st)
   local s, pos, len = st.s, st.pos, st.len
   local b = byte(s, pos)
@@ -461,7 +461,7 @@ local function parse_string(st)
 end
 
 -- Strip underscores from a numeric string (validates no leading/trailing/double underscores)
---: (string, number) -> string | nil, string
+--: (string, number) -> (string | nil, string)
 local function strip_underscores(raw, line)
   if byte(raw, 1) == BYTE_UNDER or byte(raw, #raw) == BYTE_UNDER then
     return nil, "line " .. line .. ": underscore at boundary in number"
@@ -473,7 +473,7 @@ local function strip_underscores(raw, line)
 end
 
 -- Parse a number or date/time
---: (table) -> number | table | nil, string
+--: (table) -> (number | table | nil, string)
 local function parse_number_or_date(st)
   local s, pos, len = st.s, st.pos, st.len
   local start = pos
@@ -597,7 +597,7 @@ local function parse_number_or_date(st)
 end
 
 -- Parse datetime/date/time
---: (table) -> table | nil, string
+--: (table) -> (table | nil, string)
 local function _parse_datetime(st)
   local s, pos, len = st.s, st.pos, st.len
   local start = pos
@@ -667,7 +667,7 @@ local function _parse_datetime(st)
 end
 
 -- Parse the time portion: HH:MM:SS[.frac][Z|+HH:MM|-HH:MM]
---: (string, number) -> number, number, number, number|nil, string|nil | nil, string
+--: (string, number) -> (number, number, number, number|nil, string|nil | nil, string)
 local function _parse_time_part_impl(time_str, line)
   local h, m, s
   if #time_str < 8 then
@@ -714,7 +714,7 @@ _parse_time_part = _parse_time_part_impl
 parse_datetime = _parse_datetime
 
 -- Parse a key (bare or quoted)
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function parse_simple_key(st)
   local s, pos, len = st.s, st.pos, st.len
   if pos > len then return nil, "line " .. st.line .. ": expected key" end
@@ -735,7 +735,7 @@ local function parse_simple_key(st)
 end
 
 -- Parse a dotted key into a list of key segments
---: (table) -> table | nil, string
+--: (table) -> (table | nil, string)
 local function parse_key(st)
   local keys = {}
   local n = 0
@@ -756,7 +756,7 @@ end
 -- implicit_tables tracks tables created implicitly (can be extended but not redefined)
 -- defined_tables tracks explicitly defined [table] headers
 -- array_tables tracks [[array]] paths
---: (table, table, number, table, table, table, number) -> table | nil, string
+--: (table, table, number, table, table, table, number) -> (table | nil, string)
 local function traverse_key(root, keys, depth, implicit, defined, array_tables, line)
   local cur = root
   for i = 1, depth do
@@ -782,7 +782,7 @@ local function traverse_key(root, keys, depth, implicit, defined, array_tables, 
 end
 
 -- Parse an inline table
---: (table, table) -> table | nil, string
+--: (table, table) -> (table | nil, string)
 local function parse_inline_table(st, array_tables)
   st.pos = st.pos + 1  -- skip {
   local tbl = {}
@@ -835,7 +835,7 @@ local function parse_inline_table(st, array_tables)
 end
 
 -- Parse an array value
---: (table, table) -> table | nil, string
+--: (table, table) -> (table | nil, string)
 local function parse_array(st, array_tables)
   st.pos = st.pos + 1  -- skip [
   local arr = {}
@@ -871,7 +871,7 @@ local function parse_array(st, array_tables)
 end
 
 -- Parse a value
---: (table, table) -> any | nil, string
+--: (table, table) -> (any | nil, string)
 parse_value = function(st, array_tables)
   if st.pos > st.len then return nil, "line " .. st.line .. ": expected value" end
   local b = byte(st.s, st.pos)
@@ -926,7 +926,7 @@ parse_value = function(st, array_tables)
 end
 
 -- Main decode function
---: (string) -> table | nil, string
+--: (string) -> (table | nil, string)
 local function decode(s)
   if type(s) ~= "string" then
     return nil, "expected string input"
@@ -1251,7 +1251,7 @@ local function format_datetime(dt)
 end
 
 -- Encode a value inline (for arrays and inline tables)
---: (any) -> string | nil, string
+--: (any) -> (string | nil, string)
 local function encode_inline(v)
   local vtype = type(v)
   if vtype == "string" then
@@ -1311,7 +1311,7 @@ local function encode_inline(v)
 end
 
 -- Main encode function
---: (table) -> string | nil, string
+--: (table) -> (string | nil, string)
 local function encode(tbl)
   if type(tbl) ~= "table" then
     return nil, "expected table input"

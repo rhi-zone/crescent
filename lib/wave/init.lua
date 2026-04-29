@@ -47,7 +47,7 @@ end
 -- Parse a WAVE binary string.
 -- Returns a wave struct on success, or (nil, errmsg) on failure.
 -- wave struct: { format, channels, sample_rate, bits_per_sample, data }
---: string -> { format: integer, channels: integer, sample_rate: integer, bits_per_sample: integer, data: string } | nil, string
+--: string -> ({ format: integer, channels: integer, sample_rate: integer, bits_per_sample: integer, data: string } | nil, string)
 function M.string_to_wave(s)
 	if #s < 44 then
 		return nil, "wave: input too short"
@@ -102,7 +102,7 @@ end
 
 -- Encode a wave struct to a WAVE binary string.
 -- Returns the binary string on success, or (nil, errmsg) on failure.
---: { format: integer, channels: integer, sample_rate: integer, bits_per_sample: integer, data: string } -> string | nil, string
+--: { format: integer, channels: integer, sample_rate: integer, bits_per_sample: integer, data: string } -> (string | nil, string)
 function M.wave_to_string(wave)
 	if type(wave) ~= "table" then
 		return nil, "wave: expected table"

@@ -36,7 +36,7 @@ end
 -- Returns: output, graph
 -- When opts.track = true, the returned graph carries a ._frontier and ._exec_graph
 -- that can be inspected via M.frontier and M.exec_graph module functions.
---: (TaskDef, RunOpts | nil) -> unknown, TrackedGraph
+--: (TaskDef, RunOpts | nil) -> (unknown, TrackedGraph)
 function M.run(task_def, opts)
 	-- merge: global registry < opts.executors (opts win)
 	local executors = {}

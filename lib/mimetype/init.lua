@@ -17,7 +17,7 @@ end
 --[[@param buffer string]]
 --[[@param pos integer?]]
 --[[@return string? ext, string? mimetype]]
---: (string, integer | nil) -> string | nil, string | nil
+--: (string, integer | nil) -> (string | nil, string | nil)
 M.by_contents = function(buffer, pos)
 	return by_contents.mimetype(buffer, pos)
 end

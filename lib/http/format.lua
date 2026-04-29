@@ -80,7 +80,7 @@ end
 -- RFC 9112 §3 — Parse request from wire bytes.
 -- Returns: request table, next position, or nil + nil + error string.
 --:: http_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil }
---: (string, integer | nil) -> http_request | nil, integer | nil, string | nil
+--: (string, integer | nil) -> (http_request | nil, integer | nil, string | nil)
 mod.parse_request = function(s, i)
 	i = i or 1
 	-- RFC 9112 §2.1 — message = start-line CRLF *( field-line CRLF ) CRLF [ message-body ]
@@ -117,7 +117,7 @@ end
 -- RFC 9112 §4 — Parse response from wire bytes.
 -- Returns: response table, next position, or nil + nil + error string.
 --:: http_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil }
---: (string, integer | nil) -> http_response | nil, integer | nil, string | nil
+--: (string, integer | nil) -> (http_response | nil, integer | nil, string | nil)
 mod.parse_response = function(s, i)
 	i = i or 1
 	local head_end = find_head_end(s, i)

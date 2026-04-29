@@ -72,15 +72,15 @@ for _, name in ipairs({ "z", "zlib", "zlib1", "libz" }) do
 end
 
 --:: ZlibLib = {
---::   zlibVersion: () -> string,
---::   deflateInit2_: (unknown, number, number, number, number, number, string, integer) -> integer,
---::   deflate: (unknown, number) -> integer,
---::   deflateEnd: (unknown) -> integer,
---::   inflateInit2_: (unknown, number, string, integer) -> integer,
---::   inflate: (unknown, number) -> integer,
---::   inflateEnd: (unknown) -> integer,
+--::   zlibVersion: () -> (string,)
+--::   deflateInit2_: (unknown, number, number, number, number, number, string, integer) -> (integer,)
+--::   deflate: (unknown, number) -> (integer,)
+--::   deflateEnd: (unknown) -> (integer,)
+--::   inflateInit2_: (unknown, number, string, integer) -> (integer,)
+--::   inflate: (unknown, number) -> (integer,)
+--::   inflateEnd: (unknown) -> (integer,)
 --:: }
-local function load_zlib() --: () -> ZlibLib, string
+local function load_zlib() --: () -> (ZlibLib, string)
   for _, name in ipairs(names) do
     local ok, lib = pcall(ffi.load, name)
     if ok then
@@ -122,7 +122,7 @@ local dest_len_buf = ffi.new("uLongf[1]")
 
 -- ── One-shot deflate ─────────────────────────────────────────────────────────
 
---: (string, { level: number | nil, format: string | nil } | nil) -> string | nil, string | nil
+--: (string, { level: number | nil, format: string | nil } | nil) -> (string | nil, string | nil)
 local function deflate(input, opts)
   local level --: number
   local format --: string
@@ -172,7 +172,7 @@ end
 
 -- ── One-shot inflate ─────────────────────────────────────────────────────────
 
---: (string, { format: string | nil } | nil) -> string | nil, string | nil
+--: (string, { format: string | nil } | nil) -> (string | nil, string | nil)
 local function inflate(input, opts)
   local format --: string
   if opts then format = opts.format or "zlib" else format = "zlib" end
@@ -239,7 +239,7 @@ local function deflater(opts)
   local finished = false
 
   return {
-    --: (string) -> boolean | nil, string | nil
+    --: (string) -> (boolean | nil, string | nil)
     push = function(chunk)
       if finished then return nil, "deflater already finished" end
       local src = ffi.cast("const Bytef *", chunk)
@@ -260,7 +260,7 @@ local function deflater(opts)
       until strm.avail_out ~= 0
       return true
     end,
-    --: () -> string | nil, string | nil
+    --: () -> (string | nil, string | nil)
     finish = function()
       if finished then return nil, "deflater already finished" end
       finished = true
@@ -304,7 +304,7 @@ local function inflater(opts)
   local finished = false
 
   return {
-    --: (string) -> boolean | nil, string | nil
+    --: (string) -> (boolean | nil, string | nil)
     push = function(chunk)
       if finished then return nil, "inflater already finished" end
       local src = ffi.cast("const Bytef *", chunk)
@@ -335,7 +335,7 @@ local function inflater(opts)
       until strm.avail_out ~= 0
       return true
     end,
-    --: () -> string | nil, string | nil
+    --: () -> (string | nil, string | nil)
     finish = function()
       if not finished then
         finished = true

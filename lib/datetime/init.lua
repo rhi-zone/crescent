@@ -85,7 +85,7 @@ end
 
 -- Parse a UTC offset string like "+05:30", "-07:00", "Z"
 -- Returns offset in seconds, or nil, errmsg on failure
---: (string) -> number?, string?
+--: (string) -> (number?, string?)
 local function parse_offset(s)
   if s == "Z" or s == "z" then return 0 end
   local sign, h, m = s:match("^([+-])(%d%d):?(%d%d)$")
@@ -102,7 +102,7 @@ end
 --   2024-01-15T10:30:00Z
 --   2024-01-15T10:30:00+05:30
 --   2024-01-15 10:30:00  (space separator)
---: (string) -> { year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }?, string?
+--: (string) -> ({ year: number, month: number, day: number, hour: number, min: number, sec: number, offset: number? }?, string?)
 function M.parse_iso(s)
   if type(s) ~= "string" then return nil, "expected string" end
 

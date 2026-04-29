@@ -346,7 +346,7 @@ end
 
 -- ── Format parsing ───────────────────────────────────────────────────────────
 
---: (string, table?) -> string?, string?
+--: (string, table?) -> (string?, string?)
 local function inflate(input, opts)
   opts = opts or {}
   local format = opts.format or "zlib"
@@ -471,12 +471,12 @@ end
 local function inflater(opts)
   local chunks = {}
   return {
-    --: (string) -> boolean?, string?
+    --: (string) -> (boolean?, string?)
     push = function(chunk)
       chunks[#chunks + 1] = chunk
       return true
     end,
-    --: () -> string?, string?
+    --: () -> (string?, string?)
     finish = function()
       local full = concat(chunks)
       return inflate(full, opts)
@@ -488,7 +488,7 @@ end
 
 local M = {}
 
---: (string, table?) -> nil, string
+--: (string, table?) -> (nil, string)
 M.deflate = function(_, _)
   return nil, "deflate not available in pure-lua tier"
 end

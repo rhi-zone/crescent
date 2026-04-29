@@ -75,7 +75,7 @@ else
 	end
 end
 
---: (string, integer, integer, {[1]:integer,[2]:integer,[3]:integer,[4]:integer} | nil, integer) -> string, integer | nil
+--: (string, integer, integer, {[1]:integer,[2]:integer,[3]:integer,[4]:integer} | nil, integer) -> (string, integer | nil)
 local unmask = function(packet, i, payload_len, mask, mi)
 	if mask then
 		local bytes = {}
@@ -163,7 +163,7 @@ end
 
 -- RFC 6455 §5.2 — Decode one frame
 -- Returns: msg, fin_or_error, mask, mask_index, consumed_length
---: (string, table | nil) -> table | nil, boolean|integer, table | nil, integer | nil, integer
+--: (string, table | nil) -> (table | nil, boolean|integer, table | nil, integer | nil, integer)
 local decode_impl = function(packet, acc)
 	local h0 = byte(packet, 1)
 	local fin = band(h0, 0x80) ~= 0
@@ -231,7 +231,7 @@ end
 -- Public decode: (s, i?, acc?) -> msg?, fin_or_error, consumed_length
 -- When called with (s, acc) where acc is a table, treats it as (s, nil, acc)
 -- for backward compatibility.
---: (string, integer | nil, table | nil) -> table | nil, boolean|integer, integer
+--: (string, integer | nil, table | nil) -> (table | nil, boolean|integer, integer)
 mod.decode = function(s, i, acc)
 	local packet
 	if type(i) == "table" then
@@ -250,7 +250,7 @@ mod.decode = function(s, i, acc)
 end
 
 -- Internal decode that returns all 5 values (for websocket handler)
---: (string, table | nil) -> table | nil, boolean|integer, table | nil, integer | nil, integer
+--: (string, table | nil) -> (table | nil, boolean|integer, table | nil, integer | nil, integer)
 mod._decode_full = function(packet, acc)
 	return decode_impl(packet, acc)
 end

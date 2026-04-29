@@ -76,7 +76,7 @@ function M.run_task(g, executors, hooks, task_id)
 	if hooks.on_task then hooks.on_task(task) end
 end
 
---: (TaskDef, RunOpts | nil) -> unknown, TrackedGraph
+--: (TaskDef, RunOpts | nil) -> (unknown, TrackedGraph)
 function M.run(task_def, opts)
 	local executors = {}
 	local track     = false

@@ -73,7 +73,7 @@ M.join = function(...)
 end
 
 ---Split path into (dir, file) pair.
---: (string) -> string, string
+--: (string) -> (string, string)
 M.split = function(p)
 	local n = norm_seps(p)
 	-- Find last slash
@@ -111,7 +111,7 @@ end
 
 ---Split extension from path. Returns (root, ext).
 --- Dotfiles like ".bashrc" have no extension.
---: (string) -> string, string
+--: (string) -> (string, string)
 M.splitext = function(p)
 	local n = norm_seps(p)
 	-- Find the basename start position

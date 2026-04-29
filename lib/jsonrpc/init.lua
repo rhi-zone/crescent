@@ -134,7 +134,7 @@ end
 -- Send a request from this side. Generates an id, writes the request,
 -- then synchronously reads responses until the matching one arrives.
 -- Returns result, nil on success; nil, err_obj on error.
---: (any, string, unknown) -> unknown, unknown
+--: (any, string, unknown) -> (unknown, unknown)
 function Dispatcher:request(method, params)
     local id = self._next_id
     self._next_id = id + 1

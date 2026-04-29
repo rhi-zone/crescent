@@ -22,7 +22,7 @@ local ffi = require("ffi")
 
 -- Generate a self-signed cert+key pair using openssl. Returns
 -- (cert_path, key_path) on success, or (nil, nil, errmsg) on failure.
---: () -> string | nil, string | nil, string | nil
+--: () -> (string | nil, string | nil, string | nil)
 local function gen_self_signed()
 	local key_path = os.tmpname() .. "_tls_test.key"
 	local cert_path = os.tmpname() .. "_tls_test.crt"

@@ -78,7 +78,7 @@ end
 -- Returns true on success, or (nil, errmsg) on failure.
 -- After this call, client.on_send and client.on_receive are set to go
 -- through the per-connection TLS context.
---: (unknown, unknown) -> true | nil, string | nil
+--: (unknown, unknown) -> (true | nil, string | nil)
 local function wrap_client_tls(tls_ctx, client)
 	local t = get_tls()
 	if not t then return nil, "libtls unavailable" end

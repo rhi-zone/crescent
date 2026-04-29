@@ -50,7 +50,7 @@ local MONTH_NAMES = {
 }
 
 -- Howard Hinnant civil_from_days: days since epoch -> (year, month, day)
---: (number) -> number, number, number
+--: (number) -> (number, number, number)
 local function civil_from_days(z)
 	z = z + 719468
 	local era = math.floor(z / 146097)
@@ -816,7 +816,7 @@ end
 -- Create a mock transport for testing.
 -- responses: array of strings the server will send (one per recv() call)
 -- Returns: transport object with :send(), :recv(), :close() and .sent (array of sent strings)
---: ({ string }) -> { send: (any, string) -> nil, recv: (any) -> (string | nil, string | nil), close: (any) -> nil, sent: { string } }
+--: ({ string }) -> ({ send: (any, string) -> nil, recv: (any) -> (string | nil, string | nil), close: (any) -> nil, sent: { string } })
 function M.mock_transport(responses)
 	-- Split multiline responses into individual lines for realistic socket behavior.
 	local lines = {}

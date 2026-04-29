@@ -79,7 +79,7 @@ do
 end
 
 --- Return n random bytes as a string.
---: fun(n: integer): string | nil, string | nil
+--: (n: integer) -> (string | nil, string | nil)
 function mod.bytes(n)
   if n <= 0 then return "" end
   local dst = ffi.new("uint8_t[?]", n)
@@ -89,7 +89,7 @@ function mod.bytes(n)
 end
 
 --- Return a random uint32.
---: fun(): integer | nil, string | nil
+--: () -> (integer | nil, string | nil)
 function mod.u32()
   local ok, err = _read_random(buf4, 4)
   if not ok then return nil, err end
@@ -99,7 +99,7 @@ end
 
 --- Return a random uint64 as a number.
 --- Note: Lua numbers are doubles (53-bit mantissa), so values above 2^53 lose precision.
---: fun(): number | nil, string | nil
+--: () -> (number | nil, string | nil)
 function mod.u64()
   local ok, err = _read_random(buf8, 8)
   if not ok then return nil, err end
@@ -109,7 +109,7 @@ function mod.u64()
 end
 
 --- Return a random integer in [min, max] inclusive, uniform (rejection sampling).
---: fun(min: integer, max: integer): integer | nil, string | nil
+--: (min: integer, max: integer) -> (integer | nil, string | nil)
 function mod.int(min, max)
   if min > max then return nil, "min > max" end
   if min == max then return min end
@@ -155,7 +155,7 @@ end
 
 --- Return a random float in [0, 1).
 --- Uses 53 bits of randomness for full double precision.
---: fun(): number | nil, string | nil
+--: () -> (number | nil, string | nil)
 function mod.float()
   local ok, err = _read_random(buf8, 7)
   if not ok then return nil, err end
@@ -167,7 +167,7 @@ function mod.float()
 end
 
 --- Return a random element from an array.
---: fun(array: any[]): any | nil, string | nil
+--: (array: any[]) -> (any | nil, string | nil)
 function mod.choice(array)
   local n = #array
   if n == 0 then return nil, "empty array" end
@@ -178,7 +178,7 @@ function mod.choice(array)
 end
 
 --- Fisher-Yates shuffle in-place. Returns the array.
---: fun(array: any[]): any[] | nil, string | nil
+--: (array: any[]) -> (any[] | nil, string | nil)
 function mod.shuffle(array)
   local n = #array
   for i = n, 2, -1 do
@@ -192,7 +192,7 @@ end
 local hex_chars = "0123456789abcdef"
 
 --- Return n random bytes as a hex string (2n characters).
---: fun(n: integer): string | nil, string | nil
+--: (n: integer) -> (string | nil, string | nil)
 function mod.hex(n)
   if n <= 0 then return "" end
   local dst = ffi.new("uint8_t[?]", n)
@@ -210,7 +210,7 @@ function mod.hex(n)
 end
 
 --- Return a UUID v4 string (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx).
---: fun(): string | nil, string | nil
+--: () -> (string | nil, string | nil)
 function mod.uuid()
   local dst = ffi.new("uint8_t[16]")
   local ok, err = _read_random(dst, 16)

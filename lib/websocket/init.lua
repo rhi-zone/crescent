@@ -43,7 +43,7 @@ mod.frame = frame
 --: (table) -> string | nil
 mod._encode = frame.encode
 -- Backward-compat: decode(packet, acc?) returning msg, fin_or_err, mask, mi, remaining_len
---: (string, table | nil) -> table | nil, boolean|integer, table | nil, integer | nil, integer
+--: (string, table | nil) -> (table | nil, boolean|integer, table | nil, integer | nil, integer)
 mod._decode = function(packet, acc)
 	return frame._decode_full(packet, acc)
 end
@@ -97,7 +97,7 @@ end
 --[[@param read fun(sock: luajitsocket, msg: websocket_message)]]
 --[[@param close fun(sock: luajitsocket)|nil]]
 --[[@param epoll epoll]]
---: (table, table, (table, table) -> nil, (table) -> nil, table) -> (table) -> nil, () -> nil
+--: (table, table, (table, table) -> nil, (table) -> (nil, table) -> (table) -> nil, () -> nil)
 mod.websocket = function(sock, req, read, close, epoll)
 	if (req.headers["upgrade"] or {})[1] ~= "websocket" or (req.headers["connection"] or {})[1] ~= "Upgrade" then return nil end
 	-- TODO(api): return a numeric error code here instead of sending the HTTP
