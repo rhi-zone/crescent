@@ -2503,6 +2503,45 @@ f(x)
     end)
 end)
 
+-- Regression tests for Gap 8 (annotated local-init must enforce subtyping).
+-- The `local x --: T = expr` form is now a parse error (Gap 10 fix), so the
+-- canonical equivalent is `--: T \n local x = expr`. All four originally
+-- documented Gap 8 repros must now produce errors.
+assert.describe("Gap 8: annotated local-init enforces subtyping", function()
+    assert.it("repro 1: literal mismatch (string to integer)", function()
+        has_error([[
+--: integer
+local x = "hello"
+]], "cannot assign")
+    end)
+
+    assert.it("repro 2: variable mismatch (string var to integer)", function()
+        has_error([[
+local s --: string
+--: integer
+local x = s
+]], "cannot assign")
+    end)
+
+    assert.it("repro 3: function-return mismatch (string fn to integer)", function()
+        has_error([[
+local function f() --: () -> string
+  return "hi"
+end
+--: integer
+local x = f()
+]], "cannot assign")
+    end)
+
+    assert.it("repro 4: unknown source must be narrowed before bind", function()
+        has_error([[
+--:: declare get_unk = () -> unknown
+--: integer
+local y = get_unk()
+]], "must be narrowed")
+    end)
+end)
+
 assert.describe("redundant type assertion warning", function()
     assert.it("warns when cast type equals inferred type", function()
         has_warning([==[

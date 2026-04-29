@@ -212,7 +212,29 @@ until `.cri` format fully supports literal type serialization.
 
 ---
 
-## Gap 8 — `local x --: T = expr` does not enforce the subtype check
+## Gap 8 — `local x --: T = expr` does not enforce the subtype check — FIXED
+
+**Status:** Fixed (incidental side-effect of Gap 10 parser totality work,
+commit `4d711af`). Regression tests live in
+`lib/type/static/type_soundness_test.lua` under `"Gap 8: annotated local-init
+enforces subtyping"`.
+
+**Resolution.** The originally-reported syntax `local x --: T = expr` is now a
+parse error: the annotation parser is total and rejects the trailing `= expr`
+content as not part of the annotation (this is exactly what Gap 10 was about).
+The canonical equivalent — a leading `--: T` line above `local x = expr` —
+emits `C_SUB(typeof(expr), T)` and is solved by `unify` like any other
+subtype check. The asymmetry the gap described ("local form silently passes
+where function-return form errors") no longer exists because the buggy syntax
+no longer parses, and the surviving `--: T \n local x = expr` form was
+already correctly enforced by `unify.lua:283-294` (TAG_UNKNOWN target accepts
+anything, TAG_UNKNOWN actual rejects with "must be narrowed").
+
+All four originally-documented repros now error: literal mismatch, variable
+mismatch, function-return mismatch, and unknown source. See the regression
+tests for verbatim coverage.
+
+**Original report follows for archival reference.**
 
 **File:** `constrain.lua:2440` (the `C_SUB(rhs_tid, ann_tid)` emission for
 annotated locals).
@@ -491,7 +513,7 @@ replaced by full structural checking once resolution completes.
 | 5 | Intersection dedup | Low | Arena bloat, no soundness impact |
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
 | 7 | LIT_INTEGER cross-file | Low | Edge case, deferred |
-| 8 | `local x --: T = expr_of_unknown` | High | `unknown` silently passes annotated local-init |
+| 8 | `local x --: T = expr_of_unknown` | ~~High~~ **FIXED** | Resolved as side-effect of Gap 10 parser totality (commit `4d711af`); regression tests in `type_soundness_test.lua` |
 | 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T`; compounded by the Gap 10 parser bug |
 | 10 | Parser accepts invalid `--:` syntax | High | `--: integer = x` is not a valid type but parser silently accepts the `integer` prefix and drops the rest; enables the Gap 9 footgun |
 | 11 | `--[[: any]] expr` launders `unknown` | High | Cast to `any` accepts every source type including `unknown`, defeating the documented "unknown cannot be cast away" guarantee |
