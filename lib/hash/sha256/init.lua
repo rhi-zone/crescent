@@ -59,15 +59,16 @@ local function try_system()
 	if not lib then
 		error("no ssl/crypto library found")
 	end
+	local lib_typed = lib --[[:! $FfiC]]
 
 	-- Verify the SHA256 symbol is accessible.
 	local probe_buf = ffi.new("unsigned char[32]")
-	local ok2, err2 = pcall(lib.SHA256, ffi.cast("const unsigned char *", ""), 0, probe_buf)
+	local ok2, err2 = pcall(lib_typed.SHA256, ffi.cast("const unsigned char *", ""), 0, probe_buf)
 	if not ok2 then error("SHA256 symbol not callable: " .. tostring(err2)) end
 
 	return function(s)
 		local result = ffi.new("unsigned char[32]")
-		lib.SHA256(ffi.cast("const unsigned char *", s), #s, result)
+		lib_typed.SHA256(ffi.cast("const unsigned char *", s), #s, result)
 		local parts = {}
 		for i = 0, 31 do
 			local b = result[i]
