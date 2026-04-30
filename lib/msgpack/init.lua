@@ -27,10 +27,12 @@ end
 
 -- ── encoding helpers ────────────────────────────────────────────────────────
 
+--: (number) -> string
 local function encode_uint16(n)
 	return char(floor(n / 256) % 256, n % 256)
 end
 
+--: (number) -> string
 local function encode_uint32(n)
 	return char(
 		floor(n / 16777216) % 256,
@@ -40,16 +42,19 @@ local function encode_uint32(n)
 	)
 end
 
+--: (number) -> string
 local function encode_int8(n)
 	if n < 0 then n = n + 256 end
 	return char(n)
 end
 
+--: (number) -> string
 local function encode_int16(n)
 	if n < 0 then n = n + 65536 end
 	return encode_uint16(n)
 end
 
+--: (number) -> string
 local function encode_int32(n)
 	if n < 0 then n = n + 4294967296 end
 	return encode_uint32(n)
@@ -275,6 +280,7 @@ end
 
 -- ── decode ──────────────────────────────────────────────────────────────────
 
+--: (string, integer) -> (integer | nil, integer)
 local function decode_uint8(s, pos)
 	return byte(s, pos), pos + 1
 end

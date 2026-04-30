@@ -208,6 +208,7 @@ for i = 0, 5  do
 end
 
 -- Encode a Unicode codepoint (U+0000..U+10FFFF) as a UTF-8 byte sequence.
+--: (integer) -> string
 local function codepoint_to_utf8(cp)
     if cp < 0x80 then
         return str_char(cp)
@@ -234,6 +235,7 @@ end
 
 -- Parse four hex digits from `s` at position `pos`.
 -- Returns the 16-bit value, or nil on failure.
+--: (string, integer) -> integer | nil
 local function parse_hex4(s, pos)
     local a, b, c, d = str_byte(s, pos, pos + 3)
     if not d then return nil end
@@ -246,10 +248,10 @@ end
 
 -- Decoder state (all upvalues to avoid passing through every call).
 -- These are set by decode_raw before each parse.
-local _src     -- the JSON string
-local _len     -- #_src
-local _pos     -- current byte offset (1-indexed)
-local _null    -- null sentinel value
+local _src = "" --: string
+local _len = 0 --: integer
+local _pos = 0 --: integer
+local _null --: unknown
 
 local function decode_error(msg)
     error("unexpected token at offset " .. (_pos - 1) .. ": " .. msg, 2)

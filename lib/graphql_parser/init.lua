@@ -19,15 +19,20 @@ local floor = math.floor
 -- Lexer
 -- ---------------------------------------------------------------------------
 
+--:: Lexer = { src: string, pos: integer, line: integer, col: integer, len: integer }
+
+--: (string) -> Lexer
 local function new_lexer(src)
   return { src = src, pos = 1, line = 1, col = 1, len = #src }
 end
 
+--: (Lexer, string) -> (nil, string)
 local function lex_err(lex, msg)
   return nil, format("GraphQL parse error at line %d col %d: %s", lex.line, lex.col, msg)
 end
 
 -- Advance position by n characters, tracking line/col
+--: (Lexer, integer) -> ()
 local function advance(lex, n)
   for _ = 1, n do
     if lex.pos > lex.len then break end
@@ -42,6 +47,7 @@ local function advance(lex, n)
 end
 
 -- Skip whitespace, commas (insignificant in GraphQL), and comments
+--: (Lexer) -> unknown
 local function skip_ignored(lex)
   while lex.pos <= lex.len do
     local c = byte(lex.src, lex.pos)
@@ -59,12 +65,14 @@ local function skip_ignored(lex)
 end
 
 -- Peek at current character without advancing
+--: (Lexer) -> unknown
 local function peek(lex)
   if lex.pos > lex.len then return nil end
   return byte(lex.src, lex.pos)
 end
 
 -- Read a name token (letters, digits, underscore; must start with letter or _)
+--: (Lexer) -> unknown
 local function read_name(lex)
   local start = lex.pos
   local c = byte(lex.src, start)
@@ -89,6 +97,7 @@ local function read_name(lex)
 end
 
 -- Read a number token; returns kind ("IntValue"|"FloatValue") and string value
+--: (Lexer) -> unknown
 local function read_number(lex)
   local start = lex.pos
   local is_float = false
@@ -160,6 +169,7 @@ end
 
 -- Read a regular string (single-line, double-quoted)
 -- Returns the string value (unescaped) or nil+err
+--: (Lexer) -> unknown
 local function read_string(lex)
   -- pos is at opening '"'
   lex.pos = lex.pos + 1 -- skip '"'
@@ -266,6 +276,7 @@ end
 
 -- Read a block string (triple-quoted """...""")
 -- Returns the string value after indentation stripping, or nil+err
+--: (Lexer) -> unknown
 local function read_block_string(lex)
   -- pos is at first '"' of """
   lex.pos = lex.pos + 3 -- skip """
@@ -307,6 +318,7 @@ end
 local parse_value  -- forward declaration
 local parse_type   -- forward declaration
 
+--: (Lexer) -> unknown
 local function expect_name(lex)
   skip_ignored(lex)
   local name = read_name(lex)
@@ -316,6 +328,7 @@ local function expect_name(lex)
   return { kind = "Name", value = name }
 end
 
+--: (Lexer, integer) -> unknown
 local function expect_char(lex, ch)
   skip_ignored(lex)
   if peek(lex) ~= byte(ch) then
@@ -327,6 +340,7 @@ local function expect_char(lex, ch)
   return true
 end
 
+--: (Lexer, integer) -> boolean
 local function optional_char(lex, ch)
   skip_ignored(lex)
   if peek(lex) == byte(ch) then
@@ -336,6 +350,7 @@ local function optional_char(lex, ch)
   return false
 end
 
+--: (Lexer) -> unknown
 local function parse_arguments(lex)
   skip_ignored(lex)
   if peek(lex) ~= byte("(") then return {} end
@@ -360,6 +375,7 @@ local function parse_arguments(lex)
   return args
 end
 
+--: (Lexer) -> unknown
 local function parse_directives(lex)
   local directives = {}
   while true do
@@ -376,6 +392,7 @@ local function parse_directives(lex)
   return directives
 end
 
+--: (Lexer) -> unknown
 local function parse_selection_set(lex)
   local ok, err = expect_char(lex, "{")
   if not ok then return nil, err end
@@ -597,6 +614,7 @@ parse_type = function(lex)
   return t
 end
 
+--: (Lexer) -> unknown
 local function parse_variable_definitions(lex)
   skip_ignored(lex)
   if peek(lex) ~= byte("(") then return {} end
@@ -639,6 +657,7 @@ local function parse_variable_definitions(lex)
 end
 
 -- Parse an optional description (string literal before a definition)
+--: (Lexer) -> unknown
 local function parse_description(lex)
   skip_ignored(lex)
   local c = peek(lex)
@@ -657,6 +676,7 @@ local function parse_description(lex)
 end
 
 -- Parse input value definitions (used in field args and input types)
+--: (Lexer, integer) -> unknown
 local function parse_input_value_defs(lex, close_char)
   local defs = {}
   while true do
@@ -700,6 +720,7 @@ local function parse_input_value_defs(lex, close_char)
 end
 
 -- Parse field definitions (used in object/interface types)
+--: (Lexer) -> unknown
 local function parse_field_defs(lex)
   local ok, err = expect_char(lex, "{")
   if not ok then return nil, err end
@@ -743,6 +764,7 @@ local function parse_field_defs(lex)
 end
 
 -- Parse a single top-level definition
+--: (Lexer) -> unknown
 local function parse_definition(lex)
   skip_ignored(lex)
   if lex.pos > lex.len then return nil end

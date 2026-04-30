@@ -69,6 +69,7 @@ local function pack_int64(v)
 end
 
 -- Decode float from bytes at offset (4 bytes, little-endian)
+--: (string, integer) -> number | nil
 local function unpack_float(bytes, offset)
   _f32.b[0] = string.byte(bytes, offset)
   _f32.b[1] = string.byte(bytes, offset + 1)
@@ -78,6 +79,7 @@ local function unpack_float(bytes, offset)
 end
 
 -- Decode double from bytes at offset (8 bytes, little-endian)
+--: (string, integer) -> number | nil
 local function unpack_double(bytes, offset)
   _f64.b[0] = string.byte(bytes, offset)
   _f64.b[1] = string.byte(bytes, offset + 1)
@@ -91,6 +93,7 @@ local function unpack_double(bytes, offset)
 end
 
 -- Decode uint32 from bytes at offset (4 bytes, little-endian)
+--: (string, integer) -> number | nil
 local function unpack_uint32(bytes, offset)
   _u32.b[0] = string.byte(bytes, offset)
   _u32.b[1] = string.byte(bytes, offset + 1)
@@ -100,6 +103,7 @@ local function unpack_uint32(bytes, offset)
 end
 
 -- Decode int32 from bytes at offset (4 bytes, little-endian)
+--: (string, integer) -> number | nil
 local function unpack_int32(bytes, offset)
   _i32.b[0] = string.byte(bytes, offset)
   _i32.b[1] = string.byte(bytes, offset + 1)
@@ -109,6 +113,7 @@ local function unpack_int32(bytes, offset)
 end
 
 -- Decode uint64 from bytes at offset (8 bytes, little-endian) → Lua number
+--: (string, integer) -> number | nil
 local function unpack_uint64(bytes, offset)
   _u64[0].b[0] = string.byte(bytes, offset)
   _u64[0].b[1] = string.byte(bytes, offset + 1)
@@ -122,6 +127,7 @@ local function unpack_uint64(bytes, offset)
 end
 
 -- Decode int64 from bytes at offset (8 bytes, little-endian) → Lua number
+--: (string, integer) -> number | nil
 local function unpack_int64(bytes, offset)
   _i64[0].b[0] = string.byte(bytes, offset)
   _i64[0].b[1] = string.byte(bytes, offset + 1)

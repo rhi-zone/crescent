@@ -45,23 +45,29 @@ local CHAR_f     = byte("f")
 local CHAR_A     = byte("A")
 local CHAR_F     = byte("F")
 
+--: (integer | nil) -> boolean
 local function is_digit(c)
-  return c and c >= CHAR_0 and c <= CHAR_9
+  if not c then return false end
+  return c >= CHAR_0 and c <= CHAR_9
 end
 
+--: (integer | nil) -> boolean
 local function is_hex(c)
-  return c and ((c >= CHAR_0 and c <= CHAR_9) or (c >= CHAR_a and c <= CHAR_f) or (c >= CHAR_A and c <= CHAR_F))
+  if not c then return false end
+  return (c >= CHAR_0 and c <= CHAR_9) or (c >= CHAR_a and c <= CHAR_f) or (c >= CHAR_A and c <= CHAR_F)
 end
 
+--: (integer | nil) -> boolean
 local function is_ws(c)
   return c == SPACE or c == TAB
 end
 
+--: (integer | nil) -> boolean
 local function is_bare_key_char(c)
   if not c then return false end
   if c >= CHAR_0 and c <= CHAR_9 then return true end
-  if c >= byte("A") and c <= byte("Z") then return true end
-  if c >= byte("a") and c <= byte("z") then return true end
+  if c >= CHAR_A and c <= CHAR_Z then return true end
+  if c >= CHAR_a and c <= CHAR_z then return true end
   if c == MINUS or c == UNDERSCORE then return true end
   return false
 end
@@ -77,7 +83,10 @@ local ESCAPES = {
   [BACKSLASH]  = "\\",
 }
 
+--:: Parser = { str: string, pos: integer, len: integer, line: integer }
+
 -- Parser state
+--: (string) -> Parser
 local function new_parser(str)
   return {
     str = str,
@@ -87,15 +96,19 @@ local function new_parser(str)
   }
 end
 
+--: (Parser, string) -> (nil, string)
 local function err(p, msg)
   return nil, format("line %d: %s", p.line, msg)
 end
 
+--: (Parser) -> integer | nil
 local function peek(p)
   if p.pos > p.len then return nil end
-  return byte(p.str, p.pos)
+  local b = byte(p.str, p.pos)
+  return b
 end
 
+--: (Parser) -> integer | nil
 local function advance(p)
   local c = byte(p.str, p.pos)
   if c == NEWLINE then p.line = p.line + 1 end
@@ -103,6 +116,7 @@ local function advance(p)
   return c
 end
 
+--: (Parser) -> ()
 local function skip_ws(p)
   while p.pos <= p.len do
     local c = byte(p.str, p.pos)
@@ -111,6 +125,7 @@ local function skip_ws(p)
   end
 end
 
+--: (Parser) -> ()
 local function skip_ws_and_newlines(p)
   while p.pos <= p.len do
     local c = byte(p.str, p.pos)
@@ -131,6 +146,7 @@ local function skip_ws_and_newlines(p)
   end
 end
 
+--: (Parser) -> ()
 local function skip_comment(p)
   if p.pos <= p.len and byte(p.str, p.pos) == HASH then
     while p.pos <= p.len do
@@ -141,6 +157,7 @@ local function skip_comment(p)
   end
 end
 
+--: (Parser) -> ()
 local function skip_ws_comment_newlines(p)
   while p.pos <= p.len do
     local c = byte(p.str, p.pos)
@@ -163,6 +180,7 @@ local function skip_ws_comment_newlines(p)
   end
 end
 
+--: (Parser, integer) -> (boolean | nil, string | nil)
 local function expect(p, ch)
   if p.pos > p.len or byte(p.str, p.pos) ~= ch then
     return err(p, format("expected '%s'", string.char(ch)))
@@ -172,6 +190,7 @@ local function expect(p, ch)
 end
 
 -- Parse a unicode escape (\uXXXX or \UXXXXXXXX) and return UTF-8 string
+--: (integer) -> string | nil
 local function unicode_to_utf8(cp)
   if cp < 0x80 then
     return string.char(cp)
@@ -201,6 +220,7 @@ end
 local parse_value
 
 -- Parse basic (double-quoted) string
+--: (Parser) -> (unknown, string | nil)
 local function parse_basic_string(p)
   advance(p) -- skip opening "
   local parts = {}
@@ -260,6 +280,7 @@ local function parse_basic_string(p)
 end
 
 -- Parse multiline basic string
+--: (Parser) -> (unknown, string | nil)
 local function parse_ml_basic_string(p)
   -- skip opening """
   p.pos = p.pos + 3
@@ -374,6 +395,7 @@ local function parse_ml_basic_string(p)
 end
 
 -- Parse literal (single-quoted) string
+--: (Parser) -> (unknown, string | nil)
 local function parse_literal_string(p)
   advance(p) -- skip opening '
   local start = p.pos
@@ -392,6 +414,7 @@ local function parse_literal_string(p)
 end
 
 -- Parse multiline literal string
+--: (Parser) -> (unknown, string | nil)
 local function parse_ml_literal_string(p)
   p.pos = p.pos + 3 -- skip opening '''
   -- skip immediate newline
@@ -455,6 +478,7 @@ local function parse_ml_literal_string(p)
 end
 
 -- Parse any string type
+--: (Parser) -> (unknown, string | nil)
 local function parse_string(p)
   local c1 = byte(p.str, p.pos)
   if c1 == DQUOTE then
@@ -473,6 +497,7 @@ local function parse_string(p)
 end
 
 -- Parse a bare key
+--: (Parser) -> (unknown, string | nil)
 local function parse_bare_key(p)
   local start = p.pos
   while p.pos <= p.len and is_bare_key_char(byte(p.str, p.pos)) do
@@ -485,6 +510,7 @@ local function parse_bare_key(p)
 end
 
 -- Parse a simple key (bare or quoted)
+--: (Parser) -> (unknown, string | nil)
 local function parse_simple_key(p)
   local c = peek(p)
   if c == DQUOTE then
@@ -504,6 +530,7 @@ local function parse_simple_key(p)
 end
 
 -- Parse a dotted key, returns list of key parts
+--: (Parser) -> (unknown, string | nil)
 local function parse_key(p)
   local keys = {}
   local k, e = parse_simple_key(p)
@@ -522,6 +549,7 @@ end
 
 -- Parse integer (decimal, hex, octal, binary)
 -- Returns number or nil, err
+--: (Parser) -> (unknown, string | nil)
 local function parse_number(p)
   local start = p.pos
   local c = byte(p.str, p.pos)
@@ -671,6 +699,7 @@ end
 --   local date:      1979-05-27
 --   local time:      07:32:00
 -- Returns table with __toml_type or nil (not a datetime, caller should try number)
+--: (Parser) -> (unknown, string | nil)
 local function try_parse_datetime(p)
   local s = p.str
   local pos = p.pos
@@ -798,6 +827,7 @@ local function try_parse_datetime(p)
 end
 
 -- Parse inline table
+--: (Parser) -> (unknown, string | nil)
 local function parse_inline_table(p)
   advance(p) -- skip {
   local tbl = {}
@@ -848,6 +878,7 @@ local function parse_inline_table(p)
 end
 
 -- Parse array
+--: (Parser) -> (unknown, string | nil)
 local function parse_array(p)
   advance(p) -- skip [
   local arr = {}

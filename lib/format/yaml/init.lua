@@ -26,40 +26,51 @@ local huge = math.huge
 
 -- ── Decoder ──────────────────────────────────────────────────────────────────
 
+--:: Parser = { s: string, pos: integer, len: integer, anchors: { [string]: unknown } }
+
+--: (string) -> Parser
 local function make_parser(str)
   local p = {
     s = str,
     pos = 1,
     len = #str,
     anchors = {},
-  }
+  } --[[:! Parser]]
   return p
 end
 
+--: (Parser) -> integer | nil
 local function peek(p)
   if p.pos > p.len then return nil end
-  return byte(p.s, p.pos)
+  local b = byte(p.s, p.pos)
+  return b
 end
 
+--: (Parser, integer) -> integer | nil
 local function peek_at(p, offset)
   local i = p.pos + offset
   if i > p.len then return nil end
-  return byte(p.s, i)
+  local b = byte(p.s, i)
+  return b
 end
 
+--: (Parser, integer | nil) -> ()
 local function advance(p, n)
   p.pos = p.pos + (n or 1)
 end
 
+--: (Parser) -> boolean
 local function at_end(p)
   return p.pos > p.len
 end
 
+--: (Parser) -> string | nil
 local function current_char(p)
   if p.pos > p.len then return nil end
   return sub(p.s, p.pos, p.pos)
 end
 
+--: (Parser) -> unknown
 local function rest_of_line(p)
   local nl = find(p.s, "\n", p.pos, true)
   if nl then
@@ -69,6 +80,7 @@ local function rest_of_line(p)
   return sub(p.s, p.pos)
 end
 
+--: (Parser) -> unknown
 local function skip_spaces(p)
   while p.pos <= p.len do
     local c = byte(p.s, p.pos)
@@ -80,6 +92,7 @@ local function skip_spaces(p)
   end
 end
 
+--: (Parser) -> unknown
 local function skip_whitespace_and_comments(p)
   while p.pos <= p.len do
     local c = byte(p.s, p.pos)
@@ -100,6 +113,7 @@ local function skip_whitespace_and_comments(p)
   end
 end
 
+--: (Parser) -> unknown
 local function skip_blank_lines(p)
   while p.pos <= p.len do
     local saved = p.pos
@@ -124,6 +138,7 @@ local function skip_blank_lines(p)
   end
 end
 
+--: (Parser) -> unknown
 local function expect_newline_or_end(p)
   skip_whitespace_and_comments(p)
   if at_end(p) then return true end
@@ -139,6 +154,7 @@ local function expect_newline_or_end(p)
   return false
 end
 
+--: (Parser) -> unknown
 local function get_indent(p)
   local col = 0
   local i = p.pos
@@ -175,6 +191,7 @@ local DOUBLE_ESCAPES = {
   P = "\226\128\169", -- Unicode PS
 }
 
+--: (Parser, integer) -> (string | nil, string | nil)
 local function parse_hex_escape(p, n)
   local hex = sub(p.s, p.pos, p.pos + n - 1)
   if #hex ~= n or not hex:match("^%x+$") then
@@ -205,6 +222,7 @@ local function parse_hex_escape(p, n)
   end
 end
 
+--: (Parser) -> unknown
 local function parse_double_quoted(p)
   p.pos = p.pos + 1 -- skip opening "
   local parts = {}
@@ -255,6 +273,7 @@ local function parse_double_quoted(p)
   return nil, "unterminated double-quoted string"
 end
 
+--: (Parser) -> unknown
 local function parse_single_quoted(p)
   p.pos = p.pos + 1 -- skip opening '
   local parts = {}
@@ -278,6 +297,7 @@ local function parse_single_quoted(p)
 end
 
 -- Parse a plain scalar (unquoted), stopping at flow indicators in flow context
+--: (Parser, boolean) -> unknown
 local function parse_plain_scalar(p, in_flow)
   local start = p.pos
   local last_non_space = p.pos - 1
@@ -368,6 +388,7 @@ end
 
 local parse_value -- forward declaration
 
+--: (Parser, integer) -> unknown
 local function parse_block_scalar(p, min_indent)
   local indicator = sub(p.s, p.pos, p.pos)
   local is_literal = (indicator == "|")
@@ -513,6 +534,7 @@ local function parse_block_scalar(p, min_indent)
   return result
 end
 
+--: (Parser) -> unknown
 local function parse_flow_sequence(p)
   p.pos = p.pos + 1 -- skip [
   local result = {}
@@ -542,6 +564,7 @@ local function parse_flow_sequence(p)
   return nil, "unterminated flow sequence"
 end
 
+--: (Parser) -> unknown
 local function parse_flow_mapping(p)
   p.pos = p.pos + 1 -- skip {
   local result = {}
@@ -630,6 +653,7 @@ local function parse_flow_mapping(p)
   return nil, "unterminated flow mapping"
 end
 
+--: (Parser, integer) -> unknown
 local function parse_block_sequence(p, indent)
   local result = {}
   while not at_end(p) do
@@ -699,6 +723,7 @@ end
 
 -- first_at_pos: when true, the first key is already at p.pos (past leading spaces).
 -- Used when parsing inline mappings after "- ".
+--: (Parser, integer, boolean | nil) -> unknown
 local function parse_block_mapping(p, indent, first_at_pos)
   local result = {}
   local first = first_at_pos
@@ -1003,6 +1028,7 @@ parse_value = function(p, min_indent, in_flow)
   return val
 end
 
+--: (Parser) -> unknown
 local function parse_document(p)
   skip_blank_lines(p)
   if at_end(p) then return nil end
