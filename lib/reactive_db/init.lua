@@ -376,7 +376,7 @@ function DB:transaction(fn)
   local snapshots = {}
   for tname, tbl in pairs(self._tables) do
     local snap = { rows = {}, order = {} }
-    for pk, row in pairs(tbl._rows) do snap.rows[pk] = shallow_copy(--[[:! any]] row) end
+    for pk, row in pairs(tbl._rows) do snap.rows[pk] = shallow_copy(--[[: any]] row) end
     for i, pk in ipairs(tbl._order) do snap.order[i] = pk end
     snapshots[tname] = snap
   end

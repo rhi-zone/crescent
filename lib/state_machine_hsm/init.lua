@@ -307,7 +307,7 @@ function Machine:send(event, data)
   end
 
   -- Compute LCA
-  local lca_path = lca(nodes, --[[:! any]] current, target_leaf)
+  local lca_path = lca(nodes, --[[:! string]] current, target_leaf)
 
   -- Self-transition: if source == target (same node), use the source's parent as LCA
   -- so entry/exit fire on the state itself.

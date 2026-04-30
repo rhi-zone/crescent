@@ -548,7 +548,7 @@ function M.lbfgs(f, grad, params0, opts)
     -- First loop: newest → oldest
     for j = 1, k do
       local idx = buf_idx(j)
-      alphas[j] = rho_hist[idx] * vec_dot(--[[:! any]] s_hist[idx], q)
+      alphas[j] = rho_hist[idx] * vec_dot(--[[:! { number }]] s_hist[idx], q)
       for i = 1, n do q[i] = q[i] - alphas[j] * y_hist[idx][i] end
     end
 
@@ -556,8 +556,8 @@ function M.lbfgs(f, grad, params0, opts)
     local r
     if k > 0 then
       local newest = buf_idx(1)
-      local sy = vec_dot(--[[:! any]] s_hist[newest], --[[:! any]] y_hist[newest])
-      local yy = vec_dot(--[[:! any]] y_hist[newest], --[[:! any]] y_hist[newest])
+      local sy = vec_dot(--[[:! { number }]] s_hist[newest], --[[:! { number }]] y_hist[newest])
+      local yy = vec_dot(--[[:! { number }]] y_hist[newest], --[[:! { number }]] y_hist[newest])
       if yy > 1e-15 then
         r = vec_scale(q, sy / yy)
       else
@@ -570,7 +570,7 @@ function M.lbfgs(f, grad, params0, opts)
     -- Second loop: oldest → newest
     for j = k, 1, -1 do
       local idx  = buf_idx(j)
-      local beta = rho_hist[idx] * vec_dot(--[[:! any]] y_hist[idx], r)
+      local beta = rho_hist[idx] * vec_dot(--[[:! { number }]] y_hist[idx], r)
       local diff = alphas[j] - beta
       for i = 1, n do r[i] = r[i] + s_hist[idx][i] * diff end
     end

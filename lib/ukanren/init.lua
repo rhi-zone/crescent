@@ -183,7 +183,7 @@ function M.conj_all(...)
   end
   local g = goals[1]
   for i = 2, n do
-    g = M.conj(--[[:! any]] g, --[[:! any]] goals[i])
+    g = M.conj(--[[: any]] g, --[[: any]] goals[i])
   end
   return g
 end
@@ -198,7 +198,7 @@ function M.disj_all(...)
   end
   local g = goals[1]
   for i = 2, n do
-    g = M.disj(--[[:! any]] g, --[[:! any]] goals[i])
+    g = M.disj(--[[: any]] g, --[[: any]] goals[i])
   end
   return g
 end

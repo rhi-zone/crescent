@@ -159,7 +159,7 @@ function M.new_lazy(arr, opts)
     local l = data[2 * i]
     local r = data[2 * i + 1]
     if l == nil and r == nil then
-      data[i] = --[[:! any]] identity
+      data[i] = --[[: any]] identity
     elseif l == nil then
       data[i] = r
     elseif r == nil then

@@ -109,7 +109,7 @@ function M.infer(data)
       local required = {}
       for k, v in pairs(data) do
         if type(k) == "string" then
-          properties[k] = M.infer(--[[:! any]] v)
+          properties[k] = M.infer(--[[: any]] v)
           required[#required + 1] = k
         end
       end

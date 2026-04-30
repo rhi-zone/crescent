@@ -296,9 +296,9 @@ function M.deep_merge(...)
   end
 
   if #args == 0 then return {} end
-  local result = M.copy(--[[:! any]] args[1])
+  local result = M.copy(--[[: any]] args[1])
   for i = 2, #args do
-    result = _merge2(result, --[[:! any]] args[i])
+    result = _merge2(result, --[[: any]] args[i])
   end
   return result
 end

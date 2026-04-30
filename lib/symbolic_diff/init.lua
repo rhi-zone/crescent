@@ -317,8 +317,8 @@ DIFF = function(e, v)
     -- product rule: (f*g)' = f'*g + f*g'
     local f, g = e.left, e.right
     return M.add(
-      M.mul(DIFF(f, v), --[[:! any]] g),
-      M.mul(--[[:! any]] f, DIFF(g, v))
+      M.mul(DIFF(f, v), --[[: any]] g),
+      M.mul(--[[: any]] f, DIFF(g, v))
     )
 
   elseif t == "div" then
@@ -326,10 +326,10 @@ DIFF = function(e, v)
     local f, g = e.left, e.right
     return M.div(
       M.sub(
-        M.mul(DIFF(f, v), --[[:! any]] g),
-        M.mul(--[[:! any]] f, DIFF(g, v))
+        M.mul(DIFF(f, v), --[[: any]] g),
+        M.mul(--[[: any]] f, DIFF(g, v))
       ),
-      M.pow(--[[:! any]] g, M.num(2))
+      M.pow(--[[: any]] g, M.num(2))
     )
 
   elseif t == "pow" then
@@ -339,35 +339,35 @@ DIFF = function(e, v)
       -- d/dx(f^n) = n * f^(n-1) * f'
       local n = g.value
       return M.mul(
-        M.mul(M.num(n), M.pow(--[[:! any]] f, M.num(n - 1))),
+        M.mul(M.num(n), M.pow(--[[: any]] f, M.num(n - 1))),
         DIFF(f, v)
       )
     else
       -- General case: d/dx(f^g) = f^g * (g'*ln(f) + g*f'/f)
       return M.mul(
-        M.pow(--[[:! any]] f, --[[:! any]] g),
+        M.pow(--[[: any]] f, --[[: any]] g),
         M.add(
-          M.mul(DIFF(g, v), M.ln(--[[:! any]] f)),
-          M.mul(--[[:! any]] g, M.div(DIFF(f, v), --[[:! any]] f))
+          M.mul(DIFF(g, v), M.ln(--[[: any]] f)),
+          M.mul(--[[: any]] g, M.div(DIFF(f, v), --[[: any]] f))
         )
       )
     end
 
   elseif t == "sin" then
     -- d/dx(sin(f)) = cos(f)*f'
-    return M.mul(M.cos(--[[:! any]] e.arg), DIFF(e.arg, v))
+    return M.mul(M.cos(--[[: any]] e.arg), DIFF(e.arg, v))
 
   elseif t == "cos" then
     -- d/dx(cos(f)) = -sin(f)*f'
-    return M.mul(M.neg(M.sin(--[[:! any]] e.arg)), DIFF(e.arg, v))
+    return M.mul(M.neg(M.sin(--[[: any]] e.arg)), DIFF(e.arg, v))
 
   elseif t == "ln" then
     -- d/dx(ln(f)) = f'/f
-    return M.div(DIFF(e.arg, v), --[[:! any]] e.arg)
+    return M.div(DIFF(e.arg, v), --[[: any]] e.arg)
 
   elseif t == "exp" then
     -- d/dx(exp(f)) = exp(f)*f'
-    return M.mul(M.exp(--[[:! any]] e.arg), DIFF(e.arg, v))
+    return M.mul(M.exp(--[[: any]] e.arg), DIFF(e.arg, v))
 
   else
     error("symbolic_diff.diff: unknown tag '" .. t .. "'")
