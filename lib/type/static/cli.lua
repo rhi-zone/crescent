@@ -146,10 +146,24 @@ local function pipe_write_all(fd, s)
     local done  = 0
     while done < total do
         local n = ffi.C.write(fd, buf + done, total - done)
-        if n <= 0 then break end
-        done = done + n
+        if n < 0 then
+            if ffi.errno() == 4 then  -- EINTR: retry
+                -- continue
+            else
+                break
+            end
+        elseif n == 0 then
+            break
+        else
+            done = done + n
+        end
     end
 end
+
+-- EINTR (4 on Linux/glibc and musl): syscall interrupted by signal.
+-- We MUST retry, not abort: SIGCHLD from worker exits will interrupt this
+-- parent-side read() and silently truncate worker output otherwise.
+local EINTR = 4
 
 local function pipe_read_all(fd)
     local chunk_size = 4096
@@ -157,8 +171,17 @@ local function pipe_read_all(fd)
     local chunks = {}
     while true do
         local n = ffi.C.read(fd, buf, chunk_size)
-        if n <= 0 then break end
-        chunks[#chunks + 1] = ffi.string(buf, n)
+        if n < 0 then
+            if ffi.errno() == EINTR then
+                -- retry
+            else
+                break
+            end
+        elseif n == 0 then
+            break
+        else
+            chunks[#chunks + 1] = ffi.string(buf, n)
+        end
     end
     return table.concat(chunks)
 end
@@ -200,6 +223,29 @@ end
 
 -- ── Parallel check runner ─────────────────────────────────────────────────────
 
+-- Fork a worker for `bucket` and return (pid, read_fd). The child does not
+-- return — run_worker calls os.exit. Aborts the process on pipe/fork failure.
+local function spawn_worker(bucket, project_opts, cache_dir)
+    local C = --[[: any]] ffi.C
+    local pipefd = ffi.new("int[2]")
+    if C.pipe(pipefd) ~= 0 then
+        io.stderr:write("pipe() failed\n")
+        os.exit(2)
+    end
+    local rfd, wfd = pipefd[0], pipefd[1]
+    local pid = C.fork()
+    if pid < 0 then
+        io.stderr:write("fork() failed\n")
+        os.exit(2)
+    elseif pid == 0 then
+        C.close(rfd)
+        run_worker(bucket, wfd, project_opts, cache_dir)
+        -- unreachable
+    end
+    C.close(wfd)
+    return pid, rfd
+end
+
 local function check_parallel(files, n, project_opts, cache_dir, format, errors_mod)
     -- Distribute files round-robin across n workers.
     local buckets = {}
@@ -220,40 +266,38 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
     -- Fork one worker per bucket.
     local pids     = {}
     local read_fds = {}
-    local pipefd   = ffi.new("int[2]")
 
     for i, bucket in ipairs(workers) do
-        if ffi.C.pipe(pipefd) ~= 0 then
-            io.stderr:write("pipe() failed\n")
-            os.exit(2)
-        end
-        local rfd = pipefd[0]
-        local wfd = pipefd[1]
-
-        local pid = ffi.C.fork()
-        if pid < 0 then
-            io.stderr:write("fork() failed\n")
-            os.exit(2)
-        elseif pid == 0 then
-            -- Child: close read end, run, exit.
-            ffi.C.close(rfd)
-            run_worker(bucket, wfd, project_opts, cache_dir)
-            -- run_worker calls os.exit; unreachable.
-        else
-            -- Parent: close write end.
-            ffi.C.close(wfd)
-            pids[i]     = pid
-            read_fds[i] = rfd
-        end
+        pids[i], read_fds[i] = spawn_worker(bucket, project_opts, cache_dir)
     end
 
     -- Collect output from each worker pipe.
+    -- A worker's last line is "DONE|<errors>|<warnings>". Any worker whose
+    -- output is missing the DONE sentinel crashed (typically SIGSEGV inside
+    -- LuaJIT under heavy parallel load) and silently lost its bucket. Detect
+    -- those workers and replay their files in the parent so the total error
+    -- count is deterministic regardless of worker survival.
     local all_lines = {}
+    local failed_buckets = {}  -- workers index → bucket
     for i = 1, #workers do
         local text = pipe_read_all(read_fds[i])
         ffi.C.close(read_fds[i])
+        local worker_lines = {}
+        local saw_done = false
         for line in text:gmatch("[^\n]+") do
-            all_lines[#all_lines + 1] = line
+            worker_lines[#worker_lines + 1] = line
+            if line:sub(1, 5) == "DONE|" then saw_done = true end
+        end
+        if saw_done then
+            -- Worker completed cleanly: keep its diagnostics.
+            for _, line in ipairs(worker_lines) do
+                all_lines[#all_lines + 1] = line
+            end
+        else
+            -- Worker crashed (typically SIGSEGV inside LuaJIT under heavy
+            -- parallel load). Discard its partial output and queue the bucket
+            -- for sequential replay in the parent.
+            failed_buckets[i] = workers[i]
         end
     end
 
@@ -266,6 +310,38 @@ local function check_parallel(files, n, project_opts, cache_dir, format, errors_
     -- Merge manifest shards now that all workers are done.
     local cache_mod = require("lib.type.static.cache")
     cache_mod.merge_shards(cache_dir)
+
+    -- Replay any failed buckets via a single fresh child. Bundling all failed
+    -- buckets into one child reduces the chance of hitting another crash, and
+    -- a fresh child matches the in-memory state surviving workers had so the
+    -- diagnostics are bit-identical to what a non-crashed worker would have
+    -- produced.
+    if next(failed_buckets) then
+        local nfailed = 0
+        for _ in pairs(failed_buckets) do nfailed = nfailed + 1 end
+        io.stderr:write(string.format(
+            "warning: %d worker(s) crashed; replaying their files\n",
+            nfailed))
+        local replay_files = {}
+        for _, bucket in pairs(failed_buckets) do
+            for _, filename in ipairs(bucket) do
+                replay_files[#replay_files + 1] = filename
+            end
+        end
+        local replay_pid, replay_rfd = spawn_worker(replay_files, project_opts, cache_dir)
+        local replay_text = pipe_read_all(replay_rfd)
+        ffi.C.close(replay_rfd)
+        ffi.C.waitpid(replay_pid, status_p, 0)
+        local replay_saw_done = false
+        for line in replay_text:gmatch("[^\n]+") do
+            all_lines[#all_lines + 1] = line
+            if line:sub(1, 5) == "DONE|" then replay_saw_done = true end
+        end
+        if not replay_saw_done then
+            io.stderr:write("warning: replay child also crashed; results incomplete\n")
+        end
+        cache_mod.merge_shards(cache_dir)
+    end
 
     -- Decode diagnostics into per-file err_ctx tables.
     local file_errs = {}   -- filename -> err_ctx
