@@ -31,6 +31,8 @@ local int2 = ffi.new("int[2]")
 
 local mod = {}
 
+--:: Process = { pid: integer, kill: (Process, integer | nil) -> nil, wait: (Process) -> integer }
+
 --[[@param fd integer]]
 --[[@return string]]
 local function read_fd(fd)
@@ -174,7 +176,7 @@ function handle:wait()
   return decode_status(int1[0])
 end
 
---: (string, string[] | nil, { cwd: string | nil, env: { [string]: string } | nil } | nil) -> ({ pid: number, kill: (self, number | nil) -> nil, wait: (self) -> number } | nil, string | nil)
+--: (string, string[] | nil, { cwd: string | nil, env: { [string]: string } | nil } | nil) -> (Process | nil, string | nil)
 function mod.spawn(cmd, args, opts)
   opts = opts or {}
 

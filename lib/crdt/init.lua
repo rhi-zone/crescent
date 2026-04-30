@@ -6,6 +6,13 @@ local M = {}
 
 M._tier = "pure"
 
+--:: GCounter = { _id: string, _counts: { [string]: number } }
+--:: PNCounter = { _id: string, _pos: GCounter, _neg: GCounter }
+--:: LWWRegister = { _id: string, _value: unknown, _ts: number }
+--:: TPSet = { _add: { [unknown]: boolean }, _rem: { [unknown]: boolean } }
+--:: ORSet = { _id: string, _entries: { [unknown]: unknown }, _seq: integer }
+--:: LWWMap = { _id: string, _entries: { [unknown]: unknown } }
+
 -- ─── helpers ────────────────────────────────────────────────────────────────
 
 --: (unknown, unknown) -> boolean

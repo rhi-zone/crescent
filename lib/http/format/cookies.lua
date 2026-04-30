@@ -5,6 +5,8 @@
 
 local mod = {}
 
+--:: http_request = { method: string, host: string, port?: number, path: string, headers: { [string]: { [integer]: string } }, body?: string }
+
 --: (http_request) -> { [string]: string } | nil
 mod.parse_cookies = function(req)
 	local cookie_hdr = (req.headers["cookie"] or {})[1]

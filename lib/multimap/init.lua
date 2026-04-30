@@ -5,6 +5,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: multimap = { _data: { [unknown]: { [integer]: unknown } }, _mode: string, _total: integer }
+
 local MM = {}
 MM.__index = MM
 

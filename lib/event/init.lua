@@ -8,6 +8,9 @@ end
 
 local M = {}
 
+--:: Emitter = { ... }
+--:: Event = { ... }
+
 --:: Listener = { fn: (...unknown) -> unknown, priority: number, once: boolean, id: number }
 
 local Emitter = {}

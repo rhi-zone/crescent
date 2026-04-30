@@ -4,6 +4,9 @@ local vec = require("lib.vec")
 
 local M = {}
 
+--:: Vec = { data: unknown, n: integer }
+--:: KnnIndex = { _k: integer, _dist: (Vec, Vec) -> number, _points: { [integer]: unknown }, _n: integer, _dims: integer | nil }
+
 local index_mt = {}
 index_mt.__index = index_mt
 

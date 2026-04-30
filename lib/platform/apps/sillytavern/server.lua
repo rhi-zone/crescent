@@ -36,6 +36,9 @@ local card_mod = require("lib.formats.ccv2.card")
 
 local M = {}
 
+--:: http_req = { method: string, path: string, headers: { [string]: string }, body: string | nil }
+--:: http_res = { status: integer, headers: { [string]: string }, body: string }
+
 local SCHEMA = [[
 CREATE TABLE IF NOT EXISTS card_meta (
   filename    TEXT PRIMARY KEY,

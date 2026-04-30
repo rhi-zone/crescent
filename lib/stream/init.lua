@@ -4,6 +4,8 @@ end
 
 local M = {}
 
+--:: Stream = { next: () -> unknown | nil }
+
 -- Stream metatable: all combinators are methods
 local Stream = {}
 Stream.__index = Stream

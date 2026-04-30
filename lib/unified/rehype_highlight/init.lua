@@ -20,6 +20,8 @@ end
 
 local M = {}
 
+--:: list = { [integer]: unknown }
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 --: (string) -> boolean

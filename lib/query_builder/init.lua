@@ -10,6 +10,12 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Select = { _table: string, _columns: { [integer]: string } | nil, _raw_cols: string | nil, _joins: { [integer]: unknown }, _wheres: { [integer]: unknown }, _order: string | nil, _group: string | nil, _having: unknown, _limit: integer | nil, _offset: integer | nil, _count: boolean, _exists: boolean }
+--:: Insert = { _table: string, _columns: { [integer]: string } | nil, _values: { [integer]: unknown }, _on_conflict: unknown, _returning: { [integer]: string } | nil }
+--:: Update = { _table: string, _sets: { [integer]: unknown }, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
+--:: Delete = { _table: string, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
+--:: Union = { _queries: { [integer]: unknown }, _all: boolean }
+
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 --: (table) -> table

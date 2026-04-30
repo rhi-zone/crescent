@@ -11,6 +11,8 @@ local ffi = require("ffi")
 
 local mod = {}
 
+--:: epoll = { fd: unknown, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: unknown }, weak: { [integer]: boolean }, count: integer }
+
 local epoll_ffi
 local read_c
 local write_c

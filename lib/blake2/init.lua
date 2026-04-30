@@ -22,6 +22,8 @@ local bit = require("bit")
 local M = {}
 M._tier = "pure"
 
+--:: uint64_t = integer
+
 local U64 = ffi.typeof("uint64_t")
 
 -- ---------------------------------------------------------------------------

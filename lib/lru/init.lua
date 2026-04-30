@@ -3,6 +3,10 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local M = {}
+
+--:: Cache = { ... }
+--:: Lfu = { ... }
+--:: TwoQ = { ... }
 M._tier = "pure"
 
 -- ── Internal helpers ──────────────────────────────────────────────────────────

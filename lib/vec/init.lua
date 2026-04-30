@@ -1,5 +1,7 @@
 if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
 
+--:: Vec = { data: unknown, n: integer }
+
 local M = {}
 
 local has_ffi, ffi = pcall(require, "ffi")

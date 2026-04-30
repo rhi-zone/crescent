@@ -25,6 +25,8 @@ local RTLD_LAZY = 1
 
 local mod = {}
 
+--:: DynamicLibrary = { handle: unknown, path: string }
+
 ---@class DynamicLibrary
 local DynamicLibrary = {}
 mod.DynamicLibrary = DynamicLibrary

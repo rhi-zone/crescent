@@ -4,6 +4,10 @@ end
 
 local M = {}
 
+--:: Var = { __var: true, id: integer, name: string | nil }
+--:: Pair = { __pair: true, car: unknown, cdr: unknown }
+--:: Goal = (table) -> unknown
+
 -- Variable counter for unique ids
 local _next_id = 0
 

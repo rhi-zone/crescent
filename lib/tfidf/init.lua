@@ -11,6 +11,8 @@ local table_sort = table.sort
 
 local M = {}
 
+--:: Corpus = { docs: { [string]: unknown }, df: { [string]: integer }, doc_n: integer, idf_cache: unknown, opts: unknown }
+
 -- ── Default stopwords (English, ~80 common words) ───────────────────────
 --: { [string]: boolean }
 local DEFAULT_STOPWORDS = {}

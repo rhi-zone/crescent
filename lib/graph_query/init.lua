@@ -5,6 +5,10 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Graph = { _nodes: { [unknown]: unknown }, _adj: { [unknown]: { [unknown]: unknown } } }
+--:: QGraph = { nodes: { [unknown]: unknown }, edges: { [integer]: unknown } }
+--:: Query = { _graph: unknown, _ops: { [integer]: unknown } }
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------

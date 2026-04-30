@@ -9,6 +9,9 @@ end
 
 local M = {}
 
+--:: RingBuf = { _buf: { [integer]: unknown }, _capacity: integer, _head: integer, _tail: integer, _size: integer }
+--:: ByteRingBuf = { _buf: unknown, _capacity: integer, _head: integer, _tail: integer, _size: integer }
+
 --: string
 M._tier = "pure"
 

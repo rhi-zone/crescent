@@ -4,6 +4,8 @@ end
 
 local M = {}
 
+--:: Cache = { ... }
+
 --:: CacheOpts = { ttl: number | nil, on_evict: ((unknown, unknown) -> nil) | nil, clock: (() -> number) | nil }
 
 local Cache = {}

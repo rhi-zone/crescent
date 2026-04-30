@@ -26,6 +26,8 @@ end
 
 local M = {}
 
+--:: Promise = { _state: integer, _value: unknown, _reason: unknown, _handlers: { [integer]: unknown } }
+
 local STATE_PENDING   = "pending"
 local STATE_FULFILLED = "fulfilled"
 local STATE_REJECTED  = "rejected"

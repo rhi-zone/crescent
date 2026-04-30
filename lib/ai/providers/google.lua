@@ -10,6 +10,19 @@ local stream_mod = require("lib.http.stream")
 
 local mod = {}
 
+-- Type declarations (mirror lib/ai/types.lua; redeclared because the typechecker has no cross-module type import).
+--:: ai_message = { role: "system" | "user" | "assistant" | "tool", content: string, tool_call_id?: string, name?: string }
+--:: ai_tool = { name: string, description: string, parameters: { [string]: unknown } }
+--:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
+--:: ai_http_client = { request: (req: unknown) -> (unknown, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
+--:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, http_client?: ai_http_client, api_key?: string }
+--:: ai_response = { text: string | nil, tool_calls: ai_tool_call[] | nil, finish_reason: string, usage: { input_tokens: integer, output_tokens: integer } | nil }
+--:: ai_delta = { text: string | nil, tool_call: ai_tool_call | nil, finish_reason: string | nil, usage: { input_tokens: integer, output_tokens: integer } | nil }
+--:: ai_embed_request = { model: string, value: string, http_client?: ai_http_client, api_key?: string }
+--:: ai_embed_many_request = { model: string, values: string[], http_client?: ai_http_client, api_key?: string }
+--:: ai_embed_response = { embedding: number[], usage: { input_tokens: integer } | nil }
+--:: ai_embed_many_response = { embeddings: number[][], usage: { input_tokens: integer } | nil }
+
 local API_HOST = "generativelanguage.googleapis.com"
 
 local function get_api_key(req)

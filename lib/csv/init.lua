@@ -9,6 +9,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Decoder = { feed: (string) -> nil, rows: () -> { [integer]: { [integer]: string } }, finish: () -> nil }
+
 local byte, char, sub, find, gsub = string.byte, string.char, string.sub, string.find, string.gsub
 local concat, insert = table.concat, table.insert
 

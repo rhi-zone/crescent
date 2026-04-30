@@ -10,6 +10,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Stream = { _next: () -> unknown | nil }
+
 -- ── Core ──────────────────────────────────────────────────────────────────────
 
 local Stream = {}

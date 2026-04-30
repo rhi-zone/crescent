@@ -8,6 +8,8 @@ end
 
 local M = {}
 
+--:: Trie = { _root: unknown, _size: integer, _compressed: boolean }
+
 -- opts.compressed: if true, logically a radix/Patricia trie (no-op at this tier; same interface)
 --: (opts: ({ compressed: boolean | nil } | nil)) -> Trie
 function M.new(opts)

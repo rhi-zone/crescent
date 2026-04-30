@@ -1,7 +1,8 @@
 if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
 
---: module
 local M = {}
+
+--:: Database = { _facts: { [string]: { [string]: { [integer]: string } } }, _rules: { [string]: { [integer]: unknown } }, _dirty: boolean, _derived: { [string]: { [string]: { [integer]: string } } } }
 
 local concat = table.concat
 

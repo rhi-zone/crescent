@@ -1,5 +1,7 @@
 local mod = {}
 
+--:: Schema<T> = { type: string, value: unknown, fields: { [string]: unknown } | nil, items: unknown, of: unknown, ... }
+
 -- ── fast boolean check (hot path, no allocation on failure) ──────────────────
 
 mod.checkers = {}

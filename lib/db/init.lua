@@ -7,6 +7,13 @@ local sqlite = require("lib.sqlite")
 
 local M = {}
 
+--:: sqlite = unknown
+--:: Conn = { _db: unknown }
+--:: Select = { _db: unknown, _table: string, _columns: { [integer]: string } | nil, _wheres: { [integer]: unknown }, _order: string | nil, _limit: integer | nil, _offset: integer | nil }
+--:: Insert = { _db: unknown, _table: string, _columns: { [integer]: string } | nil, _values: { [integer]: unknown }, _on_conflict: unknown, _returning: { [integer]: string } | nil }
+--:: Update = { _db: unknown, _table: string, _sets: { [integer]: unknown }, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
+--:: Delete = { _db: unknown, _table: string, _wheres: { [integer]: unknown }, _returning: { [integer]: string } | nil }
+
 -- ── FFI: sqlite3_column_name (not exposed by lib.sqlite) ───────────────────
 
 pcall(ffi.cdef, "const char *sqlite3_column_name(sqlite3_stmt*, int N);")

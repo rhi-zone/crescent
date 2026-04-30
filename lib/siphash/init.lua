@@ -20,6 +20,8 @@ local bit = require("bit")
 local M = {}
 M._tier = "pure"
 
+--:: uint64_t = integer
+
 local U64 = ffi.typeof("uint64_t")
 
 -- Bitmask for isolating lower 32 bits (used in hash_pair).

@@ -9,6 +9,8 @@ local M = {}
 --:: Observer = { next: (unknown) -> (), error: (((string) -> ()) | nil), complete: ((() -> ()) | nil) }
 --:: Teardown = () -> ()
 --:: SubscribeFn = (Observer) -> (Teardown | nil)
+--:: Observable = { _subscribe: SubscribeFn }
+--:: Subject = { _observers: { [integer]: Observer }, _closed: boolean, next: (Subject, unknown) -> nil, error: (Subject, string) -> nil, complete: (Subject) -> nil }
 
 --- Observable object. Created via M.create, M.of, M.from_array, etc.
 local Observable = {}

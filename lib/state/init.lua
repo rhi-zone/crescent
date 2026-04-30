@@ -11,6 +11,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Machine = { _initial: string, _current: string, _states: { [string]: unknown }, _listeners: { [integer]: unknown }, _history: { [string]: string }, _ctx: unknown }
+
 -- ── Internals ────────────────────────────────────────────────────────────────
 
 -- Resolve a transition spec.  It can be either:

@@ -4,6 +4,8 @@ end
 
 local M = {}
 
+--:: Model = { ... }
+
 -- ── LCG random number generator ─────────────────────────────────────────────
 
 local RNG = {}

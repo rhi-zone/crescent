@@ -16,7 +16,7 @@ local M = {}
 -- PNG magic: \137 P N G \r \n \26 \n
 local PNG_SIG = "\137PNG\r\n\26\n"
 
---: (data: string, channels: (int | nil)) -> (string, int, int, int) | (nil, string)
+--: (data: string, channels: (integer | nil)) -> (string, integer, integer, integer) | (nil, string)
 function M.decode(data, _channels)
   if #data >= 8 and data:sub(1, 8) == PNG_SIG then
     return nil, "pure Lua PNG decoder not yet implemented (TODO: lib/png/)"

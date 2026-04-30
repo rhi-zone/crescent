@@ -12,6 +12,9 @@ local abs = math.abs
 
 local M = {}
 
+--:: Bitset = { ... }
+--:: Bloom = { ... }
+
 -- Try to use LuaJIT bit library for performance; fall back to arithmetic.
 local has_bit, bit = pcall(require, "bit")
 --: string

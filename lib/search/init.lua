@@ -5,6 +5,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: query = { type: string, word: string | nil, words: { [integer]: string } | nil, op: string | nil, queries: { [integer]: unknown } | nil, max_dist: number | nil, prefix: string | nil, pattern: string | nil }
+--:: index = { add: (string, string, unknown) -> unknown, remove: (string) -> unknown, search: (unknown, integer | nil) -> unknown, size: () -> integer }
+
 -- Default stop words (common English)
 local DEFAULT_STOP_WORDS = {
   ["a"]=true, ["an"]=true, ["the"]=true, ["and"]=true, ["or"]=true,
@@ -190,7 +193,7 @@ local function wildcard_to_lua_pattern(pattern)
 end
 
 -- Create a new search index
---: (opts: ({ tokenize: (fn | nil), normalize: (fn | nil), stop_words: (table | nil), bm25_k1: (number | nil), bm25_b: (number | nil) } | nil)) -> index
+--: (opts: ({ tokenize: ((string) -> string[]) | nil, normalize: ((string) -> string) | nil, stop_words: { [string]: boolean } | nil, bm25_k1: (number | nil), bm25_b: (number | nil) } | nil)) -> index
 function M.index(opts)
   opts = opts or {}
   local stop_words = opts.stop_words or DEFAULT_STOP_WORDS
@@ -525,7 +528,7 @@ function M.index(opts)
   end
 
   -- Search
-  --: (query: query, opts: ({ limit: (number | nil), offset: (number | nil), scorer: (string | nil), explain: (boolean | nil) } | nil)) -> { results: {result}, total: number }
+  --: (query: query, opts: ({ limit: (number | nil), offset: (number | nil), scorer: (string | nil), explain: (boolean | nil) } | nil)) -> { results: { [integer]: unknown }, total: number }
   function idx:search(query, opts)
     opts = opts or {}
     local limit  = opts.limit  or 10

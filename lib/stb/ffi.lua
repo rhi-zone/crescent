@@ -25,11 +25,11 @@ pcall(ffi.cdef, [[
 ]])
 
 -- The caller passes the loaded library object; we return a bound API table.
---: (lib: unknown) -> { decode: (data: string, channels: int) -> (string, int, int, int) | (nil, string), resize: (pixels: string, src_w: int, src_h: int, dst_w: int, dst_h: int, channels: int) -> string | (nil, string) }
+--: (lib: unknown) -> { decode: (data: string, channels: integer) -> (string, integer, integer, integer) | (nil, string), resize: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> string | (nil, string) }
 local function bind(lib)
   local M = {}
 
-  --: (data: string, channels: (int | nil)) -> (string, int, int, int) | (nil, string)
+  --: (data: string, channels: (integer | nil)) -> (string, integer, integer, integer) | (nil, string)
   function M.decode(data, channels)
     channels = channels or 0
     local x = ffi.new("int[1]")
@@ -49,7 +49,7 @@ local function bind(lib)
     return result, x[0], y[0], out_ch
   end
 
-  --: (pixels: string, src_w: int, src_h: int, dst_w: int, dst_h: int, channels: int) -> string | (nil, string)
+  --: (pixels: string, src_w: integer, src_h: integer, dst_w: integer, dst_h: integer, channels: integer) -> string | (nil, string)
   function M.resize(pixels, src_w, src_h, dst_w, dst_h, channels)
     local dst_bytes = dst_w * dst_h * channels
     local dst_buf = ffi.new("unsigned char[?]", dst_bytes)

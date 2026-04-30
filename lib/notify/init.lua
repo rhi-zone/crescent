@@ -1,7 +1,13 @@
 if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
 
---: notify
 local M = {}
+
+--:: channel = { send: (table) -> (true | nil, string) }
+--:: notify = { send: (table) -> (true | nil, string) }
+--:: router = { send: (table) -> (true | nil, string), add: (channel) -> nil }
+--:: retry_channel = { send: (table) -> (true | nil, string) }
+--:: rate_limited_channel = { send: (table) -> (true | nil, string) }
+--:: batched_channel = { send: (table) -> (true | nil, string), flush: () -> nil }
 
 --- Normalize a message: set defaults for missing fields.
 --: (msg: table, (() -> number) | nil) -> table

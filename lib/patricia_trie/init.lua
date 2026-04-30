@@ -9,6 +9,8 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: PatriciaTrie = { _root: unknown, _size: integer }
+
 -- Returns the length of the longest common prefix of strings a and b.
 local function common_prefix_len(a, b)
   local n = math.min(#a, #b)

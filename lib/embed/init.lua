@@ -4,6 +4,9 @@ local vec = require("lib.vec")
 
 local M = {}
 
+--:: Vec = { data: unknown, n: integer }
+--:: Index = { _dims: integer, _metric: string, _entries: { [string]: unknown }, _ids: { [integer]: string }, _id_set: { [string]: integer } }
+
 local idx_mt = {}
 idx_mt.__index = idx_mt
 

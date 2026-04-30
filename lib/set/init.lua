@@ -3,6 +3,9 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local M = {}
+
+--:: Set = { _data: { [unknown]: boolean }, _size: integer }
+
 local Set = {}
 Set.__index = Set
 

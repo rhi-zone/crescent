@@ -2,7 +2,6 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
---: module
 local M = {}
 M._tier = "pure"
 

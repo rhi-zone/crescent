@@ -5,6 +5,7 @@ end
 local M = {}
 
 --:: PluralRule = (count: number) -> string
+--:: I = { _translations: { [string]: { [string]: unknown } }, _locale: string | nil, _fallback: string | nil, _plural_rules: { [string]: PluralRule } }
 
 -- Default plural rules for common locales
 --: { [string]: PluralRule }

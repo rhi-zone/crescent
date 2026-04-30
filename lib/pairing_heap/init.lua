@@ -5,6 +5,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: handle = { key: unknown, value: unknown, children: { [integer]: unknown }, removed: boolean, handle_id: integer }
+--:: Heap = { _root: handle | nil, _cmp: (unknown, unknown) -> boolean, _n: integer, _next_id: integer, _handles: { [integer]: handle } }
+
 -- Default comparator: min-heap (lower key = higher priority)
 local function default_cmp(a, b) return a < b end
 

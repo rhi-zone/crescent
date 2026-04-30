@@ -245,6 +245,8 @@ end
 local M = {}
 M._tier = "system-pcre2"
 
+--:: Regex = { ... }
+
 function M.compile(pattern, flags)
 	local opts = PCRE2_UTF
 	if flags then
