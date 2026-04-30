@@ -2970,3 +2970,35 @@ local result = wrap2(g, 1, 999)
 ]], "argument 3")
     end)
 end)
+
+---------------------------------------------------------------------------
+-- Regression: union-find self-loop in field access on intersection
+---------------------------------------------------------------------------
+-- Repro from lib/fsm/init.lua: field access on a setmetatable'd local that
+-- inherits an open Instance prototype caused `bind_to(res_tid, result)` to
+-- bind a fresh result var to itself (or to a chain that resolved back to
+-- itself), creating a self-loop in the union-find parent chain. `find`
+-- subsequently looped forever. Fix: `bind_to` must refuse self-binding;
+-- `find` has a defensive self-loop break.
+assert.describe("regression: bind_to self-loop in intersection field access", function()
+    assert.it("setmetatable'd instance with field access on unknown ctx terminates", function()
+        no_errors([[
+local Machine = {}
+local Instance = {}
+
+--: () -> nil
+function Machine:states()
+  for name in pairs(self._config.states) do print(name) end
+end
+
+--: (ctx: ({ [string]: unknown } | nil)) -> nil
+function Machine:start(ctx)
+  local x = ctx or {}
+  local instance = setmetatable({_ctx=x}, Instance)
+  local state_def = self._config.states[self._config.initial]
+  state_def.on_enter(instance._ctx)
+end
+return Machine
+]])
+    end)
+end)

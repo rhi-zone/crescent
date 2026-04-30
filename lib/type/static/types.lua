@@ -214,6 +214,7 @@ function M.find(ctx, tid)
         if t.tag ~= TAG_VAR and t.tag ~= TAG_ROWVAR then break end
         local parent = t.data[2]
         if parent == -1 then break end  -- unbound root
+        if parent == root then break end  -- self-loop: treat as unbound root (defensive)
         root = parent
     end
     -- Path compression
@@ -223,6 +224,7 @@ function M.find(ctx, tid)
         if t.tag ~= TAG_VAR and t.tag ~= TAG_ROWVAR then break end
         local parent = t.data[2]
         if parent == -1 then break end
+        if parent == cur then break end  -- self-loop guard
         t.data[2] = root
         cur = parent
     end

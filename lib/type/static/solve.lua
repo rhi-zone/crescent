@@ -314,11 +314,18 @@ end
 
 -- Bind a free type var to a target type directly (bypasses unify's bilateral-any short-circuit).
 -- Use this when we want to resolve a result VAR to a concrete type (T_ANY, T_UNKNOWN, etc.).
+-- Defensive: refuse to bind a var to itself (self-loop in the union-find chain).
+-- This can happen when a field-access result var feeds back into the union of field
+-- types computed for an intersection/union field access (e.g. `instance._ctx` where
+-- `instance` is an intersection containing an open table whose `_ctx` row-var got
+-- unified with the result var). A self-loop here makes `find` non-terminating.
 --: (Ctx, integer, integer) -> ()
 local function bind_to(ctx, tid, target)
     local root = find(ctx, tid)
     local t = ctx.types:get(root)
     if t.tag == TAG_VAR or t.tag == TAG_ROWVAR then
+        local target_root = find(ctx, target)
+        if target_root == root then return end  -- would create a self-loop
         t.data[2] = target
     end
 end
