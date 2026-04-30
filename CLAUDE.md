@@ -74,6 +74,8 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 **Something unexpected is a signal, not noise.** Stop and ask why before continuing.
 
+**Lua code must typecheck before commit.** The pre-commit hook in `.githooks/pre-commit` enforces this — to activate it, run `git config core.hooksPath .githooks` once per clone (the repo does not auto-activate hooks for safety). The hook runs `timeout 30 bin/cr check <file>` on each staged `lib/**/*.lua` file and rejects the commit on any error or timeout. Do not bypass with `--no-verify` — fix the type error or fix the hook.
+
 **Confident assertions require proof of work.** Assert confidently only after (1) adversarially reasoning through every plausible alternative and showing each is inferior, AND (2) verifying no downsides to the assertion. If either step is incomplete, say "I don't know" or state an explicitly-flagged hypothesis — then the immediate next step is to verify, not to hedge-word a guess into sounding like knowledge.
 
 Context is poisoned the moment you confidently state something wrong. Retraction does not fully undo it; downstream reasoning is already shaped by the bad claim. Prevention is the only real mitigation — rules that fire after the assertion cannot recover it.
@@ -86,6 +88,7 @@ See `docs/conventions.md` for the full spec. Short version:
 - Protocols: `connect` / `send` / `recv` / `close` — transport injected via opts, never created internally
 - Tiers: system > FFI > pure Lua, selected at load time, each independent, `M._tier` for introspection
 - Annotations: `--:` / `--::` only. `unknown` = TS `unknown` (caller must narrow). `any` = TS `any` (opt-out). Prefer `unknown`; `any` only when explicitly opting out and documented why.
+- **Casts: `--[[: T]]` is the checked cast (full subtyping required). `--[[:! T]]` is the overlap-checked force cast (use when narrowing `unknown` to a concrete `T` or `A | B` to `A`). `--[[:! any]]` is rejected — use `--[[: any]]` if you genuinely need an `any` cast.**
 - **`...` vs index signatures** — these are distinct. `...` is a structural subtyping marker: `{ name: string, ... }` accepts any table with at least `name`. It says nothing about reading arbitrary fields. `{ [string]: T }` is an index signature: any string key maps to `T`. Confusing them leads to open types on concrete data objects (wrong) or expecting arbitrary field reads to work on `...`-typed values (also wrong).
 
 ## Implementation Patterns

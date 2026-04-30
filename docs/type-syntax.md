@@ -589,7 +589,13 @@ local s = --[[:! string]] v      -- accepted (overlap: unknown & string nonempty
 Casting `unknown` to `any` via the regular `--[[: any]]` form is **rejected**
 — `any` is an opt-out the user must declare on the *binding* (e.g.
 `local x --: any`), not a back-channel that silently launders an `unknown`
-source. Use `--[[:! any]]` if you really want to force-cast unknown to any.
+source. The force-cast form `--[[:! any]]` is **also rejected**: a force
+cast to `any` is indistinguishable from "I gave up" and there is no
+narrowing it could perform. If you genuinely need an `any` escape hatch,
+declare it on the binding (`local x --: any = ...`) or use a checked
+`--[[: any]]` cast at a site where the source type is already `any` (so
+the cast is a no-op). To force-cast `unknown` to a *concrete* type, use
+`--[[:! T]]` with a real `T` (e.g. `--[[:! string]]`).
 
 ### Annotations vs. casts
 

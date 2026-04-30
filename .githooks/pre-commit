@@ -1,7 +1,63 @@
 #!/usr/bin/env bash
-set -e
+# Pre-commit hook: typecheck staged Lua files in lib/.
+#
+# To activate (one-time, per clone):
+#   git config core.hooksPath .githooks
+#
+# Each file is checked with `timeout 30 bin/cr check <file>`. A hang
+# (timeout) is a soundness/termination bug — see CLAUDE.md "Always run
+# typecheck under a timeout". The hook does NOT auto-fix; if a file fails,
+# fix the source and `git add` it again.
+#
+# Skip semantics:
+#   - No staged Lua files in lib/  → silently pass.
+#   - --no-verify                  → standard git behavior (we don't override).
+#
+# Bypass (use sparingly): `git commit --no-verify`. CLAUDE.md forbids
+# --no-verify as a normal workflow — fix the issue or fix the hook.
+set -euo pipefail
 
-echo "Running tests..."
-luajit lib/test/cli.lua
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
 
-echo "Pre-commit checks passed!"
+mapfile -t staged < <(
+  git diff --cached --name-only --diff-filter=ACMR \
+    | grep -E '^lib/.*\.lua$' \
+    || true
+)
+
+if [ "${#staged[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+echo "pre-commit: typechecking ${#staged[@]} staged Lua file(s)..."
+
+failed=0
+for f in "${staged[@]}"; do
+  if [ ! -f "$f" ]; then
+    # Staged but deleted on disk somehow; skip.
+    continue
+  fi
+  rc=0
+  timeout 30 bin/cr check "$f" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 124 ]; then
+      echo "pre-commit: TIMEOUT (>30s) on $f — typecheck is hanging." >&2
+      echo "  This is a soundness/termination bug. See CLAUDE.md." >&2
+    else
+      echo "pre-commit: typecheck failed on $f (exit $rc)" >&2
+    fi
+    failed=1
+  fi
+done
+
+if [ "$failed" -ne 0 ]; then
+  echo "" >&2
+  echo "pre-commit: rejecting commit due to typecheck errors above." >&2
+  echo "Fix the errors and re-stage, or run with --no-verify if you" >&2
+  echo "have a documented reason (CLAUDE.md discourages this)." >&2
+  exit 1
+fi
+
+echo "pre-commit: typecheck passed."
+exit 0
