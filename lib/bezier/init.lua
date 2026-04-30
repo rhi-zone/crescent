@@ -10,6 +10,51 @@ local M = {}
 
 M._tier = "pure"
 
+--:: Point = { x: number, y: number, z: number | nil }
+--:: Quadratic = {
+--::   p0: Point, p1: Point, p2: Point,
+--::   point: (Quadratic, number) -> Point,
+--::   tangent: (Quadratic, number) -> Point,
+--::   normal: (Quadratic, number) -> Point,
+--::   length: (Quadratic, number | nil) -> number,
+--::   split: (Quadratic, number) -> (Quadratic, Quadratic),
+--::   to_points: (Quadratic, number | nil) -> { [integer]: Point },
+--::   bounding_box: (Quadratic) -> { [integer]: number },
+--:: }
+--:: Cubic = {
+--::   p0: Point, p1: Point, p2: Point, p3: Point,
+--::   point: (Cubic, number) -> Point,
+--::   tangent: (Cubic, number) -> Point,
+--::   normal: (Cubic, number) -> Point,
+--::   length: (Cubic, number | nil) -> number,
+--::   split: (Cubic, number) -> (Cubic, Cubic),
+--::   to_points: (Cubic, number | nil) -> { [integer]: Point },
+--::   to_svg_path: (Cubic) -> string,
+--::   bounding_box: (Cubic) -> { [integer]: number },
+--::   inflections: (Cubic) -> { [integer]: number },
+--:: }
+--:: Curve = {
+--::   points: { [integer]: Point },
+--::   degree: (Curve) -> integer,
+--::   point: (Curve, number) -> Point,
+--::   to_points: (Curve, number | nil) -> { [integer]: Point },
+--::   derivative: (Curve) -> Curve,
+--::   elevate: (Curve) -> Curve,
+--:: }
+--:: SplineOpts = { tension: number | nil, closed: boolean | nil }
+--:: Spline = {
+--::   segments: { [integer]: Cubic },
+--::   closed: boolean,
+--::   point: (Spline, number) -> Point,
+--::   segment: (Spline, number) -> Cubic,
+--::   to_points: (Spline, number | nil) -> { [integer]: Point },
+--:: }
+--:: Hermite = {
+--::   p0: Point, m0: Point, p1: Point, m1: Point,
+--::   point: (Hermite, number) -> Point,
+--::   to_cubic: (Hermite) -> Cubic,
+--:: }
+
 local sqrt = math.sqrt
 local abs  = math.abs
 local floor = math.floor
@@ -18,6 +63,7 @@ local floor = math.floor
 -- Point helpers (2D and 3D, {x, y} or {x, y, z})
 -- ---------------------------------------------------------------------------
 
+--: (a: Point, b: Point, t: number) -> Point
 local function pt_lerp(a, b, t)
   local p = { x = a.x + t * (b.x - a.x), y = a.y + t * (b.y - a.y) }
   if a.z ~= nil or b.z ~= nil then
@@ -26,17 +72,20 @@ local function pt_lerp(a, b, t)
   return p
 end
 
+--: (v: Point) -> number
 local function pt_len(v)
   local z = v.z or 0
   return sqrt(v.x * v.x + v.y * v.y + z * z)
 end
 
+--: (v: Point, s: number) -> Point
 local function pt_scale(v, s)
   local p = { x = v.x * s, y = v.y * s }
   if v.z ~= nil then p.z = v.z * s end
   return p
 end
 
+--: (a: Point, b: Point) -> Point
 local function pt_add(a, b)
   local p = { x = a.x + b.x, y = a.y + b.y }
   if a.z ~= nil or b.z ~= nil then
@@ -45,6 +94,7 @@ local function pt_add(a, b)
   return p
 end
 
+--: (a: Point, b: Point) -> Point
 local function pt_sub(a, b)
   local p = { x = a.x - b.x, y = a.y - b.y }
   if a.z ~= nil or b.z ~= nil then
@@ -53,10 +103,12 @@ local function pt_sub(a, b)
   return p
 end
 
+--: (p: Point) -> Point
 local function pt_copy(p)
   return { x = p.x, y = p.y, z = p.z }
 end
 
+--: (pts: { [integer]: Point }) -> { [integer]: Point }
 local function copy_points(pts)
   local out = {}
   for i = 1, #pts do out[i] = pt_copy(pts[i]) end
@@ -130,12 +182,12 @@ end
 local Quadratic = {}
 Quadratic.__index = Quadratic
 
---: ({x:number,y:number}, {x:number,y:number}, {x:number,y:number}) -> table
+--: (p0: Point, p1: Point, p2: Point) -> Quadratic
 M.quadratic = function(p0, p1, p2)
   return setmetatable({ p0 = p0, p1 = p1, p2 = p2 }, Quadratic)
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Quadratic, t: number) -> Point
 Quadratic.point = function(self, t)
   local u = 1 - t
   local b0 = u * u
@@ -149,7 +201,7 @@ Quadratic.point = function(self, t)
   return p
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Quadratic, t: number) -> Point
 Quadratic.tangent = function(self, t)
   -- derivative: 2*((1-t)*(p1-p0) + t*(p2-p1))
   local u = 1 - t
@@ -159,13 +211,13 @@ Quadratic.tangent = function(self, t)
   return v
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Quadratic, t: number) -> Point
 Quadratic.normal = function(self, t)
   local tg = self:tangent(t)
   return { x = -tg.y, y = tg.x }
 end
 
---: ((number | nil)) -> number
+--: (self: Quadratic, n: number | nil) -> number
 Quadratic.length = function(self, n)
   n = n or 100
   local total = 0
@@ -178,14 +230,14 @@ Quadratic.length = function(self, n)
   return total
 end
 
---: (number) -> (table, table)
+--: (self: Quadratic, t: number) -> (Quadratic, Quadratic)
 Quadratic.split = function(self, t)
   local left, right = de_casteljau_split({ self.p0, self.p1, self.p2 }, t)
   return M.quadratic(left[1], left[2], left[3]),
          M.quadratic(right[1], right[2], right[3])
 end
 
---: ((number | nil)) -> {table}
+--: (self: Quadratic, n: number | nil) -> { [integer]: Point }
 Quadratic.to_points = function(self, n)
   n = n or 10
   local pts = {}
@@ -195,7 +247,7 @@ Quadratic.to_points = function(self, n)
   return pts
 end
 
---: () -> {number}
+--: (self: Quadratic) -> { [integer]: number }
 Quadratic.bounding_box = function(self)
   local p0, p1, p2 = self.p0, self.p1, self.p2
   -- derivative coefficients per axis: 2*(p1-p0)*(1-t) + 2*(p2-p1)*t = 0
@@ -233,12 +285,12 @@ end
 local Cubic = {}
 Cubic.__index = Cubic
 
---: (table, table, table, table) -> table
+--: (p0: Point, p1: Point, p2: Point, p3: Point) -> Cubic
 M.cubic = function(p0, p1, p2, p3)
   return setmetatable({ p0 = p0, p1 = p1, p2 = p2, p3 = p3 }, Cubic)
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Cubic, t: number) -> Point
 Cubic.point = function(self, t)
   local u = 1 - t
   local b0 = u * u * u
@@ -254,7 +306,7 @@ Cubic.point = function(self, t)
   return p
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Cubic, t: number) -> Point
 Cubic.tangent = function(self, t)
   -- derivative: 3*((1-t)^2*(p1-p0) + 2(1-t)t*(p2-p1) + t^2*(p3-p2))
   local u = 1 - t
@@ -268,13 +320,13 @@ Cubic.tangent = function(self, t)
   return v
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Cubic, t: number) -> Point
 Cubic.normal = function(self, t)
   local tg = self:tangent(t)
   return { x = -tg.y, y = tg.x }
 end
 
---: ((number | nil)) -> number
+--: (self: Cubic, n: number | nil) -> number
 Cubic.length = function(self, n)
   n = n or 100
   local total = 0
@@ -287,7 +339,7 @@ Cubic.length = function(self, n)
   return total
 end
 
---: (number) -> (table, table)
+--: (self: Cubic, t: number) -> (Cubic, Cubic)
 Cubic.split = function(self, t)
   local left, right = de_casteljau_split(
     { self.p0, self.p1, self.p2, self.p3 }, t)
@@ -295,7 +347,7 @@ Cubic.split = function(self, t)
          M.cubic(right[1], right[2], right[3], right[4])
 end
 
---: ((number | nil)) -> {table}
+--: (self: Cubic, n: number | nil) -> { [integer]: Point }
 Cubic.to_points = function(self, n)
   n = n or 10
   local pts = {}
@@ -305,14 +357,14 @@ Cubic.to_points = function(self, n)
   return pts
 end
 
---: () -> string
+--: (self: Cubic) -> string
 Cubic.to_svg_path = function(self)
   local p0, p1, p2, p3 = self.p0, self.p1, self.p2, self.p3
   return string.format("M %g,%g C %g,%g %g,%g %g,%g",
     p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y)
 end
 
---: () -> {number}
+--: (self: Cubic) -> { [integer]: number }
 Cubic.bounding_box = function(self)
   local p0, p1, p2, p3 = self.p0, self.p1, self.p2, self.p3
   -- derivative is quadratic: coefficients per axis
@@ -342,7 +394,7 @@ Cubic.bounding_box = function(self)
   return { min_x, min_y, max_x, max_y }
 end
 
---: () -> {number}
+--: (self: Cubic) -> { [integer]: number }
 Cubic.inflections = function(self)
   -- Curvature sign change: solve x'(t)*y''(t) - y'(t)*x''(t) = 0
   -- first derivative coefficients (quadratic):
@@ -380,22 +432,22 @@ end
 local Curve = {}
 Curve.__index = Curve
 
---: ({table}) -> table
+--: (points: { [integer]: Point }) -> Curve
 M.curve = function(points)
   return setmetatable({ points = copy_points(points) }, Curve)
 end
 
---: () -> number
+--: (self: Curve) -> integer
 Curve.degree = function(self)
   return #self.points - 1
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Curve, t: number) -> Point
 Curve.point = function(self, t)
   return de_casteljau(self.points, t)
 end
 
---: ((number | nil)) -> {table}
+--: (self: Curve, n: number | nil) -> { [integer]: Point }
 Curve.to_points = function(self, n)
   n = n or 10
   local pts = {}
@@ -406,7 +458,7 @@ Curve.to_points = function(self, n)
 end
 
 -- Derivative Bézier curve: degree n-1
---: () -> table
+--: (self: Curve) -> Curve
 Curve.derivative = function(self)
   local pts = self.points
   local n = #pts
@@ -420,7 +472,7 @@ Curve.derivative = function(self)
 end
 
 -- Degree elevation: same shape, degree+1 control points
---: () -> table
+--: (self: Curve) -> Curve
 Curve.elevate = function(self)
   local pts = self.points
   local n = #pts  -- n = degree+1 control points
@@ -441,7 +493,7 @@ end
 local Spline = {}
 Spline.__index = Spline
 
---: ({table}, (table | nil)) -> table
+--: (points: { [integer]: Point }, opts: SplineOpts | nil) -> Spline
 M.spline = function(points, opts)
   opts = opts or {}
   local tension = opts.tension or 0
@@ -484,7 +536,7 @@ M.spline = function(points, opts)
 end
 
 -- t ∈ [0, n-1] where n = #points
---: (number) -> {x:number,y:number}
+--: (self: Spline, t: number) -> Point
 Spline.point = function(self, t)
   local segs = self.segments
   local n = #segs
@@ -496,12 +548,12 @@ Spline.point = function(self, t)
   return segs[idx + 1]:point(local_t)
 end
 
---: (number) -> table
+--: (self: Spline, i: number) -> Cubic
 Spline.segment = function(self, i)
   return self.segments[i]
 end
 
---: ((number | nil)) -> {table}
+--: (self: Spline, n: number | nil) -> { [integer]: Point }
 Spline.to_points = function(self, n)
   n = n or 100
   local pts = {}
@@ -519,12 +571,12 @@ end
 local Hermite = {}
 Hermite.__index = Hermite
 
---: (table, table, table, table) -> table
+--: (p0: Point, m0: Point, p1: Point, m1: Point) -> Hermite
 M.hermite = function(p0, m0, p1, m1)
   return setmetatable({ p0 = p0, m0 = m0, p1 = p1, m1 = m1 }, Hermite)
 end
 
---: (number) -> {x:number,y:number}
+--: (self: Hermite, t: number) -> Point
 Hermite.point = function(self, t)
   local t2 = t * t
   local t3 = t2 * t
@@ -548,11 +600,11 @@ end
 
 -- Convert Hermite to equivalent cubic Bézier:
 -- cp1 = p0 + m0/3,  cp2 = p1 - m1/3
---: () -> table
+--: (self: Hermite) -> Cubic
 Hermite.to_cubic = function(self)
   local cp1 = pt_add(self.p0, pt_scale(self.m0, 1/3))
   local cp2 = pt_sub(self.p1, pt_scale(self.m1, 1/3))
-  return M.cubic(self.p0, cp1, cp2, --[[:! table]] self.p1)
+  return M.cubic(self.p0, cp1, cp2, self.p1)
 end
 
 return M

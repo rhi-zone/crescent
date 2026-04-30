@@ -52,23 +52,41 @@ end
 
 -- ── NFA ────────────────────────────────────────────────────────────────────
 
+--:: NFA = {
+--::   states: { [integer]: { accept: boolean } },
+--::   start: integer | nil,
+--::   trans: { [integer]: { [string | boolean]: { [integer]: boolean } } },
+--::   _next_id: integer,
+--::   add_state: (NFA, { accept: boolean } | nil) -> integer,
+--::   set_start: (NFA, integer) -> nil,
+--::   add_transition: (NFA, integer, string | nil, integer) -> nil,
+--::   epsilon_closure: (NFA, { [integer]: boolean }) -> { [integer]: boolean },
+--::   move: (NFA, { [integer]: boolean }, string) -> { [integer]: boolean },
+--::   accepts: (NFA, string) -> boolean,
+--::   alphabet: (NFA) -> { [string]: boolean },
+--:: }
+
 local NFA = {}
 NFA.__index = NFA
 
 --- Create a new NFA.
 -- @return NFA object
+--: () -> NFA
 function M.nfa_new()
-  return setmetatable({
+  --: NFA
+  local nfa = setmetatable({
     states = {},       -- {[id] = {accept=bool}}
     start = nil,       -- start state id
     trans = {},        -- {[from] = {[symbol or false] = {[to]=true}}}
     _next_id = 1,
   }, NFA)
+  return nfa
 end
 
 --- Add a state to the NFA.
 -- @param opts  optional {accept=bool}
 -- @return state id (integer)
+--: (self: NFA, opts: { accept: boolean } | nil) -> integer
 function NFA:add_state(opts)
   local id = self._next_id
   self._next_id = id + 1
@@ -77,6 +95,7 @@ function NFA:add_state(opts)
 end
 
 --- Set the start state.
+--: (self: NFA, id: integer) -> nil
 function NFA:set_start(id)
   self.start = id
 end
@@ -85,9 +104,10 @@ end
 -- @param from   source state id
 -- @param symbol input character (string of length 1), or nil for epsilon
 -- @param to     destination state id
+--: (self: NFA, from: integer, symbol: string | nil, to: integer) -> nil
 function NFA:add_transition(from, symbol, to)
-  local key = symbol  -- nil = epsilon key = false treated below
-  if symbol == nil then key = false end
+  --: string | boolean
+  local key = symbol or false  -- nil = epsilon → false key
   local row = self.trans[from]
   if not row then row = {}; self.trans[from] = row end
   local set = row[key]
@@ -98,6 +118,7 @@ end
 --- Compute the epsilon closure of a set of state ids.
 -- @param states  {[id]=true}
 -- @return new set {[id]=true}
+--: (self: NFA, states: { [integer]: boolean }) -> { [integer]: boolean }
 function NFA:epsilon_closure(states)
   local closure = {}
   local stack = {}
@@ -127,6 +148,7 @@ end
 -- @param states  {[id]=true}
 -- @param symbol  input character string
 -- @return new set {[id]=true}
+--: (self: NFA, states: { [integer]: boolean }, symbol: string) -> { [integer]: boolean }
 function NFA:move(states, symbol)
   local result = {}
   for s in pairs(states) do
@@ -144,6 +166,7 @@ end
 --- Test whether the NFA accepts a string (powerset simulation).
 -- @param input  string
 -- @return boolean
+--: (self: NFA, input: string) -> boolean
 function NFA:accepts(input)
   if not self.start then return false end
   local current = self:epsilon_closure({ [self.start] = true })
@@ -159,6 +182,7 @@ function NFA:accepts(input)
 end
 
 --- Collect all symbols used in transitions (excluding epsilon).
+--: (self: NFA) -> { [string]: boolean }
 function NFA:alphabet()
   local alpha = {}
   for _, row in pairs(self.trans) do
@@ -171,23 +195,40 @@ end
 
 -- ── DFA ────────────────────────────────────────────────────────────────────
 
+--:: DFA = {
+--::   states: { [integer]: { accept: boolean } },
+--::   start: integer | nil,
+--::   trans: { [integer]: { [string]: integer } },
+--::   _next_id: integer,
+--::   add_state: (DFA, { accept: boolean, start: boolean | nil } | nil) -> integer,
+--::   add_transition: (DFA, integer, string, integer) -> nil,
+--::   run: (DFA, integer | nil, string) -> integer | nil,
+--::   accepts: (DFA, string) -> boolean,
+--::   alphabet: (DFA) -> { [string]: boolean },
+--::   to_dot: (DFA) -> string,
+--:: }
+
 local DFA = {}
 DFA.__index = DFA
 
 --- Create a new DFA.
 -- @return DFA object
+--: () -> DFA
 function M.dfa_new()
-  return setmetatable({
+  --: DFA
+  local dfa = setmetatable({
     states = {},     -- {[id] = {accept=bool}}
     start = nil,
     trans = {},      -- {[from] = {[symbol] = to}}
     _next_id = 1,
   }, DFA)
+  return dfa
 end
 
 --- Add a state to the DFA.
 -- @param opts  optional {accept=bool, start=bool}
 -- @return state id (integer)
+--: (self: DFA, opts: { accept: boolean, start: boolean | nil } | nil) -> integer
 function DFA:add_state(opts)
   local id = self._next_id
   self._next_id = id + 1
@@ -197,6 +238,7 @@ function DFA:add_state(opts)
 end
 
 --- Add a transition (deterministic — one target per symbol).
+--: (self: DFA, from: integer, symbol: string, to: integer) -> nil
 function DFA:add_transition(from, symbol, to)
   local row = self.trans[from]
   if not row then row = {}; self.trans[from] = row end
@@ -205,6 +247,7 @@ end
 
 --- Run the DFA one step: from state `state` on `symbol`.
 -- @return next state id, or nil if no transition
+--: (self: DFA, state: integer | nil, symbol: string) -> integer | nil
 function DFA:run(state, symbol)
   if not state then return nil end
   -- Allow feeding multiple characters at once (streaming helper)
@@ -224,6 +267,7 @@ end
 --- Test whether the DFA accepts a string.
 -- @param input  string
 -- @return boolean
+--: (self: DFA, input: string) -> boolean
 function DFA:accepts(input)
   if not self.start then return false end
   local cur = self.start
@@ -238,6 +282,7 @@ function DFA:accepts(input)
 end
 
 --- Collect all symbols in DFA transitions.
+--: (self: DFA) -> { [string]: boolean }
 function DFA:alphabet()
   local alpha = {}
   for _, row in pairs(self.trans) do
@@ -248,6 +293,7 @@ end
 
 --- Serialize DFA to GraphViz DOT format.
 -- @return string
+--: (self: DFA) -> string
 function DFA:to_dot()
   local lines = { "digraph DFA {", '  rankdir=LR;' }
   -- invisible start arrow
@@ -283,6 +329,7 @@ end
 --- Convert an NFA to an equivalent DFA via subset construction.
 -- @param nfa  NFA object
 -- @return DFA object
+--: (nfa: NFA) -> DFA
 function M.nfa_to_dfa(nfa)
   local dfa = M.dfa_new()
   local alpha = nfa:alphabet()
@@ -340,6 +387,7 @@ end
 --- Minimize a DFA using Hopcroft's partition-refinement algorithm.
 -- @param dfa  DFA object
 -- @return new minimized DFA
+--: (dfa: DFA) -> DFA
 function M.minimize(dfa)
   local alpha = dfa:alphabet()
   local syms = sorted_keys(alpha)
@@ -497,6 +545,7 @@ end
 -- @param dfa    DFA object
 -- @param alpha  set of symbols {[sym]=true}
 -- @return new complete DFA, mapping from old ids to new ids
+--: (dfa: DFA, alpha: { [string]: boolean }) -> (DFA, { [integer]: integer })
 local function complete_dfa(dfa, alpha)
   local new_dfa = M.dfa_new()
   local old_to_new = {}
@@ -542,6 +591,7 @@ end
 --- Complement of a DFA: accepts exactly the strings the original rejects.
 -- @param dfa  DFA object
 -- @return new DFA
+--: (dfa: DFA) -> DFA
 function M.complement(dfa)
   local alpha = dfa:alphabet()
   local cdfa = complete_dfa(dfa, alpha)
@@ -555,6 +605,7 @@ end
 --- Product construction for two DFAs (used by intersection and union).
 -- @param accept_fn  function(a_accept, b_accept) -> bool
 -- @return new DFA
+--: (dfa1: DFA, dfa2: DFA, accept_fn: (boolean, boolean) -> boolean) -> DFA
 local function product(dfa1, dfa2, accept_fn)
   -- Unified alphabet
   local alpha = {}
@@ -612,6 +663,7 @@ end
 -- @param dfa1  DFA object
 -- @param dfa2  DFA object
 -- @return new DFA
+--: (dfa1: DFA, dfa2: DFA) -> DFA
 function M.intersection(dfa1, dfa2)
   return product(dfa1, dfa2, function(a, b) return a and b end)
 end
@@ -620,6 +672,7 @@ end
 -- @param dfa1  DFA object
 -- @param dfa2  DFA object
 -- @return new DFA
+--: (dfa1: DFA, dfa2: DFA) -> DFA
 function M.union(dfa1, dfa2)
   return product(dfa1, dfa2, function(a, b) return a or b end)
 end
@@ -643,6 +696,7 @@ end
 --- Build NFA from regex string using Thompson's construction.
 -- @param pattern  regex string
 -- @return NFA object, or (nil, errmsg)
+--: (pattern: string) -> (NFA | nil, string | nil)
 function M.from_regex(pattern)
   local nfa = M.nfa_new()
 

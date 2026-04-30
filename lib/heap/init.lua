@@ -4,6 +4,25 @@ end
 
 local M = {}
 
+--:: Heap = {
+--::   _data: { [integer]: unknown },
+--::   _n: integer,
+--::   _cmp: (unknown, unknown) -> boolean,
+--::   _keyed: boolean,
+--::   _index: { [unknown]: integer } | nil,
+--::   push: (Heap, unknown, number | nil) -> nil,
+--::   peek: (Heap) -> unknown | nil,
+--::   peek_priority: (Heap) -> number | nil,
+--::   pop: (Heap) -> unknown | nil,
+--::   size: (Heap) -> number,
+--::   empty: (Heap) -> boolean,
+--::   clear: (Heap) -> nil,
+--::   drain: (Heap) -> () -> unknown | nil,
+--::   to_sorted_array: (Heap) -> { [integer]: unknown },
+--::   push_or_update: (Heap, unknown, number) -> nil,
+--::   remove: (Heap, unknown) -> boolean,
+--:: }
+
 -- Heap metatable
 local Heap = {}
 Heap.__index = Heap
