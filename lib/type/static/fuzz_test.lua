@@ -653,6 +653,37 @@ arb.it("bound-decomp: <F: (...P)->R, P, R> wrong arg type always rejected",
 			"bound-decomp wrong arg not rejected: " .. src)
 	end, { trials = 300 })
 
+-- ── Invariant 26: Wrong-typed assignment rejected (Phase D3 follow-up) ───────
+-- `local x --: T = <value of type V>` where T, V are distinct base types
+-- (and neither is `any` or `unknown`) must be rejected. The dual positive
+-- case (T = V) must NOT be rejected.
+--
+-- This complements the function-arg-rejection invariant by exercising the
+-- annotation-site assignment path directly. Phase D3 (commit e81cb08) closed
+-- the `unknown <: any` hole that allowed unsound assignments to slip past
+-- the constraint solver; this invariant is the spec-oracle that prevents
+-- regression to the broken behavior, and would catch a re-introduction of
+-- "any value flows into any hole" anywhere in the assignment path.
+
+arb.it("assignment: T x = V_value rejected when T and V distinct bases",
+	farb.arb_distinct_base_types,
+	function(pair)
+		local T_node, V_node = pair[1], pair[2]
+		local TT  = farb.type_to_string(T_node)
+		local v   = farb.canonical_value(V_node)
+		local src = ("--: %s\nlocal x = %s"):format(TT, v)
+		assert(rejects(src), "wrong-type assignment not rejected: " .. src)
+	end, { trials = 300 })
+
+arb.it("assignment: T x = T_value typechecks (positive dual)",
+	farb.arb_base_type,
+	function(T_node)
+		local TT  = farb.type_to_string(T_node)
+		local v   = farb.canonical_value(T_node)
+		local src = ("--: %s\nlocal x = %s"):format(TT, v)
+		assert(typechecks(src), "same-type assignment rejected: " .. src)
+	end, { trials = 300 })
+
 -- ── Performance gate ──────────────────────────────────────────────────────────
 
 T.it("performance: ≥500 programs/sec throughput", function()
