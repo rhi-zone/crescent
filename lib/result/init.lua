@@ -4,6 +4,8 @@ end
 
 local M = {}
 
+--:: Result = { _tag: string, _val: unknown }
+
 -- Sentinel to distinguish nil-as-value from absence.
 -- Ok(nil) is valid and distinct from Err.
 local OK = "ok"
@@ -23,19 +25,19 @@ end
 
 -- ── Constructors ────────────────────────────────────────────────────────────
 
---: (val: unknown) -> table
+--: (val: unknown) -> Result
 function M.ok(val)
   return setmetatable({ _tag = OK, _val = val }, Result)
 end
 
---: (err: unknown) -> table
+--: (err: unknown) -> Result
 function M.err(err)
   return setmetatable({ _tag = ERR, _val = err }, Result)
 end
 
 --- Wrap a (value, errmsg) return pair into a Result.
 --- If errmsg is non-nil, returns Err(errmsg). Otherwise returns Ok(value).
---: (val: unknown, err: unknown) -> table
+--: (val: unknown, err: unknown) -> Result
 function M.from(val, err)
   if err ~= nil then
     return M.err(err)
@@ -45,7 +47,7 @@ end
 
 --- Wrap a pcall into a Result. fn is called with no arguments.
 --- On success returns Ok(return_value), on error returns Err(errmsg).
---: (fn: () -> unknown) -> table
+--: (fn: () -> unknown) -> Result
 function M.try(fn)
   local success, val = pcall(fn)
   if success then
@@ -102,7 +104,7 @@ end
 -- ── Transform ───────────────────────────────────────────────────────────────
 
 --- Map the Ok value. Err passes through unchanged.
---: (fn: (unknown) -> unknown) -> table
+--: (fn: (unknown) -> unknown) -> Result
 function Result:map(fn)
   if self._tag == OK then
     return M.ok(fn(self._val))
@@ -111,7 +113,7 @@ function Result:map(fn)
 end
 
 --- Map the Err value. Ok passes through unchanged.
---: (fn: (unknown) -> unknown) -> table
+--: (fn: (unknown) -> unknown) -> Result
 function Result:map_err(fn)
   if self._tag == ERR then
     return M.err(fn(self._val))
@@ -120,7 +122,7 @@ function Result:map_err(fn)
 end
 
 --- Flatmap: fn must return a Result. Short-circuits on Err.
---: (fn: (unknown) -> table) -> table
+--: (fn: (unknown) -> Result) -> Result
 function Result:and_then(fn)
   if self._tag == OK then
     return fn(self._val)
@@ -129,7 +131,7 @@ function Result:and_then(fn)
 end
 
 --- Called on Err; fn must return a Result. Ok passes through.
---: (fn: (unknown) -> table) -> table
+--: (fn: (unknown) -> Result) -> Result
 function Result:or_else(fn)
   if self._tag == ERR then
     return fn(self._val)
@@ -138,7 +140,7 @@ function Result:or_else(fn)
 end
 
 --- Call fn(val) for side effects on Ok, pass through the Result unchanged.
---: (fn: (unknown) -> nil) -> table
+--: (fn: (unknown) -> nil) -> Result
 function Result:inspect(fn)
   if self._tag == OK then
     fn(self._val)
@@ -147,7 +149,7 @@ function Result:inspect(fn)
 end
 
 --- Call fn(err) for side effects on Err, pass through the Result unchanged.
---: (fn: (unknown) -> nil) -> table
+--: (fn: (unknown) -> nil) -> Result
 function Result:inspect_err(fn)
   if self._tag == ERR then
     fn(self._val)
@@ -158,7 +160,7 @@ end
 -- ── Combine ─────────────────────────────────────────────────────────────────
 
 --- If all Results are Ok, returns Ok({v1, v2, ...}). Otherwise returns first Err.
---: (results: {table}) -> table
+--: (results: {Result}) -> Result
 function M.all(results)
   local vals = {}
   for i = 1, #results do
@@ -172,7 +174,7 @@ function M.all(results)
 end
 
 --- Returns the first Ok, or the last Err if all are Err.
---: (results: {table}) -> table
+--: (results: {Result}) -> Result
 function M.any(results)
   local last
   for i = 1, #results do

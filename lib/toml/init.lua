@@ -4,6 +4,12 @@ end
 
 local M = {}
 
+--:: toml_state = { s: string, pos: integer, len: integer, line: integer }
+--:: toml_datetime = { __toml_type: string, year?: integer, month?: integer, day?: integer, hour?: integer, min?: integer, sec?: integer, frac?: number, tz?: string }
+--:: toml_value = string | number | boolean | toml_datetime | { [string]: unknown } | { [integer]: unknown }
+--:: toml_table = { [string]: unknown }
+--:: toml_key_set = { [string]: boolean }
+
 -- byte constants
 local BYTE_NL    = 10  -- \n
 local BYTE_CR    = 13  -- \r
@@ -76,7 +82,7 @@ end
 
 -- Parser state: { s, pos, len, line }
 
---: (table) -> nil
+--: (toml_state) -> nil
 local function skip_ws(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
@@ -87,7 +93,7 @@ local function skip_ws(st)
   st.pos = pos
 end
 
---: (table) -> nil
+--: (toml_state) -> nil
 local function skip_ws_and_newlines(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
@@ -115,7 +121,7 @@ local function skip_ws_and_newlines(st)
   st.pos = pos
 end
 
---: (table) -> nil
+--: (toml_state) -> nil
 local function skip_to_newline(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
@@ -137,7 +143,7 @@ local function skip_to_newline(st)
   return true
 end
 
---: (table) -> nil
+--: (toml_state) -> nil
 local function skip_newline(st)
   local s, pos, len = st.s, st.pos, st.len
   if pos > len then return end
@@ -197,7 +203,7 @@ local escape_map = {
 local parse_value
 
 -- Parse a basic (double-quoted) string
---: (table) -> (string | nil, string)
+--: (toml_state) -> (string | nil, string)
 local function parse_basic_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 1  -- skip opening "
@@ -252,7 +258,7 @@ local function parse_basic_string(st)
 end
 
 -- Parse a multiline basic string (""")
---: (table) -> (string | nil, string)
+--: (toml_state) -> (string | nil, string)
 local function parse_ml_basic_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 3  -- skip """
@@ -367,7 +373,7 @@ local function parse_ml_basic_string(st)
 end
 
 -- Parse a literal (single-quoted) string
---: (table) -> (string | nil, string)
+--: (toml_state) -> (string | nil, string)
 local function parse_literal_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 1  -- skip '
@@ -386,7 +392,7 @@ local function parse_literal_string(st)
 end
 
 -- Parse a multiline literal string (''')
---: (table) -> (string | nil, string)
+--: (toml_state) -> (string | nil, string)
 local function parse_ml_literal_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 3  -- skip '''
@@ -442,7 +448,7 @@ local function parse_ml_literal_string(st)
 end
 
 -- Parse a string value (dispatches on quote type)
---: (table) -> (string | nil, string)
+--: (toml_state) -> (string | nil, string)
 local function parse_string(st)
   local s, pos, len = st.s, st.pos, st.len
   local b = byte(s, pos)
@@ -473,7 +479,7 @@ local function strip_underscores(raw, line)
 end
 
 -- Parse a number or date/time
---: (table) -> (number | table | nil, string)
+--: (toml_state) -> (number | toml_datetime | nil, string)
 local function parse_number_or_date(st)
   local s, pos, len = st.s, st.pos, st.len
   local start = pos
@@ -597,7 +603,7 @@ local function parse_number_or_date(st)
 end
 
 -- Parse datetime/date/time
---: (table) -> (table | nil, string)
+--: (toml_state) -> (toml_datetime | nil, string)
 local function _parse_datetime(st)
   local s, pos, len = st.s, st.pos, st.len
   local start = pos
@@ -714,7 +720,7 @@ _parse_time_part = _parse_time_part_impl
 parse_datetime = _parse_datetime
 
 -- Parse a key (bare or quoted)
---: (table) -> (string | nil, string)
+--: (toml_state) -> (string | nil, string)
 local function parse_simple_key(st)
   local s, pos, len = st.s, st.pos, st.len
   if pos > len then return nil, "line " .. st.line .. ": expected key" end
@@ -735,7 +741,7 @@ local function parse_simple_key(st)
 end
 
 -- Parse a dotted key into a list of key segments
---: (table) -> (table | nil, string)
+--: (toml_state) -> (string[] | nil, string)
 local function parse_key(st)
   local keys = {}
   local n = 0
@@ -756,7 +762,7 @@ end
 -- implicit_tables tracks tables created implicitly (can be extended but not redefined)
 -- defined_tables tracks explicitly defined [table] headers
 -- array_tables tracks [[array]] paths
---: (table, table, number, table, table, table, number) -> (table | nil, string)
+--: (toml_table, string[], integer, { [unknown]: boolean }, { [unknown]: boolean }, { [unknown]: boolean }, integer) -> (toml_table | nil, string)
 local function traverse_key(root, keys, depth, implicit, defined, array_tables, line)
   local cur = root
   for i = 1, depth do
@@ -782,7 +788,7 @@ local function traverse_key(root, keys, depth, implicit, defined, array_tables, 
 end
 
 -- Parse an inline table
---: (table, table) -> (table | nil, string)
+--: (toml_state, { [unknown]: boolean }) -> (toml_table | nil, string)
 local function parse_inline_table(st, array_tables)
   st.pos = st.pos + 1  -- skip {
   local tbl = {}
@@ -835,7 +841,7 @@ local function parse_inline_table(st, array_tables)
 end
 
 -- Parse an array value
---: (table, table) -> (table | nil, string)
+--: (toml_state, { [unknown]: boolean }) -> ({ [integer]: unknown } | nil, string)
 local function parse_array(st, array_tables)
   st.pos = st.pos + 1  -- skip [
   local arr = {}
@@ -871,7 +877,7 @@ local function parse_array(st, array_tables)
 end
 
 -- Parse a value
---: (table, table) -> (any | nil, string)
+--: (toml_state, { [unknown]: boolean }) -> (unknown, string | nil)
 parse_value = function(st, array_tables)
   if st.pos > st.len then return nil, "line " .. st.line .. ": expected value" end
   local b = byte(st.s, st.pos)
@@ -926,7 +932,7 @@ parse_value = function(st, array_tables)
 end
 
 -- Main decode function
---: (string) -> (table | nil, string)
+--: (string) -> (toml_table | nil, string)
 local function decode(s)
   if type(s) ~= "string" then
     return nil, "expected string input"
@@ -1219,7 +1225,7 @@ local function is_simple_value(v)
 end
 
 -- Format a datetime table to TOML string
---: (table) -> string
+--: (toml_datetime) -> string
 local function format_datetime(dt)
   local t = dt.__toml_type
   if t == "datetime" then
@@ -1311,7 +1317,7 @@ local function encode_inline(v)
 end
 
 -- Main encode function
---: (table) -> (string | nil, string)
+--: (toml_table) -> (string | nil, string)
 local function encode(tbl)
   if type(tbl) ~= "table" then
     return nil, "expected table input"

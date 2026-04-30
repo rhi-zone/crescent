@@ -1,6 +1,10 @@
 if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.lua;" .. package.path end
 
---: { render: (string, table, (table | nil)) -> ((string | nil), (string | nil)), compile: (string) -> ((table | nil), (string | nil)) }
+--:: mustache_ctx = { [string]: unknown }
+--:: mustache_partials = { [string]: string }
+--:: mustache_token = { [string]: unknown }
+--:: mustache_template = { [integer]: mustache_token }
+--: { render: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil)), compile: (string) -> ((mustache_template | nil), (string | nil)) }
 local M = {}
 
 -- HTML escape map
@@ -17,7 +21,7 @@ local function html_escape(s)
   return (s:gsub('[&<>"\']', escape_map))
 end
 
---: (table, string) -> unknown
+--: (mustache_ctx, string) -> unknown
 local function lookup_dotted(ctx, key)
   if key == "." then return ctx end
   local val = ctx
@@ -29,7 +33,7 @@ local function lookup_dotted(ctx, key)
   return val
 end
 
---: (table[], string) -> unknown
+--: (mustache_ctx[], string) -> unknown
 local function resolve(stack, key)
   if key == "." then
     return stack[#stack]
@@ -60,7 +64,7 @@ local function resolve(stack, key)
   return nil
 end
 
---: (table) -> boolean
+--: (unknown) -> boolean
 local function is_list(t)
   if type(t) ~= "table" then return false end
   local n = #t
@@ -83,7 +87,7 @@ end
 -- non-text tokens between that text and the current tag on the same line.
 -- Returns: is_standalone, pre_text_idx (index of preceding text token to trim, or 0 for start),
 -- and the newline string to skip after the tag (or "" at end of template).
---: (string, number, number, table[], number) -> (boolean, (number | nil), (string | nil))
+--: (string, number, number, mustache_token[], number) -> (boolean, (number | nil), (string | nil))
 local function check_standalone(template, tag_start, tag_end, tokens, len)
   -- Check preceding: either start of template or only whitespace since last newline
   local pre_text_idx = nil
@@ -144,7 +148,7 @@ local function check_standalone(template, tag_start, tag_end, tokens, len)
 end
 
 -- Trim the preceding whitespace text for a standalone tag, and advance past the trailing newline.
---: (table[], number) -> table[]
+--: (mustache_token[], number) -> mustache_template
 local function trim_standalone_pre(tokens, pre_text_idx)
   if pre_text_idx > 0 then
     local txt = tokens[pre_text_idx].value
@@ -164,7 +168,7 @@ end
 -- Forward declaration
 local render_tokens
 
---: (string, string, string) -> (table[] | nil, string | nil)
+--: (string, string, string) -> (mustache_template | nil, string | nil)
 local function compile_tokens(template, otag, ctag)
   local tokens = {}
   local i = 1
@@ -355,7 +359,7 @@ local function compile_tokens(template, otag, ctag)
   return tokens, nil
 end
 
---: (table[], table[], (table | nil), string, string) -> string
+--: (mustache_template, mustache_ctx[], (mustache_partials | nil), string, string) -> string
 render_tokens = function(tokens, stack, partials, otag, ctag)
   local buf = {}
   for _, tok in ipairs(tokens) do
@@ -388,7 +392,7 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
               buf[#buf + 1] = render_tokens(lambda_tokens, stack, partials, otag, ctag)
             end
           end
-        elseif is_list(--[[:! table]] val) then
+        elseif is_list(--[[:! mustache_ctx]] val) then
           for _, item in ipairs(val) do
             stack[#stack + 1] = item
             buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)
@@ -398,7 +402,7 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
           if type(val) == "table" then
             stack[#stack + 1] = val
           else
-            stack[#stack + 1] = --[[:! table]] val
+            stack[#stack + 1] = --[[:! mustache_ctx]] val
           end
           buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)
           stack[#stack] = nil
@@ -433,14 +437,14 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
   return table.concat(buf)
 end
 
---: (string) -> ((table | nil), (string | nil))
+--: (string) -> ((mustache_template | nil), (string | nil))
 function M.compile(template)
   local tokens, err = compile_tokens(template, "{{", "}}")
   if not tokens then return nil, err end
   local compiled = {
     _tokens = tokens,
   }
-  --: (table, (table | nil)) -> ((string | nil), (string | nil))
+  --: ({ _tokens: mustache_template, ... }, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil))
   function compiled:render(data, partials)
     local stack = { data }
     local ok2, result = pcall(render_tokens, self._tokens, stack, partials, "{{", "}}")
@@ -450,7 +454,7 @@ function M.compile(template)
   return compiled, nil
 end
 
---: (string, table, (table | nil)) -> ((string | nil), (string | nil))
+--: (string, mustache_ctx, (mustache_partials | nil)) -> ((string | nil), (string | nil))
 function M.render(template, data, partials)
   local compiled, err = M.compile(template)
   if not compiled then return nil, err end

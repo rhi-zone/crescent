@@ -11,6 +11,16 @@ local json = require("lib.format.json")
 
 local M = {}
 
+--:: web_request = { method: string, path: string, query?: { [string]: string }, params?: { [string]: string }, headers?: { [string]: unknown }, body?: unknown, cookies?: { [string]: string }, _start_time?: number, ... }
+--:: web_response = { status: integer, headers: { [string]: string[] }, body: string, ... }
+--:: web_handler = (req: web_request, res: web_response) -> nil
+--:: web_middleware = (req: web_request, res: web_response, next: () -> nil) -> nil
+--:: web_app = { _middleware: web_middleware[], _routes: { method: string, pattern_parts: string[], pattern: string, handler: web_handler }[], ... }
+--:: web_logger_opts = { log?: (msg: string) -> nil, clock?: () -> number }
+--:: web_cors_opts = { origins?: string[], methods?: string[], headers?: string[], max_age?: string }
+--:: web_csrf_opts = { secret: string, ... }
+--:: web_cookie_opts = { path?: string, domain?: string, maxAge?: integer, httpOnly?: boolean, secure?: boolean, sameSite?: string }
+
 local clock_default = os and os.clock or nil
 local concat = table.concat
 local insert = table.insert
@@ -128,7 +138,7 @@ end
 local res_mt = {}
 res_mt.__index = res_mt
 
---: (table, table) -> table
+--: (web_response, unknown) -> web_response
 function res_mt:json(data)
 	self.headers["Content-Type"] = { "application/json" }
 	local ok, encoded = pcall(json.encode, data)
@@ -140,20 +150,20 @@ function res_mt:json(data)
 	return self
 end
 
---: (table, string) -> table
+--: (web_response, string) -> web_response
 function res_mt:html(s)
 	self.headers["Content-Type"] = { "text/html" }
 	self.body = s
 	return self
 end
 
---: (table, integer) -> table
+--: (web_response, integer) -> web_response
 function res_mt:set_status(code)
 	self.status = code
 	return self
 end
 
---: (table, string, (integer | nil)) -> table
+--: (web_response, string, (integer | nil)) -> web_response
 function res_mt:redirect(url, code)
 	self.status = code or 302
 	self.headers["Location"] = { url }
@@ -165,7 +175,7 @@ end
 local App = {}
 App.__index = App
 
---: () -> table
+--: () -> web_app
 function M.app()
 	local self = setmetatable({}, App)
 	self._middleware = {}
@@ -173,14 +183,14 @@ function M.app()
 	return self
 end
 
---: (table, function) -> table
+--: (web_app, web_middleware) -> web_app
 function App:use(mw)
 	self._middleware[#self._middleware + 1] = mw
 	return self
 end
 
 -- Internal: add a route
---: (table, string, string, function) -> ()
+--: (web_app, string, string, web_handler) -> ()
 function App:_add_route(method, path, handler)
 	self._routes[#self._routes + 1] = {
 		method = method:upper(),
@@ -203,7 +213,7 @@ function App:head(path, handler) self:_add_route("HEAD", path, handler) return s
 local Group = {}
 Group.__index = Group
 
---: (table, string) -> table
+--: (web_app, string) -> { _app: web_app, _prefix: string, ... }
 function App:group(prefix)
 	return setmetatable({ _app = self, _prefix = prefix }, Group)
 end
@@ -218,7 +228,7 @@ function Group:head(path, handler) self._app:_add_route("HEAD", self._prefix .. 
 
 -- ── Request dispatch ─────────────────────────────────────────────────────────
 
---: (table, table) -> table
+--: (web_app, web_request) -> web_response
 function App:handle(req)
 	-- Parse query string from path
 	local qmark = find(req.path, "?", 1, true)
@@ -294,7 +304,7 @@ end
 
 -- ── Built-in middleware: logger ───────────────────────────────────────────────
 
---: ((table | nil)) -> function
+--: ((web_logger_opts | nil)) -> web_middleware
 function M.logger(opts)
 	--: ((string | nil)) -> (string) -> ()
 	local log_fn = opts and opts.log or print
@@ -310,7 +320,7 @@ end
 
 -- ── Built-in middleware: CORS ────────────────────────────────────────────────
 
---: ((table | nil)) -> function
+--: ((web_cors_opts | nil)) -> web_middleware
 function M.cors(opts)
 	opts = opts or {}
 	local origins = opts.origins or { "*" }
@@ -433,7 +443,7 @@ function M.cookies()
 		req.cookies = cookies
 
 		-- Add set_cookie method to response
-		--: (table, string, string, (table | nil)) -> table
+		--: (web_response, string, string, (web_cookie_opts | nil)) -> web_response
 		function res:set_cookie(name, value, opts)
 			opts = opts or {}
 			local parts = { name .. "=" .. value }
@@ -460,7 +470,7 @@ end
 
 -- ── Built-in middleware: CSRF ────────────────────────────────────────────────
 
---: (table) -> function
+--: (web_csrf_opts) -> web_middleware
 function M.csrf(opts)
 	local secret = opts.secret or error("web.csrf requires opts.secret")
 

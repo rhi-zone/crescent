@@ -148,7 +148,8 @@ end
 
 -- ── Presence ────────────────────────────────────────────────────────────
 
---:: Presence = { join: (string, string, table) -> (), leave: (string, string) -> (), update: (string, string, table) -> (), list: (string) -> {{id: string, meta: table}}, get: (string, string) -> table | nil, count: (string) -> number, on_join: ((string, string, table) -> ()) -> (), on_leave: ((string, string, table) -> ()) -> (), on_update: ((string, string, table) -> ()) -> () }
+--:: presence_meta = { [string]: unknown }
+--:: Presence = { join: (string, string, presence_meta) -> (), leave: (string, string) -> (), update: (string, string, presence_meta) -> (), list: (string) -> {{id: string, meta: presence_meta}}, get: (string, string) -> presence_meta | nil, count: (string) -> number, on_join: ((string, string, presence_meta) -> ()) -> (), on_leave: ((string, string, presence_meta) -> ()) -> (), on_update: ((string, string, presence_meta) -> ()) -> () }
 
 local Presence = {}
 Presence.__index = Presence
@@ -163,7 +164,7 @@ function M.presence()
 	}, Presence)
 end
 
---: (string, string, table) -> ()
+--: (string, string, presence_meta) -> ()
 function Presence:join(room, user_id, meta)
 	local r = self._rooms[room]
 	if not r then
@@ -194,7 +195,7 @@ function Presence:leave(room, user_id)
 	end
 end
 
---: (string, string, table) -> ()
+--: (string, string, presence_meta) -> ()
 function Presence:update(room, user_id, meta)
 	local r = self._rooms[room]
 	if not r or not r[user_id] then return end
@@ -209,7 +210,7 @@ function Presence:update(room, user_id, meta)
 	end
 end
 
---: (string) -> {{id: string, meta: table}}
+--: (string) -> {{id: string, meta: presence_meta}}
 function Presence:list(room)
 	local r = self._rooms[room]
 	if not r then return {} end
@@ -221,7 +222,7 @@ function Presence:list(room)
 	return result
 end
 
---: (string, string) -> table | nil
+--: (string, string) -> presence_meta | nil
 function Presence:get(room, user_id)
 	local r = self._rooms[room]
 	if not r then return nil end
@@ -239,25 +240,28 @@ function Presence:count(room)
 	return n
 end
 
---: ((string, string, table) -> ()) -> ()
+--: ((string, string, presence_meta) -> ()) -> ()
 function Presence:on_join(fn)
 	self._on_join[#self._on_join + 1] = fn
 end
 
---: ((string, string, table) -> ()) -> ()
+--: ((string, string, presence_meta) -> ()) -> ()
 function Presence:on_leave(fn)
 	self._on_leave[#self._on_leave + 1] = fn
 end
 
---: ((string, string, table) -> ()) -> ()
+--: ((string, string, presence_meta) -> ()) -> ()
 function Presence:on_update(fn)
 	self._on_update[#self._on_update + 1] = fn
 end
 
 -- ── Event Store ─────────────────────────────────────────────────────────
 
---:: Event = { seq: number, global_seq: number, type: string, data: table, timestamp: number }
---:: EventStore = { append: (string, table) -> (), read: (string, (table | nil)) -> {Event}, read_all: ((table | nil)) -> {Event}, on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> {string}, stream_length: (string) -> number }
+--:: event_data = { [string]: unknown }
+--:: event_input = { type: string, data: event_data }
+--:: read_opts = { after?: number, limit?: integer }
+--:: Event = { seq: number, global_seq: number, type: string, data: event_data, timestamp: number }
+--:: EventStore = { append: (string, event_input) -> (), read: (string, (read_opts | nil)) -> {Event}, read_all: ((read_opts | nil)) -> {Event}, on_append: ((string, Event) -> ()) -> (), aggregate: (string, (any, Event) -> any) -> any, streams: () -> {string}, stream_length: (string) -> number }
 
 local EventStore = {}
 EventStore.__index = EventStore
@@ -273,7 +277,7 @@ function M.event_store(opts)
 	}, EventStore)
 end
 
---: (string, table) -> ()
+--: (string, event_input) -> ()
 function EventStore:append(stream, event)
 	local s = self._streams[stream]
 	if not s then
@@ -296,7 +300,7 @@ function EventStore:append(stream, event)
 	end
 end
 
---: (string, (table | nil)) -> {Event}
+--: (string, (read_opts | nil)) -> {Event}
 function EventStore:read(stream, opts)
 	local s = self._streams[stream]
 	if not s then return {} end
@@ -314,7 +318,7 @@ function EventStore:read(stream, opts)
 	return result
 end
 
---: ((table | nil)) -> {Event}
+--: ((read_opts | nil)) -> {Event}
 function EventStore:read_all(opts)
 	opts = opts or {}
 	local after = opts.after or 0

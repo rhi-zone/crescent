@@ -63,6 +63,11 @@ end
 
 -- ── Bit reader ───────────────────────────────────────────────────────────────
 
+--:: bit_reader = { data: string, pos: integer, bitbuf: number, bitcnt: integer }
+--:: huffman_tree = { minbits: integer, maxbits: integer, [integer]: integer }
+--:: inflate_opts = { format: string | nil }
+--:: inflater_handle = { push: (string) -> ((boolean | nil), (string | nil)), finish: () -> ((string | nil), (string | nil)) }
+
 local function make_reader(data, pos)
   return {
     data = data,
@@ -72,7 +77,7 @@ local function make_reader(data, pos)
   }
 end
 
---: (table, number) -> number
+--: (bit_reader, integer) -> number
 local function read_bits(r, n)
   while r.bitcnt < n do
     if r.pos > #r.data then
@@ -90,14 +95,14 @@ local function read_bits(r, n)
 end
 
 -- Discard remaining bits in current byte (align to byte boundary)
---: (table) -> nil
+--: (bit_reader) -> nil
 local function align_byte(r)
   r.bitbuf = 0
   r.bitcnt = 0
 end
 
 -- Read bytes directly (after byte alignment)
---: (table, number) -> string
+--: (bit_reader, integer) -> string
 local function read_bytes(r, n)
   align_byte(r)
   if r.pos + n - 1 > #r.data then
@@ -113,7 +118,7 @@ end
 -- Build a Huffman decode table from code lengths.
 -- Returns a table: { minbits, maxbits, [code] = symbol }
 -- where code is the bit-reversed prefix of the appropriate length.
---: (number[], number) -> table
+--: (number[], integer) -> huffman_tree
 local function build_tree(lengths, nsym)
   local maxbits = 0
   local bl_count = {}
@@ -161,7 +166,7 @@ end
 -- Decode one symbol from the bit stream using the Huffman tree.
 -- The tree stores bit-reversed codes (see build_tree), so we accumulate bits
 -- LSB-first: each new bit goes into the next higher position.
---: (table, table) -> number
+--: (bit_reader, huffman_tree) -> number
 local function decode_symbol(r, tree)
   local code = 0
   local mask = 1
@@ -222,7 +227,7 @@ local dist_extra = {
 -- ── DEFLATE block decompression ──────────────────────────────────────────────
 
 -- Decompress blocks into output table. r = bit reader, out = output table.
---: (table, table) -> nil
+--: (bit_reader, string[]) -> nil
 local function inflate_blocks(r, out)
   local out_n = #out
   -- Maintain a flat string window for back-references
@@ -346,7 +351,7 @@ end
 
 -- ── Format parsing ───────────────────────────────────────────────────────────
 
---: (string, (table | nil)) -> ((string | nil), (string | nil))
+--: (string, (inflate_opts | nil)) -> ((string | nil), (string | nil))
 local function inflate(input, opts)
   opts = opts or {}
   local format = opts.format or "zlib"
@@ -467,7 +472,7 @@ end
 
 -- ── Streaming inflater ───────────────────────────────────────────────────────
 
---: ((table | nil)) -> table
+--: ((inflate_opts | nil)) -> inflater_handle
 local function inflater(opts)
   local chunks = {}
   return {
@@ -488,7 +493,7 @@ end
 
 local M = {}
 
---: (string, (table | nil)) -> (nil, string)
+--: (string, (inflate_opts | nil)) -> (nil, string)
 M.deflate = function(_, _)
   return nil, "deflate not available in pure-lua tier"
 end

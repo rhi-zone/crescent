@@ -2,15 +2,25 @@ if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.
 
 local M = {}
 
---:: channel = { send: (table) -> (true | nil, string) }
---:: notify = { send: (table) -> (true | nil, string) }
---:: router = { send: (table) -> (true | nil, string), add: (channel) -> nil }
---:: retry_channel = { send: (table) -> (true | nil, string) }
---:: rate_limited_channel = { send: (table) -> (true | nil, string) }
---:: batched_channel = { send: (table) -> (true | nil, string), flush: () -> nil }
+--:: notify_msg = { level?: string, topic?: string, text?: string, timestamp?: number, meta?: { [string]: unknown }, time_fn?: () -> number, _time_fn?: () -> number, ... }
+--:: channel = { send: (msg: notify_msg) -> (true | nil, string) }
+--:: notify = { send: (msg: notify_msg) -> (true | nil, string) }
+--:: router = { send: (msg: notify_msg) -> { name: string, ok: true | nil, err: string | nil }[], add: (name: string, channel: channel, opts: ({ levels?: string[], topics?: string[], filter?: (msg: notify_msg) -> boolean } | nil)) -> nil }
+--:: retry_channel = { send: (msg: notify_msg) -> (true | nil, string) }
+--:: rate_limited_channel = { send: (msg: notify_msg) -> (true | nil, string) }
+--:: batched_channel = { send: (msg: notify_msg) -> (true | nil, string), flush: () -> nil }
+--:: webhook_opts = { url: string, headers?: { [string]: string }, transform?: (msg: notify_msg) -> unknown, transport?: { post: (url: string, body: unknown, headers: ({ [string]: string } | nil)) -> (true | nil, string) }, time_fn: () -> number }
+--:: log_channel_opts = { logger: (level: string, text: string) -> nil, level?: string, time_fn: () -> number }
+--:: callback_opts = { time_fn: () -> number }
+--:: console_opts = { format?: string, time_fn: () -> number }
+--:: router_opts = { time_fn: () -> number }
+--:: route_add_opts = { levels?: string[], topics?: string[], filter?: (msg: notify_msg) -> boolean }
+--:: batch_opts = { max_size?: integer, max_wait?: number, transform?: (msgs: notify_msg[]) -> notify_msg, time_fn: () -> number }
+--:: rate_limit_opts = { rate: number, burst?: number, time_fn: () -> number }
+--:: retry_opts = { max_attempts?: integer, backoff?: number, time_fn: () -> number }
 
 --- Normalize a message: set defaults for missing fields.
---: (msg: table, (() -> number) | nil) -> table
+--: (msg: notify_msg, (() -> number) | nil) -> notify_msg
 local function normalize(msg, time_fn)
   if type(msg) ~= "table" then msg = { text = tostring(msg) } end
   if not msg.level then msg.level = "info" end
@@ -19,7 +29,7 @@ local function normalize(msg, time_fn)
 end
 
 --- Message constructor. Sets defaults (timestamp, level).
---: (fields: table) -> table
+--: (fields: notify_msg) -> notify_msg
 function M.message(fields)
   assert(fields and fields.time_fn, "message requires fields.time_fn")
   local time_fn = fields.time_fn
@@ -33,7 +43,7 @@ end
 -- ── Channels ────────────────────────────────────────────────────────────
 
 --- Webhook channel: sends HTTP POST with JSON body via injected transport.
---: (opts: table) -> channel
+--: (opts: webhook_opts) -> channel
 function M.webhook(opts)
   assert(opts and opts.time_fn, "webhook requires opts.time_fn")
   local url = opts.url
@@ -42,7 +52,7 @@ function M.webhook(opts)
   local transport = opts.transport
   local wh_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, wh_time_fn)
     local body = msg
@@ -58,14 +68,14 @@ function M.webhook(opts)
 end
 
 --- Log channel: calls logger(level, formatted_text).
---: (opts: table) -> channel
+--: (opts: log_channel_opts) -> channel
 function M.log_channel(opts)
   assert(opts and opts.time_fn, "log_channel requires opts.time_fn")
   local logger = opts.logger
   local default_level = opts.level or "info"
   local lc_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, lc_time_fn)
     local level = msg.level or default_level
@@ -90,12 +100,12 @@ function M.log_channel(opts)
 end
 
 --- Callback channel: calls a function with the message.
---: (fn: (msg: table) -> unknown, opts: table) -> channel
+--: (fn: (msg: notify_msg) -> unknown, opts: callback_opts) -> channel
 function M.callback(fn, opts)
   assert(opts and opts.time_fn, "callback requires opts.time_fn")
   local cb_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, cb_time_fn)
     local ok, err = pcall(fn, msg)
@@ -106,13 +116,13 @@ function M.callback(fn, opts)
 end
 
 --- Console channel: writes formatted message to stderr.
---: (opts: table) -> channel
+--: (opts: console_opts) -> channel
 function M.console(opts)
   assert(opts and opts.time_fn, "console requires opts.time_fn")
   local format = opts.format or "text"
   local con_time_fn = opts.time_fn
   local ch = {}
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function ch:send(msg)
     msg = normalize(msg, con_time_fn)
     if format == "json" then
@@ -137,7 +147,7 @@ end
 -- ── Router ──────────────────────────────────────────────────────────────
 
 --- Create a notification router.
---: (opts: table) -> router
+--: (opts: router_opts) -> router
 function M.router(opts)
   assert(opts and opts.time_fn, "router requires opts.time_fn")
   local rt_time_fn = opts.time_fn
@@ -145,7 +155,7 @@ function M.router(opts)
   local r = {}
 
   --- Add a channel with optional routing rules.
-  --: (name: string, channel: channel, opts: (table | nil)) -> nil
+  --: (name: string, channel: channel, opts: (route_add_opts | nil)) -> nil
   function r:add(name, channel, add_opts)
     local route = { name = name, channel = channel }
     if add_opts then
@@ -165,7 +175,7 @@ function M.router(opts)
   end
 
   --- Send a notification to all matching channels.
-  --: (msg: table) -> table[]
+  --: (msg: notify_msg) -> { name: string, ok: true | nil, err: string | nil }[]
   function r:send(msg)
     msg = normalize(msg, rt_time_fn)
     local results = {}
@@ -189,7 +199,7 @@ end
 -- ── Wrappers ────────────────────────────────────────────────────────────
 
 --- Batch wrapper: accumulates messages and flushes when threshold hit.
---: (channel: channel, opts: table) -> batched_channel
+--: (channel: channel, opts: batch_opts) -> batched_channel
 function M.batch(channel, opts)
   assert(opts and opts.time_fn, "batch requires opts.time_fn")
   local bat_time_fn = opts.time_fn
@@ -220,7 +230,7 @@ function M.batch(channel, opts)
   end
 
   --- Buffer a message. Flushes automatically at max_size.
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function b:send(msg)
     msg = normalize(msg, bat_time_fn)
     buffer[#buffer + 1] = msg
@@ -249,7 +259,7 @@ function M.batch(channel, opts)
 end
 
 --- Rate-limit wrapper: drops messages exceeding the per-minute limit.
---: (channel: channel, opts: table) -> rate_limited_channel
+--: (channel: channel, opts: rate_limit_opts) -> rate_limited_channel
 function M.rate_limit(channel, opts)
   assert(opts and opts.time_fn, "rate_limit requires opts.time_fn")
   local max_per_minute = opts.max_per_minute or 60
@@ -258,7 +268,7 @@ function M.rate_limit(channel, opts)
   local timestamps = {}
   local rl = {}
 
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function rl:send(msg)
     local now = now_fn()
     -- Prune timestamps older than 60 seconds
@@ -283,12 +293,12 @@ function M.rate_limit(channel, opts)
 end
 
 --- Retry wrapper: retries on failure up to max_attempts.
---: (channel: channel, opts: table) -> retry_channel
+--: (channel: channel, opts: retry_opts) -> retry_channel
 function M.retry(channel, opts)
   local max_attempts = opts.max_attempts or 3
   local rt = {}
 
-  --: (msg: table) -> (true | nil, string)
+  --: (msg: notify_msg) -> (true | nil, string)
   function rt:send(msg)
     local ok, err
     for _ = 1, max_attempts do

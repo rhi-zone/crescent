@@ -9,6 +9,15 @@ local json = require("lib.format.json")
 
 local M = {}
 
+--:: openapi_doc = { openapi: string, info: { [string]: unknown }, paths?: { [string]: { [string]: unknown } }, components?: { [string]: unknown }, ... }
+--:: openapi_schema = { [string]: unknown }
+--:: openapi_error = { path: string, message: string }
+--:: openapi_operation = { method: string, path: string, operationId?: string, parameters?: { [integer]: unknown }, requestBody?: { [string]: unknown }, responses?: { [string]: unknown }, summary?: string, description?: string, tags?: string[] }
+--:: openapi_spec = { _doc: openapi_doc, ... }
+--:: openapi_request = { method?: string, path?: string, headers?: { [string]: string }, query?: { [string]: string }, body?: unknown, ... }
+--:: openapi_response = { headers?: { [string]: string }, body?: unknown, ... }
+--:: openapi_handlers = { [string]: (req: openapi_request, res: openapi_response) -> nil }
+
 local type_of = type
 local pairs = pairs
 local ipairs = ipairs
@@ -25,7 +34,7 @@ local floor = math.floor
 -- ── $ref resolution ─────────────────────────────────────────────────────────
 
 -- Resolve a JSON Pointer path (e.g. "#/components/schemas/User") against root.
---: (table, string) -> unknown | nil
+--: (openapi_doc, string) -> unknown | nil
 local function resolve_pointer(root, ref)
 	if sub(ref, 1, 2) ~= "#/" then return nil end
 	local node = root
@@ -46,7 +55,7 @@ end
 
 -- Walk the spec tree and resolve all $ref references in-place.
 -- Uses a visited set to handle circular references.
---: (table, table, (table | nil)) -> ()
+--: (openapi_doc, { [unknown]: unknown }, ({ [unknown]: boolean } | nil)) -> ()
 local function resolve_refs(root, node, visited)
 	if type_of(node) ~= "table" then return end
 	if not visited then visited = {} end
@@ -73,7 +82,7 @@ end
 
 -- ── JSON Schema validation ──────────────────────────────────────────────────
 
---: (unknown, table, (string | nil)) -> (true, nil) | (nil, table)
+--: (unknown, openapi_schema, (string | nil)) -> (true, nil) | (nil, openapi_error[])
 function M.validate_schema(value, schema, path)
 	path = path or ""
 	local errors = {}
@@ -276,7 +285,7 @@ local function openapi_path_to_web_path(path)
 	return (path:gsub("{([^}]+)}", ":%1"))
 end
 
---: (table) -> string[]
+--: (openapi_spec) -> string[]
 function Spec:paths()
 	local result = {}
 	if self._doc.paths then
@@ -289,7 +298,7 @@ end
 
 local HTTP_METHODS = { get = true, put = true, post = true, delete = true, patch = true, options = true, head = true, trace = true }
 
---: (table) -> table[]
+--: (openapi_spec) -> openapi_operation[]
 function Spec:operations()
 	local result = {}
 	if not self._doc.paths then return result end
@@ -313,7 +322,7 @@ function Spec:operations()
 	return result
 end
 
---: (table, string) -> table | nil
+--: (openapi_spec, string) -> openapi_operation | nil
 function Spec:operation(operation_id)
 	if not self._doc.paths then return nil end
 	for path, path_item in pairs(self._doc.paths) do
@@ -338,7 +347,7 @@ end
 
 -- ── Request validation ──────────────────────────────────────────────────────
 
---: (table, table) -> (true, nil) | (nil, table)
+--: (openapi_spec, openapi_request) -> (true, nil) | (nil, openapi_error[])
 function Spec:validate_request(req)
 	local errors = {}
 	local method = lower(req.method or "get")
@@ -459,7 +468,7 @@ end
 
 -- ── Response validation ─────────────────────────────────────────────────────
 
---: (table, string, integer, table) -> (true, nil) | (nil, table)
+--: (openapi_spec, string, integer, openapi_response) -> (true, nil) | (nil, openapi_error[])
 function Spec:validate_response(operation_id, status_code, resp)
 	local errors = {}
 	local op = self:operation(operation_id)
@@ -513,7 +522,7 @@ end
 -- ── Route generation ────────────────────────────────────────────────────────
 
 -- Returns a table mapping method -> web_path -> handler for use with lib/web.
---: (table, table) -> table
+--: (openapi_spec, openapi_handlers) -> unknown
 function Spec:router(handlers)
 	local web = require("lib.web")
 	local app = web.app()
@@ -522,7 +531,7 @@ function Spec:router(handlers)
 end
 
 -- Mount all OpenAPI operations onto an existing web app.
---: (table, table, table) -> ()
+--: (openapi_spec, unknown, openapi_handlers) -> ()
 function Spec:mount(app, handlers)
 	if not self._doc.paths then return end
 	local spec = self
@@ -560,7 +569,7 @@ end
 
 -- ── Parsing ─────────────────────────────────────────────────────────────────
 
---: (table) -> (table, nil) | (nil, string)
+--: (openapi_doc) -> (openapi_spec, nil) | (nil, string)
 function M.parse_table(doc)
 	if type_of(doc) ~= "table" then
 		return nil, "expected table, got " .. type_of(doc)
@@ -576,7 +585,7 @@ function M.parse_table(doc)
 	return setmetatable({ _doc = doc }, Spec), nil
 end
 
---: (string) -> (table, nil) | (nil, string)
+--: (string) -> (openapi_spec, nil) | (nil, string)
 function M.parse(json_string)
 	if type_of(json_string) ~= "string" then
 		return nil, "expected string, got " .. type_of(json_string)

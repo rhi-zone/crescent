@@ -9,12 +9,14 @@ end
 local M = {}
 local Mt = { __index = M }
 
+--:: matrix = { _rows: number, _cols: number, _data: { [integer]: number } }
+
 local sqrt = math.sqrt
 local abs = math.abs
 local floor = math.floor
 
 --- Create a new matrix.
---: (rows: number, cols: number, data: ({ [number]: number } | nil)) -> table
+--: (rows: number, cols: number, data: ({ [number]: number } | nil)) -> (matrix | nil, string | nil)
 function M.new(rows, cols, data)
   if rows < 1 or cols < 1 then
     return nil, "matrix dimensions must be positive"
@@ -35,7 +37,7 @@ function M.new(rows, cols, data)
 end
 
 --- Create a matrix from an array of row arrays.
---: (rows: { [number]: { [number]: number } }) -> table
+--: (rows: { [number]: { [number]: number } }) -> (matrix | nil, string | nil)
 function M.from_rows(rows)
   local r = #rows
   if r == 0 then return nil, "empty row array" end
@@ -57,7 +59,7 @@ function M.from_rows(rows)
 end
 
 --- Create an identity matrix.
---: (n: number) -> table
+--: (n: number) -> matrix
 function M.identity(n)
   local d = {}
   local sz = n * n
@@ -69,13 +71,13 @@ function M.identity(n)
 end
 
 --- Create a zero matrix.
---: (r: number, c: number) -> table
+--: (r: number, c: number) -> matrix
 function M.zeros(r, c)
   return M.new(r, c)
 end
 
 --- Create a matrix of ones.
---: (r: number, c: number) -> table
+--: (r: number, c: number) -> matrix
 function M.ones(r, c)
   local d = {}
   local n = r * c
@@ -84,7 +86,7 @@ function M.ones(r, c)
 end
 
 --- Create a matrix with random values in [lo, hi).
---: (r: number, c: number, lo: number, hi: number) -> table
+--: (r: number, c: number, lo: number, hi: number) -> matrix
 function M.random(r, c, lo, hi)
   lo = lo or 0
   hi = hi or 1
@@ -98,7 +100,7 @@ function M.random(r, c, lo, hi)
 end
 
 --- Create a diagonal matrix from a vector.
---: (v: { [number]: number }) -> table
+--: (v: { [number]: number }) -> matrix
 function M.diag(v)
   local n = #v
   local d = {}
@@ -112,7 +114,7 @@ end
 
 --- Solve Ax = b via Gaussian elimination with partial pivoting.
 -- Returns (nil, errmsg) if system is singular.
---: (A: table, b: table) -> table | (nil, string)
+--: (A: matrix, b: matrix) -> (matrix | nil, string | nil)
 function M.solve(A, b)
   local n = A._rows
   if n ~= A._cols then
@@ -222,7 +224,7 @@ function M:col(j)
 end
 
 --- Element-wise addition.
---: (other: table) -> table | (nil, string)
+--: (other: matrix) -> (matrix | nil, string | nil)
 function M:add(other)
   local r, c = self._rows, self._cols
   if r ~= other._rows or c ~= other._cols then
@@ -236,7 +238,7 @@ function M:add(other)
 end
 
 --- Element-wise subtraction.
---: (other: table) -> table | (nil, string)
+--: (other: matrix) -> (matrix | nil, string | nil)
 function M:sub(other)
   local r, c = self._rows, self._cols
   if r ~= other._rows or c ~= other._cols then
@@ -250,7 +252,7 @@ function M:sub(other)
 end
 
 --- Matrix multiplication.
---: (other: table) -> table | (nil, string)
+--: (other: matrix) -> (matrix | nil, string | nil)
 function M:mul(other)
   local ar, ac = self._rows, self._cols
   local br, bc = other._rows, other._cols
@@ -275,7 +277,7 @@ function M:mul(other)
 end
 
 --- Scalar multiplication.
---: (n: number) -> table
+--: (n: number) -> matrix
 function M:scale(n)
   local sz = self._rows * self._cols
   local a = self._data
@@ -285,13 +287,13 @@ function M:scale(n)
 end
 
 --- Negate all elements.
---: () -> table
+--: () -> matrix
 function M:neg()
   return self:scale(-1)
 end
 
 --- Transpose.
---: () -> table
+--: () -> matrix
 function M:transpose()
   local r, c = self._rows, self._cols
   local a = self._data
@@ -377,7 +379,7 @@ end
 
 --- Inverse via Gauss-Jordan elimination.
 -- Returns (nil, errmsg) if singular.
---: () -> table | (nil, string)
+--: () -> (matrix | nil, string | nil)
 function M:inverse()
   if self._rows ~= self._cols then
     return nil, "inverse requires square matrix"
@@ -442,7 +444,7 @@ function M:inverse()
 end
 
 --- Element-wise equality with optional epsilon.
---: (other: table, eps: (number | nil)) -> boolean
+--: (other: matrix, eps: (number | nil)) -> boolean
 function M:eq(other, eps)
   if self._rows ~= other._rows or self._cols ~= other._cols then
     return false
@@ -463,7 +465,7 @@ function M:eq(other, eps)
 end
 
 --- Element-wise transform.
---: (fn: (number) -> number) -> table
+--: (fn: (number) -> number) -> matrix
 function M:map(fn)
   local n = self._rows * self._cols
   local a = self._data
@@ -473,7 +475,7 @@ function M:map(fn)
 end
 
 --- Reshape to new dimensions (must preserve element count).
---: (r: number, c: number) -> table | (nil, string)
+--: (r: number, c: number) -> (matrix | nil, string | nil)
 function M:reshape(r, c)
   if r * c ~= self._rows * self._cols then
     return nil, "cannot reshape " .. self._rows .. "x" .. self._cols .. " to " .. r .. "x" .. c
@@ -521,7 +523,7 @@ function M:norm()
 end
 
 --- Frobenius inner product (element-wise multiply then sum).
---: (other: table) -> number | (nil, string)
+--: (other: matrix) -> number | (nil, string)
 function M:dot(other)
   if self._rows ~= other._rows or self._cols ~= other._cols then
     return nil, "dimension mismatch"
@@ -554,7 +556,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Create a matrix from a flat row-major array (alias requested by spec).
---: (rows: number, cols: number, arr: { [number]: number }) -> table | (nil, string)
+--: (rows: number, cols: number, arr: { [number]: number }) -> (matrix | nil, string | nil)
 function M.from_array(rows, cols, arr)
   return M.new(rows, cols, arr)
 end
@@ -608,7 +610,7 @@ function M:max()
 end
 
 --- Element-wise fn(a, b) with another matrix of the same shape.
---: (other: table, fn: (number, number) -> number) -> table | (nil, string)
+--: (other: matrix, fn: (number, number) -> number) -> (matrix | nil, string | nil)
 function M:zip(other, fn)
   local r, c = self._rows, self._cols
   if r ~= other._rows or c ~= other._cols then
@@ -622,7 +624,7 @@ function M:zip(other, fn)
 end
 
 --- Inverse (alias: inv, for spec compatibility).
---: () -> table | (nil, string)
+--: () -> (matrix | nil, string | nil)
 function M:inv()
   return self:inverse()
 end
@@ -631,7 +633,7 @@ end
 -- Returns L (lower triangular, unit diagonal) and U (upper triangular).
 -- Pivoting is absorbed into U; the decomposition satisfies P*A = L*U for some
 -- permutation P, and L*U approximates A up to row swaps.
---: () -> (table, table | (nil, string))
+--: () -> (matrix, (matrix | nil, string | nil))
 function M:lu()
   if self._rows ~= self._cols then
     return nil, "LU decomposition requires square matrix"
@@ -686,7 +688,7 @@ function M:lu()
 end
 
 --- Submatrix from (r1,c1) to (r2,c2) inclusive (1-indexed).
---: (r1: number, c1: number, r2: number, c2: number) -> table | (nil, string)
+--: (r1: number, c1: number, r2: number, c2: number) -> (matrix | nil, string | nil)
 function M:slice(r1, c1, r2, c2)
   local r, c = self._rows, self._cols
   if r1 < 1 or c1 < 1 or r2 > r or c2 > c or r1 > r2 or c1 > c2 then
@@ -708,7 +710,7 @@ function M:slice(r1, c1, r2, c2)
 end
 
 --- Approximate element-wise equality with tolerance.
---: (other: table, tol: (number | nil)) -> boolean
+--: (other: matrix, tol: (number | nil)) -> boolean
 function M:approx_eq(other, tol)
   return self:eq(other, tol or 1e-9)
 end
