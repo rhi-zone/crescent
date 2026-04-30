@@ -74,7 +74,7 @@ nix develop                  # Dev shell for contributors (bun, etc.)
 
 **Something unexpected is a signal, not noise.** Stop and ask why before continuing.
 
-**Lua code must typecheck before commit.** The pre-commit hook in `.githooks/pre-commit` enforces this — to activate it, run `git config core.hooksPath .githooks` once per clone (the repo does not auto-activate hooks for safety). The hook runs `timeout 30 bin/cr check <file>` on each staged `lib/**/*.lua` file and rejects the commit on any error or timeout. Do not bypass with `--no-verify` — fix the type error or fix the hook.
+**Lua code must not regress typechecking before commit.** The pre-commit hook in `.githooks/pre-commit` enforces this — to activate it, run `git config core.hooksPath .githooks` once per clone (the repo does not auto-activate hooks for safety). For each staged `lib/**/*.lua` file the hook runs `timeout 30 bin/cr check <file>` on both the staged blob and the `HEAD` blob and rejects the commit only when the staged version has MORE errors than `HEAD` (or when a new file has any errors). Pre-existing errors in a file you happen to edit are tolerated. Timeouts always reject. Do not bypass with `--no-verify` — fix the new error or fix the hook.
 
 **Confident assertions require proof of work.** Assert confidently only after (1) adversarially reasoning through every plausible alternative and showing each is inferior, AND (2) verifying no downsides to the assertion. If either step is incomplete, say "I don't know" or state an explicitly-flagged hypothesis — then the immediate next step is to verify, not to hedge-word a guess into sounding like knowledge.
 

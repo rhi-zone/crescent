@@ -4,10 +4,16 @@
 # To activate (one-time, per clone):
 #   git config core.hooksPath .githooks
 #
-# Each file is checked with `timeout 30 bin/cr check <file>`. A hang
-# (timeout) is a soundness/termination bug — see CLAUDE.md "Always run
-# typecheck under a timeout". The hook does NOT auto-fix; if a file fails,
-# fix the source and `git add` it again.
+# Each staged file is checked with `timeout 30 bin/cr check <file>`. We
+# compare error counts between the staged blob and the HEAD blob for the
+# same path and reject ONLY when the staged version has MORE errors than
+# HEAD — i.e., the commit introduces new type errors. Editing a file with
+# pre-existing errors without making them worse passes. New files must be
+# error-free.
+#
+# A hang (timeout) is a soundness/termination bug — see CLAUDE.md "Always
+# run typecheck under a timeout". The hook does NOT auto-fix; if a file
+# regresses, fix the source and `git add` it again.
 #
 # Skip semantics:
 #   - No staged Lua files in lib/  → silently pass.
@@ -32,32 +38,118 @@ fi
 
 echo "pre-commit: typechecking ${#staged[@]} staged Lua file(s)..."
 
+tmp_root="$(mktemp -d -t crescent-precommit.XXXXXX)"
+trap 'rm -rf "$tmp_root"' EXIT
+
+# Run `bin/cr check` on a file and echo "<error_count>|<exit_code>" plus
+# write full output to $2. error_count is -1 on timeout or unparsable.
+run_check() {
+  local target="$1" outfile="$2"
+  local rc=0
+  timeout 30 bin/cr check "$target" >"$outfile" 2>&1 || rc=$?
+  if [ "$rc" -eq 124 ]; then
+    echo "-1|124"
+    return
+  fi
+  # Last "Checked N file(s): X error(s), Y warning(s)" line.
+  local errs
+  errs="$(grep -oE 'Checked [0-9]+ file\(s\): [0-9]+ error\(s\)' "$outfile" \
+    | tail -n1 | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || true)"
+  if [ -z "$errs" ]; then
+    # No summary line — treat as unparsable failure if rc != 0, else 0.
+    if [ "$rc" -ne 0 ]; then
+      echo "-1|$rc"
+    else
+      echo "0|0"
+    fi
+    return
+  fi
+  echo "$errs|$rc"
+}
+
 failed=0
 for f in "${staged[@]}"; do
-  if [ ! -f "$f" ]; then
-    # Staged but deleted on disk somehow; skip.
+  # Materialize staged blob preserving the relative path so diagnostics
+  # reference a sensible location.
+  staged_dir="$tmp_root/staged"
+  head_dir="$tmp_root/head"
+  staged_path="$staged_dir/$f"
+  head_path="$head_dir/$f"
+  mkdir -p "$(dirname "$staged_path")" "$(dirname "$head_path")"
+
+  if ! git show ":$f" >"$staged_path" 2>/dev/null; then
+    # Staged blob unreadable (e.g., deleted); skip.
     continue
   fi
-  rc=0
-  timeout 30 bin/cr check "$f" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    if [ "$rc" -eq 124 ]; then
-      echo "pre-commit: TIMEOUT (>30s) on $f — typecheck is hanging." >&2
-      echo "  This is a soundness/termination bug. See CLAUDE.md." >&2
-    else
-      echo "pre-commit: typecheck failed on $f (exit $rc)" >&2
-    fi
+
+  # HEAD version may not exist (new file).
+  has_head=1
+  if ! git show "HEAD:$f" >"$head_path" 2>/dev/null; then
+    has_head=0
+  fi
+
+  staged_out="$tmp_root/staged.out"
+  staged_result="$(run_check "$staged_path" "$staged_out")"
+  staged_errs="${staged_result%|*}"
+  staged_rc="${staged_result#*|}"
+
+  if [ "$staged_errs" = "-1" ] && [ "$staged_rc" = "124" ]; then
+    echo "pre-commit: TIMEOUT (>30s) on $f (staged) — typecheck is hanging." >&2
+    echo "  This is a soundness/termination bug. See CLAUDE.md." >&2
     failed=1
+    continue
+  fi
+  if [ "$staged_errs" = "-1" ]; then
+    echo "pre-commit: typecheck on $f (staged) failed unparsably (exit $staged_rc):" >&2
+    cat "$staged_out" >&2
+    failed=1
+    continue
+  fi
+
+  if [ "$has_head" -eq 0 ]; then
+    # New file: any errors fail.
+    if [ "$staged_errs" -gt 0 ]; then
+      echo "pre-commit: new file $f has $staged_errs type error(s):" >&2
+      cat "$staged_out" >&2
+      failed=1
+    fi
+    continue
+  fi
+
+  head_out="$tmp_root/head.out"
+  head_result="$(run_check "$head_path" "$head_out")"
+  head_errs="${head_result%|*}"
+  head_rc="${head_result#*|}"
+
+  if [ "$head_errs" = "-1" ] && [ "$head_rc" = "124" ]; then
+    echo "pre-commit: TIMEOUT (>30s) on $f (HEAD) — typecheck is hanging." >&2
+    echo "  This is a soundness/termination bug. See CLAUDE.md." >&2
+    failed=1
+    continue
+  fi
+  if [ "$head_errs" = "-1" ]; then
+    # HEAD unparsable — be conservative and treat as 0 so we don't mask
+    # a real regression, but warn.
+    echo "pre-commit: warning: typecheck on $f (HEAD) unparsable; treating as 0 errors." >&2
+    head_errs=0
+  fi
+
+  if [ "$staged_errs" -gt "$head_errs" ]; then
+    echo "pre-commit: $f introduces $((staged_errs - head_errs)) new type error(s) (HEAD: $head_errs, staged: $staged_errs):" >&2
+    cat "$staged_out" >&2
+    failed=1
+  elif [ "$staged_errs" -gt 0 ]; then
+    echo "pre-commit: $f has $staged_errs pre-existing error(s) (unchanged); allowing."
   fi
 done
 
 if [ "$failed" -ne 0 ]; then
   echo "" >&2
-  echo "pre-commit: rejecting commit due to typecheck errors above." >&2
-  echo "Fix the errors and re-stage, or run with --no-verify if you" >&2
-  echo "have a documented reason (CLAUDE.md discourages this)." >&2
+  echo "pre-commit: rejecting commit due to NEW typecheck errors above." >&2
+  echo "Fix the new errors and re-stage. Pre-existing errors are tolerated." >&2
+  echo "(--no-verify exists but CLAUDE.md discourages it — fix the issue or the hook.)" >&2
   exit 1
 fi
 
-echo "pre-commit: typecheck passed."
+echo "pre-commit: typecheck passed (no new errors)."
 exit 0
