@@ -634,17 +634,11 @@ function M.main(argv)
         return
     end
 
-    -- Build input_opts: same as project_opts but with no_disk_cache=true so that
-    -- input files are always fully checked (errors re-evaluated). Dependencies
-    -- reached via cri_loader strip no_disk_cache, so they use the disk cache.
-    local input_opts
-    if project_opts then
-        input_opts = {}
-        for k, v in pairs(project_opts) do input_opts[k] = v end
-        input_opts.no_disk_cache = true
-    else
-        input_opts = { no_disk_cache = true }
-    end
+    -- Inputs use the disk cache: a hash hit restores cached diagnostics + types
+    -- and skips the solver entirely. Diagnostics are stored in the .cri file
+    -- (Section 7, v2). To force a re-check, delete .crescentcache or bump the
+    -- .cri schema version.
+    local input_opts = project_opts or {}
 
     -- Determine parallelism level.
     -- Don't parallelize when --rules is active (rules_mod state lives in-process).

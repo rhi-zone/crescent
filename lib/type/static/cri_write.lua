@@ -364,10 +364,63 @@ local function build_field_pool(ctx, seen_types, seen_strings, field_entries)
     return remapped
 end
 
+-- Serialize a diagnostics list (errors + warnings) into a length-prefixed binary blob.
+-- Diagnostics carry: kind, filename, line, col, msg, notes[]. Filenames and messages
+-- are stored inline as length-prefixed UTF-8 (no string-table interning) — keeps the
+-- decoder simple and avoids cross-section coupling.
+--
+-- Layout:
+--   total_count(u32)  -- errors+warnings combined; kind byte distinguishes
+--   for each diag:
+--     kind(u8)        -- 0 = error, 1 = warning
+--     pad(u8 × 3)
+--     line(i32)
+--     col(i32)
+--     filename_len(u32)
+--     filename_bytes
+--     msg_len(u32)
+--     msg_bytes
+--     note_count(u32)
+--     for each note:
+--       line(i32)
+--       col(i32)
+--       filename_len(u32)
+--       filename_bytes
+--       msg_len(u32)
+--       msg_bytes
+local function serialize_diagnostics(diags)
+    local out = {}
+    out[#out + 1] = u32be(#diags)
+    for _, d in ipairs(diags) do
+        local kind = d.kind == "warning" and 1 or 0
+        out[#out + 1] = u8(kind) .. "\0\0\0"
+        out[#out + 1] = i32be(d.line or 0)
+        out[#out + 1] = i32be(d.col or 0)
+        local fname = d.filename or ""
+        local msg   = d.msg or ""
+        out[#out + 1] = u32be(#fname); out[#out + 1] = fname
+        out[#out + 1] = u32be(#msg);   out[#out + 1] = msg
+        local notes = d.notes or {}
+        out[#out + 1] = u32be(#notes)
+        for _, n in ipairs(notes) do
+            out[#out + 1] = i32be(n.line or 0)
+            out[#out + 1] = i32be(n.col or 0)
+            local nf = n.filename or ""
+            local nm = n.msg or ""
+            out[#out + 1] = u32be(#nf); out[#out + 1] = nf
+            out[#out + 1] = u32be(#nm); out[#out + 1] = nm
+        end
+    end
+    -- Pad to 4-byte alignment so any following data stays aligned.
+    pad_to_align(out, 4)
+    return table.concat(out)
+end
+
 -- Serialize a set of named exports from ctx.
 -- exports: { [name_string] = type_id }
+-- diagnostics: { errors = {DiagEntry, ...}, warnings = {DiagEntry, ...} } | nil
 -- Returns the raw .cri bytes as a Lua string, with SHA-256 filled in.
-function M.serialize(ctx, exports, type_aliases)
+function M.serialize(ctx, exports, type_aliases, diagnostics)
     -- Clean up any leftover side table from a previous call.
     ctx._cri_table_fields = {}
 
@@ -699,33 +752,57 @@ function M.serialize(ctx, exports, type_aliases)
     end
 
     -- -----------------------------------------------------------------------
-    -- Header (64 bytes)
-    -- magic(4) + version(4) + flags(4) + hash(32) + 5×offset(4) = 64
-    -- flags: if non-zero, byte offset of Section 6 (type alias table)
+    -- Section 7: Diagnostics (optional, v2+). Errors + warnings of the file
+    -- being serialized. Inline format (no string-table interning).
     -- -----------------------------------------------------------------------
-    local HEADER_SIZE = 64
+    local diag_bytes = ""
+    do
+        local errs = (diagnostics and diagnostics.errors)   or {}
+        local warns = (diagnostics and diagnostics.warnings) or {}
+        if #errs > 0 or #warns > 0 then
+            local combined = {}
+            for _, e in ipairs(errs)  do combined[#combined + 1] = e end
+            for _, w in ipairs(warns) do combined[#combined + 1] = w end
+            diag_bytes = serialize_diagnostics(combined)
+        end
+    end
+
+    -- -----------------------------------------------------------------------
+    -- Header (72 bytes, v2)
+    -- magic(4) + version(4) + alias_offset(4) + diag_offset(4) + hash(32)
+    --   + str_off(4) + type_off(4) + field_off(4) + list_off(4) + export_off(4)
+    -- = 4+4+4+4+32+5*4 = 68 bytes
+    -- v1 layout was 64 bytes (magic+version+flags+hash+5*offsets) and used the
+    -- "flags" field as alias_offset. v2 separates alias_offset and adds
+    -- diag_offset. Old v1 .cri files are rejected by the reader (version != 2)
+    -- and trigger a full re-check.
+    -- -----------------------------------------------------------------------
+    local HEADER_SIZE = 68
     local str_offset    = HEADER_SIZE
     local type_offset   = str_offset   + #str_bytes
     local field_offset  = type_offset  + #type_bytes
     local list_offset   = field_offset + #field_bytes
     local export_offset = list_offset  + #list_bytes
     local alias_offset  = export_offset + #export_bytes
-    local flags_val = #type_aliases > 0 and alias_offset or 0
+    local diag_offset_section = alias_offset + #alias_bytes
+    local alias_off_val = #type_aliases > 0 and alias_offset or 0
+    local diag_off_val  = #diag_bytes > 0 and diag_offset_section or 0
 
     local header = "CRIF"
-        .. u32be(1)                    -- version
-        .. u32be(flags_val)            -- flags: alias section offset (0 = none)
+        .. u32be(2)                    -- version
+        .. u32be(alias_off_val)        -- alias section offset (0 = none)
+        .. u32be(diag_off_val)         -- diagnostics section offset (0 = none)
         .. string.rep("\0", 32)        -- hash (zeroed)
         .. u32be(str_offset)
         .. u32be(type_offset)
         .. u32be(field_offset)
         .. u32be(list_offset)
         .. u32be(export_offset)
-    -- 4+4+4+32+4+4+4+4+4 = 64 ✓
-    assert(#header == 64)
+    -- 4+4+4+4+32+5*4 = 68 ✓
+    assert(#header == 68)
 
     -- Assemble
-    local body = header .. str_bytes .. type_bytes .. field_bytes .. list_bytes .. export_bytes .. alias_bytes
+    local body = header .. str_bytes .. type_bytes .. field_bytes .. list_bytes .. export_bytes .. alias_bytes .. diag_bytes
 
     -- Compute SHA-256 with hash field zeroed (it is), fill into offset 12.
     local hex = sha256.hash(body)
@@ -735,9 +812,9 @@ function M.serialize(ctx, exports, type_aliases)
     end
     raw_hash = table.concat(raw_hash)  -- 32 bytes
 
-    -- Patch: bytes 1-12 | 32-byte hash | remaining
-    -- Header: "CRIF"(4) + version(4) + flags(4) = 12 bytes before hash
-    return body:sub(1, 12) .. raw_hash .. body:sub(45)
+    -- Patch: bytes 1-16 | 32-byte hash | remaining
+    -- Header: "CRIF"(4) + version(4) + alias_off(4) + diag_off(4) = 16 bytes before hash
+    return body:sub(1, 16) .. raw_hash .. body:sub(49)
 end
 
 return M

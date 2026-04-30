@@ -83,11 +83,11 @@ local function write_manifest_disk(t, path)
     return true
 end
 
--- Extract the content hash from .cri bytes (the 32-byte hash at offset 12).
+-- Extract the content hash from .cri bytes (the 32-byte hash at offset 16, v2).
 -- Returns a 64-character lowercase hex string.
 local function cri_content_hash(bytes)
     local hex = {}
-    for i = 13, 44 do
+    for i = 17, 48 do
         hex[#hex + 1] = string.format("%02x", bytes:byte(i))
     end
     return table.concat(hex)
@@ -106,7 +106,7 @@ function M.lookup(src_hash)
     local bytes = f:read("*a")
     f:close()
 
-    if not bytes or #bytes < 64 then return nil end
+    if not bytes or #bytes < 68 then return nil end
     return bytes
 end
 

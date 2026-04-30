@@ -71,38 +71,91 @@ end
 -- SHA-256 verification
 -- ---------------------------------------------------------------------------
 local function verify_hash(bytes)
-    local zeroed = bytes:sub(1, 12) .. string.rep("\0", 32) .. bytes:sub(45)
+    -- v2: hash is at bytes 17-48 (after magic + version + alias_off + diag_off).
+    local zeroed = bytes:sub(1, 16) .. string.rep("\0", 32) .. bytes:sub(49)
     local computed = sha256.hash(zeroed)
     local stored = {}
-    for i = 13, 44 do
+    for i = 17, 48 do
         stored[#stored + 1] = string.format("%02x", bytes:byte(i))
     end
     return computed == table.concat(stored)
 end
 
 -- ---------------------------------------------------------------------------
+-- Diagnostics deserialization (Section 7, v2+)
+-- ---------------------------------------------------------------------------
+-- Returns errors[], warnings[], end_pos.
+local function read_diagnostics(bytes, pos)
+    local errors, warnings = {}, {}
+    local total = r_u32be(bytes, pos)
+    pos = pos + 4
+    for _ = 1, total do
+        local kind = r_u8(bytes, pos)
+        pos = pos + 4  -- kind(1) + pad(3)
+        local line = r_i32be(bytes, pos);     pos = pos + 4
+        local col  = r_i32be(bytes, pos);     pos = pos + 4
+        local fn_len = r_u32be(bytes, pos);   pos = pos + 4
+        local filename = bytes:sub(pos + 1, pos + fn_len)
+        pos = pos + fn_len
+        local m_len = r_u32be(bytes, pos);    pos = pos + 4
+        local msg = bytes:sub(pos + 1, pos + m_len)
+        pos = pos + m_len
+        local note_count = r_u32be(bytes, pos); pos = pos + 4
+        local notes = {}
+        for _ = 1, note_count do
+            local nl = r_i32be(bytes, pos); pos = pos + 4
+            local nc = r_i32be(bytes, pos); pos = pos + 4
+            local nfl = r_u32be(bytes, pos); pos = pos + 4
+            local nf = bytes:sub(pos + 1, pos + nfl)
+            pos = pos + nfl
+            local nml = r_u32be(bytes, pos); pos = pos + 4
+            local nm = bytes:sub(pos + 1, pos + nml)
+            pos = pos + nml
+            notes[#notes + 1] = {
+                filename = nf, line = nl, col = nc, msg = nm,
+            }
+        end
+        local entry = {
+            kind = kind == 1 and "warning" or "error",
+            filename = filename, line = line, col = col, msg = msg,
+            notes = notes,
+        }
+        if kind == 1 then
+            warnings[#warnings + 1] = entry
+        else
+            errors[#errors + 1] = entry
+        end
+    end
+    return errors, warnings, pos
+end
+
+-- ---------------------------------------------------------------------------
 -- load(bytes, ctx) → ok, exports_or_error
 -- ---------------------------------------------------------------------------
 function M.load(bytes, ctx)
-    if #bytes < 64 then
+    if #bytes < 68 then
         return false, "truncated .cri file"
     end
     if bytes:sub(1, 4) ~= "CRIF" then
         return false, "invalid .cri magic"
     end
     local version = r_u32be(bytes, 4)
-    if version ~= 1 then
+    if version ~= 2 then
         return false, "unsupported .cri version " .. version
     end
     if not verify_hash(bytes) then
         return false, "SHA-256 mismatch: .cri file is corrupted"
     end
 
-    local str_offset    = r_u32be(bytes, 44)
-    local type_offset   = r_u32be(bytes, 48)
-    local field_offset  = r_u32be(bytes, 52)
-    local list_offset   = r_u32be(bytes, 56)
-    local export_offset = r_u32be(bytes, 60)
+    -- v2 header layout:
+    --   magic(0..3) version(4..7) alias_off(8..11) diag_off(12..15)
+    --   hash(16..47) str_off(48..51) type_off(52..55) field_off(56..59)
+    --   list_off(60..63) export_off(64..67)
+    local str_offset    = r_u32be(bytes, 48)
+    local type_offset   = r_u32be(bytes, 52)
+    local field_offset  = r_u32be(bytes, 56)
+    local list_offset   = r_u32be(bytes, 60)
+    local export_offset = r_u32be(bytes, 64)
 
     -- -----------------------------------------------------------------------
     -- String table → session name_id remap
@@ -342,7 +395,7 @@ function M.load(bytes, ctx)
     -- Present when header flags field is non-zero (byte offset of section).
     -- -----------------------------------------------------------------------
     local aliases = {}
-    local alias_offset = r_u32be(bytes, 8)  -- flags field
+    local alias_offset = r_u32be(bytes, 8)  -- v2 alias_offset field
     if alias_offset > 0 and alias_offset < #bytes then
         local alias_count = r_u32be(bytes, alias_offset)
         local pos = alias_offset + 4
@@ -390,7 +443,16 @@ function M.load(bytes, ctx)
         end
     end
 
-    return true, exports, aliases
+    -- -----------------------------------------------------------------------
+    -- Diagnostics (Section 7, v2+, optional). Present iff diag_off > 0.
+    -- -----------------------------------------------------------------------
+    local diag_errors, diag_warnings = nil, nil
+    local diag_offset = r_u32be(bytes, 12)
+    if diag_offset > 0 and diag_offset < #bytes then
+        diag_errors, diag_warnings = read_diagnostics(bytes, diag_offset)
+    end
+
+    return true, exports, aliases, diag_errors, diag_warnings
 end
 
 return M

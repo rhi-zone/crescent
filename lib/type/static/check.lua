@@ -278,9 +278,37 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         if cached_bytes then
             err_ctx = errors_mod.new_ctx()
             err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
-            local ok, exports = cri_read.load(cached_bytes, ctx)
+            local ok, exports, _aliases, cached_errors, cached_warnings =
+                cri_read.load(cached_bytes, ctx)
             if ok and exports["__ret"] then
                 local export_tid = exports["__ret"]
+                -- Restore diagnostics from cache so callers see errors/warnings
+                -- without re-running the solver. cached_errors/warnings are nil
+                -- for files that produced no diagnostics (the writer omits the
+                -- section in that case).
+                if cached_errors then
+                    for _, e in ipairs(cached_errors) do
+                        err_ctx.errors[#err_ctx.errors + 1] = e
+                    end
+                end
+                if cached_warnings then
+                    for _, w in ipairs(cached_warnings) do
+                        err_ctx.warnings[#err_ctx.warnings + 1] = w
+                    end
+                end
+                -- Populate source_lines so formatters can render caret context.
+                -- Read once per file; cheap relative to a full check.
+                if cached_errors and #cached_errors > 0 or
+                   cached_warnings and #cached_warnings > 0 then
+                    local src_f = io.open(filename, "r")
+                    if src_f then
+                        local src_text = src_f:read("*a")
+                        src_f:close()
+                        if src_text then
+                            errors_mod.set_source(err_ctx, filename, src_text)
+                        end
+                    end
+                end
                 _checking[filename] = nil
                 _session[filename] = {
                     err_ctx = err_ctx, ctx = ctx,
@@ -288,7 +316,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
                 }
                 return err_ctx, ctx
             end
-            -- Cache load failed: fall through to full check.
+            -- Cache load failed (e.g. v1 .cri or hash mismatch): fall through.
         end
     end
 
@@ -320,10 +348,17 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- pcall second return is unknown; `any` is required so the value can be stored and
     -- passed to cache_mod.store (which expects string) without a static type error.
     local cri_bytes_stored = nil --: any
-    if ctx and export_tid and export_tid ~= ctx.T_ANY then
+    -- Serialize even when export_tid is T_ANY: diagnostics still need to be
+    -- cached so warm cache hits skip the solver. The reader maps T_ANY back to
+    -- ctx.T_ANY via the singleton table.
+    if ctx and export_tid then
         local exp_map = { ["__ret"] = export_tid }
         local alias_list = ctx and extract_type_aliases(ctx) or {}
-        local ok_ser, cri_bytes = pcall(cri_write.serialize, ctx, exp_map, alias_list)
+        -- Pass diagnostics (errors + warnings) so cache hits can restore them
+        -- without re-running the solver. The writer omits the section when
+        -- both lists are empty.
+        local diags = { errors = err_ctx.errors, warnings = err_ctx.warnings }
+        local ok_ser, cri_bytes = pcall(cri_write.serialize, ctx, exp_map, alias_list, diags)
         if ok_ser then
             cri_bytes_stored = cri_bytes
             if src_hash then

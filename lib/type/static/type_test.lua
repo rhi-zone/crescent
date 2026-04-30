@@ -2904,21 +2904,21 @@ assert.describe("cri: round-trip", function()
         local ctx = make_ctx("")
         local bytes = cri_write.serialize(ctx, {})
         assert.eq(bytes:sub(1, 4), "CRIF")
-        -- version = 1 in big-endian u32
+        -- version = 2 in big-endian u32 (v2 added diag_offset and explicit alias_offset)
         assert.eq(bytes:byte(5), 0)
         assert.eq(bytes:byte(6), 0)
         assert.eq(bytes:byte(7), 0)
-        assert.eq(bytes:byte(8), 1)
+        assert.eq(bytes:byte(8), 2)
     end)
 
     assert.it("SHA-256 hash is valid", function()
         local ctx = make_ctx("")
         local bytes = cri_write.serialize(ctx, {})
-        -- Zero out hash field, recompute, compare
-        local zeroed = bytes:sub(1, 12) .. string.rep("\0", 32) .. bytes:sub(45)
+        -- v2: hash is at bytes 17-48 (after magic + version + alias_off + diag_off).
+        local zeroed = bytes:sub(1, 16) .. string.rep("\0", 32) .. bytes:sub(49)
         local expected = sha256_mod.hash(zeroed)
         local stored = {}
-        for i = 13, 44 do stored[#stored + 1] = string.format("%02x", bytes:byte(i)) end
+        for i = 17, 48 do stored[#stored + 1] = string.format("%02x", bytes:byte(i)) end
         assert.eq(table.concat(stored), expected)
     end)
 
