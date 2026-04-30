@@ -140,6 +140,12 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Run the typechecker on files you write or modify.** `bin/cr check <file>...` — do this before committing. See `lib/type/static/CLAUDE.md` for annotation syntax and type system rules.
 
+**Always run typecheck under a timeout.** Single file: `timeout 30 bin/cr check <file>`. Repo-wide: `timeout 120 bin/cr check ...`. A typecheck that exceeds these limits is hanging, not slow — there is a soundness or termination bug somewhere (occurs-check, union-find self-loop, exponential expansion). When this happens, **stop other work immediately**. Two options for subagents:
+1. **Hand back to the orchestrator** — return a minimal report ("typecheck hung on <file>; aborting to keep context clean") so a fresh subagent can investigate without your accumulated context.
+2. **Investigate inline only if the current task is itself typechecker work** — i.e. you were already in `lib/type/static/` and have the relevant context. Otherwise option 1.
+
+Never silently work around a hang (skip the file, longer timeout, batch differently). The hang is the signal; suppressing it poisons every future session that encounters the same code path.
+
 **Minimize file churn.** When editing a file, read it once, plan all changes, and apply them in one pass.
 
 **`normalize view` is available** for structural outlines of files and directories:
