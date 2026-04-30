@@ -366,7 +366,7 @@ function M.minimize(dfa)
 
   local states_list = {}
   for s in pairs(reachable) do states_list[#states_list+1] = s end
-  table.sort(states_list)
+  table.sort(--[[:! { [integer]: integer }]] states_list)
 
   if #states_list == 0 then return M.dfa_new() end
 

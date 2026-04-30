@@ -106,7 +106,7 @@ function Counter:_render(out)
   -- collect keys for stable ordering
   local keys = {}
   for k in pairs(self._values) do keys[#keys + 1] = k end
-  table.sort(keys)
+  table.sort(--[[:! { [integer]: string }]] keys)
   for _, k in ipairs(keys) do
     -- k is already "label=value,..." form; reconstruct label str with braces
     local ls = k == "" and "" or "{" .. k .. "}"
@@ -163,7 +163,7 @@ function Gauge:_render(out)
   out[#out + 1] = "# TYPE " .. self._name .. " gauge"
   local keys = {}
   for k in pairs(self._values) do keys[#keys + 1] = k end
-  table.sort(keys)
+  table.sort(--[[:! { [integer]: string }]] keys)
   for _, k in ipairs(keys) do
     local ls = k == "" and "" or "{" .. k .. "}"
     out[#out + 1] = self._name .. ls .. " " .. fmt_num(self._values[k])
@@ -254,7 +254,7 @@ function Histogram:_render(out)
   out[#out + 1] = "# TYPE " .. self._name .. " histogram"
   local keys = {}
   for k in pairs(self._data) do keys[#keys + 1] = k end
-  table.sort(keys)
+  table.sort(--[[:! { [integer]: string }]] keys)
   for _, k in ipairs(keys) do
     local d = self._data[k]
     -- reconstruct label table for label_str; k is already sorted pairs
@@ -324,7 +324,7 @@ function Summary:_render(out)
   out[#out + 1] = "# TYPE " .. self._name .. " summary"
   local keys = {}
   for k in pairs(self._data) do keys[#keys + 1] = k end
-  table.sort(keys)
+  table.sort(--[[:! { [integer]: string }]] keys)
   for _, k in ipairs(keys) do
     local d = self._data[k]
     local ls = k == "" and "" or "{" .. k .. "}"

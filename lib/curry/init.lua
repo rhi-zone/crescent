@@ -45,7 +45,7 @@ function M.partial(fn, ...)
     for i = 1, nbound do args[i] = bound[i] end
     local extra = select("#", ...)
     for i = 1, extra do args[nbound + i] = select(i, ...) end
-    return fn(unpack(args, 1, nbound + extra))
+    return fn(unpack(--[[:! { [integer]: any }]] args, 1, nbound + extra))
   end
 end
 

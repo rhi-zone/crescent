@@ -96,7 +96,7 @@ function M.parse(source, filename, pool)
                 has_vararg = true
                 L:next()
             else
-                lists:push(L.val)
+                lists:push(--[[:! integer]] L.val)
                 L:expect(defs.TK_NAME)
                 while L:opt(defs.TK_COMMA) do
                     if L.tk == defs.TK_DOTS then
@@ -104,7 +104,7 @@ function M.parse(source, filename, pool)
                         L:next()
                         break
                     end
-                    lists:push(L.val)
+                    lists:push(--[[:! integer]] L.val)
                     L:expect(defs.TK_NAME)
                 end
             end
@@ -536,9 +536,9 @@ function M.parse(source, filename, pool)
             -- Generic for: for name1, name2, ... in exprlist do ... end
             -- Names are intern IDs — safe for direct push
             local nm = lists:mark()
-            lists:push(name_id)
+            lists:push(--[[:! integer]] name_id)
             while L:opt(defs.TK_COMMA) do
-                lists:push(L.val)
+                lists:push(--[[:! integer]] L.val)
                 L:expect(defs.TK_NAME)
             end
             local ns, nl = lists:since(nm)
@@ -615,10 +615,10 @@ function M.parse(source, filename, pool)
         -- local name1, name2, ... [= expr1, expr2, ...]
         -- Names are intern IDs — safe for direct push
         local nm = lists:mark()
-        lists:push(L.val)
+        lists:push(--[[:! integer]] L.val)
         L:expect(defs.TK_NAME)
         while L:opt(defs.TK_COMMA) do
-            lists:push(L.val)
+            lists:push(--[[:! integer]] L.val)
             L:expect(defs.TK_NAME)
         end
         local ns, nl = lists:since(nm)

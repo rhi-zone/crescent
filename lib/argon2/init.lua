@@ -313,7 +313,7 @@ end
 local function b2compress(h, m, t_lo, t_hi, f)
   local v = {}
   for i = 1, 8 do v[i] = {h[i][1], h[i][2]} end
-  for i = 1, 8 do v[8+i] = {B2IV[i][1], B2IV[i][2]} end
+  for i = 1, 8 do v[8+i] = --[[: any]] {B2IV[i][1], B2IV[i][2]} end
   v[13][1] = bxor(v[13][1], t_hi)
   v[13][2] = bxor(v[13][2], t_lo)
   if f then
