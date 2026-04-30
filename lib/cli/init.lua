@@ -204,7 +204,7 @@ end
 
 -- ── Parse argv against a spec ─────────────────────────────────────────────
 
---: ({ [string]: unknown }, string[], (string | nil)) -> ((table | nil), (string | nil))
+--: ({ [string]: unknown }, string[], (string | nil)) -> (({ [string]: unknown } | nil), (string | nil))
 local function parse_spec(spec, argv, program_name)
 	local args = {}
 	local pos_index = 1
@@ -454,7 +454,7 @@ end
 
 -- Parse argv against a declarative spec.
 -- Returns (args_table, nil) on success, (nil, errmsg_or_help) on failure/help/version.
---: (string[], { [string]: unknown }) -> ((table | nil), (string | nil))
+--: (string[], { [string]: unknown }) -> (({ [string]: unknown } | nil), (string | nil))
 function M.parse(argv, spec)
 	spec = spec or {}
 	normalize(spec)

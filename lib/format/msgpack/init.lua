@@ -289,7 +289,7 @@ encode = function(v)
   end
 end
 
---: (nil | boolean | number | string | table) -> string
+--: (nil | boolean | number | string | { [unknown]: unknown }) -> string
 M.encode = encode
 
 ----------------------------------------------------------------

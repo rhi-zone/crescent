@@ -226,7 +226,7 @@ function M.index(opts)
   local idx = {}
 
   -- Add a document
-  --: (id: any, text: string, opts: ({ fields: (table | nil) } | nil)) -> index
+  --: (id: any, text: string, opts: ({ fields: ({ [string]: unknown } | nil) } | nil)) -> index
   function idx:add(id, text, add_opts)
     if docs[id] then
       return self:update(id, text)

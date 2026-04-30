@@ -108,7 +108,7 @@ end
 
 -- ── Corpus ──────────────────────────────────────────────────────────────
 
---: { docs: { [string]: { text: string, tf: { [string]: number } } }, df: { [string]: number }, doc_n: number, idf_cache: ({ [string]: number } | nil), opts: (table | nil) }
+--: { docs: { [string]: { text: string, tf: { [string]: number } } }, df: { [string]: number }, doc_n: number, idf_cache: ({ [string]: number } | nil), opts: ({ tokenize: ((string) -> string[]) | nil, stopwords: { [string]: boolean } } | nil) }
 local Corpus = {}
 Corpus.__index = Corpus
 

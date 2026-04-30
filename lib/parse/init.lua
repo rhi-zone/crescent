@@ -130,7 +130,7 @@ end
 
 -- ── Combinators ─────────────────────────────────────────────────────────
 
---: (...parser) -> ((input: string, pos: integer) -> (table, integer) | (nil, integer, string))
+--: (...parser) -> ((input: string, pos: integer) -> ({ unknown }, integer) | (nil, integer, string))
 function M.seq(...)
   local parsers = { ... }
   local n = #parsers
@@ -169,7 +169,7 @@ function M.alt(...)
   end
 end
 
---: (p: parser) -> (input: string, pos: integer) -> (table, integer)
+--: (p: parser) -> (input: string, pos: integer) -> ({ unknown }, integer)
 function M.many(p)
   return function(input, pos)
     local results = {}
@@ -186,7 +186,7 @@ function M.many(p)
   end
 end
 
---: (p: parser) -> (input: string, pos: integer) -> (table, integer) | (nil, integer, string)
+--: (p: parser) -> (input: string, pos: integer) -> ({ unknown }, integer) | (nil, integer, string)
 function M.many1(p)
   local many_p = M.many(p)
   return function(input, pos)
@@ -210,7 +210,7 @@ function M.optional(p)
   end
 end
 
---: (p: parser, n: integer) -> (input: string, pos: integer) -> (table, integer) | (nil, integer, string)
+--: (p: parser, n: integer) -> (input: string, pos: integer) -> ({ unknown }, integer) | (nil, integer, string)
 function M.count(p, n)
   return function(input, pos)
     local results = {}
@@ -226,7 +226,7 @@ function M.count(p, n)
   end
 end
 
---: (p: parser, sep: parser) -> (input: string, pos: integer) -> (table, integer)
+--: (p: parser, sep: parser) -> (input: string, pos: integer) -> ({ unknown }, integer)
 function M.sep_by(p, sep)
   return function(input, pos)
     local r, npos, err = p(input, pos)
@@ -249,7 +249,7 @@ function M.sep_by(p, sep)
   end
 end
 
---: (p: parser, sep: parser) -> (input: string, pos: integer) -> (table, integer) | (nil, integer, string)
+--: (p: parser, sep: parser) -> (input: string, pos: integer) -> ({ unknown }, integer) | (nil, integer, string)
 function M.sep_by1(p, sep)
   local sb = M.sep_by(p, sep)
   return function(input, pos)

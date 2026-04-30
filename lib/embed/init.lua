@@ -5,6 +5,11 @@ local vec = require("lib.vec")
 local M = {}
 
 --:: Vec = { data: unknown, n: integer }
+--:: Metadata = { [string]: unknown }
+--:: Entry = { id: string, vector: Vec, metadata: (Metadata | nil) }
+--:: SearchResult = { id: string, score: number, metadata: (Metadata | nil) }
+--:: SerializedItem = { id: string, vector: { number }, metadata: (Metadata | nil) }
+--:: Serialized = { dims: integer, metric: string, items: { SerializedItem } }
 --:: Index = { _dims: integer, _metric: string, _entries: { [string]: unknown }, _ids: { [integer]: string }, _id_set: { [string]: integer } }
 
 local idx_mt = {}
@@ -29,7 +34,7 @@ function M.index(opts)
   }, idx_mt)
 end
 
---: (self: Index, id: string, vector: Vec, metadata: (table | nil)) -> (true) | (nil, string)
+--: (self: Index, id: string, vector: Vec, metadata: (Metadata | nil)) -> (true) | (nil, string)
 function idx_mt:add(id, vector, metadata)
   if vec.len(vector) ~= self._dims then
     return nil, "vector dimension mismatch: expected " .. self._dims .. ", got " .. vec.len(vector)
@@ -47,7 +52,7 @@ function idx_mt:add(id, vector, metadata)
   return true
 end
 
---: (self: Index, items: { { id: string, vector: Vec, metadata: (table | nil) } }) -> (true) | (nil, string)
+--: (self: Index, items: { Entry }) -> (true) | (nil, string)
 function idx_mt:add_batch(items)
   for i = 1, #items do
     local item = items[i]
@@ -59,7 +64,7 @@ function idx_mt:add_batch(items)
   return true
 end
 
---: (self: Index, query: Vec, k: number, opts: ({ filter: (((meta: (table | nil)) -> boolean) | nil) } | nil)) -> { { id: string, score: number, metadata: (table | nil) } } | (nil, string)
+--: (self: Index, query: Vec, k: number, opts: ({ filter: (((meta: (Metadata | nil)) -> boolean) | nil) } | nil)) -> { SearchResult } | (nil, string)
 function idx_mt:search(query, k, opts)
   if vec.len(query) ~= self._dims then
     return nil, "query dimension mismatch: expected " .. self._dims .. ", got " .. vec.len(query)
@@ -102,7 +107,7 @@ function idx_mt:search(query, k, opts)
   return results
 end
 
---: (self: Index, id: string) -> ({ id: string, vector: Vec, metadata: (table | nil) } | nil)
+--: (self: Index, id: string) -> (Entry | nil)
 function idx_mt:get(id)
   local entry = self._entries[id]
   if not entry then return nil end
@@ -141,7 +146,7 @@ function idx_mt:ids()
   return result
 end
 
---: (self: Index) -> table
+--: (self: Index) -> Serialized
 function idx_mt:serialize()
   local items = {}
   local ids = self._ids
@@ -160,7 +165,7 @@ function idx_mt:serialize()
   }
 end
 
---: (data: table) -> Index | (nil, string)
+--: (data: Serialized) -> Index | (nil, string)
 function M.deserialize(data)
   if not data.dims then return nil, "missing dims" end
   local idx, err = M.index({ dims = data.dims, metric = data.metric or "cosine" })

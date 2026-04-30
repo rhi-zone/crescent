@@ -9,7 +9,9 @@ local NODE_STATIC = 1
 local NODE_PARAM = 2
 local NODE_WILDCARD = 3
 
---: () -> { segment: string, kind: number, children: table, handlers: { [string]: unknown }, param_name: string | nil }
+--:: Node = { segment: string, kind: number, children: { Node }, handlers: { [string]: unknown }, param_name: string | nil, prefix: string | nil }
+
+--: (segment: string | nil, kind: number | nil, param_name: string | nil) -> Node
 local function new_node(segment, kind, param_name)
 	return {
 		segment = segment or "",
@@ -49,7 +51,7 @@ local function parse_segments(path)
 end
 
 --- Find or create a child node matching the given segment.
---: (node: table, seg_text: string, kind: number, param_name: string | nil, prefix: string | nil) -> table
+--: (node: Node, seg_text: string, kind: number, param_name: string | nil, prefix: string | nil) -> Node
 local function find_or_create_child(node, seg_text, kind, param_name, prefix)
 	local children = node.children
 	for i = 1, #children do
@@ -64,7 +66,9 @@ local function find_or_create_child(node, seg_text, kind, param_name, prefix)
 	return child
 end
 
---:: Router = { root: table, add: (self: Router, method: string, path: string, handler: unknown) -> (true | nil, string | nil), find: (self: Router, method: string, path: string) -> { handler: unknown, params: { [string]: string } } | nil, routes: (self: Router) -> { { method: string, path: string, handler: unknown } }, group: (self: Router, prefix: string, fn: (g: table) -> nil) -> nil, get: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil), post: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil), put: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil), delete: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil), patch: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil), head: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil), options: (self: Router, path: string, handler: unknown) -> (true | nil, string | nil) }
+--:: MethodFn = (self: Router, path: string, handler: unknown) -> (true | nil, string | nil)
+--:: Group = { add: (self: Group, method: string, path: string, handler: unknown) -> (true | nil, string | nil), get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn, group: (self: Group, prefix: string, fn: (g: Group) -> nil) -> nil }
+--:: Router = { root: Node, add: (self: Router, method: string, path: string, handler: unknown) -> (true | nil, string | nil), find: (self: Router, method: string, path: string) -> { handler: unknown, params: { [string]: string } } | nil, routes: (self: Router) -> { { method: string, path: string, handler: unknown } }, group: (self: Router, prefix: string, fn: (g: Group) -> nil) -> nil, get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn }
 
 local Router = {}
 Router.__index = Router
@@ -234,7 +238,7 @@ function Router:routes()
 end
 
 --- Group routes under a common prefix.
---: (prefix: string, fn: (g: table) -> nil) -> nil
+--: (prefix: string, fn: (g: Group) -> nil) -> nil
 function Router:group(prefix, fn)
 	local router_self = self
 	local g = {}

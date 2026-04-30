@@ -37,7 +37,7 @@ mod.struct_exact = function(shape) return { type = "struct_exact", shape = shape
 --: <T>(Schema<T>) -> Schema<T[]>
 mod.array = function(item) return { type = "array", item = item } end
 
---: <K, V>(Schema<K>, Schema<V>) -> Schema<table<K, V>>
+--: <K, V>(Schema<K>, Schema<V>) -> Schema<{ [K]: V }>
 mod.dictionary = function(key, value) return { type = "dictionary", key = key, value = value } end
 
 --: <T>(Schema<T>) -> Schema<T | nil>

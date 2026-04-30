@@ -6,7 +6,8 @@ local M = {}
 
 --:: Var = { __var: true, id: integer, name: string | nil }
 --:: Pair = { __pair: true, car: unknown, cdr: unknown }
---:: Goal = (table) -> unknown
+--:: Sub = { [integer]: unknown }
+--:: Goal = (Sub) -> unknown
 
 -- Variable counter for unique ids
 local _next_id = 0
@@ -53,7 +54,7 @@ function M.list(...)
 end
 
 -- Walk: resolve a variable through substitution chain
---: (v: unknown, sub: table) -> unknown
+--: (v: unknown, sub: Sub) -> unknown
 local function walk(v, sub)
   while M.is_var(v) and sub[v.id] ~= nil do
     v = sub[v.id]
@@ -73,7 +74,7 @@ end
 M.walk_deep = walk_deep
 
 -- Unify: returns extended substitution or nil
---: (u: unknown, v: unknown, sub: table) -> table | nil
+--: (u: unknown, v: unknown, sub: Sub) -> Sub | nil
 local function unify(u, v, sub)
   u = walk(u, sub)
   v = walk(v, sub)
@@ -240,14 +241,14 @@ function M.conde(...)
 end
 
 -- run: execute a goal, collect up to n results
---: (goal: Goal, n: (number | nil)) -> {table}
+--: (goal: Goal, n: (number | nil)) -> { Sub }
 function M.run(goal, n)
   local stream = goal({})
   return take(n, stream)
 end
 
 -- run_fresh: create fresh variables, run, extract named bindings
---: (n: (number | nil), fn: (...Var) -> Goal) -> {table}
+--: (n: (number | nil), fn: (...Var) -> Goal) -> { { [string]: unknown } }
 function M.run_fresh(n, fn)
   local info = debug.getinfo(fn, "u")
   local nparams = info.nparams

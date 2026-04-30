@@ -581,7 +581,7 @@ local function extract_text(children)
 end
 
 -- Walk a hast tree and apply highlighting to <pre><code> blocks.
---: (any, string, table) -> any
+--: (any, string, { [string]: string }) -> any
 local function walk(node, prefix, aliases)
   if not node then return node end
 
