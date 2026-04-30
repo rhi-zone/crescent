@@ -50,16 +50,16 @@ assert.describe("recursive types: singly-linked list", function()
     assert.it("PASS: List<T> declaration accepted", function()
         no_error([[
 --:: List<T> = { head: T, tail: List<T> | nil }
-local x --: List<number>
-x = { head = 1, tail = nil }
+--: List<number>
+local x = { head = 1, tail = nil }
 ]])
     end)
 
     assert.it("PASS: nested cons cell accepted", function()
         no_error([[
 --:: List<T> = { head: T, tail: List<T> | nil }
-local x --: List<number>
-x = { head = 1, tail = { head = 2, tail = nil } }
+--: List<number>
+local x = { head = 1, tail = { head = 2, tail = nil } }
 ]])
     end)
 
@@ -100,10 +100,10 @@ assert.describe("recursive types: binary tree", function()
     assert.it("PASS: Tree<T> leaf and branch accepted", function()
         no_error([[
 --:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
-local leaf --: Tree<number>
-leaf = { value = 1, left = nil, right = nil }
-local branch --: Tree<number>
-branch = { value = 0, left = leaf, right = leaf }
+--: Tree<number>
+local leaf = { value = 1, left = nil, right = nil }
+--: Tree<number>
+local branch = { value = 0, left = leaf, right = leaf }
 ]])
     end)
 
@@ -119,8 +119,8 @@ f({ value = "nope", left = nil, right = nil })
     assert.it("PASS: Tree<string> independent of Tree<number>", function()
         no_error([[
 --:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
-local x --: Tree<string>
-x = { value = "hello", left = nil, right = nil }
+--: Tree<string>
+local x = { value = "hello", left = nil, right = nil }
 ]])
     end)
 end)
@@ -133,12 +133,12 @@ assert.describe("recursive types: mutual recursion with discriminants", function
         no_error([[
 --:: Even = { parity: "even", pred: Odd | nil }
 --:: Odd  = { parity: "odd",  pred: Even | nil }
-local zero --: Even
-zero = { parity = "even", pred = nil }
-local one --: Odd
-one = { parity = "odd", pred = zero }
-local two --: Even
-two = { parity = "even", pred = one }
+--: Even
+local zero = { parity = "even", pred = nil }
+--: Odd
+local one = { parity = "odd", pred = zero }
+--: Even
+local two = { parity = "even", pred = one }
 ]])
     end)
 
@@ -148,8 +148,8 @@ two = { parity = "even", pred = one }
 --:: Odd  = { parity: "odd",  pred: Even | nil }
 --: (Odd) -> nil
 local function f(o) return nil end
-local zero --: Even
-zero = { parity = "even", pred = nil }
+--: Even
+local zero = { parity = "even", pred = nil }
 f(zero)
 ]], "")
     end)
@@ -160,9 +160,9 @@ f(zero)
         no_error([[
 --:: Even = { pred: Odd | nil }
 --:: Odd  = { pred: Even | nil }
-local x --: Even
-local y --: Odd
-y = x
+--:: declare x = Even
+--: Odd
+local y = x
 ]])
     end)
 end)
@@ -174,7 +174,7 @@ assert.describe("recursive types: infinite alias cycle", function()
         -- We don't specify the exact resulting type — just that no crash occurs.
         no_error([[
 --:: Inf = Inf
-local x --: Inf
+--:: declare x = Inf
 ]])
     end)
 end)
@@ -199,29 +199,29 @@ assert.describe("HKT: wrong type parameter count", function()
     assert.it("ERROR: 1-param alias used with 0 args", function()
         has_error([[
 --:: Box<T> = { value: T }
-local x --: Box
+--:: declare x = Box
 ]], "expects 1 argument")
     end)
 
     assert.it("ERROR: 1-param alias used with 2 args", function()
         has_error([[
 --:: Box<T> = { value: T }
-local x --: Box<number, string>
+--:: declare x = Box<number, string>
 ]], "")
     end)
 
     assert.it("ERROR: 2-param alias used with 1 arg", function()
         has_error([[
 --:: Either<A, B> = { tag: "left", value: A } | { tag: "right", value: B }
-local x --: Either<number>
+--:: declare x = Either<number>
 ]], "")
     end)
 
     assert.it("PASS: 2-param alias with 2 args accepted", function()
         no_error([[
 --:: Either<A, B> = { tag: "left", value: A } | { tag: "right", value: B }
-local x --: Either<number, string>
-x = { tag = "left", value = 42 }
+--: Either<number, string>
+local x = { tag = "left", value = 42 }
 ]])
     end)
 
@@ -239,16 +239,16 @@ assert.describe("HKT: nested application", function()
     assert.it("PASS: Maybe<Maybe<T>> outer just, inner just", function()
         no_error([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: Maybe<Maybe<number>>
-x = { tag = "just", value = { tag = "just", value = 42 } }
+--: Maybe<Maybe<number>>
+local x = { tag = "just", value = { tag = "just", value = 42 } }
 ]])
     end)
 
     assert.it("PASS: Maybe<Maybe<T>> outer just, inner nothing", function()
         no_error([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: Maybe<Maybe<number>>
-x = { tag = "just", value = { tag = "nothing" } }
+--: Maybe<Maybe<number>>
+local x = { tag = "just", value = { tag = "nothing" } }
 ]])
     end)
 
@@ -265,8 +265,8 @@ f({ tag = "just", value = { tag = "just", value = "oops" } })
         no_error([[
 --:: Maybe<T>     = { tag: "just", value: T } | { tag: "nothing" }
 --:: Either<A, B> = { tag: "left", value: A } | { tag: "right", value: B }
-local x --: Either<Maybe<number>, string>
-x = { tag = "left",  value = { tag = "nothing" } }
+--: Either<Maybe<number>, string>
+local x = { tag = "left",  value = { tag = "nothing" } }
 x = { tag = "right", value = "hello" }
 ]])
     end)
@@ -296,8 +296,8 @@ assert.describe("HKT: two-parameter generics", function()
     assert.it("PASS: Pair<A, B> constructed and destructured", function()
         no_error([[
 --:: Pair<A, B> = { fst: A, snd: B }
-local p --: Pair<number, string>
-p = { fst = 1, snd = "hello" }
+--: Pair<number, string>
+local p = { fst = 1, snd = "hello" }
 local n = p.fst + 1
 local s = p.snd .. "!"
 ]])
@@ -325,8 +325,8 @@ end
     assert.it("PASS: StrMap<V> string-keyed (single-param map alias)", function()
         no_error([[
 --:: StrMap<V> = { [string]: V }
-local m --: StrMap<number>
-m = { x = 1, y = 2 }
+--: StrMap<number>
+local m = { x = 1, y = 2 }
 local v = m["x"] + 1
 ]])
     end)
@@ -375,8 +375,8 @@ local function fmap(f, ma)
     if ma.tag == "just" then return { tag = "just", value = f(ma.value) }
     else return { tag = "nothing" } end
 end
-local m1 --: Maybe<number>
-m1 = { tag = "just", value = 42 }
+--: Maybe<number>
+local m1 = { tag = "just", value = 42 }
 local m2 = fmap(function(n) return tostring(n) end, m1)
 local m3 = fmap(function(s) return #s > 0 end, m2)
 ]])
@@ -387,8 +387,8 @@ local m3 = fmap(function(s) return #s > 0 end, m2)
         no_error([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --:: Either<A, B> = { tag: "left", value: A } | { tag: "right", value: B }
-local e1 --: Either<Maybe<number>, string>
-e1 = { tag = "left",  value = { tag = "just",    value = 42 } }
+--: Either<Maybe<number>, string>
+local e1 = { tag = "left",  value = { tag = "just",    value = 42 } }
 e1 = { tag = "left",  value = { tag = "nothing" }              }
 e1 = { tag = "right", value = "error msg"                      }
 ]])
@@ -399,8 +399,8 @@ assert.describe("HKT: three-parameter generic", function()
     assert.it("PASS: Triple<A, B, C> with distinct field types", function()
         no_error([[
 --:: Triple<A, B, C> = { x: A, y: B, z: C }
-local t --: Triple<number, string, boolean>
-t = { x = 1, y = "hi", z = true }
+--: Triple<number, string, boolean>
+local t = { x = 1, y = "hi", z = true }
 local sum = t.x + 1
 local cat = t.y .. "!"
 local inv = not t.z
@@ -430,8 +430,8 @@ assert.describe("HKT: known gaps (document current limits)", function()
 local function fmap(f, fa) return fa end
 --: <F: T1, A>(F<A>) -> boolean
 local function is_something(fa) return true end
-local m --: Maybe<number>
-m = { tag = "just", value = 42 }
+--: Maybe<number>
+local m = { tag = "just", value = 42 }
 -- GAP: passing fmap result to is_something requires knowing F = Maybe, not inferable
 local _ = is_something(fmap(function(x) return x end, m))
 ]])
@@ -445,10 +445,10 @@ local _ = is_something(fmap(function(x) return x end, m))
     assert.it("GAP-VAR: generics are invariant — Maybe<number> not assignable to Maybe<number|string> (known gap)", function()
         local ec = v3([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: Maybe<number>
-x = { tag = "just", value = 42 }
-local y --: Maybe<number | string>
-y = x
+--: Maybe<number>
+local x = { tag = "just", value = 42 }
+--: Maybe<number | string>
+local y = x
 ]])
         -- Document: under structural typing this actually PASSES (structural equivalence
         -- holds since Maybe<number> expands to a subtype of Maybe<number|string>).
@@ -465,10 +465,10 @@ assert.describe("ADT: Maybe<T>", function()
     assert.it("PASS: just and nothing constructors", function()
         no_error([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local a --: Maybe<number>
-a = { tag = "just", value = 42 }
-local b --: Maybe<number>
-b = { tag = "nothing" }
+--: Maybe<number>
+local a = { tag = "just", value = 42 }
+--: Maybe<number>
+local b = { tag = "nothing" }
 ]])
     end)
 
@@ -519,8 +519,8 @@ assert.describe("ADT: Either<A, B>", function()
     assert.it("PASS: left and right accepted", function()
         no_error([[
 --:: Either<A, B> = { tag: "left", value: A } | { tag: "right", value: B }
-local x --: Either<string, number>
-x = { tag = "left",  value = "error msg" }
+--: Either<string, number>
+local x = { tag = "left",  value = "error msg" }
 x = { tag = "right", value = 42 }
 ]])
     end)
@@ -553,8 +553,8 @@ assert.describe("ADT: Result<T, E>", function()
     assert.it("PASS: ok and err constructors", function()
         no_error([[
 --:: Result<T, E> = { tag: "ok", value: T } | { tag: "err", error: E }
-local x --: Result<number, string>
-x = { tag = "ok",  value = 42 }
+--: Result<number, string>
+local x = { tag = "ok",  value = 42 }
 x = { tag = "err", error = "something went wrong" }
 ]])
     end)
@@ -578,8 +578,8 @@ assert.describe("ADT: recursive RoseTree<T>", function()
     assert.it("PASS: leaf with empty children", function()
         no_error([[
 --:: RoseTree<T> = { value: T, children: RoseTree<T>[] }
-local leaf --: RoseTree<number>
-leaf = { value = 1, children = {} }
+--: RoseTree<number>
+local leaf = { value = 1, children = {} }
 ]])
     end)
 
@@ -892,7 +892,8 @@ assert.describe("$EachField adversarial", function()
         no_error([[
 --:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T> = $EachField<T, MakeOpt>
-local x --: Partial<{ name: string, age: number }>
+--: Partial<{ name: string, age: number }>
+local x = { name = nil, age = nil }
 x = { name = "alice", age = 30 }
 x = { name = nil, age = nil }
 ]])
@@ -903,7 +904,8 @@ x = { name = nil, age = nil }
         no_error([[
 --:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T> = $EachField<T, MakeOpt>
-local x --: Partial<{ a: string | nil }>
+--: Partial<{ a: string | nil }>
+local x = { a = nil }
 x = { a = nil }
 x = { a = "hello" }
 ]])
@@ -917,8 +919,8 @@ x = { a = "hello" }
 --:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T>   = $EachField<T, MakeOpt>
 --:: BiPartial<T> = Partial<Partial<T>>
-local x --: BiPartial<{ a: string }>
-x = { a = nil }
+--: BiPartial<{ a: string }>
+local x = { a = nil }
 ]])
         -- Document current (wrong) behavior: produces never and errors.
         assert.ok(errors_mod.has_errors(ec), "known bug: nested alias produces never")
@@ -928,8 +930,8 @@ x = { a = nil }
         no_error([[
 --:: Id<F> = match F { { key: %K, value: %V } => { key: K, value: V } }
 --:: Same<T> = $EachField<T, Id>
-local x --: Same<{ name: string }>
-x = { name = "bob" }
+--: Same<{ name: string }>
+local x = { name = "bob" }
 ]])
     end)
 end)
@@ -975,8 +977,8 @@ f({ tag = "just", value = --[[:number]] 42 })
         -- Trailing --: T annotations still apply to variable bindings.
         no_error([[
 local x = 42 --: number
-local y --: number
-y = x
+--: number
+local y = x
 ]])
     end)
 
@@ -986,8 +988,8 @@ y = x
         no_error([[
 --: number
 local x = 42
-local y --: number
-y = x
+--: number
+local y = x
 ]])
     end)
 
@@ -1101,8 +1103,8 @@ assert.describe("force cast: --[[:! T]] requires overlap, not subtyping", functi
         no_error([==[
 --: (string) -> nil
 local function f(s) return nil end
-local x --: unknown
-x = "hello"
+--: unknown
+local x = "hello"
 f(--[[:! string]] x)
 ]==])
     end)
@@ -1114,8 +1116,8 @@ f(--[[:! string]] x)
         no_error([==[
 --: (string) -> nil
 local function f(s) return nil end
-local x --: string | integer
-x = "hello"
+--: string | integer
+local x = "hello"
 f(--[[:! string]] x)
 ]==])
     end)
@@ -1126,18 +1128,18 @@ f(--[[:! string]] x)
         has_error([==[
 --: (integer) -> nil
 local function f(n) return nil end
-local s --: string
-s = "hello"
+--: string
+local s = "hello"
 f(--[[:! integer]] s)
 ]==], "no overlap")
     end)
 
     assert.it("ERROR: number -> string (no overlap)", function()
         has_error([==[
-local n --: number
-n = 1
-local s --: string
-s = --[[:! string]] n
+--: number
+local n = 1
+--: string
+local s = --[[:! string]] n
 ]==], "no overlap")
     end)
 
@@ -1148,8 +1150,8 @@ s = --[[:! string]] n
         no_error([==[
 --: (string) -> string
 local function id(s) return s end
-local x --: string | integer
-x = "ok"
+--: string | integer
+local x = "ok"
 local y = id(--[[:! string]] x)
 ]==])
     end)
@@ -1159,8 +1161,8 @@ local y = id(--[[:! string]] x)
         -- The force form does not produce this warning (it's a different
         -- constraint), and that's fine — the user opted into a stricter check.
         no_error([==[
-local x --: string
-x = "hi"
+--: string
+local x = "hi"
 local y = --[[:! string]] x
 ]==])
     end)
@@ -1190,19 +1192,19 @@ local n = --[[: integer]] "hello"
         -- `unknown` overlaps with `integer`, so the force cast succeeds and
         -- the result has type `integer`.
         no_error([==[
-local x --: unknown
-x = 1
-local n --: integer
-n = x --[[:! integer]]
+--: unknown
+local x = 1
+--: integer
+local n = x --[[:! integer]]
 ]==])
     end)
 
     assert.it("ERROR: trailing --[[:! T]] still requires overlap", function()
         has_error([==[
-local s --: string
-s = "hi"
-local n --: integer
-n = s --[[:! integer]]
+--: string
+local s = "hi"
+--: integer
+local n = s --[[:! integer]]
 ]==], "no overlap")
     end)
 
@@ -1221,7 +1223,8 @@ assert.describe("complex: union of recursive types", function()
     assert.it("PASS: List<number> | List<string>", function()
         no_error([[
 --:: List<T> = { head: T, tail: List<T> | nil }
-local x --: List<number> | List<string>
+--: List<number> | List<string>
+local x = { head = 1, tail = nil }
 x = { head = 1, tail = nil }
 x = { head = "a", tail = nil }
 ]])
@@ -1231,7 +1234,8 @@ x = { head = "a", tail = nil }
         no_error([[
 --:: List<T>  = { head: T, tail: List<T> | nil }
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: Maybe<List<number>>
+--: Maybe<List<number>>
+local x = { tag = "nothing" }
 x = { tag = "just",    value = { head = 1, tail = nil } }
 x = { tag = "nothing" }
 ]])
@@ -1248,7 +1252,7 @@ assert.describe("match: indexer arm patterns", function()
     assert.it("PASS: extract value type from indexer via { [string]: V } => V", function()
         no_error([[
 --:: ValueOf<T> = match T { { [string]: %V } => V }
-local x --: ValueOf<{ [string]: integer }>
+--:: declare x = ValueOf<{ [string]: integer }>
 --: integer
 local y = x
 ]])
@@ -1258,7 +1262,7 @@ local y = x
         -- { ...[%K]: %V } iterates all fields and unions their value types
         no_error([[
 --:: Values<T> = match T { { ...[%K]: %V } => V }
-local x --: Values<{ [string]: integer }>
+--:: declare x = Values<{ [string]: integer }>
 --: integer
 local y = x
 ]])
@@ -1267,8 +1271,8 @@ local y = x
     assert.it("PASS: integer-indexed table extracts correct value type", function()
         no_error([[
 --:: ElementType<T> = match T { { [integer]: %V } => V }
-local arr --: { [integer]: number }
-local x --: ElementType<{ [integer]: number }>
+--:: declare arr = { [integer]: number }
+--:: declare x = ElementType<{ [integer]: number }>
 --: number
 local y = x
 ]])
@@ -1279,7 +1283,7 @@ local y = x
         -- The result is never (no arm matches).
         no_error([[
 --:: ValueOf<T> = match T { { [string]: %V } => V }
-local x --: ValueOf<{ name: string }>
+--:: declare x = ValueOf<{ name: string }>
 -- x has type never (no string-indexed indexer matched)
 ]])
     end)
@@ -1287,7 +1291,7 @@ local x --: ValueOf<{ name: string }>
     assert.it("PASS: combined field and indexer pattern", function()
         no_error([[
 --:: DescribeMap<T> = match T { { len: %L, [string]: %V } => { value: V, len: L } }
-local x --: DescribeMap<{ len: integer, [string]: number }>
+--:: declare x = DescribeMap<{ len: integer, [string]: number }>
 local v = x.value --: number
 local l = x.len --: integer
 ]])
@@ -1325,7 +1329,8 @@ f(ok)
 local ADT = require("lib.fp.adt")
 local Maybe = ADT.define({"Just", 1}, {"Nothing", 0})
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: Maybe<number>
+--: Maybe<number>
+local x = { tag = "nothing" }
 x = { tag = "just", value = 42 }
 x = { tag = "nothing" }
 ]])
@@ -1340,7 +1345,7 @@ assert.describe("match: function-type arm patterns", function()
     assert.it("PASS: ReturnType<F> extracts single return type", function()
         no_error([[
 --:: ReturnType<F> = match F { () -> R => R }
-local x --: ReturnType<(integer) -> string>
+--:: declare x = ReturnType<(integer) -> string>
 --: string
 local y = x
 ]])
@@ -1349,7 +1354,7 @@ local y = x
     assert.it("PASS: ReturnType<F> matches regardless of param count", function()
         no_error([[
 --:: ReturnType<F> = match F { () -> R => R }
-local x --: ReturnType<(integer, string, boolean) -> number>
+--:: declare x = ReturnType<(integer, string, boolean) -> number>
 --: number
 local y = x
 ]])
@@ -1358,7 +1363,7 @@ local y = x
     assert.it("PASS: ReturnType<F> multi-return binds tuple, truncates to first in single-slot", function()
         no_error([[
 --:: ReturnType<F> = match F { () -> R => R }
-local x --: ReturnType<(integer) -> (string, boolean)>
+--:: declare x = ReturnType<(integer) -> (string, boolean)>
 --: string
 local y = x
 ]])
@@ -1369,7 +1374,7 @@ local y = x
         -- ReturnType binds R to nil.
         no_error([[
 --:: ReturnType<F> = match F { () -> R => R }
-local x --: ReturnType<() -> ()>
+--:: declare x = ReturnType<() -> ()>
 --: nil
 local y = x
 ]])
@@ -1378,7 +1383,7 @@ local y = x
     assert.it("PASS: ReturnType<F> non-function gives never", function()
         no_error([[
 --:: ReturnType<F> = match F { () -> R => R }
-local x --: ReturnType<integer>
+--:: declare x = ReturnType<integer>
 --: never
 local y = x
 ]])
@@ -1388,7 +1393,7 @@ local y = x
         -- x has type (true, string) | (false, string)
         no_error([[
 --:: PcallReturn<F> = match F { () -> R => (true, R) | (false, string) }
-local x --: PcallReturn<(integer) -> string>
+--:: declare x = PcallReturn<(integer) -> string>
 -- Assign to union-of-tuples type — verifies shape is correct
 --: (true, string) | (false, string)
 local ok = x
@@ -1399,10 +1404,10 @@ local ok = x
         -- (integer) -> R only matches (integer)->something, not (string)->something
         no_error([[
 --:: IntReturnType<F> = match F { (integer) -> R => R, () -> R => never }
-local x1 --: IntReturnType<(integer) -> string>
+--:: declare x1 = IntReturnType<(integer) -> string>
 --: string
 local y1 = x1
-local x2 --: IntReturnType<(string) -> number>
+--:: declare x2 = IntReturnType<(string) -> number>
 --: never
 local y2 = x2
 ]])

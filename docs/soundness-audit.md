@@ -295,7 +295,30 @@ adding it would extend coverage to the unknown-specific case (Repro 4).
 
 ---
 
-## Gap 9 — `local x --: T` (no initializer) silently accepted
+## Gap 9 — `local x --: T` (no initializer) silently accepted — FIXED
+
+**Status:** Fixed. The rejection rule documented under "Expected behaviour"
+below is now in effect: `local x --: T` (no initializer) errors when
+`nil` is not a subtype of `T`. Regression tests live in
+`lib/type/static/type_soundness_test.lua` under `"Gap 9: annotated local
+without initializer requires nil ∈ T"`.
+
+**Resolution.** `constrain.lua` `StmtRule[NODE_LOCAL_STMT]` now checks, for
+the no-initializer + annotated case, whether `nil <: ann_tid` via
+`unify_mod.try_unify(ctx, ctx.T_NIL, ann_tid)`. If false, the declaration
+emits `E.LOCAL_NEEDS_INIT` with a message naming the variable, the declared
+type, and the suggested fixes (`T | nil` or initializer). `unknown` and
+`any` both contain nil, so existing patterns like
+`local advapi32 --: any` and `local tls_lib --: unknown` continue to work.
+
+The repo-wide cleanup found zero new violations in non-test source: the
+previously-existing `local x --: T` sites all used `unknown`, `any`, or
+already had `| nil`. Test fixtures were migrated en masse: most tests that
+used `local x --: T` as a type-anchor for a probe `x` were converted to
+either `--: T \n local x = <init>` (when an initializer makes sense) or
+`--:: declare x = T` (when the test only needs the symbol to be in scope).
+
+**Original report follows for archival reference.**
 
 **File:** `constrain.lua` around line 2440 (same code path as Gap 8: annotated local binding).
 **Severity:** High (false negative; same family as Gap 8)
@@ -531,7 +554,7 @@ replaced by full structural checking once resolution completes.
 | 6 | Function arity nil-padding | Low | Correct for Lua semantics |
 | 7 | LIT_INTEGER cross-file | Low | Edge case, deferred |
 | 8 | `local x --: T = expr_of_unknown` | ~~High~~ **FIXED** | Resolved as side-effect of Gap 10 parser totality (commit `4d711af`); regression tests in `type_soundness_test.lua` |
-| 9 | `local x --: T` (no initializer) | High | Annotated local with no initializer is `nil` at runtime but typed as `T`; compounded by the Gap 10 parser bug |
+| 9 | `local x --: T` (no initializer) | ~~High~~ **FIXED** | TS-style rule: declaration rejected when `nil </: T` and there is no initializer. Diagnostic `E.LOCAL_NEEDS_INIT`. Regression tests under `"Gap 9: annotated local without initializer requires nil ∈ T"` in `type_soundness_test.lua`. |
 | 10 | Parser accepts invalid `--:` syntax | High | `--: integer = x` is not a valid type but parser silently accepts the `integer` prefix and drops the rest; enables the Gap 9 footgun |
 | 11 | `--[[: any]] expr` launders `unknown` | ~~High~~ **FIXED** | Closed by Phase D3 (2026-04-30): `unify.lua` rejects `unknown <: any` in both `M.unify` and `M.try_unify`; covers cast, param, return, and annotation paths. Force cast `--[[:! T]]` is the documented escape. |
 

@@ -336,8 +336,8 @@ T.it("[eval] E1: EachField<never, KeepAll> | integer == integer (0 errors)", fun
 	local src = FIXED_SCOPE .. [[
 --:: TEachNever = $EachField<never, KeepAll>
 --:: TResult = TEachNever | integer
-local x --: TResult
-local _e1a --: integer = x
+--:: declare x = TResult
+--:: declare _e1a = integer = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E1a")
 	T.eq(#ec.errors, 0, "EachField<never,KeepAll>|integer == integer: expected 0 errors, got " .. tostring(#ec.errors))
@@ -348,8 +348,8 @@ end)
 T.it("[eval] E1: EachField<never, KeepAll> used as never — no crash", function()
 	local src = FIXED_SCOPE .. [[
 --:: TNever = $EachField<never, KeepAll>
-local x --: TNever
-local _e1b --: never = x
+--:: declare x = TNever
+--:: declare _e1b = never = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E1b")
 	T.eq(#ec.errors, 0, "EachField<never,KeepAll> as never: expected 0 errors, got " .. tostring(#ec.errors))
@@ -361,8 +361,8 @@ end)
 T.it("[eval] E6a: $Catch<$Throw<msg>, integer> == integer (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
 --:: Caught = $Catch<$Throw<"test error">, integer>
-local x --: Caught
-local _e6a --: integer = x
+--:: declare x = Caught
+--:: declare _e6a = integer = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E6a")
 	T.eq(#ec.errors, 0, "Catch<Throw<msg>,integer>==integer: expected 0 errors, got " .. tostring(#ec.errors))
@@ -372,8 +372,8 @@ end)
 T.it("[eval] E6b: $Catch<string, integer> == string (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
 --:: NotCaught = $Catch<string, integer>
-local x --: NotCaught
-local _e6b --: string = x
+--:: declare x = NotCaught
+--:: declare _e6b = string = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E6b")
 	T.eq(#ec.errors, 0, "Catch<string,integer>==string: expected 0 errors, got " .. tostring(#ec.errors))
@@ -383,7 +383,7 @@ end)
 T.it("[eval] E6c: $Throw<msg> without catch produces 1 error with the message", function()
 	local src = FIXED_SCOPE .. [[
 --:: Bad = $Throw<"this is wrong">
-local x --: Bad
+--:: declare x = Bad
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E6c")
 	T.eq(#ec.errors, 1, "Throw without catch: expected 1 error, got " .. tostring(#ec.errors))
@@ -401,7 +401,7 @@ end)
 T.it("[eval] E7a: WithDefault<integer> uses default U=string (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
 --:: WithDefault<T, U = string> = { a: T, b: U }
-local x --: WithDefault<integer>
+--:: declare x = WithDefault<integer>
 --: () -> { a: integer, b: string }
 local function f() return x end
 ]]
@@ -413,7 +413,7 @@ end)
 T.it("[eval] E7b: WithDefault<integer, boolean> overrides default (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
 --:: WithDefault<T, U = string> = { a: T, b: U }
-local x --: WithDefault<integer, boolean>
+--:: declare x = WithDefault<integer, boolean>
 --: () -> { a: integer, b: boolean }
 local function f() return x end
 ]]
@@ -426,7 +426,7 @@ end)
 T.it("[eval] E7c: WithDefault<integer> b is string not boolean — 1 error", function()
 	local src = FIXED_SCOPE .. [[
 --:: WithDefault<T, U = string> = { a: T, b: U }
-local x --: WithDefault<integer>
+--:: declare x = WithDefault<integer>
 --: () -> { a: integer, b: boolean }
 local function f() return x end
 ]]
@@ -510,7 +510,7 @@ local E3_PICK_DECL = table.concat({
 -- Use function return annotation to enforce structural check (CLAUDE.md annotation gotcha).
 T.it("[eval] E3a: Pick<{ x: integer, y: string }, \"x\">.x accessible — 0 errors", function()
 	local src = E3_PICK_DECL .. [[
-local x --: Pick<{ x: integer, y: string }, "x">
+--:: declare x = Pick<{ x: integer, y: string }, "x">
 --: () -> integer
 local function get_x() return x.x end
 ]]
@@ -521,7 +521,7 @@ end)
 -- E3b: Pick removes the non-selected field — x.y is not accessible (1 error).
 T.it("[eval] E3b: Pick<{ x: integer, y: string }, \"x\">.y not accessible — 1 error", function()
 	local src = E3_PICK_DECL .. [[
-local x --: Pick<{ x: integer, y: string }, "x">
+--:: declare x = Pick<{ x: integer, y: string }, "x">
 --: () -> string
 local function get_y() return x.y end
 ]]
@@ -532,7 +532,7 @@ end)
 -- E3c: Omit removes the named field — x.y accessible (0 errors).
 T.it("[eval] E3c: Omit<{ x: integer, y: string }, \"x\">.y accessible — 0 errors", function()
 	local src = E3_PICK_DECL .. [[
-local x --: Omit<{ x: integer, y: string }, "x">
+--:: declare x = Omit<{ x: integer, y: string }, "x">
 --: () -> string
 local function get_y() return x.y end
 ]]
@@ -547,8 +547,8 @@ T.it('[eval] E3d: $EachField<T, PickKey<"x">> == Pick<T, "x"> (bidirectional, 0 
 	local src = E3_PICK_DECL .. [[
 --:: PickDirect = $EachField<{ x: integer, y: string }, PickKey<"x">>
 --:: PickAlias  = Pick<{ x: integer, y: string }, "x">
-local pd --: PickDirect
-local pa --: PickAlias
+--:: declare pd = PickDirect
+--:: declare pa = PickAlias
 --: () -> PickAlias
 local function f1() return pd end
 --: () -> PickDirect
@@ -570,7 +570,7 @@ local E2_DECL = "--:: DropOptional<D> = match D { { optional: true, ...%Rest } =
 T.it("[eval] E2a: DropOptional removes optional fields — .y accessible, .x dropped", function()
 	-- E2a-pos: .y is accessible after DropOptional
 	local src_pos = E2_DECL .. [[
-local t --: $EachField<{ x?: integer, y: string }, DropOptional>
+--:: declare t = $EachField<{ x?: integer, y: string }, DropOptional>
 --: () -> string
 local function get_y() return t.y end
 ]]
@@ -580,7 +580,7 @@ local function get_y() return t.y end
 
 	-- E2a-neg: .x is NOT accessible after DropOptional (optional field was dropped)
 	local src_neg = E2_DECL .. [[
-local t --: $EachField<{ x?: integer, y: string }, DropOptional>
+--:: declare t = $EachField<{ x?: integer, y: string }, DropOptional>
 --: () -> integer
 local function get_x() return t.x end
 ]]
@@ -596,8 +596,8 @@ T.it("[eval] E2b: DropOptional on all-required table == identity (bidirectional,
 	local src = E2_DECL .. FIXED_SCOPE .. [[
 --:: AllRequired = { x: integer, y: string }
 --:: Dropped     = $EachField<AllRequired, DropOptional>
-local d --: Dropped
-local r --: AllRequired
+--:: declare d = Dropped
+--:: declare r = AllRequired
 --: () -> AllRequired
 local function f1() return d end
 --: () -> Dropped
@@ -616,8 +616,8 @@ end)
 T.it("[eval] E9a: Normalize<integer | string> == string (0 errors)", function()
 	local src = [[
 --:: Normalize<T> = match T { integer => string, string => string }
-local x --: Normalize<integer | string>
-local _e9a --: string = x
+--:: declare x = Normalize<integer | string>
+--:: declare _e9a = string = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E9a")
 	T.eq(#ec.errors, 0, "E9a: Normalize<integer|string>==string: expected 0 errors, got " .. tostring(#ec.errors))
@@ -628,8 +628,8 @@ end)
 T.it("[eval] E9b: MapTypes<integer | string> == boolean | integer (0 errors)", function()
 	local src = [[
 --:: MapTypes<T> = match T { integer => boolean, string => integer }
-local x --: MapTypes<integer | string>
-local _e9b --: boolean | integer = x
+--:: declare x = MapTypes<integer | string>
+--:: declare _e9b = boolean | integer = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E9b")
 	T.eq(#ec.errors, 0, "E9b: MapTypes<integer|string> <: boolean|integer: expected 0 errors, got " .. tostring(#ec.errors))
@@ -640,8 +640,8 @@ end)
 T.it("[eval] E9c: Ignores<integer> == string, never arm ignored (0 errors)", function()
 	local src = [[
 --:: Ignores<T> = match T { integer => string, never => boolean }
-local x --: Ignores<integer>
-local _e9c --: string = x
+--:: declare x = Ignores<integer>
+--:: declare _e9c = string = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E9c")
 	T.eq(#ec.errors, 0, "E9c: Ignores<integer>==string (never arm ignored): expected 0 errors, got " .. tostring(#ec.errors))
@@ -692,7 +692,7 @@ end)
 T.it("[eval] E5a: Parameters<(integer, string) -> boolean> == (integer, string) (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
 --:: P1 = Parameters<(integer, string) -> boolean>
-local x --: P1
+--:: declare x = P1
 --: () -> (integer, string)
 local function f() return x[1], x[2] end
 ]]
@@ -704,7 +704,7 @@ end)
 T.it("[eval] E5b: Tail<(integer, string, boolean) -> nil> == (string, boolean) (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
 --:: TailTest = Tail<(integer, string, boolean) -> nil>
-local x --: TailTest
+--:: declare x = TailTest
 --: () -> (string, boolean)
 local function f() return x[1], x[2] end
 ]]
@@ -736,8 +736,8 @@ arb.it("[eval] E5c: Parameters<F> == param tuple for random function types",
 -- E10a (fixed): ReturnType<() -> integer> == integer
 T.it("[eval] E10a: ReturnType<() -> integer> == integer (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
-local x --: ReturnType<() -> integer>
-local _e10a --: integer = x
+--:: declare x = ReturnType<() -> integer>
+--:: declare _e10a = integer = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E10a")
 	T.eq(#ec.errors, 0, "E10a: expected 0 errors, got " .. tostring(#ec.errors))
@@ -746,8 +746,8 @@ end)
 -- E10b (fixed): ReturnType<() -> string> == string
 T.it("[eval] E10b: ReturnType<() -> string> == string (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
-local x --: ReturnType<() -> string>
-local _e10b --: string = x
+--:: declare x = ReturnType<() -> string>
+--:: declare _e10b = string = x
 ]]
 	local ec = check_mod.check_string(src, "fuzz_eval_E10b")
 	T.eq(#ec.errors, 0, "E10b: expected 0 errors, got " .. tostring(#ec.errors))
@@ -757,7 +757,7 @@ end)
 -- The captured R is a tuple (integer, string); assign element-wise.
 T.it("[eval] E10c: ReturnType<() -> (integer, string)> is a tuple (integer, string) (0 errors)", function()
 	local src = FIXED_SCOPE .. [[
-local x --: ReturnType<() -> (integer, string)>
+--:: declare x = ReturnType<() -> (integer, string)>
 --: () -> (integer, string)
 local function f() return x[1], x[2] end
 ]]
@@ -1116,7 +1116,7 @@ T.it("[eval] MA7e: structural pattern { x: %V } matches intersection input (MA7e
 --:: FieldX_MA7e<T> = match T { { x: %V } => V }
 --: () -> integer
 local function f()
-	local r --: FieldX_MA7e<{ x: integer } & { y: string }>
+	--:: declare r = FieldX_MA7e<{ x: integer } & { y: string }>
 	return r
 end
 ]]
@@ -1132,7 +1132,7 @@ T.it("[eval] MA7f: cross-member fields accessible after DNF flatten — { x:%V, 
 --:: FieldXY_MA7f<T> = match T { { x: %V, y: %W } => V }
 --: () -> integer
 local function f()
-	local r --: FieldXY_MA7f<{ x: integer } & { y: string }>
+	--:: declare r = FieldXY_MA7f<{ x: integer } & { y: string }>
 	return r
 end
 ]]
@@ -1149,7 +1149,7 @@ T.it("[eval] MA7g: A & (B|C) distributes via DNF — integer & (string|boolean) 
 --:: IntOrWild_MA7g<T> = match T { integer => boolean, _ => string }
 --: () -> boolean
 local function f()
-	local r --: IntOrWild_MA7g<integer & (string | boolean)>
+	--:: declare r = IntOrWild_MA7g<integer & (string | boolean)>
 	return r
 end
 ]]
@@ -1170,7 +1170,7 @@ T.it("[eval] MX1: closed member lacking field makes intersection pattern fail �
 --:: FieldX_MX1<T> = match T { { x: %V } => V }
 --: () -> never
 local function f()
-	local r --: FieldX_MX1<{ x: integer } & { y: string }>
+	--:: declare r = FieldX_MX1<{ x: integer } & { y: string }>
 	return r
 end
 ]]
@@ -1186,7 +1186,7 @@ T.it("[eval] MX1b: closed member lacking field in mixed open/closed intersection
 --:: FieldX_MX1b<T> = match T { { x: %V } => V }
 --: () -> never
 local function f()
-	local r --: FieldX_MX1b<{ x: integer, ...} & { y: string }>
+	--:: declare r = FieldX_MX1b<{ x: integer, ...} & { y: string }>
 	return r
 end
 ]]
@@ -1201,7 +1201,7 @@ T.it("[eval] MX1c: open members — field from one open member succeeds", functi
 --:: FieldX_MX1c<T> = match T { { x: %V } => V }
 --: () -> integer
 local function f()
-	local r --: FieldX_MX1c<{ x: integer, ...} & { y: string, ...}>
+	--:: declare r = FieldX_MX1c<{ x: integer, ...} & { y: string, ...}>
 	return r
 end
 ]]

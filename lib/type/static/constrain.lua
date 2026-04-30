@@ -2460,6 +2460,18 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
                 end
             elseif rhs_tid then
                 emit(ctx, { C_SUB, rhs_tid, ann_tid, n.line, n.col })
+            elseif el == 0 then
+                -- Gap 9: `local x --: T` with no initializer is sound only if nil ∈ T
+                -- (the runtime value is nil). Reject otherwise; user can write `T | nil`
+                -- or provide an initializer.
+                local unify_mod = require("lib.type.static.unify")
+                if not unify_mod.try_unify(ctx, ctx.T_NIL, ann_tid) then
+                    local name_str = intern_mod.get(ctx.pool, name_id) or "?"
+                    report(ctx, n.line, n.col, E.LOCAL_NEEDS_INIT, {
+                        name = name_str,
+                        t    = types_mod.display(ctx, ann_tid),
+                    })
+                end
             end
             env_mod.bind(ctx.scope, name_id, ann_tid)
             -- Record annotation so assignments keep this as the permanent type.

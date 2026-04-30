@@ -49,8 +49,8 @@ arb.it("subtyping: every type is a subtype of itself",
 	function(T_node)
 		local TT  = farb.type_to_string(T_node)
 		-- If the type itself is ill-formed (e.g. intersection field conflict), skip.
-		if rejects("local x --: " .. TT) then return end
-		local src = ("local x --: %s\nlocal y = x --: %s"):format(TT, TT)
+		if rejects("--:: declare x = " .. TT) then return end
+		local src = ("--:: declare x = %s\nlocal y = x --: %s"):format(TT, TT)
 		assert(typechecks(src), "reflexivity failed: " .. src)
 	end, { trials = 500 })
 
@@ -77,9 +77,9 @@ arb.it("union intro: A assignable to A | B (complex)",
 		local B   = farb.type_to_string(B_node)
 		-- If A or B is ill-formed (e.g. intersection field conflict, or deep type
 		-- exceeds parser stack limit), skip.
-		if rejects("local a --: " .. A) then return end
-		if rejects("local b --: " .. B) then return end
-		local src = ("local a --: %s\nlocal z = a --: %s | %s"):format(A, A, B)
+		if rejects("--:: declare a = " .. A) then return end
+		if rejects("--:: declare b = " .. B) then return end
+		local src = ("--:: declare a = %s\nlocal z = a --: %s | %s"):format(A, A, B)
 		assert(typechecks(src), "union intro (complex) failed: " .. src)
 	end, { trials = 500 })
 
@@ -92,7 +92,7 @@ arb.it("function: correct arg accepted",
 		local A   = farb.type_to_string(A_node)
 		local B   = farb.type_to_string(B_node)
 		local v   = farb.canonical_value(A_node)
-		local src = ("--: (%s) -> %s\nlocal f\nf(%s)"):format(A, B, v)
+		local src = ("--:: declare f = (%s) -> %s\nf(%s)"):format(A, B, v)
 		assert(typechecks(src), "correct arg rejected: " .. src)
 	end, { trials = 500 })
 
@@ -106,7 +106,7 @@ arb.it("function: wrong arg rejected",
 		local A_node, B_node = pair[1], pair[2]
 		local A   = farb.type_to_string(A_node)
 		local v   = farb.canonical_value(B_node)
-		local src = ("--: (%s) -> nil\nlocal f\nf(%s)"):format(A, v)
+		local src = ("--:: declare f = (%s) -> nil\nf(%s)"):format(A, v)
 		assert(rejects(src), "wrong arg not rejected: " .. src)
 	end, { trials = 500 })
 
@@ -148,8 +148,7 @@ arb.it("generic: instantiation preserves type",
 		local TT  = farb.type_to_string(T_node)
 		local v   = farb.canonical_value(T_node)
 		local src = table.concat({
-			"--: <T>(T) -> T",
-			"local id",
+			"--:: declare id = <T>(T) -> T",
 			("--: %s\nlocal x = id(%s)"):format(TT, v),
 		}, "\n")
 		assert(typechecks(src), "generic instantiation rejected: " .. src)
@@ -200,12 +199,11 @@ arb.it("function: covariant return (grammar)",
 		local A = farb.type_to_string(A_node)
 		local B = farb.type_to_string(B_node)
 		-- Pre-check: skip if either type annotation is ill-formed standalone
-		if rejects("local x --: " .. A) then return end
-		if rejects("local x --: " .. B) then return end
+		if rejects("--:: declare x = " .. A) then return end
+		if rejects("--:: declare x = " .. B) then return end
 		-- (A) -> A is assignable to (A) -> (A | B)
 		local src = table.concat({
-			("--: (%s) -> %s"):format(A, A),
-			"local f",
+			("--:: declare f = (%s) -> %s"):format(A, A),
 			("--: (%s) -> (%s | %s)"):format(A, A, B),
 			"local g = f",
 		}, "\n")
@@ -240,8 +238,8 @@ arb.it("annotation soundness: (A)->B rejects when A not <: B",
 		local A = farb.type_to_string(A_node)
 		local B = farb.type_to_string(B_node)
 		-- Pre-check: skip ill-formed annotations
-		if rejects("local x --: " .. A) then return end
-		if rejects("local x --: " .. B) then return end
+		if rejects("--:: declare x = " .. A) then return end
+		if rejects("--:: declare x = " .. B) then return end
 		-- (A) -> B with `return x` (x: A) should fail when A not <: B
 		local src = table.concat({
 			("--: (%s) -> %s"):format(A, B),
@@ -290,8 +288,7 @@ arb.it("generic constraint: violating instantiation rejected",
 		local v = farb.canonical_value(B_node)
 		-- f: <T: C>(T) -> T; call with B value where B </: C → error
 		local src = table.concat({
-			("--: <T: %s>(T) -> T"):format(C),
-			"local f",
+			("--:: declare f = <T: %s>(T) -> T"):format(C),
 			("f(%s)"):format(v),
 		}, "\n")
 		assert(rejects(src), "constraint violation not rejected: " .. src)
@@ -307,8 +304,7 @@ arb.it("generic constraint: conforming instantiation accepted",
 		local v  = farb.canonical_value(T_node)
 		-- f: <T: TT>(T) -> T; call with v of type TT → ok
 		local src = table.concat({
-			("--: <T: %s>(T) -> T"):format(TT),
-			"local f",
+			("--:: declare f = <T: %s>(T) -> T"):format(TT),
 			("f(%s)"):format(v),
 		}, "\n")
 		assert(typechecks(src), "conforming instantiation rejected: " .. src)
@@ -324,13 +320,12 @@ arb.it("multi-return: first slot has declared type",
 		local B  = farb.type_to_string(B_node)
 		-- f: () -> (A, B); local x, y = f(); x should be A, y should be B
 		local src = table.concat({
-			("--: () -> (%s, %s)"):format(A, B),
-			"local f",
+			("--:: declare f = () -> (%s, %s)"):format(A, B),
 			"local x, y = f()",
 			("local _a = x --: %s"):format(A),
 			("local _b = y --: %s"):format(B),
 		}, "\n")
-		if rejects("local _x --: " .. A) or rejects("local _y --: " .. B) then
+		if rejects("--:: declare _x = " .. A) or rejects("--:: declare _y = " .. B) then
 			return  -- skip ill-formed types
 		end
 		assert(typechecks(src), "multi-return slot type failed: " .. src)
@@ -348,8 +343,7 @@ arb.it("overload: calling with first overload arg typechecks",
 		local v = farb.canonical_value(A_node)
 		-- f: (A)->nil & (B)->nil; call with A value → ok
 		local src = table.concat({
-			("--: ((%s) -> nil) & ((%s) -> nil)"):format(A, B),
-			"local f",
+			("--:: declare f = ((%s) -> nil) & ((%s) -> nil)"):format(A, B),
 			("f(%s)"):format(v),
 		}, "\n")
 		assert(typechecks(src), "overload acceptance failed: " .. src)
@@ -367,8 +361,7 @@ arb.it("overload: calling with non-matching arg rejected",
 		local B = farb.type_to_string(B_node)
 		local v = farb.canonical_value(C_node)
 		local src = table.concat({
-			("--: ((%s) -> nil) & ((%s) -> nil)"):format(A, B),
-			"local f",
+			("--:: declare f = ((%s) -> nil) & ((%s) -> nil)"):format(A, B),
 			("f(%s)"):format(v),
 		}, "\n")
 		assert(rejects(src), "overload non-match not rejected: " .. src)
@@ -401,7 +394,7 @@ arb.it("interface oracle: A: B declaration allows A where B expected",
 			-- HasB is intentionally open so any structural subtype is accepted.
 			"--:: HasB = { fld: " .. T .. ", ... }",
 			"--:: MyType: HasB = { fld: " .. T .. ", extra: integer }",
-			"local val --: MyType",
+			"--:: declare val = MyType",
 			"--: (HasB) -> nil",
 			"local function f(_b) end",
 			"f(val)",
@@ -418,7 +411,7 @@ arb.it("EachField KeepAll: $EachField<{x:T}, KeepAll> compatible with {x:T}",
 		local TT = farb.type_to_string(T_node)
 		local src = table.concat({
 			"--:: KeepAll<D> = match D { _ => { D } }",
-			"local x --: $EachField<{ x: " .. TT .. " }, KeepAll>",
+			"--:: declare x = $EachField<{ x: " .. TT .. " }, KeepAll>",
 			"local y = x --: { x: " .. TT .. " }",
 		}, "\n")
 		assert(typechecks(src), "EachField KeepAll partial program failed: " .. src)
@@ -433,7 +426,7 @@ T.it("P1a: Pick<{name,age}, \"name\">.name accessible — 0 errors", function()
 --:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
 --: () -> string
 local function get_name()
-  local p --: Pick<{ name: string, age: integer }, "name">
+  --:: declare p = Pick<{ name: string, age: integer }, "name">
   return p.name
 end
 ]]
@@ -447,7 +440,7 @@ T.it("P1b: Pick<{name,age}, \"name\">.age not accessible — 1 error", function(
 --:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
 --: () -> integer
 local function get_age()
-  local p --: Pick<{ name: string, age: integer }, "name">
+  --:: declare p = Pick<{ name: string, age: integer }, "name">
   return p.age
 end
 ]]
@@ -463,7 +456,7 @@ end)
 T.it("P4a: CheckedId<integer> — integer arm, no throw — 0 errors", function()
 	local src = [[
 --:: CheckedId<T> = match T { integer => integer, _ => $Throw<T, " is not integer"> }
-local x --: CheckedId<integer>
+--:: declare x = CheckedId<integer>
 local _ok = x --: integer
 ]]
 	local ec = check.check_string(src, "fuzz_test_P4a")
@@ -473,7 +466,7 @@ end)
 T.it("P4b: CheckedId<string> — _ arm, throw fires — 1 error", function()
 	local src = [[
 --:: CheckedId<T> = match T { integer => integer, _ => $Throw<T, " is not integer"> }
-local x --: CheckedId<string>
+--:: declare x = CheckedId<string>
 ]]
 	local ec = check.check_string(src, "fuzz_test_P4b")
 	T.eq(#ec.errors, 1, "P4b: expected 1 error, got " .. #ec.errors)
@@ -484,7 +477,7 @@ end)
 T.it("P5a: Wrap<integer> defaults U to string — 0 errors", function()
 	local src = [[
 --:: Wrap<T, U = string> = { value: T, label: U }
-local x --: Wrap<integer>
+--:: declare x = Wrap<integer>
 local _a = x --: { value: integer, label: string }
 ]]
 	local ec = check.check_string(src, "fuzz_test_P5a")
@@ -494,7 +487,7 @@ end)
 T.it("P5b: Wrap<integer, boolean> overrides default — 0 errors", function()
 	local src = [[
 --:: Wrap<T, U = string> = { value: T, label: U }
-local x --: Wrap<integer, boolean>
+--:: declare x = Wrap<integer, boolean>
 local _a = x --: { value: integer, label: boolean }
 ]]
 	local ec = check.check_string(src, "fuzz_test_P5b")
@@ -507,7 +500,7 @@ end)
 T.it("P5c: Wrap<integer> label is string not integer — 1 error via return check", function()
 	local src = [[
 --:: Wrap<T, U = string> = { value: T, label: U }
-local x --: Wrap<integer>
+--:: declare x = Wrap<integer>
 --: () -> { value: integer, label: integer }
 local function f() return x end
 ]]
@@ -521,7 +514,7 @@ end)
 
 T.it("A2c: writing to a readonly field is rejected — 1 error", function()
 	local src = [[
-local t --: { readonly x: integer }
+--:: declare t = { readonly x: integer }
 t.x = 42
 ]]
 	local ec = check.check_string(src, "fuzz_test_A2c")
@@ -530,7 +523,7 @@ end)
 
 T.it("A2d: reading a readonly field is allowed — 0 errors", function()
 	local src = [[
-local t --: { readonly x: integer }
+--:: declare t = { readonly x: integer }
 local _read = t.x --: integer
 ]]
 	local ec = check.check_string(src, "fuzz_test_A2d")
@@ -553,8 +546,8 @@ T.it("P3b: setmetatable with typed Vec and VecMeta — 0 errors", function()
 	local src = [[
 --:: Vec = { x: integer }
 --:: VecMeta = { __add: (Vec, Vec) -> Vec }
-local mt --: VecMeta
-local v --: Vec
+--:: declare mt = VecMeta
+--:: declare v = Vec
 local result = setmetatable(v, mt)
 ]]
 	local ec = check.check_string(src, "fuzz_test_P3b")
@@ -574,7 +567,7 @@ T.it("P2a: Parameters<typeof f> == (integer, string) — bidirectional — 0 err
 --: (integer, string) -> boolean
 local function f(a, b) return true end
 local p  --: Parameters<typeof f>
-local xy --: (integer, string)
+--:: declare xy = (integer, string)
 --: () -> (integer, string)
 local function fwd() return p  end   -- Parameters<typeof f> <: (integer, string)
 --: () -> Parameters<typeof f>
@@ -602,7 +595,8 @@ T.it("P2c: ReturnType<typeof h> == boolean — 0 errors", function()
 --:: ReturnType<F> = match F { () -> %R => R }
 --: () -> boolean
 local function h() return true end
-local r  --: ReturnType<typeof h>
+--: ReturnType<typeof h>
+local r = h()
 local _ok = r --: boolean
 ]]
 	local ec = check.check_string(src, "fuzz_test_P2c")
@@ -626,7 +620,7 @@ arb.it("bound-decomp: <F: (...P)->R, P, R> correct call always typechecks",
 		local A = farb.type_to_string(A_node)
 		local v = farb.canonical_value(A_node)
 		-- Skip ill-formed type annotations
-		if rejects("local _x --: " .. A) then return end
+		if rejects("--:: declare _x = " .. A) then return end
 		-- Use identity (A)->A so the body is always sound
 		local src = table.concat({
 			"--:: declare wrap = <F: (...P) -> R, P, R>(f: F, ...P) -> R",
@@ -646,8 +640,8 @@ arb.it("bound-decomp: <F: (...P)->R, P, R> wrong arg type always rejected",
 		local A = farb.type_to_string(A_node)
 		local B = farb.type_to_string(B_node)
 		local v_wrong = farb.canonical_value(B_node)
-		if rejects("local _x --: " .. A) then return end
-		if rejects("local _y --: " .. B) then return end
+		if rejects("--:: declare _x = " .. A) then return end
+		if rejects("--:: declare _y = " .. B) then return end
 		local src = table.concat({
 			"--:: declare wrap = <F: (...P) -> R, P, R>(f: F, ...P) -> R",
 			("--: (%s) -> nil"):format(A),

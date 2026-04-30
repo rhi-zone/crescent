@@ -1326,8 +1326,7 @@ assert.describe("ann: integration with parser", function()
 --: number
 local x = 1
 --:: Pair<A, B> = { first: A, second: B }
---: string | number
-local y
+--:: declare y = string | number
 ]]
         local r = parse.parse(src, "test")
         local ann_result = ann.parse_annotations(r.lexer.annotations, r.pool, "test")
@@ -2483,8 +2482,8 @@ for k, v in pairs(t) do end
         no_errors([[
 local t = { name = "alice", age = 30 }
 for k, v in pairs(t) do
-    local _k --: string
-    _k = k
+    --: string
+    local _k = k
 end
 ]])
     end)
@@ -2495,8 +2494,8 @@ end
 --: { x: integer, y: string }
 local t = {}
 for k, v in pairs(t) do
-    local n --: number
-    n = v
+    --: number
+    local n = v
 end
 ]], "cannot")
     end)
@@ -2875,16 +2874,14 @@ assert.describe("checker: open table / row variable", function()
     end)
     assert.it("annotated open table accepts any field access", function()
         no_errors([[
-            --: { name: string, ... }
-            local t
+            --:: declare t = { name: string, ... }
             local s = t.name
             local x = t.anything_else
         ]])
     end)
     assert.it("closed table rejects unknown field", function()
         has_error([[
-            --: { name: string }
-            local t
+            --:: declare t = { name: string }
             local x = t.unknown_field
         ]], "")
     end)
@@ -3697,8 +3694,7 @@ f(v)
         local errs = check_mod.check_string([[
 --: (string) -> nil
 local function f(x) end
---: unknown
-local v
+--:: declare v = unknown
 f(v)
 ]], "test")
         assert.ok(errs and #errs.errors > 0, "unknown is not assignable to string")
@@ -4030,8 +4026,7 @@ returns[#returns + 1] = "bad"
         no_errors([[
 local function build(n)
     --: { [number]: integer }
-    local t
-    t = {}
+    local t = {}
     t[n] = 1
     return t
 end
@@ -4555,7 +4550,7 @@ local n = ("hello"):upper()
 
     assert.it("nil narrowing: x ~= nil allows string method call", function()
         v3_no_errors([[
-local x --: string | nil
+--:: declare x = string | nil
 if x ~= nil then
     local n = x:len()
 end
@@ -4564,7 +4559,7 @@ end
 
     assert.it("type() narrowing: type(x) == \"string\" allows string method call", function()
         v3_no_errors([[
-local x --: string | integer
+--:: declare x = string | integer
 if type(x) == "string" then
     local n = x:len()
 end
@@ -4675,32 +4670,32 @@ end
     assert.it("optional field: struct with missing optional field is valid", function()
         v3_no_errors([[
 --:: Point = { x: number, y?: number }
-local p --: Point
-p = { x = 1 }
+--: Point
+local p = { x = 1 }
 ]])
     end)
 
     assert.it("optional field: struct with both required and optional field is valid", function()
         v3_no_errors([[
 --:: Point = { x: number, y?: number }
-local p --: Point
-p = { x = 1, y = 2 }
+--: Point
+local p = { x = 1, y = 2 }
 ]])
     end)
 
     assert.it("optional field NOT assignable to required field position", function()
         v3_has_error([[
-local x --: { name?: string }
-local y --: { name: string }
-y = x
+--:: declare x = { name?: string }
+--: { name: string }
+local y = x
 ]], "optional")
     end)
 
     assert.it("required field IS assignable to optional field position", function()
         v3_no_errors([[
-local a --: { name: string }
-local b --: { name?: string }
-b = a
+--:: declare a = { name: string }
+--: { name?: string }
+local b = a
 ]])
     end)
 
@@ -4709,8 +4704,8 @@ b = a
 --:: opts_t = { f?: (integer) -> string }
 --: (string) -> nil
 local function use_str(s) end
-local opts --: opts_t
-opts = opts
+--:: declare get_opts = () -> opts_t
+local opts = get_opts()
 if opts.f then
     use_str(opts.f(42))
 end
@@ -4722,8 +4717,8 @@ end
 --:: opts_t = { f?: (integer) -> string }
 --: (string) -> nil
 local function use_str(s) end
-local opts --: opts_t
-opts = opts
+--:: declare get_opts = () -> opts_t
+local opts = get_opts()
 if not opts.f then return end
 use_str(opts.f(42))
 ]])
@@ -4744,7 +4739,7 @@ end
     assert.it("readonly field write is a type error", function()
         v3_has_error([[
 --:: Config = { readonly version: string }
-local c --: Config
+--:: declare c = Config
 c.version = "2.0"
 ]], "readonly")
     end)
@@ -4752,7 +4747,7 @@ c.version = "2.0"
     assert.it("readonly field name 'readonly' still works as a plain field name", function()
         v3_no_errors([[
 --:: T = { readonly: boolean }
-local t --: T
+--:: declare t = T
 local v = t.readonly
 ]])
     end)
@@ -4834,21 +4829,21 @@ local p = pair(1, "x")
     assert.it("ENFORCED: <T: { x: number }> rejects string (missing field x)", function()
         v3_has_error([[
 --:: Wrap<T: { x: number }> = { wrapped: T }
-local x --: Wrap<string>
+--:: declare x = Wrap<string>
 ]], "constraint")
     end)
 
     assert.it("ENFORCED: <T: { x: number }> accepts { x: number, y: string }", function()
         v3_no_errors([[
 --:: Wrap<T: { x: number }> = { wrapped: T }
-local x --: Wrap<{ x: number, y: string }>
+--:: declare x = Wrap<{ x: number, y: string }>
 ]])
     end)
 
     assert.it("ENFORCED: <F: (number) -> number> rejects string", function()
         v3_has_error([[
 --:: Box<F: (number) -> number> = F
-local x --: Box<string>
+--:: declare x = Box<string>
 ]], "constraint")
     end)
 end)
@@ -4875,7 +4870,7 @@ local function hkt_signature_ok(map_fn) return true end
         -- applied with args elsewhere, produces the arity error.
         v3_has_error([[
 --:: T1<T> = any
-local x --: T1
+--:: declare x = T1
 ]], "expects 1 argument")
     end)
 
@@ -4900,8 +4895,8 @@ local function extract(fa)
     return fa.value
 end
 local r = extract({ value = 42 })
-local check_int --: integer
-check_int = r
+--: integer
+local check_int = r
 ]])
     end)
 
@@ -4909,7 +4904,7 @@ check_int = r
         v3_no_errors([[
 --:: map<F, A, B> = ((A -> B) -> F<A> -> F<B>)
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: map<Maybe, number, string>
+--:: declare x = map<Maybe, number, string>
 ]])
     end)
 
@@ -4917,7 +4912,7 @@ local x --: map<Maybe, number, string>
         v3_no_errors([[
 --:: id<F, A> = (F<A> -> F<A>)
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
-local x --: id<Maybe, number>
+--:: declare x = id<Maybe, number>
 ]])
     end)
 end)
@@ -5094,14 +5089,14 @@ assert.describe("HKT: ADT match types and $EachField", function()
         -- We accept any error here — the important thing is it doesn't silently
         -- produce the correct Partial<T> semantics.
         v3_has_error([[
-local x --: $EachField<{ name: string }, any>
-x = "hello"
+--: $EachField<{ name: string }, any>
+local x = "hello"
 ]], "")
     end)
 
     assert.it("PASS: Partial<T> undeclared gives undefined type (no builtin)", function()
         v3_has_error([[
-local x --: Partial<{ name: string, age: number }>
+--:: declare x = Partial<{ name: string, age: number }>
 ]], "undefined type")
     end)
 
@@ -5112,8 +5107,8 @@ local x --: Partial<{ name: string, age: number }>
         v3_no_errors([[
 --:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V | nil } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ name: string, age: number }>
-x = { name = "bob", age = 30 }
+--: Partial<{ name: string, age: number }>
+local x = { name = "bob", age = 30 }
 x = { name = nil, age = nil }
 ]])
     end)
@@ -5158,14 +5153,14 @@ assert.describe("HKT: named kind aliases as bounds (design-doc approach)", funct
     assert.it("PASS: T1<T> = any declares a kind-* -> * alias", function()
         v3_no_errors([[
 --:: T1<T> = any
-local x --: T1<number>
+--:: declare x = T1<number>
 ]])
     end)
 
     assert.it("ERROR: T1 used without type arg errors (arity mismatch)", function()
         v3_has_error([[
 --:: T1<T> = any
-local x --: T1
+--:: declare x = T1
 ]], "expects 1 argument")
     end)
 
@@ -5195,16 +5190,16 @@ local function map_sig(map_fn) return true end
         -- A structural bound constrains not just arity but the shape of the result.
         v3_no_errors([[
 --:: Wrapper<T> = { value: T }
-local x --: Wrapper<number>
-x = { value = 42 }
+--: Wrapper<number>
+local x = { value = 42 }
 ]])
     end)
 
     assert.it("ERROR: Wrapper<T> bound violated — missing value field", function()
         v3_has_error([[
 --:: Wrapper<T> = { value: T }
-local x --: Wrapper<number>
-x = { other = 42 }
+--: Wrapper<number>
+local x = { other = 42 }
 ]], "missing field")
     end)
 end)
@@ -5218,8 +5213,8 @@ assert.describe("intrinsic: Keys<T> (was $Keys)", function()
         v3_no_errors([[
 --:: T = { a: number, b: string }
 --:: K = Keys<T>
-local x --: K
-x = "a"
+--: K
+local x = "a"
 x = "b"
 ]])
     end)
@@ -5249,8 +5244,8 @@ accept_key("anything")
     assert.it("Keys of single-field table is a single string literal", function()
         v3_no_errors([[
 --:: K = Keys<{ only: number }>
-local x --: K
-x = "only"
+--: K
+local x = "only"
 ]])
     end)
 end)
@@ -5261,8 +5256,8 @@ assert.describe("capture sigil: %Name in match patterns", function()
         v3_no_errors([[
 --:: T = { [string]: integer }
 --:: K = match T { { ...[%K]: %V } => K }
-local x --: K
-x = "hello"
+--: K
+local x = "hello"
 ]])
     end)
 
@@ -5270,8 +5265,8 @@ x = "hello"
         v3_no_errors([[
 --:: Cap<T> = match T { %T => T }
 --:: R = Cap<integer>
-local x --: R
-x = 42
+--: R
+local x = 42
 ]])
     end)
 
@@ -5280,8 +5275,8 @@ x = 42
         v3_no_errors([[
 --:: NumberOrNot<T> = match T { number => "yes", _ => "no" }
 --:: R = NumberOrNot<integer>
-local x --: R
-x = "yes"
+--: R
+local x = "yes"
 ]])
     end)
 
@@ -5305,8 +5300,8 @@ assert.describe("all-fields pattern: { ...[%K]: %V }", function()
 --: (t: { x: integer, y: string }) -> nil
 local function test(t)
     for k, v in pairs(t) do
-        local _k --: "x" | "y"
-        _k = k
+        --: "x" | "y"
+        local _k = k
     end
     return nil
 end
@@ -5319,8 +5314,8 @@ end
 --: { [string]: integer }
 local m = {}
 for k, v in pairs(m) do
-    local _k --: string
-    _k = k
+    --: string
+    local _k = k
     local x = v + 1
 end
 ]])
@@ -5332,8 +5327,8 @@ end
 --: { [integer]: string }
 local arr = {}
 for i, v in ipairs(arr) do
-    local _v --: string
-    _v = v
+    --: string
+    local _v = v
 end
 ]])
     end)
@@ -5355,8 +5350,8 @@ end
     assert.it("Keys<{ x: integer, y: string }> = \"x\" | \"y\"", function()
         v3_no_errors([[
 --:: K = Keys<{ x: integer, y: string }>
-local a --: K
-a = "x"
+--: K
+local a = "x"
 a = "y"
 ]])
         v3_has_error([[
@@ -5370,8 +5365,8 @@ f("z")
     assert.it("Values<{ x: integer, y: string }> = integer | string", function()
         v3_no_errors([[
 --:: V = Values<{ x: integer, y: string }>
-local a --: V
-a = 42
+--: V
+local a = 42
 a = "hi"
 ]])
         v3_has_error([[
@@ -5391,8 +5386,8 @@ assert.describe("intrinsic: $EachUnion<T, F>", function()
         v3_no_errors([[
 --:: ToString<T> = match T { number => string, boolean => "true" | "false" }
 --:: R = $EachUnion<number | boolean, ToString>
-local x --: R
-x = "hello"
+--: R
+local x = "hello"
 x = "true"
 ]])
     end)
@@ -5401,8 +5396,8 @@ x = "true"
         v3_no_errors([[
 --:: ToStr<T> = match T { number => string }
 --:: R = $EachUnion<number, ToStr>
-local x --: R
-x = "hi"
+--: R
+local x = "hi"
 ]])
     end)
 end)
@@ -5414,8 +5409,8 @@ assert.describe("intrinsic: $EachField<T, F>", function()
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: R = $EachField<{ a: number }, Identity>
-local x --: R
-x = { a = 42 }
+--: R
+local x = { a = 42 }
 ]])
     end)
 
@@ -5423,8 +5418,8 @@ x = { a = 42 }
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: R = $EachField<{ x: number, y: string }, Identity>
-local v --: R
-v = { x = 1, y = "hi" }
+--: R
+local v = { x = 1, y = "hi" }
 ]])
     end)
 end)
@@ -5449,8 +5444,8 @@ assert.describe("adversarial: match type edge cases", function()
         v3_no_errors([[
 --:: Unwrap<T> = match T { { value: %A } => A, T => T }
 --:: R = Unwrap<{ value: number }>
-local x --: R
-x = 42
+--: R
+local x = 42
 ]])
     end)
 
@@ -5460,8 +5455,8 @@ x = 42
 --:: Unwrap<T> = match T { { value: %A } => A, %T => T }
 --:: Inner = Unwrap<{ value: string }>
 --:: Outer = Unwrap<Inner>
-local x --: Outer
-x = "hi"
+--: Outer
+local x = "hi"
 ]])
     end)
 
@@ -5475,7 +5470,7 @@ x = "hi"
         v3_no_errors([[
 --:: Rec<T> = match T { number => Rec<number> }
 --:: R = Rec<number>
-local x --: R
+--:: declare x = R
 ]])
     end)
 
@@ -5484,8 +5479,8 @@ local x --: R
         v3_no_errors([[
 --:: FirstWins<T> = match T { number => string, number => boolean }
 --:: R = FirstWins<number>
-local x --: R
-x = "hello"
+--: R
+local x = "hello"
 ]])
     end)
 
@@ -5497,15 +5492,15 @@ x = "hello"
         v3_no_errors([[
 --:: Tag<T> = match T { number => "n", string => "s" }
 --:: R = Tag<number | string>
-local x --: R
-x = "n"
+--: R
+local x = "n"
 x = "s"
 ]])
         v3_has_error([[
 --:: Tag<T> = match T { number => "n", string => "s" }
 --:: R = Tag<number | string>
-local x --: R
-x = true
+--: R
+local x = true
 ]])
     end)
 
@@ -5517,24 +5512,24 @@ x = true
         v3_no_errors([[
 --:: Wide<T> = match T { number => number | string, %T => T }
 --:: R = Wide<number>
-local x --: R
-local n --: number
+--:: declare x = R
+--:: declare n = number
 x = n
 ]])
         -- Test string assignment independently.
         v3_no_errors([[
 --:: Wide<T> = match T { number => number | string, %T => T }
 --:: R = Wide<number>
-local x --: R
-local s --: string
+--:: declare x = R
+--:: declare s = string
 x = s
 ]])
         -- Boolean must not be assignable to number | string.
         v3_has_error([[
 --:: Wide<T> = match T { number => number | string, %T => T }
 --:: R = Wide<number>
-local x --: R
-x = true
+--: R
+local x = true
 ]], "boolean")
     end)
 
@@ -5568,14 +5563,14 @@ local r = only_num("should fail")
         v3_no_errors([[
 --:: Tag<T> = match T { string => "yes" }
 --:: R = Tag<string | number>
-local x --: R
-x = "yes"
+--: R
+local x = "yes"
 ]])
         v3_has_error([[
 --:: Tag<T> = match T { string => "yes" }
 --:: R = Tag<string | number>
-local x --: R
-local n --: number
+--:: declare x = R
+--:: declare n = number
 x = n
 ]])
     end)
@@ -5593,7 +5588,7 @@ x = n
 --:: R = Mixed<string | number>
 --: (string) -> nil
 local function only_str(s) return nil end
-local x --: R
+--:: declare x = R
 only_str(x)
 ]], "")
     end)
@@ -5608,14 +5603,14 @@ only_str(x)
         v3_no_errors([[
 --:: Tag<T> = match T { string => "a", number => "b" }
 --:: R = Tag<string>
-local x --: R
-x = "a"
+--: R
+local x = "a"
 ]])
         v3_has_error([[
 --:: Tag<T> = match T { string => "a", number => "b" }
 --:: R = Tag<string>
-local x --: R
-x = "b"
+--: R
+local x = "b"
 ]])
     end)
 
@@ -5629,13 +5624,13 @@ x = "b"
         v3_no_errors([[
 --:: NeverMatch<T> = match T { string => integer }
 --:: R = NeverMatch<never>
-local x --: R
+--:: declare x = R
 ]])
         v3_has_error([[
 --:: NeverMatch<T> = match T { string => integer }
 --:: R = NeverMatch<never>
-local x --: R
-local n --: integer
+--:: declare x = R
+--:: declare n = integer
 x = n
 ]], "never")
     end)
@@ -5657,8 +5652,8 @@ x = n
 --:: Outer<T> = match T { string => Box<T>, number => Box<T>, _ => never }
 --:: S = Outer<string>
 --:: N = Outer<number>
-local x --: S
-local y --: N
+--:: declare x = S
+--:: declare y = N
 x = "hi"
 y = 42
 ]])
@@ -5666,8 +5661,8 @@ y = 42
 --:: Box<T> = match T { string => string, number => number }
 --:: Outer<T> = match T { string => Box<T>, number => Box<T>, _ => never }
 --:: S = Outer<string>
-local x --: S
-x = 42
+--: S
+local x = 42
 ]], "")
     end)
 end)
@@ -5731,8 +5726,8 @@ assert.describe("adversarial: $EachField interactions", function()
 --:: Identity<F> = match F { %F => F }
 --:: Closed = { x: number }
 --:: R = $EachField<Closed, Identity>
-local v --: R
-v = { x = 1 }
+--: R
+local v = { x = 1 }
 ]])
     end)
 
@@ -5745,16 +5740,16 @@ v = { x = 1 }
 --:: A = { a: number }
 --:: B = { b: string }
 --:: R = $EachField<A | B, Identity>
-local v --: R
-v = { a = 1 }
+--: R
+local v = { a = 1 }
 ]])
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: A = { a: number }
 --:: B = { b: string }
 --:: R = $EachField<A | B, Identity>
-local v --: R
-v = { b = "hi" }
+--: R
+local v = { b = "hi" }
 ]])
     end)
 
@@ -5765,8 +5760,8 @@ v = { b = "hi" }
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: R = $EachField<$EachField<{ a: number }, Identity>, Identity>
-local v --: R
-v = { a = 42 }
+--: R
+local v = { a = 42 }
 ]])
     end)
 
@@ -5787,15 +5782,15 @@ accept({ n = "wrong" })
         v3_no_errors([[
 --:: MakeOpt<F> = match F { { key: %K, value: %V } => { key: K, value: V }, F => F }
 --:: R = $EachField<{ name: string }, MakeOpt>
-local v --: R
+--:: declare v = R
 ]])
     end)
 
     assert.it("PASS: Unwrap<T> — pattern capture var in table pattern", function()
         v3_no_errors([[
 --:: Unwrap<T> = match T { { value: %A } => A, T => T }
-local x --: Unwrap<{ value: number }>
-x = 42
+--: Unwrap<{ value: number }>
+local x = 42
 ]])
     end)
 
@@ -5808,8 +5803,8 @@ x = 42
         v3_no_errors([[
 --:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ name: string, age: number }>
-x = { name = "hi" }
+--: Partial<{ name: string, age: number }>
+local x = { name = "hi" }
 ]])
     end)
 
@@ -5818,8 +5813,8 @@ x = { name = "hi" }
         v3_no_errors([[
 --:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ x: number, y: string }>
-x = { y = "hello" }
+--: Partial<{ x: number, y: string }>
+local x = { y = "hello" }
 ]])
     end)
 
@@ -5828,8 +5823,8 @@ x = { y = "hello" }
         v3_no_errors([[
 --:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ x: number, y: string }>
-x = { x = 1 }
+--: Partial<{ x: number, y: string }>
+local x = { x = 1 }
 ]])
     end)
 
@@ -5838,8 +5833,8 @@ x = { x = 1 }
         v3_no_errors([[
 --:: MakeOptional<F> = match F { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ x: number, y: string }>
-x = {}
+--: Partial<{ x: number, y: string }>
+local x = {}
 ]])
     end)
 end)
@@ -5856,8 +5851,8 @@ assert.describe("$EachField flatMap: F returns brace-tuple of descriptors", func
         v3_no_errors([[
 --:: KeepAll<D> = match D { %D => { D } }
 --:: Identity<T> = $EachField<T, KeepAll>
-local v --: Identity<{ x: integer, y: string }>
-v = { x = 1, y = "hi" }
+--: Identity<{ x: integer, y: string }>
+local v = { x = 1, y = "hi" }
 ]])
     end)
 
@@ -5879,8 +5874,8 @@ accept({ n = "wrong" })
         v3_no_errors([[
 --:: DropAll<D> = match D { %D => {} }
 --:: EmptyTable<T> = $EachField<T, DropAll>
-local v --: EmptyTable<{ x: integer, y: string }>
-v = {}
+--: EmptyTable<{ x: integer, y: string }>
+local v = {}
 ]])
     end)
 
@@ -5893,8 +5888,8 @@ v = {}
 --:: DropAll<D> = match D { %D => {} }
 --:: EmptyTable<T> = $EachField<T, DropAll>
 --:: E = EmptyTable<{ x: integer, y: string }>
-local v --: E
-v = {}
+--: E
+local v = {}
 ]])
     end)
 
@@ -5904,8 +5899,8 @@ v = {}
         v3_no_errors([[
 --:: MakeOptional<D> = match D { { key: %K, value: %V } => { key: K, value: V, optional: true } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ name: string, age: number }>
-x = { name = "hi" }
+--: Partial<{ name: string, age: number }>
+local x = { name = "hi" }
 ]])
     end)
 
@@ -5914,8 +5909,8 @@ x = { name = "hi" }
         v3_no_errors([[
 --:: DropAll<D> = match D { %D => {} }
 --:: EmptyTable<T> = $EachField<T, DropAll>
-local v --: EmptyTable<{ z: boolean }>
-v = {}
+--: EmptyTable<{ z: boolean }>
+local v = {}
 ]])
     end)
 
@@ -5925,8 +5920,8 @@ v = {}
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: R = $EachField<{ a: number, b: string }, Identity>
-local v --: R
-v = { a = 1, b = "x" }
+--: R
+local v = { a = 1, b = "x" }
 ]])
     end)
 
@@ -5947,8 +5942,8 @@ assert.describe("$EachField: rest-capture F aliases with brace-tuple result", fu
         v3_no_errors([[
 --:: MakeOptional<D> = match D { { optional: _, ...%Rest } => { { optional: true, ...Rest } } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ x: integer, y: string }>
-x = { x = 1 }
+--: Partial<{ x: integer, y: string }>
+local x = { x = 1 }
 x = { y = "hi" }
 x = {}
 ]])
@@ -5960,8 +5955,8 @@ x = {}
         v3_no_errors([[
 --:: MakeReadonly<D> = match D { { readonly: _, ...%Rest } => { { readonly: true, ...Rest } } }
 --:: Readonly_<T> = $EachField<T, MakeReadonly>
-local x --: Readonly_<{ x: integer, y: string }>
-x = { x = 1, y = "hi" }
+--: Readonly_<{ x: integer, y: string }>
+local x = { x = 1, y = "hi" }
 ]])
     end)
 
@@ -5971,8 +5966,8 @@ x = { x = 1, y = "hi" }
         v3_no_errors([[
 --:: DropOptional<D> = match D { { optional: true, ... } => {}, _ => { D } }
 --:: NonOptional<T> = $EachField<T, DropOptional>
-local x --: NonOptional<{ x?: integer, y: string }>
-x = { y = "hi" }
+--: NonOptional<{ x?: integer, y: string }>
+local x = { y = "hi" }
 ]])
     end)
 
@@ -5982,8 +5977,8 @@ x = { y = "hi" }
         v3_no_errors([[
 --:: MakeOptional<D> = match D { { optional: _, ...%Rest } => { { optional: true, ...Rest } } }
 --:: Partial<T> = $EachField<T, MakeOptional>
-local x --: Partial<{ x: integer, y: string }>
-x = { x = 1 }
+--: Partial<{ x: integer, y: string }>
+local x = { x = 1 }
 ]])
     end)
 
@@ -5996,8 +5991,8 @@ assert.describe("adversarial: $EachUnion interactions", function()
         v3_no_errors([[
 --:: ToString<T> = match T { number => string }
 --:: R = $EachUnion<number, ToString>
-local x --: R
-x = "hi"
+--: R
+local x = "hi"
 ]])
     end)
 
@@ -6008,14 +6003,14 @@ x = "hi"
         v3_no_errors([[
 --:: Expand<T> = match T { number => "a" | "b" }
 --:: R = $EachUnion<number, Expand>
-local x --: R
-x = "a"
+--: R
+local x = "a"
 ]])
         v3_no_errors([[
 --:: Expand<T> = match T { number => "a" | "b" }
 --:: R = $EachUnion<number, Expand>
-local x --: R
-x = "b"
+--: R
+local x = "b"
 ]])
     end)
 
@@ -6026,15 +6021,15 @@ x = "b"
 --:: T = { foo: number, bar: string }
 --:: Identity<X> = match X { %X => X }
 --:: R = $EachUnion<Keys<T>, Identity>
-local x --: R
-x = "foo"
+--: R
+local x = "foo"
 ]])
         v3_no_errors([[
 --:: T = { foo: number, bar: string }
 --:: Identity<X> = match X { %X => X }
 --:: R = $EachUnion<Keys<T>, Identity>
-local x --: R
-x = "bar"
+--: R
+local x = "bar"
 ]])
     end)
 end)
@@ -6101,7 +6096,7 @@ assert.describe("adversarial: F<A> deferred application", function()
         v3_no_errors([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --:: Pair<F, A, B> = { left: F<A>, right: F<B> }
-local p --: Pair<Maybe, number, string>
+--:: declare p = Pair<Maybe, number, string>
 ]])
     end)
 
@@ -6110,7 +6105,7 @@ local p --: Pair<Maybe, number, string>
         v3_no_errors([[
 --:: Maybe<T> = { tag: "just", value: T } | { tag: "nothing" }
 --:: Nested<F, A> = F<F<A>>
-local x --: Nested<Maybe, number>
+--:: declare x = Nested<Maybe, number>
 ]])
     end)
 
@@ -6121,7 +6116,7 @@ local x --: Nested<Maybe, number>
         v3_has_error([[
 --:: T1<T> = any
 --:: Apply<F, A> = F<A>
-local x --: Apply<number, string>
+--:: declare x = Apply<number, string>
 ]], "does not take type arguments")
     end)
 
@@ -6145,22 +6140,22 @@ assert.describe("adversarial: soundness probes", function()
         -- `never` is the bottom type; no value can satisfy it.
         -- Assigning 42 to a `never`-annotated local must be a type error.
         v3_has_error([[
-local x --: never
-x = 42
+--: never
+local x = 42
 ]], "never")
     end)
 
     assert.it("PASS: assigning a string to a `never`-annotated binding is a type error", function()
         v3_has_error([[
-local x --: never
-x = "hello"
+--: never
+local x = "hello"
 ]], "never")
     end)
 
     assert.it("PASS: assigning nil to a `never`-annotated binding is a type error", function()
         v3_has_error([[
-local x --: never
-x = nil
+--: never
+local x = nil
 ]], "never")
     end)
 
@@ -6169,9 +6164,9 @@ x = nil
         -- There is no initializer (no write to src), so no error is emitted for src.
         -- Then assigning src (never) to x (number) must succeed: never <: number.
         v3_no_errors([[
-local src --: never
-local x --: number
-x = src
+--:: declare src = never
+--: number
+local x = src
 ]])
     end)
 
@@ -6182,14 +6177,14 @@ x = src
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: R = $EachField<any, Identity>
-local x --: R
-x = "anything"
+--: R
+local x = "anything"
 ]])
         v3_no_errors([[
 --:: Identity<F> = match F { %F => F }
 --:: R = $EachField<any, Identity>
-local x --: R
-x = 42
+--: R
+local x = 42
 ]])
     end)
 
@@ -6201,10 +6196,10 @@ x = 42
         v3_no_errors([[
 --:: Contam<T> = match T { number => any, string => string }
 --:: R = Contam<number>
-local x --: R
-x = 9999
-local y --: R
-y = "hello"
+--: R
+local x = 9999
+--: R
+local y = "hello"
 ]])
     end)
 
@@ -6213,8 +6208,8 @@ y = "hello"
         -- in practice the checker accepts this without crashing.
         v3_no_errors([[
 --:: R = any | string
-local x --: R
-x = 42
+--: R
+local x = 42
 ]])
     end)
 
@@ -6223,8 +6218,8 @@ x = 42
         -- for x; each assignment checks rhs <: Box<any> without rebinding x.
         v3_no_errors([[
 --:: Box<T> = { value: T }
-local x --: Box<any>
-x = { value = true }
+--: Box<any>
+local x = { value = true }
 x = { value = 42 }
 ]])
     end)
@@ -6233,8 +6228,8 @@ x = { value = 42 }
         -- never contributes nothing to a union; the result is just number.
         v3_no_errors([[
 --:: R = number | never
-local x --: R
-x = 42
+--: R
+local x = 42
 ]])
     end)
 
@@ -6244,8 +6239,8 @@ x = 42
         v3_no_errors([[
 --: () -> any
 local function get_any() return 42 end
-local x --: number
-x = get_any()
+--: number
+local x = get_any()
 ]])
     end)
 
@@ -6256,8 +6251,8 @@ x = get_any()
         v3_has_error([[
 --: () -> unknown
 local function get_unknown() return 42 end
-local x --: number
-x = get_unknown()
+--: number
+local x = get_unknown()
 ]], "unknown")
     end)
 end)
@@ -6268,8 +6263,8 @@ assert.describe("adversarial: intersection and union edge cases", function()
         v3_no_errors([[
 --:: T = { x: number }
 --:: R = T & T
-local v --: R
-v = { x = 1 }
+--: R
+local v = { x = 1 }
 ]])
     end)
 
@@ -6281,7 +6276,7 @@ v = { x = 1 }
 --:: A = { x: number }
 --:: B = { x: string }
 --:: R = A & B
-local v --: R
+--:: declare v = R
 ]], "x")
     end)
 
@@ -6397,7 +6392,7 @@ end
 --:: AB = A & B
 --: (A) -> nil
 local function needs_a(a) return nil end
-local v --: AB
+--:: declare v = AB
 needs_a(v)
 ]])
     end)
@@ -6407,8 +6402,8 @@ assert.describe("adversarial: literal type and widening edge cases", function()
 
     assert.it("PASS: literal assigned to annotated base type does not error", function()
         v3_no_errors([[
-local x --: number
-x = 42
+--: number
+local x = 42
 ]])
     end)
 
@@ -6417,7 +6412,7 @@ x = 42
         v3_has_error([[
 --: ("a" | "b") -> nil
 local function only_ab(s) return nil end
-local x --: string
+--:: declare x = string
 only_ab(x)
 ]], "")
     end)
@@ -6439,8 +6434,8 @@ end
 local a = 1
 local b = 2
 local c = a + b
-local x --: number
-x = c
+--: number
+local x = c
 ]])
     end)
 
@@ -6449,8 +6444,8 @@ x = c
 local a = "foo"
 local b = "bar"
 local c = a .. b
-local x --: string
-x = c
+--: string
+local x = c
 ]])
     end)
 end)
@@ -6461,8 +6456,8 @@ assert.describe("adversarial: recursive type aliases", function()
         -- A linked-list node: each node points to the next or nil.
         v3_no_errors([[
 --:: Node = { value: number, next: Node | nil }
-local n --: Node
-n = { value = 1, next = nil }
+--: Node
+local n = { value = 1, next = nil }
 ]])
     end)
 
@@ -6471,8 +6466,8 @@ n = { value = 1, next = nil }
         v3_no_errors([[
 --:: Even = { value: number, next: Odd | nil }
 --:: Odd  = { value: number, next: Even | nil }
-local e --: Even
-e = { value = 2, next = nil }
+--: Even
+local e = { value = 2, next = nil }
 ]])
     end)
 
@@ -6484,8 +6479,8 @@ e = { value = 2, next = nil }
         -- the constrain.lua TAG_NAMED placeholder path fires instead.
         v3_no_errors([[
 --:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
-local t --: Tree<number>
-t = { value = 1, left = nil, right = nil }
+--: Tree<number>
+local t = { value = 1, left = nil, right = nil }
 ]])
     end)
 
@@ -6493,8 +6488,8 @@ t = { value = 1, left = nil, right = nil }
         -- Tree<number>.value must be number; assigning a string should error.
         v3_has_error([[
 --:: Tree<T> = { value: T, left: Tree<T> | nil, right: Tree<T> | nil }
-local t --: Tree<number>
-t = { value = "wrong", left = nil, right = nil }
+--: Tree<number>
+local t = { value = "wrong", left = nil, right = nil }
 ]], "cannot assign")
     end)
 end)
@@ -6519,8 +6514,8 @@ end
 local function work() return 42 end
 local ok, val = pcall(work)
 if not ok then
-    local s --: string
-    s = val
+    --: string
+    local s = val
 end
 ]])
     end)
@@ -6561,8 +6556,8 @@ end
 local function f() return "hello" end
 local ok, val = pcall(f)
 if ok then
-    local s --: string
-    s = val
+    --: string
+    local s = val
 end
 ]])
     end)
@@ -6586,8 +6581,8 @@ end
 local function f() error("boom") end
 local ok, err = pcall(f)
 if not ok then
-    local s --: string
-    s = err
+    --: string
+    local s = err
 end
 ]])
     end)
@@ -6607,7 +6602,7 @@ local ok, val = pcall(f)
         -- after the spread ...R splices R=integer into the tuple.
         v3_no_errors([[
 --:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
-local x --: PcallReturn<(integer) -> integer>
+--:: declare x = PcallReturn<(integer) -> integer>
 --: (true, integer) | (false, string)
 local ok = x
 ]])
@@ -6617,7 +6612,7 @@ local ok = x
         -- PcallReturn with multi-return function: R is bound to a tuple, spread splices elements.
         v3_no_errors([[
 --:: PcallReturn<F> = match F { () -> %R => (true, ...R) | (false, string) }
-local x --: PcallReturn<() -> (integer, string)>
+--:: declare x = PcallReturn<() -> (integer, string)>
 --: (true, integer, string) | (false, string)
 local ok = x
 ]])
@@ -6662,7 +6657,7 @@ end
         -- not when it comes from a multi-return that resolves via constraint solving.
         -- Direct annotation works:
         v3_no_errors([[
-local f --: File | nil
+--:: declare f = File | nil
 if f then
     local line = f:read("*l")
 end
@@ -6692,9 +6687,9 @@ assert.describe("GAP: variance (unimplemented — all generics invariant)", func
 --:: Animal = { name: string }
 --:: Dog = { name: string, breed: string }
 --:: ReadBox<T> = { get: () -> T }
-local dog_box --: ReadBox<Dog>
-local _ --: ReadBox<Animal>
-_ = dog_box
+--:: declare dog_box = ReadBox<Dog>
+--: ReadBox<Animal>
+local _ = dog_box
 ]], "excess field")
     end)
 
@@ -6707,9 +6702,9 @@ _ = dog_box
 --:: Animal = { name: string }
 --:: Dog = { name: string, breed: string }
 --:: MutBox<T> = { get: () -> T, set: (T) -> nil }
-local dog_box --: MutBox<Dog>
-local animal_box --: MutBox<Animal>
-animal_box = dog_box
+--:: declare dog_box = MutBox<Dog>
+--: MutBox<Animal>
+local animal_box = dog_box
 ]], nil)
     end)
 end)
@@ -6717,47 +6712,47 @@ end)
 assert.describe("v3 closed vs open table subtyping", function()
     assert.it("depth subtyping: { x: integer } satisfies { x: number }", function()
         v3_no_errors([[
-local s --: { x: integer }
-local t --: { x: number }
-t = s
+--:: declare s = { x: integer }
+--: { x: number }
+local t = s
 ]])
     end)
 
     assert.it("depth subtyping: literal subtype field satisfies annotated", function()
         v3_no_errors([[
-local s --: { x: "hi" }
-local t --: { x: string }
-t = s
+--:: declare s = { x: "hi" }
+--: { x: string }
+local t = s
 ]])
     end)
 
     assert.it("excess field error: closed target rejects wider source", function()
         v3_has_error([[
-local t --: { x: number }
-t = { x = 1, y = 2 }
+--: { x: number }
+local t = { x = 1, y = 2 }
 ]], "excess field")
     end)
 
     assert.it("excess field error: closed-typed var to closed target", function()
         v3_has_error([[
-local s --: { x: number, y: string }
-local t --: { x: number }
-t = s
+--:: declare s = { x: number, y: string }
+--: { x: number }
+local t = s
 ]], "excess field")
     end)
 
     assert.it("open target accepts excess fields (width subtyping)", function()
         v3_no_errors([[
-local t --: { x: number, ... }
-t = { x = 1, y = 2 }
+--: { x: number, ... }
+local t = { x = 1, y = 2 }
 ]])
     end)
 
     assert.it("open target accepts closed source with more fields", function()
         v3_no_errors([[
-local s --: { x: number, y: string }
-local t --: { x: number, ... }
-t = s
+--:: declare s = { x: number, y: string }
+--: { x: number, ... }
+local t = s
 ]])
     end)
 
@@ -6780,15 +6775,15 @@ f({ x = 1, y = 2 })
     assert.it("generic bound: <T: { x: number }> still accepts wider types (at-least semantics)", function()
         v3_no_errors([[
 --:: Wrap<T: { x: number }> = { val: T }
-local w --: Wrap<{ x: number, y: string }>
+--:: declare w = Wrap<{ x: number, y: string }>
 ]])
     end)
 
     assert.it("depth subtyping in function return: () -> integer satisfies () -> number", function()
         v3_no_errors([[
-local f --: () -> integer
-local g --: () -> number
-g = f
+--:: declare f = () -> integer
+--: () -> number
+local g = f
 ]])
     end)
 end)
@@ -7097,17 +7092,14 @@ end)
 assert.describe("checker: multiple --: annotations → intersection type", function()
     assert.it("single --: still works (no regression)", function()
         no_errors([[
---: (string) -> string
-local f
+--:: declare f = ((string) -> string)
 ]])
     end)
 
     assert.it("two consecutive --: before local produce intersection — no error on either overload", function()
         no_errors([[
 --:: declare fn = ((string) -> string) & ((number) -> number)
---: (string) -> string
---: (number) -> number
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number))
 local a = fn("hello")
 local b = fn(42)
 ]])
@@ -7115,9 +7107,7 @@ local b = fn(42)
 
     assert.it("two consecutive --: before local produce intersection callable with first arg type", function()
         no_errors([[
---: (string) -> string
---: (number) -> number
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number))
 -- f should accept string (first overload)
 --: string
 local x = f("hello")
@@ -7126,9 +7116,7 @@ local x = f("hello")
 
     assert.it("two consecutive --: before local produce intersection callable with second arg type", function()
         no_errors([[
---: (string) -> string
---: (number) -> number
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number))
 -- f should accept number (second overload)
 --: number
 local y = f(42)
@@ -7137,19 +7125,14 @@ local y = f(42)
 
     assert.it("wrong arg type fails against intersection of two function overloads", function()
         has_error([[
---: (string) -> string
---: (number) -> number
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number))
 local z = f(true)
 ]], "no matching overload")
     end)
 
     assert.it("three consecutive --: produce a three-member intersection", function()
         no_errors([[
---: (string) -> string
---: (number) -> number
---: (boolean) -> boolean
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number)) & (((boolean) -> boolean))
 --: string
 local a = f("hi")
 --: number
@@ -7164,16 +7147,14 @@ local c = f(true)
         no_errors([[
 --: (string) -> string
 
---: (number) -> number
-local f
+--:: declare f = ((number) -> number)
 ]])
         -- After the gap the only annotation is (number)->number.
         -- Calling with a string should fail since the intersection was NOT formed.
         has_error([[
 --: (string) -> string
 
---: (number) -> number
-local f
+--:: declare f = ((number) -> number)
 --: string
 local x = f("hello")
 ]], "")
@@ -7616,32 +7597,32 @@ assert.describe("multi-return truncation: annotated single-var from call", funct
         -- local x --: string; x = f() where f: () -> (string, number)
         -- x gets the first return value, so string <: string passes.
         v3_no_errors([[
-local f --: () -> (string, number)
-local x --: string
-x = f()
+--:: declare f = () -> (string, number)
+--: string
+local x = f()
 ]])
     end)
 
     assert.it("inline annotation: --: string on local = multi-return call", function()
         v3_no_errors([[
-local f --: () -> (string, number)
+--:: declare f = () -> (string, number)
 local x = f() --: string
 ]])
     end)
 
     assert.it("nullable annotation: --: string? on single-var from multi-return", function()
         v3_no_errors([[
-local f --: () -> (string, number)
-local x --: string | nil
-x = f()
+--:: declare f = () -> (string, number)
+--: string | nil
+local x = f()
 ]])
     end)
 
     assert.it("wrong annotation: type error when first slot doesn't match", function()
         v3_has_error([[
-local f --: () -> (string, number)
-local x --: number
-x = f()
+--:: declare f = () -> (string, number)
+--: number
+local x = f()
 ]], "cannot assign")
     end)
 end)
@@ -7919,7 +7900,7 @@ assert.describe("record spread unification: { ...T, field: V }", function()
     assert.it("source satisfies spread annotation: all spread fields present", function()
         no_errors([[
 --:: Base = { x: integer, y: integer }
-local src --: { x: integer, y: integer, z: integer }
+--:: declare src = { x: integer, y: integer, z: integer }
 --: { ...Base, z: integer }
 local dst = src
 ]])
@@ -7928,7 +7909,7 @@ local dst = src
     assert.it("source missing spread field: error", function()
         has_error([[
 --:: Base = { x: integer, y: integer }
-local src --: { x: integer, z: integer }
+--:: declare src = { x: integer, z: integer }
 --: { ...Base, z: integer }
 local dst = src
 ]])
@@ -7937,7 +7918,7 @@ local dst = src
     assert.it("spread field type mismatch: error", function()
         has_error([[
 --:: Base = { x: integer, y: integer }
-local src --: { x: string, y: integer, z: integer }
+--:: declare src = { x: string, y: integer, z: integer }
 --: { ...Base, z: integer }
 local dst = src
 ]])
@@ -7946,7 +7927,7 @@ local dst = src
     assert.it("spread-only annotation: source with exact fields", function()
         no_errors([[
 --:: Base = { x: integer, name: string }
-local src --: { x: integer, name: string }
+--:: declare src = { x: integer, name: string }
 --: { ...Base }
 local dst = src
 ]])
@@ -7956,9 +7937,9 @@ local dst = src
         -- { ...(A | B) } where both A and B have field x — x: integer | string
         no_errors([[
 --:: WithX = { ...(({ x: integer }) | ({ x: string })) }
-local v --: WithX
-local _ --: integer | string
-_ = v.x
+--:: declare v = WithX
+--: integer | string
+local _ = v.x
 ]])
     end)
 
@@ -7966,9 +7947,9 @@ _ = v.x
         -- A has y, B does not — y should be optional (integer?)
         no_errors([[
 --:: Spread = { ...(({ x: integer, y: integer }) | ({ x: string })) }
-local v --: Spread
-local _ --: integer | string
-_ = v.x
+--:: declare v = Spread
+--: integer | string
+local _ = v.x
 ]])
     end)
 
@@ -7981,8 +7962,8 @@ local function make() --: () -> WithName<TwoKinds>
     error("mock")
 end
 local v = make()
-local _ --: string
-_ = v.name
+--: string
+local _ = v.name
 ]])
     end)
 
@@ -7990,7 +7971,7 @@ _ = v.name
         -- dst expects { ...(A | B), z: integer } but src is missing z
         has_error([[
 --:: AB = { x: integer } | { x: string }
-local src --: { x: integer }
+--:: declare src = { x: integer }
 --: { ...AB, z: integer }
 local dst = src
 ]])
@@ -8024,7 +8005,7 @@ local dst = v
 --:: B = { x: string }
 --:: WithK<T> = { ...T, k: boolean }
 --:: Dist = WithK<A | B>
-local v --: Dist
+--:: declare v = Dist
 --: boolean
 local _ = v.k
 ]])
@@ -8038,7 +8019,7 @@ local _ = v.k
 --:: A = { x: integer, y: integer }
 --:: B = { x: string }
 --:: Dist = { ...(A | B) }
-local v --: Dist
+--:: declare v = Dist
 --: integer
 local _ = v.y
 ]])
@@ -8124,7 +8105,7 @@ local _b = b
 
     assert.it("string.match with dynamic pattern returns string | nil", function()
         no_errors([[
-local pat --: string
+--:: declare pat = string
 --: string | nil
 local x = string.match("hello", pat)
 ]])
@@ -8389,7 +8370,7 @@ assert.describe("$Require<T> intrinsic", function()
         -- immediately at annotation resolution time via constrain.lua.
         v3_no_errors([[
 --:: module "test.mod": { x: integer }
-local v --: $Require<"test.mod">
+--:: declare v = $Require<"test.mod">
 --: (integer) -> nil
 local function f(n) return nil end
 f(v.x)
@@ -8400,7 +8381,7 @@ f(v.x)
         -- No module declaration for "nomod" => $Require evaluates to unknown.
         -- Accessing a field on unknown requires narrowing first => error.
         v3_has_error([[
-local v --: $Require<"nomod">
+--:: declare v = $Require<"nomod">
 local _ = v.foo
 ]], "narrowed")
     end)
@@ -8427,7 +8408,7 @@ local result = load_mod("test.mod")
         v3_no_errors([[
 --:: module "mymod": { y: string }
 --:: R = $Require<"mymod">
-local v --: R
+--:: declare v = R
 --: (string) -> nil
 local function f(s) return nil end
 f(v.y)
@@ -8532,7 +8513,7 @@ assert.describe("checker: user-defined type guards", function()
         no_errors([[
 --: (x: unknown) -> x is string
 local function is_str(x) return type(x) == "string" end
-local v --: unknown
+--:: declare v = unknown
 if is_str(v) then
     local s = v --: string
 end
@@ -8543,7 +8524,7 @@ end
         no_errors([[
 --: (x: string | integer) -> x is integer
 local function is_int(x) return type(x) == "number" end
-local v --: string | integer
+--:: declare v = string | integer
 if is_int(v) then
     local n = v --: integer
 end
@@ -8554,7 +8535,7 @@ end
         no_errors([[
 --: (x: unknown) -> x is string
 local function is_str(x) return type(x) == "string" end
-local v --: string | integer
+--:: declare v = string | integer
 if not is_str(v) then
     local n = v --: integer
 end
@@ -8574,7 +8555,7 @@ local function is_str(x) return type(x) == "string" end
 local function is_str(x) return type(x) == "string" end
 --: (integer) -> nil
 local function take_int(n) end
-local v --: string | integer
+--:: declare v = string | integer
 if is_str(v) then
     take_int(v)
 end
@@ -8591,7 +8572,7 @@ local function assert_str(x)
 end
 --: (string) -> nil
 local function take_str(s) end
-local v --: unknown
+--:: declare v = unknown
 assert_str(v)
 take_str(v)
 ]])
@@ -8603,7 +8584,7 @@ take_str(v)
 local function assert_int(x)
     assert(type(x) == "number", "expected integer")
 end
-local v --: unknown
+--:: declare v = unknown
 assert_int(v)
 local n = v --: integer
 ]])
@@ -8615,7 +8596,7 @@ local n = v --: integer
 local function assert_str(x) end
 --: (string) -> nil
 local function take_str(s) end
-local v --: string | integer
+--:: declare v = string | integer
 assert_str(v)
 take_str(v)
 ]])
@@ -8627,7 +8608,7 @@ take_str(v)
 local function assert_str(x) end
 --: (integer) -> nil
 local function take_int(n) end
-local v --: unknown
+--:: declare v = unknown
 assert_str(v)
 take_int(v)
 ]], "")
@@ -8645,7 +8626,7 @@ assert.describe("intrinsic: $Throw<...Msg>", function()
         -- check that the Throw message itself appears.
         v3_has_error([[
 --:: BadType = $Throw<"oops">
-local x --: BadType
+--:: declare x = BadType
 ]], "oops")
     end)
 
@@ -8654,7 +8635,7 @@ local x --: BadType
         v3_has_error([[
 --:: Reject<T> = $Throw<T, " is not allowed here">
 --:: R = Reject<integer>
-local x --: R
+--:: declare x = R
 ]], "integer is not allowed here")
     end)
 end)
@@ -8666,7 +8647,7 @@ assert.describe("intrinsic: $Catch<T, Default?>", function()
 --:: Safe = $Catch<$Throw<"oops">, integer>
 --: (integer) -> nil
 local function take_int(n) end
-local x --: Safe
+--:: declare x = Safe
 take_int(x)
 ]])
     end)
@@ -8677,7 +8658,7 @@ take_int(x)
 --:: Safe = $Catch<integer, string>
 --: (integer) -> nil
 local function take_int(n) end
-local x --: Safe
+--:: declare x = Safe
 take_int(x)
 ]])
     end)
@@ -8686,7 +8667,7 @@ take_int(x)
         -- No Default → returns never when thrown, no diagnostic
         v3_no_errors([[
 --:: Safe = $Catch<$Throw<"x">>
-local x --: Safe
+--:: declare x = Safe
 ]])
     end)
 
@@ -8695,7 +8676,7 @@ local x --: Safe
         v3_has_error([[
 --:: MustBeTable<T> = match T { { x: integer } => T, _ => $Throw<T, " must be a table"> }
 --:: R = MustBeTable<integer>
-local x --: R
+--:: declare x = R
 ]], "integer must be a table")
 
         -- Table arg: should not fire
@@ -8703,7 +8684,7 @@ local x --: R
 --:: Point = { x: integer }
 --:: MustBeTable<T> = match T { { x: integer } => T, _ => $Throw<T, " must be a table"> }
 --:: R = MustBeTable<Point>
-local x --: R
+--:: declare x = R
 ]])
     end)
 end)
@@ -8717,18 +8698,18 @@ assert.describe("generic parameter defaults: <T = Default>", function()
         -- Nullable<T = unknown> = T | nil; bare Nullable => unknown | nil
         v3_no_errors([[
 --:: Nullable<T = unknown> = T | nil
-local x --: Nullable
-local y --: unknown | nil
-y = x
+--:: declare x = Nullable
+--: unknown | nil
+local y = x
 ]])
     end)
 
     assert.it("Nullable<integer> uses explicit arg (integer)", function()
         v3_no_errors([[
 --:: Nullable<T = unknown> = T | nil
-local x --: Nullable<integer>
-local y --: integer | nil
-y = x
+--:: declare x = Nullable<integer>
+--: integer | nil
+local y = x
 ]])
     end)
 
@@ -8736,7 +8717,7 @@ y = x
         -- E defaults to string; Result<integer> = { ok: true, value: integer } | { ok: false, error: string }
         v3_no_errors([[
 --:: Result<T, E = string> = { ok: true, value: T } | { ok: false, error: E }
-local x --: Result<integer>
+--:: declare x = Result<integer>
 ]])
     end)
 
@@ -8744,14 +8725,14 @@ local x --: Result<integer>
         v3_no_errors([[
 --:: Error = { msg: string }
 --:: Result<T, E = string> = { ok: true, value: T } | { ok: false, error: E }
-local x --: Result<integer, Error>
+--:: declare x = Result<integer, Error>
 ]])
     end)
 
     assert.it("<T: number = integer> — valid default, no error at definition", function()
         v3_no_errors([[
 --:: Clamp<T: number = integer> = T
-local x --: Clamp
+--:: declare x = Clamp
 ]])
     end)
 
@@ -8764,7 +8745,7 @@ local x --: Clamp
     assert.it("<A, B = string> — trailing default is valid", function()
         v3_no_errors([[
 --:: Pair<A, B = string> = { first: A, second: B }
-local x --: Pair<integer>
+--:: declare x = Pair<integer>
 ]])
     end)
 
@@ -8786,8 +8767,8 @@ assert.describe("match: table-pattern rest capture { field: _, ...%Rest }", func
 --:: RestOf<D> = match D { { x: _, ...%Rest } => Rest }
 --:: T = { x: integer, y: string, z: boolean }
 --:: R = RestOf<T>
-local v --: R
-v = { y = "hi", z = true }
+--: R
+local v = { y = "hi", z = true }
 ]])
     end)
 
@@ -8797,8 +8778,8 @@ v = { y = "hi", z = true }
 --:: Override<D> = match D { { x: _, ...%Rest } => { x: string, ...Rest } }
 --:: T = { x: integer, y: string, z: boolean }
 --:: R = Override<T>
-local v --: R
-v = { x = "hello", y = "world", z = true }
+--: R
+local v = { x = "hello", y = "world", z = true }
 ]])
     end)
 
@@ -8811,8 +8792,8 @@ v = { x = "hello", y = "world", z = true }
 --:: MakeOptional<D> = match D { { key: %K, value: %V, optional: _, ...%Rest } => { key: K, value: V | nil, optional: true, ...Rest } }
 --:: Partial<T> = $EachField<T, MakeOptional>
 --:: R = Partial<{ x: integer }>
-local v --: R
-v = {}
+--: R
+local v = {}
 v = { x = 42 }
 ]])
     end)
@@ -8828,9 +8809,9 @@ assert.describe("match: param-list rest capture (...%P) -> T", function()
         v3_no_errors([[
 --:: Parameters<F> = match F { (...%P) -> unknown => P }
 --:: R = Parameters<(integer, string) -> boolean>
-local v --: R
-local v2 --: (integer, string)
-v2 = v
+--:: declare v = R
+--: (integer, string)
+local v2 = v
 ]])
     end)
 
@@ -8839,9 +8820,9 @@ v2 = v
         v3_no_errors([[
 --:: Tail<F> = match F { (integer, ...%P) -> unknown => P }
 --:: R = Tail<(integer, string, boolean) -> nil>
-local v --: R
-local v2 --: (string, boolean)
-v2 = v
+--:: declare v = R
+--: (string, boolean)
+local v2 = v
 ]])
     end)
 
@@ -8850,9 +8831,9 @@ v2 = v
         v3_no_errors([[
 --:: Last<F> = match F { (...%P, %L) -> unknown => L }
 --:: R = Last<(integer, string) -> nil>
-local v --: R
-local v2 --: string
-v2 = v
+--:: declare v = R
+--: string
+local v2 = v
 ]])
     end)
 
@@ -8861,7 +8842,7 @@ v2 = v
         v3_no_errors([[
 --:: Init<F> = match F { (...%P, %L) -> unknown => P }
 --:: R = Init<(integer, string) -> nil>
-local v --: R
+--:: declare v = R
 ]])
     end)
 end)
@@ -8887,9 +8868,9 @@ end
 --:: MyMeta = { #__add: (number, number) -> number }
 --:: WithMeta = { x: integer, #...MyMeta }
 --:: R = MetaOf<WithMeta>
-local v --: R
+--:: declare v = R
 -- R should not be nil alone: it should unify with nil (being M | nil)
-local n --: nil
+--:: declare n = nil
 -- This SHOULD fail: R could be the meta table, not nil
 ]])
     end)
@@ -8900,9 +8881,9 @@ local n --: nil
 --:: MetaOf<T> = match T { { #...%M } => M, _ => nil }
 --:: PlainTable = { x: integer }
 --:: R = MetaOf<PlainTable>
-local v --: R
-local n --: nil
-n = v
+--:: declare v = R
+--: nil
+local n = v
 ]])
     end)
 
@@ -8911,13 +8892,13 @@ n = v
         -- The result should still have the fields of T.
         v3_no_errors([[
 --:: MyMeta = { #__add: (any, any) -> any }
-local mt --: MyMeta
+--:: declare mt = MyMeta
 --: { x: integer }
 local t = { x = 1 }
 local result = setmetatable(t, mt)
 -- result is { x: integer } & { #...MyMeta }, regular field x still accessible
-local _x --: integer
-_x = result.x
+--: integer
+local _x = result.x
 ]])
     end)
 
@@ -8926,7 +8907,7 @@ _x = result.x
         -- The result carries meta slots, so __add enables + operator.
         v3_no_errors([[
 --:: MyMeta = { #__add: (any, any) -> integer }
-local mt --: MyMeta
+--:: declare mt = MyMeta
 local t = { x = 1 }
 local result = setmetatable(t, mt)
 -- result has #__add via meta spread, so + should be valid
@@ -8944,9 +8925,9 @@ assert.describe("partial application of generic aliases: TAG_PARTIAL_APP", funct
 --:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
 --:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
 --:: R = Pick<{ x: integer, y: string }, "x">
-local v --: R
-local v2 --: { x: integer }
-v2 = v
+--:: declare v = R
+--: { x: integer }
+local v2 = v
 ]])
     end)
 
@@ -8956,9 +8937,9 @@ v2 = v
 --:: OmitKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => {}, _ => { D } }, _ => { D } }
 --:: Omit<T, Keys> = $EachField<T, OmitKey<Keys>>
 --:: R = Omit<{ x: integer, y: string }, "x">
-local v --: R
-local v2 --: { y: string }
-v2 = v
+--:: declare v = R
+--: { y: string }
+local v2 = v
 ]])
     end)
 
@@ -8968,9 +8949,9 @@ v2 = v
 --:: PickKey<Keys, D> = match D { { key: %K, ...%Rest } => match K { Keys => { D }, _ => {} }, _ => {} }
 --:: Pick<T, Keys> = $EachField<T, PickKey<Keys>>
 --:: R = Pick<{ x: integer, y: string, z: boolean }, "x" | "y">
-local v --: R
-local v2 --: { x: integer, y: string }
-v2 = v
+--:: declare v = R
+--: { x: integer, y: string }
+local v2 = v
 ]])
     end)
 
@@ -8995,7 +8976,7 @@ assert.describe("match: coinductive intersection field-merging", function()
 --:: FieldX_closed<T> = match T { { x: %V } => V }
 --: () -> never
 local function f()
-    local r --: FieldX_closed<{ x: integer } & { y: string }>
+    --:: declare r = FieldX_closed<{ x: integer } & { y: string }>
     return r
 end
 ]])
@@ -9009,7 +8990,7 @@ end
 --:: FieldX_open<T> = match T { { x: %V } => V }
 --: () -> integer
 local function f()
-    local r --: FieldX_open<{ x: integer } & { y: string, ...}>
+    --:: declare r = FieldX_open<{ x: integer } & { y: string, ...}>
     return r
 end
 ]])
@@ -9022,7 +9003,7 @@ end
 --:: FieldXY_merge<T> = match T { { x: %V, y: %W } => V }
 --: () -> integer
 local function f()
-    local r --: FieldXY_merge<{ x: integer, ...} & { y: string, ...}>
+    --:: declare r = FieldXY_merge<{ x: integer, ...} & { y: string, ...}>
     return r
 end
 ]])
@@ -9051,9 +9032,9 @@ assert.describe("interface declaration: --:: Name: Constraint = body", function(
         v3_no_errors([[
 --:: Addable = { x: number, y: number }
 --:: Vec2: Addable = { x: number, y: number }
-local v --: Vec2
-local a --: Addable
-a = v
+--:: declare v = Vec2
+--: Addable
+local a = v
 ]])
     end)
 
@@ -9070,9 +9051,9 @@ a = v
         v3_has_error([[
 --:: Container<T> = { value: T }
 --:: Box<T>: Container<T> = { value: T }
-local b --: Box<integer>
-local c --: Container<string>
-c = b
+--:: declare b = Box<integer>
+--: Container<string>
+local c = b
 ]], "cannot assign")
     end)
 
@@ -9097,18 +9078,18 @@ assert.describe("bracket string key: { [\"foo\"]: V } → named field", function
     assert.it("{ [\"x\"]: integer } is equivalent to { x: integer }", function()
         v3_no_errors([[
 --:: T = { ["x"]: integer }
-local t --: T
-local n --: integer
-n = t.x
+--:: declare t = T
+--: integer
+local n = t.x
 ]])
     end)
 
     assert.it("{ [\"a\"]: string, [\"b\"]: integer } has both named fields", function()
         v3_no_errors([[
 --:: T = { ["a"]: string, ["b"]: integer }
-local t --: T
-local s --: string
-local n --: integer
+--:: declare t = T
+--:: declare s = string
+--:: declare n = integer
 s = t.a
 n = t.b
 ]])
@@ -9128,9 +9109,9 @@ assert.describe("Open/Closed transforms", function()
         v3_no_errors([[
 --:: Base = { x: integer }
 --:: O = Open<Base>
-local t --: O
-local n --: integer
-n = t.x
+--:: declare t = O
+--: integer
+local n = t.x
 local extra = t.extra
 ]])
     end)
@@ -9139,7 +9120,7 @@ local extra = t.extra
         v3_has_error([[
 --:: Base = { x: integer }
 --:: C = Closed<Base>
-local t --: C
+--:: declare t = C
 local extra = t.extra
 ]], "")
     end)
@@ -9149,9 +9130,9 @@ local extra = t.extra
         v3_no_errors([[
 --:: Passthrough<T> = match T { { ...%Rest } => { ...Rest, ... } }
 --:: R = Passthrough<{ x: integer }>
-local t --: R
-local n --: integer
-n = t.x
+--:: declare t = R
+--: integer
+local n = t.x
 local extra = t.extra
 ]])
     end)
@@ -9166,9 +9147,9 @@ assert.describe("--:: require: load declaration files", function()
         -- lib/web/js_types.lua declares DOMTokenList; check it's in scope after require
         v3_no_errors([[
 --:: require "lib.web.js_types"
-local t --: DOMTokenList
-local n --: integer
-n = t.length
+--:: declare t = DOMTokenList
+--: integer
+local n = t.length
 ]])
     end)
 
@@ -9176,9 +9157,9 @@ n = t.length
         v3_no_errors([[
 --:: require "lib.web.js_types"
 --:: El = HTMLElement
-local e --: El
-local s --: string
-s = e.id
+--:: declare e = El
+--: string
+local s = e.id
 ]])
     end)
 
@@ -9199,9 +9180,9 @@ local x = 1
         -- Instead, verify a field that IS present returns the right type.
         v3_no_errors([[
 --:: require "lib.web.js_types"
-local s --: CSSStyleDeclaration
-local n --: integer
-n = s.length
+--:: declare s = CSSStyleDeclaration
+--: integer
+local n = s.length
 ]])
     end)
 
@@ -9211,9 +9192,9 @@ n = s.length
         -- Lens = { get: (unknown) -> unknown, set: (unknown, unknown) -> unknown }
         v3_no_errors([[
 --:: require "lib.reactive"
-local lens --: Lens
-local get_fn --: (unknown) -> unknown
-get_fn = lens.get
+--:: declare lens = Lens
+--: (unknown) -> unknown
+local get_fn = lens.get
 ]])
     end)
 end)
@@ -9240,8 +9221,8 @@ assert.describe("bound decomposition: <F: (...P)->R, P, R> back-inference", func
 --: (integer) -> string
 local function int_to_str(n) return tostring(n) end
 local result = apply(int_to_str, 42)
-local s --: string
-s = result
+--: string
+local s = result
 ]])
     end)
 
@@ -9252,8 +9233,8 @@ s = result
 --: (integer, string) -> boolean
 local function check(n, s) return n > 0 end
 local result = apply2(check, 1, "hello")
-local b --: boolean
-b = result
+--: boolean
+local b = result
 ]])
     end)
 
@@ -9275,8 +9256,8 @@ local n = result + 1
 local function f(n) return tostring(n) end
 local ok, val = pcall(f, 42)
 if ok then
-    local s --: string
-    s = val
+    --: string
+    local s = val
 end
 ]])
     end)
@@ -9297,8 +9278,8 @@ local ok, val = pcall(f, "not_a_number")
 local function f(n) return tostring(n) end
 local ok, val = xpcall(f, tostring, 99)
 if ok then
-    local s --: string
-    s = val
+    --: string
+    local s = val
 end
 ]])
     end)
@@ -9311,8 +9292,8 @@ local function f() return 1, "a" end
 local ok, n, s = pcall(f)
 if ok then
     local x = n + 1
-    local t --: string
-    t = s
+    --: string
+    local t = s
 end
 ]])
     end)
@@ -9325,8 +9306,8 @@ end
 local function square(x) return x * x end
 local ok, result = wrap(square, 3.0)
 if ok then
-    local n --: number
-    n = result
+    --: number
+    local n = result
 end
 ]])
     end)
@@ -9374,8 +9355,7 @@ local function double(x) return x * 2 end
 
     assert.it("PASS: generic function called at call site still instantiates correctly", function()
         no_errors([[
---: <T>(T) -> T
-local id
+--:: declare id = (<T>(T) -> T)
 --: integer
 local x = id(42)
 ]])
@@ -9383,10 +9363,8 @@ local x = id(42)
 
     assert.it("PASS: multi-param generic <A, B>((A)->B, A) -> B called correctly", function()
         no_errors([[
---: <A, B>((A) -> B, A) -> B
-local apply
---: (integer) -> string
-local f
+--:: declare apply = (<A, B>((A) -> B, A) -> B)
+--:: declare f = ((integer) -> string)
 --: string
 local result = apply(f, 1)
 ]])
@@ -9431,7 +9409,8 @@ assert.describe("augment: --:: augment Name { ... }", function()
         no_errors([[
 --:: Base = { x: integer }
 --:: augment Base { y: string }
-local t --: Base
+--: Base
+local t = { x = 1, y = "hi" }
 local x = t.x
 local y = t.y
 ]])
@@ -9441,7 +9420,7 @@ local y = t.y
         no_errors([[
 --:: Rec = { name: string, count: integer }
 --:: augment Rec { extra: boolean }
-local r --: Rec
+--:: declare r = Rec
 local n = r.name
 local c = r.count
 ]])
@@ -9495,8 +9474,8 @@ assert.describe("indexed access: T[K]", function()
         v3_no_errors([[
 --:: T = { foo: number, bar: string }
 --:: X = T["foo"]
-local x --: X
-x = 42
+--: X
+local x = 42
 ]])
     end)
 
@@ -9504,8 +9483,8 @@ x = 42
         v3_has_error([[
 --:: T = { foo: number, bar: string }
 --:: X = T["foo"]
-local x --: X
-x = "hello"
+--: X
+local x = "hello"
 ]], "")
     end)
 
@@ -9513,8 +9492,8 @@ x = "hello"
         v3_no_errors([[
 --:: F<T, K> = T[K]
 --:: R = F<{ foo: number }, "foo">
-local x --: R
-x = 42
+--: R
+local x = 42
 ]])
     end)
 
@@ -9522,8 +9501,8 @@ x = 42
         v3_no_errors([[
 --:: T = { outer: { inner: number } }
 --:: X = T["outer"]["inner"]
-local x --: X
-x = 7
+--: X
+local x = 7
 ]])
     end)
 
@@ -9533,8 +9512,8 @@ x = 7
 --:: B = { tag: "b" }
 --:: U = A | B
 --:: X = U["tag"]
-local x --: X
-x = "a"
+--: X
+local x = "a"
 x = "b"
 ]])
     end)
@@ -9543,7 +9522,7 @@ x = "b"
         v3_has_error([[
 --:: T = { foo: number }
 --:: X = T["nonexistent"]
-local x --: X
+--:: declare x = X
 ]], "no member")
     end)
 
@@ -9551,8 +9530,8 @@ local x --: X
         v3_no_errors([[
 --:: M = { [string]: number }
 --:: X = M[string]
-local x --: X
-x = 42
+--: X
+local x = 42
 ]])
     end)
 
@@ -9576,8 +9555,8 @@ end
 --:: T = { foo: number }
 --:: U = boolean
 --:: V = T["foo"] | U
-local x --: V
-x = 42
+--: V
+local x = 42
 x = true
 ]])
     end)
@@ -9593,9 +9572,9 @@ x = true
         -- The alias `Outer` should still be registered so `b: integer` is accessible.
         v3_has_error([[
 --:: Outer = { a: string?, b: integer }
-local x --: Outer
-local y --: integer
-y = x.b
+--:: declare x = Outer
+--: integer
+local y = x.b
 ]], "postfix")
     end)
 end)
@@ -9643,8 +9622,8 @@ local m = { foo = function(a, b) return a .. b end }
 local function apply(m)
     return m.foo("hello", "world")
 end
-local result --: string
-result = apply(m)
+--: string
+local result = apply(m)
 ]])
     end)
 

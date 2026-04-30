@@ -780,8 +780,7 @@ end
         -- Calling a union of functions: argument must satisfy ALL overloads
         -- unless it's intersection (overload dispatch)
         has_error([[
---: ((string) -> string) | ((number) -> number)
-local f
+--:: declare f = (((string) -> string) | ((number) -> number))
 local y = f(true)
 ]], "")
     end)
@@ -794,9 +793,7 @@ end)
 assert.describe("soundness: intersection types", function()
     assert.it("intersection of functions: overload dispatch", function()
         no_errors([[
---: (string) -> string
---: (number) -> number
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number))
 local a = f("hello")
 local b = f(42)
 ]])
@@ -804,17 +801,14 @@ local b = f(42)
 
     assert.it("intersection: no matching overload — error", function()
         has_error([[
---: (string) -> string
---: (number) -> number
-local f
+--:: declare f = (((string) -> string)) & (((number) -> number))
 local a = f(true)
 ]], "no matching overload")
     end)
 
     assert.it("intersection of tables: all fields available", function()
         no_errors([[
---: { x: number } & { y: number }
-local t
+--:: declare t = { x: number } & { y: number }
 local a = t.x
 local b = t.y
 ]])
@@ -822,8 +816,7 @@ local b = t.y
 
     assert.it("explicit intersection annotation", function()
         no_errors([[
---: ((string) -> string) & ((number) -> number)
-local f
+--:: declare f = (((string) -> string) & ((number) -> number))
 local a = f("hello")
 local b = f(42)
 ]])
@@ -1061,9 +1054,7 @@ end)
 assert.describe("soundness: overloaded function where one overload returns nil", function()
     assert.it("overload with nil return type", function()
         no_errors([[
---: (string) -> string
---: (number) -> nil
-local f
+--:: declare f = (((string) -> string)) & ((number) -> nil)
 local a = f("hello")
 local b = f(42)
 ]])
@@ -1633,9 +1624,7 @@ local n = x.name
 
     assert.it("intersection of overloads with different return types", function()
         no_errors([[
---: (string) -> number
---: (number) -> string
-local f
+--:: declare f = (((string) -> number)) & (((number) -> string))
 --: number
 local a = f("hello")
 --: string
@@ -1722,7 +1711,7 @@ end)
 assert.describe("Gap 11: unknown cannot be laundered through any", function()
     assert.it("cast unknown -> any -> integer is rejected at the cast", function()
         has_error([==[
-local x --: unknown
+--:: declare x = unknown
 local n = --[[: any]] x
 local r = n + 1
 ]==], "must be narrowed")
@@ -1730,7 +1719,7 @@ local r = n + 1
 
     assert.it("cast unknown -> any directly is rejected", function()
         has_error([==[
-local x --: unknown
+--:: declare x = unknown
 local n = --[[: any]] x
 ]==], "must be narrowed")
     end)
@@ -1739,14 +1728,14 @@ local n = --[[: any]] x
         has_error([[
 --: (any) -> nil
 local function f(x) end
-local v --: unknown
+--:: declare v = unknown
 f(v)
 ]], "must be narrowed")
     end)
 
     assert.it("unknown returned from () -> any is rejected", function()
         has_error([[
-local v --: unknown
+--:: declare v = unknown
 --: () -> any
 local function f() return v end
 ]], "must be narrowed")
@@ -1754,7 +1743,7 @@ local function f() return v end
 
     assert.it("local --: any = unknown_expr is rejected", function()
         has_error([[
-local v --: unknown
+--:: declare v = unknown
 --: any
 local x = v
 ]], "must be narrowed")
@@ -1762,7 +1751,7 @@ local x = v
 
     assert.it("force cast to any is rejected (use --[[: any]] or a concrete T)", function()
         has_error([==[
-local x --: unknown
+--:: declare x = unknown
 local n = --[[:! any]] x
 ]==], "`--%[%[:! any%]%]` is not allowed")
     end)
@@ -1786,7 +1775,7 @@ local n = --[[: any]] x
 
     assert.it("any -> unknown still works (unknown is the top type)", function()
         no_errors([==[
-local x --: any
+--:: declare x = any
 local u = --[[: unknown]] x
 ]==])
     end)
@@ -2173,8 +2162,7 @@ end)
 assert.describe("soundness: adversarial annotation edge cases", function()
     assert.it("annotation on uninitialized local", function()
         no_errors([[
---: string
-local x
+--:: declare x = string
 ]])
     end)
 
@@ -2212,18 +2200,14 @@ end)
 assert.describe("soundness: adversarial overload dispatch", function()
     assert.it("overload with overlapping param types — best match wins", function()
         no_errors([[
---: (number) -> string
---: (integer) -> string
-local f
+--:: declare f = (((number) -> string)) & (((integer) -> string))
 local a = f(42)
 ]])
     end)
 
     assert.it("overloaded function called with exact match on each overload", function()
         no_errors([[
---: (string, string) -> string
---: (number, number) -> number
-local f
+--:: declare f = (((string, string) -> string)) & (((number, number) -> number))
 local a = f("a", "b")
 local b = f(1, 2)
 ]])
@@ -2231,9 +2215,7 @@ local b = f(1, 2)
 
     assert.it("overloaded function called with mismatched arg types — error", function()
         has_error([[
---: (string, string) -> string
---: (number, number) -> number
-local f
+--:: declare f = (((string, string) -> string)) & (((number, number) -> number))
 local a = f("hello", 42)
 ]], "")
     end)
@@ -2522,21 +2504,21 @@ assert.describe("unknown vs any", function()
 
     assert.it("unknown: field access is an error", function()
         has_error([[
-local x --: unknown
+--:: declare x = unknown
 local y = x.foo
 ]], "must be narrowed")
     end)
 
     assert.it("unknown: call is an error", function()
         has_error([[
-local x --: unknown
+--:: declare x = unknown
 x()
 ]], "must be narrowed")
     end)
 
     assert.it("unknown: arithmetic is an error", function()
         has_error([[
-local x --: unknown
+--:: declare x = unknown
 local y = x + 1
 ]], "cannot perform arithmetic")
     end)
@@ -2544,29 +2526,29 @@ local y = x + 1
     assert.it("unknown: passing to typed param is an error", function()
         has_error([[
 --:: f = (string) -> nil
-local f --: f
-local x --: unknown
+--:: declare f = f
+--:: declare x = unknown
 f(x)
 ]], "must be narrowed")
     end)
 
     assert.it("any: field access is allowed", function()
         no_errors([[
-local x --: any
+--:: declare x = any
 local y = x.foo
 ]])
     end)
 
     assert.it("any: call is allowed", function()
         no_errors([[
-local x --: any
+--:: declare x = any
 x()
 ]])
     end)
 
     assert.it("any: arithmetic is allowed", function()
         no_errors([[
-local x --: any
+--:: declare x = any
 local y = x + 1
 ]])
     end)
@@ -2574,8 +2556,8 @@ local y = x + 1
     assert.it("any: passing to typed param is allowed", function()
         no_errors([[
 --:: f = (string) -> nil
-local f --: f
-local x --: any
+--:: declare f = f
+--:: declare x = any
 f(x)
 ]])
     end)
@@ -2595,7 +2577,7 @@ local x = "hello"
 
     assert.it("repro 2: variable mismatch (string var to integer)", function()
         has_error([[
-local s --: string
+--:: declare s = string
 --: integer
 local x = s
 ]], "cannot assign")
@@ -2620,10 +2602,68 @@ local y = get_unk()
     end)
 end)
 
+-- Regression tests for Gap 9 (annotated local without initializer when nil ∉ T).
+-- `local x --: T` (no initializer) types `x` as `T` but the runtime value is
+-- `nil`. The fix rejects the declaration unless `nil` is a member of `T`.
+assert.describe("Gap 9: annotated local without initializer requires nil ∈ T", function()
+    assert.it("rejected: local x --: integer (nil ∉ integer)", function()
+        has_error([[
+local x --: integer
+]], "requires an initializer")
+    end)
+
+    assert.it("accepted: local x --: integer | nil", function()
+        no_errors([[
+local x --: integer | nil
+]])
+    end)
+
+    assert.it("accepted: local x --: integer = 5 (initializer provided)", function()
+        no_errors([[
+--: integer
+local x = 5
+]])
+    end)
+
+    assert.it("accepted: local x --: string | nil (nil arm in union)", function()
+        no_errors([[
+local x --: string | nil
+]])
+    end)
+
+    assert.it("rejected: local x --: string (nil ∉ string)", function()
+        has_error([[
+local x --: string
+]], "requires an initializer")
+    end)
+
+    assert.it("accepted: local x --: any (any contains nil)", function()
+        -- any always allows nil. Emits the explicit-any warning, no Gap-9 error.
+        no_errors([[
+--: any
+local x --: any | nil
+]])
+    end)
+
+    assert.it("accepted: local x --: unknown (unknown allows nil)", function()
+        no_errors([[
+local x --: unknown
+]])
+    end)
+
+    assert.it("rejected: nil arm only in nested type (nil not at top level)", function()
+        -- (string | nil) -> string is a function type; nil is inside the
+        -- parameter union but not at the top level of the declared type.
+        has_error([[
+local f --: (string | nil) -> string
+]], "requires an initializer")
+    end)
+end)
+
 assert.describe("redundant type assertion warning", function()
     assert.it("warns when cast type equals inferred type", function()
         has_warning([==[
-local x --: integer
+--:: declare x = integer
 local y = (--[[: integer]] x)
 ]==], "redundant")
     end)
@@ -2645,7 +2685,7 @@ local y = (--[[: number]] x)
 
     assert.it("does not warn when cast changes the type", function()
         local ec = check([==[
-local x --: integer
+--:: declare x = integer
 local y = (--[[: string]] x)
 ]==])
         local msg = errors_mod.format_plain(ec)
@@ -2654,7 +2694,7 @@ local y = (--[[: string]] x)
 
     assert.it("does not warn redundant when either side is any", function()
         local ec = check([==[
-local x --: any
+--:: declare x = any
 local y = (--[[: any]] x)
 ]==])
         local msg = errors_mod.format_plain(ec)
@@ -2663,7 +2703,7 @@ local y = (--[[: any]] x)
 
     assert.it("warns on string cast of string", function()
         has_warning([==[
-local x --: string
+--:: declare x = string
 local y = (--[[: string]] x)
 ]==], "redundant")
     end)
@@ -2933,8 +2973,8 @@ local function f(x)
     return "hello"
 end
 local result = wrap(f, 42)
-local s --: string
-s = result
+--: string
+local s = result
 ]])
     end)
 

@@ -21,8 +21,8 @@ local SCRATCH_FILE  = ".crescentcache_test_diags_subject.lua"
 
 -- Source with a guaranteed checker error: assigning a string to a typed-as-integer local.
 local SRC_WITH_ERROR = [[
-local x --: integer
-x = "not an integer"
+--: integer
+local x = "not an integer"
 return x
 ]]
 

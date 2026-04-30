@@ -377,6 +377,11 @@ local function build_templates()
                 .. " The force-cast `:!` is for narrowing `unknown` to a concrete type,"
                 .. " not for casting to `any`."
         end,
+        [E.LOCAL_NEEDS_INIT]      = function(a)
+            return "annotated `local " .. a.name .. "` requires an initializer because `nil`"
+                .. " is not in type `" .. a.t .. "` (use `" .. a.t .. " | nil` to allow nil,"
+                .. " or provide an initializer)"
+        end,
     }
 end
 
