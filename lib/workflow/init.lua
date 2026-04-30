@@ -202,7 +202,7 @@ function M.define(opts)
       end
       self.status = "running"
 
-      local action, val = run_step(self.current)
+      local action, val = run_step(--[[:! any]] self.current)
 
       if action == "done" then
         self.current = nil

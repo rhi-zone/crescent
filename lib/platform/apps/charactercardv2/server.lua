@@ -406,7 +406,7 @@ local function build_chara_for_write(state)
 	for k, v in pairs(card) do data[k] = v end
 	-- Bake the in-memory lorebook back into character_book.
 	if state.lorebook and #state.lorebook > 0 then
-		data.character_book = lorebook_mod.to_ccv2(state.lorebook)
+		data.character_book = lorebook_mod.to_ccv2(--[[:! any]] state.lorebook)
 	else
 		-- Preserve existing character_book if we have no in-memory entries but
 		-- the card did have one on disk (edge case: load then clear).
@@ -2226,7 +2226,7 @@ local function api_post_presets_save(_state, caps, _params, body, res)
 	if not preset.name or type(preset.name) ~= "string" or #preset.name == 0 then
 		return json_err(res, 400, "preset must have a name")
 	end
-	local ok, err = presets_mod.save(caps.kv, body.type, preset.name, preset)
+	local ok, err = presets_mod.save(caps.kv, body.type, preset.name, --[[:! any]] preset)
 	if not ok then return json_err(res, 400, err) end
 	return json_ok(res, { ok = true })
 end

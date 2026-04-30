@@ -269,7 +269,7 @@ function Bitset:not_()
     local mask = lshift(1, remaining) - 1
     words[self._nwords] = band(words[self._nwords], mask)
   end
-  return bitset_from_words(words, self._nwords, self._size)
+  return bitset_from_words(words, self._nwords, --[[:! any]] self._size)
 end
 
 --- Return an array of 0-based indices of all set bits.

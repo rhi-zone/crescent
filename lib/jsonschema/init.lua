@@ -472,7 +472,7 @@ end
 --: (schema: unknown, value: unknown) -> true | (nil, unknown)
 function M.validate(schema, value)
   local errors = {}
-  local ok = validate_schema(schema, value, "", errors, schema)
+  local ok = validate_schema(schema, --[[:! any]] value, "", errors, schema)
   if ok then
     return true
   end
@@ -492,7 +492,7 @@ end
 --: (schema: unknown, value: unknown) -> boolean
 function M.is_valid(schema, value)
   local errors = {}
-  return validate_schema(schema, value, "", errors, schema)
+  return validate_schema(schema, --[[:! any]] value, "", errors, schema)
 end
 
 return M

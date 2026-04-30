@@ -62,10 +62,10 @@ local function resolve_refs(root, node, visited)
 				if target then
 					node[k] = target
 					-- Continue resolving the target
-					resolve_refs(root, target, visited)
+					resolve_refs(root, --[[:! any]] target, visited)
 				end
 			else
-				resolve_refs(root, v, visited)
+				resolve_refs(root, --[[:! any]] v, visited)
 			end
 		end
 	end

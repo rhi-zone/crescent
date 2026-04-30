@@ -102,7 +102,7 @@ function M.bfs(start, goal, neighbors_fn)
     head = head + 1
 
     if goal_fn(current) then
-      return reconstruct_path(came_from, current), steps[current]
+      return reconstruct_path(came_from, --[[:! any]] current), steps[current]
     end
 
     for _, nb in ipairs(neighbors_fn(current)) do

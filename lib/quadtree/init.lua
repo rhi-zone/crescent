@@ -437,7 +437,7 @@ function QT:rebuild()
   self._root = { bounds = b, points = {}, children = nil, capacity = cap }
   for i = 1, #all do
     local p = all[i]
-    node_insert(self._root, p[1], p[2], p[3])
+    node_insert(self._root, p[1], p[2], --[[:! any]] p[3])
   end
 end
 

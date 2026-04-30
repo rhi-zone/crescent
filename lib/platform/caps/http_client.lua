@@ -382,10 +382,10 @@ function M.http_client_cap(opts)
 		if not req then return nil, "http_client: missing request" end
 		if not req.method then return nil, "http_client: missing method" end
 		if not req.path then return nil, "http_client: missing path" end
-		if not path_allowed(allowed_paths, req.path) then
+		if not path_allowed(--[[:! any]] allowed_paths, req.path) then
 			return nil, "path not allowed: " .. req.path
 		end
-		if not method_allowed(allowed_methods, req.method) then
+		if not method_allowed(--[[:! any]] allowed_methods, req.method) then
 			return nil, "method not allowed: " .. req.method
 		end
 
@@ -443,10 +443,10 @@ function M.http_client_cap(opts)
 		if not req.method then return nil, "http_client: missing method" end
 		if not req.path then return nil, "http_client: missing path" end
 		if not on_chunk then return nil, "http_client: missing on_chunk callback" end
-		if not path_allowed(allowed_paths, req.path) then
+		if not path_allowed(--[[:! any]] allowed_paths, req.path) then
 			return nil, "path not allowed: " .. req.path
 		end
-		if not method_allowed(allowed_methods, req.method) then
+		if not method_allowed(--[[:! any]] allowed_methods, req.method) then
 			return nil, "method not allowed: " .. req.method
 		end
 
@@ -613,12 +613,12 @@ function M.http_client_cap(opts)
 		end
 		-- Paths must be a subset of the current whitelist.
 		local new_paths = sub_opts.paths
-		if not paths_subset(new_paths, allowed_paths) then
+		if not paths_subset(--[[:! any]] new_paths, --[[:! any]] allowed_paths) then
 			return nil, "http_client.attenuate: paths escape current scope"
 		end
 		-- Methods must be a subset of the current whitelist.
 		local new_methods = sub_opts.methods
-		if not methods_subset(new_methods, allowed_methods) then
+		if not methods_subset(--[[:! any]] new_methods, --[[:! any]] allowed_methods) then
 			return nil, "http_client.attenuate: methods escape current scope"
 		end
 		return M.http_client_cap({

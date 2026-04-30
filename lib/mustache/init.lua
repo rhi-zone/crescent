@@ -388,7 +388,7 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
               buf[#buf + 1] = render_tokens(lambda_tokens, stack, partials, otag, ctag)
             end
           end
-        elseif is_list(val) then
+        elseif is_list(--[[:! any]] val) then
           for _, item in ipairs(val) do
             stack[#stack + 1] = item
             buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)

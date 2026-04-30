@@ -293,15 +293,15 @@ end
 local function _json_span(s)
   local parts = {
     '"name":'            .. _json_string(s.name),
-    '"trace_id":'        .. _json_string(s.trace_id),
-    '"span_id":'         .. _json_string(s.span_id),
-    '"parent_span_id":'  .. (s.parent_span_id and _json_string(s.parent_span_id) or "null"),
+    '"trace_id":'        .. _json_string(--[[:! any]] s.trace_id),
+    '"span_id":'         .. _json_string(--[[:! any]] s.span_id),
+    '"parent_span_id":'  .. (s.parent_span_id and _json_string(--[[:! any]] s.parent_span_id) or "null"),
     '"start_time":'      .. tostring(s.start_time),
     '"end_time":'        .. (s.end_time and tostring(s.end_time) or "null"),
     '"duration_ms":'     .. (s.duration_ms and tostring(s.duration_ms) or "null"),
-    '"status":'          .. _json_string(s.status),
-    '"status_message":'  .. (s.status_message and _json_string(s.status_message) or "null"),
-    '"attributes":'      .. _json_attrs(s.attributes),
+    '"status":'          .. _json_string(--[[:! any]] s.status),
+    '"status_message":'  .. (s.status_message and _json_string(--[[:! any]] s.status_message) or "null"),
+    '"attributes":'      .. _json_attrs(--[[:! any]] s.attributes),
     '"events":'          .. _json_events(s.events),
   }
   return "{" .. table.concat(parts, ",") .. "}"

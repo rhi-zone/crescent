@@ -602,7 +602,7 @@ local function walk(node, prefix, aliases)
         lang = aliases[lang] or lang
         local tokenize = TOKENIZERS[lang]
         if tokenize then
-          local src = extract_text(code_node.children or {})
+          local src = extract_text(--[[:! any]] code_node.children or {})
           local toks = tokenize(src)
           local new_children = tokens_to_hast(toks, prefix)
           -- Replace code node children with highlighted children

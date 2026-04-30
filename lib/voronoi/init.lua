@@ -337,10 +337,10 @@ function M.compute(sites, bounds)
     local full = {{x=bx,y=by},{x=bx+bw,y=by},{x=bx+bw,y=by+bh},{x=bx,y=by+bh}}
     -- Cell 1: side of s1 relative to midpoint line p2->p1
     local c1 = clip_poly_half(full, p2.x, p2.y, p1.x, p1.y)
-    c1 = clip_poly_to_bounds(c1, bx, by, bw, bh)
+    c1 = clip_poly_to_bounds(c1, bx, --[[:! any]] by, bw, bh)
     -- Cell 2: opposite side
     local c2 = clip_poly_half(full, p1.x, p1.y, p2.x, p2.y)
-    c2 = clip_poly_to_bounds(c2, bx, by, bw, bh)
+    c2 = clip_poly_to_bounds(c2, bx, --[[:! any]] by, bw, bh)
     return {cells = {
       {site = s1, vertices = sort_ccw(dedup_verts(c1)), neighbors = {2}},
       {site = s2, vertices = sort_ccw(dedup_verts(c2)), neighbors = {1}},
@@ -497,7 +497,7 @@ function M.compute(sites, bounds)
     end
 
     -- Also clip to bounding box
-    poly = clip_poly_to_bounds(poly, bx, by, bw, bh)
+    poly = clip_poly_to_bounds(poly, bx, --[[:! any]] by, bw, bh)
     poly = dedup_verts(poly)
     poly = sort_ccw(poly)
 
@@ -519,7 +519,7 @@ end
 function M.nearest_site(diagram, point)
   local best_idx, best_d2 = nil, math.huge
   for i, cell in ipairs(diagram.cells) do
-    local d2 = dist2(point.x, point.y, cell.site.x, cell.site.y)
+    local d2 = dist2(point.x, --[[:! any]] point.y, cell.site.x, cell.site.y)
     if d2 < best_d2 then
       best_d2 = d2
       best_idx = i
@@ -531,7 +531,7 @@ end
 -- Returns the index of the cell that contains the given point, or nil if outside bounds.
 function M.find_cell(diagram, point)
   for i, cell in ipairs(diagram.cells) do
-    if #cell.vertices >= 3 and point_in_polygon(point.x, point.y, cell.vertices) then
+    if #cell.vertices >= 3 and point_in_polygon(point.x, --[[:! any]] point.y, cell.vertices) then
       return i
     end
   end

@@ -1101,7 +1101,7 @@ eval_expr = function(ast, ctx)
   elseif ast.kind == "filter" then
     local base = eval_expr(ast.filter, ctx)
     if type(base) ~= "table" then return base end
-    return eval_predicate(ast.predicate, base, ctx)
+    return eval_predicate(--[[:! any]] ast.predicate, base, ctx)
   elseif ast.kind == "filter_path" then
     local base = eval_expr(ast.filter, ctx)
     if type(base) ~= "table" then return {} end
@@ -1223,7 +1223,7 @@ end
 --: (table, string) -> string
 function M.string(node, expr)
   local result = M.eval(node, expr)
-  return to_string(result)
+  return to_string(--[[:! any]] result)
 end
 
 --- Return the numeric value of an XPath expression.
@@ -1237,7 +1237,7 @@ end
 --: (table, string) -> boolean
 function M.boolean(node, expr)
   local result = M.eval(node, expr)
-  return to_boolean(result)
+  return to_boolean(--[[:! any]] result)
 end
 
 --- Compile an XPath expression for reuse.

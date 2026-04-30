@@ -144,7 +144,7 @@ function Promise:and_then(on_fulfilled)
 		if on_fulfilled then
 			local ok, result = pcall(on_fulfilled, self._value)
 			if ok then
-				resolve_promise(child, result)
+				resolve_promise(child, --[[:! any]] result)
 			else
 				reject_promise(child, result)
 			end
@@ -170,7 +170,7 @@ function Promise:catch(on_rejected)
 		if on_rejected then
 			local ok, result = pcall(on_rejected, self._reason)
 			if ok then
-				resolve_promise(child, result)
+				resolve_promise(child, --[[:! any]] result)
 			else
 				reject_promise(child, result)
 			end
@@ -218,8 +218,8 @@ end
 --: (executor: (resolve: (value: unknown) -> (), reject: (reason: unknown) -> ()) -> ()) -> Promise
 function M.new(executor)
 	local p = make_promise()
-	local function res(v) resolve_promise(p, v) end
-	local function rej(r) reject_promise(p, r) end
+	local function res(v) resolve_promise(p, --[[:! any]] v) end
+	local function rej(r) reject_promise(p, --[[:! any]] r) end
 	local ok, err = pcall(executor, res, rej)
 	if not ok then
 		reject_promise(p, err)
@@ -231,7 +231,7 @@ end
 --: (value: unknown) -> Promise
 function M.resolve(value)
 	local p = make_promise()
-	resolve_promise(p, value)
+	resolve_promise(p, --[[:! any]] value)
 	return p
 end
 
@@ -239,7 +239,7 @@ end
 --: (reason: unknown) -> Promise
 function M.reject(reason)
 	local p = make_promise()
-	reject_promise(p, reason)
+	reject_promise(p, --[[:! any]] reason)
 	return p
 end
 

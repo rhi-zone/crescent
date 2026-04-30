@@ -558,14 +558,14 @@ diff = function(ast, var)
     -- product rule: u'v + uv'
     return make_add(
       make_mul(diff(ast.left, var), ast.right),
-      make_mul(ast.left, diff(ast.right, var))
+      make_mul(--[[:! any]] ast.left, diff(ast.right, var))
     )
   elseif op == "div" then
     -- quotient rule: (u'v - uv') / v^2
     return make_div(
       make_sub(
         make_mul(diff(ast.left, var), ast.right),
-        make_mul(ast.left, diff(ast.right, var))
+        make_mul(--[[:! any]] ast.left, diff(ast.right, var))
       ),
       make_pow(ast.right, make_num(2))
     )
@@ -592,7 +592,7 @@ diff = function(ast, var)
         ast,
         make_add(
           make_mul(diff(exp_, var), make_call("log", {base})),
-          make_mul(exp_, make_div(diff(base, var), base))
+          make_mul(--[[:! any]] exp_, make_div(diff(base, var), base))
         )
       ))
     end

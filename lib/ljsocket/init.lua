@@ -923,7 +923,7 @@ local addrinfo_to_table = function(res, host, service)
 	info.family = AF.reverse[res.ai_family]
 	info.socket_type = SOCK.reverse[res.ai_socktype]
 	info.protocol = IPPROTO.reverse[res.ai_protocol]
-	info.flags = flags_to_table(res.ai_flags, AI.lookup, bit.band)
+	info.flags = flags_to_table(--[[:! any]] res.ai_flags, AI.lookup, bit.band)
 	-- Extract ip and port eagerly so the addrinfo pointer can be freed after
 	-- the linked-list walk without leaving dangling references.
 	if res.ai_addr ~= nil then
