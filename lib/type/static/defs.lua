@@ -378,6 +378,7 @@ M.E.NON_EXHAUSTIVE          = 24  -- if-chain over union doesn't cover all membe
 M.E.FIELD_ON_PRIMITIVE      = 25  -- field access on a type that cannot have fields (nil, boolean, number literal)
 M.E.CONSTRAINT_MISMATCH     = 26  -- type alias body does not satisfy declared constraint
 M.E.INDEX_KEY_NOT_FOUND     = 27  -- T[K] where T has no member K
+M.E.FORCE_CAST_TO_ANY       = 28  -- `--[[:! any]]` is disallowed (use `--[[: any]]`)
 
 -- Keyword strings (ordered by token ID, for intern pre-population)
 M.keywords = {

@@ -860,13 +860,15 @@ f("c")
     assert.it("PASS: $Keys used as index type", function()
         -- Indexing with K = Keys<Row> currently produces `unknown` (the open-table
         -- index type). Per Gap 11 fix, `unknown` cannot silently flow into `any` —
-        -- use `--[[:! T]]` (force cast) to escape the unknown without narrowing.
+        -- use `--[[:! T]]` (force cast) with a concrete T to escape the unknown.
+        -- `--[[:! any]]` is rejected by design; the force-cast is for narrowing
+        -- `unknown` to a concrete type, not for casting to `any`.
         no_error([==[
 --:: Row = { name: string, age: number }
 --:: K = Keys<Row>
---: (Row, K) -> any
+--: (Row, K) -> (string | number)
 local function get(row, key)
-    return --[[:! any]] row[key]
+    return --[[:! (string | number)]] row[key]
 end
 ]==])
     end)

@@ -1760,12 +1760,28 @@ local x = v
 ]], "must be narrowed")
     end)
 
-    assert.it("force cast unknown -> any IS the documented escape hatch", function()
-        no_errors([==[
+    assert.it("force cast to any is rejected (use --[[: any]] or a concrete T)", function()
+        has_error([==[
 local x --: unknown
 local n = --[[:! any]] x
-local r = n + 1
+]==], "`--%[%[:! any%]%]` is not allowed")
+    end)
+
+    assert.it("force cast to any rejected even when source is non-unknown", function()
+        has_error([==[
+local x = 42
+local n = --[[:! any]] x
+]==], "regular cast")
+    end)
+
+    assert.it("regular cast to any still works (escape hatch for non-unknown sources)", function()
+        local ec = check([==[
+local x = 42
+local n = --[[: any]] x
 ]==])
+        -- emits `explicit any` warning but no errors
+        local errs = ec.errors
+        assert.eq(#errs, 0, "no errors for --[[: any]] cast")
     end)
 
     assert.it("any -> unknown still works (unknown is the top type)", function()

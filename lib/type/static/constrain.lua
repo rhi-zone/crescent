@@ -2147,6 +2147,15 @@ ExprRule[NODE_CAST_EXPR] = function(ctx, nid)
     if not ctx.ann then return inner_tid end
     local ann = ctx.ann.results[n.data[1]]  -- n.data[1] is the negative cast_id
     if not ann or ann.kind ~= ANN_TYPE then return inner_tid end
+    -- Reject `--[[:! any]]`: the force-cast is for narrowing `unknown` to a
+    -- concrete type, not for casting to `any`. Use `--[[: any]]` instead.
+    if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
+        local at = ctx.ann and ctx.ann.types:get(ann.type_id)
+        if at and at.tag == defs.TAG_ANY then
+            report(ctx, n.line, n.col, E.FORCE_CAST_TO_ANY, {})
+            return inner_tid
+        end
+    end
     local cast_tid = resolve_annotation_type(ctx, ann.type_id)
     if band(n.flags, defs.FLAG_FORCE_CAST) ~= 0 then
         -- --[[:! T]] expr: overlap-checked force cast. Succeeds when actual and

@@ -372,6 +372,11 @@ local function build_templates()
         [E.INDEX_KEY_NOT_FOUND]   = function(a)
             return "type '" .. a.t .. "' has no member '" .. a.k .. "'"
         end,
+        [E.FORCE_CAST_TO_ANY]     = function(_a)
+            return "`--[[:! any]]` is not allowed. Use `--[[: any]]` (regular cast) instead."
+                .. " The force-cast `:!` is for narrowing `unknown` to a concrete type,"
+                .. " not for casting to `any`."
+        end,
     }
 end
 
