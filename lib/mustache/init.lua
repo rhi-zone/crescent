@@ -398,7 +398,7 @@ render_tokens = function(tokens, stack, partials, otag, ctag)
           if type(val) == "table" then
             stack[#stack + 1] = val
           else
-            stack[#stack + 1] = val
+            stack[#stack + 1] = --[[:! any]] val
           end
           buf[#buf + 1] = render_tokens(tok.tokens, stack, partials, otag, ctag)
           stack[#stack] = nil

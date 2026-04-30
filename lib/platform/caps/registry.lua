@@ -402,7 +402,7 @@ function M.registry_cap(opts)
 			else
 				new_allow_write = sub_opts.allow_write
 			end
-			local reg_mod = require("lib.platform.caps.registry") --: any
+			local reg_mod = --[[:! any]] require("lib.platform.caps.registry")
 			return reg_mod.registry_cap({ root = new_root, allow_write = new_allow_write })
 		end,
 	}

@@ -133,8 +133,8 @@ function M.open(db_path, opts)
 			return nil
 		end
 		local db = self._db --: any
-		local tfn = self._time_fn --: any
-		local ttl_val = self._ttl --: any
+		local tfn = --[[:! any]] self._time_fn
+		local ttl_val = --[[:! any]] self._ttl
 		local now = tfn()
 
 		local iter = db:query(
@@ -165,8 +165,8 @@ function M.open(db_path, opts)
 			return false
 		end
 		local db = self._db --: any
-		local tfn = self._time_fn --: any
-		local ttl_val = self._ttl --: any
+		local tfn = --[[:! any]] self._time_fn
+		local ttl_val = --[[:! any]] self._ttl
 		local now = tfn()
 
 		-- Verify the session exists and is not expired before updating.
@@ -205,8 +205,8 @@ function M.open(db_path, opts)
 	-- Deletes all rows where last_seen + idle_ttl < now().
 	function store:purge_expired()
 		local db = self._db --: any
-		local tfn = self._time_fn --: any
-		local ttl_val = self._ttl --: any
+		local tfn = --[[:! any]] self._time_fn
+		local ttl_val = --[[:! any]] self._ttl
 		local now = tfn()
 		-- cutoff: rows with last_seen < now - idle_ttl are expired.
 		-- last_seen + ttl < now  ↔  last_seen < now - ttl

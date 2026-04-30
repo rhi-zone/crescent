@@ -78,7 +78,7 @@ function M.open(db_path, opts)
 
 	-- sha1_fn: prefer injected, fall back to lib.hash.sha1.
 	-- Same `any` escape as time_fn above.
-	local sha1_fn_any = o.sha1_fn --: any
+	local sha1_fn_any = --[[:! any]] o.sha1_fn
 	--: (string) -> string
 	local sha1_fn
 	if sha1_fn_any then
@@ -125,7 +125,7 @@ function M.open(db_path, opts)
 
 		-- `any`: sqlite FFI handle and function fields from open-table self.
 		local db = self._db --: any
-		local tfn = self._time_fn --: any
+		local tfn = --[[:! any]] self._time_fn
 		local ts = tfn()
 
 		-- Get the most recent hash to chain from.
@@ -138,7 +138,7 @@ function M.open(db_path, opts)
 			end
 		end
 
-		local sfn = self._sha1_fn --: any
+		local sfn = --[[:! any]] self._sha1_fn
 		local row_hash = sfn(hash_input(prev_hash, ts, event_type, payload_str))
 
 		local ins_ok, ins_err = db:execute(
@@ -180,8 +180,8 @@ function M.open(db_path, opts)
 		sql = sql .. " ORDER BY id ASC"
 
 		-- `any` then tonumber: open-table reads return unknown; tonumber narrows.
-		local limit_raw  = o2.limit  --: any
-		local offset_raw = o2.offset --: any
+		local limit_raw  = --[[:! any]] o2.limit
+		local offset_raw = --[[:! any]] o2.offset
 		local limit_n  = tonumber(limit_raw)  --: number | nil
 		local offset_n = tonumber(offset_raw) --: number | nil
 		if limit_n and offset_n then
@@ -233,7 +233,7 @@ function M.open(db_path, opts)
 				return nil, id, "broken chain: prev_hash mismatch at row " .. tostring(id)
 			end
 			-- Recompute this row's hash.
-			local sfn2 = self._sha1_fn --: any
+			local sfn2 = --[[:! any]] self._sha1_fn
 			local computed = sfn2(hash_input(prev_hash, ts, event, payload))
 			if computed ~= row_hash then
 				return nil, id, "broken chain: hash mismatch at row " .. tostring(id)

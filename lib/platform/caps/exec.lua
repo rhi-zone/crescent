@@ -183,7 +183,7 @@ function M.new(manifest_entry, opts)
 		--: string
 		local sname = tostring(name)
 		--: any
-		local s = spec
+		local s = --[[:! any]] spec
 		allow_sets[sname] = build_allow_set(s.allow)
 
 		--: any
