@@ -81,7 +81,7 @@ function M.network(opts)
     local delay = opts.delay
     if delay == nil then
       delay = self._latency[pkey(from, to)]
-      if delay == nil then delay = --[[:! any]] self._default_latency end
+      if delay == nil then delay = --[[:! number]] self._default_latency end
     end
 
     local id = self._next_msg_id

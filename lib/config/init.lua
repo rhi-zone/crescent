@@ -156,7 +156,7 @@ function Config:get(key, default)
   end
 
   -- 4. defaults
-  local v = table_get(--[[:! any]] self._defaults, key)
+  local v = table_get(--[[:! table]] self._defaults, key)
   if v ~= nil then return v end
 
   return default
@@ -259,7 +259,7 @@ function Config:to_table()
     for k, v in pairs(self._layers[i]) do
       if type(v) == "table" and type(out[k]) == "table" then
         local merged = deep_copy(out[k])
-        merge_into(--[[:! any]] merged, {}) -- no-op
+        merge_into(--[[:! table]] merged, {}) -- no-op
         -- layer overrides: layer wins for conflicts
         for lk, lv in pairs(v) do
           merged[lk] = lv

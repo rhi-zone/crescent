@@ -829,7 +829,7 @@ function M.collect_constraints(direct_deps, locked, project_dir, from_label)
 
 			for dep_name, dep_value in pairs(dep_manifest.deps) do
 				local c = manifest.dep_constraint(dep_value)
-				add_constraint(--[[:! any]] dep_name, c, requirer)
+				add_constraint(--[[:! string]] dep_name, c, requirer)
 				if not visited[dep_name] then
 					queue[#queue + 1] = dep_name
 				end

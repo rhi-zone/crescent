@@ -505,7 +505,7 @@ M.tokenize = function(input, fmt)
 		if pos > ilen then break end
 		local text, new_pos, err = match_directive(spec_dir, input, pos)
 		if err or not text or text == "" then break end
-		local val, verr = convert_value(--[[:! any]] spec_dir.conv, text)
+		local val, verr = convert_value(--[[:! string]] spec_dir.conv, text)
 		if not verr then
 			results[#results + 1] = val
 		end

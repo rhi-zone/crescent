@@ -552,7 +552,7 @@ end
 Hermite.to_cubic = function(self)
   local cp1 = pt_add(self.p0, pt_scale(self.m0, 1/3))
   local cp2 = pt_sub(self.p1, pt_scale(self.m1, 1/3))
-  return M.cubic(self.p0, cp1, cp2, --[[:! any]] self.p1)
+  return M.cubic(self.p0, cp1, cp2, --[[:! table]] self.p1)
 end
 
 return M

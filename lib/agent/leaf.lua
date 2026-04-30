@@ -42,7 +42,7 @@ function M.run(task_def, initial_set, caps, preset_spec)
 		local raw_response, err = caps.llm.generate({ messages = messages, schema = schema })
 		if err then return nil, err end
 		if raw_response == nil then return nil, "llm returned nil response" end
-		local response = --[[:! any]] raw_response
+		local response = --[[: any]] raw_response
 
 		-- After consuming the render (which included _tool_result), clear the pending flag
 		-- so next iteration drops it.

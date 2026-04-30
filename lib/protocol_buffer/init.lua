@@ -528,7 +528,7 @@ function M.encode(schema, msg)
         for j = 1, #value do
           local enc, err = encode_value(type_str, value[j], nested_schema)
           if enc == nil then return nil, err end
-          parts[#parts + 1] = M.field_tag(field_number, --[[:! any]] wire)
+          parts[#parts + 1] = M.field_tag(field_number, --[[:! integer]] wire)
           parts[#parts + 1] = enc
         end
       end
@@ -539,7 +539,7 @@ function M.encode(schema, msg)
       end
       local enc, err = encode_value(type_str, value, nested_schema)
       if enc == nil then return nil, err end
-      parts[#parts + 1] = M.field_tag(field_number, --[[:! any]] wire)
+      parts[#parts + 1] = M.field_tag(field_number, --[[:! integer]] wire)
       parts[#parts + 1] = enc
     end
   end

@@ -165,7 +165,7 @@ end
 local decimal_mt  -- forward declaration; set at bottom
 
 local function wrap(coeff, exp)
-  local c, e = normalize(coeff, --[[:! any]] exp)
+  local c, e = normalize(coeff, --[[:! number]] exp)
   local d = make(c, e)
   setmetatable(d, decimal_mt)
   return d
@@ -378,7 +378,7 @@ end
 
 -- Re-implement wrap with metatable.
 wrap = function(coeff, exp)
-  local c, e = normalize(coeff, --[[:! any]] exp)
+  local c, e = normalize(coeff, --[[:! number]] exp)
   return new_decimal(c, e)
 end
 
