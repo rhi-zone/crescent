@@ -1345,10 +1345,11 @@ local function print_arguments(args)
   return "(" .. concat(parts, ", ") .. ")"
 end
 
+--: (dirs: unknown) -> string
 local function print_directives(dirs)
   if not dirs or #dirs == 0 then return "" end
   local parts = {}
-  for _, d in ipairs(dirs) do
+  for _, d in ipairs(--[[:! { name: { value: string }, arguments: any }[] ]] dirs) do
     insert(parts, "@" .. d.name.value .. print_arguments(d.arguments))
   end
   return " " .. concat(parts, " ")
@@ -1444,21 +1445,21 @@ print_node = function(node, indent)
     local s = node.operation
     if node.name then s = s .. " " .. node.name.value end
     s = s .. print_variable_definitions(node.variableDefinitions)
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     s = s .. print_selection_set(node.selectionSet, 0)
     return s
 
   elseif k == "FragmentDefinition" then
     local s = "fragment " .. node.name.value
     s = s .. " on " .. node.typeCondition.name.value
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     s = s .. print_selection_set(node.selectionSet, 0)
     return s
 
   elseif k == "SchemaDefinition" then
     local s = print_description(node.description, 0)
     s = s .. "schema"
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     s = s .. " {\n"
     for _, ot in ipairs(node.operationTypes) do
       s = s .. "  " .. ot.operation .. ": " .. ot.type.name.value .. "\n"
@@ -1467,7 +1468,7 @@ print_node = function(node, indent)
 
   elseif k == "ScalarTypeDefinition" then
     local s = print_description(node.description, 0)
-    return s .. "scalar " .. node.name.value .. print_directives(--[[:! any]] node.directives)
+    return s .. "scalar " .. node.name.value .. print_directives(node.directives)
 
   elseif k == "ObjectTypeDefinition" then
     local s = print_description(node.description, 0)
@@ -1477,7 +1478,7 @@ print_node = function(node, indent)
       for _, i in ipairs(node.interfaces) do insert(ifaces, i.name.value) end
       s = s .. " implements " .. concat(ifaces, " & ")
     end
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     if node.fields and #node.fields > 0 then
       s = s .. " {\n"
       for _, f in ipairs(node.fields) do
@@ -1506,7 +1507,7 @@ print_node = function(node, indent)
       for _, i in ipairs(node.interfaces) do insert(ifaces, i.name.value) end
       s = s .. " implements " .. concat(ifaces, " & ")
     end
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     if node.fields and #node.fields > 0 then
       s = s .. " {\n"
       for _, f in ipairs(node.fields) do
@@ -1530,7 +1531,7 @@ print_node = function(node, indent)
   elseif k == "UnionTypeDefinition" then
     local s = print_description(node.description, 0)
     s = s .. "union " .. node.name.value
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     if node.types and #node.types > 0 then
       local parts = {}
       for _, t in ipairs(node.types) do insert(parts, t.name.value) end
@@ -1541,7 +1542,7 @@ print_node = function(node, indent)
   elseif k == "EnumTypeDefinition" then
     local s = print_description(node.description, 0)
     s = s .. "enum " .. node.name.value
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     s = s .. " {\n"
     for _, v in ipairs(node.values) do
       if v.description then
@@ -1556,7 +1557,7 @@ print_node = function(node, indent)
   elseif k == "InputObjectTypeDefinition" then
     local s = print_description(node.description, 0)
     s = s .. "input " .. node.name.value
-    s = s .. print_directives(--[[:! any]] node.directives)
+    s = s .. print_directives(node.directives)
     if node.fields and #node.fields > 0 then
       s = s .. " {\n"
       s = s .. print_input_value_defs(node.fields, 1)

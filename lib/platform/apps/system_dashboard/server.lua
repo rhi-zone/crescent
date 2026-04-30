@@ -608,7 +608,7 @@ local function handle_api(state, req, res)
 		local action_caps = type(action.caps) == "table" and action.caps or {}
 		for name_k, decl_v in pairs(action_caps) do
 			local name = tostring(name_k)
-			local decl = --[[:! any]] decl_v
+			local decl = --[[:! { type: string, reason: any, ... }]] decl_v
 			local parent = find_cap_by_type(state.caps, decl.type)
 			if not parent then
 				res.status = 200
@@ -745,7 +745,7 @@ local function handle_api(state, req, res)
 		local cap_entries = {} --: any
 		local action_caps = type(action.caps) == "table" and action.caps or {}
 		for name_k, decl_v in pairs(action_caps) do
-			local decl = --[[:! any]] decl_v
+			local decl = --[[:! { type: string, reason: any, ... }]] decl_v
 			cap_entries[#cap_entries + 1] = {
 				name   = name_k,
 				type   = decl.type,

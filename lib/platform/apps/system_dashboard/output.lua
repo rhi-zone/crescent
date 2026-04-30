@@ -673,7 +673,7 @@ validate_primitive = function(prim, ctx_a)
 		-- All known primitives must be in PSPEC; missing entry = bug, not user error.
 		return nil, ctx .. ": no validation spec for primitive '" .. ty_s .. "'"
 	end
-	local spec_t = --[[:! any]] spec
+	local spec_t = --[[:! { required: { [string]: string }, check_columns: boolean | nil, check_kv_pairs: boolean | nil, check_form_fields: boolean | nil, recurse: { [string]: string } | nil }]] spec
 	-- Required fields
 	for field, expected in pairs(spec_t.required) do
 		if p[field] == nil then

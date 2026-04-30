@@ -556,16 +556,18 @@ diff = function(ast, var)
     return make_sub(diff(ast.left, var), diff(ast.right, var))
   elseif op == "mul" then
     -- product rule: u'v + uv'
+    local left = --[[:! { op: string, ... }]] ast.left
     return make_add(
       make_mul(diff(ast.left, var), ast.right),
-      make_mul(--[[:! any]] ast.left, diff(ast.right, var))
+      make_mul(left, diff(ast.right, var))
     )
   elseif op == "div" then
     -- quotient rule: (u'v - uv') / v^2
+    local left = --[[:! { op: string, ... }]] ast.left
     return make_div(
       make_sub(
         make_mul(diff(ast.left, var), ast.right),
-        make_mul(--[[:! any]] ast.left, diff(ast.right, var))
+        make_mul(left, diff(ast.right, var))
       ),
       make_pow(ast.right, make_num(2))
     )
@@ -588,11 +590,12 @@ diff = function(ast, var)
       ))
     else
       -- general: d/dx(u^v) = u^v * (v'*ln(u) + v*u'/u)
+      local exp__any = --[[:! { op: string, ... }]] exp_
       return simplify(make_mul(
         ast,
         make_add(
           make_mul(diff(exp_, var), make_call("log", {base})),
-          make_mul(--[[:! any]] exp_, make_div(diff(base, var), base))
+          make_mul(exp__any, make_div(diff(base, var), base))
         )
       ))
     end

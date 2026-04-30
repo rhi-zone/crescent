@@ -76,6 +76,7 @@ end
 
 -- Validate `value` against `schema`. Errors appended to `errors`.
 -- Returns true if valid, false if not.
+--: (schema: unknown, value: unknown, path: string | nil, errors: unknown, root_schema: unknown) -> boolean
 validate_schema = function(schema, value, path, errors, root_schema)
   path = path or ""
   errors = errors or {}
@@ -472,7 +473,7 @@ end
 --: (schema: unknown, value: unknown) -> true | (nil, unknown)
 function M.validate(schema, value)
   local errors = {}
-  local ok = validate_schema(schema, --[[:! any]] value, "", errors, schema)
+  local ok = validate_schema(schema, value, "", errors, schema)
   if ok then
     return true
   end
@@ -492,7 +493,7 @@ end
 --: (schema: unknown, value: unknown) -> boolean
 function M.is_valid(schema, value)
   local errors = {}
-  return validate_schema(schema, --[[:! any]] value, "", errors, schema)
+  return validate_schema(schema, value, "", errors, schema)
 end
 
 return M

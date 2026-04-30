@@ -383,7 +383,7 @@ local function apply_one(doc, op)
   elseif o == "test" then
     local val, err = M.pointer_get(doc, op.path)
     if err then return nil, "test: " .. err end
-    if not deep_equal(val, --[[:! any]] op.value) then
+    if not deep_equal(val, --[[:! boolean | number | string | nil | { ... }]] op.value) then
       return nil, "test failed at " .. op.path
     end
     return true, nil

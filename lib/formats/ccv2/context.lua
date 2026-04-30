@@ -181,7 +181,7 @@ function M.assemble(opts)
 
 	local entries = opts.lorebook_entries
 	if not entries and card.character_book then
-		entries = lorebook.from_ccv2(--[[:! any]] --[[:! any]] card.character_book)
+		entries = lorebook.from_ccv2(--[[:! { entries: any, ... }]] card.character_book)
 	end
 
 	local triggered_before = {}

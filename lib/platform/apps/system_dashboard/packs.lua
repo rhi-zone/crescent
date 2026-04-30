@@ -54,10 +54,10 @@ end
 local function resolve_action_caps(action_caps, pack_caps)
 	local out = {} --: { [string]: any }
 	if type(pack_caps) == "table" then
-		for k, v in pairs(pack_caps) do out[k] = --[[:! any]] v end
+		for k, v in pairs(pack_caps) do out[k] = --[[:! { type: string, ... }]] v end
 	end
 	if type(action_caps) == "table" then
-		for k, v in pairs(action_caps) do out[k] = --[[:! any]] v end
+		for k, v in pairs(action_caps) do out[k] = --[[:! { type: string, ... }]] v end
 	end
 	return out
 end
@@ -66,7 +66,7 @@ end
 -- caps have been merged in. Returns true on success, or nil, errmsg.
 --: (unknown, { [string]: any }, string, integer) -> (true | nil, string | nil)
 local function validate_action(action, effective_caps, alias_id, action_idx)
-	local action_t = --[[:! any]] action
+	local action_t = --[[:! { exec: any, ... }]] action
 	-- An action may declare no caps inline; effective_caps may still be empty
 	-- if the pack also declared none. In that case there's nothing to dispatch
 	-- and the action is treated as a no-op container (matches prior behavior:

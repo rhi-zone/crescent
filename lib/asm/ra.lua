@@ -236,10 +236,7 @@ M.allocate = function(intervals, regfile)
   local callee_saves     = {} --: { [integer]: string, ... }
   local rf_cs = regfile.callee_saved
   for _, phys_raw in pairs(assignment) do
-    --: any
-    local phys_any = --[[:! any]] phys_raw
-    --: string
-    local phys = phys_any
+    local phys = --[[:! string]] phys_raw
     if phys and rf_cs[phys] and not callee_saves_set[phys] then
       callee_saves_set[phys] = true
       callee_saves[#callee_saves + 1] = phys

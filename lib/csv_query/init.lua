@@ -36,7 +36,7 @@ local function new_df(rows, cols)
       for k in pairs(row) do
         if not seen[k] then
           seen[k] = true
-          insert(cols, --[[:! any]] k)
+          insert(cols, --[[:! string]] k)
         end
       end
     end

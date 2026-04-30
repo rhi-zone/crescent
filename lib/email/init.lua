@@ -643,7 +643,7 @@ function M.smtp_connect(opts)
 	}, SMTP)
 
 	-- Read server greeting
-	local code, resp = smtp_read_response(--[[:! any]] opts.transport)
+	local code, resp = smtp_read_response(--[[:! { recv: any, send: any }]] opts.transport)
 	if not code then return nil, resp end
 	if code ~= 220 then
 		return nil, "unexpected greeting: " .. (resp or "")
