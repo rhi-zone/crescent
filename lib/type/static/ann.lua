@@ -527,7 +527,7 @@ function M.parse_annotations(annotations, pool, filename)
                             for i = 0, tl - 1 do
                                 returns[#returns + 1] = type_lists:get(ts + i)
                             end
-                        elseif union_contains_fn(--[[:! any]] returns[1]) then
+                        elseif union_contains_fn(--[[:! integer]] returns[1]) then
                             warnings[#warnings + 1] = { line = s.line, col = 1,
                                 msg = "function type in union return position"
                                     .. " — wrap each function type in parens:"

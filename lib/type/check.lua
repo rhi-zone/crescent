@@ -56,7 +56,7 @@ mod.checkers.dictionary = function(s, x)
 	if type(x) ~= "table" then return false end
 	local s_key, s_value = s.key, s.value
 	for k, v in pairs(x) do
-		if not mod.check(s_key, k) or not mod.check(--[[:! any]] s_value, v) then return false end
+		if not mod.check(s_key, k) or not mod.check(s_value, v) then return false end
 	end
 	return true
 end
@@ -98,6 +98,7 @@ end
 
 local validators = {}
 
+--: (Schema<unknown>, unknown, string | nil) -> (unknown, string | nil)
 local function do_validate(schema, x, path)
 	return validators[schema.type](schema, x, path)
 end
@@ -182,9 +183,9 @@ validators.dictionary = function(s, x, path)
 	end
 	local s_key, s_value = s.key, s.value
 	for k, v in pairs(x) do
-		local _, kerr = do_validate(s_key, --[[:! any]] k, (path or "") .. "[key " .. tostring(k) .. "]")
+		local _, kerr = do_validate(s_key, k, (path or "") .. "[key " .. tostring(k) .. "]")
 		if kerr then return nil, kerr end
-		local _, verr = do_validate(s_value, --[[:! any]] v, index_path(path, tostring(k)))
+		local _, verr = do_validate(s_value, v, index_path(path, tostring(k)))
 		if verr then return nil, verr end
 	end
 	return x
@@ -206,7 +207,7 @@ end
 
 --: <T>(Schema<T>, unknown) -> (T | nil, string | nil)
 mod.validate = function(schema, x)
-	return do_validate(schema, --[[:! any]] x, nil)
+	return do_validate(schema, x, nil)
 end
 
 -- ── coerce: transform compatible types, return typed copy ────────────────────
@@ -223,6 +224,7 @@ end
 
 local coercers = {}
 
+--: (Schema<unknown>, unknown, string | nil) -> (unknown, string | nil)
 local function do_coerce(schema, x, path)
 	return coercers[schema.type](schema, x, path)
 end
@@ -329,9 +331,9 @@ coercers.dictionary = function(s, x, path)
 	local out = {}
 	local s_key, s_value = s.key, s.value
 	for k, v in pairs(x) do
-		local ck, kerr = do_coerce(s_key, --[[:! any]] k, (path or "") .. "[key " .. tostring(k) .. "]")
+		local ck, kerr = do_coerce(s_key, k, (path or "") .. "[key " .. tostring(k) .. "]")
 		if kerr then return nil, kerr end
-		local cv, verr = do_coerce(s_value, --[[:! any]] v, index_path(path, tostring(k)))
+		local cv, verr = do_coerce(s_value, v, index_path(path, tostring(k)))
 		if verr then return nil, verr end
 		out[ck] = cv
 	end
@@ -357,7 +359,7 @@ end
 
 --: <T>(Schema<T>, unknown) -> (T | nil, string | nil)
 mod.coerce = function(schema, x)
-	return do_coerce(schema, --[[:! any]] x, nil)
+	return do_coerce(schema, x, nil)
 end
 
 return mod

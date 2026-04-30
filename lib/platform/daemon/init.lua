@@ -243,11 +243,11 @@ function M.make(opts)
 	-- `any` is a deliberate escape hatch: the library app's `caps.index_db`
 	-- is a SQLite handle, a nil, or a test stub; we don't want to bake a
 	-- schema here. Library app tolerates nil.
-	local index_db = --[[:! any]] opts.index_db
+	local index_db = opts.index_db --: any
 	-- Wrapped index object (lib/platform/index) for operations that require
 	-- typed methods (get_grants, set_grant, etc.). Optional — tests that pass
 	-- a raw db handle without the wrapper continue to work via index_db.
-	local index_obj = --[[:! any]] opts.index_obj
+	local index_obj = opts.index_obj --: any
 	-- Injected for testability. Defaults to os.remove.
 	--: (string) -> (true | nil, string | nil)
 	local remove_fn = opts.remove_fn or os.remove
@@ -258,7 +258,7 @@ function M.make(opts)
 	local runtime_manifest = opts.runtime_manifest
 	-- Optional audit log (lib/platform/audit). When nil, all log:append calls
 	-- are skipped — tests and deployments without a configured db_path work fine.
-	local audit_log = --[[:! any]] opts.audit_log
+	local audit_log = opts.audit_log --: any
 
 	-- Admin policy. Loaded once at startup from policy_path (if set). A missing
 	-- file is not an error — single-user deployments run without a policy file.

@@ -682,7 +682,7 @@ HANDLERS["textDocument/completion"] = function(state, msg)
         for name_id, type_id in pairs(scope.bindings) do
             if not seen[name_id] then
                 seen[name_id] = true
-                local name = intern.get(ctx.pool, --[[:! any]] name_id)
+                local name = intern.get(ctx.pool, --[[:! integer]] name_id)
                 if name and name:sub(1, 2) ~= "__" then  -- skip metamethod names
                     local resolved = types.find(ctx, type_id)
                     local rt = ctx.types:get(resolved)
