@@ -1730,6 +1730,54 @@ ExprRule[NODE_FUNC_EXPR] = function(ctx, nid)
     return gen_function(ctx, n.data[0], n.data[1], n.data[2], n.data[3], has_vararg, ann_fn_tid)
 end
 
+-- Recover a concrete type for an argument AST node when its constraint-gen
+-- type is still an unresolved TAG_VAR.  Mirrors `peek_callee_ret_union`'s
+-- callee-shape inspection: identifiers via scope lookup (with _var_origin
+-- fallback through field-access bindings), and field expressions via direct
+-- table_field lookup on the receiver.  Returns nil if not statically resolvable.
+--: (Ctx, ASTNode) -> integer | nil
+local function peek_arg_type(ctx, arg_n)
+    if arg_n.kind == NODE_IDENTIFIER then
+        local tid = env_mod.lookup(ctx.scope, arg_n.data[0])
+        if tid then
+            local rtid = types_mod.find(ctx, tid)
+            local t = ctx.types:get(rtid)
+            if t.tag == TAG_VAR then
+                local origin = ctx._var_origin[rtid]
+                if origin then
+                    local src_obj = types_mod.find(ctx, origin[1])
+                    local fe = types_mod.table_field(ctx, src_obj, origin[2])
+                    if fe then return types_mod.find(ctx, fe.type_id) end
+                end
+                return nil
+            end
+            return rtid
+        end
+    elseif arg_n.kind == NODE_FIELD_EXPR then
+        local obj_n = ctx.nodes:get(arg_n.data[0])
+        if obj_n.kind == NODE_IDENTIFIER then
+            local obj_tid = env_mod.lookup(ctx.scope, obj_n.data[0])
+            if obj_tid then
+                local resolved = types_mod.find(ctx, obj_tid)
+                local fe = types_mod.table_field(ctx, resolved, arg_n.data[1])
+                if fe then return types_mod.find(ctx, fe.type_id) end
+            end
+            -- Fallback: obj is a require()'d local whose type has not yet been
+            -- resolved by the solver (still TAG_VAR awaiting $Require<T>).  Look up
+            -- the cached exports tid recorded at gen time.
+            if ctx._require_exports then
+                local exp_tid = ctx._require_exports[obj_n.data[0]]
+                if exp_tid then
+                    local exp_resolved = types_mod.find(ctx, exp_tid)
+                    local exp_fe = types_mod.table_field(ctx, exp_resolved, arg_n.data[1])
+                    if exp_fe then return types_mod.find(ctx, exp_fe.type_id) end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 -- Try to eagerly evaluate a deferred intrinsic return at constraint-gen time.
 -- When an instantiated callee has `-> ...$SomeIntrinsic<F>` as its return type,
 -- the intrinsic args (which are fresh TVs from let-polymorphism instantiation)
@@ -1740,8 +1788,8 @@ end
 --
 -- Returns the evaluated type id (a concrete union-of-tuples), or nil if not
 -- applicable (non-spread return, non-intrinsic inner, or args still unresolved).
---: (Ctx, integer, { [integer]: integer, ... }) -> integer | nil
-local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids)
+--: (Ctx, integer, { [integer]: integer, ... }, integer, integer) -> integer | nil
+local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids, args_es, args_el)
     local callee_t = ctx.types:get(types_mod.find(ctx, inst_callee_tid))
     if callee_t.tag ~= TAG_FUNCTION or callee_t.data[3] ~= 1 then return nil end
     local ret_slot = types_mod.find(ctx, ctx.lists:get(callee_t.data[2]))
@@ -1766,6 +1814,16 @@ local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids)
                 if param == match_param then
                     if arg_tids[pi + 1] then
                         concrete_arg = types_mod.find(ctx, arg_tids[pi + 1])
+                    end
+                    -- If arg_tid is still an unresolved TAG_VAR (e.g. arg is a
+                    -- field-access whose result is a fresh var awaiting C_INDEX),
+                    -- try to recover its declared type by inspecting the AST node.
+                    -- This is the path that fires for `pcall(ffi.load, ...)`.
+                    if concrete_arg and ctx.types:get(concrete_arg).tag == TAG_VAR
+                        and args_es and pi < args_el then
+                        local arg_nid = ctx.ast_lists:get(args_es + pi)
+                        local peeked = peek_arg_type(ctx, ctx.nodes:get(arg_nid))
+                        if peeked then concrete_arg = peeked end
                     end
                     break
                 end
@@ -1960,10 +2018,20 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
                 -- The returned exports type is ignored here (resolved later by $Require<T>
                 -- via the solver); we only care about aliases for scope injection.
                 if ctx.cri_loader then
-                    local _, aliases = ctx.cri_loader(ctx, mod_name)
+                    local exports_tid, aliases = ctx.cri_loader(ctx, mod_name)
                     if aliases then
                         ctx._last_require_aliases = aliases
                     end
+                    if exports_tid then
+                        ctx._last_require_exports = exports_tid
+                    end
+                end
+                -- Fallback to declared module type (--:: module "name": T) so
+                -- field-access on the require'd local can be resolved eagerly at
+                -- gen time (used by try_eager_intrinsic_return for pcall).
+                if not ctx._last_require_exports and ctx.module_types
+                    and ctx.module_types[mod_name] then
+                    ctx._last_require_exports = ctx.module_types[mod_name]
                 end
             end
         end
@@ -2051,7 +2119,7 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     -- Only applies to $PcallReturn (union-of-tuples needing correlated narrowing);
     -- other intrinsics ($IpairsReturn, $PairsReturn, $Require, ...) are resolved
     -- by resolve_deferred_intrinsic in the solver after parameter unification.
-    local eager = try_eager_intrinsic_return(ctx, inst_callee, arg_tids)
+    local eager = try_eager_intrinsic_return(ctx, inst_callee, arg_tids, n.data[1], n.data[2])
     if eager then
         ctx._last_multi_return_override = eager
     end
@@ -2409,8 +2477,10 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
     local rhs_types = el > 0 and gen_expr_list(ctx, es, el) or {}
     local stmt_require_mod = ctx._last_require_mod
     local stmt_require_aliases = ctx._last_require_aliases
+    local stmt_require_exports = ctx._last_require_exports
     ctx._last_require_mod = nil
     ctx._last_require_aliases = nil
+    ctx._last_require_exports = nil
 
     local last_rhs_is_call = false
     if el > 0 then
@@ -2479,6 +2549,10 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
             if stmt_require_mod and i == 0 and el == 1 then
                 ctx.require_sources[name_id] = stmt_require_mod
+                if stmt_require_exports then
+                    if not ctx._require_exports then ctx._require_exports = {} end
+                    ctx._require_exports[name_id] = stmt_require_exports
+                end
             end
         elseif prescanned then
             -- Prescan already bound this name to a rich type (e.g. M with all method fields).
@@ -2525,6 +2599,10 @@ StmtRule[NODE_LOCAL_STMT] = function(ctx, nid)
             ctx.def_sites[name_id] = { line = n.line, col = n.col }
             if stmt_require_mod and i == 0 and el == 1 then
                 ctx.require_sources[name_id] = stmt_require_mod
+                if stmt_require_exports then
+                    if not ctx._require_exports then ctx._require_exports = {} end
+                    ctx._require_exports[name_id] = stmt_require_exports
+                end
             end
             -- After binding a single-name table literal with no annotation, try to promote
             -- it to an enum (e.g. `local Status = { OK = 1, ERR = 2 }`).

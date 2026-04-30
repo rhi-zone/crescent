@@ -87,8 +87,7 @@ local function load_sqlite()
 	for _, name in ipairs(names) do
 		local ok, lib = pcall(ffi.load, name)
 		if ok then
-			local raw = lib --: unknown
-			local typed = raw --[[:! $FfiC]]
+			local typed = lib --[[:! $FfiC]]
 			return typed, name
 		end
 	end

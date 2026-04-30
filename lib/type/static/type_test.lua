@@ -2574,6 +2574,49 @@ if ok then
 end
 ]], "cannot")
     end)
+    -- Regression: pcall with a field-access callee from a require()'d module.
+    -- Previously the F generic could not be resolved at gen time because the
+    -- require'd local was still TAG_VAR awaiting $Require<T>; the result was that
+    -- `lib` got bound to `any`-equivalent and force-cast workarounds were needed
+    -- in lib/sqlite/init.lua and lib/compress/system.lua.
+    assert.it("pcall(ffi.load, ...) returns unknown | string, not the input fn type", function()
+        has_error([[
+local ffi = require("ffi")
+local ok, lib = pcall(ffi.load, "z")
+local n = lib --: integer
+]], "unknown")
+    end)
+    assert.it("pcall with field-access callee narrows under if ok", function()
+        no_errors([==[
+local ffi = require("ffi")
+local ok, lib = pcall(ffi.load, "z")
+if ok then
+    local typed = lib --[[:! { foo: integer }]]
+    local n = typed.foo
+end
+]==])
+    end)
+    assert.it("pcall with multi-return wrapped fn produces tuple in success arm", function()
+        no_errors([[
+--: (string) -> (integer, string)
+local function f(s)
+    return 1, "ok"
+end
+local ok, a, b = pcall(f, "x")
+if ok then
+    local x = a + 1
+    local y = b .. "!"
+end
+]])
+    end)
+    assert.it("pcall on a void function yields just the boolean ok flag", function()
+        no_errors([[
+--: () -> ()
+local function f() end
+local ok = pcall(f)
+if ok then end
+]])
+    end)
 end)
 
 assert.describe("checker: correlated multi-return narrowing (io.open, string.find)", function()
