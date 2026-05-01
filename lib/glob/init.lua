@@ -30,7 +30,7 @@ end
 
 -- Parse a character class [abc], [a-z], [!abc], [^abc].
 -- Returns the index after the closing ] and a match function.
---: (pat: string, start: number) -> (number, (c: string) -> boolean) | (nil, string)
+--: (pat: string, start: integer) -> (integer, (c: string) -> boolean) | (nil, string)
 local function _parse_char_class(pat, start)
   local i = start
   local len = #pat
@@ -75,7 +75,7 @@ end
 -- Expand brace alternation {a,b,c} into a list of alternatives.
 -- Supports nested braces.
 -- Returns the index after the closing } and a list of strings.
---: (pat: string, start: number) -> (number, string[]) | (nil, string)
+--: (pat: string, start: integer) -> (integer, string[]) | (nil, string)
 local function _parse_braces(pat, start)
   local depth = 1
   local i = start
@@ -121,9 +121,9 @@ local TOK_ALT = 6       -- {a,b} alternation (each alt is a compiled pattern)
 
 -- Compile a glob pattern into a token list.
 -- Returns a list of tokens or (nil, errmsg).
---: (pat: string) -> { type: number, ... }[] | (nil, string)
+--: (pat: string) -> { type: integer, ... }[] | (nil, string)
 local function _compile(pat)
-  local tokens = {}
+  local tokens = --[[:! { type: integer, ... }[] ]] {}
   local i = 1
   local len = #pat
 
@@ -327,6 +327,8 @@ end
 local Matcher = {}
 Matcher.__index = Matcher
 
+--:: Matcher = { _tokens: { type: integer, ... }[], _pattern: string, ... }
+
 --: (self: Matcher, str: string) -> boolean
 function Matcher:match(str)
   return _match_tokens(self._tokens, 1, str, 1)
@@ -377,7 +379,7 @@ end
 -- Returns a Lua pattern anchored with ^ and $.
 --: (pattern: string) -> string | (nil, string)
 function M.to_pattern(pattern)
-  local parts = {}
+  local parts = --[[:! string[] ]] {}
   local i = 1
   local len = #pattern
 
