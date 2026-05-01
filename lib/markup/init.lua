@@ -6,13 +6,16 @@ local M = {}
 M._tier = "pure"
 
 -- AST node constructors
+--:: Node = { tag: string, ... }
+--: (tag: string, fields: { [string]: unknown, ... } | nil) -> Node
 local function node(tag, fields)
-  local n = fields or {}
+  local n = --[[:! Node ]] (fields or {})
   n.tag = tag
   return n
 end
 
 -- HTML escape
+--: (s: string) -> string
 local function esc(s)
   return (s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
 end
@@ -23,8 +26,9 @@ end
 
 -- Parse inline markdown-style markup inside a string.
 -- Returns list of AST nodes (Text, Bold, Italic, Code, Link, Image, LineBreak).
+--: (s: string) -> { tag: string, ... }[]
 local function parse_inline_markdown(s)
-  local nodes = {}
+  local nodes = --[[:! Node[] ]] {}
   local i = 1
   local len = #s
 
@@ -178,8 +182,9 @@ end
 -- ============================================================
 -- Inline parser for RST
 -- ============================================================
+--: (s: string) -> Node[]
 local function parse_inline_rst(s)
-  local nodes = {}
+  local nodes = --[[:! Node[] ]] {}
   local i = 1
   local len = #s
 
@@ -245,8 +250,9 @@ end
 -- ============================================================
 -- Inline parser for AsciiDoc
 -- ============================================================
+--: (s: string) -> Node[]
 local function parse_inline_asciidoc(s)
-  local nodes = {}
+  local nodes = --[[:! Node[] ]] {}
   local i = 1
   local len = #s
 
@@ -314,8 +320,9 @@ end
 -- ============================================================
 
 -- Split text into lines, keeping newlines
+--: (text: string) -> string[]
 local function split_lines(text)
-  local lines = {}
+  local lines = --[[:! string[] ]] {}
   local start = 1
   while true do
     local nl = text:find("\n", start, true)
