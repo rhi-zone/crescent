@@ -43,7 +43,7 @@ the concrete record shape it actually has.
 - [ ] `lib/css_parser/init.lua` (103) — 18 cannot compare, 15 field doesn't exist (see SKIP — prior attempt regressed)
 - [x] `lib/wire_protocol/init.lua` (98 → 93) — replaced bare `table` in framer/receiver/decode_all with concrete shapes
 - [ ] `lib/graphql_parser/init.lua` (86) — 20 cannot-pass, 16 narrow-before-indexing (see SKIP — AST shape mismatches)
-- [ ] `lib/bson/init.lua` (73) — 33 arithmetic, 13 cannot-assign
+- [ ] `lib/bson/init.lua` (73) — 33 arithmetic, 13 cannot-assign — see SKIP note (force-cast on byte regressed)
 - [x] `lib/toml/init.lua` (72 → 68) — added forward declarations for parse_datetime and _parse_time_part
 - [x] `lib/unified/rehype_highlight/init.lua` (74 → 44) — added TokenList shape annotation on tokenizer accumulator locals
 
@@ -55,8 +55,8 @@ boundary, or annotating local arrays of bytes as `integer[]`/`uint8_t[]`.
 - [x] `lib/blake2/init.lua` (145 → 49) — annotated b_compress/s_compress v and m tables; replaced rejected force cast on ffi.typeof
 - [x] `lib/bignum/init.lua` (95 → 89) — bind string.byte() multi-return to single locals before arithmetic
 - [x] `lib/matrix/init.lua` (72 → 48) — annotated self: matrix on methods accessing _rows/_cols/_data
-- [ ] `lib/protocol_buffer/init.lua` (79) — 36 arithmetic
-- [ ] `lib/bits/init.lua` (76) — 37 "union member is not callable", 11 arithmetic
+- [ ] `lib/protocol_buffer/init.lua` (79) — 36 arithmetic — see SKIP note (cascading integer|nil from decode_varint)
+- [ ] `lib/bits/init.lua` (76) — 37 "union member is not callable", 11 arithmetic — see SKIP note (pcall require bit fall-through)
 - [ ] `lib/midi/init.lua` (90) — 33 arithmetic, 14 tag-literal mismatches (see SKIP — variadic byte() resists annotation)
 
 ## Tier 4 — Self-typecheck files (typechecker checking itself)
@@ -101,6 +101,9 @@ last because the type system itself is the testbed.
 - `lib/layout/init.lua` — annotated parse_track/resolve_tracks/track_offsets returns; net 89 → 96, reverted. Constructor opts type widens `node.width: any | nil` poison flows through `bw or 0` chains. Needs LayoutNode shape annotation on `M.box`/`M.grid` returns first.
 - `lib/cryptography/init.lua` — replaced bare `table` annotations with `integer[]` on put_u32le/put_u32be/sha256_compress/sha256_raw/sha512_compress/sha512_raw/qr/chacha20_block/chacha20_init; net 107 → 116, reverted. Concrete shape forces stricter checks against `string.byte` `...integer` returns at call sites; need to first narrow callers.
 - `lib/json/init.lua` — annotating forward-declared `decode_string`/`decode_number`/`decode_object`/`decode_array` with concrete return types caused `i = ni` (integer | nil) flowing through arithmetic to remain; net 106 → 110, reverted. Real fix needs narrowing `i` after each `decode_value` call (cascading guards across many sites).
+- `lib/bits/init.lua` — annotating `band/bor/bxor/bnot/lshift/rshift` with `(integer, integer) -> integer` to remove `union member any not callable` regressed 76 → 82 (concrete return type cascades into stricter checks elsewhere). Reverted. Root cause is `pcall(require, "bit")` fall-through producing union of pure-Lua impl and bit module; needs Bitset/Bloom shape annotations first.
+- `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
+- `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 
 ## Done in current session
 
