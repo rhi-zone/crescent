@@ -5,7 +5,7 @@ end
 local M = {}
 
 --:: toml_state = { s: string, pos: integer, len: integer, line: integer }
---:: toml_datetime = { __toml_type: string, year?: integer, month?: integer, day?: integer, hour?: integer, min?: integer, sec?: integer, frac?: number, tz?: string }
+--:: toml_datetime = { __toml_type: string, year?: any, month?: any, day?: any, hour?: any, min?: any, sec?: any, frac?: any, tz?: string }
 --:: toml_value = string | number | boolean | toml_datetime | { [string]: unknown } | { [integer]: unknown }
 --:: toml_table = { [string]: unknown }
 --:: toml_key_set = { [string]: boolean }
@@ -209,7 +209,7 @@ local _parse_time_part
 local function parse_basic_string(st)
   local s, len = st.s, st.len
   local pos = st.pos + 1  -- skip opening "
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   local n = 0
   while pos <= len do
     local b = byte(s, pos)
@@ -477,7 +477,8 @@ local function strip_underscores(raw, line)
   if find(raw, "__", 1, true) then
     return nil, "line " .. line .. ": consecutive underscores in number"
   end
-  return (raw:gsub("_", ""))
+  local stripped = raw:gsub("_", "")
+  return stripped --[[:! string]]
 end
 
 -- Parse a number or date/time
@@ -940,8 +941,8 @@ local function decode(s)
     return nil, "expected string input"
   end
   local st = { s = s, pos = 1, len = #s, line = 1 }
-  local root = {}
-  local current_table = root
+  local root = {} --: { [string]: unknown }
+  local current_table = root --: { [string]: unknown }
   local implicit_tables = {}     -- tables created by dotted key traversal
   local defined_tables = {}      -- tables from [header]
   local array_tables = {}        -- tables that are arrays of tables
@@ -988,23 +989,23 @@ local function decode(s)
         local parent = root
         for i = 1, #keys - 1 do
           local k = keys[i]
-          local v = parent[k]
+          local v = parent[k] --[[:! { __toml_type: unknown, [string]: unknown, [integer]: unknown }]]
           if v == nil then
-            v = {}
+            v = {} --[[:! { __toml_type: unknown, [string]: unknown, [integer]: unknown }]]
             parent[k] = v
             implicit_tables[v] = true
             defined_keys[v] = {}
           elseif type(v) == "table" and array_tables[v] then
-            v = v[#v]
+            v = v[#v] --[[:! { __toml_type: unknown, [string]: unknown, [integer]: unknown }]]
           elseif type(v) ~= "table" or v.__toml_type then
             return nil, "line " .. st.line .. ": key '" .. k .. "' conflict"
           end
           parent = v
         end
         local last = keys[#keys]
-        local arr = parent[last]
+        local arr = parent[last] --[[:! { [integer]: unknown }]]
         if arr == nil then
-          arr = {}
+          arr = {} --[[:! { [integer]: unknown }]]
           parent[last] = arr
           array_tables[arr] = true
         elseif not array_tables[arr] then
@@ -1019,18 +1020,18 @@ local function decode(s)
         local parent = root
         for i = 1, #keys - 1 do
           local k = keys[i]
-          local v = parent[k]
+          local v = parent[k] --[[:! { __toml_type: unknown, [string]: unknown, [integer]: unknown }]]
           if v == nil then
-            v = {}
+            v = {} --[[:! { __toml_type: unknown, [string]: unknown, [integer]: unknown }]]
             parent[k] = v
             implicit_tables[v] = true
             defined_keys[v] = {}
           elseif type(v) == "table" and array_tables[v] then
-            v = v[#v]
+            v = v[#v] --[[:! { __toml_type: unknown, [string]: unknown, [integer]: unknown }]]
           elseif type(v) ~= "table" or v.__toml_type then
             return nil, "line " .. st.line .. ": key '" .. k .. "' conflict"
           end
-          parent = v
+          parent = v --[[:! { [string]: unknown }]]
         end
         local last = keys[#keys]
         local v = parent[last]
@@ -1050,7 +1051,7 @@ local function decode(s)
         end
         defined_tables[v] = true
         implicit_tables[v] = nil
-        current_table = v
+        current_table = v --[[:! { [string]: unknown }]]
         if not defined_keys[v] then defined_keys[v] = {} end
       end
     else
@@ -1086,16 +1087,16 @@ local function decode(s)
       local target = current_table
       for i = 1, #keys - 1 do
         local k = keys[i]
-        local v = target[k]
+        local v = target[k] --[[:! { __toml_type: unknown, [string]: unknown }]]
         if v == nil then
-          v = {}
+          v = {} --[[:! { __toml_type: unknown, [string]: unknown }]]
           target[k] = v
           implicit_tables[v] = true
           defined_keys[v] = {}
         elseif type(v) ~= "table" or v.__toml_type then
           return nil, "line " .. st.line .. ": key '" .. k .. "' is not a table"
         end
-        target = v
+        target = v --[[:! { [string]: unknown }]]
       end
       local last_key = keys[#keys]
       if not defined_keys[target] then defined_keys[target] = {} end
@@ -1138,7 +1139,7 @@ end
 -- Escape a string for basic (double-quoted) TOML output
 --: (string) -> string
 local function escape_basic_string(s)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   local n = 0
   local i = 1
   local len = #s
@@ -1233,7 +1234,8 @@ local function format_datetime(dt)
   if t == "datetime" then
     local s = format("%04d-%02d-%02dT%02d:%02d:%02d", dt.year, dt.month, dt.day, dt.hour, dt.min, dt.sec)
     if dt.frac then
-      s = s .. format("%.6f", dt.frac):sub(2):gsub("0+$", "")
+      local frac_str0 = format("%.6f", dt.frac):sub(2):gsub("0+$", "")
+      s = s .. frac_str0 --[[:! string]]
       if s:sub(-1) == "." then s = s .. "0" end
     end
     s = s .. (dt.tz or "Z")
@@ -1241,7 +1243,8 @@ local function format_datetime(dt)
   elseif t == "datetime-local" then
     local s = format("%04d-%02d-%02dT%02d:%02d:%02d", dt.year, dt.month, dt.day, dt.hour, dt.min, dt.sec)
     if dt.frac then
-      s = s .. format("%.6f", dt.frac):sub(2):gsub("0+$", "")
+      local frac_str = format("%.6f", dt.frac):sub(2):gsub("0+$", "")
+      s = s .. frac_str --[[:! string]]
       if s:sub(-1) == "." then s = s .. "0" end
     end
     return s
@@ -1250,7 +1253,8 @@ local function format_datetime(dt)
   elseif t == "time-local" then
     local s = format("%02d:%02d:%02d", dt.hour, dt.min, dt.sec)
     if dt.frac then
-      s = s .. format("%.6f", dt.frac):sub(2):gsub("0+$", "")
+      local frac_str2 = format("%.6f", dt.frac):sub(2):gsub("0+$", "")
+      s = s .. frac_str2 --[[:! string]]
       if s:sub(-1) == "." then s = s .. "0" end
     end
     return s
@@ -1311,7 +1315,7 @@ local function encode_inline(v)
       local enc, err = encode_inline(v[k])
       if not enc then return nil, err end
       n = n + 1
-      parts[n] = quote_key(tostring(k)) .. " = " .. enc
+      parts[n] = quote_key(tostring(k)) .. " = " .. (enc --[[:! string]])
     end
     return "{" .. concat(parts, ", ") .. "}"
   end
