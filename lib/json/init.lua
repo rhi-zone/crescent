@@ -48,6 +48,9 @@ local function utf16_to_utf8(codepoint)
 	end
 end
 
+local decode_string, decode_number, decode_object, decode_array
+
+--: (string, integer, integer) -> (unknown, integer | nil, string | nil)
 local function decode_value(s, i, n)
 	-- skip whitespace
 	while i <= n and WS[byte(s, i)] do i = i + 1 end
@@ -93,12 +96,7 @@ local function decode_value(s, i, n)
 	return nil, nil, "unexpected character '" .. sub(s, i, i) .. "' at position " .. i
 end
 
--- Forward declarations resolved below
-decode_string = nil
-decode_number = nil
-decode_object = nil
-decode_array  = nil
-
+--: (string, integer, integer) -> (string | nil, integer | nil, string | nil)
 decode_string = function(s, i, n)
 	local parts = {}
 	local start = i
