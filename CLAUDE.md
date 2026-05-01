@@ -101,10 +101,10 @@ Before claiming a feature is missing: write a 5-line repro and run `timeout 30 b
 
 ```lua
 local x --: integer                   -- inline: annotates the local declaration
-local function f(x --[[: string]], y --[[: integer]]) end  -- inline param: block comment, doesn't eat rest of line
---: (string, integer) -> boolean      -- function type (preceding line → applies to next function)
+--: (string, integer) -> boolean      -- function type (preceding line → applies to next expr/function)
+-- To annotate params: use preceding-line function type (only supported form).
 -- WARNING: `function(x --: string)` is INVALID — `--` starts a line comment, eating `)` and beyond.
--- Use --[[: T]] for inline param annotations (block comment, self-closing).
+-- WARNING: `function(x --[[: string]])` is also INVALID — block comment form is parsed as a cast, not a param annotation; silently ignored in param position.
 --:: Foo = { name: string, age: integer }  -- type alias declaration
 --:: declare x = integer              -- global variable declaration
 --:: newtype UserId = integer         -- nominal newtype (not assignable to/from integer)
