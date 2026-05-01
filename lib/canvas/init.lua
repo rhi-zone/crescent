@@ -219,10 +219,7 @@ local FONT = {
 
 local Canvas = {}
 Canvas.__index = Canvas
-Canvas.width = 0 --: integer
-Canvas.height = 0 --: integer
-Canvas.channels = 4 --: integer
-Canvas.pixels = {} --: { [integer]: integer }
+--:: CanvasInst = { width: integer, height: integer, channels: integer, pixels: { [integer]: integer }, set: (CanvasInst, integer, integer, integer, integer, integer, integer | nil) -> nil, get: (CanvasInst, integer, integer) -> (integer, integer, integer, integer), line: (CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil, rect: (CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil, fill_rect: (CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil, circle: (CanvasInst, integer, integer, integer, integer, integer, integer, integer | nil) -> nil, fill_circle: (CanvasInst, integer, integer, integer, integer, integer, integer, integer | nil) -> nil, fill: (CanvasInst, integer, integer, integer, integer, integer, integer | nil) -> nil, ... }
 
 function M.new(width, height, opts)
   if type(width) ~= "number" or width < 1 then
@@ -257,7 +254,7 @@ end
 -- Pixel access
 -- ---------------------------------------------------------------------------
 
---: (integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:set(x, y, r, g, b, a)
   if x < 0 or x >= self.width or y < 0 or y >= self.height then return end
   local base = (y * self.width + x) * 4
@@ -268,7 +265,7 @@ function Canvas:set(x, y, r, g, b, a)
   px[base + 4] = a or 255
 end
 
---: (integer, integer) -> (integer, integer, integer, integer)
+--: (self: CanvasInst, integer, integer) -> (integer, integer, integer, integer)
 function Canvas:get(x, y)
   if x < 0 or x >= self.width or y < 0 or y >= self.height then
     return 0, 0, 0, 0
@@ -282,7 +279,7 @@ end
 -- Drawing primitives
 -- ---------------------------------------------------------------------------
 
---: (integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:line(x0, y0, x1, y1, r, g, b, a)
   local dx = math.abs(x1 - x0)
   local dy = math.abs(y1 - y0)
@@ -304,7 +301,7 @@ function Canvas:line(x0, y0, x1, y1, r, g, b, a)
   end
 end
 
---: (integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:rect(x, y, w, h, r, g, b, a)
   self:line(x, y, x + w - 1, y, r, g, b, a)
   self:line(x + w - 1, y, x + w - 1, y + h - 1, r, g, b, a)
@@ -312,7 +309,7 @@ function Canvas:rect(x, y, w, h, r, g, b, a)
   self:line(x, y + h - 1, x, y, r, g, b, a)
 end
 
---: (integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:fill_rect(x, y, w, h, r, g, b, a)
   local x1 = x + w - 1
   local y1 = y + h - 1
@@ -323,7 +320,7 @@ function Canvas:fill_rect(x, y, w, h, r, g, b, a)
   end
 end
 
---: (integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:circle(cx, cy, radius, r, g, b, a)
   local x = 0
   local y = radius
@@ -351,7 +348,7 @@ function Canvas:circle(cx, cy, radius, r, g, b, a)
   end
 end
 
---: (integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:fill_circle(cx, cy, radius, r, g, b, a)
   for py = cy - radius, cy + radius do
     for px = cx - radius, cx + radius do
@@ -365,7 +362,7 @@ function Canvas:fill_circle(cx, cy, radius, r, g, b, a)
 end
 
 -- Filled triangle via scanline rasterization
---: (integer, integer, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:triangle(x0, y0, x1, y1, x2, y2, r, g, b, a)
   -- Sort vertices by y
   if y1 < y0 then x0,y0,x1,y1 = x1,y1,x0,y0 end
@@ -418,7 +415,7 @@ function Canvas:triangle(x0, y0, x1, y1, x2, y2, r, g, b, a)
 end
 
 -- Midpoint ellipse algorithm
---: (integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:ellipse(cx, cy, rx, ry, r, g, b, a)
   local x = 0
   local y = ry
@@ -460,7 +457,7 @@ end
 -- Text rendering
 -- ---------------------------------------------------------------------------
 
---: (integer, integer, string, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, string, integer, integer, integer, integer | nil) -> nil
 function Canvas:text(x, y, str, r, g, b, a)
   local cx = x
   for i = 1, #str do
@@ -468,7 +465,7 @@ function Canvas:text(x, y, str, r, g, b, a)
     local glyph = FONT[code - 31]  -- index 1 = space (32)
     if glyph then
       for row = 1, FONT_H do
-        local bits = glyph[row]
+        local bits = --[[:! integer ]] glyph[row]
         for col = 0, FONT_W - 1 do
           if bit.band(bits, bit.lshift(1, FONT_W - 1 - col)) ~= 0 then
             self:set(cx + col, y + row - 1, r, g, b, a)
@@ -495,7 +492,7 @@ end
 -- Flood fill (iterative BFS)
 -- ---------------------------------------------------------------------------
 
---: (integer, integer, integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer, integer, integer | nil) -> nil
 function Canvas:fill(x, y, r, g, b, a)
   local w, h = self.width, self.height
   if x < 0 or x >= w or y < 0 or y >= h then return end
@@ -508,8 +505,8 @@ function Canvas:fill(x, y, r, g, b, a)
   local function key(px, py) return py * w + px end
   visited[key(x, y)] = true
   while head <= #queue do
-    local px = queue[head]
-    local py = queue[head + 1]
+    local px = --[[:! integer ]] queue[head]
+    local py = --[[:! integer ]] queue[head + 1]
     head = head + 2
     local cr, cg, cb, ca = self:get(px, py)
     if cr == tr and cg == tg and cb == tb and ca == ta then
@@ -536,7 +533,7 @@ end
 -- Image operations
 -- ---------------------------------------------------------------------------
 
---: (integer, integer, integer, integer | nil) -> nil
+--: (self: CanvasInst, integer, integer, integer, integer | nil) -> nil
 function Canvas:clear(r, g, b, a)
   local n = self.width * self.height
   local px = self.pixels
@@ -550,6 +547,7 @@ function Canvas:clear(r, g, b, a)
   end
 end
 
+--: (self: CanvasInst, CanvasInst, integer, integer) -> nil
 function Canvas:blit(other, dst_x, dst_y)
   for sy = 0, other.height - 1 do
     for sx = 0, other.width - 1 do
@@ -559,6 +557,7 @@ function Canvas:blit(other, dst_x, dst_y)
   end
 end
 
+--: (self: CanvasInst, integer, integer, integer, integer) -> CanvasInst
 function Canvas:crop(x, y, w, h)
   local cv = M.new(w, h)
   for sy = 0, h - 1 do
@@ -570,6 +569,7 @@ function Canvas:crop(x, y, w, h)
   return cv
 end
 
+--: (self: CanvasInst, integer, integer) -> CanvasInst
 function Canvas:scale(new_w, new_h)
   local cv = M.new(new_w, new_h)
   local sx_ratio = self.width / new_w
@@ -586,6 +586,7 @@ function Canvas:scale(new_w, new_h)
 end
 
 -- Flip horizontally in place
+--: (self: CanvasInst) -> nil
 function Canvas:flip_h()
   local w, h = self.width, self.height
   for py = 0, h - 1 do
@@ -599,6 +600,7 @@ function Canvas:flip_h()
 end
 
 -- Flip vertically in place
+--: (self: CanvasInst) -> nil
 function Canvas:flip_v()
   local w, h = self.width, self.height
   for py = 0, math.floor(h / 2) - 1 do
@@ -616,6 +618,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- PPM P6 (binary RGB)
+--: (self: CanvasInst) -> string
 function Canvas:to_ppm()
   local w, h = self.width, self.height
   local header = "P6\n" .. w .. " " .. h .. "\n255\n"
@@ -629,6 +632,7 @@ function Canvas:to_ppm()
 end
 
 -- PGM P5 (binary grayscale, average RGB)
+--: (self: CanvasInst) -> string
 function Canvas:to_pgm()
   local w, h = self.width, self.height
   local header = "P5\n" .. w .. " " .. h .. "\n255\n"
@@ -643,6 +647,7 @@ function Canvas:to_pgm()
 end
 
 -- BMP 24-bit uncompressed (bottom-up row order)
+--: (self: CanvasInst) -> string
 function Canvas:to_bmp()
   local w, h = self.width, self.height
   -- Row stride: padded to 4 bytes
@@ -700,7 +705,7 @@ function Canvas:to_bmp()
     end
   end
 
-  return table.concat(t)
+  return table.concat(--[[:! { [integer]: string }]] t)
 end
 
 -- ---------------------------------------------------------------------------
