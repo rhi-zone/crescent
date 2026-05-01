@@ -133,7 +133,8 @@ local function digits_add(a, b)
   local result = {}
   local carry = 0
   for i = n, 1, -1 do
-    local sum = byte(a, i) - 48 + byte(b, i) - 48 + carry
+    local ba, bb = byte(a, i), byte(b, i)
+    local sum = ba - 48 + bb - 48 + carry
     if sum >= 10 then
       carry = 1
       sum = sum - 10
@@ -158,7 +159,8 @@ local function digits_sub(a, b)
   local result = {}
   local borrow = 0
   for i = n, 1, -1 do
-    local d = byte(a, i) - 48 - (byte(b, i) - 48) - borrow
+    local ba, bb = byte(a, i), byte(b, i)
+    local d = ba - 48 - (bb - 48) - borrow
     if d < 0 then
       d = d + 10
       borrow = 1
@@ -188,11 +190,13 @@ local function digits_mul(a, b)
   local result = {}
   for i = 1, an + bn do result[i] = 0 end
   for i = an, 1, -1 do
-    local ai = byte(a, i) - 48
+    local ba = byte(a, i)
+    local ai = ba - 48
     if ai ~= 0 then
       local carry = 0
       for j = bn, 1, -1 do
-        local prod = ai * (byte(b, j) - 48) + result[i + j] + carry
+        local bb = byte(b, j)
+        local prod = ai * (bb - 48) + result[i + j] + carry
         carry = floor(prod / 10)
         result[i + j] = prod - carry * 10
       end
@@ -524,7 +528,8 @@ function M.round(a, places)
   if keep <= 0 then
     -- All digits are beyond the rounding point
     if keep == 0 and #a.digits > 0 then
-      local first = byte(a.digits, 1) - 48
+      local fb = byte(a.digits, 1)
+      local first = fb - 48
       if first >= 5 then
         local one_at_place = make(1, "1", -places)
         return a.s > 0 and one_at_place or one_at_place:neg()
@@ -535,7 +540,8 @@ function M.round(a, places)
   if keep >= #a.digits then
     return M.new(a)
   end
-  local round_digit = byte(a.digits, keep + 1) - 48
+  local rb = byte(a.digits, keep + 1)
+  local round_digit = rb - 48
   local kept = sub(a.digits, 1, keep)
   if round_digit >= 5 then
     kept = digits_add(kept, "1")
