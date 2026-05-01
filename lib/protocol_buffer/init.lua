@@ -192,9 +192,14 @@ local function encode_varint_signed(n)
   -- group 7: bits 49-55 = b[6]>>1
   -- group 8: bits 56-62 = b[7] & 0x7F
   -- group 9: bit  63    = b[7] >> 7
-  local b0,b1,b2,b3,b4,b5,b6,b7 =
-    tonumber(b[0]),tonumber(b[1]),tonumber(b[2]),tonumber(b[3]),
-    tonumber(b[4]),tonumber(b[5]),tonumber(b[6]),tonumber(b[7])
+  local b0 = tonumber(b[0]) --[[:! integer]]
+  local b1 = tonumber(b[1]) --[[:! integer]]
+  local b2 = tonumber(b[2]) --[[:! integer]]
+  local b3 = tonumber(b[3]) --[[:! integer]]
+  local b4 = tonumber(b[4]) --[[:! integer]]
+  local b5 = tonumber(b[5]) --[[:! integer]]
+  local b6 = tonumber(b[6]) --[[:! integer]]
+  local b7 = tonumber(b[7]) --[[:! integer]]
   local g = {
     band(b0, 0x7F),
     bor(rshift(b0, 7), band(lshift(band(b1, 0x3F), 1), 0x7F)),
@@ -233,12 +238,12 @@ function M.decode_varint(bytes, offset)
   local len = #bytes
   local byte_count = 0
   while offset <= len do
-    local byte = string.byte(bytes, offset)
+    local byte_v = string.byte(bytes, offset)
     offset = offset + 1
     byte_count = byte_count + 1
-    result = result + band(byte, 0x7f) * (2 ^ shift)
+    result = result + band(byte_v, 0x7f) * (2 ^ shift)
     shift = shift + 7
-    if band(byte, 0x80) == 0 then
+    if band(byte_v, 0x80) == 0 then
       return result, offset
     end
     if byte_count >= 10 then
@@ -258,13 +263,13 @@ local function decode_signed_varint(bytes, offset)
   local byte_count = 0
   local raw_bytes = {}
   while offset <= len do
-    local byte = string.byte(bytes, offset)
+    local byte_v = string.byte(bytes, offset)
     offset = offset + 1
     byte_count = byte_count + 1
-    raw_bytes[byte_count] = byte
-    result = result + band(byte, 0x7f) * (2 ^ shift)
+    raw_bytes[byte_count] = byte_v
+    result = result + band(byte_v, 0x7f) * (2 ^ shift)
     shift = shift + 7
-    if band(byte, 0x80) == 0 then break end
+    if band(byte_v, 0x80) == 0 then break end
     if byte_count >= 10 then
       return nil, "protocol_buffer: varint too long"
     end
