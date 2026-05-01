@@ -100,7 +100,7 @@ local function query_column_names(db, sql)
 	return names
 end
 
---: (() -> (...unknown), string[]) -> table[]
+--: (() -> (...unknown), string[]) -> { [string]: unknown }[]
 local function collect_rows(iter, col_names)
 	local rows = {}
 	while true do
@@ -161,7 +161,7 @@ function Select:offset(val)
 	return setmetatable(q, Select)
 end
 
---: (Select) -> (string, table)
+--: (Select) -> (string, unknown[])
 function Select:_build()
 	local cols = self._columns and table.concat(self._columns, ", ") or "*"
 	local sql = "SELECT " .. cols .. " FROM " .. self._table
@@ -183,7 +183,7 @@ function Select:_resolve_col_names()
 	return get_column_names(self._db, self._table)
 end
 
---: (Select) -> (table[] | nil, string | nil)
+--: (Select) -> ({ [string]: unknown }[] | nil, string | nil)
 function Select:all()
 	local sql, params = self:_build()
 	local iter, err = self._db:query(sql, unpack(params))
@@ -193,7 +193,7 @@ function Select:all()
 	return collect_rows(iter, col_names)
 end
 
---: (Select) -> ((table | nil), (string | nil))
+--: (Select) -> ({ [string]: unknown } | nil, string | nil)
 function Select:first()
 	local q = self:limit(1)
 	local rows, err = q:all()
@@ -216,7 +216,7 @@ end
 local Insert = {}
 Insert.__index = Insert
 
---: (Insert, table) -> Insert
+--: (Insert, { [string]: unknown }) -> Insert
 function Insert:values(vals)
 	local q = shallow_copy(self)
 	q._values = vals
@@ -230,7 +230,7 @@ function Insert:returning(...)
 	return setmetatable(q, Insert)
 end
 
---: (Insert) -> (string, table)
+--: (Insert) -> (string, unknown[])
 function Insert:_build()
 	local keys = {}
 	for k in pairs(self._values) do keys[#keys + 1] = k end
@@ -255,7 +255,7 @@ function Insert:exec()
 	return self._db:execute(sql, unpack(params))
 end
 
---: (Insert) -> ((table | nil), (string | nil))
+--: (Insert) -> ({ [string]: unknown } | nil, string | nil)
 function Insert:first()
 	local sql, params = self:_build()
 	local iter, err = self._db:query(sql, unpack(params))
@@ -269,7 +269,7 @@ end
 local Update = {}
 Update.__index = Update
 
---: (Update, table) -> Update
+--: (Update, { [string]: unknown }) -> Update
 function Update:set(vals)
 	local q = shallow_copy(self)
 	q._set = vals
@@ -289,7 +289,7 @@ function Update:where(clause, ...)
 	return setmetatable(q, Update)
 end
 
---: (Update) -> (string, table)
+--: (Update) -> (string, unknown[])
 function Update:_build()
 	local keys = {}
 	for k in pairs(self._set) do keys[#keys + 1] = k end
@@ -334,7 +334,7 @@ function Delete:where(clause, ...)
 	return setmetatable(q, Delete)
 end
 
---: (Delete) -> (string, table)
+--: (Delete) -> (string, unknown[])
 function Delete:_build()
 	local sql = "DELETE FROM " .. self._table
 	local params = copy_array(self._where_params)
@@ -405,7 +405,7 @@ function Conn:exec(sql, ...)
 	return self._db:execute(sql, ...)
 end
 
---: (Conn, string, ...unknown) -> (table[] | nil, string | nil)
+--: (Conn, string, ...unknown) -> ({ [string]: unknown }[] | nil, string | nil)
 function Conn:query(sql, ...)
 	local iter, err = self._db:query(sql, ...)
 	if not iter then return nil, err end
@@ -413,7 +413,7 @@ function Conn:query(sql, ...)
 	return collect_rows(iter, col_names)
 end
 
---: (Conn, string, ...unknown) -> ((table | nil), (string | nil))
+--: (Conn, string, ...unknown) -> ({ [string]: unknown } | nil, string | nil)
 function Conn:query_one(sql, ...)
 	local rows, err = self:query(sql, ...)
 	if not rows then return nil, err end
@@ -452,7 +452,7 @@ function Conn:migration_version()
 	return ver
 end
 
---: (Conn, table[]) -> ((true | nil), (string | nil))
+--: (Conn, { [integer]: { version: integer, up: string, ... } }) -> ((true | nil), (string | nil))
 function Conn:migrate(migrations)
 	local ok, err = self._db:execute(
 		"CREATE TABLE IF NOT EXISTS _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"

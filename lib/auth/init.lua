@@ -309,6 +309,7 @@ function M.verify_password(password, hash_str)
 	)
 	if not iterations_s then return false end
 	local iterations = tonumber(iterations_s)
+	if not iterations then return false end
 	local salt = hex_to_bytes(salt_hex)
 	local dk = pbkdf2_sha256(password, salt, iterations, DK_LEN)
 	local computed_hex = bytes_to_hex(dk)
