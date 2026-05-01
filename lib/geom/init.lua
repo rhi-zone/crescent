@@ -4,6 +4,15 @@ end
 
 local M = {}
 
+--:: Point2 = { x: number, y: number }
+--:: Vec2 = { x: number, y: number }
+--:: Circle = { x: number, y: number, r: number }
+--:: Aabb = { x: number, y: number, w: number, h: number }
+--:: Segment = { p1: Point2, p2: Point2 }
+--:: Line2 = { a: number, b: number, c: number }
+--:: Vec3 = { x: number, y: number, z: number }
+--:: Plane = { a: number, b: number, c: number, d: number }
+
 local sqrt = math.sqrt
 local abs  = math.abs
 local atan2 = math.atan2
@@ -39,43 +48,57 @@ end
 -- 2D Points / Vectors
 -- ---------------------------------------------------------------------------
 
+--: (number, number) -> Point2
 M.point = function(x, y) return { x = x, y = y } end
 M.vec   = M.point
 
+--: ({ x: number, y: number, ... }, { x: number, y: number, ... }) -> number
 M.distance_sq = function(p1, p2)
   local dx = p2.x - p1.x
   local dy = p2.y - p1.y
   return dx * dx + dy * dy
 end
 
+--: ({ x: number, y: number, ... }, { x: number, y: number, ... }) -> number
 M.distance = function(p1, p2) return sqrt(M.distance_sq(p1, p2)) end
 
+--: (Point2, Point2) -> Point2
 M.midpoint = function(p1, p2)
   return { x = (p1.x + p2.x) * 0.5, y = (p1.y + p2.y) * 0.5 }
 end
 
+--: (Point2, Point2, number) -> Point2
 M.lerp_point = function(p1, p2, t)
   return { x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t }
 end
 
+--: (Vec2, Vec2) -> Vec2
 M.vec_add   = function(v1, v2) return { x = v1.x + v2.x, y = v1.y + v2.y } end
+--: (Vec2, Vec2) -> Vec2
 M.vec_sub   = function(v1, v2) return { x = v1.x - v2.x, y = v1.y - v2.y } end
+--: (Vec2, number) -> Vec2
 M.vec_scale = function(v, s)   return { x = v.x * s,     y = v.y * s     } end
 
+--: (Vec2, Vec2) -> number
 M.vec_dot   = function(v1, v2) return v1.x * v2.x + v1.y * v2.y end
--- 2D cross product (scalar z-component of the 3D cross)
+-- 2D cross product (scalar z-component of the 3D cross): returns scalar
+--: (Vec2, Vec2) -> number
 M.vec_cross = function(v1, v2) return v1.x * v2.y - v1.y * v2.x end
 
+--: (Vec2) -> number
 M.vec_len   = function(v) return sqrt(v.x * v.x + v.y * v.y) end
 
+--: (Vec2) -> Vec2
 M.vec_normalize = function(v)
   local l = M.vec_len(v)
   if l == 0 then return { x = 0, y = 0 } end
   return { x = v.x / l, y = v.y / l }
 end
 
+--: (Vec2) -> number
 M.vec_angle  = function(v) return atan2(v.y, v.x) end
 
+--: (Vec2, number) -> Vec2
 M.vec_rotate = function(v, angle)
   local c = cos(angle)
   local s_ = sin(angle)
@@ -83,6 +106,7 @@ M.vec_rotate = function(v, angle)
 end
 
 -- Perpendicular vector (rotated 90° CCW): (-y, x)
+--: (Vec2) -> Vec2
 M.vec_perp = function(v) return { x = -v.y, y = v.x } end
 
 -- ---------------------------------------------------------------------------
@@ -90,6 +114,7 @@ M.vec_perp = function(v) return { x = -v.y, y = v.x } end
 -- ---------------------------------------------------------------------------
 
 -- Returns 1 (CCW), -1 (CW), 0 (collinear)
+--: (Point2, Point2, Point2) -> integer
 M.orientation = function(p1, p2, p3)
   local cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x)
   if cross > 0 then return 1 elseif cross < 0 then return -1 else return 0 end
@@ -99,13 +124,17 @@ end
 -- Line segments
 -- ---------------------------------------------------------------------------
 
+--: (Point2, Point2) -> Segment
 M.segment = function(p1, p2) return { p1 = p1, p2 = p2 } end
 
+--: (Segment) -> number
 M.segment_length = function(seg) return M.distance(seg.p1, seg.p2) end
 
+--: (Segment) -> Point2
 M.segment_midpoint = function(seg) return M.midpoint(seg.p1, seg.p2) end
 
 -- Closest point on segment to the given point
+--: (Point2, Segment) -> Point2
 M.closest_point_on_segment = function(point, seg)
   local dx = seg.p2.x - seg.p1.x
   local dy = seg.p2.y - seg.p1.y
@@ -117,6 +146,7 @@ M.closest_point_on_segment = function(point, seg)
 end
 
 -- Test if point lies on segment (within epsilon tolerance)
+--: (Point2, Segment, number | nil) -> boolean
 M.point_on_segment = function(p, seg, eps)
   eps = eps or 1e-9
   -- Must satisfy: distance(p, p1) + distance(p, p2) ≈ distance(p1, p2)
@@ -129,6 +159,7 @@ end
 -- Shared helper: compute intersection parameter for seg1 p1→p2
 -- Returns t, u where intersection = p1 + t*(p2-p1) = p3 + u*(p4-p3)
 -- Returns nil, nil if parallel
+--: (Point2, Point2, Point2, Point2) -> (number | nil, number | nil)
 local function _seg_intersect_params(p1, p2, p3, p4)
   local dx1 = p2.x - p1.x
   local dy1 = p2.y - p1.y
@@ -143,6 +174,7 @@ local function _seg_intersect_params(p1, p2, p3, p4)
   return t, u
 end
 
+--: (Segment, Segment) -> boolean
 M.segment_intersects = function(seg1, seg2)
   local t, u = _seg_intersect_params(seg1.p1, seg1.p2, seg2.p1, seg2.p2)
   if t == nil then return false end
@@ -150,6 +182,7 @@ M.segment_intersects = function(seg1, seg2)
 end
 
 -- Returns intersection point or nil (parallel or non-intersecting)
+--: (Segment, Segment) -> Point2 | nil
 M.segment_intersection = function(seg1, seg2)
   local t, u = _seg_intersect_params(seg1.p1, seg1.p2, seg2.p1, seg2.p2)
   if t == nil then return nil end
@@ -165,6 +198,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Compute line coefficients from two points
+--: (Point2, Point2) -> Line2
 M.line_from_points = function(p1, p2)
   local a = p2.y - p1.y
   local b = p1.x - p2.x
@@ -172,6 +206,7 @@ M.line_from_points = function(p1, p2)
   return { a = a, b = b, c = c }
 end
 
+--: (Point2, Vec2) -> Line2
 M.line_from_point_dir = function(p, dir)
   -- direction vector (dx, dy) → normal is (-dy, dx), so a=-dy, b=dx
   local a = -dir.y
@@ -181,6 +216,7 @@ M.line_from_point_dir = function(p, dir)
 end
 
 -- Signed distance from point to line ax+by+c=0 (positive on normal side)
+--: (Line2, Point2) -> number
 M.line_distance = function(line, point)
   local norm = sqrt(line.a * line.a + line.b * line.b)
   if norm == 0 then return 0 end
@@ -188,6 +224,7 @@ M.line_distance = function(line, point)
 end
 
 -- Intersection of two infinite lines; returns nil if parallel
+--: (Line2, Line2) -> Point2 | nil
 M.lines_intersection = function(l1, l2)
   local denom = l1.a * l2.b - l2.a * l1.b
   if denom == 0 then return nil end
@@ -206,12 +243,15 @@ end
 -- Circles
 -- ---------------------------------------------------------------------------
 
+--: (number, number, number) -> Circle
 M.circle = function(cx, cy, r) return { x = cx, y = cy, r = r } end
 
+--: (Circle, Point2) -> boolean
 M.circle_contains = function(circle, point)
   return M.distance_sq(circle, point) <= circle.r * circle.r
 end
 
+--: (Circle, Circle) -> boolean
 M.circles_intersect = function(c1, c2)
   local d_sq = M.distance_sq(c1, c2)
   local r_sum = c1.r + c2.r
@@ -220,6 +260,7 @@ M.circles_intersect = function(c1, c2)
 end
 
 -- Does segment intersect (or lie inside) circle?
+--: (Circle, Segment) -> boolean
 M.circle_segment_intersect = function(circle, seg)
   local closest = M.closest_point_on_segment(circle, seg)
   return M.distance_sq(circle, closest) <= circle.r * circle.r
@@ -229,8 +270,10 @@ end
 -- Axis-aligned bounding boxes
 -- ---------------------------------------------------------------------------
 
+--: (number, number, number, number) -> Aabb
 M.aabb = function(x, y, w, h) return { x = x, y = y, w = w, h = h } end
 
+--: (Point2[]) -> Aabb | nil
 M.aabb_from_points = function(points)
   if not points[1] then return nil end
   local min_x, min_y = points[1].x, points[1].y
@@ -245,16 +288,19 @@ M.aabb_from_points = function(points)
   return { x = min_x, y = min_y, w = max_x - min_x, h = max_y - min_y }
 end
 
+--: (Aabb, Point2) -> boolean
 M.aabb_contains_point = function(aabb, p)
   return p.x >= aabb.x and p.x <= aabb.x + aabb.w
      and p.y >= aabb.y and p.y <= aabb.y + aabb.h
 end
 
+--: (Aabb, Aabb) -> boolean
 M.aabb_intersects = function(a1, a2)
   return a1.x <= a2.x + a2.w and a1.x + a1.w >= a2.x
      and a1.y <= a2.y + a2.h and a1.y + a1.h >= a2.y
 end
 
+--: (Aabb, Aabb) -> Aabb
 M.aabb_union = function(a1, a2)
   local x = a1.x < a2.x and a1.x or a2.x
   local y = a1.y < a2.y and a1.y or a2.y
@@ -263,6 +309,7 @@ M.aabb_union = function(a1, a2)
   return { x = x, y = y, w = max_x - x, h = max_y - y }
 end
 
+--: (Aabb, number) -> Aabb
 M.aabb_expand = function(aabb, amount)
   return {
     x = aabb.x - amount,
@@ -276,14 +323,19 @@ end
 -- Triangles
 -- ---------------------------------------------------------------------------
 
+--:: Triangle = { p1: Point2, p2: Point2, p3: Point2 }
+
+--: (Point2, Point2, Point2) -> Triangle
 M.triangle = function(p1, p2, p3) return { p1 = p1, p2 = p2, p3 = p3 } end
 
 -- Signed area: positive = CCW, negative = CW
+--: (Point2, Point2, Point2) -> number
 M.triangle_area = function(p1, p2, p3)
   return 0.5 * ((p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y))
 end
 
 -- Point-in-triangle via barycentric coords (works for both windings)
+--: (Point2, Point2, Point2, Point2) -> boolean
 M.triangle_contains = function(p1, p2, p3, point)
   local d1 = M.vec_cross(M.vec_sub(p2, p1), M.vec_sub(point, p1))
   local d2 = M.vec_cross(M.vec_sub(p3, p2), M.vec_sub(point, p2))
@@ -294,6 +346,7 @@ M.triangle_contains = function(p1, p2, p3, point)
 end
 
 -- Circumcircle of triangle; returns nil for degenerate (collinear) triangle
+--: (Point2, Point2, Point2) -> Circle | nil
 M.triangle_circumcircle = function(p1, p2, p3)
   local ax, ay = p1.x, p1.y
   local bx, by = p2.x, p2.y
@@ -307,6 +360,7 @@ M.triangle_circumcircle = function(p1, p2, p3)
   return M.circle(ux, uy, r)
 end
 
+--: (Point2, Point2, Point2) -> Point2
 M.triangle_centroid = function(p1, p2, p3)
   return { x = (p1.x + p2.x + p3.x) / 3, y = (p1.y + p2.y + p3.y) / 3 }
 end
@@ -316,6 +370,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Shoelace formula — returns signed area (positive = CCW)
+--: (Point2[]) -> number
 M.polygon_area = function(points)
   local n = #points
   local area = 0
@@ -327,6 +382,7 @@ M.polygon_area = function(points)
   return area * 0.5
 end
 
+--: (Point2[]) -> Point2
 M.polygon_centroid = function(points)
   local n = #points
   local area = 0
@@ -346,6 +402,7 @@ M.polygon_centroid = function(points)
 end
 
 -- Returns true if polygon vertices are all convex (same winding for every triple)
+--: (Point2[]) -> boolean
 M.polygon_is_convex = function(points)
   local n = #points
   if n < 3 then return false end
@@ -367,6 +424,7 @@ M.polygon_is_convex = function(points)
 end
 
 -- Ray-casting point-in-polygon
+--: (Point2[], Point2) -> boolean
 M.polygon_contains = function(points, point)
   local n = #points
   local inside = false
@@ -385,6 +443,7 @@ end
 
 -- Graham scan convex hull — returns CCW ordered hull points
 -- Handles degenerate inputs (< 3 points, collinear) gracefully
+--: (Point2[]) -> Point2[]
 M.convex_hull = function(points)
   local n = #points
   if n == 0 then return {} end
@@ -439,16 +498,22 @@ end
 -- 3D Vectors
 -- ---------------------------------------------------------------------------
 
+--: (number, number, number) -> Vec3
 M.vec3 = function(x, y, z) return { x = x, y = y, z = z } end
 
+--: (Vec3, Vec3) -> Vec3
 M.vec3_add   = function(v1, v2) return { x = v1.x+v2.x, y = v1.y+v2.y, z = v1.z+v2.z } end
+--: (Vec3, Vec3) -> Vec3
 M.vec3_sub   = function(v1, v2) return { x = v1.x-v2.x, y = v1.y-v2.y, z = v1.z-v2.z } end
+--: (Vec3, number) -> Vec3
 M.vec3_scale = function(v, s)   return { x = v.x*s,     y = v.y*s,     z = v.z*s     } end
 
+--: (Vec3, Vec3) -> number
 M.vec3_dot = function(v1, v2)
   return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z
 end
 
+--: (Vec3, Vec3) -> Vec3
 M.vec3_cross = function(v1, v2)
   return {
     x = v1.y * v2.z - v1.z * v2.y,
@@ -457,10 +522,12 @@ M.vec3_cross = function(v1, v2)
   }
 end
 
+--: (Vec3) -> number
 M.vec3_len = function(v)
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
 end
 
+--: (Vec3) -> Vec3
 M.vec3_normalize = function(v)
   local l = M.vec3_len(v)
   if l == 0 then return { x = 0, y = 0, z = 0 } end
@@ -472,12 +539,14 @@ end
 -- ---------------------------------------------------------------------------
 
 -- normal should be a unit vector for meaningful distance queries
+--: (Vec3, Vec3) -> Plane
 M.plane_from_normal_point = function(normal, point)
   local d = -(normal.x * point.x + normal.y * point.y + normal.z * point.z)
   return { a = normal.x, b = normal.y, c = normal.z, d = d }
 end
 
 -- Signed distance from point to plane (assumes |normal| = 1)
+--: (Plane, Vec3) -> number
 M.plane_distance = function(plane, point)
   local norm = sqrt(plane.a*plane.a + plane.b*plane.b + plane.c*plane.c)
   if norm == 0 then return 0 end
