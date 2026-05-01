@@ -79,6 +79,7 @@ end
 -- conv_query: runs sql with params_array on a shared_db cap (dot-call API).
 -- Works for both SELECT (returns rows) and DML (returns {}).
 -- Returns rows_array, nil on success; nil, err on failure.
+--: (unknown, string, { [integer]: unknown }) -> ({ [integer]: { [string]: unknown } } | nil, string | nil)
 local function conv_query(db, sql, params)
 	return db.query(sql, params)
 end
@@ -311,6 +312,7 @@ local function parse_target(target)
 	return path, params
 end
 
+--: ({ status: integer | nil, headers: { [string]: string }, body: string | nil, ... }, unknown) -> boolean
 local function json_ok(res, data)
 	res.status = 200
 	res.headers["Content-Type"] = "application/json"
