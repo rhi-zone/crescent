@@ -157,8 +157,10 @@ local binop_prec = {
 -- Extracts --: and --:: comments from source, keyed by line number.
 -- Returns { [lineno] = { kind="type"|"decl", content=string } }
 -- ---------------------------------------------------------------------------
+--:: L2TSAnn = { kind: string, content: string }
 local function scan_annotations(source)
-    local anns = {}
+  --: { [integer]: L2TSAnn }
+  local anns = {}
     local lineno = 1
     local i = 1
     local len = #source
@@ -329,6 +331,7 @@ end
 -- ---------------------------------------------------------------------------
 -- Expression emitter — returns a string
 -- ---------------------------------------------------------------------------
+
 local emit_expr  -- forward declaration
 local emit_stmt  -- forward declaration
 local emit_block -- forward declaration
