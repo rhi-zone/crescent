@@ -18,12 +18,12 @@ shape, or returns annotated as `unknown`. Add `--[[:! T]]` overlap-cast or
 - [ ] `lib/crescent_examples/composter.lua` (311) — 253 "must be narrowed before indexing"
 - [ ] `lib/type/static/parse.lua` (177) — 151 "must be narrowed before calling"
 - [ ] `lib/lua2ts/init.lua` (162) — 110 "must be narrowed before calling", 22 arithmetic on unknown
-- [ ] `lib/xpath/init.lua` (150) — 90 "must be narrowed before calling", 10 cannot take length
+- [x] `lib/xpath/init.lua` (150 → 122) — annotated tokenize signature; replaced bare `table` with `{ ... }`
 - [ ] `lib/type/static/ann.lua` (144) — 53 "must be narrowed before calling", 20 "argument might also be X"
 - [ ] `lib/bin_packing/init.lua` (112) — 88 "must be narrowed before indexing" — see SKIP note (untyped locals; restructure)
 - [ ] `lib/lru/init.lua` (107) — 70 "must be narrowed before indexing"
-- [ ] `lib/observer/init.lua` (98) — 66 "must be narrowed before calling"
-- [ ] `lib/observable/init.lua` (83) — 51 "must be narrowed before calling", 18 "must be narrowed before indexing"
+- [x] `lib/observer/init.lua` (98 → 95) — bind+nil-check+force-cast on optional callbacks
+- [x] `lib/observable/init.lua` (83 → 81) — same pattern for SafeObserver._raw callbacks
 - [ ] `lib/red_black_tree/init.lua` (72) — 43 "must be narrowed before indexing"
 - [ ] `lib/layout/init.lua` (89) — 38 "must be narrowed before indexing", 23 arithmetic on unknown
 
@@ -96,7 +96,13 @@ last because the type system itself is the testbed.
 - `lib/crescent_examples/composter.lua` — pervasive LuaLS-style `@type`/`@diagnostic` annotations not understood by crescent typechecker; 253 narrow-before-indexing errors come from FFI-returned `unknown` values across the entire file. Fixing requires either rewriting all annotations or wholesale `--[[:! T]]` casts after each external call. Restructuring.
 - `lib/type/static/parse.lua` — 151 narrow-before-calling errors all from `L:next()`, `nodes:get()`, `lists:push()` etc. on locals returned by `lex_mod.new`/`arena_mod.new_node_arena`/`arena_mod.new_list_pool`. Fix would require giving those constructors return type annotations — typechecker self-check work that requires reading `docs/typechecker-v2.md` and `docs/type-system.md` first per `lib/type/static/CLAUDE.md`. Out of scope for cleanup pass.
 - `lib/lru/init.lua` — attempted `Cache`/`Lfu`/`TwoQ` concrete shape replacement; narrow errors stayed at 70 (helper functions take `self` as untyped parameter, shape doesn't propagate) while constructor return-type mismatches added 3 new errors. Net 107→110, reverted. Proper fix requires annotating every `self` parameter on internal helpers + reconciling `_cap: integer` vs `math.floor(capacity)` literal flow. Restructuring.
+- `lib/lua2ts/init.lua` — attempted annotating `scan_annotations(source)`, `ctx:name`/`ctx:list` returns; ctx still flows as unknown into emit_expr (closure-built ctx not seen at call sites). Net 162→163, reverted. Same family as parse.lua: needs constructor return types on `parse_mod.parse`/`new_ctx`. Out of scope for cleanup pass.
+- `lib/red_black_tree/init.lua` — recursive `RBNode` type with self-referential left/right/parent fields. Sentinel construction starts with `nil` then assigns NIL = NIL.left, defeating any concrete annotation. All 72 errors are `x.parent.left.color` chains; needs structural recursive type support, restructuring.
 
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/xpath/init.lua` (was 150 → now 122, commit e90013a)
+- [x] `lib/observer/init.lua` (was 98 → now 95, commit b9fd693)
+- [x] `lib/observable/init.lua` (was 83 → now 81, commit 6d2d311)
