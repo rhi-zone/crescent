@@ -25,7 +25,7 @@ shape, or returns annotated as `unknown`. Add `--[[:! T]]` overlap-cast or
 - [x] `lib/observer/init.lua` (98 → 95) — bind+nil-check+force-cast on optional callbacks
 - [x] `lib/observable/init.lua` (83 → 81) — same pattern for SafeObserver._raw callbacks
 - [ ] `lib/red_black_tree/init.lua` (72) — 43 "must be narrowed before indexing"
-- [ ] `lib/layout/init.lua` (89) — 38 "must be narrowed before indexing", 23 arithmetic on unknown
+- [x] `lib/layout/init.lua` (89 → 0) — added LayoutNode type alias fields (id, col/row/col_span/row_span, columns/rows, width/height as string|number|nil); annotated compute_box/compute_grid/compute_node/resolve_tracks; force casts for type(node.width)=="number" branches; 0.0 initializations
 
 ## Tier 2 — Concrete-shape replacement (vague `table` / missing fields)
 
@@ -38,8 +38,8 @@ the concrete record shape it actually has.
 - [x] `lib/crescent_examples/x11_wm.lua` (178 → 160) — added local bit = require("bit")
 - [x] `lib/yaml/init.lua` (143 → 42) — annotated YState + helpers; cur/peek return integer with fallback
 - [x] `lib/ical/init.lua` (123 → 70) — annotated add_prop signature with optional params
-- [ ] `lib/cryptography/init.lua` (107) — 26 "cannot assign X to X", 24 arithmetic on unknown
-- [ ] `lib/json/init.lua` (106) — 31 "cannot compare", 22 arithmetic, 20 "is not assignable"
+- [x] `lib/cryptography/init.lua` (107 → 64) — annotated all `table` shapes; rewrote u32be/u32le with math.floor(tonumber(byte)) pattern; fixed ror64/shr64 bit-op integer params; guarded chacha20 return in poly1305 encrypt/decrypt
+- [x] `lib/json/init.lua` (106 → 17) — annotated decode_number/array/object/encode_value/encode_array/encode_object; added i=ni force-casts; encode_value type narrowing casts; remaining 17 from string.byte ...integer comparison (unfixable)
 - [ ] `lib/css_parser/init.lua` (103) — 18 cannot compare, 15 field doesn't exist (see SKIP — prior attempt regressed)
 - [x] `lib/wire_protocol/init.lua` (98 → 93) — replaced bare `table` in framer/receiver/decode_all with concrete shapes
 - [ ] `lib/graphql_parser/init.lua` (86) — 20 cannot-pass, 16 narrow-before-indexing (see SKIP — AST shape mismatches)
@@ -98,9 +98,6 @@ last because the type system itself is the testbed.
 - `lib/lru/init.lua` — attempted `Cache`/`Lfu`/`TwoQ` concrete shape replacement; narrow errors stayed at 70 (helper functions take `self` as untyped parameter, shape doesn't propagate) while constructor return-type mismatches added 3 new errors. Net 107→110, reverted. Proper fix requires annotating every `self` parameter on internal helpers + reconciling `_cap: integer` vs `math.floor(capacity)` literal flow. Restructuring.
 - `lib/lua2ts/init.lua` — attempted annotating `scan_annotations(source)`, `ctx:name`/`ctx:list` returns; ctx still flows as unknown into emit_expr (closure-built ctx not seen at call sites). Net 162→163, reverted. Same family as parse.lua: needs constructor return types on `parse_mod.parse`/`new_ctx`. Out of scope for cleanup pass.
 - `lib/red_black_tree/init.lua` — recursive `RBNode` type with self-referential left/right/parent fields. Sentinel construction starts with `nil` then assigns NIL = NIL.left, defeating any concrete annotation. All 72 errors are `x.parent.left.color` chains; needs structural recursive type support, restructuring.
-- `lib/layout/init.lua` — annotated parse_track/resolve_tracks/track_offsets returns; net 89 → 96, reverted. Constructor opts type widens `node.width: any | nil` poison flows through `bw or 0` chains. Needs LayoutNode shape annotation on `M.box`/`M.grid` returns first.
-- `lib/cryptography/init.lua` — replaced bare `table` annotations with `integer[]` on put_u32le/put_u32be/sha256_compress/sha256_raw/sha512_compress/sha512_raw/qr/chacha20_block/chacha20_init; net 107 → 116, reverted. Concrete shape forces stricter checks against `string.byte` `...integer` returns at call sites; need to first narrow callers.
-- `lib/json/init.lua` — annotating forward-declared `decode_string`/`decode_number`/`decode_object`/`decode_array` with concrete return types caused `i = ni` (integer | nil) flowing through arithmetic to remain; net 106 → 110, reverted. Real fix needs narrowing `i` after each `decode_value` call (cascading guards across many sites).
 - `lib/bits/init.lua` — annotating `band/bor/bxor/bnot/lshift/rshift` with `(integer, integer) -> integer` to remove `union member any not callable` regressed 76 → 82 (concrete return type cascades into stricter checks elsewhere). Reverted. Root cause is `pcall(require, "bit")` fall-through producing union of pure-Lua impl and bit module; needs Bitset/Bloom shape annotations first.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
@@ -123,3 +120,6 @@ last because the type system itself is the testbed.
 - [x] `lib/bignum/init.lua` (was 95 → now 89, commit 5ec6c4e)
 - [x] `lib/blake2/init.lua` (was 145 → now 49, commit ddad5ff)
 - [x] `lib/matrix/init.lua` (was 72 → now 48, commit 6158453)
+- [x] `lib/layout/init.lua` (was 89 → now 0, commit cac805c)
+- [x] `lib/json/init.lua` (was 106 → now 17, commit a7e75c8) — 17 remaining from string.byte() ...integer comparison; unfixable without typechecker changes
+- [x] `lib/cryptography/init.lua` (was 107 → now 64, commit 256f000) — 64 remaining: 10 return-nil mismatches (string|(nil,string) multi-return union), number/integer cascades in SHA-512/Poly1305 arithmetic, ...integer from string.byte in sha512_compress block loop
