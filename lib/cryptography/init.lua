@@ -55,36 +55,44 @@ end
 function M.unhex(s)
 	if #s % 2 ~= 0 then return nil end
 	if s:find("[^0-9a-fA-F]") then return nil end
-	return (s:gsub("..", function(h) return string.char(tonumber(h, 16)) end))
+	local result = s:gsub("..", function(h) return string.char(tonumber(h, 16)) end)
+	return result
 end
 
 -- Read a big-endian uint32 from string at 1-based offset.
---: (string, number) -> number
+--: (string, integer) -> integer
 local function u32be(s, off)
-	local a, b, c, d = string.byte(s, off, off + 3)
+	local a = math.floor(tonumber(string.byte(s, off))     or 0)
+	local b = math.floor(tonumber(string.byte(s, off + 1)) or 0)
+	local c = math.floor(tonumber(string.byte(s, off + 2)) or 0)
+	local d = math.floor(tonumber(string.byte(s, off + 3)) or 0)
 	-- Use unsigned arithmetic via tobit trick: build the value then mask.
 	-- For values where MSB is set, the double sum is correct; tobit signs it.
 	return tobit(a * 0x1000000 + b * 0x10000 + c * 0x100 + d)
 end
 
 -- Read a little-endian uint32 from string at 0-based offset.
---: (string, number) -> number
+--: (string, integer) -> integer
 local function u32le(s, off)
-	local a, b, c, d = string.byte(s, off + 1, off + 4)
+	local a = math.floor(tonumber(string.byte(s, off + 1)) or 0)
+	local b = math.floor(tonumber(string.byte(s, off + 2)) or 0)
+	local c = math.floor(tonumber(string.byte(s, off + 3)) or 0)
+	local d = math.floor(tonumber(string.byte(s, off + 4)) or 0)
 	return tobit(a + b * 0x100 + c * 0x10000 + d * 0x1000000)
 end
 
 -- Write a little-endian uint32 into byte table at 1-based position.
---: (table, number, number) -> ()
+--: ({ [integer]: integer }, integer, number) -> ()
 local function put_u32le(t, pos, v)
-	t[pos]     = band(v, 0xff)
-	t[pos + 1] = band(rshift(v, 8), 0xff)
-	t[pos + 2] = band(rshift(v, 16), 0xff)
-	t[pos + 3] = band(rshift(v, 24), 0xff)
+	local vi = tobit(v)
+	t[pos]     = band(vi, 0xff)
+	t[pos + 1] = band(rshift(vi, 8), 0xff)
+	t[pos + 2] = band(rshift(vi, 16), 0xff)
+	t[pos + 3] = band(rshift(vi, 24), 0xff)
 end
 
 -- Write a big-endian uint32 into byte table at 1-based position.
---: (table, number, number) -> ()
+--: ({ [integer]: integer }, integer, integer) -> ()
 local function put_u32be(t, pos, v)
 	t[pos]     = band(rshift(v, 24), 0xff)
 	t[pos + 1] = band(rshift(v, 16), 0xff)
@@ -128,18 +136,17 @@ local SHA256_H0 = {
 }
 
 -- Reusable message schedule array (avoids per-block allocation in hot path).
-local sha256_W = {}
+local sha256_W = {} --: { [integer]: integer }
 for i = 1, 64 do sha256_W[i] = 0 end
 
 -- Compress one 64-byte SHA-256 block. h is an 8-element array of uint32 (signed via bit.*).
---: (string, number, table) -> ()
+--: (string, integer, { [integer]: integer }) -> ()
 local function sha256_compress(msg, offset, h)
 	local W = sha256_W
 	-- Load 16 big-endian words from msg at byte offset (1-based string).
 	for i = 0, 15 do
 		local o = offset + i * 4
-		local a, b, c, d = string.byte(msg, o + 1, o + 4)
-		W[i + 1] = tobit(a * 0x1000000 + b * 0x10000 + c * 0x100 + d)
+		W[i + 1] = tobit(u32be(msg, o + 1))
 	end
 	-- Extend schedule.
 	for i = 17, 64 do
@@ -174,9 +181,9 @@ local function sha256_compress(msg, offset, h)
 end
 
 -- Internal SHA-256 returning 8-word hash array.
---: (string) -> table
+--: (string) -> { [integer]: integer }
 local function sha256_raw(data)
-	local h = {}
+	local h = {} --: { [integer]: integer }
 	for i = 1, 8 do h[i] = SHA256_H0[i] end
 
 	local len    = #data
@@ -200,7 +207,7 @@ local function sha256_raw(data)
 			bits_lo % 256
 		)
 
-	local nblocks = #padded / 64
+	local nblocks = math.floor(#padded / 64)
 	for blk = 0, nblocks - 1 do
 		sha256_compress(padded, blk * 64, h)
 	end
@@ -300,13 +307,13 @@ local function xor64(ah, al, bh, bl)
 end
 
 -- 64-bit right-rotate by n bits (n < 32 or n >= 32 handled).
---: (number, number, number) -> (number, number)
+--: (number, number, integer) -> (number, number)
 local function ror64(hi, lo, n)
 	if n == 0 then return hi, lo end
 	if n >= 32 then
 		-- swap halves first, then rotate remainder
 		hi, lo = lo, hi
-		n = n - 32
+		n = tobit(n - 32)
 	end
 	if n == 0 then return hi, lo end
 	local nh = bor(rshift(tobit(hi), n), lshift(tobit(lo), 32 - n))
@@ -315,11 +322,11 @@ local function ror64(hi, lo, n)
 end
 
 -- 64-bit right-shift by n bits.
---: (number, number, number) -> (number, number)
+--: (number, number, integer) -> (number, number)
 local function shr64(hi, lo, n)
 	if n == 0 then return hi, lo end
 	if n >= 32 then
-		return 0, rshift(tobit(hi), n - 32) % 0x100000000
+		return 0, rshift(tobit(hi), tobit(n - 32)) % 0x100000000
 	end
 	local nh = rshift(tobit(hi), n)
 	local nl = bor(rshift(tobit(lo), n), lshift(tobit(hi), 32 - n))
@@ -327,11 +334,11 @@ local function shr64(hi, lo, n)
 end
 
 -- SHA-512 message schedule: 160 entries (80 pairs hi/lo), stored flat: W[2i-1]=hi, W[2i]=lo.
-local sha512_W = {}
+local sha512_W = {} --: { [integer]: number }
 for i = 1, 160 do sha512_W[i] = 0 end
 
 -- Compress one 128-byte SHA-512 block. h is a flat array: h[2i-1]=hi, h[2i]=lo.
---: (string, number, table) -> ()
+--: (string, integer, { [integer]: number }) -> ()
 local function sha512_compress(msg, offset, h)
 	local W = sha512_W
 	-- Load 16 big-endian 64-bit words (each word = 2 x 32-bit).
@@ -434,7 +441,7 @@ local function sha512_compress(msg, offset, h)
 end
 
 -- Internal SHA-512 returning flat hi/lo hash array.
---: (string) -> table
+--: (string) -> { [integer]: number }
 local function sha512_raw(data)
 	local h = {}
 	for i = 1, 8 do h[(i-1)*2+1] = SHA512_H0[i][1]; h[(i-1)*2+2] = SHA512_H0[i][2] end
@@ -596,7 +603,7 @@ end
 -- ── ChaCha20 ─────────────────────────────────────────────────────────────────
 
 -- ChaCha20 quarter round (RFC 7539 section 2.1).
---: (table, number, number, number, number) -> ()
+--: ({ [integer]: integer }, integer, integer, integer, integer) -> ()
 local function qr(s, a, b, c, d)
 	s[a] = tobit(s[a] + s[b]); s[d] = rol(bxor(s[d], s[a]), 16)
 	s[c] = tobit(s[c] + s[d]); s[b] = rol(bxor(s[b], s[c]), 12)
@@ -606,7 +613,7 @@ end
 
 -- ChaCha20 block function. Returns 64 keystream bytes.
 -- state: 16-element table of uint32 (index 1-based).
---: (table) -> string
+--: ({ [integer]: integer }) -> string
 local function chacha20_block(state)
 	local s = {}
 	for i = 1, 16 do s[i] = state[i] end
@@ -636,7 +643,7 @@ end
 
 -- Initialize ChaCha20 state (RFC 7539 section 2.3).
 -- key: 32 bytes, nonce: 12 bytes, counter: integer.
---: (string, string, number) -> table
+--: (string, string, integer) -> { [integer]: integer }
 local function chacha20_init(key, nonce, counter)
 	return {
 		-- "expand 32-byte k" constant
@@ -743,22 +750,22 @@ function M.poly1305(key, msg)
 		if chunk >= 4 then
 			t0 = unsigned(u32le(msg, pos))
 		else
-			for i = 0, chunk - 1 do t0 = t0 + string.byte(msg, pos + i + 1) * (256 ^ i) end
+			for i = 0, chunk - 1 do t0 = t0 + (math.floor(tonumber(string.byte(msg, pos + i + 1)) or 0)) * (256 ^ i) end
 		end
 		if chunk >= 8 then
 			t1 = unsigned(u32le(msg, pos + 4))
 		elseif chunk > 4 then
-			for i = 0, chunk - 5 do t1 = t1 + string.byte(msg, pos + i + 5) * (256 ^ i) end
+			for i = 0, chunk - 5 do t1 = t1 + (math.floor(tonumber(string.byte(msg, pos + i + 5)) or 0)) * (256 ^ i) end
 		end
 		if chunk >= 12 then
 			t2 = unsigned(u32le(msg, pos + 8))
 		elseif chunk > 8 then
-			for i = 0, chunk - 9 do t2 = t2 + string.byte(msg, pos + i + 9) * (256 ^ i) end
+			for i = 0, chunk - 9 do t2 = t2 + (math.floor(tonumber(string.byte(msg, pos + i + 9)) or 0)) * (256 ^ i) end
 		end
 		if chunk >= 16 then
 			t3 = unsigned(u32le(msg, pos + 12))
 		elseif chunk > 12 then
-			for i = 0, chunk - 13 do t3 = t3 + string.byte(msg, pos + i + 13) * (256 ^ i) end
+			for i = 0, chunk - 13 do t3 = t3 + (math.floor(tonumber(string.byte(msg, pos + i + 13)) or 0)) * (256 ^ i) end
 		end
 
 		-- Decompose block into 5 x 26-bit limbs and add sentinel.
@@ -885,19 +892,22 @@ function M.chacha20_poly1305_encrypt(key, nonce, plaintext, aad)
 	aad = aad or ""
 
 	-- Poly1305 one-time key: first 32 bytes of ChaCha20 keystream with counter=0.
-	local otk_result = M.chacha20(key, nonce, 0, string.rep("\0", 32))
-	local otk = otk_result  -- chacha20 always returns a string for valid inputs
+	local otk_result, otk_err = M.chacha20(key, nonce, 0, string.rep("\0", 32))
+	if not otk_result then return nil, otk_err end
+	local otk = otk_result --[[:! string]]
 
 	-- Encrypt plaintext with counter=1.
-	local ciphertext = M.chacha20(key, nonce, 1, plaintext)
+	local ciphertext, ct_err = M.chacha20(key, nonce, 1, plaintext)
+	if not ciphertext then return nil, ct_err end
+	local ct = ciphertext --[[:! string]]
 
 	-- Build MAC input per RFC 8439 section 2.8.
 	local mac_input = aad .. pad16(aad)
-		.. ciphertext .. pad16(ciphertext)
-		.. le64(#aad) .. le64(#ciphertext)
+		.. ct .. pad16(ct)
+		.. le64(#aad) .. le64(#ct)
 
 	local tag = M.poly1305(otk, mac_input)
-	return ciphertext .. tag
+	return ct .. tag
 end
 
 -- ChaCha20-Poly1305 decrypt (RFC 8439 section 2.8).
@@ -914,7 +924,9 @@ function M.chacha20_poly1305_decrypt(key, nonce, ciphertext_with_tag, aad)
 	local tag        = ciphertext_with_tag:sub(ct_len + 1)
 
 	-- Poly1305 one-time key.
-	local otk = M.chacha20(key, nonce, 0, string.rep("\0", 32))
+	local otk_result, otk_err = M.chacha20(key, nonce, 0, string.rep("\0", 32))
+	if not otk_result then return nil, otk_err end
+	local otk = otk_result --[[:! string]]
 
 	-- Verify tag.
 	local mac_input = aad .. pad16(aad)
@@ -928,7 +940,9 @@ function M.chacha20_poly1305_decrypt(key, nonce, ciphertext_with_tag, aad)
 		return nil, "authentication failed"
 	end
 
-	return M.chacha20(key, nonce, 1, ciphertext)
+	local pt, pt_err = M.chacha20(key, nonce, 1, ciphertext)
+	if not pt then return nil, pt_err end
+	return pt --[[:! string]]
 end
 
 -- ── Constant-time comparison ─────────────────────────────────────────────────
