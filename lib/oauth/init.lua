@@ -37,7 +37,9 @@ end
 function M.url_encode(str)
   if type(str) ~= "string" then str = tostring(str) end
   local result = str:gsub("([^A-Za-z0-9%-_.~])", function(c)
-    return string.format("%%%02X", string.byte(c))
+    local n --: integer
+    n = c:byte() or 0
+    return string.format("%%%02X", n)
   end)
   return result
 end
@@ -89,9 +91,12 @@ function M.base64url_encode(str)
   local len = #str
   local i = 1
   while i <= len do
-    local b1 = string.byte(str, i)     or 0
-    local b2 = string.byte(str, i + 1) or 0
-    local b3 = string.byte(str, i + 2) or 0
+    local b1 --: integer
+    b1 = str:sub(i, i):byte() or 0
+    local b2 --: integer
+    b2 = str:sub(i+1, i+1):byte() or 0
+    local b3 --: integer
+    b3 = str:sub(i+2, i+2):byte() or 0
     local triple = b1 * 0x10000 + b2 * 0x100 + b3
     result[#result + 1] = B64URL_CHARS:sub(math.floor(triple / 0x40000) % 64 + 1,
                                             math.floor(triple / 0x40000) % 64 + 1)
@@ -183,20 +188,21 @@ local function parse_string(s, pos)
       elseif esc == "t"  then buf[#buf + 1] = "\t"; pos = pos + 2
       elseif esc == "u"  then
         local hex = s:sub(pos + 2, pos + 5)
-        local cp = tonumber(hex, 16)
-        if cp then
+        local cp_n = tonumber(hex, 16)
+        if cp_n then
+          local cp = cp_n --[[:! integer]]
           -- Basic BMP encode to UTF-8
           if cp < 0x80 then
             buf[#buf + 1] = string.char(cp)
           elseif cp < 0x800 then
-            buf[#buf + 1] = string.char(
-              0xC0 + math.floor(cp / 0x40),
-              0x80 + cp % 0x40)
+            local c1 = 0xC0 + math.floor(cp / 0x40) --[[:! integer]]
+            local c2 = 0x80 + cp % 0x40
+            buf[#buf + 1] = string.char(c1, c2)
           else
-            buf[#buf + 1] = string.char(
-              0xE0 + math.floor(cp / 0x1000),
-              0x80 + math.floor(cp / 0x40) % 0x40,
-              0x80 + cp % 0x40)
+            local c1 = 0xE0 + math.floor(cp / 0x1000) --[[:! integer]]
+            local c2 = 0x80 + math.floor(cp / 0x40) % 0x40 --[[:! integer]]
+            local c3 = 0x80 + cp % 0x40
+            buf[#buf + 1] = string.char(c1, c2, c3)
           end
         end
         pos = pos + 6
@@ -238,7 +244,7 @@ local function parse_value(s, pos)
       local v, npos = parse_value(s, pos)
       if npos == nil then return nil, pos end
       arr[#arr + 1] = v
-      pos = skip_ws(s, npos)
+      pos = skip_ws(s, npos --[[:! integer]])
       local sep = s:sub(pos, pos)
       if sep == "]" then return arr, pos + 1
       elseif sep == "," then pos = pos + 1
@@ -270,13 +276,13 @@ json_parse = function(s, pos)
     if s:sub(pos, pos) ~= '"' then return nil, pos end
     local key, npos = parse_string(s, pos)
     if not key then return nil, pos end
-    pos = skip_ws(s, npos)
+    pos = skip_ws(s, npos --[[:! integer]])
     if s:sub(pos, pos) ~= ":" then return nil, pos end
     pos = pos + 1
     local val, vpos = parse_value(s, pos)
     if vpos == nil then return nil, pos end
     obj[key] = val
-    pos = skip_ws(s, vpos)
+    pos = skip_ws(s, vpos --[[:! integer]])
     local sep = s:sub(pos, pos)
     if sep == "}" then return obj, pos + 1
     elseif sep == "," then pos = pos + 1
