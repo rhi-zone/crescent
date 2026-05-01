@@ -26,6 +26,7 @@ local min   = math.min
 local vec2_mt = {}
 vec2_mt.__index = vec2_mt
 
+--: (number | nil, number | nil) -> Vec2
 function M.vec2(x, y)
   return setmetatable({ x = x or 0, y = y or 0 }, vec2_mt)
 end
@@ -148,6 +149,7 @@ end
 local vec3_mt = {}
 vec3_mt.__index = vec3_mt
 
+--: (number | nil, number | nil, number | nil) -> Vec3
 function M.vec3(x, y, z)
   return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, vec3_mt)
 end
@@ -253,6 +255,7 @@ local mat4_mt = {}
 mat4_mt.__index = mat4_mt
 
 -- identity
+--: () -> Mat4
 function M.mat4()
   return setmetatable({
     1,0,0,0,
@@ -262,6 +265,7 @@ function M.mat4()
   }, mat4_mt)
 end
 
+--: ({ [integer]: number }) -> Mat4
 function M.mat4_from(arr)
   local m = {}
   for i = 1, 16 do m[i] = arr[i] or 0 end
@@ -395,6 +399,7 @@ end
 
 -- ─── transforms ──────────────────────────────────────────────────────────────
 
+--: (number, number, number) -> Mat4
 function M.translate(x, y, z)
   return setmetatable({
     1,0,0,0,
@@ -404,6 +409,7 @@ function M.translate(x, y, z)
   }, mat4_mt)
 end
 
+--: (number, number, number) -> Mat4
 function M.scale(x, y, z)
   return setmetatable({
     x,0,0,0,
@@ -413,6 +419,7 @@ function M.scale(x, y, z)
   }, mat4_mt)
 end
 
+--: (number) -> Mat4
 function M.rotate_x(a)
   local c, s = cos(a), sin(a)
   return setmetatable({
@@ -423,6 +430,7 @@ function M.rotate_x(a)
   }, mat4_mt)
 end
 
+--: (number) -> Mat4
 function M.rotate_y(a)
   local c, s = cos(a), sin(a)
   return setmetatable({
@@ -433,6 +441,7 @@ function M.rotate_y(a)
   }, mat4_mt)
 end
 
+--: (number) -> Mat4
 function M.rotate_z(a)
   local c, s = cos(a), sin(a)
   return setmetatable({
@@ -443,6 +452,7 @@ function M.rotate_z(a)
   }, mat4_mt)
 end
 
+--: (number, number, number, number) -> Mat4
 function M.perspective(fov, aspect, near, far)
   local f = 1 / math.tan(fov * 0.5)
   local nf = 1 / (near - far)
@@ -454,6 +464,7 @@ function M.perspective(fov, aspect, near, far)
   }, mat4_mt)
 end
 
+--: (number, number, number, number, number, number) -> Mat4
 function M.ortho(left, right, bottom, top, near, far)
   local lr = 1 / (left - right)
   local bt = 1 / (bottom - top)
@@ -466,6 +477,7 @@ function M.ortho(left, right, bottom, top, near, far)
   }, mat4_mt)
 end
 
+--: (Vec3, Vec3, Vec3) -> Mat4
 function M.look_at(eye, center, up)
   local fx = center.x - eye.x
   local fy = center.y - eye.y
@@ -617,12 +629,14 @@ function quat_mt:to_axis_angle()
   return M.vec3(q.x/s, q.y/s, q.z/s), angle
 end
 
+--: (Vec3, number) -> Quat
 function M.quat_from_axis_angle(axis, angle)
   local a = axis:normalize()
   local s = sin(angle * 0.5)
   return M.quat(cos(angle * 0.5), a.x*s, a.y*s, a.z*s)
 end
 
+--: (number, number, number) -> Quat
 function M.quat_from_euler(pitch, yaw, roll)
   local cp, sp = cos(pitch*0.5), sin(pitch*0.5)
   local cy, sy = cos(yaw*0.5),   sin(yaw*0.5)
@@ -635,33 +649,40 @@ function M.quat_from_euler(pitch, yaw, roll)
   )
 end
 
+--: (Quat, Quat) -> Quat
 function quat_mt:__mul(o) return self:mul(o) end
+--: (Quat) -> string
 function quat_mt:__tostring()
   return "quat(" .. self.w .. ", " .. self.x .. ", " .. self.y .. ", " .. self.z .. ")"
 end
 
 -- ─── interpolation ───────────────────────────────────────────────────────────
 
+--: (number, number, number) -> number
 function M.lerp(a, b, t)
   return a + (b - a) * t
 end
 
+--: (number, number, number) -> number
 function M.clamp(x, lo, hi)
   if x < lo then return lo end
   if x > hi then return hi end
   return x
 end
 
+--: (number, number, number) -> number
 function M.smoothstep(edge0, edge1, t)
   local x = M.clamp((t - edge0) / (edge1 - edge0), 0, 1)
   return x * x * (3 - 2 * x)
 end
 
+--: (number, number, number) -> number
 function M.smootherstep(edge0, edge1, t)
   local x = M.clamp((t - edge0) / (edge1 - edge0), 0, 1)
   return x * x * x * (x * (x * 6 - 15) + 10)
 end
 
+--: (number) -> integer
 function M.sign(x)
   if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
 end
