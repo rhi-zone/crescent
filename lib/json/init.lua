@@ -165,6 +165,7 @@ decode_string = function(s, i, n)
 	return nil, nil, "unterminated string"
 end
 
+--: (string, integer, integer) -> (number | nil, integer | nil, string | nil)
 decode_number = function(s, i, n)
 	local j = i
 	-- optional minus
@@ -206,6 +207,7 @@ decode_number = function(s, i, n)
 	return num, j, nil
 end
 
+--: (string, integer, integer) -> (unknown, integer | nil, string | nil)
 decode_array = function(s, i, n)
 	local arr = {}
 	local idx = 1
@@ -219,7 +221,7 @@ decode_array = function(s, i, n)
 		if err then return nil, nil, err end
 		arr[idx] = val
 		idx = idx + 1
-		i = ni
+		i = ni --[[:! integer]]
 		-- skip whitespace
 		while i <= n and WS[byte(s, i)] do i = i + 1 end
 		if i > n then return nil, nil, "unterminated array" end
@@ -235,6 +237,7 @@ decode_array = function(s, i, n)
 	end
 end
 
+--: (string, integer, integer) -> (unknown, integer | nil, string | nil)
 decode_object = function(s, i, n)
 	local obj = {}
 	-- skip whitespace
@@ -252,7 +255,8 @@ decode_object = function(s, i, n)
 		end
 		local key, ni, err = decode_string(s, i + 1, n)
 		if err then return nil, nil, err end
-		i = ni
+		i = ni --[[:! integer]]
+		local skey = key --[[:! string]]
 		-- skip whitespace, expect ':'
 		while i <= n and WS[byte(s, i)] do i = i + 1 end
 		if i > n or byte(s, i) ~= 0x3A then -- ':'
@@ -260,10 +264,10 @@ decode_object = function(s, i, n)
 		end
 		i = i + 1
 		-- value
-		local val
-		val, i, err = decode_value(s, i, n)
-		if err then return nil, nil, err end
-		obj[key] = val
+		local val, ni2, err2 = decode_value(s, i, n)
+		if err2 then return nil, nil, err2 end
+		i = ni2 --[[:! integer]]
+		obj[skey] = val
 		-- skip whitespace
 		while i <= n and WS[byte(s, i)] do i = i + 1 end
 		if i > n then return nil, nil, "unterminated object" end
@@ -290,8 +294,9 @@ M.decode = function(s)
 		return nil, "json.decode: expected string, got " .. type(s)
 	end
 	local n = #s
-	local val, i, err = decode_value(s, 1, n)
+	local val, ni, err = decode_value(s, 1, n)
 	if err then return nil, err end
+	local i = ni --[[:! integer]]
 	-- check for trailing non-whitespace
 	while i <= n and WS[byte(s, i)] do i = i + 1 end
 	if i <= n then
@@ -303,7 +308,7 @@ end
 -- ── Encoder ──────────────────────────────────────────────────────────────────
 
 -- Characters that must be escaped in JSON strings
-local ESCAPE = {}
+local ESCAPE = {} --: { [integer]: string }
 ESCAPE[0x22] = '\\"'   -- "
 ESCAPE[0x5C] = '\\\\'  -- \
 ESCAPE[0x08] = '\\b'
@@ -336,15 +341,17 @@ local function encode_string(s)
 	return '"' .. concat(result) .. '"'
 end
 
-local encode_value  -- forward decl
+local encode_value
 
+--: (t: { [integer]: unknown }, opts: { indent: number | nil, sort_keys: boolean | nil } | nil, depth: integer) -> (string | nil, string | nil)
 local function encode_array(t, opts, depth)
 	if #t == 0 then return "[]" end
 	local indent = opts and opts.indent
 	local parts = {}
 	if indent then
-		local inner_pad = rep(" ", (depth + 1) * indent)
-		local close_pad = rep(" ", depth * indent)
+		local ind = floor(indent --[[:! number]])
+		local inner_pad = rep(" ", (depth + 1) * ind)
+		local close_pad = rep(" ", depth * ind)
 		for i = 1, #t do
 			local v, err = encode_value(t[i], opts, depth + 1)
 			if not v then return nil, err end
@@ -361,6 +368,7 @@ local function encode_array(t, opts, depth)
 	end
 end
 
+--: (t: { [string]: unknown }, opts: { indent: number | nil, sort_keys: boolean | nil } | nil, depth: integer) -> (string | nil, string | nil)
 local function encode_object(t, opts, depth)
 	local keys = {}
 	for k in pairs(t) do
@@ -374,8 +382,9 @@ local function encode_object(t, opts, depth)
 	local indent = opts and opts.indent
 	local parts = {}
 	if indent then
-		local inner_pad = rep(" ", (depth + 1) * indent)
-		local close_pad = rep(" ", depth * indent)
+		local ind = floor(indent --[[:! number]])
+		local inner_pad = rep(" ", (depth + 1) * ind)
+		local close_pad = rep(" ", depth * ind)
 		for idx, k in ipairs(keys) do
 			local v, err = encode_value(t[k], opts, depth + 1)
 			if not v then return nil, err end
@@ -392,6 +401,7 @@ local function encode_object(t, opts, depth)
 	end
 end
 
+--: (unknown, { indent: number | nil, sort_keys: boolean | nil } | nil, integer) -> (string | nil, string | nil)
 encode_value = function(val, opts, depth)
 	local t = type(val)
 	if val == M.null then
@@ -401,28 +411,30 @@ encode_value = function(val, opts, depth)
 	elseif t == "boolean" then
 		return val and "true" or "false", nil
 	elseif t == "number" then
-		if val ~= val then return nil, "json.encode: NaN is not allowed" end
-		if val == huge or val == -huge then return nil, "json.encode: Infinity is not allowed" end
+		local nval = val --[[:! number]]
+		if nval ~= nval then return nil, "json.encode: NaN is not allowed" end
+		if nval == huge or nval == -huge then return nil, "json.encode: Infinity is not allowed" end
 		-- Represent integers without decimal point; handle negative zero as 0
-		if val == floor(val) and val >= -1e15 and val <= 1e15 then
-			if val == 0 then return "0", nil end
-			return format("%.0f", val), nil
+		if nval == floor(nval) and nval >= -1e15 and nval <= 1e15 then
+			if nval == 0 then return "0", nil end
+			return format("%.0f", nval), nil
 		end
 		-- Use shortest representation
-		local s = format("%.17g", val)
+		local s = format("%.17g", nval)
 		return s, nil
 	elseif t == "string" then
-		return encode_string(val), nil
+		return encode_string(val --[[:! string]]), nil
 	elseif t == "table" then
 		-- Determine array vs object: array if sequential integer keys from 1
 		-- An empty table with no keys encodes as array []
-		local n = #val
+		local tval = val --[[:! { [integer]: unknown }]]
+		local n = #tval
 		local is_array = true
 		-- Check that table has no non-integer or out-of-range keys
 		local count = 0
-		for k in pairs(val) do
+		for k in pairs(tval) do
 			count = count + 1
-			if type(k) ~= "number" or floor(k) ~= k or k < 1 or k > n then
+			if type(k) ~= "number" or floor(k --[[:! number]]) ~= k or (k --[[:! number]]) < 1 or (k --[[:! number]]) > n then
 				is_array = false
 				break
 			end
@@ -430,9 +442,9 @@ encode_value = function(val, opts, depth)
 		-- If count doesn't match n, there are holes → not a pure array
 		if is_array and count ~= n then is_array = false end
 		if is_array then
-			return encode_array(val, opts, depth)
+			return encode_array(tval, opts, depth)
 		else
-			return encode_object(val, opts, depth)
+			return encode_object(val --[[:! { [string]: unknown }]], opts, depth)
 		end
 	else
 		return nil, "json.encode: unsupported type " .. t
