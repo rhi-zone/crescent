@@ -53,6 +53,8 @@ local function new_lexer(src)
 	return { src = src, pos = 1, len = #src }
 end
 
+--:: GQLLex = { src: string, pos: number, len: integer }
+--: (GQLLex, string) -> (nil, string)
 local function lex_error(lex, msg)
 	local line = 1
 	for _ in gmatch(sub(lex.src, 1, lex.pos), "\n") do line = line + 1 end
@@ -60,6 +62,7 @@ local function lex_error(lex, msg)
 end
 
 -- Skip whitespace, commas (insignificant), and comments
+--: (GQLLex) -> nil
 local function skip_ignored(lex)
 	local src, pos, len = lex.src, lex.pos, lex.len
 	while pos <= len do
@@ -78,6 +81,7 @@ local function skip_ignored(lex)
 	lex.pos = pos
 end
 
+--: (GQLLex) -> (string | nil, string | nil)
 local function read_string(lex)
 	local src, pos, len = lex.src, lex.pos, lex.len
 	-- Check for block string """
@@ -218,6 +222,8 @@ end
 
 -- ── Token stream ──────────────────────────────────────────────────────────────
 
+--:: GQLToken = { kind: string, value: string | nil, ... }
+--:: GQLParser = { lex: { src: string, pos: number, len: integer }, current: GQLToken, errors: { [integer]: string } }
 local function new_parser(src)
 	local lex = new_lexer(src)
 	local p = { lex = lex, current = nil, errors = {} }
@@ -228,6 +234,7 @@ local function new_parser(src)
 	return p
 end
 
+--: (GQLParser) -> GQLToken
 local function advance(p)
 	local tok, err = next_token(p.lex)
 	if err then
@@ -238,10 +245,12 @@ local function advance(p)
 	return tok
 end
 
+--: (GQLParser) -> GQLToken
 local function peek(p)
 	return p.current
 end
 
+--: (GQLParser, string, string | nil) -> (GQLToken | nil, string | nil)
 local function expect(p, kind, value)
 	local tok = p.current
 	if tok.kind ~= kind then
@@ -262,6 +271,7 @@ local function expect(p, kind, value)
 	return tok
 end
 
+--: (GQLParser, string | nil) -> (GQLToken | nil, string | nil)
 local function expect_name(p, value)
 	return expect(p, TK.NAME, value)
 end
