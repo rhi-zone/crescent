@@ -31,13 +31,13 @@ local binary_mt = {}
 M.null = setmetatable({}, null_mt)
 
 --- Wrap an integer millisecond timestamp as a BSON UTC datetime.
---: (ms: number) -> { _bson_type: string, ms: number }
+--: (ms: number) -> { ms: number, ... }
 function M.datetime(ms)
 	return setmetatable({ ms = ms }, datetime_mt)
 end
 
 --- Wrap binary data as a BSON binary value.
---: (data: string, subtype: number) -> { _bson_type: string, data: string, subtype: number }
+--: (data: string, subtype: number) -> { data: string, subtype: number, ... }
 function M.binary(data, subtype)
 	return setmetatable({ data = data, subtype = subtype or 0 }, binary_mt)
 end
@@ -45,13 +45,13 @@ end
 --- Returns true if v is a BSON datetime object.
 --: (v: unknown) -> boolean
 function M.is_datetime(v)
-	return type(v) == "table" and getmetatable(v) == datetime_mt
+	return (type(v) == "table" and getmetatable(v) == datetime_mt) or false
 end
 
 --- Returns true if v is a BSON binary object.
 --: (v: unknown) -> boolean
 function M.is_binary(v)
-	return type(v) == "table" and getmetatable(v) == binary_mt
+	return (type(v) == "table" and getmetatable(v) == binary_mt) or false
 end
 
 -- ── little-endian pack helpers ───────────────────────────────────────────────
@@ -169,6 +169,7 @@ end
 
 -- ── little-endian unpack helpers ─────────────────────────────────────────────
 
+--: (string, integer) -> (integer, integer)
 local function unpack_i32(s, pos)
 	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
 	local n = b1 + b2 * 256 + b3 * 65536 + b4 * 16777216
@@ -176,11 +177,13 @@ local function unpack_i32(s, pos)
 	return n, pos + 4
 end
 
+--: (string, integer) -> (integer, integer)
 local function unpack_u32(s, pos)
 	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
 	return b1 + b2 * 256 + b3 * 65536 + b4 * 16777216, pos + 4
 end
 
+--: (string, integer) -> (integer, integer)
 local function unpack_i64(s, pos)
 	local lo, hi
 	lo, pos = unpack_u32(s, pos)
