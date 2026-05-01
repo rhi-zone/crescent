@@ -61,7 +61,7 @@ end
 --- Create an identity matrix.
 --: (n: number) -> matrix
 function M.identity(n)
-  local d = {}
+  local d = {} --: { [integer]: number }
   local sz = n * n
   for i = 1, sz do d[i] = 0 end
   for i = 1, n do
@@ -103,7 +103,7 @@ end
 --: (v: { [number]: number }) -> matrix
 function M.diag(v)
   local n = #v
-  local d = {}
+  local d = {} --: { [integer]: number }
   local sz = n * n
   for i = 1, sz do d[i] = 0 end
   for i = 1, n do
@@ -188,21 +188,21 @@ function M:rows() return self._rows end
 --: () -> number
 function M:cols() return self._cols end
 
---: () -> (number, number)
+--: (self: matrix) -> (number, number)
 function M:size() return self._rows, self._cols end
 
---: (r: number, c: number) -> number
+--: (self: matrix, r: number, c: number) -> number
 function M:get(r, c)
   return self._data[(r - 1) * self._cols + c]
 end
 
---: (r: number, c: number, v: number) -> nil
+--: (self: matrix, r: number, c: number, v: number) -> nil
 function M:set(r, c, v)
   self._data[(r - 1) * self._cols + c] = v
 end
 
 --- Return row i as a flat array.
---: (i: number) -> { [number]: number }
+--: (self: matrix, i: number) -> { [number]: number }
 function M:row(i)
   local c = self._cols
   local d = self._data
@@ -213,7 +213,7 @@ function M:row(i)
 end
 
 --- Return column j as a flat array.
---: (j: number) -> { [number]: number }
+--: (self: matrix, j: number) -> { [number]: number }
 function M:col(j)
   local r = self._rows
   local c = self._cols
@@ -277,7 +277,7 @@ function M:mul(other)
 end
 
 --- Scalar multiplication.
---: (n: number) -> matrix
+--: (self: matrix, n: number) -> matrix
 function M:scale(n)
   local sz = self._rows * self._cols
   local a = self._data
@@ -475,7 +475,7 @@ function M:map(fn)
 end
 
 --- Reshape to new dimensions (must preserve element count).
---: (r: number, c: number) -> (matrix | nil, string | nil)
+--: (self: matrix, r: number, c: number) -> (matrix | nil, string | nil)
 function M:reshape(r, c)
   if r * c ~= self._rows * self._cols then
     return nil, "cannot reshape " .. self._rows .. "x" .. self._cols .. " to " .. r .. "x" .. c
@@ -688,7 +688,7 @@ function M:lu()
 end
 
 --- Submatrix from (r1,c1) to (r2,c2) inclusive (1-indexed).
---: (r1: number, c1: number, r2: number, c2: number) -> (matrix | nil, string | nil)
+--: (self: matrix, r1: number, c1: number, r2: number, c2: number) -> (matrix | nil, string | nil)
 function M:slice(r1, c1, r2, c2)
   local r, c = self._rows, self._cols
   if r1 < 1 or c1 < 1 or r2 > r or c2 > c or r1 > r2 or c1 > c2 then
