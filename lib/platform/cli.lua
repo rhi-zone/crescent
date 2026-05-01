@@ -109,12 +109,14 @@ end
 local path_util = require("lib.platform.path_util")
 local expand_home = path_util.expand_home
 
+--: (path: string) -> boolean
 local function is_dir(path)
 	local f = io.open(path .. "/.", "r")
 	if f then f:close(); return true end
 	return false
 end
 
+--: (path: string) -> boolean
 local function file_exists(path)
 	local f = io.open(path, "rb")
 	if f then f:close(); return true end
@@ -142,6 +144,7 @@ local function mkdir_p(path)
 end
 
 -- List files recursively under a directory, returning relative paths.
+--: (dir: string, prefix: string | nil) -> string[]
 local function list_files(dir, prefix)
 	prefix = prefix or ""
 	local results = {}
