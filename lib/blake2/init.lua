@@ -62,13 +62,13 @@ local B_IV = {
 }
 
 -- Rotate uint64_t right by n bits.
---: (uint64_t, number) -> uint64_t
+--: (uint64_t, integer) -> uint64_t
 local function rotr64(v, n)
   return bit.bor(bit.rshift(v, n), bit.lshift(v, 64 - n))
 end
 
 -- Read 8 bytes from string s at byte offset (0-based), little-endian → uint64_t.
---: (string, number) -> uint64_t
+--: (string, integer) -> uint64_t
 local function read_u64_le(s, off)
   local b0, b1, b2, b3, b4, b5, b6, b7 = string.byte(s, off + 1, off + 8)
   b0 = b0 or 0; b1 = b1 or 0; b2 = b2 or 0; b3 = b3 or 0
@@ -82,6 +82,7 @@ end
 -- block: 128-byte string (already zero-padded)
 -- t_lo, t_hi: counter (low and high 64-bit words)
 -- last: boolean (true for final block)
+--: (uint64_t[], string, uint64_t, uint64_t, boolean) -> nil
 local function b_compress(h, block, t_lo, t_hi, last)
   -- Load message words m[0..15] (0-based in sigma, 1-based in table)
   local m = {}
