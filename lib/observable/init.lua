@@ -78,7 +78,7 @@ end
 function SafeObserver:next(value)
   if self._stopped then return end
   local fn = self._raw.next
-  if fn then fn(value) end
+  if fn ~= nil then (--[[:! (unknown) -> ()]] fn)(value) end
 end
 
 --: (SafeObserverT, string) -> nil
@@ -86,7 +86,7 @@ function SafeObserver:error(err)
   if self._stopped then return end
   self._stopped = true
   local fn = self._raw.error
-  if fn then fn(err) end
+  if fn ~= nil then (--[[:! (string) -> ()]] fn)(err) end
 end
 
 --: (SafeObserverT) -> nil
@@ -94,7 +94,7 @@ function SafeObserver:complete()
   if self._stopped then return end
   self._stopped = true
   local fn = self._raw.complete
-  if fn then fn() end
+  if fn ~= nil then (--[[:! () -> ()]] fn)() end
 end
 
 --- Subscribe to this observable.
