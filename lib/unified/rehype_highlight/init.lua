@@ -21,6 +21,8 @@ end
 local M = {}
 
 --:: list = { [integer]: unknown }
+--:: Token = { 1: string, 2: string }
+--:: TokenList = { [integer]: Token }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,7 +101,7 @@ local LUA_BUILTINS = {
 
 --: (string) -> list
 local function tokenize_lua(src)
-  local tokens = {}
+  local tokens = {} --: TokenList
   local i = 1
   local n = #src
 
@@ -216,7 +218,7 @@ local JS_LITERALS = {
 
 --: (string) -> list
 local function tokenize_js(src)
-  local tokens = {}
+  local tokens = {} --: TokenList
   local i = 1
   local n = #src
 
@@ -324,7 +326,7 @@ local PY_LITERALS = { ["True"] = true, ["False"] = true, ["None"] = true }
 
 --: (string) -> list
 local function tokenize_python(src)
-  local tokens = {}
+  local tokens = {} --: TokenList
   local i = 1
   local n = #src
 
@@ -420,7 +422,7 @@ local JSON_LITERALS = { ["true"] = true, ["false"] = true, ["null"] = true }
 
 --: (string) -> list
 local function tokenize_json(src)
-  local tokens = {}
+  local tokens = {} --: TokenList
   local i = 1
   local n = #src
 
@@ -493,7 +495,7 @@ local BASH_BUILTINS = {
 
 --: (string) -> list
 local function tokenize_bash(src)
-  local tokens = {}
+  local tokens = {} --: TokenList
   local i = 1
   local n = #src
 
