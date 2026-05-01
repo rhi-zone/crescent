@@ -11,6 +11,12 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Observer = { next: ((unknown) -> nil) | nil, error: ((unknown) -> nil) | nil, complete: (() -> nil) | nil }
+--:: Subscription = { _closed: boolean, _unsub: (() -> nil) | nil }
+--:: Subscriber = { _obs: Observer, _sub: Subscription, _done: boolean }
+--:: Subject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown }
+--:: BehaviorSubject = { _subscribers: { [integer]: Observer }, _closed: boolean, _error: unknown, _value: unknown }
+
 -- ---------------------------------------------------------------------------
 -- Subscription
 -- ---------------------------------------------------------------------------
@@ -18,10 +24,12 @@ M._tier = "pure"
 local Subscription = {}
 Subscription.__index = Subscription
 
+--: ((() -> nil) | nil) -> Subscription
 local function new_subscription(unsub_fn)
   return setmetatable({ _closed = false, _unsub = unsub_fn }, Subscription)
 end
 
+--: (Subscription) -> nil
 function Subscription:unsubscribe()
   if not self._closed then
     self._closed = true
@@ -43,15 +51,18 @@ end
 local Subscriber = {}
 Subscriber.__index = Subscriber
 
+--: (Observer, Subscription) -> Subscriber
 local function new_subscriber(observer, subscription)
   return setmetatable({ _obs = observer, _sub = subscription, _done = false }, Subscriber)
 end
 
+--: (Subscriber, unknown) -> nil
 function Subscriber:next(v)
   if self._done then return end
   if self._obs.next then self._obs.next(v) end
 end
 
+--: (Subscriber, unknown) -> nil
 function Subscriber:error(e)
   if self._done then return end
   self._done = true
@@ -59,6 +70,7 @@ function Subscriber:error(e)
   if self._obs.error then self._obs.error(e) end
 end
 
+--: (Subscriber) -> nil
 function Subscriber:complete()
   if self._done then return end
   self._done = true
@@ -80,7 +92,7 @@ end
 -- Normalize observer argument: fn shorthand → {next=fn}
 local function normalize_observer(observer_or_fn)
   if type(observer_or_fn) == "function" then
-    return { next = observer_or_fn }
+    return { next = observer_or_fn --[[: (unknown) -> nil]] }
   end
   return observer_or_fn or {}
 end
@@ -706,7 +718,7 @@ Subject.__index = Subject
 
 function M.subject()
   local self = setmetatable({
-    _subscribers = {},
+    _subscribers = {} --[[:! { [integer]: Observer }]],
     _closed = false,
     _error = nil,
   }, Subject)
@@ -714,6 +726,7 @@ function M.subject()
   return self
 end
 
+--: (Subject, Observer | ((unknown) -> nil) | nil) -> Subscription
 function Subject:subscribe(observer_or_fn)
   local observer = normalize_observer(observer_or_fn)
   if self._closed then
@@ -738,6 +751,7 @@ function Subject:subscribe(observer_or_fn)
   return sub
 end
 
+--: (Subject, unknown) -> nil
 function Subject:next(v)
   if self._closed then return end
   for i = 1, #self._subscribers do
@@ -746,6 +760,7 @@ function Subject:next(v)
   end
 end
 
+--: (Subject, unknown) -> nil
 function Subject:error(e)
   if self._closed then return end
   self._closed = true
@@ -757,6 +772,7 @@ function Subject:error(e)
   self._subscribers = {}
 end
 
+--: (Subject) -> nil
 function Subject:complete()
   if self._closed then return end
   self._closed = true
@@ -792,7 +808,7 @@ BehaviorSubject.__index = BehaviorSubject
 
 function M.behavior_subject(initial)
   local self = setmetatable({
-    _subscribers = {},
+    _subscribers = {} --[[:! { [integer]: Observer }]],
     _closed = false,
     _error = nil,
     _value = initial,
@@ -800,6 +816,7 @@ function M.behavior_subject(initial)
   return self
 end
 
+--: (BehaviorSubject, Observer | ((unknown) -> nil) | nil) -> Subscription
 function BehaviorSubject:subscribe(observer_or_fn)
   local observer = normalize_observer(observer_or_fn)
   if self._closed then
@@ -828,6 +845,7 @@ function BehaviorSubject:subscribe(observer_or_fn)
   return sub
 end
 
+--: (BehaviorSubject, unknown) -> nil
 function BehaviorSubject:next(v)
   if self._closed then return end
   self._value = v
@@ -837,6 +855,7 @@ function BehaviorSubject:next(v)
   end
 end
 
+--: (BehaviorSubject, unknown) -> nil
 function BehaviorSubject:error(e)
   if self._closed then return end
   self._closed = true
@@ -848,6 +867,7 @@ function BehaviorSubject:error(e)
   self._subscribers = {}
 end
 
+--: (BehaviorSubject) -> nil
 function BehaviorSubject:complete()
   if self._closed then return end
   self._closed = true
@@ -858,6 +878,7 @@ function BehaviorSubject:complete()
   self._subscribers = {}
 end
 
+--: (BehaviorSubject) -> unknown
 function BehaviorSubject:get_value()
   return self._value
 end

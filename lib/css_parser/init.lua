@@ -35,6 +35,7 @@ local function is_whitespace(c)
 end
 
 -- Read an identifier starting at position i (assumes first char already valid)
+--: (string, integer, integer) -> (string, integer)
 local function read_ident(s, i, n)
   local start = i
   -- handle leading '-'
@@ -56,6 +57,7 @@ local function read_ident(s, i, n)
 end
 
 -- Read a string starting after the opening quote (quote is char q)
+--: (string, integer, integer, string) -> (string, integer)
 local function read_string(s, i, n, q)
   local parts = {}
   while i <= n do
@@ -88,6 +90,7 @@ local function read_string(s, i, n, q)
 end
 
 -- Read a number, return value (as string), integer flag, and new position
+--: (string, integer, integer) -> (string, integer)
 local function read_number(s, i, n)
   local start = i
   if i <= n and (sub(s, i, i) == "+" or sub(s, i, i) == "-") then
@@ -320,6 +323,8 @@ end
 -- ── Selector Parser ───────────────────────────────────────────────────────────
 
 -- Selector token stream helper
+--:: CssToken = { type: string, value: string | nil, name: string | nil, op: string | nil, element: boolean | nil, arg: string | nil, neg: boolean | nil, ... }
+--:: SelParser = { tokens: { [integer]: CssToken }, pos: integer, peek: (SelParser) -> CssToken, consume: (SelParser) -> CssToken, skip_ws: (SelParser) -> nil }
 local SelectorParser = {}
 SelectorParser.__index = SelectorParser
 
@@ -456,6 +461,7 @@ end
 
 -- Parse a compound selector (type_sel? simples*)
 -- Returns compound_selector table or nil
+--: (SelParser) -> { type_selector: string | nil, id: string | nil, classes: { [integer]: string }, attributes: { [integer]: { name: string, op: string | nil, value: string | nil } }, pseudos: { [integer]: { name: string, element: boolean | nil, arg: string | nil, functional: boolean | nil } }, combinator: string | nil } | nil
 local function parse_compound(p)
   local compound = {
     type_selector = nil,
@@ -515,6 +521,7 @@ local function parse_compound(p)
 end
 
 -- Parse a complex selector (compound (combinator compound)*)
+--: (SelParser) -> { [integer]: unknown } | nil
 local function parse_complex(p)
   local complex = {}
 

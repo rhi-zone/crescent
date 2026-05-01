@@ -55,12 +55,20 @@ local function encode_double(n)
 end
 
 -- 8 bytes big-endian → IEEE 754 double
+--: (string, integer) -> number
 local function decode_double(s, pos)
-  local b1, b2, b3, b4, b5, b6, b7, b8 = byte(s, pos, pos + 7)
-  local sign = b1 >= 128 and -1 or 1
-  local exp = (b1 % 128) * 16 + floor(b2 / 16)
-  local frac = (b2 % 16) * 2^48 + b3 * 2^40 + b4 * 2^32
-               + b5 * 2^24 + b6 * 2^16 + b7 * 2^8 + b8
+  local b1i = byte(s, pos)
+  local b2i = byte(s, pos + 1)
+  local b3i = byte(s, pos + 2)
+  local b4i = byte(s, pos + 3)
+  local b5i = byte(s, pos + 4)
+  local b6i = byte(s, pos + 5)
+  local b7i = byte(s, pos + 6)
+  local b8i = byte(s, pos + 7)
+  local sign = b1i >= 128 and -1 or 1
+  local exp = (b1i % 128) * 16 + floor(b2i / 16)
+  local frac = (b2i % 16) * 2^48 + b3i * 2^40 + b4i * 2^32
+               + b5i * 2^24 + b6i * 2^16 + b7i * 2^8 + b8i
   if exp == 0 then
     if frac == 0 then return sign * 0.0 end
     return sign * math.ldexp(frac, -1074) -- subnormal
@@ -72,11 +80,15 @@ local function decode_double(s, pos)
 end
 
 -- 4 bytes big-endian → IEEE 754 float
+--: (string, integer) -> number
 local function decode_float(s, pos)
-  local b1, b2, b3, b4 = byte(s, pos, pos + 3)
-  local sign = b1 >= 128 and -1 or 1
-  local exp = (b1 % 128) * 2 + floor(b2 / 128)
-  local frac = (b2 % 128) * 2^16 + b3 * 2^8 + b4
+  local b1i = byte(s, pos)
+  local b2i = byte(s, pos + 1)
+  local b3i = byte(s, pos + 2)
+  local b4i = byte(s, pos + 3)
+  local sign = b1i >= 128 and -1 or 1
+  local exp = (b1i % 128) * 2 + floor(b2i / 128)
+  local frac = (b2i % 128) * 2^16 + b3i * 2^8 + b4i
   if exp == 0 then
     if frac == 0 then return sign * 0.0 end
     return sign * math.ldexp(frac, -149) -- subnormal
@@ -88,11 +100,13 @@ local function decode_float(s, pos)
 end
 
 -- Encode a 16-bit unsigned int as 2 big-endian bytes
+--: (number) -> string
 local function u16be(n)
   return char(floor(n / 256) % 256, n % 256)
 end
 
 -- Encode a 32-bit unsigned int as 4 big-endian bytes
+--: (number) -> string
 local function u32be(n)
   return char(floor(n / 2^24) % 256, floor(n / 2^16) % 256,
               floor(n / 2^8) % 256, n % 256)
@@ -106,18 +120,21 @@ local function u64be(n)
 end
 
 -- Encode a signed 8-bit int
+--: (number) -> string
 local function i8(n)
   if n < 0 then n = n + 256 end
   return char(n % 256)
 end
 
 -- Encode a signed 16-bit int as 2 big-endian bytes
+--: (number) -> string
 local function i16be(n)
   if n < 0 then n = n + 65536 end
   return u16be(n)
 end
 
 -- Encode a signed 32-bit int as 4 big-endian bytes
+--: (number) -> string
 local function i32be(n)
   if n < 0 then n = n + 2^32 end
   return u32be(n)
@@ -149,6 +166,7 @@ local function is_integer(n)
 end
 
 -- Detect whether a table is an array (consecutive integer keys 1..n).
+--: ({ [unknown]: unknown }) -> boolean
 local function is_array(t)
   local n = #t
   -- Verify no keys outside 1..n
@@ -168,6 +186,7 @@ local function encode_boolean(v)
   return v and "\xc3" or "\xc2"
 end
 
+--: (number) -> string
 local function encode_integer(n)
   -- positive fixint: 0 to 127
   if n >= 0 and n <= 0x7f then
@@ -209,6 +228,7 @@ local function encode_integer(n)
   return "\xd3" .. i64be(n)
 end
 
+--: (string) -> string
 local function encode_string(s)
   local n = #s
   local prefix
@@ -298,6 +318,7 @@ M.encode = encode
 
 local decode -- forward declaration
 
+--: (string, number, number) -> (boolean | nil, string | nil)
 local function check_len(s, pos, need)
   if pos + need - 1 > #s then
     return nil, "msgpack: unexpected end of input"
@@ -307,6 +328,7 @@ end
 
 decode = function(s, pos)
   pos = pos or 1
+  pos = --[[:! integer]] pos
   if pos > #s then
     return nil, "msgpack: unexpected end of input"
   end

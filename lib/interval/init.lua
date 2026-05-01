@@ -11,8 +11,11 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Interval = { lo: number, hi: number, lo_closed: boolean, hi_closed: boolean }
+
 local floor = math.floor
 local huge = math.huge
+--: (number, number, number, number) -> number
 local min4 = function(a, b, c, d)
   local m = a
   if b < m then m = b end
@@ -20,6 +23,7 @@ local min4 = function(a, b, c, d)
   if d < m then m = d end
   return m
 end
+--: (number, number, number, number) -> number
 local max4 = function(a, b, c, d)
   local m = a
   if b > m then m = b end
@@ -44,6 +48,7 @@ end
 -- Create a new interval.
 -- lo_closed: whether the low end is closed (default true)
 -- hi_closed: whether the high end is closed (default true)
+--: (number, number, boolean | nil, boolean | nil) -> Interval
 function M.new(lo, hi, lo_closed, hi_closed)
   if lo_closed == nil then lo_closed = true end
   if hi_closed == nil then hi_closed = true end
@@ -70,44 +75,58 @@ function M.empty()       return M.new(1, 0, true,  true)  end
 function M.infinite()    return M.new(-huge, huge, false, false) end
 
 -- Low bound.
+--: (Interval) -> number
 function Interval:low() return self.lo end
 -- Alias: lo() for API compatibility.
+--: (Interval) -> number
 function Interval:lo() return self.lo end
 -- Alias used by legacy code.
+--: (Interval) -> number
 function Interval:get_lo() return self.lo end
 
 -- High bound.
+--: (Interval) -> number
 function Interval:high() return self.hi end
 -- Alias: hi() for API compatibility.
+--: (Interval) -> number
 function Interval:hi() return self.hi end
 -- Alias used by legacy code.
+--: (Interval) -> number
 function Interval:get_hi() return self.hi end
 
 -- True if the lower bound is open (not closed).
+--: (Interval) -> boolean
 function Interval:lo_open() return not self.lo_closed end
 -- True if the upper bound is open (not closed).
+--: (Interval) -> boolean
 function Interval:hi_open() return not self.hi_closed end
 
 -- Size / width: high - low (ignoring openness).
+--: (Interval) -> number
 function Interval:size() return self.hi - self.lo end
 
 -- Alias: length (clamps to 0 for inverted intervals).
+--: (Interval) -> number
 function Interval:length()
   local len = self.hi - self.lo
   return len < 0 and 0 or len
 end
 
 -- Midpoint.
+--: (Interval) -> number
 function Interval:midpoint() return (self.lo + self.hi) / 2 end
 
 -- True if both ends are closed.
+--: (Interval) -> boolean
 function Interval:is_closed() return self.lo_closed and self.hi_closed end
 
 -- True if both ends are open.
+--: (Interval) -> boolean
 function Interval:is_open() return not self.lo_closed and not self.hi_closed end
 
 -- True if the interval is empty.
 -- lo > hi is always empty. lo == hi is empty unless both ends are closed.
+--: (Interval) -> boolean
 function Interval:is_empty()
   if self.lo > self.hi then return true end
   if self.lo == self.hi then return not (self.lo_closed and self.hi_closed) end
@@ -115,9 +134,11 @@ function Interval:is_empty()
 end
 
 -- Alias for legacy code.
+--: (Interval) -> boolean
 function Interval:empty() return self:is_empty() end
 
 -- True if value v is contained in the interval.
+--: (Interval, number) -> boolean
 function Interval:contains(v)
   if self:is_empty() then return false end
   local lo_ok = self.lo_closed and v >= self.lo or v > self.lo
@@ -126,6 +147,7 @@ function Interval:contains(v)
 end
 
 -- True if other interval is entirely within self.
+--: (Interval, Interval) -> boolean
 function Interval:contains_interval(other)
   if self:is_empty() then return false end
   if other:is_empty() then return true end
@@ -152,6 +174,7 @@ function Interval:contains_interval(other)
 end
 
 -- True if self and other share at least one point.
+--: (Interval, Interval) -> boolean
 function Interval:overlaps(other)
   if self:is_empty() or other:is_empty() then return false end
   if self.hi < other.lo then return false end
@@ -162,6 +185,7 @@ function Interval:overlaps(other)
 end
 
 -- Intersection of self and other. Returns an interval (possibly empty).
+--: (Interval, Interval) -> Interval
 function Interval:intersection(other)
   local lo, lo_closed
   if self.lo > other.lo then
@@ -185,6 +209,7 @@ end
 -- Union of self and other.
 -- If they overlap or touch (at a closed endpoint), returns a single Interval.
 -- Otherwise returns an IntervalSet containing both.
+--: (Interval, Interval) -> Interval
 function Interval:union(other)
   local touches = self:overlaps(other)
   if not touches then
@@ -222,6 +247,7 @@ end
 
 -- Difference: points in self but not in other.
 -- Returns an Interval or IntervalSet.
+--: (Interval, Interval) -> Interval
 function Interval:difference(other)
   local inter = self:intersection(other)
   if inter:is_empty() then return self end
@@ -246,6 +272,7 @@ function Interval:difference(other)
 end
 
 -- intersect: alias for intersection.
+--: (Interval, Interval) -> Interval
 function Interval:intersect(other)
   return self:intersection(other)
 end
@@ -253,6 +280,7 @@ end
 -- complement: returns a list of intervals covering (-inf,lo) and (hi,+inf).
 -- Open/closed endpoints are inverted at the boundary.
 -- Returns {} for an empty interval (complement is all of R, represented as one infinite interval).
+--: (Interval) -> Interval[]
 function Interval:complement()
   if self:is_empty() then
     return { M.new(-huge, huge, false, false) }
@@ -273,6 +301,7 @@ end
 
 -- [a,b] + [c,d] = [a+c, b+d]
 -- Openness: open if either corresponding bound is open.
+--: (Interval, Interval) -> Interval
 function Interval:add(other)
   if self:is_empty() or other:is_empty() then return M.empty() end
   return M.new(
@@ -283,6 +312,7 @@ function Interval:add(other)
 end
 
 -- [a,b] - [c,d] = [a-d, b-c]
+--: (Interval, Interval) -> Interval
 function Interval:sub(other)
   if self:is_empty() or other:is_empty() then return M.empty() end
   return M.new(
@@ -294,6 +324,7 @@ end
 
 -- [a,b] * [c,d] = [min(ac,ad,bc,bd), max(ac,ad,bc,bd)]
 -- Openness: each endpoint is open if the contributing factor is open.
+--: (Interval, Interval) -> Interval
 function Interval:mul(other)
   if self:is_empty() or other:is_empty() then return M.empty() end
   local ac = self.lo * other.lo
@@ -329,6 +360,7 @@ end
 
 -- [a,b] / [c,d] = [a,b] * [1/d, 1/c]
 -- Returns nil, errmsg if 0 is in [c,d].
+--: (Interval, Interval) -> (Interval | nil, string | nil)
 function Interval:div(other)
   if self:is_empty() or other:is_empty() then return M.empty() end
   -- Check if 0 is in other.
@@ -340,17 +372,23 @@ function Interval:div(other)
 end
 
 -- Metamethods for arithmetic.
+--: (Interval, Interval) -> Interval
 function Interval:__add(other) return self:add(other) end
+--: (Interval, Interval) -> Interval
 function Interval:__sub(other) return self:sub(other) end
+--: (Interval, Interval) -> Interval
 function Interval:__mul(other) return self:mul(other) end
+--: (Interval, Interval) -> (Interval | nil, string | nil)
 function Interval:__div(other) return self:div(other) end
 
 -- Shift interval by offset.
+--: (Interval, number) -> Interval
 function Interval:shift(offset)
   return M.new(self.lo + offset, self.hi + offset, self.lo_closed, self.hi_closed)
 end
 
 -- Scale interval by factor around origin 0.
+--: (Interval, number) -> Interval
 function Interval:scale(factor)
   if factor >= 0 then
     return M.new(self.lo * factor, self.hi * factor, self.lo_closed, self.hi_closed)
@@ -361,6 +399,7 @@ function Interval:scale(factor)
 end
 
 -- Clamp value v into [lo, hi] (always treats bounds as closed for clamping).
+--: (Interval, number) -> number
 function Interval:clamp(v)
   if v < self.lo then return self.lo end
   if v > self.hi then return self.hi end
@@ -368,6 +407,7 @@ function Interval:clamp(v)
 end
 
 -- True if self is entirely before other (no shared point).
+--: (Interval, Interval) -> boolean
 function Interval:before(other)
   if self:is_empty() or other:is_empty() then return false end
   if self.hi < other.lo then return true end
@@ -376,21 +416,25 @@ function Interval:before(other)
 end
 
 -- True if self is entirely after other (no shared point).
+--: (Interval, Interval) -> boolean
 function Interval:after(other)
   return other:before(self)
 end
 
 -- Equality: two empty intervals are equal; otherwise all four fields must match.
+--: (Interval, Interval) -> boolean
 function Interval:eq(other)
   if self:is_empty() and other:is_empty() then return true end
   return self.lo == other.lo and self.hi == other.hi
     and self.lo_closed == other.lo_closed and self.hi_closed == other.hi_closed
 end
 
+--: (Interval, Interval) -> boolean
 function Interval:__eq(other)
   return self:eq(other)
 end
 
+--: (Interval) -> string
 function Interval:__tostring()
   local l = self.lo_closed and "[" or "("
   local r = self.hi_closed and "]" or ")"
@@ -577,6 +621,7 @@ M.Set = Set
 -- Returns a plain table of non-overlapping Intervals sorted by lo.
 -- NOTE: uses simple closed-interval semantics (lo/hi comparison only),
 -- matching the original implementation for backward compatibility.
+--: (Interval[]) -> Interval[]
 function M.merge(intervals)
   local n = #intervals
   if n == 0 then return {} end
@@ -599,6 +644,7 @@ function M.merge(intervals)
 end
 
 -- Find gaps in coverage of [lo, hi] not covered by any of the given intervals.
+--: (Interval[], number, number) -> Interval[]
 function M.gaps(intervals, lo, hi)
   local merged = M.merge(intervals)
   local result = {}
@@ -625,6 +671,7 @@ function M.gaps(intervals, lo, hi)
 end
 
 -- Bounding interval spanning all given intervals.
+--: (Interval[]) -> (Interval | nil, string | nil)
 function M.span(intervals)
   local n = #intervals
   if n == 0 then return nil, "empty interval list" end

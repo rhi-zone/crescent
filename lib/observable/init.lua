@@ -8,7 +8,8 @@ local M = {}
 
 --:: Observer = { next: (unknown) -> (), error: (((string) -> ()) | nil), complete: ((() -> ()) | nil) }
 --:: Teardown = () -> ()
---:: SubscribeFn = (Observer) -> (Teardown | nil)
+--:: SafeObserverT = { _raw: Observer, _stopped: boolean, next: (SafeObserverT, unknown) -> nil, error: (SafeObserverT, string) -> nil, complete: (SafeObserverT) -> nil }
+--:: SubscribeFn = (SafeObserverT) -> (Teardown | nil)
 --:: Observable = { _subscribe: SubscribeFn }
 --:: Subject = { _observers: { [integer]: Observer }, _closed: boolean, next: (Subject, unknown) -> nil, error: (Subject, string) -> nil, complete: (Subject) -> nil }
 
@@ -17,7 +18,7 @@ local Observable = {}
 Observable.__index = Observable
 
 --- Create an observable from a subscribe function.
---- The subscribe function receives an observer with :next(v), :error(e), :complete().
+--- The subscribe function receives a SafeObserver with :next(v), :error(e), :complete().
 --- It may return a teardown function.
 --: (SubscribeFn) -> Observable
 function M.create(subscribe_fn)
@@ -73,12 +74,14 @@ local function safe_observer(raw)
   }, SafeObserver)
 end
 
+--: (SafeObserverT, unknown) -> nil
 function SafeObserver:next(value)
   if self._stopped then return end
   local fn = self._raw.next
   if fn then fn(value) end
 end
 
+--: (SafeObserverT, string) -> nil
 function SafeObserver:error(err)
   if self._stopped then return end
   self._stopped = true
@@ -86,6 +89,7 @@ function SafeObserver:error(err)
   if fn then fn(err) end
 end
 
+--: (SafeObserverT) -> nil
 function SafeObserver:complete()
   if self._stopped then return end
   self._stopped = true

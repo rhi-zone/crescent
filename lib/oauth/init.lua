@@ -33,11 +33,13 @@ local function is_unreserved(c)
   return c:match("[A-Za-z0-9%-_.~]") ~= nil
 end
 
+--: (string) -> string
 function M.url_encode(str)
   if type(str) ~= "string" then str = tostring(str) end
-  return str:gsub("([^A-Za-z0-9%-_.~])", function(c)
+  local result = str:gsub("([^A-Za-z0-9%-_.~])", function(c)
     return string.format("%%%02X", string.byte(c))
   end)
+  return result
 end
 
 function M.url_decode(str)
@@ -146,6 +148,7 @@ end
 
 local json_parse  -- forward declaration
 
+--: (string, integer) -> integer
 local function skip_ws(s, pos)
   while pos <= #s do
     local c = s:sub(pos, pos)
@@ -158,11 +161,12 @@ local function skip_ws(s, pos)
   return pos
 end
 
+--: (string, integer) -> (string | nil, integer | nil)
 local function parse_string(s, pos)
   -- pos is on the opening quote
   assert(s:sub(pos, pos) == '"')
   pos = pos + 1
-  local buf = {}
+  local buf = {} --[[:! { [integer]: string }]]
   while pos <= #s do
     local c = s:sub(pos, pos)
     if c == '"' then
@@ -207,12 +211,14 @@ local function parse_string(s, pos)
   return nil, nil  -- unterminated string
 end
 
+--: (string, integer) -> (number | nil, integer)
 local function parse_number(s, pos)
   local num_str = s:match("^-?%d+%.?%d*[eE]?[+-]?%d*", pos)
   if not num_str then return nil, pos end
   return tonumber(num_str), pos + #num_str
 end
 
+--: (string, integer) -> (unknown, integer | nil)
 local function parse_value(s, pos)
   pos = skip_ws(s, pos)
   if pos > #s then return nil, pos end
