@@ -324,7 +324,7 @@ end
 
 -- Selector token stream helper
 --:: CssToken = { type: string, value: string | nil, name: string | nil, op: string | nil, element: boolean | nil, arg: string | nil, neg: boolean | nil, ... }
---:: SelParser = { tokens: { [integer]: CssToken }, pos: integer, peek: (SelParser) -> CssToken, consume: (SelParser) -> CssToken, skip_ws: (SelParser) -> nil }
+--:: SelParser = { tokens: { [integer]: CssToken }, pos: number, peek: (SelParser) -> CssToken, consume: (SelParser) -> CssToken, skip_ws: (SelParser) -> nil }
 local SelectorParser = {}
 SelectorParser.__index = SelectorParser
 
@@ -461,7 +461,7 @@ end
 
 -- Parse a compound selector (type_sel? simples*)
 -- Returns compound_selector table or nil
---: (SelParser) -> { type_selector: string | nil, id: string | nil, classes: { [integer]: string }, attributes: { [integer]: { name: string, op: string | nil, value: string | nil } }, pseudos: { [integer]: { name: string, element: boolean | nil, arg: string | nil, functional: boolean | nil } }, combinator: string | nil } | nil
+--: (SelParser) -> CssCompound | nil
 local function parse_compound(p)
   local compound = {
     type_selector = nil,
@@ -568,6 +568,7 @@ local function parse_complex(p)
 end
 
 -- Parse a selector list (complex ("," complex)*)
+--: (SelParser) -> { [integer]: unknown }
 local function parse_selector_list(p)
   local list = {}
 
@@ -599,6 +600,8 @@ end
 -- ── Stylesheet Parser ─────────────────────────────────────────────────────────
 
 -- Token stream helper for stylesheet parsing
+--:: CssStyleToken = { type: string, value: string | nil, unit: string | nil, flag: string | nil, ... }
+--:: TokStream = { tokens: { [integer]: CssStyleToken }, pos: number, peek: (TokStream) -> CssStyleToken, consume: (TokStream) -> CssStyleToken, skip_ws: (TokStream) -> nil, peek_nonws: (TokStream) -> CssStyleToken }
 local TokenStream = {}
 TokenStream.__index = TokenStream
 
@@ -791,7 +794,10 @@ local function class_set(class_str)
   return set
 end
 
+--:: CssCompound = { type_selector: string | nil, id: string | nil, classes: { [integer]: string }, attributes: { [integer]: { name: string, op: string | nil, value: string | nil } }, pseudos: { [integer]: { name: string, element: boolean | nil, arg: string | nil, functional: boolean | nil } }, combinator: string | nil }
+--:: CssElement = { tag: string | nil, id: string | nil, class: string | nil, attrs: { [string]: string } | nil, ... }
 -- Match a compound selector against an element
+--: (CssCompound, CssElement) -> boolean
 local function match_compound(compound, element)
   -- type selector
   if compound.type_selector and compound.type_selector ~= "*" then
