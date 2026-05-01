@@ -55,8 +55,11 @@ local CONSTS = { pi = math.pi, e = math.exp(1) }
 -- Token types: "num", "ident", "op", "lparen", "rparen", "comma", "eof"
 -- Each token: {type, value, pos}
 
+--:: Token = { type: string, value: unknown, pos: integer }
+--:: Expr = { op: string, value: number | nil, name: string | nil, args: Expr[] | nil, left: Expr | nil, right: Expr | nil, arg: Expr | nil, cond: Expr | nil, then_: Expr | nil, else_: Expr | nil, cmp: string | nil }
+
 local function lex(src)
-  local tokens = {}
+  local tokens = --[[:! Token[] ]] {}
   local i = 1
   local n = #src
 
