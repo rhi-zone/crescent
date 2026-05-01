@@ -483,7 +483,7 @@ function M.fixed(opts)
   end
 
   --- Decode all frames from a string. Returns array of frame strings.
-  --: (string) -> table
+  --: (s: string) -> string[]
   function codec:decode_all(s)
     local frames = {}
     local fi = 1
@@ -595,7 +595,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Wrap a codec in a framer that buffers encoded output.
---: (table) -> table
+--: (codec: { encode: (any, any) -> (string | nil, string | nil), ... }) -> { write: (any, any) -> (boolean | nil, string | nil), pending: (any) -> string, flush: (any) -> string, ... }
 function M.framer(codec)
   local fr = { _codec = codec, _pending = {} }
 
@@ -627,7 +627,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Wrap a codec's decoder in a receiver with has_message/next interface.
---: (table) -> table
+--: (codec: { decoder: (any) -> { feed: (any, string) -> nil, messages: (any) -> (string[] | nil, string | nil), ... }, ... }) -> { feed: (any, string) -> (boolean | nil, string | nil), has_message: (any) -> boolean, next: (any) -> string | nil, ... }
 function M.receiver(codec)
   local dec = codec:decoder()
   local rv = { _dec = dec, _queue = {}, _head = 1 }
