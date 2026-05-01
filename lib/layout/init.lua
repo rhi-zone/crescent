@@ -101,17 +101,22 @@ end
 -- Helpers
 -- ---------------------------------------------------------------------------
 
+--: (v: number, lo: number | nil, hi: number | nil) -> number
 local function clamp(v, lo, hi)
   if lo and v < lo then v = lo end
   if hi and v > hi then v = hi end
   return v
 end
 
+--:: LayoutNode = { _type: string, width: number | nil, height: number | nil, flex: number | nil, direction: string, padding: number, gap: number, children: LayoutNode[], align_items: string, justify_content: string, position: string, x: number | nil, y: number | nil, aspect_ratio: number | nil, min_width: number | nil, max_width: number | nil, min_height: number | nil, max_height: number | nil, ... }
+
 -- Apply min/max constraints to a dimension.
+--: (node: LayoutNode, w: number) -> number
 local function constrain_w(node, w)
   return clamp(w, node.min_width, node.max_width)
 end
 
+--: (node: LayoutNode, h: number) -> number
 local function constrain_h(node, h)
   return clamp(h, node.min_height, node.max_height)
 end
