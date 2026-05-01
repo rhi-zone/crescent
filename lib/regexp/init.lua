@@ -61,6 +61,11 @@ end
 --   ANCHOR_START      zero-width assert pos==1
 --   ANCHOR_END        zero-width assert pos==end+1
 
+--:: Instr = { op: integer, ... }
+--:: Insns = { [integer]: Instr }
+--:: Outs = { [integer]: { [integer]: unknown } }
+--:: Frag = { start: integer, outs: Outs }
+
 local OP_CHAR         = 1
 local OP_CLASS        = 2
 local OP_ANY          = 3
@@ -78,6 +83,7 @@ local OP_ANCHOR_END   = 9
 local function parse_error(msg) return nil, "regexp: " .. msg end
 
 -- Returns a "class predicate" table: {ranges={{lo,hi},...}, shortcuts={fn,neg,...}, neg=bool}
+--: (string, integer) -> (Cls | nil, integer | string | nil)
 local function parse_class(pat, pos)
   local neg = false
   if pos <= #pat and pat:byte(pos) == 94 then -- ^
@@ -139,6 +145,10 @@ local function parse_class(pat, pos)
   return parse_error("unterminated character class")
 end
 
+--:: ClsRange = { integer, integer }
+--:: ClsShortcut = { fn: (integer) -> boolean, neg: boolean }
+--:: Cls = { ranges: { [integer]: ClsRange }, shortcuts: { [integer]: ClsShortcut }, neg: boolean }
+--: (Cls, integer) -> boolean
 local function class_matches(cls, b)
   local hit = false
   for i = 1, #cls.ranges do
@@ -165,12 +175,14 @@ end
 local parse_alt  -- forward declaration
 
 -- emit helpers: append instruction and return its index
+--: (Insns, Instr) -> integer
 local function emit(insns, instr)
   insns[#insns + 1] = instr
   return #insns
 end
 
 -- "patch" a jump/split target that was left as 0
+--: (Insns, integer, string, integer) -> nil
 local function patch(insns, idx, field, target)
   insns[idx][field] = target
 end
@@ -182,14 +194,17 @@ end
 -- Fragment approach (textbook Thompson):
 --   fragment = { start, outs } where outs = list of {pc, field} needing patch
 
+--: (integer, Outs) -> Frag
 local function frag(start, outs) return { start = start, outs = outs } end
 
+--: (Insns, Outs, integer) -> nil
 local function patch_outs(insns, outs, target)
   for i = 1, #outs do
     insns[outs[i][1]][outs[i][2]] = target
   end
 end
 
+--: (Outs, Outs) -> Outs
 local function concat_outs(a, b)
   local r = {}
   for i = 1, #a do r[#r + 1] = a[i] end
@@ -372,6 +387,7 @@ end
 
 -- Clone instructions from insns[from..to] into insns, adjusting internal jumps
 -- by offset = #insns_new - from + 1.  Returns new frag start.
+--: (Insns, integer, integer) -> integer
 local function clone_frag(insns, from, to)
   local offset = #insns - from + 1
   local new_start = #insns + 1
@@ -397,6 +413,7 @@ end
 -- atom_outs = the out-list of the atom fragment (to be patched)
 -- min, max = repetition range
 -- Returns new frag
+--: (Insns, integer, integer, Outs, number, number) -> Frag
 local function apply_quant(insns, atom_from, atom_to, atom_outs, min, max)
   if min == 0 and max == 1 then
     -- Optional: split(atom.start, out) ; atom ; out
@@ -648,6 +665,7 @@ end
 
 -- Add state (pc, caps) to list, following epsilon transitions.
 -- visited prevents visiting the same pc twice in one step.
+--: (Insns, { [integer]: { pc: integer, caps: { [integer]: integer } } }, integer, { [integer]: integer }, integer, integer, { [integer]: unknown }) -> nil
 local function add_thread(insns, list, pc, caps, pos, slen, visited)
   if visited[pc] then return end
   visited[pc] = true
@@ -686,6 +704,7 @@ end
 -- Run the NFA on subject[init..] (1-indexed).
 -- Returns (match_start, match_end_plus1, caps) or nil.
 -- If anchored=true, only tries starting at init.
+--: ({ insns: Insns, ngroups: integer, pattern: string }, string, integer, boolean) -> (integer | nil, integer | nil, { [integer]: integer } | nil)
 local function nfa_run(prog, subject, init, anchored)
   local insns = prog.insns
   local ngroups = prog.ngroups
