@@ -93,6 +93,49 @@ See `docs/conventions.md` for the full spec. Short version:
 - **Casts: `--[[: T]]` is the checked cast (full subtyping required). `--[[:! T]]` is the overlap-checked force cast (use when narrowing `unknown` to a concrete `T` or `A | B` to `A`). `--[[:! any]]` is rejected — use `--[[: any]]` if you genuinely need an `any` cast.**
 - **`...` vs index signatures** — these are distinct. `...` is a structural subtyping marker: `{ name: string, ... }` accepts any table with at least `name`. It says nothing about reading arbitrary fields. `{ [string]: T }` is an index signature: any string key maps to `T`. Confusing them leads to open types on concrete data objects (wrong) or expecting arbitrary field reads to work on `...`-typed values (also wrong).
 
+## Typechecker capabilities (read before claiming a feature is missing)
+
+Cleanup agents repeatedly claim features are missing when they are fully implemented. Before asserting that a typechecker feature is unsupported or requires a project decision, write a 5-line `bin/cr check` repro and run it. "Feature X doesn't work" is a claim that requires the same evidence as "feature X works." The patterns below are implemented, tested, and in active use.
+
+**Discriminated unions** — narrowing works when the discriminant field has a *literal* type. A general `string` field cannot be narrowed.
+
+```lua
+-- WRONG: both members have type: string — typechecker cannot distinguish them
+--:: Block = { type: string, level: integer } | { type: string, content: string }
+
+-- RIGHT: literal discriminants — narrowing works
+--:: Block = { type: "heading", level: integer } | { type: "paragraph", content: string }
+
+if block.type == "heading" then
+  local _ = block.level  -- OK: block narrowed to { type: "heading", level: integer }
+end
+```
+
+**Aliasing to a local does NOT narrow the object.** `local t = block.type; if t == "heading" then` narrows `t`, not `block`. The guard must test the field directly on the object. Implementation: `field_disc` in `narrow.lua`, `narrow_by_field` in `types.lua`.
+
+**Open records** — `{ field: T, ... }` is fully supported in argument and return positions. The `...` suffix means "at least these fields; additional fields permitted." Do not confuse with an index signature:
+
+```lua
+--: (opts: { name: string, ... }) -> { result: integer, ... }  -- open record: OK
+--: (opts: { [string]: string })  -> { [string]: integer }     -- index signature: different meaning
+```
+
+Reading an unlisted field on an open record returns `unknown` (not `T`). This is pervasive: `Arr<T> = { [integer]: T, ... }` in stdlib_types.lua.
+
+**Generics** — `<T>(x: T) -> T` and constrained generics `<T: Bound>(x: T) -> T` are fully implemented and instantiated per call site. No project decision is needed.
+
+```lua
+--: <T>(T) -> T
+local function identity(x) return x end
+
+--: <T: { name: string, ... }>(T) -> T
+local function with_name(x) return x end  -- T must have a name field
+```
+
+Reference usage: `lib/iter/init.lua` (17 annotated sites), `lib/type/init.lua` (8 sites), `lib/parse/init.lua`, `lib/html/init.lua`. Parser: `ann.lua` lines 864–919. Constraint generation: `constrain.lua` line 643+.
+
+**Evidence rule** — before claiming a typechecker feature is missing, write and run the repro: `timeout 30 bin/cr check <file>`. A claim grounded in code-tracing alone (without actual output) is a hypothesis, not a finding.
+
 ## Implementation Patterns
 
 **When one implementation can't satisfy all legitimate use cases, provide multiple and let the caller choose.** This takes two forms:
