@@ -16,11 +16,10 @@ local type = type
 
 -- ── sentinel ────────────────────────────────────────────────────────────────
 
---: { _msgpack_bin: true }
 local bin_mt = {}
 
 --- Wrap a raw string as msgpack binary (bin8/bin16/bin32) instead of str.
---: (s: string) -> { _msgpack_bin: true, data: string }
+--: (s: string) -> { data: string }
 function M.bin(s)
 	return setmetatable({ data = s }, bin_mt)
 end
@@ -61,6 +60,7 @@ local function encode_int32(n)
 end
 
 -- IEEE 754 double, big-endian (8 bytes)
+--: (number) -> string
 local function encode_double(n)
 	if n == 0 then
 		-- distinguish +0 and -0
@@ -82,6 +82,7 @@ local function encode_double(n)
 	end
 	-- normalize
 	local exp = 0
+	--: number
 	local mant = n
 	if mant >= 2 then
 		while mant >= 2 do mant = mant / 2; exp = exp + 1 end
@@ -174,6 +175,7 @@ local function encode_number(n)
 	return char(0xcb) .. encode_double(n)
 end
 
+--: (string) -> (string | nil, string | nil)
 local function encode_string(s)
 	local len = #s
 	if len <= 31 then
@@ -200,18 +202,22 @@ local function encode_binary(s)
 	return nil, "binary too long"
 end
 
+--: ({ [unknown]: unknown }) -> boolean
 local function is_array(t)
+	--: number
 	local max = 0
 	local count = 0
 	for k in pairs(t) do
 		if type(k) ~= "number" then return false end
-		if k ~= floor(k) or k < 1 then return false end
-		if k > max then max = k end
+		local kn = --[[:! number]] k
+		if kn ~= floor(kn) or kn < 1 then return false end
+		if kn > max then max = kn end
 		count = count + 1
 	end
 	return count == max
 end
 
+--: ({ [unknown]: unknown }) -> (string | nil, string | nil)
 local function encode_array(t)
 	local len = #t
 	local header
@@ -255,61 +261,76 @@ local function encode_map(t)
 	return concat(parts)
 end
 
+--: (unknown) -> (string | nil, string | nil)
 encode_value = function(v)
 	if v == nil then
 		return encode_nil()
 	end
 	local tv = type(v)
 	if tv == "boolean" then
-		return encode_bool(v)
+		return encode_bool(--[[:! boolean]] v)
 	elseif tv == "number" then
-		return encode_number(v)
+		return encode_number(--[[:! number]] v)
 	elseif tv == "string" then
-		return encode_string(v)
+		return encode_string(--[[:! string]] v)
 	elseif tv == "table" then
 		if getmetatable(v) == bin_mt then
-			return encode_binary(v.data)
+			return encode_binary((--[[:! { data: string }]] v).data)
 		end
-		if is_array(v) then
-			return encode_array(v)
+		if is_array(--[[:! { [unknown]: unknown }]] v) then
+			return encode_array(--[[:! { [unknown]: unknown }]] v)
 		end
-		return encode_map(v)
+		return encode_map(--[[:! { [unknown]: unknown }]] v)
 	end
 	return nil, "unsupported type: " .. tv
 end
 
 -- ── decode ──────────────────────────────────────────────────────────────────
 
---: (string, integer) -> (integer | nil, integer)
+--: (string, integer) -> (number, integer)
 local function decode_uint8(s, pos)
-	return byte(s, pos), pos + 1
+	local b = byte(s, pos)
+	return b, pos + 1
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_uint16(s, pos)
-	local b1, b2 = byte(s, pos, pos + 1)
+	local b1 = byte(s, pos)
+	local b2 = byte(s, pos + 1)
 	return b1 * 256 + b2, pos + 2
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_uint32(s, pos)
-	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
+	local b1 = byte(s, pos)
+	local b2 = byte(s, pos + 1)
+	local b3 = byte(s, pos + 2)
+	local b4 = byte(s, pos + 3)
 	return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4, pos + 4
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_int8(s, pos)
 	local n = byte(s, pos)
 	if n >= 128 then n = n - 256 end
 	return n, pos + 1
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_int16(s, pos)
-	local b1, b2 = byte(s, pos, pos + 1)
+	local b1 = byte(s, pos)
+	local b2 = byte(s, pos + 1)
 	local n = b1 * 256 + b2
 	if n >= 32768 then n = n - 65536 end
 	return n, pos + 2
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_int32(s, pos)
-	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
+	local b1 = byte(s, pos)
+	local b2 = byte(s, pos + 1)
+	local b3 = byte(s, pos + 2)
+	local b4 = byte(s, pos + 3)
 	local n = b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
 	if n >= 2147483648 then n = n - 4294967296 end
 	return n, pos + 4
@@ -333,8 +354,12 @@ local function decode_int64(s, pos)
 	return n, pos + 8
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_float32(s, pos)
-	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
+	local b1 = byte(s, pos)
+	local b2 = byte(s, pos + 1)
+	local b3 = byte(s, pos + 2)
+	local b4 = byte(s, pos + 3)
 	local sign = 1
 	if b1 >= 128 then sign = -1; b1 = b1 - 128 end
 	local exp = b1 * 2 + floor(b2 / 128)
@@ -350,8 +375,16 @@ local function decode_float32(s, pos)
 	return sign * (1 + mant / 8388608) * 2^(exp - 127), pos + 4
 end
 
+--: (string, integer) -> (number, integer)
 local function decode_float64(s, pos)
-	local b1, b2, b3, b4, b5, b6, b7, b8 = byte(s, pos, pos + 7)
+	local b1 = byte(s, pos)
+	local b2 = byte(s, pos + 1)
+	local b3 = byte(s, pos + 2)
+	local b4 = byte(s, pos + 3)
+	local b5 = byte(s, pos + 4)
+	local b6 = byte(s, pos + 5)
+	local b7 = byte(s, pos + 6)
+	local b8 = byte(s, pos + 7)
 	local sign = 1
 	if b1 >= 128 then sign = -1; b1 = b1 - 128 end
 	local exp = b1 * 16 + floor(b2 / 16)
@@ -371,6 +404,7 @@ end
 
 local decode_one -- forward decl
 
+--: (string, integer) -> (unknown, integer | string)
 decode_one = function(s, pos)
 	if pos > #s then
 		return nil, "unexpected end of input"
@@ -439,13 +473,15 @@ decode_one = function(s, pos)
 
 	-- bin16
 	if b == 0xc5 then
-		local len = decode_uint16(s, pos + 1)
+		local len_n = decode_uint16(s, pos + 1)
+		local len = floor(len_n)
 		return sub(s, pos + 3, pos + 2 + len), pos + 3 + len
 	end
 
 	-- bin32
 	if b == 0xc6 then
-		local len = decode_uint32(s, pos + 1)
+		local len_n = decode_uint32(s, pos + 1)
+		local len = floor(len_n)
 		return sub(s, pos + 5, pos + 4 + len), pos + 5 + len
 	end
 
@@ -491,13 +527,15 @@ decode_one = function(s, pos)
 
 	-- str16
 	if b == 0xda then
-		local len = decode_uint16(s, pos + 1)
+		local len_n = decode_uint16(s, pos + 1)
+		local len = floor(len_n)
 		return sub(s, pos + 3, pos + 2 + len), pos + 3 + len
 	end
 
 	-- str32
 	if b == 0xdb then
-		local len = decode_uint32(s, pos + 1)
+		local len_n = decode_uint32(s, pos + 1)
+		local len = floor(len_n)
 		return sub(s, pos + 5, pos + 4 + len), pos + 5 + len
 	end
 
@@ -573,7 +611,7 @@ end
 
 -- ── public API ──────────────────────────────────────────────────────────────
 
---: (v: unknown) -> string | (nil, string)
+--: (v: unknown) -> (string | nil, string | nil)
 function M.value_to_string(v)
 	return encode_value(v)
 end
