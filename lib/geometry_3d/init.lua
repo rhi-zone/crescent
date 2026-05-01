@@ -6,6 +6,15 @@ local M = {}
 
 M._tier = "pure"
 
+--:: Vec3 = { x: number, y: number, z: number }
+--:: Ray3 = { origin: Vec3, dir: Vec3 }
+--:: Plane3 = { n: Vec3, d: number }
+--:: AABB3 = { min: Vec3, max: Vec3 }
+--:: Sphere3 = { c: Vec3, r: number }
+--:: Triangle3 = { a: Vec3, b: Vec3, c: Vec3 }
+--:: Quat = { w: number, x: number, y: number, z: number }
+--:: Mat4 = { [integer]: number }
+
 local sqrt = math.sqrt
 local abs  = math.abs
 local cos  = math.cos
@@ -19,26 +28,32 @@ local min  = math.min
 -- VECTOR3 OPERATIONS
 -- ============================================================================
 
+--: (number, number, number) -> Vec3
 function M.vec3(x, y, z)
   return {x = x, y = y, z = z}
 end
 
+--: (Vec3, Vec3) -> Vec3
 function M.add3(a, b)
   return {x = a.x + b.x, y = a.y + b.y, z = a.z + b.z}
 end
 
+--: (Vec3, Vec3) -> Vec3
 function M.sub3(a, b)
   return {x = a.x - b.x, y = a.y - b.y, z = a.z - b.z}
 end
 
+--: (Vec3, number) -> Vec3
 function M.scale3(v, s)
   return {x = v.x * s, y = v.y * s, z = v.z * s}
 end
 
+--: (Vec3, Vec3) -> number
 function M.dot3(a, b)
   return a.x * b.x + a.y * b.y + a.z * b.z
 end
 
+--: (Vec3, Vec3) -> Vec3
 function M.cross3(a, b)
   return {
     x = a.y * b.z - a.z * b.y,
@@ -47,10 +62,12 @@ function M.cross3(a, b)
   }
 end
 
+--: (Vec3) -> number
 function M.len3(v)
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
 end
 
+--: (Vec3) -> Vec3
 function M.norm3(v)
   local l = sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
   if l == 0 then return {x = 0, y = 0, z = 0} end
@@ -58,11 +75,13 @@ function M.norm3(v)
   return {x = v.x * inv, y = v.y * inv, z = v.z * inv}
 end
 
+--: (Vec3, Vec3, number) -> Vec3
 function M.lerp3(a, b, t)
   local s = 1 - t
   return {x = s * a.x + t * b.x, y = s * a.y + t * b.y, z = s * a.z + t * b.z}
 end
 
+--: (Vec3) -> Vec3
 function M.neg3(v)
   return {x = -v.x, y = -v.y, z = -v.z}
 end
@@ -72,12 +91,14 @@ end
 -- ============================================================================
 
 -- Ray: {origin={x,y,z}, dir={x,y,z}} (dir should be normalized)
+--: (Vec3, Vec3) -> Ray3
 function M.ray(origin, direction)
   return {origin = origin, dir = direction}
 end
 
 -- Ray-triangle intersection (Möller-Trumbore)
 -- Returns: t (distance along ray), u, v (barycentric) or nil
+--: (Ray3, Vec3, Vec3, Vec3) -> (number | nil, number | nil, number | nil)
 function M.ray_triangle(ray, v0, v1, v2)
   local EPSILON = 1e-8
   local e1 = M.sub3(v1, v0)
@@ -99,6 +120,7 @@ end
 
 -- Ray-sphere intersection
 -- Returns: t1, t2 (near and far intersections) or nil
+--: (Ray3, Vec3, number) -> (number | nil, number | nil)
 function M.ray_sphere(ray, center, radius)
   local oc = M.sub3(ray.origin, center)
   local a = M.dot3(ray.dir, ray.dir)
@@ -278,6 +300,7 @@ end
 -- ============================================================================
 -- Index layout (1-based): row r, col c → index (r-1)*4 + c
 
+--: () -> Mat4
 function M.mat4_identity()
   return {
     1, 0, 0, 0,
@@ -287,6 +310,7 @@ function M.mat4_identity()
   }
 end
 
+--: (number, number, number) -> Mat4
 function M.mat4_translate(tx, ty, tz)
   return {
     1,  0,  0,  tx,
@@ -296,6 +320,7 @@ function M.mat4_translate(tx, ty, tz)
   }
 end
 
+--: (number, number, number) -> Mat4
 function M.mat4_scale(sx, sy, sz)
   return {
     sx, 0,  0,  0,
@@ -305,6 +330,7 @@ function M.mat4_scale(sx, sy, sz)
   }
 end
 
+--: (number) -> Mat4
 function M.mat4_rotate_x(angle)
   local c = cos(angle)
   local s = sin(angle)
@@ -316,6 +342,7 @@ function M.mat4_rotate_x(angle)
   }
 end
 
+--: (number) -> Mat4
 function M.mat4_rotate_y(angle)
   local c = cos(angle)
   local s = sin(angle)
@@ -327,6 +354,7 @@ function M.mat4_rotate_y(angle)
   }
 end
 
+--: (number) -> Mat4
 function M.mat4_rotate_z(angle)
   local c = cos(angle)
   local s = sin(angle)
@@ -339,6 +367,7 @@ function M.mat4_rotate_z(angle)
 end
 
 -- Matrix multiply: result = a * b
+--: (Mat4, Mat4) -> Mat4
 function M.mat4_mul(a, b)
   local r = {}
   for row = 0, 3 do
@@ -354,6 +383,7 @@ function M.mat4_mul(a, b)
 end
 
 -- Apply affine transform to a point (applies translation)
+--: (Mat4, Vec3) -> Vec3
 function M.mat4_transform_point(mat, v)
   local x = mat[1]*v.x + mat[2]*v.y + mat[3]*v.z + mat[4]
   local y = mat[5]*v.x + mat[6]*v.y + mat[7]*v.z + mat[8]
@@ -367,6 +397,7 @@ function M.mat4_transform_point(mat, v)
 end
 
 -- Apply transform to a direction (no translation)
+--: (Mat4, Vec3) -> Vec3
 function M.mat4_transform_dir(mat, v)
   return {
     x = mat[1]*v.x + mat[2]*v.y + mat[3]*v.z,
@@ -379,10 +410,12 @@ end
 -- QUATERNION  {w, x, y, z}
 -- ============================================================================
 
+--: (number, number, number, number) -> Quat
 function M.quat(w, x, y, z)
   return {w = w, x = x, y = y, z = z}
 end
 
+--: (Vec3, number) -> Quat
 function M.quat_from_axis_angle(axis, angle)
   local half = angle * 0.5
   local s = sin(half)
@@ -390,6 +423,7 @@ function M.quat_from_axis_angle(axis, angle)
   return {w = cos(half), x = n.x * s, y = n.y * s, z = n.z * s}
 end
 
+--: (Quat, Quat) -> Quat
 function M.quat_mul(a, b)
   return {
     w = a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z,
@@ -400,6 +434,7 @@ function M.quat_mul(a, b)
 end
 
 -- Rotate vector v by quaternion q using sandwich product q * v * q^-1
+--: (Quat, Vec3) -> Vec3
 function M.quat_rotate(q, v)
   -- t = 2 * cross(q.xyz, v)
   local qx, qy, qz = q.x, q.y, q.z
@@ -414,6 +449,7 @@ function M.quat_rotate(q, v)
   }
 end
 
+--: (Quat) -> Quat
 function M.quat_normalize(q)
   local l = sqrt(q.w*q.w + q.x*q.x + q.y*q.y + q.z*q.z)
   if l == 0 then return {w = 1, x = 0, y = 0, z = 0} end
@@ -421,10 +457,12 @@ function M.quat_normalize(q)
   return {w = q.w * inv, x = q.x * inv, y = q.y * inv, z = q.z * inv}
 end
 
+--: (Quat) -> Quat
 function M.quat_conjugate(q)
   return {w = q.w, x = -q.x, y = -q.y, z = -q.z}
 end
 
+--: (Quat, Quat, number) -> Quat
 function M.quat_slerp(a, b, t)
   local dot = a.w*b.w + a.x*b.x + a.y*b.y + a.z*b.z
   -- Ensure shortest path
