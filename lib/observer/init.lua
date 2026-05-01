@@ -59,7 +59,8 @@ end
 --: (Subscriber, unknown) -> nil
 function Subscriber:next(v)
   if self._done then return end
-  if self._obs.next then self._obs.next(v) end
+  local fn = self._obs.next
+  if fn ~= nil then (--[[:! (unknown) -> nil]] fn)(v) end
 end
 
 --: (Subscriber, unknown) -> nil
@@ -67,7 +68,8 @@ function Subscriber:error(e)
   if self._done then return end
   self._done = true
   self._sub._closed = true
-  if self._obs.error then self._obs.error(e) end
+  local fn = self._obs.error
+  if fn ~= nil then (--[[:! (unknown) -> nil]] fn)(e) end
 end
 
 --: (Subscriber) -> nil
@@ -75,7 +77,8 @@ function Subscriber:complete()
   if self._done then return end
   self._done = true
   self._sub._closed = true
-  if self._obs.complete then self._obs.complete() end
+  local fn = self._obs.complete
+  if fn ~= nil then (--[[:! () -> nil]] fn)() end
 end
 
 -- ---------------------------------------------------------------------------
