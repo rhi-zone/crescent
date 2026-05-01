@@ -45,16 +45,16 @@ the concrete record shape it actually has.
 - [ ] `lib/graphql_parser/init.lua` (86) — 20 cannot-pass, 16 narrow-before-indexing (see SKIP — AST shape mismatches)
 - [ ] `lib/bson/init.lua` (73) — 33 arithmetic, 13 cannot-assign
 - [x] `lib/toml/init.lua` (72 → 68) — added forward declarations for parse_datetime and _parse_time_part
-- [ ] `lib/unified/rehype_highlight/init.lua` (74) — 28 "field N is not X" (numeric child indices)
+- [x] `lib/unified/rehype_highlight/init.lua` (74 → 44) — added TokenList shape annotation on tokenizer accumulator locals
 
 ## Tier 3 — Numeric / FFI buffers (arithmetic / length on unknown)
 
 These typically need a `--[[: integer]]` or `--[[: number]]` cast at the FFI
 boundary, or annotating local arrays of bytes as `integer[]`/`uint8_t[]`.
 
-- [ ] `lib/blake2/init.lua` (145) — 72 narrow, 64 arithmetic on unknown
-- [ ] `lib/bignum/init.lua` (95) — 20 arithmetic, 14 "cannot take length"
-- [ ] `lib/matrix/init.lua` (72) — 25 arithmetic, 22 "no method on this type"
+- [x] `lib/blake2/init.lua` (145 → 49) — annotated b_compress/s_compress v and m tables; replaced rejected force cast on ffi.typeof
+- [x] `lib/bignum/init.lua` (95 → 89) — bind string.byte() multi-return to single locals before arithmetic
+- [x] `lib/matrix/init.lua` (72 → 48) — annotated self: matrix on methods accessing _rows/_cols/_data
 - [ ] `lib/protocol_buffer/init.lua` (79) — 36 arithmetic
 - [ ] `lib/bits/init.lua` (76) — 37 "union member is not callable", 11 arithmetic
 - [ ] `lib/midi/init.lua` (90) — 33 arithmetic, 14 tag-literal mismatches (see SKIP — variadic byte() resists annotation)
@@ -116,3 +116,7 @@ last because the type system itself is the testbed.
 - [x] `lib/ical/init.lua` (was 123 → now 70, commit ba96da6)
 - [x] `lib/crescent_examples/x11_wm.lua` (was 178 → now 160, commit 11fe9a7)
 - [x] `lib/platform/apps/charactercardv2/server.lua` (was 271 → now 190, commit 32a35d6)
+- [x] `lib/unified/rehype_highlight/init.lua` (was 74 → now 44, commit 667c916)
+- [x] `lib/bignum/init.lua` (was 95 → now 89, commit 5ec6c4e)
+- [x] `lib/blake2/init.lua` (was 145 → now 49, commit ddad5ff)
+- [x] `lib/matrix/init.lua` (was 72 → now 48, commit 6158453)
