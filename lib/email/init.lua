@@ -30,7 +30,7 @@ local function random_hex(n)
 	return table.concat(t)
 end
 
---: (string) -> string
+--: () -> string
 local function generate_boundary()
 	return "----=_Part_" .. random_hex(16)
 end
@@ -83,8 +83,9 @@ end
 
 -- ── Quoted-Printable ─────────────────────────────────────────────────────
 
---: (string) -> string
+--: (string | nil) -> string
 local function qp_encode(str)
+	if not str then return "" end
 	-- Replace non-printable and = with =XX, wrap at 76 chars
 	local lines = {}
 	local line = {}
@@ -137,12 +138,15 @@ end
 --: (string) -> string
 local function qp_decode(str)
 	-- Unfold soft line breaks
-	local s = str:gsub("=\r\n", ""):gsub("=\n", "")
+	local s, _ = str:gsub("=\r\n", "")
+	s = s:gsub("=\n", "")
 	-- Decode =XX sequences
-	s = s:gsub("=(%x%x)", function(hex)
-		return string.char(tonumber(hex, 16))
+	local result, _ = s:gsub("=(%x%x)", function(hex)
+		local cp = tonumber(hex, 16)
+		if not cp then return "" end
+		return string.char(cp)
 	end)
-	return s
+	return result
 end
 
 -- ── RFC 2047 Encoded-Word ────────────────────────────────────────────────
@@ -151,7 +155,8 @@ end
 --: (string) -> boolean
 local function has_non_ascii(str)
 	for i = 1, #str do
-		if str:byte(i) > 127 then return true end
+		local b = str:sub(i, i):byte()
+		if b and b > 127 then return true end
 	end
 	return false
 end
@@ -160,34 +165,37 @@ end
 --: (string) -> string
 local function encode_header_value(str)
 	if not has_non_ascii(str) then return str end
-	return "=?UTF-8?B?" .. base64.encode(str) .. "?="
+	return "=?UTF-8?B?" .. (base64.encode(str) --[[:! string]]) .. "?="
 end
 
 -- Decode RFC 2047 encoded-word
 --: (string) -> string
 local function decode_header_value(str)
-	return str:gsub("=?([^?]+)?([BbQq])?([^?]*)?=", function(charset, encoding, data)
+	local result = str:gsub("=?([^?]+)?([BbQq])?([^?]*)?=", function(charset, encoding, data)
 		if not encoding or not data then return str end
 		encoding = encoding:upper()
 		if encoding == "B" then
-			return base64.decode(data) or data
+			return (base64.decode(data) --[[:! string | nil]]) or data
 		elseif encoding == "Q" then
 			-- Q encoding: _ = space, =XX = hex
 			local decoded = data:gsub("_", " ")
 			decoded = decoded:gsub("=(%x%x)", function(hex)
-				return string.char(tonumber(hex, 16))
+				local cp = tonumber(hex, 16)
+				if not cp then return "" end
+				return string.char(cp)
 			end)
 			return decoded
 		end
 		return data
 	end)
+	return result
 end
 
 -- ── Base64 line wrapping ─────────────────────────────────────────────────
 
 --: (string) -> string
 local function base64_encode_wrapped(data)
-	local encoded = base64.encode(data)
+	local encoded = base64.encode(data) --[[:! string]]
 	local lines = {}
 	for i = 1, #encoded, 76 do
 		lines[#lines + 1] = encoded:sub(i, i + 75)
@@ -197,10 +205,13 @@ end
 
 -- ── Message Object ───────────────────────────────────────────────────────
 
+--:: Attachment = { filename: string, content_type: string, data: string, inline: boolean | nil, cid: string | nil }
+--:: MessageObj = { from: string, to: { [integer]: string }, cc: { [integer]: string }, bcc: { [integer]: string }, subject: string, text: string | nil, html: string | nil, headers: { [string]: string }, reply_to: string | nil, attachments: { [integer]: Attachment }, _time_fn: () -> number }
+
 local Message = {}
 Message.__index = Message
 
---: ({ from: string, to: { string } | nil, cc: { string } | nil, bcc: { string } | nil, subject: string | nil, text: string | nil, html: string | nil, headers: { [string]: string } | nil, reply_to: string | nil }) -> any
+--: ({ from: string, to: { [integer]: string } | nil, cc: { [integer]: string } | nil, bcc: { [integer]: string } | nil, subject: string | nil, text: string | nil, html: string | nil, headers: { [string]: string } | nil, reply_to: string | nil, time_fn: () -> number }) -> MessageObj
 function M.message(opts)
 	assert(opts and opts.time_fn, "message requires opts.time_fn")
 	local msg = setmetatable({
@@ -220,7 +231,7 @@ function M.message(opts)
 end
 
 -- Add an attachment
---: ({ filename: string, content_type: string, data: string, inline: boolean | nil, cid: string | nil }) -> nil
+--: (MessageObj, Attachment) -> nil
 function Message:attach(att)
 	self.attachments[#self.attachments + 1] = {
 		filename = att.filename,
@@ -232,13 +243,13 @@ function Message:attach(att)
 end
 
 -- Format an address list for headers
---: ({ string }) -> string
+--: ({ [integer]: string }) -> string
 local function format_addr_list(addrs)
 	return table.concat(addrs, ", ")
 end
 
 -- Build the MIME body
---: (any) -> string
+--: (MessageObj) -> string
 local function build_body(msg)
 	local has_text = msg.text ~= nil
 	local has_html = msg.html ~= nil
@@ -363,7 +374,7 @@ local function build_body(msg)
 end
 
 -- Serialize message to RFC 5322 string
---: () -> (string | nil, string | nil)
+--: (MessageObj) -> (string | nil, string | nil)
 function Message:to_string()
 	local headers = {}
 	-- Required headers
@@ -404,10 +415,11 @@ local function parse_headers(raw)
 		-- Find end of line
 		local nl = raw:find("\r\n", pos, true) or raw:find("\n", pos, true)
 		if not nl then break end
+		local nl_i = nl --[[:! integer]]
 
-		local crlf = raw:byte(nl) == 13
-		local line = raw:sub(pos, nl - 1)
-		local next_pos = crlf and nl + 2 or nl + 1
+		local crlf = raw:byte(nl_i) == 13
+		local line = raw:sub(pos, nl_i - 1)
+		local next_pos = crlf and nl_i + 2 or nl_i + 1
 
 		-- Empty line = end of headers
 		if line == "" then
@@ -452,7 +464,8 @@ local function parse_mime_parts(body, boundary)
 	-- Skip past first delimiter line
 	local nl = body:find("\r\n", pos, true) or body:find("\n", pos, true)
 	if not nl then return parts end
-	pos = body:byte(nl) == 13 and nl + 2 or nl + 1
+	local nl_i = nl --[[:! integer]]
+	pos = body:byte(nl_i) == 13 and nl_i + 2 or nl_i + 1
 
 	while pos <= #body do
 		-- Find next delimiter
@@ -481,7 +494,8 @@ local function parse_mime_parts(body, boundary)
 		-- Skip past delimiter line
 		nl = body:find("\r\n", next_delim, true) or body:find("\n", next_delim, true)
 		if not nl then break end
-		pos = body:byte(nl) == 13 and nl + 2 or nl + 1
+		local nl2 = nl --[[:! integer]]
+		pos = body:byte(nl2) == 13 and nl2 + 2 or nl2 + 1
 	end
 
 	return parts
