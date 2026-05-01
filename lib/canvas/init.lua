@@ -219,8 +219,11 @@ local FONT = {
 
 local Canvas = {}
 Canvas.__index = Canvas
+Canvas.width = 0 --: integer
+Canvas.height = 0 --: integer
+Canvas.channels = 4 --: integer
+Canvas.pixels = {} --: { [integer]: integer }
 
---: (integer, integer, table | nil) -> table
 function M.new(width, height, opts)
   if type(width) ~= "number" or width < 1 then
     return nil, "width must be a positive integer"
@@ -477,7 +480,6 @@ function Canvas:text(x, y, str, r, g, b, a)
   end
 end
 
---: (string) -> table
 function M.text_size(str)
   local n = #str
   if n == 0 then return {w = 0, h = 0} end
@@ -548,7 +550,6 @@ function Canvas:clear(r, g, b, a)
   end
 end
 
---: (table, integer, integer) -> nil
 function Canvas:blit(other, dst_x, dst_y)
   for sy = 0, other.height - 1 do
     for sx = 0, other.width - 1 do
@@ -558,7 +559,6 @@ function Canvas:blit(other, dst_x, dst_y)
   end
 end
 
---: (integer, integer, integer, integer) -> table
 function Canvas:crop(x, y, w, h)
   local cv = M.new(w, h)
   for sy = 0, h - 1 do
@@ -570,7 +570,6 @@ function Canvas:crop(x, y, w, h)
   return cv
 end
 
---: (integer, integer) -> table
 function Canvas:scale(new_w, new_h)
   local cv = M.new(new_w, new_h)
   local sx_ratio = self.width / new_w
@@ -664,7 +663,7 @@ function Canvas:to_bmp()
     return string.char(bit.band(n, 0xff), bit.band(bit.rshift(n, 8), 0xff))
   end
 
-  local t = {}
+  local t = --[[:! string[] ]] {}
   -- BITMAPFILEHEADER (14 bytes)
   t[#t + 1] = "BM"           -- signature
   t[#t + 1] = le32(file_size)
@@ -708,7 +707,6 @@ end
 -- Import
 -- ---------------------------------------------------------------------------
 
---: (integer, integer, string, integer) -> table
 function M.from_raw(width, height, bytes, channels)
   channels = channels or 4
   local cv = M.new(width, height)

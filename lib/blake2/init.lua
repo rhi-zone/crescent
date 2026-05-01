@@ -24,7 +24,7 @@ M._tier = "pure"
 
 --:: uint64_t = integer
 
-local U64 = ffi.typeof("uint64_t")
+local U64 = ffi.typeof("uint64_t") --[[:! (integer | number) -> uint64_t]]
 
 -- ---------------------------------------------------------------------------
 -- Shared sigma permutation (12 rows × 16 entries, 0-based indices)
@@ -494,26 +494,26 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---: (string, table | nil) -> (string | nil, string)
+--: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
 function M.b_binary(input, opts)
   opts = opts or {}
   return blake2b_raw(input, opts.hash_len or 64, opts.key or "")
 end
 
---: (string, table | nil) -> (string | nil, string)
+--: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
 function M.b(input, opts)
   local raw, err = M.b_binary(input, opts)
   if not raw then return nil, err end
   return to_hex(raw)
 end
 
---: (string, table | nil) -> (string | nil, string)
+--: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
 function M.s_binary(input, opts)
   opts = opts or {}
   return blake2s_raw(input, opts.hash_len or 32, opts.key or "")
 end
 
---: (string, table | nil) -> (string | nil, string)
+--: (string, { hash_len: integer | nil, key: string | nil } | nil) -> (string | nil, string | nil)
 function M.s(input, opts)
   local raw, err = M.s_binary(input, opts)
   if not raw then return nil, err end
