@@ -20,7 +20,7 @@ do
 	-- NixOS/Guix: libraries are not in standard ld paths.
 	-- Try extracting libdir from NIX_LDFLAGS or scanning NIX_PROFILES.
 	if not lib then
-		local ldflags = (os and os.getenv and os.getenv("NIX_LDFLAGS")) or ""
+		local ldflags = --[[:! string ]] ((os and os.getenv and os.getenv("NIX_LDFLAGS")) or "")
 		for dir in ldflags:gmatch("-L(%S+)") do
 			for _, suffix in ipairs({ "/libcrypto.so.3", "/libcrypto.so" }) do
 				local ok, l = pcall(ffi.load, dir .. suffix)
