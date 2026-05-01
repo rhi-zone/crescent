@@ -1510,3 +1510,54 @@ return M
         end
     end)
 end)
+
+---------------------------------------------------------------------------
+-- NUMERIC FIELD DISCRIMINANT NARROWING
+-- Regression suite for the LIT_NUMBER → LIT_INTEGER promotion fix in
+-- field_disc extraction (narrow.lua) and narrow_by_field (types.lua).
+---------------------------------------------------------------------------
+
+assert.describe("numeric field discriminant narrowing", function()
+    assert.it("x.count == 42.0 narrows union with count: 42 variant (integer-valued float)", function()
+        -- The RHS literal 42.0 is LIT_NUMBER in the AST.  field_disc must promote
+        -- it to LIT_INTEGER so it matches the variant field typed `count: 42`.
+        -- Before the fix, narrow_by_field compared only data[1] (low i32) and
+        -- failed to match, leaving both union members in the narrowed type.
+        no_error([[
+--:: Short = { tag: "n", count: 42 }
+--:: Long  = { tag: "n", count: 99 }
+--: Short | Long
+local x = { tag = "n", count = 42 }
+if x.count == 42.0 then
+    local c = x.count
+end
+]])
+    end)
+
+    assert.it("x.count == 42.0 negative branch excludes Short variant", function()
+        -- In the else branch of x.count == 42.0, Short must be excluded.
+        no_error([[
+--:: Short = { tag: "n", count: 42 }
+--:: Long  = { tag: "n", count: 99 }
+--: Short | Long
+local x = { tag = "n", count = 99 }
+if x.count == 42.0 then
+    local c = x.count  -- Short only
+else
+    local c = x.count  -- Long only (99)
+end
+]])
+    end)
+
+    assert.it("x.tag == \"heading\" string discriminant baseline still works", function()
+        no_error([[
+--:: Heading = { tag: "heading", level: integer }
+--:: Para    = { tag: "para",    text: string }
+--: Heading | Para
+local x = { tag = "heading", level = 1 }
+if x.tag == "heading" then
+    local lv = x.level
+end
+]])
+    end)
+end)

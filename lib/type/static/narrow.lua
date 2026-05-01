@@ -186,7 +186,7 @@ local function extract_narrowing(ctx, nid)
             if r then return r end
         end
 
-        -- x.field == "literal" or x.field == true/false
+        -- x.field == "literal" or x.field == true/false or x.field == 42
         if lhs and lhs.kind == NODE_FIELD_EXPR then
             local obj = ctx.nodes:get(lhs.data[0])
             if obj and obj.kind == NODE_IDENTIFIER then
@@ -195,12 +195,28 @@ local function extract_narrowing(ctx, nid)
                     if rlit_kind == LIT_STRING or rlit_kind == LIT_BOOLEAN
                     or rlit_kind == LIT_INTEGER or rlit_kind == LIT_NUMBER then
                         local positive = (op == OP_EQ)
+                        local disc_lit_kind = rlit_kind
+                        local disc_lit_intern_id = rhs.data[1]
+                        if rlit_kind == LIT_NUMBER then
+                            -- LIT_NUMBER stores the double inline as data[1]+data[2] (i32x2).
+                            -- Apply the same promotion as make_lit_eq: integer-valued floats
+                            -- become LIT_INTEGER so they match `count: 42` variant fields.
+                            local num = i32x2_to_double(rhs.data[1], rhs.data[2])
+                            if num % 1 == 0 and num >= -(2^31) and num <= 2^31 - 1 then
+                                disc_lit_kind = LIT_INTEGER
+                                disc_lit_intern_id = math.floor(num)
+                            end
+                            -- Non-integer LIT_NUMBER: disc_lit_kind stays LIT_NUMBER,
+                            -- disc_lit_intern_id stays rhs.data[1] (low half of i32x2).
+                            -- narrow_by_field will compare both halves for LIT_NUMBER.
+                        end
                         return {
                             kind          = "field_disc",
                             name_id       = obj.data[0],
                             field_name_id = lhs.data[1],
-                            lit_kind      = rlit_kind,
-                            lit_intern_id = rhs.data[1],
+                            lit_kind      = disc_lit_kind,
+                            lit_intern_id = disc_lit_intern_id,
+                            lit_intern_hi = (rlit_kind == LIT_NUMBER and disc_lit_kind == LIT_NUMBER) and rhs.data[2] or nil,
                             positive      = positive,
                         }
                     end
@@ -358,12 +374,13 @@ local function apply_narrowing(ctx, info, ty_id, in_truthy)
             return ctx.T_NEVER
         end
     elseif info.kind == "field_disc" then
+        local lit_intern_hi = info.lit_intern_hi --[[:! integer | nil]]
         if in_truthy == info.positive then
             -- keep members where field matches
-            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, true, info.lit_kind)
+            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, true, info.lit_kind, lit_intern_hi)
         else
             -- remove members where field matches
-            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, false, info.lit_kind)
+            return types_mod.narrow_by_field(ctx, t, info.field_name_id, info.lit_intern_id, false, info.lit_kind, lit_intern_hi)
         end
     elseif info.kind == "lit_eq" then
         local lit_tid = types_mod.make_literal(ctx, info.lit_kind, info.lit_id)

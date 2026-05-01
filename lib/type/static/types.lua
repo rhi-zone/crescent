@@ -844,8 +844,11 @@ end
 
 -- Narrow a union by field discriminant. positive=true: keep members where field COULD be lit_intern_id.
 -- lit_kind defaults to LIT_STRING for backwards compat.
---: (Ctx, integer, integer, integer, boolean, integer | nil) -> integer
-function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit_kind)
+-- lit_intern_hi is only used when lit_kind == LIT_NUMBER (the high i32 of the i32x2-encoded double).
+-- Applies LIT_NUMBER → LIT_INTEGER promotion: a LIT_NUMBER field matches a LIT_INTEGER discriminant
+-- when the float value is integer-valued, mirroring the promotion in narrow.lua field_disc extraction.
+--: (Ctx, integer, integer, integer, boolean, integer | nil, integer | nil) -> integer
+function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit_kind, lit_intern_hi)
     lit_kind = lit_kind or LIT_STRING
     tid = M.find(ctx, tid)
     local t = ctx.types:get(tid)
@@ -856,8 +859,17 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
             if fe then
                 local frt = M.find(ctx, fe.type_id or 0)
                 local ft = ctx.types:get(frt)
-                if ft.tag == TAG_LITERAL and ft.data[0] == lit_kind then
-                    local definite = (ft.data[1] == lit_intern_id)
+                if ft.tag == TAG_LITERAL then
+                    local definite = false
+                    if ft.data[0] == lit_kind then
+                        definite = (ft.data[1] == lit_intern_id)
+                    elseif ft.data[0] == LIT_NUMBER and lit_kind == LIT_INTEGER then
+                        -- Field is LIT_NUMBER; discriminant was promoted to LIT_INTEGER.
+                        local fnum = i32x2_to_double(ft.data[1], ft.data[2])
+                        if fnum % 1 == 0 and fnum >= -(2^31) and fnum <= 2^31 - 1 then
+                            definite = (math.floor(fnum) == lit_intern_id)
+                        end
+                    end
                     if positive and not definite then return ctx.T_NEVER end
                     if not positive and definite then return ctx.T_NEVER end
                 end
@@ -877,8 +889,17 @@ function M.narrow_by_field(ctx, tid, field_name_id, lit_intern_id, positive, lit
             if fe then
                 local frt = M.find(ctx, fe.type_id or 0)
                 local ft = ctx.types:get(frt)
-                if ft.tag == TAG_LITERAL and ft.data[0] == lit_kind then
-                    definite_match = (ft.data[1] == lit_intern_id)
+                if ft.tag == TAG_LITERAL then
+                    if ft.data[0] == lit_kind then
+                        definite_match = (ft.data[1] == lit_intern_id)
+                    elseif ft.data[0] == LIT_NUMBER and lit_kind == LIT_INTEGER then
+                        -- Field is LIT_NUMBER; discriminant was promoted to LIT_INTEGER.
+                        -- Promote the field value for comparison.
+                        local fnum = i32x2_to_double(ft.data[1], ft.data[2])
+                        if fnum % 1 == 0 and fnum >= -(2^31) and fnum <= 2^31 - 1 then
+                            definite_match = (math.floor(fnum) == lit_intern_id)
+                        end
+                    end
                     possible_match = definite_match
                 end
             end

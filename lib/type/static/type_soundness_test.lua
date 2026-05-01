@@ -902,6 +902,36 @@ if x == true then
 end
 ]])
     end)
+
+    assert.it("field_disc: string discriminant narrows tagged union (baseline)", function()
+        -- Regression guard: string discriminant narrowing must keep working.
+        no_errors([[
+--:: Heading = { tag: "heading", text: string }
+--:: Para    = { tag: "para",    text: string }
+--: Heading | Para
+local x = { tag = "heading", text = "Hello" }
+if x.tag == "heading" then
+    local t = x.text  -- x is Heading here; text is string
+end
+]])
+    end)
+
+    assert.it("field_disc: integer-valued float discriminant (42.0) narrows union with count: 42 variant", function()
+        -- Bug fix: LIT_NUMBER discriminant must be promoted to LIT_INTEGER so that
+        -- x.count == 42.0 matches a variant typed `count: 42` (LIT_INTEGER).
+        no_errors([[
+--:: Short = { tag: "n", count: 42 }
+--:: Long  = { tag: "n", count: 99 }
+--: Short | Long
+local x = { tag = "n", count = 42 }
+if x.count == 42.0 then
+    -- x should narrow to Short here; count is 42 (LIT_INTEGER).
+    -- If the promotion bug exists, this branch keeps both variants and
+    -- x.count remains a union literal, not a known 42.
+    local c = x.count
+end
+]])
+    end)
 end)
 
 ---------------------------------------------------------------------------
