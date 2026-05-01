@@ -556,6 +556,7 @@ function M.unescape_text(s)
 end
 
 --- Add a property line to a lines table, with optional parameters.
+--: ({ [integer]: string }, string, unknown, { [string]: unknown } | nil) -> nil
 local function add_prop(lines, name, value, params)
   if value == nil then return end
   local parts = { name }
