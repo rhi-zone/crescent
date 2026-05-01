@@ -5,9 +5,10 @@ else package.path = arg[0]:gsub("lua/.+$", "lua/?.lua", 1) .. ";" .. package.pat
 
 local root = arg[1] or "."
 local ext_mimetype = require("lib.mimetype.by_name").mimetype
+local static_caps = { io_open = io.open, os_date = os.date }
 local static, err
-if os.getenv("404") == "1" then static, err = require("lib.http.router.static_full_404").router(root)
-else static, err = require("lib.http.router.static_full").router(root) end
+if os.getenv("404") == "1" then static, err = require("lib.http.router.static_full_404").router(root, static_caps)
+else static, err = require("lib.http.router.static_full").router(root, static_caps) end
 assert(static, err)
 local prefix = os.getenv("prefix")
 if prefix then prefix = "/" .. prefix end

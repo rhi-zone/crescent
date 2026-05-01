@@ -5,17 +5,20 @@ local mimetype_by_contents
 local mod = {}
 
 --[[@param base? string]]
-mod.router = function (base)
+--[[@param opts? { io_open: fun(path: string, mode: string): file* | nil }]]
+mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static_router() expects string as base path, got " .. tostring(base)
 	end
+	local io_open = opts and opts.io_open
+	if not io_open then return nil, "static_router() requires opts.io_open cap" end
 	base = (base or "."):gsub("/$", "")
 	--[[@type http_callback]]
 	return function (req, res)
 		-- TODO: urldecode? urldecode(req.path)
 		local full_path = path.safe_resolve(base, req.path)
 		if not full_path then res.status = 404; return end
-		local file = io.open(full_path, "rb")
+		local file = io_open(full_path, "rb")
 		if file == nil then res.status = 404; return end
 		res.status = 200
 		res.body = file:read("*all")

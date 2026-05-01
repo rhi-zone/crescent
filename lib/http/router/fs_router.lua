@@ -9,16 +9,24 @@ local mod = {}
 
 --[[@return http_callback]]
 --[[@param path? string]]
-mod.router = function (path)
+--[[@param opts { io_open: fun(path: string, mode?: string): file* | nil, stderr_write: fun(...: string): nil, lua_load: fun(path: string): (boolean, http_callback | string) }]]
+mod.router = function (path, opts)
+	if not opts then error("fs_router() requires opts with io_open, stderr_write, lua_load caps") end
+	local io_open = opts.io_open
+	if not io_open then error("fs_router() requires opts.io_open cap") end
+	local stderr_write = opts.stderr_write
+	if not stderr_write then error("fs_router() requires opts.stderr_write cap") end
+	local lua_load = opts.lua_load
+	if not lua_load then error("fs_router() requires opts.lua_load cap") end
 	local handle_file = function (path2) --[[@param path2 string]]
 		if path2:find("%.lua$") then
-			local success, cb = pcall(dofile, path2)
-			if not success then io.stderr:write("fs_router: caught error when rendering page: ", cb, "\n") end
+			local success, cb = lua_load(path2)
+			if not success then stderr_write("fs_router: caught error when rendering page: ", cb, "\n") end
 			return success and cb or nil
 		--[[@diagnostic disable-next-line: undefined-global]]
 		elseif DEV then
 			return function (req, res)
-				local file = io.open(path2)
+				local file = io_open(path2)
 				if not file then return false end
 				local contents = file:read("*all")
 				file:close()
@@ -32,7 +40,7 @@ mod.router = function (path)
 				return true
 			end
 		else
-			local file = io.open(path2)
+			local file = io_open(path2)
 			if not file then return nil end
 			local contents = file:read("*all")
 			local content_type = mimetype_by_name(path2)
