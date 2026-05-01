@@ -204,3 +204,81 @@ without opts and get stdlib. The CLI with a valid pkg.lua overrides via
 `opts.globals_files`. Projects without pkg.lua still get stdlib (same fallback).
 Self-check mode (typechecker source files) gets stdlib + ctx_types.lua via the
 filename-based heuristic in `constrain.generate`.
+
+## Supported patterns (check before claiming missing)
+
+Before asserting that a language feature is unsupported or requires a project
+decision, verify against this list. Each entry documents a pattern that has been
+falsely claimed missing and caused unnecessary reverts.
+
+### Discriminated unions require literal discriminants
+
+Discriminant-field narrowing (`field_disc` in `narrow.lua` ~189-228,
+`narrow_by_field` in `types.lua`) works only when the discriminant field has a
+*literal* type. A general `string` discriminant cannot be narrowed — the
+typechecker has no information to distinguish union members.
+
+```lua
+-- WRONG: type: string — typechecker cannot narrow; silently stays as the full union
+--:: Block = { type: string, level: integer } | { type: string, content: string }
+
+-- RIGHT: type: "heading" / type: "paragraph" — narrowing works
+--:: Block = { type: "heading", level: integer } | { type: "paragraph", content: string }
+```
+
+After the correct definition:
+
+```lua
+if block.type == "heading" then
+  -- block is narrowed to { type: "heading", level: integer }
+  local _ = block.level  -- OK
+end
+```
+
+**Aliasing to a local does NOT narrow the object.** `local t = block.type; if t
+== "heading" then` narrows `t`, not `block`. The guard must test the field
+directly.
+
+Implementation: `field_disc` in `narrow.lua`, `narrow_by_field` in `types.lua`.
+Tests: `type_complex_test.lua` (Maybe/Either/Result), `type_soundness_test.lua`.
+
+### Open records `{ field: T, ... }` are fully supported
+
+Structural open-record types are fully implemented. The `...` suffix is a
+structural subtyping marker meaning "at least these named fields; additional
+fields are permitted."
+
+```lua
+--: (opts: { name: string, ... }) -> { result: integer, ... }
+```
+
+This is pervasive in the codebase: `match.lua`, `env.lua`, `stdlib_types.lua`
+(`Arr<T> = { [integer]: T, ... }`). Do not confuse the two forms:
+
+- `{ field: T, ... }` — structural subtyping: "at least `field`; anything else
+  allowed." Reading an unlisted field returns `unknown`.
+- `{ [string]: T }` — index signature: any string key maps to `T`. Reading any
+  string key returns `T`.
+
+Confusing them leads to open types on concrete data objects (wrong) or expecting
+arbitrary field reads to work on `...`-typed values (also wrong).
+
+### Generics `<T>(x: T) -> T` are fully implemented
+
+Generic functions with type parameters are implemented and in active use. No
+project decision is needed.
+
+```lua
+--: <T>(T) -> T
+local function identity(x) return x end
+
+--: <T: { name: string, ... }>(T) -> T
+local function with_name(x) return x end  -- constrained generic: T must have name
+```
+
+Usage in the codebase: `lib/iter/init.lua` (17 sites), `lib/type/init.lua` (8
+sites), `lib/parse/init.lua`, `lib/html/init.lua`. Type parameters are
+instantiated independently at each call site.
+
+Parser: `ann.lua` lines 864-919. Constraint generation: `constrain.lua` line
+643+ and 1350-1377.
