@@ -134,7 +134,7 @@ M.segment_length = function(seg) return M.distance(seg.p1, seg.p2) end
 M.segment_midpoint = function(seg) return M.midpoint(seg.p1, seg.p2) end
 
 -- Closest point on segment to the given point
---: (Point2, Segment) -> Point2
+--: ({ x: number, y: number, ... }, Segment) -> Point2
 M.closest_point_on_segment = function(point, seg)
   local dx = seg.p2.x - seg.p1.x
   local dy = seg.p2.y - seg.p1.y
