@@ -24,7 +24,7 @@ local floor = math.floor
 --   20260101T100000Z  → utc=true
 --   20260101T100000   → utc=false (floating)
 --   20260101          → date-only (hour/min/sec nil)
---: (string) -> ({ year: integer, month: integer, day: integer, hour: integer | nil, min: integer | nil, sec: integer | nil, utc: boolean | nil } | nil, string | nil)
+--: (string) -> ({ year: integer, month: integer, day: integer, hour: integer | nil, min: integer | nil, sec: integer | nil, utc: boolean | nil } | { year: integer, month: integer, day: integer } | nil, string | nil)
 function M.parse_datetime(s)
   if not s then return nil, "nil input" end
   -- DATE-TIME: YYYYMMDDTHHmmss[Z]
@@ -32,12 +32,12 @@ function M.parse_datetime(s)
     match(s, "^(%d%d%d%d)(%d%d)(%d%d)T(%d%d)(%d%d)(%d%d)(Z?)$")
   if year then
     return {
-      year  = tonumber(year),
-      month = tonumber(month),
-      day   = tonumber(day),
-      hour  = tonumber(hour),
-      min   = tonumber(min),
-      sec   = tonumber(sec),
+      year  = tonumber(year) --[[:! integer]],
+      month = tonumber(month) --[[:! integer]],
+      day   = tonumber(day) --[[:! integer]],
+      hour  = tonumber(hour) --[[:! integer]],
+      min   = tonumber(min) --[[:! integer]],
+      sec   = tonumber(sec) --[[:! integer]],
       utc   = utc == "Z",
     }
   end
@@ -45,9 +45,9 @@ function M.parse_datetime(s)
   year, month, day = match(s, "^(%d%d%d%d)(%d%d)(%d%d)$")
   if year then
     return {
-      year  = tonumber(year),
-      month = tonumber(month),
-      day   = tonumber(day),
+      year  = tonumber(year) --[[:! integer]],
+      month = tonumber(month) --[[:! integer]],
+      day   = tonumber(day) --[[:! integer]],
     }
   end
   return nil, "invalid datetime: " .. s
@@ -59,7 +59,7 @@ function M.parse_date(s)
   if not s then return nil, "nil input" end
   local year, month, day = match(s, "^(%d%d%d%d)(%d%d)(%d%d)$")
   if not year then return nil, "invalid date: " .. s end
-  return { year = tonumber(year), month = tonumber(month), day = tonumber(day) }
+  return { year = tonumber(year) --[[:! integer]], month = tonumber(month) --[[:! integer]], day = tonumber(day) --[[:! integer]] }
 end
 
 --- Format a datetime table to iCalendar DATE-TIME string.
@@ -88,14 +88,16 @@ function M.parse_rrule(s)
   local r = {}
   for part in gmatch(s, "[^;]+") do
     local key, val = match(part, "^([^=]+)=(.*)$")
+    key = key --[[:! string | nil]]
+    val = val --[[:! string | nil]]
     if key and val then
       key = key:upper()
       if key == "FREQ" then
         r.freq = val:upper()
       elseif key == "INTERVAL" then
-        r.interval = tonumber(val)
+        r.interval = tonumber(val) --[[:! integer]]
       elseif key == "COUNT" then
-        r.count = tonumber(val)
+        r.count = tonumber(val) --[[:! integer]]
       elseif key == "UNTIL" then
         r["until"] = M.parse_datetime(val) or val
       elseif key == "WKST" then
@@ -108,25 +110,25 @@ function M.parse_rrule(s)
       elseif key == "BYMONTHDAY" then
         r.bymonthday = {}
         for d in gmatch(val, "[^,]+") do
-          insert(r.bymonthday, tonumber(d))
+          insert(r.bymonthday, tonumber(d) --[[:! integer]])
         end
       elseif key == "BYMONTH" then
         r.bymonth = {}
         for mo in gmatch(val, "[^,]+") do
-          insert(r.bymonth, tonumber(mo))
+          insert(r.bymonth, tonumber(mo) --[[:! integer]])
         end
       elseif key == "BYHOUR" then
         r.byhour = {}
-        for h in gmatch(val, "[^,]+") do insert(r.byhour, tonumber(h)) end
+        for h in gmatch(val, "[^,]+") do insert(r.byhour, tonumber(h) --[[:! integer]]) end
       elseif key == "BYMINUTE" then
         r.byminute = {}
-        for m in gmatch(val, "[^,]+") do insert(r.byminute, tonumber(m)) end
+        for m in gmatch(val, "[^,]+") do insert(r.byminute, tonumber(m) --[[:! integer]]) end
       elseif key == "BYSECOND" then
         r.bysecond = {}
-        for sec in gmatch(val, "[^,]+") do insert(r.bysecond, tonumber(sec)) end
+        for sec in gmatch(val, "[^,]+") do insert(r.bysecond, tonumber(sec) --[[:! integer]]) end
       elseif key == "BYSETPOS" then
         r.bysetpos = {}
-        for p in gmatch(val, "[^,]+") do insert(r.bysetpos, tonumber(p)) end
+        for p in gmatch(val, "[^,]+") do insert(r.bysetpos, tonumber(p) --[[:! integer]]) end
       else
         r[key:lower()] = val
       end
