@@ -108,7 +108,7 @@ local function clamp(v, lo, hi)
   return v
 end
 
---:: LayoutNode = { _type: string, width: number | nil, height: number | nil, flex: number | nil, direction: string, padding: number, gap: number, children: LayoutNode[], align_items: string, justify_content: string, position: string, x: number | nil, y: number | nil, aspect_ratio: number | nil, min_width: number | nil, max_width: number | nil, min_height: number | nil, max_height: number | nil, ... }
+--:: LayoutNode = { _type: string, id: string | nil, width: number | string | nil, height: number | string | nil, flex: number | nil, direction: string, padding: number, gap: number, children: LayoutNode[], align_items: string, justify_content: string, position: string, x: number | nil, y: number | nil, aspect_ratio: number | nil, min_width: number | nil, max_width: number | nil, min_height: number | nil, max_height: number | nil, col: integer | nil, row: integer | nil, col_span: integer | nil, row_span: integer | nil, columns: { [integer]: unknown }, rows: { [integer]: unknown }, ... }
 
 -- Apply min/max constraints to a dimension.
 --: (node: LayoutNode, w: number) -> number
@@ -137,6 +137,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Resolve track sizes (columns or rows) given total available space and gap.
+--: (tracks: { [integer]: unknown }, available: number, gap: number) -> { [integer]: number }
 local function resolve_tracks(tracks, available, gap)
   local n = #tracks
   local total_gap = gap * (n > 1 and n - 1 or 0)
@@ -176,45 +177,50 @@ local compute_node
 
 -- compute_box: layout a box node at (px, py) with given (bw, bh).
 -- Returns computed (w, h) after constraints / aspect-ratio.
+--: (node: LayoutNode, px: number, py: number, bw: number, bh: number, result: { _map: { [string]: { x: number, y: number, width: number, height: number } } }) -> (number, number)
 local function compute_box(node, px, py, bw, bh, result)
   -- Resolve actual width / height.
-  local w, h
+  local w = 0.0 --: number
+  local h = 0.0 --: number
 
   -- Width resolution.
   if type(node.width) == "number" then
-    w = node.width
+    w = node.width --[[:! number]]
   elseif node.width == "fill" then
-    w = bw or 0
+    w = bw
   elseif node.flex then
     -- flex nodes get their size injected by parent; bw is the allocated size.
-    w = bw or 0
+    w = bw
   else
-    w = bw or 0
+    w = bw
   end
 
   -- Height resolution.
   if type(node.height) == "number" then
-    h = node.height
+    h = node.height --[[:! number]]
   elseif node.height == "fill" then
-    h = bh or 0
+    h = bh
   elseif node.flex then
-    h = bh or 0
+    h = bh
   else
-    h = bh or 0
+    h = bh
   end
 
   -- Aspect ratio: if one dim is explicit and the other isn't, derive it.
   if node.aspect_ratio then
+    local ar = node.aspect_ratio --[[: number]]
     if type(node.width) == "number" and type(node.height) ~= "number" and node.height ~= "fill" then
-      h = w / node.aspect_ratio
+      h = w / ar
     elseif type(node.height) == "number" and type(node.width) ~= "number" and node.width ~= "fill" then
-      w = h * node.aspect_ratio
+      w = h * ar
     end
   end
 
   -- Apply min/max.
-  w = constrain_w(node, w)
-  h = constrain_h(node, h)
+  local wn = constrain_w(node, w --[[:! number]])
+  local hn = constrain_h(node, h --[[:! number]])
+  w = wn
+  h = hn
 
   -- Record this node.
   if node.id then
@@ -232,8 +238,8 @@ local function compute_box(node, px, py, bw, bh, result)
     local justify  = node.justify_content or "start"
 
     -- Separate absolute children from flow children.
-    local flow_children = {}
-    local abs_children  = {}
+    local flow_children = {} --: { [integer]: LayoutNode }
+    local abs_children  = {} --: { [integer]: LayoutNode }
     for i = 1, #node.children do
       local c = node.children[i]
       if c.position == "absolute" then
@@ -246,13 +252,14 @@ local function compute_box(node, px, py, bw, bh, result)
     -- ------------------------------------------------------------------
     -- Pass 1: measure fixed / fill dimensions of flow children.
     -- ------------------------------------------------------------------
-    local total_flex = 0
-    local main_used  = 0  -- sum of fixed sizes + gaps
+    local total_flex = 0.0 --: number
+    -- sum of fixed sizes + gaps
+    local main_used  = 0.0 --: number
     local n_flow     = #flow_children
 
     -- Per-child resolved main/cross sizes (before flex allocation).
-    local child_main = {}
-    local child_cross = {}
+    local child_main  = {} --: { [integer]: number | nil }
+    local child_cross = {} --: { [integer]: number | nil }
 
     for i = 1, n_flow do
       local c = flow_children[i]
@@ -264,7 +271,7 @@ local function compute_box(node, px, py, bw, bh, result)
           cm = nil  -- deferred
           total_flex = total_flex + c.flex
         elseif type(c.width) == "number" then
-          cm = c.width
+          cm = c.width --[[:! number]]
         elseif c.width == "fill" then
           cm = inner_w
         else
@@ -272,7 +279,7 @@ local function compute_box(node, px, py, bw, bh, result)
         end
 
         if type(c.height) == "number" then
-          cc = c.height
+          cc = c.height --[[:! number]]
         elseif c.height == "fill" then
           cc = inner_h
         elseif align == "stretch" then
@@ -282,7 +289,7 @@ local function compute_box(node, px, py, bw, bh, result)
         end
         -- aspect ratio for cross
         if c.aspect_ratio and cm then
-          cc = cm / c.aspect_ratio
+          cc = (cm --[[:! number]]) / (c.aspect_ratio --[[:! number]])
         end
       else -- "col"
         -- main = height, cross = width
@@ -290,7 +297,7 @@ local function compute_box(node, px, py, bw, bh, result)
           cm = nil
           total_flex = total_flex + c.flex
         elseif type(c.height) == "number" then
-          cm = c.height
+          cm = c.height --[[:! number]]
         elseif c.height == "fill" then
           cm = inner_h
         else
@@ -298,7 +305,7 @@ local function compute_box(node, px, py, bw, bh, result)
         end
 
         if type(c.width) == "number" then
-          cc = c.width
+          cc = c.width --[[:! number]]
         elseif c.width == "fill" then
           cc = inner_w
         elseif align == "stretch" then
@@ -308,13 +315,14 @@ local function compute_box(node, px, py, bw, bh, result)
         end
         -- aspect ratio for cross
         if c.aspect_ratio and cm then
-          cc = cm * c.aspect_ratio
+          cc = (cm --[[:! number]]) * (c.aspect_ratio --[[:! number]])
         end
       end
 
       if cm then
-        cm = (dir == "row") and constrain_w(c, cm) or constrain_h(c, cm)
-        main_used = main_used + cm
+        local cmn = cm --[[:! number]]
+        cm = (dir == "row") and constrain_w(c, cmn) or constrain_h(c, cmn)
+        main_used = main_used + (cm --[[:! number]])
       end
       child_main[i]  = cm
       child_cross[i] = cc
@@ -337,7 +345,7 @@ local function compute_box(node, px, py, bw, bh, result)
           allocated = constrain_w(c, allocated)
           -- cross = height
           if type(c.height) == "number" then
-            child_cross[i] = c.height
+            child_cross[i] = c.height --[[:! number]]
           elseif c.height == "fill" then
             child_cross[i] = inner_h
           elseif align == "stretch" then
@@ -345,12 +353,12 @@ local function compute_box(node, px, py, bw, bh, result)
           else
             child_cross[i] = 0
           end
-          if c.aspect_ratio then child_cross[i] = allocated / c.aspect_ratio end
+          if c.aspect_ratio then child_cross[i] = allocated / (c.aspect_ratio --[[:! number]]) end
         else
-          allocated = constrain_h(c, allocated)
+          local allocated_h = constrain_h(c, allocated)
           -- cross = width
           if type(c.width) == "number" then
-            child_cross[i] = c.width
+            child_cross[i] = c.width --[[:! number]]
           elseif c.width == "fill" then
             child_cross[i] = inner_w
           elseif align == "stretch" then
@@ -358,7 +366,10 @@ local function compute_box(node, px, py, bw, bh, result)
           else
             child_cross[i] = 0
           end
-          if c.aspect_ratio then child_cross[i] = allocated * c.aspect_ratio end
+          if c.aspect_ratio then
+            child_cross[i] = allocated_h * (c.aspect_ratio --[[:! number]])
+          end
+          allocated = allocated_h
         end
         child_main[i] = allocated
       end
@@ -367,12 +378,12 @@ local function compute_box(node, px, py, bw, bh, result)
     -- ------------------------------------------------------------------
     -- Pass 3: justify_content — compute starting offset and spacing.
     -- ------------------------------------------------------------------
-    local actual_main_total = 0
+    local actual_main_total = 0.0 --: number
     for i = 1, n_flow do actual_main_total = actual_main_total + (child_main[i] or 0) end
     actual_main_total = actual_main_total + gap * (n_flow > 1 and n_flow - 1 or 0)
 
-    local main_start = 0
-    local extra_gap  = 0
+    local main_start = 0.0 --: number
+    local extra_gap  = 0.0 --: number
 
     if justify == "start" then
       main_start = 0
@@ -383,13 +394,13 @@ local function compute_box(node, px, py, bw, bh, result)
     elseif justify == "space_between" then
       main_start = 0
       if n_flow > 1 then
-        local fixed_sum = 0
+        local fixed_sum = 0.0 --: number
         for i = 1, n_flow do fixed_sum = fixed_sum + (child_main[i] or 0) end
         extra_gap = (avail_main - fixed_sum) / (n_flow - 1)
       end
     elseif justify == "space_around" then
       if n_flow > 0 then
-        local fixed_sum = 0
+        local fixed_sum = 0.0 --: number
         for i = 1, n_flow do fixed_sum = fixed_sum + (child_main[i] or 0) end
         local space = (avail_main - fixed_sum) / n_flow
         main_start = space / 2
@@ -409,16 +420,19 @@ local function compute_box(node, px, py, bw, bh, result)
       local cc  = child_cross[i] or 0
 
       -- align_items on cross axis
-      local cross_offset = 0
+      local cross_offset = 0.0 --: number
       if align == "center" then
         cross_offset = (avail_cross - cc) / 2
       elseif align == "end" then
         cross_offset = avail_cross - cc
       elseif align == "start" or align == "stretch" then
-        cross_offset = 0
+        cross_offset = 0.0
       end
 
-      local cx, cy, cw, ch
+      local cx = 0.0 --: number
+      local cy = 0.0 --: number
+      local cw = 0.0 --: number
+      local ch = 0.0 --: number
       if dir == "row" then
         cx = px + pad + cursor
         cy = py + pad + cross_offset
@@ -433,7 +447,9 @@ local function compute_box(node, px, py, bw, bh, result)
 
       compute_node(c, cx, cy, cw, ch, result)
 
-      cursor = cursor + cm + (i < n_flow and (extra_gap > 0 and extra_gap or gap) or 0)
+      local step_gap = (i < n_flow) and gap or 0.0 --: number
+      if i < n_flow and (extra_gap --[[: number]]) > 0 then step_gap = extra_gap end
+      cursor = cursor + (cm --[[:! number]]) + step_gap
     end
 
     -- ------------------------------------------------------------------
@@ -453,9 +469,12 @@ local function compute_box(node, px, py, bw, bh, result)
 end
 
 -- compute_grid: layout a grid node at (px, py).
+--: (node: LayoutNode, px: number, py: number, bw: number, bh: number, result: { _map: { [string]: { x: number, y: number, width: number, height: number } } }) -> (number, number)
 local function compute_grid(node, px, py, bw, bh, result)
-  local w = type(node.width)  == "number" and node.width  or bw or 0
-  local h = type(node.height) == "number" and node.height or bh or 0
+  local w = 0.0 --: number
+  local h = 0.0 --: number
+  if type(node.width) == "number" then w = node.width --[[:! number]] else w = bw end
+  if type(node.height) == "number" then h = node.height --[[:! number]] else h = bh end
   local gap = node.gap or 0
 
   if node.id then
@@ -479,14 +498,14 @@ local function compute_grid(node, px, py, bw, bh, result)
     local cy = py + row_offs[ri]
 
     -- Cell width: sum of spanned column sizes + gaps between them.
-    local cw = 0
+    local cw = 0.0 --: number
     for k = ci, ci + cs - 1 do
       cw = cw + (col_sizes[k] or 0)
     end
     cw = cw + gap * (cs - 1)
 
     -- Cell height: sum of spanned row sizes + gaps.
-    local ch = 0
+    local ch = 0.0 --: number
     for k = ri, ri + rs - 1 do
       ch = ch + (row_sizes[k] or 0)
     end
@@ -506,6 +525,7 @@ local function compute_grid(node, px, py, bw, bh, result)
 end
 
 -- compute_node: dispatch to box or grid layout.
+--: (node: LayoutNode, px: number, py: number, bw: number, bh: number, result: { _map: { [string]: { x: number, y: number, width: number, height: number } } }) -> (number, number)
 compute_node = function(node, px, py, bw, bh, result)
   if node._type == "grid" then
     return compute_grid(node, px, py, bw, bh, result)
@@ -524,8 +544,10 @@ function M.compute(root)
   local result = make_result()
   -- Root: if no explicit size, derive from content (pass 0 as available space,
   -- the root will use its own width/height if set).
-  local bw = type(root.width)  == "number" and root.width  or 0
-  local bh = type(root.height) == "number" and root.height or 0
+  local bw = 0.0 --: number
+  local bh = 0.0 --: number
+  if type(root.width)  == "number" then bw = root.width  --[[:! number]] end
+  if type(root.height) == "number" then bh = root.height --[[:! number]] end
   compute_node(root, 0, 0, bw, bh, result)
   return result
 end
