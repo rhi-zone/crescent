@@ -24,7 +24,7 @@ M._tier = "pure"
 
 --:: uint64_t = integer
 
-local U64 = ffi.typeof("uint64_t") --[[:! (integer | number) -> uint64_t]]
+local U64 = ffi.typeof("uint64_t") --[[: any]]
 
 -- ---------------------------------------------------------------------------
 -- Shared sigma permutation (12 rows × 16 entries, 0-based indices)
@@ -85,13 +85,13 @@ end
 --: (uint64_t[], string, uint64_t, uint64_t, boolean) -> nil
 local function b_compress(h, block, t_lo, t_hi, last)
   -- Load message words m[0..15] (0-based in sigma, 1-based in table)
-  local m = {}
+  local m = {} --: { [integer]: integer }
   for i = 0, 15 do
     m[i] = read_u64_le(block, i * 8)
   end
 
   -- Initialize working variables
-  local v = {
+  local v = --[[: { [integer]: integer } ]] {
     h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8],
     B_IV[1], B_IV[2], B_IV[3], B_IV[4],
     bit.bxor(t_lo, B_IV[5]),
@@ -316,12 +316,12 @@ end
 -- t_lo, t_hi: counter (low and high 32-bit words)
 -- last: boolean
 local function s_compress(h, block, t_lo, t_hi, last)
-  local m = {}
+  local m = {} --: { [integer]: integer }
   for i = 0, 15 do
     m[i] = read_u32_le(block, i * 4)
   end
 
-  local v = {
+  local v = --[[: { [integer]: integer } ]] {
     h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8],
     S_IV[1], S_IV[2], S_IV[3], S_IV[4],
     bit.bxor(t_lo, S_IV[5]),
