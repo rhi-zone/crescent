@@ -93,48 +93,274 @@ See `docs/conventions.md` for the full spec. Short version:
 - **Casts: `--[[: T]]` is the checked cast (full subtyping required). `--[[:! T]]` is the overlap-checked force cast (use when narrowing `unknown` to a concrete `T` or `A | B` to `A`). `--[[:! any]]` is rejected — use `--[[: any]]` if you genuinely need an `any` cast.**
 - **`...` vs index signatures** — these are distinct. `...` is a structural subtyping marker: `{ name: string, ... }` accepts any table with at least `name`. It says nothing about reading arbitrary fields. `{ [string]: T }` is an index signature: any string key maps to `T`. Confusing them leads to open types on concrete data objects (wrong) or expecting arbitrary field reads to work on `...`-typed values (also wrong).
 
-## Typechecker capabilities (read before claiming a feature is missing)
+## Typechecker quick reference (learnxinyminutes style)
 
-Cleanup agents repeatedly claim features are missing when they are fully implemented. Before asserting that a typechecker feature is unsupported or requires a project decision, write a 5-line `bin/cr check` repro and run it. "Feature X doesn't work" is a claim that requires the same evidence as "feature X works." The patterns below are implemented, tested, and in active use.
+Before claiming a feature is missing: write a 5-line repro and run `timeout 30 bin/cr check <file>`. Every feature below is implemented, tested, and in active use.
 
-**Discriminated unions** — narrowing works when the discriminant field has a *literal* type. A general `string` field cannot be narrowed.
+### Annotation syntax
 
 ```lua
--- WRONG: both members have type: string — typechecker cannot distinguish them
---:: Block = { type: string, level: integer } | { type: string, content: string }
+local x --: integer                   -- inline: annotates the local declaration
+local function f(x --: string) end    -- param annotation
+--: (string, integer) -> boolean      -- function type (preceding line → applies to next function)
+--:: Foo = { name: string, age: integer }  -- type alias declaration
+--:: declare x = integer              -- global variable declaration
+--:: newtype UserId = integer         -- nominal newtype (not assignable to/from integer)
+--:: module "mylib": { foo: string }  -- declares what require("mylib") returns
+--:: augment string { upper: () -> string }  -- merges fields into an existing type binding
+--:: template                         -- marks next function as a generic template (advanced)
+```
 
--- RIGHT: literal discriminants — narrowing works
---:: Block = { type: "heading", level: integer } | { type: "paragraph", content: string }
+### Primitive types
 
-if block.type == "heading" then
-  local _ = block.level  -- OK: block narrowed to { type: "heading", level: integer }
+```lua
+--: integer   -- LuaJIT integer (32-bit range for literals; promotes to number ops)
+--: number    -- any number (integer or float)
+--: string
+--: boolean
+--: nil
+--: never     -- bottom type; no value inhabits it; union member is dropped
+--: unknown   -- top type; caller must narrow before use (like TS unknown)
+--: any       -- opt-out of checking (like TS any); use only when explicitly documented why
+--: cdata     -- LuaJIT FFI cdata value
+```
+
+### Literal types
+
+```lua
+--: "heading"    -- string literal type
+--: 42           -- integer literal type (integer-valued floats auto-promoted)
+--: 3.14         -- float literal type
+--: true         -- boolean literal type
+```
+
+Literal types are subtypes of their base type: `42 <: integer <: number`.
+
+### Table types
+
+```lua
+-- Closed record: exactly these fields
+--: { name: string, age: integer }
+
+-- Optional field (field may be absent or nil)
+--: { name: string, age?: integer }
+
+-- Readonly field
+--: { readonly id: integer, name: string }
+
+-- Open record: at least these fields; additional fields permitted
+--: { name: string, ... }
+-- Reading an unlisted field on { ..., ... } returns unknown (NOT the indexer type)
+
+-- Index signature: any key of that type maps to the value type
+--: { [string]: integer }
+--: { [integer]: string }
+
+-- Mixed: named fields + indexer
+--: { [integer]: string, n: integer }
+
+-- Array sugar (postfix [])
+--: string[]            -- equivalent to { [number]: string }
+--: Arr<string>         -- equivalent to { [integer]: string, ... } (stdlib alias)
+
+-- Meta slots (metamethods)
+--: { name: string, #__add: (self: unknown, other: unknown) -> unknown }
+
+-- Meta-spread (inherit all meta slots from another type)
+--: { name: string, #...MT }
+```
+
+`...` and `{ [K]: V }` are distinct. `{ name: string, ... }` does NOT mean any string key maps to any type — that is `{ [string]: unknown }`.
+
+### Function types
+
+```lua
+--: () -> nil                        -- no params, no return
+--: (string) -> integer              -- one param, one return
+--: (string, integer) -> boolean     -- two params
+--: (name: string, age: integer) -> boolean  -- named params (for predicate syntax)
+--: (string, ...integer) -> nil      -- varadic: last param ...T means zero or more T
+--: () -> (string, integer)          -- multiple returns
+--: () -> ...(T)                     -- multi-return spread (T may be a tuple type alias)
+--: string -> integer                -- right-associative bare arrow (curried sugar)
+--: function                         -- any function (untyped)
+```
+
+Multi-return union: `(A) -> B | (C) -> D` parses as `(A) -> (B | (C) -> D)`. Wrap: `((A) -> B) | ((C) -> D)`.
+
+### Union and intersection
+
+```lua
+--: string | nil          -- union (|)
+--: A & B                 -- intersection (&): must satisfy both
+--: (A -> nil) & (B -> nil)  -- overloaded function (intersection of functions)
+```
+
+Field access on union: only fields present in ALL members are accessible without narrowing.
+Field access on intersection: a field present in ANY member is accessible.
+
+### Generics
+
+```lua
+-- Basic generic function
+--: <T>(T) -> T
+
+-- Constrained generic (T must structurally satisfy the bound)
+--: <T: { name: string, ... }>(T) -> T
+
+-- Multiple type params
+--: <T, U>(T, U) -> T
+
+-- Generic alias with params
+--:: Pair<A, B> = { first: A, second: B }
+
+-- Generic alias with bounds and defaults
+--:: MyAlias<T: Bound, U = string> = { key: T, val: U }
+```
+
+Type params are instantiated independently per call site. No explicit instantiation syntax — the checker infers from arguments.
+
+### Casts
+
+```lua
+local x = expr --[[: T]]    -- checked cast: T must be a supertype of expr's type
+local x = expr --[[:! T]]   -- force cast: overlap-checked; use when narrowing unknown → T or A|B → A
+-- --[[:! any]] is REJECTED. Use --[[: any]] if you genuinely need an any cast.
+```
+
+### Narrowing forms
+
+All forms the checker recognizes in `if`/`while`/`repeat` test position:
+
+```lua
+if x then end                    -- nil_check: x is non-nil in truthy branch
+if x ~= nil then end             -- nil_check (explicit)
+if x == nil then end             -- nil_check (negative)
+if type(x) == "string" then end  -- type_check: narrows to string
+if type(x) == "number" then end  -- type_check: narrows to number
+if type(x) == "table" then end   -- type_check: narrows to table type
+if x == "literal" then end       -- lit_eq: narrows to literal type
+if x == 42 then end              -- lit_eq: narrows to integer literal
+if x == true then end            -- lit_eq: narrows to boolean literal
+if x.field then end              -- field_presence: x.field is non-nil in truthy branch
+if x.field == "val" then end     -- field_disc: discriminated union narrowing (literal only!)
+if x.field == 42 then end        -- field_disc: numeric discriminant
+if x == Enum.Member then end     -- enum_eq: narrows to enum member type
+if is_str(x) then end            -- guard_check: user-defined type predicate (see below)
+if not x then end                -- negation: inverts any narrowing above
+if a and b then end              -- and: both narrowings apply in truthy branch
+if a or b then end               -- or: either narrowing
+```
+
+Discriminant-field narrowing requires a **literal** discriminant field type. `type: string` cannot be narrowed; `type: "heading"` can. **Aliasing to a local does NOT narrow the object:** `local t = x.field; if t == "v" then` narrows `t`, not `x`.
+
+### Type predicates and assertion functions
+
+```lua
+-- Type predicate: narrows the argument in the caller's scope
+--: (x: unknown) -> x is string
+local function is_str(x) return type(x) == "string" end
+
+-- Assertion function: asserts x is T or throws (narrows after the call)
+--: (x: unknown) -> asserts x is string
+local function assert_str(x)
+  if type(x) ~= "string" then error("expected string") end
 end
 ```
 
-**Aliasing to a local does NOT narrow the object.** `local t = block.type; if t == "heading" then` narrows `t`, not `block`. The guard must test the field directly on the object. Implementation: `field_disc` in `narrow.lua`, `narrow_by_field` in `types.lua`.
-
-**Open records** — `{ field: T, ... }` is fully supported in argument and return positions. The `...` suffix means "at least these fields; additional fields permitted." Do not confuse with an index signature:
+### Match types
 
 ```lua
---: (opts: { name: string, ... }) -> { result: integer, ... }  -- open record: OK
---: (opts: { [string]: string })  -> { [string]: integer }     -- index signature: different meaning
+--:: ReturnOf<F>    = match F { () -> %R => R }               -- extract return type
+--:: ParamOf<F>     = match F { (%P, ...any) -> any => P }    -- extract first param type
+--:: ParamsOf<F>    = match F { (...%P) -> any => P }         -- all params as tuple
+--:: Tail<F>        = match F { (any, ...%P) -> any => P }    -- params after first
+
+-- Table field distribution (result is a union of the expression per field)
+--:: Keys<T>        = match T { { ...[%K]: %V } => K }
+--:: Values<T>      = match T { { ...[%K]: %V } => V }
+--:: PairsReturn<T> = match T { { ...[%K]: %V } => (K, V) }
+
+-- Conditional type
+--:: IsString<T>    = match T { string => true, _ => false }
+
+-- Pattern captures use %Name in pattern position, bare Name in result position
+-- _ is a wildcard (always matches, no binding)
+-- Bare names in pattern position are concrete type lookups (error if not in scope)
 ```
 
-Reading an unlisted field on an open record returns `unknown` (not `T`). This is pervasive: `Arr<T> = { [integer]: T, ... }` in stdlib_types.lua.
+`match` arm patterns: primitives, unions, intersections, function types `() -> %R`, `(...%P) -> T`, `(A, ...%P) -> T`, table types `{ field: T }`, `{ [K]: %V }`, `{ ...[%K]: %V }`, `{ field: T, ...%Rest }`, `{ #...%M }`.
 
-**Generics** — `<T>(x: T) -> T` and constrained generics `<T: Bound>(x: T) -> T` are fully implemented and instantiated per call site. No project decision is needed.
+### Tuple and spread types
 
 ```lua
---: <T>(T) -> T
-local function identity(x) return x end
-
---: <T: { name: string, ... }>(T) -> T
-local function with_name(x) return x end  -- T must have a name field
+--:: PcallReturn<F> = match F { (...%P) -> %R => (true, ...R) | (false, string) }
+-- (true, ...R): spreads R's elements into the tuple position.
+-- R = integer        → (true, integer)
+-- R = (A, B)         → (true, A, B)
+-- R = never (void)   → (true)
 ```
 
-Reference usage: `lib/iter/init.lua` (17 annotated sites), `lib/type/init.lua` (8 sites), `lib/parse/init.lua`, `lib/html/init.lua`. Parser: `ann.lua` lines 864–919. Constraint generation: `constrain.lua` line 643+.
+### Stdlib built-in aliases (no import needed)
 
-**Evidence rule** — before claiming a typechecker feature is missing, write and run the repro: `timeout 30 bin/cr check <file>`. A claim grounded in code-tracing alone (without actual output) is a hypothesis, not a finding.
+```lua
+Arr<T>           -- { [integer]: T, ... }
+Ptr<T>           -- T & { [0]: T }
+Ctype<T>         -- $Opaque<T> (FFI ctype wrapper)
+PairsReturn<T>   -- match T { { ...[%K]: %V } => (K, V) }
+IpairsReturn<T>  -- match T { { ...[%K]: %V } => match K { number => (integer, V), _ => never } }
+Keys<T>          -- match T { { ...[%K]: %V } => K }
+Values<T>        -- match T { { ...[%K]: %V } => V }
+Open<T>          -- match T { { ...%Rest } => { ...Rest, ... } }   (open version of T)
+Closed<T>        -- match T { { ...%Rest } => { ...Rest } }        (closed version of T)
+MetaOf<T>        -- match T { { #...%M } => M, _ => nil }         (metatable type)
+```
+
+### Permanent intrinsics ($-prefixed)
+
+```lua
+$Require<T>          -- module system; needs literal type propagation through generics
+$Opaque<T>           -- nominal identity; $Opaque<T, U> with optional exposed view U
+$Opaque<T, U>        -- opaque with view: external sees U, internal treats as T
+$FfiC                -- closed table built from ffi.cdef(...) call sites in the file
+$GlobalScope         -- closed table mirroring all --:: declare globals; used for _G
+$Throw<T>            -- type-level error (diagnostic side effect)
+$Catch<T, Default>   -- type-level pcall; returns Default if T throws
+$EachField<T, F>     -- per-field flatMap with flag access; F is a named alias
+$PatternReturn<P>    -- return type of string.match/gmatch given literal pattern P
+$FindReturn<P>       -- return type of string.find given literal pattern P
+```
+
+Do not add new `$` intrinsics — extend `match` patterns instead.
+
+### Indexed access types
+
+```lua
+--:: T = { name: string, age: integer }
+--:: Name = T["name"]   -- string (indexed access into a table type by string literal key)
+--:: Val  = Arr<integer>["n"]  -- integer (index into named field)
+```
+
+### Newtype (nominal types)
+
+```lua
+--:: newtype UserId = integer
+-- UserId is NOT assignable to integer and vice versa.
+-- Use --:: unseal UserId to rebind to inner type in a scope.
+```
+
+### typeof
+
+```lua
+local point = { x = 0.0, y = 0.0 }
+--:: PointType = typeof point   -- captures inferred type of `point` binding
+```
+
+### ANN_TYPE_ARGS (explicit type instantiation at call site)
+
+```lua
+local x = f() --:<integer>   -- force-instantiate generic f with T=integer
+```
 
 ## Implementation Patterns
 
