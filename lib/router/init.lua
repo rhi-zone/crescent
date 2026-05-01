@@ -9,7 +9,7 @@ local NODE_STATIC = 1
 local NODE_PARAM = 2
 local NODE_WILDCARD = 3
 
---:: Node = { segment: string, kind: number, children: { Node }, handlers: { [string]: unknown }, param_name: string | nil, prefix: string | nil }
+--:: Node = { segment: string, kind: number, children: { [number]: Node }, handlers: { [string]: unknown }, param_name: string | nil, prefix: string | nil }
 
 --: (segment: string | nil, kind: number | nil, param_name: string | nil) -> Node
 local function new_node(segment, kind, param_name)
@@ -19,31 +19,33 @@ local function new_node(segment, kind, param_name)
 		children = {},
 		handlers = {},
 		param_name = param_name,
+		prefix = nil,
 	}
 end
 
---- Parse a path into segments. Each segment is {kind, text, param_name?}.
+--- Parse a path into segments. Each segment is {text, kind, param_name?, prefix?}.
 --- "/users/:id/posts/*rest" -> {{"users",STATIC}, {"id",PARAM,"id"}, {"posts",STATIC}, {"rest",WILDCARD,"rest"}}
---: (path: string) -> { { string, number, string | nil } }
+--:: Segment = { text: string, kind: number, param_name: string | nil, prefix: string | nil }
+--: (path: string) -> ({ [number]: Segment }, number)
 local function parse_segments(path)
-	local segs = {}
+	local segs = {} --[[: { [number]: Segment }]]
 	local n = 0
 	for part in path:gmatch("[^/]+") do
 		if part:sub(1, 1) == "*" then
 			n = n + 1
-			segs[n] = { part:sub(2), NODE_WILDCARD, part:sub(2) }
+			segs[n] = { text = part:sub(2), kind = NODE_WILDCARD, param_name = part:sub(2), prefix = nil }
 		elseif part:sub(1, 1) == ":" then
 			n = n + 1
-			segs[n] = { part:sub(2), NODE_PARAM, part:sub(2) }
+			segs[n] = { text = part:sub(2), kind = NODE_PARAM, param_name = part:sub(2), prefix = nil }
 		else
 			-- Check for inline params: "v:version" -> split into static prefix + param
-			local prefix, pname = part:match("^(.-):(.*)")
-			if prefix and #prefix > 0 then
+			local seg_prefix, pname = part:match("^(.-):(.*)")
+			if seg_prefix and #seg_prefix > 0 then
 				n = n + 1
-				segs[n] = { part, NODE_PARAM, pname, prefix }
+				segs[n] = { text = part, kind = NODE_PARAM, param_name = pname, prefix = seg_prefix }
 			else
 				n = n + 1
-				segs[n] = { part, NODE_STATIC }
+				segs[n] = { text = part, kind = NODE_STATIC, param_name = nil, prefix = nil }
 			end
 		end
 	end
@@ -66,14 +68,15 @@ local function find_or_create_child(node, seg_text, kind, param_name, prefix)
 	return child
 end
 
---:: MethodFn = (self: Router, path: string, handler: unknown) -> (true | nil, string | nil)
---:: Group = { add: (self: Group, method: string, path: string, handler: unknown) -> (true | nil, string | nil), get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn, group: (self: Group, prefix: string, fn: (g: Group) -> nil) -> nil }
---:: Router = { root: Node, add: (self: Router, method: string, path: string, handler: unknown) -> (true | nil, string | nil), find: (self: Router, method: string, path: string) -> { handler: unknown, params: { [string]: string } } | nil, routes: (self: Router) -> { { method: string, path: string, handler: unknown } }, group: (self: Router, prefix: string, fn: (g: Group) -> nil) -> nil, get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn }
+--:: RouterInstance = { root: Node, ... }
+--:: MethodFn = (self: RouterInstance, path: string, handler: unknown) -> (boolean | nil, string | nil)
+--:: Group = { add: (self: Group, method: string, path: string, handler: unknown) -> (boolean | nil, string | nil), get: MethodFn, post: MethodFn, put: MethodFn, delete: MethodFn, patch: MethodFn, head: MethodFn, options: MethodFn, group: (self: Group, prefix: string, fn: (g: Group) -> nil) -> nil }
+--:: Router = RouterInstance
 
 local Router = {}
 Router.__index = Router
 
---: (method: string, path: string, handler: unknown) -> (true | nil, string | nil)
+--: (self: RouterInstance, method: string, path: string, handler: unknown) -> (boolean | nil, string | nil)
 function Router:add(method, path, handler)
 	if type(method) ~= "string" or #method == 0 then
 		return nil, "method must be a non-empty string"
@@ -99,7 +102,7 @@ function Router:add(method, path, handler)
 	local node = self.root
 	for i = 1, n do
 		local seg = segs[i]
-		node = find_or_create_child(node, seg[1], seg[2], seg[3], seg[4])
+		node = find_or_create_child(node, seg.text, seg.kind, seg.param_name, seg.prefix)
 	end
 
 	if node.handlers[method] then
@@ -110,7 +113,7 @@ function Router:add(method, path, handler)
 end
 
 --- Match path segments against the radix tree.
---: (method: string, path: string) -> { handler: unknown, params: { [string]: string } } | nil
+--: (self: RouterInstance, method: string, path: string) -> { handler: unknown, params: { [string]: string } } | nil
 function Router:find(method, path)
 	method = method:upper()
 
@@ -156,15 +159,15 @@ function Router:find(method, path)
 				if c.kind == NODE_PARAM then
 					if c.prefix then
 						-- Inline param: "v:version" matches "v1" -> version="1"
-						local prefix = c.prefix
+						local prefix = (c.prefix --[[:! string]])
 						if part:sub(1, #prefix) == prefix then
-							params[c.param_name] = part:sub(#prefix + 1)
+							params[c.param_name or ""] = part:sub(#prefix + 1)
 							node = c
 							matched = true
 							break
 						end
 					else
-						params[c.param_name] = part
+						params[c.param_name or ""] = part
 						node = c
 						matched = true
 						break
@@ -183,7 +186,7 @@ function Router:find(method, path)
 					for k = i, np do
 						rest[#rest + 1] = parts[k]
 					end
-					params[c.param_name] = table.concat(rest, "/")
+					params[c.param_name or ""] = table.concat(rest, "/")
 					local h = c.handlers[method]
 					if h then
 						return { handler = h, params = params }
@@ -202,21 +205,23 @@ function Router:find(method, path)
 end
 
 --- Collect all registered routes.
---: () -> { { method: string, path: string, handler: unknown } }
+--: (self: RouterInstance) -> { { method: string, path: string, handler: unknown } }
 function Router:routes()
 	local result = {}
+	--: (node: Node, prefix: string) -> nil
 	local function walk(node, prefix)
 		local path
 		if node == self.root then
 			path = ""
 		elseif node.kind == NODE_PARAM then
+			local pname = node.param_name or ""
 			if node.prefix then
-				path = prefix .. "/" .. node.prefix .. ":" .. node.param_name
+				path = prefix .. "/" .. node.prefix .. ":" .. pname
 			else
-				path = prefix .. "/:" .. node.param_name
+				path = prefix .. "/:" .. pname
 			end
 		elseif node.kind == NODE_WILDCARD then
-			path = prefix .. "/*" .. node.param_name
+			path = prefix .. "/*" .. (node.param_name or "")
 		else
 			path = prefix .. "/" .. node.segment
 		end
@@ -238,7 +243,7 @@ function Router:routes()
 end
 
 --- Group routes under a common prefix.
---: (prefix: string, fn: (g: Group) -> nil) -> nil
+--: (self: RouterInstance, prefix: string, fn: (g: Group) -> nil) -> nil
 function Router:group(prefix, fn)
 	local router_self = self
 	local g = {}
@@ -284,7 +289,7 @@ end
 function M.new()
 	local r = setmetatable({
 		root = new_node("", NODE_STATIC),
-	}, Router)
+	}, Router) --[[: Router]]
 	return r
 end
 
