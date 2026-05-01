@@ -3,6 +3,13 @@ if not package.path:find("./?/init.lua", 1, true) then package.path = "./?/init.
 local M = {}
 M._tier = "pure"
 
+--:: Vec2 = { x: number, y: number }
+--:: Vec3 = { x: number, y: number, z: number }
+--:: Vec4 = { x: number, y: number, z: number, w: number }
+--:: Quat = { x: number, y: number, z: number, w: number }
+--:: Mat4 = { [integer]: number }
+--:: Aabb = { min: Vec3, max: Vec3 }
+
 local sqrt = math.sqrt
 local sin  = math.sin
 local cos  = math.cos
@@ -23,49 +30,65 @@ function M.vec2(x, y)
   return setmetatable({ x = x or 0, y = y or 0 }, vec2_mt)
 end
 
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:add(o)   return M.vec2(self.x + o.x, self.y + o.y) end
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:sub(o)   return M.vec2(self.x - o.x, self.y - o.y) end
+--: (Vec2, number) -> Vec2
 function vec2_mt:mul(s)   return M.vec2(self.x * s,   self.y * s)   end
+--: (Vec2, number) -> Vec2
 function vec2_mt:div(s)   return M.vec2(self.x / s,   self.y / s)   end
+--: (Vec2, Vec2) -> number
 function vec2_mt:dot(o)   return self.x * o.x + self.y * o.y        end
+--: (Vec2, Vec2) -> number
 function vec2_mt:cross(o) return self.x * o.y - self.y * o.x        end  -- scalar
+--: (Vec2) -> number
 function vec2_mt:len_sq() return self.x * self.x + self.y * self.y  end
+--: (Vec2) -> number
 function vec2_mt:len()    return sqrt(self:len_sq())                 end
 
+--: (Vec2) -> Vec2
 function vec2_mt:normalize()
   local l = self:len()
   if l == 0 then return M.vec2(0, 0) end
   return M.vec2(self.x / l, self.y / l)
 end
 
+--: (Vec2, Vec2) -> number
 function vec2_mt:distance(o)
   local dx, dy = self.x - o.x, self.y - o.y
   return sqrt(dx*dx + dy*dy)
 end
 
+--: (Vec2, Vec2) -> number
 function vec2_mt:distance_sq(o)
   local dx, dy = self.x - o.x, self.y - o.y
   return dx*dx + dy*dy
 end
 
+--: (Vec2, Vec2, number) -> Vec2
 function vec2_mt:lerp(o, t)
   return M.vec2(self.x + (o.x - self.x) * t, self.y + (o.y - self.y) * t)
 end
 
+--: (Vec2) -> number
 function vec2_mt:angle()
   return atan2(self.y, self.x)
 end
 
+--: (Vec2, number) -> Vec2
 function vec2_mt:rotate(a)
   local c, s = cos(a), sin(a)
   return M.vec2(self.x * c - self.y * s, self.x * s + self.y * c)
 end
 
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:reflect(n)
   local d = 2 * self:dot(n)
   return M.vec2(self.x - d * n.x, self.y - d * n.y)
 end
 
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:project(o)
   local d = o:dot(o)
   if d == 0 then return M.vec2(0, 0) end
@@ -73,30 +96,40 @@ function vec2_mt:project(o)
   return M.vec2(o.x * s, o.y * s)
 end
 
+--: (Vec2) -> Vec2
 function vec2_mt:perp()
   return M.vec2(-self.y, self.x)
 end
 
+--: (Vec2) -> Vec2
 function vec2_mt:floor()
   return M.vec2(floor(self.x), floor(self.y))
 end
 
+--: (Vec2) -> Vec2
 function vec2_mt:ceil()
   return M.vec2(ceil(self.x), ceil(self.y))
 end
 
+--: (Vec2) -> Vec2
 function vec2_mt:round()
   return M.vec2(floor(self.x + 0.5), floor(self.y + 0.5))
 end
 
+--: (Vec2, Vec2) -> boolean
 function vec2_mt:eq(o)
   return self.x == o.x and self.y == o.y
 end
 
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:__add(o)      return self:add(o)           end
+--: (Vec2, Vec2) -> Vec2
 function vec2_mt:__sub(o)      return self:sub(o)           end
+--: (Vec2) -> Vec2
 function vec2_mt:__unm()       return M.vec2(-self.x, -self.y) end
+--: (Vec2, Vec2) -> boolean
 function vec2_mt:__eq(o)       return self:eq(o)            end
+--: (Vec2) -> string
 function vec2_mt:__tostring()
   return "vec2(" .. self.x .. ", " .. self.y .. ")"
 end
@@ -119,14 +152,22 @@ function M.vec3(x, y, z)
   return setmetatable({ x = x or 0, y = y or 0, z = z or 0 }, vec3_mt)
 end
 
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:add(o)   return M.vec3(self.x+o.x, self.y+o.y, self.z+o.z)   end
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:sub(o)   return M.vec3(self.x-o.x, self.y-o.y, self.z-o.z)   end
+--: (Vec3, number) -> Vec3
 function vec3_mt:mul(s)   return M.vec3(self.x*s,   self.y*s,   self.z*s)      end
+--: (Vec3, number) -> Vec3
 function vec3_mt:div(s)   return M.vec3(self.x/s,   self.y/s,   self.z/s)      end
+--: (Vec3, Vec3) -> number
 function vec3_mt:dot(o)   return self.x*o.x + self.y*o.y + self.z*o.z          end
+--: (Vec3) -> number
 function vec3_mt:len_sq() return self.x*self.x + self.y*self.y + self.z*self.z end
+--: (Vec3) -> number
 function vec3_mt:len()    return sqrt(self:len_sq())                            end
 
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:cross(o)
   return M.vec3(
     self.y * o.z - self.z * o.y,
@@ -135,12 +176,14 @@ function vec3_mt:cross(o)
   )
 end
 
+--: (Vec3) -> Vec3
 function vec3_mt:normalize()
   local l = self:len()
   if l == 0 then return M.vec3(0, 0, 0) end
   return M.vec3(self.x/l, self.y/l, self.z/l)
 end
 
+--: (Vec3, Vec3, number) -> Vec3
 function vec3_mt:lerp(o, t)
   return M.vec3(
     self.x + (o.x - self.x) * t,
@@ -149,21 +192,25 @@ function vec3_mt:lerp(o, t)
   )
 end
 
+--: (Vec3, Vec3) -> number
 function vec3_mt:distance(o)
   local dx, dy, dz = self.x-o.x, self.y-o.y, self.z-o.z
   return sqrt(dx*dx + dy*dy + dz*dz)
 end
 
+--: (Vec3, Vec3) -> number
 function vec3_mt:distance_sq(o)
   local dx, dy, dz = self.x-o.x, self.y-o.y, self.z-o.z
   return dx*dx + dy*dy + dz*dz
 end
 
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:reflect(n)
   local d = 2 * self:dot(n)
   return M.vec3(self.x - d*n.x, self.y - d*n.y, self.z - d*n.z)
 end
 
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:project(o)
   local d = o:dot(o)
   if d == 0 then return M.vec3(0, 0, 0) end
@@ -171,14 +218,20 @@ function vec3_mt:project(o)
   return M.vec3(o.x*s, o.y*s, o.z*s)
 end
 
+--: (Vec3, Vec3) -> boolean
 function vec3_mt:eq(o)
   return self.x == o.x and self.y == o.y and self.z == o.z
 end
 
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:__add(o)  return self:add(o)                    end
+--: (Vec3, Vec3) -> Vec3
 function vec3_mt:__sub(o)  return self:sub(o)                    end
+--: (Vec3) -> Vec3
 function vec3_mt:__unm()   return M.vec3(-self.x, -self.y, -self.z) end
+--: (Vec3, Vec3) -> boolean
 function vec3_mt:__eq(o)   return self:eq(o)                     end
+--: (Vec3) -> string
 function vec3_mt:__tostring()
   return "vec3(" .. self.x .. ", " .. self.y .. ", " .. self.z .. ")"
 end
@@ -219,6 +272,7 @@ end
 local function mat4_get(m, col, row) return m[col*4 + row + 1] end
 local function mat4_set(m, col, row, v) m[col*4 + row + 1] = v end
 
+--: (Mat4, Mat4) -> Mat4
 function mat4_mt:mul(o)
   local r = {}
   for col = 0, 3 do
@@ -233,6 +287,7 @@ function mat4_mt:mul(o)
   return setmetatable(r, mat4_mt)
 end
 
+--: (Mat4, number | { [integer]: number }, number | nil, number | nil, number | nil) -> (number, number, number, number)
 function mat4_mt:mul_vec4(x, y, z, w)
   -- accepts (x,y,z,w) or a table {x,y,z,w}
   local vx, vy, vz, vw
@@ -249,6 +304,7 @@ function mat4_mt:mul_vec4(x, y, z, w)
     m[4]*vx + m[8]*vy + m[12]*vz + m[16]*vw
 end
 
+--: (Mat4) -> Mat4
 function mat4_mt:transpose()
   local m = self
   return setmetatable({
@@ -259,6 +315,7 @@ function mat4_mt:transpose()
   }, mat4_mt)
 end
 
+--: (Mat4) -> number
 function mat4_mt:determinant()
   local m = self
   local a00,a01,a02,a03 = m[1],m[2],m[3],m[4]
@@ -281,6 +338,7 @@ function mat4_mt:determinant()
   return b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06
 end
 
+--: (Mat4) -> (Mat4 | nil, string | nil)
 function mat4_mt:inverse()
   local m = self
   local a00,a01,a02,a03 = m[1],m[2],m[3],m[4]
@@ -322,8 +380,10 @@ function mat4_mt:inverse()
   }, mat4_mt)
 end
 
+--: (Mat4, Mat4) -> Mat4
 function mat4_mt:__mul(o) return self:mul(o) end
 
+--: (Mat4) -> string
 function mat4_mt:__tostring()
   local m = self
   return string.format(
@@ -449,34 +509,41 @@ function M.quat_identity()
   return M.quat(1, 0, 0, 0)
 end
 
+--: (Quat) -> number
 function quat_mt:len_sq()
   return self.w*self.w + self.x*self.x + self.y*self.y + self.z*self.z
 end
 
+--: (Quat) -> number
 function quat_mt:len()
   return sqrt(self:len_sq())
 end
 
+--: (Quat) -> Quat
 function quat_mt:normalize()
   local l = self:len()
   if l == 0 then return M.quat(1, 0, 0, 0) end
   return M.quat(self.w/l, self.x/l, self.y/l, self.z/l)
 end
 
+--: (Quat) -> Quat
 function quat_mt:conjugate()
   return M.quat(self.w, -self.x, -self.y, -self.z)
 end
 
+--: (Quat) -> (Quat | nil, string | nil)
 function quat_mt:inverse()
   local lsq = self:len_sq()
   if lsq == 0 then return nil, "zero quaternion has no inverse" end
   return M.quat(self.w/lsq, -self.x/lsq, -self.y/lsq, -self.z/lsq)
 end
 
+--: (Quat, Quat) -> number
 function quat_mt:dot(o)
   return self.w*o.w + self.x*o.x + self.y*o.y + self.z*o.z
 end
 
+--: (Quat, Quat) -> Quat
 function quat_mt:mul(o)
   local aw, ax, ay, az = self.w, self.x, self.y, self.z
   local bw, bx, by, bz = o.w,   o.x,   o.y,   o.z
@@ -488,6 +555,7 @@ function quat_mt:mul(o)
   )
 end
 
+--: (Quat, Quat, number) -> Quat
 function quat_mt:slerp(o, t)
   local dot = self:dot(o)
   -- clamp dot to [-1,1]
@@ -521,6 +589,7 @@ function quat_mt:slerp(o, t)
   )
 end
 
+--: (Quat) -> Mat4
 function quat_mt:to_mat4()
   local w, x, y, z = self.w, self.x, self.y, self.z
   local x2, y2, z2 = x+x, y+y, z+z
@@ -535,6 +604,7 @@ function quat_mt:to_mat4()
   }, mat4_mt)
 end
 
+--: (Quat) -> (Vec3, number)
 function quat_mt:to_axis_angle()
   local q = self:normalize()
   local w = q.w
@@ -605,18 +675,21 @@ function M.aabb(min_v, max_v)
   return setmetatable({ min = min_v, max = max_v }, aabb_mt)
 end
 
+--: (Aabb, Vec3) -> boolean
 function aabb_mt:contains(p)
   return p.x >= self.min.x and p.x <= self.max.x
      and p.y >= self.min.y and p.y <= self.max.y
      and p.z >= self.min.z and p.z <= self.max.z
 end
 
+--: (Aabb, Aabb) -> boolean
 function aabb_mt:intersects(o)
   return self.min.x <= o.max.x and self.max.x >= o.min.x
      and self.min.y <= o.max.y and self.max.y >= o.min.y
      and self.min.z <= o.max.z and self.max.z >= o.min.z
 end
 
+--: (Aabb, Aabb) -> Aabb
 function aabb_mt:union(o)
   return M.aabb(
     M.vec3(min(self.min.x, o.min.x), min(self.min.y, o.min.y), min(self.min.z, o.min.z)),
@@ -624,6 +697,7 @@ function aabb_mt:union(o)
   )
 end
 
+--: (Aabb) -> Vec3
 function aabb_mt:center()
   return M.vec3(
     (self.min.x + self.max.x) * 0.5,
@@ -632,6 +706,7 @@ function aabb_mt:center()
   )
 end
 
+--: (Aabb) -> Vec3
 function aabb_mt:size()
   return M.vec3(
     self.max.x - self.min.x,
