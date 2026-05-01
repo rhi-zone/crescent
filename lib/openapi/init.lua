@@ -10,9 +10,9 @@ local json = require("lib.format.json")
 local M = {}
 
 --:: openapi_doc = { openapi: string, info: { [string]: unknown }, paths?: { [string]: { [string]: unknown } }, components?: { [string]: unknown }, ... }
---:: openapi_schema = { [string]: unknown }
+--:: openapi_schema = { type?: string, allOf?: openapi_schema[], anyOf?: openapi_schema[], oneOf?: openapi_schema[], enum?: unknown[], minLength?: integer, maxLength?: integer, pattern?: string, minimum?: number, maximum?: number, required?: string[], properties?: { [string]: openapi_schema }, additionalProperties?: boolean, items?: openapi_schema, minItems?: integer, maxItems?: integer, ... }
 --:: openapi_error = { path: string, message: string }
---:: openapi_operation = { method: string, path: string, operationId?: string, parameters?: { [integer]: unknown }, requestBody?: { [string]: unknown }, responses?: { [string]: unknown }, summary?: string, description?: string, tags?: string[] }
+--:: openapi_operation = { method: string, path: string, operationId: string | nil, parameters: { [integer]: unknown } | nil, requestBody: { [string]: unknown } | nil, responses: { [string]: unknown } | nil, summary: string | nil, description: string | nil, tags: string[] | nil }
 --:: openapi_spec = { _doc: openapi_doc, ... }
 --:: openapi_request = { method?: string, path?: string, headers?: { [string]: string }, query?: { [string]: string }, body?: unknown, ... }
 --:: openapi_response = { headers?: { [string]: string }, body?: unknown, ... }
@@ -87,10 +87,12 @@ function M.validate_schema(value, schema, path)
 	path = path or ""
 	local errors = {}
 
+	--: (string, string) -> ()
 	local function add_err(p, msg)
 		errors[#errors + 1] = { path = p, message = msg }
 	end
 
+	--: (unknown, openapi_schema, string) -> ()
 	local function validate(val, sch, p)
 		if type_of(sch) ~= "table" then return end
 
@@ -140,11 +142,12 @@ function M.validate_schema(value, schema, path)
 			elseif st == "number" then
 				ok = vt == "number"
 			elseif st == "integer" then
-				ok = vt == "number" and val == floor(val)
+				ok = vt == "number" and val == floor(--[[:! number]] val)
 			elseif st == "boolean" then
 				ok = vt == "boolean"
 			elseif st == "array" then
-				ok = vt == "table" and (#val > 0 or next(val) == nil)
+				local tval = --[[:! { [integer]: unknown }]] val
+				ok = vt == "table" and (#tval > 0 or next(tval) == nil)
 			elseif st == "object" then
 				ok = vt == "table"
 			elseif st == "null" then
@@ -169,14 +172,15 @@ function M.validate_schema(value, schema, path)
 
 		-- string constraints
 		if type_of(val) == "string" then
-			if sch.minLength and #val < sch.minLength then
-				add_err(p, "string length " .. #val .. " is less than minLength " .. sch.minLength)
+			local sval = --[[:! string]] val
+			if sch.minLength and #sval < sch.minLength then
+				add_err(p, "string length " .. #sval .. " is less than minLength " .. sch.minLength)
 			end
-			if sch.maxLength and #val > sch.maxLength then
-				add_err(p, "string length " .. #val .. " exceeds maxLength " .. sch.maxLength)
+			if sch.maxLength and #sval > sch.maxLength then
+				add_err(p, "string length " .. #sval .. " exceeds maxLength " .. sch.maxLength)
 			end
 			if sch.pattern then
-				if not val:find(sch.pattern) then
+				if not sval:find(sch.pattern) then
 					add_err(p, "string does not match pattern")
 				end
 			end
@@ -184,20 +188,22 @@ function M.validate_schema(value, schema, path)
 
 		-- numeric constraints
 		if type_of(val) == "number" then
-			if sch.minimum and val < sch.minimum then
-				add_err(p, "value " .. val .. " is less than minimum " .. sch.minimum)
+			local nval = --[[:! number]] val
+			if sch.minimum and nval < sch.minimum then
+				add_err(p, "value " .. nval .. " is less than minimum " .. sch.minimum)
 			end
-			if sch.maximum and val > sch.maximum then
-				add_err(p, "value " .. val .. " exceeds maximum " .. sch.maximum)
+			if sch.maximum and nval > sch.maximum then
+				add_err(p, "value " .. nval .. " exceeds maximum " .. sch.maximum)
 			end
 		end
 
 		-- object constraints
 		if type_of(val) == "table" and sch.type == "object" then
+			local tval = --[[:! { [string]: unknown }]] val
 			-- required
 			if sch.required then
 				for _, rname in ipairs(sch.required) do
-					if val[rname] == nil then
+					if tval[rname] == nil then
 						add_err(p .. "/" .. rname, "required field missing")
 					end
 				end
@@ -205,14 +211,14 @@ function M.validate_schema(value, schema, path)
 			-- properties
 			if sch.properties then
 				for pname, pschema in pairs(sch.properties) do
-					if val[pname] ~= nil then
-						validate(val[pname], pschema, p .. "/" .. pname)
+					if tval[pname] ~= nil then
+						validate(tval[pname], pschema, p .. "/" .. pname)
 					end
 				end
 			end
 			-- additionalProperties
 			if sch.additionalProperties == false and sch.properties then
-				for k in pairs(val) do
+				for k in pairs(tval) do
 					if type_of(k) == "string" and not sch.properties[k] then
 						add_err(p .. "/" .. k, "additional property not allowed")
 					end
@@ -222,16 +228,17 @@ function M.validate_schema(value, schema, path)
 
 		-- array constraints
 		if type_of(val) == "table" and sch.type == "array" then
+			local aval = --[[:! { [integer]: unknown }]] val
 			if sch.items then
-				for i = 1, #val do
-					validate(val[i], sch.items, p .. "/" .. (i - 1))
+				for i = 1, #aval do
+					validate(aval[i], sch.items, p .. "/" .. (i - 1))
 				end
 			end
-			if sch.minItems and #val < sch.minItems then
-				add_err(p, "array has " .. #val .. " items, minimum is " .. sch.minItems)
+			if sch.minItems and #aval < sch.minItems then
+				add_err(p, "array has " .. #aval .. " items, minimum is " .. sch.minItems)
 			end
-			if sch.maxItems and #val > sch.maxItems then
-				add_err(p, "array has " .. #val .. " items, maximum is " .. sch.maxItems)
+			if sch.maxItems and #aval > sch.maxItems then
+				add_err(p, "array has " .. #aval .. " items, maximum is " .. sch.maxItems)
 			end
 		end
 	end
@@ -305,16 +312,17 @@ function Spec:operations()
 	for path, path_item in pairs(self._doc.paths) do
 		for method, op in pairs(path_item) do
 			if HTTP_METHODS[method] and type_of(op) == "table" then
+				local top = --[[:! { [string]: unknown }]] op
 				result[#result + 1] = {
 					method = method,
 					path = path,
-					operationId = op.operationId,
-					parameters = op.parameters,
-					requestBody = op.requestBody,
-					responses = op.responses,
-					summary = op.summary,
-					description = op.description,
-					tags = op.tags,
+					operationId = --[[:! string | nil]] top.operationId,
+					parameters = --[[:! { [integer]: unknown } | nil]] top.parameters,
+					requestBody = --[[:! { [string]: unknown } | nil]] top.requestBody,
+					responses = --[[:! { [string]: unknown } | nil]] top.responses,
+					summary = --[[:! string | nil]] top.summary,
+					description = --[[:! string | nil]] top.description,
+					tags = --[[:! string[] | nil]] top.tags,
 				}
 			end
 		end
@@ -327,17 +335,18 @@ function Spec:operation(operation_id)
 	if not self._doc.paths then return nil end
 	for path, path_item in pairs(self._doc.paths) do
 		for method, op in pairs(path_item) do
-			if HTTP_METHODS[method] and type_of(op) == "table" and op.operationId == operation_id then
+			local top = --[[:! { [string]: unknown }]] op
+			if HTTP_METHODS[method] and type_of(op) == "table" and top.operationId == operation_id then
 				return {
 					method = method,
 					path = path,
-					operationId = op.operationId,
-					parameters = op.parameters,
-					requestBody = op.requestBody,
-					responses = op.responses,
-					summary = op.summary,
-					description = op.description,
-					tags = op.tags,
+					operationId = --[[:! string | nil]] top.operationId,
+					parameters = --[[:! { [integer]: unknown } | nil]] top.parameters,
+					requestBody = --[[:! { [string]: unknown } | nil]] top.requestBody,
+					responses = --[[:! { [string]: unknown } | nil]] top.responses,
+					summary = --[[:! string | nil]] top.summary,
+					description = --[[:! string | nil]] top.description,
+					tags = --[[:! string[] | nil]] top.tags,
 				}
 			end
 		end
