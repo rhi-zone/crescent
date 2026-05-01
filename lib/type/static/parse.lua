@@ -82,6 +82,12 @@ function M.parse(source, filename, pool)
     -------------------------------------------------------------------
     -- Helper: parse parameter list, body, and closing 'end'.
     -- Params are intern IDs (safe for direct mark/push/since).
+    -- Inline param type annotations (e.g. `function(x --[[: string]])`) are NOT
+    -- supported here by design: (1) --[[: T]] is expression-cast syntax, not a
+    -- declaration; (2) generics require <T> at the function level, not per-param;
+    -- (3) overloads require multiple preceding-line --: annotations. The
+    -- preceding-line form --: (T, U) -> R is the only annotation that can express
+    -- all three, so it is the sole supported form.
     -------------------------------------------------------------------
 
     local function parse_params_and_body(has_self)
