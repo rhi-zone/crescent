@@ -101,8 +101,14 @@ Before claiming a feature is missing: write a 5-line repro and run `timeout 30 b
 
 ```lua
 local x --: integer                   -- inline: annotates the local declaration
-local function f(x --: string) end    -- param annotation
+--: (string) -> nil                   -- param annotation: annotate whole function type on preceding line
+local function f(                     -- or put each param on its own line:
+  x, --: string
+  y  --: integer
+) end
 --: (string, integer) -> boolean      -- function type (preceding line → applies to next function)
+-- WARNING: `function(x --: string)` is INVALID — `--` starts a line comment, eating `)` and beyond.
+-- Always annotate params via preceding-line function type or multiline param style above.
 --:: Foo = { name: string, age: integer }  -- type alias declaration
 --:: declare x = integer              -- global variable declaration
 --:: newtype UserId = integer         -- nominal newtype (not assignable to/from integer)
