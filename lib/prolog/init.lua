@@ -21,9 +21,11 @@ local function anon_var()
   return { kind = "var", name = "_" .. _anon_id }
 end
 
+--:: PrologTerm = { kind: string, ... }
 local function mk_atom(n)  return { kind = "atom", name = n } end
 local function mk_num(v)   return { kind = "num",  value = v } end
 local function mk_var(n)   return { kind = "var",  name = n } end
+--: (string, { [integer]: PrologTerm }) -> PrologTerm
 local function mk_comp(f, args) return { kind = "comp", functor = f, args = args } end
 
 local NIL_ATOM = mk_atom("[]")
@@ -48,7 +50,10 @@ local function parse_error(msg, src, pos)
 end
 
 -- Lexer
+--:: PrologToken = { type: string, value: string | number | nil, pos: integer }
+--: (string) -> { [integer]: PrologToken }
 local function lex(src)
+  --: { [integer]: PrologToken }
   local tokens = {}
   local i = 1
   local n = #src
