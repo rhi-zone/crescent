@@ -262,7 +262,8 @@ local function _match_tokens(tokens, ti, str, si)
         local alt_len = #alt_tokens
         -- Try to match alt_tokens starting at si
         -- Use a recursive approach: match alt, then match rest
-        local function try_alt(ai, sj)
+        local try_alt --: (integer, integer) -> boolean
+        function try_alt(ai, sj)
           if ai > alt_len then
             -- Alt fully matched, now match the rest of the main tokens
             return _match_tokens(tokens, ti, str, sj)
