@@ -33,11 +33,11 @@ Files where the dominant pattern is a structurally wrong annotation: missing
 fields, excess fields, wrong-tag literals. Fix by replacing the vague type with
 the concrete record shape it actually has.
 
-- [ ] `lib/platform/apps/charactercardv2/server.lua` (271) — 44 "missing field 'enabled'", 49 indexing-narrow
+- [x] `lib/platform/apps/charactercardv2/server.lua` (271 → 190) — annotated conv_query and json_ok signatures
 - [x] `lib/unified/mdast/init.lua` (176 → 168) — annotated split_lines/count_indent/strip_indent/is_blank/is_thematic_break
-- [ ] `lib/crescent_examples/x11_wm.lua` (178) — 99 "field doesn't exist"
+- [x] `lib/crescent_examples/x11_wm.lua` (178 → 160) — added local bit = require("bit")
 - [x] `lib/yaml/init.lua` (143 → 42) — annotated YState + helpers; cur/peek return integer with fallback
-- [ ] `lib/ical/init.lua` (123) — 36 narrow + 35 missing argument
+- [x] `lib/ical/init.lua` (123 → 70) — annotated add_prop signature with optional params
 - [ ] `lib/cryptography/init.lua` (107) — 26 "cannot assign X to X", 24 arithmetic on unknown
 - [ ] `lib/json/init.lua` (106) — 31 "cannot compare", 22 arithmetic, 20 "is not assignable"
 - [ ] `lib/css_parser/init.lua` (103) — 18 cannot compare, 15 field doesn't exist (see SKIP — prior attempt regressed)
@@ -100,6 +100,7 @@ last because the type system itself is the testbed.
 - `lib/red_black_tree/init.lua` — recursive `RBNode` type with self-referential left/right/parent fields. Sentinel construction starts with `nil` then assigns NIL = NIL.left, defeating any concrete annotation. All 72 errors are `x.parent.left.color` chains; needs structural recursive type support, restructuring.
 - `lib/layout/init.lua` — annotated parse_track/resolve_tracks/track_offsets returns; net 89 → 96, reverted. Constructor opts type widens `node.width: any | nil` poison flows through `bw or 0` chains. Needs LayoutNode shape annotation on `M.box`/`M.grid` returns first.
 - `lib/cryptography/init.lua` — replaced bare `table` annotations with `integer[]` on put_u32le/put_u32be/sha256_compress/sha256_raw/sha512_compress/sha512_raw/qr/chacha20_block/chacha20_init; net 107 → 116, reverted. Concrete shape forces stricter checks against `string.byte` `...integer` returns at call sites; need to first narrow callers.
+- `lib/json/init.lua` — annotating forward-declared `decode_string`/`decode_number`/`decode_object`/`decode_array` with concrete return types caused `i = ni` (integer | nil) flowing through arithmetic to remain; net 106 → 110, reverted. Real fix needs narrowing `i` after each `decode_value` call (cascading guards across many sites).
 
 ## Done in current session
 
@@ -112,3 +113,6 @@ last because the type system itself is the testbed.
 - [x] `lib/unified/mdast/init.lua` (was 176 → now 168, commit 1bc7cba)
 - [x] `lib/wire_protocol/init.lua` (was 98 → now 93, commit 9f9c522)
 - [x] `lib/toml/init.lua` (was 72 → now 68, commit e5b3e2d)
+- [x] `lib/ical/init.lua` (was 123 → now 70, commit ba96da6)
+- [x] `lib/crescent_examples/x11_wm.lua` (was 178 → now 160, commit 11fe9a7)
+- [x] `lib/platform/apps/charactercardv2/server.lua` (was 271 → now 190, commit 32a35d6)
