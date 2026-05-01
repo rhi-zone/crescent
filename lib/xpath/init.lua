@@ -26,8 +26,10 @@ local T_STRING   = "STRING"
 local T_OP       = "OP"    -- single/multi-char operators and punctuation
 local T_EOF      = "EOF"
 
+--:: XPathToken = { type: string, value: string | number | nil }
+--: (string) -> ({ [integer]: XPathToken } | nil, string | nil)
 local function tokenize(src)
-  local tokens = {}
+  local tokens = {} --: { [integer]: XPathToken }
   local pos = 1
   local len = #src
   while pos <= len do
@@ -93,7 +95,7 @@ local function tokenize(src)
       return nil, "unexpected character '" .. c .. "' at position " .. pos
     end
   end
-  tokens[#tokens+1] = { type = T_EOF }
+  tokens[#tokens+1] = { type = T_EOF, value = nil }
   return tokens
 end
 
@@ -1191,7 +1193,7 @@ end
 
 --- Evaluate an XPath expression against a context node.
 --- Returns XPath value (node-set table, string, number, or boolean), or (nil, errmsg).
---: (table, string) -> (unknown | nil, string)
+--: ({ ... }, string) -> (unknown | nil, string)
 function M.eval(node, expr)
   local ast, err = parse(expr)
   if not ast then return nil, err end
@@ -1203,7 +1205,7 @@ function M.eval(node, expr)
 end
 
 --- Alias for eval — returns a node-set.
---: (table, string) -> (table | nil, string)
+--: ({ ... }, string) -> ({ ... } | nil, string)
 function M.select(node, expr)
   local result, err = M.eval(node, expr)
   if result == nil then return nil, err end
@@ -1212,7 +1214,7 @@ function M.select(node, expr)
 end
 
 --- Return the first matching node, or nil.
---: (table, string) -> table | nil
+--: ({ ... }, string) -> { ... } | nil
 function M.first(node, expr)
   local result = M.eval(node, expr)
   if type(result) == "table" then return result[1] end
@@ -1220,21 +1222,21 @@ function M.first(node, expr)
 end
 
 --- Return the string value of an XPath expression.
---: (table, string) -> string
+--: ({ ... }, string) -> string
 function M.string(node, expr)
   local result = M.eval(node, expr)
   return to_string(--[[: any]] result)
 end
 
 --- Return the numeric value of an XPath expression.
---: (table, string) -> number
+--: ({ ... }, string) -> number
 function M.number(node, expr)
   local result = M.eval(node, expr)
   return to_number(result)
 end
 
 --- Return the boolean value of an XPath expression.
---: (table, string) -> boolean
+--: ({ ... }, string) -> boolean
 function M.boolean(node, expr)
   local result = M.eval(node, expr)
   return to_boolean(--[[: any]] result)
@@ -1242,7 +1244,7 @@ end
 
 --- Compile an XPath expression for reuse.
 --- Returns compiled object with :eval(node) method, or (nil, errmsg).
---: (string) -> (table | nil, string)
+--: (string) -> ({ ... } | nil, string)
 function M.compile(expr)
   local ast, err = parse(expr)
   if not ast then return nil, err end
