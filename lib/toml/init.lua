@@ -201,6 +201,8 @@ local escape_map = {
 
 -- Forward declarations
 local parse_value
+local parse_datetime
+local _parse_time_part
 
 -- Parse a basic (double-quoted) string
 --: (toml_state) -> (string | nil, string)
