@@ -223,8 +223,10 @@ local function read_string(lex)
 end
 
 -- Strip block-string indentation per GraphQL spec
+--: (string) -> string
 local function strip_block_string(raw)
   -- Split into lines
+  --: { [integer]: string }
   local lines = {}
   local s = 1
   while true do
@@ -328,7 +330,7 @@ local function expect_name(lex)
   return { kind = "Name", value = name }
 end
 
---: (Lexer, integer) -> unknown
+--: (Lexer, string) -> unknown
 local function expect_char(lex, ch)
   skip_ignored(lex)
   if peek(lex) ~= byte(ch) then
@@ -340,7 +342,7 @@ local function expect_char(lex, ch)
   return true
 end
 
---: (Lexer, integer) -> boolean
+--: (Lexer, string) -> boolean
 local function optional_char(lex, ch)
   skip_ignored(lex)
   if peek(lex) == byte(ch) then
