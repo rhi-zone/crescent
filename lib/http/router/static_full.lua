@@ -54,23 +54,28 @@ local html_escape = function (string)
 end
 
 --[[@param base? string]]
-mod.router = function (base)
+--[[@param opts? { io_open: fun(path: string, mode: string): file* | nil, os_date: fun(fmt: string, t: integer): string }]]
+mod.router = function (base, opts)
 	if base ~= nil and type(base) ~= "string" then
 		return nil, "static() expects string as base path, got " .. tostring(base)
 	end
+	local io_open = opts and opts.io_open
+	if not io_open then return nil, "static() requires opts.io_open cap" end
+	local os_date = opts and opts.os_date
+	if not os_date then return nil, "static() requires opts.os_date cap" end
 	base = (base or "."):gsub("/$", "")
 	--[[@return nil]] --[[@param req http_request]] --[[@param res http_response]]
 	return function (req, res)
 		--[[TODO: urldecode? urldecode(req.path)]]
 		local full_path = path.safe_resolve(base, urldecode(req.path))
 		if not full_path then res.status = 404; return end
-		local file = io.open(full_path, "rb")
+		local file = io_open(full_path, "rb")
 		if file == nil then res.status = 404; return end
 		res.status = 200
 		res.body = file:read("*all")
 		file:close()
 		if res.body == nil then
-			file = io.open(full_path:gsub("/$", "") .. "/index.html", "rb")
+			file = io_open(full_path:gsub("/$", "") .. "/index.html", "rb")
 			if file then
 				res.body = file:read("*all")
 				file:close()
@@ -88,8 +93,8 @@ mod.router = function (base)
 					local slash = (file_info.is_dir and "/" or "")
 					parts[#parts+1] = "<tr><td><a href=\"" .. urlencode(file_info.name) .. slash .. "\">" .. html_escape(file_info.name) ..
 						slash .. "</a></td><td data-value=\"" .. (file_info.is_dir and "" or file_info.size or "") .. "\">" .. (file_info.is_dir and "" or human_readable_size(file_info.size)) ..
-						-- "</td><td data-value=\"" .. (file_info.created or "") .. "\">" .. (file_info.created and os.date("%x %X", file_info.created) or "") ..
-						"</td><td data-value=\"" .. (file_info.modified or "") .. "\">" .. (file_info.modified and os.date("%x %X", file_info.modified) or "") .. "</td></tr>"
+						-- "</td><td data-value=\"" .. (file_info.created or "") .. "\">" .. (file_info.created and os_date("%x %X", file_info.created) or "") ..
+						"</td><td data-value=\"" .. (file_info.modified or "") .. "\">" .. (file_info.modified and os_date("%x %X", file_info.modified) or "") .. "</td></tr>"
 				end
 				parts[#parts+1] = "</tbody></table></body>"
 				res.body = table.concat(parts)
