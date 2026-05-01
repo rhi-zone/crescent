@@ -38,6 +38,7 @@ local tbl_insert = table.insert
 -- ── Line splitting ─────────────────────────────────────────────────────────────
 
 -- Split src into lines. Each line does NOT include the trailing \n (or \r\n).
+--: (src: string) -> string[]
 local function split_lines(src)
   local lines = {}
   local len = #src
@@ -63,6 +64,7 @@ end
 -- ── Block-level parsing ───────────────────────────────────────────────────────
 
 -- Count leading spaces (tabs count as 4 spaces for indentation purposes).
+--: (line: string) -> (integer, integer)
 local function count_indent(line)
   local n = 0
   local len = #line
@@ -83,6 +85,7 @@ local function count_indent(line)
 end
 
 -- Strip up to `n` leading spaces (or tab-equivalent), return rest.
+--: (line: string, n: integer) -> string
 local function strip_indent(line, n)
   local removed = 0
   local i = 1
@@ -108,12 +111,14 @@ local function strip_indent(line, n)
 end
 
 -- Is the line blank (empty or only whitespace)?
+--: (line: string) -> boolean
 local function is_blank(line)
   return str_find(line, "^%s*$") ~= nil
 end
 
 -- Check if line is a thematic break: 3+ of the same char (-, *, _), optional spaces.
 -- Must have <= 3 spaces of leading indent.
+--: (line: string) -> boolean
 local function is_thematic_break(line)
   local indent, col = count_indent(line)
   if indent > 3 then return false end
