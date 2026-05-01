@@ -23,10 +23,12 @@ local BOOL_TRUE  = { ["true"]=true,  ["yes"]=true,  ["on"]=true  }
 local BOOL_FALSE = { ["false"]=true, ["no"]=true,   ["off"]=true }
 local NULL_VAL   = { ["null"]=true,  ["~"]=true,    [""]=true    }
 
+--: (s: string) -> boolean
 local function is_integer(s)
   return s:match("^%-?[0-9]+$") ~= nil
 end
 
+--: (s: string) -> boolean
 local function is_float(s)
   if s == ".inf" or s == "-.inf" or s == ".nan" then return true end
   -- Use find to avoid capture-group return-nil issue
@@ -36,6 +38,7 @@ local function is_float(s)
   return false
 end
 
+--: (s: string) -> string | number | boolean | nil
 local function parse_scalar(s)
   local lower = s:lower()
   if BOOL_TRUE[lower]  then return true  end
@@ -55,6 +58,9 @@ end
 -- Parser state
 -- ---------------------------------------------------------------------------
 
+--:: YState = { s: string, pos: integer, len: integer, line: integer, col: integer, anchors: { [string]: any } }
+
+--: (str: string) -> YState
 local function new_state(str)
   return {
     s       = str,
@@ -66,14 +72,19 @@ local function new_state(str)
   }
 end
 
+--: (st: YState) -> integer
 local function cur(st)
-  return byte(st.s, st.pos)
+  local b = byte(st.s, st.pos)
+  return b or 0
 end
 
+--: (st: YState, offset: integer | nil) -> integer
 local function peek(st, offset)
-  return byte(st.s, st.pos + (offset or 1))
+  local b = byte(st.s, st.pos + (offset or 1))
+  return b or 0
 end
 
+--: (st: YState, n: integer | nil) -> nil
 local function advance(st, n)
   n = n or 1
   for _ = 1, n do
@@ -88,6 +99,7 @@ local function advance(st, n)
   end
 end
 
+--: (st: YState) -> nil
 local function skip_spaces(st)
   while st.pos <= st.len do
     local c = cur(st)
@@ -99,6 +111,7 @@ local function skip_spaces(st)
   end
 end
 
+--: (st: YState) -> nil
 local function skip_to_eol(st)
   while st.pos <= st.len do
     local c = cur(st)
@@ -107,17 +120,20 @@ local function skip_to_eol(st)
   end
 end
 
+--: (st: YState) -> nil
 local function skip_comment(st)
   if cur(st) == 35 then -- '#'
     skip_to_eol(st)
   end
 end
 
+--: (st: YState) -> nil
 local function skip_spaces_and_comments(st)
   skip_spaces(st)
   skip_comment(st)
 end
 
+--: (st: YState) -> nil
 local function skip_newline(st)
   local c = cur(st)
   if c == 13 then -- CR
