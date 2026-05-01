@@ -34,17 +34,17 @@ fields, excess fields, wrong-tag literals. Fix by replacing the vague type with
 the concrete record shape it actually has.
 
 - [ ] `lib/platform/apps/charactercardv2/server.lua` (271) — 44 "missing field 'enabled'", 49 indexing-narrow
-- [ ] `lib/unified/mdast/init.lua` (176) — 23 "is not assignable", 21 "cannot assign", 38 arithmetic
+- [x] `lib/unified/mdast/init.lua` (176 → 168) — annotated split_lines/count_indent/strip_indent/is_blank/is_thematic_break
 - [ ] `lib/crescent_examples/x11_wm.lua` (178) — 99 "field doesn't exist"
-- [ ] `lib/yaml/init.lua` (143) — 57 missing argument, 20 cannot compare
+- [x] `lib/yaml/init.lua` (143 → 42) — annotated YState + helpers; cur/peek return integer with fallback
 - [ ] `lib/ical/init.lua` (123) — 36 narrow + 35 missing argument
 - [ ] `lib/cryptography/init.lua` (107) — 26 "cannot assign X to X", 24 arithmetic on unknown
 - [ ] `lib/json/init.lua` (106) — 31 "cannot compare", 22 arithmetic, 20 "is not assignable"
 - [ ] `lib/css_parser/init.lua` (103) — 18 cannot compare, 15 field doesn't exist (see SKIP — prior attempt regressed)
-- [ ] `lib/wire_protocol/init.lua` (98) — 31 arithmetic, 17 cannot-assign chains
+- [x] `lib/wire_protocol/init.lua` (98 → 93) — replaced bare `table` in framer/receiver/decode_all with concrete shapes
 - [ ] `lib/graphql_parser/init.lua` (86) — 20 cannot-pass, 16 narrow-before-indexing (see SKIP — AST shape mismatches)
 - [ ] `lib/bson/init.lua` (73) — 33 arithmetic, 13 cannot-assign
-- [ ] `lib/toml/init.lua` (72) — 13 cannot-pass + 13 compare + 13 cannot-assign (uniform)
+- [x] `lib/toml/init.lua` (72 → 68) — added forward declarations for parse_datetime and _parse_time_part
 - [ ] `lib/unified/rehype_highlight/init.lua` (74) — 28 "field N is not X" (numeric child indices)
 
 ## Tier 3 — Numeric / FFI buffers (arithmetic / length on unknown)
@@ -98,6 +98,8 @@ last because the type system itself is the testbed.
 - `lib/lru/init.lua` — attempted `Cache`/`Lfu`/`TwoQ` concrete shape replacement; narrow errors stayed at 70 (helper functions take `self` as untyped parameter, shape doesn't propagate) while constructor return-type mismatches added 3 new errors. Net 107→110, reverted. Proper fix requires annotating every `self` parameter on internal helpers + reconciling `_cap: integer` vs `math.floor(capacity)` literal flow. Restructuring.
 - `lib/lua2ts/init.lua` — attempted annotating `scan_annotations(source)`, `ctx:name`/`ctx:list` returns; ctx still flows as unknown into emit_expr (closure-built ctx not seen at call sites). Net 162→163, reverted. Same family as parse.lua: needs constructor return types on `parse_mod.parse`/`new_ctx`. Out of scope for cleanup pass.
 - `lib/red_black_tree/init.lua` — recursive `RBNode` type with self-referential left/right/parent fields. Sentinel construction starts with `nil` then assigns NIL = NIL.left, defeating any concrete annotation. All 72 errors are `x.parent.left.color` chains; needs structural recursive type support, restructuring.
+- `lib/layout/init.lua` — annotated parse_track/resolve_tracks/track_offsets returns; net 89 → 96, reverted. Constructor opts type widens `node.width: any | nil` poison flows through `bw or 0` chains. Needs LayoutNode shape annotation on `M.box`/`M.grid` returns first.
+- `lib/cryptography/init.lua` — replaced bare `table` annotations with `integer[]` on put_u32le/put_u32be/sha256_compress/sha256_raw/sha512_compress/sha512_raw/qr/chacha20_block/chacha20_init; net 107 → 116, reverted. Concrete shape forces stricter checks against `string.byte` `...integer` returns at call sites; need to first narrow callers.
 
 ## Done in current session
 
@@ -106,3 +108,7 @@ last because the type system itself is the testbed.
 - [x] `lib/xpath/init.lua` (was 150 → now 122, commit e90013a)
 - [x] `lib/observer/init.lua` (was 98 → now 95, commit b9fd693)
 - [x] `lib/observable/init.lua` (was 83 → now 81, commit 6d2d311)
+- [x] `lib/yaml/init.lua` (was 143 → now 42, commit c5fc96c)
+- [x] `lib/unified/mdast/init.lua` (was 176 → now 168, commit 1bc7cba)
+- [x] `lib/wire_protocol/init.lua` (was 98 → now 93, commit 9f9c522)
+- [x] `lib/toml/init.lua` (was 72 → now 68, commit e5b3e2d)
