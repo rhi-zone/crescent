@@ -211,6 +211,17 @@ end
 -- Types: "heading", "paragraph", "blockquote", "ul", "ol",
 --        "fenced_code", "indented_code", "hr", "raw_html", "blank"
 
+--:: HeadingBlock    = { type: "heading",      level: integer, text: string }
+--:: ParagraphBlock  = { type: "paragraph",    lines: { [integer]: string } }
+--:: BlockquoteBlock = { type: "blockquote",   lines: { [integer]: string } }
+--:: UlBlock         = { type: "ul",           items: { [integer]: string } }
+--:: OlBlock         = { type: "ol",           items: { [integer]: string }, start: integer }
+--:: FencedCodeBlock = { type: "fenced_code",  lang: string, code: string }
+--:: IndentedCodeBlock = { type: "indented_code", code: string }
+--:: HrBlock         = { type: "hr" }
+--:: RawHtmlBlock    = { type: "raw_html",     content: string }
+--:: Block = HeadingBlock | ParagraphBlock | BlockquoteBlock | UlBlock | OlBlock | FencedCodeBlock | IndentedCodeBlock | HrBlock | RawHtmlBlock
+
 --: (string) -> boolean
 local function is_blank(line)
   return line:match("^%s*$") ~= nil
@@ -226,8 +237,9 @@ local function is_thematic_break(line)
 end
 
 -- Parse blocks from lines array.
---: ({ [integer]: string }) -> { [integer]: table }
+--: ({ [integer]: string }) -> { [integer]: Block }
 local function parse_blocks(lines)
+  --: { [integer]: Block }
   local blocks = {}
   local i = 1
   local n = #lines
@@ -274,10 +286,10 @@ local function parse_blocks(lines)
 
     -- ATX headings: # through ######
     elseif line:match("^#+ ") or line:match("^#+$") then
-      local hashes, text = line:match("^(#+)%s*(.*)")
-      local level = math.min(#hashes, 6)
+      local hashes, raw_text = line:match("^(#+)%s*(.*)")
+      local level = math.min(#hashes, 6) --[[:! integer]]
       -- Strip optional trailing #s
-      text = text:gsub("%s+#+%s*$", ""):gsub("%s+$", "")
+      local text = (raw_text --[[:! string]]):gsub("%s+#+%s*$", ""):gsub("%s+$", "")
       blocks[#blocks + 1] = { type = "heading", level = level, text = text }
       i = i + 1
 
@@ -312,7 +324,7 @@ local function parse_blocks(lines)
     -- Ordered list: 1. 2. etc.
     elseif line:match("^[ \t]*%d+%. ") then
       local items = {}
-      local start = tonumber(line:match("^[ \t]*(%d+)%.")) or 1
+      local start = (tonumber(line:match("^[ \t]*(%d+)%.")) or 1) --[[:! integer]]
       while i <= n and (lines[i]:match("^[ \t]*%d+%. ") or (not is_blank(lines[i]) and #items > 0)) do
         if lines[i]:match("^[ \t]*%d+%. ") then
           items[#items + 1] = lines[i]:match("^[ \t]*%d+%. (.*)")
@@ -384,22 +396,20 @@ end
 -- HTML renderer
 -- ---------------------------------------------------------------------------
 
---: (table) -> string
+--: (Block) -> string
 local function render_block_html(block)
-  local t = block.type
-
-  if t == "heading" then
+  if block.type == "heading" then
     local tag = "h" .. block.level
     return "<" .. tag .. ">" .. inline_html(block.text) .. "</" .. tag .. ">\n"
 
-  elseif t == "paragraph" then
+  elseif block.type == "paragraph" then
     local parts = {}
     for _, l in ipairs(block.lines) do
       parts[#parts + 1] = inline_html(l)
     end
     return "<p>" .. table.concat(parts, "\n") .. "</p>\n"
 
-  elseif t == "blockquote" then
+  elseif block.type == "blockquote" then
     local inner_blocks = parse_blocks(block.lines)
     local inner = {}
     for _, b in ipairs(inner_blocks) do
@@ -407,7 +417,7 @@ local function render_block_html(block)
     end
     return "<blockquote>\n" .. table.concat(inner) .. "</blockquote>\n"
 
-  elseif t == "ul" then
+  elseif block.type == "ul" then
     local parts = { "<ul>\n" }
     for _, item in ipairs(block.items) do
       parts[#parts + 1] = "<li>" .. inline_html(item) .. "</li>\n"
@@ -415,9 +425,9 @@ local function render_block_html(block)
     parts[#parts + 1] = "</ul>\n"
     return table.concat(parts)
 
-  elseif t == "ol" then
+  elseif block.type == "ol" then
     local parts
-    if block.start and block.start ~= 1 then
+    if block.start ~= 1 then
       parts = { '<ol start="' .. block.start .. '">\n' }
     else
       parts = { "<ol>\n" }
@@ -428,21 +438,21 @@ local function render_block_html(block)
     parts[#parts + 1] = "</ol>\n"
     return table.concat(parts)
 
-  elseif t == "fenced_code" then
-    if block.lang and block.lang ~= "" then
+  elseif block.type == "fenced_code" then
+    if block.lang ~= "" then
       return '<pre><code class="language-' .. html_escape(block.lang) .. '">'
         .. html_escape(block.code) .. "</code></pre>\n"
     else
       return "<pre><code>" .. html_escape(block.code) .. "</code></pre>\n"
     end
 
-  elseif t == "indented_code" then
+  elseif block.type == "indented_code" then
     return "<pre><code>" .. html_escape(block.code) .. "</code></pre>\n"
 
-  elseif t == "hr" then
+  elseif block.type == "hr" then
     return "<hr />\n"
 
-  elseif t == "raw_html" then
+  elseif block.type == "raw_html" then
     return block.content .. "\n"
 
   else
@@ -454,11 +464,9 @@ end
 -- Plain text renderer
 -- ---------------------------------------------------------------------------
 
---: (table) -> string
+--: (Block) -> string
 local function render_block_text(block)
-  local t = block.type
-
-  if t == "heading" then
+  if block.type == "heading" then
     local text = inline_text(block.text)
     if block.level == 1 then
       return text .. "\n" .. string.rep("=", #text) .. "\n"
@@ -468,14 +476,14 @@ local function render_block_text(block)
       return text .. "\n"
     end
 
-  elseif t == "paragraph" then
+  elseif block.type == "paragraph" then
     local parts = {}
     for _, l in ipairs(block.lines) do
       parts[#parts + 1] = inline_text(l)
     end
     return table.concat(parts, "\n") .. "\n"
 
-  elseif t == "blockquote" then
+  elseif block.type == "blockquote" then
     local inner_blocks = parse_blocks(block.lines)
     local lines = {}
     for _, b in ipairs(inner_blocks) do
@@ -486,28 +494,31 @@ local function render_block_text(block)
     end
     return table.concat(lines, "\n") .. "\n"
 
-  elseif t == "ul" then
+  elseif block.type == "ul" then
     local parts = {}
     for _, item in ipairs(block.items) do
       parts[#parts + 1] = "- " .. inline_text(item)
     end
     return table.concat(parts, "\n") .. "\n"
 
-  elseif t == "ol" then
+  elseif block.type == "ol" then
     local parts = {}
-    local start = block.start or 1
+    local start = block.start
     for idx, item in ipairs(block.items) do
       parts[#parts + 1] = (start + idx - 1) .. ". " .. inline_text(item)
     end
     return table.concat(parts, "\n") .. "\n"
 
-  elseif t == "fenced_code" or t == "indented_code" then
+  elseif block.type == "fenced_code" then
     return block.code .. "\n"
 
-  elseif t == "hr" then
+  elseif block.type == "indented_code" then
+    return block.code .. "\n"
+
+  elseif block.type == "hr" then
     return "---\n"
 
-  elseif t == "raw_html" then
+  elseif block.type == "raw_html" then
     return block.content .. "\n"
 
   else
