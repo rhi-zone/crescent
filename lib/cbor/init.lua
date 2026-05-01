@@ -55,6 +55,7 @@ if ffi_ok then
     )
   end
 
+  --: (string, integer) -> number
   unpack_f64 = function(data, pos)
     u.b[7] = string.byte(data, pos)
     u.b[6] = string.byte(data, pos+1)
@@ -104,6 +105,7 @@ else
     return string.char(b1, b2, b3, b4, b5, b6, b7, b8)
   end
 
+  --: (string, integer) -> number
   unpack_f64 = function(data, pos)
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
     local b5, b6, b7, b8 = string.byte(data, pos+4, pos+7)
@@ -244,6 +246,7 @@ local decode_value  -- forward declaration
 -- Read argument value from additional-info field.
 -- Returns (arg, new_pos) or (nil, errmsg).
 -- For indefinite length, returns (-1, pos).
+--: (string, integer, integer) -> (integer | nil, integer | string)
 local function read_arg(data, info, pos)
   if info <= 23 then
     return info, pos
@@ -272,6 +275,7 @@ local function read_arg(data, info, pos)
   end
 end
 
+--: (string, integer) -> (unknown, integer | string | nil)
 decode_value = function(data, pos)
   if pos > #data then
     return nil, "cbor.decode: unexpected end of input"
