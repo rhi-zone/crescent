@@ -8,6 +8,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: RBNode = { key: unknown, value: unknown, color: integer, left: RBNode, right: RBNode, parent: RBNode }
+--:: RBTree = { _root: RBNode, _nil: RBNode, _size: number, _cmp: (unknown, unknown) -> boolean, ... }
+
 -- Color constants
 local RED   = 0
 local BLACK = 1
@@ -25,25 +28,28 @@ end
 
 -- Create a new red-black tree
 -- opts.cmp: optional comparator function(a, b) -> bool (a < b)
+--:: RBTreeOpts = { cmp: ((unknown, unknown) -> boolean) | nil }
 function M.new(opts)
-  opts = opts or {}
-  local NIL = make_sentinel()
+  local o = opts or {} --[[:! RBTreeOpts]]
+  local NIL = make_sentinel() --[[:! RBNode]]
   NIL.left = NIL
   NIL.right = NIL
   NIL.parent = NIL
 
+  local cmp = (o.cmp or default_cmp) --[[:! (unknown, unknown) -> boolean]]
   local tree = {
     _root = NIL,
     _nil  = NIL,
     _size = 0,
-    _cmp  = opts.cmp or default_cmp,
-  }
+    _cmp  = cmp,
+  } --[[:! RBTree]]
 
   setmetatable(tree, { __index = M })
   return tree
 end
 
 -- Left rotate around node x
+--: (RBTree, RBNode) -> nil
 local function left_rotate(tree, x)
   local NIL = tree._nil
   local y = x.right
@@ -64,6 +70,7 @@ local function left_rotate(tree, x)
 end
 
 -- Right rotate around node y
+--: (RBTree, RBNode) -> nil
 local function right_rotate(tree, y)
   local NIL = tree._nil
   local x = y.left
@@ -84,6 +91,7 @@ local function right_rotate(tree, y)
 end
 
 -- Fix red-black properties after insert
+--: (RBTree, RBNode) -> nil
 local function insert_fixup(tree, z)
   local NIL = tree._nil
   while z.parent.color == RED do
@@ -132,6 +140,7 @@ local function insert_fixup(tree, z)
 end
 
 -- Insert key-value pair (updates value if key exists)
+--: (RBTree, unknown, unknown) -> nil
 function M:insert(key, value)
   if value == nil then value = true end
   local NIL = self._nil
@@ -168,6 +177,7 @@ function M:insert(key, value)
 end
 
 -- Find node by key, return node or NIL
+--: (RBTree, unknown) -> RBNode
 local function find_node(tree, key)
   local NIL = tree._nil
   local cmp = tree._cmp
@@ -185,6 +195,7 @@ local function find_node(tree, key)
 end
 
 -- Get value by key
+--: (RBTree, unknown) -> unknown | nil
 function M:get(key)
   local node = find_node(self, key)
   if node == self._nil then return nil end
@@ -192,16 +203,19 @@ function M:get(key)
 end
 
 -- Check if key exists
+--: (RBTree, unknown) -> boolean
 function M:has(key)
   return find_node(self, key) ~= self._nil
 end
 
 -- Return current size
+--: (RBTree) -> number
 function M:size()
   return self._size
 end
 
 -- Find minimum node in subtree rooted at x
+--: (RBTree, RBNode) -> RBNode
 local function tree_min(tree, x)
   local NIL = tree._nil
   while x.left ~= NIL do
@@ -211,6 +225,7 @@ local function tree_min(tree, x)
 end
 
 -- Find maximum node in subtree rooted at x
+--: (RBTree, RBNode) -> RBNode
 local function tree_max(tree, x)
   local NIL = tree._nil
   while x.right ~= NIL do
@@ -220,6 +235,7 @@ local function tree_max(tree, x)
 end
 
 -- Return minimum key, value (nil, nil if empty)
+--: (RBTree) -> (unknown | nil, unknown | nil)
 function M:min()
   if self._root == self._nil then return nil, nil end
   local node = tree_min(self, self._root)
@@ -227,6 +243,7 @@ function M:min()
 end
 
 -- Return maximum key, value (nil, nil if empty)
+--: (RBTree) -> (unknown | nil, unknown | nil)
 function M:max()
   if self._root == self._nil then return nil, nil end
   local node = tree_max(self, self._root)
@@ -234,6 +251,7 @@ function M:max()
 end
 
 -- Transplant: replace subtree rooted at u with subtree rooted at v
+--: (RBTree, RBNode, RBNode) -> nil
 local function transplant(tree, u, v)
   local NIL = tree._nil
   if u.parent == NIL then
@@ -247,6 +265,7 @@ local function transplant(tree, u, v)
 end
 
 -- Fix red-black properties after delete
+--: (RBTree, RBNode) -> nil
 local function delete_fixup(tree, x)
   local NIL = tree._nil
   while x ~= tree._root and x.color == BLACK do
@@ -257,19 +276,20 @@ local function delete_fixup(tree, x)
         w.color = BLACK
         x.parent.color = RED
         left_rotate(tree, x.parent)
-        w = x.parent.right
+        w = x.parent.right --[[:! RBNode]]
       end
-      if w.left.color == BLACK and w.right.color == BLACK then
+      local ww = w --[[:! RBNode]]
+      if ww.left.color == BLACK and ww.right.color == BLACK then
         -- Case 2: sibling's children are both black
-        w.color = RED
-        x = x.parent
+        ww.color = RED
+        x = x.parent --[[:! RBNode]]
       else
-        if w.right.color == BLACK then
+        if ww.right.color == BLACK then
           -- Case 3: sibling's right child is black
           w.left.color = BLACK
           w.color = RED
           right_rotate(tree, w)
-          w = x.parent.right
+          w = x.parent.right --[[:! RBNode]]
         end
         -- Case 4: sibling's right child is red
         w.color = x.parent.color
@@ -286,19 +306,20 @@ local function delete_fixup(tree, x)
         w.color = BLACK
         x.parent.color = RED
         right_rotate(tree, x.parent)
-        w = x.parent.left
+        w = x.parent.left --[[:! RBNode]]
       end
-      if w.right.color == BLACK and w.left.color == BLACK then
+      local ww2 = w --[[:! RBNode]]
+      if ww2.right.color == BLACK and ww2.left.color == BLACK then
         -- Case 2 mirror
-        w.color = RED
-        x = x.parent
+        ww2.color = RED
+        x = x.parent --[[:! RBNode]]
       else
-        if w.left.color == BLACK then
+        if ww2.left.color == BLACK then
           -- Case 3 mirror
           w.right.color = BLACK
           w.color = RED
           left_rotate(tree, w)
-          w = x.parent.left
+          w = x.parent.left --[[:! RBNode]]
         end
         -- Case 4 mirror
         w.color = x.parent.color
@@ -313,6 +334,7 @@ local function delete_fixup(tree, x)
 end
 
 -- Delete key from tree, return true if found, false if not found
+--: (RBTree, unknown) -> boolean
 function M:delete(key)
   local NIL = self._nil
   local z = find_node(self, key)
@@ -322,7 +344,7 @@ function M:delete(key)
 
   local y = z
   local y_orig_color = y.color
-  local x
+  local x = NIL --[[:! RBNode]]
 
   if z.left == NIL then
     x = z.right
@@ -332,18 +354,18 @@ function M:delete(key)
     transplant(self, z, z.left)
   else
     -- Node has two children: find successor (minimum of right subtree)
-    y = tree_min(self, z.right)
+    y = tree_min(self, z.right) --[[:! RBNode]]
     y_orig_color = y.color
-    x = y.right
+    x = y.right --[[:! RBNode]]
     if y.parent == z then
       x.parent = y
     else
-      transplant(self, y, y.right)
+      transplant(self, y, y.right --[[:! RBNode]])
       y.right = z.right
       y.right.parent = y
     end
     transplant(self, z, y)
-    y.left = z.left
+    y.left = z.left --[[:! RBNode]]
     y.left.parent = y
     y.color = z.color
   end
@@ -356,6 +378,7 @@ function M:delete(key)
 end
 
 -- In-order traversal helper
+--: (RBTree, RBNode, (unknown, unknown) -> nil) -> nil
 local function inorder(tree, node, fn)
   local NIL = tree._nil
   if node == NIL then return end
@@ -365,6 +388,7 @@ local function inorder(tree, node, fn)
 end
 
 -- In-order traversal with range check
+--: (RBTree, RBNode, unknown, unknown, (unknown, unknown) -> nil) -> nil
 local function inorder_range(tree, node, lo, hi, fn)
   local NIL = tree._nil
   local cmp = tree._cmp
@@ -384,6 +408,7 @@ local function inorder_range(tree, node, lo, hi, fn)
 end
 
 -- Iterator: ordered traversal of all key-value pairs
+--: (RBTree) -> (() -> unknown | nil)
 function M:pairs()
   -- Collect into array first (simpler than stateful iterator)
   local arr = {}
@@ -400,6 +425,7 @@ function M:pairs()
 end
 
 -- Range iterator: ordered traversal of keys in [lo, hi] inclusive
+--: (RBTree, unknown, unknown) -> (() -> unknown | nil)
 function M:range(lo, hi)
   local arr = {}
   inorder_range(self, self._root, lo, hi, function(k, v)
@@ -415,6 +441,7 @@ function M:range(lo, hi)
 end
 
 -- Floor: largest key <= k
+--: (RBTree, unknown) -> (unknown | nil, unknown | nil)
 function M:floor(k)
   local NIL = self._nil
   local cmp = self._cmp
@@ -438,6 +465,7 @@ function M:floor(k)
 end
 
 -- Ceiling: smallest key >= k
+--: (RBTree, unknown) -> (unknown | nil, unknown | nil)
 function M:ceiling(k)
   local NIL = self._nil
   local cmp = self._cmp
@@ -461,6 +489,7 @@ function M:ceiling(k)
 end
 
 -- Convert to sorted array of {key, value} pairs
+--: (RBTree) -> { [integer]: { [integer]: unknown } }
 function M:to_array()
   local arr = {}
   inorder(self, self._root, function(k, v)
@@ -471,6 +500,7 @@ end
 
 -- Verify all red-black invariants
 -- Returns (true) on success or (nil, errmsg) on violation
+--: (RBTree) -> (boolean | nil, string | nil)
 function M:verify()
   local NIL = self._nil
 
@@ -485,6 +515,7 @@ function M:verify()
   end
 
   -- Recursive check
+  --: (RBNode) -> (boolean | nil, integer | string | nil)
   local function check(node)
     if node == NIL then
       return true, 1 -- black-height of nil leaf = 1
@@ -516,17 +547,19 @@ function M:verify()
     -- Recursively check subtrees
     local ok_l, bh_l = check(node.left)
     if not ok_l then return nil, bh_l end
+    local bhl = bh_l --[[:! integer]]
 
     local ok_r, bh_r = check(node.right)
     if not ok_r then return nil, bh_r end
+    local bhr = bh_r --[[:! integer]]
 
     -- Invariant 5: all paths have the same black-height
-    if bh_l ~= bh_r then
+    if bhl ~= bhr then
       return nil, "invariant 5 violated: black-height mismatch at key=" .. tostring(node.key) ..
-        " (left=" .. bh_l .. ", right=" .. bh_r .. ")"
+        " (left=" .. bhl .. ", right=" .. bhr .. ")"
     end
 
-    local bh = bh_l + (node.color == BLACK and 1 or 0)
+    local bh = bhl + (node.color == BLACK and 1 or 0)
     return true, bh
   end
 
