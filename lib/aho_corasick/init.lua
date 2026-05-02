@@ -40,7 +40,7 @@ local function build(patterns)
         g[c] = next_id
         next_id = next_id + 1
       end
-      node = g[c]
+      node = (g[c] --[[:! integer]])
     end
     -- Mark this node as a pattern end
     if not output_table[node] then output_table[node] = {} end
@@ -175,6 +175,7 @@ end
 
 -- Replace all occurrences.
 -- replacements: table {[pattern]=replacement} or function(pattern, start) -> string
+--: (self: { ... }, text: string, replacements: unknown) -> string
 function Automaton:replace(text, replacements)
   -- Collect all matches, sorted by start then by length (longest first for overlaps).
   local matches = self:search(text)
@@ -246,16 +247,17 @@ end
 
 -- Build an automaton from a list of patterns.
 -- Returns automaton or (nil, errmsg).
+--: (patterns: { [integer]: string }) -> ({ ... } | nil, string | nil)
 function M.new(patterns)
   if type(patterns) ~= "table" or #patterns == 0 then
     return nil, "aho_corasick.new: patterns must be a non-empty array"
   end
   for i, p in ipairs(patterns) do
     if type(p) ~= "string" then
-      return nil, "aho_corasick.new: pattern " .. i .. " is not a string"
+      return nil, "aho_corasick.new: pattern " .. tostring(i) .. " is not a string"
     end
     if p == "" then
-      return nil, "aho_corasick.new: empty pattern at index " .. i
+      return nil, "aho_corasick.new: empty pattern at index " .. tostring(i)
     end
   end
 
