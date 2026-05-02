@@ -74,7 +74,7 @@ last because the type system itself is the testbed.
 
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
-- [ ] `lib/csv/init.lua` (60) — 21 number/integer/nil arithmetic, 12 unknown-before-indexing
+- [x] `lib/csv/init.lua` (60 → 0)
 - [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Done)
 
 ## FFI-bound (likely unfixable without restructuring)
@@ -110,6 +110,10 @@ last because the type system itself is the testbed.
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/csv/init.lua` (was 60 → now 0, commit fa86f34)
+- [x] `lib/bencode/init.lua` (was 46 → now 0, commit 79ddc6f)
+- [x] `lib/bitarray/init.lua` (was 11 → now 0, commit 6565fdc)
 
 - [x] `lib/xpath/init.lua` (was 150 → now 122, commit e90013a)
 - [x] `lib/observer/init.lua` (was 98 → now 95, commit b9fd693)
