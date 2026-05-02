@@ -84,8 +84,9 @@ end
 --- Parse an RRULE value string into a table.
 -- Example: "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR"
 --: (string) -> { freq: string | nil, interval: integer | nil, count: integer | nil, until: unknown | nil, byday: string[] | nil, bymonthday: integer[] | nil, bymonth: integer[] | nil, wkst: string | nil }
+--:: RRule = { freq: string | nil, interval: integer | nil, count: integer | nil, until: unknown, byday: { [integer]: string } | nil, bymonthday: { [integer]: integer } | nil, bymonth: { [integer]: integer } | nil, wkst: string | nil, byhour: { [integer]: integer } | nil, byminute: { [integer]: integer } | nil, bysecond: { [integer]: integer } | nil, bysetpos: { [integer]: integer } | nil, [string]: unknown }
 function M.parse_rrule(s)
-  local r = {}
+  local r = {} --[[:! RRule]]
   for part in gmatch(s, "[^;]+") do
     local key, val = match(part, "^([^=]+)=(.*)$")
     key = key --[[:! string | nil]]
@@ -101,34 +102,42 @@ function M.parse_rrule(s)
       elseif key == "UNTIL" then
         r["until"] = M.parse_datetime(val) or val
       elseif key == "WKST" then
-        r.wkst = val:upper()
+        local wkst_val = (val --[[:! string]]):upper() --: string
+        r.wkst = wkst_val
       elseif key == "BYDAY" then
-        r.byday = {}
+        r.byday = {} --: { [integer]: string }
+        local byday_ = r.byday --[[:! { [integer]: string }]]
         for day in gmatch(val, "[^,]+") do
-          insert(r.byday, day:upper())
+          insert(byday_, day:upper())
         end
       elseif key == "BYMONTHDAY" then
-        r.bymonthday = {}
+        r.bymonthday = {} --: { [integer]: integer }
+        local bymonthday_ = r.bymonthday --[[:! { [integer]: integer }]]
         for d in gmatch(val, "[^,]+") do
-          insert(r.bymonthday, tonumber(d) --[[:! integer]])
+          bymonthday_[#bymonthday_+1] = tonumber(d) --[[:! integer]]
         end
       elseif key == "BYMONTH" then
-        r.bymonth = {}
+        r.bymonth = {} --: { [integer]: integer }
+        local bymonth_ = r.bymonth --[[:! { [integer]: integer }]]
         for mo in gmatch(val, "[^,]+") do
-          insert(r.bymonth, tonumber(mo) --[[:! integer]])
+          bymonth_[#bymonth_+1] = tonumber(mo) --[[:! integer]]
         end
       elseif key == "BYHOUR" then
-        r.byhour = {}
-        for h in gmatch(val, "[^,]+") do insert(r.byhour, tonumber(h) --[[:! integer]]) end
+        r.byhour = {} --: { [integer]: integer }
+        local byhour_ = r.byhour --[[:! { [integer]: integer }]]
+        for h in gmatch(val, "[^,]+") do byhour_[#byhour_+1] = tonumber(h) --[[:! integer]] end
       elseif key == "BYMINUTE" then
-        r.byminute = {}
-        for m in gmatch(val, "[^,]+") do insert(r.byminute, tonumber(m) --[[:! integer]]) end
+        r.byminute = {} --: { [integer]: integer }
+        local byminute_ = r.byminute --[[:! { [integer]: integer }]]
+        for m in gmatch(val, "[^,]+") do byminute_[#byminute_+1] = tonumber(m) --[[:! integer]] end
       elseif key == "BYSECOND" then
-        r.bysecond = {}
-        for sec in gmatch(val, "[^,]+") do insert(r.bysecond, tonumber(sec) --[[:! integer]]) end
+        r.bysecond = {} --: { [integer]: integer }
+        local bysecond_ = r.bysecond --[[:! { [integer]: integer }]]
+        for sec in gmatch(val, "[^,]+") do bysecond_[#bysecond_+1] = tonumber(sec) --[[:! integer]] end
       elseif key == "BYSETPOS" then
-        r.bysetpos = {}
-        for p in gmatch(val, "[^,]+") do insert(r.bysetpos, tonumber(p) --[[:! integer]]) end
+        r.bysetpos = {} --: { [integer]: integer }
+        local bysetpos_ = r.bysetpos --[[:! { [integer]: integer }]]
+        for p in gmatch(val, "[^,]+") do bysetpos_[#bysetpos_+1] = tonumber(p) --[[:! integer]] end
       else
         r[key:lower()] = val
       end
@@ -138,7 +147,7 @@ function M.parse_rrule(s)
 end
 
 --- Format an RRULE table back to string.
---: (unknown) -> string
+--: (r: RRule) -> string
 function M.format_rrule(r)
   local parts = {}
   if r.freq     then insert(parts, "FREQ=" .. r.freq:upper()) end
@@ -149,7 +158,7 @@ function M.format_rrule(r)
     if type(u) == "table" then
       insert(parts, "UNTIL=" .. M.format_datetime(u))
     else
-      insert(parts, "UNTIL=" .. u)
+      insert(parts, "UNTIL=" .. tostring(u))
     end
   end
   if r.byday and #r.byday > 0 then
@@ -191,10 +200,10 @@ function M.parse_property(line)
   local name
 
   -- Split by semicolons, first token is the property name
-  local tokens = {}
+  local tokens = {} --: { [integer]: string }
   -- We need to be careful: param values can be quoted strings containing semicolons
   local i = 1
-  local current = {}
+  local current = {} --: { [integer]: string }
   local in_quote = false
   local nlen = len(name_part)
   while i <= nlen do
@@ -204,7 +213,7 @@ function M.parse_property(line)
       insert(current, c)
     elseif c == ";" and not in_quote then
       insert(tokens, concat(current))
-      current = {}
+      current = {} --: { [integer]: string }
     else
       insert(current, c)
     end
@@ -265,12 +274,16 @@ local DATETIME_PROPS = {
   RECURRENCE_ID=true, EXDATE=true, RDATE=true,
 }
 
+--: (name: string) -> string
 local function prop_key(name)
   -- Convert property name to a Lua-friendly field name
-  return name:lower():gsub("-", "_")
+  local s, _ = name:lower():gsub("-", "_")
+  return s
 end
 
+--:: ICalProp = { name: string, value: string, params: { [string]: unknown } | nil }
 --- Parse a datetime/date property value, honouring VALUE=DATE parameter.
+--: (prop: ICalProp) -> ({ year: integer, month: integer, day: integer, hour: integer | nil, min: integer | nil, sec: integer | nil, utc: boolean | nil } | { year: integer, month: integer, day: integer } | nil, string | nil)
 local function parse_dt_prop(prop)
   local val = prop.value
   -- If VALUE=DATE param is set, parse as date only
@@ -310,7 +323,8 @@ end
 
 --- Parse a VEVENT or VTODO component from a slice of lines.
 local function parse_component(lines, start_idx, end_idx, comp_type)
-  local comp = { _alarms = {} }
+  local comp = {} --[[:! { _alarms: { [integer]: unknown } | nil, alarms: { [integer]: unknown } | nil, [string]: unknown }]]
+  comp._alarms = {} --: { [integer]: unknown }
   local i = start_idx
   while i <= end_idx do
     local line = lines[i]
@@ -321,7 +335,8 @@ local function parse_component(lines, start_idx, end_idx, comp_type)
       while j <= end_idx and lines[j] ~= "END:VALARM" do
         j = j + 1
       end
-      insert(comp._alarms, parse_valarm(lines, alarm_start, j - 1))
+      local alarms_ = comp._alarms --[[:! { [integer]: unknown }]]
+      alarms_[#alarms_+1] = parse_valarm(lines, alarm_start, j - 1) --[[: any]]
       i = j + 1
     else
       local prop, err = M.parse_property(line)
@@ -338,26 +353,31 @@ local function parse_component(lines, start_idx, end_idx, comp_type)
           comp.rrule = M.parse_rrule(prop.value)
         elseif prop.name == "EXDATE" then
           if not comp.exdate then comp.exdate = {} end
+          local exdate_ = comp.exdate --[[:! { [integer]: unknown }]]
           local dt = parse_dt_prop(prop)
-          if dt then insert(comp.exdate, dt) end
+          if dt then exdate_[#exdate_+1] = dt --[[: any]] end
         elseif prop.name == "RDATE" then
           if not comp.rdate then comp.rdate = {} end
+          local rdate_ = comp.rdate --[[:! { [integer]: unknown }]]
           local dt = parse_dt_prop(prop)
-          if dt then insert(comp.rdate, dt) end
+          if dt then rdate_[#rdate_+1] = dt --[[: any]] end
         elseif prop.name == "CATEGORIES" then
-          comp.categories = {}
+          comp.categories = {} --: { [integer]: string }
+          local categories_ = comp.categories --[[:! { [integer]: string }]]
           for cat in gmatch(prop.value, "[^,]+") do
-            insert(comp.categories, cat)
+            insert(categories_, cat)
           end
         elseif prop.name == "ATTENDEE" then
           if not comp.attendees then comp.attendees = {} end
-          local att = { value = prop.value }
+          local attendees_ = comp.attendees --[[:! { [integer]: unknown }]]
+          local att = {} --[[:! { value: string, [string]: unknown }]]
+          att.value = prop.value
           if prop.params then
-            for pk, pv in pairs(prop.params) do
+            for pk, pv in pairs(prop.params --[[:! { [string]: unknown }]]) do
               att[pk:lower()] = pv
             end
           end
-          insert(comp.attendees, att)
+          attendees_[#attendees_+1] = att --[[: any]]
         elseif prop.name == "ORGANIZER" then
           comp.organizer = { value = prop.value }
           if prop.params then
@@ -380,10 +400,11 @@ local function parse_component(lines, start_idx, end_idx, comp_type)
     end
   end
   -- Expose alarms as comp.alarms only if non-empty
-  if #comp._alarms > 0 then
-    comp.alarms = comp._alarms
+  local alarms_final = comp._alarms --[[:! { [integer]: unknown }]]
+  if #alarms_final > 0 then
+    comp.alarms = alarms_final
   end
-  comp._alarms = nil
+  comp._alarms = nil -- cleared after move to comp.alarms
   return comp
 end
 
@@ -404,13 +425,13 @@ function M.parse(s)
     return nil, "missing BEGIN:VCALENDAR"
   end
 
-  local cal = {
-    events    = {},
-    todos     = {},
-    journals  = {},
-    freebusys = {},
-    timezones = {},
-  }
+  --:: CalResult = { events: { [integer]: unknown }, todos: { [integer]: unknown }, journals: { [integer]: unknown }, freebusys: { [integer]: unknown }, timezones: { [integer]: unknown }, version: string | nil, prodid: string | nil, calscale: string | nil, method: string | nil, [string]: unknown }
+  local cal = {} --[[:! CalResult]]
+  cal.events    = {} --: { [integer]: unknown }
+  cal.todos     = {} --: { [integer]: unknown }
+  cal.journals  = {} --: { [integer]: unknown }
+  cal.freebusys = {} --: { [integer]: unknown }
+  cal.timezones = {} --: { [integer]: unknown }
 
   local i = 2
   while i <= #lines do
@@ -433,7 +454,8 @@ function M.parse(s)
         end
         j = j + 1
       end
-      insert(cal.events, parse_component(lines, comp_start, j - 1, "VEVENT"))
+      local ev_ = cal.events --[[:! { [integer]: unknown }]]
+      ev_[#ev_+1] = parse_component(lines, comp_start, j - 1, "VEVENT") --[[: any]]
       i = j + 1
     elseif upper:find("^BEGIN:VTODO") then
       local comp_start = i + 1
@@ -448,25 +470,29 @@ function M.parse(s)
         end
         j = j + 1
       end
-      insert(cal.todos, parse_component(lines, comp_start, j - 1, "VTODO"))
+      local todos_ = cal.todos --[[:! { [integer]: unknown }]]
+      todos_[#todos_+1] = parse_component(lines, comp_start, j - 1, "VTODO") --[[: any]]
       i = j + 1
     elseif upper:find("^BEGIN:VJOURNAL") then
       local comp_start = i + 1
       local j = i + 1
       while j <= #lines and lines[j]:upper() ~= "END:VJOURNAL" do j = j + 1 end
-      insert(cal.journals, parse_component(lines, comp_start, j - 1, "VJOURNAL"))
+      local jnl_ = cal.journals --[[:! { [integer]: unknown }]]
+      jnl_[#jnl_+1] = parse_component(lines, comp_start, j - 1, "VJOURNAL") --[[: any]]
       i = j + 1
     elseif upper:find("^BEGIN:VFREEBUSY") then
       local comp_start = i + 1
       local j = i + 1
       while j <= #lines and lines[j]:upper() ~= "END:VFREEBUSY" do j = j + 1 end
-      insert(cal.freebusys, parse_component(lines, comp_start, j - 1, "VFREEBUSY"))
+      local fb_ = cal.freebusys --[[:! { [integer]: unknown }]]
+      fb_[#fb_+1] = parse_component(lines, comp_start, j - 1, "VFREEBUSY") --[[: any]]
       i = j + 1
     elseif upper:find("^BEGIN:VTIMEZONE") then
       local comp_start = i + 1
       local j = i + 1
       while j <= #lines and lines[j]:upper() ~= "END:VTIMEZONE" do j = j + 1 end
-      insert(cal.timezones, parse_component(lines, comp_start, j - 1, "VTIMEZONE"))
+      local tz_ = cal.timezones --[[:! { [integer]: unknown }]]
+      tz_[#tz_+1] = parse_component(lines, comp_start, j - 1, "VTIMEZONE") --[[: any]]
       i = j + 1
     elseif upper:find("^BEGIN:") then
       -- Unknown component: skip
@@ -566,10 +592,11 @@ local function add_prop(lines, name, value, params)
         insert(parts, ";" .. k)
       else
         -- Quote value if it contains special chars
-        if find(tostring(v), "[;:,]") then
-          insert(parts, ";" .. k .. '="' .. v .. '"')
+        local vs = tostring(v)
+        if find(vs, "[;:,]") then
+          insert(parts, ";" .. k .. '="' .. vs .. '"')
         else
-          insert(parts, ";" .. k .. "=" .. v)
+          insert(parts, ";" .. k .. "=" .. vs)
         end
       end
     end
@@ -578,7 +605,12 @@ local function add_prop(lines, name, value, params)
   insert(lines, fold_line(prop_line))
 end
 
+--:: ICalDt = { year: integer, month: integer, day: integer, hour: integer | nil, min: integer | nil, sec: integer | nil, utc: boolean | nil }
+--:: ICalAlarm = { action: string | nil, trigger: string | nil, trigger_params: { [string]: unknown } | nil, description: string | nil, summary: string | nil, duration: string | nil, repeat_count: number | nil, [string]: unknown }
+--:: ICalComponent = { uid: string | nil, dtstart: ICalDt | nil, dtend: ICalDt | nil, dtstamp: ICalDt | nil, created: ICalDt | nil, last_modified: ICalDt | nil, due: ICalDt | nil, completed: ICalDt | nil, dtstart_tzid: string | nil, dtend_tzid: string | nil, dtstamp_tzid: string | nil, summary: string | nil, description: string | nil, location: string | nil, status: string | nil, transp: string | nil, class: string | nil, priority: string | nil, sequence: string | nil, url: string | nil, comment: string | nil, percent_complete: string | nil, rrule: RRule | nil, exdate: { [integer]: ICalDt } | nil, rdate: { [integer]: ICalDt } | nil, categories: { [integer]: string } | nil, organizer: { value: string, cn: string | nil, [string]: unknown } | nil, attendees: { [integer]: { value: string, [string]: unknown } } | nil, alarms: { [integer]: ICalAlarm } | nil, [string]: unknown }
+
 --- Add a datetime property (handles date-only vs date-time).
+--: (lines: { [integer]: string }, name: string, dt: ICalDt | nil, tzid: string | nil) -> nil
 local function add_dt_prop(lines, name, dt, tzid)
   if not dt then return end
   local params = nil
@@ -591,6 +623,7 @@ local function add_dt_prop(lines, name, dt, tzid)
 end
 
 --- Serialize a VEVENT component to lines.
+--: (ev: ICalComponent) -> { [integer]: string }
 local function event_to_lines(ev)
   local lines = { "BEGIN:VEVENT" }
   add_prop(lines, "UID",         ev.uid)
@@ -646,8 +679,8 @@ local function event_to_lines(ev)
       if alarm.trigger then
         add_prop(lines, "TRIGGER", alarm.trigger, alarm.trigger_params)
       end
-      add_prop(lines, "DESCRIPTION", alarm.description and escape_text(alarm.description))
-      add_prop(lines, "SUMMARY",     alarm.summary and escape_text(alarm.summary))
+      add_prop(lines, "DESCRIPTION", alarm.description and escape_text(alarm.description --[[:! string]]))
+      add_prop(lines, "SUMMARY",     alarm.summary and escape_text(alarm.summary --[[:! string]]))
       add_prop(lines, "DURATION",    alarm.duration)
       if alarm.repeat_count then
         add_prop(lines, "REPEAT", alarm.repeat_count)
@@ -660,6 +693,7 @@ local function event_to_lines(ev)
 end
 
 --- Serialize a VTODO component to lines.
+--: (td: ICalComponent) -> { [integer]: string }
 local function todo_to_lines(td)
   local lines = { "BEGIN:VTODO" }
   add_prop(lines, "UID",         td.uid)
@@ -690,7 +724,7 @@ local function todo_to_lines(td)
       if alarm.trigger then
         add_prop(lines, "TRIGGER", alarm.trigger, alarm.trigger_params)
       end
-      add_prop(lines, "DESCRIPTION", alarm.description and escape_text(alarm.description))
+      add_prop(lines, "DESCRIPTION", alarm.description and escape_text(alarm.description --[[:! string]]))
       insert(lines, "END:VALARM")
     end
   end
@@ -705,12 +739,12 @@ end
 --- Create a new calendar builder.
 --: ({ prodid: string | nil, version: string | nil, calscale: string | nil, method: string | nil } | nil) -> unknown
 function M.calendar(opts)
-  opts = opts or {}
+  local opts_ = (opts or {}) --[[:! { prodid: string | nil, version: string | nil, calscale: string | nil, method: string | nil }]]
   local cal = {
-    _version  = opts.version  or "2.0",
-    _prodid   = opts.prodid   or "-//crescent//ical//EN",
-    _calscale = opts.calscale,
-    _method   = opts.method,
+    _version  = opts_.version  or "2.0",
+    _prodid   = opts_.prodid   or "-//crescent//ical//EN",
+    _calscale = opts_.calscale,
+    _method   = opts_.method,
     _events   = {},
     _todos    = {},
     _timezones = {},
