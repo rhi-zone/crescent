@@ -14,19 +14,30 @@ local floor, sqrt = math.floor, math.sqrt
 local sort = table.sort
 local concat = table.concat
 
+--:: DiceSt = { s: string, pos: integer }
+--:: RollNode = { type: "roll", count: integer, sides: integer, keep: integer | nil, keep_low: boolean, explode: boolean, fudge: boolean, pct: boolean }
+--:: NegNode = { type: "neg", expr: DiceNode }
+--:: BinopNode = { type: "binop", op: string, left: DiceNode, right: DiceNode }
+--:: ConstNode = { type: "constant", value: number }
+--:: DiceNode = RollNode | NegNode | BinopNode | ConstNode
+--:: StatsResult = { min: number, max: number, mean: number | nil, variance: number | nil }
+
 -- ---------------------------------------------------------------------------
 -- Parser
 -- ---------------------------------------------------------------------------
 -- Tokeniser state: { s=string, pos=integer }
 
+--: (st: DiceSt) -> string
 local function peek(st)
   return st.s:sub(st.pos, st.pos)
 end
 
+--: (st: DiceSt) -> boolean
 local function at_end(st)
   return st.pos > #st.s
 end
 
+--: (st: DiceSt) -> nil
 local function skip_ws(st)
   while st.pos <= #st.s and st.s:sub(st.pos, st.pos):match("%s") do
     st.pos = st.pos + 1
@@ -34,6 +45,7 @@ local function skip_ws(st)
 end
 
 -- Read zero or more digits; return integer or nil
+--: (st: DiceSt) -> integer | nil
 local function read_int(st)
   local s = st.s
   local i = st.pos
@@ -41,7 +53,7 @@ local function read_int(st)
   local j = i
   while j <= #s and s:sub(j, j):match("%d") do j = j + 1 end
   st.pos = j
-  return tonumber(s:sub(i, j - 1))
+  return tonumber(s:sub(i, j - 1)) --[[:! integer]]
 end
 
 -- Forward declarations
@@ -49,6 +61,7 @@ local parse_expr
 
 -- Parse a single die-roll atom: [N]d(S|%|F[.2]) [k[l]K] [!]
 -- Returns AST node or nil
+--: (st: DiceSt) -> (RollNode | nil, string | nil)
 local function parse_roll(st)
   local start = st.pos
 
@@ -94,6 +107,7 @@ local function parse_roll(st)
   end
 
   count = count or 1
+  local sides_ = sides --[[:! integer]]
 
   -- Optional keep modifier: k[l]N
   local keep = nil
@@ -125,7 +139,7 @@ local function parse_roll(st)
   return {
     type     = "roll",
     count    = count,
-    sides    = sides,
+    sides    = sides_,
     keep     = keep,
     keep_low = keep_low,
     explode  = explode,
@@ -135,6 +149,7 @@ local function parse_roll(st)
 end
 
 -- Parse a primary expression: number | roll | '(' expr ')'
+--: (st: DiceSt) -> (DiceNode | nil, string | nil)
 local function parse_primary(st)
   skip_ws(st)
 
@@ -178,6 +193,7 @@ end
 -- Pratt-style binary operator parsing
 local PREC = { ["+"] = 1, ["-"] = 1, ["*"] = 2, ["/"] = 2 }
 
+--: (st: DiceSt, min_prec: integer) -> (DiceNode | nil, string | nil)
 parse_expr = function(st, min_prec)
   local left, err = parse_primary(st)
   if not left then return nil, err end
@@ -227,6 +243,7 @@ local MAX_EXPLODE = 100  -- prevent infinite explosion loops
 
 -- Roll a single die of `sides` sides using rng.
 -- For fudge: roll 1d3, subtract 2 → {-1, 0, 1}.
+--: (sides: integer, rng: (integer) -> integer, fudge: boolean) -> integer
 local function roll_one(sides, rng, fudge)
   local v = rng(sides)
   if fudge then return v - 2 end
@@ -234,41 +251,49 @@ local function roll_one(sides, rng, fudge)
 end
 
 -- Evaluate an AST node. Returns number or (nil, errmsg).
+--: (node: DiceNode, rng: (integer) -> integer) -> (number | nil, string | nil)
 local function eval(node, rng)
   local t = node.type
 
   if t == "constant" then
-    return node.value
+    local cn = node --[[:! ConstNode]]
+    return cn.value
 
   elseif t == "neg" then
-    local v, err = eval(node.expr, rng)
+    local nn = node --[[:! NegNode]]
+    local v, err = eval(nn.expr, rng)
     if not v then return nil, err end
-    return -v
+    local v_ = v --[[:! number]]
+    return -v_
 
   elseif t == "binop" then
-    local l, err = eval(node.left, rng)
+    local bn = node --[[:! BinopNode]]
+    local l, err = eval(bn.left, rng)
     if not l then return nil, err end
+    local l_ = l --[[:! number]]
     local r
-    r, err = eval(node.right, rng)
+    r, err = eval(bn.right, rng)
     if not r then return nil, err end
-    local op = node.op
-    if op == "+" then return l + r
-    elseif op == "-" then return l - r
-    elseif op == "*" then return l * r
+    local r_ = r --[[:! number]]
+    local op = bn.op
+    if op == "+" then return l_ + r_
+    elseif op == "-" then return l_ - r_
+    elseif op == "*" then return l_ * r_
     elseif op == "/" then
-      if r == 0 then return nil, "division by zero" end
-      return floor(l / r)
+      if r_ == 0 then return nil, "division by zero" end
+      return floor(l_ / r_)
     end
 
   elseif t == "roll" then
-    local dice = {}
-    for _ = 1, node.count do
-      local v = roll_one(node.sides, rng, node.fudge)
+    local rn = node --[[:! RollNode]]
+    local dice = {} --: { [integer]: integer }
+    for _ = 1, rn.count do
+      local v = roll_one(rn.sides, rng, rn.fudge)
       -- Exploding dice
-      if node.explode and not node.fudge then
+      if rn.explode and not rn.fudge then
         local boom = 0
-        while v % node.sides == 0 and boom < MAX_EXPLODE do
-          v = v + roll_one(node.sides, rng, false)
+        while v % rn.sides == 0 and boom < MAX_EXPLODE do
+          v = v + roll_one(rn.sides, rng, false)
           boom = boom + 1
         end
       end
@@ -276,15 +301,16 @@ local function eval(node, rng)
     end
 
     -- Keep highest/lowest
-    if node.keep then
+    if rn.keep then
       sort(dice)
+      local keep_ = rn.keep --[[:! integer]]
       local sum = 0
-      if node.keep_low then
+      if rn.keep_low then
         -- keep lowest keep values (already sorted ascending)
-        for i = 1, node.keep do sum = sum + dice[i] end
+        for i = 1, keep_ do sum = sum + dice[i] end
       else
         -- keep highest keep values
-        for i = node.count - node.keep + 1, node.count do
+        for i = rn.count - keep_ + 1, rn.count do
           sum = sum + dice[i]
         end
       end
@@ -299,73 +325,86 @@ local function eval(node, rng)
   return nil, "unknown node type: " .. tostring(t)
 end
 
+--:: DetailResult = { total: number, rolls: { [integer]: unknown }, breakdown: string | nil }
 -- Evaluate a parsed AST node with full roll details.
 -- Returns a details table or (nil, errmsg).
+--: (node: DiceNode, rng: (integer) -> integer, breakdown_parts: { [integer]: string } | nil) -> (DetailResult | nil, string | nil)
 local function eval_detailed(node, rng, breakdown_parts)
   local t = node.type
   breakdown_parts = breakdown_parts or {}
 
   if t == "constant" then
-    breakdown_parts[#breakdown_parts + 1] = tostring(node.value)
-    return { total = node.value, rolls = {} }
+    local cn = node --[[:! ConstNode]]
+    breakdown_parts[#breakdown_parts + 1] = tostring(cn.value)
+    local empty_rolls = {} --: { [integer]: unknown }
+    return { total = cn.value, rolls = empty_rolls, breakdown = nil }
 
   elseif t == "neg" then
-    local inner, err = eval_detailed(node.expr, rng, {})
+    local nn = node --[[:! NegNode]]
+    local inner, err = eval_detailed(nn.expr, rng, {})
     if not inner then return nil, err end
-    breakdown_parts[#breakdown_parts + 1] = "-(" .. (inner.breakdown or tostring(inner.total)) .. ")"
-    return { total = -inner.total, rolls = inner.rolls,
-             breakdown = "-(" .. (inner.breakdown or tostring(inner.total)) .. ")" }
+    local inner_ = inner --[[:! DetailResult]]
+    breakdown_parts[#breakdown_parts + 1] = "-(" .. (inner_.breakdown or tostring(inner_.total)) .. ")"
+    return { total = -inner_.total, rolls = inner_.rolls,
+             breakdown = "-(" .. (inner_.breakdown or tostring(inner_.total)) .. ")" }
 
   elseif t == "binop" then
-    local lb, rb = {}, {}
-    local l, err = eval_detailed(node.left, rng, lb)
+    local bn = node --[[:! BinopNode]]
+    local lb = {} --: { [integer]: string }
+    local rb = {} --: { [integer]: string }
+    local l, err = eval_detailed(bn.left, rng, lb)
     if not l then return nil, err end
+    local l_ = l --[[:! DetailResult]]
     local r
-    r, err = eval_detailed(node.right, rng, rb)
+    r, err = eval_detailed(bn.right, rng, rb)
     if not r then return nil, err end
-    local total
-    local op = node.op
-    if op == "+" then total = l.total + r.total
-    elseif op == "-" then total = l.total - r.total
-    elseif op == "*" then total = l.total * r.total
+    local r_ = r --[[:! DetailResult]]
+    local total = 0 --: number
+    local op = bn.op
+    if op == "+" then total = l_.total + r_.total
+    elseif op == "-" then total = l_.total - r_.total
+    elseif op == "*" then total = l_.total * r_.total
     elseif op == "/" then
-      if r.total == 0 then return nil, "division by zero" end
-      total = floor(l.total / r.total)
+      if r_.total == 0 then return nil, "division by zero" end
+      total = floor(l_.total / r_.total)
     end
-    local lbd = lb[1] or tostring(l.total)
-    local rbd = rb[1] or tostring(r.total)
+    local lbd = lb[1] or tostring(l_.total)
+    local rbd = rb[1] or tostring(r_.total)
     local bd = lbd .. op .. rbd
     breakdown_parts[#breakdown_parts + 1] = bd
-    local rolls = {}
-    for _, v in ipairs(l.rolls) do rolls[#rolls + 1] = v end
-    for _, v in ipairs(r.rolls) do rolls[#rolls + 1] = v end
+    local rolls = {} --: { [integer]: unknown }
+    for _, v in ipairs(l_.rolls) do rolls[#rolls + 1] = v end
+    for _, v in ipairs(r_.rolls) do rolls[#rolls + 1] = v end
     return { total = total, rolls = rolls, breakdown = bd }
 
   elseif t == "roll" then
-    local dice = {}
-    for _ = 1, node.count do
-      local v = roll_one(node.sides, rng, node.fudge)
-      if node.explode and not node.fudge then
+    local rn = node --[[:! RollNode]]
+    local dice = {} --: { [integer]: integer }
+    for _ = 1, rn.count do
+      local v = roll_one(rn.sides, rng, rn.fudge)
+      if rn.explode and not rn.fudge then
         local boom = 0
-        while v % node.sides == 0 and boom < MAX_EXPLODE do
-          v = v + roll_one(node.sides, rng, false)
+        while v % rn.sides == 0 and boom < MAX_EXPLODE do
+          v = v + roll_one(rn.sides, rng, false)
           boom = boom + 1
         end
       end
       dice[#dice + 1] = v
     end
 
-    local kept, dropped = {}, {}
-    if node.keep then
-      local sorted = {}
+    local kept = {} --: { [integer]: integer }
+    local dropped = {} --: { [integer]: integer }
+    if rn.keep then
+      local sorted = {} --: { [integer]: integer }
       for i, v in ipairs(dice) do sorted[i] = v end
       sort(sorted)
-      if node.keep_low then
-        for i = 1, node.keep do kept[#kept + 1] = sorted[i] end
-        for i = node.keep + 1, #sorted do dropped[#dropped + 1] = sorted[i] end
+      local keep_ = rn.keep --[[:! integer]]
+      if rn.keep_low then
+        for i = 1, keep_ do kept[#kept + 1] = sorted[i] end
+        for i = keep_ + 1, #sorted do dropped[#dropped + 1] = sorted[i] end
       else
-        for i = 1, node.count - node.keep do dropped[#dropped + 1] = sorted[i] end
-        for i = node.count - node.keep + 1, node.count do kept[#kept + 1] = sorted[i] end
+        for i = 1, rn.count - keep_ do dropped[#dropped + 1] = sorted[i] end
+        for i = rn.count - keep_ + 1, rn.count do kept[#kept + 1] = sorted[i] end
       end
     else
       for i, v in ipairs(dice) do kept[i] = v end
@@ -375,15 +414,15 @@ local function eval_detailed(node, rng, breakdown_parts)
     for _, v in ipairs(kept) do sum = sum + v end
 
     local sides_str
-    if node.fudge then sides_str = "F"
-    elseif node.pct then sides_str = "%"
-    else sides_str = tostring(node.sides) end
+    if rn.fudge then sides_str = "F"
+    elseif rn.pct then sides_str = "%"
+    else sides_str = tostring(rn.sides) end
 
-    local label = node.count .. "d" .. sides_str
-    if node.keep then
-      label = label .. "k" .. (node.keep_low and "l" or "") .. node.keep
+    local label = rn.count .. "d" .. (sides_str --[[:! string]])
+    if rn.keep then
+      label = label .. "k" .. (rn.keep_low and "l" or "") .. (rn.keep --[[:! integer]])
     end
-    if node.explode then label = label .. "!" end
+    if rn.explode then label = label .. "!" end
 
     local roll_entry = {
       label   = label,
@@ -450,63 +489,107 @@ end
 -- For keep/explode we fall back to simulation.
 local SIM_N = 10000
 
+--: (node: DiceNode) -> { min: number, max: number, mean: number | nil, variance: number | nil } | nil
 local function stats_node(node)
   local t = node.type
 
   if t == "constant" then
-    return { min = node.value, max = node.value, mean = node.value, variance = 0 }
+    local cn = node --[[:! ConstNode]]
+    local v = cn.value --: number
+    local zero = 0 --: number
+    return { min = v, max = v, mean = v, variance = zero }
 
   elseif t == "neg" then
-    local s = stats_node(node.expr)
-    return { min = -s.max, max = -s.min, mean = -s.mean, variance = s.variance }
+    local nn = node --[[:! NegNode]]
+    local s = stats_node(nn.expr)
+    if not s then return nil end
+    local smin = s.min --: number
+    local smax = s.max --: number
+    local smean = s.mean
+    local svar = s.variance
+    return { min = -smax, max = -smin,
+             mean = smean and -smean or nil, variance = svar }
 
   elseif t == "binop" then
-    local l = stats_node(node.left)
-    local r = stats_node(node.right)
-    local op = node.op
+    local bn = node --[[:! BinopNode]]
+    local l_raw = stats_node(bn.left)
+    local r_raw = stats_node(bn.right)
+    if not l_raw or not r_raw then return nil end
+    -- After nil guard, l_raw and r_raw are non-nil; use direct field access
+    local l_min = (l_raw or {min=0}).min --: number
+    local l_max = (l_raw or {max=0}).max --: number
+    local l_mean = (l_raw or {mean=nil}).mean --: number | nil
+    local l_var = (l_raw or {variance=nil}).variance --: number | nil
+    local r_min = (r_raw or {min=0}).min --: number
+    local r_max = (r_raw or {max=0}).max --: number
+    local r_mean = (r_raw or {mean=nil}).mean --: number | nil
+    local r_var = (r_raw or {variance=nil}).variance --: number | nil
+    --:: _BinSR = { min: number, max: number, mean: number | nil, variance: number | nil }
+    local l_ = { min = l_min, max = l_max, mean = l_mean, variance = l_var } --: _BinSR
+    local r_ = { min = r_min, max = r_max, mean = r_mean, variance = r_var } --: _BinSR
+    local op = bn.op
     if op == "+" then
-      return { min = l.min + r.min, max = l.max + r.max,
-               mean = l.mean + r.mean, variance = l.variance + r.variance }
+      local lm = l_.mean --: number | nil
+      local rm = r_.mean --: number | nil
+      local lv = l_.variance --: number | nil
+      local rv = r_.variance --: number | nil
+      local cmean = lm and rm and (lm --[[:! number]]) + (rm --[[:! number]]) or nil --: number | nil
+      local cvar = lv and rv and (lv --[[:! number]]) + (rv --[[:! number]]) or nil --: number | nil
+      return { min = l_.min + r_.min, max = l_.max + r_.max,
+               mean = cmean, variance = cvar }
     elseif op == "-" then
-      return { min = l.min - r.max, max = l.max - r.min,
-               mean = l.mean - r.mean, variance = l.variance + r.variance }
+      local lm = l_.mean --: number | nil
+      local rm = r_.mean --: number | nil
+      local lv = l_.variance --: number | nil
+      local rv = r_.variance --: number | nil
+      local cmean = lm and rm and (lm --[[:! number]]) - (rm --[[:! number]]) or nil --: number | nil
+      local cvar = lv and rv and (lv --[[:! number]]) + (rv --[[:! number]]) or nil --: number | nil
+      return { min = l_.min - r_.max, max = l_.max - r_.min,
+               mean = cmean, variance = cvar }
     elseif op == "*" then
       -- For simple constant * roll or roll * constant, compute analytically.
       -- Otherwise approximate via simulation mark.
-      local mins = { l.min * r.min, l.min * r.max, l.max * r.min, l.max * r.max }
-      sort(mins)
+      local mins = { l_.min * r_.min, l_.min * r_.max, l_.max * r_.min, l_.max * r_.max } --: { [integer]: number }
+      sort(mins --[[:! { [integer]: integer }]])
       -- Mean of product of independent vars = product of means (only for independent).
+      local lm = l_.mean --: number | nil
+      local rm = r_.mean --: number | nil
+      local cmean = lm and rm and (lm --[[:! number]]) * (rm --[[:! number]]) or nil --: number | nil
       return { min = mins[1], max = mins[4],
-               mean = l.mean * r.mean, variance = nil }  -- nil triggers simulation
+               mean = cmean, variance = nil }  -- nil triggers simulation
     elseif op == "/" then
-      return { min = floor(l.min / math.max(r.max, 1)),
-               max = floor(l.max / math.max(r.min, 1)),
+      return { min = floor(l_.min / math.max(r_.max, 1)),
+               max = floor(l_.max / math.max(r_.min, 1)),
                mean = nil, variance = nil }
     end
 
   elseif t == "roll" then
+    local rn = node --[[:! RollNode]]
     -- Fudge: mean=0, var per die = 2/3
-    if node.fudge then
-      if node.keep then
+    if rn.fudge then
+      if rn.keep then
         return nil  -- fall back to sim
       end
-      local n = node.count
+      local n = rn.count
+      local n_ = n --: number
+      local zero = 0 --: number
       return {
-        min      = -n,
-        max      =  n,
-        mean     = 0,
-        variance = n * (2 / 3),
+        min      = -n_,
+        max      =  n_,
+        mean     = zero,
+        variance = n_ * (2 / 3),
       }
     end
 
-    local s = node.sides
+    local s = rn.sides
 
     -- Basic NdS (no keep, no explode) — closed form
-    if not node.keep and not node.explode then
-      local n = node.count
-      local mean = n * (s + 1) / 2
-      local var  = n * (s * s - 1) / 12
-      return { min = n, max = n * s, mean = mean, variance = var }
+    if not rn.keep and not rn.explode then
+      local n = rn.count
+      local n_ = n --: number
+      local mean = n_ * (s + 1) / 2
+      local var  = n_ * (s * s - 1) / 12
+      return { min = n_, max = n_ * s, mean = mean, variance = var }
     end
 
     -- Keep / explode: simulate
@@ -517,18 +600,22 @@ local function stats_node(node)
 end
 
 -- Fallback: simulate to get stats.
+--: (node: DiceNode, n: integer) -> { min: number, max: number, mean: number, variance: number }
 local function simulate_stats(node, n)
-  local sum, sum2 = 0, 0
-  local mn, mx = math.huge, -math.huge
+  local sum = 0 --: number
+  local sum2 = 0 --: number
+  local mn = math.huge --: number
+  local mx = -math.huge --: number
   local counts = {}
   for _ = 1, n do
     local v = eval(node, DEFAULT_RNG)
     if v then
-      sum  = sum  + v
-      sum2 = sum2 + v * v
-      if v < mn then mn = v end
-      if v > mx then mx = v end
-      counts[v] = (counts[v] or 0) + 1
+      local v_ = v --[[:! number]]
+      sum  = sum  + v_
+      sum2 = sum2 + v_ * v_
+      if v_ < mn then mn = v_ end
+      if v_ > mx then mx = v_ end
+      counts[v_] = ((counts[v_] --[[:! integer | nil]]) or 0) + 1
     end
   end
   local mean = sum / n
@@ -540,13 +627,11 @@ function M.stats(expr_or_string)
   local node, err = resolve(expr_or_string)
   if not node then return nil, err end
 
-  local s = stats_node(node)
-  if not s or s.variance == nil or s.mean == nil then
-    -- Fall back to simulation
-    s = simulate_stats(node, SIM_N)
-  end
-
-  s.stddev = sqrt(s.variance)
+  local s_raw = stats_node(node)
+  local s = (s_raw and s_raw.variance ~= nil and s_raw.mean ~= nil)
+    and s_raw or simulate_stats(node, SIM_N)
+  local svar = s.variance --[[:! number]]
+  s.stddev = sqrt(svar)
   return s
 end
 
@@ -558,7 +643,10 @@ function M.simulate(expr_or_string, n, rng)
   local freq = {}
   for _ = 1, n do
     local v = eval(node, rng)
-    if v then freq[v] = (freq[v] or 0) + 1 end
+    if v then
+      local v_ = v --[[:! number]]
+      freq[v_] = ((freq[v_] --[[:! integer | nil]]) or 0) + 1
+    end
   end
   return freq
 end
