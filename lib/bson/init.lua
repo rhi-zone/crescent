@@ -10,8 +10,11 @@ local M = {}
 
 M._tier = "pure"
 
-local ffi_ok, ffi = pcall(require, "ffi")
-if not ffi_ok then ffi = nil end
+local ffi --[[: any]]
+do
+	local ffi_ok, ffi_ = pcall(require, "ffi")
+	if ffi_ok then ffi = ffi_ end
+end
 
 local bit = require("bit")
 local byte = string.byte
@@ -57,12 +60,13 @@ end
 -- ── little-endian pack helpers ───────────────────────────────────────────────
 
 local function pack_i32(n)
-	n = bit.tobit(n)
+	local ni = math.floor(n) --[[:! integer]]
+	ni = bit.tobit(ni)
 	return char(
-		bit.band(n, 0xff),
-		bit.band(bit.rshift(n, 8), 0xff),
-		bit.band(bit.rshift(n, 16), 0xff),
-		bit.band(bit.rshift(n, 24), 0xff)
+		bit.band(ni, 0xff),
+		bit.band(bit.rshift(ni, 8), 0xff),
+		bit.band(bit.rshift(ni, 16), 0xff),
+		bit.band(bit.rshift(ni, 24), 0xff)
 	)
 end
 
@@ -80,8 +84,8 @@ end
 local function pack_i64(n)
 	-- Split n into signed hi32 and unsigned lo32 via floor division.
 	-- This avoids the precision loss of adding 2^64 as a double.
-	local hi = floor(n / 4294967296)
-	local lo = n - hi * 4294967296
+	local hi = floor(n / 4294967296) --: number
+	local lo = n - hi * 4294967296 --: number
 	-- hi may be negative (e.g. -1 for values in [-2^32, 0)).
 	-- Convert hi to unsigned 32-bit for byte extraction.
 	if hi < 0 then hi = hi + 4294967296 end
@@ -101,11 +105,12 @@ end
 -- Uses FFI when available for exact bit-level representation.
 local pack_double
 if ffi then
-	local _tmp = ffi.new("double[1]")
+	local ffi_ = ffi --[[:! { new: (string) -> any, cast: (string, any) -> any, ... }]]
+	local _tmp = ffi_.new("double[1]") --[[: any]]
 	local _ptr  -- will be cast after first use
 	pack_double = function(n)
 		_tmp[0] = n
-		local p = ffi.cast("uint8_t*", _tmp)
+		local p = ffi_.cast("uint8_t*", _tmp) --[[: any]]
 		return char(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7])
 	end
 else
@@ -128,8 +133,8 @@ else
 		if n == huge then
 			return char(0, 0, 0, 0, 0, 0, 240, sign + 127)
 		end
-		local exp = 0
-		local mant = n
+		local exp = 0 --: number
+		local mant = n --: number
 		if mant >= 2 then
 			while mant >= 2 do mant = mant / 2; exp = exp + 1 end
 		elseif mant < 1 then
@@ -137,9 +142,9 @@ else
 		end
 		if exp == -1022 and mant < 1 then
 			-- subnormal
-			local frac = mant * 4503599627370496
-			local lo = frac % 4294967296
-			local hi = floor(frac / 4294967296)
+			local frac = mant * 4503599627370496 --: number
+			local lo = frac % 4294967296 --: number
+			local hi = floor(frac / 4294967296) --: number
 			return char(
 				lo % 256, floor(lo / 256) % 256,
 				floor(lo / 65536) % 256, floor(lo / 16777216) % 256,
@@ -149,9 +154,9 @@ else
 		end
 		exp = exp + 1023
 		mant = mant - 1
-		local frac = mant * 4503599627370496
-		local lo = frac % 4294967296
-		local hi = floor(frac / 4294967296)
+		local frac = mant * 4503599627370496 --: number
+		local lo = frac % 4294967296 --: number
+		local hi = floor(frac / 4294967296) --: number
 		-- little-endian layout:
 		-- byte0..3 = lo bits
 		-- byte4..6 = hi bits (mantissa high)
@@ -171,51 +176,71 @@ end
 
 --: (string, integer) -> (integer, integer)
 local function unpack_i32(s, pos)
-	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
-	local n = b1 + b2 * 256 + b3 * 65536 + b4 * 16777216
+	local b1 = (byte(s, pos) or 0) --[[:! integer]]
+	local b2 = (byte(s, pos + 1) or 0) --[[:! integer]]
+	local b3 = (byte(s, pos + 2) or 0) --[[:! integer]]
+	local b4 = (byte(s, pos + 3) or 0) --[[:! integer]]
+	local n = (b1 + b2 * 256 + b3 * 65536 + b4 * 16777216) --[[: number]]
 	if n >= 2147483648 then n = n - 4294967296 end
-	return n, pos + 4
+	return n --[[:! integer]], pos + 4
 end
 
 --: (string, integer) -> (integer, integer)
 local function unpack_u32(s, pos)
-	local b1, b2, b3, b4 = byte(s, pos, pos + 3)
-	return b1 + b2 * 256 + b3 * 65536 + b4 * 16777216, pos + 4
+	local b1 = (byte(s, pos) or 0) --[[:! integer]]
+	local b2 = (byte(s, pos + 1) or 0) --[[:! integer]]
+	local b3 = (byte(s, pos + 2) or 0) --[[:! integer]]
+	local b4 = (byte(s, pos + 3) or 0) --[[:! integer]]
+	local n = (b1 + b2 * 256 + b3 * 65536 + b4 * 16777216) --[[: number]]
+	return n --[[:! integer]], pos + 4
 end
 
---: (string, integer) -> (integer, integer)
+--: (string, integer) -> (number, integer)
 local function unpack_i64(s, pos)
-	local lo, hi
+	local lo = 0 --[[: number]]
+	local hi = 0 --[[: number]]
 	lo, pos = unpack_u32(s, pos)
 	hi, pos = unpack_u32(s, pos)
 	-- Convert hi to signed 32-bit, then compute: hi_signed * 2^32 + lo_unsigned.
 	-- This avoids the precision loss of adding/subtracting 2^64 as a double.
-	if hi >= 2147483648 then hi = hi - 4294967296 end
-	return hi * 4294967296 + lo, pos
+	local hi_ = hi --[[: number]]
+	if hi_ >= 2147483648 then hi_ = hi_ - 4294967296 end
+	return hi_ * 4294967296 + lo, pos
 end
 
 -- Unpack IEEE 754 double from little-endian 8 bytes.
 local unpack_double
 if ffi then
-	local _tmp = ffi.new("uint8_t[8]")
-	local _dptr = ffi.cast("double*", _tmp)
+	local ffi_ = ffi --[[:! { new: (string) -> any, cast: (string, any) -> any, ... }]]
+	local _tmp = ffi_.new("uint8_t[8]") --[[: any]]
+	local _dptr = ffi_.cast("double*", _tmp) --[[: any]]
+	--: (string, integer) -> (number, integer)
 	unpack_double = function(s, pos)
 		for i = 0, 7 do
-			_tmp[i] = byte(s, pos + i)
+			_tmp[i] = (byte(s, pos + i) or 0) --[[:! integer]]
 		end
-		return tonumber(_dptr[0]), pos + 8
+		return tonumber(_dptr[0]) or 0, pos + 8
 	end
 else
 	local huge = math.huge
+	--: (string, integer) -> (number, integer)
 	unpack_double = function(s, pos)
-		local b1, b2, b3, b4, b5, b6, b7, b8 = byte(s, pos, pos + 7)
+		local b1 = (byte(s, pos) or 0) --[[:! integer]]
+		local b2 = (byte(s, pos + 1) or 0) --[[:! integer]]
+		local b3 = (byte(s, pos + 2) or 0) --[[:! integer]]
+		local b4 = (byte(s, pos + 3) or 0) --[[:! integer]]
+		local b5 = (byte(s, pos + 4) or 0) --[[:! integer]]
+		local b6 = (byte(s, pos + 5) or 0) --[[:! integer]]
+		local b7 = (byte(s, pos + 6) or 0) --[[:! integer]]
+		local b8 = (byte(s, pos + 7) or 0) --[[:! integer]]
 		-- little-endian: b1=byte0(lsb), b8=byte7(msb)
-		local sign = 1
-		if b8 >= 128 then sign = -1; b8 = b8 - 128 end
-		local exp = b8 * 16 + floor(b7 / 16)
-		local hi = (b7 % 16) * 65536 + b6 * 256 + b5
-		local lo = b4 * 16777216 + b3 * 65536 + b2 * 256 + b1
-		local mant = hi * 4294967296 + lo
+		local sign = 1 --: number
+		local b8_ = b8 --: number
+		if b8_ >= 128 then sign = -1; b8_ = b8_ - 128 end
+		local exp = b8_ * 16 + floor(b7 / 16) --: number
+		local hi = (b7 % 16) * 65536 + b6 * 256 + b5 --: number
+		local lo = b4 * 16777216 + b3 * 65536 + b2 * 256 + b1 --: number
+		local mant = hi * 4294967296 + lo --: number
 		if exp == 0 then
 			if mant == 0 then return sign * 0, pos + 8 end
 			return sign * mant * 2^(-1074), pos + 8
@@ -231,30 +256,34 @@ end
 
 -- Returns true if t is a BSON array (sequential integer keys 1..n).
 local function is_array(t)
+	local t_ = t --[[: any]]
 	local n = 0
-	for _ in pairs(t) do n = n + 1 end
+	for _ in pairs(t_) do n = n + 1 end
 	if n == 0 then return false end
 	for i = 1, n do
-		if t[i] == nil then return false end
+		if t_[i] == nil then return false end
 	end
 	return true
 end
 
 -- Returns true if t looks like an array-document (keys "0","1",...,"n-1").
 local function is_array_doc(t)
+	local t_ = t --[[: any]]
 	local n = 0
-	for _ in pairs(t) do n = n + 1 end
+	for _ in pairs(t_) do n = n + 1 end
 	if n == 0 then return false end
-	for i = 0, n - 1 do
-		if t[tostring(i)] == nil then return false end
+	local n_ = 0 + n --[[: integer]]
+	for i = 0, n_ - 1 do
+		if t_[tostring(i)] == nil then return false end
 	end
 	return true
 end
 
 -- Convert a decoded array-document (keys "0","1",...) to a Lua array (keys 1,2,...).
 local function array_doc_to_array(t)
+	local t_ = t --[[: any]]
 	local arr = {}
-	for k, v in pairs(t) do
+	for k, v in pairs(t_) do
 		local i = tonumber(k)
 		if i then arr[i + 1] = v end
 	end
@@ -290,35 +319,38 @@ encode_value = function(v)
 	end
 
 	if tv == "number" then
+		local vn = v --[[:! number]]
 		-- integer-valued?
-		if v == floor(v) and v >= -2147483648 and v <= 2147483647 then
-			return "\x10" .. pack_i32(v)
-		elseif v == floor(v) and v >= -9007199254740992 and v <= 9007199254740992 then
-			return "\x12" .. pack_i64(v)
+		if vn == floor(vn) and vn >= -2147483648 and vn <= 2147483647 then
+			return "\x10" .. pack_i32(vn)
+		elseif vn == floor(vn) and vn >= -9007199254740992 and vn <= 9007199254740992 then
+			return "\x12" .. pack_i64(vn)
 		else
-			return "\x01" .. pack_double(v)
+			return "\x01" .. pack_double(vn)
 		end
 	end
 
 	if tv == "string" then
-		local len = #v
-		return "\x02" .. pack_i32(len + 1) .. v .. "\0"
+		local vs = v --[[:! string]]
+		local len = #vs
+		return "\x02" .. pack_i32(len + 1) .. vs .. "\0"
 	end
 
 	if tv == "table" then
-		local mt = getmetatable(v)
+		local vt = v --[[:! { ms: number, data: string, subtype: number, ... }]]
+		local mt = getmetatable(vt)
 		if mt == datetime_mt then
-			return "\x09" .. pack_i64(v.ms)
+			return "\x09" .. pack_i64(vt.ms)
 		end
 		if mt == binary_mt then
-			local data = v.data
-			local subtype = v.subtype or 0
+			local data = vt.data
+			local subtype = vt.subtype or 0
 			return "\x05" .. pack_i32(#data) .. char(subtype) .. data
 		end
 		-- embedded document or array
-		local doc, derr = encode_document(v)
+		local doc, derr = encode_document(vt)
 		if not doc then return nil, derr end
-		if is_array(v) then
+		if is_array(vt) then
 			return "\x04" .. doc
 		else
 			return "\x03" .. doc
@@ -366,7 +398,6 @@ end
 --- Encode a Lua value as a BSON document.
 -- A top-level nil encodes as an empty document.
 -- Returns: bytes string, or (nil, errmsg)
---: (value: unknown) -> string | (nil, string)
 function M.encode(value)
 	if value == nil then
 		-- empty document
@@ -383,11 +414,12 @@ end
 -- Read a null-terminated cstring starting at pos.
 -- Returns: string, pos_after_null
 local function read_cstring(s, pos)
-	local nul = s:find("\0", pos, true)
+	local s_ = s --[[:! string]]
+	local nul = s_:find("\0", pos, true)
 	if not nul then
 		return nil, "unterminated cstring"
 	end
-	return sub(s, pos, nul - 1), nul + 1
+	return sub(s_, pos, nul - 1), nul + 1
 end
 
 -- Decode a BSON document starting at pos.
@@ -417,7 +449,10 @@ local function decode_document(s, pos)
 
 		-- read key
 		local key, err
-		key, cur = read_cstring(s, cur)
+		do
+			local cur_ = cur
+			key, cur = read_cstring(s, cur_)
+		end
 		if not key then return nil, err end
 
 		-- read value
@@ -438,14 +473,16 @@ local function decode_document(s, pos)
 
 		elseif tbyte == 0x03 then
 			-- embedded document
-			val, cur, err = decode_document(s, cur)
-			if not val then return nil, err end
+			local val_2, cur_2 = decode_document(s, cur)
+			if not val_2 then return nil, tostring(cur_2) end
+			val = val_2
+			cur = (tonumber(cur_2) or cur) --[[:! integer]]
 
 		elseif tbyte == 0x04 then
 			-- array (document with "0","1",... keys → convert to Lua array)
-			local arr_t
-			arr_t, cur, err = decode_document(s, cur)
-			if not arr_t then return nil, err end
+			local arr_t, cur_2 = decode_document(s, cur)
+			if not arr_t then return nil, tostring(cur_2) end
+			cur = (tonumber(cur_2) or cur) --[[:! integer]]
 			-- arr_t has string keys "0","1","2"... — convert to 1-indexed Lua array
 			local arr = {}
 			for k, v in pairs(arr_t) do
@@ -462,7 +499,7 @@ local function decode_document(s, pos)
 			local blen
 			blen, cur = unpack_i32(s, cur)
 			if cur > slen then return nil, "truncated binary subtype" end
-			local subtype = byte(s, cur)
+			local subtype = (byte(s, cur) or 0) --[[:! integer]]
 			cur = cur + 1
 			if cur + blen - 1 > slen then return nil, "truncated binary data" end
 			val = M.binary(sub(s, cur, cur + blen - 1), subtype)
@@ -470,7 +507,7 @@ local function decode_document(s, pos)
 
 		elseif tbyte == 0x08 then
 			-- boolean
-			local bval = byte(s, cur)
+			local bval = (byte(s, cur) or 0) --[[:! integer]]
 			cur = cur + 1
 			val = (bval == 0x01)
 
@@ -519,10 +556,11 @@ function M.decode(bytes, pos)
 		return nil, nil, "expected string"
 	end
 	pos = pos or 1
+	local pos_ = math.floor(pos) --[[:! integer]]
 	if #bytes == 0 then
 		return nil, nil, "empty input"
 	end
-	local t, npos = decode_document(bytes, pos)
+	local t, npos = decode_document(bytes, pos_)
 	if not t then
 		return nil, nil, npos  -- npos holds errmsg when t is nil
 	end
@@ -533,7 +571,6 @@ end
 
 --- Decode all concatenated BSON documents from bytes.
 -- Returns: array of tables, or (nil, errmsg)
---: (bytes: string) -> { unknown } | (nil, string)
 function M.decode_all(bytes)
 	if type(bytes) ~= "string" then
 		return nil, "expected string"
@@ -543,9 +580,9 @@ function M.decode_all(bytes)
 	local len = #bytes
 	while pos <= len do
 		local t, npos = decode_document(bytes, pos)
-		if not t then return nil, npos end  -- npos holds errmsg when t is nil
+		if not t then return nil, tostring(npos) end  -- npos holds errmsg when t is nil
 		results[#results + 1] = t
-		pos = npos
+		pos = (tonumber(npos) or pos) --[[:! integer]]
 	end
 	return results
 end
