@@ -146,6 +146,7 @@ end
 
 -- Skip blank/comment lines; leaves st positioned at first non-space char of
 -- next content line and returns its 0-based indent.
+--: (st: YState) -> integer
 local function skip_empty_lines(st)
   while st.pos <= st.len do
     local saved = st.pos
@@ -166,6 +167,7 @@ local function skip_empty_lines(st)
 end
 
 -- Return current column (0-based indent level).
+--: (st: YState) -> integer
 local function current_indent(st)
   return st.col - 1
 end
@@ -182,9 +184,10 @@ local ESC = {
   ["/"]  = "/",
 }
 
+--: (st: YState) -> string
 local function parse_double_quoted(st)
   advance(st) -- skip opening "
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while st.pos <= st.len do
     local c = cur(st)
     if c == 34 then -- closing "
@@ -204,19 +207,19 @@ local function parse_double_quoted(st)
         advance(st, 4)
         local code = tonumber(hex, 16) or 0
         if code < 0x80 then
-          parts[#parts+1] = char(code)
+          parts[#parts+1] = char(code) or ""
         elseif code < 0x800 then
-          parts[#parts+1] = char(0xC0 + math.floor(code/64), 0x80 + (code%64))
+          parts[#parts+1] = char(0xC0 + math.floor(code/64), 0x80 + (code%64)) or ""
         else
           parts[#parts+1] = char(0xE0 + math.floor(code/4096),
                                  0x80 + math.floor((code%4096)/64),
-                                 0x80 + (code%64))
+                                 0x80 + (code%64)) or ""
         end
       elseif esc_ch == "x" then
         advance(st)
         local hex = sub(st.s, st.pos, st.pos+1)
         advance(st, 2)
-        parts[#parts+1] = char(tonumber(hex, 16) or 0)
+        parts[#parts+1] = char(tonumber(hex, 16) or 0) or ""
       elseif ec == 10 or ec == 13 then
         skip_newline(st)
         skip_spaces(st)
@@ -230,16 +233,17 @@ local function parse_double_quoted(st)
       skip_spaces(st)
       parts[#parts+1] = " "
     else
-      parts[#parts+1] = char(c)
+      parts[#parts+1] = char(c) or ""
       advance(st)
     end
   end
   return table.concat(parts)
 end
 
+--: (st: YState) -> string
 local function parse_single_quoted(st)
   advance(st) -- skip opening '
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   while st.pos <= st.len do
     local c = cur(st)
     if c == 39 then -- single quote
@@ -255,7 +259,7 @@ local function parse_single_quoted(st)
       skip_spaces(st)
       parts[#parts+1] = " "
     else
-      parts[#parts+1] = char(c)
+      parts[#parts+1] = char(c) or ""
       advance(st)
     end
   end
@@ -264,6 +268,7 @@ end
 
 -- Returns true if the line starting at st.pos (already past leading spaces)
 -- begins a new block item (sequence dash or mapping key).
+--: (st: YState) -> boolean
 local function is_block_line(st)
   local c = cur(st)
   if c == nil then return true end
@@ -287,9 +292,10 @@ local function is_block_line(st)
 end
 
 -- Parse a plain (unquoted) scalar stopping at flow indicators, newlines, ': ', ' #'
+--: (st: YState, in_flow: boolean) -> string
 local function parse_plain_scalar(st, in_flow)
-  local parts = {}
-  local line_buf = {}
+  local parts = {} --: { [integer]: string }
+  local line_buf = {} --: { [integer]: string }
 
   local function flush_line()
     local s = table.concat(line_buf)
@@ -337,10 +343,10 @@ local function parse_plain_scalar(st, in_flow)
       if nc == 32 or nc == 10 or nc == 13 or nc == nil then
         break
       end
-      line_buf[#line_buf+1] = char(c)
+      line_buf[#line_buf+1] = char(c) or ""
       advance(st)
     else
-      line_buf[#line_buf+1] = char(c)
+      line_buf[#line_buf+1] = char(c) or ""
       advance(st)
     end
   end
@@ -352,6 +358,7 @@ end
 -- Block scalar (literal | and folded >)
 -- ---------------------------------------------------------------------------
 
+--: (st: YState, indent: integer) -> string
 local function parse_block_scalar(st, indent)
   local c = cur(st)
   local is_literal = (c == 124) -- '|'
@@ -396,6 +403,7 @@ local function parse_block_scalar(st, indent)
     st.pos = saved_pos; st.line = saved_line; st.col = saved_col
     if not block_indent then block_indent = indent + 2 end
   end
+  local block_indent_ = block_indent --[[:! integer]]
 
   local lines = {}
   local trailing_empty = 0
@@ -417,7 +425,7 @@ local function parse_block_scalar(st, indent)
       lines[#lines+1] = false
       trailing_empty = trailing_empty + 1
       break
-    elseif spaces < block_indent then
+    elseif spaces < block_indent_ then
       -- dedented: end of block scalar; restore to line start
       st.pos = line_start
       -- restore col: line_start is beginning of this line (col=1)
@@ -430,7 +438,7 @@ local function parse_block_scalar(st, indent)
       for i = 1, #lines do
         if lines[i] == false then lines[i] = "" end
       end
-      local extra_indent = string.rep(" ", spaces - block_indent)
+      local extra_indent = string.rep(" ", spaces - block_indent_)
       local rest_start = st.pos
       skip_to_eol(st)
       local rest = sub(st.s, rest_start, st.pos - 1)
@@ -498,16 +506,22 @@ end
 -- Forward declarations
 -- ---------------------------------------------------------------------------
 
-local parse_value
-local parse_block_sequence
-local parse_block_mapping
-local parse_flow_sequence
-local parse_flow_mapping
+--: (st: YState, min_indent: integer, in_flow: boolean) -> unknown
+local parse_value = function(_st, _min_indent, _in_flow) return nil end
+--: (st: YState, seq_indent: integer) -> { [integer]: unknown }
+local parse_block_sequence = function(_st, _seq_indent) return {} end
+--: (st: YState, map_indent: integer) -> { [string]: unknown }
+local parse_block_mapping = function(_st, _map_indent) return {} end
+--: (st: YState) -> { [integer]: unknown }
+local parse_flow_sequence = function(_st) return {} end
+--: (st: YState) -> { [string]: unknown }
+local parse_flow_mapping = function(_st) return {} end
 
 -- ---------------------------------------------------------------------------
 -- Flow sequences and mappings
 -- ---------------------------------------------------------------------------
 
+--: (st: YState) -> { [integer]: unknown }
 parse_flow_sequence = function(st)
   advance(st) -- skip '['
   local result = {}
@@ -533,6 +547,7 @@ parse_flow_sequence = function(st)
   return result
 end
 
+--: (st: YState) -> { [string]: unknown }
 parse_flow_mapping = function(st)
   advance(st) -- skip '{'
   local result = {}
@@ -574,6 +589,7 @@ end
 -- Anchor / alias
 -- ---------------------------------------------------------------------------
 
+--: (st: YState) -> string
 local function parse_anchor_name(st)
   local start = st.pos
   while st.pos <= st.len do
@@ -591,6 +607,7 @@ end
 -- Main value parser
 -- ---------------------------------------------------------------------------
 
+--: (st: YState, min_indent: integer, in_flow: boolean) -> unknown
 parse_value = function(st, min_indent, in_flow)
   skip_spaces_and_comments(st)
   if st.pos > st.len then return nil end
@@ -603,7 +620,7 @@ parse_value = function(st, min_indent, in_flow)
     advance(st)
     anchor_name = parse_anchor_name(st)
     skip_spaces(st)
-    c = cur(st)
+    c = cur(st) --[[:! integer]]
     -- If anchor is alone on its line, the value follows on the next line(s).
     -- Skip the newline and any empty lines, then re-parse from that indent.
     if c == 10 or c == 13 or c == 35 then
@@ -680,6 +697,7 @@ end
 -- Block collections
 -- ---------------------------------------------------------------------------
 
+--: (st: YState, seq_indent: integer) -> { [integer]: unknown }
 parse_block_sequence = function(st, seq_indent)
   local result = {}
   local n = 0  -- explicit counter so nil items occupy correct slots
@@ -726,6 +744,7 @@ parse_block_sequence = function(st, seq_indent)
   return result
 end
 
+--: (st: YState, map_indent: integer) -> { [string]: unknown }
 parse_block_mapping = function(st, map_indent)
   local result = {}
 
@@ -813,6 +832,7 @@ end
 -- Top-level parse
 -- ---------------------------------------------------------------------------
 
+--: (st: YState) -> unknown
 local function parse_document(st)
   -- skip leading directives, comments, blank lines
   while st.pos <= st.len do
@@ -897,6 +917,7 @@ M.parse = M.decode
 -- ---------------------------------------------------------------------------
 
 -- Returns true if this string must be quoted when used as a plain scalar.
+--: (s: string) -> boolean
 local function needs_quoting(s)
   if s == "" then return true end
   local lower = s:lower()
@@ -916,6 +937,7 @@ local function needs_quoting(s)
   return false
 end
 
+--: (s: string) -> string
 local function quote_string(s)
   local escaped = s
     :gsub("\\", "\\\\")
@@ -938,14 +960,16 @@ local function is_array(t)
   if type(t) ~= "table" then return false end
   local n = 0
   local count = 0
-  for k, _ in pairs(t) do
+  for k, _ in pairs(t --[[:! { [any]: unknown }]]) do
     count = count + 1
-    if type(k) ~= "number" or k ~= math.floor(k) or k < 1 then return false end
-    if k > n then n = k end
+    local kn = tonumber(k --[[: any]]) or -1
+    if type(k) ~= "number" or kn ~= math.floor(kn) or kn < 1 then return false end
+    if kn > n then n = kn --[[:! integer]] end
   end
   return n == count
 end
 
+--: (val: unknown, indent_level: integer, indent_str: string, sort_keys: boolean) -> string
 local function encode_value(val, indent_level, indent_str, sort_keys)
   local t = type(val)
 
@@ -954,32 +978,35 @@ local function encode_value(val, indent_level, indent_str, sort_keys)
   elseif t == "boolean" then
     return val and "true" or "false"
   elseif t == "number" then
-    if val ~= val          then return ".nan"  end
-    if val ==  math.huge   then return ".inf"  end
-    if val == -math.huge   then return "-.inf" end
-    if val == math.floor(val) and math.abs(val) < 1e15 then
-      return format("%d", val)
+    local valn = val --[[:! number]]
+    if valn ~= valn          then return ".nan"  end
+    if valn ==  math.huge   then return ".inf"  end
+    if valn == -math.huge   then return "-.inf" end
+    if valn == math.floor(valn) and math.abs(valn) < 1e15 then
+      return format("%d", valn)
     end
-    return format("%g", val)
+    return format("%g", valn)
   elseif t == "string" then
-    if needs_quoting(val) then
-      return quote_string(val)
+    local val_ = val --[[:! string]]
+    if needs_quoting(val_) then
+      return quote_string(val_)
     end
-    return val
+    return val_
   elseif t == "table" then
     local indent       = string.rep(indent_str, indent_level)
     local child_indent = string.rep(indent_str, indent_level + 1)
+    local val_t = val --[[:! { [string]: unknown }]]
 
-    if next(val) == nil then
+    if next(val_t) == nil then
       return "{}"
     end
 
-    if is_array(val) then
-      local n = #val
+    if is_array(val_t) then
+      local n = #val_t
       if n == 0 then return "[]" end
-      local parts = {}
+      local parts = {} --: { [integer]: string }
       for i = 1, n do
-        local item = encode_value(val[i], indent_level + 1, indent_str, sort_keys)
+        local item = encode_value(val_t[i], indent_level + 1, indent_str, sort_keys)
         if item:find("\n", 1, true) then
           -- multi-line: put value indented on next line after '-'
           parts[#parts+1] = "-\n" .. child_indent .. item
@@ -990,19 +1017,19 @@ local function encode_value(val, indent_level, indent_str, sort_keys)
       return table.concat(parts, "\n" .. indent)
     else
       -- mapping
-      local keys = {}
-      for k in pairs(val) do keys[#keys+1] = k end
+      local keys = {} --: { [integer]: unknown }
+      for k in pairs(val_t) do keys[#keys+1] = k end
       if sort_keys then
         table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
       end
-      local parts = {}
+      local parts = {} --: { [integer]: string }
       for _, k in ipairs(keys) do
         local ks    = tostring(k)
         local kstr  = needs_quoting(ks) and quote_string(ks) or ks
-        local v_val = val[k]
+        local v_val = val_t[k]
         local venc  = encode_value(v_val, indent_level + 1, indent_str, sort_keys)
         -- nested tables always go on the next line (block style)
-        if type(v_val) == "table" and next(v_val) ~= nil then
+        if type(v_val) == "table" and next(v_val --[[:! { [string]: unknown }]]) ~= nil then
           parts[#parts+1] = kstr .. ":\n" .. child_indent .. venc
         elseif venc:find("\n", 1, true) then
           parts[#parts+1] = kstr .. ":\n" .. child_indent .. venc
@@ -1018,9 +1045,9 @@ local function encode_value(val, indent_level, indent_str, sort_keys)
 end
 
 function M.encode(val, opts)
-  opts = opts or {}
-  local indent_size = opts.indent    or 2
-  local sort_keys   = opts.sort_keys or false
+  local opts_ = (opts or {}) --[[:! { indent: integer | nil, sort_keys: boolean | nil }]]
+  local indent_size = opts_.indent    or 2
+  local sort_keys   = opts_.sort_keys or false
   local indent_str  = string.rep(" ", indent_size)
 
   local ok, result = pcall(function()
