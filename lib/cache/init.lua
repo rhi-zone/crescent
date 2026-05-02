@@ -4,7 +4,9 @@ end
 
 local M = {}
 
---:: Cache = { ... }
+--:: CacheNode = { key: unknown, value: unknown, prev: CacheNode | nil, next: CacheNode | nil, expires_at: number | nil }
+
+--:: Cache = { _cap: integer, _size: integer, _map: { [unknown]: CacheNode }, _head: CacheNode | nil, _tail: CacheNode | nil, _ttl: number | nil, _on_evict: ((unknown, unknown) -> nil) | nil, _clock: (() -> number) | nil }
 
 --:: CacheOpts = { ttl: number | nil, on_evict: ((unknown, unknown) -> nil) | nil, clock: (() -> number) | nil }
 
@@ -15,28 +17,27 @@ Cache.__index = Cache
 -- opts.ttl: default TTL in seconds (optional)
 -- opts.on_evict: callback(key, value) on eviction (optional)
 -- opts.clock: injectable clock function (required for TTL)
---: (number, CacheOpts | nil) -> Cache
+--: (number, CacheOpts | nil) -> Cache | nil
 function M.new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
     return nil, "capacity must be a positive number"
   end
-  capacity = math.floor(capacity)
-  opts = opts or {}
+  capacity = math.floor(capacity) --[[:! integer]]
   local self = setmetatable({
     _cap = capacity,
     _size = 0,
     _map = {},       -- key -> node
     _head = nil,     -- most recent
     _tail = nil,     -- least recent
-    _ttl = opts.ttl,
-    _on_evict = opts.on_evict,
-    _clock = opts.clock,
+    _ttl = opts and opts.ttl or nil,
+    _on_evict = opts and opts.on_evict or nil,
+    _clock = opts and opts.clock or nil,
   }, Cache)
   return self
 end
 
 -- Detach a node from the doubly-linked list.
-local function _detach(self, node)
+local function _detach(self --[[:! Cache]], node --[[:! CacheNode]])
   local p, n = node.prev, node.next
   if p then p.next = n else self._head = n end
   if n then n.prev = p else self._tail = p end
@@ -45,7 +46,7 @@ local function _detach(self, node)
 end
 
 -- Push a node to the head (most recent).
-local function _push_head(self, node)
+local function _push_head(self --[[:! Cache]], node --[[:! CacheNode]])
   node.prev = nil
   node.next = self._head
   if self._head then self._head.prev = node end
@@ -54,7 +55,7 @@ local function _push_head(self, node)
 end
 
 -- Move an existing node to the head.
-local function _promote(self, node)
+local function _promote(self --[[:! Cache]], node --[[:! CacheNode]])
   if node == self._head then return end
   _detach(self, node)
   _push_head(self, node)
@@ -62,55 +63,69 @@ end
 
 -- Check if a node has expired. If expired, remove it and fire on_evict.
 -- Returns true if the node was expired and removed.
-local function _check_expired(self, node)
-  if not node.expires_at then return false end
-  if self._clock() < node.expires_at then return false end
+local function _check_expired(self --[[:! Cache]], node --[[:! CacheNode]])
+  local expires_at = node.expires_at --[[:! number | nil]]
+  if not expires_at then return false end
+  local at = expires_at --[[:! number]]
+  local clock = self._clock
+  if not clock then return false end
+  if clock() < at then return false end
   _detach(self, node)
   self._map[node.key] = nil
-  self._size = self._size - 1
-  if self._on_evict then self._on_evict(node.key, node.value) end
+  self._size = (self._size --[[:! integer]]) - 1
+  local evict = self._on_evict
+  if evict then (evict --[[:! (unknown, unknown) -> nil]])(node.key, node.value) end
   return true
 end
 
 -- Evict the tail (least recently used) node.
-local function _evict_tail(self)
+local function _evict_tail(self --[[:! Cache]])
   local node = self._tail
   if not node then return end
-  _detach(self, node)
-  self._map[node.key] = nil
-  self._size = self._size - 1
-  if self._on_evict then self._on_evict(node.key, node.value) end
+  local n = node --[[:! CacheNode]]
+  _detach(self, n)
+  self._map[n.key] = nil
+  self._size = (self._size --[[:! integer]]) - 1
+  local evict = self._on_evict
+  if evict then (evict --[[:! (unknown, unknown) -> nil]])(n.key, n.value) end
 end
 
 -- Set a key-value pair. Returns the old value if the key existed, or nil.
 -- ttl overrides the default TTL for this entry (in seconds).
 --: (unknown, unknown, number | nil) -> unknown | nil
 function Cache:set(key, value, ttl)
-  local node = self._map[key]
+  local self_ = self --[[:! Cache]]
+  local node = self_._map[key]
+  local clock = self_._clock
+  local function compute_expiry(t)
+    if not t then return nil end
+    if not clock then return nil end
+    return (clock --[[:! () -> number]])() + t
+  end
   if node then
     -- Key exists: update value, promote, update expiry
     local old = node.value
     node.value = value
-    local t = ttl or self._ttl
-    node.expires_at = t and (self._clock() + t) or nil
-    _promote(self, node)
+    local t = ttl or self_._ttl
+    node.expires_at = compute_expiry(t)
+    _promote(self_, node)
     return old
   end
   -- New key: evict if at capacity
-  if self._size >= self._cap then
-    _evict_tail(self)
+  if self_._size >= self_._cap then
+    _evict_tail(self_)
   end
-  local t = ttl or self._ttl
-  node = {
+  local t = ttl or self_._ttl
+  local new_node --[[:! CacheNode]] = {
     key = key,
     value = value,
     prev = nil,
     next = nil,
-    expires_at = t and (self._clock() + t) or nil,
+    expires_at = compute_expiry(t),
   }
-  self._map[key] = node
-  self._size = self._size + 1
-  _push_head(self, node)
+  self_._map[key] = new_node
+  self_._size = self_._size + 1
+  _push_head(self_, new_node)
   return nil
 end
 
@@ -118,10 +133,11 @@ end
 -- Returns nil if missing or expired.
 --: (unknown) -> unknown | nil
 function Cache:get(key)
-  local node = self._map[key]
+  local self_ = self --[[:! Cache]]
+  local node = self_._map[key]
   if not node then return nil end
-  if _check_expired(self, node) then return nil end
-  _promote(self, node)
+  if _check_expired(self_, node) then return nil end
+  _promote(self_, node)
   return node.value
 end
 
@@ -129,29 +145,32 @@ end
 -- Returns nil if missing or expired.
 --: (unknown) -> unknown | nil
 function Cache:peek(key)
-  local node = self._map[key]
+  local self_ = self --[[:! Cache]]
+  local node = self_._map[key]
   if not node then return nil end
-  if _check_expired(self, node) then return nil end
+  if _check_expired(self_, node) then return nil end
   return node.value
 end
 
 -- Check if a key exists and is not expired.
 --: (unknown) -> boolean
 function Cache:has(key)
-  local node = self._map[key]
+  local self_ = self --[[:! Cache]]
+  local node = self_._map[key]
   if not node then return false end
-  if _check_expired(self, node) then return false end
+  if _check_expired(self_, node) then return false end
   return true
 end
 
 -- Delete a key. Returns the old value, or nil if not found.
 --: (unknown) -> unknown | nil
 function Cache:delete(key)
-  local node = self._map[key]
+  local self_ = self --[[:! Cache]]
+  local node = self_._map[key]
   if not node then return nil end
-  _detach(self, node)
-  self._map[key] = nil
-  self._size = self._size - 1
+  _detach(self_, node)
+  self_._map[key] = nil
+  self_._size = self_._size - 1
   return node.value
 end
 
@@ -180,12 +199,14 @@ end
 -- Expired entries are skipped (and lazily removed).
 --: () -> { [number]: unknown }
 function Cache:keys()
+  local self_ = self --[[:! Cache]]
   local result = {}
-  local node = self._head
+  local node = self_._head
   while node do
-    local nxt = node.next
-    if not _check_expired(self, node) then
-      result[#result + 1] = node.key
+    local cur = node --[[:! CacheNode]]
+    local nxt = cur.next
+    if not _check_expired(self_, cur) then
+      result[#result + 1] = cur.key
     end
     node = nxt
   end
@@ -196,12 +217,13 @@ end
 -- Expired entries are skipped (and lazily removed).
 --: () -> () -> (unknown, unknown)
 function Cache:pairs()
-  local node = self._head
+  local self_ = self --[[:! Cache]]
+  local node = self_._head
   return function()
     while node do
-      local current = node
-      node = node.next
-      if not _check_expired(self, current) then
+      local current = node --[[:! CacheNode]]
+      node = current.next
+      if not _check_expired(self_, current) then
         return current.key, current.value
       end
     end
@@ -212,19 +234,21 @@ end
 -- Set multiple key-value pairs. Each entry is {key, value} or {key, value, ttl}.
 --: ({ [number]: { [number]: unknown } }) -> nil
 function Cache:set_many(entries)
+  local set_fn = Cache.set
   for i = 1, #entries do
     local e = entries[i]
-    self:set(e[1], e[2], e[3])
+    set_fn(self, e[1], e[2], e[3])
   end
 end
 
 -- Get multiple keys. Returns a table mapping each found key to its value.
 --: ({ [number]: unknown }) -> { [unknown]: unknown }
 function Cache:get_many(keys_list)
+  local get_fn = Cache.get
   local result = {}
   for i = 1, #keys_list do
     local k = keys_list[i]
-    local v = self:get(k)
+    local v = get_fn(self, k)
     if v ~= nil then
       result[k] = v
     end
@@ -233,16 +257,16 @@ function Cache:get_many(keys_list)
 end
 
 -- Resize the cache. If shrinking, evicts least recently used entries.
---: (number) -> nil | (nil, string)
 function Cache:resize(new_cap)
+  local self_ = self --[[:! Cache]]
   if type(new_cap) ~= "number" or new_cap < 1 then
     return nil, "capacity must be a positive number"
   end
-  new_cap = math.floor(new_cap)
-  while self._size > new_cap do
-    _evict_tail(self)
+  new_cap = math.floor(new_cap) --[[:! integer]]
+  while self_._size > new_cap do
+    _evict_tail(self_)
   end
-  self._cap = new_cap
+  self_._cap = new_cap
 end
 
 return M
