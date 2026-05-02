@@ -81,7 +81,7 @@ end
 --: (v: Point, s: number) -> Point
 local function pt_scale(v, s)
   local p = { x = v.x * s, y = v.y * s }
-  if v.z ~= nil then p.z = v.z * s end
+  if v.z ~= nil then p.z = (v.z --[[:! number]]) * s end
   return p
 end
 
@@ -214,13 +214,13 @@ end
 --: (self: Quadratic, t: number) -> Point
 Quadratic.normal = function(self, t)
   local tg = self:tangent(t)
-  return { x = -tg.y, y = tg.x }
+  return { x = -tg.y, y = tg.x, z = nil }
 end
 
 --: (self: Quadratic, n: number | nil) -> number
 Quadratic.length = function(self, n)
   n = n or 100
-  local total = 0
+  local total = 0.0 --[[: number]]
   local prev = self:point(0)
   for i = 1, n do
     local cur = self:point(i / n)
@@ -323,13 +323,13 @@ end
 --: (self: Cubic, t: number) -> Point
 Cubic.normal = function(self, t)
   local tg = self:tangent(t)
-  return { x = -tg.y, y = tg.x }
+  return { x = -tg.y, y = tg.x, z = nil }
 end
 
 --: (self: Cubic, n: number | nil) -> number
 Cubic.length = function(self, n)
   n = n or 100
-  local total = 0
+  local total = 0.0 --[[: number]]
   local prev = self:point(0)
   for i = 1, n do
     local cur = self:point(i / n)
@@ -462,7 +462,7 @@ end
 Curve.derivative = function(self)
   local pts = self.points
   local n = #pts
-  if n <= 1 then return M.curve({ { x=0, y=0 } }) end
+  if n <= 1 then return M.curve({ { x=0, y=0, z=nil } }) end
   local d = self:degree()
   local deriv = {}
   for i = 1, n - 1 do
@@ -495,7 +495,7 @@ Spline.__index = Spline
 
 --: (points: { [integer]: Point }, opts: SplineOpts | nil) -> Spline
 M.spline = function(points, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! SplineOpts]]
   local tension = opts.tension or 0
   local closed  = opts.closed or false
   local alpha   = (1 - tension) / 6  -- Catmull-Rom weight factor
