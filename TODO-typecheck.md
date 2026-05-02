@@ -15,12 +15,12 @@ for `unknown` flowing out of `tonumber`, `string.match`, table reads of unknown
 shape, or returns annotated as `unknown`. Add `--[[:! T]]` overlap-cast or
 `if type(x) == "number" then ... end` predicate to narrow.
 
-- [ ] `lib/crescent_examples/composter.lua` (311) — 253 "must be narrowed before indexing"
+- [x] `lib/crescent_examples/composter.lua` (311 → 300) — added missing `bit` require; remaining 300 are FFI-bound (wlr/wl/xkb unknown)
 - [ ] `lib/type/static/parse.lua` (177) — 151 "must be narrowed before calling"
 - [ ] `lib/lua2ts/init.lua` (162) — 110 "must be narrowed before calling", 22 arithmetic on unknown — see SKIP note (closure-built ctx is untyped, needs L2TSCtx alias + full method annotation; complex)
 - [x] `lib/xpath/init.lua` (150 → 122) — annotated tokenize signature; replaced bare `table` with `{ ... }`
 - [ ] `lib/type/static/ann.lua` (144) — 53 "must be narrowed before calling", 20 "argument might also be X"
-- [ ] `lib/bin_packing/init.lua` (112) — 88 "must be narrowed before indexing" — see SKIP note (untyped locals; restructure)
+- [x] `lib/bin_packing/init.lua` (112 → 2) — annotated all 1D/2D fn params and locals; 2 typechecker limitations remain
 - [x] `lib/lru/init.lua` (107 → 8) — defined LruNode/Cache/LfuNode/LfuBucket/Lfu/TwoQNode/TwoQFifoQ/TwoQLruQ/TwoQ shapes; annotated all helper fns and methods with self types; force-cast setmetatable returns; cap/o locals to avoid type narrowing bug; `--[[:! Cache]]` overlap casts. Remaining 8: multi-return nil in factory fns (typechecker limitation), `self:method()` calls where `self` is a named type (method lookup doesn't follow metatable).
 - [x] `lib/observer/init.lua` (98 → 95) — bind+nil-check+force-cast on optional callbacks
 - [x] `lib/observable/init.lua` (83 → 81) — same pattern for SafeObserver._raw callbacks
@@ -75,6 +75,7 @@ last because the type system itself is the testbed.
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
 - [x] `lib/csv/init.lua` (60 → 0)
+- [x] `lib/http/format.lua` (9 → 0) — cast find() returns after nil-check; tonumber() integer cast for sub() arg
 - [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Skipped)
 
 ## FFI-bound (likely unfixable without restructuring)
@@ -88,7 +89,7 @@ last because the type system itself is the testbed.
 - `lib/expr/init.lua` (73) — pervasive unknown propagation, requires restructuring
 - `lib/graph_algorithms/init.lua` (77) — recursive `dfs_visit` pre-declared but checker still flagged
 - `lib/platform/cli.lua` (68) — disparate nil/concat issues, no single pattern
-- `lib/bin_packing/init.lua` — untyped local variables (`bins`, `remaining`); restructuring needed
+- `lib/bin_packing/init.lua` — ~~untyped local variables (`bins`, `remaining`); restructuring needed~~ (done: 112 → 2)
 - `lib/matrix_ext/init.lua` (97) — table↔matrix swap is net neutral
 - `lib/interval/init.lua` (65) — already minimized in prior session (96→65)
 - `lib/multipart/init.lua` — setmetatable shape incompatibility

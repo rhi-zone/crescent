@@ -40,9 +40,10 @@ local function parse_headers(block)
 			if c == 0x20 or c == 0x09 then -- SP or HTAB
 				local next_crlf = find(block, "\r\n", pos, true)
 				if not next_crlf then next_crlf = len + 1 end
+				local nc = next_crlf --[[:! integer]]
 				-- replace obs-fold with single SP
-				line = line .. " " .. sub(block, pos + 1, next_crlf - 1)
-				pos = next_crlf + 2
+				line = line .. " " .. sub(block, pos + 1, nc - 1)
+				pos = nc + 2
 			else
 				break
 			end
@@ -50,9 +51,10 @@ local function parse_headers(block)
 		-- RFC 9110 §5.1 — field-name: case-insensitive
 		local colon = find(line, ":", 1, true)
 		if colon then
-			local name = lower(sub(line, 1, colon - 1))
+			local ci = colon --[[:! integer]]
+				local name = lower(sub(line, 1, ci - 1))
 			-- RFC 9110 §5.5 — trim OWS (optional whitespace) from field value
-			local val_start = colon + 1
+			local val_start = ci + 1
 			local val_end = #line
 			while val_start <= val_end and (byte(line, val_start) == 0x20 or byte(line, val_start) == 0x09) do
 				val_start = val_start + 1
@@ -106,7 +108,7 @@ mod.parse_request = function(s, i)
 	local cl = headers["content-length"]
 	if cl then
 		local len = tonumber(cl[1])
-		if len then body = sub(s, body_start, body_start + len - 1) end
+		if len then body = sub(s, body_start, body_start + (len --[[:! integer]]) - 1) end
 	end
 	return {
 		method = method, target = target, version = version,
@@ -156,7 +158,7 @@ mod.parse_response = function(s, i)
 	local cl = headers["content-length"]
 	if cl then
 		local len = tonumber(cl[1])
-		if len then body = sub(s, body_start, body_start + len - 1) end
+		if len then body = sub(s, body_start, body_start + (len --[[:! integer]]) - 1) end
 	end
 	return {
 		status = status, reason = reason, version = version,
