@@ -7,6 +7,7 @@ M._tier = "pure"
 
 -- Myers O(ND) forward pass.
 -- Returns (trace, d_final, offset) or (nil, errmsg).
+--: ({ [number]: unknown }, { [number]: unknown }) -> ({ [integer]: { [integer]: integer } } | nil, integer | string, integer | nil)
 local function myers_forward(a, b)
   local n = #a
   local m = #b
@@ -23,13 +24,14 @@ local function myers_forward(a, b)
       else
         x = (v[offset + k - 1] or 0) --[[:! integer]] + 1
       end
-      local y = x - k
-      while x < n and y < m and a[x + 1] == b[y + 1] do
-        x = x + 1
+      local x_ = x --[[:! integer]]
+      local y = x_ - k
+      while x_ < n and y < m and a[x_ + 1] == b[y + 1] do
+        x_ = x_ + 1
         y = y + 1
       end
-      v[offset + k] = x
-      if x >= n and y >= m then
+      v[offset + k] = x_
+      if x_ >= n and y >= m then
         local snap = {}
         for j = -d, d, 2 do snap[offset + j] = v[offset + j] end
         trace[d + 1] = snap
@@ -46,8 +48,10 @@ end
 
 -- Backtrack through trace to produce a flat list of regions.
 -- Each region: { op, ax, ay, bx, by } (all 1-indexed, inclusive).
+--: ({ [integer]: { [integer]: integer } }, integer, integer, integer, integer) -> { [integer]: { op: string, a_start: number, a_end: number, b_start: number, b_end: number } }
 local function myers_backtrack(trace, n, m, d_final, offset)
-  local x, y = n, m
+  local x = n --[[:! integer]]
+  local y = m --[[:! integer]]
   local stack = {} --: { [integer]: unknown }
   local ns = 0
 
@@ -55,8 +59,9 @@ local function myers_backtrack(trace, n, m, d_final, offset)
     local k = x - y
     local prev_snap = d > 0 and trace[d] or nil
     local function prev_v(ki)
+      local ki_ = ki --[[:! integer]]
       if not prev_snap then return 0 end
-      return prev_snap[offset + ki] or -1
+      return prev_snap[offset + ki_] or -1
     end
 
     local prev_k
@@ -65,35 +70,45 @@ local function myers_backtrack(trace, n, m, d_final, offset)
     else
       prev_k = k - 1
     end
+    local prev_k_ = prev_k --[[:! integer]]
 
-    local prev_x = d > 0 and (prev_snap[offset + prev_k] or 0) or 0
-    local prev_y = prev_x - prev_k
+    local prev_x_raw
+    if prev_snap then
+      prev_x_raw = prev_snap[offset + prev_k_] or 0
+    else
+      prev_x_raw = 0
+    end
+    local prev_x = (d > 0 and prev_x_raw or 0)
+    local prev_x_ = prev_x --[[:! integer]]
+    local prev_y = prev_x_ - prev_k_
 
     local diag_start_x, diag_start_y
     if d > 0 then
-      if prev_k > k then
-        diag_start_x = prev_x
+      if prev_k_ > k then
+        diag_start_x = prev_x_
         diag_start_y = prev_y + 1
       else
-        diag_start_x = prev_x + 1
+        diag_start_x = prev_x_ + 1
         diag_start_y = prev_y
       end
     else
       diag_start_x = 0
       diag_start_y = 0
     end
+    local diag_start_x_ = diag_start_x --[[:! integer]]
+    local diag_start_y_ = diag_start_y --[[:! integer]]
 
     -- Emit equal diagonal (backwards)
-    if x > diag_start_x then
+    if x > diag_start_x_ then
       ns = ns + 1
-      stack[ns] = { "eq", diag_start_x + 1, x, diag_start_y + 1, y }
-      x = diag_start_x
-      y = diag_start_y
+      stack[ns] = { "eq", diag_start_x_ + 1, x, diag_start_y_ + 1, y }
+      x = diag_start_x_
+      y = diag_start_y_
     end
 
     -- Emit the edit
     if d > 0 then
-      if prev_k > k then
+      if prev_k_ > k then
         -- insert from b[y]
         ns = ns + 1
         stack[ns] = { "ins", x + 1, x, y, y }
@@ -137,13 +152,15 @@ M.diff = function(a, b)
 
   local trace, d_final, offset = myers_forward(a, b)
   if not trace then return nil, d_final end
+  local d_final_ = d_final --[[:! integer]]
+  local offset_ = offset --[[:! integer]]
 
   -- d_final == 0 means identical sequences: one big eq op
-  if d_final == 0 then
+  if d_final_ == 0 then
     return { { op = "eq", a_start = 1, a_end = n, b_start = 1, b_end = m } }
   end
 
-  return myers_backtrack(trace, n, m, d_final, offset)
+  return myers_backtrack(trace, n, m, d_final_, offset_)
 end
 
 -- Edit distance only (no script). O(ND) via Myers.
@@ -166,13 +183,14 @@ M.distance = function(a, b)
       else
         x = (v[offset + k - 1] or 0) --[[:! integer]] + 1
       end
-      local y = x - k
-      while x < n and y < m and a[x + 1] == b[y + 1] do
-        x = x + 1
+      local x_ = x --[[:! integer]]
+      local y = x_ - k
+      while x_ < n and y < m and a[x_ + 1] == b[y + 1] do
+        x_ = x_ + 1
         y = y + 1
       end
-      v[offset + k] = x
-      if x >= n and y >= m then return d end
+      v[offset + k] = x_
+      if x_ >= n and y >= m then return d end
     end
   end
 
