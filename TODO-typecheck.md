@@ -129,6 +129,10 @@ last because the type system itself is the testbed.
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
 
+- [x] `lib/interpolation_curves/init.lua` (was 67 → now 0, commit 8d94e7f) — NumArr/NumArr2D/Spline/CSpline/HSpline/EvalSpline/Curve type aliases; bisect/thomas/mat_solve/poly_eval annotations; self_ casts in monotone/akima methods; 0→number annotated accumulators; EvalSpline cast for curve methods
+- [x] `lib/physics_2d/init.lua` (was 70 → now 0, commit 28a8850) — BodyShape/JointShape/WorldShape/CollInfo/BodyOpts/WorldOpts type aliases; annotated collision helpers; setmetatable via --[[: any]] + return cast; self_ cast in World:step
+- [x] `lib/validation/init.lua` (was 71 → now 57, commit af01242) — replaced XxxSchema.optional = XxxSchema.nullable with Schema.nullable (14 occurrences); remaining 57 from unknown method calls on schema prototype chain
+
 - [x] `lib/diff/init.lua` (was 8 → now 0, commit e232596) — force-cast branch-join locals; annotated helper function signatures
 - [x] `lib/bloom_clock/init.lua` (was 11 → now 0, commit 49d62d4) — Clock type alias; annotated all helpers; self_ casts in methods; FNV constant as signed int32
 - [x] `lib/uuid/init.lua` (was 4 → now 3, commit 846b5d0) — rand_bytes forward-decl as rand_bytes_fn|nil; force-cast at call sites; 3 FFI ffi.new errors remain
