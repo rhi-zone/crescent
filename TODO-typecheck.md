@@ -75,6 +75,8 @@ last because the type system itself is the testbed.
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
 ### Newly discovered (not yet attempted)
+- `lib/spreadsheet/init.lua` (124) — 37 narrow-before-calling, 15 cannot-pass, 8 arithmetic on nil; complex AST evaluation
+- `lib/prolog/init.lua` (122) — 28 no-method-args, 16 cannot-take-length; AST uses method accessors
 - `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; full Bloom type annotation cascades badly (23 errors when attempted); skip
 - `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail; skip (confirmed)
 - `lib/base58/init.lua` (2) — any fix to sha256fn call sites triggers new error in hex_to_bin (typechecker limitation with gsub return + checked cast interaction)
@@ -127,8 +129,11 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 
-## Done in current session (session N+1)
+## Done in current session (session N+2)
 
+- [x] `lib/dice/init.lua` (was 65 → now 0, commit 201dfe0) — DiceSt/RollNode/NegNode/BinopNode/ConstNode/DiceNode/StatsResult type aliases; preceding-line fn annotations; force-cast node to subtypes after type-tag checks; `--[[:! integer]]` on tonumber/read_int returns; stats_node workaround for typechecker nil-narrowing limitation
+- [x] `lib/graph_layout/init.lua` (was 63 → now 0, commit cda6749) — GNode/GEdge/Graph/Pos2D/PosMap/DispMap/AdjMap/OutAdjList/LayerMap aliases using `{ [any]: T }`; annotated all public functions + make_rng; typed pos/disp/out_adj/in_deg/layer/layers locals
+- [x] `lib/template_engine/init.lua` (was 67 → now 0, commit 71ad118) — Token/ASTNode type aliases; lex() find() casts; render_sub extra_ctx optional; force-cast node.body/expr/filters in render_nodes; fixed next_i arithmetic; loader call casts
 - [x] `lib/agent/leaf.lua` (was 1 → now 0, commit c1f7a04) — defined LlmResponse type; --[[:! LlmResponse]] force-cast after nil-check; typed notes_add/notes_drop/tool_call inline
 - [x] `lib/agent/render.lua` (was 1 → now 0, commit c1f7a04) — inline messages initializer
 - [x] `lib/asm/init.lua` (was 1 → now 0, commit c1f7a04) — force-cast desc.intervals at ra.allocate call site
