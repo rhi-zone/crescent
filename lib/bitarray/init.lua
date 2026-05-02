@@ -69,6 +69,8 @@ end
 -- Bitarray metatable
 -- ---------------------------------------------------------------------------
 
+--:: BAType = { n: integer, words: { [integer]: integer }, get: (BAType, integer) -> integer, set: (BAType, integer, integer) -> nil, ... }
+
 local BA = {}
 BA.__index = BA
 
@@ -77,12 +79,14 @@ BA.__index = BA
 -- ---------------------------------------------------------------------------
 
 --- Create a new bitarray of exactly `n` bits, all zero. `n` must be >= 0.
+--: (integer|nil) -> BAType
 function M.new(n)
   n = n or 0
   local nw = words_for(n)
-  local words = {}
+  local words = {} --: { [integer]: integer }
   for i = 1, nw do words[i] = 0 end
-  return setmetatable({ words = words, n = n }, BA)
+  local ret = setmetatable({ words = words, n = n }, BA) --[[: any]]
+  return ret --[[:! BAType]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -122,14 +126,15 @@ end
 
 --- Set all bits to v (0 or 1).
 function BA:fill(v)
-  local words = self.words
+  local ba = self --[[:! BAType]]
+  local words = ba.words
   local nw = #words
   if v == 0 then
     for i = 1, nw do words[i] = 0 end
   else
     for i = 1, nw do words[i] = -1 end
-    -- Mask the last word to avoid spurious bits beyond self.n.
-    local tail = self.n % WORD_BITS
+    -- Mask the last word to avoid spurious bits beyond ba.n.
+    local tail = ba.n % WORD_BITS
     if tail ~= 0 then
       words[nw] = low_mask(tail)
     end
@@ -215,32 +220,36 @@ local function check_same_len(a, b, op)
   end
 end
 
+--: (BAType, BAType) -> BAType
 function M.and_(a, b)
   check_same_len(a, b, "and_")
-  local c = M.new(a.n)
+  local c = M.new(a.n) --[[:! BAType]]
   local aw, bw, cw = a.words, b.words, c.words
   for i = 1, #aw do cw[i] = band(aw[i], bw[i]) end
   return c
 end
 
+--: (BAType, BAType) -> BAType
 function M.or_(a, b)
   check_same_len(a, b, "or_")
-  local c = M.new(a.n)
+  local c = M.new(a.n) --[[:! BAType]]
   local aw, bw, cw = a.words, b.words, c.words
   for i = 1, #aw do cw[i] = bor(aw[i], bw[i]) end
   return c
 end
 
+--: (BAType, BAType) -> BAType
 function M.xor_(a, b)
   check_same_len(a, b, "xor_")
-  local c = M.new(a.n)
+  local c = M.new(a.n) --[[:! BAType]]
   local aw, bw, cw = a.words, b.words, c.words
   for i = 1, #aw do cw[i] = bxor(aw[i], bw[i]) end
   return c
 end
 
+--: (BAType) -> BAType
 function M.not_(a)
-  local c = M.new(a.n)
+  local c = M.new(a.n) --[[:! BAType]]
   local aw, cw = a.words, c.words
   local nw = #aw
   for i = 1, nw do cw[i] = bnot(aw[i]) end
@@ -315,6 +324,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Return a new bitarray containing bits [from, to) (0-indexed, exclusive end).
+--: (self: BAType, integer, integer) -> BAType
 function BA:slice(from, to)
   local len = to - from
   local c = M.new(len)
@@ -325,9 +335,10 @@ function BA:slice(from, to)
 end
 
 --- Concatenate two bitarrays, returning a new one.
+--: (BAType, BAType) -> BAType
 function M.concat(a, b)
   local na, nb = a.n, b.n
-  local c = M.new(na + nb)
+  local c = M.new(na + nb) --[[:! BAType]]
   -- Copy a's words directly for the aligned portion.
   local aw = a.words
   for i = 1, #aw do c.words[i] = aw[i] end
@@ -352,22 +363,26 @@ end
 
 --- Write a `width`-bit unsigned integer `value` at bit `offset` (0-indexed).
 --- Writes only the low `width` bits of `value`.
+--: (self: { _ba: BAType }, integer, integer, integer) -> nil
 function FL:write(offset, width, value)
-  local ba = self._ba
+  local fls = self --[[:! { _ba: BAType }]]
+  local ba = fls._ba
   for i = 0, width - 1 do
     ba:set(offset + i, band(rshift(value, i), 1))
   end
 end
 
 --- Read a `width`-bit unsigned integer from bit `offset` (0-indexed).
+--: (self: { _ba: BAType }, integer, integer) -> integer
 function FL:read(offset, width)
-  local ba = self._ba
+  local fls = self --[[:! { _ba: BAType }]]
+  local ba = fls._ba
   local v = 0
   for i = 0, width - 1 do
     v = bor(v, lshift(ba:get(offset + i), i))
   end
   -- band to ensure unsigned interpretation in LuaJIT (avoids negative results for 32-bit values)
-  return band(v, low_mask(math.min(width, 32)))
+  return band(v, low_mask(math.min(width, 32) --[[:! integer]]))
 end
 
 -- ---------------------------------------------------------------------------
@@ -375,9 +390,10 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Pack a Lua array of integers into a bitarray, `width` bits per element.
+--: ({ [integer]: integer }, integer) -> BAType
 function M.pack_array(arr, width)
   local n = #arr
-  local ba = M.new(n * width)
+  local ba = M.new(n * width) --[[:! BAType]]
   for idx = 1, n do
     local v = arr[idx]
     local offset = (idx - 1) * width
@@ -389,9 +405,10 @@ function M.pack_array(arr, width)
 end
 
 --- Unpack `count` integers of `width` bits each from a bitarray.
+--: (BAType, integer, integer) -> { [integer]: integer }
 function M.unpack_array(ba, width, count)
   local arr = {}
-  local mask = low_mask(math.min(width, 32))
+  local mask = low_mask(math.min(width, 32) --[[:! integer]])
   for idx = 1, count do
     local offset = (idx - 1) * width
     local v = 0
