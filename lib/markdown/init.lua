@@ -79,7 +79,8 @@ local function inline_html(s)
     end
     ms, me, url = s:find("^<(mailto:[^>]+)>", pos)
     if ms then
-      return ms, me, '<a href="' .. html_escape(url) .. '">' .. html_escape(url) .. '</a>'
+      local url_ = url or "" --[[: string]]
+      return ms, me, '<a href="' .. html_escape(url_) .. '">' .. html_escape(url_) .. '</a>'
     end
   end
 
@@ -121,29 +122,34 @@ local function inline_html(s)
   local trailing_br = s:match("  $")
   if trailing_br then
     s = s:sub(1, len - 2)
-    len = len - 2
+    len = (len - 2) --[[:! integer]]
   end
+  local s_ = s --[[:! string]]
+  local len_ = len --[[:! integer]]
 
-  while pos <= len do
+  while pos <= len_ do
     -- Try each span starting at current pos
     local found = false
     for _, try_fn in ipairs(spans) do
-      local ms, me, repl = try_fn(s, pos)
+      local ms, me, repl = try_fn(s_, pos)
       if ms then
+        local ms_ = ms --[[:! integer]]
+        local me_ = me --[[:! integer]]
+        local repl_ = repl --[[:! string]]
         -- Escape and emit any text before this span
-        if ms > pos then
-          out[#out + 1] = html_escape(s:sub(pos, ms - 1))
+        if ms_ > pos then
+          out[#out + 1] = html_escape(s_:sub(pos, ms_ - 1))
         end
-        out[#out + 1] = repl
-        pos = me + 1
+        out[#out + 1] = repl_
+        pos = (me_ + 1) --[[:! integer]]
         found = true
         break
       end
     end
     if not found then
       -- No span matched at this position; advance one character
-      out[#out + 1] = html_escape(s:sub(pos, pos))
-      pos = pos + 1
+      out[#out + 1] = html_escape(s_:sub(pos, pos))
+      pos = (pos + 1) --[[:! integer]]
     end
   end
 
@@ -296,7 +302,7 @@ local function parse_blocks(lines)
     -- Blockquote: > text
     elseif line:match("^>") then
       local bq_lines = {}
-      while i <= n and (lines[i]:match("^>") or (not is_blank(lines[i]) and #bq_lines > 0 and not is_blank(bq_lines[#bq_lines]))) do
+      while i <= n and (lines[i]:match("^>") or (not is_blank(lines[i]) and #bq_lines > 0 and not is_blank((bq_lines[#bq_lines]) --[[:! string]]))) do
         local l = lines[i]
         if l:match("^>%s?") then
           bq_lines[#bq_lines + 1] = l:match("^>%s?(.*)")
@@ -368,7 +374,7 @@ local function parse_blocks(lines)
       if #para_lines == 0 then
         -- Fallback: consume one line as paragraph
         para_lines[#para_lines + 1] = line
-        i = i + 1
+        i = (i + 1) --[[:! integer]]
       end
       -- Check for setext heading underline (any number of paragraph lines)
       if i <= n then
