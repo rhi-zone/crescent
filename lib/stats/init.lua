@@ -22,14 +22,16 @@ local sort   = table.sort
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
-local function check_data(data)
+--:: NumArr = { [integer]: number }
+
+local function check_data(data --[[ : NumArr ]])
   if type(data) ~= "table" or #data == 0 then
     return nil, "data must be a non-empty array"
   end
   return true
 end
 
-local function check_pair(x, y)
+local function check_pair(x --[[ : NumArr ]], y --[[ : NumArr ]])
   if type(x) ~= "table" or type(y) ~= "table" then
     return nil, "x and y must be arrays"
   end
@@ -43,8 +45,8 @@ local function check_pair(x, y)
 end
 
 --- Return a sorted copy of data.
-local function sorted(data)
-  local s = {}
+local function sorted(data --[[ : NumArr ]]) --: NumArr
+  local s = {} --: NumArr
   for i = 1, #data do s[i] = data[i] end
   sort(s)
   return s
@@ -54,30 +56,30 @@ end
 -- 1. Descriptive Statistics — Central Tendency
 -- ---------------------------------------------------------------------------
 
-function M.mean(data)
+function M.mean(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local sum = 0
+  local sum = 0 --: number
   for i = 1, #data do sum = sum + data[i] end
   return sum / #data
 end
 
-function M.median(data)
+function M.median(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local s = sorted(data)
   local n = #s
   if n % 2 == 1 then
-    return s[(n + 1) / 2]
+    return s[(n + 1) / 2 --[[:! integer]]]
   else
-    return (s[n / 2] + s[n / 2 + 1]) / 2
+    return (s[n / 2 --[[:! integer]]] + s[n / 2 + 1 --[[:! integer]]]) / 2
   end
 end
 
-function M.mode(data)
+function M.mode(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local counts = {}
+  local counts = {} --: { [number]: integer }
   local max_count = 0
   for i = 1, #data do
     local v = data[i]
@@ -92,10 +94,10 @@ function M.mode(data)
   return modes
 end
 
-function M.geometric_mean(data)
+function M.geometric_mean(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local sum_log = 0
+  local sum_log = 0 --: number
   for i = 1, #data do
     if data[i] <= 0 then
       return nil, "geometric_mean requires all values > 0"
@@ -105,10 +107,10 @@ function M.geometric_mean(data)
   return exp(sum_log / #data)
 end
 
-function M.harmonic_mean(data)
+function M.harmonic_mean(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local sum_inv = 0
+  local sum_inv = 0 --: number
   for i = 1, #data do
     if data[i] == 0 then
       return nil, "harmonic_mean requires all values != 0"
@@ -118,31 +120,32 @@ function M.harmonic_mean(data)
   return #data / sum_inv
 end
 
-function M.trimmed_mean(data, trim)
+function M.trimmed_mean(data --[[ : NumArr ]], trim --[[ : number | nil ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  trim = trim or 0.1
-  if trim < 0 or trim >= 0.5 then
+  local trim_ = (trim or 0.1) --: number
+  if trim_ < 0 or trim_ >= 0.5 then
     return nil, "trim must be in [0, 0.5)"
   end
   local s = sorted(data)
   local n = #s
-  local k = floor(n * trim)
-  local sum = 0
+  local k = floor(n * trim_) --[[:! integer]]
+  local sum = 0 --: number
   local count = 0
   for i = k + 1, n - k do
     sum = sum + s[i]
     count = count + 1
   end
   if count == 0 then return nil, "trimmed_mean: all data trimmed away" end
-  return sum / count
+  local denom = count --: number
+  return sum / denom
 end
 
 -- ---------------------------------------------------------------------------
 -- 1. Descriptive Statistics — Spread
 -- ---------------------------------------------------------------------------
 
-function M.variance(data, sample)
+function M.variance(data --[[ : NumArr ]], sample)
   local ok, err = check_data(data)
   if not ok then return nil, err end
   if sample == nil then sample = true end
@@ -150,8 +153,8 @@ function M.variance(data, sample)
   if sample and n < 2 then
     return nil, "sample variance requires at least 2 data points"
   end
-  local mu = M.mean(data)
-  local sum_sq = 0
+  local mu = M.mean(data) --[[:! number]]
+  local sum_sq = 0 --: number
   for i = 1, n do
     local d = data[i] - mu
     sum_sq = sum_sq + d * d
@@ -165,16 +168,16 @@ function M.std(data, sample)
   return sqrt(v)
 end
 
-function M.mad(data)
+function M.mad(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local med = M.median(data)
-  local devs = {}
+  local med = M.median(data) --[[:! number]]
+  local devs = {} --: NumArr
   for i = 1, #data do devs[i] = abs(data[i] - med) end
   return M.median(devs)
 end
 
-function M.range(data)
+function M.range(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local mn, mx = data[1], data[1]
@@ -185,19 +188,19 @@ function M.range(data)
   return mx - mn
 end
 
-function M.iqr(data)
+function M.iqr(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local q1, q2, q3 = M.quartiles(data)  -- luacheck: ignore q2
-  return q3 - q1
+  return (q3 --[[:! number]]) - (q1 --[[:! number]])
 end
 
-function M.cv(data)
+function M.cv(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local mu = M.mean(data)
+  local mu = M.mean(data) --[[:! number]]
   if mu == 0 then return nil, "cv: mean is zero" end
-  local s = M.std(data, true)
+  local s = M.std(data, true) --[[:! number]]
   return s / mu
 end
 
@@ -205,15 +208,15 @@ end
 -- 1. Descriptive Statistics — Shape
 -- ---------------------------------------------------------------------------
 
-function M.skewness(data)
+function M.skewness(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local n = #data
   if n < 3 then return nil, "skewness requires at least 3 data points" end
-  local mu = M.mean(data)
-  local s  = M.std(data, true)
+  local mu = M.mean(data) --[[:! number]]
+  local s  = M.std(data, true) --[[:! number]]
   if s == 0 then return nil, "skewness: standard deviation is zero" end
-  local sum = 0
+  local sum = 0 --: number
   for i = 1, n do
     local z = (data[i] - mu) / s
     sum = sum + z * z * z
@@ -221,15 +224,15 @@ function M.skewness(data)
   return (n / ((n - 1) * (n - 2))) * sum
 end
 
-function M.kurtosis(data)
+function M.kurtosis(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local n = #data
   if n < 4 then return nil, "kurtosis requires at least 4 data points" end
-  local mu = M.mean(data)
-  local s  = M.std(data, true)
+  local mu = M.mean(data) --[[:! number]]
+  local s  = M.std(data, true) --[[:! number]]
   if s == 0 then return nil, "kurtosis: standard deviation is zero" end
-  local sum = 0
+  local sum = 0 --: number
   for i = 1, n do
     local z = (data[i] - mu) / s
     sum = sum + z * z * z * z
@@ -244,7 +247,7 @@ end
 -- 1. Descriptive Statistics — Order Statistics
 -- ---------------------------------------------------------------------------
 
-function M.min(data)
+function M.min(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local mn = data[1]
@@ -252,7 +255,7 @@ function M.min(data)
   return mn
 end
 
-function M.max(data)
+function M.max(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local mx = data[1]
@@ -261,7 +264,7 @@ function M.max(data)
 end
 
 --- Linear interpolation quantile (method 7, same as R default).
-function M.quantile(data, p)
+function M.quantile(data --[[ : NumArr ]], p)
   local ok, err = check_data(data)
   if not ok then return nil, err end
   if p < 0 or p > 1 then return nil, "p must be in [0, 1]" end
@@ -269,7 +272,7 @@ function M.quantile(data, p)
   local n = #s
   if n == 1 then return s[1] end
   local h = p * (n - 1) + 1   -- 1-based virtual index
-  local lo = floor(h)
+  local lo = floor(h) --[[:! integer]]
   local hi = lo + 1
   if hi > n then return s[n] end
   local frac = h - lo
@@ -306,7 +309,7 @@ end
 -- 1. Descriptive Statistics — Correlation
 -- ---------------------------------------------------------------------------
 
-function M.covariance(x, y, sample)
+function M.covariance(x --[[ : NumArr ]], y --[[ : NumArr ]], sample)
   local ok, err = check_pair(x, y)
   if not ok then return nil, err end
   if sample == nil then sample = true end
@@ -314,9 +317,9 @@ function M.covariance(x, y, sample)
   if sample and n < 2 then
     return nil, "sample covariance requires at least 2 data points"
   end
-  local mx = M.mean(x)
-  local my = M.mean(y)
-  local sum = 0
+  local mx = M.mean(x) --[[:! number]]
+  local my = M.mean(y) --[[:! number]]
+  local sum = 0 --: number
   for i = 1, n do
     sum = sum + (x[i] - mx) * (y[i] - my)
   end
@@ -326,39 +329,47 @@ end
 function M.correlation(x, y)
   local ok, err = check_pair(x, y)
   if not ok then return nil, err end
-  local sx = M.std(x, true)
-  local sy = M.std(y, true)
-  if sx == nil then return nil, "correlation: std of x failed" end
-  if sy == nil then return nil, "correlation: std of y failed" end
-  if sx == 0 or sy == 0 then
+  local sx_v, sxe = M.std(x, true)
+  if sx_v == nil then return nil, sxe end
+  local sy_v, sye = M.std(y, true)
+  if sy_v == nil then return nil, sye end
+  local sx_ = (sx_v or 0) --: number
+  local sy_ = (sy_v or 0) --: number
+  if sx_ == 0 or sy_ == 0 then
     return nil, "correlation: standard deviation is zero"
   end
   local cov, cerr = M.covariance(x, y, true)
   if cov == nil then return nil, cerr end
-  return cov / (sx * sy)
+  local cov_ = (cov or 0) --: number
+  return cov_ / (sx_ * sy_)
 end
 
 --- Spearman rank correlation.
-local function rank_data(data)
+local function rank_data(data --[[ : NumArr ]])
   local n = #data
   -- Create index array sorted by value
-  local idx = {}
+  local idx = {} --: { [integer]: integer }
   for i = 1, n do idx[i] = i end
-  sort(idx, function(a, b) return data[a] < data[b] end)
+  sort(idx, function(a, b)
+    local ai = a --[[:! integer]]
+    local bi = b --[[:! integer]]
+    return data[ai] < data[bi]
+  end)
   local ranks = {}
-  local i = 1
-  while i <= n do
-    local j = i
+  local r_start = 1
+  while r_start <= n do
+    local rj = r_start
+    local vi = data[idx[r_start]]  -- value at current run start
     -- find run of equal values
-    while j <= n and data[idx[j]] == data[idx[i]] do j = j + 1 end
-    local avg_rank = (i + j - 1) / 2
-    for k = i, j - 1 do ranks[idx[k]] = avg_rank end
-    i = j
+    while rj <= n and data[idx[rj]] == vi do rj = rj + 1 end
+    local avg_rank = (r_start + rj - 1) / 2
+    for k = r_start, rj - 1 do ranks[idx[k]] = avg_rank end
+    r_start = rj
   end
   return ranks
 end
 
-function M.spearman(x, y)
+function M.spearman(x --[[ : NumArr ]], y --[[ : NumArr ]])
   local ok, err = check_pair(x, y)
   if not ok then return nil, err end
   local rx = rank_data(x)
@@ -370,26 +381,27 @@ end
 -- 1. Descriptive Statistics — Normalization
 -- ---------------------------------------------------------------------------
 
-function M.normalize(data)
+function M.normalize(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local mu = M.mean(data)
-  local s  = M.std(data, true)
-  if s == nil then return nil, "normalize: std failed" end
+  local mu = M.mean(data) --[[:! number]]
+  local s_v = M.std(data, true)
+  if s_v == nil then return nil, "normalize: std failed" end
+  local s = (s_v or 0) --: number
   if s == 0 then return nil, "normalize: standard deviation is zero" end
-  local out = {}
+  local out = {} --: NumArr
   for i = 1, #data do out[i] = (data[i] - mu) / s end
   return out
 end
 
-function M.min_max_scale(data)
+function M.min_max_scale(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local mn = M.min(data)
-  local mx = M.max(data)
+  local mn = M.min(data) --[[:! number]]
+  local mx = M.max(data) --[[:! number]]
   local r  = mx - mn
   if r == 0 then return nil, "min_max_scale: all values are equal" end
-  local out = {}
+  local out = {} --: NumArr
   for i = 1, #data do out[i] = (data[i] - mn) / r end
   return out
 end
@@ -434,15 +446,19 @@ end
 local function norm_inv_standard(p)
   if p <= 0 then return -huge end
   if p >= 1 then return  huge end
+  --: { [integer]: number }
   local a = { -3.969683028665376e+01,  2.209460984245205e+02,
               -2.759285104469687e+02,  1.383577518672690e+02,
               -3.066479806614716e+01,  2.506628277459239e+00 }
+  --: { [integer]: number }
   local b = { -5.447609879822406e+01,  1.615858368580409e+02,
               -1.556989798598866e+02,  6.680131188771972e+01,
               -1.328068155288572e+01 }
+  --: { [integer]: number }
   local c = { -7.784894002430293e-03, -3.223964580411365e-01,
               -2.400758277161838e+00, -2.549732539343734e+00,
                4.374664141464968e+00,  2.938163982698783e+00 }
+  --: { [integer]: number }
   local d = {  7.784695709041462e-03,  3.224671290700398e-01,
                2.445134137142996e+00,  3.754408661907416e+00 }
   local p_low  = 0.02425
@@ -519,6 +535,7 @@ end
 -- Use Stirling's series for lgamma.
 local function lgamma(x)
   -- Lanczos approximation (g=7, n=9)
+  --: { [integer]: number }
   local c = { 0.99999999999980993,    676.5203681218851,
               -1259.1392167224028,     771.32342877765313,
               -176.61502916214059,      12.507343278686905,
@@ -564,12 +581,14 @@ function M.t_cdf(x, df)
   local t2 = x * x
   local ib = betai(df / 2, 0.5, df / (df + t2))
   if ib == nil then return nil, "t_cdf: betai failed" end
-  return 1 - ib   -- two-tailed: P(|T| > |x|) is ib; P(|T| <= |x|) is 1-ib
+  local ib_ = (ib or 0) --: number
+  return 1 - ib_
 end
 
 --- Two-tailed survival: P(|T| > |x|).
-local function t_two_tail_p(t_stat, df)
-  return 1 - M.t_cdf(t_stat, df)
+local function t_two_tail_p(t_stat --[[ : number ]], df --[[ : number ]])
+  local r = (M.t_cdf(t_stat, df) or 0) --: number
+  return 1 - r
 end
 
 -- ---------------------------------------------------------------------------
@@ -660,11 +679,12 @@ function M.poisson_cdf(k, lambda)
   if k < 0 or k ~= floor(k) then
     return nil, "poisson_cdf: k must be a non-negative integer"
   end
-  local sum = 0
+  local sum = 0 --: number
   for j = 0, k do
     local p, err = M.poisson_pmf(j, lambda)
     if p == nil then return nil, err end
-    sum = sum + p
+    local p_ = (p or 0) --: number
+    sum = sum + p_
   end
   return sum
 end
@@ -705,11 +725,12 @@ function M.binom_cdf(k, n, p)
     return nil, "binom_cdf: p must be in [0, 1]"
   end
   if k >= n then return 1 end
-  local sum = 0
+  local sum = 0 --: number
   for j = 0, k do
     local v, err = M.binom_pmf(j, n, p)
     if v == nil then return nil, err end
-    sum = sum + v
+    local v_ = (v or 0) --: number
+    sum = sum + v_
   end
   return sum
 end
@@ -724,8 +745,8 @@ function M.t_test_one(data, mu)
   if mu == nil then return nil, "t_test_one: mu is required" end
   local n   = #data
   if n < 2 then return nil, "t_test_one: need at least 2 data points" end
-  local xbar = M.mean(data)
-  local s    = M.std(data, true)
+  local xbar = M.mean(data) --[[:! number]]
+  local s    = M.std(data, true) --[[:! number]]
   if s == 0 then return nil, "t_test_one: standard deviation is zero" end
   local t    = (xbar - mu) / (s / sqrt(n))
   local df   = n - 1
@@ -742,10 +763,10 @@ function M.t_test_two(data1, data2)
   local n2 = #data2
   if n1 < 2 then return nil, "t_test_two: data1 needs at least 2 points" end
   if n2 < 2 then return nil, "t_test_two: data2 needs at least 2 points" end
-  local m1 = M.mean(data1)
-  local m2 = M.mean(data2)
-  local v1 = M.variance(data1, true)
-  local v2 = M.variance(data2, true)
+  local m1 = M.mean(data1) --[[:! number]]
+  local m2 = M.mean(data2) --[[:! number]]
+  local v1 = M.variance(data1, true) --[[:! number]]
+  local v2 = M.variance(data2, true) --[[:! number]]
   -- Welch's t-test
   local se  = sqrt(v1 / n1 + v2 / n2)
   if se == 0 then return nil, "t_test_two: standard error is zero" end
@@ -754,18 +775,19 @@ function M.t_test_two(data1, data2)
   local num = (v1 / n1 + v2 / n2) ^ 2
   local den = (v1 / n1) ^ 2 / (n1 - 1) + (v2 / n2) ^ 2 / (n2 - 1)
   local df  = num / den
-  local p   = t_two_tail_p(t, df)
+  local df_int = df --[[:! integer]]
+  local p   = t_two_tail_p(t, df_int)
   return { t_stat = t, p_value = p, df = df }
 end
 
-function M.chi2_test(observed, expected)
+function M.chi2_test(observed --[[ : NumArr ]], expected --[[ : NumArr ]])
   if type(observed) ~= "table" or #observed == 0 then
     return nil, "chi2_test: observed must be a non-empty array"
   end
   if type(expected) ~= "table" or #expected ~= #observed then
     return nil, "chi2_test: expected must have the same length as observed"
   end
-  local chi2 = 0
+  local chi2 = 0 --: number
   local df   = #observed - 1
   for i = 1, #observed do
     if expected[i] == 0 then
@@ -775,22 +797,24 @@ function M.chi2_test(observed, expected)
     chi2 = chi2 + diff * diff / expected[i]
   end
   -- p-value = P(chi2 > stat) = 1 - chi2_cdf(stat, df)
-  local p = 1 - M.chi2_cdf(chi2, df)
+  local chi2_p = (M.chi2_cdf(chi2, df) or 0) --: number
+  local p = 1 - chi2_p
   return { chi2_stat = chi2, p_value = p, df = df }
 end
 
-function M.correlation_test(x, y)
+function M.correlation_test(x --[[ : NumArr ]], y --[[ : NumArr ]])
   local ok, err = check_pair(x, y)
   if not ok then return nil, err end
   local n = #x
   if n < 3 then return nil, "correlation_test: need at least 3 data points" end
   local r, rerr = M.correlation(x, y)
   if r == nil then return nil, rerr end
-  if abs(r) >= 1 then
+  local r_ = (r or 0) --: number
+  if abs(r_) >= 1 then
     -- Perfect correlation: t -> inf, p -> 0
-    return { r = r, t_stat = r > 0 and huge or -huge, p_value = 0 }
+    return { r = r_, t_stat = r_ > 0 and huge or -huge, p_value = 0 }
   end
-  local t  = r * sqrt(n - 2) / sqrt(1 - r * r)
+  local t  = r_ * sqrt(n - 2) / sqrt(1 - r_ * r_)
   local df = n - 2
   local p  = t_two_tail_p(t, df)
   return { r = r, t_stat = t, p_value = p }
@@ -800,15 +824,15 @@ end
 -- 4. Linear Regression
 -- ---------------------------------------------------------------------------
 
-function M.linear_regression(x, y)
+function M.linear_regression(x --[[ : NumArr ]], y --[[ : NumArr ]])
   local ok, err = check_pair(x, y)
   if not ok then return nil, err end
   local n  = #x
   if n < 2 then return nil, "linear_regression: need at least 2 points" end
-  local mx = M.mean(x)
-  local my = M.mean(y)
-  local sxx = 0
-  local sxy = 0
+  local mx = M.mean(x) --[[:! number]]
+  local my = M.mean(y) --[[:! number]]
+  local sxx = 0 --: number
+  local sxy = 0 --: number
   for i = 1, n do
     local dx = x[i] - mx
     sxx = sxx + dx * dx
@@ -818,9 +842,9 @@ function M.linear_regression(x, y)
   local b   = sxy / sxx
   local a   = my - b * mx
   -- R-squared
-  local ss_res = 0
-  local ss_tot = 0
-  local residuals = {}
+  local ss_res = 0 --: number
+  local ss_tot = 0 --: number
+  local residuals = {} --: NumArr
   for i = 1, n do
     local pred = a + b * x[i]
     local res  = y[i] - pred
@@ -836,7 +860,9 @@ end
 --- X: array of row-vectors (each row has the same number of features);
 ---    an intercept column of ones is prepended automatically.
 --- y: array of target values.
-function M.multiple_regression(X, y)
+--:: NumArr2D = { [integer]: NumArr }
+
+function M.multiple_regression(X --[[ : NumArr2D ]], y --[[ : NumArr ]])
   if type(X) ~= "table" or #X == 0 then
     return nil, "multiple_regression: X must be a non-empty array of row-vectors"
   end
@@ -849,20 +875,20 @@ function M.multiple_regression(X, y)
   local p = p0 + 1   -- +1 for intercept
 
   -- Build augmented design matrix A (n x p) with leading 1 column.
-  local A = {}
+  local A = {} --: NumArr2D
   for i = 1, n do
-    A[i] = { 1 }
+    A[i] = { 1 } --: NumArr
     for j = 1, p0 do A[i][j + 1] = X[i][j] end
   end
 
   -- Compute X^T X (p x p) and X^T y (p x 1).
-  local XtX = {}
-  local Xty = {}
+  local XtX = {} --: NumArr2D
+  local Xty = {} --: NumArr
   for i = 1, p do
-    XtX[i] = {}
-    Xty[i] = 0
+    XtX[i] = {} --: NumArr
+    Xty[i] = 0 --: number
     for j = 1, p do
-      local s = 0
+      local s = 0 --: number
       for k = 1, n do s = s + A[k][i] * A[k][j] end
       XtX[i][j] = s
     end
@@ -871,9 +897,9 @@ function M.multiple_regression(X, y)
 
   -- Solve XtX * beta = Xty via Gaussian elimination with partial pivoting.
   -- Augment XtX with Xty as the last column.
-  local M2 = {}
+  local M2 = {} --: NumArr2D
   for i = 1, p do
-    M2[i] = {}
+    M2[i] = {} --: NumArr
     for j = 1, p do M2[i][j] = XtX[i][j] end
     M2[i][p + 1] = Xty[i]
   end
@@ -902,16 +928,16 @@ function M.multiple_regression(X, y)
       end
     end
   end
-  local coeffs = {}
+  local coeffs = {} --: NumArr
   for i = 1, p do coeffs[i] = M2[i][p + 1] end
 
   -- Compute residuals and R-squared.
-  local y_mean = M.mean(y)
-  local ss_res = 0
-  local ss_tot = 0
-  local residuals = {}
+  local y_mean = M.mean(y) --[[:! number]]
+  local ss_res = 0 --: number
+  local ss_tot = 0 --: number
+  local residuals = {} --: NumArr
   for i = 1, n do
-    local pred = 0
+    local pred = 0 --: number
     for j = 1, p do pred = pred + coeffs[j] * A[i][j] end
     residuals[i] = y[i] - pred
     ss_res = ss_res + residuals[i] * residuals[i]
@@ -949,38 +975,35 @@ end
 -- 5. Histograms and Frequency
 -- ---------------------------------------------------------------------------
 
-function M.histogram(data, n_bins)
+function M.histogram(data --[[ : NumArr ]], n_bins --[[ : integer | nil ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local n = #data
-  if n_bins == nil then
-    -- Sturges' rule
-    n_bins = ceil(log(n) / log(2)) + 1
-  end
-  if n_bins < 1 then return nil, "histogram: n_bins must be >= 1" end
-  local mn = M.min(data)
-  local mx = M.max(data)
+  local nb = n_bins or (ceil(log(n) / log(2)) + 1 --[[:! integer]])
+  if nb < 1 then return nil, "histogram: n_bins must be >= 1" end
+  local mn = M.min(data) --[[:! number]]
+  local mx = M.max(data) --[[:! number]]
   if mn == mx then
     -- All values equal: one bin
-    return { bins = n_bins, counts = { n }, edges = { mn, mx + 1 } }
+    return { bins = nb, counts = { n }, edges = { mn, mx + 1 } }
   end
-  local width = (mx - mn) / n_bins
-  local counts = {}
-  local edges  = {}
-  for i = 0, n_bins do edges[i + 1] = mn + i * width end
-  for i = 1, n_bins do counts[i] = 0 end
+  local width = (mx - mn) / nb
+  local counts = {} --: { [integer]: integer }
+  local edges  = {} --: NumArr
+  for i = 0, nb do edges[i + 1] = mn + i * width end
+  for i = 1, nb do counts[i] = 0 end
   for i = 1, n do
-    local idx = floor((data[i] - mn) / width) + 1
-    if idx > n_bins then idx = n_bins end  -- clamp max to last bin
+    local idx = floor((data[i] - mn) / width) + 1 --[[:! integer]]
+    if idx > nb then idx = nb end  -- clamp max to last bin
     counts[idx] = counts[idx] + 1
   end
-  return { bins = n_bins, counts = counts, edges = edges }
+  return { bins = nb, counts = counts, edges = edges }
 end
 
-function M.frequency(data)
+function M.frequency(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
-  local freq = {}
+  local freq = {} --: { [number]: integer }
   for i = 1, #data do
     local v = data[i]
     freq[v] = (freq[v] or 0) + 1
@@ -988,7 +1011,7 @@ function M.frequency(data)
   return freq
 end
 
-function M.cumulative_frequency(data)
+function M.cumulative_frequency(data --[[ : NumArr ]])
   local ok, err = check_data(data)
   if not ok then return nil, err end
   local s = sorted(data)
