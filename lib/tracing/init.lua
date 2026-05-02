@@ -8,20 +8,25 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Exporter = { export: (unknown, unknown) -> nil, spans: (unknown) -> { [integer]: unknown }, reset: (unknown) -> nil, ... }
+--:: SpanCtx = { trace_id: string, span_id: string }
+--:: SpanObj = { trace_id: string, span_id: string, name: string, parent_span_id: string | nil, start_time: number, end_time: number | nil, duration_ms: number | nil, attributes: { [string]: unknown }, events: { [integer]: unknown }, status: string, status_message: string | nil, _exporter: Exporter }
+
 -- ── ID generation ──────────────────────────────────────────────────────────
 
 local bit = require("bit")
 
 -- Xorshift32 PRNG — safe in LuaJIT double precision (operates in 32-bit range).
 -- Returns unsigned 32-bit integer.
+--: (integer) -> integer
 local function _xorshift32(s)
   s = bit.bxor(s, bit.lshift(s, 13))
   s = bit.bxor(s, bit.rshift(s, 17))
   s = bit.bxor(s, bit.lshift(s, 5))
   s = bit.band(s, 0xFFFFFFFF)
-  if s < 0 then s = s + 0x100000000 end
+  if s < 0 then s = (s + 0x100000000) --[[:! integer]] end
   if s == 0 then s = 1 end  -- avoid zero state
-  return s
+  return s --[[:! integer]]
 end
 
 local _hex = "0123456789abcdef"
@@ -30,8 +35,9 @@ local _hex = "0123456789abcdef"
 -- We extract 4 bits at a time to produce hex digits.
 local function _rand_hex(n, rng_state_ref)
   local t   = {}
-  local s   = rng_state_ref[1]
+  local s   = rng_state_ref[1] --[[:! integer]]
   local bits = 0
+  --: integer
   local val  = 0
   for i = 1, n do
     if bits < 4 then
@@ -39,9 +45,10 @@ local function _rand_hex(n, rng_state_ref)
       val  = s
       bits = 32
     end
-    local nibble = val % 16
-    t[i] = _hex:sub(nibble + 1, nibble + 1)
-    val  = math.floor(val / 16)
+    local nibble = val % 16 --[[:! integer]]
+    local pos = (nibble + 1) --[[:! integer]]
+    t[i] = _hex:sub(pos, pos)
+    val  = math.floor(val / 16) --[[:! integer]]
     bits = bits - 4
   end
   rng_state_ref[1] = s
@@ -49,8 +56,10 @@ local function _rand_hex(n, rng_state_ref)
 end
 
 -- Returns a rng_state_ref table {state} and a _rand_hex-compatible call.
+--: (integer | nil, (() -> integer) | nil) -> { [integer]: integer }
 local function _make_rng(seed, time_fn)
-  local s = seed or time_fn()
+  local time_fn_ = time_fn --[[:! (() -> integer) | nil]]
+  local s = seed or (time_fn_ and time_fn_()) or 1 --[[:! integer]]
   if s == 0 then s = 1 end
   -- Warm up: avoid poor low-seed initial values
   s = _xorshift32(s)
@@ -132,10 +141,12 @@ function Span:set_status(status, message)
 end
 
 function Span:finish()
-  if self.end_time then return end  -- already finished
-  self.end_time   = os.clock()
-  self.duration_ms = (self.end_time - self.start_time) * 1000
-  self._exporter:export(self)
+  local self_ = self --[[:! SpanObj]]
+  if self_.end_time then return end  -- already finished
+  local end_time = os.clock()
+  self_.end_time   = end_time
+  self_.duration_ms = (end_time - self_.start_time) * 1000
+  self_._exporter:export(self_)
 end
 
 function Span:context()
@@ -157,8 +168,9 @@ function Tracer:start_span(name, opts)
     trace_id       = opts.parent.trace_id
     parent_span_id = opts.parent.span_id
   elseif opts.context then
-    trace_id       = opts.context.trace_id
-    parent_span_id = opts.context.span_id
+    local ctx_ = opts.context --[[:! SpanCtx]]
+    trace_id       = ctx_.trace_id
+    parent_span_id = ctx_.span_id
   else
     trace_id = _rand_hex(32, self._rng)
   end
@@ -215,10 +227,10 @@ function Provider:tracer(name)
   }, Tracer)
 end
 
-function M.provider(opts)
+function M.provider(opts --[[:! { time_fn: () -> integer, exporter?: Exporter, id_seed?: integer }]])
   assert(opts and opts.time_fn, "provider requires opts.time_fn")
   local exporter = opts.exporter or M.noop_exporter()
-  local rng = _make_rng(opts.id_seed, opts.time_fn)
+  local rng = _make_rng(opts.id_seed --[[:! integer | nil]], opts.time_fn)
   return setmetatable({
     _exporter = exporter,
     _rng      = rng,
@@ -230,6 +242,7 @@ end
 -- Inject: produce a W3C traceparent header string from a span.
 -- Format: "00-{trace_id}-{span_id}-{flags}"
 -- flags: "01" = sampled
+--: (SpanCtx) -> string
 function M.inject(span)
   return "00-" .. span.trace_id .. "-" .. span.span_id .. "-01"
 end
@@ -301,7 +314,7 @@ local function _json_span(s)
     '"duration_ms":'     .. (s.duration_ms and tostring(s.duration_ms) or "null"),
     '"status":'          .. _json_string(--[[:! string]] s.status),
     '"status_message":'  .. (s.status_message and _json_string(--[[:! string]] s.status_message) or "null"),
-    '"attributes":'      .. _json_attrs(--[[:! table]] s.attributes),
+    '"attributes":'      .. _json_attrs(s.attributes --[[:! { [string]: unknown }]]),
     '"events":'          .. _json_events(s.events),
   }
   return "{" .. table.concat(parts, ",") .. "}"
