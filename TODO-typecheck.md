@@ -75,9 +75,8 @@ last because the type system itself is the testbed.
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
 ### Newly discovered (not yet attempted)
-- `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; all bit.* calls cascade
-- `lib/bitset/init.lua` (11) — setmetatable + BS method pattern; missing argument from math.ceil returning number
-- `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail
+- `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; full Bloom type annotation cascades badly (23 errors when attempted); skip
+- `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail; skip (confirmed)
 - `lib/base58/init.lua` (2) — any fix to sha256fn call sites triggers new error in hex_to_bin (typechecker limitation with gsub return + checked cast interaction)
 - `lib/benford/init.lua` — DONE (see session log)
 - `lib/barcode/init.lua` — DONE (see session log)
@@ -85,8 +84,6 @@ last because the type system itself is the testbed.
 - `lib/ansi/init.lua` — DONE (see session log)
 - `lib/bezier/init.lua` (12) — return type mismatch on setmetatable for Quadratic/Cubic types
 - `lib/bundle/init.lua` (15)
-- `lib/cache/init.lua` (25)
-- `lib/spell_check/init.lua` (13)
 
 
 
@@ -131,6 +128,10 @@ last because the type system itself is the testbed.
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/cache/init.lua` (was 25 → now 0, commit 27a79b6) — CacheNode/Cache type aliases; annotated all helpers with force-cast params; compute_expiry closure; nil-safe clock/evict calls; self_ pattern in all methods
+- [x] `lib/bitset/init.lua` (was 11 → now 0, commit fc13aa2) — Bitset open type alias; M.new optional arg annotation; max_words integer cast; BS.set direct call in from_bits
+- [x] `lib/spell_check/init.lua` (was 13 → now 0, commit 309d884) — Checker type alias; levenshtein/build_index annotated; prev/curr typed arrays; self_ casts in all methods; Checker.method() calls for dispatch; inline field init in constructor
 
 - [x] `lib/behavior_tree/init.lua` (was 33 → now 0, commit 457366c) — defined BTNode recursive type; annotated tick_*/reset_node/debug_node with node_ force-casts; cast children to { [integer]: BTNode }; typed state fields; fixed tick_parallel needed union
 - [x] `lib/calendar/init.lua` (was 34 → now 0, commit c3f3af7) — defined Date type; annotated is_leap/days_in_month/to_ordinal/from_ordinal; self_ force-casts in date_mt methods; defined Recur type; rewrote range/recur_mt:next with from_ordinal directly; recur_mt.next() direct calls in take/all
