@@ -17,6 +17,7 @@ local floor, abs, min = math.floor, math.abs, math.min
 
 -- Standard Wagner-Fischer algorithm, two-row space optimization.
 -- Returns distance, or max_dist+1 if length difference exceeds max_dist.
+--: (string, string, integer | nil) -> integer
 local function levenshtein(a, b, max_dist)
   local la, lb = len(a), len(b)
   -- Early exit: length difference alone exceeds budget
@@ -28,7 +29,9 @@ local function levenshtein(a, b, max_dist)
   if a == b then return 0 end
 
   -- prev[j] = edit distance between a[1..i-1] and b[1..j]
+  --: { [integer]: integer }
   local prev = {}
+  --: { [integer]: integer }
   local curr = {}
   for j = 0, lb do prev[j] = j end
 
@@ -144,10 +147,12 @@ local BUILTIN_WORDS = {
 
 -- ── Checker object ────────────────────────────────────────────────────────────
 
+--:: Checker = { _dict: { [string]: boolean }, _by_len: { [integer]: { [integer]: string } }, _count: integer, ... }
 local Checker = {}
 Checker.__index = Checker
 
 -- Build the internal lookup table and length-bucket index.
+--: ({ [integer]: string }) -> ({ [string]: boolean }, { [integer]: { [integer]: string } })
 local function build_index(words)
   local dict = {}       -- word -> true (lowercase keys)
   local by_len = {}     -- length -> array of lowercase words
@@ -166,17 +171,18 @@ end
 -- Create a new spell checker.
 -- words: optional array of strings; if nil, uses built-in dictionary.
 function M.new(words)
-  local self = setmetatable({}, Checker)
   local src = words or BUILTIN_WORDS
-  self._dict, self._by_len = build_index(src)
-  self._count = 0
-  for _ in pairs(self._dict) do self._count = self._count + 1 end
-  return self
+  local d, bl = build_index(src)
+  local cnt = 0
+  for _ in pairs(d) do cnt = cnt + 1 end
+  local self_ = setmetatable({ _dict = d, _by_len = bl, _count = cnt }, Checker) --[[:! Checker]]
+  return self_
 end
 
 -- Check if a word is spelled correctly (case-insensitive).
 function Checker:check(word)
-  return self._dict[lower(word)] == true
+  local self_ = self --[[:! Checker]]
+  return self_._dict[lower(word)] == true
 end
 
 -- Alias for check.
@@ -184,37 +190,41 @@ Checker.correct = Checker.check
 
 -- Return the number of words in the dictionary.
 function Checker:size()
-  return self._count
+  local self_ = self --[[:! Checker]]
+  return self_._count
 end
 
 -- Add a single word to the dictionary.
 function Checker:add(word)
+  local self_ = self --[[:! Checker]]
   local lw = lower(word)
-  if not self._dict[lw] then
-    self._dict[lw] = true
-    self._count = self._count + 1
+  if not self_._dict[lw] then
+    self_._dict[lw] = true
+    self_._count = self_._count + 1
     local l = len(lw)
-    if not self._by_len[l] then self._by_len[l] = {} end
-    insert(self._by_len[l], lw)
+    if not self_._by_len[l] then self_._by_len[l] = {} end
+    insert(self_._by_len[l], lw)
   end
 end
 
 -- Add multiple words.
 function Checker:add_all(words)
+  local self_ = self --[[:! Checker]]
   for _, w in ipairs(words) do
-    self:add(w)
+    Checker.add(self_, w)
   end
 end
 
 -- Remove a word from the dictionary.
 function Checker:remove(word)
+  local self_ = self --[[:! Checker]]
   local lw = lower(word)
-  if self._dict[lw] then
-    self._dict[lw] = nil
-    self._count = self._count - 1
+  if self_._dict[lw] then
+    self_._dict[lw] = nil
+    self_._count = self_._count - 1
     local l = len(lw)
-    if self._by_len[l] then
-      local arr = self._by_len[l]
+    if self_._by_len[l] then
+      local arr = self_._by_len[l]
       for i = 1, #arr do
         if arr[i] == lw then
           table.remove(arr, i)
@@ -229,9 +239,10 @@ end
 -- opts: { max_suggestions=5, max_distance=2, case_sensitive=false }
 -- Returns array of candidate words sorted by distance then alphabetically.
 function Checker:suggest(word, opts)
+  local self_ = self --[[:! Checker]]
   opts = opts or {}
-  local max_sugg   = opts.max_suggestions or 5
-  local max_dist   = opts.max_distance or 2
+  local max_sugg   = (opts.max_suggestions or 5) --[[:! integer]]
+  local max_dist   = (opts.max_distance or 2) --[[:! integer]]
   local case_sens  = opts.case_sensitive or false
 
   local query = case_sens and word or lower(word)
@@ -239,7 +250,7 @@ function Checker:suggest(word, opts)
 
   -- Collect candidates from length buckets within reach
   local candidates = {}
-  for bucket_len, words_in_bucket in pairs(self._by_len) do
+  for bucket_len, words_in_bucket in pairs(self_._by_len) do
     if abs(bucket_len - qlen) <= max_dist then
       for _, w in ipairs(words_in_bucket) do
         if w ~= query then
@@ -261,7 +272,8 @@ function Checker:suggest(word, opts)
   -- Return at most max_sugg results
   local result = {}
   for i = 1, min(max_sugg, #candidates) do
-    result[i] = candidates[i].word
+    local c = candidates[i] --[[:! { word: string, dist: integer }]]
+    result[i] = c.word
   end
   return result
 end
@@ -269,10 +281,11 @@ end
 -- Check a word and return suggestions if incorrect.
 -- Returns (true, nil) if correct; (false, suggestions) if incorrect.
 function Checker:check_with_suggestions(word, opts)
-  if self:check(word) then
+  local self_ = self --[[:! Checker]]
+  if Checker.check(self_, word) then
     return true, nil
   end
-  return false, self:suggest(word, opts)
+  return false, Checker.suggest(self_, word, opts)
 end
 
 -- ── Text checking ─────────────────────────────────────────────────────────────
@@ -308,6 +321,7 @@ end
 -- Returns array of { word, position, suggestions } for each misspelled word.
 -- opts: { max_suggestions=3, ignore_capitalized=true }
 function Checker:check_text(text, opts)
+  local self_ = self --[[:! Checker]]
   opts = opts or {}
   local max_sugg       = opts.max_suggestions or 3
   local ignore_caps    = opts.ignore_capitalized
@@ -356,8 +370,8 @@ function Checker:check_text(text, opts)
         local first = byte(word, 1)
         local is_cap = first >= 65 and first <= 90
         if not (ignore_caps and is_cap) then
-          if not self:check(word) then
-            local sugg = self:suggest(word, { max_suggestions = max_sugg })
+          if not Checker.check(self_, word) then
+            local sugg = Checker.suggest(self_, word, { max_suggestions = max_sugg })
             insert(errors, { word = word, position = tok_start, suggestions = sugg })
           end
         end
@@ -371,6 +385,7 @@ end
 -- but only when there is exactly one candidate at distance 1.
 -- Returns the corrected string.
 function Checker:correct_text(text)
+  local self_ = self --[[:! Checker]]
   local result = {}
   local pos = 1
   local tlen = len(text)
@@ -399,7 +414,7 @@ function Checker:correct_text(text)
     local token = sub(text, tok_start, tok_end)
 
     local word = strip_punct(token)
-    if len(word) >= 2 and not self:check(word) then
+    if len(word) >= 2 and not Checker.check(self_, word) then
       -- find how much leading/trailing punctuation was stripped
       local lead = token:find(word, 1, true)
       local before = lead and sub(token, 1, lead - 1) or ""
@@ -407,7 +422,7 @@ function Checker:correct_text(text)
       local after = sub(token, after_start)
 
       -- Only replace if there is exactly one candidate at distance 1
-      local sugg = self:suggest(word, { max_suggestions = 2, max_distance = 1 })
+      local sugg = Checker.suggest(self_, word, { max_suggestions = 2, max_distance = 1 })
       if #sugg == 1 then
         insert(result, before .. sugg[1] .. after)
       else
