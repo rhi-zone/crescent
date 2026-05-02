@@ -29,15 +29,15 @@ end
 --- Resolve a dotted module name to a file path using search_paths.
 --- Tries: <search_path>/<mod_path>/init.lua, then <search_path>/<mod_path>.lua,
 --- then top-level <mod_path>/init.lua and <mod_path>.lua.
---: (mod_name: string, read_fn: (string) -> string | nil, search_paths: { string } | nil) -> (string | nil, string | nil)
+--: (mod_name: string, read_fn: (string) -> string | nil, search_paths: { [integer]: string } | nil) -> (string | nil, string | nil)
 local function resolve_module(mod_name, read_fn, search_paths)
 	local mod_path = mod_name:gsub("%.", "/")
 	-- Candidate suffixes to try for each base directory
-	local suffixes = { "/" .. mod_path .. "/init.lua", "/" .. mod_path .. ".lua" }
+	local suffixes = { "/" .. mod_path .. "/init.lua", "/" .. mod_path .. ".lua" } --[[: { [integer]: string }]]
 	-- Try each search path
 	if search_paths then
 		for i = 1, #search_paths do
-			local base = search_paths[i]
+			local base = search_paths[i] --[[:! string]]
 			for j = 1, #suffixes do
 				local path = base .. suffixes[j]
 				local content = read_fn(path)
@@ -46,9 +46,9 @@ local function resolve_module(mod_name, read_fn, search_paths)
 		end
 	end
 	-- Try from working directory
-	local top_suffixes = { mod_path .. "/init.lua", mod_path .. ".lua" }
+	local top_suffixes = { mod_path .. "/init.lua", mod_path .. ".lua" } --[[: { [integer]: string }]]
 	for j = 1, #top_suffixes do
-		local path = top_suffixes[j]
+		local path = top_suffixes[j] --[[:! string]]
 		local content = read_fn(path)
 		if content then return path, content end
 	end
@@ -135,20 +135,21 @@ local function emit_bundle(modules, entry_source, opts)
 end
 
 --- Bundle a file and all its static require() dependencies into a single Lua string.
---: (entry_path: string, opts: { read_fn: (string) -> string | nil, search_paths: { string } | nil, shebang: string | nil }) -> (string | nil, string | nil)
+--:: BundleOpts = { read_fn: (string) -> string | nil, search_paths: { [integer]: string } | nil, shebang: string | nil }
+--: (entry_path: string, opts: BundleOpts) -> (string | nil, string | nil)
 function M.bundle(entry_path, opts)
-	opts = opts or {}
 	local read_fn = opts.read_fn
 	if type(read_fn) ~= "function" then
 		error("bundle: opts.read_fn function is required")
 	end
-	local entry_source = read_fn(entry_path)
+	local read_fn_ = read_fn --[[:! (string) -> string | nil]]
+	local entry_source = read_fn_(entry_path)
 	if not entry_source then
 		return nil, "cannot read entry file: " .. entry_path
 	end
 	local search_paths = opts.search_paths
 	local resolve_fn = function(mod_name)
-		local _, content = resolve_module(mod_name, read_fn, search_paths)
+		local _, content = resolve_module(mod_name, read_fn_, search_paths)
 		return content
 	end
 	local modules = collect_deps(entry_source, resolve_fn)
@@ -156,32 +157,35 @@ function M.bundle(entry_path, opts)
 end
 
 --- Bundle from a source string with a custom resolver function.
---: (source: string, opts: { resolve: (name: string) -> string | nil, shebang: string | nil } | nil) -> (string | nil, string | nil)
+--:: BundleStringOpts = { resolve: (string) -> string | nil, shebang: string | nil }
+--: (source: string, opts: BundleStringOpts | nil) -> (string | nil, string | nil)
 function M.bundle_string(source, opts)
 	if type(source) ~= "string" then
 		return nil, "source must be a string"
 	end
-	opts = opts or {}
-	local resolve_fn = opts.resolve or function() return nil end
+	local opts_ = opts --[[:! BundleStringOpts | nil]]
+	local resolve_fn = (opts_ and opts_.resolve) or (function(_name) return nil end --[[:! (string) -> string | nil]])
+	local shebang_opts = opts_ --[[:! { shebang: string | nil } | nil]]
 	local modules = collect_deps(source, resolve_fn)
-	return emit_bundle(modules, source, opts), nil
+	return emit_bundle(modules, source, shebang_opts), nil
 end
 
 --- Analyze an entry file and return an ordered list of its transitive dependencies.
---: (entry_path: string, opts: { read_fn: (string) -> string | nil, search_paths: { string } | nil }) -> ({ string } | nil, string | nil)
+--:: AnalyzeOpts = { read_fn: (string) -> string | nil, search_paths: { [integer]: string } | nil }
+--: (entry_path: string, opts: AnalyzeOpts) -> ({ [integer]: string } | nil, string | nil)
 function M.analyze(entry_path, opts)
-	opts = opts or {}
 	local read_fn = opts.read_fn
 	if type(read_fn) ~= "function" then
 		error("analyze: opts.read_fn function is required")
 	end
-	local entry_source = read_fn(entry_path)
+	local read_fn_ = read_fn --[[:! (string) -> string | nil]]
+	local entry_source = read_fn_(entry_path)
 	if not entry_source then
 		return nil, "cannot read entry file: " .. entry_path
 	end
 	local search_paths = opts.search_paths
 	local resolve_fn = function(mod_name)
-		local _, content = resolve_module(mod_name, read_fn, search_paths)
+		local _, content = resolve_module(mod_name, read_fn_, search_paths)
 		return content
 	end
 	local modules = collect_deps(entry_source, resolve_fn)
@@ -193,10 +197,11 @@ function M.analyze(entry_path, opts)
 end
 
 --- Analyze a source string and return an ordered list of its transitive dependencies.
---: (source: string, opts: { resolve: (name: string) -> string | nil } | nil) -> { string }
+--:: AnalyzeStringOpts = { resolve: (string) -> string | nil }
+--: (source: string, opts: AnalyzeStringOpts | nil) -> { [integer]: string }
 function M.analyze_string(source, opts)
-	opts = opts or {}
-	local resolve_fn = opts.resolve or function() return nil end
+	local opts_ = opts --[[:! AnalyzeStringOpts | nil]]
+	local resolve_fn = (opts_ and opts_.resolve) or (function(_name) return nil end --[[:! (string) -> string | nil]])
 	local modules = collect_deps(source, resolve_fn)
 	local result = {}
 	for i = 1, #modules do
