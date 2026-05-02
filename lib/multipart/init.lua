@@ -13,17 +13,23 @@ M._tier = "pure"
 local concat = table.concat
 local byte, char, find, sub, format = string.byte, string.char, string.find, string.sub, string.format
 
+--:: HeaderMap = { [string]: string, ... }
+--:: Part = { headers: HeaderMap, body: string }
+--:: DecodedPart = { headers: HeaderMap, body: string, name: string | nil, filename: string | nil }
+--:: Builder = { _boundary: string, _parts: { [integer]: Part }, ... }
+
 -- ── Boundary generation ───────────────────────────────────────────────────────
 
 local BOUNDARY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
 local function gen_boundary(seed)
     if not seed then error("multipart: seed is required for boundary generation") end
-    math.randomseed(seed)
-    local t = {}
-    for i = 1, 24 do
-        local r = math.random(#BOUNDARY_CHARS)
-        t[i] = sub(BOUNDARY_CHARS, r, r)
+    local seed_ = seed --[[:! integer]]
+    math.randomseed(seed_)
+    local t = {} --: { [integer]: string }
+    for _ = 1, 24 do
+        local r = (math.floor(math.random() * #BOUNDARY_CHARS) + 1) --[[:! integer]]
+        table.insert(t, string.sub(BOUNDARY_CHARS, r, r))
     end
     return concat(t)
 end
@@ -31,6 +37,7 @@ end
 -- ── Header parsing ────────────────────────────────────────────────────────────
 
 -- Parse a single header line "Name: value" -> name (lowercase), value
+--: (string) -> (string | nil, string | nil)
 local function parse_header_line(line)
     local colon = find(line, ":", 1, true)
     if not colon then return nil, nil end
@@ -42,104 +49,106 @@ end
 -- Parse Content-Disposition parameters from a value like:
 --   form-data; name="field1"; filename="test.txt"
 -- Returns a table { disposition="form-data", name="field1", filename="test.txt" }
+--:: DispositionMap = { disposition: string | nil, name: string | nil, filename: string | nil, [string]: string }
+--: (string) -> DispositionMap
 local function parse_disposition(value)
-    local result = {}
+    local result = {} --[[: any]]
+    local result_ = result --[[:! DispositionMap]]
     -- Extract main disposition type (before first ;)
     local disp = value:match("^%s*([^;]+)")
     if disp then
-        result.disposition = disp:match("^%s*(.-)%s*$")
-    end
-    -- Extract parameters: name="value" or name=value
-    for key, quoted, unquoted in value:gmatch(";%s*([%w%-]+)%s*=%s*\"([^\"]*)\"|;%s*([%w%-]+)%s*=%s*([^;%s]+)") do
-        if key ~= "" then
-            result[key] = quoted
-        elseif unquoted then
-            -- This branch handles unquoted values — captured differently
-        end
+        result_["disposition"] = disp:match("^%s*(.-)%s*$") or ""
     end
     -- More robust param extraction
     for param in value:gmatch(";([^;]+)") do
-        local k = param:match("^%s*([%w%-]+)%s*=")
+        local param_ = param --[[:! string]]
+        local k = param_:match("^%s*([%w%-]+)%s*=")
         if k then
             -- Try quoted
-            local v = param:match("^%s*[%w%-]+%s*=%s*\"([^\"]*)\"")
+            local v = param_:match("^%s*[%w%-]+%s*=%s*\"([^\"]*)\"")
             if not v then
-                v = param:match("^%s*[%w%-]+%s*=%s*(.-)%s*$")
+                v = param_:match("^%s*[%w%-]+%s*=%s*(.-)%s*$")
             end
-            if v then result[k] = v end
+            if v then result_[k] = v end
         end
     end
-    return result
+    return result_
 end
 
 -- ── Builder ───────────────────────────────────────────────────────────────────
 
-local Builder = {}
+local Builder = {} --[[: any]]
 Builder.__index = Builder
 
 --- Create a new multipart builder.
 -- If boundary is not provided, seed is required to generate one.
---: (string | nil, integer | nil) -> table
+--: (string | nil, integer | nil) -> Builder
 function M.new(boundary, seed)
     if not boundary and not seed then error("multipart.new: boundary or seed is required") end
-    local self = setmetatable({}, Builder)
-    self._boundary = boundary or gen_boundary(seed)
-    self._parts = {}
-    return self
+    local self = setmetatable({}, Builder) --[[: any]]
+    local self_ = self --[[:! Builder]]
+    self_._boundary = boundary or gen_boundary(seed)
+    self_._parts = {}
+    return self_
 end
 
 --- Add a plain form field.
---: (string, string) -> nil
+--: (Builder, string, string) -> nil
 function Builder:field(name, value)
-    local headers = {
-        ["Content-Disposition"] = format('form-data; name="%s"', name),
-    }
-    self:part(headers, value)
+    local self_ = self --[[:! Builder]]
+    local headers = { ["Content-Disposition"] = format('form-data; name="%s"', name) } --: HeaderMap
+    Builder.part(self_, headers, value)
 end
 
 --- Add a file part.
---: (string, string, string, string | nil) -> nil
+--: (Builder, string, string, string, string | nil) -> nil
 function Builder:file(name, filename, content, content_type)
+    local self_ = self --[[:! Builder]]
     local headers = {
         ["Content-Disposition"] = format('form-data; name="%s"; filename="%s"', name, filename),
         ["Content-Type"] = content_type or "application/octet-stream",
-    }
-    self:part(headers, content)
+    } --: HeaderMap
+    Builder.part(self_, headers, content)
 end
 
 --- Add a part with custom headers and body.
---: ({ [string]: string }, string) -> nil
+--: (Builder, HeaderMap, string) -> nil
 function Builder:part(headers, body)
-    self._parts[#self._parts + 1] = { headers = headers, body = body }
+    local self_ = self --[[:! Builder]]
+    self_._parts[#self_._parts + 1] = { headers = headers, body = body }
 end
 
 --- Finalize and return the multipart body and boundary.
---: () -> (string, string)
+--: (Builder) -> (string, string)
 function Builder:body()
-    local t = {}
+    local self_ = self --[[:! Builder]]
+    local t = {} --: { [integer]: string }
     local k = 1
-    local boundary = self._boundary
-    for _, part in ipairs(self._parts) do
+    local boundary = self_._boundary
+    for _, part in ipairs(self_._parts) do
+        local part_ = part --[[:! Part]]
         t[k] = "--"; k = k + 1
         t[k] = boundary; k = k + 1
         t[k] = "\r\n"; k = k + 1
         -- Write headers in deterministic order: Content-Disposition first, then others
-        local cd = part.headers["Content-Disposition"]
+        local cd = part_.headers["Content-Disposition"]
         if cd then
             t[k] = "Content-Disposition: "; k = k + 1
             t[k] = cd; k = k + 1
             t[k] = "\r\n"; k = k + 1
         end
-        for hname, hval in pairs(part.headers) do
-            if hname:lower() ~= "content-disposition" then
-                t[k] = hname; k = k + 1
+        for hname, hval in pairs(part_.headers) do
+            local hname_ = hname --[[:! string]]
+            local hval_ = hval --[[:! string]]
+            if hname_:lower() ~= "content-disposition" then
+                t[k] = hname_; k = k + 1
                 t[k] = ": "; k = k + 1
-                t[k] = hval; k = k + 1
+                t[k] = hval_; k = k + 1
                 t[k] = "\r\n"; k = k + 1
             end
         end
         t[k] = "\r\n"; k = k + 1
-        t[k] = part.body; k = k + 1
+        t[k] = part_.body; k = k + 1
         t[k] = "\r\n"; k = k + 1
     end
     t[k] = "--"; k = k + 1
@@ -149,9 +158,10 @@ function Builder:body()
 end
 
 --- Return the Content-Type header value for this multipart body.
---: () -> string
+--: (Builder) -> string
 function Builder:content_type()
-    return format("multipart/form-data; boundary=%s", self._boundary)
+    local self_ = self --[[:! Builder]]
+    return format("multipart/form-data; boundary=%s", self_._boundary)
 end
 
 -- ── One-shot encode ───────────────────────────────────────────────────────────
@@ -161,32 +171,41 @@ end
 --   { name="f", value="v" }                               -- plain field
 --   { name="f", filename="x.txt", data="...", type="..." } -- file part
 --   { headers={...}, body="..." }                          -- raw part
---: (table, string | nil, integer | nil) -> (string, string)
+--: ({ [integer]: { [string]: unknown } }, string | nil, integer | nil) -> (string, string)
 function M.encode(parts, boundary, seed)
     local mp = M.new(boundary, seed)
     for _, p in ipairs(parts) do
-        if p.headers then
-            mp:part(p.headers, p.body or "")
-        elseif p.filename then
-            mp:file(p.name, p.filename, p.data or "", p.type)
+        local p_ = p --[[:! { [string]: unknown }]]
+        if p_["headers"] then
+            local h_ = p_["headers"] --[[:! HeaderMap]]
+            local b_ = (p_["body"] or "") --[[:! string]]
+            Builder.part(mp, h_, b_)
+        elseif p_["filename"] then
+            local name_ = p_["name"] --[[:! string]]
+            local fn_ = p_["filename"] --[[:! string]]
+            local data_ = (p_["data"] or "") --[[:! string]]
+            local type_ = p_["type"] --[[:! string | nil]]
+            Builder.file(mp, name_, fn_, data_, type_)
         else
-            mp:field(p.name, p.value or "")
+            local name_ = p_["name"] --[[:! string]]
+            local val_ = (p_["value"] or "") --[[:! string]]
+            Builder.field(mp, name_, val_)
         end
     end
-    return mp:body()
+    return Builder.body(mp)
 end
 
 -- ── Decode ────────────────────────────────────────────────────────────────────
 
 --- Decode a multipart body given its boundary.
 -- Returns array of { headers={...}, body="..." }, or (nil, errmsg) on error.
---: (string, string) -> table | (nil, string)
+--: (string, string) -> ({ [integer]: DecodedPart } | nil, string | nil)
 function M.decode(body, boundary)
     if not boundary or boundary == "" then
         return nil, "multipart.decode: boundary is required"
     end
 
-    local parts = {}
+    local parts = {} --: { [integer]: DecodedPart }
 
     -- Normalize line endings to \n for easier splitting, but preserve body bytes.
     -- We work with the original body and track positions to preserve exact bytes.
@@ -204,38 +223,43 @@ function M.decode(body, boundary)
     if not s then
         return nil, "multipart.decode: no boundary found"
     end
+    local e_ = e --[[:! integer]]
 
     -- Check if immediately followed by --  (empty body with just closing boundary)
-    local after_first = sub(body, e + 1, e + 2)
+    local after_first = sub(body, e_ + 1, e_ + 2)
     if after_first == "--" then
         return parts  -- no parts
     end
 
     -- Move past the first boundary line (skip \r\n or \n)
-    pos = e + 1
+    pos = e_ + 1
     if sub(body, pos, pos) == "\r" then pos = pos + 1 end
     if sub(body, pos, pos) == "\n" then pos = pos + 1 end
 
     -- Parse parts
-    while pos <= n do
+    while (pos --[[:! integer]]) <= n do
+        local pos_ = pos --[[:! integer]]
         -- Find the next boundary (could be closing --)
-        local bs, be = find(body, delim, pos, true)
+        local bs, be = find(body, delim, pos_, true)
         if not bs then
             -- No more boundaries; remaining content is a malformed final part
             break
         end
+        local bs_ = bs --[[:! integer]]
+        local be_ = be --[[:! integer]]
 
         -- Part content runs from pos to just before the boundary line
         -- (strip the \r\n before the boundary delimiter)
-        local part_end = bs - 1
+        local part_end = bs_ - 1
         if part_end >= 1 and byte(body, part_end) == 10 then  -- \n
             part_end = part_end - 1
         end
-        if part_end >= 1 and byte(body, part_end) == 13 then  -- \r
-            part_end = part_end - 1
+        local part_end2 = part_end --[[:! integer]]
+        if part_end2 >= 1 and byte(body, part_end2) == 13 then  -- \r
+            part_end = part_end2 - 1
         end
 
-        local part_content = sub(body, pos, part_end)
+        local part_content = sub(body, pos_, part_end)
 
         -- Parse headers from part_content
         -- Headers end at first blank line (\r\n\r\n or \n\n)
@@ -253,17 +277,21 @@ function M.decode(body, boundary)
                 body_start = #part_content + 1
             end
         end
+        local header_end_ = header_end --[[:! integer]]
+        local body_start_ = body_start --[[:! integer]]
 
-        local header_block = sub(part_content, 1, header_end - 1)
-        local part_body = sub(part_content, body_start)
+        local header_block = sub(part_content, 1, header_end_ - 1)
+        local part_body = sub(part_content, body_start_)
 
         -- Parse individual headers
-        local headers = {}
+        local headers = {} --: HeaderMap
         for line in (header_block .. "\n"):gmatch("([^\r\n]*)\r?\n") do
             if line ~= "" then
                 local hname, hval = parse_header_line(line)
                 if hname then
-                    headers[hname] = hval
+                    local hname_ = hname --[[:! string]]
+                    local hval_ = (hval or "") --[[:! string]]
+                    headers[hname_] = hval_
                 end
             end
         end
@@ -273,8 +301,8 @@ function M.decode(body, boundary)
         local name, filename
         if cd_raw then
             local cd = parse_disposition(cd_raw)
-            name = cd.name
-            filename = cd.filename
+            name = cd["name"]
+            filename = cd["filename"]
         end
 
         parts[#parts + 1] = {
@@ -286,13 +314,13 @@ function M.decode(body, boundary)
 
         -- Advance past boundary
         -- Check for closing boundary
-        local after = sub(body, be + 1, be + 2)
+        local after = sub(body, be_ + 1, be_ + 2)
         if after == "--" then
             break  -- closing boundary reached
         end
 
         -- Move past boundary line ending
-        pos = be + 1
+        pos = be_ + 1
         if sub(body, pos, pos) == "\r" then pos = pos + 1 end
         if sub(body, pos, pos) == "\n" then pos = pos + 1 end
     end
@@ -304,7 +332,7 @@ end
 
 --- Extract the boundary parameter from a Content-Type header value.
 -- e.g. "multipart/form-data; boundary=abc123" -> "abc123"
---: (string) -> string | (nil, string)
+--: (string) -> (string | nil, string | nil)
 function M.parse_boundary(content_type)
     if not content_type then
         return nil, "multipart.parse_boundary: content_type is required"
