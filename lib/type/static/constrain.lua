@@ -74,16 +74,12 @@ local FLAG_OPAQUE_KEY = defs.FLAG_OPAQUE_KEY
 local band            = require("bit").band
 local bor             = require("bit").bor
 
--- Compute field flags, auto-setting FLAG_PRIVATE for `_`-prefixed names.
+-- Compute field flags from base_flags (boolean shorthand for FLAG_OPTIONAL is accepted).
 --: (Ctx, integer, integer | nil) -> integer
 local function field_flags(ctx, name_id, base_flags)
     base_flags = base_flags or 0
     if type(base_flags) == "boolean" then
         base_flags = base_flags and FLAG_OPTIONAL or 0
-    end
-    local name = require("lib.type.static.intern").get(ctx.pool, name_id) or ""
-    if name:sub(1, 1) == "_" then
-        base_flags = bor(base_flags, FLAG_PRIVATE)
     end
     return base_flags
 end

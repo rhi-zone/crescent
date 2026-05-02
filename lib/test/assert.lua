@@ -17,6 +17,7 @@ local function fmt(v)
 	return tostring(v)
 end
 
+--: (unknown, unknown, string | nil) -> nil
 mod.eq = function(a, b, msg)
 	if a ~= b then
 		_fail = _fail + 1
@@ -25,6 +26,7 @@ mod.eq = function(a, b, msg)
 	_pass = _pass + 1
 end
 
+--: (unknown, unknown, string | nil) -> nil
 mod.neq = function(a, b, msg)
 	if a == b then
 		_fail = _fail + 1
@@ -33,6 +35,7 @@ mod.neq = function(a, b, msg)
 	_pass = _pass + 1
 end
 
+--: (unknown, string | nil) -> nil
 mod.ok = function(v, msg)
 	if not v then
 		_fail = _fail + 1
@@ -41,6 +44,7 @@ mod.ok = function(v, msg)
 	_pass = _pass + 1
 end
 
+--: (unknown, string | nil) -> nil
 mod.fail = function(v, msg)
 	if v then
 		_fail = _fail + 1
@@ -49,6 +53,7 @@ mod.fail = function(v, msg)
 	_pass = _pass + 1
 end
 
+--: (() -> unknown, string | nil) -> nil
 mod.throws = function(fn, msg)
 	local ok = pcall(fn)
 	if ok then
