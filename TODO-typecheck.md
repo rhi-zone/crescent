@@ -132,6 +132,14 @@ last because the type system itself is the testbed.
 - `lib/bits/init.lua` — annotating `band/bor/bxor/bnot/lshift/rshift` with `(integer, integer) -> integer` to remove `union member any not callable` regressed 76 → 82 (concrete return type cascades into stricter checks elsewhere). Reverted. Root cause is `pcall(require, "bit")` fall-through producing union of pure-Lua impl and bit module; needs Bitset/Bloom shape annotations first.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
+- `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+6)
+
+- [x] `lib/interval_tree/init.lua` (was 16 → now 0, commit 5a97279) — ITreeNode/ITreeObj type aliases; annotate all helpers with `(params) -> ret` syntax; force-cast left/right fields as ITreeNode|nil at recursive call sites; self_ pattern in Tree methods; phi-join m_ force-cast in update_max; split multi-return assignments for bst_delete to avoid nil assignment to { [integer]: boolean }
+- [x] `lib/bench/init.lua` (was 28 → now 0, commit ce5a01e) — ClockFn/Stats/BenchResult/BenchOpts/SuiteCase/SuiteResult type aliases; annotate M.stats with typed array; annotate format_ns/format_ops; self_ cast in ResultMT:format; typed samples/s arrays; var_sum/sum as number; median initializer; clock injection guard; batch_ integer cast; slowest as number; sorted SuiteResult cast for table.sort
+- [x] `lib/async_queue/init.lua` (was 41 → now 0, commit 00cd0ea) — AQDoneCb/AQTask/AQState/AQStats/AQListeners/AQObj/BatcherObj type aliases; arr_remove helper to avoid table.remove type inference conflict; pq_insert annotated; rate_ok/rate_consume/finish_task/reschedule_retry/start_task annotated; self_ casts in all Queue/Batcher methods; Queue.tick/run_all use self_ for field access; Batcher._flush_key called directly for method dispatch; narrowing fixes for number|nil comparisons
+- skipped `lib/automata/init.lua` (27 errors) — multi-param annotation syntax confusion + setmetatable overlap failures + generic sorted_keys; net regressed to 35 on first attempt, reverted
 
 ## Done in current session (session N+5)
 
