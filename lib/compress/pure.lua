@@ -7,10 +7,15 @@ local byte = string.byte
 local sub = string.sub
 local char = string.char
 local concat = table.concat
-local band = bit and bit.band or function(a, b) return a % (b + 1) end
-local rshift = bit and bit.rshift or function(a, n) return math.floor(a / 2^n) end
-local bxor = bit and bit.bxor
-local lshift = bit and bit.lshift
+-- Helper: extract a single byte as integer
+--: (string, integer) -> integer
+local function byte1(s, i) return (byte(s, i) or 0) --[[:! integer]] end
+
+local _bit = (pcall(require, "bit") and require("bit") or nil) --[[: any]]
+local band = (_bit and _bit.band or function(a, b) return a % (b + 1) end) --[[:! (integer, integer) -> integer]]
+local rshift = (_bit and _bit.rshift or function(a, n) return math.floor(a / 2^n) end) --[[:! (integer, integer) -> integer]]
+local bxor = (_bit and _bit.bxor or function(a, b) return 0 end) --[[:! (integer, integer) -> integer]]
+local lshift = (_bit and _bit.lshift or function(a, n) return math.floor(a * 2^n) end) --[[:! (integer, integer) -> integer]]
 
 -- Convert a signed 32-bit integer (as returned by bit.*) to unsigned Lua number.
 --: (number) -> number
@@ -27,7 +32,7 @@ local MOD_ADLER = 65521
 local function adler32(data)
   local a, b = 1, 0
   for i = 1, #data do
-    a = (a + byte(data, i)) % MOD_ADLER
+    a = (a + byte1(data, i)) % MOD_ADLER
     b = (b + a) % MOD_ADLER
   end
   return b * 65536 + a
@@ -42,7 +47,7 @@ do
     local c = i
     for _ = 1, 8 do
       if band(c, 1) == 1 then
-        c = bxor(rshift(c, 1), 0xEDB88320)
+        c = bxor(rshift(c, 1), math.floor(0xEDB88320))
       else
         c = rshift(c, 1)
       end
@@ -53,12 +58,12 @@ end
 
 --: (string) -> number
 local function crc32(data)
-  local c = 0xFFFFFFFF
+  local c = math.floor(0xFFFFFFFF) --[[:! integer]]
   for i = 1, #data do
-    local idx = band(bxor(c, byte(data, i)), 0xFF)
-    c = bxor(rshift(c, 8), crc_table[idx])
+    local idx = band(bxor(c, byte1(data, i)), 0xFF)
+    c = bxor(rshift(c, 8), (crc_table[idx] or 0) --[[:! integer]])
   end
-  return to_u32(band(bxor(c, 0xFFFFFFFF), 0xFFFFFFFF))
+  return to_u32(band(bxor(c, math.floor(0xFFFFFFFF)), math.floor(0xFFFFFFFF)))
 end
 
 -- ── Bit reader ───────────────────────────────────────────────────────────────
@@ -83,7 +88,7 @@ local function read_bits(r, n)
     if r.pos > #r.data then
       error("unexpected end of input")
     end
-    r.bitbuf = r.bitbuf + byte(r.data, r.pos) * (2 ^ r.bitcnt)
+    r.bitbuf = r.bitbuf + byte1(r.data, r.pos) * (2 ^ r.bitcnt)
     r.pos = r.pos + 1
     r.bitcnt = r.bitcnt + 8
   end
@@ -120,40 +125,41 @@ end
 -- where code is the bit-reversed prefix of the appropriate length.
 --: (number[], integer) -> huffman_tree
 local function build_tree(lengths, nsym)
-  local maxbits = 0
-  local bl_count = {}
+  local maxbits = 0 --: integer
+  local bl_count = {} --: { [integer]: integer }
   for i = 0, nsym - 1 do
-    local len = lengths[i] or 0
+    local len = (lengths[i] or 0) --[[:! integer]]
     if len > 0 then
       bl_count[len] = (bl_count[len] or 0) + 1
       if len > maxbits then maxbits = len end
     end
   end
   if maxbits == 0 then
-    return { minbits = 1, maxbits = 1 }
+    local empty_tree = { minbits = 1, maxbits = 1 } --[[:! huffman_tree]]
+    return empty_tree
   end
 
   -- Compute next_code for each bit length
-  local next_code = {}
-  local code = 0
+  local next_code = {} --: { [integer]: integer }
+  local code = 0 --: integer
   for bits = 1, maxbits do
     code = (code + (bl_count[bits - 1] or 0)) * 2
     next_code[bits] = code
   end
 
   -- Assign codes and store bit-reversed in lookup table
-  local tree = { minbits = maxbits, maxbits = maxbits }
+  local tree = { minbits = maxbits, maxbits = maxbits } --[[:! huffman_tree]]
   for i = 0, nsym - 1 do
-    local len = lengths[i] or 0
+    local len = (lengths[i] or 0) --[[:! integer]]
     if len > 0 then
-      local c = next_code[len]
+      local c = (next_code[len] or 0) --: integer
       next_code[len] = c + 1
       -- Bit-reverse the code
-      local rev = 0
-      local tmp = c
+      local rev = 0 --: integer
+      local tmp = c --: integer
       for _ = 1, len do
         rev = rev * 2 + tmp % 2
-        tmp = math.floor(tmp / 2)
+        tmp = math.floor(tmp / 2) --[[:! integer]]
       end
       -- Store with length encoded
       tree[rev * 32 + len] = i
@@ -250,15 +256,15 @@ local function inflate_blocks(r, out)
       -- Stored block
       align_byte(r)
       if r.pos + 3 > #r.data then error("unexpected end of input") end
-      local len = byte(r.data, r.pos) + byte(r.data, r.pos + 1) * 256
-      local nlen = byte(r.data, r.pos + 2) + byte(r.data, r.pos + 3) * 256
+      local len = byte1(r.data, r.pos) + byte1(r.data, r.pos + 1) * 256
+      local nlen = byte1(r.data, r.pos + 2) + byte1(r.data, r.pos + 3) * 256
       r.pos = r.pos + 4
       if band(len + nlen, 0xFFFF) ~= 0xFFFF then
         error("invalid stored block length")
       end
       if r.pos + len - 1 > #r.data then error("unexpected end of input") end
       for i = 0, len - 1 do
-        emit(char(byte(r.data, r.pos + i)))
+        emit(char(byte1(r.data, r.pos + i)))
       end
       r.pos = r.pos + len
 
@@ -270,9 +276,9 @@ local function inflate_blocks(r, out)
         dist_tree = fixed_dist_tree
       else
         -- Dynamic Huffman codes
-        local hlit = read_bits(r, 5) + 257
-        local hdist = read_bits(r, 5) + 1
-        local hclen = read_bits(r, 4) + 4
+        local hlit = math.floor(read_bits(r, 5) + 257) --[[:! integer]]
+        local hdist = math.floor(read_bits(r, 5) + 1) --[[:! integer]]
+        local hclen = math.floor(read_bits(r, 4) + 4) --[[:! integer]]
 
         local cl_order = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15}
         local cl_lengths = {}
@@ -353,15 +359,15 @@ end
 
 --: (string, (inflate_opts | nil)) -> ((string | nil), (string | nil))
 local function inflate(input, opts)
-  opts = opts or {}
-  local format = opts.format or "zlib"
-  local pos = 1
+  local opts_ = (opts or {}) --[[:! inflate_opts]]
+  local format = opts_.format or "zlib"
+  local pos = 1 --: integer
 
   if format == "zlib" then
     -- Parse zlib header (RFC 1950)
     if #input < 6 then return nil, "input too short for zlib format" end
-    local cmf = byte(input, 1)
-    local flg = byte(input, 2)
+    local cmf = byte1(input, 1)
+    local flg = byte1(input, 2)
     if (cmf * 256 + flg) % 31 ~= 0 then
       return nil, "invalid zlib header checksum"
     end
@@ -383,10 +389,10 @@ local function inflate(input, opts)
     -- Verify Adler-32 (last 4 bytes, big-endian)
     local alen = #input
     if alen < pos + 3 then return nil, "missing adler32 checksum" end
-    local expected = byte(input, alen - 3) * 16777216 +
-                     byte(input, alen - 2) * 65536 +
-                     byte(input, alen - 1) * 256 +
-                     byte(input, alen)
+    local expected = byte1(input, alen - 3) * 16777216 +
+                     byte1(input, alen - 2) * 65536 +
+                     byte1(input, alen - 1) * 256 +
+                     byte1(input, alen)
     local actual = adler32(result)
     if expected ~= actual then
       return nil, "adler32 checksum mismatch: expected " .. expected .. " got " .. actual
@@ -396,35 +402,39 @@ local function inflate(input, opts)
   elseif format == "gzip" then
     -- Parse gzip header (RFC 1952)
     if #input < 18 then return nil, "input too short for gzip format" end
-    if byte(input, 1) ~= 0x1f or byte(input, 2) ~= 0x8b then
+    if byte1(input, 1) ~= 0x1f or byte1(input, 2) ~= 0x8b then
       return nil, "invalid gzip magic number"
     end
-    if byte(input, 3) ~= 8 then
+    if byte1(input, 3) ~= 8 then
       return nil, "unsupported gzip compression method"
     end
-    local flg = byte(input, 4)
-    pos = 11 -- skip ID1, ID2, CM, FLG, MTIME(4), XFL, OS
+    local flg = byte1(input, 4)
+    pos = math.floor(11) --[[:! integer]] -- skip ID1, ID2, CM, FLG, MTIME(4), XFL, OS
 
     -- FEXTRA
     if band(flg, 4) ~= 0 then
       if pos + 1 > #input then return nil, "truncated gzip header (FEXTRA)" end
-      local xlen = byte(input, pos) + byte(input, pos + 1) * 256
+      local xlen = byte1(input, pos) + byte1(input, pos + 1) * 256 --[[:! integer]]
       pos = pos + 2 + xlen
     end
+    pos = pos --[[:! integer]]
     -- FNAME
     if band(flg, 8) ~= 0 then
-      while pos <= #input and byte(input, pos) ~= 0 do pos = pos + 1 end
+      while pos <= #input and byte1(input, pos) ~= 0 do pos = pos + 1 end
       pos = pos + 1 -- skip null terminator
     end
+    pos = pos --[[:! integer]]
     -- FCOMMENT
     if band(flg, 16) ~= 0 then
-      while pos <= #input and byte(input, pos) ~= 0 do pos = pos + 1 end
+      while pos <= #input and byte1(input, pos) ~= 0 do pos = pos + 1 end
       pos = pos + 1
     end
+    pos = pos --[[:! integer]]
     -- FHCRC
     if band(flg, 2) ~= 0 then
       pos = pos + 2
     end
+    pos = pos --[[:! integer]]
 
     if pos > #input then return nil, "truncated gzip header" end
 
@@ -439,14 +449,14 @@ local function inflate(input, opts)
     -- The trailer is at the end of the input, after the compressed data
     local alen = #input
     if alen < 8 then return nil, "missing gzip trailer" end
-    local expected_crc = byte(input, alen - 7) +
-                         byte(input, alen - 6) * 256 +
-                         byte(input, alen - 5) * 65536 +
-                         byte(input, alen - 4) * 16777216
-    local expected_size = byte(input, alen - 3) +
-                          byte(input, alen - 2) * 256 +
-                          byte(input, alen - 1) * 65536 +
-                          byte(input, alen) * 16777216
+    local expected_crc = byte1(input, alen - 7) +
+                         byte1(input, alen - 6) * 256 +
+                         byte1(input, alen - 5) * 65536 +
+                         byte1(input, alen - 4) * 16777216
+    local expected_size = byte1(input, alen - 3) +
+                          byte1(input, alen - 2) * 256 +
+                          byte1(input, alen - 1) * 65536 +
+                          byte1(input, alen) * 16777216
 
     local actual_crc = crc32(result)
     if expected_crc ~= actual_crc then

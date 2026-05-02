@@ -5,6 +5,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Cmd = { execute: () -> nil, undo: () -> nil, describe: (() -> string) | nil }
+--:: PQEntry = { fn: () -> nil, priority: integer }
+
 -- ---------------------------------------------------------------------------
 -- compound(commands, desc?) -> command
 -- Groups multiple commands into a single undoable unit.
@@ -46,11 +49,11 @@ function M.history(opts)
   opts = opts or {}
   local max_size = opts.max_size  -- nil = unlimited
 
-  local undo_stack = {}  -- [1] = oldest, [#] = most recent
-  local redo_stack = {}
+  local undo_stack = {} --: { [integer]: Cmd }
+  local redo_stack = {} --: { [integer]: Cmd }
 
   -- batch/transaction state
-  local batch_commands = nil  -- non-nil when inside a batch or transaction
+  local batch_commands = nil --: { [integer]: Cmd } | nil
 
   local h = {}
 
@@ -88,7 +91,7 @@ function M.history(opts)
   function h:undo()
     if #undo_stack == 0 then return nil, "nothing to undo" end
     local cmd = undo_stack[#undo_stack]
-    undo_stack[#undo_stack] = nil
+    undo_stack[#undo_stack] = nil --[[: any]]
     local ok, err = pcall(cmd.undo)
     if not ok then
       -- Restore the command to the undo stack since undo failed
@@ -102,7 +105,7 @@ function M.history(opts)
   function h:redo()
     if #redo_stack == 0 then return nil, "nothing to redo" end
     local cmd = redo_stack[#redo_stack]
-    redo_stack[#redo_stack] = nil
+    redo_stack[#redo_stack] = nil --[[: any]]
     local ok, err = pcall(cmd.execute)
     if not ok then
       redo_stack[#redo_stack + 1] = cmd
@@ -138,12 +141,13 @@ function M.history(opts)
     local prev = batch_commands
     batch_commands = {}
     local ok, err = pcall(fn)
-    local collected = batch_commands
+    local collected = batch_commands --[[:! { [integer]: Cmd }]]
     batch_commands = prev
     if not ok then
       -- Roll back in reverse order
       for i = #collected, 1, -1 do
-        pcall(collected[i].undo)
+        local cmd_ = collected[i] --[[:! Cmd]]
+        pcall(cmd_.undo)
       end
       return nil, err
     end
@@ -177,9 +181,9 @@ function M.history(opts)
 
   -- Returns array of descriptions, oldest first (undo stack order).
   function h:list()
-    local result = {}
+    local result = {} --: { [integer]: string }
     for i = 1, #undo_stack do
-      local cmd = undo_stack[i]
+      local cmd = undo_stack[i] --[[:! Cmd]]
       if cmd.describe then
         result[#result + 1] = cmd.describe()
       else
@@ -202,7 +206,7 @@ end
 -- Sequential execution queue.
 -- ---------------------------------------------------------------------------
 function M.queue()
-  local items = {}
+  local items = {} --: { [integer]: unknown }
 
   local q = {}
 
@@ -212,7 +216,10 @@ function M.queue()
 
   function q:run_next()
     if #items == 0 then return nil, "queue is empty" end
-    local fn = table.remove(items, 1)
+    local fn = items[1] --[[:! () -> nil]]
+    local n = #items
+    for i = 1, n - 1 do items[i] = items[i + 1] end
+    items[n] = nil --[[: any]]
     local ok, err = pcall(fn)
     if not ok then return nil, err end
     return true
@@ -243,7 +250,7 @@ end
 -- ---------------------------------------------------------------------------
 function M.priority_queue()
   -- Each entry: { fn = fn, priority = n }
-  local items = {}
+  local items = {} --: { [integer]: PQEntry }
 
   local pq = {}
 
@@ -260,7 +267,10 @@ function M.priority_queue()
 
   function pq:run_next()
     if #items == 0 then return nil, "queue is empty" end
-    local entry = table.remove(items, 1)
+    local entry = items[1] --[[:! PQEntry]]
+    local n2 = #items
+    for i = 1, n2 - 1 do items[i] = items[i + 1] end
+    items[n2] = nil --[[: any]]
     local ok, err = pcall(entry.fn)
     if not ok then return nil, err end
     return true
