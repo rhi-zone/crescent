@@ -21,7 +21,7 @@ local function anon_var()
   return { kind = "var", name = "_" .. _anon_id }
 end
 
---:: PrologTerm = { kind: string, ... }
+--:: PrologTerm = { kind: string, name?: string, value?: number, functor?: string, args?: { [integer]: PrologTerm }, ... }
 local function mk_atom(n)  return { kind = "atom", name = n } end
 local function mk_num(v)   return { kind = "num",  value = v } end
 local function mk_var(n)   return { kind = "var",  name = n } end
@@ -55,12 +55,12 @@ end
 local function lex(src)
   --: { [integer]: PrologToken }
   local tokens = {}
-  local i = 1
+  local i = 1 --: integer
   local n = #src
   while i <= n do
     -- skip whitespace and comments
     local ws = src:match("^%s+", i)
-    if ws then i = i + #ws end
+    if ws then i = (i + #ws) --[[:! integer]] end
     if i > n then break end
     -- line comment
     if src:sub(i, i+1) == "/*" then
@@ -92,19 +92,19 @@ local function lex(src)
       i = j
     -- numbers (integer or float) — only bare digits; unary minus handled by parser
     elseif src:match("^%d", i) then
-      local num_str = src:match("^%d+%.%d+", i) or src:match("^%d+", i)
+      local num_str = (src:match("^%d+%.%d+", i) or src:match("^%d+", i)) --[[:! string]]
       tokens[#tokens+1] = { type = "num", value = tonumber(num_str), pos = i }
-      i = i + #num_str
+      i = (i + #num_str) --[[:! integer]]
     -- lowercase atom or functor
     elseif src:match("^[a-z]", i) then
-      local word = src:match("^[a-zA-Z0-9_]+", i)
+      local word = src:match("^[a-zA-Z0-9_]+", i) --[[:! string]]
       tokens[#tokens+1] = { type = "atom", value = word, pos = i }
-      i = i + #word
+      i = (i + #word) --[[:! integer]]
     -- variable (uppercase or _)
     elseif src:match("^[A-Z_]", i) then
-      local word = src:match("^[a-zA-Z0-9_]+", i)
+      local word = src:match("^[a-zA-Z0-9_]+", i) --[[:! string]]
       tokens[#tokens+1] = { type = "var", value = word, pos = i }
-      i = i + #word
+      i = (i + #word) --[[:! integer]]
     -- operator-like tokens
     elseif src:sub(i, i+2) == "\\==" then
       tokens[#tokens+1] = { type = "op", value = "\\==", pos = i }
@@ -298,9 +298,9 @@ parse_term = function(toks, pos, maxprec)
   -- Try prefix operator
   local tok = toks[pos]
   if tok then
-    local pfx = PREFIX_OPS[tok.value]
-    if pfx and pfx[1] <= maxprec then
-      local rprec = pfx[2] == "fy" and pfx[1] or pfx[1] - 1
+    local pfx = PREFIX_OPS[tok.value] --[[:! { [integer]: any }]]
+    if pfx and (pfx[1] --[[:! integer]]) <= maxprec then
+      local rprec = pfx[2] == "fy" and (pfx[1] --[[:! integer]]) or (pfx[1] --[[:! integer]]) - 1
       local rhs, np2 = parse_term(toks, pos + 1, rprec)
       if rhs then
         lhs = mk_comp(tok.value, { rhs })
@@ -332,9 +332,9 @@ parse_term = function(toks, pos, maxprec)
     else
       break
     end
-    local info = INFIX_OPS[op]
-    local prec = info[1]
-    local assoc = info[2]
+    local info = INFIX_OPS[op] --[[:! { [integer]: any }]]
+    local prec = info[1] --[[:! integer]]
+    local assoc = info[2] --[[:! string]]
     if prec > maxprec then break end
     -- determine right-hand side max prec
     local rprec
@@ -358,8 +358,9 @@ end
 -- body_list is an array of terms (goals)
 -- A fact: head.   or just head
 -- A rule: head :- goal1, goal2, ...
+--: (string) -> (PrologTerm | nil, { [integer]: PrologTerm } | nil | string)
 local function parse_clause(src)
-  src = src:gsub("%.%s*$", "")  -- strip trailing dot
+  src = (src:gsub("%.%s*$", "") --[[: string]])  -- strip trailing dot
   local toks = lex(src)
   if #toks == 0 then return nil, "empty clause" end
   local term, np = parse_term(toks, 1, 1200)
@@ -371,7 +372,8 @@ local function parse_clause(src)
     local body_term = term.args[2]
     -- flatten comma conjunction
     local goals = {}
-    local function flatten_conj(t)
+    local flatten_conj
+    flatten_conj = function(t)
       if t.kind == "comp" and t.functor == "," then
         flatten_conj(t.args[1])
         flatten_conj(t.args[2])
@@ -394,7 +396,8 @@ local function parse_goals(src)
   local term, np = parse_term(toks, 1, 1200)
   if not term then return nil, np end
   local goals = {}
-  local function flatten_conj(t)
+  local flatten_conj
+  flatten_conj = function(t)
     if t.kind == "comp" and t.functor == "," then
       flatten_conj(t.args[1])
       flatten_conj(t.args[2])
@@ -402,7 +405,7 @@ local function parse_goals(src)
       goals[#goals+1] = t
     end
   end
-  flatten_conj(term)
+  flatten_conj(term --[[:! PrologTerm]])
   return goals
 end
 
@@ -415,19 +418,21 @@ local function copy_term(term, mapping)
   mapping = mapping or {}
   local k = term.kind
   if k == "var" then
-    if not mapping[term.name] then
+    local tname = term.name --[[:! string]]
+    if not mapping[tname] then
       _anon_id = _anon_id + 1
-      mapping[term.name] = { kind = "var", name = term.name .. "_" .. _anon_id }
+      mapping[tname] = { kind = "var", name = tname .. "_" .. _anon_id }
     end
-    return mapping[term.name]
+    return mapping[tname]
   elseif k == "atom" or k == "num" then
     return term
   elseif k == "comp" then
+    local term_args = term.args --[[:! { [integer]: PrologTerm }]]
     local args = {}
-    for i = 1, #term.args do
-      args[i] = copy_term(term.args[i], mapping)
+    for i = 1, #term_args do
+      args[i] = copy_term(term_args[i], mapping)
     end
-    return { kind = "comp", functor = term.functor, args = args }
+    return { kind = "comp", functor = term.functor --[[:! string]], args = args }
   end
   return term
 end
@@ -446,11 +451,12 @@ end
 local function deref(env, t)
   t = walk(env, t)
   if t.kind == "comp" then
+    local t_args = t.args --[[:! { [integer]: PrologTerm }]]
     local args = {}
-    for i = 1, #t.args do
-      args[i] = deref(env, t.args[i])
+    for i = 1, #t_args do
+      args[i] = deref(env, t_args[i])
     end
-    return { kind = "comp", functor = t.functor, args = args }
+    return { kind = "comp", functor = t.functor --[[:! string]], args = args }
   end
   return t
 end
@@ -483,11 +489,13 @@ local function unify(env, t1, t2)
     return env
   end
   if t1.kind == "comp" and t2.kind == "comp"
-    and t1.functor == t2.functor
-    and #t1.args == #t2.args then
+    and t1.functor == t2.functor then
+    local a1 = t1.args --[[:! { [integer]: PrologTerm }]]
+    local a2 = t2.args --[[:! { [integer]: PrologTerm }]]
+    if #a1 ~= #a2 then return nil end
     local e = env
-    for i = 1, #t1.args do
-      e = unify(e, t1.args[i], t2.args[i])
+    for i = 1, #a1 do
+      e = unify(e, a1[i], a2[i])
       if not e then return nil end
     end
     return e
@@ -496,24 +504,27 @@ local function unify(env, t1, t2)
 end
 
 -- Convert a term back to a string (for display)
+--: (any, any) -> string
 local function term_to_string(env, t)
-  t = deref(env, t)
+  t = deref(env, t) --[[:! PrologTerm]]
   if t.kind == "var" then
     -- Strip the _N suffix added by copy_term to show original name
-    return t.name:match("^([^_]+)") or t.name
+    local tname = t.name --[[:! string]]
+    return (tname:match("^([^_]+)") or tname) --[[: string]]
   elseif t.kind == "atom" then
-    return t.name
+    return (t.name --[[:! string]])
   elseif t.kind == "num" then
-    local v = t.value
+    local v = t.value --[[:! number]]
     if v == math.floor(v) then return tostring(math.floor(v)) else return tostring(v) end
   elseif t.kind == "comp" then
     -- List display
-    if t.functor == "." and #t.args == 2 then
+    local t_args = t.args --[[:! { [integer]: PrologTerm }]]
+    if t.functor == "." and #t_args == 2 then
       local elems = {}
       local cur = t
-      while cur.kind == "comp" and cur.functor == "." and #cur.args == 2 do
+      while cur.kind == "comp" and cur.functor == "." and #(cur.args --[[:! { [integer]: PrologTerm }]]) == 2 do
         elems[#elems+1] = term_to_string(env, cur.args[1])
-        cur = deref(env, cur.args[2])
+        cur = deref(env, cur.args[2]) --[[:! PrologTerm]]
       end
       if cur.kind == "atom" and cur.name == "[]" then
         return "[" .. table.concat(elems, ",") .. "]"
@@ -522,84 +533,86 @@ local function term_to_string(env, t)
       end
     end
     local args = {}
-    for i = 1, #t.args do
-      args[i] = term_to_string(env, t.args[i])
+    for i = 1, #t_args do
+      args[i] = term_to_string(env, t_args[i])
     end
-    return t.functor .. "(" .. table.concat(args, ",") .. ")"
+    return (t.functor --[[:! string]]) .. "(" .. table.concat(args, ",") .. ")"
   end
   return "?"
 end
 
 -- Evaluate an arithmetic expression term to a number
 local function eval_arith(env, t)
-  t = deref(env, t)
+  t = deref(env, t) --[[:! PrologTerm]]
   if t.kind == "num" then return t.value end
   if t.kind == "var" then
-    return nil, "unbound variable in arithmetic: " .. t.name
+    return nil, "unbound variable in arithmetic: " .. (t.name --[[:! string]])
   end
   if t.kind == "atom" then
-    local n = tonumber(t.name)
+    local tname = t.name --[[:! string]]
+    local n = tonumber(tname)
     if n then return n end
-    return nil, "non-numeric atom in arithmetic: " .. t.name
+    return nil, "non-numeric atom in arithmetic: " .. tname
   end
   if t.kind == "comp" then
-    local f = t.functor
-    if f == "+" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+    local f = t.functor --[[:! string]]
+    local t_args = t.args --[[:! { [integer]: PrologTerm }]]
+    if f == "+" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return a + b
-    elseif f == "-" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return (a --[[: number]]) + (b --[[: number]])
+    elseif f == "-" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return a - b
-    elseif f == "-" and #t.args == 1 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return (a --[[: number]]) - (b --[[: number]])
+    elseif f == "-" and #t_args == 1 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      return -a
-    elseif f == "*" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return -(a --[[: number]])
+    elseif f == "*" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return a * b
-    elseif f == "/" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return (a --[[: number]]) * (b --[[: number]])
+    elseif f == "/" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return a / b
-    elseif f == "mod" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return (a --[[: number]]) / (b --[[: number]])
+    elseif f == "mod" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return a % b
-    elseif f == "^" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return (a --[[: number]]) % (b --[[: number]])
+    elseif f == "^" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return a ^ b
-    elseif f == "abs" and #t.args == 1 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return (a --[[: number]]) ^ (b --[[: number]])
+    elseif f == "abs" and #t_args == 1 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      return math.abs(a)
-    elseif f == "max" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return math.abs(a --[[: number]])
+    elseif f == "max" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return math.max(a, b)
-    elseif f == "min" and #t.args == 2 then
-      local a, e1 = eval_arith(env, t.args[1])
+      return math.max(a --[[: number]], b --[[: number]])
+    elseif f == "min" and #t_args == 2 then
+      local a, e1 = eval_arith(env, t_args[1])
       if not a then return nil, e1 end
-      local b, e2 = eval_arith(env, t.args[2])
+      local b, e2 = eval_arith(env, t_args[2])
       if not b then return nil, e2 end
-      return math.min(a, b)
+      return math.min(a --[[: number]], b --[[: number]])
     end
   end
   return nil, "cannot evaluate as arithmetic: " .. term_to_string({}, t)
@@ -607,8 +620,8 @@ end
 
 -- Extract the predicate key from a term: "functor/arity"
 local function pred_key(t)
-  if t.kind == "atom" then return t.name .. "/0" end
-  if t.kind == "comp" then return t.functor .. "/" .. #t.args end
+  if t.kind == "atom" then return (t.name --[[:! string]]) .. "/0" end
+  if t.kind == "comp" then return (t.functor --[[:! string]]) .. "/" .. #(t.args --[[:! { [integer]: PrologTerm }]]) end
   return nil
 end
 
@@ -652,10 +665,11 @@ function DB:assert(clause_str)
 end
 
 -- Retract matching clause (first match)
+--: (any, string) -> (boolean | nil, string | nil)
 function DB:retract(clause_str)
   local head, body = parse_clause(clause_str)
   if not head then return nil, body end
-  local key = pred_key(head)
+  local key = pred_key(head) --[[:! string]]
   local clauses = self._clauses[key]
   if not clauses then return nil, "no clauses for " .. key end
   -- find first clause whose head unifies with the given head
@@ -667,14 +681,18 @@ function DB:retract(clause_str)
     if env then
       -- also check body if provided
       local body_match = true
-      if #body > 0 and #clause.body ~= #body then
+      local clause_body = clause.body --[[:! { [integer]: PrologTerm }]]
+      if #body > 0 and #clause_body ~= #body then
         body_match = false
       elseif #body > 0 then
+        local env2 = env --[[: { [string]: PrologTerm }]]
         for j = 1, #body do
-          local body_copy = copy_term(clause.body[j], mapping)
-          env = unify(env, body_copy, body[j])
-          if not env then body_match = false break end
+          local body_copy = copy_term(clause_body[j], mapping)
+          env2 = unify(env2, body_copy, body[j])
+          if not env2 then body_match = false break end
+          env2 = env2 --[[: { [string]: PrologTerm }]]
         end
+        if env2 then env = env2 end
       end
       if body_match then
         table.remove(clauses, i)
@@ -696,6 +714,7 @@ local solve  -- forward declaration
 
 -- Resolve a goal list against the database, yielding solutions (envs)
 -- `depth` is used to detect infinite recursion (safety limit)
+--: (any, { [integer]: PrologTerm }, { [string]: PrologTerm }, integer | nil) -> ()
 solve = function(db, goals, env, depth)
   depth = depth or 0
   if depth > 50000 then
@@ -711,15 +730,15 @@ solve = function(db, goals, env, depth)
   local rest = {}
   for i = 2, #goals do rest[i-1] = goals[i] end
 
-  goal = deref(env, goal)
+  goal = deref(env, goal) --[[:! PrologTerm]]
 
   local functor, arity
   if goal.kind == "atom" then
-    functor = goal.name
+    functor = goal.name --[[:! string]]
     arity = 0
   elseif goal.kind == "comp" then
-    functor = goal.functor
-    arity = #goal.args
+    functor = goal.functor --[[:! string]]
+    arity = #(goal.args --[[:! { [integer]: PrologTerm }]])
   else
     -- Goal is not callable
     error("not a callable goal: " .. term_to_string(env, goal))
@@ -773,18 +792,22 @@ solve = function(db, goals, env, depth)
 
   -- ==/2: strict equality (no unification, just check)
   if functor == "==" and arity == 2 then
-    local t1 = deref(env, goal.args[1])
-    local t2 = deref(env, goal.args[2])
+    local goal_args = goal.args --[[:! { [integer]: PrologTerm }]]
+    local t1 = deref(env, goal_args[1]) --[[:! PrologTerm]]
+    local t2 = deref(env, goal_args[2]) --[[:! PrologTerm]]
     -- structural equality
-    local function term_eq(a, b)
+    local term_eq
+    term_eq = function(a, b)
       if a.kind ~= b.kind then return false end
       if a.kind == "atom" then return a.name == b.name end
       if a.kind == "num" then return a.value == b.value end
       if a.kind == "var" then return a.name == b.name end
       if a.kind == "comp" then
-        if a.functor ~= b.functor or #a.args ~= #b.args then return false end
-        for i = 1, #a.args do
-          if not term_eq(a.args[i], b.args[i]) then return false end
+        local aa = a.args --[[:! { [integer]: PrologTerm }]]
+        local ba = b.args --[[:! { [integer]: PrologTerm }]]
+        if a.functor ~= b.functor or #aa ~= #ba then return false end
+        for i = 1, #aa do
+          if not term_eq(aa[i], ba[i]) then return false end
         end
         return true
       end
@@ -798,17 +821,21 @@ solve = function(db, goals, env, depth)
 
   -- \==/2: strict inequality
   if functor == "\\==" and arity == 2 then
-    local t1 = deref(env, goal.args[1])
-    local t2 = deref(env, goal.args[2])
-    local function term_eq(a, b)
+    local goal_args = goal.args --[[:! { [integer]: PrologTerm }]]
+    local t1 = deref(env, goal_args[1]) --[[:! PrologTerm]]
+    local t2 = deref(env, goal_args[2]) --[[:! PrologTerm]]
+    local term_eq
+    term_eq = function(a, b)
       if a.kind ~= b.kind then return false end
       if a.kind == "atom" then return a.name == b.name end
       if a.kind == "num" then return a.value == b.value end
       if a.kind == "var" then return a.name == b.name end
       if a.kind == "comp" then
-        if a.functor ~= b.functor or #a.args ~= #b.args then return false end
-        for i = 1, #a.args do
-          if not term_eq(a.args[i], b.args[i]) then return false end
+        local aa = a.args --[[:! { [integer]: PrologTerm }]]
+        local ba = b.args --[[:! { [integer]: PrologTerm }]]
+        if a.functor ~= b.functor or #aa ~= #ba then return false end
+        for i = 1, #aa do
+          if not term_eq(aa[i], ba[i]) then return false end
         end
         return true
       end
@@ -830,10 +857,15 @@ solve = function(db, goals, env, depth)
   end
 
   -- arithmetic comparison predicates
+  --:: ArithCmpFn = (number, number) -> boolean
   local ARITH_CMP = {
+    --: ArithCmpFn
     ["<"]  = function(a, b) return a < b end,
+    --: ArithCmpFn
     [">"]  = function(a, b) return a > b end,
+    --: ArithCmpFn
     ["=<"] = function(a, b) return a <= b end,
+    --: ArithCmpFn
     [">="] = function(a, b) return a >= b end,
   }
   if ARITH_CMP[functor] and arity == 2 then
@@ -880,7 +912,7 @@ solve = function(db, goals, env, depth)
     elseif term_arg.kind == "num" then
       tname = term_arg.value; tarity = 0
     elseif term_arg.kind == "comp" then
-      tname = term_arg.functor; tarity = #term_arg.args
+      tname = term_arg.functor --[[:! string]]; tarity = #(term_arg.args --[[:! { [integer]: PrologTerm }]])
     else
       -- term is unbound — build compound from name/arity (not implemented)
       error("functor/3: term must be bound")
@@ -917,7 +949,8 @@ solve = function(db, goals, env, depth)
     if clause_term.kind == "comp" and clause_term.functor == ":-" then
       head2 = clause_term.args[1]
       local goals2 = {}
-      local function flatten_c(t)
+      local flatten_c
+      flatten_c = function(t)
         if t.kind == "comp" and t.functor == "," then
           flatten_c(t.args[1]); flatten_c(t.args[2])
         else goals2[#goals2+1] = t end
@@ -940,7 +973,8 @@ solve = function(db, goals, env, depth)
     if clause_term.kind == "comp" and clause_term.functor == ":-" then
       head2 = clause_term.args[1]
       local goals2 = {}
-      local function flatten_c(t)
+      local flatten_c
+      flatten_c = function(t)
         if t.kind == "comp" and t.functor == "," then
           flatten_c(t.args[1]); flatten_c(t.args[2])
         else goals2[#goals2+1] = t end
@@ -974,9 +1008,10 @@ solve = function(db, goals, env, depth)
   if functor == "number_codes" and arity == 2 then
     local num_t = deref(env, goal.args[1])
     if num_t.kind == "num" then
-      local s = tostring(math.floor(num_t.value) == num_t.value and math.floor(num_t.value) or num_t.value)
+      local nv = num_t.value --[[:! number]]
+      local s = tostring(math.floor(nv) == nv and math.floor(nv) or nv) --[[:! string]]
       local codes = {}
-      for ci = 1, #s do codes[ci] = mk_num(s:byte(ci)) end
+      for ci = 1, #s do codes[ci] = mk_num((string.byte(s, ci) or 0) --[[:! integer]]) end
       local list_term = mk_list(codes)
       local e2 = unify(env, goal.args[2], list_term)
       if e2 then solve(db, rest, e2, depth + 1) end
@@ -987,9 +1022,9 @@ solve = function(db, goals, env, depth)
   if functor == "atom_codes" and arity == 2 then
     local atom_t = deref(env, goal.args[1])
     if atom_t.kind == "atom" then
-      local s = atom_t.name
+      local s = atom_t.name --[[:! string]]
       local codes = {}
-      for ci = 1, #s do codes[ci] = mk_num(s:byte(ci)) end
+      for ci = 1, #s do codes[ci] = mk_num((string.byte(s, ci) or 0) --[[:! integer]]) end
       local list_term = mk_list(codes)
       local e2 = unify(env, goal.args[2], list_term)
       if e2 then solve(db, rest, e2, depth + 1) end
@@ -1044,25 +1079,29 @@ end
 local function extract_bindings(env, query_vars)
   local result = {}
   for name, term in pairs(query_vars) do
-    local val = deref(env, term)
+    local val = deref(env, term) --[[:! PrologTerm]]
     result[name] = term_to_string(env, val)
   end
   return result
 end
 
 -- Collect the variable names from a list of goal terms
+--: ({ [integer]: PrologTerm }) -> { [string]: PrologTerm }
 local function collect_vars(goals)
   local vars = {}
   local seen = {}
-  local function collect(t)
+  local collect
+  collect = function(t)
     if t.kind == "var" then
       -- Skip anonymous vars
-      if not t.name:match("^_") and not seen[t.name] then
-        seen[t.name] = true
-        vars[t.name] = t
+      local tname = t.name --[[:! string]]
+      if not tname:match("^_") and not seen[tname] then
+        seen[tname] = true
+        vars[tname] = t
       end
     elseif t.kind == "comp" then
-      for i = 1, #t.args do collect(t.args[i]) end
+      local targs = t.args --[[:! { [integer]: PrologTerm }]]
+      for i = 1, #targs do collect(targs[i]) end
     end
   end
   for i = 1, #goals do collect(goals[i]) end
@@ -1073,12 +1112,13 @@ end
 function DB:query(goal_str)
   local goals, err = parse_goals(goal_str)
   if not goals then return nil, err end
-  if #goals == 0 then return nil, "empty query" end
+  local goals_ = goals --[[:! { [integer]: PrologTerm }]]
+  if #goals_ == 0 then return nil, "empty query" end
 
-  local query_vars = collect_vars(goals)
+  local query_vars = collect_vars(goals_)
 
   local co = coroutine.create(function()
-    solve(self, goals, {}, 0)
+    solve(self, goals_, {}, 0)
   end)
 
   return function()
