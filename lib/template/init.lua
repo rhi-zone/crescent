@@ -40,8 +40,9 @@ end
 -- Token types: "text", "var", "raw_var", "block_open", "block_else", "block_close", "partial", "comment"
 -- ============================================================
 
+--: (string) -> ({ [integer]: unknown } | nil, string | nil)
 local function lex(template)
-  local tokens = {}
+  local tokens = {} --: { [integer]: unknown }
   local pos = 1
   local len = #template
 
@@ -127,7 +128,7 @@ local function parse(tokens)
   local parse_nodes  -- forward declaration
 
   parse_nodes = function(stop_keywords)
-    local nodes = {}
+    local nodes = {} --: { [integer]: unknown }
     while pos <= n do
       local tok = peek()
       if tok.type == "text" then
@@ -203,6 +204,7 @@ end
 -- Resolve a dotted path like "a.b.c" in a context stack.
 -- Special paths: "." = current item, "@index" / "@key" = loop meta.
 -- ctx_stack entries are tables; meta keys like "." and "@index" are stored directly in the loop_ctx.
+--: (string, { [integer]: unknown }) -> unknown
 local function resolve(path, ctx_stack)
   -- Special: "." and "@..." — look only in the topmost context's meta keys
   if path == "." or path:sub(1,1) == "@" then
@@ -240,6 +242,7 @@ end
 
 -- Apply a filter spec like "upper" or "default:fallback" to a value.
 -- Returns (result, is_raw) — is_raw=true means caller should not HTML-escape.
+--: (string, unknown, { [string]: unknown }) -> (unknown, boolean)
 local function apply_filter(filter_spec, value, filters)
   local colon = filter_spec:find(":", 1, true)
   local name, arg
@@ -263,7 +266,7 @@ local function apply_filter(filter_spec, value, filters)
   end
 
   -- Check custom filters first, then built-ins
-  local fn = filters[name] or builtin_filters[name]
+  local fn = (filters[name] or builtin_filters[name]) --[[:! (unknown, unknown) -> unknown]]
   if fn then
     local result = fn(value == nil and "" or value, arg)
     -- escape filter returns already-escaped HTML — mark as raw to avoid double-escaping
@@ -384,8 +387,8 @@ function Engine:compile(tmpl_str)
   local nodes, perr = parse(toks)
   if not nodes then return nil, perr end
 
-  local partials = self._partials
-  local filters  = self._filters
+  local partials = self._partials --[[:! { [string]: unknown }]]
+  local filters  = self._filters --[[:! { [string]: unknown }]]
 
   return function(data)
     local out = {}
@@ -415,6 +418,7 @@ end
 -- Module-level API (uses global registries)
 -- ============================================================
 
+--: (string) -> (((unknown) -> string) | nil, string | nil)
 function M.compile(tmpl_str)
   local toks, err = lex(tmpl_str)
   if not toks then return nil, err end
