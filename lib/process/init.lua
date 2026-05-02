@@ -3,6 +3,7 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local ffi = require("ffi")
+local bit = require("bit")
 
 pcall(ffi.cdef, [[
   int pipe(int pipefd[2]);
@@ -58,9 +59,11 @@ local function decode_status(status)
   return 128 + lo
 end
 
---: (string, string[] | nil, { stdin: string | nil, cwd: string | nil, env: { [string]: string } | nil } | nil) -> (number, string, string | nil, string)
+--: (string, { [integer]: string } | nil, { stdin: string | nil, cwd: string | nil, env: { [string]: string } | nil } | nil) -> (integer | nil, string, string | nil)
 function mod.exec(cmd, args, opts)
-  opts = opts or {}
+  --: { stdin: string | nil, cwd: string | nil, env: { [string]: string } | nil }
+  local opts_ = (opts or {}) --[[:! { stdin: string | nil, cwd: string | nil, env: { [string]: string } | nil }]]
+  opts = opts_
 
   -- create pipes: stdout, stderr, stdin (if needed)
   local stdout_pipe = ffi.new("int[2]")
@@ -140,8 +143,11 @@ function mod.exec(cmd, args, opts)
   if stdin_pipe then
     ffi.C.close(stdin_pipe[0])
     local input = opts.stdin
-    if input and #input > 0 then
-      ffi.C.write(stdin_pipe[1], input, #input)
+    if input then
+      local input_ = input --[[:! string]]
+      if #input_ > 0 then
+        ffi.C.write(stdin_pipe[1], input_, #input_)
+      end
     end
     ffi.C.close(stdin_pipe[1])
   end
@@ -167,18 +173,22 @@ handle.__index = handle
 
 --[[@param signal integer?]]
 function handle:kill(signal)
-  ffi.C.kill(self.pid, signal or SIGTERM)
+  local self_ = self --[[:! Process]]
+  ffi.C.kill(self_.pid, signal or SIGTERM)
 end
 
 --[[@return integer exit_code]]
 function handle:wait()
-  ffi.C.waitpid(self.pid, int1, 0)
+  local self_ = self --[[:! Process]]
+  ffi.C.waitpid(self_.pid, int1, 0)
   return decode_status(int1[0])
 end
 
---: (string, string[] | nil, { cwd: string | nil, env: { [string]: string } | nil } | nil) -> (Process | nil, string | nil)
+--: (string, { [integer]: string } | nil, { cwd: string | nil, env: { [string]: string } | nil } | nil) -> (Process | nil, string | nil)
 function mod.spawn(cmd, args, opts)
-  opts = opts or {}
+  --: { cwd: string | nil, env: { [string]: string } | nil }
+  local opts_ = (opts or {}) --[[:! { cwd: string | nil, env: { [string]: string } | nil }]]
+  opts = opts_
 
   local pid = ffi.C.fork()
   if pid < 0 then return nil, "fork() failed" end
@@ -209,7 +219,7 @@ function mod.spawn(cmd, args, opts)
   end
 
   -- parent
-  return setmetatable({ pid = pid }, handle)
+  return setmetatable({ pid = pid }, handle) --[[: any]] --[[:! Process]]
 end
 
 return mod
