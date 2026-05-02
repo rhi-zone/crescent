@@ -17,19 +17,30 @@ end
 local json = require("lib.format.json")
 local base64 = require("lib.encode.base64")
 local hmac = require("lib.hash.hmac")
+local bit = require("bit")
+local bor, bxor, band, rshift = bit.bor, bit.bxor, bit.band, bit.rshift
 
 local M = {}
+
+local json_encode = json.encode --[[:! ({ [string]: unknown }) -> string]]
+local json_decode = json.decode --[[:! (string) -> { [string]: unknown } | nil]]
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- Convert standard base64 to base64url (RFC 4648 §5): + → -, / → _, strip =.
 --: (string) -> string
+local base64_encode = base64.encode --[[:! (string, { pad: boolean | nil, ... } | nil) -> string]]
+local base64_decode = base64.decode --[[:! (string) -> string]]
+
+-- Convert standard base64 to base64url (RFC 4648 §5): + → -, / → _, strip =.
+--: (string) -> string
 local function base64url_encode(s)
-	return (base64.encode(s, { pad = false }):gsub("+", "-"):gsub("/", "_"))
+	local encoded = base64_encode(s, { pad = false })
+	return (encoded:gsub("+", "-"):gsub("/", "_"))
 end
 
 -- Convert base64url back to standard base64 and decode.
---: (string) -> string | (nil, string)
+--: (string) -> (string | nil, string | nil)
 local function base64url_decode(s)
 	-- Restore standard alphabet.
 	s = s:gsub("-", "+"):gsub("_", "/")
@@ -42,13 +53,19 @@ local function base64url_decode(s)
 	elseif rem == 1 then
 		return nil, "invalid base64url: length mod 4 == 1"
 	end
-	return base64.decode(s)
+	local decoded = base64_decode(s)
+	return decoded
 end
 
 -- Convert a hex string to raw binary bytes.
 --: (string) -> string
 local function hex_to_bytes(hex)
-	return (hex:gsub("..", function(h) return string.char(tonumber(h, 16)) end))
+	local parts = {} --: { [integer]: string }
+	for i = 1, #hex, 2 do
+		local byte_val = math.floor(tonumber(hex:sub(i, i + 1), 16) or 0)
+		parts[#parts + 1] = string.char(byte_val --[[:! integer]])
+	end
+	return table.concat(parts)
 end
 
 -- Convert raw binary bytes to lowercase hex string.
@@ -69,9 +86,11 @@ end
 function M.constant_time_eq(a, b)
 	if type(a) ~= "string" or type(b) ~= "string" then return false end
 	if #a ~= #b then return false end
-	local diff = 0
+	local diff = 0 --: integer
 	for i = 1, #a do
-		diff = bit.bor(diff, bit.bxor(string.byte(a, i), string.byte(b, i)))
+		local ba_, _, _ = string.byte(a, i, i)
+		local bb_, _, _ = string.byte(b, i, i)
+		diff = bor(diff, bxor(ba_ --[[:! integer]], bb_ --[[:! integer]]))
 	end
 	return diff == 0
 end
@@ -95,7 +114,7 @@ end
 local JWT_HEADER = base64url_encode('{"alg":"HS256","typ":"JWT"}')
 
 --- Encode a JWT with HS256.
---: ({ [string]: unknown }, string) -> string | (nil, string)
+--: ({ [string]: unknown }, string) -> (string | nil, string | nil)
 function M.jwt_encode(payload, secret)
 	if type(payload) ~= "table" then
 		return nil, "payload must be a table"
@@ -103,7 +122,7 @@ function M.jwt_encode(payload, secret)
 	if type(secret) ~= "string" then
 		return nil, "secret must be a string"
 	end
-	local payload_json = json.encode(payload)
+	local payload_json = json_encode(payload --[[:! { [string]: unknown }]])
 	if not payload_json then
 		return nil, "failed to encode payload as JSON"
 	end
@@ -117,21 +136,23 @@ end
 --- Decode and verify a JWT with HS256.
 --- opts.verify_exp: set false to skip expiration check (default true).
 --- opts.time_fn: required — function returning unix timestamp.
---: (string, string, { verify_exp: boolean | nil, time_fn: () -> number } | nil) -> table | (nil, string)
+--: (string, string, { verify_exp: boolean | nil, time_fn: () -> number } | nil) -> ({ [string]: unknown } | nil, string | nil)
 function M.jwt_decode(token, secret, opts)
 	assert(opts and opts.time_fn, "jwt_decode requires opts.time_fn")
 	if type(token) ~= "string" then
 		return nil, "invalid token"
 	end
 	-- Split into 3 parts.
-	local parts = {}
+	local parts = {} --: { [integer]: string }
 	for part in token:gmatch("[^%.]+") do
 		parts[#parts + 1] = part
 	end
 	if #parts ~= 3 then
 		return nil, "invalid token"
 	end
-	local header_b64, payload_b64, sig_b64 = parts[1], parts[2], parts[3]
+	local header_b64 = parts[1]
+	local payload_b64 = parts[2]
+	local sig_b64 = parts[3]
 
 	-- Verify signature.
 	local signing_input = header_b64 .. "." .. payload_b64
@@ -146,32 +167,35 @@ function M.jwt_decode(token, secret, opts)
 	if not payload_json then
 		return nil, "invalid token"
 	end
-	local payload, json_err = json.decode(payload_json)
+	local payload = json_decode(payload_json --[[:! string]])
 	if not payload then
 		return nil, "invalid token"
 	end
 	if type(payload) ~= "table" then
 		return nil, "invalid token"
 	end
+	local payload_ = payload --[[:! { [string]: unknown }]]
 
 	-- Time validation.
-	local now = opts.time_fn()
+	local time_fn = opts and opts.time_fn
+	if not time_fn then return nil, "opts.time_fn required" end
+	local now = time_fn()
 	local verify_exp = true
-	if opts.verify_exp == false then
+	if opts and opts.verify_exp == false then
 		verify_exp = false
 	end
-	if verify_exp and payload.exp and type(payload.exp) == "number" then
-		if now >= payload.exp then
+	if verify_exp and payload_.exp and type(payload_.exp) == "number" then
+		if now >= (payload_.exp --[[:! number]]) then
 			return nil, "token expired"
 		end
 	end
-	if payload.nbf and type(payload.nbf) == "number" then
-		if now < payload.nbf then
+	if payload_.nbf and type(payload_.nbf) == "number" then
+		if now < (payload_.nbf --[[:! number]]) then
 			return nil, "token not yet valid"
 		end
 	end
 
-	return payload
+	return payload_
 end
 
 -- ── Session tokens ───────────────────────────────────────────────────────────
@@ -243,12 +267,13 @@ end
 -- XOR two equal-length binary strings.
 --: (string, string) -> string
 local function xor_strings(a, b)
-	local bxor = bit.bxor
 	local sbyte = string.byte
 	local schar = string.char
 	local out = {}
 	for i = 1, #a do
-		out[i] = schar(bxor(sbyte(a, i), sbyte(b, i)))
+		local ba_, _, _ = sbyte(a, i, i)
+		local bb_, _, _ = sbyte(b, i, i)
+		out[i] = schar(bxor(ba_ --[[:! integer]], bb_ --[[:! integer]]))
 	end
 	return table.concat(out)
 end
@@ -261,10 +286,10 @@ local function pbkdf2_sha256(password, salt, iterations, dk_len)
 	for i = 1, n_blocks do
 		-- INT32_BE(i)
 		local int_i = string.char(
-			bit.band(bit.rshift(i, 24), 0xFF),
-			bit.band(bit.rshift(i, 16), 0xFF),
-			bit.band(bit.rshift(i, 8), 0xFF),
-			bit.band(i, 0xFF)
+			band(rshift(i, 24), 0xFF),
+			band(rshift(i, 16), 0xFF),
+			band(rshift(i, 8), 0xFF),
+			band(i, 0xFF)
 		)
 		local u = hmac_sha256_binary(password, salt .. int_i)
 		local result = u
@@ -274,10 +299,8 @@ local function pbkdf2_sha256(password, salt, iterations, dk_len)
 		end
 		dk_parts[#dk_parts + 1] = result
 	end
-	local dk = table.concat(dk_parts)
-	if #dk > dk_len then
-		dk = dk:sub(1, dk_len)
-	end
+	local dk_full = table.concat(dk_parts) --: string
+	local dk = #dk_full > dk_len and dk_full:sub(1, math.floor(dk_len)) or dk_full
 	return dk
 end
 
