@@ -154,11 +154,12 @@ end
 
 local _sha256  -- cached sha256 module
 
+--: () -> (string) -> string
 local function get_sha256()
 	if not _sha256 then
 		_sha256 = require("lib.hash.sha256")
 	end
-	return _sha256.sha256
+	return (_sha256.sha256 --[[:! (string) -> string]])
 end
 
 local function hex_to_bin(hex)
