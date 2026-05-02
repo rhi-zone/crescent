@@ -18,15 +18,17 @@ local floor = math.floor
 -- ── Variable-length quantity (VLQ) ───────────────────────────────────────────
 
 -- Decode a VLQ from data at pos. Returns value, next_pos.
+--: (string, integer) -> (integer | nil, integer | nil)
 local function vlq_decode(data, pos)
     local v = 0
-    local b
+    --: integer | nil
+    local b = nil
     repeat
         b = byte(data, pos)
         if b == nil then return nil, nil end
-        v = bor(lshift(v, 7), band(b, 0x7F))
+        v = bor(lshift(v, 7), band(b --[[:! integer]], 0x7F))
         pos = pos + 1
-    until band(b, 0x80) == 0
+    until band(b --[[:! integer]], 0x80) == 0
     return v, pos
 end
 
@@ -63,17 +65,25 @@ end
 
 -- ── Big-endian integer readers ────────────────────────────────────────────────
 
+--: (string, integer) -> (integer, integer)
 local function read_u8(data, pos)
-    return byte(data, pos), pos + 1
+    local v = ((byte(data, pos)) or 0) --[[:! integer]]
+    return v, pos + 1
 end
 
+--: (string, integer) -> (integer, integer)
 local function read_u16(data, pos)
-    local a, b = byte(data, pos, pos + 1)
+    local a = ((byte(data, pos)) or 0) --[[:! integer]]
+    local b = ((byte(data, pos + 1)) or 0) --[[:! integer]]
     return bor(lshift(a, 8), b), pos + 2
 end
 
+--: (string, integer) -> (number, integer)
 local function read_u32(data, pos)
-    local a, b, c, d = byte(data, pos, pos + 3)
+    local a = ((byte(data, pos)) or 0) --[[:! integer]]
+    local b = ((byte(data, pos + 1)) or 0) --[[:! integer]]
+    local c = ((byte(data, pos + 2)) or 0) --[[:! integer]]
+    local d = ((byte(data, pos + 3)) or 0) --[[:! integer]]
     -- Use float arithmetic to avoid signed 32-bit overflow in LuaJIT
     return a * 0x1000000 + b * 0x10000 + c * 0x100 + d, pos + 4
 end
@@ -111,10 +121,13 @@ local META_TEXT_SUBTYPE_IDS = {}
 for k, v in pairs(META_TEXT_SUBTYPES) do META_TEXT_SUBTYPE_IDS[v] = k end
 
 -- ── Parser ────────────────────────────────────────────────────────────────────
+--:: MidiEvent = { type: string, tick: number, ... }
 
 -- Parse all events from a track chunk body (after "MTrk" + length).
 -- Returns events list (absolute ticks) or nil, errmsg.
+--: (string, integer, integer) -> ({ [integer]: MidiEvent } | nil, string | nil)
 local function parse_track(data, start, len)
+    --: { [integer]: MidiEvent }
     local events = {}
     local pos = start
     local limit = start + len
@@ -125,20 +138,21 @@ local function parse_track(data, start, len)
         -- Delta time
         local delta, npos = vlq_decode(data, pos)
         if not delta then
-            return nil, "truncated VLQ at pos " .. pos
+            return nil, "truncated VLQ at pos " .. tostring(pos)
         end
-        pos = npos
-        tick = tick + delta
+        pos = npos --[[:! integer]]
+        tick = tick + (delta --[[:! integer]])
 
         local status_byte = byte(data, pos)
         if status_byte == nil then
             return nil, "unexpected end of track data"
         end
+        local sb = status_byte --[[:! integer]]
 
-        local status
-        if band(status_byte, 0x80) ~= 0 then
+        local status = 0
+        if band(sb, 0x80) ~= 0 then
             -- New status byte
-            status = status_byte
+            status = sb
             pos = pos + 1
             -- SysEx and meta do NOT update running status
             if status ~= 0xFF and status ~= 0xF0 and status ~= 0xF7 then
@@ -159,168 +173,180 @@ local function parse_track(data, start, len)
             -- Meta event
             local subtype = byte(data, pos)
             if subtype == nil then return nil, "truncated meta event" end
+            local subtype_i = subtype --[[:! integer]]
             pos = pos + 1
             local meta_len, npos2 = vlq_decode(data, pos)
             if not meta_len then return nil, "truncated meta length" end
-            pos = npos2
-            local meta_data = data:sub(pos, pos + meta_len - 1)
-            pos = pos + meta_len
+            local meta_len_i = meta_len --[[:! integer]]
+            pos = npos2 --[[:! integer]]
+            local meta_data = data:sub(pos, pos + meta_len_i - 1)
+            pos = pos + meta_len_i
 
-            if subtype == 0x2F then
+            if subtype_i == 0x2F then
                 -- End of track
-                events[#events + 1] = { type = "end_of_track", tick = tick }
-            elseif subtype == 0x51 then
+                table.insert(events, { type = "end_of_track", tick = tick })
+            elseif subtype_i == 0x51 then
                 -- Tempo: 3 bytes, microseconds per beat
-                local a, b, c = byte(meta_data, 1, 3)
+                local a = ((byte(meta_data, 1)) or 0) --[[:! integer]]
+                local b = ((byte(meta_data, 2)) or 0) --[[:! integer]]
+                local c = ((byte(meta_data, 3)) or 0) --[[:! integer]]
                 local uspb = a * 0x10000 + b * 0x100 + c
                 local bpm = 60000000 / uspb
-                events[#events + 1] = {
+                table.insert(events, {
                     type = "tempo",
                     bpm = bpm,
                     microseconds_per_beat = uspb,
                     tick = tick,
-                }
-            elseif subtype == 0x58 then
+                })
+            elseif subtype_i == 0x58 then
                 -- Time signature
-                local nn, dd = byte(meta_data, 1, 2)
-                events[#events + 1] = {
+                local nn = ((byte(meta_data, 1)) or 0) --[[:! integer]]
+                local dd = ((byte(meta_data, 2)) or 0) --[[:! integer]]
+                table.insert(events, {
                     type = "time_signature",
                     numerator = nn,
                     denominator = lshift(1, dd),
                     tick = tick,
-                }
-            elseif subtype == 0x59 then
+                })
+            elseif subtype_i == 0x59 then
                 -- Key signature
-                local sf, mi = byte(meta_data, 1, 2)
+                local sf = ((byte(meta_data, 1)) or 0) --[[:! integer]]
+                local mi = ((byte(meta_data, 2)) or 0) --[[:! integer]]
                 -- sf is signed (-7 to 7)
                 if sf >= 128 then sf = sf - 256 end
-                events[#events + 1] = {
+                table.insert(events, {
                     type = "key_signature",
                     key = sf,
                     mode = mi,
                     tick = tick,
-                }
-            elseif META_TEXT_SUBTYPES[subtype] then
-                events[#events + 1] = {
+                })
+            elseif META_TEXT_SUBTYPES[subtype_i] then
+                table.insert(events, {
                     type = "text",
-                    subtype = META_TEXT_SUBTYPES[subtype],
+                    subtype = META_TEXT_SUBTYPES[subtype_i],
                     text = meta_data,
                     tick = tick,
-                }
+                })
             else
                 -- Unknown meta
-                events[#events + 1] = {
+                table.insert(events, {
                     type = "meta",
-                    subtype = subtype,
+                    subtype = subtype_i,
                     data = meta_data,
                     tick = tick,
-                }
+                })
             end
 
         elseif status == 0xF0 or status == 0xF7 then
             -- SysEx
             local sysex_len, npos2 = vlq_decode(data, pos)
             if not sysex_len then return nil, "truncated sysex length" end
-            pos = npos2
-            local sysex_data = data:sub(pos, pos + sysex_len - 1)
-            pos = pos + sysex_len
-            events[#events + 1] = {
+            local sysex_len_i = sysex_len --[[:! integer]]
+            pos = npos2 --[[:! integer]]
+            local sysex_data = data:sub(pos, pos + sysex_len_i - 1)
+            pos = pos + sysex_len_i
+            table.insert(events, {
                 type = "sysex",
                 data = sysex_data,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x08 then
             -- Note off
-            local note, vel = byte(data, pos, pos + 1)
+            local note = ((byte(data, pos)) or 0) --[[:! integer]]
+            local vel  = ((byte(data, pos + 1)) or 0) --[[:! integer]]
             pos = pos + 2
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "note_off",
                 channel = channel,
                 note = note,
                 velocity = vel,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x09 then
             -- Note on (velocity 0 = note off semantically, but we preserve it)
-            local note, vel = byte(data, pos, pos + 1)
+            local note = ((byte(data, pos)) or 0) --[[:! integer]]
+            local vel  = ((byte(data, pos + 1)) or 0) --[[:! integer]]
             pos = pos + 2
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "note_on",
                 channel = channel,
                 note = note,
                 velocity = vel,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x0A then
             -- Polyphonic key pressure / aftertouch
-            local note, pressure = byte(data, pos, pos + 1)
+            local note     = ((byte(data, pos)) or 0) --[[:! integer]]
+            local pressure = ((byte(data, pos + 1)) or 0) --[[:! integer]]
             pos = pos + 2
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "aftertouch",
                 channel = channel,
                 note = note,
                 pressure = pressure,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x0B then
             -- Control change
-            local ctrl, val = byte(data, pos, pos + 1)
+            local ctrl = ((byte(data, pos)) or 0) --[[:! integer]]
+            local val  = ((byte(data, pos + 1)) or 0) --[[:! integer]]
             pos = pos + 2
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "control_change",
                 channel = channel,
                 controller = ctrl,
                 value = val,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x0C then
             -- Program change
-            local prog = byte(data, pos)
+            local prog = ((byte(data, pos)) or 0) --[[:! integer]]
             pos = pos + 1
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "program_change",
                 channel = channel,
                 program = prog,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x0D then
             -- Channel pressure
-            local pressure = byte(data, pos)
+            local pressure = ((byte(data, pos)) or 0) --[[:! integer]]
             pos = pos + 1
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "channel_pressure",
                 channel = channel,
                 pressure = pressure,
                 tick = tick,
-            }
+            })
 
         elseif msg_type == 0x0E then
             -- Pitch bend: two 7-bit bytes, LSB first
-            local lsb, msb = byte(data, pos, pos + 1)
+            local lsb = ((byte(data, pos)) or 0) --[[:! integer]]
+            local msb = ((byte(data, pos + 1)) or 0) --[[:! integer]]
             pos = pos + 2
             local raw = bor(lsb, lshift(msb, 7))
             local value = raw - 8192  -- center at 0
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "pitch_bend",
                 channel = channel,
                 value = value,
                 tick = tick,
-            }
+            })
 
         else
             -- Unknown status; try to skip 1 data byte
-            events[#events + 1] = {
+            table.insert(events, {
                 type = "unknown",
                 status = status,
                 data = "",
                 tick = tick,
-            }
+            })
         end
     end
 
@@ -347,7 +373,7 @@ function M.parse(data)
     local format, npos = read_u16(data, pos)
     local ntracks, npos2 = read_u16(data, npos)
     local division, npos3 = read_u16(data, npos2)
-    pos = 9 + hdr_len  -- skip any extra header bytes
+    pos = (9 + hdr_len) --[[:! integer]]  -- skip any extra header bytes
 
     -- division: if bit 15 = 0, ticks per quarter note; otherwise SMPTE
     local ticks_per_beat
@@ -358,6 +384,7 @@ function M.parse(data)
         ticks_per_beat = division
     end
 
+    --: { [integer]: { events: { [integer]: MidiEvent } } }
     local tracks = {}
     for i = 1, ntracks do
         if pos + 7 > #data then
@@ -368,12 +395,13 @@ function M.parse(data)
             return nil, "expected MTrk chunk, got " .. chunk_id .. " at track " .. i
         end
         local track_len, tpos = read_u32(data, pos + 4)
-        local events, err = parse_track(data, tpos, track_len)
+        local track_len_i = track_len --[[:! integer]]
+        local events, err = parse_track(data, tpos, track_len_i)
         if not events then
-            return nil, "error parsing track " .. i .. ": " .. err
+            return nil, "error parsing track " .. i .. ": " .. (err or "?")
         end
         tracks[i] = { events = events }
-        pos = tpos + track_len
+        pos = (tpos + track_len) --[[:! integer]]
     end
 
     return {
@@ -564,7 +592,7 @@ function M.encode(midi_file)
         -- Ensure end_of_track exists
         local last = events[#events]
         if not last or last.type ~= "end_of_track" then
-            local last_tick = (last and last.tick) or 0
+            local last_tick = ((last and last.tick) or 0) --[[:! integer]]
             events = {}
             for j, ev in ipairs(track.events or {}) do events[j] = ev end
             events[#events + 1] = { type = "end_of_track", tick = last_tick }
@@ -584,24 +612,35 @@ end
 -- Adds .time_seconds field to each event in each track.
 -- Respects tempo changes found in any track.
 -- Returns a new midi_file (shallow-copy of tracks/events with time_seconds added).
---: ({ format: number, ticks_per_beat: number, tracks: unknown[] }) -> { format: number, ticks_per_beat: number, tracks: unknown[] }
+--:: MidiTrack = { events: { [integer]: MidiEvent } }
+--:: MidiFile = { format: number, ticks_per_beat: number, tracks: { [integer]: MidiTrack } }
+--: (MidiFile) -> MidiFile
 function M.to_seconds(midi_file)
     local tpb = midi_file.ticks_per_beat or 480
+    --: { [integer]: MidiTrack }
     local tracks = midi_file.tracks or {}
 
     -- Collect all tempo events across all tracks, sorted by tick
-    local tempo_map = { { tick = 0, uspb = 500000 } }
+    --:: TempoEntry = { tick: number, uspb: number, time_seconds: number | nil }
+    --: { [integer]: TempoEntry }
+    local tempo_map = { { tick = 0, uspb = 500000, time_seconds = (nil --[[: number | nil]]) } }
     for _, track in ipairs(tracks) do
         for _, ev in ipairs(track.events or {}) do
             if ev.type == "tempo" then
-                tempo_map[#tempo_map + 1] = {
-                    tick = ev.tick,
-                    uspb = ev.microseconds_per_beat,
+                local ev_t = ev --[[:! { type: string, tick: number, microseconds_per_beat: number, ... }]]
+                --: TempoEntry
+                local entry = {
+                    tick = ev_t.tick,
+                    uspb = ev_t.microseconds_per_beat,
+                    time_seconds = (nil --[[: number | nil]]),
                 }
+                tempo_map[#tempo_map + 1] = entry
             end
         end
     end
-    table.sort(tempo_map, function(a, b) return a.tick < b.tick end)
+    table.sort(tempo_map, function(a, b)
+        return (a --[[:! { tick: number }]]).tick < (b --[[:! { tick: number }]]).tick
+    end)
 
     -- Build cumulative time at each tempo change
     -- tempo_map[i].time_seconds = absolute seconds at that tick
@@ -610,7 +649,7 @@ function M.to_seconds(midi_file)
         local prev = tempo_map[i - 1]
         local dtick = tempo_map[i].tick - prev.tick
         local dt = dtick * prev.uspb / (tpb * 1e6)
-        tempo_map[i].time_seconds = prev.time_seconds + dt
+        tempo_map[i].time_seconds = (prev.time_seconds or 0) + dt
     end
 
     -- Function: convert tick to seconds
@@ -626,7 +665,7 @@ function M.to_seconds(midi_file)
         end
         local t = tempo_map[ti]
         local dtick = tick - t.tick
-        return t.time_seconds + dtick * t.uspb / (tpb * 1e6)
+        return (t.time_seconds or 0) + dtick * t.uspb / (tpb * 1e6)
     end
 
     -- Build new tracks with time_seconds attached
@@ -652,6 +691,7 @@ end
 
 -- ── Note utilities ────────────────────────────────────────────────────────────
 
+--: { [integer]: string }
 local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
 
 --- Convert a MIDI note number to a name like "C4", "F#3".
@@ -660,7 +700,7 @@ local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#",
 function M.note_name(note)
     local oct = floor(note / 12) - 1
     local pc = note % 12
-    return NOTE_NAMES[pc + 1] .. oct
+    return (NOTE_NAMES[floor(pc) + 1] or "?") .. tostring(oct)
 end
 
 -- Build reverse lookup: "C" -> 0, "C#" -> 1, "Db" -> 1, ...
@@ -686,7 +726,7 @@ function M.note_number(name)
     pc_str = pc_str:sub(1, 1):upper() .. pc_str:sub(2)
     local pc = NOTE_NAME_TO_PC[pc_str]
     if pc == nil then return nil end
-    local oct = tonumber(oct_str)
+    local oct = tonumber(oct_str) or 0
     return (oct + 1) * 12 + pc
 end
 
@@ -722,8 +762,9 @@ end
 
 --- Add a note_on and note_off pair.
 function TrackBuilder:note(tick, duration_ticks, channel, note, velocity)
-    self:note_on(tick, channel, note, velocity)
-    self:note_off(tick + duration_ticks, channel, note, velocity or 64)
+    local tb = self --[[:! { note_on: (unknown, number, number, number, number) -> unknown, note_off: (unknown, number, number, number, number) -> unknown }]]
+    tb:note_on(tick, channel, note, velocity or 64)
+    tb:note_off(tick + duration_ticks, channel, note, velocity or 64)
     return self
 end
 
@@ -757,7 +798,7 @@ function TrackBuilder:build()
         if a.type == "note_off" and b.type == "note_on" then return true end
         return false
     end)
-    local last_tick = (events[#events] and events[#events].tick) or 0
+    local last_tick = ((events[#events] and events[#events].tick) or 0) --[[:! integer]]
     events[#events + 1] = { type = "end_of_track", tick = last_tick }
     return { events = events }
 end
@@ -771,7 +812,7 @@ FileBuilder.__index = FileBuilder
 -- opts: { format=0|1|2, ticks_per_beat=480 }
 --: ({ format: number | nil, ticks_per_beat: number | nil } | nil) -> unknown
 function M.file(opts)
-    opts = opts or {}
+    opts = opts or {} --[[:! { format: number | nil, ticks_per_beat: number | nil }]]
     return setmetatable({
         _format = opts.format or 1,
         _tpb = opts.ticks_per_beat or 480,
@@ -788,10 +829,11 @@ end
 --- Build and return the midi_file table.
 --: () -> { format: number, ticks_per_beat: number, tracks: unknown[] }
 function FileBuilder:build()
+    local fb = self --[[:! { _format: number, _tpb: number, _tracks: unknown[] }]]
     return {
-        format = self._format,
-        ticks_per_beat = self._tpb,
-        tracks = self._tracks,
+        format = fb._format,
+        ticks_per_beat = fb._tpb,
+        tracks = fb._tracks,
     }
 end
 

@@ -158,6 +158,10 @@ local binop_prec = {
 -- Returns { [lineno] = { kind="type"|"decl", content=string } }
 -- ---------------------------------------------------------------------------
 --:: L2TSAnn = { kind: string, content: string }
+--:: L2TSNodeData = { [integer]: number }
+--:: L2TSNodeInfo = { kind: number, flags: number, line: number, col: number, d: L2TSNodeData }
+--:: L2TSCtx = { pool: unknown, nodes: unknown, lists: unknown, indent: integer, lines: { [integer]: string }, anns: { [integer]: L2TSAnn }, opts: { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }, imports: { [string]: string }, import_order: { [integer]: string }, bundle_mode: boolean, bundle_requires: { [integer]: string }, bundle_req_seen: { [string]: boolean }, harden: boolean, harden_used: { [string]: boolean }, skip_stmts: { [integer]: boolean } | nil, check_ident: (self: L2TSCtx, name: string) -> nil, use_harden: (self: L2TSCtx, name: string) -> nil, istr: (self: L2TSCtx) -> string, emit: (self: L2TSCtx, line: string) -> nil, raw: (self: L2TSCtx, line: string) -> nil, name: (self: L2TSCtx, id: number) -> string, list: (self: L2TSCtx, start: number, len: number) -> { [integer]: number }, node: (self: L2TSCtx, id: number) -> L2TSNodeInfo, ann_for: (self: L2TSCtx, lineno: number) -> L2TSAnn | nil, add_import: (self: L2TSCtx, alias: string, modname: string) -> nil, add_bundle_require: (self: L2TSCtx, modname: string) -> nil }
+--: (string) -> { [integer]: L2TSAnn }
 local function scan_annotations(source)
   --: { [integer]: L2TSAnn }
   local anns = {}
@@ -176,7 +180,7 @@ local function scan_annotations(source)
             local colon = line:match("%-%-:([^:].*)$")
             if not colon then colon = line:match("%-%-:()") and "" end  -- bare --:
             if colon then
-                anns[lineno] = { kind = "type", content = colon:match("^%s*(.-)%s*$") }
+                anns[lineno] = { kind = "type", content = (colon --[[:! string]]):match("^%s*(.-)%s*$") or "" }
             end
         end
         lineno = lineno + 1
@@ -190,29 +194,30 @@ end
 -- Translates the crescent annotation mini-language to TS types.
 -- This is a best-effort string transform; does not parse the full type grammar.
 -- ---------------------------------------------------------------------------
+--: (string | nil) -> string | nil
 local function ann_to_ts(content)
     if not content or content == "" then return nil end
     -- nil → null
-    content = content:gsub("%bnil", "null")
+    local s, _ = content:gsub("%bnil", "null")
     -- integer → number
-    content = content:gsub("integer", "number")
+    s, _ = s:gsub("integer", "number")
     -- (A, B) -> C  →  (a: A, b: B) => C
-    -- We use a simple pattern for the common single-arrow case.
     -- For now: replace -> with =>
-    content = content:gsub("%->" , "=>")
+    s, _ = s:gsub("%->" , "=>")
     -- { [string]: V } → Record<string, V>
-    content = content:gsub("{%s*%[string%]%s*:%s*(.-)%s*}", function(v)
+    s, _ = s:gsub("{%s*%[string%]%s*:%s*(.-)%s*}", function(v)
         return "Record<string, " .. v .. ">"
     end)
     -- T? → T | null
-    content = content:gsub("([%w_]+)%?", "%1 | null")
-    return content
+    s, _ = s:gsub("([%w_]+)%?", "%1 | null")
+    return s
 end
 
 -- ---------------------------------------------------------------------------
 -- Emit context
 -- Produces indented TS output line by line.
 -- ---------------------------------------------------------------------------
+--: (unknown, unknown, unknown, string, { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil } | nil) -> L2TSCtx
 local function new_ctx(pool, nodes, lists, source, opts)
     local ctx = {
         pool   = pool,
@@ -222,7 +227,7 @@ local function new_ctx(pool, nodes, lists, source, opts)
         lines  = {},    -- collected output lines
         -- annotation map: lineno → { kind, content }
         anns   = scan_annotations(source),
-        opts   = opts or {},
+        opts   = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }]],
         -- pending ESM imports: { modname → alias }
         imports = {},
         import_order = {},
@@ -234,6 +239,9 @@ local function new_ctx(pool, nodes, lists, source, opts)
         -- Set of helper names that have been triggered by harden emission;
         -- emitted at the top of output (alongside imports) once each.
         harden_used     = {},
+        -- Set during class scanning: stmt_ids to skip in emit_block.
+        --: { [integer]: boolean } | nil
+        skip_stmts      = nil,
     }
 
     -- Reject use of a JS-hazard identifier in harden mode. Any reference
@@ -249,7 +257,7 @@ local function new_ctx(pool, nodes, lists, source, opts)
     function ctx:use_harden(name)
         self.harden_used[name] = true
         -- __safe_* helpers depend on __MAX_OUTPUT
-        if name:sub(1, 7) == "__safe_" then
+        if string.sub(name, 1, 7) == "__safe_" then
             self.harden_used.__MAX_OUTPUT = true
         end
         -- __safeGet depends on __PROTO_KEYS
@@ -263,11 +271,14 @@ local function new_ctx(pool, nodes, lists, source, opts)
     end
 
     function ctx:emit(line)
-        self.lines[#self.lines + 1] = self:istr() .. line
+        local ctx_t = self --[[:! L2TSCtx]]
+        local lines = ctx_t.lines
+        lines[#lines + 1] = ctx_t:istr() .. line
     end
 
     function ctx:raw(line)
-        self.lines[#self.lines + 1] = line
+        local lines = self.lines --[[:! { [integer]: string }]]
+        lines[#lines + 1] = line
     end
 
     -- Intern ID → Lua string
@@ -277,9 +288,10 @@ local function new_ctx(pool, nodes, lists, source, opts)
 
     -- Retrieve items from the list pool as a Lua array of int32 values.
     function ctx:list(start, len)
+        --: { [integer]: number }
         local result = {}
         for i = 0, len - 1 do
-            result[i + 1] = tonumber(self.lists:get(start + i))
+            result[i + 1] = tonumber(self.lists:get(start + i)) or 0
         end
         return result
     end
@@ -288,17 +300,17 @@ local function new_ctx(pool, nodes, lists, source, opts)
     function ctx:node(id)
         local n = self.nodes:get(id)
         return {
-            kind  = tonumber(n.kind),
-            flags = tonumber(n.flags),
-            line  = tonumber(n.line),
-            col   = tonumber(n.col),
+            kind  = tonumber(n.kind)  or 0,
+            flags = tonumber(n.flags) or 0,
+            line  = tonumber(n.line)  or 0,
+            col   = tonumber(n.col)   or 0,
             d     = {
-                tonumber(n.data[0]),
-                tonumber(n.data[1]),
-                tonumber(n.data[2]),
-                tonumber(n.data[3]),
-                tonumber(n.data[4]),
-                tonumber(n.data[5]),
+                tonumber(n.data[0]) or 0,
+                tonumber(n.data[1]) or 0,
+                tonumber(n.data[2]) or 0,
+                tonumber(n.data[3]) or 0,
+                tonumber(n.data[4]) or 0,
+                tonumber(n.data[5]) or 0,
             },
         }
     end
@@ -313,7 +325,8 @@ local function new_ctx(pool, nodes, lists, source, opts)
     function ctx:add_import(alias, modname)
         if not self.imports[modname] then
             self.imports[modname] = alias
-            self.import_order[#self.import_order + 1] = modname
+            local import_order = self.import_order --[[:! { [integer]: string }]]
+            import_order[#import_order + 1] = modname
         end
     end
 
@@ -321,7 +334,8 @@ local function new_ctx(pool, nodes, lists, source, opts)
     function ctx:add_bundle_require(modname)
         if not self.bundle_req_seen[modname] then
             self.bundle_req_seen[modname] = true
-            self.bundle_requires[#self.bundle_requires + 1] = modname
+            local bundle_requires = self.bundle_requires --[[:! { [integer]: string }]]
+            bundle_requires[#bundle_requires + 1] = modname
         end
     end
 
@@ -337,9 +351,14 @@ local emit_stmt  -- forward declaration
 local emit_block -- forward declaration
 
 -- Escape a Lua string literal for JS/TS output.
+--: (string) -> string
 local function escape_str(s)
-    return s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n')
-              :gsub('\r', '\\r'):gsub('\t', '\\t')
+    local r, _ = s:gsub('\\', '\\\\')
+    r, _ = r:gsub('"', '\\"')
+    r, _ = r:gsub('\n', '\\n')
+    r, _ = r:gsub('\r', '\\r')
+    r, _ = r:gsub('\t', '\\t')
+    return r
 end
 
 -- Returns true if the expression needs parentheses at the given parent precedence.
@@ -348,6 +367,7 @@ local function needs_parens(prec, parent_prec)
 end
 
 -- Emit a comma-separated list of expressions.
+--: (L2TSCtx, number, number) -> string
 local function emit_expr_list(ctx, starts, lens)
     local items = ctx:list(starts, lens)
     local parts = {}
@@ -358,12 +378,14 @@ local function emit_expr_list(ctx, starts, lens)
 end
 
 -- Emit a single parameter name from an intern ID.
+--: (L2TSCtx, number) -> string
 local function param_name(ctx, id)
     local s = ctx:name(id)
     if s ~= "..." then ctx:check_ident(s) end
     return s == "..." and "...args" or s
 end
 
+--: (L2TSCtx, number, number) -> string
 emit_expr = function(ctx, nid, parent_prec)
     local n = ctx:node(nid)
     local kind = n.kind
@@ -524,7 +546,7 @@ emit_expr = function(ctx, nid, parent_prec)
                     if arg_n.kind == defs.NODE_LITERAL and arg_n.d[1] == defs.LIT_STRING then
                         local mod_name = ctx:name(arg_n.d[2])
                         ctx:add_bundle_require(mod_name)
-                        local mod_id = mod_name:gsub("%.", "/")
+                        local mod_id, _ = mod_name:gsub("%.", "/")
                         return '__require("' .. mod_id .. '")'
                     end
                 end
@@ -655,36 +677,45 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Emit param list with optional type annotation.
+--: (L2TSCtx, number, number, boolean, string | nil) -> string
 local function emit_params(ctx, ps, pl, has_vararg, ann_content)
     local params = ctx:list(ps, pl)
+    --: { [integer]: string }
     local param_parts = {}
-    for i, pid in ipairs(params) do
-        param_parts[i] = param_name(ctx, pid)
+    for _, pid in ipairs(params) do
+        table.insert(param_parts, param_name(ctx, pid))
     end
     if has_vararg then
-        param_parts[#param_parts + 1] = "...args"
+        table.insert(param_parts, "...args")
     end
     -- If annotation exists, attach types (best-effort: split by comma)
     if ann_content then
         local ts_ann = ann_to_ts(ann_content)
         -- Try to extract parameter types from (A, B) -> C form
-        local param_types_str = ts_ann and ts_ann:match("^%((.-)%)%s*=>") or nil
-        if param_types_str then
-            local types_list = {}
-            for t in (param_types_str .. ","):gmatch("([^,]+),") do
-                types_list[#types_list + 1] = t:match("^%s*(.-)%s*$")
-            end
-            for i, pname in ipairs(param_parts) do
-                if types_list[i] and not pname:match("^%.%.%.") then
-                    param_parts[i] = pname .. ": " .. types_list[i]
+        if ts_ann then
+            local param_types_str = ts_ann:match("^%((.-)%)%s*=>")
+            if param_types_str then
+                local types_list = {}
+                for t in (param_types_str .. ","):gmatch("([^,]+),") do
+                    types_list[#types_list + 1] = t:match("^%s*(.-)%s*$") or t
                 end
+                local typed_parts = {}
+                for i, pname in ipairs(param_parts --[[:! { [integer]: string }]]) do
+                    if types_list[i] and not (pname --[[:! string]]):match("^%.%.%.") then
+                        typed_parts[i] = (pname --[[:! string]]) .. ": " .. (types_list[i] --[[:! string]])
+                    else
+                        typed_parts[i] = pname --[[:! string]]
+                    end
+                end
+                return table.concat(typed_parts, ", ")
             end
         end
     end
-    return table.concat(param_parts, ", ")
+    return table.concat(param_parts --[[:! { [integer]: string | number }]], ", ")
 end
 
 -- Emit a return type annotation suffix (": ReturnType" or "").
+--: (string | nil) -> string
 local function emit_return_type(ann_content)
     if not ann_content then return "" end
     local ts = ann_to_ts(ann_content)
@@ -695,6 +726,7 @@ local function emit_return_type(ann_content)
 end
 
 -- Check if a call expression is `require("mod")` and return the module name.
+--: (L2TSCtx, number) -> string | nil
 local function get_require_mod(ctx, nid)
     local n = ctx:node(nid)
     if n.kind ~= defs.NODE_CALL_EXPR then return nil end
@@ -711,15 +743,19 @@ local function get_require_mod(ctx, nid)
 end
 
 -- Convert a module name like "lib.foo.bar" to an import path like "./lib/foo/bar".
+--: (string) -> string
 local function mod_to_import_path(modname)
-    return "./" .. modname:gsub("%.", "/")
+    local path, _ = modname:gsub("%.", "/")
+    return "./" .. path
 end
 
 -- Derive a variable alias from a module name: "lib.foo.bar" → "bar".
+--: (string) -> string
 local function mod_to_alias(modname)
     return modname:match("([^%.]+)$") or modname
 end
 
+--: (L2TSCtx, number) -> nil
 emit_stmt = function(ctx, nid)
     local n = ctx:node(nid)
     local kind = n.kind
@@ -732,6 +768,7 @@ emit_stmt = function(ctx, nid)
         local el = d[4]
         local names = ctx:list(ns, nl)
         -- Build name strings
+        --: { [number]: string }
         local name_parts = {}
         for i, nid2 in ipairs(names) do
             local nm = ctx:name(nid2)
@@ -748,7 +785,7 @@ emit_stmt = function(ctx, nid)
                 local ts_type = ann_content and (": " .. (ann_to_ts(ann_content) or "unknown")) or ""
                 ctx:emit("let " .. name_parts[1] .. ts_type .. ";")
             else
-                ctx:emit("let [" .. table.concat(name_parts, ", ") .. "];")
+                ctx:emit("let [" .. table.concat(name_parts --[[:! { [integer]: string | number }]], ", ") .. "];")
             end
         elseif el == 1 then
             -- Single initializer
@@ -760,7 +797,7 @@ emit_stmt = function(ctx, nid)
                 if ctx.bundle_mode then
                     -- Bundle mode: emit const x = __require("lib/foo"); and record dep.
                     local alias = name_parts[1]
-                    local mod_id = mod_name:gsub("%.", "/")
+                    local mod_id, _ = mod_name:gsub("%.", "/")
                     ctx:add_bundle_require(mod_name)
                     local ts_type = ann_content and (": " .. (ann_to_ts(ann_content) or "unknown")) or ""
                     ctx:emit("const " .. alias .. ts_type .. ' = __require("' .. mod_id .. '");')
@@ -779,19 +816,20 @@ emit_stmt = function(ctx, nid)
                 ctx:emit("const " .. name_parts[1] .. ts_type .. " = " .. val .. ";")
             else
                 -- Destructure multiple names from single value (multi-return)
-                ctx:emit("const [" .. table.concat(name_parts, ", ") .. "] = " .. val .. ";")
+                ctx:emit("const [" .. table.concat(name_parts --[[:! { [integer]: string | number }]], ", ") .. "] = " .. val .. ";")
             end
         else
             -- Multiple initializers (uncommon)
             local exprs = ctx:list(es, el)
+            --: { [integer]: string }
             local val_parts = {}
-            for i, eid in ipairs(exprs) do
-                val_parts[i] = emit_expr(ctx, eid, 0)
+            for _, eid in ipairs(exprs) do
+                table.insert(val_parts, emit_expr(ctx, eid, 0))
             end
             if #name_parts == 1 then
                 ctx:emit("const " .. name_parts[1] .. " = " .. val_parts[1] .. ";")
             else
-                ctx:emit("const [" .. table.concat(name_parts, ", ") .. "] = [" .. table.concat(val_parts, ", ") .. "];")
+                ctx:emit("const [" .. table.concat(name_parts --[[:! { [integer]: string | number }]], ", ") .. "] = [" .. table.concat(val_parts --[[:! { [integer]: string | number }]], ", ") .. "];")
             end
         end
 
@@ -999,6 +1037,7 @@ emit_stmt = function(ctx, nid)
         local bl = d[6]
         local names = ctx:list(ns, nl)
         local exprs = ctx:list(es, el)
+        --: { [number]: string }
         local name_parts = {}
         for i, nid2 in ipairs(names) do
             local nm = ctx:name(nid2)
@@ -1006,7 +1045,7 @@ emit_stmt = function(ctx, nid)
             name_parts[i] = nm
         end
         local var_str = #name_parts > 1
-            and "[" .. table.concat(name_parts, ", ") .. "]"
+            and "[" .. table.concat(name_parts --[[:! { [integer]: string | number }]], ", ") .. "]"
             or name_parts[1]
         -- Detect ipairs/pairs by inspecting the expression
         -- emit_expr already handles ipairs → .entries() and pairs → Object.entries()
@@ -1038,6 +1077,7 @@ emit_stmt = function(ctx, nid)
     end
 end
 
+--: (L2TSCtx, number, number) -> nil
 emit_block = function(ctx, bs, bl)
     local stmts = ctx:list(bs, bl)
     for _, sid in ipairs(stmts) do
@@ -1054,6 +1094,7 @@ end
 -- Annotation declaration emitter
 -- Emits `--::` type declarations as TypeScript type aliases.
 -- ---------------------------------------------------------------------------
+--: (L2TSCtx) -> { [integer]: string }
 local function emit_decl_annotations(ctx)
     local lines = {}
     -- Scan all annotations for ANN_DECL kind
@@ -1062,8 +1103,8 @@ local function emit_decl_annotations(ctx)
             -- content like "Foo = { x: integer }"
             local name, body = ann.content:match("^([%a_][%w_]*)%s*=%s*(.+)$")
             if name and body then
-                local ts_body = ann_to_ts(body)
-                lines[#lines + 1] = "export type " .. name .. " = " .. ts_body .. ";"
+                local ts_body = ann_to_ts(body) or (body --[[:! string]])
+                lines[#lines + 1] = "export type " .. (name --[[:! string]]) .. " = " .. ts_body .. ";"
             end
         end
     end
@@ -1094,8 +1135,12 @@ end
 -- }
 -- skip_ids: set of all stmt ids that should NOT be emitted by emit_stmt.
 -- ---------------------------------------------------------------------------
+--:: L2TSMethodInfo = { id: number, name: string, is_static: boolean }
+--:: L2TSClassInfo = { decl_id: number, index_id: number | nil, ctor_id: number | nil, methods: { [integer]: L2TSMethodInfo } }
+--:: L2TSDelegation = { lhs: string, rhs_id: number }
 
 -- Returns the single string name of an identifier node, or nil.
+--: (L2TSCtx, number) -> string | nil
 local function ident_name(ctx, nid)
     local n = ctx:node(nid)
     if n.kind ~= defs.NODE_IDENTIFIER then return nil end
@@ -1104,6 +1149,7 @@ end
 
 -- Returns (obj_name, field_name) if nid is a NODE_FIELD_EXPR whose object is
 -- a simple identifier, otherwise nil.
+--: (L2TSCtx, number) -> (string | nil, string | nil)
 local function field_of_ident(ctx, nid)
     local n = ctx:node(nid)
     if n.kind ~= defs.NODE_FIELD_EXPR then return nil end
@@ -1115,6 +1161,7 @@ end
 
 -- Returns true if nid is a call to setmetatable(_, proto_name) or
 -- setmetatable(_, { __index = proto_name }).
+--: (L2TSCtx, number, string) -> boolean
 local function is_setmetatable_call(ctx, nid, proto_name)
     local n = ctx:node(nid)
     if n.kind ~= defs.NODE_CALL_EXPR then return false end
@@ -1144,8 +1191,11 @@ local function is_setmetatable_call(ctx, nid, proto_name)
     return false
 end
 
+--: (L2TSCtx, { [integer]: number }) -> ({ [string]: L2TSClassInfo | nil }, { [number]: boolean }, { [number]: L2TSDelegation })
 local function scan_classes(ctx, stmt_ids)
+    --: { [string]: L2TSClassInfo | nil }
     local classes = {}   -- { [proto_name] = ClassInfo }
+    --: { [number]: boolean }
     local skip    = {}   -- { [stmt_id] = true }
 
     -- Pass 1: find `local M = {}` and `M.__index = M`.
@@ -1164,8 +1214,9 @@ local function scan_classes(ctx, stmt_ids)
                     if not classes[name] then
                         classes[name] = {
                             decl_id  = sid,
-                            index_id = nil,
-                            ctor_id  = nil,
+                            index_id = (nil --[[: number | nil]]),
+                            ctor_id  = (nil --[[: number | nil]]),
+                            --: { [integer]: L2TSMethodInfo }
                             methods  = {},
                         }
                     end
@@ -1181,7 +1232,7 @@ local function scan_classes(ctx, stmt_ids)
                 if obj and field == "__index" then
                     local rhs = ident_name(ctx, exprs[1])
                     if rhs == obj and classes[obj] then
-                        classes[obj].index_id = sid
+                        (classes[obj] --[[:! L2TSClassInfo]]).index_id = sid
                         skip[sid] = true
                     end
                 end
@@ -1203,7 +1254,7 @@ local function scan_classes(ctx, stmt_ids)
             local name_nid = sn.d[1]
             local obj, field = field_of_ident(ctx, name_nid)
             if obj and classes[obj] then
-                local info = classes[obj]
+                local info = classes[obj] --[[:! L2TSClassInfo]]
                 if field == "new" then
                     info.ctor_id = sid
                     skip[sid] = true
@@ -1263,6 +1314,7 @@ end
 -- Emit a constructor body, transforming it into a TypeScript constructor.
 -- Skips: `local self = setmetatable(...)` and `return self` statements.
 -- Replaces field assignments `self.x = v` with `this.x = v`.
+--: (L2TSCtx, string, number, number) -> nil
 local function emit_ctor_body(ctx, proto_name, bs, bl)
     local stmts = ctx:list(bs, bl)
     for _, sid in ipairs(stmts) do
@@ -1301,6 +1353,7 @@ end
 -- Emit a constructor body preamble: `const self = this;` so that field
 -- assignments like `self.x = v` in the Lua body work as `this.x`.
 -- This is emitted before the body statements (after the setmetatable skip).
+--: (L2TSCtx, string, number, number) -> nil
 local function emit_ctor_body_with_self(ctx, proto_name, bs, bl)
     ctx:emit("const self = this;")
     emit_ctor_body(ctx, proto_name, bs, bl)
@@ -1312,12 +1365,14 @@ end
 -- being implicit, we don't need to rewrite the body — `self` references
 -- in JS/TS are just `self` (a valid identifier). However, TS classes use
 -- `this`, so we emit a `const self = this;` preamble so the body works.
+--: (L2TSCtx, number, number) -> nil
 local function emit_method_body(ctx, bs, bl)
     ctx:emit("const self = this;")
     emit_block(ctx, bs, bl)
 end
 
 -- Emit a full class declaration for a detected prototype.
+--: (L2TSCtx, string, L2TSClassInfo) -> nil
 local function emit_class(ctx, proto_name, info)
     ctx:emit("class " .. proto_name .. " {")
     ctx.indent = ctx.indent + 1
@@ -1378,6 +1433,7 @@ local function emit_class(ctx, proto_name, info)
 end
 
 -- Emit the top-level chunk, scanning for class patterns first.
+--: (L2TSCtx, number, number) -> nil
 local function emit_chunk_with_classes(ctx, bs, bl)
     local stmt_ids = ctx:list(bs, bl)
 
@@ -1390,13 +1446,15 @@ local function emit_chunk_with_classes(ctx, bs, bl)
     -- Mark each class by its decl_id for ordered emission.
     local class_at_decl = {}
     for name, info in pairs(classes) do
-        class_at_decl[info.decl_id] = { name = name, info = info }
+        if info then
+            class_at_decl[info.decl_id] = { name = name, info = info }
+        end
     end
 
     for _, sid in ipairs(stmt_ids) do
         if class_at_decl[sid] then
             -- Emit the class declaration in place of the `local M = {}` statement.
-            local entry = class_at_decl[sid]
+            local entry = class_at_decl[sid] --[[:! { name: string, info: L2TSClassInfo }]]
             emit_class(ctx, entry.name, entry.info)
         elseif delegations[sid] then
             -- M.__index = Other → Object.setPrototypeOf(M, Other)
@@ -1414,16 +1472,16 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil }) | nil) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile(source, opts)
-    opts = opts or {}
+    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }]]
     local filename = opts.filename or "?"
     local ok, result = pcall(function()
         local parsed = parse_mod.parse(source, filename)
         local ctx = new_ctx(parsed.pool, parsed.nodes, parsed.lists, source, opts)
 
         -- Walk the root chunk
-        local root = ctx:node(parsed.root)
+        local root = ctx:node(tonumber(parsed.root) or 0)
         if root.kind ~= defs.NODE_CHUNK then
             return nil, "expected chunk root"
         end
@@ -1433,6 +1491,7 @@ function M.transpile(source, opts)
         local decl_lines = emit_decl_annotations(ctx)
 
         -- Build output
+        --: { [integer]: string }
         local out = {}
 
         -- Header
@@ -1445,7 +1504,7 @@ function M.transpile(source, opts)
             local emitted_any = false
             for _, hname in ipairs(HARDEN_HELPERS_ORDER) do
                 if ctx.harden_used[hname] then
-                    out[#out + 1] = HARDEN_HELPERS[hname]
+                    out[#out + 1] = HARDEN_HELPERS[hname] --[[:! string]]
                     emitted_any = true
                 end
             end
@@ -1482,13 +1541,13 @@ function M.transpile(source, opts)
     return result
 end
 
---: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil }) | nil) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile_file(path, opts)
     local f, err = io.open(path, "r")
     if not f then return nil, "cannot open " .. path .. ": " .. (err or "?") end
-    local source = f:read("*a")
+    local source = f:read("*a") --[[:! string]]
     f:close()
-    opts = opts or {}
+    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil }]]
     opts.filename = opts.filename or path
     return M.transpile(source, opts)
 end
@@ -1523,7 +1582,7 @@ local function transpile_bundle_module(source, opts)
         local parsed = parse_mod.parse(source, bundle_opts.filename or "?")
         local ctx = new_ctx(parsed.pool, parsed.nodes, parsed.lists, source, bundle_opts)
 
-        local root = ctx:node(parsed.root)
+        local root = ctx:node(tonumber(parsed.root) or 0)
         if root.kind ~= defs.NODE_CHUNK then
             error("expected chunk root")
         end
@@ -1570,11 +1629,12 @@ function M.bundle(entry_path, entry_src, resolve_fn, opts)
     local order   = {}  -- ordered list of { mod_id, lines } for output
     local errors_out = {}
 
+    --: (string, string) -> nil
     local function process(mod_name, source)
         if visited[mod_name] then return end
         visited[mod_name] = true
 
-        local mod_id = mod_name:gsub("%.", "/")
+        local mod_id, _ = mod_name:gsub("%.", "/")
         local file_opts = {}
         for k, v in pairs(opts) do file_opts[k] = v end
         file_opts.filename = file_opts.filename or (mod_id .. ".lua")
@@ -1608,6 +1668,7 @@ function M.bundle(entry_path, entry_src, resolve_fn, opts)
     end
 
     -- Assemble output
+    --: { [integer]: string }
     local out = {}
 
     if opts.strict then
@@ -1626,7 +1687,7 @@ function M.bundle(entry_path, entry_src, resolve_fn, opts)
     end
 
     -- Run the entry module
-    local entry_id = entry_path:gsub("%.", "/")
+    local entry_id, _ = entry_path:gsub("%.", "/")
     out[#out + 1] = "// run entry"
     out[#out + 1] = '__require("' .. entry_id .. '");'
 
