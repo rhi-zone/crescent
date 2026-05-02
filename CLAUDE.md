@@ -52,6 +52,7 @@ Pointers to conditional context — read on demand, not loaded by default.
 ```bash
 bin/cr test                  # Run tests
 bin/cr check <file>          # Typecheck a file
+bin/cr check --summary <file>  # Root-cause-grouped error summary (use this first when diagnosing why a file has errors)
 cd docs && bun dev           # Local docs (requires bun)
 nix develop                  # Dev shell for contributors (bun, etc.)
 ```
@@ -418,7 +419,7 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 ## Workflow
 
-**Run the typechecker on files you write or modify.** `bin/cr check <file>...` — do this before committing. See `lib/type/static/CLAUDE.md` for annotation syntax and type system rules.
+**Run the typechecker on files you write or modify.** `bin/cr check <file>...` — do this before committing. See `lib/type/static/CLAUDE.md` for annotation syntax and type system rules. **When diagnosing why a file has many errors, run `bin/cr check --summary <file>` first** — it groups errors by root cause (unresolved requires, cascading unknowns, etc.) and is far more informative than piping raw output through grep/sed.
 
 **Always run typecheck under a timeout.** Single file: `timeout 30 bin/cr check <file>`. Repo-wide: `timeout 120 bin/cr check ...`. A typecheck that exceeds these limits is hanging, not slow — there is a soundness or termination bug somewhere (occurs-check, union-find self-loop, exponential expansion). When this happens, **stop other work immediately**. Two options for subagents:
 1. **Hand back to the orchestrator** — return a minimal report ("typecheck hung on <file>; aborting to keep context clean") so a fresh subagent can investigate without your accumulated context.
