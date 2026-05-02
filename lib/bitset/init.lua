@@ -69,8 +69,11 @@ BS.__index = BS
 -- Constructors
 -- ---------------------------------------------------------------------------
 
+--:: Bitset = { words: { [integer]: integer }, ... }
+
 --- Create a new bitset. `n` is an optional capacity hint (bits); the bitset
 --- grows automatically on demand regardless.
+--: (number | nil) -> Bitset
 function M.new(n)
   local nw = 0
   local words = {}
@@ -85,7 +88,7 @@ end
 function M.from_bits(positions)
   local bs = M.new()
   for _, pos in ipairs(positions) do
-    bs:set(pos)
+    BS.set(bs, pos)
   end
   return bs
 end
@@ -156,7 +159,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local function max_words(a, b)
-  return math.max(#a.words, #b.words)
+  return math.max(#a.words, #b.words) --[[:! integer]]
 end
 
 --- Bitwise AND — returns new bitset. Words beyond either bitset are 0 AND x = 0.
