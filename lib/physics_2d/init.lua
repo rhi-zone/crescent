@@ -17,16 +17,19 @@ local sqrt = math.sqrt
 local abs  = math.abs
 local max  = math.max
 
+--: (number, number) -> number
 local function vec_len(x, y)
   return sqrt(x * x + y * y)
 end
 
+--: (number, number) -> (number, number, number)
 local function vec_normalize(x, y)
   local len = sqrt(x * x + y * y)
   if len < 1e-10 then return 0, 0, 0 end
   return x / len, y / len, len
 end
 
+--: (number, number, number) -> number
 local function clamp(v, lo, hi)
   if v < lo then return lo end
   if v > hi then return hi end
@@ -37,12 +40,20 @@ end
 -- Body
 -- ---------------------------------------------------------------------------
 
+--:: BodyOpts = { x: number | nil, y: number | nil, vx: number | nil, vy: number | nil, mass: number | nil, angle: number | nil, angular_vel: number | nil, restitution: number | nil, friction: number | nil, shape: string | nil, radius: number | nil, width: number | nil, height: number | nil, ... }
+--:: BodyShape = { x: number, y: number, vx: number, vy: number, mass: number, inv_mass: number, _angle: number, angular_vel: number, restitution: number, friction: number, shape: string, radius: number, width: number, height: number, _fx: number, _fy: number, _torque: number, inertia: number, inv_inertia: number, _world: unknown, ... }
+--:: JointShape = { body_a: BodyShape, body_b: BodyShape, target_dist: number, stiffness: number, _world: unknown, ... }
+--:: CollInfo = { nx: number, ny: number, depth: number, cx: number, cy: number }
+--:: WorldOpts = { gravity: { x: number, y: number } | nil, damping: number | nil, ... }
+--:: WorldShape = { gx: number, gy: number, damping: number, _bodies: { [integer]: BodyShape }, _joints: { [integer]: JointShape }, ... }
+
 local Body = {}
 Body.__index = Body
 
+--: (unknown, (BodyOpts | nil)) -> BodyShape
 local function new_body(world, opts)
-  opts = opts or {}
-  local b = setmetatable({}, Body)
+  opts = (opts or {}) --[[:! BodyOpts]]
+  local b = setmetatable({}, Body) --[[: any]]
   b._world        = world
   b.x             = opts.x or 0
   b.y             = opts.y or 0
@@ -68,7 +79,7 @@ local function new_body(world, opts)
     b.inertia     = (b.mass == 0) and 0 or (b.mass * (b.width * b.width + b.height * b.height) / 12)
   end
   b.inv_inertia   = (b.inertia == 0) and 0 or (1.0 / b.inertia)
-  return b
+  return b --[[:! BodyShape]]
 end
 
 function Body:position()
@@ -111,6 +122,7 @@ end
 
 -- Circle vs circle
 -- Returns nil or {nx, ny, depth, cx, cy}
+--: (BodyShape, BodyShape) -> (CollInfo | nil)
 local function collide_circle_circle(a, b)
   local dx = b.x - a.x
   local dy = b.y - a.y
@@ -133,6 +145,7 @@ end
 
 -- Circle vs AABB box
 -- Returns nil or {nx, ny, depth, cx, cy}
+--: (BodyShape, BodyShape) -> (CollInfo | nil)
 local function collide_circle_box(circle, box)
   -- Half-extents of the box
   local hw = box.width  * 0.5
@@ -171,6 +184,7 @@ end
 
 -- AABB vs AABB
 -- Returns nil or {nx, ny, depth, cx, cy}
+--: (BodyShape, BodyShape) -> (CollInfo | nil)
 local function collide_box_box(a, b)
   local hw_a = a.width  * 0.5
   local hh_a = a.height * 0.5
@@ -196,6 +210,7 @@ local function collide_box_box(a, b)
   return { nx = nx, ny = ny, depth = depth, cx = cx, cy = cy }
 end
 
+--: (BodyShape, BodyShape) -> (CollInfo | nil)
 local function detect_collision(a, b)
   local info
   if a.shape == "circle" and b.shape == "circle" then
@@ -223,6 +238,7 @@ end
 -- Impulse resolution
 -- ---------------------------------------------------------------------------
 
+--: (BodyShape, BodyShape, CollInfo) -> nil
 local function resolve_collision(a, b, info)
   local nx, ny = info.nx, info.ny
   local depth   = info.depth
@@ -276,9 +292,10 @@ end
 local Joint = {}
 Joint.__index = Joint
 
+--: (unknown, BodyShape, BodyShape, ({ target_dist: number | nil, stiffness: number | nil, ... } | nil)) -> JointShape
 local function new_joint(world, body_a, body_b, opts)
-  opts = opts or {}
-  local j = setmetatable({}, Joint)
+  opts = (opts or {}) --[[:! { target_dist: number | nil, stiffness: number | nil, ... }]]
+  local j = setmetatable({}, Joint) --[[: any]]
   j._world   = world
   j.body_a   = body_a
   j.body_b   = body_b
@@ -286,9 +303,10 @@ local function new_joint(world, body_a, body_b, opts)
   local dy = body_b.y - body_a.y
   j.target_dist = opts.target_dist or sqrt(dx * dx + dy * dy)
   j.stiffness   = opts.stiffness ~= nil and opts.stiffness or 1.0
-  return j
+  return j --[[:! JointShape]]
 end
 
+--: (JointShape, number) -> nil
 local function step_joint(j, dt)
   local a, b = j.body_a, j.body_b
   local dx = b.x - a.x
@@ -327,16 +345,17 @@ end
 local World = {}
 World.__index = World
 
+--: ((WorldOpts | nil)) -> WorldShape
 local function new_world(opts)
-  opts = opts or {}
-  local grav = opts.gravity or { x = 0, y = -9.8 }
-  local w = setmetatable({}, World)
+  opts = (opts or {}) --[[:! WorldOpts]]
+  local grav = opts.gravity or { x = 0.0, y = -9.8 }
+  local w = setmetatable({}, World) --[[: any]]
   w.gx      = grav.x
   w.gy      = grav.y
   w.damping = opts.damping ~= nil and opts.damping or 0.999
   w._bodies = {}
   w._joints = {}
-  return w
+  return w --[[:! WorldShape]]
 end
 
 function World:body(opts)
@@ -396,10 +415,11 @@ function World:collisions()
 end
 
 function World:step(dt)
-  local bs  = self._bodies
-  local gx  = self.gx
-  local gy  = self.gy
-  local dmp = self.damping
+  local self_ = self --[[:! WorldShape]]
+  local bs  = self_._bodies
+  local gx  = self_.gx
+  local gy  = self_.gy
+  local dmp = self_.damping
 
   -- Integrate velocity and position (semi-implicit Euler)
   for i = 1, #bs do
@@ -430,8 +450,8 @@ function World:step(dt)
   end
 
   -- Step joints
-  for i = 1, #self._joints do
-    step_joint(self._joints[i], dt)
+  for i = 1, #self_._joints do
+    step_joint(self_._joints[i], dt)
   end
 end
 
