@@ -94,7 +94,7 @@ last because the type system itself is the testbed.
 - [x] `lib/csv/init.lua` (60 → 0)
 - [x] `lib/http/format.lua` (9 → 0) — cast find() returns after nil-check; tonumber() integer cast for sub() arg
 - [x] `lib/smtp/init.lua` (47 → 25) — annotated param/return types; remaining 25 from Session self.transport unknown (prototype method lookup limitation)
-- [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Skipped)
+- [x] `lib/diff/init.lua` (8 → 0) — force-cast x_/y_/prev_k_/diag_start_ locals after if/else branch joins; annotated myers_forward/myers_backtrack signatures
 
 ## FFI-bound (likely unfixable without restructuring)
 
@@ -128,6 +128,12 @@ last because the type system itself is the testbed.
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/diff/init.lua` (was 8 → now 0, commit e232596) — force-cast branch-join locals; annotated helper function signatures
+- [x] `lib/bloom_clock/init.lua` (was 11 → now 0, commit 49d62d4) — Clock type alias; annotated all helpers; self_ casts in methods; FNV constant as signed int32
+- [x] `lib/uuid/init.lua` (was 4 → now 3, commit 846b5d0) — rand_bytes forward-decl as rand_bytes_fn|nil; force-cast at call sites; 3 FFI ffi.new errors remain
+- [x] `lib/string_ext/init.lua` (was 6 → now 0, commit be1e194) — annotated M.split/split_n/lines with string param types
+- [x] `lib/table_ext/init.lua` (was 6 → now 0, commit 318ae44) — annotated flatten/zip/take/range; force-cast depth_/step_
 
 - [x] `lib/markdown/init.lua` (was 7 → now 0, commit b60f672) — force-casts on ms_/me_/repl_ from unknown try_fn returns; s_/len_ locals after if-branch type union; bq_lines[#bq_lines] cast; i cast after increment
 - [x] `lib/taskgraph/executor/ai.lua` (was 9 → now 0, commit dddcd2a) — AiMessage/CompleteInput/ToolLoopInput/ToolSpec types; ctx_ force-cast with spawn/result methods; tool_calls nil split; --[[: any]] on generate({...}) calls for optional-vs-nil mismatch
