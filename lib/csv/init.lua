@@ -9,7 +9,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: Decoder = { feed: (string) -> nil, rows: () -> { [integer]: { [integer]: string } }, finish: () -> nil }
+--:: Decoder = { push: (string) -> nil, rows: () -> { [integer]: unknown }, finish: () -> { [integer]: unknown } }
 
 local byte, char, sub, find, gsub = string.byte, string.char, string.sub, string.find, string.gsub
 local concat, insert = table.concat, table.insert
@@ -38,8 +38,9 @@ end
 -- On unterminated quoted field: nil, pos, "eof", errmsg
 -- ---------------------------------------------------------------------------
 
+--: (string, integer, integer, integer, integer, boolean) -> (string|nil, integer, string, string|nil)
 local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
-  local c = byte(s, pos)
+  local c = (byte(s, pos)) or 0 --[[:! integer]]
 
   if c == quot_b then
     -- Quoted field — collect everything until unescaped closing quote
@@ -48,9 +49,9 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
     local nparts = 0
     local start = pos
     while pos <= len do
-      c = byte(s, pos)
+      c = (byte(s, pos)) or 0 --[[:! integer]]
       if c == quot_b then
-        if pos + 1 <= len and byte(s, pos + 1) == quot_b then
+        if pos + 1 <= len and ((byte(s, pos + 1)) or 0 --[[:! integer]]) == quot_b then
           -- "" → escaped quote
           nparts = nparts + 1
           parts[nparts] = sub(s, start, pos)  -- includes the first "
@@ -73,18 +74,18 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
       return nil, pos, "eof", "csv: unterminated quoted field"
     end
 
-    local field = nparts == 1 and parts[1] or concat(parts)
+    local field = (nparts == 1 and parts[1] or concat(parts)) --[[:! string]]
 
     -- Consume terminator after closing quote
     if pos > len then
       return field, pos, "eof"
     end
-    c = byte(s, pos)
+    c = (byte(s, pos)) or 0 --[[:! integer]]
     if c == sep_b then
       return field, pos + 1, "delim"
     elseif c == BYTE_CR then
       pos = pos + 1
-      if pos <= len and byte(s, pos) == BYTE_LF then pos = pos + 1 end
+      if pos <= len and ((byte(s, pos)) or 0 --[[:! integer]]) == BYTE_LF then pos = pos + 1 end
       return field, pos, "newline"
     elseif c == BYTE_LF then
       return field, pos + 1, "newline"
@@ -96,26 +97,26 @@ local function parse_field(s, pos, len, sep_b, quot_b, do_trim)
   -- Unquoted field — scan to separator or newline
   local start = pos
   while pos <= len do
-    c = byte(s, pos)
+    c = (byte(s, pos)) or 0 --[[:! integer]]
     if c == sep_b then
       local field = sub(s, start, pos - 1)
-      if do_trim then field = field:match("^%s*(.-)%s*$") end
+      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
       return field, pos + 1, "delim"
     elseif c == BYTE_CR then
       local field = sub(s, start, pos - 1)
-      if do_trim then field = field:match("^%s*(.-)%s*$") end
+      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
       pos = pos + 1
-      if pos <= len and byte(s, pos) == BYTE_LF then pos = pos + 1 end
+      if pos <= len and ((byte(s, pos)) or 0 --[[:! integer]]) == BYTE_LF then pos = pos + 1 end
       return field, pos, "newline"
     elseif c == BYTE_LF then
       local field = sub(s, start, pos - 1)
-      if do_trim then field = field:match("^%s*(.-)%s*$") end
+      if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
       return field, pos + 1, "newline"
     end
     pos = pos + 1
   end
   local field = sub(s, start, pos - 1)
-  if do_trim then field = field:match("^%s*(.-)%s*$") end
+  if do_trim then field = (field:match("^%s*(.-)%s*$")) or field --[[:! string]] end
   return field, pos, "eof"
 end
 
@@ -130,34 +131,36 @@ end
 ---   trim        bool    trim whitespace from unquoted fields (default false)
 ---   headers     bool    first row is headers; return array of {key=value} tables
 ---   coerce      bool    auto-convert numeric/bool strings (default false)
---: (string, { separator: string|nil, quote: string|nil, trim: boolean|nil, headers: boolean|nil, coerce: boolean|nil }|nil) -> { [integer]: unknown } | (nil, string)
+--: (string, { separator: string|nil, quote: string|nil, trim: boolean|nil, headers: boolean|nil, coerce: boolean|nil }|nil) -> ({ [integer]: unknown } | nil, string | nil)
 function M.decode(s, opts)
   if type(s) ~= "string" then
     return nil, "csv.decode: expected string, got " .. type(s)
   end
 
-  opts = opts or {}
-  local sep_str    = opts.separator or ","
-  local quot_str   = opts.quote     or '"'
-  local do_trim    = opts.trim      or false
-  local do_headers = opts.headers   or false
-  local do_coerce  = opts.coerce    or false
+  local sep_str    = (opts and opts.separator) or ","
+  local quot_str   = (opts and opts.quote)     or '"'
+  local do_trim    = ((opts and opts.trim)      or false) --[[:! boolean]]
+  local do_headers = ((opts and opts.headers)   or false) --[[:! boolean]]
+  local do_coerce  = ((opts and opts.coerce)    or false) --[[:! boolean]]
 
-  local sep_b  = byte(sep_str,  1)
-  local quot_b = byte(quot_str, 1)
+  local _sep_b_raw  = byte(sep_str --[[:! string]],  1)
+  local _quot_b_raw = byte(quot_str --[[:! string]], 1)
+  local sep_b  = (_sep_b_raw  or 44) --[[:! integer]]
+  local quot_b = (_quot_b_raw or 34) --[[:! integer]]
   local len    = #s
   local pos    = 1
 
+  --: { [integer]: { [integer]: unknown } | nil }
   local rows = {}
   local nrow = 0
 
   while pos <= len do
-    local c = byte(s, pos)
+    local c = (byte(s, pos)) or 0 --[[:! integer]]
 
     -- Blank line (newline at start of row position)
     if c == BYTE_CR then
       pos = pos + 1
-      if pos <= len and byte(s, pos) == BYTE_LF then pos = pos + 1 end
+      if pos <= len and ((byte(s, pos)) or 0 --[[:! integer]]) == BYTE_LF then pos = pos + 1 end
       nrow = nrow + 1
       rows[nrow] = {}
     elseif c == BYTE_LF then
@@ -171,9 +174,9 @@ function M.decode(s, opts)
       while true do
         local field, next_pos, term, err = parse_field(s, pos, len, sep_b, quot_b, do_trim)
         if err then
-          return nil, err
+          return nil, err --[[:! string]]
         end
-        if do_coerce then field = coerce_value(field) end
+        if do_coerce and field ~= nil then field = coerce_value(field) end
         nfield = nfield + 1
         row[nfield] = field
         pos = next_pos
@@ -196,27 +199,27 @@ function M.decode(s, opts)
   end
 
   -- Strip a single trailing empty row produced by a trailing newline
-  if nrow > 0 and #rows[nrow] == 0 then
+  if nrow > 0 and #(rows[nrow] or {} --[[:! { [integer]: unknown }]]) == 0 then
     rows[nrow] = nil
     nrow = nrow - 1
   end
 
   if do_headers then
-    if nrow == 0 then return {} end
-    local headers = rows[1]
+    if nrow == 0 then return {} --[[:! { [integer]: unknown }]] end
+    local headers = rows[1] or {} --[[:! { [integer]: unknown }]]
     local result = {}
     for ri = 2, nrow do
-      local r = rows[ri]
+      local r = rows[ri] or {} --[[:! { [integer]: unknown }]]
       local rec = {}
       for hi = 1, #headers do
-        rec[headers[hi]] = r[hi]
+        rec[headers[hi] --[[:! string]]] = r[hi]
       end
       result[ri - 1] = rec
     end
     return result
   end
 
-  return rows
+  return rows --[[:! { [integer]: unknown }]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -224,11 +227,16 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Decode a single CSV row string into an array of field strings.
---: (string, { separator: string|nil, quote: string|nil, trim: boolean|nil, coerce: boolean|nil }|nil) -> { [integer]: unknown } | (nil, string)
+--: (string, { separator: string|nil, quote: string|nil, trim: boolean|nil, headers: boolean|nil, coerce: boolean|nil }|nil) -> ({ [integer]: unknown } | nil, string | nil)
 function M.decode_row(s, opts)
   local rows, err = M.decode(s, opts)
   if not rows then return nil, err end
-  return rows[1] or {}
+  local rows_t = rows --[[:! { [integer]: unknown }]]
+  local first = rows_t[1]
+  if first == nil then
+    return {} --[[:! { [integer]: unknown }]]
+  end
+  return first --[[:! { [integer]: unknown }]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -259,10 +267,9 @@ end
 --- Encode a single row (array of values) into a CSV line without line ending.
 --: ({ [integer]: unknown }, { separator: string|nil, quote: string|nil, always_quote: boolean|nil }|nil) -> string
 function M.encode_row(row, opts)
-  opts = opts or {}
-  local sep_str  = opts.separator    or ","
-  local quot_str = opts.quote        or '"'
-  local always_q = opts.always_quote or false
+  local sep_str  = ((opts and opts.separator)    or ",")  --[[:! string]]
+  local quot_str = ((opts and opts.quote)        or '"')  --[[:! string]]
+  local always_q = (opts and opts.always_quote) or false
 
   local parts = {}
   for i = 1, #row do
@@ -284,13 +291,12 @@ end
 --- Encode an array of rows into a CSV string.
 --: ({ [integer]: { [integer]: unknown } }, { separator: string|nil, quote: string|nil, line_ending: string|nil, always_quote: boolean|nil }|nil) -> string
 function M.encode(rows, opts)
-  opts = opts or {}
-  local line_ending = opts.line_ending or "\n"
+  local line_ending = ((opts and opts.line_ending) or "\n") --[[:! string]]
   local row_opts = {
-    separator    = opts.separator,
-    quote        = opts.quote,
-    always_quote = opts.always_quote,
-  }
+    separator    = opts and opts.separator,
+    quote        = opts and opts.quote,
+    always_quote = opts and opts.always_quote,
+  } --: { separator: string|nil, quote: string|nil, always_quote: boolean|nil }
 
   local lines = {}
   for i = 1, #rows do
@@ -308,13 +314,12 @@ end
 --- keys: ordered array of field names to include (defines column order).
 --: ({ [integer]: { [string]: unknown } }, { [integer]: string }, { separator: string|nil, quote: string|nil, line_ending: string|nil, always_quote: boolean|nil }|nil) -> string
 function M.encode_records(records, keys, opts)
-  opts = opts or {}
-  local line_ending = opts.line_ending or "\n"
+  local line_ending = ((opts and opts.line_ending) or "\n") --[[:! string]]
   local row_opts = {
-    separator    = opts.separator,
-    quote        = opts.quote,
-    always_quote = opts.always_quote,
-  }
+    separator    = opts and opts.separator,
+    quote        = opts and opts.quote,
+    always_quote = opts and opts.always_quote,
+  } --: { separator: string|nil, quote: string|nil, always_quote: boolean|nil }
 
   local lines = {}
   lines[1] = M.encode_row(keys, row_opts)
@@ -335,7 +340,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Return an iterator that yields one decoded row at a time.
---: (string, { separator: string|nil, quote: string|nil, trim: boolean|nil, coerce: boolean|nil }|nil) -> () -> { [integer]: unknown } | nil
+--: (string, { separator: string|nil, quote: string|nil, trim: boolean|nil, headers: boolean|nil, coerce: boolean|nil }|nil) -> () -> { [integer]: unknown } | nil
 function M.iter(s, opts)
   local rows, err = M.decode(s, opts)
   if not rows then error(err) end
@@ -350,6 +355,8 @@ end
 -- Streaming decoder (push-based)
 -- ---------------------------------------------------------------------------
 
+--:: DecoderSelf = { _buf: string, _rows: { [integer]: unknown }, _n: integer, _opts: { separator: string|nil, quote: string|nil, headers: boolean|nil }|nil, _header_row: unknown, _header_mode: boolean|nil }
+
 local Decoder = {}
 Decoder.__index = Decoder
 
@@ -362,57 +369,61 @@ function M.decoder(opts)
   self._rows        = {}
   self._n           = 0
   self._header_row  = nil
-  self._header_mode = opts and (opts.headers or opts.header)
-  return self
+  self._header_mode = opts and opts.headers
+  local ret = self --[[: any]]
+  return ret --[[:! Decoder]]
 end
 
 function Decoder:push(chunk)
-  self._buf = self._buf .. chunk
-  self:_process()
+  local ds = self --[[:! DecoderSelf]]
+  ds._buf = ds._buf .. chunk
+  Decoder._process(ds)
 end
 
 function Decoder:_process()
-  local buf   = self._buf
+  local ds = self --[[:! DecoderSelf]]
+  local buf   = ds._buf
   local len   = #buf
   local pos   = 1
   local in_q  = false
   local last  = 0
 
-  local quot_str = (self._opts and (self._opts.quote or '"')) or '"'
-  local quot_b   = byte(quot_str, 1)
+  local quot_str = ((ds._opts and (ds._opts.quote or '"')) or '"') --[[:! string]]
+  local _quot_b_r = byte(quot_str, 1)
+  local quot_b   = (_quot_b_r or 34) --[[:! integer]]
 
   while pos <= len do
-    local c = byte(buf, pos)
+    local c = (byte(buf, pos)) or 0 --[[:! integer]]
     if c == quot_b then
       in_q = not in_q
     elseif not in_q and (c == BYTE_LF or c == BYTE_CR) then
       local row_str = sub(buf, last + 1, pos - 1)
-      if c == BYTE_CR and pos + 1 <= len and byte(buf, pos + 1) == BYTE_LF then
+      if c == BYTE_CR and pos + 1 <= len and ((byte(buf, pos + 1)) or 0 --[[:! integer]]) == BYTE_LF then
         pos = pos + 1
       end
       last = pos
 
       if #row_str > 0 then
-        local ropts = {}
-        if self._opts then
-          ropts.separator = self._opts.separator or self._opts.delimiter
-          ropts.quote     = self._opts.quote
-        end
+        local sep_opt = ds._opts and ds._opts.separator
+        local quot_opt = ds._opts and ds._opts.quote
+        --: { separator: string|nil, quote: string|nil, trim: boolean|nil, headers: boolean|nil, coerce: boolean|nil }
+        local ropts = { separator = sep_opt, quote = quot_opt, trim = nil, headers = nil, coerce = nil }
         local parsed = M.decode(row_str, ropts)
-        if parsed and #parsed > 0 then
-          local row = parsed[1]
-          if self._header_mode and not self._header_row then
-            self._header_row = row
-          elseif self._header_mode and self._header_row then
+        if type(parsed) == "table" and #(parsed --[[:! { [integer]: unknown }]]) > 0 then
+          local row = (parsed --[[:! { [integer]: unknown }]])[1]
+          if ds._header_mode and not ds._header_row then
+            ds._header_row = row
+          elseif ds._header_mode and ds._header_row then
+            local hrow = ds._header_row --[[:! { [integer]: unknown }]]
             local rec = {}
-            for j = 1, #self._header_row do
-              rec[self._header_row[j]] = row[j] or ""
+            for j = 1, #hrow do
+              rec[hrow[j] --[[:! string]]] = row[j] or ""
             end
-            self._n = self._n + 1
-            self._rows[self._n] = rec
+            ds._n = ds._n + 1
+            ds._rows[ds._n] = rec
           else
-            self._n = self._n + 1
-            self._rows[self._n] = row
+            ds._n = ds._n + 1
+            ds._rows[ds._n] = row
           end
         end
       end
@@ -421,50 +432,53 @@ function Decoder:_process()
   end
 
   if last > 0 then
-    self._buf = sub(buf, last + 1)
+    ds._buf = sub(buf, last + 1)
   end
 end
 
 --- Get completed rows since the last call and reset the internal completed list.
 --: () -> { [integer]: unknown }
 function Decoder:rows()
-  local rows = self._rows
-  self._rows = {}
-  self._n    = 0
+  local ds = self --[[:! DecoderSelf]]
+  local rows = ds._rows
+  ds._rows = {}
+  ds._n    = 0
   return rows
 end
 
 --- Process any remaining buffered data and return all remaining rows.
 --: () -> { [integer]: unknown }
 function Decoder:finish()
-  if #self._buf > 0 then
-    local ropts = {}
-    if self._opts then
-      ropts.separator = self._opts.separator or self._opts.delimiter
-      ropts.quote     = self._opts.quote
-    end
-    local parsed = M.decode(self._buf, ropts)
-    if parsed then
-      for i = 1, #parsed do
-        local row = parsed[i]
-        if self._header_mode and not self._header_row then
-          self._header_row = row
-        elseif self._header_mode and self._header_row then
+  local ds = self --[[:! DecoderSelf]]
+  if #ds._buf > 0 then
+    local sep_opt2 = ds._opts and ds._opts.separator
+    local quot_opt2 = ds._opts and ds._opts.quote
+    --: { separator: string|nil, quote: string|nil, trim: boolean|nil, headers: boolean|nil, coerce: boolean|nil }
+    local ropts2 = { separator = sep_opt2, quote = quot_opt2, trim = nil, headers = nil, coerce = nil }
+    local parsed = M.decode(ds._buf, ropts2)
+    if type(parsed) == "table" then
+      local parsed_rows = parsed --[[:! { [integer]: unknown }]]
+      for i = 1, #parsed_rows do
+        local row = parsed_rows[i]
+        if ds._header_mode and not ds._header_row then
+          ds._header_row = row
+        elseif ds._header_mode and ds._header_row then
+          local hrow2 = ds._header_row --[[:! { [integer]: unknown }]]
           local rec = {}
-          for j = 1, #self._header_row do
-            rec[self._header_row[j]] = row[j] or ""
+          for j = 1, #hrow2 do
+            rec[hrow2[j] --[[:! string]]] = row[j] or ""
           end
-          self._n = self._n + 1
-          self._rows[self._n] = rec
+          ds._n = ds._n + 1
+          ds._rows[ds._n] = rec
         else
-          self._n = self._n + 1
-          self._rows[self._n] = row
+          ds._n = ds._n + 1
+          ds._rows[ds._n] = row
         end
       end
     end
-    self._buf = ""
+    ds._buf = ""
   end
-  return self:rows()
+  return Decoder.rows(ds)
 end
 
 -- ---------------------------------------------------------------------------
