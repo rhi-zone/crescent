@@ -82,8 +82,8 @@ last because the type system itself is the testbed.
 - `lib/barcode/init.lua` — DONE (see session log)
 - `lib/bayesian_filter/init.lua` — DONE (see session log)
 - `lib/ansi/init.lua` — DONE (see session log)
-- `lib/bezier/init.lua` (12) — return type mismatch on setmetatable for Quadratic/Cubic types
-- `lib/bundle/init.lua` (15)
+- `lib/bezier/init.lua` (12 → 5) — remaining: setmetatable return intersection not assignable to named aliases with self-referential method sigs (typechecker limitation)
+- `lib/bundle/init.lua` (15 → 0) — done
 
 
 
@@ -128,6 +128,11 @@ last because the type system itself is the testbed.
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/bezier/init.lua` (was 12 → now 5, commit d09d5a3) — annotated pt_scale z-cast, z=nil in normal() returns, number accumulator casts, SplineOpts force-cast; remaining 5: setmetatable return mismatch (typechecker limitation with self-referential aliases)
+- [x] `lib/bundle/init.lua` (was 15 → now 0, commit e4a44da) — BundleOpts/BundleStringOpts/AnalyzeOpts/AnalyzeStringOpts aliases; { [integer]: string } arrays; read_fn force-cast after type guard; fallback resolver with dummy param
+- [x] `lib/base58/init.lua` (was 2 → now 1, commit c27059c) — annotated get_sha256 return; remaining 1: gsub multi-return in hex_to_bin (typechecker limitation, matches skip note)
+- [x] `lib/aho_corasick/init.lua` (was 5 → now 2, commit 9f2062b) — force-cast g[c]→integer in trie; annotated patterns param; tostring(i) in error strings; annotated replace text param; remaining 2: search/replacements call on unknown (needs method annotations)
 
 - [x] `lib/cache/init.lua` (was 25 → now 0, commit 27a79b6) — CacheNode/Cache type aliases; annotated all helpers with force-cast params; compute_expiry closure; nil-safe clock/evict calls; self_ pattern in all methods
 - [x] `lib/bitset/init.lua` (was 11 → now 0, commit fc13aa2) — Bitset open type alias; M.new optional arg annotation; max_words integer cast; BS.set direct call in from_bits
