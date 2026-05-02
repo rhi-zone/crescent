@@ -12,16 +12,16 @@ local function myers_forward(a, b)
   local m = #b
   local max_d = n + m
   local offset = max_d + 2
-  local v = { [offset] = 0 }
-  local trace = {}
+  local v = { [offset] = 0 } --: { [integer]: integer }
+  local trace = {} --: { [integer]: { [integer]: integer } }
 
   for d = 0, max_d do
     for k = -d, d, 2 do
       local x
-      if k == -d or (k ~= d and (v[offset + k - 1] or -1) < (v[offset + k + 1] or -1)) then
-        x = v[offset + k + 1] or 0
+      if k == -d or (k ~= d and (v[offset + k - 1] or -1) --[[:! integer]] < (v[offset + k + 1] or -1) --[[:! integer]]) then
+        x = (v[offset + k + 1] or 0) --[[:! integer]]
       else
-        x = (v[offset + k - 1] or 0) + 1
+        x = (v[offset + k - 1] or 0) --[[:! integer]] + 1
       end
       local y = x - k
       while x < n and y < m and a[x + 1] == b[y + 1] do
@@ -48,7 +48,7 @@ end
 -- Each region: { op, ax, ay, bx, by } (all 1-indexed, inclusive).
 local function myers_backtrack(trace, n, m, d_final, offset)
   local x, y = n, m
-  local stack = {}
+  local stack = {} --: { [integer]: unknown }
   local ns = 0
 
   for d = d_final, 0, -1 do
@@ -108,10 +108,10 @@ local function myers_backtrack(trace, n, m, d_final, offset)
   end
 
   -- Reverse to forward order and convert to table form
-  local result = {}
+  local result = {} --: { [integer]: { op: string, a_start: number, a_end: number, b_start: number, b_end: number } }
   for i = ns, 1, -1 do
-    local e = stack[i]
-    result[ns - i + 1] = { op = e[1], a_start = e[2], a_end = e[3], b_start = e[4], b_end = e[5] }
+    local e = stack[i] --[[:! { [integer]: unknown }]]
+    result[ns - i + 1] = { op = e[1] --[[:! string]], a_start = e[2] --[[:! number]], a_end = e[3] --[[:! number]], b_start = e[4] --[[:! number]], b_end = e[5] --[[:! number]] }
   end
   return result
 end
@@ -122,7 +122,7 @@ end
 -- For "ins": a_start > a_end (no a elements consumed); b_start..b_end are inserted.
 -- For "del": b_start > b_end (no b elements consumed); a_start..a_end are deleted.
 -- For "eq":  a_start..a_end == b_start..b_end.
---: ({ [number]: unknown }, { [number]: unknown }) -> { [number]: { op: string, a_start: number, a_end: number, b_start: number, b_end: number } }
+--: ({ [number]: unknown }, { [number]: unknown }) -> { [number]: { op: string, a_start: number, a_end: number, b_start: number, b_end: number } } | nil
 M.diff = function(a, b)
   local n = #a
   local m = #b
@@ -156,15 +156,15 @@ M.distance = function(a, b)
 
   local max_d = n + m
   local offset = max_d + 2
-  local v = { [offset] = 0 }
+  local v = { [offset] = 0 } --: { [integer]: integer }
 
   for d = 0, max_d do
     for k = -d, d, 2 do
       local x
-      if k == -d or (k ~= d and (v[offset + k - 1] or -1) < (v[offset + k + 1] or -1)) then
-        x = v[offset + k + 1] or 0
+      if k == -d or (k ~= d and (v[offset + k - 1] or -1) --[[:! integer]] < (v[offset + k + 1] or -1) --[[:! integer]]) then
+        x = (v[offset + k + 1] or 0) --[[:! integer]]
       else
-        x = (v[offset + k - 1] or 0) + 1
+        x = (v[offset + k - 1] or 0) --[[:! integer]] + 1
       end
       local y = x - k
       while x < n and y < m and a[x + 1] == b[y + 1] do
@@ -192,7 +192,7 @@ local function split_lines(s)
     if nl then
       n = n + 1
       lines[n] = s:sub(pos, nl)
-      pos = nl + 1
+      pos = (nl --[[:! integer]]) + 1
     else
       n = n + 1
       lines[n] = s:sub(pos)
@@ -204,7 +204,7 @@ end
 
 -- Convenience: diff two strings line-by-line.
 -- Returns array of { op, line } where op = "=", "+", "-".
---: (string, string) -> { [number]: { op: string, line: string } }
+--: (string, string) -> { [number]: { op: string, line: string } } | nil
 M.lines = function(str_a, str_b)
   local a = split_lines(str_a)
   local b = split_lines(str_b)
@@ -236,7 +236,7 @@ end
 
 -- Convenience: diff two strings character-by-character.
 -- Returns array of { op, line } where line is a single character and op = "=", "+", "-".
---: (string, string) -> { [number]: { op: string, line: string } }
+--: (string, string) -> { [number]: { op: string, line: string } } | nil
 M.chars = function(str_a, str_b)
   local a = {}
   for i = 1, #str_a do a[i] = str_a:sub(i, i) end
@@ -275,9 +275,8 @@ end
 -- Returns a unified diff string.
 --: (string, string, ({ context: (number | nil), a_name: (string | nil), b_name: (string | nil) } | nil)) -> string
 M.unified = function(str_a, str_b, opts)
-  opts = opts or {}
-  local ctx = opts.context
-  if ctx == nil then ctx = 3 end
+  opts = (opts or {}) --[[:! { context: number | nil, a_name: string | nil, b_name: string | nil }]]
+  local ctx = opts.context or 3 --: number
   local a_name = opts.a_name or "a"
   local b_name = opts.b_name or "b"
 
@@ -288,7 +287,7 @@ M.unified = function(str_a, str_b, opts)
 
   -- Flatten into per-line ops with source indices for context tracking
   -- flat[i] = { op="="|"+"|"-", text=string, ai=number?, bi=number? }
-  local flat = {}
+  local flat = {} --: { [integer]: { op: string, text: unknown, ... } }
   local nf = 0
   for _, e in ipairs(edits) do
     if e.op == "eq" then
@@ -312,7 +311,7 @@ M.unified = function(str_a, str_b, opts)
   end
 
   -- Identify changed indices in flat
-  local changed = {}
+  local changed = {} --: { [integer]: integer }
   local nc = 0
   for i = 1, nf do
     if flat[i].op ~= "=" then
@@ -359,15 +358,15 @@ M.unified = function(str_a, str_b, opts)
     for i = hstart, hend do
       local f = flat[i]
       if f.op == "=" then
-        if not a_start_line then a_start_line = f.ai end
-        if not b_start_line then b_start_line = f.bi end
+        if not a_start_line then a_start_line = f.ai --[[:! number | nil]] end
+        if not b_start_line then b_start_line = f.bi --[[:! number | nil]] end
         a_count = a_count + 1
         b_count = b_count + 1
       elseif f.op == "-" then
-        if not a_start_line then a_start_line = f.ai end
+        if not a_start_line then a_start_line = f.ai --[[:! number | nil]] end
         a_count = a_count + 1
       elseif f.op == "+" then
-        if not b_start_line then b_start_line = f.bi end
+        if not b_start_line then b_start_line = f.bi --[[:! number | nil]] end
         b_count = b_count + 1
       end
     end
@@ -381,7 +380,7 @@ M.unified = function(str_a, str_b, opts)
     for i = hstart, hend do
       local f = flat[i]
       -- Strip trailing newline for output (unified diff format has no bare \n)
-      local text = f.text
+      local text = f.text --[[:! string]]
       -- lines already include newlines; emit them directly
       if f.op == "=" then
         no = no + 1; out[no] = " " .. text
@@ -402,7 +401,7 @@ end
 
 -- Parse a unified diff and apply it to original string.
 -- Returns patched string, or (nil, errmsg) on failure.
---: (string, string) -> string | (nil, string)
+--: (string, string) -> string | nil
 M.apply = function(original, patch)
   if patch == "" then return original end
 
@@ -445,7 +444,7 @@ M.apply = function(original, patch)
     end
 
     if a_start_s then
-      local a_start = tonumber(a_start_s)
+      local a_start = tonumber(a_start_s) or 0
       -- Emit context lines from orig up to hunk start
       while orig_pos < a_start do
         nr = nr + 1
