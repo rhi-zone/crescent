@@ -6,9 +6,11 @@ local M = {}
 M._tier = "pure"
 
 -- Tokenize text into lowercase words, stripping punctuation
+--: (string) -> { [integer]: string }
 local function tokenize(text)
-  local words = {}
-  for word in text:lower():gmatch("[%a]+") do
+  local words = {} --: { [integer]: string }
+  local lower = text:lower()
+  for word in lower:gmatch("[%a]+") do
     words[#words + 1] = word
   end
   return words
@@ -23,7 +25,7 @@ local function softmax(log_scores)
     if v > max_score then max_score = v end
   end
 
-  local sum = 0
+  local sum = (0.0) --[[:! number]]
   local exp_scores = {}
   for k, v in pairs(log_scores) do
     local e = math.exp(v - max_score)
@@ -38,10 +40,14 @@ local function softmax(log_scores)
   return probs
 end
 
+--:: ClfCat = { doc_count: integer, word_counts: { [string]: integer }, total_words: integer }
+--:: Classifier = { _cats: { [string]: ClfCat }, _cat_list: { [integer]: string }, _vocab: { [string]: boolean }, _vocab_size: integer, _total_docs: integer, ... }
+
 -- Classifier object methods
 local Clf = {}
 Clf.__index = Clf
 
+--: (Classifier, string, string) -> nil
 function Clf:train(category, text)
   local words = tokenize(text)
 
@@ -67,6 +73,7 @@ function Clf:train(category, text)
   end
 end
 
+--: (Classifier, string) -> { [string]: number }
 function Clf:scores(text)
   if #self._cat_list == 0 then
     return {}
@@ -180,13 +187,24 @@ function Clf:reset()
 end
 
 -- Create a new classifier
+--: () -> Classifier
 function M.new()
-  local clf = setmetatable({}, Clf)
-  clf:reset()
+  local cats = {} --: { [string]: ClfCat }
+  local cat_list = {} --: { [integer]: string }
+  local vocab = {} --: { [string]: boolean }
+  local clf = setmetatable({
+    _cats = cats,
+    _cat_list = cat_list,
+    _vocab = vocab,
+    _vocab_size = 0,
+    _total_docs = 0,
+  }, Clf) --[[:! Classifier]]
   return clf
 end
 
+--:: ClfSerial = { total_docs: integer, vocab_size: integer, vocab: { [integer]: string }, cat_list: { [integer]: string }, cats: { [string]: { doc_count: integer, word_counts: { [string]: integer }, total_words: integer } } }
 -- Deserialize a classifier from a table
+--: (ClfSerial) -> Classifier
 function M.deserialize(t)
   local clf = M.new()
   clf._total_docs = t.total_docs
