@@ -302,8 +302,8 @@ local function read_block_string(lex)
       end
       lex.pos = lex.pos + 3
       -- Unescape \""" → """
-      raw = raw:gsub('\\"""', '"""')
-      return strip_block_string(raw)
+      local raw_, _ = raw:gsub('\\"""', '"""')
+      return strip_block_string(raw_)
     elseif byte(lex.src, lex.pos) == 10 then
       lex.pos = lex.pos + 1
     else
@@ -357,7 +357,7 @@ local function parse_arguments(lex)
   skip_ignored(lex)
   if peek(lex) ~= byte("(") then return {} end
   advance(lex, 1) -- skip '('
-  local args = {}
+  local args = {} --[[:! { [integer]: any }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte(")") then advance(lex, 1); break end
@@ -372,14 +372,14 @@ local function parse_arguments(lex)
     local val
     val, err = parse_value(lex)
     if not val then return nil, err end
-    insert(args, { kind = "Argument", name = name, value = val })
+    args[#args + 1] = { kind = "Argument", name = name, value = val } --[[: any]]
   end
   return args
 end
 
 --: (Lexer) -> unknown
 local function parse_directives(lex)
-  local directives = {}
+  local directives = {} --[[:! { [integer]: any }]]
   while true do
     skip_ignored(lex)
     if peek(lex) ~= byte("@") then break end
@@ -389,7 +389,7 @@ local function parse_directives(lex)
     local args
     args, err = parse_arguments(lex)
     if not args then return nil, err end
-    insert(directives, { kind = "Directive", name = name, arguments = args })
+    directives[#directives + 1] = { kind = "Directive", name = name, arguments = args } --[[: any]]
   end
   return directives
 end
@@ -398,7 +398,7 @@ end
 local function parse_selection_set(lex)
   local ok, err = expect_char(lex, "{")
   if not ok then return nil, err end
-  local selections = {}
+  local selections = {} --[[:! { [integer]: any }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -423,40 +423,40 @@ local function parse_selection_set(lex)
         local dirs
         dirs, err = parse_directives(lex)
         if not dirs then return nil, err end
-        local ss
-        ss, err = parse_selection_set(lex)
-        if not ss then return nil, err end
-        insert(selections, {
+        local ss_, ss_err = parse_selection_set(lex)
+        if not ss_ then return nil, ss_err end
+        local ss = ss_ --[[:! { [any]: unknown, ... }]]
+        selections[#selections + 1] = { --[[: any]]
           kind = "InlineFragment",
           typeCondition = tc,
           directives = dirs,
           selectionSet = ss,
-        })
+        }
       elseif name_val then
         -- named fragment spread
         local dirs
         dirs, err = parse_directives(lex)
         if not dirs then return nil, err end
-        insert(selections, {
+        selections[#selections + 1] = { --[[: any]]
           kind = "FragmentSpread",
           name = { kind = "Name", value = name_val },
           directives = dirs,
-        })
+        }
       else
         -- inline fragment without type condition
         lex.pos, lex.line, lex.col = saved_pos, saved_line, saved_col
         local dirs
         dirs, err = parse_directives(lex)
         if not dirs then return nil, err end
-        local ss
-        ss, err = parse_selection_set(lex)
-        if not ss then return nil, err end
-        insert(selections, {
+        local ss_, ss_err = parse_selection_set(lex)
+        if not ss_ then return nil, ss_err end
+        local ss = ss_ --[[:! { [any]: unknown, ... }]]
+        selections[#selections + 1] = { --[[: any]]
           kind = "InlineFragment",
           typeCondition = nil,
           directives = dirs,
           selectionSet = ss,
-        })
+        }
       end
     else
       -- field (possibly aliased)
@@ -472,7 +472,8 @@ local function parse_selection_set(lex)
         alias_node = { kind = "Name", value = first_name }
         local fn, ferr = expect_name(lex)
         if not fn then return nil, ferr end
-        field_name = fn.value
+        local fn_ = fn --[[:! { value: string, ... }]]
+        field_name = fn_.value
       end
       local args
       args, err = parse_arguments(lex)
@@ -486,14 +487,14 @@ local function parse_selection_set(lex)
         ss, err = parse_selection_set(lex)
         if not ss then return nil, err end
       end
-      insert(selections, {
+      selections[#selections + 1] = { --[[: any]]
         kind = "Field",
         alias = alias_node,
         name = { kind = "Name", value = field_name },
         arguments = args,
         directives = dirs,
         selectionSet = ss,
-      })
+      }
     end
   end
   return { kind = "SelectionSet", selections = selections }
@@ -540,14 +541,14 @@ parse_value = function(lex)
   -- List value [...]
   if c == byte("[") then
     advance(lex, 1)
-    local values = {}
+    local values = {} --[[:! { [integer]: any }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("]") then advance(lex, 1); break end
       if lex.pos > lex.len then return nil, "unterminated list value" end
       local v, err = parse_value(lex)
       if not v then return nil, err end
-      insert(values, v)
+      values[#values + 1] = v --[[: any]]
     end
     return { kind = "ListValue", values = values }
   end
@@ -555,7 +556,7 @@ parse_value = function(lex)
   -- Object value {...}
   if c == byte("{") then
     advance(lex, 1)
-    local fields = {}
+    local fields = {} --[[:! { [integer]: any }]] --[[:! { [integer]: any }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -568,7 +569,7 @@ parse_value = function(lex)
       local val
       val, err = parse_value(lex)
       if not val then return nil, err end
-      insert(fields, { kind = "ObjectField", name = name, value = val })
+      fields[#fields + 1] = { kind = "ObjectField", name = name, value = val } --[[: any]]
     end
     return { kind = "ObjectValue", fields = fields }
   end
@@ -591,7 +592,7 @@ end
 parse_type = function(lex)
   skip_ignored(lex)
   local c = peek(lex)
-  local t
+  local t = nil --[[: any]]
   local err
   if c == byte("[") then
     advance(lex, 1)
@@ -601,17 +602,17 @@ parse_type = function(lex)
     local ok
     ok, err = expect_char(lex, "]")
     if not ok then return nil, err end
-    t = { kind = "ListType", type = inner }
+    t = { kind = "ListType", type = inner } --[[: any]]
   else
     local name
     name, err = expect_name(lex)
     if not name then return nil, err end
-    t = { kind = "NamedType", name = name }
+    t = { kind = "NamedType", name = name } --[[: any]]
   end
   skip_ignored(lex)
   if peek(lex) == byte("!") then
     advance(lex, 1)
-    t = { kind = "NonNullType", type = t }
+    t = { kind = "NonNullType", type = t } --[[: any]]
   end
   return t
 end
@@ -647,13 +648,13 @@ local function parse_variable_definitions(lex)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    insert(vars, {
+    vars[#vars + 1] = { --[[: any]]
       kind = "VariableDefinition",
       variable = { kind = "Variable", name = name },
       type = typ,
       defaultValue = default,
       directives = dirs,
-    })
+    }
   end
   return vars
 end
@@ -679,8 +680,9 @@ end
 
 -- Parse input value definitions (used in field args and input types)
 --: (Lexer, integer) -> unknown
+--: (Lexer, string) -> unknown
 local function parse_input_value_defs(lex, close_char)
-  local defs = {}
+  local defs = {} --[[:! { [integer]: any }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte(close_char) then advance(lex, 1); break end
@@ -709,14 +711,14 @@ local function parse_input_value_defs(lex, close_char)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    insert(defs, {
+    defs[#defs + 1] = { --[[: any]]
       kind = "InputValueDefinition",
       description = desc,
       name = name,
       type = typ,
       defaultValue = default,
       directives = dirs,
-    })
+    }
   end
   return defs
 end
@@ -726,7 +728,7 @@ end
 local function parse_field_defs(lex)
   local ok, err = expect_char(lex, "{")
   if not ok then return nil, err end
-  local fields = {}
+  local fields = {} --[[:! { [integer]: any }]]
   while true do
     skip_ignored(lex)
     if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -737,12 +739,13 @@ local function parse_field_defs(lex)
     name, err = expect_name(lex)
     if not name then return nil, err end
     -- optional arguments
-    local args = {}
+    local args = {} --[[:! { [integer]: any }]]
     skip_ignored(lex)
     if peek(lex) == byte("(") then
       advance(lex, 1)
-      args, err = parse_input_value_defs(lex, ")")
-      if not args then return nil, err end
+      local args_, err_ = parse_input_value_defs(lex, ")")
+      if not args_ then return nil, err_ end
+      args = args_ --[[:! { [integer]: any }]]
     end
     local col_ok
     col_ok, err = expect_char(lex, ":")
@@ -753,14 +756,14 @@ local function parse_field_defs(lex)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    insert(fields, {
+    fields[#fields + 1] = { --[[: any]]
       kind = "FieldDefinition",
       description = desc,
       name = name,
       arguments = args,
       type = typ,
       directives = dirs,
-    })
+    }
   end
   return fields
 end
@@ -870,19 +873,20 @@ local function parse_definition(lex)
       skip_ignored(lex)
       if peek(lex) == byte("}") then advance(lex, 1); break end
       if lex.pos > lex.len then return nil, "unterminated schema definition" end
-      local op_name_node, nerr = expect_name(lex)
-      if not op_name_node then return nil, nerr end
+      local op_name_node_, nerr = expect_name(lex)
+      if not op_name_node_ then return nil, nerr end
+      local op_name_node = op_name_node_ --[[:! { value: string, ... }]]
       local col_ok
       col_ok, err = expect_char(lex, ":")
       if not col_ok then return nil, err end
       local type_name
       type_name, err = expect_name(lex)
       if not type_name then return nil, err end
-      insert(op_types, {
+      op_types[#op_types + 1] = { --[[: any]]
         kind = "OperationTypeDefinition",
         operation = op_name_node.value,
         type = { kind = "NamedType", name = type_name },
-      })
+      }
     end
     return {
       kind = "SchemaDefinition",
@@ -910,7 +914,7 @@ local function parse_definition(lex)
     local type_name, err = expect_name(lex)
     if not type_name then return nil, err end
     -- optional "implements"
-    local interfaces = {}
+    local interfaces = {} --[[:! { [integer]: any }]]
     skip_ignored(lex)
     local saved2_pos, saved2_line, saved2_col = lex.pos, lex.line, lex.col
     local kw = read_name(lex)
@@ -921,7 +925,7 @@ local function parse_definition(lex)
         local iface_name
         iface_name, err = expect_name(lex)
         if not iface_name then return nil, err end
-        insert(interfaces, { kind = "NamedType", name = iface_name })
+        interfaces[#interfaces + 1] = { kind = "NamedType", name = iface_name } --[[: any]]
         skip_ignored(lex)
         if peek(lex) ~= byte("&") then break end
         advance(lex, 1)
@@ -954,7 +958,7 @@ local function parse_definition(lex)
     local type_name, err = expect_name(lex)
     if not type_name then return nil, err end
     -- optional "implements"
-    local interfaces = {}
+    local interfaces = {} --[[:! { [integer]: any }]]
     skip_ignored(lex)
     local saved2_pos, saved2_line, saved2_col = lex.pos, lex.line, lex.col
     local kw = read_name(lex)
@@ -965,7 +969,7 @@ local function parse_definition(lex)
         local iface_name
         iface_name, err = expect_name(lex)
         if not iface_name then return nil, err end
-        insert(interfaces, { kind = "NamedType", name = iface_name })
+        interfaces[#interfaces + 1] = { kind = "NamedType", name = iface_name } --[[: any]]
         skip_ignored(lex)
         if peek(lex) ~= byte("&") then break end
         advance(lex, 1)
@@ -1000,7 +1004,7 @@ local function parse_definition(lex)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    local types = {}
+    local types = {} --[[:! { [integer]: any }]]
     skip_ignored(lex)
     if peek(lex) == byte("=") then
       advance(lex, 1)
@@ -1010,7 +1014,7 @@ local function parse_definition(lex)
         local member_name
         member_name, err = expect_name(lex)
         if not member_name then return nil, err end
-        insert(types, { kind = "NamedType", name = member_name })
+        types[#types + 1] = { kind = "NamedType", name = member_name } --[[: any]]
         skip_ignored(lex)
         if peek(lex) ~= byte("|") then break end
         advance(lex, 1)
@@ -1034,7 +1038,7 @@ local function parse_definition(lex)
     local ok
     ok, err = expect_char(lex, "{")
     if not ok then return nil, err end
-    local values = {}
+    local values = {} --[[:! { [integer]: any }]]
     while true do
       skip_ignored(lex)
       if peek(lex) == byte("}") then advance(lex, 1); break end
@@ -1047,12 +1051,12 @@ local function parse_definition(lex)
       local edirs
       edirs, err = parse_directives(lex)
       if not edirs then return nil, err end
-      insert(values, {
+      values[#values + 1] = { --[[: any]]
         kind = "EnumValueDefinition",
         description = edesc,
         name = val_name,
         directives = edirs,
-      })
+      }
     end
     return {
       kind = "EnumTypeDefinition",
@@ -1069,12 +1073,13 @@ local function parse_definition(lex)
     local dirs
     dirs, err = parse_directives(lex)
     if not dirs then return nil, err end
-    local fields = {}
+    local fields = {} --[[:! { [integer]: any }]]
     skip_ignored(lex)
     if peek(lex) == byte("{") then
       advance(lex, 1)
-      fields, err = parse_input_value_defs(lex, "}")
-      if not fields then return nil, err end
+      local fields_, err_ = parse_input_value_defs(lex, "}")
+      if not fields_ then return nil, err_ end
+      fields = fields_ --[[:! { [integer]: any }]]
     end
     return {
       kind = "InputObjectTypeDefinition",
@@ -1091,12 +1096,13 @@ local function parse_definition(lex)
     local dir_name
     dir_name, err = expect_name(lex)
     if not dir_name then return nil, err end
-    local args = {}
+    local args = {} --[[:! { [integer]: any }]]
     skip_ignored(lex)
     if peek(lex) == byte("(") then
       advance(lex, 1)
-      args, err = parse_input_value_defs(lex, ")")
-      if not args then return nil, err end
+      local args_, err_ = parse_input_value_defs(lex, ")")
+      if not args_ then return nil, err_ end
+      args = args_ --[[:! { [integer]: any }]]
     end
     -- optional "repeatable"
     local repeatable = false
@@ -1120,7 +1126,7 @@ local function parse_definition(lex)
       skip_ignored(lex)
       local loc, lerr = expect_name(lex)
       if not loc then return nil, lerr end
-      insert(locations, loc)
+      locations[#locations + 1] = (loc --[[:! { kind: string, value: string, ... }]])
       skip_ignored(lex)
       if peek(lex) ~= byte("|") then break end
       advance(lex, 1)
@@ -1149,8 +1155,10 @@ local function parse_definition(lex)
       return nil, err or format("invalid extend at line %d col %d", lex.line, lex.col)
     end
     -- wrap with extension kind
-    inner.kind = inner.kind:gsub("Definition$", "Extension")
-    return inner
+    local inner_ = inner --[[:! { kind: string, ... }]]
+    local new_kind, _ = inner_.kind:gsub("Definition$", "Extension")
+    inner_.kind = new_kind
+    return inner_
   end
 
   -- If we have a description but no keyword, that's an error
@@ -1187,7 +1195,7 @@ function M.parse(src)
     return nil, "expected string"
   end
   local lex = new_lexer(src)
-  local defs = {}
+  local defs = {} --[[:! { [integer]: any }]]
   while true do
     skip_ignored(lex)
     if lex.pos > lex.len then break end
@@ -1196,7 +1204,7 @@ function M.parse(src)
       if err then return nil, err end
       break
     end
-    insert(defs, def)
+    defs[#defs + 1] = (def --[[:! { kind: string, ... }]])
   end
   return { kind = "Document", definitions = defs }
 end
@@ -1304,12 +1312,14 @@ local function print_indent(indent)
   return string.rep("  ", indent)
 end
 
+--: (node: unknown) -> string
 local function print_string_value(node)
-  if node.block then
-    return '"""\n' .. node.value .. '\n"""'
+  local node_ = node --[[:! { block: boolean | nil, value: string, ... }]]
+  if node_.block then
+    return '"""\n' .. node_.value .. '\n"""'
   else
     -- Escape special characters
-    local s = node.value
+    local s = node_.value
     s = s:gsub('\\', '\\\\')
     s = s:gsub('"', '\\"')
     s = s:gsub('\n', '\\n')
@@ -1319,92 +1329,107 @@ local function print_string_value(node)
   end
 end
 
+--: (t: unknown) -> string
 local function print_type(t)
-  if t.kind == "NamedType" then
-    return t.name.value
-  elseif t.kind == "ListType" then
-    return "[" .. print_type(t.type) .. "]"
-  elseif t.kind == "NonNullType" then
-    return print_type(t.type) .. "!"
+  local t_ = t --[[:! { kind: string, ... }]]
+  if t_.kind == "NamedType" then
+    local t_name = t_.name --[[:! { value: string, ... }]]
+    return t_name.value
+  elseif t_.kind == "ListType" then
+    return "[" .. print_type(t_.type) .. "]"
+  elseif t_.kind == "NonNullType" then
+    return print_type(t_.type) .. "!"
   end
   return "?"
 end
 
+--: (node: unknown) -> string
 local function print_value(node)
-  local k = node.kind
+  local node_ = node --[[:! { kind: string, value: unknown, values: unknown, fields: unknown, name: { value: string, ... } | nil, ... }]]
+  local k = node_.kind
   if k == "IntValue" or k == "FloatValue" then
-    return node.value
+    return tostring(node_.value)
   elseif k == "StringValue" then
-    return print_string_value(node)
+    return print_string_value(node_)
   elseif k == "BooleanValue" then
-    return node.value and "true" or "false"
+    return node_.value and "true" or "false"
   elseif k == "NullValue" then
     return "null"
   elseif k == "EnumValue" then
-    return node.value
+    return tostring(node_.value)
   elseif k == "Variable" then
-    return "$" .. node.name.value
+    local var_name = node_.name --[[:! { value: string, ... }]]
+    return "$" .. var_name.value
   elseif k == "ListValue" then
-    local parts = {}
-    for _, v in ipairs(node.values) do
-      insert(parts, print_value(v))
+    local parts = {} --[[:! { [integer]: string }]]
+    for _, v in ipairs(node_.values --[[:! { [integer]: unknown }]]) do
+      parts[#parts + 1] = print_value(v) --[[:! string]]
     end
     return "[" .. concat(parts, ", ") .. "]"
   elseif k == "ObjectValue" then
-    local parts = {}
-    for _, f in ipairs(node.fields) do
-      insert(parts, f.name.value .. ": " .. print_value(f.value))
+    local parts = {} --[[:! { [integer]: string }]]
+    for _, f in ipairs(node_.fields --[[:! { [integer]: unknown }]]) do
+      local f_ = f --[[:! { name: { value: string, ... }, value: unknown, ... }]]
+      parts[#parts + 1] = (f_.name.value .. ": " .. print_value(f_.value)) --[[:! string]]
     end
     return "{" .. concat(parts, ", ") .. "}"
   end
   return "null"
 end
 
+--: (args: unknown) -> string
 local function print_arguments(args)
-  if not args or #args == 0 then return "" end
-  local parts = {}
-  for _, arg in ipairs(args) do
-    insert(parts, arg.name.value .. ": " .. print_value(arg.value))
+  local args_ = args --[[:! { [integer]: unknown }]]
+  if not args_ or #args_ == 0 then return "" end
+  local parts = {} --[[:! { [integer]: string }]]
+  for _, arg in ipairs(args_) do
+    local arg_ = arg --[[:! { name: { value: string, ... }, value: unknown, ... }]]
+    parts[#parts + 1] = (arg_.name.value .. ": " .. print_value(arg_.value)) --[[:! string]]
   end
   return "(" .. concat(parts, ", ") .. ")"
 end
 
 --: (dirs: unknown) -> string
 local function print_directives(dirs)
-  if not dirs or #dirs == 0 then return "" end
+  local dirs_ = dirs --[[:! { [integer]: unknown }]]
+  if not dirs_ or #dirs_ == 0 then return "" end
   local parts = {}
-  for _, d in ipairs(--[[:! { name: { value: string }, arguments: any }[] ]] dirs) do
-    insert(parts, "@" .. d.name.value .. print_arguments(d.arguments))
+  for _, d in ipairs(dirs_) do
+    local d_ = d --[[:! { name: { value: string, ... }, arguments: unknown, ... }]]
+    insert(parts, "@" .. d_.name.value .. print_arguments(d_.arguments))
   end
   return " " .. concat(parts, " ")
 end
 
+--: (ss: unknown, indent: integer) -> string
 local function print_selection_set(ss, indent)
   if not ss then return "" end
+  local ss_ = ss --[[:! { selections: { [integer]: unknown }, ... }]]
   local lines = { " {" }
-  for _, sel in ipairs(ss.selections) do
+  for _, sel in ipairs(ss_.selections) do
+    local sel_ = sel --[[:! { kind: string, alias: { value: string, ... } | nil, name: { value: string, ... }, arguments: unknown, directives: unknown, selectionSet: unknown, typeCondition: { name: { value: string, ... }, ... } | nil, ... }]]
     local s = print_indent(indent + 1)
-    local k = sel.kind
+    local k = sel_.kind
     if k == "Field" then
-      if sel.alias then
-        s = s .. sel.alias.value .. ": "
+      if sel_.alias then
+        s = s .. sel_.alias.value .. ": "
       end
-      s = s .. sel.name.value
-      s = s .. print_arguments(sel.arguments)
-      s = s .. print_directives(sel.directives)
-      if sel.selectionSet then
-        s = s .. print_selection_set(sel.selectionSet, indent + 1)
+      s = s .. sel_.name.value
+      s = s .. print_arguments(sel_.arguments)
+      s = s .. print_directives(sel_.directives)
+      if sel_.selectionSet then
+        s = s .. print_selection_set(sel_.selectionSet, indent + 1)
       end
     elseif k == "FragmentSpread" then
-      s = s .. "..." .. sel.name.value
-      s = s .. print_directives(sel.directives)
+      s = s .. "..." .. sel_.name.value
+      s = s .. print_directives(sel_.directives)
     elseif k == "InlineFragment" then
       s = s .. "..."
-      if sel.typeCondition then
-        s = s .. " on " .. sel.typeCondition.name.value
+      if sel_.typeCondition then
+        s = s .. " on " .. sel_.typeCondition.name.value
       end
-      s = s .. print_directives(sel.directives)
-      s = s .. print_selection_set(sel.selectionSet, indent + 1)
+      s = s .. print_directives(sel_.directives)
+      s = s .. print_selection_set(sel_.selectionSet, indent + 1)
     end
     insert(lines, s)
   end
@@ -1412,37 +1437,44 @@ local function print_selection_set(ss, indent)
   return concat(lines, "\n")
 end
 
+--: (vars: unknown) -> string
 local function print_variable_definitions(vars)
-  if not vars or #vars == 0 then return "" end
+  local vars_ = vars --[[:! { [integer]: unknown }]]
+  if not vars_ or #vars_ == 0 then return "" end
   local parts = {}
-  for _, vd in ipairs(vars) do
-    local s = "$" .. vd.variable.name.value .. ": " .. print_type(vd.type)
-    if vd.defaultValue then
-      s = s .. " = " .. print_value(vd.defaultValue)
+  for _, vd in ipairs(vars_) do
+    local vd_ = vd --[[:! { variable: { name: { value: string, ... }, ... }, type: unknown, defaultValue: unknown, directives: unknown, ... }]]
+    local s = "$" .. vd_.variable.name.value .. ": " .. print_type(vd_.type)
+    if vd_.defaultValue then
+      s = s .. " = " .. print_value(vd_.defaultValue)
     end
-    s = s .. print_directives(vd.directives)
+    s = s .. print_directives(vd_.directives)
     insert(parts, s)
   end
   return "(" .. concat(parts, ", ") .. ")"
 end
 
+--: (desc: unknown, indent: integer) -> string
 local function print_description(desc, indent)
   if not desc then return "" end
   return print_indent(indent) .. print_string_value(desc) .. "\n"
 end
 
+--: (defs: unknown, indent: integer) -> string
 local function print_input_value_defs(defs, indent)
+  local defs_ = defs --[[:! { [integer]: unknown }]]
   local parts = {}
-  for _, d in ipairs(defs) do
+  for _, d in ipairs(defs_) do
+    local d_ = d --[[:! { description: unknown, name: { value: string, ... }, type: unknown, defaultValue: unknown, directives: unknown, ... }]]
     local s = print_indent(indent)
-    if d.description then
-      s = print_description(d.description, indent) .. s
+    if d_.description then
+      s = print_description(d_.description, indent) .. s
     end
-    s = s .. d.name.value .. ": " .. print_type(d.type)
-    if d.defaultValue then
-      s = s .. " = " .. print_value(d.defaultValue)
+    s = s .. d_.name.value .. ": " .. print_type(d_.type)
+    if d_.defaultValue then
+      s = s .. " = " .. print_value(d_.defaultValue)
     end
-    s = s .. print_directives(d.directives)
+    s = s .. print_directives(d_.directives)
     insert(parts, s)
   end
   return concat(parts, "\n")
@@ -1450,6 +1482,7 @@ end
 
 print_node = function(node, indent)
   indent = indent or 0
+  node = (node --[[:! { [string]: unknown, ... }]]) --[[: any]]
   local k = node.kind
 
   if k == "Document" then
@@ -1485,8 +1518,9 @@ print_node = function(node, indent)
     s = s .. "schema"
     s = s .. print_directives(node.directives)
     s = s .. " {\n"
-    for _, ot in ipairs(node.operationTypes) do
-      s = s .. "  " .. ot.operation .. ": " .. ot.type.name.value .. "\n"
+    for _, ot in ipairs(node.operationTypes --[[:! { [integer]: unknown }]]) do
+      local ot_ = ot --[[:! { operation: string, type: { name: { value: string, ... }, ... }, ... }]]
+      s = s .. "  " .. ot_.operation .. ": " .. ot_.type.name.value .. "\n"
     end
     return s .. "}"
 
@@ -1496,27 +1530,34 @@ print_node = function(node, indent)
 
   elseif k == "ObjectTypeDefinition" then
     local s = print_description(node.description, 0)
-    s = s .. "type " .. node.name.value
-    if node.interfaces and #node.interfaces > 0 then
+    local n_name = node.name --[[:! { value: string, ... }]]
+    s = s .. "type " .. n_name.value
+    local n_ifaces = node.interfaces --[[:! { [integer]: unknown }]]
+    if n_ifaces and #n_ifaces > 0 then
       local ifaces = {}
-      for _, i in ipairs(node.interfaces) do insert(ifaces, i.name.value) end
+      for _, i in ipairs(n_ifaces) do
+        local i_ = i --[[:! { name: { value: string, ... }, ... }]]
+        insert(ifaces, i_.name.value)
+      end
       s = s .. " implements " .. concat(ifaces, " & ")
     end
     s = s .. print_directives(node.directives)
     if node.fields and #node.fields > 0 then
       s = s .. " {\n"
-      for _, f in ipairs(node.fields) do
-        if f.description then
-          s = s .. print_description(f.description, 1)
+      for _, f in ipairs(node.fields --[[:! { [integer]: unknown }]]) do
+        local f_ = f --[[:! { description: unknown, name: { value: string, ... }, arguments: unknown, type: unknown, directives: unknown, ... }]]
+        if f_.description then
+          s = s .. print_description(f_.description, 1)
         end
-        s = s .. "  " .. f.name.value
-        if f.arguments and #f.arguments > 0 then
+        s = s .. "  " .. f_.name.value
+        local f_args = f_.arguments --[[:! { [integer]: unknown }]]
+        if f_args and #f_args > 0 then
           s = s .. "(\n"
-          s = s .. print_input_value_defs(f.arguments, 2)
+          s = s .. print_input_value_defs(f_args, 2)
           s = s .. "\n  )"
         end
-        s = s .. ": " .. print_type(f.type)
-        s = s .. print_directives(f.directives)
+        s = s .. ": " .. print_type(f_.type)
+        s = s .. print_directives(f_.directives)
         s = s .. "\n"
       end
       s = s .. "}"
@@ -1534,18 +1575,20 @@ print_node = function(node, indent)
     s = s .. print_directives(node.directives)
     if node.fields and #node.fields > 0 then
       s = s .. " {\n"
-      for _, f in ipairs(node.fields) do
-        if f.description then
-          s = s .. print_description(f.description, 1)
+      for _, f in ipairs(node.fields --[[:! { [integer]: unknown }]]) do
+        local f_ = f --[[:! { description: unknown, name: { value: string, ... }, arguments: unknown, type: unknown, directives: unknown, ... }]]
+        if f_.description then
+          s = s .. print_description(f_.description, 1)
         end
-        s = s .. "  " .. f.name.value
-        if f.arguments and #f.arguments > 0 then
+        s = s .. "  " .. f_.name.value
+        local f_args = f_.arguments --[[:! { [integer]: unknown }]]
+        if f_args and #f_args > 0 then
           s = s .. "(\n"
-          s = s .. print_input_value_defs(f.arguments, 2)
+          s = s .. print_input_value_defs(f_args, 2)
           s = s .. "\n  )"
         end
-        s = s .. ": " .. print_type(f.type)
-        s = s .. print_directives(f.directives)
+        s = s .. ": " .. print_type(f_.type)
+        s = s .. print_directives(f_.directives)
         s = s .. "\n"
       end
       s = s .. "}"
@@ -1568,12 +1611,13 @@ print_node = function(node, indent)
     s = s .. "enum " .. node.name.value
     s = s .. print_directives(node.directives)
     s = s .. " {\n"
-    for _, v in ipairs(node.values) do
-      if v.description then
-        s = s .. print_description(v.description, 1)
+    for _, v in ipairs(node.values --[[:! { [integer]: unknown }]]) do
+      local v_ = v --[[:! { description: unknown, name: { value: string, ... }, directives: unknown, ... }]]
+      if v_.description then
+        s = s .. print_description(v_.description, 1)
       end
-      s = s .. "  " .. v.name.value
-      s = s .. print_directives(v.directives)
+      s = s .. "  " .. v_.name.value
+      s = s .. print_directives(v_.directives)
       s = s .. "\n"
     end
     return s .. "}"
@@ -1598,7 +1642,7 @@ print_node = function(node, indent)
       s = s .. "\n)"
     end
     if node.repeatable then s = s .. " repeatable" end
-    local locs = {}
+    local locs = {} --[[:! { [integer]: any }]]
     for _, l in ipairs(node.locations) do insert(locs, l.value) end
     s = s .. " on " .. concat(locs, " | ")
     return s
