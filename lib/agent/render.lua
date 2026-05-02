@@ -23,8 +23,7 @@ end
 -- task_inputs is the current task's inputs (injected into user turn).
 --: (AgentSet, unknown) -> RenderMessage[]
 function M.render(s, task_inputs)
-	local messages --: any[]
-	messages = {}
+	local messages = {} --: any[]
 
 	-- System turn: only if _system is present.
 	local system_val = set_mod.get(s, "_system")

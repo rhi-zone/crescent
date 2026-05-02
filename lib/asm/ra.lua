@@ -36,7 +36,8 @@ local function active_insert(active, interval)
       break
     end
   end
-  table.insert(active, pos, interval)
+  local active_any = active --[[: any]]
+  table.insert(active_any, pos, interval)
 end
 
 -- Build reverse alias map: given aliases = {ymm0="xmm0", ymm1="xmm1", ...}
@@ -171,7 +172,8 @@ M.allocate = function(intervals, regfile)
     while #active > 0 do
       local j = active[1] --: Interval
       if j.last >= current_first then break end
-      table.remove(active, 1)
+      local active_any = active --[[: any]]
+      table.remove(active_any, 1)
       local pool = free_pool(j.type)
       pool[#pool + 1] = j.phys
       unblock_alias(j.phys)
@@ -212,11 +214,16 @@ M.allocate = function(intervals, regfile)
 
       if spill_idx > 0 and active[spill_idx].last > interval.last then
         -- Steal the spilled interval's register for the current interval.
-        local victim = table.remove(active, spill_idx) --: Interval
+        local victim = active[spill_idx] --: Interval
         local stolen = victim.phys
+        do
+          local active_any2 = active --[[: any]]
+          table.remove(active_any2, spill_idx)
+        end
         -- Victim goes to a spill slot.
-        assignment[victim.id] = nil
-        spills[victim.id] = new_slot()
+        local victim_id = victim.id --[[:! integer]]
+        assignment[victim_id] = nil
+        spills[victim_id] = new_slot()
         unblock_alias(stolen)
 
         -- Assign stolen register to current interval.

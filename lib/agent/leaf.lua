@@ -13,7 +13,8 @@ local M = {}
 --::   max_iterations: integer | nil,
 --:: }
 
---:: LlmCap = { generate: (req: { [string]: unknown }) -> (unknown, string | nil) }
+--:: LlmResponse = { notes_add: { [integer]: { key: string, value: unknown }, ... } | nil, notes_drop: { [integer]: string, ... } | nil, tool_call: { name: string, args: { [string]: unknown } | nil, ... } | nil, result: unknown }
+--:: LlmCap = { generate: (req: { [string]: unknown }) -> (LlmResponse | nil, string | nil) }
 --:: ExecCap = any
 --:: LeafCaps = { llm: LlmCap, exec: ExecCap | nil }
 
@@ -42,7 +43,7 @@ function M.run(task_def, initial_set, caps, preset_spec)
 		local raw_response, err = caps.llm.generate({ messages = messages, schema = schema })
 		if err then return nil, err end
 		if raw_response == nil then return nil, "llm returned nil response" end
-		local response = --[[: any]] raw_response
+		local response = raw_response --[[:! LlmResponse]]
 
 		-- After consuming the render (which included _tool_result), clear the pending flag
 		-- so next iteration drops it.
@@ -52,10 +53,10 @@ function M.run(task_def, initial_set, caps, preset_spec)
 
 		-- notes_add: array of {key, value} pairs.
 		if type(response.notes_add) == "table" then
-			for _, entry in ipairs(response.notes_add) do
-				local entry_any = entry --: any
-				local k = entry_any.key --: string
-				local v = entry_any.value
+			local notes_add = response.notes_add --[[:! { [integer]: { key: string, value: unknown, ... }, ... }]]
+			for _, entry in ipairs(notes_add) do
+				local k = entry.key
+				local v = entry.value
 				if type(k) == "string" and k:sub(1, 1) ~= "_" then
 					s = set_mod.note(s, k, v)
 				end
@@ -64,8 +65,9 @@ function M.run(task_def, initial_set, caps, preset_spec)
 
 		-- notes_drop: array of keys.
 		if type(response.notes_drop) == "table" then
-			for _, raw_k in ipairs(response.notes_drop) do
-				local k = raw_k --: string
+			local notes_drop = response.notes_drop --[[:! { [integer]: string, ... }]]
+			for _, raw_k in ipairs(notes_drop) do
+				local k = raw_k --[[:! string]]
 				if type(k) == "string" and k:sub(1, 1) ~= "_" then
 					s = set_mod.drop(s, k)
 				end
@@ -77,7 +79,7 @@ function M.run(task_def, initial_set, caps, preset_spec)
 			if caps.exec == nil then
 				return nil, "tool_call in response but no exec cap provided"
 			end
-			local tc     = response.tool_call --: any
+			local tc     = response.tool_call --[[:! { name: string, args: { [string]: unknown } | nil, ... }]]
 			local out, terr = caps.exec(tc.name, tc.args or {})
 			if terr then return nil, terr end
 			s = set_mod.note(s, "_tool_result", out)

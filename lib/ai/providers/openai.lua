@@ -8,16 +8,24 @@ end
 local compat = require("lib.ai.providers.openai_compat")
 
 local function create(base_url)
-	local config = { name = "openai" }
+	local host = "api.openai.com" --: string
+	local chat_path = nil --: string | nil
 	if base_url then
 		local h, p = base_url:match("^https?://([^/]+)(.*)")
 		if not h then h, p = base_url:match("^([^/]+)(.*)") end
-		config.host = h or "api.openai.com"
-		if p and #p > 0 then config.chat_path = p end
-	else
-		config.host = "api.openai.com"
+		host = (h or "api.openai.com") --[[:! string]]
+		if p and #p > 0 then chat_path = p --[[:! string]] end
 	end
-	return compat.create(config)
+	local ep2 = nil --: string | nil
+	local ip2 = nil --: string | nil
+	local cfg = {
+		name = "openai",
+		host = host,
+		chat_path = chat_path,
+		embeddings_path = ep2,
+		images_path = ip2,
+	}
+	return compat.create(cfg)
 end
 
 return { create = create }

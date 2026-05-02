@@ -115,7 +115,7 @@ local function make_bearer_headers(api_key, body_str)
 end
 
 --- Create an OpenAI-compatible provider.
---: ({ name: string, host: string, chat_path: (string | nil), embeddings_path: (string | nil), images_path: (string | nil), make_headers: ((api_key: string, body_str: string) -> { [string]: { string } }  | nil)}) -> ai_provider
+--: ({ name: string, host: string, chat_path: (string | nil), embeddings_path: (string | nil), images_path: (string | nil), make_headers?: ((api_key: string, body_str: string) -> { [string]: { string } })}) -> ai_provider
 mod.create = function(config)
 	local host = config.host
 	local chat_path = config.chat_path or "/v1/chat/completions"
