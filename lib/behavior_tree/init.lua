@@ -17,8 +17,9 @@ local FAILURE  = "failure"
 local tick_node  -- forward declaration
 
 -- Fisher-Yates shuffle (in-place on a copy)
+--: (children: { [integer]: BTNode }) -> { [integer]: BTNode }
 local function shuffled(children)
-  local t = {}
+  local t = {} --: { [integer]: BTNode }
   for i = 1, #children do t[i] = children[i] end
   for i = #t, 2, -1 do
     local j = math.random(i)
@@ -27,120 +28,131 @@ local function shuffled(children)
   return t
 end
 
+--: (node: BTNode) -> nil
 local function reset_node(node)
   -- Reset per-node state
   for k in pairs(node.state) do node.state[k] = nil end
   -- Recurse into children
   if node.children then
-    for i = 1, #node.children do reset_node(node.children[i]) end
+    local ch = node.children --[[:! { [integer]: BTNode }]]
+    for i = 1, #ch do reset_node(ch[i]) end
   end
-  if node.child then reset_node(node.child) end
+  if node.child then reset_node(node.child --[[:! BTNode]]) end
 end
 
 -- Sequence: run children left-to-right; fail on first failure; succeed when all succeed.
 -- Stateful: remembers which child was "running".
 local function tick_sequence(node, bb)
-  local start = node.state.child_idx or 1
-  for i = start, #node.children do
-    local status = tick_node(node.children[i], bb)
+  local node_ = node --[[:! BTNode]]
+  local children = node_.children --[[:! { [integer]: BTNode }]]
+  local start = node_.state.child_idx or 1
+  for i = start --[[:! integer]], #children do
+    local status = tick_node(children[i], bb)
     if status == FAILURE then
-      node.state.child_idx = 1
+      node_.state.child_idx = 1
       return FAILURE
     elseif status == RUNNING then
-      node.state.child_idx = i
+      node_.state.child_idx = i
       return RUNNING
     end
     -- SUCCESS: advance
   end
-  node.state.child_idx = 1
+  node_.state.child_idx = 1
   return SUCCESS
 end
 
 -- Selector: run children left-to-right; succeed on first success; fail when all fail.
 local function tick_selector(node, bb)
-  local start = node.state.child_idx or 1
-  for i = start, #node.children do
-    local status = tick_node(node.children[i], bb)
+  local node_ = node --[[:! BTNode]]
+  local children = node_.children --[[:! { [integer]: BTNode }]]
+  local start = node_.state.child_idx or 1
+  for i = start --[[:! integer]], #children do
+    local status = tick_node(children[i], bb)
     if status == SUCCESS then
-      node.state.child_idx = 1
+      node_.state.child_idx = 1
       return SUCCESS
     elseif status == RUNNING then
-      node.state.child_idx = i
+      node_.state.child_idx = i
       return RUNNING
     end
     -- FAILURE: try next
   end
-  node.state.child_idx = 1
+  node_.state.child_idx = 1
   return FAILURE
 end
 
 -- Parallel: tick ALL children every tick.
 -- success_threshold: "all" | "any" | number
 local function tick_parallel(node, bb)
-  local threshold = node.threshold  -- stored on node, not state
-  local n = #node.children
+  local node_ = node --[[:! BTNode]]
+  local threshold = node_.threshold  -- stored on node, not state
+  local children = node_.children --[[:! { [integer]: BTNode }]]
+  local n = #children
   local successes = 0
   local failures  = 0
   for i = 1, n do
-    local status = tick_node(node.children[i], bb)
+    local status = tick_node(children[i], bb)
     if status == SUCCESS then successes = successes + 1
     elseif status == FAILURE then failures = failures + 1
     end
   end
-  local needed
+  local needed = 0
   if threshold == "all" then needed = n
   elseif threshold == "any" then needed = 1
-  else needed = threshold
+  else needed = threshold --[[:! integer]]
   end
-  if successes >= needed then return SUCCESS end
-  if failures > (n - needed) then return FAILURE end
+  local needed_ = needed --[[:! integer]]
+  if successes >= needed_ then return SUCCESS end
+  if failures > (n - needed_) then return FAILURE end
   return RUNNING
 end
 
 -- RandomSequence / RandomSelector: shuffle children once per "fresh start"
 local function tick_random_sequence(node, bb)
-  if not node.state.shuffled then
-    node.state.shuffled = shuffled(node.children)
-    node.state.child_idx = 1
+  local node_ = node --[[:! BTNode]]
+  if not node_.state.shuffled then
+    node_.state.shuffled = shuffled(node_.children --[[:! { [integer]: BTNode }]])
+    node_.state.child_idx = 1
   end
-  local children = node.state.shuffled
-  local start = node.state.child_idx or 1
-  for i = start, #children do
+  local children = node_.state.shuffled --[[:! { [integer]: BTNode }]]
+  local start = node_.state.child_idx or 1
+  for i = start --[[:! integer]], #children do
     local status = tick_node(children[i], bb)
     if status == FAILURE then
-      node.state.shuffled   = nil
-      node.state.child_idx  = 1
+      node_.state.shuffled   = nil
+      node_.state.child_idx  = 1
       return FAILURE
     elseif status == RUNNING then
-      node.state.child_idx = i
+      node_.state.child_idx = i
       return RUNNING
     end
   end
-  node.state.shuffled  = nil
-  node.state.child_idx = 1
+  node_.state.shuffled  = nil
+  node_.state.child_idx = 1
   return SUCCESS
 end
 
 local function tick_random_selector(node, bb)
-  if not node.state.shuffled then
-    node.state.shuffled  = shuffled(node.children)
-    node.state.child_idx = 1
+  local node_ = node --[[:! BTNode]]
+  if not node_.state.shuffled then
+    node_.state.shuffled  = shuffled(node_.children --[[:! { [integer]: BTNode }]])
+    node_.state.child_idx = 1
   end
-  local children = node.state.shuffled
-  local start = node.state.child_idx or 1
-  for i = start, #children do
+  local children = node_.state.shuffled --[[:! { [integer]: BTNode }]]
+  local start = node_.state.child_idx or 1
+  for i = start --[[:! integer]], #children do
     local status = tick_node(children[i], bb)
     if status == SUCCESS then
-      node.state.shuffled  = nil
-      node.state.child_idx = 1
+      node_.state.shuffled  = nil
+      node_.state.child_idx = 1
       return SUCCESS
     elseif status == RUNNING then
-      node.state.child_idx = i
+      node_.state.child_idx = i
       return RUNNING
     end
   end
-  node.state.shuffled  = nil
-  node.state.child_idx = 1
+  node_.state.shuffled  = nil
+  node_.state.child_idx = 1
   return FAILURE
 end
 
@@ -165,77 +177,83 @@ local function tick_failer(node, bb)
 end
 
 local function tick_repeater(node, bb)
-  local n = node.state.n  -- how many left (-1 = infinite)
+  local node_ = node --[[:! BTNode]]
+  local n = node_.state.n --[[:! integer | nil]]
   if n == nil then
-    n = node.total  -- initialise from config on node
+    n = node_.total  -- initialise from config on node
   end
+  local ni = n --[[:! integer]]
   while true do
-    local status = tick_node(node.child, bb)
+    local status = tick_node(node_.child --[[:! BTNode]], bb)
     if status == RUNNING then
-      node.state.n = n
+      node_.state.n = ni
       return RUNNING
     end
     -- child finished (success or failure)
-    reset_node(node.child)
-    if n == -1 then
+    reset_node(node_.child --[[:! BTNode]])
+    if ni == -1 then
       -- infinite: just keep going (return running so the tree keeps ticking)
-      node.state.n = n
+      node_.state.n = ni
       return RUNNING
     end
-    n = n - 1
-    node.state.n = n
-    if n <= 0 then
-      node.state.n = nil  -- will re-read node.total on next fresh start
+    ni = ni - 1
+    node_.state.n = ni
+    if ni <= 0 then
+      node_.state.n = nil  -- will re-read node.total on next fresh start
       return SUCCESS
     end
   end
 end
 
 local function tick_repeat_until_fail(node, bb)
+  local node_ = node --[[:! BTNode]]
   while true do
-    local status = tick_node(node.child, bb)
+    local status = tick_node(node_.child --[[:! BTNode]], bb)
     if status == RUNNING then return RUNNING end
     if status == FAILURE then return SUCCESS end
     -- SUCCESS: repeat
-    reset_node(node.child)
+    reset_node(node_.child --[[:! BTNode]])
   end
 end
 
 local function tick_retry(node, bb)
+  local node_ = node --[[:! BTNode]]
   -- retry child up to n times on failure
-  local remaining = node.state.remaining
-  if remaining == nil then remaining = node.total end
+  local remaining = node_.state.remaining --[[:! integer | nil]]
+  if remaining == nil then remaining = node_.total end
+  local rem = remaining --[[:! integer]]
   while true do
-    local status = tick_node(node.child, bb)
+    local status = tick_node(node_.child --[[:! BTNode]], bb)
     if status == SUCCESS then
-      node.state.remaining = nil  -- will re-read node.total on next fresh start
+      node_.state.remaining = nil  -- will re-read node.total on next fresh start
       return SUCCESS
     elseif status == RUNNING then
-      node.state.remaining = remaining
+      node_.state.remaining = rem
       return RUNNING
     end
     -- FAILURE
-    remaining = remaining - 1
-    node.state.remaining = remaining
-    if remaining <= 0 then
-      node.state.remaining = nil  -- will re-read node.total on next fresh start
+    rem = rem - 1
+    node_.state.remaining = rem
+    if rem <= 0 then
+      node_.state.remaining = nil  -- will re-read node.total on next fresh start
       return FAILURE
     end
-    reset_node(node.child)
+    reset_node(node_.child --[[:! BTNode]])
   end
 end
 
 local function tick_cooldown(node, bb)
-  local cooldown_until = node.state.cooldown_until or 0
-  local tick_count     = node.state.tick_count or 0
+  local node_ = node --[[:! BTNode]]
+  local cooldown_until = node_.state.cooldown_until --[[:! integer | nil]] or 0
+  local tick_count     = node_.state.tick_count --[[:! integer | nil]] or 0
   tick_count = tick_count + 1
-  node.state.tick_count = tick_count
+  node_.state.tick_count = tick_count
   if tick_count <= cooldown_until then
     return FAILURE  -- still in cooldown — block execution
   end
-  local status = tick_node(node.child, bb)
+  local status = tick_node(node_.child --[[:! BTNode]], bb)
   if status == SUCCESS then
-    node.state.cooldown_until = tick_count + node.ticks  -- config on node
+    node_.state.cooldown_until = tick_count + (node_.ticks --[[:! integer]])
   end
   return status
 end
@@ -286,12 +304,13 @@ local TICKERS = {
 }
 
 tick_node = function(node, bb)
-  local ticker = TICKERS[node.type]
+  local node_ = node --[[:! BTNode]]
+  local ticker = TICKERS[node_.type]
   if not ticker then
-    return nil, "unknown node type: " .. tostring(node.type)
+    return nil, "unknown node type: " .. tostring(node_.type)
   end
-  local status = ticker(node, bb)
-  node.last_status = status
+  local status = (ticker --[[:! (BTNode, unknown) -> string]])(node_, bb)
+  node_.last_status = status
   return status
 end
 
@@ -300,20 +319,22 @@ end
 -- ---------------------------------------------------------------------------
 
 local function debug_node(node, indent)
+  local node_ = node --[[:! BTNode]]
   indent = indent or 0
   local pad = string.rep("  ", indent)
-  local parts = { pad .. node.type }
-  if node.last_status then
-    parts[#parts + 1] = " [" .. node.last_status .. "]"
+  local parts = { pad .. node_.type }
+  if node_.last_status then
+    parts[#parts + 1] = " [" .. node_.last_status .. "]"
   end
   local line = table.concat(parts)
   local lines = { line }
-  if node.child then
-    lines[#lines + 1] = debug_node(node.child, indent + 1)
+  if node_.child then
+    lines[#lines + 1] = debug_node(node_.child --[[:! BTNode]], indent + 1)
   end
-  if node.children then
-    for i = 1, #node.children do
-      lines[#lines + 1] = debug_node(node.children[i], indent + 1)
+  if node_.children then
+    local ch = node_.children --[[:! { [integer]: BTNode }]]
+    for i = 1, #ch do
+      lines[#lines + 1] = debug_node(ch[i], indent + 1)
     end
   end
   return table.concat(lines, "\n")
@@ -323,10 +344,14 @@ end
 -- Node constructors
 -- ---------------------------------------------------------------------------
 
+--:: BTNode = { type: string, state: { [string]: unknown }, last_status: string | nil, children: { [integer]: BTNode } | nil, child: BTNode | nil, fn: unknown, threshold: unknown, total: integer | nil, ticks: integer | nil, subtree: unknown, ... }
+
+--: (t: { type: string, ... }) -> BTNode
 local function make_node(t)
-  t.state = {}
-  t.last_status = nil
-  return t
+  local n = t --[[:! BTNode]]
+  n.state = {}
+  n.last_status = nil
+  return n
 end
 
 function M.sequence(children)
