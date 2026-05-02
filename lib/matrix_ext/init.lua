@@ -12,6 +12,7 @@ local Matrix = require("lib.matrix")
 local M = {}
 M._tier = "pure"
 
+
 local sqrt = math.sqrt
 local abs  = math.abs
 local huge = math.huge
@@ -21,30 +22,35 @@ local huge = math.huge
 -- ---------------------------------------------------------------------------
 
 --- Clone a matrix using the lib/matrix API.
+--: (A: matrix) -> (matrix | nil, string | nil)
 local function clone(A)
   return Matrix.new(A._rows, A._cols, A._data)
 end
 
 --- Get element (1-indexed).
+--: (A: matrix, i: number, j: number) -> number
 local function get(A, i, j)
   return A._data[(i - 1) * A._cols + j]
 end
 
 --- Set element (1-indexed).
+--: (A: matrix, i: number, j: number, v: number) -> nil
 local function set(A, i, j, v)
   A._data[(i - 1) * A._cols + j] = v
 end
 
 --- Dot product of two 1-D Lua tables (length n).
+--: (a: { [number]: number }, b: { [number]: number }, n: number) -> number
 local function dot_vec(a, b, n)
-  local s = 0
+  local s = 0 --: number
   for k = 1, n do s = s + a[k] * b[k] end
   return s
 end
 
 --- 2-norm of a 1-D Lua table (length n).
+--: (v: { [number]: number }, n: number) -> number
 local function norm_vec(v, n)
-  local s = 0
+  local s = 0 --: number
   for k = 1, n do s = s + v[k] * v[k] end
   return sqrt(s)
 end
@@ -54,31 +60,33 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Create a new rows×cols matrix filled with init (default 0).
---: (rows: number, cols: number, init: (number | nil)) -> table
+--: (rows: number, cols: number, init: (number | nil)) -> matrix
 function M.new(rows, cols, init)
   if init and init ~= 0 then
     local d = {}
     local n = rows * cols
     for i = 1, n do d[i] = init end
-    return Matrix.new(rows, cols, d)
+    local r1 = Matrix.new(rows, cols, d)
+    return --[[:! matrix]] r1
   end
-  return Matrix.new(rows, cols)
+  local r2 = Matrix.new(rows, cols)
+  return --[[:! matrix]] r2
 end
 
 --- n×n identity matrix.
---: (n: number) -> table
+--: (n: number) -> matrix
 function M.identity(n)
   return Matrix.identity(n)
 end
 
 --- Matrix from flat row-major array.
---: (data: { [number]: number }, rows: number, cols: number) -> table | (nil, string)
+--: (data: { [number]: number }, rows: number, cols: number) -> (matrix | nil, string | nil)
 function M.from_array(data, rows, cols)
   return Matrix.new(rows, cols, data)
 end
 
 --- Matrix from array of row arrays.
---: (rows_table: { [number]: { [number]: number } }) -> table | (nil, string)
+--: (rows_table: { [number]: { [number]: number } }) -> (matrix | nil, string | nil)
 function M.from_rows(rows_table)
   return Matrix.from_rows(rows_table)
 end
@@ -88,34 +96,34 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Matrix multiplication: A (m×k) * B (k×n) -> m×n.
---: (A: table, B: table) -> table | (nil, string)
+--: (A: matrix, B: matrix) -> (matrix | nil, string | nil)
 function M.mul(A, B)
   if A._cols ~= B._rows then
     return nil, "inner dimensions mismatch: " .. A._cols .. " vs " .. B._rows
   end
-  return A:mul(B)
+  return Matrix.mul(A, B)
 end
 
 --- Transpose of A.
---: (A: table) -> table
+--: (A: matrix) -> matrix
 function M.transpose(A)
-  return A:transpose()
+  return Matrix.transpose(A)
 end
 
 --- Frobenius norm of A.
---: (A: table) -> number
+--: (A: matrix) -> number
 function M.norm_frobenius(A)
-  return A:norm()
+  return Matrix.norm(A)
 end
 
 --- 2-norm (largest singular value) of A.
 --- Computed via power iteration on A^T A.
---: (A: table) -> number
+--: (A: matrix) -> number
 function M.norm_2(A)
   local _, S = M.svd(A, 100)
   if not S then
     -- fallback: Frobenius
-    return A:norm()
+    return Matrix.norm(A)
   end
   return S[1] or 0
 end
@@ -128,7 +136,7 @@ end
 --- Returns L, U, P, sign  where P is a permutation vector (P[i] = original row),
 --- sign is +1 or -1 (number of swaps parity), and PA = LU.
 --- Returns (nil, nil, nil, nil, errmsg) if A is singular.
---: (A: table) -> (table, table, { [number]: number }, number | (nil, nil, nil, nil, string))
+--: (A: matrix) -> (matrix | nil, matrix | nil, { [number]: number } | nil, number | nil, string | nil)
 function M.lu(A)
   local n = A._rows
   if n ~= A._cols then
@@ -136,7 +144,7 @@ function M.lu(A)
   end
 
   -- Working copy as 2-D Lua table for easy row swaps
-  local U = {}
+  local U = {} --: { [integer]: { [integer]: number } }
   local d = A._data
   for i = 1, n do
     U[i] = {}
@@ -145,7 +153,7 @@ function M.lu(A)
   end
 
   -- L starts as identity (we fill below-diagonal entries in place)
-  local L_data = {}
+  local L_data = {} --: { [integer]: number }
   for i = 1, n * n do L_data[i] = 0 end
   for i = 1, n do L_data[(i - 1) * n + i] = 1 end
 
@@ -205,8 +213,9 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Solve L x = b where L is lower triangular (unit diagonal if unit=true).
+--: (L: matrix, b: { [integer]: number }, n: number, unit: boolean | nil) -> { [integer]: number } | nil
 local function fwd_sub(L, b, n, unit)
-  local x = {}
+  local x = {} --: { [integer]: number }
   for i = 1, n do
     local s = b[i]
     for j = 1, i - 1 do
@@ -224,8 +233,9 @@ local function fwd_sub(L, b, n, unit)
 end
 
 --- Solve U x = b where U is upper triangular.
+--: (U: matrix, b: { [integer]: number }, n: number) -> { [integer]: number } | nil
 local function back_sub(U, b, n)
-  local x = {}
+  local x = {} --: { [integer]: number }
   for i = n, 1, -1 do
     local s = b[i]
     for j = i + 1, n do
@@ -245,7 +255,7 @@ end
 --- Solve Ax = b using LU decomposition with partial pivoting.
 --- b is a 1-D Lua table (length n).
 --- Returns x as a 1-D Lua table, or (nil, errmsg).
---: (A: table, b: { [number]: number }) -> { [number]: number } | (nil, string)
+--: (A: matrix, b: { [number]: number }) -> ({ [number]: number } | nil, string | nil)
 function M.solve(A, b)
   local n = A._rows
   if n ~= A._cols then return nil, "A must be square" end
@@ -255,15 +265,15 @@ function M.solve(A, b)
   if err then return nil, err end
 
   -- Apply permutation to b
-  local pb = {}
-  for i = 1, n do pb[i] = b[P[i]] end
+  local pb = {} --: { [integer]: number }
+  for i = 1, n do pb[i] = b[--[[:! integer]] P[--[[:! integer]] i]] end
 
   -- Solve Ly = pb (L has unit diagonal)
-  local y = fwd_sub(L, pb, n, true)
+  local y = fwd_sub(--[[:! matrix]] L, pb, n, true)
   if not y then return nil, "singular matrix (forward substitution)" end
 
   -- Solve Ux = y
-  local x = back_sub(U, y, n)
+  local x = back_sub(--[[:! matrix]] U, y, n)
   if not x then return nil, "singular matrix (back substitution)" end
 
   return x
@@ -274,7 +284,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Determinant of square matrix A via LU.
---: (A: table) -> number | (nil, string)
+--: (A: matrix) -> (number | nil, string | nil)
 function M.det(A)
   local n = A._rows
   if n ~= A._cols then return nil, "det requires square matrix" end
@@ -285,8 +295,9 @@ function M.det(A)
     return 0
   end
 
-  local d = sign
-  for i = 1, n do d = d * get(U, i, i) end
+  local d = --[[:! number]] sign
+  local Uu = --[[:! matrix]] U
+  for i = 1, n do d = d * get(Uu, i, i) end
   return d
 end
 
@@ -295,28 +306,30 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Inverse of square matrix A via LU.
---: (A: table) -> table | (nil, string)
+--: (A: matrix) -> (matrix | nil, string | nil)
 function M.inv(A)
   local n = A._rows
   if n ~= A._cols then return nil, "inv requires square matrix" end
 
   local L, U, P, _, err = M.lu(A)
   if err then return nil, err end
+  local Lm = --[[:! matrix]] L
+  local Um = --[[:! matrix]] U
 
   -- Solve for each column of the identity
   local cols = {}
   for j = 1, n do
     local ej = {}
     for i = 1, n do ej[i] = 0 end
-    ej[P[j]] = 1  -- permuted RHS; we need e_j in the original ordering
+    ej[--[[:! integer]] P[--[[:! integer]] j]] = 1  -- permuted RHS
 
     -- Actually we need to map through permutation: pb[i] = ej[P[i]]
-    local pb = {}
-    for i = 1, n do pb[i] = (P[i] == j) and 1 or 0 end
+    local pb = {} --: { [integer]: number }
+    for i = 1, n do pb[i] = (P[--[[:! integer]] i] == j) and 1 or 0 end
 
-    local y = fwd_sub(L, pb, n, true)
+    local y = fwd_sub(Lm, pb, n, true)
     if not y then return nil, "singular matrix" end
-    local x = back_sub(U, y, n)
+    local x = back_sub(Um, y, n)
     if not x then return nil, "singular matrix" end
     cols[j] = x
   end
@@ -339,7 +352,7 @@ end
 --- QR decomposition of A (m×n, m >= n) via modified Gram-Schmidt.
 --- Returns Q (m×n orthonormal columns), R (n×n upper triangular).
 --- Returns (nil, nil, errmsg) on failure.
---: (A: table) -> (table, table | (nil, nil, string))
+--: (A: matrix) -> (matrix | nil, matrix | nil, string | nil)
 function M.qr(A)
   local m, n = A._rows, A._cols
   if m < n then
@@ -347,12 +360,12 @@ function M.qr(A)
   end
 
   -- Work with columns as Lua arrays
-  local Q_cols = {}
+  local Q_cols = {} --: { [number]: { [number]: number } }
   for j = 1, n do
-    Q_cols[j] = A:col(j)
+    Q_cols[j] = Matrix.col(A, j)
   end
 
-  local R_data = {}
+  local R_data = {} --: { [integer]: number }
   for i = 1, n * n do R_data[i] = 0 end
 
   for j = 1, n do
@@ -393,12 +406,12 @@ end
 --- Cholesky decomposition of symmetric positive-definite matrix A.
 --- Returns L (lower triangular) such that A = L * L^T.
 --- Returns (nil, errmsg) if A is not positive definite.
---: (A: table) -> table | (nil, string)
+--: (A: matrix) -> (matrix | nil, string | nil)
 function M.cholesky(A)
   local n = A._rows
   if n ~= A._cols then return nil, "Cholesky requires square matrix" end
 
-  local L_data = {}
+  local L_data = {} --: { [integer]: number }
   for i = 1, n * n do L_data[i] = 0 end
 
   for i = 1, n do
@@ -432,7 +445,7 @@ end
 --- Eigenvalues and eigenvectors of real symmetric matrix A via Jacobi iteration.
 --- Returns eigenvalues (sorted ascending) and eigenvectors (columns of V).
 --- max_iter defaults to 1000.
---: (A: table, max_iter: (number | nil)) -> ({ [number]: number }, table | (nil, nil, string))
+--: (A: matrix, max_iter: (number | nil)) -> ({ [number]: number } | nil, matrix | nil, string | nil)
 function M.eigen_symmetric(A, max_iter)
   local n = A._rows
   if n ~= A._cols then
@@ -441,22 +454,22 @@ function M.eigen_symmetric(A, max_iter)
   max_iter = max_iter or 1000
 
   -- Working copy as 2-D Lua table
-  local a = {}
+  local a = {} --: { [integer]: { [integer]: number } }
   for i = 1, n do
-    a[i] = {}
+    a[i] = {} --: { [integer]: number }
     for j = 1, n do a[i][j] = get(A, i, j) end
   end
 
   -- V starts as identity (accumulates rotations)
-  local V = {}
+  local V = {} --: { [integer]: { [integer]: number } }
   for i = 1, n do
-    V[i] = {}
+    V[i] = {} --: { [integer]: number }
     for j = 1, n do V[i][j] = (i == j) and 1 or 0 end
   end
 
   for _ = 1, max_iter do
     -- Find largest off-diagonal element
-    local max_val = 0
+    local max_val = 0 --: number
     local p, q = 1, 2
     for i = 1, n do
       for j = i + 1, n do
@@ -547,7 +560,7 @@ end
 --- Power iteration to find the dominant (largest absolute) eigenvalue and
 --- corresponding eigenvector of A.
 --- Returns eigenvalue, eigenvector (1-D table), or (nil, nil, errmsg).
---: (A: table, max_iter: (number | nil), tol: (number | nil)) -> (number, { [number]: number } | (nil, nil, string))
+--: (A: matrix, max_iter: (number | nil), tol: (number | nil)) -> (number | nil, { [number]: number } | nil, string | nil)
 function M.power_iter(A, max_iter, tol)
   local n = A._rows
   if n ~= A._cols then return nil, nil, "power_iter requires square matrix" end
@@ -555,15 +568,15 @@ function M.power_iter(A, max_iter, tol)
   tol = tol or 1e-10
 
   -- Start with a random-ish vector
-  local v = {}
+  local v = {} --: { [number]: number }
   for i = 1, n do v[i] = 1 / sqrt(n) end
 
-  local eigenvalue = 0
+  local eigenvalue = 0 --: number
   for _ = 1, max_iter do
     -- Multiply A * v
-    local Av = {}
+    local Av = {} --: { [number]: number }
     for i = 1, n do
-      local s = 0
+      local s = 0 --: number
       local base = (i - 1) * n
       local d = A._data
       for j = 1, n do s = s + d[base + j] * v[j] end
@@ -600,12 +613,12 @@ end
 
 --- Thin SVD of A (m×n) via one-sided Jacobi.
 --- Returns U (m×n), S (1-D array of n singular values descending), V (n×n).
---: (A: table, max_iter: (number | nil)) -> (table, { [number]: number }, table | (nil, nil, nil, string))
+--: (A: matrix, max_iter: (number | nil)) -> (matrix | nil, { [number]: number } | nil, matrix | nil, string | nil)
 function M.svd(A, max_iter)
   local m, n = A._rows, A._cols
   -- Handle wide matrices by transposing
   if m < n then
-    local U2, S2, V2, err = M.svd(A:transpose(), max_iter)
+    local U2, S2, V2, err = M.svd(Matrix.transpose(A), max_iter)
     if err then return nil, nil, nil, err end
     return V2, S2, U2
   end
@@ -613,16 +626,16 @@ function M.svd(A, max_iter)
   max_iter = max_iter or 100
 
   -- Working copy of A as 2-D table (columns will be orthogonalized)
-  local B = {}
+  local B = {} --: { [integer]: { [integer]: number } }
   for i = 1, m do
-    B[i] = {}
+    B[i] = {} --: { [integer]: number }
     for j = 1, n do B[i][j] = get(A, i, j) end
   end
 
   -- V starts as n×n identity
-  local V = {}
+  local V = {} --: { [integer]: { [integer]: number } }
   for i = 1, n do
-    V[i] = {}
+    V[i] = {} --: { [integer]: number }
     for j = 1, n do V[i][j] = (i == j) and 1 or 0 end
   end
 
@@ -635,7 +648,9 @@ function M.svd(A, max_iter)
     for p = 1, n - 1 do
       for q = p + 1, n do
         -- Compute inner products: alpha = <Bp, Bp>, beta = <Bq, Bq>, gamma = <Bp, Bq>
-        local alpha, beta, gamma = 0, 0, 0
+        local alpha = 0 --: number
+        local beta  = 0 --: number
+        local gamma = 0 --: number
         for i = 1, m do
           alpha = alpha + B[i][p] * B[i][p]
           beta  = beta  + B[i][q] * B[i][q]
@@ -677,9 +692,9 @@ function M.svd(A, max_iter)
   end
 
   -- Extract singular values (column norms of B) and normalise to get U
-  local S = {}
+  local S = {} --: { [integer]: number }
   for j = 1, n do
-    local nrm = 0
+    local nrm = 0 --: number
     for i = 1, m do nrm = nrm + B[i][j] * B[i][j] end
     S[j] = sqrt(nrm)
   end
@@ -722,7 +737,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Matrix rank via SVD (threshold-based).
---: (A: table, tol: (number | nil)) -> number
+--: (A: matrix, tol: (number | nil)) -> number
 function M.rank(A, tol)
   local _, S, _, err = M.svd(A)
   if err or not S then return 0 end
@@ -733,8 +748,9 @@ function M.rank(A, tol)
     tol = 1e-12 * (A._rows > A._cols and A._rows or A._cols) * max_sv
   end
   local r = 0
+  local tol2 = --[[:! number]] tol
   for i = 1, n do
-    if S[i] > tol then r = r + 1 end
+    if S[i] > tol2 then r = r + 1 end
   end
   return r
 end
@@ -744,39 +760,44 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Moore-Penrose pseudoinverse of A via SVD.
---: (A: table) -> table
+--: (A: matrix) -> matrix
 function M.pinv(A)
   local m, n = A._rows, A._cols
   local U, S, V = M.svd(A)
   if not U then
     -- fallback: zero matrix
-    return Matrix.new(n, m)
+    local r0 = Matrix.new(n, m)
+    return --[[:! matrix]] r0
   end
 
-  local k = #S
+  local Su = --[[:! { [number]: number }]] S
+  local Vu = --[[:! matrix]] V
+  local Uu = --[[:! matrix]] U
+  local k = #Su
   -- Build S^+ (n×m): diagonal with 1/s_i if s_i > tol, else 0
-  local max_sv = S[1] or 0
+  local max_sv = Su[1] or 0
   local tol = 1e-12 * (m > n and m or n) * max_sv
 
   -- pinv = V * S^+ * U^T
   -- We compute this as: for each singular value, add v_i * (1/s_i) * u_i^T
-  local data = {}
+  local data = {} --: { [integer]: number }
   for i = 1, n * m do data[i] = 0 end
 
   for i = 1, k do
-    if S[i] > tol then
-      local inv_s = 1 / S[i]
+    if Su[i] > tol then
+      local inv_s = 1 / Su[i]
       for r = 1, n do
-        local vr = get(V, r, i)
+        local vr = get(Vu, r, i)
         local base = (r - 1) * m
         for c2 = 1, m do
-          data[base + c2] = data[base + c2] + vr * inv_s * get(U, c2, i)
+          data[base + c2] = data[base + c2] + vr * inv_s * get(Uu, c2, i)
         end
       end
     end
   end
 
-  return Matrix.new(n, m, data)
+  local rr = Matrix.new(n, m, data)
+  return --[[:! matrix]] rr
 end
 
 return M
