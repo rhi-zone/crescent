@@ -26,6 +26,8 @@ M.CLASS_PRIVATE     = 3
 
 local CLASS_NAME = { [0]="universal", [1]="application", [2]="context", [3]="private" }
 
+--:: TlvNode = { tag: integer, class: string, class_num: integer, constructed: boolean, value: string, length: integer, next_pos: integer }
+
 -- UNIVERSAL tag numbers
 M.TAG_BOOLEAN          = 1
 M.TAG_INTEGER          = 2
@@ -67,6 +69,7 @@ end
 -- Decode one TLV from data starting at pos (1-based, default 1).
 -- Returns: node table, nil  OR  nil, errmsg
 -- node = { tag, class, class_num, constructed, value, length, next_pos }
+--: (string, integer | nil) -> (TlvNode | nil, string | nil)
 function M.decode_tlv(data, pos)
   pos = pos or 1
   local data_len = slen(data)
@@ -75,7 +78,7 @@ function M.decode_tlv(data, pos)
   end
 
   -- ── Tag byte(s) ──
-  local tag_byte = byte(data, pos)
+  local tag_byte = (byte(data, pos) or 0) --[[:! integer]]
   local class_num   = band(rshift(tag_byte, 6), 0x03)
   local constructed = band(tag_byte, 0x20) ~= 0
   local tag_num     = band(tag_byte, 0x1f)
@@ -88,7 +91,7 @@ function M.decode_tlv(data, pos)
       if pos > data_len then
         return nil, "unexpected end of data in long-form tag"
       end
-      local b = byte(data, pos)
+      local b = (byte(data, pos) or 0) --[[:! integer]]
       pos = pos + 1
       tag_num = tag_num * 128 + band(b, 0x7f)
       if band(b, 0x80) == 0 then break end
@@ -99,9 +102,9 @@ function M.decode_tlv(data, pos)
   if pos > data_len then
     return nil, "unexpected end of data before length"
   end
-  local len_byte = byte(data, pos)
+  local len_byte = (byte(data, pos) or 0) --[[:! integer]]
   pos = pos + 1
-  local vlen
+  local vlen = 0
   if band(len_byte, 0x80) == 0 then
     -- Short form
     vlen = len_byte
@@ -118,7 +121,7 @@ function M.decode_tlv(data, pos)
       if pos > data_len then
         return nil, "unexpected end of data in length field"
       end
-      vlen = vlen * 256 + byte(data, pos)
+      vlen = vlen * 256 + ((byte(data, pos) or 0) --[[:! integer]])
       pos = pos + 1
     end
   end
@@ -146,6 +149,7 @@ end
 -- Parse a sequence of TLVs from data[pos..end_pos].
 -- pos defaults to 1, end_pos defaults to slen(data).
 -- Returns: array of TLV nodes, nil  OR  nil, errmsg
+--: (string, integer | nil, integer | nil) -> ({ [integer]: TlvNode } | nil, string | nil)
 function M.decode_sequence(data, pos, end_pos)
   pos = pos or 1
   end_pos = end_pos or slen(data)
@@ -166,29 +170,30 @@ function M.decode_integer(value_bytes)
   if slen(value_bytes) == 0 then
     return nil, "empty INTEGER value"
   end
-  local first = byte(value_bytes, 1)
+  local first = (byte(value_bytes, 1) or 0) --[[:! integer]]
   local negative = band(first, 0x80) ~= 0
-  local n = 0
+  local n = 0 --: number
   if negative then
     -- Two's complement: each byte inverted, then +1 at the end, then negated.
     for i = 1, slen(value_bytes) do
-      n = n * 256 + bxor(byte(value_bytes, i), 0xff)
+      n = n * 256 + bxor((byte(value_bytes, i) or 0) --[[:! integer]], 0xff)
     end
     n = -(n + 1)
   else
     for i = 1, slen(value_bytes) do
-      n = n * 256 + byte(value_bytes, i)
+      n = n * 256 + ((byte(value_bytes, i) or 0) --[[:! integer]])
     end
   end
   -- 2^53 boundary for safe integer representation
-  if n > 9007199254740992 or n < -9007199254740992 then
+  local n_ = n --[[:! number]]
+  if n_ > 9007199254740992 or n_ < -9007199254740992 then
     local hex = {}
     for i = 1, slen(value_bytes) do
-      hex[i] = string.format("%02x", byte(value_bytes, i))
+      hex[i] = string.format("%02x", (byte(value_bytes, i) or 0) --[[:! integer]])
     end
     return "0x" .. concat(hex), nil
   end
-  return n, nil
+  return n_, nil
 end
 
 -- Decode BOOLEAN value bytes → true | false
@@ -259,7 +264,8 @@ function M.decode_time(value_bytes, tag)
     -- YYMMDDHHMMSSZ  (or YYMMDDHHMMSS±HHMM, simplified to Z-only here)
     local yy = tonumber(sub(s, 1, 2))
     if not yy then return nil, "invalid UTCTime: " .. s end
-    local year = (yy >= 50) and (1900 + yy) or (2000 + yy)
+    local yy_ = (yy or 0) --[[:! number]]
+    local year = (yy_ >= 50) and (1900 + yy_) or (2000 + yy_)
     return string.format("%04d-%s-%sT%s:%s:%sZ",
       year, sub(s, 3, 4), sub(s, 5, 6),
       sub(s, 7, 8), sub(s, 9, 10), sub(s, 11, 12)), nil
@@ -389,21 +395,23 @@ end
 
 -- Encode INTEGER (Lua number or hex string "0x...")
 function M.encode_integer(n)
-  local bytes = {}
+  local bytes = {} --: { [integer]: integer }
 
   if type(n) == "string" then
     -- Hex string "0x..." → raw big-endian bytes
-    local hex = n:match("^0[xX](.+)$") or n
+    local n_ = n --[[:! string]]
+    local hex = (n_:match("^0[xX](.+)$") or n_) --[[:! string]]
     if #hex % 2 ~= 0 then hex = "0" .. hex end
     for i = 1, #hex, 2 do
-      bytes[#bytes + 1] = tonumber(hex:sub(i, i + 1), 16)
+      local chunk = "0x" .. sub(hex, i, i + 1)
+      bytes[#bytes + 1] = math.floor(tonumber(chunk) or 0) --[[:! integer]]
     end
     -- Strip leading zeros (but keep at least one byte)
-    while #bytes > 1 and bytes[1] == 0 and band(bytes[2], 0x80) == 0 do
+    while #bytes > 1 and bytes[1] == 0 and band(bytes[2] --[[:! integer]], 0x80) == 0 do
       table.remove(bytes, 1)
     end
     -- Ensure positive: prepend 0x00 if high bit set
-    if band(bytes[1], 0x80) ~= 0 then
+    if band(bytes[1] --[[:! integer]], 0x80) ~= 0 then
       table.insert(bytes, 1, 0x00)
     end
   else
@@ -465,30 +473,31 @@ end
 
 -- Encode OID from dotted-decimal string "1.2.840.113549.1.1.11"
 function M.encode_oid(oid_string)
-  local parts = {}
+  local parts = {} --: { [integer]: number }
   for part in oid_string:gmatch("[^.]+") do
-    parts[#parts + 1] = tonumber(part)
-    if not parts[#parts] then
+    local pn = tonumber(part)
+    if not pn then
       return nil, "invalid OID component: " .. part
     end
+    parts[#parts + 1] = pn
   end
   if #parts < 2 then
     return nil, "OID must have at least two components"
   end
 
-  local buf = {}
+  local buf = {} --: { [integer]: any }
   -- First two components: combined as 40*c1 + c2
-  buf[#buf + 1] = char(parts[1] * 40 + parts[2])
+  buf[#buf + 1] = char(math.floor(parts[1] * 40 + parts[2]) --[[:! integer]])
 
   -- Remaining components: base-128 big-endian, MSB set on all but last byte
   for i = 3, #parts do
-    local v = parts[i]
+    local v = math.floor(parts[i]) --[[:! integer]]
     if v == 0 then
       buf[#buf + 1] = char(0)
     else
-      local chunk = {}
+      local chunk = {} --: { [integer]: integer }
       chunk[1] = band(v, 0x7f)
-      v = floor(v / 128)
+      v = floor(v / 128) --[[:! integer]]
       while v > 0 do
         table.insert(chunk, 1, bor(band(v, 0x7f), 0x80))
         v = floor(v / 128)
