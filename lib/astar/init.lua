@@ -95,21 +95,23 @@ function M.bfs(start, goal, neighbors_fn)
   local head = 1
   local came_from = {}
   local visited = { [start] = true }
-  local steps = { [start] = 0 }
+  local steps = {} --: { [unknown]: integer }
+  steps[start] = 0
 
   while head <= #queue do
     local current = queue[head]
     head = head + 1
 
     if goal_fn(current) then
-      return reconstruct_path(came_from, --[[: any]] current), steps[current]
+      local cur_ = current --[[:! string]]
+      return reconstruct_path(came_from, cur_), steps[current]
     end
 
     for _, nb in ipairs(neighbors_fn(current)) do
       if not visited[nb] then
         visited[nb] = true
         came_from[nb] = current
-        steps[nb] = steps[current] + 1
+        steps[nb] = (steps[current] --[[:! integer]]) + 1
         queue[#queue + 1] = nb
       end
     end
@@ -128,7 +130,8 @@ function M.dfs(start, goal, neighbors_fn)
   local stack = { start }
   local came_from = {}
   local visited = { [start] = true }
-  local steps = { [start] = 0 }
+  local steps = {} --: { [unknown]: integer }
+  steps[start] = 0
 
   while #stack > 0 do
     local current = table.remove(stack)
@@ -141,7 +144,7 @@ function M.dfs(start, goal, neighbors_fn)
       if not visited[nb] then
         visited[nb] = true
         came_from[nb] = current
-        steps[nb] = steps[current] + 1
+        steps[nb] = (steps[current] --[[:! integer]]) + 1
         stack[#stack + 1] = nb
       end
     end
@@ -215,23 +218,26 @@ local function default_obstacle(grid, row, col)
   return r == nil or r[col] == nil or r[col] ~= 0
 end
 
+--: (r1: number, c1: number, r2: number, c2: number) -> number
 local function heuristic_manhattan(r1, c1, r2, c2)
   local dr = r1 - r2
   local dc = c1 - c2
   return (dr < 0 and -dr or dr) + (dc < 0 and -dc or dc)
 end
 
+--: (r1: number, c1: number, r2: number, c2: number) -> number
 local function heuristic_euclidean(r1, c1, r2, c2)
   local dr = r1 - r2
   local dc = c1 - c2
   return math.sqrt(dr * dr + dc * dc)
 end
 
+--: (r1: number, c1: number, r2: number, c2: number) -> number
 local function heuristic_chebyshev(r1, c1, r2, c2)
   local dr = r1 - r2
   local dc = c1 - c2
-  dr = dr < 0 and -dr or dr
-  dc = dc < 0 and -dc or dc
+  dr = (dr < 0 and -dr or dr) --[[:! number]]
+  dc = (dc < 0 and -dc or dc) --[[:! number]]
   return dr > dc and dr or dc
 end
 
@@ -270,9 +276,9 @@ function M.grid_astar(grid, start, goal, opts)
   if obstacle(grid, gr, gc) then return nil, "no path found" end
 
   local open = heap.new("min")
-  local g_score = {}
-  local came_from = {}
-  local closed = {}
+  local g_score = {} --: { [integer]: number }
+  local came_from = {} --: { [integer]: integer | nil }
+  local closed = {} --: { [integer]: boolean }
 
   local start_key = cell_key(sr, sc)
   local goal_key = cell_key(gr, gc)
@@ -281,23 +287,25 @@ function M.grid_astar(grid, start, goal, opts)
   open:push(start_key, h_fn(sr, sc, gr, gc))
 
   -- Decode key back to row, col
+  --: (k: integer) -> (integer, integer)
   local function decode(k)
     return math.floor(k / 65536), k % 65536
   end
 
   while not open:empty() do
-    local cur_key = open:pop()
+    local cur_key = open:pop() --[[:! integer]]
     if closed[cur_key] then goto grid_continue end
     closed[cur_key] = true
 
     if cur_key == goal_key then
       -- Reconstruct path as {row, col} tables
       local path = {}
-      local k = cur_key
+      local k = cur_key --: integer | nil
       while k do
-        local r, c = decode(k)
+        local ki = k --[[:! integer]]
+        local r, c = decode(ki)
         table.insert(path, 1, { r, c })
-        k = came_from[k]
+        k = came_from[ki]
       end
       return path, g_score[cur_key]
     end
@@ -305,14 +313,14 @@ function M.grid_astar(grid, start, goal, opts)
     local cur_r, cur_c = decode(cur_key)
 
     for _, d in ipairs(dirs) do
-      local nr, nc = cur_r + d[1], cur_c + d[2]
+      local nr, nc = cur_r + (d[1] --[[:! integer]]), cur_c + (d[2] --[[:! integer]])
       if not obstacle(grid, nr, nc) then
         local nk = cell_key(nr, nc)
         if not closed[nk] then
           -- Cost: 1 for cardinal, sqrt(2) for diagonal
           local move_cost = (d[1] ~= 0 and d[2] ~= 0) and 1.41421356 or 1
-          local new_g = g_score[cur_key] + move_cost
-          if g_score[nk] == nil or new_g < g_score[nk] then
+          local new_g = (g_score[cur_key] --[[:! number]]) + move_cost
+          if g_score[nk] == nil or new_g < (g_score[nk] --[[:! number]]) then
             g_score[nk] = new_g
             came_from[nk] = cur_key
             local f = new_g + h_fn(nr, nc, gr, gc)
@@ -338,12 +346,14 @@ function M.flood_fill(grid, start, opts)
   local obstacle = opts.obstacle_fn or default_obstacle
   local dirs = opts.diagonal and DIRS_8 or DIRS_4
 
-  local sr, sc = start[1], start[2]
+  local sr, sc = (start[1] --[[:! integer]]), (start[2] --[[:! integer]])
   if obstacle(grid, sr, sc) then return {} end
 
-  local queue = { cell_key(sr, sc) }
+  local queue = {} --: { [integer]: integer }
+  queue[1] = cell_key(sr, sc)
   local head = 1
-  local visited = { [cell_key(sr, sc)] = true }
+  local visited = {} --: { [integer]: boolean }
+  visited[cell_key(sr, sc)] = true
   local result = {}
 
   while head <= #queue do
@@ -355,7 +365,7 @@ function M.flood_fill(grid, start, opts)
     result[#result + 1] = { r, c }
 
     for _, d in ipairs(dirs) do
-      local nr, nc = r + d[1], c + d[2]
+      local nr, nc = r + (d[1] --[[:! integer]]), c + (d[2] --[[:! integer]])
       if not obstacle(grid, nr, nc) then
         local nk = cell_key(nr, nc)
         if not visited[nk] then
@@ -377,12 +387,13 @@ function M.distance_map(grid, start, opts)
   local obstacle = opts.obstacle_fn or default_obstacle
   local dirs = opts.diagonal and DIRS_8 or DIRS_4
 
-  local sr, sc = start[1], start[2]
-  local dist = {}
+  local sr, sc = (start[1] --[[:! integer]]), (start[2] --[[:! integer]])
+  local dist = {} --: { [integer]: integer }
 
   if obstacle(grid, sr, sc) then return dist end
 
-  local queue = { cell_key(sr, sc) }
+  local queue = {} --: { [integer]: integer }
+  queue[1] = cell_key(sr, sc)
   local head = 1
   dist[cell_key(sr, sc)] = 0
 
@@ -392,10 +403,10 @@ function M.distance_map(grid, start, opts)
 
     local r = math.floor(cur_key / 65536)
     local c = cur_key % 65536
-    local d = dist[cur_key]
+    local d = dist[cur_key] --[[:! integer]]
 
     for _, dir in ipairs(dirs) do
-      local nr, nc = r + dir[1], c + dir[2]
+      local nr, nc = r + (dir[1] --[[:! integer]]), c + (dir[2] --[[:! integer]])
       if not obstacle(grid, nr, nc) then
         local nk = cell_key(nr, nc)
         if dist[nk] == nil then
@@ -422,14 +433,15 @@ function M.flow_field(grid, goal, opts)
   local obstacle = opts.obstacle_fn or default_obstacle
   local dirs = DIRS_4  -- flow field uses 4-dir by default
 
-  local gr, gc = goal[1], goal[2]
+  local gr, gc = (goal[1] --[[:! integer]]), (goal[2] --[[:! integer]])
 
   -- BFS from goal outward
-  local dist = {}
+  local dist = {} --: { [integer]: integer }
   local goal_key = cell_key(gr, gc)
   dist[goal_key] = 0
 
-  local queue = { goal_key }
+  local queue = {} --: { [integer]: integer }
+  queue[1] = goal_key
   local head = 1
 
   while head <= #queue do
@@ -438,10 +450,10 @@ function M.flow_field(grid, goal, opts)
 
     local r = math.floor(cur_key / 65536)
     local c = cur_key % 65536
-    local d = dist[cur_key]
+    local d = dist[cur_key] --[[:! integer]]
 
     for _, dir in ipairs(dirs) do
-      local nr, nc = r + dir[1], c + dir[2]
+      local nr, nc = r + (dir[1] --[[:! integer]]), c + (dir[2] --[[:! integer]])
       if not obstacle(grid, nr, nc) then
         local nk = cell_key(nr, nc)
         if dist[nk] == nil then
@@ -455,10 +467,11 @@ function M.flow_field(grid, goal, opts)
   -- Build flow field: for each cell, pick neighbor with lowest dist (toward goal)
   local flow = {}
   for key, _ in pairs(dist) do
-    local r = math.floor(key / 65536)
-    local c = key % 65536
+    local k = key --[[:! integer]]
+    local r = math.floor(k / 65536)
+    local c = k % 65536
 
-    if key == goal_key then
+    if k == goal_key then
       -- At goal: no direction needed, use {0,0}
       if not flow[r] then flow[r] = {} end
       flow[r][c] = { 0, 0 }
@@ -466,10 +479,11 @@ function M.flow_field(grid, goal, opts)
       local best_dist = math.huge
       local best_dir = nil
       for _, dir in ipairs(dirs) do
-        local nr, nc = r + dir[1], c + dir[2]
+        local nr, nc = r + (dir[1] --[[:! integer]]), c + (dir[2] --[[:! integer]])
         local nk = cell_key(nr, nc)
-        if dist[nk] ~= nil and dist[nk] < best_dist then
-          best_dist = dist[nk]
+        local nk_dist = dist[nk]
+        if nk_dist ~= nil and nk_dist < best_dist then
+          best_dist = nk_dist
           best_dir = dir
         end
       end
