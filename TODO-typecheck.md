@@ -129,6 +129,11 @@ last because the type system itself is the testbed.
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
 
+- [x] `lib/markdown/init.lua` (was 7 → now 0, commit b60f672) — force-casts on ms_/me_/repl_ from unknown try_fn returns; s_/len_ locals after if-branch type union; bq_lines[#bq_lines] cast; i cast after increment
+- [x] `lib/taskgraph/executor/ai.lua` (was 9 → now 0, commit dddcd2a) — AiMessage/CompleteInput/ToolLoopInput/ToolSpec types; ctx_ force-cast with spawn/result methods; tool_calls nil split; --[[: any]] on generate({...}) calls for optional-vs-nil mismatch
+- [x] `lib/totp/init.lua` (was 12 → now 0, commit 7332268) — HotpOpts/TotpOpts/VerifyOpts/NewSecretOpts type aliases; counter_to_bytes annotated number->string; hmac_binary return annotated; lo_i/hi_i math.floor casts for bitwise; mac_/key_ checked casts; opts_ and pattern for optional fields; uri_encode gsub --[[: string]] return cast
+- [x] `lib/tracing/init.lua` (was 12 → now 0, commit 3782170) — SpanObj/SpanCtx/Exporter type aliases; _xorshift32 integer->integer annotation; nibble pos cast; _make_rng time_fn annotation; self_=SpanObj cast in finish; end_time local; opts.context SpanCtx cast; M.inject SpanCtx param; id_seed cast
+
 - [x] `lib/bezier/init.lua` (was 12 → now 5, commit d09d5a3) — annotated pt_scale z-cast, z=nil in normal() returns, number accumulator casts, SplineOpts force-cast; remaining 5: setmetatable return mismatch (typechecker limitation with self-referential aliases)
 - [x] `lib/bundle/init.lua` (was 15 → now 0, commit e4a44da) — BundleOpts/BundleStringOpts/AnalyzeOpts/AnalyzeStringOpts aliases; { [integer]: string } arrays; read_fn force-cast after type guard; fallback resolver with dummy param
 - [x] `lib/base58/init.lua` (was 2 → now 1, commit c27059c) — annotated get_sha256 return; remaining 1: gsub multi-return in hex_to_bin (typechecker limitation, matches skip note)
