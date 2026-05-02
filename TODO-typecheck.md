@@ -133,6 +133,12 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 
+## Done in current session (session N+5)
+
+- [x] `lib/toml/init.lua` (was 44 → now 0, commit b1d84fa) — changed is_ws/is_digit/is_hex/is_bare_key_char/is_newline params number→integer; replaced inline byte("x") calls with BYTE_x constants; (byte(s,pos) or 0) --[[:! integer]] force-casts; phi-join pos recast locals; fixed skip_to_newline annotation; removed unannotatable 5-return mixed type from _parse_time_part_impl; write_table empty-string sentinel for nil prefix; separate loop locals (k2/err2) for parse_key
+- [x] `lib/async/init.lua` (was 34 → now 0, commit 08ae89f) — defined PromiseP/CbList/FinallyList/ResolveFn/RejectFn/LoopObj type aliases; annotated settle(); self_ casts in Promise/Loop methods; annotated M.promise() return; cast LoopObj from setmetatable; Thread cast for coroutine; yp --[[:! PromiseP]] after type check on yielded
+- [x] `lib/chan/init.lua` (was 27 → now 0, commit 424bf69) — defined SendEntry/RecvEntry/ChanBuf/SendQ/RecvQ/ChanObj type aliases; annotated buf_push/buf_pop; self_ casts in all Chan methods; replaced table.remove(send_q) with index+shift (avoids generic V unification); _ready_q: { [integer]: Thread }; entry.co --[[:! Thread]] casts
+
 ## Done in current session (session N+4)
 
 - [x] `lib/complex/init.lua` (was 35 → now 0, commit d987f07) — Complex type alias with method sigs; coerce annotated; metamethods use a_/b_ locals; self_ casts in mt methods; `--[[: any]]` on setmetatable + force cast to Complex; M.tan uses mt.__div directly; M.pow uses mt.__mul for lz; M.roots `--: number` on r_n
