@@ -21,6 +21,12 @@ local base32 = require("lib.base32")
 local M = {}
 M._tier = "pure"
 
+--:: HotpOpts = { digits?: integer, alg?: string, period?: number }
+--:: TotpOpts = { digits?: integer, alg?: string, period?: number, time: number }
+--:: VerifyOpts = { window?: integer, period?: number, digits?: integer, alg?: string, time: number }
+--:: NewSecretOpts = { bytes?: integer, time: number }
+--:: OtpAuthOpts = { issuer?: string, digits?: integer, period?: number, counter?: integer, algorithm?: string }
+
 local band   = bit.band
 local bor    = bit.bor
 local lshift = bit.lshift
@@ -32,6 +38,7 @@ local rshift = bit.rshift
 -- LuaJIT integers are 64-bit when using the number type carefully.
 -- For values that fit in 32 bits (step counts up to ~136 years at 30s periods
 -- only reach ~10^9), high 4 bytes are zero.
+--: (number) -> string
 local function counter_to_bytes(n)
   -- Split into high and low 32-bit halves.
   -- Use modular arithmetic to avoid float precision issues for large values.
@@ -39,20 +46,23 @@ local function counter_to_bytes(n)
   local lo = n % 0x100000000        -- lower 32 bits
   local hi = (n - lo) / 0x100000000 -- upper 32 bits (integer division)
   hi = hi % 0x100000000
+  local lo_i = math.floor(lo) --[[:! integer]]
+  local hi_i = math.floor(hi) --[[:! integer]]
   return string.char(
-    band(rshift(hi, 24), 0xff),
-    band(rshift(hi, 16), 0xff),
-    band(rshift(hi,  8), 0xff),
-    band(hi, 0xff),
-    band(rshift(lo, 24), 0xff),
-    band(rshift(lo, 16), 0xff),
-    band(rshift(lo,  8), 0xff),
-    band(lo, 0xff)
+    band(rshift(hi_i, 24), 0xff),
+    band(rshift(hi_i, 16), 0xff),
+    band(rshift(hi_i,  8), 0xff),
+    band(hi_i, 0xff),
+    band(rshift(lo_i, 24), 0xff),
+    band(rshift(lo_i, 16), 0xff),
+    band(rshift(lo_i,  8), 0xff),
+    band(lo_i, 0xff)
   )
 end
 
 -- ── HMAC dispatch ─────────────────────────────────────────────────────────────
 
+--: (string | nil, string, string) -> (string | nil, string | nil)
 local function hmac_binary(alg, key, msg)
   if alg == "sha1" or alg == nil then
     return hmac.sha1_binary(key, msg)
@@ -70,10 +80,12 @@ end
 -- counter: integer counter value (>= 0)
 -- opts: { digits = 6, alg = "sha1" }
 -- Returns: otp_string, nil  OR  nil, errmsg
+--: (unknown, number, HotpOpts | nil) -> (string | nil, string | nil)
 function M.hotp(key, counter, opts)
-  if type(key) ~= "string" or #key == 0 then
+  if type(key) ~= "string" or #(key --[[:! string]]) == 0 then
     return nil, "key must be a non-empty string"
   end
+  local key_ = key --[[:! string]]
   if type(counter) ~= "number" or counter < 0 or counter ~= math.floor(counter) then
     return nil, "counter must be a non-negative integer"
   end
@@ -88,19 +100,20 @@ function M.hotp(key, counter, opts)
   local counter_bytes = counter_to_bytes(counter)
 
   -- Step 2: HMAC
-  local mac, err = hmac_binary(alg, key, counter_bytes)
+  local mac, err = hmac_binary(alg, key_, counter_bytes)
   if not mac then return nil, err end
+  local mac_ = mac --[[: string]]
 
   -- Step 3: dynamic truncation (RFC 4226 §5.3)
   -- offset = last byte & 0x0f
-  local last = string.byte(mac, #mac)
+  local last = string.byte(mac_, #mac_)
   local offset = band(last, 0x0f)
 
   -- Step 4: extract 4 bytes at offset (1-indexed in Lua)
-  local b1 = string.byte(mac, offset + 1)
-  local b2 = string.byte(mac, offset + 2)
-  local b3 = string.byte(mac, offset + 3)
-  local b4 = string.byte(mac, offset + 4)
+  local b1 = string.byte(mac_, offset + 1)
+  local b2 = string.byte(mac_, offset + 2)
+  local b3 = string.byte(mac_, offset + 3)
+  local b4 = string.byte(mac_, offset + 4)
 
   -- mask the most-significant bit of b1
   local code = bor(
@@ -125,15 +138,15 @@ end
 -- key: raw binary secret
 -- opts: { digits = 6, period = 30, alg = "sha1", time = <required> }
 -- Returns: otp_string, nil  OR  nil, errmsg
-function M.totp(key, opts)
-  opts = opts or {}
-  local period = opts.period or 30
+function M.totp(key, opts --[[:! TotpOpts | nil]])
+  local opts_ = opts --[[:! TotpOpts | nil]]
+  local period = ((opts_ and opts_.period) or 30) --[[:! number]]
   if type(period) ~= "number" or period <= 0 then
     return nil, "period must be a positive number"
   end
-  local t = opts.time
+  local t = (opts_ and opts_.time) or 0 --[[:! number]]
   local step = math.floor(t / period)
-  return M.hotp(key, step, opts)
+  return M.hotp(key, step, opts --[[: any]])
 end
 
 --- TOTP with base32-encoded secret (common for authenticator apps).
@@ -146,7 +159,7 @@ function M.totp_base32(secret, opts)
   end
   local key, err = base32.decode(secret)
   if not key then return nil, "base32 decode failed: " .. tostring(err) end
-  return M.totp(key, opts)
+  return M.totp(key, opts --[[: any]])
 end
 
 -- ── Secret generation ─────────────────────────────────────────────────────────
@@ -154,10 +167,11 @@ end
 --- Generate a new random secret.
 -- opts: { bytes = 20 }
 -- Returns: base32_string
-function M.new_secret(opts)
-  opts = opts or {}
-  local nbytes = opts.bytes or 20
-  math.randomseed(opts.time + math.random(0, 65535))
+function M.new_secret(opts --[[:! NewSecretOpts | nil]])
+  local opts_ = opts --[[:! NewSecretOpts | nil]]
+  local nbytes = (opts_ and opts_.bytes) or 20
+  local t = (opts_ and opts_.time) or 0 --[[:! number]]
+  math.randomseed(t + math.random(0, 65535))
   local bytes = {}
   for i = 1, nbytes do
     bytes[i] = string.char(math.random(0, 255))
@@ -172,24 +186,25 @@ end
 -- code: string like "123456"
 -- opts: { window = 1, period = 30, time = <required> }
 -- Returns: true or false
-function M.verify(secret, code, opts)
+function M.verify(secret, code, opts --[[:! VerifyOpts | nil]])
   if type(secret) ~= "string" or type(code) ~= "string" then
     return false
   end
   local key, err = base32.decode(secret)
   if not key then return false end
+  local key_ = tostring(key)
 
-  opts = opts or {}
-  local window = opts.window or 1
-  local period = opts.period or 30
-  local t = opts.time
+  local opts_ = opts --[[:! VerifyOpts | nil]]
+  local window = ((opts_ and opts_.window) or 1) --[[:! integer]]
+  local period = ((opts_ and opts_.period) or 30) --[[:! number]]
+  local t = (opts_ and opts_.time) or 0 --[[:! number]]
   local step = math.floor(t / period)
 
   for delta = -window, window do
-    local otp, e = M.hotp(key, step + delta, {
-      digits = opts.digits or 6,
-      alg    = opts.alg or "sha1",
-    })
+    local otp, e = M.hotp(key_, step + delta, {
+      digits = (opts_ and opts_.digits) or 6,
+      alg    = (opts_ and opts_.alg) or "sha1",
+    } --[[: any]])
     if otp and otp == code then
       return true
     end
@@ -200,10 +215,11 @@ end
 -- ── URI generation ────────────────────────────────────────────────────────────
 
 -- Percent-encode a string for use in a URI.
+--: (string) -> string
 local function uri_encode(s)
-  return (s:gsub("[^%w%-%.%_%~]", function(c)
+  return s:gsub("[^%w%-%.%_%~]", function(c)
     return string.format("%%%02X", string.byte(c))
-  end))
+  end) --[[: string]]
 end
 
 --- Generate an otpauth:// URI for QR code provisioning.
