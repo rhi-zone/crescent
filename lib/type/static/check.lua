@@ -186,8 +186,14 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     _pool = explicit_pool or _pool or intern_mod.new()
     _checking[filename] = true
 
+    -- dep_hashes: accumulates { [dep_path] = src_hash } for each dependency resolved
+    -- during this check, so the cache entry can be invalidated when deps change.
+    --: { [string]: string | nil, ... }
+    local dep_hashes = {}
+
     -- Build a cri_loader for require() type resolution.
     -- Recursively checks dependencies and caches their export types.
+    -- Also records the source hash of each resolved dep into dep_hashes.
     local function cri_loader(ctx, mod_name)
         local dep_path = resolve_module_path(mod_name)
         -- Try init.lua if the direct path doesn't exist:
@@ -204,6 +210,12 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         -- e.g. lib/lunajson/init_types.lua overrides lib/lunajson/init.lua for typing.
         local decl = find_decl_path(dep_path)
         if decl then dep_path = decl end
+
+        -- Record the dep's source hash for cache invalidation.
+        if not dep_hashes[dep_path] then
+            local h = cache_mod.hash_file(dep_path)
+            if h then dep_hashes[dep_path] = h end
+        end
 
         -- Guard: skip if the dependency is currently being checked (cycle prevention).
         if _checking[dep_path] then return nil end
@@ -274,7 +286,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     local err_ctx, ctx
 
     if src_hash then
-        local cached_bytes = cache_mod.lookup(src_hash)
+        local cached_bytes = cache_mod.lookup(src_hash, cache_mod.hash_file)
         if cached_bytes then
             err_ctx = errors_mod.new_ctx()
             err_ctx, ctx = run_v3("", filename, parent_scope, _pool, cri_loader, opts)
@@ -362,7 +374,7 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
         if ok_ser then
             cri_bytes_stored = cri_bytes
             if src_hash then
-                cache_mod.store(src_hash, cri_bytes)
+                cache_mod.store(src_hash, cri_bytes, dep_hashes)
             end
         end
     end
