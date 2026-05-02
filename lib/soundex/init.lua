@@ -15,6 +15,7 @@ M._tier = "pure"
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
+--: (string) -> string
 local function upper(s)
   return s:upper()
 end
@@ -40,6 +41,7 @@ local SOUNDEX_TABLE = {
   R=6,
 }
 
+--: (string) -> (string | nil, string | nil)
 M.soundex = function(word)
   if not word or word == "" then
     return nil, "empty input"
@@ -157,7 +159,7 @@ M.metaphone = function(word)
 
   local len = #s
   local result = {}
-  local i = 1
+  local i = 1 --: integer
 
   -- Helper: character at position (or "" if out of bounds)
   local function at(pos)
@@ -428,20 +430,22 @@ M.double_metaphone = function(word)
   local len = #s
   local pri = {}  -- primary key
   local sec = {}  -- secondary key
-  local i = 1
+  local i = 1 --: integer
 
   local function at(pos)
     if pos < 1 or pos > len then return "" end
     return s:sub(pos, pos)
   end
 
+  --: (integer, integer | nil) -> string
   local function sub(pos, n)
     if pos < 1 then return "" end
-    n = n or 1
+    local nn = (n or 1) --[[:! integer]]
     if pos > len then return "" end
-    return s:sub(pos, math.min(pos + n - 1, len))
+    return s:sub(pos, math.min(pos + nn - 1, len) --[[:! integer]])
   end
 
+  --: (string, string | nil) -> ()
   local function add(p, q)
     pri[#pri + 1] = p
     sec[#sec + 1] = (q ~= nil) and q or p
@@ -992,8 +996,9 @@ M.nysiis = function(word)
 
   -- Step 3: Encode body
   -- Apply substitution rules (left to right, longest match first)
+  --: (string) -> string
   local function encode_body(str)
-    local result = {}
+    local result = {} --[[:! { [integer]: string }]]
     local j = 1
     local blen = #str
     while j <= blen do
@@ -1107,12 +1112,13 @@ M.sounds_like = function(a, b)
 end
 
 -- Longest Common Subsequence length of two strings
+--: (string, string) -> integer
 local function lcs_length(a, b)
   local la, lb = #a, #b
   if la == 0 or lb == 0 then return 0 end
   -- Use two-row DP
-  local prev = {}
-  local curr = {}
+  local prev = {} --[[:! { [integer]: integer }]]
+  local curr = {} --[[:! { [integer]: integer }]]
   for j = 0, lb do prev[j] = 0 end
   for i_idx = 1, la do
     curr[0] = 0
@@ -1120,7 +1126,7 @@ local function lcs_length(a, b)
       if a:sub(i_idx, i_idx) == b:sub(j_idx, j_idx) then
         curr[j_idx] = prev[j_idx - 1] + 1
       else
-        curr[j_idx] = math.max(prev[j_idx], curr[j_idx - 1])
+        curr[j_idx] = math.max(prev[j_idx], curr[j_idx - 1]) --[[:! integer]]
       end
     end
     -- Swap
@@ -1135,8 +1141,10 @@ M.similarity = function(a, b)
   local pa = M.soundex(a)
   local pb = M.soundex(b)
   if pa == nil or pb == nil then return 0.0 end
-  local lcs = lcs_length(pa, pb)
-  local maxlen = math.max(#pa, #pb)
+  local pa_s = pa --[[:! string]]
+  local pb_s = pb --[[:! string]]
+  local lcs = lcs_length(pa_s, pb_s)
+  local maxlen = math.max(#pa_s, #pb_s)
   if maxlen == 0 then return 1.0 end
   return lcs / maxlen
 end
