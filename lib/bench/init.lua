@@ -22,13 +22,20 @@ M._tier = "pure"
 -- Clock: injectable via opts.clock_fn (must return nanoseconds).
 -- ---------------------------------------------------------------------------
 
+--:: ClockFn = () -> number
+--:: Stats = { mean: number, median: number, min: number, max: number, stddev: number, p95: number, p99: number }
+--:: BenchResult = { iters: integer, total_ns: number, mean_ns: number, median_ns: number, min_ns: number, max_ns: number, stddev_ns: number, p95_ns: number, p99_ns: number, ops_per_sec: number }
+--:: BenchOpts = { duration: number | nil, warmup: number | nil, min_iters: integer | nil, clock_fn: ClockFn | nil, overhead_ns: number | nil, batch: integer | nil }
+--:: SuiteCase = { name: string, fn: () -> nil }
+--:: SuiteResult = { name: string, result: BenchResult }
+
 -- ---------------------------------------------------------------------------
 -- Statistics helpers
 -- ---------------------------------------------------------------------------
 
 -- Compute statistics over a numeric array of samples.
 -- Returns {mean, median, min, max, stddev, p95, p99}.
---:: Stats = { mean: number, median: number, min: number, max: number, stddev: number, p95: number, p99: number }
+--: ({ [integer]: number }) -> Stats
 function M.stats(samples)
   local n = #samples
   if n == 0 then
@@ -36,15 +43,15 @@ function M.stats(samples)
   end
 
   -- sort a copy
-  local s = {}
+  local s = {} --: { [integer]: number }
   for i = 1, n do s[i] = samples[i] end
-  table.sort(s)
+  table.sort(--[[:! { [integer]: integer }]] s)
 
-  local sum = 0
+  local sum = 0 --: number
   for i = 1, n do sum = sum + s[i] end
   local mean = sum / n
 
-  local var_sum = 0
+  local var_sum = 0 --: number
   for i = 1, n do
     local d = s[i] - mean
     var_sum = var_sum + d * d
@@ -56,11 +63,12 @@ function M.stats(samples)
     return arr[idx]
   end
 
-  local median
+  local median = 0 --: number
   if n % 2 == 1 then
     median = s[math.ceil(n / 2)]
   else
-    median = (s[n / 2] + s[n / 2 + 1]) / 2
+    local mid = math.floor(n / 2)
+    median = (s[mid] + s[mid + 1]) / 2
   end
 
   return {
@@ -79,6 +87,7 @@ end
 -- < 1e6 ns   → "X.XXµs"
 -- < 1e9 ns   → "X.XXms"
 -- else       → "X.XXs"
+--: (number) -> string
 function M.format_ns(ns)
   if ns < 1000 then
     return string.format("%.2fns", ns)
@@ -96,6 +105,7 @@ end
 -- >= 1e6  → "X.XXM ops/sec"
 -- >= 1e3  → "X.XXk ops/sec"
 -- else    → "X ops/sec"
+--: (number) -> string
 function M.format_ops(ops)
   if ops >= 1e9 then
     return string.format("%.2fG ops/sec", ops / 1e9)
@@ -116,12 +126,13 @@ local ResultMT = {}
 ResultMT.__index = ResultMT
 
 function ResultMT:format()
+  local self_ = self --[[:! BenchResult]]
   return string.format(
     "mean=%s \xc2\xb1%s, %s, %d iters",
-    M.format_ns(self.mean_ns),
-    M.format_ns(self.stddev_ns),
-    M.format_ops(self.ops_per_sec),
-    self.iters
+    M.format_ns(self_.mean_ns),
+    M.format_ns(self_.stddev_ns),
+    M.format_ops(self_.ops_per_sec),
+    self_.iters
   )
 end
 
@@ -131,12 +142,12 @@ ResultMT.__tostring = ResultMT.format
 -- samples: array of per-iteration nanoseconds
 -- total_ns: total nanoseconds of the measurement phase
 local function make_result(samples, total_ns, overhead_ns)
-  overhead_ns = overhead_ns or 0
+  local overhead_ns_ = overhead_ns or 0 --: number
   local n = #samples
   -- subtract calibration overhead from each sample (clamp to 0)
-  if overhead_ns > 0 then
+  if overhead_ns_ > 0 then
     for i = 1, n do
-      samples[i] = math.max(0, samples[i] - overhead_ns)
+      samples[i] = math.max(0, samples[i] - overhead_ns_)
     end
   end
 
@@ -194,12 +205,13 @@ end
 --   overhead_ns (number) calibration overhead to subtract (default 0)
 --   batch      (number) iterations per timing sample (auto-detected if nil)
 function M.run(fn, opts)
-  opts = opts or {}
-  local duration    = opts.duration  or 1.0
-  local warmup      = opts.warmup    or 0.1
-  local min_iters   = opts.min_iters or 100
-  local clock       = opts.clock_fn  or error("bench.run: opts.clock_fn is required")
-  local overhead_ns = opts.overhead_ns or 0
+  local opts_ = (opts or {}) --[[:! BenchOpts]]
+  local duration    = opts_.duration  or 1.0 --: number
+  local warmup      = opts_.warmup    or 0.1 --: number
+  local min_iters   = opts_.min_iters or 100 --: integer
+  if not opts_.clock_fn then error("bench.run: opts.clock_fn is required") end
+  local clock = opts_.clock_fn --[[:! ClockFn]]
+  local overhead_ns = opts_.overhead_ns or 0 --: number
 
   -- warmup phase
   local warmup_ns = warmup * 1e9
@@ -210,37 +222,38 @@ function M.run(fn, opts)
 
   -- auto-detect batch size: time a single call; if < 100ns, batch enough to
   -- get a reading > 1µs per batch (to avoid clock resolution noise).
-  local batch = opts.batch
-  if not batch then
+  local batch = opts_.batch or 0 --: integer
+  if batch == 0 then
     local s0 = clock()
     fn()
     local single = clock() - s0
     if single < 100 then
       -- aim for ~10µs per batch sample
-      batch = math.max(1, math.floor(10000 / math.max(1, single)))
+      batch = math.max(1, math.floor(10000 / math.max(1, single))) --[[:! integer]]
     else
       batch = 1
     end
   end
 
   -- measurement phase
-  local samples = {}
+  local samples = {} --: { [integer]: number }
+  local batch_ = batch --[[:! integer]]
   local total_start = clock()
   local budget_ns = duration * 1e9
-  local iters_done = 0
+  local iters_done = 0 --: number
 
   while true do
     -- run one batch
     local t0 = clock()
-    for _ = 1, batch do
+    for _ = 1, batch_ do
       fn()
     end
     local t1 = clock()
-    local per_iter = (t1 - t0) / batch
-    for _ = 1, batch do
+    local per_iter = (t1 - t0) / batch_
+    for _ = 1, batch_ do
       samples[#samples + 1] = per_iter
     end
-    iters_done = iters_done + batch
+    iters_done = iters_done + batch_
 
     -- check stopping conditions
     local elapsed = clock() - total_start
@@ -266,9 +279,11 @@ function M.throughput(fn, size_bytes, opts)
   local bound_fn = function() fn(size_bytes) end
   local result = M.run(bound_fn, opts)
 
+  local bytes_per_sec = result.ops_per_sec * size_bytes
+  local mb_per_sec = bytes_per_sec / (1024 * 1024)
   result.size_bytes    = size_bytes
-  result.bytes_per_sec = result.ops_per_sec * size_bytes
-  result.mb_per_sec    = result.bytes_per_sec / (1024 * 1024)
+  result.bytes_per_sec = bytes_per_sec
+  result.mb_per_sec    = mb_per_sec
 
   -- override format for throughput results
   local orig_mt = getmetatable(result)
@@ -306,6 +321,7 @@ function SuiteMT:add(name, fn)
 end
 
 -- Run all benchmarks; return array of {name, result}.
+--: (self: any, BenchOpts | nil) -> { [integer]: SuiteResult }
 function SuiteMT:run(opts)
   local results = {}
   for i = 1, #self._cases do
@@ -317,17 +333,22 @@ end
 
 -- Pretty-print a comparison table sorted by mean (fastest first).
 -- Shows relative speedup vs the slowest entry.
+--: (self: any, { [integer]: SuiteResult }) -> nil
 function SuiteMT:print(results)
   -- find slowest mean
-  local slowest = 0
+  local slowest = 0 --: number
   for _, r in ipairs(results) do
     if r.result.mean_ns > slowest then slowest = r.result.mean_ns end
   end
 
   -- sort by mean ascending (copy)
-  local sorted = {}
+  local sorted = {} --: { [integer]: SuiteResult }
   for i, r in ipairs(results) do sorted[i] = r end
-  table.sort(sorted, function(a, b) return a.result.mean_ns < b.result.mean_ns end)
+  table.sort(--[[:! { [integer]: integer }]] sorted, function(a, b)
+    local a_ = a --[[:! SuiteResult]]
+    local b_ = b --[[:! SuiteResult]]
+    return a_.result.mean_ns < b_.result.mean_ns
+  end)
 
   -- determine column widths
   local name_w = 4  -- "name"
