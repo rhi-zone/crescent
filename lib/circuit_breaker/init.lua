@@ -10,6 +10,10 @@ local M = {}
 M._tier = "pure"
 
 --:: State = "closed" | "open" | "half_open"
+--:: CBClock = () -> number
+--:: CBIsFailure = (unknown, unknown) -> boolean
+--:: CBOnChange = (string, string) -> nil
+--:: CB = { _failure_threshold: number, _success_threshold: number, _timeout: number, _on_state_change: CBOnChange | nil, _clock: CBClock, _is_failure: CBIsFailure, _state: string, _failures: integer, _successes: integer, _last_failure_time: number | nil, ... }
 
 local STATE_CLOSED    = "closed"
 local STATE_OPEN      = "open"
@@ -48,23 +52,25 @@ end
 
 -- Internal: transition to a new state, firing callback if set.
 local function transition(self, new_state)
-	local old_state = self._state
+	local cb = self --[[:! CB]]
+	local old_state = cb._state
 	if old_state == new_state then return end
-	self._state = new_state
-	if self._on_state_change then
-		self._on_state_change(old_state, new_state)
+	cb._state = new_state
+	if cb._on_state_change then
+		cb._on_state_change(old_state, new_state)
 	end
 end
 
 -- Execute fn through the circuit breaker.
 -- Returns the results of fn on success, or nil, errmsg on failure/open circuit.
-function M:call(fn)
+function M.call(self, fn)
+	local cb = self --[[:! CB]]
 	-- Check if OPEN and whether timeout has elapsed
-	if self._state == STATE_OPEN then
-		local now = self._clock()
-		if self._last_failure_time and (now - self._last_failure_time) >= self._timeout then
-			transition(self, STATE_HALF_OPEN)
-			self._successes = 0
+	if cb._state == STATE_OPEN then
+		local now = cb._clock()
+		if cb._last_failure_time and (now - cb._last_failure_time) >= cb._timeout then
+			transition(cb, STATE_HALF_OPEN)
+			cb._successes = 0
 		else
 			return nil, "circuit breaker is open"
 		end
@@ -76,43 +82,44 @@ function M:call(fn)
 
 	if not pok then
 		-- fn threw an error (r1 is the error message here)
-		self._failures = self._failures + 1
-		self._last_failure_time = self._clock()
-		if self._state == STATE_HALF_OPEN then
-			transition(self, STATE_OPEN)
-			self._successes = 0
-		elseif self._failures >= self._failure_threshold then
-			transition(self, STATE_OPEN)
+		cb._failures = cb._failures + 1
+		cb._last_failure_time = cb._clock()
+		if cb._state == STATE_HALF_OPEN then
+			transition(cb, STATE_OPEN)
+			cb._successes = 0
+		elseif cb._failures >= cb._failure_threshold then
+			transition(cb, STATE_OPEN)
 		end
 		return nil, tostring(r1)
 	end
 
 	-- fn returned normally; r1..r5 are its actual return values
 	-- Check the failure predicate
-	if self._is_failure(r1, r2) then
-		self._failures = self._failures + 1
-		self._last_failure_time = self._clock()
-		if self._state == STATE_HALF_OPEN then
-			transition(self, STATE_OPEN)
-			self._successes = 0
-		elseif self._failures >= self._failure_threshold then
-			transition(self, STATE_OPEN)
+	if cb._is_failure(r1, r2) then
+		cb._failures = cb._failures + 1
+		local t2 = cb._clock()
+		cb._last_failure_time = t2 --[[:! number]]
+		if cb._state == STATE_HALF_OPEN then
+			transition(cb, STATE_OPEN)
+			cb._successes = 0
+		elseif cb._failures >= cb._failure_threshold then
+			transition(cb, STATE_OPEN)
 		end
 		-- Return the original (failed) results to the caller
 		return r1, r2, r3, r4, r5
 	end
 
 	-- Success
-	if self._state == STATE_HALF_OPEN then
-		self._successes = self._successes + 1
-		if self._successes >= self._success_threshold then
-			transition(self, STATE_CLOSED)
-			self._failures = 0
-			self._successes = 0
+	if cb._state == STATE_HALF_OPEN then
+		cb._successes = cb._successes + 1
+		if cb._successes >= cb._success_threshold then
+			transition(cb, STATE_CLOSED)
+			cb._failures = 0
+			cb._successes = 0
 		end
 	else
 		-- CLOSED: reset failure count on success
-		self._failures = 0
+		cb._failures = 0
 	end
 
 	return r1, r2, r3, r4, r5
