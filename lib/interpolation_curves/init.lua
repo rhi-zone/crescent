@@ -15,11 +15,22 @@ local abs   = math.abs
 local floor = math.floor
 local huge  = math.huge
 
+--:: NumArr = { [integer]: number }
+--:: NumArr2D = { [integer]: NumArr }
+--:: Spline = { ... }
+--:: CSpline = { _xs: NumArr, _ys: NumArr, _h: NumArr, _M: NumArr, _n: integer, eval: (CSpline, number) -> number, ... }
+--:: HSpline = { _xs: NumArr, _ys: NumArr, _h: NumArr, _m: NumArr, _n: integer, eval: (HSpline, number) -> number, ... }
+--:: EvalSpline = { eval: (EvalSpline, number) -> number, eval_all: (EvalSpline, {number}) -> {number}, ... }
+--:: LinInterp = { _xs: NumArr, _ys: NumArr, _n: integer, eval: (LinInterp, number) -> number, ... }
+--:: Curve = { _sx: EvalSpline, _sy: EvalSpline, _total_len: number, _n: integer, eval: (Curve, number) -> { integer: number }, ... }
+--:: CurveOpts = { type: string | nil, ... }
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
 -- Binary search: largest i such that xs[i] <= x. Returns 1..n-1, clamped.
+--: (NumArr, number) -> integer
 local function bisect(xs, x)
   local lo, hi = 1, #xs
   if x <= xs[lo] then return lo end
@@ -33,9 +44,12 @@ end
 
 -- Thomas algorithm: solves tridiagonal A*x = d.
 -- a: sub-diagonal (a[2..n] used), b: main diagonal (1..n), c: super-diagonal (c[1..n-1] used)
+--: (NumArr, NumArr, NumArr, NumArr) -> NumArr
 local function thomas(a, b, c, d)
   local n = #b
+  --: NumArr
   local cp = {}
+  --: NumArr
   local dp = {}
   cp[1] = (c[1] or 0) / b[1]
   dp[1] = d[1] / b[1]
@@ -44,6 +58,7 @@ local function thomas(a, b, c, d)
     cp[i] = (c[i] or 0) / denom
     dp[i] = (d[i] - (a[i] or 0) * dp[i-1]) / denom
   end
+  --: NumArr
   local x = {}
   x[n] = dp[n]
   for i = n - 1, 1, -1 do
@@ -53,8 +68,10 @@ local function thomas(a, b, c, d)
 end
 
 -- Partial-pivot Gaussian elimination: solves A*x = b. A is n×n (1-indexed).
+--: (NumArr2D, NumArr) -> NumArr
 local function mat_solve(A, b)
   local n = #b
+  --: NumArr2D
   local M2 = {}
   for i = 1, n do
     M2[i] = {}
@@ -71,7 +88,8 @@ local function mat_solve(A, b)
     M2[col], M2[max_row] = M2[max_row], M2[col]
     local pivot = M2[col][col]
     if abs(pivot) < 1e-14 then
-      local z = {}; for i = 1, n do z[i] = 0 end; return z
+      --: NumArr
+      local z = {}; for i = 1, n do z[i] = 0.0 end; return z
     end
     for row = 1, n do
       if row ~= col then
@@ -83,12 +101,14 @@ local function mat_solve(A, b)
     end
     for j = col, n + 1 do M2[col][j] = M2[col][j] / pivot end
   end
+  --: NumArr
   local x = {}
   for i = 1, n do x[i] = M2[i][n + 1] end
   return x
 end
 
 -- Horner evaluation of polynomial with coefficients coeffs[1]=c0 .. coeffs[d+1]=cd.
+--: (NumArr, number) -> number
 local function poly_eval(coeffs, x)
   local n = #coeffs
   local r = coeffs[n]
@@ -101,6 +121,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Standard cubic-spline segment eval using M[] (second derivatives).
+--: (CSpline, number) -> number
 local function cs_eval(self, x)
   local i = bisect(self._xs, x)
   if i > self._n then i = self._n end
@@ -115,12 +136,14 @@ local function cs_eval(self, x)
        + ((self._ys[i + 1] / hi - Mi1 * hi / 6) * dx)
 end
 
+--: (CSpline, NumArr) -> NumArr
 local function cs_eval_all(self, qxs)
   local out = {}
   for k = 1, #qxs do out[k] = self:eval(qxs[k]) end
   return out
 end
 
+--: (CSpline, number) -> number
 local function cs_deriv(self, x)
   local i = bisect(self._xs, x)
   if i > self._n then i = self._n end
@@ -135,6 +158,7 @@ local function cs_deriv(self, x)
        - (self._ys[i] / hi - Mi * hi / 6)
 end
 
+--: (CSpline, number) -> number
 local function cs_deriv2(self, x)
   local i = bisect(self._xs, x)
   if i > self._n then i = self._n end
@@ -148,6 +172,7 @@ local function cs_deriv2(self, x)
 end
 
 -- Definite integral of the cubic spline from a to b using exact formula.
+--: (CSpline, number, number) -> number
 local function cs_integrate(self, a, b)
   if a == b then return 0 end
   local sign = 1
@@ -201,6 +226,7 @@ end
 -- boundary conditions for the interior tridiagonal system.
 -- bc: "natural"   → M[1]=M[n+1]=0
 --     "clamped"   → uses opts.dy0, opts.dyn as endpoint first derivatives
+--: ({number}, {number}, string, ({ dy0: number, dyn: number } | nil)) -> (Spline | nil, string | nil)
 local function build_cubic_spline(xs, ys, bc, opts)
   local n = #xs - 1
   if n < 1 then return nil, "need at least 2 points" end
@@ -208,11 +234,12 @@ local function build_cubic_spline(xs, ys, bc, opts)
   local h = {}
   for i = 1, n do h[i] = xs[i + 1] - xs[i] end
 
+  --: NumArr
   local Mfull = {}
 
   if n == 1 then
     -- Single interval: linear (M = 0 everywhere)
-    Mfull[1] = 0; Mfull[2] = 0
+    Mfull[1] = 0.0; Mfull[2] = 0.0
     return { _xs = xs, _ys = ys, _h = h, _M = Mfull, _n = n }
   end
 
@@ -288,7 +315,7 @@ end
 
 -- Natural cubic spline through (xs, ys).
 -- xs must be strictly increasing. Returns spline object.
---: ({number}, {number}) -> table
+--: ({number}, {number}) -> (Spline | nil, string | nil)
 M.cubic_spline = function(xs, ys)
   if #xs < 2 then return nil, "cubic_spline: need at least 2 points" end
   local spline, err = build_cubic_spline(xs, ys, "natural", nil)
@@ -298,7 +325,7 @@ M.cubic_spline = function(xs, ys)
 end
 
 -- Clamped cubic spline: dy0 and dyn are the first derivatives at the endpoints.
---: ({number}, {number}, number, number) -> table
+--: ({number}, {number}, number, number) -> (Spline | nil, string | nil)
 M.clamped_spline = function(xs, ys, dy0, dyn)
   if #xs < 2 then return nil, "clamped_spline: need at least 2 points" end
   local spline, err = build_cubic_spline(xs, ys, "clamped", { dy0 = dy0, dyn = dyn })
@@ -313,7 +340,7 @@ end
 
 -- Monotone spline: no overshoot within monotone intervals.
 -- Uses Hermite interpolation with Fritsch-Carlson tangent constraints.
---: ({number}, {number}) -> table
+--: ({number}, {number}) -> (Spline | nil, string | nil)
 M.monotone_spline = function(xs, ys)
   local n = #xs
   if n < 2 then return nil, "monotone_spline: need at least 2 points" end
@@ -358,72 +385,77 @@ M.monotone_spline = function(xs, ys)
   local spline = { _xs = xs, _ys = ys, _h = h, _m = m, _n = n }
 
   function spline:eval(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
-    local hi = self._h[i]
-    local t  = (x - self._xs[i]) / hi
+    local self_ = self --[[:! HSpline]]
+    local i = bisect(self_._xs, x)
+    if i > self_._n then i = self_._n end
+    local hi = self_._h[i]
+    local t  = (x - self_._xs[i]) / hi
     local t2 = t * t; local t3 = t2 * t
     local h00 =  2*t3 - 3*t2 + 1
     local h10 =    t3 - 2*t2 + t
     local h01 = -2*t3 + 3*t2
     local h11 =    t3 -   t2
-    return h00 * self._ys[i] + h10 * hi * self._m[i]
-         + h01 * self._ys[i + 1] + h11 * hi * self._m[i + 1]
+    return h00 * self_._ys[i] + h10 * hi * self_._m[i]
+         + h01 * self_._ys[i + 1] + h11 * hi * self_._m[i + 1]
   end
 
   function spline:eval_all(qxs)
+    local self_ = self --[[:! HSpline]]
     local out = {}
-    for k = 1, #qxs do out[k] = self:eval(qxs[k]) end
+    for k = 1, #qxs do out[k] = self_:eval(qxs[k]) end
     return out
   end
 
   function spline:deriv(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
-    local hi = self._h[i]
-    local t  = (x - self._xs[i]) / hi
+    local self_ = self --[[:! HSpline]]
+    local i = bisect(self_._xs, x)
+    if i > self_._n then i = self_._n end
+    local hi = self_._h[i]
+    local t  = (x - self_._xs[i]) / hi
     local t2 = t * t
     local dh00 =  6*t2 - 6*t
     local dh10 =  3*t2 - 4*t + 1
     local dh01 = -6*t2 + 6*t
     local dh11 =  3*t2 - 2*t
-    return (dh00 * self._ys[i] + dh10 * hi * self._m[i]
-          + dh01 * self._ys[i + 1] + dh11 * hi * self._m[i + 1]) / hi
+    return (dh00 * self_._ys[i] + dh10 * hi * self_._m[i]
+          + dh01 * self_._ys[i + 1] + dh11 * hi * self_._m[i + 1]) / hi
   end
 
   function spline:deriv2(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
-    local hi = self._h[i]
-    local t  = (x - self._xs[i]) / hi
+    local self_ = self --[[:! HSpline]]
+    local i = bisect(self_._xs, x)
+    if i > self_._n then i = self_._n end
+    local hi = self_._h[i]
+    local t  = (x - self_._xs[i]) / hi
     -- d²/dt² of Hermite basis, divided by hi²
     local d2h00 =  12*t - 6
     local d2h10 =   6*t - 4
     local d2h01 = -12*t + 6
     local d2h11 =   6*t - 2
-    return (d2h00 * self._ys[i] + d2h10 * hi * self._m[i]
-          + d2h01 * self._ys[i + 1] + d2h11 * hi * self._m[i + 1]) / (hi * hi)
+    return (d2h00 * self_._ys[i] + d2h10 * hi * self_._m[i]
+          + d2h01 * self_._ys[i + 1] + d2h11 * hi * self_._m[i + 1]) / (hi * hi)
   end
 
   function spline:integrate(a, b)
+    local self_ = self --[[:! HSpline]]
     if a == b then return 0 end
     local sign = 1
     if a > b then a, b = b, a; sign = -1 end
     local total = 0
-    local ia = bisect(self._xs, a)
-    if ia > self._n then ia = self._n end
-    local ib = bisect(self._xs, b)
-    if ib > self._n then ib = self._n end
+    local ia = bisect(self_._xs, a)
+    if ia > self_._n then ia = self_._n end
+    local ib = bisect(self_._xs, b)
+    if ib > self_._n then ib = self_._n end
     for i = ia, ib do
-      local x0 = self._xs[i]
-      local x1 = self._xs[i + 1]
+      local x0 = self_._xs[i]
+      local x1 = self_._xs[i + 1]
       local lo  = (i == ia) and a or x0
       local hi_x = (i == ib) and b or x1
-      local hi = self._h[i]
-      local yi  = self._ys[i]
-      local yi1 = self._ys[i + 1]
-      local mi  = self._m[i]
-      local mi1 = self._m[i + 1]
+      local hi = self_._h[i]
+      local yi  = self_._ys[i]
+      local yi1 = self_._ys[i + 1]
+      local mi  = self_._m[i]
+      local mi1 = self_._m[i + 1]
       -- Antiderivative of Hermite spline in t=0..1: hi * integral over t
       -- F(t) = hi * [ (t4/2 - t3 + t)*yi + (t4/4 - 2t3/3 + t2/2)*hi*mi
       --              + (-t4/2 + t3)*yi1 + (t4/4 - t3/3)*hi*mi1 ]
@@ -452,7 +484,7 @@ end
 
 -- Akima spline: local method using weighted average of slopes.
 -- Less sensitive to outliers than cubic spline.
---: ({number}, {number}) -> table
+--: ({number}, {number}) -> (Spline | nil, string | nil)
 M.akima_spline = function(xs, ys)
   local n = #xs
   if n < 2 then return nil, "akima_spline: need at least 2 points" end
@@ -517,71 +549,76 @@ M.akima_spline = function(xs, ys)
   local spline = { _xs = xs, _ys = ys, _h = h, _m = m, _n = n - 1 }
 
   function spline:eval(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
-    local hi = self._h[i]
-    local t  = (x - self._xs[i]) / hi
+    local self_ = self --[[:! HSpline]]
+    local i = bisect(self_._xs, x)
+    if i > self_._n then i = self_._n end
+    local hi = self_._h[i]
+    local t  = (x - self_._xs[i]) / hi
     local t2 = t * t; local t3 = t2 * t
     local h00 =  2*t3 - 3*t2 + 1
     local h10 =    t3 - 2*t2 + t
     local h01 = -2*t3 + 3*t2
     local h11 =    t3 -   t2
-    return h00 * self._ys[i] + h10 * hi * self._m[i]
-         + h01 * self._ys[i + 1] + h11 * hi * self._m[i + 1]
+    return h00 * self_._ys[i] + h10 * hi * self_._m[i]
+         + h01 * self_._ys[i + 1] + h11 * hi * self_._m[i + 1]
   end
 
   function spline:eval_all(qxs)
+    local self_ = self --[[:! HSpline]]
     local out = {}
-    for k = 1, #qxs do out[k] = self:eval(qxs[k]) end
+    for k = 1, #qxs do out[k] = self_:eval(qxs[k]) end
     return out
   end
 
   function spline:deriv(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
-    local hi = self._h[i]
-    local t  = (x - self._xs[i]) / hi
+    local self_ = self --[[:! HSpline]]
+    local i = bisect(self_._xs, x)
+    if i > self_._n then i = self_._n end
+    local hi = self_._h[i]
+    local t  = (x - self_._xs[i]) / hi
     local t2 = t * t
     local dh00 =  6*t2 - 6*t
     local dh10 =  3*t2 - 4*t + 1
     local dh01 = -6*t2 + 6*t
     local dh11 =  3*t2 - 2*t
-    return (dh00 * self._ys[i] + dh10 * hi * self._m[i]
-          + dh01 * self._ys[i + 1] + dh11 * hi * self._m[i + 1]) / hi
+    return (dh00 * self_._ys[i] + dh10 * hi * self_._m[i]
+          + dh01 * self_._ys[i + 1] + dh11 * hi * self_._m[i + 1]) / hi
   end
 
   function spline:deriv2(x)
-    local i = bisect(self._xs, x)
-    if i > self._n then i = self._n end
-    local hi = self._h[i]
-    local t  = (x - self._xs[i]) / hi
+    local self_ = self --[[:! HSpline]]
+    local i = bisect(self_._xs, x)
+    if i > self_._n then i = self_._n end
+    local hi = self_._h[i]
+    local t  = (x - self_._xs[i]) / hi
     local d2h00 =  12*t - 6
     local d2h10 =   6*t - 4
     local d2h01 = -12*t + 6
     local d2h11 =   6*t - 2
-    return (d2h00 * self._ys[i] + d2h10 * hi * self._m[i]
-          + d2h01 * self._ys[i + 1] + d2h11 * hi * self._m[i + 1]) / (hi * hi)
+    return (d2h00 * self_._ys[i] + d2h10 * hi * self_._m[i]
+          + d2h01 * self_._ys[i + 1] + d2h11 * hi * self_._m[i + 1]) / (hi * hi)
   end
 
   function spline:integrate(a, b)
+    local self_ = self --[[:! HSpline]]
     if a == b then return 0 end
     local sign = 1
     if a > b then a, b = b, a; sign = -1 end
     local total = 0
-    local ia = bisect(self._xs, a)
-    if ia > self._n then ia = self._n end
-    local ib = bisect(self._xs, b)
-    if ib > self._n then ib = self._n end
+    local ia = bisect(self_._xs, a)
+    if ia > self_._n then ia = self_._n end
+    local ib = bisect(self_._xs, b)
+    if ib > self_._n then ib = self_._n end
     for i = ia, ib do
-      local x0  = self._xs[i]
-      local x1  = self._xs[i + 1]
+      local x0  = self_._xs[i]
+      local x1  = self_._xs[i + 1]
       local lo   = (i == ia) and a or x0
       local hi_x = (i == ib) and b or x1
-      local hi   = self._h[i]
-      local yi   = self._ys[i]
-      local yi1  = self._ys[i + 1]
-      local mi   = self._m[i]
-      local mi1  = self._m[i + 1]
+      local hi   = self_._h[i]
+      local yi   = self_._ys[i]
+      local yi1  = self_._ys[i + 1]
+      local mi   = self_._m[i]
+      local mi1  = self_._m[i + 1]
       local function antideriv_t(t)
         local t2 = t * t; local t3 = t2 * t; local t4 = t3 * t
         return hi * (
@@ -604,7 +641,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Returns an object with :eval(x) and :eval_all(xs).
---: ({number}, {number}) -> table
+--: ({number}, {number}) -> (Spline | nil, string | nil)
 M.linear = function(xs, ys)
   if #xs < 2 then return nil, "linear: need at least 2 points" end
   local interp = { _xs = xs, _ys = ys, _n = #xs - 1 }
@@ -632,19 +669,22 @@ end
 
 -- Fit a polynomial of given degree to (xs, ys) using least squares.
 -- Returns a poly object with :eval(x), .coefficients, and .r_squared.
---: ({number}, {number}, number) -> table
+--: ({number}, {number}, integer) -> (Spline | nil, string | nil)
 M.polynomial_fit = function(xs, ys, degree)
   local n = #xs
   if n < 1 then return nil, "polynomial_fit: need at least 1 point" end
   local d = degree + 1
 
   -- Build normal equations: (V^T V) c = V^T y
+  --: NumArr2D
   local ATA = {}
+  --: NumArr
   local ATy = {}
   for i = 1, d do
-    ATA[i] = {}
-    ATy[i] = 0
+    ATA[i] = {} --[[:! NumArr]]
+    ATy[i] = 0.0
     for j = 1, d do
+      --: number
       local s = 0
       for k = 1, n do s = s + xs[k]^(i + j - 2) end
       ATA[i][j] = s
@@ -655,10 +695,14 @@ M.polynomial_fit = function(xs, ys, degree)
   local coeffs = mat_solve(ATA, ATy)
 
   -- R²
+  --: number
   local ymean = 0
   for i = 1, n do ymean = ymean + ys[i] end
   ymean = ymean / n
-  local ss_tot, ss_res = 0, 0
+  --: number
+  local ss_tot = 0
+  --: number
+  local ss_res = 0
   for i = 1, n do
     ss_tot = ss_tot + (ys[i] - ymean)^2
     ss_res = ss_res + (ys[i] - poly_eval(coeffs, xs[i]))^2
@@ -678,8 +722,10 @@ end
 -- Returns cumulative lengths t[i] normalized to [0,1].
 local function arc_length_params(points)
   local n = #points
+  --: NumArr
   local t = {}
   t[1] = 0
+  --: number
   local total = 0
   for i = 2, n do
     local dx = points[i][1] - points[i - 1][1]
@@ -697,11 +743,11 @@ end
 -- Build a 2D parameterized curve through the given points.
 -- opts.type: "catmull_rom" (default) | "cubic_spline" | "b_spline" | "linear"
 -- Returns curve object with :eval(t), :sample(n), :length().
---: ({{number,number}}, (table | nil)) -> table
+--: ({{number,number}}, (CurveOpts | nil)) -> (Spline | nil, string | nil)
 M.curve_2d = function(points, opts)
   local n = #points
   if n < 2 then return nil, "curve_2d: need at least 2 points" end
-  opts = opts or {}
+  opts = (opts or {}) --[[:! CurveOpts]]
   local curve_type = opts.type or "catmull_rom"
 
   local ts, total_len = arc_length_params(points)
@@ -710,7 +756,10 @@ M.curve_2d = function(points, opts)
   local px = {}; local py = {}
   for i = 1, n do px[i] = points[i][1]; py[i] = points[i][2] end
 
-  local sx, sy  -- spline objects for x(t) and y(t)
+  --: Spline | nil
+  local sx
+  --: Spline | nil
+  local sy
 
   if curve_type == "cubic_spline" then
     sx = M.cubic_spline(ts, px)
@@ -729,26 +778,32 @@ M.curve_2d = function(points, opts)
     sy = M.cubic_spline(ts, py)
   end
 
-  local curve = { _sx = sx, _sy = sy, _ts = ts, _total_len = total_len, _n = n }
+  local sx_ = sx --[[:! EvalSpline]]
+  local sy_ = sy --[[:! EvalSpline]]
+  local curve = { _sx = sx_, _sy = sy_, _ts = ts, _total_len = total_len, _n = n }
 
   function curve:eval(t)
+    local self_ = self --[[:! Curve]]
     t = t < 0 and 0 or (t > 1 and 1 or t)
-    return { self._sx:eval(t), self._sy:eval(t) }
+    return { self_._sx:eval(t), self_._sy:eval(t) }
   end
 
   function curve:sample(count)
+    local self_ = self --[[:! Curve]]
     local out = {}
-    count = count or n
-    if count < 2 then count = 2 end
-    for i = 1, count do
-      local t = (i - 1) / (count - 1)
-      out[i] = self:eval(t)
+    --: integer
+    local cnt = count or self_._n
+    if cnt < 2 then cnt = 2 end
+    for i = 1, cnt do
+      local t = (i - 1) / (cnt - 1)
+      out[i] = self_:eval(t)
     end
     return out
   end
 
   function curve:length()
-    return self._total_len
+    local self_ = self --[[:! Curve]]
+    return self_._total_len
   end
 
   return curve
@@ -763,7 +818,8 @@ end
 --: ({number}, {number}, {number}) -> {number}
 M.resample = function(xs, ys, new_xs)
   local interp = M.linear(xs, ys)
-  return interp:eval_all(new_xs)
+  local interp_ = interp --[[:! EvalSpline]]
+  return interp_:eval_all(new_xs)
 end
 
 return M
