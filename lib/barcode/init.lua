@@ -61,6 +61,7 @@ local CODE128_PATTERNS = {
 -- Symbol 0..94 map to ASCII 32..126
 -- Symbol 95..102 map to special function codes (FNC3, FNC2, SHIFT, CodeC, CodeB, FNC4, CodeA, FNC1)
 -- For Code B auto-select we only use values 0..94 (space..~)
+--: (integer) -> integer | nil
 local function code128b_value(byte)
   -- ASCII 32 = symbol 0, ASCII 126 = symbol 94
   if byte >= 32 and byte <= 126 then
@@ -106,9 +107,11 @@ function M.code128(s)
 
   -- Data symbols
   for i = 1, #s do
-    local sym = code128b_value(s:byte(i))
+    local bi = s:byte(i)
+    local b = (bi or 0) --[[:! integer]]
+    local sym = code128b_value(b)
     code128_append_pattern(bars, CODE128_PATTERNS[sym])
-    checksum = checksum + i * sym
+    checksum = checksum + i * (sym --[[:! integer]])
   end
 
   checksum = checksum % 103
@@ -129,11 +132,12 @@ end
 
 -- L-code patterns (left half, odd parity) for digits 0-9
 -- Each is 7 modules.
-local EAN_L = {
+--:: EanPattern = { [integer]: integer }
+local EAN_L = ({
   [0] = {3,2,1,1}, [1] = {2,2,2,1}, [2] = {2,1,2,2}, [3] = {1,4,1,1},
   [4] = {1,1,3,2}, [5] = {1,2,3,1}, [6] = {1,1,1,4}, [7] = {1,3,1,2},
   [8] = {1,2,1,3}, [9] = {3,1,1,2},
-}
+}) --[[:! { [integer]: EanPattern }]]
 
 -- G-code = reverse of R-code = reverse of complement of L-code
 -- R-code: complement of L-code (bar<->space)
@@ -150,8 +154,8 @@ local EAN13_PARITY = {
 
 -- Append an EAN digit (7 modules) given pattern type: "L", "G", or "R"
 local function ean_append_digit(bars, digit, ptype)
-  local lp = EAN_L[digit]
-  local widths
+  local lp = EAN_L[digit] --[[:! EanPattern]]
+  local widths = lp
   if ptype == "L" then
     widths = lp
   elseif ptype == "R" then
@@ -164,7 +168,7 @@ local function ean_append_digit(bars, digit, ptype)
     widths = lp
   elseif ptype == "G" then
     -- G-code = reverse of R-code, same widths reversed
-    widths = {}
+    widths = {} --[[:! EanPattern]]
     for i = #lp, 1, -1 do widths[#widths + 1] = lp[i] end
   end
 
@@ -195,7 +199,8 @@ function M.ean13_check_digit(s)
   end
   local sum = 0
   for i = 1, 12 do
-    local d = s:byte(i) - 48
+    local bi = s:byte(i)
+    local d = (bi or 0) --[[:! integer]] - 48
     if d < 0 or d > 9 then return nil, "ean13_check_digit: non-digit in input" end
     -- Odd positions (1,3,5,...) weight 1; even positions (2,4,6,...) weight 3
     sum = sum + d * ((i % 2 == 0) and 3 or 1)
@@ -226,19 +231,19 @@ function M.ean13(s)
     end
   end
 
-  local digits = {}
-  for i = 1, #s do digits[i] = s:byte(i) - 48 end
+  local digits = {} --: { [integer]: integer }
+  for i = 1, #s do local bi = s:byte(i); digits[i] = (bi or 0) --[[:! integer]] - 48 end
 
   local check, err
   if #s == 12 then
     check, err = M.ean13_check_digit(s)
     if not check then return nil, err end
-    digits[13] = check
+    digits[13] = (check or 0) --[[:! integer]]
   else
     check, err = M.ean13_check_digit(s:sub(1, 12))
     if not check then return nil, err end
     if digits[13] ~= check then
-      return nil, "ean13: invalid check digit (expected " .. check .. ", got " .. digits[13] .. ")"
+      return nil, "ean13: invalid check digit (expected " .. tostring(check) .. ", got " .. tostring(digits[13]) .. ")"
     end
   end
 
@@ -298,17 +303,18 @@ function M.ean8(s)
     end
   end
 
-  local digits = {}
-  for i = 1, #s do digits[i] = s:byte(i) - 48 end
+  local digits = {} --: { [integer]: integer }
+  for i = 1, #s do local bi = s:byte(i); digits[i] = (bi or 0) --[[:! integer]] - 48 end
 
   -- EAN-8 check digit: same algorithm as EAN-13 but on 7 digits
   -- Weights: odd=3, even=1 (reversed from EAN-13)
+  --: ({ [integer]: integer }) -> integer
   local function ean8_check(d7)
     local sum = 0
     for i = 1, 7 do
       sum = sum + d7[i] * ((i % 2 == 1) and 3 or 1)
     end
-    return (10 - (sum % 10)) % 10
+    return (10 - (sum % 10)) % 10 --[[:! integer]]
   end
 
   if #s == 7 then
@@ -371,7 +377,7 @@ end
 -- Each symbol: 9 modules (5 bars + 4 spaces), 3 wide elements.
 -- Pattern encoded as 9 bits: 1=wide, 0=narrow; alternating bar/space starting with bar.
 -- Narrow=1 module, wide=3 modules (standard ratio 3:1).
-local CODE39_PATTERNS = {
+local CODE39_PATTERNS = ({
   ["0"] = {false,false,false,true,true,false,true,false,false},
   ["1"] = {true,false,false,true,false,false,false,false,true},
   ["2"] = {false,false,true,true,false,false,false,false,true},
@@ -416,7 +422,7 @@ local CODE39_PATTERNS = {
   ["+"] = {false,true,false,false,false,true,false,true,false},
   ["%"] = {false,false,false,true,false,true,false,true,false},
   ["*"] = {false,true,false,false,true,false,true,false,false}, -- start/stop
-}
+}) --[[:! { [string]: { [integer]: boolean } }]]
 
 local function code39_append_symbol(bars, pat, narrow, wide)
   narrow = narrow or 1
@@ -492,8 +498,9 @@ end
 
 --- Render bars array as an SVG string.
 -- opts: { height=100, bar_width=2, quiet_zone=10, show_text=true, text="" }
+--: ({ [integer]: integer }, { height: integer | nil, bar_width: integer | nil, quiet_zone: integer | nil, show_text: boolean | nil, text: string | nil } | nil) -> string
 function M.to_svg(bars, opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { height: integer | nil, bar_width: integer | nil, quiet_zone: integer | nil, show_text: boolean | nil, text: string | nil }]]
   local height     = opts.height     or 100
   local bar_width  = opts.bar_width  or 2
   local quiet_zone = opts.quiet_zone or 0
