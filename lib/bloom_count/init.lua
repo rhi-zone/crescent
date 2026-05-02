@@ -9,7 +9,7 @@ end
 local M = {}
 M._tier = "pure"
 
-local bit = bit  -- LuaJIT global
+local bit = require("bit")
 local band, bor, bxor, lshift, rshift = bit.band, bit.bor, bit.bxor, bit.lshift, bit.rshift
 local floor, ceil, log, exp = math.floor, math.ceil, math.log, math.exp
 local LN2 = log(2)
@@ -19,21 +19,26 @@ local LN2 = log(2)
 -- ---------------------------------------------------------------------------
 
 -- FNV-1a 32-bit hash
+--: (s: string, seed: integer) -> integer
 local function fnv1a(s, seed)
-  seed = seed or 0
-  local h = band(2166136261 + seed * 16777619, 0xFFFFFFFF)
+  local h = band(math.floor(2166136261) + seed * 16777619, 0xFFFFFFFF) --[[:! integer]]
   for i = 1, #s do
-    h = band(bxor(h, string.byte(s, i)) * 16777619, 0xFFFFFFFF)
+    local b_, _, _ = string.byte(s, i, i)
+    local b = b_ --[[:! integer]]
+    h = band(bxor(h, b) * 16777619, 0xFFFFFFFF)
   end
   return h
 end
 
 -- Two independent hashes for Kirsch-Mitzenmacher double hashing
+--: (s: string) -> (integer, integer)
 local function hash_pair(s)
   local h1 = fnv1a(s, 0)
-  local h2 = 0
+  local h2 = 0 --: integer
   for i = 1, #s do
-    h2 = band(h2 * 31 + string.byte(s, i), 0xFFFFFFFF)
+    local b_, _, _ = string.byte(s, i, i)
+    local b = b_ --[[:! integer]]
+    h2 = band(h2 * 31 + b, 0xFFFFFFFF)
   end
   -- h2 must be odd to ensure all m slots are reachable
   h2 = bor(h2, 1)
@@ -41,13 +46,15 @@ local function hash_pair(s)
 end
 
 -- Optimal bit count: m = -n * ln(p) / (ln 2)^2
+--: (n: number, p: number) -> integer
 local function optimal_m(n, p)
-  return ceil(-n * log(p) / (LN2 * LN2))
+  return ceil(-n * log(p) / (LN2 * LN2)) --[[:! integer]]
 end
 
 -- Optimal hash count: k = (m/n) * ln(2)
+--: (m: number, n: number) -> integer
 local function optimal_k(m, n)
-  return math.max(1, ceil((m / n) * LN2))
+  return math.max(1, ceil((m / n) * LN2)) --[[:! integer]]
 end
 
 -- ---------------------------------------------------------------------------
@@ -56,9 +63,12 @@ end
 -- Uses an array of counters (plain Lua integers). counter_bits controls the
 -- logical max per counter (4=max 15, 8=max 255) — we saturate at max.
 
+--:: CBFShape = { _m: integer, _k: integer, _max: integer, _counters: { [integer]: integer }, _size: integer, ... }
+
 local CBF = {}
 CBF.__index = CBF
 
+--: (self: CBFShape, s: string, fn: (pos: integer) -> nil) -> nil
 local function cbf_probe(self, s, fn)
   local m, k = self._m, self._k
   local h1, h2 = hash_pair(s)
@@ -68,14 +78,15 @@ local function cbf_probe(self, s, fn)
 end
 
 function CBF:add(item)
+  local self_ = self --[[:! CBFShape]]
   local s = tostring(item)
-  local counters = self._counters
-  local max = self._max
-  cbf_probe(self, s, function(pos)
+  local counters = self_._counters
+  local max = self_._max
+  cbf_probe(self_, s, function(pos)
     local c = counters[pos]
     if c < max then counters[pos] = c + 1 end
   end)
-  self._size = self._size + 1
+  self_._size = self_._size + 1
 end
 
 function CBF:remove(item)
@@ -116,18 +127,21 @@ function CBF:count(item)
 end
 
 function CBF:clear()
-  local counters = self._counters
-  for i = 0, self._m - 1 do counters[i] = 0 end
-  self._size = 0
+  local self_ = self --[[:! CBFShape]]
+  local counters = self_._counters
+  for i = 0, self_._m - 1 do counters[i] = 0 end
+  self_._size = 0
 end
 
 function CBF:size()
-  return self._size
+  local self_ = self --[[:! CBFShape]]
+  return self_._size
 end
 
 function CBF:false_positive_rate()
-  local n = self._size
-  local m, k = self._m, self._k
+  local self_ = self --[[:! CBFShape]]
+  local n = self_._size
+  local m, k = self_._m, self_._k
   if n == 0 then return 0 end
   return (1 - exp(-k * n / m)) ^ k
 end
@@ -136,15 +150,15 @@ end
 -- opts.capacity, opts.error_rate (default 0.01), opts.counter_bits (default 4)
 function M.counting(opts)
   opts = opts or {}
-  local n = opts.capacity or 1000
-  local p = opts.error_rate or 0.01
+  local n = (opts.capacity or 1000) --[[:! number]]
+  local p = (opts.error_rate or 0.01) --[[:! number]]
   if n < 1 or p <= 0 or p >= 1 then
     return nil, "bloom_count.counting: capacity must be >= 1 and 0 < error_rate < 1"
   end
   local m = optimal_m(n, p)
-  local k = opts.hash_count or optimal_k(m, n)
-  local bits = opts.counter_bits or 4
-  local max = (bits >= 32) and 0x7FFFFFFF or (lshift(1, bits) - 1)
+  local k = opts.hash_count and (opts.hash_count --[[:! integer]]) or optimal_k(m, n)
+  local bits = (opts.counter_bits or 4) --[[:! integer]]
+  local max = (bits >= 32) and 0x7FFFFFFF or (lshift(1, bits) - 1) --[[:! integer]]
   local counters = {}
   for i = 0, m - 1 do counters[i] = 0 end
   return setmetatable({
@@ -161,10 +175,13 @@ end
 -- ---------------------------------------------------------------------------
 -- 2 candidate buckets per item; fingerprint-based; supports O(1) deletion.
 
+--:: CFShape = { _num_buckets: integer, _bucket_size: integer, _fp_bits: integer, _max_kicks: integer, _buckets: { [integer]: { [integer]: integer } }, _count: integer, ... }
+
 local CF = {}
 CF.__index = CF
 
 -- Compute fingerprint (never 0)
+--: (h: integer, bits: integer) -> integer
 local function fingerprint(h, bits)
   local mask = lshift(1, bits) - 1
   local fp = band(h, mask)
@@ -175,6 +192,7 @@ end
 -- Compute the two candidate bucket indices and fingerprint for an item.
 -- Use a second independent hash for b1 to avoid the correlation between fp and b1
 -- that occurs when both use the same low bits of the same hash value.
+--: (self: CFShape, item: string) -> (integer, integer, integer)
 local function cf_positions(self, item)
   local h1 = fnv1a(item, 0)
   local h2 = fnv1a(item, 1337)  -- independent hash for bucket index
@@ -187,17 +205,18 @@ local function cf_positions(self, item)
 end
 
 function CF:add(item)
+  local self_ = self --[[:! CFShape]]
   local s = tostring(item)
-  local b1, b2, fp = cf_positions(self, s)
-  local buckets = self._buckets
-  local bsz = self._bucket_size
+  local b1, b2, fp = cf_positions(self_, s)
+  local buckets = self_._buckets
+  local bsz = self_._bucket_size
 
   -- Try bucket 1
   local bucket = buckets[b1]
   for i = 1, bsz do
     if bucket[i] == 0 then
       bucket[i] = fp
-      self._count = self._count + 1
+      self_._count = self_._count + 1
       return true
     end
   end
@@ -207,7 +226,7 @@ function CF:add(item)
   for i = 1, bsz do
     if bucket[i] == 0 then
       bucket[i] = fp
-      self._count = self._count + 1
+      self_._count = self_._count + 1
       return true
     end
   end
@@ -215,20 +234,20 @@ function CF:add(item)
   -- Cuckoo eviction: randomly evict from one of the two buckets
   local cur_b = (math.random(2) == 1) and b1 or b2
   local cur_fp = fp
-  local max_kicks = self._max_kicks
+  local max_kicks = self_._max_kicks
   for _ = 1, max_kicks do
     -- Pick a random entry in cur_b to evict
-    local slot = math.random(bsz)
+    local slot = math.random(bsz) --[[:! integer]]
     local evicted = buckets[cur_b][slot]
     buckets[cur_b][slot] = cur_fp
     cur_fp = evicted
     -- Find the alternate bucket for the evicted fingerprint
-    local alt_b = bxor(cur_b, fnv1a(tostring(cur_fp), 0) % self._num_buckets)
+    local alt_b = bxor(cur_b, fnv1a(tostring(cur_fp), 0) % self_._num_buckets)
     bucket = buckets[alt_b]
     for i = 1, bsz do
       if bucket[i] == 0 then
         bucket[i] = cur_fp
-        self._count = self._count + 1
+        self_._count = self_._count + 1
         return true
       end
     end
@@ -240,16 +259,17 @@ function CF:add(item)
 end
 
 function CF:remove(item)
+  local self_ = self --[[:! CFShape]]
   local s = tostring(item)
-  local b1, b2, fp = cf_positions(self, s)
-  local buckets = self._buckets
-  local bsz = self._bucket_size
+  local b1, b2, fp = cf_positions(self_, s)
+  local buckets = self_._buckets
+  local bsz = self_._bucket_size
 
   local bucket = buckets[b1]
   for i = 1, bsz do
     if bucket[i] == fp then
       bucket[i] = 0
-      self._count = self._count - 1
+      self_._count = self_._count - 1
       return true
     end
   end
@@ -258,7 +278,7 @@ function CF:remove(item)
   for i = 1, bsz do
     if bucket[i] == fp then
       bucket[i] = 0
-      self._count = self._count - 1
+      self_._count = self_._count - 1
       return true
     end
   end
@@ -267,10 +287,11 @@ function CF:remove(item)
 end
 
 function CF:contains(item)
+  local self_ = self --[[:! CFShape]]
   local s = tostring(item)
-  local b1, b2, fp = cf_positions(self, s)
-  local buckets = self._buckets
-  local bsz = self._bucket_size
+  local b1, b2, fp = cf_positions(self_, s)
+  local buckets = self_._buckets
+  local bsz = self_._bucket_size
 
   local bucket = buckets[b1]
   for i = 1, bsz do
@@ -286,18 +307,20 @@ function CF:contains(item)
 end
 
 function CF:load_factor()
-  return self._count / (self._num_buckets * self._bucket_size)
+  local self_ = self --[[:! CFShape]]
+  return self_._count / (self_._num_buckets * self_._bucket_size)
 end
 
 function CF:clear()
-  local bsz = self._bucket_size
-  local nb = self._num_buckets
-  local buckets = self._buckets
+  local self_ = self --[[:! CFShape]]
+  local bsz = self_._bucket_size
+  local nb = self_._num_buckets
+  local buckets = self_._buckets
   for i = 0, nb - 1 do
     local bucket = buckets[i]
     for j = 1, bsz do bucket[j] = 0 end
   end
-  self._count = 0
+  self_._count = 0
 end
 
 -- Construct cuckoo filter from options table
@@ -333,19 +356,24 @@ end
 -- Simple (non-counting) Bloom filter — used internally by Scalable Bloom filter
 -- ---------------------------------------------------------------------------
 
+--:: SBFInner = { _m: integer, _k: integer, _bits: { [integer]: integer }, _count: integer, _capacity: number, ... }
+
 local SBF_inner = {}
 SBF_inner.__index = SBF_inner
 
+--: (bits: { [integer]: integer }, pos: integer) -> boolean
 local function sbloom_bit_get(bits, pos)
   local word = floor(pos / 32) + 1
   return band(rshift(bits[word] or 0, pos % 32), 1) == 1
 end
 
+--: (bits: { [integer]: integer }, pos: integer) -> nil
 local function sbloom_bit_set(bits, pos)
   local word = floor(pos / 32) + 1
   bits[word] = bor(bits[word] or 0, lshift(1, pos % 32))
 end
 
+--: (self: SBFInner, s: string, fn: (pos: integer) -> nil) -> nil
 local function sbloom_probe(self, s, fn)
   local m, k = self._m, self._k
   local h1, h2 = hash_pair(s)
@@ -355,23 +383,27 @@ local function sbloom_probe(self, s, fn)
 end
 
 function SBF_inner:add(s)
-  sbloom_probe(self, s, function(pos) sbloom_bit_set(self._bits, pos) end)
-  self._count = self._count + 1
+  local self_ = self --[[:! SBFInner]]
+  sbloom_probe(self_, s, function(pos) sbloom_bit_set(self_._bits, pos) end)
+  self_._count = self_._count + 1
 end
 
 function SBF_inner:contains(s)
+  local self_ = self --[[:! SBFInner]]
   local found = true
-  sbloom_probe(self, s, function(pos)
-    if not sbloom_bit_get(self._bits, pos) then found = false end
+  sbloom_probe(self_, s, function(pos)
+    if not sbloom_bit_get(self_._bits, pos) then found = false end
   end)
   return found
 end
 
 function SBF_inner:at_capacity()
+  local self_ = self --[[:! SBFInner]]
   -- Consider "full" when 90% of capacity has been used
-  return self._count >= self._capacity * 0.9
+  return self_._count >= self_._capacity * 0.9
 end
 
+--: (n: number, p: number) -> SBFInner
 local function make_inner_bloom(n, p)
   local m = optimal_m(n, p)
   local k = optimal_k(m, n)
@@ -391,40 +423,46 @@ end
 -- Scalable Bloom Filter
 -- ---------------------------------------------------------------------------
 
+--:: ScalableBloomShape = { _filters: { [integer]: SBFInner }, _base_error_rate: number, _growth_factor: number, ... }
+
 local ScalableBloom = {}
 ScalableBloom.__index = ScalableBloom
 
 function ScalableBloom:add(item)
+  local self_ = self --[[:! ScalableBloomShape]]
   local s = tostring(item)
   -- Check if current filter needs expanding
-  local current = self._filters[#self._filters]
+  local current = self_._filters[#self_._filters]
   if current:at_capacity() then
-    local new_cap = current._capacity * self._growth_factor
+    local new_cap = current._capacity * self_._growth_factor
     -- Tighten error rate by factor of 0.85 per level to bound total FP rate
-    local new_p = self._base_error_rate * (0.85 ^ #self._filters)
+    local new_p = self_._base_error_rate * (0.85 ^ #self_._filters)
     if new_p < 1e-10 then new_p = 1e-10 end
     current = make_inner_bloom(new_cap, new_p)
-    self._filters[#self._filters + 1] = current
+    self_._filters[#self_._filters + 1] = current
   end
   current:add(s)
 end
 
 function ScalableBloom:contains(item)
+  local self_ = self --[[:! ScalableBloomShape]]
   local s = tostring(item)
-  for i = 1, #self._filters do
-    if self._filters[i]:contains(s) then return true end
+  for i = 1, #self_._filters do
+    if self_._filters[i]:contains(s) then return true end
   end
   return false
 end
 
 function ScalableBloom:filter_count()
-  return #self._filters
+  local self_ = self --[[:! ScalableBloomShape]]
+  return #self_._filters
 end
 
 function ScalableBloom:total_capacity()
+  local self_ = self --[[:! ScalableBloomShape]]
   local total = 0
-  for i = 1, #self._filters do
-    total = total + self._filters[i]._capacity
+  for i = 1, #self_._filters do
+    total = total + self_._filters[i]._capacity
   end
   return total
 end
@@ -433,9 +471,9 @@ end
 -- opts.initial_capacity (default 100), opts.error_rate (default 0.01), opts.growth_factor (default 2)
 function M.scalable(opts)
   opts = opts or {}
-  local initial_capacity = opts.initial_capacity or 100
-  local error_rate = opts.error_rate or 0.01
-  local growth_factor = opts.growth_factor or 2
+  local initial_capacity = (opts.initial_capacity or 100) --[[:! number]]
+  local error_rate = (opts.error_rate or 0.01) --[[:! number]]
+  local growth_factor = (opts.growth_factor or 2) --[[:! number]]
   local first = make_inner_bloom(initial_capacity, error_rate)
   return setmetatable({
     _filters          = { first },
