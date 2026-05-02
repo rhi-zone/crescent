@@ -11,6 +11,12 @@ local M = {}
 
 M._tier = "pure"
 
+--:: CompRecord = { type: string, name: string, np: integer, nn: integer, value: number }
+--:: CircuitShape = { _nodes: { [string]: integer }, _node_names: { [integer]: string }, _node_count: integer, _components: { [integer]: CompRecord }, _vsources: { [integer]: CompRecord }, node: (CircuitShape, string) -> integer, _ensure_node: (CircuitShape, any) -> integer, resistor: (CircuitShape, string, any, any, number) -> CircuitShape, voltage_source: (CircuitShape, string, any, any, number) -> CircuitShape, current_source: (CircuitShape, string, any, any, number) -> CircuitShape, wire: (CircuitShape, string, any, any) -> CircuitShape, _build_mna: (CircuitShape) -> any, solve_dc: (CircuitShape) -> any, sweep: (CircuitShape, string, string, any) -> any }
+--:: ResultShape = { _voltages: { [string]: number }, _currents: { [string]: number }, _power: { [string]: number }, node_voltages: { [string]: number }, branch_currents: { [string]: number } }
+--:: NumMatrix = { [integer]: { [integer]: number } }
+--:: NumVec = { [integer]: number }
+
 -- Gaussian elimination with partial pivoting
 -- Solves Ax = b in place, returns x or (nil, errmsg)
 local function gaussian_solve(A, b, n)
@@ -45,7 +51,7 @@ local function gaussian_solve(A, b, n)
 		end
 	end
 	-- Back substitution
-	local x = {}
+	local x = {} --: NumVec
 	for row = n, 1, -1 do
 		local sum = b[row]
 		for c = row + 1, n do
@@ -57,19 +63,23 @@ local function gaussian_solve(A, b, n)
 end
 
 -- Deep copy a 2D matrix
+--: (NumMatrix, integer) -> NumMatrix
 local function copy_matrix(A, n)
-	local B = {}
+	local B = {} --: NumMatrix
 	for i = 1, n do
 		B[i] = {}
 		for j = 1, n do
-			B[i][j] = A[i][j]
+			local Ai = A[i] --[[:! { [integer]: number }]]
+			local Bi = B[i] --[[:! { [integer]: number }]]
+			Bi[j] = Ai[j]
 		end
 	end
 	return B
 end
 
+--: (NumVec, integer) -> NumVec
 local function copy_vec(b, n)
-	local v = {}
+	local v = {} --: NumVec
 	for i = 1, n do v[i] = b[i] end
 	return v
 end
@@ -82,15 +92,18 @@ local Result = {}
 Result.__index = Result
 
 function Result:voltage(name)
-	return self._voltages[name]
+	local self_ = self --[[:! ResultShape]]
+	return self_._voltages[name]
 end
 
 function Result:current(name)
-	return self._currents[name]
+	local self_ = self --[[:! ResultShape]]
+	return self_._currents[name]
 end
 
 function Result:power(name)
-	return self._power[name]
+	local self_ = self --[[:! ResultShape]]
+	return self_._power[name]
 end
 
 -- Circuit object
@@ -98,95 +111,108 @@ local Circuit = {}
 Circuit.__index = Circuit
 
 function M.new()
-	local c = setmetatable({}, Circuit)
-	c._nodes = {}        -- name -> id (0 = ground)
-	c._node_names = {}   -- id -> name
-	c._node_count = 0    -- number of non-ground nodes
-	c._components = {}   -- list of component tables
-	c._vsources = {}     -- list of voltage source component tables (ordered)
-	return c
+	local c = setmetatable({
+		_nodes = {},        -- name -> id (0 = ground)
+		_node_names = {},   -- id -> name
+		_node_count = 0,    -- number of non-ground nodes
+		_components = {},   -- list of component tables
+		_vsources = {},     -- list of voltage source component tables (ordered)
+	}, Circuit) --[[: any]]
+	return c --[[:! CircuitShape]]
 end
 
 -- Register a named node, returns its id (1-based, 0 = ground)
 function Circuit:node(name)
+	local self_ = self --[[:! CircuitShape]]
 	if name == "0" or name == "gnd" or name == "GND" then
 		return 0
 	end
-	if self._nodes[name] then
-		return self._nodes[name]
+	if self_._nodes[name] then
+		return self_._nodes[name]
 	end
-	self._node_count = self._node_count + 1
-	local id = self._node_count
-	self._nodes[name] = id
-	self._node_names[id] = name
+	self_._node_count = self_._node_count + 1
+	local id = self_._node_count
+	self_._nodes[name] = id
+	self_._node_names[id] = name
 	return id
 end
 
 -- Get or register node by id or name
 function Circuit:_ensure_node(n)
+	local self_ = self --[[:! CircuitShape]]
 	if type(n) == "number" then
-		if n == 0 then return 0 end
+		local n_ = n --[[:! integer]]
+		if n_ == 0 then return 0 end
 		-- Register numeric nodes without a name if not already named
-		if not self._node_names[n] then
-			if n > self._node_count then self._node_count = n end
-			self._node_names[n] = tostring(n)
-			self._nodes[tostring(n)] = n
+		if not self_._node_names[n_] then
+			if n_ > self_._node_count then self_._node_count = n_ end
+			self_._node_names[n_] = tostring(n_)
+			self_._nodes[tostring(n_)] = n_
 		end
-		return n
+		return n_
 	end
-	return self:node(n)
+	return self_:node(n --[[:! string]])
 end
 
 function Circuit:resistor(name, np, nn, r)
-	np = self:_ensure_node(np)
-	nn = self:_ensure_node(nn)
-	local comp = { type = "R", name = name, np = np, nn = nn, value = r }
-	self._components[#self._components + 1] = comp
-	return self
+	local self_ = self --[[:! CircuitShape]]
+	local np_ = self_:_ensure_node(np)
+	local nn_ = self_:_ensure_node(nn)
+	local r_ = r --[[:! number]]
+	local comp = { type = "R", name = name --[[:! string]], np = np_, nn = nn_, value = r_ }
+	self_._components[#self_._components + 1] = comp
+	return self_
 end
 
 function Circuit:voltage_source(name, np, nn, v)
-	np = self:_ensure_node(np)
-	nn = self:_ensure_node(nn)
-	local comp = { type = "V", name = name, np = np, nn = nn, value = v }
-	self._components[#self._components + 1] = comp
-	self._vsources[#self._vsources + 1] = comp
-	return self
+	local self_ = self --[[:! CircuitShape]]
+	local np_ = self_:_ensure_node(np)
+	local nn_ = self_:_ensure_node(nn)
+	local v_ = v --[[:! number]]
+	local comp = { type = "V", name = name --[[:! string]], np = np_, nn = nn_, value = v_ }
+	self_._components[#self_._components + 1] = comp
+	self_._vsources[#self_._vsources + 1] = comp
+	return self_
 end
 
 function Circuit:current_source(name, np, nn, i)
-	np = self:_ensure_node(np)
-	nn = self:_ensure_node(nn)
-	local comp = { type = "I", name = name, np = np, nn = nn, value = i }
-	self._components[#self._components + 1] = comp
-	return self
+	local self_ = self --[[:! CircuitShape]]
+	local np_ = self_:_ensure_node(np)
+	local nn_ = self_:_ensure_node(nn)
+	local i_ = i --[[:! number]]
+	local comp = { type = "I", name = name --[[:! string]], np = np_, nn = nn_, value = i_ }
+	self_._components[#self_._components + 1] = comp
+	return self_
 end
 
 -- Wire = 0Ω resistance (implemented as voltage source with 0V)
 function Circuit:wire(name, np, nn)
-	np = self:_ensure_node(np)
-	nn = self:_ensure_node(nn)
-	local comp = { type = "V", name = name, np = np, nn = nn, value = 0.0 }
-	self._components[#self._components + 1] = comp
-	self._vsources[#self._vsources + 1] = comp
-	return self
+	local self_ = self --[[:! CircuitShape]]
+	local np_ = self_:_ensure_node(np)
+	local nn_ = self_:_ensure_node(nn)
+	local comp = { type = "V", name = name --[[:! string]], np = np_, nn = nn_, value = 0.0 }
+	self_._components[#self_._components + 1] = comp
+	self_._vsources[#self_._vsources + 1] = comp
+	return self_
 end
 
 -- Build the MNA matrix. Returns A, b, size, vsource_idx_map
 -- vsource_idx_map: vsource_name -> extra variable index (1-based into vsources)
 function Circuit:_build_mna()
-	local N = self._node_count    -- number of non-ground nodes
-	local Nv = #self._vsources    -- number of voltage sources / wires
+	local self_ = self --[[:! CircuitShape]]
+	local N = self_._node_count    -- number of non-ground nodes
+	local Nv = #self_._vsources    -- number of voltage sources / wires
 	local sz = N + Nv             -- total system size
 
 	-- Initialize A and b
-	local A = {}
-	local b = {}
+	local A = {} --: NumMatrix
+	local b = {} --: NumVec
 	for i = 1, sz do
 		A[i] = {}
-		b[i] = 0
+		b[i] = 0.0
 		for j = 1, sz do
-			A[i][j] = 0
+			local Ai = A[i] --[[:! { [integer]: number }]]
+			Ai[j] = 0.0
 		end
 	end
 
@@ -195,12 +221,12 @@ function Circuit:_build_mna()
 	-- Voltage source k maps to row/col N+k
 
 	-- Build vsource index map
-	local vsource_idx = {}
-	for k, vs in ipairs(self._vsources) do
+	local vsource_idx = {} --: { [string]: integer }
+	for k, vs in ipairs(self_._vsources) do
 		vsource_idx[vs.name] = k
 	end
 
-	for _, comp in ipairs(self._components) do
+	for _, comp in ipairs(self_._components) do
 		local t = comp.type
 		local i = comp.np   -- positive node (0 = ground)
 		local j = comp.nn   -- negative node (0 = ground)
@@ -241,61 +267,73 @@ end
 -- Solve DC operating point
 -- Returns Result object or (nil, errmsg)
 function Circuit:solve_dc()
-	local A, b, sz, N, vsource_idx = self:_build_mna()
+	local self_ = self --[[:! CircuitShape]]
+	local mna = {self_:_build_mna()} --[[:! { [integer]: any }]]
+	local A_ = mna[1] --[[:! NumMatrix]]
+	local b_ = mna[2] --[[:! NumVec]]
+	local sz_ = mna[3] --[[:! integer]]
+	local N_ = mna[4] --[[:! integer]]
+	local vsource_idx_ = mna[5] --[[:! { [string]: integer }]]
 
-	if sz == 0 then
+	if sz_ == 0 then
 		-- trivial: only ground node
-		local empty_pwr = { total = 0 }
+		local empty_pwr = { total = 0.0 } --: { [string]: number }
 		return setmetatable({
-			_voltages = {}, _currents = {}, _power = empty_pwr,
-			node_voltages = {}, branch_currents = {},
-		}, Result)
+			_voltages = {} --[[:! { [string]: number }]],
+			_currents = {} --[[:! { [string]: number }]],
+			_power = empty_pwr,
+			node_voltages = {} --[[:! { [string]: number }]],
+			branch_currents = {} --[[:! { [string]: number }]],
+		}, Result) --[[: any]]
 	end
 
-	local Ac = copy_matrix(A, sz)
-	local bc = copy_vec(b, sz)
-	local x, err = gaussian_solve(Ac, bc, sz)
-	if not x then return nil, err end
+	local Ac = copy_matrix(A_, sz_)
+	local bc = copy_vec(b_, sz_)
+	local x = gaussian_solve(Ac, bc, sz_)
+	if not x then return nil, "singular matrix" end
 
 	-- Extract node voltages
-	local node_voltages = {}
-	for id, name in pairs(self._node_names) do
-		node_voltages[name] = x[id]
+	local node_voltages = { ["0"] = 0.0, gnd = 0.0 } --: { [string]: number }
+	for id, name in pairs(self_._node_names) do
+		local id_ = id --[[:! integer]]
+		node_voltages[name] = x[id_]
 	end
-	node_voltages["0"] = 0
-	node_voltages["gnd"] = 0
 
 	-- Extract branch currents
-	local branch_currents = {}
+	local branch_currents = {} --: { [string]: number }
 	-- For voltage sources: current is the extra variable
-	for name, k in pairs(vsource_idx) do
-		branch_currents[name] = x[N + k]
+	for name, k in pairs(vsource_idx_) do
+		branch_currents[name] = x[N_ + k]
 	end
 	-- For resistors: I = (V_np - V_nn) / R
-	for _, comp in ipairs(self._components) do
+	for _, comp in ipairs(self_._components) do
 		if comp.type == "R" then
-			local vp = (comp.np == 0) and 0 or x[comp.np]
-			local vn = (comp.nn == 0) and 0 or x[comp.nn]
-			branch_currents[comp.name] = (vp - vn) / comp.value
+			local vp = (comp.np == 0) and 0.0 or x[comp.np]
+			local vn = (comp.nn == 0) and 0.0 or x[comp.nn]
+			local vp_ = vp --[[:! number]]
+			local vn_ = vn --[[:! number]]
+			branch_currents[comp.name] = (vp_ - vn_) / comp.value
 		elseif comp.type == "I" then
 			branch_currents[comp.name] = comp.value
 		end
 	end
 
 	-- Compute power
-	local power = {}
-	local total_power = 0
-	for _, comp in ipairs(self._components) do
+	local power = { total = 0.0 } --: { [string]: number }
+	local total_power = 0.0 --: number
+	for _, comp in ipairs(self_._components) do
 		local name = comp.name
-		local cur = branch_currents[name]
-		local vp = (comp.np == 0) and 0 or x[comp.np]
-		local vn = (comp.nn == 0) and 0 or x[comp.nn]
-		local v_drop = vp - vn
+		local cur = branch_currents[name] or 0.0
+		local vp = (comp.np == 0) and 0.0 or x[comp.np]
+		local vn = (comp.nn == 0) and 0.0 or x[comp.nn]
+		local vp_ = vp --[[:! number]]
+		local vn_ = vn --[[:! number]]
+		local v_drop = vp_ - vn_
 		local p = v_drop * cur
 		power[name] = p
 		if comp.type == "R" then total_power = total_power + p end
 	end
-	power.total = total_power
+	power["total"] = total_power
 
 	return setmetatable({
 		_voltages = node_voltages,
@@ -304,15 +342,17 @@ function Circuit:solve_dc()
 		-- public aliases for direct table access (no 'power' field — use :power() method)
 		node_voltages = node_voltages,
 		branch_currents = branch_currents,
-	}, Result)
+	}, Result) --[[: any]]
 end
 
 -- Parameter sweep: change a component value and solve for each
 -- comp_name: component name, param: "voltage"/"current"/"resistance", values: array
 function Circuit:sweep(comp_name, param, values)
+	local self_ = self --[[:! CircuitShape]]
+	local values_ = values --[[:! { [integer]: number }]]
 	-- Find the component
-	local target = nil
-	for _, comp in ipairs(self._components) do
+	local target = nil --: CompRecord|nil
+	for _, comp in ipairs(self_._components) do
 		if comp.name == comp_name then
 			target = comp
 			break
@@ -321,63 +361,70 @@ function Circuit:sweep(comp_name, param, values)
 	if not target then
 		return nil, "component not found: " .. tostring(comp_name)
 	end
+	local target_ = target --[[:! CompRecord]]
 
-	local original = target.value
+	local original = target_.value
 	local results = {}
-	for i = 1, #values do
-		target.value = values[i]
+	for i = 1, #values_ do
+		target_.value = values_[i]
 		-- Rebuild vsources list if needed (type change not supported)
-		local result, err = self:solve_dc()
+		local result, err = self_:solve_dc()
 		if not result then
-			target.value = original
+			target_.value = original
 			return nil, err
 		end
 		results[i] = result
 	end
-	target.value = original
+	target_.value = original
 	return results
 end
 
 -- Thevenin equivalent between two nodes
 -- Returns {vth, rth} or (nil, errmsg)
 function CS_thevenin(circuit, n_pos, n_neg)
+	local c_ = circuit --[[:! CircuitShape]]
+	local np = n_pos --[[:! integer]]
+	local nn = n_neg --[[:! integer]]
 	-- Vth = open circuit voltage between n_pos and n_neg
-	local result, err = circuit:solve_dc()
-	if not result then return nil, err end
+	local result = c_:solve_dc()
+	if not result then return nil, "solve failed" end
+	local result_ = result --[[:! ResultShape]]
 
-	local np_name = circuit._node_names[n_pos] or tostring(n_pos)
-	local nn_name = (n_neg == 0) and "0" or (circuit._node_names[n_neg] or tostring(n_neg))
+	local np_name = c_._node_names[np] or tostring(np)
+	local nn_name = (nn == 0) and "0" or (c_._node_names[nn] or tostring(nn))
 
-	local vp = result.node_voltages[np_name] or 0
-	local vn = result.node_voltages[nn_name] or 0
+	local vp = result_.node_voltages[np_name] or 0.0
+	local vn = result_.node_voltages[nn_name] or 0.0
 	local vth = vp - vn
 
 	-- Rth: zero all independent sources, apply 1V test source between n_pos and n_neg
 	-- Build modified circuit
 	local test = M.new()
 	-- Copy all nodes
-	for id, name in pairs(circuit._node_names) do
-		test._nodes[name] = id
-		test._node_names[id] = name
-		if id > test._node_count then test._node_count = id end
+	for id, name in pairs(c_._node_names) do
+		local id_ = id --[[:! integer]]
+		test._nodes[name] = id_
+		test._node_names[id_] = name
+		if id_ > test._node_count then test._node_count = id_ end
 	end
 	-- Copy components with zeroed sources
-	for _, comp in ipairs(circuit._components) do
+	for _, comp in ipairs(c_._components) do
 		if comp.type == "R" then
 			test:resistor(comp.name, comp.np, comp.nn, comp.value)
 		elseif comp.type == "V" then
-			test:voltage_source(comp.name, comp.np, comp.nn, 0)
+			test:voltage_source(comp.name, comp.np, comp.nn, 0.0)
 		elseif comp.type == "I" then
 			-- zero current source = open circuit: skip
 		end
 	end
 	-- Add 1V test source
-	test:voltage_source("_test_vth", n_pos, n_neg, 1.0)
+	test:voltage_source("_test_vth", np, nn, 1.0)
 
-	local tr, terr = test:solve_dc()
-	if not tr then return nil, terr end
+	local tr = test:solve_dc()
+	if not tr then return nil, "solve failed on test circuit" end
+	local tr_ = tr --[[:! ResultShape]]
 
-	local i_test = tr.branch_currents["_test_vth"]
+	local i_test = tr_.branch_currents["_test_vth"]
 	if not i_test or math.abs(i_test) < 1e-15 then
 		return nil, "cannot determine Rth: zero test current"
 	end
@@ -391,10 +438,11 @@ end
 -- Norton equivalent between two nodes
 -- Returns {in_, rn} or (nil, errmsg)
 local function CS_norton(circuit, n_pos, n_neg)
-	local th, err = CS_thevenin(circuit, n_pos, n_neg)
-	if not th then return nil, err end
-	local rn = th.rth
-	local in_ = th.vth / rn
+	local th = CS_thevenin(circuit, n_pos, n_neg)
+	if not th then return nil, "thevenin failed" end
+	local th_ = th --[[:! { vth: number, rth: number }]]
+	local rn = th_.rth
+	local in_ = th_.vth / rn
 	return { in_ = in_, rn = rn }
 end
 
