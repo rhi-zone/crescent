@@ -17,22 +17,25 @@ local huge = math.huge
 -- ── helpers ──────────────────────────────────────────────────────────────────
 
 -- Binary search: returns index of largest i such that ts[i] <= t, or 0.
-local function bisect_le(times, t)
+-- Binary search: returns index of largest i such that ts[i] <= t, or 0.
+local function bisect_le(times --[[ : { [integer]: number } ]], t --[[ : number ]])
   local lo, hi = 1, #times
   if hi == 0 or times[1] > t then return 0 end
   while lo < hi do
-    local mid = lo + math.floor((hi - lo + 1) / 2)
+    local fl = math.floor((hi - lo + 1) / 2) --[[:! integer]]
+    local mid = lo + fl
     if times[mid] <= t then lo = mid else hi = mid - 1 end
   end
   return lo
 end
 
 -- Returns index of first i such that ts[i] >= t, or #times+1.
-local function bisect_ge(times, t)
+local function bisect_ge(times --[[ : { [integer]: number } ]], t --[[ : number ]])
   local lo, hi = 1, #times
   if hi == 0 or times[hi] < t then return hi + 1 end
   while lo < hi do
-    local mid = lo + math.floor((hi - lo) / 2)
+    local fl = math.floor((hi - lo) / 2) --[[:! integer]]
+    local mid = lo + fl
     if times[mid] >= t then hi = mid else lo = mid + 1 end
   end
   return lo
@@ -71,7 +74,7 @@ local function new_series()
 end
 
 -- Create a series pre-loaded with parallel time/value arrays (internal, no copy).
-local function series_from(ts_arr, vs_arr)
+local function series_from(ts_arr --[[ : { [integer]: number } ]], vs_arr --[[ : { [integer]: number } ]])
   return setmetatable({ _t = ts_arr, _v = vs_arr }, Series)
 end
 
@@ -128,14 +131,15 @@ end
 function Series:stats(t0, t1)
   local times = self._t
   local vals  = self._v
-  local lo, hi
-  if t0 == nil then
-    lo, hi = 1, #times
-  else
+  local lo = 1
+  local hi = #times
+  if t0 ~= nil then
     lo = bisect_ge(times, t0)
     hi = bisect_le(times, t1)
   end
-  local n = hi - lo + 1
+  local lo_ = lo --[[:! integer]]
+  local hi_ = hi --[[:! integer]]
+  local n = hi_ - lo_ + 1
   if n <= 0 then
     return { min=nil, max=nil, mean=nil, sum=nil, count=0,
              stddev=nil, first=nil, last=nil }
@@ -143,7 +147,7 @@ function Series:stats(t0, t1)
   local s  = 0
   local mn = huge
   local mx = -huge
-  for i = lo, hi do
+  for i = lo_, hi_ do
     local v = vals[i]
     s = s + v
     if v < mn then mn = v end
@@ -152,7 +156,7 @@ function Series:stats(t0, t1)
   local mean = s / n
   -- two-pass stddev
   local sq = 0
-  for i = lo, hi do
+  for i = lo_, hi_ do
     local d = vals[i] - mean
     sq = sq + d * d
   end
@@ -164,8 +168,8 @@ function Series:stats(t0, t1)
     sum    = s,
     count  = n,
     stddev = stddev,
-    first  = vals[lo],
-    last   = vals[hi],
+    first  = vals[lo_],
+    last   = vals[hi_],
   }
 end
 
@@ -177,9 +181,10 @@ function Series:resample(interval, agg)
   local vals  = self._v
   local n = #times
   if n == 0 then return new_series() end
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   local bucket_t = nil
-  local bucket_v = {}
+  local bucket_v = {} --: { [integer]: number }
   for i = 1, n do
     local t = times[i]
     local b = math.floor(t / interval) * interval
@@ -214,7 +219,8 @@ function Series:rolling(n, agg)
   local times = self._t
   local vals  = self._v
   local len = #times
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   for i = n, len do
     local window = {}
     for j = i - n + 1, i do
@@ -237,7 +243,8 @@ function Series:downsample(max_points)
   local n = #times
   if n <= max_points then
     -- return a shallow copy
-    local ot, ov = {}, {}
+    local ot = {} --: { [integer]: number }
+    local ov = {} --: { [integer]: number }
     for i = 1, n do ot[i] = times[i]; ov[i] = vals[i] end
     return series_from(ot, ov)
   end
@@ -245,7 +252,8 @@ function Series:downsample(max_points)
     -- just return first and last
     return series_from({ times[1], times[n] }, { vals[1], vals[n] })
   end
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   -- always keep first point
   ot[1] = times[1]; ov[1] = vals[1]
   -- bucket the middle points
@@ -261,7 +269,9 @@ function Series:downsample(max_points)
     local c_end   = math.floor((i + 1) * bucket_size) + 1
     if c_end > n - 1 then c_end = n - 1 end
     if c_start > n - 1 then c_start = n - 1 end
-    local avg_t, avg_v, cnt = 0, 0, 0
+    local avg_t = 0 --: number
+    local avg_v = 0 --: number
+    local cnt = 0
     for j = c_start, c_end do
       avg_t = avg_t + times[j]
       avg_v = avg_v + vals[j]
@@ -304,7 +314,8 @@ function Series:normalize()
     if vals[i] > mx then mx = vals[i] end
   end
   local range = mx - mn
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   for i = 1, n do
     ot[i] = times[i]
     ov[i] = (range == 0) and 0 or (vals[i] - mn) / range
@@ -317,7 +328,8 @@ function Series:diff()
   local times = self._t
   local vals  = self._v
   local n = #times
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   for i = 2, n do
     ot[#ot + 1] = times[i]
     ov[#ov + 1] = vals[i] - vals[i - 1]
@@ -330,7 +342,8 @@ function Series:cumsum()
   local times = self._t
   local vals  = self._v
   local n = #times
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   local s = 0
   for i = 1, n do
     s = s + vals[i]
@@ -345,7 +358,8 @@ function Series:apply(fn)
   local times = self._t
   local vals  = self._v
   local n = #times
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   for i = 1, n do
     ot[i] = times[i]
     ov[i] = fn(vals[i])
@@ -379,26 +393,20 @@ function Series:outliers(opts)
     for i = 1, n do
       local z = math.abs(vals[i] - mean) / sd
       if z >= threshold then
-        result[#result + 1] = { vals[i], vals[i], z }
-        -- use proper fields
-        result[#result].t       = times[i]
-        result[#result].v       = vals[i]
-        result[#result].z_score = z
-        -- fix array part
-        result[#result][1] = times[i]
-        result[#result][2] = vals[i]
-        result[#result][3] = z
+        result[#result + 1] = { times[i], vals[i], z,
+          t = times[i], v = vals[i], z_score = z, score = z }
       end
     end
 
   elseif method == "iqr" then
-    local threshold = opts.threshold or 1.5
+    local threshold_raw = opts.threshold or 1.5
+    local threshold = threshold_raw --[[:! number]]
     -- sort values to find quartiles
-    local sorted = {}
+    local sorted = {} --: { [integer]: number }
     for i = 1, n do sorted[i] = vals[i] end
     table.sort(sorted)
-    local q1 = sorted[math.floor(n * 0.25) + 1] or sorted[1]
-    local q3 = sorted[math.floor(n * 0.75) + 1] or sorted[n]
+    local q1 = sorted[math.floor(n * 0.25) + 1 --[[:! integer]]] or sorted[1]
+    local q3 = sorted[math.floor(n * 0.75) + 1 --[[:! integer]]] or sorted[n]
     local iqr = q3 - q1
     local lo_fence = q1 - threshold * iqr
     local hi_fence = q3 + threshold * iqr
@@ -408,7 +416,7 @@ function Series:outliers(opts)
         local score = (v > hi_fence) and (v - hi_fence) / iqr
                                       or  (lo_fence - v) / iqr
         result[#result + 1] = { times[i], v, score,
-          t = times[i], v = v, score = score }
+          t = times[i], v = v, score = score, z_score = score }
       end
     end
   else
@@ -429,7 +437,8 @@ end
 function M.merge(s1, s2, fn)
   local t1, v1 = s1._t, s1._v
   local t2, v2 = s2._t, s2._v
-  local ot, ov = {}, {}
+  local ot = {} --: { [integer]: number }
+  local ov = {} --: { [integer]: number }
   local i, j = 1, 1
   local n1, n2 = #t1, #t2
   while i <= n1 and j <= n2 do
@@ -450,7 +459,7 @@ end
 -- opts.method = "linear" (default) | "exact"
 -- Uses the union of timestamps from both series.
 -- Returns {s1_aligned, s2_aligned}.
-function M.align(s1, s2, opts)
+function M.align(s1 --[[ : { at: (number, unknown) -> number | nil, _t: { [integer]: number }, _v: { [integer]: number }, ... } ]], s2 --[[ : { at: (number, unknown) -> number | nil, _t: { [integer]: number }, _v: { [integer]: number }, ... } ]], opts)
   opts = opts or {}
   local interp = (opts.method == nil or opts.method == "linear") and "linear" or nil
   -- collect union of timestamps
@@ -472,12 +481,16 @@ function M.align(s1, s2, opts)
   end
   table.sort(all_t)
   local m = #all_t
-  local a1t, a1v = {}, {}
-  local a2t, a2v = {}, {}
+  local a1t = {} --: { [integer]: number }
+  local a1v = {} --: { [integer]: number }
+  local a2t = {} --: { [integer]: number }
+  local a2v = {} --: { [integer]: number }
   for i = 1, m do
     local t = all_t[i]
-    local v1 = s1:at(t, interp)
-    local v2 = s2:at(t, interp)
+    local s1_any = s1 --[[: any]]
+    local s2_any = s2 --[[: any]]
+    local v1 = s1_any:at(t, interp)
+    local v2 = s2_any:at(t, interp)
     if v1 ~= nil and v2 ~= nil then
       a1t[#a1t + 1] = t; a1v[#a1v + 1] = v1
       a2t[#a2t + 1] = t; a2v[#a2v + 1] = v2
