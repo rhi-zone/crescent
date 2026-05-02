@@ -22,7 +22,7 @@ M.configure = function(getenv)
   end
   local no_color = getenv("NO_COLOR")
   local term     = getenv("TERM")
-  M.enabled = not (no_color ~= nil and no_color ~= "") and term ~= "dumb"
+  M.enabled = not (no_color ~= nil and no_color ~= "") and term ~= "dumb" and true or false
 end
 
 -- ESC [ prefix used by all sequences.
