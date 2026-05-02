@@ -32,6 +32,7 @@ end
 -- Every schema is a table with a `_validate(value, path) -> ok, errs` method.
 -- `check` and `parse` are defined on the base prototype.
 
+
 local Schema = {}
 Schema.__index = Schema
 
@@ -250,7 +251,7 @@ function StringSchema:nullable()
   return s
 end
 
-StringSchema.optional = StringSchema.nullable
+StringSchema.optional = Schema.nullable
 
 function StringSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -364,7 +365,7 @@ function NumberSchema:nullable()
   return s
 end
 
-NumberSchema.optional = NumberSchema.nullable
+NumberSchema.optional = Schema.nullable
 
 function NumberSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -451,7 +452,7 @@ function IntegerSchema:nullable()
   return s
 end
 
-IntegerSchema.optional = IntegerSchema.nullable
+IntegerSchema.optional = Schema.nullable
 
 function IntegerSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -526,7 +527,7 @@ function BooleanSchema:nullable()
   return s
 end
 
-BooleanSchema.optional = BooleanSchema.nullable
+BooleanSchema.optional = Schema.nullable
 
 function BooleanSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -679,7 +680,7 @@ function ArraySchema:nullable()
   return s
 end
 
-ArraySchema.optional = ArraySchema.nullable
+ArraySchema.optional = Schema.nullable
 
 function ArraySchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -758,7 +759,7 @@ function RecordSchema:nullable()
   return s
 end
 
-RecordSchema.optional = RecordSchema.nullable
+RecordSchema.optional = Schema.nullable
 
 function RecordSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -847,7 +848,7 @@ function MapSchema:nullable()
   return s
 end
 
-MapSchema.optional = MapSchema.nullable
+MapSchema.optional = Schema.nullable
 
 function MapSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -936,7 +937,7 @@ function TupleSchema:nullable()
   return s
 end
 
-TupleSchema.optional = TupleSchema.nullable
+TupleSchema.optional = Schema.nullable
 
 function TupleSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -987,7 +988,7 @@ function UnionSchema:nullable()
   return s
 end
 
-UnionSchema.optional = UnionSchema.nullable
+UnionSchema.optional = Schema.nullable
 
 function UnionSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -1048,7 +1049,7 @@ function IntersectionSchema:nullable()
   return s
 end
 
-IntersectionSchema.optional = IntersectionSchema.nullable
+IntersectionSchema.optional = Schema.nullable
 
 function IntersectionSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -1093,7 +1094,7 @@ function LiteralSchema:nullable()
   return s
 end
 
-LiteralSchema.optional = LiteralSchema.nullable
+LiteralSchema.optional = Schema.nullable
 
 function LiteralSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -1137,7 +1138,7 @@ function EnumSchema:nullable()
   return s
 end
 
-EnumSchema.optional = EnumSchema.nullable
+EnumSchema.optional = Schema.nullable
 
 function EnumSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -1182,7 +1183,7 @@ function NotSchema:nullable()
   return s
 end
 
-NotSchema.optional = NotSchema.nullable
+NotSchema.optional = Schema.nullable
 
 function NotSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
@@ -1228,7 +1229,7 @@ function CustomSchema:nullable()
   return s
 end
 
-CustomSchema.optional = CustomSchema.nullable
+CustomSchema.optional = Schema.nullable
 
 function CustomSchema:default(val)
   local s = setmetatable({}, getmetatable(self))
