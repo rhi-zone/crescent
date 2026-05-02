@@ -74,6 +74,26 @@ last because the type system itself is the testbed.
 
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
+### Newly discovered (not yet attempted)
+- `lib/astar/init.lua` (28) — nil | integer comparisons, arithmetic on unknown from untyped heaps
+- `lib/bigint/init.lua` (49) — integer|integer|integer unions from multi-branch arithmetic
+- `lib/calendar/init.lua` (34) — arithmetic on unknown from untyped opts table
+- `lib/behavior_tree/init.lua` (33) — cannot take length of unknown (self fields untyped)
+- `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; all bit.* calls cascade
+- `lib/bitset/init.lua` (11) — setmetatable + BS method pattern; missing argument from math.ceil returning number
+- `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail
+- `lib/base58/init.lua` (2) — any fix to sha256fn call sites triggers new error in hex_to_bin (typechecker limitation with gsub return + checked cast interaction)
+- `lib/benford/init.lua` — DONE (see session log)
+- `lib/barcode/init.lua` — DONE (see session log)
+- `lib/bayesian_filter/init.lua` — DONE (see session log)
+- `lib/ansi/init.lua` — DONE (see session log)
+- `lib/bezier/init.lua` (12) — return type mismatch on setmetatable for Quadratic/Cubic types
+- `lib/bundle/init.lua` (15)
+- `lib/cache/init.lua` (25)
+- `lib/spell_check/init.lua` (13)
+
+
+
 - [x] `lib/xml/init.lua` (62 → 2) — 2 remaining: nil-assignment to typed arrays (typechecker limitation)
 - [x] `lib/cbor/init.lua` (66 → 5) — 5 remaining: type() narrowing limitations in encode_value
 - [x] `lib/cron_parser/init.lua` (63 → 0)
@@ -145,3 +165,7 @@ last because the type system itself is the testbed.
 - [x] `lib/template/init.lua` (was 23 → now 0, commit 7088442)
 - [x] `lib/diff/init.lua` (was 39 → now 8, commit d27b1b5) — 8 remaining: integer|integer compare from v-table or-chain (typechecker limitation)
 - [x] `lib/base64/init.lua` (was 14 → now 0, commit 2914d91)
+- [x] `lib/barcode/init.lua` (was 18 → now 0, commit 4d65c1c) — annotated code128b_value, EAN_L, CODE39_PATTERNS; fixed string.byte ...integer via locals; annotated to_svg opts; cast EanPattern indexing
+- [x] `lib/bayesian_filter/init.lua` (was 13 → now 0, commit 7044dcb) — ClfCat/Classifier/ClfSerial type aliases; tokenize annotation; inline field init in constructor; softmax sum cast to number
+- [x] `lib/ansi/init.lua` (was 1 → now 0, commit d386cff) — boolean coercion via `and true or false`
+- [x] `lib/benford/init.lua` (was 12 → now 0, commit 4069309) — annotated lower_reg_gamma/leading_two_digits; typed observed accumulators; log_gamma c-table typed array; nil-safe leading digit extraction
