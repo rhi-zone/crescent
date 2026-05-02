@@ -4,8 +4,10 @@ end
 
 local M = {}
 
+--:: Codec = { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+
 --- Create a codec from an encode/decode table.
---: (t: { encode: (unknown) -> unknown, decode: (unknown) -> unknown }) -> { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+--: (t: Codec) -> (Codec | nil, string | nil)
 local function new(t)
   if not t then return nil, "codec: expected table" end
   if not t.encode then return nil, "codec: missing encode function" end
@@ -15,7 +17,7 @@ end
 M.new = new
 
 --- Create a codec from two functions.
---: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+--: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> (Codec | nil, string | nil)
 local function from(encode_fn, decode_fn)
   if not encode_fn then return nil, "codec: missing encode function" end
   if not decode_fn then return nil, "codec: missing decode function" end
@@ -24,9 +26,9 @@ end
 M.from = from
 
 --- Chain codecs: encode left-to-right, decode right-to-left.
---: (...{ encode: (unknown) -> unknown, decode: (unknown) -> unknown }) -> { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+--: (...Codec) -> (Codec | nil, string | nil)
 local function chain(...)
-  local codecs = { ... }
+  local codecs = { ... } --: { [integer]: Codec }
   local n = #codecs
   if n == 0 then return nil, "codec.chain: expected at least one codec" end
   if n == 1 then return codecs[1] end
@@ -54,7 +56,7 @@ end
 M.chain = chain
 
 --- Conditional codec: apply only when predicate returns true, otherwise passthrough.
---: (predicate: (unknown) -> boolean, codec: { encode: (unknown) -> unknown, decode: (unknown) -> unknown }) -> { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+--: (predicate: (unknown) -> boolean, codec: Codec) -> (Codec | nil, string | nil)
 local function when(predicate, codec)
   if not predicate then return nil, "codec.when: missing predicate" end
   if not codec then return nil, "codec.when: missing codec" end
@@ -72,7 +74,7 @@ end
 M.when = when
 
 --- Map codec: transform with arbitrary functions.
---: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> { encode: (unknown) -> unknown, decode: (unknown) -> unknown }
+--: (encode_fn: (unknown) -> unknown, decode_fn: (unknown) -> unknown) -> (Codec | nil, string | nil)
 local function map(encode_fn, decode_fn)
   if not encode_fn then return nil, "codec.map: missing encode function" end
   if not decode_fn then return nil, "codec.map: missing decode function" end
@@ -102,7 +104,7 @@ M.identity = {
 M.hex = {
   encode = function(s)
     if type(s) ~= "string" then return nil, "codec.hex.encode: expected string" end
-    return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+    return (s:gsub(".", function(c) return string.format("%02x", string.byte(c, 1)) end))
   end,
   decode = function(s)
     if type(s) ~= "string" then return nil, "codec.hex.decode: expected string" end
@@ -113,8 +115,9 @@ M.hex = {
 }
 
 --- ROT13 codec: rotate ASCII letters by 13 positions. Self-inverse.
+--: (string) -> string
 local function rot13_char(c)
-  local b = c:byte()
+  local b = string.byte(c, 1)
   if b >= 65 and b <= 90 then return string.char((b - 65 + 13) % 26 + 65) end
   if b >= 97 and b <= 122 then return string.char((b - 97 + 13) % 26 + 97) end
   return c
@@ -122,7 +125,8 @@ end
 
 local function rot13_fn(s)
   if type(s) ~= "string" then return nil, "codec.rot13: expected string" end
-  return (s:gsub(".", rot13_char))
+  local rot13_char_ = rot13_char --[[:! (string) -> string | nil]]
+  return (s:gsub(".", rot13_char_))
 end
 
 M.rot13 = {
@@ -143,54 +147,62 @@ M.reverse = {
 }
 
 --- XOR codec: XOR each byte with a key byte. Self-inverse.
---: (key: number) -> { encode: (string) -> string, decode: (string) -> string }
+--: (key: number) -> ({ encode: (string) -> string, decode: (string) -> string } | nil, string | nil)
 local function xor(key)
   if type(key) ~= "number" then return nil, "codec.xor: expected number key" end
-  key = key % 256
+  local key_ = (key % 256) --[[:! integer]]
   -- Use bit.bxor if available (LuaJIT), otherwise bit32 (PUC Lua 5.2+), otherwise pure fallback
-  local bxor
-  if bit then
-    bxor = bit.bxor
-  elseif bit32 then
-    bxor = bit32.bxor
+  local ok_bit, bit_mod = pcall(require, "bit")
+  local bxor_fn --: ((integer, integer) -> integer) | nil
+  if ok_bit then
+    bxor_fn = (bit_mod --[[: any]]).bxor --[[:! (integer, integer) -> integer]]
+  else
+    local ok_bit32, bit32_mod = pcall(require, "bit32")
+    if ok_bit32 then
+      bxor_fn = (bit32_mod --[[: any]]).bxor --[[:! (integer, integer) -> integer]]
+    end
   end
-  if bxor then
+  if bxor_fn then
+    local bxor_ = bxor_fn --[[:! (integer, integer) -> integer]]
     local function xor_fn_fast(s)
       if type(s) ~= "string" then return nil, "codec.xor: expected string" end
-      local t = {}
+      local t = {} --: { [integer]: string }
       for i = 1, #s do
-        t[i] = string.char(bxor(s:byte(i), key))
+        local b = (string.byte(s, i, i) or 0) --[[:! integer]]
+        local xored = bxor_(b, key_) --: integer
+        t[i] = string.char(xored)
       end
       return table.concat(t)
     end
-    return { encode = xor_fn_fast, decode = xor_fn_fast }
+    return { encode = xor_fn_fast --[[:! (string) -> string]], decode = xor_fn_fast --[[:! (string) -> string]] }
   end
   -- Pure fallback: use lookup table
-  local lookup = {}
+  local lookup = {} --: { [integer]: string }
   for i = 0, 255 do
     -- Manual XOR via decomposition
     local result = 0
-    local a, b = i, key
+    local a, b = i, key_
     local p = 1
     for _ = 1, 8 do
       local a_bit = a % 2
       local b_bit = b % 2
       if a_bit ~= b_bit then result = result + p end
-      a = (a - a_bit) / 2
-      b = (b - b_bit) / 2
+      a = math.floor((a - a_bit) / 2)
+      b = math.floor((b - b_bit) / 2)
       p = p * 2
     end
     lookup[i] = string.char(result)
   end
   local function xor_fn_pure(s)
     if type(s) ~= "string" then return nil, "codec.xor: expected string" end
-    local t = {}
+    local t = {} --: { [integer]: string }
     for i = 1, #s do
-      t[i] = lookup[s:byte(i)]
+      local b = (string.byte(s, i, i)) or 0 --[[:! integer]]
+      t[i] = lookup[b]
     end
     return table.concat(t)
   end
-  return { encode = xor_fn_pure, decode = xor_fn_pure }
+  return { encode = xor_fn_pure --[[:! (string) -> string]], decode = xor_fn_pure --[[:! (string) -> string]] }
 end
 M.xor = xor
 

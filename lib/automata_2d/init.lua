@@ -8,13 +8,20 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: RuleFn = (integer, integer) -> integer
+--:: DenseGrid = { _w: integer, _h: integer, _wrap: boolean, _rule: RuleFn, _buf: { [integer]: integer }, _gen: integer }
+--:: SparseGrid = { _cells: { [string]: boolean }, _rule: RuleFn }
+--:: Cell2D = { [integer]: integer }
+
 -- Hash key for sparse grid: encode (x,y) as a string to support arbitrary
 -- (including negative) integer coordinates without overflow.
+--: (number, number) -> string
 local function key(x, y) return x .. "," .. y end
 -- Decode a key back to x, y.
+--: (string) -> (integer, integer)
 local function unkey(k)
   local x, y = k:match("^(-?%d+),(-?%d+)$")
-  return tonumber(x), tonumber(y)
+  return (tonumber(x) or 0) --[[:! integer]], (tonumber(y) or 0) --[[:! integer]]
 end
 
 -- BIG is kept for the RLE encoder's internal set (non-negative coords only in RLE output).
@@ -38,6 +45,7 @@ end
 
 --- Parse a B/S rule string and return a rule function.
 -- The rule function has signature: function(neighbors, current) -> next_state (0 or 1)
+--: (string) -> (RuleFn | nil, string | nil)
 function M.parse_rule(rule_str)
   local birth, survive, err = parse_bs(rule_str)
   if not birth then return nil, err end
@@ -52,25 +60,23 @@ end
 
 -- ── Built-in Rules ────────────────────────────────────────────────────────────
 
-M.rules = {}
+M.rules = {} --: { [string]: RuleFn }
 
--- B3/S23 — Conway's Life
-M.rules.life = M.parse_rule("B3/S23")
-
--- B36/S23 — HighLife (supports replicators)
-M.rules.highlife = M.parse_rule("B36/S23")
-
--- B2/S — Seeds (birth on 2 neighbors, no survival)
-M.rules.seeds = M.parse_rule("B2/S")
-
--- B3678/S34678 — Day & Night
-M.rules.day_and_night = M.parse_rule("B3678/S34678")
-
--- B4678/S35678 — Anneal
-M.rules.anneal = M.parse_rule("B4678/S35678")
-
--- B1357/S1357 — Replicator
-M.rules.replicator = M.parse_rule("B1357/S1357")
+do
+  local function rule(s) local f = (M.parse_rule(s)); return f --[[:! RuleFn]] end
+  -- B3/S23 — Conway's Life
+  M.rules.life = rule("B3/S23")
+  -- B36/S23 — HighLife (supports replicators)
+  M.rules.highlife = rule("B36/S23")
+  -- B2/S — Seeds (birth on 2 neighbors, no survival)
+  M.rules.seeds = rule("B2/S")
+  -- B3678/S34678 — Day & Night
+  M.rules.day_and_night = rule("B3678/S34678")
+  -- B4678/S35678 — Anneal
+  M.rules.anneal = rule("B4678/S35678")
+  -- B1357/S1357 — Replicator
+  M.rules.replicator = rule("B1357/S1357")
+end
 
 -- ── Dense Grid ────────────────────────────────────────────────────────────────
 
@@ -79,31 +85,35 @@ DenseGrid.__index = DenseGrid
 
 --- Get cell value at 0-indexed (x, y). Returns 0 for out-of-bounds.
 function DenseGrid:get(x, y)
-  if x < 0 or x >= self._w or y < 0 or y >= self._h then return 0 end
-  return self._buf[y * self._w + x + 1]
+  local self_ = self --[[:! DenseGrid]]
+  if x < 0 or x >= self_._w or y < 0 or y >= self_._h then return 0 end
+  return self_._buf[y * self_._w + x + 1]
 end
 
 --- Set cell value at 0-indexed (x, y). Returns nil, errmsg on out-of-bounds.
 function DenseGrid:set(x, y, value)
-  if x < 0 or x >= self._w or y < 0 or y >= self._h then
+  local self_ = self --[[:! DenseGrid]]
+  if x < 0 or x >= self_._w or y < 0 or y >= self_._h then
     return nil, "dense:set: position out of bounds"
   end
-  self._buf[y * self._w + x + 1] = value or 0
+  self_._buf[y * self_._w + x + 1] = value or 0
   return true
 end
 
 --- Clear all cells to 0.
 function DenseGrid:clear()
-  local buf = self._buf
-  local sz = self._w * self._h
+  local self_ = self --[[:! DenseGrid]]
+  local buf = self_._buf
+  local sz = self_._w * self_._h
   for i = 1, sz do buf[i] = 0 end
 end
 
 --- Return the number of live cells.
 function DenseGrid:population()
+  local self_ = self --[[:! DenseGrid]]
   local count = 0
-  local buf = self._buf
-  local sz = self._w * self._h
+  local buf = self_._buf
+  local sz = self_._w * self_._h
   for i = 1, sz do
     if buf[i] == 1 then count = count + 1 end
   end
@@ -112,14 +122,16 @@ end
 
 --- Return the number of steps taken.
 function DenseGrid:generation()
-  return self._gen
+  local self_ = self --[[:! DenseGrid]]
+  return self_._gen
 end
 
 --- Return an array of {x, y} (0-indexed) for all live cells.
 function DenseGrid:alive_cells()
-  local result = {}
-  local buf = self._buf
-  local w, h = self._w, self._h
+  local self_ = self --[[:! DenseGrid]]
+  local result = {} --: { [integer]: Cell2D }
+  local buf = self_._buf
+  local w, h = self_._w, self_._h
   for y = 0, h - 1 do
     for x = 0, w - 1 do
       if buf[y * w + x + 1] == 1 then
@@ -132,9 +144,11 @@ end
 
 --- Set cells from an array of {x, y} (like alive_cells output). Clears first.
 function DenseGrid:pattern(cells)
-  self:clear()
+  local self_ = self --[[:! DenseGrid]]
+  DenseGrid.clear(self_)
   for _, cell in ipairs(cells) do
-    self:set(cell[1], cell[2], 1)
+    local cell_ = cell --[[:! Cell2D]]
+    DenseGrid.set(self_, cell_[1], cell_[2], 1)
   end
 end
 
@@ -163,12 +177,13 @@ end
 
 --- Advance one generation.
 function DenseGrid:step()
-  local w, h = self._w, self._h
-  local wrap = self._wrap
-  local rule = self._rule
-  local buf = self._buf
+  local self_ = self --[[:! DenseGrid]]
+  local w, h = self_._w, self_._h
+  local wrap = self_._wrap
+  local rule = self_._rule
+  local buf = self_._buf
   -- Allocate next buffer.
-  local next = {}
+  local next = {} --: { [integer]: integer }
   for i = 1, w * h do next[i] = 0 end
   for y = 0, h - 1 do
     for x = 0, w - 1 do
@@ -177,8 +192,8 @@ function DenseGrid:step()
       next[y * w + x + 1] = rule(n, cur)
     end
   end
-  self._buf = next
-  self._gen = self._gen + 1
+  self_._buf = next
+  self_._gen = self_._gen + 1
 end
 
 --- Advance n generations.
@@ -188,6 +203,7 @@ end
 
 --- Create a dense grid.
 -- opts: { rule="life"|"highlife"|..., wrap=true }
+--: (integer, integer, { rule?: string | RuleFn, wrap?: boolean } | nil) -> (DenseGrid | nil, string | nil)
 function M.dense(width, height, opts)
   opts = opts or {}
   local rule_name = opts.rule or "life"
@@ -198,19 +214,24 @@ function M.dense(width, height, opts)
     rule_fn = M.rules[rule_name]
   else
     -- Try to parse it as B/S notation.
-    local fn, err = M.parse_rule(rule_name)
-    if not fn then return nil, "dense: unknown rule: " .. tostring(rule_name) .. (err and (" (" .. err .. ")") or "") end
+    local fn, err = M.parse_rule(rule_name --[[:! string]])
+    if not fn then
+      local detail = err and (" (" .. (err or "") .. ")") or ""
+      return nil, "dense: unknown rule: " .. tostring(rule_name) .. detail
+    end
     rule_fn = fn
   end
-  local buf = {}
+  local buf = {} --: { [integer]: integer }
   for i = 1, width * height do buf[i] = 0 end
-  local g = setmetatable({}, DenseGrid)
-  g._w = width
-  g._h = height
-  g._wrap = opts.wrap ~= false  -- default true
-  g._rule = rule_fn
-  g._buf = buf
-  g._gen = 0
+  local gen0 = 0 --: integer
+  local g = setmetatable({
+    _w = width,
+    _h = height,
+    _wrap = opts.wrap ~= false,
+    _rule = rule_fn --[[:! RuleFn]],
+    _buf = buf,
+    _gen = gen0,
+  }, DenseGrid) --[[:! DenseGrid]]
   return g
 end
 
@@ -221,30 +242,35 @@ SparseGrid.__index = SparseGrid
 
 --- Mark cell (x, y) alive.
 function SparseGrid:set(x, y)
-  self._cells[key(x, y)] = true
+  local self_ = self --[[:! SparseGrid]]
+  self_._cells[key(x, y)] = true
 end
 
 --- Mark cell (x, y) dead.
 function SparseGrid:unset(x, y)
-  self._cells[key(x, y)] = nil
+  local self_ = self --[[:! SparseGrid]]
+  self_._cells[key(x, y)] = nil
 end
 
 --- Returns 1 if alive, 0 if dead.
 function SparseGrid:get(x, y)
-  return self._cells[key(x, y)] and 1 or 0
+  local self_ = self --[[:! SparseGrid]]
+  return self_._cells[key(x, y)] and 1 or 0
 end
 
 --- Return the number of live cells.
 function SparseGrid:population()
+  local self_ = self --[[:! SparseGrid]]
   local count = 0
-  for _ in pairs(self._cells) do count = count + 1 end
+  for _ in pairs(self_._cells) do count = count + 1 end
   return count
 end
 
 --- Return an array of {x, y} for all live cells.
 function SparseGrid:alive_cells()
-  local result = {}
-  for k in pairs(self._cells) do
+  local self_ = self --[[:! SparseGrid]]
+  local result = {} --: { [integer]: Cell2D }
+  for k in pairs(self_._cells) do
     local x, y = unkey(k)
     result[#result + 1] = {x, y}
   end
@@ -254,9 +280,13 @@ end
 --- Return {min_x, min_y, max_x, max_y} bounding box of live cells.
 -- Returns nil if no live cells.
 function SparseGrid:bounds()
+  local self_ = self --[[:! SparseGrid]]
   local first = true
-  local min_x, min_y, max_x, max_y
-  for k in pairs(self._cells) do
+  local min_x = 0 --: number
+  local min_y = 0 --: number
+  local max_x = 0 --: number
+  local max_y = 0 --: number
+  for k in pairs(self_._cells) do
     local x, y = unkey(k)
     if first then
       min_x, min_y, max_x, max_y = x, y, x, y
@@ -274,13 +304,16 @@ end
 
 --- Set cells from an array of {x, y}. Clears first.
 function SparseGrid:pattern(cells)
-  self._cells = {}
+  local self_ = self --[[:! SparseGrid]]
+  self_._cells = {}
   for _, cell in ipairs(cells) do
-    self:set(cell[1], cell[2])
+    local cell_ = cell --[[:! Cell2D]]
+    SparseGrid.set(self_, cell_[1], cell_[2])
   end
 end
 
 --- Count alive Moore neighbors at (x, y) in sparse cells table.
+--: ({ [string]: boolean }, number, number) -> integer
 local function sparse_neighbors(cells, x, y)
   local n = 0
   for dy = -1, 1 do
@@ -295,10 +328,11 @@ end
 
 --- Advance one generation.
 function SparseGrid:step()
-  local old = self._cells
-  local rule = self._rule
+  local self_ = self --[[:! SparseGrid]]
+  local old = self_._cells
+  local rule = self_._rule
   -- Collect candidates: all alive cells + all their neighbors.
-  local candidates = {}
+  local candidates = {} --: { [string]: boolean }
   for k in pairs(old) do
     local x, y = unkey(k)
     for dy = -1, 1 do
@@ -308,7 +342,7 @@ function SparseGrid:step()
     end
   end
   -- Apply rule to each candidate.
-  local new_cells = {}
+  local new_cells = {} --: { [string]: boolean }
   for k in pairs(candidates) do
     local x, y = unkey(k)
     local cur = old[k] and 1 or 0
@@ -318,7 +352,7 @@ function SparseGrid:step()
       new_cells[k] = true
     end
   end
-  self._cells = new_cells
+  self_._cells = new_cells
 end
 
 --- Advance n generations.
@@ -332,9 +366,11 @@ function M.sparse(rule_fn)
   if type(rule_fn) ~= "function" then
     return nil, "sparse: rule_fn must be a function"
   end
-  local g = setmetatable({}, SparseGrid)
-  g._cells = {}
-  g._rule = rule_fn
+  local rule_fn_ = rule_fn --[[:! RuleFn]]
+  local g = setmetatable({
+    _cells = {},
+    _rule = rule_fn_,
+  }, SparseGrid) --[[:! SparseGrid]]
   return g
 end
 
@@ -344,8 +380,9 @@ end
 -- Supports standard RLE: digits for run length, 'b'=dead, 'o'=alive,
 -- '$'=end of row, '!'=end of pattern. Ignores comments (#... lines) and
 -- header lines (x = ...).
+--: (string) -> { [integer]: Cell2D }
 function M.rle_decode(rle_str)
-  local cells = {}
+  local cells = {} --: { [integer]: Cell2D }
   local x, y = 0, 0
   local run = 0
 
@@ -356,7 +393,7 @@ function M.rle_decode(rle_str)
   for i = 1, #data do
     local c = data:sub(i, i)
     if c:match("%d") then
-      run = run * 10 + tonumber(c)
+      run = run * 10 + (tonumber(c) or 0) --[[:! integer]]
     elseif c == "b" then
       -- Dead cells: advance x.
       local count = run == 0 and 1 or run
@@ -386,6 +423,7 @@ end
 
 --- Encode an array of {x, y} alive cells (0-indexed) to RLE string.
 -- Sorts by y then x and produces compact RLE output.
+--: ({ [integer]: Cell2D }) -> string
 function M.rle_encode(cells)
   if #cells == 0 then return "!" end
 
@@ -418,15 +456,15 @@ function M.rle_encode(cells)
   end
 
   -- Produce row-by-row RLE.
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   local prev_y = min_y
 
   -- Group cells by row.
-  local rows = {}
+  local rows = {} --: { [integer]: { [integer]: integer } }
   for _, c in ipairs(sorted) do
-    local ry = c[2]
+    local ry = c[2] --[[:! integer]]
     if not rows[ry] then rows[ry] = {} end
-    rows[ry][#rows[ry] + 1] = c[1]
+    rows[ry][#rows[ry] + 1] = c[1] --[[:! integer]]
   end
 
   local first_row = true
@@ -449,8 +487,8 @@ function M.rle_encode(cells)
       -- Find min/max x in row.
       local row_min_x = row_xs[1]
       local row_max_x = row_xs[#row_xs]
-      local xs_set = {}
-      for _, rx in ipairs(row_xs) do xs_set[rx] = true end
+      local xs_set = {} --: { [integer]: boolean }
+      for _, rx in ipairs(row_xs) do xs_set[rx --[[:! integer]]] = true end
 
       -- Encode row as run-length of b/o.
       -- Only encode up to the last alive cell (trailing dead cells omitted).

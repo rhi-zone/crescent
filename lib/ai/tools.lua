@@ -12,6 +12,7 @@ local mod = {}
 --:: ai_tool_call = { id: string, name: string, arguments: { [string]: unknown } }
 --:: ai_http_client = { request: (req: unknown) -> (unknown, string | nil), stream: (req: unknown) -> ((() -> string | nil, string | nil) | nil, (() -> nil) | string | nil) }
 --:: ai_request = { model: string, messages: ai_message[], max_tokens?: integer, temperature?: number, tools?: ai_tool[], stream?: boolean, provider?: ai_provider, http_client?: ai_http_client, api_key?: string }
+--:: ai_tool_call_list = { [integer]: ai_tool_call }
 --:: ai_response = { text: string | nil, tool_calls: ai_tool_call[] | nil, finish_reason: string, usage: { input_tokens: integer, output_tokens: integer } | nil }
 --:: ai_delta = { text: string | nil, tool_call: ai_tool_call | nil, finish_reason: string | nil, usage: { input_tokens: integer, output_tokens: integer } | nil }
 --:: ai_provider = { generate: (req: ai_request) -> (ai_response | nil, string | nil), stream: (req: ai_request) -> ((() -> ai_delta | nil) | nil, string | nil) }
@@ -28,7 +29,7 @@ mod.run = function(opts)
 	local max_rounds = opts.max_rounds or 10
 
 	for _ = 1, max_rounds do
-		local res, err = ai.generate({
+		local req = {
 			model = opts.model,
 			messages = messages,
 			tools = opts.tools,
@@ -37,11 +38,15 @@ mod.run = function(opts)
 			provider = opts.provider,
 			http_client = opts.http_client,
 			api_key = opts.api_key,
-		})
+		} --[[: any]]
+		local res, err = ai.generate(req --[[:! ai_request]])
 		if not res then return nil, err end
 
 		-- if no tool calls, return final response
-		if not res.tool_calls or #res.tool_calls == 0 then
+		local tool_calls = res.tool_calls
+		if not tool_calls then return res end
+		local tool_calls_ = tool_calls --[[:! ai_tool_call_list]]
+		if #tool_calls_ == 0 then
 			return res
 		end
 
@@ -51,23 +56,24 @@ mod.run = function(opts)
 		messages[#messages + 1] = { role = "assistant", content = assistant_content }
 
 		-- execute each tool call and append results
-		for i = 1, #res.tool_calls do
-			local tc = res.tool_calls[i]
+		local json_encode = require("lib.format.json").encode --[[:! (unknown) -> string]]
+		for i = 1, #tool_calls_ do
+			local tc = tool_calls_[i]
 			local handler = opts.handlers[tc.name]
 			local result
 			if handler then
 				local ok, ret = pcall(handler, tc.arguments)
 				if ok then
-					result = type(ret) == "string" and ret or require("lib.format.json").encode(ret)
+					result = type(ret) == "string" and ret or json_encode(ret)
 				else
-					result = '{"error": ' .. require("lib.format.json").encode(tostring(ret)) .. '}'
+					result = '{"error": ' .. json_encode(tostring(ret)) .. '}'
 				end
 			else
 				result = '{"error": "unknown tool: ' .. tc.name .. '"}'
 			end
 			messages[#messages + 1] = {
 				role = "tool",
-				content = result,
+				content = result or "",
 				tool_call_id = tc.id,
 				name = tc.name,
 			}
