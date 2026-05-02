@@ -531,6 +531,268 @@ function M.dump_json(filenames)
     return table.concat(parts)
 end
 
+-- ── Summary mode ─────────────────────────────────────────────────────────────
+
+-- Resolve a module name to a file path (same logic as check.lua's cri_loader).
+--: (string) -> string | nil
+local function resolve_mod_path(mod_name)
+    --: string
+    local rel = mod_name:gsub("%.", "/")
+    local path = rel .. ".lua"
+    local f = io.open(path, "r")
+    if f then f:close(); return path end
+    --: string
+    local rel2 = path:gsub("%.lua$", "/init.lua")
+    f = io.open(rel2, "r")
+    if f then f:close(); return rel2 end
+    return nil
+end
+
+-- Extract require("mod") calls from source text (skipping comments).
+-- Returns an array of module name strings (in order, may contain duplicates).
+--: (string) -> { [integer]: string, ... }
+local function extract_requires(source)
+    local mods = {}
+    -- Strip single-line comments (-- ...) so we don't match requires in comments.
+    local stripped = source:gsub("%-%-[^\n]*", "")
+    for mod in stripped:gmatch('require%s*%(%s*["\']([^"\']+)["\']%s*%)') do
+        mods[#mods + 1] = mod
+    end
+    return mods
+end
+
+-- Categorise a single error message into a short bucket label.
+--: (string) -> string
+local function bucket_label(msg)
+    -- Strip ANSI codes first (should be plain text from err_ctx, but be safe).
+    msg = msg:gsub("\27%[[%d;]*m", "")
+    if msg:find("unknown`? must be narrowed", 1, false)
+        or msg:find("of type `unknown`", 1, false) then
+        return "unknown cascade (narrowing required)"
+    elseif msg:find("doesn't exist", 1, true) then
+        return "field doesn't exist"
+    elseif msg:find("type mismatch", 1, true) or msg:find("cannot assign", 1, true) then
+        return "type mismatch / assignment"
+    elseif msg:find("cannot call", 1, true) or msg:find("no matching overload", 1, true)
+        or msg:find("no method", 1, true) then
+        return "call / overload mismatch"
+    elseif msg:find("cannot perform arithmetic", 1, true)
+        or msg:find("cannot concatenate", 1, true)
+        or msg:find("cannot get length", 1, true)
+        or msg:find("cannot compare", 1, true)
+        or msg:find("cannot take length", 1, true) then
+        return "operator on wrong type"
+    elseif msg:find("missing required argument", 1, true) then
+        return "missing required argument"
+    elseif msg:find("unknown identifier", 1, true) then
+        return "unknown identifier"
+    else
+        return "other"
+    end
+end
+
+-- Print a root-cause-aware summary for a list of (filename, err_ctx) pairs.
+-- If total errors is 0, prints nothing (clean file).
+--: ({ [integer]: { filename: string, err_ctx: { errors: { [integer]: { msg: string, line: integer, ... }, ... }, ... } }, ... }) -> ()
+local function print_summary(file_errs_list)
+    local grand_total = 0
+    for _, fe in ipairs(file_errs_list) do
+        grand_total = grand_total + #fe.err_ctx.errors
+    end
+
+    if grand_total == 0 then
+        io.stderr:write("No errors.\n")
+        return
+    end
+
+    for _, fe in ipairs(file_errs_list) do
+        local filename = fe.filename
+        local err_ctx  = fe.err_ctx
+        local errors   = err_ctx.errors
+        local n = #errors
+        if n == 0 then goto continue end
+
+        io.stderr:write(string.format("%s: %d error%s\n", filename, n, n == 1 and "" or "s"))
+
+        -- Read source to find require() calls.
+        --: string
+        local source = ""
+        local sf = io.open(filename, "r")
+        if sf then source = (sf:read("*a") or "") --[[: string]]; sf:close() end
+
+        local mods = extract_requires(source)
+
+        -- Determine which requires are unresolved.
+        -- Skip built-in LuaJIT modules: bit, ffi, jit, table, string, etc.
+        --: { [string]: boolean | nil, ... }
+        local builtin = {
+            bit=true, ffi=true, jit=true, string=true, table=true,
+            math=true, io=true, os=true, coroutine=true, debug=true,
+            package=true, utf8=true,
+        }
+        --: { [string]: boolean | nil, ... }
+        local unresolved = {}
+        --: { [integer]: string, ... }
+        local unresolved_list = {}
+        --: { [string]: boolean | nil, ... }
+        local seen_mod = {}
+        for _, mod in ipairs(mods) do
+            if not seen_mod[mod] and not builtin[mod] then
+                seen_mod[mod] = true
+                if not resolve_mod_path(mod) then
+                    unresolved[mod] = true
+                    unresolved_list[#unresolved_list + 1] = mod
+                end
+            end
+        end
+
+        -- Count cascade errors (messages referencing unknown narrowing).
+        -- We attribute these to unresolved requires heuristically: if there are
+        -- unresolved requires and the error mentions `unknown`, it's a cascade.
+        --: { [string]: integer | nil, ... }
+        local cascade_count = {}  -- mod_name → count
+        local remaining_errors = {}
+        local has_unresolved = #unresolved_list > 0
+
+        for _, e in ipairs(errors) do
+            local lbl = bucket_label(e.msg)
+            if has_unresolved and lbl == "unknown cascade (narrowing required)" then
+                -- Attribute to the first unresolved require (simple heuristic).
+                -- A more precise version would track which variable names came from
+                -- which require and match on line context.
+                local first_mod = unresolved_list[1]
+                cascade_count[first_mod] = (cascade_count[first_mod] or 0) + 1
+            else
+                remaining_errors[#remaining_errors + 1] = e
+            end
+        end
+
+        -- If we have multiple unresolved requires, try to distribute cascade errors
+        -- by attributing based on source proximity: the require that appears earliest
+        -- before the error line. This is a rough heuristic.
+        if #unresolved_list > 1 then
+            -- Build: mod_name → line number of the require() call.
+            -- Use comment-stripped source so requires in comments are ignored.
+            --: { [string]: integer | nil, ... }
+            local mod_line = {}
+            local stripped_src = source:gsub("%-%-[^\n]*", "")
+            local lineno = 1
+            local prev_end = 1
+            local nl = stripped_src:find("\n", prev_end, true)
+            while nl do
+                --: integer
+                local nl_pos = nl
+                local segment = stripped_src:sub(prev_end, nl_pos)
+                for mod in segment:gmatch('require%s*%(%s*["\']([^"\']+)["\']%s*%)') do
+                    if unresolved[mod] and not mod_line[mod] then
+                        mod_line[mod] = lineno
+                    end
+                end
+                lineno = lineno + 1
+                prev_end = nl_pos + 1
+                nl = stripped_src:find("\n", prev_end, true)
+            end
+
+            -- Re-bucket cascade errors from the first-mod bucket.
+            local first_mod = unresolved_list[1]
+            local old_count = cascade_count[first_mod] or 0
+            if old_count > 0 then
+                -- Reset and re-attribute all cascade errors.
+                for _, mod in ipairs(unresolved_list) do
+                    cascade_count[mod] = 0
+                end
+                -- Re-scan errors for cascade attribution.
+                local new_remaining = {}
+                for _, e in ipairs(errors) do
+                    local lbl = bucket_label(e.msg)
+                    if lbl == "unknown cascade (narrowing required)" then
+                        -- Find which unresolved require most recently precedes this error's line.
+                        local best_mod = unresolved_list[1]
+                        --: integer
+                        local best_line = 0 - 1
+                        for _, mod in ipairs(unresolved_list) do
+                            --: integer
+                            local ml = mod_line[mod] or 0
+                            if ml <= e.line then
+                                if ml > best_line then
+                                    best_line = ml
+                                    best_mod = mod
+                                end
+                            end
+                        end
+                        cascade_count[best_mod] = (cascade_count[best_mod] or 0) + 1
+                    else
+                        new_remaining[#new_remaining + 1] = e
+                    end
+                end
+                remaining_errors = new_remaining
+            end
+        end
+
+        -- Bucket remaining errors.
+        --: { [string]: integer | nil, ... }
+        local buckets = {}
+        --: { [integer]: string, ... }
+        local bucket_order = {}
+        for _, e in ipairs(remaining_errors) do
+            local lbl = bucket_label(e.msg)
+            if not buckets[lbl] then
+                bucket_order[#bucket_order + 1] = lbl
+                buckets[lbl] = 0
+            end
+            buckets[lbl] = (buckets[lbl] or 0) + 1
+        end
+
+        -- Print root causes section.
+        local has_cascade = false
+        for _, mod in ipairs(unresolved_list) do
+            local cnt = cascade_count[mod] or 0
+            if cnt > 0 then has_cascade = true; break end
+        end
+
+        if has_cascade then
+            io.stderr:write("  Root causes:\n")
+            for _, mod in ipairs(unresolved_list) do
+                local cnt = cascade_count[mod] or 0
+                if cnt > 0 then
+                    io.stderr:write(string.format(
+                        "    require(%q) → unknown (module not found): %d downstream error%s\n",
+                        mod, cnt, cnt == 1 and "" or "s"))
+                end
+            end
+        end
+
+        -- Print remaining (non-cascade) errors bucketed.
+        local remaining_count = #remaining_errors
+        if remaining_count > 0 then
+            io.stderr:write(string.format("  Remaining (%s):\n",
+                has_cascade and "no cascade root" or "all errors"))
+            for _, lbl in ipairs(bucket_order) do
+                local cnt = buckets[lbl] or 0
+                io.stderr:write(string.format("    %3d  %s\n", cnt, lbl))
+            end
+        end
+
+        -- List unresolved requires with no cascade errors (module not found but
+        -- no unknown errors attributed to them — may still be the root cause).
+        local silent_unresolved = {}
+        for _, mod in ipairs(unresolved_list) do
+            if (cascade_count[mod] or 0) == 0 then
+                silent_unresolved[#silent_unresolved + 1] = mod
+            end
+        end
+        if #silent_unresolved > 0 then
+            io.stderr:write("  Unresolved requires (no cascade errors attributed):\n")
+            for _, mod in ipairs(silent_unresolved) do
+                io.stderr:write(string.format("    require(%q) — module not found\n", mod))
+            end
+        end
+
+        io.stderr:write("\n")
+        ::continue::
+    end
+end
+
 --- Main entry point. argv is a 1-indexed list of arguments.
 function M.main(argv)
     local check_mod  = require("lib.type.static.check")
@@ -539,11 +801,12 @@ function M.main(argv)
     local types_mod  = require("lib.type.static.types")
     local defs       = require("lib.type.static.defs")
 
-    local format   = "ansi"  -- ansi | plain | json | sarif
-    local dump     = false
-    local annotate = false
+    local format    = "ansi"  -- ansi | plain | json | sarif
+    local dump      = false
+    local annotate  = false
     local run_rules = false  -- --rules flag: run lint passes after check
-    local files    = {}
+    local summary   = false  -- --summary flag: print bucketed root-cause summary
+    local files     = {}
 
     local i = 1
     while i <= #argv do
@@ -558,6 +821,9 @@ function M.main(argv)
             i = i + 1
         elseif argv[i] == "--rules" then
             run_rules = true
+            i = i + 1
+        elseif argv[i] == "--summary" then
+            summary = true
             i = i + 1
         else
             files[#files + 1] = argv[i]
@@ -717,9 +983,9 @@ function M.main(argv)
     local input_opts = project_opts or {}
 
     -- Determine parallelism level.
-    -- Don't parallelize when --rules is active (rules_mod state lives in-process).
+    -- Don't parallelize when --rules or --summary is active (state lives in-process).
     local njobs
-    if run_rules or not fork_available then
+    if run_rules or summary or not fork_available then
         njobs = 1
     else
         njobs = math.min(get_cpu_count(), #files)
@@ -732,10 +998,13 @@ function M.main(argv)
         return
     end
 
-    -- Sequential path (--rules active, fork unavailable, or single file).
+    -- Sequential path (--rules/--summary active, fork unavailable, or single file).
     local total_errors   = 0
     local total_warnings = 0
     local structured_parts = {}
+    -- Accumulates { filename, err_ctx } for --summary output.
+    --: { [integer]: { filename: string, err_ctx: ErrCtx }, ... }
+    local summary_entries = {}
 
     for _, filename in ipairs(files) do
         local err_ctx, ctx = check_mod.check_file(filename, nil, nil, input_opts)
@@ -750,42 +1019,52 @@ function M.main(argv)
         total_errors   = total_errors   + ne
         total_warnings = total_warnings + nw
 
-        if format == "json" then
-            structured_parts[#structured_parts + 1] = errors_mod.format_json(err_ctx)
-        elseif format == "sarif" then
-            structured_parts[#structured_parts + 1] = err_ctx
-        elseif ne > 0 or nw > 0 then
-            if format == "plain" then
-                io.stderr:write(errors_mod.format_plain(err_ctx))
-            else
-                io.stderr:write(errors_mod.format_ansi(err_ctx))
+        if summary then
+            summary_entries[#summary_entries + 1] = { filename = filename, err_ctx = err_ctx }
+        end
+
+        if not summary then
+            if format == "json" then
+                structured_parts[#structured_parts + 1] = errors_mod.format_json(err_ctx)
+            elseif format == "sarif" then
+                structured_parts[#structured_parts + 1] = err_ctx
+            elseif ne > 0 or nw > 0 then
+                if format == "plain" then
+                    io.stderr:write(errors_mod.format_plain(err_ctx))
+                else
+                    io.stderr:write(errors_mod.format_ansi(err_ctx))
+                end
+                io.stderr:write("\n")
             end
-            io.stderr:write("\n")
         end
     end
 
-    if format == "json" then
-        -- Merge all JSON arrays into one.
-        io.write("[")
-        local first = true
-        for _, part in ipairs(structured_parts) do
-            local inner = part:match("^%[(.*)%]$") or ""
-            if inner ~= "" then
-                if not first then io.write(",") end
-                io.write(inner)
-                first = false
+    if summary then
+        print_summary(summary_entries)
+    else
+        if format == "json" then
+            -- Merge all JSON arrays into one.
+            io.write("[")
+            local first = true
+            for _, part in ipairs(structured_parts) do
+                local inner = part:match("^%[(.*)%]$") or ""
+                if inner ~= "" then
+                    if not first then io.write(",") end
+                    io.write(inner)
+                    first = false
+                end
             end
+            io.write("]\n")
+        elseif format == "sarif" then
+            -- Merge all err_ctx into one SARIF document.
+            local combined = errors_mod.new_ctx()
+            for _, ec in ipairs(structured_parts) do
+                for _, e in ipairs(ec.errors)   do combined.errors[#combined.errors+1]     = e end
+                for _, w in ipairs(ec.warnings) do combined.warnings[#combined.warnings+1] = w end
+            end
+            io.write(errors_mod.format_sarif(combined))
+            io.write("\n")
         end
-        io.write("]\n")
-    elseif format == "sarif" then
-        -- Merge all err_ctx into one SARIF document.
-        local combined = errors_mod.new_ctx()
-        for _, ec in ipairs(structured_parts) do
-            for _, e in ipairs(ec.errors)   do combined.errors[#combined.errors+1]     = e end
-            for _, w in ipairs(ec.warnings) do combined.warnings[#combined.warnings+1] = w end
-        end
-        io.write(errors_mod.format_sarif(combined))
-        io.write("\n")
     end
 
     io.stderr:write(string.format("\nChecked %d file(s): %d error(s), %d warning(s)\n",
