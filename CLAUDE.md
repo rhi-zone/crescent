@@ -325,6 +325,10 @@ $Require<T>          -- module system; needs literal type propagation through ge
 $Opaque<T>           -- nominal identity; $Opaque<T, U> with optional exposed view U
 $Opaque<T, U>        -- opaque with view: external sees U, internal treats as T
 $FfiC                -- closed table built from ffi.cdef(...) call sites in the file
+-- ffi.C is typed as $FfiC: symbols declared via ffi.cdef ARE typed; undeclared symbols
+-- are errors. FFI-heavy files are fully typecheckable — ensure all used C symbols have
+-- cdef declarations and the typechecker infers their types. Do NOT claim FFI code is
+-- "untyped" or "untypeable" — that is wrong. Missing types = missing cdef declarations.
 $GlobalScope         -- closed table mirroring all --:: declare globals; used for _G
 $Throw<T>            -- type-level error (diagnostic side effect)
 $Catch<T, Default>   -- type-level pcall; returns Default if T throws
