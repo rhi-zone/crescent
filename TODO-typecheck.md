@@ -135,6 +135,12 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+11)
+
+- [x] `lib/ai/tools.lua` (was 5 → now 0, commit 3b4de95) — ai_request cast via any intermediate, tool_calls local for nil-narrowing escape, json_encode typed local, ai_tool_call_list alias for [] syntax
+- [x] `lib/automata_2d/init.lua` (was 39 → now 0, commit 3b4de95) — DenseGrid/SparseGrid/RuleFn/Cell2D type aliases; self_ casts in all methods; key/unkey annotations; parts typed as { [integer]: string }; run arithmetic with (tonumber(c) or 0); M.rules via inline do/end helper with RuleFn cast; M.dense/M.sparse constructors typed; rows table typed
+- [x] `lib/codec/init.lua` (was 25 → now 0, commit 3b4de95) — Codec alias; return types updated to include nil; rot13_char annotated (string) -> string; c:byte() → string.byte(c,1); bit/bit32 via pcall; bxor typed cast; a/b integer division via math.floor; string.byte(s,i,i) for single-byte extraction
+
 ## Done in current session (session N+10)
 
 - [x] `lib/multipart/init.lua` (was 30 → now 0, commit 7f3731c) — HeaderMap/DispositionMap/Builder/Part/DecodedPart aliases; parse_header_line/parse_disposition/gen_boundary annotated; find() return casts; phi-join pos cast; multi-return annotation (T|nil, string|nil); table.insert avoids t[i] assignment type issue
