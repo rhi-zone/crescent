@@ -51,8 +51,10 @@ end
 local function read_reply(transport)
 	local code, lines = M.read_response(transport)
 	if not code then return nil, lines end
-	local text = table.concat(lines, "\n")
-	return { ok = code >= 200 and code < 300, code = code, text = text, lines = lines }
+	local co = (code --[[: any]]) --[[:! integer]]
+	local lns = (lines --[[: any]]) --[[:! { [integer]: string }]]
+	local text = table.concat(lns, "\n")
+	return { ok = co >= 200 and co < 300, code = co, text = text, lines = lns }
 end
 
 -- parse_response: parse the first line of a response string (for external use)
@@ -73,12 +75,14 @@ M.validate_address = function(addr)
 	-- local-part@domain; both non-empty, domain has at least one dot
 	local local_part, domain = addr:match("^([^@]+)@([^@]+)$")
 	if not local_part or not domain then return false end
-	if #local_part == 0 or #domain == 0 then return false end
+	local lp = local_part --[[:! string]]
+	local dom = domain --[[:! string]]
+	if #lp == 0 or #dom == 0 then return false end
 	-- domain must contain at least one dot and no consecutive dots
-	if not domain:find("%.") then return false end
-	if domain:find("%.%.") then return false end
+	if not dom:find("%.") then return false end
+	if dom:find("%.%.") then return false end
 	-- no leading/trailing dots in domain
-	if domain:sub(1,1) == "." or domain:sub(-1) == "." then return false end
+	if dom:sub(1,1) == "." or dom:sub(-1) == "." then return false end
 	return true
 end
 
@@ -102,13 +106,15 @@ M.parse_address = function(s)
 end
 
 -- Format {name, addr} as an RFC 2822 address string
+--: ({ name: string | nil, addr: string | nil } | nil) -> (string | nil, string | nil)
 M.format_address = function(t)
 	if not t or not t.addr then return nil, "smtp: format_address: missing addr" end
 	if t.name and t.name ~= "" then
 		-- quote name if it contains special chars
-		local name = t.name
+		local name = t.name --[[:! string]]
 		if name:find('[",;:<>@%(%)%[%]\\]') then
-			name = '"' .. name:gsub('"', '\\"') .. '"'
+			local escaped = name:gsub('"', '\\"')
+			name = '"' .. escaped .. '"'
 		end
 		return name .. " <" .. t.addr .. ">"
 	end
@@ -121,12 +127,13 @@ end
 
 local BOUNDARY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
+--: (integer) -> string
 local function make_boundary(seed)
 	if not seed then error("smtp: seed is required for boundary generation") end
 	math.randomseed(seed)
 	local t = {}
 	for i = 1, 24 do
-		local idx = math.random(1, #BOUNDARY_CHARS)
+		local idx = math.random(1, #BOUNDARY_CHARS) --[[:! integer]]
 		t[i] = BOUNDARY_CHARS:sub(idx, idx)
 	end
 	return "----=_Part_" .. table.concat(t)
@@ -146,6 +153,7 @@ local function format_addr_list(list)
 end
 
 -- RFC 2822 date format
+--: ((() -> { wday: integer, day: integer, month: integer, year: integer, hour: integer, min: integer, sec: integer })) -> string
 local function rfc2822_date(time_fn)
 	local days = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"}
 	local months = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"}
@@ -156,6 +164,7 @@ end
 
 -- Encode a string as quoted-printable (RFC 2045)
 -- Handles line folding at 76 chars
+--: (string) -> string
 local function quoted_printable_encode(s)
 	local out = {}
 	local line = {}
@@ -173,7 +182,9 @@ local function quoted_printable_encode(s)
 
 	local i = 1
 	while i <= #s do
-		local c = s:byte(i)
+		local c_raw = s:byte(i)
+		local c = (c_raw or 0) --[[:! integer]]
+		--: string | nil
 		local encoded
 		if c == 13 and s:byte(i+1) == 10 then
 			-- CRLF: flush current line as-is
@@ -233,6 +244,7 @@ end
 --   seed (integer) — required when html is set (for boundary generation)
 --   time_fn () -> date_table — required; returns os.date("*t")-compatible table
 -- Returns the raw message string.
+--: ({ from: string | nil, to: { [integer]: unknown } | nil, subject: string | nil, body: string | nil, cc: { [integer]: unknown } | nil, headers: { [string]: string } | nil, text: string | nil, html: string | nil, seed: integer | nil, time_fn: (() -> { wday: integer, day: integer, month: integer, year: integer, hour: integer, min: integer, sec: integer }) | nil }) -> string
 M.build_message = function(msg)
 	local parts = {}
 
@@ -247,7 +259,9 @@ M.build_message = function(msg)
 		parts[#parts + 1] = "Cc: " .. format_addr_list(msg.cc)
 	end
 	parts[#parts + 1] = "Subject: " .. subject
-	parts[#parts + 1] = "Date: " .. rfc2822_date(msg.time_fn)
+	if msg.time_fn then
+		parts[#parts + 1] = "Date: " .. rfc2822_date(msg.time_fn)
+	end
 	parts[#parts + 1] = "MIME-Version: 1.0"
 
 	-- Extra headers
@@ -261,7 +275,7 @@ M.build_message = function(msg)
 
 	if msg.html then
 		-- multipart/alternative
-		local boundary = make_boundary(msg.seed)
+		local boundary = make_boundary(msg.seed or 0)
 		parts[#parts + 1] = 'Content-Type: multipart/alternative; boundary="' .. boundary .. '"'
 		parts[#parts + 1] = ""  -- end of headers
 		parts[#parts + 1] = "--" .. boundary
@@ -284,6 +298,9 @@ end
 -- Session state machine
 -- ---------------------------------------------------------------------------
 
+--:: SmtpTransport = { send: (SmtpTransport, string) -> unknown, recv: (SmtpTransport) -> string | nil, ... }
+--:: SmtpSession = { transport: SmtpTransport, ... }
+
 local Session = {}
 Session.__index = Session
 
@@ -294,24 +311,28 @@ M.session = function(transport)
 end
 
 -- Send a raw command line (CRLF appended automatically)
+--: (SmtpSession, string) -> unknown
 function Session:command(cmd)
-	return self.transport:send(cmd .. "\r\n")
+	local s = self --[[:! SmtpSession]]
+	return s.transport:send(cmd .. "\r\n")
 end
 
 -- Send EHLO and parse the extension list.
 -- Returns {ok=true, extensions={...}} or {ok=false, err="..."}
 function Session:ehlo(hostname)
+	local s = self --[[:! SmtpSession]]
 	hostname = hostname or "localhost"
-	self:command("EHLO " .. hostname)
-	local code, lines = M.read_response(self.transport)
+	s:command("EHLO " .. hostname)
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
+	local lns = (lines --[[: any]]) --[[:! { [integer]: string }]]
 	if code ~= 250 then
-		return { ok = false, err = "EHLO failed: " .. (lines and table.concat(lines, " ") or "") }
+		return { ok = false, err = "EHLO failed: " .. table.concat(lns, " ") }
 	end
 	-- First line is the greeting; rest are capabilities
 	local extensions = {}
-	for i = 2, #lines do
-		extensions[#extensions + 1] = lines[i]
+	for i = 2, #lns do
+		extensions[#extensions + 1] = lns[i]
 	end
 	return { ok = true, extensions = extensions }
 end
