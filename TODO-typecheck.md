@@ -135,6 +135,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+12)
+
+- [x] `lib/html/init.lua` (was 58 → now 0, commit 940839f) — annotate element/raw_element/void factories as returning any; fix escape gsub multi-return; force-cast xs to concrete table type inside factory closures; fix ESCAPE_MAP cast for gsub
+- [x] `lib/color_palette/init.lua` (was 56 → now 0, commit 940839f) — add Color type alias; annotate all helpers and public M functions; force-cast multi-return values from hsl_norm_to_rgb/rgb_to_lab via { } array; fix phi-join in hue2rgb; annotate channel_range/average_color/quantize/deduplicate; fix table.remove nil with explicit buckets annotation; annotate sort/nearest/best_foreground with typed params
+- [x] `lib/lru_ttl/init.lua` (was 54 → now 0, commit beeccd7) — add LruNode/LruStats/Cache type aliases; annotate all Cache methods with self: Cache; self_ casts in every method; annotate helpers; fix nil narrowing after tail-guard; setmetatable via any cast then force-cast
+- [x] `lib/tilemap/init.lua` (was 53 → now 0, commit beeccd7) — add TileMap/Heap/HeapEntry/RoomRect/Dir/Rng type aliases with method sigs; annotate all methods with self: T and self_ bodies; fix direction table indexing via Dir cast; annotate make_rng; fix astar with typed locals
+
 ## Done in current session (session N+11)
 
 - [x] `lib/ai/tools.lua` (was 5 → now 0, commit 3b4de95) — ai_request cast via any intermediate, tool_calls local for nil-narrowing escape, json_encode typed local, ai_tool_call_list alias for [] syntax
