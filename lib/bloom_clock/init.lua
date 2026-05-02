@@ -11,16 +11,21 @@ local rshift = bit.rshift
 local M = {}
 M._tier = "pure"
 
+--:: Clock = { _node_id: string, _time: integer, _size: integer, _hash_count: integer, _filter: { [integer]: integer } }
+
 -- FNV-1a 32-bit hash
+--: (string) -> integer
 local function fnv1a(s)
-  local h = 2166136261
+  local h = -2128831035 --[[:! integer]]  -- FNV offset basis (signed 32-bit of 2166136261)
   for i = 1, #s do
-    h = band(bit.bxor(h, s:byte(i)) * 16777619, 0xffffffff)
+    local b = (string.byte(s, i)) or 0 --[[:! integer]]
+    h = band(bit.bxor(h, b) * 16777619, 0xffffffff) --[[:! integer]]
   end
   return h
 end
 
 -- Produce two independent base hashes from a string key
+--: (string) -> (integer, integer)
 local function two_hashes(key)
   local h1 = fnv1a(key)
   -- Mix for second hash using a different seed
@@ -29,25 +34,29 @@ local function two_hashes(key)
 end
 
 -- Number of uint32 words needed to hold `size` bits
+--: (integer) -> integer
 local function words_for(size)
-  return math.floor((size + 31) / 32)
+  return math.floor((size + 31) / 32) --[[:! integer]]
 end
 
 -- Set bit `idx` (0-based) in the filter array
+--: ({ [integer]: integer }, integer) -> nil
 local function set_bit(filter, idx)
-  local word = math.floor(idx / 32) + 1
+  local word = math.floor(idx / 32) + 1 --[[:! integer]]
   local bit_pos = idx % 32
-  filter[word] = bor(filter[word], lshift(1, bit_pos))
+  filter[word] = bor(filter[word] or 0, lshift(1, bit_pos))
 end
 
 -- Test bit `idx` (0-based) in the filter array
+--: ({ [integer]: integer }, integer) -> boolean
 local function test_bit(filter, idx)
-  local word = math.floor(idx / 32) + 1
+  local word = math.floor(idx / 32) + 1 --[[:! integer]]
   local bit_pos = idx % 32
-  return band(filter[word], lshift(1, bit_pos)) ~= 0
+  return band(filter[word] or 0, lshift(1, bit_pos)) ~= 0
 end
 
 -- Add key to bloom filter using double-hashing
+--: ({ [integer]: integer }, integer, integer, string) -> nil
 local function bloom_add(filter, size, hash_count, key)
   local h1, h2 = two_hashes(key)
   for i = 0, hash_count - 1 do
@@ -59,6 +68,7 @@ local function bloom_add(filter, size, hash_count, key)
 end
 
 -- Check if all k bits for key are set in filter
+--: ({ [integer]: integer }, integer, integer, string) -> boolean
 local function bloom_contains(filter, size, hash_count, key)
   local h1, h2 = two_hashes(key)
   for i = 0, hash_count - 1 do
@@ -71,9 +81,10 @@ local function bloom_contains(filter, size, hash_count, key)
 end
 
 -- Allocate a zeroed filter (array of words)
+--: (integer) -> { [integer]: integer }
 local function new_filter(size)
   local n = words_for(size)
-  local f = {}
+  local f = {} --: { [integer]: integer }
   for i = 1, n do
     f[i] = 0
   end
@@ -81,19 +92,21 @@ local function new_filter(size)
 end
 
 -- OR two filters together (union), storing into dst
+--: ({ [integer]: integer }, { [integer]: integer }, integer) -> nil
 local function filter_or(dst, src, size)
   local n = words_for(size)
   for i = 1, n do
-    dst[i] = bor(dst[i], src[i])
+    dst[i] = bor(dst[i] or 0, src[i] or 0)
   end
 end
 
 -- Check if filter `a` is a subset of filter `b` (every 1-bit in a is also in b)
+--: ({ [integer]: integer }, { [integer]: integer }, integer) -> boolean
 local function filter_subset(a, b, size)
   local n = words_for(size)
   for i = 1, n do
     -- if a has bits that b doesn't, not a subset
-    if band(a[i], b[i]) ~= a[i] then
+    if band(a[i] or 0, b[i] or 0) ~= (a[i] or 0) then
       return false
     end
   end
@@ -101,9 +114,10 @@ local function filter_subset(a, b, size)
 end
 
 -- Clone a filter
+--: ({ [integer]: integer }, integer) -> { [integer]: integer }
 local function filter_clone(f, size)
   local n = words_for(size)
-  local c = {}
+  local c = {} --: { [integer]: integer }
   for i = 1, n do
     c[i] = f[i]
   end
@@ -114,9 +128,10 @@ local Clock = {}
 Clock.__index = Clock
 
 function Clock:tick()
-  self._time = self._time + 1
-  local key = self._node_id .. ":" .. tostring(self._time)
-  bloom_add(self._filter, self._size, self._hash_count, key)
+  local self_ = self --[[:! Clock]]
+  self_._time = self_._time + 1
+  local key = self_._node_id .. ":" .. tostring(self_._time)
+  bloom_add(self_._filter, self_._size, self_._hash_count, key)
 end
 
 function Clock:time()
@@ -124,9 +139,11 @@ function Clock:time()
 end
 
 function Clock:merge(other)
-  filter_or(self._filter, other._filter, self._size)
-  if other._time > self._time then
-    self._time = other._time
+  local self_ = self --[[:! Clock]]
+  local other_ = other --[[:! Clock]]
+  filter_or(self_._filter, other_._filter, self_._size)
+  if other_._time > self_._time then
+    self_._time = other_._time
   end
 end
 
@@ -145,12 +162,14 @@ function Clock:serialize()
 end
 
 function Clock:clone()
-  local c = {}
-  c._node_id = self._node_id
-  c._time = self._time
-  c._size = self._size
-  c._hash_count = self._hash_count
-  c._filter = filter_clone(self._filter, self._size)
+  local self_ = self --[[:! Clock]]
+  local c = {
+    _node_id = self_._node_id,
+    _time = self_._time,
+    _size = self_._size,
+    _hash_count = self_._hash_count,
+    _filter = filter_clone(self_._filter, self_._size),
+  }
   return setmetatable(c, Clock)
 end
 
@@ -189,10 +208,12 @@ end
 -- happened_before(a, b): returns true if a causally precedes b
 -- Condition: a's filter is a subset of b's filter AND a.time < b.time
 function M.happened_before(a, b)
-  if a._size ~= b._size then
+  local a_ = a --[[:! Clock]]
+  local b_ = b --[[:! Clock]]
+  if a_._size ~= b_._size then
     return false
   end
-  return a._time < b._time and filter_subset(a._filter, b._filter, a._size)
+  return a_._time < b_._time and filter_subset(a_._filter, b_._filter, a_._size)
 end
 
 -- concurrent(a, b): neither happened before the other
