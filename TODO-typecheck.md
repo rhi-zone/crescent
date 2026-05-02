@@ -103,6 +103,8 @@ last because the type system itself is the testbed.
 
 ## Skipped in prior runs (with reason)
 
+- `lib/text_diff/init.lua` (57) — Myers diff uses heterogeneous stack entries {op, x1, x2, y1, y2}; op=string other fields=integer; phi-join `integer | integer` comparison failures; typed stack caused cascade. Needs tagged-union type.
+- `lib/validation/init.lua` (57) — self on Schema methods is unknown; `new_schema(proto)` param annotation doesn't override inferred type from first call; 15 `_type_name` literal mismatches remain.
 - `lib/midi/init.lua` — `string.byte()` variadic multi-return resists annotation
 - `lib/expr/init.lua` (73) — pervasive unknown propagation, requires restructuring
 - `lib/graph_algorithms/init.lua` (77) — recursive `dfs_visit` pre-declared but checker still flagged
@@ -138,6 +140,9 @@ last because the type system itself is the testbed.
 - [x] `lib/physics_2d/init.lua` (was 70 → now 0, commit 28a8850) — BodyShape/JointShape/WorldShape/CollInfo/BodyOpts/WorldOpts type aliases; annotated collision helpers; setmetatable via --[[: any]] + return cast; self_ cast in World:step
 - [x] `lib/validation/init.lua` (was 71 → now 57, commit af01242) — replaced XxxSchema.optional = XxxSchema.nullable with Schema.nullable (14 occurrences); remaining 57 from unknown method calls on schema prototype chain
 
+- [x] `lib/stats/init.lua` (was 105 → now 0, commit 95e78a0) — NumArr/NumArr2D type aliases; annotated all public params; `or 0` nil-cast pattern; `0 --: number` accumulators; annotated coefficient arrays
+- [x] `lib/time_series/init.lua` (was 14 → now 0, commit 5190915) — annotated bisect params/IntArr/NumArr; `lo_/hi_` force-casts for phi-join; `avg_t/avg_v --: number`; unified outlier result shapes
+- [x] `lib/circuit_breaker/init.lua` (was 9 → now 0, commit 59482b8) — CB type alias; force-cast self to CB in helpers; CBClock/CBIsFailure/CBOnChange named function types
 - [x] `lib/diff/init.lua` (was 8 → now 0, commit e232596) — force-cast branch-join locals; annotated helper function signatures
 - [x] `lib/bloom_clock/init.lua` (was 11 → now 0, commit 49d62d4) — Clock type alias; annotated all helpers; self_ casts in methods; FNV constant as signed int32
 - [x] `lib/uuid/init.lua` (was 4 → now 3, commit 846b5d0) — rand_bytes forward-decl as rand_bytes_fn|nil; force-cast at call sites; 3 FFI ffi.new errors remain
