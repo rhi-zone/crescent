@@ -299,7 +299,11 @@ end
 -- ---------------------------------------------------------------------------
 
 --:: SmtpTransport = { send: (SmtpTransport, string) -> unknown, recv: (SmtpTransport) -> string | nil, ... }
---:: SmtpSession = { transport: SmtpTransport, ... }
+--:: SmtpSession = { transport: SmtpTransport, command: (SmtpSession, string) -> unknown, ehlo: (SmtpSession, string | nil) -> unknown, auth_plain: (SmtpSession, string, string) -> unknown, auth_login: (SmtpSession, string, string) -> unknown, mail_from: (SmtpSession, string) -> unknown, rcpt_to: (SmtpSession, string) -> unknown, data: (SmtpSession, string) -> unknown, quit: (SmtpSession) -> unknown, rset: (SmtpSession) -> unknown, noop: (SmtpSession) -> unknown, ... }
+--:: SmtpAuth = { method: string | nil, user: string, password: string }
+--:: SmtpOpts = { ehlo_host: string | nil, auth: SmtpAuth | nil, ... }
+--:: SmtpAddr = { addr: string, name: string | nil }
+--:: SmtpMsg = { from: unknown, to: { [integer]: unknown } | nil, cc: { [integer]: unknown } | nil, bcc: { [integer]: unknown } | nil, subject: string | nil, body: string | nil, headers: { [string]: string } | nil, ... }
 
 local Session = {}
 Session.__index = Session
@@ -339,12 +343,13 @@ end
 
 -- AUTH PLAIN: sends credentials in base64
 function Session:auth_plain(user, password)
+	local s = self --[[:! SmtpSession]]
 	-- PLAIN: "\0user\0password" base64-encoded
 	local credentials = "\0" .. user .. "\0" .. password
 	-- base64 encode
 	local b64 = M.base64_encode(credentials)
-	self:command("AUTH PLAIN " .. b64)
-	local code, lines = M.read_response(self.transport)
+	s:command("AUTH PLAIN " .. b64)
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 235 then
 		return { ok = false, err = "AUTH PLAIN failed: " .. (lines and lines[1] or "") }
@@ -354,22 +359,23 @@ end
 
 -- AUTH LOGIN: two-step challenge/response
 function Session:auth_login(user, password)
-	self:command("AUTH LOGIN")
-	local code, lines = M.read_response(self.transport)
+	local s = self --[[:! SmtpSession]]
+	s:command("AUTH LOGIN")
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 334 then
 		return { ok = false, err = "AUTH LOGIN: unexpected response: " .. (lines and lines[1] or "") }
 	end
 	-- send username
-	self:command(M.base64_encode(user))
-	code, lines = M.read_response(self.transport)
+	s:command(M.base64_encode(user))
+	code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 334 then
 		return { ok = false, err = "AUTH LOGIN: username not accepted: " .. (lines and lines[1] or "") }
 	end
 	-- send password
-	self:command(M.base64_encode(password))
-	code, lines = M.read_response(self.transport)
+	s:command(M.base64_encode(password))
+	code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 235 then
 		return { ok = false, err = "AUTH LOGIN failed: " .. (lines and lines[1] or "") }
@@ -379,8 +385,9 @@ end
 
 -- MAIL FROM command
 function Session:mail_from(addr)
-	self:command("MAIL FROM:<" .. addr .. ">")
-	local code, lines = M.read_response(self.transport)
+	local s = self --[[:! SmtpSession]]
+	s:command("MAIL FROM:<" .. addr .. ">")
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 250 then
 		return { ok = false, err = "MAIL FROM failed: " .. (lines and lines[1] or "") }
@@ -390,8 +397,9 @@ end
 
 -- RCPT TO command
 function Session:rcpt_to(addr)
-	self:command("RCPT TO:<" .. addr .. ">")
-	local code, lines = M.read_response(self.transport)
+	local s = self --[[:! SmtpSession]]
+	s:command("RCPT TO:<" .. addr .. ">")
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 250 and code ~= 251 then
 		return { ok = false, err = "RCPT TO failed (" .. addr .. "): " .. (lines and lines[1] or "") }
@@ -403,8 +411,9 @@ end
 -- raw_message should already be a properly formatted RFC 2822 message.
 -- Lines starting with "." are dot-stuffed automatically.
 function Session:data(raw_message)
-	self:command("DATA")
-	local code, lines = M.read_response(self.transport)
+	local s = self --[[:! SmtpSession]]
+	s:command("DATA")
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 354 then
 		return { ok = false, err = "DATA not accepted: " .. (lines and lines[1] or "") }
@@ -415,8 +424,8 @@ function Session:data(raw_message)
 	if not stuffed:match("\r\n$") then
 		stuffed = stuffed .. "\r\n"
 	end
-	self.transport:send(stuffed .. ".\r\n")
-	code, lines = M.read_response(self.transport)
+	s.transport:send(stuffed .. ".\r\n")
+	code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 250 then
 		return { ok = false, err = "DATA delivery failed: " .. (lines and lines[1] or "") }
@@ -426,15 +435,17 @@ end
 
 -- QUIT command
 function Session:quit()
-	self:command("QUIT")
+	local s = self --[[:! SmtpSession]]
+	s:command("QUIT")
 	-- read the 221 goodbye (best effort)
-	M.read_response(self.transport)
+	M.read_response(s.transport)
 end
 
 -- RSET command (reset mail transaction)
 function Session:rset()
-	self:command("RSET")
-	local code, lines = M.read_response(self.transport)
+	local s = self --[[:! SmtpSession]]
+	s:command("RSET")
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	if code ~= 250 then
 		return { ok = false, err = "RSET failed: " .. (lines and lines[1] or "") }
@@ -444,8 +455,9 @@ end
 
 -- NOOP command
 function Session:noop()
-	self:command("NOOP")
-	local code, lines = M.read_response(self.transport)
+	local s = self --[[:! SmtpSession]]
+	s:command("NOOP")
+	local code, lines = M.read_response(s.transport)
 	if not code then return nil, lines end
 	return { ok = code == 250, code = code, text = lines and lines[1] or "" }
 end
@@ -459,18 +471,20 @@ end
 -- opts: { ehlo_host="localhost", auth={user, password, method="plain"|"login"} }
 -- Returns true on success, or nil, errmsg on failure.
 M.send = function(transport, msg, opts)
-	opts = opts or {}
-	local session = M.session(transport)
+	local opts_ = (opts or {}) --[[:! SmtpOpts]]
+	local msg_ = msg --[[:! SmtpMsg]]
+	local session = M.session(transport) --[[:! SmtpSession]]
 
 	-- EHLO
-	local ehlo_host = opts.ehlo_host or "localhost"
+	local ehlo_host = opts_.ehlo_host or "localhost"
 	local result, err = session:ehlo(ehlo_host)
 	if not result then return nil, err end
-	if not result.ok then return nil, result.err end
+	local result_ = result --[[:! { ok: boolean, err: string | nil }]]
+	if not result_.ok then return nil, result_.err end
 
 	-- AUTH (optional)
-	if opts.auth then
-		local auth = opts.auth
+	if opts_.auth then
+		local auth = opts_.auth --[[:! SmtpAuth]]
 		local method = auth.method or "plain"
 		local auth_result
 		if method == "login" then
@@ -479,38 +493,53 @@ M.send = function(transport, msg, opts)
 			auth_result, err = session:auth_plain(auth.user, auth.password)
 		end
 		if not auth_result then return nil, err end
-		if not auth_result.ok then return nil, auth_result.err end
+		local ar_ = auth_result --[[:! { ok: boolean, err: string | nil }]]
+		if not ar_.ok then return nil, ar_.err end
 	end
 
 	-- MAIL FROM
-	local from_addr = msg.from
-	if type(from_addr) == "table" then from_addr = from_addr.addr end
+	local from_addr = msg_.from
+	local from_str
+	if type(from_addr) == "table" then
+		local from_t = from_addr --[[:! SmtpAddr]]
+		from_str = from_t.addr
+	else
+		from_str = from_addr --[[:! string]]
+	end
 	local mail_result
-	mail_result, err = session:mail_from(from_addr)
+	mail_result, err = session:mail_from(from_str)
 	if not mail_result then return nil, err end
-	if not mail_result.ok then return nil, mail_result.err end
+	local mr_ = mail_result --[[:! { ok: boolean, err: string | nil }]]
+	if not mr_.ok then return nil, mr_.err end
 
 	-- RCPT TO for all recipients (to + cc + bcc)
-	local all_rcpt = {}
-	for _, a in ipairs(msg.to or {}) do all_rcpt[#all_rcpt + 1] = a end
-	for _, a in ipairs(msg.cc or {}) do all_rcpt[#all_rcpt + 1] = a end
-	for _, a in ipairs(msg.bcc or {}) do all_rcpt[#all_rcpt + 1] = a end
+	local all_rcpt = {} --: { [integer]: string | SmtpAddr }
+	for _, a in ipairs(msg_.to or {}) do local a_ = a --[[:! string | SmtpAddr]]; all_rcpt[#all_rcpt + 1] = a_ end
+	for _, a in ipairs(msg_.cc or {}) do local a_ = a --[[:! string | SmtpAddr]]; all_rcpt[#all_rcpt + 1] = a_ end
+	for _, a in ipairs(msg_.bcc or {}) do local a_ = a --[[:! string | SmtpAddr]]; all_rcpt[#all_rcpt + 1] = a_ end
 
 	for _, rcpt in ipairs(all_rcpt) do
-		local addr = rcpt
-		if type(addr) == "table" then addr = addr.addr end
+		local addr_str
+		if type(rcpt) == "table" then
+			local rcpt_t = rcpt --[[:! SmtpAddr]]
+			addr_str = rcpt_t.addr
+		else
+			addr_str = rcpt --[[:! string]]
+		end
 		local rcpt_result
-		rcpt_result, err = session:rcpt_to(addr)
+		rcpt_result, err = session:rcpt_to(addr_str)
 		if not rcpt_result then return nil, err end
-		if not rcpt_result.ok then return nil, rcpt_result.err end
+		local rr_ = rcpt_result --[[:! { ok: boolean, err: string | nil }]]
+		if not rr_.ok then return nil, rr_.err end
 	end
 
 	-- DATA
-	local raw = M.build_message(msg)
+	local raw = M.build_message(msg_ --[[: any]])
 	local data_result
 	data_result, err = session:data(raw)
 	if not data_result then return nil, err end
-	if not data_result.ok then return nil, data_result.err end
+	local dr_ = data_result --[[:! { ok: boolean, err: string | nil }]]
+	if not dr_.ok then return nil, dr_.err end
 
 	session:quit()
 	return true
@@ -549,26 +578,29 @@ M.base64_encode = function(s)
 end
 
 M.base64_decode = function(s)
-	local decode = {}
+	local decode = {} --: { [string]: integer }
 	for i = 1, #b64_chars do
 		decode[b64_chars:sub(i,i)] = i - 1
 	end
-	local out = {}
+	local out = {} --: { [integer]: string }
 	local i = 1
 	while i <= #s do
 		local c0 = decode[s:sub(i, i)] or 0
 		local c1 = decode[s:sub(i+1, i+1)] or 0
 		local c2 = decode[s:sub(i+2, i+2)]
 		local c3 = decode[s:sub(i+3, i+3)]
-		local b0 = c0 * 4 + math.floor(c1 / 16)
-		out[#out + 1] = string.char(b0)
+		local b0 = math.floor(c0 * 4 + math.floor(c1 / 16)) --[[:! integer]]
+		table.insert(out, string.char(b0))
 		if c2 ~= nil then
-			local b1 = (c1 % 16) * 16 + math.floor(c2 / 4)
-			out[#out + 1] = string.char(b1)
+			local c2_ = c2 --[[:! integer]]
+			local b1 = math.floor((c1 % 16) * 16 + math.floor(c2_ / 4)) --[[:! integer]]
+			table.insert(out, string.char(b1))
 		end
 		if c3 ~= nil then
-			local b2 = (c2 % 4) * 64 + c3
-			out[#out + 1] = string.char(b2)
+			local c2_ = (c2 or 0) --[[:! integer]]
+			local c3_ = c3 --[[:! integer]]
+			local b2 = math.floor((c2_ % 4) * 64 + c3_) --[[:! integer]]
+			table.insert(out, string.char(b2))
 		end
 		i = i + 4
 	end
