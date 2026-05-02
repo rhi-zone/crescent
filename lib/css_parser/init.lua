@@ -19,11 +19,11 @@ local type, tostring, pairs, ipairs, next = type, tostring, pairs, ipairs, next
 
 -- Character predicates
 local function is_ident_start(c)
-  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or byte(c) > 127
+  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or ((byte(c, 1) or 0) --[[:! integer]]) > 127
 end
 
 local function is_ident_char(c)
-  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or byte(c) > 127
+  return c == "_" or c == "-" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or ((byte(c, 1) or 0) --[[:! integer]]) > 127
 end
 
 local function is_digit(c)
@@ -50,10 +50,12 @@ local function read_ident(s, i, n)
   else
     i = i + 1
   end
-  while i <= n and is_ident_char(sub(s, i, i)) do
-    i = i + 1
+  local i_ = i --[[:! integer]]
+  while i_ <= n and is_ident_char(sub(s, i_, i_)) do
+    i_ = i_ + 1
   end
-  return sub(s, start, i - 1), i
+  local i_out = i_ --[[:! integer]]
+  return sub(s, start, i_out - 1), i_out
 end
 
 -- Read a string starting after the opening quote (quote is char q)
@@ -96,24 +98,28 @@ local function read_number(s, i, n)
   if i <= n and (sub(s, i, i) == "+" or sub(s, i, i) == "-") then
     i = i + 1
   end
-  while i <= n and is_digit(sub(s, i, i)) do i = i + 1 end
-  if i <= n and sub(s, i, i) == "." and i + 1 <= n and is_digit(sub(s, i + 1, i + 1)) then
-    i = i + 1 -- consume "."
-    while i <= n and is_digit(sub(s, i, i)) do i = i + 1 end
+  local i_ = i --[[:! integer]]
+  while i_ <= n and is_digit(sub(s, i_, i_)) do i_ = i_ + 1 end
+  if i_ <= n and sub(s, i_, i_) == "." and i_ + 1 <= n and is_digit(sub(s, i_ + 1, i_ + 1)) then
+    i_ = i_ + 1 -- consume "."
+    while i_ <= n and is_digit(sub(s, i_, i_)) do i_ = i_ + 1 end
   end
   -- optional exponent
-  if i <= n and (sub(s, i, i) == "e" or sub(s, i, i) == "E") then
-    local j = i + 1
+  local i__ = i_ --[[:! integer]]
+  if i__ <= n and (sub(s, i__, i__) == "e" or sub(s, i__, i__) == "E") then
+    local j = i__ + 1
     if j <= n and (sub(s, j, j) == "+" or sub(s, j, j) == "-") then j = j + 1 end
-    if j <= n and is_digit(sub(s, j, j)) then
-      i = j
-      while i <= n and is_digit(sub(s, i, i)) do i = i + 1 end
+    local j_ = j --[[:! integer]]
+    if j_ <= n and is_digit(sub(s, j_, j_)) then
+      i__ = j_ --[[:! integer]]
+      while i__ <= n and is_digit(sub(s, i__, i__)) do i__ = i__ + 1 end
     end
   end
-  return sub(s, start, i - 1), i
+  return sub(s, start, i__ - 1), i__
 end
 
 -- Read url() contents (after the opening paren)
+--: (string, integer, integer) -> (string, integer)
 local function read_url(s, i, n)
   -- skip whitespace
   while i <= n and is_whitespace(sub(s, i, i)) do i = i + 1 end
@@ -369,10 +375,13 @@ local function new_selector_parser(s)
       while i <= n and is_whitespace(sub(s, i, i)) do i = i + 1 end
       local attr_name = ""
       if i <= n and is_ident_start(sub(s, i, i)) then
-        attr_name, i = read_ident(s, i, n)
+        local an_, ai_ = read_ident(s, i, n)
+        attr_name = an_
+        i = ai_ --[[:! integer]]
       end
+      local i_attr = i --[[:! integer]]
       -- skip ws
-      while i <= n and is_whitespace(sub(s, i, i)) do i = i + 1 end
+      while i_attr <= n and is_whitespace(sub(s, i_attr, i_attr)) do i_attr = i_attr + 1 end
       local op = nil
       local attr_val = nil
       if i <= n and sub(s, i, i) ~= "]" then
@@ -464,12 +473,12 @@ end
 --: (SelParser) -> CssCompound | nil
 local function parse_compound(p)
   local compound = {
-    type_selector = nil,
-    id = nil,
+    type_selector = nil --[[: string | nil]],
+    id = nil --[[: string | nil]],
     classes = {},
     attributes = {},
     pseudos = {},
-    combinator = nil,
+    combinator = nil --[[: string | nil]],
   }
   local found = false
 
