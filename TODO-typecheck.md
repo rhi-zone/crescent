@@ -135,6 +135,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+13)
+
+- [x] `lib/command_queue/init.lua` (was 5 → now 0, commit 7981d4c) — Cmd/PQEntry aliases; typed undo/redo stacks; force-cast table.remove via index+shift pattern; nil-assign via --[[: any]]
+- [x] `lib/consistent_hash/init.lua` (was 9 → now 0, commit 7981d4c) — Ring type alias with open shape; self_ casts in all methods; VNode as { [integer]: any }; fnv1a integer cast; math.floor() for literal large hex; table.sort via --[[: any]] cast
+- [x] `lib/config/init.lua` (was 15 → now 0, commit 7981d4c) — Config/ConfigData/EnvReader aliases; self_ casts in all methods; key_ cast; fixed gsub multi-return; deep_copy force-cast to ConfigData; opts_ cast for inflate_opts
+- [x] `lib/compress/pure.lua` (was 56 → now 0, commit 7981d4c) — byte1() helper for single-byte extraction; pcall-based bit require with typed fallbacks; math.floor() for large hex literals; huffman_tree typed locals; integer casts for pos phi-joins in gzip parser
+
 ## Done in current session (session N+12)
 
 - [x] `lib/html/init.lua` (was 58 → now 0, commit 940839f) — annotate element/raw_element/void factories as returning any; fix escape gsub multi-return; force-cast xs to concrete table type inside factory closures; fix ESCAPE_MAP cast for gsub
