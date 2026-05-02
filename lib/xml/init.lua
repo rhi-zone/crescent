@@ -10,6 +10,9 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: XmlAttrs = { [string]: string }
+--:: XmlNode = { type: string, children: { [integer]: unknown }, parent: unknown, ... }
+
 -- ---------------------------------------------------------------------------
 -- Entity tables
 -- ---------------------------------------------------------------------------
@@ -22,7 +25,7 @@ local ESCAPE_MAP = { ["&"] = "&amp;", ["<"] = "&lt;", [">"] = "&gt;",
 --: (string) -> string
 function M.unescape(s)
   return (s
-    :gsub("&(%a[%w_]*);", function(e) return ENTITIES[e] or ("&" .. e .. ";") end)
+    :gsub("&(%a[%w_]*);", function(e) return (ENTITIES[e] --[[:! string | nil]]) or ("&" .. e .. ";") end)
     :gsub("&#(%d+);",     function(n)
       local cp = tonumber(n)
       if cp and cp <= 0x10FFFF then return string.char(cp) end
@@ -38,7 +41,8 @@ end
 --- Encode special XML characters in a string.
 --: (string) -> string
 function M.escape(s)
-  return (s:gsub('[&<>"\']', ESCAPE_MAP))
+  local result, _ = s:gsub('[&<>"\']', ESCAPE_MAP)
+  return result
 end
 
 -- ---------------------------------------------------------------------------
@@ -60,12 +64,13 @@ end
 
 -- Parse attributes starting at pos (inside a tag, after the tag name).
 -- Returns: attrs table, self_closing bool, new pos  OR  nil, errmsg
+--: (string, integer) -> (XmlAttrs | nil, boolean | string, integer | nil)
 local function parse_attrs(xml, pos)
   local attrs = {}
   local len = #xml
   while pos <= len do
     -- skip whitespace
-    pos = xml:match("^%s*()", pos) or pos
+    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos) --[[:! integer]]
     local c = xml:sub(pos, pos)
     if c == ">" then
       return attrs, false, pos + 1
@@ -79,14 +84,14 @@ local function parse_attrs(xml, pos)
     if not aname then
       return nil, "expected attribute name at position " .. pos
     end
-    pos = after_name
+    pos = after_name --[[:! integer]]
     -- optional whitespace + '='
-    pos = xml:match("^%s*()", pos) or pos
+    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos) --[[:! integer]]
     if xml:sub(pos, pos) ~= "=" then
       return nil, "expected '=' after attribute name '" .. aname .. "'"
     end
     pos = pos + 1
-    pos = xml:match("^%s*()", pos) or pos
+    pos = ((xml:match("^%s*()", pos) --[[:! integer | nil]]) or pos) --[[:! integer]]
     -- quoted value
     local q = xml:sub(pos, pos)
     if q ~= '"' and q ~= "'" then
@@ -98,7 +103,7 @@ local function parse_attrs(xml, pos)
       return nil, "unterminated attribute value for '" .. aname .. "'"
     end
     attrs[aname] = M.unescape(aval)
-    pos = after_val
+    pos = after_val --[[:! integer]]
   end
   return nil, "unexpected end of input while parsing attributes"
 end
@@ -119,7 +124,7 @@ end
 ---   processing_instruction(target, data)
 ---
 --- Returns true on success, or (nil, errmsg).
---: (string, table) -> (true | nil, string)
+--: (string, { [string]: unknown }) -> (boolean | nil, string | nil)
 function M.sax(xml, handlers)
   handlers = handlers or {}
   local function fire(name, ...)
@@ -127,9 +132,9 @@ function M.sax(xml, handlers)
     if fn then fn(...) end
   end
 
-  local pos = 1
+  local pos = 1 --: integer
   local len = #xml
-  local stack = {}  -- open tag names for error reporting
+  local stack = {} --[[:! { [integer]: string }]] -- open tag names for error reporting
 
   fire("start_document")
 
@@ -138,9 +143,9 @@ function M.sax(xml, handlers)
 
   while pos <= len do
     -- Find next '<' or end of text
-    local lt = xml:find("<", pos, true)
+    local lt = xml:find("<", pos, true) --[[:! integer | nil]]
     -- Emit text before '<' (or trailing text)
-    local text_end = lt and lt - 1 or len
+    local text_end = (lt and lt - 1 or len) --[[:! integer]]
     if text_end >= pos then
       local raw = xml:sub(pos, text_end)
       -- Only fire text if non-empty after unescaping
@@ -233,7 +238,7 @@ function M.sax(xml, handlers)
       else
         stack[#stack + 1] = name
       end
-      pos = new_pos
+      pos = new_pos --[[:! integer]]
 
     else
       -- bare '<' followed by something unexpected — treat as text
@@ -246,7 +251,7 @@ function M.sax(xml, handlers)
   end
 
   fire("end_document")
-  return true
+  return (true --[[: true]])
 end
 
 -- ---------------------------------------------------------------------------
@@ -255,15 +260,15 @@ end
 
 --- Parse XML into a DOM tree.
 --- Returns root document node, or (nil, errmsg).
---: (string) -> (table | nil, string)
+--: (string) -> (XmlNode | nil, string)
 function M.parse(xml)
   local doc = {
     type = "document",
     children = {},
     parent = nil,
-  }
-  local current = doc
-  local stack = { doc }
+  } --[[:! XmlNode]]
+  local current = doc --[[:! XmlNode]]
+  local stack = { doc } --[[:! { [integer]: XmlNode }]]
 
   local handlers = {
     start_element = function(name, attrs)
@@ -280,7 +285,7 @@ function M.parse(xml)
     end,
     end_element = function(_name)
       stack[#stack] = nil
-      current = stack[#stack]
+      current = stack[#stack] --[[:! XmlNode]]
     end,
     text = function(content)
       -- merge adjacent text nodes
@@ -320,7 +325,7 @@ function M.parse(xml)
   }
 
   local ok, err = M.sax(xml, handlers)
-  if not ok then return nil, err end
+  if not ok then return nil, err --[[:! string]] end
   return doc
 end
 
@@ -329,7 +334,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Find the first child element with the given tag name.
---: (table, string) -> table | nil
+--: (XmlNode, string) -> XmlNode | nil
 function M.find(node, tag)
   local children = node.children
   if not children then return nil end
@@ -341,7 +346,7 @@ function M.find(node, tag)
 end
 
 --- Find all direct child elements with the given tag name.
---: (table, string) -> table
+--: (XmlNode, string) -> { [integer]: XmlNode }
 function M.find_all(node, tag)
   local result = {}
   local children = node.children
@@ -356,25 +361,27 @@ function M.find_all(node, tag)
 end
 
 --- Concatenate all text content (text and CDATA nodes) in the subtree.
---: (table) -> string
+--: (XmlNode) -> string
 function M.text_content(node)
-  if node.type == "text" or node.type == "cdata" then
-    return node.text or ""
+  local nd = node --[[:! { type: string, text: string | nil, children: { [integer]: unknown }, parent: unknown, ... }]]
+  if nd.type == "text" or nd.type == "cdata" then
+    return nd.text or ""
   end
-  local parts = {}
+  local parts = {} --[[:! { [integer]: string }]]
   local function walk(n)
-    if n.type == "text" or n.type == "cdata" then
-      parts[#parts + 1] = n.text or ""
-    elseif n.children then
-      for i = 1, #n.children do walk(n.children[i]) end
+    local wn = n --[[:! { type: string, text: string | nil, children: { [integer]: unknown }, parent: unknown, ... }]]
+    if wn.type == "text" or wn.type == "cdata" then
+      parts[#parts + 1] = wn.text or ""
+    elseif wn.children then
+      for i = 1, #wn.children do walk(wn.children[i]) end
     end
   end
-  walk(node)
+  walk(nd)
   return table.concat(parts)
 end
 
 --- Get an attribute value from an element node.
---: (table, string) -> string | nil
+--: (XmlNode, string) -> string | nil
 function M.attr(node, name)
   if node.attrs then return node.attrs[name] end
   return nil
@@ -385,7 +392,7 @@ end
 ---   "a/b/c"  — descend through direct children
 ---   "//tag"  — find all descendants with tag
 ---   "a//b"   — descend to 'a' then find all descendants 'b'
---: (table, string) -> table
+--: (XmlNode, string) -> { [integer]: XmlNode }
 function M.xpath_simple(node, path)
   -- Split path on '/'
   -- Handle leading '//' as "all descendants"
@@ -408,25 +415,23 @@ function M.xpath_simple(node, path)
 
   -- Parse path segments handling '//'
   -- We iterate segment by segment
-  local current_nodes = { node }
+  local current_nodes = { node } --[[:! { [integer]: XmlNode }]]
 
   -- Split into segments while preserving '//' markers
-  local segments = {}
+  local segments = {} --[[:! { [integer]: { deep: boolean, tag: string | nil } }]]
   local i = 1
   while i <= #path do
     if path:sub(i, i + 1) == "//" then
-      segments[#segments + 1] = { deep = true }
+      local tag = path:match("^([^/]+)", i + 2) --[[:! string | nil]]
+      segments[#segments + 1] = { deep = true, tag = tag }
       i = i + 2
-      -- capture the tag name following '//'
-      local tag = path:match("^([^/]+)", i)
       if tag then
-        segments[#segments].tag = tag
         i = i + #tag
       end
     elseif path:sub(i, i) == "/" then
       i = i + 1
     else
-      local tag = path:match("^([^/]+)", i)
+      local tag = path:match("^([^/]+)", i) --[[:! string | nil]]
       if tag then
         segments[#segments + 1] = { deep = false, tag = tag }
         i = i + #tag
@@ -437,7 +442,7 @@ function M.xpath_simple(node, path)
   end
 
   for _, seg in ipairs(segments) do
-    local next_nodes = {}
+    local next_nodes = {} --[[:! { [integer]: XmlNode }]]
     if seg.deep then
       for _, nd in ipairs(current_nodes) do
         local found = descendants(nd, seg.tag or "*")
@@ -445,7 +450,7 @@ function M.xpath_simple(node, path)
       end
     else
       for _, nd in ipairs(current_nodes) do
-        local found = M.find_all(nd, seg.tag)
+        local found = M.find_all(nd, seg.tag or "")
         for _, f in ipairs(found) do next_nodes[#next_nodes + 1] = f end
       end
     end
@@ -463,35 +468,36 @@ end
 
 --- Serialize a DOM node to an XML string.
 --- opts: { indent=N, declare=true }
---: (table, table | nil) -> string
+--: (XmlNode, { indent: integer | nil, declare: boolean | nil } | nil) -> string
 function M.serialize(node, opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { indent: integer | nil, declare: boolean | nil }]]
   local indent_size = opts.indent
-  local parts = {}
+  local parts = {} --[[:! { [integer]: string }]]
 
   if opts.declare then
     parts[#parts + 1] = '<?xml version="1.0" encoding="UTF-8"?>\n'
   end
 
   local function write(n, depth)
-    local pad = indent_size and string.rep(" ", depth * indent_size) or ""
+    local nd = n --[[:! { type: string, children: { [integer]: XmlNode }, tag: string | nil, attrs: XmlAttrs | nil, text: string | nil, target: string | nil, ... }]]
+    local pad = indent_size and string.rep(" ", depth * (indent_size --[[:! integer]])) or ""
     local nl  = indent_size and "\n" or ""
 
-    if n.type == "document" then
-      for i = 1, #n.children do write(n.children[i], depth) end
+    if nd.type == "document" then
+      for i = 1, #nd.children do write(nd.children[i], depth) end
 
-    elseif n.type == "element" then
-      parts[#parts + 1] = pad .. "<" .. n.tag
-      if n.attrs then
+    elseif nd.type == "element" then
+      parts[#parts + 1] = pad .. "<" .. (nd.tag or "")
+      if nd.attrs then
         -- stable attribute order: sort keys
-        local keys = {}
-        for k in pairs(n.attrs) do keys[#keys + 1] = k end
+        local keys = {} --[[:! { [integer]: string }]]
+        for k in pairs(nd.attrs) do keys[#keys + 1] = k end
         table.sort(keys)
         for _, k in ipairs(keys) do
-          parts[#parts + 1] = ' ' .. k .. '="' .. M.escape(n.attrs[k]) .. '"'
+          parts[#parts + 1] = ' ' .. k .. '="' .. M.escape(nd.attrs[k]) .. '"'
         end
       end
-      local children = n.children or {}
+      local children = nd.children
       if #children == 0 then
         parts[#parts + 1] = "/>" .. nl
       else
@@ -499,42 +505,43 @@ function M.serialize(node, opts)
         -- check if all children are text/cdata (inline)
         local all_inline = true
         for i = 1, #children do
-          if children[i].type ~= "text" and children[i].type ~= "cdata" then
+          local ci = children[i] --[[:! XmlNode]]
+          if ci.type ~= "text" and ci.type ~= "cdata" then
             all_inline = false; break
           end
         end
         if all_inline and indent_size then
           -- keep on one line
           for i = 1, #children do write(children[i], 0) end
-          parts[#parts + 1] = "</" .. n.tag .. ">" .. nl
+          parts[#parts + 1] = "</" .. (nd.tag or "") .. ">" .. nl
         else
           parts[#parts + 1] = nl
           for i = 1, #children do write(children[i], depth + 1) end
-          parts[#parts + 1] = pad .. "</" .. n.tag .. ">" .. nl
+          parts[#parts + 1] = pad .. "</" .. (nd.tag or "") .. ">" .. nl
         end
       end
 
-    elseif n.type == "text" then
+    elseif nd.type == "text" then
       if indent_size then
         -- if we're inside an element at depth>0 check if we should pad
-        parts[#parts + 1] = M.escape(n.text or "")
+        parts[#parts + 1] = M.escape(nd.text or "")
       else
-        parts[#parts + 1] = M.escape(n.text or "")
+        parts[#parts + 1] = M.escape(nd.text or "")
       end
 
-    elseif n.type == "cdata" then
-      parts[#parts + 1] = "<![CDATA[" .. (n.text or "") .. "]]>"
+    elseif nd.type == "cdata" then
+      parts[#parts + 1] = "<![CDATA[" .. (nd.text or "") .. "]]>"
       if indent_size then parts[#parts + 1] = nl end
 
-    elseif n.type == "comment" then
-      parts[#parts + 1] = pad .. "<!--" .. (n.text or "") .. "-->" .. nl
+    elseif nd.type == "comment" then
+      parts[#parts + 1] = pad .. "<!--" .. (nd.text or "") .. "-->" .. nl
 
-    elseif n.type == "processing_instruction" then
-      local data = n.text or ""
+    elseif nd.type == "processing_instruction" then
+      local data = nd.text or ""
       if data ~= "" then
-        parts[#parts + 1] = pad .. "<?" .. (n.target or "?") .. " " .. data .. "?>" .. nl
+        parts[#parts + 1] = pad .. "<?" .. (nd.target or "?") .. " " .. data .. "?>" .. nl
       else
-        parts[#parts + 1] = pad .. "<?" .. (n.target or "?") .. "?>" .. nl
+        parts[#parts + 1] = pad .. "<?" .. (nd.target or "?") .. "?>" .. nl
       end
     end
   end
@@ -548,7 +555,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Create an element node.
---: (string, table | nil, table | nil) -> table
+--: (string, XmlAttrs | nil, { [integer]: XmlNode } | nil) -> XmlNode
 function M.element(tag, attrs, children)
   local node = {
     type = "element",
@@ -568,15 +575,15 @@ function M.element(tag, attrs, children)
 end
 
 --- Create a text node.
---: (string) -> table
+--: (string) -> XmlNode
 function M.text_node(s)
-  return { type = "text", text = s, parent = nil }
+  return { type = "text", text = s, parent = nil, children = {} } --[[:! XmlNode]]
 end
 
 --- Create a comment node.
---: (string) -> table
+--: (string) -> XmlNode
 function M.comment_node(s)
-  return { type = "comment", text = s, parent = nil }
+  return { type = "comment", text = s, parent = nil, children = {} } --[[:! XmlNode]]
 end
 
 return M
