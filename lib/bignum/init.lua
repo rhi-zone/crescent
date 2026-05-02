@@ -52,14 +52,24 @@ end
 
 -- ── Metatable (forward-declared) ─────────────────────────────────────────────
 
+--:: Bignum = { s: integer, digits: string, exp: integer }
+
 local mt = {}
 M._mt = mt
 mt.__index = M
 
 -- ── String utilities ─────────────────────────────────────────────────────────
 
+-- Get a single byte at position i as integer.
+--: (s: string, i: number) -> integer
+local function getbyte(s, i)
+  local r = (byte(s, --[[:! integer]] i))
+  return --[[:! integer]] r
+end
+
 -- Build a string from a table of byte values, handling LuaJIT's unpack limit.
 local CHUNK = 200
+--: (t: { [integer]: integer }) -> string
 local function bytes_to_string(t)
   if #t == 0 then return "" end
   if #t <= CHUNK then
@@ -85,6 +95,7 @@ end
 --   1. Strip leading zeros from digits, decrementing exp accordingly.
 --   2. Strip trailing zeros from digits (exp unchanged).
 --   3. Canonicalize zero.
+--: (s: integer, digits: string, exp: integer) -> Bignum
 local function make(s, digits, exp)
   if digits == "" then digits = "0" end
 
@@ -106,34 +117,38 @@ local function make(s, digits, exp)
 
   -- 3. Canonicalize zero
   if digits == "0" or s == 0 then
-    return setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
+    return --[[:! Bignum]] setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
   end
 
-  return setmetatable({ s = s, digits = digits, exp = exp }, mt)
+  return --[[:! Bignum]] setmetatable({ s = s, digits = digits, exp = exp }, mt)
 end
 
 -- Return a new bignum that is zero.
+--: () -> Bignum
 local function zero()
-  return setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
+  return --[[:! Bignum]] setmetatable({ s = 0, digits = "0", exp = 0 }, mt)
 end
 
 -- Return string padded with leading zeros to length n.
+--: (str: string, n: number) -> string
 local function lpad(str, n)
   local pad = n - #str
   if pad <= 0 then return str end
-  return rep("0", pad) .. str
+  return rep("0", --[[:! integer]] pad) .. str
 end
 
 -- Add two unsigned digit strings (big-endian decimal).
+--: (a: string, b: string) -> string
 local function digits_add(a, b)
   local an, bn = #a, #b
   local n = max(an, bn)
   a = lpad(a, n)
   b = lpad(b, n)
-  local result = {}
+  local result = {} --: { [integer]: integer }
   local carry = 0
   for i = n, 1, -1 do
-    local ba, bb = byte(a, i), byte(b, i)
+    local ba = getbyte(a, i)
+    local bb = getbyte(b, i)
     local sum = ba - 48 + bb - 48 + carry
     if sum >= 10 then
       carry = 1
@@ -152,14 +167,16 @@ local function digits_add(a, b)
 end
 
 -- Subtract unsigned digit string b from a where a >= b.
+--: (a: string, b: string) -> string
 local function digits_sub(a, b)
   local n = max(#a, #b)
   a = lpad(a, n)
   b = lpad(b, n)
-  local result = {}
+  local result = {} --: { [integer]: integer }
   local borrow = 0
   for i = n, 1, -1 do
-    local ba, bb = byte(a, i), byte(b, i)
+    local ba = getbyte(a, i)
+    local bb = getbyte(b, i)
     local d = ba - 48 - (bb - 48) - borrow
     if d < 0 then
       d = d + 10
@@ -177,6 +194,7 @@ local function digits_sub(a, b)
 end
 
 -- Compare two unsigned digit strings as integers.
+--: (a: string, b: string) -> integer
 local function digits_cmp(a, b)
   if #a ~= #b then return #a < #b and -1 or 1 end
   if a == b then return 0 end
@@ -184,18 +202,19 @@ local function digits_cmp(a, b)
 end
 
 -- Multiply two unsigned digit strings. Returns result digit string.
+--: (a: string, b: string) -> string
 local function digits_mul(a, b)
   if a == "0" or b == "0" then return "0" end
   local an, bn = #a, #b
-  local result = {}
+  local result = {} --: { [integer]: integer }
   for i = 1, an + bn do result[i] = 0 end
   for i = an, 1, -1 do
-    local ba = byte(a, i)
+    local ba = getbyte(a, i)
     local ai = ba - 48
     if ai ~= 0 then
       local carry = 0
       for j = bn, 1, -1 do
-        local bb = byte(b, j)
+        local bb = getbyte(b, j)
         local prod = ai * (bb - 48) + result[i + j] + carry
         carry = floor(prod / 10)
         result[i + j] = prod - carry * 10
@@ -203,7 +222,7 @@ local function digits_mul(a, b)
       result[i] = result[i] + carry
     end
   end
-  local out = {}
+  local out = {} --: { [integer]: integer }
   for i = 1, #result do out[i] = result[i] + 48 end
   local s = bytes_to_string(out):match("^0*(.+)$") or "0"
   return s
@@ -212,17 +231,18 @@ end
 -- Integer long division: returns floor(num * 10^extra / den) as a digit string,
 -- where extra is chosen to produce at least `prec` significant digits in the result.
 -- Also returns the shift used so the caller can reconstruct the exponent.
+--: (num: string, den: string, prec: integer) -> (string, integer)
 local function digits_div(num, den, prec)
   -- We want prec significant digits in the quotient.
   -- Let len_q = #num - #den + 1 (rough integer quotient digit count).
   -- We need to produce prec digits, so shift = prec + max(0, #den - #num).
-  local shift = prec + max(0, #den - #num)
+  local shift = prec + --[[:! integer]] (max(0, #den - #num))
   local shifted_num = num .. rep("0", shift)
   local sn = #shifted_num
 
   -- Digit-by-digit long division
-  local remainder = "0"
-  local q_digits = {}
+  local remainder = "0" --: string
+  local q_digits = {} --: { [integer]: integer }
   for i = 1, sn do
     local d = sub(shifted_num, i, i)
     if remainder == "0" then
@@ -232,7 +252,7 @@ local function digits_div(num, den, prec)
     end
     -- Strip leading zeros
     if #remainder > 1 then
-      remainder = remainder:match("^0*(.+)$") or "0"
+      remainder = string.match(remainder, "^0*(.+)$") or "0"
     end
     -- Binary search for quotient digit 0..9
     local lo, hi = 0, 9
@@ -266,6 +286,7 @@ end
 --
 -- We align by padding with zeros so both have the same "span" of digit positions.
 -- The digit at index k of the aligned string has place value 10^(base_exp - k).
+--: (a: Bignum, b: Bignum) -> (string, string, integer)
 local function align(a, b)
   -- a's most-significant digit is at position a.exp - 1 (0-indexed from decimal).
   -- a's least-significant digit is at position a.exp - #a.digits.
@@ -279,8 +300,8 @@ local function align(a, b)
   local common_lo = min(a_lo, b_lo)
 
   -- a needs (common_hi - a_hi) leading zeros and (a_lo - common_lo) trailing zeros
-  local ad = rep("0", common_hi - a_hi) .. a.digits .. rep("0", a_lo - common_lo)
-  local bd = rep("0", common_hi - b_hi) .. b.digits .. rep("0", b_lo - common_lo)
+  local ad = rep("0", --[[:! integer]] (common_hi - a_hi)) .. a.digits .. rep("0", --[[:! integer]] (a_lo - common_lo))
+  local bd = rep("0", --[[:! integer]] (common_hi - b_hi)) .. b.digits .. rep("0", --[[:! integer]] (b_lo - common_lo))
 
   -- The aligned digit string represents an integer scaled by 10^common_lo.
   -- actual_value = s * 0.aligned_digits * 10^common_hi
@@ -297,9 +318,11 @@ end
 
 -- Parse a decimal string (including scientific notation) into a bignum.
 -- Returns bignum or (nil, errmsg).
+--: (v: number | string | Bignum) -> (Bignum | nil, string | nil)
 function M.new(v)
   if type(v) == "table" and getmetatable(v) == mt then
-    return setmetatable({ s = v.s, digits = v.digits, exp = v.exp }, mt)
+    local bv = --[[:! Bignum]] v
+    return --[[:! Bignum]] setmetatable({ s = bv.s, digits = bv.digits, exp = bv.exp }, mt)
   end
   if type(v) == "number" then
     if v == floor(v) and abs(v) < 1e15 then
@@ -311,7 +334,8 @@ function M.new(v)
   if type(v) ~= "string" then
     return nil, "bignum.new: expected string or number, got " .. type(v)
   end
-  local str = v:match("^%s*(.-)%s*$")
+  local vs = --[[:! string]] v
+  local str = string.match(vs, "^%s*(.-)%s*$") or ""
   if str == "" then return nil, "bignum.new: empty string" end
 
   local s = 1
@@ -323,38 +347,39 @@ function M.new(v)
   end
 
   -- Split off scientific-notation exponent
-  local mantissa, exp_str = str:match("^([^eE]+)[eE]([+-]?%d+)$")
-  local exp_offset = 0
+  local mantissa, exp_str = string.match(str, "^([^eE]+)[eE]([+-]?%d+)$")
+  local exp_offset = 0 --: integer
   if mantissa then
-    exp_offset = tonumber(exp_str)
+    exp_offset = --[[:! integer]] (tonumber(exp_str) or 0)
     str = mantissa
   end
 
   -- Split integer and fractional parts at decimal point
-  local int_part, frac_part = str:match("^(%d*)%.(%d*)$")
+  local int_part, frac_part = string.match(str, "^(%d*)%.(%d*)$")
   if not int_part then
-    if str:match("^%d+$") then
+    if string.match(str, "^%d+$") then
       int_part, frac_part = str, ""
     else
       return nil, "bignum.new: invalid number string: " .. v
     end
   end
 
-  local all_digits = int_part .. frac_part
+  local all_digits = (--[[:! string]] int_part) .. (--[[:! string]] frac_part)
   if all_digits == "" then
-    return nil, "bignum.new: no digits found in: " .. v
+    return nil, "bignum.new: no digits found in: " .. tostring(v)
   end
   if not all_digits:match("^%d+$") then
-    return nil, "bignum.new: invalid digit string in: " .. v
+    return nil, "bignum.new: invalid digit string in: " .. tostring(v)
   end
 
   -- exp = number of digits before the decimal point + scientific exponent
-  local exp = #int_part + exp_offset
+  local exp = #(--[[:! string]] int_part) + exp_offset
   return make(s, all_digits, exp)
 end
 
 M.parse = M.new
 
+--: (n: number) -> (Bignum | nil, string | nil)
 function M.from_number(n)
   if type(n) ~= "number" then
     return nil, "bignum.from_number: expected number, got " .. type(n)
@@ -365,13 +390,15 @@ end
 -- ── Constants ────────────────────────────────────────────────────────────────
 
 M.ZERO = zero()
-M.ONE  = M.new("1")
+--: Bignum
+M.ONE = --[[:! Bignum]] select(1, M.new("1"))
 
 -- ── Arithmetic ───────────────────────────────────────────────────────────────
 
+--: (a: Bignum, b: Bignum) -> Bignum
 function M.add(a, b)
-  if a.s == 0 then return M.new(b) end
-  if b.s == 0 then return M.new(a) end
+  if a.s == 0 then return --[[:! Bignum]] select(1, M.new(b)) end
+  if b.s == 0 then return --[[:! Bignum]] select(1, M.new(a)) end
   if a.s == b.s then
     local ad, bd, base_lo = align(a, b)
     local sum = digits_add(ad, bd)
@@ -392,12 +419,17 @@ function M.add(a, b)
   end
 end
 
+--: (a: Bignum, b: Bignum) -> Bignum
 function M.sub(a, b)
-  if b.s == 0 then return M.new(a) end
-  local neg_b = setmetatable({ s = -b.s, digits = b.digits, exp = b.exp }, mt)
-  return M.add(a, neg_b)
+  if b.s == 0 then
+    return --[[:! Bignum]] select(1, M.new(a))
+  end
+  local neg_b = --[[:! Bignum]] setmetatable({ s = -b.s, digits = b.digits, exp = b.exp }, mt)
+  local r = M.add(a, neg_b)
+  return r
 end
 
+--: (a: Bignum, b: Bignum) -> Bignum
 function M.mul(a, b)
   if a.s == 0 or b.s == 0 then return zero() end
   local prod = digits_mul(a.digits, b.digits)
@@ -408,6 +440,7 @@ function M.mul(a, b)
   return make(a.s * b.s, prod, new_exp)
 end
 
+--: (a: Bignum, b: Bignum, prec: (integer | nil)) -> (Bignum | nil, string | nil)
 function M.div(a, b, prec)
   if b.s == 0 then return nil, "bignum.div: division by zero" end
   if a.s == 0 then return zero() end
@@ -431,27 +464,31 @@ function M.div(a, b, prec)
   return make(a.s * b.s, q, new_exp)
 end
 
+--: (a: Bignum, b: Bignum) -> (Bignum | nil, string | nil)
 function M.mod(a, b)
   if b.s == 0 then return nil, "bignum.mod: modulo by zero" end
   -- a % b = a - trunc(a/b) * b
-  local q, err = a:div(b)
+  local q, err = M.div(a, b)
   if not q then return nil, err end
-  q = q:trunc()
-  return a:sub(q:mul(b))
+  q = M.trunc(q)
+  return M.sub(a, M.mul(q, b))
 end
 
+--: (a: Bignum) -> Bignum
 function M.neg(a)
   if a.s == 0 then return zero() end
-  return setmetatable({ s = -a.s, digits = a.digits, exp = a.exp }, mt)
+  return --[[:! Bignum]] setmetatable({ s = -a.s, digits = a.digits, exp = a.exp }, mt)
 end
 
+--: (a: Bignum) -> Bignum
 function M.abs(a)
   if a.s == 0 then return zero() end
-  return setmetatable({ s = 1, digits = a.digits, exp = a.exp }, mt)
+  return --[[:! Bignum]] setmetatable({ s = 1, digits = a.digits, exp = a.exp }, mt)
 end
 
 -- ── Comparison ───────────────────────────────────────────────────────────────
 
+--: (a: Bignum, b: Bignum) -> integer
 local function cmp(a, b)
   if a.s ~= b.s then
     if a.s == 0 and b.s == 0 then return 0 end
@@ -463,17 +500,25 @@ local function cmp(a, b)
   return a.s > 0 and c or -c
 end
 
+--: (a: Bignum, b: Bignum) -> boolean
 function M.eq(a, b)  return cmp(a, b) == 0  end
+--: (a: Bignum, b: Bignum) -> boolean
 function M.lt(a, b)  return cmp(a, b) < 0   end
+--: (a: Bignum, b: Bignum) -> boolean
 function M.le(a, b)  return cmp(a, b) <= 0  end
+--: (a: Bignum, b: Bignum) -> boolean
 function M.gt(a, b)  return cmp(a, b) > 0   end
+--: (a: Bignum, b: Bignum) -> boolean
 function M.ge(a, b)  return cmp(a, b) >= 0  end
 
 -- ── Predicates ───────────────────────────────────────────────────────────────
 
+--: (a: Bignum) -> boolean
 function M.is_zero(a)    return a.s == 0       end
+--: (a: Bignum) -> integer
 function M.sign(a)       return a.s            end
 
+--: (a: Bignum) -> boolean
 function M.is_integer(a)
   if a.s == 0 then return true end
   -- value = 0.digits × 10^exp
@@ -489,36 +534,40 @@ end
 
 -- ── Rounding ─────────────────────────────────────────────────────────────────
 
+--: (a: Bignum) -> Bignum
 function M.trunc(a)
   if a.s == 0 then return zero() end
   -- value = 0.digits × 10^exp
   -- Integer part: first `exp` digits of the digit string (if exp > 0)
   if a.exp <= 0 then return zero() end       -- entirely fractional
-  if a.exp >= #a.digits then return M.new(a) end  -- entirely integer
+  if a.exp >= #a.digits then local r, _ = M.new(a); return --[[:! Bignum]] r end  -- entirely integer
   -- Keep only the first exp digits
   local int_digits = sub(a.digits, 1, a.exp)
   return make(a.s, int_digits, a.exp)
 end
 
+--: (a: Bignum) -> Bignum
 function M.floor(a)
   if a.s == 0 then return zero() end
-  local t = a:trunc()
-  if a.s < 0 and not a:is_integer() then
-    return t:sub(M.ONE)
+  local t = M.trunc(a)
+  if a.s < 0 and not M.is_integer(a) then
+    return M.sub(t, M.ONE)
   end
   return t
 end
 
+--: (a: Bignum) -> Bignum
 function M.ceil(a)
   if a.s == 0 then return zero() end
-  local t = a:trunc()
-  if a.s > 0 and not a:is_integer() then
-    return t:add(M.ONE)
+  local t = M.trunc(a)
+  if a.s > 0 and not M.is_integer(a) then
+    return M.add(t, M.ONE)
   end
   return t
 end
 
 -- Round to `places` decimal places (round half away from zero).
+--: (a: Bignum, places: (integer | nil)) -> Bignum
 function M.round(a, places)
   places = places or 0
   if a.s == 0 then return zero() end
@@ -528,20 +577,19 @@ function M.round(a, places)
   if keep <= 0 then
     -- All digits are beyond the rounding point
     if keep == 0 and #a.digits > 0 then
-      local fb = byte(a.digits, 1)
-      local first = fb - 48
+      local first = getbyte(a.digits, 1) - 48
       if first >= 5 then
         local one_at_place = make(1, "1", -places)
-        return a.s > 0 and one_at_place or one_at_place:neg()
+        return a.s > 0 and one_at_place or M.neg(one_at_place)
       end
     end
     return zero()
   end
   if keep >= #a.digits then
-    return M.new(a)
+    local r, _ = M.new(a)
+    return --[[:! Bignum]] r
   end
-  local rb = byte(a.digits, keep + 1)
-  local round_digit = rb - 48
+  local round_digit = getbyte(a.digits, keep + 1) - 48
   local kept = sub(a.digits, 1, keep)
   if round_digit >= 5 then
     kept = digits_add(kept, "1")
@@ -551,6 +599,7 @@ end
 
 -- ── Conversion ───────────────────────────────────────────────────────────────
 
+--: (a: Bignum) -> string
 function M.to_string(a)
   if a.s == 0 then return "0" end
   local prefix = a.s < 0 and "-" or ""
@@ -569,16 +618,19 @@ function M.to_string(a)
   end
 end
 
+--: (a: Bignum) -> number | nil
 function M.to_number(a)
-  return tonumber(a:to_string())
+  return tonumber(M.to_string(a))
 end
 
+--: (a: Bignum) -> string
 function M.to_integer(a)
-  return a:trunc():to_string()
+  return M.to_string(M.trunc(a))
 end
 
 -- ── Math functions ────────────────────────────────────────────────────────────
 
+--: (a: Bignum, n: number) -> (Bignum | nil, string | nil)
 function M.pow(a, n)
   if type(n) ~= "number" or n ~= floor(n) then
     return nil, "bignum.pow: exponent must be an integer"
@@ -587,48 +639,55 @@ function M.pow(a, n)
     return nil, "bignum.pow: negative exponent requires division"
   end
   if n == 0 then return M.ONE end
-  if n == 1 then return M.new(a) end
+  if n == 1 then
+    local r1, _ = M.new(a)
+    return --[[:! Bignum]] r1
+  end
   local result = M.ONE
-  local base = M.new(a)
+  local baseb = --[[:! Bignum]] select(1, M.new(a))
   while n > 0 do
-    if n % 2 == 1 then result = result:mul(base) end
-    base = base:mul(base)
+    if n % 2 == 1 then result = M.mul(result, baseb) end
+    baseb = M.mul(baseb, baseb)
     n = floor(n / 2)
   end
   return result
 end
 
 -- Square root via Newton-Raphson to `prec` decimal places.
+--: (a: Bignum, prec: (integer | nil)) -> (Bignum | nil, string | nil)
 function M.sqrt(a, prec)
   prec = prec or _default_prec
   if a.s < 0 then return nil, "bignum.sqrt: negative argument" end
   if a.s == 0 then return zero() end
 
   -- Initial approximation
-  local approx = math.sqrt(a:to_number())
+  local aton = M.to_number(a)
+  local approx = math.sqrt(aton or 1)
   if approx ~= approx or approx <= 0 then approx = 1 end
-  local x = M.new(format("%.6g", approx))
-  local two = M.new("2")
+  local x = --[[:! Bignum]] select(1, M.new(format("%.6g", approx)))
+  local two = --[[:! Bignum]] select(1, M.new("2"))
   local wp = prec + 6
 
   for _ = 1, 200 do
-    local ax = a:div(x, wp)
-    local x2 = x:add(ax):div(two, wp)
-    local diff = x2:sub(x):abs()
+    local axb = --[[:! Bignum]] select(1, M.div(a, x, wp))
+    local x2add = M.add(x, axb)
+    local x2 = --[[:! Bignum]] select(1, M.div(x2add, two, wp))
+    local diff = M.abs(M.sub(x2, x))
     -- Converged when diff < 10^(-(prec+3))
     local threshold = make(1, "1", -(prec + 3))
-    if diff:lt(threshold) or diff.s == 0 then
+    if M.lt(diff, threshold) or diff.s == 0 then
       x = x2
       break
     end
     x = x2
   end
-  return x:round(prec)
+  return M.round(x, prec)
 end
 
 -- Compute pi to `prec` decimal places using the Machin formula:
 --   pi/4 = 4*arctan(1/5) - arctan(1/239)
 -- Each arctan(1/x) computed via the Taylor series sum.
+--: (prec: (integer | nil)) -> Bignum
 function M.pi(prec)
   prec = prec or _default_prec
   local wp = prec + 10  -- extra working precision
@@ -636,51 +695,53 @@ function M.pi(prec)
   -- arctan(1/x_int) = 1/x - 1/(3x^3) + 1/(5x^5) - ...
   -- We accumulate in bignum arithmetic.
   local function arctan_inv(x_int)
-    local x_bn  = M.new(tostring(x_int))
-    local x2_bn = M.new(tostring(x_int * x_int))
+    local x_bn = --[[:! Bignum]] select(1, M.new(tostring(x_int)))
+    local x2_bn = --[[:! Bignum]] select(1, M.new(tostring(x_int * x_int)))
     -- First term: 1/x
-    local term = M.ONE:div(x_bn, wp + 5)
+    local term = --[[:! Bignum]] select(1, M.div(M.ONE, x_bn, wp + 5))
     local s    = term
     local k    = 1
     local neg  = true
     while true do
       -- term_{k} = term_{k-1} / x^2 × (2k-1)/(2k+1)
-      term = term:div(x2_bn, wp + 5)
-      term = term:mul(M.new(tostring(2 * k - 1))):div(M.new(tostring(2 * k + 1)), wp + 5)
+      local t1 = --[[:! Bignum]] select(1, M.div(term, x2_bn, wp + 5))
+      local num_b = --[[:! Bignum]] select(1, M.new(tostring(2 * k - 1)))
+      local den_b = --[[:! Bignum]] select(1, M.new(tostring(2 * k + 1)))
+      term = --[[:! Bignum]] select(1, M.div(M.mul(t1, num_b), den_b, wp + 5))
       if neg then
-        s = s:sub(term)
+        s = --[[:! Bignum]] M.sub(s, term)
       else
-        s = s:add(term)
+        s = --[[:! Bignum]] M.add(s, term)
       end
       neg = not neg
       k = k + 1
       -- Stop when term < 10^(-(wp+2))
       local threshold = make(1, "1", -(wp + 2))
-      if term:abs():lt(threshold) or term.s == 0 then break end
+      if M.lt(M.abs(term), threshold) or term.s == 0 then break end
       if k > 100000 then break end
     end
     return s
   end
 
-  local four = M.new("4")
+  local four = --[[:! Bignum]] select(1, M.new("4"))
   local a5   = arctan_inv(5)
   local a239 = arctan_inv(239)
   -- pi = 4 * (4*arctan(1/5) - arctan(1/239))
-  local pi_val = four:mul(four:mul(a5):sub(a239))
-  return pi_val:round(prec)
+  local pi_val = M.mul(four, M.sub(M.mul(four, a5), a239))
+  return M.round(pi_val, prec)
 end
 
 -- ── Metamethods ──────────────────────────────────────────────────────────────
 
-mt.__tostring = function(a)  return a:to_string() end
-mt.__add      = function(a, b) return a:add(b) end
-mt.__sub      = function(a, b) return a:sub(b) end
-mt.__mul      = function(a, b) return a:mul(b) end
-mt.__div      = function(a, b) return a:div(b) end
-mt.__mod      = function(a, b) return a:mod(b) end
-mt.__unm      = function(a)    return a:neg() end
-mt.__eq       = function(a, b) return a:eq(b) end
-mt.__lt       = function(a, b) return a:lt(b) end
-mt.__le       = function(a, b) return a:le(b) end
+mt.__tostring = function(a)  return M.to_string(a) end
+mt.__add      = function(a, b) return M.add(a, b) end
+mt.__sub      = function(a, b) return M.sub(a, b) end
+mt.__mul      = function(a, b) return M.mul(a, b) end
+mt.__div      = function(a, b) return M.div(a, b) end
+mt.__mod      = function(a, b) return M.mod(a, b) end
+mt.__unm      = function(a)    return M.neg(a) end
+mt.__eq       = function(a, b) return M.eq(a, b) end
+mt.__lt       = function(a, b) return M.lt(a, b) end
+mt.__le       = function(a, b) return M.le(a, b) end
 
 return M
