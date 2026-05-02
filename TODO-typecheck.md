@@ -77,6 +77,10 @@ last because the type system itself is the testbed.
 ### Newly discovered (not yet attempted)
 - ~~`lib/spreadsheet/init.lua`~~ — done (see session N+3)
 - ~~`lib/prolog/init.lua`~~ — done (see session N+3)
+- ~~`lib/complex/init.lua`~~ — done (session N+4)
+- ~~`lib/convex_hull/init.lua`~~ — done (session N+4)
+- ~~`lib/asn1/init.lua`~~ — done (session N+4)
+- ~~`lib/columnar/init.lua`~~ — done (session N+4)
 - `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; full Bloom type annotation cascades badly (23 errors when attempted); skip
 - `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail; skip (confirmed)
 - `lib/base58/init.lua` (2) — any fix to sha256fn call sites triggers new error in hex_to_bin (typechecker limitation with gsub return + checked cast interaction)
@@ -129,7 +133,14 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 
-## Done in current session (session N+3)
+## Done in current session (session N+4)
+
+- [x] `lib/complex/init.lua` (was 35 → now 0, commit d987f07) — Complex type alias with method sigs; coerce annotated; metamethods use a_/b_ locals; self_ casts in mt methods; `--[[: any]]` on setmetatable + force cast to Complex; M.tan uses mt.__div directly; M.pow uses mt.__mul for lz; M.roots `--: number` on r_n
+- [x] `lib/convex_hull/init.lua` (was 30 → now 0, commit ebd8976) — Point/Circle type aliases; annotated cross/dist/dist2/circle_from_1/2/3/point_in_circle/welzl/on_segment/is_ear/dp_rec with param types; typed sorted/filtered/stack/upper/lower/pts/indices arrays; `--: number` on accumulators; `--[[: any]]` nil-pop on stack; `(x and y) and true or false` for boolean returns
+- [x] `lib/asn1/init.lua` (was 31 → now 0, commit bf832e8) — TlvNode type alias; annotated decode_tlv/decode_sequence return types; `(byte(...) or 0) --[[:! integer]]` for byte() calls; `--: number` on n accumulator; `n_ = n --[[:! number]]` after if-branch; tonumber/hex parsing fixes in encode_integer/encode_oid; `--: { [integer]: any }` on OID buf
+- [x] `lib/columnar/init.lua` (was 16 → now 0, commit 13d1988) — ColDef/ColTable/ValidatorFn type aliases; validator fn table split from literal; self_ casts in all methods; col_def_ casts for ColDef; `--[[:! ColTable]]` constructor via any cast; `--[[:! number]]` on nil-guarded comparisons; `--: number | nil` on min/max accumulators
+
+## Done in prior sessions (session N+3)
 
 - [x] `lib/spreadsheet/init.lua` (was 122 → now 0, commit f4dcf6f) — SpreadToken/SpreadNode/ParserState/SheetType type aliases; annotated lex/cell_key/num_coerce/eval_node/collect_deps/csv_parse_row; self_ casts in Parser/Sheet methods; tonumber/math.floor/math.min casts; gsub tuple concat fixes
 - [x] `lib/prolog/init.lua` (was 103 → now 18, commit 5b17255) — PrologTerm optional fields; forward-declared recursive closures; deref/walk result casts; annotated term_to_string/eval_arith/solve/collect_vars; lex integer|1 phi-join fix; string.byte variadic cast; 18 remaining: cascading env nil-assignment in DB:retract loop, ARITH_CMP functor nil, extract_bindings unknown
