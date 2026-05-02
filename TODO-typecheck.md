@@ -72,6 +72,11 @@ last because the type system itself is the testbed.
 - [ ] `lib/type/static/lsp.lua` (66)
 - [ ] `lib/type/static/intrinsic.lua` (62)
 
+## Tier 5 — Uncatalogued files (discovered in cleanup pass)
+
+- [ ] `lib/csv/init.lua` (60) — 21 number/integer/nil arithmetic, 12 unknown-before-indexing
+- [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Done)
+
 ## FFI-bound (likely unfixable without restructuring)
 
 - [ ] `lib/ljsocket/init.lua` (100) — 29 narrow + 19 missing argument + 18 cannot-assign — SKIP unless coupling with cdef
@@ -112,7 +117,7 @@ last because the type system itself is the testbed.
 - [x] `lib/yaml/init.lua` (was 143 → now 42, commit c5fc96c)
 - [x] `lib/unified/mdast/init.lua` (was 176 → now 168, commit 1bc7cba)
 - [x] `lib/wire_protocol/init.lua` (was 98 → now 93, commit 9f9c522)
-- [x] `lib/toml/init.lua` (was 72 → now 68, commit e5b3e2d)
+- [x] `lib/toml/init.lua` (was 72 → now 68, commit e5b3e2d; further reduced to 44, commit 96baa28)
 - [x] `lib/ical/init.lua` (was 123 → now 70, commit ba96da6)
 - [x] `lib/crescent_examples/x11_wm.lua` (was 178 → now 160, commit 11fe9a7)
 - [x] `lib/platform/apps/charactercardv2/server.lua` (was 271 → now 190, commit 32a35d6)
@@ -123,3 +128,6 @@ last because the type system itself is the testbed.
 - [x] `lib/layout/init.lua` (was 89 → now 0, commit cac805c)
 - [x] `lib/json/init.lua` (was 106 → now 17, commit a7e75c8) — 17 remaining from string.byte() ...integer comparison; unfixable without typechecker changes
 - [x] `lib/cryptography/init.lua` (was 107 → now 64, commit 256f000) — 64 remaining: 10 return-nil mismatches (string|(nil,string) multi-return union), number/integer cascades in SHA-512/Poly1305 arithmetic, ...integer from string.byte in sha512_compress block loop
+- [x] `lib/template/init.lua` (was 23 → now 0, commit 7088442)
+- [x] `lib/diff/init.lua` (was 39 → now 8, commit d27b1b5) — 8 remaining: integer|integer compare from v-table or-chain (typechecker limitation)
+- [x] `lib/base64/init.lua` (was 14 → now 0, commit 2914d91)
