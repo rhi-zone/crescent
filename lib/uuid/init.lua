@@ -30,7 +30,7 @@ end
 -- ── Random bytes: tier selection ─────────────────────────────────────────────
 
 --:: rand_bytes_fn = (len: integer) -> { [integer]: integer }
-local rand_bytes --: rand_bytes_fn
+local rand_bytes --: rand_bytes_fn | nil
 
 -- Tier 1: Linux getrandom(2) via FFI
 local function try_ffi_getrandom()
@@ -210,7 +210,7 @@ end
 
 --: () -> string
 M.v4 = function()
-	local b = rand_bytes(16)
+	local b = (rand_bytes --[[:! rand_bytes_fn]])(16)
 	-- Set version: high nibble of byte 7 = 0x4
 	b[7] = (b[7] % 16) + 0x40  -- clear high nibble, set to 4
 	-- Set variant: high 2 bits of byte 9 = 10
@@ -258,7 +258,7 @@ M.v7 = function(time_fn)
 
 	local ms = v7_last_ms
 	local seq = v7_seq
-	local rand = rand_bytes(8)  -- random bytes for bits 64-127
+	local rand = (rand_bytes --[[:! rand_bytes_fn]])(8)  -- random bytes for bits 64-127
 
 	-- Encode timestamp: 48 bits big-endian across bytes 0-5
 	-- ms fits in 48 bits (until year 10889)
