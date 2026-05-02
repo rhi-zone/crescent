@@ -5,21 +5,26 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Point = { x: number, y: number }
+
 -- ========================
 -- INTERNAL HELPERS
 -- ========================
 
 -- Cross product of vectors OA and OB (2D → scalar z-component)
 -- Positive = CCW, Negative = CW, Zero = collinear
+--: (Point, Point, Point) -> number
 local function cross(o, a, b)
   return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
 end
 
+--: (Point, Point) -> number
 local function dist2(a, b)
   local dx, dy = b.x - a.x, b.y - a.y
   return dx * dx + dy * dy
 end
 
+--: (Point, Point) -> number
 local function dist(a, b)
   return math.sqrt(dist2(a, b))
 end
@@ -29,36 +34,39 @@ end
 -- Returns hull vertices in CCW order, collinear points excluded
 -- ========================
 
+--: ({ [integer]: Point }) -> { [integer]: Point }
 function M.convex_hull(points)
   local n = #points
   if n == 0 then return {} end
   if n == 1 then return { { x = points[1].x, y = points[1].y } } end
 
   -- Find pivot: lowest y, then leftmost x
-  local pivot = points[1]
+  local pivot = points[1] --: Point
   for i = 2, n do
-    local p = points[i]
+    local p = points[i] --[[:! Point]]
     if p.y < pivot.y or (p.y == pivot.y and p.x < pivot.x) then
       pivot = p
     end
   end
 
   -- Sort by polar angle with respect to pivot; ties broken by distance (closer first)
-  local sorted = {}
+  local sorted = {} --: { [integer]: Point }
   for i = 1, n do
-    local p = points[i]
+    local p = points[i] --[[:! Point]]
     if p ~= pivot then
       sorted[#sorted + 1] = p
     end
   end
   table.sort(sorted, function(a, b)
-    local c = cross(pivot, a, b)
+    local a_ = a --[[:! Point]]
+    local b_ = b --[[:! Point]]
+    local c = cross(pivot, a_, b_)
     if c ~= 0 then return c > 0 end
-    return dist2(pivot, a) < dist2(pivot, b)
+    return dist2(pivot, a_) < dist2(pivot, b_)
   end)
 
   -- Remove collinear points except the farthest from pivot
-  local filtered = {}
+  local filtered = {} --: { [integer]: Point }
   local i = 1
   while i <= #sorted do
     local j = i
@@ -75,10 +83,10 @@ function M.convex_hull(points)
     return { { x = pivot.x, y = pivot.y }, { x = filtered[1].x, y = filtered[1].y } }
   end
 
-  local stack = { pivot, filtered[1], filtered[2] }
+  local stack = { pivot, filtered[1], filtered[2] } --: { [integer]: Point }
   for k = 3, #filtered do
     while #stack >= 2 and cross(stack[#stack - 1], stack[#stack], filtered[k]) <= 0 do
-      stack[#stack] = nil
+      stack[#stack] = nil --[[: any]]
     end
     stack[#stack + 1] = filtered[k]
   end
@@ -95,30 +103,34 @@ end
 -- QUICKHULL O(n log n) average
 -- ========================
 
+--: ({ [integer]: Point }, Point, Point, nil, { [integer]: Point }) -> nil
 local function quickhull_rec(pts, a, b, hull_set, result)
   if #pts == 0 then return end
 
   -- Find point with max distance (cross product magnitude) from line a→b
-  local max_cross = 0
-  local farthest = nil
+  local max_cross = 0 --: number
+  local farthest = nil --: Point | nil
   for _, p in ipairs(pts) do
-    local c = cross(a, b, p)
+    local p_ = p --[[:! Point]]
+    local c = cross(a, b, p_)
     if c > max_cross then
       max_cross = c
-      farthest = p
+      farthest = p_
     end
   end
 
   if not farthest then return end
 
   -- Partition: left of a→farthest and left of farthest→b
-  local left1, left2 = {}, {}
+  local left1 = {} --: { [integer]: Point }
+  local left2 = {} --: { [integer]: Point }
   for _, p in ipairs(pts) do
-    if p ~= farthest then
-      if cross(a, farthest, p) > 0 then
-        left1[#left1 + 1] = p
-      elseif cross(farthest, b, p) > 0 then
-        left2[#left2 + 1] = p
+    local p_ = p --[[:! Point]]
+    if p_ ~= farthest then
+      if cross(a, farthest, p_) > 0 then
+        left1[#left1 + 1] = p_
+      elseif cross(farthest, b, p_) > 0 then
+        left2[#left2 + 1] = p_
       end
     end
   end
@@ -128,15 +140,17 @@ local function quickhull_rec(pts, a, b, hull_set, result)
   quickhull_rec(left2, farthest, b, hull_set, result)
 end
 
+--: ({ [integer]: Point }) -> { [integer]: Point }
 function M.quickhull(points)
   local n = #points
   if n == 0 then return {} end
   if n == 1 then return { { x = points[1].x, y = points[1].y } } end
 
   -- Find leftmost and rightmost points
-  local left_pt, right_pt = points[1], points[1]
+  local left_pt = points[1] --: Point
+  local right_pt = points[1] --: Point
   for i = 2, n do
-    local p = points[i]
+    local p = points[i] --[[:! Point]]
     if p.x < left_pt.x or (p.x == left_pt.x and p.y < left_pt.y) then left_pt = p end
     if p.x > right_pt.x or (p.x == right_pt.x and p.y > right_pt.y) then right_pt = p end
   end
@@ -146,13 +160,15 @@ function M.quickhull(points)
   end
 
   -- Partition points into upper (left of left→right) and lower (left of right→left)
-  local upper, lower = {}, {}
+  local upper = {} --: { [integer]: Point }
+  local lower = {} --: { [integer]: Point }
   for _, p in ipairs(points) do
-    if p ~= left_pt and p ~= right_pt then
-      if cross(left_pt, right_pt, p) > 0 then
-        upper[#upper + 1] = p
-      elseif cross(right_pt, left_pt, p) > 0 then
-        lower[#lower + 1] = p
+    local p_ = p --[[:! Point]]
+    if p_ ~= left_pt and p_ ~= right_pt then
+      if cross(left_pt, right_pt, p_) > 0 then
+        upper[#upper + 1] = p_
+      elseif cross(right_pt, left_pt, p_) > 0 then
+        lower[#lower + 1] = p_
       end
     end
   end
@@ -172,19 +188,20 @@ end
 -- Hull must be CCW order
 -- ========================
 
+--: ({ [integer]: Point }, Point) -> boolean
 function M.point_in_hull(hull, p)
   local n = #hull
   if n == 0 then return false end
-  if n == 1 then return hull[1].x == p.x and hull[1].y == p.y end
+  if n == 1 then return (hull[1].x == p.x and hull[1].y == p.y) and true or false end
   if n == 2 then
     -- Edge case: degenerate hull (line segment)
     local c = cross(hull[1], hull[2], p)
     if c ~= 0 then return false end
     local t = dist2(hull[1], hull[2])
-    if t == 0 then return hull[1].x == p.x and hull[1].y == p.y end
+    if t == 0 then return (hull[1].x == p.x and hull[1].y == p.y) and true or false end
     local dot = (p.x - hull[1].x) * (hull[2].x - hull[1].x) +
                 (p.y - hull[1].y) * (hull[2].y - hull[1].y)
-    return dot >= 0 and dot <= t
+    return (dot >= 0 and dot <= t) and true or false
   end
 
   -- Use fan triangulation from hull[1]
@@ -212,6 +229,7 @@ end
 -- POINT IN POLYGON — winding number (works for concave polygons)
 -- ========================
 
+--: ({ [integer]: Point }, Point) -> boolean
 function M.point_in_polygon(poly, p)
   local n = #poly
   if n < 3 then return false end
@@ -244,13 +262,14 @@ end
 -- Positive for CCW, negative for CW
 -- ========================
 
+--: ({ [integer]: Point }) -> number
 function M.polygon_area(poly)
   local n = #poly
   if n < 3 then return 0 end
-  local sum = 0
+  local sum = 0 --: number
   for i = 1, n do
-    local a = poly[i]
-    local b = poly[i % n + 1]
+    local a = poly[i] --[[:! Point]]
+    local b = poly[i % n + 1] --[[:! Point]]
     sum = sum + (a.x * b.y - b.x * a.y)
   end
   return math.abs(sum) * 0.5
@@ -260,6 +279,7 @@ end
 -- POLYGON CENTROID
 -- ========================
 
+--: ({ [integer]: Point }) -> Point | nil
 function M.polygon_centroid(poly)
   local n = #poly
   if n == 0 then return nil end
@@ -268,10 +288,12 @@ function M.polygon_centroid(poly)
     return { x = (poly[1].x + poly[2].x) * 0.5, y = (poly[1].y + poly[2].y) * 0.5 }
   end
 
-  local cx, cy, area = 0, 0, 0
+  local cx = 0 --: number
+  local cy = 0 --: number
+  local area = 0 --: number
   for i = 1, n do
-    local a = poly[i]
-    local b = poly[i % n + 1]
+    local a = poly[i] --[[:! Point]]
+    local b = poly[i % n + 1] --[[:! Point]]
     local cross_val = a.x * b.y - b.x * a.y
     area = area + cross_val
     cx = cx + (a.x + b.x) * cross_val
@@ -280,8 +302,12 @@ function M.polygon_centroid(poly)
   area = area * 0.5
   if area == 0 then
     -- Degenerate polygon — use arithmetic mean
-    local sx, sy = 0, 0
-    for _, p in ipairs(poly) do sx = sx + p.x; sy = sy + p.y end
+    local sx = 0 --: number
+    local sy = 0 --: number
+    for _, p in ipairs(poly) do
+      local p_ = p --[[:! Point]]
+      sx = sx + p_.x; sy = sy + p_.y
+    end
     return { x = sx / n, y = sy / n }
   end
   local inv = 1 / (6 * area)
@@ -292,12 +318,13 @@ end
 -- POLYGON PERIMETER
 -- ========================
 
+--: ({ [integer]: Point }) -> number
 function M.polygon_perimeter(poly)
   local n = #poly
   if n < 2 then return 0 end
-  local sum = 0
+  local sum = 0 --: number
   for i = 1, n do
-    sum = sum + dist(poly[i], poly[i % n + 1])
+    sum = sum + dist(poly[i] --[[:! Point]], poly[i % n + 1] --[[:! Point]])
   end
   return sum
 end
@@ -307,6 +334,7 @@ end
 -- Checks all cross products have the same sign (or zero)
 -- ========================
 
+--: ({ [integer]: Point }) -> boolean
 function M.is_convex(poly)
   local n = #poly
   if n < 3 then return true end
@@ -331,20 +359,22 @@ end
 -- RAMER-DOUGLAS-PEUCKER polyline simplification
 -- ========================
 
+--: ({ [integer]: Point }, integer, integer, number, { [integer]: Point }) -> nil
 local function dp_rec(points, start, stop, epsilon, result)
   if stop <= start + 1 then
     return
   end
   -- Find point with max distance from line start→stop
-  local a, b = points[start], points[stop]
-  local max_dist = 0
+  local a = points[start] --[[:! Point]]
+  local b = points[stop] --[[:! Point]]
+  local max_dist = 0 --: number
   local max_idx = start
   for i = start + 1, stop - 1 do
-    local p = points[i]
+    local p = points[i] --[[:! Point]]
     -- Distance from p to segment a→b
     local dx, dy = b.x - a.x, b.y - a.y
     local len2 = dx * dx + dy * dy
-    local d
+    local d = 0 --: number
     if len2 == 0 then
       d = dist(p, a)
     else
@@ -387,10 +417,14 @@ end
 -- MINIMUM BOUNDING CIRCLE — Welzl's algorithm
 -- ========================
 
+--:: Circle = { cx: number, cy: number, r: number }
+
+--: (Point) -> Circle
 local function circle_from_1(p)
   return { cx = p.x, cy = p.y, r = 0 }
 end
 
+--: (Point, Point) -> Circle
 local function circle_from_2(a, b)
   return {
     cx = (a.x + b.x) * 0.5,
@@ -399,6 +433,7 @@ local function circle_from_2(a, b)
   }
 end
 
+--: (Point, Point, Point) -> Circle
 local function circle_from_3(a, b, c)
   local ax, ay = b.x - a.x, b.y - a.y
   local bx, by = c.x - a.x, c.y - a.y
@@ -420,11 +455,13 @@ local function circle_from_3(a, b, c)
   return { cx = cx, cy = cy, r = dist(a, { x = cx, y = cy }) }
 end
 
+--: (Circle, Point) -> boolean
 local function point_in_circle(c, p)
   local dx, dy = p.x - c.cx, p.y - c.cy
-  return dx * dx + dy * dy <= c.r * c.r + 1e-10
+  return (dx * dx + dy * dy <= c.r * c.r + 1e-10) and true or false
 end
 
+--: ({ [integer]: Point }, { [integer]: Point }, integer) -> Circle
 local function welzl(pts, R, n)
   if n == 0 or #R == 3 then
     if #R == 0 then return { cx = 0, cy = 0, r = 0 }
@@ -434,16 +471,17 @@ local function welzl(pts, R, n)
     end
   end
 
-  local p = pts[n]
+  local p = pts[n] --[[:! Point]]
   local D = welzl(pts, R, n - 1)
   if point_in_circle(D, p) then return D end
 
-  local R2 = {}
-  for _, r in ipairs(R) do R2[#R2 + 1] = r end
+  local R2 = {} --: { [integer]: Point }
+  for _, r in ipairs(R) do R2[#R2 + 1] = r --[[:! Point]] end
   R2[#R2 + 1] = p
   return welzl(pts, R2, n - 1)
 end
 
+--: ({ [integer]: Point }) -> Circle
 function M.min_bounding_circle(points)
   local n = #points
   if n == 0 then return { cx = 0, cy = 0, r = 0 } end
@@ -451,13 +489,13 @@ function M.min_bounding_circle(points)
   if n == 2 then return circle_from_2(points[1], points[2]) end
 
   -- Shuffle for expected O(n) — use a deterministic Fisher-Yates for reproducibility
-  local pts = {}
-  for i, p in ipairs(points) do pts[i] = p end
+  local pts = {} --: { [integer]: Point }
+  for i, p in ipairs(points) do pts[i] = p --[[:! Point]] end
   -- simple seed-based shuffle
-  local seed = 12345
+  local seed = 12345 --: number
   for i = n, 2, -1 do
     seed = (seed * 1103515245 + 12345) % (2 ^ 31)
-    local j = (seed % i) + 1
+    local j = math.floor(seed % i) + 1
     pts[i], pts[j] = pts[j], pts[i]
   end
 
@@ -474,12 +512,14 @@ local function sign(x)
 end
 
 -- Returns true if point p is on segment [a, b] (assumes collinear)
+--: (Point, Point, Point) -> boolean
 local function on_segment(a, b, p)
-  return math.min(a.x, b.x) <= p.x and p.x <= math.max(a.x, b.x) and
-         math.min(a.y, b.y) <= p.y and p.y <= math.max(a.y, b.y)
+  return (math.min(a.x, b.x) <= p.x and p.x <= math.max(a.x, b.x) and
+         math.min(a.y, b.y) <= p.y and p.y <= math.max(a.y, b.y)) and true or false
 end
 
 -- Check if segments (a1,a2) and (b1,b2) intersect
+--: (Point, Point, Point, Point) -> boolean
 function M.segments_intersect(a1, a2, b1, b2)
   local d1 = cross(b1, b2, a1)
   local d2 = cross(b1, b2, a2)
@@ -501,6 +541,7 @@ end
 
 -- Compute intersection point of segments (a1,a2) and (b1,b2)
 -- Returns {x, y} or nil if they don't intersect
+--: (Point, Point, Point, Point) -> Point | nil
 function M.segment_intersection(a1, a2, b1, b2)
   if not M.segments_intersect(a1, a2, b1, b2) then return nil end
 
@@ -522,6 +563,7 @@ function M.segment_intersection(a1, a2, b1, b2)
 end
 
 -- Distance from point p to line segment [a, b]
+--: (Point, Point, Point) -> number
 function M.point_to_segment_dist(p, a, b)
   local dx, dy = b.x - a.x, b.y - a.y
   local len2 = dx * dx + dy * dy
@@ -538,11 +580,14 @@ end
 -- Returns array of {a, b, c} where a/b/c are {x,y} tables
 -- ========================
 
+--: ({ [integer]: Point }, { [integer]: integer }, integer, integer) -> boolean
 local function is_ear(poly, indices, i, n)
   local prev_i = indices[(i - 2 + n) % n + 1]
   local curr_i = indices[(i - 1 + n) % n + 1]
   local next_i = indices[(i) % n + 1]
-  local a, b, c = poly[prev_i], poly[curr_i], poly[next_i]
+  local a = poly[prev_i] --[[:! Point]]
+  local b = poly[curr_i] --[[:! Point]]
+  local c = poly[next_i] --[[:! Point]]
 
   -- The ear triangle must be CCW (positive area)
   if cross(a, b, c) <= 0 then return false end
@@ -551,7 +596,7 @@ local function is_ear(poly, indices, i, n)
   for j = 1, n do
     local idx = indices[j]
     if idx ~= prev_i and idx ~= curr_i and idx ~= next_i then
-      local p = poly[idx]
+      local p = poly[idx] --[[:! Point]]
       -- Point in triangle test via cross products
       if cross(a, b, p) >= 0 and cross(b, c, p) >= 0 and cross(c, a, p) >= 0 then
         return false
@@ -561,19 +606,20 @@ local function is_ear(poly, indices, i, n)
   return true
 end
 
+--: ({ [integer]: Point }) -> { [integer]: { a: Point, b: Point, c: Point } }
 function M.triangulate(polygon)
   local n = #polygon
   if n < 3 then return {} end
 
   -- Work with indices
-  local indices = {}
+  local indices = {} --: { [integer]: integer }
   for i = 1, n do indices[i] = i end
 
   -- Ensure CCW orientation
-  local area_signed = 0
+  local area_signed = 0 --: number
   for i = 1, n do
-    local a = polygon[i]
-    local b = polygon[i % n + 1]
+    local a = polygon[i] --[[:! Point]]
+    local b = polygon[i % n + 1] --[[:! Point]]
     area_signed = area_signed + (a.x * b.y - b.x * a.y)
   end
   if area_signed < 0 then
