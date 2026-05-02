@@ -75,10 +75,6 @@ last because the type system itself is the testbed.
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
 ### Newly discovered (not yet attempted)
-- `lib/astar/init.lua` (28) — nil | integer comparisons, arithmetic on unknown from untyped heaps
-- `lib/bigint/init.lua` (49) — integer|integer|integer unions from multi-branch arithmetic
-- `lib/calendar/init.lua` (34) — arithmetic on unknown from untyped opts table
-- `lib/behavior_tree/init.lua` (33) — cannot take length of unknown (self fields untyped)
 - `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; all bit.* calls cascade
 - `lib/bitset/init.lua` (11) — setmetatable + BS method pattern; missing argument from math.ceil returning number
 - `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail
@@ -135,6 +131,11 @@ last because the type system itself is the testbed.
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/behavior_tree/init.lua` (was 33 → now 0, commit 457366c) — defined BTNode recursive type; annotated tick_*/reset_node/debug_node with node_ force-casts; cast children to { [integer]: BTNode }; typed state fields; fixed tick_parallel needed union
+- [x] `lib/calendar/init.lua` (was 34 → now 0, commit c3f3af7) — defined Date type; annotated is_leap/days_in_month/to_ordinal/from_ordinal; self_ force-casts in date_mt methods; defined Recur type; rewrote range/recur_mt:next with from_ordinal directly; recur_mt.next() direct calls in take/all
+- [x] `lib/astar/init.lua` (was 28 → now 0, commit e6eb8ff) — annotated heuristic functions; typed g_score/dist as { [integer]: T }; decode() -> (integer, integer); cur_key/key force-casts; dir[1]/dir[2] force-casts
+- [x] `lib/bigint/init.lua` (was 49 → now 0, commit 31bd15b) — defined BigInt type; annotated all helpers and M functions; typed local arrays; used divmod_abs directly in gcd/to_hex; restructured boolean expressions for typechecker
 
 - [x] `lib/xml/init.lua` (was 62 → now 2, commit 531e51e) — XmlAttrs/XmlNode type aliases; replaced all `table` annotations; annotated parse_attrs; force-cast match() captures; remaining 2: nil assignment to typed arrays (typechecker limitation)
 - [x] `lib/cron_parser/init.lua` (was 63 → now 0, commit 45b6fb2) — DateFn/CronFields/Schedule type aliases; self: Schedule casts; force-cast snap_forward/snap_backward calls; annotated helper functions
