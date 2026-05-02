@@ -36,8 +36,8 @@ the concrete record shape it actually has.
 - [x] `lib/platform/apps/charactercardv2/server.lua` (271 → 190) — annotated conv_query and json_ok signatures
 - [x] `lib/unified/mdast/init.lua` (176 → 168) — annotated split_lines/count_indent/strip_indent/is_blank/is_thematic_break
 - [x] `lib/crescent_examples/x11_wm.lua` (178 → 160) — added local bit = require("bit")
-- [x] `lib/yaml/init.lua` (143 → 42) — annotated YState + helpers; cur/peek return integer with fallback
-- [x] `lib/ical/init.lua` (123 → 70) — annotated add_prop signature with optional params
+- [x] `lib/yaml/init.lua` (143 → 42 → 0) — annotated YState + helpers; cur/peek return integer with fallback
+- [x] `lib/ical/init.lua` (123 → 70 → 0) — annotated add_prop signature with optional params
 - [x] `lib/cryptography/init.lua` (107 → 64) — annotated all `table` shapes; rewrote u32be/u32le with math.floor(tonumber(byte)) pattern; fixed ror64/shr64 bit-op integer params; guarded chacha20 return in poly1305 encrypt/decrypt
 - [x] `lib/json/init.lua` (106 → 17) — annotated decode_number/array/object/encode_value/encode_array/encode_object; added i=ni force-casts; encode_value type narrowing casts; remaining 17 from string.byte ...integer comparison (unfixable)
 - [ ] `lib/css_parser/init.lua` (53 after partial fix) — remaining: integer|integer phi-join in new_selector_parser (pervasive), SelectorParser method shape mismatches (field doesn't exist)
@@ -45,7 +45,7 @@ the concrete record shape it actually has.
 - [x] `lib/graphql_parser/init.lua` (86 → 0, commit c0c3681) — insert(arr,node) → arr[#arr+1]=node --[[: any]]; annotated printer fns; cast node params to { [string]: unknown }
 - [x] `lib/bson/init.lua` (73 → 0, commit a5ff410) — byte() individual extraction, ffi_ typed alias, --[[: any]] cast for pairs(), decode_document cursor via tonumber()
 - [x] `lib/toml/init.lua` (72 → 68) — added forward declarations for parse_datetime and _parse_time_part
-- [x] `lib/unified/rehype_highlight/init.lua` (74 → 44) — added TokenList shape annotation on tokenizer accumulator locals
+- [x] `lib/unified/rehype_highlight/init.lua` (74 → 44 → 0) — added TokenList shape annotation on tokenizer accumulator locals
 
 ## Tier 3 — Numeric / FFI buffers (arithmetic / length on unknown)
 
@@ -122,7 +122,7 @@ last because the type system itself is the testbed.
 - `lib/multipart/init.lua` — setmetatable shape incompatibility
 - `lib/markdown/init.lua` — narrowing requires direct field access, not local alias
 - `lib/taskgraph/executor/ai.lua` — protective sentinel, any change cascades
-- `lib/css_parser/init.lua` — prior attempt at `is_ident_start`/`is_digit` annotation regressed (103→104)
+- `lib/css_parser/init.lua` — prior attempt at `is_ident_start`/`is_digit` annotation regressed (103→104); session N+9 attempt at SelectorParser/TokenStream method annotations regressed 53→86; setmetatable return type not recognized as method-bearing by typechecker
 - `lib/regexp/init.lua` (~42) — skipped in prior session
 - `lib/graphql_parser/init.lua` — AST-shape mismatches around `insert(args, {kind=...})`
 - `lib/glob/init.lua` — return-type union mismatches at iterator boundary
@@ -134,6 +134,13 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+9)
+
+- [x] `lib/yaml/init.lua` (was 42 → now 0, commit 0879e05) — stub initializers for forward-declared parse fns; annotated skip_empty_lines/current_indent/parse_double_quoted/parse_single_quoted/parse_block_scalar/parse_anchor_name/needs_quoting/quote_string/encode_value; typed parts/line_buf arrays; block_indent_ cast; encode_value type narrowing; is_array pairs cast
+- [x] `lib/unified/rehype_highlight/init.lua` (was 44 → now 0, commit 2a47723) — Token type annotation fix; e_ --[[:! integer]] casts in find-guarded blocks; HastChild type alias; tokenize_fn cast; tokens_to_hast children/plain_buf typed
+- [x] `lib/ical/init.lua` (was 70 → now 0, commit 3fd7aac) — RRule/ICalAlarm/ICalComponent/ICalProp/ICalDt/CalResult type aliases; annotated event_to_lines/todo_to_lines/add_dt_prop/parse_dt_prop/prop_key; force-casts for empty table init; arr[#arr+1] for integer-array inserts
+- skipped `lib/css_parser/init.lua` — SelectorParser/TokenStream method annotation attempt regressed 53 → 86; core issue is metatable setmetatable return type not recognized as method-bearing
 
 ## Done in current session (session N+8)
 
