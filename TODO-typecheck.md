@@ -74,6 +74,10 @@ last because the type system itself is the testbed.
 
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
+- [x] `lib/xml/init.lua` (62 → 2) — 2 remaining: nil-assignment to typed arrays (typechecker limitation)
+- [x] `lib/cbor/init.lua` (66 → 5) — 5 remaining: type() narrowing limitations in encode_value
+- [x] `lib/cron_parser/init.lua` (63 → 0)
+- [x] `lib/soundex/init.lua` (84 → 0)
 - [x] `lib/csv/init.lua` (60 → 0)
 - [x] `lib/http/format.lua` (9 → 0) — cast find() returns after nil-check; tonumber() integer cast for sub() arg
 - [x] `lib/smtp/init.lua` (47 → 25) — annotated param/return types; remaining 25 from Session self.transport unknown (prototype method lookup limitation)
@@ -111,6 +115,11 @@ last because the type system itself is the testbed.
 ## Done in current session
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
+
+- [x] `lib/xml/init.lua` (was 62 → now 2, commit 531e51e) — XmlAttrs/XmlNode type aliases; replaced all `table` annotations; annotated parse_attrs; force-cast match() captures; remaining 2: nil assignment to typed arrays (typechecker limitation)
+- [x] `lib/cron_parser/init.lua` (was 63 → now 0, commit 45b6fb2) — DateFn/CronFields/Schedule type aliases; self: Schedule casts; force-cast snap_forward/snap_backward calls; annotated helper functions
+- [x] `lib/cbor/init.lua` (was 66 → now 5, commit 053d6d7) — annotated read_arg/decode_value; bound byte multi-returns with or-0; pos/arg force-casts after guards; remaining 5: type() narrowing limitations
+- [x] `lib/soundex/init.lua` (was 84 → now 0, commit 7d13e04) — annotated upper/sub/encode_body/lcs_length/add(p,q)/M.soundex; local i: integer; DP table shapes
 
 - [x] `lib/csv/init.lua` (was 60 → now 0, commit fa86f34)
 - [x] `lib/bencode/init.lua` (was 46 → now 0, commit 79ddc6f)
