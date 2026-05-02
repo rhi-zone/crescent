@@ -47,7 +47,7 @@ function M.encode(s, opts)
     local k = 1
     for i = 1, n - tail, 3 do
         local a, b, c = byte(s, i, i + 2)
-        local v = a * 0x10000 + b * 0x100 + c
+        local v = (a or 0) --[[:! integer]] * 0x10000 + (b or 0) --[[:! integer]] * 0x100 + (c or 0) --[[:! integer]]
         t[k] = char(
             enc[floor(v / 0x40000) % 64],
             enc[floor(v / 0x1000) % 64],
@@ -58,7 +58,7 @@ function M.encode(s, opts)
     end
     if tail == 2 then
         local a, b = byte(s, n - 1, n)
-        local v = a * 0x10000 + b * 0x100
+        local v = (a or 0) --[[:! integer]] * 0x10000 + (b or 0) --[[:! integer]] * 0x100
         if pad then
             t[k] = char(
                 enc[floor(v / 0x40000) % 64],
@@ -74,7 +74,8 @@ function M.encode(s, opts)
             )
         end
     elseif tail == 1 then
-        local v = byte(s, n) * 0x10000
+        local a3 = byte(s, n)
+        local v = (a3 or 0) --[[:! integer]] * 0x10000
         if pad then
             t[k] = char(
                 enc[floor(v / 0x40000) % 64],
@@ -93,7 +94,7 @@ end
 
 --- Decode a base64 string to binary.
 --- Whitespace (space, tab, CR, LF) is skipped. Returns (nil, errmsg) on invalid input.
---: (string, { url: boolean | nil } | nil) -> string | (nil, string)
+--: (string, { url: boolean | nil } | nil) -> string | nil
 function M.decode(s, opts)
     local dec = (opts and opts.url) and url_dec or std_dec
     local n = #s
@@ -101,7 +102,7 @@ function M.decode(s, opts)
 
     -- Strip whitespace and padding, collect data bytes
     local bytes = {}
-    local nb = 0
+    local nb = 0 --: integer
     local saw_pad = false
     for i = 1, n do
         local b = byte(s, i)
@@ -172,7 +173,7 @@ function M.encode_url(s)
 end
 
 --- Decode URL-safe base64 (with or without padding).
---: (string) -> string | (nil, string)
+--: (string) -> string | nil
 function M.decode_url(s)
     return M.decode(s, { url = true })
 end
