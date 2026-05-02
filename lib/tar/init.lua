@@ -163,9 +163,9 @@ function M.read(bytes)
             else
                 -- Reconstruct full path from optional prefix + name
                 local raw_prefix = sub(block, OFF_PREFIX, OFF_PREFIX + LEN_PREFIX - 1)
-                local prefix = raw_prefix:match("^([^%z]*)") or ""
+                local prefix = (raw_prefix:match("^([^%z]*)") or "") --[[:! string]]
                 local raw_name = sub(block, OFF_NAME, OFF_NAME + LEN_NAME - 1)
-                local name = raw_name:match("^([^%z]*)") or ""
+                local name = (raw_name:match("^([^%z]*)") or "") --[[:! string]]
                 if prefix ~= "" then
                     name = prefix .. "/" .. name
                 end
@@ -177,13 +177,14 @@ function M.read(bytes)
                 local size  = parse_octal(size_field)
                 local mtime = parse_octal(mtime_field)
 
+                local size_ = size --[[:! integer]]
                 local data_blocks = floor((size + BLOCK - 1) / BLOCK)
                 local data = ""
                 if size > 0 then
-                    if pos + size - 1 > len then
+                    if pos + size_ - 1 > len then
                         return nil, "tar: truncated archive: entry '" .. name .. "' extends past end"
                     end
-                    data = sub(bytes, pos, pos + size - 1)
+                    data = sub(bytes, pos, pos + size_ - 1)
                     pos = pos + data_blocks * BLOCK
                 end
 

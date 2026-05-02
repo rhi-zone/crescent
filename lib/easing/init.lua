@@ -302,7 +302,7 @@ local _names = {
 -- Returns the easing function for a given name, or nil.
 --: (string) -> (((number) -> number) | nil)
 M.get = function(name)
-  return M[name]
+  return M[name] --[[:! ((number) -> number) | nil]]
 end
 
 -- Returns an array of all easing function names.
@@ -319,15 +319,15 @@ end
 -- `ease_fn` may be a function or a name string (default "linear").
 --: (number, number, number, (((number) -> number) | string | nil)) -> number
 M.interpolate = function(t, from, to, ease_fn)
-  local fn
+  local fn --: ((number) -> number) | nil
   if type(ease_fn) == "function" then
-    fn = ease_fn
+    fn = ease_fn --[[:! (number) -> number]]
   elseif type(ease_fn) == "string" then
-    fn = M[ease_fn]
+    fn = M[ease_fn] --[[:! ((number) -> number) | nil]]
   else
     fn = M.linear
   end
-  return from + (to - from) * fn(t)
+  return from + (to - from) * (fn or M.linear)(t)
 end
 
 return M

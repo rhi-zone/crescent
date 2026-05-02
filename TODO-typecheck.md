@@ -144,6 +144,10 @@ last because the type system itself is the testbed.
 - [x] `lib/time_series/init.lua` (was 14 → now 0, commit 5190915) — annotated bisect params/IntArr/NumArr; `lo_/hi_` force-casts for phi-join; `avg_t/avg_v --: number`; unified outlier result shapes
 - [x] `lib/circuit_breaker/init.lua` (was 9 → now 0, commit 59482b8) — CB type alias; force-cast self to CB in helpers; CBClock/CBIsFailure/CBOnChange named function types
 - [x] `lib/diff/init.lua` (was 8 → now 0, commit e232596) — force-cast branch-join locals; annotated helper function signatures
+- [x] `lib/easing/init.lua` (was 2 → now 0) — force-cast `M[name]` return in `M.get`; cast `M[ease_fn]` in `M.interpolate`; `fn or M.linear` nil-safe call
+- [x] `lib/tar/init.lua` (was 2 → now 0) — force-cast `match("^([^%z]*)")` captures; `size_` integer cast for `sub()` args
+- [x] `lib/crc32/init.lua` (was 3 → now 0) — annotated `compute_with_table` with `number|nil` init param; `{ [integer]: integer }` for res/tmp; local crc_ casts for `string.format %x`
+- [x] `lib/statemachine/init.lua` (was 3 → now 0) — annotated `default_sub_path` return; force-cast `target_str_` for concat; `machine_` force-cast with transition/matches shape; `new_state_` context indexing cast
 - [x] `lib/bloom_clock/init.lua` (was 11 → now 0, commit 49d62d4) — Clock type alias; annotated all helpers; self_ casts in methods; FNV constant as signed int32
 - [x] `lib/uuid/init.lua` (was 4 → now 3, commit 846b5d0) — rand_bytes forward-decl as rand_bytes_fn|nil; force-cast at call sites; 3 FFI ffi.new errors remain
 - [x] `lib/string_ext/init.lua` (was 6 → now 0, commit be1e194) — annotated M.split/split_n/lines with string param types

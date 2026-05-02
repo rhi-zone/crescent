@@ -55,6 +55,7 @@ end
 -- Return the "default" leaf path starting from a node.
 -- For atomic nodes returns {}.
 -- For compound nodes follows .initial recursively.
+--: (unknown) -> { [integer]: string }
 local function default_sub_path(node)
   if type(node) ~= "table" then return {} end
   if not node.initial then return {} end
@@ -241,9 +242,10 @@ function Machine:transition(state, event_name, event_data)
     return {value = state.value, context = ctx}
   end
 
-  local new_path = resolve_target(self._config, path, target_str)
+  local target_str_ = target_str --[[:! string]]
+  local new_path = resolve_target(self._config, path, target_str_)
   if not new_path then
-    return nil, "statemachine: unknown target state '" .. target_str .. "'"
+    return nil, "statemachine: unknown target state '" .. target_str_ .. "'"
   end
 
   local old_chain = ancestor_chain(self._config, path)
@@ -314,13 +316,15 @@ Service.__index = Service
 
 function Service:send(event_name, event_data)
   if self._stopped then return end
-  local new_state, err = self._machine:transition(self.state, event_name, event_data)
+  local machine_ = self._machine --[[:! { transition: (unknown, unknown, unknown, unknown) -> (unknown, unknown), matches: (unknown, unknown) -> unknown, ... }]]
+  local new_state, err = machine_:transition(self.state, event_name, event_data)
   if new_state == nil then
     -- Propagate errors (unknown target etc.) silently; caller can check.
     return nil, err
   end
-  self.state = new_state
-  self.context = new_state.context
+  local new_state_ = new_state --[[:! { context: unknown, ... }]]
+  self.state = new_state_
+  self.context = new_state_.context
 end
 
 function Service:matches(pattern)

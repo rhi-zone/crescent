@@ -52,6 +52,7 @@ local KOOPMAN_TABLE = make_table(0xEB31D82E)
 -- Core computation
 -- ---------------------------------------------------------------------------
 
+--: ({ [integer]: integer }, string, number | nil) -> number
 local function compute_with_table(tbl, data, init_crc)
   -- init_crc is a previous CRC result (unsigned double); bit.tobit converts
   -- to the signed 32-bit domain that the bit library requires.
@@ -78,7 +79,8 @@ end
 
 --- 8-character lowercase hex string of the CRC-32.
 function M.hex(data)
-  return string.format("%08x", M.compute(data))
+  local crc_ = M.compute(data) --[[:! integer]]
+  return string.format("%08x", crc_)
 end
 
 -- ---------------------------------------------------------------------------
@@ -95,7 +97,8 @@ end
 
 --- 8-character lowercase hex string of the CRC-32C.
 function M.castagnoli_hex(data)
-  return string.format("%08x", M.castagnoli(data))
+  local crc_ = M.castagnoli(data) --[[:! integer]]
+  return string.format("%08x", crc_)
 end
 
 -- ---------------------------------------------------------------------------
@@ -118,7 +121,8 @@ end
 --- @return table  stream object with :update/:finish/:hex/:reset methods
 function M.stream()
   local s = {}
-  local _crc = 0  -- current CRC (unsigned double)
+  -- current CRC (unsigned double)
+  local _crc = 0 --: number
 
   --- Feed more data into the accumulator.
   function s:update(chunk)
@@ -220,7 +224,7 @@ function M.combine(crc1, crc2, len2)
   local mat = build_generator()
   local acc = bit.tobit(crc1)
   -- Identity matrix for accumulating the result matrix
-  local res = {}
+  local res = {} --: { [integer]: integer }
   for i = 1, 32 do
     if i < 32 then res[i] = lshift(1, i - 1)
     else res[i] = bit.tobit(0x80000000) end
@@ -229,7 +233,7 @@ function M.combine(crc1, crc2, len2)
   -- Exponent = 8 * len2; use plain Lua number arithmetic (not bit ops) so
   -- that large len2 values (> 2^28 bytes) don't overflow 32-bit signed int.
   local n = 8 * len2
-  local tmp = {}
+  local tmp = {} --: { [integer]: integer }
   while n > 0 do
     if n % 2 ~= 0 then
       -- res = mat * res  (column-wise)
