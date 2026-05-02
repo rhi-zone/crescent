@@ -37,6 +37,24 @@ local BYTE_a      = 97
 local BYTE_f      = 102
 local BYTE_z      = 122
 local BYTE_UNDER  = 95  -- _
+local BYTE_7      = 55  -- '7'
+local BYTE_1      = 49  -- '1'
+local BYTE_e      = 101 -- 'e'
+local BYTE_E      = 69  -- 'E'
+local BYTE_u      = 117 -- 'u'
+local BYTE_U      = 85  -- 'U'
+local BYTE_COLON  = 58  -- ':'
+local BYTE_x      = 120 -- 'x'
+local BYTE_X      = 88  -- 'X'
+local BYTE_o      = 111 -- 'o'
+local BYTE_O      = 79  -- 'O'
+local BYTE_b_     = 98  -- 'b'
+local BYTE_B_     = 66  -- 'B'
+local BYTE_T_     = 84  -- 'T'
+local BYTE_t_     = 116 -- 't'
+local BYTE_i      = 105 -- 'i'
+local BYTE_n_     = 110 -- 'n'
+-- note: BYTE_Z=90, BYTE_z=122 already defined above
 
 local byte = string.byte
 local sub = string.sub
@@ -50,17 +68,17 @@ local huge = math.huge
 -- Parser
 -- ============================================================================
 
---: (number) -> boolean
+--: (integer) -> boolean
 local function is_ws(b)
   return b == BYTE_SPACE or b == BYTE_TAB
 end
 
---: (number) -> boolean
+--: (integer) -> boolean
 local function is_newline(b)
   return b == BYTE_NL or b == BYTE_CR
 end
 
---: (number) -> boolean
+--: (integer) -> boolean
 local function is_bare_key_char(b)
   return (b >= BYTE_a and b <= BYTE_z)
       or (b >= BYTE_A and b <= BYTE_Z)
@@ -68,16 +86,16 @@ local function is_bare_key_char(b)
       or b == BYTE_MINUS or b == BYTE_UNDER
 end
 
---: (number) -> boolean
+--: (integer) -> boolean
 local function is_digit(b)
-  return b >= BYTE_0 and b <= BYTE_9
+  return b >= BYTE_0 and b <= BYTE_9 and true or false
 end
 
---: (number) -> boolean
+--: (integer) -> boolean
 local function is_hex(b)
-  return (b >= BYTE_0 and b <= BYTE_9)
+  return ((b >= BYTE_0 and b <= BYTE_9)
       or (b >= BYTE_a and b <= BYTE_f)
-      or (b >= BYTE_A and b <= BYTE_F)
+      or (b >= BYTE_A and b <= BYTE_F)) and true or false
 end
 
 -- Parser state: { s, pos, len, line }
@@ -121,7 +139,7 @@ local function skip_ws_and_newlines(st)
   st.pos = pos
 end
 
---: (toml_state) -> nil
+--: (toml_state) -> (boolean | nil, string)
 local function skip_to_newline(st)
   local s, pos, len = st.s, st.pos, st.len
   while pos <= len do
@@ -224,8 +242,8 @@ local function parse_basic_string(st)
       if esc then
         n = n + 1; parts[n] = esc
         pos = pos + 1
-      elseif b == byte("u") or b == byte("U") then
-        local ndig = b == byte("u") and 4 or 8
+      elseif b == BYTE_u or b == BYTE_U then
+        local ndig = b == BYTE_u and 4 or 8
         pos = pos + 1
         if pos + ndig - 1 > len then
           return nil, "line " .. st.line .. ": incomplete unicode escape"
@@ -263,7 +281,7 @@ end
 --: (toml_state) -> (string | nil, string)
 local function parse_ml_basic_string(st)
   local s, len = st.s, st.len
-  local pos = st.pos + 3  -- skip """
+  local pos = st.pos + 3  --: integer
   -- trim first newline
   if pos <= len then
     local b = byte(s, pos)
@@ -276,6 +294,8 @@ local function parse_ml_basic_string(st)
       st.line = st.line + 1
     end
   end
+  local pos_ = pos --[[:! integer]]
+  pos = pos_
   local parts = {}
   local n = 0
   while pos <= len do
@@ -297,13 +317,13 @@ local function parse_ml_basic_string(st)
     elseif b == BYTE_BSLASH then
       pos = pos + 1
       if pos > len then return nil, "line " .. st.line .. ": unexpected end of string" end
-      b = byte(s, pos)
+      b = (byte(s, pos) or 0) --[[:! integer]]
       -- line-ending backslash: trim whitespace+newlines
       if b == BYTE_NL or b == BYTE_CR or is_ws(b) then
         -- skip whitespace before newline
-        while pos <= len and is_ws(byte(s, pos)) do pos = pos + 1 end
+        while pos <= len and is_ws((byte(s, pos) or 0) --[[:! integer]]) do pos = pos + 1 end
         if pos <= len then
-          b = byte(s, pos)
+          b = (byte(s, pos) or 0) --[[:! integer]]
           if b == BYTE_NL then
             st.line = st.line + 1
             pos = pos + 1
@@ -314,8 +334,10 @@ local function parse_ml_basic_string(st)
           end
         end
         -- skip further whitespace and newlines
+        local pws_ = pos --[[:! integer]]
+        pos = pws_
         while pos <= len do
-          b = byte(s, pos)
+          b = (byte(s, pos) or 0) --[[:! integer]]
           if b == BYTE_NL then
             st.line = st.line + 1
             pos = pos + 1
@@ -334,8 +356,8 @@ local function parse_ml_basic_string(st)
         if esc then
           n = n + 1; parts[n] = esc
           pos = pos + 1
-        elseif b == byte("u") or b == byte("U") then
-          local ndig = b == byte("u") and 4 or 8
+        elseif b == BYTE_u or b == BYTE_U then
+          local ndig = b == BYTE_u and 4 or 8
           pos = pos + 1
           if pos + ndig - 1 > len then
             return nil, "line " .. st.line .. ": incomplete unicode escape"
@@ -397,7 +419,7 @@ end
 --: (toml_state) -> (string | nil, string)
 local function parse_ml_literal_string(st)
   local s, len = st.s, st.len
-  local pos = st.pos + 3  -- skip '''
+  local pos = st.pos + 3  --: integer
   -- trim first newline
   if pos <= len then
     local b = byte(s, pos)
@@ -410,6 +432,8 @@ local function parse_ml_literal_string(st)
       st.line = st.line + 1
     end
   end
+  local pos__ = pos --[[:! integer]]
+  pos = pos__
   local parts = {}
   local n = 0
   while pos <= len do
@@ -512,47 +536,57 @@ local function parse_number_or_date(st)
   -- 0x, 0o, 0b prefixes
   if b == BYTE_0 and pos + 1 <= len then
     local next_b = byte(s, pos + 1)
-    if next_b == byte("x") or next_b == byte("X") then
+    if next_b == BYTE_x or next_b == BYTE_X then
       pos = pos + 2
       local nstart = pos
-      while pos <= len and (is_hex(byte(s, pos)) or byte(s, pos) == BYTE_UNDER) do
+      while pos <= len and (is_hex((byte(s, pos) or 0) --[[:! integer]]) or byte(s, pos) == BYTE_UNDER) do
         pos = pos + 1
       end
       if pos == nstart then return nil, "line " .. st.line .. ": expected hex digits" end
       st.pos = pos
       local raw, err = strip_underscores(sub(s, nstart, pos - 1), st.line)
       if not raw then return nil, err end
-      return sign * tonumber(raw, 16)
-    elseif next_b == byte("o") or next_b == byte("O") then
+      local n16 = tonumber(raw, 16)
+      if not n16 then return nil, "line " .. st.line .. ": invalid hex number" end
+      return sign * (n16 --[[:! number]])
+    elseif next_b == BYTE_o or next_b == BYTE_O then
       pos = pos + 2
       local nstart = pos
-      while pos <= len and ((byte(s, pos) >= BYTE_0 and byte(s, pos) <= byte("7")) or byte(s, pos) == BYTE_UNDER) do
+      while pos <= len do
+        local ob = (byte(s, pos) or 0) --[[:! integer]]
+        if not ((ob >= BYTE_0 and ob <= BYTE_7) or ob == BYTE_UNDER) then break end
         pos = pos + 1
       end
       if pos == nstart then return nil, "line " .. st.line .. ": expected octal digits" end
       st.pos = pos
       local raw, err = strip_underscores(sub(s, nstart, pos - 1), st.line)
       if not raw then return nil, err end
-      return sign * tonumber(raw, 8)
-    elseif next_b == byte("b") or next_b == byte("B") then
+      local n8 = tonumber(raw, 8)
+      if not n8 then return nil, "line " .. st.line .. ": invalid octal number" end
+      return sign * (n8 --[[:! number]])
+    elseif next_b == BYTE_b_ or next_b == BYTE_B_ then
       pos = pos + 2
       local nstart = pos
-      while pos <= len and (byte(s, pos) == BYTE_0 or byte(s, pos) == byte("1") or byte(s, pos) == BYTE_UNDER) do
+      while pos <= len and (byte(s, pos) == BYTE_0 or byte(s, pos) == BYTE_1 or byte(s, pos) == BYTE_UNDER) do
         pos = pos + 1
       end
       if pos == nstart then return nil, "line " .. st.line .. ": expected binary digits" end
       st.pos = pos
       local raw, err = strip_underscores(sub(s, nstart, pos - 1), st.line)
       if not raw then return nil, err end
-      return sign * tonumber(raw, 2)
+      local n2 = tonumber(raw, 2)
+      if not n2 then return nil, "line " .. st.line .. ": invalid binary number" end
+      return sign * (n2 --[[:! number]])
     end
   end
 
   -- decimal integer or float, or date/time
   -- scan digits
+  local pos_d = pos --[[:! integer]]
+  pos = pos_d
   local has_sign = (byte(s, start) == BYTE_PLUS or byte(s, start) == BYTE_MINUS)
   local dstart = pos
-  while pos <= len and (is_digit(byte(s, pos)) or byte(s, pos) == BYTE_UNDER) do
+  while pos <= len and (is_digit((byte(s, pos) or 0) --[[:! integer]]) or byte(s, pos) == BYTE_UNDER) do
     pos = pos + 1
   end
 
@@ -563,7 +597,7 @@ local function parse_number_or_date(st)
   end
 
   -- check for time: HH:MM pattern (2 digits then :) with no sign
-  if not has_sign and (pos - dstart) == 2 and pos <= len and byte(s, pos) == byte(":") then
+  if not has_sign and (pos - dstart) == 2 and pos <= len and byte(s, pos) == BYTE_COLON then
     return parse_datetime(st)
   end
 
@@ -572,25 +606,29 @@ local function parse_number_or_date(st)
   if pos <= len and byte(s, pos) == BYTE_DOT then
     is_float = true
     pos = pos + 1
-    if pos > len or not is_digit(byte(s, pos)) then
+    if pos > len or not is_digit((byte(s, pos) or 0) --[[:! integer]]) then
       return nil, "line " .. st.line .. ": expected digit after decimal point"
     end
-    while pos <= len and (is_digit(byte(s, pos)) or byte(s, pos) == BYTE_UNDER) do
+    while pos <= len and (is_digit((byte(s, pos) or 0) --[[:! integer]]) or byte(s, pos) == BYTE_UNDER) do
       pos = pos + 1
     end
   end
 
   -- float: exponent
-  if pos <= len and (byte(s, pos) == byte("e") or byte(s, pos) == byte("E")) then
+  local pos_e_ = pos --[[:! integer]]
+  pos = pos_e_
+  if pos <= len and (byte(s, pos) == BYTE_e or byte(s, pos) == BYTE_E) then
     is_float = true
     pos = pos + 1
     if pos <= len and (byte(s, pos) == BYTE_PLUS or byte(s, pos) == BYTE_MINUS) then
       pos = pos + 1
     end
-    if pos > len or not is_digit(byte(s, pos)) then
+    local pos_ex_ = pos --[[:! integer]]
+    pos = pos_ex_
+    if pos > len or not is_digit((byte(s, pos) or 0) --[[:! integer]]) then
       return nil, "line " .. st.line .. ": expected digit in exponent"
     end
-    while pos <= len and (is_digit(byte(s, pos)) or byte(s, pos) == BYTE_UNDER) do
+    while pos <= len and (is_digit((byte(s, pos) or 0) --[[:! integer]]) or byte(s, pos) == BYTE_UNDER) do
       pos = pos + 1
     end
   end
@@ -613,14 +651,14 @@ local function _parse_datetime(st)
 
   -- scan the full token (digits, -, :, ., T, t, Z, z, +)
   while pos <= len do
-    local b = byte(s, pos)
-    if is_digit(b) or b == BYTE_MINUS or b == byte(":") or b == BYTE_DOT
-       or b == byte("T") or b == byte("t") or b == byte("Z") or b == byte("z")
+    local b = (byte(s, pos) or 0) --[[:! integer]]
+    if is_digit(b) or b == BYTE_MINUS or b == BYTE_COLON or b == BYTE_DOT
+       or b == BYTE_T_ or b == BYTE_t_ or b == BYTE_Z or b == BYTE_z
        or b == BYTE_PLUS or b == BYTE_SPACE then
       -- space only valid between date and time
       if b == BYTE_SPACE then
         -- check if next char is a digit (time part)
-        if pos + 1 <= len and is_digit(byte(s, pos + 1)) then
+        if pos + 1 <= len and is_digit((byte(s, pos + 1) or 0) --[[:! integer]]) then
           pos = pos + 1
         else
           break
@@ -651,7 +689,7 @@ local function _parse_datetime(st)
     if #raw >= 11 and (sub(raw, 11, 11) == "T" or sub(raw, 11, 11) == "t" or sub(raw, 11, 11) == " ") then
       local time_part = sub(raw, 12)
       hour, min, sec, frac, tz = _parse_time_part(time_part, st.line)
-      if not hour then return nil, min end  -- min is errmsg
+      if not hour then return nil, "line " .. st.line .. ": invalid time in datetime" end
 
       if tz then
         return { __toml_type = "datetime", year = year, month = month, day = day,
@@ -676,28 +714,27 @@ local function _parse_datetime(st)
 end
 
 -- Parse the time portion: HH:MM:SS[.frac][Z|+HH:MM|-HH:MM]
---: (string, number) -> (number, number, number, number|nil, string|nil | nil, string)
 local function _parse_time_part_impl(time_str, line)
   local h, m, s
   if #time_str < 8 then
     -- might be HH:MM:SS minimum
-    if #time_str < 5 then return nil, "line " .. line .. ": invalid time" end
+    if #time_str < 5 then return nil, nil, nil, nil, nil end
   end
   h = tonumber(sub(time_str, 1, 2))
-  if sub(time_str, 3, 3) ~= ":" then return nil, "line " .. line .. ": expected ':' in time" end
+  if sub(time_str, 3, 3) ~= ":" then return nil, nil, nil, nil, nil end
   m = tonumber(sub(time_str, 4, 5))
   if #time_str == 5 then
     return h, m, 0, nil, nil
   end
-  if sub(time_str, 6, 6) ~= ":" then return nil, "line " .. line .. ": expected ':' in time" end
+  if sub(time_str, 6, 6) ~= ":" then return nil, nil, nil, nil, nil end
   s = tonumber(sub(time_str, 7, 8))
 
   local frac_val = nil
-  local rest_pos = 9
+  local rest_pos = 9 --: integer
   if rest_pos <= #time_str and sub(time_str, rest_pos, rest_pos) == "." then
     rest_pos = rest_pos + 1
     local frac_start = rest_pos
-    while rest_pos <= #time_str and is_digit(byte(time_str, rest_pos)) do
+    while rest_pos <= #time_str and is_digit((byte(time_str, rest_pos) or 0) --[[:! integer]]) do
       rest_pos = rest_pos + 1
     end
     if rest_pos > frac_start then
@@ -705,6 +742,8 @@ local function _parse_time_part_impl(time_str, line)
     end
   end
 
+  local rp_ = rest_pos --[[:! integer]]
+  rest_pos = rp_
   local tz_val = nil
   if rest_pos <= #time_str then
     local tz_char = sub(time_str, rest_pos, rest_pos)
@@ -736,7 +775,7 @@ local function parse_simple_key(st)
     return nil, "line " .. st.line .. ": expected key, got '" .. sub(s, pos, pos) .. "'"
   end
   local start = pos
-  while pos <= len and is_bare_key_char(byte(s, pos)) do
+  while pos <= len and is_bare_key_char((byte(s, pos) or 0) --[[:! integer]]) do
     pos = pos + 1
   end
   st.pos = pos
@@ -754,9 +793,9 @@ local function parse_key(st)
   while st.pos <= st.len and byte(st.s, st.pos) == BYTE_DOT do
     st.pos = st.pos + 1  -- skip dot
     skip_ws(st)
-    k, err = parse_simple_key(st)
-    if not k then return nil, err end
-    n = n + 1; keys[n] = k
+    local k2, err2 = parse_simple_key(st)
+    if not k2 then return nil, err2 end
+    n = n + 1; keys[n] = k2
   end
   return keys
 end
@@ -883,7 +922,7 @@ end
 --: (toml_state, { [unknown]: boolean }) -> (unknown, string | nil)
 parse_value = function(st, array_tables)
   if st.pos > st.len then return nil, "line " .. st.line .. ": expected value" end
-  local b = byte(st.s, st.pos)
+  local b = (byte(st.s, st.pos) or 0) --[[:! integer]]
 
   -- string
   if b == BYTE_QUOTE or b == BYTE_APOS then
@@ -891,16 +930,16 @@ parse_value = function(st, array_tables)
   end
 
   -- boolean
-  if b == byte("t") and sub(st.s, st.pos, st.pos + 3) == "true" then
+  if b == BYTE_t_ and sub(st.s, st.pos, st.pos + 3) == "true" then
     local after = st.pos + 4
-    if after > st.len or not is_bare_key_char(byte(st.s, after)) then
+    if after > st.len or not is_bare_key_char((byte(st.s, after) or 0) --[[:! integer]]) then
       st.pos = after
       return true
     end
   end
-  if b == byte("f") and sub(st.s, st.pos, st.pos + 4) == "false" then
+  if b == BYTE_f and sub(st.s, st.pos, st.pos + 4) == "false" then
     local after = st.pos + 5
-    if after > st.len or not is_bare_key_char(byte(st.s, after)) then
+    if after > st.len or not is_bare_key_char((byte(st.s, after) or 0) --[[:! integer]]) then
       st.pos = after
       return false
     end
@@ -922,11 +961,11 @@ parse_value = function(st, array_tables)
   end
 
   -- inf/nan without sign
-  if b == byte("i") and sub(st.s, st.pos, st.pos + 2) == "inf" then
+  if b == BYTE_i and sub(st.s, st.pos, st.pos + 2) == "inf" then
     st.pos = st.pos + 3
     return huge
   end
-  if b == byte("n") and sub(st.s, st.pos, st.pos + 2) == "nan" then
+  if b == BYTE_n_ and sub(st.s, st.pos, st.pos + 2) == "nan" then
     st.pos = st.pos + 3
     return 0/0
   end
@@ -1078,10 +1117,10 @@ local function decode(s)
         return nil, "line " .. st.line .. ": expected '='"
       end
       st.pos = st.pos + 1  -- skip =
-      skip_ws(st)
-      local val
-      val, err = parse_value(st, array_tables)
-      if val == nil and err then return nil, err end
+      local st_ = st --[[:! toml_state]]
+      skip_ws(st_)
+      local val, verr = parse_value(st_, array_tables)
+      if val == nil and verr then return nil, verr end
 
       -- navigate to target table
       local target = current_table
@@ -1394,7 +1433,7 @@ local function encode(tbl)
     -- write sub-tables
     for i = 1, tn do
       local k = table_keys[i]
-      local full = prefix and (prefix .. "." .. quote_key(tostring(k))) or quote_key(tostring(k))
+      local full = (prefix ~= "") and (prefix .. "." .. quote_key(tostring(k))) or quote_key(tostring(k))
       n = n + 1; out[n] = ""
       n = n + 1; out[n] = "[" .. full .. "]"
       local err = write_table(t[k], full)
@@ -1404,7 +1443,7 @@ local function encode(tbl)
     -- write arrays of tables
     for i = 1, an do
       local k = array_table_keys[i]
-      local full = prefix and (prefix .. "." .. quote_key(tostring(k))) or quote_key(tostring(k))
+      local full = (prefix ~= "") and (prefix .. "." .. quote_key(tostring(k))) or quote_key(tostring(k))
       local arr = t[k]
       for j = 1, #arr do
         n = n + 1; out[n] = ""
@@ -1415,7 +1454,7 @@ local function encode(tbl)
     end
   end
 
-  write_table(tbl, nil)
+  write_table(tbl, "")
 
   -- trim leading empty line
   if n > 0 and out[1] == "" then
