@@ -39,6 +39,7 @@ mod.variables.key_repeat_delay_ms = 600
 
 --[[@diagnostic disable: need-check-nil]]
 
+local bit = require("bit")
 local ffi = require("ffi")
 local xkb = require("dep.xkbcommon")
 local wl = require("dep.wayland_server")
