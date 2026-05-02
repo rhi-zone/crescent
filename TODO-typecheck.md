@@ -129,6 +129,11 @@ last because the type system itself is the testbed.
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
 
+- [x] `lib/cellular_automata/init.lua` (was 2 → now 0, commit 3517df6) — `local bit = require("bit")`; annotated row array `{ [integer]: integer }` to allow assigning 1
+- [x] `lib/bloom_filter/init.lua` (was 24 → now 0, commit 3517df6) — BloomFilter/ScalableBloom type aliases; annotated optimal_m/k/bitarray_new/hash_i; parse_opts return type; force-casts after nil-check; self_ casts in methods; CountingFilter alias
+- [x] `lib/bloom_count/init.lua` (was 24 → now 0, commit c430a42) — `require("bit")`; CBFShape/CFShape/SBFInner/ScalableBloomShape type aliases; annotated hash helpers; `string.byte(s,i,i)` pattern for single-byte extraction; self_ casts across all methods
+- [x] `lib/auth/init.lua` (was 26 → now 0, commit 09d45cb) — `require("bit")` + local aliases; force-cast base64_encode/decode/json_encode/decode as typed locals; annotated jwt_decode parts array; fixed hex_to_bytes; self-contained xor_strings with single-byte extraction
+
 - [x] `lib/interpolation_curves/init.lua` (was 67 → now 0, commit 8d94e7f) — NumArr/NumArr2D/Spline/CSpline/HSpline/EvalSpline/Curve type aliases; bisect/thomas/mat_solve/poly_eval annotations; self_ casts in monotone/akima methods; 0→number annotated accumulators; EvalSpline cast for curve methods
 - [x] `lib/physics_2d/init.lua` (was 70 → now 0, commit 28a8850) — BodyShape/JointShape/WorldShape/CollInfo/BodyOpts/WorldOpts type aliases; annotated collision helpers; setmetatable via --[[: any]] + return cast; self_ cast in World:step
 - [x] `lib/validation/init.lua` (was 71 → now 57, commit af01242) — replaced XxxSchema.optional = XxxSchema.nullable with Schema.nullable (14 occurrences); remaining 57 from unknown method calls on schema prototype chain
