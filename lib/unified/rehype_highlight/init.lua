@@ -21,7 +21,7 @@ end
 local M = {}
 
 --:: list = { [integer]: unknown }
---:: Token = { 1: string, 2: string }
+--:: Token = { [integer]: string }
 --:: TokenList = { [integer]: Token }
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
@@ -32,14 +32,14 @@ local function is_word_char(c)
 end
 
 -- Check word boundary: character before pos (1-indexed) is not a word char.
---: (string, number) -> boolean
+--: (string, integer) -> boolean
 local function at_word_start(src, pos)
   if pos == 1 then return true end
   return not is_word_char(src:sub(pos - 1, pos - 1))
 end
 
 -- Check word boundary: character after match end is not a word char.
---: (string, number) -> boolean
+--: (string, integer) -> boolean
 local function at_word_end(src, pos)
   local c = src:sub(pos + 1, pos + 1)
   return c == "" or not is_word_char(c)
@@ -50,8 +50,8 @@ end
 -- tokens: list of {kind, text} where kind == "plain" or a hljs kind
 --: (list, string) -> list
 local function tokens_to_hast(tokens, prefix)
-  local children = {}
-  local plain_buf = {}
+  local children = {} --: list
+  local plain_buf = {} --: { [integer]: string }
 
   local function flush_plain()
     if #plain_buf > 0 then
@@ -109,8 +109,9 @@ local function tokenize_lua(src)
     -- Block comment --[[ ... ]]
     local bc_start, bc_end = src:find("^%-%-%[%[(.-)%]%]", i)
     if bc_start then
-      tokens[#tokens + 1] = { "comment", src:sub(bc_start, bc_end) }
-      i = bc_end + 1
+      local bc_end_ = bc_end --[[:! integer]]
+      tokens[#tokens + 1] = { "comment", src:sub(bc_start, bc_end_) }
+      i = bc_end_ + 1
     -- Line comment --
     elseif src:sub(i, i + 1) == "--" then
       local line_end = src:find("\n", i, true) or (n + 1)
@@ -120,8 +121,9 @@ local function tokenize_lua(src)
     elseif src:sub(i, i + 1) == "[[" then
       local s, e = src:find("%]%]", i + 2, true)
       if s then
-        tokens[#tokens + 1] = { "string", src:sub(i, e) }
-        i = e + 1
+        local e_ = e --[[:! integer]]
+        tokens[#tokens + 1] = { "string", src:sub(i, e_) }
+        i = e_ + 1
       else
         tokens[#tokens + 1] = { "plain", src:sub(i, i) }
         i = i + 1
@@ -154,8 +156,9 @@ local function tokenize_lua(src)
     elseif src:sub(i, i + 1):lower() == "0x" then
       local s, e = src:find("^0[xX][%x]+", i)
       if s then
-        tokens[#tokens + 1] = { "number", src:sub(s, e) }
-        i = e + 1
+        local e_ = e --[[:! integer]]
+        tokens[#tokens + 1] = { "number", src:sub(s, e_) }
+        i = e_ + 1
       else
         tokens[#tokens + 1] = { "plain", src:sub(i, i) }
         i = i + 1
@@ -166,10 +169,11 @@ local function tokenize_lua(src)
       local s, e = src:find("^%d+%.?%d*", i)
       -- extend with optional exponent (e.g. 1e10, 3.14e-2)
       if s then
-        local e2 = src:match("^[eE][+%-]?%d+", e + 1)
-        if e2 then e = e + #e2 end
-        tokens[#tokens + 1] = { "number", src:sub(s, e) }
-        i = e + 1
+        local e_ = e --[[:! integer]]
+        local e2 = src:match("^[eE][+%-]?%d+", e_ + 1)
+        if e2 then e_ = e_ + #e2 end
+        tokens[#tokens + 1] = { "number", src:sub(s, e_) }
+        i = e_ + 1
       else
         tokens[#tokens + 1] = { "plain", src:sub(i, i) }
         i = i + 1
@@ -177,7 +181,7 @@ local function tokenize_lua(src)
     -- Identifier / keyword / literal / built-in
     elseif src:sub(i, i):match("[%a_]") then
       local s, e = src:find("^[%w_]+", i)
-      local word = src:sub(s, e)
+      local word = src:sub(s, (e --[[:! integer]]))
       local kind
       if LUA_LITERALS[word] then
         kind = "literal"
@@ -189,7 +193,7 @@ local function tokenize_lua(src)
         kind = "plain"
       end
       tokens[#tokens + 1] = { kind, word }
-      i = e + 1
+      i = (e --[[:! integer]]) + 1
     else
       tokens[#tokens + 1] = { "plain", src:sub(i, i) }
       i = i + 1
@@ -227,8 +231,9 @@ local function tokenize_js(src)
     if src:sub(i, i + 1) == "/*" then
       local s, e = src:find("%*/", i + 2, true)
       if s then
-        tokens[#tokens + 1] = { "comment", src:sub(i, e + 1) }
-        i = e + 2
+        local e_ = e --[[:! integer]]
+        tokens[#tokens + 1] = { "comment", src:sub(i, e_ + 1) }
+        i = e_ + 2
       else
         tokens[#tokens + 1] = { "comment", src:sub(i) }
         i = n + 1
@@ -279,10 +284,11 @@ local function tokenize_js(src)
            (src:sub(i, i) == "." and src:sub(i + 1, i + 1):match("%d")) then
       local s, e = src:find("^%d+%.?%d*", i)
       if s then
-        local e2 = src:match("^[eE][+%-]?%d+", e + 1)
-        if e2 then e = e + #e2 end
-        tokens[#tokens + 1] = { "number", src:sub(s, e) }
-        i = e + 1
+        local e_ = e --[[:! integer]]
+        local e2 = src:match("^[eE][+%-]?%d+", e_ + 1)
+        if e2 then e_ = e_ + #e2 end
+        tokens[#tokens + 1] = { "number", src:sub(s, e_) }
+        i = e_ + 1
       else
         tokens[#tokens + 1] = { "plain", src:sub(i, i) }
         i = i + 1
@@ -290,7 +296,7 @@ local function tokenize_js(src)
     -- Identifier / keyword / literal
     elseif src:sub(i, i):match("[%a_$]") then
       local s, e = src:find("^[%w_$]+", i)
-      local word = src:sub(s, e)
+      local word = src:sub(s, (e --[[:! integer]]))
       local kind
       if JS_LITERALS[word] then
         kind = "literal"
@@ -300,7 +306,7 @@ local function tokenize_js(src)
         kind = "plain"
       end
       tokens[#tokens + 1] = { kind, word }
-      i = e + 1
+      i = (e --[[:! integer]]) + 1
     else
       tokens[#tokens + 1] = { "plain", src:sub(i, i) }
       i = i + 1
@@ -335,8 +341,9 @@ local function tokenize_python(src)
     if src:sub(i, i + 2) == '"""' then
       local s, e = src:find('"""', i + 3, true)
       if s then
-        tokens[#tokens + 1] = { "string", src:sub(i, e + 2) }
-        i = e + 3
+        local e_ = e --[[:! integer]]
+        tokens[#tokens + 1] = { "string", src:sub(i, e_ + 2) }
+        i = e_ + 3
       else
         tokens[#tokens + 1] = { "string", src:sub(i) }
         i = n + 1
@@ -345,8 +352,9 @@ local function tokenize_python(src)
     elseif src:sub(i, i + 2) == "'''" then
       local s, e = src:find("'''", i + 3, true)
       if s then
-        tokens[#tokens + 1] = { "string", src:sub(i, e + 2) }
-        i = e + 3
+        local e_ = e --[[:! integer]]
+        tokens[#tokens + 1] = { "string", src:sub(i, e_ + 2) }
+        i = e_ + 3
       else
         tokens[#tokens + 1] = { "string", src:sub(i) }
         i = n + 1
@@ -385,10 +393,11 @@ local function tokenize_python(src)
            (src:sub(i, i) == "." and src:sub(i + 1, i + 1):match("%d")) then
       local s, e = src:find("^%d+%.?%d*", i)
       if s then
-        local e2 = src:match("^[eE][+%-]?%d+", e + 1)
-        if e2 then e = e + #e2 end
-        tokens[#tokens + 1] = { "number", src:sub(s, e) }
-        i = e + 1
+        local e_ = e --[[:! integer]]
+        local e2 = src:match("^[eE][+%-]?%d+", e_ + 1)
+        if e2 then e_ = e_ + #e2 end
+        tokens[#tokens + 1] = { "number", src:sub(s, e_) }
+        i = e_ + 1
       else
         tokens[#tokens + 1] = { "plain", src:sub(i, i) }
         i = i + 1
@@ -396,7 +405,7 @@ local function tokenize_python(src)
     -- Identifier / keyword / literal
     elseif src:sub(i, i):match("[%a_]") then
       local s, e = src:find("^[%w_]+", i)
-      local word = src:sub(s, e)
+      local word = src:sub(s, (e --[[:! integer]]))
       local kind
       if PY_LITERALS[word] then
         kind = "literal"
@@ -406,7 +415,7 @@ local function tokenize_python(src)
         kind = "plain"
       end
       tokens[#tokens + 1] = { kind, word }
-      i = e + 1
+      i = (e --[[:! integer]]) + 1
     else
       tokens[#tokens + 1] = { "plain", src:sub(i, i) }
       i = i + 1
@@ -451,10 +460,11 @@ local function tokenize_json(src)
            (src:sub(i, i):match("%d") or src:sub(i + 1, i + 1):match("%d")) then
       local s, e = src:find("^%-?%d+%.?%d*", i)
       if s then
-        local e2 = src:match("^[eE][+%-]?%d+", e + 1)
-        if e2 then e = e + #e2 end
-        tokens[#tokens + 1] = { "number", src:sub(s, e) }
-        i = e + 1
+        local e_ = e --[[:! integer]]
+        local e2 = src:match("^[eE][+%-]?%d+", e_ + 1)
+        if e2 then e_ = e_ + #e2 end
+        tokens[#tokens + 1] = { "number", src:sub(s, e_) }
+        i = e_ + 1
       else
         tokens[#tokens + 1] = { "plain", src:sub(i, i) }
         i = i + 1
@@ -462,13 +472,13 @@ local function tokenize_json(src)
     -- Literal: true / false / null
     elseif src:sub(i, i):match("[%a]") then
       local s, e = src:find("^[%a]+", i)
-      local word = src:sub(s, e)
+      local word = src:sub(s, (e --[[:! integer]]))
       if JSON_LITERALS[word] then
         tokens[#tokens + 1] = { "literal", word }
       else
         tokens[#tokens + 1] = { "plain", word }
       end
-      i = e + 1
+      i = (e --[[:! integer]]) + 1
     else
       tokens[#tokens + 1] = { "plain", src:sub(i, i) }
       i = i + 1
@@ -531,19 +541,21 @@ local function tokenize_bash(src)
     -- Identifier / keyword / built-in
     elseif src:sub(i, i):match("[%a_]") then
       local s, e = src:find("^[%w_%-%.]+", i)
-      local word = src:sub(s, e)
+      local s_ = s --[[:! integer]]
+      local e_ = e --[[:! integer]]
+      local word = src:sub(s_, e_)
       -- Only match pure alpha-underscore for keywords/builtins
       local plain_word = src:match("^[%w_]+", i) or ""
       local kind
-      if BASH_KEYWORDS[plain_word] and #plain_word == (e - s + 1) then
+      if BASH_KEYWORDS[plain_word] and #plain_word == (e_ - s_ + 1) then
         kind = "keyword"
-      elseif BASH_BUILTINS[plain_word] and #plain_word == (e - s + 1) then
+      elseif BASH_BUILTINS[plain_word] and #plain_word == (e_ - s_ + 1) then
         kind = "built_in"
       else
         kind = "plain"
       end
       tokens[#tokens + 1] = { kind, word }
-      i = e + 1
+      i = e_ + 1
     else
       tokens[#tokens + 1] = { "plain", src:sub(i, i) }
       i = i + 1
@@ -569,14 +581,16 @@ local TOKENIZERS = {
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
 -- Extract concatenated text content from a list of hast children.
+--:: HastChild = { type: string, value: string | nil, children: list | nil, ... }
 --: (list) -> string
 local function extract_text(children)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   for _, child in ipairs(children) do
-    if child.type == "text" then
-      parts[#parts + 1] = child.value or ""
-    elseif child.type == "element" and child.children then
-      parts[#parts + 1] = extract_text(child.children)
+    local ch = child --[[:! HastChild]]
+    if ch.type == "text" then
+      parts[#parts + 1] = ch.value or ""
+    elseif ch.type == "element" and ch.children then
+      parts[#parts + 1] = extract_text(ch.children)
     end
   end
   return table.concat(parts)
@@ -599,18 +613,20 @@ local function walk(node, prefix, aliases)
     end
 
     if code_node then
-      local class = (code_node.props or {}).class or ""
+      local code_node_ = code_node --[[:! HastChild]]
+      local class = ((code_node_.props or {}) --[[:! { class: string | nil, ... }]]).class or ""
       local lang = class:match("^language%-(.+)$")
       if lang then
         -- Resolve aliases
         lang = aliases[lang] or lang
         local tokenize = TOKENIZERS[lang]
         if tokenize then
-          local src = extract_text(--[[: any]] code_node.children or {})
-          local toks = tokenize(src)
+          local tokenize_ = tokenize --[[:! (string) -> list]]
+          local src = extract_text((code_node_.children or {}) --[[:! list]])
+          local toks = tokenize_(src)
           local new_children = tokens_to_hast(toks, prefix)
           -- Replace code node children with highlighted children
-          code_node.children = new_children
+          code_node_.children = new_children
           -- Add hljs class to <pre>
           local pre_props = node.props or {}
           local existing = pre_props.class
