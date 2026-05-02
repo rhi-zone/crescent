@@ -127,7 +127,15 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 
-## Done in current session
+## Done in current session (session N+1)
+
+- [x] `lib/agent/leaf.lua` (was 1 → now 0, commit c1f7a04) — defined LlmResponse type; --[[:! LlmResponse]] force-cast after nil-check; typed notes_add/notes_drop/tool_call inline
+- [x] `lib/agent/render.lua` (was 1 → now 0, commit c1f7a04) — inline messages initializer
+- [x] `lib/asm/init.lua` (was 1 → now 0, commit c1f7a04) — force-cast desc.intervals at ra.allocate call site
+- [x] `lib/asm/ra.lua` (was 4 → now 0, commit c1f7a04) — active_any intermediate for table.insert/remove overload confusion; read victim before remove; force-cast victim.id
+- [x] `lib/ai/providers/openai.lua` (was 1 → now 0, commit c1f7a04) — restructure config with typed locals; fix make_headers annotation in compat to optional field
+
+## Done in prior sessions
 
 (workers append here in `[x] lib/foo/init.lua (was N → now M, commit <hash>)` form)
 
