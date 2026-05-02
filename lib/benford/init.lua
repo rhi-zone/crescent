@@ -37,12 +37,13 @@ local function leading_digit(n)
 	return math.floor(n)
 end
 
+--: (number) -> integer | nil
 local function leading_two_digits(n)
-	n = math.abs(n)
-	if n == 0 then return nil end
-	while n < 10 do n = n * 10 end
-	while n >= 100 do n = n / 10 end
-	return math.floor(n)
+	local x = math.abs(n)
+	if x == 0 then return nil end
+	while x < 10 do x = x * 10 end
+	while x >= 100 do x = x / 10 end
+	return math.floor(x) --[[:! integer]]
 end
 
 -- ── Expected Benford probabilities ───────────────────────────────────────────
@@ -63,7 +64,7 @@ end
 
 -- Second digit d (0-9): sum over k=1..9 of log10(1 + 1/(10k+d))
 function M.expected_second(digit)
-	local sum = 0
+	local sum = (0.0) --[[:! number]]
 	for k = 1, 9 do
 		sum = sum + log10(1 + 1 / (10 * k + digit))
 	end
@@ -150,17 +151,16 @@ end
 local function log_gamma(z)
 	-- Lanczos approximation
 	local g = 7
-	local c = {
-		0.99999999999980993,
-		676.5203681218851,
-		-1259.1392167224028,
-		771.32342877765313,
-		-176.61502916214059,
-		12.507343278686905,
-		-0.13857109526572012,
-		9.9843695780195716e-6,
-		1.5056327351493116e-7,
-	}
+	local c = {} --: { [integer]: number }
+	c[1] = 0.99999999999980993
+	c[2] = 676.5203681218851
+	c[3] = -1259.1392167224028
+	c[4] = 771.32342877765313
+	c[5] = -176.61502916214059
+	c[6] = 12.507343278686905
+	c[7] = -0.13857109526572012
+	c[8] = 9.9843695780195716e-6
+	c[9] = 1.5056327351493116e-7
 	if z < 0.5 then
 		return math.log(math.pi / math.sin(math.pi * z)) - log_gamma(1 - z)
 	end
@@ -174,6 +174,7 @@ local function log_gamma(z)
 end
 
 -- Lower incomplete gamma series: gamma(a, x) / Gamma(a)
+--: (number, number) -> number
 local function lower_reg_gamma(a, x)
 	if x < 0 then return 0 end
 	if x == 0 then return 0 end
@@ -235,7 +236,7 @@ local function build_result(observed, expected_probs, n, keys)
 		frequency[k] = observed[k] / n
 	end
 
-	local mad_sum = 0
+	local mad_sum = (0.0) --[[:! number]]
 	for _, k in ipairs(keys) do
 		mad_sum = mad_sum + math.abs(frequency[k] - expected_probs[k])
 	end
@@ -268,13 +269,13 @@ function M.analyze(numbers)
 	if type(numbers) ~= "table" then
 		return nil, "analyze: expected array of numbers"
 	end
-	local observed = {}
+	local observed = {} --: { [integer]: integer }
 	for d = 1, 9 do observed[d] = 0 end
 	local n = 0
 	for _, v in ipairs(numbers) do
 		if type(v) == "number" and v ~= 0 then
-			local d = leading_digit(v)
-			if d and d >= 1 and d <= 9 then
+			local d = leading_digit(v) or 0
+			if d >= 1 and d <= 9 then
 				observed[d] = observed[d] + 1
 				n = n + 1
 			end
@@ -294,7 +295,7 @@ function M.analyze_second(numbers)
 	if type(numbers) ~= "table" then
 		return nil, "analyze_second: expected array of numbers"
 	end
-	local observed = {}
+	local observed = {} --: { [integer]: integer }
 	for d = 0, 9 do observed[d] = 0 end
 	local n = 0
 	for _, v in ipairs(numbers) do
@@ -326,13 +327,13 @@ function M.analyze_two_digits(numbers)
 	if type(numbers) ~= "table" then
 		return nil, "analyze_two_digits: expected array of numbers"
 	end
-	local observed = {}
+	local observed = {} --: { [integer]: integer }
 	for d = 10, 99 do observed[d] = 0 end
 	local n = 0
 	for _, v in ipairs(numbers) do
 		if type(v) == "number" and v ~= 0 then
-			local d = leading_two_digits(v)
-			if d and d >= 10 and d <= 99 then
+			local d = leading_two_digits(v) or 0
+			if d >= 10 and d <= 99 then
 				observed[d] = observed[d] + 1
 				n = n + 1
 			end
