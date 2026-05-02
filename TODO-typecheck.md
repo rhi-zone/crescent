@@ -17,7 +17,7 @@ shape, or returns annotated as `unknown`. Add `--[[:! T]]` overlap-cast or
 
 - [x] `lib/crescent_examples/composter.lua` (311 → 300) — added missing `bit` require; remaining 300 are FFI-bound (wlr/wl/xkb unknown)
 - [ ] `lib/type/static/parse.lua` (177) — 151 "must be narrowed before calling"
-- [ ] `lib/lua2ts/init.lua` (162) — 110 "must be narrowed before calling", 22 arithmetic on unknown — see SKIP note (closure-built ctx is untyped, needs L2TSCtx alias + full method annotation; complex)
+- [x] `lib/lua2ts/init.lua` (162 → 0) — already fixed in prior session (confirmed 0 errors at session start)
 - [x] `lib/xpath/init.lua` (150 → 122) — annotated tokenize signature; replaced bare `table` with `{ ... }`
 - [ ] `lib/type/static/ann.lua` (144) — 53 "must be narrowed before calling", 20 "argument might also be X"
 - [x] `lib/bin_packing/init.lua` (112 → 2) — annotated all 1D/2D fn params and locals; 2 typechecker limitations remain
@@ -40,10 +40,10 @@ the concrete record shape it actually has.
 - [x] `lib/ical/init.lua` (123 → 70) — annotated add_prop signature with optional params
 - [x] `lib/cryptography/init.lua` (107 → 64) — annotated all `table` shapes; rewrote u32be/u32le with math.floor(tonumber(byte)) pattern; fixed ror64/shr64 bit-op integer params; guarded chacha20 return in poly1305 encrypt/decrypt
 - [x] `lib/json/init.lua` (106 → 17) — annotated decode_number/array/object/encode_value/encode_array/encode_object; added i=ni force-casts; encode_value type narrowing casts; remaining 17 from string.byte ...integer comparison (unfixable)
-- [ ] `lib/css_parser/init.lua` (103) — 18 cannot compare, 15 field doesn't exist (see SKIP — prior attempt regressed)
+- [ ] `lib/css_parser/init.lua` (53 after partial fix) — remaining: integer|integer phi-join in new_selector_parser (pervasive), SelectorParser method shape mismatches (field doesn't exist)
 - [x] `lib/wire_protocol/init.lua` (98 → 93) — replaced bare `table` in framer/receiver/decode_all with concrete shapes
-- [ ] `lib/graphql_parser/init.lua` (86) — 20 cannot-pass, 16 narrow-before-indexing (see SKIP — AST shape mismatches)
-- [ ] `lib/bson/init.lua` (73) — 33 arithmetic, 13 cannot-assign — see SKIP note (force-cast on byte regressed)
+- [x] `lib/graphql_parser/init.lua` (86 → 0, commit c0c3681) — insert(arr,node) → arr[#arr+1]=node --[[: any]]; annotated printer fns; cast node params to { [string]: unknown }
+- [x] `lib/bson/init.lua` (73 → 0, commit a5ff410) — byte() individual extraction, ffi_ typed alias, --[[: any]] cast for pairs(), decode_document cursor via tonumber()
 - [x] `lib/toml/init.lua` (72 → 68) — added forward declarations for parse_datetime and _parse_time_part
 - [x] `lib/unified/rehype_highlight/init.lua` (74 → 44) — added TokenList shape annotation on tokenizer accumulator locals
 
@@ -56,8 +56,8 @@ boundary, or annotating local arrays of bytes as `integer[]`/`uint8_t[]`.
 - [x] `lib/bignum/init.lua` (95 → 89) — bind string.byte() multi-return to single locals before arithmetic
 - [x] `lib/matrix/init.lua` (72 → 48) — annotated self: matrix on methods accessing _rows/_cols/_data
 - [ ] `lib/protocol_buffer/init.lua` (79) — 36 arithmetic — see SKIP note (cascading integer|nil from decode_varint)
-- [ ] `lib/bits/init.lua` (76) — 37 "union member is not callable", 11 arithmetic — see SKIP note (pcall require bit fall-through)
-- [ ] `lib/midi/init.lua` (90) — 33 arithmetic, 14 tag-literal mismatches (see SKIP — variadic byte() resists annotation)
+- [x] `lib/bits/init.lua` (76 → 0) — already fixed in prior session (confirmed 0 errors at session start)
+- [x] `lib/midi/init.lua` (90 → 0) — already fixed in prior session (confirmed 0 errors at session start)
 
 ## Tier 4 — Self-typecheck files (typechecker checking itself)
 
@@ -133,6 +133,12 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+7)
+
+- [x] `lib/bson/init.lua` (was 73 → now 0, commit a5ff410) — byte() individual extraction with (x or 0) --[[:! integer]]; ffi_ typed alias for ffi module access; --[[: any]] cast on t before pairs(); decode_document cursor via tonumber() at recursive call sites
+- [x] `lib/graphql_parser/init.lua` (was 86 → now 0, commit c0c3681) — insert(arr, node) → arr[#arr+1]=node --[[: any]]; annotated all printer functions with return types; cast node params to { [string]: unknown } --[[: any]] in print_node; cast ipairs() collections before iteration
+- [x] `lib/css_parser/init.lua` (was 103 → now 53, commit 1f4c722) — byte(c,1) to avoid variadic; phi-join cast via local i_ --[[:! integer]] in read_ident/read_number; read_url annotation; compound field types as string|nil; remaining 53 from pervasive integer|integer phi-join in new_selector_parser and SelectorParser method shape issues
 
 ## Done in current session (session N+6)
 
