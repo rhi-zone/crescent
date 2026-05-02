@@ -135,6 +135,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+14)
+
+- [x] `lib/actor/init.lua` (was 52 → now 0, commit d5fa9c9) — ActorRecord/ActorCtxShape/SystemShape/SupervisorShape/ChildEntry/FailureRec type aliases; self_ casts in all methods; Opaque→any for coroutine; fix deadline number|nil comparisons; fix _kill_actor actor_ casts; supervisor spawn/handle_exit/record_failure self_ casts
+- [x] `lib/circuit_sim/init.lua` (was 52 → now 0, commit 150bd02) — CompRecord/CircuitShape/ResultShape/NumMatrix/NumVec type aliases; annotated gaussian_solve/copy_matrix/copy_vec; Result and Circuit method self_ casts; _build_mna multi-return via {self_:_build_mna()}; CS_thevenin/CS_norton casts; node_voltages/power initialized with required literal fields
+- [x] `lib/cli/init.lua` (was 47 → now 0, commit 76bac0e) — FlagSpec/OptionSpec/PosSpec/CmdSpec type aliases; normalize forward-declared with nil-union; generate_help/parse_spec/completions_bash/zsh/fish/public API all use CmdSpec; cmd_key local for _command field assignment; norm_ cast for recursive normalize call
+- [x] `lib/color/init.lua` (was 47 → now 0, commit 33c8254) — ColorObj/NamedEntry type aliases; clamp/round annotated (number)->number; rgb_to_hsl/rgb_to_hsv/hsl_to_rgb/hsv_to_rgb with direct param usage; hue2rgb ternary chain for t phi-join; multi-return via {fn(...)} table pattern; M.rgb/hsv/hsl param casts; hex string via local sv/sv2/sv3/hex_; _color constructor with rv/gv/bv/av casts
+
 ## Done in current session (session N+13)
 
 - [x] `lib/command_queue/init.lua` (was 5 → now 0, commit 7981d4c) — Cmd/PQEntry aliases; typed undo/redo stacks; force-cast table.remove via index+shift pattern; nil-assign via --[[: any]]
