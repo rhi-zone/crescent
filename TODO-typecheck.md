@@ -17,14 +17,14 @@ shape, or returns annotated as `unknown`. Add `--[[:! T]]` overlap-cast or
 
 - [ ] `lib/crescent_examples/composter.lua` (311) — 253 "must be narrowed before indexing"
 - [ ] `lib/type/static/parse.lua` (177) — 151 "must be narrowed before calling"
-- [ ] `lib/lua2ts/init.lua` (162) — 110 "must be narrowed before calling", 22 arithmetic on unknown
+- [ ] `lib/lua2ts/init.lua` (162) — 110 "must be narrowed before calling", 22 arithmetic on unknown — see SKIP note (closure-built ctx is untyped, needs L2TSCtx alias + full method annotation; complex)
 - [x] `lib/xpath/init.lua` (150 → 122) — annotated tokenize signature; replaced bare `table` with `{ ... }`
 - [ ] `lib/type/static/ann.lua` (144) — 53 "must be narrowed before calling", 20 "argument might also be X"
 - [ ] `lib/bin_packing/init.lua` (112) — 88 "must be narrowed before indexing" — see SKIP note (untyped locals; restructure)
-- [ ] `lib/lru/init.lua` (107) — 70 "must be narrowed before indexing"
+- [x] `lib/lru/init.lua` (107 → 8) — defined LruNode/Cache/LfuNode/LfuBucket/Lfu/TwoQNode/TwoQFifoQ/TwoQLruQ/TwoQ shapes; annotated all helper fns and methods with self types; force-cast setmetatable returns; cap/o locals to avoid type narrowing bug; `--[[:! Cache]]` overlap casts. Remaining 8: multi-return nil in factory fns (typechecker limitation), `self:method()` calls where `self` is a named type (method lookup doesn't follow metatable).
 - [x] `lib/observer/init.lua` (98 → 95) — bind+nil-check+force-cast on optional callbacks
 - [x] `lib/observable/init.lua` (83 → 81) — same pattern for SafeObserver._raw callbacks
-- [ ] `lib/red_black_tree/init.lua` (72) — 43 "must be narrowed before indexing"
+- [x] `lib/red_black_tree/init.lua` (72 → 0) — defined RBNode/RBTree shapes; annotated all helper fns and M methods; force-casts on sentinel, cmp, and control-flow merge points (ww/ww2 locals); `local x = NIL --[[:! RBNode]]` init; verify check fn annotated; bh_l/bh_r narrowed after nil-check.
 - [x] `lib/layout/init.lua` (89 → 0) — added LayoutNode type alias fields (id, col/row/col_span/row_span, columns/rows, width/height as string|number|nil); annotated compute_box/compute_grid/compute_node/resolve_tracks; force casts for type(node.width)=="number" branches; 0.0 initializations
 
 ## Tier 2 — Concrete-shape replacement (vague `table` / missing fields)
@@ -75,7 +75,7 @@ last because the type system itself is the testbed.
 ## Tier 5 — Uncatalogued files (discovered in cleanup pass)
 
 - [x] `lib/csv/init.lua` (60 → 0)
-- [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Done)
+- [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Skipped)
 
 ## FFI-bound (likely unfixable without restructuring)
 
@@ -100,7 +100,6 @@ last because the type system itself is the testbed.
 - `lib/glob/init.lua` — return-type union mismatches at iterator boundary
 - `lib/crescent_examples/composter.lua` — pervasive LuaLS-style `@type`/`@diagnostic` annotations not understood by crescent typechecker; 253 narrow-before-indexing errors come from FFI-returned `unknown` values across the entire file. Fixing requires either rewriting all annotations or wholesale `--[[:! T]]` casts after each external call. Restructuring.
 - `lib/type/static/parse.lua` — 151 narrow-before-calling errors all from `L:next()`, `nodes:get()`, `lists:push()` etc. on locals returned by `lex_mod.new`/`arena_mod.new_node_arena`/`arena_mod.new_list_pool`. Fix would require giving those constructors return type annotations — typechecker self-check work that requires reading `docs/typechecker-v2.md` and `docs/type-system.md` first per `lib/type/static/CLAUDE.md`. Out of scope for cleanup pass.
-- `lib/lru/init.lua` — attempted `Cache`/`Lfu`/`TwoQ` concrete shape replacement; narrow errors stayed at 70 (helper functions take `self` as untyped parameter, shape doesn't propagate) while constructor return-type mismatches added 3 new errors. Net 107→110, reverted. Proper fix requires annotating every `self` parameter on internal helpers + reconciling `_cap: integer` vs `math.floor(capacity)` literal flow. Restructuring.
 - `lib/lua2ts/init.lua` — attempted annotating `scan_annotations(source)`, `ctx:name`/`ctx:list` returns; ctx still flows as unknown into emit_expr (closure-built ctx not seen at call sites). Net 162→163, reverted. Same family as parse.lua: needs constructor return types on `parse_mod.parse`/`new_ctx`. Out of scope for cleanup pass.
 - `lib/red_black_tree/init.lua` — recursive `RBNode` type with self-referential left/right/parent fields. Sentinel construction starts with `nil` then assigns NIL = NIL.left, defeating any concrete annotation. All 72 errors are `x.parent.left.color` chains; needs structural recursive type support, restructuring.
 - `lib/bits/init.lua` — annotating `band/bor/bxor/bnot/lshift/rshift` with `(integer, integer) -> integer` to remove `union member any not callable` regressed 76 → 82 (concrete return type cascades into stricter checks elsewhere). Reverted. Root cause is `pcall(require, "bit")` fall-through producing union of pure-Lua impl and bit module; needs Bitset/Bloom shape annotations first.
