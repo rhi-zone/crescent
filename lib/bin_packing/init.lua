@@ -5,6 +5,10 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: Rect = { w: number, h: number, id: unknown }
+--:: FreeRect = { x: number, y: number, w: number, h: number }
+--:: PlacedRect = { id: unknown, x: number, y: number, w: number, h: number, rotated: boolean }
+
 -- ========================
 -- 1D BIN PACKING
 -- ========================
@@ -13,11 +17,14 @@ M._tier = "pure"
 -- items: array of numbers (sizes)
 -- capacity: bin capacity
 -- Returns array of bins (each bin is an array of item indices), or nil+errmsg
+--: ({ [integer]: number }, number) -> ({ [integer]: { [integer]: integer } } | nil, string | nil)
 function M.first_fit(items, capacity)
   if not capacity or capacity <= 0 then
     return nil, "capacity must be > 0"
   end
+  --: { [integer]: { [integer]: integer } }
   local bins = {}
+  --: { [integer]: number }
   local remaining = {}
   for i = 1, #items do
     local sz = items[i]
@@ -43,11 +50,13 @@ function M.first_fit(items, capacity)
 end
 
 -- First Fit Decreasing: sort items by size descending, then first fit.
+--: ({ [integer]: number }, number) -> ({ [integer]: { [integer]: integer } } | nil, string | nil)
 function M.first_fit_decreasing(items, capacity)
   if not capacity or capacity <= 0 then
     return nil, "capacity must be > 0"
   end
   -- Build sorted index array (descending by size)
+  --: { [integer]: integer }
   local order = {}
   for i = 1, #items do order[i] = i end
   table.sort(order, function(a, b) return items[a] > items[b] end)
@@ -60,7 +69,9 @@ function M.first_fit_decreasing(items, capacity)
     end
   end
 
+  --: { [integer]: { [integer]: integer } }
   local bins = {}
+  --: { [integer]: number }
   local remaining = {}
   for i = 1, #order do
     local item_idx = order[i]
@@ -84,11 +95,14 @@ function M.first_fit_decreasing(items, capacity)
 end
 
 -- Best Fit: place each item in the bin with least remaining space that still fits.
+--: ({ [integer]: number }, number) -> ({ [integer]: { [integer]: integer } } | nil, string | nil)
 function M.best_fit(items, capacity)
   if not capacity or capacity <= 0 then
     return nil, "capacity must be > 0"
   end
+  --: { [integer]: { [integer]: integer } }
   local bins = {}
+  --: { [integer]: number }
   local remaining = {}
   for i = 1, #items do
     local sz = items[i]
@@ -117,10 +131,12 @@ function M.best_fit(items, capacity)
 end
 
 -- Best Fit Decreasing: sort items descending, then best fit.
+--: ({ [integer]: number }, number) -> ({ [integer]: { [integer]: integer } } | nil, string | nil)
 function M.best_fit_decreasing(items, capacity)
   if not capacity or capacity <= 0 then
     return nil, "capacity must be > 0"
   end
+  --: { [integer]: integer }
   local order = {}
   for i = 1, #items do order[i] = i end
   table.sort(order, function(a, b) return items[a] > items[b] end)
@@ -132,7 +148,9 @@ function M.best_fit_decreasing(items, capacity)
     end
   end
 
+  --: { [integer]: { [integer]: integer } }
   local bins = {}
+  --: { [integer]: number }
   local remaining = {}
   for i = 1, #order do
     local item_idx = order[i]
@@ -159,11 +177,14 @@ function M.best_fit_decreasing(items, capacity)
 end
 
 -- Next Fit: only consider the current bin; open a new one if item doesn't fit.
+--: ({ [integer]: number }, number) -> ({ [integer]: { [integer]: integer } } | nil, string | nil)
 function M.next_fit(items, capacity)
   if not capacity or capacity <= 0 then
     return nil, "capacity must be > 0"
   end
+  --: { [integer]: { [integer]: integer } }
   local bins = {}
+  --: { [integer]: number }
   local remaining = {}
   local current = 0
   for i = 1, #items do
@@ -190,8 +211,10 @@ function M.bin_count(bins)
 end
 
 -- Total fill / (bins * capacity). Returns 0 for empty bins.
+--: ({ [integer]: { [integer]: integer } }, { [integer]: number }, number) -> number
 function M.utilization(bins, items, capacity)
   if #bins == 0 then return 0 end
+  --: number
   local total = 0
   for b = 1, #bins do
     for _, idx in ipairs(bins[b]) do
@@ -202,9 +225,11 @@ function M.utilization(bins, items, capacity)
 end
 
 -- Returns true if valid packing: all items placed exactly once, no bin overflows.
+--: ({ [integer]: { [integer]: integer } }, { [integer]: number }, number) -> (boolean, string | nil)
 function M.validate(bins, items, capacity)
   local seen = {}
   for b = 1, #bins do
+    --: number
     local used = 0
     for _, idx in ipairs(bins[b]) do
       if seen[idx] then return false, "item " .. idx .. " placed twice" end
@@ -240,8 +265,9 @@ end
 -- bin_w, bin_h: bin dimensions (0 = auto-grow)
 -- opts: { allow_rotate=false, split="short_axis"|"long_axis" }
 -- Returns: {placed=[{id,x,y,w,h,rotated}], unplaced=[...], w=used_w, h=used_h}
+--: ({ [integer]: Rect }, number, number, { allow_rotate: boolean | nil, split: string | nil } | nil) -> { placed: { [integer]: PlacedRect }, unplaced: { [integer]: Rect }, w: number, h: number }
 function M.guillotine(rects, bin_w, bin_h, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { allow_rotate: boolean | nil, split: string | nil }]]
   local allow_rotate = opts.allow_rotate or false
   local split_mode = opts.split or "short_axis"
   local auto_grow = (bin_w == 0 or bin_h == 0)
@@ -255,6 +281,7 @@ function M.guillotine(rects, bin_w, bin_h, opts)
 
   -- Auto-grow: estimate a starting size
   if auto_grow then
+    --: number
     local total_area = 0
     for i = 1, #rects do
       total_area = total_area + rects[i].w * rects[i].h
@@ -265,20 +292,28 @@ function M.guillotine(rects, bin_w, bin_h, opts)
   end
 
   -- Free rectangles list: each is {x, y, w, h}
+  --: { [integer]: FreeRect }
   local free = { { x = 0, y = 0, w = bin_w, h = bin_h } }
 
+  --: { [integer]: PlacedRect }
   local placed = {}
+  --: { [integer]: Rect }
   local unplaced = {}
+  --: number
   local used_w = 0
+  --: number
   local used_h = 0
 
   for _, ri in ipairs(order) do
     local rect = rects[ri]
-    local rw, rh = rect.w, rect.h
+    local rw = rect.w --: number
+    local rh = rect.h --: number
     local id = rect.id ~= nil and rect.id or ri
 
     -- Find best free rect (smallest area that fits)
+    --: integer | nil
     local best_idx = nil
+    --: number
     local best_area = math.huge
     local best_rotated = false
 
@@ -286,7 +321,7 @@ function M.guillotine(rects, bin_w, bin_h, opts)
       local f = free[fi]
       -- Normal orientation
       if f.w >= rw and f.h >= rh then
-        local area = f.w * f.h
+        local area = f.w * f.h --: number
         if area < best_area then
           best_area = area
           best_idx = fi
@@ -295,7 +330,7 @@ function M.guillotine(rects, bin_w, bin_h, opts)
       end
       -- Rotated orientation
       if allow_rotate and f.w >= rh and f.h >= rw then
-        local area = f.w * f.h
+        local area = f.w * f.h --: number
         if area < best_area then
           best_area = area
           best_idx = fi
@@ -316,11 +351,11 @@ function M.guillotine(rects, bin_w, bin_h, opts)
         free[#free + 1] = new_bottom
         -- Retry finding
         best_idx = nil
-        best_area = math.huge
+        best_area = math.huge --: number
         for fi = 1, #free do
           local f = free[fi]
           if f.w >= rw and f.h >= rh then
-            local area = f.w * f.h
+            local area = f.w * f.h --: number
             if area < best_area then
               best_area = area
               best_idx = fi
@@ -328,7 +363,7 @@ function M.guillotine(rects, bin_w, bin_h, opts)
             end
           end
           if allow_rotate and f.w >= rh and f.h >= rw then
-            local area = f.w * f.h
+            local area = f.w * f.h --: number
             if area < best_area then
               best_area = area
               best_idx = fi
@@ -398,8 +433,9 @@ end
 -- Shelf (row-based) algorithm.
 -- Packs items row by row, sorted by height descending.
 -- Returns: {placed=[{id,x,y,w,h,rotated}], unplaced=[...], w=used_w, h=used_h}
+--: ({ [integer]: Rect }, number, number, { allow_rotate: boolean | nil } | nil) -> ({ placed: { [integer]: PlacedRect }, unplaced: { [integer]: Rect }, w: number, h: number } | nil, string | nil)
 function M.shelf(rects, bin_w, bin_h, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { allow_rotate: boolean | nil }]]
   local allow_rotate = opts.allow_rotate or false
 
   if bin_w <= 0 then return nil, "bin_w must be > 0" end
@@ -409,7 +445,9 @@ function M.shelf(rects, bin_w, bin_h, opts)
   local order = {}
   for i = 1, #rects do order[i] = i end
   table.sort(order, function(a, b)
+    --: number
     local ha = rects[a].h
+    --: number
     local hb = rects[b].h
     if allow_rotate then
       ha = math.max(rects[a].w, rects[a].h)
@@ -418,17 +456,25 @@ function M.shelf(rects, bin_w, bin_h, opts)
     return ha > hb
   end)
 
+  --: { [integer]: PlacedRect }
   local placed = {}
+  --: { [integer]: Rect }
   local unplaced = {}
+  --: number
   local shelf_x = 0
+  --: number
   local shelf_y = 0
+  --: number
   local shelf_h = 0
+  --: number
   local used_w = 0
+  --: number
   local used_h = 0
 
   for _, ri in ipairs(order) do
     local rect = rects[ri]
-    local rw, rh = rect.w, rect.h
+    local rw = rect.w --: number
+    local rh = rect.h --: number
     local id = rect.id ~= nil and rect.id or ri
     local rotated = false
 
@@ -486,8 +532,9 @@ end
 -- MaxRects algorithm.
 -- Uses maximal rectangle free space tracking for high-quality packing.
 -- opts: { allow_rotate=false, heuristic="best_short_side"|"best_long_side"|"best_area" }
+--: ({ [integer]: Rect }, number, number, { allow_rotate: boolean | nil, heuristic: string | nil } | nil) -> ({ placed: { [integer]: PlacedRect }, unplaced: { [integer]: Rect }, w: number, h: number } | nil, string | nil)
 function M.maxrects(rects, bin_w, bin_h, opts)
-  opts = opts or {}
+  opts = (opts or {}) --[[:! { allow_rotate: boolean | nil, heuristic: string | nil }]]
   local allow_rotate = opts.allow_rotate or false
   local heuristic = opts.heuristic or "best_short_side"
 
@@ -502,14 +549,20 @@ function M.maxrects(rects, bin_w, bin_h, opts)
   end)
 
   -- Free rectangles list
+  --: { [integer]: FreeRect }
   local free = { { x = 0, y = 0, w = bin_w, h = bin_h } }
 
+  --: { [integer]: PlacedRect }
   local placed = {}
+  --: { [integer]: Rect }
   local unplaced = {}
+  --: number
   local used_w = 0
+  --: number
   local used_h = 0
 
   -- Score a placement (lower = better)
+  --: (number, number, number, number) -> number
   local function score(fw, fh, rw, rh)
     if heuristic == "best_area" then
       return fw * fh - rw * rh
@@ -522,13 +575,19 @@ function M.maxrects(rects, bin_w, bin_h, opts)
 
   for _, ri in ipairs(order) do
     local rect = rects[ri]
-    local rw, rh = rect.w, rect.h
+    local rw = rect.w --: number
+    local rh = rect.h --: number
     local id = rect.id ~= nil and rect.id or ri
 
+    --: integer | nil
     local best_fi = nil
+    --: number
     local best_score = math.huge
     local best_rotated = false
-    local best_x, best_y = 0, 0
+    --: number
+    local best_x = 0
+    --: number
+    local best_y = 0
 
     for fi = 1, #free do
       local f = free[fi]
@@ -568,6 +627,7 @@ function M.maxrects(rects, bin_w, bin_h, opts)
       if best_y + ph > used_h then used_h = best_y + ph end
 
       -- Split all free rects that overlap with the placed rect
+      --: { [integer]: FreeRect }
       local new_free = {}
       for fi = 1, #free do
         local f = free[fi]
@@ -595,6 +655,7 @@ function M.maxrects(rects, bin_w, bin_h, opts)
       end
 
       -- Prune: remove free rects fully contained by another
+      --: { [integer]: FreeRect }
       local pruned = {}
       for i = 1, #new_free do
         local r = new_free[i]
@@ -638,14 +699,20 @@ function M.auto_pack(rects, opts)
 end
 
 -- Efficiency: placed area / (result.w * result.h). Returns 0 for degenerate cases.
+--: ({ placed: { [integer]: PlacedRect }, w: number, h: number } | nil) -> number
 function M.pack_efficiency(result)
-  if not result or not result.placed or #result.placed == 0 then return 0 end
-  if result.w == 0 or result.h == 0 then return 0 end
+  if not result then return 0 end
+  local placed = result.placed --[[:! { [integer]: PlacedRect }]]
+  local rw = result.w --: number
+  local rh = result.h --: number
+  if not placed or #placed == 0 then return 0 end
+  if rw == 0 or rh == 0 then return 0 end
+  --: number
   local total = 0
-  for _, p in ipairs(result.placed) do
+  for _, p in ipairs(placed) do
     total = total + p.w * p.h
   end
-  return total / (result.w * result.h)
+  return total / (rw * rh)
 end
 
 return M
