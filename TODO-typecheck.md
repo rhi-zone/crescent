@@ -106,6 +106,7 @@ last because the type system itself is the testbed.
 
 - [ ] `lib/ljsocket/init.lua` (100) — 29 narrow + 19 missing argument + 18 cannot-assign — SKIP unless coupling with cdef
 - [ ] `lib/crypto/system.lua` (80) — 33 narrow + 33 return mismatch + 5 no-matching-overload — SKIP
+- [ ] `lib/process/init.lua` (53) — 49 ffi.C.* field errors (pipe/fork/exec/close/dup2/chdir/setenv etc); unfixable without cdef type annotations
 
 ## Skipped in prior runs (with reason)
 
@@ -133,6 +134,13 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+8)
+
+- [x] `lib/skiplist/init.lua` (was 56 → now 0, commit f358484) — SLNode/Skiplist type aliases; new_node/find_update annotations; self_ casts in all SL methods; forward[i] --[[:! SLNode]] at traversal sites; cmp_ typed local; any→Skiplist via any chain
+- [x] `lib/steering/init.lua` (was 61 → now 0, commit d33ae6a) — Vec2/Agent type aliases with method sigs; self_/param casts in vec2_mt/agent_mt; annotated all public behavior functions; break method-chain intermediates with Vec2 casts; count_ phi-join workaround
+- [x] `lib/process/init.lua` (was 64 → now 53, commit bc0f794) — add bit require; fix return type annotations (nil error returns); typed opts_ casts; self_ in handle methods; #input nil-guard; setmetatable cast. Remaining 49: FFI-bound ffi.C.* (added to FFI-bound section)
+- [x] `lib/db/init.lua` (was 62 → now 0, commit d1cf9e5) — sqlite/Conn/Select/Insert/Update/Delete open type aliases; _where_params/_set fields; self_/db_/any casts throughout; typed arrays; nil-guards; boolean|nil migrate return
 
 ## Done in current session (session N+7)
 
