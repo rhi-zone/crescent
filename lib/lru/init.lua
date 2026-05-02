@@ -4,13 +4,20 @@ end
 
 local M = {}
 
---:: Cache = { ... }
---:: Lfu = { ... }
---:: TwoQ = { ... }
+--:: LruNode = { key: unknown, value: unknown, prev: LruNode | nil, next: LruNode | nil, expires_at: number | nil }
+--:: Cache = { _cap: number, _size: number, _map: { [unknown]: LruNode }, _head: LruNode | nil, _tail: LruNode | nil, _ttl: number | nil, _on_evict: ((unknown, unknown) -> nil) | nil, _clock: (() -> number) | nil, _hits: number, _misses: number, _evictions: number, ... }
+--:: LfuNode = { key: unknown, value: unknown, freq: number, b_prev: LfuNode | nil, b_next: LfuNode | nil }
+--:: LfuBucket = { head: LfuNode | nil, tail: LfuNode | nil, count: number }
+--:: Lfu = { _cap: number, _size: number, _min_freq: number, _map: { [unknown]: LfuNode }, _freq: { [number]: LfuBucket }, _on_evict: ((unknown, unknown) -> nil) | nil, _hits: number, _misses: number, _evictions: number, ... }
+--:: TwoQFifoQ = { head: TwoQNode | nil, tail: TwoQNode | nil, count: number }
+--:: TwoQLruQ = { head: TwoQNode | nil, tail: TwoQNode | nil, count: number }
+--:: TwoQNode = { key: unknown, value: unknown, queue: string, f_prev: TwoQNode | nil, f_next: TwoQNode | nil, o_prev: TwoQNode | nil, o_next: TwoQNode | nil }
+--:: TwoQ = { _cap: number, _in_cap: number, _out_cap: number, _in_q: TwoQFifoQ, _out_q: TwoQLruQ, _ghost: { [unknown]: boolean }, _map: { [unknown]: TwoQNode }, _on_evict: ((unknown, unknown) -> nil) | nil, _hits: number, _misses: number, _evictions: number, ... }
 M._tier = "pure"
 
 -- ── Internal helpers ──────────────────────────────────────────────────────────
 
+--: (Cache, LruNode) -> nil
 local function _detach(self, node)
   local p, n = node.prev, node.next
   if p then p.next = n else self._head = n end
@@ -19,6 +26,7 @@ local function _detach(self, node)
   node.next = nil
 end
 
+--: (Cache, LruNode) -> nil
 local function _push_head(self, node)
   node.prev = nil
   node.next = self._head
@@ -27,6 +35,7 @@ local function _push_head(self, node)
   if not self._tail then self._tail = node end
 end
 
+--: (Cache, LruNode) -> nil
 local function _promote(self, node)
   if node == self._head then return end
   _detach(self, node)
@@ -34,8 +43,10 @@ local function _promote(self, node)
 end
 
 -- Returns true (and removes node) if expired.
+--: (Cache, LruNode) -> boolean
 local function _check_expired(self, node)
   if not node.expires_at then return false end
+  if not self._clock then return false end
   if self._clock() < node.expires_at then return false end
   _detach(self, node)
   self._map[node.key] = nil
@@ -45,10 +56,11 @@ local function _check_expired(self, node)
   return true
 end
 
+--: (Cache) -> nil
 local function _evict_tail(self)
   local node = self._tail
   if not node then return end
-  _detach(self, node)
+  _detach(self, node --[[:! LruNode]])
   self._map[node.key] = nil
   self._size = self._size - 1
   self._evictions = self._evictions + 1
@@ -71,33 +83,34 @@ function M.new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
     return nil, "capacity must be a positive number"
   end
-  capacity = math.floor(capacity)
-  opts = opts or {}
+  local cap = math.floor(capacity --[[:! number]])
+  local o = opts or {} --[[:! LruOpts]]
   return setmetatable({
-    _cap       = capacity,
+    _cap       = cap,
     _size      = 0,
     _map       = {},
     _head      = nil,
     _tail      = nil,
-    _ttl       = opts.ttl,
-    _on_evict  = opts.on_evict,
-    _clock     = opts.clock,
+    _ttl       = o.ttl,
+    _on_evict  = o.on_evict,
+    _clock     = o.clock,
     _hits      = 0,
     _misses    = 0,
     _evictions = 0,
-  }, Cache)
+  }, Cache) --[[:! Cache]]
 end
 
 -- Set a key-value pair. ttl overrides the default TTL for this entry (seconds).
 -- Returns the old value if the key already existed, or nil.
---: (unknown, unknown, number | nil) -> unknown | nil
+--: (Cache, unknown, unknown, number | nil) -> unknown | nil
 function Cache:set(key, value, ttl)
   local node = self._map[key]
+  local clock = self._clock --[[:! (() -> number) | nil]]
   if node then
     local old = node.value
     node.value = value
     local t = ttl or self._ttl
-    node.expires_at = t and (self._clock() + t) or nil
+    node.expires_at = t and clock and (clock() + (t --[[:! number]])) or nil
     _promote(self, node)
     return old
   end
@@ -110,7 +123,7 @@ function Cache:set(key, value, ttl)
     value      = value,
     prev       = nil,
     next       = nil,
-    expires_at = t and (self._clock() + t) or nil,
+    expires_at = t and clock and (clock() + (t --[[:! number]])) or nil,
   }
   self._map[key] = node
   self._size = self._size + 1
@@ -120,7 +133,7 @@ end
 
 -- Get the value for a key, promoting it to most recently used.
 -- Returns nil if missing or expired.
---: (unknown) -> unknown | nil
+--: (Cache, unknown) -> unknown | nil
 function Cache:get(key)
   local node = self._map[key]
   if not node then
@@ -137,7 +150,7 @@ function Cache:get(key)
 end
 
 -- Get without promoting. Returns nil if missing or expired.
---: (unknown) -> unknown | nil
+--: (Cache, unknown) -> unknown | nil
 function Cache:peek(key)
   local node = self._map[key]
   if not node then return nil end
@@ -146,7 +159,7 @@ function Cache:peek(key)
 end
 
 -- Check existence without promoting. Does NOT count as a hit/miss.
---: (unknown) -> boolean
+--: (Cache, unknown) -> boolean
 function Cache:has(key)
   local node = self._map[key]
   if not node then return false end
@@ -156,7 +169,7 @@ end
 
 -- Delete a key. Returns the old value, or nil if not found.
 -- Does NOT fire on_evict.
---: (unknown) -> unknown | nil
+--: (Cache, unknown) -> unknown | nil
 function Cache:delete(key)
   local node = self._map[key]
   if not node then return nil end
@@ -167,6 +180,7 @@ function Cache:delete(key)
 end
 
 -- Remove all entries. Does NOT fire on_evict.
+--: (Cache) -> nil
 function Cache:clear()
   self._map  = {}
   self._head = nil
@@ -175,25 +189,25 @@ function Cache:clear()
 end
 
 -- Current number of (non-expired) entries. O(1); does not scan for expired items.
---: () -> number
+--: (Cache) -> number
 function Cache:size()
   return self._size
 end
 
 -- Maximum capacity.
---: () -> number
+--: (Cache) -> number
 function Cache:capacity()
   return self._cap
 end
 
 -- True when size == capacity.
---: () -> boolean
+--: (Cache) -> boolean
 function Cache:is_full()
   return self._size >= self._cap
 end
 
 -- Return value for key; if missing, call loader(), store result, and return it.
---: (unknown, () -> unknown) -> unknown
+--: (Cache, unknown, () -> unknown) -> unknown
 function Cache:get_or_set(key, loader)
   local v = self:get(key)
   if v ~= nil then return v end
@@ -210,7 +224,7 @@ end
 
 -- Get multiple keys. Returns table mapping each found key to its value.
 -- Missing/expired keys are omitted.
---: ({ [number]: unknown }) -> { [unknown]: unknown }
+--: (Cache, { [number]: unknown }) -> { [unknown]: unknown }
 function Cache:mget(keys_list)
   local result = {}
   for i = 1, #keys_list do
@@ -224,7 +238,7 @@ function Cache:mget(keys_list)
 end
 
 -- Set multiple key-value pairs from a table {key=value, ...}.
---: ({ [unknown]: unknown }) -> nil
+--: (Cache, { [unknown]: unknown }) -> nil
 function Cache:mset(pairs_table)
   for k, v in pairs(pairs_table) do
     self:set(k, v)
@@ -233,14 +247,15 @@ end
 
 -- Iterator over (key, value) pairs, most recently used first.
 -- Expired entries are lazily removed during iteration.
---: () -> (() -> (unknown, unknown) | nil)
+--: (Cache) -> (() -> (unknown, unknown) | nil)
 function Cache:iter()
+  local cache = self --[[:! Cache]]
   local node = self._head
   return function()
     while node do
-      local current = node
+      local current = node --[[:! LruNode]]
       node = node.next
-      if not _check_expired(self, current) then
+      if not _check_expired(cache, current) then
         return current.key, current.value
       end
     end
@@ -250,14 +265,15 @@ end
 
 -- Array of all keys, most recently used first.
 -- Expired entries are skipped and lazily removed.
---: () -> { [number]: unknown }
+--: (Cache) -> { [number]: unknown }
 function Cache:keys()
   local result = {}
   local node = self._head
   while node do
-    local nxt = node.next
-    if not _check_expired(self, node) then
-      result[#result + 1] = node.key
+    local n = node --[[:! LruNode]]
+    local nxt = n.next
+    if not _check_expired(self, n) then
+      result[#result + 1] = n.key
     end
     node = nxt
   end
@@ -265,14 +281,15 @@ function Cache:keys()
 end
 
 -- Array of all values, most recently used first.
---: () -> { [number]: unknown }
+--: (Cache) -> { [number]: unknown }
 function Cache:values()
   local result = {}
   local node = self._head
   while node do
-    local nxt = node.next
-    if not _check_expired(self, node) then
-      result[#result + 1] = node.value
+    local n = node --[[:! LruNode]]
+    local nxt = n.next
+    if not _check_expired(self, n) then
+      result[#result + 1] = n.value
     end
     node = nxt
   end
@@ -280,14 +297,15 @@ function Cache:values()
 end
 
 -- Array of {key, value} pairs, most recently used first.
---: () -> { [number]: { [number]: unknown } }
+--: (Cache) -> { [number]: { [number]: unknown } }
 function Cache:pairs()
   local result = {}
   local node = self._head
   while node do
-    local nxt = node.next
-    if not _check_expired(self, node) then
-      result[#result + 1] = { node.key, node.value }
+    local n = node --[[:! LruNode]]
+    local nxt = n.next
+    if not _check_expired(self, n) then
+      result[#result + 1] = { n.key, n.value }
     end
     node = nxt
   end
@@ -295,7 +313,7 @@ function Cache:pairs()
 end
 
 -- Hits / (hits + misses) since creation or last reset_stats. Returns 0 when no lookups.
---: () -> number
+--: (Cache) -> number
 function Cache:hit_rate()
   local total = self._hits + self._misses
   if total == 0 then return 0 end
@@ -303,7 +321,7 @@ function Cache:hit_rate()
 end
 
 -- {hits, misses, evictions, size, capacity}
---: () -> { hits: number, misses: number, evictions: number, size: number, capacity: number }
+--: (Cache) -> { hits: number, misses: number, evictions: number, size: number, capacity: number }
 function Cache:stats()
   return {
     hits      = self._hits,
@@ -315,6 +333,7 @@ function Cache:stats()
 end
 
 -- Reset hit/miss/eviction counters.
+--: (Cache) -> nil
 function Cache:reset_stats()
   self._hits      = 0
   self._misses    = 0
@@ -332,6 +351,7 @@ Lfu.__index = Lfu
 -- Doubly-linked list helpers operating on per-frequency buckets.
 -- Each bucket is { head, tail, count } of nodes.
 
+--: (LfuBucket, LfuNode) -> nil
 local function _lfu_bucket_push_head(bucket, node)
   node.b_prev = nil
   node.b_next = bucket.head
@@ -341,6 +361,7 @@ local function _lfu_bucket_push_head(bucket, node)
   bucket.count = bucket.count + 1
 end
 
+--: (LfuBucket, LfuNode) -> nil
 local function _lfu_bucket_detach(bucket, node)
   local p, n = node.b_prev, node.b_next
   if p then p.b_next = n else bucket.head = n end
@@ -356,21 +377,22 @@ function M.lfu_new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
     return nil, "capacity must be a positive number"
   end
-  capacity = math.floor(capacity)
-  opts = opts or {}
+  local cap = math.floor(capacity --[[:! number]])
+  local o = opts or {} --[[:! LfuOpts]]
   return setmetatable({
-    _cap      = capacity,
+    _cap      = cap,
     _size     = 0,
     _min_freq = 1,
     _map      = {},   -- key -> node
     _freq     = {},   -- freq -> bucket {head, tail, count}
-    _on_evict = opts.on_evict,
+    _on_evict = o.on_evict,
     _hits      = 0,
     _misses    = 0,
     _evictions = 0,
-  }, Lfu)
+  }, Lfu) --[[:! Lfu]]
 end
 
+--: (Lfu, number) -> LfuBucket
 local function _lfu_get_or_create_bucket(self, freq)
   local b = self._freq[freq]
   if not b then
@@ -380,9 +402,10 @@ local function _lfu_get_or_create_bucket(self, freq)
   return b
 end
 
+--: (Lfu, LfuNode) -> nil
 local function _lfu_promote(self, node)
   local old_freq = node.freq
-  local old_bucket = self._freq[old_freq]
+  local old_bucket = self._freq[old_freq] --[[:! LfuBucket]]
   _lfu_bucket_detach(old_bucket, node)
   -- Clean up empty bucket and advance min_freq if needed
   if old_bucket.count == 0 then
@@ -396,6 +419,7 @@ local function _lfu_promote(self, node)
   _lfu_bucket_push_head(new_bucket, node)
 end
 
+--: (Lfu) -> nil
 local function _lfu_evict(self)
   local bucket = self._freq[self._min_freq]
   if not bucket or not bucket.tail then return end
@@ -410,7 +434,7 @@ local function _lfu_evict(self)
   if self._on_evict then self._on_evict(victim.key, victim.value) end
 end
 
---: (unknown, unknown) -> nil
+--: (Lfu, unknown, unknown) -> nil
 function Lfu:set(key, value)
   local node = self._map[key]
   if node then
@@ -435,7 +459,7 @@ function Lfu:set(key, value)
   _lfu_bucket_push_head(bucket, node)
 end
 
---: (unknown) -> unknown | nil
+--: (Lfu, unknown) -> unknown | nil
 function Lfu:get(key)
   local node = self._map[key]
   if not node then
@@ -447,19 +471,19 @@ function Lfu:get(key)
   return node.value
 end
 
---: (unknown) -> unknown | nil
+--: (Lfu, unknown) -> unknown | nil
 function Lfu:peek(key)
   local node = self._map[key]
   if not node then return nil end
   return node.value
 end
 
---: (unknown) -> boolean
+--: (Lfu, unknown) -> boolean
 function Lfu:has(key)
   return self._map[key] ~= nil
 end
 
---: (unknown) -> unknown | nil
+--: (Lfu, unknown) -> unknown | nil
 function Lfu:delete(key)
   local node = self._map[key]
   if not node then return nil end
@@ -475,6 +499,7 @@ function Lfu:delete(key)
   return node.value
 end
 
+--: (Lfu) -> nil
 function Lfu:clear()
   self._map      = {}
   self._freq     = {}
@@ -482,36 +507,36 @@ function Lfu:clear()
   self._min_freq = 1
 end
 
---: () -> number
+--: (Lfu) -> number
 function Lfu:size()
   return self._size
 end
 
---: () -> number
+--: (Lfu) -> number
 function Lfu:capacity()
   return self._cap
 end
 
---: () -> boolean
+--: (Lfu) -> boolean
 function Lfu:is_full()
   return self._size >= self._cap
 end
 
---: (unknown) -> number
+--: (Lfu, unknown) -> number
 function Lfu:frequency(key)
   local node = self._map[key]
   if not node then return 0 end
   return node.freq
 end
 
---: () -> number
+--: (Lfu) -> number
 function Lfu:hit_rate()
   local total = self._hits + self._misses
   if total == 0 then return 0 end
   return self._hits / total
 end
 
---: () -> { hits: number, misses: number, evictions: number, size: number, capacity: number }
+--: (Lfu) -> { hits: number, misses: number, evictions: number, size: number, capacity: number }
 function Lfu:stats()
   return {
     hits      = self._hits,
@@ -522,6 +547,7 @@ function Lfu:stats()
   }
 end
 
+--: (Lfu) -> nil
 function Lfu:reset_stats()
   self._hits      = 0
   self._misses    = 0
@@ -540,6 +566,7 @@ local TwoQ = {}
 TwoQ.__index = TwoQ
 
 -- TwoQ FIFO helpers (singly-linked, tail-insert, head-evict).
+--: (TwoQFifoQ, TwoQNode) -> nil
 local function _fifo_push(q, node)
   node.f_prev = nil
   node.f_next = nil
@@ -553,6 +580,7 @@ local function _fifo_push(q, node)
   q.count = q.count + 1
 end
 
+--: (TwoQFifoQ, TwoQNode) -> nil
 local function _fifo_remove(q, node)
   local p, n = node.f_prev, node.f_next
   if p then p.f_next = n else q.head = n end
@@ -563,6 +591,7 @@ local function _fifo_remove(q, node)
 end
 
 -- TwoQ out-LRU helpers (doubly-linked list, same as main LRU above).
+--: (TwoQLruQ, TwoQNode) -> nil
 local function _out_detach(q, node)
   local p, n = node.o_prev, node.o_next
   if p then p.o_next = n else q.head = n end
@@ -571,6 +600,7 @@ local function _out_detach(q, node)
   node.o_next = nil
 end
 
+--: (TwoQLruQ, TwoQNode) -> nil
 local function _out_push_head(q, node)
   node.o_prev = nil
   node.o_next = q.head
@@ -580,6 +610,7 @@ local function _out_push_head(q, node)
   q.count = q.count + 1
 end
 
+--: (TwoQLruQ, TwoQNode) -> nil
 local function _out_promote(q, node)
   if node == q.head then return end
   _out_detach(q, node)
@@ -593,13 +624,13 @@ function M.twoq_new(capacity, opts)
   if type(capacity) ~= "number" or capacity < 1 then
     return nil, "capacity must be a positive number"
   end
-  capacity = math.floor(capacity)
-  opts = opts or {}
-  local in_ratio = opts.in_ratio or 0.25
-  local in_cap   = math.max(1, math.floor(capacity * in_ratio))
-  local out_cap  = math.max(1, capacity - in_cap)
+  local cap = math.floor(capacity --[[:! number]])
+  local o = opts or {} --[[:! TwoQOpts]]
+  local in_ratio = o.in_ratio or 0.25
+  local in_cap   = math.max(1, math.floor(cap * in_ratio))
+  local out_cap  = math.max(1, cap - in_cap)
   return setmetatable({
-    _cap      = capacity,
+    _cap      = cap,
     _in_cap   = in_cap,
     _out_cap  = out_cap,
     -- "in" FIFO queue: {head, tail, count}
@@ -609,30 +640,32 @@ function M.twoq_new(capacity, opts)
     -- ghost set: keys of items evicted from "out"
     _ghost    = {},
     _map      = {},   -- key -> node (only live entries)
-    _on_evict = opts.on_evict,
+    _on_evict = o.on_evict,
     _hits      = 0,
     _misses    = 0,
     _evictions = 0,
-  }, TwoQ)
+  }, TwoQ) --[[:! TwoQ]]
 end
 
 -- Evict from "in" FIFO (oldest = head).
+--: (TwoQ) -> nil
 local function _twoq_evict_in(self)
   local q    = self._in_q
   local node = q.head
   if not node then return end
-  _fifo_remove(q, node)
+  _fifo_remove(q, node --[[:! TwoQNode]])
   self._map[node.key] = nil
   self._evictions = self._evictions + 1
   if self._on_evict then self._on_evict(node.key, node.value) end
 end
 
 -- Evict from "out" LRU (least recent = tail).
+--: (TwoQ) -> nil
 local function _twoq_evict_out(self)
   local q    = self._out_q
   local node = q.tail
   if not node then return end
-  _out_detach(q, node)
+  _out_detach(q, node --[[:! TwoQNode]])
   q.count = q.count - 1
   -- Move key to ghost set.
   self._ghost[node.key] = true
@@ -641,7 +674,7 @@ local function _twoq_evict_out(self)
   if self._on_evict then self._on_evict(node.key, node.value) end
 end
 
---: (unknown, unknown) -> nil
+--: (TwoQ, unknown, unknown) -> nil
 function TwoQ:set(key, value)
   local node = self._map[key]
   if node then
@@ -677,7 +710,7 @@ function TwoQ:set(key, value)
   _fifo_push(self._in_q, node)
 end
 
---: (unknown) -> unknown | nil
+--: (TwoQ, unknown) -> unknown | nil
 function TwoQ:get(key)
   local node = self._map[key]
   if not node then
@@ -700,19 +733,19 @@ function TwoQ:get(key)
   return node.value
 end
 
---: (unknown) -> unknown | nil
+--: (TwoQ, unknown) -> unknown | nil
 function TwoQ:peek(key)
   local node = self._map[key]
   if not node then return nil end
   return node.value
 end
 
---: (unknown) -> boolean
+--: (TwoQ, unknown) -> boolean
 function TwoQ:has(key)
   return self._map[key] ~= nil
 end
 
---: (unknown) -> unknown | nil
+--: (TwoQ, unknown) -> unknown | nil
 function TwoQ:delete(key)
   local node = self._map[key]
   if not node then return nil end
@@ -726,6 +759,7 @@ function TwoQ:delete(key)
   return node.value
 end
 
+--: (TwoQ) -> nil
 function TwoQ:clear()
   self._map     = {}
   self._ghost   = {}
@@ -733,59 +767,60 @@ function TwoQ:clear()
   self._out_q   = { head = nil, tail = nil, count = 0 }
 end
 
---: () -> number
+--: (TwoQ) -> number
 function TwoQ:size()
   return self._in_q.count + self._out_q.count
 end
 
---: () -> number
+--: (TwoQ) -> number
 function TwoQ:capacity()
   return self._cap
 end
 
---: () -> boolean
+--: (TwoQ) -> boolean
 function TwoQ:is_full()
   return (self._in_q.count + self._out_q.count) >= self._cap
 end
 
 -- "in" queue (FIFO) membership: true if key is in the "in" queue.
---: (unknown) -> boolean
+--: (TwoQ, unknown) -> boolean
 function TwoQ:in_queue(key)
   local node = self._map[key]
-  return node ~= nil and node.queue == "in"
+  return (node ~= nil and node.queue == "in") --[[:! boolean]]
 end
 
 -- "out" queue (LRU) membership: true if key is in the "out" queue.
---: (unknown) -> boolean
+--: (TwoQ, unknown) -> boolean
 function TwoQ:out_queue(key)
   local node = self._map[key]
-  return node ~= nil and node.queue == "out"
+  return (node ~= nil and node.queue == "out") --[[:! boolean]]
 end
 
 -- True if key is in the ghost set (evicted from "out" but not yet re-inserted).
---: (unknown) -> boolean
+--: (TwoQ, unknown) -> boolean
 function TwoQ:in_ghost(key)
   return self._ghost[key] == true
 end
 
---: () -> number
+--: (TwoQ) -> number
 function TwoQ:hit_rate()
   local total = self._hits + self._misses
   if total == 0 then return 0 end
   return self._hits / total
 end
 
---: () -> { hits: number, misses: number, evictions: number, size: number, capacity: number }
+--: (TwoQ) -> { hits: number, misses: number, evictions: number, size: number, capacity: number }
 function TwoQ:stats()
   return {
     hits      = self._hits,
     misses    = self._misses,
     evictions = self._evictions,
-    size      = self:size(),
+    size      = self._in_q.count + self._out_q.count,
     capacity  = self._cap,
   }
 end
 
+--: (TwoQ) -> nil
 function TwoQ:reset_stats()
   self._hits      = 0
   self._misses    = 0
