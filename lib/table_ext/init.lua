@@ -61,12 +61,16 @@ function M.flat_map(t, fn)
 end
 
 --- Flatten nested arrays. depth=1 by default, nil=infinite.
+--: (unknown, number | nil) -> { [integer]: unknown }
 function M.flatten(t, depth)
-	if depth == nil then depth = math.huge end
-	local out, n = {}, 0
+	local depth_ = (depth == nil and math.huge or depth) --[[:! number]]
+	local out = {} --: { [integer]: unknown }
+	local n = 0
+	--: (unknown, number) -> nil
 	local function rec(arr, d)
-		for i = 1, #arr do
-			local v = arr[i]
+		local arr_ = arr --[[:! { [integer]: unknown }]]
+		for i = 1, #arr_ do
+			local v = arr_[i]
 			if type(v) == "table" and d > 0 then
 				rec(v, d - 1)
 			else
@@ -75,7 +79,7 @@ function M.flatten(t, depth)
 			end
 		end
 	end
-	rec(t, depth)
+	rec(t, depth_)
 	return out
 end
 
@@ -234,7 +238,7 @@ end
 
 --- Zip multiple arrays into array of tuples.
 function M.zip(...)
-	local arrays = {...}
+	local arrays = {...} --: { [integer]: { [integer]: unknown } }
 	local len = #arrays[1]
 	for i = 2, #arrays do
 		if #arrays[i] < len then len = #arrays[i] end
@@ -278,8 +282,9 @@ function M.chunk(t, n)
 end
 
 --- First n elements.
+--: ({ [integer]: unknown }, integer) -> { [integer]: unknown }
 function M.take(t, n)
-	local out = {}
+	local out = {} --: { [integer]: unknown }
 	for i = 1, n < #t and n or #t do out[i] = t[i] end
 	return out
 end
@@ -328,10 +333,13 @@ function M.concat(...)
 end
 
 --- Build {from, from+step, ..., <=to}. step defaults to 1 (or -1 if to<from).
+--: (integer, integer, integer | nil) -> { [integer]: integer }
 function M.range(from, to, step)
 	if step == nil then step = (to >= from) and 1 or -1 end
-	local out, n = {}, 0
-	if step > 0 then
+	local step_ = step --[[:! integer]]
+	local out = {} --: { [integer]: integer }
+	local n = 0
+	if step_ > 0 then
 		local v = from
 		while v <= to do
 			n = n + 1
