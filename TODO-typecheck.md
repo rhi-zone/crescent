@@ -76,6 +76,7 @@ last because the type system itself is the testbed.
 
 - [x] `lib/csv/init.lua` (60 → 0)
 - [x] `lib/http/format.lua` (9 → 0) — cast find() returns after nil-check; tonumber() integer cast for sub() arg
+- [x] `lib/smtp/init.lua` (47 → 25) — annotated param/return types; remaining 25 from Session self.transport unknown (prototype method lookup limitation)
 - [ ] `lib/diff/init.lua` (8) — remaining integer|integer compare (typechecker limitation, see Skipped)
 
 ## FFI-bound (likely unfixable without restructuring)
