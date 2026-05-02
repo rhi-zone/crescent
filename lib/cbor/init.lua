@@ -86,7 +86,7 @@ else
 
     local exp = math.floor(math.log(n) / math.log(2))
     local mant = n / (2^exp) - 1
-    if mant < 0 then mant = 0 end
+    mant = math.max(mant, 0)
     if mant >= 1 then mant = mant - 1; exp = exp + 1 end
     exp = exp + 1023  -- bias
 
@@ -109,12 +109,20 @@ else
   unpack_f64 = function(data, pos)
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
     local b5, b6, b7, b8 = string.byte(data, pos+4, pos+7)
-    local sign = math.floor(b1 / 0x80)
-    local exp  = (b1 % 0x80) * 16 + math.floor(b2 / 16)
-    local mant = (b2 % 16) * (2^48)
-      + b3 * (2^40) + b4 * (2^32)
-      + b5 * (2^24) + b6 * (2^16)
-      + b7 * (2^8)  + b8
+    local _b1 = b1 or 0 --[[:! integer]]
+    local _b2 = b2 or 0 --[[:! integer]]
+    local _b3 = b3 or 0 --[[:! integer]]
+    local _b4 = b4 or 0 --[[:! integer]]
+    local _b5 = b5 or 0 --[[:! integer]]
+    local _b6 = b6 or 0 --[[:! integer]]
+    local _b7 = b7 or 0 --[[:! integer]]
+    local _b8 = b8 or 0 --[[:! integer]]
+    local sign = math.floor(_b1 / 0x80)
+    local exp  = (_b1 % 0x80) * 16 + math.floor(_b2 / 16)
+    local mant = (_b2 % 16) * (2^48)
+      + _b3 * (2^40) + _b4 * (2^32)
+      + _b5 * (2^24) + _b6 * (2^16)
+      + _b7 * (2^8)  + _b8
     mant = mant / (2^52)
     if exp == 0x7ff then
       if mant ~= 0 then return 0/0 end
@@ -246,27 +254,43 @@ local decode_value  -- forward declaration
 -- Read argument value from additional-info field.
 -- Returns (arg, new_pos) or (nil, errmsg).
 -- For indefinite length, returns (-1, pos).
---: (string, integer, integer) -> (integer | nil, integer | string)
+--: (string, integer, integer) -> (number | nil, integer | string)
 local function read_arg(data, info, pos)
   if info <= 23 then
     return info, pos
   elseif info == 24 then
     if pos > #data then return nil, "cbor.decode: truncated" end
-    return string.byte(data, pos), pos + 1
+    local byte1 = string.byte(data, pos) or 0
+    return byte1 --[[:! integer]], pos + 1
   elseif info == 25 then
     if pos + 1 > #data then return nil, "cbor.decode: truncated" end
-    local hi, lo = string.byte(data, pos), string.byte(data, pos+1)
+    local hi, _ = string.byte(data, pos, pos)
+    local lo, __ = string.byte(data, pos+1, pos+1)
+    hi = (hi or 0) --[[:! integer]]
+    lo = (lo or 0) --[[:! integer]]
     return hi * 256 + lo, pos + 2
   elseif info == 26 then
     if pos + 3 > #data then return nil, "cbor.decode: truncated" end
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
-    return ((b1 * 256 + b2) * 256 + b3) * 256 + b4, pos + 4
+    local _b1 = b1 or 0 --[[:! integer]]
+    local _b2 = b2 or 0 --[[:! integer]]
+    local _b3 = b3 or 0 --[[:! integer]]
+    local _b4 = b4 or 0 --[[:! integer]]
+    return ((_b1 * 256 + _b2) * 256 + _b3) * 256 + _b4, pos + 4
   elseif info == 27 then
     if pos + 7 > #data then return nil, "cbor.decode: truncated" end
     local b1, b2, b3, b4 = string.byte(data, pos, pos+3)
     local b5, b6, b7, b8 = string.byte(data, pos+4, pos+7)
-    local hi = ((b1 * 256 + b2) * 256 + b3) * 256 + b4
-    local lo = ((b5 * 256 + b6) * 256 + b7) * 256 + b8
+    local _b1 = b1 or 0 --[[:! integer]]
+    local _b2 = b2 or 0 --[[:! integer]]
+    local _b3 = b3 or 0 --[[:! integer]]
+    local _b4 = b4 or 0 --[[:! integer]]
+    local _b5 = b5 or 0 --[[:! integer]]
+    local _b6 = b6 or 0 --[[:! integer]]
+    local _b7 = b7 or 0 --[[:! integer]]
+    local _b8 = b8 or 0 --[[:! integer]]
+    local hi = ((_b1 * 256 + _b2) * 256 + _b3) * 256 + _b4
+    local lo = ((_b5 * 256 + _b6) * 256 + _b7) * 256 + _b8
     return hi * (2^32) + lo, pos + 8
   elseif info == 31 then
     return -1, pos  -- indefinite length
@@ -289,20 +313,23 @@ decode_value = function(data, pos)
   if major == 0 then
     -- unsigned integer
     local arg, npos = read_arg(data, info, pos)
-    if npos == nil then return nil, arg end  -- arg is errmsg
+    if npos == nil then return nil, arg end
+    arg = arg --[[:! integer]]  -- arg is errmsg
     return arg, npos
 
   elseif major == 1 then
     -- negative integer: value = -1 - arg
     local arg, npos = read_arg(data, info, pos)
     if npos == nil then return nil, arg end
+    arg = arg --[[:! integer]]
     return -1 - arg, npos
 
   elseif major == 2 then
     -- byte string
     local arg, npos = read_arg(data, info, pos)
     if npos == nil then return nil, arg end
-    pos = npos
+    arg = arg --[[:! integer]]
+    pos = npos --[[:! integer]]
     if arg == -1 then
       -- indefinite length byte string
       local chunks = {}
@@ -317,7 +344,7 @@ decode_value = function(data, pos)
           return nil, "cbor.decode: non-byte-string chunk in indefinite byte string"
         end
         chunks[#chunks+1] = chunk.s
-        pos = cpos
+        pos = cpos --[[:! integer]]
       end
       return M.bytes(table.concat(chunks)), pos
     end
@@ -328,7 +355,8 @@ decode_value = function(data, pos)
     -- text string
     local arg, npos = read_arg(data, info, pos)
     if npos == nil then return nil, arg end
-    pos = npos
+    arg = arg --[[:! integer]]
+    pos = npos --[[:! integer]]
     if arg == -1 then
       local chunks = {}
       while true do
@@ -342,7 +370,7 @@ decode_value = function(data, pos)
           return nil, "cbor.decode: non-string chunk in indefinite text string"
         end
         chunks[#chunks+1] = chunk
-        pos = cpos
+        pos = cpos --[[:! integer]]
       end
       return table.concat(chunks), pos
     end
@@ -353,7 +381,8 @@ decode_value = function(data, pos)
     -- array
     local arg, npos = read_arg(data, info, pos)
     if npos == nil then return nil, arg end
-    pos = npos
+    arg = arg --[[:! integer]]
+    pos = npos --[[:! integer]]
     local arr = {}
     if arg == -1 then
       while true do
@@ -364,14 +393,14 @@ decode_value = function(data, pos)
         local v, vpos = decode_value(data, pos)
         if type(vpos) ~= "number" then return nil, vpos end
         arr[#arr+1] = v  -- v may be nil (CBOR null); that's valid
-        pos = vpos
+        pos = vpos --[[:! integer]]
       end
     else
       for _ = 1, arg do
         local v, vpos = decode_value(data, pos)
         if type(vpos) ~= "number" then return nil, vpos end
         arr[#arr+1] = v
-        pos = vpos
+        pos = vpos --[[:! integer]]
       end
     end
     return arr, pos
@@ -380,15 +409,16 @@ decode_value = function(data, pos)
     -- map
     local arg, npos = read_arg(data, info, pos)
     if npos == nil then return nil, arg end
-    pos = npos
+    arg = arg --[[:! integer]]
+    pos = npos --[[:! integer]]
     local map = {}
     local function read_pair()
       local k, kpos = decode_value(data, pos)
       if type(kpos) ~= "number" then return nil, kpos end
-      pos = kpos
+      pos = kpos --[[:! integer]]
       local v, vpos = decode_value(data, pos)
       if type(vpos) ~= "number" then return nil, vpos end
-      pos = vpos
+      pos = vpos --[[:! integer]]
       -- byte string keys: use the raw string as map key
       if M.is_bytes(k) then k = k.s end
       map[k] = v
@@ -427,6 +457,8 @@ decode_value = function(data, pos)
       -- float16: 2 bytes already available via read_arg
       local arg, npos = read_arg(data, info, pos)
       if npos == nil then return nil, arg end
+      arg = arg --[[:! integer]]
+    arg = arg --[[:! integer]]
       local sign16 = math.floor(arg / (2^15))
       local exp16  = math.floor(arg / (2^10)) % 32
       local mant16 = arg % (2^10)
@@ -444,6 +476,8 @@ decode_value = function(data, pos)
       -- float32: reconstruct from 4-byte arg
       local arg, npos = read_arg(data, info, pos)
       if npos == nil then return nil, arg end
+      arg = arg --[[:! integer]]
+    arg = arg --[[:! integer]]
       local sign32 = math.floor(arg / (2^31)) % 2
       local exp32  = math.floor(arg / (2^23)) % 256
       local mant32 = arg % (2^23)
@@ -468,6 +502,8 @@ decode_value = function(data, pos)
       -- simple value (0-19 inline or info==24 for extended)
       local arg, npos = read_arg(data, info, pos)
       if npos == nil then return nil, arg end
+      arg = arg --[[:! integer]]
+    arg = arg --[[:! integer]]
       return nil, "cbor.decode: unsupported simple value: " .. arg
     end
   end
