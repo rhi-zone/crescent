@@ -12,8 +12,8 @@ local abs = math.abs
 
 local M = {}
 
---:: Bitset = { ... }
---:: Bloom = { ... }
+--:: Bitset = { _words: { [integer]: number }, _size: integer, _nwords: integer, ... }
+--:: Bloom = { _bits: Bitset, _m: number, _k: number, _n: number, _count: number, ... }
 
 -- Try to use LuaJIT bit library for performance; fall back to arithmetic.
 local has_bit, bit = pcall(require, "bit")
@@ -22,12 +22,12 @@ M._tier = has_bit and "ffi" or "pure"
 
 local band, bor, bxor, bnot, lshift, rshift
 if has_bit then
-  band = bit.band
-  bor = bit.bor
-  bxor = bit.bxor
-  bnot = bit.bnot
-  lshift = bit.lshift
-  rshift = bit.rshift
+  band   = --[[:! (number, number) -> number]] bit.band
+  bor    = --[[:! (number, number) -> number]] bit.bor
+  bxor   = --[[:! (number, number) -> number]] bit.bxor
+  bnot   = --[[:! (number) -> number]] bit.bnot
+  lshift = --[[:! (number, number) -> number]] bit.lshift
+  rshift = --[[:! (number, number) -> number]] bit.rshift
 else
   -- Pure Lua fallback (32-bit unsigned arithmetic)
   band = function(a, b)
@@ -76,21 +76,29 @@ else
     return floor(a / (2 ^ n)) % 4294967296
   end
 end
+band   = --[[:! (number, number) -> number]] band
+bor    = --[[:! (number, number) -> number]] bor
+bxor   = --[[:! (number, number) -> number]] bxor
+bnot   = --[[:! (number) -> number]] bnot
+lshift = --[[:! (number, number) -> number]] lshift
+rshift = --[[:! (number, number) -> number]] rshift
 
 -- ── Popcount ────────────────────────────────────────────────────────────────
 
 -- Hamming weight for a 32-bit integer.
+--: (x: number) -> number
 local function popcount32(x)
   -- Ensure unsigned 32-bit
-  if x < 0 then x = x + 4294967296 end
-  x = x - band(rshift(x, 1), 0x55555555)
-  x = band(x, 0x33333333) + band(rshift(x, 2), 0x33333333)
-  x = band(x + rshift(x, 4), 0x0F0F0F0F)
+  local xn = x --: number
+  if xn < 0 then xn = xn + 4294967296 end
+  xn = xn - band(rshift(xn, 1), 0x55555555)
+  xn = band(xn, 0x33333333) + band(rshift(xn, 2), 0x33333333)
+  xn = band(xn + rshift(xn, 4), 0x0F0F0F0F)
   -- Multiply by 0x01010101 and shift right 24
   -- Use addition to avoid overflow issues on pure Lua
-  x = x + lshift(x, 8)
-  x = x + lshift(x, 16)
-  return band(rshift(x, 24), 0x3F)
+  xn = xn + lshift(xn, 8)
+  xn = xn + lshift(xn, 16)
+  return band(rshift(xn, 24), 0x3F)
 end
 
 -- ── Bitset ──────────────────────────────────────────────────────────────────
@@ -101,26 +109,27 @@ Bitset.__index = Bitset
 local BITS_PER_WORD = 32
 
 --- Create a new fixed-size bitset.
---: (n: number) -> Bitset
+--: (n: number) -> (Bitset | nil, string | nil)
 function M.bitset(n)
   if type(n) ~= "number" or n < 0 then
     return nil, "bitset: size must be a non-negative number"
   end
-  n = floor(n)
-  local nwords = ceil(n / BITS_PER_WORD)
+  local ni = floor(--[[:! number]] n)
+  local nwords = ceil(ni / BITS_PER_WORD)
   if nwords == 0 then nwords = 1 end
+  --: { [integer]: number }
   local words = {}
   for i = 1, nwords do words[i] = 0 end
   local self = setmetatable({
     _words = words,
-    _size = n,
+    _size = ni,
     _nwords = nwords,
   }, Bitset)
   return self
 end
 
 --- Set bit at index i (0-based).
---: (i: number) -> nil
+--: (self: Bitset, i: number) -> nil
 function Bitset:set(i)
   if i < 0 or i >= self._size then return end
   local word_idx = floor(i / BITS_PER_WORD) + 1
@@ -129,7 +138,7 @@ function Bitset:set(i)
 end
 
 --- Clear bit at index i (0-based).
---: (i: number) -> nil
+--: (self: Bitset, i: number) -> nil
 function Bitset:clear(i)
   if i < 0 or i >= self._size then return end
   local word_idx = floor(i / BITS_PER_WORD) + 1
@@ -138,7 +147,7 @@ function Bitset:clear(i)
 end
 
 --- Toggle bit at index i (0-based).
---: (i: number) -> nil
+--: (self: Bitset, i: number) -> nil
 function Bitset:toggle(i)
   if i < 0 or i >= self._size then return end
   local word_idx = floor(i / BITS_PER_WORD) + 1
@@ -147,7 +156,7 @@ function Bitset:toggle(i)
 end
 
 --- Get bit at index i (0-based). Returns boolean.
---: (i: number) -> boolean
+--: (self: Bitset, i: number) -> boolean
 function Bitset:get(i)
   if i < 0 or i >= self._size then return false end
   local word_idx = floor(i / BITS_PER_WORD) + 1
@@ -156,9 +165,9 @@ function Bitset:get(i)
 end
 
 --- Return the number of set bits (popcount).
---: () -> number
+--: (self: Bitset) -> number
 function Bitset:count()
-  local c = 0
+  local c = 0 --: number
   for i = 1, self._nwords do
     c = c + popcount32(self._words[i])
   end
@@ -166,13 +175,13 @@ function Bitset:count()
 end
 
 --- Return the total capacity.
---: () -> number
+--: (self: Bitset) -> number
 function Bitset:size()
   return self._size
 end
 
 --- Return true if any bit is set.
---: () -> boolean
+--: (self: Bitset) -> boolean
 function Bitset:any()
   for i = 1, self._nwords do
     if self._words[i] ~= 0 then return true end
@@ -181,13 +190,13 @@ function Bitset:any()
 end
 
 --- Return true if no bits are set.
---: () -> boolean
+--: (self: Bitset) -> boolean
 function Bitset:none()
-  return not self:any()
+  return not Bitset.any(self)
 end
 
 --- Return true if all bits are set.
---: () -> boolean
+--: (self: Bitset) -> boolean
 function Bitset:all()
   -- Check all full words
   local full_words = floor(self._size / BITS_PER_WORD)
@@ -221,7 +230,7 @@ local function bitset_from_words(words, nwords, size)
 end
 
 --- Bitwise AND with another bitset. Returns a new bitset.
---: (other: Bitset) -> Bitset | (nil, string)
+--: (self: Bitset, other: Bitset) -> (Bitset | nil, string | nil)
 function Bitset:and_(other)
   if self._size ~= other._size then
     return nil, "bitset:and_: size mismatch"
@@ -234,7 +243,7 @@ function Bitset:and_(other)
 end
 
 --- Bitwise OR with another bitset. Returns a new bitset.
---: (other: Bitset) -> Bitset | (nil, string)
+--: (self: Bitset, other: Bitset) -> (Bitset | nil, string | nil)
 function Bitset:or_(other)
   if self._size ~= other._size then
     return nil, "bitset:or_: size mismatch"
@@ -247,7 +256,7 @@ function Bitset:or_(other)
 end
 
 --- Bitwise XOR with another bitset. Returns a new bitset.
---: (other: Bitset) -> Bitset | (nil, string)
+--: (self: Bitset, other: Bitset) -> (Bitset | nil, string | nil)
 function Bitset:xor_(other)
   if self._size ~= other._size then
     return nil, "bitset:xor_: size mismatch"
@@ -260,7 +269,7 @@ function Bitset:xor_(other)
 end
 
 --- Bitwise NOT. Returns a new bitset (only flips bits within size).
---: () -> Bitset
+--: (self: Bitset) -> Bitset
 function Bitset:not_()
   local words = {}
   for i = 1, self._nwords do
@@ -276,12 +285,12 @@ function Bitset:not_()
 end
 
 --- Return an array of 0-based indices of all set bits.
---: () -> { [number]: number }
+--: (self: Bitset) -> { [number]: number }
 function Bitset:to_array()
   local result = {}
   local n = 0
   for i = 0, self._size - 1 do
-    if self:get(i) then
+    if Bitset.get(self, i) then
       n = n + 1
       result[n] = i
     end
@@ -290,10 +299,10 @@ function Bitset:to_array()
 end
 
 --- Set bits from an array of 0-based indices. Returns self for chaining.
---: (indices: { [number]: number }) -> Bitset
+--: (self: Bitset, indices: { [number]: number }) -> Bitset
 function Bitset:from_array(indices)
   for _, i in ipairs(indices) do
-    self:set(i)
+    Bitset.set(self, i)
   end
   return self
 end
@@ -302,7 +311,7 @@ end
 function Bitset:__tostring()
   local chars = {}
   for i = 0, self._size - 1 do
-    chars[i + 1] = self:get(i) and "1" or "0"
+    chars[i + 1] = Bitset.get(self, i) and "1" or "0"
   end
   return table.concat(chars)
 end
@@ -326,6 +335,7 @@ end
 local FNV_OFFSET = 2166136261
 local FNV_PRIME = 16777619
 
+--: (data: string) -> (number, number)
 local function hash_pair(data)
   local h1 = FNV_OFFSET
   local h2 = 2246822519  -- different seed
@@ -345,7 +355,7 @@ local function hash_pair(data)
 end
 
 --- Create a new Bloom filter.
---: (expected_items: number, fp_rate: number) -> Bloom | (nil, string)
+--: (expected_items: number, fp_rate: number) -> (Bloom | nil, string | nil)
 function M.bloom(expected_items, fp_rate)
   if type(expected_items) ~= "number" or expected_items <= 0 then
     return nil, "bloom: expected_items must be a positive number"
@@ -361,11 +371,11 @@ function M.bloom(expected_items, fp_rate)
   local k = ceil((m / expected_items) * ln2)
   if k < 1 then k = 1 end
 
-  local bs = M.bitset(m)
-  if not bs then return nil, "bloom: failed to create internal bitset" end
+  local bs, bs_err = M.bitset(m)
+  if not bs then return nil, bs_err end
 
   return setmetatable({
-    _bits = bs,
+    _bits = --[[:! Bitset]] bs,
     _m = m,
     _k = k,
     _n = expected_items,
@@ -374,7 +384,7 @@ function M.bloom(expected_items, fp_rate)
 end
 
 --- Add an item (string or number) to the filter.
---: (item: string | number) -> nil
+--: (self: Bloom, item: string | number) -> nil
 function Bloom:add(item)
   local s = tostring(item)
   local h1, h2 = hash_pair(s)
@@ -382,10 +392,10 @@ function Bloom:add(item)
   local already_present = true
   for i = 0, self._k - 1 do
     local idx = (h1 + i * h2) % m
-    if not self._bits:get(idx) then
+    if not Bitset.get(self._bits, idx) then
       already_present = false
     end
-    self._bits:set(idx)
+    Bitset.set(self._bits, idx)
   end
   if not already_present then
     self._count = self._count + 1
@@ -394,14 +404,14 @@ end
 
 --- Test if an item might be in the filter. Returns boolean.
 -- May return false positives but never false negatives.
---: (item: string | number) -> boolean
+--: (self: Bloom, item: string | number) -> boolean
 function Bloom:test(item)
   local s = tostring(item)
   local h1, h2 = hash_pair(s)
   local m = self._m
   for i = 0, self._k - 1 do
     local idx = (h1 + i * h2) % m
-    if not self._bits:get(idx) then
+    if not Bitset.get(self._bits, idx) then
       return false
     end
   end
@@ -409,24 +419,24 @@ function Bloom:test(item)
 end
 
 --- Approximate count of items added.
---: () -> number
+--: (self: Bloom) -> number
 function Bloom:count()
   return self._count
 end
 
 --- Merge another Bloom filter into this one (union). Same parameters required.
---: (other: Bloom) -> true | (nil, string)
+--: (self: Bloom, other: Bloom) -> (boolean | nil, string | nil)
 function Bloom:union(other)
   if self._m ~= other._m or self._k ~= other._k then
     return nil, "bloom:union: filters must have same parameters"
   end
-  local merged = self._bits:or_(other._bits)
+  local merged = Bitset.or_(self._bits, other._bits)
   if not merged then
     return nil, "bloom:union: bitset or_ failed"
   end
   self._bits = merged
   -- Estimate count from fill ratio: n_est = -(m/k) * ln(1 - X/m)
-  local set_bits = self._bits:count()
+  local set_bits = Bitset.count(self._bits)
   if set_bits >= self._m then
     self._count = self._n  -- saturated
   else
@@ -436,7 +446,7 @@ function Bloom:union(other)
 end
 
 --- Clear all bits and reset count.
---: () -> nil
+--: (self: Bloom) -> nil
 function Bloom:clear()
   for i = 1, self._bits._nwords do
     self._bits._words[i] = 0
@@ -445,9 +455,9 @@ function Bloom:clear()
 end
 
 --- Estimated false positive rate based on current fill ratio.
---: () -> number
+--: (self: Bloom) -> number
 function Bloom:false_positive_rate()
-  local set_bits = self._bits:count()
+  local set_bits = Bitset.count(self._bits)
   local fill = set_bits / self._m
   return (fill) ^ self._k
 end
