@@ -135,6 +135,15 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+15)
+
+- [x] `lib/css/embed.lua` (was 3 → now 0) — replaced `table` annotation with concrete shapes for sheet/css_mod params and return type
+- [x] `lib/css/media.lua` (was 3 → now 0) — replaced `table` annotation with concrete shapes; `--[[:! string]]` cast for `type() and ... or ...` phi-join
+- [x] `lib/dns/tcp_client.lua` (was 3 → now 0) — added `local bit = require("bit")`; cast `dns.type` to `{ [string]: unknown }` for `["*"]` field access
+- [x] `lib/pkg/lock.lua` (was 2 → now 0) — added `LockEntry` type alias; annotated `lock.parse` params/return; cast `current_pkg = {}` to `LockEntry`; `or ""` guard on `f:read()` return
+- [x] `lib/unified/rehype_minify/init.lua` (was 2 → now 0) — `gsub` multi-return via `local r, _ = s:gsub(...); return r`; `not not BLOCK[tag]` to get boolean
+- [x] `lib/unified/rehype_shift_heading/init.lua` (was 2 → now 0) — annotated HEADING_LEVEL as `{ [string]: integer }`; cast `node.tag` to string; cast `level + shift` to number; phi-join re-cast via `new_level_` local
+
 ## Done in current session (session N+14)
 
 - [x] `lib/actor/init.lua` (was 52 → now 0, commit d5fa9c9) — ActorRecord/ActorCtxShape/SystemShape/SupervisorShape/ChildEntry/FailureRec type aliases; self_ casts in all methods; Opaque→any for coroutine; fix deadline number|nil comparisons; fix _kill_actor actor_ casts; supervisor spawn/handle_exit/record_failure self_ casts

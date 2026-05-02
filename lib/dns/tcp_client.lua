@@ -3,6 +3,7 @@
 
 local dns = require("lib.dns.format")
 local tcp_client = require("lib.tcp.client").client
+local bit = require("bit")
 
 local mod = {}
 
@@ -13,7 +14,7 @@ mod.client = function (cb, nameserver, domain, opcode, type, class, epoll)
 	local is_running = not epoll
 	epoll = epoll or require("lib.epoll").new()
 	--[[@diagnostic disable-next-line: cast-local-type]]
-	type = type or dns.type["*"]
+	type = type or (dns.type --[[:! { [string]: unknown }]])["*"]
 	class = class or dns.class.IN
 	local name_parts = {}
 	for s in domain:gmatch("[^.]+") do name_parts[#name_parts+1] = s end

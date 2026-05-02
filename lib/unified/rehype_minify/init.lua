@@ -43,7 +43,7 @@ local BLOCK = {
 local function collapse_whitespace(s, collapse_newlines)
   if collapse_newlines then
     -- Collapse any whitespace sequence (including newlines) to a single space.
-    return s:gsub("%s+", " ")
+    local r, _ = s:gsub("%s+", " "); return r
   else
     -- Collapse non-newline whitespace sequences; preserve newlines.
     return s:gsub("[^\n\r%s]+", function(w) return w end)
@@ -87,7 +87,7 @@ minify_node = function(node, in_pre, collapse_newlines)
   if node.type ~= "element" then return end
   local tag = node.tag or ""
   local is_pre = tag == "pre"
-  local is_block = BLOCK[tag]
+  local is_block = not not BLOCK[tag]
   minify_children(node, is_block, in_pre or is_pre, collapse_newlines)
 end
 

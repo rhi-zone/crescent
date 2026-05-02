@@ -32,9 +32,9 @@ M.all                  = make_query("all")
 -- Construct a @media rule block.
 -- query: a Query object or a raw string
 -- items: list of rule/keyframes/nested-media tables
---: (query: table | string, items: table) -> table
+--: (query: { _q: string, ... } | string, items: { [integer]: unknown }) -> { _type: string, query: string, items: { [integer]: unknown } }
 function M.media(query, items)
-  local q = type(query) == "table" and query._q or query
+  local q = (type(query) == "table" and query._q or query) --[[:! string]]
   return { _type = "media", query = q, items = items }
 end
 

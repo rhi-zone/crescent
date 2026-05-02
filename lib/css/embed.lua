@@ -16,7 +16,7 @@ local M = {}
 -- rendered but not exposed as typed class names (they appear in the style block
 -- regardless).
 --
---: (sheet: table, css_mod: table) -> (string, table)
+--: (sheet: { items: { [integer]: { _type: string, selector: unknown, ... } }, ... }, css_mod: { render: (unknown) -> string, class: (string) -> unknown, ... }) -> (string, { [string]: unknown })
 function M.embed(sheet, css_mod)
   local css_text = css_mod.render(sheet)
   local style_block = "<style>\n" .. css_text .. "\n</style>"

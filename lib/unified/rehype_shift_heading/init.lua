@@ -16,19 +16,20 @@ local M = {}
 
 -- ── Heading tags ──────────────────────────────────────────────────────────────
 
-local HEADING_LEVEL = { h1=1, h2=2, h3=3, h4=4, h5=5, h6=6 }
+local HEADING_LEVEL = { h1=1, h2=2, h3=3, h4=4, h5=5, h6=6 } --: { [string]: integer }
 
 -- ── Tree walker ───────────────────────────────────────────────────────────────
 
 --: (any, number) -> nil
 local function walk(node, shift)
   if node.type == "element" then
-    local level = HEADING_LEVEL[node.tag]
+    local level = HEADING_LEVEL[(node.tag --[[:! string]])]
     if level then
-      local new_level = level + shift
+      local new_level = level + shift --[[:! number]]
       if new_level < 1 then new_level = 1 end
-      if new_level > 6 then new_level = 6 end
-      node.tag = "h" .. new_level
+      local new_level_ = new_level --[[:! number]]
+      if new_level_ > 6 then new_level_ = 6 end
+      node.tag = "h" .. new_level_
     end
   end
   if node.children then
@@ -43,7 +44,7 @@ end
 --: (any, any) -> nil
 function M.plugin(processor, opts)
   opts = opts or {}
-  local shift = opts.shift or 1
+  local shift = (opts.shift or 1) --[[:! number]]
   processor:use_transformer(function(tree)
     walk(tree, shift)
     return tree

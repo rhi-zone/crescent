@@ -47,6 +47,7 @@ local VALID_KEYS = {
 	include      = true,
 }
 
+--:: LockEntry = { version: string | nil, url: string | nil, tarball_hash: string | nil, tree_hash: string | nil, include: string | nil, [string]: string | nil }
 -- parse(content) → tbl | nil, err
 -- tbl is { [name] = { version, url, tarball_hash, tree_hash, include }, ... }
 -- tree_hash and include may be nil when absent from the lockfile.
@@ -54,10 +55,11 @@ local VALID_KEYS = {
 -- Lockfiles without a lockfile_version field are treated as v1 (migrated silently).
 -- Lockfiles with lockfile_version = 2 are the current format.
 -- Any other version value returns an error.
+--: (content: string) -> ({ [string]: LockEntry } | nil, string | nil)
 function lock.parse(content)
-	local result = {}
-	local current_name = nil
-	local current_pkg = nil
+	local result = {} --: { [string]: LockEntry }
+	local current_name = nil --: string | nil
+	local current_pkg = nil --: LockEntry | nil
 	local lnum = 0
 
 	for line in (content .. "\n"):gmatch("([^\n]*)\n") do
@@ -92,7 +94,7 @@ function lock.parse(content)
 				return nil, ("line %d: duplicate package %q"):format(lnum, name)
 			end
 			current_name = name
-			current_pkg = {}
+			current_pkg = {} --[[:! LockEntry]]
 			result[name] = current_pkg
 
 		-- key = "value"
@@ -135,7 +137,7 @@ function lock.load(path)
 	if not f then
 		return nil, err
 	end
-	local content = f:read("*a")
+	local content = f:read("*a") or ""
 	f:close()
 	return lock.parse(content)
 end
