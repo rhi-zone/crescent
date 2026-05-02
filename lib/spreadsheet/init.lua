@@ -34,7 +34,7 @@ local function parse_cell_ref(s)
   local abs_col, col_str, abs_row, row_str =
     s:match("^(%$?)([A-Za-z]+)(%$?)(%d+)$")
   if not col_str then return nil end
-  return col_str:upper(), tonumber(row_str), abs_col == "$", abs_row == "$"
+  return col_str:upper(), tonumber(row_str) --[[:! integer]], abs_col == "$", abs_row == "$"
 end
 
 -- Convert column letter(s) to 1-based integer (A=1, Z=26, AA=27, ...)
@@ -58,6 +58,7 @@ local function num_to_col(n)
 end
 
 -- Canonical cell key: "A1" style (uppercase col, row as string)
+--: (string, integer) -> string
 local function cell_key(col_str, row_num)
   return col_str:upper() .. tostring(row_num)
 end
@@ -79,10 +80,10 @@ local function parse_range(s)
   local ra = parse_ref(a)
   local rb = parse_ref(b)
   if not ra or not rb then return nil end
-  local r1 = math.min(ra.row, rb.row)
-  local r2 = math.max(ra.row, rb.row)
-  local c1 = math.min(ra.col, rb.col)
-  local c2 = math.max(ra.col, rb.col)
+  local r1 = math.min(ra.row, rb.row) --[[:! integer]]
+  local r2 = math.max(ra.row, rb.row) --[[:! integer]]
+  local c1 = math.min(ra.col, rb.col) --[[:! integer]]
+  local c2 = math.max(ra.col, rb.col) --[[:! integer]]
   return { r1 = r1, c1 = c1, r2 = r2, c2 = c2 }
 end
 
@@ -103,14 +104,21 @@ local TK = {
   EOF    = "EOF",
 }
 
+--:: SpreadToken = { type: string, ... }
+--:: SpreadNode = { type: string, op?: string, value?: any, left?: SpreadNode, right?: SpreadNode, operand?: SpreadNode, name?: string, args?: { [integer]: SpreadNode }, ... }
+--:: ParserState = { tokens: { [integer]: SpreadToken }, pos: integer, peek: (ParserState) -> SpreadToken, consume: (ParserState) -> SpreadToken, expect: (ParserState, string) -> SpreadToken, expr: (ParserState) -> SpreadNode, comparison: (ParserState) -> SpreadNode, concat: (ParserState) -> SpreadNode, additive: (ParserState) -> SpreadNode, multiplicative: (ParserState) -> SpreadNode, power: (ParserState) -> SpreadNode, unary: (ParserState) -> SpreadNode, primary: (ParserState) -> SpreadNode }
+
+--: (string) -> { [integer]: SpreadToken }
 local function lex(src)
+  --: { [integer]: SpreadToken }
   local tokens = {}
+  --: integer
   local i = 1
   local n = #src
 
-  local function peek() return src:sub(i, i) end
+  local function peek() return src:sub(i, i) --[[:! string]] end
   local function advance() i = i + 1 end
-  local function cur() return src:sub(i, i) end
+  local function cur() return src:sub(i, i) --[[:! string]] end
 
   while i <= n do
     local c = cur()
@@ -147,7 +155,7 @@ local function lex(src)
       local two = src:sub(i, i+1)
       if two == "<=" or two == ">=" or two == "<>" then
         tokens[#tokens+1] = { type = TK.OP, value = two }
-        i = i + 2
+        i = (i + 2) --[[:! integer]]
       else
         tokens[#tokens+1] = { type = TK.OP, value = c }
         advance()
@@ -189,13 +197,15 @@ local function lex(src)
           if j <= n and (src:sub(j,j) == "$" or src:sub(j,j):match("[A-Za-z]")) then
             -- consume range
             j = j + 0
-            if src:sub(j,j) == "$" then j = j + 1 end
-            while j <= n and src:sub(j,j):match("[A-Za-z]") do j = j + 1 end
-            if src:sub(j,j) == "$" then j = j + 1 end
-            while j <= n and src:sub(j,j):match("%d") do j = j + 1 end
+            if src:sub(j,j) == "$" then j = (j + 1) --[[:! integer]] end
+            j = j --[[:! integer]]
+            while j <= n and src:sub(j,j):match("[A-Za-z]") do j = (j + 1) --[[:! integer]] end
+            if src:sub(j,j) == "$" then j = (j + 1) --[[:! integer]] end
+            j = j --[[:! integer]]
+            while j <= n and src:sub(j,j):match("%d") do j = (j + 1) --[[:! integer]] end
             local range_str = src:sub(start, j-1)
             tokens[#tokens+1] = { type = TK.REF, value = range_str, is_range = true }
-            i = j
+            i = j --[[:! integer]]
           else
             tokens[#tokens+1] = { type = TK.REF, value = word, is_range = false }
           end
@@ -230,21 +240,25 @@ local NT = {
   CALL   = "CALL",
 }
 
+--: ({ [integer]: SpreadToken }) -> ParserState
 local function Parser(tokens)
-  local p = { tokens = tokens, pos = 1 }
+  local p = { tokens = tokens, pos = 1 } --[[: any]]
 
   function p:peek()
-    return self.tokens[self.pos]
+    local self_ = self --[[:! ParserState]]
+    return self_.tokens[self_.pos]
   end
 
   function p:consume()
-    local t = self.tokens[self.pos]
-    self.pos = self.pos + 1
+    local self_ = self --[[:! ParserState]]
+    local t = self_.tokens[self_.pos]
+    self_.pos = (self_.pos + 1) --[[:! integer]]
     return t
   end
 
   function p:expect(typ)
-    local t = self:consume()
+    local self_ = self --[[:! ParserState]]
+    local t = self_:consume()
     if t.type ~= typ then
       error("expected " .. typ .. " got " .. t.type)
     end
@@ -253,30 +267,33 @@ local function Parser(tokens)
 
   -- expr → comparison
   function p:expr()
-    return self:comparison()
+    local self_ = self --[[:! ParserState]]
+    return self_:comparison()
   end
 
   -- comparison → concat ((<|>|<=|>=|=|<>) concat)*
   function p:comparison()
-    local left = self:concat()
-    local tk = self:peek()
+    local self_ = self --[[:! ParserState]]
+    local left = self_:concat()
+    local tk = self_:peek()
     while tk.type == TK.OP and
           (tk.value == "<" or tk.value == ">" or tk.value == "<=" or
            tk.value == ">=" or tk.value == "=" or tk.value == "<>") do
-      self:consume()
-      local right = self:concat()
-      left = { type = NT.BINOP, op = tk.value, left = left, right = right }
-      tk = self:peek()
+      self_:consume()
+      local right = self_:concat()
+      left = { type = NT.BINOP, op = (tk.value --[[:! string]]), left = left, right = right }
+      tk = self_:peek()
     end
     return left
   end
 
   -- concat → additive (& additive)*
   function p:concat()
-    local left = self:additive()
-    while self:peek().type == TK.OP and self:peek().value == "&" do
-      self:consume()
-      local right = self:additive()
+    local self_ = self --[[:! ParserState]]
+    local left = self_:additive()
+    while self_:peek().type == TK.OP and self_:peek().value == "&" do
+      self_:consume()
+      local right = self_:additive()
       left = { type = NT.BINOP, op = "&", left = left, right = right }
     end
     return left
@@ -284,36 +301,39 @@ local function Parser(tokens)
 
   -- additive → multiplicative ((+|-) multiplicative)*
   function p:additive()
-    local left = self:multiplicative()
-    local tk = self:peek()
+    local self_ = self --[[:! ParserState]]
+    local left = self_:multiplicative()
+    local tk = self_:peek()
     while tk.type == TK.OP and (tk.value == "+" or tk.value == "-") do
-      self:consume()
-      local right = self:multiplicative()
-      left = { type = NT.BINOP, op = tk.value, left = left, right = right }
-      tk = self:peek()
+      self_:consume()
+      local right = self_:multiplicative()
+      left = { type = NT.BINOP, op = (tk.value --[[:! string]]), left = left, right = right }
+      tk = self_:peek()
     end
     return left
   end
 
   -- multiplicative → power ((*|/) power)*
   function p:multiplicative()
-    local left = self:power()
-    local tk = self:peek()
+    local self_ = self --[[:! ParserState]]
+    local left = self_:power()
+    local tk = self_:peek()
     while tk.type == TK.OP and (tk.value == "*" or tk.value == "/") do
-      self:consume()
-      local right = self:power()
-      left = { type = NT.BINOP, op = tk.value, left = left, right = right }
-      tk = self:peek()
+      self_:consume()
+      local right = self_:power()
+      left = { type = NT.BINOP, op = (tk.value --[[:! string]]), left = left, right = right }
+      tk = self_:peek()
     end
     return left
   end
 
   -- power → unary (^ unary)*  (right-assoc)
   function p:power()
-    local base = self:unary()
-    if self:peek().type == TK.OP and self:peek().value == "^" then
-      self:consume()
-      local exp = self:power() -- right-recursive
+    local self_ = self --[[:! ParserState]]
+    local base = self_:unary()
+    if self_:peek().type == TK.OP and self_:peek().value == "^" then
+      self_:consume()
+      local exp = self_:power() -- right-recursive
       return { type = NT.BINOP, op = "^", left = base, right = exp }
     end
     return base
@@ -321,61 +341,63 @@ local function Parser(tokens)
 
   -- unary → -? primary
   function p:unary()
-    if self:peek().type == TK.OP and self:peek().value == "-" then
-      self:consume()
-      local operand = self:primary()
+    local self_ = self --[[:! ParserState]]
+    if self_:peek().type == TK.OP and self_:peek().value == "-" then
+      self_:consume()
+      local operand = self_:primary()
       return { type = NT.UNOP, op = "-", operand = operand }
     end
-    return self:primary()
+    return self_:primary()
   end
 
   -- primary → NUM | STR | REF(range) | NAME(args) | ( expr )
   function p:primary()
-    local tk = self:peek()
+    local self_ = self --[[:! ParserState]]
+    local tk = self_:peek()
     if tk.type == TK.NUM then
-      self:consume()
+      self_:consume()
       return { type = NT.NUM, value = tk.value }
     elseif tk.type == TK.STR then
-      self:consume()
+      self_:consume()
       return { type = NT.STR, value = tk.value }
     elseif tk.type == TK.REF then
-      self:consume()
-      if tk.is_range then
+      self_:consume()
+      if (tk --[[: { type: string, is_range: boolean | nil, ... }]]).is_range then
         return { type = NT.RANGE, value = tk.value }
       else
         return { type = NT.REF, value = tk.value }
       end
     elseif tk.type == TK.NAME then
       -- Could be TRUE/FALSE literals or a function call
-      self:consume()
+      self_:consume()
       if tk.value == "TRUE" then
         return { type = NT.NUM, value = true }
       elseif tk.value == "FALSE" then
         return { type = NT.NUM, value = false }
       end
       -- function call
-      self:expect(TK.LPAREN)
+      self_:expect(TK.LPAREN)
       local args = {}
-      if self:peek().type ~= TK.RPAREN then
-        args[#args+1] = self:expr()
-        while self:peek().type == TK.COMMA do
-          self:consume()
-          args[#args+1] = self:expr()
+      if self_:peek().type ~= TK.RPAREN then
+        args[#args+1] = self_:expr()
+        while self_:peek().type == TK.COMMA do
+          self_:consume()
+          args[#args+1] = self_:expr()
         end
       end
-      self:expect(TK.RPAREN)
+      self_:expect(TK.RPAREN)
       return { type = NT.CALL, name = tk.value, args = args }
     elseif tk.type == TK.LPAREN then
-      self:consume()
-      local e = self:expr()
-      self:expect(TK.RPAREN)
+      self_:consume()
+      local e = self_:expr()
+      self_:expect(TK.RPAREN)
       return e
     else
       error("unexpected token: " .. tk.type .. " " .. tostring(tk.value))
     end
   end
 
-  return p
+  return p --[[:! ParserState]]
 end
 
 local function parse_formula(src)
@@ -390,6 +412,7 @@ end
 -- Built-in functions
 -- ---------------------------------------------------------------------------
 
+--: (any) -> (number | nil, string | nil)
 local function num_coerce(v)
   if type(v) == "number" then return v end
   if type(v) == "boolean" then return v and 1 or 0 end
@@ -420,7 +443,7 @@ local BUILTINS = {}
 
 BUILTINS.SUM = function(args)
   local vals = flatten(args)
-  local s = 0
+  local s = 0 --: number
   for _, v in ipairs(vals) do
     if is_error(v) then return v end
     if type(v) == "number" then s = s + v
@@ -433,8 +456,8 @@ end
 
 BUILTINS.AVERAGE = function(args)
   local vals = flatten(args)
-  local s = 0
-  local cnt = 0
+  local s = 0 --: number
+  local cnt = 0 --: number
   for _, v in ipairs(vals) do
     if is_error(v) then return v end
     if type(v) == "number" then s = s + v; cnt = cnt + 1
@@ -495,7 +518,8 @@ BUILTINS.ABS = function(args)
   if is_error(v) then return v end
   local n, e = num_coerce(v)
   if e then return e end
-  return math.abs(n)
+  local n_ = n --[[:! number]]
+  return math.abs(n_)
 end
 
 BUILTINS.ROUND = function(args)
@@ -504,14 +528,15 @@ BUILTINS.ROUND = function(args)
   if is_error(v) then return v end
   local n, e = num_coerce(v)
   if e then return e end
+  local n_ = n --[[:! number]]
   local digits = 0
   if args[2] ~= nil then
     local d, de = num_coerce(args[2])
     if de then return de end
-    digits = math.floor(d)
+    digits = math.floor(d --[[:! number]])
   end
   local factor = 10 ^ digits
-  return math.floor(n * factor + 0.5) / factor
+  return math.floor(n_ * factor + 0.5) / factor
 end
 
 BUILTINS.FLOOR = function(args)
@@ -520,7 +545,7 @@ BUILTINS.FLOOR = function(args)
   if is_error(v) then return v end
   local n, e = num_coerce(v)
   if e then return e end
-  return math.floor(n)
+  return math.floor(n --[[:! number]])
 end
 
 BUILTINS.CEILING = function(args)
@@ -529,17 +554,19 @@ BUILTINS.CEILING = function(args)
   if is_error(v) then return v end
   local n, e = num_coerce(v)
   if e then return e end
-  return math.ceil(n)
+  return math.ceil(n --[[:! number]])
 end
 
 BUILTINS.MOD = function(args)
   if #args ~= 2 then return ERR_VALUE end
   local a, ea = num_coerce(args[1])
   if ea then return ea end
+  local a_ = a --[[:! number]]
   local b, eb = num_coerce(args[2])
   if eb then return eb end
-  if b == 0 then return ERR_DIV0 end
-  return a % b
+  local b_ = b --[[:! number]]
+  if b_ == 0 then return ERR_DIV0 end
+  return a_ % b_
 end
 
 BUILTINS.POWER = function(args)
@@ -548,28 +575,30 @@ BUILTINS.POWER = function(args)
   if ea then return ea end
   local b, eb = num_coerce(args[2])
   if eb then return eb end
-  return a ^ b
+  return (a --[[:! number]]) ^ (b --[[:! number]])
 end
 
 BUILTINS.SQRT = function(args)
   if #args ~= 1 then return ERR_VALUE end
   local n, e = num_coerce(args[1])
   if e then return e end
-  if n < 0 then return ERR_VALUE end
-  return math.sqrt(n)
+  local n_ = n --[[:! number]]
+  if n_ < 0 then return ERR_VALUE end
+  return math.sqrt(n_)
 end
 
 BUILTINS.LOG = function(args)
   if #args < 1 then return ERR_VALUE end
   local n, e = num_coerce(args[1])
   if e then return e end
-  if n <= 0 then return ERR_VALUE end
+  local n_ = n --[[:! number]]
+  if n_ <= 0 then return ERR_VALUE end
   if args[2] ~= nil then
     local b, be = num_coerce(args[2])
     if be then return be end
-    return math.log(n) / math.log(b)
+    return math.log(n_) / math.log(b --[[:! number]])
   end
-  return math.log(n) / math.log(10)
+  return math.log(n_) / math.log(10)
 end
 
 BUILTINS.IF = function(args)
@@ -637,22 +666,22 @@ end
 BUILTINS.LEFT = function(args)
   if #args < 1 then return ERR_VALUE end
   local s = tostring(args[1])
-  local n = args[2] and math.floor(tonumber(args[2]) or 1) or 1
+  local n = math.floor(tonumber(args[2]) or 1) --[[:! integer]]
   return s:sub(1, n)
 end
 
 BUILTINS.RIGHT = function(args)
   if #args < 1 then return ERR_VALUE end
   local s = tostring(args[1])
-  local n = args[2] and math.floor(tonumber(args[2]) or 1) or 1
+  local n = math.floor(tonumber(args[2]) or 1) --[[:! integer]]
   return s:sub(-n)
 end
 
 BUILTINS.MID = function(args)
   if #args < 3 then return ERR_VALUE end
   local s = tostring(args[1])
-  local start = math.floor(tonumber(args[2]) or 1)
-  local len = math.floor(tonumber(args[3]) or 0)
+  local start = math.floor(tonumber(args[2]) or 1) --[[:! integer]]
+  local len = math.floor(tonumber(args[3]) or 0) --[[:! integer]]
   return s:sub(start, start + len - 1)
 end
 
@@ -691,17 +720,18 @@ BUILTINS.VLOOKUP = function(args)
   if #args < 3 then return ERR_VALUE end
   local lookup = args[1]
   local range_arg = args[2]
-  local col_idx = math.floor(tonumber(args[3]) or 1)
+  local col_idx = math.floor(tonumber(args[3]) or 1) --[[:! integer]]
   local exact = args[4]
   if exact == nil then exact = true end
   if type(exact) == "number" then exact = exact ~= 0 end
 
-  if not (type(range_arg) == "table" and range_arg.__range) then
+  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: any, ... }]]).__range) then
     return ERR_VALUE
   end
+  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (any, string) -> any, ... }, values: { [integer]: any } }]]
 
-  local rng = range_arg.range
-  local sheet = range_arg.sheet
+  local rng = range_arg_.range
+  local sheet = range_arg_.sheet
 
   -- Build rows: each row is values from c1..c2 for a given row
   for r = rng.r1, rng.r2 do
@@ -723,7 +753,7 @@ BUILTINS.VLOOKUP = function(args)
       local target_col = rng.c1 + col_idx - 1
       if target_col > rng.c2 then return ERR_REF end
       local target_key = cell_key(num_to_col(target_col), r)
-      return sheet:get(target_key)
+      return sheet:get(target_key)  -- luacheck: ignore
     end
   end
   return ERR_NA
@@ -733,15 +763,16 @@ end
 BUILTINS.INDEX = function(args)
   if #args < 2 then return ERR_VALUE end
   local range_arg = args[1]
-  if not (type(range_arg) == "table" and range_arg.__range) then
+  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: any, ... }]]).__range) then
     return ERR_VALUE
   end
-  local rng = range_arg.range
-  local sheet = range_arg.sheet
-  local row_idx = math.floor(tonumber(args[2]) or 1)
-  local col_idx = args[3] and math.floor(tonumber(args[3]) or 1) or 1
-  local r = rng.r1 + row_idx - 1
-  local c = rng.c1 + col_idx - 1
+  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (any, string) -> any, ... }, values: { [integer]: any } }]]
+  local rng = range_arg_.range
+  local sheet = range_arg_.sheet
+  local row_idx = math.floor(tonumber(args[2]) or 1) --[[:! integer]]
+  local col_idx = math.floor(tonumber(args[3]) or 1) --[[:! integer]]
+  local r = rng.r1 + row_idx - 1 --[[:! integer]]
+  local c = rng.c1 + col_idx - 1 --[[:! integer]]
   if r > rng.r2 or c > rng.c2 then return ERR_REF end
   return sheet:get(cell_key(num_to_col(c), r))
 end
@@ -751,12 +782,12 @@ BUILTINS.MATCH = function(args)
   if #args < 2 then return ERR_VALUE end
   local lookup = args[1]
   local range_arg = args[2]
-  if not (type(range_arg) == "table" and range_arg.__range) then
+  if not (type(range_arg) == "table" and (range_arg --[[:! { __range: any, ... }]]).__range) then
     return ERR_VALUE
   end
-  local rng = range_arg.range
-  local sheet = range_arg.sheet
-  local vals = range_arg.values
+  local range_arg_ = range_arg --[[:! { range: { r1: integer, c1: integer, r2: integer, c2: integer }, sheet: { get: (any, string) -> any, ... }, values: { [integer]: any } }]]
+  local rng = range_arg_.range
+  local vals = range_arg_.values
   for i, v in ipairs(vals) do
     if v == lookup then return i end
   end
@@ -769,58 +800,60 @@ end
 
 -- Evaluate an AST node given a sheet context
 -- Returns a value or an error string
+--: (SpreadNode, any, { [string]: boolean } | nil) -> any
 local function eval_node(node, sheet, visiting)
+  local sheet_ = sheet --[[:! { _max_rows: integer, _max_cols: integer, _get_computed: (any, string, any) -> any, ... }]]
   if node.type == NT.NUM then
     return node.value
   elseif node.type == NT.STR then
     return node.value
   elseif node.type == NT.REF then
-    local ref_str = node.value
+    local ref_str = (node.value --[[:! string]])
     -- Strip $ signs to get canonical ref
     local clean = ref_str:gsub("%$", "")
     local col_str, row_num = clean:match("^([A-Za-z]+)(%d+)$")
     if not col_str then return ERR_REF end
     col_str = col_str:upper()
-    row_num = tonumber(row_num)
+    row_num = tonumber(row_num --[[:! string]]) --[[:! integer]]
     -- bounds check
-    if row_num < 1 or row_num > sheet._max_rows then return ERR_REF end
+    if row_num < 1 or row_num > sheet_._max_rows then return ERR_REF end
     local c = col_to_num(col_str)
-    if c < 1 or c > sheet._max_cols then return ERR_REF end
+    if c < 1 or c > sheet_._max_cols then return ERR_REF end
     local key = cell_key(col_str, row_num)
-    return sheet:_get_computed(key, visiting)
+    return sheet_:_get_computed(key, visiting)
   elseif node.type == NT.RANGE then
-    local rng = parse_range(node.value)
+    local rng = parse_range(node.value --[[:! string]])
     if not rng then return ERR_REF end
     -- bounds check
-    if rng.r1 < 1 or rng.r2 > sheet._max_rows or
-       rng.c1 < 1 or rng.c2 > sheet._max_cols then
+    if rng.r1 < 1 or rng.r2 > sheet_._max_rows or
+       rng.c1 < 1 or rng.c2 > sheet_._max_cols then
       return ERR_REF
     end
     local vals = {}
     for r = rng.r1, rng.r2 do
       for c = rng.c1, rng.c2 do
         local key = cell_key(num_to_col(c), r)
-        local v = sheet:_get_computed(key, visiting)
+        local v = sheet_:_get_computed(key, visiting)
         vals[#vals+1] = v
       end
     end
     return { __range = true, values = vals, range = rng, sheet = sheet }
   elseif node.type == NT.UNOP then
-    local v = eval_node(node.operand, sheet, visiting)
+    local v = eval_node(node.operand --[[:! SpreadNode]], sheet, visiting)
     if is_error(v) then return v end
     if node.op == "-" then
       local n, e = num_coerce(v)
       if e then return e end
-      return -n
+      return -(n --[[:! number]])
     end
     return v
   elseif node.type == NT.BINOP then
-    local op = node.op
-    local lv = eval_node(node.left, sheet, visiting)
-    local rv = eval_node(node.right, sheet, visiting)
+    local op = node.op --[[:! string]]
+    local lv = eval_node(node.left --[[:! SpreadNode]], sheet, visiting)
+    local rv = eval_node(node.right --[[:! SpreadNode]], sheet, visiting)
     -- ranges aren't valid in binary ops (except &)
-    if type(lv) == "table" and lv.__range then lv = ERR_VALUE end
-    if type(rv) == "table" and rv.__range then rv = ERR_VALUE end
+    if type(lv) == "table" and (lv --[[:! { __range: any, ... }]]).__range then lv = ERR_VALUE end
+    if type(rv) == "table" and (rv --[[:! { __range: any, ... }]]).__range then rv = ERR_VALUE end
 
     if op == "&" then
       if is_error(lv) then return lv end
@@ -835,52 +868,53 @@ local function eval_node(node, sheet, visiting)
       if ea then return ea end
       local b, eb = num_coerce(rv)
       if eb then return eb end
-      return a + b
+      return (a --[[:! number]]) + (b --[[:! number]])
     elseif op == "-" then
       local a, ea = num_coerce(lv)
       if ea then return ea end
       local b, eb = num_coerce(rv)
       if eb then return eb end
-      return a - b
+      return (a --[[:! number]]) - (b --[[:! number]])
     elseif op == "*" then
       local a, ea = num_coerce(lv)
       if ea then return ea end
       local b, eb = num_coerce(rv)
       if eb then return eb end
-      return a * b
+      return (a --[[:! number]]) * (b --[[:! number]])
     elseif op == "/" then
       local a, ea = num_coerce(lv)
       if ea then return ea end
       local b, eb = num_coerce(rv)
       if eb then return eb end
-      if b == 0 then return ERR_DIV0 end
-      return a / b
+      local b_ = b --[[:! number]]
+      if b_ == 0 then return ERR_DIV0 end
+      return (a --[[:! number]]) / b_
     elseif op == "^" then
       local a, ea = num_coerce(lv)
       if ea then return ea end
       local b, eb = num_coerce(rv)
       if eb then return eb end
-      return a ^ b
+      return (a --[[:! number]]) ^ (b --[[:! number]])
     elseif op == "=" then
       return lv == rv
     elseif op == "<>" then
       return lv ~= rv
     elseif op == "<" then
-      return lv < rv
+      return (lv --[[: any]]) < (rv --[[: any]])
     elseif op == ">" then
-      return lv > rv
+      return (lv --[[: any]]) > (rv --[[: any]])
     elseif op == "<=" then
-      return lv <= rv
+      return (lv --[[: any]]) <= (rv --[[: any]])
     elseif op == ">=" then
-      return lv >= rv
+      return (lv --[[: any]]) >= (rv --[[: any]])
     end
     return ERR_VALUE
   elseif node.type == NT.CALL then
-    local fn = BUILTINS[node.name]
+    local fn = BUILTINS[node.name --[[:! string]]]
     if not fn then return ERR_NAME end
     -- evaluate args
     local evaled = {}
-    for _, arg in ipairs(node.args) do
+    for _, arg in ipairs(node.args --[[:! { [integer]: SpreadNode }]]) do
       local v = eval_node(arg, sheet, visiting)
       evaled[#evaled+1] = v
     end
@@ -896,12 +930,13 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Collect all cell references (not ranges) and ranges from an AST
+--: (SpreadNode, { [string]: boolean }) -> ()
 local function collect_deps(node, deps)
   if node.type == NT.REF then
-    local clean = node.value:gsub("%$", ""):upper()
+    local clean = (node.value --[[:! string]]):gsub("%$", ""):upper()
     deps[clean] = true
   elseif node.type == NT.RANGE then
-    local rng = parse_range(node.value:gsub("%$", ""):upper())
+    local rng = parse_range((node.value --[[:! string]]):gsub("%$", ""):upper())
     if rng then
       for r = rng.r1, rng.r2 do
         for c = rng.c1, rng.c2 do
@@ -911,12 +946,12 @@ local function collect_deps(node, deps)
       end
     end
   elseif node.type == NT.BINOP then
-    collect_deps(node.left, deps)
-    collect_deps(node.right, deps)
+    collect_deps(node.left --[[:! SpreadNode]], deps)
+    collect_deps(node.right --[[:! SpreadNode]], deps)
   elseif node.type == NT.UNOP then
-    collect_deps(node.operand, deps)
+    collect_deps(node.operand --[[:! SpreadNode]], deps)
   elseif node.type == NT.CALL then
-    for _, arg in ipairs(node.args) do
+    for _, arg in ipairs(node.args --[[:! { [integer]: SpreadNode }]]) do
       collect_deps(arg, deps)
     end
   end
@@ -926,21 +961,25 @@ end
 -- Sheet object
 -- ---------------------------------------------------------------------------
 
+--:: SheetType = { _cells: { [string]: any }, _dependents: { [string]: { [string]: boolean } }, _max_rows: integer, _max_cols: integer, _invalidate: (SheetType, string, { [string]: boolean } | nil) -> (), _get_computed: (SheetType, string, { [string]: boolean } | nil) -> any, set: (SheetType, string, any) -> (boolean | nil, string | nil), get: (SheetType, string) -> any, range: (SheetType, string) -> any, set_range: (SheetType, string, any) -> any, to_csv: (SheetType) -> string, from_csv: (SheetType, string) -> any, ... }
+
 local Sheet = {}
 Sheet.__index = Sheet
 
+--: (SheetType, string, { [string]: boolean } | nil) -> ()
 function Sheet:_invalidate(key, seen)
+  local self_ = self --[[:! SheetType]]
   seen = seen or {}
   if seen[key] then return end
   seen[key] = true
   -- Mark this cell's cached value as dirty
-  local cell = self._cells[key]
-  if cell then cell.dirty = true end
+  local cell = self_._cells[key]
+  if cell then (cell --[[:! { dirty: boolean, ... }]]).dirty = true end
   -- Propagate to dependents
-  local dependents = self._dependents[key]
+  local dependents = self_._dependents[key]
   if dependents then
     for dep_key in pairs(dependents) do
-      self:_invalidate(dep_key, seen)
+      self_:_invalidate(dep_key --[[:! string]], seen)
     end
   end
 end
@@ -962,20 +1001,21 @@ function Sheet:_get_computed(key, visiting)
   end
   -- Recompute
   visiting[key] = true
-  local result = eval_node(cell.ast, self, visiting)
+  local result = eval_node(cell.ast --[[:! SpreadNode]], self, visiting)
   visiting[key] = nil
   cell.cached = result
   cell.dirty = false
   return result
 end
 
+--: (any, string, any) -> (boolean | nil, string | nil)
 function Sheet:set(ref, value)
   -- Normalize ref (strip $ for key)
   local clean = ref:gsub("%$", ""):upper()
   -- Validate
   local col_str, row_num = clean:match("^([A-Za-z]+)(%d+)$")
   if not col_str then return nil, "invalid cell reference: " .. ref end
-  row_num = tonumber(row_num)
+  row_num = tonumber(row_num --[[:! string]]) --[[:! integer]]
   local col_num = col_to_num(col_str)
   if row_num < 1 or row_num > self._max_rows then return nil, ERR_REF end
   if col_num < 1 or col_num > self._max_cols then return nil, ERR_REF end
@@ -1002,7 +1042,7 @@ function Sheet:set(ref, value)
                cached = ERR_NAME, parse_err = true }
     else
       local deps = {}
-      collect_deps(ast, deps)
+      collect_deps(ast --[[:! SpreadNode]], deps)
       cell = { formula = formula_src, ast = ast, deps = deps, dirty = true, cached = nil }
     end
   else
@@ -1031,12 +1071,13 @@ function Sheet:get(ref)
   local clean = ref:gsub("%$", ""):upper()
   local col_str, row_num = clean:match("^([A-Za-z]+)(%d+)$")
   if not col_str then return nil end
-  row_num = tonumber(row_num)
+  row_num = tonumber(row_num --[[:! string]])
   if not row_num then return nil end
-  local key = cell_key(col_str, row_num)
+  local key = cell_key(col_str, row_num --[[:! integer]])
   return self:_get_computed(key)
 end
 
+--: (any, string) -> ({ [integer]: { row: integer, col: integer, value: any } } | nil, string | nil)
 function Sheet:range(ref_range)
   local rng = parse_range(ref_range:gsub("%$", ""):upper())
   if not rng then return nil, "invalid range: " .. ref_range end
@@ -1051,6 +1092,7 @@ function Sheet:range(ref_range)
   return out
 end
 
+--: (any, string, { [integer]: any }) -> (boolean | nil, string | nil)
 function Sheet:set_range(ref_range, values_array)
   local rng = parse_range(ref_range:gsub("%$", ""):upper())
   if not rng then return nil, "invalid range: " .. ref_range end
@@ -1074,11 +1116,12 @@ local function csv_escape(v)
   if v == nil then return "" end
   local s = tostring(v)
   if s:find('[,"\n\r]') then
-    s = '"' .. s:gsub('"', '""') .. '"'
+    s = '"' .. (s:gsub('"', '""') --[[: string]]) .. '"'
   end
   return s
 end
 
+--: (string) -> { [integer]: string }
 local function csv_parse_row(line)
   local fields = {}
   local i = 1
@@ -1118,14 +1161,16 @@ local function csv_parse_row(line)
   return fields
 end
 
+--: (SheetType) -> string
 function Sheet:to_csv()
+  local self_ = self --[[:! SheetType]]
   -- Find used extents
   local max_row = 0
   local max_col = 0
-  for key in pairs(self._cells) do
+  for key in pairs(self_._cells) do
     local col_str, row_num = key:match("^([A-Za-z]+)(%d+)$")
     if col_str then
-      local r = tonumber(row_num)
+      local r = tonumber(row_num --[[:! string]]) --[[:! integer]]
       local c = col_to_num(col_str)
       if r > max_row then max_row = r end
       if c > max_col then max_col = c end
@@ -1137,7 +1182,7 @@ function Sheet:to_csv()
     local row = {}
     for c = 1, max_col do
       local key = cell_key(num_to_col(c), r)
-      local val = self:_get_computed(key)
+      local val = self_:_get_computed(key)
       row[#row+1] = csv_escape(val)
     end
     lines[#lines+1] = table.concat(row, ",")
