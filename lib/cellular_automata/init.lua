@@ -9,7 +9,7 @@ end
 local M = {}
 M._tier = "pure"
 
-local bit = bit or require("bit")
+local bit = require("bit")
 local band, bor, rshift, lshift = bit.band, bit.bor, bit.rshift, bit.lshift
 
 -- ── 1D Elementary Cellular Automata (Wolfram rules) ────────────────────────
@@ -31,7 +31,7 @@ Rule1D.__index = Rule1D
 --- Initialize a row with a single live cell in the center.
 -- Returns an array of 0/1 values of length `width`.
 function Rule1D:init_single(width)
-  local row = {}
+  local row = {} --: { [integer]: integer }
   for i = 1, width do row[i] = 0 end
   row[math.floor(width / 2) + 1] = 1
   return row
