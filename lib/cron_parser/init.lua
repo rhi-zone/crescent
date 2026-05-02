@@ -40,6 +40,7 @@ local ALIASES = {
 
 -- Resolve a token that may be a name or number, within [min, max].
 -- Returns integer value or nil, errmsg.
+--: (string, integer, integer, { [string]: integer } | nil) -> (integer | nil, string | nil)
 local function resolve_value(token, min, max, names)
   local n = tonumber(token)
   if n then
@@ -61,25 +62,31 @@ end
 
 -- Expand a single segment (no commas) into a sorted set of values.
 -- Returns array or nil, errmsg.
+--: (string, integer, integer, { [string]: integer } | nil) -> ({ [integer]: integer } | nil, string | nil)
 local function expand_segment(seg, min, max, names)
   -- step suffix: anything/step or range/step
   local base, step_str = seg:match("^(.+)/(%d+)$")
-  local step = 1
+  local step = 1 --: integer
   if base then
-    step = tonumber(step_str)
-    if not step or step < 1 then
+    local step_n = tonumber(step_str)
+    if not step_n then
+      return nil, "invalid step in: " .. seg
+    end
+    step = math.floor(step_n)
+    if step < 1 then
       return nil, "invalid step in: " .. seg
     end
   else
     base = seg
   end
 
+  local base_s = base --[[:! string]]
   local from, to
-  if base == "*" then
+  if base_s == "*" then
     from = min
     to = max
   else
-    local a, b = base:match("^([^%-]+)%-([^%-]+)$")
+    local a, b = base_s:match("^([^%-]+)%-([^%-]+)$")
     if a then
       local va, ea = resolve_value(a, min, max, names)
       if not va then return nil, ea end
@@ -92,7 +99,7 @@ local function expand_segment(seg, min, max, names)
       to = vb
     else
       -- single value
-      local v, e = resolve_value(base, min, max, names)
+      local v, e = resolve_value(base_s, min, max, names)
       if not v then return nil, e end
       from = v
       to = v
@@ -109,6 +116,7 @@ end
 -- Parse a cron field string into a sorted, deduplicated array of integers.
 -- min and max are the inclusive bounds. names is optional table of name->int.
 -- Returns array or nil, errmsg.
+--: (string, integer, integer, { [string]: integer } | nil) -> ({ [integer]: integer } | nil, string | nil)
 function M.parse_field(field, min, max, names)
   if type(field) ~= "string" then
     return nil, "field must be a string"
@@ -139,6 +147,7 @@ end
 
 -- Returns fields table: {second?, minute, hour, dom, month, dow}
 -- or nil, errmsg.
+--: (string) -> (CronFields | nil, string | nil)
 local function parse_fields(expr)
   local parts = {}
   for p in expr:gmatch("%S+") do
@@ -151,7 +160,7 @@ local function parse_fields(expr)
   if #parts == 6 then
     -- 6-field: second minute hour dom month dow
     local s, e = M.parse_field(parts[1], 0, 59)
-    if not s then return nil, "second: " .. e end
+    if not s then return nil, "second: " .. (e or "?") end
     second_field = s
     off = 1
   elseif #parts == 5 then
@@ -161,24 +170,24 @@ local function parse_fields(expr)
   end
 
   local m, em = M.parse_field(parts[1 + off], 0, 59)
-  if not m then return nil, "minute: " .. em end
+  if not m then return nil, "minute: " .. (em or "?") end
   minute_f = m
 
   local h, eh = M.parse_field(parts[2 + off], 0, 23)
-  if not h then return nil, "hour: " .. eh end
+  if not h then return nil, "hour: " .. (eh or "?") end
   hour_f = h
 
   local dom, edom = M.parse_field(parts[3 + off], 1, 31)
-  if not dom then return nil, "day-of-month: " .. edom end
+  if not dom then return nil, "day-of-month: " .. (edom or "?") end
   dom_f = dom
 
   local mo, emo = M.parse_field(parts[4 + off], 1, 12, MONTH_NAMES)
-  if not mo then return nil, "month: " .. emo end
+  if not mo then return nil, "month: " .. (emo or "?") end
   month_f = mo
 
   -- DOW: 0-7 where both 0 and 7 = Sunday
   local dow_raw, edow = M.parse_field(parts[5 + off], 0, 7, DOW_NAMES)
-  if not dow_raw then return nil, "day-of-week: " .. edow end
+  if not dow_raw then return nil, "day-of-week: " .. (edow or "?") end
   -- Normalize 7 -> 0
   local dow_seen = {}
   local dow = {}
@@ -210,11 +219,18 @@ end
 -- Schedule object
 -- ---------------------------------------------------------------------------
 
+--:: DateFn = (string, integer) -> { year: integer, month: integer, day: integer, hour: integer, min: integer, sec: integer, wday: integer, ... }
+--:: CronFields = { minute: { [integer]: integer }, hour: { [integer]: integer }, dom: { [integer]: integer }, month: { [integer]: integer }, dow: { [integer]: integer }, second: { [integer]: integer } | nil }
+--:: Schedule = { fields: CronFields, _date_fn: DateFn, matches: (Schedule, integer) -> boolean, next: (Schedule, integer, integer | nil) -> integer | nil, prev: (Schedule, integer) -> integer | nil, range: (Schedule, integer, integer) -> { [integer]: integer }, describe: (Schedule) -> string, ... }
+
+
 local Schedule = {}
 Schedule.__index = Schedule
 
 -- Check whether a given Unix timestamp matches this schedule.
+--: (Schedule, integer) -> boolean
 function Schedule:matches(ts)
+  local self = self --[[:! Schedule]]
   local t = self._date_fn("*t", ts)
   -- Check month
   local month_ok = false
@@ -269,6 +285,7 @@ end
 
 -- Advance the timestamp to the start of the next minute (or second for 6-field).
 -- Used internally in next/prev search.
+--: (integer, boolean, DateFn) -> integer
 local function snap_forward(ts, has_seconds, date_fn)
   if has_seconds then
     return ts + 1
@@ -279,6 +296,7 @@ local function snap_forward(ts, has_seconds, date_fn)
   return ts - t.sec + 60
 end
 
+--: (integer, boolean, DateFn) -> integer
 local function snap_backward(ts, has_seconds, date_fn)
   if has_seconds then
     return ts - 1
@@ -297,19 +315,21 @@ end
 
 -- Find the n-th next occurrence after ts (exclusive).
 -- Returns timestamp or nil if not found within 4 years.
+--: (Schedule, integer, integer | nil) -> integer | nil
 function Schedule:next(ts, n)
+  local self = self --[[:! Schedule]]
   n = n or 1
   local has_sec = self.fields.second ~= nil
   local limit = ts + 4 * 365 * 24 * 3600
-  local cur = snap_forward(ts, has_sec, self._date_fn)
+  local cur = (snap_forward(ts, has_sec, self._date_fn) --[[:! integer]])
   local found = 0
   while cur <= limit do
     if self:matches(cur) then
       found = found + 1
       if found == n then return cur end
-      cur = snap_forward(cur, has_sec, self._date_fn)
+      cur = (snap_forward(cur, has_sec, self._date_fn) --[[:! integer]])
     else
-      cur = snap_forward(cur, has_sec, self._date_fn)
+      cur = (snap_forward(cur, has_sec, self._date_fn) --[[:! integer]])
     end
   end
   return nil
@@ -317,38 +337,35 @@ end
 
 -- Find the previous occurrence before ts (exclusive).
 -- Returns timestamp or nil if not found within 4 years.
+--: (Schedule, integer) -> integer | nil
 function Schedule:prev(ts)
+  local self = self --[[:! Schedule]]
   local has_sec = self.fields.second ~= nil
   local limit = ts - 4 * 365 * 24 * 3600
-  local cur = snap_backward(ts, has_sec, self._date_fn)
+  local cur = (snap_backward(ts, has_sec, self._date_fn) --[[:! integer]])
   while cur >= limit do
     if self:matches(cur) then
       return cur
     end
-    cur = snap_backward(cur, has_sec, self._date_fn)
+    cur = (snap_backward(cur, has_sec, self._date_fn) --[[:! integer]])
   end
   return nil
 end
 
 -- Return all matching timestamps in [start_ts, end_ts] inclusive.
+--: (Schedule, integer, integer) -> { [integer]: integer }
 function Schedule:range(start_ts, end_ts)
+  local self = self --[[:! Schedule]]
   local has_sec = self.fields.second ~= nil
-  local result = {}
+  local result = {} --[[:! { [integer]: integer }]]
   -- Snap start to a candidate boundary
   local t = self._date_fn("*t", start_ts)
-  local cur
-  if has_sec then
-    -- start at exact second
-    cur = start_ts - (start_ts % 1)  -- already integer
-  else
-    -- snap to start of current minute
-    cur = start_ts - t.sec
-  end
+  local cur = (has_sec and start_ts or start_ts - t.sec) --[[:! integer]]
   while cur <= end_ts do
     if cur >= start_ts and self:matches(cur) then
       result[#result + 1] = cur
     end
-    cur = snap_forward(cur, has_sec, self._date_fn)
+    cur = (snap_forward(cur, has_sec, self._date_fn) --[[:! integer]])
   end
   return result
 end
@@ -366,6 +383,7 @@ local DOW_NAMES_REV = {
   [0] = "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 }
 
+--: ({ [integer]: integer }, { [integer]: string } | nil, integer, integer) -> string | nil
 local function list_words(arr, names, full_range_min, full_range_max)
   if #arr == (full_range_max - full_range_min + 1) then
     return nil  -- means "every"
@@ -397,6 +415,7 @@ local function list_words(arr, names, full_range_min, full_range_max)
   return table.concat(out, ", ") .. " and " .. parts[#parts]
 end
 
+--: (integer) -> string
 local function ordinal(n)
   if n == 1 then return "1st"
   elseif n == 2 then return "2nd"
@@ -439,7 +458,9 @@ local function format_time(hour, min)
   return h .. ":" .. pad2(min) .. " " .. suffix
 end
 
+--: (Schedule) -> string
 function Schedule:describe()
+  local self = self --[[:! Schedule]]
   local f = self.fields
   local all_min   = #f.minute == 60
   local all_hour  = #f.hour == 24
@@ -464,15 +485,15 @@ function Schedule:describe()
 
   -- Multiple doms + all dow + single time
   if not all_dom and all_dow and #f.hour == 1 and #f.minute == 1 and all_month then
-    local dom_parts = {}
+    local dom_parts = {} --[[:! { [integer]: string }]]
     for _, v in ipairs(f.dom) do dom_parts[#dom_parts+1] = ordinal(v) end
-    local dom_str
+    local dom_str = "" --: string
     if #dom_parts == 1 then
       dom_str = dom_parts[1]
     elseif #dom_parts == 2 then
       dom_str = dom_parts[1] .. " and " .. dom_parts[2]
     else
-      local tmp = {}
+      local tmp = {} --[[:! { [integer]: string }]]
       for i = 1, #dom_parts - 1 do tmp[#tmp+1] = dom_parts[i] end
       dom_str = table.concat(tmp, ", ") .. " and " .. dom_parts[#dom_parts]
     end
@@ -560,7 +581,7 @@ function M.parse(expr, opts)
 
   local fields, err = parse_fields(expr)
   if not fields then
-    return nil, "invalid cron expression: " .. err
+    return nil, "invalid cron expression: " .. (err or "?")
   end
 
   local sched = setmetatable({ fields = fields, _date_fn = opts.date_fn }, Schedule)
