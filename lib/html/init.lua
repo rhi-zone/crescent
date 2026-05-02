@@ -26,7 +26,11 @@ local ESCAPE_MAP = {
 }
 
 --: (s: string) -> string
-local function escape(s) return s:gsub("[&<>\"']", ESCAPE_MAP) end
+local function escape(s)
+	local map = ESCAPE_MAP --[[:! { [string]: string }]]
+	local r, _ = s:gsub("[&<>\"']", map --[[: any]])
+	return r --[[:! string]]
+end
 M.escape = escape
 
 -- Attribute serialization -----------------------------------------------
@@ -49,36 +53,48 @@ end
 
 -- Normal element: attrs table with string keys as HTML attributes and
 -- integer keys as pre-rendered child strings.
+--: (tag: string) -> any
 local function element(tag)
-	return function(xs)
+	--: (xs: { [string]: unknown, [integer]: unknown } | string) -> string
+	local function f(xs)
 		if type(xs) == "string" then
-			return string.format("<%s>%s</%s>", tag, escape(xs), tag)
+			return string.format("<%s>%s</%s>", tag, escape(xs --[[:! string]]), tag)
 		end
-		local parts = { "<", tag, attrs_str(xs), ">" }
-		for i = 1, #xs do parts[#parts + 1] = xs[i] end
+		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
+		local parts = { "<", tag, attrs_str(xs_), ">" }
+		for i = 1, #xs_ do parts[#parts + 1] = xs_[i] --[[:! string]] end
 		parts[#parts + 1] = "</" .. tag .. ">"
 		return table.concat(parts)
 	end
+	return f
 end
 
 -- Raw element: children not escaped (for <script>, <style>).
+--: (tag: string) -> any
 local function raw_element(tag)
-	return function(xs)
+	--: (xs: { [string]: unknown, [integer]: unknown } | string) -> string
+	local function f(xs)
 		if type(xs) == "string" then
-			return string.format("<%s>%s</%s>", tag, xs, tag)
+			return string.format("<%s>%s</%s>", tag, xs --[[:! string]], tag)
 		end
-		local parts = { "<", tag, attrs_str(xs), ">" }
-		for i = 1, #xs do parts[#parts + 1] = xs[i] end
+		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
+		local parts = { "<", tag, attrs_str(xs_), ">" }
+		for i = 1, #xs_ do parts[#parts + 1] = xs_[i] --[[:! string]] end
 		parts[#parts + 1] = "</" .. tag .. ">"
 		return table.concat(parts)
 	end
+	return f
 end
 
 -- Void element: no children, self-closing.
+--: (tag: string) -> any
 local function void(tag)
-	return function(xs)
-		return "<" .. tag .. attrs_str(xs or {}) .. " />"
+	--: (xs: { [string]: unknown, [integer]: unknown } | nil) -> string
+	local function f(xs)
+		local xs_ = xs --[[:! { [string]: unknown, [integer]: unknown }]]
+		return "<" .. tag .. attrs_str(xs_ or {}) .. " />"
 	end
+	return f
 end
 
 M.element     = element
