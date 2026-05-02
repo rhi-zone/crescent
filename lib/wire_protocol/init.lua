@@ -20,9 +20,10 @@ local floor = math.floor
 
 -- Encode an unsigned integer into `n` bytes, big-endian.
 local function uint_to_be(v, n)
-  local t = {}
+  local t = {} --: { [integer]: string }
   for i = n, 1, -1 do
-    t[i] = char(v % 256)
+    local i_ = i --[[:! integer]]
+    t[i_] = char((v % 256) --[[:! integer]])
     v = floor(v / 256)
   end
   return concat(t)
@@ -30,9 +31,10 @@ end
 
 -- Encode an unsigned integer into `n` bytes, little-endian.
 local function uint_to_le(v, n)
-  local t = {}
+  local t = {} --: { [integer]: string }
   for i = 1, n do
-    t[i] = char(v % 256)
+    local i_ = i --[[:! integer]]
+    t[i_] = char((v % 256) --[[:! integer]])
     v = floor(v / 256)
   end
   return concat(t)
@@ -40,23 +42,25 @@ end
 
 -- Decode `n` bytes starting at `pos` as big-endian unsigned integer.
 -- Returns value, next_pos.
+--: (string, integer, integer) -> (integer, integer)
 local function be_to_uint(s, pos, n)
-  local v = 0
+  local v = 0 --: number
   for i = pos, pos + n - 1 do
-    v = v * 256 + byte(s, i)
+    v = v * 256 + (byte(s, i) or 0) --[[:! integer]]
   end
-  return v, pos + n
+  return floor(v) --[[:! integer]], pos + n
 end
 
 -- Decode `n` bytes starting at `pos` as little-endian unsigned integer.
+--: (string, integer, integer) -> (integer, integer)
 local function le_to_uint(s, pos, n)
-  local v = 0
-  local mul = 1
+  local v = 0 --: number
+  local mul = 1 --: number
   for i = pos, pos + n - 1 do
-    v = v + byte(s, i) * mul
+    v = v + (byte(s, i) or 0) --[[:! integer]] * mul
     mul = mul * 256
   end
-  return v, pos + n
+  return floor(v) --[[:! integer]], pos + n
 end
 
 -- ---------------------------------------------------------------------------
@@ -64,7 +68,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Encode an unsigned integer as a LEB128 varint.
---: (integer) -> string
+--: (integer) -> (string | nil, string | nil)
 function M.encode_varint(v)
   if v < 0 then return nil, "encode_varint: negative values not supported" end
   local t = {}
@@ -84,7 +88,7 @@ end
 --: (string, integer | nil) -> (integer | nil, integer | string)
 function M.decode_varint(s, pos)
   pos = pos or 1
-  local v = 0
+  local v = 0 --: number
   local shift = 0
   local len = #s
   local consumed = 0
@@ -92,7 +96,7 @@ function M.decode_varint(s, pos)
     if pos > len then
       return nil, "decode_varint: incomplete varint"
     end
-    local b = byte(s, pos)
+    local b = (byte(s, pos) or 0) --[[:! integer]]
     pos = pos + 1
     consumed = consumed + 1
     v = v + (b % 128) * (2 ^ shift)
@@ -102,7 +106,7 @@ function M.decode_varint(s, pos)
       return nil, "decode_varint: varint too large"
     end
   end
-  return floor(v), consumed
+  return floor(v) --[[:! integer]], consumed
 end
 
 -- ---------------------------------------------------------------------------
@@ -114,7 +118,7 @@ end
 -- s=string (consumes remaining bytes on unpack; packs as-is)
 
 --- Pack values into a binary string.
---: (string, ...unknown) -> string
+--: (string, ...unknown) -> (string | nil, string | nil)
 function M.pack(fmt, ...)
   local endian = "big"
   local i = 1
@@ -123,17 +127,17 @@ function M.pack(fmt, ...)
   end
   local args = {...}
   local ai = 1
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   local pi = 1
-  while i <= #fmt do
+  while (i --[[:! integer]]) <= #fmt do
     local c = sub(fmt, i, i)
     i = i + 1
-    local v = args[ai]; ai = ai + 1
+    local v = (args[ai] --[[:! number]]); ai = ai + 1
     if c == "B" then
-      parts[pi] = char(v % 256); pi = pi + 1
+      parts[pi] = char((v % 256) --[[:! integer]]); pi = pi + 1
     elseif c == "b" then
       if v < 0 then v = v + 256 end
-      parts[pi] = char(v % 256); pi = pi + 1
+      parts[pi] = char((v % 256) --[[:! integer]]); pi = pi + 1
     elseif c == "H" then
       if endian == "big" then parts[pi] = uint_to_be(v % 65536, 2)
       else parts[pi] = uint_to_le(v % 65536, 2) end
@@ -175,7 +179,8 @@ function M.pack(fmt, ...)
       end
       pi = pi + 1
     elseif c == "s" then
-      parts[pi] = tostring(v); pi = pi + 1
+      table.insert(parts, tostring(v))
+      pi = pi + 1
     else
       return nil, "pack: unknown format specifier '" .. c .. "'"
     end
@@ -193,58 +198,70 @@ function M.unpack(fmt, s)
   elseif sub(fmt, 1, 1) == "<" then endian = "little"; fi = 2
   end
   local pos = 1
-  local results = {}
+  local results = {} --: { [integer]: unknown }
   local ri = 1
-  while fi <= #fmt do
+  while (fi --[[:! integer]]) <= #fmt do
     local c = sub(fmt, fi, fi)
     fi = fi + 1
     if c == "B" then
-      results[ri] = byte(s, pos); pos = pos + 1; ri = ri + 1
+      results[ri] = (byte(s, pos) or 0) --[[:! integer]]; pos = pos + 1; ri = ri + 1
     elseif c == "b" then
-      local v = byte(s, pos); pos = pos + 1
+      local v = (byte(s, pos) or 0) --[[:! integer]]; pos = pos + 1
       if v >= 128 then v = v - 256 end
       results[ri] = v; ri = ri + 1
     elseif c == "H" then
-      local v
-      if endian == "big" then v, pos = be_to_uint(s, pos, 2)
-      else v, pos = le_to_uint(s, pos, 2) end
-      results[ri] = v; ri = ri + 1
+      local v = 0 --: integer
+      local npos = pos
+      if endian == "big" then v, npos = be_to_uint(s, pos, 2)
+      else v, npos = le_to_uint(s, pos, 2) end
+      pos = npos; results[ri] = v; ri = ri + 1
     elseif c == "h" then
-      local v
-      if endian == "big" then v, pos = be_to_uint(s, pos, 2)
-      else v, pos = le_to_uint(s, pos, 2) end
+      local v = 0 --: integer
+      local npos = pos
+      if endian == "big" then v, npos = be_to_uint(s, pos, 2)
+      else v, npos = le_to_uint(s, pos, 2) end
+      pos = npos
       if v >= 32768 then v = v - 65536 end
       results[ri] = v; ri = ri + 1
     elseif c == "I" then
-      local v
-      if endian == "big" then v, pos = be_to_uint(s, pos, 4)
-      else v, pos = le_to_uint(s, pos, 4) end
-      results[ri] = v; ri = ri + 1
+      local v = 0 --: integer
+      local npos = pos
+      if endian == "big" then v, npos = be_to_uint(s, pos, 4)
+      else v, npos = le_to_uint(s, pos, 4) end
+      pos = npos; results[ri] = v; ri = ri + 1
     elseif c == "i" then
-      local v
-      if endian == "big" then v, pos = be_to_uint(s, pos, 4)
-      else v, pos = le_to_uint(s, pos, 4) end
-      if v >= 2147483648 then v = v - 4294967296 end
+      local v = 0 --: integer
+      local npos = pos
+      if endian == "big" then v, npos = be_to_uint(s, pos, 4)
+      else v, npos = le_to_uint(s, pos, 4) end
+      pos = npos
+      if v >= 2147483648 then v = (v - 4294967296) --[[:! integer]] end
       results[ri] = v; ri = ri + 1
     elseif c == "Q" then
-      local hi, lo
+      local hi = 0 --: integer
+      local lo = 0 --: integer
+      local npos = pos
       if endian == "big" then
-        hi, pos = be_to_uint(s, pos, 4)
-        lo, pos = be_to_uint(s, pos, 4)
+        hi, npos = be_to_uint(s, pos, 4)
+        lo, npos = be_to_uint(s, npos, 4)
       else
-        lo, pos = le_to_uint(s, pos, 4)
-        hi, pos = le_to_uint(s, pos, 4)
+        lo, npos = le_to_uint(s, pos, 4)
+        hi, npos = le_to_uint(s, npos, 4)
       end
+      pos = npos
       results[ri] = hi * 4294967296 + lo; ri = ri + 1
     elseif c == "q" then
-      local hi, lo
+      local hi = 0 --: integer
+      local lo = 0 --: integer
+      local npos = pos
       if endian == "big" then
-        hi, pos = be_to_uint(s, pos, 4)
-        lo, pos = be_to_uint(s, pos, 4)
+        hi, npos = be_to_uint(s, pos, 4)
+        lo, npos = be_to_uint(s, npos, 4)
       else
-        lo, pos = le_to_uint(s, pos, 4)
-        hi, pos = le_to_uint(s, pos, 4)
+        lo, npos = le_to_uint(s, pos, 4)
+        hi, npos = le_to_uint(s, npos, 4)
       end
+      pos = npos
       local v = hi * 4294967296 + lo
       if hi >= 2147483648 then v = v - 2^64 end
       results[ri] = v; ri = ri + 1
@@ -268,10 +285,10 @@ end
 -- opts.include_length: whether length field includes itself (default false)
 function M.length_prefixed(opts)
   opts = opts or {}
-  local lsz = opts.length_size or 4
+  local lsz = (opts.length_size or 4) --[[:! integer]]
   local endian = opts.endian or "big"
-  local max_size = opts.max_frame_size or (4 * 1024 * 1024)
-  local include_length = opts.include_length or false
+  local max_size = (opts.max_frame_size or (4 * 1024 * 1024)) --[[:! integer]]
+  local include_length = (opts.include_length or false) --[[:! boolean]]
 
   if lsz ~= 1 and lsz ~= 2 and lsz ~= 4 and lsz ~= 8 then
     error("length_prefixed: length_size must be 1, 2, 4, or 8")
@@ -302,7 +319,8 @@ function M.length_prefixed(opts)
     if #s < lsz then
       return nil, "decode: not enough data for length header"
     end
-    local length_val, next_pos
+    local length_val = 0 --: integer
+    local next_pos = 1 --: integer
     if endian == "big" then
       length_val, next_pos = be_to_uint(s, 1, lsz)
     else
@@ -336,7 +354,8 @@ function M.length_prefixed(opts)
       local buf = self._buf
       while true do
         if #buf < lsz then break end
-        local length_val, next_pos
+        local length_val = 0 --: integer
+        local next_pos = 1 --: integer
         if endian == "big" then
           length_val, next_pos = be_to_uint(buf, 1, lsz)
         else
@@ -377,8 +396,8 @@ end
 -- opts.strip_delimiter: whether to strip delimiter from decoded payload (default true)
 function M.delimited(opts)
   opts = opts or {}
-  local delim = opts.delimiter or "\n"
-  local max_size = opts.max_frame_size or (64 * 1024)
+  local delim = (opts.delimiter or "\n") --[[:! string]]
+  local max_size = (opts.max_frame_size or (64 * 1024)) --[[:! integer]]
   local strip = opts.strip_delimiter
   if strip == nil then strip = true end
 
@@ -400,12 +419,14 @@ function M.delimited(opts)
     if not dstart then
       return nil, "decode: delimiter not found"
     end
-    local payload_end = strip and (dstart - 1) or dend
+    local dstart_ = dstart --[[:! integer]]
+    local dend_ = dend --[[:! integer]]
+    local payload_end = strip and (dstart_ - 1) or dend_
     local payload = sub(s, 1, payload_end)
     if #payload > max_size then
       return nil, "decode: frame too large"
     end
-    return payload, sub(s, dend + 1)
+    return payload, sub(s, dend_ + 1)
   end
 
   --- Create a stateful streaming decoder.
@@ -423,7 +444,9 @@ function M.delimited(opts)
       while true do
         local dstart, dend = find(buf, delim, 1, true)
         if not dstart then break end
-        local payload_end = strip and (dstart - 1) or dend
+        local dstart_ = dstart --[[:! integer]]
+        local dend_ = dend --[[:! integer]]
+        local payload_end = strip and (dstart_ - 1) or dend_
         local payload = sub(buf, 1, payload_end)
         if #payload > max_size then
           self._buf = buf
@@ -431,7 +454,7 @@ function M.delimited(opts)
         end
         msgs[mi] = payload
         mi = mi + 1
-        buf = sub(buf, dend + 1)
+        buf = sub(buf, dend_ + 1)
       end
       self._buf = buf
       return msgs
@@ -452,11 +475,12 @@ end
 -- opts.pad: byte value to pad with (default 0)
 function M.fixed(opts)
   opts = opts or {}
-  local sz = opts.size
-  if not sz or sz < 1 then
+  local sz_raw = opts.size
+  if not sz_raw or (sz_raw --[[:! number]]) < 1 then
     error("fixed: size must be a positive integer")
   end
-  local pad_byte = opts.pad or 0
+  local sz = sz_raw --[[:! integer]]
+  local pad_byte = (opts.pad or 0) --[[:! integer]]
 
   local codec = {}
 
@@ -537,15 +561,15 @@ end
 -- opts.max_frame_size: max value size (default 64KB)
 function M.tlv(opts)
   opts = opts or {}
-  local tsz = opts.type_size or 1
-  local lsz = opts.length_size or 2
+  local tsz = (opts.type_size or 1) --[[:! integer]]
+  local lsz = (opts.length_size or 2) --[[:! integer]]
   local endian = opts.endian or "big"
-  local max_size = opts.max_frame_size or (64 * 1024)
+  local max_size = (opts.max_frame_size or (64 * 1024)) --[[:! integer]]
 
   local codec = {}
 
   --- Encode a TLV frame.
-  --: (integer, string) -> (string | nil, string)
+  --: (any, integer, string) -> (string | nil, string)
   function codec:encode(type_id, value)
     local vlen = #value
     if vlen > max_size then
@@ -569,7 +593,8 @@ function M.tlv(opts)
     if #s < header_size then
       return nil, "decode: not enough data for TLV header"
     end
-    local type_id, vlen
+    local type_id = 0 --: integer
+    local vlen = 0 --: integer
     if endian == "big" then
       type_id = (be_to_uint(s, 1, tsz))
       vlen = (be_to_uint(s, tsz + 1, lsz))
@@ -594,66 +619,84 @@ end
 -- Framer: encodes and buffers outgoing frames
 -- ---------------------------------------------------------------------------
 
+--:: FramerCodec = { encode: (FramerCodec, any) -> (string | nil, string | nil), ... }
+--:: Framer = { _codec: FramerCodec, _pending: { [integer]: string }, ... }
 --- Wrap a codec in a framer that buffers encoded output.
---: (codec: { encode: (any, any) -> (string | nil, string | nil), ... }) -> { write: (any, any) -> (boolean | nil, string | nil), pending: (any) -> string, flush: (any) -> string, ... }
+--: (codec: FramerCodec) -> Framer
 function M.framer(codec)
-  local fr = { _codec = codec, _pending = {} }
+  local fr = {} --[[: any]]
+  local fr_ = fr --[[:! Framer]]
+  fr_._codec = codec
+  fr_._pending = {}
 
   --- Encode a message and buffer it.
-  function fr:write(msg)
-    local frame, err = self._codec:encode(msg)
+  function fr_:write(msg)
+    local s = self --[[:! Framer]]
+    local frame, err = s._codec:encode(msg)
     if not frame then return nil, err end
-    self._pending[#self._pending + 1] = frame
+    s._pending[#s._pending + 1] = frame
     return true
   end
 
   --- Return all buffered bytes as a single string (without clearing).
-  function fr:pending()
-    return concat(self._pending)
+  function fr_:pending()
+    local s = self --[[:! Framer]]
+    return concat(s._pending)
   end
 
   --- Return and clear all buffered bytes.
-  function fr:flush()
-    local out = concat(self._pending)
-    self._pending = {}
+  function fr_:flush()
+    local s = self --[[:! Framer]]
+    local out = concat(s._pending)
+    s._pending = {}
     return out
   end
 
-  return fr
+  return fr_
 end
 
 -- ---------------------------------------------------------------------------
 -- Receiver: stateful incremental message reader
 -- ---------------------------------------------------------------------------
 
+--:: ReceiverDec = { feed: (ReceiverDec, string) -> nil, messages: (ReceiverDec) -> ({ [integer]: string } | nil, string | nil), ... }
+--:: Receiver = { _dec: ReceiverDec, _queue: { [integer]: string }, _head: integer, ... }
 --- Wrap a codec's decoder in a receiver with has_message/next interface.
---: (codec: { decoder: (any) -> { feed: (any, string) -> nil, messages: (any) -> (string[] | nil, string | nil), ... }, ... }) -> { feed: (any, string) -> (boolean | nil, string | nil), has_message: (any) -> boolean, next: (any) -> string | nil, ... }
+--: (codec: { decoder: (any) -> ReceiverDec, ... }) -> Receiver
 function M.receiver(codec)
-  local dec = codec:decoder()
-  local rv = { _dec = dec, _queue = {}, _head = 1 }
+  local dec = codec:decoder() --[[:! ReceiverDec]]
+  local rv = {} --[[: any]]
+  local rv_ = rv --[[:! Receiver]]
+  rv_._dec = dec
+  rv_._queue = {}
+  rv_._head = 1
 
   --- Feed bytes into the receiver.
-  function rv:feed(data)
-    self._dec:feed(data)
-    local msgs, err = self._dec:messages()
+  function rv_:feed(data)
+    local s = self --[[:! Receiver]]
+    s._dec:feed(data)
+    local msgs, err = s._dec:messages()
     if not msgs then return nil, err end
-    for i = 1, #msgs do
-      self._queue[#self._queue + 1] = msgs[i]
+    local msgs_ = msgs --[[:! { [integer]: string }]]
+    for i = 1, #msgs_ do
+      s._queue[#s._queue + 1] = msgs_[i]
     end
     return true
   end
 
   --- Returns true if at least one complete message is available.
-  function rv:has_message()
-    return self._head <= #self._queue
+  function rv_:has_message()
+    local s = self --[[:! Receiver]]
+    return s._head <= #s._queue
   end
 
   --- Return the next complete message (or nil if none).
-  function rv:next()
-    if self._head > #self._queue then return nil end
-    local msg = self._queue[self._head]
-    self._queue[self._head] = nil
-    self._head = self._head + 1
+  function rv_:next()
+    local s = self --[[:! Receiver]]
+    if s._head > #s._queue then return nil end
+    local msg = s._queue[s._head]
+    s._queue[s._head] = nil --[[: any]]
+    s._head = s._head + 1
     return msg
   end
 
