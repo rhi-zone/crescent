@@ -63,6 +63,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/git/` — Git protocol/repository operations (2154 lines). Status: wip (no test file).
 - `lib/github/` — GitHub REST API client. Status: stable.
 - `lib/http/` — HTTP server/client. Status: stable.
+- `lib/http_static/` — static file server with CORS headers, pre-compressed file support (.gz/.br), and optional path-prefix stripping. Wraps `lib/http/router/static_full`. Status: stable.
 - `lib/https/` — HTTPS layer. Status: wip.
 - `lib/imap/` — IMAP RFC 9051 format/parser. Status: wip (no init.lua, no test).
 - `lib/inotify/` — Linux inotify FFI. Status: wip (no test).
@@ -377,6 +378,9 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/dynamic_library/` — dynamic library loading. Status: wip.
 - `lib/env/` — environment variable access (capability-injected). Status: stable.
 - `lib/env_schema/` — typed env var schema validation. Status: stable.
+- `lib/cloc/` — count lines of code/comments/blank by language extension; capability-injected I/O. Status: stable.
+- `lib/expand_c/` — C macro expansion via `cc -E`; capability-injected popen. Status: stable.
+- `lib/find_cli/` — filesystem search with predicate DSL (name, size, age, bool combinators); capability-injected walk and time. Status: stable.
 - `lib/fs/` — filesystem ops. Status: stable.
 - `lib/linux/` — Linux /proc parsing (no init.lua). Status: wip.
 - `lib/path/` — cross-platform path string ops (no I/O). Status: stable.
@@ -405,6 +409,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/midi/` — Standard MIDI File parser/encoder. Status: stable.
 - `lib/network_sim/` — network simulator (deterministic LCG). Status: stable.
 - `lib/solitaire/` — headless Klondike engine. Status: stable.
+- `lib/solitaire_cli/` — interactive CLI renderer and runner for Klondike Solitaire; wraps `lib/solitaire` with injected I/O. Status: stable.
 - `lib/state/`, `lib/state_machine/`, `lib/statemachine/`, `lib/state_machine_hsm/`, `lib/fsm/` — FSM/HSM family (5 parallel-ish impls; `state_machine_hsm` and `statemachine` are HSM/Harel charts; others are flat). Status: stable.
 - `lib/steering/` — Reynolds-style 2D steering behaviors. Status: stable.
 - `lib/tilemap/` — tilemap. Status: stable.
