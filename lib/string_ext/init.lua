@@ -202,6 +202,7 @@ end
 
 --- Split s by separator sep. plain=true for literal separator (default true).
 -- Returns array of strings. Empty parts are preserved.
+--: (string, string, boolean | nil) -> { [integer]: string }
 function M.split(s, sep, plain)
   if plain == nil then plain = true end
   local result = {}
@@ -219,6 +220,7 @@ function M.split(s, sep, plain)
 end
 
 --- Split s into at most n parts. The last part contains the remainder.
+--: (string, string, integer) -> { [integer]: string }
 function M.split_n(s, sep, n)
   local result = {}
   local i = 1
@@ -234,6 +236,7 @@ end
 
 --- Split s into lines, handling both \r\n and \n.
 -- A trailing newline produces a trailing empty string in the result.
+--: (string) -> { [integer]: string }
 function M.lines(s)
   local result = {}
   local i = 1
