@@ -135,6 +135,12 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+10)
+
+- [x] `lib/multipart/init.lua` (was 30 → now 0, commit 7f3731c) — HeaderMap/DispositionMap/Builder/Part/DecodedPart aliases; parse_header_line/parse_disposition/gen_boundary annotated; find() return casts; phi-join pos cast; multi-return annotation (T|nil, string|nil); table.insert avoids t[i] assignment type issue
+- [x] `lib/smtp/init.lua` (was 25 → now 0, commit cf6d22f) — SmtpSession with all method sigs; SmtpAuth/SmtpOpts/SmtpAddr/SmtpMsg aliases; self_ casts in all methods; base64_decode decode/out tables; table.insert avoids integer-to-string assignment issue
+- [x] `lib/wire_protocol/init.lua` (was 93 → now 0, commit 342e2a6) — be_to_uint/le_to_uint annotated; byte() casts; pack/unpack fixes; length_prefixed/delimited/fixed/tlv opts casts; Framer/Receiver type aliases; method annotation self param
+
 ## Done in current session (session N+9)
 
 - [x] `lib/yaml/init.lua` (was 42 → now 0, commit 0879e05) — stub initializers for forward-declared parse fns; annotated skip_empty_lines/current_indent/parse_double_quoted/parse_single_quoted/parse_block_scalar/parse_anchor_name/needs_quoting/quote_string/encode_value; typed parts/line_buf arrays; block_indent_ cast; encode_value type narrowing; is_array pairs cast
