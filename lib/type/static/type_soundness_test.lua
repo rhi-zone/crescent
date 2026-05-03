@@ -3285,3 +3285,341 @@ needs_100(x)
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- CASTS: --[[: T]] checked cast and --[[:! T]] force cast
+---------------------------------------------------------------------------
+
+assert.describe("soundness: checked cast --[[: T]]", function()
+    assert.it("valid subtype cast: integer -> number passes", function()
+        no_errors([==[
+--:: declare x = integer
+local y = --[[: number]] x
+]==])
+    end)
+
+    assert.it("valid subtype cast: result is usable as target type", function()
+        no_errors([==[
+--:: declare x = integer
+--: (number) -> nil
+local function needs_num(n) end
+needs_num(--[[: number]] x)
+]==])
+    end)
+
+    assert.it("invalid cast: unrelated type -> error", function()
+        has_error([==[
+--:: declare x = integer
+local y = --[[: string]] x
+]==], "")
+    end)
+
+    assert.it("cast to narrower type is an error (number -> integer not valid subtype)", function()
+        has_error([==[
+--:: declare x = number
+local y = --[[: integer]] x
+]==], "")
+    end)
+end)
+
+assert.describe("soundness: force cast --[[:! T]]", function()
+    assert.it("force cast unknown -> concrete type passes (overlap exists)", function()
+        -- unknown overlaps with any concrete type; force cast is the only escape
+        no_errors([==[
+--:: declare x = unknown
+local y = --[[:! string]] x
+]==])
+    end)
+
+    assert.it("force cast result is usable as the target type", function()
+        no_errors([==[
+--:: declare x = unknown
+local y = --[[:! string]] x
+local s = y .. "!"
+]==])
+    end)
+
+    assert.it("force cast string | integer -> string passes (overlap exists)", function()
+        no_errors([==[
+--:: declare x = string | integer
+local y = --[[:! string]] x
+]==])
+    end)
+
+    assert.it("force cast disjoint types: boolean -> number errors", function()
+        has_error([==[
+--:: declare x = boolean
+local y = --[[:! number]] x
+]==], "")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- NARROWING: not x, and, or narrowing forms
+---------------------------------------------------------------------------
+
+assert.describe("soundness: not-x narrowing", function()
+    assert.it("if not x then: nil|string narrowed to nil in branch", function()
+        no_errors([[
+--: string | nil
+local x = nil
+if not x then
+    -- x is nil here; concat would be a type error outside this branch
+    local n = nil
+end
+]])
+    end)
+
+    assert.it("if not x then: string is excluded (else branch has x as string)", function()
+        no_errors([[
+--: (string | nil) -> string
+local function f(x)
+    if not x then return "" end
+    return x .. "!"
+end
+]])
+    end)
+
+    assert.it("not x produces boolean", function()
+        no_errors([[
+--: boolean
+local x = true
+local y = not x
+]])
+    end)
+end)
+
+assert.describe("soundness: or-narrowing", function()
+    assert.it("x or default: non-nil value type inferred for result", function()
+        -- x: string|nil; (x or default) should be string
+        no_errors([[
+--: string | nil
+local x = "hello"
+local y = x or "default"
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(y)
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- OPEN RECORDS: unlisted field access returns unknown
+---------------------------------------------------------------------------
+
+assert.describe("soundness: open record unlisted field type", function()
+    assert.it("unlisted field on open record is unknown (not string)", function()
+        -- Reading an unlisted field on { name: string, ... } must error
+        -- when used as a concrete type without narrowing.
+        has_error([[
+--:: declare t = { name: string, ... }
+local x = t.other_field
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(x)
+]], "")
+    end)
+
+    assert.it("unlisted field on open record is assignable to unknown", function()
+        no_errors([[
+--:: declare t = { name: string, ... }
+local x = t.other_field
+--: unknown
+local u = x
+]])
+    end)
+
+    assert.it("listed field on open record has its declared type", function()
+        no_errors([[
+--:: declare t = { name: string, ... }
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(t.name)
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- GENERICS: return type inference at call site
+---------------------------------------------------------------------------
+
+assert.describe("soundness: generic return type inference at call site", function()
+    assert.it("<T>(T)->T called with integer returns integer", function()
+        no_errors([[
+--: <T>(T) -> T
+local function identity(x) return x end
+local r = identity(42)
+--: (integer) -> nil
+local function needs_int(n) end
+needs_int(r)
+]])
+    end)
+
+    assert.it("<T>(T)->T called with string returns string", function()
+        no_errors([[
+--: <T>(T) -> T
+local function identity(x) return x end
+local r = identity("hello")
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(r)
+]])
+    end)
+
+    assert.it("<T, U>(T, U)->{first:T, second:U} infers both at call site", function()
+        no_errors([[
+--: <A, B>(a: A, b: B) -> { first: A, second: B }
+local function pair(a, b) return { first = a, second = b } end
+local p = pair(1, "hello")
+--: (integer) -> nil
+local function needs_int(n) end
+needs_int(p.first)
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(p.second)
+]])
+    end)
+
+    assert.it("<T>(T)->T called with wrong return type errors", function()
+        has_error([[
+--: <T>(T) -> T
+local function identity(x) return x end
+local r = identity(42)
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(r)
+]], "")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- INTERSECTION: method call on intersection member
+---------------------------------------------------------------------------
+
+assert.describe("soundness: intersection method call", function()
+    assert.it("method from first member callable on intersection value", function()
+        no_errors([[
+--:: A = { greet: () -> string }
+--:: B = { count: integer }
+--:: AB = A & B
+--:: declare v = AB
+local s = v.greet()
+]])
+    end)
+
+    assert.it("method from second member callable on intersection value", function()
+        no_errors([[
+--:: A = { x: number }
+--:: B = { describe: () -> string }
+--:: AB = A & B
+--:: declare v = AB
+local s = v.describe()
+]])
+    end)
+
+    assert.it("intersection value passable where only first member expected", function()
+        no_errors([[
+--:: A = { x: number }
+--:: B = { y: string }
+--:: AB = A & B
+--:: declare v = AB
+--: (A) -> nil
+local function needs_a(a) end
+needs_a(v)
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- NEWTYPE: assignable to itself, not to underlying type
+---------------------------------------------------------------------------
+
+assert.describe("soundness: newtype round-trip", function()
+    assert.it("newtype passes through function accepting same newtype", function()
+        no_errors([[
+--:: newtype UserId = integer
+--:: declare make = (integer) -> UserId
+--: (UserId) -> nil
+local function process(id) end
+process(make(42))
+]])
+    end)
+
+    assert.it("newtype not assignable to underlying type without coercion", function()
+        has_error([[
+--:: newtype UserId = integer
+--:: declare make = (integer) -> UserId
+--: (integer) -> nil
+local function needs_int(n) end
+needs_int(make(42))
+]], "")
+    end)
+
+    assert.it("underlying type not assignable to newtype", function()
+        has_error([[
+--:: newtype UserId = integer
+--: UserId
+local id = 99
+]], "")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- TYPEOF: type of expression
+---------------------------------------------------------------------------
+
+assert.describe("soundness: typeof expression type extraction", function()
+    assert.it("typeof integer expression is usable as integer", function()
+        no_errors([[
+local x = 42
+--: typeof x
+local y = x
+--: (integer) -> nil
+local function needs_int(n) end
+needs_int(y)
+]])
+    end)
+
+    assert.it("typeof string expression is usable as string", function()
+        no_errors([[
+local x = "hello"
+--: typeof x
+local y = x
+--: (string) -> nil
+local function needs_str(s) end
+needs_str(y)
+]])
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- INDEXED ACCESS: T[K] basic behaviors
+---------------------------------------------------------------------------
+
+assert.describe("soundness: indexed access T[K]", function()
+    assert.it("T['field'] extracts named field type", function()
+        no_errors([[
+--:: Row = { id: integer, name: string }
+--:: IdType = Row["id"]
+--: IdType
+local x = 42
+]])
+    end)
+
+    assert.it("T['missing'] produces error at use site", function()
+        has_error([[
+--:: Row = { id: integer }
+--:: Bad = Row["nonexistent"]
+--:: declare x = Bad
+]], "")
+    end)
+
+    assert.it("T[string] with index signature extracts value type", function()
+        no_errors([[
+--:: Dict = { [string]: number }
+--:: ValType = Dict[string]
+--: ValType
+local x = 3.14
+]])
+    end)
+end)
