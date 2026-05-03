@@ -1049,51 +1049,125 @@ local function solve_index(ctx, c)
         return true
     end
 
+    -- ---------------------------------------------------------------------------
+    -- Recursive field lookup: distributivity over union and intersection.
+    --
+    -- field_access_on(ctx, mid, name_id) -> (field_types, open_miss, closed_miss, any_escape)
+    --
+    -- Distributes field access over compound types:
+    --   (A & B).x  = A.x & B.x  (collect from all members)
+    --   (A | B).x  = A.x | B.x  (collect from each arm; closed_miss if any arm misses)
+    --   (A & B) | C  -> recurse into (A & B) then C
+    --   (A | B) & C  -> recurse into (A | B) then C
+    --
+    -- Returns:
+    --   field_types  - list of resolved type IDs found so far (may be appended to)
+    --   open_miss    - true if any arm was open and might have the field
+    --   closed_miss  - true if any arm was closed and definitely lacks the field
+    --   any_escape   - true if any arm was TAG_ANY (caller should return T_ANY immediately)
+    --
+    -- Implemented as a local forward-declared function so union/intersection handlers
+    -- can call each other recursively without hoisting all code.
+
+    -- forward declaration so union and intersection lambdas can cross-call
+    local field_access_on
+    field_access_on = function(ctx2, mid, nid)
+        mid = find(ctx2, mid)
+        local mt = ctx2.types:get(mid)
+        -- TAG_FFIC: resolve to actual C table first
+        if mt.tag == TAG_FFIC then
+            local resolved_mid = resolve_ffic(ctx2, mid)
+            local resolved_mt  = ctx2.types:get(resolved_mid)
+            if resolved_mt.tag == TAG_TABLE then
+                local fe = types_mod.table_field(ctx2, resolved_mid, nid)
+                if fe then
+                    return { find(ctx2, fe.type_id) }, false, false, false
+                else
+                    return {}, false, true, false
+                end
+            else
+                -- $FfiC not yet initialised: T_ANY fallback
+                return {}, false, false, true
+            end
+        end
+        if mt.tag == TAG_ANY then
+            return {}, false, false, true
+        end
+        if mt.tag == TAG_UNKNOWN then
+            return { ctx2.T_UNKNOWN }, false, false, false
+        end
+        if mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
+            return {}, true, false, false
+        end
+        if mt.tag == TAG_TABLE then
+            local fe = types_mod.table_field(ctx2, mid, nid)
+            if fe then
+                return { find(ctx2, fe.type_id) }, false, false, false
+            elseif mt.data[4] >= 0 then
+                return {}, true, false, false
+            else
+                return {}, false, true, false
+            end
+        end
+        if mt.tag == TAG_INTERSECTION then
+            -- Distribute: field must be reachable from each member that is a closed type.
+            -- Collect types from all members; any_open means result may contain unknown.
+            local ftypes, any_open2, all_miss2 = {}, false, true
+            for i = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+                local arm_mid = ctx2.lists:get(i)
+                local arm_ft, arm_open, arm_closed, arm_any = field_access_on(ctx2, arm_mid, nid)
+                if arm_any then return {}, false, false, true end
+                for _, t in ipairs(arm_ft) do ftypes[#ftypes + 1] = t end
+                if arm_open   then any_open2 = true; all_miss2 = false end
+                if #arm_ft > 0 then all_miss2 = false end
+                -- arm_closed means this member definitively lacks the field; for an
+                -- intersection that is a miss (the intersection still contributes closed_miss
+                -- only when ALL members miss — but since we are inside a union arm, we just
+                -- treat a closed-table member that lacks the field as contributing nothing,
+                -- and if all intersection members miss we treat the intersection as missing).
+                if arm_closed and #arm_ft == 0 and not arm_open then
+                    -- this member definitively lacks the field; keep all_miss as-is
+                else
+                    -- arm has something (field or open) — already updated above
+                end
+            end
+            if all_miss2 and not any_open2 then
+                return {}, false, true, false
+            end
+            if any_open2 then ftypes[#ftypes + 1] = ctx2.T_UNKNOWN end
+            return ftypes, false, false, false
+        end
+        if mt.tag == TAG_UNION then
+            -- Distribute: collect from each arm.
+            local ftypes, any_open2, any_closed2 = {}, false, false
+            for i = mt.data[0], mt.data[0] + mt.data[1] - 1 do
+                local arm_mid = ctx2.lists:get(i)
+                local arm_ft, arm_open, arm_closed, arm_any = field_access_on(ctx2, arm_mid, nid)
+                if arm_any then return {}, false, false, true end
+                for _, t in ipairs(arm_ft) do ftypes[#ftypes + 1] = t end
+                if arm_open   then any_open2   = true end
+                if arm_closed then any_closed2 = true end
+            end
+            return ftypes, any_open2, any_closed2, false
+        end
+        -- All other types (function, tuple, nominal, etc.) lack the field
+        return {}, false, true, false
+    end
+
     if obj_t.tag == TAG_UNION then
         local field_types = {}
         local closed_miss = false
         local open_miss   = false
         for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
-            local mid = find(ctx, ctx.lists:get(i))
-            local mt = ctx.types:get(mid)
-            if mt.tag == TAG_FFIC then
-                -- Resolve $FfiC to the actual FFI C table for this compilation unit,
-                -- then do field lookup on the resolved table.
-                local resolved_mid = resolve_ffic(ctx, mid)
-                local resolved_mt  = ctx.types:get(resolved_mid)
-                if resolved_mt.tag == TAG_TABLE then
-                    local fe = types_mod.table_field(ctx, resolved_mid, name_id)
-                    if fe then
-                        field_types[#field_types + 1] = find(ctx, fe.type_id)
-                    else
-                        closed_miss = true
-                    end
-                else
-                    -- T_ANY fallback when $FfiC is not yet initialised
-                    bind_to(ctx, res_tid, ctx.T_ANY)
-                    return true
-                end
-            elseif mt.tag == TAG_TABLE then
-                local fe = types_mod.table_field(ctx, mid, name_id)
-                if fe then
-                    field_types[#field_types + 1] = find(ctx, fe.type_id)
-                elseif mt.data[4] >= 0 then
-                    open_miss = true
-                else
-                    closed_miss = true
-                end
-            elseif mt.tag == TAG_ANY then
+            local mid = ctx.lists:get(i)
+            local arm_ft, arm_open, arm_closed, arm_any = field_access_on(ctx, mid, name_id)
+            if arm_any then
                 bind_to(ctx, res_tid, ctx.T_ANY)
                 return true
-            elseif mt.tag == TAG_UNKNOWN then
-                -- unknown in a union: field access on this arm requires narrowing
-                field_types[#field_types + 1] = ctx.T_UNKNOWN
-            elseif mt.tag == TAG_VAR or mt.tag == TAG_ROWVAR then
-                -- Unresolved — field may exist
-                open_miss = true
-            else
-                closed_miss = true
             end
+            for _, t in ipairs(arm_ft) do field_types[#field_types + 1] = t end
+            if arm_open   then open_miss   = true end
+            if arm_closed then closed_miss = true end
         end
         if #field_types > 0 or open_miss or closed_miss then
             if open_miss   then field_types[#field_types + 1] = ctx.T_UNKNOWN end
@@ -1109,7 +1183,9 @@ local function solve_index(ctx, c)
     end
 
     if obj_t.tag == TAG_INTERSECTION then
-        -- Field must exist in ALL closed members; if any open member, result may exist.
+        -- Field must exist in at least one member; if any open member, result may exist.
+        -- Closed members that lack the field are simply not a source of it (the value
+        -- satisfies all members, so it may still carry the field from another member).
         local field_types = {}
         local any_open = false
         local all_miss = true

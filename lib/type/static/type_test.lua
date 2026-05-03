@@ -9972,18 +9972,18 @@ local _ = v.unlisted
 end)
 
 assert.describe("checker: intersection interaction with union", function()
-    assert.it("(A & B) | C: field from A (in intersection arm) returns type | nil — limitation: intersection member in union treated as closed_miss", function()
-        -- The union solver sees TAG_INTERSECTION as a non-TABLE member and sets closed_miss.
-        -- This adds nil to the result even though A clearly has x.
-        -- This is a known limitation: (A & B) | C field lookup conservatively adds nil.
-        has_error([[
+    assert.it("(A & B) | C: field from intersection arm is found via distributivity — no nil added", function()
+        -- The union solver recurses into the TAG_INTERSECTION member (A & B) to find x.
+        -- A has x, so (A & B) contributes x: integer. C has x: boolean.
+        -- Result: integer | boolean. No nil added.
+        no_errors([[
 --:: A = { x: integer }
 --:: B = { y: string }
 --:: C = { x: boolean }
 --:: declare v = (A & B) | C
 --: integer | boolean
 local _ = v.x
-]], "might also be")
+]])
     end)
 
     assert.it("(A | B) & C: C lacks field x; intersection requires x from C — error", function()
