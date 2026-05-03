@@ -9694,3 +9694,163 @@ local r = identity(42)
 ]])
     end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- FFI type system: $FfiC symbol access, ffi.load, unions, ffi.new
+-- ---------------------------------------------------------------------------
+
+assert.describe("ffi type system: $FfiC symbol access", function()
+    assert.it("ffi.C.declared function: no error", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local _ = ffi.C.open("path", 0)
+]=])
+    end)
+
+    assert.it("ffi.C.undeclared symbol: error", function()
+        has_error([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local _ = ffi.C.nonexistent
+]=], "doesn't exist")
+    end)
+
+    assert.it("ffi.C symbol with no cdef at all: error", function()
+        has_error([=[
+local ffi = require("ffi")
+local _ = ffi.C.open
+]=], "doesn't exist")
+    end)
+
+    assert.it("ffi.C declared fn callable with correct arg types: no error", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ int add(int a, int b); ]]
+local result = ffi.C.add(1, 2)
+]=])
+    end)
+
+    assert.it("ffi.C declared fn called with wrong arg type: error", function()
+        has_error([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local _ = ffi.C.open(42, 0)
+]=], "cannot pass")
+    end)
+
+    assert.it("ffi.C declared fn called with too few args: error", function()
+        has_error([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local _ = ffi.C.open("path")
+]=], "missing argument")
+    end)
+
+    assert.it("ffi.C declared fn return value is usable as integer", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local result = ffi.C.open("test.txt", 0)
+--: (integer) -> nil
+local function consume(n) end
+consume(result)
+]=])
+    end)
+end)
+
+assert.describe("ffi type system: ffi.load result is $FfiC", function()
+    assert.it("ffi.load result: declared symbol callable, no error", function()
+        no_errors([=[
+local ffi = require("ffi")
+local lib = ffi.load("c")
+ffi.cdef[[ int close(int); ]]
+lib.close(1)
+]=])
+    end)
+
+    assert.it("ffi.load result: undeclared symbol is an error", function()
+        has_error([=[
+local ffi = require("ffi")
+local lib = ffi.load("c")
+ffi.cdef[[ int close(int); ]]
+local _ = lib.undeclared
+]=], "doesn't exist")
+    end)
+
+    assert.it("ffi.load result is not integer (regression: pcall result type)", function()
+        has_error([=[
+local ffi = require("ffi")
+local ok, lib = pcall(ffi.load, "z")
+local n = lib
+--: integer
+local m = n
+]=], "cannot assign")
+    end)
+end)
+
+assert.describe("ffi type system: $FfiC in unions", function()
+    assert.it("ffi.C | ffi.load union: field access works without force cast", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local c
+local x
+if c then x = ffi.C else x = ffi.load("c") end
+local _ = x.open("path", 0)
+]=])
+    end)
+
+    assert.it("ffi.C | ffi.load union: undeclared field returns nil (union closed-miss)", function()
+        -- When all union arms are $FfiC and none declares the field, the union path
+        -- returns nil rather than erroring (consistent with general union field-miss
+        -- semantics: the result is nil | nil = nil, not an error).
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ int open(const char*, int); ]]
+local c
+local x
+if c then x = ffi.C else x = ffi.load("c") end
+local _ = x.nonexistent
+]=])
+    end)
+end)
+
+assert.describe("ffi type system: ffi.new and struct field access", function()
+    assert.it("ffi.new with cdef'd typedef struct: no error", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ typedef struct { int x; } Point; ]]
+local p = ffi.new("Point")
+]=])
+    end)
+
+    assert.it("ffi.new struct: fields accessible and numeric", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ typedef struct { int x; int y; } Vec2; ]]
+local v = ffi.new("Vec2")
+local sum = v.x + v.y
+]=])
+    end)
+
+    assert.it("ffi.cdef struct field: usable in annotated function", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ typedef struct { int line; int col; } Span; ]]
+--: (Span) -> integer
+local function get_line(s) return s.line end
+]=])
+    end)
+end)
+
+assert.describe("ffi type system: pcall(ffi.load) narrowing", function()
+    assert.it("pcall(ffi.load): lib.close usable in ok arm", function()
+        no_errors([=[
+local ffi = require("ffi")
+ffi.cdef[[ int close(int); ]]
+local ok, lib = pcall(ffi.load, "z")
+if ok then lib.close(0) end
+]=])
+    end)
+end)
