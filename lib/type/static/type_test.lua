@@ -10168,3 +10168,451 @@ if ok then lib.close(0) end
 ]=])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- Comprehensive union edge cases and combinations
+---------------------------------------------------------------------------
+
+assert.describe("checker: nested union flattening", function()
+    assert.it("(A | (B | C)) is equivalent to A | B | C for field access", function()
+        -- Nesting a union inside another union should flatten: any field present
+        -- in all three members is accessible without error.
+        no_errors([[
+--:: A = { x: integer }
+--:: B = { x: string }
+--:: C = { x: boolean }
+--:: Nested = A | (B | C)
+--:: declare v = Nested
+--: integer | string | boolean
+local _ = v.x
+]])
+    end)
+
+    assert.it("(A | (B | C)) field absent in one nested member → nil in result", function()
+        -- C lacks field y; the nested union B|C contributes nil for y from C.
+        has_error([[
+--:: A = { x: integer, y: number }
+--:: B = { x: string, y: number }
+--:: C = { x: boolean }
+--:: Nested = A | (B | C)
+--:: declare v = Nested
+--: number
+local _ = v.y
+]], "might also be")
+    end)
+
+    assert.it("triple union A|B|C all have field x: result is union of all three", function()
+        no_errors([[
+--:: declare v = { x: integer } | { x: string } | { x: boolean }
+--: integer | string | boolean
+local _ = v.x
+]])
+    end)
+
+    assert.it("triple union where only two have field x: result includes nil", function()
+        has_error([[
+--:: declare v = { x: integer } | { x: string } | { y: boolean }
+--: integer | string
+local _ = v.x
+]], "might also be")
+    end)
+end)
+
+assert.describe("checker: union in function parameters", function()
+    assert.it("function accepting (string | integer) called with string: no error", function()
+        no_errors([[
+--: (string | integer) -> nil
+local function f(x) end
+f("hello")
+]])
+    end)
+
+    assert.it("function accepting (string | integer) called with integer: no error", function()
+        no_errors([[
+--: (string | integer) -> nil
+local function f(x) end
+f(42)
+]])
+    end)
+
+    assert.it("function accepting (string | integer) called with boolean: error", function()
+        has_error([[
+--: (string | integer) -> nil
+local function f(x) end
+f(true)
+]], "")
+    end)
+
+    assert.it("function accepting (string | integer) called with nil: error", function()
+        has_error([[
+--: (string | integer) -> nil
+local function f(x) end
+f(nil)
+]], "")
+    end)
+
+    assert.it("passing (string | integer) variable to string-only param: error", function()
+        has_error([[
+--:: declare x = string | integer
+--: (string) -> nil
+local function f(s) end
+f(x)
+]], "")
+    end)
+end)
+
+assert.describe("checker: union assignment and widening", function()
+    assert.it("assigning integer to (string | integer) annotated variable: no error", function()
+        no_errors([[
+--: string | integer
+local x = 42
+]])
+    end)
+
+    assert.it("assigning string to (string | integer) annotated variable: no error", function()
+        no_errors([[
+--: string | integer
+local x = "hello"
+]])
+    end)
+
+    assert.it("assigning boolean to (string | integer) annotated variable: error", function()
+        has_error([[
+--: string | integer
+local x = true
+]], "cannot assign")
+    end)
+
+    assert.it("assigning integer to (string | boolean) annotated variable: error", function()
+        has_error([[
+--: string | boolean
+local x = 42
+]], "cannot assign")
+    end)
+
+    assert.it("table field of union type: assigning matching member — no error", function()
+        no_errors([[
+--:: T = { x: string | integer }
+--: T
+local t = { x = "hello" }
+]])
+    end)
+
+    assert.it("table field of union type: assigning non-member — error", function()
+        has_error([[
+--:: T = { x: string | integer }
+--: T
+local t = { x = true }
+]], "cannot assign")
+    end)
+
+    assert.it("reading a union-typed field gives union: usable in annotated local", function()
+        no_errors([[
+--:: T = { x: string | integer }
+--:: declare t = T
+--: string | integer
+local _ = t.x
+]])
+    end)
+end)
+
+assert.describe("checker: union with never", function()
+    assert.it("string | never simplifies to string: value assignable as string", function()
+        no_errors([[
+--:: R = string | never
+--: R
+local x = "hello"
+]])
+    end)
+
+    assert.it("string | never simplifies to string: integer not assignable", function()
+        has_error([[
+--:: R = string | never
+--: R
+local x = 42
+]], "cannot assign")
+    end)
+
+    assert.it("never | never is never: no value is assignable", function()
+        -- never | never = never. A function returning never is the only thing that
+        -- fits; we verify by checking that a concrete value does not fit.
+        has_error([[
+--:: R = never | never
+--: R
+local x = 42
+]], "cannot assign")
+    end)
+
+    assert.it("never | string | integer: both concrete members usable", function()
+        no_errors([[
+--:: R = never | string | integer
+--: R
+local x = "hello"
+]])
+    end)
+end)
+
+assert.describe("checker: union with unknown", function()
+    assert.it("string | unknown: cannot use as string without narrowing", function()
+        -- unknown absorbs the union (make_union returns T_UNKNOWN).
+        -- A variable of unknown type cannot be used as string without a guard.
+        has_error([[
+--:: R = string | unknown
+--:: declare v = R
+--: string
+local _ = v
+]], "")
+    end)
+
+    assert.it("string | unknown: after type() guard, string branch works", function()
+        -- narrowing to string after a type() check is valid even if the static
+        -- type is effectively unknown.
+        no_errors([[
+--:: declare v = string | unknown
+if type(v) == "string" then
+    local _ = v:upper()
+end
+]])
+    end)
+end)
+
+assert.describe("checker: union with any", function()
+    assert.it("any | string is effectively any: integer assignable to it", function()
+        -- any absorbs the union; any is a bilateral escape hatch.
+        no_errors([[
+--:: R = any | string
+--: R
+local x = 42
+]])
+    end)
+
+    assert.it("string | any: assigning boolean — no error (any is bilateral)", function()
+        no_errors([[
+--:: R = string | any
+--: R
+local x = true
+]])
+    end)
+end)
+
+assert.describe("checker: union return types from branching", function()
+    assert.it("if/else returning different types: result is union of both", function()
+        -- The inferred return type is integer | string; passing to a (integer|string)->nil fn is valid.
+        no_errors([[
+--: (boolean) -> integer | string
+local function f(cond)
+    if cond then return 1 else return "x" end
+end
+--: (integer | string) -> nil
+local function consume(v) end
+consume(f(true))
+]])
+    end)
+
+    assert.it("multiple return paths with same type: result is that type (no widening)", function()
+        no_errors([[
+--: (boolean) -> integer
+local function f(cond)
+    if cond then return 1 else return 2 end
+end
+--: integer
+local _ = f(true)
+]])
+    end)
+end)
+
+assert.describe("checker: union with optional fields from variant difference", function()
+    assert.it("{x:string}|{x:string,y:integer}: field x always present — no error", function()
+        no_errors([[
+--:: A = { x: string }
+--:: B = { x: string, y: integer }
+--:: declare v = A | B
+--: string
+local _ = v.x
+]])
+    end)
+
+    assert.it("{x:string}|{x:string,y:integer}: field y only in B — result includes nil", function()
+        -- A lacks y, so the union field lookup returns integer | nil.
+        has_error([[
+--:: A = { x: string }
+--:: B = { x: string, y: integer }
+--:: declare v = A | B
+--: integer
+local _ = v.y
+]], "might also be")
+    end)
+
+    assert.it("{x:string}|{x:string,y:integer}: field y usable as (integer|nil)", function()
+        no_errors([[
+--:: A = { x: string }
+--:: B = { x: string, y: integer }
+--:: declare v = A | B
+--: integer | nil
+local _ = v.y
+]])
+    end)
+end)
+
+assert.describe("checker: union narrowing — multiple elseif type guards", function()
+    assert.it("type() guards on string|integer|boolean exhaust the union", function()
+        no_errors([[
+--:: declare x = string | integer | boolean
+if type(x) == "string" then
+    local _ = x:upper()
+elseif type(x) == "number" then
+    local _ = x + 1
+else
+    -- boolean branch
+    local _ = not x
+end
+]])
+    end)
+
+    assert.it("type() else branch gets remaining members after two guards", function()
+        -- After string and number guards, only boolean remains.
+        no_errors([[
+--:: declare x = string | number | boolean
+if type(x) == "string" then
+    local _ = x:upper()
+elseif type(x) == "number" then
+    local _ = x + 0
+else
+    local _ = not x
+end
+]])
+    end)
+end)
+
+assert.describe("checker: union length (#) operator", function()
+    assert.it("#(string | { [integer]: unknown }): both support length — no error", function()
+        no_errors([[
+--:: declare x = string | { [integer]: unknown }
+local _ = #x
+]])
+    end)
+
+    assert.it("#(string | integer): integer has no length — error", function()
+        has_error([[
+--:: declare x = string | integer
+local _ = #x
+]], "")
+    end)
+end)
+
+assert.describe("checker: literal type unions", function()
+    assert.it('assigning "a" to ("a"|"b"|"c") annotated var: no error', function()
+        no_errors([[
+--: "a" | "b" | "c"
+local x = "a"
+]])
+    end)
+
+    assert.it('assigning "b" to ("a"|"b"|"c") annotated var: no error', function()
+        no_errors([[
+--: "a" | "b" | "c"
+local x = "b"
+]])
+    end)
+
+    assert.it('assigning "d" to ("a"|"b"|"c") annotated var: error', function()
+        has_error([[
+--: "a" | "b" | "c"
+local x = "d"
+]], "cannot assign")
+    end)
+
+    assert.it('assigning plain string to ("a"|"b") annotated var: error', function()
+        has_error([[
+--:: declare s = string
+--: "a" | "b"
+local x = s
+]], "cannot assign")
+    end)
+
+    assert.it("numeric literal union 1|2|3: assigning 1 — no error", function()
+        no_errors([[
+--: 1 | 2 | 3
+local x = 1
+]])
+    end)
+
+    assert.it("numeric literal union 1|2|3: assigning 4 — error", function()
+        has_error([[
+--: 1 | 2 | 3
+local x = 4
+]], "cannot assign")
+    end)
+
+    assert.it("numeric literal union 1|2|3: assigning integer variable — error (supertype)", function()
+        has_error([[
+--:: declare n = integer
+--: 1 | 2 | 3
+local x = n
+]], "cannot assign")
+    end)
+end)
+
+assert.describe("checker: literal union preserved in field access", function()
+    assert.it('({x:"a"}|{x:"b"}).x gives "a"|"b" literal union', function()
+        -- Reading the field from a union of literal-typed tables preserves the
+        -- literal types in the result union.
+        no_errors([[
+--:: A = { x: "a" }
+--:: B = { x: "b" }
+--:: declare v = A | B
+--: "a" | "b"
+local _ = v.x
+]])
+    end)
+
+    assert.it('literal union field: result rejects value outside the union', function()
+        has_error([[
+--:: A = { x: "a" }
+--:: B = { x: "b" }
+--:: declare v = A | B
+--: "c"
+local _ = v.x
+]], "cannot assign")
+    end)
+
+    assert.it('literal union field: each literal member acceptable individually', function()
+        no_errors([[
+--:: A = { x: "yes" }
+--:: B = { x: "no" }
+--:: declare v = A | B
+if v.x == "yes" then
+    --: "yes"
+    local _ = v.x
+end
+]])
+    end)
+end)
+
+assert.describe("checker: union — recursive self-referential with union arm", function()
+    assert.it("Tree = {val:integer, children:{[integer]:Tree}|nil}: no error on construction", function()
+        no_errors([[
+--:: Tree = { val: integer, children: { [integer]: Tree } | nil }
+--: Tree
+local t = { val = 1, children = nil }
+]])
+    end)
+
+    assert.it("Tree.val is integer: accessing val on Tree gives integer", function()
+        no_errors([[
+--:: Tree = { val: integer, children: { [integer]: Tree } | nil }
+--:: declare t = Tree
+--: integer
+local _ = t.val
+]])
+    end)
+
+    assert.it("Tree.children is {[integer]:Tree}|nil: accessing children gives union", function()
+        no_errors([[
+--:: Tree = { val: integer, children: { [integer]: Tree } | nil }
+--:: declare t = Tree
+--: { [integer]: Tree } | nil
+local _ = t.children
+]])
+    end)
+end)
