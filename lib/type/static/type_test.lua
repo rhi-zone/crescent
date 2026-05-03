@@ -9695,6 +9695,320 @@ local r = identity(42)
     end)
 end)
 
+---------------------------------------------------------------------------
+-- Comprehensive union type system tests
+---------------------------------------------------------------------------
+
+assert.describe("checker: union field access distribution", function()
+    assert.it("both members have field x: no error, result is union of field types", function()
+        no_errors([[
+--:: T = { x: string } | { x: number }
+--:: declare v = T
+--: string | number
+local _ = v.x
+]])
+    end)
+
+    assert.it("second member lacks field x: result is T | nil (nil-unioned, not hard error)", function()
+        -- When one closed member lacks the field, it contributes nil to the union.
+        -- The access itself does not error; using the result as string does.
+        has_error([[
+--:: T = { x: string } | { y: number }
+--:: declare v = T
+--: string
+local _ = v.x
+]], "might also be")
+    end)
+
+    assert.it("neither member has field z: result is nil (closed_miss)", function()
+        -- Neither member has z; the solver contributes nil (closed_miss).
+        -- Accessing z does not immediately error; using as string does.
+        has_error([[
+--:: T = { x: string } | { x: number }
+--:: declare v = T
+--: string
+local _ = v.z .. "!"
+]], "")
+    end)
+
+    assert.it("neither member has field z: bare access returns nil (no error)", function()
+        -- The field miss returns nil without an immediate type error.
+        no_errors([[
+--:: T = { x: string } | { x: number }
+--:: declare v = T
+--: nil
+local _ = v.z
+]])
+    end)
+
+    assert.it("3-member union, all have field x: no error, result is union of all field types", function()
+        no_errors([[
+--:: T = { x: string } | { x: number } | { x: boolean }
+--:: declare v = T
+--: string | number | boolean
+local _ = v.x
+]])
+    end)
+
+    assert.it("4-member union, all have field: field types unioned correctly", function()
+        no_errors([[
+--:: T = { x: string } | { x: number } | { x: boolean } | { x: integer }
+--:: declare v = T
+--: string | number | boolean | integer
+local _ = v.x
+]])
+    end)
+end)
+
+assert.describe("checker: discriminated union narrowing", function()
+    assert.it("literal discriminant 'type' narrows correctly after if x.type == 'a'", function()
+        no_errors([[
+--:: Shape = { type: "circle", r: number } | { type: "rect", w: number, h: number }
+--:: declare s = Shape
+if s.type == "circle" then
+    --: number
+    local _ = s.r
+end
+]])
+    end)
+
+    assert.it("non-literal discriminant (type: string) does NOT narrow", function()
+        -- A general `string` discriminant has no literal values to distinguish on.
+        -- The narrowing cannot exclude any union member, so accessing member-specific
+        -- fields after the guard still errors (result is T | nil from the other member).
+        has_error([[
+--:: A = { type: string, level: integer }
+--:: B = { type: string, content: string }
+--:: declare v = A | B
+if v.type == "heading" then
+    --: integer
+    local _ = v.level
+end
+]], "might also be")
+    end)
+
+    assert.it("aliasing discriminant to local does NOT narrow the original object", function()
+        -- `local t = s.type; if t == 'circle'` narrows t, not s.
+        -- Accessing s.r inside the if block still errors because s is not narrowed.
+        has_error([[
+--:: Shape = { type: "circle", r: number } | { type: "rect", w: number }
+--:: declare s = Shape
+local t = s.type
+if t == "circle" then
+    --: number
+    local _ = s.r
+end
+]], "might also be")
+    end)
+
+    assert.it("after narrowing, variant-specific fields are accessible without error", function()
+        no_errors([[
+--:: Shape = { type: "circle", r: number } | { type: "rect", w: number, h: number }
+--:: declare s = Shape
+if s.type == "circle" then
+    --: number
+    local _ = s.r
+else
+    --: number
+    local w = s.w
+    --: number
+    local h = s.h
+end
+]])
+    end)
+
+    assert.it("exhaustiveness: all variants covered in elseif chain (no warning)", function()
+        no_errors([[
+--:: T = { tag: "a" } | { tag: "b" } | { tag: "c" }
+--: (T) -> string
+local function label(t)
+    if t.tag == "a" then return "a"
+    elseif t.tag == "b" then return "b"
+    else return "c"
+    end
+end
+]])
+    end)
+
+    assert.it("non-exhaustiveness: one missing variant produces warning", function()
+        has_warning([[
+--:: T = { tag: "a" } | { tag: "b" } | { tag: "c" }
+--: (T) -> string
+local function label(t)
+    if t.tag == "a" then return "a"
+    elseif t.tag == "b" then return "b"
+    end
+    return "unknown"
+end
+]], "non%-exhaustive")
+    end)
+end)
+
+assert.describe("checker: union arithmetic and operations", function()
+    assert.it("(string | number) + 1: error (string does not support arithmetic)", function()
+        has_error([[
+--:: declare x = string | number
+local _ = x + 1
+]], "arithmetic")
+    end)
+
+    assert.it("(integer | number) + 1: no error (both support arithmetic)", function()
+        no_errors([[
+--:: declare x = integer | number
+local _ = x + 1
+]])
+    end)
+
+    assert.it("(string | boolean) .. '!': error (boolean cannot concatenate)", function()
+        has_error([[
+--:: declare x = string | boolean
+local _ = x .. "!"
+]], "")
+    end)
+end)
+
+assert.describe("checker: union with nil", function()
+    assert.it("(string | nil):upper() without nil guard: error", function()
+        has_error([[
+--:: declare x = string | nil
+local _ = x:upper()
+]], "nil")
+    end)
+
+    assert.it("(string | nil):upper() after nil guard: no error", function()
+        no_errors([[
+--:: declare x = string | nil
+if x ~= nil then
+    local n = x:upper()
+end
+]])
+    end)
+
+    assert.it("(string | nil) field-like method after nil check: no error", function()
+        no_errors([[
+--:: declare x = string | nil
+if x ~= nil then
+    local n = x:len()
+end
+]])
+    end)
+end)
+
+assert.describe("checker: union method calls", function()
+    assert.it("union where both members have same method: no error", function()
+        no_errors([[
+--:: A = { process: (string) -> integer }
+--:: B = { process: (string) -> integer }
+--:: declare v = A | B
+local n = v.process("hello")
+]])
+    end)
+
+    assert.it("union where only one member has the method: error", function()
+        has_error([[
+--:: A = { process: (string) -> integer }
+--:: B = { name: string }
+--:: declare v = A | B
+local n = v.process("hello")
+]], "nil")
+    end)
+end)
+
+assert.describe("checker: union narrowing via type()", function()
+    assert.it("type(x) == 'string' narrows (string | number) to string", function()
+        no_errors([[
+--:: declare x = string | number
+if type(x) == "string" then
+    local n = x:upper()
+end
+]])
+    end)
+
+    assert.it("type(x) == 'number' narrows (string | number) to number", function()
+        no_errors([[
+--:: declare x = string | number
+if type(x) == "number" then
+    local _ = x + 1
+end
+]])
+    end)
+
+    assert.it("type(x) == 'string' in else branch: arithmetic on number is valid", function()
+        no_errors([[
+--:: declare x = string | number
+if type(x) == "string" then
+    local _ = x:upper()
+else
+    local _ = x + 1
+end
+]])
+    end)
+end)
+
+assert.describe("checker: open record union", function()
+    assert.it("open record union, both have field x: x accessible as union of field types", function()
+        no_errors([[
+--:: declare v = { x: string, ... } | { x: number, ... }
+--: string | number
+local _ = v.x
+]])
+    end)
+
+    assert.it("open record union: unlisted field returns unknown (not error)", function()
+        -- Both members are open tables; unlisted field access returns unknown.
+        no_errors([[
+--:: declare v = { x: string, ... } | { x: number, ... }
+local _ = v.unlisted
+]])
+    end)
+
+    assert.it("open record union: unlisted field is unknown (cannot be used as string without narrowing)", function()
+        has_error([[
+--:: declare v = { x: string, ... } | { x: number, ... }
+--: string
+local _ = v.unlisted
+]], "")
+    end)
+end)
+
+assert.describe("checker: intersection interaction with union", function()
+    assert.it("(A & B) | C: field from A (in intersection arm) returns type | nil — limitation: intersection member in union treated as closed_miss", function()
+        -- The union solver sees TAG_INTERSECTION as a non-TABLE member and sets closed_miss.
+        -- This adds nil to the result even though A clearly has x.
+        -- This is a known limitation: (A & B) | C field lookup conservatively adds nil.
+        has_error([[
+--:: A = { x: integer }
+--:: B = { y: string }
+--:: C = { x: boolean }
+--:: declare v = (A & B) | C
+--: integer | boolean
+local _ = v.x
+]], "might also be")
+    end)
+
+    assert.it("(A | B) & C: C lacks field x; intersection requires x from C — error", function()
+        -- The intersection solver requires x to be in C for it to be in (A|B)&C,
+        -- because C is a concrete closed table that does not carry x.
+        has_error([[
+--:: A = { x: integer }
+--:: B = { x: string }
+--:: C = { y: boolean }
+--:: declare v = (A | B) & C
+local _ = v.x
+]], "doesn't exist")
+    end)
+
+    assert.it("(A | B) & C where C also has field x: field accessible", function()
+        no_errors([[
+--:: A = { x: integer }
+--:: B = { x: string }
+--:: C = { x: boolean, y: boolean }
+--:: declare v = (A | B) & C
+local _ = v.x
+]])
+    end)
+end)
+
 -- ---------------------------------------------------------------------------
 -- FFI type system: $FfiC symbol access, ffi.load, unions, ffi.new
 -- ---------------------------------------------------------------------------
