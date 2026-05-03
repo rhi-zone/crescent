@@ -3088,3 +3088,200 @@ return Machine
 ]])
     end)
 end)
+
+---------------------------------------------------------------------------
+-- NUMERIC LITERALS (exotic forms: hex, scientific notation, hex float)
+---------------------------------------------------------------------------
+
+assert.describe("numeric literals: integer forms", function()
+    assert.it("plain decimal integer", function()
+        no_errors([[
+--: integer
+local x = 42
+]])
+    end)
+
+    assert.it("hex integer 0xff", function()
+        no_errors([[
+--: integer
+local x = 0xff
+]])
+    end)
+
+    assert.it("hex integer 0xFF (uppercase)", function()
+        no_errors([[
+--: integer
+local x = 0xFF
+]])
+    end)
+
+    assert.it("hex integer 0x0", function()
+        no_errors([[
+--: integer
+local x = 0x0
+]])
+    end)
+
+    assert.it("hex integer 0x1e2 (e is a hex digit, not exponent marker)", function()
+        -- 0x1e2 = 482; the 'e' here is a hex digit, NOT a float exponent
+        -- Only 'p'/'P' is the binary exponent marker in hex floats
+        no_errors([[
+--: integer
+local x = 0x1e2
+]])
+    end)
+end)
+
+assert.describe("numeric literals: float forms (non-integer)", function()
+    assert.it("decimal float 1.5 is NOT an integer", function()
+        has_error([[
+--: integer
+local x = 1.5
+]], "")
+    end)
+
+    assert.it("decimal float 1.5 accepted as number", function()
+        no_errors([[
+--: number
+local x = 1.5
+]])
+    end)
+
+    assert.it("negative exponent 1e-2 = 0.01 is NOT an integer", function()
+        has_error([[
+--: integer
+local x = 1e-2
+]], "")
+    end)
+
+    assert.it("negative exponent 1e-2 accepted as number", function()
+        no_errors([[
+--: number
+local x = 1e-2
+]])
+    end)
+
+    assert.it("hex float 0x.1e2p2 = 0.47... is NOT an integer", function()
+        -- 0x.1e2 is hex fractional part (0.117...), times 2^2 = 4, gives ~0.47
+        has_error([[
+--: integer
+local x = 0x.1e2p2
+]], "")
+    end)
+
+    assert.it("hex float 0xffp-8 = 0.996... is NOT an integer", function()
+        has_error([[
+--: integer
+local x = 0xffp-8
+]], "")
+    end)
+
+    assert.it("non-integer float passed to integer function param is rejected", function()
+        has_error([[
+--: (integer) -> nil
+local function f(x) end
+f(1.5)
+]], "")
+    end)
+end)
+
+assert.describe("numeric literals: integer-valued float promotion", function()
+    assert.it("1.0 (decimal float, value 1) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 1.0
+]])
+    end)
+
+    assert.it("42.0 (decimal float, value 42) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 42.0
+]])
+    end)
+
+    assert.it("1e2 = 100.0 (scientific, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 1e2
+]])
+    end)
+
+    assert.it("1.5e2 = 150.0 (fraction+exponent, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 1.5e2
+]])
+    end)
+
+    assert.it("1E2 = 100.0 (uppercase E, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 1E2
+]])
+    end)
+
+    assert.it("1e+2 = 100.0 (explicit positive exponent, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 1e+2
+]])
+    end)
+
+    assert.it("0x1p0 = 1.0 (hex float, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 0x1p0
+]])
+    end)
+
+    assert.it("0x1.8p1 = 3.0 (hex float with fraction, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 0x1.8p1
+]])
+    end)
+
+    assert.it("0x.1p4 = 1.0 (hex float no integer part, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 0x.1p4
+]])
+    end)
+
+    assert.it("0x1p+1 = 2.0 (hex float explicit positive exponent, integer-valued) promotes to integer", function()
+        no_errors([[
+--: integer
+local x = 0x1p+1
+]])
+    end)
+
+    assert.it("0x1e2p0 = 482.0 (hex float where mantissa contains e digit, integer-valued) promotes to integer", function()
+        -- 0x1e2 as hex mantissa = 482; times 2^0 = 482.0 -> integer 482
+        no_errors([[
+--: integer
+local x = 0x1e2p0
+]])
+    end)
+
+    assert.it("integer-valued float usable in integer arithmetic", function()
+        no_errors([[
+--: integer
+local a = 1e2
+--: integer
+local b = 0x1p0
+local c = a + b
+]])
+    end)
+
+    assert.it("promoted integer-valued floats have correct promoted value", function()
+        -- 1e2 promotes to integer literal 100; without a widening annotation,
+        -- the inferred type is the literal 100, usable where 100 is expected
+        no_errors([[
+local x = 1e2
+--: (100) -> nil
+local function needs_100(v) end
+needs_100(x)
+]])
+    end)
+end)
