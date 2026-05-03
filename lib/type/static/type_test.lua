@@ -2579,17 +2579,18 @@ end
     -- require'd local was still TAG_VAR awaiting $Require<T>; the result was that
     -- `lib` got bound to `any`-equivalent and force-cast workarounds were needed
     -- in lib/sqlite/init.lua and lib/compress/system.lua.
-    assert.it("pcall(ffi.load, ...) returns unknown | string, not the input fn type", function()
+    assert.it("pcall(ffi.load, ...) lib is $FfiC not integer", function()
         has_error([[
 local ffi = require("ffi")
 local ok, lib = pcall(ffi.load, "z")
 local n = lib --: integer
-]], "unknown")
+]], "cannot assign")
     end)
     assert.it("pcall with field-access callee narrows under if ok", function()
         no_errors([==[
-local ffi = require("ffi")
-local ok, lib = pcall(ffi.load, "z")
+--: () -> { foo: integer }
+local function make() return { foo = 1 } end
+local ok, lib = pcall(make)
 if ok then
     local typed = lib --[[:! { foo: integer }]]
     local n = typed.foo

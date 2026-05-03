@@ -70,7 +70,7 @@
 --::   copy:     <T, U>(dst: Ptr<T>, src: Ptr<U>, n: integer) -> nil,
 --::   fill:     <T>(dst: Ptr<T>, n: integer, c: integer | nil) -> nil,
 --::   string:   (ptr: Ptr<integer>, len: integer | nil) -> string,
---::   load:     (name: string, global: boolean | nil) -> unknown,
+--::   load:     (name: string, global: boolean | nil) -> $FfiC,
 --::   gc:       <T>(cdata: T, finalizer: ((T) -> ()) | nil) -> T,
 --::   metatype: <T>(ct: Ctype<T>, metatable: { [string]: unknown, ... }) -> Ctype<T>,
 --::   istype:   (ct: string | Ctype<unknown>, obj: unknown) -> boolean,
