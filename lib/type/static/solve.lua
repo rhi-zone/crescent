@@ -1056,7 +1056,24 @@ local function solve_index(ctx, c)
         for i = obj_t.data[0], obj_t.data[0] + obj_t.data[1] - 1 do
             local mid = find(ctx, ctx.lists:get(i))
             local mt = ctx.types:get(mid)
-            if mt.tag == TAG_TABLE then
+            if mt.tag == TAG_FFIC then
+                -- Resolve $FfiC to the actual FFI C table for this compilation unit,
+                -- then do field lookup on the resolved table.
+                local resolved_mid = resolve_ffic(ctx, mid)
+                local resolved_mt  = ctx.types:get(resolved_mid)
+                if resolved_mt.tag == TAG_TABLE then
+                    local fe = types_mod.table_field(ctx, resolved_mid, name_id)
+                    if fe then
+                        field_types[#field_types + 1] = find(ctx, fe.type_id)
+                    else
+                        closed_miss = true
+                    end
+                else
+                    -- T_ANY fallback when $FfiC is not yet initialised
+                    bind_to(ctx, res_tid, ctx.T_ANY)
+                    return true
+                end
+            elseif mt.tag == TAG_TABLE then
                 local fe = types_mod.table_field(ctx, mid, name_id)
                 if fe then
                     field_types[#field_types + 1] = find(ctx, fe.type_id)

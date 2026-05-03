@@ -662,6 +662,10 @@ local function struct_equal(ctx, a, b, seen)
     if tag == TAG_NOMINAL then
         return ta.data[1] == tb.data[1]
     end
+    -- TAG_CDATA and TAG_FFIC are singletons per compilation unit:
+    -- any two nodes with the same tag are structurally equal.
+    if tag == TAG_CDATA then return true end
+    if tag == defs.TAG_FFIC then return true end
     -- Cycle detection for recursive types.
     seen = seen or {}
     local key = a .. ":" .. b
