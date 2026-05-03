@@ -5,7 +5,7 @@ end
 local ffi = require("ffi")
 local bit = require("bit")
 
-pcall(ffi.cdef, [[
+ffi.cdef[[
   int pipe(int pipefd[2]);
   int fork(void);
   int execvp(const char *file, char *const argv[]);
@@ -20,15 +20,18 @@ pcall(ffi.cdef, [[
   void _exit(int status);
   int setenv(const char *name, const char *value, int overwrite);
   int clearenv(void);
-]])
+]]
 
 local SIGTERM = 15
 local SIGKILL = 9
 local WNOHANG = 1
 
-local buf = ffi.new("char[65536]")
-local int1 = ffi.new("int[1]")
-local int2 = ffi.new("int[2]")
+--: integer & { [0]: integer }
+local buf = ffi.new("char[65536]") --[[: any]]
+--: { [0]: integer }
+local int1 = ffi.new("int[1]") --[[: any]]
+--: { [0]: integer, [1]: integer }
+local int2 = ffi.new("int[2]") --[[: any]]
 
 local mod = {}
 
@@ -41,7 +44,7 @@ local function read_fd(fd)
   while true do
     local n = ffi.C.read(fd, buf, 65536)
     if n <= 0 then break end
-    parts[#parts + 1] = ffi.string(buf, n)
+    parts[#parts + 1] = ffi.string(buf, n --[[:! integer]])
   end
   return table.concat(parts)
 end
@@ -66,9 +69,9 @@ function mod.exec(cmd, args, opts)
   opts = opts_
 
   -- create pipes: stdout, stderr, stdin (if needed)
-  local stdout_pipe = ffi.new("int[2]")
-  local stderr_pipe = ffi.new("int[2]")
-  local stdin_pipe = opts.stdin and ffi.new("int[2]") or nil
+  local stdout_pipe = (ffi.new("int[2]") --[[: any]]) --[[:! { [integer]: integer }]]
+  local stderr_pipe = (ffi.new("int[2]") --[[: any]]) --[[:! { [integer]: integer }]]
+  local stdin_pipe = (opts.stdin and ffi.new("int[2]") or nil) --[[: any]] --[[:! { [integer]: integer } | nil]]
 
   if ffi.C.pipe(stdout_pipe) ~= 0 then return nil, "pipe() failed for stdout" end
   if ffi.C.pipe(stderr_pipe) ~= 0 then
@@ -123,7 +126,9 @@ function mod.exec(cmd, args, opts)
 
     -- build argv: {cmd, args..., NULL}
     local nargs = args and #args or 0
-    local argv = ffi.new("const char*[?]", nargs + 2)
+    --: { [integer]: string | nil }
+    --: { [integer]: string | nil }
+    local argv = ffi.new("const char*[?]", nargs + 2) --[[: any]]
     argv[0] = cmd
     for i = 1, nargs do
       argv[i] = args[i]
@@ -207,7 +212,9 @@ function mod.spawn(cmd, args, opts)
     end
 
     local nargs = args and #args or 0
-    local argv = ffi.new("const char*[?]", nargs + 2)
+    --: { [integer]: string | nil }
+    --: { [integer]: string | nil }
+    local argv = ffi.new("const char*[?]", nargs + 2) --[[: any]]
     argv[0] = cmd
     for i = 1, nargs do
       argv[i] = args[i]
@@ -219,7 +226,8 @@ function mod.spawn(cmd, args, opts)
   end
 
   -- parent
-  return setmetatable({ pid = pid }, handle) --[[: any]] --[[:! Process]]
+  --: Process
+  return (setmetatable({ pid = pid }, handle) --[[: any]])
 end
 
 return mod

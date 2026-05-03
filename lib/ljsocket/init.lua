@@ -102,6 +102,7 @@ do
 		ljsocket_ffi = ffi.C
 	end
 
+	--: (string, string, (string | nil), (boolean | nil)) -> nil
 	local generic_function = function(C_name, cdef, alias, size_error_handling)
 		ffi.cdef(cdef)
 		alias = alias or C_name
@@ -393,12 +394,15 @@ do
 			--[[@field ioctlsocket fun(s: ffi.cdata*, cmd: integer, argp: ffi.cdata*): integer]]
 
 			local IOCPARM_MASK = 0x7
-			local IOC_IN = 0x80000000
+			local IOC_IN = bit.bnot(0x7fffffff)  -- 0x80000000 as integer via bit ops
 			local _IOW = function(x, y, t)
 				return bit.bor(IOC_IN, bit.lshift(bit.band(ffi.sizeof(t), IOCPARM_MASK), 16), bit.lshift(x, 8), y)
 			end
 
-			local FIONBIO = _IOW(string.byte("f"), 126, "uint32_t") --[[-2147195266 -- 2147772030ULL]]
+			local b_byte = string.byte("f")
+			--: integer
+			local b_byte_ = b_byte --[[:! integer]]
+			local FIONBIO = _IOW(b_byte_, 126, "uint32_t") --[[-2147195266 -- 2147772030ULL]]
 
 			socket.blocking = socket.blocking or function(fd, b)
 				local ret = ljsocket_ffi.ioctlsocket(fd, FIONBIO, ffi.new("int[1]", b and 0 or 1))
@@ -430,7 +434,7 @@ do
 			socket.lasterror = function(num)
 				num = num or ffi.errno()
 				if not cache[num] then
-					local err = ffi.string(ffi.C.strerror(num))
+					local err = ffi.C.strerror(num)
 					cache[num] = err == "" and tostring(num) or err
 				end
 				return cache[num], num

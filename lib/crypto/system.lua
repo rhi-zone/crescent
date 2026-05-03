@@ -22,8 +22,9 @@ do
 	if not lib then
 		local ldflags = --[[:! string ]] ((os and os.getenv and os.getenv("NIX_LDFLAGS")) or "")
 		for dir in ldflags:gmatch("-L(%S+)") do
+			local dir_ = dir --[[:! string]]
 			for _, suffix in ipairs({ "/libcrypto.so.3", "/libcrypto.so" }) do
-				local ok, l = pcall(ffi.load, dir .. suffix)
+				local ok, l = pcall(ffi.load, dir_ .. suffix)
 				if ok then lib = l; break end
 			end
 			if lib then break end
@@ -31,13 +32,16 @@ do
 	end
 	if not lib then
 		-- Try common NixOS system profile paths
+		local home = os and os.getenv and os.getenv("HOME")
 		local profiles = {
 			"/run/current-system/sw/lib",
-			(os and os.getenv and os.getenv("HOME")) and (os.getenv("HOME") .. "/.nix-profile/lib") or nil,
+			type(home) == "string" and (home --[[:! string]] .. "/.nix-profile/lib") or nil,
 		}
 		for _, dir in ipairs(profiles) do
+			if type(dir) ~= "string" then break end
+			local dir_ = dir --[[:! string]]
 			for _, suffix in ipairs({ "/libcrypto.so.3", "/libcrypto.so" }) do
-				local ok, l = pcall(ffi.load, dir .. suffix)
+				local ok, l = pcall(ffi.load, dir_ .. suffix)
 				if ok then lib = l; break end
 			end
 			if lib then break end
@@ -45,6 +49,8 @@ do
 	end
 end
 if not lib then error("libcrypto not found") end
+--: $FfiC
+lib = lib --[[:! $FfiC]]
 
 -- ── FFI declarations ────────────────────────────────────────────────────────
 
@@ -57,19 +63,19 @@ const void *EVP_aes_256_gcm(void);
 const void *EVP_chacha20_poly1305(void);
 
 int EVP_EncryptInit_ex(EVP_CIPHER_CTX *ctx, const void *type, void *impl,
-	const unsigned char *key, const unsigned char *iv);
-int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
-	const unsigned char *in, int inl);
-int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl);
+	const void *key, const void *iv);
+int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, void *out, int *outl,
+	const void *in, int inl);
+int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, void *out, int *outl);
 int EVP_CIPHER_CTX_ctrl(EVP_CIPHER_CTX *ctx, int type, int arg, void *ptr);
 
 int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const void *type, void *impl,
-	const unsigned char *key, const unsigned char *iv);
-int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
-	const unsigned char *in, int inl);
-int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl);
+	const void *key, const void *iv);
+int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, void *out, int *outl,
+	const void *in, int inl);
+int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, void *out, int *outl);
 
-int RAND_bytes(unsigned char *buf, int num);
+int RAND_bytes(void *buf, int num);
 ]]
 
 -- EVP_CTRL constants
@@ -80,12 +86,14 @@ local EVP_CTRL_AEAD_SET_TAG   = 0x11
 local TAG_LEN = 16
 
 -- Scratch buffers for outl parameter
-local outl_buf = ffi.new("int[1]")
+--: { [0]: integer }
+local outl_buf = ffi.new("int[1]") --[[: any]]
 
 -- ── Internal helpers ────────────────────────────────────────────────────────
 
---: (cdata, string, string, string, (string | nil)) -> (string, nil) | (nil, string)
+--: (cdata, string, string, string, (string | nil)) -> (string | nil, string | nil)
 local function aead_encrypt(cipher, key, nonce, plaintext, aad)
+	--: cdata
 	local ctx = lib.EVP_CIPHER_CTX_new()
 	if ctx == nil then return nil, "failed to create cipher context" end
 
@@ -116,7 +124,7 @@ local function aead_encrypt(cipher, key, nonce, plaintext, aad)
 	end
 
 	-- Encrypt plaintext
-	local ct_buf = ffi.new("unsigned char[?]", #plaintext + 16)
+	local ct_buf = ffi.new("unsigned char[?]", #plaintext + 16) --[[: any]]
 	if lib.EVP_EncryptUpdate(ctx, ct_buf, outl_buf, plaintext, #plaintext) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "EVP_EncryptUpdate failed"
@@ -131,17 +139,17 @@ local function aead_encrypt(cipher, key, nonce, plaintext, aad)
 	ct_len = ct_len + outl_buf[0]
 
 	-- Get tag
-	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN)
+	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[: any]]
 	if lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, TAG_LEN, tag_buf) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "failed to get tag"
 	end
 
 	lib.EVP_CIPHER_CTX_free(ctx)
-	return ffi.string(ct_buf, ct_len) .. ffi.string(tag_buf, TAG_LEN)
+	return ffi.string(ct_buf --[[:! integer & { [0]: integer }]], ct_len) .. ffi.string(tag_buf --[[:! integer & { [0]: integer }]], TAG_LEN)
 end
 
---: (cdata, string, string, string, (string | nil)) -> (string, nil) | (nil, string)
+--: (cdata, string, string, string, (string | nil)) -> (string | nil, string | nil)
 local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	if #ciphertext_with_tag < TAG_LEN then
 		return nil, "ciphertext too short"
@@ -151,6 +159,7 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	local ct = ciphertext_with_tag:sub(1, ct_len)
 	local tag = ciphertext_with_tag:sub(ct_len + 1)
 
+	--: cdata
 	local ctx = lib.EVP_CIPHER_CTX_new()
 	if ctx == nil then return nil, "failed to create cipher context" end
 
@@ -181,7 +190,7 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	end
 
 	-- Decrypt ciphertext
-	local pt_buf = ffi.new("unsigned char[?]", ct_len + 16)
+	local pt_buf = ffi.new("unsigned char[?]", ct_len + 16) --[[: any]]
 	if lib.EVP_DecryptUpdate(ctx, pt_buf, outl_buf, ct, ct_len) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "EVP_DecryptUpdate failed"
@@ -189,8 +198,8 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	local pt_len = outl_buf[0]
 
 	-- Set expected tag
-	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN)
-	ffi.copy(tag_buf, tag, TAG_LEN)
+	local tag_buf = ffi.new("unsigned char[?]", TAG_LEN) --[[: any]]
+	ffi.copy(tag_buf --[[: any]], tag --[[: any]], TAG_LEN)
 	if lib.EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, TAG_LEN, tag_buf) ~= 1 then
 		lib.EVP_CIPHER_CTX_free(ctx)
 		return nil, "failed to set tag"
@@ -204,21 +213,21 @@ local function aead_decrypt(cipher, key, nonce, ciphertext_with_tag, aad)
 	pt_len = pt_len + outl_buf[0]
 
 	lib.EVP_CIPHER_CTX_free(ctx)
-	return ffi.string(pt_buf, pt_len)
+	return ffi.string(pt_buf --[[:! integer & { [0]: integer }]], pt_len)
 end
 
 -- ── AES-256-GCM ─────────────────────────────────────────────────────────────
 
 local aes_gcm_cipher = lib.EVP_aes_256_gcm()
 
---: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string | nil, string | nil)
 function M.aes_gcm_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
 	return aead_encrypt(aes_gcm_cipher, key, nonce, plaintext, aad)
 end
 
---: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string | nil, string | nil)
 function M.aes_gcm_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -229,14 +238,14 @@ end
 
 local chacha_cipher = lib.EVP_chacha20_poly1305()
 
---: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string | nil, string | nil)
 function M.chacha20_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
 	return aead_encrypt(chacha_cipher, key, nonce, plaintext, aad)
 end
 
---: (string, string, string, (string | nil)) -> (string, nil) | (nil, string)
+--: (string, string, string, (string | nil)) -> (string | nil, string | nil)
 function M.chacha20_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32 then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -251,19 +260,13 @@ end
 
 local hmac = require("lib.hash.hmac")
 
--- Convert hex string to raw bytes.
---: (string) -> string
-local function hex_to_bytes(hex)
-	return (hex:gsub("..", function(h) return string.char(tonumber(h, 16)) end))
-end
-
 -- HMAC-SHA256 returning raw binary bytes.
 --: (string, string) -> string
 local function hmac_sha256_bin(key, msg)
 	return hmac.sha256_binary(key, msg)
 end
 
---: (string, (string | nil), (string | nil), (number | nil)) -> (string, nil) | (nil, string)
+--: (string, (string | nil), (string | nil), (integer | nil)) -> (string | nil, string | nil)
 function M.hkdf(ikm, salt, info, length)
 	length = length or 32
 	info = info or ""
@@ -271,10 +274,12 @@ function M.hkdf(ikm, salt, info, length)
 	if length <= 0 then return nil, "length must be positive" end
 
 	-- HKDF-Extract
-	if not salt or #salt == 0 then
+	if not salt or salt == "" then
 		salt = string.rep("\0", 32)
 	end
-	local prk = hmac_sha256_bin(salt, ikm)
+	--: string
+	local salt_ = salt --[[:! string]]
+	local prk = hmac_sha256_bin(salt_, ikm)
 
 	-- HKDF-Expand
 	local t = ""
@@ -290,10 +295,10 @@ end
 
 -- ── Random bytes ────────────────────────────────────────────────────────────
 
---: (number) -> (string, nil) | (nil, string)
+--: (integer) -> (string | nil, string | nil)
 function M.random_bytes(n)
 	if n <= 0 then return "" end
-	local buf = ffi.new("unsigned char[?]", n)
+	local buf = ffi.new("unsigned char[?]", n) --[[: any]]
 	if lib.RAND_bytes(buf, n) ~= 1 then
 		return nil, "RAND_bytes failed"
 	end
