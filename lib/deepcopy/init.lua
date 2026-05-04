@@ -15,14 +15,17 @@ local FROZEN = {}
 -- @param v any value
 -- @param opts? {transform?: (v,depth)->(new_val,bool)}
 -- @return copied value
+--: (unknown, ({ transform: unknown } | nil)) -> unknown
 function M.copy(v, opts)
   local visited = {}
-  local transform = opts and opts.transform
+  local transform_raw = opts and opts.transform
+  local transform = transform_raw --[[:! ((unknown, integer) -> (unknown, boolean)) | nil]]
 
   local function _copy(x, depth)
     if type(x) ~= "table" then
       if transform then
-        local nv, handled = transform(x, depth)
+        local transform_ = transform --[[:! (unknown, integer) -> (unknown, boolean)]]
+        local nv, handled = transform_(x, depth)
         if handled then return nv end
       end
       return x
@@ -30,7 +33,8 @@ function M.copy(v, opts)
     if visited[x] then return visited[x] end
 
     if transform then
-      local nv, handled = transform(x, depth)
+      local transform_ = transform --[[:! (unknown, integer) -> (unknown, boolean)]]
+      local nv, handled = transform_(x, depth)
       if handled then
         visited[x] = nv
         return nv
@@ -180,7 +184,7 @@ end
 -- @param b any (new)
 -- @return list of {path, old, new} tables
 function M.diff(a, b)
-  local changes = {}
+  local changes = {} --: { [integer]: any }
 
   local function _diff(x, y, path)
     if type(x) ~= "table" or type(y) ~= "table" then
@@ -253,7 +257,7 @@ end
 -- @return merged table
 function M.merge(...)
   local result = {}
-  local args = {...}
+  local args = {...} --: { [integer]: any }
   for i = 1, #args do
     local t = args[i]
     if type(t) == "table" then
@@ -269,8 +273,9 @@ end
 -- @param ... tables
 -- @return merged table
 function M.deep_merge(...)
-  local args = {...}
+  local args = {...} --: { [integer]: any }
 
+  --: (any, any) -> any
   local function _merge2(base, override)
     local result = {}
     for k, v in pairs(base) do
@@ -286,7 +291,8 @@ function M.deep_merge(...)
         if is_array then
           result[k] = M.copy(v)
         else
-          result[k] = _merge2(result[k], v)
+          local rk = result[k] --[[:! { [unknown]: unknown }]]
+          result[k] = _merge2(rk, v)
         end
       else
         result[k] = type(v) == "table" and M.copy(v) or v
@@ -296,9 +302,10 @@ function M.deep_merge(...)
   end
 
   if #args == 0 then return {} end
-  local result = M.copy(--[[: any]] args[1])
+  local result_raw = M.copy(args[1])
+  local result = result_raw --[[:! { [unknown]: unknown }]]
   for i = 2, #args do
-    result = _merge2(result, --[[: any]] args[i])
+    result = _merge2(result, args[i])
   end
   return result
 end
@@ -307,6 +314,7 @@ end
 
 -- Parse a path string like "user.profile.name" or "arr[1].x"
 -- Returns list of keys (strings or numbers)
+--: (string) -> { [integer]: unknown }
 local function parse_path(path)
   if path == "" or path == nil then return {} end
   local parts = {}
@@ -316,15 +324,18 @@ local function parse_path(path)
     -- bracket index: [N]
     local idx = s:match("^%[(%d+)%]")
     if idx then
-      parts[#parts + 1] = tonumber(idx)
-      s = s:sub(#idx + 3) -- skip [N]
+      local idx_ = idx --[[:! string]]
+      parts[#parts + 1] = tonumber(idx_)
+      s = s:sub(#idx_ + 3) -- skip [N]
       if s:sub(1, 1) == "." then s = s:sub(2) end
     else
       -- dot-separated key
       local key, rest = s:match("^([^%.%[]+)(.*)")
       if not key then break end
-      parts[#parts + 1] = key
-      s = rest
+      local key_ = key --[[:! string]]
+      local rest_ = rest --[[:! string]]
+      parts[#parts + 1] = key_
+      s = rest_
       if s:sub(1, 1) == "." then s = s:sub(2) end
     end
   end

@@ -10,6 +10,8 @@ local M = {}
 M._tier = "pure"
 
 local byte, char, sub, find, format, rep = string.byte, string.char, string.sub, string.find, string.format, string.rep
+--: (string, integer) -> integer
+local function byte1(s, i) return (string.byte(s, i, i) or 0) --[[:! integer]] end
 local concat, sort = table.concat, table.sort
 local floor, huge = math.floor, math.huge
 local type, tostring, pairs, ipairs, next = type, tostring, pairs, ipairs, next
@@ -167,44 +169,52 @@ end
 
 --: (string, integer, integer) -> (number | nil, integer | nil, string | nil)
 decode_number = function(s, i, n)
-	local j = i
+	local j = i --: integer
 	-- optional minus
 	if byte(s, j) == 0x2D then j = j + 1 end
-	if j > n then return nil, nil, "expected digit after '-'" end
+	local j1 = j --[[:! integer]]
+	if j1 > n then return nil, nil, "expected digit after '-'" end
 	-- integer part
-	local b = byte(s, j)
+	local b = byte1(s, j1)
 	if b == 0x30 then
-		j = j + 1  -- leading zero: only one allowed
+		j = j1 + 1  -- leading zero: only one allowed
 	elseif b >= 0x31 and b <= 0x39 then
-		j = j + 1
-		while j <= n and byte(s, j) >= 0x30 and byte(s, j) <= 0x39 do j = j + 1 end
+		j = j1 + 1
+		local j2 = j --[[:! integer]]
+		while j2 <= n and byte1(s, j2) >= 0x30 and byte1(s, j2) <= 0x39 do j2 = j2 + 1 end
+		j = j2
 	else
 		return nil, nil, "invalid number at position " .. i
 	end
 	-- fractional part
 	local is_float = false
-	if j <= n and byte(s, j) == 0x2E then -- '.'
+	local j3 = j --[[:! integer]]
+	if j3 <= n and byte(s, j3) == 0x2E then -- '.'
 		is_float = true
-		j = j + 1
-		if j > n or byte(s, j) < 0x30 or byte(s, j) > 0x39 then
-			return nil, nil, "expected digit after decimal point at position " .. j
+		j3 = j3 + 1
+		if j3 > n or byte1(s, j3) < 0x30 or byte1(s, j3) > 0x39 then
+			return nil, nil, "expected digit after decimal point at position " .. j3
 		end
-		while j <= n and byte(s, j) >= 0x30 and byte(s, j) <= 0x39 do j = j + 1 end
+		while j3 <= n and byte1(s, j3) >= 0x30 and byte1(s, j3) <= 0x39 do j3 = j3 + 1 end
 	end
 	-- exponent
-	if j <= n and (byte(s, j) == 0x65 or byte(s, j) == 0x45) then -- 'e' or 'E'
+	local j3e = j3 --[[:! integer]]
+	if j3e <= n and (byte(s, j3e) == 0x65 or byte(s, j3e) == 0x45) then -- 'e' or 'E'
 		is_float = true
-		j = j + 1
-		if j <= n and (byte(s, j) == 0x2B or byte(s, j) == 0x2D) then j = j + 1 end
-		if j > n or byte(s, j) < 0x30 or byte(s, j) > 0x39 then
-			return nil, nil, "expected digit in exponent at position " .. j
+		j3e = j3e + 1
+		local j4 = j3e --[[:! integer]]
+		if j4 <= n and (byte(s, j4) == 0x2B or byte(s, j4) == 0x2D) then j4 = j4 + 1 end
+		local j5 = j4 --[[:! integer]]
+		if j5 > n or byte1(s, j5) < 0x30 or byte1(s, j5) > 0x39 then
+			return nil, nil, "expected digit in exponent at position " .. j5
 		end
-		while j <= n and byte(s, j) >= 0x30 and byte(s, j) <= 0x39 do j = j + 1 end
+		while j5 <= n and byte1(s, j5) >= 0x30 and byte1(s, j5) <= 0x39 do j5 = j5 + 1 end
+		j3e = j5
 	end
-	local numstr = sub(s, i, j - 1)
+	local numstr = sub(s, i, j3e - 1)
 	local num = tonumber(numstr)
 	if num == nil then return nil, nil, "invalid number: " .. numstr end
-	return num, j, nil
+	return num, j3, nil
 end
 
 --: (string, integer, integer) -> (unknown, integer | nil, string | nil)
@@ -322,17 +332,17 @@ end
 
 local function encode_string(s)
 	local result = {}
-	local start = 1
-	local i = 1
-	local n = #s
+	local start = 1 --: integer
+	local i = 1 --: integer
+	local n = #s --: integer
 	while i <= n do
-		local b = byte(s, i)
+		local b = byte1(s, i)
 		local esc = ESCAPE[b]
 		if esc then
 			if i > start then result[#result + 1] = sub(s, start, i - 1) end
 			result[#result + 1] = esc
 			i = i + 1
-			start = i
+			start = i --[[:! integer]]
 		else
 			i = i + 1
 		end

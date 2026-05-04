@@ -55,7 +55,7 @@ end
 function M.unhex(s)
 	if #s % 2 ~= 0 then return nil end
 	if s:find("[^0-9a-fA-F]") then return nil end
-	local result = s:gsub("..", function(h) return string.char(tonumber(h, 16)) end)
+	local result = (s:gsub("..", function(h) return string.char((tonumber(h, 16) or 0) --[[:! integer]]) end)) --[[: string]]
 	return result
 end
 
@@ -110,7 +110,7 @@ end
 -- ── SHA-256 ──────────────────────────────────────────────────────────────────
 
 -- SHA-256 round constants (first 32 bits of fractional cube roots of primes 2..311).
-local SHA256_K = {
+local SHA256_K = { --: { [integer]: number }
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
 	0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
 	0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -130,7 +130,7 @@ local SHA256_K = {
 }
 
 -- SHA-256 initial hash values (first 32 bits of fractional sqrt of primes 2..19).
-local SHA256_H0 = {
+local SHA256_H0 = { --: { [integer]: number }
 	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
 	0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 }
@@ -140,7 +140,7 @@ local sha256_W = {} --: { [integer]: integer }
 for i = 1, 64 do sha256_W[i] = 0 end
 
 -- Compress one 64-byte SHA-256 block. h is an 8-element array of uint32 (signed via bit.*).
---: (string, integer, { [integer]: integer }) -> ()
+--: (string, integer, { [integer]: number }) -> ()
 local function sha256_compress(msg, offset, h)
 	local W = sha256_W
 	-- Load 16 big-endian words from msg at byte offset (1-based string).
@@ -157,8 +157,10 @@ local function sha256_compress(msg, offset, h)
 		W[i] = tobit(W[i - 16] + s0 + W[i - 7] + s1)
 	end
 
-	local a, b, c, d = h[1], h[2], h[3], h[4]
-	local e, f, g, hh = h[5], h[6], h[7], h[8]
+	local a = tobit(h[1]); local b = tobit(h[2])
+	local c = tobit(h[3]); local d = tobit(h[4])
+	local e = tobit(h[5]); local f = tobit(h[6])
+	local g = tobit(h[7]); local hh = tobit(h[8])
 
 	for i = 1, 64 do
 		local S1    = bxor(ror(e, 6), ror(e, 11), ror(e, 25))
@@ -181,9 +183,9 @@ local function sha256_compress(msg, offset, h)
 end
 
 -- Internal SHA-256 returning 8-word hash array.
---: (string) -> { [integer]: integer }
+--: (string) -> { [integer]: number }
 local function sha256_raw(data)
-	local h = {} --: { [integer]: integer }
+	local h = {} --: { [integer]: number }
 	for i = 1, 8 do h[i] = SHA256_H0[i] end
 
 	local len    = #data
@@ -220,7 +222,7 @@ function M.sha256_bytes(data)
 	local h   = sha256_raw(data)
 	local out = {}
 	for i = 1, 8 do
-		put_u32be(out, (i - 1) * 4 + 1, h[i])
+		put_u32be(out, (i - 1) * 4 + 1, tobit(h[i]))
 	end
 	local bytes = {}
 	for i = 1, 32 do bytes[i] = string.char(out[i]) end
@@ -239,7 +241,7 @@ end
 
 -- SHA-512 round constants (first 64 bits of cube roots of first 80 primes).
 -- Stored as {hi, lo} pairs (each 32-bit unsigned).
-local SHA512_K = {
+local SHA512_K = { --: { [integer]: { [integer]: number } }
 	{0x428a2f98, 0xd728ae22}, {0x71374491, 0x23ef65cd},
 	{0xb5c0fbcf, 0xec4d3b2f}, {0xe9b5dba5, 0x8189dbbc},
 	{0x3956c25b, 0xf348b538}, {0x59f111f1, 0xb605d019},
@@ -283,7 +285,7 @@ local SHA512_K = {
 }
 
 -- SHA-512 initial hash values (sqrt of primes 2..19).
-local SHA512_H0 = {
+local SHA512_H0 = { --: { [integer]: { [integer]: number } }
 	{0x6a09e667, 0xf3bcc908}, {0xbb67ae85, 0x84caa73b},
 	{0x3c6ef372, 0xfe94f82b}, {0xa54ff53a, 0x5f1d36f1},
 	{0x510e527f, 0xade682d1}, {0x9b05688c, 0x2b3e6c1f},
@@ -313,11 +315,12 @@ local function ror64(hi, lo, n)
 	if n >= 32 then
 		-- swap halves first, then rotate remainder
 		hi, lo = lo, hi
-		n = tobit(n - 32)
+		n = tobit(n - 32) --[[:! integer]]
 	end
 	if n == 0 then return hi, lo end
-	local nh = bor(rshift(tobit(hi), n), lshift(tobit(lo), 32 - n))
-	local nl = bor(rshift(tobit(lo), n), lshift(tobit(hi), 32 - n))
+	local n_ = n --[[:! integer]]
+	local nh = bor(rshift(tobit(hi), n_), lshift(tobit(lo), 32 - n_))
+	local nl = bor(rshift(tobit(lo), n_), lshift(tobit(hi), 32 - n_))
 	return unsigned(nh), unsigned(nl)
 end
 
@@ -328,8 +331,9 @@ local function shr64(hi, lo, n)
 	if n >= 32 then
 		return 0, rshift(tobit(hi), tobit(n - 32)) % 0x100000000
 	end
-	local nh = rshift(tobit(hi), n)
-	local nl = bor(rshift(tobit(lo), n), lshift(tobit(hi), 32 - n))
+	local n_ = n --[[:! integer]]
+	local nh = rshift(tobit(hi), n_)
+	local nl = bor(rshift(tobit(lo), n_), lshift(tobit(hi), 32 - n_))
 	return unsigned(nh), unsigned(nl)
 end
 
@@ -344,7 +348,14 @@ local function sha512_compress(msg, offset, h)
 	-- Load 16 big-endian 64-bit words (each word = 2 x 32-bit).
 	for i = 0, 15 do
 		local o = offset + i * 8
-		local a, b, c, d, e, f, g, hb = string.byte(msg, o + 1, o + 8)
+		local a  = (string.byte(msg, o + 1, o + 1) or 0) --[[:! integer]]
+		local b  = (string.byte(msg, o + 2, o + 2) or 0) --[[:! integer]]
+		local c  = (string.byte(msg, o + 3, o + 3) or 0) --[[:! integer]]
+		local d  = (string.byte(msg, o + 4, o + 4) or 0) --[[:! integer]]
+		local e  = (string.byte(msg, o + 5, o + 5) or 0) --[[:! integer]]
+		local f  = (string.byte(msg, o + 6, o + 6) or 0) --[[:! integer]]
+		local g  = (string.byte(msg, o + 7, o + 7) or 0) --[[:! integer]]
+		local hb = (string.byte(msg, o + 8, o + 8) or 0) --[[:! integer]]
 		W[i * 2 + 1] = a * 0x1000000 + b * 0x10000 + c * 0x100 + d  -- hi
 		W[i * 2 + 2] = e * 0x1000000 + f * 0x10000 + g * 0x100 + hb -- lo
 	end
@@ -443,7 +454,7 @@ end
 -- Internal SHA-512 returning flat hi/lo hash array.
 --: (string) -> { [integer]: number }
 local function sha512_raw(data)
-	local h = {}
+	local h = {} --: { [integer]: number }
 	for i = 1, 8 do h[(i-1)*2+1] = SHA512_H0[i][1]; h[(i-1)*2+2] = SHA512_H0[i][2] end
 
 	local len = #data
@@ -470,7 +481,7 @@ local function sha512_raw(data)
 			bits_lo % 256
 		)
 
-	local nblocks = #padded / 128
+	local nblocks = math.floor(#padded / 128)
 	for blk = 0, nblocks - 1 do
 		sha512_compress(padded, blk * 128, h)
 	end
@@ -503,7 +514,7 @@ end
 -- Generic HMAC construction (RFC 2104).
 -- hash_fn: function(string) -> raw_bytes.
 -- block_size: block size in bytes (64 for SHA-256, 128 for SHA-512).
---: ((string) -> string, number, string, string) -> string
+--: ((string) -> string, integer, string, string) -> string
 local function hmac(hash_fn, block_size, key, data)
 	-- Shorten key if longer than block size.
 	if #key > block_size then key = hash_fn(key) end
@@ -511,16 +522,18 @@ local function hmac(hash_fn, block_size, key, data)
 	if #key < block_size then key = key .. string.rep("\0", block_size - #key) end
 
 	-- Inner and outer padding.
-	local ipad_key = {}
-	local opad_key = {}
+	local ipad_key = {} --: { [integer]: string }
+	local opad_key = {} --: { [integer]: string }
 	for i = 1, block_size do
-		ipad_key[i] = string.char(bxor(string.byte(key, i), 0x36))
-		opad_key[i] = string.char(bxor(string.byte(key, i), 0x5c))
+		local kb_raw = string.byte(key, i, i) or 0
+		local kb = kb_raw --[[:! integer]]
+		ipad_key[i] = string.char(bxor(kb, 0x36))
+		opad_key[i] = string.char(bxor(kb, 0x5c))
 	end
-	ipad_key = table.concat(ipad_key)
-	opad_key = table.concat(opad_key)
+	local ipad_key_s = table.concat(ipad_key)
+	local opad_key_s = table.concat(opad_key)
 
-	return hash_fn(opad_key .. hash_fn(ipad_key .. data))
+	return hash_fn(opad_key_s .. hash_fn(ipad_key_s .. data))
 end
 
 -- HMAC-SHA256: returns 32-byte raw binary.
@@ -553,13 +566,14 @@ end
 -- password: string, salt: string, iterations: integer, key_len: integer.
 -- hash: "sha256" (default) or "sha512".
 -- Returns key_len raw bytes, or (nil, errmsg) on error.
---: (string, string, number, number, (string | nil)) -> string | (nil, string)
+--: (string, string, number, number, (string | nil)) -> (string | nil, string | nil)
 function M.pbkdf2(password, salt, iterations, key_len, hash)
 	hash = hash or "sha256"
 	if iterations < 1 then return nil, "iterations must be >= 1" end
 	if key_len < 1   then return nil, "key_len must be >= 1" end
 
-	local prf_raw, hlen
+	local prf_raw --: ((string, string) -> string) | nil
+	local hlen = 0 --: integer
 	if hash == "sha256" then
 		prf_raw = hmac_sha256_raw
 		hlen    = 32
@@ -569,8 +583,10 @@ function M.pbkdf2(password, salt, iterations, key_len, hash)
 	else
 		return nil, "unsupported hash: " .. tostring(hash)
 	end
+	if not prf_raw then return nil, "unsupported hash" end
+	local prf_raw_ = prf_raw --[[:! (string, string) -> string]]
 
-	local max_blocks = math.ceil(key_len / hlen)
+	local max_blocks = math.floor((key_len + hlen - 1) / hlen)
 	if max_blocks > 0xffffffff then return nil, "key_len too large" end
 
 	local blocks = {}
@@ -582,14 +598,18 @@ function M.pbkdf2(password, salt, iterations, key_len, hash)
 			math.floor(blk / 0x100)     % 256,
 			blk % 256
 		)
-		local u = prf_raw(password, salt_i)
+		local u = prf_raw_(password, salt_i)
 		local f = u
 		for _ = 2, iterations do
-			u = prf_raw(password, u)
+			u = prf_raw_(password, u)
 			-- XOR f with u byte-by-byte.
-			local ft = {}
+			local ft = {} --: { [integer]: string }
 			for j = 1, hlen do
-				ft[j] = string.char(bxor(string.byte(f, j), string.byte(u, j)))
+				local fb_raw = string.byte(f, j, j) or 0
+				local ub_raw = string.byte(u, j, j) or 0
+				local fb = fb_raw --[[:! integer]]
+				local ub = ub_raw --[[:! integer]]
+				ft[j] = string.char(bxor(fb, ub))
 			end
 			f = table.concat(ft)
 		end
@@ -597,7 +617,7 @@ function M.pbkdf2(password, salt, iterations, key_len, hash)
 	end
 
 	local result = table.concat(blocks)
-	return result:sub(1, key_len)
+	return result:sub(1, math.floor(key_len))
 end
 
 -- ── ChaCha20 ─────────────────────────────────────────────────────────────────
@@ -661,7 +681,7 @@ end
 -- ChaCha20 encrypt/decrypt (symmetric XOR).
 -- key: 32 bytes, nonce: 12 bytes, counter: integer, data: string.
 -- Returns ciphertext or (nil, errmsg).
---: (string, string, number, string) -> string | (nil, string)
+--: (string, string, integer, string) -> (string | nil, string | nil)
 function M.chacha20(key, nonce, counter, data)
 	if #key ~= 32   then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -676,7 +696,7 @@ function M.chacha20(key, nonce, counter, data)
 		local chunk_len = math.min(64, dlen - pos + 1)
 		local out       = {}
 		for i = 1, chunk_len do
-			out[i] = string.char(bxor(string.byte(data, pos + i - 1), string.byte(ks, i)))
+			out[i] = string.char(bxor((string.byte(data, pos + i - 1, pos + i - 1) or 0) --[[:! integer]], (string.byte(ks, i, i) or 0) --[[:! integer]]))
 		end
 		blocks[#blocks + 1] = table.concat(out)
 		pos = pos + 64
@@ -691,15 +711,10 @@ end
 -- double-precision overflow in the 130-bit accumulator arithmetic.
 
 local ffi_ok, ffi = pcall(require, "ffi")
-local u64, u64n
-if ffi_ok then
-	u64  = function(n) return ffi.new("uint64_t", n) end
-	u64n = function(v) return tonumber(v) end
-else
-	-- Fallback: may lose precision on large messages but not used here without FFI.
-	u64  = function(n) return n end
-	u64n = function(v) return v end
-end
+--: (number) -> number
+local function u64(n) if ffi_ok then return ffi.new("uint64_t", n) else return n end end
+--: (number) -> number
+local function u64n(v) if ffi_ok then return tonumber(v) or 0 else return v end end
 
 -- Poly1305 MAC.
 -- key: 32 bytes (r = key[1..16], s = key[17..32]).
@@ -708,19 +723,17 @@ end
 --: (string, string) -> string
 function M.poly1305(key, msg)
 	-- Parse and clamp r (little-endian, 4 x 32-bit words, clamped per spec).
-	local r0 = band(u32le(key, 0),  0x0fffffff)
-	local r1 = band(u32le(key, 4),  0x0ffffffc)
-	local r2 = band(u32le(key, 8),  0x0ffffffc)
-	local r3 = band(u32le(key, 12), 0x0ffffffc)
-	-- Make unsigned.
-	r0 = unsigned(r0); r1 = unsigned(r1); r2 = unsigned(r2); r3 = unsigned(r3)
+	local r0_ = unsigned(band(u32le(key, 0),  0x0fffffff))
+	local r1_ = unsigned(band(u32le(key, 4),  0x0ffffffc))
+	local r2_ = unsigned(band(u32le(key, 8),  0x0ffffffc))
+	local r3_ = unsigned(band(u32le(key, 12), 0x0ffffffc))
 
 	-- Decompose r into 5 x 26-bit limbs.
-	local rr0 = r0 % 0x4000000
-	local rr1 = (math.floor(r0 / 0x4000000) + r1 * 64) % 0x4000000
-	local rr2 = (math.floor(r1 / 0x100000)  + r2 * 4096) % 0x4000000
-	local rr3 = (math.floor(r2 / 0x4000)    + r3 * 262144) % 0x4000000
-	local rr4 = math.floor(r3 / 0x100)
+	local rr0 = r0_ % 0x4000000
+	local rr1 = (math.floor(r0_ / 0x4000000) + r1_ * 64) % 0x4000000
+	local rr2 = (math.floor(r1_ / 0x100000)  + r2_ * 4096) % 0x4000000
+	local rr3 = (math.floor(r2_ / 0x4000)    + r3_ * 262144) % 0x4000000
+	local rr4 = math.floor(r3_ / 0x100)
 
 	-- Precompute 5*r limbs.
 	local sr1 = rr1 * 5
@@ -735,7 +748,11 @@ function M.poly1305(key, msg)
 	local us3 = unsigned(u32le(key, 28))
 
 	-- Accumulator h (5 x 26-bit limbs).
-	local h0, h1, h2, h3, h4 = 0, 0, 0, 0, 0
+	local h0 = 0 --: number
+	local h1 = 0 --: number
+	local h2 = 0 --: number
+	local h3 = 0 --: number
+	local h4 = 0 --: number
 
 	local R0, R1, R2, R3, R4 = u64(rr0), u64(rr1), u64(rr2), u64(rr3), u64(rr4)
 	local S1, S2, S3, S4     = u64(sr1),  u64(sr2),  u64(sr3),  u64(sr4)
@@ -746,7 +763,10 @@ function M.poly1305(key, msg)
 		local chunk = math.min(16, mlen - pos)
 
 		-- Read block bytes as 4 little-endian uint32 words (unsigned).
-		local t0, t1, t2, t3 = 0, 0, 0, 0
+		local t0 = 0 --: number
+		local t1 = 0 --: number
+		local t2 = 0 --: number
+		local t3 = 0 --: number
 		if chunk >= 4 then
 			t0 = unsigned(u32le(msg, pos))
 		else
@@ -885,7 +905,7 @@ end
 -- ChaCha20-Poly1305 encrypt (RFC 8439 section 2.8).
 -- key: 32 bytes, nonce: 12 bytes, plaintext: string, aad: optional string.
 -- Returns ciphertext || 16-byte tag, or (nil, errmsg).
---: (string, string, string, (string | nil)) -> string | (nil, string)
+--: (string, string, string, (string | nil)) -> (string | nil, string | nil)
 function M.chacha20_poly1305_encrypt(key, nonce, plaintext, aad)
 	if #key ~= 32   then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -912,7 +932,7 @@ end
 
 -- ChaCha20-Poly1305 decrypt (RFC 8439 section 2.8).
 -- Returns plaintext or (nil, errmsg).
---: (string, string, string, (string | nil)) -> string | (nil, string)
+--: (string, string, string, (string | nil)) -> (string | nil, string | nil)
 function M.chacha20_poly1305_decrypt(key, nonce, ciphertext_with_tag, aad)
 	if #key ~= 32   then return nil, "key must be 32 bytes" end
 	if #nonce ~= 12 then return nil, "nonce must be 12 bytes" end
@@ -954,7 +974,7 @@ function M.ct_eq(a, b)
 	if #a ~= #b then return false end
 	local diff = 0
 	for i = 1, #a do
-		diff = bor(diff, bxor(string.byte(a, i), string.byte(b, i)))
+		diff = bor(diff, bxor((string.byte(a, i, i) or 0) --[[:! integer]], (string.byte(b, i, i) or 0) --[[:! integer]]))
 	end
 	return diff == 0
 end
