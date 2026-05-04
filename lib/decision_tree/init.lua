@@ -6,6 +6,11 @@ local M = {}
 
 M._tier = "pure"
 
+--:: LabelCounts = { [string]: integer }
+--:: LeafNode = { type: string, label: any, counts: LabelCounts, total: integer }
+--:: BranchNode = { type: string, feature: string, children: { [any]: any }, default_label: any, counts: LabelCounts, total: integer }
+--:: TreeNode = { type: string, label: any, counts: LabelCounts, total: integer, feature: string, children: { [any]: any }, default_label: any }
+
 -- Math helpers
 
 local function log2(x)
@@ -14,9 +19,9 @@ end
 
 -- Count label occurrences in a dataset
 local function count_labels(dataset)
-  local counts = {}
+  local counts = {} --: LabelCounts
   for _, ex in ipairs(dataset) do
-    local lbl = ex.label
+    local lbl = tostring(ex.label)
     counts[lbl] = (counts[lbl] or 0) + 1
   end
   return counts
@@ -28,7 +33,7 @@ local function majority_label(dataset)
   local best_lbl, best_cnt = nil, -1
   for lbl, cnt in pairs(counts) do
     if cnt > best_cnt then
-      best_lbl = lbl
+      best_lbl = lbl --[[: any]]
       best_cnt = cnt
     end
   end
@@ -40,7 +45,7 @@ local function entropy(dataset)
   local n = #dataset
   if n == 0 then return 0 end
   local counts = count_labels(dataset)
-  local h = 0
+  local h = 0 --: number
   for _, cnt in pairs(counts) do
     local p = cnt / n
     h = h - p * log2(p)
@@ -50,7 +55,7 @@ end
 
 -- Split dataset by feature value
 local function split_by_feature(dataset, feature)
-  local splits = {}  -- value -> subset
+  local splits = {} --: { [any]: { [integer]: any } }
   for _, ex in ipairs(dataset) do
     local v = ex[feature]
     if v == nil then v = "__nil__" end
@@ -66,7 +71,7 @@ local function information_gain(dataset, feature)
   local n = #dataset
   local h = entropy(dataset)
   local splits = split_by_feature(dataset, feature)
-  local cond_h = 0
+  local cond_h = 0 --: number
   for _, subset in pairs(splits) do
     cond_h = cond_h + (#subset / n) * entropy(subset)
   end
@@ -78,7 +83,7 @@ local function gain_ratio(dataset, feature)
   local n = #dataset
   local ig, splits = information_gain(dataset, feature)
   -- Split info
-  local si = 0
+  local si = 0 --: number
   for _, subset in pairs(splits) do
     local p = #subset / n
     if p > 0 then
@@ -145,7 +150,9 @@ local function build_tree(dataset, features, depth, max_depth, min_samples, algo
   end
 
   -- Choose best feature
-  local best_feature, best_score, best_splits = nil, -math.huge, nil
+  local best_feature = nil
+  local best_score = -math.huge --: number
+  local best_splits = nil --: { [any]: { [integer]: any } } | nil
   for _, f in ipairs(features) do
     local score, splits
     if algorithm == "c45" then
@@ -153,8 +160,9 @@ local function build_tree(dataset, features, depth, max_depth, min_samples, algo
     else
       score, splits = information_gain(dataset, f)
     end
-    if score > best_score then
-      best_score = score
+    local score_ = score --[[:! number]]
+    if score_ > best_score then
+      best_score = score_
       best_feature = f
       best_splits = splits
     end
@@ -173,8 +181,9 @@ local function build_tree(dataset, features, depth, max_depth, min_samples, algo
     end
   end
 
-  local children = {}
-  for val, subset in pairs(best_splits) do
+  local children = {} --: { [any]: any }
+  local best_splits_ = best_splits --[[:! { [any]: { [integer]: any } }]]
+  for val, subset in pairs(best_splits_) do
     children[val] = build_tree(subset, remaining, depth + 1, max_depth, min_samples, algorithm)
   end
 
@@ -190,52 +199,55 @@ end
 
 -- Traverse the tree to predict a label
 local function traverse(node, example)
-  if node.type == "leaf" then
-    return node.label
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then
+    return node_.label
   end
-  local v = example[node.feature]
+  local v = example[node_.feature]
   if v == nil then v = "__nil__" end
-  local child = node.children[v]
+  local child = node_.children[v]
   if not child then
-    return node.default_label
+    return node_.default_label
   end
-  return traverse(child, example)
+  return traverse(child --[[:! TreeNode]], example)
 end
 
 -- Traverse to get probability distribution
 local function traverse_proba(node, example)
-  if node.type == "leaf" then
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then
     -- Return counts as proba
-    local proba = {}
-    local total = node.total
+    local proba = {} --: { [string]: number }
+    local total = node_.total
     if total == 0 then return proba end
-    for lbl, cnt in pairs(node.counts) do
+    for lbl, cnt in pairs(node_.counts) do
       proba[lbl] = cnt / total
     end
     return proba
   end
-  local v = example[node.feature]
+  local v = example[node_.feature]
   if v == nil then v = "__nil__" end
-  local child = node.children[v]
+  local child = node_.children[v]
   if not child then
     -- Return distribution from this node
-    local proba = {}
-    local total = node.total
+    local proba = {} --: { [string]: number }
+    local total = node_.total
     if total == 0 then return proba end
-    for lbl, cnt in pairs(node.counts) do
+    for lbl, cnt in pairs(node_.counts) do
       proba[lbl] = cnt / total
     end
     return proba
   end
-  return traverse_proba(child, example)
+  return traverse_proba(child --[[:! TreeNode]], example)
 end
 
 -- Compute max depth of a tree
 local function tree_depth(node)
-  if node.type == "leaf" then return 0 end
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then return 0 end
   local max_d = 0
-  for _, child in pairs(node.children) do
-    local d = tree_depth(child)
+  for _, child in pairs(node_.children) do
+    local d = tree_depth(child --[[:! TreeNode]])
     if d > max_d then max_d = d end
   end
   return 1 + max_d
@@ -243,10 +255,11 @@ end
 
 -- Count total nodes
 local function tree_node_count(node)
-  if node.type == "leaf" then return 1 end
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then return 1 end
   local cnt = 1
-  for _, child in pairs(node.children) do
-    cnt = cnt + tree_node_count(child)
+  for _, child in pairs(node_.children) do
+    cnt = cnt + tree_node_count(child --[[:! TreeNode]])
   end
   return cnt
 end
@@ -254,19 +267,21 @@ end
 -- Feature importance: sum of weighted information gain at each split
 -- importance[feature] += (node.total / root.total) * IG contributed
 local function collect_importance(node, root_total, importance)
-  if node.type == "leaf" then return end
-  local f = node.feature
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then return end
+  local f = node_.feature
   -- Compute IG at this node
   -- We already know the feature; approximate contribution as weighted entropy reduction
-  local h_parent = 0
-  for _, cnt in pairs(node.counts) do
-    local p = cnt / node.total
+  local h_parent = 0 --: number
+  for _, cnt in pairs(node_.counts) do
+    local p = cnt / node_.total
     h_parent = h_parent - p * log2(p)
   end
-  local h_children = 0
-  for _, child in pairs(node.children) do
-    local p_child = child.total / node.total
-    local h_child = 0
+  local h_children = 0 --: number
+  for _, child_any in pairs(node_.children) do
+    local child = child_any --[[:! TreeNode]]
+    local p_child = child.total / node_.total
+    local h_child = 0 --: number
     for _, cnt in pairs(child.counts) do
       local p = cnt / child.total
       h_child = h_child - p * log2(p)
@@ -274,141 +289,149 @@ local function collect_importance(node, root_total, importance)
     h_children = h_children + p_child * h_child
   end
   local ig = h_parent - h_children
-  local weight = node.total / root_total
+  local weight = node_.total / root_total
   importance[f] = (importance[f] or 0) + weight * ig
 
-  for _, child in pairs(node.children) do
-    collect_importance(child, root_total, importance)
+  for _, child_any in pairs(node_.children) do
+    collect_importance(child_any --[[:! TreeNode]], root_total, importance)
   end
 end
 
 -- Normalize a table of scores to sum to 1
 local function normalize_scores(t)
-  local total = 0
-  for _, v in pairs(t) do total = total + v end
-  if total == 0 then return t end
-  local out = {}
-  for k, v in pairs(t) do out[k] = v / total end
+  local t_ = t --[[:! { [string]: number }]]
+  local total = 0 --: number
+  for _, v in pairs(t_) do total = total + v end
+  if total == 0 then return t_ end
+  local out = {} --: { [string]: number }
+  for k, v in pairs(t_) do out[k] = v / total end
   return out
 end
 
 -- Convert tree to if-then rules (depth-first, collect path)
 local function collect_rules(node, path, rules)
-  if node.type == "leaf" then
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then
     local conds = {}
     for _, cond in ipairs(path) do
       conds[#conds + 1] = cond
     end
     local rule
     if #conds == 0 then
-      rule = "IF TRUE THEN " .. tostring(node.label)
+      rule = "IF TRUE THEN " .. tostring(node_.label)
     else
-      rule = "IF " .. table.concat(conds, " AND ") .. " THEN " .. tostring(node.label)
+      rule = "IF " .. table.concat(conds, " AND ") .. " THEN " .. tostring(node_.label)
     end
     rules[#rules + 1] = rule
     return
   end
   -- Sort values for deterministic output
-  local vals = {}
-  for v in pairs(node.children) do vals[#vals + 1] = v end
+  local vals = {} --: { [integer]: string }
+  for v in pairs(node_.children) do vals[#vals + 1] = tostring(v) end
   table.sort(vals)
   for _, v in ipairs(vals) do
-    local display_v = v == "__nil__" and "nil" or tostring(v)
-    path[#path + 1] = node.feature .. "=" .. display_v
-    collect_rules(node.children[v], path, rules)
-    path[#path] = nil
+    local display_v = v == "__nil__" and "nil" or v
+    path[#path + 1] = node_.feature .. "=" .. display_v
+    collect_rules(node_.children[v] --[[:! TreeNode]], path, rules)
+    path[#path] = nil --[[: any]]
   end
 end
 
 -- Print tree as string
+--: (TreeNode, integer | nil, { [integer]: string } | nil) -> string
 local function tree_to_string(node, indent, lines)
-  indent = indent or 0
-  lines = lines or {}
-  local prefix = string.rep("  ", indent)
-  if node.type == "leaf" then
-    lines[#lines + 1] = prefix .. "[" .. tostring(node.label) .. "] (" .. node.total .. " samples)"
+  local node_ = node --[[:! TreeNode]]
+  local indent_ = indent or 0
+  local lines_ = lines or {} --: { [integer]: string }
+  local prefix = string.rep("  ", indent_)
+  if node_.type == "leaf" then
+    lines_[#lines_ + 1] = prefix .. "[" .. tostring(node_.label) .. "] (" .. tostring(node_.total) .. " samples)"
   else
-    lines[#lines + 1] = prefix .. node.feature .. ":"
-    local vals = {}
-    for v in pairs(node.children) do vals[#vals + 1] = v end
+    lines_[#lines_ + 1] = prefix .. node_.feature .. ":"
+    local vals = {} --: { [integer]: string }
+    for v in pairs(node_.children) do vals[#vals + 1] = tostring(v) end
     table.sort(vals)
     for _, v in ipairs(vals) do
-      local display_v = v == "__nil__" and "nil" or tostring(v)
-      lines[#lines + 1] = prefix .. "  " .. display_v .. " ->"
-      tree_to_string(node.children[v], indent + 2, lines)
+      local display_v = v == "__nil__" and "nil" or v
+      lines_[#lines_ + 1] = prefix .. "  " .. display_v .. " ->"
+      tree_to_string(node_.children[v] --[[:! TreeNode]], indent_ + 2, lines_)
     end
   end
-  return table.concat(lines, "\n")
+  return table.concat(lines_, "\n")
 end
 
 -- Serialize tree to plain Lua table (recursive)
 local function serialize_node(node)
-  if node.type == "leaf" then
-    local counts = {}
-    for k, v in pairs(node.counts) do counts[k] = v end
-    return {type="leaf", label=node.label, counts=counts, total=node.total}
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then
+    local counts = {} --: LabelCounts
+    for k, v in pairs(node_.counts) do counts[k] = v end
+    return {type="leaf", label=node_.label, counts=counts, total=node_.total}
   end
-  local children = {}
-  for v, child in pairs(node.children) do
-    children[v] = serialize_node(child)
+  local children = {} --: { [any]: any }
+  for v, child in pairs(node_.children) do
+    children[v] = serialize_node(child --[[:! TreeNode]])
   end
-  local counts = {}
-  for k, v in pairs(node.counts) do counts[k] = v end
+  local counts = {} --: LabelCounts
+  for k, v in pairs(node_.counts) do counts[k] = v end
   return {
     type = "branch",
-    feature = node.feature,
+    feature = node_.feature,
     children = children,
-    default_label = node.default_label,
+    default_label = node_.default_label,
     counts = counts,
-    total = node.total,
+    total = node_.total,
   }
 end
 
 -- Deserialize from plain Lua table
 local function deserialize_node(t)
-  if t.type == "leaf" then
-    return {type="leaf", label=t.label, counts=t.counts, total=t.total}
+  local t_ = t --[[:! TreeNode]]
+  if t_.type == "leaf" then
+    return {type="leaf", label=t_.label, counts=t_.counts, total=t_.total}
   end
-  local children = {}
-  for v, child in pairs(t.children) do
-    children[v] = deserialize_node(child)
+  local children = {} --: { [any]: any }
+  for v, child in pairs(t_.children) do
+    children[v] = deserialize_node(child --[[:! TreeNode]])
   end
   return {
     type = "branch",
-    feature = t.feature,
+    feature = t_.feature,
     children = children,
-    default_label = t.default_label,
-    counts = t.counts,
-    total = t.total,
+    default_label = t_.default_label,
+    counts = t_.counts,
+    total = t_.total,
   }
 end
 
 -- Reduced-error pruning (recursive)
 -- Returns new node; prunes if replacing subtree with leaf improves/maintains val accuracy
 local function prune_node(node, val_dataset)
-  if node.type == "leaf" then return node end
+  local node_ = node --[[:! TreeNode]]
+  if node_.type == "leaf" then return node_ end
 
   -- Prune children first
-  local pruned_children = {}
-  for v, child in pairs(node.children) do
+  local pruned_children = {} --: { [any]: any }
+  for v, child in pairs(node_.children) do
     -- Get subset of val_dataset reaching this child
     local subset = {}
     for _, ex in ipairs(val_dataset) do
-      local ev = ex[node.feature]
+      local ev = ex[node_.feature]
       if ev == nil then ev = "__nil__" end
       if ev == v then subset[#subset + 1] = ex end
     end
-    pruned_children[v] = prune_node(child, subset)
+    pruned_children[v] = prune_node(child --[[:! TreeNode]], subset)
   end
 
   -- Build pruned branch node
   local pruned = {
     type = "branch",
-    feature = node.feature,
+    feature = node_.feature,
     children = pruned_children,
-    default_label = node.default_label,
-    counts = node.counts,
-    total = node.total,
+    default_label = node_.default_label,
+    counts = node_.counts,
+    total = node_.total,
+    label = nil, --[[: any]]
   }
 
   -- Count correct predictions with current subtree
@@ -442,27 +465,31 @@ local Tree = {}
 Tree.__index = Tree
 
 function Tree:predict(example)
-  return traverse(self._root, example)
+  local root_ = self._root --[[:! TreeNode]]
+  return traverse(root_, example)
 end
 
 function Tree:predict_proba(example)
-  return traverse_proba(self._root, example)
+  local root_ = self._root --[[:! TreeNode]]
+  return traverse_proba(root_, example)
 end
 
 function Tree:predict_all(examples)
+  local root_ = self._root --[[:! TreeNode]]
   local results = {}
   for i, ex in ipairs(examples) do
-    results[i] = traverse(self._root, ex)
+    results[i] = traverse(root_, ex)
   end
   return results
 end
 
 function Tree:accuracy(test_dataset)
+  local root_ = self._root --[[:! TreeNode]]
   local correct = 0
   local total = #test_dataset
   if total == 0 then return 1.0 end
   for _, ex in ipairs(test_dataset) do
-    if traverse(self._root, ex) == ex.label then
+    if traverse(root_, ex) == ex.label then
       correct = correct + 1
     end
   end
@@ -470,31 +497,38 @@ function Tree:accuracy(test_dataset)
 end
 
 function Tree:depth()
-  return tree_depth(self._root)
+  local root_ = self._root --[[:! TreeNode]]
+  return tree_depth(root_)
 end
 
 function Tree:node_count()
-  return tree_node_count(self._root)
+  local root_ = self._root --[[:! TreeNode]]
+  return tree_node_count(root_)
 end
 
 function Tree:feature_importance()
-  local importance = {}
-  collect_importance(self._root, self._root.total, importance)
+  local root_ = self._root --[[:! TreeNode]]
+  local importance = {} --: { [string]: number }
+  collect_importance(root_, root_.total, importance)
   return normalize_scores(importance)
 end
 
 function Tree:print()
-  return tree_to_string(self._root)
+  local root_ = self._root --[[:! TreeNode]]
+  return tree_to_string(root_, nil, nil)
 end
 
 function Tree:to_rules()
-  local rules = {}
-  collect_rules(self._root, {}, rules)
+  local root_ = self._root --[[:! TreeNode]]
+  local rules = {} --: { [integer]: string }
+  local path = {} --: { [integer]: string }
+  collect_rules(root_, path, rules)
   return rules
 end
 
 function Tree:serialize()
-  return serialize_node(self._root)
+  local root_ = self._root --[[:! TreeNode]]
+  return serialize_node(root_)
 end
 
 -- Main train function
@@ -509,8 +543,9 @@ function M.train(dataset, opts)
   if not features then
     features = get_all_features(dataset)
   end
+  local features_ = features --[[:! { [integer]: string }]]
 
-  local root = build_tree(dataset, features, 0, max_depth, min_samples, algorithm)
+  local root = build_tree(dataset, features_, 0, max_depth, min_samples, algorithm)
   local tree = setmetatable({_root = root}, Tree)
   return tree
 end
@@ -531,15 +566,17 @@ local Forest = {}
 Forest.__index = Forest
 
 function Forest:predict(example)
-  local votes = {}
-  for _, tree in ipairs(self._trees) do
-    local lbl = tree:predict(example)
+  local trees_ = self._trees --[[:! { [integer]: any }]]
+  local votes = {} --: { [string]: integer }
+  for _, tree in ipairs(trees_) do
+    local tree_ = tree --[[: any]]
+    local lbl = tostring(tree_:predict(example))
     votes[lbl] = (votes[lbl] or 0) + 1
   end
   local best_lbl, best_cnt = nil, -1
   for lbl, cnt in pairs(votes) do
     if cnt > best_cnt then
-      best_lbl = lbl
+      best_lbl = lbl --[[: any]]
       best_cnt = cnt
     end
   end
@@ -547,15 +584,17 @@ function Forest:predict(example)
 end
 
 function Forest:predict_proba(example)
-  local sum_proba = {}
-  local n = #self._trees
-  for _, tree in ipairs(self._trees) do
-    local proba = tree:predict_proba(example)
+  local trees_ = self._trees --[[:! { [integer]: any }]]
+  local sum_proba = {} --: { [string]: number }
+  local n = #trees_
+  for _, tree in ipairs(trees_) do
+    local tree_ = tree --[[: any]]
+    local proba = tree_:predict_proba(example) --[[:! { [string]: number }]]
     for lbl, p in pairs(proba) do
       sum_proba[lbl] = (sum_proba[lbl] or 0) + p
     end
   end
-  local avg = {}
+  local avg = {} --: { [string]: number }
   for lbl, total in pairs(sum_proba) do
     avg[lbl] = total / n
   end
@@ -563,11 +602,23 @@ function Forest:predict_proba(example)
 end
 
 function Forest:accuracy(test_dataset)
+  local trees_ = self._trees --[[:! { [integer]: any }]]
   local correct = 0
   local total = #test_dataset
   if total == 0 then return 1.0 end
   for _, ex in ipairs(test_dataset) do
-    if self:predict(ex) == ex.label then
+    -- predict by voting directly to avoid self-type issue
+    local votes = {} --: { [string]: integer }
+    for _, tree in ipairs(trees_) do
+      local tree_ = tree --[[: any]]
+      local lbl = tostring(tree_:predict(ex))
+      votes[lbl] = (votes[lbl] or 0) + 1
+    end
+    local best_lbl, best_cnt = nil, -1
+    for lbl, cnt in pairs(votes) do
+      if cnt > best_cnt then best_lbl = lbl; best_cnt = cnt end
+    end
+    if best_lbl == ex.label then
       correct = correct + 1
     end
   end
@@ -575,15 +626,17 @@ function Forest:accuracy(test_dataset)
 end
 
 function Forest:feature_importance()
-  local sum_importance = {}
-  local n = #self._trees
-  for _, tree in ipairs(self._trees) do
-    local imp = tree:feature_importance()
+  local trees_ = self._trees --[[:! { [integer]: any }]]
+  local sum_importance = {} --: { [string]: number }
+  local n = #trees_
+  for _, tree in ipairs(trees_) do
+    local tree_ = tree --[[: any]]
+    local imp = tree_:feature_importance() --[[:! { [string]: number }]]
     for f, score in pairs(imp) do
       sum_importance[f] = (sum_importance[f] or 0) + score
     end
   end
-  local avg = {}
+  local avg = {} --: { [string]: number }
   for f, total in pairs(sum_importance) do
     avg[f] = total / n
   end
@@ -591,11 +644,12 @@ function Forest:feature_importance()
 end
 
 -- Simple LCG RNG (no external deps)
+--: (integer | nil) -> any
 local function make_rng(seed)
-  local state = seed or 12345
+  local state = (seed or 12345) --[[:! integer]]
   return {
     next = function(self)
-      state = (state * 1664525 + 1013904223) % (2^32)
+      state = math.floor((state * 1664525 + 1013904223) % (2^32)) --[[:! integer]]
       return state
     end,
     float = function(self)
@@ -657,10 +711,12 @@ function M.forest(dataset, opts)
   local min_samples = opts.min_samples or 1
   local seed = opts.seed or 42
 
-  local all_features = opts.features or get_all_features(dataset)
+  local all_features_raw = opts.features or get_all_features(dataset)
+  local all_features = all_features_raw --[[:! { [integer]: string }]]
   local k = resolve_max_features(max_features_spec, #all_features)
 
-  local rng = make_rng(seed)
+  local seed_ = (seed or 42) --[[:! integer]]
+  local rng = make_rng(seed_)
   local trees = {}
 
   for i = 1, num_trees do
