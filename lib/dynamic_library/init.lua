@@ -17,9 +17,7 @@ char* dlerror(void);
 ---@field dlclose fun(handle: ptr_c<nil>): number
 ---@field dlerror fun(): string_c
 
----@type dl_ffi
----@diagnostic disable-next-line: assign-type-mismatch
-local dl_ffi = ffi.C
+local dl_ffi = ffi.C --[[: any]]
 
 local RTLD_LAZY = 1
 

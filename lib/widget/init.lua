@@ -107,10 +107,11 @@ end
 function M.dynamic(init_state, widget)
 	return function(signal)
 		local state_sig = R.signal(init_state)
+		local state_sig_ = state_sig --[[: any]]
 
 		-- Combined signal: {state=S, value=A}
 		local combined = R.computed(function()
-			return { state = state_sig.get(), value = signal.get() }
+			return { state = state_sig_.get(), value = signal.get() }
 		end, { state_sig, signal })
 
 		-- Expose state setter on the combined signal so child can update state.
@@ -124,9 +125,9 @@ function M.dynamic(init_state, widget)
 		wrapped.focus     = combined.focus
 		wrapped.narrow    = combined.narrow
 		-- set_state(s): update only the local state portion
-		wrapped.set_state = function(s) state_sig.set(s) end
+		wrapped.set_state = function(s) state_sig_.set(s) end
 		-- update_state(f): apply f to current local state
-		wrapped.update_state = function(f) state_sig.update(f) end
+		wrapped.update_state = function(f) state_sig_.update(f) end
 		-- dispose the computed when scope exits
 		M.register(function() combined.dispose() end)
 

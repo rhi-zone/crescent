@@ -61,6 +61,8 @@ end
 -- Machine constructor
 -- ---------------------------------------------------------------------------
 
+--:: Machine = { _prog: { [integer]: unknown }, _size: integer, _stack: { [integer]: unknown }, _sp: integer, _pc: integer, _env: { [string]: unknown }, _halted: boolean, _call_stack: { [integer]: integer }, step: (Machine) -> boolean }
+
 local Machine = {}
 Machine.__index = Machine
 
@@ -274,33 +276,37 @@ end
 
 -- Execute one instruction.  Returns false if halted, true otherwise.
 function Machine:step()
-  if self._halted then return false end
-  local pc = self._pc
-  if pc > self._size then
-    self._halted = true
+  local self_ = self --[[:! Machine]]
+  if self_._halted then return false end
+  local pc = self_._pc
+  if pc > self_._size then
+    self_._halted = true
     return false
   end
-  local instr = self._prog[pc]
-  self._pc = pc + 1
-  local h = handlers[instr.op]
-  if not h then
-    error("vm: unknown opcode '" .. tostring(instr.op) .. "'")
+  local instr = self_._prog[pc]
+  self_._pc = pc + 1
+  local h = handlers --[[: any]]
+  local hfn = h[instr --[[: any]]]
+  if not hfn then
+    error("vm: unknown opcode '" .. tostring(instr --[[: any]]) .. "'")
   end
-  h(self, instr)
-  return not self._halted
+  hfn(self_, instr)
+  return not self_._halted
 end
 
 -- Execute n instructions (or until halted).
 function Machine:steps(n)
+  local self_ = self --[[:! Machine]]
   for _ = 1, n do
-    if not self:step() then break end
+    if not self_:step() then break end
   end
 end
 
 -- Run until HALT or end of program.
 function Machine:run()
-  while not self._halted do
-    if not self:step() then break end
+  local self_ = self --[[:! Machine]]
+  while not self_._halted do
+    if not self_:step() then break end
   end
 end
 

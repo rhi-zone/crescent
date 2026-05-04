@@ -278,20 +278,21 @@ end
 -- Generic CRC
 -- ---------------------------------------------------------------------------
 
+--:: GenericCrcOpts = { poly: integer, width: integer, init: integer | nil, refin: boolean | nil, refout: boolean | nil, xorout: integer | nil }
+
 --- Generic CRC computation (width 8, 16, or 32).
---- @param data string
---- @param opts table  {poly, width, init=0, refin=true, refout=true, xorout=0}
---- @return number
+--: (string, GenericCrcOpts) -> (number | nil, string | nil)
 function M.generic(data, opts)
-  if not opts or not opts.poly or not opts.width then
+  local opts_ = opts --[[:! GenericCrcOpts]]
+  if not opts_ or not opts_.poly or not opts_.width then
     return nil, "opts.poly and opts.width are required"
   end
-  local poly   = opts.poly
-  local width  = opts.width
-  local init   = opts.init   or 0
-  local refin  = opts.refin  ~= false  -- default true
-  local refout = opts.refout ~= false  -- default true
-  local xorout = opts.xorout or 0
+  local poly   = opts_.poly --[[:! integer]]
+  local width  = opts_.width --[[:! integer]]
+  local init   = opts_.init   or 0
+  local refin  = opts_.refin  ~= false  -- default true
+  local refout = opts_.refout ~= false  -- default true
+  local xorout = opts_.xorout or 0
   local mask   = width == 32 and 0xFFFFFFFF or (lshift(1, width) - 1)
 
   local tbl
@@ -301,26 +302,31 @@ function M.generic(data, opts)
     tbl = make_normal_table(poly, width)
   end
 
-  local crc = init
+  local crc = init --: integer
   if refin then
     for i = 1, #data do
-      local byte = string.byte(data, i)
+      local byte = (string.byte(data, i)) or 0 --[[:! integer]]
       local idx = band(bxor(crc, byte), 0xFF)
       crc = bxor(rshift(crc, 8), tbl[idx])
     end
   else
     for i = 1, #data do
-      local byte = string.byte(data, i)
-      local idx = band(bxor(rshift(crc, width - 8), byte), 0xFF)
+      local byte = (string.byte(data, i)) or 0 --[[:! integer]]
+      local width_ = width --[[:! integer]]
+      local idx = band(bxor(rshift(crc, width_ - 8), byte), 0xFF)
       crc = bxor(lshift(crc, 8), tbl[idx])
       crc = band(crc, mask)
     end
   end
 
   if refout ~= refin then
-    crc = reflect(crc, width)
+    local crc_ = crc --[[:! integer]]
+    local width_ = width --[[:! integer]]
+    crc = reflect(crc_, width_)
   end
-  local result = bxor(band(crc, mask), xorout)
+  local crc_ = crc --[[:! integer]]
+  local xorout_ = xorout --[[:! integer]]
+  local result = bxor(band(crc_, mask), xorout_)
   -- Normalise to unsigned double for 32-bit results.
   if width == 32 then return u32(result) end
   return result
