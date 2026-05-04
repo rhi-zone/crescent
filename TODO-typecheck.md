@@ -55,7 +55,7 @@ boundary, or annotating local arrays of bytes as `integer[]`/`uint8_t[]`.
 - [x] `lib/blake2/init.lua` (145 → 49) — annotated b_compress/s_compress v and m tables; replaced rejected force cast on ffi.typeof
 - [x] `lib/bignum/init.lua` (95 → 89) — bind string.byte() multi-return to single locals before arithmetic
 - [x] `lib/matrix/init.lua` (72 → 48) — annotated self: matrix on methods accessing _rows/_cols/_data
-- [ ] `lib/protocol_buffer/init.lua` (79) — 36 arithmetic — see SKIP note (cascading integer|nil from decode_varint)
+- [x] `lib/protocol_buffer/init.lua` (79 → 0) — annotated decode_varint/decode_signed_varint return types; force-casts after nil-checks; math.floor for number→integer; expanded encode_varint_signed to named locals; typed msg/fields/arr
 - [x] `lib/bits/init.lua` (76 → 0) — already fixed in prior session (confirmed 0 errors at session start)
 - [x] `lib/midi/init.lua` (90 → 0) — already fixed in prior session (confirmed 0 errors at session start)
 
@@ -82,6 +82,9 @@ last because the type system itself is the testbed.
 - ~~`lib/asn1/init.lua`~~ — done (session N+4)
 - ~~`lib/columnar/init.lua`~~ — done (session N+4)
 - `lib/ai/providers/anthropic.lua` (28) — json.decode returns unknown; field access on unknown can't be cast with --[[: any]] (need --[[:! T]]); pervasive cascade; skip until json.decode return type is narrowable
+- [x] `lib/multiset/init.lua` (1 → 0) — changed ms:add(v) to MT.add(ms, v) in M.from (setmetatable return not resolved by checker)
+- [x] `lib/http/format/form_urlencode.lua` (2 → 0) — annotated req param with concrete shape including method/headers/body
+- [x] `lib/stb/pure/image.lua` (2 → 0) — corrected return annotation to match stub-only implementation
 - `lib/ai/providers/google.lua` (50) — same json.decode cascade pattern; skip
 - `lib/ai/providers/openai_compat.lua` (43) — similar; skip
 - `lib/argon2/init.lua` (54) — FFI + unknown cascade; skip
