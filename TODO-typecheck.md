@@ -187,6 +187,26 @@ last because the type system itself is the testbed.
 - [x] `lib/unified/retext_repeated_words/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any; cast node.children
 - [x] `lib/unified/retext_sentence_spacing/init.lua` (2 → 0, commit 8ace416) — cast nlcst to any; cast node.children
 - `lib/dns/format.lua` (60) — skipped: adding bit require triggers cascade from typed bit.lshift/rshift requiring integer args; pervasive `s:byte(i)` returns `integer | nil` cascades; too many changes needed
+- [x] `lib/rehype_xast/init.lua` (5 → 0, commit 2e2074d) — cast xast to any; cast node.children
+- [x] `lib/unified/retext_readability/init.lua` (5 → 0, commit 2e2074d) — cast nlcst to any; cast node.children; annotate collect_stats return
+- [x] `lib/unified/unist_util_visit/init.lua` (5 → 0, commit 2e2074d) — i = result cast; walk via any for nil parent; exit_fn return cast
+- [x] `lib/css/property.lua` (6 → 0, commit df64711) — replace table annotations; tostring(rule.syntax); gsub capture; cast sheet.items
+- [x] `lib/formats/ccv2/adapters/import.lua` (6 → 0, commit df64711) — replace table annotations; cast data after nil-guard; lorebook any
+- [x] `lib/unified/rehype_format/init.lua` (4 → 0, commit 2236722) — boolean return fix; integer depth annotation; cast node.children
+- [x] `lib/formats/ccv2/adapters/export.lua` (4 → 0, commit 2236722) — replace table annotations; split entries check
+- [x] `lib/unified/remark_squeeze_paragraphs/init.lua` (4 → 0, commit 2236722) — cast node.children
+- [x] `lib/unified/init.lua` (4 → 0, commit 2236722) — cast self for P:use and process
+- [x] `lib/merge/init.lua` (5 → 0, commit d50825e) — replace table annotation
+- [x] `lib/ndjson/init.lua` (5 → 0, commit d50825e) — cast json to any
+- [x] `lib/roman/init.lua` (5 → 0, commit d50825e) — annotate SYMBOL_VALUE; typed parts; or-0 cast
+- [x] `lib/format/json/schema.lua` (5 → 0, commit aa3073a) — src_/t_ typed locals; use src_:sub; cast pos
+- [x] `lib/socket/server.lua` (5 → 0, commit aa3073a) — cast socket/epoll_ to any; annotate opts_; use epoll_any; cast remove via any
+- [x] `lib/hyperloglog/init.lua` (4 → 1, commit 2aa6f73) — cast self._m/_regs/_alpha; E phi-join; bit global unfixable
+- [x] `lib/lru_cache/init.lua` (4 → 0, commit 2aa6f73) — self_ cast in Cache:set/delete
+- [x] `lib/unified/retext_keywords/init.lua` (4 → 0, commit 2aa6f73) — cast nlcst; node.children; maximum/freq casts
+- [x] `lib/unified/retext_sentiment/init.lua` (4 → 0, commit 2aa6f73) — cast nlcst; node.children; cast score
+- [x] `lib/encode/urlencode/init.lua` (5 → 0, commit eaad401) — rename param; math.floor div; hex_alphabet annotation; gsub any-intermediate
+- [x] `lib/hash/hmac/init.lua` (6 → 2, commit eaad401) — block_size cast; sa/sb as number; bit global remaining
 
 ## Done in current session (session N+33)
 
