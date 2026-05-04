@@ -15,7 +15,7 @@ M.MIN = 1
 M.MAX = 3999
 
 -- Symbol values for decoding (uppercase)
-local SYMBOL_VALUE = {
+local SYMBOL_VALUE = { --: { [string]: integer }
   I = 1, V = 5, X = 10, L = 50, C = 100, D = 500, M = 1000,
 }
 
@@ -61,7 +61,7 @@ M.encode = function(n, opts)
 
   opts = opts or {}
   local table = opts.additive and ADDITIVE or SUBTRACTIVE
-  local parts = {}
+  local parts = {} --: { [integer]: string }
   local remaining = n
 
   for _, pair in ipairs(table) do
@@ -103,8 +103,8 @@ M.decode = function(s)
   local total = 0
   local len = #upper
   for i = 1, len do
-    local cur = SYMBOL_VALUE[upper:sub(i, i)]
-    local nxt = i < len and SYMBOL_VALUE[upper:sub(i + 1, i + 1)] or 0
+    local cur = (SYMBOL_VALUE[upper:sub(i, i)] or 0) --[[:! integer]]
+    local nxt = (i < len and SYMBOL_VALUE[upper:sub(i + 1, i + 1)] or 0) --[[:! integer]]
     if cur < nxt then
       total = total - cur
     else
