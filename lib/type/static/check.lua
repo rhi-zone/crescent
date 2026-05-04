@@ -191,6 +191,19 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     --: { [string]: string | nil, ... }
     local dep_hashes = {}
 
+    -- Include globals_files (stdlib_types.lua etc.) in dep_hashes so that
+    -- changes to stdlib invalidate cached .cri entries for all user files.
+    --: { [integer]: string, ... } | nil
+    local globals_files = opts and (opts --[[: any]]).globals_files
+    if globals_files then
+        for _, gpath in ipairs(globals_files) do
+            if not dep_hashes[gpath] then
+                local h = cache_mod.hash_file(gpath)
+                if h then dep_hashes[gpath] = h end
+            end
+        end
+    end
+
     -- Build a cri_loader for require() type resolution.
     -- Recursively checks dependencies and caches their export types.
     -- Also records the source hash of each resolved dep into dep_hashes.
