@@ -47,7 +47,7 @@ end
 --- Useful for passing standard Lua iterators to zip/chain which accept
 --- two closures. Our constructors already return closures, so wrap is
 --- only needed for raw triples like pairs(t) or next, t.
---: <S, V>((S, V) -> V, S, V) -> () -> V
+--: ((...unknown) -> unknown, unknown, unknown) -> () -> unknown
 function iter.wrap(f, s, c)
   return function()
     local v = f(s, c)
@@ -62,7 +62,7 @@ end
 ----------------------------------------------------------------
 
 --- Apply fn to each value.
---: <S, V, W>((V) -> W, (S, V) -> V, S, V) -> () -> W
+--: ((unknown) -> unknown, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
 function iter.map(fn, f, s, c)
   return function()
     local v = f(s, c)
@@ -73,7 +73,7 @@ function iter.map(fn, f, s, c)
 end
 
 --- Keep values where pred returns true.
---: <S, V>((V) -> boolean, (S, V) -> V, S, V) -> () -> V
+--: ((unknown) -> boolean, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
 function iter.filter(pred, f, s, c)
   return function()
     while true do
@@ -86,7 +86,7 @@ function iter.filter(pred, f, s, c)
 end
 
 --- First n values.
---: <S, V>(number, (S, V) -> V, S, V) -> () -> V
+--: (number, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
 function iter.take(n, f, s, c)
   local remaining = n
   return function()
@@ -100,7 +100,7 @@ function iter.take(n, f, s, c)
 end
 
 --- Skip first n values, then yield the rest.
---: <S, V>(number, (S, V) -> V, S, V) -> () -> V
+--: (number, (...unknown) -> unknown, unknown, unknown) -> () -> unknown
 function iter.skip(n, f, s, c)
   local skipped = false
   return function()
@@ -282,7 +282,7 @@ function iter.all(pred, f, s, c)
 end
 
 --- First value matching predicate, or nil.
---: <S, V>((V) -> boolean, (S, V) -> V, S, V) -> V | nil
+--: ((unknown) -> boolean, (...unknown) -> unknown, unknown, unknown) -> unknown
 function iter.find(pred, f, s, c)
   while true do
     local v = f(s, c)
