@@ -53,7 +53,7 @@ These typically need a `--[[: integer]]` or `--[[: number]]` cast at the FFI
 boundary, or annotating local arrays of bytes as `integer[]`/`uint8_t[]`.
 
 - [x] `lib/blake2/init.lua` (145 → 49) — annotated b_compress/s_compress v and m tables; replaced rejected force cast on ffi.typeof
-- [x] `lib/bignum/init.lua` (95 → 89) — bind string.byte() multi-return to single locals before arithmetic
+- [x] `lib/bignum/init.lua` (95 → 89 → 0) — bind string.byte() multi-return to single locals before arithmetic; confirmed 0 errors at session N+32 start
 - [x] `lib/matrix/init.lua` (72 → 48) — annotated self: matrix on methods accessing _rows/_cols/_data
 - [x] `lib/protocol_buffer/init.lua` (79 → 0) — annotated decode_varint/decode_signed_varint return types; force-casts after nil-checks; math.floor for number→integer; expanded encode_varint_signed to named locals; typed msg/fields/arr
 - [x] `lib/bits/init.lua` (76 → 0) — already fixed in prior session (confirmed 0 errors at session start)
@@ -154,6 +154,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+32)
+
+- [x] `lib/cryptography/init.lua` (64 → 0, commit 25cf836) — annotate SHA256_K/SHA256_H0/SHA512_K/SHA512_H0 as { [integer]: number } arrays; fix gsub multi-return; fix ror64/shr64 phi-join with n_ casts; fix sha512_compress to individual byte reads; fix hmac block_size as integer, ipad/opad as typed arrays; fix pbkdf2 return annotation to (string|nil,string|nil); fix chacha20 counter type; fix poly1305 unsigned() reassignment and u64n nil return; fix ct_eq byte comparisons
+- [x] `lib/deepcopy/init.lua` (8 → 0, commit 25cf836) — annotate M.copy opts as optional; annotate changes as { [integer]: any }; add parse_path annotation; cast match captures; annotate _merge2 as (any,any)->any; annotate args as { [integer]: any }
+- [x] `lib/json/init.lua` (17 → 0, commit 25cf836) — add byte1 helper for single-byte extraction; rewrite decode_number with typed j1/j2/j3/j3e/j4/j5 locals; fix encode_string with explicit integer annotations
+- [x] `lib/text_diff/init.lua` (57 → 26, commit a1be563) — annotate v/trace/snap arrays; annotate myers_forward return type; cast phi-join x/prev_k/prev_x locals; annotate stack and result arrays in cleanup_* functions; remaining 26 in levenshtein/apply/stats/lines_to_chars
 
 ## Done in current session (session N+31)
 
