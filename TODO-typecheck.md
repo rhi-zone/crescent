@@ -143,6 +143,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+21)
+
+- [x] `lib/matrix/init.lua` (was 48 → now 0, commit 50ad046) — self_ casts in all methods; typed aug/rows/x arrays; trace/det/dot nil-return annotation changed to (number|nil,string|nil); add/sub/mul/zip self_+other_ casts; approx_eq inlined; __mul via M.scale/M.mul direct calls; setmetatable via --[[: any]] --[[:! matrix]]; zeros via M.new unwrap
+- [x] `lib/blake2/init.lua` (was 49 → now 4, commit 50ad046) — S_IV as --[[:! { [integer]: integer }]] with math.floor; rotr32 annotated (integer,integer)->integer; read_u32_le annotated (string,integer)->integer with off casts; s_compress h param typed; opts_ force-casts in b_binary/s_binary. Remaining 4: B_IV uint64_t FFI arithmetic (genuinely FFI-bound)
+- [x] `lib/dotenv/init.lua` (was 6 → now 0, commit 5320450) — unescape_double gsub multi-return via local r,_; expand_vars inline gsub with --[[:! string]] cast; load_files/stringify opts_ force-casts
+- [x] `lib/feature_flags/init.lua` (was 6 → now 0, commit 5320450) — Registry type alias; hash_to_float annotated (string)->number; math.floor for FNV offset; emit/eval_flag annotated; self_ cast; h --: number in variant
+
 ## Done in current session (session N+20)
 
 - [x] `lib/cr/run.lua` (was 2 → now 0, commit 91042bb) — cast loadfile() chunk to `() -> nil` before pcall
