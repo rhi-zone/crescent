@@ -18,22 +18,25 @@ end
 -- Auto-detects arity from debug.getinfo when not supplied.
 function M.curry(fn, n)
   if n == nil then n = M.arity(fn) end
-  if n <= 1 then return fn end
+  local n_ = n --[[:! integer]]
+  if n_ <= 1 then return fn end
   local function step(collected, remaining)
+    local remaining_ = remaining --[[:! integer]]
     return function(...)
       local args = {}
       for i = 1, #collected do args[i] = collected[i] end
-      local added = select("#", ...)
+      local added = select("#", ...) --[[:! integer]]
       for i = 1, added do args[#collected + i] = select(i, ...) end
-      local new_remaining = remaining - added
+      local new_remaining = remaining_ - added
       if new_remaining <= 0 then
-        return fn(unpack(args))
+        local fn_ = fn --[[:! (...unknown) -> unknown]]
+        return fn_(unpack(--[[:! { [integer]: unknown }]] args))
       else
         return step(args, new_remaining)
       end
     end
   end
-  return step({}, n)
+  return step({}, n_)
 end
 
 -- partial(fn, ...) -> fn with leading args bound.
@@ -52,6 +55,7 @@ end
 -- compose(f, g, ...) -> right-to-left composition.
 -- compose(f, g)(x) = f(g(x))
 function M.compose(...)
+  --: { [integer]: (...unknown) -> unknown }
   local fns = { ... }
   local n = #fns
   if n == 0 then return M.identity end
@@ -59,15 +63,16 @@ function M.compose(...)
   return function(...)
     local result = { fns[n](...) }
     for i = n - 1, 1, -1 do
-      result = { fns[i](unpack(result)) }
+      result = { fns[i](unpack(--[[:! { [integer]: unknown }]] result)) }
     end
-    return unpack(result)
+    return unpack(--[[:! { [integer]: unknown }]] result)
   end
 end
 
 -- pipe(f, g, ...) -> left-to-right composition.
 -- pipe(f, g)(x) = g(f(x))
 function M.pipe(...)
+  --: { [integer]: (...unknown) -> unknown }
   local fns = { ... }
   local n = #fns
   if n == 0 then return M.identity end
@@ -75,9 +80,9 @@ function M.pipe(...)
   return function(...)
     local result = { fns[1](...) }
     for i = 2, n do
-      result = { fns[i](unpack(result)) }
+      result = { fns[i](unpack(--[[:! { [integer]: unknown }]] result)) }
     end
-    return unpack(result)
+    return unpack(--[[:! { [integer]: unknown }]] result)
   end
 end
 
@@ -136,6 +141,7 @@ end
 -- juxt(f, g, ...) -> fn that applies each function to the same args
 -- and returns a table of all results.
 function M.juxt(...)
+  --: { [integer]: (...unknown) -> unknown }
   local fns = { ... }
   local n = #fns
   return function(...)
@@ -162,6 +168,7 @@ end
 -- thread(val, f1, f2, ...) -> pipes val through each function in order.
 -- Equivalent to pipe(f1, f2, ...)(val).
 function M.thread(val, ...)
+  --: { [integer]: (unknown) -> unknown }
   local fns = { ... }
   local result = val
   for i = 1, #fns do

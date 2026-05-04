@@ -143,6 +143,14 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+22)
+
+- [x] `lib/ecs/init.lua` (was 4 → now 0) — cast json module via `any` intermediate to typed alias `{ encode: ..., decode: ... }`
+- [x] `lib/event_emitter/init.lua` (was 5 → now 0) — EeEntry/Emitter type aliases; annotated call_list with typed list param; self_ cast in emit; fired `--: integer` accumulator with final phi-join cast
+- [x] `lib/env/init.lua` (was 4 → now 0) — `debug.getinfo(1)` force-cast to `{ source: string }`; `env_ffi` cast to `any` (ffi.load return); fixed env_iter return type to `(integer | nil, string | nil)`; changed `any` to `unknown` in stateless annotation
+- [x] `lib/curry/init.lua` (was 9 → now 0) — annotated fns arrays as `{ [integer]: (...unknown) -> unknown }`; n_ and remaining_ integer casts; fn_ cast before call; unpack casts in compose/pipe
+- skipped `lib/deepcopy/init.lua` (8 errors) — M.copy uses `any` in params (generic table copy); transform param requires `any` → triggers annotation warning; changes phi-join conflict between `{old:T,new:nil}` and `{old:nil,new:T}` shapes. Restructuring needed.
+
 ## Done in current session (session N+21)
 
 - [x] `lib/matrix/init.lua` (was 48 → now 0, commit 50ad046) — self_ casts in all methods; typed aug/rows/x arrays; trace/det/dot nil-return annotation changed to (number|nil,string|nil); add/sub/mul/zip self_+other_ casts; approx_eq inlined; __mul via M.scale/M.mul direct calls; setmetatable via --[[: any]] --[[:! matrix]]; zeros via M.new unwrap

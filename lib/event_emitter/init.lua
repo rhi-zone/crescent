@@ -17,14 +17,20 @@ local function get_list(self, event)
 	return list
 end
 
+--:: EeEntry = { fn: (...unknown) -> unknown, once: boolean }
+--:: EeListeners = { [string]: { [integer]: EeEntry } }
+--:: Emitter = { _listeners: EeListeners, _max_listeners: integer }
+
 -- Internal: emit to a single list, handling once removal and returning fired count
 -- Returns: number of listeners called
+--: ({ [integer]: EeEntry }, ...unknown) -> integer
 local function call_list(list, ...)
 	if not list or #list == 0 then return 0 end
 	-- snapshot so mutations during emit don't affect iteration
+	--: { [integer]: EeEntry }
 	local snap = {}
 	for i = 1, #list do snap[i] = list[i] end
-	local fired = 0
+	local fired = 0 --: integer
 	for i = 1, #snap do
 		local entry = snap[i]
 		-- find entry in current list and remove if once
@@ -91,11 +97,12 @@ function emitter_mt:off(event, fn)
 end
 
 function emitter_mt:emit(event, ...)
+	local self_ = self --[[:! Emitter]]
 	-- error event with no listeners raises
 	if event == "error" then
-		local list = self._listeners["error"]
+		local list = self_._listeners["error"]
 		if not list or #list == 0 then
-			local wild = self._listeners["*"]
+			local wild = self_._listeners["*"]
 			if not wild or #wild == 0 then
 				local msg = ...
 				error(msg ~= nil and msg or "unhandled error event")
@@ -103,22 +110,23 @@ function emitter_mt:emit(event, ...)
 		end
 	end
 
-	local fired = 0
+	local fired = 0 --: integer
 
-	local list = self._listeners[event]
+	local list = self_._listeners[event]
 	if list then
 		fired = fired + call_list(list, ...)
 	end
 
 	-- wildcard listeners receive (event_name, ...)
 	if event ~= "*" then
-		local wild = self._listeners["*"]
+		local wild = self_._listeners["*"]
 		if wild then
 			fired = fired + call_list(wild, event, ...)
 		end
 	end
 
-	return fired > 0
+	local fired_ = fired --[[:! integer]]
+	return fired_ > 0
 end
 
 function emitter_mt:listener_count(event)
@@ -184,6 +192,7 @@ end
 
 function M.new()
 	return setmetatable({
+		--: { [string]: { [integer]: EeEntry } }
 		_listeners = {},
 		_max_listeners = DEFAULT_MAX_LISTENERS,
 	}, emitter_mt)
