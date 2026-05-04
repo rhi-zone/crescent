@@ -3,6 +3,7 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 local ffi = require("ffi")
+local ffi_any = ffi --[[: any]]
 
 local mod = {}
 
@@ -62,7 +63,7 @@ local SQLITE_NULL    = 5
 local function load_sqlite()
 	if ffi.os == "Windows" then
 		local name = ffi.arch == "x64" and "dep/sqlite.dll" or "dep/sqlite-x86.dll"
-		local lib = ffi.load(name) --[[:! $FfiC]]
+		local lib = ffi_any.load(name)
 		return lib, name
 	end
 	-- Build vendored name first (platform-specific compiled libraries).
@@ -85,15 +86,15 @@ local function load_sqlite()
 	names[#names + 1] = "libsqlite3.dylib"
 	names[#names + 1] = "/usr/lib/libsqlite3.dylib" -- macOS system
 	for _, name in ipairs(names) do
-		local ok, lib = pcall(ffi.load, name)
+		local ok, lib = pcall(ffi_any.load, name)
 		if ok then
-			local typed = lib --[[:! $FfiC]]
-			return typed, name
+			return lib, name
 		end
 	end
 	error("sqlite3: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
 end
 local sqlite_ffi, sqlite_loaded_from = load_sqlite()
+local sqlite_ffi_any = sqlite_ffi --[[: any]]
 
 mod._tier = "system-sqlite"
 mod._loaded_from = sqlite_loaded_from
@@ -131,7 +132,7 @@ local function bind(stmt, params, length)
 				sqlite_ffi.sqlite3_bind_double(stmt, i, x)
 			end
 		elseif t == "string" then
-			sqlite_ffi.sqlite3_bind_text(stmt, i, x, #x, SQLITE_TRANSIENT)
+			sqlite_ffi_any.sqlite3_bind_text(stmt, i, x, #x, SQLITE_TRANSIENT)
 		elseif t == "boolean" then
 			sqlite_ffi.sqlite3_bind_int(stmt, i, x and 1 or 0)
 		elseif t == "cdata" then
@@ -185,7 +186,7 @@ sqlite.changes = function(self)
 end
 
 local function db_errmsg(self)
-	return ffi.string(sqlite_ffi.sqlite3_errmsg(self.db[0]))
+	return ffi_any.string(sqlite_ffi_any.sqlite3_errmsg(self.db[0]))
 end
 
 --[[@return true? success, string? error]] --[[@param sql string]] --[[@param ... number|string|boolean?]]
@@ -331,8 +332,11 @@ local function tables_raw(self)
 	end
 end
 
-sqlite.tables = package.loaded["lib.functional.iterable"] and function(self)
-	return require("lib.functional.iterable").iter(tables_raw(self))
+local pkg_loaded = package.loaded --[[: any]]
+sqlite.tables = pkg_loaded["lib.functional.iterable"] and function(self)
+	local iterable = require("lib.functional.iterable")
+	local iterable_any = iterable --[[:! { iter: (...unknown) -> unknown }]]
+	return iterable_any.iter(tables_raw(self))
 end or tables_raw
 
 return mod
