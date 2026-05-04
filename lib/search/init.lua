@@ -5,7 +5,7 @@ end
 local M = {}
 M._tier = "pure"
 
---:: query = { type: string, word: string | nil, words: { [integer]: string } | nil, op: string | nil, queries: { [integer]: unknown } | nil, max_dist: number | nil, prefix: string | nil, pattern: string | nil }
+--:: query = { type: string, word: string | nil, words: { [integer]: string } | nil, op: string | nil, queries: { [integer]: unknown } | nil, max_dist: number | nil, prefix: string | nil, pattern: string | nil, ... }
 --:: index = { add: (string, string, unknown) -> unknown, remove: (string) -> unknown, search: (unknown, integer | nil) -> unknown, size: () -> integer }
 
 -- Default stop words (common English)
@@ -73,7 +73,7 @@ end
 -- Highlight: wrap matched terms in tags
 --: (text: string, terms: {string}, opts: ({ open: (string | nil), close: (string | nil) } | nil)) -> string
 function M.highlight(text, terms, opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { open: string | nil, close: string | nil }]]
   local open_tag = opts.open or "<mark>"
   local close_tag = opts.close or "</mark>"
   -- build set of lowercased terms
@@ -102,7 +102,7 @@ function M.highlight(text, terms, opts)
     else
       result[#result + 1] = word
     end
-    pos = we + 1
+    pos = (we or pos) --[[:! integer]] + 1
   end
   return table.concat(result)
 end
@@ -114,8 +114,8 @@ local function edit_distance(a, b)
   if la == 0 then return lb end
   if lb == 0 then return la end
   -- two-row DP
-  local prev = {}
-  local curr = {}
+  local prev = {} --: { [integer]: integer }
+  local curr = {} --: { [integer]: integer }
   for j = 0, lb do prev[j] = j end
   for i = 1, la do
     curr[0] = i
@@ -140,53 +140,54 @@ end
 -- Query constructors
 --: (word: string) -> query
 function M.term(word)
-  return { type = "term", word = word:lower() }
+  return { type = "term", word = word:lower() } --[[: any]]
 end
 
 --: (words: {string}) -> query
 function M.phrase(words)
   local lwords = {}
   for i = 1, #words do lwords[i] = words[i]:lower() end
-  return { type = "phrase", words = lwords }
+  return { type = "phrase", words = lwords } --[[: any]]
 end
 
---: (op: string, queries: {query}) -> query
+--: (op: string, queries: {query}) -> (query | nil, string | nil)
 function M.boolean(op, queries)
   if op ~= "and" and op ~= "or" and op ~= "not" then
     return nil, "search: boolean op must be 'and', 'or', or 'not'"
   end
-  return { type = "boolean", op = op, queries = queries }
+  return { type = "boolean", op = op, queries = queries } --[[: any]]
 end
 
---: (word: string, max_dist: number) -> query
+--: (word: string, max_dist: number | nil) -> query
 function M.fuzzy(word, max_dist)
-  return { type = "fuzzy", word = word:lower(), max_dist = max_dist or 1 }
+  return { type = "fuzzy", word = word:lower(), max_dist = max_dist or 1 } --[[: any]]
 end
 
 --: (prefix: string) -> query
 function M.prefix(prefix)
-  return { type = "prefix", prefix = prefix:lower() }
+  return { type = "prefix", prefix = prefix:lower() } --[[: any]]
 end
 
 --: (pattern: string) -> query
 function M.wildcard(pattern)
-  return { type = "wildcard", pattern = pattern:lower() }
+  return { type = "wildcard", pattern = pattern:lower() } --[[: any]]
 end
 
 -- Convert wildcard pattern (? = any char, * = any chars) to Lua pattern
 --: (pattern: string) -> string
 local function wildcard_to_lua_pattern(pattern)
-  local parts = {}
+  local parts = {} --: { [integer]: string }
+  local parts_ = parts --[[: any]]
   for i = 1, #pattern do
     local c = pattern:sub(i, i)
     if c == "?" then
-      parts[#parts + 1] = "."
+      parts_[#parts + 1] = "."
     elseif c == "*" then
-      parts[#parts + 1] = ".*"
+      parts_[#parts + 1] = ".*"
     elseif c:match("[%(%)%.%%%+%-%[%]%^%$]") then
-      parts[#parts + 1] = "%" .. c
+      parts_[#parts + 1] = "%" .. c
     else
-      parts[#parts + 1] = c
+      parts_[#parts + 1] = c
     end
   end
   return "^" .. table.concat(parts) .. "$"
@@ -195,7 +196,7 @@ end
 -- Create a new search index
 --: (opts: ({ tokenize: ((string) -> string[]) | nil, normalize: ((string) -> string) | nil, stop_words: { [string]: boolean } | nil, bm25_k1: (number | nil), bm25_b: (number | nil) } | nil)) -> index
 function M.index(opts)
-  opts = opts or {}
+  opts = opts or {} --[[:! { tokenize: ((string) -> string[]) | nil, normalize: ((string) -> string) | nil, stop_words: { [string]: boolean } | nil, bm25_k1: number | nil, bm25_b: number | nil }]]
   local stop_words = opts.stop_words or DEFAULT_STOP_WORDS
   local bm25_k1 = opts.bm25_k1 or 1.5
   local bm25_b  = opts.bm25_b  or 0.75
@@ -203,10 +204,11 @@ function M.index(opts)
   local tokenize_fn = opts.tokenize or M.tokenize
   local normalize_fn = opts.normalize
 
+  --:: InvEntry = { positions: { [integer]: integer }, freq: integer }
   -- Inverted index: term -> { doc_id -> { positions: {...}, freq: n } }
-  local inverted = {}
+  local inverted = {} --[[: any]]
   -- Document store: doc_id -> { text: string, length: n, fields: table? }
-  local docs = {}
+  local docs = {} --[[: any]]
   local doc_count = 0
   local total_length = 0  -- sum of all doc lengths (for BM25 avg)
 
@@ -215,7 +217,7 @@ function M.index(opts)
     local result = {}
     for i = 1, #tokens do
       local t = tokens[i]
-      if normalize_fn then t = normalize_fn(t) end
+      if normalize_fn then t = (normalize_fn --[[:! (string) -> string]])(t) end
       if not stop_words[t] then
         result[#result + 1] = t
       end
@@ -226,17 +228,18 @@ function M.index(opts)
   local idx = {}
 
   -- Add a document
-  --: (id: any, text: string, opts: ({ fields: ({ [string]: unknown } | nil) } | nil)) -> index
+  --: (self: unknown, id: unknown, text: string, opts: ({ fields: ({ [string]: unknown } | nil) } | nil)) -> unknown
   function idx:add(id, text, add_opts)
+    local text_ = text --[[:! string]]
     if docs[id] then
-      return self:update(id, text)
+      local self_ = idx; return self_:update(id --[[:! string]], text_)
     end
-    add_opts = add_opts or {}
-    local raw_tokens = tokenize_fn(text)
+    add_opts = add_opts or {} --[[:! { fields: { [string]: unknown } | nil }]]
+    local raw_tokens = (tokenize_fn --[[:! (string) -> { [integer]: string }]])(text_)
     local tokens = process_tokens(raw_tokens)
     local doc_len = #tokens
 
-    docs[id] = { text = text, length = doc_len, fields = add_opts.fields }
+    docs[id] = { text = text_, length = doc_len, fields = add_opts.fields }
     doc_count = doc_count + 1
     total_length = total_length + doc_len
 
@@ -261,7 +264,7 @@ function M.index(opts)
     if not doc then return self end
 
     -- Remove from inverted index
-    local raw_tokens = tokenize_fn(doc.text)
+    local raw_tokens = (tokenize_fn --[[:! (string) -> { [integer]: string }]])(doc.text --[[:! string]])
     local tokens = process_tokens(raw_tokens)
     for _, tok in ipairs(tokens) do
       if inverted[tok] and inverted[tok][id] then
@@ -301,13 +304,14 @@ function M.index(opts)
 
   -- Evaluate a query, returning a set of matching doc_ids
   local function eval_query(query)
-    local qt = query.type
+    local q = query --[[: any]]
+    local qt = q.type
     if qt == "term" then
-      return posting_set(query.word)
+      return posting_set(q.word --[[:! string]])
 
     elseif qt == "phrase" then
       -- Find docs containing all words, then check adjacency
-      local words = query.words
+      local words = q.words --[[:! { [integer]: string }]]
       if #words == 0 then return {} end
       -- Start with docs that contain the first word
       local candidates = posting_set(words[1])
@@ -329,7 +333,8 @@ function M.index(opts)
         for _, start_pos in ipairs(first_positions) do
           local ok = true
           for i = 2, #words do
-            local target = start_pos + (i - 1)
+            local start_pos_ = start_pos --[[: any]]
+            local target = start_pos_ + (i - 1)
             local found = false
             for _, p in ipairs(inverted[words[i]][doc_id].positions) do
               if p == target then found = true; break end
@@ -345,14 +350,14 @@ function M.index(opts)
       return result
 
     elseif qt == "boolean" then
-      local op = query.op
-      local queries = query.queries
+      local op = q.op --[[:! string]]
+      local queries = q.queries --[[:! { [integer]: unknown }]]
       if #queries == 0 then return {} end
 
       if op == "and" then
-        local result = eval_query(queries[1])
+        local result = eval_query(queries[1] --[[:! query]])
         for i = 2, #queries do
-          local s = eval_query(queries[i])
+          local s = eval_query(queries[i] --[[:! query]])
           for doc_id in pairs(result) do
             if not s[doc_id] then result[doc_id] = nil end
           end
@@ -362,7 +367,7 @@ function M.index(opts)
       elseif op == "or" then
         local result = {}
         for i = 1, #queries do
-          for doc_id in pairs(eval_query(queries[i])) do
+          for doc_id in pairs(eval_query(queries[i] --[[:! query]])) do
             result[doc_id] = true
           end
         end
@@ -371,10 +376,10 @@ function M.index(opts)
       elseif op == "not" then
         -- NOT: all docs minus matches of first query
         -- If two queries: second is base set, subtract first
-        local exclude = eval_query(queries[1])
+        local exclude = eval_query(queries[1] --[[:! query]])
         local base
         if #queries >= 2 then
-          base = eval_query(queries[2])
+          base = eval_query(queries[2] --[[:! query]])
         else
           base = {}
           for doc_id in pairs(docs) do base[doc_id] = true end
@@ -384,12 +389,13 @@ function M.index(opts)
       end
 
     elseif qt == "fuzzy" then
-      local word = query.word
-      local max_dist = query.max_dist
+      local word = q.word --[[:! string]]
+      local max_dist = (q.max_dist or 1) --[[:! number]]
       local result = {}
       for term in pairs(inverted) do
-        if edit_distance(word, term) <= max_dist then
-          for doc_id in pairs(inverted[term]) do
+        local term_ = term --[[:! string]]
+        if edit_distance(word, term_) <= max_dist then
+          for doc_id in pairs(inverted[term_]) do
             result[doc_id] = true
           end
         end
@@ -397,12 +403,13 @@ function M.index(opts)
       return result
 
     elseif qt == "prefix" then
-      local prefix = query.prefix
+      local prefix = q.prefix --[[:! string]]
       local plen = #prefix
       local result = {}
       for term in pairs(inverted) do
-        if term:sub(1, plen) == prefix then
-          for doc_id in pairs(inverted[term]) do
+        local term_ = term --[[:! string]]
+        if term_:sub(1, plen) == prefix then
+          for doc_id in pairs(inverted[term_]) do
             result[doc_id] = true
           end
         end
@@ -410,11 +417,12 @@ function M.index(opts)
       return result
 
     elseif qt == "wildcard" then
-      local lua_pat = wildcard_to_lua_pattern(query.pattern)
+      local lua_pat = wildcard_to_lua_pattern(q.pattern --[[:! string]])
       local result = {}
       for term in pairs(inverted) do
-        if term:match(lua_pat) then
-          for doc_id in pairs(inverted[term]) do
+        local term_ = term --[[:! string]]
+        if term_:match(lua_pat) then
+          for doc_id in pairs(inverted[term_]) do
             result[doc_id] = true
           end
         end
@@ -427,47 +435,52 @@ function M.index(opts)
 
   -- Collect terms relevant to a query (for scoring)
   local function collect_query_terms(query)
-    local qt = query.type
+    local q = query --[[: any]]
+    local qt = q.type
     if qt == "term" then
-      return { query.word }
+      return { q.word --[[:! string]] }
     elseif qt == "phrase" then
-      return query.words
+      return q.words --[[:! { [integer]: string }]]
     elseif qt == "boolean" then
-      local terms = {}
-      for i = 1, #query.queries do
-        for _, t in ipairs(collect_query_terms(query.queries[i])) do
+      local terms = {} --: { [integer]: string }
+      local qs = q.queries --[[:! { [integer]: unknown }]]
+      for i = 1, #qs do
+        for _, t in ipairs(collect_query_terms(qs[i] --[[:! query]])) do
           terms[#terms + 1] = t
         end
       end
       return terms
     elseif qt == "fuzzy" then
       -- collect all terms within distance
-      local word = query.word
-      local max_dist = query.max_dist
-      local terms = {}
+      local word = q.word --[[:! string]]
+      local max_dist = (q.max_dist or 1) --[[:! number]]
+      local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
-        if edit_distance(word, term) <= max_dist then
-          terms[#terms + 1] = term
+        local term_ = term --[[:! string]]
+        if edit_distance(word, term_) <= max_dist then
+          terms[#terms + 1] = term_
         end
       end
       return terms
     elseif qt == "prefix" then
-      local prefix = query.prefix
+      local prefix = q.prefix --[[:! string]]
       local plen = #prefix
-      local terms = {}
+      local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
-        if term:sub(1, plen) == prefix then terms[#terms + 1] = term end
+        local term_ = term --[[:! string]]
+        if term_:sub(1, plen) == prefix then terms[#terms + 1] = term_ end
       end
       return terms
     elseif qt == "wildcard" then
-      local lua_pat = wildcard_to_lua_pattern(query.pattern)
-      local terms = {}
+      local lua_pat = wildcard_to_lua_pattern(q.pattern --[[:! string]])
+      local terms = {} --: { [integer]: string }
       for term in pairs(inverted) do
-        if term:match(lua_pat) then terms[#terms + 1] = term end
+        local term_ = term --[[:! string]]
+        if term_:match(lua_pat) then terms[#terms + 1] = term_ end
       end
       return terms
     end
-    return {}
+    return {} --[[: any]]
   end
 
   -- TF-IDF score for a doc given a list of query terms
@@ -517,7 +530,7 @@ function M.index(opts)
     local snippet = M.highlight(text, terms)
     -- positions: collect all match positions
     local positions = {}
-    local raw_tokens = tokenize_fn(text)
+    local raw_tokens = (tokenize_fn --[[:! (string) -> { [integer]: string }]])(text --[[:! string]])
     local processed = process_tokens(raw_tokens)
     local term_set = {}
     for _, t in ipairs(terms) do term_set[t] = true end
@@ -530,14 +543,14 @@ function M.index(opts)
   -- Search
   --: (query: query, opts: ({ limit: (number | nil), offset: (number | nil), scorer: (string | nil), explain: (boolean | nil) } | nil)) -> { results: { [integer]: unknown }, total: number }
   function idx:search(query, opts)
-    opts = opts or {}
-    local limit  = opts.limit  or 10
-    local offset = opts.offset or 0
-    local scorer = opts.scorer or "bm25"
+    opts = opts or {} --[[:! { limit: number | nil, offset: number | nil, scorer: string | nil, explain: boolean | nil }]]
+    local limit  = ((opts.limit)  or 10) --[[:! number]]
+    local offset = ((opts.offset) or 0)  --[[:! number]]
+    local scorer = (opts.scorer or "bm25") --[[:! string]]
     local explain = opts.explain or false
 
-    local matching = eval_query(query)
-    local terms = collect_query_terms(query)
+    local matching = eval_query(query --[[: any]])
+    local terms = collect_query_terms(query --[[: any]])
 
     -- Score each matching doc
     local scored = {}
@@ -561,7 +574,7 @@ function M.index(opts)
       local doc = docs[s.id]
       local r = { id = s.id, score = s.score }
       if explain then
-        r.highlights = make_highlights(s.id, terms, doc)
+        r --[[: any]].highlights = make_highlights(s.id, terms --[[:! { [number]: string }]], doc)
       end
       results[#results + 1] = r
     end
@@ -572,8 +585,8 @@ function M.index(opts)
   -- Facet: count results by field value
   --: (query: query, field: string) -> { [string]: number }
   function idx:facet(query, field)
-    local matching = eval_query(query)
-    local counts = {}
+    local matching = eval_query(query --[[: any]])
+    local counts = {} --[[: any]]
     for doc_id in pairs(matching) do
       local doc = docs[doc_id]
       if doc and doc.fields then
@@ -587,7 +600,7 @@ function M.index(opts)
     return counts
   end
 
-  return idx
+  return idx --[[: any]]
 end
 
 return M
