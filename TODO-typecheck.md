@@ -85,10 +85,10 @@ last because the type system itself is the testbed.
 - `lib/ai/providers/google.lua` (50) — same json.decode cascade pattern; skip
 - `lib/ai/providers/openai_compat.lua` (43) — similar; skip
 - `lib/argon2/init.lua` (54) — FFI + unknown cascade; skip
-- `lib/http/stream.lua` (19) — unknown cascade from stream methods
-- `lib/http/server.lua` (33) — unknown cascade
-- `lib/http/client.lua` (4) — unknown cascade
-- `lib/http/router/api.lua` (13) — unknown cascade
+- ~~`lib/http/stream.lua`~~ — DONE (19 → 0, commit b262691)
+- ~~`lib/http/server.lua`~~ — DONE (33 → 0, commit b262691)
+- ~~`lib/http/client.lua`~~ — DONE (4 → 0, commit b262691)
+- ~~`lib/http/router/api.lua`~~ — DONE (13 → 0, commit b262691)
 - `lib/bloom/init.lua` (12) — `local bit = bit` global is unknown; full Bloom type annotation cascades badly (23 errors when attempted); skip
 - `lib/base32/init.lua` (11) — string param annotation cascades: math.floor → number → sub() integer args fail; skip (confirmed)
 - `lib/base58/init.lua` (2) — any fix to sha256fn call sites triggers new error in hex_to_bin (typechecker limitation with gsub return + checked cast interaction)
@@ -142,6 +142,13 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+19)
+
+- [x] `lib/http/client.lua` (was 4 → now 0, commit b262691) — headers_ force-cast to `{ [string]: unknown }`, parse_response cast, ep:loop via any
+- [x] `lib/http/router/api.lua` (was 13 → now 0, commit b262691) — req_/res_ as any; json_to_/to_json_ typed locals; route as any
+- [x] `lib/http/stream.lua` (was 19 → now 0, commit b262691) — self_ casts in all methods; TlsMod alias with methods; math.floor --[[:! integer]] casts; line ternary for type stability
+- [x] `lib/http/server.lua` (was 33 → now 0, commit b262691) — TlsMod type alias for get_tls() return; http module cast; http_client_sock type alias; res_any for raw field; tls_cert_/tls_key_ locals
 
 ## Done in current session (session N+18)
 
