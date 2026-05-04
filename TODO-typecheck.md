@@ -133,7 +133,7 @@ last because the type system itself is the testbed.
 - `lib/css_parser/init.lua` — prior attempt at `is_ident_start`/`is_digit` annotation regressed (103→104); session N+9 attempt at SelectorParser/TokenStream method annotations regressed 53→86; setmetatable return type not recognized as method-bearing by typechecker
 - `lib/regexp/init.lua` (~42) — skipped in prior session
 - `lib/graphql_parser/init.lua` — AST-shape mismatches around `insert(args, {kind=...})`
-- `lib/glob/init.lua` — return-type union mismatches at iterator boundary
+- `lib/glob/init.lua` (39) — return-type union mismatches: `(integer, fn) | (nil, string)` not narrowed by typechecker after nil-check guard; phi-join i vars; attempted fix session N+23 regressed badly; structural limitation
 - `lib/crescent_examples/composter.lua` — pervasive LuaLS-style `@type`/`@diagnostic` annotations not understood by crescent typechecker; 253 narrow-before-indexing errors come from FFI-returned `unknown` values across the entire file. Fixing requires either rewriting all annotations or wholesale `--[[:! T]]` casts after each external call. Restructuring.
 - `lib/type/static/parse.lua` — 151 narrow-before-calling errors all from `L:next()`, `nodes:get()`, `lists:push()` etc. on locals returned by `lex_mod.new`/`arena_mod.new_node_arena`/`arena_mod.new_list_pool`. Fix would require giving those constructors return type annotations — typechecker self-check work that requires reading `docs/typechecker-v2.md` and `docs/type-system.md` first per `lib/type/static/CLAUDE.md`. Out of scope for cleanup pass.
 - `lib/lua2ts/init.lua` — attempted annotating `scan_annotations(source)`, `ctx:name`/`ctx:list` returns; ctx still flows as unknown into emit_expr (closure-built ctx not seen at call sites). Net 162→163, reverted. Same family as parse.lua: needs constructor return types on `parse_mod.parse`/`new_ctx`. Out of scope for cleanup pass.
@@ -142,6 +142,13 @@ last because the type system itself is the testbed.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+23)
+
+- [x] `lib/aho_corasick/init.lua` (was 2 → now 0, commit 576faa9) — Automaton type alias with full method sigs; annotated replace() self as Automaton; force-cast replacements after type() check to typed fn/table
+- [x] `lib/regexp/init.lua` (was 42 → now 0, commit 576faa9) — annotated parse_alt/parse_concat/parse_atom/parse_brace_quant; Thread/ThreadList type aliases in nfa_run; typed alts/frags as { [integer]: Frag }; e_ force-casts after nil-check in Re methods; Outs[i][1] integer casts in clone loops; emit() accepts any; src_ cast in clone_frag
+- [x] `lib/prolog/init.lua` (was 18 → now 2, commit 0790249) — mk_list optional tail annotation; extract_bindings typed params; ARITH_CMP fn cast; eval_arith (or 0) casts; term/env via intermediate locals; val_ cast from coroutine; 2 remaining: parse_term forward-declared untyped (annotating it cascades 23 new errors from arithmetic on integer return)
+- skipped `lib/glob/init.lua` (39 errors) — multi-return union type `(integer, fn) | (nil, string)` not narrowed by typechecker after nil-check; phi-join i vars also fail; attempted fix regressed to many more errors; structural limitation
 
 ## Done in current session (session N+22)
 
