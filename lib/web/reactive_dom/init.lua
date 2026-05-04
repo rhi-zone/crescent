@@ -125,7 +125,7 @@ function M.bind_input(el_raw, signal_raw)
 	local el = el_raw --: HTMLInputElement
 	local sig = signal_raw --: Signal<unknown>
 	widget.subscribe_now(signal_raw, function(v)
-		el.value = v
+		el.value = tostring(v)
 	end)
 	local function on_input(_ev)
 		_ev = _ev --: AnyEvent
@@ -405,7 +405,7 @@ function M.each(item_widget, get_key)
 			local unsub = list_signal.subscribe(function(_v)
 				render_keyed(list_signal.get())
 			end)
-			widget.register(unsub)
+			widget.register(unsub --[[: any]])
 			widget.register(keyed_teardown)
 		else
 			-- Unkeyed: re-render on length change only
@@ -418,7 +418,7 @@ function M.each(item_widget, get_key)
 			local unsub = len_computed.subscribe(function(_v)
 				render_all(list_signal.get())
 			end)
-			widget.register(unsub)
+			widget.register(unsub --[[: any]])
 			widget.register(function() len_computed.dispose() end)
 			widget.register(teardown_all)
 		end

@@ -90,7 +90,7 @@ table.sort(EMOJI_SORTED, function(a, b) return #a > #b end)
 
 -- Returns the byte length of the UTF-8 character at position i in s,
 -- or 0 if the byte is not a valid UTF-8 lead byte.
---: (string, number) -> number
+--: (string, integer) -> integer
 local function utf8_char_len(s, i)
   local b = s:byte(i)
   if not b then return 0 end
@@ -102,7 +102,7 @@ local function utf8_char_len(s, i)
 end
 
 -- Returns true when s starts with the bytes of pattern at position i.
---: (string, number, string) -> boolean
+--: (string, integer, string) -> boolean
 local function starts_with_at(s, i, pattern)
   local len = #pattern
   return s:sub(i, i + len - 1) == pattern
@@ -110,7 +110,7 @@ end
 
 -- Find the first emoji in s starting at byte offset `from`.
 -- Returns: start_byte, end_byte (inclusive), label  or nil if none found.
---: (string, number) -> (any, any, any)
+--: (string, integer) -> (any, any, any)
 local function find_emoji(s, from)
   local i = from
   local len = #s

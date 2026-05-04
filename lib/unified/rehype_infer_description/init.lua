@@ -50,7 +50,7 @@ end
 
 -- Truncate text to at most max_words words and truncate_size characters.
 -- Appends "…" if truncated.
---: (string, number, number) -> string
+--: (string, integer, integer) -> string
 local function truncate(s, max_words, truncate_size)
   -- Word truncation.
   local word_count = 0
@@ -73,8 +73,9 @@ local function truncate(s, max_words, truncate_size)
   if word_count < max_words then
     word_end = #s
   end
-  local result = s:sub(1, word_end)
-  local truncated_by_words = word_end < #s
+  local word_end_ = word_end --[[:! integer]]
+  local result = s:sub(1, word_end_)
+  local truncated_by_words = word_end_ < #s
 
   -- Character truncation.
   if #result > truncate_size then
@@ -128,7 +129,8 @@ function M.plugin(processor, opts)
     local para = para_idx and children[para_idx]
     if not para then
       -- No <p> among direct children — do a depth-first search for the first <p>.
-      local function find_first_p(node)
+      local find_first_p
+      find_first_p = function(node)
         if node.type == "element" and node.tag == "p" then
           return node
         end
