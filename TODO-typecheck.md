@@ -143,6 +143,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+20)
+
+- [x] `lib/cr/run.lua` (was 2 → now 0, commit 91042bb) — cast loadfile() chunk to `() -> nil` before pcall
+- [x] `lib/cr/init.lua` (was 11 → now 0, commit 91042bb) — CrOpts type alias; typed injected array; pkg_config string cast; annotate try_load_cr_cmd params; pcall chunk/result casts
+- [x] `lib/count_min/init.lua` (was 11 → now 0, commit 91042bb) — require("bit") instead of global; CMS type alias; self_ casts in all methods; math.floor for large hex literals; individual string.byte calls in unpack_u32
+- [x] `lib/conversation/init.lua` (was 12 → now 0, commit 91042bb) — Db type alias; json_ typed via any intermediate; math.floor for large hex literals; self_ casts in all db_mt methods
+
 ## Done in current session (session N+19)
 
 - [x] `lib/http/client.lua` (was 4 → now 0, commit b262691) — headers_ force-cast to `{ [string]: unknown }`, parse_response cast, ep:loop via any
