@@ -494,14 +494,14 @@ end
 -- from/to: file name labels. opts: {context=3}
 M.to_unified = function(diffs, from, to, opts)
   opts = opts or {}
-  local ctx = opts.context
-  if ctx == nil then ctx = 3 end
+  local ctx_ = opts.context
+  local ctx = (ctx_ ~= nil and ctx_ or 3) --[[:! integer]]
   from = from or "a"
   to = to or "b"
 
   -- Build line-level view from character diffs
   -- Split each diff text by newline, emit +/- lines
-  local lines = {}  -- {op, text}
+  local lines = {} --: { [integer]: { [integer]: string } }
   local nl = 0
 
   for _, d in ipairs(diffs) do
@@ -528,7 +528,7 @@ M.to_unified = function(diffs, from, to, opts)
   if nl == 0 then return "" end
 
   -- Identify changed indices
-  local changed_idx = {}
+  local changed_idx = {} --: { [integer]: integer }
   local nc = 0
   for i = 1, nl do
     if lines[i][1] ~= "equal" then
@@ -540,20 +540,20 @@ M.to_unified = function(diffs, from, to, opts)
   if nc == 0 then return "" end
 
   -- Group into hunks
-  local hunks = {}
+  local hunks = {} --: { [integer]: { [integer]: integer } }
   local nh = 0
-  local hs = math.max(1, changed_idx[1] - ctx)
-  local he = math.min(nl, changed_idx[1] + ctx)
+  local hs = math.max(1, changed_idx[1] - ctx) --[[:! integer]]
+  local he = math.min(nl, changed_idx[1] + ctx) --[[:! integer]]
   for ci = 2, nc do
     local idx = changed_idx[ci]
-    local new_start = math.max(1, idx - ctx)
+    local new_start = math.max(1, idx - ctx) --[[:! integer]]
     if new_start <= he + 1 then
-      he = math.min(nl, idx + ctx)
+      he = math.min(nl, idx + ctx) --[[:! integer]]
     else
       nh = nh + 1
       hunks[nh] = { hs, he }
       hs = new_start
-      he = math.min(nl, idx + ctx)
+      he = math.min(nl, idx + ctx) --[[:! integer]]
     end
   end
   nh = nh + 1
@@ -565,7 +565,8 @@ M.to_unified = function(diffs, from, to, opts)
   no = no + 1; out[no] = "+++ " .. to .. "\n"
 
   for hi = 1, nh do
-    local hstart, hend = hunks[hi][1], hunks[hi][2]
+    local hstart = hunks[hi][1] --[[:! integer]]
+    local hend = hunks[hi][2] --[[:! integer]]
     -- Count a/b lines
     local a_n, b_n = 0, 0
     local a_line, b_line = 1, 1  -- logical line counters (just use position)
@@ -696,7 +697,7 @@ end
 
 -- Compute Levenshtein edit distance from a diff (insertions + deletions are 1 each char).
 M.levenshtein = function(diffs)
-  local dist = 0
+  local dist = 0 --: number
   local ins_buf, del_buf = 0, 0
   for _, d in ipairs(diffs) do
     local op, text = d[1], d[2]
@@ -722,9 +723,10 @@ end
 -- Find best position of pattern in text using bitap algorithm.
 -- Returns (pos, score) where pos is 1-indexed, score is 0..1 (1=exact).
 -- opts: {threshold=0.5}
+--: (string, string, { threshold: number | nil } | nil) -> (integer | nil, number)
 M.fuzzy_find = function(text, pattern, opts)
-  opts = opts or {}
-  local threshold = opts.threshold or 0.5
+  local opts_ = opts or {} --[[:! { threshold: number | nil }]]
+  local threshold = opts_.threshold or 0.5
   if pattern == "" then return 1, 1.0 end
   if text == "" then return nil, 0.0 end
 
@@ -737,24 +739,24 @@ M.fuzzy_find = function(text, pattern, opts)
 
   -- Simple approach: sliding window with normalized edit distance
   local best_pos = nil
-  local best_score = 0.0
+  local best_score = 0.0 --: number
 
   for i = 1, text_len - pat_len + 1 do
     local window = text:sub(i, i + pat_len - 1)
     -- Compute edit distance between window and pattern
     -- Simple DP
-    local prev = {}
+    local prev = {} --: { [integer]: integer }
     for j = 0, pat_len do prev[j] = j end
     for ci = 1, pat_len do
-      local curr = { [0] = ci }
+      local curr = { [0] = ci } --: { [integer]: integer }
       local c = window:sub(ci, ci)
       for j = 1, pat_len do
         local cost = c == pattern:sub(j, j) and 0 or 1
-        curr[j] = math.min(curr[j-1] + 1, prev[j] + 1, prev[j-1] + cost)
+        curr[j] = math.min(curr[j-1] + 1, prev[j] + 1, prev[j-1] + cost) --[[:! integer]]
       end
       prev = curr
     end
-    local dist = prev[pat_len]
+    local dist = prev[pat_len] --[[:! integer]]
     local score = 1.0 - dist / pat_len
     if score > best_score and score >= threshold then
       best_score = score
@@ -773,6 +775,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Split text into words (sequences of non-whitespace + whitespace runs).
+--: (string) -> { [integer]: string }
 local function split_words(s)
   local words = {}
   local nw = 0
@@ -821,9 +824,11 @@ M.word_diff = function(text1, text2)
   local edits = diff_lib.diff(words1, words2)
   if not edits then return { { "delete", text1 }, { "insert", text2 } } end
 
-  local result = {}
+  local edits_any = edits --[[: any]]
+  local edits_ = edits_any --[[:! { [integer]: { op: string, a_start: integer, a_end: integer, b_start: integer, b_end: integer } }]]
+  local result = {} --: { [integer]: { [integer]: string } }
   local nr = 0
-  for _, e in ipairs(edits) do
+  for _, e in ipairs(edits_) do
     local op_name
     if e.op == "eq" then op_name = "equal"
     elseif e.op == "del" then op_name = "delete"
@@ -832,18 +837,19 @@ M.word_diff = function(text1, text2)
 
     local text
     if e.op == "eq" or e.op == "del" then
-      local parts = {}
+      local parts = {} --: { [integer]: string }
       for i = e.a_start, e.a_end do parts[i - e.a_start + 1] = words1[i] end
       text = table.concat(parts)
     else
-      local parts = {}
+      local parts = {} --: { [integer]: string }
       for i = e.b_start, e.b_end do parts[i - e.b_start + 1] = words2[i] end
       text = table.concat(parts)
     end
 
     -- Merge adjacent same op
     if nr > 0 and result[nr][1] == op_name then
-      result[nr][2] = result[nr][2] .. text
+      local prev_text = result[nr][2] --[[:! string]]
+      result[nr][2] = prev_text .. text
     else
       nr = nr + 1
       result[nr] = { op_name, text }
