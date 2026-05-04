@@ -6,7 +6,10 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: SubEntry = { id: integer, handler: (unknown) -> unknown, filter: ((unknown) -> boolean) | nil, once: boolean }
+
 -- Split a topic string into segments on ".".
+--: (string) -> { [integer]: string }
 local function split_segments(s)
   local segs = {}
   local i = 1
@@ -26,6 +29,7 @@ end
 
 -- Match a single segment against a pattern segment.
 -- Supports "?" as single-character wildcard within a segment.
+--: (string, string) -> boolean
 local function match_segment(seg, pat)
   if pat == "*" or pat == "**" or pat == "#" then
     return true
@@ -48,7 +52,7 @@ local function match_segment(seg, pat)
       return false
     end
   end
-  return si > slen and pi > plen
+  return (si > slen and pi > plen) and true or false
 end
 
 --- Test whether a concrete topic matches a pattern.
@@ -100,7 +104,7 @@ end
 -- @return Bus
 function M.new()
   -- subs[topic_pattern] = array of { id, handler, filter, once }
-  local subs = {}
+  local subs = {} --: { [string]: any }
   -- middleware stack: array of function(topic, msg, next)
   local middleware = {}
   -- async queue: array of { topic, data }
