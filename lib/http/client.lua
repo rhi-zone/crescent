@@ -16,7 +16,8 @@ mod.send = function (req)
 	ok, err = client:connect(req.host, req.port or "http")
 	if not ok then return nil, err end
 	req.headers = req.headers or {}
-	if not req.headers["Host"] then req.headers["Host"] = { req.host } end
+	local headers_ = req.headers --[[:! { [string]: unknown }]]
+	if not headers_["Host"] then headers_["Host"] = { req.host } end
 	ok, err = client:send(format.serialize_request({ method = req.method, target = req.path or "/", version = req.version or "HTTP/1.1", headers = req.headers, body = req.body }))
 	if not ok then return nil, err end
 	return client:receive()
@@ -46,7 +47,8 @@ mod.send_async = function (req, cb, ep)
 	while not client:is_connected() do client:poll_connect() end
 
 	req.headers = req.headers or {}
-	if not req.headers["Host"] then req.headers["Host"] = { req.host } end
+	local headers2_ = req.headers --[[:! { [string]: unknown }]]
+	if not headers2_["Host"] then headers2_["Host"] = { req.host } end
 	local request_bytes = format.serialize_request({
 		method = req.method,
 		target = req.path or "/",
@@ -71,7 +73,8 @@ mod.send_async = function (req, cb, ep)
 		end
 		-- Check if we have a complete response: headers terminated + content-length satisfied.
 		local data = table.concat(buf)
-		local resp = format.parse_response(data)
+		local parse_response_ = format.parse_response --[[:! (string) -> unknown]]
+		local resp = parse_response_(data)
 		if resp then
 			done = true
 			if remove then remove() end
@@ -94,7 +97,10 @@ mod.send_async = function (req, cb, ep)
 		return
 	end
 
-	if is_owner then ep:loop() end
+	if is_owner then
+		local ep_ = ep --[[: any]]
+		ep_:loop()
+	end
 end
 
 return mod

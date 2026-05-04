@@ -5,46 +5,48 @@ local mod = {}
 local json_to_value = require("lib.format.json").json_to_value
 local value_to_json = require("lib.format.json").value_to_json
 
---[[@param routes api_table_handler]]
+--: (any) -> (any, any, any) -> boolean | nil
 mod.router = function (routes)
-	--[[@type http_callback]]
 	return function (req, res, sock)
-		local route = routes
+		local req_ = req --[[: any]]
+		local res_ = res --[[: any]]
+		local json_to_ = json_to_value --[[:! (unknown) -> unknown]]
+		local to_json_ = value_to_json --[[:! (unknown) -> unknown]]
+		local route = routes --[[: any]]
 		if type(route) == "function" then
-			local input = json_to_value(req.body)
-			res.headers["Content-Type"] = { "application/json" }
-			res.body = value_to_json(route(input))
+			local input = json_to_(req_.body)
+			res_.headers["Content-Type"] = { "application/json" }
+			res_.body = to_json_(route(input))
 			return true
 		end
 		local start
 		local end_ = 0
 		local part
 		repeat
-			--[[@diagnostic disable-next-line: cast-local-type]]
-			start, end_, part = req.path:find("/([^/]*)", end_ + 1)
+			start, end_, part = req_.path:find("/([^/]*)", end_ + 1)
 			local new_route = route[part]
 			if not new_route then
 				new_route = route[1]
-				local globs = req.globs or {}
+				local globs = req_.globs or {}
 				globs[#globs+1] = part
-				req.globs = globs
+				req_.globs = globs
 			end
 			route = new_route
 			if type(route) == "function" then
 				--[[FIXME: apis don't have access to req.globs]]
-				if end_ < #req.path then req.globs.rest = req.path:sub(end_ + 1) end
-				local input = json_to_value(req.body)
-				res.headers["Content-Type"] = { "application/json" }
-				res.body = value_to_json(route(input))
+				if end_ < #req_.path then req_.globs = req_.globs or {}; req_.globs.rest = req_.path:sub(end_ + 1) end
+				local input = json_to_(req_.body)
+				res_.headers["Content-Type"] = { "application/json" }
+				res_.body = to_json_(route(input))
 				return true
 			elseif route == nil then return end
-		until end_ == #req.path
+		until end_ == #req_.path
 		route = route[""]
 		if type(route) == "function" then
-			if end_ < #req.path then req.globs.rest = req.path:sub(end_ + 1) end
-			local input = json_to_value(req.body)
-			res.headers["Content-Type"] = { "application/json" }
-			res.body = value_to_json(route(input))
+			if end_ < #req_.path then req_.globs = req_.globs or {}; req_.globs.rest = req_.path:sub(end_ + 1) end
+			local input = json_to_(req_.body)
+			res_.headers["Content-Type"] = { "application/json" }
+			res_.body = to_json_(route(input))
 			return true
 		end
 	end
