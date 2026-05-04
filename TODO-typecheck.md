@@ -119,6 +119,14 @@ last because the type system itself is the testbed.
 - [ ] `lib/crypto/system.lua` (80) — 33 narrow + 33 return mismatch + 5 no-matching-overload — SKIP
 - [ ] `lib/process/init.lua` (53) — 49 ffi.C.* field errors (pipe/fork/exec/close/dup2/chdir/setenv etc); unfixable without cdef type annotations
 
+## Skipped in prior runs (session N+31)
+
+- `lib/observer/init.lua` (95) — closures capture `s: Subscriber` but typechecker sees it as `unknown` inside inner lambdas (closure variable capture type propagation limitation); 32 `new_observable(function(s)...)` calls each need `local s_ = s --[[:! Subscriber]]` for all `s:` calls in inner closures; too pervasive to fix without cascade risk
+- `lib/observable/init.lua` (81) — same pattern: `observer` param in closures is unknown; also `source:subscribe` has "no method" because Observable type alias doesn't carry prototype method types through `M.create` return
+- `lib/xpath/init.lua` (122) — Parser methods have unknown `self` (need 20-method type alias with all signatures); DOM nodes `n.children` is unknown; `eval_expr` forward-declared untyped cascades through all evaluation; pervasive
+- `lib/unified/mdast/init.lua` (168) — diverse error types: integer↔string in mixed arrays, `integer | nil` arithmetic, multi-type union argument mismatches; restructuring needed
+- `lib/time/init.lua` (1) — `0x100000000ULL` syntax not supported by typechecker parser (malformed number); FFI-bound
+
 ## Skipped in prior runs (with reason)
 
 - `lib/text_diff/init.lua` (57) — Myers diff uses heterogeneous stack entries {op, x1, x2, y1, y2}; op=string other fields=integer; phi-join `integer | integer` comparison failures; typed stack caused cascade. Needs tagged-union type.
@@ -146,6 +154,14 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+31)
+
+- [x] `lib/tui/init.lua` (1 → 0, commit c745f91) — force-cast unknown `widget` param to open record `{ render: unknown, ... }` before passing to `M.render`
+- [x] `lib/tokenizer/init.lua` (4 → 0, commit c745f91) — added `TokState`/`TokRule`/`TokLexer` type aliases with open shapes; `self_` casts in State methods; annotated `try_rules` with typed params; `matched_ = matched --[[:! string]]` after guard
+- [x] `lib/task_runner/init.lua` (6 → 0, commit c745f91) — `TaskDef`/`TaskResult`/`Runner` type aliases; `{ [string]: boolean | nil }` for in_stack; `runner__ = runner_ --[[:! Runner]]` cast in execute_plan; `self_` casts in run_all/run_tagged
+- [x] `lib/state_machine/init.lua` (7 → 0, commit c745f91) — `SMInstance` alias; `tostring(sname)`/`tostring(event)`/`tostring(t.target)` for concat; `sm_any`/`sm` two-step cast pattern
+- [x] `lib/zstd/init.lua` (8 → 0, commit c745f91) — replace `table` with concrete opts shape; `and true or false` for boolean return; `--[[:! string]]` casts for os.getenv results; `dst_cap = 1 --: number` with `--[[:! number]]` branch casts
 
 ## Done in current session (session N+30)
 
