@@ -144,6 +144,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+28)
+
+- [x] `lib/iter/init.lua` (6 → 0, commit 81c61a0) — drop generic type params on wrap/map/filter/take/skip/find; use `(unknown) -> unknown` signatures to avoid skolem conflicts with nil union returns in closures
+- [x] `lib/http/server_fork.lua` (6 → 0, commit 81c61a0) — inline HttpRequest/HttpResponse/HttpMod type aliases; SockClient alias for socket callback param; client_ force-cast throughout
+- [x] `lib/http/server_ws.lua` (6 → 0, commit 81c61a0) — WsHttpMod/WsHandler/WsSockClient aliases; handler_ cast; ws_open_ force-cast after nil-guard; http_fn_any intermediate for pcall
+- [x] `lib/doc/init.lua` (26 → 0, commit 81c61a0) — DocCtx/DocResult/DocExport type aliases; ctx_any intermediates for types_mod calls; check_mod any-cast; h:lines() rewritten as while-loop with explicit iterator call; typed arrays; table.sort comparator any-casts
+
 ## Done in current session (session N+27)
 
 - [x] `lib/connection_pool/init.lua` (33 → 0, commit a654be7) — Pool/ConnEntry/ConnMeta/PoolStats type aliases; self_ casts in all methods; nil-narrowing for idle_timeout/max_lifetime via intermediate locals; validate result via if/else; method sigs on Pool type
