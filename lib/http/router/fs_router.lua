@@ -7,26 +7,30 @@ local mimetype_by_contents
 
 local mod = {}
 
---[[@return http_callback]]
---[[@param path? string]]
---[[@param opts { io_open: fun(path: string, mode?: string): file* | nil, stderr_write: fun(...: string): nil, lua_load: fun(path: string): (boolean, http_callback | string) }]]
+--:: FsRouterOpts = { io_open: (path: string, mode: string | nil) -> any, stderr_write: (...string) -> nil, lua_load: (path: string) -> (boolean, any) }
+--: (string | nil, FsRouterOpts | nil) -> (any)
 mod.router = function (path, opts)
 	if not opts then error("fs_router() requires opts with io_open, stderr_write, lua_load caps") end
-	local io_open = opts.io_open
+	local opts_ = opts --[[:! FsRouterOpts]]
+	local io_open = opts_.io_open
 	if not io_open then error("fs_router() requires opts.io_open cap") end
-	local stderr_write = opts.stderr_write
+	local io_open_ = io_open --[[:! (string, string | nil) -> any]]
+	local stderr_write = opts_.stderr_write
 	if not stderr_write then error("fs_router() requires opts.stderr_write cap") end
-	local lua_load = opts.lua_load
+	local stderr_write_ = stderr_write --[[:! (...string) -> nil]]
+	local lua_load = opts_.lua_load
 	if not lua_load then error("fs_router() requires opts.lua_load cap") end
-	local handle_file = function (path2) --[[@param path2 string]]
+	local lua_load_ = lua_load --[[:! (string) -> (boolean, any)]]
+	--: (string) -> any
+	local handle_file = function (path2)
 		if path2:find("%.lua$") then
-			local success, cb = lua_load(path2)
-			if not success then stderr_write("fs_router: caught error when rendering page: ", cb, "\n") end
-			return success and cb or nil
-		--[[@diagnostic disable-next-line: undefined-global]]
-		elseif DEV then
+			local success, cb_ = lua_load_(path2)
+			local cb = cb_ --[[:! string]]
+			if not success then stderr_write_("fs_router: caught error when rendering page: ", cb, "\n") end
+			return success and cb_ or nil
+		elseif rawget(_G, "DEV") then
 			return function (req, res)
-				local file = io_open(path2)
+				local file = io_open_(path2)
 				if not file then return false end
 				local contents = file:read("*all")
 				file:close()
@@ -40,7 +44,7 @@ mod.router = function (path, opts)
 				return true
 			end
 		else
-			local file = io_open(path2)
+			local file = io_open_(path2)
 			if not file then return nil end
 			local contents = file:read("*all")
 			local content_type = mimetype_by_name(path2)
@@ -57,7 +61,8 @@ mod.router = function (path, opts)
 		end
 	end
 	local handle_dir
-	handle_dir = function (path2) --[[@param path2 string]]
+	--: (string) -> any
+	handle_dir = function (path2)
 		local routes = {}
 		for entry in dir_list(path2) do
 			local new_path = path2 .. "/" .. entry.name
