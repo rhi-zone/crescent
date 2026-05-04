@@ -93,7 +93,7 @@ function M.dsatur(graph)
   if n == 0 then return {} end
 
   -- saturation[u] = number of distinct neighbor colors
-  local saturation = {}
+  local saturation = {} --: { [any]: integer }
   -- neighbor_color_sets[u] = set of colors used by colored neighbors
   local neighbor_color_sets = {}
   local colored = {}
@@ -255,7 +255,7 @@ function M.is_bipartite(graph)
   local ns = nodes(graph)
   if #ns == 0 then return true, {} end
 
-  local coloring = {}
+  local coloring = {} --: { [any]: integer }
 
   for _, start in ipairs(ns) do
     if not coloring[start] then
@@ -294,7 +294,8 @@ function M.edge_color(graph)
   local seen_edges = {}
   for u, neighbors in pairs(graph) do
     for _, v in ipairs(neighbors) do
-      local a, b = u, v
+      local a = tostring(u)
+      local b = tostring(v)
       if a > b then a, b = b, a end
       local key = a .. "," .. b
       if not seen_edges[key] then

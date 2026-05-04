@@ -142,7 +142,7 @@ end
 -- $$ is left as literal text (block math delimiter).
 -- Returns an array of nodes.
 local function split_inline_math(value, allow_single)
-  local result = {}
+  local result = {} --: { [integer]: { type: string, value: string } }
   local pos = 1
   local len = #value
 
@@ -225,7 +225,7 @@ end
 
 local function transform(node, allow_single, blocks)
   if node.type == "root" or node.type == "blockquote" then
-    local children = node.children
+    local children = node.children --[[:! { [integer]: any }]]
     local new_children = {}
     for i = 1, #children do
       local child = children[i]
@@ -264,9 +264,10 @@ local function remark_math(processor, opts)
     allow_single = false
   end
 
-  local inner_parser = processor._parser
+  local proc_ = processor --[[: any]]
+  local inner_parser = proc_._parser
 
-  processor:parser(function(source)
+  proc_:parser(function(source)
     local cleaned, blocks = extract_block_math(source)
 
     local ast, err
@@ -282,7 +283,7 @@ local function remark_math(processor, opts)
     return ast
   end)
 
-  processor:use_transformer(function(ast)
+  proc_:use_transformer(function(ast)
     local blocks = ast._math_blocks or {}
     ast._math_blocks = nil
     transform(ast, allow_single, blocks)
@@ -290,7 +291,7 @@ local function remark_math(processor, opts)
   end)
 end
 
-setmetatable(M, { __call = function(_, ...) return remark_math(...) end })
+setmetatable(M, { __call = function(_, proc, opts) return remark_math(proc, opts) end })
 
 M.plugin = remark_math
 

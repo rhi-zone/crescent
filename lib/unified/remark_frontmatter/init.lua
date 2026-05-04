@@ -51,7 +51,9 @@ local FENCES = {
 --   • Content between the fences is the raw frontmatter value (trailing
 --     newline of the last content line is not included in `value`).
 local function try_extract(source, node_type, fence)
-  local fence_len = #fence  -- always 3
+  local source_ = source --[[:! string]]
+  local fence_ = fence --[[:! string]]
+  local fence_len = #fence_  -- always 3
 
   -- Opening fence must be the first characters.
   if source:sub(1, fence_len) ~= fence then return nil end
@@ -70,10 +72,10 @@ local function try_extract(source, node_type, fence)
   end
 
   -- Scan for the closing fence.  It must appear at the start of a line.
-  local pos = open_end
-  local src_len = #source
+  local pos = open_end --[[:! integer]]
+  local src_len = #source_
   while pos <= src_len do
-    local nl = source:find("\n", pos, true)
+    local nl = source_:find("\n", pos, true)
     local line_end = nl or (src_len + 1)
     local line = source:sub(pos, line_end - 1)
     -- Strip trailing \r.
@@ -113,7 +115,8 @@ local function remark_frontmatter(processor, opts)
   -- Capture the existing parser so we can delegate to it.
   local inner_parser = processor._parser
 
-  processor:parser(function(source)
+  local proc_ = processor --[[: any]]
+  proc_:parser(function(source)
     -- Try each active type in order.
     for i = 1, #types do
       local name  = types[i]
@@ -148,7 +151,7 @@ end
 
 -- Make the module callable as a plugin:
 --   processor:use(frontmatter)
-setmetatable(M, { __call = function(_, ...) return remark_frontmatter(...) end })
+setmetatable(M, { __call = function(_, proc, opts) return remark_frontmatter(proc, opts) end })
 
 M.plugin = remark_frontmatter
 
