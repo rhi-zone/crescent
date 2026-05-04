@@ -20,13 +20,15 @@ local function chars_to_array(s)
 end
 
 -- Myers forward pass; returns (v_final, d_final, offset) or (nil, errmsg)
+--: ({ [integer]: string }, { [integer]: string }) -> ({ [integer]: { [integer]: integer } } | nil, integer | nil, integer | nil)
 local function myers_forward(a, b)
   local n = #a
   local m = #b
   local max_d = n + m
   local offset = max_d + 2
-  local v = { [offset] = 0 }
-  local trace = {}
+  local v = {} --: { [integer]: integer }
+  v[offset] = 0
+  local trace = {} --: { [integer]: { [integer]: integer } }
 
   if max_d == 0 then
     trace[1] = { [offset] = 0 }
@@ -35,26 +37,27 @@ local function myers_forward(a, b)
 
   for d = 0, max_d do
     for k = -d, d, 2 do
-      local x
-      if k == -d or (k ~= d and (v[offset + k - 1] or -1) < (v[offset + k + 1] or -1)) then
-        x = v[offset + k + 1] or 0
+      local x0 = 0 --: integer
+      if k == -d or (k ~= d and v[offset + k - 1] < v[offset + k + 1]) then
+        x0 = v[offset + k + 1]
       else
-        x = (v[offset + k - 1] or 0) + 1
+        x0 = v[offset + k - 1] + 1
       end
-      local y = x - k
+      local x = x0 --[[:! integer]]
+      local y = x - k --: integer
       while x < n and y < m and a[x + 1] == b[y + 1] do
         x = x + 1
         y = y + 1
       end
       v[offset + k] = x
       if x >= n and y >= m then
-        local snap = {}
+        local snap = {} --: { [integer]: integer }
         for j = -d, d, 2 do snap[offset + j] = v[offset + j] end
         trace[d + 1] = snap
         return trace, d, offset
       end
     end
-    local snap = {}
+    local snap = {} --: { [integer]: integer }
     for j = -d, d, 2 do snap[offset + j] = v[offset + j] end
     trace[d + 1] = snap
   end
@@ -62,50 +65,58 @@ local function myers_forward(a, b)
   return nil, "diff: no solution found"
 end
 
+--: ({ [integer]: string }, { [integer]: string }, { [integer]: { [integer]: integer } }, integer, integer) -> { [integer]: { [integer]: unknown } }
 local function myers_backtrack(a, b, trace, d_final, offset)
   local n = #a
   local m = #b
-  local x, y = n, m
-  local stack = {}
+  local x = n --: integer
+  local y = m --: integer
+  local stack = {} --: { [integer]: { [integer]: unknown } }
   local ns = 0
 
   for d = d_final, 0, -1 do
-    local k = x - y
-    local prev_snap = d > 0 and trace[d] or nil
+    local k = x - y --: integer
+    local prev_snap = d > 0 and trace[d] or nil --: { [integer]: integer } | nil
+
     local function prev_v(ki)
       if not prev_snap then return 0 end
-      return prev_snap[offset + ki] or -1
+      return prev_snap[offset + ki]
     end
 
-    local prev_k
+    local prev_k0 = 0 --: integer
     if k == -d or (k ~= d and prev_v(k - 1) < prev_v(k + 1)) then
-      prev_k = k + 1
+      prev_k0 = k + 1
     else
-      prev_k = k - 1
+      prev_k0 = k - 1
     end
+    local prev_k = prev_k0 --[[:! integer]]
 
-    local prev_x = d > 0 and (prev_snap[offset + prev_k] or 0) or 0
-    local prev_y = prev_x - prev_k
+    local prev_x = 0 --: integer
+    if d > 0 and prev_snap then
+      prev_x = prev_snap[offset + prev_k]
+    end
+    local prev_x_ = prev_x --[[:! integer]]
+    local prev_y = prev_x_ - prev_k --: integer
 
-    local diag_start_x, diag_start_y
+    local diag_start_x = 0 --: integer
+    local diag_start_y = 0 --: integer
     if d > 0 then
       if prev_k > k then
-        diag_start_x = prev_x
+        diag_start_x = prev_x_
         diag_start_y = prev_y + 1
       else
-        diag_start_x = prev_x + 1
+        diag_start_x = prev_x_ + 1
         diag_start_y = prev_y
       end
-    else
-      diag_start_x = 0
-      diag_start_y = 0
     end
 
-    if x > diag_start_x then
+    local dsx = diag_start_x --[[:! integer]]
+    local dsy = diag_start_y --[[:! integer]]
+    if x > dsx then
       ns = ns + 1
-      stack[ns] = { "equal", diag_start_x + 1, x, diag_start_y + 1, y }
-      x = diag_start_x
-      y = diag_start_y
+      stack[ns] = { "equal", dsx + 1, x, dsy + 1, y }
+      x = dsx
+      y = dsy
     end
 
     if d > 0 then
@@ -122,24 +133,28 @@ local function myers_backtrack(a, b, trace, d_final, offset)
   end
 
   -- Reverse and convert to {op,text}
-  local result = {}
+  local result = {} --: { [integer]: { [integer]: string } }
   local nr = 0
   for i = ns, 1, -1 do
     local e = stack[i]
-    local op = e[1]
-    local text
+    local op = e[1] --[[:! string]]
+    local e2 = e[2] --[[:! integer]]
+    local e3 = e[3] --[[:! integer]]
+    local e4 = e[4] --[[:! integer]]
+    local e5 = e[5] --[[:! integer]]
+    local text = "" --: string
     if op == "equal" then
-      -- a[e[2]..e[3]]
+      -- a[e2..e3]
       local parts = {}
-      for j = e[2], e[3] do parts[j - e[2] + 1] = a[j] end
+      for j = e2, e3 do parts[j - e2 + 1] = a[j] end
       text = table.concat(parts)
     elseif op == "delete" then
       local parts = {}
-      for j = e[2], e[3] do parts[j - e[2] + 1] = a[j] end
+      for j = e2, e3 do parts[j - e2 + 1] = a[j] end
       text = table.concat(parts)
     else -- insert
       local parts = {}
-      for j = e[4], e[5] do parts[j - e[4] + 1] = b[j] end
+      for j = e4, e5 do parts[j - e4 + 1] = b[j] end
       text = table.concat(parts)
     end
     -- Merge with previous if same op
@@ -220,19 +235,22 @@ M.diff = function(text1, text2, _opts)
   else
     local a = chars_to_array(s1)
     local b = chars_to_array(s2)
-    local trace, d_final, offset = myers_forward(a, b)
-    if not trace then
+    local fwd_trace, fwd_d, fwd_offset = myers_forward(a, b)
+    if fwd_trace then
+      local trace_ = fwd_trace --[[:! { [integer]: { [integer]: integer } }]]
+      local d_final_ = (fwd_d or 0) --[[:! integer]]
+      local offset_ = (fwd_offset or 0) --[[:! integer]]
+      local inner = myers_backtrack(a, b, trace_, d_final_, offset_)
+      for _, op in ipairs(inner) do
+        nd = nd + 1
+        diffs[nd] = op
+      end
+    else
       -- fallback: single delete + insert
       nd = nd + 1
       diffs[nd] = { "delete", s1 }
       nd = nd + 1
       diffs[nd] = { "insert", s2 }
-    else
-      local inner = myers_backtrack(a, b, trace, d_final, offset)
-      for _, op in ipairs(inner) do
-        nd = nd + 1
-        diffs[nd] = op
-      end
     end
   end
 
@@ -285,10 +303,15 @@ end
 
 -- Shift edit boundaries to align with word/sentence boundaries.
 -- Returns a new diffs array (does not mutate input).
+--: ({ [integer]: { [integer]: string } }) -> { [integer]: { [integer]: string } }
 M.cleanup_semantic = function(diffs)
   -- Deep copy
-  local d = {}
-  for i, v in ipairs(diffs) do d[i] = { v[1], v[2] } end
+  local d = {} --: { [integer]: { [integer]: string } }
+  for i, v in ipairs(diffs) do
+    local v1 = v[1] --[[:! string]]
+    local v2 = v[2] --[[:! string]]
+    d[i] = { v1, v2 }
+  end
 
   -- Repeatedly shift non-equal runs right to word boundaries.
   -- For each edit group between two equals, we can shift by moving the
@@ -352,7 +375,7 @@ M.cleanup_semantic = function(diffs)
   end
 
   -- Merge adjacent ops of same type and remove empties
-  local result = {}
+  local result = {} --: { [integer]: { [integer]: string } }
   local nr = 0
   for _, v in ipairs(d) do
     if v[2] ~= "" then
@@ -373,10 +396,15 @@ end
 
 -- Merge tiny edit islands that cost more edits than they save.
 -- edit_cost: number of edit operations to open a new edit region (default 4).
+--: ({ [integer]: { [integer]: string } }, (number | nil)) -> { [integer]: { [integer]: string } }
 M.cleanup_efficiency = function(diffs, edit_cost)
   edit_cost = edit_cost or 4
-  local d = {}
-  for i, v in ipairs(diffs) do d[i] = { v[1], v[2] } end
+  local d = {} --: { [integer]: { [integer]: string } }
+  for i, v in ipairs(diffs) do
+    local v1 = v[1] --[[:! string]]
+    local v2 = v[2] --[[:! string]]
+    d[i] = { v1, v2 }
+  end
 
   local changed = true
   while changed do
