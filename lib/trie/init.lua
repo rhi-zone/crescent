@@ -8,103 +8,116 @@ end
 
 local M = {}
 
---:: Trie = { _root: unknown, _size: integer, _compressed: boolean }
+--:: TrieNode = { children: { [integer]: TrieNode }, has_value: boolean | nil, value: unknown | nil }
+--:: Trie = { _root: TrieNode, _size: integer, _compressed: boolean }
 
 -- opts.compressed: if true, logically a radix/Patricia trie (no-op at this tier; same interface)
 --: (opts: ({ compressed: boolean | nil } | nil)) -> Trie
 function M.new(opts)
   local self = {
-    _root = { children = {} },
+    _root = { children = {}, has_value = nil, value = nil },
     _size = 0,
     _compressed = opts and opts.compressed or false,
   }
-  return setmetatable(self, { __index = M })
+  local t = setmetatable(self, { __index = M }) --[[: any]]
+  return t --[[:! Trie]]
 end
 
 -- Navigate to the node for the given prefix.
 -- Returns the node or nil if the prefix path does not exist.
+--: (TrieNode, string) -> (TrieNode | nil)
 local function walk(root, str)
-  local node = root
+  local node = root --: TrieNode | nil
   for i = 1, #str do
     local ch = str:byte(i)
-    node = node.children[ch]
+    local node_ = node --[[:! TrieNode]]
+    node = node_.children[ch]
     if not node then return nil end
   end
   return node
 end
 
 -- Insert a key with an associated value (default true).
---: (key: string, value: (unknown | nil)) -> ()
+--: (self: Trie, key: string, value: (unknown | nil)) -> ()
 function M:insert(key, value)
+  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return nil, "key must be a string" end
   if value == nil then value = true end
-  local node = self._root
+  local node = self_._root
   for i = 1, #key do
     local ch = key:byte(i)
-    if not node.children[ch] then
-      node.children[ch] = { children = {} }
+    local node_ = node --[[:! TrieNode]]
+    if not node_.children[ch] then
+      node_.children[ch] = { children = {}, has_value = nil, value = nil }
     end
-    node = node.children[ch]
+    node = node_.children[ch]
   end
-  if node.value == nil then
-    self._size = self._size + 1
+  local node_ = node --[[:! TrieNode]]
+  if node_.value == nil then
+    self_._size = self_._size + 1
   end
-  node.value = value
-  node.has_value = true
+  node_.value = value
+  node_.has_value = true
 end
 
 -- Exact match lookup. Returns value or nil.
---: (key: string) -> (unknown | nil)
+--: (self: Trie, key: string) -> (unknown | nil)
 function M:get(key)
+  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return nil, "key must be a string" end
-  local node = walk(self._root, key)
+  local node = walk(self_._root, key)
   if node and node.has_value then return node.value end
   return nil
 end
 
 -- Returns true if the exact key exists.
---: (key: string) -> boolean
+--: (self: Trie, key: string) -> boolean
 function M:has(key)
+  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return false end
-  local node = walk(self._root, key)
-  return node ~= nil and node.has_value == true
+  local node = walk(self_._root, key)
+  return (node ~= nil and node.has_value == true) and true or false
 end
 
 -- Remove a key. Returns old value or nil.
---: (key: string) -> (unknown | nil)
+--: (self: Trie, key: string) -> (unknown | nil)
 function M:remove(key)
+  local self_ = self --[[:! Trie]]
   if type(key) ~= "string" then return nil, "key must be a string" end
-  local node = walk(self._root, key)
+  local node = walk(self_._root, key)
   if not node or not node.has_value then return nil end
   local old = node.value
   node.value = nil
-  node.has_value = nil
-  self._size = self._size - 1
+  node.has_value = false
+  self_._size = self_._size - 1
   return old
 end
 
 -- Number of keys stored.
---: () -> number
+--: (self: Trie) -> number
 function M:size()
-  return self._size
+  local self_ = self --[[:! Trie]]
+  return self_._size
 end
 
 -- Returns true if any stored key starts with prefix.
---: (prefix: string) -> boolean
+--: (self: Trie, prefix: string) -> boolean
 function M:has_prefix(prefix)
+  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return false end
-  local node = walk(self._root, prefix)
+  local node = walk(self_._root, prefix)
   if not node then return false end
   -- The subtree is non-empty if this node has a value or has children with values.
   if node.has_value then return true end
   -- BFS/DFS to check for any value in subtree.
-  local stack = { node }
+  local stack = { node } --: { [integer]: TrieNode }
   while #stack > 0 do
     local n = stack[#stack]
-    stack[#stack] = nil
+    stack[#stack] = nil --[[: any]]
     for _, child in pairs(n.children) do
-      if child.has_value then return true end
-      stack[#stack + 1] = child
+      local child_ = child --[[:! TrieNode]]
+      if child_.has_value then return true end
+      stack[#stack + 1] = child_
     end
   end
   return false
@@ -112,124 +125,137 @@ end
 
 -- Collect all key-value pairs in the subtree rooted at node.
 -- buf is the byte buffer for the current prefix, results is the output array.
+--: (TrieNode, { [integer]: integer }, { [integer]: { [integer]: unknown } }) -> nil
 local function collect(node, buf, results)
   if node.has_value then
-    results[#results + 1] = { string.char(unpack(buf)), node.value }
+    results[#results + 1] = { string.char(unpack(buf)) --[[:! string]], node.value }
   end
   -- Sort children by byte value for deterministic (sorted) output.
-  local keys = {}
+  local keys = {} --: { [integer]: integer }
   for ch in pairs(node.children) do
-    keys[#keys + 1] = ch
+    keys[#keys + 1] = ch --[[:! integer]]
   end
   table.sort(keys)
   for i = 1, #keys do
     buf[#buf + 1] = keys[i]
     collect(node.children[keys[i]], buf, results)
-    buf[#buf] = nil
+    buf[#buf] = nil --[[: any]]
   end
 end
 
 -- Collect keys only (sorted) in the subtree.
+--: (TrieNode, { [integer]: integer }, { [integer]: string }) -> nil
 local function collect_keys(node, buf, results)
   if node.has_value then
-    results[#results + 1] = string.char(unpack(buf))
+    results[#results + 1] = string.char(unpack(buf)) --[[:! string]]
   end
-  local keys = {}
+  local keys = {} --: { [integer]: integer }
   for ch in pairs(node.children) do
-    keys[#keys + 1] = ch
+    keys[#keys + 1] = ch --[[:! integer]]
   end
   table.sort(keys)
   for i = 1, #keys do
     buf[#buf + 1] = keys[i]
     collect_keys(node.children[keys[i]], buf, results)
-    buf[#buf] = nil
+    buf[#buf] = nil --[[: any]]
   end
 end
 
 -- Collect up to limit keys (sorted) in the subtree.
+--: (TrieNode, { [integer]: integer }, { [integer]: string }, integer) -> nil
 local function collect_keys_limited(node, buf, results, limit)
   if #results >= limit then return end
   if node.has_value then
-    results[#results + 1] = string.char(unpack(buf))
+    results[#results + 1] = string.char(unpack(buf)) --[[:! string]]
     if #results >= limit then return end
   end
-  local keys = {}
+  local keys = {} --: { [integer]: integer }
   for ch in pairs(node.children) do
-    keys[#keys + 1] = ch
+    keys[#keys + 1] = ch --[[:! integer]]
   end
   table.sort(keys)
   for i = 1, #keys do
     if #results >= limit then return end
     buf[#buf + 1] = keys[i]
     collect_keys_limited(node.children[keys[i]], buf, results, limit)
-    buf[#buf] = nil
+    buf[#buf] = nil --[[: any]]
   end
 end
 
 -- Count all keys in the subtree.
+--: (TrieNode) -> integer
 local function count_subtree(node)
   local c = 0
   if node.has_value then c = 1 end
   for _, child in pairs(node.children) do
-    c = c + count_subtree(child)
+    local child_ = child --[[:! TrieNode]]
+    c = c + count_subtree(child_)
   end
   return c
 end
 
 -- Array of {key, value} for all keys starting with prefix (sorted).
---: (prefix: string) -> { {string, unknown} }
+--: (self: Trie, prefix: string) -> { [integer]: { [integer]: unknown } }
 function M:find_prefix(prefix)
+  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return {} end
-  local node = walk(self._root, prefix)
+  local node = walk(self_._root, prefix)
   if not node then return {} end
-  local buf = {}
+  local buf = {} --: { [integer]: integer }
   for i = 1, #prefix do buf[i] = prefix:byte(i) end
-  local results = {}
+  local results = {} --: { [integer]: { [integer]: unknown } }
   collect(node, buf, results)
   return results
 end
 
 -- Number of keys starting with prefix.
---: (prefix: string) -> number
+--: (self: Trie, prefix: string) -> number
 function M:count_prefix(prefix)
+  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return 0 end
-  local node = walk(self._root, prefix)
+  local node = walk(self_._root, prefix)
   if not node then return 0 end
   return count_subtree(node)
 end
 
 -- Longest stored key that is a prefix of str.
 -- Returns (key, value) or nil.
---: (str: string) -> ((string | nil), (unknown | nil))
+--: (self: Trie, str: string) -> ((string | nil), (unknown | nil))
 function M:longest_prefix(str)
+  local self_ = self --[[:! Trie]]
   if type(str) ~= "string" then return nil end
-  local node = self._root
-  local last_key, last_val
-  if node.has_value then
+  local node = self_._root --: TrieNode | nil
+  local last_key --: string | nil
+  local last_val --: unknown | nil
+  local node0 = node --[[:! TrieNode]]
+  if node0.has_value then
     last_key = ""
-    last_val = node.value
+    last_val = node0.value
   end
   for i = 1, #str do
     local ch = str:byte(i)
-    node = node.children[ch]
+    local node_ = node --[[:! TrieNode]]
+    node = node_.children[ch]
     if not node then break end
-    if node.has_value then
+    local noden = node --[[:! TrieNode]]
+    if noden.has_value then
       last_key = str:sub(1, i)
-      last_val = node.value
+      last_val = noden.value
     end
   end
   return last_key, last_val
 end
 
 -- Up to limit keys starting with prefix (sorted). Default limit: all.
---: (prefix: string, limit: (number | nil)) -> {string}
+--: (self: Trie, prefix: string, limit: (integer | nil)) -> { [integer]: string }
 function M:autocomplete(prefix, limit)
+  local self_ = self --[[:! Trie]]
   if type(prefix) ~= "string" then return {} end
-  local node = walk(self._root, prefix)
+  local node = walk(self_._root, prefix)
   if not node then return {} end
-  local buf = {}
+  local buf = {} --: { [integer]: integer }
   for i = 1, #prefix do buf[i] = prefix:byte(i) end
-  local results = {}
+  local results = {} --: { [integer]: string }
   if limit then
     collect_keys_limited(node, buf, results, limit)
   else
@@ -239,19 +265,21 @@ function M:autocomplete(prefix, limit)
 end
 
 -- Array of all keys (sorted).
---: () -> {string}
+--: (self: Trie) -> { [integer]: string }
 function M:keys()
-  local results = {}
-  collect_keys(self._root, {}, results)
+  local self_ = self --[[:! Trie]]
+  local results = {} --: { [integer]: string }
+  collect_keys(self_._root, {}, results)
   return results
 end
 
 -- Array of all values (key-sorted order).
---: () -> {unknown}
+--: (self: Trie) -> { [integer]: unknown }
 function M:values()
-  local results = {}
-  collect(self._root, {}, results)
-  local vals = {}
+  local self_ = self --[[:! Trie]]
+  local results = {} --: { [integer]: { [integer]: unknown } }
+  collect(self_._root, {}, results)
+  local vals = {} --: { [integer]: unknown }
   for i = 1, #results do
     vals[i] = results[i][2]
   end
@@ -259,45 +287,47 @@ function M:values()
 end
 
 -- Iterator: key, value (sorted order).
---: () -> () -> ((string | nil), (unknown | nil))
+--: (self: Trie) -> () -> ((string | nil), (unknown | nil))
 function M:pairs()
-  local results = {}
-  collect(self._root, {}, results)
+  local self_ = self --[[:! Trie]]
+  local results = {} --: { [integer]: { [integer]: unknown } }
+  collect(self_._root, {}, results)
   local i = 0
   return function()
     i = i + 1
-    if results[i] then
-      return results[i][1], results[i][2]
+    local r = results[i]
+    if r then
+      return r[1] --[[:! string]], r[2]
     end
+    return nil, nil
   end
 end
 
 -- Remove all keys.
---: () -> ()
+--: (self: Trie) -> ()
 function M:clear()
-  self._root = { children = {} }
-  self._size = 0
+  local self_ = self --[[:! Trie]]
+  self_._root = { children = {}, has_value = nil, value = nil }
+  self_._size = 0
 end
 
 -- Aliases for spec-compatible API names.
 -- delete: alias for remove. Returns true if key existed, false if not.
---: (key: string) -> boolean
+--: (self: Trie, key: string) -> boolean
 function M:delete(key)
-  local old = self:remove(key)
+  local self_ = self --[[:! Trie]]
+  local old = M.remove(self_, key)
   return old ~= nil
 end
 
 -- completions: alias for autocomplete. Returns sorted key list with given prefix.
---: (prefix: string, limit: (number | nil)) -> {string}
 M.completions = M.autocomplete
 
 -- all: alias for keys. Returns all keys sorted.
---: () -> {string}
-M.all = M.keys
+M.all = M.keys --[[: any]]
 
 -- iter: alias for pairs. Iterator over (key, value) in sorted order.
---: () -> () -> ((string | nil), (unknown | nil))
-M.iter = M.pairs
+M.iter = M.pairs --[[: any]]
 
 M._tier = "pure"
 

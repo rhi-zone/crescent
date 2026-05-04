@@ -15,6 +15,7 @@ local pi = math.pi
 -- category → { canonical_unit, { alias → factor, ... } }
 local CATEGORIES = {}
 
+--: (string, string, { [string]: number | boolean }) -> nil
 local function def(cat, base, units)
   CATEGORIES[cat] = { base = base, units = units }
 end
@@ -258,10 +259,11 @@ function M.format(value, unit, opts)
   opts = opts or {}
   local precision = opts.precision
   if precision == nil then precision = 2 end
+  local precision_ = precision --[[:! integer]]
   local space = opts.space
   if space == nil then space = true end
   local sep = space and " " or ""
-  local fmt_str = "%." .. precision .. "f"
+  local fmt_str = "%." .. precision_ .. "f"
   return string.format(fmt_str, value) .. sep .. tostring(unit)
 end
 

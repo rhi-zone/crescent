@@ -20,9 +20,10 @@ end
 -- Returns array of line strings.
 -- opts.break_long_words = true  (break words longer than width)
 -- opts.preserve_spaces = false  (currently ignored — always collapses)
+--: (string, integer, { [string]: unknown } | nil) -> { [integer]: string }
 function M.greedy(text, width, opts)
-  opts = opts or {}
-  local break_long = opts.break_long_words or false
+  local opts_ = opts or {} --[[:! { [string]: unknown }]]
+  local break_long = opts_.break_long_words and true or false
   local words = split_words(text)
   if #words == 0 then return {} end
 
@@ -49,21 +50,24 @@ function M.greedy(text, width, opts)
       local pos = 1
       while pos <= wlen do
         -- How much space is left on the current line?
-        local space = (current_len == 0) and width or (width - current_len - 1)
+        local space_ = (current_len == 0) and width or (width - current_len - 1)
+        local space = space_ --[[:! integer]]
         if space <= 0 then
           flush()
           space = width
         end
         local chunk = word:sub(pos, pos + space - 1)
-        if current_len == 0 then
+        local cl_ = current_len --[[:! integer]]
+        if cl_ == 0 then
           current = chunk
           current_len = #chunk
         else
           current = current .. " " .. chunk
-          current_len = current_len + 1 + #chunk
+          current_len = cl_ + 1 + #chunk
         end
         pos = pos + space
-        if current_len >= width then
+        local cl2_ = current_len --[[:! integer]]
+        if cl2_ >= width then
           flush()
         end
       end
@@ -90,6 +94,7 @@ end
 -- Optimal (Knuth-Plass simplified) line wrapping via DP.
 -- Minimizes sum of squared slack on non-last lines.
 -- Returns array of line strings.
+--: (string, integer, { ... } | nil) -> { [integer]: string }
 function M.optimal(text, width, opts)
   opts = opts or {}
   local words = split_words(text)
@@ -97,7 +102,7 @@ function M.optimal(text, width, opts)
   if n == 0 then return {} end
 
   -- Precompute word lengths
-  local wlen = {}
+  local wlen = {} --: { [integer]: integer }
   for i, w in ipairs(words) do
     wlen[i] = #w
   end
@@ -105,8 +110,8 @@ function M.optimal(text, width, opts)
   -- cost[i] = minimum total raggedness to wrap words[1..i]
   -- break[i] = j such that words[j+1..i] are on the last segment
   local INF = math.huge
-  local cost = {}
-  local brk = {}
+  local cost = {} --: { [integer]: number }
+  local brk = {} --: { [integer]: integer }
 
   cost[0] = 0
 
@@ -120,9 +125,11 @@ function M.optimal(text, width, opts)
       if j == i then
         line_len = wlen[i]
       else
-        line_len = line_len + 1 + wlen[j]  -- +1 for space
+        local ll_ = line_len --[[:! integer]]
+        line_len = ll_ + 1 + wlen[j]  -- +1 for space
       end
-      if line_len > width then break end
+      local ll2_ = line_len --[[:! integer]]
+      if ll2_ > width then break end
       local slack = width - line_len
       -- If this is the last line (j == 1 implies words 1..i), cost for last line = 0
       -- We treat a segment as the last only when j==1 (starts from beginning) but
@@ -143,7 +150,7 @@ function M.optimal(text, width, opts)
   end
 
   -- Backtrack to find line boundaries
-  local breaks = {}
+  local breaks = {} --: { [integer]: integer }
   local pos = n
   while pos > 0 do
     breaks[#breaks + 1] = pos
@@ -154,7 +161,7 @@ function M.optimal(text, width, opts)
   local lines = {}
   local prev = 0
   for k = #breaks, 1, -1 do
-    local last = breaks[k]
+    local last = breaks[k] --[[:! integer]]
     local parts = {}
     for i = prev + 1, last do
       parts[#parts + 1] = words[i]
@@ -186,7 +193,7 @@ function M.paragraph(text, width, opts)
   for seg in (text .. "\n"):gmatch("([^\n]*)\n") do
     segments[#segments + 1] = seg
   end
-  local result_lines = {}
+  local result_lines = {} --: { [integer]: string }
   for _, seg in ipairs(segments) do
     local wrapped = M.greedy(seg, width, opts)
     if #wrapped == 0 then
@@ -217,6 +224,7 @@ end
 -- Justify lines: pad spaces between words so each line is exactly width chars.
 -- The last line is left-aligned (not justified).
 -- Returns array of justified line strings.
+--: ({ [integer]: string }, integer) -> { [integer]: string }
 function M.justify(lines, width)
   local result = {}
   for i, line in ipairs(lines) do
@@ -224,24 +232,24 @@ function M.justify(lines, width)
       -- Last line: left-aligned
       result[#result + 1] = line
     else
-      local words = {}
-      for w in line:gmatch("%S+") do words[#words + 1] = w end
-      if #words <= 1 then
+      local words_ = {} --: { [integer]: string }
+      for w in line:gmatch("%S+") do words_[#words_ + 1] = w end
+      if #words_ <= 1 then
         -- Single word: left-align
         result[#result + 1] = line
       else
         local total_word_len = 0
-        for _, w in ipairs(words) do total_word_len = total_word_len + #w end
-        local gaps = #words - 1
+        for _, w in ipairs(words_) do total_word_len = total_word_len + #w end
+        local gaps = #words_ - 1
         local total_spaces = width - total_word_len
         local base_space = math.floor(total_spaces / gaps)
         local extra = total_spaces - base_space * gaps
-        local parts = {}
-        for j, w in ipairs(words) do
+        local parts = {} --: { [integer]: string }
+        for j, w in ipairs(words_) do
           parts[#parts + 1] = w
-          if j < #words then
+          if j < #words_ then
             local sp = base_space + (j <= extra and 1 or 0)
-            parts[#parts + 1] = string.rep(" ", sp)
+            parts[#parts + 1] = string.rep(" ", sp --[[:! integer]])
           end
         end
         result[#result + 1] = table.concat(parts)
@@ -270,15 +278,16 @@ end
 
 -- Truncate text with ellipsis if it exceeds width.
 -- ellipsis defaults to "..."
+--: (string, integer, string | nil) -> string
 function M.truncate(text, width, ellipsis)
-  ellipsis = ellipsis or "..."
+  local ellipsis_ = ellipsis or "..."
   if #text <= width then return text end
-  local cut = width - #ellipsis
+  local cut = width - #ellipsis_
   if cut <= 0 then
     -- ellipsis itself is too long; just truncate hard
-    return ellipsis:sub(1, width)
+    return ellipsis_:sub(1, width)
   end
-  return text:sub(1, cut) .. ellipsis
+  return text:sub(1, cut) .. ellipsis_
 end
 
 -- Full pipeline: wrap text then join with newlines.
