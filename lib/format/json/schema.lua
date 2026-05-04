@@ -38,6 +38,8 @@ local function schema(fields)
     -- decode_obj_raw: inner scanner. No pcall — throws on malformed input.
     -- Caller must supply the destination table t.
     local function decode_obj_raw(src, t)
+      local src_ = src --[[:! string]]
+      local t_ = t --[[:! { [string]: unknown }]]
         local pos, len = 2, #src
         repeat
             local b = src:byte(pos)
@@ -49,14 +51,14 @@ local function schema(fields)
             -- Scan to closing quote of key
             while b ~= 34 do pos = pos + 1; b = src:byte(pos) end
             -- Look up pre-interned key or fall back to substring
-            local key = PRE[src:sub(ks, pos - 1)] or src:sub(ks, pos - 1)
+            local key = PRE[src_:sub(ks, pos - 1)] or src_:sub(ks, pos - 1)
             -- Skip closing quote + colon (pos+1 is ':', pos+2 is first byte of value)
             pos = pos + 2; b = src:byte(pos)
             if b == 34 then
                 -- String value
                 pos = pos + 1; local vs = pos; b = src:byte(pos)
                 while b ~= 34 do pos = pos + 1; b = src:byte(pos) end
-                rawset(t, key, src:sub(vs, pos - 1)); pos = pos + 1
+                rawset(t_, key, src_:sub(vs, pos - 1)); pos = pos + 1
             elseif b == 116 then
                 -- true (4 bytes: t-r-u-e)
                 rawset(t, key, true); pos = pos + 4
@@ -69,12 +71,12 @@ local function schema(fields)
                 while b ~= 44 and b ~= 125 and pos <= len do
                     pos = pos + 1; b = src:byte(pos)
                 end
-                rawset(t, key, tonumber(src:sub(ns, pos - 1)))
+                rawset(t_, key, tonumber(src_:sub(ns, pos - 1)))
             end
             -- Consume comma if present
             if src:byte(pos) == 44 then pos = pos + 1 end
-        until pos >= len
-        return t
+        until (pos --[[:! integer]]) >= len
+        return t_
     end
 
     -- decode_into(src, buf): populate buf in-place. Throws on error.
