@@ -155,6 +155,15 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+35)
+
+- [x] `lib/entity_component/init.lua` (7 → 0, commit 61114de) — self_ pattern in entity/destroy/clear/add/remove; sys_ cast for system descriptor in World:run
+- [x] `lib/unified/remark_toc/init.lua` (6 → 0, commit 61114de) — annotate extract_text/slugify return types; cast children array and stack type; nil-pop cast
+- [x] `lib/unified/remark_abbr/init.lua` (6 → 0, commit 2e90c4f) — annotate split_text params; cast s/e via any intermediate after early-nil multi-return
+- [x] `lib/sandbox/init.lua` (6 → 0, commit 2e90c4f) — cast debug to any for sethook calls (typed overload mismatch)
+- [x] `lib/formats/ccv2/card.lua` (5 → 0, commit 2e90c4f) — cast base64/json/png requires to any (all return unknown)
+- [x] `lib/sqlite/init.lua` (5 → 0, commit 2e90c4f) — ffi_any/sqlite_ffi_any intermediates for load/bind_text/errmsg; pkg_loaded any cast; iterable force-cast for .iter
+
 ## Done in current session (session N+34)
 
 - [x] `lib/service_registry/init.lua` (2 → 0, commit 728bacb) — cast inst to open record in discover loop; annotate tags_match params
