@@ -13,7 +13,7 @@ end
 --
 -- Stores: root.data.passive = { {sentence="...", pattern="was written"}, ... }
 
-local nlcst = require("lib.unified.nlcst")
+local nlcst = require("lib.unified.nlcst") --[[: any]]
 
 local M = {}
 
@@ -55,7 +55,8 @@ local function sentence_words(sent)
       return
     end
     if node.children then
-      for i = 1, #node.children do walk(node.children[i]) end
+      local nc = node.children --[[:! { [integer]: any }]]
+      for i = 1, #nc do walk(nc[i]) end
     end
   end
   walk(sent)
@@ -100,7 +101,8 @@ local function transformer(root)
       return -- Don't recurse further into sentence.
     end
     if node.children then
-      for i = 1, #node.children do walk_node(node.children[i]) end
+      local nc = node.children --[[:! { [integer]: any }]]
+      for i = 1, #nc do walk_node(nc[i]) end
     end
   end
 

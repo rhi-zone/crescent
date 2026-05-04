@@ -18,7 +18,7 @@ end
 -- Stores: root.data.indefinite_article =
 --   { {actual="a", expected="an", word="apple", sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst")
+local nlcst = require("lib.unified.nlcst") --[[: any]]
 
 local M = {}
 
@@ -52,12 +52,14 @@ local VOWEL_LETTER_SOUNDS = {
 
 -- Returns true if the word should be preceded by "an".
 local function needs_an(word)
-  if #word == 0 then return false end
-  local lower = word:lower()
+  --: string
+  local word_ = word --[[:! string]]
+  if #word_ == 0 then return false end
+  local lower = word_:lower()
   local first = lower:sub(1, 1)
 
   -- All uppercase (or mixed short word): treat as abbreviation spoken letter-by-letter.
-  local is_abbrev = word:match("^[A-Z][A-Z]+$") ~= nil
+  local is_abbrev = word_:match("^[A-Z][A-Z]+$") ~= nil
 
   if is_abbrev then
     return VOWEL_LETTER_SOUNDS[first] == true
@@ -119,7 +121,8 @@ local function transformer(root)
       return
     end
     if node.children then
-      for i = 1, #node.children do walk(node.children[i]) end
+      local nc = node.children --[[:! { [integer]: any }]]
+      for i = 1, #nc do walk(nc[i]) end
     end
   end
 

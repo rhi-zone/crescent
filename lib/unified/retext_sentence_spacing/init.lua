@@ -14,7 +14,7 @@ end
 --
 -- Stores: root.data.sentence_spacing = { {actual=2, expected=1, sentence="..."}, ... }
 
-local nlcst = require("lib.unified.nlcst")
+local nlcst = require("lib.unified.nlcst") --[[: any]]
 
 local M = {}
 
@@ -63,7 +63,8 @@ local function transformer(root, opts)
       return
     end
     if node.children then
-      for i = 1, #node.children do walk(node.children[i]) end
+      local nc = node.children --[[:! { [integer]: any }]]
+      for i = 1, #nc do walk(nc[i]) end
     end
   end
 
