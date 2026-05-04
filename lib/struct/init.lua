@@ -15,8 +15,10 @@ local ffi = require("ffi")
 local bit = require("bit")
 
 -- FFI unions for float conversion
-local union_f32 = ffi.typeof("union { float f; uint8_t b[4]; }")
-local union_f64 = ffi.typeof("union { double d; uint8_t b[8]; }")
+--:: F32Union = { f: number, b: { [integer]: integer } }
+--:: F64Union = { f: number, d: number, b: { [integer]: integer } }
+local union_f32 = ffi.typeof("union { float f; uint8_t b[4]; }") --[[: any]]
+local union_f64 = ffi.typeof("union { double d; uint8_t b[8]; }") --[[: any]]
 local u32 = ffi.typeof("union { uint32_t u; int32_t i; }")
 local u64 = ffi.typeof("union { uint64_t u; int64_t i; }")
 
@@ -40,13 +42,16 @@ local SIZES = {
   ["?"] = 1,
 }
 
+--:: StructOp = { char: string, count: integer, le: boolean }
 -- Parse format string into a list of ops.
 -- Each op: { char, count, le } where le=true means little-endian.
 -- Returns ops_list, err
+--: (fmt: string) -> ({ [integer]: StructOp } | nil, string | nil)
 local function parse_fmt(fmt)
-  local le -- nil = use native
-  local i = 1
-  local ops = {}
+  local le --: boolean | nil
+  local i = 1 --: integer
+  local ops = {} --: { [integer]: StructOp }
+  local ops_ = ops --[[: any]]
 
   -- Optional byte order prefix
   local first = fmt:sub(1, 1)
@@ -84,15 +89,15 @@ local function parse_fmt(fmt)
     i = i + 1
 
     -- 'x' (pad) ignores repeat in terms of values but takes bytes
+    local eff_le = (le == nil and NATIVE_LE or le) --[[:! boolean]]
     if c == "x" then
-      ops[#ops + 1] = { char = "x", count = count, le = (le == nil and NATIVE_LE or le) }
+      ops_[#ops + 1] = { char = "x", count = count, le = eff_le }
     elseif c == "s" then
       -- Ns = string of N bytes; treat count as the string length, one value
-      ops[#ops + 1] = { char = "s", count = count, le = (le == nil and NATIVE_LE or le) }
+      ops_[#ops + 1] = { char = "s", count = count, le = eff_le }
     elseif SIZES[c] then
-      local effective_le = (le == nil and NATIVE_LE or le)
       for _ = 1, count do
-        ops[#ops + 1] = { char = c, count = 1, le = effective_le }
+        ops_[#ops + 1] = { char = c, count = 1, le = eff_le }
       end
     else
       return nil, "struct: unknown format character '" .. c .. "'"
@@ -103,7 +108,9 @@ local function parse_fmt(fmt)
 end
 
 -- Write bytes for a single op into a table of byte strings
+--: (out: { [integer]: string }, op: StructOp, val: unknown) -> (boolean | nil, string | nil)
 local function write_op(out, op, val)
+  local out_ = out --[[: any]]
   local c = op.char
   local le = op.le
 
@@ -120,83 +127,84 @@ local function write_op(out, op, val)
   elseif c == "b" then
     -- int8
     if type(val) ~= "number" then return nil, "struct: expected number for 'b'" end
-    val = math.floor(val)
-    if val < -128 or val > 127 then return nil, "struct: value out of range for 'b'" end
-    if val < 0 then val = val + 256 end
-    out[#out + 1] = string.char(val)
+    local nv = math.floor(val --[[:! number]])
+    if nv < -128 or nv > 127 then return nil, "struct: value out of range for 'b'" end
+    if nv < 0 then nv = nv + 256 end
+    out_[#out + 1] = string.char(nv)
     return true
 
   elseif c == "B" then
     -- uint8
     if type(val) ~= "number" then return nil, "struct: expected number for 'B'" end
-    val = math.floor(val)
-    if val < 0 or val > 255 then return nil, "struct: value out of range for 'B'" end
-    out[#out + 1] = string.char(val)
+    local nv = math.floor(val --[[:! number]])
+    if nv < 0 or nv > 255 then return nil, "struct: value out of range for 'B'" end
+    out_[#out + 1] = string.char(nv)
     return true
 
   elseif c == "h" then
     -- int16
     if type(val) ~= "number" then return nil, "struct: expected number for 'h'" end
-    val = math.floor(val)
-    if val < -32768 or val > 32767 then return nil, "struct: value out of range for 'h'" end
-    if val < 0 then val = val + 65536 end
-    local b0 = val % 256
-    local b1 = math.floor(val / 256) % 256
+    local nv = math.floor(val --[[:! number]])
+    if nv < -32768 or nv > 32767 then return nil, "struct: value out of range for 'h'" end
+    if nv < 0 then nv = nv + 65536 end
+    local b0 = nv % 256
+    local b1 = math.floor(nv / 256) % 256
     if le then
-      out[#out + 1] = string.char(b0, b1)
+      out_[#out + 1] = string.char(b0, b1)
     else
-      out[#out + 1] = string.char(b1, b0)
+      out_[#out + 1] = string.char(b1, b0)
     end
     return true
 
   elseif c == "H" then
     -- uint16
     if type(val) ~= "number" then return nil, "struct: expected number for 'H'" end
-    val = math.floor(val)
-    if val < 0 or val > 65535 then return nil, "struct: value out of range for 'H'" end
-    local b0 = val % 256
-    local b1 = math.floor(val / 256) % 256
+    local nv = math.floor(val --[[:! number]])
+    if nv < 0 or nv > 65535 then return nil, "struct: value out of range for 'H'" end
+    local b0 = nv % 256
+    local b1 = math.floor(nv / 256) % 256
     if le then
-      out[#out + 1] = string.char(b0, b1)
+      out_[#out + 1] = string.char(b0, b1)
     else
-      out[#out + 1] = string.char(b1, b0)
+      out_[#out + 1] = string.char(b1, b0)
     end
     return true
 
   elseif c == "i" or c == "l" then
     -- int32
     if type(val) ~= "number" then return nil, "struct: expected number for '" .. c .. "'" end
-    val = math.floor(val)
-    if val < -2147483648 or val > 2147483647 then
+    local nv = math.floor(val --[[:! number]])
+    if nv < -2147483648 or nv > 2147483647 then
       return nil, "struct: value out of range for '" .. c .. "'"
     end
-    if val < 0 then val = val + 4294967296 end
-    local b0 = val % 256
-    local b1 = math.floor(val / 256) % 256
-    local b2 = math.floor(val / 65536) % 256
-    local b3 = math.floor(val / 16777216) % 256
+    if nv < 0 then nv = (nv + 4294967296) --[[:! integer]] end
+    local nv2 = nv --[[:! integer]]
+    local b0 = nv2 % 256
+    local b1 = math.floor(nv2 / 256) % 256
+    local b2 = math.floor(nv2 / 65536) % 256
+    local b3 = math.floor(nv2 / 16777216) % 256
     if le then
-      out[#out + 1] = string.char(b0, b1, b2, b3)
+      out_[#out + 1] = string.char(b0, b1, b2, b3)
     else
-      out[#out + 1] = string.char(b3, b2, b1, b0)
+      out_[#out + 1] = string.char(b3, b2, b1, b0)
     end
     return true
 
   elseif c == "I" or c == "L" then
     -- uint32
     if type(val) ~= "number" then return nil, "struct: expected number for '" .. c .. "'" end
-    val = math.floor(val)
-    if val < 0 or val > 4294967295 then
+    local nv = math.floor(val --[[:! number]])
+    if nv < 0 or nv > 4294967295 then
       return nil, "struct: value out of range for '" .. c .. "'"
     end
-    local b0 = val % 256
-    local b1 = math.floor(val / 256) % 256
-    local b2 = math.floor(val / 65536) % 256
-    local b3 = math.floor(val / 16777216) % 256
+    local b0 = nv % 256
+    local b1 = math.floor(nv / 256) % 256
+    local b2 = math.floor(nv / 65536) % 256
+    local b3 = math.floor(nv / 16777216) % 256
     if le then
-      out[#out + 1] = string.char(b0, b1, b2, b3)
+      out_[#out + 1] = string.char(b0, b1, b2, b3)
     else
-      out[#out + 1] = string.char(b3, b2, b1, b0)
+      out_[#out + 1] = string.char(b3, b2, b1, b0)
     end
     return true
 
@@ -204,7 +212,7 @@ local function write_op(out, op, val)
     -- int64 — use FFI for correct bit handling
     if type(val) ~= "number" then return nil, "struct: expected number for 'q'" end
     local tmp = ffi.new("union { int64_t i; uint8_t b[8]; }")
-    tmp.i = val
+    tmp.i = val --[[:! number]]
     local s
     if le then
       s = string.char(tmp.b[0], tmp.b[1], tmp.b[2], tmp.b[3],
@@ -220,7 +228,7 @@ local function write_op(out, op, val)
     -- uint64
     if type(val) ~= "number" then return nil, "struct: expected number for 'Q'" end
     local tmp = ffi.new("union { uint64_t u; uint8_t b[8]; }")
-    tmp.u = val
+    tmp.u = val --[[:! number]]
     local s
     if le then
       s = string.char(tmp.b[0], tmp.b[1], tmp.b[2], tmp.b[3],
@@ -236,7 +244,7 @@ local function write_op(out, op, val)
     -- float32
     if type(val) ~= "number" then return nil, "struct: expected number for 'f'" end
     local u = union_f32()
-    u.f = val
+    u.f = val --[[:! number]]
     local s
     if le then
       s = string.char(u.b[0], u.b[1], u.b[2], u.b[3])
@@ -250,7 +258,7 @@ local function write_op(out, op, val)
     -- float64
     if type(val) ~= "number" then return nil, "struct: expected number for 'd'" end
     local u = union_f64()
-    u.d = val
+    u.d = val --[[:! number]]
     local s
     if le then
       s = string.char(u.b[0], u.b[1], u.b[2], u.b[3],
@@ -266,14 +274,19 @@ local function write_op(out, op, val)
     -- string / char
     local n = op.count
     if type(val) ~= "string" then return nil, "struct: expected string for 's'/'c'" end
-    if #val < n then
+    local sval = val --[[:! string]]
+    if #sval < n then
       -- zero-pad
-      out[#out + 1] = val .. string.rep("\0", n - #val)
-    elseif #val > n then
-      out[#out + 1] = val:sub(1, n)
+      out[#out + 1] = sval .. string.rep("\0", n - #sval)
+    elseif #sval > n then
+      out[#out + 1] = sval:sub(1, n)
     else
-      out[#out + 1] = val
+      out[#out + 1] = sval
     end
+    return true
+
+  elseif c == "?" then
+    out[#out + 1] = (val and val ~= 0) and "\1" or "\0"
     return true
 
   else
@@ -283,6 +296,7 @@ end
 
 -- Read a value for a single op from string s at position pos.
 -- Returns value, new_pos
+--: (op: StructOp, s: string, pos: integer) -> (unknown, integer | nil, string | nil)
 local function read_op(op, s, pos)
   local c = op.char
   local le = op.le
@@ -309,9 +323,9 @@ local function read_op(op, s, pos)
   elseif c == "h" then
     local b0, b1 = s:byte(pos, pos + 1)
     if not b1 then return nil, nil, "struct: buffer too short for 'h'" end
-    local v
-    if le then v = b0 + b1 * 256
-    else      v = b1 + b0 * 256 end
+    local v = 0 --: integer
+    if le then v = (b0 + b1 * 256) --[[:! integer]]
+    else      v = (b1 + b0 * 256) --[[:! integer]] end
     if v >= 32768 then v = v - 65536 end
     return v, pos + 2
 
@@ -326,10 +340,10 @@ local function read_op(op, s, pos)
   elseif c == "i" or c == "l" then
     local b0, b1, b2, b3 = s:byte(pos, pos + 3)
     if not b3 then return nil, nil, "struct: buffer too short for '" .. c .. "'" end
-    local v
-    if le then v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
-    else      v = b3 + b2 * 256 + b1 * 65536 + b0 * 16777216 end
-    if v >= 2147483648 then v = v - 4294967296 end
+    local v = 0 --: integer
+    if le then v = (b0 + b1 * 256 + b2 * 65536 + b3 * 16777216) --[[:! integer]]
+    else      v = (b3 + b2 * 256 + b1 * 65536 + b0 * 16777216) --[[:! integer]] end
+    if v >= 2147483648 then v = (v - 4294967296) --[[:! integer]] end
     return v, pos + 4
 
   elseif c == "I" or c == "L" then
