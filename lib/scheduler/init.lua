@@ -18,6 +18,11 @@ local M = {}
 --: string
 M._tier = "pure"
 
+--:: Task = { name: string, priority: number, seq: integer, status: string, error: string | nil, _sched: unknown, _co: Thread | nil, _cancelled: boolean, _wake_val: unknown }
+--:: Channel = { _value: unknown, _has: boolean, _waiters: { [integer]: Task } }
+--:: HeapEntry = { wake_time: number, task: Task }
+--:: SchedObj = { _clock: () -> number, _ready: { [integer]: Task }, _sleeping: { [integer]: HeapEntry }, _all_tasks: { [integer]: Task }, _steps: integer, _done_hook: ((Task) -> unknown) | nil, _failed_hook: ((Task, string | nil) -> unknown) | nil, _seq: integer, spawn: (SchedObj, unknown, unknown) -> Task, step: (SchedObj) -> nil, done: (SchedObj) -> boolean }
+
 local co_create  = coroutine.create
 local co_resume  = coroutine.resume
 local co_status  = coroutine.status
@@ -27,6 +32,7 @@ local co_yield   = coroutine.yield
 -- Min-heap for the timer queue (keyed by wake_time)
 -- ---------------------------------------------------------------------------
 
+--: ({ [integer]: HeapEntry }, HeapEntry) -> nil
 local function heap_push(heap, item)
   heap[#heap + 1] = item
   local i = #heap
@@ -38,10 +44,12 @@ local function heap_push(heap, item)
   end
 end
 
+--: ({ [integer]: HeapEntry }) -> HeapEntry | nil
 local function heap_pop(heap)
   if #heap == 0 then return nil end
   local top = heap[1]
-  local last = table.remove(heap)
+  local last_ = table.remove(heap)
+  local last = last_ --[[:! HeapEntry]]
   if #heap > 0 then
     heap[1] = last
     local i = 1
@@ -59,6 +67,7 @@ local function heap_pop(heap)
   return top
 end
 
+--: ({ [integer]: HeapEntry }) -> HeapEntry | nil
 local function heap_peek(heap)
   return heap[1]
 end
@@ -122,6 +131,7 @@ end
 
 -- Insert a task into the ready queue, maintaining descending priority order.
 -- Higher priority number = runs first.
+--: ({ [integer]: Task }, Task) -> nil
 local function ready_insert(ready, task)
   local n = #ready
   local i = n + 1
@@ -142,22 +152,22 @@ end
 -- fn(ctx) — the task body; ctx provides yield/sleep/await/send
 -- opts.priority (number, default 0), opts.name (string)
 function Sched:spawn(fn, opts)
+  local self_ = self --[[:! SchedObj]]
   opts = opts or {}
-  self._seq = self._seq + 1
+  self_._seq = self_._seq + 1
   local task = setmetatable({
-    name      = opts.name or ("task" .. self._seq),
+    name      = opts.name or ("task" .. self_._seq),
     priority  = opts.priority or 0,
-    seq       = self._seq,
+    seq       = self_._seq,
     status    = "pending",
     error     = nil,
-    _sched    = self,
+    _sched    = self_,
     _co       = nil,
     _cancelled = false,
-  }, Task)
+  }, Task) --[[: any]]
+  local task_ = task --[[:! Task]]
 
   -- Build the ctx table (closed over the task and scheduler).
-  local sched = self
-
   local ctx = {}
 
   -- Yield to scheduler; task will be re-queued for next step.
@@ -172,29 +182,31 @@ function Sched:spawn(fn, opts)
 
   -- Block until channel has a value; returns that value.
   ctx.await = function(ch)
+    local ch_ = ch --[[:! Channel]]
     -- If channel already has a value, return immediately.
-    if ch._has then
-      return ch._value
+    if ch_._has then
+      return ch_._value
     end
-    ch._waiters[#ch._waiters + 1] = task
-    local val = co_yield("await", ch)
+    ch_._waiters[#ch_._waiters + 1] = task_
+    local val = co_yield("await", ch_)
     return val
   end
 
   -- Send value to channel; wake all waiters and yield once to let them run.
   ctx.send = function(ch, val)
-    ch._value = val
-    ch._has   = true
+    local ch_ = ch --[[:! Channel]]
+    ch_._value = val
+    ch_._has   = true
     -- Move all waiters to the ready queue
-    for i = 1, #ch._waiters do
-      local waiter = ch._waiters[i]
+    for i = 1, #ch_._waiters do
+      local waiter = ch_._waiters[i]
       if not waiter._cancelled and waiter.status == "waiting" then
         waiter.status    = "pending"
         waiter._wake_val = val
-        ready_insert(sched._ready, waiter)
+        ready_insert(self_._ready, waiter)
       end
     end
-    ch._waiters = {}
+    ch_._waiters = {}
     -- Yield once to let waiters run before we continue
     co_yield("yield")
   end
@@ -202,15 +214,16 @@ function Sched:spawn(fn, opts)
   local co = co_create(function()
     fn(ctx)
   end)
-  task._co = co
-  self._all_tasks[#self._all_tasks + 1] = task
-  ready_insert(self._ready, task)
-  return task
+  task_._co = co
+  self_._all_tasks[#self_._all_tasks + 1] = task_
+  ready_insert(self_._ready, task_)
+  return task_
 end
 
 -- Spawn a task that runs fn once after delay_seconds.
 function Sched:after(delay_seconds, fn, opts)
-  return self:spawn(function(ctx)
+  local self_ = self --[[:! SchedObj]]
+  return self_:spawn(function(ctx)
     ctx.sleep(delay_seconds)
     fn(ctx)
   end, opts)
@@ -219,7 +232,8 @@ end
 -- Spawn a task that runs fn every interval_seconds.
 -- fn may return false to cancel itself.
 function Sched:every(interval_seconds, fn, opts)
-  return self:spawn(function(ctx)
+  local self_ = self --[[:! SchedObj]]
+  return self_:spawn(function(ctx)
     while true do
       ctx.sleep(interval_seconds)
       local result = fn(ctx)
@@ -230,23 +244,27 @@ end
 
 -- Register a hook called when a task completes successfully.
 function Sched:on_task_done(fn)
-  self._done_hook = fn
+  local self_ = self --[[:! SchedObj]]
+  self_._done_hook = fn
 end
 
 -- Register a hook called when a task fails.
 function Sched:on_task_failed(fn)
-  self._failed_hook = fn
+  local self_ = self --[[:! SchedObj]]
+  self_._failed_hook = fn
 end
 
 -- Cancel a task: mark it and remove from ready queue if present.
 function Sched:cancel(task)
+  local self_ = self --[[:! SchedObj]]
   if task.status == "done" or task.status == "failed" then return end
   task._cancelled = true
   task.status = "done"  -- treat as done so done() can return true
   -- Remove from ready queue
-  for i = 1, #self._ready do
-    if self._ready[i] == task then
-      table.remove(self._ready, i)
+  local ready_any = self_._ready --[[: any]]
+  for i = 1, #self_._ready do
+    if self_._ready[i] == task then
+      table.remove(ready_any, i)
       break
     end
   end
@@ -255,27 +273,30 @@ end
 
 -- Run one scheduling step.
 function Sched:step()
-  self._steps = self._steps + 1
-  local now = self._clock()
+  local self_ = self --[[:! SchedObj]]
+  self_._steps = self_._steps + 1
+  local now = self_._clock()
 
   -- Move sleeping tasks whose wake time has passed to ready queue.
   while true do
-    local top = heap_peek(self._sleeping)
-    if not top or top.wake_time > now then break end
-    heap_pop(self._sleeping)
+    local top_ = heap_peek(self_._sleeping)
+    if not top_ then break end
+    local top = top_ --[[:! HeapEntry]]
+    if top.wake_time > now then break end
+    heap_pop(self_._sleeping)
     local task = top.task
     if not task._cancelled and task.status == "sleeping" then
       task.status = "pending"
-      ready_insert(self._ready, task)
+      ready_insert(self_._ready, task)
     end
   end
 
   -- Run each ready task once.
   -- Take a snapshot of the tasks that are ready right now. Any tasks that yield
-  -- or get woken (channels) during this step are inserted into self._ready and
+  -- or get woken (channels) during this step are inserted into self_._ready and
   -- will run in the NEXT step. We process only the snapshot tasks in this step.
-  local snapshot = self._ready
-  self._ready = {}
+  local snapshot = self_._ready
+  self_._ready = {}
   for _, task in ipairs(snapshot) do
     if task._cancelled or task.status == "done" or task.status == "failed" then
       -- skip
@@ -284,25 +305,28 @@ function Sched:step()
       local resume_val = task._wake_val
       task._wake_val = nil
 
-      local ok, a, b = co_resume(task._co, resume_val)
+      local co_ = task._co --[[:! Thread]]
+      local ok, a, b = co_resume(co_, resume_val)
 
       if not ok then
         -- Coroutine errored
         task.status = "failed"
         task.error  = tostring(a)
-        if self._failed_hook then self._failed_hook(task, task.error) end
-      elseif co_status(task._co) == "dead" then
+        local failed_hook_ = self_._failed_hook
+        if failed_hook_ then (failed_hook_ --[[:! (Task, string | nil) -> unknown]])(task, task.error) end
+      elseif co_status(co_) == "dead" then
         -- Coroutine finished normally
         task.status = "done"
-        if self._done_hook then self._done_hook(task) end
+        local done_hook_ = self_._done_hook
+        if done_hook_ then (done_hook_ --[[:! (Task) -> unknown]])(task) end
       else
         -- Coroutine yielded — interpret the yield signal
         local signal = a  -- "yield" | "sleep" | "await"
         if signal == "sleep" then
-          local seconds = b or 0
+          local seconds = (b or 0) --[[:! number]]
           task.status    = "sleeping"
           local entry    = { wake_time = now + seconds, task = task }
-          heap_push(self._sleeping, entry)
+          heap_push(self_._sleeping, entry)
         elseif signal == "await" then
           task.status = "waiting"
           -- task is already registered in ch._waiters by ctx.await
@@ -310,10 +334,10 @@ function Sched:step()
           -- "yield" or unknown: re-queue for next step
           -- Update seq so this task goes after others with the same priority
           -- that are already in the queue (round-robin fairness).
-          self._seq = self._seq + 1
-          task.seq  = self._seq
+          self_._seq = self_._seq + 1
+          task.seq  = self_._seq
           task.status = "pending"
-          ready_insert(self._ready, task)
+          ready_insert(self_._ready, task)
         end
       end
     end
@@ -323,29 +347,32 @@ end
 -- Run until all tasks are done or failed.
 -- Safety limit: max_steps (default 1,000,000).
 function Sched:run(max_steps)
+  local self_ = self --[[:! SchedObj]]
   max_steps = max_steps or 1000000
   local i = 0
-  while i < max_steps and not self:done() do
-    self:step()
+  while i < max_steps and not self_:done() do
+    self_:step()
     i = i + 1
     -- If nothing is ready and nothing is sleeping but we're not done, break.
-    if #self._ready == 0 and #self._sleeping == 0 then break end
+    if #self_._ready == 0 and #self_._sleeping == 0 then break end
   end
 end
 
 -- Run at most n_steps steps.
 function Sched:run_for(n_steps)
+  local self_ = self --[[:! SchedObj]]
   for _ = 1, n_steps do
-    if self:done() then break end
-    self:step()
+    if self_:done() then break end
+    self_:step()
   end
 end
 
 -- Number of active tasks (not done/failed).
 function Sched:task_count()
+  local self_ = self --[[:! SchedObj]]
   local n = 0
-  for i = 1, #self._all_tasks do
-    local t = self._all_tasks[i]
+  for i = 1, #self_._all_tasks do
+    local t = self_._all_tasks[i]
     if t.status ~= "done" and t.status ~= "failed" and not t._cancelled then
       n = n + 1
     end
@@ -355,8 +382,9 @@ end
 
 -- True when all tasks are done or failed.
 function Sched:done()
-  for i = 1, #self._all_tasks do
-    local t = self._all_tasks[i]
+  local self_ = self --[[:! SchedObj]]
+  for i = 1, #self_._all_tasks do
+    local t = self_._all_tasks[i]
     if t.status ~= "done" and t.status ~= "failed" then
       return false
     end
@@ -366,9 +394,10 @@ end
 
 -- Statistics snapshot.
 function Sched:stats()
+  local self_ = self --[[:! SchedObj]]
   local total, done, failed, pending = 0, 0, 0, 0
-  for i = 1, #self._all_tasks do
-    local t = self._all_tasks[i]
+  for i = 1, #self_._all_tasks do
+    local t = self_._all_tasks[i]
     total = total + 1
     if t.status == "done" or t._cancelled then
       done = done + 1
@@ -378,7 +407,7 @@ function Sched:stats()
       pending = pending + 1
     end
   end
-  return { total = total, done = done, failed = failed, pending = pending, steps = self._steps }
+  return { total = total, done = done, failed = failed, pending = pending, steps = self_._steps }
 end
 
 return M
