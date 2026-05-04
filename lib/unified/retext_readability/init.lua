@@ -19,7 +19,7 @@ end
 --   sentences=N, words=N, syllables=N
 -- }
 
-local nlcst = require("lib.unified.nlcst")
+local nlcst = require("lib.unified.nlcst") --[[: any]]
 
 local M = {}
 
@@ -35,6 +35,7 @@ end
 
 -- Walk a node tree and collect word strings and sentence counts.
 -- Returns total_sentences, total_words, total_syllables, total_complex_words.
+--: (any) -> (integer, integer, integer, integer)
 local function collect_stats(root)
   local sentences   = 0
   local words       = 0
@@ -56,9 +57,8 @@ local function collect_stats(root)
       return -- Don't descend into word children.
     end
     if node.children then
-      for i = 1, #node.children do
-        walk(node.children[i])
-      end
+      local nc = node.children --[[:! { [integer]: any }]]
+      for i = 1, #nc do walk(nc[i]) end
     end
   end
 

@@ -14,17 +14,19 @@ end
 --   hast doctype -> xast doctype("html")
 --   hast raw     -> xast text(value)   (raw HTML can't round-trip through XML)
 
-local xast = require("lib.unified.xast")
+local xast = require("lib.unified.xast") --[[: any]]
 
 local M = {}
 
 local convert_node  -- forward declaration
 
 local function convert_children(children)
+  --: { [integer]: any } | nil
   if not children then return {} end
+  local children_ = children --[[:! { [integer]: any }]]
   local out = {}
-  for i = 1, #children do
-    local x = convert_node(children[i])
+  for i = 1, #children_ do
+    local x = convert_node(children_[i])
     if x then out[#out + 1] = x end
   end
   return out

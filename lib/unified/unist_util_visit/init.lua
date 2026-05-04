@@ -80,7 +80,7 @@ local function walk(node, index, parent, test, enter, exit)
         -- child already removed from node.children by the recursive call;
         -- don't increment: the next child is now at the same index.
       elseif type(result) == "number" then
-        i = result
+        i = result --[[:! integer]]
       else
         i = i + 1
       end
@@ -89,7 +89,8 @@ local function walk(node, index, parent, test, enter, exit)
 
   -- Exit phase
   if exit and test(node) then
-    local exit_signal = exit(node, index, parent)
+    local exit_fn = exit --[[:! (unknown, unknown, unknown) -> unknown]]
+    local exit_signal = exit_fn(node, index, parent)
     if exit_signal == M.EXIT then return M.EXIT end
     if exit_signal == M.REMOVE then
       if parent and parent.children then
@@ -131,7 +132,8 @@ setmetatable(M, {
     end
 
     local test = make_test(types)
-    walk(tree, nil, nil, test, enter, exit)
+    local walk_any = walk --[[: any]]
+    walk_any(tree, nil, nil, test, enter, exit)
   end,
 })
 
@@ -182,7 +184,7 @@ local function walk_parents(node, ancestors, test, enter, exit)
       if result == M.REMOVE then
         -- don't increment; child already removed
       elseif type(result) == "number" then
-        i = result
+        i = result --[[:! integer]]
       else
         i = i + 1
       end
@@ -191,7 +193,8 @@ local function walk_parents(node, ancestors, test, enter, exit)
   end
 
   if exit and test(node) then
-    signal = exit(node, ancestors)
+    local exit_fn = exit --[[:! (unknown, unknown) -> any]]
+    signal = exit_fn(node, ancestors)
     if signal == M.EXIT then return M.EXIT end
   end
 
