@@ -340,6 +340,7 @@ local function new_selector_parser(s)
   local n = #s
   local i = 1
   while i <= n do
+    i = i --[[:! integer]]
     local c = sub(s, i, i)
     if is_whitespace(c) then
       -- collapse whitespace to single token
@@ -356,14 +357,14 @@ local function new_selector_parser(s)
       if i <= n and is_ident_start(sub(s, i, i)) then
         local name, ni = read_ident(s, i, n)
         insert(tokens, { type = "class", value = name })
-        i = ni
+        i = ni --[[:! integer]]
       end
     elseif c == "#" then
       i = i + 1
       if i <= n and is_ident_start(sub(s, i, i)) then
         local name, ni = read_ident(s, i, n)
         insert(tokens, { type = "id", value = name })
-        i = ni
+        i = ni --[[:! integer]]
       end
     elseif c == "*" then
       insert(tokens, { type = "universal" })
@@ -379,38 +380,41 @@ local function new_selector_parser(s)
         attr_name = an_
         i = ai_ --[[:! integer]]
       end
-      local i_attr = i --[[:! integer]]
-      -- skip ws
-      while i_attr <= n and is_whitespace(sub(s, i_attr, i_attr)) do i_attr = i_attr + 1 end
+      local i2 = i --[[:! integer]]
       local op = nil
       local attr_val = nil
-      if i <= n and sub(s, i, i) ~= "]" then
+      if i2 <= n and sub(s, i2, i2) ~= "]" then
         -- read operator
-        local op_start = i
-        if sub(s, i, i + 1):find("^[~|^$*]=$") or sub(s, i, i) == "=" then
-          if sub(s, i, i + 1):find("^[~|^$*]=$") then
-            op = sub(s, i, i + 1)
-            i = i + 2
+        if sub(s, i2, i2 + 1):find("^[~|^$*]=$") or sub(s, i2, i2) == "=" then
+          if sub(s, i2, i2 + 1):find("^[~|^$*]=$") then
+            op = sub(s, i2, i2 + 1)
+            i2 = i2 + 2
           else
             op = "="
-            i = i + 1
+            i2 = i2 + 1
           end
+          i2 = i2 --[[:! integer]]
           -- skip ws
-          while i <= n and is_whitespace(sub(s, i, i)) do i = i + 1 end
+          while i2 <= n and is_whitespace(sub(s, i2, i2)) do i2 = i2 + 1 end
+          i2 = i2 --[[:! integer]]
           -- read value
-          if i <= n and (sub(s, i, i) == '"' or sub(s, i, i) == "'") then
-            local q = sub(s, i, i)
-            attr_val, i = read_string(s, i + 1, n, q)
-          elseif i <= n then
-            local vs = i
-            while i <= n and sub(s, i, i) ~= "]" and not is_whitespace(sub(s, i, i)) do i = i + 1 end
-            attr_val = sub(s, vs, i - 1)
+          if i2 <= n and (sub(s, i2, i2) == '"' or sub(s, i2, i2) == "'") then
+            local q = sub(s, i2, i2)
+            local av_, ni_ = read_string(s, i2 + 1, n, q)
+            attr_val = av_
+            i2 = ni_ --[[:! integer]]
+          elseif i2 <= n then
+            local vs = i2
+            while i2 <= n and sub(s, i2, i2) ~= "]" and not is_whitespace(sub(s, i2, i2)) do i2 = i2 + 1 end
+            attr_val = sub(s, vs, i2 - 1)
           end
+          i2 = i2 --[[:! integer]]
         end
       end
       -- skip to closing bracket
-      while i <= n and sub(s, i, i) ~= "]" do i = i + 1 end
-      if i <= n then i = i + 1 end -- consume "]"
+      while i2 <= n and sub(s, i2, i2) ~= "]" do i2 = i2 + 1 end
+      if i2 <= n then i2 = i2 + 1 end -- consume "]"
+      i = i2 --[[:! integer]]
       insert(tokens, { type = "attr", name = attr_name, op = op, value = attr_val })
     elseif c == ":" then
       i = i + 1
@@ -419,52 +423,61 @@ local function new_selector_parser(s)
         is_element = true
         i = i + 1
       end
-      if i <= n and is_ident_start(sub(s, i, i)) then
-        local name, ni = read_ident(s, i, n)
-        i = ni
+      local i3 = i --[[:! integer]]
+      if i3 <= n and is_ident_start(sub(s, i3, i3)) then
+        local name, ni = read_ident(s, i3, n)
+        i3 = ni --[[:! integer]]
         -- check for functional pseudo
-        if i <= n and sub(s, i, i) == "(" then
-          i = i + 1
+        if i3 <= n and sub(s, i3, i3) == "(" then
+          i3 = i3 + 1
           -- read argument (simple: balanced parens not supported, just read until ")")
-          local arg_start = i
-          local depth = 1
-          while i <= n and depth > 0 do
-            if sub(s, i, i) == "(" then depth = depth + 1
-            elseif sub(s, i, i) == ")" then depth = depth - 1 end
-            if depth > 0 then i = i + 1 else break end
+          local arg_start = i3
+          local depth = 1 --: integer
+          while i3 <= n and depth > 0 do
+            i3 = i3 --[[:! integer]]
+            depth = depth --[[:! integer]]
+            if sub(s, i3, i3) == "(" then depth = depth + 1
+            elseif sub(s, i3, i3) == ")" then depth = depth - 1 end
+            depth = depth --[[:! integer]]
+            if depth > 0 then i3 = i3 + 1 else break end
           end
-          local arg = trim(sub(s, arg_start, i - 1))
-          if i <= n then i = i + 1 end -- consume ")"
+          local arg = trim(sub(s, arg_start, i3 - 1))
+          if i3 <= n then i3 = i3 + 1 end -- consume ")"
           insert(tokens, { type = "pseudo_fn", name = name, arg = arg, element = is_element })
         else
           insert(tokens, { type = "pseudo", name = name, element = is_element })
         end
       end
+      i = i3 --[[:! integer]]
     elseif is_ident_start(c) then
       local name, ni = read_ident(s, i, n)
       insert(tokens, { type = "ident", value = name })
-      i = ni
+      i = ni --[[:! integer]]
     else
       i = i + 1 -- skip unknown
     end
   end
   insert(tokens, { type = "eof" })
-  return setmetatable({ tokens = tokens, pos = 1 }, SelectorParser)
+  local p_ = setmetatable({ tokens = tokens, pos = 1 }, SelectorParser) --[[: any]]
+  return p_ --[[:! SelParser]]
 end
 
 function SelectorParser:peek()
-  return self.tokens[self.pos]
+  local self_ = self --[[:! SelParser]]
+  return self_.tokens[self_.pos]
 end
 
 function SelectorParser:consume()
-  local t = self.tokens[self.pos]
-  self.pos = self.pos + 1
+  local self_ = self --[[:! SelParser]]
+  local t = self_.tokens[self_.pos]
+  self_.pos = self_.pos + 1
   return t
 end
 
 function SelectorParser:skip_ws()
-  while self.tokens[self.pos] and self.tokens[self.pos].type == "ws" do
-    self.pos = self.pos + 1
+  local self_ = self --[[:! SelParser]]
+  while self_.tokens[self_.pos] and self_.tokens[self_.pos].type == "ws" do
+    self_.pos = self_.pos + 1
   end
 end
 
@@ -614,69 +627,77 @@ end
 local TokenStream = {}
 TokenStream.__index = TokenStream
 
+--: ({ [integer]: CssStyleToken }) -> TokStream
 local function new_token_stream(tokens)
-  return setmetatable({ tokens = tokens, pos = 1 }, TokenStream)
+  local s_ = setmetatable({ tokens = tokens, pos = 1 }, TokenStream) --[[: any]]
+  return s_ --[[:! TokStream]]
 end
 
 function TokenStream:peek()
-  return self.tokens[self.pos]
+  local self_ = self --[[:! TokStream]]
+  return self_.tokens[self_.pos]
 end
 
 function TokenStream:consume()
-  local t = self.tokens[self.pos]
-  self.pos = self.pos + 1
+  local self_ = self --[[:! TokStream]]
+  local t = self_.tokens[self_.pos]
+  self_.pos = self_.pos + 1
   return t
 end
 
 function TokenStream:skip_ws()
-  while self.tokens[self.pos] and self.tokens[self.pos].type == "whitespace" do
-    self.pos = self.pos + 1
+  local self_ = self --[[:! TokStream]]
+  while self_.tokens[self_.pos] and self_.tokens[self_.pos].type == "whitespace" do
+    self_.pos = self_.pos + 1
   end
 end
 
 function TokenStream:peek_nonws()
-  local j = self.pos
-  while self.tokens[j] and self.tokens[j].type == "whitespace" do j = j + 1 end
-  return self.tokens[j]
+  local self_ = self --[[:! TokStream]]
+  local j = self_.pos
+  while self_.tokens[j] and self_.tokens[j].type == "whitespace" do j = j + 1 end
+  return self_.tokens[j]
 end
 
 -- Read tokens into a string until a given token type is found (not consumed)
 local function collect_until(stream, stop_types)
+  local stream_ = stream --[[:! TokStream]]
   local parts = {}
   while true do
-    local t = stream:peek()
+    local t = stream_:peek()
     if not t or t.type == "eof" then break end
     for _, st in ipairs(stop_types) do
       if t.type == st then return concat(parts) end
     end
     insert(parts, t.value or "")
-    stream:consume()
+    stream_:consume()
   end
   return concat(parts)
 end
 
 -- Parse a block { ... } and return inner tokens
 local function parse_block(stream)
+  local stream_ = stream --[[:! TokStream]]
   -- consume open_brace
-  stream:consume()
+  stream_:consume()
   local depth = 1
   local inner = {}
   while true do
-    local t = stream:peek()
+    local t = stream_:peek()
     if not t or t.type == "eof" then break end
     if t.type == "open_brace" then
       depth = depth + 1
-      insert(inner, stream:consume())
+      insert(inner, stream_:consume())
     elseif t.type == "close_brace" then
       depth = depth - 1
       if depth == 0 then
-        stream:consume()
+        stream_:consume()
         break
       else
-        insert(inner, stream:consume())
+        insert(inner, stream_:consume())
       end
     else
-      insert(inner, stream:consume())
+      insert(inner, stream_:consume())
     end
   end
   return inner
@@ -693,22 +714,23 @@ end
 
 -- Parse at-rule starting after @name token has been consumed
 local function parse_at_rule(stream, name)
+  local stream_ = stream --[[:! TokStream]]
   -- collect prelude tokens until { or ;
   local prelude_toks = {}
   local rules = nil
   while true do
-    local t = stream:peek()
+    local t = stream_:peek()
     if not t or t.type == "eof" then break end
     if t.type == "semicolon" then
-      stream:consume()
+      stream_:consume()
       break
     elseif t.type == "open_brace" then
       -- nested block
-      local block_toks = parse_block(stream)
+      local block_toks = parse_block(stream_)
       -- for @media/@supports etc, parse inner rules
-      local inner_stream = new_token_stream(block_toks)
+      local inner_stream = new_token_stream(block_toks --[[: any]] --[[:! { [integer]: CssStyleToken }]])
       -- append eof
-      insert(block_toks, { type = "eof", value = "" })
+      insert(block_toks, { type = "eof", value = "" } --[[: any]])
       rules = {}
       -- parse inner rules (simplified: only style rules)
       while true do
@@ -736,7 +758,7 @@ local function parse_at_rule(stream, name)
       end
       break
     else
-      insert(prelude_toks, stream:consume())
+      insert(prelude_toks, stream_:consume())
     end
   end
   local prelude = tokens_to_string(prelude_toks)
@@ -804,7 +826,7 @@ local function class_set(class_str)
 end
 
 --:: CssCompound = { type_selector: string | nil, id: string | nil, classes: { [integer]: string }, attributes: { [integer]: { name: string, op: string | nil, value: string | nil } }, pseudos: { [integer]: { name: string, element: boolean | nil, arg: string | nil, functional: boolean | nil } }, combinator: string | nil }
---:: CssElement = { tag: string | nil, id: string | nil, class: string | nil, attrs: { [string]: string } | nil, ... }
+--:: CssElement = { tag: string | nil, id: string | nil, class: string | nil, attrs: { [string]: string } | nil, parent: CssElement | nil, prev: CssElement | nil, ... }
 -- Match a compound selector against an element
 --: (CssCompound, CssElement) -> boolean
 local function match_compound(compound, element)
@@ -843,15 +865,19 @@ local function match_compound(compound, element)
         end
         if not found then return false end
       elseif attr.op == "|=" then
-        if av ~= attr.value and not (av and find(av, attr.value .. "-", 1, true) == 1) then
+        local av_ = attr.value or ""
+        if av ~= av_ and not (av and find(av, av_ .. "-", 1, true) == 1) then
           return false
         end
       elseif attr.op == "^=" then
-        if not av or find(av, attr.value, 1, true) ~= 1 then return false end
+        local av_ = attr.value or ""
+        if not av or find(av, av_, 1, true) ~= 1 then return false end
       elseif attr.op == "$=" then
-        if not av or sub(av, -#attr.value) ~= attr.value then return false end
+        local av_ = attr.value or ""
+        if not av or sub(av, -#av_) ~= av_ then return false end
       elseif attr.op == "*=" then
-        if not av or not find(av, attr.value, 1, true) then return false end
+        local av_ = attr.value or ""
+        if not av or not find(av, av_, 1, true) then return false end
       end
     end
   end
@@ -861,7 +887,7 @@ local function match_compound(compound, element)
   -- except for :not()
   for _, pseudo in ipairs(compound.pseudos) do
     if pseudo.functional and pseudo.name:lower() == "not" then
-      local not_sel = M.parse_selector(pseudo.arg)
+      local not_sel = M.parse_selector(pseudo.arg or "")
       if not_sel and #not_sel > 0 then
         if M.matches_complex(not_sel[1], element) then return false end
       end
@@ -877,7 +903,7 @@ function M.matches_complex(complex, element)
   -- Work right to left through the compound selectors
   -- The last compound matches the target element
   local idx = #complex
-  local el = element
+  local el = element --[[:! CssElement]]
 
   -- match last compound
   if not match_compound(complex[idx], el) then return false end
@@ -891,31 +917,37 @@ function M.matches_complex(complex, element)
     if combinator == ">" then
       -- parent must match
       if not el.parent then return false end
-      el = el.parent
+      el = el.parent --[[:! CssElement]]
       if not match_compound(compound, el) then return false end
     elseif combinator == " " then
       -- ancestor must match
       if not el.parent then return false end
-      el = el.parent
+      el = el.parent --[[:! CssElement]]
       local found = false
-      while el do
-        if match_compound(compound, el) then found = true; break end
-        el = el.parent
+      local anc --: CssElement | nil
+      anc = el
+      while anc do
+        local anc_ = anc --[[:! CssElement]]
+        if match_compound(compound, anc_) then found = true; break end
+        anc = anc_.parent
       end
       if not found then return false end
     elseif combinator == "+" then
       -- immediately preceding sibling
       if not el.prev then return false end
-      el = el.prev
+      el = el.prev --[[:! CssElement]]
       if not match_compound(compound, el) then return false end
     elseif combinator == "~" then
       -- preceding sibling
       if not el.prev then return false end
-      el = el.prev
+      el = el.prev --[[:! CssElement]]
       local found = false
-      while el do
-        if match_compound(compound, el) then found = true; break end
-        el = el.prev
+      local sib --: CssElement | nil
+      sib = el
+      while sib do
+        local sib_ = sib --[[:! CssElement]]
+        if match_compound(compound, sib_) then found = true; break end
+        sib = sib_.prev
       end
       if not found then return false end
     else
@@ -932,7 +964,8 @@ end
 function M.matches(selector_str, element)
   local sel_list = M.parse_selector(selector_str)
   for _, complex in ipairs(sel_list) do
-    if M.matches_complex(complex, element) then return true end
+    local complex_ = complex --[[:! { [integer]: CssCompound }]]
+    if M.matches_complex(complex_, element) then return true end
   end
   return false
 end
@@ -984,6 +1017,7 @@ end
 -- ── Stringify ────────────────────────────────────────────────────────────────
 
 -- Stringify a compound selector
+--: (CssCompound) -> string
 local function stringify_compound(compound)
   local parts = {}
   if compound.type_selector then
@@ -997,7 +1031,8 @@ local function stringify_compound(compound)
   end
   for _, attr in ipairs(compound.attributes) do
     if attr.op then
-      insert(parts, "[" .. attr.name .. attr.op .. '"' .. (attr.value or "") .. '"]')
+      local op_ = attr.op --[[:! string]]
+      insert(parts, "[" .. attr.name .. op_ .. '"' .. (attr.value or "") .. '"]')
     else
       insert(parts, "[" .. attr.name .. "]")
     end
