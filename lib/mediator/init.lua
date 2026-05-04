@@ -14,12 +14,13 @@ M._tier = "pure"
 -- Accepts an optional prefix string for namespace sub-mediators, and an
 -- optional reference to a parent mediator (shares handler/middleware tables).
 local function make_mediator(prefix, parent)
+  local prefix_ = (prefix or nil) --[[:! string | nil]]
   local med = {}
 
   -- If parent provided, share their tables so namespace dispatch hits parent state.
   local handlers     = parent and parent._handlers     or {}
   local event_lists  = parent and parent._event_lists  or {}
-  local global_mw    = parent and parent._global_mw    or {}
+  local global_mw    = (parent and parent._global_mw    or {}) --[[:! { [integer]: any }]]
   local command_mw   = parent and parent._command_mw   or {}
 
   -- Expose for namespace children.
@@ -29,7 +30,7 @@ local function make_mediator(prefix, parent)
   med._command_mw  = command_mw
 
   local function full_name(name)
-    if prefix then return prefix .. "." .. name end
+    if prefix_ then return prefix_ .. "." .. name end
     return name
   end
 
@@ -170,7 +171,8 @@ local function make_mediator(prefix, parent)
   --- Create a sub-mediator that prefixes all names with the given prefix.
   -- The sub-mediator shares handler/event/middleware tables with the parent.
   function med:namespace(ns_prefix)
-    local combined = prefix and (prefix .. "." .. ns_prefix) or ns_prefix
+    local ns_ = ns_prefix --[[:! string]]
+    local combined = prefix_ and (prefix_ .. "." .. ns_) or ns_
     return make_mediator(combined, med)
   end
 
@@ -179,7 +181,8 @@ end
 
 --- Create a new mediator instance.
 function M.new()
-  return make_mediator(nil, nil)
+  local make_any = make_mediator --[[: any]]
+  return make_any(nil, nil)
 end
 
 return M

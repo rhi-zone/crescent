@@ -24,7 +24,9 @@ M._tier = "pure"
 local function xor_strings(a, b)
   local result = {}
   for i = 1, #a do
-    result[i] = string.char(bit.bxor(string.byte(a, i), string.byte(b, i)))
+    local ba = (string.byte(a, i, i) or 0) --[[:! integer]]
+    local bb = (string.byte(b, i, i) or 0) --[[:! integer]]
+    result[i] = string.char(bit.bxor(ba, bb))
   end
   return table.concat(result)
 end
@@ -66,11 +68,12 @@ end
 
 -- Compute one block Ti = F(password, salt, c, i) per RFC 8018 §5.2.
 local function compute_block(prf, password, salt, iterations, i)
+  local prf_fn = prf --[[:! (string, string) -> string]]
   -- U1 = PRF(password, salt || INT(i))
-  local u = prf(password, salt .. int32_be(i))
+  local u = prf_fn(password, salt .. int32_be(i))
   local t = u
   for _ = 2, iterations do
-    u = prf(password, u)
+    u = prf_fn(password, u)
     t = xor_strings(t, u)
   end
   return t
@@ -87,12 +90,15 @@ function M.derive(password, salt, iterations, dklen, opts)
   local alg = opts and opts.alg
   local prf, hlen, err = get_prf(alg)
   if not prf then return nil, err end
+  local prf_any = prf --[[: any]]
+  local prf_ = prf_any --[[:! (string, string) -> string]]
+  local hlen_ = (hlen or 32) --[[:! integer]]
 
   if type(iterations) ~= "number" or iterations < 1 or math.floor(iterations) ~= iterations then
     return nil, "pbkdf2: iterations must be a positive integer"
   end
 
-  dklen = dklen or hlen
+  dklen = dklen or hlen_
 
   if type(dklen) ~= "number" or dklen < 1 or math.floor(dklen) ~= dklen then
     return nil, "pbkdf2: dklen must be a positive integer"
@@ -102,14 +108,15 @@ function M.derive(password, salt, iterations, dklen, opts)
   -- We skip the exact large-number check for simplicity; LuaJIT doubles can
   -- represent the limit precisely only up to 2^53. In practice dklen fits.
 
-  local blocks = math.ceil(dklen / hlen)
+  local dklen_ = dklen --[[:! integer]]
+  local blocks = math.ceil(dklen_ / hlen_) --[[:! integer]]
   local parts = {}
   for i = 1, blocks do
-    parts[i] = compute_block(prf, password, salt, iterations, i)
+    parts[i] = compute_block(prf_, password, salt, iterations, i)
   end
   local dk = table.concat(parts)
   -- Truncate to dklen bytes.
-  return dk:sub(1, dklen)
+  return dk:sub(1, dklen_)
 end
 
 --- Derive a key and return it as a lowercase hex string.
@@ -143,7 +150,9 @@ function M.verify(password, salt, iterations, derived_key, opts)
   if #candidate ~= #stored then return false end
   local diff = 0
   for i = 1, #stored do
-    diff = bit.bor(diff, bit.bxor(string.byte(candidate, i), string.byte(stored, i)))
+    local bc = (string.byte(candidate, i, i) or 0) --[[:! integer]]
+    local bs = (string.byte(stored, i, i) or 0) --[[:! integer]]
+    diff = bit.bor(diff, bit.bxor(bc, bs))
   end
   return diff == 0
 end
