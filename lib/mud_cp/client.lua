@@ -30,7 +30,7 @@ mod.wrap = function (cb, mcp_cb)
 				elseif line:sub(4, 4) == ":" then
 					local key = line:match("#$#: (.+)")
 					if key then
-						local msg = multiline_messages[key]
+						local msg = multiline_messages[key] --[[:! { type: unknown, value: unknown }]]
 						mcp_cb(msg.type, msg.value)
 						multiline_messages[key] = nil
 					end
@@ -43,7 +43,7 @@ mod.wrap = function (cb, mcp_cb)
 		end
 	end, function (write)
 		--[[FIXME: this function is not accessible since this wraps the callback not the server...]]
-		return function(s) if s:sub(1, 3) == "#$#" then write("#$\"" .. s) else write(s) end end
+		return function(s) local s_ = s --[[:! string]]; if s_:sub(1, 3) == "#$#" then write("#$\"" .. s_) else write(s_) end end
 	end --[[FIXME: also return function write_message() end]]
 end
 

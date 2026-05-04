@@ -84,15 +84,19 @@ io.write(string.format("%-8s  %-6s  %14s  %14s\n",
     "variant", "size", "encode MB/s", "decode MB/s"))
 io.write(string.rep("-", 50) .. "\n")
 
+--:: BenchVariant = { name: string, enc: (string, { pad: boolean | nil, url: boolean | nil } | nil) -> string, dec: (string, { url: boolean | nil } | nil) -> string }
+
+local base64_any = base64 --[[: any]]
+local base64url_any = base64url --[[: any]]
 local variants = {
-    { name = "std",        enc = base64.encode,    dec = base64.decode },
-    { name = "url",        enc = base64url.encode,  dec = base64url.decode },
-}
+    { name = "std",        enc = base64_any.encode,    dec = base64_any.decode },
+    { name = "url",        enc = base64url_any.encode,  dec = base64url_any.decode },
+} --: { [integer]: BenchVariant }
 
 for _, v in ipairs(variants) do
     for _, s in ipairs(sizes) do
         local input   = string.rep("x", s.bytes)
-        local encoded = v.enc(input)
+        local encoded = v.enc(input, nil)
         local n       = iters_for(s.bytes)
 
         local enc_mbps = bench(v.enc, input, n)

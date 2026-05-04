@@ -15,28 +15,35 @@ function Iso.new(get, review)
 	return { get = get, review = review }
 end
 
+--:: IsoT = { get: (unknown) -> unknown, review: (unknown) -> unknown }
+
 -- Iso.get(iso, s) -> a
 function Iso.get(iso, s)
-	return iso.get(s)
+	local iso_ = iso --[[:! IsoT]]
+	return iso_.get(s)
 end
 
 -- Iso.review(iso, a) -> s
 function Iso.review(iso, a)
-	return iso.review(a)
+	local iso_ = iso --[[:! IsoT]]
+	return iso_.review(a)
 end
 
 -- Iso.flip(iso) -> Iso a s
 -- Swap the two directions.
 function Iso.flip(iso)
-	return Iso.new(iso.review, iso.get)
+	local iso_ = iso --[[:! IsoT]]
+	return Iso.new(iso_.review, iso_.get)
 end
 
 -- Iso.compose(iso1, iso2) -> Iso s c
 -- Given Iso s a and Iso a c, produce Iso s c.
 function Iso.compose(iso1, iso2)
+	local i1 = iso1 --[[:! IsoT]]
+	local i2 = iso2 --[[:! IsoT]]
 	return Iso.new(
-		function(s) return iso2.get(iso1.get(s)) end,
-		function(c) return iso1.review(iso2.review(c)) end
+		function(s) return i2.get(i1.get(s)) end,
+		function(c) return i1.review(i2.review(c)) end
 	)
 end
 
@@ -44,14 +51,15 @@ end
 -- An Iso is a special Lens where set reconstructs via review.
 -- Returns a plain { get, set } table compatible with lib/fp/optics/lens.
 function Iso.to_lens(iso)
+	local iso_ = iso --[[:! IsoT]]
 	return {
-		get = iso.get,
-		set = function(s, a)
+		get = iso_.get,
+		set = function(_s, a)
 			-- The set direction of an Iso ignores s (it's an iso, not just a lens):
 			-- the new value fully determines the result via review.
 			-- This matches the Haskell Law: set l (get l s) s == s
 			-- For an Iso, review(a) discards the original s entirely.
-			return iso.review(a)
+			return iso_.review(a)
 		end,
 	}
 end
