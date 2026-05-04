@@ -72,6 +72,7 @@ end
 -- Returns:
 --   plain_rules[sym]     = value (string | stochastic table | function)
 --   context_rules[sym]   = array of {kind, left?, right?, value}
+--: (spec_rules: { [string]: unknown }) -> ({ [string]: unknown } | nil, { [string]: { [integer]: LsRule } } | nil, string | nil)
 local function index_rules(spec_rules)
   local plain = {}
   local ctx = {}
@@ -98,8 +99,14 @@ end
 -- STRING GENERATION
 -- ========================
 
+--:: LsCmd = { type: string, x1: number, y1: number, x2: number, y2: number, x: number, y: number, angle: number, ... }
+--:: LsRule = { kind: string, left: string | nil, right: string | nil, param: string | nil, value: unknown, prob: number | nil, rule: unknown, ... }
+--:: LsRng = { next: (self: LsRng) -> integer, float: (self: LsRng) -> number }
+--:: LsOpts = { step: number | nil, angle: number | nil, start_x: number | nil, start_y: number | nil, start_angle: number | nil, width: number | nil, height: number | nil, stroke: string | nil, bg: string | nil, stroke_width: number | nil, ... }
+
 -- Try to match a parametric token at position i in string s.
 -- Returns sym, params_table, end_pos  or  nil
+--: (s: string, i: integer) -> (string | nil, { [integer]: string } | nil, integer | nil)
 local function match_parametric(s, i)
   local sym = s:sub(i, i)
   if not sym:match("[A-Za-z]") then return nil end
@@ -115,9 +122,11 @@ local function match_parametric(s, i)
 end
 
 -- Apply rules once to a string, return new string.
+--: (s: string, plain: { [string]: unknown }, ctx_rules: { [string]: { [integer]: LsRule } }, rng: LsRng) -> string
 local function apply_rules_once(s, plain, ctx_rules, rng)
-  local parts = {}
-  local i = 1
+  local parts = {} --: { [integer]: string }
+  local parts_ = parts --[[: any]]
+  local i = 1 --: integer
   local n = #s
   while i <= n do
     local ch = s:sub(i, i)
@@ -127,12 +136,14 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
     if ctx_rules[ch] then
       local sym, params, end_pos = match_parametric(s, i)
       if sym and params then
+        local end_pos_ = end_pos --[[:! integer]]
         for _, crule in ipairs(ctx_rules[sym]) do
           if crule.kind == "parametric" then
-            local result = crule.value(params)
+            local vfn = crule.value --[[:! (...unknown) -> unknown]]
+            local result = vfn(params)
             if result ~= nil then
-              parts[#parts + 1] = result
-              i = end_pos + 1
+              parts_[#parts + 1] = result
+              i = end_pos_ + 1
               advanced = true
               break
             end
@@ -140,8 +151,8 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
         end
         if not advanced then
           -- parametric token but no rule matched; emit as-is
-          parts[#parts + 1] = s:sub(i, end_pos)
-          i = end_pos + 1
+          parts_[#parts + 1] = s:sub(i, end_pos_)
+          i = end_pos_ + 1
           advanced = true
         end
       end
@@ -152,18 +163,21 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
       local applied_ctx = false
       if ctx_rules[ch] then
         for _, crule in ipairs(ctx_rules[ch]) do
-          local match = false
+          local match = false --: boolean
           if crule.kind == "context_l" then
-            match = (i > 1 and s:sub(i - 1, i - 1) == crule.left)
+            local i_ = i --[[:! number]]
+            match = (i_ > 1 and s:sub(i - 1, i - 1) == crule.left) and true or false
           elseif crule.kind == "context_r" then
-            match = (i < n and s:sub(i + 1, i + 1) == crule.right)
+            local i_ = i --[[:! number]]
+            match = (i_ < n and s:sub(i + 1, i + 1) == crule.right) and true or false
           end
           if match then
             local value = crule.value
             if type(value) == "string" then
-              parts[#parts + 1] = value
+              parts_[#parts + 1] = value --[[:! string]]
             elseif type(value) == "function" then
-              parts[#parts + 1] = value({})
+              local vfn2 = value --[[:! (...unknown) -> string]]
+              parts_[#parts + 1] = vfn2({})
             end
             applied_ctx = true
             break
@@ -177,24 +191,26 @@ local function apply_rules_once(s, plain, ctx_rules, rng)
         -- Apply plain rule
         local rule = plain[ch]
         if rule == nil then
-          parts[#parts + 1] = ch
+          parts_[#parts + 1] = ch
         elseif type(rule) == "string" then
-          parts[#parts + 1] = rule
+          parts_[#parts + 1] = rule --[[:! string]]
         elseif type(rule) == "function" then
-          parts[#parts + 1] = rule({})
+          local rfn = rule --[[:! (...unknown) -> string]]
+          parts_[#parts + 1] = rfn({})
         else
           -- stochastic: array of {prob=p, rule=s}
           local r = rng:float()
-          local cumul = 0
+          local cumul = 0 --: number
           local chosen = ch
           for _, entry in ipairs(rule) do
-            cumul = cumul + entry.prob
+            local eprob = (entry.prob or 0) --[[:! number]]
+            cumul = cumul + eprob
             if r < cumul then
-              chosen = entry.rule
+              chosen = (entry.rule or ch) --[[:! string]]
               break
             end
           end
-          parts[#parts + 1] = chosen
+          parts_[#parts + 1] = chosen
         end
         i = i + 1
       end
@@ -209,16 +225,19 @@ end
 
 local RAD = math.pi / 180
 
+--: (s: string, opts: LsOpts | nil) -> { [integer]: LsCmd }
 local function interpret_string(s, opts)
-  local step    = (opts and opts.step) or 10
-  local angle   = (opts and opts.angle) or 90
-  local x       = (opts and opts.start_x) or 0
-  local y       = (opts and opts.start_y) or 0
-  local dir     = (opts and opts.start_angle) or 90  -- degrees, 90 = up
+  local step    = ((opts and opts.step) or 10) --[[:! number]]
+  local angle   = ((opts and opts.angle) or 90) --[[:! number]]
+  local x       = ((opts and opts.start_x) or 0) --[[:! number]]
+  local y       = ((opts and opts.start_y) or 0) --[[:! number]]
+  local dir     = ((opts and opts.start_angle) or 90) --[[:! number]] -- degrees, 90 = up
 
-  local cmds   = {}
-  local stack  = {}
-  local i      = 1
+  local cmds   = {} --: { [integer]: LsCmd }
+  local cmds_  = cmds --[[: any]]
+  local stack  = {} --: { [integer]: { x: number, y: number, dir: number } }
+  local stack_ = stack --[[: any]]
+  local i      = 1 --: integer
   local n      = #s
 
   while i <= n do
@@ -227,12 +246,12 @@ local function interpret_string(s, opts)
     if ch == "F" then
       local nx = x + step * math.cos(dir * RAD)
       local ny = y + step * math.sin(dir * RAD)
-      cmds[#cmds + 1] = { type = "line", x1 = x, y1 = y, x2 = nx, y2 = ny }
+      cmds_[#cmds + 1] = { type = "line", x1 = x, y1 = y, x2 = nx, y2 = ny }
       x, y = nx, ny
     elseif ch == "f" then
       local nx = x + step * math.cos(dir * RAD)
       local ny = y + step * math.sin(dir * RAD)
-      cmds[#cmds + 1] = { type = "move", x1 = x, y1 = y, x2 = nx, y2 = ny }
+      cmds_[#cmds + 1] = { type = "move", x1 = x, y1 = y, x2 = nx, y2 = ny }
       x, y = nx, ny
     elseif ch == "+" then
       dir = dir + angle
@@ -241,19 +260,19 @@ local function interpret_string(s, opts)
     elseif ch == "|" then
       dir = dir + 180
     elseif ch == "[" then
-      cmds[#cmds + 1] = { type = "push", x = x, y = y, angle = dir }
-      stack[#stack + 1] = { x = x, y = y, dir = dir }
+      cmds_[#cmds + 1] = { type = "push", x = x, y = y, angle = dir }
+      stack_[#stack + 1] = { x = x, y = y, dir = dir }
     elseif ch == "]" then
       local top = stack[#stack]
       if top then
-        stack[#stack] = nil
+        stack_[#stack] = nil
         x, y, dir = top.x, top.y, top.dir
-        cmds[#cmds + 1] = { type = "pop", x = x, y = y, angle = dir }
+        cmds_[#cmds + 1] = { type = "pop", x = x, y = y, angle = dir }
       end
     elseif ch == "(" then
       -- skip parametric value "(n)" — turtle doesn't act on it
       local close = s:find(")", i + 1, true)
-      if close then i = close end
+      if close then i = (close) --[[:! integer]] end
     end
     -- all other symbols ignored in turtle
 
@@ -266,25 +285,36 @@ end
 -- BOUNDS
 -- ========================
 
+--:: LsBounds = { min_x: number, min_y: number, max_x: number, max_y: number, width: number, height: number }
+--: (cmds: { [integer]: LsCmd }) -> LsBounds
 local function compute_bounds(cmds)
-  local min_x, min_y, max_x, max_y
+  local min_x = 0 --: number
+  local min_y = 0 --: number
+  local max_x = 0 --: number
+  local max_y = 0 --: number
+  local seen = false
   for _, cmd in ipairs(cmds) do
     if cmd.type == "line" or cmd.type == "move" then
-      if min_x == nil then
-        min_x, min_y = cmd.x1, cmd.y1
-        max_x, max_y = cmd.x1, cmd.y1
+      local x1 = cmd.x1 --[[:! number]]
+      local y1 = cmd.y1 --[[:! number]]
+      local x2 = cmd.x2 --[[:! number]]
+      local y2 = cmd.y2 --[[:! number]]
+      if not seen then
+        min_x, min_y = x1, y1
+        max_x, max_y = x1, y1
+        seen = true
       end
-      if cmd.x1 < min_x then min_x = cmd.x1 end
-      if cmd.y1 < min_y then min_y = cmd.y1 end
-      if cmd.x1 > max_x then max_x = cmd.x1 end
-      if cmd.y1 > max_y then max_y = cmd.y1 end
-      if cmd.x2 < min_x then min_x = cmd.x2 end
-      if cmd.y2 < min_y then min_y = cmd.y2 end
-      if cmd.x2 > max_x then max_x = cmd.x2 end
-      if cmd.y2 > max_y then max_y = cmd.y2 end
+      if x1 < min_x then min_x = x1 end
+      if y1 < min_y then min_y = y1 end
+      if x1 > max_x then max_x = x1 end
+      if y1 > max_y then max_y = y1 end
+      if x2 < min_x then min_x = x2 end
+      if y2 < min_y then min_y = y2 end
+      if x2 > max_x then max_x = x2 end
+      if y2 > max_y then max_y = y2 end
     end
   end
-  if min_x == nil then
+  if not seen then
     return { min_x = 0, min_y = 0, max_x = 0, max_y = 0, width = 0, height = 0 }
   end
   return {
@@ -306,19 +336,21 @@ local function fmt(n)
   return string.format("%.4g", n)
 end
 
+--: (cmds: { [integer]: LsCmd }, opts: LsOpts | nil) -> string
 local function to_svg(cmds, opts)
-  local w      = (opts and opts.width)  or 400
-  local h      = (opts and opts.height) or 400
-  local stroke = (opts and opts.stroke) or "black"
-  local bg     = (opts and opts.bg)     or "white"
-  local stroke_w = (opts and opts.stroke_width) or 1
+  local w      = ((opts and opts.width)  or 400) --[[:! number]]
+  local h      = ((opts and opts.height) or 400) --[[:! number]]
+  local stroke = ((opts and opts.stroke) or "black") --[[:! string]]
+  local bg     = ((opts and opts.bg)     or "white") --[[:! string]]
+  local stroke_w = ((opts and opts.stroke_width) or 1) --[[:! number]]
 
   -- compute bounds to fit
   local bbox = compute_bounds(cmds)
 
   -- scale to fit
-  local scale = 1
-  local ox, oy = 0, 0
+  local scale = 1 --: number
+  local ox = 0 --: number
+  local oy = 0 --: number
   if bbox.width > 0 and bbox.height > 0 then
     local sx = (w * 0.9) / bbox.width
     local sy = (h * 0.9) / bbox.height
@@ -354,30 +386,37 @@ end
 -- LSYSTEM OBJECT
 -- ========================
 
+--:: LsObj = { _axiom: string, _plain: { [string]: unknown }, _ctx: { [string]: { [integer]: LsRule } }, _angle: number, _rng: LsRng, ... }
+
 local Ls = {}
 Ls.__index = Ls
 
+--: (self: LsObj, n: number) -> (string | nil, string | nil)
 function Ls:generate(n)
   if type(n) ~= "number" or n < 0 or n ~= math.floor(n) then
     return nil, "generate: n must be a non-negative integer"
   end
-  local s = self._axiom
+  local self_ = self --[[:! LsObj]]
+  local s = self_._axiom
   for _ = 1, n do
-    s = apply_rules_once(s, self._plain, self._ctx, self._rng)
+    s = apply_rules_once(s, self_._plain, self_._ctx, self_._rng)
   end
   return s
 end
 
+--: (self: LsObj, str: string, opts: LsOpts | nil) -> ({ [integer]: LsCmd } | nil, string | nil)
 function Ls:interpret(str, opts)
   if type(str) ~= "string" then
     return nil, "interpret: argument must be a string"
   end
-  local merged = {}
-  if opts then for k, v in pairs(opts) do merged[k] = v end end
-  if merged.angle == nil then merged.angle = self._angle end
-  return interpret_string(str, merged)
+  local self_ = self --[[:! LsObj]]
+  local merged = {} --[[: any]]
+  if opts then for k, v in pairs(opts) do merged --[[: any]][k] = v end end
+  if merged.angle == nil then merged.angle = self_._angle end
+  return interpret_string(str, merged --[[:! LsOpts]])
 end
 
+--: (self: LsObj, cmds: { [integer]: LsCmd }) -> (LsBounds | nil, string | nil)
 function Ls:bounds(cmds)
   if type(cmds) ~= "table" then
     return nil, "bounds: argument must be a table of commands"
@@ -385,14 +424,16 @@ function Ls:bounds(cmds)
   return compute_bounds(cmds)
 end
 
+--: (self: LsObj, str: string, opts: LsOpts | nil) -> (string | nil, string | nil)
 function Ls:to_svg(str, opts)
   if type(str) ~= "string" then
     return nil, "to_svg: first argument must be a string"
   end
-  local merged = {}
-  if opts then for k, v in pairs(opts) do merged[k] = v end end
-  if merged.angle == nil then merged.angle = self._angle end
-  local cmds = interpret_string(str, merged)
+  local self_ = self --[[:! LsObj]]
+  local merged = {} --[[: any]]
+  if opts then for k, v in pairs(opts) do merged --[[: any]][k] = v end end
+  if merged.angle == nil then merged.angle = self_._angle end
+  local cmds = interpret_string(str, merged --[[:! LsOpts]])
   return to_svg(cmds, opts)
 end
 
@@ -417,37 +458,42 @@ function M.new(spec)
     return nil, "new: spec.rules must be a table"
   end
 
-  local plain, ctx_rules, err = index_rules(spec.rules)
+  local plain, ctx_rules, err = index_rules(spec.rules --[[:! { [string]: unknown }]])
   if err then return nil, "new: " .. err end
+  local plain_ = plain --[[:! { [string]: unknown }]]
+  local ctx_rules_ = ctx_rules --[[:! { [string]: { [integer]: LsRule } }]]
 
   -- Validate stochastic rules
-  for sym, rule in pairs(plain) do
+  for sym, rule in pairs(plain_) do
+    local sym_ = tostring(sym)
     if type(rule) == "table" then
-      local total = 0
-      for _, entry in ipairs(rule) do
-        if type(entry) ~= "table" or type(entry.prob) ~= "number" or (type(entry.rule) ~= "string" and type(entry.rule) ~= "function") then
-          return nil, "new: stochastic rule entries must be {prob=number, rule=string|function}, got invalid entry for sym " .. sym
+      local total = 0 --: number
+      local rule_ = rule --[[: any]]
+      for _, entry in ipairs(rule_) do
+        local entry_ = entry --[[: any]]
+        if type(entry_) ~= "table" or type(entry_.prob) ~= "number" or (type(entry_.rule) ~= "string" and type(entry_.rule) ~= "function") then
+          return nil, "new: stochastic rule entries must be {prob=number, rule=string|function}, got invalid entry for sym " .. sym_
         end
-        total = total + entry.prob
+        total = total + (entry_.prob --[[:! number]])
       end
       if math.abs(total - 1.0) > 0.01 then
-        return nil, "new: stochastic probabilities must sum to 1.0, got " .. total .. " for sym " .. sym
+        return nil, "new: stochastic probabilities must sum to 1.0, got " .. total .. " for sym " .. sym_
       end
     elseif type(rule) ~= "string" and type(rule) ~= "function" then
       return nil, "new: rule value must be string, function, or stochastic table"
     end
   end
 
-  local angle = spec.angle or 90
-  local seed  = spec.seed  or 42
+  local angle = (spec.angle or 90) --[[:! number]]
+  local seed  = (spec.seed  or 42) --[[:! integer]]
 
   local ls = setmetatable({
-    _axiom  = spec.axiom,
-    _plain  = plain,
-    _ctx    = ctx_rules,
+    _axiom  = spec.axiom --[[:! string]],
+    _plain  = plain_,
+    _ctx    = ctx_rules_,
     _angle  = angle,
     _rng    = make_rng(seed),
-  }, Ls)
+  }, Ls) --[[: any]] --[[:! LsObj]]
   return ls
 end
 
