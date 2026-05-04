@@ -143,6 +143,14 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+18)
+
+- [x] `lib/schema/init.lua` (was 8 → now 0, commit 2f2d832) — Col/AlterBuilder type aliases + self_ casts; gsub multi-return fix; removed unannotatable vararg return sigs
+- [x] `lib/shamir/init.lua` (was 9 → now 0, commit 2f2d832) — added `local bit = require("bit")`; GF_LOG as `{ [integer]: integer }` (removed nil assignment); hex_strings_ cast; i_ = tostring(i) for concat; s_ force-cast after type() check
+- [x] `lib/signals/init.lua` (was 8 → now 0, commit 2f2d832) — EffNode/SubNode type aliases; snapshot arrays typed `{ [integer]: EffNode }`; eff/dep/fn force-casts after pairs; sentinel shape includes all fields; _pop nil via `--[[: any]]`
+- [x] `lib/simulated_annealing/init.lua` (was 9 → now 0, commit 2f2d832) — RNG/SAOpts type aliases; seed_/opts_ casts; setmetatable via `--[[: any]]` chain + `--[[:! RNG]]`; on_accept_/on_improve_ force-casts; `len --: number` accumulator
+- skipped `lib/chacha20/init.lua` (was 1 → net 89 after fix) — parse error was at `0x10000000000000ULL`; removing ULL suffix let typechecker parse the full file revealing 89 pre-existing errors; reverted
+
 ## Done in current session (session N+17)
 
 - [x] `lib/asm/emit/x64.lua` (was 14 → now 2, commit a720eaf) — `--[[:! VReg]]` casts on all `insn.dst`/`insn.operands[i]` after extraction; separate `src2_any` local for add/mov imm-check; `enc_mov_ri64` annotated `(buf, string, integer)`; `--[[:! integer]]` on `.imm` reads; 2 remaining FFI-bound (`ffi.copy` string type, `ffi.cast` return)
