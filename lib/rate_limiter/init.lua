@@ -5,10 +5,21 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: RLStats = { allowed: number, denied: number, total: number }
+--:: TokenBucket = { allow: (TokenBucket, number | nil) -> (boolean, number | nil), refill: (TokenBucket) -> nil, tokens: (TokenBucket) -> number, stats: (TokenBucket) -> RLStats }
+--:: LeakyBucket = { allow: (LeakyBucket, number | nil) -> (boolean, number | nil), size: (LeakyBucket) -> number, stats: (LeakyBucket) -> RLStats }
+--:: FixedWindow = { allow: (FixedWindow, string | nil) -> (boolean, number | nil), count: (FixedWindow, string | nil) -> number, reset: (FixedWindow, string | nil) -> nil, stats: (FixedWindow) -> RLStats }
+--:: SlidingWindowLog = { allow: (SlidingWindowLog, string | nil) -> (boolean, number | nil), stats: (SlidingWindowLog) -> RLStats }
+--:: SlidingWindowCounter = { allow: (SlidingWindowCounter, string | nil) -> (boolean, number | nil), stats: (SlidingWindowCounter) -> RLStats }
+--:: ConcurrentLimiter = { acquire: (ConcurrentLimiter) -> (() -> nil) | nil, count: (ConcurrentLimiter) -> number, stats: (ConcurrentLimiter) -> RLStats }
+--:: MultiLimiter = { allow: (MultiLimiter, string | nil) -> (boolean, number | nil), stats: (MultiLimiter) -> RLStats }
+--:: FWEntry = { count: number, window_start: number }
+--:: SWCEntry = { prev: number, curr: number, window_start: number }
+
 -- Token bucket: smooth bursts.
 -- Tokens refill at `rate` per second up to `capacity`.
 -- opts: { capacity: number, rate: number, clock: () -> number }
---: (opts: { capacity: number, rate: number, clock: () -> number }) -> TokenBucket
+--: (opts: { capacity: number, rate: number, clock: () -> number }) -> (TokenBucket | nil, string | nil)
 function M.token_bucket(opts)
   local capacity = opts.capacity
   local rate = opts.rate
@@ -70,7 +81,7 @@ end
 -- Requests add water; water drains at `rate` per second.
 -- Rejects when bucket would overflow.
 -- opts: { capacity: number, rate: number, clock: () -> number }
---: (opts: { capacity: number, rate: number, clock: () -> number }) -> LeakyBucket
+--: (opts: { capacity: number, rate: number, clock: () -> number }) -> (LeakyBucket | nil, string | nil)
 function M.leaky_bucket(opts)
   local capacity = opts.capacity
   local rate = opts.rate
@@ -80,7 +91,7 @@ function M.leaky_bucket(opts)
   if not clock then return nil, "clock is required" end
 
   local self = {}
-  local water = 0
+  local water = 0 --: number
   local last_time = clock()
   local allowed = 0
   local denied = 0
@@ -126,7 +137,7 @@ end
 
 -- Fixed window counter: simple, efficient per-key limiting.
 -- opts: { limit: number, window: number, clock: () -> number }
---: (opts: { limit: number, window: number, clock: () -> number }) -> FixedWindow
+--: (opts: { limit: number, window: number, clock: () -> number }) -> (FixedWindow | nil, string | nil)
 function M.fixed_window(opts)
   local limit = opts.limit
   local window = opts.window
@@ -137,10 +148,11 @@ function M.fixed_window(opts)
 
   local self = {}
   -- per-key store: key -> { count: number, window_start: number }
-  local store = {}
+  local store = {} --: { [string]: FWEntry }
   local allowed = 0
   local denied = 0
 
+  --: (string) -> FWEntry
   local function get_entry(key)
     local entry = store[key]
     if not entry then
@@ -150,6 +162,7 @@ function M.fixed_window(opts)
     return entry
   end
 
+  --: (FWEntry) -> nil
   local function check_window(entry)
     local now = clock()
     if now >= entry.window_start + window then
@@ -200,7 +213,7 @@ end
 -- Sliding window log: precise limiting using sorted timestamp log.
 -- Memory usage grows with limit (stores one timestamp per allowed request).
 -- opts: { limit: number, window: number, clock: () -> number }
---: (opts: { limit: number, window: number, clock: () -> number }) -> SlidingWindowLog
+--: (opts: { limit: number, window: number, clock: () -> number }) -> (SlidingWindowLog | nil, string | nil)
 function M.sliding_window_log(opts)
   local limit = opts.limit
   local window = opts.window
@@ -211,10 +224,11 @@ function M.sliding_window_log(opts)
 
   local self = {}
   -- per-key log: key -> array of timestamps (sorted ascending)
-  local logs = {}
+  local logs = {} --: { [string]: { [integer]: number } }
   local allowed = 0
   local denied = 0
 
+  --: (string) -> { [integer]: number }
   local function get_log(key)
     local l = logs[key]
     if not l then
@@ -224,6 +238,7 @@ function M.sliding_window_log(opts)
     return l
   end
 
+  --: ({ [integer]: number }, number) -> nil
   local function prune(log, cutoff)
     -- remove timestamps older than cutoff from the front
     local i = 1
@@ -236,8 +251,9 @@ function M.sliding_window_log(opts)
       for j = 1, n do
         log[j] = log[j + i - 1]
       end
+      local log_any = log --[[: any]]
       for j = n + 1, #log do
-        log[j] = nil
+        log_any[j] = nil
       end
     end
   end
@@ -272,7 +288,7 @@ end
 -- Sliding window counter: approximate limiting using two fixed windows.
 -- Memory-efficient; error is at most 1/limit of limit for smooth traffic.
 -- opts: { limit: number, window: number, clock: () -> number }
---: (opts: { limit: number, window: number, clock: () -> number }) -> SlidingWindowCounter
+--: (opts: { limit: number, window: number, clock: () -> number }) -> (SlidingWindowCounter | nil, string | nil)
 function M.sliding_window_counter(opts)
   local limit = opts.limit
   local window = opts.window
@@ -283,10 +299,11 @@ function M.sliding_window_counter(opts)
 
   local self = {}
   -- per-key store: key -> { prev: number, curr: number, window_start: number }
-  local store = {}
+  local store = {} --: { [string]: SWCEntry }
   local allowed = 0
   local denied = 0
 
+  --: (string) -> SWCEntry
   local function get_entry(key)
     local entry = store[key]
     if not entry then
@@ -296,6 +313,7 @@ function M.sliding_window_counter(opts)
     return entry
   end
 
+  --: (SWCEntry) -> nil
   local function advance(entry)
     local now = clock()
     local elapsed = now - entry.window_start
@@ -310,6 +328,7 @@ function M.sliding_window_counter(opts)
     end
   end
 
+  --: (SWCEntry) -> number
   local function weighted_count(entry)
     local now = clock()
     local elapsed = now - entry.window_start
@@ -331,7 +350,7 @@ function M.sliding_window_counter(opts)
     denied = denied + 1
     -- approximate wait: when weighted count drops below limit
     -- weighted = curr + prev*(1-t/w) < limit => t > w*(1 - (limit-curr)/prev)
-    local wait = 0
+    local wait = 0 --: number
     if entry.prev > 0 then
       local frac_needed = 1 - (limit - entry.curr) / entry.prev
       if frac_needed > 0 then
@@ -354,7 +373,7 @@ end
 
 -- Concurrent limiter: caps simultaneous in-flight requests.
 -- opts: { limit: number }
---: (opts: { limit: number }) -> ConcurrentLimiter
+--: (opts: { limit: number }) -> (ConcurrentLimiter | nil, string | nil)
 function M.concurrent(opts)
   local limit = opts.limit
   if not limit or limit <= 0 then return nil, "limit must be positive" end
@@ -397,20 +416,22 @@ end
 -- Multi-limiter: all constituent limiters must pass.
 -- Returns false (and max wait) if any limiter denies.
 -- Variadic: RL.multi(limiter1, limiter2, ...)
---: (...unknown) -> MultiLimiter
+--: (...unknown) -> (MultiLimiter | nil, string | nil)
 function M.multi(...)
-  local limiters = {...}
+  local limiters_ = {...}
+  local limiters = limiters_ --[[:! { [integer]: { allow: (unknown, string | nil) -> (boolean, number | nil) } }]]
   if #limiters == 0 then return nil, "at least one limiter is required" end
 
   local self = {}
 
   --: (key: (string | nil)) -> (boolean, (number | nil))
   function self:allow(key)
-    local max_wait = 0
+    local max_wait = 0 --: number
     for i = 1, #limiters do
       local ok, wait = limiters[i]:allow(key)
       if not ok then
-        if wait and wait > max_wait then max_wait = wait end
+        local wait_ = wait or 0
+        if wait_ > max_wait then max_wait = wait_ end
         -- consume remaining limiters without side effects by not calling them
         -- but we must still return denied
         -- We already called allow on limiters[i]; the others are not called,
