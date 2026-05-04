@@ -40,7 +40,7 @@ the concrete record shape it actually has.
 - [x] `lib/ical/init.lua` (123 → 70 → 0) — annotated add_prop signature with optional params
 - [x] `lib/cryptography/init.lua` (107 → 64) — annotated all `table` shapes; rewrote u32be/u32le with math.floor(tonumber(byte)) pattern; fixed ror64/shr64 bit-op integer params; guarded chacha20 return in poly1305 encrypt/decrypt
 - [x] `lib/json/init.lua` (106 → 17) — annotated decode_number/array/object/encode_value/encode_array/encode_object; added i=ni force-casts; encode_value type narrowing casts; remaining 17 from string.byte ...integer comparison (unfixable)
-- [ ] `lib/css_parser/init.lua` (53 after partial fix) — remaining: integer|integer phi-join in new_selector_parser (pervasive), SelectorParser method shape mismatches (field doesn't exist)
+- [x] `lib/css_parser/init.lua` (53 → 0, commit 7f43a0f) — i2/i3/depth phi-join recasts; self_ casts in SelectorParser/TokenStream methods; new_token_stream/new_selector_parser → any → T casts; annotate parse_block/collect_until/parse_at_rule with stream_ force-casts; add parent/prev to CssElement; fix attr.value/pseudo.arg nil-concat; annotate stringify_compound param as CssCompound
 - [x] `lib/wire_protocol/init.lua` (98 → 93) — replaced bare `table` in framer/receiver/decode_all with concrete shapes
 - [x] `lib/graphql_parser/init.lua` (86 → 0, commit c0c3681) — insert(arr,node) → arr[#arr+1]=node --[[: any]]; annotated printer fns; cast node params to { [string]: unknown }
 - [x] `lib/bson/init.lua` (73 → 0, commit a5ff410) — byte() individual extraction, ffi_ typed alias, --[[: any]] cast for pairs(), decode_document cursor via tonumber()
@@ -143,6 +143,13 @@ last because the type system itself is the testbed.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+29)
+
+- [x] `lib/css_parser/init.lua` (53 → 0, commit 7f43a0f) — i2/i3/depth phi-join recasts; self_ in SelectorParser/TokenStream methods; any→T casts on constructors; stream_ force-casts in parse_block/collect_until/parse_at_rule; parent/prev in CssElement; attr.value/pseudo.arg nil-guards; stringify_compound annotated
+- [x] `lib/uuid/init.lua` (3 → 0, commit 4a62f0a) — `ffi_new = ffi.new --[[: any]]` pattern to bypass VLA ffi.new overload mismatch
+- [x] `lib/wavelet/init.lua` (4 → 0, commit 4a62f0a) — annotate dl as `{ [integer]: number }`; WaveletDef type alias; annotate conv_down/upsample_conv; typed out array; get_wavelet force-cast return
+- [x] `lib/constraint_solver/init.lua` (10 → 0, commit 4a62f0a) — CspProblem/CspFn types; annotate check_binary/get_neighbors; self_ in Problem:variable/solve/solve_all; typed queue; arc[1]/arc[2] string force-casts
 
 ## Done in current session (session N+28)
 
