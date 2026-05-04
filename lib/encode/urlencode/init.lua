@@ -4,16 +4,19 @@ end
 
 local mod = {}
 
-local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" }
+local hex_alphabet = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" } --: { [integer]: string }
 
 --[[converts from string to urlencode]]
 --[[@param string string]]
 --: (string) -> string
-mod.string_to_urlencode = function (string)
+mod.string_to_urlencode = function (str)
 	-- FIXME
-	return string:gsub("[^%w-._~:%[%]@!$'%(%)*+,;=]", function (char)
-		local code = char:byte(1)
-		return "%" .. hex_alphabet[bit.rshift(code, 4) + 1] .. hex_alphabet[code % 16 + 1]
+	local gsub_any = str.gsub --[[: any]]
+	return gsub_any(str, "[^%w-._~:%[%]@!$'%(%)*+,;=]", function (char)
+		local char_ = char --[[:! string]]
+		local code = (string.byte(char_, 1) or 0) --[[:! integer]]
+		local hi = math.floor(code / 16) --[[:! integer]]
+		return "%" .. hex_alphabet[hi + 1] .. hex_alphabet[code % 16 + 1]
 	end)
 end
 
@@ -22,7 +25,8 @@ end
 --: (string) -> string
 mod.urlencode_to_string = function (urlencoded)
 	-- TODO: error if invalid
-	return (urlencoded:gsub("%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char(tonumber(code, 16)) end))
+	local gsub_any2 = urlencoded.gsub --[[: any]]
+	return gsub_any2(urlencoded, "%%([0-9a-fA-F][0-9a-fA-F])", function (code) return string.char((tonumber(code, 16) or 0) --[[:! integer]]) end)
 end
 
 return mod

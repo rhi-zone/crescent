@@ -62,8 +62,9 @@ local function ensure_xor_lookup()
 	for a = 0, 255 do
 		xor_lookup[a] = {}
 		for b = 0, 255 do
-			local val = 0
-			local sa, sb = a, b
+			local val = 0 --: number
+			local sa = a --: number
+			local sb = b --: number
 			for p = 0, 7 do
 				local ba = sa % 2
 				local bb = sb % 2
@@ -111,7 +112,7 @@ function M.compute(hash_fn, block_size, key, message)
 
 	-- Step 2: Pad key to block_size with zeros.
 	if #key < block_size then
-		key = key .. string.rep("\0", block_size - #key)
+		key = key .. string.rep("\0", (block_size - #key) --[[:! integer]])
 	end
 
 	-- Step 3: XOR key with ipad (0x36) and opad (0x5c).
