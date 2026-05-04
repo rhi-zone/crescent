@@ -144,6 +144,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+27)
+
+- [x] `lib/connection_pool/init.lua` (33 → 0, commit a654be7) — Pool/ConnEntry/ConnMeta/PoolStats type aliases; self_ casts in all methods; nil-narrowing for idle_timeout/max_lifetime via intermediate locals; validate result via if/else; method sigs on Pool type
+- [x] `lib/decision_tree/init.lua` (34 → 0, commit c9917d2) — TreeNode/LabelCounts type aliases; annotated build_tree/traverse/traverse_proba with node_ casts; h/si/cond_h as --: number accumulators; splits typed; Forest self._trees cast; make_rng integer seed
+- [x] `lib/decimal/init.lua` (37 → 0, commit 32cbe99) — Decimal type alias; annotated normalize/make/align/round_coeff; round_up via (x and y) and true or false; coeff/exp defaulted via (or 0); M[key] via any-intermediate for __index
+- [x] `lib/crdt/init.lua` (38 → 0, commit 96dacbe) — GCounter type alias with method sigs; LWWEntry type alias; self_ casts in all methods; boolean phi-join fixes; LWWEntry nil-checks restructured; tags cast to { [string]: boolean }
+
 ## Done in current session (session N+26)
 
 - [x] `lib/lindenmayer/init.lua` (54 → 0, commit d8cae77) — LsCmd/LsRule/LsRng/LsOpts/LsObj/LsBounds type aliases; annotated match_parametric/apply_rules_once/interpret_string/compute_bounds/to_svg/Ls methods; parts_/cmds_/stack_ any-intermediates; opts field force-casts to number/string; entry.prob/rule casts
