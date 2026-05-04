@@ -16,6 +16,7 @@ M._tier = "pure"
 local SQRT2 = math_sqrt(2)
 local INV_SQRT2 = 1 / SQRT2
 
+--:: WaveletDef = { name: string, vanishing_moments: integer, dec_lo: { [integer]: number }, dec_hi: { [integer]: number }, rec_lo: { [integer]: number }, rec_hi: { [integer]: number } }
 -- Each wavelet entry: dec_lo, dec_hi, rec_lo, rec_hi, vanishing_moments
 local WAVELETS = {}
 
@@ -41,7 +42,7 @@ end
 do
   local s3 = math_sqrt(3)
   local s2_4 = 4 * SQRT2
-  local dl = {
+  local dl = { --: { [integer]: number }
     (1 + s3) / s2_4,
     (3 + s3) / s2_4,
     (3 - s3) / s2_4,
@@ -151,13 +152,14 @@ end
 
 -- Circular convolution with downsampling by 2.
 -- Returns output of length floor(n/2) where n = #signal.
+--: ({ [integer]: number }, { [integer]: number }) -> { [integer]: number }
 local function conv_down(signal, filter)
   local n = #signal
   local flen = #filter
   local out_len = math_floor(n / 2)
   local out = {}
   for i = 1, out_len do
-    local s = 0
+    local s = 0 --: number
     for k = 1, flen do
       -- 0-indexed position: 2*(i-1) + (k-1)
       local idx = (2 * (i - 1) + (k - 1)) % n + 1
@@ -175,11 +177,14 @@ end
 -- But we use the adjoint / synthesis convolution:
 --   output[j] = sum_{i} input[i] * rec[j - 2*i + 1]  (linear, zero-padded boundaries)
 -- We'll accumulate by upsample+overlap.
+--: ({ [integer]: number }, { [integer]: number }, integer) -> { [integer]: number }
 local function upsample_conv(input, filter, out_len)
   local n = #input
   local flen = #filter
-  local out = {}
-  for j = 1, out_len do out[j] = 0 end
+  local out = {} --: { [integer]: number }
+  for j = 1, out_len do
+    out[j] = 0 --: number
+  end
   for i = 1, n do
     for k = 1, flen do
       -- position in output: 2*(i-1) + (k-1) + 1, with circular wrap
@@ -190,11 +195,13 @@ local function upsample_conv(input, filter, out_len)
   return out
 end
 
+--: (string) -> (WaveletDef | nil, string | nil)
 local function get_wavelet(name)
-  local w = WAVELETS[name]
-  if not w then
+  local w_ = WAVELETS[name]
+  if not w_ then
     return nil, "unknown wavelet: " .. tostring(name)
   end
+  local w = w_ --[[:! WaveletDef]]
   return w
 end
 

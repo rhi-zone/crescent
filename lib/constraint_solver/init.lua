@@ -46,6 +46,7 @@ local function check_unary(problem, var, v)
 end
 
 -- Check whether assignment of var1=v1, var2=v2 satisfies all binary constraints between them
+--: (CspProblem, string, unknown, string, unknown) -> boolean
 local function check_binary(problem, var1, v1, var2, v2)
   local key = var1 .. "\0" .. var2
   local cs = problem._constraints[key]
@@ -66,6 +67,7 @@ local function check_binary(problem, var1, v1, var2, v2)
 end
 
 -- Get all neighbors of a variable (variables that share a binary constraint)
+--: (CspProblem, string) -> { [integer]: string }
 local function get_neighbors(problem, var)
   local seen = {}
   local result = {}
@@ -123,7 +125,7 @@ end
 -- Returns true if arc-consistent (no domain empty), false if domain wipeout detected.
 local function ac3(problem, domains)
   -- Initialize queue with all arcs (xi, xj) for each binary constraint
-  local queue = {}
+  local queue = {} --: { [integer]: { [integer]: string } }
   for key, _ in pairs(problem._constraints) do
     local sep = key:find("\0")
     if sep then
@@ -138,7 +140,8 @@ local function ac3(problem, domains)
   while head <= #queue do
     local arc = queue[head]
     head = head + 1
-    local xi, xj = arc[1], arc[2]
+    local xi = arc[1] --[[:! string]]
+    local xj = arc[2] --[[:! string]]
 
     if domains[xi] and domains[xj] then
       if revise(problem, domains, xi, xj) then
@@ -304,18 +307,22 @@ end
 -- PROBLEM OBJECT
 -- ========================
 
+--:: CspFn = (...unknown) -> boolean
+--:: CspProblem = { _vars: { [integer]: string }, _domain: { [string]: { [integer]: unknown } }, _constraints: { [string]: { [integer]: CspFn } }, _unary: { [string]: { [integer]: CspFn } }, _ternary: { [integer]: { [integer]: any } } }
+
 local Problem = {}
 Problem.__index = Problem
 
 function Problem:variable(name, domain)
-  if self._domain[name] then
+  local self_ = self --[[:! CspProblem]]
+  if self_._domain[name] then
     return nil, "variable already defined: " .. name
   end
-  self._vars[#self._vars + 1] = name
+  self_._vars[#self_._vars + 1] = name
   local d = {}
   for i = 1, #domain do d[i] = domain[i] end
-  self._domain[name] = d
-  self._unary[name] = {}
+  self_._domain[name] = d
+  self_._unary[name] = {}
   return self
 end
 
@@ -442,11 +449,12 @@ local function backtrack_with_ternary(problem, assignment, domains, solutions, l
 end
 
 function Problem:solve(opts)
+  local self_ = self --[[:! CspProblem]]
   opts = opts or {}
 
   -- Apply unary constraints to reduce domains upfront
-  local domains = copy_domains(self._domain)
-  for var, unary_fns in pairs(self._unary) do
+  local domains = copy_domains(self_._domain)
+  for var, unary_fns in pairs(self_._unary) do
     if #unary_fns > 0 then
       local d = domains[var]
       local i = 1
@@ -461,29 +469,30 @@ function Problem:solve(opts)
   end
 
   -- AC-3 preprocessing
-  local consistent = ac3(self, domains)
+  local consistent = ac3(self_, domains)
   if not consistent then return nil end
 
   local solutions = {}
   local assignment = { _keys = {} }
 
-  local use_ternary = #self._ternary > 0
+  local use_ternary = #self_._ternary > 0
   if use_ternary then
-    backtrack_with_ternary(self, assignment, domains, solutions, 1)
+    backtrack_with_ternary(self_, assignment, domains, solutions, 1)
   else
-    backtrack(self, assignment, domains, solutions, 1)
+    backtrack(self_, assignment, domains, solutions, 1)
   end
 
   return solutions[1]
 end
 
 function Problem:solve_all(opts)
+  local self_ = self --[[:! CspProblem]]
   opts = opts or {}
   local limit = opts.limit
 
   -- Apply unary constraints to reduce domains upfront
-  local domains = copy_domains(self._domain)
-  for var, unary_fns in pairs(self._unary) do
+  local domains = copy_domains(self_._domain)
+  for var, unary_fns in pairs(self_._unary) do
     if #unary_fns > 0 then
       local d = domains[var]
       local i = 1
@@ -498,17 +507,17 @@ function Problem:solve_all(opts)
   end
 
   -- AC-3 preprocessing
-  local consistent = ac3(self, domains)
+  local consistent = ac3(self_, domains)
   if not consistent then return {} end
 
   local solutions = {}
   local assignment = { _keys = {} }
 
-  local use_ternary = #self._ternary > 0
+  local use_ternary = #self_._ternary > 0
   if use_ternary then
-    backtrack_with_ternary(self, assignment, domains, solutions, limit)
+    backtrack_with_ternary(self_, assignment, domains, solutions, limit)
   else
-    backtrack(self, assignment, domains, solutions, limit)
+    backtrack(self_, assignment, domains, solutions, limit)
   end
 
   return solutions
