@@ -21,7 +21,7 @@ end
 function M.from(arr)
   local ms = M.new()
   for _, v in ipairs(arr) do
-    ms:add(v)
+    MT.add(ms, v)
   end
   return ms
 end
