@@ -155,6 +155,13 @@ last because the type system itself is the testbed.
 - `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
 
+## Done in current session (session N+33)
+
+- [x] `lib/text_diff/init.lua` (26 → 0, commit acbc3a1) — annotate changed_idx/hunks/lines as typed arrays; cast hstart/hend; fix ctx with force-cast; annotate fuzzy_find params and prev/curr DP arrays; annotate split_words param; cast edits via any intermediate
+- [x] `lib/pubsub/init.lua` (9 → 0, commit ceea097) — add SubEntry type alias; annotate split_segments/match_segment; annotate subs as { [string]: any }; fix boolean return
+- [x] `lib/scheduler/init.lua` (14 → 0, commit b0b0fac) — add Task/Channel/HeapEntry/SchedObj type aliases; annotate heap helpers and ready_insert; self_ casts in all Sched methods; Thread type for coroutines; fix heap_pop nil guard
+- [x] `lib/rate_limiter/init.lua` (17 → 0, commit 1488842) — add named limiter type aliases; fix multi-return annotations; annotate entry helpers; fix number accumulator types
+
 ## Done in current session (session N+32)
 
 - [x] `lib/cryptography/init.lua` (64 → 0, commit 25cf836) — annotate SHA256_K/SHA256_H0/SHA512_K/SHA512_H0 as { [integer]: number } arrays; fix gsub multi-return; fix ror64/shr64 phi-join with n_ casts; fix sha512_compress to individual byte reads; fix hmac block_size as integer, ipad/opad as typed arrays; fix pbkdf2 return annotation to (string|nil,string|nil); fix chacha20 counter type; fix poly1305 unsigned() reassignment and u64n nil return; fix ct_eq byte comparisons
