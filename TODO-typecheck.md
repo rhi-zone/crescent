@@ -141,7 +141,14 @@ last because the type system itself is the testbed.
 - `lib/bits/init.lua` — annotating `band/bor/bxor/bnot/lshift/rshift` with `(integer, integer) -> integer` to remove `union member any not callable` regressed 76 → 82 (concrete return type cascades into stricter checks elsewhere). Reverted. Root cause is `pcall(require, "bit")` fall-through producing union of pure-Lua impl and bit module; needs Bitset/Bloom shape annotations first.
 - `lib/bson/init.lua` — force-cast `byte(s, pos) --[[:! integer]]` per byte regressed 73 → 85 (caster mismatch on `integer | nil` source) — reverted. Fix would need either narrowing `nil` separately, or upstream `byte` typing change.
 - `lib/protocol_buffer/init.lua` — pervasive `integer | nil` from `decode_varint` second return flows through arithmetic at every call site (313, 382, 388, 393, 395, 462…); 79 errors require cascading nil-guards across decode pipeline. Restructuring.
+- `lib/parse/init.lua` (57) — parser combinator library; closures return multi-value types like `(string, integer) | (nil, integer, string)` — annotating closure params regresses errors because typechecker doesn't handle multi-value return annotations on returned closures correctly.
 - `lib/automata/init.lua` (27) — NFA/DFA setmetatable overlap fails; multi-param annotation syntax confusion; sorted_keys is a generic function (key type depends on input) that the typechecker can't express; DFA add_state opts mismatch at many call sites. Net regressed to 35 on attempt; reverted.
+
+## Done in current session (session N+26)
+
+- [x] `lib/lindenmayer/init.lua` (54 → 0, commit d8cae77) — LsCmd/LsRule/LsRng/LsOpts/LsObj/LsBounds type aliases; annotated match_parametric/apply_rules_once/interpret_string/compute_bounds/to_svg/Ls methods; parts_/cmds_/stack_ any-intermediates; opts field force-casts to number/string; entry.prob/rule casts
+- [x] `lib/search/init.lua` (53 → 0, commit 17d14c3) — open-record query type; constructors --[[: any]] returns; eval_query/collect_query_terms q --[[: any]] branches; typed prev/curr integer arrays; inverted/docs --[[: any]]; opts force-casts; idx:add self annotation
+- [x] `lib/struct/init.lua` (54 → 0, commit b23b7b6) — StructOp type alias; parse_fmt/write_op/read_op signatures; ops_ any-intermediate; nv locals after type() guards; out_ any-intermediate for string.char; phi-join integer casts; union_f32/f64 --[[: any]] cast
 
 ## Done in current session (session N+25)
 
