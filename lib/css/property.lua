@@ -8,7 +8,7 @@ local M = {}
 -- name: CssVar name string (must start with --)
 -- opts: { syntax: string, inherits: boolean, initial_value: string? }
 -- Returns a table with _type = "property"
---: (name: string, opts: table) -> table
+--: (name: string, opts: { syntax: unknown, inherits: unknown, initial_value: unknown | nil }) -> { _type: string, name: string, syntax: unknown, inherits: unknown, initial_value: unknown }
 function M.property_rule(name, opts)
   if name:sub(1, 2) ~= "--" then
     error("@property name must start with --: " .. name)
@@ -25,10 +25,10 @@ function M.property_rule(name, opts)
 end
 
 -- Render a @property rule to a CSS string.
---: (rule: table) -> string
+--: (rule: { name: string, syntax: unknown, inherits: unknown, initial_value: unknown | nil }) -> string
 function M.render_property(rule)
   local parts = { "@property " .. rule.name .. " {" }
-  parts[#parts+1] = '  syntax: "' .. rule.syntax .. '";'
+  parts[#parts+1] = '  syntax: "' .. tostring(rule.syntax) .. '";'
   parts[#parts+1] = "  inherits: " .. (rule.inherits and "true" or "false") .. ";"
   if rule.initial_value ~= nil then
     parts[#parts+1] = "  initial-value: " .. tostring(rule.initial_value) .. ";"
@@ -42,7 +42,7 @@ end
 -- "declared" = rule has var_name as a property key
 -- "referenced" = rule has a value containing "var(var_name)"
 -- Also reports @property registrations under report[var_name].registered = true
---: (sheet: table, var_names: { [integer]: string }) -> table
+--: (sheet: unknown, var_names: { [integer]: string }) -> { [string]: unknown }
 function M.analyze(sheet, var_names)
   local watched = {}
   for _, name in ipairs(var_names) do watched[name] = true end
@@ -64,7 +64,8 @@ function M.analyze(sheet, var_names)
           end
           local val_str = tostring(v)
           for name in pairs(watched) do
-            if val_str:find("var%(" .. name:gsub("%-", "%%-") .. "%)", 1) then
+            local pat, _ = name:gsub("%-", "%%-")
+            if val_str:find("var%(" .. pat .. "%)", 1) then
               local r = report[name]
               r.referenced[#r.referenced+1] = sel_str
             end
@@ -80,7 +81,8 @@ function M.analyze(sheet, var_names)
     end
   end
 
-  analyze_items(sheet.items)
+  local sheet_ = sheet --[[:! { items: { [integer]: any } }]]
+  analyze_items(sheet_.items)
   return report
 end
 

@@ -20,22 +20,25 @@ local function extract_lorebook(data)
 	if not data then return nil end
 	local book = data.character_book
 	if not book then return nil end
-	return lorebook.from_ccv2(book)
+	local lorebook_any = lorebook --[[: any]]
+	return lorebook_any.from_ccv2(book)
 end
 
---: (string) -> ({ card: table, lorebook: (table | nil) } | nil, string)
+--: (string) -> ({ card: unknown, lorebook: unknown } | nil, string | nil)
 function M.from_png(bytes)
 	local data, err = card_mod.from_png(bytes)
 	if not data then return nil, err end
-	local entries = extract_lorebook(data)
+	local data_ = data --[[:! { character_book: unknown | nil }]]
+	local entries = extract_lorebook(data_)
 	return { card = data, lorebook = entries }
 end
 
---: (string) -> ({ card: table, lorebook: (table | nil) } | nil, string)
+--: (string) -> ({ card: unknown, lorebook: unknown } | nil, string | nil)
 function M.from_json(str)
 	local data, err = card_mod.from_json(str)
 	if not data then return nil, err end
-	local entries = extract_lorebook(data)
+	local data_ = data --[[:! { character_book: unknown | nil }]]
+	local entries = extract_lorebook(data_)
 	return { card = data, lorebook = entries }
 end
 
