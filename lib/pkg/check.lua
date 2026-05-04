@@ -26,7 +26,7 @@ local function walk_lua_files(dir, fn)
 	if not fh then
 		return nil, "failed to enumerate " .. dir
 	end
-	local out = fh:read("*a")
+	local out = fh:read("*a") or ""
 	fh:close()
 	for path in out:gmatch("[^\n]+") do
 		if path ~= "" then
@@ -48,6 +48,7 @@ end
 -- We extract only the first path component after "lib." — that is the package
 -- name (e.g. "foo" from "lib.foo.v2.util").
 local function scan_requires(source)
+	local source_ = source --[[:! string]]
 	local results = {}
 
 	-- Two forms: with parens and without.  Both single and double quotes.
@@ -62,7 +63,7 @@ local function scan_requires(source)
 	-- We iterate line-by-line so we can record accurate line numbers.
 
 	local line_num = 0
-	for line in (source .. "\n"):gmatch("([^\n]*)\n") do
+	for line in (source_ .. "\n"):gmatch("([^\n]*)\n") do
 		line_num = line_num + 1
 
 		-- Skip full-line comments (heuristic: lines starting with optional
@@ -162,8 +163,9 @@ function M.scan(pkg_dir)
 		return result
 	end
 
-	local own_name = m.name
-	local deps     = m.deps or {}
+	local m_ = m --[[:! { name: unknown, deps: unknown }]]
+	local own_name = m_.name
+	local deps     = m_.deps or {}
 
 	-- Build a set of declared dep names for O(1) lookup.
 	local declared = {}
@@ -173,16 +175,17 @@ function M.scan(pkg_dir)
 
 	-- ── 2. Walk *.lua files, skipping *_test.lua ──────────────────────────────
 	local walk_ok, walk_err = walk_lua_files(pkg_dir, function(filepath)
+		local filepath_ = filepath --[[:! string]]
 		-- Skip test files.
-		if filepath:match("_test%.lua$") then
+		if filepath_:match("_test%.lua$") then
 			return
 		end
 
 		-- Read the file.
-		local fh, open_err = io.open(filepath, "r")
+		local fh, open_err = io.open(filepath_, "r")
 		if not fh then
 			result.warnings[#result.warnings + 1] =
-				"could not read " .. filepath .. ": " .. tostring(open_err)
+				"could not read " .. filepath_ .. ": " .. tostring(open_err)
 			return
 		end
 		local source = fh:read("*a")
