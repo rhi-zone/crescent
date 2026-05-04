@@ -78,33 +78,36 @@ end
 
 --- Create a new entity and return its integer ID.
 function World:entity()
-  local id = self._next_id
-  self._next_id = id + 1
-  self._alive[id] = true
-  self:emit("entity_created", id)
+  local self_ = self --[[: any]]
+  local id = self_._next_id
+  self_._next_id = id + 1
+  self_._alive[id] = true
+  self_:emit("entity_created", id)
   return id
 end
 
 --- Remove an entity and all its components.
 function World:destroy(e)
-  if not self._alive[e] then return end
+  local self_ = self --[[: any]]
+  if not self_._alive[e] then return end
   -- remove from every component store
-  for name, store in pairs(self._components) do
+  for name, store in pairs(self_._components) do
     if store[e] ~= nil then
       store[e] = nil
-      self:emit("component_removed", e, name)
+      self_:emit("component_removed", e, name)
     end
   end
-  self._alive[e] = nil
-  self:emit("entity_destroyed", e)
+  self_._alive[e] = nil
+  self_:emit("entity_destroyed", e)
 end
 
 --- Remove all entities (and their components) from the world.
 function World:clear()
+  local self_ = self --[[: any]]
   -- collect alive IDs first to avoid modifying during iteration
   local ids = {}
-  for id in pairs(self._alive) do ids[#ids+1] = id end
-  for _, id in ipairs(ids) do self:destroy(id) end
+  for id in pairs(self_._alive) do ids[#ids+1] = id end
+  for _, id in ipairs(ids) do self_:destroy(id) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -119,26 +122,28 @@ end
 -- @param data  table|nil  initial field values
 -- @return true | nil, errmsg
 function World:add(e, name, data)
-  if not self._alive[e] then
+  local self_ = self --[[: any]]
+  if not self_._alive[e] then
     return nil, "entity " .. tostring(e) .. " does not exist"
   end
-  if self._components[name] == nil then
+  if self_._components[name] == nil then
     return nil, "component '" .. name .. "' not registered"
   end
   local comp = shallow_copy(data)
-  merge_defaults(comp, self._defaults[name])
-  self._components[name][e] = comp
-  self:emit("component_added", e, name)
+  merge_defaults(comp, self_._defaults[name])
+  self_._components[name][e] = comp
+  self_:emit("component_added", e, name)
   return true
 end
 
 --- Remove a component from an entity.
 -- No-op if entity doesn't have the component.
 function World:remove(e, name)
-  local store = self._components[name]
+  local self_ = self --[[: any]]
+  local store = self_._components[name]
   if store and store[e] ~= nil then
     store[e] = nil
-    self:emit("component_removed", e, name)
+    self_:emit("component_removed", e, name)
   end
 end
 
@@ -251,8 +256,9 @@ end
 -- Extra arguments (e.g. dt) are forwarded to the system function after
 -- the component tables.
 function World:run(sys, ...)
-  local names = sys.components
-  local fn    = sys.fn
+  local sys_ = sys --[[:! { components: { [integer]: string }, fn: (...unknown) -> unknown }]]
+  local names = sys_.components
+  local fn    = sys_.fn
   local n     = #names
   local args  = {...}
   local nargs = #args

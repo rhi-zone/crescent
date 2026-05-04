@@ -29,11 +29,12 @@ local M = {}
 -- ── Text extraction ───────────────────────────────────────────────────────────
 
 -- Recursively concatenate all `text` node values from a node's children.
+--: (any) -> string
 local function extract_text(node)
   if node.type == "text" then
     return node.value or ""
   end
-  local children = node.children
+  local children = node.children --[[:! { [integer]: any }]]
   if not children then return "" end
   local parts = {}
   for i = 1, #children do
@@ -47,6 +48,7 @@ end
 -- Produce a URL-friendly anchor slug from heading text.
 -- Algorithm: lowercase → replace runs of non-alphanumeric/non-hyphen chars
 -- with a single hyphen → strip leading/trailing hyphens.
+--: (string) -> string
 local function slugify(text)
   local s = text:lower()
   s = s:gsub("[^%a%d%-]+", "-")
@@ -112,7 +114,7 @@ local function build_toc_list(entries, ordered, min_depth)
   local root_list = make_list()
   -- stack maps relative depth → {list_node, parent_item}
   -- stack[1] = { list = root_list, item = nil }
-  local stack = { { list = root_list, item = nil } }
+  local stack = { { list = root_list, item = nil } } --: { [integer]: { list: any, item: any } }
 
   for e = 1, #entries do
     local entry = entries[e]
@@ -136,7 +138,7 @@ local function build_toc_list(entries, ordered, min_depth)
 
     -- If the stack is deeper, pop back.
     while #stack > rel do
-      stack[#stack] = nil
+      stack[#stack] = nil --[[: any]]
     end
 
     -- Add the item to the current list.
