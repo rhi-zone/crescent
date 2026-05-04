@@ -18,6 +18,7 @@ end
 local M = {}
 M._tier = "pure"
 
+local bit    = require("bit")
 local band   = bit.band
 local bxor   = bit.bxor
 local rshift = bit.rshift
@@ -94,9 +95,9 @@ end
 -- Returns a new streaming CRC32 hasher.
 -- `seed` defaults to 0.
 function M.new(seed)
-	local h = setmetatable({}, H)
-	h:reset(seed)
-	return h
+	local h_any = setmetatable({}, H) --[[: any]]
+	h_any:reset(seed)
+	return h_any
 end
 
 return M

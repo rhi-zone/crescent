@@ -6,16 +6,16 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local json = require("lib.format.json")
+local json = require("lib.format.json") --[[: any]]
 
 -- Lazy-load the HTTPS client so that requiring lib.github does not fail
 -- in environments where TLS is unavailable (e.g. test runners without libtls).
-local _http
+local _http --[[: any]]
 local function http()
 	if not _http then
 		_http = require("lib.https.client")
 	end
-	return _http
+	return _http --[[: any]]
 end
 
 --:: github_client = { token: string | nil }
@@ -26,7 +26,6 @@ local BASE_HOST = "api.github.com"
 local API_VERSION = "2022-11-28"
 
 -- Build the common headers table for a client, including Authorization if token is set.
---: (github_client) -> { [string]: string[] }
 local function make_headers(self)
 	local headers = {
 		["Accept"] = { "application/vnd.github+json" },
