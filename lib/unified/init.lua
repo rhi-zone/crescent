@@ -50,12 +50,14 @@ local function new_processor()
   -- Apply a plugin (and optional opts) to this processor.
   -- If the processor is frozen, clone first and apply to the clone.
   function P:use(plugin, opts)
-    if self._frozen then
-      return self:clone():use(plugin, opts)
+    local self_any = self --[[:! { _frozen: boolean, _plugins: { [integer]: any }, ... }]]
+    if self_any._frozen then
+      local c = self_any --[[: any]]
+      return c:clone():use(plugin, opts)
     end
-    self._plugins[#self._plugins + 1] = {plugin, opts}
-    plugin(self, opts)
-    return self
+    self_any._plugins[#self_any._plugins + 1] = {plugin, opts}
+    plugin(self_any, opts)
+    return self_any
   end
 
   -- Freeze the processor. After freezing, :use() clones before applying.
@@ -109,11 +111,12 @@ local function new_processor()
   -- Full pipeline: parse → run → stringify.
   -- Returns (string) or (nil, errmsg).
   function P:process(source)
-    local ast, err = self:parse(source)
+    local self_any = self --[[: any]]
+    local ast, err = self_any:parse(source)
     if not ast then return nil, err end
-    ast, err = self:run(ast)
+    ast, err = self_any:run(ast)
     if not ast then return nil, err end
-    return self:stringify(ast)
+    return self_any:stringify(ast)
   end
 
   return P

@@ -23,7 +23,7 @@ local M = {}
 -- Returns true when a paragraph node is empty (should be removed).
 local function is_empty_paragraph(node)
   if node.type ~= "paragraph" then return false end
-  local children = node.children
+  local children = node.children --[[:! { [integer]: any }]]
   if not children or #children == 0 then return true end
   -- A paragraph is also empty when every child is a whitespace-only text node.
   for i = 1, #children do
@@ -45,11 +45,13 @@ end
 
 -- Remove empty paragraphs from a children array, returning a new array.
 local function filter_children(children)
+  --: { [integer]: any } | nil
   if not children then return children end
+  local children_ = children --[[:! { [integer]: any }]]
   local out = {}
-  for i = 1, #children do
-    if not is_empty_paragraph(children[i]) then
-      out[#out + 1] = children[i]
+  for i = 1, #children_ do
+    if not is_empty_paragraph(children_[i]) then
+      out[#out + 1] = children_[i]
     end
   end
   return out
@@ -72,8 +74,9 @@ local function squeeze(node)
   -- structures (list > listItem > blockquote > …) are all handled.
   local children = node.children
   if children then
-    for i = 1, #children do
-      squeeze(children[i])
+    local nc = children --[[:! { [integer]: any }]]
+    for i = 1, #nc do
+      squeeze(nc[i])
     end
   end
   return node

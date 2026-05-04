@@ -18,21 +18,27 @@ local M = {}
 local function with_lorebook(data, entries)
 	local out = {}
 	for k, v in pairs(data) do out[k] = v end
-	if entries and #entries > 0 then
-		out.character_book = lorebook.to_ccv2(entries)
+	if entries then
+		local entries_ = entries --[[:! { [integer]: any }]]
+		if #entries_ > 0 then
+			local lorebook_any = lorebook --[[: any]]
+			out.character_book = lorebook_any.to_ccv2(entries_)
+		else
+			out.character_book = nil
+		end
 	else
 		out.character_book = nil
 	end
 	return out
 end
 
---: (table, (table | nil), (string | nil)) -> (string | nil, string)
+--: (unknown, (unknown | nil), (string | nil)) -> (string | nil, string)
 function M.to_png(data, entries, png_bytes)
 	local out = with_lorebook(data, entries)
 	return card_mod.to_png(out, png_bytes)
 end
 
---: (table, (table | nil)) -> (string | nil, string)
+--: (unknown, (unknown | nil)) -> (string | nil, string)
 function M.to_json(data, entries)
 	local out = with_lorebook(data, entries)
 	return card_mod.to_json(out)
