@@ -9,13 +9,17 @@ end
 -- GF(256) uses the AES irreducible polynomial x^8+x^4+x^3+x+1 (0x11B).
 -- Addition = XOR. Multiplication via log/exp tables for O(1).
 
+local bit = require("bit")
+
 local M = {}
 
 M._tier = "pure"
 
 -- GF(256) tables using primitive polynomial 0x11B.
 -- Generator g = 0x03.
+--: { [integer]: integer }
 local GF_EXP = {}  -- gf_exp[i] = g^i, indices 0..254 (255 wraps to 1)
+--: { [integer]: integer }
 local GF_LOG = {}  -- gf_log[x] = discrete log base g of x (for x != 0)
 
 do
@@ -33,7 +37,7 @@ do
     GF_EXP[i] = GF_EXP[i - 255]
   end
   GF_EXP[255] = 1  -- g^255 = 1 (order is 255)
-  GF_LOG[0] = nil  -- log(0) is undefined
+  -- GF_LOG[0] is undefined (log of 0), so we leave it unset
 end
 
 local function gf_mul(a, b)
@@ -198,17 +202,20 @@ function M.decode_shares(hex_strings)
     return nil, "hex_strings must be an array"
   end
   local shares = {}
-  for i, s in ipairs(hex_strings) do
+  local hex_strings_ = hex_strings --[[:! { [integer]: unknown }]]
+  for i, s in ipairs(hex_strings_) do
+    local i_ = tostring(i)
     if type(s) ~= "string" then
-      return nil, "entry " .. i .. " is not a string"
+      return nil, "entry " .. i_ .. " is not a string"
     end
-    local x_hex, y_hex = s:match("^(%x%x):(%x*)$")
+    local s_ = s --[[:! string]]
+    local x_hex, y_hex = s_:match("^(%x%x):(%x*)$")
     if not x_hex then
-      return nil, "entry " .. i .. " has invalid format (expected XX:yyhex)"
+      return nil, "entry " .. i_ .. " has invalid format (expected XX:yyhex)"
     end
     -- y_hex length must be even
     if #y_hex % 2 ~= 0 then
-      return nil, "entry " .. i .. " y hex has odd length"
+      return nil, "entry " .. i_ .. " y hex has odd length"
     end
     local x = tonumber(x_hex, 16)
     local y_bytes = {}

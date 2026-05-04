@@ -9,6 +9,7 @@ local M = {}
 
 -- ── Column builder ───────────────────────────────────────────────────────────
 
+--:: Col = { _name: string, _type: string, _constraints: { [integer]: string }, primary_key: (self: Col) -> Col, autoincrement: (self: Col) -> Col, not_null: (self: Col) -> Col, unique: (self: Col) -> Col, default: (self: Col, unknown) -> Col, references: (self: Col, string, string) -> Col, check: (self: Col, string) -> Col, to_sql: (self: Col) -> string }
 local Col = {}
 Col.__index = Col
 
@@ -20,27 +21,37 @@ local function new_column(name, sql_type)
 	}, Col)
 end
 
+--: (self: Col) -> Col
 function Col:primary_key()
-	self._constraints[#self._constraints + 1] = "PRIMARY KEY"
-	return self
+	local self_ = self --[[:! Col]]
+	self_._constraints[#self_._constraints + 1] = "PRIMARY KEY"
+	return self_
 end
 
+--: (self: Col) -> Col
 function Col:autoincrement()
-	self._constraints[#self._constraints + 1] = "AUTOINCREMENT"
-	return self
+	local self_ = self --[[:! Col]]
+	self_._constraints[#self_._constraints + 1] = "AUTOINCREMENT"
+	return self_
 end
 
+--: (self: Col) -> Col
 function Col:not_null()
-	self._constraints[#self._constraints + 1] = "NOT NULL"
-	return self
+	local self_ = self --[[:! Col]]
+	self_._constraints[#self_._constraints + 1] = "NOT NULL"
+	return self_
 end
 
+--: (self: Col) -> Col
 function Col:unique()
-	self._constraints[#self._constraints + 1] = "UNIQUE"
-	return self
+	local self_ = self --[[:! Col]]
+	self_._constraints[#self_._constraints + 1] = "UNIQUE"
+	return self_
 end
 
+--: (self: Col, unknown) -> Col
 function Col:default(value)
+	local self_ = self --[[:! Col]]
 	local repr
 	if value == true then
 		repr = "1"
@@ -53,29 +64,36 @@ function Col:default(value)
 		if value:match("^[A-Z_]+$") then
 			repr = value
 		else
-			repr = "'" .. value:gsub("'", "''") .. "'"
+			local r, _ = value:gsub("'", "''")
+			repr = "'" .. r .. "'"
 		end
 	else
 		repr = tostring(value)
 	end
-	self._constraints[#self._constraints + 1] = "DEFAULT " .. repr
-	return self
+	self_._constraints[#self_._constraints + 1] = "DEFAULT " .. repr
+	return self_
 end
 
+--: (self: Col, string, string) -> Col
 function Col:references(table_name, column_name)
-	self._constraints[#self._constraints + 1] = "REFERENCES " .. table_name .. "(" .. column_name .. ")"
-	return self
+	local self_ = self --[[:! Col]]
+	self_._constraints[#self_._constraints + 1] = "REFERENCES " .. table_name .. "(" .. column_name .. ")"
+	return self_
 end
 
+--: (self: Col, string) -> Col
 function Col:check(expr)
-	self._constraints[#self._constraints + 1] = "CHECK (" .. expr .. ")"
-	return self
+	local self_ = self --[[:! Col]]
+	self_._constraints[#self_._constraints + 1] = "CHECK (" .. expr .. ")"
+	return self_
 end
 
+--: (self: Col) -> string
 function Col:to_sql()
-	local parts = { self._name, self._type }
-	for i = 1, #self._constraints do
-		parts[#parts + 1] = self._constraints[i]
+	local self_ = self --[[:! Col]]
+	local parts = { self_._name, self_._type }
+	for i = 1, #self_._constraints do
+		parts[#parts + 1] = self_._constraints[i]
 	end
 	return table.concat(parts, " ")
 end
@@ -146,6 +164,8 @@ end
 
 -- ── Alter table builder ──────────────────────────────────────────────────────
 
+--:: AlterOp = { kind: string, sql: string }
+--:: AlterBuilder = { _name: string, _operations: { [integer]: AlterOp } }
 local AlterBuilder = {}
 AlterBuilder.__index = AlterBuilder
 
@@ -156,55 +176,65 @@ local function new_alter_builder(name)
 	}, AlterBuilder)
 end
 
+--: (self: AlterBuilder, string, string, string | nil) -> nil
 function AlterBuilder:add_column(name, sql_type, constraints)
+	local self_ = self --[[:! AlterBuilder]]
 	local suffix = ""
 	if constraints then
 		suffix = " " .. constraints
 	end
-	self._operations[#self._operations + 1] = {
+	self_._operations[#self_._operations + 1] = {
 		kind = "add_column",
-		sql = "ALTER TABLE " .. self._name .. " ADD COLUMN " .. name .. " " .. sql_type .. suffix,
+		sql = "ALTER TABLE " .. self_._name .. " ADD COLUMN " .. name .. " " .. sql_type .. suffix,
 	}
 end
 
+--: (self: AlterBuilder, string) -> nil
 function AlterBuilder:drop_column(name)
-	self._operations[#self._operations + 1] = {
+	local self_ = self --[[:! AlterBuilder]]
+	self_._operations[#self_._operations + 1] = {
 		kind = "drop_column",
-		sql = "ALTER TABLE " .. self._name .. " DROP COLUMN " .. name,
+		sql = "ALTER TABLE " .. self_._name .. " DROP COLUMN " .. name,
 	}
 end
 
+--: (self: AlterBuilder, string, string) -> nil
 function AlterBuilder:rename_column(old_name, new_name)
-	self._operations[#self._operations + 1] = {
+	local self_ = self --[[:! AlterBuilder]]
+	self_._operations[#self_._operations + 1] = {
 		kind = "rename_column",
-		sql = "ALTER TABLE " .. self._name .. " RENAME COLUMN " .. old_name .. " TO " .. new_name,
+		sql = "ALTER TABLE " .. self_._name .. " RENAME COLUMN " .. old_name .. " TO " .. new_name,
 	}
 end
 
 function AlterBuilder:add_index(name, ...)
+	local self_ = self --[[:! AlterBuilder]]
 	local columns = { ... }
 	if #columns == 0 then
 		return nil, "add_index requires at least one column"
 	end
-	self._operations[#self._operations + 1] = {
+	self_._operations[#self_._operations + 1] = {
 		kind = "add_index",
-		sql = "CREATE INDEX " .. name .. " ON " .. self._name .. " (" .. table.concat(columns, ", ") .. ")",
+		sql = "CREATE INDEX " .. name .. " ON " .. self_._name .. " (" .. table.concat(columns, ", ") .. ")",
 	}
 end
 
 function AlterBuilder:add_unique_index(name, ...)
+	local self_ = self --[[:! AlterBuilder]]
 	local columns = { ... }
 	if #columns == 0 then
 		return nil, "add_unique_index requires at least one column"
 	end
-	self._operations[#self._operations + 1] = {
+	self_._operations[#self_._operations + 1] = {
 		kind = "add_unique_index",
-		sql = "CREATE UNIQUE INDEX " .. name .. " ON " .. self._name .. " (" .. table.concat(columns, ", ") .. ")",
+		sql = "CREATE UNIQUE INDEX " .. name .. " ON " .. self_._name .. " (" .. table.concat(columns, ", ") .. ")",
 	}
 end
 
+--: (self: AlterBuilder, string) -> nil
 function AlterBuilder:drop_index(name)
-	self._operations[#self._operations + 1] = {
+	local self_ = self --[[:! AlterBuilder]]
+	self_._operations[#self_._operations + 1] = {
 		kind = "drop_index",
 		sql = "DROP INDEX " .. name,
 	}

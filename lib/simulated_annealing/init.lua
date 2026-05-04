@@ -13,6 +13,7 @@ M._tier = "pure"
 -- LCG random number generator (seeded, portable)
 -- ---------------------------------------------------------------------------
 
+--:: RNG = { state: number, next: (self: RNG) -> number, float: (self: RNG) -> number, int: (self: RNG, number, number) -> number }
 local RNG = {}
 RNG.__index = RNG
 
@@ -21,8 +22,11 @@ local LCG_A = 1664525
 local LCG_C = 1013904223
 local LCG_M = 2^32
 
+--: (number) -> RNG
 function RNG.new(seed)
-  return setmetatable({ state = seed % LCG_M }, RNG)
+  local seed_ = seed --[[:! number]]
+  local obj = setmetatable({ state = seed_ % LCG_M }, RNG) --[[: any]]
+  return obj --[[:! RNG]]
 end
 
 function RNG:next()
@@ -91,12 +95,15 @@ function M.schedules.custom(fn)
   return fn
 end
 
+--:: SAOpts = { initial: unknown, energy: (unknown) -> number, neighbor: (unknown, RNG) -> unknown, schedule: unknown, temp_start: number | nil, temp_end: number | nil, steps: integer | nil, accept: ((number, number) -> number) | nil, seed: number | nil, on_accept: ((unknown, number, number, integer) -> nil) | nil, on_improve: ((unknown, number, integer) -> nil) | nil, track_history: boolean | nil, ... }
+
 -- Resolve a schedule name or function into a callable temperature function
 local function resolve_schedule(opts)
-  local name = opts.schedule or "exponential"
-  local T0   = opts.temp_start or 100.0
-  local Tend = opts.temp_end   or 0.01
-  local steps = opts.steps     or 10000
+  local opts_ = opts --[[:! SAOpts]]
+  local name = opts_.schedule or "exponential"
+  local T0   = opts_.temp_start or 100.0
+  local Tend = opts_.temp_end   or 0.01
+  local steps = opts_.steps     or 10000
   if type(name) == "function" then
     return name
   end
@@ -127,10 +134,12 @@ end
 -- opts.accept    : acceptance function(delta_e, temp) -> probability (optional)
 -- rng        : RNG object
 -- Returns: new_state, new_energy, accepted (bool)
+--: (unknown, number, number, SAOpts, RNG) -> (unknown, number, boolean)
 function M.step(state, energy, temp, opts, rng)
-  local neighbor_fn = opts.neighbor
-  local energy_fn   = opts.energy
-  local accept_fn   = opts.accept or boltzmann
+  local opts_ = opts --[[:! SAOpts]]
+  local neighbor_fn = opts_.neighbor
+  local energy_fn   = opts_.energy
+  local accept_fn   = opts_.accept or boltzmann
 
   local candidate        = neighbor_fn(state, rng)
   local candidate_energy = energy_fn(candidate)
@@ -172,20 +181,22 @@ end
 --   track_history: bool — if true, record {step, energy, temp} each step
 --
 -- Returns result table or (nil, errmsg).
+--: (SAOpts) -> ({ state: unknown, energy: number, steps: integer, accepted: integer, improved: integer, history: { [integer]: { [integer]: number } } | nil } | nil, string | nil)
 function M.run(opts)
   if not opts then return nil, "opts required" end
-  if not opts.initial then return nil, "opts.initial required" end
-  if not opts.energy then return nil, "opts.energy required" end
-  if not opts.neighbor then return nil, "opts.neighbor required" end
+  local opts_ = opts --[[:! SAOpts]]
+  if not opts_.initial then return nil, "opts.initial required" end
+  if not opts_.energy then return nil, "opts.energy required" end
+  if not opts_.neighbor then return nil, "opts.neighbor required" end
 
-  local steps = opts.steps or 10000
-  local rng = RNG.new(opts.seed or 0)
+  local steps = opts_.steps or 10000
+  local rng = RNG.new(opts_.seed or 0)
 
-  local temp_fn, err = resolve_schedule(opts)
+  local temp_fn, err = resolve_schedule(opts_)
   if not temp_fn then return nil, err end
 
-  local state  = opts.initial
-  local energy = opts.energy(state)
+  local state  = opts_.initial
+  local energy = opts_.energy(state)
 
   -- Track best
   local best_state  = state
@@ -193,16 +204,17 @@ function M.run(opts)
 
   local accepted_count = 0
   local improved_count = 0
-  local history        = opts.track_history and {} or nil
+  local history --: { [integer]: { [integer]: number } } | nil
+  if opts_.track_history then history = {} end
 
-  local on_accept  = opts.on_accept
-  local on_improve = opts.on_improve
+  local on_accept  = opts_.on_accept
+  local on_improve = opts_.on_improve
 
   for step = 0, steps - 1 do
     local temp = temp_fn(step, steps)
 
     local new_state, new_energy, was_accepted =
-      M.step(state, energy, temp, opts, rng)
+      M.step(state, energy, temp, opts_, rng)
 
     if was_accepted then
       state  = new_state
@@ -210,7 +222,8 @@ function M.run(opts)
       accepted_count = accepted_count + 1
 
       if on_accept then
-        on_accept(state, energy, temp, step)
+        local on_accept_ = on_accept --[[:! (unknown, number, number, integer) -> nil]]
+        on_accept_(state, energy, temp, step)
       end
 
       if energy < best_energy then
@@ -219,13 +232,15 @@ function M.run(opts)
         improved_count = improved_count + 1
 
         if on_improve then
-          on_improve(state, energy, step)
+          local on_improve_ = on_improve --[[:! (unknown, number, integer) -> nil]]
+          on_improve_(state, energy, step)
         end
       end
     end
 
     if history then
-      history[#history + 1] = { step, energy, temp }
+      local h = history --[[:! { [integer]: { [integer]: number } }]]
+      h[#h + 1] = { step, energy, temp }
     end
   end
 
@@ -246,7 +261,7 @@ end
 -- Compute Euclidean tour length for a permutation of cities.
 local function tour_length(perm, cities)
   local n   = #perm
-  local len = 0
+  local len = 0 --: number
   for i = 1, n do
     local a = cities[perm[i]]
     local b = cities[perm[(i % n) + 1]]

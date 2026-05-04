@@ -23,10 +23,14 @@ end
 local M = {}
 M._tier = "pure"
 
+--:: EffNode = { _kind: string, _fn: () -> unknown, _deps: { [any]: boolean }, _subs: { [any]: boolean }, _disposed: boolean, _dirty: boolean, _computing: boolean, _value: unknown }
+--:: SubNode = { _kind: string, _deps: { [any]: boolean }, _subs: { [any]: boolean }, _disposed: boolean, _dirty: boolean, _computing: boolean, _value: unknown }
+
 -- ---------------------------------------------------------------------------
 -- Subscriber stack and batch state
 -- ---------------------------------------------------------------------------
 
+--: { [integer]: SubNode }
 local _stack  = {}             -- stack of active subscriber objects
 local _batch_depth   = 0       -- nesting level of M.batch()
 local _pending_effects = {}    -- effects queued during a batch: { [eff] = true }
@@ -34,7 +38,7 @@ local _flushing      = false   -- true while flush_effects is running (prevents 
 local _queued_effects = {}     -- effects collected during a single write's propagation pass
 
 local function _push(sub) _stack[#_stack + 1] = sub end
-local function _pop()     _stack[#_stack] = nil      end
+local function _pop()     _stack[#_stack] = nil --[[: any]] end
 local function _current() return _stack[#_stack]     end
 
 -- ---------------------------------------------------------------------------
@@ -93,14 +97,16 @@ local function _notify(node)
   if not _flushing then
     _flushing = true
     while next(_queued_effects) do
+      --: { [integer]: EffNode }
       local snapshot = {}
       for eff, _ in pairs(_queued_effects) do
-        snapshot[#snapshot + 1] = eff
+        snapshot[#snapshot + 1] = eff --[[: any]]
       end
       _queued_effects = {}
       for i = 1, #snapshot do
-        if not snapshot[i]._disposed then
-          run_effect(snapshot[i])
+        local eff_ = snapshot[i] --[[:! EffNode]]
+        if not eff_._disposed then
+          run_effect(eff_)
         end
       end
     end
@@ -116,7 +122,8 @@ run_effect = function(eff)
   if eff._disposed then return end
   -- Unlink from all current dependencies so they are rebuilt on this run
   for dep, _ in pairs(eff._deps) do
-    dep._subs[eff] = nil
+    local dep_ = dep --[[:! SubNode]]
+    dep_._subs[eff] = nil
   end
   eff._deps = {}
   _push(eff)
@@ -133,14 +140,16 @@ end
 
 local function flush_effects()
   while next(_pending_effects) do
+    --: { [integer]: EffNode }
     local snapshot = {}
     for eff, _ in pairs(_pending_effects) do
-      snapshot[#snapshot + 1] = eff
+      snapshot[#snapshot + 1] = eff --[[: any]]
     end
     _pending_effects = {}
     for i = 1, #snapshot do
-      if not snapshot[i]._disposed then
-        run_effect(snapshot[i])
+      local eff_ = snapshot[i] --[[:! EffNode]]
+      if not eff_._disposed then
+        run_effect(eff_)
       end
     end
   end
@@ -172,7 +181,8 @@ function SignalMT:__call(new_val)
     state._value = new_val
     -- Fire explicit on() listeners synchronously
     for _, fn in pairs(state._on) do
-      fn(new_val, old)
+      local fn_ = fn --[[:! (unknown, unknown) -> nil]]
+      fn_(new_val, old)
     end
     -- Notify reactive subscribers
     _notify(state)
@@ -198,7 +208,8 @@ function ComputedMT:__call()
     end
     -- Rebuild dependency links from scratch
     for dep, _ in pairs(state._deps) do
-      dep._subs[state] = nil
+      local dep_ = dep --[[:! SubNode]]
+      dep_._subs[state] = nil
     end
     state._deps      = {}
     state._dirty     = false
@@ -262,13 +273,15 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.untrack(fn)
-  local sentinel = { _kind = "untrack", _deps = {} }
+  --: SubNode
+  local sentinel = { _kind = "untrack", _deps = {}, _subs = {}, _disposed = false, _dirty = false, _computing = false, _value = nil }
   _push(sentinel)
   local ok, result = pcall(fn)
   _pop()
   -- Remove any accidental links
   for dep, _ in pairs(sentinel._deps) do
-    dep._subs[sentinel] = nil
+    local dep_ = dep --[[:! SubNode]]
+    dep_._subs[sentinel] = nil
   end
   if not ok then error(result, 2) end
   return result
@@ -320,7 +333,7 @@ function M.effect(fn)
       dep._subs[self] = nil
     end
     self._deps = {}
-    _pending_effects[self] = nil
+    _pending_effects[self] = nil --[[: any]]
   end
 end
 
